@@ -31,6 +31,8 @@ func (a Agent) Title() string {
 
 // Config is the committable, secret-free fleet description.
 type Config struct {
+	// GuildID and ChannelID identify the Discord coordination channel. Reserved
+	// for the inbound reader (v0.1) and the setup bootstrap; not used by v0 send.
 	GuildID   string `json:"guild_id"`
 	ChannelID string `json:"channel_id"`
 	// OperatorUserID is the Discord user id whose messages flotilla will act

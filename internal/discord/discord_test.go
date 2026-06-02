@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -42,4 +43,44 @@ func TestPostErrorsOnNon2xx(t *testing.T) {
 	if err := Post(srv.URL, "x", "y"); err == nil {
 		t.Error("Post = nil error on 403, want error")
 	}
+}
+
+func TestPostRedactsWebhookOnError(t *testing.T) {
+	// An unreachable URL carrying a secret token must not leak the token.
+	const secret = "SUPERSECRETWEBHOOKTOKEN"
+	err := Post("http://127.0.0.1:1/webhooks/123/"+secret, "x", "y")
+	if err == nil {
+		t.Fatal("Post to dead address = nil error, want error")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Errorf("error leaked the webhook secret: %v", err)
+	}
+}
+
+func TestClampContent(t *testing.T) {
+	if got := clampContent("short"); got != "short" {
+		t.Errorf("clampContent(short) = %q", got)
+	}
+	long := strings.Repeat("a", maxContentRunes+50)
+	got := clampContent(long)
+	if n := len([]rune(got)); n != maxContentRunes {
+		t.Errorf("clamped rune length = %d, want %d", n, maxContentRunes)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Error("clamped content missing ellipsis marker")
+	}
+	// Multi-byte runes must not be split mid-rune.
+	multi := strings.Repeat("é", maxContentRunes+50)
+	if !utf8ValidClamp(clampContent(multi)) {
+		t.Error("clampContent split a multi-byte rune")
+	}
+}
+
+func utf8ValidClamp(s string) bool {
+	for _, r := range s {
+		if r == '�' {
+			return false
+		}
+	}
+	return true
 }

@@ -27,3 +27,6 @@ htmlcov/
 *.swp
 .idea/
 .vscode/
+
+# Live roster (secret-free by design, but holds your real ids — keep the example committed)
+/flotilla.json
