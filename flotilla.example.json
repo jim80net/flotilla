@@ -1,0 +1,13 @@
+{
+  "guild_id": "YOUR_DISCORD_SERVER_ID",
+  "channel_id": "YOUR_COORDINATION_CHANNEL_ID",
+  "operator_user_id": "YOUR_DISCORD_USER_ID",
+  "agents": [
+    { "name": "hydra-ops" },
+    { "name": "x-signal-dev" },
+    { "name": "macro-desk-dev" },
+    { "name": "v12-dev" },
+    { "name": "tactical-head" },
+    { "name": "training", "tmux_title": "training" }
+  ]
+}
