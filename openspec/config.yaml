@@ -1,0 +1,10 @@
+schema: spec-driven
+
+context: |
+  flotilla coordinates a fleet of AI coding agents (e.g. Claude Code sessions),
+  each running in its own tmux pane. Go, standard-library-first. Delivery is via
+  `tmux send-keys` (injecting text into a pane IS the wake for a turn-based
+  agent); the audit trail is a Discord channel (per-agent webhook identities).
+  Topology is hub-and-spoke: one XO agent routes, peers report back, the operator
+  goes through the XO. Strong typing, no untyped maps; gofmt + go vet + mypy-style
+  rigor; every claim validated end-to-end before merge.
