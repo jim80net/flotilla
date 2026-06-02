@@ -12,15 +12,15 @@
 
 ## 2. Message filter (the most important tests — D1)
 
-- [ ] 2.1 `accept(m)`: early-return drop on `m.WebhookID != ""` (author-agnostic feedback guard); then require `m.Author.ID == operator_user_id`
-- [ ] 2.2 Test: a synthetic mirror message (non-empty WebhookID, body `→ v12-dev: …`) is DROPPED even if author looked like the operator
-- [ ] 2.3 Test: a non-operator author is dropped; the operator is accepted
+- [x] 2.1 `accept(m)`: early-return drop on `m.WebhookID != ""` (author-agnostic feedback guard); then require `m.Author.ID == operator_user_id` (`internal/relay.Accept`)
+- [x] 2.2 Test: a synthetic mirror message (non-empty WebhookID) is DROPPED even if author looked like the operator
+- [x] 2.3 Test: a non-operator author is dropped; the operator is accepted
 
 ## 3. Routing (D5)
 
-- [ ] 3.1 Parse `@<agent> <rest>` multi-line-safe (split on first whitespace run, take remainder verbatim); case-insensitive agent normalize; `@@` escape → literal `@…` to XO; bare message → XO
-- [ ] 3.2 Unknown `@agent` → post a one-line "no agent <x>; sent to XO" reply, route to XO
-- [ ] 3.3 Tests: multi-line `@agent` keeps all lines; `@Unknown` replies + routes to XO; `@@literal` → XO; case-insensitive match
+- [x] 3.1 Parse `@<agent> <rest>` multi-line-safe (split on first whitespace run, take remainder verbatim); case-insensitive agent normalize; `@@` escape → literal `@…` to XO; bare message → XO (`internal/relay.Route`)
+- [x] 3.2 Unknown `@agent` → `Decision.Notice` "no agent <x>; sent to XO", route to XO (channel post wired in §8)
+- [x] 3.3 Tests: multi-line `@agent` keeps all lines; `@Unknown` notice + routes to XO; `@@literal` → XO; case-insensitive match
 
 ## 4. Serialized injector (D4)
 
