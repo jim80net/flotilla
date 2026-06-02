@@ -43,9 +43,11 @@ func TestAgentTitleFallback(t *testing.T) {
 
 func TestLoadRejectsEmptyAndDup(t *testing.T) {
 	cases := map[string]string{
-		"no agents":  `{"agents": []}`,
-		"empty name": `{"agents": [{"name": ""}]}`,
-		"duplicate":  `{"agents": [{"name": "a"}, {"name": "a"}]}`,
+		"no agents":                      `{"agents": []}`,
+		"empty name":                     `{"agents": [{"name": ""}]}`,
+		"duplicate":                      `{"agents": [{"name": "a"}, {"name": "a"}]}`,
+		"shared title":                   `{"agents": [{"name": "a", "tmux_title": "x"}, {"name": "b", "tmux_title": "x"}]}`,
+		"title collides with other name": `{"agents": [{"name": "x"}, {"name": "b", "tmux_title": "x"}]}`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -88,5 +90,17 @@ func TestSecrets(t *testing.T) {
 	}
 	if _, err := s.Webhook("nope"); err == nil {
 		t.Error("Webhook(nope) = nil error, want error")
+	}
+}
+
+func TestSecretsRejectsMalformedLine(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "secrets.env")
+	// A non-blank, non-comment line with no '=' must be rejected, not skipped.
+	body := "FLOTILLA_BOT_TOKEN=tok\nGARBAGE_NO_EQUALS\n"
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatalf("write secrets: %v", err)
+	}
+	if _, err := LoadSecrets(p); err == nil {
+		t.Error("LoadSecrets(malformed) = nil error, want error")
 	}
 }

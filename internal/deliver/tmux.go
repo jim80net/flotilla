@@ -6,9 +6,11 @@ package deliver
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // paneListFormat asks tmux for every pane as "<target>\t<title>".
@@ -18,13 +20,18 @@ const paneListFormat = "#{session_name}:#{window_index}.#{pane_index}\t#{pane_ti
 // hang flotilla indefinitely.
 const commandTimeout = 10 * time.Second
 
-// sendBuffer is the tmux buffer name a message is loaded into before pasting.
-// Deleted after each paste.
-const sendBuffer = "flotilla-send"
+// bufferName returns a per-process tmux buffer name. tmux paste buffers live in
+// the tmux SERVER, shared across processes, so a fixed name would let two
+// concurrent `flotilla send` invocations overwrite each other's payload and
+// cross-deliver (agent A receiving agent B's message). Scoping the name to the
+// pid keeps concurrent sends independent.
+func bufferName() string {
+	return fmt.Sprintf("flotilla-send-%d", os.Getpid())
+}
 
 // ResolvePane returns the tmux target (session:window.pane) of the pane whose
-// title matches want exactly. It errors if no pane — or more than one pane —
-// carries the title, so an ambiguous fleet never silently mis-delivers.
+// title matches want. It errors if no pane — or more than one pane — matches,
+// so an ambiguous fleet never silently mis-delivers.
 func ResolvePane(want string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
@@ -60,12 +67,17 @@ func parsePane(output, want string) (string, error) {
 
 // titleMatches reports whether a tmux pane title belongs to the agent named
 // want. Claude Code renames its pane to "<status-glyph> <name>" (e.g.
-// "✳ v12-dev"), so an exact-equality check fails on a live session. We accept
-// either the bare name or the name as the final space-delimited token — the
-// leading-space boundary keeps "v12" from matching "✳ v12-dev".
+// "✳ v12-dev"), so exact equality fails on a live session. We accept the bare
+// name, or a SINGLE-rune glyph prefix followed by the name. Constraining the
+// prefix to one rune rejects both "v12" (substring) and "build v12-dev"
+// (an unrelated multi-word pane) as matches for "v12-dev".
 func titleMatches(title, want string) bool {
 	title = strings.TrimSpace(title)
-	return title == want || strings.HasSuffix(title, " "+want)
+	if title == want {
+		return true
+	}
+	glyph, rest, found := strings.Cut(title, " ")
+	return found && rest == want && utf8.RuneCountInString(glyph) == 1
 }
 
 // Send delivers text to the target pane as a SINGLE submission. The message is
@@ -74,17 +86,24 @@ func titleMatches(title, want string) bool {
 // then submits the whole message. Routing the text through a buffer (stdin) also
 // keeps it out of argv entirely, so a message beginning with '-' is never
 // mistaken for a tmux flag.
+//
+// Caveat: bracketed paste inserts literal newlines ONLY while the receiving
+// application has bracketed-paste mode enabled (Claude Code's TUI does — this is
+// validated end-to-end). For a target that lacks it, tmux converts each LF to a
+// CR and every newline would submit, so a non-Claude or modal target needs
+// revalidation before relying on multi-line delivery.
 func Send(target, text string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
 
-	load := exec.CommandContext(ctx, "tmux", "load-buffer", "-b", sendBuffer, "-")
+	buf := bufferName()
+	load := exec.CommandContext(ctx, "tmux", "load-buffer", "-b", buf, "-")
 	load.Stdin = strings.NewReader(text)
 	if err := load.Run(); err != nil {
 		return fmt.Errorf("tmux load-buffer: %w", err)
 	}
 	// -p: bracketed paste (literal newlines); -d: delete the buffer afterwards.
-	if err := exec.CommandContext(ctx, "tmux", "paste-buffer", "-d", "-p", "-b", sendBuffer, "-t", target).Run(); err != nil {
+	if err := exec.CommandContext(ctx, "tmux", "paste-buffer", "-d", "-p", "-b", buf, "-t", target).Run(); err != nil {
 		return fmt.Errorf("tmux paste-buffer: %w", err)
 	}
 	// Submit. "Enter" is a key name (no -l); -- guards a dash-leading target.

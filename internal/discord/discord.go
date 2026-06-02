@@ -13,10 +13,11 @@ package discord
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
+	"net/url"
 	"time"
 )
 
@@ -36,21 +37,29 @@ var httpClient = &http.Client{Timeout: 10 * time.Second}
 // v0 audit-mirror primitive. Discord returns 204 No Content on success.
 //
 // The webhook URL is itself a credential (anyone holding it can post as that
-// identity), so it is never allowed to appear in a returned error.
+// identity), so it is never allowed to appear in a returned error: the URL is
+// validated up front (a malformed URL yields a content-free error), and any
+// transport error is reduced to its URL-free underlying cause.
 func Post(webhookURL, username, content string) error {
+	parsed, err := url.Parse(webhookURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		// Deliberately generic — echoing the URL here would leak the credential.
+		return errors.New("invalid webhook URL")
+	}
+
 	body, err := json.Marshal(webhookPayload{Username: username, Content: clampContent(content)})
 	if err != nil {
 		return fmt.Errorf("encode webhook payload: %w", err)
 	}
 	req, err := http.NewRequest(http.MethodPost, webhookURL, bytes.NewReader(body))
 	if err != nil {
-		return redact(err, webhookURL, "build webhook request")
+		return fmt.Errorf("build webhook request for host %s: %w", parsed.Host, urlFreeCause(err))
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return redact(err, webhookURL, "post to webhook")
+		return fmt.Errorf("post to webhook host %s: %w", parsed.Host, urlFreeCause(err))
 	}
 	defer resp.Body.Close()
 
@@ -71,10 +80,14 @@ func clampContent(s string) string {
 	return string(r[:maxContentRunes-1]) + "…"
 }
 
-// redact returns an error for context ctx with every occurrence of the secret
-// URL scrubbed. The original (URL-bearing) error is intentionally dropped from
-// the chain so it cannot be recovered via Unwrap.
-func redact(err error, secret, ctx string) error {
-	msg := strings.ReplaceAll(err.Error(), secret, "<webhook-url-redacted>")
-	return fmt.Errorf("%s: %s", ctx, msg)
+// urlFreeCause unwraps a *url.Error to its underlying cause, which does not carry
+// the (secret) URL. The wrapper's Error() string embeds the full URL — escaped
+// via strconv.Quote, so a literal string-scrub is unreliable — so we drop the
+// wrapper entirely and keep only the cause (a dial/timeout error, etc.).
+func urlFreeCause(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return ue.Err
+	}
+	return err
 }

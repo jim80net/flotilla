@@ -1,6 +1,9 @@
 package deliver
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParsePane(t *testing.T) {
 	out := "0:0.0\thydra-ops\n0:0.1\tx-signal-dev\n0:0.3\tv12-dev\n"
@@ -58,5 +61,36 @@ func TestParsePaneMatchesGlyphPrefixedTitle(t *testing.T) {
 	// The glyph prefix must not let "v12" match "✳ v12-dev".
 	if _, err := parsePane(out, "v12"); err == nil {
 		t.Error("parsePane(v12) matched a glyph-prefixed v12-dev, want no match")
+	}
+}
+
+func TestTitleMatches(t *testing.T) {
+	cases := []struct {
+		title, want string
+		match       bool
+	}{
+		{"v12-dev", "v12-dev", true},       // bare name
+		{"✳ v12-dev", "v12-dev", true},     // single-glyph prefix (Claude live title)
+		{"⠂ hydra-ops", "hydra-ops", true}, // different spinner glyph
+		{"valbot", "valbot", true},
+		{"✳ v12-dev", "v12", false},      // substring must not match
+		{"my v12-dev", "v12-dev", false}, // multi-word prefix is not a glyph
+		{"build v12-dev", "v12-dev", false},
+		{"foo bar v12-dev", "v12-dev", false},
+	}
+	for _, c := range cases {
+		if got := titleMatches(c.title, c.want); got != c.match {
+			t.Errorf("titleMatches(%q, %q) = %v, want %v", c.title, c.want, got, c.match)
+		}
+	}
+}
+
+func TestBufferNameIsPerProcess(t *testing.T) {
+	b := bufferName()
+	if !strings.HasPrefix(b, "flotilla-send-") {
+		t.Errorf("bufferName = %q, want flotilla-send-<pid>", b)
+	}
+	if b == "flotilla-send" {
+		t.Error("bufferName is the old shared constant — concurrent sends would collide")
 	}
 }

@@ -57,6 +57,18 @@ func TestPostRedactsWebhookOnError(t *testing.T) {
 	}
 }
 
+func TestPostInvalidURLNoLeak(t *testing.T) {
+	const secret = "SUPERSECRETWEBHOOKTOKEN"
+	// A control char makes url.Parse fail; the secret must not appear in the error.
+	err := Post("http://discord.test/\x01webhooks/123/"+secret, "x", "y")
+	if err == nil {
+		t.Fatal("Post(malformed url) = nil error, want error")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Errorf("error leaked the secret on a malformed URL: %v", err)
+	}
+}
+
 func TestClampContent(t *testing.T) {
 	if got := clampContent("short"); got != "short" {
 		t.Errorf("clampContent(short) = %q", got)

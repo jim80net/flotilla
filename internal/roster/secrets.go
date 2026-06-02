@@ -36,7 +36,9 @@ func LoadSecrets(path string) (*Secrets, error) {
 		}
 		key, val, ok := strings.Cut(line, "=")
 		if !ok {
-			continue
+			// A non-blank, non-comment line with no '=' is malformed. Reject it
+			// rather than silently dropping what may be a credential.
+			return nil, fmt.Errorf("secrets %q: malformed line (expected KEY=VALUE): %q", path, line)
 		}
 		vals[strings.TrimSpace(key)] = strings.TrimSpace(val)
 	}

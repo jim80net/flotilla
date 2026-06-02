@@ -57,15 +57,22 @@ func Load(path string) (*Config, error) {
 	if len(c.Agents) == 0 {
 		return nil, fmt.Errorf("roster %q lists no agents", path)
 	}
-	seen := make(map[string]bool, len(c.Agents))
+	seenName := make(map[string]bool, len(c.Agents))
+	seenTitle := make(map[string]bool, len(c.Agents))
 	for _, a := range c.Agents {
 		if a.Name == "" {
 			return nil, fmt.Errorf("roster %q has an agent with an empty name", path)
 		}
-		if seen[a.Name] {
+		if seenName[a.Name] {
 			return nil, fmt.Errorf("roster %q has duplicate agent %q", path, a.Name)
 		}
-		seen[a.Name] = true
+		seenName[a.Name] = true
+		// Two agents resolving to the same tmux pane title would misroute
+		// (delivery resolves by Title()); reject it at load time.
+		if seenTitle[a.Title()] {
+			return nil, fmt.Errorf("roster %q: agents share tmux title %q (would misroute delivery)", path, a.Title())
+		}
+		seenTitle[a.Title()] = true
 	}
 	return &c, nil
 }
