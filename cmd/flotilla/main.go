@@ -6,6 +6,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -46,12 +47,15 @@ func usage() {
 	fmt.Println(`flotilla — coordinate a fleet of AI coding agents
 
 usage:
-  flotilla send --from <sender> <agent> <message>   deliver to an agent's pane + mirror to Discord
+  flotilla send --from <sender> <agent> <message>     inline message
+  flotilla send --from <sender> --file <path> <agent> message body from a file ('-' = stdin)
   flotilla version
   flotilla help
 
 flags for 'send':
   --from <name>     sender identity (default $FLOTILLA_SELF)
+  --file <path>     read the message body from a file ('-' for stdin) instead of
+                    the command line — avoids shell quoting of multi-line bodies
   --roster <path>   roster config (default ./flotilla.json or $FLOTILLA_ROSTER)
   --secrets <path>  secrets env file (default $FLOTILLA_SECRETS)
   --no-mirror       deliver via tmux only; skip the Discord audit post
@@ -71,6 +75,7 @@ func rosterDefault() string {
 func cmdSend(args []string) error {
 	fs := flag.NewFlagSet("send", flag.ContinueOnError)
 	from := fs.String("from", os.Getenv("FLOTILLA_SELF"), "sender identity")
+	file := fs.String("file", "", "read message body from this file ('-' for stdin)")
 	rosterPath := fs.String("roster", rosterDefault(), "roster config path")
 	secretsPath := fs.String("secrets", os.Getenv("FLOTILLA_SECRETS"), "secrets env file path")
 	noMirror := fs.Bool("no-mirror", false, "skip the Discord audit mirror")
@@ -78,13 +83,16 @@ func cmdSend(args []string) error {
 		return err
 	}
 	rest := fs.Args()
-	if len(rest) < 2 {
-		return fmt.Errorf("usage: flotilla send --from <sender> <agent> <message>")
+	if len(rest) == 0 {
+		return fmt.Errorf("usage: flotilla send --from <sender> <agent> <message>  (or --file <path> <agent>)")
 	}
-	agentName := rest[0]
-	message := strings.Join(rest[1:], " ")
 	if *from == "" {
 		return fmt.Errorf("--from is required (or set $FLOTILLA_SELF)")
+	}
+	agentName := rest[0]
+	message, err := resolveMessage(*file, rest[1:], os.Stdin)
+	if err != nil {
+		return err
 	}
 	if strings.TrimSpace(message) == "" {
 		return fmt.Errorf("message is empty")
@@ -120,6 +128,44 @@ func cmdSend(args []string) error {
 		fmt.Fprintln(os.Stderr, "flotilla: WARNING — audit mirror skipped (message WAS delivered): "+err.Error())
 	}
 	return nil
+}
+
+// resolveMessage determines the message body. With filePath set, it is read
+// from that file ("-" reads stdin) and a trailing newline is trimmed; inline
+// positional words are then disallowed (mutually exclusive). Without filePath,
+// the positional words are joined with spaces.
+func resolveMessage(filePath string, inline []string, stdin io.Reader) (string, error) {
+	if filePath != "" {
+		if len(inline) > 0 {
+			return "", fmt.Errorf("--file and an inline message are mutually exclusive")
+		}
+		raw, err := readSource(filePath, stdin)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimRight(raw, "\r\n"), nil
+	}
+	if len(inline) == 0 {
+		return "", fmt.Errorf("no message: provide an inline message or --file <path>")
+	}
+	return strings.Join(inline, " "), nil
+}
+
+// readSource reads a message body from a file path, or from stdin when the path
+// is "-".
+func readSource(path string, stdin io.Reader) (string, error) {
+	if path == "-" {
+		b, err := io.ReadAll(stdin)
+		if err != nil {
+			return "", fmt.Errorf("read message from stdin: %w", err)
+		}
+		return string(b), nil
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read message file: %w", err)
+	}
+	return string(b), nil
 }
 
 // mirror posts the delivered instruction to the audit channel under the

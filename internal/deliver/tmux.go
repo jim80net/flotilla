@@ -20,6 +20,13 @@ const paneListFormat = "#{session_name}:#{window_index}.#{pane_index}\t#{pane_ti
 // hang flotilla indefinitely.
 const commandTimeout = 10 * time.Second
 
+// submitSettleDelay gives the receiving TUI time to ingest the bracketed paste
+// before the submitting Enter. Without it, a multi-line paste that the TUI
+// collapses (Claude Code shows "[Pasted text +N lines]") is left UNSUBMITTED by
+// an immediately-following Enter — validated: a 4-line paste failed to submit
+// with no delay, and submitted reliably with it.
+const submitSettleDelay = 250 * time.Millisecond
+
 // bufferName returns a per-process tmux buffer name. tmux paste buffers live in
 // the tmux SERVER, shared across processes, so a fixed name would let two
 // concurrent `flotilla send` invocations overwrite each other's payload and
@@ -106,6 +113,8 @@ func Send(target, text string) error {
 	if err := exec.CommandContext(ctx, "tmux", "paste-buffer", "-d", "-p", "-b", buf, "-t", target).Run(); err != nil {
 		return fmt.Errorf("tmux paste-buffer: %w", err)
 	}
+	// Let the TUI finish ingesting the paste before submitting (see const docs).
+	time.Sleep(submitSettleDelay)
 	// Submit. "Enter" is a key name (no -l); -- guards a dash-leading target.
 	if err := exec.CommandContext(ctx, "tmux", "send-keys", "-t", target, "--", "Enter").Run(); err != nil {
 		return fmt.Errorf("tmux send-keys enter: %w", err)
