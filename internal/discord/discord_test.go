@@ -73,16 +73,16 @@ func TestClampContent(t *testing.T) {
 	if got := clampContent("short"); got != "short" {
 		t.Errorf("clampContent(short) = %q", got)
 	}
-	long := strings.Repeat("a", maxContentRunes+50)
+	long := strings.Repeat("a", MaxContentRunes+50)
 	got := clampContent(long)
-	if n := len([]rune(got)); n != maxContentRunes {
-		t.Errorf("clamped rune length = %d, want %d", n, maxContentRunes)
+	if n := len([]rune(got)); n != MaxContentRunes {
+		t.Errorf("clamped rune length = %d, want %d", n, MaxContentRunes)
 	}
 	if !strings.HasSuffix(got, "…") {
 		t.Error("clamped content missing ellipsis marker")
 	}
 	// Multi-byte runes must not be split mid-rune.
-	multi := strings.Repeat("é", maxContentRunes+50)
+	multi := strings.Repeat("é", MaxContentRunes+50)
 	if !utf8ValidClamp(clampContent(multi)) {
 		t.Error("clampContent split a multi-byte rune")
 	}

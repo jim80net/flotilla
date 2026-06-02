@@ -21,8 +21,9 @@ import (
 	"time"
 )
 
-// maxContentRunes is Discord's hard limit on webhook message content length.
-const maxContentRunes = 2000
+// MaxContentRunes is Discord's hard limit on webhook message content length.
+// Exported so callers can warn when the audit copy will be truncated.
+const MaxContentRunes = 2000
 
 // webhookPayload is the subset of Discord's execute-webhook body flotilla sends.
 type webhookPayload struct {
@@ -74,10 +75,10 @@ func Post(webhookURL, username, content string) error {
 // boundary, appending an ellipsis so truncation is visible in the audit trail.
 func clampContent(s string) string {
 	r := []rune(s)
-	if len(r) <= maxContentRunes {
+	if len(r) <= MaxContentRunes {
 		return s
 	}
-	return string(r[:maxContentRunes-1]) + "…"
+	return string(r[:MaxContentRunes-1]) + "…"
 }
 
 // urlFreeCause unwraps a *url.Error to its underlying cause, which does not carry

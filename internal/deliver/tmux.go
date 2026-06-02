@@ -21,10 +21,13 @@ const paneListFormat = "#{session_name}:#{window_index}.#{pane_index}\t#{pane_ti
 const commandTimeout = 10 * time.Second
 
 // submitSettleDelay gives the receiving TUI time to ingest the bracketed paste
-// before the submitting Enter. Without it, a multi-line paste that the TUI
-// collapses (Claude Code shows "[Pasted text +N lines]") is left UNSUBMITTED by
-// an immediately-following Enter — validated: a 4-line paste failed to submit
-// with no delay, and submitted reliably with it.
+// before the submitting Enter. Without it the Enter races the pane's paste
+// ingestion and is dropped, leaving the message UNSUBMITTED in the composer.
+// Validated empirically: BOTH a single-line paste and a multi-line paste (which
+// Claude Code collapses to "[Pasted text +N lines]") failed to submit with no
+// delay and submitted reliably with it. There is no deterministic tmux-level
+// signal for "the target app finished ingesting the paste" (tmux wait-for syncs
+// tmux clients, not the target application), so a settle delay is necessary.
 const submitSettleDelay = 250 * time.Millisecond
 
 // bufferName returns a per-process tmux buffer name. tmux paste buffers live in
@@ -113,8 +116,15 @@ func Send(target, text string) error {
 	if err := exec.CommandContext(ctx, "tmux", "paste-buffer", "-d", "-p", "-b", buf, "-t", target).Run(); err != nil {
 		return fmt.Errorf("tmux paste-buffer: %w", err)
 	}
-	// Let the TUI finish ingesting the paste before submitting (see const docs).
-	time.Sleep(submitSettleDelay)
+	// Give the TUI time to ingest the bracketed paste before submitting. This is
+	// required for ALL pastes, not just multi-line: empirically a single-line
+	// paste followed by an immediate Enter is also dropped (a race between the
+	// pane's paste ingestion and the submitting keystroke). See submitSettleDelay.
+	select {
+	case <-time.After(submitSettleDelay):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	// Submit. "Enter" is a key name (no -l); -- guards a dash-leading target.
 	if err := exec.CommandContext(ctx, "tmux", "send-keys", "-t", target, "--", "Enter").Run(); err != nil {
 		return fmt.Errorf("tmux send-keys enter: %w", err)

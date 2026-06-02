@@ -90,6 +90,21 @@ func cmdSend(args []string) error {
 		return fmt.Errorf("--from is required (or set $FLOTILLA_SELF)")
 	}
 	agentName := rest[0]
+	// Go's flag parser stops at the first positional (the agent), so any flag
+	// placed AFTER the agent is silently swallowed. Catch that with a clear
+	// message instead of a confusing downstream failure.
+	for _, a := range rest[1:] {
+		if strings.HasPrefix(a, "-") {
+			return fmt.Errorf("unexpected %q after the agent name: put flags before the agent, or use --file for a message that starts with '-'", a)
+		}
+	}
+	// --file - reads stdin; if stdin is an interactive terminal nothing is piped
+	// and io.ReadAll would block forever. Fail fast instead of hanging.
+	if *file == "-" {
+		if fi, statErr := os.Stdin.Stat(); statErr == nil && fi.Mode()&os.ModeCharDevice != 0 {
+			return fmt.Errorf("--file - requires piped stdin, but stdin is a terminal (nothing piped)")
+		}
+	}
 	message, err := resolveMessage(*file, rest[1:], os.Stdin)
 	if err != nil {
 		return err
@@ -124,6 +139,9 @@ func cmdSend(args []string) error {
 	if *noMirror {
 		return nil
 	}
+	if n := len([]rune(message)); n > discord.MaxContentRunes {
+		fmt.Fprintf(os.Stderr, "flotilla: note — message is %d chars; the Discord audit copy is truncated to %d (the full message WAS delivered)\n", n, discord.MaxContentRunes)
+	}
 	if err := mirror(*secretsPath, *from, agentName, message); err != nil {
 		fmt.Fprintln(os.Stderr, "flotilla: WARNING — audit mirror skipped (message WAS delivered): "+err.Error())
 	}
@@ -131,7 +149,7 @@ func cmdSend(args []string) error {
 }
 
 // resolveMessage determines the message body. With filePath set, it is read
-// from that file ("-" reads stdin) and a trailing newline is trimmed; inline
+// from that file ("-" reads stdin) and trailing newlines are trimmed; inline
 // positional words are then disallowed (mutually exclusive). Without filePath,
 // the positional words are joined with spaces.
 func resolveMessage(filePath string, inline []string, stdin io.Reader) (string, error) {

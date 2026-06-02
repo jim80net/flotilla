@@ -58,3 +58,41 @@ func TestResolveMessageFileNotFound(t *testing.T) {
 		t.Error("resolveMessage(missing file) = nil error, want error")
 	}
 }
+
+func TestResolveMessageEmptyFileReturnsEmpty(t *testing.T) {
+	// Contract: an empty file resolves to "" without error; the empty-message
+	// rejection lives one layer up (cmdSend's TrimSpace guard).
+	p := filepath.Join(t.TempDir(), "empty.txt")
+	if err := os.WriteFile(p, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolveMessage(p, nil, nil)
+	if err != nil || got != "" {
+		t.Errorf("resolveMessage(empty file) = %q, %v; want \"\", nil", got, err)
+	}
+}
+
+func TestResolveMessageWhitespaceOnlyFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "ws.txt")
+	if err := os.WriteFile(p, []byte("   \t \n\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolveMessage(p, nil, nil)
+	if err != nil {
+		t.Fatalf("resolveMessage: %v", err)
+	}
+	// Trailing newlines trimmed; remaining is whitespace (rejected by cmdSend).
+	if strings.TrimSpace(got) != "" {
+		t.Errorf("got %q, want whitespace-only", got)
+	}
+}
+
+func TestResolveMessageStdinMultiline(t *testing.T) {
+	got, err := resolveMessage("-", nil, strings.NewReader("a\nb\nc\n"))
+	if err != nil {
+		t.Fatalf("resolveMessage: %v", err)
+	}
+	if got != "a\nb\nc" {
+		t.Errorf("got %q, want internal newlines preserved, trailing trimmed", got)
+	}
+}
