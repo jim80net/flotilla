@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 )
 
 // Agent is one coordinated coding agent — a long-lived session in a tmux pane.
@@ -42,6 +43,18 @@ type Config struct {
 	// ready; not a secret.
 	OperatorUserID string  `json:"operator_user_id,omitempty"`
 	Agents         []Agent `json:"agents"`
+
+	// --- `watch` capability (flotilla watch); validated at load ---
+
+	// XOAgent is the delivery target for a bare operator message and the target
+	// of the heartbeat. If set, it MUST name an agent in Agents.
+	XOAgent string `json:"xo_agent,omitempty"`
+	// HeartbeatInterval is a Go duration (e.g. "20m"); empty or "0" disables the
+	// heartbeat. Parsed (validated) at load.
+	HeartbeatInterval string `json:"heartbeat_interval,omitempty"`
+	// HeartbeatMessage is the idempotent tick prompt; watch supplies a default
+	// when empty.
+	HeartbeatMessage string `json:"heartbeat_message,omitempty"`
 }
 
 // Load reads and validates a roster config file.
@@ -73,6 +86,18 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("roster %q: agents share tmux title %q (would misroute delivery)", path, a.Title())
 		}
 		seenTitle[a.Title()] = true
+	}
+	// watch-capability fields: validate at load so a misconfigured daemon
+	// refuses to start rather than failing silently at the first tick.
+	if c.XOAgent != "" {
+		if _, err := c.Agent(c.XOAgent); err != nil {
+			return nil, fmt.Errorf("roster %q: xo_agent %q is not in agents", path, c.XOAgent)
+		}
+	}
+	if c.HeartbeatInterval != "" && c.HeartbeatInterval != "0" {
+		if _, err := time.ParseDuration(c.HeartbeatInterval); err != nil {
+			return nil, fmt.Errorf("roster %q: invalid heartbeat_interval %q: %w", path, c.HeartbeatInterval, err)
+		}
 	}
 	return &c, nil
 }

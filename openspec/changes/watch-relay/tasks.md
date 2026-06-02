@@ -43,8 +43,8 @@
 
 ## 7. Config (D8)
 
-- [ ] 7.1 Add `roster.Config` fields `xo_agent`, `heartbeat_interval`, `heartbeat_message`
-- [ ] 7.2 Validate at load: `heartbeat_interval` parses (Go duration); `xo_agent` exists in `agents`; tests for both rejection paths
+- [x] 7.1 Add `roster.Config` fields `xo_agent`, `heartbeat_interval`, `heartbeat_message`
+- [x] 7.2 Validate at load: `heartbeat_interval` parses (Go duration); `xo_agent` exists in `agents`; tests for both rejection paths
 
 ## 8. Command + deploy
 
