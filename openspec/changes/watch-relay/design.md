@@ -66,15 +66,28 @@ routed to the XO) so the operator can always force XO delivery. `@name` is
 literal text (Discord's mention UI emits `<@id>`, which is NOT routing); document
 this. A bare message → the XO pane.
 
-### D6 — Heartbeat cadence + content (review S3)
-Default `heartbeat_interval` = `20m` (configurable; `0`/empty disables). The tick
-prompt SHALL be explicitly idempotent and check-then-noop: "This is an automated
-heartbeat, not an operator instruction. Emit your one-line liveness ack. If
-there is pending work (an unanswered desk report, an open plan step), advance it
-by one step; otherwise reply 'idle' and do nothing. Do not invent new work." The
-default prompt is part of this design so it is reviewed, not improvised — the
-goal is a clock, not a driver (a tick that finds busywork every cycle accelerates
-the XO's own context exhaustion and trips D3).
+### D6 — Heartbeat content: the self-continuing clock (review S3; operator 2026-06-03)
+Default `heartbeat_interval` = `20m` (configurable; `0`/empty disables). The
+heartbeat's PURPOSE is not merely keep-alive — it is what turns a turn-based XO
+into a self-continuing system. The operator's directive (2026-06-03): a
+turn-based agent stops because of the stop mechanism, not because the work is
+unclear; the clock exists to re-prompt "is there clear, already-authorized work I
+should advance right now?" and, if so, advance it WITHOUT waiting for the
+operator. The discriminator is laid-out-and-authorized work (an open task in the
+active openspec change, an unanswered desk report, an already-approved plan step)
+versus manufactured work: the tick SHALL continue the former and SHALL NOT invent
+the latter. This reconciles "keep building when the work is clear" with the
+anti-busywork concern (D3 / review S3) — continue the laid-out, never the
+invented, so the clock drives progress without burning context on make-work. The
+tick prompt SHALL be idempotent and check-then-act, and is part of this design so
+it is reviewed, not improvised:
+
+> "This is an automated heartbeat, not a new instruction. Emit your one-line
+> liveness ack. If there is clear, already-authorized work in flight — an open
+> task in the active openspec change, an unanswered desk report, an approved plan
+> step — advance it now without waiting for the operator. If nothing is laid out,
+> reply 'idle' and do nothing. Never manufacture work the operator did not
+> authorize."
 
 ### D7 — discordgo resilience (review S4)
 Request `IntentsGuildMessages | IntentsMessageContent`. Rely on discordgo's

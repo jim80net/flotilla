@@ -76,6 +76,25 @@ never invent work).
 - **WHEN** the inactivity interval elapses with no real delivery and the XO appears idle
 - **THEN** one idempotent tick is injected
 
+### Requirement: The heartbeat drives autonomous continuation of authorized work
+
+The heartbeat SHALL make the XO self-continuing: on each tick, when there is
+clear, already-authorized work in flight — an open task in the active change, an
+unanswered desk report, an approved plan step — the XO SHALL advance that work
+without waiting for the operator to re-prompt. The XO SHALL NOT manufacture new,
+unauthorized work; when nothing is laid out it SHALL acknowledge idle and stop.
+This is the mechanism that turns a turn-based agent into a dynamic system that
+keeps building while clear work remains — the operator does not have to nudge it
+through laid-out, obvious steps.
+
+#### Scenario: Laid-out work is advanced without the operator
+- **WHEN** a heartbeat fires and an open, already-authorized task remains (e.g. an unchecked task in the active openspec change)
+- **THEN** the XO advances that work itself rather than waiting for the operator to re-prompt
+
+#### Scenario: Nothing laid out — idle, no make-work
+- **WHEN** a heartbeat fires and no authorized work is in flight
+- **THEN** the XO acknowledges idle and does nothing (it does not invent work)
+
 ### Requirement: Liveness watchdog via tick-and-acknowledge
 
 The watchdog SHALL determine XO liveness from acknowledgements, not process
