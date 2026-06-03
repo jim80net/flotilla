@@ -104,3 +104,18 @@ func TestSecretsRejectsMalformedLine(t *testing.T) {
 		t.Error("LoadSecrets(malformed) = nil error, want error")
 	}
 }
+
+func TestLoadWatchConfigValidation(t *testing.T) {
+	if _, err := Load(writeTemp(t, `{"agents":[{"name":"hydra-ops"},{"name":"v12-dev"}],"xo_agent":"hydra-ops","heartbeat_interval":"20m"}`)); err != nil {
+		t.Fatalf("valid watch config rejected: %v", err)
+	}
+	if _, err := Load(writeTemp(t, `{"agents":[{"name":"hydra-ops"}],"xo_agent":"nope"}`)); err == nil {
+		t.Error("xo_agent not in agents = nil error, want error")
+	}
+	if _, err := Load(writeTemp(t, `{"agents":[{"name":"hydra-ops"}],"heartbeat_interval":"20mins"}`)); err == nil {
+		t.Error("bad heartbeat_interval = nil error, want error")
+	}
+	if _, err := Load(writeTemp(t, `{"agents":[{"name":"hydra-ops"}],"heartbeat_interval":"0"}`)); err != nil {
+		t.Errorf("heartbeat_interval \"0\" (disabled) should be valid: %v", err)
+	}
+}

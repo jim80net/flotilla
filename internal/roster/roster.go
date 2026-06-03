@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 )
 
 // Agent is one coordinated coding agent — a long-lived session in a tmux pane.
@@ -42,6 +43,22 @@ type Config struct {
 	// ready; not a secret.
 	OperatorUserID string  `json:"operator_user_id,omitempty"`
 	Agents         []Agent `json:"agents"`
+
+	// --- `watch` capability (flotilla watch); validated at load ---
+
+	// XOAgent is the delivery target for a bare operator message and the target
+	// of the heartbeat. If set, it MUST name an agent in Agents.
+	XOAgent string `json:"xo_agent,omitempty"`
+	// HeartbeatInterval is a Go duration (e.g. "20m"); empty or "0" disables the
+	// heartbeat. Parsed (validated) at load.
+	HeartbeatInterval string `json:"heartbeat_interval,omitempty"`
+	// HeartbeatMessage is the idempotent tick prompt; watch supplies a default
+	// when empty.
+	HeartbeatMessage string `json:"heartbeat_message,omitempty"`
+
+	// heartbeatDur is HeartbeatInterval parsed once at load (0 = disabled), so
+	// consumers get a typed value instead of re-parsing the string.
+	heartbeatDur time.Duration
 }
 
 // Load reads and validates a roster config file.
@@ -74,8 +91,25 @@ func Load(path string) (*Config, error) {
 		}
 		seenTitle[a.Title()] = true
 	}
+	// watch-capability fields: validate at load so a misconfigured daemon
+	// refuses to start rather than failing silently at the first tick.
+	if c.XOAgent != "" {
+		if _, err := c.Agent(c.XOAgent); err != nil {
+			return nil, fmt.Errorf("roster %q: xo_agent %q is not in agents", path, c.XOAgent)
+		}
+	}
+	if c.HeartbeatInterval != "" && c.HeartbeatInterval != "0" {
+		d, err := time.ParseDuration(c.HeartbeatInterval)
+		if err != nil {
+			return nil, fmt.Errorf("roster %q: invalid heartbeat_interval %q: %w", path, c.HeartbeatInterval, err)
+		}
+		c.heartbeatDur = d
+	}
 	return &c, nil
 }
+
+// HeartbeatDur returns the parsed heartbeat interval (0 when disabled).
+func (c *Config) HeartbeatDur() time.Duration { return c.heartbeatDur }
 
 // Agent looks up an agent by name.
 func (c *Config) Agent(name string) (Agent, error) {
