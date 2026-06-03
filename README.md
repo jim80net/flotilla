@@ -5,6 +5,9 @@
 > Status: **v0, work in progress.** The design below is the target; the
 > implementation is being built in the open. Expect rough edges.
 
+> **New here? → [docs/quickstart.md](./docs/quickstart.md)** — install to your
+> first cross-pane message and the self-continuing clock, runnable cold.
+
 ## The problem
 
 You run several long-lived AI coding agents at once — say one per domain
@@ -76,7 +79,7 @@ Near-term:
       confirm receipt.
 - [ ] Chat-bus setup helper (create channel + per-agent identities).
 - [ ] Release-sign-off workflow.
-- [ ] Docs + an end-to-end quickstart that a newcomer can run cold.
+- [x] Docs + an end-to-end quickstart that a newcomer can run cold — [docs/quickstart.md](./docs/quickstart.md) (cold-tested: install, send, clock).
 
 ## License
 
