@@ -24,8 +24,8 @@
 
 ## 4. Serialized injector (D4)
 
-- [ ] 4.1 One worker goroutine draining a job channel; both relay and heartbeat enqueue; calls `deliver.Send` strictly sequentially
-- [ ] 4.2 Test: two concurrent enqueues do not interleave (deliveries are serialized)
+- [x] 4.1 One worker goroutine draining a job channel; both relay and heartbeat enqueue; calls a `SendFunc` (wired to `deliver`) strictly sequentially (`internal/watch.Injector`)
+- [x] 4.2 Test: 20 concurrent enqueues do not interleave (verified with `-race`); worker survives a send error
 
 ## 5. Idle-gated heartbeat (D2, D6)
 
