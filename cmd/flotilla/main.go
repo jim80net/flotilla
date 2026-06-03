@@ -65,7 +65,18 @@ flags for 'send':
 
 The Discord audit mirror is best-effort: if it is unconfigured or fails, the
 message is still delivered and the command succeeds (with a warning), so a
-retry never double-delivers.`)
+retry never double-delivers.
+
+flags for 'watch':
+  --roster <path>         roster config (default ./flotilla.json or $FLOTILLA_ROSTER)
+  --secrets <path>        secrets env file: relay bot token + down-alert webhook (default $FLOTILLA_SECRETS)
+  --ack-file <path>       XO liveness ack file the XO touches (default $FLOTILLA_ACK_FILE, else <roster-dir>/flotilla-xo-alive)
+  --max-missed-acks <n>   consecutive missed acks before a down-alert (default 3)
+
+watch runs the XO heartbeat clock + liveness watchdog (needs neither Discord nor
+secrets), and adds the inbound relay when channel_id + operator_user_id + a bot
+token are configured. The heartbeat target and interval come from the roster
+(xo_agent, heartbeat_interval).`)
 }
 
 func rosterDefault() string {
