@@ -129,6 +129,21 @@ func cmdWatch(args []string) error {
 	// heartbeat's own busy predicate is nil here.
 	hb := watch.NewHeartbeat(interval, xo, prompt, injector.Enqueue, nil)
 	hb.SetGate(gate)
+	// Activity probe: fingerprint the XO pane (its captured contents). Any change
+	// — the XO taking a turn, emitting output — resets the idle clock, so the tick
+	// fires only after genuine inactivity, not on a fixed wall-clock. Returning ""
+	// (pane unresolved/unreadable) is treated as no-activity and never false-resets.
+	hb.SetActivityProbe(func() string {
+		pane, err := deliver.ResolvePane(agentTitle(cfg, xo))
+		if err != nil {
+			return ""
+		}
+		out, err := deliver.CapturePane(pane)
+		if err != nil {
+			return ""
+		}
+		return out
+	})
 	hb.Start()
 	defer hb.Stop()
 
