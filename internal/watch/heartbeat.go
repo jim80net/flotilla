@@ -6,14 +6,21 @@ import (
 )
 
 // DefaultHeartbeatPrompt is the idempotent self-continuation tick (design D6).
-// It turns a turn-based XO into a self-continuing system: advance clear,
-// already-authorized laid-out work without waiting for the operator; otherwise
-// idle. It must never drive the XO to manufacture unauthorized work.
+// It turns a turn-based XO into a self-continuing system: on each tick the XO
+// CHECKS its concrete work sources and advances the next already-authorized
+// step rather than answering from memory — and a task blocked only from landing
+// (a push gate, a pending review) is explicitly NOT idle. It must never drive
+// the XO to manufacture unauthorized work. Deployments can override the wording
+// per-roster via heartbeat_message (e.g. to name concrete source paths).
 const DefaultHeartbeatPrompt = "This is an automated heartbeat, not a new instruction. " +
-	"Emit your one-line liveness ack. If there is clear, already-authorized work in flight " +
-	"— an open task in the active openspec change, an unanswered desk report, an approved " +
-	"plan step — advance it now without waiting for the operator. If nothing is laid out, " +
-	"reply 'idle' and do nothing. Never manufacture work the operator did not authorize."
+	"Emit a one-line liveness ack. Then do not decide from memory — check your concrete work " +
+	"sources before concluding anything: the active openspec change's unchecked tasks (run " +
+	"`openspec list` and read its tasks.md), the project roadmap and any tracked TODO, and the " +
+	"standing goal. Advance the next clear, already-authorized step now without waiting for the " +
+	"operator. A task blocked only from landing (a push gate, a pending review) is NOT idle — " +
+	"advance it as far as you can locally, then surface the blocker in one line. Only if, after " +
+	"checking those sources, there is genuinely no unblocked authorized step, reply 'idle' and " +
+	"do nothing. Never manufacture work the operator did not authorize."
 
 // Heartbeat injects the self-continuation tick into the XO pane after an
 // inactivity interval, UNLESS the XO appears busy (idle-gate). The timer resets
