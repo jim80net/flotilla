@@ -33,10 +33,19 @@ func Busy(target string) (bool, error) {
 }
 
 // parseBusy is the testable core: true when the captured pane shows an active
-// working marker.
+// working marker. It scopes the scan to the bottom of the pane (the live
+// status/footer area): the active spinner is always at the bottom, and an old
+// "(Ns ·" line scrolled up in history would otherwise false-positive as busy
+// and wrongly skip a tick.
 func parseBusy(captured string) bool {
-	if strings.Contains(captured, "esc to interrupt") {
+	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
+	const tail = 8
+	if len(lines) > tail {
+		lines = lines[len(lines)-tail:]
+	}
+	scope := strings.Join(lines, "\n")
+	if strings.Contains(scope, "esc to interrupt") {
 		return true
 	}
-	return activeSpinner.MatchString(captured)
+	return activeSpinner.MatchString(scope)
 }

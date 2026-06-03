@@ -78,6 +78,16 @@ func cmdWatch(args []string) error {
 		}
 		return deliver.Send(pane, message)
 	}, 16)
+	// Mirror what actually lands to the audit channel: relayed instructions in
+	// full, heartbeat ticks as a terse marker (the long prompt would be noise).
+	// Posted via webhook, which the gateway's feedback filter drops — no loop.
+	injector.SetMirror(func(j watch.Job) {
+		if j.Kind == "heartbeat" {
+			post("flotilla-watch", "⏱ heartbeat → "+j.Agent)
+		} else {
+			post("flotilla-watch", "→ "+j.Agent+": "+j.Message)
+		}
+	})
 	injector.Start()
 	defer injector.Stop()
 
@@ -125,8 +135,11 @@ func cmdWatch(args []string) error {
 	fmt.Printf("flotilla watch: clock running — XO=%s interval=%s ack=%s\n", xo, interval, *ackPath)
 
 	// Inbound relay (optional): needs a channel id + bot token (and the bot's
-	// privileged Message Content intent). Without them, watch runs clock-only.
-	if cfg.ChannelID != "" && botToken != "" {
+	// privileged Message Content intent) AND an operator_user_id — without the
+	// latter, relay.Accept drops every message, so enabling the gateway would
+	// claim "relay active" while silently dropping all traffic.
+	switch {
+	case cfg.ChannelID != "" && botToken != "" && cfg.OperatorUserID != "":
 		rel := watch.NewRelay(cfg, xo, injector, hb, func(msg string) { post("flotilla-watch", msg) })
 		gw, err := discord.NewGateway(botToken, cfg.ChannelID, rel.Handle)
 		if err != nil {
@@ -137,8 +150,10 @@ func cmdWatch(args []string) error {
 		}
 		defer func() { _ = gw.Close() }()
 		fmt.Println("flotilla watch: inbound relay active")
-	} else {
-		fmt.Println("flotilla watch: clock-only (relay disabled — set channel_id + bot token to enable)")
+	case cfg.ChannelID != "" && botToken != "" && cfg.OperatorUserID == "":
+		return fmt.Errorf("relay requires operator_user_id in the roster (channel_id + bot token are set) — set it, or remove channel_id for clock-only")
+	default:
+		fmt.Println("flotilla watch: clock-only (relay disabled — set channel_id + bot token + operator_user_id to enable)")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)

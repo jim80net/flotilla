@@ -14,6 +14,7 @@ import (
 type Job struct {
 	Agent   string
 	Message string
+	Kind    string // "relay" | "heartbeat" | "" — labels the audit mirror
 }
 
 // SendFunc delivers a message to an agent's pane. Production wires
@@ -35,7 +36,12 @@ type Injector struct {
 	stopped chan struct{} // Enqueue: stop accepting (closed once)
 	done    chan struct{}
 	once    sync.Once
+	mirror  func(Job) // optional: called after a successful delivery (audit trail)
 }
+
+// SetMirror installs a hook called after each successful delivery, for the audit
+// trail. Must be set before Start.
+func (in *Injector) SetMirror(mirror func(Job)) { in.mirror = mirror }
 
 // NewInjector builds an injector with the given send function and queue buffer.
 func NewInjector(send SendFunc, buffer int) *Injector {
@@ -75,6 +81,10 @@ func (in *Injector) deliver(j Job) {
 		// A failed delivery must not kill the worker — log and continue, so one
 		// bad pane can't take down the whole relay.
 		log.Printf("flotilla watch: deliver to %q failed: %v", j.Agent, err)
+		return
+	}
+	if in.mirror != nil {
+		in.mirror(j) // audit only what actually landed
 	}
 }
 

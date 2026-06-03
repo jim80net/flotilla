@@ -1,6 +1,9 @@
 package watch
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 // DefaultHeartbeatPrompt is the idempotent self-continuation tick (design D6).
 // It turns a turn-based XO into a self-continuing system: advance clear,
@@ -27,6 +30,9 @@ type Heartbeat struct {
 	reset chan struct{}
 	stop  chan struct{}
 	done  chan struct{}
+
+	startOnce sync.Once
+	stopOnce  sync.Once
 }
 
 // NewHeartbeat builds a heartbeat. interval <= 0 disables it (no ticks ever).
@@ -67,11 +73,11 @@ func (h *Heartbeat) Reset() {
 }
 
 // Start launches the heartbeat loop.
-func (h *Heartbeat) Start() { go h.loop() }
+func (h *Heartbeat) Start() { h.startOnce.Do(func() { go h.loop() }) }
 
-// Stop ends the loop and waits for it to exit.
+// Stop ends the loop and waits for it to exit. Idempotent (safe to call twice).
 func (h *Heartbeat) Stop() {
-	close(h.stop)
+	h.stopOnce.Do(func() { close(h.stop) })
 	<-h.done
 }
 
@@ -103,7 +109,7 @@ func (h *Heartbeat) loop() {
 			// when it reports the XO down, skip the tick — don't wind a dead clock.
 			gated := h.gate != nil && h.gate()
 			if !gated && !h.busy(h.xoAgent) {
-				h.enqueue(Job{Agent: h.xoAgent, Message: h.prompt})
+				h.enqueue(Job{Agent: h.xoAgent, Message: h.prompt, Kind: "heartbeat"})
 			}
 			t.Reset(h.interval)
 		}

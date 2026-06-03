@@ -39,7 +39,7 @@ func (r *Relay) Handle(webhookID, authorID, content string) {
 	if d.Notice != "" && r.notify != nil {
 		r.notify(d.Notice)
 	}
-	r.injector.Enqueue(Job{Agent: d.Agent, Message: d.Message})
+	r.injector.Enqueue(Job{Agent: d.Agent, Message: d.Message, Kind: "relay"})
 }
 
 // resolveAgent maps a (case-insensitive) token to a canonical roster agent name.

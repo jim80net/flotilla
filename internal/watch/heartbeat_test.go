@@ -72,9 +72,8 @@ func TestHeartbeatResetSuppressesTick(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 		h.Reset()
 	}
-	got := c.count()
-	h.Stop()
-	if got != 0 {
+	h.Stop() // stop first (drains any in-flight tick) so the count is deterministic
+	if got := c.count(); got != 0 {
 		t.Errorf("heartbeat fired %d times despite continuous resets, want 0", got)
 	}
 }

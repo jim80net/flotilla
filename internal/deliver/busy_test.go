@@ -16,6 +16,9 @@ func TestParseBusy(t *testing.T) {
 		{"completed-turn summary", "● answer here\n✻ Worked for 8m 33s", false},
 		{"idle composer placeholder", "❯ Try \"how does cli.py work?\"\n  ⏵⏵ auto mode on (shift+tab to cycle)", false},
 		{"empty idle", "❯ \n", false},
+		// An old spinner line in scrollback must NOT false-positive: only the
+		// live tail (last few lines) is scanned.
+		{"stale spinner in scrollback", "✻ Frosting… (3s · ↓ 25 tokens)\n● done\n\n\n\n\n\n\n❯ \n  ⏵⏵ auto mode on", false},
 	}
 	for _, c := range cases {
 		if got := parseBusy(c.captured); got != c.busy {
