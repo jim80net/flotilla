@@ -38,7 +38,7 @@
 - [x] 6.1 The tick asks the XO for a one-line ack (in `DefaultHeartbeatPrompt`); the ack SOURCE (channel post / state-file touch) is consumed in §8 and passed to `Observe(acked, ...)`
 - [x] 6.2 `Watchdog.Observe`: alert after K consecutive missed acks; `crashed` argument is the immediate fast-path (cmd supplies it from `#{pane_current_command}` is-a-shell)
 - [x] 6.3 Alert on the down-transition only (debounced); clears on recovery, can re-trip (`internal/watch.Watchdog`)
-- [ ] 6.4 `ResolvePane` failures (0 or >1) caught per-tick → watchdog state, never fatal — wired in §8
+- [x] 6.4 `ResolvePane` failures (0 or >1) caught per-tick → treated as down, never fatal (`cmdWatch` gate + `AckWatcher` ack source via touch-file)
 - [x] 6.5 Tests: K-missed alert; debounce while down; recovery clears + re-trips; crash fast-path
 
 ## 7. Config (D8)
@@ -48,13 +48,13 @@
 
 ## 8. Command + deploy
 
-- [ ] 8.1 `cmd/flotilla watch` wiring (flags: `--roster`, `--secrets`); compose reader + filter + router + injector + heartbeat + watchdog
+- [~] 8.1 `cmd/flotilla watch` wiring: CLOCK half done (injector + idle-gated heartbeat + watchdog gate, flags `--roster/--secrets/--ack-file/--max-missed-acks`); RELAY half (gateway reader → Accept → Route → injector) pending (§1)
 - [ ] 8.2 `deploy/flotilla-watch.service` (systemd user unit): `EnvironmentFile` for secrets, `Restart=on-failure`, `RestartPreventExitStatus` for auth failure, `ExecStart=flotilla watch --roster … --secrets …`
 - [ ] 8.3 Runbook: install/enable/verify; require operator Discord 2FA (security boundary)
 
 ## 9. Review + ship
 
 - [ ] 9.1 `gofmt`/`go vet`/`go build`/`go test` green
-- [ ] 9.2 e2e validation: live gateway → relay injects into a throwaway pane; idle-gate skips a busy XO; watchdog alerts on missed acks
+- [~] 9.2 e2e: CLOCK validated live (heartbeat auto-ticked an idle throwaway XO with no operator input; watchdog alerted on unresponsive/shell-fallback). RELAY e2e (operator msg → injected) pending the bot's Message Content intent.
 - [ ] 9.3 systems-review the diff; cubic; address all findings
 - [ ] 9.4 PR → merge → deploy as `flotilla-watch.service`; archive this change
