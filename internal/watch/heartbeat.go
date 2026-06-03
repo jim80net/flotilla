@@ -6,14 +6,25 @@ import (
 )
 
 // DefaultHeartbeatPrompt is the idempotent self-continuation tick (design D6).
-// It turns a turn-based XO into a self-continuing system: advance clear,
-// already-authorized laid-out work without waiting for the operator; otherwise
-// idle. It must never drive the XO to manufacture unauthorized work.
+// It turns a turn-based XO into a self-continuing system: on each tick the XO
+// READS its work sources (in order) and advances the next already-authorized
+// step rather than answering from memory — and a task blocked only from landing
+// (a push gate, a pending review) is explicitly NOT idle. It names a
+// convention: `.flotilla-state.md` is the top-level goal + task tracker, with
+// the active openspec change as per-change detail (pluggable later — see #6).
+// It must never drive the XO to manufacture unauthorized work. Deployments can
+// override the wording per-roster via heartbeat_message (e.g. to name absolute
+// source paths).
 const DefaultHeartbeatPrompt = "This is an automated heartbeat, not a new instruction. " +
-	"Emit your one-line liveness ack. If there is clear, already-authorized work in flight " +
-	"— an open task in the active openspec change, an unanswered desk report, an approved " +
-	"plan step — advance it now without waiting for the operator. If nothing is laid out, " +
-	"reply 'idle' and do nothing. Never manufacture work the operator did not authorize."
+	"Emit a one-line liveness ack. Then do not decide from memory — read your work sources, in " +
+	"order: (1) the top-level goal + task tracker `.flotilla-state.md` if present; (2) the active " +
+	"openspec change's unchecked tasks if openspec is installed and a change is active (run " +
+	"`openspec list`, then read its tasks.md); (3) the project roadmap / README. Advance the next " +
+	"clear, already-authorized step now without waiting for the operator, and keep " +
+	"`.flotilla-state.md` current as you go. A task blocked only from landing (a push gate, a " +
+	"pending review) is NOT idle — advance it as far as you can locally, then surface the blocker " +
+	"in one line. Only if, after reading those sources, there is genuinely no unblocked authorized " +
+	"step, reply 'idle' and do nothing. Never manufacture work the operator did not authorize."
 
 // Heartbeat injects the self-continuation tick into the XO pane after an
 // inactivity interval, UNLESS the XO appears busy (idle-gate). The timer resets
