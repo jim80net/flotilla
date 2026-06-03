@@ -21,7 +21,8 @@ type Heartbeat struct {
 	xoAgent  string
 	prompt   string
 	enqueue  func(Job)
-	busy     func(agent string) bool // idle-gate: true when the pane shows a working glyph
+	busy     func(agent string) bool // idle-gate: true when the pane is mid-turn
+	gate     func() bool             // per-interval hook; true → skip this tick (e.g. XO is down)
 
 	reset chan struct{}
 	stop  chan struct{}
@@ -49,6 +50,12 @@ func NewHeartbeat(interval time.Duration, xoAgent, prompt string, enqueue func(J
 		done:     make(chan struct{}),
 	}
 }
+
+// SetGate installs a per-interval hook run at the start of every tick cycle
+// (before the idle-gate). When it returns true the tick is skipped this cycle.
+// The watchdog uses it to observe liveness every interval and suppress the tick
+// while the XO is down (don't wind a dead clock). Must be set before Start.
+func (h *Heartbeat) SetGate(gate func() bool) { h.gate = gate }
 
 // Reset restarts the inactivity timer. Call it on every real delivery so a
 // stream of operator activity suppresses the synthetic tick. Non-blocking.
@@ -89,7 +96,10 @@ func (h *Heartbeat) loop() {
 			}
 			t.Reset(h.interval)
 		case <-t.C:
-			if !h.busy(h.xoAgent) {
+			// gate runs every interval (the watchdog observes liveness here);
+			// when it reports the XO down, skip the tick — don't wind a dead clock.
+			gated := h.gate != nil && h.gate()
+			if !gated && !h.busy(h.xoAgent) {
 				h.enqueue(Job{Agent: h.xoAgent, Message: h.prompt})
 			}
 			t.Reset(h.interval)
