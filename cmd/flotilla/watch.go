@@ -48,7 +48,24 @@ func cmdWatch(args []string) error {
 		*ackPath = filepath.Join(filepath.Dir(*rosterPath), "flotilla-xo-alive")
 	}
 
-	alert := buildAlert(*secretsPath, xo)
+	// Load secrets once: the bot token (gateway) and the alert/notice webhook.
+	var alertHook, botToken string
+	if *secretsPath != "" {
+		if secrets, err := roster.LoadSecrets(*secretsPath); err == nil {
+			botToken = secrets.BotToken()
+			if h, err := secrets.Webhook(xo); err == nil {
+				alertHook = h
+			}
+		}
+	}
+	post := func(username, msg string) {
+		if alertHook != "" {
+			_ = discord.Post(alertHook, username, msg)
+		} else {
+			fmt.Fprintln(os.Stderr, "flotilla watch: "+msg)
+		}
+	}
+	alert := func(msg string) { post("flotilla-watch", "⚠️ "+msg) }
 
 	injector := watch.NewInjector(func(agent, message string) error {
 		pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
@@ -99,24 +116,28 @@ func cmdWatch(args []string) error {
 
 	fmt.Printf("flotilla watch: clock running — XO=%s interval=%s ack=%s\n", xo, interval, *ackPath)
 
+	// Inbound relay (optional): needs a channel id + bot token (and the bot's
+	// privileged Message Content intent). Without them, watch runs clock-only.
+	if cfg.ChannelID != "" && botToken != "" {
+		rel := watch.NewRelay(cfg, xo, injector, hb, func(msg string) { post("flotilla-watch", msg) })
+		gw, err := discord.NewGateway(botToken, cfg.ChannelID, rel.Handle)
+		if err != nil {
+			return err
+		}
+		if err := gw.Open(); err != nil {
+			return err
+		}
+		defer func() { _ = gw.Close() }()
+		fmt.Println("flotilla watch: inbound relay active")
+	} else {
+		fmt.Println("flotilla watch: clock-only (relay disabled — set channel_id + bot token to enable)")
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 	<-ctx.Done()
 	fmt.Println("\nflotilla watch: shutting down")
 	return nil
-}
-
-// buildAlert returns the down-alert sink: a Discord post under a flotilla-watch
-// identity when a webhook is available, else stderr.
-func buildAlert(secretsPath, xo string) func(string) {
-	if secretsPath != "" {
-		if secrets, err := roster.LoadSecrets(secretsPath); err == nil {
-			if hook, err := secrets.Webhook(xo); err == nil {
-				return func(msg string) { _ = discord.Post(hook, "flotilla-watch", "⚠️ "+msg) }
-			}
-		}
-	}
-	return func(msg string) { fmt.Fprintln(os.Stderr, "flotilla watch ALERT: "+msg) }
 }
 
 // agentTitle returns the tmux pane title to resolve for an agent name.
