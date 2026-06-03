@@ -6,7 +6,7 @@ runnable as written — no prior flotilla knowledge assumed.
 
 ## What you need
 
-- **Go 1.22+** (to build the binary).
+- **Go 1.26+** (to build the binary; matches the module's `go` directive).
 - **tmux** — every coordinated agent runs in a tmux pane; flotilla delivers by
   typing into that pane.
 - **At least one agent already running in a tmux pane.** flotilla does not
