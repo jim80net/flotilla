@@ -32,6 +32,8 @@ func run(args []string) error {
 	switch args[0] {
 	case "send":
 		return cmdSend(args[1:])
+	case "watch":
+		return cmdWatch(args[1:])
 	case "version", "-v", "--version":
 		fmt.Println("flotilla " + version)
 		return nil
@@ -49,6 +51,7 @@ func usage() {
 usage:
   flotilla send --from <sender> <agent> <message>     inline message
   flotilla send --from <sender> --file <path> <agent> message body from a file ('-' = stdin)
+  flotilla watch                                      relay + XO heartbeat clock daemon
   flotilla version
   flotilla help
 
