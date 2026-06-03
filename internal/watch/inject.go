@@ -83,9 +83,23 @@ func (in *Injector) deliver(j Job) {
 		log.Printf("flotilla watch: deliver to %q failed: %v", j.Agent, err)
 		return
 	}
+	// Success log: make each landed delivery auditable from journalctl,
+	// independent of the Discord mirror. Terse and body-free — the byte count
+	// stands in for the content (the mirror already carries the message).
+	log.Printf("flotilla watch: %s delivered to %q (%d bytes)", deliveryKind(j.Kind), j.Agent, len(j.Message))
 	if in.mirror != nil {
 		in.mirror(j) // audit only what actually landed
 	}
+}
+
+// deliveryKind labels a delivery for the audit log. A bare Job (empty Kind) is
+// an operator relay (the relay handler always sets "relay"; the heartbeat sets
+// "heartbeat"), so it reads as "relay".
+func deliveryKind(kind string) string {
+	if kind == "" {
+		return "relay"
+	}
+	return kind
 }
 
 // Enqueue submits a delivery. It blocks under back pressure (full buffer) so
