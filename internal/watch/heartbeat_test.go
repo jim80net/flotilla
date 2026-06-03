@@ -108,3 +108,23 @@ func TestHeartbeatActivityStableFires(t *testing.T) {
 		t.Error("heartbeat never fired despite a stable (idle) pane")
 	}
 }
+
+func TestDerivePollInterval(t *testing.T) {
+	cases := []struct{ interval, want time.Duration }{
+		{20 * time.Minute, 30 * time.Second},           // cap
+		{40 * time.Second, 10 * time.Second},           // interval/4
+		{2 * time.Second, time.Second},                 // 1s floor, still <= interval/2
+		{1 * time.Second, 500 * time.Millisecond},      // interval/2 guard beats the floor
+		{40 * time.Millisecond, 20 * time.Millisecond}, // interval/2 guard (sub-second)
+	}
+	for _, tc := range cases {
+		got := derivePollInterval(tc.interval)
+		if got != tc.want {
+			t.Errorf("derivePollInterval(%v) = %v, want %v", tc.interval, got, tc.want)
+		}
+		// invariant (cubic P2): the probe must be sampled before the timer fires.
+		if got >= tc.interval {
+			t.Errorf("derivePollInterval(%v) = %v >= interval — would fire before sampling activity", tc.interval, got)
+		}
+	}
+}

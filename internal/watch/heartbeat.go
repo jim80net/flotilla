@@ -60,7 +60,11 @@ type Heartbeat struct {
 
 // derivePollInterval picks how often to sample pane activity: frequent enough to
 // notice activity well within the idle interval, but bounded so a long interval
-// doesn't poll wastefully. Clamped to [1s, 30s].
+// doesn't poll wastefully. Clamped to [1s, 30s], and never more than interval/2
+// so the probe is always sampled before the timer can fire (≥2 polls per
+// interval) — without that guard, a sub-~4s interval (where the 1s floor exceeds
+// interval/4) could fire mid-activity. Production intervals are minutes, so this
+// only matters for very small intervals.
 func derivePollInterval(interval time.Duration) time.Duration {
 	p := interval / 4
 	if p < time.Second {
@@ -68,6 +72,9 @@ func derivePollInterval(interval time.Duration) time.Duration {
 	}
 	if p > 30*time.Second {
 		p = 30 * time.Second
+	}
+	if p > interval/2 {
+		p = interval / 2
 	}
 	return p
 }
