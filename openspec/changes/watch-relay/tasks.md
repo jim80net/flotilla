@@ -6,9 +6,9 @@
 
 ## 1. Gateway reader (discordgo)
 
-- [ ] 1.1 Add `github.com/bwmarrin/discordgo`; `go mod tidy`
-- [ ] 1.2 Open one `Session` with `IntentsGuildMessages | IntentsMessageContent`; register a MESSAGE_CREATE handler; graceful `Session.Close()` on SIGTERM (D7)
-- [ ] 1.3 Log reconnects; document the disconnect-window message-loss caveat (D7)
+- [x] 1.1 Add `github.com/bwmarrin/discordgo` (direct dep); `go mod tidy`
+- [x] 1.2 `internal/discord.Gateway`: one Session with `IntentsGuildMessages | IntentsMessageContent`, channel-scoped MESSAGE_CREATE handler, graceful `Close()` on SIGTERM
+- [x] 1.3 Disconnect/Resumed logged; disconnect-window message-loss caveat documented (gateway.go + runbook)
 
 ## 2. Message filter (the most important tests — D1)
 
@@ -48,13 +48,13 @@
 
 ## 8. Command + deploy
 
-- [~] 8.1 `cmd/flotilla watch` wiring: CLOCK half done (injector + idle-gated heartbeat + watchdog gate, flags `--roster/--secrets/--ack-file/--max-missed-acks`); RELAY half (gateway reader → Accept → Route → injector) pending (§1)
+- [x] 8.1 `cmd/flotilla watch` wiring: injector + idle-gated heartbeat + watchdog gate + gateway relay (flags `--roster/--secrets/--ack-file/--max-missed-acks`); secrets fatal-if-broken; single per-cycle pane resolve
 - [ ] 8.2 `deploy/flotilla-watch.service` (systemd user unit): `EnvironmentFile` for secrets, `Restart=on-failure`, `RestartPreventExitStatus` for auth failure, `ExecStart=flotilla watch --roster … --secrets …`
 - [ ] 8.3 Runbook: install/enable/verify; require operator Discord 2FA (security boundary)
 
 ## 9. Review + ship
 
-- [ ] 9.1 `gofmt`/`go vet`/`go build`/`go test` green
-- [~] 9.2 e2e: CLOCK validated live (heartbeat auto-ticked an idle throwaway XO with no operator input; watchdog alerted on unresponsive/shell-fallback). RELAY e2e (operator msg → injected) pending the bot's Message Content intent.
-- [ ] 9.3 systems-review the diff; cubic; address all findings
+- [x] 9.1 `gofmt`/`go vet`/`go build`/`go test -race` green
+- [x] 9.2 e2e: CLOCK validated live (heartbeat auto-ticked an idle XO with no operator input; watchdog alerted on unresponsive/shell-fallback). RELAY validated live (bot-as-operator message → gateway → accept → route → injected into the pane; Message Content intent confirmed).
+- [x] 9.3 systems-review (design + implementation rounds); all findings addressed (no P1; P2-1/2/3 + P3s fixed). Cubic pending on PR.
 - [ ] 9.4 PR → merge → deploy as `flotilla-watch.service`; archive this change
