@@ -29,9 +29,9 @@
 
 ## 5. Idle-gated heartbeat (D2, D6)
 
-- [ ] 5.1 Inactivity timer (`heartbeat_interval`); reset on every real relayed delivery (D4)
-- [ ] 5.2 Idle gate: skip the tick if the XO pane title shows a working/spinner glyph (busy)
-- [ ] 5.3 Tick prompt = the idempotent check-then-noop default (D6); test the idle gate skips when busy and fires when idle
+- [x] 5.1 Inactivity timer (`heartbeat_interval`); `Reset()` on every real delivery (`internal/watch.Heartbeat`)
+- [x] 5.2 Idle gate: heartbeat takes a `busy(agent)` predicate and skips the tick when true (the spinner-glyph detector is wired in §8)
+- [x] 5.3 Tick prompt = `DefaultHeartbeatPrompt` (the autonomous-continuation self-clock, D6); tests cover disabled / idle-fires / busy-skips / reset-suppresses
 
 ## 6. Liveness watchdog (tick→ack — D3, D9)
 
