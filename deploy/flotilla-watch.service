@@ -1,0 +1,23 @@
+[Unit]
+Description=flotilla watch — inter-agent relay + XO heartbeat clock
+Documentation=https://github.com/jim80net/flotilla
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# --- Edit these paths for your install (see docs/watch-runbook.md) ---
+EnvironmentFile=-%h/.config/flotilla/flotilla-secrets.env
+ExecStart=%h/go/bin/flotilla watch \
+  --roster %h/.config/flotilla/flotilla.json \
+  --secrets %h/.config/flotilla/flotilla-secrets.env
+Restart=on-failure
+# A persistent auth failure (bad bot token) would otherwise hot-loop against
+# Discord's rate limiter; throttle restarts. (Follow-up: make a fatal startup
+# error a distinct non-restartable exit code + RestartPreventExitStatus.)
+RestartSec=15
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target
