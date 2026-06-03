@@ -96,6 +96,9 @@ func (h *Heartbeat) loop() {
 			}
 			t.Reset(h.interval)
 		case <-t.C:
+			// (A coincident pending Reset is benign: select may pick this tick,
+			// then the buffered reset is consumed next iteration and re-arms the
+			// timer to the same interval — no double-tick, no drift.)
 			// gate runs every interval (the watchdog observes liveness here);
 			// when it reports the XO down, skip the tick — don't wind a dead clock.
 			gated := h.gate != nil && h.gate()

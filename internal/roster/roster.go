@@ -55,6 +55,10 @@ type Config struct {
 	// HeartbeatMessage is the idempotent tick prompt; watch supplies a default
 	// when empty.
 	HeartbeatMessage string `json:"heartbeat_message,omitempty"`
+
+	// heartbeatDur is HeartbeatInterval parsed once at load (0 = disabled), so
+	// consumers get a typed value instead of re-parsing the string.
+	heartbeatDur time.Duration
 }
 
 // Load reads and validates a roster config file.
@@ -95,12 +99,17 @@ func Load(path string) (*Config, error) {
 		}
 	}
 	if c.HeartbeatInterval != "" && c.HeartbeatInterval != "0" {
-		if _, err := time.ParseDuration(c.HeartbeatInterval); err != nil {
+		d, err := time.ParseDuration(c.HeartbeatInterval)
+		if err != nil {
 			return nil, fmt.Errorf("roster %q: invalid heartbeat_interval %q: %w", path, c.HeartbeatInterval, err)
 		}
+		c.heartbeatDur = d
 	}
 	return &c, nil
 }
+
+// HeartbeatDur returns the parsed heartbeat interval (0 when disabled).
+func (c *Config) HeartbeatDur() time.Duration { return c.heartbeatDur }
 
 // Agent looks up an agent by name.
 func (c *Config) Agent(name string) (Agent, error) {

@@ -11,6 +11,11 @@ import (
 // "✻ Frosting… (3s · ↓ 25 tokens · thinking)". The "(Ns ·" elapsed-counter is
 // present only while a turn is running; a completed turn shows "Worked for 8m"
 // (no parens) and an idle pane shows the "⏵⏵ auto mode" / "❯ Try…" footer.
+//
+// NOTE: these are Claude-Code-version-specific render markers — revalidate them
+// on TUI upgrades. Detection fails OPEN (an unrecognized/unreadable state reads
+// as not-busy), so drift costs at most one extra idempotent tick, never a missed
+// clock.
 var activeSpinner = regexp.MustCompile(`\(\d+s ·`)
 
 // Busy reports whether the agent's pane appears to be mid-turn (working), used

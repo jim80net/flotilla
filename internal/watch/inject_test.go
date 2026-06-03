@@ -53,3 +53,13 @@ func TestInjectorSurvivesSendError(t *testing.T) {
 		t.Errorf("processed %d jobs after errors, want 2 (worker must survive)", got)
 	}
 }
+
+func TestInjectorEnqueueAfterStopDoesNotPanic(t *testing.T) {
+	// Regression: an in-flight relay handler may Enqueue after Stop. With the old
+	// close-from-sender design this was send-on-closed-channel → panic.
+	in := NewInjector(func(string, string) error { return nil }, 1)
+	in.Start()
+	in.Stop()
+	in.Enqueue(Job{Agent: "x", Message: "late"}) // must drop safely, not panic
+	in.Stop()                                    // idempotent
+}

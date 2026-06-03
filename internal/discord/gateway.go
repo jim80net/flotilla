@@ -38,6 +38,14 @@ func NewGateway(botToken, channelID string, handler MessageHandler) (*Gateway, e
 		}
 		handler(m.WebhookID, authorID, m.Content)
 	})
+	// Log gateway flaps so a message lost during a reconnect window is
+	// explainable in the journal ("gateway disconnected 14:03 / resumed 14:03").
+	s.AddHandler(func(_ *discordgo.Session, _ *discordgo.Disconnect) {
+		log.Printf("flotilla watch: gateway disconnected")
+	})
+	s.AddHandler(func(_ *discordgo.Session, _ *discordgo.Resumed) {
+		log.Printf("flotilla watch: gateway resumed")
+	})
 	return &Gateway{session: s, channelID: channelID}, nil
 }
 

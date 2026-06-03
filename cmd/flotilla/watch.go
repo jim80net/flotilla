@@ -4,11 +4,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
-	"time"
 
 	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/discord"
@@ -40,23 +40,27 @@ func cmdWatch(args []string) error {
 		xo = cfg.Agents[0].Name
 	}
 
-	interval := time.Duration(0)
-	if cfg.HeartbeatInterval != "" && cfg.HeartbeatInterval != "0" {
-		interval, _ = time.ParseDuration(cfg.HeartbeatInterval) // validated at load
-	}
+	interval := cfg.HeartbeatDur() // parsed + validated at load
 	if *ackPath == "" {
 		*ackPath = filepath.Join(filepath.Dir(*rosterPath), "flotilla-xo-alive")
 	}
 
 	// Load secrets once: the bot token (gateway) and the alert/notice webhook.
+	// A configured-but-broken secrets file is fatal — don't silently degrade to
+	// clock-only (the operator set --secrets expecting the relay).
 	var alertHook, botToken string
 	if *secretsPath != "" {
-		if secrets, err := roster.LoadSecrets(*secretsPath); err == nil {
-			botToken = secrets.BotToken()
-			if h, err := secrets.Webhook(xo); err == nil {
-				alertHook = h
-			}
+		secrets, err := roster.LoadSecrets(*secretsPath)
+		if err != nil {
+			return err
 		}
+		botToken = secrets.BotToken()
+		if h, err := secrets.Webhook(xo); err == nil {
+			alertHook = h
+		}
+	}
+	if alertHook == "" {
+		fmt.Fprintln(os.Stderr, "flotilla watch: WARNING — no alert webhook; down-alerts go to stderr (journald) only")
 	}
 	post := func(username, msg string) {
 		if alertHook != "" {
@@ -80,26 +84,28 @@ func cmdWatch(args []string) error {
 	wd := watch.NewWatchdog(*maxMissed, alert)
 	ack := watch.NewAckWatcher(*ackPath)
 
-	// gate runs every interval: observe XO liveness (crash + ack) and skip the
-	// tick while the XO is down (don't wind a dead clock). ResolvePane failures
-	// are treated as "down", never fatal to the daemon.
+	// gate runs every interval: resolve the XO pane ONCE, observe liveness
+	// (crash + ack), and skip the tick while the XO is down OR busy. A resolve
+	// failure is treated as "down", never fatal to the daemon.
 	gate := func() bool {
+		pane, err := deliver.ResolvePane(agentTitle(cfg, xo))
+		if err != nil {
+			wd.Observe(ack.Acked(), true)
+			return true
+		}
 		crashed := false
-		if pane, err := deliver.ResolvePane(agentTitle(cfg, xo)); err != nil {
-			crashed = true
-		} else if cmdName, err := deliver.PaneCommand(pane); err != nil || deliver.IsShell(cmdName) {
+		if cmdName, err := deliver.PaneCommand(pane); err != nil || deliver.IsShell(cmdName) {
 			crashed = true
 		}
 		wd.Observe(ack.Acked(), crashed)
-		return wd.Down()
-	}
-
-	busy := func(agent string) bool {
-		pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
-		if err != nil {
-			return false
+		if wd.Down() {
+			return true
 		}
-		b, _ := deliver.Busy(pane)
+		b, err := deliver.Busy(pane)
+		if err != nil {
+			log.Printf("flotilla watch: busy-check failed for %q: %v", xo, err)
+			return false // fail-open: an unreadable pane reads as not-busy
+		}
 		return b
 	}
 
@@ -109,7 +115,9 @@ func cmdWatch(args []string) error {
 	}
 	prompt += "\n(To ack you are alive, run: touch " + *ackPath + ")"
 
-	hb := watch.NewHeartbeat(interval, xo, prompt, injector.Enqueue, busy)
+	// busy-gating is handled inside gate (single pane resolve per cycle), so the
+	// heartbeat's own busy predicate is nil here.
+	hb := watch.NewHeartbeat(interval, xo, prompt, injector.Enqueue, nil)
 	hb.SetGate(gate)
 	hb.Start()
 	defer hb.Stop()

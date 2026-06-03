@@ -3,10 +3,15 @@ Description=flotilla watch — inter-agent relay + XO heartbeat clock
 Documentation=https://github.com/jim80net/flotilla
 After=network-online.target
 Wants=network-online.target
+# Stop a bad-token hot-loop from hammering Discord's IDENTIFY rate limit: give
+# up after 5 failed starts in 5 minutes (manual restart required thereafter).
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
-# --- Edit these paths for your install (see docs/watch-runbook.md) ---
+# --- Edit these paths for your install (see docs/watch-runbook.md). ExecStart
+# assumes the binary is at ~/go/bin/flotilla (the `go install` default). ---
 EnvironmentFile=-%h/.config/flotilla/flotilla-secrets.env
 ExecStart=%h/go/bin/flotilla watch \
   --roster %h/.config/flotilla/flotilla.json \
