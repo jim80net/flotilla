@@ -35,11 +35,11 @@
 
 ## 6. Liveness watchdog (tick→ack — D3, D9)
 
-- [ ] 6.1 The tick instructs the XO to emit a one-line ack (state file touch or terse channel post); watcher records last-ack time
-- [ ] 6.2 Alert after K consecutive missed acks within a window; cheap fast-path: `#{pane_current_command}` is a shell → immediate crash alert
-- [ ] 6.3 Alert on the down-transition only, with cool-down; clear on recovery (D9)
-- [ ] 6.4 `ResolvePane` failures (0 or >1) are caught per-tick → watchdog state, never fatal (D9)
-- [ ] 6.5 Tests: K-missed-acks alert; recovery clears; alert debounced (no per-cycle spam)
+- [x] 6.1 The tick asks the XO for a one-line ack (in `DefaultHeartbeatPrompt`); the ack SOURCE (channel post / state-file touch) is consumed in §8 and passed to `Observe(acked, ...)`
+- [x] 6.2 `Watchdog.Observe`: alert after K consecutive missed acks; `crashed` argument is the immediate fast-path (cmd supplies it from `#{pane_current_command}` is-a-shell)
+- [x] 6.3 Alert on the down-transition only (debounced); clears on recovery, can re-trip (`internal/watch.Watchdog`)
+- [ ] 6.4 `ResolvePane` failures (0 or >1) caught per-tick → watchdog state, never fatal — wired in §8
+- [x] 6.5 Tests: K-missed alert; debounce while down; recovery clears + re-trips; crash fast-path
 
 ## 7. Config (D8)
 
