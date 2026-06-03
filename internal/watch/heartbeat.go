@@ -33,16 +33,22 @@ const DefaultHeartbeatPrompt = "This is an automated heartbeat, not a new instru
 	"work the operator did not authorize."
 
 // Heartbeat injects the self-continuation tick into the XO pane after an
-// inactivity interval, UNLESS the XO appears busy (idle-gate). The timer resets
-// on every real delivery (an operator message is itself a tick), so the
-// synthetic tick fires only after a true inactivity gap.
+// inactivity interval, UNLESS the XO appears busy (idle-gate). The interval is
+// reset by ANY of: a real delivery (an operator message is itself a tick), or —
+// when an activity probe is installed — any change in the XO's tmux pane (the XO
+// taking a turn, emitting output). So the synthetic tick fires only after a true
+// inactivity gap: ~`interval` of no operator traffic AND no pane activity. The
+// probe is polled every `pollInterval` (derived from `interval`). Without a probe
+// it degrades to the prior delivery-reset-only behavior.
 type Heartbeat struct {
-	interval time.Duration
-	xoAgent  string
-	prompt   string
-	enqueue  func(Job)
-	busy     func(agent string) bool // idle-gate: true when the pane is mid-turn
-	gate     func() bool             // per-interval hook; true → skip this tick (e.g. XO is down)
+	interval     time.Duration
+	pollInterval time.Duration
+	xoAgent      string
+	prompt       string
+	enqueue      func(Job)
+	busy         func(agent string) bool // idle-gate: true when the pane is mid-turn
+	gate         func() bool             // per-interval hook; true → skip this tick (e.g. XO is down)
+	activity     func() string           // XO-pane fingerprint; a change resets the idle clock. nil ⇒ disabled.
 
 	reset chan struct{}
 	stop  chan struct{}
@@ -50,6 +56,20 @@ type Heartbeat struct {
 
 	startOnce sync.Once
 	stopOnce  sync.Once
+}
+
+// derivePollInterval picks how often to sample pane activity: frequent enough to
+// notice activity well within the idle interval, but bounded so a long interval
+// doesn't poll wastefully. Clamped to [1s, 30s].
+func derivePollInterval(interval time.Duration) time.Duration {
+	p := interval / 4
+	if p < time.Second {
+		p = time.Second
+	}
+	if p > 30*time.Second {
+		p = 30 * time.Second
+	}
+	return p
 }
 
 // NewHeartbeat builds a heartbeat. interval <= 0 disables it (no ticks ever).
@@ -63,14 +83,15 @@ func NewHeartbeat(interval time.Duration, xoAgent, prompt string, enqueue func(J
 		busy = func(string) bool { return false }
 	}
 	return &Heartbeat{
-		interval: interval,
-		xoAgent:  xoAgent,
-		prompt:   prompt,
-		enqueue:  enqueue,
-		busy:     busy,
-		reset:    make(chan struct{}, 1),
-		stop:     make(chan struct{}),
-		done:     make(chan struct{}),
+		interval:     interval,
+		pollInterval: derivePollInterval(interval),
+		xoAgent:      xoAgent,
+		prompt:       prompt,
+		enqueue:      enqueue,
+		busy:         busy,
+		reset:        make(chan struct{}, 1),
+		stop:         make(chan struct{}),
+		done:         make(chan struct{}),
 	}
 }
 
@@ -79,6 +100,24 @@ func NewHeartbeat(interval time.Duration, xoAgent, prompt string, enqueue func(J
 // The watchdog uses it to observe liveness every interval and suppress the tick
 // while the XO is down (don't wind a dead clock). Must be set before Start.
 func (h *Heartbeat) SetGate(gate func() bool) { h.gate = gate }
+
+// SetActivityProbe installs a fingerprint function for the XO's pane (e.g. a hash
+// of `tmux capture-pane`). The loop polls it every pollInterval; any change in
+// the fingerprint resets the idle interval — the XO is active (taking a turn,
+// emitting output), so the synthetic tick is deferred. A "" result means the
+// probe is unavailable this cycle and is treated as no-activity (does not reset).
+// Without a probe the heartbeat resets only on deliveries (prior behavior). Must
+// be set before Start.
+func (h *Heartbeat) SetActivityProbe(probe func() string) { h.activity = probe }
+
+// SetPollInterval overrides how often the activity probe is sampled (default is
+// derived from the interval, clamped to [1s, 30s]). Useful to tune cadence per
+// deployment, and for fast tests. Ignored if d <= 0. Must be set before Start.
+func (h *Heartbeat) SetPollInterval(d time.Duration) {
+	if d > 0 {
+		h.pollInterval = d
+	}
+}
 
 // Reset restarts the inactivity timer. Call it on every real delivery so a
 // stream of operator activity suppresses the synthetic tick. Non-blocking.
@@ -106,24 +145,46 @@ func (h *Heartbeat) loop() {
 	}
 	t := time.NewTimer(h.interval)
 	defer t.Stop()
+
+	resetTimer := func() {
+		if !t.Stop() {
+			select {
+			case <-t.C:
+			default:
+			}
+		}
+		t.Reset(h.interval)
+	}
+
+	// Pane-activity polling: when an activity probe is installed, sample the XO
+	// pane every pollInterval; any change resets the idle interval, so the tick
+	// fires only after a true inactivity gap (no deliveries AND no pane changes).
+	var pollC <-chan time.Time
+	lastFP := ""
+	if h.activity != nil {
+		pt := time.NewTicker(h.pollInterval)
+		defer pt.Stop()
+		pollC = pt.C
+		lastFP = h.activity() // seed so the first poll doesn't false-trigger a reset
+	}
+
 	for {
 		select {
 		case <-h.stop:
 			return
 		case <-h.reset:
-			if !t.Stop() {
-				select {
-				case <-t.C:
-				default:
-				}
+			resetTimer()
+		case <-pollC:
+			fp := h.activity()
+			if fp != "" && fp != lastFP {
+				lastFP = fp
+				resetTimer() // XO pane changed → the XO is active → defer the tick
 			}
-			t.Reset(h.interval)
 		case <-t.C:
-			// (A coincident pending Reset is benign: select may pick this tick,
-			// then the buffered reset is consumed next iteration and re-arms the
-			// timer to the same interval — no double-tick, no drift.)
-			// gate runs every interval (the watchdog observes liveness here);
-			// when it reports the XO down, skip the tick — don't wind a dead clock.
+			// (A coincident pending reset/poll is benign: select may pick this
+			// tick, then the buffered reset re-arms the timer next iteration.)
+			// gate runs here (the watchdog observes liveness); when the XO is
+			// down, skip the tick — don't wind a dead clock.
 			gated := h.gate != nil && h.gate()
 			if !gated && !h.busy(h.xoAgent) {
 				h.enqueue(Job{Agent: h.xoAgent, Message: h.prompt, Kind: "heartbeat"})

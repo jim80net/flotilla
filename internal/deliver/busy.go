@@ -18,18 +18,28 @@ import (
 // clock.
 var activeSpinner = regexp.MustCompile(`\(\d+s ·`)
 
+// CapturePane returns the visible contents of a tmux pane (`capture-pane -p`).
+// Shared by busy-detection and the heartbeat's pane-activity fingerprint.
+func CapturePane(target string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "tmux", "capture-pane", "-p", "-t", target).Output()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
 // Busy reports whether the agent's pane appears to be mid-turn (working), used
 // to idle-gate the heartbeat so a tick never interrupts in-flight work. It is
 // best-effort: a very brief turn between samples may read as idle, which only
 // costs one extra idempotent tick.
 func Busy(target string) (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "tmux", "capture-pane", "-p", "-t", target).Output()
+	out, err := CapturePane(target)
 	if err != nil {
 		return false, err
 	}
-	return parseBusy(string(out)), nil
+	return parseBusy(out), nil
 }
 
 // parseBusy is the testable core: true when the captured pane shows an active
