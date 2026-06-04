@@ -78,6 +78,9 @@ Near-term:
 - [ ] Delivery library: resolve agent → pane, inject, mirror to the bus,
       confirm receipt.
 - [ ] Chat-bus setup helper (create channel + per-agent identities).
+- [x] Operator-facing outbound path: `flotilla notify --from <agent> <message>`
+      posts straight to the operator on Discord under the agent's own webhook,
+      with no tmux injection (distinct from `send`, which wakes a pane).
 - [ ] Release-sign-off workflow.
 - [x] Docs + an end-to-end quickstart that a newcomer can run cold — [docs/quickstart.md](./docs/quickstart.md) (cold-tested: install, send, clock).
 

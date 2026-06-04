@@ -32,6 +32,8 @@ func run(args []string) error {
 	switch args[0] {
 	case "send":
 		return cmdSend(args[1:])
+	case "notify":
+		return cmdNotify(args[1:])
 	case "watch":
 		return cmdWatch(args[1:])
 	case "version", "-v", "--version":
@@ -51,6 +53,8 @@ func usage() {
 usage:
   flotilla send --from <sender> <agent> <message>     inline message
   flotilla send --from <sender> --file <path> <agent> message body from a file ('-' = stdin)
+  flotilla notify --from <agent> <message>            post to the operator under <agent>'s webhook (no tmux)
+  flotilla notify --from <agent> --file <path>        notify body from a file ('-' = stdin)
   flotilla watch                                      relay + XO heartbeat clock daemon
   flotilla version
   flotilla help
@@ -66,6 +70,19 @@ flags for 'send':
 The Discord audit mirror is best-effort: if it is unconfigured or fails, the
 message is still delivered and the command succeeds (with a warning), so a
 retry never double-delivers.
+
+flags for 'notify':
+  --from <name>     the agent whose webhook the message is posted under
+                    (default $FLOTILLA_SELF)
+  --file <path>     read the message body from a file ('-' for stdin)
+  --secrets <path>  secrets env file (default $FLOTILLA_SECRETS)
+
+notify is the operator-facing outbound path: it posts <message> directly to the
+operator on Discord, under the <agent>'s own webhook identity, and does NOT
+inject into any tmux pane. Use it when an agent (typically the XO) wants to
+reach the operator — as opposed to 'send', which wakes another agent's pane and
+mirrors the wake to the audit channel. The message must be ≤ 2000 characters
+(Discord's hard limit); a longer body is rejected (nothing is posted).
 
 flags for 'watch':
   --roster <path>         roster config (default ./flotilla.json or $FLOTILLA_ROSTER)
@@ -159,6 +176,71 @@ func cmdSend(args []string) error {
 	if err := mirror(*secretsPath, *from, agentName, message); err != nil {
 		fmt.Fprintln(os.Stderr, "flotilla: WARNING — audit mirror skipped (message WAS delivered): "+err.Error())
 	}
+	return nil
+}
+
+// cmdNotify posts a message directly to the operator on Discord, under the
+// sender agent's own webhook identity, with NO tmux injection. It is the
+// operator-facing outbound path — distinct from 'send', which wakes another
+// agent's pane and mirrors that wake to the audit channel. Reuses the exact
+// message-resolution (--file / stdin) and webhook-resolution that 'send' uses.
+func cmdNotify(args []string) error {
+	fs := flag.NewFlagSet("notify", flag.ContinueOnError)
+	from := fs.String("from", os.Getenv("FLOTILLA_SELF"), "agent whose webhook to post under")
+	file := fs.String("file", "", "read message body from this file ('-' for stdin)")
+	secretsPath := fs.String("secrets", os.Getenv("FLOTILLA_SECRETS"), "secrets env file path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *from == "" {
+		return fmt.Errorf("--from is required (or set $FLOTILLA_SELF)")
+	}
+	rest := fs.Args()
+	// Go's flag parser stops at the first positional, so a flag placed AFTER the
+	// message words is silently swallowed. Catch it with a clear message — the
+	// same guard 'send' uses (there is no agent positional here, so we check the
+	// whole tail).
+	for _, a := range rest {
+		if strings.HasPrefix(a, "-") {
+			return fmt.Errorf("unexpected flag %q after the message: put flags before the message, or use --file for a body that starts with '-'", a)
+		}
+	}
+	// --file - reads stdin; if stdin is an interactive terminal nothing is piped
+	// and io.ReadAll would block forever. Fail fast instead of hanging.
+	if *file == "-" {
+		if fi, statErr := os.Stdin.Stat(); statErr == nil && fi.Mode()&os.ModeCharDevice != 0 {
+			return fmt.Errorf("--file - requires piped stdin, but stdin is a terminal (nothing piped)")
+		}
+	}
+	message, err := resolveMessage(*file, rest, os.Stdin)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(message) == "" {
+		return fmt.Errorf("message is empty")
+	}
+	// Unlike the best-effort audit mirror (which truncates), this message IS the
+	// operator-facing content. Reject an over-length body cleanly rather than
+	// silently dropping the tail — the operator must see the whole message.
+	if n := len([]rune(message)); n > discord.MaxContentRunes {
+		return fmt.Errorf("message is %d chars; Discord's limit is %d — shorten it or split it (nothing was posted)", n, discord.MaxContentRunes)
+	}
+
+	if *secretsPath == "" {
+		return fmt.Errorf("secrets unset (set --secrets or $FLOTILLA_SECRETS)")
+	}
+	secrets, err := roster.LoadSecrets(*secretsPath)
+	if err != nil {
+		return err
+	}
+	hook, err := secrets.Webhook(*from)
+	if err != nil {
+		return err
+	}
+	if err := discord.Post(hook, *from, message); err != nil {
+		return err
+	}
+	fmt.Printf("notified operator as %s\n", *from)
 	return nil
 }
 

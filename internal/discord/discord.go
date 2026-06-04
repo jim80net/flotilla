@@ -25,6 +25,13 @@ import (
 // Exported so callers can warn when the audit copy will be truncated.
 const MaxContentRunes = 2000
 
+// UserAgent is sent on every webhook POST. Discord's edge (Cloudflare) rejects
+// requests carrying Go's default User-Agent ("Go-http-client/1.1") with HTTP 403
+// (Cloudflare error 1010, "the owner of this website has banned your browser"),
+// so an explicit, identifiable User-Agent is mandatory — empirically verified,
+// not cosmetic. See https://discord.com/developers/docs/reference#user-agent.
+const UserAgent = "flotilla (https://github.com/jim80net/flotilla)"
+
 // webhookPayload is the subset of Discord's execute-webhook body flotilla sends.
 type webhookPayload struct {
 	Username string `json:"username,omitempty"`
@@ -57,6 +64,9 @@ func Post(webhookURL, username, content string) error {
 		return fmt.Errorf("build webhook request for host %s: %w", parsed.Host, urlFreeCause(err))
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// Without an explicit User-Agent, Discord's Cloudflare edge returns 403
+	// (error 1010) against Go's default UA. This header is load-bearing.
+	req.Header.Set("User-Agent", UserAgent)
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
