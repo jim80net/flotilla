@@ -112,6 +112,29 @@ channel under per-agent webhook identities.
    # or: export FLOTILLA_SECRETS=$PWD/flotilla-secrets.env
    ```
 
+### Reach the operator directly: `flotilla notify`
+
+The audit mirror above is for *coordination* traffic — it always accompanies a
+tmux delivery to another agent. When an agent (typically the XO) wants to
+message **you, the operator**, on Discord — with no tmux pane involved — use
+`notify`. It posts the message body straight to that agent's own webhook and
+does nothing else:
+
+```sh
+# under the agent's own webhook identity, straight to the channel — no tmux:
+flotilla notify --from xo --secrets ./flotilla-secrets.env "release is green, your call"
+
+# multi-line bodies come from a file or stdin, like send:
+flotilla notify --from xo --secrets ./flotilla-secrets.env --file ./status.md
+echo "deploy finished" | flotilla notify --from xo --secrets ./flotilla-secrets.env --file -
+```
+
+It reuses the same per-agent webhooks (`FLOTILLA_WEBHOOK_<AGENT>`) and
+`--secrets` source as the audit mirror. The message must be ≤ 2000 characters
+(Discord's hard limit); a longer one is rejected cleanly and **nothing is
+posted** — shorten or split it. Unlike `send`'s best-effort mirror, a `notify`
+failure is a command failure (exit non-zero), because the post *is* the point.
+
 ## 5. Run the clock (self-continuing XO)
 
 The `watch` daemon heartbeats one agent — the **XO** — on an inactivity
