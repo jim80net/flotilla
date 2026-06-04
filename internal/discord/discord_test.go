@@ -33,6 +33,44 @@ func TestPostSendsPayloadAndSucceedsOn204(t *testing.T) {
 	}
 }
 
+func TestPostSetsExplicitUserAgent(t *testing.T) {
+	// Discord's Cloudflare edge 403s the Go default User-Agent (error 1010), so
+	// every webhook POST must carry an explicit, non-default UA. This is the
+	// regression guard for that empirically-verified requirement.
+	var gotUA string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUA = r.Header.Get("User-Agent")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	if err := Post(srv.URL, "agent", "hi"); err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	if gotUA != UserAgent {
+		t.Errorf("User-Agent = %q, want %q", gotUA, UserAgent)
+	}
+	if strings.HasPrefix(gotUA, "Go-http-client") {
+		t.Errorf("User-Agent is the Go default %q — Discord would 403 this", gotUA)
+	}
+}
+
+func TestPostContentTypeIsJSON(t *testing.T) {
+	var gotCT string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCT = r.Header.Get("Content-Type")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	if err := Post(srv.URL, "agent", "hi"); err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	if gotCT != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", gotCT)
+	}
+}
+
 func TestPostErrorsOnNon2xx(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
