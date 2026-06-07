@@ -78,15 +78,16 @@ func cmdWatch(args []string) error {
 		}
 		return deliver.Send(pane, message)
 	}, 16)
-	// Mirror what actually lands to the audit channel: relayed instructions in
-	// full, heartbeat ticks as a terse marker (the long prompt would be noise).
-	// Posted via webhook, which the gateway's feedback filter drops — no loop.
+	// Mirror relayed instructions to the audit channel in full. Heartbeat ticks
+	// are NOT mirrored: they fire every interval and a per-tick marker is pure
+	// noise in the operator's Discord channel (XO liveness is already covered by
+	// the ack file + the missed-ack down alert below). Posted via webhook, which
+	// the gateway's feedback filter drops — no loop.
 	injector.SetMirror(func(j watch.Job) {
 		if j.Kind == "heartbeat" {
-			post("flotilla-watch", "⏱ heartbeat → "+j.Agent)
-		} else {
-			post("flotilla-watch", "→ "+j.Agent+": "+j.Message)
+			return
 		}
+		post("flotilla-watch", "→ "+j.Agent+": "+j.Message)
 	})
 	injector.Start()
 	defer injector.Stop()
