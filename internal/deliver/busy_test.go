@@ -21,8 +21,8 @@ func TestParseBusy(t *testing.T) {
 		{"stale spinner in scrollback", "✻ Frosting… (3s · ↓ 25 tokens)\n● done\n\n\n\n\n\n\n❯ \n  ⏵⏵ auto mode on", false},
 	}
 	for _, c := range cases {
-		if got := parseBusy(c.captured); got != c.busy {
-			t.Errorf("%s: parseBusy = %v, want %v", c.name, got, c.busy)
+		if got := ParseBusy(c.captured); got != c.busy {
+			t.Errorf("%s: ParseBusy = %v, want %v", c.name, got, c.busy)
 		}
 	}
 }

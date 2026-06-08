@@ -85,6 +85,30 @@ func TestTitleMatches(t *testing.T) {
 	}
 }
 
+func TestClearKeysArgsIsLiteralSlash(t *testing.T) {
+	// A slash command must be injected as LITERAL keystrokes (-l), the verified
+	// method — NOT a bracketed paste (unverified for slash-command recognition).
+	got := clearKeysArgs("0:0.0", "/clear")
+	want := []string{"send-keys", "-t", "0:0.0", "-l", "--", "/clear"}
+	if len(got) != len(want) {
+		t.Fatalf("clearKeysArgs = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("clearKeysArgs = %v, want %v (differ at %d)", got, want, i)
+		}
+	}
+	var hasLiteral bool
+	for _, a := range got {
+		if a == "-l" {
+			hasLiteral = true
+		}
+	}
+	if !hasLiteral {
+		t.Error("clearKeysArgs missing -l: the slash would be parsed as key names, not typed literally")
+	}
+}
+
 func TestBufferNameIsPerProcess(t *testing.T) {
 	b := bufferName()
 	if !strings.HasPrefix(b, "flotilla-send-") {
