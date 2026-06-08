@@ -46,6 +46,6 @@
 
 ## 7. Docs + review + ship
 
-- [ ] 7.1 docs/watch-runbook.md + quickstart §5 + xo-doctrine.md: the change-detector, the enable flag, the liveness layers + ping modes, the $0-idle win; the continuation narrow-answer discipline + the settled/awaiting markers.
-- [ ] 7.2 gofmt/vet/build/`go test -race ./...` green; openspec --strict valid.
-- [ ] 7.3 /systems-review on the diff; PR; CI+cubic; enumerate inline findings; merge-ready.
+- [x] 7.1 docs/watch-runbook.md + quickstart §5 + xo-doctrine.md: the change-detector, the enable flag, the liveness layers + ping modes, the $0-idle win; the continuation narrow-answer discipline + the settled/awaiting markers.
+- [x] 7.2 gofmt/vet/build/`go test -race ./...` green; openspec --strict valid.
+- [x] 7.3 /systems-review on the diff (2 adversarial reviewers; HIGH vanished-pane + MEDIUM/LOW fixed); PR #22 (CI build-test + Socket green; cubic enumerated via gh api); merge-ready report to operator.
