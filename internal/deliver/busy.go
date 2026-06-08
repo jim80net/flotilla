@@ -30,24 +30,13 @@ func CapturePane(target string) (string, error) {
 	return string(out), nil
 }
 
-// Busy reports whether the agent's pane appears to be mid-turn (working), used
-// to idle-gate the heartbeat so a tick never interrupts in-flight work. It is
-// best-effort: a very brief turn between samples may read as idle, which only
-// costs one extra idempotent tick.
-func Busy(target string) (bool, error) {
-	out, err := CapturePane(target)
-	if err != nil {
-		return false, err
-	}
-	return parseBusy(out), nil
-}
-
-// parseBusy is the testable core: true when the captured pane shows an active
+// ParseBusy is the testable core: true when the captured pane shows an active
 // working marker. It scopes the scan to the bottom of the pane (the live
 // status/footer area): the active spinner is always at the bottom, and an old
 // "(Ns ·" line scrolled up in history would otherwise false-positive as busy
-// and wrongly skip a tick.
-func parseBusy(captured string) bool {
+// and wrongly skip a tick. Exported so a surface driver can classify pane state
+// from captured text.
+func ParseBusy(captured string) bool {
 	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
 	const tail = 8
 	if len(lines) > tail {

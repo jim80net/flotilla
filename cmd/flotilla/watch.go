@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/discord"
 	"github.com/jim80net/flotilla/internal/roster"
+	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/watch"
 )
 
@@ -35,10 +35,20 @@ func cmdWatch(args []string) error {
 	if err != nil {
 		return err
 	}
+	// Validate every agent's surface driver up front — an unknown surface is a
+	// clear startup error, never a silent mis-drive at the first tick/delivery.
+	for _, a := range cfg.Agents {
+		if _, ok := surface.Get(a.Surface); !ok {
+			return fmt.Errorf("agent %q: unknown surface %q (known: see internal/surface registry)", a.Name, a.Surface)
+		}
+	}
 	xo := cfg.XOAgent
 	if xo == "" {
 		xo = cfg.Agents[0].Name
 	}
+	// The XO's driver (for state assessment in the gate). Surfaces are validated
+	// above, so this lookup succeeds.
+	xoDrv, _ := surface.Get(agentSurface(cfg, xo))
 
 	interval := cfg.HeartbeatDur() // parsed + validated at load
 	if *ackPath == "" {
@@ -72,11 +82,15 @@ func cmdWatch(args []string) error {
 	alert := func(msg string) { post("flotilla-watch", "⚠️ "+msg) }
 
 	injector := watch.NewInjector(func(agent, message string) error {
+		drv, ok := surface.Get(agentSurface(cfg, agent))
+		if !ok {
+			return fmt.Errorf("unknown surface for agent %q", agent)
+		}
 		pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
 		if err != nil {
 			return err
 		}
-		return deliver.Send(pane, message)
+		return drv.Submit(pane, message)
 	}, 16)
 	// Mirror relayed instructions to the audit channel in full. Heartbeat ticks
 	// are NOT mirrored: they fire every interval and a per-tick marker is pure
@@ -104,20 +118,16 @@ func cmdWatch(args []string) error {
 			wd.Observe(ack.Acked(), true)
 			return true
 		}
-		crashed := false
-		if cmdName, err := deliver.PaneCommand(pane); err != nil || deliver.IsShell(cmdName) {
-			crashed = true
-		}
-		wd.Observe(ack.Acked(), crashed)
+		// The surface driver assesses rendered state (it performs its own pane
+		// captures). For claude-code this is byte-identical to the prior inline
+		// PaneCommand/IsShell + Busy logic: Shell ⇒ crashed, Working ⇒ busy,
+		// capture-error ⇒ Idle (fail-open).
+		st := xoDrv.Assess(pane)
+		wd.Observe(ack.Acked(), st == surface.StateShell)
 		if wd.Down() {
 			return true
 		}
-		b, err := deliver.Busy(pane)
-		if err != nil {
-			log.Printf("flotilla watch: busy-check failed for %q: %v", xo, err)
-			return false // fail-open: an unreadable pane reads as not-busy
-		}
-		return b
+		return st == surface.StateWorking
 	}
 
 	prompt := cfg.HeartbeatMessage
@@ -185,4 +195,14 @@ func agentTitle(cfg *roster.Config, name string) string {
 		return a.Title()
 	}
 	return name
+}
+
+// agentSurface returns the surface name configured for an agent (empty ⇒ the
+// default driver). An unknown name falls back to "" so surface.Get resolves the
+// default rather than erroring on a non-roster name.
+func agentSurface(cfg *roster.Config, name string) string {
+	if a, err := cfg.Agent(name); err == nil {
+		return a.Surface
+	}
+	return ""
 }
