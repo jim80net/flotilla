@@ -135,3 +135,30 @@ func TestLoadWatchConfigValidation(t *testing.T) {
 		t.Errorf("heartbeat_interval \"0\" (disabled) should be valid: %v", err)
 	}
 }
+
+func TestLoadChangeDetectorValidation(t *testing.T) {
+	// change_detector with a positive interval + valid ping mode is accepted.
+	cfg, err := Load(writeTemp(t, `{"agents":[{"name":"hydra-ops"}],"xo_agent":"hydra-ops","heartbeat_interval":"20m","change_detector":true,"liveness_ping_mode":"none"}`))
+	if err != nil {
+		t.Fatalf("valid change_detector config rejected: %v", err)
+	}
+	if !cfg.ChangeDetector || cfg.LivenessPingMode != "none" {
+		t.Errorf("change_detector fields not loaded: %+v", cfg)
+	}
+	// change_detector with no interval → error (it would never tick).
+	if _, err := Load(writeTemp(t, `{"agents":[{"name":"hydra-ops"}],"change_detector":true}`)); err == nil {
+		t.Error("change_detector without heartbeat_interval = nil error, want error")
+	}
+	// change_detector with disabled interval ("0") → error too.
+	if _, err := Load(writeTemp(t, `{"agents":[{"name":"hydra-ops"}],"change_detector":true,"heartbeat_interval":"0"}`)); err == nil {
+		t.Error("change_detector with heartbeat_interval \"0\" = nil error, want error")
+	}
+	// invalid liveness_ping_mode → error.
+	if _, err := Load(writeTemp(t, `{"agents":[{"name":"hydra-ops"}],"heartbeat_interval":"20m","liveness_ping_mode":"sometimes"}`)); err == nil {
+		t.Error("invalid liveness_ping_mode = nil error, want error")
+	}
+	// empty liveness_ping_mode is valid (defaults to none at use).
+	if _, err := Load(writeTemp(t, `{"agents":[{"name":"hydra-ops"}],"heartbeat_interval":"20m"}`)); err != nil {
+		t.Errorf("empty liveness_ping_mode should be valid: %v", err)
+	}
+}

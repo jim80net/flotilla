@@ -87,6 +87,10 @@ Near-term:
       `flotilla notify` and stays quiet on heartbeat acks / routine inter-agent
       traffic, so the operator ↔ XO conversation is readable from anywhere:
       [docs/xo-doctrine.md](./docs/xo-doctrine.md).
+- [x] `flotilla watch` clock + liveness watchdog + inbound relay, with an opt-in
+      **change-detector** (heartbeat v2) that wakes the XO only on a material
+      change and rotates its context after each handling — an idle fleet costs
+      nothing: [docs/watch-runbook.md](./docs/watch-runbook.md).
 - [ ] Release-sign-off workflow.
 - [x] Docs + an end-to-end quickstart that a newcomer can run cold — [docs/quickstart.md](./docs/quickstart.md) (cold-tested: install, send, clock).
 

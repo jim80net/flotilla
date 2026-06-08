@@ -160,6 +160,104 @@ flotilla ships **A as the default.** B is deferred; if it lands later it will be
 opt-in and additive, not a replacement for the XO knowing how to address its
 operator directly.
 
+## The change-detector (heartbeat v2) and the discipline it demands
+
+When a deployment enables the **change-detector** (`change_detector: true` in the
+roster — opt-in), `flotilla watch` stops waking the XO every interval with a
+generic prompt. Instead it watches the fleet deterministically and wakes the XO
+**only on a material change** (a desk finished a turn or crashed, or the state
+tracker changed), and **rotates the XO's context after each settled handling**.
+An idle fleet costs nothing; every handling runs in fresh context. This keeps the
+self-continuing clock cheap and inference sharp — but, exactly as with any
+fresh-context model, it is a **contract the XO must hold**, plus two markers it
+maintains.
+
+### The state-externalization contract (non-negotiable when this is on)
+
+Because the XO's context is rotated between handlings, **anything you will need
+after the next rotation must be written to durable state — never held only in
+context.** Keep `.flotilla-state.md` (the top-level goal + task tracker) current:
+the goal, the open tasks, what you just did, what's blocked and why, and the
+operator-decision queue. A rotated XO re-reads it and continues. If you hold
+progress only in your head, the next rotation loses it. (`watch` never rotates you
+mid-turn — only after you settle to idle — but it *will* wipe a quiescent task's
+working memory, which is fine *if and only if* you externalized the progress.)
+
+### Self-continuation — the narrow-answer discipline
+
+When you finish a turn, the detector wakes you once with a **continuation
+prompt**: advance the next clear, **already-authorized** step if one remains
+(read your durable sources in order — the tracker, the active openspec change's
+unchecked tasks, the roadmap) — and if nothing authorized remains, **reply idle,
+do NOT manufacture work, and signal idle** (see the settle marker below). A task
+blocked only from landing (a push gate, a pending review) is **NOT idle** —
+advance it locally, then surface the blocker in one line. The detector rotates
+your context between steps, so always reason from durable state, not the prior
+turn's conversation.
+
+A code-level cap (`--max-self-continuations`, default 3) bounds a runaway: after
+that many consecutive continuations with no external change and no idle signal,
+the detector forces you settled regardless. The cap is the backstop; the
+narrow-answer discipline is what keeps you off it.
+
+### The settle (idle) marker — exact lifecycle
+
+The fast way to tell the detector you are idle is the **settle marker**
+(`watch --settled-file`, default `<roster-dir>/flotilla-xo-settled`):
+
+- **When a continuation wake finds nothing authorized to advance**, reply idle
+  and `touch <settled-file>`. The detector consumes the marker, records you
+  settled, and **stops self-continuation waking until an external material
+  change** (a desk transition, a tracker change) **or an operator message**.
+- You do **not** remove it yourself — the detector consumes it. An external
+  change or an operator message also clears the settled state automatically, so
+  you re-engage on real work without any bookkeeping.
+
+If you forget to touch it, the cap still settles you within a few cheap cycles —
+the marker just settles you on the *first* idle turn instead.
+
+### The awaiting-operator marker — exact lifecycle
+
+The context rotate is suppressed while you are **awaiting an operator reply**, so
+an outstanding question is never wiped out from under you. This is the
+awaiting-veto marker (`watch --awaiting-file`, default
+`<roster-dir>/flotilla-xo-awaiting`) that **you maintain as one discipline with
+your operator-decision queue** — there is no separate bookkeeping:
+
+- **SET the marker at the exact moment you pose a question to the operator** —
+  the same act as adding the item to the operator-decision queue in
+  `.flotilla-state.md`. Posing the question and creating the marker are one step:
+  `touch <awaiting-file>`. If multiple questions are open, the marker simply
+  stays present.
+- **REMOVE the marker the moment the question is resolved** — when the operator's
+  answer arrives, OR when you have durably recorded the answer/decision into
+  `.flotilla-state.md` (whichever comes first). When the last open question is
+  resolved, `rm -f <awaiting-file>`.
+
+While the marker exists, `watch` handles changes **without** rotating your
+context (the outstanding-question thread is preserved). A forgotten (stale)
+marker only degrades to "no rotation" — never to a wrongful rotate — so erring
+toward leaving it set is safe; the cost is just lost token savings until you
+clear it.
+
+### Wiring (opt-in)
+
+```jsonc
+// roster (committable):
+{ "xo_agent": "hydra-ops", "heartbeat_interval": "20m",
+  "change_detector": true, "liveness_ping_mode": "none" }
+```
+
+Permit, in the XO's allow-list (alongside the ack `touch`): `tmux send-keys` (the
+`/clear` rotate path) and the marker writes (`touch`/`rm` of the settle and
+awaiting files). Add the lines to the XO's standing instructions:
+
+> When you finish a turn under the change-detector, advance the next
+> already-authorized step from durable state, or reply idle and
+> `touch <settled-file>` — never manufacture work. The moment you ask the
+> operator a question, `touch <awaiting-file>`; remove it when the question is
+> resolved.
+
 ## See also
 
 - [quickstart.md §4 → "Reach the operator directly"](./quickstart.md#reach-the-operator-directly-flotilla-notify)

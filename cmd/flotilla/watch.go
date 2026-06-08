@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/jim80net/flotilla/internal/deliver"
@@ -26,7 +29,15 @@ func cmdWatch(args []string) error {
 	rosterPath := fs.String("roster", rosterDefault(), "roster config path")
 	secretsPath := fs.String("secrets", os.Getenv("FLOTILLA_SECRETS"), "secrets env file path (for the down-alert webhook)")
 	ackPath := fs.String("ack-file", os.Getenv("FLOTILLA_ACK_FILE"), "XO liveness ack file (the XO touches it)")
-	maxMissed := fs.Int("max-missed-acks", 3, "consecutive missed acks before a down alert")
+	maxMissed := fs.Int("max-missed-acks", 3, "consecutive missed acks (K) before a down alert")
+	// change-detector (heartbeat v2) paths + tuning; consulted only when the
+	// roster sets change_detector: true.
+	snapshotPath := fs.String("snapshot-file", os.Getenv("FLOTILLA_SNAPSHOT_FILE"), "change-detector snapshot file (default <roster-dir>/flotilla-detector-state.json)")
+	awaitingPath := fs.String("awaiting-file", os.Getenv("FLOTILLA_AWAITING_FILE"), "awaiting-operator veto marker (default <roster-dir>/flotilla-xo-awaiting)")
+	settledPath := fs.String("settled-file", os.Getenv("FLOTILLA_SETTLED_FILE"), "XO settle (idle) marker (default <roster-dir>/flotilla-xo-settled)")
+	trackerPath := fs.String("tracker-file", os.Getenv("FLOTILLA_TRACKER_FILE"), "state-tracker file the detector hashes (default <roster-dir>/.flotilla-state.md)")
+	maxQuiet := fs.Int("max-quiet-intervals", 0, "change-detector liveness ping cadence N in intervals (0 ⇒ mode default)")
+	maxSelfCont := fs.Int("max-self-continuations", 3, "change-detector cap on consecutive XO self-continuations with no external change")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -51,8 +62,21 @@ func cmdWatch(args []string) error {
 	xoDrv, _ := surface.Get(agentSurface(cfg, xo))
 
 	interval := cfg.HeartbeatDur() // parsed + validated at load
+	rosterDir := filepath.Dir(*rosterPath)
 	if *ackPath == "" {
-		*ackPath = filepath.Join(filepath.Dir(*rosterPath), "flotilla-xo-alive")
+		*ackPath = filepath.Join(rosterDir, "flotilla-xo-alive")
+	}
+	if *snapshotPath == "" {
+		*snapshotPath = filepath.Join(rosterDir, "flotilla-detector-state.json")
+	}
+	if *awaitingPath == "" {
+		*awaitingPath = filepath.Join(rosterDir, "flotilla-xo-awaiting")
+	}
+	if *settledPath == "" {
+		*settledPath = filepath.Join(rosterDir, "flotilla-xo-settled")
+	}
+	if *trackerPath == "" {
+		*trackerPath = filepath.Join(rosterDir, ".flotilla-state.md")
 	}
 
 	// Load secrets once: the bot token (gateway) and the alert/notice webhook.
@@ -98,7 +122,10 @@ func cmdWatch(args []string) error {
 	// the ack file + the missed-ack down alert below). Posted via webhook, which
 	// the gateway's feedback filter drops — no loop.
 	injector.SetMirror(func(j watch.Job) {
-		if j.Kind == "heartbeat" {
+		// Heartbeat ticks and change-detector wakes fire automatically; a per-wake
+		// marker is pure noise in the operator's channel (XO liveness is covered by
+		// the ack file + the down alert). Only relayed operator traffic is mirrored.
+		if j.Kind == "heartbeat" || j.Kind == "detector" {
 			return
 		}
 		post("flotilla-watch", "→ "+j.Agent+": "+j.Message)
@@ -106,59 +133,158 @@ func cmdWatch(args []string) error {
 	injector.Start()
 	defer injector.Stop()
 
-	wd := watch.NewWatchdog(*maxMissed, alert)
 	ack := watch.NewAckWatcher(*ackPath)
+	ackInstr := "\n(To ack you are alive, run: touch " + *ackPath + ")"
 
-	// gate runs every interval: resolve the XO pane ONCE, observe liveness
-	// (crash + ack), and skip the tick while the XO is down OR busy. A resolve
-	// failure is treated as "down", never fatal to the daemon.
-	gate := func() bool {
-		pane, err := deliver.ResolvePane(agentTitle(cfg, xo))
-		if err != nil {
-			wd.Observe(ack.Acked(), true)
-			return true
+	// onAccepted is the relay's clock hook: legacy resets the heartbeat timer; v2
+	// clears the detector's settled flag when the message targets the XO.
+	var onAccepted func(string)
+
+	if cfg.ChangeDetector {
+		// ---- heartbeat v2: the change-detector (wake only on a material change) ----
+		desks := make([]string, 0, len(cfg.Agents))
+		for _, a := range cfg.Agents {
+			desks = append(desks, a.Name)
 		}
-		// The surface driver assesses rendered state (it performs its own pane
-		// captures). For claude-code this is byte-identical to the prior inline
-		// PaneCommand/IsShell + Busy logic: Shell ⇒ crashed, Working ⇒ busy,
-		// capture-error ⇒ Idle (fail-open).
-		st := xoDrv.Assess(pane)
-		wd.Observe(ack.Acked(), st == surface.StateShell)
-		if wd.Down() {
-			return true
+		awaiting := watch.NewAwaitingMarker(*awaitingPath)
+		settled := watch.NewSettledMarker(*settledPath)
+
+		// The continuation prompt carries the narrow-answer discipline (advance the
+		// next AUTHORIZED step or reply idle — never manufacture work) and tells the
+		// XO how to signal idle (touch the settle marker). Context is rotated between
+		// steps, so it instructs reading durable state rather than this conversation.
+		continuationPrompt := "[flotilla change-detector] You just finished a turn. Advance the next clear, " +
+			"ALREADY-AUTHORIZED step if one remains — reading durable state, not memory: (1) the goal+task tracker " +
+			*trackerPath + "; (2) the active openspec change's unchecked tasks; (3) the roadmap/README. A task " +
+			"blocked only from landing (a push gate, a pending review) is NOT idle — advance it locally, then " +
+			"surface the blocker in one line. If nothing AUTHORIZED remains, reply 'idle', do NOT manufacture " +
+			"work, and signal idle by running: touch " + *settledPath + ". (Your context is rotated between steps " +
+			"— rely on durable state, not this conversation.)" + ackInstr
+
+		wake := func(kind watch.WakeKind, reasons []string) {
+			var body string
+			switch kind {
+			case watch.WakeContinuation:
+				body = continuationPrompt
+			case watch.WakePing:
+				body = "[flotilla change-detector] Liveness check — reply with a one-line ack only; take no other action." + ackInstr
+			default: // WakeMaterial
+				body = "[flotilla change-detector] Material change(s) detected: " + strings.Join(reasons, "; ") +
+					".\nCheck in on the affected desk(s) and advance any authorized coordination. If nothing is " +
+					"actionable, reply idle and signal it by running: touch " + *settledPath + "." + ackInstr
+			}
+			injector.Enqueue(watch.Job{Agent: xo, Message: body, Kind: "detector"})
 		}
-		return st == surface.StateWorking
+
+		det := watch.NewDetector(watch.DetectorConfig{
+			XOAgent:  xo,
+			Desks:    desks,
+			Interval: interval,
+			Assess: func(agent string) surface.State {
+				drv, ok := surface.Get(agentSurface(cfg, agent))
+				if !ok {
+					return surface.StateUnknown
+				}
+				pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
+				if err != nil {
+					// The pane titled for this agent is gone (the session died and
+					// the pane closed, or its title no longer matches) — that is a
+					// crash, equivalent to a pane that dropped back to a shell. Map
+					// it to Shell so the detector's two-consecutive debounce absorbs a
+					// transient resolve blip but a persistent vanish still crash-alerts
+					// the XO immediately (preserving — and bettering — the legacy gate,
+					// which alerted on the very first resolve failure).
+					return surface.StateShell
+				}
+				return drv.Assess(pane)
+			},
+			TrackerHash: trackerHasher(*trackerPath),
+			AckAge:      ack.Age,
+			Wake:        wake,
+			Rotate: func() error {
+				pane, err := deliver.ResolvePane(agentTitle(cfg, xo))
+				if err != nil {
+					return err
+				}
+				return surface.RotateContext(xoDrv, pane)
+			},
+			Awaiting:            awaiting.Present,
+			SettleConsume:       settled.Consume,
+			Alert:               alert,
+			MaxMissedAcks:       *maxMissed,
+			MaxQuietIntervals:   *maxQuiet,
+			LivenessPingMode:    cfg.LivenessPingMode,
+			MaxSelfContinuation: *maxSelfCont,
+		}, *snapshotPath)
+		det.Start()
+		defer det.Stop()
+		onAccepted = func(target string) {
+			if target == xo {
+				det.OperatorWake() // an operator message re-engages a settled XO
+			}
+		}
+		mode := cfg.LivenessPingMode
+		if mode == "" {
+			mode = "none"
+		}
+		fmt.Printf("flotilla watch: change-detector running — XO=%s interval=%s ping-mode=%s ack=%s snapshot=%s\n",
+			xo, interval, mode, *ackPath, *snapshotPath)
+	} else {
+		// ---- legacy always-wake heartbeat ----
+		wd := watch.NewWatchdog(*maxMissed, alert)
+
+		// gate runs every interval: resolve the XO pane ONCE, observe liveness
+		// (crash + ack), and skip the tick while the XO is down OR busy. A resolve
+		// failure is treated as "down", never fatal to the daemon.
+		gate := func() bool {
+			pane, err := deliver.ResolvePane(agentTitle(cfg, xo))
+			if err != nil {
+				wd.Observe(ack.Acked(), true)
+				return true
+			}
+			// The surface driver assesses rendered state (it performs its own pane
+			// captures). For claude-code this is byte-identical to the prior inline
+			// PaneCommand/IsShell + Busy logic: Shell ⇒ crashed, Working ⇒ busy,
+			// capture-error ⇒ Idle (fail-open).
+			st := xoDrv.Assess(pane)
+			wd.Observe(ack.Acked(), st == surface.StateShell)
+			if wd.Down() {
+				return true
+			}
+			return st == surface.StateWorking
+		}
+
+		prompt := cfg.HeartbeatMessage
+		if prompt == "" {
+			prompt = watch.DefaultHeartbeatPrompt
+		}
+		prompt += ackInstr
+
+		// busy-gating is handled inside gate (single pane resolve per cycle), so the
+		// heartbeat's own busy predicate is nil here.
+		hb := watch.NewHeartbeat(interval, xo, prompt, injector.Enqueue, nil)
+		hb.SetGate(gate)
+		// Activity probe: fingerprint the XO pane (its captured contents). Any change
+		// — the XO taking a turn, emitting output — resets the idle clock, so the tick
+		// fires only after genuine inactivity, not on a fixed wall-clock. Returning ""
+		// (pane unresolved/unreadable) is treated as no-activity and never false-resets.
+		hb.SetActivityProbe(func() string {
+			pane, err := deliver.ResolvePane(agentTitle(cfg, xo))
+			if err != nil {
+				return ""
+			}
+			out, err := deliver.CapturePane(pane)
+			if err != nil {
+				return ""
+			}
+			return out
+		})
+		hb.Start()
+		defer hb.Stop()
+		onAccepted = func(string) { hb.Reset() }
+
+		fmt.Printf("flotilla watch: clock running — XO=%s interval=%s ack=%s\n", xo, interval, *ackPath)
 	}
-
-	prompt := cfg.HeartbeatMessage
-	if prompt == "" {
-		prompt = watch.DefaultHeartbeatPrompt
-	}
-	prompt += "\n(To ack you are alive, run: touch " + *ackPath + ")"
-
-	// busy-gating is handled inside gate (single pane resolve per cycle), so the
-	// heartbeat's own busy predicate is nil here.
-	hb := watch.NewHeartbeat(interval, xo, prompt, injector.Enqueue, nil)
-	hb.SetGate(gate)
-	// Activity probe: fingerprint the XO pane (its captured contents). Any change
-	// — the XO taking a turn, emitting output — resets the idle clock, so the tick
-	// fires only after genuine inactivity, not on a fixed wall-clock. Returning ""
-	// (pane unresolved/unreadable) is treated as no-activity and never false-resets.
-	hb.SetActivityProbe(func() string {
-		pane, err := deliver.ResolvePane(agentTitle(cfg, xo))
-		if err != nil {
-			return ""
-		}
-		out, err := deliver.CapturePane(pane)
-		if err != nil {
-			return ""
-		}
-		return out
-	})
-	hb.Start()
-	defer hb.Stop()
-
-	fmt.Printf("flotilla watch: clock running — XO=%s interval=%s ack=%s\n", xo, interval, *ackPath)
 
 	// Inbound relay (optional): needs a channel id + bot token (and the bot's
 	// privileged Message Content intent) AND an operator_user_id — without the
@@ -166,7 +292,7 @@ func cmdWatch(args []string) error {
 	// claim "relay active" while silently dropping all traffic.
 	switch {
 	case cfg.ChannelID != "" && botToken != "" && cfg.OperatorUserID != "":
-		rel := watch.NewRelay(cfg, xo, injector, hb, func(msg string) { post("flotilla-watch", msg) })
+		rel := watch.NewRelay(cfg, xo, injector, onAccepted, func(msg string) { post("flotilla-watch", msg) })
 		gw, err := discord.NewGateway(botToken, cfg.ChannelID, rel.Handle)
 		if err != nil {
 			return err
@@ -187,6 +313,22 @@ func cmdWatch(args []string) error {
 	<-ctx.Done()
 	fmt.Println("\nflotilla watch: shutting down")
 	return nil
+}
+
+// trackerHasher returns a content-hash function for the state-tracker file the
+// change-detector watches. A change in the hash is a material signal. Absent OR
+// unreadable both report ok=false (no update) so the detector carries the prior
+// hash forward and treats it as unchanged (systems-review M4: absent → no-signal,
+// read-error → treat-unchanged — never a wake-storm).
+func trackerHasher(path string) func() (string, bool) {
+	return func() (string, bool) {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return "", false
+		}
+		sum := sha256.Sum256(raw)
+		return hex.EncodeToString(sum[:]), true
+	}
 }
 
 // agentTitle returns the tmux pane title to resolve for an agent name.

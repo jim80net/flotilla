@@ -21,6 +21,27 @@ const (
 	StateErrored                // surfaced an error state (reserved; per-surface)
 )
 
+// String renders a State as a short lowercase label for logs and the
+// detector's targeted wake prompts (e.g. "v12-dev: entered shell").
+func (s State) String() string {
+	switch s {
+	case StateShell:
+		return "shell"
+	case StateWorking:
+		return "working"
+	case StateIdle:
+		return "idle"
+	case StateAwaitingInput:
+		return "awaiting-input"
+	case StateAwaitingApproval:
+		return "awaiting-approval"
+	case StateErrored:
+		return "errored"
+	default:
+		return "unknown"
+	}
+}
+
 // Strategy is how a surface rotates (resets) its context.
 type Strategy int
 

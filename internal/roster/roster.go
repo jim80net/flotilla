@@ -62,6 +62,20 @@ type Config struct {
 	// when empty.
 	HeartbeatMessage string `json:"heartbeat_message,omitempty"`
 
+	// ChangeDetector opts into heartbeat v2: instead of waking the XO every
+	// interval with a generic prompt, the detector wakes it ONLY on a material
+	// change (a desk transition or a tracker change) and rotates its context
+	// after each settled handling. An idle fleet costs nothing. Opt-in (default
+	// false → the legacy always-wake heartbeat). Requires heartbeat_interval > 0.
+	ChangeDetector bool `json:"change_detector,omitempty"`
+	// LivenessPingMode tunes the v2 liveness safety ping WITHOUT a rebuild
+	// (the C1b tradeoff): "none" (default — true $0-idle, a wide safety ping at
+	// ~2K×interval, accepting a ~2K idle-fleet wedge window), "interval" (a cheap
+	// ack-ping every K-1 intervals — the strict K×interval window), or
+	// "consecutive" (ping every K-1, alert after ~2 missed pings — the middle
+	// ground). Empty ⇒ "none". Only consulted when ChangeDetector is on.
+	LivenessPingMode string `json:"liveness_ping_mode,omitempty"`
+
 	// heartbeatDur is HeartbeatInterval parsed once at load (0 = disabled), so
 	// consumers get a typed value instead of re-parsing the string.
 	heartbeatDur time.Duration
@@ -110,6 +124,16 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("roster %q: invalid heartbeat_interval %q: %w", path, c.HeartbeatInterval, err)
 		}
 		c.heartbeatDur = d
+	}
+	switch c.LivenessPingMode {
+	case "", "none", "interval", "consecutive":
+	default:
+		return nil, fmt.Errorf("roster %q: invalid liveness_ping_mode %q (want none|interval|consecutive)", path, c.LivenessPingMode)
+	}
+	// The change-detector ticks on heartbeat_interval; without one it would never
+	// run (and never check liveness). Refuse to start rather than silently no-op.
+	if c.ChangeDetector && c.heartbeatDur <= 0 {
+		return nil, fmt.Errorf("roster %q: change_detector requires a positive heartbeat_interval", path)
 	}
 	return &c, nil
 }
