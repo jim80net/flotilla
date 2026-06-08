@@ -1,0 +1,56 @@
+name: CI
+
+# Build, vet, format-check, and race-test every push to main and every PR, so a
+# build break, a vet finding, an unformatted file, or a failing test is caught
+# before merge. Until this existed, flotilla PRs ran only Socket Security + cubic
+# — none of which compile or test the Go code (issue #16).
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: CI only needs to read the repo.
+permissions:
+  contents: read
+
+# A newer push to the same branch/PR cancels the in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      # Actions are pinned to immutable commit SHAs (supply-chain hardening — a
+      # moving tag like @v4 could be repointed to malicious code); the trailing
+      # comment records the human-readable version for readability/upgrades.
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          # Track the version in go.mod (the `go` directive) so CI never drifts
+          # from the module's declared toolchain.
+          go-version-file: go.mod
+          # actions/setup-go caches the module and build caches by default.
+
+      - name: gofmt (fail on any unformatted file)
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            echo "Run: gofmt -w ."
+            exit 1
+          fi
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test (race detector)
+        run: go test -race ./...
