@@ -86,15 +86,25 @@ mirrors the wake to the audit channel. The message must be ≤ 2000 characters
 (Discord's hard limit); a longer body is rejected (nothing is posted).
 
 flags for 'watch':
-  --roster <path>         roster config (default ./flotilla.json or $FLOTILLA_ROSTER)
-  --secrets <path>        secrets env file: relay bot token + down-alert webhook (default $FLOTILLA_SECRETS)
-  --ack-file <path>       XO liveness ack file the XO touches (default $FLOTILLA_ACK_FILE, else <roster-dir>/flotilla-xo-alive)
-  --max-missed-acks <n>   consecutive missed acks before a down-alert (default 3)
+  --roster <path>             roster config (default ./flotilla.json or $FLOTILLA_ROSTER)
+  --secrets <path>            secrets env file: relay bot token + down-alert webhook (default $FLOTILLA_SECRETS)
+  --ack-file <path>           XO liveness ack file the XO touches (default $FLOTILLA_ACK_FILE, else <roster-dir>/flotilla-xo-alive)
+  --max-missed-acks <n>       missed-ack window K, in intervals, before a down-alert (default 3)
 
-watch runs the XO heartbeat clock + liveness watchdog (needs neither Discord nor
-secrets), and adds the inbound relay when channel_id + operator_user_id + a bot
-token are configured. The heartbeat target and interval come from the roster
-(xo_agent, heartbeat_interval).`)
+  change-detector (heartbeat v2 — enabled by roster change_detector: true):
+  --snapshot-file <path>      detector snapshot (default $FLOTILLA_SNAPSHOT_FILE, else <roster-dir>/flotilla-detector-state.json)
+  --awaiting-file <path>      awaiting-operator veto marker (default $FLOTILLA_AWAITING_FILE, else <roster-dir>/flotilla-xo-awaiting)
+  --settled-file <path>       XO settle/idle marker (default $FLOTILLA_SETTLED_FILE, else <roster-dir>/flotilla-xo-settled)
+  --tracker-file <path>       state-tracker file the detector hashes (default $FLOTILLA_TRACKER_FILE, else <roster-dir>/.flotilla-state.md)
+  --max-quiet-intervals <n>   liveness ping cadence N, in intervals (0 ⇒ ping-mode default)
+  --max-self-continuations <n> cap on consecutive XO self-continuations with no external change (default 3)
+
+watch runs the XO clock + liveness watchdog (needs neither Discord nor secrets),
+and adds the inbound relay when channel_id + operator_user_id + a bot token are
+configured. The clock target and interval come from the roster (xo_agent,
+heartbeat_interval). By default the clock is the legacy always-wake heartbeat;
+set change_detector: true (with liveness_ping_mode none|interval|consecutive) to
+wake the XO only on a material change — an idle fleet then costs nothing.`)
 }
 
 func rosterDefault() string {

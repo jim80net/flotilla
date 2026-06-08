@@ -51,10 +51,91 @@ Omit `channel_id` (or the bot token) to run the heartbeat + watchdog with no
 Discord relay — useful to give the XO a self-continuing clock before the relay
 is configured.
 
+## Change-detector (heartbeat v2 — opt-in)
+
+The legacy clock wakes the XO **every interval** with a generic "do your duties"
+prompt — so the XO burns context on every tick even when nothing changed. Set
+`change_detector: true` in the roster to switch to **heartbeat v2**: a
+deterministic, no-LLM detector that each tick snapshots the fleet (every desk's
+assessed surface state + the state-tracker file's hash), diffs it against the
+prior snapshot, and **wakes the XO only on a material change** — with a prompt
+naming what changed. An idle fleet costs **$0/tick**, and the XO's context is
+rotated after each settled handling (via the surface driver: claude-code →
+`/clear`), so even a busy fleet never accumulates XO context.
+
+```jsonc
+// roster:
+{ "xo_agent": "hydra-ops", "heartbeat_interval": "20m",
+  "change_detector": true, "liveness_ping_mode": "none" }
+```
+
+**What counts as material** (v1): a desk transition INTO an actionable state
+(`shell` = crashed, or — when a driver emits them — `errored`/`awaiting-input`/
+`awaiting-approval`), a desk `working → idle` ("finished a turn"), or a change in
+the state-tracker file's hash. A desk merely *resuming* work (`→ working`) is
+deliberately NOT material — that keeps the wake set tight. The XO's own
+`working → idle` feeds **self-continuation** (below), never a desk-finished wake.
+
+**Self-continuation + the markers.** On the XO's own `working → idle` the detector
+wakes it once to advance the next authorized step, rotating context between steps;
+the XO signals "nothing to do" with the **settle marker** and signals "I'm
+awaiting the operator" with the **awaiting marker** (which vetoes the rotate). A
+hard cap (`--max-self-continuations`, default 3) bounds a runaway. The exact
+lifecycle the XO must follow is in [`xo-doctrine.md`](./xo-doctrine.md#the-change-detector-heartbeat-v2-and-the-discipline-it-demands)
+— wire it into the XO's standing instructions, and permit the marker `touch`/`rm`
+plus `tmux send-keys` (the rotate path) in the XO's allow-list.
+
+**Liveness ping mode** (`liveness_ping_mode`, the C1b tradeoff) — switchable
+without a rebuild:
+
+| mode | idle cost | wedge-detection window | use when |
+|------|-----------|------------------------|----------|
+| `none` *(default)* | true $0-idle (a wide safety ping only at ~2K×interval) | ~2K×interval on a truly-idle fleet (a **crash is still immediate**) | you want the cheapest idle; a wedged XO on an idle fleet has nothing to miss |
+| `interval` | a cheap ack-only ping every K-1 intervals | strict **K×interval** | you want the legacy-tight wedge window and don't mind a ping per idle interval |
+| `consecutive` | a ping every K-1 intervals | ~K-1+2 intervals (2 missed pings) | a middle ground |
+
+`K` is `--max-missed-acks` (default 3); `N` (the ping cadence) defaults from the
+mode and can be overridden with `--max-quiet-intervals`. The default `none`
+honors the project ruling that the $0-idle win is the point and the
+slow-idle-wedge cost is near-zero; flip it per deployment if you need the strict
+window.
+
+> **`interval`/`consecutive` assume the XO's ack round-trip fits in under one
+> interval.** In `interval` mode the ping fires at `K-1` and the alert at `K`, so
+> only ~1 interval is left for the wake → turn → `touch` → next-tick round-trip; a
+> healthy-but-slow XO on a short interval can then false-alert "wedged." If you
+> run a short interval, widen the gap with `--max-quiet-intervals` (a smaller `N`)
+> or a larger `--max-missed-acks` (a larger `K`) — or stay on `none`, where the
+> safety ping at `2K` precedes the alert at `2K+1` with a full window of slack.
+
+**Detector files** (all default under the roster dir; override via flag or env):
+`--snapshot-file` (the diff state), `--awaiting-file`, `--settled-file`,
+`--tracker-file` (`.flotilla-state.md`). The snapshot is written atomically and
+read fail-safe: a missing/corrupt snapshot cold-starts (one conservative wake);
+a persistent write failure raises a loud alert and degrades to in-memory-only
+(never wake-every-tick). Liveness state is kept independent of the snapshot, so a
+snapshot outage can never blind the watchdog.
+
+The legacy always-wake heartbeat is unchanged when `change_detector` is unset.
+
 ## Down alerts
 
-When the XO misses `--max-missed-acks` consecutive acks (default 3) or its pane
-falls back to a shell, `flotilla watch` posts a one-line `⚠️ XO … restart needed`
-to the channel (via the XO webhook), or to stderr if no webhook is configured.
-The alert fires once on the down-transition and clears on recovery. Recovery is
-manual (restart the XO session); auto-respawn is a future milestone.
+**Legacy clock:** when the XO misses `--max-missed-acks` consecutive acks
+(default 3) or its pane falls back to a shell, `flotilla watch` posts a one-line
+`⚠️ XO … restart needed` to the channel (via the XO webhook), or to stderr if no
+webhook is configured.
+
+**Change-detector:** liveness is re-grounded on **wall-clock ack age** (since v2
+no longer prompts the XO every interval): the detector alerts when the ack file's
+age exceeds the mode-derived window while the XO is not a shell, and on a crash
+(two consecutive shell reads — debounced so a transient tmux blip never
+false-alarms). A wide-mode (`none`) idle fleet keeps the XO acking via the wide
+safety ping.
+
+In both cases the alert fires once on the down-transition and clears on recovery.
+Recovery is manual (restart the XO session); auto-respawn is a future milestone.
+Under the change-detector, a freshly-restarted XO is not auto-woken to resume
+coordination (a restart implies fresh context and the operator is in the loop) —
+re-engage it with an operator message, which clears any settled state and lands
+in its pane; the next material change or safety ping then resumes the normal
+cadence.

@@ -9,33 +9,38 @@ import (
 
 // Relay turns an accepted operator gateway message into a serialized delivery.
 // It is the glue between the pure relay decision logic and the running clock:
-// every accepted message resets the heartbeat (operator activity IS a tick) and
-// is routed to the XO or a named desk. Kept free of discordgo so it is testable
-// with plain fields.
+// every accepted message notifies the clock (operator activity IS a tick — the
+// legacy heartbeat resets its timer; the v2 detector clears the XO's settled
+// flag) and is routed to the XO or a named desk. Kept free of discordgo so it is
+// testable with plain fields.
 type Relay struct {
-	cfg       *roster.Config
-	xoAgent   string
-	injector  *Injector
-	heartbeat *Heartbeat   // may be nil (relay-only mode)
-	notify    func(string) // post a one-line channel notice (unknown @agent); may be nil
+	cfg        *roster.Config
+	xoAgent    string
+	injector   *Injector
+	onAccepted func(target string) // clock hook, called with the routed target; may be nil
+	notify     func(string)        // post a one-line channel notice (unknown @agent); may be nil
 }
 
 // NewRelay builds the handler. xoAgent is the bare-message / fallback target.
-func NewRelay(cfg *roster.Config, xoAgent string, injector *Injector, heartbeat *Heartbeat, notify func(string)) *Relay {
-	return &Relay{cfg: cfg, xoAgent: xoAgent, injector: injector, heartbeat: heartbeat, notify: notify}
+// onAccepted is the clock hook run for every accepted message with the resolved
+// delivery target (the XO or a desk); it may be nil. Legacy wiring passes a
+// heartbeat reset; v2 wiring clears the detector's settled flag when the target
+// is the XO.
+func NewRelay(cfg *roster.Config, xoAgent string, injector *Injector, onAccepted func(string), notify func(string)) *Relay {
+	return &Relay{cfg: cfg, xoAgent: xoAgent, injector: injector, onAccepted: onAccepted, notify: notify}
 }
 
 // Handle processes one gateway message (fields already extracted). It drops
-// non-operator and webhook (self-mirror) messages, resets the heartbeat on an
-// accepted message, routes it, and enqueues the delivery.
+// non-operator and webhook (self-mirror) messages, routes the message, notifies
+// the clock with the resolved target, and enqueues the delivery.
 func (r *Relay) Handle(webhookID, authorID, content string) {
 	if !relay.Accept(webhookID, authorID, r.cfg.OperatorUserID) {
 		return
 	}
-	if r.heartbeat != nil {
-		r.heartbeat.Reset() // a real operator message is itself a clock tick
-	}
 	d := relay.Route(content, r.xoAgent, r.resolveAgent)
+	if r.onAccepted != nil {
+		r.onAccepted(d.Agent) // operator activity IS a clock tick (target-aware)
+	}
 	if d.Notice != "" && r.notify != nil {
 		r.notify(d.Notice)
 	}

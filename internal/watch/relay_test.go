@@ -52,3 +52,25 @@ func TestRelayRoutesOperatorMessage(t *testing.T) {
 		t.Errorf("notices = %d, want 1 (unknown agent)", len(*notices))
 	}
 }
+
+func TestRelayOnAcceptedReceivesRoutedTarget(t *testing.T) {
+	cfg := &roster.Config{
+		OperatorUserID: "op",
+		Agents:         []roster.Agent{{Name: "hydra-ops"}, {Name: "v12-dev"}},
+	}
+	c := &collector{}
+	inj := NewInjector(func(agent, msg string) error { c.enqueue(Job{Agent: agent, Message: msg}); return nil }, 8)
+	inj.Start()
+	var targets []string
+	r := NewRelay(cfg, "hydra-ops", inj, func(target string) { targets = append(targets, target) }, nil)
+
+	r.Handle("", "op", "status please")     // bare → XO
+	r.Handle("", "op", "@v12-dev ship it")  // directed → desk
+	r.Handle("webhook-1", "op", "→ mirror") // dropped → no onAccepted
+	r.Handle("", "intruder", "evil")        // dropped → no onAccepted
+	inj.Stop()
+
+	if len(targets) != 2 || targets[0] != "hydra-ops" || targets[1] != "v12-dev" {
+		t.Errorf("onAccepted targets = %v, want [hydra-ops v12-dev] (dropped messages must not fire)", targets)
+	}
+}

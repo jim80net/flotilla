@@ -194,10 +194,39 @@ true inactivity gap.
 | `--roster` | `./flotilla.json` or `$FLOTILLA_ROSTER` | roster path |
 | `--ack-file` | `$FLOTILLA_ACK_FILE`, else `<roster-dir>/flotilla-xo-alive` | XO liveness ack file |
 | `--secrets` | `$FLOTILLA_SECRETS` | secrets env file (down-alert webhook + relay bot token) |
-| `--max-missed-acks` | `3` | consecutive missed acks before a down-alert |
+| `--max-missed-acks` | `3` | missed-ack window K (intervals) before a down-alert |
 
 Run it under a process manager (systemd, etc.) so it stays up; see
 [`watch-runbook.md`](./watch-runbook.md) for an example unit.
+
+### Wake only on a material change (heartbeat v2)
+
+The default clock wakes the XO *every* interval. To wake it **only when something
+material changes** — a desk finishes or crashes, or the state tracker changes —
+set `change_detector: true`:
+
+```json
+{
+  "agents": [{ "name": "infra" }, { "name": "research" }],
+  "xo_agent": "infra",
+  "heartbeat_interval": "20m",
+  "change_detector": true,
+  "liveness_ping_mode": "none"
+}
+```
+
+Now an idle fleet costs nothing: the XO sleeps until a desk transition or a
+tracker change wakes it with a targeted prompt, and its context is rotated after
+each settled handling. `liveness_ping_mode` trades idle cost against the
+wedge-detection window — `none` (default, true $0-idle), `interval` (strict
+window), or `consecutive` (middle ground). The XO maintains a **settle marker**
+(to say "idle") and an **awaiting marker** (to protect an outstanding operator
+question from a context rotate) — wire the
+[XO doctrine](./xo-doctrine.md#the-change-detector-heartbeat-v2-and-the-discipline-it-demands)
+into the XO's standing instructions. See the
+[runbook](./watch-runbook.md#change-detector-heartbeat-v2--opt-in) for the full
+flag + file surface (`--snapshot-file`, `--awaiting-file`, `--settled-file`,
+`--tracker-file`, `--max-quiet-intervals`, `--max-self-continuations`).
 
 ## 6. (Optional) Inbound relay
 
