@@ -22,11 +22,14 @@ jobs:
   build-test:
     runs-on: ubuntu-latest
     steps:
+      # Actions are pinned to immutable commit SHAs (supply-chain hardening — a
+      # moving tag like @v4 could be repointed to malicious code); the trailing
+      # comment records the human-readable version for readability/upgrades.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           # Track the version in go.mod (the `go` directive) so CI never drifts
           # from the module's declared toolchain.
