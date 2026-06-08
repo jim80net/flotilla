@@ -10,23 +10,29 @@ import (
 // what happened. AssertWindow defaults to 0 (exactly one health sample) unless a
 // test overrides it.
 type clearStub struct {
-	awaiting    bool
-	resolveErr  error
-	pane        string
-	captures    []string // returned in order per Capture call; last value sticks
-	captureErr  error
-	isShell     bool
-	clearErr    error
-	clearCalled int
-	alerts      []string
+	awaiting         bool
+	resolveErr       error
+	pane             string
+	captures         []string // returned in order per Capture call; last value sticks
+	captureErr       error
+	beforeCaptureErr error // errors ONLY the first (pre-clear) Capture call
+	isShell          bool
+	clearErr         error
+	clearCalled      int
+	alerts           []string
 }
 
 func (s *clearStub) controller() *ClearController {
 	capIdx := 0
+	capCalls := 0
 	return &ClearController{
 		AwaitingExists: func() bool { return s.awaiting },
 		Resolve:        func() (string, error) { return s.pane, s.resolveErr },
 		Capture: func(string) (string, error) {
+			capCalls++
+			if capCalls == 1 && s.beforeCaptureErr != nil {
+				return "", s.beforeCaptureErr
+			}
 			if s.captureErr != nil {
 				return "", s.captureErr
 			}
@@ -125,6 +131,22 @@ func TestClearInjectionErrorFallsBackToNoClear(t *testing.T) {
 	}
 	if len(s.alerts) != 0 {
 		t.Errorf("clear inject error: must not alert; got %v", s.alerts)
+	}
+}
+
+func TestClearBeforeCaptureErrorSkipsClear(t *testing.T) {
+	// If the pre-clear capture fails we cannot honestly assert post-clear health
+	// (a real RC drop would masquerade as "RC was never active"), so we must NOT
+	// clear this tick — deliver the prompt in the existing context, no alert.
+	s := &clearStub{pane: "0:0.0", beforeCaptureErr: errors.New("capture-pane boom"), captures: []string{"Remote Control active"}}
+	if got := s.controller().Decide("xo"); got != ProceedNoClear {
+		t.Errorf("pre-clear capture error: Decide = %v, want ProceedNoClear (cannot assert health → don't clear)", got)
+	}
+	if s.clearCalled != 0 {
+		t.Errorf("pre-clear capture error: /clear injected %d times, want 0", s.clearCalled)
+	}
+	if len(s.alerts) != 0 {
+		t.Errorf("pre-clear capture error: must not alert (nothing was cleared); got %v", s.alerts)
 	}
 }
 

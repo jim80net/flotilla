@@ -7,7 +7,7 @@
 
 ## 1. Literal-keystroke clear primitive (internal/deliver)
 
-- [x] 1.1 `deliver.ClearContext(target)`: literal `tmux send-keys -t <target> -l -- "/clear"` then `send-keys -t <target> -- Enter`, with a `clearSettleDelay` between (NOT bracket-paste — the verified method)
+- [x] 1.1 `deliver.ClearContext(target)`: literal `tmux send-keys -t <target> -l -- "/clear"` then `send-keys -t <target> -- Enter`, with a `clearComposeDelay` between (NOT bracket-paste — the verified method)
 - [x] 1.2 Test: command construction (args) matches the verified literal-keystroke form, via the same no-live-server seam the existing tmux tests use
 
 ## 2. ClearFirst on the heartbeat job (internal/watch)

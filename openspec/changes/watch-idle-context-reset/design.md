@@ -142,9 +142,21 @@ The hard constraint: **never clear mid-operator-conversation**.
 
 ### Primary guarantee (structural, free)
 
-The idle-gate already prevents a clear within `interval` of an operator message
-or while the XO is mid-turn (see "Why clear before the prompt"). This reuses
-existing `heartbeat.go` logic — no new mechanism.
+The idle-gate prevents a clear within `interval` of an operator message or while
+the XO is mid-turn, *as observed at fire time* (see "Why clear before the
+prompt"). This reuses existing `heartbeat.go` logic — no new mechanism.
+
+**Honest scope (post-fire window).** A clear is enqueued at fire and runs a
+moment later in the worker. A brand-new operator message arriving in that brief
+post-fire window (which itself follows a full `interval` of silence) is NOT an
+in-flight thread — it is a new thread beginning — and is never lost: it is
+delivered after the tick prompt, landing in the freshly-cleared context. This is
+acceptable (the replaced context was idle ≥ `interval`; all durable state
+survives) and matches the operator's discrimination ("is there an *in-flight*
+thread?"). We deliberately do NOT add a delivery-sequence guard for this case: it
+is not a requirement violation, and the window is irreducible anyway (a message
+arriving during the clear's own execution cannot be un-cleared). The spec states
+this scope explicitly rather than overclaiming an absolute.
 
 ### Hard veto (the A2 addition) — tied to operator-decision queuing
 

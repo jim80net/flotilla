@@ -59,10 +59,17 @@ func (cc *ClearController) Decide(agent string) ClearDecision {
 		// the gate/watchdog owns liveness. No clear, no alert.
 		return ProceedNoClear
 	}
-	rcWasActive := false
-	if before, err := cc.Capture(pane); err == nil {
-		rcWasActive = strings.Contains(before, rcActiveMarker)
+	before, err := cc.Capture(pane)
+	if err != nil {
+		// Can't read the pre-clear pane → we cannot tell whether Remote Control
+		// was active, so we could not honestly assert health AFTER a clear (a
+		// real RC drop would masquerade as "RC was never active"). Don't clear
+		// this tick; deliver the prompt in the existing context. Liveness is still
+		// covered by the tick→ack watchdog.
+		log.Printf("flotilla watch: pre-clear capture failed for %q: %v — skipping clear this tick", agent, err)
+		return ProceedNoClear
 	}
+	rcWasActive := strings.Contains(before, rcActiveMarker)
 	if err := cc.Clear(pane); err != nil {
 		// The /clear failed to inject; do not claim cleared and do not skip the
 		// prompt — fall back to a plain tick in the existing context.

@@ -29,16 +29,25 @@ prompt-only heartbeat.
 
 ### Requirement: Never clear mid-operator-conversation (idle-gate + awaiting-operator veto)
 
-The system SHALL NOT inject `/clear` while an operator conversation is in flight.
-This SHALL be guaranteed by the existing idle-gate (a tick fires only after
-`interval` with no operator delivery AND no XO-pane activity, so no clear lands
-within `interval` of an operator message or while the XO is mid-turn) AND by an
-**awaiting-operator veto marker**: while the marker is present, the system SHALL
-skip the clear and run the tick in the existing context. The XO SHALL maintain
-the marker as one discipline with its operator-decision queue — set when an open
-question to the operator is queued, removed when the last open question is
-answered or recorded. A stale marker SHALL degrade safely to no-clear (i.e. the
-prior accumulating-context behavior), never to a wrongful clear.
+The system SHALL NOT inject `/clear` while an operator conversation thread is in
+flight. An in-flight thread is either: (a) a recent operator/XO exchange —
+covered by the idle-gate (a tick fires only after `interval` with no operator
+delivery AND no XO-pane activity *as observed at fire time*, so the clear never
+preempts an active exchange or a mid-turn XO); or (b) the XO awaiting an operator
+reply — covered by an **awaiting-operator veto marker**: while the marker is
+present, the system SHALL skip the clear and run the tick in the existing
+context. The XO SHALL maintain the marker as one discipline with its
+operator-decision queue — set when an open question to the operator is queued,
+removed when the last open question is answered or recorded. A stale marker SHALL
+degrade safely to no-clear (the prior accumulating-context behavior), never to a
+wrongful clear.
+
+A brand-new operator message arriving in the brief window *after* an idle tick
+has fired (which itself requires a full `interval` of prior silence) is NOT an
+in-flight thread — it is a new thread beginning. Such a message is never lost (it
+is delivered after the tick prompt) and lands in the freshly-cleared context;
+this is acceptable because the replaced context was, by the idle-gate, idle for
+at least `interval` and all durable state survives the clear.
 
 #### Scenario: Outstanding operator question is not wiped
 - **WHEN** the heartbeat fires while the awaiting-operator marker is present (the XO is awaiting an operator reply)
