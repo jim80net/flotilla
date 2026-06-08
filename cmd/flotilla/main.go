@@ -13,6 +13,7 @@ import (
 	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/discord"
 	"github.com/jim80net/flotilla/internal/roster"
+	"github.com/jim80net/flotilla/internal/surface"
 )
 
 const version = "0.0.1"
@@ -152,14 +153,21 @@ func cmdSend(args []string) error {
 	if err != nil {
 		return err
 	}
+	// Resolve the agent's surface driver (how this surface submits a turn).
+	// Unknown surface is a clear error, never a silent mis-drive.
+	drv, ok := surface.Get(agent.Surface)
+	if !ok {
+		return fmt.Errorf("agent %q: unknown surface %q (known: see internal/surface registry)", agentName, agent.Surface)
+	}
 
-	// Deliver = wake: paste the message into the agent's pane and submit. This
-	// is the operation that must succeed; the audit mirror below is best-effort.
+	// Deliver = wake: submit the message into the agent's pane via its driver
+	// (claude-code = bracketed paste + Enter). This is the operation that must
+	// succeed; the audit mirror below is best-effort.
 	pane, err := deliver.ResolvePane(agent.Title())
 	if err != nil {
 		return err
 	}
-	if err := deliver.Send(pane, message); err != nil {
+	if err := drv.Submit(pane, message); err != nil {
 		return err
 	}
 	fmt.Printf("delivered to %s (pane %s)\n", agentName, pane)

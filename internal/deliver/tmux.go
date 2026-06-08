@@ -30,6 +30,13 @@ const commandTimeout = 10 * time.Second
 // tmux clients, not the target application), so a settle delay is necessary.
 const submitSettleDelay = 250 * time.Millisecond
 
+// clearComposeDelay gives the TUI time to register a typed slash command in its
+// composer before the submitting Enter. Matches the gap used in the live
+// verification on claude 2.1.161 (type "/clear", wait, Enter); harmless because
+// ClearContext runs only on idle context-rotate, never on a latency-sensitive
+// path.
+const clearComposeDelay = 1 * time.Second
+
 // bufferName returns a per-process tmux buffer name. tmux paste buffers live in
 // the tmux SERVER, shared across processes, so a fixed name would let two
 // concurrent `flotilla send` invocations overwrite each other's payload and
@@ -37,6 +44,40 @@ const submitSettleDelay = 250 * time.Millisecond
 // pid keeps concurrent sends independent.
 func bufferName() string {
 	return fmt.Sprintf("flotilla-send-%d", os.Getpid())
+}
+
+// clearKeysArgs returns the `tmux send-keys` argv that types a slash command into
+// a TUI pane as LITERAL keystrokes (`-l`), so it reaches the composer as literal
+// text rather than being parsed as tmux key names. This is the empirically-
+// verified injection method (claude 2.1.161) — deliberately NOT the bracketed
+// paste `Send` uses, which is for message bodies and is unverified for slash
+// commands. Split out as a pure function so the argv is testable without tmux.
+func clearKeysArgs(target, cmd string) []string {
+	return []string{"send-keys", "-t", target, "-l", "--", cmd}
+}
+
+// ClearContext injects a context-reset slash command (Claude Code's `/clear`)
+// into the target pane as literal keystrokes, then submits with Enter — resetting
+// that session's context window while leaving process/session/pane and any
+// Remote-Control binding intact (verified on claude 2.1.161). It does NOT verify
+// the result. Only call when the pane is idle: a slash injected mid-turn is
+// undefined. (Surface drivers whose rotate strategy is RestartProcess must NEVER
+// call this — a slash would land as literal composer text; see internal/surface.)
+func ClearContext(target string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	if err := exec.CommandContext(ctx, "tmux", clearKeysArgs(target, "/clear")...).Run(); err != nil {
+		return fmt.Errorf("tmux send-keys /clear: %w", err)
+	}
+	select {
+	case <-time.After(clearComposeDelay):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if err := exec.CommandContext(ctx, "tmux", "send-keys", "-t", target, "--", "Enter").Run(); err != nil {
+		return fmt.Errorf("tmux send-keys enter: %w", err)
+	}
+	return nil
 }
 
 // ResolvePane returns the tmux target (session:window.pane) of the pane whose

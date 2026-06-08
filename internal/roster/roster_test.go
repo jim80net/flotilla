@@ -105,6 +105,22 @@ func TestSecretsRejectsMalformedLine(t *testing.T) {
 	}
 }
 
+func TestLoadAgentSurface(t *testing.T) {
+	// surface is optional (default applied at resolve time) and carried verbatim.
+	cfg, err := Load(writeTemp(t, `{"agents":[{"name":"a"},{"name":"b","surface":"grok"}]}`))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	a, _ := cfg.Agent("a")
+	if a.Surface != "" {
+		t.Errorf("agent a surface = %q, want \"\" (default applied at resolve)", a.Surface)
+	}
+	b, _ := cfg.Agent("b")
+	if b.Surface != "grok" {
+		t.Errorf("agent b surface = %q, want grok", b.Surface)
+	}
+}
+
 func TestLoadWatchConfigValidation(t *testing.T) {
 	if _, err := Load(writeTemp(t, `{"agents":[{"name":"hydra-ops"},{"name":"v12-dev"}],"xo_agent":"hydra-ops","heartbeat_interval":"20m"}`)); err != nil {
 		t.Fatalf("valid watch config rejected: %v", err)
