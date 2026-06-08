@@ -82,7 +82,10 @@ The three layers:
    today's K-missed-ack lag for the crash case.
 2. **Ack staleness (unchanged threshold).** Keep the existing rule — alert when
    the ack mtime is older than `K×interval`. This preserves the EXACT current
-   wedged-XO detection window (no regression).
+   wedged-XO detection window (no regression). **[SUPERSEDED by C1/C1b below:]**
+   the strict `K×interval` window holds only under `liveness_ping_mode: interval`;
+   the shipped default `none` (true $0-idle) intentionally widens the idle-fleet
+   wedge window to ~`2K×interval` — a crash is still immediate. See C1b.
 3. **Max-quiet liveness ping.** If the XO has not been woken (by a material change
    OR a prior ping) for **N intervals**, force a minimal liveness ping (a wake
    that asks only for an ack). **N is chosen `< K`** (default `N = max(1, K-1)`)
