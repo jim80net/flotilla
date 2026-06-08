@@ -20,6 +20,12 @@ type Agent struct {
 	// resolves the pane by matching this title, so it survives pane
 	// reordering. Defaults to Name when empty.
 	TmuxTitle string `json:"tmux_title,omitempty"`
+	// Surface names the agent's terminal-surface driver (e.g. "claude-code",
+	// "grok", "cursor") — how flotilla submits turns, assesses pane state, and
+	// rotates context for this agent. Empty defaults to the reference driver
+	// ("claude-code"). Validated against the registered drivers at command
+	// startup (in cmd, to keep roster free of an internal/surface import).
+	Surface string `json:"surface,omitempty"`
 }
 
 // Title returns the tmux pane title to match for this agent.
