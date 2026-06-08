@@ -43,7 +43,9 @@ daemon or a hosted service:
 - **Topology — hub and spoke.** One agent is the hub (the XO). You talk to
   the hub; the hub routes to the domain agents; the agents report back
   through the hub. Peer-to-peer traffic is brokered by the hub so there is
-  always one coherent picture and one accountable router.
+  always one coherent picture and one accountable router. How the XO holds up
+  its end — replying to you on Discord, and staying quiet on routine noise —
+  is its operating doctrine: see [docs/xo-doctrine.md](./docs/xo-doctrine.md).
 - **Bounded autonomy — per-agent permission posture.** Each agent runs with
   its own allow-list, so it can act on safe operations unattended while
   still stopping for confirmation on risky ones. Coordination never implies
@@ -81,6 +83,10 @@ Near-term:
 - [x] Operator-facing outbound path: `flotilla notify --from <agent> <message>`
       posts straight to the operator on Discord under the agent's own webhook,
       with no tmux injection (distinct from `send`, which wakes a pane).
+- [x] XO operating doctrine — the XO replies to the operator on Discord via
+      `flotilla notify` and stays quiet on heartbeat acks / routine inter-agent
+      traffic, so the operator ↔ XO conversation is readable from anywhere:
+      [docs/xo-doctrine.md](./docs/xo-doctrine.md).
 - [ ] Release-sign-off workflow.
 - [x] Docs + an end-to-end quickstart that a newcomer can run cold — [docs/quickstart.md](./docs/quickstart.md) (cold-tested: install, send, clock).
 
