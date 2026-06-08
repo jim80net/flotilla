@@ -135,6 +135,12 @@ It reuses the same per-agent webhooks (`FLOTILLA_WEBHOOK_<AGENT>`) and
 posted** — shorten or split it. Unlike `send`'s best-effort mirror, a `notify`
 failure is a command failure (exit non-zero), because the post *is* the point.
 
+> **When should the XO use `notify`?** As a standing convention: the XO replies
+> to genuine operator messages on Discord with `notify`, and stays quiet on
+> heartbeat acks and routine inter-agent traffic — so you can follow the
+> operator ↔ XO conversation from the channel. That doctrine, and how to wire it
+> into your XO, is [docs/xo-doctrine.md](./xo-doctrine.md).
+
 ## 5. Run the clock (self-continuing XO)
 
 The `watch` daemon heartbeats one agent — the **XO** — on an inactivity
