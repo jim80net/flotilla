@@ -30,18 +30,6 @@ func CapturePane(target string) (string, error) {
 	return string(out), nil
 }
 
-// Busy reports whether the agent's pane appears to be mid-turn (working), used
-// to idle-gate the heartbeat so a tick never interrupts in-flight work. It is
-// best-effort: a very brief turn between samples may read as idle, which only
-// costs one extra idempotent tick.
-func Busy(target string) (bool, error) {
-	out, err := CapturePane(target)
-	if err != nil {
-		return false, err
-	}
-	return ParseBusy(out), nil
-}
-
 // ParseBusy is the testable core: true when the captured pane shows an active
 // working marker. It scopes the scan to the bottom of the pane (the live
 // status/footer area): the active spinner is always at the bottom, and an old

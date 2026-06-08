@@ -18,7 +18,7 @@ type Job struct {
 }
 
 // SendFunc delivers a message to an agent's pane. Production wires
-// deliver.ResolvePane + deliver.Send; tests inject a stub.
+// deliver.ResolvePane + the agent's surface driver Submit; tests inject a stub.
 type SendFunc func(agent, message string) error
 
 // Injector serializes all deliveries through one worker goroutine, so a relayed
