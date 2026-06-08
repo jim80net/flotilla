@@ -49,6 +49,7 @@ type Heartbeat struct {
 	busy         func(agent string) bool // idle-gate: true when the pane is mid-turn
 	gate         func() bool             // per-interval hook; true → skip this tick (e.g. XO is down)
 	activity     func() string           // XO-pane fingerprint; a change resets the idle clock. nil ⇒ disabled.
+	clearFirst   bool                    // when true, tick jobs carry ClearFirst (idle-tick context reset)
 
 	reset chan struct{}
 	stop  chan struct{}
@@ -116,6 +117,12 @@ func (h *Heartbeat) SetGate(gate func() bool) { h.gate = gate }
 // Without a probe the heartbeat resets only on deliveries (prior behavior). Must
 // be set before Start.
 func (h *Heartbeat) SetActivityProbe(probe func() string) { h.activity = probe }
+
+// SetClearFirst enables idle-tick context reset: every heartbeat tick job is
+// tagged ClearFirst, so the injector's clearHook resets the XO's context before
+// delivering the tick prompt. Off by default (opt-in via roster). Must be set
+// before Start.
+func (h *Heartbeat) SetClearFirst(on bool) { h.clearFirst = on }
 
 // SetPollInterval overrides how often the activity probe is sampled (default is
 // derived from the interval, clamped to [1s, 30s]). Useful to tune cadence per
@@ -194,7 +201,7 @@ func (h *Heartbeat) loop() {
 			// down, skip the tick — don't wind a dead clock.
 			gated := h.gate != nil && h.gate()
 			if !gated && !h.busy(h.xoAgent) {
-				h.enqueue(Job{Agent: h.xoAgent, Message: h.prompt, Kind: "heartbeat"})
+				h.enqueue(Job{Agent: h.xoAgent, Message: h.prompt, Kind: "heartbeat", ClearFirst: h.clearFirst})
 			}
 			t.Reset(h.interval)
 		}

@@ -166,6 +166,12 @@ Add three fields to the roster:
 - `heartbeat_message` *(optional)* — override the default tick wording (e.g. to
   name your project's concrete work sources). A sensible default is used when
   omitted.
+- `idle_context_reset` *(optional, default `false`)* — when `true`, `watch`
+  resets the XO's context (injects `/clear`) on each idle tick so the clock stays
+  cheap instead of running against an ever-growing window. Opt-in; it leans on
+  undocumented Claude behavior and asks a discipline of the XO — see
+  [xo-doctrine](./xo-doctrine.md#fresh-context-every-idle-tick-and-the-discipline-it-demands)
+  and the [runbook](./watch-runbook.md#idle-tick-context-reset-opt-in).
 
 Run it (clock-only — no Discord needed):
 
@@ -193,6 +199,7 @@ true inactivity gap.
 |------|---------|---------|
 | `--roster` | `./flotilla.json` or `$FLOTILLA_ROSTER` | roster path |
 | `--ack-file` | `$FLOTILLA_ACK_FILE`, else `<roster-dir>/flotilla-xo-alive` | XO liveness ack file |
+| `--awaiting-file` | `$FLOTILLA_AWAITING_FILE`, else `<roster-dir>/flotilla-xo-awaiting` | awaiting-operator veto marker; suppresses idle-tick context reset while present (only used with `idle_context_reset`) |
 | `--secrets` | `$FLOTILLA_SECRETS` | secrets env file (down-alert webhook + relay bot token) |
 | `--max-missed-acks` | `3` | consecutive missed acks before a down-alert |
 

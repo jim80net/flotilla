@@ -119,3 +119,21 @@ func TestLoadWatchConfigValidation(t *testing.T) {
 		t.Errorf("heartbeat_interval \"0\" (disabled) should be valid: %v", err)
 	}
 }
+
+func TestLoadIdleContextReset(t *testing.T) {
+	// Opt-in (default false): absent ⇒ false; explicit true ⇒ true.
+	cfg, err := Load(writeTemp(t, `{"agents":[{"name":"hydra-ops"}],"xo_agent":"hydra-ops"}`))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.IdleContextReset {
+		t.Error("idle_context_reset absent should default to false (opt-in)")
+	}
+	cfg, err = Load(writeTemp(t, `{"agents":[{"name":"hydra-ops"}],"xo_agent":"hydra-ops","idle_context_reset":true}`))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !cfg.IdleContextReset {
+		t.Error("idle_context_reset:true should parse as true")
+	}
+}

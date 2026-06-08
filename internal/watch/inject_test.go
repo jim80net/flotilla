@@ -125,6 +125,94 @@ func TestInjectorDoesNotLogSuccessOnFailedDelivery(t *testing.T) {
 	}
 }
 
+func TestInjectorClearFirstRouting(t *testing.T) {
+	// A ClearFirst job runs the clearHook first; SkipPrompt suppresses the prompt
+	// (never drive a broken XO), the two Proceed verdicts deliver it, and a nil
+	// hook delivers it (back-compat). The clearHook runs inside deliver(), so the
+	// clear + prompt are one atomic worker iteration.
+	cases := []struct {
+		name       string
+		hook       func(string) ClearDecision
+		wantSends  int
+		wantHookOK bool
+	}{
+		{"skip prompt", func(string) ClearDecision { return SkipPrompt }, 0, true},
+		{"proceed cleared", func(string) ClearDecision { return ProceedCleared }, 1, true},
+		{"proceed no clear", func(string) ClearDecision { return ProceedNoClear }, 1, true},
+		{"nil hook delivers (back-compat)", nil, 1, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var sends, hookCalls int32
+			in := NewInjector(func(string, string) error { atomic.AddInt32(&sends, 1); return nil }, 1)
+			if tc.hook != nil {
+				in.SetClearHook(func(a string) ClearDecision { atomic.AddInt32(&hookCalls, 1); return tc.hook(a) })
+			}
+			in.Start()
+			in.Enqueue(Job{Agent: "xo", Message: "tick", Kind: "heartbeat", ClearFirst: true})
+			in.Stop()
+			if got := int(atomic.LoadInt32(&sends)); got != tc.wantSends {
+				t.Errorf("sends = %d, want %d", got, tc.wantSends)
+			}
+			if tc.wantHookOK && atomic.LoadInt32(&hookCalls) != 1 {
+				t.Errorf("clearHook calls = %d, want 1", hookCalls)
+			}
+		})
+	}
+}
+
+func TestInjectorClearFirstFalseSkipsHook(t *testing.T) {
+	// A job WITHOUT ClearFirst must never invoke the clearHook (only idle heartbeat
+	// ticks clear; relays and plain ticks deliver straight through).
+	var hookCalls, sends int32
+	in := NewInjector(func(string, string) error { atomic.AddInt32(&sends, 1); return nil }, 1)
+	in.SetClearHook(func(string) ClearDecision { atomic.AddInt32(&hookCalls, 1); return ProceedCleared })
+	in.Start()
+	in.Enqueue(Job{Agent: "xo", Message: "operator msg", Kind: "relay"}) // ClearFirst false
+	in.Stop()
+	if atomic.LoadInt32(&hookCalls) != 0 {
+		t.Errorf("clearHook called %d times for a non-ClearFirst job, want 0", hookCalls)
+	}
+	if atomic.LoadInt32(&sends) != 1 {
+		t.Error("non-ClearFirst job must still be delivered")
+	}
+}
+
+func TestInjectorClearFirstAtomicWithPrompt(t *testing.T) {
+	// The clear (clearHook) and the tick prompt must be one atomic worker
+	// iteration: a relayed message enqueued right after must be delivered AFTER
+	// the prompt, never between the clear and the prompt. Record the call order.
+	var mu sync.Mutex
+	var order []string
+	send := func(_, msg string) error {
+		mu.Lock()
+		order = append(order, "send:"+msg)
+		mu.Unlock()
+		return nil
+	}
+	in := NewInjector(send, 4)
+	in.SetClearHook(func(string) ClearDecision {
+		mu.Lock()
+		order = append(order, "clear")
+		mu.Unlock()
+		return ProceedCleared
+	})
+	in.Start()
+	in.Enqueue(Job{Agent: "xo", Message: "tick", Kind: "heartbeat", ClearFirst: true})
+	in.Enqueue(Job{Agent: "xo", Message: "operator", Kind: "relay"})
+	in.Stop()
+
+	want := []string{"clear", "send:tick", "send:operator"}
+	if len(order) != len(want) {
+		t.Fatalf("call order = %v, want %v", order, want)
+	}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Fatalf("call order = %v, want %v (a relay interleaved between clear and prompt)", order, want)
+		}
+	}
+}
+
 func TestInjectorEnqueueAfterStopDoesNotPanic(t *testing.T) {
 	// Regression: an in-flight relay handler may Enqueue after Stop. With the old
 	// close-from-sender design this was send-on-closed-channel → panic.

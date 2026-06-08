@@ -88,6 +88,7 @@ flags for 'watch':
   --roster <path>         roster config (default ./flotilla.json or $FLOTILLA_ROSTER)
   --secrets <path>        secrets env file: relay bot token + down-alert webhook (default $FLOTILLA_SECRETS)
   --ack-file <path>       XO liveness ack file the XO touches (default $FLOTILLA_ACK_FILE, else <roster-dir>/flotilla-xo-alive)
+  --awaiting-file <path>  awaiting-operator veto marker; suppresses idle-tick context reset while present (default $FLOTILLA_AWAITING_FILE, else <roster-dir>/flotilla-xo-awaiting)
   --max-missed-acks <n>   consecutive missed acks before a down-alert (default 3)
 
 watch runs the XO heartbeat clock + liveness watchdog (needs neither Discord nor

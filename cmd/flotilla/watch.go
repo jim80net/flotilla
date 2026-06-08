@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/discord"
@@ -26,6 +27,7 @@ func cmdWatch(args []string) error {
 	rosterPath := fs.String("roster", rosterDefault(), "roster config path")
 	secretsPath := fs.String("secrets", os.Getenv("FLOTILLA_SECRETS"), "secrets env file path (for the down-alert webhook)")
 	ackPath := fs.String("ack-file", os.Getenv("FLOTILLA_ACK_FILE"), "XO liveness ack file (the XO touches it)")
+	awaitingPath := fs.String("awaiting-file", os.Getenv("FLOTILLA_AWAITING_FILE"), "awaiting-operator veto marker (the XO sets it while awaiting an operator reply; suppresses idle-tick context reset)")
 	maxMissed := fs.Int("max-missed-acks", 3, "consecutive missed acks before a down alert")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -43,6 +45,9 @@ func cmdWatch(args []string) error {
 	interval := cfg.HeartbeatDur() // parsed + validated at load
 	if *ackPath == "" {
 		*ackPath = filepath.Join(filepath.Dir(*rosterPath), "flotilla-xo-alive")
+	}
+	if *awaitingPath == "" {
+		*awaitingPath = filepath.Join(filepath.Dir(*rosterPath), "flotilla-xo-awaiting")
 	}
 
 	// Load secrets once: the bot token (gateway) and the alert/notice webhook.
@@ -89,6 +94,31 @@ func cmdWatch(args []string) error {
 		}
 		post("flotilla-watch", "→ "+j.Agent+": "+j.Message)
 	})
+
+	// Idle-tick context reset (opt-in): on each idle heartbeat fire, reset the
+	// XO's context via /clear before the tick prompt, so the tick runs fresh from
+	// durable state instead of an ever-accumulating window. The clearHook runs
+	// inside the injector worker (atomic with the prompt — no relay interleave),
+	// vetoes while the awaiting-operator marker is present, and asserts the XO
+	// survived the clear (RC still active if it was; pane still live) before the
+	// prompt is delivered — else it raises a loud alert and skips the prompt.
+	if cfg.IdleContextReset {
+		cc := &watch.ClearController{
+			AwaitingExists: func() bool { _, err := os.Stat(*awaitingPath); return err == nil },
+			Resolve:        func() (string, error) { return deliver.ResolvePane(agentTitle(cfg, xo)) },
+			Capture:        deliver.CapturePane,
+			PaneIsShell: func(pane string) bool {
+				cmd, err := deliver.PaneCommand(pane)
+				return err == nil && deliver.IsShell(cmd)
+			},
+			Clear:        deliver.ClearContext,
+			Alert:        alert,
+			AssertWindow: 5 * time.Second,
+			AssertPoll:   500 * time.Millisecond,
+		}
+		injector.SetClearHook(cc.Decide)
+	}
+
 	injector.Start()
 	defer injector.Stop()
 
@@ -129,6 +159,7 @@ func cmdWatch(args []string) error {
 	// busy-gating is handled inside gate (single pane resolve per cycle), so the
 	// heartbeat's own busy predicate is nil here.
 	hb := watch.NewHeartbeat(interval, xo, prompt, injector.Enqueue, nil)
+	hb.SetClearFirst(cfg.IdleContextReset) // idle-tick context reset (opt-in); tags tick jobs ClearFirst
 	hb.SetGate(gate)
 	// Activity probe: fingerprint the XO pane (its captured contents). Any change
 	// — the XO taking a turn, emitting output — resets the idle clock, so the tick

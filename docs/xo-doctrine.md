@@ -160,6 +160,74 @@ flotilla ships **A as the default.** B is deferred; if it lands later it will be
 opt-in and additive, not a replacement for the XO knowing how to address its
 operator directly.
 
+## Fresh context every idle tick (and the discipline it demands)
+
+When a deployment enables **idle-tick context reset** (`idle_context_reset: true`
+in the roster — opt-in), `flotilla watch` injects `/clear` into the XO pane on
+each *idle* heartbeat fire, resetting the XO's context window to fresh before the
+tick prompt. This keeps the self-continuing clock cheap (a fresh tick is a few
+thousand tokens, not an ever-accumulating window that degrades inference). It is
+safe precisely because the heartbeat prompt already works "neither from memory":
+the XO reconstructs state from durable sources every tick. But that safety is a
+**contract the XO must hold**, plus one marker it must maintain.
+
+### The state-externalization contract (non-negotiable when this is on)
+
+Because your context is wiped between idle ticks, **anything you will need after
+the next idle tick must be written to durable state — never held only in
+context.** Keep `.flotilla-state.md` (the top-level goal + task tracker) current:
+the goal, the open tasks, what you just did, what's blocked and why, and the
+operator-decision queue. A fresh post-clear XO re-reads it and continues. If you
+hold progress only in your head, the next clear loses it. (`watch` only clears
+after a true inactivity gap, so it never wipes you mid-turn — but it *will* wipe a
+quiescent multi-tick task's working memory, which is fine *if and only if* you
+externalized the progress.)
+
+### The awaiting-operator marker — exact lifecycle
+
+The clear is suppressed while you are **awaiting an operator reply**, so an
+outstanding question is never wiped out from under you. This is enforced by a
+veto marker file (`watch --awaiting-file`, default
+`<roster-dir>/flotilla-xo-awaiting`) that **you maintain as one discipline with
+your operator-decision queue** — there is no separate bookkeeping:
+
+- **SET the marker at the exact moment you pose a question to the operator** —
+  the same act as adding the item to the operator-decision queue in
+  `.flotilla-state.md`. (Posing the question and creating the marker are one
+  step: `touch <awaiting-file>`.) If multiple questions are open, the marker
+  simply stays present.
+- **REMOVE the marker the moment the question is resolved** — i.e. when the
+  operator's answer **arrives**, OR when you have **durably recorded** the answer
+  /decision into `.flotilla-state.md` (whichever comes first). When the last open
+  operator question is resolved, remove the marker (`rm -f <awaiting-file>`).
+
+While the marker exists, `watch` runs idle ticks **without** clearing (your
+context, including the outstanding-question thread, is preserved). A forgotten
+(stale) marker only degrades to "no clearing" — the prior accumulating-context
+behavior — never to a wrongful clear, so erring toward leaving it set is safe;
+the cost is just lost token savings until you clear it.
+
+### The post-clear safety net
+
+`watch` asserts, after every `/clear`, that the XO survived: Remote Control is
+still active (if it was) and the pane is still a live Claude session, and the
+tick→ack watchdog continues to cover liveness. If the assertion fails, `watch`
+raises a loud down-alert and does **not** drive the (now-broken) XO further —
+recovery is a manual restart, as with any down-alert. The behavior leans on
+undocumented Claude Code mechanics (verified live), so the runbook carries a
+re-verification step to run on Claude Code version bumps.
+
+### Wiring (opt-in)
+
+```jsonc
+// roster (committable):
+{ "xo_agent": "hydra-ops", "heartbeat_interval": "20m", "idle_context_reset": true }
+```
+
+Permit `tmux send-keys` (the `/clear` injection path) and the marker write
+(`touch`/`rm` of the awaiting-file) in the XO's allow-list, alongside the ack
+`touch`. See [watch-runbook → XO permission posture](./watch-runbook.md#prerequisites).
+
 ## See also
 
 - [quickstart.md §4 → "Reach the operator directly"](./quickstart.md#reach-the-operator-directly-flotilla-notify)

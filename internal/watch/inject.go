@@ -15,7 +15,26 @@ type Job struct {
 	Agent   string
 	Message string
 	Kind    string // "relay" | "heartbeat" | "" — labels the audit mirror
+	// ClearFirst asks the worker to run the clearHook (reset the agent's context
+	// via /clear) BEFORE delivering Message. Set only on idle heartbeat ticks when
+	// idle-tick context reset is enabled. The clear + the prompt are delivered in
+	// one worker iteration, so a relayed message can never land between them.
+	ClearFirst bool
 }
+
+// ClearDecision is the clearHook's verdict for a ClearFirst job.
+type ClearDecision int
+
+const (
+	// ProceedCleared: the context was reset; deliver the prompt (into fresh context).
+	ProceedCleared ClearDecision = iota
+	// ProceedNoClear: no clear was performed (vetoed, or the pane could not be
+	// resolved); deliver the prompt in the existing context anyway.
+	ProceedNoClear
+	// SkipPrompt: the post-clear health assertion FAILED; do NOT deliver the
+	// prompt (never drive a broken XO). The hook has already raised a loud alert.
+	SkipPrompt
+)
 
 // SendFunc delivers a message to an agent's pane. Production wires
 // deliver.ResolvePane + deliver.Send; tests inject a stub.
@@ -30,18 +49,27 @@ type SendFunc func(agent, message string) error
 // in-flight at shutdown could otherwise send on a closed channel and panic.
 // Stop signals the worker to drain-and-exit and makes Enqueue drop instead.
 type Injector struct {
-	jobs    chan Job
-	send    SendFunc
-	stop    chan struct{} // worker: drain then exit
-	stopped chan struct{} // Enqueue: stop accepting (closed once)
-	done    chan struct{}
-	once    sync.Once
-	mirror  func(Job) // optional: called after a successful delivery (audit trail)
+	jobs      chan Job
+	send      SendFunc
+	stop      chan struct{} // worker: drain then exit
+	stopped   chan struct{} // Enqueue: stop accepting (closed once)
+	done      chan struct{}
+	once      sync.Once
+	mirror    func(Job)                        // optional: called after a successful delivery (audit trail)
+	clearHook func(agent string) ClearDecision // optional: pre-delivery context reset for ClearFirst jobs
 }
 
 // SetMirror installs a hook called after each successful delivery, for the audit
 // trail. Must be set before Start.
 func (in *Injector) SetMirror(mirror func(Job)) { in.mirror = mirror }
+
+// SetClearHook installs the pre-delivery hook run for a job with ClearFirst set:
+// it resets the agent's context (inject /clear) and asserts the agent is still
+// healthy, returning whether to proceed with the prompt. Running inside deliver()
+// keeps the clear + prompt atomic in one worker iteration (no relay interleave).
+// Must be set before Start. When unset, a ClearFirst job is delivered as a plain
+// prompt (back-compat).
+func (in *Injector) SetClearHook(hook func(agent string) ClearDecision) { in.clearHook = hook }
 
 // NewInjector builds an injector with the given send function and queue buffer.
 func NewInjector(send SendFunc, buffer int) *Injector {
@@ -77,6 +105,16 @@ func (in *Injector) Start() {
 }
 
 func (in *Injector) deliver(j Job) {
+	// Pre-delivery context reset (idle heartbeat tick): reset the agent's context
+	// then assert it is still healthy. On a failed assertion, do NOT deliver the
+	// prompt — never drive a broken XO (the hook has already alerted). The clear
+	// and the prompt run in this single worker iteration, so no relayed message
+	// interleaves between them.
+	if j.ClearFirst && in.clearHook != nil {
+		if in.clearHook(j.Agent) == SkipPrompt {
+			return
+		}
+	}
 	if err := in.send(j.Agent, j.Message); err != nil {
 		// A failed delivery must not kill the worker — log and continue, so one
 		// bad pane can't take down the whole relay.

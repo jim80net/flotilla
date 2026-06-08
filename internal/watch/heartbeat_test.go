@@ -109,6 +109,25 @@ func TestHeartbeatActivityStableFires(t *testing.T) {
 	}
 }
 
+func TestHeartbeatClearFirstFlag(t *testing.T) {
+	// SetClearFirst(true) tags every tick job ClearFirst (idle-tick context reset);
+	// the default is off (back-compat: a plain tick).
+	for _, on := range []bool{false, true} {
+		c := &collector{}
+		h := NewHeartbeat(20*time.Millisecond, "hydra-ops", "", c.enqueue, func(string) bool { return false })
+		h.SetClearFirst(on)
+		h.Start()
+		time.Sleep(120 * time.Millisecond)
+		h.Stop()
+		if c.count() == 0 {
+			t.Fatalf("clearFirst=%v: heartbeat never fired", on)
+		}
+		if c.jobs[0].ClearFirst != on {
+			t.Errorf("clearFirst=%v: tick.ClearFirst = %v, want %v", on, c.jobs[0].ClearFirst, on)
+		}
+	}
+}
+
 func TestDerivePollInterval(t *testing.T) {
 	cases := []struct{ interval, want time.Duration }{
 		{20 * time.Minute, 30 * time.Second},           // cap

@@ -30,6 +30,13 @@ const commandTimeout = 10 * time.Second
 // tmux clients, not the target application), so a settle delay is necessary.
 const submitSettleDelay = 250 * time.Millisecond
 
+// clearComposeDelay gives the TUI time to register the typed "/clear" slash
+// command in its composer before the submitting Enter. Matches the gap used in
+// the live verification on claude 2.1.161 (type "/clear", wait, Enter); a value
+// this conservative is harmless because ClearContext runs only on idle heartbeat
+// ticks (minutes apart), never on a latency-sensitive path.
+const clearComposeDelay = 1 * time.Second
+
 // bufferName returns a per-process tmux buffer name. tmux paste buffers live in
 // the tmux SERVER, shared across processes, so a fixed name would let two
 // concurrent `flotilla send` invocations overwrite each other's payload and
@@ -37,6 +44,44 @@ const submitSettleDelay = 250 * time.Millisecond
 // pid keeps concurrent sends independent.
 func bufferName() string {
 	return fmt.Sprintf("flotilla-send-%d", os.Getpid())
+}
+
+// clearKeysArgs returns the `tmux send-keys` argv that types Claude Code's
+// `/clear` slash command into target as LITERAL keystrokes (`-l`), so it reaches
+// the composer as the literal text "/clear" rather than being parsed as tmux key
+// names. This is the empirically-verified injection method (claude 2.1.161) —
+// deliberately NOT the bracketed paste `Send` uses (`paste-buffer -p`), which is
+// for message bodies and is unverified for slash-command recognition. Split out
+// as a pure function so the argv is testable without a live tmux server.
+func clearKeysArgs(target string) []string {
+	return []string{"send-keys", "-t", target, "-l", "--", "/clear"}
+}
+
+// ClearContext injects Claude Code's `/clear` into the target pane (types it as
+// literal keystrokes, then submits with Enter), resetting that session's context
+// window to fresh while leaving the process/session/pane and any Remote-Control
+// binding intact (verified on claude 2.1.161). There is no programmatic
+// self-clear; injecting `/clear` like a human is the mechanism. It does NOT
+// verify the result — the caller asserts post-clear health (see watch's
+// ClearController). Only call when the pane is idle: `/clear` injected mid-turn
+// is undefined.
+func ClearContext(target string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	if err := exec.CommandContext(ctx, "tmux", clearKeysArgs(target)...).Run(); err != nil {
+		return fmt.Errorf("tmux send-keys /clear: %w", err)
+	}
+	// Let the TUI register the typed command before submitting (mirrors Send's
+	// settle; without the gap the Enter can race composer ingestion).
+	select {
+	case <-time.After(clearComposeDelay):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if err := exec.CommandContext(ctx, "tmux", "send-keys", "-t", target, "--", "Enter").Run(); err != nil {
+		return fmt.Errorf("tmux send-keys enter: %w", err)
+	}
+	return nil
 }
 
 // ResolvePane returns the tmux target (session:window.pane) of the pane whose

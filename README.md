@@ -87,6 +87,10 @@ Near-term:
       `flotilla notify` and stays quiet on heartbeat acks / routine inter-agent
       traffic, so the operator ↔ XO conversation is readable from anywhere:
       [docs/xo-doctrine.md](./docs/xo-doctrine.md).
+- [x] Idle-tick context reset (opt-in `idle_context_reset`) — `watch` injects
+      `/clear` on idle heartbeats so the self-continuing clock runs in fresh
+      context instead of an ever-accumulating window, with a veto for outstanding
+      operator questions and a mandatory post-clear health assertion.
 - [ ] Release-sign-off workflow.
 - [x] Docs + an end-to-end quickstart that a newcomer can run cold — [docs/quickstart.md](./docs/quickstart.md) (cold-tested: install, send, clock).
 

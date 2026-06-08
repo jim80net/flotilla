@@ -55,6 +55,14 @@ type Config struct {
 	// HeartbeatMessage is the idempotent tick prompt; watch supplies a default
 	// when empty.
 	HeartbeatMessage string `json:"heartbeat_message,omitempty"`
+	// IdleContextReset enables idle-tick context reset: on each idle heartbeat
+	// fire, watch injects /clear into the XO pane (resetting its context to fresh)
+	// before the tick prompt, so the tick runs in a small context reconstructed
+	// from durable state instead of an ever-accumulating one. OPT-IN (default
+	// false): the behavior relies on an undocumented Claude Code dependency, so a
+	// deployment opts in deliberately. Guarded at runtime by a mandatory
+	// post-clear health assertion. See openspec change watch-idle-context-reset.
+	IdleContextReset bool `json:"idle_context_reset,omitempty"`
 
 	// heartbeatDur is HeartbeatInterval parsed once at load (0 = disabled), so
 	// consumers get a typed value instead of re-parsing the string.
