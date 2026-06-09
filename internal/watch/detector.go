@@ -10,9 +10,10 @@ import (
 )
 
 // shellDebounce is the number of CONSECUTIVE shell assessments required before a
-// desk is treated as crashed (systems-review M2). The claude-code Assess maps a
-// transient tmux read-error to StateShell, so a single blip would otherwise look
-// like a crash; requiring two consecutive reads suppresses that false alarm.
+// desk is treated as crashed (systems-review M2). Even though claude-code Assess
+// now maps a transient pane-command read-error to StateUnknown (not StateShell),
+// a desk genuinely mid-restart can momentarily present a real bare shell;
+// requiring two consecutive StateShell reads suppresses that false alarm.
 const shellDebounce = 2
 
 // snapshotWriteFailThreshold is how many consecutive snapshot-write failures
