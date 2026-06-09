@@ -8,13 +8,13 @@ import (
 )
 
 // paneTargetFormat is the -F format that asks tmux's new-window / new-session to
-// PRINT (-P) the created pane's target as "session:window.pane". relaunch reads
+// PRINT (-P) the created pane's target as "session:window.pane". resume reads
 // it back so the freshly-created pane can be tagged + reported without a second
 // list-panes scan.
 const paneTargetFormat = "#{session_name}:#{window_index}.#{pane_index}"
 
-// ResolveOutcome is the 3-way result of resolving an agent's pane for relaunch.
-// Unlike ResolvePane (which collapses none/ambiguous into an error), relaunch
+// ResolveOutcome is the 3-way result of resolving an agent's pane for resume.
+// Unlike ResolvePane (which collapses none/ambiguous into an error), resume
 // needs to DISCRIMINATE them: ResolveUnique respawns in place, ResolveNone cold-
 // creates, ResolveAmbiguous refuses.
 type ResolveOutcome int
@@ -26,11 +26,11 @@ const (
 	// ResolveNone: no pane resolves — genuine cold recovery. target is empty.
 	ResolveNone
 	// ResolveAmbiguous: more than one pane matches (mis-tagged fleet or duplicate
-	// title) — relaunch refuses rather than creating a third pane. target is empty.
+	// title) — resume refuses rather than creating a third pane. target is empty.
 	ResolveAmbiguous
 )
 
-// Resolve resolves an agent's pane for relaunch with a 3-way outcome, sharing the
+// Resolve resolves an agent's pane for resume with a 3-way outcome, sharing the
 // marker-first / title-fallback precedence with ResolvePane (both call
 // classifyPanes). The marker — not the window — is the source of truth for "does
 // this desk's pane already exist", consistent with ResolvePane's two-tier
@@ -43,7 +43,7 @@ func Resolve(want string) (target string, outcome ResolveOutcome, err error) {
 	defer cancel()
 	out, lerr := exec.CommandContext(ctx, "tmux", "list-panes", "-a", "-F", paneListFormat).Output()
 	if lerr != nil {
-		// Exit 1 = no tmux server running → treat as "no pane" so relaunch takes
+		// Exit 1 = no tmux server running → treat as "no pane" so resume takes
 		// the cold-create path (NewSession cold-starts the server). Any OTHER
 		// failure (timeout, permission, a wedged socket) is surfaced as an error —
 		// silently turning it into a cold-create would mask a real problem and could
@@ -74,7 +74,7 @@ func Resolve(want string) (target string, outcome ResolveOutcome, err error) {
 }
 
 // HasSession reports whether a tmux session exists (`tmux has-session`). Used by
-// relaunch's cold-create branch to decide between NewSession (cold-start the
+// resume's cold-create branch to decide between NewSession (cold-start the
 // server / first window) and NewWindow (add a window to a live session). It
 // returns (true, nil) if the session exists, (false, nil) if it does not (tmux
 // exit 1 — also covers "no tmux server at all", which cold-create handles), and
@@ -148,7 +148,7 @@ func NewSession(session, name, cwd, launch string) (target string, err error) {
 }
 
 // ReadMarker reads a pane's @flotilla_agent marker back (`tmux display-message`),
-// trimmed. relaunch uses it after RespawnPane to CONFIRM the reused pane's marker
+// trimmed. resume uses it after RespawnPane to CONFIRM the reused pane's marker
 // still equals the agent's key (a respawn reuses the pane id, so the per-pane
 // option survives — this verifies it did). Mirrors TagPane's read-back pattern.
 func ReadMarker(target string) (string, error) {

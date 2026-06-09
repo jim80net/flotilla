@@ -134,10 +134,10 @@ false-alarms). A wide-mode (`none`) idle fleet keeps the XO acking via the wide
 safety ping.
 
 In both cases the alert fires once on the down-transition and clears on recovery.
-Recovery is manual today: `flotilla relaunch <xo>` restarts the XO from its
-host-local launch recipe (see the quickstart's `flotilla relaunch` section).
-`relaunch` is the deterministic building block the future opt-in
-`watch --relaunch-xo` will call on the down-transition to auto-respawn the XO
+Recovery is manual today: `flotilla resume <xo>` restarts the XO from its
+host-local launch recipe (see the quickstart's `flotilla resume` section).
+`resume` is the deterministic building block the future opt-in
+`watch --resume-xo` will call on the down-transition to auto-respawn the XO
 (guarded by a storm rate-limiter) — that auto-composition is the next milestone;
 the manual command lands first. Under the change-detector, a freshly-restarted
 XO is not auto-woken to resume coordination (a restart implies fresh context and

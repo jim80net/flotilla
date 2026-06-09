@@ -112,9 +112,9 @@ flotilla register infra --pane demo:0.0     # or a pane id like %4
 The marker (a tmux per-pane `@flotilla_agent` user-option) is surface-agnostic
 and falls back to title matching for any untagged pane, so it is purely additive.
 
-### (Re)start a dead desk: `flotilla relaunch`
+### (Re)start a dead desk: `flotilla resume`
 
-When a desk's process dies — or the whole tmux server dies — `relaunch`
+When a desk's process dies — or the whole tmux server dies — `resume`
 deterministically restarts it from a **host-local launch recipe**: the desk's
 launch command and working directory (plus an optional tmux target and a state
 pointer). The recipes live in a **separate, gitignored, host-local file** — a
@@ -147,20 +147,20 @@ already write `flotilla-secrets.env`.
 - `tmux` *(optional)* — the `session:window` to create the pane in; default
   `flotilla:<name>`.
 - `state` *(optional)* — a pointer to the desk's handoff/context doc, **printed**
-  for you to drive `/takeover` (relaunch does **not** auto-restore context).
+  for you to drive `/takeover` (resume does **not** auto-restore context).
 
 ```sh
-flotilla relaunch infra            # default launch file: <roster-dir>/flotilla-launch.json
-flotilla relaunch infra --force    # relaunch even if the pane is a LIVE session (kills it first)
+flotilla resume infra            # default launch file: <roster-dir>/flotilla-launch.json
+flotilla resume infra --force    # resume even if the pane is a LIVE session (kills it first)
 ```
 
-`relaunch` resolves the desk by its stable marker first: an existing pane is
+`resume` resolves the desk by its stable marker first: an existing pane is
 **respawned in place** (and **refuses a live session** unless `--force` —
 restart is not resume-and-act); a mis-tagged (ambiguous) fleet is **refused**;
 with no pane it **cold-creates** the desk's window — cold-starting the tmux
 server if the whole server died — and tags it. Load is **fail-closed**: a single
 malformed recipe blocks the whole file, so fix the bad entry before any desk can
-be relaunched. The launch file matches the default `.gitignore`'s
+be resumed. The launch file matches the default `.gitignore`'s
 `/flotilla-launch.json` line; if you point `--launch` at a non-default path, you
 own keeping it out of version control.
 

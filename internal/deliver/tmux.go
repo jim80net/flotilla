@@ -139,7 +139,7 @@ func parseFields(line string) (target, title, marker string) {
 // apply. Lines are "<target>\t<title>\t<marker>"; the marker is empty for an
 // untagged pane. Field extraction (parseFields) is robust to a literal TAB inside
 // the title and to 1-/2-field format variants. Both parsePane (the delivery
-// resolver, `(string, error)`) and Resolve (the relaunch resolver, 3-way
+// resolver, `(string, error)`) and Resolve (the resume resolver, 3-way
 // outcome) call this so the marker-vs-title precedence is defined once.
 func classifyPanes(output, want string) (markerMatches, titleMatches []string) {
 	for _, line := range strings.Split(strings.TrimRight(output, "\n"), "\n") {
