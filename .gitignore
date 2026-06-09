@@ -30,3 +30,7 @@ htmlcov/
 
 # Live roster (secret-free by design, but holds your real ids — keep the example committed)
 /flotilla.json
+
+# Host-local launch recipes (holds this host's worktree paths — never commit the
+# filesystem layout; trusted at the secrets level, sibling of flotilla-secrets.env)
+/flotilla-launch.json

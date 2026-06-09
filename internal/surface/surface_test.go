@@ -73,7 +73,7 @@ func TestClaudeAssessParity(t *testing.T) {
 		captureErr error
 		want       State
 	}{
-		{"panecommand error → shell", "", boom, false, "", nil, StateShell},
+		{"panecommand error → unknown (transient glitch, not a crash)", "", boom, false, "", nil, StateUnknown},
 		{"isShell → shell", "bash", nil, true, "", nil, StateShell},
 		{"capture error → idle (fail-open)", "node", nil, false, "", boom, StateIdle},
 		{"busy spinner → working", "node", nil, false, "✻ Frosting… (3s · ↓ 25 tokens)", nil, StateWorking},

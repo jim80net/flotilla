@@ -133,25 +133,15 @@ func parseFields(line string) (target, title, marker string) {
 	return target, line[first+1 : last], line[last+1:]
 }
 
-// parsePane finds the unique target for an agent in tmux list-panes output, with
-// a two-tier precedence so a title-drifting desk stays resolvable:
-//
-//  1. MARKER (authoritative): a pane whose `@flotilla_agent` user-option equals
-//     `want`. A pane tagged once via `flotilla register` resolves here forever,
-//     regardless of how its title drifts. If two panes carry the same marker the
-//     fleet is mis-tagged → ambiguity error (never silently pick one).
-//  2. TITLE (fallback, only when no pane carries `@flotilla_agent == want`):
-//     the prior exact / single-glyph-prefix title match, so an UNtagged fleet —
-//     or an untagged agent within a partially-tagged fleet — keeps working
-//     exactly as before. (A marker on some OTHER agent's pane does NOT suppress
-//     this agent's title match; only a marker equal to THIS `want` does.)
-//
-// Lines are "<target>\t<title>\t<marker>"; the marker is empty for an untagged
-// pane. Field extraction (parseFields) is robust to a literal TAB inside the
-// title and to 1-/2-field format variants. Split out so the precedence is
-// testable without a running tmux server.
-func parsePane(output, want string) (string, error) {
-	var markerMatches, titleMatches []string
+// classifyPanes is the shared lower scan of tmux list-panes output for an agent
+// resolution key `want`. It returns every MARKER match and every TITLE match
+// (each a tmux target), preserving the two-tier precedence the resolvers above
+// apply. Lines are "<target>\t<title>\t<marker>"; the marker is empty for an
+// untagged pane. Field extraction (parseFields) is robust to a literal TAB inside
+// the title and to 1-/2-field format variants. Both parsePane (the delivery
+// resolver, `(string, error)`) and Resolve (the relaunch resolver, 3-way
+// outcome) call this so the marker-vs-title precedence is defined once.
+func classifyPanes(output, want string) (markerMatches, titleMatches []string) {
 	for _, line := range strings.Split(strings.TrimRight(output, "\n"), "\n") {
 		if line == "" {
 			continue
@@ -166,6 +156,25 @@ func parsePane(output, want string) (string, error) {
 			titleMatches = append(titleMatches, target)
 		}
 	}
+	return markerMatches, titleMatches
+}
+
+// parsePane finds the unique target for an agent in tmux list-panes output, with
+// a two-tier precedence so a title-drifting desk stays resolvable:
+//
+//  1. MARKER (authoritative): a pane whose `@flotilla_agent` user-option equals
+//     `want`. A pane tagged once via `flotilla register` resolves here forever,
+//     regardless of how its title drifts. If two panes carry the same marker the
+//     fleet is mis-tagged → ambiguity error (never silently pick one).
+//  2. TITLE (fallback, only when no pane carries `@flotilla_agent == want`):
+//     the prior exact / single-glyph-prefix title match, so an UNtagged fleet —
+//     or an untagged agent within a partially-tagged fleet — keeps working
+//     exactly as before. (A marker on some OTHER agent's pane does NOT suppress
+//     this agent's title match; only a marker equal to THIS `want` does.)
+//
+// Split out so the precedence is testable without a running tmux server.
+func parsePane(output, want string) (string, error) {
+	markerMatches, titleMatches := classifyPanes(output, want)
 
 	// Tier 1: the stable marker wins outright when present.
 	switch len(markerMatches) {

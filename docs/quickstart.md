@@ -112,6 +112,58 @@ flotilla register infra --pane demo:0.0     # or a pane id like %4
 The marker (a tmux per-pane `@flotilla_agent` user-option) is surface-agnostic
 and falls back to title matching for any untagged pane, so it is purely additive.
 
+### (Re)start a dead desk: `flotilla relaunch`
+
+When a desk's process dies — or the whole tmux server dies — `relaunch`
+deterministically restarts it from a **host-local launch recipe**: the desk's
+launch command and working directory (plus an optional tmux target and a state
+pointer). The recipes live in a **separate, gitignored, host-local file** — a
+sibling of your secrets file — because a worktree's absolute path is specific to
+this host and must not land in the committable roster. The file is trusted at
+the **secrets level**: recipes are shell-run, so anyone who can write it can
+already write `flotilla-secrets.env`.
+
+```json
+// flotilla-launch.json  (host-local; gitignored)
+{
+  "agents": {
+    "infra": {
+      "launch": "claude -w infra",
+      "cwd": "/home/me/work/infra-worktree",
+      "tmux": "flotilla:infra",
+      "state": ".claude/handoffs/latest.md"
+    },
+    "research": {
+      "launch": "cd /home/me/work/research && claude --continue",
+      "cwd": "/home/me/work/research"
+    }
+  }
+}
+```
+
+- `launch` *(required)* — the shell command that (re)starts the desk; it is the
+  pane's foreground process (so a compound `cd x && claude --continue` works).
+- `cwd` *(required, absolute)* — the working directory / worktree to launch in.
+- `tmux` *(optional)* — the `session:window` to create the pane in; default
+  `flotilla:<name>`.
+- `state` *(optional)* — a pointer to the desk's handoff/context doc, **printed**
+  for you to drive `/takeover` (relaunch does **not** auto-restore context).
+
+```sh
+flotilla relaunch infra            # default launch file: <roster-dir>/flotilla-launch.json
+flotilla relaunch infra --force    # relaunch even if the pane is a LIVE session (kills it first)
+```
+
+`relaunch` resolves the desk by its stable marker first: an existing pane is
+**respawned in place** (and **refuses a live session** unless `--force` —
+restart is not resume-and-act); a mis-tagged (ambiguous) fleet is **refused**;
+with no pane it **cold-creates** the desk's window — cold-starting the tmux
+server if the whole server died — and tags it. Load is **fail-closed**: a single
+malformed recipe blocks the whole file, so fix the bad entry before any desk can
+be relaunched. The launch file matches the default `.gitignore`'s
+`/flotilla-launch.json` line; if you point `--launch` at a non-default path, you
+own keeping it out of version control.
+
 ## 4. (Optional) Discord audit mirror
 
 To get a durable, phone-readable transcript, post every delivery to a Discord
