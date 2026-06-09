@@ -43,11 +43,15 @@ func Resolve(want string) (target string, outcome ResolveOutcome, err error) {
 	defer cancel()
 	out, lerr := exec.CommandContext(ctx, "tmux", "list-panes", "-a", "-F", paneListFormat).Output()
 	if lerr != nil {
-		// No tmux server (or a wedged one) → treat as "no pane" so relaunch takes
-		// the cold-create path, which cold-starts the server. A genuine wedge then
-		// surfaces on the subsequent new-session call (commandTimeout-bounded),
-		// not as a silent resolve failure here.
-		return "", ResolveNone, nil
+		// Exit 1 = no tmux server running → treat as "no pane" so relaunch takes
+		// the cold-create path (NewSession cold-starts the server). Any OTHER
+		// failure (timeout, permission, a wedged socket) is surfaced as an error —
+		// silently turning it into a cold-create would mask a real problem and could
+		// spawn a duplicate against a server that was actually reachable.
+		if exitErr, ok := lerr.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return "", ResolveNone, nil
+		}
+		return "", ResolveNone, fmt.Errorf("tmux list-panes: %w", lerr)
 	}
 	markerMatches, titleMatches := classifyPanes(string(out), want)
 	// Marker tier is authoritative: any marker match decides the outcome

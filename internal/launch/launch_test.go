@@ -162,7 +162,9 @@ func TestValidTmuxTarget(t *testing.T) {
 	cases := map[string]bool{
 		"flotilla:hydra-ops": true,
 		"s:w":                true,
-		"s:w.0":              false, // ".pane" suffix rejected — relaunch derives the pane
+		"s:w.0":              false, // trailing ".<digits>" = a tmux pane index, rejected
+		"s:rel-1.2":          false, // also a trailing ".<digits>" → pane-index ambiguous
+		"s:my.app":           true,  // a non-numeric dot is a legit window name
 		"flotilla":           false,
 		":w":                 false,
 		"s:":                 false,

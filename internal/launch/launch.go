@@ -130,11 +130,12 @@ func (c *Config) Recipe(agent string) (Recipe, bool) {
 }
 
 // validTmuxTarget reports whether s is a plain `session:window` target: exactly
-// one ":" with a non-empty session and a non-empty window, no ".pane" suffix in
-// the window half, and no spaces in either half. relaunch derives the pane
-// itself, so a `.pane` suffix is rejected (it would name a window literally
-// "<name>.0", diverging from the canonical flotilla:<name> convention); spaces
-// are rejected because they would break the downstream `tmux new-session
+// one ":" with a non-empty session and a non-empty window, no tmux pane-index
+// suffix on the window (a trailing ".<digits>"), and no spaces in either half.
+// relaunch derives the pane itself, so a window ending in ".<digits>" (e.g.
+// "hydra-ops.0", "rel-1.2") is rejected — tmux would parse it as a pane
+// reference, not a window name. A non-numeric dot (e.g. "my.app") is fine.
+// Spaces are rejected because they would break the downstream `tmux new-session
 // -s <session> -n <window>` argv. (\t \n \r are already rejected by the caller
 // before this runs.)
 func validTmuxTarget(s string) bool {
@@ -146,13 +147,27 @@ func validTmuxTarget(s string) bool {
 	if strings.Contains(window, ":") {
 		return false
 	}
-	// A ".pane" suffix in the window half — relaunch derives the pane.
-	if strings.Contains(window, ".") {
+	// A trailing ".<digits>" is a tmux pane index — relaunch derives the pane, so
+	// it must not be baked into the window name.
+	if i := strings.LastIndexByte(window, '.'); i >= 0 && isAllDigits(window[i+1:]) {
 		return false
 	}
 	// Spaces would break the tmux argv for the cold-create commands.
 	if strings.ContainsRune(session, ' ') || strings.ContainsRune(window, ' ') {
 		return false
+	}
+	return true
+}
+
+// isAllDigits reports whether s is non-empty and entirely ASCII digits.
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
 	}
 	return true
 }

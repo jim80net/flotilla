@@ -176,9 +176,11 @@ func runRelaunch(ops relaunchOps, p relaunchPlan) (string, error) {
 			return "", err
 		}
 		// The cold-create branch is the only one that creates the marker. TagPane's
-		// read-back confirms it landed on the intended pane.
+		// read-back confirms it landed on the intended pane. If tagging fails the
+		// desk is ALREADY running (untagged) — say so, so the operator tags it
+		// rather than re-relaunching into a second pane.
 		if err := ops.tag(newTarget, p.key); err != nil {
-			return "", err
+			return "", fmt.Errorf("launched %s at %s but tagging failed: %w — the desk IS running; tag it with: flotilla register %s --pane %s", p.agent, newTarget, err, p.agent, newTarget)
 		}
 		return fmt.Sprintf("relaunched %s (cold) → pane %s (tagged @flotilla_agent=%s)\n", p.agent, newTarget, p.key), nil
 	}
