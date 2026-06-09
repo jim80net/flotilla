@@ -39,6 +39,8 @@ func run(args []string) error {
 		return cmdWatch(args[1:])
 	case "register":
 		return cmdRegister(args[1:])
+	case "relaunch":
+		return cmdRelaunch(args[1:])
 	case "version", "-v", "--version":
 		fmt.Println("flotilla " + version)
 		return nil
@@ -60,6 +62,7 @@ usage:
   flotilla notify --from <agent> --file <path>        notify body from a file ('-' = stdin)
   flotilla watch                                      relay + XO heartbeat clock daemon
   flotilla register <agent> [--pane <target>]         tag a pane so it resolves by a stable, drift-immune marker
+  flotilla relaunch <agent> [--launch <path>] [--force]  (re)start a dead desk from its host-local launch recipe
   flotilla version
   flotilla help
 
@@ -118,7 +121,24 @@ the agent by that key instead of the tmux pane title. Claude Code retitles its
 pane to a task summary every turn, which breaks title-based resolution; the
 marker is immune to that drift. Run 'flotilla register <name>' once inside each
 desk's pane at launch, or re-tag an already-drifted desk from elsewhere with
-'flotilla register <name> --pane <target>' (no need to interrupt the desk).`)
+'flotilla register <name> --pane <target>' (no need to interrupt the desk).
+
+flags for 'relaunch':
+  --roster <path>   roster config (default ./flotilla.json or $FLOTILLA_ROSTER)
+  --launch <path>   host-local launch recipes (default $FLOTILLA_LAUNCH, else <roster-dir>/flotilla-launch.json)
+  --force           relaunch even if the desk is a LIVE session (kills it first)
+
+relaunch deterministically (re)starts a desk from its host-local launch recipe
+(launch command + working directory, optional tmux target + state pointer). It
+resolves the desk by its stable marker first: an existing pane is respawned in
+place (refusing a LIVE session unless --force — restart is not resume-and-act);
+an ambiguous (mis-tagged) fleet is refused; with no pane it cold-creates the
+desk's window (cold-starting the tmux server if the whole server died) and tags
+it. The launch file is HOST-LOCAL and gitignored (a sibling of
+flotilla-secrets.env), trusted at the secrets level — recipes are shell-run, so
+anyone who can write it can already write your secrets. relaunch (re)starts the
+process and ensures it is tagged; it does NOT restore context — drive /takeover
+from the printed state pointer yourself.`)
 }
 
 func rosterDefault() string {
