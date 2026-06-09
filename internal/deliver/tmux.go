@@ -107,6 +107,32 @@ func ResolvePane(want string) (string, error) {
 	return parsePane(string(out), want)
 }
 
+// parseFields splits one tmux list-panes line "<target>\t<title>\t<marker>"
+// into its three fields, ROBUST to a literal tab inside the title. A greedy
+// SplitN would mis-assign a tab-containing title's tail to the marker field,
+// silently un-resolving a registered desk (a TUI's pane title is external and
+// can contain a tab; the marker field we control is roster-validated tab-free).
+// We exploit the two invariants instead: the target (a tmux session:window.pane
+// id) never contains a tab, and the marker never contains a tab — so the target
+// is everything before the FIRST tab, the marker everything after the LAST tab,
+// and the title is whatever lies between (tabs and all). Fewer than two tabs
+// degrades gracefully: one tab → "<target>\t<title>" (no marker); none →
+// target-only.
+func parseFields(line string) (target, title, marker string) {
+	first := strings.IndexByte(line, '\t')
+	if first < 0 {
+		return line, "", ""
+	}
+	target = line[:first]
+	last := strings.LastIndexByte(line, '\t')
+	if last == first {
+		// Exactly one tab: a 2-field variant — the second field is the title and
+		// there is no marker.
+		return target, line[first+1:], ""
+	}
+	return target, line[first+1 : last], line[last+1:]
+}
+
 // parsePane finds the unique target for an agent in tmux list-panes output, with
 // a two-tier precedence so a title-drifting desk stays resolvable:
 //
@@ -121,8 +147,8 @@ func ResolvePane(want string) (string, error) {
 //     this agent's title match; only a marker equal to THIS `want` does.)
 //
 // Lines are "<target>\t<title>\t<marker>"; the marker is empty for an untagged
-// pane. A line missing the marker field (2-field) is tolerated (marker empty),
-// so the function is robust to format variants. Split out so the precedence is
+// pane. Field extraction (parseFields) is robust to a literal TAB inside the
+// title and to 1-/2-field format variants. Split out so the precedence is
 // testable without a running tmux server.
 func parsePane(output, want string) (string, error) {
 	var markerMatches, titleMatches []string
@@ -130,15 +156,7 @@ func parsePane(output, want string) (string, error) {
 		if line == "" {
 			continue
 		}
-		fields := strings.SplitN(line, "\t", 3)
-		target := fields[0]
-		var title, marker string
-		if len(fields) > 1 {
-			title = fields[1]
-		}
-		if len(fields) > 2 {
-			marker = fields[2]
-		}
+		target, title, marker := parseFields(line)
 		// An empty marker never matches (an untagged pane is title-only); only a
 		// non-empty marker equal to want is authoritative.
 		if marker != "" && marker == want {

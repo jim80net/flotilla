@@ -124,6 +124,41 @@ func TestParsePaneMarkerDoesNotMatchEmptyWantOrEmptyMarker(t *testing.T) {
 	}
 }
 
+func TestParseFieldsRobustToTabInTitle(t *testing.T) {
+	// A TUI-set pane title containing a literal tab must not corrupt the marker
+	// field. target = before first tab; marker = after last tab; title = between.
+	cases := []struct {
+		line, target, title, marker string
+	}{
+		{"0:0.0\tplain title\tv12-dev", "0:0.0", "plain title", "v12-dev"},
+		{"0:0.0\thas\ta\ttab\tv12-dev", "0:0.0", "has\ta\ttab", "v12-dev"}, // tabs in title
+		{"0:0.0\tuntagged title\t", "0:0.0", "untagged title", ""},         // empty marker
+		{"0:0.0\ttwo\ttab\t", "0:0.0", "two\ttab", ""},                     // tabby title, untagged
+		{"0:0.0\tonly title", "0:0.0", "only title", ""},                   // 2-field variant
+		{"0:0.0", "0:0.0", "", ""},                                         // target-only
+	}
+	for _, c := range cases {
+		tg, ti, mk := parseFields(c.line)
+		if tg != c.target || ti != c.title || mk != c.marker {
+			t.Errorf("parseFields(%q) = (%q,%q,%q), want (%q,%q,%q)", c.line, tg, ti, mk, c.target, c.title, c.marker)
+		}
+	}
+}
+
+func TestParsePaneMarkerResolvesTitleWithLiteralTab(t *testing.T) {
+	// A registered desk whose external TUI title contains a literal tab must
+	// still resolve by its marker — the bug a greedy SplitN would introduce.
+	out := "0:0.0\t⠂ hydra-ops\t\n" +
+		"0:0.2\t✳ build\tstep\t2\tmacro-desk-dev\n" // title has tabs; marker is last field
+	got, err := parsePane(out, "macro-desk-dev")
+	if err != nil {
+		t.Fatalf("parsePane(tabbed title, marker): %v", err)
+	}
+	if got != "0:0.2" {
+		t.Errorf("target = %q, want 0:0.2 (resolved by marker despite tabs in title)", got)
+	}
+}
+
 func TestTitleMatches(t *testing.T) {
 	cases := []struct {
 		title, want string
