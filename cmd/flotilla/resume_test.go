@@ -8,7 +8,7 @@ import (
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
-func TestParseRelaunchArgs(t *testing.T) {
+func TestParseResumeArgs(t *testing.T) {
 	// Pin $FLOTILLA_LAUNCH so the --launch default is deterministic across hosts.
 	t.Setenv("FLOTILLA_LAUNCH", "")
 	cases := []struct {
@@ -31,15 +31,15 @@ func TestParseRelaunchArgs(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			agent, _, launchPath, force, err := parseRelaunchArgs(c.args)
+			agent, _, launchPath, force, err := parseResumeArgs(c.args)
 			if c.wantErr {
 				if err == nil {
-					t.Fatalf("parseRelaunchArgs(%v) = nil error, want error", c.args)
+					t.Fatalf("parseResumeArgs(%v) = nil error, want error", c.args)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("parseRelaunchArgs(%v): %v", c.args, err)
+				t.Fatalf("parseResumeArgs(%v): %v", c.args, err)
 			}
 			if agent != c.wantAgent {
 				t.Errorf("agent = %q, want %q", agent, c.wantAgent)
@@ -54,31 +54,31 @@ func TestParseRelaunchArgs(t *testing.T) {
 	}
 }
 
-func TestParseRelaunchArgsEnvDefault(t *testing.T) {
+func TestParseResumeArgsEnvDefault(t *testing.T) {
 	// $FLOTILLA_LAUNCH pre-fills the --launch default (mirrors watch's env-var
 	// defaults), overriding the roster-relative fallback.
 	t.Setenv("FLOTILLA_LAUNCH", "/env/launch.json")
-	_, _, launchPath, _, err := parseRelaunchArgs([]string{"hydra-ops"})
+	_, _, launchPath, _, err := parseResumeArgs([]string{"hydra-ops"})
 	if err != nil {
-		t.Fatalf("parseRelaunchArgs: %v", err)
+		t.Fatalf("parseResumeArgs: %v", err)
 	}
 	if launchPath != "/env/launch.json" {
 		t.Errorf("launchPath = %q, want /env/launch.json (from $FLOTILLA_LAUNCH)", launchPath)
 	}
 }
 
-// relaunchRec records which side effects runRelaunch performed, so the safety
+// resumeRec records which side effects runResume performed, so the safety
 // matrix can assert "refused → nothing killed" / "dead → respawned" / etc.
-type relaunchRec struct {
+type resumeRec struct {
 	respawned, tagged, newSession, newWindow bool
 	tagTarget                                string
 }
 
-// fakeOps builds relaunchOps from a fixed resolution + assessment + marker
-// read-back, recording side effects — exercising runRelaunch's decision core
+// fakeOps builds resumeOps from a fixed resolution + assessment + marker
+// read-back, recording side effects — exercising runResume's decision core
 // without a live tmux server or a real agent.
-func fakeOps(rec *relaunchRec, target string, outcome deliver.ResolveOutcome, st surface.State, marker string, hasSess bool) relaunchOps {
-	return relaunchOps{
+func fakeOps(rec *resumeRec, target string, outcome deliver.ResolveOutcome, st surface.State, marker string, hasSess bool) resumeOps {
+	return resumeOps{
 		resolve:    func(string) (string, deliver.ResolveOutcome, error) { return target, outcome, nil },
 		assess:     func(string) surface.State { return st },
 		respawn:    func(string, string, string) error { rec.respawned = true; return nil },
@@ -90,17 +90,17 @@ func fakeOps(rec *relaunchRec, target string, outcome deliver.ResolveOutcome, st
 	}
 }
 
-// TestRunRelaunchSafetyMatrix pins the two P1 invariants: a live (or
+// TestRunResumeSafetyMatrix pins the two P1 invariants: a live (or
 // can't-confirm-dead) pane is NEVER respawned without --force, and the marker is
 // never duplicated. Without this, the safety-critical interlock was untested.
-func TestRunRelaunchSafetyMatrix(t *testing.T) {
-	plan := relaunchPlan{agent: "v12-dev", key: "v12-dev", cwd: "/w", launch: "sleep 1", session: "flotilla", window: "v12-dev"}
+func TestRunResumeSafetyMatrix(t *testing.T) {
+	plan := resumePlan{agent: "v12-dev", key: "v12-dev", cwd: "/w", launch: "sleep 1", session: "flotilla", window: "v12-dev"}
 	forced := plan
 	forced.force = true
 
 	cases := []struct {
 		name                                                   string
-		plan                                                   relaunchPlan
+		plan                                                   resumePlan
 		target                                                 string
 		outcome                                                deliver.ResolveOutcome
 		st                                                     surface.State
@@ -131,9 +131,9 @@ func TestRunRelaunchSafetyMatrix(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			rec := &relaunchRec{}
+			rec := &resumeRec{}
 			ops := fakeOps(rec, c.target, c.outcome, c.st, c.marker, c.hasSess)
-			_, err := runRelaunch(ops, c.plan)
+			_, err := runResume(ops, c.plan)
 			if c.wantErr != (err != nil) {
 				t.Fatalf("err = %v, wantErr = %v", err, c.wantErr)
 			}
@@ -153,7 +153,7 @@ func TestRunRelaunchSafetyMatrix(t *testing.T) {
 	}
 }
 
-func TestRelaunchTmuxTarget(t *testing.T) {
+func TestResumeTmuxTarget(t *testing.T) {
 	cases := []struct {
 		name        string
 		recipe      launch.Recipe
@@ -167,9 +167,9 @@ func TestRelaunchTmuxTarget(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			s, w := relaunchTmuxTarget(c.recipe, c.agent)
+			s, w := resumeTmuxTarget(c.recipe, c.agent)
 			if s != c.wantSession || w != c.wantWindow {
-				t.Errorf("relaunchTmuxTarget = (%q,%q), want (%q,%q)", s, w, c.wantSession, c.wantWindow)
+				t.Errorf("resumeTmuxTarget = (%q,%q), want (%q,%q)", s, w, c.wantSession, c.wantWindow)
 			}
 		})
 	}
