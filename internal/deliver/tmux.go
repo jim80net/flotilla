@@ -13,8 +13,18 @@ import (
 	"unicode/utf8"
 )
 
-// paneListFormat asks tmux for every pane as "<target>\t<title>".
-const paneListFormat = "#{session_name}:#{window_index}.#{pane_index}\t#{pane_title}"
+// agentMarker is the tmux per-pane user-option flotilla tags a pane with, so a
+// desk is resolvable by a STABLE key immune to title drift. Claude Code (and
+// other TUIs) retitle their pane to a task summary every turn, which breaks
+// title-based resolution; a user-option set once (via `flotilla register`)
+// survives every retitle. It is surface-agnostic (any TUI's pane can carry it),
+// which also preps the drivable-surfaces lane.
+const agentMarker = "@flotilla_agent"
+
+// paneListFormat asks tmux for every pane as "<target>\t<title>\t<marker>".
+// The marker field is empty for an untagged pane (tmux expands an unset
+// user-option to the empty string).
+const paneListFormat = "#{session_name}:#{window_index}.#{pane_index}\t#{pane_title}\t#{" + agentMarker + "}"
 
 // commandTimeout bounds every tmux invocation so a wedged tmux server cannot
 // hang flotilla indefinitely.
@@ -80,9 +90,13 @@ func ClearContext(target string) error {
 	return nil
 }
 
-// ResolvePane returns the tmux target (session:window.pane) of the pane whose
-// title matches want. It errors if no pane — or more than one pane — matches,
-// so an ambiguous fleet never silently mis-delivers.
+// ResolvePane returns the tmux target (session:window.pane) of the pane for the
+// agent resolution key `want`. It resolves by a stable `@flotilla_agent` marker
+// first (immune to title drift) and falls back to the pane title; it errors if
+// no pane — or more than one — matches, so an ambiguous fleet never silently
+// mis-delivers. `want` is the agent's resolution key (its name, or its roster
+// `tmux_title` override), the same value `flotilla register` records as the
+// marker.
 func ResolvePane(want string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
@@ -93,36 +107,130 @@ func ResolvePane(want string) (string, error) {
 	return parsePane(string(out), want)
 }
 
-// parsePane finds the unique target for a pane title in tmux list-panes output.
-// Split out so the matching logic is testable without a running tmux server.
+// parseFields splits one tmux list-panes line "<target>\t<title>\t<marker>"
+// into its three fields, ROBUST to a literal tab inside the title. A greedy
+// SplitN would mis-assign a tab-containing title's tail to the marker field,
+// silently un-resolving a registered desk (a TUI's pane title is external and
+// can contain a tab; the marker field we control is roster-validated tab-free).
+// We exploit the two invariants instead: the target (a tmux session:window.pane
+// id) never contains a tab, and the marker never contains a tab — so the target
+// is everything before the FIRST tab, the marker everything after the LAST tab,
+// and the title is whatever lies between (tabs and all). Fewer than two tabs
+// degrades gracefully: one tab → "<target>\t<title>" (no marker); none →
+// target-only.
+func parseFields(line string) (target, title, marker string) {
+	first := strings.IndexByte(line, '\t')
+	if first < 0 {
+		return line, "", ""
+	}
+	target = line[:first]
+	last := strings.LastIndexByte(line, '\t')
+	if last == first {
+		// Exactly one tab: a 2-field variant — the second field is the title and
+		// there is no marker.
+		return target, line[first+1:], ""
+	}
+	return target, line[first+1 : last], line[last+1:]
+}
+
+// parsePane finds the unique target for an agent in tmux list-panes output, with
+// a two-tier precedence so a title-drifting desk stays resolvable:
+//
+//  1. MARKER (authoritative): a pane whose `@flotilla_agent` user-option equals
+//     `want`. A pane tagged once via `flotilla register` resolves here forever,
+//     regardless of how its title drifts. If two panes carry the same marker the
+//     fleet is mis-tagged → ambiguity error (never silently pick one).
+//  2. TITLE (fallback, only when no pane carries `@flotilla_agent == want`):
+//     the prior exact / single-glyph-prefix title match, so an UNtagged fleet —
+//     or an untagged agent within a partially-tagged fleet — keeps working
+//     exactly as before. (A marker on some OTHER agent's pane does NOT suppress
+//     this agent's title match; only a marker equal to THIS `want` does.)
+//
+// Lines are "<target>\t<title>\t<marker>"; the marker is empty for an untagged
+// pane. Field extraction (parseFields) is robust to a literal TAB inside the
+// title and to 1-/2-field format variants. Split out so the precedence is
+// testable without a running tmux server.
 func parsePane(output, want string) (string, error) {
-	var matches []string
+	var markerMatches, titleMatches []string
 	for _, line := range strings.Split(strings.TrimRight(output, "\n"), "\n") {
 		if line == "" {
 			continue
 		}
-		target, title, ok := strings.Cut(line, "\t")
-		if ok && titleMatches(title, want) {
-			matches = append(matches, target)
+		target, title, marker := parseFields(line)
+		// An empty marker never matches (an untagged pane is title-only); only a
+		// non-empty marker equal to want is authoritative.
+		if marker != "" && marker == want {
+			markerMatches = append(markerMatches, target)
+		}
+		if titleMatchesName(title, want) {
+			titleMatches = append(titleMatches, target)
 		}
 	}
-	switch len(matches) {
-	case 0:
-		return "", fmt.Errorf("no tmux pane titled %q", want)
+
+	// Tier 1: the stable marker wins outright when present.
+	switch len(markerMatches) {
 	case 1:
-		return matches[0], nil
+		return markerMatches[0], nil
 	default:
-		return "", fmt.Errorf("ambiguous: %d tmux panes titled %q (%s)", len(matches), want, strings.Join(matches, ", "))
+		if len(markerMatches) > 1 {
+			return "", fmt.Errorf("ambiguous: %d tmux panes tagged @flotilla_agent=%q (%s) — re-tag the right one with: flotilla register %s --pane <target>",
+				len(markerMatches), want, strings.Join(markerMatches, ", "), want)
+		}
+	}
+
+	// Tier 2: title fallback for an untagged fleet.
+	switch len(titleMatches) {
+	case 0:
+		return "", fmt.Errorf("no tmux pane for agent %q (no @flotilla_agent marker and no matching title) — tag it with: flotilla register %s", want, want)
+	case 1:
+		return titleMatches[0], nil
+	default:
+		return "", fmt.Errorf("ambiguous: %d tmux panes titled %q (%s) — tag the right one with: flotilla register %s --pane <target>",
+			len(titleMatches), want, strings.Join(titleMatches, ", "), want)
 	}
 }
 
-// titleMatches reports whether a tmux pane title belongs to the agent named
+// TagPane records the stable @flotilla_agent marker on a pane (`flotilla
+// register`), so the pane resolves by key regardless of later title drift. key
+// is the agent's resolution key (name, or tmux_title override) — the same value
+// ResolvePane matches against.
+func TagPane(target, key string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	// `--` stops flag parsing so a key beginning with '-' (a dash-leading agent
+	// name) is taken as the option VALUE, not mistaken for a tmux flag.
+	if err := exec.CommandContext(ctx, "tmux", "set-option", "-p", "-t", target, "--", agentMarker, key).Run(); err != nil {
+		return fmt.Errorf("tmux set-option %s for pane %q: %w", agentMarker, target, err)
+	}
+	// Read the marker back and confirm it landed on the intended pane with the
+	// intended value. A typo'd `--pane` target, or a tmux quirk that drops the
+	// option, would otherwise report success while leaving the desk silently
+	// unresolvable — the exact failure this command exists to prevent.
+	out, err := exec.CommandContext(ctx, "tmux", "display-message", "-p", "-t", target, "#{"+agentMarker+"}").Output()
+	if err != nil {
+		return fmt.Errorf("tmux verify %s for pane %q: %w", agentMarker, target, err)
+	}
+	if got := strings.TrimRight(string(out), "\n"); got != key {
+		return fmt.Errorf("tmux %s read-back mismatch for pane %q: set %q but read %q (wrong --pane target?)", agentMarker, target, key, got)
+	}
+	return nil
+}
+
+// titleMatchesName reports whether a tmux pane title belongs to the agent named
 // want. Claude Code renames its pane to "<status-glyph> <name>" (e.g.
 // "✳ v12-dev"), so exact equality fails on a live session. We accept the bare
 // name, or a SINGLE-rune glyph prefix followed by the name. Constraining the
 // prefix to one rune rejects both "v12" (substring) and "build v12-dev"
-// (an unrelated multi-word pane) as matches for "v12-dev".
-func titleMatches(title, want string) bool {
+// (an unrelated multi-word pane) as matches for "v12-dev". This is the FALLBACK
+// tier — once a pane is `flotilla register`-tagged, the marker resolves it and
+// the title no longer matters.
+func titleMatchesName(title, want string) bool {
+	// An empty want must never match (e.g. an empty title against an empty key);
+	// the marker tier already requires a non-empty value, and resolution keys are
+	// roster-validated non-empty, so this is a defensive self-guard.
+	if want == "" {
+		return false
+	}
 	title = strings.TrimSpace(title)
 	if title == want {
 		return true

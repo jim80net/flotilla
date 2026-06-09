@@ -88,6 +88,30 @@ echo "deploy when green" | flotilla send --from me --file - infra
 Without Discord configured, the audit mirror is simply skipped (you get a
 warning; delivery still succeeds). Pass `--no-mirror` to silence it.
 
+### Make resolution drift-proof: `flotilla register`
+
+`send` resolves a desk by its pane **title** — but Claude Code (and other TUIs)
+retitle their pane to a task summary every turn, so a pane launched as `infra`
+becomes `✳ Refactor the auth module` once it starts working, and title-based
+resolution then fails (`no tmux pane for agent "infra" …`). Tag the pane once
+with a **stable, drift-immune marker** instead:
+
+```sh
+flotilla register infra            # run INSIDE the infra pane (uses $TMUX_PANE)
+```
+
+After that, `flotilla send infra …` resolves by the marker no matter how the
+title drifts. Add `flotilla register <name>` to each desk's launch. To fix a
+desk that has **already** drifted, tag it from anywhere with an explicit target
+(no need to interrupt it):
+
+```sh
+flotilla register infra --pane demo:0.0     # or a pane id like %4
+```
+
+The marker (a tmux per-pane `@flotilla_agent` user-option) is surface-agnostic
+and falls back to title matching for any untagged pane, so it is purely additive.
+
 ## 4. (Optional) Discord audit mirror
 
 To get a durable, phone-readable transcript, post every delivery to a Discord
