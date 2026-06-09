@@ -57,7 +57,7 @@ positional out, parses the rest as flags, and also accepts a trailing positional
   fully solve the issue; auto-tag is an easy follow-up if the pre-drift window
   ever matters.
 - **A roster `pane_id` field.** Pane ids (`%4`) are brittle across server
-  restarts/relaunches and add config surface; the self-set marker is better.
+  restarts/resumees and add config surface; the self-set marker is better.
 
 ## Test plan
 

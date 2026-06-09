@@ -6,7 +6,7 @@
 
 flotilla coordinates a fleet of AI coding agents, each a session in a tmux
 pane. It can *deliver to* and *detect the death of* a desk — but it does **not
-record where a desk's state lives or how to relaunch it**. The roster carries
+record where a desk's state lives or how to resume it**. The roster carries
 only names (plus optional `tmux_title`, `surface`). So when a desk's process
 dies — or the whole tmux server dies — recovery requires either guessing the
 launch command/working directory or out-of-band operator knowledge. Concretely
@@ -15,7 +15,7 @@ this gap blocks three things at once:
 1. **Manual desk rebuild** — a domain desk's state lives in a worktree whose
    name need not match the agent name (e.g. `crypto-trend-dev`'s work is in the
    `spark-crypto` worktree), so there is no derivable launch command.
-2. **Auto-relaunch of the XO** — the watchdog reliably detects the XO is down
+2. **Auto-resume of the XO** — the watchdog reliably detects the XO is down
    and alerts "restart needed", but has no declared command to actually restart
    it (the recovery half of the operator's chosen hybrid posture).
 3. **The recovery skill** — `flotilla-fleet-recovery` has to *guess*
@@ -23,7 +23,7 @@ this gap blocks three things at once:
 
 Origin: 2026-06-09, the `hydra-ops` XO + the entire tmux server died overnight
 (~6.7h); `flotilla-watch` survived and (we confirmed by repro) alerts on the
-down-transition — to Discord — but nothing relaunches. Operator: *"the lack of
+down-transition — to Discord — but nothing resumees. Operator: *"the lack of
 a clear direction of where the agent state lives is a feature gap, clearly."*
 
 ## Decision (operator, 2026-06-09): host-local launch recipes (Option A)
@@ -67,7 +67,7 @@ the same reason secrets aren't in the roster.
   for the operator/skill to drive `/takeover` (the CLI does **not** auto-inject
   it — see Non-goals).
 - An agent present in the roster but absent from the launch file is "declared
-  but not relaunchable" — `relaunch` errors clearly rather than guessing.
+  but not resumable" — `resume` errors clearly rather than guessing.
 
 **Validation at load** — the full table, held to `roster.Load`'s discipline
 (systems-review hardening 2026-06-09):
@@ -75,11 +75,11 @@ the same reason secrets aren't in the roster.
 | field | rule |
 |---|---|
 | `launch` | required; non-empty; reject `\t` `\n` `\r` |
-| `cwd` | required; non-empty; **absolute** (host-independent typo guard; existence is NOT checked at load — the file may be loaded on another host — it surfaces as a clear `relaunch`-time error); reject `\t` `\n` `\r` |
-| `tmux` | optional; if present parses as a plain `session:window` — non-empty halves, no second `:`, no `.pane` suffix in the window half (relaunch derives the pane), no spaces (would break the cold-create argv); reject `\t` `\n` `\r` |
+| `cwd` | required; non-empty; **absolute** (host-independent typo guard; existence is NOT checked at load — the file may be loaded on another host — it surfaces as a clear `resume`-time error); reject `\t` `\n` `\r` |
+| `tmux` | optional; if present parses as a plain `session:window` — non-empty halves, no second `:`, no `.pane` suffix in the window half (resume derives the pane), no spaces (would break the cold-create argv); reject `\t` `\n` `\r` |
 | `state` | optional; reject `\t` `\n` `\r` (it is printed for the operator/skill to parse) |
 | every key in `agents` | must name an agent in the roster (unknown → load error; catches typos) |
-| no two recipes | may share a `tmux` target (would relaunch into the same window — mirrors roster's shared-title rejection) |
+| no two recipes | may share a `tmux` target (would resume into the same window — mirrors roster's shared-title rejection) |
 
 The reject-`\t`/`\r` rule (not just `\n`) matches `roster.go`: these values flow
 onto the TAB/NEWLINE-delimited `list-panes` wire format and into the marker.
@@ -91,8 +91,8 @@ secrets-file path — and `roster.Load`/`LoadSecrets` impose no such check eithe
 rejecting `..` would also break a legitimate relative `--launch ../shared.json`.
 
 **Load is fail-closed:** a single malformed recipe blocks loading the whole
-file, so `relaunch` for *every* desk fails until it's fixed. That is the correct
-safety posture (never relaunch on a half-parsed file), but the recovery skill
+file, so `resume` for *every* desk fails until it's fixed. That is the correct
+safety posture (never resume on a half-parsed file), but the recovery skill
 MUST document it — one bad recipe entry blocks recovering the entire fleet.
 
 **`.gitignore`:** `flotilla-launch.json` matches **no** existing ignore pattern
@@ -101,7 +101,7 @@ MUST document it — one bad recipe entry blocks recovering the entire fleet.
 worktree layout, the exact leak Option A exists to prevent. For a non-default
 `--launch` path the operator owns the leak risk (documented).
 
-## New command: `flotilla relaunch <agent>`
+## New command: `flotilla resume <agent>`
 
 The single building block both manual recovery and auto-XO consume — so its
 safety properties are **enforced in the command**, not delegated to callers
@@ -130,7 +130,7 @@ Algorithm:
        `StateAwaitingInput`, `StateAwaitingApproval`, `StateErrored` (all LIVE),
        AND `StateUnknown` (capture failed → can't confirm dead):
        `"<agent>" at <target> is <state> (not a dead shell); refusing to
-       relaunch — close it first, or pass --force`. Refuse-by-default (not
+       resume — close it first, or pass --force`. Refuse-by-default (not
        allow-by-default) makes "restart ≠ resume-and-act" a code invariant that
        every present/future caller and surface inherits; the claude surface fails
        OPEN to a live state on capture error, so "can't tell" lands on the safe
@@ -161,7 +161,7 @@ Algorithm:
      - then `deliver.TagPane(newPane, agent.Title())` (with its read-back) — the
        only branch that creates the marker.
      - **Concurrency**: resolve-by-marker-first is the primary guard — a racing
-       second `relaunch` finds the first's tagged pane and respawns in place. A
+       second `resume` finds the first's tagged pane and respawns in place. A
        residual cold-create race remains (two cold invocations both passing None
        before either tags → a second window), which is recoverable,
        operator-visible state (NOT a duplicate marker — only one pane gets
@@ -169,7 +169,7 @@ Algorithm:
        hardening, not a v1 requirement.
 
 3. Print the resolved target + the `state` pointer (if any) so the caller drives
-   `/takeover`. `relaunch` (re)starts the process and ensures it's tagged; it
+   `/takeover`. `resume` (re)starts the process and ensures it's tagged; it
    does **not** restore context (see Non-goals). All tmux calls reuse
    `deliver`'s 10s `commandTimeout`.
 
@@ -179,39 +179,39 @@ create a duplicate marker* — invariants of the building block, so every caller
 
 ## Auto-XO composition (separate PR — PR-2)
 
-`flotilla watch --relaunch-xo` (opt-in): on the watchdog **down-transition** for
-the XO, invoke the XO's relaunch recipe — guarded by a **dedicated, time-windowed
+`flotilla watch --resume-xo` (opt-in): on the watchdog **down-transition** for
+the XO, invoke the XO's resume recipe — guarded by a **dedicated, time-windowed
 rate limiter**, NOT the watchdog's debounce. (systems-review 2026-06-09: the
 watchdog's `down` flag debounces *per transition* and clears only on a real ack
 — it gives **zero** protection against a *flapping* recipe that acks once, then
-re-dies seconds later, producing a fresh down-transition → relaunch → ack →
+re-dies seconds later, producing a fresh down-transition → resume → ack →
 death spin.) So PR-2 carries its own sliding-window guard with true
-`StartLimitIntervalSec`/`StartLimitBurst` semantics: at most **N relaunches per
+`StartLimitIntervalSec`/`StartLimitBurst` semantics: at most **N resumees per
 rolling window T**, counting only deaths-within-T (so steady-state healthy
 operation never trips it, but a flap latches off after the burst). On exceeding:
-**stop auto-relaunching, alert `XO relaunch storm — auto-relaunch disabled,
+**stop auto-resuming, alert `XO resume storm — auto-resume disabled,
 manual intervention required`, and require an operator reset.** The heartbeat
-then re-orients a successfully-relaunched XO from its `state` on the next tick.
+then re-orients a successfully-resumed XO from its `state` on the next tick.
 
-Only the XO is auto-relaunched, and that asymmetry is **load-bearing, not
-arbitrary**: the XO is what notices dead *domain* desks, so auto-relaunching the
+Only the XO is auto-resumed, and that asymmetry is **load-bearing, not
+arbitrary**: the XO is what notices dead *domain* desks, so auto-resuming the
 XO bootstraps the entire manual-recovery path (if the XO is down, nothing drives
 desk recovery either). A future reader must not "simplify" by making domain desks
-auto-relaunch too — that would multiply the storm-guard surface across N desks
+auto-resume too — that would multiply the storm-guard surface across N desks
 for no bootstrapping benefit. Domain desks stay manual: the recovery skill calls
-`flotilla relaunch <name>` per dead desk.
+`flotilla resume <name>` per dead desk.
 
 ## PR split
 
 - **PR-1** (this design): launch-recipe file (load + validate) + `flotilla
-  relaunch <agent>` + docs + update the `flotilla-fleet-recovery` skill to call
-  `relaunch`. Unblocks deterministic *manual* rebuild of any desk.
-- **PR-2**: `watch --relaunch-xo` auto-relaunch on the down-transition +
+  resume <agent>` + docs + update the `flotilla-fleet-recovery` skill to call
+  `resume`. Unblocks deterministic *manual* rebuild of any desk.
+- **PR-2**: `watch --resume-xo` auto-resume on the down-transition +
   storm-guard. Composes on PR-1.
 
 ## Non-goals
 
-- Auto-relaunching **domain** desks (hybrid: XO auto, desks manual).
+- Auto-resuming **domain** desks (hybrid: XO auto, desks manual).
 - Auto-injecting `/takeover` — context restoration stays an explicit step the
   operator/skill drives (a desk could resume mid-destructive-op; restart ≠
   resume-and-act).
@@ -219,8 +219,8 @@ for no bootstrapping benefit. Domain desks stay manual: the recovery skill calls
 
 ## Backward compatibility
 
-Purely additive. No launch file → `relaunch` errors clearly; `watch` without
-`--relaunch-xo` behaves exactly as today (alert-only). The roster schema is
+Purely additive. No launch file → `resume` errors clearly; `watch` without
+`--resume-xo` behaves exactly as today (alert-only). The roster schema is
 unchanged.
 
 ## Populating the recipes (data, not code)

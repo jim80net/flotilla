@@ -55,9 +55,9 @@ func TestLoadValid(t *testing.T) {
 	if r.State != ".claude/handoffs/latest.md" {
 		t.Errorf("State = %q", r.State)
 	}
-	// An agent in the roster but absent from the launch file is not relaunchable.
+	// An agent in the roster but absent from the launch file is not resumable.
 	if _, ok := cfg.Recipe("v12-dev"); ok {
-		t.Error("Recipe(v12-dev) found, want absent (declared but not relaunchable)")
+		t.Error("Recipe(v12-dev) found, want absent (declared but not resumable)")
 	}
 }
 
@@ -95,7 +95,7 @@ func TestLoadRejects(t *testing.T) {
 }
 
 func TestLoadRejectsDuplicateTmuxTarget(t *testing.T) {
-	// Two distinct agents pointing at the same tmux target would relaunch into the
+	// Two distinct agents pointing at the same tmux target would resume into the
 	// same window — rejected (mirrors roster's shared-title rejection).
 	p := writeTemp(t, `{
 		"agents": {
@@ -124,7 +124,7 @@ func TestLoadAllowsDistinctTmuxAndEmptyTmux(t *testing.T) {
 }
 
 func TestLoadAbsentFileErrors(t *testing.T) {
-	// A genuinely absent launch file is an error (relaunch handles "no recipe"
+	// A genuinely absent launch file is an error (resume handles "no recipe"
 	// distinctly, but Load itself surfaces the read failure).
 	missing := filepath.Join(t.TempDir(), "does-not-exist.json")
 	if _, err := Load(missing, rosterAgents()); err == nil {
@@ -134,7 +134,7 @@ func TestLoadAbsentFileErrors(t *testing.T) {
 
 func TestLoadEmptyAgentsIsValid(t *testing.T) {
 	// An empty agents map is not malformed — it just declares no recipes; every
-	// relaunch then errors "no launch recipe" (a distinct, clear message).
+	// resume then errors "no launch recipe" (a distinct, clear message).
 	p := writeTemp(t, `{"agents": {}}`)
 	cfg, err := Load(p, rosterAgents())
 	if err != nil {
