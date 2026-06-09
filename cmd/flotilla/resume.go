@@ -12,10 +12,10 @@ import (
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
-// relaunchOps are the tmux + surface operations cmdRelaunch performs, injected so
-// the safety-critical decision logic in runRelaunch is unit-testable without a
+// resumeOps are the tmux + surface operations cmdResume performs, injected so
+// the safety-critical decision logic in runResume is unit-testable without a
 // live tmux server or a real agent.
-type relaunchOps struct {
+type resumeOps struct {
 	resolve    func(want string) (string, deliver.ResolveOutcome, error)
 	assess     func(target string) surface.State
 	respawn    func(target, cwd, launch string) error
@@ -26,22 +26,22 @@ type relaunchOps struct {
 	tag        func(target, key string) error
 }
 
-// relaunchPlan is the resolved per-agent input to runRelaunch.
-type relaunchPlan struct {
+// resumePlan is the resolved per-agent input to runResume.
+type resumePlan struct {
 	agent, key, cwd, launch, session, window string
 	force                                    bool
 }
 
-// cmdRelaunch deterministically (re)starts a desk from its host-local launch
+// cmdResume deterministically (re)starts a desk from its host-local launch
 // recipe. It is the single building block both manual recovery and the future
 // auto-XO (PR-2) consume, so its two P1 safety properties are ENFORCED in
-// runRelaunch, not delegated to callers: it never kills a LIVE desk (refuses
+// runResume, not delegated to callers: it never kills a LIVE desk (refuses
 // without --force) and never creates a DUPLICATE marker (resolve-by-marker-first,
 // refuse on ambiguity). The marker — not the window — is the source of truth for
 // "does this desk's pane already exist", consistent with ResolvePane's two-tier
 // precedence.
-func cmdRelaunch(args []string) error {
-	agentName, rosterPath, launchPath, force, err := parseRelaunchArgs(args)
+func cmdResume(args []string) error {
+	agentName, rosterPath, launchPath, force, err := parseResumeArgs(args)
 	if err != nil {
 		return err
 	}
@@ -56,7 +56,7 @@ func cmdRelaunch(args []string) error {
 	}
 
 	// The launch file default is a sibling of the roster, resolved AFTER roster
-	// parsing so an explicit --launch overrides it (parseRelaunchArgs leaves it
+	// parsing so an explicit --launch overrides it (parseResumeArgs leaves it
 	// empty when not given).
 	if launchPath == "" {
 		launchPath = launch.DefaultPath(rosterPath)
@@ -83,8 +83,8 @@ func cmdRelaunch(args []string) error {
 		return fmt.Errorf("agent %q: unknown surface %q (not a registered driver)", agentName, agentSurface(cfg, agentName))
 	}
 
-	session, window := relaunchTmuxTarget(recipe, agentName)
-	ops := relaunchOps{
+	session, window := resumeTmuxTarget(recipe, agentName)
+	ops := resumeOps{
 		resolve:    deliver.Resolve,
 		assess:     drv.Assess,
 		respawn:    deliver.RespawnPane,
@@ -94,11 +94,11 @@ func cmdRelaunch(args []string) error {
 		newWindow:  deliver.NewWindow,
 		tag:        deliver.TagPane,
 	}
-	plan := relaunchPlan{
+	plan := resumePlan{
 		agent: agentName, key: agent.Title(), cwd: recipe.Cwd, launch: recipe.Launch,
 		session: session, window: window, force: force,
 	}
-	msg, err := runRelaunch(ops, plan)
+	msg, err := runResume(ops, plan)
 	if err != nil {
 		return err
 	}
@@ -107,9 +107,9 @@ func cmdRelaunch(args []string) error {
 	return nil
 }
 
-// runRelaunch is the safety-critical decision core, separated from I/O so the two
+// runResume is the safety-critical decision core, separated from I/O so the two
 // P1 invariants are unit-tested. Returns the operator-facing result line.
-func runRelaunch(ops relaunchOps, p relaunchPlan) (string, error) {
+func runResume(ops resumeOps, p resumePlan) (string, error) {
 	target, outcome, err := ops.resolve(p.key)
 	if err != nil {
 		return "", err
@@ -125,7 +125,7 @@ func runRelaunch(ops relaunchOps, p relaunchPlan) (string, error) {
 		// lands on the safe side: refuse, never SIGKILL a possibly-live desk.
 		st := ops.assess(target)
 		if !p.force && st != surface.StateShell {
-			return "", fmt.Errorf("%q at %s is %s (not a dead shell); refusing to relaunch — close it first, or pass --force", p.agent, target, st)
+			return "", fmt.Errorf("%q at %s is %s (not a dead shell); refusing to resume — close it first, or pass --force", p.agent, target, st)
 		}
 		if err := ops.respawn(target, p.cwd, p.launch); err != nil {
 			return "", err
@@ -137,14 +137,14 @@ func runRelaunch(ops relaunchOps, p relaunchPlan) (string, error) {
 		}
 		switch {
 		case got == p.key:
-			return fmt.Sprintf("relaunched %s in place → pane %s (was %s, marker confirmed)\n", p.agent, target, st), nil
+			return fmt.Sprintf("resumed %s in place → pane %s (was %s, marker confirmed)\n", p.agent, target, st), nil
 		case got == "":
 			// The pane resolved by TITLE (an untagged desk — the migration case): the
 			// respawned pane has no marker, so ADOPT it by tagging rather than failing.
 			if err := ops.tag(target, p.key); err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("relaunched %s in place → pane %s (was %s, adopted: tagged @flotilla_agent=%s)\n", p.agent, target, st, p.key), nil
+			return fmt.Sprintf("resumed %s in place → pane %s (was %s, adopted: tagged @flotilla_agent=%s)\n", p.agent, target, st, p.key), nil
 		default:
 			return "", fmt.Errorf("respawned %q at %s but its @flotilla_agent marker reads %q (expected %q) — re-tag it with: flotilla register %s --pane %s", p.agent, target, got, p.key, p.agent, target)
 		}
@@ -178,30 +178,30 @@ func runRelaunch(ops relaunchOps, p relaunchPlan) (string, error) {
 		// The cold-create branch is the only one that creates the marker. TagPane's
 		// read-back confirms it landed on the intended pane. If tagging fails the
 		// desk is ALREADY running (untagged) — say so, so the operator tags it
-		// rather than re-relaunching into a second pane.
+		// rather than re-resuming into a second pane.
 		if err := ops.tag(newTarget, p.key); err != nil {
 			return "", fmt.Errorf("launched %s at %s but tagging failed: %w — the desk IS running; tag it with: flotilla register %s --pane %s", p.agent, newTarget, err, p.agent, newTarget)
 		}
-		return fmt.Sprintf("relaunched %s (cold) → pane %s (tagged @flotilla_agent=%s)\n", p.agent, newTarget, p.key), nil
+		return fmt.Sprintf("resumed %s (cold) → pane %s (tagged @flotilla_agent=%s)\n", p.agent, newTarget, p.key), nil
 	}
 }
 
 // printState surfaces the recipe's state pointer (if any) so the operator/skill
-// can drive /takeover. relaunch (re)starts the process and ensures it is tagged;
+// can drive /takeover. resume (re)starts the process and ensures it is tagged;
 // it does NOT restore context (a desk could resume mid-destructive-op; restart ≠
 // resume-and-act — see the design's Non-goals).
 func printState(r launch.Recipe) {
 	if r.State != "" {
-		fmt.Printf("  state pointer: %s (drive /takeover from here — relaunch does NOT auto-restore context)\n", r.State)
+		fmt.Printf("  state pointer: %s (drive /takeover from here — resume does NOT auto-restore context)\n", r.State)
 	}
 }
 
-// relaunchTmuxTarget derives the (session, window) to cold-create into. A recipe
+// resumeTmuxTarget derives the (session, window) to cold-create into. A recipe
 // tmux of "session:window" splits there; an absent tmux defaults to the canonical
 // "flotilla" session with the agent name as the window (the design's
 // flotilla:<name> default). Validated at load (validTmuxTarget), so the split is
 // safe here.
-func relaunchTmuxTarget(r launch.Recipe, agentName string) (session, window string) {
+func resumeTmuxTarget(r launch.Recipe, agentName string) (session, window string) {
 	if r.Tmux != "" {
 		s, w, _ := strings.Cut(r.Tmux, ":")
 		return s, w
@@ -209,20 +209,20 @@ func relaunchTmuxTarget(r launch.Recipe, agentName string) (session, window stri
 	return "flotilla", agentName
 }
 
-// parseRelaunchArgs resolves the agent, roster path, launch path, and --force
-// flag from the relaunch args, accepting the agent positional EITHER before or
+// parseResumeArgs resolves the agent, roster path, launch path, and --force
+// flag from the resume args, accepting the agent positional EITHER before or
 // after the flags (the same migration-friendly ordering parseRegisterArgs uses).
 // Pure (no roster/launch/tmux I/O) so the ordering is unit tested. launchPath is
 // returned empty when --launch was not given, so the caller can default it to a
 // roster-relative path after loading the roster.
-func parseRelaunchArgs(args []string) (agent, rosterPath, launchPath string, force bool, err error) {
+func parseResumeArgs(args []string) (agent, rosterPath, launchPath string, force bool, err error) {
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		agent, args = args[0], args[1:]
 	}
-	fs := flag.NewFlagSet("relaunch", flag.ContinueOnError)
+	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
 	rp := fs.String("roster", rosterDefault(), "roster config path")
 	lp := fs.String("launch", os.Getenv("FLOTILLA_LAUNCH"), "launch recipes path (default <roster-dir>/flotilla-launch.json)")
-	fc := fs.Bool("force", false, "relaunch even if the desk is a live session (kills it)")
+	fc := fs.Bool("force", false, "resume even if the desk is a live session (kills it)")
 	if err = fs.Parse(args); err != nil {
 		return "", "", "", false, err
 	}
@@ -231,7 +231,7 @@ func parseRelaunchArgs(args []string) (agent, rosterPath, launchPath string, for
 		agent, rest = rest[0], rest[1:]
 	}
 	if agent == "" || len(rest) != 0 {
-		return "", "", "", false, fmt.Errorf("usage: flotilla relaunch <agent> [--launch <path>] [--force]")
+		return "", "", "", false, fmt.Errorf("usage: flotilla resume <agent> [--launch <path>] [--force]")
 	}
 	return agent, *rp, *lp, *fc, nil
 }

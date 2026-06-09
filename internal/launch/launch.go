@@ -30,11 +30,11 @@ type Recipe struct {
 	// Cwd (required) is the working directory / worktree to launch in. It MUST be
 	// absolute (a host-independent typo guard); existence is NOT checked at load —
 	// the file may be loaded on another host — so a missing dir surfaces as a
-	// clear relaunch-time error, not a load error.
+	// clear resume-time error, not a load error.
 	Cwd string `json:"cwd"`
 	// Tmux (optional) is the target `session:window` to (re)create the pane in;
 	// empty defaults to `flotilla:<name>` (a canonical `flotilla` session, one
-	// window per agent) at relaunch time.
+	// window per agent) at resume time.
 	Tmux string `json:"tmux,omitempty"`
 	// State (optional) is a pointer to the desk's handoff/context doc, surfaced
 	// for the operator/skill to drive `/takeover` (the CLI does NOT auto-inject it
@@ -57,8 +57,8 @@ func DefaultPath(rosterPath string) string {
 // discipline. rosterAgents is the set of agent names declared in the roster;
 // every key in the file MUST be one of them (an unknown key is a typo and a load
 // error). Load is FAIL-CLOSED: a single malformed recipe blocks loading the whole
-// file, so relaunch for every desk fails until it is fixed — the correct safety
-// posture (never relaunch on a half-parsed file). The recovery skill must
+// file, so resume for every desk fails until it is fixed — the correct safety
+// posture (never resume on a half-parsed file). The recovery skill must
 // document that one bad entry blocks recovering the entire fleet.
 func Load(path string, rosterAgents map[string]bool) (*Config, error) {
 	raw, err := os.ReadFile(path)
@@ -70,11 +70,11 @@ func Load(path string, rosterAgents map[string]bool) (*Config, error) {
 		return nil, fmt.Errorf("parse launch recipes %q: %w", path, err)
 	}
 	// seenTmux rejects two recipes sharing a non-empty tmux target — they would
-	// relaunch into the same window, mirroring roster's shared-title rejection.
+	// resume into the same window, mirroring roster's shared-title rejection.
 	seenTmux := make(map[string]string, len(c.Agents))
 	for name, r := range c.Agents {
 		// Every key must name a roster agent (catches typos — a recipe for an
-		// agent that does not exist can never be relaunched and signals a mistake).
+		// agent that does not exist can never be resumed and signals a mistake).
 		if !rosterAgents[name] {
 			return nil, fmt.Errorf("launch recipes %q: agent %q is not in the roster (typo?)", path, name)
 		}
@@ -87,7 +87,7 @@ func Load(path string, rosterAgents map[string]bool) (*Config, error) {
 			return nil, fmt.Errorf("launch recipes %q: agent %q launch %q contains a tab/newline", path, name, r.Launch)
 		}
 		// cwd: required, non-empty, absolute (a host-independent typo guard;
-		// existence is checked at relaunch time, not load — the file may be loaded
+		// existence is checked at resume time, not load — the file may be loaded
 		// on another host).
 		if r.Cwd == "" {
 			return nil, fmt.Errorf("launch recipes %q: agent %q has an empty cwd", path, name)
@@ -108,7 +108,7 @@ func Load(path string, rosterAgents map[string]bool) (*Config, error) {
 				return nil, fmt.Errorf("launch recipes %q: agent %q tmux %q is not a valid session:window target", path, name, r.Tmux)
 			}
 			if other, dup := seenTmux[r.Tmux]; dup {
-				return nil, fmt.Errorf("launch recipes %q: agents %q and %q share tmux target %q (would relaunch into the same window)", path, other, name, r.Tmux)
+				return nil, fmt.Errorf("launch recipes %q: agents %q and %q share tmux target %q (would resume into the same window)", path, other, name, r.Tmux)
 			}
 			seenTmux[r.Tmux] = name
 		}
@@ -122,7 +122,7 @@ func Load(path string, rosterAgents map[string]bool) (*Config, error) {
 }
 
 // Recipe returns the recipe for an agent and whether one is declared. An agent
-// present in the roster but absent here is "declared but not relaunchable" — the
+// present in the roster but absent here is "declared but not resumable" — the
 // caller errors clearly rather than guessing.
 func (c *Config) Recipe(agent string) (Recipe, bool) {
 	r, ok := c.Agents[agent]
@@ -132,7 +132,7 @@ func (c *Config) Recipe(agent string) (Recipe, bool) {
 // validTmuxTarget reports whether s is a plain `session:window` target: exactly
 // one ":" with a non-empty session and a non-empty window, no tmux pane-index
 // suffix on the window (a trailing ".<digits>"), and no spaces in either half.
-// relaunch derives the pane itself, so a window ending in ".<digits>" (e.g.
+// resume derives the pane itself, so a window ending in ".<digits>" (e.g.
 // "hydra-ops.0", "rel-1.2") is rejected — tmux would parse it as a pane
 // reference, not a window name. A non-numeric dot (e.g. "my.app") is fine.
 // Spaces are rejected because they would break the downstream `tmux new-session
@@ -147,7 +147,7 @@ func validTmuxTarget(s string) bool {
 	if strings.Contains(window, ":") {
 		return false
 	}
-	// A trailing ".<digits>" is a tmux pane index — relaunch derives the pane, so
+	// A trailing ".<digits>" is a tmux pane index — resume derives the pane, so
 	// it must not be baked into the window name.
 	if i := strings.LastIndexByte(window, '.'); i >= 0 && isAllDigits(window[i+1:]) {
 		return false
