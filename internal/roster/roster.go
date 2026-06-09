@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -104,6 +105,14 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("roster %q has duplicate agent %q", path, a.Name)
 		}
 		seenName[a.Name] = true
+		// The resolution key travels on a TAB-delimited, NEWLINE-separated tmux
+		// list-panes line and is stored verbatim as the @flotilla_agent marker; a
+		// tab or newline in it would corrupt that wire format — splitting the
+		// marker (so a tagged pane never resolves) or injecting a phantom record.
+		// Reject it at load so the corruption is impossible by construction.
+		if strings.ContainsAny(a.Title(), "\t\n\r") {
+			return nil, fmt.Errorf("roster %q: agent %q resolution key %q contains a tab/newline (would corrupt tmux pane resolution)", path, a.Name, a.Title())
+		}
 		// Two agents resolving to the same tmux pane title would misroute
 		// (delivery resolves by Title()); reject it at load time.
 		if seenTitle[a.Title()] {

@@ -48,6 +48,9 @@ func TestLoadRejectsEmptyAndDup(t *testing.T) {
 		"duplicate":                      `{"agents": [{"name": "a"}, {"name": "a"}]}`,
 		"shared title":                   `{"agents": [{"name": "a", "tmux_title": "x"}, {"name": "b", "tmux_title": "x"}]}`,
 		"title collides with other name": `{"agents": [{"name": "x"}, {"name": "b", "tmux_title": "x"}]}`,
+		"tab in name":                    `{"agents": [{"name": "a\tb"}]}`,
+		"newline in name":                `{"agents": [{"name": "a\nb"}]}`,
+		"tab in tmux_title":              `{"agents": [{"name": "a", "tmux_title": "x\ty"}]}`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
