@@ -64,6 +64,66 @@ func TestParsePaneMatchesGlyphPrefixedTitle(t *testing.T) {
 	}
 }
 
+func TestParsePaneMarkerResolvesDriftedTitle(t *testing.T) {
+	// The bug: a Claude desk launched as "macro-desk-dev" retitled itself to a
+	// task summary. With the stable @flotilla_agent marker it still resolves —
+	// the title is now irrelevant.
+	out := "0:0.0\t⠂ hydra-ops\t\n" +
+		"0:0.2\t✳ Design P4 believability scorecard\tmacro-desk-dev\n"
+	got, err := parsePane(out, "macro-desk-dev")
+	if err != nil {
+		t.Fatalf("parsePane(marker, drifted title): %v", err)
+	}
+	if got != "0:0.2" {
+		t.Errorf("target = %q, want 0:0.2 (resolved by marker despite drifted title)", got)
+	}
+}
+
+func TestParsePaneMarkerWinsOverTitleOfAnotherPane(t *testing.T) {
+	// Pane A carries the marker (its title drifted); pane B coincidentally has a
+	// title that would match. The authoritative marker must win.
+	out := "0:0.1\t✳ some drifted summary\tv12-dev\n" + // marker pane (drifted title)
+		"0:0.9\tv12-dev\t\n" // title-coincidence pane, untagged
+	got, err := parsePane(out, "v12-dev")
+	if err != nil {
+		t.Fatalf("parsePane: %v", err)
+	}
+	if got != "0:0.1" {
+		t.Errorf("target = %q, want 0:0.1 (marker is authoritative over a title match)", got)
+	}
+}
+
+func TestParsePaneMarkerAmbiguousIsError(t *testing.T) {
+	// Two panes tagged with the same marker = a mis-tagged fleet → never pick one.
+	out := "0:0.1\tfoo\tv12-dev\n1:0.0\tbar\tv12-dev\n"
+	if _, err := parsePane(out, "v12-dev"); err == nil {
+		t.Error("parsePane(duplicate marker) = nil error, want ambiguity error")
+	}
+}
+
+func TestParsePaneFallsBackToTitleWhenNoMarker(t *testing.T) {
+	// A fully untagged fleet (empty marker fields) resolves by title exactly as
+	// before — backward compatibility.
+	out := "0:0.0\thydra-ops\t\n0:0.3\t✳ v12-dev\t\n"
+	got, err := parsePane(out, "v12-dev")
+	if err != nil {
+		t.Fatalf("parsePane(title fallback): %v", err)
+	}
+	if got != "0:0.3" {
+		t.Errorf("target = %q, want 0:0.3 (glyph title fallback)", got)
+	}
+}
+
+func TestParsePaneMarkerDoesNotMatchEmptyWantOrEmptyMarker(t *testing.T) {
+	// An empty marker must never match (an untagged pane is title-only). Searching
+	// a real name against a fleet of empty markers falls through to title (and
+	// here finds nothing) — it must not match an empty-marker pane.
+	out := "0:0.0\tsomething\t\n0:0.1\tother\t\n"
+	if _, err := parsePane(out, "macro-desk-dev"); err == nil {
+		t.Error("empty markers must not match a non-empty want; expected not-found error")
+	}
+}
+
 func TestTitleMatches(t *testing.T) {
 	cases := []struct {
 		title, want string
@@ -77,10 +137,13 @@ func TestTitleMatches(t *testing.T) {
 		{"my v12-dev", "v12-dev", false}, // multi-word prefix is not a glyph
 		{"build v12-dev", "v12-dev", false},
 		{"foo bar v12-dev", "v12-dev", false},
+		{"", "", false},         // empty want must never match (defensive self-guard)
+		{"   ", "", false},      // whitespace-only title vs empty want must not match
+		{"anything", "", false}, // empty want against any title
 	}
 	for _, c := range cases {
-		if got := titleMatches(c.title, c.want); got != c.match {
-			t.Errorf("titleMatches(%q, %q) = %v, want %v", c.title, c.want, got, c.match)
+		if got := titleMatchesName(c.title, c.want); got != c.match {
+			t.Errorf("titleMatchesName(%q, %q) = %v, want %v", c.title, c.want, got, c.match)
 		}
 	}
 }
