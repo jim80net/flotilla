@@ -37,6 +37,8 @@ func run(args []string) error {
 		return cmdNotify(args[1:])
 	case "watch":
 		return cmdWatch(args[1:])
+	case "register":
+		return cmdRegister(args[1:])
 	case "version", "-v", "--version":
 		fmt.Println("flotilla " + version)
 		return nil
@@ -57,6 +59,7 @@ usage:
   flotilla notify --from <agent> <message>            post to the operator under <agent>'s webhook (no tmux)
   flotilla notify --from <agent> --file <path>        notify body from a file ('-' = stdin)
   flotilla watch                                      relay + XO heartbeat clock daemon
+  flotilla register <agent> [--pane <target>]         tag a pane so it resolves by a stable, drift-immune marker
   flotilla version
   flotilla help
 
@@ -104,7 +107,18 @@ and adds the inbound relay when channel_id + operator_user_id + a bot token are
 configured. The clock target and interval come from the roster (xo_agent,
 heartbeat_interval). By default the clock is the legacy always-wake heartbeat;
 set change_detector: true (with liveness_ping_mode none|interval|consecutive) to
-wake the XO only on a material change — an idle fleet then costs nothing.`)
+wake the XO only on a material change — an idle fleet then costs nothing.
+
+flags for 'register':
+  --roster <path>   roster config (default ./flotilla.json or $FLOTILLA_ROSTER)
+  --pane <target>   tmux pane to tag (default $TMUX_PANE — the pane this runs in)
+
+register tags a pane with a stable @flotilla_agent marker so flotilla resolves
+the agent by that key instead of the tmux pane title. Claude Code retitles its
+pane to a task summary every turn, which breaks title-based resolution; the
+marker is immune to that drift. Run 'flotilla register <name>' once inside each
+desk's pane at launch, or re-tag an already-drifted desk from elsewhere with
+'flotilla register <name> --pane <target>' (no need to interrupt the desk).`)
 }
 
 func rosterDefault() string {
