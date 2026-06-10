@@ -42,10 +42,12 @@ var defaultRelayBackoff = relayBackoff{initial: 5 * time.Second, max: 2 * time.M
 // the relay's sustained-down state is escalated ONCE to the operator via the
 // down-alert webhook. By attempt 5 the network is almost certainly up (a normal
 // boot-DNS-blip recovers in attempts 1-2), so a still-failing relay is a genuine
-// misconfiguration (bad bot token) or a real outage — surface it loudly. The
-// counter resets on any success, so each sustained down-episode alerts exactly
-// once. Replaces the silent-misconfig guard the old StartLimitBurst give-up
-// provided, WITHOUT coupling to discordgo's close-code/error-string internals.
+// misconfiguration (bad bot token) or a real outage — surface it loudly. On a
+// successful open the retry goroutine exits, so a STARTUP down-episode escalates
+// exactly once; a later disconnect after the relay is up is handled by discordgo's
+// internal auto-reconnect (this controller no longer monitors it). Replaces the
+// silent-misconfig guard the old StartLimitBurst give-up provided, WITHOUT coupling
+// to discordgo's close-code/error-string internals.
 const escalateThreshold = 5
 
 // shutdownJoinTimeout bounds Shutdown's wait for the retry goroutine to exit. The
@@ -121,8 +123,9 @@ func (rc *relayController) Start(ctx context.Context) {
 //
 // It tracks CONSECUTIVE failures and, when the count crosses escalateThreshold,
 // fires the operator-facing escalate ONCE (then keeps retrying forever, so a long
-// outage still self-heals on recovery). A success resets the counter so each
-// sustained down-episode alerts exactly once.
+// outage still self-heals on recovery). On success the goroutine exits — so the
+// startup down-episode it manages escalates exactly once; re-arming would require a
+// fresh Start (a post-recovery disconnect is discordgo's auto-reconnect, not this).
 //
 // A successful open is published to rc.gw (under the mutex) before the goroutine
 // exits, then done is closed — so a clean Shutdown join always observes the final

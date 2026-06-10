@@ -85,10 +85,11 @@ a real outage. By the 5th attempt the network is almost certainly back, so
 It does **not** alert again for the same down-episode (one alert per sustained
 outage), and it keeps retrying forever in the background — so a long outage still
 self-heals on recovery (you'll see `inbound relay active (recovered)` when it
-does). The escalation counter resets on any successful open, so a *later*
-sustained outage alerts again. This replaces the silent-misconfiguration guard the
-old `StartLimitBurst` give-up used to provide (it now surfaces the same condition
-loudly instead of killing the daemon).
+does). The escalation covers the **startup** down-episode the controller manages:
+once the relay is up, the retry goroutine exits and a *later* disconnect is handled
+by discordgo's internal auto-reconnect (not re-escalated via this path). This
+replaces the silent-misconfiguration guard the old `StartLimitBurst` give-up used to
+provide (it now surfaces the same condition loudly instead of killing the daemon).
 
 This is the fix for the 2026-06-10 power-failure crash-loop: previously a failed
 `gw.Open()` returned a fatal error, killing the already-running clock; the unit's

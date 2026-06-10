@@ -6,13 +6,14 @@ Wants=network-online.target
 # Give up after 5 failed starts, then require a manual restart — this guards
 # GENUINELY-fatal LOCAL startup errors (a malformed roster, an unknown surface, a
 # broken secrets file), which still `return err` fatally before the relay block.
-# The window is 600s (not 300s) so the burst can actually trip: each restart cycle
-# is now RestartSec 15s + the ExecStartPre DNS-readiness wait (up to ~62s) ≈ 77s,
-# so 5 cycles span ≈ 385s — which would NOT fit in a 300s window (the limiter
-# would never engage), but comfortably fits in 600s. A transient relay-open failure
-# is NO LONGER one of these fatal errors (the daemon degrades to clock-only and
-# retries the gateway in the background), so a cold-boot DNS blip can never exhaust
-# the burst limit.
+# The window is widened to 600s (from 300s) as defensive margin. Post-fix, a
+# genuinely-fatal LOCAL error fails fast with DNS already up, so its ExecStartPre
+# wait is ~0s and 5 restart cycles span only ≈85s (5 × RestartSec 15s) — which fits
+# either window. The 600s headroom only matters in the rare overlap of a fatal local
+# error AND a slow-DNS boot (ExecStartPre up to ~62s/cycle ≈ 385s); it is margin, not
+# a tight requirement. A transient relay-open failure is NO LONGER fatal (the daemon
+# degrades to clock-only and retries the gateway in the background), so a cold-boot
+# DNS blip never produces a failed start and never consumes burst budget at all.
 StartLimitIntervalSec=600
 StartLimitBurst=5
 
