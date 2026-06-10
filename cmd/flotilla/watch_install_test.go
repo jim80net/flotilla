@@ -109,11 +109,13 @@ func TestInstallerRejectsIncompleteEnv(t *testing.T) {
 }
 
 // `KEY = value` (spaces around the =, a common .env habit) must not leave a leading
-// space in the value — that would yield an invalid `ExecStart= %h/...`.
+// space in the value — that would yield an invalid `ExecStart= %h/...`. A
+// tab-indented key must also still resolve (if the key-strip missed tabs, FLOTILLA_BIN
+// would become an "unknown key" → missing-var → render failure here).
 func TestInstallerTrimsWhitespaceAroundEquals(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "spaced.env")
 	body := "FLOTILLA_WORKDIR = /srv/fleet\n" +
-		"FLOTILLA_BIN = %h/go/bin/flotilla\n" +
+		"\tFLOTILLA_BIN = %h/go/bin/flotilla\n" +
 		"FLOTILLA_ROSTER=/srv/fleet/flotilla.json\n" +
 		"FLOTILLA_SECRETS=/srv/fleet/secrets.env\n" +
 		"FLOTILLA_ACK_FILE=/srv/fleet/xo-alive\n"

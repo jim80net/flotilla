@@ -49,7 +49,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   line="${line%$'\r'}"
   [[ -z "$line" || "$line" == \#* ]] && continue
   key="${line%%=*}"; val="${line#*=}"
-  key="${key// /}"
+  key="${key//[$' \t']/}"
   # Trim surrounding whitespace from the value so a `KEY = value` habit does not
   # leave a leading space that yields an invalid `ExecStart= %h/...`. Values are
   # taken literally otherwise (no quote-stripping — see the .env.example header).
@@ -140,7 +140,15 @@ fi
 mkdir -p "$(dirname "$DEST")"
 cp "$new_tmp" "$DEST"
 echo "Installed: $DEST"
-systemctl --user daemon-reload
+# daemon-reload needs an active user D-Bus session; on a headless host (no login
+# session) it fails with "Failed to connect to bus". Surface that clearly with the
+# fix rather than aborting on systemd's bare error.
+if ! systemctl --user daemon-reload; then
+  echo "error: 'systemctl --user daemon-reload' failed — this needs an active user" >&2
+  echo "       D-Bus session (XDG_RUNTIME_DIR / DBUS_SESSION_BUS_ADDRESS). On a" >&2
+  echo "       headless host, enable lingering: loginctl enable-linger \"\$USER\"" >&2
+  exit 1
+fi
 echo "Reloaded systemd user units."
 
 # NEVER auto-restart the safety-critical clock. A reloaded unit takes effect on the
