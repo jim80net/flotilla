@@ -273,7 +273,8 @@ true inactivity gap.
 | `--max-missed-acks` | `3` | missed-ack window K (intervals) before a down-alert |
 
 Run it under a process manager (systemd, etc.) so it stays up; see
-[`watch-runbook.md`](./watch-runbook.md) for an example unit.
+[`watch-runbook.md`](./watch-runbook.md) for the systemd unit template +
+`deploy/flotilla-watch-install.sh` installer.
 
 ### Wake only on a material change (heartbeat v2)
 

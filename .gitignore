@@ -34,3 +34,10 @@ htmlcov/
 # Host-local launch recipes (holds this host's worktree paths — never commit the
 # filesystem layout; trusted at the secrets level, sibling of flotilla-secrets.env)
 /flotilla-launch.json
+
+# flotilla-watch host paths: the per-host deploy/flotilla-watch.env is already
+# ignored by *.env above (desired — per-host layout). The test fixture also ends in
+# .env, so *.env would catch it — re-include it explicitly so CI can see it. (The
+# .env.example is NOT matched by *.env, but listed here for clarity.)
+!/deploy/flotilla-watch.env.example
+!/deploy/testdata/flotilla-watch.fixture.env
