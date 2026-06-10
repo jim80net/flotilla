@@ -1,5 +1,10 @@
 # send Specification (delta: stable, title-drift-immune pane resolution)
 
+## RENAMED Requirements
+
+- FROM: `### Requirement: Pane resolution by title, exact or single-glyph-prefixed`
+- TO: `### Requirement: Pane resolution by stable marker, then title`
+
 ## MODIFIED Requirements
 
 ### Requirement: Pane resolution by stable marker, then title
