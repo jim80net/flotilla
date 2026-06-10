@@ -1,0 +1,43 @@
+[Unit]
+Description=flotilla watch — XO heartbeat clock + inbound Discord relay
+Documentation=https://github.com/jim80net/flotilla
+After=network-online.target
+Wants=network-online.target
+# Give up after 5 failed starts inside this window, then require a manual restart —
+# this guards GENUINELY-fatal LOCAL startup errors (a malformed roster, an unknown
+# surface, a broken secrets file), which still fail fatally before the relay opens.
+# The window is 600s (widened from 300s) as defensive margin: a transient relay-open
+# failure is NO LONGER fatal (the daemon degrades to clock-only and retries the
+# gateway in the background — see cmd/flotilla/relay.go), so a cold-boot DNS blip
+# never produces a failed start and never consumes burst budget. The headroom only
+# matters in the rare overlap of a fatal LOCAL error AND a slow-DNS boot (the
+# ExecStartPre wait can add up to ~62s per cycle).
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# --- GENERATED from deploy/flotilla-watch.service.in by deploy/flotilla-watch-install.sh.
+#     Do NOT hand-edit the installed copy at ~/.config/systemd/user/flotilla-watch.service
+#     — edit deploy/flotilla-watch.env and re-run the installer. That is the whole point:
+#     the host-specific paths live in one env file, so the unit stops drifting. ---
+WorkingDirectory=@FLOTILLA_WORKDIR@
+# Cold-boot DNS defense-in-depth: after a power-failure reboot, systemd-resolved
+# (127.0.0.53) can still be unanswering ~6s in, so the relay gateway's discord.com
+# lookup fails. The daemon treats a failed relay open as NON-FATAL (clock-only +
+# background retry), so this pre-flight is belt-and-braces: wait up to ~60s for
+# discord.com to resolve, but ALWAYS exit 0 (even on timeout) so the safety-critical
+# clock starts regardless. Never block the clock on DNS.
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do getent hosts discord.com >/dev/null 2>&1 && exit 0; sleep 2; done; exit 0'
+ExecStart=@FLOTILLA_BIN@ watch --roster @FLOTILLA_ROSTER@ --secrets @FLOTILLA_SECRETS@ --ack-file @FLOTILLA_ACK_FILE@
+Restart=on-failure
+# RestartSec pairs with the StartLimitIntervalSec budget above: each restart cycle is
+# this 15s plus the ExecStartPre DNS-readiness wait. on-failure + the burst limit
+# still guard genuinely-fatal LOCAL startup errors; a transient relay-open failure is
+# no longer fatal.
+RestartSec=15
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target

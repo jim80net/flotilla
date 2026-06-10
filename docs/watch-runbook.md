@@ -25,14 +25,36 @@ when a `channel_id` + bot token are present.
 
 ## Install the service
 
+The systemd unit is **generated** from the repo template
+`deploy/flotilla-watch.service.in` + a per-host path config, by
+`deploy/flotilla-watch-install.sh`. Never hand-edit the installed
+`~/.config/systemd/user/flotilla-watch.service` — edit the env and re-run the
+installer (that is what keeps the unit from drifting).
+
 ```bash
+# 1. Place the roster + secrets wherever you like (the env records the paths).
 mkdir -p ~/.config/flotilla
 cp /path/to/flotilla.json          ~/.config/flotilla/flotilla.json
 cp /path/to/flotilla-secrets.env   ~/.config/flotilla/flotilla-secrets.env && chmod 600 ~/.config/flotilla/flotilla-secrets.env
-cp deploy/flotilla-watch.service   ~/.config/systemd/user/
-systemctl --user daemon-reload
+
+# 2. Create THIS host's path config from the example and edit the five paths.
+cp deploy/flotilla-watch.env.example deploy/flotilla-watch.env
+$EDITOR deploy/flotilla-watch.env        # FLOTILLA_WORKDIR/BIN/ROSTER/SECRETS/ACK_FILE
+
+# 3. Generate + install the unit (idempotent; --dry-run first to preview the diff).
+bash deploy/flotilla-watch-install.sh --dry-run    # preview; writes nothing
+bash deploy/flotilla-watch-install.sh              # generate + daemon-reload
+
+# 4. Enable + start.
 systemctl --user enable --now flotilla-watch.service
 ```
+
+`deploy/flotilla-watch.env` is gitignored (per-host paths, not secret). The
+installer validates the roster/secrets paths exist, refuses to emit a unit with
+an unsubstituted placeholder, and **never restarts a running clock** — if you
+re-run it after a change while the service is live, it prints the
+`systemctl --user restart flotilla-watch.service` for you to run when ready. To
+change paths later, edit `deploy/flotilla-watch.env` and re-run the installer.
 
 ## Verify
 
