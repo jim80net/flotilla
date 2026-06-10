@@ -36,7 +36,8 @@ htmlcov/
 /flotilla-launch.json
 
 # flotilla-watch host paths: the per-host deploy/flotilla-watch.env is already
-# ignored by *.env above (desired — per-host layout). But the committed example and
-# the test fixture must NOT be ignored — re-include them explicitly.
+# ignored by *.env above (desired — per-host layout). The test fixture also ends in
+# .env, so *.env would catch it — re-include it explicitly so CI can see it. (The
+# .env.example is NOT matched by *.env, but listed here for clarity.)
 !/deploy/flotilla-watch.env.example
 !/deploy/testdata/flotilla-watch.fixture.env

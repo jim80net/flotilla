@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -22,9 +23,12 @@ const (
 
 var placeholderRe = regexp.MustCompile(`@FLOTILLA_[A-Z_]+@`)
 
-// funcLineRe matches the directives systemd actually acts on (excludes comments,
-// Description, Documentation) so the test asserts FUNCTIONAL equivalence, not prose.
-var funcLineRe = regexp.MustCompile(`(?m)^(Type|WorkingDirectory|ExecStartPre|ExecStart|RestartSec|Restart|StartLimitIntervalSec|StartLimitBurst|KillSignal|TimeoutStopSec|After|Wants|WantedBy)=.*$`)
+// funcLineRe matches the section headers + the directives systemd acts on (excludes
+// comments, Description, Documentation) so the test asserts FUNCTIONAL equivalence,
+// not prose. Capturing the [Section] headers locks placement too: a directive moved
+// to the wrong section would change this sequence and fail, even though systemd
+// would silently ignore it.
+var funcLineRe = regexp.MustCompile(`(?m)^(\[(?:Unit|Service|Install)\]|(?:Type|WorkingDirectory|ExecStartPre|ExecStart|RestartSec|Restart|StartLimitIntervalSec|StartLimitBurst|KillSignal|TimeoutStopSec|After|Wants|WantedBy)=.*)$`)
 
 // renderUnit runs the installer in --print mode (pure render: no path-existence
 // checks, no write, no daemon-reload) and returns the generated unit text.
@@ -48,10 +52,12 @@ func TestInstallerGeneratesExpectedFunctionalUnit(t *testing.T) {
 	// A change to the template or substitution that alters what systemd acts on
 	// fails here — that is the lock the XO asked for.
 	want := []string{
+		"[Unit]",
 		"After=network-online.target",
 		"Wants=network-online.target",
 		"StartLimitIntervalSec=600",
 		"StartLimitBurst=5",
+		"[Service]",
 		"Type=simple",
 		"WorkingDirectory=/srv/fleet",
 		`ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do getent hosts discord.com >/dev/null 2>&1 && exit 0; sleep 2; done; exit 0'`,
@@ -60,6 +66,7 @@ func TestInstallerGeneratesExpectedFunctionalUnit(t *testing.T) {
 		"RestartSec=15",
 		"KillSignal=SIGTERM",
 		"TimeoutStopSec=15",
+		"[Install]",
 		"WantedBy=default.target",
 	}
 	got := funcLineRe.FindAllString(unit, -1)
@@ -98,5 +105,43 @@ func TestInstallerRejectsIncompleteEnv(t *testing.T) {
 	}
 	if out, err := exec.Command("bash", installerSh, "--print", p).CombinedOutput(); err == nil {
 		t.Fatalf("expected failure on incomplete env, got success:\n%s", out)
+	}
+}
+
+// `KEY = value` (spaces around the =, a common .env habit) must not leave a leading
+// space in the value — that would yield an invalid `ExecStart= %h/...`.
+func TestInstallerTrimsWhitespaceAroundEquals(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "spaced.env")
+	body := "FLOTILLA_WORKDIR = /srv/fleet\n" +
+		"FLOTILLA_BIN = %h/go/bin/flotilla\n" +
+		"FLOTILLA_ROSTER=/srv/fleet/flotilla.json\n" +
+		"FLOTILLA_SECRETS=/srv/fleet/secrets.env\n" +
+		"FLOTILLA_ACK_FILE=/srv/fleet/xo-alive\n"
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unit := renderUnit(t, p)
+	if !strings.Contains(unit, "ExecStart=%h/go/bin/flotilla watch ") {
+		t.Errorf("ExecStart not clean after a spaced env:\n%s", funcLineRe.FindString(unit))
+	}
+	if strings.Contains(unit, "ExecStart= ") || strings.Contains(unit, "WorkingDirectory= ") {
+		t.Errorf("a value retained leading whitespace:\n%s", unit)
+	}
+}
+
+// A value that itself contains a template token would be rewritten by a later
+// substitution pass; the installer must refuse rather than emit a corrupted unit.
+func TestInstallerRejectsPlaceholderInValue(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "evil.env")
+	body := "FLOTILLA_WORKDIR=/srv/fleet\n" +
+		"FLOTILLA_BIN=@FLOTILLA_ROSTER@\n" +
+		"FLOTILLA_ROSTER=/srv/fleet/flotilla.json\n" +
+		"FLOTILLA_SECRETS=/srv/fleet/secrets.env\n" +
+		"FLOTILLA_ACK_FILE=/srv/fleet/xo-alive\n"
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("bash", installerSh, "--print", p).CombinedOutput(); err == nil {
+		t.Fatalf("expected failure on placeholder-in-value, got success:\n%s", out)
 	}
 }

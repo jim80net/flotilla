@@ -50,6 +50,11 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   [[ -z "$line" || "$line" == \#* ]] && continue
   key="${line%%=*}"; val="${line#*=}"
   key="${key// /}"
+  # Trim surrounding whitespace from the value so a `KEY = value` habit does not
+  # leave a leading space that yields an invalid `ExecStart= %h/...`. Values are
+  # taken literally otherwise (no quote-stripping — see the .env.example header).
+  val="${val#"${val%%[![:space:]]*}"}"
+  val="${val%"${val##*[![:space:]]}"}"
   case "$key" in
     FLOTILLA_WORKDIR|FLOTILLA_BIN|FLOTILLA_ROSTER|FLOTILLA_SECRETS|FLOTILLA_ACK_FILE)
       printf -v "$key" '%s' "$val" ;;
@@ -65,6 +70,16 @@ if (( ${#missing[@]} )); then
   echo "error: $ENV_FILE is missing required var(s): ${missing[*]}" >&2
   exit 1
 fi
+
+# A value must never itself contain a template token, or a later substitution pass
+# would rewrite it (substitution is sequential). Implausible for a real path, but
+# cheap to make the substitution provably safe.
+for v in FLOTILLA_WORKDIR FLOTILLA_BIN FLOTILLA_ROSTER FLOTILLA_SECRETS FLOTILLA_ACK_FILE; do
+  if [[ "${!v}" == *@FLOTILLA_*@* ]]; then
+    echo "error: $v contains a template placeholder token (@FLOTILLA_...@); refusing" >&2
+    exit 1
+  fi
+done
 
 # Generate via pure-bash placeholder substitution — NOT sed/envsubst: the
 # ExecStartPre line contains $(seq 1 30)/$i and %h that those tools would mangle.
@@ -89,7 +104,14 @@ fi
 
 # Path sanity (install + dry-run only). Expand a leading %h -> $HOME for the check;
 # substitution keeps %h literal so systemd still resolves it at runtime.
-check_path() { local p="${1/#%h/$HOME}"; [[ -e "$p" ]]; }
+check_path() {
+  local p="$1"
+  case "$p" in
+    %h)   p="$HOME" ;;       # exact specifier
+    %h/*) p="$HOME/${p#%h/}" ;;
+  esac
+  [[ -e "$p" ]]
+}
 check_path "$FLOTILLA_ROSTER"  || { echo "error: roster not found: $FLOTILLA_ROSTER" >&2; exit 1; }
 check_path "$FLOTILLA_SECRETS" || { echo "error: secrets not found: $FLOTILLA_SECRETS" >&2; exit 1; }
 check_path "$FLOTILLA_BIN"     || echo "warning: binary not found yet: $FLOTILLA_BIN (install it before starting)" >&2
