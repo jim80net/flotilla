@@ -11,7 +11,7 @@ post IS the message.
 
 #### Scenario: Agent reaches the operator without touching a pane
 - **WHEN** `flotilla notify --from <agent> <message>` runs with the agent's webhook configured
-- **THEN** the message is posted to Discord under `<agent>`'s username, and no tmux pane is resolved or written to
+- **THEN** the message is posted to Discord under `<agent>`'s username, no tmux pane is resolved or written to, and the command reports that it notified the operator as `<agent>`
 
 ### Requirement: Webhook resolved from the sending agent's secret key
 
@@ -72,11 +72,17 @@ never receive input.
 - **WHEN** notify is given a body that is only whitespace
 - **THEN** the command errors instead of posting an empty message
 
+#### Scenario: A file body and an inline message are mutually exclusive
+- **WHEN** notify is given both `--file <path>` and inline message words
+- **THEN** the command errors (the two sources are mutually exclusive) and posts nothing
+
 ### Requirement: Secrets required; the webhook secret never appears in an error
 
 A secrets path SHALL be required (`--secrets` or `$FLOTILLA_SECRETS`); its
-absence SHALL error before any network attempt. The webhook URL is a credential
-and SHALL NEVER appear in a returned error (a malformed URL yields a content-free
+absence SHALL error before any network attempt. Message-body validation (empty
+and over-length) SHALL occur before secrets are loaded, so a message that will be
+rejected never triggers a credential read. The webhook URL is a credential and
+SHALL NEVER appear in a returned error (a malformed URL yields a content-free
 error; a transport error is reduced to its URL-free cause).
 
 #### Scenario: Missing secrets path errors before posting
