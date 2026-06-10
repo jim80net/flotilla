@@ -63,12 +63,32 @@ flotilla watch: WARNING — inbound relay failed to open (…); running CLOCK-ON
 flotilla watch: inbound relay active (recovered)
 ```
 
-The degraded warning goes to **stderr (journald) only**, never the Discord
-down-alert webhook — that webhook needs the same network that just failed. The
-unit also carries a best-effort `ExecStartPre` that waits up to ~60s for
-`discord.com` to resolve (always exiting 0, so it can never block the clock); the
-code-side retry is the actual correctness guarantee, the pre-flight just narrows
-the window where the relay starts degraded.
+The per-attempt degraded warnings go to **stderr (journald) only**, never the
+Discord down-alert webhook — that webhook needs the same network that just
+failed. The unit also carries a best-effort `ExecStartPre` that waits up to ~60s
+for `discord.com` to resolve (always exiting 0, so it can never block the clock);
+the code-side retry is the actual correctness guarantee, the pre-flight just
+narrows the window where the relay starts degraded.
+
+**Sustained-down escalation (one Discord alert, not a silent retry-forever).** A
+normal boot-DNS-blip recovers within the first one or two retries. If the relay is
+*still* down after **5 consecutive failed attempts**, that is no longer a
+transient blip — it is a genuine misconfiguration (most often a bad bot token) or
+a real outage. By the 5th attempt the network is almost certainly back, so
+`flotilla watch` escalates **exactly once** via the operator down-alert webhook
+(falling back to stderr if no webhook is configured):
+
+```
+⚠️ flotilla watch: relay still down after 5 attempts (last error: …) — if this persists, check the bot token / network. The safety-critical clock is unaffected; retries continue.
+```
+
+It does **not** alert again for the same down-episode (one alert per sustained
+outage), and it keeps retrying forever in the background — so a long outage still
+self-heals on recovery (you'll see `inbound relay active (recovered)` when it
+does). The escalation counter resets on any successful open, so a *later*
+sustained outage alerts again. This replaces the silent-misconfiguration guard the
+old `StartLimitBurst` give-up used to provide (it now surfaces the same condition
+loudly instead of killing the daemon).
 
 This is the fix for the 2026-06-10 power-failure crash-loop: previously a failed
 `gw.Open()` returned a fatal error, killing the already-running clock; the unit's

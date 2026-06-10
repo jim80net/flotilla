@@ -318,7 +318,11 @@ func cmdWatch(args []string) error {
 			}
 			return gw, nil
 		}
-		rc := newRelayController(factory, defaultRelayBackoff, stderrWarn, func(msg string) { fmt.Println(msg) })
+		// warn → stderr (journald) for routine per-attempt noise; note → stdout for
+		// active/recovered; escalate → the down-alert webhook (alert) so a SUSTAINED
+		// relay-down state (bad token / real outage) surfaces loudly to the operator
+		// exactly once. alert already falls back to stderr when no webhook is set.
+		rc := newRelayController(factory, defaultRelayBackoff, stderrWarn, func(msg string) { fmt.Println(msg) }, alert)
 		rc.Start(ctx)
 		defer rc.Shutdown()
 	case cfg.ChannelID != "" && botToken != "" && cfg.OperatorUserID == "":

@@ -3,9 +3,17 @@ Description=flotilla watch — inter-agent relay + XO heartbeat clock
 Documentation=https://github.com/jim80net/flotilla
 After=network-online.target
 Wants=network-online.target
-# Stop a bad-token hot-loop from hammering Discord's IDENTIFY rate limit: give
-# up after 5 failed starts in 5 minutes (manual restart required thereafter).
-StartLimitIntervalSec=300
+# Give up after 5 failed starts, then require a manual restart — this guards
+# GENUINELY-fatal LOCAL startup errors (a malformed roster, an unknown surface, a
+# broken secrets file), which still `return err` fatally before the relay block.
+# The window is 600s (not 300s) so the burst can actually trip: each restart cycle
+# is now RestartSec 15s + the ExecStartPre DNS-readiness wait (up to ~62s) ≈ 77s,
+# so 5 cycles span ≈ 385s — which would NOT fit in a 300s window (the limiter
+# would never engage), but comfortably fits in 600s. A transient relay-open failure
+# is NO LONGER one of these fatal errors (the daemon degrades to clock-only and
+# retries the gateway in the background), so a cold-boot DNS blip can never exhaust
+# the burst limit.
+StartLimitIntervalSec=600
 StartLimitBurst=5
 
 [Service]
@@ -25,13 +33,10 @@ ExecStart=%h/go/bin/flotilla watch \
   --roster %h/.config/flotilla/flotilla.json \
   --secrets %h/.config/flotilla/flotilla-secrets.env
 Restart=on-failure
-# Restart=on-failure + the StartLimit above still guard GENUINELY-fatal startup
-# errors (a malformed roster, an unknown surface, a missing operator_user_id with
-# a configured channel) — those are config/programming errors the operator must
-# fix, so a hot-loop-then-give-up is the right behavior. A transient relay-open
-# failure is NO LONGER fatal (the daemon degrades to clock-only and retries the
-# gateway in the background), so the cold-boot crash-loop that hit the
-# 2026-06-10 power-failure reboot can no longer exhaust the burst limit.
+# RestartSec=15 pairs with the StartLimitIntervalSec budget noted above: each
+# restart cycle is this 15s plus the ExecStartPre DNS-readiness wait. on-failure +
+# the burst limit still guard the genuinely-fatal LOCAL startup errors; a transient
+# relay-open failure is no longer fatal.
 RestartSec=15
 KillSignal=SIGTERM
 TimeoutStopSec=15

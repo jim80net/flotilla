@@ -68,10 +68,10 @@ func fastBackoff() relayBackoff {
 // no background goroutine; Shutdown closes the gateway.
 func TestRelayOpenSuccessFirstTry(t *testing.T) {
 	gw := &fakeGateway{}
-	warn, note := &recorder{}, &recorder{}
+	warn, note, esc := &recorder{}, &recorder{}, &recorder{}
 	factory := func() (gatewayController, error) { return gw, nil }
 
-	rc := newRelayController(factory, fastBackoff(), warn.record, note.record)
+	rc := newRelayController(factory, fastBackoff(), warn.record, note.record, esc.record)
 	rc.Start(context.Background())
 
 	if rc.done != nil {
@@ -79,6 +79,9 @@ func TestRelayOpenSuccessFirstTry(t *testing.T) {
 	}
 	if warn.count() != 0 {
 		t.Errorf("no degraded warning expected on a clean open; got %v", warn.lines)
+	}
+	if esc.count() != 0 {
+		t.Errorf("no escalation expected on a clean open; got %v", esc.lines)
 	}
 	if !note.any("inbound relay active") {
 		t.Errorf("expected 'inbound relay active' note; got %v", note.lines)
@@ -103,7 +106,7 @@ func TestRelayOpenFailsThenClockSurvives(t *testing.T) {
 	// observe the degraded-but-running state deterministically.
 	factory := func() (gatewayController, error) { return nil, errBoom }
 
-	rc := newRelayController(factory, fastBackoff(), warn.record, note.record)
+	rc := newRelayController(factory, fastBackoff(), warn.record, note.record, discardRec)
 	rc.Start(ctx) // MUST NOT block, MUST NOT panic, and (the whole point) the
 	// surrounding daemon would proceed to run its clock — Start has no return value
 	// that could abort cmdWatch.
@@ -147,7 +150,7 @@ func TestRelayRetryEventuallyOpens(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	rc := newRelayController(factory, fastBackoff(), warn.record, note.record)
+	rc := newRelayController(factory, fastBackoff(), warn.record, note.record, discardRec)
 	rc.Start(ctx)
 
 	if !waitFor(func() bool { return note.any("recovered") }, time.Second) {
@@ -169,7 +172,7 @@ func TestRelayShutdownCancelsRetryGoroutine(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	rc := newRelayController(factory, fastBackoff(), warn.record, note.record)
+	rc := newRelayController(factory, fastBackoff(), warn.record, note.record, discardRec)
 	rc.Start(ctx)
 	if rc.done == nil {
 		t.Fatalf("expected a retry goroutine")
@@ -191,7 +194,7 @@ func TestRelayParentCtxCancelStopsRetry(t *testing.T) {
 	factory := func() (gatewayController, error) { return nil, errBoom }
 
 	ctx, cancel := context.WithCancel(context.Background())
-	rc := newRelayController(factory, fastBackoff(), warn.record, note.record)
+	rc := newRelayController(factory, fastBackoff(), warn.record, note.record, discardRec)
 	rc.Start(ctx)
 	if rc.done == nil {
 		t.Fatalf("expected a retry goroutine")
@@ -210,6 +213,114 @@ func TestRelayParentCtxCancelStopsRetry(t *testing.T) {
 	rc.Shutdown() // still safe to call afterwards
 }
 
+// TestRelayEscalatesOnceAfterThreshold: with opens failing forever, the operator-
+// facing escalate fires EXACTLY ONCE after escalateThreshold consecutive failures
+// — not on every attempt, and not before the threshold. This is the replacement
+// for the silent-misconfig guard the old StartLimitBurst give-up provided.
+func TestRelayEscalatesOnceAfterThreshold(t *testing.T) {
+	warn, note, esc := &recorder{}, &recorder{}, &recorder{}
+	factory := func() (gatewayController, error) { return nil, errBoom }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rc := newRelayController(factory, fastBackoff(), warn.record, note.record, esc.record)
+	rc.Start(ctx)
+
+	// Wait until the escalation has fired (the goroutine needs escalateThreshold
+	// failed attempts; fastBackoff makes that ~tens of ms).
+	if !waitFor(func() bool { return esc.count() >= 1 }, time.Second) {
+		t.Fatalf("expected one escalation after %d failures; warn=%d note=%v esc=%v", escalateThreshold, warn.count(), note.lines, esc.lines)
+	}
+	if !esc.any("still down after") {
+		t.Errorf("escalation message should describe the sustained-down state; got %v", esc.lines)
+	}
+	// Let several MORE retry cycles elapse and assert it did NOT escalate again
+	// (one alert per sustained down-episode).
+	time.Sleep(20 * testBackoffMax)
+	if n := esc.count(); n != 1 {
+		t.Errorf("escalate must fire exactly once per down-episode; fired %d times: %v", n, esc.lines)
+	}
+	rc.Shutdown()
+}
+
+// TestRelayShutdownBoundedDuringInFlightOpen proves P3a: a factory wedged inside a
+// real Open() (it blocks until released) must NOT stall Shutdown — the bounded
+// join returns promptly. The wedged goroutine has not published rc.gw, so nothing
+// is closed; it is reaped on (test/process) exit when we release it.
+func TestRelayShutdownBoundedDuringInFlightOpen(t *testing.T) {
+	warn, note := &recorder{}, &recorder{}
+	release := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	first := true
+	factory := func() (gatewayController, error) {
+		if first {
+			first = false
+			return nil, errBoom // fail the initial open → spawn the retry goroutine
+		}
+		// The retry attempt wedges here (as discordgo's ReadMessage can) until released.
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release
+		return nil, errBoom
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// A tiny initial backoff so the wedging retry attempt starts almost immediately.
+	rc := newRelayController(factory, relayBackoff{initial: time.Millisecond, max: time.Millisecond}, warn.record, note.record, discardRec)
+	rc.Start(ctx)
+
+	// Wait until the retry goroutine is actually blocked inside the factory.
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatalf("retry goroutine never entered the wedging Open")
+	}
+
+	// Shutdown must return within ~shutdownJoinTimeout despite the in-flight Open.
+	done := make(chan struct{})
+	start := time.Now()
+	go func() { rc.Shutdown(); close(done) }()
+	select {
+	case <-done:
+		if elapsed := time.Since(start); elapsed > shutdownJoinTimeout+time.Second {
+			t.Errorf("Shutdown took %s, want ≤ ~%s (bounded join)", elapsed, shutdownJoinTimeout)
+		}
+	case <-time.After(shutdownJoinTimeout + 2*time.Second):
+		t.Fatalf("Shutdown blocked past the bounded join — a mid-Open wedge stalled it")
+	}
+	close(release) // let the wedged goroutine unwind (no leak past the test)
+}
+
+// TestRelayDoubleShutdownIdempotent: calling Shutdown twice must not panic or
+// hang (the second call's cancel/close are no-ops; the second done-wait either
+// observes the already-closed channel or the bounded timeout).
+func TestRelayDoubleShutdownIdempotent(t *testing.T) {
+	gw := &fakeGateway{}
+	warn, note := &recorder{}, &recorder{}
+	factory := func() (gatewayController, error) { return gw, nil } // first-try success
+
+	rc := newRelayController(factory, fastBackoff(), warn.record, note.record, discardRec)
+	rc.Start(context.Background())
+
+	rc.Shutdown()
+	rc.Shutdown() // must be safe — no panic, no hang
+	if !gw.isClosed() {
+		t.Errorf("gateway should be closed after Shutdown")
+	}
+
+	// Also exercise the failing-forever path (a retry goroutine exists), double-call.
+	warn2, note2 := &recorder{}, &recorder{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rc2 := newRelayController(func() (gatewayController, error) { return nil, errBoom }, fastBackoff(), warn2.record, note2.record, discardRec)
+	rc2.Start(ctx)
+	rc2.Shutdown()
+	rc2.Shutdown() // second call: done already closed → returns immediately, no panic
+}
+
 func TestNextWait(t *testing.T) {
 	bo := relayBackoff{initial: 5 * time.Second, max: 2 * time.Minute}
 	cases := []struct {
@@ -226,6 +337,9 @@ func TestNextWait(t *testing.T) {
 		}
 	}
 }
+
+// discardRec is a no-op sink for tests that don't assert on a given channel.
+func discardRec(string) {}
 
 // errBoom is a stable sentinel for "open failed".
 var errBoom = &boomError{}
