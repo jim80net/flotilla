@@ -13,13 +13,25 @@ Type=simple
 # --- Edit these paths for your install (see docs/watch-runbook.md). ExecStart
 # assumes the binary is at ~/go/bin/flotilla (the `go install` default). ---
 EnvironmentFile=-%h/.config/flotilla/flotilla-secrets.env
+# Defense-in-depth for cold-boot DNS: after a power-failure reboot, systemd-
+# resolved (127.0.0.53) can still be unanswering ~6s into the boot, so the relay
+# gateway's discord.com lookup fails. The daemon now treats a failed relay open as
+# NON-FATAL (clock-only + background retry — see cmd/flotilla/relay.go), so this
+# pre-flight is a belt-and-braces nicety, not a correctness requirement: wait up to
+# ~60s for discord.com to resolve, but ALWAYS exit 0 (even on timeout) so the
+# safety-critical clock starts regardless. Never block the clock on DNS.
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do getent hosts discord.com >/dev/null 2>&1 && exit 0; sleep 2; done; exit 0'
 ExecStart=%h/go/bin/flotilla watch \
   --roster %h/.config/flotilla/flotilla.json \
   --secrets %h/.config/flotilla/flotilla-secrets.env
 Restart=on-failure
-# A persistent auth failure (bad bot token) would otherwise hot-loop against
-# Discord's rate limiter; throttle restarts. (Follow-up: make a fatal startup
-# error a distinct non-restartable exit code + RestartPreventExitStatus.)
+# Restart=on-failure + the StartLimit above still guard GENUINELY-fatal startup
+# errors (a malformed roster, an unknown surface, a missing operator_user_id with
+# a configured channel) — those are config/programming errors the operator must
+# fix, so a hot-loop-then-give-up is the right behavior. A transient relay-open
+# failure is NO LONGER fatal (the daemon degrades to clock-only and retries the
+# gateway in the background), so the cold-boot crash-loop that hit the
+# 2026-06-10 power-failure reboot can no longer exhaust the burst limit.
 RestartSec=15
 KillSignal=SIGTERM
 TimeoutStopSec=15

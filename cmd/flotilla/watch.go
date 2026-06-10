@@ -286,30 +286,47 @@ func cmdWatch(args []string) error {
 		fmt.Printf("flotilla watch: clock running — XO=%s interval=%s ack=%s\n", xo, interval, *ackPath)
 	}
 
+	// The daemon's shutdown context — established BEFORE the relay so the relay's
+	// background open-retry goroutine can be tied to it (and so cancellation on
+	// SIGTERM/SIGINT unwinds the retry cleanly, no leak).
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+
 	// Inbound relay (optional): needs a channel id + bot token (and the bot's
 	// privileged Message Content intent) AND an operator_user_id — without the
 	// latter, relay.Accept drops every message, so enabling the gateway would
 	// claim "relay active" while silently dropping all traffic.
+	//
+	// The relay open is NON-FATAL: a gateway construct/open failure (the cold-boot
+	// DNS blip ~6s post-reboot, a transient network hiccup) must NOT take down the
+	// already-running safety-critical clock — that crash-looped flotilla-watch to a
+	// permanent `failed` after the 2026-06-10 power-failure reboot, killing the very
+	// down-alert relay before it could alert. So we degrade to clock-only and retry
+	// the open in the background until it succeeds or shutdown. The warning goes to
+	// stderr (journald) ONLY, never the Discord webhook — that needs the same
+	// network that just failed.
 	switch {
 	case cfg.ChannelID != "" && botToken != "" && cfg.OperatorUserID != "":
 		rel := watch.NewRelay(cfg, xo, injector, onAccepted, func(msg string) { post("flotilla-watch", msg) })
-		gw, err := discord.NewGateway(botToken, cfg.ChannelID, rel.Handle)
-		if err != nil {
-			return err
+		factory := func() (gatewayController, error) {
+			gw, err := discord.NewGateway(botToken, cfg.ChannelID, rel.Handle)
+			if err != nil {
+				return nil, err
+			}
+			if err := gw.Open(); err != nil {
+				return nil, err
+			}
+			return gw, nil
 		}
-		if err := gw.Open(); err != nil {
-			return err
-		}
-		defer func() { _ = gw.Close() }()
-		fmt.Println("flotilla watch: inbound relay active")
+		rc := newRelayController(factory, defaultRelayBackoff, stderrWarn, func(msg string) { fmt.Println(msg) })
+		rc.Start(ctx)
+		defer rc.Shutdown()
 	case cfg.ChannelID != "" && botToken != "" && cfg.OperatorUserID == "":
 		return fmt.Errorf("relay requires operator_user_id in the roster (channel_id + bot token are set) — set it, or remove channel_id for clock-only")
 	default:
 		fmt.Println("flotilla watch: clock-only (relay disabled — set channel_id + bot token + operator_user_id to enable)")
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-	defer stop()
 	<-ctx.Done()
 	fmt.Println("\nflotilla watch: shutting down")
 	return nil

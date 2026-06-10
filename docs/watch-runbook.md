@@ -46,6 +46,38 @@ heartbeat interval an idle XO should receive the heartbeat prompt in its pane.
 Post a message in the channel as the operator and confirm it lands in the
 target pane.
 
+### Relay open is non-fatal (cold-boot / transient-network resilience)
+
+The safety-critical clock (heartbeat + watchdog) and the optional inbound relay
+are decoupled at startup: **a relay-gateway open failure NEVER takes down the
+clock.** If the Discord gateway can't open at startup — most commonly a cold-boot
+DNS blip where `systemd-resolved` isn't answering yet ~6s into a power-failure
+reboot, or any transient network hiccup — `flotilla watch` logs a degraded
+warning to the journal, keeps the clock running, and retries the gateway in the
+background with bounded exponential backoff (5s → … → 2m cap) until it succeeds
+or the daemon is shut down. The journal will show:
+
+```
+flotilla watch: WARNING — inbound relay failed to open (…); running CLOCK-ONLY and retrying in the background. The safety-critical heartbeat/watchdog is unaffected.
+…
+flotilla watch: inbound relay active (recovered)
+```
+
+The degraded warning goes to **stderr (journald) only**, never the Discord
+down-alert webhook — that webhook needs the same network that just failed. The
+unit also carries a best-effort `ExecStartPre` that waits up to ~60s for
+`discord.com` to resolve (always exiting 0, so it can never block the clock); the
+code-side retry is the actual correctness guarantee, the pre-flight just narrows
+the window where the relay starts degraded.
+
+This is the fix for the 2026-06-10 power-failure crash-loop: previously a failed
+`gw.Open()` returned a fatal error, killing the already-running clock; the unit's
+`StartLimitBurst=5` then exhausted all restarts in ~76s (before DNS settled) and
+landed the service permanently `failed` — taking the down-alert relay with it, so
+the operator got no alert. `Restart=on-failure` + the start-limit still guard
+*genuinely* fatal startup errors (a malformed roster, an unknown surface, a
+missing `operator_user_id` alongside a configured `channel_id`).
+
 ## Clock-only mode
 
 Omit `channel_id` (or the bot token) to run the heartbeat + watchdog with no
