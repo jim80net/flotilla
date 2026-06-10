@@ -13,7 +13,7 @@
 ## 2. Validate + review
 
 - [x] 2.1 `openspec validate notify-spec-backport --strict` passes.
-- [ ] 2.2 /systems-review on the spec diff; address findings.
-- [ ] 2.3 PR (CI green; cubic if it runs — not gating on this repo per the
-      standard-flow note); enumerate any inline findings; report merge-ready to
-      the XO (reviews + merges).
+- [x] 2.2 Spec-vs-code review on the diff (adversarial spec-accuracy audit +
+      OCR); findings addressed — SPEC ACCURATE, 0 P1, 3 parity P2s folded.
+- [x] 2.3 PR #27 (CI green; no cubic on this repo); merge-ready reported to the
+      XO, who reviewed + merged.
