@@ -3,9 +3,18 @@ Description=flotilla watch — inter-agent relay + XO heartbeat clock
 Documentation=https://github.com/jim80net/flotilla
 After=network-online.target
 Wants=network-online.target
-# Stop a bad-token hot-loop from hammering Discord's IDENTIFY rate limit: give
-# up after 5 failed starts in 5 minutes (manual restart required thereafter).
-StartLimitIntervalSec=300
+# Give up after 5 failed starts, then require a manual restart — this guards
+# GENUINELY-fatal LOCAL startup errors (a malformed roster, an unknown surface, a
+# broken secrets file), which still `return err` fatally before the relay block.
+# The window is widened to 600s (from 300s) as defensive margin. Post-fix, a
+# genuinely-fatal LOCAL error fails fast with DNS already up, so its ExecStartPre
+# wait is ~0s and 5 restart cycles span only ≈85s (5 × RestartSec 15s) — which fits
+# either window. The 600s headroom only matters in the rare overlap of a fatal local
+# error AND a slow-DNS boot (ExecStartPre up to ~62s/cycle ≈ 385s); it is margin, not
+# a tight requirement. A transient relay-open failure is NO LONGER fatal (the daemon
+# degrades to clock-only and retries the gateway in the background), so a cold-boot
+# DNS blip never produces a failed start and never consumes burst budget at all.
+StartLimitIntervalSec=600
 StartLimitBurst=5
 
 [Service]
@@ -13,13 +22,22 @@ Type=simple
 # --- Edit these paths for your install (see docs/watch-runbook.md). ExecStart
 # assumes the binary is at ~/go/bin/flotilla (the `go install` default). ---
 EnvironmentFile=-%h/.config/flotilla/flotilla-secrets.env
+# Defense-in-depth for cold-boot DNS: after a power-failure reboot, systemd-
+# resolved (127.0.0.53) can still be unanswering ~6s into the boot, so the relay
+# gateway's discord.com lookup fails. The daemon now treats a failed relay open as
+# NON-FATAL (clock-only + background retry — see cmd/flotilla/relay.go), so this
+# pre-flight is a belt-and-braces nicety, not a correctness requirement: wait up to
+# ~60s for discord.com to resolve, but ALWAYS exit 0 (even on timeout) so the
+# safety-critical clock starts regardless. Never block the clock on DNS.
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do getent hosts discord.com >/dev/null 2>&1 && exit 0; sleep 2; done; exit 0'
 ExecStart=%h/go/bin/flotilla watch \
   --roster %h/.config/flotilla/flotilla.json \
   --secrets %h/.config/flotilla/flotilla-secrets.env
 Restart=on-failure
-# A persistent auth failure (bad bot token) would otherwise hot-loop against
-# Discord's rate limiter; throttle restarts. (Follow-up: make a fatal startup
-# error a distinct non-restartable exit code + RestartPreventExitStatus.)
+# RestartSec=15 pairs with the StartLimitIntervalSec budget noted above: each
+# restart cycle is this 15s plus the ExecStartPre DNS-readiness wait. on-failure +
+# the burst limit still guard the genuinely-fatal LOCAL startup errors; a transient
+# relay-open failure is no longer fatal.
 RestartSec=15
 KillSignal=SIGTERM
 TimeoutStopSec=15
