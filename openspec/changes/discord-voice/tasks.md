@@ -137,10 +137,20 @@
       build-tagged stub) AND in §3b the matching **`voice-opus-codec` CI job** (installs
       libopus-dev; `go build`/`go test -race -tags voiceopus`) compiles + tests the REAL
       codec path, so neither side can silently rot.
-- [ ] 6.1b `flotilla-voice.service` (own unit via the installer pattern);
-      document `libopus-dev` + `state/voice.env`.
-- [ ] 6.2 Voice docs: push-to-talk expectation, the `speak` contract, cost cap, the
-      operator-SSRC gate, discordgo-voice-maturity build risk.
+- [x] 6.1b `flotilla-voice.service` (own unit via the installer pattern);
+      document `libopus-dev` + `state/voice.env`. — `deploy/flotilla-voice.service.in`
+      (clock-isolated: no dependency on flotilla-watch; requires a `-tags voiceopus` binary)
+      + `deploy/flotilla-voice-install.sh` (mirrors the watch installer: env-driven, pure-bash
+      substitution, placeholder guards, operator-controlled restart — voice is a live metered
+      surface) + `deploy/flotilla-voice.env.example` (host paths) + `deploy/voice.env.example`
+      (runtime XAI+VOICE_* config). Tested: `voice_install_test.go` (functional-unit lock,
+      example substitutes, incomplete/placeholder/whitespace guards) + the `voice.env.example`
+      cold-test (parses via `loadVoiceConfig`).
+- [x] 6.2 Voice docs: push-to-talk expectation, the `speak` contract, cost cap, the
+      operator-SSRC gate, discordgo-voice-maturity build risk. — `docs/voice-runbook.md`:
+      build (`-tags voiceopus` + `libopus-dev`), Discord bot/intents setup, the two config
+      files, install/enable, smoke test, the fail-closed operator gate, the cost cap, and the
+      #42 discordgo-reconnect caveat. The build command is cold-tested.
 
 ## 7. Review + PR
 
