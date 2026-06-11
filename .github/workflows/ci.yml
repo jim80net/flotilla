@@ -49,6 +49,19 @@ jobs:
       - name: Build
         run: go build ./...
 
+      # The Opus codec is the one planned CGO dependency in the voice path and is isolated
+      # behind the `voiceopus` build tag (the libopus impl lands in internal/voice in §3b;
+      # today only the //go:build !voiceopus stub ships). The core flotilla binary must
+      # build with NO CGO and NO libopus — this step pins that invariant: once the
+      # build-tagged libopus code lands, a stray CGO import in the core (or a codec file
+      # missing its build tag) fails CI here instead of silently coupling the core to
+      # libopus. ubuntu-latest has gcc, so the default `go build` above would happily link
+      # CGO and hide such a regression. NOTE (§3b): when opus_cgo.go lands, add a matching
+      # `-tags voiceopus` build step so the REAL codec path is compiled in CI too — see
+      # tasks.md §6.1.
+      - name: Core builds without CGO (libopus isolation)
+        run: CGO_ENABLED=0 go build ./...
+
       - name: Vet
         run: go vet ./...
 
