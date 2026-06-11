@@ -28,6 +28,10 @@ htmlcov/
 .idea/
 .vscode/
 
+# Claude Code agent worktrees (transient, per-subagent git worktrees; auto-cleaned).
+# Never commit them — they are isolated checkouts, not project content.
+.claude/worktrees/
+
 # Live roster (secret-free by design, but holds your real ids — keep the example committed)
 /flotilla.json
 
