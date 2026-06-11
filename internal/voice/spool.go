@@ -111,9 +111,10 @@ func WriteSpeak(text string) (string, error) {
 	if err := f.Close(); err != nil {
 		return "", fmt.Errorf("voice: close spool entry: %w", err)
 	}
-	// Enforce the bound: drop oldest-first down to the cap. Best-effort by design — the
-	// write already succeeded, so a trim hiccup must not fail speak (see the doc comment).
-	trimSpool(dir, SpoolMaxFiles)
+	// Enforce the bound: drop oldest-first down to the cap, but NEVER the entry we just
+	// wrote (passed as keep). Best-effort by design — the write already succeeded, so a trim
+	// hiccup must not fail speak (see the doc comment).
+	trimSpool(dir, SpoolMaxFiles, name)
 	return path, nil
 }
 
@@ -146,6 +147,9 @@ func ListSpool() ([]string, error) {
 // by ListSpool). It does NOT delete the entry — the consumer reads, acts, then DeleteSpools
 // so a crash between read and delete re-delivers rather than silently drops.
 func ReadSpool(name string) (string, error) {
+	if err := validSpoolName(name); err != nil {
+		return "", err
+	}
 	b, err := os.ReadFile(filepath.Join(SpoolDir(), name))
 	if err != nil {
 		return "", fmt.Errorf("voice: read spool entry %q: %w", name, err)
@@ -157,8 +161,25 @@ func ReadSpool(name string) (string, error) {
 // not an error (idempotent): a concurrent drop-oldest trim or a double-consume must not
 // fail the consumer.
 func DeleteSpool(name string) error {
+	if err := validSpoolName(name); err != nil {
+		return err
+	}
 	if err := os.Remove(filepath.Join(SpoolDir(), name)); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("voice: delete spool entry %q: %w", name, err)
+	}
+	return nil
+}
+
+// validSpoolName rejects anything that is not a bare filename, so a caller-supplied entry
+// name (these are exported) can never traverse out of the spool dir (e.g. "../../secret").
+// ListSpool only ever returns bare names, but ReadSpool/DeleteSpool are exported and must
+// not trust their argument.
+func validSpoolName(name string) error {
+	// filepath.Base(name) != name catches separators and trailing slashes; the explicit
+	// "."/".." checks catch the dir references Base leaves unchanged (DeleteSpool(".") would
+	// otherwise os.Remove the spool dir itself).
+	if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
+		return fmt.Errorf("voice: invalid spool entry name %q (must be a bare filename)", name)
 	}
 	return nil
 }
@@ -173,15 +194,28 @@ func spoolName(t time.Time) (string, error) {
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", fmt.Errorf("voice: spool name entropy: %w", err)
 	}
-	return fmt.Sprintf("%0*d-%s%s", spoolNanoWidth, t.UnixNano(), hex.EncodeToString(b[:]), spoolEntryExt), nil
+	// Clamp a pre-epoch clock to 0: a negative UnixNano would emit a leading '-' (which
+	// sorts BEFORE '0' and is wider than spoolNanoWidth), corrupting the fixed-width
+	// lexical==chronological ordering. A degenerate clock must not break the sort.
+	ns := t.UnixNano()
+	if ns < 0 {
+		ns = 0
+	}
+	return fmt.Sprintf("%0*d-%s%s", spoolNanoWidth, ns, hex.EncodeToString(b[:]), spoolEntryExt), nil
 }
 
 // trimSpool enforces the drop-oldest bound: if the spool holds more than max entries, it
-// deletes the oldest (count-max) of them. It is best-effort — list/remove errors are
-// swallowed because trimming runs AFTER a successful write and must never fail speak (the
-// never-blocks-the-turn invariant). The newest entries (including the just-written one,
-// which sorts last) are always kept.
-func trimSpool(dir string, max int) {
+// deletes the oldest down to the cap — but NEVER the keep entry (the just-written file).
+// It is best-effort — list/remove errors are swallowed because trimming runs AFTER a
+// successful write and must never fail speak (the never-blocks-the-turn invariant).
+//
+// keep is excluded EXPLICITLY rather than relying on "the new file sorts last": a stale
+// far-future-timestamped entry already in the dir (NTP step-back, a copied/restored file,
+// two hosts with skewed clocks sharing the dir) would push the just-written `now` file to
+// the front of the lexical order, and a sort-only trim would then evict the most-current
+// spoken line — silently violating drop-oldest-never-refuse-new. Excluding keep makes that
+// impossible regardless of clock anomalies.
+func trimSpool(dir string, max int, keep string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
@@ -197,7 +231,15 @@ func trimSpool(dir string, max int) {
 		return
 	}
 	sort.Strings(names) // oldest-first
-	for _, name := range names[:len(names)-max] {
+	toDelete := len(names) - max
+	for _, name := range names {
+		if toDelete == 0 {
+			break
+		}
+		if name == keep {
+			continue // never evict the just-written entry, even if a skewed clock sorts it oldest
+		}
 		_ = os.Remove(filepath.Join(dir, name))
+		toDelete--
 	}
 }

@@ -263,3 +263,66 @@ func contains(haystack []string, needle string) bool {
 	}
 	return false
 }
+
+// Regression (systems-review P1-1): the bound must never evict the JUST-WRITTEN entry, even
+// when a stale far-future-timestamped file is already in the dir (NTP step-back, a copied
+// file, skewed clocks). Such a file sorts AFTER the new `now` file, so a sort-only trim
+// would drop the most-current spoken line. The keep-exclusion makes that impossible.
+func TestTrimNeverEvictsJustWrittenUnderClockSkew(t *testing.T) {
+	dir := isolateSpool(t)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Fill to the cap with far-future entries (prefix 9e18 ns ≈ year 2255 > any real now),
+	// so the about-to-be-written `now` file will sort to the FRONT (apparent oldest).
+	for i := 0; i < SpoolMaxFiles; i++ {
+		stale := filepath.Join(dir, "9000000000000000"+strconv.Itoa(1000+i)+"-deadbeef.txt")
+		if err := os.WriteFile(stale, []byte("stale"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	path, err := WriteSpeak("must survive the trim")
+	if err != nil {
+		t.Fatalf("WriteSpeak: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("just-written entry was evicted by trim under clock skew: %v", err)
+	}
+	if got := spoolCount(t); got != SpoolMaxFiles {
+		t.Errorf("spool holds %d entries, want exactly cap %d (one stale entry should have been dropped)", got, SpoolMaxFiles)
+	}
+}
+
+// Regression (systems-review P2-1): a pre-epoch clock must not produce a '-'-prefixed,
+// over-width name that breaks the fixed-width lexical==chronological ordering. The nanos
+// prefix is always exactly spoolNanoWidth unsigned digits.
+func TestSpoolNamePreEpochClampedToFixedWidth(t *testing.T) {
+	name, err := spoolName(time.Unix(0, -1)) // UnixNano = -1
+	if err != nil {
+		t.Fatalf("spoolName: %v", err)
+	}
+	dash := strings.IndexByte(name, '-')
+	if dash != spoolNanoWidth {
+		t.Fatalf("name %q: nanos prefix is %d chars, want exactly %d (no leading '-' / over-width)", name, dash, spoolNanoWidth)
+	}
+	for i := 0; i < dash; i++ {
+		if name[i] < '0' || name[i] > '9' {
+			t.Fatalf("name %q: prefix char %d is %q, want a digit", name, i, name[i])
+		}
+	}
+}
+
+// Regression (OCR): ReadSpool/DeleteSpool are exported and must reject any name that is not
+// a bare filename, so a caller cannot traverse out of the spool dir.
+func TestReadDeleteSpoolRejectTraversal(t *testing.T) {
+	isolateSpool(t)
+	for _, bad := range []string{"../escape.txt", "../../etc/passwd", "sub/dir.txt", "", "."} {
+		if _, err := ReadSpool(bad); err == nil {
+			t.Errorf("ReadSpool(%q) = nil error, want a traversal rejection", bad)
+		}
+		if err := DeleteSpool(bad); err == nil {
+			t.Errorf("DeleteSpool(%q) = nil error, want a traversal rejection", bad)
+		}
+	}
+}
