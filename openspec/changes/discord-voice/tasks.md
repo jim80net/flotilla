@@ -154,6 +154,12 @@
 
 ## 7. Review + PR
 
-- [ ] 7.1 `/systems-review` + OCR on the implementation diff; fold findings.
-- [ ] 7.2 PR(s); CI green; merge-ready → XO reviews+merges. (Live-capture / activation is
-      a further operator decision — metered spend on a new audio surface.)
+- [x] 7.1 `/systems-review` + OCR on the implementation diff; fold findings. — Done per
+      slice: every PR (#35–#45) ran systems-review (the gate of record; OCR where it didn't
+      time out on diff size) and folded findings before merge.
+- [x] 7.2 PR(s); CI green; merge-ready → XO reviews+merges. — 8 PRs merged (#35/#36/#37/#38/
+      #39/#40/#41/#43/#45), each CI-green. **LIVE ACTIVATION remains operator-gated** (metered
+      Grok spend on a new audio surface) — `flotilla voice` is built + deployable but opt-in;
+      see `docs/voice-runbook.md`. Open follow-ups: #42 (discordgo-v0.29.0 reconnect signal),
+      #44 (atomic-mv installer). Change is build-complete and ready to archive at the
+      operator's discretion.
