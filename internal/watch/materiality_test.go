@@ -51,7 +51,7 @@ func TestExternalMaterialExcludesXOAndSortsReasons(t *testing.T) {
 			"v12-dev":   surface.StateWorking,
 			"zeta-dev":  surface.StateWorking,
 		},
-		TrackerHash: "h0",
+		SignalHash: "h0",
 	}
 	cur := Snapshot{
 		DeskStates: map[string]surface.State{
@@ -59,21 +59,21 @@ func TestExternalMaterialExcludesXOAndSortsReasons(t *testing.T) {
 			"v12-dev":   surface.StateIdle, // desk finished — material
 			"zeta-dev":  surface.StateIdle, // desk finished — material
 		},
-		TrackerHash: "h1", // tracker changed — material
+		SignalHash: "h1", // external signal changed — material
 	}
 	ok, reasons := externalMaterial(prev, cur, "hydra-ops")
 	if !ok {
 		t.Fatal("expected material changes")
 	}
 	if len(reasons) != 3 {
-		t.Fatalf("reasons = %v, want 3 (v12-dev, zeta-dev, tracker; NOT the XO)", reasons)
+		t.Fatalf("reasons = %v, want 3 (v12-dev, zeta-dev, signal; NOT the XO)", reasons)
 	}
-	// Stable order: desks sorted by name, tracker last.
+	// Stable order: desks sorted by name, signal last.
 	if reasons[0][:7] != "v12-dev" || reasons[1][:8] != "zeta-dev" {
 		t.Errorf("desk reasons not sorted: %v", reasons)
 	}
-	if reasons[2] != "state tracker changed" {
-		t.Errorf("tracker reason should be last: %v", reasons)
+	if reasons[2] != "external signal changed" {
+		t.Errorf("signal reason should be last: %v", reasons)
 	}
 	for _, r := range reasons {
 		if r[:9] == "hydra-ops" {
@@ -91,18 +91,34 @@ func TestExternalMaterialColdStartSilent(t *testing.T) {
 			"v12-dev": surface.StateIdle,
 			"zeta":    surface.StateWorking,
 		},
-		TrackerHash: "h1",
+		SignalHash: "h1",
 	}
 	if ok, reasons := externalMaterial(prev, cur, "hydra-ops"); ok {
 		t.Errorf("cold start should be silent, got %v", reasons)
 	}
 }
 
-func TestExternalMaterialTrackerOnly(t *testing.T) {
-	prev := Snapshot{DeskStates: map[string]surface.State{"v12-dev": surface.StateIdle}, TrackerHash: "h0"}
-	cur := Snapshot{DeskStates: map[string]surface.State{"v12-dev": surface.StateIdle}, TrackerHash: "h1"}
+func TestExternalMaterialSignalOnly(t *testing.T) {
+	prev := Snapshot{DeskStates: map[string]surface.State{"v12-dev": surface.StateIdle}, SignalHash: "h0"}
+	cur := Snapshot{DeskStates: map[string]surface.State{"v12-dev": surface.StateIdle}, SignalHash: "h1"}
 	ok, reasons := externalMaterial(prev, cur, "hydra-ops")
-	if !ok || len(reasons) != 1 || reasons[0] != "state tracker changed" {
-		t.Errorf("tracker-only change = (%v,%v), want one tracker reason", ok, reasons)
+	if !ok || len(reasons) != 1 || reasons[0] != "external signal changed" {
+		t.Errorf("signal-only change = (%v,%v), want one external-signal reason", ok, reasons)
+	}
+}
+
+// A single-writer tracker's content is the XO's OWN output; it must NOT reach the
+// wake materiality set at all. The detector never feeds the tracker hash into the
+// snapshot's SignalHash (only the optional external --signal-file does), so a
+// tracker edit produces no SignalHash delta and therefore no wake. This asserts the
+// predicate-level guarantee: equal SignalHash across the diff ⇒ no signal reason,
+// regardless of desk churn the XO itself caused.
+func TestExternalMaterialTrackerWritesDoNotWake(t *testing.T) {
+	// SignalHash unchanged (the tracker is not a signal source); only the XO's own
+	// pane churned — which externalMaterial excludes (H2). Result: no wake.
+	prev := Snapshot{DeskStates: map[string]surface.State{"hydra-ops": surface.StateWorking}, SignalHash: "h0"}
+	cur := Snapshot{DeskStates: map[string]surface.State{"hydra-ops": surface.StateIdle}, SignalHash: "h0"}
+	if ok, reasons := externalMaterial(prev, cur, "hydra-ops"); ok {
+		t.Errorf("the XO's own tracker writes must not produce an external wake, got %v", reasons)
 	}
 }

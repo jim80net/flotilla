@@ -49,7 +49,8 @@ func cmdWatch(args []string) error {
 	snapshotPath := fs.String("snapshot-file", os.Getenv("FLOTILLA_SNAPSHOT_FILE"), "change-detector snapshot file (default <roster-dir>/flotilla-detector-state.json)")
 	awaitingPath := fs.String("awaiting-file", os.Getenv("FLOTILLA_AWAITING_FILE"), "awaiting-operator veto marker (default <roster-dir>/flotilla-xo-awaiting)")
 	settledPath := fs.String("settled-file", os.Getenv("FLOTILLA_SETTLED_FILE"), "XO settle (idle) marker (default <roster-dir>/flotilla-xo-settled)")
-	trackerPath := fs.String("tracker-file", os.Getenv("FLOTILLA_TRACKER_FILE"), "state-tracker file the detector hashes (default <roster-dir>/.flotilla-state.md)")
+	trackerPath := fs.String("tracker-file", os.Getenv("FLOTILLA_TRACKER_FILE"), "the XO's state tracker the continuation prompt names as {{tracker}} (default <roster-dir>/.flotilla-state.md); NOT hashed as a wake signal — it is the XO's own output")
+	signalPath := fs.String("signal-file", os.Getenv("FLOTILLA_SIGNAL_FILE"), "optional external signal file whose content-hash change wakes the XO (a file the XO does NOT write; unset ⇒ no external-signal trigger)")
 	maxQuiet := fs.Int("max-quiet-intervals", 0, "change-detector liveness ping cadence N in intervals (0 ⇒ mode default)")
 	maxSelfCont := fs.Int("max-self-continuations", 3, "change-detector cap on consecutive XO self-continuations with no external change")
 	if err := fs.Parse(args); err != nil {
@@ -164,13 +165,22 @@ func cmdWatch(args []string) error {
 		settled := watch.NewSettledMarker(*settledPath)
 
 		// The tracker path is resolved ONCE (workspace state.md → --tracker-file/default)
-		// and used as BOTH the {{tracker}} the continuation prompt names AND the file the
-		// detector hashes (TrackerHash below) — they can never diverge (P1-2: otherwise the
-		// XO updates a file the detector no longer watches and self-continuation silently
-		// dies). With no workspace this is *trackerPath, so behavior is byte-identical.
+		// and used ONLY as the {{tracker}} the continuation prompt names — the XO's own
+		// read+write source. The detector deliberately does NOT hash it as a wake signal:
+		// the heartbeat instructs the XO to keep the tracker current, so hashing it would
+		// self-wake the XO on its own writes (a loop until it settles). External wake
+		// deltas flow through the separate, optional --signal-file (a file the XO does not
+		// write); see signalHash below.
 		resolvedTracker, err := workspace.ResolveTracker(xo, *trackerPath)
 		if err != nil {
 			return err
+		}
+
+		// The external-signal wake source: hash the --signal-file when configured, else
+		// leave nil so the detector defaults it to inert (no external-signal trigger).
+		var signalHash func() (string, bool)
+		if *signalPath != "" {
+			signalHash = contentHasher(*signalPath)
 		}
 
 		// The continuation prompt carries the narrow-answer discipline (advance the next
@@ -222,9 +232,9 @@ func cmdWatch(args []string) error {
 				}
 				return drv.Assess(pane)
 			},
-			TrackerHash: trackerHasher(resolvedTracker),
-			AckAge:      ack.Age,
-			Wake:        wake,
+			SignalHash: signalHash,
+			AckAge:     ack.Age,
+			Wake:       wake,
 			Rotate: func() error {
 				pane, err := deliver.ResolvePane(agentTitle(cfg, xo))
 				if err != nil {
@@ -369,12 +379,12 @@ func cmdWatch(args []string) error {
 	return nil
 }
 
-// trackerHasher returns a content-hash function for the state-tracker file the
-// change-detector watches. A change in the hash is a material signal. Absent OR
-// unreadable both report ok=false (no update) so the detector carries the prior
-// hash forward and treats it as unchanged (systems-review M4: absent → no-signal,
-// read-error → treat-unchanged — never a wake-storm).
-func trackerHasher(path string) func() (string, bool) {
+// contentHasher returns a content-hash function for a file the change-detector
+// watches as an external wake signal. A change in the hash is a material signal.
+// Absent OR unreadable both report ok=false (no update) so the detector carries the
+// prior hash forward and treats it as unchanged (absent → no-signal, read-error →
+// treat-unchanged — never a wake-storm).
+func contentHasher(path string) func() (string, bool) {
 	return func() (string, bool) {
 		raw, err := os.ReadFile(path)
 		if err != nil {

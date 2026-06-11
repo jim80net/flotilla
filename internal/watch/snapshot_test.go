@@ -16,8 +16,8 @@ func TestSnapshotRoundTrip(t *testing.T) {
 			"hydra-ops": surface.StateIdle,
 			"v12-dev":   surface.StateWorking,
 		},
-		TrackerHash: "abc123",
-		XOSettled:   true,
+		SignalHash: "abc123",
+		XOSettled:  true,
 	}
 	if err := want.Save(p); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -26,7 +26,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("LoadSnapshot ok=false after a successful Save")
 	}
-	if got.TrackerHash != want.TrackerHash || got.XOSettled != want.XOSettled {
+	if got.SignalHash != want.SignalHash || got.XOSettled != want.XOSettled {
 		t.Errorf("round-trip scalar mismatch: got %+v want %+v", got, want)
 	}
 	if got.DeskStates["hydra-ops"] != surface.StateIdle || got.DeskStates["v12-dev"] != surface.StateWorking {
@@ -60,7 +60,7 @@ func TestLoadSnapshotNilMapNormalized(t *testing.T) {
 	// A valid snapshot whose desk_states is JSON null must load with a non-nil
 	// map so the detector can write into it without a nil-map panic.
 	p := filepath.Join(t.TempDir(), "nullmap.json")
-	if err := os.WriteFile(p, []byte(`{"desk_states":null,"tracker_hash":"x","xo_settled":false}`), 0o600); err != nil {
+	if err := os.WriteFile(p, []byte(`{"desk_states":null,"signal_hash":"x","xo_settled":false}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	s, ok := LoadSnapshot(p)

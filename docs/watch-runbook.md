@@ -133,8 +133,8 @@ The legacy clock wakes the XO **every interval** with a generic "do your duties"
 prompt — so the XO burns context on every tick even when nothing changed. Set
 `change_detector: true` in the roster to switch to **heartbeat v2**: a
 deterministic, no-LLM detector that each tick snapshots the fleet (every desk's
-assessed surface state + the state-tracker file's hash), diffs it against the
-prior snapshot, and **wakes the XO only on a material change** — with a prompt
+assessed surface state + the optional external signal-file's hash), diffs it against
+the prior snapshot, and **wakes the XO only on a material change** — with a prompt
 naming what changed. An idle fleet costs **$0/tick**, and the XO's context is
 rotated after each settled handling (via the surface driver: claude-code →
 `/clear`), so even a busy fleet never accumulates XO context.
@@ -148,9 +148,17 @@ rotated after each settled handling (via the surface driver: claude-code →
 **What counts as material** (v1): a desk transition INTO an actionable state
 (`shell` = crashed, or — when a driver emits them — `errored`/`awaiting-input`/
 `awaiting-approval`), a desk `working → idle` ("finished a turn"), or a change in
-the state-tracker file's hash. A desk merely *resuming* work (`→ working`) is
-deliberately NOT material — that keeps the wake set tight. The XO's own
-`working → idle` feeds **self-continuation** (below), never a desk-finished wake.
+the optional **external signal-file**'s hash (`--signal-file`). A desk merely
+*resuming* work (`→ working`) is deliberately NOT material — that keeps the wake set
+tight. The XO's own `working → idle` feeds **self-continuation** (below), never a
+desk-finished wake.
+
+> **The XO's own state tracker (`.flotilla-state.md`) is NOT a wake signal.** The
+> heartbeat instructs the XO to keep the tracker current, so hashing it as a wake
+> source would self-wake the XO on its own writes (a loop until it settles). The
+> tracker is only the continuation prompt's `{{tracker}}` read-source. Genuine
+> *external* state the XO must react to (a desk or tool dropping a signal) goes
+> through the separate, optional `--signal-file` — a file the XO does **not** write.
 
 **Self-continuation + the markers.** On the XO's own `working → idle` the detector
 wakes it once to advance the next authorized step, rotating context between steps;
@@ -186,7 +194,10 @@ window.
 
 **Detector files** (all default under the roster dir; override via flag or env):
 `--snapshot-file` (the diff state), `--awaiting-file`, `--settled-file`,
-`--tracker-file` (`.flotilla-state.md`). The snapshot is written atomically and
+`--tracker-file` (`.flotilla-state.md`, the XO's `{{tracker}}` read-source — NOT
+hashed as a wake signal), and `--signal-file` (`$FLOTILLA_SIGNAL_FILE`, **optional**,
+unset by default — the external-signal wake source; a file the XO does not write).
+The snapshot is written atomically and
 read fail-safe: a missing/corrupt snapshot cold-starts (one conservative wake);
 a persistent write failure raises a loud alert and degrades to in-memory-only
 (never wake-every-tick). Liveness state is kept independent of the snapshot, so a

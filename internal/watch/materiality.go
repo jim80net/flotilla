@@ -60,9 +60,9 @@ func material(prev, cur surface.State) (bool, string) {
 // externalMaterial collects every material change between two snapshots EXCEPT
 // the XO's own desk transitions (systems-review H2: the XO is in the snapshot
 // too, but its Working→Idle feeds self-continuation only — never the
-// desk-finished wake). The state-tracker hash changing is also material. Reasons
-// are returned in a stable order (desks sorted by name, tracker last) so the
-// wake prompt and the tests are deterministic.
+// desk-finished wake). The optional external signal-file hash changing is also
+// material. Reasons are returned in a stable order (desks sorted by name, signal
+// last) so the wake prompt and the tests are deterministic.
 func externalMaterial(prev, cur Snapshot, xoAgent string) (bool, []string) {
 	names := make([]string, 0, len(cur.DeskStates))
 	for name := range cur.DeskStates {
@@ -81,10 +81,13 @@ func externalMaterial(prev, cur Snapshot, xoAgent string) (bool, []string) {
 			reasons = append(reasons, name+": "+why)
 		}
 	}
-	// Tracker-hash change. Empty hashes (cold-start, or an absent/unreadable
-	// tracker carried forward as unchanged — M4) are never material.
-	if prev.TrackerHash != "" && cur.TrackerHash != "" && prev.TrackerHash != cur.TrackerHash {
-		reasons = append(reasons, "state tracker changed")
+	// External signal-file hash change. Empty hashes (no signal file configured,
+	// cold-start, or an absent/unreadable signal file carried forward as unchanged)
+	// are never material. The XO's OWN state tracker is deliberately not hashed here
+	// (it would self-wake the XO on its own writes); only a file the XO does not
+	// write reaches this branch.
+	if prev.SignalHash != "" && cur.SignalHash != "" && prev.SignalHash != cur.SignalHash {
+		reasons = append(reasons, "external signal changed")
 	}
 	return len(reasons) > 0, reasons
 }
