@@ -40,26 +40,37 @@
 
 ## 3. Discord voice I/O + codec (internal/voice; cgo build tag)
 
-> **§3a FOUNDATION (this PR — pure-Go, no libopus needed):** the SSRC→UserID gate, the
+> **§3a FOUNDATION (merged #37 — pure-Go, no libopus):** the SSRC→UserID gate, the
 > 24→48 kHz resample stage, and the CGO-isolated codec SEAM (interface + build-tagged stub
-> + the CI proof that the core builds `CGO_ENABLED=0`). Everything here is unit-tested
-> under `-race` with no CGO. §3b below (the real libopus codec + the live discordgo voice
-> session) is **BLOCKED on `libopus-dev`** (not installed on the build host — operator must
-> `sudo apt install libopus-dev`) and on a live voice channel for integration; deferred to
-> the next §3 PR once the toolchain is in place.
+> + the CI proof that the core builds `CGO_ENABLED=0`). Unit-tested under `-race`, no CGO.
+>
+> **§3b-codec (this PR — the real libopus codec):** `libopus-dev` is now installed
+> (operator, 2026-06-11; libopus 1.4 verified). `opus_cgo.go` (`//go:build voiceopus`) +
+> the PCM→Opus→PCM round-trip test land, plus the `-tags voiceopus` CI build/test job. The
+> remaining §3 items (live discordgo voice session, endpointer, recovery) move into the
+> §3b-session / §4 / §5 stream and still need a live voice channel for integration.
 
 - [~] 3.1 Own discordgo session w/ `IntentsGuildVoiceStates` (P2-1); `ChannelVoiceJoin`;
       `OpusRecv`/`OpusSend`; maintain the **SSRC→UserID table** from `VoiceSpeakingUpdate`.
       — **DONE: the SSRC→UserID table** (`SpeakerTable`, positive fail-closed operator gate,
       P1-1) + tests. **DEFERRED (§3b):** the live session/join/`OpusRecv`/`OpusSend` wiring
       (needs libopus + a live channel).
-- [~] 3.2 Opus↔PCM via libopus (cgo, build-tagged; lean `hraban/opus`, empirical pick).
-      Test: PCM→Opus→PCM round-trip within tolerance. — **DONE: the build-tagged seam**
-      (`OpusCodec` interface in codec.go; `//go:build !voiceopus` stub fails-closed with a
-      clear error; CI proves `CGO_ENABLED=0 go build ./...`) **+ the 24→48 kHz `Resample`
-      stage** (design folds resample into the codec stage) + tests. **DEFERRED (§3b):** the
-      real `opus_cgo.go` (`//go:build voiceopus`) + the PCM→Opus→PCM round-trip test —
-      blocked on `libopus-dev`; shipping untested CGO would violate done-means-done.
+- [x] 3.2 Opus↔PCM via libopus (cgo, build-tagged; **first-party binding over system
+      libopus** — ruling 2026-06-11). Test: PCM→Opus→PCM round-trip within tolerance. — §3a
+      shipped the build-tagged seam (`OpusCodec` in codec.go; `//go:build !voiceopus`
+      fail-closed stub; CI `CGO_ENABLED=0` proof) + the 24→48 kHz `Resample` stage. §3b
+      (this PR) ships the real `opus_cgo.go` (`//go:build voiceopus`) — a ~one-screen
+      `#cgo pkg-config: opus` binding over the 7-function libopus C API (create/encode/
+      decode/destroy/strerror) — plus round-trip / silence-vs-signal / frame-size-guard /
+      empty-packet-guard / idempotent-Close tests + the `-tags voiceopus` CI job.
+      **Library decision:** both design candidates were disqualified for "system libopus on
+      ALL arches" — `hraban/opus` pins `pkg-config: opus opusfile` package-wide (needs the
+      unused libopusfile); `layeh.com/gopus` silently VENDORS opus-1.1.2 on amd64 (the CI/
+      prod arch) and only pkg-config's system libopus on other arches (caught by
+      systems-review — a false "links libopus 1.4" claim on amd64). A first-party binding
+      `#cgo pkg-config: opus` uses system libopus on every arch (the design's declared
+      `libopus-dev` dep, nothing extra), gives a real `opus_*_destroy` `Close()`, and shrinks
+      the supply chain to a frozen 7-function surface we fully audit.
 - [ ] 3.3 Endpointer: configurable silence-timeout (~1.5–2 s) end-of-utterance. Test. (§3b/§4.)
 - [ ] 3.4 Voice-session recovery (P2-2): a gateway drop discards the in-flight utterance
       (no late inject), re-establishes or emits a one-line notice. Test the drop-stale path. (§3b.)
@@ -89,9 +100,9 @@
 
 - [x] 6.1a **enforce `CGO_ENABLED=0` on the non-voice build + CI (P3-1)** so "core is
       pure-Go" is tested — DONE in §3a (ci.yml "Core builds without CGO" step + the
-      build-tagged stub). **§3b:** add a matching `-tags voiceopus` CI build so the REAL
-      libopus codec path is compiled/tested in CI too (today the no-CGO step is
-      pre-positioned and only becomes a real guard once opus_cgo.go lands).
+      build-tagged stub) AND in §3b the matching **`voice-opus-codec` CI job** (installs
+      libopus-dev; `go build`/`go test -race -tags voiceopus`) compiles + tests the REAL
+      codec path, so neither side can silently rot.
 - [ ] 6.1b `flotilla-voice.service` (own unit via the installer pattern);
       document `libopus-dev` + `state/voice.env`.
 - [ ] 6.2 Voice docs: push-to-talk expectation, the `speak` contract, cost cap, the
