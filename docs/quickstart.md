@@ -164,6 +164,27 @@ be resumed. The launch file matches the default `.gitignore`'s
 `/flotilla-launch.json` line; if you point `--launch` at a non-default path, you
 own keeping it out of version control.
 
+### Per-agent workspace: `flotilla workspace`
+
+The flat `flotilla-launch.json` is being superseded by a per-agent **workspace**
+`~/.flotilla/<agent>/` — one home holding the desk's launch recipe (`launch.json`),
+its heartbeat prompt (`HEARTBEAT.md`), its working tracker (`state.md`), and its
+identity in the agent's native instruction file (`CLAUDE.md` for Claude Code,
+`AGENTS.md` for Grok/Cursor). Scaffold one:
+
+```sh
+flotilla workspace init infra        # creates ~/.flotilla/infra/ (never clobbers)
+flotilla workspace path infra        # prints the directory
+```
+
+Then edit `~/.flotilla/infra/launch.json` — set `cwd` to the agent's absolute
+worktree. The scaffolded `launch` loads the identity at startup via the
+(empirically verified) `claude --append-system-prompt-file ~/.flotilla/infra/CLAUDE.md -w infra`.
+`flotilla resume` reads the workspace `launch.json` first and **falls back to the
+flat `flotilla-launch.json`** when no workspace exists, so migration is per-agent and
+nothing breaks until you move a desk over. The workspace lives under `$HOME` (the
+daemon must run as the same user — the shipped `flotilla-watch` is a `--user` service).
+
 ## 4. (Optional) Discord audit mirror
 
 To get a durable, phone-readable transcript of inter-agent coordination, mirror
