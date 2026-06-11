@@ -1,7 +1,6 @@
 package workspace
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,14 +41,14 @@ func ResolvePrompt(agent, builtin, tracker, settle string) (string, error) {
 		return "", err
 	}
 	p := filepath.Join(dir, HeartbeatFileName)
-	raw, rerr := os.ReadFile(p)
-	switch {
-	case rerr == nil:
+	// HEARTBEAT.md is an OPTIONAL cosmetic override. ANY read failure — absent, or a
+	// malformed/unreadable instance (a directory, a permission error) — falls back to the
+	// built-in prompt. A broken optional file must NEVER fail the safety-critical daemon
+	// (fail-open, matching ResolveTracker's os.Stat fallback + the relay-non-fatal posture).
+	if raw, rerr := os.ReadFile(p); rerr == nil {
 		if content := strings.TrimRight(string(raw), "\r\n"); strings.TrimSpace(content) != "" {
 			tmpl = content
 		}
-	case !os.IsNotExist(rerr):
-		return "", fmt.Errorf("read heartbeat prompt %q: %w", p, rerr)
 	}
 	tmpl = strings.ReplaceAll(tmpl, "{{tracker}}", tracker)
 	tmpl = strings.ReplaceAll(tmpl, "{{settle}}", settle)

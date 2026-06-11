@@ -89,6 +89,24 @@ func TestResolvePromptEmptyHeartbeatFallsToBuiltin(t *testing.T) {
 	}
 }
 
+// A malformed/unreadable HEARTBEAT.md (here: a directory) must FALL BACK to the
+// built-in, NEVER error — an optional cosmetic file cannot be allowed to fail the
+// safety-critical watch daemon (fail-open, matching ResolveTracker).
+func TestResolvePromptMalformedHeartbeatFallsBackNotFatal(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(rootEnv, root)
+	if err := os.MkdirAll(filepath.Join(root, "xo", HeartbeatFileName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ResolvePrompt("xo", builtinPrompt, "/t/state.md", "/t/settle")
+	if err != nil {
+		t.Fatalf("a malformed HEARTBEAT.md must NOT error (fail-open): %v", err)
+	}
+	if !strings.Contains(got, "advance, reading the tracker /t/state.md") {
+		t.Errorf("malformed HEARTBEAT.md should fall back to the built-in: %q", got)
+	}
+}
+
 // The P1-2 single-source invariant: the path the prompt names MUST equal the path
 // ResolveTracker returns, in every resolution branch.
 func TestPromptTrackerSingleSource(t *testing.T) {

@@ -279,8 +279,10 @@ func cmdWatch(args []string) error {
 		}
 
 		// Legacy heartbeat prompt resolution: a non-empty workspace HEARTBEAT.md →
-		// roster heartbeat_message → DefaultHeartbeatPrompt. The legacy prompt carries no
-		// {{tracker}}/{{settle}} placeholders, so the substitution is a no-op here.
+		// roster heartbeat_message → DefaultHeartbeatPrompt. The built-in legacy prompts
+		// carry no {{tracker}}/{{settle}} placeholders, so the substitution is a no-op; a
+		// HEARTBEAT.md override that DID contain a placeholder resolves to empty here by
+		// design (legacy mode has no detector tracker/settle path to interpolate).
 		legacyBuiltin := cfg.HeartbeatMessage
 		if legacyBuiltin == "" {
 			legacyBuiltin = watch.DefaultHeartbeatPrompt
