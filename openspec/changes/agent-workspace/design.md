@@ -1,6 +1,6 @@
 # Design: per-agent workspace `~/.flotilla/<agent>/`
 
-**Status:** design (awaiting XO checkpoint) · **Date:** 2026-06-11 · **Subsumes:** #6 (pluggable tracker + heartbeat-prompt customization) · **Builds on:** `docs/agent-launch-recipes-design.md` (the flat launch recipe this evolves).
+**Status:** design (revised after systems-review — awaiting XO checkpoint) · **Date:** 2026-06-11 · **Subsumes:** #6 (pluggable tracker + heartbeat-prompt customization) · **Builds on:** `docs/agent-launch-recipes-design.md`.
 
 ## Context
 
@@ -11,165 +11,211 @@ missing entirely:
 | concern | today | problem |
 |---|---|---|
 | launch recipe | flat `flotilla-launch.json` (`agents` map, host-local) | one file for all desks; no per-agent home |
-| heartbeat prompt | roster `heartbeat_message` (single, global) | every heartbeated agent shares one prompt |
+| heartbeat / continuation prompt | roster `heartbeat_message` (legacy) **or** the detector's hard-coded `continuationPrompt` (`cmd/flotilla/watch.go:156`) | the production XO runs the **detector**, whose prompt is not customizable at all |
 | working tracker | `watch --tracker-file` (single, global) | the detector hashes ONE tracker (the XO's) |
 | desk identity/role | — | no home for "who is this desk + its standing task" |
 
-The operator's decision (2026-06-10, confirmed 2026-06-11): unify them into a
-per-agent **workspace** under a host-local home `~/.flotilla/<agent>/` — mirroring
-`~/.openclaw/workspace-<name>/` and `~/.hermes/` — and the per-workspace launch
-config **replaces** the flat `flotilla-launch.json` (the flat file stays a
-read-only migration fallback). The identity file uses the agent's **native**
-convention (`CLAUDE.md` / `AGENTS.md`), not a flotilla-only `IDENTITY.md`, so it
-is read with zero glue.
+Operator decision (2026-06-10, confirmed 2026-06-11): unify them into a per-agent
+**workspace** `~/.flotilla/<agent>/` (mirroring `~/.openclaw/`, `~/.hermes/` —
+illustrative precedent, not an interop contract); the per-workspace launch config
+**replaces** the flat `flotilla-launch.json` (which stays a read-only migration
+fallback); the identity file uses the agent's **native** convention
+(`CLAUDE.md`/`AGENTS.md`), not a flotilla-only `IDENTITY.md`.
+
+> **Production mode is the change-detector, not the legacy heartbeat.** When
+> `change_detector: true` (the XO's live config), `cfg.HeartbeatMessage` /
+> `DefaultHeartbeatPrompt` are **never consulted** — the XO is woken by the
+> detector's `continuationPrompt` / ping / material bodies (watch.go:156-177).
+> The legacy `heartbeat_message` path (watch.go:257-261) runs only when the
+> detector is off. The design below targets the **detector** prompt, or
+> `HEARTBEAT.md` would be silently inert for the production XO (systems-review P1-1).
 
 ## Schema — `~/.flotilla/<agent>/`
 
 ```
 ~/.flotilla/<agent>/
   launch.json    # the launch recipe (single object — the agent IS the dir name)
-  HEARTBEAT.md   # this agent's heartbeat / continuation prompt (customizable)
+  HEARTBEAT.md   # this agent's continuation-prompt TEMPLATE (customizable)
   state.md       # this agent's working tracker (the detector hashes it)
   CLAUDE.md      # (surface=claude-code) the desk's native identity/role file
   AGENTS.md      # (surface=grok / cursor) ditto — surface-named, read natively
 ```
 
-The directory is **host-local and gitignored-by-location** (it lives under `$HOME`,
-not the repo) and trusted at the secrets level (the launch command is shell-run —
-anyone who can write the workspace can already write `flotilla-secrets.env`),
-exactly the posture the flat launch file established.
+Host-local (under the resolved home dir), never committed, trusted at the secrets
+level (the `launch` command is shell-run).
 
-### `launch.json` — the recipe (unchanged fields, relocated + de-mapped)
+### Home-dir resolution (systems-review P2-4)
+
+The workspace root is `<home>/.flotilla/`, where `<home>` = `os.UserHomeDir()`
+(respects `$HOME`, then the passwd db). A `--workspace-root <dir>` flag /
+`$FLOTILLA_WORKSPACE_ROOT` overrides it (mirroring `--tracker-file`), for tests and
+non-standard layouts. **Load-bearing assumption, stated as a requirement:** the
+`flotilla-watch` daemon and the operator's interactive `flotilla resume` resolve the
+**same** home. This holds today because `flotilla-watch` is a `systemctl --user`
+service (per `deploy/flotilla-watch.service.in` — runs as the operator's user, same
+`$HOME`). A system-level unit running as a different user would read a different
+`~/.flotilla/` and the operator's scaffolding would be invisible to the daemon — so
+the runbook MUST keep it a user service (or set `--workspace-root` explicitly).
+
+### `launch.json` — the recipe (same fields, relocated + de-mapped)
 
 ```json
-{ "launch": "claude -w hydra-ops", "cwd": "/abs/path/to/worktree", "tmux": "flotilla:hydra-ops" }
+{ "launch": "claude --add-dir ~/.flotilla/hydra-ops -w hydra-ops", "cwd": "/abs/worktree", "tmux": "flotilla:hydra-ops" }
 ```
 
-The same `Recipe` the flat file used (`internal/launch/launch.go`), with the SAME
-validation table (launch: required, no `\t\n\r`; cwd: required, absolute, no
-`\t\n\r`; tmux: optional, plain `session:window`, no `.pane` suffix / second `:` /
-spaces), but:
+The same `Recipe` the flat file used (`internal/launch/launch.go`), SAME validation
+(launch/cwd/tmux rules), but: no `agents` map (one recipe per file; the agent is the
+dir name); no `state` field (the workspace `state.md` is the pointer). The flat
+file's `state` stays valid in the fallback path only.
 
-- **No `agents` map** — one recipe per file; the agent is the directory name.
-- **No `state` field** — the workspace's own `state.md` IS the state pointer
-  (`resume` defaults the printed `/takeover` pointer to `<workspace>/state.md`).
-  The flat file's `state` stays valid in the fallback path only.
-- The cross-recipe "no two share a tmux target" check moves to a **fleet-load**
-  step (load all workspaces, reject a shared tmux target) — preserved, not lost.
+### `HEARTBEAT.md` — the continuation-prompt template (fixes P1-1 + P1-2 together)
 
-### `HEARTBEAT.md` — the per-agent prompt
+`HEARTBEAT.md` is an OPTIONAL template for the detector's **continuation** prompt
+(the self-continuation tick — the natural customization target; ping/material
+bodies stay built-in). It supports two placeholders that flotilla substitutes from
+**resolved** values, and the ack instruction is always appended:
 
-The text `flotilla watch` injects on a tick for THIS agent. Replaces the single
-roster `heartbeat_message`. Resolution order (per agent): `<workspace>/HEARTBEAT.md`
-→ roster `heartbeat_message` → `watch.DefaultHeartbeatPrompt`. The change-detector's
-continuation prompt (today hard-coded in `cmd/flotilla/watch.go`) resolves the same
-way, so the XO's self-continuation wording becomes editable in one file.
+- `{{tracker}}` → the resolved tracker path (see below)
+- `{{settle}}` → the settle-marker path
+
+Resolution: `<workspace>/HEARTBEAT.md` (templated) → the built-in `continuationPrompt`.
+In **legacy** mode only, `HEARTBEAT.md` (verbatim, same placeholders) → roster
+`heartbeat_message` → `DefaultHeartbeatPrompt`.
+
+**The P1-2 invariant — one resolved tracker path, two consumers.** Today
+`*trackerPath` is BOTH interpolated into the continuation prompt (watch.go:158) AND
+the hash target (watch.go:201) — one variable, so they cannot diverge. The workspace
+MUST preserve that: `ResolveTracker(agent)` returns ONE path that is (a) fed to
+`trackerHasher` and (b) substituted for `{{tracker}}` in the prompt. They can never
+point at different files — otherwise the XO updates a file the detector does not
+hash and the self-continuation materiality signal **silently dies**. This is the
+single most dangerous failure mode and is encoded as a spec scenario ("the path the
+prompt names equals the path the detector hashes").
 
 ### `state.md` — the per-agent tracker
 
-The tracker the change-detector content-hashes to decide "did the goal/task state
-change". Replaces `watch --tracker-file`. Resolution (for the detected agent):
-`<workspace>/state.md` → `--tracker-file` / `$FLOTILLA_TRACKER_FILE` →
-`<roster-dir>/.flotilla-state.md`. The XO's `.flotilla-state.md` relocates to
-`~/.flotilla/hydra-ops/state.md`.
+The file the change-detector content-hashes. Resolution (for the detected agent):
+`<workspace>/state.md` → `--tracker-file`/`$FLOTILLA_TRACKER_FILE` →
+`<roster-dir>/.flotilla-state.md`. The resolved path threads into both the hasher
+and `{{tracker}}` (above).
 
 ### Native instruction file — `CLAUDE.md` / `AGENTS.md`
 
-The desk's identity + standing role, in the **agent's own convention** so it is
-read natively (zero glue). The file NAME is chosen by the agent's `surface`
-(claude-code → `CLAUDE.md`; grok / cursor → `AGENTS.md`). **flotilla never
-auto-injects or clobbers it** — mirroring resume's non-goal (no auto-`/takeover`;
-restart ≠ resume-and-act). See the open fork below for how it reaches the agent.
+The desk's identity/role in the agent's own convention (claude-code → `CLAUDE.md`;
+grok/cursor → `AGENTS.md`). flotilla NEVER auto-injects or clobbers it.
+
+## How the identity file reaches the agent — THE OPEN FORK (decide at checkpoint)
+
+Claude Code discovers `CLAUDE.md` from the cwd, its ancestors, and `~/.claude/` —
+not from an arbitrary path. A desk's `cwd` is usually its worktree, so
+`~/.flotilla/<agent>/CLAUDE.md` is **not** natively on the read path. Three options:
+
+- **Option C — `launch` command adds the workspace dir (RECOMMENDED).** The recipe's
+  `launch` is already operator-authored shell (`launch.go:29`), so it can read the
+  workspace identity with **zero flotilla glue and zero cwd touch**:
+  `claude --add-dir ~/.flotilla/<agent> -w <agent>` (Claude Code's `--add-dir` adds
+  the directory to the session context). This dominates A and B — no cwd repurposing,
+  no symlink side-effect — and is just a recipe convention `workspace init` can emit.
+- **Option A — flotilla never touches the cwd; operator wires it.** (A1) set the
+  recipe `cwd` to the workspace dir for a repo-less desk; (A2) for a repo desk, the
+  **repo's own** `CLAUDE.md` is the identity and the workspace file is *vestigial*
+  (documentation-only, never read) — which undercuts "one home for identity" for the
+  common repo desk.
+- **Option B — `workspace init` symlinks the identity into the cwd** iff absent.
+  Automatic, but flotilla now writes into the agent's worktree (a new side effect; a
+  dangling symlink if the workspace moves).
+
+**Recommendation: Option C** — zero glue, zero cwd touch, and `workspace init` emits
+the `--add-dir` recipe convention. The XO ratifies C vs A vs B at the checkpoint.
 
 ## `flotilla resume` — read the workspace, fall back to the flat file
 
-Today `resume` loads the flat `flotilla-launch.json` and `Config.Recipe(agent)`.
-New resolution (no change to the safety-critical `runResume` core — the two P1
-invariants are surface-/source-agnostic):
+Recipe resolution (the safety-critical `runResume` core is unchanged — its two P1
+invariants key on `key`/`cwd`/`launch`/tmux, never the recipe SOURCE, verified
+resume.go:112-187):
 
-1. If `~/.flotilla/<agent>/launch.json` exists → load + validate it as the recipe.
-2. Else if the flat launch file has an entry for `<agent>` → use it (migration
-   fallback), exactly as today.
-3. Else → the existing clear error (`no launch recipe for "<agent>"…`), now naming
-   both the workspace path and the flat file it looked in.
+1. `~/.flotilla/<agent>/launch.json` exists → use it.
+2. Else the flat `flotilla-launch.json` has an entry → use it (migration fallback).
+3. Else the existing clear error, now naming both locations.
 
-The printed `/takeover` state pointer = `<workspace>/state.md` if present, else the
-flat recipe's `state`. **Everything else in `resume` is unchanged** — resolve-by-
-marker-first, the fail-safe liveness interlock, cold-create, tagging read-back.
+The printed `/takeover` pointer = `<workspace>/state.md` if it exists **and is
+non-empty** (mirrors the existing `r.State != ""` guard, resume.go:194 — an empty
+scaffolded `state.md` suppresses the pointer, P2-5), else the flat recipe's `state`.
+
+### Cross-recipe tmux-collision check (systems-review P2-1, P2-2)
+
+Today `launch.Load` validates the WHOLE flat file every resume, so a shared `tmux`
+target is caught for free (`launch.go:110-113`). With one `launch.json` per dir,
+`resume <agent>` naturally loads only that agent's recipe — there is no fleet view.
+The check is **preserved by a bounded fleet scan**, with a deliberately *weaker
+failure posture than the flat file's fail-closed*:
+
+- On resume, glob `~/.flotilla/*/launch.json` (∪ flat-file recipes for agents
+  without a workspace, so the invariant spans both sources during migration) and
+  reject only if **this** agent's resolved `tmux` target collides with another's.
+- A malformed/unreadable *other* workspace is **skipped with a warning**, NOT
+  fail-closed — a broken unrelated workspace must never block recovering a healthy
+  desk (that would REGRESS recoverability vs. today, where one file's validity is
+  all-or-nothing only because it is one file). This is a deliberate design choice,
+  not an oversight.
 
 ## `flotilla watch` — per-agent prompt + tracker (MODIFIED `watch`)
 
-- **Heartbeat prompt**: resolve per the order above when enqueueing a tick for an
-  agent. v1 only the `xo_agent` is heartbeated, so this reads
-  `~/.flotilla/<xo_agent>/HEARTBEAT.md`; absent → today's roster/default behavior.
-- **Detector tracker**: the `trackerHasher` path resolves to
-  `~/.flotilla/<xo_agent>/state.md` when present, else `--tracker-file`/default.
+- **Continuation prompt**: when enqueueing the detector continuation wake, source it
+  from the resolved `HEARTBEAT.md` template (else built-in), with `{{tracker}}`/
+  `{{settle}}` substituted and ack appended. Resolved ONCE at watch startup (prompts
+  are built at startup today — watch.go:156, frozen into the `wake` closure), so a
+  `HEARTBEAT.md` edit takes effect on the next `flotilla-watch` restart, not live.
+- **Detector tracker**: `trackerHasher` path = `ResolveTracker(xo_agent)` — the SAME
+  resolved path substituted into `{{tracker}}` (the P1-2 single-source invariant).
 
-Both are **fallback-defaulted**, so a deployment with no workspace behaves exactly
-as today (the `watch` MODIFIED requirements keep the existing scenarios and ADD the
-workspace-source-precedence scenario).
+No workspace ⇒ every default at watch.go:66-80 / 257-261 is untouched ⇒ behavior is
+**bit-for-bit today** (verified). See migration for the one non-additive transition.
+
+## Migration & backward compatibility (systems-review P1-3)
+
+**The no-workspace path is purely additive — today's behavior bit-for-bit.** The
+*migration transition* is NOT invisible and the proposal must not claim it is:
+
+- Switching the tracker source (operator `mv .flotilla-state.md ~/.flotilla/hydra-ops/state.md`)
+  is a **hash-discontinuity** event. The detector's snapshot is keyed to the old
+  path's content (`*snapshotPath`, watch.go:218); the first tick after the source
+  switches to `state.md` hashes a different file than the persisted snapshot → **one
+  spurious material wake**. This requires a `flotilla-watch` **restart** to switch the
+  source cleanly, and the one-time post-migration wake is **expected and harmless**
+  (the XO replies idle and re-settles). Documented in the runbook; not claimed away.
+
+Migration per agent: `flotilla workspace init <agent>` → fill `launch.json` → move
+the XO's `.flotilla-state.md` → `state.md` → restart `flotilla-watch`. The flat
+`flotilla-launch.json` stays a fallback until all desks are migrated, then removable.
 
 ## New command — `flotilla workspace`
 
-- `flotilla workspace init <agent>` — scaffold `~/.flotilla/<agent>/`: write a
-  `launch.json` template (commented with the validation rules), an empty
-  `HEARTBEAT.md` and `state.md`, and a stub identity file named for the agent's
-  `surface` (`CLAUDE.md` / `AGENTS.md`). **Idempotent**: never overwrites an
-  existing file (prints "exists, kept"); creates only what's missing. Validates the
-  agent is in the roster first.
-- `flotilla workspace path <agent>` — print the resolved workspace dir (for scripts
-  / the recovery skill).
-
-`init` does NOT populate the recipe with real paths (host data the operator owns,
-per the launch-design "data, not code" principle) — it scaffolds the shape.
-
-## Native instruction file — THE OPEN FORK (decide at checkpoint)
-
-Claude Code discovers `CLAUDE.md` from the cwd, its ancestors, and `~/.claude/` —
-**not** from an arbitrary path. A desk's `cwd` is typically its worktree, so
-`~/.flotilla/<agent>/CLAUDE.md` is **not** on the agent's native read path. Two
-ways to honor "read natively, zero glue":
-
-- **Option A — `flotilla` never touches the cwd (recommended).** The workspace
-  holds the *canonical* identity file; how it reaches the agent is operator wiring,
-  with two supported patterns documented: (A1) set the recipe `cwd` to the
-  workspace dir for an identity-first / repo-less desk (then `CLAUDE.md` is native);
-  (A2) for a repo/worktree desk, the **repo's own** `CLAUDE.md`/`AGENTS.md` is its
-  identity (the agent already reads it — true zero glue) and the workspace file is
-  optional. Mirrors resume's "no auto-edit of the agent's files" non-goal exactly.
-- **Option B — `workspace init` symlinks the identity file into the cwd** iff the
-  cwd lacks one (never clobbers a repo's existing file). More automatic, but
-  flotilla now writes into the agent's working tree — a new side effect to reason
-  about (and a dangling symlink if the workspace moves).
-
-**Recommendation: Option A** — it keeps flotilla's "never silently edit the
-agent's files" invariant, and the repo-native case (A2) is the genuine zero-glue
-story. The XO ratifies A vs B at the checkpoint before any build.
-
-## Migration & backward compatibility
-
-Purely additive. No workspace → flat launch file + roster prompt + `--tracker-file`,
-i.e. today's behavior bit-for-bit. The operator migrates per-agent with
-`flotilla workspace init`, fills `launch.json`, moves the XO's `.flotilla-state.md`
-to `state.md`. The flat `flotilla-launch.json` is a read-only fallback retained
-until every desk has a workspace, then removable. No roster schema change.
+- `flotilla workspace init <agent>` — roster-validate the agent (this is where the
+  flat file's per-key roster check relocates, P3-3), then scaffold: a commented
+  `launch.json` template (emitting the `--add-dir` recipe convention), empty
+  `HEARTBEAT.md`/`state.md`, and a surface-named identity stub. **Idempotent**: never
+  overwrites; creates only what's missing. Does NOT populate real host paths (operator
+  data, per the launch-design "data, not code" principle).
+- `flotilla workspace path <agent>` — print the resolved dir (for scripts/the skill).
 
 ## Non-goals
 
 - Auto-injecting identity / `/takeover` (unchanged from resume's non-goals).
-- A committable/shared workspace — host-specific by design (it holds host paths).
-- Multi-agent heartbeating — v1 still heartbeats only the `xo_agent`; per-agent
-  `HEARTBEAT.md` simply makes that one prompt file-editable and future-proofs the
-  rest.
-- Removing the flat `flotilla-launch.json` reader now — it stays as the migration
-  fallback; its deletion is a future cleanup once all desks are migrated.
+- A committable/shared workspace — host-specific by design.
+- Multi-agent heartbeating — v1 heartbeats only the `xo_agent`; per-agent
+  `HEARTBEAT.md` makes that one prompt file-editable and future-proofs the rest.
+- Customizing the ping/material detector bodies — only the continuation prompt is
+  templated in v1 (the others are liveness/notification, not self-continuation).
+- Removing the flat-file reader now — it stays as the migration fallback.
 
 ## Open questions for the checkpoint
 
-1. **Native-instruction-file fork: Option A (no cwd touch, recommended) vs B
-   (symlink-on-init)?**
-2. **`state` field drop:** confirm `resume`'s `/takeover` pointer should default to
-   `<workspace>/state.md` (vs keeping an explicit recipe `state`).
-3. **Scope/PR split:** one PR (workspace schema + `workspace` cmd + resume + watch),
-   or split resume-consumption (PR-1) from watch-consumption (PR-2)? (Recommend
-   split — watch is the live safety-critical daemon; isolate its change.)
+1. **Identity-file fork: Option C (`--add-dir`, recommended) vs A vs B?**
+2. **`HEARTBEAT.md` templating scope:** template the continuation prompt with
+   `{{tracker}}`/`{{settle}}` (recommended — delivers customization for the *production*
+   detector path), or defer prompt-customization and ship only launch.json + state.md +
+   identity in v1 (simpler, but no prompt customization, contradicting the operator ask)?
+3. **PR split:** recommend PR-1 = workspace pkg + `workspace` cmd + `resume` consumption
+   (no live-daemon risk); PR-2 = `watch` consumption (the safety-critical detector — the
+   P1-2 single-source threading + P1-3 restart semantics land isolated and well-tested).

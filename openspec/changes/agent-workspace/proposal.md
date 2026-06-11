@@ -46,10 +46,16 @@ Subsumes #6 (pluggable tracker + first-class heartbeat-prompt customization).
 
 - **Code:** new `internal/workspace` (schema + load + fallback resolution); `cmd/flotilla`
   gains `workspace`; `resume` + `watch` consume the workspace; `.gitignore`.
-- **Behavior:** purely additive — no workspace present → today's behavior exactly
-  (flat launch file, roster prompt, `--tracker-file`).
-- **Migration:** the operator runs `flotilla workspace init` per agent; the flat
-  `flotilla-launch.json` keeps working until each desk has a workspace.
-- **Design checkpoint:** the native-instruction-file read-path (how `CLAUDE.md`/
-  `AGENTS.md` reaches the agent given `cwd` may be a worktree) is the one open fork —
-  see design.md §"Native instruction file"; resolved at the XO checkpoint before build.
+- **Behavior:** additive on the **no-workspace path** — no workspace present → today's
+  behavior bit-for-bit (flat launch file, built-in/roster prompt, `--tracker-file`).
+  The prompt customized is the **detector** continuation prompt (the XO's production
+  path), not the legacy `heartbeat_message`. The migration *transition* is NOT
+  invisible (see below).
+- **Migration:** the operator runs `flotilla workspace init` per agent and restarts
+  `flotilla-watch` when switching the tracker source — that switch is a one-time
+  hash-discontinuity (one expected, harmless spurious wake), not a live no-op. The
+  flat `flotilla-launch.json` keeps working until each desk has a workspace.
+- **Design checkpoint (after systems-review revision):** open forks for the XO —
+  (1) how the native identity file reaches the agent (Option C `--add-dir` recommended
+  vs A/B); (2) HEARTBEAT.md templating scope; (3) the PR-1/PR-2 split. See design.md
+  §"Open questions".
