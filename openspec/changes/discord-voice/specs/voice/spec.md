@@ -73,7 +73,12 @@ registers), NOT buffered and injected later.
 from `watch`, so the watch `Injector`'s in-process serialization does NOT protect against
 a voice transcript interleaving with a heartbeat/relay paste into the same composer. The
 lock SHALL be per-pane (never blocking unrelated panes), and SHALL also close the
-pre-existing `send` interleave race, not only the voice case.
+pre-existing `send` interleave race, not only the voice case. The lock SHALL be a
+kernel-advisory `flock` (auto-released on holder death, so a crashed writer never wedges
+the pane) with a BOUNDED acquire timeout; on timeout the writer SHALL log and DROP the
+delivery rather than block — critical because the watch `Injector` (the heartbeat clock)
+acquires this same lock and must never be wedged by a stuck holder or a non-self-releasing
+lockfile.
 
 #### Scenario: Concurrent writers do not interleave into one composer
 - **WHEN** a voice transcript and a heartbeat tick target the same XO pane at the same moment
@@ -83,8 +88,11 @@ pre-existing `send` interleave race, not only the voice case.
 
 When a transcript is ready but the XO pane is in a working state, the process SHALL check
 pane state (the same `surface.Assess` the watchdog uses) and DEFER the injection (brief
-retry) rather than paste mid-turn into an active composer. This composes with the per-pane
-lock (the lock serializes; the busy-check avoids interrupting an in-flight turn).
+retry) rather than paste mid-turn into an active composer. The defer SHALL be bounded (up
+to a configured N seconds); on exceeding the bound the process SHALL surface a one-line
+operator notice (re-speak) rather than dropping silently or deferring unboundedly. This
+composes with the per-pane lock (the lock serializes; the busy-check avoids interrupting an
+in-flight turn).
 
 #### Scenario: A transcript waits for a working XO
 - **WHEN** a transcript is ready while the XO pane is `Working`

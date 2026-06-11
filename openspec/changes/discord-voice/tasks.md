@@ -58,8 +58,10 @@
 
 - [ ] 5.1 `flotilla speak "<short text>"` — writes a timestamped file to `state/voice/outbound/`
       and returns IMMEDIATELY (non-blocking; never fails the XO turn on voice's state).
-      Bounded (TTL / max-files). The `voice` process watches→consumes→deletes. Test: speak
-      writes + returns with voice down; the spool is bounded.
+      Bounded (TTL / max-files); **overflow action = DROP-OLDEST, never refuse-new** (a
+      refuse-new would fail the XO turn, violating the never-blocks-the-turn ruling). The
+      `voice` process watches→consumes→deletes. Test: speak writes + returns with voice
+      down; the spool is bounded; overflow drops the oldest, not the new write.
 - [ ] 5.2 `flotilla voice` command: load roster + `state/voice.env`, join channel, run both
       pipelines; dispatch + usage in `main.go`.
 
