@@ -67,3 +67,30 @@ jobs:
 
       - name: Test (race detector)
         run: go test -race ./...
+
+  # The voice process is the ONE binary built with `-tags voiceopus` (CGO + libopus):
+  # opus_cgo.go is a first-party binding that `#cgo pkg-config: opus` → SYSTEM libopus on
+  # every architecture (ubuntu-latest is amd64, so libopus-dev IS load-bearing here — there
+  # is no vendored fallback). This job is the counterpart to the core's "builds without CGO"
+  # guard — it compiles AND tests the real Opus codec path on amd64 so it can never silently
+  # rot (a build/test break in the tagged code is invisible to the default build above). The
+  # default job proves the core needs none of this.
+  voice-opus-codec:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install libopus (voice codec host dependency)
+        run: sudo apt-get update && sudo apt-get install -y libopus-dev
+
+      - name: Build the voice codec (-tags voiceopus, CGO + libopus)
+        run: CGO_ENABLED=1 go build -tags voiceopus ./...
+
+      - name: Test the voice codec (round-trip, race detector)
+        run: CGO_ENABLED=1 go test -tags voiceopus -race ./internal/voice/...

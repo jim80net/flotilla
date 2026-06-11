@@ -24,6 +24,8 @@ type OpusCodec interface {
 	Encode(pcm []int16) ([]byte, error)
 	// Decode turns one received Opus packet (Packet.Opus) back into mono 48 kHz PCM.
 	Decode(opus []byte) ([]int16, error)
-	// Close releases the underlying libopus encoder/decoder.
+	// Close releases the underlying libopus encoder/decoder. Callers MUST Close every codec
+	// they construct: the libopus implementation holds C state the Go GC never reclaims, so a
+	// dropped-without-Close codec leaks. Safe to call more than once.
 	Close() error
 }
