@@ -1,6 +1,8 @@
 package deliver
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,9 +24,13 @@ import (
 //     rather than blocking, because the heartbeat clock's Injector acquires this same
 //     lock and must NEVER be wedged by a stuck holder.
 //
-// Lock files live under the host temp dir, so all flotilla processes on the host
-// coordinate (they must share $TMPDIR — the same single-host assumption the workspace
-// makes about $HOME; systemd --user + an interactive shell both default to /tmp).
+// Lock files live under a $HOME-based dir (`~/.flotilla/pane-locks/`), NOT $TMPDIR:
+// the writers (watch's --user systemd service, the operator's interactive shell, voice)
+// must resolve the SAME directory, and $TMPDIR can silently diverge between them (a
+// systemd unit's `PrivateTmp=` gives it a private /tmp; --user units don't inherit the
+// login shell's env). $HOME is the single-host invariant the workspace already relies on
+// (daemon + operator run as the same user) and `PrivateTmp=` does not touch it, so it is
+// the env-independent coordination point.
 
 const (
 	// paneLockTimeout bounds how long a writer waits for a pane's lock before dropping.
@@ -37,12 +43,21 @@ const (
 // auto-released on Close / process death).
 type paneLock struct{ f *os.File }
 
-func paneLockDir() string { return filepath.Join(os.TempDir(), "flotilla-pane-locks") }
+func paneLockDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve pane-lock dir: %w", err)
+	}
+	return filepath.Join(home, ".flotilla", "pane-locks"), nil
+}
 
-// paneLockKey maps a tmux target to a filesystem-safe lockfile stem (a target like
-// "session:win.0" or "%4" → only [A-Za-z0-9], else '_').
+// paneLockKey maps a tmux target to a filesystem-safe, COLLISION-FREE lockfile stem: a
+// readable sanitized prefix (a target like "session:win.0" or "%4" → only [A-Za-z0-9],
+// else '_') plus a short hash of the RAW target. The hash is load-bearing — without it
+// two distinct targets that sanitize alike (e.g. "a:1" and "a-1") would share a lockfile
+// and FALSE-serialize unrelated panes; the hash keeps distinct targets distinct.
 func paneLockKey(target string) string {
-	return strings.Map(func(r rune) rune {
+	stem := strings.Map(func(r rune) rune {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
 			return r
@@ -50,6 +65,11 @@ func paneLockKey(target string) string {
 			return '_'
 		}
 	}, target)
+	if len(stem) > 48 {
+		stem = stem[:48]
+	}
+	sum := sha256.Sum256([]byte(target))
+	return stem + "-" + hex.EncodeToString(sum[:4])
 }
 
 // acquirePaneLock takes the per-pane advisory lock, blocking at most paneLockTimeout.
@@ -61,10 +81,14 @@ func acquirePaneLock(target string) (*paneLock, error) {
 // polls a non-blocking flock until it is held or the deadline passes; on timeout it
 // returns an error (the caller drops the delivery) and NEVER blocks indefinitely.
 func acquirePaneLockFor(target string, timeout time.Duration) (*paneLock, error) {
-	if err := os.MkdirAll(paneLockDir(), 0o700); err != nil {
+	dir, err := paneLockDir()
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("pane lock dir: %w", err)
 	}
-	path := filepath.Join(paneLockDir(), paneLockKey(target)+".lock")
+	path := filepath.Join(dir, paneLockKey(target)+".lock")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open pane lock for %q: %w", target, err)
