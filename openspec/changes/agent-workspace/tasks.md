@@ -55,14 +55,14 @@
 
 ## 4. `flotilla watch` consumes the workspace (PR-2 — live safety-critical daemon)
 
-- [ ] 4.1 Detector continuation prompt via `ResolvePrompt`, tracker via `ResolveTracker`
-      — resolved ONCE at startup; the resolved tracker path feeds BOTH `trackerHasher`
-      AND the prompt's `{{tracker}}` (P1-2). Test: HEARTBEAT.md overrides the detector
-      continuation prompt; **prompt-named path == hashed path**.
-- [ ] 4.2 Legacy-mode prompt resolution (HEARTBEAT.md → heartbeat_message → default).
-- [ ] 4.3 Regression: **no workspace ⇒ byte-identical to today** (watch.go:66-80, 156-177,
-      257-261 paths). Migration transition documented as restart-time + one spurious wake
-      (P1-3) — assert the restart semantics, not live re-resolution.
+- [x] 4.1 Detector continuation prompt via `ResolvePrompt`, tracker via `ResolveTracker`
+      — resolved ONCE; the resolved tracker feeds BOTH `trackerHasher` AND the prompt's
+      `{{tracker}}` (P1-2). Tests (workspace pkg): HEARTBEAT.md overrides; single-source
+      invariant; empty-file foot-gun guard.
+- [x] 4.2 Legacy-mode prompt resolution (non-empty HEARTBEAT.md → heartbeat_message → default).
+- [x] 4.3 Regression `TestDetectorContinuationBuiltinNoWorkspace`: no workspace ⇒ the
+      built-in const substitutes byte-identically (no placeholders left). Migration is a
+      restart-time switch + one harmless spurious wake (P1-3, spec scenario) — NOT live.
 
 ## 5. Docs + migration
 

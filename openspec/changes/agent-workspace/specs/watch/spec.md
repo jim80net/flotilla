@@ -6,13 +6,16 @@
 detector's tracker file from the heartbeated/detected agent's workspace when present,
 with the existing roster/flag values as fallback. The continuation prompt comes from
 `~/.flotilla/<agent>/HEARTBEAT.md` (a template whose `{{tracker}}`/`{{settle}}`
-placeholders are substituted and whose ack instruction is appended) when present,
-else the built-in continuation prompt; in legacy (non-detector) mode the order is
-`HEARTBEAT.md` → roster `heartbeat_message` → `DefaultHeartbeatPrompt`. The detector
-tracker resolves `~/.flotilla/<agent>/state.md` → `--tracker-file`/
-`$FLOTILLA_TRACKER_FILE` → `<roster-dir>/.flotilla-state.md`. A deployment with no
-workspace SHALL behave exactly as before (same prompt, same tracker) — the change is
-additive on the no-workspace path.
+placeholders are substituted and whose ack instruction is appended) when present **and
+non-empty**, else the built-in continuation prompt; in legacy (non-detector) mode the
+order is `HEARTBEAT.md` → roster `heartbeat_message` → `DefaultHeartbeatPrompt`. The
+detector tracker resolves `~/.flotilla/<agent>/state.md` **(when non-empty)** →
+`--tracker-file`/`$FLOTILLA_TRACKER_FILE` → `<roster-dir>/.flotilla-state.md`. The
+non-empty guards are load-bearing: `flotilla workspace init` scaffolds EMPTY
+`HEARTBEAT.md`/`state.md`, and an empty file must NOT hijack the detector (a blank
+prompt, or a static empty-hash tracker that blinds the change signal). A deployment
+with no workspace SHALL behave exactly as before (same prompt, same tracker) — the
+change is additive on the no-workspace path.
 
 #### Scenario: A workspace HEARTBEAT.md overrides the detector continuation prompt
 - **WHEN** the heartbeated agent runs under the change-detector and has `~/.flotilla/<agent>/HEARTBEAT.md`
@@ -29,3 +32,7 @@ additive on the no-workspace path.
 #### Scenario: No workspace leaves today's behavior unchanged
 - **WHEN** no workspace exists for the heartbeated agent
 - **THEN** the prompt and tracker resolve to the built-in/roster/flag defaults exactly as before
+
+#### Scenario: An empty scaffolded HEARTBEAT.md/state.md does not hijack the detector
+- **WHEN** the workspace exists but `HEARTBEAT.md` and/or `state.md` are empty (freshly scaffolded, not yet migrated)
+- **THEN** the empty `HEARTBEAT.md` falls back to the built-in prompt (never a blank wake) and the empty `state.md` falls back to the `--tracker-file`/default (never a static empty-hash that blinds the change signal)
