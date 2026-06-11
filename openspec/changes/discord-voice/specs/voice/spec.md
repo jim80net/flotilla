@@ -46,16 +46,49 @@ local model driver is a future addition behind the same interface.
 - **WHEN** the voice process is configured with the Grok provider
 - **THEN** STT and TTS route through Grok's APIs, and swapping to another provider requires no pipeline change
 
-### Requirement: The operator-identity trust boundary is preserved
+### Requirement: Inbound audio is gated by a POSITIVE operator-SSRC mapping, fail-closed
 
-Voice input SHALL be trusted only from the operator's Discord identity
-(`operator_user_id`) — mere presence in the voice channel SHALL NOT confer authorization,
-mirroring the text relay's allow-list. A transcript from a non-operator speaker SHALL NOT
-be injected as an XO command.
+Voice input SHALL be injected ONLY when its Discord audio SSRC is POSITIVELY mapped to
+`operator_user_id`. Discord's received audio packets carry an SSRC but no user id; the
+process SHALL maintain an SSRC→UserID table seeded from the voice "speaking" events
+(`VoiceSpeakingUpdate`). Audio whose SSRC is **unmapped, ambiguous, or mapped to a
+non-operator** SHALL be DROPPED (fail-closed) — never injected — mirroring the text
+relay's positive allow-list. This explicitly covers the join-time / first-packet race: an
+SSRC not yet in the table is dropped (the operator re-speaks once the speaking event
+registers), NOT buffered and injected later.
+
+#### Scenario: Unattributed audio is dropped, not injected
+- **WHEN** audio arrives from an SSRC not yet (or never) mapped to the operator — e.g. a speaker already talking at join, or the first packets before the speaking event lands
+- **THEN** that audio is dropped and never injected into the XO's pane (fail-closed)
 
 #### Scenario: A non-operator voice is not an XO command
-- **WHEN** someone other than the operator speaks in the channel
+- **WHEN** an SSRC mapped to a non-operator user speaks
 - **THEN** their speech is not injected into the XO's pane as a command
+
+### Requirement: Pane injection is serialized by a per-pane lock across all writers
+
+Because `voice` is a separate process from `watch`, the watch `Injector`'s in-process
+serialization does not protect against a voice transcript interleaving with a
+heartbeat/relay paste into the SAME pane composer. `internal/deliver` SHALL serialize the
+paste-sequence (load-buffer → paste → settle → Enter) with a **per-pane advisory lock**
+that EVERY writer (`send`, the watch injector, `voice`) acquires and releases. The lock
+SHALL be per-pane (never blocking unrelated panes). This also closes the pre-existing
+`send` interleave race, not only the voice case.
+
+#### Scenario: Concurrent writers do not interleave into one composer
+- **WHEN** a voice transcript and a heartbeat tick target the same XO pane at the same moment
+- **THEN** the two paste-sequences are serialized by the per-pane lock — neither corrupts the other's composer input
+
+### Requirement: Inbound defers when the XO pane is busy
+
+When a transcript is ready but the XO pane is in a working state, the process SHALL check
+pane state (the same `surface.Assess` the watchdog uses) and DEFER the injection (brief
+retry) rather than paste mid-turn into an active composer. This composes with the per-pane
+lock (the lock serializes; the busy-check avoids interrupting an in-flight turn).
+
+#### Scenario: A transcript waits for a working XO
+- **WHEN** a transcript is ready while the XO pane is `Working`
+- **THEN** the injection is deferred and retried, not pasted into the active turn
 
 ### Requirement: Opus/CGO is isolated to the voice binary
 
@@ -73,8 +106,43 @@ voice install only.
 v1 SHALL be push-to-talk (request → XO turn → spoken reply), NOT duplex/barge-in — the
 latency floor is the XO's Claude turn. The process SHALL enforce a cost cap (max session
 duration / max synthesized characters) on the metered speech APIs and surface a running
-meter; on reaching the cap it SHALL stop and alert rather than spend unbounded.
+meter; on reaching the cap it SHALL stop and alert rather than spend unbounded. The
+meter's reserve→commit SHALL be **atomic** so concurrent synthesis cannot overshoot the
+cap via a check-then-spend race.
 
 #### Scenario: The cost cap stops unbounded spend
 - **WHEN** a voice session reaches the configured cost/duration cap
 - **THEN** the process stops synthesizing/transcribing and alerts, rather than continuing to spend
+
+### Requirement: A speech-provider error degrades gracefully, never silently
+
+An STT/TTS provider error or timeout SHALL be handled gracefully — the affected utterance
+or reply is dropped and a **one-line operator notice** is surfaced — NEVER silently
+swallowed (silently dropping a transcribed operator command, or a reply, would leave the
+operator believing the XO heard/answered when it did not).
+
+#### Scenario: An STT timeout is surfaced, not swallowed
+- **WHEN** the STT call errors or times out on the operator's utterance
+- **THEN** the utterance is dropped AND a one-line notice tells the operator it failed (re-speak), rather than failing silently
+
+### Requirement: Voice-session recovery is self-healing and drops stale audio
+
+A voice-gateway disconnect (discordgo's voice support is explicitly work-in-progress)
+SHALL NOT replay stale audio: the in-flight utterance is **dropped** (a half-captured
+command must never be injected late), the voice connection is re-established, and if it
+cannot be, a **one-line operator notice** is emitted and the process idles rather than
+spins. This is independent of the clock (a voice failure never touches `watch`).
+
+#### Scenario: A mid-utterance disconnect drops the partial, does not inject it late
+- **WHEN** the voice gateway drops while the operator is mid-utterance
+- **THEN** the partial capture is discarded (never injected after reconnect) and the connection re-establishes or the operator is notified
+
+### Requirement: The speech-provider key never leaks
+
+`XAI_API_KEY` (in `state/voice.env`, chmod 600, never committed) SHALL NEVER appear in
+logs, returned errors, or the Discord audit mirror — provider transport errors are reduced
+to a key-free cause, mirroring how `internal/discord` keeps webhook URLs out of errors.
+
+#### Scenario: A provider transport error carries no key
+- **WHEN** an STT/TTS call fails (bad auth, network)
+- **THEN** the surfaced error contains no part of `XAI_API_KEY`

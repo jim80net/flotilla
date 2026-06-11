@@ -9,49 +9,69 @@
 
 - [x] 0.1 Draft proposal + design.md + voice spec delta + this plan.
 - [x] 0.2 `openspec validate discord-voice --strict` passes.
-- [ ] 0.3 Checkpoint the openspec to the XO.
-- [ ] 0.4 XO runs `/systems-review` + OCR on the design (flow step 5); iterate to clean.
+- [x] 0.3 Checkpoint → XO design-review round 1: 2 P1 (fail-open SSRC gate; cross-process
+      injection interleave) + 5 P2 + 3 P3 + ruled the 4 forks. ALL folded (P1-1 positive
+      fail-closed SSRC gate; P1-2 per-pane deliver lock; P2-1..5; P3-1/3; rulings recorded).
+- [ ] 0.4 RE-checkpoint the revised design → XO re-runs systems-review (+OCR); iterate to clean.
 - [ ] 0.5 OPERATOR greenlight of the build phase. (BLOCKS 1+.)
 
-## 1. SpeechProvider interface + Grok driver (internal/voice)
+## 1. Per-pane injection serialization (internal/deliver — P1-2; PREREQUISITE, closes a pre-existing race)
 
-- [ ] 1.1 `SpeechProvider` interface (STT/TTS/Caps) + `ProviderCaps` (sample rate, max
-      utterance, cost-per-unit). Test: a fake provider satisfies it.
-- [ ] 1.2 `grokProvider`: STT POST `/v1/stt` (PCM/wav), TTS POST `/v1/tts` → decode to
-      PCM; `XAI_API_KEY` from `state/voice.env`; URL-free errors (never leak the key).
-      Test: httptest round-trip for STT + TTS; key never in an error.
-- [ ] 1.3 Cost meter + cap (max session minutes / max TTS chars); on cap → stop + alert.
-      Test: the cap trips and halts.
+- [ ] 1.1 Add a per-pane advisory `flock` (per-pane lockfile) around the
+      load-buffer→paste→settle→Enter sequence in `internal/deliver.Send`; EVERY writer
+      (`send`, watch `Injector`, `voice`) acquires/releases it. Per-pane (never blocks
+      unrelated panes). Test: two concurrent Sends to one pane serialize; different panes
+      don't block; the pre-existing `send` race is closed.
 
-## 2. Discord voice I/O + codec (internal/voice; CGO build tag)
+## 2. SpeechProvider interface + Grok driver (internal/voice)
 
-- [ ] 2.1 Join the operator's voice channel (`ChannelVoiceJoin`); `OpusRecv`/`OpusSend` wiring.
-- [ ] 2.2 Opus↔PCM via libopus (CGO, build-tagged so the core stays pure-Go). Test: a
-      round-trip PCM→Opus→PCM within tolerance (or a golden frame).
-- [ ] 2.3 Endpointer: silence-timeout end-of-utterance from the per-SSRC frame stream. Test.
+- [ ] 2.0 **VALIDATE the real Grok STT/TTS API shape FIRST (P3-3)** — confirm `/v1/stt`,
+      `/v1/tts` request/response + auth against live xAI docs (and a $0-or-cheap probe)
+      BEFORE wiring; record the verified shape. Do NOT build on the doc-summarized shape.
+- [ ] 2.1 `SpeechProvider` interface (STT/TTS/Caps). Test: a fake provider satisfies it.
+- [ ] 2.2 `grokProvider` per the validated shape; `XAI_API_KEY` from `state/voice.env`;
+      key NEVER in logs/errors/audit (P2-4). Test: httptest round-trip; key-free errors.
+- [ ] 2.3 Cost meter + cap with **atomic reserve→commit** (P2-3) — concurrent synthesis
+      cannot overshoot. On cap → stop + alert. Test: the cap holds under concurrency.
 
-## 3. The pipelines
+## 3. Discord voice I/O + codec (internal/voice; cgo build tag)
 
-- [ ] 3.1 Inbound: utterance → endpoint → STT → inject into the XO pane via `internal/deliver`,
-      tagged voice-originated, GATED on `operator_user_id` (non-operator → dropped). Test:
-      the operator-gate (non-operator speech not injected); the inject path.
-- [ ] 3.2 Outbound: the XO's dedicated `speak` reply → TTS → Opus → `OpusSend`. Test.
+- [ ] 3.1 Own discordgo session w/ `IntentsGuildVoiceStates` (P2-1); `ChannelVoiceJoin`;
+      `OpusRecv`/`OpusSend`; maintain the **SSRC→UserID table** from `VoiceSpeakingUpdate`.
+- [ ] 3.2 Opus↔PCM via libopus (cgo, build-tagged; lean `hraban/opus`, empirical pick).
+      Test: PCM→Opus→PCM round-trip within tolerance.
+- [ ] 3.3 Endpointer: configurable silence-timeout (~1.5–2 s) end-of-utterance. Test.
+- [ ] 3.4 Voice-session recovery (P2-2): a gateway drop discards the in-flight utterance
+      (no late inject), re-establishes or emits a one-line notice. Test the drop-stale path.
 
-## 4. The `speak` outbound path + the `voice` command
+## 4. The pipelines
 
-- [ ] 4.1 `flotilla speak "<short text>"` (or `notify --voice`) — the XO's spoken-reply
-      emitter; the `voice` process consumes it (transport per the checkpoint decision).
-- [ ] 4.2 `flotilla voice` command: load roster + `state/voice.env`, join the channel,
-      run both pipelines; dispatch + usage in `main.go`.
+- [ ] 4.1 Inbound: utterance → endpoint → STT → inject via `internal/deliver` (under the
+      per-pane lock), tagged voice-originated. **Gate = POSITIVE SSRC→operator mapping,
+      fail-closed (P1-1)**: unmapped/ambiguous/non-operator SSRC → DROPPED. **Busy-defer
+      (P2-5)**: if the XO pane is `Working`, defer/retry. STT error/timeout → drop + one-line
+      notice, never silent (P2-3). Tests: unattributed-dropped, non-operator-dropped,
+      busy-deferred, STT-error-surfaced.
+- [ ] 4.2 Outbound: consume the `speak` spool → TTS → Opus → `OpusSend`. Test.
 
-## 5. Deploy + docs
+## 5. `flotilla speak` (file-drop spool) + the `voice` command
 
-- [ ] 5.1 A `flotilla-voice.service` (its own unit, generated by the installer pattern);
-      document the `libopus-dev` host dependency + `state/voice.env`.
-- [ ] 5.2 Voice section in the docs: the push-to-talk expectation, the speak contract,
-      the cost cap, the operator-identity gate.
+- [ ] 5.1 `flotilla speak "<short text>"` — writes a timestamped file to `state/voice/outbound/`
+      and returns IMMEDIATELY (non-blocking; never fails the XO turn on voice's state).
+      Bounded (TTL / max-files). The `voice` process watches→consumes→deletes. Test: speak
+      writes + returns with voice down; the spool is bounded.
+- [ ] 5.2 `flotilla voice` command: load roster + `state/voice.env`, join channel, run both
+      pipelines; dispatch + usage in `main.go`.
 
-## 6. Review + PR
+## 6. Deploy + docs
+
+- [ ] 6.1 `flotilla-voice.service` (own unit via the installer pattern); **enforce
+      `CGO_ENABLED=0` on the non-voice build + CI (P3-1)** so "core is pure-Go" is tested;
+      document `libopus-dev` + `state/voice.env`.
+- [ ] 6.2 Voice docs: push-to-talk expectation, the `speak` contract, cost cap, the
+      operator-SSRC gate, discordgo-voice-maturity build risk.
+
+## 7. Review + PR
 
 - [ ] 6.1 `/systems-review` + OCR on the implementation diff; fold findings.
 - [ ] 6.2 PR(s); CI green; merge-ready → XO reviews+merges. (Live-capture / activation is

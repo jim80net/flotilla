@@ -21,7 +21,7 @@ systems-review/OCR). No build until the operator greenlights the build phase.
      (endpoint on silence), runs it through **STT**, and **injects the text into the
      XO's pane** via the existing deliver/relay path (tagged voice-originated);
   2. when the XO emits a **concise spoken reply** through a dedicated outbound path
-     (`flotilla speak` / a `--voice` tag — NOT all-`notify`-spoken: a long brief must
+     (a dedicated `flotilla speak` command — NOT all-`notify`-spoken: a long brief must
      never be read aloud), runs it through **TTS** and plays it back into the channel.
 - A pluggable **`SpeechProvider`** interface (STT + TTS) — Grok Voice is the v1 driver;
   a local Nemotron stays a documented future driver (no GPU load in v1).
@@ -41,8 +41,12 @@ systems-review/OCR). No build until the operator greenlights the build phase.
 
 - **Code (build phase, gated):** new `cmd/flotilla voice` + `internal/voice` (the
   process, the SpeechProvider interface + a Grok driver, the Discord voice I/O, the
-  endpointer); a `flotilla speak`/`--voice` outbound path; CGO+libopus in the voice
-  build only. Reuses `internal/deliver` (inject) + `internal/discord` (gateway).
+  endpointer); a `flotilla speak` outbound path + spool; a per-pane injection lock added
+  to `internal/deliver` (closes a pre-existing `send` interleave race too); CGO+libopus in
+  the voice build only. Reuses `internal/deliver` (inject); **follows the
+  `internal/discord` pattern with its OWN discordgo session** carrying voice intents
+  (`IntentsGuildVoiceStates` — the existing relay gateway sets only Guild-Messages, so the
+  voice session is separate; the bot needs voice intents enabled).
 - **Config/secrets:** `XAI_API_KEY` (operator's existing xAI key from `~/.hermes/.env`
   → `state/voice.env`); the voice channel id in the roster. Metered spend (operator's $):
   STT ¢/hr, TTS $4.20/1M chars — a session is cents; v1 carries a cost cap + meter.
