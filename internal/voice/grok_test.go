@@ -17,8 +17,8 @@ func TestGrokTTS(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth, gotCT = r.Header.Get("Authorization"), r.Header.Get("Content-Type")
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
-		w.Header().Set("Content-Type", "audio/mpeg")
-		_, _ = w.Write([]byte("ID3-fake-mp3-bytes"))
+		w.Header().Set("Content-Type", "audio/pcm")
+		_, _ = w.Write([]byte("RAWPCMBYTES"))
 	}))
 	defer srv.Close()
 
@@ -34,11 +34,30 @@ func TestGrokTTS(t *testing.T) {
 	if gotCT != "application/json" {
 		t.Errorf("content-type = %q", gotCT)
 	}
-	if gotBody != (ttsRequest{Text: "hello voice", VoiceID: "eve", Language: "en"}) {
-		t.Errorf("tts body = %+v, want the verified {text,voice_id,language}", gotBody)
+	// We request Discord-native PCM @ 48 kHz (probe-verified) so the outbound path needs no
+	// transcode — assert the request carries output_format.codec=pcm + sample_rate=48000.
+	want := ttsRequest{Text: "hello voice", VoiceID: "eve", Language: "en", OutputFormat: ttsOutputFormat{Codec: "pcm"}, SampleRate: 48000}
+	if gotBody != want {
+		t.Errorf("tts body = %+v, want %+v", gotBody, want)
 	}
-	if au.ContentType != "audio/mpeg" || au.SampleRate != 24000 || string(au.Data) != "ID3-fake-mp3-bytes" {
-		t.Errorf("audio = %+v (want 24kHz audio/mpeg passthrough)", au)
+	if au.ContentType != "audio/pcm" || au.SampleRate != 48000 || string(au.Data) != "RAWPCMBYTES" {
+		t.Errorf("audio = %+v (want 48kHz audio/pcm passthrough)", au)
+	}
+}
+
+// A 200 response whose body is NOT audio (a JSON error envelope, an HTML interstitial) must
+// be rejected — never returned as bytes that the outbound path would play as noise after
+// already charging the synthesis.
+func TestGrokTTSRejectsNonAudio200(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"error":"quota"}`))
+	}))
+	defer srv.Close()
+	g := NewGrokProvider("xai-test")
+	g.ttsURL = srv.URL
+	if _, err := g.TTS(context.Background(), "hi"); err == nil {
+		t.Fatal("TTS accepted a non-audio 200 body; want a content-type error")
 	}
 }
 

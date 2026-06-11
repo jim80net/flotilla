@@ -3,6 +3,7 @@ package voice
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -35,14 +36,26 @@ func (f *fakeSession) Close() error                   { return nil }
 type fakeCodec struct{ samplesPerFrame int }
 
 func (c fakeCodec) Decode(opus []byte) ([]int16, error) { return make([]int16, c.samplesPerFrame), nil }
-func (c fakeCodec) Encode(pcm []int16) ([]byte, error)  { return nil, nil }
-func (c fakeCodec) Close() error                        { return nil }
 
-// fakeProvider records the audio handed to STT and returns a configured transcript or error.
+// Encode validates the pipeline framed to exactly one Discord frame (the real codec requires
+// it), then returns a non-empty marker packet so outbound tests can count transmitted frames.
+func (c fakeCodec) Encode(pcm []int16) ([]byte, error) {
+	if len(pcm) != DiscordFrameSize {
+		return nil, fmt.Errorf("fakeCodec.Encode got %d samples, want a full %d-sample frame", len(pcm), DiscordFrameSize)
+	}
+	return []byte{0xAB}, nil
+}
+func (c fakeCodec) Close() error { return nil }
+
+// fakeProvider records the audio handed to STT and returns a configured transcript/error
+// (inbound) or a configured PCM clip (outbound TTS).
 type fakeProvider struct {
-	text   string
-	err    error
-	gotWAV chan []byte
+	text    string
+	err     error
+	gotWAV  chan []byte
+	ttsPCM  []byte // raw s16le PCM returned by TTS (outbound tests)
+	ttsErr  error
+	ttsText chan string // records text handed to TTS
 }
 
 func (p *fakeProvider) STT(ctx context.Context, audio []byte, filename string) (Transcript, error) {
@@ -54,8 +67,16 @@ func (p *fakeProvider) STT(ctx context.Context, audio []byte, filename string) (
 	}
 	return Transcript{Text: p.text, Duration: 1}, nil
 }
-func (p *fakeProvider) TTS(ctx context.Context, text string) (Audio, error) { return Audio{}, nil }
-func (p *fakeProvider) Caps() Caps                                          { return GrokVoiceCaps }
+func (p *fakeProvider) TTS(ctx context.Context, text string) (Audio, error) {
+	if p.ttsText != nil {
+		p.ttsText <- text
+	}
+	if p.ttsErr != nil {
+		return Audio{}, p.ttsErr
+	}
+	return Audio{Data: p.ttsPCM, ContentType: "audio/pcm", SampleRate: DiscordSampleRate}, nil
+}
+func (p *fakeProvider) Caps() Caps { return GrokVoiceCaps }
 
 // fakeInjector reports busy for the first busyFor checks, then idle; it records injected text.
 type fakeInjector struct {
