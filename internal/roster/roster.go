@@ -58,7 +58,8 @@ type Config struct {
 	// coordination stays in the tmux panes and does not clutter the operator's
 	// Discord — only the operator-facing `flotilla notify` posts. Set true to
 	// restore the v0 always-mirror audit trail. A per-call `--mirror` / `--no-mirror`
-	// overrides it (precedence: flag → this setting → off). `notify` is unaffected.
+	// overrides this setting (precedence: explicit flag > roster setting > default
+	// off). `notify` is unaffected.
 	MirrorInterAgent bool `json:"mirror_inter_agent,omitempty"`
 
 	// --- `watch` capability (flotilla watch); validated at load ---
