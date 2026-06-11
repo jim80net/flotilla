@@ -82,6 +82,17 @@ func cmdResume(args []string) error {
 		return err
 	}
 
+	// Cross-recipe tmux-collision guard across workspaces ∪ flat recipes (the
+	// fleet-level invariant the flat file's single-file load gave for free). A broken
+	// UNRELATED workspace is skipped with a warning, never fail-closed.
+	if warns, ferr := workspace.FleetTmuxCheck(agentName, recipe.Tmux, flat); ferr != nil {
+		return ferr
+	} else {
+		for _, w := range warns {
+			fmt.Fprintln(os.Stderr, "flotilla: "+w)
+		}
+	}
+
 	// Resolve the agent's surface driver up front. An unregistered surface (a typo
 	// in the roster's surface field, or a driver not yet built) MUST error cleanly
 	// — never nil-deref past the liveness interlock (that would skip the safety
