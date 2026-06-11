@@ -123,7 +123,7 @@ func TestInboundOperatorUtteranceInjected(t *testing.T) {
 	prov := &fakeProvider{text: "status please", gotWAV: make(chan []byte, 1)}
 	inj := &fakeInjector{injected: make(chan string, 1)}
 	gate := NewSpeakerTable("op-1")
-	p := NewInboundPipeline(sess, fakeCodec{samplesPerFrame: 100}, prov, gate, inj, nil, fastConfig())
+	p := NewInboundPipeline(sess, fakeCodec{samplesPerFrame: 100}, prov, nil, gate, inj, nil, fastConfig())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -154,7 +154,7 @@ func TestInboundUnattributedDropped(t *testing.T) {
 	prov := &fakeProvider{text: "should not happen", gotWAV: make(chan []byte, 1)}
 	inj := &fakeInjector{injected: make(chan string, 1)}
 	gate := NewSpeakerTable("op-1")
-	p := NewInboundPipeline(sess, fakeCodec{samplesPerFrame: 100}, prov, gate, inj, nil, fastConfig())
+	p := NewInboundPipeline(sess, fakeCodec{samplesPerFrame: 100}, prov, nil, gate, inj, nil, fastConfig())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -180,7 +180,7 @@ func TestInboundNonOperatorDropped(t *testing.T) {
 	prov := &fakeProvider{text: "nope", gotWAV: make(chan []byte, 1)}
 	inj := &fakeInjector{injected: make(chan string, 1)}
 	gate := NewSpeakerTable("op-1")
-	p := NewInboundPipeline(sess, fakeCodec{samplesPerFrame: 100}, prov, gate, inj, nil, fastConfig())
+	p := NewInboundPipeline(sess, fakeCodec{samplesPerFrame: 100}, prov, nil, gate, inj, nil, fastConfig())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -208,7 +208,7 @@ func TestInboundSpeakerSSRCChangeDropsStaleUtterance(t *testing.T) {
 	prov := &fakeProvider{text: "fresh start", gotWAV: make(chan []byte, 1)}
 	inj := &fakeInjector{injected: make(chan string, 1)}
 	gate := NewSpeakerTable("op-1")
-	p := NewInboundPipeline(sess, fakeCodec{samplesPerFrame: 100}, prov, gate, inj, nil, fastConfig())
+	p := NewInboundPipeline(sess, fakeCodec{samplesPerFrame: 100}, prov, nil, gate, inj, nil, fastConfig())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -237,7 +237,7 @@ func TestInboundBusyDeferThenInject(t *testing.T) {
 	prov := &fakeProvider{text: "deferred reply"}
 	inj := &fakeInjector{injected: make(chan string, 1), busyFor: 3} // busy for 3 checks, then idle
 	gate := NewSpeakerTable("op-1")
-	p := NewInboundPipeline(sess, fakeCodec{samplesPerFrame: 100}, prov, gate, inj, nil, fastConfig())
+	p := NewInboundPipeline(sess, fakeCodec{samplesPerFrame: 100}, prov, nil, gate, inj, nil, fastConfig())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -263,7 +263,7 @@ func TestInboundBusyGivesUpWithNotice(t *testing.T) {
 	inj := &fakeInjector{injected: make(chan string, 1), alwaysBusy: true}
 	notices := make(chan string, 1)
 	gate := NewSpeakerTable("op-1")
-	p := NewInboundPipeline(sess, fakeCodec{samplesPerFrame: 100}, prov, gate, inj, func(s string) { notices <- s }, fastConfig())
+	p := NewInboundPipeline(sess, fakeCodec{samplesPerFrame: 100}, prov, nil, gate, inj, func(s string) { notices <- s }, fastConfig())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -293,7 +293,7 @@ func TestInboundSTTErrorSurfaced(t *testing.T) {
 	inj := &fakeInjector{injected: make(chan string, 1)}
 	notices := make(chan string, 1)
 	gate := NewSpeakerTable("op-1")
-	p := NewInboundPipeline(sess, fakeCodec{samplesPerFrame: 100}, prov, gate, inj, func(s string) { notices <- s }, fastConfig())
+	p := NewInboundPipeline(sess, fakeCodec{samplesPerFrame: 100}, prov, nil, gate, inj, func(s string) { notices <- s }, fastConfig())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -323,7 +323,7 @@ func TestInboundMaxUtteranceForcesFinalize(t *testing.T) {
 	inj := &fakeInjector{injected: make(chan string, 1)}
 	gate := NewSpeakerTable("op-1")
 	cfg := InboundConfig{QuietGap: 10 * time.Second, MaxUtteranceSamples: 150, BusyRetryInterval: 5 * time.Millisecond, BusyMaxRetries: 5}
-	p := NewInboundPipeline(sess, fakeCodec{samplesPerFrame: 100}, prov, gate, inj, nil, cfg)
+	p := NewInboundPipeline(sess, fakeCodec{samplesPerFrame: 100}, prov, nil, gate, inj, nil, cfg)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -356,6 +356,37 @@ func TestSanitizeForPane(t *testing.T) {
 		if strings.ContainsAny(sanitizeForPane(in), "\n\r\t\x00\x07") {
 			t.Errorf("sanitizeForPane(%q) left a control char in %q", in, sanitizeForPane(in))
 		}
+	}
+}
+
+// With a shared cost meter, a capped session mutes voice INPUT too: the STT reserve trips
+// before the call, so nothing is transcribed or injected — only a one-line notice.
+func TestInboundSTTCostCapMutes(t *testing.T) {
+	sess := newFakeSession()
+	prov := &fakeProvider{text: "should not transcribe", gotWAV: make(chan []byte, 1)}
+	inj := &fakeInjector{injected: make(chan string, 1)}
+	notices := make(chan string, 1)
+	meter := NewMeter(0, GrokVoiceCaps) // $0 cap → any STT reserve trips it
+	gate := NewSpeakerTable("op-1")
+	p := NewInboundPipeline(sess, fakeCodec{samplesPerFrame: 100}, prov, meter, gate, inj, func(s string) { notices <- s }, fastConfig())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go p.Run(ctx)
+
+	sess.speaking <- SpeakingEvent{SSRC: 7, UserID: "op-1"}
+	sess.recv <- Packet{SSRC: 7, Opus: []byte{0x1}}
+
+	msg, ok := recvWithin(t, notices, time.Second)
+	if !ok || !strings.Contains(msg, "cost cap") {
+		t.Fatalf("want a cost-cap notice, got ok=%v msg=%q", ok, msg)
+	}
+	select {
+	case <-prov.gotWAV:
+		t.Fatal("STT was called despite the cap (reserve must precede the call)")
+	case <-inj.injected:
+		t.Fatal("injected despite the cap")
+	default:
 	}
 }
 
