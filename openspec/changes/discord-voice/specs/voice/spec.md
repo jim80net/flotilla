@@ -67,13 +67,13 @@ registers), NOT buffered and injected later.
 
 ### Requirement: Pane injection is serialized by a per-pane lock across all writers
 
-Because `voice` is a separate process from `watch`, the watch `Injector`'s in-process
-serialization does not protect against a voice transcript interleaving with a
-heartbeat/relay paste into the SAME pane composer. `internal/deliver` SHALL serialize the
-paste-sequence (load-buffer → paste → settle → Enter) with a **per-pane advisory lock**
-that EVERY writer (`send`, the watch injector, `voice`) acquires and releases. The lock
-SHALL be per-pane (never blocking unrelated panes). This also closes the pre-existing
-`send` interleave race, not only the voice case.
+`internal/deliver` SHALL serialize the pane paste-sequence (load-buffer → paste → settle
+→ Enter) with a **per-pane advisory lock** that EVERY writer (`send`, the watch injector,
+`voice`) acquires and releases. This is required because `voice` is a separate process
+from `watch`, so the watch `Injector`'s in-process serialization does NOT protect against
+a voice transcript interleaving with a heartbeat/relay paste into the same composer. The
+lock SHALL be per-pane (never blocking unrelated panes), and SHALL also close the
+pre-existing `send` interleave race, not only the voice case.
 
 #### Scenario: Concurrent writers do not interleave into one composer
 - **WHEN** a voice transcript and a heartbeat tick target the same XO pane at the same moment
@@ -127,11 +127,11 @@ operator believing the XO heard/answered when it did not).
 
 ### Requirement: Voice-session recovery is self-healing and drops stale audio
 
-A voice-gateway disconnect (discordgo's voice support is explicitly work-in-progress)
-SHALL NOT replay stale audio: the in-flight utterance is **dropped** (a half-captured
-command must never be injected late), the voice connection is re-established, and if it
-cannot be, a **one-line operator notice** is emitted and the process idles rather than
-spins. This is independent of the clock (a voice failure never touches `watch`).
+On a voice-gateway disconnect (discordgo's voice support is explicitly work-in-progress),
+the process SHALL **drop the in-flight utterance** (a half-captured command must never be
+injected late, after reconnect), re-establish the voice connection, and — if it cannot —
+emit a **one-line operator notice** and idle rather than spin. Stale audio SHALL NEVER be
+replayed. This is independent of the clock (a voice failure never touches `watch`).
 
 #### Scenario: A mid-utterance disconnect drops the partial, does not inject it late
 - **WHEN** the voice gateway drops while the operator is mid-utterance
