@@ -50,11 +50,13 @@
 > remaining §3 items (live discordgo voice session, endpointer, recovery) move into the
 > §3b-session / §4 / §5 stream and still need a live voice channel for integration.
 
-- [~] 3.1 Own discordgo session w/ `IntentsGuildVoiceStates` (P2-1); `ChannelVoiceJoin`;
+- [x] 3.1 Own discordgo session w/ `IntentsGuildVoiceStates` (P2-1); `ChannelVoiceJoin`;
       `OpusRecv`/`OpusSend`; maintain the **SSRC→UserID table** from `VoiceSpeakingUpdate`.
-      — **DONE: the SSRC→UserID table** (`SpeakerTable`, positive fail-closed operator gate,
-      P1-1) + tests. **DEFERRED (§3b):** the live session/join/`OpusRecv`/`OpusSend` wiring
-      (needs libopus + a live channel).
+      — SSRC→UserID table (`SpeakerTable`) was §3a; PR-C adds the live adapter
+      (`discord_session.go`/`JoinVoice`, voiceopus-tagged): own discordgo session w/
+      `IntentsGuilds|IntentsGuildVoiceStates`, join deaf=false, pump `OpusRecv`/`OpusSend`
+      (Speaking toggle), feed `VoiceSpeakingUpdate`→the gate. Thin (discordgo voice is WIP);
+      live-channel integration is the remaining verification.
 - [x] 3.2 Opus↔PCM via libopus (cgo, build-tagged; **first-party binding over system
       libopus** — ruling 2026-06-11). Test: PCM→Opus→PCM round-trip within tolerance. — §3a
       shipped the build-tagged seam (`OpusCodec` in codec.go; `//go:build !voiceopus`
@@ -74,8 +76,12 @@
 - [x] 3.3 Endpointer: configurable silence-timeout (~1.5–2 s) end-of-utterance. Test.
       (`InboundConfig.QuietGap`, default 1500ms; silence timer in `InboundPipeline.Run` +
       a `MaxUtteranceSamples` forced-finalize cap. Tested.)
-- [ ] 3.4 Voice-session recovery (P2-2): a gateway drop discards the in-flight utterance
-      (no late inject), re-establishes or emits a one-line notice. Test the drop-stale path. (§3b.)
+- [x] 3.4 Voice-session recovery (P2-2): a gateway drop discards the in-flight utterance
+      (no late inject), re-establishes or emits a one-line notice. Test the drop-stale path.
+      — `Supervise` (recovery.go): connect→run→on-drop tear down (fresh session = empty
+      buffer = no late inject)→reconnect, bounded by MaxAttempts then a give-up notice; clean
+      shutdown on ctx. Fully unit-tested via the `Connector` seam (reconnect, clean-shutdown,
+      give-up, failure-count-reset) — the untestable discordgo transport is behind the seam.
 
 ## 4. The pipelines
 
@@ -115,8 +121,14 @@
       cap already bounds a permanently-down voice process, and an age sweep, if wanted, fits
       naturally in §5.2's consumer loop. trim never evicts the just-written entry even under
       clock skew; consume API + path-traversal guard included.)
-- [ ] 5.2 `flotilla voice` command: load roster + `state/voice.env`, join channel, run both
-      pipelines; dispatch + usage in `main.go`.
+- [x] 5.2 `flotilla voice` command: load roster + `state/voice.env`, join channel, run both
+      pipelines; dispatch + usage in `main.go`. — `cmdVoice` (voice.go, voiceopus): loads the
+      voice.env config (tested loader) + roster + secrets, builds the deps (two codecs, Grok
+      provider, one shared **Meter capping STT+TTS**, fail-closed gate, real `paneInjector`
+      over surface-busy + locked `deliver.Send`), opens its own voice-intent discordgo session,
+      and runs `Supervise`. A `//go:build !voiceopus` stub makes `flotilla voice` fail clearly
+      in the core CGO0 binary. **Closed a #40 gap:** inbound STT is now metered too (reserve by
+      clip duration before the call), so the cost cap covers the whole session.
 
 ## 6. Deploy + docs
 
