@@ -85,8 +85,8 @@ flotilla send --from me --file ./instructions.txt infra
 echo "deploy when green" | flotilla send --from me --file - infra
 ```
 
-Without Discord configured, the audit mirror is simply skipped (you get a
-warning; delivery still succeeds). Pass `--no-mirror` to silence it.
+Inter-agent mirroring is **default-off**, so by default a send just delivers to
+the pane (no Discord post). See §4 to enable it; `--no-mirror` also forces it off.
 
 ### Make resolution drift-proof: `flotilla register`
 
@@ -166,8 +166,10 @@ own keeping it out of version control.
 
 ## 4. (Optional) Discord audit mirror
 
-To get a durable, phone-readable transcript, post every delivery to a Discord
-channel under per-agent webhook identities.
+To get a durable, phone-readable transcript of inter-agent coordination, mirror
+sends to a Discord channel under per-agent webhook identities. **Inter-agent
+mirroring is default-off** — it clutters the operator's channel with intra-fleet
+chatter that already lives in the tmux panes — so you opt in per-roster or per-call.
 
 1. Create one **webhook per agent** in your channel (Channel → Edit → Integrations
    → Webhooks). Name each after the agent.
@@ -184,14 +186,19 @@ channel under per-agent webhook identities.
 3. Point sends at it:
 
    ```sh
-   flotilla send --from me --secrets ./flotilla-secrets.env infra "rebuilding now"
-   # or: export FLOTILLA_SECRETS=$PWD/flotilla-secrets.env
+   # mirroring is default-off, so enable it — per roster (always) or per call:
+   flotilla send --from me --secrets ./flotilla-secrets.env --mirror infra "rebuilding now"
+   # or set "mirror_inter_agent": true in the roster to mirror every send
    ```
+
+   Precedence: `--no-mirror` (off) → `--mirror` (on) → roster `mirror_inter_agent`
+   → off. `--mirror` and `--no-mirror` together is an error. The operator-facing
+   `flotilla notify` (below) always posts, regardless of this setting.
 
 ### Reach the operator directly: `flotilla notify`
 
-The audit mirror above is for *coordination* traffic — it always accompanies a
-tmux delivery to another agent. When an agent (typically the XO) wants to
+The audit mirror above is for *coordination* traffic and is **opt-in (default-off)**.
+When an agent (typically the XO) wants to
 message **you, the operator**, on Discord — with no tmux pane involved — use
 `notify`. It posts the message body straight to that agent's own webhook and
 does nothing else:
@@ -242,6 +249,10 @@ Add three fields to the roster:
 - `heartbeat_message` *(optional)* — override the default tick wording (e.g. to
   name your project's concrete work sources). A sensible default is used when
   omitted.
+- `mirror_inter_agent` *(optional, default `false`)* — when `true`, every
+  `flotilla send` mirrors to the Discord audit channel; default-off keeps
+  inter-agent coordination in the panes (only `flotilla notify` posts). A per-call
+  `--mirror`/`--no-mirror` overrides it.
 
 Run it (clock-only — no Discord needed):
 
