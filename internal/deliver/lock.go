@@ -118,4 +118,5 @@ func (l *paneLock) Release() {
 	}
 	_ = syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN)
 	_ = l.f.Close()
+	l.f = nil // idempotent — a second Release is a no-op, never acts on a closed fd
 }
