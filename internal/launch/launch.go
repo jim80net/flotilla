@@ -78,47 +78,60 @@ func Load(path string, rosterAgents map[string]bool) (*Config, error) {
 		if !rosterAgents[name] {
 			return nil, fmt.Errorf("launch recipes %q: agent %q is not in the roster (typo?)", path, name)
 		}
-		// launch: required, non-empty, no tab/newline (it flows onto tmux argv and
-		// the wire format the marker shares; reject \t \n \r like roster.go).
-		if r.Launch == "" {
-			return nil, fmt.Errorf("launch recipes %q: agent %q has an empty launch command", path, name)
+		// Per-field validation (shared with the per-agent workspace, which reuses
+		// ValidateRecipe for ~/.flotilla/<agent>/launch.json).
+		if err := ValidateRecipe(fmt.Sprintf("launch recipes %q: agent %q", path, name), r); err != nil {
+			return nil, err
 		}
-		if strings.ContainsAny(r.Launch, "\t\n\r") {
-			return nil, fmt.Errorf("launch recipes %q: agent %q launch %q contains a tab/newline", path, name, r.Launch)
-		}
-		// cwd: required, non-empty, absolute (a host-independent typo guard;
-		// existence is checked at resume time, not load — the file may be loaded
-		// on another host).
-		if r.Cwd == "" {
-			return nil, fmt.Errorf("launch recipes %q: agent %q has an empty cwd", path, name)
-		}
-		if strings.ContainsAny(r.Cwd, "\t\n\r") {
-			return nil, fmt.Errorf("launch recipes %q: agent %q cwd %q contains a tab/newline", path, name, r.Cwd)
-		}
-		if !filepath.IsAbs(r.Cwd) {
-			return nil, fmt.Errorf("launch recipes %q: agent %q cwd %q is not absolute", path, name, r.Cwd)
-		}
-		// tmux: optional; if present must parse as session:window (a single ":"
-		// with non-empty halves) and carry no tab/newline.
+		// tmux cross-recipe uniqueness is fleet-level (not part of single-recipe
+		// validation): two recipes sharing a non-empty target would resume into the
+		// same window, mirroring roster's shared-title rejection.
 		if r.Tmux != "" {
-			if strings.ContainsAny(r.Tmux, "\t\n\r") {
-				return nil, fmt.Errorf("launch recipes %q: agent %q tmux %q contains a tab/newline", path, name, r.Tmux)
-			}
-			if !validTmuxTarget(r.Tmux) {
-				return nil, fmt.Errorf("launch recipes %q: agent %q tmux %q is not a valid session:window target", path, name, r.Tmux)
-			}
 			if other, dup := seenTmux[r.Tmux]; dup {
 				return nil, fmt.Errorf("launch recipes %q: agents %q and %q share tmux target %q (would resume into the same window)", path, other, name, r.Tmux)
 			}
 			seenTmux[r.Tmux] = name
 		}
-		// state: optional; reject \t \n \r — it is PRINTED for the operator/skill
-		// to parse, so a newline would corrupt that output line.
-		if strings.ContainsAny(r.State, "\t\n\r") {
-			return nil, fmt.Errorf("launch recipes %q: agent %q state %q contains a tab/newline", path, name, r.State)
-		}
 	}
 	return &c, nil
+}
+
+// ValidateRecipe checks a single recipe's fields with the same rules Load applies per
+// entry: launch required and free of \t\n\r; cwd required, absolute, free of \t\n\r
+// (existence is checked at resume time, not load — the recipe may be read on another
+// host); tmux optional and, if present, a plain session:window; state free of \t\n\r
+// (it is printed for the operator/skill to parse). It does NOT check cross-recipe
+// uniqueness (the fleet-level shared-tmux rejection) or roster membership — those are
+// the caller's. `where` prefixes error messages (the flat file passes its path+agent;
+// the workspace passes the workspace launch.json path).
+func ValidateRecipe(where string, r Recipe) error {
+	if r.Launch == "" {
+		return fmt.Errorf("%s has an empty launch command", where)
+	}
+	if strings.ContainsAny(r.Launch, "\t\n\r") {
+		return fmt.Errorf("%s launch %q contains a tab/newline", where, r.Launch)
+	}
+	if r.Cwd == "" {
+		return fmt.Errorf("%s has an empty cwd", where)
+	}
+	if strings.ContainsAny(r.Cwd, "\t\n\r") {
+		return fmt.Errorf("%s cwd %q contains a tab/newline", where, r.Cwd)
+	}
+	if !filepath.IsAbs(r.Cwd) {
+		return fmt.Errorf("%s cwd %q is not absolute", where, r.Cwd)
+	}
+	if r.Tmux != "" {
+		if strings.ContainsAny(r.Tmux, "\t\n\r") {
+			return fmt.Errorf("%s tmux %q contains a tab/newline", where, r.Tmux)
+		}
+		if !validTmuxTarget(r.Tmux) {
+			return fmt.Errorf("%s tmux %q is not a valid session:window target", where, r.Tmux)
+		}
+	}
+	if strings.ContainsAny(r.State, "\t\n\r") {
+		return fmt.Errorf("%s state %q contains a tab/newline", where, r.State)
+	}
+	return nil
 }
 
 // Recipe returns the recipe for an agent and whether one is declared. An agent
