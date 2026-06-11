@@ -1,0 +1,36 @@
+[Unit]
+Description=flotilla voice — operator↔XO Discord voice (Grok STT/TTS, push-to-talk)
+Documentation=https://github.com/jim80net/flotilla/blob/main/docs/voice-runbook.md
+After=network-online.target
+Wants=network-online.target
+# Voice is an OPT-IN, NON-safety-critical process, fully ISOLATED from flotilla-watch (the
+# fleet's heartbeat clock): there is deliberately NO ordering or dependency on
+# flotilla-watch.service, so a voice crash/restart can never perturb the clock. The restart
+# budget below bounds genuinely-fatal LOCAL startup errors (a missing/incomplete voice
+# config, a malformed roster, or a non-voice binary) rather than spinning forever.
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# --- GENERATED from deploy/flotilla-voice.service.in by deploy/flotilla-voice-install.sh.
+#     Do NOT hand-edit the installed copy at ~/.config/systemd/user/flotilla-voice.service —
+#     edit deploy/flotilla-voice.env and re-run the installer. The host-specific paths live
+#     in one env file, so the unit stops drifting. ---
+# REQUIRES a voice-enabled binary: build with `-tags voiceopus` (CGO + libopus-dev). A core
+# CGO_ENABLED=0 binary exits immediately with a clear "rebuild with -tags voiceopus" error.
+WorkingDirectory=@FLOTILLA_WORKDIR@
+# Cold-boot DNS defense-in-depth (same as the watch unit): wait up to ~60s for discord.com
+# to resolve, but ALWAYS exit 0 (even on timeout) so a transient resolver blip never burns
+# the start budget — the daemon retries the gateway on its own.
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do getent hosts discord.com >/dev/null 2>&1 && exit 0; sleep 2; done; exit 0'
+ExecStart=@FLOTILLA_BIN@ voice --config @FLOTILLA_VOICE_CONFIG@ --roster @FLOTILLA_ROSTER@ --secrets @FLOTILLA_SECRETS@
+Restart=on-failure
+RestartSec=15
+# SIGTERM → the daemon's signal.NotifyContext cancels cleanly: it stops the pipelines and
+# leaves the voice channel (Disconnect) before exit.
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target

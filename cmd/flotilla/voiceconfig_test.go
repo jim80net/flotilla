@@ -67,3 +67,16 @@ func TestLoadVoiceConfigMissingFile(t *testing.T) {
 		t.Fatal("expected an error for a missing file")
 	}
 }
+
+// Cold-test the committed runtime template: deploy/voice.env.example must PARSE via the real
+// loader (all required keys present, cap numeric) so the operator's copy-fill-run path can't
+// silently rot. (go test CWD = cmd/flotilla, so deploy/ is two up.)
+func TestVoiceEnvExampleParses(t *testing.T) {
+	cfg, err := loadVoiceConfig("../../deploy/voice.env.example")
+	if err != nil {
+		t.Fatalf("deploy/voice.env.example does not parse via loadVoiceConfig: %v", err)
+	}
+	if cfg.XOAgent == "" || cfg.CapUSD <= 0 || cfg.XAIKey == "" {
+		t.Errorf("template parsed but with empty/invalid fields: %+v", *cfg)
+	}
+}
