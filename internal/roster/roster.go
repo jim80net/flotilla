@@ -51,6 +51,16 @@ type Config struct {
 	OperatorUserID string  `json:"operator_user_id,omitempty"`
 	Agents         []Agent `json:"agents"`
 
+	// --- `send` capability ---
+
+	// MirrorInterAgent gates whether `flotilla send` mirrors the delivered message
+	// to the Discord audit channel. DEFAULT FALSE (off): inter-agent (XO↔desk)
+	// coordination stays in the tmux panes and does not clutter the operator's
+	// Discord — only the operator-facing `flotilla notify` posts. Set true to
+	// restore the v0 always-mirror audit trail. A per-call `--mirror` / `--no-mirror`
+	// overrides it (precedence: flag → this setting → off). `notify` is unaffected.
+	MirrorInterAgent bool `json:"mirror_inter_agent,omitempty"`
+
 	// --- `watch` capability (flotilla watch); validated at load ---
 
 	// XOAgent is the delivery target for a bare operator message and the target

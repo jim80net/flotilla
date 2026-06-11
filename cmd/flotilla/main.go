@@ -72,11 +72,15 @@ flags for 'send':
                     the command line — avoids shell quoting of multi-line bodies
   --roster <path>   roster config (default ./flotilla.json or $FLOTILLA_ROSTER)
   --secrets <path>  secrets env file (default $FLOTILLA_SECRETS)
-  --no-mirror       deliver via tmux only; skip the Discord audit post
+  --mirror          force-enable the Discord audit mirror for this send
+  --no-mirror       force-disable it (--mirror and --no-mirror are mutually exclusive)
 
-The Discord audit mirror is best-effort: if it is unconfigured or fails, the
-message is still delivered and the command succeeds (with a warning), so a
-retry never double-delivers.
+Inter-agent send mirroring is DEFAULT-OFF — intra-fleet coordination stays in the
+tmux panes and does not clutter Discord; only the operator-facing 'flotilla notify'
+posts by default. Set roster "mirror_inter_agent": true to restore the always-on
+audit trail (or pass --mirror per call; precedence: flag → roster setting → off).
+When it does mirror it is best-effort: an unconfigured/failed mirror still delivers
+and the command succeeds (with a warning), so a retry never double-delivers.
 
 flags for 'notify':
   --from <name>     the agent whose webhook the message is posted under
@@ -154,9 +158,13 @@ func cmdSend(args []string) error {
 	file := fs.String("file", "", "read message body from this file ('-' for stdin)")
 	rosterPath := fs.String("roster", rosterDefault(), "roster config path")
 	secretsPath := fs.String("secrets", os.Getenv("FLOTILLA_SECRETS"), "secrets env file path")
-	noMirror := fs.Bool("no-mirror", false, "skip the Discord audit mirror")
+	noMirror := fs.Bool("no-mirror", false, "force-skip the Discord audit mirror")
+	doMirror := fs.Bool("mirror", false, "force-enable the Discord audit mirror (overrides a default-off roster)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *noMirror && *doMirror {
+		return fmt.Errorf("--mirror and --no-mirror are mutually exclusive")
 	}
 	rest := fs.Args()
 	if len(rest) == 0 {
@@ -216,10 +224,12 @@ func cmdSend(args []string) error {
 	}
 	fmt.Printf("delivered to %s (pane %s)\n", agentName, pane)
 
-	// Mirror to the Discord audit channel under the sender's identity. A mirror
-	// failure (or absence) is a warning, not a command failure — the message is
-	// already delivered, and failing here would tempt a retry into a double-send.
-	if *noMirror {
+	// Mirror to the Discord audit channel under the sender's identity. Inter-agent
+	// mirroring is DEFAULT-OFF (it cluttered the operator's Discord); precedence is
+	// --no-mirror (off) → --mirror (on) → roster mirror_inter_agent (default false).
+	// A mirror failure (or absence) is a warning, not a command failure — the message
+	// is already delivered, and failing here would tempt a retry into a double-send.
+	if !shouldMirror(*noMirror, *doMirror, cfg.MirrorInterAgent) {
 		return nil
 	}
 	if n := len([]rune(message)); n > discord.MaxContentRunes {
@@ -332,6 +342,22 @@ func readSource(path string, stdin io.Reader) (string, error) {
 		return "", fmt.Errorf("read message file: %w", err)
 	}
 	return string(b), nil
+}
+
+// shouldMirror resolves whether a `send` mirrors to the Discord audit channel.
+// Precedence: --no-mirror forces off, --mirror forces on, else the roster default
+// (mirror_inter_agent, itself default false → inter-agent mirroring is off unless
+// opted in). The two flags are rejected as mutually exclusive upstream, so at most
+// one of noMirror/doMirror is true here.
+func shouldMirror(noMirror, doMirror, rosterDefault bool) bool {
+	switch {
+	case noMirror:
+		return false
+	case doMirror:
+		return true
+	default:
+		return rosterDefault
+	}
 }
 
 // mirror posts the delivered instruction to the audit channel under the
