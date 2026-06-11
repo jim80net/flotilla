@@ -91,7 +91,17 @@
       unit-tested with fakes (pure-Go, `CGO_ENABLED=0`). **DEFERRED (§3.1/PR-C):** the real
       `PaneInjector` (wraps `surface.Assess` busy-check + `deliver.Send` under the per-pane
       lock) + the real discordgo `Session` adapter — both need the live session / a channel.
-- [ ] 4.2 Outbound: consume the `speak` spool → TTS → Opus → `OpusSend`. Test.
+- [~] 4.2 Outbound: consume the `speak` spool → TTS → Opus → `OpusSend`. Test.
+      — **ENGINE DONE (this PR):** `OutboundPipeline` over the `Session`/`OpusCodec`/
+      `SpeechProvider` seams + the cost `Meter`: drains the spool oldest-first, reserves
+      spend BEFORE synth (cap → quiet + one notice), synthesizes, frames PCM into 960-sample
+      Opus packets (zero-padding the tail), and transmits paced at ~20 ms; read-then-delete
+      consume. Unit-tested with fakes. **SIMPLIFICATION (probe-verified 2026-06-11):** Grok
+      `/v1/tts` with `output_format.codec=pcm, sample_rate=48000` returns raw 48 kHz mono PCM
+      directly (HTTP 200, `audio/pcm`) — so the outbound path needs **NO MP3 decoder (no new
+      dependency) and NO 24→48 resample**; `GrokProvider.TTS` now requests that shape. (The
+      §3b `Resample` remains for any future provider whose native rate ≠ 48 kHz.) **DEFERRED
+      (§5.2/PR-C):** the real discordgo `Session` (OpusSend) wiring + the live channel.
 
 ## 5. `flotilla speak` (file-drop spool) + the `voice` command
 
