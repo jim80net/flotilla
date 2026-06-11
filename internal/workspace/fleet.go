@@ -27,7 +27,12 @@ func FleetTmuxCheck(agent, target string, flat *launch.Config) (warnings []strin
 		return nil, err
 	}
 	seen := map[string]bool{} // agents accounted for via a workspace (don't double-count from flat)
-	matches, _ := filepath.Glob(filepath.Join(root, "*", LaunchFileName))
+	// A glob error (e.g. a metacharacter in the resolved root) must NOT silently
+	// turn the cross-workspace collision guard into a no-op — surface it.
+	matches, gerr := filepath.Glob(filepath.Join(root, "*", LaunchFileName))
+	if gerr != nil {
+		return warnings, fmt.Errorf("scan workspaces under %q: %w", root, gerr)
+	}
 	for _, p := range matches {
 		other := filepath.Base(filepath.Dir(p))
 		seen[other] = true
@@ -36,7 +41,7 @@ func FleetTmuxCheck(agent, target string, flat *launch.Config) (warnings []strin
 		}
 		r, ok, lerr := LoadRecipe(other)
 		if lerr != nil {
-			warnings = append(warnings, fmt.Sprintf("skipped malformed workspace %q: %v", other, lerr))
+			warnings = append(warnings, fmt.Sprintf("skipped malformed workspace %q: %v (its tmux-collision check was bypassed for %q — fix it to restore the guard)", other, lerr, agent))
 			continue
 		}
 		if ok && r.Tmux == target {

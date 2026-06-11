@@ -60,7 +60,7 @@ the runbook MUST keep it a user service (or set `--workspace-root` explicitly).
 ### `launch.json` — the recipe (same fields, relocated + de-mapped)
 
 ```json
-{ "launch": "claude --add-dir ~/.flotilla/hydra-ops -w hydra-ops", "cwd": "/abs/worktree", "tmux": "flotilla:hydra-ops" }
+{ "launch": "claude --append-system-prompt-file ~/.flotilla/hydra-ops/CLAUDE.md -w hydra-ops", "cwd": "/abs/worktree", "tmux": "flotilla:hydra-ops" }
 ```
 
 The same `Recipe` the flat file used (`internal/launch/launch.go`), SAME validation
@@ -214,7 +214,7 @@ the XO's `.flotilla-state.md` → `state.md` → restart `flotilla-watch`. The f
 
 - `flotilla workspace init <agent>` — roster-validate the agent (this is where the
   flat file's per-key roster check relocates, P3-3), then scaffold: a commented
-  `launch.json` template (emitting the `--add-dir` recipe convention), empty
+  `launch.json` template (emitting the `--append-system-prompt-file` recipe convention), empty
   `HEARTBEAT.md`/`state.md`, and a surface-named identity stub. **Idempotent**: never
   overwrites; creates only what's missing. Does NOT populate real host paths (operator
   data, per the launch-design "data, not code" principle).
@@ -232,9 +232,11 @@ the XO's `.flotilla-state.md` → `state.md` → restart `flotilla-watch`. The f
 
 ## Ratified decisions (XO checkpoint 2026-06-11)
 
-1. **Identity-file delivery = Option C** (`claude --add-dir ~/.flotilla/<agent>`), with
-   the build-time empirical auto-load confirm + `--append-system-prompt-file` fallback,
-   and the per-surface caveat for Grok/Cursor `AGENTS.md` (above).
+1. **Identity-file delivery = Option C**, the launch command loads the identity
+   explicitly — `claude --append-system-prompt-file ~/.flotilla/<agent>/CLAUDE.md`
+   (the `--add-dir` auto-load originally proposed was empirically REFUTED, see §1.4a
+   above; both halves of the `-file` claim are verified), with the per-surface caveat
+   for Grok/Cursor `AGENTS.md` deferred to the driver phase.
 2. **HEARTBEAT.md templates the DETECTOR continuation prompt** with `{{tracker}}`/
    `{{settle}}` — NOT deferred. The production XO is `change_detector:true`, so
    customizing only `DefaultHeartbeatPrompt` would be inert; templating the detector
