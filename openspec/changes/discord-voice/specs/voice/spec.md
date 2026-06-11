@@ -127,11 +127,12 @@ operator believing the XO heard/answered when it did not).
 
 ### Requirement: Voice-session recovery is self-healing and drops stale audio
 
-On a voice-gateway disconnect (discordgo's voice support is explicitly work-in-progress),
-the process SHALL **drop the in-flight utterance** (a half-captured command must never be
-injected late, after reconnect), re-establish the voice connection, and — if it cannot —
-emit a **one-line operator notice** and idle rather than spin. Stale audio SHALL NEVER be
-replayed. This is independent of the clock (a voice failure never touches `watch`).
+The process SHALL, on a voice-gateway disconnect, **drop the in-flight utterance** (a
+half-captured command must never be injected late after reconnect), re-establish the voice
+connection, and — if it cannot — emit a **one-line operator notice** and idle rather than
+spin. Stale audio SHALL NEVER be replayed. discordgo's voice support is explicitly
+work-in-progress, so a mid-utterance drop is expected; this recovery is independent of the
+clock (a voice failure never touches `watch`).
 
 #### Scenario: A mid-utterance disconnect drops the partial, does not inject it late
 - **WHEN** the voice gateway drops while the operator is mid-utterance
