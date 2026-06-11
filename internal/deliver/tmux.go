@@ -74,6 +74,14 @@ func clearKeysArgs(target, cmd string) []string {
 // undefined. (Surface drivers whose rotate strategy is RestartProcess must NEVER
 // call this — a slash would land as literal composer text; see internal/surface.)
 func ClearContext(target string) error {
+	// /clear writes the same composer as Send, so serialize it against other writers
+	// to this pane (same per-pane lock; bounded acquire → drop rather than block).
+	lock, err := acquirePaneLock(target)
+	if err != nil {
+		return err
+	}
+	defer lock.Release()
+
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
 	if err := exec.CommandContext(ctx, "tmux", clearKeysArgs(target, "/clear")...).Run(); err != nil {
@@ -261,6 +269,15 @@ func titleMatchesName(title, want string) bool {
 // CR and every newline would submit, so a non-Claude or modal target needs
 // revalidation before relying on multi-line delivery.
 func Send(target, text string) error {
+	// Serialize the non-atomic paste-sequence against every other writer to this pane
+	// (send / the watch Injector / voice). A bounded acquire drops the delivery rather
+	// than blocking the heartbeat clock, which holds this same lock.
+	lock, err := acquirePaneLock(target)
+	if err != nil {
+		return err
+	}
+	defer lock.Release()
+
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
 
