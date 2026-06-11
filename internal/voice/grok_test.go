@@ -82,10 +82,22 @@ func TestGrokErrorNeverLeaksKey(t *testing.T) {
 
 	g := NewGrokProvider(key)
 	g.ttsURL, g.sttURL = srv.URL, srv.URL
+	// Non-200 (server-error) path: the snippet is the server body, never the key.
 	if _, err := g.TTS(context.Background(), "x"); err == nil || strings.Contains(err.Error(), key) {
-		t.Errorf("tts error must be non-nil AND key-free: %v", err)
+		t.Errorf("tts (http error) must be non-nil AND key-free: %v", err)
 	}
 	if _, err := g.STT(context.Background(), []byte("a"), "a.mp3"); err == nil || strings.Contains(err.Error(), key) {
-		t.Errorf("stt error must be non-nil AND key-free: %v", err)
+		t.Errorf("stt (http error) must be non-nil AND key-free: %v", err)
+	}
+
+	// Transport-error path: client.Do fails (*url.Error). The error embeds the URL
+	// (key-free — the key is only an Authorization header, never in the URL), so it must
+	// still be key-free. (This is the path with the theoretical URL-embedding risk.)
+	g.ttsURL, g.sttURL = "http://127.0.0.1:1/v1/tts", "http://127.0.0.1:1/v1/stt"
+	if _, err := g.TTS(context.Background(), "x"); err == nil || strings.Contains(err.Error(), key) {
+		t.Errorf("tts (transport error) must be non-nil AND key-free: %v", err)
+	}
+	if _, err := g.STT(context.Background(), []byte("a"), "a.mp3"); err == nil || strings.Contains(err.Error(), key) {
+		t.Errorf("stt (transport error) must be non-nil AND key-free: %v", err)
 	}
 }

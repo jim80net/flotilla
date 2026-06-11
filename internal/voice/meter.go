@@ -30,6 +30,9 @@ func NewMeter(capUSD float64, caps Caps) *Meter {
 // it sets the hard-stop flag and returns ErrCapReached WITHOUT spending (never
 // overshoots). Once stopped, every reserve returns ErrCapReached.
 func (m *Meter) reserve(costUSD float64) error {
+	if costUSD < 0 { // a negative cost (e.g. a buggy negative char count) must never
+		costUSD = 0 // "refund" spend or pass the cap check — clamp to a no-op.
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.stopped {
