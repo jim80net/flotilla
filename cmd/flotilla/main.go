@@ -41,6 +41,8 @@ func run(args []string) error {
 		return cmdRegister(args[1:])
 	case "resume":
 		return cmdResume(args[1:])
+	case "workspace":
+		return cmdWorkspace(args[1:])
 	case "version", "-v", "--version":
 		fmt.Println("flotilla " + version)
 		return nil
@@ -63,6 +65,8 @@ usage:
   flotilla watch                                      relay + XO heartbeat clock daemon
   flotilla register <agent> [--pane <target>]         tag a pane so it resolves by a stable, drift-immune marker
   flotilla resume <agent> [--launch <path>] [--force]  (re)start a dead desk from its host-local launch recipe
+  flotilla workspace init <agent>                     scaffold the per-agent ~/.flotilla/<agent>/ home
+  flotilla workspace path <agent>                     print an agent's workspace directory
   flotilla version
   flotilla help
 

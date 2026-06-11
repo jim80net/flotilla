@@ -10,6 +10,7 @@ import (
 	"github.com/jim80net/flotilla/internal/launch"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
+	"github.com/jim80net/flotilla/internal/workspace"
 )
 
 // resumeOps are the tmux + surface operations cmdResume performs, injected so
@@ -61,17 +62,35 @@ func cmdResume(args []string) error {
 	if launchPath == "" {
 		launchPath = launch.DefaultPath(rosterPath)
 	}
-	rosterAgents := make(map[string]bool, len(cfg.Agents))
-	for _, a := range cfg.Agents {
-		rosterAgents[a.Name] = true
+	// The flat launch file is now a MIGRATION FALLBACK behind the per-agent workspace
+	// (~/.flotilla/<agent>/launch.json). It may be absent entirely once every desk is
+	// migrated, so load it only when present; a present-but-malformed file is still a
+	// fail-closed error (the existing safety posture).
+	var flat *launch.Config
+	if _, statErr := os.Stat(launchPath); statErr == nil {
+		rosterAgents := make(map[string]bool, len(cfg.Agents))
+		for _, a := range cfg.Agents {
+			rosterAgents[a.Name] = true
+		}
+		flat, err = launch.Load(launchPath, rosterAgents)
+		if err != nil {
+			return err
+		}
 	}
-	lc, err := launch.Load(launchPath, rosterAgents)
+	recipe, err := workspace.ResolveRecipe(agentName, flat)
 	if err != nil {
 		return err
 	}
-	recipe, ok := lc.Recipe(agentName)
-	if !ok {
-		return fmt.Errorf("no launch recipe for %q in %s", agentName, launchPath)
+
+	// Cross-recipe tmux-collision guard across workspaces ∪ flat recipes (the
+	// fleet-level invariant the flat file's single-file load gave for free). A broken
+	// UNRELATED workspace is skipped with a warning, never fail-closed.
+	if warns, ferr := workspace.FleetTmuxCheck(agentName, recipe.Tmux, flat); ferr != nil {
+		return ferr
+	} else {
+		for _, w := range warns {
+			fmt.Fprintln(os.Stderr, "flotilla: "+w)
+		}
 	}
 
 	// Resolve the agent's surface driver up front. An unregistered surface (a typo
@@ -103,7 +122,7 @@ func cmdResume(args []string) error {
 		return err
 	}
 	fmt.Print(msg)
-	printState(recipe)
+	printState(agentName, recipe)
 	return nil
 }
 
@@ -186,14 +205,17 @@ func runResume(ops resumeOps, p resumePlan) (string, error) {
 	}
 }
 
-// printState surfaces the recipe's state pointer (if any) so the operator/skill
-// can drive /takeover. resume (re)starts the process and ensures it is tagged;
-// it does NOT restore context (a desk could resume mid-destructive-op; restart ≠
-// resume-and-act — see the design's Non-goals).
-func printState(r launch.Recipe) {
-	if r.State != "" {
-		fmt.Printf("  state pointer: %s (drive /takeover from here — resume does NOT auto-restore context)\n", r.State)
+// printState surfaces the state pointer (if any) so the operator/skill can drive
+// /takeover: the agent's workspace state.md when non-empty, else the flat recipe's
+// state field. resume (re)starts the process and ensures it is tagged; it does NOT
+// restore context (a desk could resume mid-destructive-op; restart ≠ resume-and-act —
+// see the design's Non-goals).
+func printState(agent string, r launch.Recipe) {
+	pointer, err := workspace.StatePointer(agent, r.State)
+	if err != nil || pointer == "" {
+		return
 	}
+	fmt.Printf("  state pointer: %s (drive /takeover from here — resume does NOT auto-restore context)\n", pointer)
 }
 
 // resumeTmuxTarget derives the (session, window) to cold-create into. A recipe

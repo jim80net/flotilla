@@ -60,7 +60,7 @@ the runbook MUST keep it a user service (or set `--workspace-root` explicitly).
 ### `launch.json` — the recipe (same fields, relocated + de-mapped)
 
 ```json
-{ "launch": "claude --add-dir ~/.flotilla/hydra-ops -w hydra-ops", "cwd": "/abs/worktree", "tmux": "flotilla:hydra-ops" }
+{ "launch": "claude --append-system-prompt-file ~/.flotilla/hydra-ops/CLAUDE.md -w hydra-ops", "cwd": "/abs/worktree", "tmux": "flotilla:hydra-ops" }
 ```
 
 The same `Recipe` the flat file used (`internal/launch/launch.go`), SAME validation
@@ -110,26 +110,34 @@ Claude Code discovers `CLAUDE.md` from the cwd, its ancestors, and `~/.claude/` 
 not from an arbitrary path. A desk's `cwd` is usually its worktree, so
 `~/.flotilla/<agent>/CLAUDE.md` is **not** natively on the cwd read path. The ratified
 mechanism is **Option C**: the recipe's `launch` command (already operator-authored
-shell, `launch.go:29`) adds the workspace dir, with **zero flotilla glue and zero cwd
+shell, `launch.go:29`) loads the workspace identity explicitly, with **zero cwd
 touch**:
 
 ```
-claude --add-dir ~/.flotilla/<agent> -w <agent>
+claude --append-system-prompt-file ~/.flotilla/<agent>/CLAUDE.md -w <agent>
 ```
 
-**Auto-load evidence + the one thing to confirm empirically at build.** `claude --help`
-documents `--bare` as disabling "CLAUDE.md auto-discovery" and lists, as the explicit
-replacement, "provide context via … `--add-dir (CLAUDE.md dirs)`" — i.e. an
-`--add-dir`'d directory's `CLAUDE.md` IS loaded as context, not merely made accessible.
-That is first-party CLI evidence, but it is an inference from help text, NOT an
-empirical measurement — so task 1.4a **empirically confirms** it before we rely on it
-(launch `claude --add-dir <tmp>` with a sentinel `CLAUDE.md` in `<tmp>`; assert the
-sentinel is in context). **Fallback if it does NOT auto-load:**
-`--append-system-prompt-file ~/.flotilla/<agent>/CLAUDE.md` (the same file, loaded
-explicitly — guaranteed, just not via auto-discovery). The `workspace init` recipe
-template emits whichever the build confirms.
+**Empirical result (task 1.4a — RESOLVED 2026-06-11, the `--add-dir` auto-load claim
+was REFUTED).** The original recommendation was `--add-dir ~/.flotilla/<agent>`, on the
+inference that `claude --help`'s `--bare` line "`--add-dir (CLAUDE.md dirs)`" meant an
+added dir's `CLAUDE.md` is auto-loaded. A sentinel test (claude 2.1.172) refuted it: a
+`CLAUDE.md` carrying a secret codename, reachable ONLY via `--add-dir` (cwd elsewhere),
+was **NOT loaded** (`claude --add-dir <dir> -p "codename?"` → `NONE`); a control with the
+same file in the cwd DID load it (`-p` does not disable discovery, so the negative is
+real); and a control with `--append-system-prompt` DID load it. So `--add-dir` only
+grants file ACCESS — it does not shape identity. The ratified **fallback is now the
+mechanism**: `--append-system-prompt-file <workspace>/CLAUDE.md` loads the identity at
+launch, with the file still named by the native convention. `workspace init` emits this
+recipe form.
 
-**Per-surface caveat (XO: "verify PER surface").** The auto-load evidence is for
+**Both halves of that claim are empirically verified — no help-text inference (the XO
+caught that `--append-system-prompt-file` was at risk of the same `--add-dir` trap).**
+A control proved `--append-system-prompt <TEXT>` loads the sentinel codename; a second
+sentinel proved the `-file` variant specifically loads the FILE's contents
+(`claude --append-system-prompt-file <file-with-codename> -p "codename?"` → the codename,
+not `NONE`). So `-file` is verified to load, not merely present in `--help`.
+
+**Per-surface caveat (XO: "verify PER surface").** The empirical result above is for
 **Claude Code** only. The Grok/Cursor `AGENTS.md` load mechanism is **UNVERIFIED** and
 is deferred to the drivable-surfaces phase (Grok/Cursor are operator-gated, not v1);
 when those drivers are built they MUST repeat this per-surface verification, and the
@@ -206,7 +214,7 @@ the XO's `.flotilla-state.md` → `state.md` → restart `flotilla-watch`. The f
 
 - `flotilla workspace init <agent>` — roster-validate the agent (this is where the
   flat file's per-key roster check relocates, P3-3), then scaffold: a commented
-  `launch.json` template (emitting the `--add-dir` recipe convention), empty
+  `launch.json` template (emitting the `--append-system-prompt-file` recipe convention), empty
   `HEARTBEAT.md`/`state.md`, and a surface-named identity stub. **Idempotent**: never
   overwrites; creates only what's missing. Does NOT populate real host paths (operator
   data, per the launch-design "data, not code" principle).
@@ -224,9 +232,11 @@ the XO's `.flotilla-state.md` → `state.md` → restart `flotilla-watch`. The f
 
 ## Ratified decisions (XO checkpoint 2026-06-11)
 
-1. **Identity-file delivery = Option C** (`claude --add-dir ~/.flotilla/<agent>`), with
-   the build-time empirical auto-load confirm + `--append-system-prompt-file` fallback,
-   and the per-surface caveat for Grok/Cursor `AGENTS.md` (above).
+1. **Identity-file delivery = Option C**, the launch command loads the identity
+   explicitly — `claude --append-system-prompt-file ~/.flotilla/<agent>/CLAUDE.md`
+   (the `--add-dir` auto-load originally proposed was empirically REFUTED, see §1.4a
+   above; both halves of the `-file` claim are verified), with the per-surface caveat
+   for Grok/Cursor `AGENTS.md` deferred to the driver phase.
 2. **HEARTBEAT.md templates the DETECTOR continuation prompt** with `{{tracker}}`/
    `{{settle}}` — NOT deferred. The production XO is `change_detector:true`, so
    customizing only `DefaultHeartbeatPrompt` would be inert; templating the detector
