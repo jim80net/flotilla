@@ -91,16 +91,18 @@ type InboundPipeline struct {
 	session  Session
 	codec    OpusCodec
 	stt      SpeechProvider
+	meter    *Meter // session cost cap (STT spend); nil ⇒ unmetered (tests)
 	gate     *SpeakerTable
 	injector PaneInjector
 	notice   func(string) // one-line operator notice on a dropped/failed utterance (never silent)
 	cfg      InboundConfig
 }
 
-// NewInboundPipeline wires the pipeline. gate is the fail-closed operator SSRC gate
-// (seeded from Speaking events at runtime); notice posts a one-line operator notice when an
-// utterance is dropped or fails (so a failure is never silent) — pass a no-op to discard.
-func NewInboundPipeline(s Session, codec OpusCodec, stt SpeechProvider, gate *SpeakerTable, inj PaneInjector, notice func(string), cfg InboundConfig) *InboundPipeline {
+// NewInboundPipeline wires the pipeline. meter enforces the shared session cost cap on STT
+// (pass nil to disable metering); gate is the fail-closed operator SSRC gate (seeded from
+// Speaking events at runtime); notice posts a one-line operator notice when an utterance is
+// dropped or fails (so a failure is never silent) — pass a no-op to discard.
+func NewInboundPipeline(s Session, codec OpusCodec, stt SpeechProvider, meter *Meter, gate *SpeakerTable, inj PaneInjector, notice func(string), cfg InboundConfig) *InboundPipeline {
 	if notice == nil {
 		notice = func(string) {}
 	}
@@ -108,6 +110,7 @@ func NewInboundPipeline(s Session, codec OpusCodec, stt SpeechProvider, gate *Sp
 		session:  s,
 		codec:    codec,
 		stt:      stt,
+		meter:    meter,
 		gate:     gate,
 		injector: inj,
 		notice:   notice,
@@ -180,6 +183,16 @@ func (p *InboundPipeline) Run(ctx context.Context) error {
 // finalize transcribes an assembled utterance and injects it. Any failure produces a
 // one-line operator notice (never a silent drop).
 func (p *InboundPipeline) finalize(ctx context.Context, pcm []int16) {
+	// Spend gate: reserve the STT cost (the clip's duration in seconds) BEFORE the call, so a
+	// session that has hit the cap goes quiet instead of continuing to spend. The duration is
+	// known from the PCM length — no need to wait for the provider's reported duration.
+	if p.meter != nil {
+		seconds := float64(len(pcm)) / float64(DiscordSampleRate*DiscordChannels)
+		if err := p.meter.ReserveSTT(seconds); err != nil {
+			p.notice("voice: cost cap reached — voice input muted for this session.")
+			return
+		}
+	}
 	wav := encodeWAV(pcm, DiscordSampleRate, DiscordChannels)
 	// Bound the STT call: it runs inline on the receive loop, so an unbounded transcription
 	// would stall audio intake (and drop frames) up to the provider's transport timeout.
