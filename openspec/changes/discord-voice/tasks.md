@@ -71,18 +71,26 @@
       `#cgo pkg-config: opus` uses system libopus on every arch (the design's declared
       `libopus-dev` dep, nothing extra), gives a real `opus_*_destroy` `Close()`, and shrinks
       the supply chain to a frozen 7-function surface we fully audit.
-- [ ] 3.3 Endpointer: configurable silence-timeout (~1.5–2 s) end-of-utterance. Test. (§3b/§4.)
+- [x] 3.3 Endpointer: configurable silence-timeout (~1.5–2 s) end-of-utterance. Test.
+      (`InboundConfig.QuietGap`, default 1500ms; silence timer in `InboundPipeline.Run` +
+      a `MaxUtteranceSamples` forced-finalize cap. Tested.)
 - [ ] 3.4 Voice-session recovery (P2-2): a gateway drop discards the in-flight utterance
       (no late inject), re-establishes or emits a one-line notice. Test the drop-stale path. (§3b.)
 
 ## 4. The pipelines
 
-- [ ] 4.1 Inbound: utterance → endpoint → STT → inject via `internal/deliver` (under the
+- [~] 4.1 Inbound: utterance → endpoint → STT → inject via `internal/deliver` (under the
       per-pane lock), tagged voice-originated. **Gate = POSITIVE SSRC→operator mapping,
       fail-closed (P1-1)**: unmapped/ambiguous/non-operator SSRC → DROPPED. **Busy-defer
       (P2-5)**: if the XO pane is `Working`, defer/retry. STT error/timeout → drop + one-line
       notice, never silent (P2-3). Tests: unattributed-dropped, non-operator-dropped,
       busy-deferred, STT-error-surfaced.
+      — **ENGINE DONE (this PR):** `InboundPipeline` over the `Session`/`OpusCodec`/
+      `SpeechProvider`/`PaneInjector` seams — fail-closed gate, silence endpoint, WAV-wrap →
+      STT → voice-tagged inject, bounded busy-defer, STT-error notice. All six behaviors
+      unit-tested with fakes (pure-Go, `CGO_ENABLED=0`). **DEFERRED (§3.1/PR-C):** the real
+      `PaneInjector` (wraps `surface.Assess` busy-check + `deliver.Send` under the per-pane
+      lock) + the real discordgo `Session` adapter — both need the live session / a channel.
 - [ ] 4.2 Outbound: consume the `speak` spool → TTS → Opus → `OpusSend`. Test.
 
 ## 5. `flotilla speak` (file-drop spool) + the `voice` command
