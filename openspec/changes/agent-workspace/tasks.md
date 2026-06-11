@@ -11,7 +11,8 @@
 - [x] 0.3 Adversarial systems-review + OCR on the design; fold findings (3 P1 + 6 P2
       folded: detector-prompt targeting, single-source tracker, migration restart,
       fleet-scan posture, Option C, $HOME, empty-state suppression).
-- [ ] 0.4 Checkpoint the revised openspec to the XO; resolve the open forks. (BLOCKS 1+.)
+- [x] 0.4 Checkpoint → XO ratified all 3 forks 2026-06-11 (Option C `--add-dir`;
+      template the DETECTOR continuation prompt; PR-1/PR-2 split). Build unblocked.
 
 ## 1. `internal/workspace` package (schema + resolution)
 
@@ -28,6 +29,11 @@
       SAME path ResolveTracker returns** (the P1-2 single-source invariant).
 - [ ] 1.4 `IdentityFileName(surface)` — claude-code→`CLAUDE.md`, grok/cursor→`AGENTS.md`,
       unknown→error. Test: each surface.
+- [ ] 1.4a EMPIRICALLY confirm `claude --add-dir <tmp>` auto-loads `<tmp>/CLAUDE.md` into
+      context (sentinel smoke test) BEFORE relying on Option C; if it does NOT, the
+      `workspace init` recipe template emits `--append-system-prompt-file <ws>/CLAUDE.md`
+      instead. Grok/Cursor `AGENTS.md` auto-load stays UNVERIFIED → its per-surface
+      confirm is deferred to the drivable-surfaces (driver) phase, NOT claimed here.
 - [ ] 1.5 `FleetTmuxCheck(agent, target)` — glob sibling workspaces ∪ flat recipes for
       unmigrated agents; reject a collision; SKIP a malformed other workspace with a
       warning (NOT fail-closed). Test: collision rejected; broken sibling skipped, this

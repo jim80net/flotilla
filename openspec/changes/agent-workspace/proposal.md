@@ -55,7 +55,8 @@ Subsumes #6 (pluggable tracker + first-class heartbeat-prompt customization).
   `flotilla-watch` when switching the tracker source — that switch is a one-time
   hash-discontinuity (one expected, harmless spurious wake), not a live no-op. The
   flat `flotilla-launch.json` keeps working until each desk has a workspace.
-- **Design checkpoint (after systems-review revision):** open forks for the XO —
-  (1) how the native identity file reaches the agent (Option C `--add-dir` recommended
-  vs A/B); (2) HEARTBEAT.md templating scope; (3) the PR-1/PR-2 split. See design.md
-  §"Open questions".
+- **Ratified (XO checkpoint 2026-06-11):** (1) identity delivery = Option C
+  (`claude --add-dir`, with a build-time empirical auto-load confirm + a
+  `--append-system-prompt-file` fallback, and Grok/Cursor `AGENTS.md` deferred per-surface);
+  (2) HEARTBEAT.md templates the detector continuation prompt; (3) PR-1 (workspace + cmd +
+  resume) then PR-2 (watch/detector). See design.md §"Ratified decisions". Build unblocked.

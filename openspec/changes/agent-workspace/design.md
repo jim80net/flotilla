@@ -104,29 +104,42 @@ and `{{tracker}}` (above).
 The desk's identity/role in the agent's own convention (claude-code → `CLAUDE.md`;
 grok/cursor → `AGENTS.md`). flotilla NEVER auto-injects or clobbers it.
 
-## How the identity file reaches the agent — THE OPEN FORK (decide at checkpoint)
+## How the identity file reaches the agent — RATIFIED: Option C (XO checkpoint 2026-06-11)
 
 Claude Code discovers `CLAUDE.md` from the cwd, its ancestors, and `~/.claude/` —
 not from an arbitrary path. A desk's `cwd` is usually its worktree, so
-`~/.flotilla/<agent>/CLAUDE.md` is **not** natively on the read path. Three options:
+`~/.flotilla/<agent>/CLAUDE.md` is **not** natively on the cwd read path. The ratified
+mechanism is **Option C**: the recipe's `launch` command (already operator-authored
+shell, `launch.go:29`) adds the workspace dir, with **zero flotilla glue and zero cwd
+touch**:
 
-- **Option C — `launch` command adds the workspace dir (RECOMMENDED).** The recipe's
-  `launch` is already operator-authored shell (`launch.go:29`), so it can read the
-  workspace identity with **zero flotilla glue and zero cwd touch**:
-  `claude --add-dir ~/.flotilla/<agent> -w <agent>` (Claude Code's `--add-dir` adds
-  the directory to the session context). This dominates A and B — no cwd repurposing,
-  no symlink side-effect — and is just a recipe convention `workspace init` can emit.
-- **Option A — flotilla never touches the cwd; operator wires it.** (A1) set the
-  recipe `cwd` to the workspace dir for a repo-less desk; (A2) for a repo desk, the
-  **repo's own** `CLAUDE.md` is the identity and the workspace file is *vestigial*
-  (documentation-only, never read) — which undercuts "one home for identity" for the
-  common repo desk.
-- **Option B — `workspace init` symlinks the identity into the cwd** iff absent.
-  Automatic, but flotilla now writes into the agent's worktree (a new side effect; a
-  dangling symlink if the workspace moves).
+```
+claude --add-dir ~/.flotilla/<agent> -w <agent>
+```
 
-**Recommendation: Option C** — zero glue, zero cwd touch, and `workspace init` emits
-the `--add-dir` recipe convention. The XO ratifies C vs A vs B at the checkpoint.
+**Auto-load evidence + the one thing to confirm empirically at build.** `claude --help`
+documents `--bare` as disabling "CLAUDE.md auto-discovery" and lists, as the explicit
+replacement, "provide context via … `--add-dir (CLAUDE.md dirs)`" — i.e. an
+`--add-dir`'d directory's `CLAUDE.md` IS loaded as context, not merely made accessible.
+That is first-party CLI evidence, but it is an inference from help text, NOT an
+empirical measurement — so task 1.4a **empirically confirms** it before we rely on it
+(launch `claude --add-dir <tmp>` with a sentinel `CLAUDE.md` in `<tmp>`; assert the
+sentinel is in context). **Fallback if it does NOT auto-load:**
+`--append-system-prompt-file ~/.flotilla/<agent>/CLAUDE.md` (the same file, loaded
+explicitly — guaranteed, just not via auto-discovery). The `workspace init` recipe
+template emits whichever the build confirms.
+
+**Per-surface caveat (XO: "verify PER surface").** The auto-load evidence is for
+**Claude Code** only. The Grok/Cursor `AGENTS.md` load mechanism is **UNVERIFIED** and
+is deferred to the drivable-surfaces phase (Grok/Cursor are operator-gated, not v1);
+when those drivers are built they MUST repeat this per-surface verification, and the
+design does NOT claim auto-shaping for them.
+
+Rejected alternatives: **A** — flotilla never touches the cwd (A2's repo-`CLAUDE.md`
+makes the workspace identity file vestigial for repo desks); **B** — `workspace init`
+symlinks the identity into the cwd (a write into the agent's worktree + dangling-symlink
+risk). C dominates both: no cwd repurposing, no worktree side-effect, just a recipe
+convention.
 
 ## `flotilla resume` — read the workspace, fall back to the flat file
 
@@ -209,13 +222,15 @@ the XO's `.flotilla-state.md` → `state.md` → restart `flotilla-watch`. The f
   templated in v1 (the others are liveness/notification, not self-continuation).
 - Removing the flat-file reader now — it stays as the migration fallback.
 
-## Open questions for the checkpoint
+## Ratified decisions (XO checkpoint 2026-06-11)
 
-1. **Identity-file fork: Option C (`--add-dir`, recommended) vs A vs B?**
-2. **`HEARTBEAT.md` templating scope:** template the continuation prompt with
-   `{{tracker}}`/`{{settle}}` (recommended — delivers customization for the *production*
-   detector path), or defer prompt-customization and ship only launch.json + state.md +
-   identity in v1 (simpler, but no prompt customization, contradicting the operator ask)?
-3. **PR split:** recommend PR-1 = workspace pkg + `workspace` cmd + `resume` consumption
-   (no live-daemon risk); PR-2 = `watch` consumption (the safety-critical detector — the
-   P1-2 single-source threading + P1-3 restart semantics land isolated and well-tested).
+1. **Identity-file delivery = Option C** (`claude --add-dir ~/.flotilla/<agent>`), with
+   the build-time empirical auto-load confirm + `--append-system-prompt-file` fallback,
+   and the per-surface caveat for Grok/Cursor `AGENTS.md` (above).
+2. **HEARTBEAT.md templates the DETECTOR continuation prompt** with `{{tracker}}`/
+   `{{settle}}` — NOT deferred. The production XO is `change_detector:true`, so
+   customizing only `DefaultHeartbeatPrompt` would be inert; templating the detector
+   continuation prompt is the only scope that delivers customization where it runs.
+3. **PR split confirmed:** PR-1 = workspace pkg + `workspace` cmd + `resume` (no
+   live-daemon risk); PR-2 = `watch`/detector consumption isolated (the P1-2 single-source
+   threading + P1-3 restart semantics get focused review on the highest-blast-radius surface).
