@@ -38,6 +38,8 @@ func run(args []string) error {
 		return cmdNotify(args[1:])
 	case "speak":
 		return cmdSpeak(args[1:])
+	case "voice":
+		return cmdVoice(args[1:])
 	case "watch":
 		return cmdWatch(args[1:])
 	case "register":
@@ -67,6 +69,7 @@ usage:
   flotilla notify --from <agent> --file <path>        notify body from a file ('-' = stdin)
   flotilla speak <text>                               drop a short spoken reply on the voice outbound spool (non-blocking)
   flotilla speak --file <path>                         speak body from a file ('-' = stdin)
+  flotilla voice [--config <voice.env>]               operator↔XO Discord voice (needs a -tags voiceopus build)
   flotilla watch                                      relay + XO heartbeat clock daemon
   flotilla register <agent> [--pane <target>]         tag a pane so it resolves by a stable, drift-immune marker
   flotilla resume <agent> [--launch <path>] [--force]  (re)start a dead desk from its host-local launch recipe
