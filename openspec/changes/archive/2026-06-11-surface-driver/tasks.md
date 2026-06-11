@@ -25,5 +25,5 @@
 ## 5. review + ship
 
 - [x] 5.1 `gofmt`/`go vet`/`go build`/`go test -race ./...` green
-- [ ] 5.2 `/systems-review` on the diff; address findings
-- [ ] 5.3 PR referencing this change; CI + cubic green; enumerate cubic inline findings; report merge-ready
+- [x] 5.2 `/systems-review` on the diff; address findings (done in `aeeb384` — review APPROVED the byte-identical claim; folded 2 LOW cleanups)
+- [x] 5.3 PR referencing this change; CI green; report merge-ready (PR #21 MERGED 2026-06-08; flotilla has no cubic — systems-review + merge are the gates of record)
