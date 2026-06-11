@@ -14,6 +14,7 @@ import (
 	"github.com/jim80net/flotilla/internal/discord"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
+	"github.com/jim80net/flotilla/internal/voice"
 )
 
 const version = "0.0.1"
@@ -35,6 +36,8 @@ func run(args []string) error {
 		return cmdSend(args[1:])
 	case "notify":
 		return cmdNotify(args[1:])
+	case "speak":
+		return cmdSpeak(args[1:])
 	case "watch":
 		return cmdWatch(args[1:])
 	case "register":
@@ -62,6 +65,8 @@ usage:
   flotilla send --from <sender> --file <path> <agent> message body from a file ('-' = stdin)
   flotilla notify --from <agent> <message>            post to the operator under <agent>'s webhook (no tmux)
   flotilla notify --from <agent> --file <path>        notify body from a file ('-' = stdin)
+  flotilla speak <text>                               drop a short spoken reply on the voice outbound spool (non-blocking)
+  flotilla speak --file <path>                         speak body from a file ('-' = stdin)
   flotilla watch                                      relay + XO heartbeat clock daemon
   flotilla register <agent> [--pane <target>]         tag a pane so it resolves by a stable, drift-immune marker
   flotilla resume <agent> [--launch <path>] [--force]  (re)start a dead desk from its host-local launch recipe
@@ -98,6 +103,18 @@ inject into any tmux pane. Use it when an agent (typically the XO) wants to
 reach the operator — as opposed to 'send', which wakes another agent's pane and
 mirrors the wake to the audit channel. The message must be ≤ 2000 characters
 (Discord's hard limit); a longer body is rejected (nothing is posted).
+
+flags for 'speak':
+  --file <path>     read the spoken text from a file ('-' for stdin)
+
+speak is the XO's outbound VOICE path: it drops <text> onto the voice outbound
+spool (state/voice/outbound/) and returns IMMEDIATELY. It is decoupled from the
+'flotilla voice' process on purpose — speak NEVER blocks on, nor fails because
+of, voice being up, so it can never fail the XO's turn (even with voice down it
+succeeds by just writing a file). The voice process watches→consumes→deletes
+those files. The spool is bounded; on overflow the OLDEST entry is dropped, a
+new write is NEVER refused (a refusal would fail the turn). On success speak
+prints only the spooled path.
 
 flags for 'watch':
   --roster <path>             roster config (default ./flotilla.json or $FLOTILLA_ROSTER)
@@ -307,6 +324,55 @@ func cmdNotify(args []string) error {
 		return err
 	}
 	fmt.Printf("notified operator as %s\n", *from)
+	return nil
+}
+
+// cmdSpeak drops a short spoken reply onto the voice outbound spool and returns
+// immediately — the XO's outbound VOICE path. It is deliberately decoupled from the
+// `flotilla voice` process: speak NEVER blocks on, nor fails because of, voice being up
+// (writing a file waits on no reader), so it can never fail the XO's turn — even with
+// voice down it succeeds by just dropping a file. The voice process watches→consumes→
+// deletes those files; the spool is bounded with a drop-oldest (never refuse-new) overflow
+// policy enforced in voice.WriteSpeak. Reuses the exact --file / stdin message resolution
+// that `send`/`notify` use; takes the text as a positional arg otherwise.
+func cmdSpeak(args []string) error {
+	fs := flag.NewFlagSet("speak", flag.ContinueOnError)
+	file := fs.String("file", "", "read the spoken text from this file ('-' for stdin)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	rest := fs.Args()
+	// Go's flag parser stops at the first positional, so a flag placed AFTER the text words
+	// is silently swallowed. Catch it with the same guard `notify` uses (no agent positional
+	// here, so we check the whole tail).
+	for _, a := range rest {
+		if strings.HasPrefix(a, "-") {
+			return fmt.Errorf("unexpected flag %q after the text: put flags before the text, or use --file for a body that starts with '-'", a)
+		}
+	}
+	// --file - reads stdin; if stdin is an interactive terminal nothing is piped and
+	// io.ReadAll would block forever. Fail fast instead of hanging.
+	if *file == "-" {
+		if fi, statErr := os.Stdin.Stat(); statErr == nil && fi.Mode()&os.ModeCharDevice != 0 {
+			return fmt.Errorf("--file - requires piped stdin, but stdin is a terminal (nothing piped)")
+		}
+	}
+	text, err := resolveMessage(*file, rest, os.Stdin)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(text) == "" {
+		return fmt.Errorf("text is empty")
+	}
+	// The ONLY thing that can fail here is a local filesystem error creating/writing the
+	// spool file — never the voice process's state. On success we print just the spooled
+	// path (the contract: speak is quiet, non-blocking, and exits 0 even when it had to
+	// create the spool dir).
+	path, err := voice.WriteSpeak(text)
+	if err != nil {
+		return err
+	}
+	fmt.Println(path)
 	return nil
 }
 

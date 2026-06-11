@@ -87,12 +87,16 @@
 
 ## 5. `flotilla speak` (file-drop spool) + the `voice` command
 
-- [ ] 5.1 `flotilla speak "<short text>"` — writes a timestamped file to `state/voice/outbound/`
+- [x] 5.1 `flotilla speak "<short text>"` — writes a timestamped file to `state/voice/outbound/`
       and returns IMMEDIATELY (non-blocking; never fails the XO turn on voice's state).
       Bounded (TTL / max-files); **overflow action = DROP-OLDEST, never refuse-new** (a
       refuse-new would fail the XO turn, violating the never-blocks-the-turn ruling). The
       `voice` process watches→consumes→deletes. Test: speak writes + returns with voice
       down; the spool is bounded; overflow drops the oldest, not the new write.
+      (Bound = **max-files (SpoolMaxFiles=64)**; TTL intentionally deferred — the file-count
+      cap already bounds a permanently-down voice process, and an age sweep, if wanted, fits
+      naturally in §5.2's consumer loop. trim never evicts the just-written entry even under
+      clock skew; consume API + path-traversal guard included.)
 - [ ] 5.2 `flotilla voice` command: load roster + `state/voice.env`, join channel, run both
       pipelines; dispatch + usage in `main.go`.
 
