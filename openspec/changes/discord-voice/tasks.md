@@ -76,7 +76,7 @@
 
 ## 5. `flotilla speak` (file-drop spool) + the `voice` command
 
-- [ ] 5.1 `flotilla speak "<short text>"` — writes a timestamped file to `state/voice/outbound/`
+- [x] 5.1 `flotilla speak "<short text>"` — writes a timestamped file to `state/voice/outbound/`
       and returns IMMEDIATELY (non-blocking; never fails the XO turn on voice's state).
       Bounded (TTL / max-files); **overflow action = DROP-OLDEST, never refuse-new** (a
       refuse-new would fail the XO turn, violating the never-blocks-the-turn ruling). The
