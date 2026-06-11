@@ -278,9 +278,16 @@ func cmdWatch(args []string) error {
 			return st == surface.StateWorking
 		}
 
-		prompt := cfg.HeartbeatMessage
-		if prompt == "" {
-			prompt = watch.DefaultHeartbeatPrompt
+		// Legacy heartbeat prompt resolution: a non-empty workspace HEARTBEAT.md →
+		// roster heartbeat_message → DefaultHeartbeatPrompt. The legacy prompt carries no
+		// {{tracker}}/{{settle}} placeholders, so the substitution is a no-op here.
+		legacyBuiltin := cfg.HeartbeatMessage
+		if legacyBuiltin == "" {
+			legacyBuiltin = watch.DefaultHeartbeatPrompt
+		}
+		prompt, err := workspace.ResolvePrompt(xo, legacyBuiltin, "", "")
+		if err != nil {
+			return err
 		}
 		prompt += ackInstr
 
