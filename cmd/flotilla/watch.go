@@ -17,7 +17,21 @@ import (
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/watch"
+	"github.com/jim80net/flotilla/internal/workspace"
 )
+
+// detectorContinuationBuiltin is the default change-detector continuation prompt (the
+// self-continuation tick). workspace.ResolvePrompt substitutes {{tracker}}/{{settle}}
+// with the resolved tracker + settle paths and lets a per-agent HEARTBEAT.md override
+// the wording. Kept as a package const so the no-workspace byte-identity (the prompt the
+// XO receives when no workspace exists) is regression-locked by a test.
+const detectorContinuationBuiltin = "[flotilla change-detector] You just finished a turn. Advance the next clear, " +
+	"ALREADY-AUTHORIZED step if one remains — reading durable state, not memory: (1) the goal+task tracker " +
+	"{{tracker}}; (2) the active openspec change's unchecked tasks; (3) the roadmap/README. A task " +
+	"blocked only from landing (a push gate, a pending review) is NOT idle — advance it locally, then " +
+	"surface the blocker in one line. If nothing AUTHORIZED remains, reply 'idle', do NOT manufacture " +
+	"work, and signal idle by running: touch {{settle}}. (Your context is rotated between steps " +
+	"— rely on durable state, not this conversation.)"
 
 // cmdWatch runs the long-lived watch daemon. This is the CLOCK half: it
 // heartbeats the XO so a turn-based agent keeps advancing clear, authorized work
@@ -149,17 +163,27 @@ func cmdWatch(args []string) error {
 		awaiting := watch.NewAwaitingMarker(*awaitingPath)
 		settled := watch.NewSettledMarker(*settledPath)
 
-		// The continuation prompt carries the narrow-answer discipline (advance the
-		// next AUTHORIZED step or reply idle — never manufacture work) and tells the
-		// XO how to signal idle (touch the settle marker). Context is rotated between
-		// steps, so it instructs reading durable state rather than this conversation.
-		continuationPrompt := "[flotilla change-detector] You just finished a turn. Advance the next clear, " +
-			"ALREADY-AUTHORIZED step if one remains — reading durable state, not memory: (1) the goal+task tracker " +
-			*trackerPath + "; (2) the active openspec change's unchecked tasks; (3) the roadmap/README. A task " +
-			"blocked only from landing (a push gate, a pending review) is NOT idle — advance it locally, then " +
-			"surface the blocker in one line. If nothing AUTHORIZED remains, reply 'idle', do NOT manufacture " +
-			"work, and signal idle by running: touch " + *settledPath + ". (Your context is rotated between steps " +
-			"— rely on durable state, not this conversation.)" + ackInstr
+		// The tracker path is resolved ONCE (workspace state.md → --tracker-file/default)
+		// and used as BOTH the {{tracker}} the continuation prompt names AND the file the
+		// detector hashes (TrackerHash below) — they can never diverge (P1-2: otherwise the
+		// XO updates a file the detector no longer watches and self-continuation silently
+		// dies). With no workspace this is *trackerPath, so behavior is byte-identical.
+		resolvedTracker, err := workspace.ResolveTracker(xo, *trackerPath)
+		if err != nil {
+			return err
+		}
+
+		// The continuation prompt carries the narrow-answer discipline (advance the next
+		// AUTHORIZED step or reply idle — never manufacture work) and tells the XO how to
+		// signal idle (touch the settle marker). Context is rotated between steps, so it
+		// instructs reading durable state rather than this conversation. The per-agent
+		// HEARTBEAT.md may override the wording; with no workspace the built-in below is
+		// used and {{tracker}}/{{settle}} substitute byte-identically to direct interpolation.
+		continuationPrompt, err := workspace.ResolvePrompt(xo, detectorContinuationBuiltin, resolvedTracker, *settledPath)
+		if err != nil {
+			return err
+		}
+		continuationPrompt += ackInstr
 
 		wake := func(kind watch.WakeKind, reasons []string) {
 			var body string
@@ -198,7 +222,7 @@ func cmdWatch(args []string) error {
 				}
 				return drv.Assess(pane)
 			},
-			TrackerHash: trackerHasher(*trackerPath),
+			TrackerHash: trackerHasher(resolvedTracker),
 			AckAge:      ack.Age,
 			Wake:        wake,
 			Rotate: func() error {
