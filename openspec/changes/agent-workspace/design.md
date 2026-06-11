@@ -126,9 +126,16 @@ was **NOT loaded** (`claude --add-dir <dir> -p "codename?"` → `NONE`); a contr
 same file in the cwd DID load it (`-p` does not disable discovery, so the negative is
 real); and a control with `--append-system-prompt` DID load it. So `--add-dir` only
 grants file ACCESS — it does not shape identity. The ratified **fallback is now the
-mechanism**: `--append-system-prompt-file <workspace>/CLAUDE.md` (the `-file` variant
-exists per `--help`) loads the identity at launch, verified, with the file still named
-by the native convention. `workspace init` emits this recipe form.
+mechanism**: `--append-system-prompt-file <workspace>/CLAUDE.md` loads the identity at
+launch, with the file still named by the native convention. `workspace init` emits this
+recipe form.
+
+**Both halves of that claim are empirically verified — no help-text inference (the XO
+caught that `--append-system-prompt-file` was at risk of the same `--add-dir` trap).**
+A control proved `--append-system-prompt <TEXT>` loads the sentinel codename; a second
+sentinel proved the `-file` variant specifically loads the FILE's contents
+(`claude --append-system-prompt-file <file-with-codename> -p "codename?"` → the codename,
+not `NONE`). So `-file` is verified to load, not merely present in `--help`.
 
 **Per-surface caveat (XO: "verify PER surface").** The empirical result above is for
 **Claude Code** only. The Grok/Cursor `AGENTS.md` load mechanism is **UNVERIFIED** and
