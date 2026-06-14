@@ -1,0 +1,27 @@
+[Unit]
+Description=flotilla doctor — gateway-health ESCALATOR (NOT the heartbeat clock)
+Documentation=https://github.com/jim80net/flotilla
+After=network-online.target
+Wants=network-online.target
+# This is a Type=oneshot health check fired by flotilla-doctor.timer. It is the
+# gateway-health ESCALATOR — it detects "flotilla-watch alive but Discord-gateway
+# down" from outside the daemon and escalates (notify + headless claude -p
+# /recover-flotilla). It NEVER restarts flotilla-watch (the safety-critical clock):
+# whether a restart is warranted is the recovery skill's decision after it
+# diagnoses the real cause (DNS first). See openspec change watch-gateway-doctor.
+
+[Service]
+Type=oneshot
+# --- GENERATED from deploy/flotilla-doctor.service.in by deploy/flotilla-doctor-install.sh.
+#     Do NOT hand-edit the installed copy at ~/.config/systemd/user/flotilla-doctor.service
+#     — edit deploy/flotilla-doctor.env and re-run the installer. The host-specific paths
+#     live in one env file, so the unit stops drifting. ---
+WorkingDirectory=@FLOTILLA_WORKDIR@
+ExecStart=@FLOTILLA_DOCTOR_DEST@ --self @FLOTILLA_SELF@ --secrets @FLOTILLA_SECRETS@ --workdir @FLOTILLA_WORKDIR@ --bin @FLOTILLA_BIN@ --claude @FLOTILLA_CLAUDE_BIN@ --skill @FLOTILLA_RECOVER_SKILL@ --state-dir @FLOTILLA_DOCTOR_STATE_DIR@
+# Generous start timeout: a single run may sleep RECHECK_SECONDS (default 15s) on
+# the recheck AND, on escalation, run a headless claude recovery agent bounded to
+# 600s. 700s covers both with margin so systemd does not kill the agent mid-recovery.
+TimeoutStartSec=700
+
+[Install]
+WantedBy=default.target
