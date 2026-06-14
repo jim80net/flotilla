@@ -1,0 +1,17 @@
+[Unit]
+Description=flotilla doctor timer — fire the gateway-health escalator every ~3 min
+Documentation=https://github.com/jim80net/flotilla
+# Cadence (3 min) × the doctor's strike THRESHOLD (default 3) ≈ ~9 min of
+# confirmed gateway-down before any escalation fires. The 2026-06-12 outage went
+# 9 HOURS undetected, so ~9 min of confirmation before waking a recovery agent is
+# very conservative. The doctor's own per-run flock prevents overlap if a run runs
+# long (e.g. while it spawns the recovery agent).
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=3min
+Persistent=true
+Unit=flotilla-doctor.service
+
+[Install]
+WantedBy=timers.target

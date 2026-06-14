@@ -48,3 +48,6 @@ htmlcov/
 # Same re-include for the voice deploy: the .example files are not *.env-matched, but the
 # test fixture ends in .env and CI's install-test needs it committed.
 !/deploy/testdata/flotilla-voice.fixture.env
+# Same re-include for the doctor deploy: the per-host deploy/flotilla-doctor.env is
+# *.env-ignored (desired), but the install-test fixture ends in .env and CI needs it.
+!/deploy/testdata/flotilla-doctor.fixture.env
