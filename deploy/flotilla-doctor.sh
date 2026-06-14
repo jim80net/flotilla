@@ -111,6 +111,11 @@ if (( lock_ok )) && command -v flock >/dev/null 2>&1; then
     log "another flotilla-doctor run holds the lock — exiting"
     exit 0
   fi
+else
+  # flock missing (or the lock fd failed to open) — single-flight is OFF for this
+  # run. Surface it so the operator knows overlap-protection is degraded; the
+  # per-run cooldown still bounds re-spawning the recovery agent.
+  log "WARNING: flock unavailable — single-flight overlap protection is OFF this run"
 fi
 
 # ---- the cheap health check (pure bash, no LLM) -----------------------------
@@ -120,8 +125,12 @@ fi
 #   2  -> indeterminate (ss errored) — do NOT treat as unhealthy/escalate
 gateway_healthy() {
   if ! systemctl --user is-active --quiet "$WATCH_UNIT"; then
-    return 1   # not active -> not a gateway-health problem this doctor escalates
-                # (a crashed/inactive daemon is systemd's Restart job, not ours)
+    # not active -> unhealthy, and this DOES escalate by design. systemd's
+    # Restart=on-failure gives up after StartLimitBurst=5, so a daemon that died
+    # on a fatal local error (malformed roster, broken secrets) stays down with no
+    # further systemd action — exactly the dead-process case recover-flotilla's
+    # Step 1 diagnoses. We deliberately do NOT return indeterminate here.
+    return 1
   fi
 
   local pid
@@ -132,9 +141,15 @@ gateway_healthy() {
   fi
 
   # flotilla only talks to Discord, so ANY ESTABLISHED :443 socket owned by the
-  # watch PID == gateway up. `ss -tnpH` is no-header, numeric, with process info.
+  # watch PID == gateway up. Let `ss` do the established+port filtering itself:
+  #   `state established 'dport = :443'`
+  # This is critical — a bare `ss -tnpH` ALSO lists SYN-SENT sockets (which carry
+  # the pid), so a daemon stuck mid-reconnect (resolver answers but connect never
+  # completes — the exact DNS-flap this watchdog exists for) would read as healthy.
+  # Matching the established state + the destination port exactly also avoids the
+  # IPv6 "...:443" address-vs-port ambiguity (no `:443` substring regex needed).
   local ss_out ss_rc
-  ss_out="$(ss -tnpH 2>/dev/null)"
+  ss_out="$(ss -tnpH state established 'dport = :443' 2>/dev/null)"
   ss_rc=$?
   if [[ "$ss_rc" -ne 0 ]]; then
     # ss itself failed (not "no sockets"). Be conservative: an ss failure alone
@@ -142,20 +157,35 @@ gateway_healthy() {
     return 2
   fi
 
-  # Match a line owned by our PID that has an ESTABLISHED :443 endpoint. ss puts
-  # the process as `users:(("flotilla",pid=1234,fd=7))`. State column is "ESTAB".
-  if printf '%s\n' "$ss_out" \
-       | grep -F "pid=${pid}," \
-       | grep -qE '(:443[[:space:]]|:443$)'; then
+  # ss already filtered to ESTABLISHED + dport :443; we only need to confirm the
+  # owning process is the watch PID. ss puts it as `users:(("flotilla",pid=N,fd=M))`.
+  if printf '%s\n' "$ss_out" | grep -qF "pid=${pid},"; then
     return 0   # healthy
   fi
-  return 1     # socket genuinely absent -> unhealthy
+  return 1     # no established Discord socket -> unhealthy
 }
 
+# Strikes older than this are treated as 0 (the confirmation window restarts
+# fresh). Conservatively > 2x the ~3-min timer cadence: a reboot or a timer gap
+# must NOT let a stale strike file shortcut the multi-tick confirmation window
+# (e.g. a down-episode that left strikes=2, then a reboot, must not escalate on
+# the very next tick). A continuous down-episode re-writes the file each tick, so
+# its mtime stays fresh and strikes accumulate normally.
+STRIKE_STALE_SECONDS="${FLOTILLA_DOCTOR_STRIKE_STALE:-600}"
+
 read_strikes() {
-  local n
+  local n mtime age
   n="$(cat "$STRIKE_FILE" 2>/dev/null || echo 0)"
   [[ "$n" =~ ^[0-9]+$ ]] || n=0
+  if [[ "$n" -gt 0 && -f "$STRIKE_FILE" ]]; then
+    mtime="$(stat -c %Y "$STRIKE_FILE" 2>/dev/null || echo 0)"
+    [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
+    age=$(( $(now_epoch) - mtime ))
+    if [[ "$age" -ge "$STRIKE_STALE_SECONDS" ]]; then
+      log "strike file is stale (${age}s >= ${STRIKE_STALE_SECONDS}s) — restarting the confirmation window at 0"
+      n=0
+    fi
+  fi
   printf '%s' "$n"
 }
 
@@ -238,18 +268,29 @@ main_pid="$(systemctl --user show -p MainPID --value "$WATCH_UNIT" 2>/dev/null |
 [[ "$main_pid" =~ ^[0-9]+$ ]] || main_pid=0
 
 # :443 socket dump for the watch PID (the core evidence — empty == gateway down).
-sock_dump="$(ss -tnpH 2>/dev/null | grep -F "pid=${main_pid}," | grep ':443' || true)"
-[[ -n "$sock_dump" ]] || sock_dump="(no established :443 socket owned by pid=${main_pid})"
+# Same exact established+dport filter as the health check, so the evidence matches
+# the verdict (a SYN-SENT mid-reconnect socket is NOT counted as a live gateway).
+sock_dump="$(ss -tnpH state established 'dport = :443' 2>/dev/null | grep -F "pid=${main_pid}," || true)"
+[[ -n "$sock_dump" ]] || sock_dump="(no ESTABLISHED :443 socket owned by pid=${main_pid})"
 
 # Recent journal tail.
 journal_tail="$(journalctl --user -u flotilla-watch --since "30 min ago" --no-pager 2>/dev/null | tail -25 || true)"
 [[ -n "$journal_tail" ]] || journal_tail="(journal unavailable)"
 
 # Ack-file age — we don't know the ack path here, so report the freshest mtime of
-# any flotilla-xo-alive-style ack file under the state dir, if present.
+# any flotilla-xo-alive-style ack file under the state dir, if present. Use a
+# nullglob-scoped expansion so a no-match leaves an EMPTY array (not the literal
+# glob pattern); save/restore the prior nullglob setting.
 ack_age="(ack file not located under state dir)"
-ack_file="$(ls -1 "$STATE_DIR"/flotilla*xo-alive "$STATE_DIR"/*xo-alive 2>/dev/null | head -1 || true)"
+_had_nullglob=0; shopt -q nullglob && _had_nullglob=1
+shopt -s nullglob
+ack_candidates=( "$STATE_DIR"/flotilla*xo-alive "$STATE_DIR"/*xo-alive )
+(( _had_nullglob )) || shopt -u nullglob
+ack_file=""
+[[ ${#ack_candidates[@]} -gt 0 ]] && ack_file="${ack_candidates[0]}"
 if [[ -n "$ack_file" && -e "$ack_file" ]]; then
+  # stat -c is GNU coreutils; this doctor is Linux-systemd-only by design
+  # (systemctl --user / journalctl / ss), so GNU stat is consistent with the platform.
   ack_mtime="$(stat -c %Y "$ack_file" 2>/dev/null || echo 0)"
   [[ "$ack_mtime" =~ ^[0-9]+$ ]] || ack_mtime=0
   ack_age="$(( nowt - ack_mtime ))s old ($ack_file)"

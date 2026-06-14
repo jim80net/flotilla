@@ -152,17 +152,35 @@ if (( unit_changed == 0 && script_changed == 0 && timer_changed == 0 )); then
   exit 0
 fi
 
-if [[ -f "$DEST" ]]; then
-  if (( unit_changed )); then
+# Show a diff for EVERY installed artifact that changes (unit, escalator script,
+# timer), not just the unit — so --dry-run is a complete preview of the install.
+if (( unit_changed )); then
+  if [[ -f "$DEST" ]]; then
     echo "Changes to $DEST:"
     diff -u "$DEST" "$new_tmp" || true
     echo ""
+  else
+    echo "Installing new unit: $DEST"
   fi
-else
-  echo "Installing new unit: $DEST"
 fi
-(( script_changed )) && echo "Escalator script will be (re)installed: $FLOTILLA_DOCTOR_DEST"
-(( timer_changed ))  && echo "Timer will be (re)installed: $TIMER_DEST"
+if (( script_changed )); then
+  if [[ -f "$FLOTILLA_DOCTOR_DEST" ]]; then
+    echo "Changes to $FLOTILLA_DOCTOR_DEST:"
+    diff -u "$FLOTILLA_DOCTOR_DEST" "$DOCTOR_SH_SRC" || true
+    echo ""
+  else
+    echo "Installing new escalator script: $FLOTILLA_DOCTOR_DEST"
+  fi
+fi
+if (( timer_changed )); then
+  if [[ -f "$TIMER_DEST" ]]; then
+    echo "Changes to $TIMER_DEST:"
+    diff -u "$TIMER_DEST" "$TIMER_SRC" || true
+    echo ""
+  else
+    echo "Installing new timer: $TIMER_DEST"
+  fi
+fi
 
 if [[ "$MODE" == dry-run ]]; then
   echo "(--dry-run: nothing written, nothing reloaded)"
