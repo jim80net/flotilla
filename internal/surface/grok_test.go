@@ -35,19 +35,20 @@ func TestParseGrokState(t *testing.T) {
 			want:     StateAwaitingApproval,
 		},
 		{
-			name:     "unexpected error → Errored",
-			captured: "some partial output\nAn unexpected error occurred.",
-			want:     StateErrored,
+			// systems-review: grok renders transient errors INLINE in the conversation
+			// (streamContent), not in the bottom chrome — and they linger as history. So
+			// the driver does NOT emit Errored; a recovered desk with an old error above
+			// an idle composer reads Idle (the turn already fired its Working→Idle wake).
+			name:     "transient error in conversation scrollback + idle composer below → Idle (no Errored)",
+			captured: "An unexpected error occurred.\n" + manyLines(14) + "Message Grok...\n@ files   shift+enter new line   tab modes",
+			want:     StateIdle,
 		},
 		{
-			name:     "auth-failed STATUS_MESSAGE → Errored",
-			captured: "Authentication failed. Your API key may be invalid or expired.",
-			want:     StateErrored,
-		},
-		{
-			name:     "rate-limit STATUS_MESSAGE → Errored",
-			captured: "Rate limit exceeded. Please wait a moment and try again.",
-			want:     StateErrored,
+			// An AUTH error pops the api-key modal — caught as AwaitingApproval, the right
+			// classification for a desk blocked needing the operator.
+			name:     "auth error pops the api-key modal → AwaitingApproval (not a silent error)",
+			captured: "Authentication failed.\nPaste your xAI API key to unlock chat. You can hide this prompt with esc.",
+			want:     StateAwaitingApproval,
 		},
 		{
 			name:     "pre-stream 'Planning next moves' → Working",
@@ -109,7 +110,6 @@ func TestGrokAssess(t *testing.T) {
 		{"capture error → unknown (NOT a false finished-a-turn)", "node", nil, false, "", boom, StateUnknown},
 		{"classifier routes: approval", "node", nil, false, "Payment required\nApprove payment", nil, StateAwaitingApproval},
 		{"classifier routes: working", "node", nil, false, "Planning next moves", nil, StateWorking},
-		{"classifier routes: errored", "node", nil, false, "An unexpected error occurred.", nil, StateErrored},
 		{"classifier routes: idle", "node", nil, false, "Message Grok...", nil, StateIdle},
 	}
 	for _, tc := range cases {

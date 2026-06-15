@@ -90,11 +90,17 @@ above), claude-style precedence:
    `Confirm` tab, `ui/plan.tsx:142`, is opt-in and its only literal `Confirm` is too
    generic to match safely, so it is NOT keyed on — a documented limitation; a future
    refinement could detect the plan panel structurally.)
-2. **`Errored`** — best-effort, a known error literal: `An unexpected error occurred.`
-   (`ui/app.tsx:2127`), `Authentication failed. Your API key may be invalid or
-   expired.` (`agent/agent.ts:2795`), `Rate limit exceeded. Please wait a moment and
-   try again.` (`agent/agent.ts:2800`). (Grok appends errors as plain text — no fixed
-   prefix — so this keys on the specific STATUS_MESSAGES strings.)
+2. **(no `Errored`)** — grok-dev does NOT render a persistent error state in the
+   bottom chrome. Transient errors (`An unexpected error occurred.`, the
+   STATUS_MESSAGES `Authentication failed…`/`Rate limit exceeded…`) are APPENDED to
+   `streamContent` (`ui/app.tsx:2117-2118,2127-2128`) and shown inline in the
+   conversation scrollbox (`ui/app.tsx:3475-3477`) — above the bottom chrome this
+   driver scans, and they linger as history after the turn ends (a wide scan would
+   false-read `Errored` on a recovered desk). So the driver does NOT emit `Errored`:
+   an AUTH error pops the api-key modal → `AwaitingApproval` (covered above); any
+   other transient error ends the turn → the normal `Working`→`Idle` wake brings the
+   XO to check. (This was caught in systems-review — the initial error markers were
+   unreachable by the bottom-chrome scan.)
 3. **`Working`** — a persistent working marker: `Planning next moves`
    (`ui/app.tsx:3482`), `enter queue` or `esc interrupt` (the processing status bar,
    `ui/app.tsx:3960-3965`). The animated spinner `⬒⬔⬓⬕` (`ui/app.tsx:100`, 120ms

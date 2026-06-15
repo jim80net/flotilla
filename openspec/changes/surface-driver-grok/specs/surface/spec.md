@@ -15,10 +15,14 @@ context-rotate strategy as `SlashCommand` with the reset command **`/new`** (NOT
 
 Because grok-dev AUTO-EXECUTES tools (shell commands, file edits) without a
 per-action approval prompt — only its x402 micropayment tool has an approval gate —
-the `grok` driver SHALL emit a REDUCED assessed-state set: `Shell`, `Working`,
-`Idle`, and `Errored`, with `AwaitingApproval` emitted ONLY for the genuine blocking
-gates that exist (the `Payment required` panel and the API-key-needed prompt), NOT
-for ordinary edits or shell commands. The driver's documentation and this spec SHALL
+the `grok` driver SHALL emit a REDUCED assessed-state set: `Shell`, `Working`, and
+`Idle`, with `AwaitingApproval` emitted ONLY for the genuine blocking gates that exist
+(the `Payment required` panel and the API-key-needed/auth-error modal), NOT for
+ordinary edits or shell commands. The driver SHALL NOT emit `Errored`: grok-dev
+renders transient errors inline in the conversation history (not a persistent
+bottom-chrome state), so they are not separately detectable — an auth error is covered
+by `AwaitingApproval` (it pops the api-key modal) and any other transient error is
+covered by the normal `Working`→`Idle` "finished a turn" wake. The driver's documentation and this spec SHALL
 state prominently that a grok desk runs shell commands and edits files unprompted —
 an operational hazard for a fleet operator. The grok driver's render markers SHALL be
 documented as source-verified (grok-dev `fb97af8`) and NOT live-captured (grok-dev is

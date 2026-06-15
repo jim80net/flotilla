@@ -31,11 +31,16 @@ Target: the open-source **grok-dev** CLI (`superagent-ai/grok-cli`, package
 ## Decision: a REDUCED state set (operator-approved scope)
 
 Because Grok has no per-edit/per-shell approval chokepoint, the `grok` driver emits
-a reduced set — **idle / working / errored / shell** — with `AwaitingApproval` only
-for the genuine, cleanly-detectable blocking gates that DO exist (the x402
-`Payment required` panel and the "API key needed" prompt). The Plan-mode `Confirm`
-gate is opt-in (non-default) and its only literal (`Confirm`) is too generic to
-substring-match safely, so the driver does not key on it (documented limitation).
+a reduced set — **idle / working / shell** — with `AwaitingApproval` only for the
+genuine, cleanly-detectable blocking gates that DO exist (the x402 `Payment required`
+panel and the "API key needed"/auth-error modal). It does **not** emit `Errored`:
+grok-dev renders transient errors inline in the conversation history (not a persistent
+bottom-chrome state), so they are not separately detectable — auth errors surface as
+`AwaitingApproval` (the api-key modal), other transient errors via the `Working`→`Idle`
+"finished a turn" wake (caught in systems-review — the original error markers were
+unreachable by the bottom-chrome scan). The Plan-mode `Confirm` gate is opt-in
+(non-default) and its only literal (`Confirm`) is too generic to substring-match
+safely, so the driver does not key on it (documented limitation).
 Polarity is claude-style (Working-positive, Idle-default): Grok's working status
 bar (`enter queue` / `esc interrupt`) persists the whole turn.
 

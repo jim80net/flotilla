@@ -88,22 +88,26 @@ const grokTail = 12
 
 // grokApprovalMarkers are the GENUINE blocking gates (the only AwaitingApproval cases
 // — Grok auto-executes everything else). Specific literals from grok-dev ui/app.tsx:
-// the x402 micropayment panel (:5635) and the auth-needed prompt (:4154). The
-// Plan-mode "Confirm" tab (ui/plan.tsx:142) is opt-in and its literal is too generic
-// to match safely, so it is intentionally NOT keyed on.
+// the x402 micropayment panel (:5635) and the auth-needed modal (:4154). The auth
+// modal ALSO covers auth errors: an auth failure pops this full-screen modal
+// (ui/app.tsx:1775-1777), so a desk blocked on a bad/expired key surfaces here as
+// AwaitingApproval. The Plan-mode "Confirm" tab (ui/plan.tsx:142) is opt-in and its
+// literal is too generic to match safely, so it is intentionally NOT keyed on.
 var grokApprovalMarkers = []string{
 	"Payment required",       // x402 micropayment panel (ui/app.tsx:5635)
-	"Paste your xAI API key", // auth-needed prompt — desk blocked, needs operator (ui/app.tsx:4154)
+	"Paste your xAI API key", // auth-needed/auth-error modal — desk blocked, needs operator (ui/app.tsx:4154)
 }
 
-// grokErrorMarkers are best-effort error literals (grok-dev appends errors as plain
-// text with no fixed prefix): the catch-all (ui/app.tsx:2127) and the STATUS_MESSAGES
-// strings (agent/agent.ts:2795,2800).
-var grokErrorMarkers = []string{
-	"An unexpected error occurred.",
-	"Authentication failed. Your API key may be invalid or expired.",
-	"Rate limit exceeded. Please wait a moment and try again.",
-}
+// NOTE — no Errored state. grok-dev does NOT render a persistent error state in the
+// bottom chrome: transient errors (rate-limit, "An unexpected error occurred.", the
+// STATUS_MESSAGES) are APPENDED to streamContent (ui/app.tsx:2117-2118,2127-2128) and
+// shown inline in the conversation scrollbox (ui/app.tsx:3475-3477) — above the bottom
+// chrome this driver scans, and they linger as history after the turn ends (so a wide
+// scan would false-read Errored on a recovered desk). So this driver does NOT emit
+// Errored. The two error paths are still covered: an AUTH error pops the api-key modal
+// → AwaitingApproval (above); any other transient error ends the turn → a normal
+// Working→Idle "finished a turn" wake brings the XO to check the desk. This was caught
+// in systems-review (the original error markers were unreachable by the bottom scan).
 
 // grokWorkingMarkers are the PERSISTENT working anchors (rendered the whole turn while
 // isProcessing): the pre-stream "Planning next moves" (ui/app.tsx:3482) and the
@@ -118,17 +122,15 @@ var grokWorkingMarkers = []string{
 
 // parseGrokState classifies a captured grok-dev pane into the REDUCED state set,
 // claude-style (Working-positive, Idle-default). Precedence: AwaitingApproval (a
-// genuine blocking gate) → Errored → Working → Idle (default). Ordinary edits/shell
-// never reach AwaitingApproval — Grok auto-executes them — so a running tool with no
-// blocking-gate marker classifies as Working (or Idle when done).
+// genuine blocking gate) → Working → Idle (default). There is no Errored branch (see
+// the note above grokApprovalMarkers). Ordinary edits/shell never reach
+// AwaitingApproval — Grok auto-executes them — so a running tool with no blocking-gate
+// marker classifies as Working (or Idle when done).
 func parseGrokState(captured string) State {
 	tail := strings.Join(lastNNonEmptyLines(captured, grokTail), "\n")
 
 	if containsAny(tail, grokApprovalMarkers) {
 		return StateAwaitingApproval
-	}
-	if containsAny(tail, grokErrorMarkers) {
-		return StateErrored
 	}
 	if containsAny(tail, grokWorkingMarkers) {
 		return StateWorking
