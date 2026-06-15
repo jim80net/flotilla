@@ -8,6 +8,7 @@
     { "name": "macro-desk-dev" },
     { "name": "v12-dev" },
     { "name": "tactical-head" },
-    { "name": "training", "tmux_title": "training" }
+    { "name": "training", "tmux_title": "training" },
+    { "name": "pair-dev", "surface": "aider" }
   ]
 }

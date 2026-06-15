@@ -56,25 +56,27 @@ func bufferName() string {
 	return fmt.Sprintf("flotilla-send-%d", os.Getpid())
 }
 
-// clearKeysArgs returns the `tmux send-keys` argv that types a slash command into
+// slashKeysArgs returns the `tmux send-keys` argv that types a slash command into
 // a TUI pane as LITERAL keystrokes (`-l`), so it reaches the composer as literal
 // text rather than being parsed as tmux key names. This is the empirically-
 // verified injection method (claude 2.1.161) — deliberately NOT the bracketed
 // paste `Send` uses, which is for message bodies and is unverified for slash
-// commands. Split out as a pure function so the argv is testable without tmux.
-func clearKeysArgs(target, cmd string) []string {
+// commands. It is surface-agnostic: the command (`/clear`, `/new`, `/new-chat`, …)
+// is the caller's. Split out as a pure function so the argv is testable without tmux.
+func slashKeysArgs(target, cmd string) []string {
 	return []string{"send-keys", "-t", target, "-l", "--", cmd}
 }
 
-// ClearContext injects a context-reset slash command (Claude Code's `/clear`)
-// into the target pane as literal keystrokes, then submits with Enter — resetting
-// that session's context window while leaving process/session/pane and any
-// Remote-Control binding intact (verified on claude 2.1.161). It does NOT verify
-// the result. Only call when the pane is idle: a slash injected mid-turn is
-// undefined. (Surface drivers whose rotate strategy is RestartProcess must NEVER
-// call this — a slash would land as literal composer text; see internal/surface.)
-func ClearContext(target string) error {
-	// /clear writes the same composer as Send, so serialize it against other writers
+// InjectSlash injects a context-reset slash command into the target pane as
+// literal keystrokes, then submits with Enter — resetting that session's context
+// window while leaving process/session/pane and any Remote-Control binding intact.
+// The command is surface-specific (the caller's): claude-code `/clear`, aider
+// `/clear`, grok `/new`, cursor `/new-chat`, … It does NOT verify the result. Only
+// call when the pane is idle: a slash injected mid-turn is undefined. (Surface
+// drivers whose rotate strategy is RestartProcess must NEVER call this — the slash
+// would land as literal composer text; see internal/surface.)
+func InjectSlash(target, cmd string) error {
+	// A slash writes the same composer as Send, so serialize it against other writers
 	// to this pane (same per-pane lock; bounded acquire → drop rather than block).
 	lock, err := acquirePaneLock(target)
 	if err != nil {
@@ -84,8 +86,8 @@ func ClearContext(target string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
-	if err := exec.CommandContext(ctx, "tmux", clearKeysArgs(target, "/clear")...).Run(); err != nil {
-		return fmt.Errorf("tmux send-keys /clear: %w", err)
+	if err := exec.CommandContext(ctx, "tmux", slashKeysArgs(target, cmd)...).Run(); err != nil {
+		return fmt.Errorf("tmux send-keys %s: %w", cmd, err)
 	}
 	select {
 	case <-time.After(clearComposeDelay):
@@ -97,6 +99,12 @@ func ClearContext(target string) error {
 	}
 	return nil
 }
+
+// ClearContext injects Claude Code's `/clear` (verified on claude 2.1.161) — the
+// reference claude-code reset. It is a thin wrapper over InjectSlash so the
+// claude-code driver's behavior is byte-identical to before InjectSlash was
+// generalized out of it.
+func ClearContext(target string) error { return InjectSlash(target, "/clear") }
 
 // ResolvePane returns the tmux target (session:window.pane) of the pane for the
 // agent resolution key `want`. It resolves by a stable `@flotilla_agent` marker

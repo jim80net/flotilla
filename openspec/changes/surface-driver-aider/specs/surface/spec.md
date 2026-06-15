@@ -45,8 +45,12 @@ streaming, or auto-retry). A pane capture error SHALL return `Unknown`
 (non-material), never a false `Idle`.
 
 #### Scenario: An open approval prompt is AwaitingApproval
-- **WHEN** the captured pane's tail shows aider's confirmation prompt (the `(Y)es/(N)o` token, e.g. `Run shell command? … (Y)es/(N)o`)
+- **WHEN** the captured pane's last non-empty line shows aider's confirmation prompt (the `(Y)es/(N)o` token, e.g. `Run shell command? … (Y)es/(N)o [Yes]:`)
 - **THEN** `Assess` returns `AwaitingApproval`
+
+#### Scenario: A wrapped approval prompt is still AwaitingApproval
+- **WHEN** the confirmation question is long enough to wrap so the `(Y)es/(N)o` token sits a line above the cursor and the last non-empty line is the cursor suffix (`[Yes]:` or `[No]:`)
+- **THEN** `Assess` returns `AwaitingApproval` (the desk blocked on a wrapped prompt still wakes the XO; it is not misread as Working)
 
 #### Scenario: A returned prompt is positively Idle
 - **WHEN** the tail's last non-empty line is a recognized aider prompt (`> ` / `ask> ` / `architect> ` / `multi> `)
