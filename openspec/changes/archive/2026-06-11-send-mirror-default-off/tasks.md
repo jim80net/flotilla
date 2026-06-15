@@ -30,5 +30,5 @@
 
 ## 4. Review + PR
 
-- [ ] 4.1 OCR on the implementation diff; fold findings.
-- [ ] 4.2 PR; CI green; merge-ready → XO reviews+merges.
+- [x] 4.1 OCR on the implementation diff; fold findings. (Folded in `0838a89` — clarified the mirror precedence comment: explicit flag > roster setting > default off.)
+- [x] 4.2 PR; CI green; merge-ready → XO reviews+merges. (PR #31 MERGED 2026-06-11, CI green.)

@@ -183,27 +183,35 @@ func TestTitleMatches(t *testing.T) {
 	}
 }
 
-func TestClearKeysArgsIsLiteralSlash(t *testing.T) {
+func TestSlashKeysArgsIsLiteralSlash(t *testing.T) {
 	// A slash command must be injected as LITERAL keystrokes (-l), the verified
 	// method — NOT a bracketed paste (unverified for slash-command recognition).
-	got := clearKeysArgs("0:0.0", "/clear")
-	want := []string{"send-keys", "-t", "0:0.0", "-l", "--", "/clear"}
-	if len(got) != len(want) {
-		t.Fatalf("clearKeysArgs = %v, want %v", got, want)
+	// Surface-agnostic: the same argv shape holds for any driver's reset command.
+	cases := []struct {
+		target, cmd string
+		want        []string
+	}{
+		{"0:0.0", "/clear", []string{"send-keys", "-t", "0:0.0", "-l", "--", "/clear"}},       // claude-code / aider reset
+		{"1:2.3", "/new", []string{"send-keys", "-t", "1:2.3", "-l", "--", "/new"}},           // grok reset
+		{"a:0.0", "/new-chat", []string{"send-keys", "-t", "a:0.0", "-l", "--", "/new-chat"}}, // cursor reset
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("clearKeysArgs = %v, want %v (differ at %d)", got, want, i)
+	for _, c := range cases {
+		got := slashKeysArgs(c.target, c.cmd)
+		if len(got) != len(c.want) {
+			t.Fatalf("slashKeysArgs(%q,%q) = %v, want %v", c.target, c.cmd, got, c.want)
 		}
-	}
-	var hasLiteral bool
-	for _, a := range got {
-		if a == "-l" {
-			hasLiteral = true
+		var hasLiteral bool
+		for i := range c.want {
+			if got[i] != c.want[i] {
+				t.Fatalf("slashKeysArgs(%q,%q) = %v, want %v (differ at %d)", c.target, c.cmd, got, c.want, i)
+			}
+			if got[i] == "-l" {
+				hasLiteral = true
+			}
 		}
-	}
-	if !hasLiteral {
-		t.Error("clearKeysArgs missing -l: the slash would be parsed as key names, not typed literally")
+		if !hasLiteral {
+			t.Errorf("slashKeysArgs(%q,%q) missing -l: the slash would be parsed as key names, not typed literally", c.target, c.cmd)
+		}
 	}
 }
 

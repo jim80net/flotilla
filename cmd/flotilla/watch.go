@@ -63,10 +63,8 @@ func cmdWatch(args []string) error {
 	}
 	// Validate every agent's surface driver up front — an unknown surface is a
 	// clear startup error, never a silent mis-drive at the first tick/delivery.
-	for _, a := range cfg.Agents {
-		if _, ok := surface.Get(a.Surface); !ok {
-			return fmt.Errorf("agent %q: unknown surface %q (known: see internal/surface registry)", a.Name, a.Surface)
-		}
+	if err := validateAgentSurfaces(cfg); err != nil {
+		return err
 	}
 	xo := cfg.XOAgent
 	if xo == "" {
@@ -401,6 +399,20 @@ func agentTitle(cfg *roster.Config, name string) string {
 		return a.Title()
 	}
 	return name
+}
+
+// validateAgentSurfaces checks that every agent's configured surface resolves to
+// a registered driver, so a misconfigured roster refuses to start rather than
+// mis-driving a pane at the first tick/delivery. An empty surface resolves to the
+// default (claude-code); "aider" resolves to the aider driver; an unregistered
+// name (e.g. "nope") is a clear startup error.
+func validateAgentSurfaces(cfg *roster.Config) error {
+	for _, a := range cfg.Agents {
+		if _, ok := surface.Get(a.Surface); !ok {
+			return fmt.Errorf("agent %q: unknown surface %q (known: see internal/surface registry)", a.Name, a.Surface)
+		}
+	}
+	return nil
 }
 
 // agentSurface returns the surface name configured for an agent (empty ⇒ the
