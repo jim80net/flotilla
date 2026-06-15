@@ -314,3 +314,60 @@ func Send(target, text string) error {
 	}
 	return nil
 }
+
+// sendCtrlJArgs builds the ordered `tmux send-keys` argv sequence that types `text`
+// into a pane using Ctrl+J (`C-j`) as the in-composer NEWLINE (not bracketed paste),
+// then submits with a final `Enter`. Per line: `send-keys -l -- <line>` (literal text,
+// so a line beginning with '-' or containing key-like tokens is typed verbatim);
+// between lines: `send-keys -- C-j` (the newline keystroke). Split out as a pure
+// function so the sequence is testable without a tmux server. The LAST element is
+// always the submitting `Enter`.
+func sendCtrlJArgs(target, text string) [][]string {
+	lines := strings.Split(text, "\n")
+	seq := make([][]string, 0, 2*len(lines)+1)
+	for i, line := range lines {
+		if i > 0 {
+			seq = append(seq, []string{"send-keys", "-t", target, "--", "C-j"})
+		}
+		seq = append(seq, []string{"send-keys", "-t", target, "-l", "--", line})
+	}
+	seq = append(seq, []string{"send-keys", "-t", target, "--", "Enter"})
+	return seq
+}
+
+// SendCtrlJ delivers text to the target pane as a SINGLE submission using Ctrl+J for
+// in-composer newlines instead of a bracketed paste, then a final Enter. This is the
+// per-driver alternate to Send for a harness that does NOT enable bracketed-paste mode
+// (where Send's literal newlines would instead submit each line early), or whose tmux
+// newline is Ctrl+J. Like Send it serializes against other writers (the per-pane lock)
+// and is bounded by commandTimeout, with a submitSettleDelay before the submitting
+// Enter. A driver selects this by wiring its `send` field to SendCtrlJ.
+func SendCtrlJ(target, text string) error {
+	lock, err := acquirePaneLock(target)
+	if err != nil {
+		return err
+	}
+	defer lock.Release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+
+	seq := sendCtrlJArgs(target, text)
+	// Type the lines + interleaved C-j newlines (everything except the final Enter).
+	for _, args := range seq[:len(seq)-1] {
+		if err := exec.CommandContext(ctx, "tmux", args...).Run(); err != nil {
+			return fmt.Errorf("tmux send-keys (ctrl-j newline): %w", err)
+		}
+	}
+	// Settle before submitting, matching Send's submitSettleDelay rationale (the
+	// composer must register the typed text before the Enter, or the Enter races it).
+	select {
+	case <-time.After(submitSettleDelay):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if err := exec.CommandContext(ctx, "tmux", seq[len(seq)-1]...).Run(); err != nil {
+		return fmt.Errorf("tmux send-keys enter: %w", err)
+	}
+	return nil
+}

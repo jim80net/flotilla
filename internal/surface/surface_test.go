@@ -21,6 +21,39 @@ func TestRegistryDefaultAndUnknown(t *testing.T) {
 	}
 }
 
+func TestMixedHarnessFleetRoutesPerDriver(t *testing.T) {
+	// The inter-harness guarantee (pillar B): a roster mixing harnesses resolves EACH
+	// agent's surface to ITS OWN driver, so send/inject/Assess route per-driver across a
+	// mixed fleet. (send/watch resolve via surface.Get(agent.Surface) — main.go:235,
+	// watch.go:122,216 — proven live this session with an aider+opencode fleet + opencode
+	// XO; this locks the registry side of that guarantee.) cursor joins when it ships.
+	want := map[string]string{
+		"":            "claude-code", // empty surface → default
+		"claude-code": "claude-code",
+		"aider":       "aider",
+		"opencode":    "opencode",
+		"grok":        "grok",
+	}
+	seen := map[string]bool{}
+	for surface, wantName := range want {
+		d, ok := Get(surface)
+		if !ok {
+			t.Errorf("Get(%q) not ok — a mixed roster would fail to drive this desk", surface)
+			continue
+		}
+		if d.Name() != wantName {
+			t.Errorf("Get(%q).Name() = %q, want %q (mis-routed driver)", surface, d.Name(), wantName)
+		}
+		seen[d.Name()] = true
+	}
+	// Distinct harnesses resolve to distinct drivers (no collapse to a single driver).
+	for _, name := range []string{"claude-code", "aider", "opencode", "grok"} {
+		if !seen[name] {
+			t.Errorf("driver %q was never resolved — the mixed fleet is missing a harness", name)
+		}
+	}
+}
+
 // recordingDriver is a stub used to prove the rotate guard never injects into a
 // RestartProcess surface.
 type recordingDriver struct {
