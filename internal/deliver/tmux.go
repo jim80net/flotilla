@@ -349,24 +349,30 @@ func SendCtrlJ(target, text string) error {
 	}
 	defer lock.Release()
 
-	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
-	defer cancel()
+	// Each tmux invocation gets its OWN commandTimeout. The 2N+1-command sequence
+	// (vs Send's fixed 3) would deplete a single shared budget for a very long body;
+	// commandTimeout exists to bound EACH op against a wedged tmux server, not to cap
+	// the whole sequence, so a per-command timeout is the correct semantic here. (The
+	// total wall-time scales with the message size, which flotilla controls — turn/wake
+	// prompts are small; a concurrent writer's lock-acquire is bounded and drops rather
+	// than blocking the clock.)
+	run := func(args []string) error {
+		ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+		defer cancel()
+		return exec.CommandContext(ctx, "tmux", args...).Run()
+	}
 
 	seq := sendCtrlJArgs(target, text)
 	// Type the lines + interleaved C-j newlines (everything except the final Enter).
 	for _, args := range seq[:len(seq)-1] {
-		if err := exec.CommandContext(ctx, "tmux", args...).Run(); err != nil {
+		if err := run(args); err != nil {
 			return fmt.Errorf("tmux send-keys (ctrl-j newline): %w", err)
 		}
 	}
 	// Settle before submitting, matching Send's submitSettleDelay rationale (the
 	// composer must register the typed text before the Enter, or the Enter races it).
-	select {
-	case <-time.After(submitSettleDelay):
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	if err := exec.CommandContext(ctx, "tmux", seq[len(seq)-1]...).Run(); err != nil {
+	time.Sleep(submitSettleDelay)
+	if err := run(seq[len(seq)-1]); err != nil {
 		return fmt.Errorf("tmux send-keys enter: %w", err)
 	}
 	return nil
