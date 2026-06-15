@@ -1,0 +1,194 @@
+package surface
+
+import (
+	"errors"
+	"testing"
+)
+
+func TestOpenCodeRegistered(t *testing.T) {
+	d, ok := Get("opencode")
+	if !ok || d.Name() != "opencode" {
+		t.Errorf(`Get("opencode") = (%v, %v), want the opencode driver`, d, ok)
+	}
+}
+
+func TestParseOpenCodeState(t *testing.T) {
+	// EXHAUSTIVE over the claude-style ladder (Working-positive, Idle-default).
+	// Fixtures use OpenCode's real rendered markers (source-verified, sst/opencode):
+	// permission.tsx Permission required/Allow once; prompt/index.tsx esc interrupt /
+	// [⋯] / [retrying; error-component.tsx A fatal error occurred!. The animated
+	// spinner glyph is intentionally NOT a marker.
+	//
+	// LIVE-CAPTURE (surface-driver-opencode §4, opencode v1.3.15 — the RELEASED build,
+	// not the survey's HEAD — against local ollama, $0, via `tmux capture-pane -p`):
+	//   - Idle    : composer "Ask anything..." + footer "tab agents  ctrl+p commands"
+	//               + status "…:master  1.3.15", NO working marker → Idle (default)   [VALIDATED]
+	//   - Working : "⬝⬝⬝■■■■■  esc interrupt" — the `esc interrupt` text PERSISTS the
+	//               whole non-idle duration, then vanishes when the turn finishes; this
+	//               empirically confirms claude-style polarity (no mid-stream gap)       [VALIDATED]
+	//   - running opencode's pane_current_command == "opencode" → IsShell=false          [VALIDATED]
+	//   - the spinner (⬝/■) is an animated cycling glyph → correctly NOT a marker        [VALIDATED]
+	// AwaitingApproval (Permission required / Allow once / Allow always, permission.tsx:
+	// 391,404,407) and Errored (A fatal error occurred!, error-component.tsx:65) are
+	// SOURCE-VERIFIED (re-confirmed this session) but were NOT live-elicited: the local
+	// 1.5b/7b ollama models did not reliably invoke tools through the framework (they
+	// printed tool-call JSON as text), and the capture client's CPR-dependency ended the
+	// session before a tool-calling turn reached the permission gate. Follow-up tracked in #54:
+	// live-elicit the permission dialog with a reliable tool-calling model +
+	// `permission:{edit:"ask"}` to lock these two markers (low risk — they are specific
+	// source-cited UI literals; all other states are live-validated).
+	cases := []struct {
+		name     string
+		captured string
+		want     State
+	}{
+		{
+			name:     "permission dialog header → AwaitingApproval",
+			captured: "Edit calc.py\n  - return a+b\n  + return a + b\nPermission required\nAllow once  Allow always  Reject",
+			want:     StateAwaitingApproval,
+		},
+		{
+			name:     "bash permission ($ command) → AwaitingApproval",
+			captured: "Shell command\n$ go test ./...\nAllow once  Allow always  Reject\n△ 1 Permission",
+			want:     StateAwaitingApproval,
+		},
+		{
+			name:     "approval co-rendered with a working hint → AwaitingApproval (precedence)",
+			captured: "Permission required\nAllow once  Reject\nesc interrupt",
+			want:     StateAwaitingApproval,
+		},
+		{
+			name:     "esc interrupt hint → Working",
+			captured: "Thinking\n⠹\nesc interrupt",
+			want:     StateWorking,
+		},
+		{
+			name:     "post-esc 'again to interrupt' → Working",
+			captured: "Thinking\nesc again to interrupt",
+			want:     StateWorking,
+		},
+		{
+			name:     "animations-disabled [⋯] indicator → Working",
+			captured: "Thinking\n[⋯]\nesc interrupt",
+			want:     StateWorking,
+		},
+		{
+			name:     "retry backoff line → Working (self-healing)",
+			captured: "model error [retrying in 2s attempt #1]\nesc interrupt",
+			want:     StateWorking,
+		},
+		{
+			name:     "fatal error boundary → Errored",
+			captured: "A fatal error occurred!\nPlease report an issue.\nReset TUI  Exit",
+			want:     StateErrored,
+		},
+		{
+			name:     "idle composer (no marker) → Idle (the claude-style default)",
+			captured: "Ask anything...\n/status  /help",
+			want:     StateIdle,
+		},
+		{
+			name:     "empty capture string → Idle (the classifier default; capture ERRORS are handled in Assess → Unknown)",
+			captured: "",
+			want:     StateIdle,
+		},
+		{
+			// Torn/partial working frame (systems-review LOW-1): a mid-repaint capture
+			// missing the esc-interrupt line reads Idle. Documented residual = the generic
+			// scrape-torn-frame risk shared with claude-code (same no-Working→Idle debounce).
+			// The esc-interrupt line is a single text node, so capture-pane emits it
+			// atomically in practice (confirmed by live capture); a fully torn frame is rare.
+			name:     "torn working frame (no marker captured) → Idle (documented residual)",
+			captured: "Thinking",
+			want:     StateIdle,
+		},
+		{
+			// Tail-scoping: a stale approval far above the visible bottom (pushed past the
+			// non-empty tail window) does not trigger AwaitingApproval; the live bottom is idle.
+			name:     "stale approval pushed above the tail window → Idle",
+			captured: "Permission required\nAllow once\n" + manyLines(22) + "Ask anything...",
+			want:     StateIdle,
+		},
+		{
+			// MEDIUM-1 regression: a model response that QUOTES a marker ("Allow once")
+			// in the conversation area (above the bottom chrome) must NOT false-trigger
+			// AwaitingApproval — the scan is anchored to the last non-empty lines (the
+			// footer/composer chrome), not the whole frame.
+			name:     "model output quoting 'Allow once' high up + idle composer below → Idle",
+			captured: "The permission dialog has an \"Allow once\" button you can click.\n" + manyLines(14) + "Ask anything...\ntab agents  ctrl+p commands",
+			want:     StateIdle,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parseOpenCodeState(tc.captured); got != tc.want {
+				t.Errorf("parseOpenCodeState = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// manyLines returns n newline-separated filler lines (no markers), to push earlier
+// content out of the tail window in tail-scoping tests.
+func manyLines(n int) string {
+	s := ""
+	for i := 0; i < n; i++ {
+		s += "filler conversation line\n"
+	}
+	return s
+}
+
+func TestOpenCodeAssess(t *testing.T) {
+	boom := errors.New("tmux boom")
+	cases := []struct {
+		name       string
+		cmd        string
+		cmdErr     error
+		isShell    bool
+		captured   string
+		captureErr error
+		want       State
+	}{
+		{"panecommand error → unknown", "", boom, false, "", nil, StateUnknown},
+		{"isShell → shell (opencode process gone)", "bash", nil, true, "", nil, StateShell},
+		{"capture error → unknown (NOT a false finished-a-turn; like aider)", "bun", nil, false, "", boom, StateUnknown},
+		{"classifier routes: approval", "bun", nil, false, "Permission required\nAllow once", nil, StateAwaitingApproval},
+		{"classifier routes: working", "bun", nil, false, "Thinking\nesc interrupt", nil, StateWorking},
+		{"classifier routes: errored", "bun", nil, false, "A fatal error occurred!", nil, StateErrored},
+		{"classifier routes: idle", "bun", nil, false, "Ask anything...", nil, StateIdle},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := openCode{
+				paneCommand: func(string) (string, error) { return tc.cmd, tc.cmdErr },
+				isShell:     func(string) bool { return tc.isShell },
+				capturePane: func(string) (string, error) { return tc.captured, tc.captureErr },
+				classify:    parseOpenCodeState,
+			}
+			if got := c.Assess("0:0.0"); got != tc.want {
+				t.Errorf("Assess = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestOpenCodeSubmitRotateRoute(t *testing.T) {
+	var submitted bool
+	var injectedCmd string
+	c := openCode{
+		send:   func(pane, text string) error { submitted = true; return nil },
+		inject: func(pane, cmd string) error { injectedCmd = cmd; return nil },
+	}
+	if err := c.Submit("0:0.0", "hi"); err != nil || !submitted {
+		t.Errorf("Submit routed=%v err=%v, want routed to send", submitted, err)
+	}
+	if err := c.Rotate("0:0.0"); err != nil || injectedCmd != "/clear" {
+		t.Errorf("Rotate injected %q err=%v, want /clear", injectedCmd, err)
+	}
+	if c.RotateStrategy() != SlashCommand {
+		t.Errorf("opencode RotateStrategy = %v, want SlashCommand", c.RotateStrategy())
+	}
+	if newOpenCode().Name() != "opencode" {
+		t.Error("newOpenCode().Name() != opencode")
+	}
+}
