@@ -55,14 +55,21 @@ daemon or a hosted service:
   policy for how flotilla submits a turn, assesses the pane's rendered state
   (working / idle / awaiting-approval / errored / shell-crash), and rotates
   context. This lets a desk run Claude Code, **Aider**, … behind one interface,
-  so the fleet can mix harnesses. `claude-code`, `aider`, and `opencode` ship
-  today. The Aider driver is the first to surface *awaiting-approval* and
+  so the fleet can mix harnesses. `claude-code`, `aider`, `opencode`, and `grok`
+  ship today. The Aider driver is the first to surface *awaiting-approval* and
   *errored* states, so a desk blocked on a confirmation prompt or hitting an error
   wakes the XO automatically; the OpenCode driver does the same with claude-style
   polarity (its working indicator persists the whole turn). (Like `claude-code`, an
   agent must run AS its pane's process — e.g. launch `aider …` / `opencode` directly,
   not wrapped in `bash -c "… ; exec bash"` — so crash detection reads the agent, not
   the wrapper shell.)
+  - **`grok` caveats** (read before adding a Grok desk): (1) **Grok auto-executes
+    shell commands and file edits WITHOUT prompting** — it has no per-action approval
+    gate, so a Grok desk acts on its environment unprompted (an operational hazard);
+    the driver emits a reduced state set accordingly. (2) The `grok` driver's render
+    markers are **source-verified, not yet live-captured** (Grok is xAI-only/metered,
+    so there is no $0 validation path) — live-capture validation is pending a funded
+    xAI session.
 
 ## Why these choices
 
@@ -109,7 +116,8 @@ Near-term:
       `aider`, and `opencode` ship today; both `aider` and `opencode` emit the full
       assessed-state set (incl. awaiting-approval / errored). Build + validate is $0
       via a local model (ollama); running a paid-model desk is a separate operator
-      spend choice. Grok and Cursor drivers are next on the roadmap.
+      spend choice. The `grok` driver also ships (source-verified; reduced state set
+      — Grok auto-executes unprompted). Cursor is next on the roadmap.
 - [ ] Release-sign-off workflow.
 - [x] Docs + an end-to-end quickstart that a newcomer can run cold — [docs/quickstart.md](./docs/quickstart.md) (cold-tested: install, send, clock).
 
