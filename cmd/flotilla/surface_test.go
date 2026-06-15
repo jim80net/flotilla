@@ -17,6 +17,7 @@ func TestValidateAgentSurfaces(t *testing.T) {
 		{Name: "pair", Surface: "aider"},          // the aider driver
 		{Name: "oc", Surface: "opencode"},         // the opencode driver
 		{Name: "gk", Surface: "grok"},             // the grok driver
+		{Name: "cur", Surface: "cursor"},          // the cursor driver (skeleton/inert)
 	}}
 	if err := validateAgentSurfaces(ok); err != nil {
 		t.Fatalf("validateAgentSurfaces(aider+default) = %v, want nil", err)

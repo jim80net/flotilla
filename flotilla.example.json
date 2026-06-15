@@ -11,6 +11,7 @@
     { "name": "training", "tmux_title": "training" },
     { "name": "pair-dev", "surface": "aider" },
     { "name": "oc-dev", "surface": "opencode" },
-    { "name": "grok-dev", "surface": "grok" }
+    { "name": "grok-dev", "surface": "grok" },
+    { "name": "cursor-dev", "surface": "cursor" }
   ]
 }

@@ -70,6 +70,12 @@ daemon or a hosted service:
     markers are **source-verified, not yet live-captured** (Grok is xAI-only/metered,
     so there is no $0 validation path) — live-capture validation is pending a funded
     xAI session.
+  - **`cursor` (skeleton, INERT)**: Cursor's CLI agent is closed-source, so its render
+    markers can only come from observed render. The driver ships as a skeleton with
+    **placeholder markers — it classifies every pane `Idle` (inert) until an
+    operator-present live-capture** fills them (submit + `/new-chat` reset work, but it
+    does not yet detect working/approval). Don't add a Cursor desk expecting state
+    detection until that capture lands.
 
 ## Why these choices
 
