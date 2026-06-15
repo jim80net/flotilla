@@ -47,11 +47,15 @@ type Strategy int
 
 const (
 	// SlashCommand: a reset is injected into the pane (e.g. Claude Code /clear,
-	// Grok /new).
+	// aider /clear, Grok /new, Cursor /new-chat). Every driver shipped so far is
+	// SlashCommand — each harness has a documented in-session reset.
 	SlashCommand Strategy = iota
-	// RestartProcess: the surface has no in-session reset (e.g. cursor-agent); the
-	// session must be restarted. A reset is NEVER injected into such a surface — a
-	// slash would land as literal composer text.
+	// RestartProcess: the surface has NO in-session reset, so the session must be
+	// restarted. A reset is NEVER injected into such a surface — a slash would land
+	// as literal composer text. Reserved for a future restart-only TUI; no current
+	// driver uses it (cursor-agent, once thought restart-only, has /new-chat and is
+	// SlashCommand). The guard (RotateContext, below) is still exercised by a stub
+	// test so it stays correct for whenever such a surface lands.
 	RestartProcess
 )
 
@@ -95,9 +99,10 @@ var ErrRestartRequired = errors.New("surface requires a process restart to rotat
 
 // RotateContext rotates a surface's context SAFELY. For a SlashCommand surface it
 // injects the surface's reset; for a RestartProcess surface it injects NOTHING and
-// returns ErrRestartRequired — this is the guard that prevents a slash command
-// from being typed into a restart-only TUI (e.g. cursor-agent) where it would land
-// as literal composer text. All context-rotate callers MUST go through this helper.
+// returns ErrRestartRequired — this is the guard that prevents a slash command from
+// being typed into a future restart-only TUI where it would land as literal composer
+// text. (No current driver is RestartProcess; the guard is exercised by a stub test.)
+// All context-rotate callers MUST go through this helper.
 func RotateContext(d Driver, pane string) error {
 	if d.RotateStrategy() == RestartProcess {
 		return ErrRestartRequired
