@@ -48,8 +48,13 @@ func newGrok() grok {
 
 func (grok) Name() string { return "grok" }
 
-// Submit delivers a turn via bracketed paste + Enter (grok-dev's composer handles
-// bracketed paste — ui/app.tsx onPaste handler), like the other drivers.
+// Submit delivers a turn via the wired `send` (currently bracketed paste + Enter,
+// deliver.Send — grok-dev's composer has an onPaste handler). NEWLINE-METHOD NOTE
+// (#58): whether grok-dev's composer actually enables bracketed-paste mode (so a
+// multi-line body lands as literal newlines rather than submitting each line early) is
+// NOT yet confirmed — deferred to the grok live-capture. If the capture shows it lacks
+// bracketed paste, wire `send` to deliver.SendCtrlJ (the per-driver Ctrl+J newline
+// alternate). Do NOT assume bracketed paste works for grok until #58 confirms.
 func (g grok) Submit(pane, text string) error { return g.send(pane, text) }
 
 // Assess resolves the pane's rendered state. capture-error returns Unknown (like

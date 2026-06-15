@@ -118,6 +118,13 @@ Near-term:
       via a local model (ollama); running a paid-model desk is a separate operator
       spend choice. The `grok` driver also ships (source-verified; reduced state set
       — Grok auto-executes unprompted). Cursor is next on the roadmap.
+- [x] **Inter-harness fleets** — a single fleet mixes harnesses: a Claude XO
+      coordinates Aider / OpenCode / Grok desks, each driven by its own driver
+      (send / assess / wake are all surface-agnostic — proven live with an OpenCode XO
+      driving a mixed fleet). Non-Claude desks are *pull-participants* (the XO collects
+      by reading their panes, cued by the driver assessment; they can't push reports):
+      [docs/inter-harness.md](./docs/inter-harness.md). Push-capable "smart desks" are a
+      follow-on.
 - [ ] Release-sign-off workflow.
 - [x] Docs + an end-to-end quickstart that a newcomer can run cold — [docs/quickstart.md](./docs/quickstart.md) (cold-tested: install, send, clock).
 
