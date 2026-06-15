@@ -50,6 +50,17 @@ daemon or a hosted service:
   its own allow-list, so it can act on safe operations unattended while
   still stopping for confirmation on risky ones. Coordination never implies
   unbounded authority.
+- **Heterogeneous harnesses — per-agent surface driver.** Each agent declares
+  a `surface` (default `claude-code`) that selects a *driver* — the per-harness
+  policy for how flotilla submits a turn, assesses the pane's rendered state
+  (working / idle / awaiting-approval / errored / shell-crash), and rotates
+  context. This lets a desk run Claude Code, **Aider**, … behind one interface,
+  so the fleet can mix harnesses. The Aider driver is the first to surface
+  *awaiting-approval* and *errored* states, so a desk blocked on a confirmation
+  prompt or hitting an error wakes the XO automatically. (Like `claude-code`, an
+  agent must run AS its pane's process — e.g. launch `aider …` directly, not
+  wrapped in `bash -c "aider …; exec bash"` — so crash detection reads the agent,
+  not the wrapper shell.)
 
 ## Why these choices
 
@@ -91,6 +102,11 @@ Near-term:
       **change-detector** (heartbeat v2) that wakes the XO only on a material
       change and rotates its context after each handling — an idle fleet costs
       nothing: [docs/watch-runbook.md](./docs/watch-runbook.md).
+- [x] Per-agent **surface drivers** — drive heterogeneous harnesses through one
+      interface (`roster.agent.surface`, default `claude-code`). `claude-code` +
+      `aider` ship today; the `aider` driver emits the full assessed-state set
+      (incl. awaiting-approval / errored). Build + validate is $0 via a local
+      ollama model; a paid-model aider desk is a separate operator spend choice.
 - [ ] Release-sign-off workflow.
 - [x] Docs + an end-to-end quickstart that a newcomer can run cold — [docs/quickstart.md](./docs/quickstart.md) (cold-tested: install, send, clock).
 

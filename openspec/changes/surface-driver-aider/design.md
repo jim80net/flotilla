@@ -176,22 +176,28 @@ externalization (idle-polarity is a per-driver attribute).
 
 **Precedence ladder (highest first), with rationale:**
 
-1. **`AwaitingApproval`** — the tail contains the approval token `(Y)es/(N)o`
-   (io.py:832). Wins over everything: an open approval prompt is the live state
-   and demands XO action. (This is the dormant state, now emitted.)
+1. **`AwaitingApproval`** — the **last non-empty line** is the open `confirm_ask`
+   prompt: it contains the options token `(Y)es/(N)o` (io.py:832) OR ends with the
+   cursor suffix `[Yes]:`/`[No]:` (io.py:842-844). Both are matched because a long
+   question wraps so the token can sit a line *above* the cursor while `[Yes]:`
+   stays on the last line — the wrap case the live capture exhibited; matching only
+   the token would silently miss a wrapped approval and never wake the XO (the
+   driver's headline failure mode). Anchoring to the LAST line means a stale
+   approval scrolled up cannot mislead. (This is the dormant state, now emitted.)
 2. **`Idle`** — the tail's **last non-empty line** is a recognized prompt
    (`> `/`ask> `/`architect> `/`multi> `, io.py:545-552). POSITIVE detection: the
    desk is "finished" only when its prompt has returned. (A prompt below an error
-   means recovered → Idle wins over Errored, which is why Idle precedes it.)
-3. **`Errored`** — the tail contains a known non-retryable error phrase from the
-   `exceptions.py` set (e.g. `Check your API key`, an auth-failure description) OR
-   the `An uncaught exception occurred:` banner (report.py:145) AND the last line
-   is NOT a prompt. Best-effort and narrow by honest design: most aider errors
-   resolve to `Shell` (fatal), `Working` (auto-retry), `AwaitingApproval`
-   (`Try to proceed anyway?`), or `Idle` (recovered), so `Errored` only catches a
-   recognized error that is the LIVE bottom state at sample time. Durable error
-   capture (tailing aider's `.aider.chat.history.md` or a `--verbose` log) is a
-   Phase-3 option, noted in out-of-scope.
+   means recovered → Idle wins over Errored.)
+3. **`Errored`** — a known non-retryable error phrase from the `exceptions.py` set
+   (e.g. `Check your API key`, an auth-failure description) OR the
+   `An uncaught exception occurred:` banner (report.py:145) is in the **last few
+   non-empty lines** (the LIVE bottom state — not merely anywhere in the 12-line
+   tail, so a recovered error still in the tail while the next turn streams below
+   it does not re-fire a spurious `Errored` wake). Best-effort and narrow by honest
+   design: most aider errors resolve to `Shell` (fatal), `Working` (auto-retry),
+   `AwaitingApproval` (`Try to proceed anyway?`), or `Idle` (recovered). Durable
+   error capture (tailing aider's `.aider.chat.history.md` or a `--verbose` log) is
+   a Phase-3 option, noted in out-of-scope.
 4. **`Working`** — the DEFAULT: none of the above matched (mid-stream, the
    pre-stream `Waiting for <model>` spinner, an `Retrying in N seconds...`
    auto-retry, or any non-prompt non-error state). Auto-retry is deliberately
@@ -334,5 +340,10 @@ externalization shape the N=2 evidence recommends.
 - Durable error capture (tailing aider's `.aider.chat.history.md` or a
   `--verbose` log) to catch print-then-return-to-prompt errors the live-tail scan
   misses — a Phase-3 robustness option; `Errored` is best-effort/live-only here.
+- `StateAwaitingInput` is left UNMAPPED for aider (the reserved state stays
+  reserved): aider's confirmations map to `AwaitingApproval`; a non-approval input
+  block (model selection, `/ask` follow-up) reads as the `Working` default. A desk
+  genuinely stuck on a non-approval input prompt would not wake the XO — acceptable
+  for v1, a candidate refinement once such a case is observed.
 - The `RestartProcess` guard's real-driver exercise (lands with cursor/grok if
   any is restart-only; Phase 1's stub test already proves the guard).
