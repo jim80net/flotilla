@@ -46,6 +46,20 @@ func TestParseAiderState(t *testing.T) {
 			want:     StateAwaitingApproval,
 		},
 		{
+			// MEDIUM-1 regression: a long question wraps so the "(Y)es/(N)o" token sits
+			// a line ABOVE the cursor; the "[Yes]:" cursor suffix stays on the last line.
+			// Must still classify AwaitingApproval (else a blocked desk reads Working →
+			// the XO is never woken — the driver's headline feature silently fails).
+			name:     "wrapped approval (token wrapped above the [Yes]: cursor) → AwaitingApproval",
+			captured: "No files matched 'x.py'. Do you want to create /very/long/path/that/wraps/\nx.py? (Y)es/(N)o/(A)ll/(S)kip all\n[Yes]: ",
+			want:     StateAwaitingApproval,
+		},
+		{
+			name:     "default-no approval ([No]: cursor) → AwaitingApproval",
+			captured: "Try to proceed anyway?\n[No]: ",
+			want:     StateAwaitingApproval,
+		},
+		{
 			name:     "returned bare prompt → Idle (positive)",
 			captured: "All chat history cleared.\n\n> ",
 			want:     StateIdle,
@@ -104,6 +118,15 @@ func TestParseAiderState(t *testing.T) {
 			name:     "error phrase WITH prompt returned below → Idle (recovered, idle wins over error)",
 			captured: "The API provider is not able to authenticate you. Check your API key.\n> ",
 			want:     StateIdle,
+		},
+		{
+			// MEDIUM-2 regression: a recovered error is still in the 12-line tail but the
+			// NEXT turn is streaming below it (>aiderErrorScan non-empty lines after the
+			// error). It must NOT re-fire Errored — that would be a spurious "entered
+			// errored" wake. The error is no longer the live bottom state → Working.
+			name:     "stale error pushed out of the bottom by a new turn's stream → Working (not a re-fired Errored)",
+			captured: "The API provider is not able to authenticate you. Check your API key.\nLet me try a different approach.\nGenerating the corrected implementation now\nstreaming the fourth line of the new response",
+			want:     StateWorking,
 		},
 		{
 			name:     "empty capture → Working (default; not a false idle)",

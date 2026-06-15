@@ -83,6 +83,13 @@ func (aider) RotateStrategy() Strategy { return SlashCommand }
 // lines covers a multi-line approval subject plus its prompt line.
 const aiderTail = 12
 
+// aiderErrorScan bounds the Errored phrase scan to the last few NON-EMPTY lines —
+// "the live bottom state". A wider scan would re-fire Errored on a recovered error
+// still sitting in the 12-line tail while the NEXT turn streams below it (a spurious
+// "entered errored" wake). 3 covers a one-line API error and the uncaught banner +
+// its first traceback lines.
+const aiderErrorScan = 3
+
 // aiderPromptLine matches aider's idle composer prompt on the (right-trimmed)
 // last non-empty line, reproducing the io.py:545-550 construction: an optional
 // edit-format prefix, an optional " multi" (multiline mode), then ">". Examples:
@@ -105,12 +112,16 @@ var aiderErrorPhrases = []string{
 
 // parseAiderState classifies a captured aider pane into the full State set, scoped
 // to the live tail, IDLE-POSITIVE. Precedence (highest first):
-//  1. AwaitingApproval — the LAST non-empty line is the open approval prompt (it
-//     contains the "(Y)es/(N)o" token, io.py:832; a stale approval scrolled up is
-//     never the last line, so it cannot mislead).
+//  1. AwaitingApproval — the open confirm_ask prompt is the LAST non-empty line. Its
+//     options token "(Y)es/(N)o" (io.py:832) or its cursor suffix "[Yes]:"/"[No]:"
+//     (io.py:842-844) is on that line. Both are matched because a long question can
+//     wrap so the token sits a line up while the "[Yes]:" cursor stays last (the wrap
+//     case the live capture showed). Anchoring to the LAST line means a stale approval
+//     scrolled up cannot mislead.
 //  2. Idle — the last non-empty line is a returned prompt (positive detection).
-//  3. Errored — a known non-retryable error phrase is present in the tail and no
-//     prompt/approval is the last line (best-effort; live-only).
+//  3. Errored — a known non-retryable error phrase is the LIVE bottom state (within
+//     the last few non-empty lines), not merely anywhere in the tail (best-effort;
+//     so a recovered error during the next turn does not re-fire).
 //  4. Working — the DEFAULT: a readable pane not at its prompt is presumed still
 //     working (mid-stream, streaming, "Waiting for …", "Retrying in …"). This is
 //     the inverse of claude-code's Working-positive polarity, because aider's
@@ -120,21 +131,26 @@ func parseAiderState(captured string) State {
 	if len(lines) > aiderTail {
 		lines = lines[len(lines)-aiderTail:]
 	}
-	tail := strings.Join(lines, "\n")
 	last, hasLast := lastNonEmpty(lines)
 
-	// 1. AwaitingApproval — the live approval prompt IS the last line.
-	if hasLast && strings.Contains(last, "(Y)es/(N)o") {
-		return StateAwaitingApproval
-	}
-	// 2. Idle — the prompt has returned (positive detection).
-	if hasLast && aiderPromptLine.MatchString(strings.TrimRight(last, " \t")) {
-		return StateIdle
+	if hasLast {
+		l := strings.TrimRight(last, " \t")
+		// 1. AwaitingApproval — token on the last line, or the cursor suffix (robust
+		//    to the question wrapping above the cursor).
+		if strings.Contains(last, "(Y)es/(N)o") || strings.HasSuffix(l, "[Yes]:") || strings.HasSuffix(l, "[No]:") {
+			return StateAwaitingApproval
+		}
+		// 2. Idle — the prompt has returned (positive detection).
+		if aiderPromptLine.MatchString(l) {
+			return StateIdle
+		}
 	}
 	// 3. Errored — a known non-retryable error is the live bottom state.
-	for _, p := range aiderErrorPhrases {
-		if strings.Contains(tail, p) {
-			return StateErrored
+	for _, l := range lastNNonEmpty(lines, aiderErrorScan) {
+		for _, p := range aiderErrorPhrases {
+			if strings.Contains(l, p) {
+				return StateErrored
+			}
 		}
 	}
 	// 4. Working — the default.
@@ -149,4 +165,16 @@ func lastNonEmpty(lines []string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// lastNNonEmpty returns up to the last n non-empty lines (oldest-first), so the
+// Errored scan considers only the live bottom region.
+func lastNNonEmpty(lines []string, n int) []string {
+	var out []string
+	for i := len(lines) - 1; i >= 0 && len(out) < n; i-- {
+		if strings.TrimSpace(lines[i]) != "" {
+			out = append(out, lines[i])
+		}
+	}
+	return out
 }
