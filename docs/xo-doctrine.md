@@ -172,6 +172,24 @@ self-continuing clock cheap and inference sharp — but, exactly as with any
 fresh-context model, it is a **contract the XO must hold**, plus two markers it
 maintains.
 
+### Mixed-harness desks — lean on the driver `Assess`, and pull (don't expect push)
+
+When the fleet mixes harnesses (Aider / OpenCode / Grok / Cursor desks alongside
+Claude ones — see [inter-harness.md](./inter-harness.md)), the XO's desk-monitoring
+duty changes in two ways:
+
+- **Trust the driver-assessed state; don't eyeball a non-Claude render.** The
+  change-detector already assesses each desk through *its own* surface driver and names
+  the state in the wake reason (`aid: finished a turn`, `aid: entered awaiting-approval`).
+  Lean on that — do not re-classify a non-Claude pane by eye (its working / idle /
+  approval render differs from Claude's, and the XO may misread it).
+- **Non-Claude desks are pull-participants.** A non-Claude desk has no flotilla skill
+  set, so it cannot `flotilla notify`-push a report. **Collect by reading its pane /
+  files** (cued by the driver `Assess` for *when*); delegation is one-way (the XO
+  submits; the desk reports via its state + what it writes). Rotate a non-Claude desk
+  with its driver's reset (`/new`, `/new-chat`), and recover a dead one by relaunching
+  its launch recipe — not Claude's `/clear` / resume.
+
 ### The state-externalization contract (non-negotiable when this is on)
 
 Because the XO's context is rotated between handlings, **anything you will need

@@ -215,6 +215,75 @@ func TestSlashKeysArgsIsLiteralSlash(t *testing.T) {
 	}
 }
 
+func TestSendCtrlJArgsNewlineSequence(t *testing.T) {
+	// SendCtrlJ types each line literally (-l) with a C-j keystroke between lines
+	// (the in-composer newline, NOT a submit) and a single final Enter. This is the
+	// per-driver alternate to bracketed-paste Send for harnesses without bracketed
+	// paste / whose tmux newline is Ctrl+J.
+	t.Run("single line → literal text then Enter", func(t *testing.T) {
+		got := sendCtrlJArgs("0:0.0", "hello world")
+		want := [][]string{
+			{"send-keys", "-t", "0:0.0", "-l", "--", "hello world"},
+			{"send-keys", "-t", "0:0.0", "--", "Enter"},
+		}
+		assertArgSeq(t, got, want)
+	})
+	t.Run("multi-line → C-j between lines, one final Enter", func(t *testing.T) {
+		got := sendCtrlJArgs("0:0.0", "line one\nline two\nline three")
+		want := [][]string{
+			{"send-keys", "-t", "0:0.0", "-l", "--", "line one"},
+			{"send-keys", "-t", "0:0.0", "--", "C-j"},
+			{"send-keys", "-t", "0:0.0", "-l", "--", "line two"},
+			{"send-keys", "-t", "0:0.0", "--", "C-j"},
+			{"send-keys", "-t", "0:0.0", "-l", "--", "line three"},
+			{"send-keys", "-t", "0:0.0", "--", "Enter"},
+		}
+		assertArgSeq(t, got, want)
+		// Exactly one submitting Enter, and it is LAST — newlines never submit.
+		enters := 0
+		for i, a := range got {
+			if a[len(a)-1] == "Enter" {
+				enters++
+				if i != len(got)-1 {
+					t.Error("Enter must be the final keystroke (a mid-sequence Enter would submit early)")
+				}
+			}
+		}
+		if enters != 1 {
+			t.Errorf("want exactly one Enter, got %d", enters)
+		}
+	})
+	t.Run("blank interior line keeps its C-j (the blank line)", func(t *testing.T) {
+		got := sendCtrlJArgs("0:0.0", "a\n\nb")
+		want := [][]string{
+			{"send-keys", "-t", "0:0.0", "-l", "--", "a"},
+			{"send-keys", "-t", "0:0.0", "--", "C-j"},
+			{"send-keys", "-t", "0:0.0", "-l", "--", ""},
+			{"send-keys", "-t", "0:0.0", "--", "C-j"},
+			{"send-keys", "-t", "0:0.0", "-l", "--", "b"},
+			{"send-keys", "-t", "0:0.0", "--", "Enter"},
+		}
+		assertArgSeq(t, got, want)
+	})
+}
+
+func assertArgSeq(t *testing.T, got, want [][]string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("arg-seq length = %d, want %d\ngot:  %v\nwant: %v", len(got), len(want), got, want)
+	}
+	for i := range want {
+		if len(got[i]) != len(want[i]) {
+			t.Fatalf("arg %d = %v, want %v", i, got[i], want[i])
+		}
+		for j := range want[i] {
+			if got[i][j] != want[i][j] {
+				t.Fatalf("arg %d = %v, want %v (differ at %d)", i, got[i], want[i], j)
+			}
+		}
+	}
+}
+
 func TestBufferNameIsPerProcess(t *testing.T) {
 	b := bufferName()
 	if !strings.HasPrefix(b, "flotilla-send-") {
