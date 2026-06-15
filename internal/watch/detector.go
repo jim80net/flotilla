@@ -26,8 +26,8 @@ const snapshotWriteFailThreshold = 3
 type WakeKind int
 
 const (
-	// WakeMaterial: an external desk transition or a tracker change (or the
-	// cold-start reassess) — the reasons name what changed.
+	// WakeMaterial: an external desk transition or an external signal-file change
+	// (or the cold-start reassess) — the reasons name what changed.
 	WakeMaterial WakeKind = iota
 	// WakeContinuation: the XO finished a turn and may have a next authorized
 	// step; the prompt carries the narrow-answer discipline (advance or reply
@@ -248,7 +248,7 @@ func (d *Detector) Tick() {
 		}
 	}
 
-	// 1. Gather current signals. Tracker absent/unreadable carries the prior hash
+	// 1. Gather current signals. Signal absent/unreadable carries the prior hash
 	//    forward (treat-unchanged — M4); states are shell-debounced (M2).
 	cur := Snapshot{
 		DeskStates: make(map[string]surface.State, len(d.cfg.Desks)),
