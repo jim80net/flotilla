@@ -129,7 +129,8 @@ flags for 'watch':
   --snapshot-file <path>      detector snapshot (default $FLOTILLA_SNAPSHOT_FILE, else <roster-dir>/flotilla-detector-state.json)
   --awaiting-file <path>      awaiting-operator veto marker (default $FLOTILLA_AWAITING_FILE, else <roster-dir>/flotilla-xo-awaiting)
   --settled-file <path>       XO settle/idle marker (default $FLOTILLA_SETTLED_FILE, else <roster-dir>/flotilla-xo-settled)
-  --tracker-file <path>       state-tracker file the detector hashes (default $FLOTILLA_TRACKER_FILE, else <roster-dir>/.flotilla-state.md)
+  --tracker-file <path>       the XO's {{tracker}} read-source — NOT hashed as a wake signal (default $FLOTILLA_TRACKER_FILE, else <roster-dir>/.flotilla-state.md)
+  --signal-file <path>        OPTIONAL external signal file whose content-hash change wakes the XO (a file the XO does NOT write; $FLOTILLA_SIGNAL_FILE; unset ⇒ no external-signal trigger)
   --max-quiet-intervals <n>   liveness ping cadence N, in intervals (0 ⇒ ping-mode default)
   --max-self-continuations <n> cap on consecutive XO self-continuations with no external change (default 3)
 

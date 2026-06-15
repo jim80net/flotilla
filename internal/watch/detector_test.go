@@ -16,8 +16,8 @@ import (
 type detFixture struct {
 	mu          sync.Mutex
 	states      map[string]surface.State
-	tracker     string
-	trackerOK   bool
+	signal      string
+	signalOK    bool
 	ackAge      time.Duration
 	awaiting    bool
 	settle      bool // settle marker present (consumed when read)
@@ -35,7 +35,7 @@ type wakeRec struct {
 }
 
 func newFixture() *detFixture {
-	return &detFixture{states: map[string]surface.State{}, trackerOK: true}
+	return &detFixture{states: map[string]surface.State{}, signalOK: true}
 }
 
 func (f *detFixture) set(agent string, s surface.State) {
@@ -59,10 +59,10 @@ func (f *detFixture) config(xo string, desks []string, k int, mode string) Detec
 			}
 			return surface.StateUnknown
 		},
-		TrackerHash: func() (string, bool) {
+		SignalHash: func() (string, bool) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
-			return f.tracker, f.trackerOK
+			return f.signal, f.signalOK
 		},
 		AckAge: func() time.Duration { f.mu.Lock(); defer f.mu.Unlock(); return f.ackAge },
 		Wake: func(kind WakeKind, reasons []string) {
@@ -112,12 +112,12 @@ func newDet(t *testing.T, f *detFixture, cfg DetectorConfig) *Detector {
 
 // seed installs a baseline snapshot and clears the cold flag, so the next Tick
 // diffs against the given states rather than cold-starting.
-func seed(d *Detector, states map[string]surface.State, tracker string) {
+func seed(d *Detector, states map[string]surface.State, signal string) {
 	cp := map[string]surface.State{}
 	for k, v := range states {
 		cp[k] = v
 	}
-	d.snap = Snapshot{DeskStates: cp, TrackerHash: tracker}
+	d.snap = Snapshot{DeskStates: cp, SignalHash: signal}
 	d.cold = false
 }
 
@@ -127,7 +127,7 @@ func TestDetectorColdStartWakesOnceThenQuiet(t *testing.T) {
 	d := newDet(t, f, cfg)
 	f.set("hydra-ops", surface.StateIdle)
 	f.set("v12-dev", surface.StateWorking)
-	f.tracker = "h0"
+	f.signal = "h0"
 
 	d.Tick() // cold
 	if f.wakeCount() != 1 || f.lastWake().kind != WakeMaterial {
@@ -148,7 +148,7 @@ func TestDetectorDeskFinishedWakesTargeted(t *testing.T) {
 	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle, "v12-dev": surface.StateWorking}, "h0")
 	f.set("hydra-ops", surface.StateIdle)
 	f.set("v12-dev", surface.StateIdle) // desk finished a turn
-	f.tracker = "h0"
+	f.signal = "h0"
 
 	d.Tick()
 	if f.wakeCount() != 1 || f.lastWake().kind != WakeMaterial {
@@ -166,7 +166,7 @@ func TestDetectorIdleFleetIsSilent(t *testing.T) {
 	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle, "v12-dev": surface.StateIdle}, "h0")
 	f.set("hydra-ops", surface.StateIdle)
 	f.set("v12-dev", surface.StateIdle)
-	f.tracker = "h0"
+	f.signal = "h0"
 	d.Tick()
 	if f.wakeCount() != 0 {
 		t.Errorf("idle fleet must cost zero wakes, got %+v", f.wakes)
@@ -180,7 +180,7 @@ func TestDetectorShellDebounced(t *testing.T) {
 	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle, "v12-dev": surface.StateIdle}, "h0")
 	f.set("hydra-ops", surface.StateIdle)
 	f.set("v12-dev", surface.StateShell) // first shell read — a blip
-	f.tracker = "h0"
+	f.signal = "h0"
 
 	d.Tick()
 	if f.wakeCount() != 0 {
@@ -201,7 +201,7 @@ func TestDetectorXOSelfContinuationOnceNotDeskFinished(t *testing.T) {
 	seed(d, map[string]surface.State{"hydra-ops": surface.StateWorking, "v12-dev": surface.StateIdle}, "h0")
 	f.set("hydra-ops", surface.StateIdle) // XO finished a turn
 	f.set("v12-dev", surface.StateIdle)
-	f.tracker = "h0"
+	f.signal = "h0"
 
 	d.Tick()
 	if f.wakeCount() != 1 {
@@ -222,7 +222,7 @@ func TestDetectorSettleMarkerSleepsUntilExternalChange(t *testing.T) {
 	seed(d, map[string]surface.State{"hydra-ops": surface.StateWorking, "v12-dev": surface.StateIdle}, "h0")
 	f.set("hydra-ops", surface.StateIdle)
 	f.set("v12-dev", surface.StateIdle)
-	f.tracker = "h0"
+	f.signal = "h0"
 	f.settle = true // the XO replied idle
 
 	d.Tick()
@@ -255,7 +255,7 @@ func TestDetectorSelfContinuationCap(t *testing.T) {
 	cfg.MaxSelfContinuation = 2
 	d := newDet(t, f, cfg)
 	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle}, "h0")
-	f.tracker = "h0"
+	f.signal = "h0"
 
 	// Drive repeated XO Working→Idle with no external change and no settle marker.
 	contWakes := 0
@@ -284,7 +284,7 @@ func TestDetectorOperatorWakeClearsSettled(t *testing.T) {
 	seed(d, map[string]surface.State{"hydra-ops": surface.StateWorking, "v12-dev": surface.StateIdle}, "h0")
 	f.set("hydra-ops", surface.StateIdle)
 	f.set("v12-dev", surface.StateIdle)
-	f.tracker = "h0"
+	f.signal = "h0"
 	f.settle = true
 	d.Tick() // settles
 	if !d.snap.XOSettled {
@@ -312,7 +312,7 @@ func TestDetectorRotateSkippedWhileAwaiting(t *testing.T) {
 	d := newDet(t, f, cfg)
 	seed(d, map[string]surface.State{"hydra-ops": surface.StateWorking}, "h0")
 	f.set("hydra-ops", surface.StateIdle)
-	f.tracker = "h0"
+	f.signal = "h0"
 	f.awaiting = true // outstanding operator question
 
 	d.Tick()
@@ -327,7 +327,7 @@ func TestDetectorLivenessWedgeAndRecovery(t *testing.T) {
 	d := newDet(t, f, cfg)
 	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle}, "h0")
 	f.set("hydra-ops", surface.StateIdle)
-	f.tracker = "h0"
+	f.signal = "h0"
 
 	f.ackAge = 2 * time.Minute // < 3×interval → healthy
 	d.Tick()
@@ -353,7 +353,7 @@ func TestDetectorLivenessCrashImmediate(t *testing.T) {
 	d := newDet(t, f, cfg)
 	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle}, "h0")
 	f.set("hydra-ops", surface.StateShell)
-	f.tracker = "h0"
+	f.signal = "h0"
 	d.Tick() // shell #1 — debounced, no crash
 	if len(f.alerts) != 0 {
 		t.Fatalf("single shell read must not crash-alert, got %v", f.alerts)
@@ -373,7 +373,7 @@ func TestDetectorWedgeSuppressedWhileShellPending(t *testing.T) {
 	d := newDet(t, f, cfg)
 	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle}, "h0")
 	f.set("hydra-ops", surface.StateShell)
-	f.tracker = "h0"
+	f.signal = "h0"
 	f.ackAge = 10 * time.Minute // also stale — but shell is pending, so no wedge yet
 
 	d.Tick() // shell #1 (pending) + stale ack → NO alert
@@ -392,7 +392,7 @@ func TestDetectorMaxQuietPing(t *testing.T) {
 	d := newDet(t, f, cfg)
 	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle}, "h0")
 	f.set("hydra-ops", surface.StateIdle)
-	f.tracker = "h0"
+	f.signal = "h0"
 	f.ackAge = time.Minute // healthy, no alert
 
 	d.Tick() // quiet 1
@@ -417,7 +417,7 @@ func TestDetectorSnapshotWriteFailureDegradesLoudly(t *testing.T) {
 	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle, "v12-dev": surface.StateIdle}, "h0")
 	f.set("hydra-ops", surface.StateIdle)
 	f.set("v12-dev", surface.StateIdle)
-	f.tracker = "h0"
+	f.signal = "h0"
 	f.persistErr = errors.New("disk full")
 
 	for i := 0; i < snapshotWriteFailThreshold; i++ {
@@ -478,7 +478,7 @@ func TestDetectorOperatorWakeDuringTickRace(t *testing.T) {
 	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle, "v12-dev": surface.StateIdle}, "h0")
 	f.set("hydra-ops", surface.StateIdle)
 	f.set("v12-dev", surface.StateIdle)
-	f.tracker = "h0"
+	f.signal = "h0"
 
 	var wg sync.WaitGroup
 	for i := 0; i < 50; i++ {

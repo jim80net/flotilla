@@ -107,8 +107,9 @@ func TestResolvePromptMalformedHeartbeatFallsBackNotFatal(t *testing.T) {
 	}
 }
 
-// The P1-2 single-source invariant: the path the prompt names MUST equal the path
-// ResolveTracker returns, in every resolution branch.
+// The single-source invariant: the {{tracker}} the prompt names MUST equal the path
+// ResolveTracker returns, in every resolution branch — so the XO is always told to
+// read the exact tracker the workspace resolved.
 func TestPromptTrackerSingleSource(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv(rootEnv, root)
@@ -126,6 +127,6 @@ func TestPromptTrackerSingleSource(t *testing.T) {
 		t.Fatalf("ResolveTracker should pick the workspace state.md, got %q", tracker)
 	}
 	if !strings.Contains(prompt, tracker) {
-		t.Errorf("prompt must name the SAME path the detector hashes (%q): %q", tracker, prompt)
+		t.Errorf("prompt must name the SAME path ResolveTracker returned (%q): %q", tracker, prompt)
 	}
 }
