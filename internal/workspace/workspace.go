@@ -52,8 +52,9 @@ func Dir(agent string) (string, error) {
 // CONVENTIONS.md`); opencode/grok/cursor → AGENTS.md. An unknown surface is an error
 // rather than a guessed name — the per-surface load mechanism is verified per driver
 // (aider --read is documented; OpenCode loads AGENTS.md natively, packages/opencode/
-// src/session/instruction.ts; the Grok/Cursor AGENTS.md load is unverified and
-// deferred to those driver phases).
+// src/session/instruction.ts; Grok loads AGENTS.md natively, grok-dev src/utils/
+// instructions.ts:39,50 — verified in the grok driver phase; the Cursor AGENTS.md
+// load is unverified and deferred to that driver phase).
 func IdentityFileName(surface string) (string, error) {
 	switch surface {
 	case "", "claude-code":
