@@ -26,8 +26,8 @@ const snapshotWriteFailThreshold = 3
 type WakeKind int
 
 const (
-	// WakeMaterial: an external desk transition or a tracker change (or the
-	// cold-start reassess) — the reasons name what changed.
+	// WakeMaterial: an external desk transition or an external signal-file change
+	// (or the cold-start reassess) — the reasons name what changed.
 	WakeMaterial WakeKind = iota
 	// WakeContinuation: the XO finished a turn and may have a next authorized
 	// step; the prompt carries the narrow-answer discipline (advance or reply
@@ -48,9 +48,13 @@ type DetectorConfig struct {
 	// Assess resolves a desk's current surface state (resolve pane + Driver.Assess);
 	// an unresolvable pane SHOULD return StateUnknown (anti-flap, caught by ack age).
 	Assess func(agent string) surface.State
-	// TrackerHash returns the state-tracker file's content hash; ok=false when the
-	// tracker is absent/unreadable (treated as unchanged — M4).
-	TrackerHash func() (string, bool)
+	// SignalHash returns the OPTIONAL external signal file's content hash; ok=false
+	// when no signal file is configured or it is absent/unreadable (treated as
+	// unchanged — no wake-storm). This is NOT the XO's own state tracker: hashing the
+	// tracker would self-wake the XO on its own writes (the heartbeat instructs the
+	// XO to keep .flotilla-state.md current). External wake deltas (a desk/tool
+	// dropping a signal) flow through here; unconfigured ⇒ inert (always ok=false).
+	SignalHash func() (string, bool)
 	// AckAge returns the wall-clock age of the XO's last liveness ack.
 	AckAge func() time.Duration
 	// Wake enqueues an XO wake of the given kind with human-readable reasons; the
@@ -113,6 +117,10 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 	}
 	if cfg.Persist == nil {
 		cfg.Persist = func(s Snapshot) error { return s.Save(snapPath) }
+	}
+	if cfg.SignalHash == nil {
+		// No external signal file configured ⇒ inert (never a wake from this source).
+		cfg.SignalHash = func() (string, bool) { return "", false }
 	}
 	if cfg.MaxSelfContinuation < 1 {
 		cfg.MaxSelfContinuation = 3
@@ -240,18 +248,18 @@ func (d *Detector) Tick() {
 		}
 	}
 
-	// 1. Gather current signals. Tracker absent/unreadable carries the prior hash
+	// 1. Gather current signals. Signal absent/unreadable carries the prior hash
 	//    forward (treat-unchanged — M4); states are shell-debounced (M2).
 	cur := Snapshot{
-		DeskStates:  make(map[string]surface.State, len(d.cfg.Desks)),
-		TrackerHash: d.snap.TrackerHash,
-		XOSettled:   d.snap.XOSettled,
+		DeskStates: make(map[string]surface.State, len(d.cfg.Desks)),
+		SignalHash: d.snap.SignalHash,
+		XOSettled:  d.snap.XOSettled,
 	}
 	for _, name := range d.cfg.Desks {
 		cur.DeskStates[name] = d.debounce(name, d.cfg.Assess(name))
 	}
-	if h, ok := d.cfg.TrackerHash(); ok {
-		cur.TrackerHash = h
+	if h, ok := d.cfg.SignalHash(); ok {
+		cur.SignalHash = h
 	}
 
 	// 2. Cold start (missing/corrupt snapshot, or first boot): seed the baseline
