@@ -119,9 +119,10 @@ source-verified and kept.
 ## Test plan (TDD)
 
 1. **`parseGrokState` (table-driven, claude-style, reduced set):**
-   `Payment required` / `Paste your xAI API key` → AwaitingApproval; the STATUS_MESSAGES
-   + `An unexpected error occurred.` → Errored; `Planning next moves` / `enter queue` /
-   `esc interrupt` → Working; idle composer (no marker) → Idle; a model response quoting
+   `Payment required` / `Paste your xAI API key` → AwaitingApproval; `Planning next
+   moves` / `enter queue` / `esc interrupt` → Working; idle composer (no marker) → Idle;
+   a transient error in the conversation scrollback + idle composer below → Idle (NO
+   Errored); an auth error → AwaitingApproval (api-key modal); a model response quoting
    a marker high up → not misled (bottom-chrome scoping); auto-execute case (a tool
    running, no approval marker) → Working/Idle, NOT AwaitingApproval.
 2. **`grok.Assess`** (stubbed primitives + real classifier): panecmd-err→Unknown;

@@ -50,7 +50,7 @@ follow-up).
 - **THEN** `Assess` returns `Working`
 
 #### Scenario: An idle composer is Idle (the default)
-- **WHEN** the tail shows no approval gate, no error literal, and no working marker
+- **WHEN** the tail shows no approval gate and no working marker
 - **THEN** `Assess` returns `Idle`
 
 #### Scenario: A crashed grok pane is Shell
