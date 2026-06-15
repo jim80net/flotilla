@@ -71,20 +71,19 @@ Assess(pane):
   if err != nil:   return StateUnknown   // transient glitch (mirror claude/aider)
   if isShell(cmd): return StateShell      // process gone
   captured, err := capturePane(pane)
-  if err != nil:   return StateIdle        // fail-open to Idle — SAFE here (claude-style:
-                                            //   Working is positively detected, so a capture
-                                            //   glitch reading Idle cannot manufacture a false
-                                            //   "finished a turn" the way it could for aider)
+  if err != nil:   return StateUnknown      // glitch ⇒ Unknown (non-material), NOT Idle
   return classify(captured)
 ```
 
-Note the capture-error polarity choice DIFFERS from aider on purpose. aider returns
-Unknown on capture-error (it is idle-positive, so a glitch must not look like a
-returned prompt). OpenCode is Working-positive, so the claude-code fail-open-to-Idle
-(claude.go:68-72) is correct: a glitch that loses the working marker degrades to Idle,
-and since Working is the positively-detected state, the next good capture re-detects it
-— no spurious "finished" wake is manufactured by the glitch itself (a real Working→Idle
-requires the working marker to actually be gone in a SUCCESSFUL capture).
+Capture-error returns **Unknown**, like aider (NOT claude-code's fail-open-to-Idle).
+The detector diffs whatever `Assess` returns this tick against the prior snapshot
+(detector.go:251,279,302) and only `StateShell` is debounced (detector.go:341-345) —
+so a transient capture glitch on a WORKING desk that returned Idle would diff as
+`Working→Idle` = "finished a turn" (materiality.go:51) and fire one spurious wake
+(on the XO, a context-wiping continuation). Unknown is non-material into AND out of
+(materiality.go:48), so a glitch produces ZERO wakes regardless of polarity — strictly
+safer than fail-open-to-Idle. (claude-code's capture-err→Idle carries this same latent
+over-wake; it is tracked separately, not changed here.)
 
 `classify` (pure `parseOpenCodeState(string) State`) scopes to the bottom region of the
 pane (like `deliver.ParseBusy` busy.go:42-44). **Precedence (highest first):**

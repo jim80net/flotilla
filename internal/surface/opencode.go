@@ -44,12 +44,14 @@ func (openCode) Name() string { return "opencode" }
 func (c openCode) Submit(pane, text string) error { return c.send(pane, text) }
 
 // Assess resolves the pane's rendered state. The pane-command / shell branches
-// mirror claude-code/aider. A pane CAPTURE error fails open to Idle (the claude-code
-// choice, claude.go:68-72) — SAFE here because OpenCode is Working-POSITIVE: a glitch
-// that loses the working marker reads Idle, but Working is re-detected on the next
-// good capture, so the glitch itself manufactures no false "finished a turn" (a real
-// Working→Idle requires the working marker to actually be absent in a SUCCESSFUL
-// capture). This differs from aider, which is idle-positive and must return Unknown.
+// mirror claude-code/aider. A pane CAPTURE error returns Unknown (like aider, NOT
+// claude-code's fail-open-to-Idle): a transient capture glitch on a WORKING desk
+// that returned Idle would diff as Working→Idle = "finished a turn" (materiality.go:51)
+// and fire one spurious wake — the detector diffs whatever Assess returns this tick
+// (detector.go:251,279,302) and only StateShell is debounced (detector.go:341-345).
+// Unknown is treated as non-material into AND out of (materiality.go:48), so a glitch
+// produces zero wakes regardless of polarity — strictly safer. (claude-code carries
+// the same latent over-wake from its capture-err→Idle; tracked in #55.)
 func (c openCode) Assess(pane string) State {
 	cmd, err := c.paneCommand(pane)
 	if err != nil {
@@ -60,7 +62,7 @@ func (c openCode) Assess(pane string) State {
 	}
 	captured, err := c.capturePane(pane)
 	if err != nil {
-		return StateIdle
+		return StateUnknown
 	}
 	return c.classify(captured)
 }
@@ -73,12 +75,15 @@ func (openCode) RotateStrategy() Strategy { return SlashCommand }
 
 // --- pure state classifier (the testable core) ---
 
-// openCodeTail bounds the marker scan to the live bottom region of the captured
-// pane (the visible frame), like deliver.ParseBusy (busy.go:42-44). 20 lines covers
-// OpenCode's permission dialog (capped at maxHeight 15) plus its bottom-anchored
-// button row and the footer permission counter, so an approval is caught even when
-// the "Permission required" header sits near the top of the dialog.
-const openCodeTail = 20
+// openCodeTail bounds the marker scan to the last N NON-EMPTY lines of the captured
+// pane (the visible frame), like deliver.ParseBusy's tail scope (busy.go:42-44) but
+// non-empty so blank composer padding doesn't consume the budget. Scanning the bottom
+// chrome — the working hint / footer / permission button row + footer counter, all
+// bottom-anchored — rather than the whole frame keeps streamed model output (which
+// renders ABOVE, in the conversation area) from false-matching a marker it happens to
+// quote. 12 covers OpenCode's permission button row + footer counter (bottom-anchored
+// within the maxHeight-15 dialog) and the working hint line.
+const openCodeTail = 12
 
 // openCodeApprovalMarkers identify a pending permission (the AwaitingApproval state).
 // All are specific permission-UI literals from packages/tui/src/routes/session/
@@ -96,8 +101,8 @@ var openCodeApprovalMarkers = []string{
 // (:1513), and the retry backoff line (:1562). The animated spinner glyph is a cycling
 // frame and is deliberately NOT relied upon.
 var openCodeWorkingMarkers = []string{
-	"esc interrupt",
-	"again to interrupt",
+	"esc interrupt",          // the working hint
+	"esc again to interrupt", // post-esc variant (full literal, NOT the loose "again to interrupt")
 	"[⋯]",
 	"[retrying ",
 }
@@ -120,11 +125,7 @@ var openCodeErrorMarkers = []string{
 //  4. Idle — the DEFAULT (safe: the working marker persists the whole non-idle
 //     duration, so its absence reliably means idle).
 func parseOpenCodeState(captured string) State {
-	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
-	if len(lines) > openCodeTail {
-		lines = lines[len(lines)-openCodeTail:]
-	}
-	tail := strings.Join(lines, "\n")
+	tail := strings.Join(lastNNonEmptyLines(captured, openCodeTail), "\n")
 
 	if containsAny(tail, openCodeApprovalMarkers) {
 		return StateAwaitingApproval
@@ -146,4 +147,23 @@ func containsAny(s string, subs []string) bool {
 		}
 	}
 	return false
+}
+
+// lastNNonEmptyLines returns up to the last n non-empty lines of captured, in
+// original order. Scoping marker scans to the bottom non-empty chrome (footer /
+// working hint / permission button row) keeps streamed model output — which renders
+// above, in the conversation area — from false-matching a quoted marker.
+func lastNNonEmptyLines(captured string, n int) []string {
+	all := strings.Split(strings.TrimRight(captured, "\n"), "\n")
+	var rev []string
+	for i := len(all) - 1; i >= 0 && len(rev) < n; i-- {
+		if strings.TrimSpace(all[i]) != "" {
+			rev = append(rev, all[i])
+		}
+	}
+	// reverse back to original order
+	for i, j := 0, len(rev)-1; i < j; i, j = i+1, j-1 {
+		rev[i], rev[j] = rev[j], rev[i]
+	}
+	return rev
 }

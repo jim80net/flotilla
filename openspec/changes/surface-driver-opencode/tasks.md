@@ -5,8 +5,8 @@
 
 ## 2. opencode driver
 
-- [x] 2.1 `internal/surface/opencode.go`: `openCode` driver with injectable primitives (paneCommand/isShell/capturePane/classify/send/inject); `Name()`→`opencode`; `Submit`→`deliver.Send`; `Assess`→(panecmd-err→Unknown; shell→Shell; **capture-err→Idle** (claude-style fail-open — safe under Working-positive polarity); else `parseOpenCodeState`); `Rotate`→`inject(pane,"/clear")` (alias for session.new, app.tsx:573); `RotateStrategy`→SlashCommand; `init()`→`Register`.
-- [x] 2.2 Tests: `Assess` table (panecmd-err→Unknown; shell→Shell; capture-err→Idle; classifier routing) with real `parseOpenCodeState`; Submit→deliver.Send; Rotate→InjectSlash(`/clear`); RotateStrategy=SlashCommand; `Get("opencode")` ok.
+- [x] 2.1 `internal/surface/opencode.go`: `openCode` driver with injectable primitives (paneCommand/isShell/capturePane/classify/send/inject); `Name()`→`opencode`; `Submit`→`deliver.Send`; `Assess`→(panecmd-err→Unknown; shell→Shell; **capture-err→Unknown** (non-material; avoids a spurious Working→Idle wake on a glitch); else `parseOpenCodeState`); `Rotate`→`inject(pane,"/clear")` (alias for session.new, app.tsx:573); `RotateStrategy`→SlashCommand; `init()`→`Register`.
+- [x] 2.2 Tests: `Assess` table (panecmd-err→Unknown; shell→Shell; capture-err→Unknown; classifier routing) with real `parseOpenCodeState`; Submit→deliver.Send; Rotate→InjectSlash(`/clear`); RotateStrategy=SlashCommand; `Get("opencode")` ok.
 
 ## 3. config + docs
 

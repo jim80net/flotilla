@@ -38,8 +38,8 @@ be: a transient pane-command read error → `Unknown`; a shell foreground comman
 the footer permission counter) → `AwaitingApproval`; else the fatal-error boundary →
 `Errored`; else a persistent working marker (the `esc interrupt` hint, the `[⋯]`
 indicator, or a `[retrying` backoff line) → `Working`; else `Idle`. A pane capture
-error SHALL fail open to `Idle` (safe under Working-positive polarity — a glitch cannot
-manufacture a false "finished a turn").
+error SHALL return `Unknown` (non-material), never `Idle` — so a transient glitch on a
+working desk cannot diff as `Working→Idle` ("finished a turn") and fire a spurious wake.
 
 #### Scenario: A pending permission is AwaitingApproval
 - **WHEN** the captured pane shows OpenCode's permission UI (the `Permission required` header, an `Allow once` button, or the footer permission counter), even while a working indicator co-renders

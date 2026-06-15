@@ -33,8 +33,8 @@ func TestParseOpenCodeState(t *testing.T) {
 	// SOURCE-VERIFIED (re-confirmed this session) but were NOT live-elicited: the local
 	// 1.5b/7b ollama models did not reliably invoke tools through the framework (they
 	// printed tool-call JSON as text), and the capture client's CPR-dependency ended the
-	// session before a tool-calling turn reached the permission gate. Recommended
-	// follow-up: live-elicit the permission dialog with a reliable tool-calling model +
+	// session before a tool-calling turn reached the permission gate. Follow-up tracked in #54:
+	// live-elicit the permission dialog with a reliable tool-calling model +
 	// `permission:{edit:"ask"}` to lock these two markers (low risk — they are specific
 	// source-cited UI literals; all other states are live-validated).
 	cases := []struct {
@@ -88,7 +88,7 @@ func TestParseOpenCodeState(t *testing.T) {
 			want:     StateIdle,
 		},
 		{
-			name:     "empty capture → Idle (default, claude-style fail-open)",
+			name:     "empty capture string → Idle (the classifier default; capture ERRORS are handled in Assess → Unknown)",
 			captured: "",
 			want:     StateIdle,
 		},
@@ -103,10 +103,19 @@ func TestParseOpenCodeState(t *testing.T) {
 			want:     StateIdle,
 		},
 		{
-			// Tail-scoping: a stale approval far above the visible bottom (here pushed past
-			// the 20-line window) does not trigger AwaitingApproval; the live bottom is idle.
+			// Tail-scoping: a stale approval far above the visible bottom (pushed past the
+			// non-empty tail window) does not trigger AwaitingApproval; the live bottom is idle.
 			name:     "stale approval pushed above the tail window → Idle",
 			captured: "Permission required\nAllow once\n" + manyLines(22) + "Ask anything...",
+			want:     StateIdle,
+		},
+		{
+			// MEDIUM-1 regression: a model response that QUOTES a marker ("Allow once")
+			// in the conversation area (above the bottom chrome) must NOT false-trigger
+			// AwaitingApproval — the scan is anchored to the last non-empty lines (the
+			// footer/composer chrome), not the whole frame.
+			name:     "model output quoting 'Allow once' high up + idle composer below → Idle",
+			captured: "The permission dialog has an \"Allow once\" button you can click.\n" + manyLines(14) + "Ask anything...\ntab agents  ctrl+p commands",
 			want:     StateIdle,
 		},
 	}
@@ -142,7 +151,7 @@ func TestOpenCodeAssess(t *testing.T) {
 	}{
 		{"panecommand error → unknown", "", boom, false, "", nil, StateUnknown},
 		{"isShell → shell (opencode process gone)", "bash", nil, true, "", nil, StateShell},
-		{"capture error → idle (claude-style fail-open, safe under working-positive)", "bun", nil, false, "", boom, StateIdle},
+		{"capture error → unknown (NOT a false finished-a-turn; like aider)", "bun", nil, false, "", boom, StateUnknown},
 		{"classifier routes: approval", "bun", nil, false, "Permission required\nAllow once", nil, StateAwaitingApproval},
 		{"classifier routes: working", "bun", nil, false, "Thinking\nesc interrupt", nil, StateWorking},
 		{"classifier routes: errored", "bun", nil, false, "A fatal error occurred!", nil, StateErrored},
