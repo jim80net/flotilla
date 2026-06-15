@@ -47,6 +47,7 @@ func TestIdentityFileName(t *testing.T) {
 		{"claude-code", "CLAUDE.md", false},
 		{"", "CLAUDE.md", false},           // empty surface defaults to claude-code (per roster)
 		{"aider", "CONVENTIONS.md", false}, // aider's documented conventions file (--read CONVENTIONS.md)
+		{"opencode", "AGENTS.md", false},   // OpenCode loads AGENTS.md natively (instruction.ts)
 		{"grok", "AGENTS.md", false},
 		{"cursor", "AGENTS.md", false},
 		{"made-up", "", true},

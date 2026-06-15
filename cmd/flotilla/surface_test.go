@@ -14,7 +14,8 @@ func TestValidateAgentSurfaces(t *testing.T) {
 	ok := &roster.Config{Agents: []roster.Agent{
 		{Name: "xo"}, // empty → default claude-code
 		{Name: "v12-dev", Surface: "claude-code"}, // explicit default
-		{Name: "pair", Surface: "aider"},          // the new driver
+		{Name: "pair", Surface: "aider"},          // the aider driver
+		{Name: "oc", Surface: "opencode"},         // the opencode driver
 	}}
 	if err := validateAgentSurfaces(ok); err != nil {
 		t.Fatalf("validateAgentSurfaces(aider+default) = %v, want nil", err)
