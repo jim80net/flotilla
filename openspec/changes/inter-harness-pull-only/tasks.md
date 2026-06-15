@@ -9,7 +9,7 @@
 ## 1. G1 — per-driver submit-newline method (the one code change)
 
 - [ ] 1.1 `internal/deliver`: add `SendCtrlJ(target, text)` (type lines with `C-j` newlines, then `Enter`) + a pure `sendCtrlJArgs` arg-builder; arg test (per-line `send-keys -l`, `C-j` between, final `Enter`), like `slashKeysArgs`.
-- [ ] 1.2 `internal/surface`: confirm claude/aider/opencode drivers wire `send`→`deliver.Send` (bracketed paste); document the per-driver newline-method seam. grok/cursor: add a NOTE in their drivers that the newline method is deferred to live-capture (#58/#61) — NOT assumed-confirmed.
+- [ ] 1.2 `internal/surface`: confirm claude/aider/opencode drivers wire `send`→`deliver.Send` (bracketed paste); document the per-driver newline-method seam. grok: add a NOTE in its driver that the newline method is deferred to live-capture (#58) — NOT assumed-confirmed; cursor's equivalent note lands with the cursor driver (#62/#61).
 - [ ] 1.3 Live-confirm multi-line bracketed-paste Submit for claude/aider/opencode (aider+opencode already confirmed this session; claude is the reference) — record provenance.
 
 ## 2. Mixed-surface fleet regression

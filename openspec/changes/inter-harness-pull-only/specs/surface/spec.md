@@ -6,7 +6,7 @@
 
 The system SHALL support an inter-harness fleet: the XO and `watch` daemon SHALL drive every
 desk through its per-agent surface driver, so a roster mixing harnesses (claude-code, aider,
-opencode, grok, cursor) is delivered to, assessed, and woken correctly per-driver — submission
+opencode, grok; cursor when it ships) is delivered to, assessed, and woken correctly per-driver — submission
 (`Submit`), state assessment (`Assess`), and the detector's wake injection SHALL all be
 surface-agnostic. A non-claude desk SHALL be treated as a PULL-PARTICIPANT: because it does
 not run flotilla's skill set, the XO collects its result by reading its pane/output (cued by

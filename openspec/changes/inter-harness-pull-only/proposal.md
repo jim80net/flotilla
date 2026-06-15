@@ -1,7 +1,7 @@
 ## Why
 
-The surface-driver roadmap shipped five drivers (claude-code/aider/opencode/grok/cursor)
-behind one interface. This change delivers **pillar B — inter-harness execution**: a
+The surface-driver roadmap shipped four drivers (claude-code/aider/opencode/grok)
+behind one interface, with a cursor skeleton held for its live-capture (#62). This change delivers **pillar B — inter-harness execution**: a
 flotilla fleet that COORDINATES across harnesses (a claude XO routing work to aider/
 opencode/grok desks, collecting results). It is the direct, proven payoff of the
 surface-driver work and the GOAL-#2 differentiator ("drop-in agentize ANY harness +
@@ -18,7 +18,7 @@ the inter-harness model explicit and honest.
 
 ## Scope: PULL-ONLY (option a) — the operator-ratified first increment
 
-Non-claude desks (aider/opencode/grok/cursor) are **pull-participants**: a claude desk has
+Non-claude desks (aider/opencode/grok, and cursor once it ships) are **pull-participants**: a claude desk has
 flotilla's skill set (it can `flotilla notify`/`send` to PUSH reports + take flotilla-command
 delegation); a non-claude desk just runs turns in its harness. So in this increment the XO
 **collects** a non-claude desk's result by READING its pane/files (capture), state-cued by
@@ -32,7 +32,7 @@ pull-participants** (no silent assumption they can push).
 
 - **G1 — multi-line Submit is bracketed-paste-dependent (CODE).** Every driver's `Submit`
   uses `deliver.Send` (bracketed paste + Enter), which yields literal newlines only if the
-  target enables bracketed-paste mode (`tmux.go:266-270`). Confirmed for claude/aider/opencode.
+  target enables bracketed-paste mode (`tmux.go:274-278`). Confirmed for claude/aider/opencode.
   This change ADDS a per-driver alternate newline-submit primitive (`Ctrl+J` keystroke
   newlines) so a harness without bracketed paste can submit multi-line correctly, and makes
   the newline method a per-driver choice. claude/aider/opencode stay on bracketed paste

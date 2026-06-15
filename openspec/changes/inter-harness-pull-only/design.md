@@ -22,9 +22,9 @@ resolve→Submit/Assess path so the surface-agnostic guarantee is locked.
 
 ## G1 — per-driver submit-newline method (the one code change)
 
-`deliver.Send` (`tmux.go:271-308`) submits via bracketed paste: load-buffer → `paste-buffer
+`deliver.Send` (`tmux.go:279-316`) submits via bracketed paste: load-buffer → `paste-buffer
 -p` (literal newlines) → settle → `Enter`. The literal-newline behavior holds ONLY when the
-target enables bracketed-paste mode (`tmux.go:266-270`); confirmed live for claude-code,
+target enables bracketed-paste mode (`tmux.go:274-278`); confirmed live for claude-code,
 aider (prompt_toolkit), and opencode. A harness without it would see each `\n` submit early,
 breaking multi-line delivery.
 
@@ -52,11 +52,11 @@ their captures.
 detected at runtime from a tmux pane; the driver KNOWS its harness, so a static choice is
 correct and testable.)
 
-## The pull-only inter-harness model (G2 + G5/G6 — docs)
+## The pull-only inter-harness model (G2 — docs)
 
 A new `docs/inter-harness.md` documents, honestly:
 - **The plumbing is surface-agnostic** (send/inject/Assess/wake resolve the per-agent
-  driver; proven live) — a claude XO can drive aider/opencode/grok/cursor desks today.
+  driver; proven live) — a claude XO can drive aider/opencode/grok desks today (cursor once it ships).
 - **Non-claude desks are PULL-PARTICIPANTS.** A claude desk has flotilla's skill set (it can
   `flotilla notify`/`send` to push reports + take flotilla-command delegation). A non-claude
   desk does not — it runs turns in its harness. So:
