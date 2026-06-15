@@ -6,15 +6,16 @@ import (
 	"strings"
 )
 
-// ResolveTracker returns the path the change-detector should hash for an agent: the
-// workspace state.md when it exists AND is non-empty, else `fallback` (the caller's
-// already-resolved --tracker-file / default). An empty scaffolded state.md does NOT
-// hijack the tracker (mirrors StatePointer) — only a real, populated tracker takes
-// over, so `flotilla workspace init` never silently blinds the detector.
+// ResolveTracker returns the path the continuation prompt names as {{tracker}} for an
+// agent — the XO's durable read+write state source: the workspace state.md when it
+// exists AND is non-empty, else `fallback` (the caller's already-resolved
+// --tracker-file / default). An empty scaffolded state.md does NOT hijack the tracker
+// (mirrors StatePointer) — only a real, populated tracker takes over, so `flotilla
+// workspace init` never silently changes the XO's read-source.
 //
-// This is the SINGLE source the caller MUST use for BOTH the hash target AND the
-// continuation prompt's {{tracker}} placeholder, so the path the XO is told to read
-// can never diverge from the path the detector hashes (the P1-2 invariant).
+// NOTE: the change-detector deliberately does NOT hash the tracker as a wake signal
+// (it is the XO's own output; hashing it would self-wake the XO on its own writes —
+// see internal/watch). The tracker is purely the {{tracker}} read-source here.
 func ResolveTracker(agent, fallback string) (string, error) {
 	dir, err := Dir(agent)
 	if err != nil {

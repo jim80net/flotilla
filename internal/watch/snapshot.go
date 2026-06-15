@@ -25,9 +25,15 @@ type Snapshot struct {
 	// name), including the XO. The diff against the next tick's states is what
 	// the materiality predicate consumes.
 	DeskStates map[string]surface.State `json:"desk_states"`
-	// TrackerHash is the content hash of the state-tracker file (.flotilla-state.md)
-	// as of the last tick; a change is a material signal.
-	TrackerHash string `json:"tracker_hash"`
+	// SignalHash is the content hash of the OPTIONAL external signal file as of the
+	// last tick; a change is a material wake signal. It is deliberately NOT the XO's
+	// own state tracker (.flotilla-state.md): the XO writes that itself, so hashing
+	// it would self-wake the XO on its own writes. Empty when no signal file is
+	// configured (then it is never material). NOTE: the json tag was renamed
+	// tracker_hash→signal_hash; a pre-rename on-disk snapshot loads this field empty,
+	// which is harmless — empty ⇒ non-material, and the default config runs with no
+	// signal file, so SignalHash starts empty regardless.
+	SignalHash string `json:"signal_hash"`
 	// XOSettled records that the XO replied idle (or hit the self-continuation
 	// cap) and should not be self-continuation-woken until an external material
 	// change or an operator message. Persisted so a daemon restart does not
