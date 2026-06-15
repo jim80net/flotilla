@@ -47,14 +47,18 @@ func Dir(agent string) (string, error) {
 }
 
 // IdentityFileName returns the desk identity file name for a surface, by the agent's
-// native convention: claude-code (and the empty default) → CLAUDE.md; grok/cursor →
-// AGENTS.md. An unknown surface is an error rather than a guessed name — the per-surface
-// load mechanism is verified per driver (the Grok/Cursor AGENTS.md load is unverified
+// native convention: claude-code (and the empty default) → CLAUDE.md; aider →
+// CONVENTIONS.md (its documented conventions file, loaded via `aider --read
+// CONVENTIONS.md`); grok/cursor → AGENTS.md. An unknown surface is an error rather
+// than a guessed name — the per-surface load mechanism is verified per driver (the
+// aider --read mechanism is documented; the Grok/Cursor AGENTS.md load is unverified
 // and deferred to the driver phase).
 func IdentityFileName(surface string) (string, error) {
 	switch surface {
 	case "", "claude-code":
 		return "CLAUDE.md", nil
+	case "aider":
+		return "CONVENTIONS.md", nil
 	case "grok", "cursor":
 		return "AGENTS.md", nil
 	default:
