@@ -24,8 +24,10 @@ TDD → PR), already through a ratified design gate.
   `Submit` returns `nil` the body is in the composer, so a retry re-sends **Enter alone**,
   never re-pasting (which would double-submit). Not a new `Driver` method — the interface
   is unchanged.
-- **`surface.ConfirmSubmit(d, pane, text, escalate, sleep)`** — confirmed delivery,
-  orchestrating the existing `Driver.Submit` + `Driver.Assess`:
+- **`surface.Confirm{SendEnter, Sleep}.Submit(d, pane, text)`** — confirmed delivery,
+  orchestrating the existing `Driver.Submit` + `Driver.Assess`. It is PURE MECHANISM
+  returning a typed error; escalation is the CALLER's policy (kind-aware — relay alerts
+  loudly, ticks do not — and only the caller knows the kind):
   - **idle-gate** (deliver only when idle): `Working`→`ErrBusy`; `Shell`→`ErrCrashed`
     (escalate, do not defer into a crash); `Idle`→submit; `Unknown`/`Awaiting*`/`Errored`
     →`ErrTransient` (bounded re-assess, not a busy-defer);

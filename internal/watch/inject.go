@@ -26,12 +26,23 @@ const busyDeferDelay = 5 * time.Second
 // sustained busy. Once per job, so a normal turn never cries wolf.
 const busyEscalateAt = 6
 
-// maxRelayDeferrals BOUNDS the defer: after this many re-enqueues (~maxRelayDeferrals×
+// maxRelayDeferrals BOUNDS the busy defer: after this many re-enqueues (~maxRelayDeferrals×
 // busyDeferDelay ≈ 5 min) a relay that still cannot be delivered is escalated AND DROPPED,
 // rather than re-enqueued forever. An un-droppable message against a wedged XO would
 // otherwise be an unbounded timer chain; a genuinely wedged XO is independently crash/
 // wedge-alerted by the detector's liveness watchdog.
 const maxRelayDeferrals = 60
+
+// transientDeferDelay / maxTransientReassess are the SHORT, low-capped policy for a relay
+// whose pane state is transiently UNCERTAIN (Unknown/Awaiting*/Errored ⇒ surface.ErrTransient),
+// distinct from a genuinely busy XO. A capture glitch (the common ErrTransient cause) clears
+// within a poll or two, so we re-assess quickly and give up much sooner than the busy bound —
+// a pane that stays uncertain for this long is genuinely broken (and is independently caught by
+// the detector), so we escalate + drop rather than re-assess for the full busy ~5 min.
+const (
+	transientDeferDelay  = 1 * time.Second
+	maxTransientReassess = 5
+)
 
 // Job is one delivery: a message destined for an agent's pane.
 type Job struct {
@@ -67,9 +78,9 @@ type Injector struct {
 	stopped   chan struct{} // Enqueue: stop accepting (closed once)
 	done      chan struct{}
 	once      sync.Once
-	mirror    func(Job)    // optional: called after a CONFIRMED delivery (audit trail)
-	escalate  func(string) // optional: a LOUD operator alert for a failed/undeliverable relay
-	reEnqueue func(Job)    // how a deferred (busy) relay is re-enqueued; injectable for tests
+	mirror    func(Job)                // optional: called after a CONFIRMED delivery (audit trail)
+	escalate  func(string)             // optional: a LOUD operator alert for a failed/undeliverable relay
+	reEnqueue func(Job, time.Duration) // how a deferred relay is re-enqueued after a delay; injectable for tests
 }
 
 // SetMirror installs a hook called after each CONFIRMED delivery, for the audit
@@ -91,9 +102,10 @@ func NewInjector(send SendFunc, buffer int) *Injector {
 		stopped: make(chan struct{}),
 		done:    make(chan struct{}),
 	}
-	// A busy relay is re-enqueued OFF the worker after busyDeferDelay, so the single worker
-	// stays free for other desks. Enqueue drops safely after Stop, so a late timer is a no-op.
-	in.reEnqueue = func(j Job) { time.AfterFunc(busyDeferDelay, func() { in.Enqueue(j) }) }
+	// A deferred relay is re-enqueued OFF the worker after the given delay, so the single
+	// worker stays free for other desks. Enqueue drops safely after Stop, so a late timer is a
+	// no-op (Stop does not cancel pending timers; they fire ≤delay later and drop — bounded).
+	in.reEnqueue = func(j Job, delay time.Duration) { time.AfterFunc(delay, func() { in.Enqueue(j) }) }
 	return in
 }
 
@@ -146,18 +158,31 @@ func (in *Injector) deliver(j Job) {
 	}
 }
 
-// handleBusy applies the kind-aware busy policy. A relay (operator) message is DEFERRED
-// (re-enqueued after a delay so the worker stays free), bounded by maxRelayDeferrals, with one
-// loud alert at busyEscalateAt and a final escalate+drop at the bound — an operator message is
-// never silently lost, but also never re-enqueued forever against a wedged XO. A heartbeat/
-// detector tick is time-relative: it is DROPPED (the next tick re-evaluates from current
-// state); re-delivering a stale tick after the turn ends would double-prompt.
+// handleBusy applies the kind-aware not-idle policy for a busy (ErrBusy) or transiently-
+// uncertain (ErrTransient) result. A heartbeat/detector tick is time-relative and is DROPPED
+// (the next tick re-evaluates; re-delivering a stale tick would double-prompt). A relay
+// (operator) message is DEFERRED — re-enqueued OFF the worker so it stays free — and never
+// silently lost, but also never re-enqueued forever: it is bounded and escalated, with the
+// cadence + bound + wording chosen by CAUSE. Busy: re-check every busyDeferDelay, one "QUEUED"
+// alert at busyEscalateAt, escalate+drop at maxRelayDeferrals (~5 min). Transient: a SHORT
+// transientDeferDelay re-assess, capped low at maxTransientReassess (a glitch clears fast; a
+// pane that stays uncertain is broken and the detector catches it).
 func (in *Injector) handleBusy(j Job, cause error) {
 	if !isRelay(j.Kind) {
-		log.Printf("flotilla watch: drop %s to %q (busy): %v", deliveryKind(j.Kind), j.Agent, cause)
+		log.Printf("flotilla watch: drop %s to %q (not idle): %v", deliveryKind(j.Kind), j.Agent, cause)
 		return
 	}
 	j.deferrals++ // j is the worker's local copy; the incremented value rides the re-enqueue
+	if errors.Is(cause, surface.ErrTransient) {
+		if j.deferrals >= maxTransientReassess {
+			in.raise("operator message to %q NOT delivered — XO pane state stayed uncertain (%d attempts); DROPPED", j.Agent, j.deferrals)
+			log.Printf("flotilla watch: relay to %q dropped after %d uncertain re-assessments", j.Agent, j.deferrals)
+			return
+		}
+		in.reEnqueue(j, transientDeferDelay)
+		return
+	}
+	// ErrBusy: a genuinely busy XO — defer at the busy cadence, bounded.
 	if j.deferrals >= maxRelayDeferrals {
 		in.raise("operator message to %q UNDELIVERABLE — XO busy for too long (%d attempts); DROPPED", j.Agent, j.deferrals)
 		log.Printf("flotilla watch: relay to %q dropped after %d busy deferrals", j.Agent, j.deferrals)
@@ -166,7 +191,7 @@ func (in *Injector) handleBusy(j Job, cause error) {
 	if j.deferrals == busyEscalateAt {
 		in.raise("operator message to %q is QUEUED — the XO has been busy ~%s; will deliver when it goes idle", j.Agent, time.Duration(busyEscalateAt)*busyDeferDelay)
 	}
-	in.reEnqueue(j)
+	in.reEnqueue(j, busyDeferDelay)
 }
 
 // raise emits a LOUD operator alert (no-op if no escalate hook is wired).

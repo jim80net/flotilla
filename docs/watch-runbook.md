@@ -133,6 +133,13 @@ XO is idle (or recover it). `flotilla send` from the shell behaves the same: it 
 `delivered … — turn confirmed` on success, or exits non-zero with `… is busy … NOT
 delivered` so you know to retry.
 
+Heartbeat / change-detector ticks flow through the same confirmed delivery (so they too
+recover a dropped Enter), but they are **time-relative**: a tick that arrives while the XO
+is busy is dropped, not deferred (the next tick re-evaluates), and a failed tick never
+escalates (XO liveness is the watchdog's job, see Down alerts). The trade is a small added
+per-tick cost — up to ~1.75 s of confirm polling on a tick that has to retry — paid off the
+delivery worker, so it never stalls other desks.
+
 ### Relay open is non-fatal (cold-boot / transient-network resilience)
 
 The safety-critical clock (heartbeat + watchdog) and the optional inbound relay

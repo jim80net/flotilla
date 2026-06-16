@@ -23,7 +23,7 @@ type rig struct {
 func newRig(sendErr error) *rig {
 	r := &rig{}
 	r.in = NewInjector(func(string, string) error { return sendErr }, 0)
-	r.in.reEnqueue = func(j Job) { r.deferred = append(r.deferred, j) }
+	r.in.reEnqueue = func(j Job, _ time.Duration) { r.deferred = append(r.deferred, j) }
 	r.in.SetEscalate(func(msg string) { r.alerts = append(r.alerts, msg) })
 	r.in.SetMirror(func(j Job) { r.mirrored = append(r.mirrored, j) })
 	return r
@@ -77,29 +77,47 @@ func TestInjectorBusyRelayBoundedDropAtMax(t *testing.T) {
 	}
 }
 
-func TestInjectorDropsBusyHeartbeat(t *testing.T) {
-	// A heartbeat/detector tick is time-relative: a busy result DROPS it (the next tick
-	// re-evaluates), never deferred, never escalated.
+func TestInjectorDropsBusyTick(t *testing.T) {
+	// A heartbeat/detector tick is time-relative: a busy OR transient result DROPS it (the next
+	// tick re-evaluates), never deferred, never escalated.
 	for _, kind := range []string{"heartbeat", "detector"} {
-		r := newRig(surface.ErrBusy)
-		r.in.deliver(Job{Agent: "hydra-ops", Kind: kind})
-		if len(r.deferred) != 0 {
-			t.Errorf("%s: deferred = %d, want 0 (a busy tick is dropped, not deferred)", kind, len(r.deferred))
-		}
-		if len(r.alerts) != 0 {
-			t.Errorf("%s: alerts = %d, want 0 (a tick never escalates)", kind, len(r.alerts))
+		for _, cause := range []error{surface.ErrBusy, surface.ErrTransient} {
+			r := newRig(cause)
+			r.in.deliver(Job{Agent: "hydra-ops", Kind: kind})
+			if len(r.deferred) != 0 {
+				t.Errorf("%s/%v: deferred = %d, want 0 (a not-idle tick is dropped, not deferred)", kind, cause, len(r.deferred))
+			}
+			if len(r.alerts) != 0 {
+				t.Errorf("%s/%v: alerts = %d, want 0 (a tick never escalates)", kind, cause, len(r.alerts))
+			}
 		}
 	}
 }
 
-func TestInjectorTransientRelayDefers(t *testing.T) {
-	// A transiently-uncertain state (Unknown/Awaiting/Errored ⇒ ErrTransient) for a relay is
-	// re-assessed via the same bounded re-enqueue (never fired-into, never silently dropped).
-	r := newRig(surface.ErrTransient)
-	r.in.deliver(Job{Agent: "hydra-ops", Kind: "relay"})
-	if len(r.deferred) != 1 {
-		t.Errorf("deferred = %d, want 1 (a transient relay is re-assessed, not fired-into)", len(r.deferred))
-	}
+func TestInjectorTransientRelayReassessesThenDropsBounded(t *testing.T) {
+	// A transiently-uncertain relay (Unknown/Awaiting/Errored ⇒ ErrTransient) is re-assessed —
+	// never fired-into, never silently dropped — on the SHORT transient cadence, and bounded by
+	// maxTransientReassess (much lower than the busy bound; a glitch clears fast).
+	t.Run("below the cap → re-assessed", func(t *testing.T) {
+		r := newRig(surface.ErrTransient)
+		r.in.deliver(Job{Agent: "hydra-ops", Kind: "relay"})
+		if len(r.deferred) != 1 {
+			t.Errorf("deferred = %d, want 1 (a transient relay is re-assessed, not fired-into)", len(r.deferred))
+		}
+		if r.deferred[0].deferrals != 1 {
+			t.Errorf("re-enqueued deferrals = %d, want 1", r.deferred[0].deferrals)
+		}
+	})
+	t.Run("at the transient cap → escalate + drop (NOT the busy bound)", func(t *testing.T) {
+		r := newRig(surface.ErrTransient)
+		r.in.deliver(Job{Agent: "hydra-ops", Kind: "relay", deferrals: maxTransientReassess - 1})
+		if len(r.deferred) != 0 {
+			t.Errorf("deferred = %d, want 0 (transient is capped LOW and drops, not the 5-min busy bound)", len(r.deferred))
+		}
+		if len(r.alerts) != 1 || !strings.Contains(r.alerts[0], "uncertain") {
+			t.Errorf("alerts = %v, want exactly one 'uncertain'-worded drop alert (not the busy wording)", r.alerts)
+		}
+	})
 }
 
 func TestInjectorRelayFailureEscalatesNoSuccess(t *testing.T) {
@@ -145,6 +163,18 @@ func TestInjectorConfirmedDeliveryLogsAndMirrors(t *testing.T) {
 	}
 }
 
+func TestInjectorDeferAfterStopDropsSafely(t *testing.T) {
+	// A busy-defer timer that fires AFTER Stop must drop safely via Enqueue's stopped guard —
+	// not panic, not block. Exercises the REAL (timer-based) reEnqueue with a 0 delay so it
+	// fires at once, after Stop.
+	in := NewInjector(func(string, string) error { return nil }, 1)
+	in.Start()
+	in.Stop()
+	in.reEnqueue(Job{Agent: "x", Kind: "relay"}, 0) // schedules an Enqueue ~immediately
+	time.Sleep(20 * time.Millisecond)               // let the timer fire onto a stopped injector
+	in.Stop()                                       // idempotent; must not panic
+}
+
 // regrDriver is a surface.Driver whose Assess returns a scripted sequence, for the 06:07
 // regression: it lets one delivery see a busy XO and the next see an idle-then-working one.
 type regrDriver struct {
@@ -180,7 +210,7 @@ func TestRelayBusyThenIdleRegression0607(t *testing.T) {
 	var mirrored, deferred []Job
 	var alerts []string
 	in := NewInjector(func(_, msg string) error { return confirm.Submit(drv, "hydra-ops-pane", msg) }, 0)
-	in.reEnqueue = func(j Job) { deferred = append(deferred, j) }
+	in.reEnqueue = func(j Job, _ time.Duration) { deferred = append(deferred, j) }
 	in.SetMirror(func(j Job) { mirrored = append(mirrored, j) })
 	in.SetEscalate(func(s string) { alerts = append(alerts, s) })
 
@@ -227,7 +257,7 @@ func TestInjectorWorkerNotBlockedByBusyDefer(t *testing.T) {
 		atomic.AddInt32(&delivered, 1)
 		return nil
 	}, 4)
-	in.reEnqueue = func(Job) {} // swallow the defer so the busy relay does not loop forever
+	in.reEnqueue = func(Job, time.Duration) {} // swallow the defer so the busy relay does not loop forever
 	in.Start()
 	var wg sync.WaitGroup
 	for i := 0; i < 5; i++ {

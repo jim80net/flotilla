@@ -78,8 +78,8 @@ type Confirm struct {
 // escalate per the job's kind. The caller may hold a higher-level per-pane lock across this
 // call to serialize it against other in-process pane writers (the watch Injector holds
 // paneMu so the detector's /clear rotate cannot interleave between the submit and the
-// retry); Assess and Submit take the per-pane flock themselves, so this needs no lock of its
-// own.
+// retry); Submit and SendEnter take the per-pane flock themselves (Assess is a lockless
+// read-only capture), so this needs no lock of its own.
 func (c Confirm) Submit(d Driver, pane, text string) error {
 	// 1. idle-gate — deliver ONLY when idle; never fire into a busy/crashed/uncertain composer.
 	switch d.Assess(pane) {
