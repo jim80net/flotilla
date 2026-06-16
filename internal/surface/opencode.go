@@ -44,14 +44,14 @@ func (openCode) Name() string { return "opencode" }
 func (c openCode) Submit(pane, text string) error { return c.send(pane, text) }
 
 // Assess resolves the pane's rendered state. The pane-command / shell branches
-// mirror claude-code/aider. A pane CAPTURE error returns Unknown (like aider, NOT
-// claude-code's fail-open-to-Idle): a transient capture glitch on a WORKING desk
-// that returned Idle would diff as Working→Idle = "finished a turn" (materiality.go:51)
-// and fire one spurious wake — the detector diffs whatever Assess returns this tick
-// (detector.go:251,279,302) and only StateShell is debounced (detector.go:341-345).
-// Unknown is treated as non-material into AND out of (materiality.go:48), so a glitch
-// produces zero wakes regardless of polarity — strictly safer. (claude-code carries
-// the same latent over-wake from its capture-err→Idle; tracked in #55.)
+// mirror claude-code/aider. A pane CAPTURE error returns Unknown: a transient capture
+// glitch on a WORKING desk that returned Idle would diff as Working→Idle = "finished a
+// turn" (materiality.go:51) and fire one spurious wake — the detector diffs whatever
+// Assess returns this tick (detector.go:251,279,302) and only StateShell is debounced
+// (detector.go:341-345). Unknown is treated as non-material into AND out of
+// (materiality.go:48), so a glitch produces zero wakes regardless of polarity — strictly
+// safer. (All five drivers now return Unknown on capture-error — #55 converged claude-code,
+// which historically returned Idle here.)
 func (c openCode) Assess(pane string) State {
 	cmd, err := c.paneCommand(pane)
 	if err != nil {
