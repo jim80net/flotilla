@@ -1,0 +1,249 @@
+package watch
+
+import (
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/jim80net/flotilla/internal/surface"
+)
+
+// rig builds an Injector wired for white-box dispatch tests: send returns a scripted error,
+// reEnqueue and escalate are recorded (no timers, no goroutine), so in.deliver(job) can be
+// called directly and its busy-defer / escalation policy inspected deterministically.
+type rig struct {
+	in       *Injector
+	deferred []Job // jobs the busy-defer re-enqueued
+	alerts   []string
+	mirrored []Job
+}
+
+func newRig(sendErr error) *rig {
+	r := &rig{}
+	r.in = NewInjector(func(string, string) error { return sendErr }, 0)
+	r.in.reEnqueue = func(j Job) { r.deferred = append(r.deferred, j) }
+	r.in.SetEscalate(func(msg string) { r.alerts = append(r.alerts, msg) })
+	r.in.SetMirror(func(j Job) { r.mirrored = append(r.mirrored, j) })
+	return r
+}
+
+func TestInjectorDefersBusyRelay(t *testing.T) {
+	// A busy RELAY is re-enqueued (deferred), not dropped, not yet escalated — and the
+	// re-enqueued copy carries deferrals+1 (OCR-H3: the count must ride the new Job).
+	r := newRig(surface.ErrBusy)
+	r.in.deliver(Job{Agent: "hydra-ops", Message: "hi", Kind: "relay"})
+	if len(r.deferred) != 1 {
+		t.Fatalf("deferred %d jobs, want 1 (a busy relay is re-enqueued)", len(r.deferred))
+	}
+	if r.deferred[0].deferrals != 1 {
+		t.Errorf("re-enqueued deferrals = %d, want 1 (the incremented count must ride the new Job)", r.deferred[0].deferrals)
+	}
+	if len(r.alerts) != 0 {
+		t.Errorf("alerts = %d, want 0 (below the escalate threshold)", len(r.alerts))
+	}
+	if len(r.mirrored) != 0 {
+		t.Errorf("mirrored = %d, want 0 (nothing was confirmed delivered)", len(r.mirrored))
+	}
+}
+
+func TestInjectorBusyRelayEscalatesOnceAtThreshold(t *testing.T) {
+	// At busyEscalateAt deferrals, ONE loud alert fires (queued behind a long turn) and the
+	// message is still deferred (not yet dropped).
+	r := newRig(surface.ErrBusy)
+	r.in.deliver(Job{Agent: "hydra-ops", Kind: "relay", deferrals: busyEscalateAt - 1})
+	if len(r.alerts) != 1 {
+		t.Fatalf("alerts = %d, want exactly 1 at the escalate threshold", len(r.alerts))
+	}
+	if !strings.Contains(r.alerts[0], "QUEUED") {
+		t.Errorf("alert = %q, want a 'queued behind a long turn' message", r.alerts[0])
+	}
+	if len(r.deferred) != 1 {
+		t.Errorf("deferred = %d, want 1 (still deferred at the escalate threshold, not dropped)", len(r.deferred))
+	}
+}
+
+func TestInjectorBusyRelayBoundedDropAtMax(t *testing.T) {
+	// At maxRelayDeferrals the message is escalated AND DROPPED (no further re-enqueue) — the
+	// bound that prevents an unbounded timer chain against a wedged XO.
+	r := newRig(surface.ErrBusy)
+	r.in.deliver(Job{Agent: "hydra-ops", Kind: "relay", deferrals: maxRelayDeferrals - 1})
+	if len(r.deferred) != 0 {
+		t.Errorf("deferred = %d, want 0 (the bound DROPS rather than re-enqueues)", len(r.deferred))
+	}
+	if len(r.alerts) != 1 || !strings.Contains(r.alerts[0], "UNDELIVERABLE") {
+		t.Errorf("alerts = %v, want exactly one UNDELIVERABLE drop alert", r.alerts)
+	}
+}
+
+func TestInjectorDropsBusyHeartbeat(t *testing.T) {
+	// A heartbeat/detector tick is time-relative: a busy result DROPS it (the next tick
+	// re-evaluates), never deferred, never escalated.
+	for _, kind := range []string{"heartbeat", "detector"} {
+		r := newRig(surface.ErrBusy)
+		r.in.deliver(Job{Agent: "hydra-ops", Kind: kind})
+		if len(r.deferred) != 0 {
+			t.Errorf("%s: deferred = %d, want 0 (a busy tick is dropped, not deferred)", kind, len(r.deferred))
+		}
+		if len(r.alerts) != 0 {
+			t.Errorf("%s: alerts = %d, want 0 (a tick never escalates)", kind, len(r.alerts))
+		}
+	}
+}
+
+func TestInjectorTransientRelayDefers(t *testing.T) {
+	// A transiently-uncertain state (Unknown/Awaiting/Errored ⇒ ErrTransient) for a relay is
+	// re-assessed via the same bounded re-enqueue (never fired-into, never silently dropped).
+	r := newRig(surface.ErrTransient)
+	r.in.deliver(Job{Agent: "hydra-ops", Kind: "relay"})
+	if len(r.deferred) != 1 {
+		t.Errorf("deferred = %d, want 1 (a transient relay is re-assessed, not fired-into)", len(r.deferred))
+	}
+}
+
+func TestInjectorRelayFailureEscalatesNoSuccess(t *testing.T) {
+	// A real delivery failure (ErrUnconfirmed / ErrCrashed) for a relay escalates LOUDLY and
+	// emits NO success log and NO mirror — the inverse of the silent-success bug.
+	for _, e := range []error{surface.ErrUnconfirmed, surface.ErrCrashed} {
+		r := newRig(e)
+		buf := captureLog(t)
+		r.in.deliver(Job{Agent: "hydra-ops", Message: "important", Kind: "relay"})
+		if len(r.alerts) != 1 {
+			t.Errorf("%v: alerts = %d, want 1 (loud on a failed operator message)", e, len(r.alerts))
+		}
+		if len(r.mirrored) != 0 {
+			t.Errorf("%v: mirrored = %d, want 0 (nothing landed)", e, len(r.mirrored))
+		}
+		if strings.Contains(buf.String(), "delivered to") {
+			t.Errorf("%v: a failed delivery emitted a success log: %q", e, buf.String())
+		}
+	}
+}
+
+func TestInjectorTickFailureDoesNotEscalate(t *testing.T) {
+	// A failed heartbeat/detector delivery logs but does NOT escalate (only operator messages
+	// are loud; XO liveness is the detector watchdog's job).
+	r := newRig(surface.ErrUnconfirmed)
+	r.in.deliver(Job{Agent: "hydra-ops", Kind: "detector"})
+	if len(r.alerts) != 0 {
+		t.Errorf("alerts = %d, want 0 (a tick failure does not escalate)", len(r.alerts))
+	}
+}
+
+func TestInjectorConfirmedDeliveryLogsAndMirrors(t *testing.T) {
+	// A CONFIRMED delivery (send → nil) still logs success + mirrors (existing behavior
+	// preserved now that nil means "turn started", not "tmux ran").
+	r := newRig(nil)
+	buf := captureLog(t)
+	r.in.deliver(Job{Agent: "hydra-ops", Message: "go", Kind: "relay"})
+	if len(r.mirrored) != 1 {
+		t.Errorf("mirrored = %d, want 1 (a confirmed delivery is mirrored)", len(r.mirrored))
+	}
+	if !strings.Contains(buf.String(), "delivered to") {
+		t.Errorf("confirmed delivery missing success log: %q", buf.String())
+	}
+}
+
+// regrDriver is a surface.Driver whose Assess returns a scripted sequence, for the 06:07
+// regression: it lets one delivery see a busy XO and the next see an idle-then-working one.
+type regrDriver struct {
+	assess  []surface.State
+	i       int
+	submits int
+}
+
+func (d *regrDriver) Name() string                     { return "regr" }
+func (d *regrDriver) Submit(string, string) error      { d.submits++; return nil }
+func (d *regrDriver) Rotate(string) error              { return nil }
+func (d *regrDriver) RotateStrategy() surface.Strategy { return surface.SlashCommand }
+func (d *regrDriver) Assess(string) surface.State {
+	if d.i >= len(d.assess) {
+		return d.assess[len(d.assess)-1]
+	}
+	s := d.assess[d.i]
+	d.i++
+	return s
+}
+
+func TestRelayBusyThenIdleRegression0607(t *testing.T) {
+	// The 2026-06-16 06:07 silent-drop, end-to-end through the real surface.Confirm + Injector:
+	// an operator message arriving mid-turn must NOT be submitted (it is deferred) and must be
+	// reported delivered (logged + mirrored) ONLY once the XO is idle and a turn actually
+	// starts. Executable proof that "delivered" now means "turn started", not "tmux ran".
+	drv := &regrDriver{assess: []surface.State{
+		surface.StateWorking, // delivery 1: gate sees Working → ErrBusy, NO submit (the fix)
+		surface.StateIdle,    // delivery 2 (re-enqueued): gate sees Idle → submit
+		surface.StateWorking, // delivery 2: confirm poll sees the Idle→Working edge → confirmed
+	}}
+	confirm := surface.Confirm{SendEnter: func(string) error { return nil }, Sleep: func(time.Duration) {}}
+	var mirrored, deferred []Job
+	var alerts []string
+	in := NewInjector(func(_, msg string) error { return confirm.Submit(drv, "hydra-ops-pane", msg) }, 0)
+	in.reEnqueue = func(j Job) { deferred = append(deferred, j) }
+	in.SetMirror(func(j Job) { mirrored = append(mirrored, j) })
+	in.SetEscalate(func(s string) { alerts = append(alerts, s) })
+
+	buf := captureLog(t)
+	job := Job{Agent: "hydra-ops", Message: "operator: are you there?", Kind: "relay"}
+
+	// Delivery 1 — XO is mid-turn → deferred; NEVER submitted; NEVER logged/mirrored as delivered.
+	in.deliver(job)
+	if drv.submits != 0 {
+		t.Fatalf("submitted into a busy composer — the 06:07 bug: submits=%d", drv.submits)
+	}
+	if len(deferred) != 1 {
+		t.Fatalf("a busy operator message was not deferred: deferred=%d", len(deferred))
+	}
+	if len(mirrored) != 0 || strings.Contains(buf.String(), "delivered to") {
+		t.Fatalf("a busy (undelivered) message was reported delivered — silent-success regression: log=%q mirrored=%d", buf.String(), len(mirrored))
+	}
+
+	// Delivery 2 — the re-enqueued job, XO now idle → submit + confirm → logged + mirrored.
+	in.deliver(deferred[0])
+	if drv.submits != 1 {
+		t.Fatalf("the idle re-delivery did not submit: submits=%d", drv.submits)
+	}
+	if len(mirrored) != 1 {
+		t.Fatalf("a confirmed delivery was not mirrored: mirrored=%d", len(mirrored))
+	}
+	if !strings.Contains(buf.String(), "delivered to") {
+		t.Fatalf("a confirmed delivery left no success log: %q", buf.String())
+	}
+	if len(alerts) != 0 {
+		t.Fatalf("unexpected escalation on a successful delivery: %v", alerts)
+	}
+}
+
+func TestInjectorWorkerNotBlockedByBusyDefer(t *testing.T) {
+	// The defer is OFF the worker: a busy relay re-enqueues via the (here no-op) hook and
+	// returns immediately, so a second desk's job is delivered without waiting. Integration
+	// flavor: a real worker, a send that is busy for one agent and idle for another.
+	var delivered int32
+	in := NewInjector(func(agent, _ string) error {
+		if agent == "busy-desk" {
+			return surface.ErrBusy
+		}
+		atomic.AddInt32(&delivered, 1)
+		return nil
+	}, 4)
+	in.reEnqueue = func(Job) {} // swallow the defer so the busy relay does not loop forever
+	in.Start()
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); in.Enqueue(Job{Agent: "busy-desk", Kind: "relay"}) }()
+	}
+	wg.Add(1)
+	go func() { defer wg.Done(); in.Enqueue(Job{Agent: "other-desk", Kind: "relay"}) }()
+	wg.Wait()
+	// Give the worker a moment to drain.
+	deadline := time.Now().Add(time.Second)
+	for atomic.LoadInt32(&delivered) < 1 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	in.Stop()
+	if atomic.LoadInt32(&delivered) < 1 {
+		t.Error("the other desk's delivery was blocked behind the busy relay — the worker stalled")
+	}
+}
