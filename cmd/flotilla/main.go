@@ -48,6 +48,8 @@ func run(args []string) error {
 		return cmdResume(args[1:])
 	case "workspace":
 		return cmdWorkspace(args[1:])
+	case "push-snippet":
+		return cmdPushSnippet(args[1:])
 	case "version", "-v", "--version":
 		fmt.Println("flotilla " + version)
 		return nil
@@ -75,6 +77,7 @@ usage:
   flotilla resume <agent> [--launch <path>] [--force]  (re)start a dead desk from its host-local launch recipe
   flotilla workspace init <agent>                     scaffold the per-agent ~/.flotilla/<agent>/ home
   flotilla workspace path <agent>                     print an agent's workspace directory
+  flotilla push-snippet <desk-agent>                  print the smart-push convention to append to a non-claude desk's identity file (secret-free; reports to the XO via send)
   flotilla version
   flotilla help
 
