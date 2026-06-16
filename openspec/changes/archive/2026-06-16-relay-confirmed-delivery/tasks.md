@@ -45,8 +45,8 @@
 ## 6. review + ship
 
 - [x] 6.1 `gofmt -l` clean; `go vet`/`go build ./...`/`go test -race ./...` green.
-- [ ] 6.2 `/systems-review` AND `/open-code-review` in parallel on the IMPLEMENTATION diff; resolve findings.
-- [ ] 6.3 PR referencing this change; CI green; merge on clean gates. Archive the change; checkpoint the XO.
+- [x] 6.2 `/systems-review` AND `/open-code-review` in parallel on the IMPLEMENTATION diff — both SOUND/no merge-blockers; findings folded (commit d2e8186: transient policy M1/P3-1 + M2/L1/L2/L3). P2-1 (wiring integration test) deferred per both reviewers → issue #72.
+- [x] 6.3 PR #71 — CI green; merged + deployed + VERIFIED LIVE (XO, 2026-06-16). Change archived.
 
 > **Empirical validations (per verify-before-acting):** (a) a bare Enter on an idle/empty
 > claude composer is a no-op (validate live on a SCRATCH claude pane — not the live XO);
