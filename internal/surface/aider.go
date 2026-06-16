@@ -77,7 +77,7 @@ func (aider) RotateStrategy() Strategy { return SlashCommand }
 // --- pure state classifier (the testable core, the aider analogue of deliver.ParseBusy) ---
 
 // aiderTail bounds every marker scan to the live bottom region of the pane, like
-// deliver.ParseBusy (busy.go:42-44). aider prints approvals and errors into the
+// deliver.ParseBusy's tail scope. aider prints approvals and errors into the
 // scrollback and then returns to a prompt, so a whole-buffer scan would
 // false-positive on a stale string; only the bottom region decides state. 12
 // lines covers a multi-line approval subject plus its prompt line.
