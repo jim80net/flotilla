@@ -87,6 +87,15 @@ done
 
 # Generate via pure-bash placeholder substitution — NOT sed/envsubst: the
 # ExecStartPre line contains $(seq 1 30)/$i and %h that those tools would mangle.
+#
+# Disable patsub_replacement (bash 5.2+ default-ON): with it on, a literal `&` in a
+# ${var//pat/repl} REPLACEMENT expands to the matched text — so a path value
+# containing `&` would corrupt the substitution (the `&` becomes the placeholder
+# token, surviving the fail-loud guard with a misleading error). We want every value
+# substituted LITERALLY. Unsetting it makes `&` literal uniformly for ALL keys, and
+# degrades gracefully on bash <5.2 (where the option does not exist and `&` was
+# already literal). No substitution here uses `&`-as-matched-text.
+shopt -u patsub_replacement 2>/dev/null || true
 content="$(cat "$TEMPLATE")"
 content="${content//@FLOTILLA_WORKDIR@/$FLOTILLA_WORKDIR}"
 content="${content//@FLOTILLA_BIN@/$FLOTILLA_BIN}"
@@ -107,9 +116,12 @@ fi
 content="${content//@FLOTILLA_BACKLOG_ARG@/$backlog_arg}"
 
 # Fail loudly if any placeholder survived (a typo'd or newly-added template token).
+# The offender-grep charset includes * and . so it always prints SOMETHING that the
+# `*@FLOTILLA_*@*` glob can match (a literal `@FLOTILLA_*@` in a template comment would
+# trip the glob but be invisible to a [A-Z_]-only grep — an empty, confusing error).
 if [[ "$content" == *@FLOTILLA_*@* ]]; then
   echo "error: unsubstituted placeholder(s) remain in the generated unit:" >&2
-  printf '%s\n' "$content" | grep -o '@FLOTILLA_[A-Z_]*@' | sort -u >&2
+  printf '%s\n' "$content" | grep -o '@FLOTILLA_[A-Z_.*]*@' | sort -u >&2
   exit 1
 fi
 

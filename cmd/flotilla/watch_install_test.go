@@ -224,6 +224,22 @@ func TestInstallerBacklogUnsetOmitsArg(t *testing.T) {
 	}
 }
 
+// A backlog path containing `&` must render LITERALLY. bash 5.2+ enables
+// patsub_replacement by default, under which a `&` in a ${var//pat/repl} replacement
+// expands to the matched text — corrupting the path into the placeholder token and
+// tripping the fail-loud guard. The installer disables patsub_replacement so every
+// value substitutes literally; this locks that contract (it covers all keys uniformly).
+func TestInstallerBacklogPathWithAmpersand(t *testing.T) {
+	unit := renderUnitEnv(t, backlogEnv(t, "/srv/fleet/a&b.md"))
+	if m := placeholderRe.FindAllString(unit, -1); len(m) > 0 {
+		t.Fatalf("unsubstituted placeholders remain (& corrupted the substitution): %v", m)
+	}
+	want := "ExecStart=%h/go/bin/flotilla watch --roster /srv/fleet/flotilla.json --secrets /srv/fleet/secrets.env --ack-file /srv/fleet/xo-alive --backlog-file /srv/fleet/a&b.md"
+	if got := execLine(t, unit); got != want {
+		t.Errorf("ExecStart with `&` in backlog path:\n got:  %q\n want: %q", got, want)
+	}
+}
+
 // (c) An inherited (exported) FLOTILLA_BACKLOG_FILE must NOT leak into a render whose
 // .env omits the key — the installer reads the value ONLY from the .env file. This
 // guards the pre-clear: the live Spark host exports FLOTILLA_BACKLOG_FILE (the binary

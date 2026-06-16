@@ -48,13 +48,27 @@ exists — so a missing file is a non-fatal warning (mirroring the `FLOTILLA_BIN
 
 ## Risks / Trade-offs
 
-- **Risk:** a future template comment containing the literal token pattern `@FLOTILLA_*@` would trip
-  the fail-loud glob guard (the `*` is matched by the guard's glob but not by the grep that prints
-  the offender, yielding an empty error). **Mitigation:** the descriptive comment is worded to avoid
-  the token pattern; the regression tests render the real template and would fail on any survivor.
+- **Risk (FIXED — systems-review P2):** bash 5.2+ enables `patsub_replacement` by default, under
+  which a literal `&` in a `${var//pat/repl}` REPLACEMENT expands to the matched text — so a path
+  value containing `&` would corrupt the substitution into the placeholder token, surviving the
+  fail-loud guard with a misleading "unsubstituted placeholder" error. This was pre-existing for all
+  five required keys; this change would have extended it to the sixth. **Fix:** the installer now
+  `shopt -u patsub_replacement` before substituting, so every value is substituted LITERALLY for ALL
+  keys (degrades gracefully on bash <5.2 where the option is absent and `&` was already literal).
+  Locked by `TestInstallerBacklogPathWithAmpersand`.
+- **Risk (HARDENED — systems-review P3):** a future template comment containing the literal token
+  pattern `@FLOTILLA_*@` would trip the fail-loud glob guard (`*@FLOTILLA_*@*`) but be invisible to
+  the offender-printing grep (`@FLOTILLA_[A-Z_]*@`), yielding an empty/confusing error. **Mitigation:**
+  the descriptive comment is worded to avoid the literal pattern, AND the offender-grep charset now
+  includes `*` and `.` (`@FLOTILLA_[A-Z_.*]*@`) so the error can never be empty. The regression tests
+  render the real template and would fail on any survivor.
 - **Trade-off:** the byte-identity guarantee is asserted at the FUNCTIONAL-directive level (the
   `funcLineRe` regression), not raw-byte, because this change adds non-functional comment lines to
   the template. systemd acts only on the directives, so functional identity is the correct invariant.
+- **Known limitation (pre-existing, NOT fixed here):** template values are not shell-quoted in the
+  generated `ExecStart`, so a path containing spaces would be word-split by systemd into multiple
+  arguments. This affects all six keys equally, is implausible for a real fleet path, and quoting it
+  uniformly is out of scope for this change (it would restructure the template for all keys).
 
 ## Migration
 

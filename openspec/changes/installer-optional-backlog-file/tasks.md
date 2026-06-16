@@ -12,7 +12,7 @@
 
 ## 3. Verify
 
-- [x] 3.1 `go test ./...` green (9 installer tests incl. the 3 new ones); `go vet ./...` clean; `bash -n` clean.
+- [x] 3.1 `go test ./...` green (10 installer tests incl. the 4 new ones); `go vet ./...` clean; `bash -n` clean.
 - [x] 3.2 `openspec validate installer-optional-backlog-file`.
-- [ ] 3.3 `/systems-review` + `/open-code-review` in parallel on the diff; fold findings.
+- [x] 3.3 `/open-code-review` (CLEAN, 0 comments) + systems-review (CLEAN-WITH-NITS, no P1) on the diff. Folded: P2 `&`-in-path substitution corruption → `shopt -u patsub_replacement` (root-cause, all keys) + `TestInstallerBacklogPathWithAmpersand`; P3 glob/grep mismatch → offender-grep charset hardened. P3 space-splitting noted as pre-existing out-of-scope limitation.
 - [ ] 3.4 PR → XO review + merge. (After merge: XO does the Spark drop-in → `.env` cutover.)
