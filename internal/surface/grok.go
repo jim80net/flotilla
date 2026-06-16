@@ -1,10 +1,14 @@
 package surface
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/jim80net/flotilla/internal/deliver"
+	"github.com/jim80net/flotilla/internal/grokstore"
 )
 
 func init() { Register(newGrok()) }
@@ -36,16 +40,31 @@ type grok struct {
 	classify    func(string) State
 	send        func(string, string) error
 	inject      func(string, string) error
+	// ResultReader seams (the full-result reader, #58 B): resolve the pane's cwd, then read the
+	// grok session store rooted at grokHome. Injectable so LatestResult is unit-testable without
+	// tmux or a real ~/.grok.
+	paneCWD      func(string) (string, error)
+	grokHome     string
+	latestResult func(grokHome, cwd string) (string, error)
 }
 
 func newGrok() grok {
+	// On the rare UserHomeDir error, leave grokHome EMPTY (NOT filepath.Join("", ".grok") == ".grok",
+	// which would read a bogus relative path) so LatestResult's empty-home guard fires a clear error.
+	grokHome := ""
+	if home, err := os.UserHomeDir(); err == nil {
+		grokHome = filepath.Join(home, ".grok")
+	}
 	return grok{
-		paneCommand: deliver.PaneCommand,
-		isShell:     deliver.IsShell,
-		capturePane: deliver.CapturePane,
-		classify:    parseGrokState,
-		send:        deliver.Send,
-		inject:      deliver.InjectSlash,
+		paneCommand:  deliver.PaneCommand,
+		isShell:      deliver.IsShell,
+		capturePane:  deliver.CapturePane,
+		classify:     parseGrokState,
+		send:         deliver.Send,
+		inject:       deliver.InjectSlash,
+		paneCWD:      deliver.PaneCWD,
+		grokHome:     grokHome,
+		latestResult: grokstore.LatestResult,
 	}
 }
 
@@ -81,6 +100,21 @@ func (g grok) Assess(pane string) State {
 func (g grok) Rotate(pane string) error { return g.inject(pane, "/new") }
 
 func (grok) RotateStrategy() Strategy { return SlashCommand }
+
+// LatestResult implements ResultReader: the full text of grok's latest completed turn, read from
+// the official grok session store (~/.grok), keyed by the desk pane's working directory. This is
+// what makes a grok desk fully readable — the pane capture shows only the visible tail, but a long
+// research result lives complete in the session's chat_history.jsonl.
+func (g grok) LatestResult(pane string) (string, error) {
+	cwd, err := g.paneCWD(pane)
+	if err != nil {
+		return "", err
+	}
+	if g.grokHome == "" {
+		return "", fmt.Errorf("grok: cannot resolve the ~/.grok session store (no home directory)")
+	}
+	return g.latestResult(g.grokHome, cwd)
+}
 
 // --- pure state classifier (the testable core) ---
 
