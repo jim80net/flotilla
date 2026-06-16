@@ -30,8 +30,8 @@
 ## 4. review + ship
 
 - [x] 4.1 `gofmt`/`go vet`/`go build ./...`/`go test -race ./...` green; `openspec validate --strict`.
-- [ ] 4.2 `/systems-review` + `/open-code-review` in parallel on the diff; resolve.
-- [ ] 4.3 PR referencing this change (#58 part B); CI green; XO review + merge. Archive.
+- [x] 4.2 `/systems-review` + `/open-code-review` in parallel on the diff; resolve.
+- [x] 4.3 PR referencing this change (#58 part B); CI green; XO review + merge. Archive.
 
 > Batched deploy: the XO rebuilds + restarts ONCE after this lands (the grok driver from part A AND
 > this reader go live together — no per-PR heartbeat-clock restart).
