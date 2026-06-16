@@ -9,7 +9,7 @@
 ## 1. The smart-push convention + provisioning (build — after 0.5; shape per checkpoint)
 
 - [ ] 1.1 The canonical smart-push snippet (the desk's identity-file convention): WHEN (finished/blocked/errored) + HOW (`flotilla send --from <self> <xo> "<pointer>"`); pointer-not-transcript; NEVER `flotilla notify`/secrets.
-- [ ] 1.2 Provisioning: document (and, if the checkpoint picks the helper, build) a small `flotilla` helper that prints the snippet filled with the desk's + XO's names from the roster — and NEVER emits any secret (the security invariant, tested). `$FLOTILLA_SELF` + roster + binary on PATH are the only provisioning (non-secret).
+- [ ] 1.2 Provisioning: document (and, if the checkpoint picks the helper, build) a small `flotilla` helper that prints the snippet filled with the desk's + XO's names from the roster — and NEVER emits any secret (the security invariant, tested). `$FLOTILLA_SELF` + roster + binary on PATH are the only provisioning (non-secret). LOW-3 (systems-review): the test SHALL assert `$FLOTILLA_SELF`/`--from` resolves to a real roster agent (a provisioning typo otherwise yields a bogus-sender report).
 - [ ] 1.3 (only if the checkpoint picks the roster-flag option) a per-agent `push` flag the workspace honors when scaffolding the identity file; tests.
 
 ## 2. Security invariant (test)
@@ -19,7 +19,7 @@
 ## 3. Docs
 
 - [ ] 3.1 Extend `docs/inter-harness.md` (the "smart desks" section): the secure push-to-XO model + the security boundary (no secrets to desks; desk→Discord-direct is a Non-Goal); the convention snippet; provisioning.
-- [ ] 3.2 `docs/xo-doctrine.md`: a smart desk's pushed report is the XO's cue to collect that desk + relay to the operator only if needed (the XO stays the sole Discord identity).
+- [ ] 3.2 `docs/xo-doctrine.md`: a smart desk's pushed report is the XO's cue to collect that desk + relay to the operator only if needed (the XO stays the sole Discord identity). LOW-1 (systems-review): the existing lines ~188-190 say a non-Claude desk "cannot push" — EDIT them (don't append): a *provisioned* smart desk IS a push peer (via `send`-to-XO), an unprovisioned one stays pull-only. Also note the structural property: a pushed report (pane injection) can never be misclassified as an OPERATOR message (those arrive only via the Discord relay's operator-id filter).
 
 ## 4. review + ship (build phase — after 0.5)
 

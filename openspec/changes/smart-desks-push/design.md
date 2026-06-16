@@ -26,6 +26,34 @@ Verified against source:
 file.** The XO is the only Discord-facing identity; it decides what (if anything) to
 relay to the operator (`flotilla notify`) after receiving a desk's pushed report. This is
 the same trust boundary the fleet already has — the daemon/XO hold secrets, desks don't.
+(Precisely: `send` is secrets-free because the inter-agent mirror is **default-off**, not
+merely because `--secrets` is omitted — a `--mirror --secrets …` send WOULD load secrets;
+smart-push runs neither flag, roster default off, so it never reaches `LoadSecrets`.)
+
+**Two honesty points the model rests on (state them, don't wave at "trusted-host"):**
+
+1. **`--from` is an UNAUTHENTICATED identity assertion the XO trusts.** `flotilla send`
+   does not validate `--from` against the roster or the sending process (`main.go:182` —
+   it flows straight into the body); a desk could claim `--from <another-desk>`. This is
+   consistent with flotilla everywhere (`send`/`notify` both treat `--from` as
+   self-declared) and adds **zero marginal privilege** — a desk in the tmux session can
+   already `tmux send-keys` arbitrary text (any `--from`) into the XO's pane. But this
+   change gives the XO a *convention to trust* `flotilla send` reports, so a
+   compromised/confused desk spoofing `--from` could misdirect the XO. We accept this
+   under the trusted-host model (one host, all panes mutually trusted); it is named here,
+   not hidden. A structural mitigation already holds (point below): a pushed report can
+   never be mistaken for an OPERATOR message — those arrive only via the Discord relay's
+   `Accept(authorID == operatorID)` path (`internal/relay/relay.go`), which a pane
+   injection never transits. So the worst case is desk-spoofs-desk, not desk-spoofs-operator.
+2. **"No secrets in the smart-push path" is a PROVISIONING CONTRACT, not a code-enforced
+   guarantee.** The flotilla binary cannot stop a desk that *is* handed `$FLOTILLA_SECRETS`
+   in its environment from running `flotilla notify`. The boundary rests on **provisioning
+   discipline**: the desk's launch environment (host-local launch config) MUST NOT include
+   `$FLOTILLA_SECRETS` and the desk MUST NOT have a readable path to the secrets file. The
+   docs/spec state this as a contract on provisioning, not a promise the binary keeps.
+   (Every `LoadSecrets` caller fails closed — `notify`/`voice`/`watch` error or degrade
+   without secrets and never print one back — so there is no leak path *given* the desk
+   isn't provisioned the file; the contract is exactly "don't provision it the file".)
 
 ## The smart-push convention (what goes in the desk's identity file)
 

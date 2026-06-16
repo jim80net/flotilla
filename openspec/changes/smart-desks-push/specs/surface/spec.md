@@ -18,9 +18,9 @@ pull-participant with no behavior change.
 - **WHEN** a provisioned smart desk finishes a delegated task or is blocked
 - **THEN** it reports to the XO by `flotilla send --from <desk> <xo> "<pointer>"` (a tmux injection requiring no secrets), and the XO collects the desk's detail and relays to the operator only if warranted
 
-#### Scenario: A desk is never given the fleet secrets
+#### Scenario: A desk is never given the fleet secrets (a provisioning contract)
 - **WHEN** a smart desk is provisioned for push
-- **THEN** it receives only the flotilla binary, the secret-free roster, and its own `--from` identity — never the secrets file, the bot token, or any webhook; the desk→Discord-direct push path is not provisioned
+- **THEN** it receives only the flotilla binary, the secret-free roster, and its own `--from` identity — never the secrets file, the bot token, or any webhook; the desk→Discord-direct push path is not provisioned. (This is a contract on PROVISIONING — the desk's launch environment must not include `$FLOTILLA_SECRETS` or a readable secrets path — not a guarantee the binary enforces; the docs SHALL state it as such.)
 
 #### Scenario: The pull-participant default is unchanged
 - **WHEN** a non-Claude desk has no smart-push convention
