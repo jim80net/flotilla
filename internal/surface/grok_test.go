@@ -135,3 +135,47 @@ func TestGrokSubmitRotateRoute(t *testing.T) {
 		t.Error("newGrok().Name() != grok")
 	}
 }
+
+// The grok driver must satisfy the optional ResultReader capability (compile-time).
+var _ ResultReader = grok{}
+
+func TestGrokLatestResult(t *testing.T) {
+	t.Run("resolves cwd then reads the store", func(t *testing.T) {
+		g := grok{
+			paneCWD:  func(pane string) (string, error) { return "/home/jim/workspace/grok-research", nil },
+			grokHome: "/home/jim/.grok",
+			latestResult: func(home, cwd string) (string, error) {
+				if home != "/home/jim/.grok" || cwd != "/home/jim/workspace/grok-research" {
+					t.Errorf("latestResult got (home=%q, cwd=%q), want the resolved pair", home, cwd)
+				}
+				return "the full latest grok result", nil
+			},
+		}
+		got, err := g.LatestResult("flotilla:5.0")
+		if err != nil || got != "the full latest grok result" {
+			t.Errorf("LatestResult = (%q, %v), want the store result", got, err)
+		}
+	})
+	t.Run("pane cwd resolution error propagates", func(t *testing.T) {
+		g := grok{paneCWD: func(string) (string, error) { return "", errBoom }, grokHome: "/x"}
+		if _, err := g.LatestResult("p"); err != errBoom {
+			t.Errorf("err = %v, want the cwd-resolution error", err)
+		}
+	})
+	t.Run("empty grokHome → clear error, store not consulted", func(t *testing.T) {
+		called := false
+		g := grok{
+			paneCWD:      func(string) (string, error) { return "/cwd", nil },
+			grokHome:     "",
+			latestResult: func(string, string) (string, error) { called = true; return "", nil },
+		}
+		if _, err := g.LatestResult("p"); err == nil {
+			t.Error("want an error when grokHome is unresolved")
+		}
+		if called {
+			t.Error("store must not be consulted when grokHome is empty")
+		}
+	})
+}
+
+var errBoom = errors.New("boom")

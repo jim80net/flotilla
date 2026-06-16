@@ -336,3 +336,16 @@ func TestBufferNameIsPerProcess(t *testing.T) {
 		t.Error("bufferName is the old shared constant — concurrent sends would collide")
 	}
 }
+
+func TestPaneCWDArgs(t *testing.T) {
+	got := paneCWDArgs("flotilla:5.0")
+	want := []string{"display-message", "-p", "-t", "flotilla:5.0", "#{pane_current_path}"}
+	if len(got) != len(want) {
+		t.Fatalf("paneCWDArgs = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("paneCWDArgs = %v, want %v (differ at %d)", got, want, i)
+		}
+	}
+}

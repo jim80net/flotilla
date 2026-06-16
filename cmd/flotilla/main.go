@@ -52,6 +52,8 @@ func run(args []string) error {
 		return cmdWorkspace(args[1:])
 	case "push-snippet":
 		return cmdPushSnippet(args[1:])
+	case "result":
+		return cmdResult(args[1:])
 	case "version", "-v", "--version":
 		fmt.Println("flotilla " + version)
 		return nil
@@ -80,6 +82,7 @@ usage:
   flotilla workspace init <agent>                     scaffold the per-agent ~/.flotilla/<agent>/ home
   flotilla workspace path <agent>                     print an agent's workspace directory
   flotilla push-snippet <desk-agent>                  print the smart-push convention to append to a non-claude desk's identity file (secret-free; reports to the XO via send)
+  flotilla result <agent>                             print a desk's FULL latest result from its harness session store (grok; read-only) — for long results the pane capture truncates
   flotilla version
   flotilla help
 
