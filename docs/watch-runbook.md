@@ -56,6 +56,47 @@ re-run it after a change while the service is live, it prints the
 `systemctl --user restart flotilla-watch.service` for you to run when ready. To
 change paths later, edit `deploy/flotilla-watch.env` and re-run the installer.
 
+## Keep the binary in sync after a merge (merged ≠ running)
+
+**Merging watch/relay/detector code does NOT change what the live service runs.**
+`flotilla-watch.service` execs the binary at `~/go/bin/flotilla` and holds that
+in-memory image until the process restarts. So a PR that lands on `origin/main`
+is *merged* but not *running* — the daemon keeps the binary it was started with
+until you rebuild **and** restart. The installer above (re)generates the systemd
+*unit*; it never rebuilds the binary and deliberately never restarts the clock.
+Those are two separate deploy steps from the merge.
+
+After merging any PR that touches `cmd/flotilla/watch.go`, `internal/watch/`,
+`internal/relay/`, `internal/deliver/`, or `internal/surface/` — anything the
+running watch executes — redeploy in two steps:
+
+```bash
+# 1. Rebuild the binary from the merged code (safe + non-disruptive: the running
+#    daemon keeps its old in-memory image; this only rewrites ~/go/bin/flotilla).
+cd /path/to/flotilla && git pull         # land the merge in your build checkout
+go install ./cmd/flotilla                # → fresh ~/go/bin/flotilla
+
+# 2. Restart the service to pick up the new binary. THIS is the operator/XO-owned
+#    step — it briefly stops the safety-critical heartbeat clock, so do it
+#    deliberately, not as a reflex of the merge.
+systemctl --user restart flotilla-watch.service
+```
+
+Verify the swap took: the binary's mtime is fresh and the merged HEAD is in the
+build checkout —
+
+```bash
+ls -l --time-style=full-iso ~/go/bin/flotilla   # mtime == the rebuild you just ran
+git -C /path/to/flotilla log --oneline -3        # the merged PR is in HEAD
+journalctl --user -u flotilla-watch -n 20        # clean restart: `clock running …`
+```
+
+Step 1 is free and reversible (rebuild any time; the running clock is untouched
+until the restart). Step 2 is the deploy proper. Splitting them is intentional —
+it lets the binary be staged ahead of a restart the operator/XO times safely.
+Tracking issue for a one-command convenience wrapper:
+[#69](https://github.com/jim80net/flotilla/issues/69).
+
 ## Verify
 
 ```bash
