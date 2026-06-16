@@ -265,8 +265,9 @@ loop stops returning to it.
 
 **Write the backlog ATOMICALLY** (write a temp file, then rename over the target),
 the same discipline as the snapshot — the detector reads the file every tick, and
-a torn mid-write read must never corrupt the gate. (A torn read fails safe — no
-gate that tick — but atomic writes avoid it entirely.)
+a torn mid-write read must never corrupt the gate. (A torn read self-heals on the
+next tick — at worst it momentarily mis-reads the queue — but atomic writes avoid
+it entirely.)
 
 ### The settle (idle) marker — exact lifecycle
 

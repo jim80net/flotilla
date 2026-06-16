@@ -31,12 +31,12 @@ import (
 
 // Status is the backlog's settle-relevant classification.
 type Status struct {
-	Unblocked []string // ordered unblocked item raw lines (file priority) — the drive queue
-	Blocked   int      // operator-blocked items (for the alert text / logging)
-	Done      int      // completed items (informational)
-	Malformed int      // item lines lacking a recognized [status] marker (flagged; counted as Unblocked)
-	Items     int      // total item lines seen in the section
-	Found     bool     // a "## Backlog" section heading was located
+	Unblocked []string // ordered unblocked item raw lines (file priority) — the drive queue (the gate's trigger)
+	Blocked   int      // operator-blocked items — informational / test-observable (not read by the gate today)
+	Done      int      // completed items — informational / test-observable
+	Malformed int      // item lines lacking a recognized [status] marker (flagged; ALSO counted in Unblocked)
+	Items     int      // total item lines seen in the section — informational / test-observable
+	Found     bool     // a "## Backlog" section heading was located (distinguishes absent from present-but-empty)
 }
 
 // itemLine matches a markdown list item (numbered or bulleted) and captures the text after the

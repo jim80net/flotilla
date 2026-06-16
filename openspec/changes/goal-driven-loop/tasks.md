@@ -10,7 +10,7 @@
 
 - [x] 1.1 TEST `Parse` against a **verbatim contract-format fixture** (mirroring the live file):
       5 `[in-flight]`/`[next]` → `len(Unblocked)=5`, 1 `[blocked]` → `Blocked=1`, `Unblocked[0]`=top
-      raw line, `Found:true`, `Items:6`; section located by `## Backlog` prefix, other sections ignored.
+      raw line, `Found:true`, `Items:7`; section located by `## Backlog` prefix, other sections ignored.
 - [x] 1.2 TEST edge/fail-safe: empty section (`Unblocked:0,Found:true`); no `## Backlog` section +
       non-empty (`Found:false`); markerless item → `Malformed++` AND in `Unblocked` (err-toward-drive);
       `[done]`/`~~`/`✅` excluded; `[done]` literal (lowercase prose "done" does NOT match); both-markers

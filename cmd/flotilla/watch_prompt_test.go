@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -52,5 +53,57 @@ func TestBacklogWakeBodyNamesItemAndAcks(t *testing.T) {
 	}
 	if !strings.Contains(body, "NOT settle while unblocked work remains") {
 		t.Error("WakeBacklog body must convey the mechanical no-settle contract")
+	}
+}
+
+// backlogStatusGate must alert ONCE on the edge into a present-but-unparseable backlog (never a
+// silent no-op), re-arm after a clean read, and fail SILENT (no gate, no alert) on absent/unreadable.
+func TestBacklogStatusGateAlertOnceAndReArm(t *testing.T) {
+	var content string
+	var readErr error
+	var alerts []string
+	gate := backlogStatusGate("/x/backlog.md",
+		func() ([]byte, error) {
+			if readErr != nil {
+				return nil, readErr
+			}
+			return []byte(content), nil
+		},
+		func(m string) { alerts = append(alerts, m) })
+
+	// Present-but-unparseable (non-empty, no ## Backlog section) → alert exactly once across repeats.
+	content = "# Doc\nsome prose, no backlog section here\n"
+	gate()
+	gate()
+	gate()
+	if len(alerts) != 1 {
+		t.Fatalf("alerts = %d, want 1 (alert ONCE on the edge into unparseable, not every tick)", len(alerts))
+	}
+
+	// A clean read re-arms the latch and does not alert.
+	content = "## Backlog\n- [in-flight] real work\n"
+	st := gate()
+	if len(st.Unblocked) != 1 {
+		t.Errorf("clean read Unblocked = %d, want 1", len(st.Unblocked))
+	}
+	if len(alerts) != 1 {
+		t.Errorf("a clean read must not alert; alerts = %d, want 1", len(alerts))
+	}
+
+	// A markerless item is a new unparseable edge → re-fires (the latch re-armed).
+	content = "## Backlog\n- markerless item with no status\n"
+	gate()
+	if len(alerts) != 2 {
+		t.Errorf("a re-armed latch must re-fire on a new unparseable edge; alerts = %d, want 2", len(alerts))
+	}
+
+	// Absent/unreadable → silent: zero Status (no gate), no alert.
+	readErr = errors.New("no such file")
+	st = gate()
+	if len(st.Unblocked) != 0 || st.Found {
+		t.Errorf("unreadable must yield a zero Status (no gate); got %+v", st)
+	}
+	if len(alerts) != 2 {
+		t.Errorf("unreadable must be SILENT (the file may not exist yet); alerts = %d, want 2", len(alerts))
 	}
 }

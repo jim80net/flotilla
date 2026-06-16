@@ -202,33 +202,15 @@ func cmdWatch(args []string) error {
 		}
 
 		// The goal-driven loop's backlog gate (opt-in via --backlog-file; unset ⇒ nil ⇒ the
-		// detector's inert default ⇒ today's settle behavior). Read FRESH each tick and NOT
-		// content-hashed: the backlog is the XO's OWN output (like the tracker), so hashing it
-		// would self-wake on the XO's edits. backlog.Parse is total/fail-safe. A present-but-
-		// unparseable backlog (no ## Backlog section, or markerless items) raises a LOUD alert
-		// ONCE on the edge into the flagged state — never a silent no-op — while the loop keeps
-		// driving (Malformed items are surfaced as unblocked). The latch is single-goroutine
-		// (the gate is called only from the detector's continueXO, under its mutex).
+		// detector's inert default ⇒ today's settle behavior). backlogStatusGate reads the file
+		// FRESH each tick (NOT content-hashed — the backlog is the XO's OWN output, like the
+		// tracker, so hashing it would self-wake on the XO's edits) and raises a LOUD alert once on
+		// the edge into a present-but-unparseable state. The gate is called only from the detector's
+		// continueXO under its mutex, so the latch inside is single-goroutine.
 		var backlogGate func() backlog.Status
 		if *backlogPath != "" {
-			backlogFlagged := false
-			backlogGate = func() backlog.Status {
-				raw, err := os.ReadFile(*backlogPath)
-				if err != nil {
-					backlogFlagged = false // absent/unreadable ⇒ silent no-gate (file may not exist yet)
-					return backlog.Status{}
-				}
-				st := backlog.Parse(string(raw))
-				unparseable := (!st.Found && strings.TrimSpace(string(raw)) != "") || st.Malformed > 0
-				switch {
-				case unparseable && !backlogFlagged:
-					alert(fmt.Sprintf("goal-loop: backlog %s present but unparseable (found=%v, %d markerless item(s)) — fix the [status] format; the loop keeps driving meanwhile", *backlogPath, st.Found, st.Malformed))
-					backlogFlagged = true
-				case !unparseable:
-					backlogFlagged = false
-				}
-				return st
-			}
+			bp := *backlogPath
+			backlogGate = backlogStatusGate(bp, func() ([]byte, error) { return os.ReadFile(bp) }, alert)
 		}
 
 		// The continuation prompt carries the narrow-answer discipline (advance the next
@@ -442,17 +424,6 @@ func cmdWatch(args []string) error {
 // Absent OR unreadable both report ok=false (no update) so the detector carries the
 // prior hash forward and treats it as unchanged (absent → no-signal, read-error →
 // treat-unchanged — never a wake-storm).
-// backlogWakeBody composes the goal-driven loop's WakeBacklog prompt: it NAMES the driven item(s)
-// and MUST append ackInstr — a continuously-driven XO that is never told to ack would falsely trip
-// the AckAge wedge alert (the liveness backstop). Pure so the name + ack invariant is testable.
-func backlogWakeBody(items []string, backlogPath, ackInstr string) string {
-	return "[flotilla goal-driven loop] Advance the top unblocked backlog item:\n" + strings.Join(items, "\n") +
-		"\nDispatch it to the right desk/harness if not started; check in / unblock if in flight; if it is " +
-		"genuinely operator-blocked, drive PREP and move to the next. Reply idle ONLY if every remaining " +
-		"backlog item is done or operator-blocked — the loop will NOT settle while unblocked work remains. " +
-		"Read the backlog file (" + backlogPath + "), not this conversation." + ackInstr
-}
-
 func contentHasher(path string) func() (string, bool) {
 	return func() (string, bool) {
 		raw, err := os.ReadFile(path)
@@ -462,6 +433,50 @@ func contentHasher(path string) func() (string, bool) {
 		sum := sha256.Sum256(raw)
 		return hex.EncodeToString(sum[:]), true
 	}
+}
+
+// backlogStatusGate builds the goal-driven loop's BacklogGate. It reads the backlog (via read),
+// parses it (total/fail-safe), and returns the Status the detector's continueXO gates on. It raises
+// a LOUD alert ONCE on the EDGE into a present-but-unparseable state — a non-empty file with no
+// "## Backlog" section, OR items lacking a [status] marker — so a format slip is never a silent
+// no-op; it re-arms after a clean read. Absent/unreadable fails SILENT (zero Status, no gate, no
+// alert): the file may not exist yet, and a torn mid-write read self-heals on the next tick. read
+// + alert are injected so the alert-once latch is unit-testable; the gate is called only from the
+// detector goroutine (under its mutex), so the latch is single-goroutine.
+func backlogStatusGate(path string, read func() ([]byte, error), alert func(string)) func() backlog.Status {
+	flagged := false
+	return func() backlog.Status {
+		raw, err := read()
+		if err != nil {
+			flagged = false // absent/unreadable ⇒ silent no-gate (file may not exist yet; torn read self-heals)
+			return backlog.Status{}
+		}
+		content := string(raw)
+		st := backlog.Parse(content)
+		// "unparseable" deliberately uses Malformed>0 (NOT the design's broader "Found && Items==0"):
+		// a drained backlog (Found, 0 items) is the normal settle-eligible steady state and must NOT
+		// false-alarm. A markerless item is the real format slip, and it is flagged here.
+		unparseable := (!st.Found && strings.TrimSpace(content) != "") || st.Malformed > 0
+		switch {
+		case unparseable && !flagged:
+			alert(fmt.Sprintf("goal-loop: backlog %s present but unparseable (found=%v, %d markerless item(s)) — fix the [status] format; the loop keeps driving meanwhile", path, st.Found, st.Malformed))
+			flagged = true
+		case !unparseable:
+			flagged = false
+		}
+		return st
+	}
+}
+
+// backlogWakeBody composes the goal-driven loop's WakeBacklog prompt: it NAMES the driven item(s)
+// and MUST append ackInstr — a continuously-driven XO that is never told to ack would falsely trip
+// the AckAge wedge alert (the liveness backstop). Pure so the name + ack invariant is testable.
+func backlogWakeBody(items []string, backlogPath, ackInstr string) string {
+	return "[flotilla goal-driven loop] Advance the top unblocked backlog item:\n" + strings.Join(items, "\n") +
+		"\nDispatch it to the right desk/harness if not started; check in / unblock if in flight; if it is " +
+		"genuinely operator-blocked, drive PREP and move to the next. Reply idle ONLY if every remaining " +
+		"backlog item is done or operator-blocked — the loop will NOT settle while unblocked work remains. " +
+		"Read the backlog file (" + backlogPath + "), not this conversation." + ackInstr
 }
 
 // agentTitle returns the tmux pane title to resolve for an agent name.
