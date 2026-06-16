@@ -13,75 +13,51 @@ func TestGrokRegistered(t *testing.T) {
 }
 
 func TestParseGrokState(t *testing.T) {
-	// EXHAUSTIVE over the claude-style REDUCED ladder. Fixtures use grok-dev's real
-	// rendered markers, SOURCE-VERIFIED at fb97af8 (NOT live-captured — grok-dev is
-	// xAI-only/metered): ui/app.tsx Payment required/Paste your xAI API key/Planning
-	// next moves/enter queue/esc interrupt; agent/agent.ts STATUS_MESSAGES. The
-	// animated spinner ⬒⬔⬓⬕ is intentionally NOT a marker; the Plan-mode generic
-	// "Confirm" is intentionally NOT keyed on.
+	// Fixtures are LIVE-CAPTURED from the official grok CLI ("Grok Composer 2.5 Fast") on the
+	// running grok-research desk (2026-06-16, #58). Working-positive, Idle-default. The Working
+	// marker is the live streaming arrow ⇣ (U+21E3, present every frame of a turn); the gerund
+	// verb (Thinking…/Waiting…) and the leading spinner glyph vary. Idle/done shows
+	// "Turn completed in …" + an empty composer with NO arrow.
 	cases := []struct {
 		name     string
 		captured string
 		want     State
 	}{
 		{
-			name:     "x402 payment panel → AwaitingApproval",
-			captured: "Payment required\nPrice: 0.05 USDC on base\nApprove payment  Reject",
-			want:     StateAwaitingApproval,
+			name:     "live streaming status (arrow + gerund + elapsed) → Working",
+			captured: "     ...streamed output...\n\n  ⠙ Waiting… 0.4s ⇣127k [✗]",
+			want:     StateWorking,
 		},
 		{
-			name:     "API-key-needed prompt (desk blocked) → AwaitingApproval",
-			captured: "Paste your xAI API key to unlock chat. You can hide this prompt with esc.",
-			want:     StateAwaitingApproval,
+			name:     "early thinking frame (arrow + Thinking…) → Working",
+			captured: "  ┃ The user wants …\n  ⠸ Thinking… 0.1s                              2.9s ⇣127k [✗]",
+			want:     StateWorking,
 		},
 		{
-			// systems-review: grok renders transient errors INLINE in the conversation
-			// (streamContent), not in the bottom chrome — and they linger as history. So
-			// the driver does NOT emit Errored; a recovered desk with an old error above
-			// an idle composer reads Idle (the turn already fired its Working→Idle wake).
-			name:     "transient error in conversation scrollback + idle composer below → Idle (no Errored)",
-			captured: "An unexpected error occurred.\n" + manyLines(14) + "Message Grok...\n@ files   shift+enter new line   tab modes",
+			name:     "gerund-only frame (no arrow yet) → Working (secondary anchor)",
+			captured: "  ⠦ Generating…",
+			want:     StateWorking,
+		},
+		{
+			name:     "completed turn (Turn completed in … + ◆ stop, no arrow) → Idle",
+			captured: "  ◆ stop  [hooks: 2]\n\n  Turn completed in 3.9s.\n\n  ╭────╮\n  │ ❯  │\n  ╰──── Grok Composer 2.5 Fast ─╯\n  Shift+Tab:mode  │  Ctrl+.:shortcuts",
 			want:     StateIdle,
 		},
 		{
-			// An AUTH error pops the api-key modal — caught as AwaitingApproval, the right
-			// classification for a desk blocked needing the operator.
-			name:     "auth error pops the api-key modal → AwaitingApproval (not a silent error)",
-			captured: "Authentication failed.\nPaste your xAI API key to unlock chat. You can hide this prompt with esc.",
-			want:     StateAwaitingApproval,
-		},
-		{
-			name:     "pre-stream 'Planning next moves' → Working",
-			captured: "Agent\nPlanning next moves\nenter queue   esc interrupt",
-			want:     StateWorking,
-		},
-		{
-			name:     "processing status bar 'enter queue' → Working",
-			captured: "→ bash\nrunning ls -la\nenter queue   esc interrupt",
-			want:     StateWorking,
-		},
-		{
-			// THE reduced-set proof: Grok auto-executes a shell command (a tool is
-			// running) with NO approval gate → Working, NEVER AwaitingApproval.
-			name:     "auto-executing a shell tool (no approval gate) → Working, NOT AwaitingApproval",
-			captured: "→ bash\n$ rm -rf node_modules\nenter queue   esc interrupt",
-			want:     StateWorking,
-		},
-		{
-			name:     "idle composer (Message Grok placeholder) → Idle (the default)",
-			captured: "Agent\nMessage Grok...\n@ files   shift+enter new line   tab modes",
+			name:     "fresh empty composer → Idle (the default)",
+			captured: "  ╭────╮\n  │ ❯  │\n  ╰──── Grok Composer 2.5 Fast ─╯\n  Shift+Tab:mode  │  Ctrl+.:shortcuts",
 			want:     StateIdle,
 		},
 		{
-			name:     "empty capture → Idle (classifier default)",
+			name:     "empty capture → Idle",
 			captured: "",
 			want:     StateIdle,
 		},
 		{
-			// Bottom-chrome scoping: a model response quoting "Payment required" high up
-			// (above the bottom chrome) must NOT false-trigger AwaitingApproval.
-			name:     "model output quoting 'Payment required' high up + idle below → Idle",
-			captured: "To pay an x402 invoice you'll see a \"Payment required\" panel.\n" + manyLines(14) + "Message Grok...\n@ files   shift+enter new line   tab modes",
+			// Bottom-chrome scoping: an old streaming arrow ⇣ scrolled high up in history (above
+			// the tail) must NOT keep the desk reading Working after the turn finished.
+			captured: "  ⠙ Waiting… 1.2s ⇣99k [✗]\n" + manyLines(14) + "  Turn completed in 5.0s.\n  │ ❯  │\n  Shift+Tab:mode",
+			name:     "stale arrow in scrollback + completed below → Idle",
 			want:     StateIdle,
 		},
 	}
@@ -108,9 +84,8 @@ func TestGrokAssess(t *testing.T) {
 		{"panecommand error → unknown", "", boom, false, "", nil, StateUnknown},
 		{"isShell → shell (grok process gone)", "bash", nil, true, "", nil, StateShell},
 		{"capture error → unknown (NOT a false finished-a-turn)", "node", nil, false, "", boom, StateUnknown},
-		{"classifier routes: approval", "node", nil, false, "Payment required\nApprove payment", nil, StateAwaitingApproval},
-		{"classifier routes: working", "node", nil, false, "Planning next moves", nil, StateWorking},
-		{"classifier routes: idle", "node", nil, false, "Message Grok...", nil, StateIdle},
+		{"classifier routes: working (arrow)", "grok", nil, false, "⠙ Waiting… 0.4s ⇣127k [✗]", nil, StateWorking},
+		{"classifier routes: idle (completed)", "grok", nil, false, "Turn completed in 3.9s.\n│ ❯ │", nil, StateIdle},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -137,9 +112,9 @@ func TestGrokSubmitRotateRoute(t *testing.T) {
 	if err := g.Submit("0:0.0", "hi"); err != nil || !submitted {
 		t.Errorf("Submit routed=%v err=%v, want routed to send", submitted, err)
 	}
-	// The first driver whose reset is NOT /clear — validates the InjectSlash generalization.
+	// Official grok resets with /new ("Start a new session"), confirmed in its slash menu.
 	if err := g.Rotate("0:0.0"); err != nil || injectedCmd != "/new" {
-		t.Errorf("Rotate injected %q err=%v, want /new (grok's reset, NOT /clear)", injectedCmd, err)
+		t.Errorf("Rotate injected %q err=%v, want /new", injectedCmd, err)
 	}
 	if g.RotateStrategy() != SlashCommand {
 		t.Errorf("grok RotateStrategy = %v, want SlashCommand", g.RotateStrategy())
