@@ -4,11 +4,13 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/discord"
@@ -240,17 +242,29 @@ func cmdSend(args []string) error {
 		return fmt.Errorf("agent %q: unknown surface %q (known: see internal/surface registry)", agentName, agent.Surface)
 	}
 
-	// Deliver = wake: submit the message into the agent's pane via its driver
-	// (claude-code = bracketed paste + Enter). This is the operation that must
-	// succeed; the audit mirror below is best-effort.
+	// Deliver = wake: submit the message into the agent's pane via its driver and CONFIRM a
+	// turn started (idle-gate → submit → confirm the Idle→Working edge → Enter-only retry),
+	// rather than assuming success from the tmux exit code (the relay silent-drop bug, see
+	// docs/findings-inbound-relay-lastmile.md). This is the operation that must succeed; the
+	// audit mirror below is best-effort.
 	pane, err := deliver.ResolvePane(agent.Title())
 	if err != nil {
 		return err
 	}
-	if err := drv.Submit(pane, message); err != nil {
-		return err
+	confirm := surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}
+	if err := confirm.Submit(drv, pane, message); err != nil {
+		switch {
+		case errors.Is(err, surface.ErrBusy):
+			return fmt.Errorf("%s is busy (mid-turn) — NOT delivered; retry when it is idle", agentName)
+		case errors.Is(err, surface.ErrTransient):
+			return fmt.Errorf("%s pane state is uncertain — NOT delivered; retry", agentName)
+		case errors.Is(err, surface.ErrCrashed):
+			return fmt.Errorf("%s is at a shell (crashed) — NOT delivered", agentName)
+		default: // ErrUnconfirmed, or a paste/lock error
+			return fmt.Errorf("delivery to %s could not be confirmed: %w", agentName, err)
+		}
 	}
-	fmt.Printf("delivered to %s (pane %s)\n", agentName, pane)
+	fmt.Printf("delivered to %s (pane %s) — turn confirmed\n", agentName, pane)
 
 	// Mirror to the Discord audit channel under the sender's identity. Inter-agent
 	// mirroring is DEFAULT-OFF (it cluttered the operator's Discord); precedence is

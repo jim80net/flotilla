@@ -377,3 +377,39 @@ func SendCtrlJ(target, text string) error {
 	}
 	return nil
 }
+
+// sendEnterArgs builds the `tmux send-keys` argv that submits a SINGLE Enter to a pane.
+// "Enter" is a key NAME (no -l), so it is the submitting keystroke (not literal text);
+// `--` guards a dash-leading target from being parsed as a tmux flag. Split out as a pure
+// function so the argv is testable without a tmux server, mirroring sendCtrlJArgs /
+// slashKeysArgs. It is identical to the trailing Enter step of Send (tmux.go) and
+// InjectSlash — factored here as the reusable confirmed-delivery retry keystroke.
+func sendEnterArgs(target string) []string {
+	return []string{"send-keys", "-t", target, "--", "Enter"}
+}
+
+// SendEnter submits a single Enter to the target pane under the per-pane lock. It is the
+// IDEMPOTENT retry for confirmed delivery (internal/surface.ConfirmSubmit): when a prior
+// Send pasted the body but its submitting Enter was dropped in the paste-ingestion race
+// (submitSettleDelay mitigates but does not eliminate this on a loaded host), the body sits
+// unsubmitted in the composer and a bare Enter submits it. Crucially it NEVER re-pastes, so
+// it cannot double-submit the message body — re-running Send would paste a second copy.
+// (Whether a bare Enter on an already-consumed idle composer submits nothing is a separate
+// TUI property validated out-of-band; the no-double-submit guarantee here is structural —
+// this primitive only ever sends a key, never text.) Like Send it takes the per-pane
+// cross-process lock (bounded acquire → drop, never blocking the heartbeat clock) and is
+// bounded by commandTimeout.
+func SendEnter(target string) error {
+	lock, err := acquirePaneLock(target)
+	if err != nil {
+		return err
+	}
+	defer lock.Release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	if err := exec.CommandContext(ctx, "tmux", sendEnterArgs(target)...).Run(); err != nil {
+		return fmt.Errorf("tmux send-keys enter: %w", err)
+	}
+	return nil
+}

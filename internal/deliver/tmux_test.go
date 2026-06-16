@@ -284,6 +284,49 @@ func assertArgSeq(t *testing.T, got, want [][]string) {
 	}
 }
 
+func TestSendEnterArgsIsSingleSubmittingEnter(t *testing.T) {
+	// The confirmed-delivery retry (internal/surface.ConfirmSubmit) re-sends Enter ALONE to
+	// submit a body already pasted into the composer, never re-pasting. The argv must be a
+	// single submitting Enter (a key NAME, no -l) with the -- flag guard.
+	cases := []struct {
+		target string
+		want   []string
+	}{
+		{"0:0.0", []string{"send-keys", "-t", "0:0.0", "--", "Enter"}},
+		{"-dash:1.2", []string{"send-keys", "-t", "-dash:1.2", "--", "Enter"}}, // -- guards a dash-leading target
+	}
+	for _, c := range cases {
+		got := sendEnterArgs(c.target)
+		if len(got) != len(c.want) {
+			t.Fatalf("sendEnterArgs(%q) = %v, want %v", c.target, got, c.want)
+		}
+		for i := range c.want {
+			if got[i] != c.want[i] {
+				t.Fatalf("sendEnterArgs(%q) = %v, want %v (differ at %d)", c.target, got, c.want, i)
+			}
+		}
+		// It must be a submitting Enter: the key name "Enter" (NOT typed as literal text via -l),
+		// and the -- guard present so a dash-leading target is not parsed as a flag.
+		for _, a := range got {
+			if a == "-l" {
+				t.Errorf("sendEnterArgs(%q) contains -l: Enter would be typed as literal text, not submit", c.target)
+			}
+		}
+		if got[len(got)-1] != "Enter" {
+			t.Errorf("sendEnterArgs(%q) last arg = %q, want the submitting key \"Enter\"", c.target, got[len(got)-1])
+		}
+		guarded := false
+		for i, a := range got {
+			if a == "--" && i == len(got)-2 {
+				guarded = true
+			}
+		}
+		if !guarded {
+			t.Errorf("sendEnterArgs(%q) = %v, want -- immediately before Enter (dash-leading-target guard)", c.target, got)
+		}
+	}
+}
+
 func TestBufferNameIsPerProcess(t *testing.T) {
 	b := bufferName()
 	if !strings.HasPrefix(b, "flotilla-send-") {

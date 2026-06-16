@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/discord"
@@ -118,6 +119,15 @@ func cmdWatch(args []string) error {
 	}
 	alert := func(msg string) { post("flotilla-watch", "⚠️ "+msg) }
 
+	// paneMus serializes the daemon's two in-process pane writers — a confirmed delivery
+	// (below) and the change-detector's /clear rotate (Rotate closure) — so the rotate cannot
+	// interleave between a confirmed delivery's submit and its Enter-only retry. Shared by both.
+	paneMus := watch.NewPaneMutexes()
+	// confirm turns "the tmux keystrokes ran" into "a turn started": it idle-gates, submits,
+	// confirms the Idle→Working edge, retries Enter-only (never re-pasting), and returns a typed
+	// error the Injector dispatches on (ErrBusy → defer; failure → loud alert). Closing the
+	// relay's silent-drop class (docs/findings-inbound-relay-lastmile.md).
+	confirm := surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}
 	injector := watch.NewInjector(func(agent, message string) error {
 		drv, ok := surface.Get(agentSurface(cfg, agent))
 		if !ok {
@@ -127,8 +137,15 @@ func cmdWatch(args []string) error {
 		if err != nil {
 			return err
 		}
-		return drv.Submit(pane, message)
+		// Hold the per-agent pane mutex across the WHOLE confirmed-delivery sequence so the
+		// detector's /clear rotate cannot interleave between the submit and the retry.
+		unlock := paneMus.Lock(agent)
+		defer unlock()
+		return confirm.Submit(drv, pane, message)
 	}, 16)
+	// A failed/undeliverable RELAY (operator message) raises a LOUD alert — the inverse of the
+	// silent-success bug. Heartbeat/detector ticks never escalate (a stale tick is dropped).
+	injector.SetEscalate(alert)
 	// Mirror relayed instructions to the audit channel in full. Heartbeat ticks
 	// are NOT mirrored: they fire every interval and a per-tick marker is pure
 	// noise in the operator's Discord channel (XO liveness is already covered by
@@ -234,6 +251,11 @@ func cmdWatch(args []string) error {
 			AckAge:     ack.Age,
 			Wake:       wake,
 			Rotate: func() error {
+				// Serialize the /clear rotate against an in-flight confirmed delivery to the XO
+				// pane (the same paneMus the Injector holds), so the rotate never interleaves
+				// between a delivery's submit and its Enter-only retry.
+				unlock := paneMus.Lock(xo)
+				defer unlock()
 				pane, err := deliver.ResolvePane(agentTitle(cfg, xo))
 				if err != nil {
 					return err
