@@ -34,3 +34,23 @@ func TestDetectorContinuationBuiltinNoWorkspace(t *testing.T) {
 		}
 	}
 }
+
+// The WakeBacklog prompt MUST name the driven item AND append the ack instruction — the latter is
+// load-bearing: a continuously-driven XO that is never told to ack would falsely trip the AckAge
+// wedge alert (the liveness backstop for an always-driving, never-settling XO).
+func TestBacklogWakeBodyNamesItemAndAcks(t *testing.T) {
+	ack := "\n(To ack you are alive, run: touch /x/alive)"
+	body := backlogWakeBody([]string{"- [in-flight] ship the tactical PR"}, "/state/fleet-backlog.md", ack)
+	if !strings.Contains(body, "ship the tactical PR") {
+		t.Error("WakeBacklog body must NAME the driven item")
+	}
+	if !strings.HasSuffix(body, ack) {
+		t.Error("WakeBacklog body MUST append the ack instruction (else a driven XO never acks → false wedge alert)")
+	}
+	if !strings.Contains(body, "/state/fleet-backlog.md") {
+		t.Error("WakeBacklog body must point the XO at the backlog file (read durable state, not memory)")
+	}
+	if !strings.Contains(body, "NOT settle while unblocked work remains") {
+		t.Error("WakeBacklog body must convey the mechanical no-settle contract")
+	}
+}
