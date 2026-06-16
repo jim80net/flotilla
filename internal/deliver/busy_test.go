@@ -16,6 +16,10 @@ func TestParseBusy(t *testing.T) {
 		{"early spinner, middot glyph frame", "· Cooking…", true},
 		{"early spinner, sparkle glyph + long gerund", "✢ Quantumizing…", true},
 		{"early spinner, hyphenated gerund", "✶ Sock-hopping…", true},
+		// OCR-F2: the verb is token-based (not [A-Z][a-z]+), so apostrophe gerunds — real
+		// claude-code spinner verbs — match in the EARLY (counterless) phase too, rather than
+		// false-negativing like the old narrow class would.
+		{"early spinner, apostrophe gerund", "✻ Mullin'…", true},
 		// --- COUNTER phase: same gerund+"…" plus the elapsed counter.
 		{"counter spinner (seconds)", "● 333\n✻ Frosting… (3s · ↓ 25 tokens · thinking)\n", true},
 		{"counter spinner (live capture)", "✽ Scurrying… (53s · ↓ 3.4k tokens)", true},
@@ -34,9 +38,18 @@ func TestParseBusy(t *testing.T) {
 		{"idle composer ellipsis placeholder", "❯ Try a task…\n  ⏵⏵ auto mode on (shift+tab to cycle)", false},
 		{"empty idle", "❯ \n", false},
 		{"idle footer only", "  jim@host:~/x [Opus 4.8] ctx:57%\n  ⏵⏵ auto mode on (shift+tab to cycle)", false},
+		// "●" is the response/tool bullet, not a spinner glyph: a response line that happens to
+		// be a lone gerund+"…" must NOT read as working (the "●" exclusion in the glyph class).
+		{"response bullet gerund is not a spinner", "● Building…\n  ⏵⏵ auto mode on (shift+tab to cycle)", false},
+		// OCR-F1: there is no separate (unanchored) counter arm, so a "❯" composer line that
+		// merely CONTAINS a counter substring cannot false-positive — the match is gated on the
+		// leading glyph, and "❯" is excluded.
+		{"composer line containing a counter substring", "❯ it took (3s · earlier)\n  ⏵⏵ auto mode on", false},
 
 		// An old spinner line scrolled up in history must NOT false-positive: only the live
-		// tail (last few lines) is scanned, line by line.
+		// tail (last `tail` lines) is scanned, line by line. The blank-line count here is
+		// LOAD-BEARING — it pushes the spinner (lines 0-1) past the tail=8 window — so do not
+		// trim it when editing this fixture.
 		{"stale spinner in scrollback", "✻ Frosting… (3s · ↓ 25 tokens)\n● done\n\n\n\n\n\n\n❯ \n  ⏵⏵ auto mode on", false},
 	}
 	for _, c := range cases {

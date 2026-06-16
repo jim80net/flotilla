@@ -76,7 +76,7 @@ func (openCode) RotateStrategy() Strategy { return SlashCommand }
 // --- pure state classifier (the testable core) ---
 
 // openCodeTail bounds the marker scan to the last N NON-EMPTY lines of the captured
-// pane (the visible frame), like deliver.ParseBusy's tail scope (busy.go:42-44) but
+// pane (the visible frame), like deliver.ParseBusy's tail scope but
 // non-empty so blank composer padding doesn't consume the budget. Scanning the bottom
 // chrome — the working hint / footer / permission button row + footer counter, all
 // bottom-anchored — rather than the whole frame keeps streamed model output (which

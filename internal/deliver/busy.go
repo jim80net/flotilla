@@ -10,33 +10,41 @@ import (
 // workingSpinner matches Claude Code's in-flight working status line. The render EVOLVES
 // over a turn (measured live on claude-code v2.1.178, 2026-06-16):
 //   - early (first ~seconds): "✻ Cooking…" / "· Cooking…" / "✢ Quantumizing…" — an animated
-//     leading glyph, a space, a Capitalized gerund verb, then the "…" ellipsis (U+2026),
-//     with NO elapsed counter yet;
+//     leading glyph, a space, a gerund verb, then the "…" ellipsis (U+2026), NO counter yet;
 //   - later: "✽ Scurrying… (53s · ↓ 3.4k tokens)" — the SAME verb+"…" plus the counter;
 //   - minute-scale: "✻ Deliberating… (3m 14s · …)" — verb+"…" plus a minute-format counter.
 //
-// The STABLE marker across the whole lifecycle is the "<glyph> <Verb>…" — the gerund
-// immediately followed by U+2026 — NOT the "(Ns ·" counter (which appears only seconds in,
-// and whose minute-format "(3m 14s ·" never matched the old `\(\d+s ·` regex at all). A
-// COMPLETED turn shows "✻ Worked for 2s" / "✻ Baked for 7m 23s" (no ellipsis) and an idle
-// composer is "❯ " — neither matches. We anchor on the glyph-led line and EXCLUDE the "❯"
-// composer prompt so the idle "❯ Try a task…" placeholder can never read as working.
+// The STABLE marker across the WHOLE lifecycle is the "<glyph> <verb>…" — a gerund verb
+// immediately followed by U+2026. Every working render carries it (the counter, when present,
+// is on the SAME line as the verb+"…"), so we match ONLY this and need no separate counter
+// arm. We deliberately do NOT match the bare "(Ns ·" counter: the old `\(\d+s ·`-only regex
+// false-NEGATIVED the entire early phase and all short turns (a confirmed delivery then saw
+// "idle" through a turn that actually ran and reported it undelivered), AND its minute-format
+// "(3m 14s ·" never matched at all. With this marker Enter→Working is detected in ~60ms
+// (measured), well inside the first confirm poll. A COMPLETED turn shows "✻ Worked for 2s" /
+// "✻ Baked for 7m 23s" (no ellipsis) → no match; an idle composer is "❯ " → no match.
 //
-// The prior regex (`\(\d+s ·` only) false-NEGATIVED the entire early phase and all short
-// turns, so a confirmed delivery (internal/surface.Confirm) saw "idle" through a turn that
-// actually ran and reported it undelivered. With this marker, Enter→Working is detected in
-// ~60ms (measured), well inside the first confirm poll.
+// Anatomy (anchored to line start, so the whole match is gated on the leading glyph):
 //
-// NOTE: still Claude-Code-version-specific — revalidate on a TUI upgrade. Detection fails
-// OPEN (an unrecognized/unreadable state reads as not-busy): under the change-detector a
-// false not-busy costs at most one extra idempotent tick; under confirmed delivery it is
-// caught by the Enter-only retry + escalation, never a silent drop.
+//	^[ \t]*          optional indent
+//	[^\s❯●\w]        the animated glyph — ONE leading rune that is not whitespace, not the "❯"
+//	                 composer prompt, not the "●" response/tool bullet, and not a word char.
+//	                 The glyph set animates widely (✻ ✽ ✢ ✶ · …), so we EXCLUDE the two known
+//	                 non-spinner leaders rather than enumerate the spinner set: excluding "❯"
+//	                 keeps an idle "❯ Try a task…" placeholder from reading as working;
+//	                 excluding "●" keeps a response bullet like "● Building…" from doing so.
+//	\s+              the space after the glyph
+//	[^\s\x{2026}]+   the verb as a SINGLE non-space token up to the ellipsis — token-based (not
+//	                 [A-Z][a-z]+) so hyphenated ("Sock-hopping…") and apostrophe ("Mullin'…")
+//	                 gerunds match too, not just plain ASCII words. (A multi-WORD gerund phrase
+//	                 would not match — none observed; revalidate if claude-code adds them.)
+//	\x{2026}         the "…" ellipsis (U+2026)
 //
-// The leading glyph animates across a wide set (✻ ✽ ✢ ✶ · …), so we do NOT enumerate it —
-// `[^\s❯\w]` is "one leading rune that is not whitespace, not the ❯ prompt, and not a word
-// char" (every observed glyph qualifies; a letter/digit-led response line does not). The
-// `(\d+s ·` alternative is kept as a redundant secondary signal (harmless when present).
-var workingSpinner = regexp.MustCompile(`^[ \t]*[^\s❯\w]\s+[A-Z][a-z-]+\x{2026}|\(\d+s ·`)
+// NOTE: still Claude-Code-version-specific — revalidate on a TUI upgrade. Detection fails OPEN
+// (an unrecognized/unreadable state reads as not-busy): under the change-detector a false
+// not-busy costs at most one extra idempotent tick; under confirmed delivery it is caught by
+// the Enter-only retry + escalation, never a silent drop.
+var workingSpinner = regexp.MustCompile(`^[ \t]*[^\s❯●\w]\s+[^\s\x{2026}]+\x{2026}`)
 
 // CapturePane returns the visible contents of a tmux pane (`capture-pane -p`).
 // Shared by busy-detection and the heartbeat's pane-activity fingerprint.
