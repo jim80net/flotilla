@@ -70,10 +70,34 @@ paste (confirmed live). Grok and Cursor's newline method is **not yet confirmed*
 is deferred to their live-capture sessions (#58, #61); do not assume bracketed paste
 works for them until then.
 
-## The follow-on: smart desks (push-capable peers)
+## Smart desks (opt-in push-capable peers)
 
-The pull-only model above is the proven, minimum-viable inter-harness fleet. A
-follow-on (not yet built) makes non-Claude desks **first-class push-capable peers** by
-injecting flotilla's reporting conventions into their identity file (`AGENTS.md`) so
-they `flotilla notify` on completion (their harnesses can run shell). Until then,
-non-Claude desks are pull-participants as described.
+A non-Claude desk can be **provisioned for push** so it proactively reports to the XO
+instead of waiting to be polled. The push is **secret-free by design**:
+
+- **A smart desk pushes via `flotilla send --from <desk> <xo> "<pointer>"`** — pure tmux
+  injection into the XO's pane, which needs **no secrets**. The XO (the only holder of
+  the fleet secrets) relays onward to the operator if warranted.
+- **A smart desk NEVER pushes via `flotilla notify`** (which posts to Discord via the
+  agent's webhook and so needs the secrets file — the Discord bot token + every agent's
+  webhook). Giving a desk that file would let it impersonate any agent. So **desks never
+  receive the secrets file**; the XO is the sole Discord-facing identity. A smart desk
+  gains *zero* new privilege beyond its existing tmux access + the secret-free roster.
+
+**Provision a desk for push** with `flotilla push-snippet <desk>` — it prints the
+convention snippet (filled with the desk's + XO's roster names) to append to the desk's
+identity file (`AGENTS.md` / `CONVENTIONS.md`), and names the file. The desk needs the
+`flotilla` binary on PATH, the roster, and `$FLOTILLA_SELF=<desk>` in its launch
+environment — all non-secret.
+
+> **Security boundary (a provisioning contract, not a binary guarantee):** the desk's
+> launch environment MUST NOT include `$FLOTILLA_SECRETS` or a readable secrets path. The
+> binary cannot stop a desk that *is* handed the secrets from running `notify`; the
+> boundary rests on not provisioning it the file. `--from` is an unauthenticated,
+> self-declared identity (the trusted-host model, same as everywhere in flotilla) — but a
+> pushed report can never be mistaken for an *operator* message (those arrive only via the
+> Discord relay's operator-id filter, which a pane injection never transits), so the worst
+> case is desk-spoofs-desk, never desk-spoofs-operator.
+
+A desk **without** the smart-push convention stays a pull-participant exactly as
+described above — push is strictly opt-in.
