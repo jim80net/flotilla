@@ -80,7 +80,11 @@ func buildPushSnippet(cfg *roster.Config, deskName string) (string, error) {
 		xo = cfg.Agents[0].Name
 	}
 	if xo == deskName {
-		return "", fmt.Errorf("agent %q is the XO — the smart-push snippet provisions a DESK to report TO the XO, not the XO itself", deskName)
+		how := "the configured xo_agent"
+		if cfg.XOAgent == "" {
+			how = "the de-facto XO (the first roster agent; no xo_agent is set)"
+		}
+		return "", fmt.Errorf("agent %q is %s — the smart-push snippet provisions a DESK to report TO the XO, not the XO itself", deskName, how)
 	}
 	// The desk's native instruction file (AGENTS.md / CONVENTIONS.md / CLAUDE.md).
 	idFile, err := workspace.IdentityFileName(desk.Surface)
