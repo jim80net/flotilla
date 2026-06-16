@@ -29,7 +29,13 @@ WorkingDirectory=@FLOTILLA_WORKDIR@
 # discord.com to resolve, but ALWAYS exit 0 (even on timeout) so the safety-critical
 # clock starts regardless. Never block the clock on DNS.
 ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do getent hosts discord.com >/dev/null 2>&1 && exit 0; sleep 2; done; exit 0'
-ExecStart=@FLOTILLA_BIN@ watch --roster @FLOTILLA_ROSTER@ --secrets @FLOTILLA_SECRETS@ --ack-file @FLOTILLA_ACK_FILE@
+# The trailing @FLOTILLA_BACKLOG_ARG@ is a COMPUTED fragment: the installer
+# substitutes it to " --backlog-file <path>" (leading space included) when the
+# OPTIONAL FLOTILLA_BACKLOG_FILE is set, or to "" when unset — so an unset backlog
+# leaves this line byte-identical to a no-backlog install. It is ALWAYS substituted
+# (to the fragment or to empty), so the installer's "no placeholder survives" guard
+# still holds.
+ExecStart=@FLOTILLA_BIN@ watch --roster @FLOTILLA_ROSTER@ --secrets @FLOTILLA_SECRETS@ --ack-file @FLOTILLA_ACK_FILE@@FLOTILLA_BACKLOG_ARG@
 Restart=on-failure
 # RestartSec pairs with the StartLimitIntervalSec budget above: each restart cycle is
 # this 15s plus the ExecStartPre DNS-readiness wait. on-failure + the burst limit
