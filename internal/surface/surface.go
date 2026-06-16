@@ -72,6 +72,17 @@ type Driver interface {
 	RotateStrategy() Strategy
 }
 
+// ResultReader is an OPTIONAL Driver capability: return the full text of the desk's latest
+// COMPLETED turn from the harness's own session store. It exists for harnesses whose pane capture
+// shows only a truncated tail (e.g. xAI's grok CLI — a long research result scrolls off the pane,
+// but the full text is in its session store). A Driver MAY implement it; callers type-assert and
+// fall back to the pane capture when it is absent. It is READ-ONLY (never writes a pane).
+type ResultReader interface {
+	// LatestResult returns the full latest completed-turn text for the desk at the resolved pane,
+	// or a clear error (no session / no completed turn yet / unreadable store).
+	LatestResult(pane string) (string, error)
+}
+
 // DefaultSurface is used when an agent has no surface configured.
 const DefaultSurface = "claude-code"
 
