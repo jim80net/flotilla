@@ -109,6 +109,37 @@ heartbeat interval an idle XO should receive the heartbeat prompt in its pane.
 Post a message in the channel as the operator and confirm it lands in the
 target pane.
 
+### Confirmed delivery (an operator message is never silently dropped)
+
+A relayed operator message is delivered with **confirmation**, not fire-and-forget. The
+daemon submits into the XO pane and then verifies a turn actually started (the
+`Idle → Working` edge) before it logs `… delivered to "…" (N bytes)`. So that success line
+now means *a turn started*, not merely *the tmux keystrokes ran*. Concretely:
+
+- **The XO is busy when your message arrives** → it is **not** pasted into the active
+  composer (that was the silent-drop bug). It is deferred and re-tried every few seconds;
+  it lands (and is confirmed) once the XO goes idle. Delivery to other desks continues
+  meanwhile.
+- **The XO stays busy for ~30s** → you get ONE loud alert: `operator message to "…" is
+  QUEUED — the XO has been busy …`. It still delivers when the turn ends.
+- **The XO is busy for ~5 min, or crashed, or the submit can't be confirmed** → you get a
+  loud alert (`… UNDELIVERABLE …` / `… NOT delivered …`) and the message is dropped rather
+  than retried forever. A genuinely wedged/crashed XO is also caught by the liveness
+  watchdog (see Down alerts).
+
+So a dropped operator message is **always** surfaced via the down-alert path — never
+silent. If you see a delivery alert, the message did **not** reach the XO; re-send once the
+XO is idle (or recover it). `flotilla send` from the shell behaves the same: it prints
+`delivered … — turn confirmed` on success, or exits non-zero with `… is busy … NOT
+delivered` so you know to retry.
+
+Heartbeat / change-detector ticks flow through the same confirmed delivery (so they too
+recover a dropped Enter), but they are **time-relative**: a tick that arrives while the XO
+is busy is dropped, not deferred (the next tick re-evaluates), and a failed tick never
+escalates (XO liveness is the watchdog's job, see Down alerts). The trade is a small added
+per-tick cost — up to ~1.75 s of confirm polling on a tick that has to retry — paid off the
+delivery worker, so it never stalls other desks.
+
 ### Relay open is non-fatal (cold-boot / transient-network resilience)
 
 The safety-critical clock (heartbeat + watchdog) and the optional inbound relay
