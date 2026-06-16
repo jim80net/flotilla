@@ -47,15 +47,22 @@ func (c claudeCode) Submit(pane, text string) error { return c.send(pane, text) 
 //     failure path, not here).
 //   - command IS a shell                           → Shell (the genuine crash:
 //     the agent process exited and the pane dropped to a bare shell)
-//   - else capture fails                           → Idle (fail-open: matches the
-//     prior "busy-check error ⇒ treat as not busy")
+//   - else capture fails                           → Unknown (a transient capture
+//     glitch on an EXISTING non-shell pane — non-material into AND out of, so it
+//     never diffs as Working→Idle ("finished a turn") and fires a spurious wake;
+//     #55, converging with aider/opencode/grok)
 //   - else the working-spinner is present          → Working, else Idle
 //
 // (Refines the surface-driver extraction's prior "read-error ⇒ Shell" fast-path,
 // which conflated a transient read failure with a crash — fixed because the
 // resume interlock SIGKILLs on a Shell verdict, so a read glitch must never
 // read as Shell. The watchdog is unaffected for real crashes: a gone pane fails
-// ResolvePane; a shell pane still reads as Shell.)
+// ResolvePane; a shell pane still reads as Shell. The capture-error verdict was
+// originally Idle ("byte-identical to the prior busy-err ⇒ not-busy"); #55 changed
+// it to Unknown — strictly safer under the change-detector (a glitch on a working
+// desk no longer spuriously wakes the XO with "finished a turn"), and unchanged for
+// the legacy XO gate (Idle/Unknown both → tick fires) and the resume interlock
+// (Idle/Unknown both → refuse to kill, only Shell kills).)
 func (c claudeCode) Assess(pane string) State {
 	cmd, err := c.paneCommand(pane)
 	if err != nil {
@@ -67,8 +74,8 @@ func (c claudeCode) Assess(pane string) State {
 	}
 	captured, err := c.capturePane(pane)
 	if err != nil {
-		log.Printf("flotilla: surface(claude-code): pane capture failed for %q: %v (treating as idle)", pane, err)
-		return StateIdle
+		log.Printf("flotilla: surface(claude-code): pane capture failed for %q: %v (treating as unknown, not a false finish)", pane, err)
+		return StateUnknown
 	}
 	if c.parseBusy(captured) {
 		return StateWorking

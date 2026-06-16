@@ -275,9 +275,10 @@ func cmdWatch(args []string) error {
 				return true
 			}
 			// The surface driver assesses rendered state (it performs its own pane
-			// captures). For claude-code this is byte-identical to the prior inline
-			// PaneCommand/IsShell + Busy logic: Shell ⇒ crashed, Working ⇒ busy,
-			// capture-error ⇒ Idle (fail-open).
+			// captures). For claude-code: Shell ⇒ crashed, Working ⇒ busy. (capture-error
+			// ⇒ Unknown since #55, converging all drivers; here in the legacy gate Idle
+			// and Unknown are equivalent — both are not-Shell and not-Working, so the
+			// tick fires either way.)
 			st := xoDrv.Assess(pane)
 			wd.Observe(ack.Acked(), st == surface.StateShell)
 			if wd.Down() {
