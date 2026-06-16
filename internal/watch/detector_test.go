@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/backlog"
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
@@ -27,6 +28,7 @@ type detFixture struct {
 	persisted   []Snapshot
 	rotateCalls int
 	rotateErr   error
+	backlog     backlog.Status // the goal-driven loop gate; zero ⇒ inert (no unblocked items)
 }
 
 type wakeRec struct {
@@ -80,6 +82,11 @@ func (f *detFixture) config(xo string, desks []string, k int, mode string) Detec
 			return was
 		},
 		Alert: func(m string) { f.mu.Lock(); defer f.mu.Unlock(); f.alerts = append(f.alerts, m) },
+		BacklogGate: func() backlog.Status {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			return f.backlog
+		},
 		Persist: func(s Snapshot) error {
 			f.mu.Lock()
 			defer f.mu.Unlock()
