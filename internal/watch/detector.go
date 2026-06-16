@@ -2,10 +2,12 @@ package watch
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"sync"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/backlog"
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
@@ -36,6 +38,10 @@ const (
 	// WakePing: a liveness-only ping (ack and do nothing else) — the max-quiet
 	// safety net so a healthy idle XO keeps acking.
 	WakePing
+	// WakeBacklog: the goal-driven loop drives the top unblocked backlog item; the
+	// reasons carry that item's raw line (the caller names it in the prompt). Emitted
+	// instead of settling while the backlog gate reports unblocked work remains.
+	WakeBacklog
 )
 
 // DetectorConfig wires a Detector. The collaborators are injected so the whole
@@ -80,6 +86,17 @@ type DetectorConfig struct {
 	MaxQuietIntervals   int    // N override — ping cadence; 0 ⇒ mode default
 	LivenessPingMode    string // "none" (default, $0-idle) | "interval" | "consecutive"
 	MaxSelfContinuation int    // H1 hard cap on consecutive no-external-change continuations
+
+	// BacklogGate reports the fleet backlog's settle-relevant status (the goal-driven loop). A
+	// non-empty Unblocked queue VETOES settle — overriding both the XO's idle self-signal and the
+	// self-continuation cap — and drives the top unblocked item (WakeBacklog). NewDetector defaults
+	// it to an inert closure (zero Status ⇒ no unblocked items ⇒ today's behavior unchanged), so a
+	// deployment without --backlog-file is byte-identical to before this change.
+	BacklogGate func() backlog.Status
+	// BacklogStuckCap is the per-item drive bound: an unblocked item driven this many times without
+	// leaving the queue is escalated ONCE and deprioritized (the loop drives other items rather than
+	// spinning on it). NewDetector defaults it when < 1.
+	BacklogStuckCap int
 }
 
 // Detector is the v2 heartbeat: a deterministic, no-LLM tick that wakes the XO
@@ -98,6 +115,7 @@ type Detector struct {
 	cold        bool
 	quietTicks  int
 	selfCont    int
+	driveCount  map[string]int // per-item backlog drive counts (the goal-driven loop's stuck handling)
 	shellStreak map[string]int
 	writeFails  int
 	degraded    bool
@@ -125,6 +143,14 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 	if cfg.MaxSelfContinuation < 1 {
 		cfg.MaxSelfContinuation = 3
 	}
+	if cfg.BacklogGate == nil {
+		// No backlog configured ⇒ inert: the zero Status has no unblocked items, so continueXO's
+		// gate is never triggered and behavior is byte-identical to before the goal-driven loop.
+		cfg.BacklogGate = func() backlog.Status { return backlog.Status{} }
+	}
+	if cfg.BacklogStuckCap < 1 {
+		cfg.BacklogStuckCap = 5
+	}
 	ping, alert := livenessParams(cfg.LivenessPingMode, cfg.MaxMissedAcks, cfg.MaxQuietIntervals)
 
 	snap, ok := LoadSnapshot(snapPath)
@@ -134,6 +160,7 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 		alertInterval: alert,
 		snap:          snap,
 		cold:          !ok,
+		driveCount:    map[string]int{},
 		shellStreak:   map[string]int{},
 		// The detector computes the staleness threshold itself (age > alertInterval×
 		// interval), so the watchdog only needs to trip on the first stale/crash
@@ -226,6 +253,12 @@ func (d *Detector) OperatorWake() {
 	d.snap.XOSettled = false
 	d.selfCont = 0
 	d.quietTicks = 0
+	// Clear per-item backlog drive counts: a fresh operator directive re-engages the loop and must
+	// not inherit a stale stuck-streak (which would wrongly fire a stuck alert / deprioritize an
+	// item on the next wake).
+	for item := range d.driveCount {
+		delete(d.driveCount, item)
+	}
 	// Drop any settle signal the XO may have just dropped, so it cannot re-settle
 	// the XO on the next tick after the operator has re-engaged it.
 	if d.cfg.SettleConsume != nil {
@@ -311,12 +344,15 @@ func (d *Detector) Tick() {
 	d.save()
 }
 
-// continueXO handles the XO's own Working→Idle: rotate to fresh context (unless
-// awaiting an operator reply), then either settle (the XO signalled idle, or the
-// hard cap is hit) or wake once more to advance the next authorized step.
+// continueXO handles the XO's own Working→Idle. It rotates to fresh context (unless awaiting an
+// operator reply), then consults the backlog gate: while UNBLOCKED items remain it NEVER settles —
+// overriding both the XO's idle self-signal and the self-continuation cap (the mechanical
+// anti-passivity fix) — and drives the top non-stuck item (WakeBacklog). Only when the gate is
+// satisfied (no unblocked items: empty / all-operator-blocked / awaiting / no backlog configured)
+// does the existing settle/continuation/cap logic apply, byte-identical to before.
 func (d *Detector) continueXO(cur *Snapshot, wake func(WakeKind, []string)) {
-	// Rotate between steps so each handling runs in fresh context — gated by the
-	// awaiting-operator veto (never wipe an outstanding question thread).
+	// Rotate between steps so each handling runs in fresh context — gated by the awaiting-operator
+	// veto (never wipe an outstanding question thread). Runs first on BOTH branches below.
 	if d.cfg.Awaiting == nil || !d.cfg.Awaiting() {
 		if d.cfg.Rotate != nil {
 			if err := d.cfg.Rotate(); err != nil && !errors.Is(err, surface.ErrRestartRequired) {
@@ -325,22 +361,79 @@ func (d *Detector) continueXO(cur *Snapshot, wake func(WakeKind, []string)) {
 		}
 	}
 
-	// Fast settle: the XO signalled idle.
-	if d.cfg.SettleConsume != nil && d.cfg.SettleConsume() {
-		cur.XOSettled = true
+	// Consume the settle marker regardless (as before) — even in the override branch, so a stale
+	// marker can't settle the XO on a later tick.
+	settleSignalled := d.cfg.SettleConsume != nil && d.cfg.SettleConsume()
+
+	// The backlog drive queue. An outstanding operator question (Awaiting) is a legitimate
+	// operator-gated pause: suppress the drive (treat as no unblocked work) — OperatorWake
+	// re-engages when the operator answers.
+	queue := d.cfg.BacklogGate().Unblocked
+	if d.cfg.Awaiting != nil && d.cfg.Awaiting() {
+		queue = nil
+	}
+	d.pruneDriveCounts(queue) // drop counts for items that left the queue (drained / marked blocked)
+
+	if len(queue) == 0 {
+		// Gate satisfied → TODAY'S behavior, unchanged. (Inert default ⇒ this is always the path.)
+		if settleSignalled {
+			cur.XOSettled = true
+			return
+		}
+		d.selfCont++
+		if d.selfCont > d.cfg.MaxSelfContinuation {
+			cur.XOSettled = true
+			log.Printf("flotilla watch: XO self-continuation hit the cap (%d) with no external change — forcing settled", d.cfg.MaxSelfContinuation)
+			return
+		}
+		wake(WakeContinuation, nil)
 		return
 	}
 
-	// Otherwise the XO claims a next step. Bound a runaway that never signals idle
-	// and produces no external change (H1) — rotation erases its memory of looping,
-	// so the cap is a code-level backstop, not a prompt promise.
-	d.selfCont++
-	if d.selfCont > d.cfg.MaxSelfContinuation {
-		cur.XOSettled = true
-		log.Printf("flotilla watch: XO self-continuation hit the cap (%d) with no external change — forcing settled", d.cfg.MaxSelfContinuation)
+	// Unblocked items remain → NEVER settle (the self-signal & cap are overridden). Not in the
+	// empty-backlog runaway regime, so reset that counter.
+	d.selfCont = 0
+	target := d.pickDriveTarget(queue) // top item not over the stuck cap, else the top item
+	d.driveCount[target]++
+	if d.driveCount[target] == d.cfg.BacklogStuckCap {
+		// Just crossed the cap → escalate THIS item ONCE and deprioritize it (pickDriveTarget will
+		// prefer lower-priority items below the cap next time). The XO durably marks it
+		// [blocked]/[needs-attention] in response, removing it from the queue.
+		if d.cfg.Alert != nil {
+			d.cfg.Alert(fmt.Sprintf("goal-loop: backlog item not progressing after %d wakes — advance it, or mark it [blocked]/[needs-attention]: %s", d.cfg.BacklogStuckCap, target))
+		}
+	}
+	wake(WakeBacklog, []string{target})
+}
+
+// pickDriveTarget returns the highest-priority queued item whose drive count is still below the
+// stuck cap; if EVERY queued item is at/over the cap, it returns the top item anyway (keep driving
+// at cadence — never spin tighter than the tick, never settle while work remains).
+func (d *Detector) pickDriveTarget(queue []string) string {
+	for _, item := range queue {
+		if d.driveCount[item] < d.cfg.BacklogStuckCap {
+			return item
+		}
+	}
+	return queue[0]
+}
+
+// pruneDriveCounts drops per-item counts for items no longer in the unblocked queue (drained, or
+// the XO marked them blocked/done), so a re-appearing item starts fresh and the map can't grow
+// unbounded.
+func (d *Detector) pruneDriveCounts(queue []string) {
+	if len(d.driveCount) == 0 {
 		return
 	}
-	wake(WakeContinuation, nil)
+	live := make(map[string]struct{}, len(queue))
+	for _, item := range queue {
+		live[item] = struct{}{}
+	}
+	for item := range d.driveCount {
+		if _, ok := live[item]; !ok {
+			delete(d.driveCount, item)
+		}
+	}
 }
 
 // debounce returns a desk's effective state, suppressing a single transient

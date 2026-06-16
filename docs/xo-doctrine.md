@@ -225,6 +225,50 @@ that many consecutive continuations with no external change and no idle signal,
 the detector forces you settled regardless. The cap is the backstop; the
 narrow-answer discipline is what keeps you off it.
 
+### The fleet backlog — the goal-driven loop (opt-in, `--backlog-file`)
+
+When a backlog file is configured, the detector is **goal-driven**: it
+**mechanically refuses to settle** (overriding BOTH your idle reply AND the
+self-continuation cap) while the backlog has **unblocked** items. Each
+continuation it instead wakes you to **advance the top unblocked item**. There is
+no "if quiet, hold" — while unblocked work exists you are driven; you settle ONLY
+when every item is done or operator-blocked (or while you are awaiting an operator
+answer). This is the durable anti-passivity mechanism — it does not depend on you
+choosing to keep going.
+
+**The item-line CONTRACT.** Each backlog item is a list line in the `## Backlog`
+section carrying a leading bracketed status marker:
+
+```
+## Backlog (prioritized — advance the top UNBLOCKED item each wake)
+- [in-flight] <task> (<owner desk>)      # being driven        → UNBLOCKED
+- [next] <task> (<owner desk>)           # not started          → UNBLOCKED
+- [blocked] <task> — awaiting <operator decision>   # human-gated → operator-blocked
+- [needs-attention] <task>               # deprioritized stuck   → operator-blocked
+- [done] <task>                          # complete             → drained
+```
+
+`in-flight`/`next` are unblocked (they keep the loop driving); `blocked`/
+`needs-attention` are operator-blocked (drive PREP on them, but they do not block
+settle); `done` is drained. **Maintain this format** — a line with no recognized
+`[status]` marker is FLAGGED (a loud alert) and treated as unblocked (the loop
+keeps driving, never silently misclassifies), so a format slip is loud, not
+silent. **Drain** by marking items `[done]` (or `[blocked]`) as they complete, and
+by **dispatching** unblocked items across desks/harnesses (not doing everything
+yourself).
+
+**Per-item stuck handling.** If you are driven onto the same item repeatedly
+without it progressing, the detector escalates a loud alert naming that item and
+**deprioritizes** it (drives the rest of the backlog instead). When you get that
+alert: advance the item, or durably mark it `[blocked]`/`[needs-attention]` so the
+loop stops returning to it.
+
+**Write the backlog ATOMICALLY** (write a temp file, then rename over the target),
+the same discipline as the snapshot — the detector reads the file every tick, and
+a torn mid-write read must never corrupt the gate. (A torn read self-heals on the
+next tick — at worst it momentarily mis-reads the queue — but atomic writes avoid
+it entirely.)
+
 ### The settle (idle) marker — exact lifecycle
 
 The fast way to tell the detector you are idle is the **settle marker**
