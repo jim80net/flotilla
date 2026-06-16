@@ -42,9 +42,13 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
-# Load ONLY the five known keys (so a stray line can never inject shell). Pre-clear
-# them so an inherited environment (e.g. a caller's $FLOTILLA_SECRETS) can't leak in.
-FLOTILLA_WORKDIR='' FLOTILLA_BIN='' FLOTILLA_ROSTER='' FLOTILLA_SECRETS='' FLOTILLA_ACK_FILE=''
+# Load ONLY the known keys (so a stray line can never inject shell). Pre-clear them
+# so an inherited environment can't leak in. FLOTILLA_BACKLOG_FILE is LOAD-BEARING
+# here: the live host EXPORTS it (the binary reads it as a fallback default — see
+# cmd/flotilla/watch.go), so without this pre-clear an inherited value would inject
+# `--backlog-file` even when the .env omits the optional key, silently breaking the
+# byte-identical-when-unset guarantee. The value must come from the .env ONLY.
+FLOTILLA_WORKDIR='' FLOTILLA_BIN='' FLOTILLA_ROSTER='' FLOTILLA_SECRETS='' FLOTILLA_ACK_FILE='' FLOTILLA_BACKLOG_FILE=''
 while IFS= read -r line || [[ -n "$line" ]]; do
   line="${line%$'\r'}"
   [[ -z "$line" || "$line" == \#* ]] && continue
@@ -56,7 +60,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   val="${val#"${val%%[![:space:]]*}"}"
   val="${val%"${val##*[![:space:]]}"}"
   case "$key" in
-    FLOTILLA_WORKDIR|FLOTILLA_BIN|FLOTILLA_ROSTER|FLOTILLA_SECRETS|FLOTILLA_ACK_FILE)
+    FLOTILLA_WORKDIR|FLOTILLA_BIN|FLOTILLA_ROSTER|FLOTILLA_SECRETS|FLOTILLA_ACK_FILE|FLOTILLA_BACKLOG_FILE)
       printf -v "$key" '%s' "$val" ;;
     *) echo "warning: ignoring unknown key in $ENV_FILE: $key" >&2 ;;
   esac
@@ -74,7 +78,7 @@ fi
 # A value must never itself contain a template token, or a later substitution pass
 # would rewrite it (substitution is sequential). Implausible for a real path, but
 # cheap to make the substitution provably safe.
-for v in FLOTILLA_WORKDIR FLOTILLA_BIN FLOTILLA_ROSTER FLOTILLA_SECRETS FLOTILLA_ACK_FILE; do
+for v in FLOTILLA_WORKDIR FLOTILLA_BIN FLOTILLA_ROSTER FLOTILLA_SECRETS FLOTILLA_ACK_FILE FLOTILLA_BACKLOG_FILE; do
   if [[ "${!v}" == *@FLOTILLA_*@* ]]; then
     echo "error: $v contains a template placeholder token (@FLOTILLA_...@); refusing" >&2
     exit 1
@@ -83,6 +87,15 @@ done
 
 # Generate via pure-bash placeholder substitution — NOT sed/envsubst: the
 # ExecStartPre line contains $(seq 1 30)/$i and %h that those tools would mangle.
+#
+# Disable patsub_replacement (bash 5.2+ default-ON): with it on, a literal `&` in a
+# ${var//pat/repl} REPLACEMENT expands to the matched text — so a path value
+# containing `&` would corrupt the substitution (the `&` becomes the placeholder
+# token, surviving the fail-loud guard with a misleading error). We want every value
+# substituted LITERALLY. Unsetting it makes `&` literal uniformly for ALL keys, and
+# degrades gracefully on bash <5.2 (where the option does not exist and `&` was
+# already literal). No substitution here uses `&`-as-matched-text.
+shopt -u patsub_replacement 2>/dev/null || true
 content="$(cat "$TEMPLATE")"
 content="${content//@FLOTILLA_WORKDIR@/$FLOTILLA_WORKDIR}"
 content="${content//@FLOTILLA_BIN@/$FLOTILLA_BIN}"
@@ -90,10 +103,25 @@ content="${content//@FLOTILLA_ROSTER@/$FLOTILLA_ROSTER}"
 content="${content//@FLOTILLA_SECRETS@/$FLOTILLA_SECRETS}"
 content="${content//@FLOTILLA_ACK_FILE@/$FLOTILLA_ACK_FILE}"
 
+# OPTIONAL backlog: compute the ExecStart fragment. SET ⇒ " --backlog-file <path>"
+# (the leading space is part of the fragment, since the template appends it with no
+# separator); UNSET ⇒ "" (byte-identical to a no-backlog unit). The placeholder is
+# ALWAYS substituted — to the fragment or to empty — so the fail-loud guard below
+# still holds and an unset backlog leaves no trailing space.
+if [[ -n "$FLOTILLA_BACKLOG_FILE" ]]; then
+  backlog_arg=" --backlog-file $FLOTILLA_BACKLOG_FILE"
+else
+  backlog_arg=""
+fi
+content="${content//@FLOTILLA_BACKLOG_ARG@/$backlog_arg}"
+
 # Fail loudly if any placeholder survived (a typo'd or newly-added template token).
+# The offender-grep charset includes * and . so it always prints SOMETHING that the
+# `*@FLOTILLA_*@*` glob can match (a literal `@FLOTILLA_*@` in a template comment would
+# trip the glob but be invisible to a [A-Z_]-only grep — an empty, confusing error).
 if [[ "$content" == *@FLOTILLA_*@* ]]; then
   echo "error: unsubstituted placeholder(s) remain in the generated unit:" >&2
-  printf '%s\n' "$content" | grep -o '@FLOTILLA_[A-Z_]*@' | sort -u >&2
+  printf '%s\n' "$content" | grep -o '@FLOTILLA_[A-Z_.*]*@' | sort -u >&2
   exit 1
 fi
 
@@ -115,6 +143,10 @@ check_path() {
 check_path "$FLOTILLA_ROSTER"  || { echo "error: roster not found: $FLOTILLA_ROSTER" >&2; exit 1; }
 check_path "$FLOTILLA_SECRETS" || { echo "error: secrets not found: $FLOTILLA_SECRETS" >&2; exit 1; }
 check_path "$FLOTILLA_BIN"     || echo "warning: binary not found yet: $FLOTILLA_BIN (install it before starting)" >&2
+# Backlog is OPTIONAL and the XO may not have created it yet on a fresh host, so a
+# missing file is a warning (non-fatal), unlike the roster/secrets hard prerequisites.
+[[ -z "$FLOTILLA_BACKLOG_FILE" ]] || check_path "$FLOTILLA_BACKLOG_FILE" || \
+  echo "warning: backlog file not found yet: $FLOTILLA_BACKLOG_FILE (the XO creates it; the gate is inert until it exists)" >&2
 
 new_tmp="$(mktemp)"; trap 'rm -f "$new_tmp"' EXIT
 printf '%s\n' "$content" > "$new_tmp"
