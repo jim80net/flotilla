@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 
 	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/roster"
@@ -44,6 +45,12 @@ func cmdResult(args []string) error {
 	pane, err := deliver.ResolvePane(agent.Title())
 	if err != nil {
 		return err
+	}
+	// Mid-turn guard: if the desk is actively working, "latest completed turn" may instead be
+	// intermediate narration (a partial). Warn to STDERR (stdout stays the pipeable result) so the
+	// operator knows to re-read when idle — the result is still printed (they may want the partial).
+	if drv.Assess(pane) == surface.StateWorking {
+		fmt.Fprintf(os.Stderr, "flotilla: warning — %s is mid-turn; this may be intermediate narration, not the final result. Re-run when idle.\n", agentName)
 	}
 	result, err := rr.LatestResult(pane)
 	if err != nil {

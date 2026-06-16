@@ -88,3 +88,54 @@ func TestLatestResultErrors(t *testing.T) {
 		}
 	})
 }
+
+func TestLatestResultArrayContent(t *testing.T) {
+	// grok may write assistant content as an array of typed blocks (structured/multimodal turns).
+	// extractText must concatenate the text blocks, not skip the entry (OCR-M2).
+	cwd := "/home/jim/workspace/grok-research"
+	history := `{"type":"assistant","content":[{"type":"text","text":"part one "},{"type":"text","text":"and part two"}]}`
+	home := writeStore(t, cwd, "s1", "%2Fhome%2Fjim%2Fworkspace%2Fgrok-research", history)
+	got, err := LatestResult(home, cwd)
+	if err != nil || got != "part one and part two" {
+		t.Errorf("got (%q, %v), want the concatenated text blocks", got, err)
+	}
+}
+
+func TestLatestResultUndecodableAssistantIsLoud(t *testing.T) {
+	// An assistant entry whose content is neither string nor text-blocks must NOT silently vanish —
+	// it surfaces a distinct "unrecognized format" error, not "no assistant turn yet" (OCR-M2).
+	cwd := "/home/jim/workspace/grok-research"
+	history := `{"type":"assistant","content":42}` // a number — neither string nor block array
+	home := writeStore(t, cwd, "s1", "%2Fhome%2Fjim%2Fworkspace%2Fgrok-research", history)
+	_, err := LatestResult(home, cwd)
+	if err == nil || !strings.Contains(err.Error(), "unrecognized") {
+		t.Errorf("err = %v, want a distinct 'unrecognized format' error (not a silent skip / no-turn)", err)
+	}
+}
+
+func TestLatestResultTrailingSlashCwdMatches(t *testing.T) {
+	// filepath.Clean tolerates a trailing slash on either side (the pane cwd vs the stored cwd).
+	home := writeStore(t, "/home/jim/workspace/grok-research", "s1", "%2Fhome%2Fjim%2Fworkspace%2Fgrok-research", `{"type":"assistant","content":"ok"}`)
+	got, err := LatestResult(home, "/home/jim/workspace/grok-research/")
+	if err != nil || got != "ok" {
+		t.Errorf("got (%q, %v), want a match despite the trailing slash", got, err)
+	}
+}
+
+func TestLatestResultAmbiguousMatchesError(t *testing.T) {
+	// If the same session-id appears under two cwd dirs (a corrupt/duplicated store), pick neither —
+	// surface the ambiguity loudly rather than silently taking matches[0] (systems-P3 / OCR-L3).
+	cwd := "/home/jim/workspace/grok-research"
+	home := writeStore(t, cwd, "dup", "%2Fhome%2Fjim%2Fworkspace%2Fgrok-research", `{"type":"assistant","content":"a"}`)
+	// plant a SECOND chat_history for the same session-id under a different cwd dir
+	dir2 := filepath.Join(home, "sessions", "%2Fother%2Fcwd", "dup")
+	if err := os.MkdirAll(dir2, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir2, "chat_history.jsonl"), []byte(`{"type":"assistant","content":"b"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LatestResult(home, cwd); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Errorf("err = %v, want an 'ambiguous' error for a duplicated session-id", err)
+	}
+}

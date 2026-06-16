@@ -49,7 +49,12 @@ type grok struct {
 }
 
 func newGrok() grok {
-	home, _ := os.UserHomeDir() // empty on the rare error ⇒ LatestResult returns a clear error
+	// On the rare UserHomeDir error, leave grokHome EMPTY (NOT filepath.Join("", ".grok") == ".grok",
+	// which would read a bogus relative path) so LatestResult's empty-home guard fires a clear error.
+	grokHome := ""
+	if home, err := os.UserHomeDir(); err == nil {
+		grokHome = filepath.Join(home, ".grok")
+	}
 	return grok{
 		paneCommand:  deliver.PaneCommand,
 		isShell:      deliver.IsShell,
@@ -58,7 +63,7 @@ func newGrok() grok {
 		send:         deliver.Send,
 		inject:       deliver.InjectSlash,
 		paneCWD:      deliver.PaneCWD,
-		grokHome:     filepath.Join(home, ".grok"),
+		grokHome:     grokHome,
 		latestResult: grokstore.LatestResult,
 	}
 }
