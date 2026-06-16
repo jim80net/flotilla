@@ -183,12 +183,19 @@ duty changes in two ways:
   the state in the wake reason (`aid: finished a turn`, `aid: entered awaiting-approval`).
   Lean on that — do not re-classify a non-Claude pane by eye (its working / idle /
   approval render differs from Claude's, and the XO may misread it).
-- **Non-Claude desks are pull-participants.** A non-Claude desk has no flotilla skill
-  set, so it cannot `flotilla notify`-push a report. **Collect by reading its pane /
+- **Non-Claude desks are pull-participants by default.** An unprovisioned non-Claude
+  desk has no flotilla skill set, so it does not push — **collect by reading its pane /
   files** (cued by the driver `Assess` for *when*); delegation is one-way (the XO
   submits; the desk reports via its state + what it writes). Rotate a non-Claude desk
   with its driver's reset (`/new`, `/new-chat`), and recover a dead one by relaunching
   its launch recipe — not Claude's `/clear` / resume.
+- **A *provisioned smart desk* IS a push peer** (opt-in, via `flotilla push-snippet` —
+  see [inter-harness.md](./inter-harness.md)). It reports to the XO with `flotilla send`
+  (pane injection, **no secrets** — never `flotilla notify`, which the XO owns). When a
+  smart desk pushes a report, that is the XO's cue to **collect that desk** (pull its
+  detail), route as needed, and relay to the operator only if it needs them. A pushed
+  desk report can never be an *operator* message — operator messages arrive only via the
+  Discord relay's operator-id filter, which a desk's pane injection never transits.
 
 ### The state-externalization contract (non-negotiable when this is on)
 
