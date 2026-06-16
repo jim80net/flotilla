@@ -24,8 +24,11 @@ func init() { Register(newGrok()) }
 // NOT YET CHARACTERIZED (follow-up, needs a live capture of the state): the official grok's
 // blocking gates (auth-needed / payment / a tool-approval prompt, if any). grok auto-executes
 // most tools, so blocking gates are rare; until one is captured this driver emits NO
-// AwaitingApproval — an auth-blocked desk would read Idle (a known gap; the detector's
-// crash/wedge liveness still covers a truly stuck desk, and the operator funds the key).
+// AwaitingApproval — an auth-blocked desk reads Idle (a known gap). Liveness caveat: a desk that
+// CRASHES to a shell still alerts (the per-desk Shell debounce + the resolve-fail→Shell mapping),
+// but the ack-age WEDGE timer watches only the XO — so an auth-blocked-but-process-alive grok
+// desk is invisible to liveness until that gate is captured (#58 follow-up); the operator funds
+// the key, so this is rare.
 type grok struct {
 	paneCommand func(string) (string, error)
 	isShell     func(string) bool
@@ -86,28 +89,34 @@ func (grok) RotateStrategy() Strategy { return SlashCommand }
 // above), keeping a quoted marker in the model's own output from false-matching.
 const grokTail = 12
 
-// grokWorkingArrow is the official grok's live streaming/processing indicator: the downwards
-// arrow ⇣ (U+21E3) precedes the streamed-token count in the status line — e.g.
-// "⠙ Waiting… 0.4s ⇣127k [✗]". LIVE-MEASURED present on EVERY frame throughout a turn (initial
-// thinking AND streaming, from ~200ms after submit) and ABSENT when idle/done (which shows
-// "Turn completed in Xs." and an empty composer; the ⇣ count is 0). We key on this stable arrow
-// rather than the leading spinner glyph or the gerund verb, both of which VARY
-// (⠙/⠦/⠸ … and Thinking…/Waiting…/Generating…).
+// The official grok's working render has TWO processing-only signals, both LIVE-MEASURED present
+// during a turn and ABSENT when idle/done (idle shows "Turn completed in Xs." + an empty composer
+// box drawn with U+2500 box chars / "◆" / "❯" — none of which match either signal):
+//
+//   - grokWorkingArrow ⇣ (U+21E3): the streamed-token-count arrow in the status line, e.g.
+//     "⠙ Waiting… 0.4s ⇣127k [✗]". Present during the STREAMING phase.
+//   - grokSpinner (braille animation, U+2801–U+28FF, e.g. ⠙ ⠦ ⠸): the processing spinner that
+//     leads the status line throughout ALL processing phases (initial thinking, streaming, and —
+//     by construction — tool calls), so it covers the brief pre-arrow window and any phase where
+//     token streaming pauses. We key on the spinner's Unicode RANGE, not the cycling frame.
+//
+// We deliberately do NOT match a "Capitalized word + …" gerund: the leading verb VARIES
+// (Thinking…/Waiting…/Generating…) and a bare [A-Z][a-z]+… matches ordinary prose ("Note…",
+// "Done…") that can land in the bottom tail of a FINISHED turn — which would false-read Working
+// and re-introduce the "detector can't see grok finished" bug this driver fixes. The arrow and
+// the braille spinner are grok CHROME, not prose, so they are the safe anchors.
 const grokWorkingArrow = "⇣"
 
-// grokWorkingGerund is a secondary working anchor: a capitalized gerund verb immediately followed
-// by the "…" ellipsis (U+2026) — "Thinking…", "Waiting…", "Generating…" — the processing label
-// shown beside the arrow. Belt-and-suspenders to grokWorkingArrow.
-var grokWorkingGerund = regexp.MustCompile(`[A-Z][a-z]+\x{2026}`)
+var grokSpinner = regexp.MustCompile(`[\x{2801}-\x{28FF}]`) // any non-blank braille spinner frame
 
 // parseGrokState classifies a captured official-grok pane, claude-style (Working-positive,
-// Idle-default). Working iff the bottom chrome shows the live streaming arrow ⇣ (or the
-// gerund+"…" processing label); otherwise Idle (a finished turn shows "Turn completed in …" and
-// an empty composer — no arrow). There is no AwaitingApproval branch yet (see the driver note:
-// the official grok's blocking gates are not yet live-captured).
+// Idle-default). Working iff the bottom chrome shows the streaming arrow ⇣ OR a braille spinner
+// frame; otherwise Idle (a finished turn shows "Turn completed in …" and an empty composer — no
+// arrow, no spinner). There is no AwaitingApproval branch yet (see the driver note: the official
+// grok's blocking gates are not yet live-captured).
 func parseGrokState(captured string) State {
 	tail := strings.Join(lastNNonEmptyLines(captured, grokTail), "\n")
-	if strings.Contains(tail, grokWorkingArrow) || grokWorkingGerund.MatchString(tail) {
+	if strings.Contains(tail, grokWorkingArrow) || grokSpinner.MatchString(tail) {
 		return StateWorking
 	}
 	return StateIdle

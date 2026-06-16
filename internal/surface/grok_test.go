@@ -24,18 +24,22 @@ func TestParseGrokState(t *testing.T) {
 		want     State
 	}{
 		{
-			name:     "live streaming status (arrow + gerund + elapsed) → Working",
+			name:     "live streaming status (spinner + arrow + elapsed) → Working",
 			captured: "     ...streamed output...\n\n  ⠙ Waiting… 0.4s ⇣127k [✗]",
 			want:     StateWorking,
 		},
 		{
-			name:     "early thinking frame (arrow + Thinking…) → Working",
-			captured: "  ┃ The user wants …\n  ⠸ Thinking… 0.1s                              2.9s ⇣127k [✗]",
+			// ARROW branch pinned in isolation: the streaming arrow ⇣ with NO braille spinner on
+			// the line (so this case fails iff arrow-detection is removed — OCR-M1).
+			name:     "arrow only, no spinner frame → Working (arrow branch)",
+			captured: "  streaming  3.2s ⇣127k [✗]",
 			want:     StateWorking,
 		},
 		{
-			name:     "gerund-only frame (no arrow yet) → Working (secondary anchor)",
-			captured: "  ⠦ Generating…",
+			// SPINNER branch pinned in isolation: a braille spinner frame with NO arrow (the brief
+			// pre-stream / thinking window) → fails iff spinner-detection is removed.
+			name:     "spinner frame, no arrow → Working (spinner branch)",
+			captured: "  ⠦ Thinking… 0.1s",
 			want:     StateWorking,
 		},
 		{
@@ -51,6 +55,14 @@ func TestParseGrokState(t *testing.T) {
 		{
 			name:     "empty capture → Idle",
 			captured: "",
+			want:     StateIdle,
+		},
+		{
+			// P2 regression: a finished turn whose tail contains an ordinary Capitalized-word +
+			// ellipsis ("Note…"/"Done…") must read Idle. The old broad [A-Z][a-z]+… secondary
+			// false-matched these; the arrow/spinner anchors (grok chrome, not prose) do not.
+			name:     "idle turn with a 'Note…' prose ellipsis in the tail → Idle (not a false Working)",
+			captured: "  Note… see the summary above. Done… for now.\n  Turn completed in 2s.\n  │ ❯  │\n  Shift+Tab:mode",
 			want:     StateIdle,
 		},
 		{
