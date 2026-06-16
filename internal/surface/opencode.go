@@ -50,7 +50,7 @@ func (c openCode) Submit(pane, text string) error { return c.send(pane, text) }
 // Assess returns this tick (detector.go:251,279,302) and only StateShell is debounced
 // (detector.go:341-345). Unknown is treated as non-material into AND out of
 // (materiality.go:48), so a glitch produces zero wakes regardless of polarity — strictly
-// safer. (All five drivers now return Unknown on capture-error — #55 converged claude-code,
+// safer. (All four registered drivers (claude-code/aider/opencode/grok) now return Unknown on capture-error — #55 converged claude-code,
 // which historically returned Idle here.)
 func (c openCode) Assess(pane string) State {
 	cmd, err := c.paneCommand(pane)
