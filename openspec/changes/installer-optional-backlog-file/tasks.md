@@ -1,0 +1,18 @@
+## 1. TDD — installer regression (the functional-identity lock)
+
+- [x] 1.1 TEST (SET) `TestInstallerBacklogSetAppendsArg`: render a 6-key env (5 + `FLOTILLA_BACKLOG_FILE=/srv/fleet/backlog.md`) → `ExecStart` ends with exactly ` --backlog-file /srv/fleet/backlog.md` (single-spaced, no surviving placeholder).
+- [x] 1.2 TEST (UNSET, the no-regression lock) `TestInstallerBacklogUnsetOmitsArg` + the existing `TestInstallerGeneratesExpectedFunctionalUnit`: the 5-key fixture's `ExecStart` stays exactly `…--ack-file /srv/fleet/xo-alive` — no `--backlog-file`, no trailing space.
+- [x] 1.3 TEST (inherited-env no-leak, guards the pre-clear) `TestInstallerBacklogInheritedEnvNoLeak`: export `FLOTILLA_BACKLOG_FILE` in the installer subprocess env but render the 5-key fixture → `ExecStart` has no `--backlog-file`.
+
+## 2. IMPL — installer/template/.env plumbing
+
+- [x] 2.1 `deploy/flotilla-watch.service.in`: append `@FLOTILLA_BACKLOG_ARG@` to the `ExecStart` line directly after `@FLOTILLA_ACK_FILE@` (no separating space); document the computed-fragment mechanism in a comment.
+- [x] 2.2 `deploy/flotilla-watch-install.sh`: pre-clear `FLOTILLA_BACKLOG_FILE=''` (load-bearing — the host exports it); add it to the key allowlist (loaded, not warned); DO NOT add it to the required-missing loop; add it to the template-token-in-value safety check; compute `backlog_arg` (` --backlog-file <path>` when set, else `""`) and substitute `@FLOTILLA_BACKLOG_ARG@`; non-fatal warning if the backlog file is missing.
+- [x] 2.3 `deploy/flotilla-watch.env.example`: add the OPTIONAL 6th key, COMMENTED OUT, documenting gate-OFF-when-unset + byte-identical-when-unset semantics.
+
+## 3. Verify
+
+- [x] 3.1 `go test ./...` green (9 installer tests incl. the 3 new ones); `go vet ./...` clean; `bash -n` clean.
+- [x] 3.2 `openspec validate installer-optional-backlog-file`.
+- [ ] 3.3 `/systems-review` + `/open-code-review` in parallel on the diff; fold findings.
+- [ ] 3.4 PR → XO review + merge. (After merge: XO does the Spark drop-in → `.env` cutover.)
