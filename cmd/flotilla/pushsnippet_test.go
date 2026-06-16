@@ -72,3 +72,36 @@ func TestBuildPushSnippetRejectsNonRosterDeskAndXO(t *testing.T) {
 		t.Error("buildPushSnippet(the XO) = nil error, want a rejection (the XO is not a push-desk)")
 	}
 }
+
+func TestBuildPushSnippetXOFallbackToFirstAgent(t *testing.T) {
+	// systems-review LOW-1: no XOAgent set → the XO resolves to Agents[0], and the snippet
+	// instructs `send` to that agent.
+	cfg := &roster.Config{
+		Agents: []roster.Agent{
+			{Name: "lead"},                        // Agents[0] → the de-facto XO
+			{Name: "oc-dev", Surface: "opencode"}, // the desk
+		},
+	}
+	out, err := buildPushSnippet(cfg, "oc-dev")
+	if err != nil {
+		t.Fatalf("buildPushSnippet: %v", err)
+	}
+	if !strings.Contains(out, "flotilla send --from oc-dev lead") {
+		t.Errorf("with no XOAgent, the snippet must target Agents[0] (lead); got:\n%s", out)
+	}
+}
+
+func TestBuildPushSnippetUnknownSurfaceErrors(t *testing.T) {
+	// systems-review LOW-2: an unregistered surface has no identity-file convention → error
+	// (never a guessed file).
+	cfg := &roster.Config{
+		XOAgent: "xo",
+		Agents: []roster.Agent{
+			{Name: "xo"},
+			{Name: "weird", Surface: "made-up"},
+		},
+	}
+	if _, err := buildPushSnippet(cfg, "weird"); err == nil {
+		t.Error("buildPushSnippet(unknown surface) = nil error, want an identity-file error")
+	}
+}
