@@ -245,6 +245,78 @@ func TestRelayBusyThenIdleRegression0607(t *testing.T) {
 	}
 }
 
+// composerDriver is a surface.Driver that ALSO implements surface.ComposerProbe, for the
+// heavy-pane false-negative regression: Assess stays Idle (the spinner has not rendered) while the
+// composer reports CLEARED (the Enter was accepted) — the exact render the bug misread.
+type composerDriver struct {
+	submits  int
+	pending  bool // what ComposerPending reports
+	probable bool // ok flag ComposerPending returns
+}
+
+func (d *composerDriver) Name() string                     { return "composer" }
+func (d *composerDriver) Submit(string, string) error      { d.submits++; return nil }
+func (d *composerDriver) Rotate(string) error              { return nil }
+func (d *composerDriver) RotateStrategy() surface.Strategy { return surface.SlashCommand }
+func (d *composerDriver) Assess(string) surface.State      { return surface.StateIdle } // spinner never renders
+func (d *composerDriver) ComposerPending(string) (bool, bool) {
+	return d.pending, d.probable
+}
+
+func TestRelayHeavyPaneComposerClearNoFalseAlarm(t *testing.T) {
+	// End-to-end through the real surface.Confirm + Injector: on a heavy XO pane the spinner lags
+	// past the confirm window (Assess stays Idle), but the composer CLEARS (the message landed).
+	// The relay must be reported DELIVERED (logged + mirrored) and must NOT raise the false
+	// "operator message NOT delivered" alarm — the operator-facing bug this change fixes.
+	drv := &composerDriver{pending: false, probable: true} // composer cleared = submit accepted
+	confirm := surface.Confirm{SendEnter: func(string) error { return nil }, Sleep: func(time.Duration) {}}
+	var mirrored, deferred []Job
+	var alerts []string
+	in := NewInjector(func(_, msg string) error { return confirm.Submit(drv, "hydra-ops-pane", msg) }, 0)
+	in.reEnqueue = func(j Job, _ time.Duration) { deferred = append(deferred, j) }
+	in.SetMirror(func(j Job) { mirrored = append(mirrored, j) })
+	in.SetEscalate(func(s string) { alerts = append(alerts, s) })
+
+	buf := captureLog(t)
+	in.deliver(Job{Agent: "hydra-ops", Message: "operator: exec summary", Kind: "relay"})
+
+	if len(alerts) != 0 {
+		t.Fatalf("FALSE alarm raised on a delivered message: %v", alerts)
+	}
+	if len(mirrored) != 1 {
+		t.Fatalf("a confirmed (composer-cleared) delivery was not mirrored: mirrored=%d", len(mirrored))
+	}
+	if len(deferred) != 0 {
+		t.Fatalf("a confirmed delivery was deferred: deferred=%d", len(deferred))
+	}
+	if !strings.Contains(buf.String(), "delivered to") {
+		t.Fatalf("a confirmed delivery left no success log: %q", buf.String())
+	}
+}
+
+func TestRelayHeavyPaneComposerStaysPendingStillEscalates(t *testing.T) {
+	// The invariant guard, end-to-end: when the composer stays PENDING (the body never left it —
+	// a genuine non-delivery) and the spinner never appears, the relay MUST still raise the loud
+	// alarm. The false-negative fix must not weaken the never-silent-drop guarantee.
+	drv := &composerDriver{pending: true, probable: true} // body stuck in the composer
+	confirm := surface.Confirm{SendEnter: func(string) error { return nil }, Sleep: func(time.Duration) {}}
+	var mirrored []Job
+	var alerts []string
+	in := NewInjector(func(_, msg string) error { return confirm.Submit(drv, "hydra-ops-pane", msg) }, 0)
+	in.reEnqueue = func(Job, time.Duration) {}
+	in.SetMirror(func(j Job) { mirrored = append(mirrored, j) })
+	in.SetEscalate(func(s string) { alerts = append(alerts, s) })
+
+	in.deliver(Job{Agent: "hydra-ops", Message: "operator: exec summary", Kind: "relay"})
+
+	if len(alerts) != 1 {
+		t.Fatalf("a genuine non-delivery did not escalate: alerts=%v", alerts)
+	}
+	if len(mirrored) != 0 {
+		t.Fatalf("a non-delivered message was mirrored: mirrored=%d", len(mirrored))
+	}
+}
+
 func TestInjectorWorkerNotBlockedByBusyDefer(t *testing.T) {
 	// The defer is OFF the worker: a busy relay re-enqueues via the (here no-op) hook and
 	// returns immediately, so a second desk's job is delivered without waiting. Integration
