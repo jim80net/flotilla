@@ -108,7 +108,7 @@
 
       <div class="msg" id="m2"><div class="av xo">⛵</div><div class="body">
         <div class="line1"><span class="name xo">xo</span><span class="badge"><span class="dot"></span>APP</span><span class="ts">Today at 9:41 AM</span></div>
-        <div class="text">AppX-API just merged + deployed full-text search on the catalog. Next up: make it fast under load — I've dispatched AppX-Ops to benchmark caching options, will report back when it's in.</div></div></div>
+        <div class="text">AppX-API just merged + deployed full-text search on the catalog, and AppX-Data shipped the indexing pipeline behind it. Next up: make it fast under load — I've dispatched AppX-Ops to benchmark caching options, will report back when it's in.</div></div></div>
 
       <div class="msg" id="m3"><div class="av op">Y</div><div class="body">
         <div class="line1"><span class="name op">you</span><span class="ts">Today at 9:42 AM</span></div>
@@ -116,7 +116,7 @@
 
       <div class="msg" id="m4"><div class="av xo">⛵</div><div class="body">
         <div class="line1"><span class="name xo">xo</span><span class="badge"><span class="dot"></span>APP</span><span class="ts">Today at 9:42 AM</span></div>
-        <div class="text">Queued — I'll tee it up after the caching work.</div></div></div>
+        <div class="text">Queued — I'll loop in AppX-Data to index the new filter fields, then tee it up after the caching work.</div></div></div>
 
       <div class="typing" id="typing"><div class="dots"><span></span><span></span><span></span></div>
         <div class="who"><b>xo</b> is typing…</div></div>
@@ -133,12 +133,12 @@
     await sleep(700);
     show('m1');                 // you: Status?
     await sleep(900); typing(true);
-    await sleep(2000); typing(false); show('m2');   // xo: report (long — read time)
-    await sleep(6200);
+    await sleep(2000); typing(false); show('m2');   // xo: 3-lane report (longer — read time)
+    await sleep(7400);
     show('m3');                 // you: add filters + sort
     await sleep(900); typing(true);
-    await sleep(1700); typing(false); show('m4');   // xo: Queued
-    await sleep(4200);          // end hold
+    await sleep(1800); typing(false); show('m4');   // xo: Queued (loops in AppX-Data)
+    await sleep(4600);          // end hold
     window.__done = true;
   }
   run();
