@@ -181,12 +181,6 @@ Near-term:
 - [ ] Release-sign-off workflow.
 - [x] Docs + an end-to-end quickstart that a newcomer can run cold — [docs/quickstart.md](./docs/quickstart.md) (cold-tested: install, send, clock).
 
-## Research log
-
-Durable kill-or-keep verdicts from experiments and evaluations, so a future
-session reads the verdict instead of re-deriving it — see
-[research/](./research/README.md). (e.g. *OCR as a third PR reviewer → shelved*.)
-
 ## License
 
 [MIT](./LICENSE).
