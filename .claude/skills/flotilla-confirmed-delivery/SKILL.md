@@ -22,10 +22,10 @@ boost: 0.05
 # flotilla confirmed-delivery — the invariants (do NOT regress)
 
 `internal/surface/confirm.go` (`Confirm.Submit`) turns "the tmux keystrokes ran" into
-"the submit was accepted." Full design + measured evidence:
-`docs/design-confirm-false-negative.md`. PRs: #71/#74 (closed the silent-DROP), #86
-(closed the false ALARM). The code comments there are the source of truth — this skill is
-the trigger so you read them before changing anything in this area.
+"the submit was accepted." Full design + measured evidence live in the code comments
+(`internal/surface/confirm.go` + `internal/surface/surface.go`). PRs: #71/#74 (closed the
+silent-DROP), #86 (closed the false ALARM). The code comments are the source of truth — this
+skill is the trigger so you read them before changing anything in this area.
 
 ## The three load-bearing facts
 

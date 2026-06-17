@@ -247,8 +247,8 @@ func cmdSend(args []string) error {
 
 	// Deliver = wake: submit the message into the agent's pane via its driver and CONFIRM a
 	// turn started (idle-gate → submit → confirm the Idle→Working edge → Enter-only retry),
-	// rather than assuming success from the tmux exit code (the relay silent-drop bug, see
-	// docs/findings-inbound-relay-lastmile.md). This is the operation that must succeed; the
+	// rather than assuming success from the tmux exit code (the relay silent-drop bug). This is
+	// the operation that must succeed; the
 	// audit mirror below is best-effort.
 	pane, err := deliver.ResolvePane(agent.Title())
 	if err != nil {
