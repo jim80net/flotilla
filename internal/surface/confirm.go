@@ -3,6 +3,7 @@ package surface
 import (
 	"errors"
 	"fmt"
+	"log"
 	"time"
 )
 
@@ -30,10 +31,23 @@ const (
 	// common case; the extra polls absorb host-load jitter on the busy-marker render.
 	confirmPolls = 5
 	// maxSubmitAttempts is the initial paste+Enter plus up to (maxSubmitAttempts-1) Enter-only
-	// retries. Covers a transient dropped Enter without an unbounded loop. Worst-case confirm
-	// latency ≈ deliver.submitSettleDelay (250ms, inside the first Submit) +
-	// maxSubmitAttempts×confirmPolls×confirmPollInterval ≈ 250ms + 1.5s ≈ 1.75s.
+	// retries. Covers a transient dropped Enter without an unbounded loop. The fast phase spans
+	// maxSubmitAttempts×confirmPolls×confirmPollInterval ≈ 1.5s; a started turn (composer cleared,
+	// or the spinner up) is confirmed inside it in the common case.
 	maxSubmitAttempts = 3
+
+	// confirmGracePolls × confirmGraceInterval is a PATIENT grace phase entered ONLY when the fast
+	// phase did not confirm. It absorbs a genuinely slow turn-start — the heavy-pane spinner that
+	// renders seconds after the Enter is accepted (docs/design-confirm-false-negative.md) — on a
+	// surface WITHOUT a composer probe, or when the probe could not read the composer. It re-checks
+	// the same success signals at a longer interval but sends NO further Enter (the body is either
+	// accepted-and-slow-to-render or genuinely gone; the bounded fast-phase retries already covered
+	// a dropped Enter, and another Enter is a no-op on an empty composer). A composer-probe driver
+	// (claude-code) almost never reaches here — the composer clears the instant the Enter is
+	// accepted, so the fast phase confirms it without waiting on the spinner. Conservative default;
+	// validate/tune with the per-submit poll-count instrumentation (logConfirmed/logUnconfirmed).
+	confirmGracePolls    = 10
+	confirmGraceInterval = 500 * time.Millisecond
 )
 
 // ErrBusy means the pane assessed as Working at delivery time: confirmed delivery did NOT
@@ -70,11 +84,16 @@ type Confirm struct {
 	Sleep     func(time.Duration)     // the confirm-poll wait (time.Sleep)
 }
 
-// Submit delivers text to the pane via the driver and CONFIRMS a turn started, with an
-// idle-gate and an idempotent Enter-only retry. It returns nil ONLY when a turn is confirmed
-// (the Idle→Working edge was observed); otherwise ErrBusy / ErrCrashed / ErrTransient (no
-// submit attempted), the wrapped submit error (a paste that did not land), or ErrUnconfirmed
-// (submitted but no turn after the bounded retries). The caller decides whether/how to
+// Submit delivers text to the pane via the driver and CONFIRMS the submit was accepted, with an
+// idle-gate and an idempotent Enter-only retry. It returns nil ONLY when the submit is confirmed —
+// by the composer CLEARING (the body left the composer ⇒ the Enter was accepted; the fast, turn-
+// start-latency-INDEPENDENT signal, available when the driver implements ComposerProbe) OR the
+// Idle→Working edge (the spinner; corroboration and the fallback for drivers without a composer
+// probe). Otherwise: ErrBusy / ErrCrashed / ErrTransient (no submit attempted), the wrapped submit
+// error (a paste that did not land), ErrCrashed (the pane dropped to a shell mid-confirm), or
+// ErrUnconfirmed (the body provably remained in the composer after the bounded retries, or — for a
+// no-probe driver — no Working edge appeared within the fast + patient grace window). The caller
+// decides whether/how to
 // escalate per the job's kind. The caller may hold a higher-level per-pane lock across this
 // call to serialize it against other in-process pane writers (the watch Injector holds
 // paneMu so the detector's /clear rotate cannot interleave between the submit and the
@@ -102,12 +121,26 @@ func (c Confirm) Submit(d Driver, pane, text string) error {
 		return fmt.Errorf("submit to pane %s failed (body not delivered): %w", pane, err)
 	}
 
-	// 3. confirm the Idle→Working edge; on no-edge, re-send Enter ALONE (idempotent), bounded.
+	// 3. Confirm the submit. Each poll checks two success signals (pollConfirm): the composer
+	//    CLEARING (the root-cause signal — the body left the composer, so the Enter was accepted;
+	//    fast and independent of how late the spinner renders) and the Idle→Working edge (the
+	//    spinner — corroboration, and the only signal for a driver without a composer probe). A
+	//    pane that dropped to a shell mid-confirm short-circuits to ErrCrashed. On no-confirm,
+	//    re-send Enter ALONE (idempotent) — bounded — to recover a dropped Enter.
+	var probe ComposerProbe
+	if p, ok := d.(ComposerProbe); ok {
+		probe = p
+	}
+	polls := 0
 	for attempt := 1; attempt <= maxSubmitAttempts; attempt++ {
 		for poll := 0; poll < confirmPolls; poll++ {
 			c.Sleep(confirmPollInterval)
-			if d.Assess(pane) == StateWorking {
-				return nil // CONFIRMED — a turn started
+			polls++
+			if sig, crashed := pollConfirm(d, pane, probe); crashed {
+				return ErrCrashed // crashed mid-confirm — do not wait out the window
+			} else if sig != "" {
+				logConfirmed(pane, sig, polls)
+				return nil
 			}
 		}
 		if attempt < maxSubmitAttempts {
@@ -116,5 +149,69 @@ func (c Confirm) Submit(d Driver, pane, text string) error {
 			}
 		}
 	}
+
+	// 4. Patient grace: absorb a genuinely slow turn-start before declaring failure (see the
+	//    confirmGracePolls comment). Same two signals, longer interval, NO further Enter.
+	for poll := 0; poll < confirmGracePolls; poll++ {
+		c.Sleep(confirmGraceInterval)
+		polls++
+		if sig, crashed := pollConfirm(d, pane, probe); crashed {
+			return ErrCrashed
+		} else if sig != "" {
+			logConfirmed(pane, sig, polls)
+			return nil
+		}
+	}
+	logUnconfirmed(d, pane, probe, polls)
 	return ErrUnconfirmed
+}
+
+// pollConfirm performs ONE confirmation read of the pane and reports the outcome: a non-empty
+// signal ("working" or "composer-cleared") means the submit is confirmed; crashed=true means the
+// pane dropped to a shell (the agent process is gone). It assesses first (one capture) and only
+// probes the composer when not already Working/Shell, so the common confirmed-by-spinner poll
+// costs a single capture. The composer-cleared check requires the probe to be DECISIVE (ok=true);
+// an undetermined probe (capture glitch / surprise render) is ignored so a glitch is never read as
+// "cleared" — confirmation then rests on the spinner.
+func pollConfirm(d Driver, pane string, probe ComposerProbe) (signal string, crashed bool) {
+	switch d.Assess(pane) {
+	case StateWorking:
+		return "working", false
+	case StateShell:
+		return "", true
+	}
+	if probe != nil {
+		if pending, ok := probe.ComposerPending(pane); ok && !pending {
+			return "composer-cleared", false
+		}
+	}
+	return "", false
+}
+
+// logConfirmed records a confirmed submit that needed more than the first poll — the slow-start /
+// dropped-Enter cases this layer exists to handle. The common case (confirmed on the first poll)
+// is silent to keep the journal clean; the poll count is the turn-start-latency proxy and which
+// SIGNAL fired validates the design (composer-cleared firing while the spinner lags is exactly the
+// false-negative class being fixed).
+func logConfirmed(pane, signal string, polls int) {
+	if polls <= 1 {
+		return
+	}
+	log.Printf("flotilla: surface: confirmed submit to %s via %s after %d polls", pane, signal, polls)
+}
+
+// logUnconfirmed records a genuine non-delivery (the escalated case) with the diagnostic state, so
+// a real failure is never just an opaque "could not be confirmed".
+func logUnconfirmed(d Driver, pane string, probe ComposerProbe, polls int) {
+	composer := "n/a"
+	if probe != nil {
+		if pending, ok := probe.ComposerPending(pane); !ok {
+			composer = "undetermined"
+		} else if pending {
+			composer = "pending"
+		} else {
+			composer = "cleared"
+		}
+	}
+	log.Printf("flotilla: surface: UNCONFIRMED submit to %s after %d polls (last assess=%s composer=%s)", pane, polls, d.Assess(pane), composer)
 }
