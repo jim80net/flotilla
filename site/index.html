@@ -117,18 +117,14 @@
         <figure class="hero-demo" aria-label="product demo">
           <div class="demo-chrome">
             <span class="tl-dot r"></span><span class="tl-dot y"></span><span class="tl-dot g"></span>
-            <span class="demo-title">discord · #fleet</span>
+            <span class="demo-title">terminal · flotilla</span>
           </div>
-          <!-- ASSET: demo gif goes here — replace the .demo-canvas contents with
-               <img src="./assets/demo.gif" alt="flotilla coordinating a fleet"> or an
-               asciinema embed. The static mock below renders today as a stand-in. -->
+          <!-- Real recorded demo: asciinema cast → animated SVG (agg-rendered GIF lives in
+               docs/assets/ for the README). Regenerate from docs/assets/flotilla-demo.cast. -->
           <div class="demo-canvas" id="demo-canvas">
-            <div class="chat-line"><span class="who op">you</span> <span class="msg">@backend ship the release when CI is green</span></div>
-            <div class="chat-line"><span class="who xo">xo</span> <span class="msg">routing to <b>backend</b> &middot; will report go/no-go</span></div>
-            <div class="chat-line sys"><span class="who">→ backend</span> <span class="msg">ship the release when CI is green</span></div>
-            <div class="chat-line"><span class="who be">backend</span> <span class="msg">CI green · deploy started · <span class="ok">ok</span></span></div>
-            <div class="chat-line"><span class="who xo">xo</span> <span class="msg"><span class="ok">go</span> — backend deployed, frontend &amp; data clean</span></div>
-            <div class="demo-caption"><!-- ASSET: replace with live demo -->static preview &middot; real demo asset drops in here</div>
+            <img class="demo-media" src="./assets/flotilla-demo.svg"
+                 alt="flotilla coordinating a two-agent fleet: an XO routes a task to a backend desk, collects the report back, and runs the self-continuing clock — every hop a confirmed delivery" />
+            <div class="demo-caption">a real run &middot; confirmed cross-pane delivery + the self-continuing clock</div>
           </div>
         </figure>
       </div>

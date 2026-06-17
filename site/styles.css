@@ -192,6 +192,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.08; 
 .tl-dot.r { background: #ff5f57; } .tl-dot.y { background: #febc2e; } .tl-dot.g { background: #28c840; }
 .demo-title { margin-left: .6rem; font-size: .76rem; color: var(--ink-3); }
 .demo-canvas { padding: 1.1rem 1.1rem 1.3rem; font-size: .82rem; }
+.demo-media { display: block; width: 100%; height: auto; border-radius: var(--r-sm); }
 .chat-line { display: flex; gap: .6rem; padding: .42rem 0; border-bottom: 1px dashed var(--line-soft); }
 .chat-line:last-of-type { border-bottom: none; }
 .chat-line .who { font-weight: 600; flex-shrink: 0; min-width: 4.6em; }
