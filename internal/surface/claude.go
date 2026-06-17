@@ -2,6 +2,7 @@ package surface
 
 import (
 	"log"
+	"strings"
 
 	"github.com/jim80net/flotilla/internal/deliver"
 )
@@ -88,3 +89,55 @@ func (c claudeCode) Assess(pane string) State {
 func (c claudeCode) Rotate(pane string) error { return c.clear(pane) }
 
 func (claudeCode) RotateStrategy() Strategy { return SlashCommand }
+
+// ComposerPending implements surface.ComposerProbe: it reads the pane and classifies the
+// composer line so confirmed delivery can confirm on the composer CLEARING (the body left the
+// composer ⇒ the Enter was accepted) — a fast, latency-independent success signal that does NOT
+// wait on the late-rendering Working spinner. A capture error reads as UNDETERMINED (ok=false) so
+// the caller falls back to the spinner signal rather than misreading a glitch as "cleared".
+func (c claudeCode) ComposerPending(pane string) (pending bool, ok bool) {
+	captured, err := c.capturePane(pane)
+	if err != nil {
+		log.Printf("flotilla: surface(claude-code): composer probe capture failed for %q: %v (undetermined)", pane, err)
+		return false, false
+	}
+	return parseComposerPending(captured)
+}
+
+// parseComposerPending classifies Claude Code's composer line from a captured pane:
+//   - the composer is the bottom-most prompt line "❯ " (U+276F), drawn between two box-rule
+//     lines, with a status footer below it. When IDLE-and-empty it is "❯ " followed by only
+//     whitespace; with a body awaiting submit it shows "❯ <text>" or, for a multi-line paste
+//     Claude Code collapses, "❯ [Pasted text +N lines]";
+//   - non-whitespace after the prompt  → PENDING  (true, true)   (a body the Enter has not taken)
+//   - only whitespace after the prompt → CLEARED  (false, true)  (submitted / empty composer)
+//   - no "❯" prompt line in the tail   → UNDETERMINED (false, false) (capture glitch / surprise
+//     render) — the caller falls back to the spinner, never treating this as "cleared".
+//
+// Scoped to the pane TAIL (the live bottom chrome) so a "❯" quoted in scrollback output cannot be
+// mistaken for the composer; the composer prompt sits just above the box-rule + footer, well
+// within the tail. The "❯" is the unique composer prompt — deliver.workingSpinner explicitly
+// EXCLUDES it as a spinner glyph — so an empty composer never reads as a working render and vice
+// versa.
+//
+// CAVEAT (safe degradation): a FRESH composer can render a dim placeholder ("❯ Try …"). capture-
+// pane strips the dim styling, so a placeholder would read as PENDING. That is harmless: a false
+// "pending" only triggers an idempotent Enter-only retry (a no-op on an already-empty composer)
+// and the confirmation falls back to the spinner — i.e. it degrades to the prior behavior, never
+// to a false success or a silent drop. In the production scenario (a post-turn idle composer that
+// flotilla pastes into) the composer renders as a bare "❯ " — no placeholder (verified by live
+// capture, 2026-06-17). Version-specific like deliver.workingSpinner; revalidate on a TUI upgrade.
+func parseComposerPending(captured string) (pending bool, ok bool) {
+	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
+	const tail = 10 // composer prompt sits above the box-rule + status footer (≈4 lines up)
+	if len(lines) > tail {
+		lines = lines[len(lines)-tail:]
+	}
+	for i := len(lines) - 1; i >= 0; i-- { // bottom-most "❯" line is the live composer
+		rest := strings.TrimLeft(lines[i], " \t")
+		if after, found := strings.CutPrefix(rest, "❯"); found {
+			return strings.TrimSpace(after) != "", true
+		}
+	}
+	return false, false
+}
