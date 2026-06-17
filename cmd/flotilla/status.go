@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -30,6 +31,7 @@ func cmdStatus(args []string) error {
 	rosterPath := fs.String("roster", rosterDefault(), "roster config path")
 	snapshotPath := fs.String("snapshot-file", os.Getenv("FLOTILLA_SNAPSHOT_FILE"), "change-detector snapshot file (default <roster-dir>/flotilla-detector-state.json)")
 	ackPath := fs.String("ack-file", os.Getenv("FLOTILLA_ACK_FILE"), "XO liveness ack file (default <roster-dir>/flotilla-xo-alive)")
+	asJSON := fs.Bool("json", false, "emit machine-readable JSON instead of the text table")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -56,8 +58,68 @@ func cmdStatus(args []string) error {
 	}
 
 	snap, snapOK := watch.LoadSnapshot(*snapshotPath)
+	if *asJSON {
+		// generated_at is the snapshot's mtime (when watch last wrote it) — the
+		// honest "as of" for the states below. Empty when there is no snapshot.
+		generatedAt := ""
+		if fi, statErr := os.Stat(*snapshotPath); statErr == nil {
+			generatedAt = fi.ModTime().UTC().Format(time.RFC3339)
+		}
+		doc := buildStatusJSON(cfg, xo, generatedAt, snap)
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(doc)
+	}
 	writeStatus(os.Stdout, cfg, xo, *snapshotPath, *ackPath, snap, snapOK, time.Now())
 	return nil
+}
+
+// statusDoc is the `--json` shape. It is deliberately the SAME contract the
+// landing-page widget consumes — an `agents` array plus a `generated_at` stamp —
+// so the public sample status.json can be a real `flotilla status --json` run
+// against a demo roster rather than hand-authored data. It carries only what the
+// command actually knows: each desk's name, its surface (from the roster), its
+// snapshot state, and the XO's role. There is no per-desk "task" — the detector
+// snapshot does not record one — so the JSON does not invent it.
+type statusDoc struct {
+	GeneratedAt string       `json:"generated_at"`
+	XO          string       `json:"xo,omitempty"`
+	Agents      []statusItem `json:"agents"`
+}
+
+type statusItem struct {
+	Name    string `json:"name"`
+	Role    string `json:"role,omitempty"`    // "hub" for the XO, else omitted
+	Surface string `json:"surface,omitempty"` // effective surface driver
+	State   string `json:"state"`             // same label set as the text view
+}
+
+// buildStatusJSON assembles the --json document. Pure (no I/O) so it is
+// unit-testable with an in-memory snapshot; cmdStatus supplies generated_at
+// (the snapshot's mtime) and the loaded snapshot.
+func buildStatusJSON(cfg *roster.Config, xo, generatedAt string, snap watch.Snapshot) statusDoc {
+	doc := statusDoc{GeneratedAt: generatedAt, XO: xo, Agents: make([]statusItem, 0, len(cfg.Agents))}
+	for _, a := range cfg.Agents {
+		item := statusItem{
+			Name:    a.Name,
+			Surface: effectiveSurface(a.Surface),
+			State:   deskStateLabel(snap, a.Name),
+		}
+		if a.Name == xo {
+			item.Role = "hub"
+		}
+		doc.Agents = append(doc.Agents, item)
+	}
+	return doc
+}
+
+// effectiveSurface resolves an agent's surface name for display: an empty roster
+// surface means the default driver, which the docs name "claude-code".
+func effectiveSurface(s string) string {
+	if s == "" {
+		return "claude-code"
+	}
+	return s
 }
 
 // writeStatus renders the report. It is split from cmdStatus (which does flag +

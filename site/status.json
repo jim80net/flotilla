@@ -1,11 +1,32 @@
 {
-  "_comment": "SAMPLE fleet status — generic desks, no real deployment. Lets the landing-page widget render live today. TODO: replace with real `flotilla status --json` output once that command ships. Contract: agents[] of { name, role?, surface?, state, task? }; state ∈ working|idle|awaiting|errored|offline.",
-  "generated_at": "sample data",
+  "generated_at": "2026-06-17T17:26:31Z",
+  "xo": "xo",
   "agents": [
-    { "name": "xo",       "role": "hub", "surface": "claude-code", "state": "idle",     "task": "coordinating — idle, waiting on the fleet" },
-    { "name": "backend",                 "surface": "claude-code", "state": "working",  "task": "shipping the release · CI running" },
-    { "name": "frontend",                "surface": "aider",       "state": "awaiting", "task": "blocked on a confirmation prompt" },
-    { "name": "data",                    "surface": "opencode",    "state": "working",  "task": "backfilling the ingest pipeline" },
-    { "name": "infra",                   "surface": "grok",        "state": "idle",     "task": "watch standing by" }
+    {
+      "name": "xo",
+      "role": "hub",
+      "surface": "claude-code",
+      "state": "idle"
+    },
+    {
+      "name": "backend",
+      "surface": "claude-code",
+      "state": "working"
+    },
+    {
+      "name": "frontend",
+      "surface": "aider",
+      "state": "awaiting-approval"
+    },
+    {
+      "name": "data",
+      "surface": "opencode",
+      "state": "working"
+    },
+    {
+      "name": "infra",
+      "surface": "grok",
+      "state": "idle"
+    }
   ]
 }
