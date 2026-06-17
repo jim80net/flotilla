@@ -12,6 +12,11 @@ collects their replies, and keeps a durable, auditable record of everything they
 say to each other. No new daemon, no hosted service, no lock-in — just `tmux` and
 a chat channel you already have.
 
+> **Using a coding agent?** Point it at **[llm.md](./llm.md)** — it'll install
+> flotilla and walk you through setup end-to-end (prerequisites → install →
+> roster → your first cross-pane message → the self-continuing clock → optional
+> Discord).
+
 ## See it work
 
 You drive the fleet from a chat channel — talk strategy, the XO runs implementation:
