@@ -5,9 +5,6 @@
 // host-specific and live in a separate, gitignored file (a sibling of
 // flotilla-secrets.env), loaded by Load. This mirrors the secrets-file pattern:
 // a committable roster plus a host-local file trusted at the secrets level.
-//
-// See docs/agent-launch-recipes-design.md for the full design and validation
-// table.
 package launch
 
 import (

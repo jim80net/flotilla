@@ -89,8 +89,8 @@ type ResultReader interface {
 // instant the keystroke is accepted — a synchronous TUI action — whereas the Working spinner
 // renders only once the turn machinery spins up, which lags SECONDS on a heavy (high-context)
 // session. Confirming on the spinner ALONE produced FALSE "not delivered" escalations on the
-// heavy XO pane (every observed false negative was the heaviest pane; see
-// docs/design-confirm-false-negative.md). The composer-cleared signal eliminates them.
+// heavy XO pane (every observed false negative was the heaviest pane). The composer-cleared
+// signal eliminates them.
 //
 // It does NOT re-open the silent-drop, but the reason is NOT that a non-error Submit guarantees
 // the body landed (deliver.Send does not verify TUI ingestion — see "failure mode A"). It is that
