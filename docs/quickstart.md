@@ -9,9 +9,13 @@ runnable as written — no prior flotilla knowledge assumed.
 - **Go 1.26+** (to build the binary; matches the module's `go` directive).
 - **tmux** — every coordinated agent runs in a tmux pane; flotilla delivers by
   typing into that pane.
-- **At least one agent already running in a tmux pane.** flotilla does not
-  launch agents; it talks to ones you already run (e.g. a `claude` session in a
-  pane). For this walkthrough a plain shell in a pane is enough to see delivery.
+- **A supported agent you can run in a tmux pane** — Claude Code, Aider,
+  OpenCode, or Grok. flotilla does not launch agents; it talks to ones you
+  already run. This walkthrough uses Claude Code (the default surface). `send`
+  **confirms a real turn started**, so its target must be a live agent: a pane
+  that has dropped to a bare shell is treated as a *crashed* agent and the
+  delivery is refused (you can watch that refusal with zero setup — see §3 — but
+  seeing a *successful* delivery needs a running agent).
 - **(Optional) a Discord bot + channel** — only if you want the audit mirror or
   the inbound relay. The clock and `send` work fully without Discord.
 
@@ -58,25 +62,67 @@ matches a name, so it never silently mis-delivers.
 
 ## 3. Send a message
 
-Give one of your agents a pane. For a quick smoke test, open a second terminal
-and start a titled shell pane:
+`send` delivers an instruction into a **live agent's** pane and confirms the turn
+actually started — it idle-gates, submits, then verifies, rather than typing
+blindly and assuming success. So the target must be a running agent; a pane
+sitting at a bare shell is reported as a crashed agent and the delivery is
+refused.
+
+### Start your agent — tagged
+
+A TUI agent **renames its own pane title every turn** — a pane launched as
+`infra` becomes `✳ Refactor the auth module` once it starts working — so
+title-based resolution drifts the moment the agent gets to work. The fix is a
+**stable, drift-immune marker** set with `flotilla register`. Set it in the same
+line that launches the agent, so the pane is tagged before the agent takes over:
 
 ```sh
 tmux new-session -d -s demo
-tmux rename-window -t demo 'win'
-tmux select-pane -t demo -T infra      # set the pane title to "infra"
+tmux send-keys -t demo 'flotilla register infra && exec claude' Enter
 ```
 
-Now deliver:
+`flotilla register infra`, run inside the pane, reads `$TMUX_PANE` and tags it:
+
+```
+registered infra → pane demo:0.0 (marker @flotilla_agent=infra); title drift no longer breaks resolution
+```
+
+`exec claude` then starts your agent (any supported surface). The marker is a
+per-pane tmux `@flotilla_agent` user-option, so it **survives the agent taking
+over the pane and every title change after** — `send` resolves by it regardless
+of how the title drifts. Putting `flotilla register <name>` in each desk's launch
+line is the standard pattern; it falls back to title matching for any untagged
+pane, so it is purely additive.
+
+> **Already started an agent untagged?** Tag it from anywhere with an explicit
+> target — no need to interrupt it:
+> `flotilla register infra --pane demo:0.0` (or a pane id like `%4`).
+
+### Deliver
 
 ```sh
 flotilla send --from me infra "pull origin main and run the tests"
 ```
 
-The text is typed into the `infra` pane and submitted (a bracketed paste plus a
-single Enter, so multi-line bodies arrive as one submission, not many). For a
-plain shell pane you will see the line appear and run; for an agent it lands as
-that agent's next turn.
+```
+delivered to infra (pane demo:0.0) — turn confirmed
+```
+
+The instruction is typed into the pane (a bracketed paste plus a single Enter, so
+multi-line bodies arrive as one submission, not many) and lands as the agent's
+next turn. `send` reports a **typed failure instead of a false success** when it
+cannot confirm a turn — the message is never silently dropped:
+
+| What you see | Means |
+|---|---|
+| `delivered to … — turn confirmed` | the turn started ✓ |
+| `is at a shell (crashed) — NOT delivered` | the pane is a bare shell (the agent exited) — flotilla refuses to type into a dead pane |
+| `is busy (mid-turn) — NOT delivered; retry when it is idle` | the agent is mid-turn; resend when it is idle |
+
+> **See the crash-detection guard with zero setup:** point `send` at a plain
+> shell pane (no agent running) and it reports `is at a shell (crashed) — NOT
+> delivered`. That refusal *is* the feature — flotilla never types into a pane
+> whose agent has died.
 
 Long or multi-line bodies are easier from a file or stdin (no shell quoting):
 
@@ -87,30 +133,6 @@ echo "deploy when green" | flotilla send --from me --file - infra
 
 Inter-agent mirroring is **default-off**, so by default a send just delivers to
 the pane (no Discord post). See §4 to enable it; `--no-mirror` also forces it off.
-
-### Make resolution drift-proof: `flotilla register`
-
-`send` resolves a desk by its pane **title** — but Claude Code (and other TUIs)
-retitle their pane to a task summary every turn, so a pane launched as `infra`
-becomes `✳ Refactor the auth module` once it starts working, and title-based
-resolution then fails (`no tmux pane for agent "infra" …`). Tag the pane once
-with a **stable, drift-immune marker** instead:
-
-```sh
-flotilla register infra            # run INSIDE the infra pane (uses $TMUX_PANE)
-```
-
-After that, `flotilla send infra …` resolves by the marker no matter how the
-title drifts. Add `flotilla register <name>` to each desk's launch. To fix a
-desk that has **already** drifted, tag it from anywhere with an explicit target
-(no need to interrupt it):
-
-```sh
-flotilla register infra --pane demo:0.0     # or a pane id like %4
-```
-
-The marker (a tmux per-pane `@flotilla_agent` user-option) is surface-agnostic
-and falls back to title matching for any untagged pane, so it is purely additive.
 
 ### (Re)start a dead desk: `flotilla resume`
 

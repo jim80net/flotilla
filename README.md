@@ -1,12 +1,54 @@
 # flotilla
 
-**Coordinate a fleet of AI coding agents from a single hub — with a durable, auditable record of everything they say to each other.**
+> **flotilla is a drop-in chief of staff for the AI coding agents you already
+> run.** It turns separate Claude Code / Aider / OpenCode / Grok sessions into
+> one coordinated fleet — a single hub agent routes the work and reports back —
+> and you drive the whole thing from a chat channel on your phone.
 
-> Status: **v0, work in progress.** The design below is the target; the
-> implementation is being built in the open. Expect rough edges.
+It's a **pluggable coordination layer**: drop it over the harnesses you already
+run, and one chief-of-staff agent (the "XO") fans work to your domain desks,
+collects their replies, and keeps a durable, auditable record of everything they
+say to each other. No new daemon, no hosted service, no lock-in — just `tmux` and
+a chat channel you already have.
+
+## See it work
+
+Point flotilla at an agent you already run, then drive it from one command:
+
+```console
+# install (Go 1.26+) — full cold-start walkthrough in docs/quickstart.md
+$ go install github.com/jim80net/flotilla/cmd/flotilla@latest
+
+# tag the agent you already run (a stable marker survives TUI title drift):
+$ flotilla register infra --pane demo:0.0
+registered infra → pane demo:0.0 (marker @flotilla_agent=infra); title drift no longer breaks resolution
+
+# deliver an instruction — and CONFIRM the turn actually started:
+$ flotilla send --from me infra "pull origin main and run the tests"
+delivered to infra (pane demo:0.0) — turn confirmed
+
+# keep a turn-based XO advancing already-authorized work on a clock:
+$ flotilla watch --roster ./flotilla.json --ack-file ./flotilla-xo-alive
+flotilla watch: clock running — XO=infra interval=20m0s ack=./flotilla-xo-alive
+```
+
+`send` doesn't type-and-hope: it confirms a real turn started and refuses a dead
+pane, so a "delivered" line is a turn that actually began — never a silently
+dropped message. `watch` keeps an idle fleet at ~zero cost until there's work.
 
 > **New here? → [docs/quickstart.md](./docs/quickstart.md)** — install to your
 > first cross-pane message and the self-continuing clock, runnable cold.
+
+**What you get**
+
+- **Coordinate the agents you already run** — Claude Code, Aider, OpenCode, and
+  Grok desks behind one interface; each stays an ordinary session you control,
+  so opting in costs you nothing and you can walk away anytime.
+- **One chief-of-staff agent in charge** — the XO routes work to the domain
+  desks and reports back, so you talk to one agent, not five — from your phone.
+- **A durable, auditable record** — every instruction and reply can be mirrored
+  to a chat channel you read back from anywhere, with confirmed delivery so the
+  log never lies about what landed.
 
 ## The problem
 
@@ -92,6 +134,10 @@ daemon or a hosted service:
   the channel instead of polling terminals.
 
 ## Status & roadmap
+
+> **v0, work in progress.** flotilla is built and dogfooded daily, but it's
+> young and the surface is still moving — expect rough edges. The checklist
+> below marks what ships today (`[x]`) vs. what's still planned (`[ ]`).
 
 This is being extracted and generalized from a private multi-agent setup.
 Near-term:
