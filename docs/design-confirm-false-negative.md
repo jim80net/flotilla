@@ -90,16 +90,29 @@ A message that truly does NOT land must still escalate loudly. The fix must dist
 This is *stronger* than today: we escalate on **positive evidence of failure** (body
 still in the composer), not on **absence of a proxy** (no spinner yet).
 
-### One subtlety that rules out the naive fix
+### One subtlety, and how the implementation resolves it (updated after review)
 
 "Composer is empty now ⇒ success" is **unsafe alone**. An empty composer is ambiguous:
-either (a) the body was submitted (Enter accepted), or (b) the paste was never ingested
-(body never appeared) and the Enter hit an empty composer — the silent-drop #71 exists to
-catch. The safe signal is the **pending→cleared transition** (we observed the body in the
-composer, *then* observed it clear) OR a corroborating Working/queued state — never a bare
-"empty now." In practice `tmux paste-buffer` reliably fills the composer, so the body is
-observable as pending right after paste; the residual risk is a paste the TUI hasn't
-ingested when we look, which the transition-observation closes.
+either (a) the body was submitted (Enter accepted), or (b) the paste has not been ingested
+*yet* and the submitting Enter raced that ingestion and was dropped (the `deliver` "failure
+mode A") — so the composer reads empty for an instant though nothing was submitted. Trusting a
+single empty read re-opens the silent-drop #71 exists to catch. `deliver.Send` returning nil
+does NOT close this — it means the tmux paste+Enter ran, not that the TUI ingested the paste.
+
+The design first proposed the strict **pending→cleared transition** (observe the body, *then*
+observe it clear). Implementation review found strict transition **incompatible with the fix**:
+on a fast Enter-accept the composer clears *before* the first poll, so "pending" is never
+observed and confirmation would fall back to the lagging spinner — the exact false negative
+being fixed. The shipped signal is instead a **stable cleared read**: require
+`clearedConfirmPolls` (2) CONSECUTIVE cleared reads before trusting "cleared." A paste still
+being ingested reads empty for an instant but flips to **pending** before the streak completes —
+resetting the streak and triggering an idempotent Enter-only retry — so case (b) is caught, not
+confirmed; only a composer that *stays* empty is trusted as submitted. This keeps the fast,
+latency-independent benefit while closing the ingestion-race hole. **Residual:** a dropped Enter
+whose body takes longer than ≈`clearedConfirmPolls × confirmPollInterval` after the first poll
+to render could still be missed; the `logConfirmed`/`logUnconfirmed` per-submit instrumentation
+is the production canary (revalidate the margin against `submitSettleDelay` on a TUI upgrade).
+See `confirm.go`'s `clearedConfirmPolls` for the full argument.
 
 ## Options (the fork to decide)
 

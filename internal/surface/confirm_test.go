@@ -165,14 +165,14 @@ func (s *composerStub) ComposerPending(string) (bool, bool) {
 
 func TestConfirmSubmitConfirmsOnComposerClear(t *testing.T) {
 	// THE regression for the false-negative bug (docs/design-confirm-false-negative.md): a heavy
-	// pane whose Working spinner NEVER renders inside the window, but whose composer CLEARS on the
-	// first poll (the Enter was accepted). Spinner-only confirmation would have returned
-	// ErrUnconfirmed and the relay would have raised a FALSE alarm; the composer-cleared signal
-	// confirms immediately. ⇒ nil; Submit ×1; NO Enter-only retry.
+	// pane whose Working spinner NEVER renders inside the window, but whose composer reads CLEARED
+	// and STAYS cleared (the Enter was accepted). Spinner-only confirmation would have returned
+	// ErrUnconfirmed and the relay would have raised a FALSE alarm; the stable composer-cleared
+	// signal confirms it (within clearedConfirmPolls). ⇒ nil; Submit ×1; NO Enter-only retry.
 	enter := 0
 	d := &composerStub{
 		assessSeq:  []State{StateIdle},       // gate Idle, then Idle forever (spinner lagging)
-		pendingSeq: [][2]bool{{false, true}}, // first poll: composer cleared (submitted)
+		pendingSeq: [][2]bool{{false, true}}, // composer cleared, and stays cleared (submitted)
 	}
 	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
 	if err != nil {
@@ -206,6 +206,49 @@ func TestConfirmSubmitComposerDroppedEnterThenClears(t *testing.T) {
 	}
 	if enter != 1 {
 		t.Errorf("SendEnter calls = %d, want 1", enter)
+	}
+}
+
+func TestConfirmSubmitTransientEmptyThenPendingDoesNotFalseConfirm(t *testing.T) {
+	// The paste-ingestion-race guard (clearedConfirmPolls): the FIRST poll reads the composer empty
+	// because the bracketed paste has not been ingested YET — not because anything was submitted —
+	// and the submitting Enter raced that ingestion and was dropped. A single empty read must NOT
+	// confirm; the body renders as PENDING a poll later and resets the streak, so this is recovered
+	// (Enter retry) rather than reported as a (false) success. Here the body stays pending after the
+	// retries ⇒ ErrUnconfirmed (a genuine stuck message escalates), proving the single leading empty
+	// did NOT short-circuit to success.
+	seq := [][2]bool{{false, true}} // poll-1: empty (paste not ingested yet) — must not confirm alone
+	for i := 0; i < 40; i++ {
+		seq = append(seq, [2]bool{true, true}) // thereafter: body rendered + stuck (Enter was dropped)
+	}
+	enter := 0
+	d := &composerStub{assessSeq: []State{StateIdle}, pendingSeq: seq}
+	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
+	if !errors.Is(err, ErrUnconfirmed) {
+		t.Fatalf("err = %v, want ErrUnconfirmed (a single transient-empty read must not false-confirm)", err)
+	}
+	if enter != maxSubmitAttempts-1 {
+		t.Errorf("SendEnter calls = %d, want %d", enter, maxSubmitAttempts-1)
+	}
+}
+
+func TestConfirmSubmitTransientEmptyThenStableClearRecovers(t *testing.T) {
+	// Same leading transient-empty as above, but after the Enter-only retry the composer reaches a
+	// STABLE cleared read (the retried Enter landed) ⇒ confirmed. Proves the guard recovers rather
+	// than over-blocking a real submit: a transient empty + later stable clear still succeeds.
+	seq := [][2]bool{{false, true}} // poll-1 empty (not ingested)
+	for i := 1; i < confirmPolls; i++ {
+		seq = append(seq, [2]bool{true, true}) // rest of attempt-1: pending (Enter was dropped)
+	}
+	seq = append(seq, [2]bool{false, true}, [2]bool{false, true}) // attempt-2: cleared, cleared (stable)
+	enter := 0
+	d := &composerStub{assessSeq: []State{StateIdle}, pendingSeq: seq}
+	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
+	if err != nil {
+		t.Fatalf("err = %v, want nil (stable clear after the retry confirms)", err)
+	}
+	if d.submitCalls != 1 || enter != 1 {
+		t.Errorf("Submit=%d enter=%d, want Submit=1 enter=1", d.submitCalls, enter)
 	}
 }
 

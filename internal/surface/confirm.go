@@ -48,6 +48,27 @@ const (
 	// validate/tune with the per-submit poll-count instrumentation (logConfirmed/logUnconfirmed).
 	confirmGracePolls    = 10
 	confirmGraceInterval = 500 * time.Millisecond
+
+	// clearedConfirmPolls is how many CONSECUTIVE "composer cleared" reads are required before the
+	// composer-cleared signal counts as a confirmed submit. This closes the paste-ingestion-race
+	// silent-drop (deliver findings, "failure mode A"): tmux paste-buffer can exit cleanly while
+	// the TUI has not yet ingested the bracketed paste, so the FIRST poll may read an empty
+	// composer NOT because the body was submitted but because it has not rendered yet — and if the
+	// submitting Enter raced that same ingestion and was dropped, a single empty read would falsely
+	// confirm a message still sitting unsubmitted. Requiring the empty read to be STABLE gives a
+	// lagging paste time to render as "pending" (which resets the streak and triggers an Enter-only
+	// retry) before an empty composer is trusted as "submitted". A genuinely-submitted composer
+	// stays empty across the streak; a not-yet-ingested one flips to pending and is caught.
+	//
+	// NOTE: we deliberately do NOT use the strict "observe pending THEN cleared" transition: on a
+	// fast Enter-accept the composer clears before the first poll, so "pending" is never observed
+	// and a strict transition would fall back to the lagging spinner — re-introducing the very
+	// false negative this fixes. The stable-cleared streak is the signal that stays both fast
+	// (latency-independent) AND safe against the ingestion race. Residual assumption: a dropped
+	// Enter whose body takes longer than ~clearedConfirmPolls×confirmPollInterval after the first
+	// poll to render could still be missed; the logConfirmed/logUnconfirmed instrumentation is the
+	// production canary for that (revalidate the margin against submitSettleDelay on a TUI upgrade).
+	clearedConfirmPolls = 2
 )
 
 // ErrBusy means the pane assessed as Working at delivery time: confirmed delivery did NOT
@@ -114,33 +135,57 @@ func (c Confirm) Submit(d Driver, pane, text string) error {
 
 	// 2. attempt 1 — full paste + Enter. Capture Submit's error: a paste that did NOT land
 	//    (lock timeout / tmux failure) is returned (the caller escalates), NOT Enter-only-
-	//    retried. The no-re-paste idempotency invariant below holds BECAUSE we reach the
-	//    retry loop only on Submit==nil (the body is confirmed in the composer; only the
-	//    Enter is in question).
+	//    retried. The no-re-paste idempotency invariant below holds BECAUSE we reach the retry
+	//    loop only on Submit==nil — and a retry sends Enter ONLY (never re-pastes), so it cannot
+	//    double-submit the body. (Submit==nil means the tmux paste+Enter ran; it does NOT by
+	//    itself prove the TUI ingested the paste — that is why confirmation below requires a STABLE
+	//    cleared read, so a not-yet-ingested paste is caught rather than mistaken for submitted.)
 	if err := d.Submit(pane, text); err != nil {
 		return fmt.Errorf("submit to pane %s failed (body not delivered): %w", pane, err)
 	}
 
-	// 3. Confirm the submit. Each poll checks two success signals (pollConfirm): the composer
-	//    CLEARING (the root-cause signal — the body left the composer, so the Enter was accepted;
-	//    fast and independent of how late the spinner renders) and the Idle→Working edge (the
-	//    spinner — corroboration, and the only signal for a driver without a composer probe). A
-	//    pane that dropped to a shell mid-confirm short-circuits to ErrCrashed. On no-confirm,
-	//    re-send Enter ALONE (idempotent) — bounded — to recover a dropped Enter.
+	// 3. Confirm the submit. Each poll (pollConfirm) reads one of: WORKING (the spinner — confirm
+	//    immediately; corroboration and the only signal for a no-probe driver), SHELL (crashed mid-
+	//    confirm → ErrCrashed, don't wait out the window), CLEARED (the composer is empty), PENDING
+	//    (the body is still in the composer — a dropped/un-ingested Enter), or NONE (undetermined).
+	//    The composer-CLEARING is the root-cause signal (the body left the composer ⇒ the Enter was
+	//    accepted; fast and independent of how late the spinner renders), but it is trusted only
+	//    once STABLE — clearedConfirmPolls consecutive cleared reads — so a paste still being
+	//    ingested (which would read empty now but flip to pending shortly) is not mistaken for a
+	//    submit (see clearedConfirmPolls). A PENDING read resets the streak; on no-confirm at an
+	//    attempt boundary, re-send Enter ALONE (idempotent) — bounded — to recover a dropped Enter.
 	var probe ComposerProbe
 	if p, ok := d.(ComposerProbe); ok {
 		probe = p
 	}
 	polls := 0
+	clearedStreak := 0
+	// check performs one poll and reports whether confirmation is settled (and with what error:
+	// nil = confirmed, ErrCrashed = crashed). clearedStreak rides across polls and the grace phase.
+	check := func() (settled bool, err error) {
+		polls++
+		switch pollConfirm(d, pane, probe) {
+		case readWorking:
+			logConfirmed(pane, "working", polls)
+			return true, nil
+		case readCrashed:
+			return true, ErrCrashed
+		case readCleared:
+			if clearedStreak++; clearedStreak >= clearedConfirmPolls {
+				logConfirmed(pane, "composer-cleared", polls)
+				return true, nil
+			}
+		default: // readPending / readNone — not (yet) cleared; a lagging or stuck body resets the streak
+			clearedStreak = 0
+		}
+		return false, nil
+	}
+
 	for attempt := 1; attempt <= maxSubmitAttempts; attempt++ {
 		for poll := 0; poll < confirmPolls; poll++ {
 			c.Sleep(confirmPollInterval)
-			polls++
-			if sig, crashed := pollConfirm(d, pane, probe); crashed {
-				return ErrCrashed // crashed mid-confirm — do not wait out the window
-			} else if sig != "" {
-				logConfirmed(pane, sig, polls)
-				return nil
+			if settled, err := check(); settled {
+				return err
 			}
 		}
 		if attempt < maxSubmitAttempts {
@@ -151,41 +196,49 @@ func (c Confirm) Submit(d Driver, pane, text string) error {
 	}
 
 	// 4. Patient grace: absorb a genuinely slow turn-start before declaring failure (see the
-	//    confirmGracePolls comment). Same two signals, longer interval, NO further Enter.
+	//    confirmGracePolls comment). Same signals, longer interval, NO further Enter.
 	for poll := 0; poll < confirmGracePolls; poll++ {
 		c.Sleep(confirmGraceInterval)
-		polls++
-		if sig, crashed := pollConfirm(d, pane, probe); crashed {
-			return ErrCrashed
-		} else if sig != "" {
-			logConfirmed(pane, sig, polls)
-			return nil
+		if settled, err := check(); settled {
+			return err
 		}
 	}
 	logUnconfirmed(d, pane, probe, polls)
 	return ErrUnconfirmed
 }
 
-// pollConfirm performs ONE confirmation read of the pane and reports the outcome: a non-empty
-// signal ("working" or "composer-cleared") means the submit is confirmed; crashed=true means the
-// pane dropped to a shell (the agent process is gone). It assesses first (one capture) and only
+// confirmRead is the outcome of one confirmation poll (see pollConfirm).
+type confirmRead int
+
+const (
+	readNone    confirmRead = iota // undetermined / no confirming signal this poll
+	readWorking                    // the Working spinner is up → a turn started
+	readCleared                    // the composer is empty → counts toward the stable-cleared streak
+	readPending                    // the body is still in the composer → a dropped/un-ingested Enter
+	readCrashed                    // the pane dropped to a shell → the agent process is gone
+)
+
+// pollConfirm performs ONE confirmation read of the pane. It assesses first (one capture) and only
 // probes the composer when not already Working/Shell, so the common confirmed-by-spinner poll
-// costs a single capture. The composer-cleared check requires the probe to be DECISIVE (ok=true);
-// an undetermined probe (capture glitch / surprise render) is ignored so a glitch is never read as
-// "cleared" — confirmation then rests on the spinner.
-func pollConfirm(d Driver, pane string, probe ComposerProbe) (signal string, crashed bool) {
+// costs a single capture. The composer read distinguishes CLEARED from PENDING only when the probe
+// is DECISIVE (ok=true); an undetermined probe (capture glitch / surprise render) reads as
+// readNone so a glitch is never trusted as "cleared" — confirmation then rests on the spinner.
+func pollConfirm(d Driver, pane string, probe ComposerProbe) confirmRead {
 	switch d.Assess(pane) {
 	case StateWorking:
-		return "working", false
+		return readWorking
 	case StateShell:
-		return "", true
+		return readCrashed
 	}
 	if probe != nil {
-		if pending, ok := probe.ComposerPending(pane); ok && !pending {
-			return "composer-cleared", false
+		if pending, ok := probe.ComposerPending(pane); ok {
+			if pending {
+				return readPending
+			}
+			return readCleared
 		}
 	}
-	return "", false
+	return readNone
 }
 
 // logConfirmed records a confirmed submit that needed more than the first poll — the slow-start /

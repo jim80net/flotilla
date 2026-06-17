@@ -90,10 +90,15 @@ type ResultReader interface {
 // renders only once the turn machinery spins up, which lags SECONDS on a heavy (high-context)
 // session. Confirming on the spinner ALONE produced FALSE "not delivered" escalations on the
 // heavy XO pane (every observed false negative was the heaviest pane; see
-// docs/design-confirm-false-negative.md). The composer-cleared signal eliminates them without
-// re-opening the silent-drop: given Confirm.Submit's post-submit invariant (a non-error Submit
-// means the body WAS in the composer), an emptied composer can only mean the body was submitted,
-// never that it silently vanished.
+// docs/design-confirm-false-negative.md). The composer-cleared signal eliminates them.
+//
+// It does NOT re-open the silent-drop, but the reason is NOT that a non-error Submit guarantees
+// the body landed (deliver.Send does not verify TUI ingestion — see "failure mode A"). It is that
+// Confirm.Submit requires the cleared read to be STABLE (clearedConfirmPolls consecutive cleared
+// reads): a paste still being ingested reads empty for an instant but flips to "pending" before
+// the streak completes, so it is caught and retried rather than mistaken for a submit; only a
+// composer that stays empty is trusted. A genuinely-stuck body reads pending throughout and
+// escalates loudly. See confirm.go's clearedConfirmPolls for the full argument and residual.
 //
 // A Driver MAY implement it; Confirm.Submit type-asserts and falls back to the spinner window when
 // it is absent. It is READ-ONLY (never writes a pane), like ResultReader.
