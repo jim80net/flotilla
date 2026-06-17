@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -133,6 +134,66 @@ func TestWriteStatus_WithSnapshot(t *testing.T) {
 	for _, line := range strings.Split(out, "\n") {
 		if strings.HasPrefix(line, "infra") && strings.Contains(line, "(XO)") {
 			t.Errorf("(XO) marker wrongly on infra line: %q", line)
+		}
+	}
+}
+
+func TestEffectiveSurface(t *testing.T) {
+	if got := effectiveSurface(""); got != "claude-code" {
+		t.Errorf("effectiveSurface(\"\") = %q, want claude-code (the default driver)", got)
+	}
+	if got := effectiveSurface("aider"); got != "aider" {
+		t.Errorf("effectiveSurface(\"aider\") = %q, want aider", got)
+	}
+}
+
+func TestBuildStatusJSON(t *testing.T) {
+	cfg := &roster.Config{Agents: []roster.Agent{
+		{Name: "xo"}, // empty surface ⇒ claude-code; this is the XO ⇒ role hub
+		{Name: "frontend", Surface: "aider"},
+		{Name: "data", Surface: "opencode"},
+	}}
+	snap := watch.Snapshot{DeskStates: map[string]surface.State{
+		"xo":       surface.StateIdle,
+		"frontend": surface.StateAwaitingApproval,
+		"data":     surface.StateWorking,
+	}}
+
+	doc := buildStatusJSON(cfg, "xo", "2026-06-17T17:00:00Z", snap)
+
+	if doc.GeneratedAt != "2026-06-17T17:00:00Z" {
+		t.Errorf("generated_at = %q", doc.GeneratedAt)
+	}
+	if doc.XO != "xo" {
+		t.Errorf("xo = %q, want xo", doc.XO)
+	}
+	if len(doc.Agents) != 3 {
+		t.Fatalf("got %d agents, want 3", len(doc.Agents))
+	}
+	// XO: role hub, default surface claude-code, idle.
+	xo := doc.Agents[0]
+	if xo.Name != "xo" || xo.Role != "hub" || xo.Surface != "claude-code" || xo.State != "idle" {
+		t.Errorf("xo item = %+v, want {xo hub claude-code idle}", xo)
+	}
+	// Non-XO desks carry no role; surface comes from the roster.
+	if doc.Agents[1].Role != "" {
+		t.Errorf("non-XO agent should have no role, got %q", doc.Agents[1].Role)
+	}
+	if doc.Agents[1].Surface != "aider" || doc.Agents[1].State != "awaiting-approval" {
+		t.Errorf("frontend item = %+v", doc.Agents[1])
+	}
+	if doc.Agents[2].Surface != "opencode" || doc.Agents[2].State != "working" {
+		t.Errorf("data item = %+v", doc.Agents[2])
+	}
+
+	// It must marshal to the widget's contract: an `agents` array + `generated_at`.
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"generated_at"`, `"agents"`, `"name":"xo"`, `"role":"hub"`, `"state":"awaiting-approval"`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("marshaled JSON missing %s\n%s", want, raw)
 		}
 	}
 }

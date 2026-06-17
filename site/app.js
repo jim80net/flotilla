@@ -2,14 +2,13 @@
    flotilla landing — minimal vanilla JS.
    Two jobs only:
      1. copy-to-clipboard on the install one-liner;
-     2. the LIVE FLEET STATUS widget: fetch ./status.json and render a table.
+     2. the FLEET STATUS widget: fetch ./status.json and render a table.
 
-   TODO: point the widget at real `flotilla status --json` output once that
-   command ships. The committed ./status.json is a generic SAMPLE so the widget
-   renders live on this static page today. Its shape (an `agents` array of
-   { name, role?, surface?, state, task? }) is the contract a real
-   `flotilla status --json` should emit; adjust render() if the real shape
-   differs.
+   ./status.json is REAL output of `flotilla status --json` run against a generic
+   DEMO fleet (see tools/landing-status/gen.sh) — not hand-authored, and never a
+   real deployment. Its shape is exactly what the command emits: an `agents` array
+   of { name, role?, surface?, state } plus `generated_at` + `xo`. The page labels
+   it "sample · demo fleet" so a demo render is never mistaken for a live one.
    ========================================================================= */
 (function () {
   "use strict";
@@ -88,17 +87,18 @@
       var roleBadge = a.role
         ? '<span class="role">' + escapeHtml(a.role) + "</span>"
         : "";
+      // Columns mirror what `flotilla status` actually knows: name (+ role),
+      // surface driver, and assessed state. (No per-desk "task" — the detector
+      // snapshot doesn't record one, so the widget doesn't invent a column for it.)
       var surface = a.surface
         ? '<span class="fleet-surface">' + escapeHtml(a.surface) + "</span>"
         : '<span class="fleet-surface"></span>';
-      var task = a.task ? escapeHtml(a.task) : "";
 
       return (
         '<div class="fleet-row" style="animation-delay:' + (i * 60) + 'ms">' +
           '<span class="fleet-name">' + escapeHtml(a.name || "—") + roleBadge + "</span>" +
-          '<span class="state ' + state + '"><span class="glyph"></span>' + escapeHtml(label) + "</span>" +
-          '<span class="fleet-task">' + task + "</span>" +
           surface +
+          '<span class="state ' + state + '"><span class="glyph"></span>' + escapeHtml(label) + "</span>" +
         "</div>"
       );
     }).join("");
@@ -107,17 +107,17 @@
 
     if (meta) {
       var working = agents.filter(function (a) { return normalizeState(a.state) === "working"; }).length;
-      var stamp = data.generated_at ? " · " + escapeHtml(data.generated_at) : "";
-      meta.textContent = agents.length + " agents · " + working + " working" + stamp;
+      meta.textContent = agents.length + " agents · " + working + " working";
     }
   }
 
   function normalizeState(s) {
     s = String(s || "").toLowerCase().trim();
-    // map a few synonyms onto the canonical class set
-    if (s === "awaiting-approval" || s === "awaiting_approval" || s === "blocked") return "awaiting";
-    if (s === "error" || s === "crashed") return "errored";
-    if (s === "down" || s === "dead") return "offline";
+    // Map `flotilla status` labels + synonyms onto the canonical class set.
+    if (s === "awaiting" || s === "awaiting-input" || s === "awaiting_input" ||
+        s === "awaiting-approval" || s === "awaiting_approval" || s === "blocked") return "awaiting";
+    if (s === "error" || s === "errored" || s === "crashed" || s === "shell") return "errored";
+    if (s === "down" || s === "dead" || s === "offline" || s === "unknown") return "offline";
     return KNOWN_STATES.indexOf(s) >= 0 ? s : "idle";
   }
 

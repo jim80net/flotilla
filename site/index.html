@@ -345,15 +345,16 @@
         <h2>See the fleet at a glance.</h2>
       </div>
 
-      <!-- The widget fetches ./status.json and renders the table. A committed
-           SAMPLE status.json (generic desks) makes it render live on this static
-           page today.
-           TODO: point at real `flotilla status` JSON output once that command ships. -->
+      <!-- The widget fetches ./status.json and renders the table. status.json is
+           REAL output of `flotilla status --json` run against a generic DEMO fleet
+           (regenerate via tools/landing-status/gen.sh) — not hand-authored, and
+           never a real deployment. The "sample · demo fleet" badge keeps that honest. -->
       <div class="fleet-panel">
         <div class="fleet-bar">
           <span class="fleet-bar-title">
             <span class="live-pulse" aria-hidden="true"></span>
             flotilla&nbsp;status&nbsp;<span class="muted">--json</span>
+            <span class="sample-badge">sample · demo fleet</span>
           </span>
           <span class="fleet-bar-meta" id="fleet-meta">loading…</span>
         </div>
@@ -362,6 +363,11 @@
           <p class="fleet-fallback">Fleet status renders here. <noscript>Enable JavaScript to see it live.</noscript></p>
         </div>
       </div>
+      <p class="fleet-note">
+        <strong>Sample — demo fleet.</strong> Real output of
+        <code>flotilla status --json</code> run against a generic example roster
+        (the same desks as the quickstart), not a live deployment.
+      </p>
     </section>
 
     <!-- ───────────────────── 30-SECOND START ───────────────────── -->
