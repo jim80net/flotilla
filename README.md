@@ -18,7 +18,7 @@ You drive the fleet from a chat channel — talk strategy, the XO runs implement
 
 ![flotilla driven from a chat channel: the operator asks for status and queues new work in plain language; the XO reports what just shipped, dispatches a desk to benchmark caching, and queues the next task](docs/assets/flotilla-demo.gif)
 
-*(The message shapes are exactly what flotilla emits — the operator's lines arrive over the inbound relay; the XO's replies are `flotilla notify` posts. The desks do the work in their own panes; the XO coordinates and reports back.)*
+**Mockup — illustrative.** *(The message shapes are exactly what flotilla emits — the operator's lines arrive over the inbound relay; the XO's replies are `flotilla notify` posts; the desks do the work in their own panes while the XO coordinates and reports back.)*
 
 Under the hood it's substrate you already have. Point flotilla at a running agent and drive it from one command:
 
