@@ -372,8 +372,10 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.08; 
   margin: 0; background: var(--abyss-2); border: 1px solid var(--line);
   border-radius: var(--r-sm); padding: .8rem 1rem; overflow-x: auto;
 }
-.start-steps pre code { font-size: .82rem; color: var(--cyan); }
+.start-steps pre code { font-size: .82rem; color: var(--cyan); white-space: pre; }
 .start-steps pre code::before { content: "$ "; color: var(--ink-3); }
+.start-note { font-size: .82rem; color: var(--ink-3); margin: .55rem 0 0; }
+.start-note code { color: var(--ink-2); }
 .start-aside {
   padding: 1.6rem; border: 1px solid var(--line); border-radius: var(--r);
   background: var(--abyss-2);

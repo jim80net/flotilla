@@ -87,9 +87,9 @@
 
           <!-- COPY: HERO SUBHEAD — final supporting sentence slots here -->
           <p class="hero-sub">
-            Coordinate Claude Code, Aider, Grok &mdash; the agents you run today &mdash;
-            into one fleet. One hub agent routes the work and reports back, every
-            message mirrored to a chat channel you can read from your phone.
+            Coordinate Claude Code, Aider, OpenCode, Grok &mdash; the agents you run
+            today &mdash; into one fleet. One hub agent routes the work and reports back,
+            every message mirrored to a chat channel you can read from your phone.
           </p>
 
           <!-- install one-liner: module path verified against go.mod
@@ -156,8 +156,8 @@
           <div class="card-num">01</div>
           <h3>One fleet, no new daemon</h3>
           <p>
-            Coordinate Claude Code, Aider, and Grok as a single fleet. flotilla is
-            drop-in &mdash; it talks to the agent sessions you already run in
+            Coordinate Claude Code, Aider, OpenCode, and Grok as a single fleet.
+            flotilla is drop-in &mdash; it talks to the agent sessions you already run in
             <code>tmux</code>, so nothing is replaced and you give nothing up to opt in.
           </p>
         </article>
@@ -387,15 +387,18 @@
           <li>
             <span class="start-n">2</span>
             <div>
-              <h3>Send a message into an agent's pane</h3>
-              <pre><code>flotilla send --from me backend "pull origin main and run the tests"</code></pre>
+              <h3>Tag an agent you run, then send</h3>
+              <pre><code>flotilla register backend --pane demo:0.0
+flotilla send --from me backend "pull origin main and run the tests"</code></pre>
+              <p class="start-note">A stable marker survives the TUI retitling its pane;
+                <code>send</code> then confirms the turn actually started.</p>
             </div>
           </li>
           <li>
             <span class="start-n">3</span>
             <div>
-              <h3>Watch the fleet</h3>
-              <pre><code>flotilla watch --roster ./flotilla.json</code></pre>
+              <h3>Run the self-continuing clock</h3>
+              <pre><code>flotilla watch --roster ./flotilla.json --ack-file ./flotilla-xo-alive</code></pre>
             </div>
           </li>
         </ol>
