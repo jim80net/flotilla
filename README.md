@@ -13,6 +13,10 @@ a chat channel you already have.
 
 ## See it work
 
+![flotilla coordinating a two-agent fleet: an XO routes a task to a backend desk, collects the report, and runs the self-continuing clock — every hop a confirmed delivery](docs/assets/flotilla-demo.gif)
+
+*(A real run — an XO routes work to a backend desk, collects the report back, and starts the clock; every hop is a confirmed delivery. [Source cast](docs/assets/flotilla-demo.cast).)*
+
 Point flotilla at an agent you already run, then drive it from one command:
 
 ```console
