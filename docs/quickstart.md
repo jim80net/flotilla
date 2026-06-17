@@ -1,8 +1,11 @@
 # flotilla quickstart
 
-A cold start: from nothing to (1) sending a message into another agent's
-terminal, and (2) running the self-continuing XO clock. Every command below is
-runnable as written — no prior flotilla knowledge assumed.
+The payoff is **driving your whole fleet from a chat channel** — you talk to the
+XO in Discord and it runs the rest. This is the cold start that gets you there:
+from nothing to (1) sending a message into another agent's terminal, (2) running
+the self-continuing XO clock, and (3) wiring the Discord mirror + inbound relay
+(§4 and §6) that turn the channel into your day-to-day cockpit. Every command
+below is runnable as written — no prior flotilla knowledge assumed.
 
 ## What you need
 

@@ -25,7 +25,33 @@ You drive the fleet from a chat channel — talk strategy, the XO runs implement
 
 **Mockup — illustrative.** *(The message shapes are exactly what flotilla emits — the operator's lines arrive over the inbound relay; the XO's replies are `flotilla notify` posts; the desks do the work in their own panes while the XO coordinates and reports back.)*
 
-Under the hood it's substrate you already have. Point flotilla at a running agent and drive it from one command:
+**That chat channel is the whole interface.** You message the XO the way you'd
+message a colleague — *"what shipped overnight?"*, *"benchmark the cache and
+report back"* — and it routes the work to the right desk, collects the replies,
+and answers you in the same channel. Every instruction and reply lands there
+with confirmed delivery, so you drive the fleet from your phone and read back
+exactly what happened. Once it's running, there's no terminal to babysit — the
+chat is where you live.
+
+(Prefer to wire it up or poke at it directly? The CLI that powers all this is
+right below, in [Under the hood: the CLI](#under-the-hood-the-cli).)
+
+**What you get**
+
+- **Coordinate the harnesses you've already built** — Claude Code, Aider, OpenCode, and
+  Grok desks behind one interface; each stays an ordinary session you control,
+  so opting in costs you nothing and you can walk away anytime.
+- **One chief-of-staff agent in charge** — the XO routes work to the domain
+  desks and reports back, so you talk to one agent, not five — from your phone.
+- **A durable, auditable record** — every instruction and reply can be mirrored
+  to a chat channel you read back from anywhere, with confirmed delivery so the
+  log never lies about what landed.
+
+## Under the hood: the CLI
+
+The chat channel is where you live; underneath, flotilla is a small CLI over
+`tmux` — substrate you already have. You rarely touch it once the fleet is
+running, but it's what sets the fleet up and powers every message:
 
 ```console
 # install (Go 1.26+) — full cold-start walkthrough in docs/quickstart.md
@@ -50,17 +76,6 @@ dropped message. `watch` keeps an idle fleet at ~zero cost until there's work.
 
 > **New here? → [docs/quickstart.md](./docs/quickstart.md)** — install to your
 > first cross-pane message and the self-continuing clock, runnable cold.
-
-**What you get**
-
-- **Coordinate the harnesses you've already built** — Claude Code, Aider, OpenCode, and
-  Grok desks behind one interface; each stays an ordinary session you control,
-  so opting in costs you nothing and you can walk away anytime.
-- **One chief-of-staff agent in charge** — the XO routes work to the domain
-  desks and reports back, so you talk to one agent, not five — from your phone.
-- **A durable, auditable record** — every instruction and reply can be mirrored
-  to a chat channel you read back from anywhere, with confirmed delivery so the
-  log never lies about what landed.
 
 ## The problem
 
