@@ -164,7 +164,7 @@ func (s *composerStub) ComposerPending(string) (bool, bool) {
 }
 
 func TestConfirmSubmitConfirmsOnComposerClear(t *testing.T) {
-	// THE regression for the false-negative bug (docs/design-confirm-false-negative.md): a heavy
+	// THE regression for the false-negative bug: a heavy
 	// pane whose Working spinner NEVER renders inside the window, but whose composer reads CLEARED
 	// and STAYS cleared (the Enter was accepted). Spinner-only confirmation would have returned
 	// ErrUnconfirmed and the relay would have raised a FALSE alarm; the stable composer-cleared

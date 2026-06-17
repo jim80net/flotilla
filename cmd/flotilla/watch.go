@@ -129,7 +129,7 @@ func cmdWatch(args []string) error {
 	// confirm turns "the tmux keystrokes ran" into "a turn started": it idle-gates, submits,
 	// confirms the Idle→Working edge, retries Enter-only (never re-pasting), and returns a typed
 	// error the Injector dispatches on (ErrBusy → defer; failure → loud alert). Closing the
-	// relay's silent-drop class (docs/findings-inbound-relay-lastmile.md).
+	// relay's silent-drop class.
 	confirm := surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}
 	injector := watch.NewInjector(func(agent, message string) error {
 		drv, ok := surface.Get(agentSurface(cfg, agent))

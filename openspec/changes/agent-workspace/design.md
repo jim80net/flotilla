@@ -1,6 +1,6 @@
 # Design: per-agent workspace `~/.flotilla/<agent>/`
 
-**Status:** design (revised after systems-review — awaiting XO checkpoint) · **Date:** 2026-06-11 · **Subsumes:** #6 (pluggable tracker + heartbeat-prompt customization) · **Builds on:** `docs/agent-launch-recipes-design.md`.
+**Status:** design (revised after systems-review — awaiting XO checkpoint) · **Date:** 2026-06-11 · **Subsumes:** #6 (pluggable tracker + heartbeat-prompt customization) · **Builds on:** the host-local launch-recipe mechanism (`internal/launch`).
 
 ## Context
 

@@ -10,8 +10,8 @@ import (
 // Confirmed delivery turns "the tmux keystrokes ran" into "a turn started." The relay
 // last-mile was a silent failure: deliver.Send pastes + sends one Enter and returns nil if
 // the tmux commands exit cleanly, so an Enter dropped in the paste-ingestion race (or eaten
-// by a busy composer) left the operator's message UNSUBMITTED while flotilla logged success
-// (see docs/findings-inbound-relay-lastmile.md). ConfirmSubmit closes that class at the
+// by a busy composer) left the operator's message UNSUBMITTED while flotilla logged success.
+// ConfirmSubmit closes that class at the
 // submit layer: it gates on idle, submits, CONFIRMS the Idle→Working edge via the driver's
 // Assess, retries the submitting Enter ALONE (never re-pasting → never double-submitting),
 // and escalates LOUDLY rather than ever reporting an unverified submit as delivered.
@@ -38,7 +38,7 @@ const (
 
 	// confirmGracePolls × confirmGraceInterval is a PATIENT grace phase entered ONLY when the fast
 	// phase did not confirm. It absorbs a genuinely slow turn-start — the heavy-pane spinner that
-	// renders seconds after the Enter is accepted (docs/design-confirm-false-negative.md) — on a
+	// renders seconds after the Enter is accepted — on a
 	// surface WITHOUT a composer probe, or when the probe could not read the composer. It re-checks
 	// the same success signals at a longer interval but sends NO further Enter (the body is either
 	// accepted-and-slow-to-render or genuinely gone; the bounded fast-phase retries already covered
