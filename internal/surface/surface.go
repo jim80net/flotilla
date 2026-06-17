@@ -83,6 +83,35 @@ type ResultReader interface {
 	LatestResult(pane string) (string, error)
 }
 
+// ComposerProbe is an OPTIONAL Driver capability: report whether the pane's composer holds a
+// PENDING (unsubmitted) submission. Confirmed delivery (Confirm.Submit) uses the composer
+// CLEARING as a FAST, latency-independent success signal. Pressing Enter clears the composer the
+// instant the keystroke is accepted — a synchronous TUI action — whereas the Working spinner
+// renders only once the turn machinery spins up, which lags SECONDS on a heavy (high-context)
+// session. Confirming on the spinner ALONE produced FALSE "not delivered" escalations on the
+// heavy XO pane (every observed false negative was the heaviest pane; see
+// docs/design-confirm-false-negative.md). The composer-cleared signal eliminates them.
+//
+// It does NOT re-open the silent-drop, but the reason is NOT that a non-error Submit guarantees
+// the body landed (deliver.Send does not verify TUI ingestion — see "failure mode A"). It is that
+// Confirm.Submit requires the cleared read to be STABLE (clearedConfirmPolls consecutive cleared
+// reads): a paste still being ingested reads empty for an instant but flips to "pending" before
+// the streak completes, so it is caught and retried rather than mistaken for a submit; only a
+// composer that stays empty is trusted. A genuinely-stuck body reads pending throughout and
+// escalates loudly. See confirm.go's clearedConfirmPolls for the full argument and residual.
+//
+// A Driver MAY implement it; Confirm.Submit type-asserts and falls back to the spinner window when
+// it is absent. It is READ-ONLY (never writes a pane), like ResultReader.
+type ComposerProbe interface {
+	// ComposerPending reports whether the composer holds an unsubmitted body. When ok=true:
+	// pending=true means the body is still sitting in the composer (the submitting Enter has not
+	// been accepted — a dropped Enter to retry), pending=false means the composer is empty (the
+	// submit was accepted). ok=false means the driver could NOT determine the composer state
+	// (capture glitch / unrecognized render) — the caller MUST NOT treat !pending as "cleared" in
+	// that case and falls back to the spinner signal.
+	ComposerPending(pane string) (pending bool, ok bool)
+}
+
 // DefaultSurface is used when an agent has no surface configured.
 const DefaultSurface = "claude-code"
 
