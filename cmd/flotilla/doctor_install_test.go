@@ -46,7 +46,7 @@ func TestDoctorInstallerExecStartHasAllFlags(t *testing.T) {
 	unit := renderDoctorUnit(t, doctorFixtureEnv)
 
 	wantExecStart := "ExecStart=%h/.local/bin/flotilla-doctor " +
-		"--self hydra-ops " +
+		"--self xo " +
 		"--secrets /srv/fleet/secrets.env " +
 		"--workdir /srv/fleet " +
 		"--bin %h/go/bin/flotilla " +

@@ -28,7 +28,7 @@ func writeStore(t *testing.T, cwd, sessionID, encodedCwd, history string) string
 }
 
 func TestLatestResultReturnsLastAssistant(t *testing.T) {
-	cwd := "/home/jim/workspace/grok-research"
+	cwd := "/srv/fleet/research"
 	// Mixed entries; the LAST assistant content is the latest result. A trailing user entry must
 	// NOT shadow it; an earlier assistant must be superseded.
 	history := strings.Join([]string{
@@ -37,7 +37,7 @@ func TestLatestResultReturnsLastAssistant(t *testing.T) {
 		`{"type":"user","content":"second question"}`,
 		`{"type":"assistant","content":"THE FULL latest result\nwith multiple lines\nand sources."}`,
 	}, "\n")
-	home := writeStore(t, cwd, "019ecf5e-sess", "%2Fhome%2Fjim%2Fworkspace%2Fgrok-research", history)
+	home := writeStore(t, cwd, "019ecf5e-sess", "%2Fsrv%2Ffleet%2Fresearch", history)
 	got, err := LatestResult(home, cwd)
 	if err != nil {
 		t.Fatalf("LatestResult err = %v", err)
@@ -48,12 +48,12 @@ func TestLatestResultReturnsLastAssistant(t *testing.T) {
 }
 
 func TestLatestResultSkipsMalformedLine(t *testing.T) {
-	cwd := "/home/jim/workspace/grok-research"
+	cwd := "/srv/fleet/research"
 	history := strings.Join([]string{
 		`{"type":"assistant","content":"valid result"}`,
 		`{not valid json at all`, // a torn/partial line must be skipped, not fatal
 	}, "\n")
-	home := writeStore(t, cwd, "s1", "%2Fhome%2Fjim%2Fworkspace%2Fgrok-research", history)
+	home := writeStore(t, cwd, "s1", "%2Fsrv%2Ffleet%2Fresearch", history)
 	got, err := LatestResult(home, cwd)
 	if err != nil || got != "valid result" {
 		t.Errorf("got (%q, %v), want (\"valid result\", nil) — a malformed line must be skipped", got, err)
@@ -61,8 +61,8 @@ func TestLatestResultSkipsMalformedLine(t *testing.T) {
 }
 
 func TestLatestResultErrors(t *testing.T) {
-	cwd := "/home/jim/workspace/grok-research"
-	enc := "%2Fhome%2Fjim%2Fworkspace%2Fgrok-research"
+	cwd := "/srv/fleet/research"
+	enc := "%2Fsrv%2Ffleet%2Fresearch"
 
 	t.Run("no active session for cwd", func(t *testing.T) {
 		home := writeStore(t, "/some/other/cwd", "s1", enc, `{"type":"assistant","content":"x"}`)
@@ -92,9 +92,9 @@ func TestLatestResultErrors(t *testing.T) {
 func TestLatestResultArrayContent(t *testing.T) {
 	// grok may write assistant content as an array of typed blocks (structured/multimodal turns).
 	// extractText must concatenate the text blocks, not skip the entry (OCR-M2).
-	cwd := "/home/jim/workspace/grok-research"
+	cwd := "/srv/fleet/research"
 	history := `{"type":"assistant","content":[{"type":"text","text":"part one "},{"type":"text","text":"and part two"}]}`
-	home := writeStore(t, cwd, "s1", "%2Fhome%2Fjim%2Fworkspace%2Fgrok-research", history)
+	home := writeStore(t, cwd, "s1", "%2Fsrv%2Ffleet%2Fresearch", history)
 	got, err := LatestResult(home, cwd)
 	if err != nil || got != "part one and part two" {
 		t.Errorf("got (%q, %v), want the concatenated text blocks", got, err)
@@ -104,9 +104,9 @@ func TestLatestResultArrayContent(t *testing.T) {
 func TestLatestResultUndecodableAssistantIsLoud(t *testing.T) {
 	// An assistant entry whose content is neither string nor text-blocks must NOT silently vanish —
 	// it surfaces a distinct "unrecognized format" error, not "no assistant turn yet" (OCR-M2).
-	cwd := "/home/jim/workspace/grok-research"
+	cwd := "/srv/fleet/research"
 	history := `{"type":"assistant","content":42}` // a number — neither string nor block array
-	home := writeStore(t, cwd, "s1", "%2Fhome%2Fjim%2Fworkspace%2Fgrok-research", history)
+	home := writeStore(t, cwd, "s1", "%2Fsrv%2Ffleet%2Fresearch", history)
 	_, err := LatestResult(home, cwd)
 	if err == nil || !strings.Contains(err.Error(), "unrecognized") {
 		t.Errorf("err = %v, want a distinct 'unrecognized format' error (not a silent skip / no-turn)", err)
@@ -115,8 +115,8 @@ func TestLatestResultUndecodableAssistantIsLoud(t *testing.T) {
 
 func TestLatestResultTrailingSlashCwdMatches(t *testing.T) {
 	// filepath.Clean tolerates a trailing slash on either side (the pane cwd vs the stored cwd).
-	home := writeStore(t, "/home/jim/workspace/grok-research", "s1", "%2Fhome%2Fjim%2Fworkspace%2Fgrok-research", `{"type":"assistant","content":"ok"}`)
-	got, err := LatestResult(home, "/home/jim/workspace/grok-research/")
+	home := writeStore(t, "/srv/fleet/research", "s1", "%2Fsrv%2Ffleet%2Fresearch", `{"type":"assistant","content":"ok"}`)
+	got, err := LatestResult(home, "/srv/fleet/research/")
 	if err != nil || got != "ok" {
 		t.Errorf("got (%q, %v), want a match despite the trailing slash", got, err)
 	}
@@ -125,8 +125,8 @@ func TestLatestResultTrailingSlashCwdMatches(t *testing.T) {
 func TestLatestResultAmbiguousMatchesError(t *testing.T) {
 	// If the same session-id appears under two cwd dirs (a corrupt/duplicated store), pick neither —
 	// surface the ambiguity loudly rather than silently taking matches[0] (systems-P3 / OCR-L3).
-	cwd := "/home/jim/workspace/grok-research"
-	home := writeStore(t, cwd, "dup", "%2Fhome%2Fjim%2Fworkspace%2Fgrok-research", `{"type":"assistant","content":"a"}`)
+	cwd := "/srv/fleet/research"
+	home := writeStore(t, cwd, "dup", "%2Fsrv%2Ffleet%2Fresearch", `{"type":"assistant","content":"a"}`)
 	// plant a SECOND chat_history for the same session-id under a different cwd dir
 	dir2 := filepath.Join(home, "sessions", "%2Fother%2Fcwd", "dup")
 	if err := os.MkdirAll(dir2, 0o755); err != nil {

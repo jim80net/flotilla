@@ -13,7 +13,7 @@ even when nothing is actionable." The forensic read of the live system explains
 why, and reframes the work:
 
 - **Production runs the LEGACY always-wake heartbeat, not the v2 detector.** The
-  live roster `…/spark/state/flotilla.json` sets `heartbeat_interval: "20m"` and a
+  live roster `…/state/flotilla.json` sets `heartbeat_interval: "20m"` and a
   heavy `heartbeat_message` (DUTY A: sweep every desk's pane; DUTY B: read the
   tracker + openspec + README and advance; DUTY C: operator-decision queue) — but
   it has **no `change_detector` field**. So `cmdWatch` takes the legacy branch

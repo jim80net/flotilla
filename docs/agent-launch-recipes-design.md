@@ -13,15 +13,15 @@ launch command/working directory or out-of-band operator knowledge. Concretely
 this gap blocks three things at once:
 
 1. **Manual desk rebuild** — a domain desk's state lives in a worktree whose
-   name need not match the agent name (e.g. `crypto-trend-dev`'s work is in the
-   `spark-crypto` worktree), so there is no derivable launch command.
+   name need not match the agent name (e.g. `secondary-dev`'s work is in the
+   `secondary` worktree), so there is no derivable launch command.
 2. **Auto-resume of the XO** — the watchdog reliably detects the XO is down
    and alerts "restart needed", but has no declared command to actually restart
    it (the recovery half of the operator's chosen hybrid posture).
 3. **The recovery skill** — `flotilla-fleet-recovery` has to *guess*
    `claude -w <name>`.
 
-Origin: 2026-06-09, the `hydra-ops` XO + the entire tmux server died overnight
+Origin: 2026-06-09, the `xo` + the entire tmux server died overnight
 (~6.7h); `flotilla-watch` survived and (we confirmed by repro) alerts on the
 down-transition — to Discord — but nothing resumees. Operator: *"the lack of
 a clear direction of where the agent state lives is a feature gap, clearly."*
@@ -44,15 +44,15 @@ the same reason secrets aren't in the roster.
 ```json
 {
   "agents": {
-    "hydra-ops": {
-      "launch": "claude -w hydra-ops",
-      "cwd": "/home/jim/workspace/github.com/your-org/your-repo",
-      "tmux": "flotilla:hydra-ops",
+    "xo": {
+      "launch": "claude -w xo",
+      "cwd": "/srv/fleet/main",
+      "tmux": "flotilla:xo",
       "state": ".claude/handoffs/<latest>.md"
     },
-    "crypto-trend-dev": {
+    "secondary-dev": {
       "launch": "claude --continue",
-      "cwd": "/home/jim/workspace/github.com/your-org/your-repo-2"
+      "cwd": "/srv/fleet/secondary"
     }
   }
 }
@@ -114,7 +114,7 @@ Algorithm:
 1. Load roster (agent must exist) + launch recipes; resolve this agent's recipe
    (error `no launch recipe for "<agent>" in <file>` if absent). `launch` is
    the trailing **command argument** to tmux (run by the pane's `sh -c`), NOT
-   `send-keys` — so a recipe like `claude -w hydra-ops` (or a compound
+   `send-keys` — so a recipe like `claude -w xo` (or a compound
    `cd x && claude --continue`) is the pane's foreground process, and when it
    exits the pane dies (a dead recipe surfaces as a dead pane the watchdog
    catches). Recipes are therefore shell-interpreted; the launch file is
@@ -226,6 +226,6 @@ unchanged.
 ## Populating the recipes (data, not code)
 
 The feature ships the mechanism. The actual recipes are host data the operator
-owns; `hydra-ops` is known empirically (`claude -w hydra-ops` in the spark repo
+owns; the `xo` recipe is known empirically (`claude -w xo` in your fleet's repo
 root). Domain-desk launch commands/worktrees are operator-provided (or derived
-from each desk's handoff) and written into `flotilla-launch.json` on Spark.
+from each desk's handoff) and written into `flotilla-launch.json` on your host.

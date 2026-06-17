@@ -29,7 +29,7 @@
 ## 1. Production enablement (config only — the immediate win; operator-gated)
 
 > Not code in this repo — a change to the live roster
-> `…/spark/state/flotilla.json`. Captures the bulk of the burn reduction by lighting
+> `…/state/flotilla.json`. Captures the bulk of the burn reduction by lighting
 > up the already-shipped v2 detector. Listed here so it is not lost; do it only on
 > operator sign-off, and verify the wedge/crash alert still fires after the flip.
 

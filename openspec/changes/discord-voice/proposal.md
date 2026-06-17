@@ -47,7 +47,7 @@ systems-review/OCR). No build until the operator greenlights the build phase.
   `internal/discord` pattern with its OWN discordgo session** carrying voice intents
   (`IntentsGuildVoiceStates` — the existing relay gateway sets only Guild-Messages, so the
   voice session is separate; the bot needs voice intents enabled).
-- **Config/secrets:** `XAI_API_KEY` (operator's existing xAI key from `~/.hermes/.env`
+- **Config/secrets:** `XAI_API_KEY` (operator's existing xAI key from their provider's env file
   → `state/voice.env`); the voice channel id in the roster. Metered spend (operator's $):
   STT ¢/hr, TTS $4.20/1M chars — a session is cents; v1 carries a cost cap + meter.
 - **Security:** same trust boundary as the text relay — only the operator's Discord
