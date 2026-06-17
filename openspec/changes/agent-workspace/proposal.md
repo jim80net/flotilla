@@ -9,7 +9,7 @@ and makes "where does this agent's state live?" unanswerable in one place —
 the same institutional gap the launch-recipe work began closing.
 
 Unify them into one per-agent **workspace** `~/.flotilla/<agent>/` (host-local
-home, mirroring `~/.openclaw/`, `~/.hermes/`): a single directory holding the
+home, mirroring `~/.openclaw/`, `~/.<provider>/`): a single directory holding the
 launch recipe, the customizable heartbeat prompt, the working tracker, and the
 desk's identity in the agent's **native** instruction file (`CLAUDE.md` for
 Claude Code, `AGENTS.md` for Grok/Cursor — no flotilla-only format, zero glue).

@@ -25,13 +25,13 @@ func TestLoadValid(t *testing.T) {
 		"agents": {
 			"hydra-ops": {
 				"launch": "claude -w hydra-ops",
-				"cwd": "/home/jim/workspace/github.com/General-ML/spark",
+				"cwd": "/srv/fleet/main",
 				"tmux": "flotilla:hydra-ops",
 				"state": ".claude/handoffs/latest.md"
 			},
 			"crypto-trend-dev": {
 				"launch": "cd /tmp && claude --continue",
-				"cwd": "/home/jim/workspace/github.com/General-ML/spark-crypto"
+				"cwd": "/srv/fleet/secondary"
 			}
 		}
 	}`)
@@ -46,7 +46,7 @@ func TestLoadValid(t *testing.T) {
 	if r.Launch != "claude -w hydra-ops" {
 		t.Errorf("Launch = %q", r.Launch)
 	}
-	if r.Cwd != "/home/jim/workspace/github.com/General-ML/spark" {
+	if r.Cwd != "/srv/fleet/main" {
 		t.Errorf("Cwd = %q", r.Cwd)
 	}
 	if r.Tmux != "flotilla:hydra-ops" {

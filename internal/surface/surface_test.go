@@ -147,7 +147,7 @@ func TestParseComposerPending(t *testing.T) {
 		rule,
 		"❯ ",
 		rule,
-		"  jim@rt-dgx-sp001:~ [Opus 4.8] ctx:35%                    /rc active",
+		"  user@host:~ [Opus 4.8] ctx:35%                    /rc active",
 		"  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents",
 	}, "\n")
 	cases := []struct {
@@ -161,7 +161,7 @@ func TestParseComposerPending(t *testing.T) {
 		{"multi-line paste placeholder → pending", rule + "\n❯ [Pasted text +12 lines]\n" + rule, true, true},
 		{"working render, composer empty → cleared", "· Ideating… (6m · ↓ 23k tokens)\n" + rule + "\n❯ \n" + rule, false, true},
 		{"indented empty composer → cleared", "  ❯ \n  footer", false, true},
-		{"no composer prompt in tail → undetermined", "jim@host:~$ \n  some shell output", false, false},
+		{"no composer prompt in tail → undetermined", "user@host:~$ \n  some shell output", false, false},
 		{"real hydra-ops capture with survey modal → cleared", hydraCleared, false, true},
 	}
 	for _, tc := range cases {

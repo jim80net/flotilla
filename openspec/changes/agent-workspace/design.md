@@ -16,7 +16,7 @@ missing entirely:
 | desk identity/role | — | no home for "who is this desk + its standing task" |
 
 Operator decision (2026-06-10, confirmed 2026-06-11): unify them into a per-agent
-**workspace** `~/.flotilla/<agent>/` (mirroring `~/.openclaw/`, `~/.hermes/` —
+**workspace** `~/.flotilla/<agent>/` (mirroring `~/.openclaw/`, `~/.<provider>/` —
 illustrative precedent, not an interop contract); the per-workspace launch config
 **replaces** the flat `flotilla-launch.json` (which stays a read-only migration
 fallback); the identity file uses the agent's **native** convention

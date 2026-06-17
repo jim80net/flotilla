@@ -142,10 +142,10 @@ var _ ResultReader = grok{}
 func TestGrokLatestResult(t *testing.T) {
 	t.Run("resolves cwd then reads the store", func(t *testing.T) {
 		g := grok{
-			paneCWD:  func(pane string) (string, error) { return "/home/jim/workspace/grok-research", nil },
-			grokHome: "/home/jim/.grok",
+			paneCWD:  func(pane string) (string, error) { return "/srv/fleet/research", nil },
+			grokHome: "/home/you/.grok",
 			latestResult: func(home, cwd string) (string, error) {
-				if home != "/home/jim/.grok" || cwd != "/home/jim/workspace/grok-research" {
+				if home != "/home/you/.grok" || cwd != "/srv/fleet/research" {
 					t.Errorf("latestResult got (home=%q, cwd=%q), want the resolved pair", home, cwd)
 				}
 				return "the full latest grok result", nil

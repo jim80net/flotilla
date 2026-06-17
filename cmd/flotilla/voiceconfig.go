@@ -10,7 +10,7 @@ import (
 
 // voiceConfig is the `flotilla voice` runtime configuration, loaded from the voice env file
 // (state/voice.env — chmod 600, never committed; the operator copies XAI_API_KEY there from
-// ~/.hermes/.env, decoupling voice from Hermes). It is parsed here (pure-Go, no build tag) so
+// their provider's env file, decoupling voice from any one agent's config). It is parsed here (pure-Go, no build tag) so
 // the loader is unit-tested in the core build; the voiceopus command consumes it.
 //
 // XAIKey is a secret and MUST never be logged or echoed (loadVoiceConfig never prints values,

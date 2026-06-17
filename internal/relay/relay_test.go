@@ -3,7 +3,7 @@ package relay
 import "testing"
 
 func TestAccept(t *testing.T) {
-	const op = "355415374918844417"
+	const op = "111111111111111111"
 	// The single most important test: a webhook post (our own mirror) is dropped
 	// even if it somehow carried the operator's id — no feedback loop.
 	if Accept("webhook-123", op, op) {

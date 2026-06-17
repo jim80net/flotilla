@@ -19,14 +19,14 @@ not a paid API)?
   subscription (the Max OAuth token is not exposed as `ANTHROPIC_AUTH_TOKEN`,
   which is the only env OCR's "Claude Code environment" resolver reads). So the
   only $0 option is a local OpenAI-compatible model.
-- Benchmarked against a local **Qwen2.5-Coder-32B-Instruct Q4_K_M** on the GB10
-  (124 GB unified): **too slow + GPU-saturating + missed the known bug.**
+- Benchmarked against a local **Qwen2.5-Coder-32B-Instruct Q4_K_M** on a local GPU:
+  **too slow + GPU-saturating + missed the known bug.**
 - **Paid path** (Anthropic / cheap OpenAI-compatible) would be fast + better
   quality, but is **costly** (~208K input tokens per file, below) **and
   redundant** — cubic (Claude-grade) + `/systems-review` (Claude-grade) already
   cover that tier and *did* catch the bug OCR missed.
 
-## Measurements (all measured 2026-06-08 on host rt-dgx-sp001, GB10)
+## Measurements (all measured 2026-06-08 on a local GPU host)
 
 Setup: `ocr` built from source on aarch64 (`v0.0.0-a32b8c7`); model served by
 `llama.cpp` `llama-server` (build 8269); OCR → local endpoint via the OpenAI
@@ -43,7 +43,7 @@ sensibly picked the **8 Go source files**, excluding docs (`.md`) and **all
 | **Tokens — single 110-line file** | **~208,307 input** + ~3,448 output (the agent re-reads the file + codebase-search + a >50-line "plan" phase + positioning + reflection) |
 | **Quality — single file** | **0 comments — "Looks good to me."** The file was the *buggy* `clear.go` (pre-fix commit `7f1e79e`) containing a known silent-failure (a pre-clear `Capture` error masking a Remote-Control drop) that `/systems-review` caught. **OCR-local MISSED it.** |
 | **Host impact — GPU** | **pinned 93-96%** for the entire duration of every run (verified by 5-second sampling: 340/356 samples ≥93%). A review run would **saturate the production GPU** and disrupt concurrent work. |
-| **Host impact — memory** | RAM **40 → 51 GB peak** (18.4 GB model + KV-cache growth). `nvidia-smi` cannot report VRAM on the GB10 (unified memory) → RAM is the proxy. Load ~2.0-2.5 (CPU modest). |
+| **Host impact — memory** | Substantial RAM growth under load (18.4 GB model + KV-cache growth). On a unified-memory GPU host `nvidia-smi` cannot report VRAM → RAM is the proxy. Load ~2.0-2.5 (CPU modest). |
 
 Comparison point: cubic reviews a whole PR in **~2-20 min** and `/systems-review`
 runs Claude-grade in minutes; both caught the `clear.go` silent-failure.
@@ -72,6 +72,6 @@ plausibly clears (a)+(b).
 ## Artifacts
 
 - The 18.4 GB GGUF (`Qwen2.5-Coder-32B-Instruct-Q4_K_M.gguf`) is **kept** at
-  `/home/jim/models/` — dead weight for OCR, but a useful general local code
-  model; non-pressing on a 124 GB host (operator's call to keep).
+  `$HOME/models/` — dead weight for OCR, but a useful general local code
+  model; non-pressing on a host with ample disk (operator's call to keep).
 - OCR repo clone used for research: `/tmp/ocr-research-2975902` (ephemeral).
