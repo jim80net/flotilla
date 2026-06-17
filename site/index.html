@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<!--
+  flotilla landing page : single static page, no framework, no backend.
+  Vanilla JS is used ONLY for the live fleet-status widget (see app.js).
+
+  COPY MARKERS: every spot whose final wording is NOT yet locked carries a
+  "COPY:" HTML comment. A later step slots the operator's final one-liner / hook
+  into those spots. Find them all with: grep -n "COPY:" index.html
+  The draft one-liner used below is a PLACEHOLDER (operator may tweak it).
+
+  ASSET MARKERS: an "ASSET:" HTML comment marks where a produced asset (the demo
+  gif / asciinema cast) drops in. Find them with: grep -n "ASSET:" index.html
+
+  GENERIC ONLY: this page describes the open-source product. No private
+  deployment details appear anywhere : example agents are generic (xo, backend,
+  frontend, data), mirroring the public quickstart, NOT any host roster.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>flotilla — a drop-in chief of staff for your AI coding harnesses</title>
+
+  <meta name="description" content="flotilla is a drop-in chief of staff for the AI coding harnesses you've already built — turn separate Claude Code / Aider / OpenCode / Grok sessions into one centrally coordinated fleet, with a durable auditable record of everything." />
+
+  <meta property="og:title" content="flotilla" />
+  <meta property="og:description" content="A drop-in chief of staff for the AI coding harnesses you've already built." />
+  <meta property="og:type" content="website" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <!-- Display: Space Mono (characterful monospace) avoided in favor of Syne (geometric grotesque)
+       paired with IBM Plex Mono for the terminal/code body. Distinctive, not generic. -->
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <!-- atmospheric layers: grain + faint signal-grid, fixed behind everything -->
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-grain" aria-hidden="true"></div>
+
+  <!-- ───────────────────────── NAV ───────────────────────── -->
+  <header class="nav">
+    <a class="brand" href="#top">
+      <span class="brand-mark" aria-hidden="true">
+        <!-- tiny hub-and-spoke glyph -->
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="12" cy="12" r="2.4" />
+          <circle cx="4" cy="6" r="1.5" /><circle cx="20" cy="6" r="1.5" />
+          <circle cx="4" cy="18" r="1.5" /><circle cx="20" cy="18" r="1.5" />
+          <path d="M10 11 5 7M14 11 19 7M10 13 5 17M14 13 19 17" stroke-opacity=".8" />
+        </svg>
+      </span>
+      <span class="brand-name">flotilla</span>
+    </a>
+    <nav class="nav-links">
+      <a href="#what">what</a>
+      <a href="#how">how</a>
+      <a href="#arch">architecture</a>
+      <a href="#status">live status</a>
+      <a href="#start">start</a>
+      <a class="nav-cta" href="https://github.com/jim80net/flotilla" target="_blank" rel="noopener">
+        GitHub ↗
+      </a>
+    </nav>
+  </header>
+
+  <!-- ───────────────────────── HERO ───────────────────────── -->
+  <main id="top">
+    <section class="hero" id="hero">
+      <div class="hero-inner">
+        <div class="hero-copy">
+          <div class="eyebrow">
+            <span class="dot"></span>
+            <!-- COPY: status pill text — keep honest with README "v0, WIP" -->
+            open source · v0, built in the open
+          </div>
+
+          <!-- HERO ONE-LINER — LOCKED to the operator's final wording (sentence 1). -->
+          <h1 class="hero-headline">
+            flotilla is a <span class="hl">drop-in chief of staff</span><br />
+            for the AI coding harnesses you've already built.
+          </h1>
+
+          <!-- HERO SUBHEAD — LOCKED to the operator's final wording (sentences 2–4, verbatim). -->
+          <p class="hero-sub">
+            Stop shuffling 10 terminal windows. flotilla turns separate Claude Code /
+            Aider / OpenCode / Grok sessions into one centrally coordinated fleet. A
+            single hub agent coordinates multiple streams of work and lets you drive
+            strategy, not implementation.
+          </p>
+
+          <!-- install one-liner: module path verified against go.mod
+               (module github.com/jim80net/flotilla; entrypoint cmd/flotilla) -->
+          <div class="install" role="group" aria-label="install command">
+            <code id="install-cmd">go install github.com/jim80net/flotilla/cmd/flotilla@latest</code>
+            <button class="copy-btn" data-copy="#install-cmd" aria-label="copy install command">
+              <span class="copy-label">copy</span>
+            </button>
+          </div>
+
+          <div class="hero-cta">
+            <a class="btn btn-primary" href="https://github.com/jim80net/flotilla" target="_blank" rel="noopener">
+              <!-- COPY: primary CTA label -->
+              Star on GitHub
+              <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg>
+            </a>
+            <a class="btn btn-ghost" href="#start">
+              30-second start &darr;
+            </a>
+          </div>
+        </div>
+
+        <!-- demo asset placeholder: a produced gif / asciinema cast drops in here -->
+        <figure class="hero-demo" aria-label="product demo">
+          <div class="demo-chrome">
+            <span class="tl-dot r"></span><span class="tl-dot y"></span><span class="tl-dot g"></span>
+            <span class="demo-title">Discord &middot; #fleet</span>
+          </div>
+          <!-- Demo: a mocked Discord client (CLIENT chrome only — fake handles, no real
+               IDs) playing the operator's approved conversation. Source + artifacts
+               (flotilla-demo-source.html / .mp4 / .gif) tracked in site/assets/;
+               regenerate by recording flotilla-demo-source.html (chromium → ffmpeg). -->
+          <div class="demo-canvas" id="demo-canvas">
+            <img class="demo-media" src="./assets/flotilla-demo.gif"
+                 alt="flotilla driven from a chat channel: the operator asks for status and queues new work in plain language; the XO reports what just shipped, dispatches a desk to benchmark caching, and queues the next task" />
+            <div class="demo-caption">drive the fleet from chat &middot; talk strategy, the XO runs implementation</div>
+          </div>
+        </figure>
+      </div>
+
+      <!-- harness marquee: the surfaces flotilla drives today -->
+      <div class="harness-strip" aria-label="supported harnesses">
+        <span class="hs-label">drives</span>
+        <span class="hs-chip">Claude Code</span>
+        <span class="hs-chip">Aider</span>
+        <span class="hs-chip">OpenCode</span>
+        <span class="hs-chip">Grok</span>
+        <span class="hs-chip soon">Cursor <em>· roadmap</em></span>
+      </div>
+    </section>
+
+    <!-- ─────────────────────── WHAT IT DOES ─────────────────────── -->
+    <section class="band" id="what">
+      <div class="band-head">
+        <span class="kicker">01 — what it does</span>
+        <!-- COPY: section lede -->
+        <h2>Stop being the message bus for your own agents.</h2>
+      </div>
+      <div class="cards three">
+        <article class="card">
+          <div class="card-num">01</div>
+          <h3>One fleet, no new daemon</h3>
+          <p>
+            Coordinate Claude Code, Aider, OpenCode, and Grok as a single fleet.
+            flotilla is drop-in &mdash; it talks to the agent sessions already running in
+            <code>tmux</code>, so nothing is replaced and you give nothing up to opt in.
+          </p>
+        </article>
+        <article class="card">
+          <div class="card-num">02</div>
+          <h3>A chief of staff that routes &amp; reports</h3>
+          <p>
+            One hub agent &mdash; the executive officer (XO) &mdash; routes work to the
+            domain agents and collects their replies. You talk to one agent, not five,
+            and manage the whole fleet from your phone.
+          </p>
+        </article>
+        <article class="card">
+          <div class="card-num">03</div>
+          <h3>Durable, auditable channel</h3>
+          <p>
+            Every instruction and reply is mirrored to a chat channel under each
+            agent's own identity &mdash; a timestamped, phone-readable transcript of all
+            coordination. The audit trail is a first-class feature, not an afterthought.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <!-- ─────────────────────── HOW IT WORKS ─────────────────────── -->
+    <section class="band" id="how">
+      <div class="band-head">
+        <span class="kicker">02 — how it works</span>
+        <!-- COPY: section lede -->
+        <h2>Hub and spoke, built on substrate you already have.</h2>
+      </div>
+
+      <div class="how-grid">
+        <!-- inline SVG hub-and-spoke diagram -->
+        <figure class="diagram" aria-label="hub-and-spoke topology: an XO hub routes to domain agents; every message mirrors to a chat channel">
+          <svg viewBox="0 0 460 360" role="img">
+            <defs>
+              <radialGradient id="hubglow" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="var(--cyan)" stop-opacity=".55" />
+                <stop offset="100%" stop-color="var(--cyan)" stop-opacity="0" />
+              </radialGradient>
+              <linearGradient id="spoke" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stop-color="var(--cyan)" stop-opacity=".15" />
+                <stop offset="100%" stop-color="var(--cyan)" stop-opacity=".7" />
+              </linearGradient>
+            </defs>
+
+            <!-- spokes -->
+            <g class="spokes" stroke="url(#spoke)" stroke-width="1.6" fill="none">
+              <path d="M230 180 L92 92" />
+              <path d="M230 180 L368 92" />
+              <path d="M230 180 L92 268" />
+              <path d="M230 180 L368 268" />
+            </g>
+
+            <!-- channel link (dashed, downward to the bus) -->
+            <path class="bus-link" d="M230 210 L230 318" stroke="var(--amber)" stroke-width="1.6" stroke-dasharray="5 6" fill="none" />
+
+            <!-- hub glow + node -->
+            <circle cx="230" cy="180" r="64" fill="url(#hubglow)" />
+            <circle class="hub" cx="230" cy="180" r="30" />
+            <text class="node-label hub-label" x="230" y="184" text-anchor="middle">XO</text>
+
+            <!-- spoke nodes -->
+            <g class="nodes">
+              <g transform="translate(92,92)">
+                <circle class="node" r="22" />
+                <text class="node-label" y="4" text-anchor="middle">backend</text>
+              </g>
+              <g transform="translate(368,92)">
+                <circle class="node" r="22" />
+                <text class="node-label" y="4" text-anchor="middle">frontend</text>
+              </g>
+              <g transform="translate(92,268)">
+                <circle class="node" r="22" />
+                <text class="node-label" y="4" text-anchor="middle">data</text>
+              </g>
+              <g transform="translate(368,268)">
+                <circle class="node" r="22" />
+                <text class="node-label" y="4" text-anchor="middle">infra</text>
+              </g>
+            </g>
+
+            <!-- the chat bus -->
+            <g transform="translate(230,338)">
+              <rect class="bus" x="-92" y="-20" width="184" height="40" rx="8" />
+              <text class="bus-label" y="5" text-anchor="middle">chat channel &middot; audit trail</text>
+            </g>
+          </svg>
+          <figcaption>You talk to the hub. The hub routes to the domain agents and brokers their replies. Every message mirrors to the channel.</figcaption>
+        </figure>
+
+        <ol class="how-steps">
+          <li>
+            <span class="step-tag">delivery &amp; wake</span>
+            <h3>Inject into a tmux pane</h3>
+            <p>
+              Each agent lives in a <code>tmux</code> pane. flotilla delivers an
+              instruction by typing it into the target pane &mdash; the same thing you do
+              by hand. For a turn-based agent, the injection <em>is</em> the wake; there's
+              nothing to poll.
+            </p>
+          </li>
+          <li>
+            <span class="step-tag">topology</span>
+            <h3>One hub routes the rest</h3>
+            <p>
+              One agent is the hub (the XO). You talk to the hub; it routes to the domain
+              agents and collects their reports &mdash; so there is always one coherent
+              picture and one accountable router.
+            </p>
+          </li>
+          <li>
+            <span class="step-tag">audit &amp; read-back</span>
+            <h3>Mirror to a chat channel</h3>
+            <p>
+              Every instruction and reply is posted to a dedicated channel, each agent
+              under its own webhook identity &mdash; a durable, timestamped transcript you
+              can read back from any device.
+            </p>
+          </li>
+          <li>
+            <span class="step-tag">bounded autonomy</span>
+            <h3>Per-agent permission posture</h3>
+            <p>
+              Each agent runs with its own allow-list, acting unattended on safe
+              operations while still stopping for confirmation on risky ones.
+              Coordination never implies unbounded authority.
+            </p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ───────────────────── PLUGGABLE ARCHITECTURE ───────────────────── -->
+    <section class="band" id="arch">
+      <div class="band-head">
+        <span class="kicker">03 — pluggable architecture</span>
+        <!-- COPY: section lede -->
+        <h2>Heterogeneous by design. One interface, many harnesses.</h2>
+      </div>
+
+      <div class="arch-layout">
+        <div class="arch-lead">
+          <p>
+            Each agent declares a <code>surface</code> that selects a <em>driver</em> &mdash;
+            the per-harness policy for how flotilla submits a turn, reads the pane's
+            rendered state (working / idle / awaiting-approval / errored / crashed), and
+            rotates context. A single fleet can mix harnesses behind one interface.
+          </p>
+        </div>
+
+        <div class="arch-cols">
+          <div class="arch-col shipped">
+            <div class="arch-tag"><span class="tick">✓</span> shipped today</div>
+            <ul>
+              <li><b>Surface drivers</b> &mdash; Claude Code, Aider, OpenCode, Grok</li>
+              <li><b>Inter-harness fleets</b> &mdash; one XO drives a mixed fleet</li>
+              <li><b>The self-continuing clock</b> &mdash; heartbeat + liveness watchdog</li>
+              <li><b>Change-detector</b> &mdash; wake the XO only on a material change</li>
+              <li><b>Inbound relay</b> &mdash; message the fleet from the channel</li>
+            </ul>
+          </div>
+          <!-- HONESTY: modes + interfaces are DESIGNED pluggable but NOT yet shipped.
+               README/roadmap flags them as targets; do not imply they exist. -->
+          <div class="arch-col roadmap">
+            <div class="arch-tag"><span class="soon-tick">◌</span> designed pluggable · roadmap</div>
+            <ul>
+              <li><b>Modes</b> &mdash; first-class behavior modes you drive the fleet by</li>
+              <li><b>Interfaces</b> &mdash; pluggable surfaces; the chat channel is just one</li>
+              <li><b>Reporting</b> &mdash; a richer reporting model beyond the mirror</li>
+              <li><b>Cursor driver</b> &mdash; next harness on the roadmap</li>
+            </ul>
+            <p class="roadmap-note">
+              These follow the same pluggability model the harness drivers already prove.
+              They're the target, not yet the implementation &mdash; built in the open.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────────────── LIVE FLEET STATUS ───────────────────── -->
+    <section class="band" id="status">
+      <div class="band-head">
+        <span class="kicker">04 — live fleet status</span>
+        <!-- COPY: section lede -->
+        <h2>See the fleet at a glance.</h2>
+      </div>
+
+      <!-- The widget fetches ./status.json and renders the table. A committed
+           SAMPLE status.json (generic desks) makes it render live on this static
+           page today.
+           TODO: point at real `flotilla status` JSON output once that command ships. -->
+      <div class="fleet-panel">
+        <div class="fleet-bar">
+          <span class="fleet-bar-title">
+            <span class="live-pulse" aria-hidden="true"></span>
+            flotilla&nbsp;status&nbsp;<span class="muted">--json</span>
+          </span>
+          <span class="fleet-bar-meta" id="fleet-meta">loading…</span>
+        </div>
+        <div id="fleet-status" data-src="./status.json">
+          <!-- vanilla JS in app.js renders the fleet table here -->
+          <p class="fleet-fallback">Fleet status renders here. <noscript>Enable JavaScript to see it live.</noscript></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────────────── 30-SECOND START ───────────────────── -->
+    <section class="band" id="start">
+      <div class="band-head">
+        <span class="kicker">05 — 30-second start</span>
+        <!-- COPY: section lede -->
+        <h2>Install, send, see your fleet.</h2>
+      </div>
+
+      <div class="start-grid">
+        <ol class="start-steps">
+          <li>
+            <span class="start-n">1</span>
+            <div>
+              <h3>Install</h3>
+              <pre><code>go install github.com/jim80net/flotilla/cmd/flotilla@latest</code></pre>
+            </div>
+          </li>
+          <li>
+            <span class="start-n">2</span>
+            <div>
+              <h3>Tag an agent you run, then send</h3>
+              <pre><code>flotilla register backend --pane demo:0.0
+flotilla send --from me backend "pull origin main and run the tests"</code></pre>
+              <p class="start-note">A stable marker survives the TUI retitling its pane;
+                <code>send</code> then confirms the turn actually started.</p>
+            </div>
+          </li>
+          <li>
+            <span class="start-n">3</span>
+            <div>
+              <h3>Run the self-continuing clock</h3>
+              <pre><code>flotilla watch --roster ./flotilla.json --ack-file ./flotilla-xo-alive</code></pre>
+            </div>
+          </li>
+        </ol>
+        <aside class="start-aside">
+          <p>
+            The full walkthrough &mdash; roster, the Discord audit mirror, the
+            self-continuing clock &mdash; runs cold from a clean machine.
+          </p>
+          <a class="btn btn-primary" href="https://github.com/jim80net/flotilla/blob/main/docs/quickstart.md" target="_blank" rel="noopener">
+            Read the quickstart ↗
+          </a>
+          <a class="btn btn-ghost" href="https://github.com/jim80net/flotilla/blob/main/docs/xo-doctrine.md" target="_blank" rel="noopener">
+            XO doctrine ↗
+          </a>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <!-- ───────────────────────── FOOTER ───────────────────────── -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <span class="brand-name">flotilla</span>
+        <!-- COPY: footer tagline -->
+        <p>Built in the open.</p>
+      </div>
+      <nav class="footer-links">
+        <a href="https://github.com/jim80net/flotilla" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/jim80net/flotilla/blob/main/docs/quickstart.md" target="_blank" rel="noopener">Quickstart</a>
+        <a href="https://github.com/jim80net/flotilla/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+      </nav>
+    </div>
+    <div class="footer-base">
+      <span>MIT licensed</span>
+      <span class="sep">·</span>
+      <span>v0 — work in progress</span>
+      <span class="sep">·</span>
+      <a href="https://github.com/jim80net/flotilla" target="_blank" rel="noopener">github.com/jim80net/flotilla</a>
+    </div>
+  </footer>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+Demo asset directory.
+
+Drop the produced demo here as `demo.gif` (or an asciinema cast), then in
+index.html replace the `.demo-canvas` stand-in contents with:
+
+    <img src="./assets/demo.gif" alt="flotilla coordinating a fleet" />
+
+The `<!-- ASSET: demo gif goes here -->` marker in index.html flags the spot.
