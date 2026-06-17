@@ -39,7 +39,7 @@ func renderUnit(t *testing.T, envPath string) string {
 
 // renderUnitEnv is renderUnit with extra "KEY=value" entries appended to the
 // installer subprocess's environment. Used to prove the installer ignores an
-// inherited FLOTILLA_BACKLOG_FILE (the live Spark host exports it) and reads the
+// inherited FLOTILLA_BACKLOG_FILE (the live fleet host exports it) and reads the
 // value ONLY from the .env file.
 func renderUnitEnv(t *testing.T, envPath string, extraEnv ...string) string {
 	t.Helper()
@@ -182,7 +182,7 @@ func TestInstallerRejectsPlaceholderInValue(t *testing.T) {
 // ExecStart line (no --backlog-file, no trailing space) against the 5-key fixture;
 // the three tests below add the SET path, an explicit unset assertion, and the
 // inherited-env-no-leak guard that protects the byte-identical guarantee on the live
-// Spark host (which exports FLOTILLA_BACKLOG_FILE for the binary to read).
+// fleet host (which exports FLOTILLA_BACKLOG_FILE for the binary to read).
 
 func backlogEnv(t *testing.T, backlog string) string {
 	t.Helper()
@@ -242,7 +242,7 @@ func TestInstallerBacklogPathWithAmpersand(t *testing.T) {
 
 // (c) An inherited (exported) FLOTILLA_BACKLOG_FILE must NOT leak into a render whose
 // .env omits the key — the installer reads the value ONLY from the .env file. This
-// guards the pre-clear: the live Spark host exports FLOTILLA_BACKLOG_FILE (the binary
+// guards the pre-clear: the live fleet host exports FLOTILLA_BACKLOG_FILE (the binary
 // reads it), so without the pre-clear the byte-identical-when-unset guarantee would
 // fail on exactly the host this work targets.
 func TestInstallerBacklogInheritedEnvNoLeak(t *testing.T) {

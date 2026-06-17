@@ -64,7 +64,7 @@ exported in the XO's environment, the reply collapses to `flotilla notify
 
 ```sh
 flotilla notify --from <xo> --secrets ./flotilla-secrets.env \
-  "Deploy is green and live. Positions reconciled, nothing pending — your call on the next batch."
+  "Deploy is green and live. All checks pass, nothing pending — your call on the next step."
 ```
 
 For a long or multi-line reply, use a file or stdin (no shell quoting), exactly
@@ -313,7 +313,7 @@ clear it.
 
 ```jsonc
 // roster (committable):
-{ "xo_agent": "hydra-ops", "heartbeat_interval": "20m",
+{ "xo_agent": "xo", "heartbeat_interval": "20m",
   "change_detector": true, "liveness_ping_mode": "none" }
 ```
 

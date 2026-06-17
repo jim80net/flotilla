@@ -19,7 +19,7 @@ when a `channel_id` + bot token are present.
 2. **Roster** `flotilla.json` (committable, no secrets) with your agents, `xo_agent`, and `heartbeat_interval` (e.g. `"20m"`; `"0"` disables the clock). For the relay also set `channel_id` and `operator_user_id`.
 3. **Secrets** `flotilla-secrets.env` (chmod 600): `FLOTILLA_BOT_TOKEN` (relay) and `FLOTILLA_WEBHOOK_<AGENT>` lines (audit mirror + alert/notice posts).
 4. **Relay only — enable the bot's Message Content intent:** Discord Developer Portal → your bot → Privileged Gateway Intents → **Message Content** = ON. Without it the gateway connects but message bodies are empty, so the relay sees nothing.
-5. **Security — enable Discord two-factor auth on the operator account.** The channel is a command-injection surface gated only by `operator_user_id`; the operator's account is the real boundary (same posture as the tactical Hermes agent). The bot token can READ the channel, so keep `flotilla-secrets.env` at chmod 600 and never commit it.
+5. **Security — enable Discord two-factor auth on the operator account.** The channel is a command-injection surface gated only by `operator_user_id`; the operator's account is the real boundary (same posture as any privileged operator-gated agent). The bot token can READ the channel, so keep `flotilla-secrets.env` at chmod 600 and never commit it.
 6. **XO permission posture.** The XO session must be allowed to (a) `touch` the ack file (its liveness ack) and (b) act on the tick's instruction to advance work — otherwise the watchdog will (correctly) flag it as unresponsive. Run the XO with an allow-list that includes these (the project's posture-(b)).
 7. **Register each desk's pane (drift-proof resolution).** flotilla resolves a desk by its pane title, but Claude Code retitles its pane to a task summary every turn, which breaks `send`/heartbeat resolution until re-pinned. Tag each pane once with a stable marker — `flotilla register <name>` inside the pane at launch (see [quickstart §3 → "Make resolution drift-proof"](./quickstart.md#make-resolution-drift-proof-flotilla-register)). To repair an already-drifted desk without interrupting it, the XO runs `flotilla register <name> --pane <target>` from its own pane. Untagged panes still resolve by title (the marker is purely additive).
 
@@ -213,7 +213,7 @@ rotated after each settled handling (via the surface driver: claude-code →
 
 ```jsonc
 // roster:
-{ "xo_agent": "hydra-ops", "heartbeat_interval": "20m",
+{ "xo_agent": "xo", "heartbeat_interval": "20m",
   "change_detector": true, "liveness_ping_mode": "none" }
 ```
 

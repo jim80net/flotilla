@@ -1,6 +1,6 @@
 # Design: Discord live voice chat (Phase 1 — Grok Voice v1)
 
-**Status:** design (awaiting XO checkpoint; DESIGN ONLY — no build until operator greenlight) · **Date:** 2026-06-11 · **Ratified params (XO):** Grok Voice STT/TTS v1; separate `flotilla voice` process; pluggable SpeechProvider; CGO+libopus isolated to the voice binary; push-to-talk v1; `XAI_API_KEY` from `~/.hermes/.env` → `state/voice.env`; dedicated concise spoken-reply path (not all-notify-spoken).
+**Status:** design (awaiting XO checkpoint; DESIGN ONLY — no build until operator greenlight) · **Date:** 2026-06-11 · **Ratified params (XO):** Grok Voice STT/TTS v1; separate `flotilla voice` process; pluggable SpeechProvider; CGO+libopus isolated to the voice binary; push-to-talk v1; `XAI_API_KEY` from your provider's env file → `state/voice.env`; dedicated concise spoken-reply path (not all-notify-spoken).
 
 ## Context
 
@@ -73,7 +73,7 @@ type SpeechProvider interface {
   `{text, voice_id, language}` to `/v1/tts` and decodes the returned audio to PCM.
   `XAI_API_KEY` from `state/voice.env`.
 - **Future driver = local Nemotron** (documented, not built): same interface, no API
-  spend, GPU-resident — the box has capacity (GB10 GPU idle, 107 GB RAM free), but v1
+  spend, GPU-resident — the host has spare GPU/RAM capacity, but v1
   ships the API to avoid local-model integration risk and ship faster.
 
 ## The hard technical decision — Opus codec (CGO + libopus, isolated)
@@ -136,7 +136,7 @@ The gate SHALL be a POSITIVE allow-list, mirroring the relay's (`relay.go:18`):
 ## Secrets & cost
 
 - **Secret hygiene (P2-4):** `XAI_API_KEY` lives in `state/voice.env` (the operator copies
-  it from `~/.hermes/.env`, decoupling voice from Hermes; chmod 600, never committed). It
+  it from your provider's env file, decoupling voice from any one agent's config; chmod 600, never committed). It
   SHALL NEVER appear in logs, errors, or the audit mirror (URL/secret-free errors, as
   `internal/discord` already does for webhook URLs).
 - **Cost (operator's $, metered on the shared xAI account):** STT ¢/hr, TTS $4.20/1M chars
@@ -205,7 +205,7 @@ serializes; the busy-check avoids interrupting an active turn).
    socket would couple the XO turn to voice's liveness, the spool does not.
 4. **Opus lib = deferred to build** (build-detail); lean `hraban/opus` (more actively
    maintained than `layeh.com/gopus`); final pick is empirical at build (builds +
-   round-trips cleanly on the GB10 host).
+   round-trips cleanly on the host).
 
 ## Non-goals (v1)
 

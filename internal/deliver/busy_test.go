@@ -37,7 +37,7 @@ func TestParseBusy(t *testing.T) {
 		// working (the regex excludes the ❯ composer prompt as a spinner glyph).
 		{"idle composer ellipsis placeholder", "❯ Try a task…\n  ⏵⏵ auto mode on (shift+tab to cycle)", false},
 		{"empty idle", "❯ \n", false},
-		{"idle footer only", "  jim@host:~/x [Opus 4.8] ctx:57%\n  ⏵⏵ auto mode on (shift+tab to cycle)", false},
+		{"idle footer only", "  user@host:~/x [Opus 4.8] ctx:57%\n  ⏵⏵ auto mode on (shift+tab to cycle)", false},
 		// "●" is the response/tool bullet, not a spinner glyph: a response line that happens to
 		// be a lone gerund+"…" must NOT read as working (the "●" exclusion in the glyph class).
 		{"response bullet gerund is not a spinner", "● Building…\n  ⏵⏵ auto mode on (shift+tab to cycle)", false},

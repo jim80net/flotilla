@@ -13,7 +13,7 @@ materiality-gated "cheap-check-then-escalate" gate the operator is describing
 shipped in archive change `2026-06-10-watch-change-detector`) — a deterministic,
 pure-Go, no-LLM tick that wakes the XO ONLY on a material change. **It is dormant
 in production.** The live roster
-(`/home/jim/workspace/github.com/your-org/your-repo/state/flotilla.json`) has **no
+(`/srv/fleet/main/state/flotilla.json`) has **no
 `change_detector` field**, so `cmdWatch` takes the *legacy always-wake* branch
 (`cmd/flotilla/watch.go:256`), and the state dir contains none of the v2 artifacts
 (no `flotilla-detector-state.json`, `flotilla-xo-settled`, or
