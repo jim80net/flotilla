@@ -1,12 +1,13 @@
 # flotilla
 
-> **flotilla is a drop-in chief of staff for the AI coding agents you already
-> run.** It turns separate Claude Code / Aider / OpenCode / Grok sessions into
-> one coordinated fleet — a single hub agent routes the work and reports back —
-> and you drive the whole thing from a chat channel on your phone.
+> **flotilla is a drop-in chief of staff for the AI coding harnesses you've
+> already built.** Stop shuffling 10 terminal windows. flotilla turns separate
+> Claude Code / Aider / OpenCode / Grok sessions into one centrally coordinated
+> fleet. A single hub agent coordinates multiple streams of work and lets you
+> drive strategy, not implementation.
 
-It's a **pluggable coordination layer**: drop it over the harnesses you already
-run, and one chief-of-staff agent (the "XO") fans work to your domain desks,
+It's a **pluggable coordination layer**: drop it over the harnesses you've
+already built, and one chief-of-staff agent (the "XO") fans work to your domain desks,
 collects their replies, and keeps a durable, auditable record of everything they
 say to each other. No new daemon, no hosted service, no lock-in — just `tmux` and
 a chat channel you already have.
@@ -17,13 +18,13 @@ a chat channel you already have.
 
 *(A real run — an XO routes work to a backend desk, collects the report back, and starts the clock; every hop is a confirmed delivery. [Source cast](docs/assets/flotilla-demo.cast).)*
 
-Point flotilla at an agent you already run, then drive it from one command:
+Point flotilla at a running agent, then drive it from one command:
 
 ```console
 # install (Go 1.26+) — full cold-start walkthrough in docs/quickstart.md
 $ go install github.com/jim80net/flotilla/cmd/flotilla@latest
 
-# tag the agent you already run (a stable marker survives TUI title drift):
+# tag a running agent (a stable marker survives TUI title drift):
 $ flotilla register infra --pane demo:0.0
 registered infra → pane demo:0.0 (marker @flotilla_agent=infra); title drift no longer breaks resolution
 
@@ -45,7 +46,7 @@ dropped message. `watch` keeps an idle fleet at ~zero cost until there's work.
 
 **What you get**
 
-- **Coordinate the agents you already run** — Claude Code, Aider, OpenCode, and
+- **Coordinate the harnesses you've already built** — Claude Code, Aider, OpenCode, and
   Grok desks behind one interface; each stays an ordinary session you control,
   so opting in costs you nothing and you can walk away anytime.
 - **One chief-of-staff agent in charge** — the XO routes work to the domain
