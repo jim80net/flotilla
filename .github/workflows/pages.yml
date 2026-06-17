@@ -1,0 +1,53 @@
+# Deploy the marketing landing page (site/) to GitHub Pages.
+#
+# ── DOES NOT AUTO-GO-LIVE ────────────────────────────────────────────────────
+# This workflow is intentionally MANUAL-ONLY (workflow_dispatch). There is no
+# push/pull_request trigger, so merging the landing page to main publishes
+# NOTHING. The site goes live only when an operator both (1) enables Pages and
+# (2) dispatches this workflow.
+#
+# ── THE ONE STEP THE OPERATOR TAKES TO ENABLE PAGES ──────────────────────────
+#   GitHub repo → Settings → Pages → "Build and deployment"
+#     → Source: **GitHub Actions**
+# Then: Actions tab → "Deploy landing page (GitHub Pages)" → "Run workflow".
+# (Until the Source is set to GitHub Actions, the deploy step has nowhere to
+# publish and will fail closed — it cannot accidentally make the repo public.)
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Deploy landing page (GitHub Pages)
+
+on:
+  workflow_dispatch: {}   # manual only — never on push/PR, so it never auto-publishes
+
+# Least-privilege token scoped for Pages deployment.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one concurrent deployment; don't cancel an in-progress publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
