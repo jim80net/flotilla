@@ -19,7 +19,7 @@ func TestHumanizeAge(t *testing.T) {
 		want string
 	}{
 		{0, "0s"},
-		{-5 * time.Second, "0s"},      // clock skew clamps, never a negative
+		{-5 * time.Second, "0s"},       // clock skew clamps, never a negative
 		{900 * time.Millisecond, "1s"}, // rounds to the second
 		{9 * time.Second, "9s"},
 		{59 * time.Second, "59s"},
@@ -40,7 +40,7 @@ func TestDeskStateLabel(t *testing.T) {
 	snap := watch.Snapshot{DeskStates: map[string]surface.State{
 		"infra":    surface.StateWorking,
 		"research": surface.StateIdle,
-		"data":     surface.StateShell,         // rendered "crashed", not "shell"
+		"data":     surface.StateShell, // rendered "crashed", not "shell"
 		"feature":  surface.StateAwaitingInput,
 	}}
 	cases := map[string]string{
