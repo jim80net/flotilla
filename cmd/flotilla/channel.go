@@ -74,12 +74,30 @@ func parseChannelCreateArgs(args []string) (channelCreateOpts, error) {
 	if o.name == "" || len(rest) != 0 {
 		return channelCreateOpts{}, fmt.Errorf("usage: flotilla channel create <name> [--type text|category] [--topic <t>] [--category <name|id>] [--xo <agent> [--member <agent>]... [--role <label>]]")
 	}
+	if strings.TrimSpace(o.name) == "" {
+		return channelCreateOpts{}, fmt.Errorf("channel name is empty")
+	}
 	if *ctype != "text" && *ctype != "category" {
 		return channelCreateOpts{}, fmt.Errorf("--type must be text or category, got %q", *ctype)
+	}
+	// A category has no topic — Discord silently drops it, which would look like a no-op.
+	// Reject it up front, mirroring the category-under-category guard in cmdChannelCreate.
+	if *ctype == "category" && *topic != "" {
+		return channelCreateOpts{}, fmt.Errorf("--topic is only valid for text channels (a category has no topic)")
 	}
 	// --member/--role only make sense alongside --xo (they shape the emitted binding).
 	if *xo == "" && (len(members) > 0 || *role != "") {
 		return channelCreateOpts{}, fmt.Errorf("--member/--role require --xo (the binding's hub)")
+	}
+	// An empty --xo/--member value would emit a malformed binding (or a confusing roster
+	// lookup error); reject it cleanly here.
+	if *xo != "" && strings.TrimSpace(*xo) == "" {
+		return channelCreateOpts{}, fmt.Errorf("--xo is empty")
+	}
+	for _, m := range members {
+		if strings.TrimSpace(m) == "" {
+			return channelCreateOpts{}, fmt.Errorf("--member is empty")
+		}
 	}
 	o.ctype, o.topic, o.category, o.xo, o.role = *ctype, *topic, *category, *xo, *role
 	o.members, o.rosterPath, o.secretsPath = members, *rp, *sp

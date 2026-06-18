@@ -71,15 +71,21 @@ type Provisioner struct{ api guildAPI }
 
 // NewProvisioner builds a provisioner over a real discordgo session authenticated
 // with the bot token. It does NOT call Open() — every method used is a plain REST
-// call, so no gateway/websocket is established. It keeps discordgo's default
-// ShouldRetryOnRateLimit (transparent retry on a 429 burst, the right behavior for
-// a one-shot provisioning command) and default LogError level, so the token is
-// never written to a log.
+// call, so no gateway/websocket is established, and the default LogError level means
+// the token is never written to a log.
+//
+// It disables discordgo's ShouldRetryOnRateLimit: that auto-retry is UNBOUNDED on a
+// sustained 429 (restapi.go:295 re-issues with the SAME sequence — MaxRestRetries
+// only caps the 5xx path), so a global rate limit during a squadron burst would hang
+// the command indefinitely with no output. With it off, a 429 surfaces immediately as
+// a clear rate-limit error (see mapErr) and the operator re-runs — which is safe
+// because Create is idempotent (already-created channels skip).
 func NewProvisioner(botToken string) (*Provisioner, error) {
 	sess, err := discordgo.New("Bot " + botToken)
 	if err != nil {
 		return nil, fmt.Errorf("discord session: %w", err)
 	}
+	sess.ShouldRetryOnRateLimit = false
 	return &Provisioner{api: &discordgoAPI{sess: sess}}, nil
 }
 
@@ -90,6 +96,12 @@ func NewProvisioner(botToken string) (*Provisioner, error) {
 func (p *Provisioner) Preflight(guildID string) error {
 	botID, roleIDs, err := p.api.selfMember(guildID)
 	if err != nil {
+		// A 404 here means the bot is not a member of guild_id (or guild_id is wrong) —
+		// the most common misconfiguration; say so rather than leaving a bare HTTP 404.
+		var ae *apiError
+		if errors.As(err, &ae) && ae.status == 404 {
+			return fmt.Errorf("bot is not a member of guild %s (invite the bot to that guild, and check the roster guild_id): %w", guildID, err)
+		}
 		return err
 	}
 	g, err := p.api.guild(guildID)
@@ -345,21 +357,36 @@ func mapErr(err error) error {
 type discordgoAPI struct{ sess *discordgo.Session }
 
 func (a *discordgoAPI) selfMember(guildID string) (string, []string, error) {
-	m, err := a.sess.GuildMember(guildID, "@me")
+	// Two canonical bot-token routes: GET /users/@me for the bot's id, then
+	// GET /guilds/{id}/members/{id} with the REAL snowflake. We deliberately do NOT
+	// use GuildMember(guildID, "@me") — /guilds/{id}/members/@me is not a route we can
+	// confirm against canonical sources, whereas /users/@me is unambiguous.
+	me, err := a.sess.User("@me")
 	if err != nil {
 		return "", nil, mapErr(err)
 	}
-	id := ""
-	if m.User != nil {
-		id = m.User.ID
+	if me == nil || me.ID == "" {
+		return "", nil, errors.New("discord: could not resolve the bot's own user id")
 	}
-	return id, m.Roles, nil
+	m, err := a.sess.GuildMember(guildID, me.ID)
+	if err != nil {
+		return "", nil, mapErr(err)
+	}
+	if m == nil {
+		return "", nil, errors.New("discord: guild member lookup returned no member")
+	}
+	return me.ID, m.Roles, nil
 }
 
 func (a *discordgoAPI) guild(guildID string) (*guildInfo, error) {
 	g, err := a.sess.Guild(guildID)
 	if err != nil {
 		return nil, mapErr(err)
+	}
+	if g == nil {
+		// discordgo's Guild() does not guard a null body (it unmarshals and returns);
+		// a (nil,nil) would panic on g.Roles below.
+		return nil, errors.New("discord: guild lookup returned no guild")
 	}
 	rp := make(map[string]int64, len(g.Roles))
 	for _, r := range g.Roles {

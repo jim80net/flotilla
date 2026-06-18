@@ -270,6 +270,51 @@ func TestDelete404(t *testing.T) {
 	}
 }
 
+func TestDeleteHappyPath(t *testing.T) {
+	f := &fakeAPI{}
+	p := &Provisioner{api: f}
+	if err := p.Delete("123"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(f.deletedIDs) != 1 || f.deletedIDs[0] != "123" {
+		t.Fatalf("expected delete of 123, got %v", f.deletedIDs)
+	}
+}
+
+func TestCreate400Passthrough(t *testing.T) {
+	// A 400 (e.g. the 50-per-category / 500-per-guild limit) surfaces Discord's own
+	// message verbatim — not swallowed, not mistaken for a permission error.
+	f := &fakeAPI{createErr: &apiError{status: 400, msg: "Maximum number of channels reached (500)"}}
+	p := &Provisioner{api: f}
+	_, _, err := p.Create(guildID, CreateSpec{Name: "x", Type: ChannelTypeText})
+	if err == nil || !strings.Contains(err.Error(), "Maximum number of channels") || !strings.Contains(err.Error(), "400") {
+		t.Fatalf("want the 400 message surfaced, got %v", err)
+	}
+}
+
+func TestList(t *testing.T) {
+	want := []Channel{{ID: "1", Name: "a", Type: ChannelTypeText}}
+	p := &Provisioner{api: &fakeAPI{existing: want}}
+	got, err := p.List(guildID)
+	if err != nil || len(got) != 1 || got[0].ID != "1" {
+		t.Fatalf("List = (%v,%v)", got, err)
+	}
+}
+
+func TestChannelTypeName(t *testing.T) {
+	cases := map[int]string{
+		ChannelTypeText:     "text",
+		ChannelTypeCategory: "category",
+		2:                   "voice",
+		99:                  "type99",
+	}
+	for in, want := range cases {
+		if got := ChannelTypeName(in); got != want {
+			t.Fatalf("ChannelTypeName(%d) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestResolveParentCategory(t *testing.T) {
 	chans := []Channel{
 		{ID: "201", Name: "Family Office", Type: ChannelTypeCategory},

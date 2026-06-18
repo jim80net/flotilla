@@ -77,20 +77,23 @@ type guildAPI interface {
   policy or the tests.
 - `Channel` (the provisioner's value type) is `{ID, Name string; Type int; ParentID string}`
   — deliberately NOT `roster.Channel` (that is the *binding*; this is the *Discord object*).
-- **`selfMember` collapses the bot-identity lookup into ONE call** (`GuildMember(guildID,
-  "@me")` returns both the bot's `User.ID` and its `Roles`), instead of a separate
-  `User("@me")` + `GuildMember` — one fewer round-trip and one fewer rate-limit bucket
-  before any create (systems P3).
+- **`selfMember` uses two CANONICAL bot-token routes** — `User("@me")`
+  (`GET /users/@me`, unambiguous) for the bot's id, then `GuildMember(guildID, <id>)` with
+  the REAL snowflake for its roles. (The impl-trio split on whether
+  `GET /guilds/{id}/members/@me` is valid for a bot token; rather than gamble on an
+  endpoint not confirmable against canonical sources, we use the two routes that
+  unambiguously are.)
 
 `type discordgoAPI struct { sess *discordgo.Session }` implements `guildAPI` by calling
-`sess.GuildMember(guildID,"@me")`, `sess.Guild`, `sess.GuildChannels`,
-`sess.GuildChannelCreateComplex`, `sess.ChannelDelete`. This adapter is the ONLY part
-that talks to discordgo, and the only part not unit-tested (it is exercised live).
+`sess.User("@me")` + `sess.GuildMember(guildID,<id>)`, `sess.Guild`, `sess.GuildChannels`,
+`sess.GuildChannelCreateComplex`, `sess.ChannelDelete` (guarding nil returns — discordgo's
+`Guild`/`User` do not all guard a null body). This adapter is the ONLY part that talks to
+discordgo, and the only part not unit-tested (it is exercised live).
 
 `NewProvisioner(botToken string) (*Provisioner, error)` builds the real session
 (`discordgo.New("Bot "+token)`) and wraps it. It does **not** call `Open()`. It does not
-raise the log level (default `LogError`); the token never reaches a log. The session
-keeps discordgo's **default `ShouldRetryOnRateLimit: true`** (see Rate limits).
+raise the log level (default `LogError`); the token never reaches a log. It **disables
+`ShouldRetryOnRateLimit`** (see Rate limits).
 
 ### The `Provisioner` and its pure helpers
 
@@ -151,6 +154,12 @@ channels in the live coordination guild — an outward-facing action reserved fo
 operator), so the key is pinned to what is documented and the residual risk is stated, not
 hidden. `list` is the authoritative read-back.
 
+**Idempotency is name+type+PARENT-scoped** (impl-trio): a re-run that resolves
+`--category` to a *different* parent (e.g. a category name that became ambiguous between
+runs) is a distinct key and creates a second channel. Ambiguity is caught at resolve time
+(`ResolveParentCategory` errors), so the realistic path is closed; the residual cross-run
+drift is the same "visible duplicate, caught by `list`" residual as the name key.
+
 **Idempotency is sequential-single-actor** (systems P2): two concurrent
 `flotilla channel create fleet-command`, or a manual UI create between this command's
 `list` and its `POST`, can still race (Discord enforces no name uniqueness, and a
@@ -176,6 +185,7 @@ Checked in this PRECEDENCE order so the first error a user sees is deterministic
 |---|---|
 | `--secrets` unset / no `FLOTILLA_BOT_TOKEN` | `channel provisioning needs a bot token (set FLOTILLA_BOT_TOKEN in the secrets file)` |
 | roster has no `guild_id` | `roster has no guild_id — set it so the bot knows which guild to provision in` |
+| bot not in the guild (preflight `selfMember` 404) | `bot is not a member of guild <id> (invite the bot to that guild, and check the roster guild_id)` |
 | bot lacks Manage Channels (preflight) | `bot lacks Manage Channels in guild <id> — grant it in Server Settings → Roles → the bot's role → Manage Channels` |
 | create returns **403** (backstop) | the same Manage-Channels message + `(denied at create — check the category's/channel's permission overwrites)` |
 | create returns **429** (`*discordgo.RateLimitError`) and retry is exhausted/disabled | `discord: rate limited, retry after <d>` |
@@ -195,15 +205,17 @@ wrapper because its `Error()` embeds the secret URL. A test asserts the returned
 chain contains no `*discordgo.RESTError` (so the embedded Authorization can never leak via
 `%+v`), in addition to the string-level "no token / no Authorization" assertion.
 
-**Rate limits (systems P1 / STORM P0):** a squadron stand-up is a burst of creates — the
-canonical 429 trigger. discordgo's session has a **built-in rate limiter that, with the
-default `ShouldRetryOnRateLimit: true`, sleeps `Retry-After` and retries automatically**
-(`restapi.go:279-298`, `discord.go:42`). We KEEP that default — for a one-shot
-provisioning command, briefly blocking then succeeding is the right behavior (better than
-failing a half-done squadron). The design documents that `create` may briefly block under
-rate-limiting; the `*RateLimitError` taxonomy arm handles the case where a limit surfaces
-to the caller anyway (e.g. a retry-exhausted or globally-limited response), so it is never
-an unhandled/opaque error.
+**Rate limits (systems P1 / STORM P0 / impl-trio):** a squadron stand-up is a burst of
+creates — the canonical 429 trigger. discordgo's default `ShouldRetryOnRateLimit: true`
+auto-retries a 429, BUT — confirmed by reading `restapi.go:287-295` — that retry re-issues
+with the **same `sequence`** (unlike the 5xx path at `:272-275` which increments and is
+capped by `MaxRestRetries`), so it is **UNBOUNDED**: a sustained/global 429 would sleep-and-
+retry forever, hanging the command with no output. So `NewProvisioner` sets
+`ShouldRetryOnRateLimit = false`: a 429 then surfaces immediately as discordgo's
+`*RateLimitError` (`restapi.go:297`), which `mapErr` turns into the clear `*rateLimitError`
+("rate limited, retry after <d>"). The command fails fast and the operator/CoS re-runs —
+**safe because `Create` is idempotent** (already-created channels skip). This reverses the
+design-gate "keep the default" note on concrete code evidence the default is unbounded.
 
 ### Guild id & agent validation source
 

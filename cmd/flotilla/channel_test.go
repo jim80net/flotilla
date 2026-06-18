@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -37,6 +39,24 @@ func TestParseChannelCreateArgs(t *testing.T) {
 		_, err := parseChannelCreateArgs([]string{"x", "--type", "voice"})
 		if err == nil || !strings.Contains(err.Error(), "text or category") {
 			t.Fatalf("want type error, got %v", err)
+		}
+	})
+	t.Run("empty/whitespace name rejected", func(t *testing.T) {
+		_, err := parseChannelCreateArgs([]string{"   "})
+		if err == nil || !strings.Contains(err.Error(), "name is empty") {
+			t.Fatalf("want empty-name error, got %v", err)
+		}
+	})
+	t.Run("topic on a category rejected", func(t *testing.T) {
+		_, err := parseChannelCreateArgs([]string{"Fam", "--type", "category", "--topic", "x"})
+		if err == nil || !strings.Contains(err.Error(), "only valid for text") {
+			t.Fatalf("want topic-on-category error, got %v", err)
+		}
+	})
+	t.Run("empty member rejected", func(t *testing.T) {
+		_, err := parseChannelCreateArgs([]string{"x", "--xo", "a", "--member", ""})
+		if err == nil || !strings.Contains(err.Error(), "--member is empty") {
+			t.Fatalf("want empty-member error, got %v", err)
 		}
 	})
 	t.Run("member without xo rejected", func(t *testing.T) {
@@ -82,6 +102,46 @@ func TestParseChannelDeleteArgs(t *testing.T) {
 		_, _, err := parseChannelDeleteArgs([]string{"--yes"})
 		if err == nil || !strings.Contains(err.Error(), "usage") {
 			t.Fatalf("want usage error, got %v", err)
+		}
+	})
+}
+
+// writeTemp writes content to a uniquely-named temp file and returns its path.
+func writeTemp(t *testing.T, name, content string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// TestCmdChannelCreatePrecedence exercises the command orchestration's check ORDER
+// (roster/agents → bot token → guild_id) — all of which abort BEFORE any network
+// call, so the risky sequencing is covered without a live Discord. The create/preflight
+// network path beyond guild_id is the deliberately-live seam.
+func TestCmdChannelCreatePrecedence(t *testing.T) {
+	rosterGood := writeTemp(t, "flotilla.json", `{"guild_id":"100","agents":[{"name":"alpha-xo"}]}`)
+	rosterNoGuild := writeTemp(t, "flotilla-ng.json", `{"agents":[{"name":"alpha-xo"}]}`)
+	secretsGood := writeTemp(t, "secrets.env", "FLOTILLA_BOT_TOKEN=tok\n")
+	secretsNoTok := writeTemp(t, "secrets-empty.env", "# no token here\n")
+
+	t.Run("unknown --xo fails before the token/network", func(t *testing.T) {
+		err := cmdChannelCreate([]string{"chan", "--xo", "ghost", "--roster", rosterGood, "--secrets", secretsGood})
+		if err == nil || !strings.Contains(err.Error(), "ghost") {
+			t.Fatalf("want unknown-agent error, got %v", err)
+		}
+	})
+	t.Run("missing bot token fails", func(t *testing.T) {
+		err := cmdChannelCreate([]string{"chan", "--roster", rosterGood, "--secrets", secretsNoTok})
+		if err == nil || !strings.Contains(err.Error(), "bot token") {
+			t.Fatalf("want bot-token error, got %v", err)
+		}
+	})
+	t.Run("missing guild_id fails (after token)", func(t *testing.T) {
+		err := cmdChannelCreate([]string{"chan", "--roster", rosterNoGuild, "--secrets", secretsGood})
+		if err == nil || !strings.Contains(err.Error(), "guild_id") {
+			t.Fatalf("want guild_id error, got %v", err)
 		}
 	})
 }
