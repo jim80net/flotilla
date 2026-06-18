@@ -3,40 +3,50 @@ package discord
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/bwmarrin/discordgo"
 )
 
-// MessageHandler receives the fields the relay needs from each gateway message.
-// Narrow by design, so the gateway is decoupled from the relay/watch packages.
-type MessageHandler func(webhookID, authorID, content string)
+// MessageHandler receives the fields the relay needs from each gateway message,
+// including the message's ORIGIN channel id so a multi-channel relay can route by
+// it. Narrow by design, so the gateway is decoupled from the relay/watch packages.
+type MessageHandler func(channelID, webhookID, authorID, content string)
 
-// Gateway streams one Discord channel and dispatches its messages to a handler.
-// It is the inbound half of the bus (the relay); the send half stays webhook-only.
+// Gateway streams a SET of Discord channels and dispatches their messages to a
+// handler. It is the inbound half of the bus (the relay); the send half stays
+// webhook-only. One bot session admits every channel in the set (federation: the
+// bot must be present with the Message Content intent in each).
 type Gateway struct {
-	session   *discordgo.Session
-	channelID string
+	session    *discordgo.Session
+	channelIDs []string
 }
 
 // NewGateway opens a session configured with the Guild Messages + Message
 // Content intents (the latter is privileged — it must be enabled on the bot in
-// the Developer Portal) and registers a MESSAGE_CREATE handler scoped to
-// channelID.
-func NewGateway(botToken, channelID string, handler MessageHandler) (*Gateway, error) {
+// the Developer Portal) and registers a MESSAGE_CREATE handler scoped to the SET
+// of channelIDs. A message in any bound channel is dispatched with its origin
+// channel id (so the relay can route by it); messages in any other channel are
+// ignored.
+func NewGateway(botToken string, channelIDs []string, handler MessageHandler) (*Gateway, error) {
 	s, err := discordgo.New("Bot " + botToken)
 	if err != nil {
 		return nil, fmt.Errorf("discord session: %w", err)
 	}
 	s.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsMessageContent
+	admit := make(map[string]struct{}, len(channelIDs))
+	for _, id := range channelIDs {
+		admit[id] = struct{}{}
+	}
 	s.AddHandler(func(_ *discordgo.Session, m *discordgo.MessageCreate) {
-		if m.ChannelID != channelID {
+		if _, ok := admit[m.ChannelID]; !ok {
 			return
 		}
 		authorID := ""
 		if m.Author != nil {
 			authorID = m.Author.ID
 		}
-		handler(m.WebhookID, authorID, m.Content)
+		handler(m.ChannelID, m.WebhookID, authorID, m.Content)
 	})
 	// Log gateway flaps so a message lost during a reconnect window is
 	// explainable in the journal ("gateway disconnected 14:03 / resumed 14:03").
@@ -46,7 +56,7 @@ func NewGateway(botToken, channelID string, handler MessageHandler) (*Gateway, e
 	s.AddHandler(func(_ *discordgo.Session, _ *discordgo.Resumed) {
 		log.Printf("flotilla watch: gateway resumed")
 	})
-	return &Gateway{session: s, channelID: channelID}, nil
+	return &Gateway{session: s, channelIDs: channelIDs}, nil
 }
 
 // Open connects the gateway. discordgo auto-reconnects thereafter; messages sent
@@ -55,7 +65,7 @@ func (g *Gateway) Open() error {
 	if err := g.session.Open(); err != nil {
 		return fmt.Errorf("open gateway: %w", err)
 	}
-	log.Printf("flotilla watch: gateway connected (channel %s)", g.channelID)
+	log.Printf("flotilla watch: gateway connected (channels %s)", strings.Join(g.channelIDs, ", "))
 	return nil
 }
 

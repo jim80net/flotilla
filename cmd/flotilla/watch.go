@@ -375,10 +375,18 @@ func cmdWatch(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	// Inbound relay (optional): needs a channel id + bot token (and the bot's
-	// privileged Message Content intent) AND an operator_user_id — without the
-	// latter, relay.Accept drops every message, so enabling the gateway would
-	// claim "relay active" while silently dropping all traffic.
+	// Inbound relay (optional): needs at least one channel binding + a bot token
+	// (and the bot's privileged Message Content intent) AND an operator_user_id —
+	// without the latter, relay.Accept drops every message, so enabling the gateway
+	// would claim "relay active" while silently dropping all traffic.
+	//
+	// The relay listens on the channel SET the roster's bindings declare: the legacy
+	// channel_id is the one-binding degenerate case; an explicit channels[] is the
+	// federated set (one multi-channel relay routes each message by its origin
+	// channel). A daemon whose roster declares NEITHER runs clock-only (no gateway) —
+	// which is exactly how a per-XO clock daemon avoids relaying a channel the central
+	// multi-channel relay owns (design §7: exactly one relay per channel; the clock is
+	// per-XO but the relay is not).
 	//
 	// The relay open is NON-FATAL: a gateway construct/open failure (the cold-boot
 	// DNS blip ~6s post-reboot, a transient network hiccup) must NOT take down the
@@ -388,11 +396,16 @@ func cmdWatch(args []string) error {
 	// the open in the background until it succeeds or shutdown. The warning goes to
 	// stderr (journald) ONLY, never the Discord webhook — that needs the same
 	// network that just failed.
+	bindings := cfg.Bindings()
+	channelIDs := make([]string, 0, len(bindings))
+	for _, b := range bindings {
+		channelIDs = append(channelIDs, b.ChannelID)
+	}
 	switch {
-	case cfg.ChannelID != "" && botToken != "" && cfg.OperatorUserID != "":
-		rel := watch.NewRelay(cfg, xo, injector, onAccepted, func(msg string) { post("flotilla-watch", msg) })
+	case len(channelIDs) > 0 && botToken != "" && cfg.OperatorUserID != "":
+		rel := watch.NewRelay(cfg, injector, onAccepted, func(msg string) { post("flotilla-watch", msg) })
 		factory := func() (gatewayController, error) {
-			gw, err := discord.NewGateway(botToken, cfg.ChannelID, rel.Handle)
+			gw, err := discord.NewGateway(botToken, channelIDs, rel.Handle)
 			if err != nil {
 				return nil, err
 			}
@@ -408,10 +421,10 @@ func cmdWatch(args []string) error {
 		rc := newRelayController(factory, defaultRelayBackoff, stderrWarn, func(msg string) { fmt.Println(msg) }, alert)
 		rc.Start(ctx)
 		defer rc.Shutdown()
-	case cfg.ChannelID != "" && botToken != "" && cfg.OperatorUserID == "":
-		return fmt.Errorf("relay requires operator_user_id in the roster (channel_id + bot token are set) — set it, or remove channel_id for clock-only")
+	case len(channelIDs) > 0 && botToken != "" && cfg.OperatorUserID == "":
+		return fmt.Errorf("relay requires operator_user_id in the roster (channel binding + bot token are set) — set it, or remove the channel binding for clock-only")
 	default:
-		fmt.Println("flotilla watch: clock-only (relay disabled — set channel_id + bot token + operator_user_id to enable)")
+		fmt.Println("flotilla watch: clock-only (relay disabled — set channel_id/channels[] + bot token + operator_user_id to enable)")
 	}
 
 	<-ctx.Done()
