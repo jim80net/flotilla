@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/backlog"
+	"github.com/jim80net/flotilla/internal/cos"
 	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/discord"
 	"github.com/jim80net/flotilla/internal/roster"
@@ -162,6 +163,11 @@ func cmdWatch(args []string) error {
 			return
 		}
 		post("flotilla-watch", "→ "+j.Agent+": "+j.Message)
+		// CoS context-mirror (#108): append this confirmed operator→target relay
+		// delivery to the who-knows-what ledger, tagged with the origin channel (the
+		// #105 Job.OriginChannel seam). Inert unless cos_agent is set; observe-only +
+		// best-effort (never affects delivery).
+		mirrorRelayToLedger(cfg.CosLedger, j)
 	})
 	injector.Start()
 	defer injector.Stop()
@@ -512,6 +518,27 @@ func validateAgentSurfaces(cfg *roster.Config) error {
 		}
 	}
 	return nil
+}
+
+// mirrorRelayToLedger appends a confirmed operator→target relay delivery to the CoS
+// who-knows-what ledger (#108), tagged with the Job's origin channel (#105 seam), so
+// the chief of staff can see which side-conversation (and which desk/XO) was told
+// what. cosLedger == "" (cos_agent unset) ⇒ inert. BEST-EFFORT + observe-only: the
+// confirmed delivery already happened, so a ledger failure NEVER affects it — it is
+// reported to stderr and ignored.
+func mirrorRelayToLedger(cosLedger string, j watch.Job) {
+	if cosLedger == "" {
+		return
+	}
+	if err := cos.Append(cosLedger, cos.Entry{
+		Time:    time.Now(),
+		Channel: j.OriginChannel,
+		From:    "operator",
+		To:      j.Agent,
+		Gist:    j.Message,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "flotilla watch: cos ledger append failed: %v\n", err)
+	}
 }
 
 // agentSurface returns the surface name configured for an agent (empty ⇒ the

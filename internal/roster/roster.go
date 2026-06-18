@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -125,10 +126,17 @@ type Config struct {
 	Channels []Channel `json:"channels,omitempty"`
 
 	// CosAgent names the chief-of-staff agent the CoS context-mirror (#108) mirrors
-	// operator↔XO traffic to. RESERVED by this change: validated (must name an agent
-	// in Agents) but NOT yet consumed — the cos-context-mirror change builds the
-	// behavior. A generalizable role, not a deployment desk name. Empty ⇒ no CoS mirror.
+	// operator↔XO traffic to. Validated (must name an agent in Agents) when set. A
+	// generalizable role, not a deployment desk name. Empty ⇒ the CoS mirror is inert
+	// (no mirror, no ledger — fully backward compatible).
 	CosAgent string `json:"cos_agent,omitempty"`
+	// CosLedger is where the CoS context-mirror appends its deterministic
+	// who-knows-what ledger (the productized state/context-ledger.md). Optional;
+	// defaults at load to <roster-dir>/context-ledger.md when CosAgent is set.
+	// Host-local state (the CoS's read source) like the other watch state files —
+	// NOT content-hashed as a wake signal (it would self-trigger). Inert when CosAgent
+	// is unset.
+	CosLedger string `json:"cos_ledger,omitempty"`
 
 	// heartbeatDur is HeartbeatInterval parsed once at load (0 = disabled), so
 	// consumers get a typed value instead of re-parsing the string.
@@ -240,12 +248,21 @@ func Load(path string) (*Config, error) {
 			}
 		}
 	}
-	// cos_agent is RESERVED for the CoS context-mirror (#108): validated now (so the
-	// config shape is stable across the two changes), consumed later.
+	// cos_agent (the CoS context-mirror #108): validated fail-closed when set. CosLedger
+	// is resolved here to be non-empty IFF the mirror is active, so a single check
+	// (cfg.CosLedger != "") is the correct gate for every consumer: when cos_agent is
+	// set, default the ledger path (explicit cos_ledger, else <roster-dir>/context-ledger.md,
+	// host-local beside the roster); when cos_agent is UNSET, force CosLedger empty so a
+	// stray cos_ledger can never activate the (inert) feature.
 	if c.CosAgent != "" {
 		if _, err := c.Agent(c.CosAgent); err != nil {
 			return nil, fmt.Errorf("roster %q: cos_agent %q is not in agents", path, c.CosAgent)
 		}
+		if c.CosLedger == "" {
+			c.CosLedger = filepath.Join(filepath.Dir(path), "context-ledger.md")
+		}
+	} else {
+		c.CosLedger = "" // inert: cos_ledger without cos_agent is ignored (the feature is gated on cos_agent)
 	}
 	return &c, nil
 }
@@ -293,6 +310,38 @@ func (c *Config) BindingForChannel(channelID string) (Channel, bool) {
 		}
 	}
 	return Channel{}, false
+}
+
+// IsXO reports whether name is an XO in this roster — the top-level primary
+// xo_agent OR the xo_agent of any channel binding (federation). The CoS outbound
+// mirror uses it to scope the ledger to XO→operator replies (a desk `notify` is
+// not operator↔XO traffic in v1).
+func (c *Config) IsXO(name string) bool {
+	if name == "" {
+		return false
+	}
+	if c.XOAgent == name {
+		return true
+	}
+	for _, ch := range c.Bindings() {
+		if ch.XOAgent == name {
+			return true
+		}
+	}
+	return false
+}
+
+// ChannelForXO returns the Discord channel an XO owns (the binding whose xo_agent is
+// name), for tagging that XO's outbound ledger entry. ok=false when no binding is
+// owned by name (then the caller records an empty channel — the ledger renders it as
+// "-"). For the legacy single-fleet form this is the synthesized binding's channel.
+func (c *Config) ChannelForXO(name string) (string, bool) {
+	for _, ch := range c.Bindings() {
+		if ch.XOAgent == name {
+			return ch.ChannelID, true
+		}
+	}
+	return "", false
 }
 
 // Agent looks up an agent by name.

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/cos"
 	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/discord"
 	"github.com/jim80net/flotilla/internal/roster"
@@ -313,6 +314,7 @@ func cmdNotify(args []string) error {
 	from := fs.String("from", os.Getenv("FLOTILLA_SELF"), "agent whose webhook to post under")
 	file := fs.String("file", "", "read message body from this file ('-' for stdin)")
 	secretsPath := fs.String("secrets", os.Getenv("FLOTILLA_SECRETS"), "secrets env file path")
+	rosterPath := fs.String("roster", rosterDefault(), "roster config path (for the CoS context-mirror; optional)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -365,7 +367,36 @@ func cmdNotify(args []string) error {
 		return err
 	}
 	fmt.Printf("notified operator as %s\n", *from)
+	// CoS context-mirror (#108): record this XO→operator reply in the who-knows-what
+	// ledger. Strictly best-effort + observe-only — the operator-facing post already
+	// succeeded, so it must never fail notify.
+	mirrorNotifyToLedger(*rosterPath, *from, message)
 	return nil
+}
+
+// mirrorNotifyToLedger appends an XO→operator notify to the CoS who-knows-what ledger
+// when cos_agent is configured AND the sender is an XO (a desk's notify is not
+// operator↔XO traffic in v1). It is BEST-EFFORT: a missing/unreadable roster, an inert
+// CoS, a non-XO sender, or an append error all just skip the ledger — the operator
+// post has already succeeded, and the mirror is observe-only, so it never fails notify.
+func mirrorNotifyToLedger(rosterPath, from, message string) {
+	cfg, err := roster.Load(rosterPath)
+	if err != nil {
+		return // no/unreadable roster ⇒ no ledger (notify already succeeded)
+	}
+	if cfg.CosLedger == "" || !cfg.IsXO(from) {
+		return // CoS inert, or sender is not an XO ⇒ out of v1 scope
+	}
+	channel, _ := cfg.ChannelForXO(from)
+	if err := cos.Append(cfg.CosLedger, cos.Entry{
+		Time:    time.Now(),
+		Channel: channel,
+		From:    from,
+		To:      "operator",
+		Gist:    message,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "flotilla notify: cos ledger append failed: %v\n", err)
+	}
 }
 
 // cmdSpeak drops a short spoken reply onto the voice outbound spool and returns

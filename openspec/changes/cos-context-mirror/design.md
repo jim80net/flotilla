@@ -1,9 +1,10 @@
 # Design — CoS context-integration layer (#108, companion to #105)
 
-> **Design-first; companion to `federation-channels` (#105).** #105 lays the seams;
-> this change builds the chief-of-staff mirror + the who-knows-what ledger on them.
-> Buildable only after #105 merges. Generalizable: a `cos_agent` role, never a
-> deployment's desk name.
+> **Design + v1 implementation; companion to `federation-channels` (#105, merged).**
+> #105 laid the seams (`watch.Job.OriginChannel` + the validated `cos_agent`); this
+> change builds the chief-of-staff mirror + the who-knows-what ledger on them, under
+> the autonomous workflow (the systems-review + OCR + STORM trio is the bar).
+> Generalizable: a `cos_agent` role, never a deployment's desk name.
 
 ## 1. The problem federation creates
 
@@ -106,11 +107,11 @@ not the CoS region, without a self-wake loop).
 
 ## 7. Dependency + phasing
 
-- **Hard dependency on #105:** needs `watch.Job.OriginChannel` and the validated
-  `cos_agent` field. Do not build until #105 merges.
-- **Phase 1 (#108 v1):** the deterministic substrate — inbound + outbound mirror →
-  ledger append, gated on `cos_agent` set; docs. No CoS-curation code (that's
-  doctrine, not flotilla code).
+- **Hard dependency on #105 (satisfied):** consumes `watch.Job.OriginChannel` and the
+  validated `cos_agent` field, both now merged to main.
+- **Phase 1 (#108 v1 — built in this change):** the deterministic substrate — inbound +
+  outbound mirror → ledger append, gated on `cos_agent` set; docs. No CoS-curation code
+  (that's doctrine, not flotilla code).
 - **Phase 2:** optional CoS-channel post (decision 6.2b); broader scope (6.3);
   retention (6.4); a CoS doctrine doc (how the `cos_agent` integrates the ledger on
   its heartbeat, like the XO doctrine).

@@ -13,10 +13,10 @@ Operator directive 2026-06-18 (#108): **productize it** — every operator↔XO
 exchange should be mirrored to the chief of staff, and the who-knows-what ledger
 should be automated rather than hand-kept.
 
-This change is **design-first** and is the **companion to #105**: #105 lays the
-seams (the routed `Job` carries its `OriginChannel`; a `cos_agent` config field is
-reserved + validated), and this change builds the behavior on top. It does not
-block #105.
+This change is the **companion to #105**: #105 (now merged) lays the seams (the
+routed `Job` carries its `OriginChannel`; a `cos_agent` config field is reserved +
+validated), and this change builds the behavior on top, under the autonomous
+workflow (clearing the systems-review + OCR + STORM trio is the bar).
 
 ## What Changes
 
@@ -50,9 +50,9 @@ block #105.
 
 ## Impact
 
-- **Design-first; depends on #105's seams.** Buildable only after #105 lands
-  `OriginChannel` on `watch.Job` and the `cos_agent` config field. Enumerated,
-  unchecked build tasks.
+- **Built on #105's seams (now merged).** Consumes `OriginChannel` on `watch.Job`
+  and the validated `cos_agent` field; the v1 substrate is implemented in this change
+  (Phase-1 tasks done; the trio runs on the impl diff).
 - **Deterministic substrate, no new authority.** The mirror is observe-only — it
   records traffic the relay/notify already handle; it grants the CoS no delivery
   authority and changes no relay security rule (operator-only + webhook-drop are
@@ -61,7 +61,7 @@ block #105.
 - **Generalizable, not Spark-specific.** `cos_agent` + a configurable ledger path;
   no deployment desk names baked in. `state/context-ledger.md` is the operational
   precedent, not the product surface.
-- **Affected surfaces (when built):** the `Injector.SetMirror` hook
-  (`internal/watch/inject.go` / `cmd/flotilla/watch.go`), `flotilla notify`
-  (`cmd/flotilla/main.go`), a new ledger writer, `internal/roster` (consume the
-  reserved `cos_agent`), and docs.
+- **Affected surfaces (built in this change):** the `Injector.SetMirror` hook
+  (`cmd/flotilla/watch.go`), `flotilla notify` (`cmd/flotilla/main.go`), a new ledger
+  writer (`internal/cos`), `internal/roster` (consume `cos_agent`; `cos_ledger`,
+  `IsXO`, `ChannelForXO`), and docs.
