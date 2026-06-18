@@ -137,6 +137,11 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.08; 
   display: grid; grid-template-columns: 1.05fr .95fr; gap: 3rem; align-items: center;
 }
 @media (max-width: 920px) { .hero-inner { grid-template-columns: 1fr; gap: 2.4rem; } }
+/* Grid/flex children default to min-width:auto, which is their CONTENT width — so a
+   non-wrapping code line (the install command, the start snippets) refuses to shrink
+   and drags the whole column past the viewport (horizontal overflow on mobile). Let
+   these columns shrink to the track so long lines scroll WITHIN their box instead. */
+.hero-copy, .hero-demo { min-width: 0; }
 
 .eyebrow {
   display: inline-flex; align-items: center; gap: .55rem;
@@ -158,12 +163,12 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.08; 
 .hero-sub { font-size: 1.02rem; color: var(--ink-2); max-width: 34em; margin: 0 0 1.7rem; }
 
 .install {
-  display: flex; align-items: stretch; gap: 0; max-width: 36rem;
+  display: flex; align-items: stretch; gap: 0; max-width: 36rem; min-width: 0;
   border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden;
   background: var(--abyss-2);
 }
 .install code {
-  flex: 1; padding: .85rem 1rem; font-size: .82rem; color: var(--cyan);
+  flex: 1; min-width: 0; padding: .85rem 1rem; font-size: .82rem; color: var(--cyan);
   white-space: nowrap; overflow-x: auto; align-self: center;
 }
 .install code::before { content: "$ "; color: var(--ink-3); }
@@ -363,18 +368,26 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.08; 
 .state.offline .glyph { background: var(--ink-3); }
 
 @media (max-width: 680px) {
-  /* row 1: name | state ; row 2: surface full-width */
+  /* row 1: name | state ; row 2: surface full-width — the status widget's 3-field
+     shape (#99 content reshape) */
   .fleet-row { grid-template-columns: 1fr auto; row-gap: .35rem; }
   .fleet-name { grid-column: 1; grid-row: 1; }
   .fleet-row .state { grid-column: 2; grid-row: 1; }
   .fleet-surface { grid-column: 1 / -1; grid-row: 2; }
+  /* stack the panel header so "flotilla status --json" + its meta don't collide /
+     wrap mid-flag on a narrow screen (#98 mobile-flow fix) */
+  .fleet-bar { flex-direction: column; align-items: flex-start; gap: .3rem; }
+  .fleet-bar-meta { font-size: .72rem; }
 }
 
 /* ── 30-second start ────────────────────────────────────────────────────── */
 .start-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 2.5rem; align-items: start; }
 @media (max-width: 860px) { .start-grid { grid-template-columns: 1fr; gap: 2rem; } }
 .start-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 1.2rem; }
-.start-steps li { display: flex; gap: 1.1rem; align-items: flex-start; }
+.start-steps li { display: flex; gap: 1.1rem; align-items: flex-start; min-width: 0; }
+/* the step body holds non-wrapping <pre><code> snippets — let it shrink so they
+   scroll within the box rather than widening the page (mobile horizontal overflow). */
+.start-steps li > div { min-width: 0; flex: 1; }
 .start-n {
   flex-shrink: 0; width: 2.1rem; height: 2.1rem; border-radius: 50%;
   display: grid; place-items: center; font-family: var(--display); font-weight: 800;
@@ -395,6 +408,16 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.08; 
 }
 .start-aside p { font-size: .92rem; margin: 0 0 1.2rem; }
 .start-aside .btn { width: 100%; justify-content: center; margin-bottom: .7rem; }
+
+/* ── mobile rhythm ──────────────────────────────────────────────────────────
+   On a phone the desktop 4.5rem band rhythm reads as oversized dead space; tighten
+   the vertical cadence (gutters + look unchanged) so sections flow tighter. */
+@media (max-width: 600px) {
+  .hero { padding-top: 2rem; padding-bottom: 3rem; }
+  .band { padding-top: 3rem; padding-bottom: 3rem; }
+  .band-head { margin-bottom: 1.8rem; }
+  .harness-strip { margin-top: 2.2rem; padding-top: 1.3rem; }
+}
 
 /* ── footer ─────────────────────────────────────────────────────────────── */
 .footer { border-top: 1px solid var(--line); margin-top: 3rem; background: var(--abyss-2); }
