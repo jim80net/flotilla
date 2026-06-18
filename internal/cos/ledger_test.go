@@ -81,6 +81,25 @@ func TestLineBackstopClipsPathologicalPrefix(t *testing.T) {
 	}
 }
 
+func TestLineFlattensNewlineInPlainFields(t *testing.T) {
+	// channel/from/to render with %s (not %q), so a CR/LF in any of them must be escaped
+	// — otherwise it would inject a second physical line and forge a ledger entry,
+	// breaking the one-line-per-entry + atomic-append invariant (cubic #109 P2).
+	got := Line(Entry{
+		Time:    fixedTime(),
+		Channel: "C\nFORGED · evil → victim · \"injected\"",
+		From:    "oper\rator",
+		To:      "alpha\nxo",
+		Gist:    "hi",
+	})
+	if strings.Count(got, "\n") != 1 { // only the trailing newline
+		t.Errorf("a newline in a plain field must not inject a second line, got %q", got)
+	}
+	if !strings.Contains(got, `\n`) || !strings.Contains(got, `\r`) {
+		t.Errorf("embedded CR/LF should be escaped: %q", got)
+	}
+}
+
 func TestAppendCreatesAndAppends(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "context-ledger.md")
 	if err := Append(path, Entry{Time: fixedTime(), Channel: "C_ALPHA", From: "operator", To: "alpha-xo", Gist: "first"}); err != nil {

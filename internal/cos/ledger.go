@@ -98,14 +98,18 @@ func Append(path string, e Entry) error {
 // Line GUARANTEES len(result) ≤ maxLineBytes: the gist is rune-clamped, and if the
 // type-unbounded channel/from/to fields still push the line past PIPE_BUF the line is
 // clipped (rune-safe) as an unconditional backstop — so the single O_APPEND write the
-// caller issues is always atomic w.r.t. a concurrent appender.
+// caller issues is always atomic w.r.t. a concurrent appender. It also GUARANTEES the
+// result is a single physical line: the gist is escaped via %q, and channel/from/to are
+// rendered with %s so an embedded CR/LF in any of them (a Discord-sourced channel id, a
+// roster agent name) would otherwise inject a second physical line and forge a ledger
+// entry — they are flattened first.
 func Line(e Entry) string {
 	channel := e.Channel
 	if channel == "" {
 		channel = "-"
 	}
 	line := fmt.Sprintf("- %s · %s · %s → %s · %q\n",
-		e.Time.UTC().Format(time.RFC3339), channel, e.From, e.To, clampGist(e.Gist))
+		e.Time.UTC().Format(time.RFC3339), flattenField(channel), flattenField(e.From), flattenField(e.To), clampGist(e.Gist))
 	if len(line) > maxLineBytes {
 		// Backstop: the gist is already rune-clamped, but channel/from/to are unbounded
 		// by type. If a pathological field pushes the rendered line past PIPE_BUF, clip
@@ -133,6 +137,18 @@ func clipToBytes(line string, maxBytes int) string {
 		out = utf8.AppendRune(out, r)
 	}
 	return string(out) + "\n"
+}
+
+// flattenField escapes CR/LF in a field rendered inline with %s (channel/from/to), so
+// a newline can never inject a second physical line — preserving the one-line-per-entry
+// invariant (and with it the atomic-append reasoning) regardless of the field's source.
+// The common case (no CR/LF) returns the input unchanged. The gist needs no equivalent:
+// it is rendered with %q, which already escapes newlines.
+func flattenField(s string) string {
+	if !strings.ContainsAny(s, "\r\n") {
+		return s
+	}
+	return strings.NewReplacer("\r", `\r`, "\n", `\n`).Replace(s)
 }
 
 // clampGist flattens leading/trailing whitespace and truncates the gist to
