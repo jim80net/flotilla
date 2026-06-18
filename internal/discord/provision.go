@@ -57,8 +57,8 @@ type guildInfo struct {
 // keeps discordgo types — and the credential-bearing *discordgo.RESTError — out of
 // the policy layer.
 type guildAPI interface {
-	// selfMember returns the bot's own user id and role ids in one call
-	// (GET /guilds/{id}/members/@me), collapsing the identity+roles lookup.
+	// selfMember returns the bot's own user id and its role ids in the guild, via two
+	// canonical bot-token routes (GET /users/@me then GET /guilds/{id}/members/{id}).
 	selfMember(guildID string) (botUserID string, roleIDs []string, err error)
 	guild(guildID string) (*guildInfo, error)
 	channels(guildID string) ([]Channel, error)
@@ -416,6 +416,12 @@ func (a *discordgoAPI) createChannel(guildID string, in CreateSpec) (Channel, er
 	})
 	if err != nil {
 		return Channel{}, mapErr(err)
+	}
+	if c == nil {
+		// discordgo's GuildChannelCreateComplex unmarshals and returns without a nil
+		// guard; a null 2xx body would otherwise panic at c.ID. (Create also rejects an
+		// empty id, covering the non-nil-but-empty case.)
+		return Channel{}, errors.New("discord: channel create returned no channel")
 	}
 	return Channel{ID: c.ID, Name: c.Name, Type: int(c.Type), ParentID: c.ParentID}, nil
 }
