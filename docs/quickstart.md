@@ -409,6 +409,85 @@ Then run `watch` with `--secrets`; it logs `relay active` instead of
 `clock-only`. Because the channel becomes a command surface, enable **2FA** on
 your Discord account.
 
+### Federated fleets — per-project channels + `#fleet-command`
+
+When you coordinate **several flotillas** (a fleet of fleets), give each project
+its own Discord channel and add a `#fleet-command` channel for cross-fleet
+steering. The Discord channel list *becomes the org chart*: you DM a project's
+chief by posting in its channel, or drive everything from `#fleet-command`.
+
+The model is the same hub-and-spoke one tier up: `#fleet-command` is bound to a
+**meta-XO** whose *members are the project-XOs*, and each project channel is bound
+to a **project-XO** whose members are its desks. A project-XO is to the meta-XO
+exactly what a desk is to a project-XO. Replace the single top-level
+`channel_id`/`xo_agent` with a `channels[]` list (the two forms are **mutually
+exclusive** — use one):
+
+```jsonc
+{
+  "guild_id": "G",
+  "operator_user_id": "YOUR_DISCORD_USER_ID",
+  "xo_agent": "meta-xo",
+  "agents": [
+    { "name": "meta-xo" },
+    { "name": "alpha-xo" }, { "name": "alpha-be" }, { "name": "alpha-data" },
+    { "name": "beta-xo" },  { "name": "beta-be" }
+  ],
+  "channels": [
+    { "role": "fleet-command", "channel_id": "C_CMD",   "xo_agent": "meta-xo",
+      "members": ["alpha-xo", "beta-xo"] },
+    { "role": "project",       "channel_id": "C_ALPHA", "xo_agent": "alpha-xo",
+      "members": ["alpha-be", "alpha-data"] },
+    { "role": "project",       "channel_id": "C_BETA",  "xo_agent": "beta-xo",
+      "members": ["beta-be"] }
+  ]
+}
+```
+
+Routing is by the message's **origin channel**: a bare message in `#fleet-alpha`
+goes to `alpha-xo`; `@alpha-be` there reaches that desk. In `#fleet-command`, a
+bare message goes to `meta-xo` and `@alpha-xo` addresses the project-XO. An
+`@name` **never resolves outside the channel it was typed in** (so a desk is not
+reachable from `#fleet-command`, only its project-XO is).
+
+> **The bot needs the Message Content intent in EVERY bound channel — not just
+> one.** With several channels it is easy to grant the intent/permissions in some
+> and miss one. A channel where the bot can't read content delivers messages with
+> **empty** bodies; flotilla drops empty operator messages (it never injects a
+> blank turn), so the symptom is "my messages in `#fleet-X` do nothing." Verify
+> each channel with a real `@typo` and watch for the fallback notice.
+
+**One relay, many clocks (avoid double-delivery).** The inbound relay must own a
+given channel *exactly once* — two daemons opening a gateway on the same channel
+would deliver every operator message twice. So a federated single-host deployment
+runs:
+
+- **one multi-channel relay daemon** — the `watch` whose roster carries
+  `channels[]`; it opens the gateway for the whole set and routes by origin
+  channel. Set the top-level **`xo_agent` to the meta-XO** (as in the example
+  above) — that is the XO this daemon clocks (and the `status`/`voice` target).
+  It is orthogonal to the channel bindings; if you omit it the clock falls back
+  to the first agent in `agents[]`.
+- **one clock-only `watch` per project-XO** — a roster with `xo_agent` set and
+  **no** `channel_id`/`channels[]`. With no channel binding a daemon opens no
+  gateway, so it can never relay a channel the central relay owns; it just clocks
+  its one XO (`heartbeat_interval`, change-detector, liveness — exactly as a
+  single-fleet clock).
+
+**Delivery between tiers (Transport A, single-host).** The meta-XO reaches a
+project-XO the **same way** a project-XO reaches a desk — `flotilla send --from
+meta-xo alpha-xo "…"` injects + confirms into alpha-XO's pane. The project-XO's
+pane is the single inbox: operator-direct (via `#fleet-alpha`) and
+meta-XO-delegated (via `send`) both land there. v1 federation is therefore
+**single-host** (or SSH-reachable tmux) — the meta-XO must be able to resolve the
+project-XO's pane. Cross-host federation over a Discord bus is a deliberate later
+phase.
+
+**Per-XO outbound.** Each XO posts to *its* channel via its own
+`FLOTILLA_WEBHOOK_<XO>` webhook, created **in that XO's channel** (see step 4). v1
+note: the relay's own one-line notices (e.g. "no agent X; sent to XO") and the
+audit mirror post under the relay daemon's alert webhook, not per origin channel.
+
 ## Troubleshooting
 
 - **`no tmux pane titled "X"`** — the pane title doesn't match the agent name.
