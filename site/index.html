@@ -151,11 +151,11 @@
       <div class="cards three">
         <article class="card">
           <div class="card-num">01</div>
-          <h3>One fleet, no new daemon</h3>
+          <h3>One hub for your whole fleet</h3>
           <p>
             Coordinate Claude Code, Aider, OpenCode, and Grok as a single fleet.
-            flotilla is drop-in &mdash; it talks to the agent sessions already running in
-            <code>tmux</code>, so nothing is replaced and you give nothing up to opt in.
+            One XO routes work to the right desk and reports back, so you manage
+            many agents through one conversation instead of juggling terminals.
           </p>
         </article>
         <article class="card">
@@ -184,7 +184,7 @@
       <div class="band-head">
         <span class="kicker">02 — how it works</span>
         <!-- COPY: section lede -->
-        <h2>Hub and spoke, built on substrate you already have.</h2>
+        <h2>Hub and spoke, over tmux and a chat channel.</h2>
       </div>
 
       <div class="how-grid">
@@ -345,15 +345,16 @@
         <h2>See the fleet at a glance.</h2>
       </div>
 
-      <!-- The widget fetches ./status.json and renders the table. A committed
-           SAMPLE status.json (generic desks) makes it render live on this static
-           page today.
-           TODO: point at real `flotilla status` JSON output once that command ships. -->
+      <!-- The widget fetches ./status.json and renders the table. status.json is
+           REAL output of `flotilla status --json` run against a generic DEMO fleet
+           (regenerate via tools/landing-status/gen.sh) — not hand-authored, and
+           never a real deployment. The "sample · demo fleet" badge keeps that honest. -->
       <div class="fleet-panel">
         <div class="fleet-bar">
           <span class="fleet-bar-title">
             <span class="live-pulse" aria-hidden="true"></span>
             flotilla&nbsp;status&nbsp;<span class="muted">--json</span>
+            <span class="sample-badge">sample · demo fleet</span>
           </span>
           <span class="fleet-bar-meta" id="fleet-meta">loading…</span>
         </div>
@@ -362,6 +363,11 @@
           <p class="fleet-fallback">Fleet status renders here. <noscript>Enable JavaScript to see it live.</noscript></p>
         </div>
       </div>
+      <p class="fleet-note">
+        <strong>Sample — demo fleet.</strong> Real output of
+        <code>flotilla status --json</code> run against a generic example roster
+        (the same desks as the quickstart), not a live deployment.
+      </p>
     </section>
 
     <!-- ───────────────────── 30-SECOND START ───────────────────── -->

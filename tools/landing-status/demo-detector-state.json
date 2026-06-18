@@ -1,0 +1,6 @@
+{
+  "_comment": "DEMO change-detector snapshot — a curated GENERIC sample fleet for the public landing widget, NOT any real deployment. This is the input fixture `flotilla status --json` reads to produce site/status.json (see gen.sh). desk_states are surface.State integer codes (internal/surface/surface.go): 1=shell/crashed, 2=working, 3=idle, 4=awaiting-input, 5=awaiting-approval. Unknown fields like this one are ignored by the loader.",
+  "desk_states": { "xo": 3, "backend": 2, "frontend": 5, "data": 2, "infra": 3 },
+  "signal_hash": "",
+  "xo_settled": false
+}
