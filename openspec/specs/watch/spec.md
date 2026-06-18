@@ -7,17 +7,24 @@ TBD - created by archiving change watch-relay. Update Purpose after archive.
 
 The system SHALL provide `flotilla watch`, a long-lived process that streams the
 Discord gateway and injects accepted operator messages into the target agent's
-tmux pane via the `send` capability's delivery. Injection is the wake; no polling
-loop and no agent kept alive are required. A relayed delivery SHALL be CONFIRMED —
-reported successful (logged and mirrored) only when a turn is confirmed to have started
-(the `Idle → Working` edge), never on the bare exit code of the tmux keystrokes. A relayed
-message that cannot be confirmed delivered SHALL raise a LOUD operator alert; it SHALL NOT
-be reported as delivered.
+tmux pane via the `send` capability's delivery. The relay SHALL listen on a SET of
+channels, each **bound** to exactly one XO; a message's **origin channel**
+determines its routing (the channel's bound XO and that XO's member scope). A
+single-channel roster (one `channel_id` + `xo_agent`) is the degenerate
+one-binding case and SHALL behave exactly as before. Injection is the wake; no
+polling loop and no agent kept alive are required. A relayed delivery SHALL be
+CONFIRMED — reported successful (logged and mirrored) only when a turn is confirmed
+to have started (the `Idle → Working` edge), never on the bare exit code of the
+tmux keystrokes. A relayed message that cannot be confirmed delivered SHALL raise a
+LOUD operator alert; it SHALL NOT be reported as delivered.
 
-#### Scenario: An operator message reaches the target pane
-- **WHEN** the operator posts a message in the coordination channel and `flotilla watch` is running
-- **THEN** the message is delivered (typed + submitted) into the routed agent's pane and the
-  delivery is confirmed (a turn started) before it is logged/mirrored as delivered
+#### Scenario: An operator message reaches the bound channel's XO
+- **WHEN** the operator posts a bare message in a bound channel and `flotilla watch` is running
+- **THEN** the message is delivered (typed + submitted) into that channel's bound XO pane and the delivery is confirmed (a turn started) before it is logged/mirrored as delivered
+
+#### Scenario: A message off any bound channel is ignored
+- **WHEN** a message arrives on a channel that is not in the binding set
+- **THEN** the relay ignores it (the gateway admits only bound channels)
 
 #### Scenario: A relayed message that does not start a turn is never reported delivered
 - **WHEN** a relayed submit does not produce a confirmed turn after the bounded retries
@@ -26,40 +33,48 @@ be reported as delivered.
 ### Requirement: Feedback-loop immunity
 
 The relay SHALL drop any gateway message carrying a non-empty webhook identifier,
-author-agnostically, before any other processing — so the `send` capability's own
-audit-mirror posts can never re-enter the relay. This guard SHALL hold even if
-the author authorization is later broadened.
+author-agnostically, before any other processing — so the `send`/`notify` audit
+posts can never re-enter the relay. This guard SHALL hold on EVERY bound channel,
+and SHALL hold even if the author authorization is later broadened.
 
-#### Scenario: The audit mirror does not feed back
-- **WHEN** the audit mirror posts `→ v12-dev: …` to the channel (a webhook message)
-- **THEN** `flotilla watch` ignores it (no self-injection storm)
+#### Scenario: The audit mirror does not feed back on any channel
+- **WHEN** an audit/notify webhook post lands in any bound channel (a webhook message)
+- **THEN** `flotilla watch` ignores it (no self-injection storm), on that channel and every other
 
 ### Requirement: Operator-only authorization
 
-The relay SHALL act only on messages authored by the configured operator user
-id. All other authors SHALL be ignored. There is no per-command authorization;
-the operator's account (and its two-factor authentication) is the security
-boundary.
+The relay SHALL act only on messages authored by the configured operator user id,
+on every bound channel. All other authors SHALL be ignored. There is no per-command
+authorization; the operator's account (and its two-factor authentication) is the
+security boundary. (A future federation transport that lets a parent meta-XO
+deliver into a child fleet's channel is a SEPARATE, explicitly-gated change that
+introduces a pinned parent allow-list; it is not part of this delta.)
 
-#### Scenario: Non-operator message ignored
-- **WHEN** a message from any author other than the operator arrives
+#### Scenario: Non-operator message ignored on every channel
+- **WHEN** a message from any author other than the operator arrives on any bound channel
 - **THEN** it is ignored
 
 ### Requirement: Routing to the XO or a named agent
 
-A bare operator message SHALL route to the XO agent's pane. A message of the form
-`@<agent> <body>` SHALL route `<body>` to that agent's pane when `<agent>` is in
-the roster (case-insensitive); the body SHALL be preserved verbatim including
-newlines. An unknown `@<agent>` SHALL post a one-line notice and route to the XO.
-A leading `@@` SHALL escape to a literal `@…` routed to the XO.
+Within a bound channel, a bare operator message SHALL route to that channel's bound
+XO. A message of the form `@<name> <body>` SHALL route `<body>` to `<name>` when it
+resolves (case-insensitive) against **that channel's member scope** — for a project
+channel, the XO's desks; for the fleet-command channel, the project-XO members. An
+unresolved `@<name>` SHALL route the whole message to the channel's XO with a
+one-line notice. A leading `@@` SHALL remain the literal-`@` escape hatch to the
+channel's XO. Bodies SHALL be preserved verbatim, including newlines.
 
-#### Scenario: Multi-line directed message preserved
-- **WHEN** the operator posts `@v12-dev do X` followed by additional lines
-- **THEN** the entire multi-line body is delivered to v12-dev as one prompt
+#### Scenario: A desk is addressed within its project channel
+- **WHEN** the operator posts `@backend run the tests` in project-alpha's channel and `backend` is one of alpha's members
+- **THEN** `run the tests` is delivered to alpha's `backend` desk pane
 
-#### Scenario: Unknown agent falls back with notice
-- **WHEN** the operator posts `@nope do X` and `nope` is not a roster agent
-- **THEN** a one-line "no agent 'nope'; sent to XO" notice is posted and the message routes to the XO
+#### Scenario: A project-XO is addressed within the fleet-command channel
+- **WHEN** the operator posts `@alpha-xo status across your desks` in the fleet-command channel and `alpha-xo` is a member of the fleet-command binding
+- **THEN** the message routes to `alpha-xo` (the project chief), per the configured cross-tier transport
+
+#### Scenario: An unknown @name falls back to the channel's XO
+- **WHEN** the operator posts `@nope do X` in a bound channel where `nope` is not in that channel's member scope
+- **THEN** the whole message routes to that channel's bound XO with a one-line notice naming the unknown token
 
 ### Requirement: Serialized injection
 
