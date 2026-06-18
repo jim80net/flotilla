@@ -54,6 +54,33 @@ func TestClampGistBoundsLine(t *testing.T) {
 	}
 }
 
+func TestLineWorstCaseQuoteExpansionStaysAtomic(t *testing.T) {
+	// \U0010000C is an unprintable supplementary code point: %q escapes it to the
+	// 10-byte \U0010000c form — Go's WORST-CASE expansion (~10 bytes/rune). A full
+	// maxGistRunes gist of these is the real stress on the PIPE_BUF byte bound that the
+	// rune clamp must hold (the prior TestClampGistBounds case used 'é', which %q does
+	// not escape, so it never exercised the expansion). A realistic prefix is included.
+	gist := strings.Repeat("\U0010000C", maxGistRunes+50)
+	got := Line(Entry{Time: fixedTime(), Channel: "123456789012345678", From: "operator", To: "alpha-xo", Gist: gist})
+	if len(got) > maxLineBytes {
+		t.Errorf("worst-case %%q line is %d bytes; must be ≤ PIPE_BUF (%d) for atomic append", len(got), maxLineBytes)
+	}
+}
+
+func TestLineBackstopClipsPathologicalPrefix(t *testing.T) {
+	// The gist is rune-clamped, but channel/from/to are unbounded by type. A pathological
+	// agent name (far beyond any real roster) must still produce an atomically-appendable
+	// line: Line's clip backstop guarantees ≤ PIPE_BUF unconditionally, ending in '\n'.
+	huge := strings.Repeat("z", 5000)
+	got := Line(Entry{Time: fixedTime(), Channel: "C", From: "operator", To: huge, Gist: "hello"})
+	if len(got) > maxLineBytes {
+		t.Errorf("backstop failed: line is %d bytes; must be ≤ %d", len(got), maxLineBytes)
+	}
+	if !strings.HasSuffix(got, "\n") || strings.Count(got, "\n") != 1 {
+		t.Errorf("clipped line must end in exactly one newline: %q", got[max(0, len(got)-20):])
+	}
+}
+
 func TestAppendCreatesAndAppends(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "context-ledger.md")
 	if err := Append(path, Entry{Time: fixedTime(), Channel: "C_ALPHA", From: "operator", To: "alpha-xo", Gist: "first"}); err != nil {
@@ -79,10 +106,17 @@ func TestAppendCreatesAndAppends(t *testing.T) {
 }
 
 func TestAppendConcurrentWritersNoInterleave(t *testing.T) {
-	// Many goroutines (modelling the watch hook + notify processes) append
-	// concurrently. Each line must land intact: exactly N lines, each a complete,
-	// well-formed entry (no torn/interleaved bytes), since each line is a single
-	// O_APPEND write of ≤ PIPE_BUF bytes.
+	// Many goroutines append concurrently. Each line must land intact: exactly N lines,
+	// each a complete, well-formed entry (no torn/interleaved bytes), since each line is a
+	// single O_APPEND write of ≤ PIPE_BUF bytes.
+	//
+	// NOTE: this is an IN-PROCESS proxy for the documented CROSS-PROCESS invariant (the
+	// `watch` daemon's mirror hook + a separate `flotilla notify` process). The kernel's
+	// O_APPEND-under-PIPE_BUF atomicity is the same guarantee whether the racing writers
+	// are goroutines (sharing one fd table) or separate processes (each its own fd, same
+	// inode) — both issue independent write(2) calls on O_APPEND descriptors — so this
+	// exercises the same code path; a true multi-process test would add a subprocess
+	// harness without testing a different kernel guarantee.
 	path := filepath.Join(t.TempDir(), "context-ledger.md")
 	const n = 64
 	var wg sync.WaitGroup

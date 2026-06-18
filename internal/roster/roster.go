@@ -135,7 +135,9 @@ type Config struct {
 	// defaults at load to <roster-dir>/context-ledger.md when CosAgent is set.
 	// Host-local state (the CoS's read source) like the other watch state files —
 	// NOT content-hashed as a wake signal (it would self-trigger). Inert when CosAgent
-	// is unset.
+	// is unset. MUST resolve to a path on a LOCAL filesystem: the lock-free concurrent
+	// append (watch hook + a separate notify process) relies on O_APPEND-under-PIPE_BUF
+	// atomicity, which networked mounts (NFS/overlay) may not honor.
 	CosLedger string `json:"cos_ledger,omitempty"`
 
 	// heartbeatDur is HeartbeatInterval parsed once at load (0 = disabled), so

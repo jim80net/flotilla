@@ -20,15 +20,25 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
-// maxGistRunes bounds the gist so a rendered line stays well under the POSIX
-// PIPE_BUF (4096 bytes) atomic-append boundary. Two SEPARATE processes append to the
-// same ledger — the `flotilla watch` daemon's mirror hook (operator→XO) and a
-// `flotilla notify` process (XO→operator) — so a line that exceeds PIPE_BUF could
-// interleave with another appender's write and corrupt both. Clamping the gist (the
-// only unbounded field) keeps every line single + atomic: 280 runes ≤ 1120 bytes,
-// and even with %q escaping (~2×) plus the fixed prefix the line is < 2.5 KB.
+// maxLineBytes is the POSIX PIPE_BUF atomic-append boundary (Linux: 4096). Two SEPARATE
+// processes append to the same ledger — the `flotilla watch` daemon's mirror hook
+// (operator→XO) and a `flotilla notify` process (XO→operator) — so a line that exceeds
+// PIPE_BUF could interleave with another appender's write and corrupt both. Line
+// GUARANTEES every rendered line is ≤ this many bytes (clamping the gist, and clipping
+// as an unconditional backstop), so a single O_APPEND write is always atomic w.r.t.
+// other appenders on a local filesystem — independent of any field's length.
+const maxLineBytes = 4096
+
+// maxGistRunes is the human-readable default clamp on the gist (the message body — the
+// field carrying arbitrary operator/XO content). It keeps the COMMON line far under
+// maxLineBytes: 280 runes ≤ 1120 raw bytes, and even at Go's worst-case %q expansion
+// (~10 bytes/rune for unprintable supplementary codepoints) ≈ 2.8 KB of gist plus a
+// realistic prefix is ≈ 2.9 KB — well under the 4096 PIPE_BUF bound. maxLineBytes is the
+// hard backstop for the uncommon case where the (type-unbounded) channel/from/to fields
+// would otherwise push the line over PIPE_BUF.
 const maxGistRunes = 280
 
 // Entry is one mirrored operator↔XO exchange — the unit appended to the ledger.
@@ -84,13 +94,45 @@ func Append(path string, e Entry) error {
 // with %q so a multi-line or quote-bearing body is escaped onto ONE physical line
 // (the atomicity precondition) and is unambiguously delimited. An empty channel
 // renders as "-" so the field is never blank (which would shift the column layout).
+//
+// Line GUARANTEES len(result) ≤ maxLineBytes: the gist is rune-clamped, and if the
+// type-unbounded channel/from/to fields still push the line past PIPE_BUF the line is
+// clipped (rune-safe) as an unconditional backstop — so the single O_APPEND write the
+// caller issues is always atomic w.r.t. a concurrent appender.
 func Line(e Entry) string {
 	channel := e.Channel
 	if channel == "" {
 		channel = "-"
 	}
-	return fmt.Sprintf("- %s · %s · %s → %s · %q\n",
+	line := fmt.Sprintf("- %s · %s · %s → %s · %q\n",
 		e.Time.UTC().Format(time.RFC3339), channel, e.From, e.To, clampGist(e.Gist))
+	if len(line) > maxLineBytes {
+		// Backstop: the gist is already rune-clamped, but channel/from/to are unbounded
+		// by type. If a pathological field pushes the rendered line past PIPE_BUF, clip
+		// it so the O_APPEND write stays atomic. Unreachable for roster/Discord-bounded
+		// fields (agent names, Discord snowflake channel ids); a clipped line is strictly
+		// safer than a torn cross-appender interleave that would corrupt two lines.
+		line = clipToBytes(line, maxLineBytes)
+	}
+	return line
+}
+
+// clipToBytes returns line truncated to at most maxBytes bytes on a UTF-8 rune boundary,
+// always ending in exactly one '\n'. It is Line's unconditional PIPE_BUF backstop.
+func clipToBytes(line string, maxBytes int) string {
+	body := strings.TrimRight(line, "\n")
+	limit := maxBytes - 1 // reserve one byte for the trailing newline
+	if len(body) <= limit {
+		return body + "\n"
+	}
+	out := make([]byte, 0, limit)
+	for _, r := range body {
+		if len(out)+utf8.RuneLen(r) > limit {
+			break
+		}
+		out = utf8.AppendRune(out, r)
+	}
+	return string(out) + "\n"
 }
 
 // clampGist flattens leading/trailing whitespace and truncates the gist to

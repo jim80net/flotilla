@@ -511,11 +511,12 @@ With `cos_agent` set, `flotilla watch` appends a line per exchange, both directi
 - 2026-06-18T14:05:10Z · C_ALPHA · alpha-xo → operator · "merged; deploying"
 ```
 
-- **Inbound** (operator→XO/desk): every confirmed relay delivery is recorded, tagged
-  with the **origin channel** — so the CoS sees which side-conversation, and which
-  desk, was told what.
+- **Inbound** (operator→XO): a confirmed relay delivery to an **XO** is recorded,
+  tagged with the **origin channel** — so the CoS sees which side-conversation each
+  exchange belongs to. (An operator message addressed to a *desk* via `@name` is not
+  operator↔XO traffic, so it is not ledgered in v1.)
 - **Outbound** (XO→operator): each `flotilla notify` from an XO is recorded too. (A
-  desk's `notify` is not operator↔XO traffic, so it is not ledgered in v1.)
+  desk's `notify` is likewise not operator↔XO traffic, so it is not ledgered in v1.)
 
 The ledger is a **deterministic substrate** — flotilla appends structured facts with
 **no LLM** in the write path; the `cos_agent` reads it on its heartbeat and writes its
@@ -523,6 +524,14 @@ The ledger is a **deterministic substrate** — flotilla appends structured fact
 two never collide. The mirror is **observe-only**: it records traffic the relay and
 `notify` already handle and grants the CoS no command path to any desk — it changes no
 relay security rule. **Inert when `cos_agent` is unset** (no mirror, no ledger).
+
+> **Operational notes (v1).** The ledger is a durable, append-only record of
+> coordination message bodies (gist-clamped + `%q`-escaped, but **not redacted** — a
+> secret pasted into an operator/XO message lands verbatim), written `0o600`. Keep
+> `cos_ledger` on a **local filesystem** — the lock-free atomic append relies on
+> `O_APPEND`-under-PIPE_BUF atomicity, which a networked mount (NFS/overlay) may not
+> honor. There is no rotation yet, so it grows without bound. Retention, redaction, and
+> a machine-parseable format are tracked follow-ups (see the change's design §6–§7).
 
 `cos_agent` is a **role**, not a specific deployment's desk name — point it at whatever
 agent plays chief of staff in your fleet.

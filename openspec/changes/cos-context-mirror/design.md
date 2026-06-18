@@ -112,9 +112,12 @@ not the CoS region, without a self-wake loop).
 - **Phase 1 (#108 v1 — built in this change):** the deterministic substrate — inbound +
   outbound mirror → ledger append, gated on `cos_agent` set; docs. No CoS-curation code
   (that's doctrine, not flotilla code).
-- **Phase 2:** optional CoS-channel post (decision 6.2b); broader scope (6.3);
-  retention (6.4); a CoS doctrine doc (how the `cos_agent` integrates the ledger on
-  its heartbeat, like the XO doctrine).
+- **Phase 2 (tracked in #115):** optional CoS-channel post (decision 6.2b); broader
+  scope (6.3); retention (6.4); secret-redaction / per-channel opt-out; a
+  machine-parseable (JSONL) form + a monotonic sequence number (closes the
+  cross-appender wall-clock ordering gap); a non-local-filesystem guard for the ledger
+  path; a CoS doctrine doc (how the `cos_agent` integrates the ledger on its heartbeat,
+  like the XO doctrine). These are deferred-and-visible, not lost.
 
 ## 8. Non-goals
 

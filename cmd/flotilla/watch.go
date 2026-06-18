@@ -163,11 +163,13 @@ func cmdWatch(args []string) error {
 			return
 		}
 		post("flotilla-watch", "→ "+j.Agent+": "+j.Message)
-		// CoS context-mirror (#108): append this confirmed operator→target relay
-		// delivery to the who-knows-what ledger, tagged with the origin channel (the
-		// #105 Job.OriginChannel seam). Inert unless cos_agent is set; observe-only +
+		// CoS context-mirror (#108): append this confirmed operator→XO relay delivery
+		// to the who-knows-what ledger, tagged with the origin channel (the #105
+		// Job.OriginChannel seam). Scoped to XO targets (a desk addressed via @name is
+		// not operator↔XO traffic in v1 — symmetric with the notify path; broader scope
+		// is design §6.3 Phase 2). Inert unless cos_agent is set; observe-only +
 		// best-effort (never affects delivery).
-		mirrorRelayToLedger(cfg.CosLedger, j)
+		mirrorRelayToLedger(cfg, j)
 	})
 	injector.Start()
 	defer injector.Stop()
@@ -520,17 +522,19 @@ func validateAgentSurfaces(cfg *roster.Config) error {
 	return nil
 }
 
-// mirrorRelayToLedger appends a confirmed operator→target relay delivery to the CoS
+// mirrorRelayToLedger appends a confirmed operator→XO relay delivery to the CoS
 // who-knows-what ledger (#108), tagged with the Job's origin channel (#105 seam), so
-// the chief of staff can see which side-conversation (and which desk/XO) was told
-// what. cosLedger == "" (cos_agent unset) ⇒ inert. BEST-EFFORT + observe-only: the
-// confirmed delivery already happened, so a ledger failure NEVER affects it — it is
-// reported to stderr and ignored.
-func mirrorRelayToLedger(cosLedger string, j watch.Job) {
-	if cosLedger == "" {
+// the chief of staff can see which side-conversation (and which XO) was told what.
+// Scoped to XO targets via cfg.IsXO — an operator message addressed to a DESK (@name)
+// is not operator↔XO traffic in v1, symmetric with the notify path's IsXO gate; the
+// broader scope (XO↔desk, operator↔desk) is design §6.3 Phase 2. cfg.CosLedger == ""
+// (cos_agent unset) ⇒ inert. BEST-EFFORT + observe-only: the confirmed delivery already
+// happened, so a ledger failure NEVER affects it — it is reported to stderr and ignored.
+func mirrorRelayToLedger(cfg *roster.Config, j watch.Job) {
+	if cfg.CosLedger == "" || !cfg.IsXO(j.Agent) {
 		return
 	}
-	if err := cos.Append(cosLedger, cos.Entry{
+	if err := cos.Append(cfg.CosLedger, cos.Entry{
 		Time:    time.Now(),
 		Channel: j.OriginChannel,
 		From:    "operator",

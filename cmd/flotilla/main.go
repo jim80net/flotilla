@@ -387,7 +387,14 @@ func mirrorNotifyToLedger(rosterPath, from, message string) {
 	if cfg.CosLedger == "" || !cfg.IsXO(from) {
 		return // CoS inert, or sender is not an XO ⇒ out of v1 scope
 	}
-	channel, _ := cfg.ChannelForXO(from)
+	channel, ok := cfg.ChannelForXO(from)
+	// A federated roster (channels[] declared) whose clocked XO owns no channel binding
+	// is config drift — the entry still records (channel renders "-"), but surface it so
+	// the misconfiguration isn't masked. A legacy/clock-only XO legitimately owns no
+	// channel, so only warn in the federated case (OCR #109 Medium).
+	if !ok && len(cfg.Channels) > 0 {
+		fmt.Fprintf(os.Stderr, "flotilla notify: XO %q has no channel binding in the federated roster — ledger entry tagged with no channel\n", from)
+	}
 	if err := cos.Append(cfg.CosLedger, cos.Entry{
 		Time:    time.Now(),
 		Channel: channel,
