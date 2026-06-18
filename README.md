@@ -184,6 +184,11 @@ inspect end to end:
 > young and the surface is still moving — expect rough edges. The checklist
 > below marks what ships today (`[x]`) vs. what's still planned (`[ ]`).
 
+> **Product & positioning decisions** (what flotilla is, what it isn't, the
+> competitive stance) are tracked in the openspec
+> [`product-decisions` register](./openspec/specs/product-decisions/spec.md) — the
+> source of truth this README's positioning derives from.
+
 This is being extracted and generalized from a private multi-agent setup.
 Near-term:
 
