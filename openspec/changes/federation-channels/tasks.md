@@ -71,7 +71,16 @@
       DONE: `docs/quickstart.md` §6 "Federated fleets" — the model, an example `channels[]` roster,
       origin-channel routing + scope isolation, the one-relay/many-clocks topology, Transport A
       single-host, per-XO outbound.
-- [ ] 1.10 `/systems-review` + `/open-code-review` + `/storm` on the implementation diff; iterate.
+- [x] 1.10 `/systems-review` + `/open-code-review` + `/storm` on the implementation diff; iterate.
+      DONE (trio run on main..design/federation-channels):
+      • systems-review: CLEAN — 0 P1s (security preserved per-channel, ripple complete, validation
+        comprehensive, backward-compat exact). 2 P2s = documented §7 v1 limitations.
+      • OCR: 1 finding (Bindings() slice aliasing vs legacy alloc) → RESOLVED: documented the
+        read-only contract on Bindings().
+      • STORM: MERGEABLE, no v1 blockers. New failure mode surfaced (partial Message-Content intent →
+        blank inject) → RESOLVED: relay drops empty/whitespace operator messages (+ test) + quickstart
+        callout. Daemon role-fusion + topology warts → tracked as #111–#114; meta-XO trust scope named
+        in design §11. Strengthened the "list meta-XO first" doc callout.
 
 ## Phase 2 — Transport B (Discord-bus, cross-host) — SEPARATE change, later
 

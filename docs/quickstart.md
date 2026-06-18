@@ -447,8 +447,14 @@ Routing is by the message's **origin channel**: a bare message in `#fleet-alpha`
 goes to `alpha-xo`; `@alpha-be` there reaches that desk. In `#fleet-command`, a
 bare message goes to `meta-xo` and `@alpha-xo` addresses the project-XO. An
 `@name` **never resolves outside the channel it was typed in** (so a desk is not
-reachable from `#fleet-command`, only its project-XO is). One bot serves every
-channel — it must be present in each, with the **Message Content** intent.
+reachable from `#fleet-command`, only its project-XO is).
+
+> **The bot needs the Message Content intent in EVERY bound channel — not just
+> one.** With several channels it is easy to grant the intent/permissions in some
+> and miss one. A channel where the bot can't read content delivers messages with
+> **empty** bodies; flotilla drops empty operator messages (it never injects a
+> blank turn), so the symptom is "my messages in `#fleet-X` do nothing." Verify
+> each channel with a real `@typo` and watch for the fallback notice.
 
 **One relay, many clocks (avoid double-delivery).** The inbound relay must own a
 given channel *exactly once* — two daemons opening a gateway on the same channel
@@ -457,8 +463,10 @@ runs:
 
 - **one multi-channel relay daemon** — the `watch` whose roster carries
   `channels[]`; it opens the gateway for the whole set and routes by origin
-  channel. (Its own clock targets the first agent in `agents[]`, so list your
-  meta-XO first.)
+  channel. **⚠ This daemon's own clock targets the FIRST agent in `agents[]`**
+  (a `channels[]` roster has no top-level `xo_agent`), so **list your meta-XO
+  first** — otherwise the meta-XO is never heartbeated and the wrong agent is
+  clocked, silently. (A future `flotilla federation doctor` will check this.)
 - **one clock-only `watch` per project-XO** — a roster with `xo_agent` set and
   **no** `channel_id`/`channels[]`. With no channel binding a daemon opens no
   gateway, so it can never relay a channel the central relay owns; it just clocks

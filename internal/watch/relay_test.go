@@ -73,6 +73,20 @@ func TestRelayDropsUnboundChannel(t *testing.T) {
 	}
 }
 
+// An empty / whitespace-only operator message is dropped — there is nothing to
+// deliver, and an empty body is the signature of a bound channel where the bot lacks
+// the Message Content intent (partial-intent coverage is possible once federation
+// spans several channels). It must never inject a blank turn into the XO pane.
+func TestRelayDropsEmptyContent(t *testing.T) {
+	r, c, _ := newRelayHarness(legacyCfg())
+	r.Handle("C1", "", "op", "")    // bot-without-intent shape → dropped
+	r.Handle("C1", "", "op", "   ") // whitespace-only → dropped
+	r.injector.Stop()
+	if c.count() != 0 {
+		t.Errorf("delivered %d, want 0 (empty/whitespace operator message must be dropped)", c.count())
+	}
+}
+
 func TestRelayRoutesOperatorMessage(t *testing.T) {
 	r, c, notices := newRelayHarness(legacyCfg())
 	r.Handle("C1", "", "op", "@v12-dev ship it")

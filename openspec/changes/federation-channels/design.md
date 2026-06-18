@@ -301,3 +301,14 @@ the `channel_id`s for the roster. It never writes secrets to a committed file.
 - No per-command authorization model (the operator account + 2FA remains the
   security boundary; Transport B only adds a pinned parent identity).
 - No automatic fleet discovery — the roster declares the topology explicitly.
+
+**Trust scope of the meta-XO (named for phase-2's threat model).** Under Transport A,
+the meta-XO reaches every project-XO by `flotilla send` (pane injection), so the
+meta-XO is effectively a **host-wide injection authority** — a larger blast radius
+than any single project-XO. In v1 this is acceptable because the meta-XO is as
+trusted as the operator who configured the fleet (the operator account remains the
+only security boundary, and v1 is single-host). v1 deliberately does NOT constrain
+what the meta-XO may `send`. Phase-2 (Transport B, the pinned parent allow-list)
+MUST inherit this stated boundary: a confused or prompt-injected meta-XO is a
+lateral-movement vector across all projects on the host, and the parent-identity
+pinning is what bounds it once delivery crosses the channel bus.

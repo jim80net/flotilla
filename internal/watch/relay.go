@@ -48,6 +48,16 @@ func (r *Relay) Handle(channelID, webhookID, authorID, content string) {
 	if !relay.Accept(webhookID, authorID, r.cfg.OperatorUserID) {
 		return
 	}
+	// Drop an empty/whitespace-only operator message: there is nothing to deliver,
+	// and an empty body is ALSO the signature of a bound channel where the bot lacks
+	// the privileged Message Content intent (Discord then delivers MESSAGE_CREATE with
+	// empty content). Multi-channel federation makes PARTIAL intent coverage possible
+	// (the intent granted in some channels, missed in one), so without this guard a
+	// mis-permissioned channel would silently inject a blank turn into that channel's
+	// XO pane. Routing a blank is never desirable, so we drop it regardless of cause.
+	if strings.TrimSpace(content) == "" {
+		return
+	}
 	d := relay.Route(content, binding.XOAgent, memberResolver(binding.Members))
 	if r.onAccepted != nil {
 		r.onAccepted(d.Agent) // operator activity IS a clock tick (target-aware)

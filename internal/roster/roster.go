@@ -249,6 +249,13 @@ func (c *Config) HeartbeatDur() time.Duration { return c.heartbeatDur }
 // the pre-federation behavior where "@name" resolved against all agents, and
 // defaulting the XO to the first agent when xo_agent is unset, matching watch). When
 // neither channel_id nor channels[] is set (a clock-only daemon), it returns nil.
+//
+// READ-ONLY CONTRACT: the returned bindings (and each binding's Members slice) are
+// shared with the Config in the federation path (it returns the config's own
+// Channels slice header, not a copy) — callers MUST treat the result as immutable
+// and MUST NOT append to or reassign any Members slice. Config is read-only after
+// Load, and every consumer (BindingForChannel, the relay's memberResolver) only
+// reads, so no copy is made on this per-message path.
 func (c *Config) Bindings() []Channel {
 	if len(c.Channels) > 0 {
 		return c.Channels
