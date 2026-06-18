@@ -26,29 +26,51 @@
       an agent is the xo of ≤1 binding; legacy form vs `channels[]` mutually exclusive.
       DONE + tested (`internal/roster/federation_test.go`: valid federated roster, 7
       fail-closed cases, backward-compat synthesized binding, clock-only no-binding).
-- [ ] 1.3 `internal/discord/gateway.go`: accept a SET of channel ids; admit any bound
+- [x] 1.3 `internal/discord/gateway.go`: accept a SET of channel ids; admit any bound
       channel; pass origin `channelID` into the handler (`MessageHandler` gains it).
-- [ ] 1.4 `internal/watch/relay.go`: look up the binding by origin channel; run the
+      DONE: `MessageHandler func(channelID, webhookID, authorID, content)`; `NewGateway(token,
+      channelIDs []string, handler)` with an admit-set; Open logs the channel set.
+- [x] 1.4 `internal/watch/relay.go`: look up the binding by origin channel; run the
       EXISTING `Accept`/`Route` against that binding's xo_agent + member resolver.
-- [ ] 1.5 `cmd/flotilla/watch.go`: wire the channel set + per-binding routing; preserve
+      DONE: `Relay.Handle(channelID,…)` → `cfg.BindingForChannel` → `relay.Route` with a
+      `memberResolver(binding.Members)` scoped resolver; `xoAgent` dropped from `Relay`/`NewRelay`
+      (it is now per-binding). `relay.Accept`/`Route` unchanged.
+- [x] 1.5 `cmd/flotilla/watch.go`: wire the channel set + per-binding routing; preserve
       single-channel behavior when no `channels[]` is present.
-- [ ] 1.6 Transport A: confirm the meta-XO→project-XO path is plain `flotilla send`
+      DONE: gateway-open gated on `len(cfg.Bindings()) > 0` (was `cfg.ChannelID != ""`); opens over
+      the whole `channelIDs` set; a daemon with no binding runs clock-only (no gateway) — the §7
+      one-relay-per-channel separation. Single-channel path byte-equivalent.
+- [x] 1.6 Transport A: confirm the meta-XO→project-XO path is plain `flotilla send`
       (pane injection); no relay change. Document the single-host constraint.
-- [ ] 1.7 Per-XO outbound: ensure `notify`/mirror post to the XO's own channel webhook;
+      DONE: no code (send/inject path reused verbatim; `relay.Accept` not broadened); documented in
+      the quickstart "Federated fleets" → "Delivery between tiers (Transport A, single-host)".
+- [x] 1.7 Per-XO outbound: ensure `notify`/mirror post to the XO's own channel webhook;
       validate `FLOTILLA_WEBHOOK_<XO>` per bound XO.
-- [ ] 1.7a CoS-mirror SEAM (for companion #108 — see design §8; do NOT build the mirror here):
+      DONE: `notify`/mirror already select the webhook by `--from` (no code change needed — the
+      requirement is that the per-XO webhook be created in that XO's channel, a setup concern);
+      documented in the quickstart. v1 note recorded: the relay's own notices/mirror post under the
+      relay daemon's alert webhook, not per origin channel (documented limitation).
+- [x] 1.7a CoS-mirror SEAM (for companion #108 — see design §8; do NOT build the mirror here):
       add `OriginChannel` to `watch.Job` and have the relay set it when routing an operator
       message, so the existing `Injector.SetMirror` hook can later post per-channel traffic to
       the CoS with full context. Keep the existing mirror behavior unchanged.
+      DONE: `Job.OriginChannel` (additive); the relay sets it on the routed job; the mirror hook
+      already receives the whole Job. v1 behavior unchanged (only carried). Tested via SetMirror.
 - [x] 1.7b CoS-mirror SEAM: reserve a top-level `cos_agent` config field — parse + validate
       (must name an agent in `agents[]` when set) but do NOT act on it in v1; #108 consumes it.
-      DONE: `Config.CosAgent` + fail-closed validation + test. (1.7a OriginChannel is part of
-      the relay/inject ripple — deferred to the next session, see handoff.)
-- [ ] 1.8 Tests: relay routing by channel (alpha desk vs project-XO vs meta-XO),
+      DONE: `Config.CosAgent` + fail-closed validation + test.
+- [x] 1.8 Tests: relay routing by channel (alpha desk vs project-XO vs meta-XO),
       per-channel operator-only + self-mirror-drop, validation failures, backward-compat
       single-fleet roster unchanged, the Job carries OriginChannel, `cos_agent` validation.
-- [ ] 1.9 Docs: quickstart "federated fleets" section; example federated roster;
+      DONE: `internal/watch/relay_test.go` rewritten — backward-compat (legacy binding), unbound-
+      channel drop, route-by-origin-channel, member-scope isolation, per-channel auth + self-mirror
+      drop, OriginChannel-on-Job, onAccepted target. Roster validation cases in `federation_test.go`
+      (1.2). `go test -race ./...` green.
+- [x] 1.9 Docs: quickstart "federated fleets" section; example federated roster;
       setup-helper usage.
+      DONE: `docs/quickstart.md` §6 "Federated fleets" — the model, an example `channels[]` roster,
+      origin-channel routing + scope isolation, the one-relay/many-clocks topology, Transport A
+      single-host, per-XO outbound.
 - [ ] 1.10 `/systems-review` + `/open-code-review` + `/storm` on the implementation diff; iterate.
 
 ## Phase 2 — Transport B (Discord-bus, cross-host) — SEPARATE change, later

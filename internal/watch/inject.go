@@ -49,6 +49,13 @@ type Job struct {
 	Agent   string
 	Message string
 	Kind    string // "relay" | "heartbeat" | "detector" | "" — labels the audit mirror
+	// OriginChannel is the Discord channel a relayed operator message arrived on
+	// (set by the relay when routing; empty for heartbeat/detector ticks). It is the
+	// CoS-mirror seam (companion change #108): the post-confirmed-delivery mirror hook
+	// (SetMirror) receives the whole Job, so a CoS context-mirror can later post
+	// per-channel traffic ("in #fleet-alpha, operator→alpha-xo: …") with full context.
+	// v1 only CARRIES it — today's audit-mirror behavior is unchanged.
+	OriginChannel string
 	// deferrals counts how many times a BUSY relay job has been re-enqueued. It is internal
 	// to the Injector's busy-defer (deferJob increments it on a NEW copy before re-enqueue);
 	// senders MUST NOT set it — every Job{} literal leaves it zero, the correct start.
