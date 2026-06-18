@@ -427,6 +427,7 @@ exclusive** — use one):
 {
   "guild_id": "G",
   "operator_user_id": "YOUR_DISCORD_USER_ID",
+  "xo_agent": "meta-xo",
   "agents": [
     { "name": "meta-xo" },
     { "name": "alpha-xo" }, { "name": "alpha-be" }, { "name": "alpha-data" },
@@ -463,10 +464,10 @@ runs:
 
 - **one multi-channel relay daemon** — the `watch` whose roster carries
   `channels[]`; it opens the gateway for the whole set and routes by origin
-  channel. **⚠ This daemon's own clock targets the FIRST agent in `agents[]`**
-  (a `channels[]` roster has no top-level `xo_agent`), so **list your meta-XO
-  first** — otherwise the meta-XO is never heartbeated and the wrong agent is
-  clocked, silently. (A future `flotilla federation doctor` will check this.)
+  channel. Set the top-level **`xo_agent` to the meta-XO** (as in the example
+  above) — that is the XO this daemon clocks (and the `status`/`voice` target).
+  It is orthogonal to the channel bindings; if you omit it the clock falls back
+  to the first agent in `agents[]`.
 - **one clock-only `watch` per project-XO** — a roster with `xo_agent` set and
   **no** `channel_id`/`channels[]`. With no channel binding a daemon opens no
   gateway, so it can never relay a channel the central relay owns; it just clocks
@@ -474,8 +475,8 @@ runs:
   single-fleet clock).
 
 **Delivery between tiers (Transport A, single-host).** The meta-XO reaches a
-project-XO the **same way** a project-XO reaches a desk — `flotilla send
-meta-xo→alpha-xo "…"` injects + confirms into alpha-XO's pane. The project-XO's
+project-XO the **same way** a project-XO reaches a desk — `flotilla send --from
+meta-xo alpha-xo "…"` injects + confirms into alpha-XO's pane. The project-XO's
 pane is the single inbox: operator-direct (via `#fleet-alpha`) and
 meta-XO-delegated (via `send`) both land there. v1 federation is therefore
 **single-host** (or SSH-reachable tmux) — the meta-XO must be able to resolve the

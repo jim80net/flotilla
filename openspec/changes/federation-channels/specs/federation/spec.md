@@ -42,17 +42,26 @@ mechanism as a per-XO channel — it is one tier up, not a special case.
 The roster SHALL express channel↔XO bindings, each mapping one Discord channel to
 exactly one XO and that XO's member scope. The legacy single-fleet form
 (`channel_id` + `xo_agent`) SHALL remain valid and SHALL be equivalent to a single
-binding (backward compatible). Configuration SHALL be validated fail-closed at load:
-every bound `xo_agent` and `member` names an agent in the roster; every `channel_id`
-is bound at most once; an agent is the XO of at most one binding; the legacy form and
-an explicit binding list are mutually exclusive.
+binding (backward compatible). The legacy `channel_id` and an explicit binding list
+(`channels[]`) are the two BINDING forms and SHALL be mutually exclusive. The
+top-level `xo_agent` is ORTHOGONAL to the binding form — it names this daemon's
+primary XO (the heartbeat/clock, status, and voice target) and MAY accompany
+`channels[]` to select which XO a federated relay daemon clocks (defaulting to the
+first agent when unset). Configuration SHALL be validated fail-closed at load: every
+bound `xo_agent` and `member` names an agent in the roster; every `channel_id` is
+bound at most once; an agent is the XO of at most one binding; the legacy `channel_id`
+and an explicit binding list are not both present.
 
 #### Scenario: A single-fleet roster keeps working
 - **WHEN** a roster sets the legacy `channel_id` + `xo_agent` and no binding list
 - **THEN** it loads as a single binding and behaves exactly as before this capability
 
+#### Scenario: A federated roster selects its clock XO explicitly
+- **WHEN** a roster sets `channels[]` AND a top-level `xo_agent` (no legacy `channel_id`)
+- **THEN** it loads, routing is by `channels[]`, and the daemon's clock/status/voice target is that `xo_agent` rather than the first agent
+
 #### Scenario: An invalid binding is rejected at load
-- **WHEN** a binding names an xo_agent or member not present in `agents[]`, or binds a channel twice, or mixes the legacy form with an explicit binding list
+- **WHEN** a binding names an xo_agent or member not present in `agents[]`, or binds a channel twice, or sets both the legacy `channel_id` and an explicit binding list
 - **THEN** roster load fails with a clear error and the daemon does not start
 
 ### Requirement: Per-XO outbound identity

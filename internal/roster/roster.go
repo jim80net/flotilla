@@ -85,8 +85,12 @@ type Config struct {
 
 	// --- `watch` capability (flotilla watch); validated at load ---
 
-	// XOAgent is the delivery target for a bare operator message and the target
-	// of the heartbeat. If set, it MUST name an agent in Agents.
+	// XOAgent is this daemon's PRIMARY XO: the heartbeat/clock target, the status
+	// default, and the voice/push target. In the legacy single-channel form it is
+	// ALSO the bare-message delivery target (the one binding's XO). It is ORTHOGONAL
+	// to the binding form, so it MAY be set alongside channels[] to pick which XO a
+	// federated relay daemon clocks (typically the meta-XO) — without it, the clock
+	// falls back to Agents[0]. If set, it MUST name an agent in Agents.
 	XOAgent string `json:"xo_agent,omitempty"`
 	// HeartbeatInterval is a Go duration (e.g. "20m"); empty or "0" disables the
 	// heartbeat. Parsed (validated) at load.
@@ -114,8 +118,9 @@ type Config struct {
 	// Channels binds Discord channels to XOs for federation (per-XO + fleet-command
 	// channels). Each binds one channel to one XO + its member scope; the inbound
 	// relay routes a message by its ORIGIN channel to that binding. MUTUALLY
-	// EXCLUSIVE with the legacy top-level channel_id/xo_agent (use one form). When
-	// empty, the single channel_id/xo_agent is the one effective binding (see
+	// EXCLUSIVE with the legacy top-level channel_id (the other binding form — use
+	// one), but NOT with xo_agent, which remains valid as this daemon's primary/clock
+	// XO. When empty, the single channel_id/xo_agent is the one effective binding (see
 	// Bindings) — backward compatible.
 	Channels []Channel `json:"channels,omitempty"`
 
@@ -192,12 +197,17 @@ func Load(path string) (*Config, error) {
 	if c.ChangeDetector && c.heartbeatDur <= 0 {
 		return nil, fmt.Errorf("roster %q: change_detector requires a positive heartbeat_interval", path)
 	}
-	// federation: channel↔XO bindings. The legacy channel_id/xo_agent is one
-	// IMPLICIT binding (see Bindings); an explicit channels[] is MUTUALLY EXCLUSIVE
-	// with it. Fail-closed so a misconfigured federation refuses to start.
+	// federation: channel↔XO bindings. The legacy channel_id is one IMPLICIT binding
+	// (see Bindings); an explicit channels[] is the federated set. The two BINDING
+	// forms are mutually exclusive (you cannot declare both a legacy binding and a
+	// federated set). xo_agent is ORTHOGONAL to the binding form — it is this daemon's
+	// primary/clock XO (also the heartbeat/status/voice target), and with channels[]
+	// it picks WHICH XO this relay daemon clocks (typically the meta-XO) instead of
+	// silently defaulting to Agents[0]. Fail-closed so a misconfigured federation
+	// refuses to start.
 	if len(c.Channels) > 0 {
-		if c.ChannelID != "" || c.XOAgent != "" {
-			return nil, fmt.Errorf("roster %q: channels[] and the legacy channel_id/xo_agent are mutually exclusive — use one form", path)
+		if c.ChannelID != "" {
+			return nil, fmt.Errorf("roster %q: channels[] and the legacy channel_id are mutually exclusive binding forms — use one (xo_agent may accompany channels[] as this daemon's primary/clock XO)", path)
 		}
 		seenChan := make(map[string]bool, len(c.Channels))
 		seenXO := make(map[string]bool, len(c.Channels))

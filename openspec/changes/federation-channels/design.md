@@ -115,9 +115,12 @@ posting in its channel, or drives cross-fleet from `#fleet-command`.
 ```
 
 ```jsonc
-// Federated fleet — the meta-XO + two project-XOs, each with its own channel:
+// Federated fleet — the meta-XO + two project-XOs, each with its own channel.
+// xo_agent names the relay daemon's PRIMARY/clock XO (the meta-XO), orthogonal
+// to the channel bindings:
 {
   "operator_user_id": "U",
+  "xo_agent": "meta-xo",
   "agents": [
     { "name": "meta-xo" },
     { "name": "alpha-xo" }, { "name": "alpha-be" }, { "name": "alpha-data" },
@@ -138,8 +141,13 @@ posting in its channel, or drives cross-fleet from `#fleet-command`.
 checks):** every `xo_agent`/`member` names an agent in `agents[]`; every
 `channel_id` is unique (no channel bound twice — this is what guarantees the
 "exactly one relay per channel" invariant in §7 at config time); each agent is the
-`xo_agent` of at most one binding; `channel_id`+`xo_agent` and `channels[]` are
-mutually exclusive (use one form); secrets carry a webhook for each XO that posts
+`xo_agent` of at most one binding; the legacy `channel_id` and `channels[]` are the
+two BINDING forms and are mutually exclusive (use one). The top-level `xo_agent` is
+**orthogonal** to the binding form: it is this daemon's PRIMARY XO (the
+heartbeat/clock, `status`, and `voice` target) and MAY accompany `channels[]` to
+pick which XO a federated relay daemon clocks (the meta-XO) instead of defaulting to
+`agents[0]` — so a federated relay roster sets `xo_agent: meta-xo` alongside its
+`channels[]`. Secrets carry a webhook for each XO that posts
 (`FLOTILLA_WEBHOOK_<XO>`), created **in that XO's channel**.
 
 **On the recursion (allowed by design, not a validation error):** an agent MAY be
@@ -210,9 +218,13 @@ watch a delegation flow through `#fleet-alpha`).
   already monitors *many* desks but heartbeats *one* `xo_agent`. In a federation,
   each project flotilla runs its own `watch` (its own clock) as today; the meta-XO
   needs a clock too. v1 keeps **one clocked XO per `watch` daemon** — a federated
-  single-host deployment runs one `watch` per XO (meta + each project). Multiplexing
-  the clock over several XOs in one daemon is a possible later simplification,
-  explicitly **out of scope** here.
+  single-host deployment runs one `watch` per XO (meta + each project). The multi-
+  channel relay daemon picks WHICH XO it clocks via the top-level `xo_agent` (set it
+  to the meta-XO); when unset it defaults to `agents[0]`. Because `xo_agent` is
+  orthogonal to `channels[]` (§5), the relay daemon both relays the whole channel set
+  AND clocks its primary XO explicitly — no positional footgun. Multiplexing the clock
+  over several XOs in one daemon is a possible later simplification, explicitly
+  **out of scope** here.
 - **Exactly one relay per channel (the load-bearing invariant that separates the
   clock from the relay).** The clock is per-XO, but the inbound relay must NOT be:
   if two daemons both opened a gateway on the same channel, an operator message

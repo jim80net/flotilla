@@ -58,8 +58,8 @@ func TestLoad_FederationChannels_Valid(t *testing.T) {
 
 func TestLoad_FederationChannels_FailClosed(t *testing.T) {
 	cases := map[string]string{
-		"mutually exclusive with legacy": `{
-		  "operator_user_id":"U","channel_id":"C","xo_agent":"a",
+		"legacy channel_id and channels[] are mutually exclusive": `{
+		  "operator_user_id":"U","channel_id":"C",
 		  "agents":[{"name":"a"}],
 		  "channels":[{"channel_id":"C2","xo_agent":"a"}]}`,
 		"channel bound twice": `{
@@ -85,6 +85,30 @@ func TestLoad_FederationChannels_FailClosed(t *testing.T) {
 		if _, err := Load(writeRoster(t, body)); err == nil {
 			t.Errorf("%s: expected load error, got nil", name)
 		}
+	}
+}
+
+func TestLoad_FederationChannels_WithPrimaryXO(t *testing.T) {
+	// channels[] MAY carry a top-level xo_agent — it is this daemon's primary/clock
+	// XO (heartbeat/status/voice target), orthogonal to the bindings, NOT a mutual-
+	// exclusion error. It picks which XO a federated relay daemon clocks (the meta-XO)
+	// instead of silently defaulting to Agents[0]. Bindings() still routes on channels[],
+	// ignoring xo_agent for routing.
+	cfg, err := Load(writeRoster(t, `{
+	  "operator_user_id":"U","xo_agent":"meta-xo",
+	  "agents":[{"name":"meta-xo"},{"name":"alpha-xo"},{"name":"alpha-be"}],
+	  "channels":[
+	    {"channel_id":"C_CMD","xo_agent":"meta-xo","members":["alpha-xo"]},
+	    {"channel_id":"C_ALPHA","xo_agent":"alpha-xo","members":["alpha-be"]}]}`))
+	if err != nil {
+		t.Fatalf("channels[] + primary xo_agent should load, got: %v", err)
+	}
+	if cfg.XOAgent != "meta-xo" {
+		t.Errorf("primary XOAgent = %q, want meta-xo (the clock target)", cfg.XOAgent)
+	}
+	// Routing is by channels[], unaffected by the primary xo_agent.
+	if bs := cfg.Bindings(); len(bs) != 2 || bs[0].ChannelID != "C_CMD" {
+		t.Errorf("Bindings should route on channels[] (2 bindings), got %+v", bs)
 	}
 }
 

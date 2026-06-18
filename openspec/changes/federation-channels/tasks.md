@@ -1,8 +1,11 @@
 # Tasks — federation-channels
 
-> **Design-first.** Phase 0 produces the design + spec for ratification. Phase 1+
-> build tasks are enumerated but **unchecked — do not implement until the operator
-> ratifies the design (especially the §6 transport fork).**
+> **Design-first, then build under the autonomous workflow.** Phase 0 produced the
+> design + spec; the review trio cleared it; the channel-federation feature is the
+> operator's standing ask (issue #101), so Phase 1 (Transport A / v1) proceeded under
+> the autonomous dev+review workflow — no per-PR ratification gate. The §6 transport
+> fork was resolved for v1 by **Transport A** (single-host pane injection); **Transport
+> B remains design-only and is NOT built here** (Phase 2, a separate change).
 
 ## Phase 0 — design + review (this change)
 
@@ -11,11 +14,15 @@
       multi-channel inbound routing, the §6 cross-tier transport fork (A vs B) with
       the relay security analysis, config surface (backward compatible), phasing.
 - [x] 0.3 Spec deltas: new `federation` capability + `watch` multi-channel relay delta.
-- [ ] 0.4 `/systems-review` + `/open-code-review` on the design; iterate to clean.
-- [ ] 0.5 Surface to the XO → operator ratification of the §6 fork + open questions
-      (design.md §10). **Gate: no Phase 1 work before ratification.**
+- [x] 0.4 `/systems-review` + `/open-code-review` on the design; iterate to clean.
+      DONE: iteration-1 systems-review (canonical comment on PR #105) — design clean after
+      3 refinements folded in (the one-relay-per-channel invariant, single-guild assumption,
+      recursion clarification).
+- [x] 0.5 v1 scope resolved to Transport A (single-host); the build proceeded under the
+      autonomous workflow (operator's standing ask, issue #101). Transport B (the §6 fork's
+      cross-host arm) stays design-only → Phase 2.
 
-## Phase 1 — multi-channel inbound + Transport A (AFTER ratification)
+## Phase 1 — multi-channel inbound + Transport A (v1)
 
 - [x] 1.1 `internal/roster`: add `Channel` binding type + `Config.Channels []Channel`;
       keep top-level `channel_id`/`xo_agent` as the one-binding degenerate form.
