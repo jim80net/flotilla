@@ -1,0 +1,13 @@
+{
+  "_comment": "DEMO roster for the public landing-page status widget — a GENERIC sample fleet (xo + backend/frontend/data/infra, matching the quickstart and the how-diagram). It is NOT any real deployment. Used only to regenerate site/status.json via gen.sh; never wire the public widget to a real fleet (that would leak real desk names).",
+  "agents": [
+    { "name": "xo", "surface": "claude-code" },
+    { "name": "backend", "surface": "claude-code" },
+    { "name": "frontend", "surface": "aider" },
+    { "name": "data", "surface": "opencode" },
+    { "name": "infra", "surface": "grok" }
+  ],
+  "xo_agent": "xo",
+  "heartbeat_interval": "20m",
+  "change_detector": true
+}

@@ -156,6 +156,7 @@ flags for 'status':
   --roster <path>         roster config (default ./flotilla.json or $FLOTILLA_ROSTER)
   --snapshot-file <path>  the watch change-detector snapshot to read (default $FLOTILLA_SNAPSHOT_FILE, else <roster-dir>/flotilla-detector-state.json)
   --ack-file <path>       XO liveness ack file to age (default $FLOTILLA_ACK_FILE, else <roster-dir>/flotilla-xo-alive)
+  --json                  emit machine-readable JSON ({ generated_at, xo, agents[] }) instead of the text table
 
 status prints one line per roster desk — its last-known state (idle / working /
 awaiting-input / crashed / unknown) and, for the XO, its last-ack age and whether
