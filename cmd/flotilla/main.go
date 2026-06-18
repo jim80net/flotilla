@@ -44,6 +44,8 @@ func run(args []string) error {
 		return cmdVoice(args[1:])
 	case "watch":
 		return cmdWatch(args[1:])
+	case "status":
+		return cmdStatus(args[1:])
 	case "register":
 		return cmdRegister(args[1:])
 	case "resume":
@@ -77,6 +79,7 @@ usage:
   flotilla speak --file <path>                         speak body from a file ('-' = stdin)
   flotilla voice [--config <voice.env>]               operator↔XO Discord voice (needs a -tags voiceopus build)
   flotilla watch                                      relay + XO heartbeat clock daemon
+  flotilla status                                     one line per desk: last-known state + XO ack age (reads the watch snapshot; no daemon)
   flotilla register <agent> [--pane <target>]         tag a pane so it resolves by a stable, drift-immune marker
   flotilla resume <agent> [--launch <path>] [--force]  (re)start a dead desk from its host-local launch recipe
   flotilla workspace init <agent>                     scaffold the per-agent ~/.flotilla/<agent>/ home
@@ -148,6 +151,20 @@ configured. The clock target and interval come from the roster (xo_agent,
 heartbeat_interval). By default the clock is the legacy always-wake heartbeat;
 set change_detector: true (with liveness_ping_mode none|interval|consecutive) to
 wake the XO only on a material change — an idle fleet then costs nothing.
+
+flags for 'status':
+  --roster <path>         roster config (default ./flotilla.json or $FLOTILLA_ROSTER)
+  --snapshot-file <path>  the watch change-detector snapshot to read (default $FLOTILLA_SNAPSHOT_FILE, else <roster-dir>/flotilla-detector-state.json)
+  --ack-file <path>       XO liveness ack file to age (default $FLOTILLA_ACK_FILE, else <roster-dir>/flotilla-xo-alive)
+  --json                  emit machine-readable JSON ({ generated_at, xo, agents[] }) instead of the text table
+
+status prints one line per roster desk — its last-known state (idle / working /
+awaiting-input / crashed / unknown) and, for the XO, its last-ack age and whether
+it has settled. It is READ-ONLY: it reads the snapshot + ack file that 'flotilla
+watch' (with change_detector: true) already writes, starts no daemon, and probes
+no panes. The states are the detector's view as of its last tick, so the header
+reports the snapshot's age — a stale read is never shown as live. With no readable
+snapshot it still lists the roster, every desk as 'unknown'.
 
 flags for 'register':
   --roster <path>   roster config (default ./flotilla.json or $FLOTILLA_ROSTER)
