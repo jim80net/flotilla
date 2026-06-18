@@ -47,6 +47,8 @@ func run(args []string) error {
 		return cmdWatch(args[1:])
 	case "status":
 		return cmdStatus(args[1:])
+	case "channel":
+		return cmdChannel(args[1:])
 	case "register":
 		return cmdRegister(args[1:])
 	case "resume":
@@ -81,6 +83,10 @@ usage:
   flotilla voice [--config <voice.env>]               operator↔XO Discord voice (needs a -tags voiceopus build)
   flotilla watch                                      relay + XO heartbeat clock daemon
   flotilla status                                     one line per desk: last-known state + XO ack age (reads the watch snapshot; no daemon)
+  flotilla channel create <name> [--type text|category] [--topic <t>] [--category <name|id>]
+                                                      create a Discord channel via the bot (idempotent; emits an F#105 binding with --xo)
+  flotilla channel list [--json]                      list the guild's channels (id, type, name, parent)
+  flotilla channel delete <channel-id> --yes          delete a channel by snowflake id only (the one destructive verb)
   flotilla register <agent> [--pane <target>]         tag a pane so it resolves by a stable, drift-immune marker
   flotilla resume <agent> [--launch <path>] [--force]  (re)start a dead desk from its host-local launch recipe
   flotilla workspace init <agent>                     scaffold the per-agent ~/.flotilla/<agent>/ home
@@ -166,6 +172,29 @@ watch' (with change_detector: true) already writes, starts no daemon, and probes
 no panes. The states are the detector's view as of its last tick, so the header
 reports the snapshot's age — a stale read is never shown as live. With no readable
 snapshot it still lists the roster, every desk as 'unknown'.
+
+flags for 'channel':
+  create <name>     create a channel in the roster's guild_id via the bot token
+    --type text|category   channel type (default text)
+    --topic <t>            channel topic (text channels)
+    --category <name|id>   place a text channel under this parent category (by name or snowflake id)
+    --xo <agent>           also print the F#105 channel→XO binding for the new channel
+    --member <agent>       a member of that binding (repeatable; requires --xo)
+    --role <label>         the binding's role label (requires --xo)
+  list [--json]     list the guild's channels (id, type, name, parent)
+  delete <id> --yes delete a channel by its snowflake id (never by name); --yes is required
+  --roster <path>   roster config (default ./flotilla.json or $FLOTILLA_ROSTER)
+  --secrets <path>  secrets env file holding FLOTILLA_BOT_TOKEN (default $FLOTILLA_SECRETS)
+
+channel provisions Discord channels mechanically — the creation complement to the
+F#105 routing bindings. create is IDEMPOTENT (re-running skips an existing same-name
+channel under the same parent, so a squadron stand-up is safe to re-run) and runs a
+Manage-Channels permission preflight first (a clear error if the bot lacks it). The
+bot token is read from the secrets file and never logged. With --xo, create also
+prints the roster channels[] binding (with the new channel's id) ready to paste, so
+routing is live the moment you wire it. These are one-shot REST calls; no gateway is
+opened. delete is the one destructive verb: id-only (validated as a snowflake) and
+--yes-gated — intended for operator-driven teardown.
 
 flags for 'register':
   --roster <path>   roster config (default ./flotilla.json or $FLOTILLA_ROSTER)
