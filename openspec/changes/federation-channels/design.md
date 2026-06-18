@@ -1,8 +1,12 @@
 # Design — per-flotilla channels + fleet-command (up/down federation)
 
-> **Status: design-first, for operator ratification. No daemon code is built
-> until ratified.** This document is the architecture + the decision the operator
-> owns (the cross-tier transport fork, §6).
+> **Status: design + v1 implementation (Transport A), built under the autonomous
+> workflow.** The design was reviewed by the systems-review + open-code-review +
+> STORM trio; clearing that trio is the bar (operator directive 2026-06-18 — a
+> design that clears the trio proceeds to implementation, no separate per-design
+> ratification gate). The §6 cross-tier transport fork was resolved for v1 by
+> **Transport A** (single-host pane injection); **Transport B stays design-only**,
+> gated to Phase 2 (its parent-allow-list security model is the separate decision).
 
 ## 1. Where we are today (grounded in the code)
 
@@ -169,7 +173,7 @@ clock); the meta-XO's host owns a *fleet* roster whose `members` are the
 project-XOs. The two roster tiers compose; §6 Transport B is what carries a
 delivery across the host boundary.
 
-## 6. DECISION — cross-tier delivery transport (operator's to ratify)
+## 6. DECISION — cross-tier delivery transport (resolved for v1: Transport A)
 
 Inbound (operator → any XO) is solved by §4 for both options. The fork is **how a
 parent hub delivers DOWN to a child hub** (meta-XO → project-XO).
@@ -206,8 +210,11 @@ watch a delegation flow through `#fleet-alpha`).
   deliberate phase-2 change whose whole job is the parent-allow-list security
   spec.
 
-> **This is the one genuine fork for the operator.** Everything else (multi-channel
-> inbound, the binding model, config) is shared by both and is the v1 spine.
+> **This was the one genuine fork; resolved for v1 as Transport A** (single-host
+> pane injection — recommended above and implemented in this change). Transport B
+> (cross-host, with its parent-allow-list security model) is deferred to Phase 2.
+> Everything else (multi-channel inbound, the binding model, config) is shared by
+> both and is the v1 spine.
 
 ## 7. Outbound identity & the clock
 
@@ -283,10 +290,11 @@ the `channel_id`s for the roster. It never writes secrets to a committed file.
 
 ## 9. Phasing
 
-- **Phase 0 (this change):** design + spec + config surface. Ratify the §6 fork.
-- **Phase 1 (v1, after ratification):** multi-channel gateway + channel→XO relay
-  routing + config (`channels[]`) + validation + Transport A (pane injection) +
-  per-XO outbound + docs. Backward compatible; relay security model unchanged.
+- **Phase 0 + Phase 1 (this change):** design + spec + config surface, AND the v1
+  build — multi-channel gateway + channel→XO relay routing + config (`channels[]`) +
+  validation + Transport A (pane injection) + per-XO outbound + docs. The §6 fork is
+  resolved for v1 as Transport A. Backward compatible; relay security model unchanged.
+  Built under the autonomous workflow once the review trio cleared the design.
 - **Companion (#108, separate change):** the CoS context-integration layer —
   per-channel mirror-to-CoS (inbound via the §8 `OriginChannel` seam + outbound XO
   replies via `notify`) and the productized who-knows-what ledger. v1 only lays the
@@ -296,17 +304,19 @@ the `channel_id`s for the roster. It never writes secrets to a committed file.
 - **Phase 3 (later):** clock multiplexing / nested-roster ergonomics / a
   meta-XO doctrine doc (cross-fleet reporting cadence).
 
-## 10. Open questions for the operator
+## 10. Design-time open questions (resolved for v1)
 
-1. **§6 transport:** ratify A-for-v1 + B-as-phase-2 (recommended), or require B
-   (cross-host) in v1?
-2. **Topology of the dogfood fleet:** is the first real federation single-host
-   (all flotillas as tmux sessions on one box → A suffices) or multi-host (needs
-   B sooner)?
-3. **Channel naming/role vocabulary:** `#fleet-command` + `#fleet-<name>` — is
-   that the convention to bake into the setup helper?
-4. **Clock:** one `watch` per XO (v1) acceptable, or is single-daemon clock
-   multiplexing wanted earlier?
+These were the open questions at design time; all are resolved as built for v1 (the
+operator may still steer the cross-host/clock items as the dogfood federation grows):
+
+1. **§6 transport:** RESOLVED — Transport A for v1, Transport B as Phase 2.
+2. **Topology of the dogfood fleet:** RESOLVED for v1 — single-host (all flotillas as
+   tmux sessions on one box → A suffices). Multi-host triggers Phase 2 (Transport B).
+3. **Channel naming/role vocabulary:** RESOLVED — `#fleet-command` + `#fleet-<name>`
+   is the convention (documented in the quickstart; the setup helper is Phase 3).
+4. **Clock:** RESOLVED for v1 — one `watch` per XO, with the relay daemon's clock XO
+   selected explicitly via the top-level `xo_agent` (§7). Single-daemon clock
+   multiplexing remains a possible Phase 3 simplification.
 
 ## 11. Non-goals
 
