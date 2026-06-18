@@ -227,7 +227,41 @@ watch a delegation flow through `#fleet-alpha`).
   central relay owns.) This keeps "per-XO clock" and "one relay per channel"
   non-contradictory.
 
-## 8. Setup helper
+## 8. CoS-mirror seam (companion change #108 — built later, NOT in v1)
+
+Operator directive 2026-06-18 (issue #108): when the relay routes an inbound
+operator message by channel to an XO's pane, it should ALSO mirror that
+operator↔XO traffic to the **chief of staff** — a designated agent that catches
+every per-channel side-conversation and integrates "who-knows-what" context. The
+live Spark fleet already does this by hand in an operational `state/context-ledger.md`;
+#108 productizes the pattern. (The CoS is generalizable: a configured `cos_agent`,
+**not** any specific deployment's desk name — keep it host-neutral.)
+
+**This is substantial** (it spans both directions — inbound via the relay AND
+outbound XO replies via `notify` — plus the who-knows-what ledger), so it is the
+companion change #108, **not** folded into v1. F#105's only obligation is to **not
+architect the routing so the mirror is hard to add.** Two cheap seams make #108 a
+clean bolt-on:
+
+1. **The Job must carry its origin channel.** `watch.Job` today has
+   `{Agent, Message, Kind}` (`internal/watch/inject.go:48`); the relay enqueues a
+   routed operator message as `Job{Agent: target, Message, Kind:"relay"}`. v1 SHALL
+   add `OriginChannel` (the Discord channel the operator message arrived on) and the
+   relay SHALL set it when routing — so a CoS mirror can post *"in #fleet-alpha,
+   operator→alpha-xo: …"* with full context. The existing post-confirmed-delivery
+   mirror hook (`Injector.SetMirror(func(Job))`, `inject.go:86`, wired at
+   `watch.go:157`) is the exact subscription point — it already receives the Job; it
+   just needs the channel on it.
+2. **Reserve a `cos_agent` config field** (optional, roster top-level): the
+   chief-of-staff agent that #108 mirrors operator↔XO traffic to. v1 parses/validates
+   it (must name an agent in `agents[]` when set) but does **not** yet act on it; #108
+   consumes it. Reserving it now keeps the config shape stable across the two changes.
+
+v1 does NOT post anything to the CoS, does NOT touch `notify`, and does NOT build the
+ledger — it only (a) carries `OriginChannel` on the Job and (b) reserves+validates
+`cos_agent`. Everything else is #108.
+
+## 8b. Setup helper
 
 Extend the bus-setup direction: given the roster's `channels[]`, create the
 per-XO + fleet-command channels (idempotent), create one webhook per XO **in its
@@ -240,6 +274,10 @@ the `channel_id`s for the roster. It never writes secrets to a committed file.
 - **Phase 1 (v1, after ratification):** multi-channel gateway + channel→XO relay
   routing + config (`channels[]`) + validation + Transport A (pane injection) +
   per-XO outbound + docs. Backward compatible; relay security model unchanged.
+- **Companion (#108, separate change):** the CoS context-integration layer —
+  per-channel mirror-to-CoS (inbound via the §8 `OriginChannel` seam + outbound XO
+  replies via `notify`) and the productized who-knows-what ledger. v1 only lays the
+  seams (§8); #108 builds the behavior. Independent of the §6 transport phasing.
 - **Phase 2 (later, separate change):** Transport B (Discord-bus) with the
   parent-allow-list security spec, enabling cross-host federation.
 - **Phase 3 (later):** clock multiplexing / nested-roster ergonomics / a

@@ -31,12 +31,18 @@
       (pane injection); no relay change. Document the single-host constraint.
 - [ ] 1.7 Per-XO outbound: ensure `notify`/mirror post to the XO's own channel webhook;
       validate `FLOTILLA_WEBHOOK_<XO>` per bound XO.
+- [ ] 1.7a CoS-mirror SEAM (for companion #108 — see design §8; do NOT build the mirror here):
+      add `OriginChannel` to `watch.Job` and have the relay set it when routing an operator
+      message, so the existing `Injector.SetMirror` hook can later post per-channel traffic to
+      the CoS with full context. Keep the existing mirror behavior unchanged.
+- [ ] 1.7b CoS-mirror SEAM: reserve a top-level `cos_agent` config field — parse + validate
+      (must name an agent in `agents[]` when set) but do NOT act on it in v1; #108 consumes it.
 - [ ] 1.8 Tests: relay routing by channel (alpha desk vs project-XO vs meta-XO),
       per-channel operator-only + self-mirror-drop, validation failures, backward-compat
-      single-fleet roster unchanged.
+      single-fleet roster unchanged, the Job carries OriginChannel, `cos_agent` validation.
 - [ ] 1.9 Docs: quickstart "federated fleets" section; example federated roster;
       setup-helper usage.
-- [ ] 1.10 `/systems-review` + `/open-code-review` on the implementation diff; iterate.
+- [ ] 1.10 `/systems-review` + `/open-code-review` + `/storm` on the implementation diff; iterate.
 
 ## Phase 2 — Transport B (Discord-bus, cross-host) — SEPARATE change, later
 
