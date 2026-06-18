@@ -17,10 +17,15 @@
 
 ## Phase 1 — multi-channel inbound + Transport A (AFTER ratification)
 
-- [ ] 1.1 `internal/roster`: add `Channel` binding type + `Config.Channels []Channel`;
+- [x] 1.1 `internal/roster`: add `Channel` binding type + `Config.Channels []Channel`;
       keep top-level `channel_id`/`xo_agent` as the one-binding degenerate form.
-- [ ] 1.2 Roster validation (fail-closed): xo_agent/members exist; channel_ids unique;
+      DONE: `Channel` type + `Channels` field + `Bindings()`/`BindingForChannel()`
+      (legacy → one synthesized binding; members = all agents; XO defaults to first
+      agent) — `internal/roster/roster.go`.
+- [x] 1.2 Roster validation (fail-closed): xo_agent/members exist; channel_ids unique;
       an agent is the xo of ≤1 binding; legacy form vs `channels[]` mutually exclusive.
+      DONE + tested (`internal/roster/federation_test.go`: valid federated roster, 7
+      fail-closed cases, backward-compat synthesized binding, clock-only no-binding).
 - [ ] 1.3 `internal/discord/gateway.go`: accept a SET of channel ids; admit any bound
       channel; pass origin `channelID` into the handler (`MessageHandler` gains it).
 - [ ] 1.4 `internal/watch/relay.go`: look up the binding by origin channel; run the
@@ -35,8 +40,10 @@
       add `OriginChannel` to `watch.Job` and have the relay set it when routing an operator
       message, so the existing `Injector.SetMirror` hook can later post per-channel traffic to
       the CoS with full context. Keep the existing mirror behavior unchanged.
-- [ ] 1.7b CoS-mirror SEAM: reserve a top-level `cos_agent` config field — parse + validate
+- [x] 1.7b CoS-mirror SEAM: reserve a top-level `cos_agent` config field — parse + validate
       (must name an agent in `agents[]` when set) but do NOT act on it in v1; #108 consumes it.
+      DONE: `Config.CosAgent` + fail-closed validation + test. (1.7a OriginChannel is part of
+      the relay/inject ripple — deferred to the next session, see handoff.)
 - [ ] 1.8 Tests: relay routing by channel (alpha desk vs project-XO vs meta-XO),
       per-channel operator-only + self-mirror-drop, validation failures, backward-compat
       single-fleet roster unchanged, the Job carries OriginChannel, `cos_agent` validation.

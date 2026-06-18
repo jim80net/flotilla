@@ -37,6 +37,27 @@ func (a Agent) Title() string {
 	return a.Name
 }
 
+// Channel binds one Discord channel to exactly one XO (its "home" hub) and the
+// member set addressable from that channel. It is the federation unit: a project
+// channel binds a project-XO + its desks; the fleet-command channel binds the
+// meta-XO + the project-XOs (a project-XO is to the meta-XO what a desk is to a
+// project-XO). The inbound relay routes a message by its ORIGIN channel to the
+// matching binding. The legacy single ChannelID + XOAgent form is the degenerate
+// one-binding case — see Bindings.
+type Channel struct {
+	// ChannelID is the Discord channel this binding owns (unique across bindings —
+	// this is what guarantees "exactly one relay per channel").
+	ChannelID string `json:"channel_id"`
+	// XOAgent is the hub a BARE operator message in this channel routes to.
+	XOAgent string `json:"xo_agent"`
+	// Members are the agents addressable via "@name" in this channel (this hub's
+	// desks; for the meta-XO, its project-XOs).
+	Members []string `json:"members,omitempty"`
+	// Role is an optional human label ("fleet-command" / "project") for notices and
+	// the setup helper; routing is uniform regardless of role.
+	Role string `json:"role,omitempty"`
+}
+
 // Config is the committable, secret-free fleet description.
 type Config struct {
 	// GuildID and ChannelID identify the Discord coordination channel. Reserved
@@ -87,6 +108,22 @@ type Config struct {
 	// "consecutive" (ping every K-1, alert after ~2 missed pings — the middle
 	// ground). Empty ⇒ "none". Only consulted when ChangeDetector is on.
 	LivenessPingMode string `json:"liveness_ping_mode,omitempty"`
+
+	// --- federation (`federation-channels`); validated at load ---
+
+	// Channels binds Discord channels to XOs for federation (per-XO + fleet-command
+	// channels). Each binds one channel to one XO + its member scope; the inbound
+	// relay routes a message by its ORIGIN channel to that binding. MUTUALLY
+	// EXCLUSIVE with the legacy top-level channel_id/xo_agent (use one form). When
+	// empty, the single channel_id/xo_agent is the one effective binding (see
+	// Bindings) — backward compatible.
+	Channels []Channel `json:"channels,omitempty"`
+
+	// CosAgent names the chief-of-staff agent the CoS context-mirror (#108) mirrors
+	// operator↔XO traffic to. RESERVED by this change: validated (must name an agent
+	// in Agents) but NOT yet consumed — the cos-context-mirror change builds the
+	// behavior. A generalizable role, not a deployment desk name. Empty ⇒ no CoS mirror.
+	CosAgent string `json:"cos_agent,omitempty"`
 
 	// heartbeatDur is HeartbeatInterval parsed once at load (0 = disabled), so
 	// consumers get a typed value instead of re-parsing the string.
@@ -155,11 +192,91 @@ func Load(path string) (*Config, error) {
 	if c.ChangeDetector && c.heartbeatDur <= 0 {
 		return nil, fmt.Errorf("roster %q: change_detector requires a positive heartbeat_interval", path)
 	}
+	// federation: channel↔XO bindings. The legacy channel_id/xo_agent is one
+	// IMPLICIT binding (see Bindings); an explicit channels[] is MUTUALLY EXCLUSIVE
+	// with it. Fail-closed so a misconfigured federation refuses to start.
+	if len(c.Channels) > 0 {
+		if c.ChannelID != "" || c.XOAgent != "" {
+			return nil, fmt.Errorf("roster %q: channels[] and the legacy channel_id/xo_agent are mutually exclusive — use one form", path)
+		}
+		seenChan := make(map[string]bool, len(c.Channels))
+		seenXO := make(map[string]bool, len(c.Channels))
+		for _, ch := range c.Channels {
+			if ch.ChannelID == "" {
+				return nil, fmt.Errorf("roster %q: a channel binding has an empty channel_id", path)
+			}
+			// Unique channel id ⇒ exactly one relay owns a channel (no double-delivery).
+			if seenChan[ch.ChannelID] {
+				return nil, fmt.Errorf("roster %q: channel %q is bound more than once (exactly one relay per channel)", path, ch.ChannelID)
+			}
+			seenChan[ch.ChannelID] = true
+			if ch.XOAgent == "" {
+				return nil, fmt.Errorf("roster %q: channel %q has no xo_agent", path, ch.ChannelID)
+			}
+			if _, err := c.Agent(ch.XOAgent); err != nil {
+				return nil, fmt.Errorf("roster %q: channel %q xo_agent %q is not in agents", path, ch.ChannelID, ch.XOAgent)
+			}
+			// A channel has one hub: an agent is the xo_agent of at most one binding.
+			// (An agent MAY still be a MEMBER of several channels — that's the
+			// recursion, e.g. a project-XO is a member of fleet-command.)
+			if seenXO[ch.XOAgent] {
+				return nil, fmt.Errorf("roster %q: agent %q is the xo_agent of more than one channel binding", path, ch.XOAgent)
+			}
+			seenXO[ch.XOAgent] = true
+			for _, m := range ch.Members {
+				if _, err := c.Agent(m); err != nil {
+					return nil, fmt.Errorf("roster %q: channel %q member %q is not in agents", path, ch.ChannelID, m)
+				}
+			}
+		}
+	}
+	// cos_agent is RESERVED for the CoS context-mirror (#108): validated now (so the
+	// config shape is stable across the two changes), consumed later.
+	if c.CosAgent != "" {
+		if _, err := c.Agent(c.CosAgent); err != nil {
+			return nil, fmt.Errorf("roster %q: cos_agent %q is not in agents", path, c.CosAgent)
+		}
+	}
 	return &c, nil
 }
 
 // HeartbeatDur returns the parsed heartbeat interval (0 when disabled).
 func (c *Config) HeartbeatDur() time.Duration { return c.heartbeatDur }
+
+// Bindings returns the effective channel→XO bindings the relay routes on. With an
+// explicit Channels list it returns that; otherwise it synthesizes the single
+// legacy binding (channel_id + xo_agent, with EVERY agent as a member — preserving
+// the pre-federation behavior where "@name" resolved against all agents, and
+// defaulting the XO to the first agent when xo_agent is unset, matching watch). When
+// neither channel_id nor channels[] is set (a clock-only daemon), it returns nil.
+func (c *Config) Bindings() []Channel {
+	if len(c.Channels) > 0 {
+		return c.Channels
+	}
+	if c.ChannelID == "" {
+		return nil
+	}
+	members := make([]string, 0, len(c.Agents))
+	for _, a := range c.Agents {
+		members = append(members, a.Name)
+	}
+	xo := c.XOAgent
+	if xo == "" && len(c.Agents) > 0 {
+		xo = c.Agents[0].Name
+	}
+	return []Channel{{ChannelID: c.ChannelID, XOAgent: xo, Members: members}}
+}
+
+// BindingForChannel returns the binding that owns a Discord channel id (ok=false
+// when no binding owns it — the relay ignores such a channel).
+func (c *Config) BindingForChannel(channelID string) (Channel, bool) {
+	for _, ch := range c.Bindings() {
+		if ch.ChannelID == channelID {
+			return ch, true
+		}
+	}
+	return Channel{}, false
+}
 
 // Agent looks up an agent by name.
 func (c *Config) Agent(name string) (Agent, error) {
