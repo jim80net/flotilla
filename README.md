@@ -9,8 +9,9 @@
 It's a **pluggable coordination layer**: drop it over the harnesses you've
 already built, and one chief-of-staff agent (the "XO") fans work to your domain desks,
 collects their replies, and keeps a durable, auditable record of everything they
-say to each other. No new daemon, no hosted service, no lock-in — just `tmux` and
-a chat channel you already have.
+say to each other. You delegate through one hub, every instruction and reply is
+confirmed and mirrored to a chat channel, and you drive the whole fleet from
+Discord — even from your phone.
 
 > **Using a coding agent?** Point it at **[llm.md](./llm.md)** — it'll install
 > flotilla and walk you through setup end-to-end (prerequisites → install →
@@ -25,7 +26,33 @@ You drive the fleet from a chat channel — talk strategy, the XO runs implement
 
 **Mockup — illustrative.** *(The message shapes are exactly what flotilla emits — the operator's lines arrive over the inbound relay; the XO's replies are `flotilla notify` posts; the desks do the work in their own panes while the XO coordinates and reports back.)*
 
-Under the hood it's substrate you already have. Point flotilla at a running agent and drive it from one command:
+**That chat channel is the whole interface.** You message the XO the way you'd
+message a colleague — *"what shipped overnight?"*, *"benchmark the cache and
+report back"* — and it routes the work to the right desk, collects the replies,
+and answers you in the same channel. Every instruction and reply lands there
+with confirmed delivery, so you drive the fleet from your phone and read back
+exactly what happened. Once it's running, there's no terminal to babysit — the
+chat is where you live.
+
+(Prefer to wire it up or poke at it directly? The CLI that powers all this is
+right below, in [Under the hood: the CLI](#under-the-hood-the-cli).)
+
+**What you get**
+
+- **Coordinate the harnesses you've already built** — Claude Code, Aider, OpenCode, and
+  Grok desks behind one interface; each stays an ordinary session you control,
+  while the XO coordinates the work across them.
+- **One chief-of-staff agent in charge** — the XO routes work to the domain
+  desks and reports back, so you talk to one agent, not five — from your phone.
+- **A durable, auditable record** — every instruction and reply can be mirrored
+  to a chat channel you read back from anywhere, with confirmed delivery so the
+  log never lies about what landed.
+
+## Under the hood: the CLI
+
+The chat channel is where you live; underneath, flotilla is a small CLI over
+`tmux`. You rarely touch it once the fleet is running, but it's what sets the
+fleet up and powers every message:
 
 ```console
 # install (Go 1.26+) — full cold-start walkthrough in docs/quickstart.md
@@ -51,17 +78,6 @@ dropped message. `watch` keeps an idle fleet at ~zero cost until there's work.
 > **New here? → [docs/quickstart.md](./docs/quickstart.md)** — install to your
 > first cross-pane message and the self-continuing clock, runnable cold.
 
-**What you get**
-
-- **Coordinate the harnesses you've already built** — Claude Code, Aider, OpenCode, and
-  Grok desks behind one interface; each stays an ordinary session you control,
-  so opting in costs you nothing and you can walk away anytime.
-- **One chief-of-staff agent in charge** — the XO routes work to the domain
-  desks and reports back, so you talk to one agent, not five — from your phone.
-- **A durable, auditable record** — every instruction and reply can be mirrored
-  to a chat channel you read back from anywhere, with confirmed delivery so the
-  log never lies about what landed.
-
 ## The problem
 
 You run several long-lived AI coding agents at once — say one per domain
@@ -82,8 +98,8 @@ can read back from anywhere.**
 
 ## How it works
 
-flotilla is deliberately built on substrate you already have, not a new
-daemon or a hosted service:
+flotilla coordinates the agents you already run through mechanisms you can
+inspect end to end:
 
 - **Delivery & wake — terminal multiplexer injection.** Each agent lives in
   a `tmux` pane. flotilla delivers an instruction by typing it into the
@@ -128,8 +144,8 @@ daemon or a hosted service:
 ## Why these choices
 
 - Terminal-multiplexer injection works **today**, needs no special API, and
-  keeps each agent an ordinary, independently-controlled session — you don't
-  give anything up to opt in.
+  keeps each agent an ordinary, independently-controlled session you can still
+  drive by hand.
 - A chat channel gives durability and read-back for free, and lets *you*
   step into the same bus the agents use, from any device.
 - The hub-and-spoke model means there is a single point of contact (you talk
