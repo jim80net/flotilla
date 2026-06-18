@@ -48,12 +48,22 @@
       IsXO, ChannelForXO), `cmd/flotilla/cos_mirror_test.go` (inbound w/ origin channel,
       outbound XO-only, desk-skip, inert, missing-roster best-effort). `go test -race ./...` green.
 - [x] 1.7 Docs: a "chief of staff" section (cos_agent + the ledger) in the quickstart.
-- [ ] 1.8 `/systems-review` + `/open-code-review` + `/storm` on the impl; iterate.
+- [x] 1.8 `/systems-review` + `/open-code-review` + `/storm` on the impl; iterate.
+      DONE: trio run on the impl + re-run on the fixes. Resolved at root: inbound mirror
+      narrowed to XO targets (was operator→any-agent — drifted broader than spec/§6.3;
+      symmetric with the notify gate); `Line` now guarantees ≤ PIPE_BUF unconditionally
+      (rune-safe clip backstop for the type-unbounded channel/from/to) + flattens CR/LF in
+      channel/from/to to prevent ledger-line injection (cubic P2); federated-drift stderr
+      warning on a channel-less XO (OCR); local-FS + verbatim-persist risks documented.
+      Final gates: systems-review CLEAN (0/0/0), OCR 0 High/0 Medium, STORM A−, cubic 0
+      unresolved, CI green. Deferred Phase-2 work filed visibly (#115) + roster gap (#116).
 
-## Phase 2 — curation ergonomics (later, per §6 decisions)
+## Phase 2 — curation ergonomics (later, per §6 decisions) — tracked in #115
 
 - [ ] 2.1 (opt) CoS-channel post of the integrated view (decision 6.2b).
 - [ ] 2.2 (opt) Broader scope: XO↔desk / desk↔desk into the ledger (decision 6.3).
-- [ ] 2.3 (opt) Retention/rotation (decision 6.4).
+- [ ] 2.3 (opt) Retention/rotation (decision 6.4); + secret-redaction / per-channel opt-out.
 - [ ] 2.4 CoS doctrine doc — how `cos_agent` integrates the ledger on its heartbeat
       (sibling of `docs/xo-doctrine.md`).
+- [ ] 2.5 (opt) Machine-parseable (JSONL) form + monotonic sequence (closes the
+      cross-appender wall-clock ordering gap); non-local-FS guard for the ledger path.
