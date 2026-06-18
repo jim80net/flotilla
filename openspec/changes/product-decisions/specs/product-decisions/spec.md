@@ -8,7 +8,8 @@ the home for the **product-level** calls that otherwise live only in commit bodi
 and rules — so they are tracked, citeable, and **never re-asked**. The README and any
 strategy / release / landing material DERIVE from this register. Each requirement records
 the decision, its provenance (operator statement and/or enacting commit), and that it is
-settled.
+settled. The companion `docs/open-product-questions.md` holds the genuinely UN-decided
+questions; settled calls live here, open ones live there.
 
 ## ADDED Requirements
 
@@ -18,8 +19,19 @@ This register SHALL be the source of truth for ratified product / positioning / 
 decisions. A decision recorded here SHALL NOT be re-opened or presented as an "open
 question" in any draft, strategy memo, or review; derivative material (README, landing,
 release docs) SHALL cite the decided answer rather than re-litigate it. A draft that
-re-opens a ratified decision is a defect to fix, not a question to answer. New ratified
-decisions SHALL be appended here (with provenance) as they are made.
+re-opens a ratified decision is a defect to fix, not a question to answer.
+
+**Canon hierarchy** (to avoid a two-canon drift): this register is canonical for *what was
+decided* and its provenance; the **README** is the canonical *enacted copy* of any
+positioning decision; the operator's `.claude/rules/` are the *behavioral enforcement*. If a
+later README edit contradicts a decision here, the register's decision wins until the
+operator ratifies a change (recorded here per the supersession requirement below).
+
+**Append trigger** (so the register stays current, not write-once): when the operator
+ratifies a new product / positioning / process decision, the XO SHALL append it here (with
+provenance) — bound to an event that already fires, the end-of-session `wrap-things-up` /
+handoff step — rather than relying on memory. Provenance MUST cite a commit reachable from
+`main` and/or a dated operator statement; an unmerged-branch commit is not valid provenance.
 
 #### Scenario: A strategy draft references a settled decision
 
@@ -29,7 +41,20 @@ decisions SHALL be appended here (with provenance) as they are made.
 #### Scenario: A new decision is ratified
 
 - **WHEN** the operator ratifies a new product / positioning / process decision
-- **THEN** it is appended to this register with its provenance, so the next reader finds it instead of re-asking
+- **THEN** it is appended to this register at session wrap-up with `main`-reachable provenance, so the next reader finds it instead of re-asking
+
+### Requirement: Decisions are superseded, never silently edited
+
+A reversed or changed decision SHALL be recorded by marking the original as `Superseded-by`
+(or `Reversed-on <date>`) and adding the new decision — never by silently editing or deleting
+the original, which would destroy the audit trail the register exists to provide. (The
+no-daemon disavowal is itself a reversal: "no daemon" was once in the README, then disavowed
+— exactly the kind of change this convention keeps honest.)
+
+#### Scenario: The operator reverses a prior decision
+
+- **WHEN** the operator changes or reverses a decision recorded here
+- **THEN** the original entry is marked superseded/reversed (with the date) and the new decision is appended, preserving both — not overwritten
 
 ### Requirement: Positioning — flotilla is a drop-in chief of staff
 
@@ -38,7 +63,7 @@ you've already built"** — a **pluggable coordination layer** in which one hub 
 fans work to domain desks, collects replies, and keeps a durable auditable record, driven
 from a chat channel. The **README is the canonical statement** of this positioning. This is
 RATIFIED — operator 2026-06-18 (*"Q1 was definitely answered and the current README is the
-result"*), enacted in PRs #96 / #107 (commits `5ef0f38`, `0720b35`, `3450996`),
+result"*), enacted in PR #96 (commit `3450996`, the positioning commit in `main`),
 README.md:3-14. The one-liner SHALL NOT be re-presented as an open choice.
 
 #### Scenario: The one-liner is needed
@@ -52,7 +77,8 @@ flotilla SHALL NOT use no-daemon, no-hosted-service, no-lock-in, or
 built-on-substrate-you-already-have as product differentiators or requirements in any
 public copy. This was explicitly DISAVOWED by the operator on 2026-06-18 (no-daemon /
 no-new-binary is not a real product requirement; drop it and references to it), enacted in
-PR #96 (commit 5ef0f38). It is also inaccurate, since flotilla watch IS a daemon. True
+PR #96 (commit 3450996, whose title is literally "drop the no-daemon/lock-in positioning").
+It is also inaccurate, since flotilla watch IS a daemon. True
 technical statements that happen to share words (for example, each agent stays an ordinary,
 independently-controlled session) remain fine; only the positioning use is banned.
 
@@ -66,7 +92,8 @@ independently-controlled session) remain fine; only the positioning use is banne
 The public framing SHALL lead with the **chat channel as the primary interface** ("you drive
 the fleet from a chat channel, even from your phone; once it's running there's no terminal to
 babysit"), with the CLI presented as the under-the-hood mechanism. RATIFIED — enacted in the
-chat-first README (PRs #96 / #107, README.md:21-38).
+chat-first README (PR #96, commit `3450996`, README.md:21-38; the illustrative demo mockup
+was added in #89 and labeled in #94).
 
 #### Scenario: The pitch is ordered
 
@@ -77,8 +104,8 @@ chat-first README (PRs #96 / #107, README.md:21-38).
 
 herdr SHALL be treated as a **complementary** runtime/visibility layer at a different
 altitude, not a competitor, and flotilla SHALL NOT take a hard dependency on or tie itself to
-it. RATIFIED — operator 2026-06-18; `docs/competitive/herdr-vs-flotilla.md:10,22` (*"more
-complementary than competing"*).
+it. RATIFIED — operator 2026-06-18; `docs/competitive/herdr-vs-flotilla.md:10` (*"more
+complementary than competing"*; see also the comparison table at :22).
 
 #### Scenario: herdr comes up in positioning or design
 
@@ -104,7 +131,8 @@ open-code-review + STORM), with no separate per-design operator-ratification gat
 non-major work SHALL merge without an operator nod. The operator's review is reserved for
 **strategy, major / fundamentally-significant / controversial choices, money, irreversible /
 outward-facing actions, and genuine divergent-direction forks**. RATIFIED — operator
-2026-06-18 (commit `db0864a` body; the autonomous-workflow directive).
+2026-06-18 (the autonomous-workflow directive; canonical source is the operator statement,
+durably captured in the `operate-autonomous-workflow-merge-without-operator-review` rule).
 
 #### Scenario: A clean-gated non-major PR is ready
 
@@ -127,7 +155,8 @@ spawn it.)
 
 Decisions that have a canonical capability home SHALL be recorded and cited there, not
 duplicated here; this register POINTS to them. The capability specs of record include:
-`federation` (recursive hub-and-spoke; Transport A for v1, Transport B deferred), `cos`
+`federation` (recursive hub-and-spoke; single-host pane-injection transport for v1, the
+cross-tier transport explicit/gated and deferred — see the federation spec), `cos`
 (observe-only context mirror), `surface` (per-agent drivers; unknown surface = clear error;
 pull-participants + opt-in smart desks), `provision` (mechanical channel provisioning),
 `backlog` (goal-driven loop), `watch` (change-detector v2 default), `voice`, and the
