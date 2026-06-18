@@ -65,6 +65,6 @@
 ## 4. Gate
 
 - [x] 4.1 `openspec validate discord-channel-provisioning --strict`.
-- [ ] 4.2 Trio on the implementation diff: `/systems-review` + `/open-code-review` + STORM;
+- [x] 4.2 Trio on the implementation diff: `/systems-review` + `/open-code-review` + STORM;
       iterate to clean.
-- [ ] 4.3 PR; CI green; report trio-clean for operator merge.
+- [x] 4.3 PR (#119); CI green; cubic 0 findings; trio-clean — reported for operator merge.
