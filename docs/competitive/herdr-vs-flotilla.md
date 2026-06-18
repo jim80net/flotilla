@@ -5,7 +5,7 @@
 ## What each product is
 
 - **herdr** (herdr.dev, github.com/ogulcancelik/herdr) — an **agent-aware terminal multiplexer** ("one terminal for the whole herd" / "tmux for AI coding agents"). A Rust/Ratatui client-server multiplexer: workspaces/tabs/real-PTY panes with mouse support, persistent detach/reattach, SSH remoting, and — its differentiator over tmux/Zellij — **semantic per-agent state detection** (idle/working/done/blocked) in a sidebar, plus a local Unix-socket JSON API so agents can drive the terminal.
-- **flotilla** (github.com/jim80net/flotilla) — a **drop-in coordination layer over existing harnesses**. A hub "XO" agent fans work to domain "desk" agents, collects replies, and keeps a durable auditable record of inter-agent traffic. No new agent, no hosted service, no daemon — tmux panes + a chat channel (Discord) you already have. Go, MIT.
+- **flotilla** (github.com/jim80net/flotilla) — a **drop-in coordination layer over existing harnesses**. A hub "XO" agent fans work to domain "desk" agents, collects replies, and keeps a durable auditable record of inter-agent traffic, over tmux panes + a Discord channel. Go, MIT.
 
 **Crucial distinction: herdr is a RUNTIME/visibility layer; flotilla is a COORDINATION/delegation layer. Different altitudes of the same stack — more complementary than competing.**
 
@@ -34,7 +34,7 @@ Mature, real product: ~6.1k GitHub stars, v0.7.0 (2026-06-15), 890 commits, acti
 | Maturity (stars/releases/cadence) | ✅ ~6.1k★, v0.7.0 | ➖ early | herdr far ahead |
 | License | AGPL-3.0 + commercial | MIT | flotilla more permissive |
 
-**Approach divergence:** herdr = build-the-runtime-agents-live-in (self-hosted binary, AGPL+commercial, terminal-centric). flotilla = coordinate-the-harnesses-you-already-run (no-daemon/no-new-agent, MIT, chat-centric, drive-from-phone). *herdr makes panes smart; flotilla makes a fleet a team.*
+**Approach divergence:** herdr = build-the-runtime-agents-live-in (self-hosted binary, AGPL+commercial, terminal-centric). flotilla = coordinate-the-harnesses-you-already-run (MIT, chat-centric, drive-from-phone). *herdr makes panes smart; flotilla makes a fleet a team.*
 
 ## Where flotilla can compete
 
@@ -44,7 +44,7 @@ Honest framing: herdr is more mature, more popular, more polished, and broader o
 1. Hub-and-spoke delegation with a real broker (XO→desks).
 2. Confirmed-delivery + durable auditable inter-agent transcript (a governance/compliance product, not a log).
 3. Drive-the-whole-fleet-from-Discord-on-your-phone (herdr's sharpest absence).
-4. No-daemon, MIT, drop-in over existing harnesses (vs herdr's AGPL+commercial heavier adopt).
+4. MIT-licensed, drop-in coordination over existing harnesses (vs herdr's AGPL+commercial heavier adopt).
 
 **Gaps flotilla should consider adopting from herdr:**
 - Native hook/plugin state integrations instead of pure output-heuristic drivers (more reliable; the path to 14+ agents).
