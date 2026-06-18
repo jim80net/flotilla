@@ -147,7 +147,8 @@ two BINDING forms and are mutually exclusive (use one). The top-level `xo_agent`
 heartbeat/clock, `status`, and `voice` target) and MAY accompany `channels[]` to
 pick which XO a federated relay daemon clocks (the meta-XO) instead of defaulting to
 `agents[0]` — so a federated relay roster sets `xo_agent: meta-xo` alongside its
-`channels[]`. Secrets carry a webhook for each XO that posts
+`channels[]`. The optional top-level `cos_agent` (§8, reserved for #108) MUST name an
+agent in `agents[]` when set. Secrets carry a webhook for each XO that posts
 (`FLOTILLA_WEBHOOK_<XO>`), created **in that XO's channel**.
 
 **On the recursion (allowed by design, not a validation error):** an agent MAY be
