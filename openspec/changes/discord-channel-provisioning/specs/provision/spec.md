@@ -32,8 +32,23 @@ from stdout text. A 2xx response carrying no channel id SHALL be treated as an e
 
 #### Scenario: Create under a parent category
 
-- **WHEN** `flotilla channel create trade-desk --category "Family Office"` runs and that category exists
+- **WHEN** `flotilla channel create trade-desk --category "Family Office"` runs and exactly one category by that name exists
 - **THEN** the channel is created with its parent set to that category's id
+
+#### Scenario: An unresolvable or ambiguous parent category is a clear error
+
+- **WHEN** `--category` names a category that does not exist, or names a category name shared by more than one category
+- **THEN** the command fails with a clear error (for ambiguity, instructing the operator to pass the category's snowflake id) and creates nothing
+
+#### Scenario: Errors are reported in a deterministic precedence
+
+- **WHEN** more than one precondition is unmet (e.g. neither the bot token nor the guild_id is set)
+- **THEN** the command reports them in a fixed order — bot token, then guild_id, then the Manage Channels preflight, then create — so the first error surfaced is deterministic
+
+#### Scenario: A rate-limited create is handled, never opaque
+
+- **WHEN** a create is rate-limited by Discord (HTTP 429)
+- **THEN** the command either transparently retries and succeeds, or fails with a clear rate-limit error naming the retry-after — never an unhandled or malformed error
 
 #### Scenario: Missing bot token is a clear error
 
@@ -50,9 +65,11 @@ from stdout text. A 2xx response carrying no channel id SHALL be treated as an e
 Before attempting to create a channel, the system SHALL compute the bot's effective
 guild-level permissions (guild owner, or `Administrator`, or the union of the `@everyone`
 role and the bot's roles) and SHALL fail with a clear, actionable error naming the missing
-**Manage Channels** permission when it is absent — creating nothing. A `403` returned at
-create time SHALL be translated to the same clear permission error as a backstop (covering
-category/channel permission overwrites or a permission change after the preflight).
+**Manage Channels** permission when it is absent — creating nothing. The `@everyone` grant
+SHALL be read from the role whose id equals the guild id (the documented Discord invariant).
+A `403` returned at create time SHALL be translated to the same clear permission error as a
+backstop (covering category/channel permission overwrites or a permission change after the
+preflight).
 
 #### Scenario: Bot lacks Manage Channels
 
@@ -72,16 +89,20 @@ category/channel permission overwrites or a permission change after the prefligh
 ### Requirement: Idempotent create (skip-if-exists)
 
 Because Discord does not enforce channel-name uniqueness, the system SHALL make create
-idempotent: before creating, it SHALL list the guild's channels and SKIP creation
-(reporting the existing channel's id) when a channel of the same type with a matching name
-already exists under the same parent. Name matching SHALL account for Discord's text-channel
-normalization (lowercasing and space→hyphen), so a re-run with the original requested name
-still matches the normalized stored name.
+idempotent under sequential single-actor use: before creating, it SHALL list the guild's
+channels and SKIP creation (reporting the existing channel's id) when a channel of the same
+type with a matching name already exists under the same parent. Name matching SHALL account
+for Discord's documented text-channel normalization (lowercasing and space→hyphen) so a
+re-run with the original requested name still matches the normalized stored name; it SHALL
+NOT apply speculative transforms that could over-match and falsely skip a distinct channel.
+The skip report SHALL disclose that an existing channel's topic/parent are NOT reconciled
+(create is idempotent, not convergent). Concurrent provisioning MAY still race (Discord
+enforces no name uniqueness); `list` is the authoritative read-back.
 
 #### Scenario: Re-running a create does not duplicate
 
 - **WHEN** `flotilla channel create fleet-command` runs a second time and that channel already exists under the same parent
-- **THEN** no new channel is created and the command reports the existing channel's id as skipped
+- **THEN** no new channel is created and the command reports the existing channel's id as skipped, disclosing that topic/parent were not reconciled
 
 #### Scenario: Requested name matches a normalized existing name
 
@@ -111,6 +132,11 @@ clear error. The system SHALL NOT rewrite the committable roster file in place.
 - **WHEN** `--xo` or `--member` names an agent not present in the roster
 - **THEN** the command fails with a clear error before emitting any binding
 
+#### Scenario: Empty members and role are omitted from the binding
+
+- **WHEN** `create --xo alpha-xo` runs with no `--member` and no `--role`
+- **THEN** the emitted binding contains `channel_id` and `xo_agent` only (empty members/role are omitted), matching the roster `omitempty` shape
+
 ### Requirement: List channels
 
 The system SHALL list the guild's channels (id, type, name, parent) via the bot token, so
@@ -128,15 +154,30 @@ The system SHALL delete a channel only when given its explicit snowflake id — 
 name — so a name typo cannot delete the wrong channel. On success it SHALL report the
 deleted id.
 
+The delete verb SHALL require an explicit confirmation flag (`--yes`) and SHALL validate
+that the argument is a snowflake (all digits) before any REST call, so the one destructive
+verb is never a one-keystroke or fat-fingered fire. A delete of a well-formed but
+non-existent id SHALL report a clear error, never a silent success.
+
 #### Scenario: Delete by id
 
-- **WHEN** `flotilla channel delete 123456789012345678` runs
+- **WHEN** `flotilla channel delete 123456789012345678 --yes` runs
 - **THEN** that channel is deleted and the id is reported
+
+#### Scenario: Delete requires confirmation
+
+- **WHEN** `flotilla channel delete 123456789012345678` runs without `--yes`
+- **THEN** it fails with a clear error and deletes nothing
 
 #### Scenario: Delete has no name path
 
-- **WHEN** an operator wants to delete a channel
-- **THEN** the only accepted form is the explicit snowflake id (there is no delete-by-name), so a mistyped name cannot target a real channel
+- **WHEN** an operator passes a non-snowflake (non-numeric) argument to delete
+- **THEN** it is rejected before any REST call (there is no delete-by-name), so a mistyped name cannot target a real channel
+
+#### Scenario: Delete of a non-existent id is a clear error
+
+- **WHEN** `flotilla channel delete <well-formed-but-absent-id> --yes` runs and no such channel exists
+- **THEN** it reports a clear error (not a silent exit-0)
 
 ### Requirement: The bot token is never logged
 

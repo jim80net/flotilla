@@ -29,9 +29,16 @@ the operator.
     `--type category`), with optional `--topic` and `--category <name|id>` parent.
   - `flotilla channel list` — list the guild's channels (id, type, parent) so the
     operator/CoS can read back what exists and harvest snowflake ids.
-  - `flotilla channel delete <channel-id>` — tear down a channel **by explicit
-    snowflake id only** (never by name — you cannot fat-finger a name and nuke the
-    wrong channel).
+  - `flotilla channel delete <channel-id> --yes` — tear down a channel **by explicit
+    snowflake id only** (never by name; the id is validated as a snowflake before any REST
+    call) and **only with the `--yes` confirmation flag** — the one destructive verb is
+    never a one-keystroke fire. Intended for operator-driven teardown (least-privilege:
+    discouraged for autonomous-CoS use against the live coordination guild).
+
+This is an **imperative provisioning helper**: `create` provisions from its argv, never by
+reading the roster as a desired-state plan. Declarative reconciliation (a `sync` verb,
+`--write-roster`, drift detection) is an explicit non-goal here — named so the imperative
+scope is a conscious choice, not a drift toward an accidental IaC engine.
 - **Idempotent create (skip-if-exists).** Discord does NOT enforce channel-name
   uniqueness, so a naive re-run would silently create duplicates. `create` first lists
   the guild and skips (reporting the existing id) when a channel of the same type with a
