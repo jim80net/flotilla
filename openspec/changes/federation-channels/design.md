@@ -136,10 +136,23 @@ posting in its channel, or drives cross-fleet from `#fleet-command`.
 
 **Validation rules (fail-closed at load, mirroring the existing strict roster
 checks):** every `xo_agent`/`member` names an agent in `agents[]`; every
-`channel_id` is unique (no channel bound twice); each agent is the `xo_agent` of
-at most one binding; `channel_id`+`xo_agent` and `channels[]` are mutually
-exclusive (use one form); secrets carry a webhook for each XO that posts
+`channel_id` is unique (no channel bound twice — this is what guarantees the
+"exactly one relay per channel" invariant in §7 at config time); each agent is the
+`xo_agent` of at most one binding; `channel_id`+`xo_agent` and `channels[]` are
+mutually exclusive (use one form); secrets carry a webhook for each XO that posts
 (`FLOTILLA_WEBHOOK_<XO>`), created **in that XO's channel**.
+
+**On the recursion (allowed by design, not a validation error):** an agent MAY be
+both the `xo_agent` of one binding AND a `member` of another — that is exactly a
+project-XO (hub of `#fleet-alpha`, member of `#fleet-command`). An agent MAY also be
+a member of more than one channel (addressable from several places; it still has one
+pane/inbox). The only "≤1" rule is *xo-of-a-binding* (a channel has one hub).
+
+**Single-guild assumption (v1):** the roster carries one `guild_id`, so v1 binds
+channels **within one Discord server** (one bot, present in each bound channel with
+the Message-Content intent). Federating across **separate Discord servers** —
+per-binding `guild_id`, a bot in each guild — is a deliberate later extension, not
+in v1.
 
 **Cross-host note (multi-host federation):** when project flotillas run on
 different hosts, each host owns a *project* roster (its own `flotilla watch` +
@@ -197,10 +210,22 @@ watch a delegation flow through `#fleet-alpha`).
   already monitors *many* desks but heartbeats *one* `xo_agent`. In a federation,
   each project flotilla runs its own `watch` (its own clock) as today; the meta-XO
   needs a clock too. v1 keeps **one clocked XO per `watch` daemon** — a federated
-  single-host deployment runs one `watch` per XO (meta + each project), and the
-  **multi-channel relay** can be hosted by any one of them (or a dedicated relay
-  instance). Multiplexing the clock over several XOs in one daemon is a possible
-  later simplification, explicitly **out of scope** here.
+  single-host deployment runs one `watch` per XO (meta + each project). Multiplexing
+  the clock over several XOs in one daemon is a possible later simplification,
+  explicitly **out of scope** here.
+- **Exactly one relay per channel (the load-bearing invariant that separates the
+  clock from the relay).** The clock is per-XO, but the inbound relay must NOT be:
+  if two daemons both opened a gateway on the same channel, an operator message
+  would be **delivered twice**. Therefore **exactly one relay instance owns a given
+  channel.** Concretely, a federated deployment runs ONE multi-channel relay (a
+  daemon — or a dedicated relay-only instance — that opens the gateway for the whole
+  `channels[]` set and routes by origin channel), while the per-XO clock daemons run
+  **gateway-disabled (clock-only)**. A daemon's gateway is enabled only for the
+  channels it exclusively owns; no channel appears in two relays. (Mechanically:
+  `cmdWatch` opens a gateway today whenever channel+token+operator are set — the v1
+  build must gate that so a clock-only daemon does not also relay a channel the
+  central relay owns.) This keeps "per-XO clock" and "one relay per channel"
+  non-contradictory.
 
 ## 8. Setup helper
 
