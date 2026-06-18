@@ -21,13 +21,13 @@ Every "decision/question" the old draft raised, with its real status. The regist
 |---|---|---|
 | §1 / §8.1 — the one-liner ("Option A/B/C, his call") | **DECIDED** | The current README **is** the answer: "drop-in chief of staff … pluggable coordination layer" (README.md:3-14). Operator 2026-06-18: *"Q1 was definitely answered and the current README is the result."* Register: *Positioning*. |
 | §5 README proposal line "drop-in, **no new daemon**" | **DISAVOWED — that line was the taint** | "No daemon / no lock-in" is not a differentiator (operator 2026-06-18; #96/`5ef0f38`). The current README correctly omits it. Register: *No-daemon … not differentiators*. |
-| §2 — "biggest miss: no visual / not 30-sec-shiny" | **STALE / DONE** | The README is already chat-first and **has a demo GIF** (README.md:21-38, `docs/assets/flotilla-demo.gif`), shipped via #96/#107. |
-| §5 — "rewrite the README" | **STALE** | The chat-first rewrite already landed (#96/#107). The README is the decided positioning, not a draft to redo. |
+| §2 — "biggest miss: no visual / not 30-sec-shiny" | **STALE / DONE** | The README is already chat-first and carries an **illustrative demo mockup** (README.md:21-38, `docs/assets/flotilla-demo.gif`, added in #89 and explicitly labeled "Mockup — illustrative" in #94). A real screen-recording could still be a nice-to-have, but the "no visual" gap is closed. |
+| §5 — "rewrite the README" | **STALE** | The chat-first rewrite already landed (#96, commit `3450996`). The README is the decided positioning, not a draft to redo. |
+| §3.2 — `flotilla status` (whole-fleet snapshot) | **DONE / SHIPPED** | `flotilla status` (one line per desk) shipped in #97 (`cmd/flotilla/status.go`), with `--json`; #99 wired the landing widget to real `flotilla status --json`. Not future work. |
 | §6 / §8.5 — landing site greenlight | **DECIDED** | Owned by a **separate dedicated desk** the operator is standing up (operator 2026-06-18). Register: *landing/dashboard = separate desk*. Core-flotilla XO stays on core. |
 | §7 — "public surface must use generic examples" | **DECIDED (already practiced)** | Generic `infra`/`research`/`data` only, never the private deployment. Register: *public surface uses generic examples only*. |
 | §7 — herdr framing | **DECIDED** | Complementary, no tie-in (`docs/competitive/herdr-vs-flotilla.md`). Register: *herdr = complementary*. |
-| §8 closing — "the rest flows on clean gates, no per-step permission" | **DECIDED (posture)** | Trio-gated autonomy; clean-gated non-major work merges without a nod (operator 2026-06-18, `db0864a`). Register: *workflow posture*. |
-| §3.2 / §8 — `flotilla status` (whole-fleet snapshot) | **NOT a decision — buildable now** | Reporting/status has no abstraction risk and is aligned, non-major maintenance → it flows on clean gates under the autonomous-workflow posture. No operator call needed; see §C. |
+| §8 closing — "the rest flows on clean gates, no per-step permission" | **DECIDED (posture)** | Trio-gated autonomy; clean-gated non-major work merges without a nod (operator 2026-06-18 autonomous-workflow directive). Register: *workflow posture*. |
 
 ---
 
@@ -76,8 +76,8 @@ So the genuine strategy question:
 
 - Do you want a **deliberate launch moment** (a scoped "v1 public cut" you point people at),
   or does flotilla just **keep evolving continuously** as a public repo (no launch event)?
-- If a launch: what's the minimum bar (the README + demo already exist; `flotilla status`
-  from §C would be a natural "one obvious value-add")?
+- If a launch: the README + illustrative demo + `flotilla status` already exist, so the
+  minimum bar may already be met — what (if anything) is the gate before you'd point people at it?
 
 ---
 
@@ -86,13 +86,12 @@ So the genuine strategy question:
 Under the trio-gated autonomous-workflow posture, these are aligned, non-major, low-risk and
 flow on clean gates without an operator call (listed so they're visible, not to ask):
 
-- **`flotilla status`** — a whole-fleet snapshot command (+ `--json`). It only *reads* state
-  the detector already assesses (`surface.Assess` over each desk + the backlog) — **zero
-  abstraction risk**. The single most concrete "value obvious at a glance" feature. I can
-  take this through the standard flow whenever it's the priority.
-- A **scheduled reporting digest** (small follow-on to `status`).
+- A **scheduled reporting digest** — push the existing `flotilla status` snapshot to Discord
+  on a cadence (morning brief / end-of-run), a small follow-on to the shipped `status` command.
 - The **release-sign-off workflow** (the one unchecked README roadmap item) — buildable;
   note it pairs with B1 *if* Modes happen, but it stands alone too.
+
+(`flotilla status` itself already shipped — see §A.)
 
 ---
 
