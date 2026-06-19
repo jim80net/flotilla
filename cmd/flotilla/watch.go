@@ -123,10 +123,6 @@ func cmdWatch(args []string) error {
 	}
 	alert := func(msg string) { post("flotilla-watch", "⚠️ "+msg) }
 
-	// paneMus serializes the daemon's two in-process pane writers — a confirmed delivery
-	// (below) and the change-detector's /clear rotate (Rotate closure) — so the rotate cannot
-	// interleave between a confirmed delivery's submit and its Enter-only retry. Shared by both.
-	paneMus := watch.NewPaneMutexes()
 	// confirm turns "the tmux keystrokes ran" into "a turn started": it idle-gates, submits,
 	// confirms the Idle→Working edge, retries Enter-only (never re-pasting), and returns a typed
 	// error the Injector dispatches on (ErrBusy → defer; failure → loud alert). Closing the
@@ -141,10 +137,18 @@ func cmdWatch(args []string) error {
 		if err != nil {
 			return err
 		}
-		// Hold the per-agent pane mutex across the WHOLE confirmed-delivery sequence so the
-		// detector's /clear rotate cannot interleave between the submit and the retry.
-		unlock := paneMus.Lock(agent)
-		defer unlock()
+		// Hold the per-pane TRANSACTION lock across the WHOLE confirmed-delivery sequence so no
+		// other transaction — the detector's /clear rotate (same process), a `flotilla send`, or a
+		// flotilla-dash control action (other processes) — can interleave between the submit and
+		// the Enter-only retry. Keyed by the resolved pane target (the same key the per-call flock
+		// inside Submit uses), bounded so a stuck holder never wedges this worker. A timeout is a
+		// real delivery failure (the Injector escalates a relay, drops a tick) — the same class as
+		// a per-call lock-contention error.
+		txn, err := deliver.AcquirePaneTxn(pane, deliver.PaneTxnTimeout)
+		if err != nil {
+			return err
+		}
+		defer txn.Release()
 		return confirm.Submit(drv, pane, message)
 	}, 16)
 	// A failed/undeliverable RELAY (operator message) raises a LOUD alert — the inverse of the
@@ -276,15 +280,23 @@ func cmdWatch(args []string) error {
 			AckAge:     ack.Age,
 			Wake:       wake,
 			Rotate: func() error {
-				// Serialize the /clear rotate against an in-flight confirmed delivery to the XO
-				// pane (the same paneMus the Injector holds), so the rotate never interleaves
-				// between a delivery's submit and its Enter-only retry.
-				unlock := paneMus.Lock(xo)
-				defer unlock()
+				// Resolve the XO pane FIRST, then take the per-pane TRANSACTION lock keyed by that
+				// target (the same key every other transaction writer uses), so the /clear rotate
+				// never interleaves between any confirmed delivery's submit and its Enter-only retry
+				// — across processes (a dash control action, a `flotilla send`), not just the
+				// in-process Injector. The detector invokes Rotate from runTail, OUTSIDE detector.mu,
+				// so this bounded acquire cannot stall the tick loop (see Detector.Tick). A txn-lock
+				// timeout surfaces as a rotate error (logged, non-fatal — the continuation still
+				// proceeds, just in un-rotated context this tick).
 				pane, err := deliver.ResolvePane(agentTitle(cfg, xo))
 				if err != nil {
 					return err
 				}
+				txn, err := deliver.AcquirePaneTxn(pane, deliver.PaneTxnTimeout)
+				if err != nil {
+					return err
+				}
+				defer txn.Release()
 				return surface.RotateContext(xoDrv, pane)
 			},
 			Awaiting:            awaiting.Present,

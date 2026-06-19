@@ -33,10 +33,34 @@ import (
 // the env-independent coordination point.
 
 const (
-	// paneLockTimeout bounds how long a writer waits for a pane's lock before dropping.
+	// paneLockTimeout bounds how long a writer waits for a pane's per-CALL lock before dropping.
 	paneLockTimeout = 8 * time.Second
 	// paneLockPoll is the retry cadence while the lock is held by another writer.
 	paneLockPoll = 25 * time.Millisecond
+
+	// PaneTxnTimeout bounds how long a TRANSACTION writer waits for a pane's transaction lock
+	// (AcquirePaneTxn) before giving up and dropping its delivery. A whole transaction (a
+	// confirmed delivery: submit → poll Assess → re-send Enter, or a context rotate) holds the
+	// txn lock for its entire span. The SLEEP-dominated worst case of a full surface.Confirm.Submit
+	// is ~6.5s (fast phase maxSubmitAttempts×confirmPolls×confirmPollInterval ≈ 1.5s + patient
+	// grace confirmGracePolls×confirmGraceInterval ≈ 5s); on top of that each of its ~25 pane
+	// captures + Enter sends is a tmux call that takes the per-call .lock, so a HEALTHY server adds
+	// tens-to-low-hundreds of ms total but a SLOW/contended server adds more (the absolute ceiling
+	// is bounded only by deliver.commandTimeout per call — but a tmux server that hung that long is
+	// itself broken, and dropping is then the correct outcome). 12s sits a realistic ~1.5–2× above
+	// the ~7–8s a slow-but-alive delivery takes, so a writer waits out a legitimately in-flight
+	// delivery rather than spuriously dropping, while still bounding a genuinely stuck holder. It is
+	// far below the change-detector tick interval, so a waiting rotate never stalls the clock.
+	// Callers pass this as the AcquirePaneTxn timeout; the dash passes the same.
+	PaneTxnTimeout = 12 * time.Second
+
+	// paneLockSuffix / paneTxnSuffix name the two DISTINCT lockfiles per pane. The per-call lock
+	// (.lock) guards a single tmux call; the transaction lock (.txn) guards a whole multi-step
+	// transaction. They MUST be distinct files: a transaction holds .txn while its inner tmux
+	// calls each take .lock, so sharing one file would self-deadlock (flock is per-open-file-
+	// description — a second fd to the same file in the same process blocks against the first).
+	paneLockSuffix = ".lock"
+	paneTxnSuffix  = ".txn"
 )
 
 // paneLock is a held per-pane advisory lock; Release drops it (the flock is also
@@ -72,15 +96,22 @@ func paneLockKey(target string) string {
 	return stem + "-" + hex.EncodeToString(sum[:4])
 }
 
-// acquirePaneLock takes the per-pane advisory lock, blocking at most paneLockTimeout.
+// acquirePaneLock takes the per-pane per-CALL advisory lock, blocking at most paneLockTimeout.
 func acquirePaneLock(target string) (*paneLock, error) {
 	return acquirePaneLockFor(target, paneLockTimeout)
 }
 
-// acquirePaneLockFor is the bounded-acquire core (timeout injectable for tests). It
-// polls a non-blocking flock until it is held or the deadline passes; on timeout it
-// returns an error (the caller drops the delivery) and NEVER blocks indefinitely.
+// acquirePaneLockFor takes the per-CALL lock (.lock) with an injectable timeout (for tests).
 func acquirePaneLockFor(target string, timeout time.Duration) (*paneLock, error) {
+	return acquirePaneLockFile(target, paneLockSuffix, "injection", timeout)
+}
+
+// acquirePaneLockFile is the bounded-acquire core, parameterized by lockfile SUFFIX (.lock vs
+// .txn) and an error LABEL. It polls a non-blocking flock until it is held or the deadline
+// passes; on timeout it returns an error (the caller drops the delivery) and NEVER blocks
+// indefinitely. Distinct suffixes give a pane two independent advisory locks (per-call and
+// per-transaction) that one process can hold simultaneously without self-deadlock.
+func acquirePaneLockFile(target, suffix, label string, timeout time.Duration) (*paneLock, error) {
 	dir, err := paneLockDir()
 	if err != nil {
 		return nil, err
@@ -88,10 +119,10 @@ func acquirePaneLockFor(target string, timeout time.Duration) (*paneLock, error)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("pane lock dir: %w", err)
 	}
-	path := filepath.Join(dir, paneLockKey(target)+".lock")
+	path := filepath.Join(dir, paneLockKey(target)+suffix)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return nil, fmt.Errorf("open pane lock for %q: %w", target, err)
+		return nil, fmt.Errorf("open pane %s lock for %q: %w", label, target, err)
 	}
 	deadline := time.Now().Add(timeout)
 	for {
@@ -101,12 +132,12 @@ func acquirePaneLockFor(target string, timeout time.Duration) (*paneLock, error)
 		case syscall.EWOULDBLOCK:
 			if time.Now().After(deadline) {
 				f.Close()
-				return nil, fmt.Errorf("pane %q injection lock busy: timed out after %s (delivery dropped)", target, timeout)
+				return nil, fmt.Errorf("pane %q %s lock busy: timed out after %s (delivery dropped)", target, label, timeout)
 			}
 			time.Sleep(paneLockPoll)
 		default:
 			f.Close()
-			return nil, fmt.Errorf("flock pane %q: %w", target, err)
+			return nil, fmt.Errorf("flock pane %q %s lock: %w", target, label, err)
 		}
 	}
 }
@@ -119,4 +150,39 @@ func (l *paneLock) Release() {
 	_ = syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN)
 	_ = l.f.Close()
 	l.f = nil // idempotent — a second Release is a no-op, never acts on a closed fd
+}
+
+// PaneTxn is a held per-pane TRANSACTION lock — the cross-process generalization of the watch
+// daemon's former in-process per-pane mutex (the removed watch.PaneMutexes). It serializes WHOLE
+// pane transactions (a confirmed delivery,
+// or a context rotate) so two transactions to the same pane never interleave keystrokes,
+// regardless of which OS process runs each (CLI `send`, the `watch` Injector + detector rotate,
+// the flotilla-dash control handler). It is a distinct flock (.txn) from the per-call lock
+// (.lock), so a per-call lock taken INSIDE a held transaction does not self-deadlock. Release
+// drops it (the flock also auto-releases on process death, so a crashed holder never wedges the
+// pane). The lock is CALLER-HELD: surface.Confirm.Submit is unchanged (it takes only the per-call
+// lock); each caller wraps its whole transaction in AcquirePaneTxn → defer Release → Submit.
+type PaneTxn struct{ l *paneLock }
+
+// AcquirePaneTxn takes the per-pane TRANSACTION lock, waiting at most timeout (then erroring so
+// the caller drops the delivery, never wedging the heartbeat clock). It is keyed by the pane
+// TARGET via the SAME paneLockKey the per-call lock uses, so every transaction writer (CLI send,
+// the watch Injector, the detector rotate, the dash) computes one identical key per pane and the
+// lock protects the actual shared resource. Pass deliver.PaneTxnTimeout unless a caller needs a
+// tighter bound. The returned *PaneTxn must be Released (defer it) when the transaction ends.
+func AcquirePaneTxn(target string, timeout time.Duration) (*PaneTxn, error) {
+	l, err := acquirePaneLockFile(target, paneTxnSuffix, "transaction", timeout)
+	if err != nil {
+		return nil, err
+	}
+	return &PaneTxn{l: l}, nil
+}
+
+// Release drops the transaction lock. Safe on a nil receiver and idempotent (the underlying
+// paneLock.Release is a no-op after the first call).
+func (t *PaneTxn) Release() {
+	if t == nil {
+		return
+	}
+	t.l.Release()
 }
