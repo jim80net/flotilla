@@ -106,7 +106,16 @@
       (env-gated) integration test exercising the REAL execRunner read path. `go test -race ./...` green.
 - [x] 2.6 Docs: tracker section in `docs/dash-runbook.md` (gh auth prerequisite, `--repo` pinning,
       write-CSRF posture, `operator-idea` label) — gh commands cold-tested; README roadmap updated.
-- [ ] 2.7 `/systems-review` + `/open-code-review` + `/storm` on the Phase 2 diff; iterate clean.
+- [x] 2.7 `/systems-review` + `/open-code-review` + `/storm` on the Phase 2 diff; iterated clean.
+      ROUND 1: trio converged — design/security clean, ONE Med must-fix (no request-time gh deadline) +
+      cheap improvements. Folded ALL: gh seam-level timeout (ErrTimeout→504), gh-missing (ErrGHMissing→503),
+      trimmed title/labels (ErrEmptyLabel), full writeTrackerError status map + 5xx stderr log, List state
+      validation, decodeJSON trailing-content rejection, safeHref scheme allowlist, a11y (aria-selected +
+      focus-visible), pinned-fields comment precision. Resolved STORM's "private-repo empty-vs-error"
+      hypothesis with a live probe (inaccessible repo → exit-1 ErrRepoNotFound, never exit-0 []).
+      ROUND 2: systems-review APPROVE, OCR clean (its 2 "High" were false positives), STORM CLEAN — no
+      must-fix; round-1 fixes re-verified by live execution. One P3 (title length capped untrimmed vs
+      sent-trimmed) fixed. go test -race ./... green; vet+gofmt clean; live read path re-verified.
 - [ ] 2.8 **Phase-2 checkpoint:** report; proposed Phase 3.
 
 ## Phase 3 — cnc control actions
