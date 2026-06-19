@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -92,6 +93,40 @@ func TestHubCap(t *testing.T) {
 	}
 	if h.add(&sseClient{events: make(chan string, 1)}) {
 		t.Error("add should refuse a client over the cap")
+	}
+}
+
+// TestHubCapAtomicUnderBurst: concurrent connects must NOT overshoot the cap —
+// the count is decided by run, not a check-then-register race in the caller.
+func TestHubCapAtomicUnderBurst(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h := newHub()
+	go h.run(ctx)
+
+	const burst = maxSSEClients + 32
+	results := make(chan bool, burst)
+	var wg sync.WaitGroup
+	for i := 0; i < burst; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results <- h.add(&sseClient{events: make(chan string, 1)})
+		}()
+	}
+	wg.Wait()
+	close(results)
+	admitted := 0
+	for ok := range results {
+		if ok {
+			admitted++
+		}
+	}
+	if admitted != maxSSEClients {
+		t.Errorf("admitted %d clients under a burst, want exactly the cap %d (no overshoot)", admitted, maxSSEClients)
+	}
+	if got := h.count(); got != maxSSEClients {
+		t.Errorf("hub holds %d clients, want %d", got, maxSSEClients)
 	}
 }
 

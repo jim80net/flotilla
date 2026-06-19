@@ -36,7 +36,7 @@ type sseClient struct {
 // srv.Shutdown (the graceful-stop invariant). The fix makes shutdown leak-free
 // and deterministic.
 type hub struct {
-	register   chan *sseClient
+	register   chan registerReq
 	unregister chan *sseClient
 	broadcast  chan string
 	clients    map[*sseClient]bool
@@ -44,9 +44,17 @@ type hub struct {
 	done       chan struct{} // closed by run on exit
 }
 
+// registerReq asks run to admit a client. The cap decision is made by run (the
+// single owner of the client set) and returned on reply, so the cap is exact —
+// no check-then-register TOCTOU where concurrent connects overshoot maxSSEClients.
+type registerReq struct {
+	client *sseClient
+	reply  chan bool // buffered (cap 1) so run never blocks replying
+}
+
 func newHub() *hub {
 	return &hub{
-		register:   make(chan *sseClient),
+		register:   make(chan registerReq),
 		unregister: make(chan *sseClient),
 		broadcast:  make(chan string),
 		clients:    make(map[*sseClient]bool),
@@ -68,8 +76,15 @@ func (h *hub) run(ctx context.Context) {
 				delete(h.clients, c)
 			}
 			return
-		case c := <-h.register:
-			h.clients[c] = true
+		case req := <-h.register:
+			// The cap is enforced HERE, atomically, against the authoritative
+			// client count — never a check-then-act race in the caller.
+			if len(h.clients) >= maxSSEClients {
+				req.reply <- false
+			} else {
+				h.clients[req.client] = true
+				req.reply <- true
+			}
 		case c := <-h.unregister:
 			if h.clients[c] {
 				delete(h.clients, c)
@@ -93,16 +108,19 @@ func (h *hub) run(ctx context.Context) {
 }
 
 // add registers a client, returning false if the connection cap is reached (the
-// caller then refuses the connection) OR the hub is shutting down. It is safe to
-// call from a handler goroutine: it goes through the hub's channel, serialized by
-// run, and never blocks past run's exit (the done guard).
+// caller then refuses the connection) OR the hub is shutting down. The cap is
+// decided by run under its single-owner lock (exact, no overshoot). Safe from a
+// handler goroutine: it never blocks past run's exit (the done guard).
 func (h *hub) add(c *sseClient) bool {
-	if h.count() >= maxSSEClients {
-		return false
-	}
+	reply := make(chan bool, 1)
 	select {
-	case h.register <- c:
-		return true
+	case h.register <- registerReq{client: c, reply: reply}:
+		select {
+		case ok := <-reply:
+			return ok
+		case <-h.done:
+			return false
+		}
 	case <-h.done:
 		return false
 	}

@@ -135,15 +135,29 @@
   }
 
   /* ── refresh orchestration ───────────────────────────────────────────── */
+  // A monotonic epoch guards against out-of-order renders: SSE bursts + the poll
+  // fallback can launch overlapping refreshes, and an older response could land
+  // after a newer one. Each refresh stamps an epoch; a response only renders if
+  // it is still the latest, so a slow earlier fetch can never clobber the board
+  // with a stale snapshot.
+  var refreshEpoch = 0;
   function refresh() {
-    getJSON("/api/status").then(renderBoard).catch(function (err) {
-      el("board").innerHTML = '<div class="error">Could not load fleet status (' + escapeHtml(err.message) + ").</div>";
+    var epoch = ++refreshEpoch;
+    function current() { return epoch === refreshEpoch; }
+    function errorIn(id, err) { if (current()) el(id).innerHTML = '<div class="error">' + escapeHtml(err.message) + "</div>"; }
+
+    getJSON("/api/status").then(function (d) { if (current()) renderBoard(d); }).catch(function (err) {
+      if (current()) el("board").innerHTML = '<div class="error">Could not load fleet status (' + escapeHtml(err.message) + ").</div>";
     });
-    getJSON("/api/topology").then(renderTopology).catch(function (err) {
-      el("topology").innerHTML = '<div class="error">' + escapeHtml(err.message) + "</div>";
+    getJSON("/api/topology").then(function (d) { if (current()) renderTopology(d); }).catch(function (err) {
+      errorIn("topology", err);
     });
-    getJSON("/api/history").then(renderHistory).catch(function (err) {
-      el("ledger").innerHTML = '<div class="error">' + escapeHtml(err.message) + "</div>";
+    getJSON("/api/history").then(function (d) { if (current()) renderHistory(d); }).catch(function (err) {
+      // A history failure must mark BOTH panes — leaving the backlog showing its
+      // previous (now-stale) content while the ledger shows an error would be
+      // inconsistent and misleading.
+      errorIn("ledger", err);
+      errorIn("backlog", err);
     });
   }
 
@@ -162,12 +176,16 @@
     }
     var es = new EventSource("/events");
     var pollTimer = null;
+    function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
     es.addEventListener("update", function () {
       setConn("live");
-      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      stopPolling();
       refresh();
     });
-    es.onopen = function () { setConn("live"); };
+    // Stop the fallback poller as soon as the live link is (re)established — not
+    // only when an `update` event arrives — so a reconnect doesn't keep the
+    // redundant 5s refetch running.
+    es.onopen = function () { setConn("live"); stopPolling(); };
     es.onerror = function () {
       // EventSource auto-reconnects; meanwhile fall back to polling so the board
       // never goes silently stale.
