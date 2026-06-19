@@ -159,7 +159,13 @@ lands when flotilla-dev's cross-process pane lock is ready.
 - [ ] 3b.5 `/systems-review` + `/open-code-review` + `/storm` on the 3b diff; iterate clean.
 
 ### Phase 3 gates
-- [ ] 3.6 `/systems-review` + `/open-code-review` + `/storm` on the Phase 3a diff; iterate clean.
+- [x] 3.6 `/systems-review` + `/open-code-review` + `/storm` on the Phase 3a diff; iterated clean.
+      Trio converged: systems-review APPROVE, OCR clean (ES6-style findings were false positives vs the
+      deliberate ES5 vanilla-JS house style), STORM CLEAN — NO must-fix. Folded the polish: a SAFETY
+      RATCHET import-guard test (control links no pane-driving code while route/resume are gated — §5
+      fail-closed now CI-enforced by construction), federated-roster warning parity, honest JS outcome
+      default, a static "pending the pane lock" UX badge, doc-comment precision, a []rune micro-fix.
+      go test -race ./... green; vet+gofmt clean. (Phase 3b will run its own trio when the lock lands.)
 - [ ] 3.7 **Phase-3 checkpoint:** report; archive the openspec change when all phases land.
 
 ## Phase 4 — ergonomics (later, optional)
