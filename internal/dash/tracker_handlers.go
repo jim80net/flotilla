@@ -3,8 +3,11 @@ package dash
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 
 	"github.com/jim80net/flotilla/internal/dash/tracker"
@@ -261,28 +264,50 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
 		return false
 	}
+	// Reject trailing content after the JSON object (exactly one value expected).
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid request body: unexpected trailing content")
+		return false
+	}
 	return true
 }
 
 // writeTrackerError maps a tracker typed error onto an HTTP status + an honest
-// JSON message. An unrecognized error is a 502 (the dash is a gateway to gh) —
-// never a swallowed success.
+// JSON message (always surfaced — the silent-failure discipline). An
+// unrecognized gh failure is a 502 (the dash is a gateway to gh) — never a
+// swallowed success. Gateway-class (5xx) failures are also logged to the dash's
+// stderr so an operator can correlate a reported "tracker error" with a cause;
+// on loopback the verbatim gh message to the client is acceptable (Phase 3's
+// non-loopback bind should genericize the client message — TODO below).
 func writeTrackerError(w http.ResponseWriter, err error) {
 	status := http.StatusBadGateway
 	switch {
-	case errors.Is(err, tracker.ErrNoRepo):
+	case errors.Is(err, tracker.ErrNoRepo),
+		errors.Is(err, tracker.ErrGHMissing):
 		status = http.StatusServiceUnavailable
-	case errors.Is(err, tracker.ErrIssueNotFound):
+	case errors.Is(err, tracker.ErrIssueNotFound),
+		errors.Is(err, tracker.ErrRepoNotFound):
 		status = http.StatusNotFound
 	case errors.Is(err, tracker.ErrRateLimited):
 		status = http.StatusTooManyRequests
+	case errors.Is(err, tracker.ErrTimeout):
+		status = http.StatusGatewayTimeout
 	case errors.Is(err, tracker.ErrInvalidNumber),
 		errors.Is(err, tracker.ErrEmptyTitle),
 		errors.Is(err, tracker.ErrEmptyBody),
+		errors.Is(err, tracker.ErrEmptyLabel),
 		errors.Is(err, tracker.ErrTooLong),
 		errors.Is(err, tracker.ErrNoLabelChange),
+		errors.Is(err, tracker.ErrInvalidState),
 		errors.Is(err, tracker.ErrInvalidRepo):
 		status = http.StatusBadRequest
+	}
+	// TODO(dash, Phase 3): on a non-loopback bind, return a generic client
+	// message for 5xx (the verbatim gh stderr may carry host paths) and keep the
+	// detail server-side only. On loopback the operator IS the host owner, so the
+	// real message aids debugging.
+	if status >= 500 {
+		fmt.Fprintf(os.Stderr, "flotilla dash: tracker error (%d): %v\n", status, err)
 	}
 	writeError(w, status, err.Error())
 }

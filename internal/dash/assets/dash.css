@@ -130,6 +130,12 @@ code { font-family: var(--mono); color: var(--ink); background: rgba(255,255,255
 .tab:hover { color: var(--ink-2); }
 .tab.active { color: var(--ink); border-color: var(--line); background: var(--abyss-3); }
 
+/* visible keyboard focus (WCAG 2.4.7) on all interactive controls */
+.tab:focus-visible, .btn:focus-visible,
+input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: 2px solid var(--cyan); outline-offset: 1px;
+}
+
 /* buttons */
 .btn {
   font-family: var(--mono); font-size: .8rem; color: var(--ink-2);

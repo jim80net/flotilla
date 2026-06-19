@@ -117,6 +117,13 @@ var (
 	ErrIssueNotFound = errors.New("issue not found")
 	// ErrNetwork: gh could not reach GitHub (offline / DNS / connection).
 	ErrNetwork = errors.New("could not reach GitHub (check your network connection)")
+	// ErrTimeout: a gh invocation exceeded the per-call deadline (a hung/slow gh
+	// or a degraded GitHub). The subprocess is killed; the UI surfaces a timeout
+	// rather than letting a request hang indefinitely.
+	ErrTimeout = errors.New("gh timed out reaching GitHub")
+	// ErrGHMissing: the `gh` CLI is not installed or not on PATH (a first-run
+	// host-setup failure, distinct from an authenticated gh that errored).
+	ErrGHMissing = errors.New("the `gh` CLI is not installed or not on PATH")
 	// ErrParse: gh exited 0 but its output could not be parsed into the pinned
 	// field shape (a gh output-format change — detected, never silently mis-read).
 	ErrParse = errors.New("could not parse gh output")
@@ -130,8 +137,12 @@ var (
 	ErrEmptyTitle = errors.New("issue title is required")
 	// ErrEmptyBody: a comment request with no body.
 	ErrEmptyBody = errors.New("comment body is required")
+	// ErrEmptyLabel: a label that is empty or whitespace-only.
+	ErrEmptyLabel = errors.New("a label is empty")
 	// ErrTooLong: a field exceeds its length cap.
 	ErrTooLong = errors.New("field exceeds the maximum length")
 	// ErrNoLabelChange: a label request with neither add nor remove.
 	ErrNoLabelChange = errors.New("label change requires at least one label to add or remove")
+	// ErrInvalidState: a List state filter outside {open, closed, all}.
+	ErrInvalidState = errors.New("state must be open, closed, or all")
 )

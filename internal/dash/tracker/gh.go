@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Field caps for request-derived content. They bound a single request's blast
@@ -25,10 +27,19 @@ const (
 	maxLimit = 200
 )
 
+// ghTimeout bounds a single gh invocation when the caller's context carries no
+// deadline (the HTTP request path). A hung/slow gh (degraded GitHub, DNS stall,
+// a huge paginated repo) is killed at this deadline rather than pinning a
+// handler goroutine + child process indefinitely. The seam owns its own latency
+// budget so every verb inherits it; a caller WITH a shorter deadline (e.g. the
+// startup repo-resolve) keeps its own.
+const ghTimeout = 30 * time.Second
+
 // listFields / detailFields PIN the exact `gh --json` field set we parse. Pinning
-// the set (never the default shape) means a gh output change is DETECTED at parse
-// time, not silently mis-read (design §6). Keep these in sync with the Issue
-// struct's json tags.
+// the set catches a gh output SHAPE change (a removed/retyped field → an
+// ErrParse, not a silent mis-read); a field RENAME degrades to a zero value
+// (encoding/json ignores unknown keys), which the env-gated live test (gh_live_test.go)
+// is the canary for. Keep these in sync with the Issue struct's json tags.
 const (
 	listFields   = "number,title,labels,state,author,updatedAt"
 	detailFields = "number,title,body,labels,state,author,createdAt,updatedAt,comments,url"
@@ -82,6 +93,9 @@ func (g *GHTracker) List(ctx context.Context, filter ListFilter) ([]Issue, error
 	state := strings.ToLower(strings.TrimSpace(filter.State))
 	if state == "" {
 		state = "open"
+	}
+	if state != "open" && state != "closed" && state != "all" {
+		return nil, fmt.Errorf("%w: state %q (want open|closed|all)", ErrInvalidState, state)
 	}
 	args = append(args, "--state="+state)
 	if filter.Label != "" {
@@ -142,22 +156,25 @@ func (g *GHTracker) Create(ctx context.Context, in CreateInput) (Issue, error) {
 	if len(in.Body) > maxBodyLen {
 		return Issue{}, fmt.Errorf("%w: body (max %d)", ErrTooLong, maxBodyLen)
 	}
-	if err := validateLabels(in.Labels); err != nil {
+	labels, err := normalizeLabels(in.Labels)
+	if err != nil {
 		return Issue{}, err
 	}
-	args := []string{"issue", "create", "--repo=" + g.repo, "--title=" + in.Title, "--body-file=-"}
-	for _, l := range in.Labels {
+	// Send the TRIMMED title (the empty-check trims, so the stored/sent value
+	// must match — otherwise " hi " ships leading/trailing whitespace to GitHub).
+	args := []string{"issue", "create", "--repo=" + g.repo, "--title=" + title, "--body-file=-"}
+	for _, l := range labels {
 		args = append(args, "--label="+l)
 	}
-	out, errb, err := g.run(ctx, args, []byte(in.Body))
-	if err != nil {
-		return Issue{}, classify(errb, err)
+	out, errb, rerr := g.run(ctx, args, []byte(in.Body))
+	if rerr != nil {
+		return Issue{}, classify(errb, rerr)
 	}
 	// `gh issue create` prints the new issue URL (it has no --json). Parse the
 	// number from the URL's last path segment; the frontend refetches the list.
 	url := strings.TrimSpace(string(out))
 	num := issueNumberFromURL(url)
-	return Issue{Number: num, URL: url, State: "OPEN", Title: in.Title}, nil
+	return Issue{Number: num, URL: url, State: "OPEN", Title: title}, nil
 }
 
 // Comment appends a comment, body via stdin (injection-safe).
@@ -188,17 +205,19 @@ func (g *GHTracker) Label(ctx context.Context, number int, add, remove []string)
 	if len(add) == 0 && len(remove) == 0 {
 		return ErrNoLabelChange
 	}
-	if err := validateLabels(add); err != nil {
+	addN, err := normalizeLabels(add)
+	if err != nil {
 		return err
 	}
-	if err := validateLabels(remove); err != nil {
+	removeN, err := normalizeLabels(remove)
+	if err != nil {
 		return err
 	}
 	args := []string{"issue", "edit", "--repo=" + g.repo}
-	for _, l := range add {
+	for _, l := range addN {
 		args = append(args, "--add-label="+l)
 	}
-	for _, l := range remove {
+	for _, l := range removeN {
 		args = append(args, "--remove-label="+l)
 	}
 	args = append(args, "--", strconv.Itoa(number))
@@ -224,22 +243,27 @@ func (g *GHTracker) Close(ctx context.Context, number int) error {
 
 // --- helpers ---
 
-// validateLabels rejects empty/over-long labels and an over-count list. Labels
-// may contain spaces and most characters; the `--label=value` form means a
-// leading `-` is not a flag, so only emptiness, length, and count are checked.
-func validateLabels(labels []string) error {
+// normalizeLabels trims each label and rejects empty/over-long labels and an
+// over-count list, returning the cleaned labels to send. Labels may contain
+// spaces and most characters; the `--label=value` form means a leading `-` is
+// not a flag, so only emptiness, length, and count are checked. Trimming here
+// means " bug " and "bug" are the same label (not two distinct GitHub labels).
+func normalizeLabels(labels []string) ([]string, error) {
 	if len(labels) > maxLabelCount {
-		return fmt.Errorf("%w: labels (max %d)", ErrTooLong, maxLabelCount)
+		return nil, fmt.Errorf("%w: labels (max %d)", ErrTooLong, maxLabelCount)
 	}
+	out := make([]string, 0, len(labels))
 	for _, l := range labels {
-		if strings.TrimSpace(l) == "" {
-			return fmt.Errorf("%w: a label is empty", ErrTooLong)
+		t := strings.TrimSpace(l)
+		if t == "" {
+			return nil, ErrEmptyLabel
 		}
-		if len(l) > maxLabelLen {
-			return fmt.Errorf("%w: label (max %d)", ErrTooLong, maxLabelLen)
+		if len(t) > maxLabelLen {
+			return nil, fmt.Errorf("%w: label (max %d)", ErrTooLong, maxLabelLen)
 		}
+		out = append(out, t)
 	}
-	return nil
+	return out, nil
 }
 
 var issueURLTail = regexp.MustCompile(`/(\d+)\s*$`)
@@ -264,6 +288,13 @@ func issueNumberFromURL(url string) int {
 // the generic fallback. The patterns were verified against gh 2.45 live output
 // (repo-not-found, issue-not-found, HTTP 401, rate limit, connection failure).
 func classify(stderr []byte, runErr error) error {
+	// Process-level failures the stderr can't describe come first.
+	if errors.Is(runErr, context.DeadlineExceeded) {
+		return ErrTimeout
+	}
+	if errors.Is(runErr, exec.ErrNotFound) {
+		return ErrGHMissing
+	}
 	s := string(stderr)
 	switch {
 	case strings.Contains(s, "Could not resolve to a Repository"):
@@ -292,8 +323,16 @@ func classify(stderr []byte, runErr error) error {
 }
 
 // execRunner is the real ghRunner: it runs `gh <args>` with stdin piped, and
-// captures stdout/stderr separately (stderr drives error classification).
+// captures stdout/stderr separately (stderr drives error classification). When
+// the caller's context carries no deadline (the HTTP request path), it imposes
+// ghTimeout so a hung gh is killed instead of pinning the goroutine; a timeout
+// surfaces as context.DeadlineExceeded so classify maps it to ErrTimeout.
 func execRunner(ctx context.Context, args []string, stdin []byte) ([]byte, []byte, error) {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, ghTimeout)
+		defer cancel()
+	}
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
@@ -302,6 +341,11 @@ func execRunner(ctx context.Context, args []string, stdin []byte) ([]byte, []byt
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 	err := cmd.Run()
+	// When CommandContext kills the child on deadline, cmd.Run() returns a
+	// "signal: killed" error; report the cause so classify recognizes it.
+	if ctx.Err() == context.DeadlineExceeded {
+		return out.Bytes(), errb.Bytes(), context.DeadlineExceeded
+	}
 	return out.Bytes(), errb.Bytes(), err
 }
 

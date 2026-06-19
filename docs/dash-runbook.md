@@ -124,8 +124,14 @@ gh auth status          # must report logged in to github.com
 gh --version            # any recent gh (tested against 2.45)
 ```
 
-If `gh` is not authenticated, the tracker surfaces a clear error in the UI
-("gh is not authenticated — run `gh auth login`"); the fleet view is unaffected.
+If `gh` is not authenticated — or not installed at all — the tracker surfaces a
+clear error in the UI ("gh is not authenticated — run `gh auth login`" /
+"the `gh` CLI is not installed or not on PATH"); the fleet view is unaffected.
+
+The tracker is **last-writer-wins** against GitHub: it holds no local issue state
+and does no optimistic-concurrency check, so two tabs (or two operators) editing
+the same issue simply apply in order. Each gh call is also bounded by a 30-second
+timeout, after which the UI reports a gateway timeout rather than hanging.
 
 ### Pinning the repo
 

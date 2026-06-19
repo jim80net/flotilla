@@ -213,6 +213,8 @@
     el("freshness").classList.toggle("hidden", !fleet);
     el("tab-fleet").classList.toggle("active", fleet);
     el("tab-issues").classList.toggle("active", !fleet);
+    el("tab-fleet").setAttribute("aria-selected", String(fleet));
+    el("tab-issues").setAttribute("aria-selected", String(!fleet));
     if (!fleet && window.flotillaTracker) window.flotillaTracker.show();
   }
   var tabs = document.querySelectorAll(".tab");

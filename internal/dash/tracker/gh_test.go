@@ -3,6 +3,7 @@ package tracker
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -159,6 +160,62 @@ func TestClassify_GHFailureModes(t *testing.T) {
 				t.Fatalf("classify(%q) = %v, want %v", c.name, err, c.want)
 			}
 		})
+	}
+}
+
+func TestClassify_TimeoutAndMissingGH(t *testing.T) {
+	// A context-deadline (a hung gh killed by execRunner) maps to ErrTimeout.
+	f := &fakeRunner{err: context.DeadlineExceeded}
+	g := newFakeTracker(t, f)
+	if _, err := g.List(ctx(), ListFilter{}); !errors.Is(err, ErrTimeout) {
+		t.Errorf("deadline → %v, want ErrTimeout", err)
+	}
+	// gh not installed (exec.ErrNotFound) maps to ErrGHMissing, not a swallowed
+	// or generic error.
+	f2 := &fakeRunner{err: exec.ErrNotFound}
+	g2 := newFakeTracker(t, f2)
+	if _, err := g2.List(ctx(), ListFilter{}); !errors.Is(err, ErrGHMissing) {
+		t.Errorf("exec.ErrNotFound → %v, want ErrGHMissing", err)
+	}
+}
+
+func TestList_InvalidStateRejected(t *testing.T) {
+	f := &fakeRunner{}
+	g := newFakeTracker(t, f)
+	if _, err := g.List(ctx(), ListFilter{State: "garbage"}); !errors.Is(err, ErrInvalidState) {
+		t.Errorf("err = %v, want ErrInvalidState", err)
+	}
+	if f.calls != 0 {
+		t.Error("an invalid state must not reach gh")
+	}
+}
+
+func TestCreate_TrimsTitleAndLabels(t *testing.T) {
+	f := &fakeRunner{stdout: []byte("https://github.com/jim80net/flotilla/issues/1\n")}
+	g := newFakeTracker(t, f)
+	issue, err := g.Create(ctx(), CreateInput{Title: "  spaced  ", Body: "x", Labels: []string{"  operator-idea  "}})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if v, _ := f.arg("--title"); v != "spaced" {
+		t.Errorf("--title = %q, want trimmed 'spaced'", v)
+	}
+	if v, _ := f.arg("--label"); v != "operator-idea" {
+		t.Errorf("--label = %q, want trimmed", v)
+	}
+	if issue.Title != "spaced" {
+		t.Errorf("returned title = %q, want trimmed", issue.Title)
+	}
+}
+
+func TestCreate_EmptyLabelRejected(t *testing.T) {
+	f := &fakeRunner{}
+	g := newFakeTracker(t, f)
+	if _, err := g.Create(ctx(), CreateInput{Title: "ok", Labels: []string{"  "}}); !errors.Is(err, ErrEmptyLabel) {
+		t.Errorf("err = %v, want ErrEmptyLabel", err)
+	}
+	if f.calls != 0 {
+		t.Error("an empty label must not reach gh")
 	}
 }
 

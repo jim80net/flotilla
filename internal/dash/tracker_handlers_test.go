@@ -188,6 +188,31 @@ func TestIssuesList_RateLimited(t *testing.T) {
 	}
 }
 
+func TestIssuesList_TypedErrorStatusMapping(t *testing.T) {
+	cases := []struct {
+		err  error
+		want int
+	}{
+		{tracker.ErrTimeout, http.StatusGatewayTimeout},
+		{tracker.ErrGHMissing, http.StatusServiceUnavailable},
+		{tracker.ErrRepoNotFound, http.StatusNotFound},
+		{tracker.ErrUnauthenticated, http.StatusBadGateway}, // gh→GitHub auth is a gateway failure, not a dash-auth 401
+		{tracker.ErrNetwork, http.StatusBadGateway},
+		{tracker.ErrInvalidState, http.StatusBadRequest},
+	}
+	for _, c := range cases {
+		f := &fakeTracker{err: c.err}
+		srv := trackerServer(t, f)
+		rec := doGet(t, srv, "/api/issues")
+		if rec.Code != c.want {
+			t.Errorf("%v → %d, want %d", c.err, rec.Code, c.want)
+		}
+		if !strings.Contains(rec.Body.String(), "error") {
+			t.Errorf("%v: error must be surfaced in the body", c.err)
+		}
+	}
+}
+
 // --- write endpoints (happy path) ---
 
 func TestIssueCreate_HappyPath(t *testing.T) {
@@ -331,6 +356,18 @@ func TestIssueCreate_MalformedBodyRejected(t *testing.T) {
 	}
 	if f.calls != 0 {
 		t.Error("a malformed body must not reach the tracker")
+	}
+}
+
+func TestIssueCreate_TrailingContentRejected(t *testing.T) {
+	f := &fakeTracker{}
+	srv := trackerServer(t, f)
+	rec := doWrite(t, srv, "POST", "/api/issues", `{"title":"x"}{"title":"y"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("code %d, want 400 (trailing content)", rec.Code)
+	}
+	if f.calls != 0 {
+		t.Error("a body with trailing content must not reach the tracker")
 	}
 }
 

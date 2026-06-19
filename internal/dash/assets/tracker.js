@@ -37,6 +37,14 @@
     });
   }
 
+  // safeHref returns an escaped https?:// URL or "" — a scheme allowlist so a
+  // non-http(s) URL (e.g. a javascript: scheme, which escapeHtml does NOT
+  // neutralize in an href) can never become a clickable link. The issue URL is
+  // gh-minted today; this makes the safe-scheme invariant explicit, not implicit.
+  function safeHref(u) {
+    return /^https?:\/\//i.test(String(u || "")) ? escapeHtml(u) : "";
+  }
+
   /* ── label chips ─────────────────────────────────────────────────────── */
   function labelChips(labels) {
     return (labels || []).map(function (l) {
@@ -109,7 +117,7 @@
         '<span class="issue-state ' + escapeHtml(state) + '">' + escapeHtml(state || "?") + "</span> " +
         '<span class="muted">by ' + escapeHtml(it.author && it.author.login) + "</span> " +
         '<span class="issue-labels">' + labelChips(it.labels) + "</span>" +
-        (it.url ? ' <a class="issue-link" href="' + escapeHtml(it.url) + '" target="_blank" rel="noopener">view on GitHub ↗</a>' : "") +
+        (safeHref(it.url) ? ' <a class="issue-link" href="' + safeHref(it.url) + '" target="_blank" rel="noopener">view on GitHub ↗</a>' : "") +
       "</div>" +
       '<div class="issue-body">' + escapeHtml(it.body || "") + "</div>" +
       '<h3 class="sub">Comments (' + comments.length + ")</h3>" +
