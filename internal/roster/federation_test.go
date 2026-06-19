@@ -120,6 +120,19 @@ func TestLoad_FederationChannels_XOHubsMultipleChannels(t *testing.T) {
 	if ch, ok := cfg.ChannelForXO("alpha"); !ok || ch != "C_HOME" {
 		t.Errorf("ChannelForXO(alpha) = %q ok=%v, want C_HOME (first-listed)", ch, ok)
 	}
+	// Pin "first-listed" precisely: reversing the binding order flips the home channel
+	// (proves the semantic is first-listed, not lowest-id / arbitrary).
+	rev, err := Load(writeRoster(t, `{
+	  "operator_user_id":"U","agents":[{"name":"alpha"},{"name":"meta"}],
+	  "channels":[
+	    {"channel_id":"C_CMD","xo_agent":"alpha"},
+	    {"channel_id":"C_HOME","xo_agent":"alpha"}]}`))
+	if err != nil {
+		t.Fatalf("reversed multi-channel roster should load: %v", err)
+	}
+	if ch, ok := rev.ChannelForXO("alpha"); !ok || ch != "C_CMD" {
+		t.Errorf("ChannelForXO(alpha) reversed = %q, want C_CMD (now first-listed)", ch)
+	}
 	// A channel bound twice (same channel → two XOs) is STILL rejected (the preserved
 	// one-relay-per-channel invariant).
 	if _, err := Load(writeRoster(t, `{

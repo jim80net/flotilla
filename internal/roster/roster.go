@@ -38,13 +38,14 @@ func (a Agent) Title() string {
 	return a.Name
 }
 
-// Channel binds one Discord channel to exactly one XO (its "home" hub) and the
-// member set addressable from that channel. It is the federation unit: a project
-// channel binds a project-XO + its desks; the fleet-command channel binds the
-// meta-XO + the project-XOs (a project-XO is to the meta-XO what a desk is to a
-// project-XO). The inbound relay routes a message by its ORIGIN channel to the
-// matching binding. The legacy single ChannelID + XOAgent form is the degenerate
-// one-binding case — see Bindings.
+// Channel binds one Discord channel to exactly one XO (its hub) and the member set
+// addressable from that channel. It is the federation unit: a project channel binds a
+// project-XO + its desks; the fleet-command channel binds the meta-XO + the project-XOs
+// (a project-XO is to the meta-XO what a desk is to a project-XO). One channel routes to
+// one XO, but an XO MAY hub several channels — its first-listed binding is then its
+// "home"/primary channel (see ChannelForXO). The inbound relay routes a message by its
+// ORIGIN channel to the matching binding. The legacy single ChannelID + XOAgent form is
+// the degenerate one-binding case — see Bindings.
 type Channel struct {
 	// ChannelID is the Discord channel this binding owns (unique across bindings —
 	// this is what guarantees "exactly one relay per channel").

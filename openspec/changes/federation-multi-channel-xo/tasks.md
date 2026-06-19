@@ -19,10 +19,16 @@
 
 ## 3. Gate
 
-- [ ] 3.1 Trio (systems-review + open-code-review + STORM) — confirm specifically: (a) one
-      relay per channel still holds (no channel gets two XOs), (b) @-resolution + member
-      semantics unaffected, (c) no regression to the legacy single-channel synthesis path.
+- [x] 3.1 Trio (systems-review + open-code-review + STORM) — CONFIRMED (a) one relay per
+      channel holds (seenChan retained + re-tested), (b) per-channel @-resolution/members
+      unaffected, (c) legacy synthesis path unchanged. Folded: reconciled the federation
+      "Per-XO outbound identity" requirement (a multi-channel XO posts via its single
+      webhook into its home/first-listed channel; inbound is per-channel, outbound is
+      home-scoped + NOT origin-aware this phase); reversed-order ChannelForXO test pins the
+      first-listed semantic; struct doc wording.
 - [ ] 3.2 PR; CI green; cubic via GraphQL isResolved; merge on clean gates.
 - [ ] 3.3 After merge: hand the operator the ready-to-paste `channels[]` (14-channel map +
-      `#spark-c2` with the FULL `agents[]` as members) + cutover steps (remove `channel_id`,
-      restart `watch`).
+      `#spark-c2` with the FULL `agents[]` as members) + cutover steps: remove `channel_id`,
+      restart `watch`, AND **create/verify each XO's `FLOTILLA_WEBHOOK_<XO>` in its
+      FIRST-LISTED (home) channel** so outbound posts + ledger tags coincide (the trio's
+      outbound-identity finding). List each XO's home channel FIRST in `channels[]`.

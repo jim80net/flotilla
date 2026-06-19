@@ -41,3 +41,24 @@ binding is NO LONGER an error.
 #### Scenario: An invalid binding is rejected at load
 - **WHEN** a binding names an xo_agent or member not present in `agents[]`, or binds the SAME channel twice (two XOs for one channel), or sets both the legacy `channel_id` and an explicit binding list
 - **THEN** roster load fails with a clear error and the daemon does not start
+
+### Requirement: Per-XO outbound identity
+
+Each XO SHALL post outbound under its OWN webhook identity (`FLOTILLA_WEBHOOK_<XO>`).
+Because a Discord webhook is channel-bound and there is exactly ONE webhook per XO, a
+multi-channel XO's outbound (`notify` / mirror) lands in a SINGLE channel — its
+**home (first-listed) channel** — even though it HUBS several channels for inbound. So
+the webhook MUST be created in the XO's home (first-listed) channel, so its outbound
+identity and the channel its ledger entries are tagged with (`ChannelForXO`) coincide.
+Outbound is home-channel-scoped; INBOUND is per-channel (each hubbed channel routes to
+the XO independently). Outbound is NOT origin-channel-aware in this phase (an XO's reply
+lands in its home channel regardless of which hubbed channel the operator messaged from);
+making outbound origin-aware would be a separate, explicitly-scoped change.
+
+#### Scenario: A multi-channel XO reports in its home channel
+- **WHEN** an XO that hubs several channels runs `flotilla notify --from <xo> …`
+- **THEN** the message posts under that XO's single webhook in its home (first-listed) channel, matching the channel `ChannelForXO` tags its ledger entries with
+
+#### Scenario: A single-channel project-XO reports in its own channel
+- **WHEN** `alpha-xo` (one binding) runs `flotilla notify --from alpha-xo …`
+- **THEN** the message posts in `#fleet-alpha` under the alpha-xo webhook identity, not in any other channel
