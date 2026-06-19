@@ -50,7 +50,11 @@ Acquiring the pane-transaction lock SHALL wait at most a bounded timeout and the
 or crashed holder can never permanently wedge the heartbeat clock or any other writer. The
 acquire SHALL NOT be performed while holding a lock whose hold-time is latency-critical to the
 detector (the `detector.mu` ordering): the transaction lock is acquired so that a bounded wait
-on it cannot stall the detector's tick loop.
+on it cannot stall the detector's tick loop. The advisory `flock` poll is NOT FIFO-fair, so under
+sustained contention from 3+ writers on one pane a writer MAY time out and drop while others hand
+the lock off; this is acceptable — the bounded drop is the designed safety valve (never a wedge),
+and per-pane multi-writer contention is rare (it requires concurrent deliveries to the SAME pane
+from distinct processes).
 
 #### Scenario: A stuck holder times out rather than wedging
 
