@@ -35,86 +35,137 @@
 
 ## Phase 1 — dash server + read cnc (zero blast radius)
 
-- [ ] 1.1 `cmd/flotilla/main.go`: add the `dash` switch arm + usage block.
-- [ ] 1.2 `cmd/flotilla/dash.go`: flags (`--roster`, `--snapshot-file`, `--ack-file`,
-      `--bind` [default `127.0.0.1:<port>`], `--auth-token`/`$FLOTILLA_DASH_TOKEN`,
-      `--repo` for the tracker), default-path resolution mirroring `status` EXACTLY.
-- [ ] 1.3 `internal/dash`: the read model — load snapshot (`watch.LoadSnapshot`),
+- [x] 1.1 `cmd/flotilla/main.go`: add the `dash` switch arm + usage block.
+- [x] 1.2 `cmd/flotilla/dash.go`: flags (`--roster`, `--snapshot-file`, `--ack-file`,
+      `--tracker-file`, `--bind` [default `127.0.0.1:8787`], `--repo` for the tracker —
+      accepted, unused), default-path resolution mirroring `status` EXACTLY.
+      NOTE: the `--auth-token`/`$FLOTILLA_DASH_TOKEN` machinery is deferred to the control
+      phase — it is coupled to the write-auth gate + the SSE-cookie auth that makes a
+      non-loopback bind safe. Phase 1 is loopback-ONLY and fails closed on any non-loopback
+      bind (a strict superset of "non-loopback without a token fails closed"), so an inert
+      Phase-1 token flag would be a footgun. Tracked for the control phase (§3.2).
+- [x] 1.3 `internal/dash`: the read model — load snapshot (`watch.LoadSnapshot`),
       ack age, roster bindings (`Config.Bindings()`), CoS ledger, backlog (`backlog.Parse`).
       Pure functions, unit-tested with in-memory artifacts + a pinned clock.
-- [ ] 1.4 `internal/dash`: the HTTP server (`net/http` + `ServeMux`), `embed.FS`
+- [x] 1.4 `internal/dash`: the HTTP server (`net/http` + `ServeMux`), `embed.FS`
       assets, `html/template` page render, `/api/status` (the `flotilla status --json`
       SUPERSET), `/api/topology`, `/api/history` JSON endpoints.
-- [ ] 1.5 `internal/dash`: SSE `/events` hub — ONE shared poller keyed on
+- [x] 1.5 `internal/dash`: SSE `/events` hub — ONE shared poller keyed on
       `(mtime,size)` of snapshot/ledger/backlog; per-client register/deregister on
       disconnect (`Request.Context().Done()`); non-blocking fan-out (drop slow clients);
-      connection cap; `http.Server` read/write/idle timeouts. `/api/status` JSON poll =
+      connection cap; `http.Server` read/idle timeouts. `/api/status` JSON poll =
       fallback + reconcile-on-reconnect read.
-- [ ] 1.6 Frontend (vanilla JS, no build): fleet board (three-state freshness),
+- [x] 1.6 Frontend (vanilla JS, no build): fleet board (three-state freshness),
       federation topology org chart, coordination history; SSE live-update wiring; dynamic
       data via `fetch`ed JSON only (never server-rendered into `<script>`); reuse `site/` CSS.
-- [ ] 1.7 Loopback bind by default; `Host`-header allowlist on every handler (anti-rebinding,
+- [x] 1.7 Loopback bind by default; `Host`-header allowlist on every handler (anti-rebinding,
       lands in P1 so the infra exists before writes); the three-state empty board (absent/stale/fresh).
-- [ ] 1.8 Tests: read-model purity (snapshot → board JSON; topology from bindings;
+- [x] 1.8 Tests: read-model purity (snapshot → board JSON; topology from bindings;
       ledger/backlog parse), the status-superset contract (name/state always; role for XO;
       effective surface), the three-state freshness paths, single-fleet (one-binding) topology,
       SSE hub (emit on `(mtime,size)` change, client deregister-on-disconnect), `Host`-allowlist
       rejection. `go test -race ./...`.
-- [ ] 1.9 Docs: `docs/dash-runbook.md` (start, bind, what it reads, no-snapshot note);
-      README roadmap line. Cold-test the runbook's commands.
-- [ ] 1.10 `/systems-review` + `/open-code-review` + `/storm` on the Phase 1 diff; iterate clean.
+- [x] 1.9 Docs: `docs/dash-runbook.md` (start, bind, what it reads, no-snapshot note);
+      README roadmap line. Cold-tested the runbook's commands.
+- [x] 1.10 `/systems-review` + `/open-code-review` + `/storm` on the Phase 1 diff; iterate clean.
+      ROUND 1: all three converged on ONE real defect — the SSE hub could deadlock/leak a goroutine
+      on graceful shutdown (a producer send blocking forever once run() exited on ctx-cancel).
+      FIXED with a hub `done` channel guarding every producer select (verified: shutdown with a live
+      SSE client now exits in ~0.1s, was a 5s hang + leak). Also folded: OCR's statSig silent-swallow
+      (documented as a deliberate change-trigger choice — authoritative freshness is in loadBoard),
+      STORM S1 (escapeHtml `'`), U1 ("settled?"→"settled unknown"), U2 (stale banner → RED per §3).
+      M1 (status-helper duplication) kept — justified (pkg main is unimportable), parity-tested, TODO
+      filed for a future shared-package extraction. All other axes (reader-only, loopback fail-closed,
+      Host-allowlist, status-superset, freshness, ledger parse, aliasing, XSS) verified CLEAN.
 - [ ] 1.11 **Phase-1 checkpoint:** report what landed / what's deferred / proposed Phase 2.
 
 ## Phase 2 — native GitHub-backed issue tracker
 
-- [ ] 2.1 `internal/dash/tracker`: a minimal Go interface (`List/Get/Create/Comment/Label/Close`)
-      with ONE `gh`-backed implementation; parse `gh … --json <explicit-fields>` (pinned field set);
-      defensive parse (unparseable/empty → typed error); map gh non-zero/non-JSON exits
-      (unauthenticated / rate-limited / repo-not-found / network) to typed errors. Inject-a-fake
-      for tests. NO strategy registry, NO config-selected provider (that is the deferred #103).
-- [ ] 2.2 `--repo owner/name` resolution PINNED AT STARTUP (default: the dash's working-dir repo, as
-      `gh` resolves) — never request-derived. Injection-safe invocation: bodies via stdin, `--`
-      option terminator, issue numbers validated as integers.
-- [ ] 2.3 Tracker UI: list (open issues + `operator-idea` label), detail (body + comments),
-      create / comment / label / close forms; close is confirmed explicitly.
-- [ ] 2.4 Gate issue WRITES behind the auth posture + the browser-CSRF defense (custom header +
-      Origin check, on loopback too); reads follow the read posture.
-- [ ] 2.5 Tests: backend against a fake `gh` runner (list/create/comment/close happy + the
-      gh-down typed-error paths: unauth / rate-limited / repo-not-found); handler auth + CSRF
-      gating on writes; injection-safe arg passing; over-length / missing-repo errors.
-- [ ] 2.6 Docs: tracker section in `docs/dash-runbook.md` (gh auth prerequisite, --repo).
-- [ ] 2.7 `/systems-review` + `/open-code-review` + `/storm` on the Phase 2 diff; iterate clean.
+- [x] 2.1 `internal/dash/tracker`: a minimal Go interface (`List/Get/Create/Comment/Label/Close`)
+      with ONE `gh`-backed implementation (`gh.go`); parse `gh … --json=<explicit-fields>` (pinned
+      `listFields`/`detailFields`); defensive parse (unparseable → ErrParse, empty list → []Issue not
+      error); map gh non-zero/non-JSON exits (unauthenticated / rate-limited / repo-not-found /
+      network) to typed sentinel errors via `classify` (patterns verified against gh 2.45 live
+      stderr). Inject-a-fake `ghRunner` for tests. NO strategy registry, NO config-selected provider.
+- [x] 2.2 `--repo owner/name` resolution PINNED AT STARTUP (`resolveTrackerRepo`; default via
+      `tracker.ResolveDefaultRepo` = the working-dir repo as `gh` resolves; `$FLOTILLA_DASH_REPO`
+      also honored) — never request-derived. Injection-safe invocation: bodies via stdin
+      (`--body-file=-`), titles/labels via `--flag=value`, `--` option terminator before positional
+      numbers, issue numbers validated as positive integers, repo validated against `repoPattern`.
+- [x] 2.3 Tracker UI (`assets/tracker.js` + index/CSS): Fleet/Issues tab nav; list (open issues +
+      one-click `operator-idea` filter + state filter), detail (body + comments + GitHub link),
+      create / comment / label / close forms; close is confirmed explicitly (window.confirm).
+- [x] 2.4 Gate issue WRITES behind the browser-CSRF defense (`requireWrite`: custom `X-Flotilla-Dash`
+      header + Origin/Referer allowlist, on loopback too); method-gated (writes POST-only via the mux);
+      reads follow the open-on-loopback read posture. (Bearer token + SSE cookie stay Phase 3.)
+- [x] 2.5 Tests: backend against a fake `gh` runner (list/get/create/comment/label/close happy + the
+      gh-down typed-error paths: unauth / rate-limited / repo-not-found / network / unparseable);
+      handler CSRF gating on writes (missing-header → 403 no gh call, cross-origin → 403, non-browser
+      allowed, GET-on-write rejected); injection-safe arg passing (evil title/body/leading-dash, repo
+      pin unretargetable); over-length / empty / missing-repo / invalid-number errors. Plus a live
+      (env-gated) integration test exercising the REAL execRunner read path. `go test -race ./...` green.
+- [x] 2.6 Docs: tracker section in `docs/dash-runbook.md` (gh auth prerequisite, `--repo` pinning,
+      write-CSRF posture, `operator-idea` label) — gh commands cold-tested; README roadmap updated.
+- [x] 2.7 `/systems-review` + `/open-code-review` + `/storm` on the Phase 2 diff; iterated clean.
+      ROUND 1: trio converged — design/security clean, ONE Med must-fix (no request-time gh deadline) +
+      cheap improvements. Folded ALL: gh seam-level timeout (ErrTimeout→504), gh-missing (ErrGHMissing→503),
+      trimmed title/labels (ErrEmptyLabel), full writeTrackerError status map + 5xx stderr log, List state
+      validation, decodeJSON trailing-content rejection, safeHref scheme allowlist, a11y (aria-selected +
+      focus-visible), pinned-fields comment precision. Resolved STORM's "private-repo empty-vs-error"
+      hypothesis with a live probe (inaccessible repo → exit-1 ErrRepoNotFound, never exit-0 []).
+      ROUND 2: systems-review APPROVE, OCR clean (its 2 "High" were false positives), STORM CLEAN — no
+      must-fix; round-1 fixes re-verified by live execution. One P3 (title length capped untrimmed vs
+      sent-trimmed) fixed. go test -race ./... green; vet+gofmt clean; live read path re-verified.
 - [ ] 2.8 **Phase-2 checkpoint:** report; proposed Phase 3.
 
 ## Phase 3 — cnc control actions
 
-- [ ] 3.0 **(shared-core, coordinate with flotilla-dev)** cross-process pane-transaction
-      lock in `internal/deliver` (per-pane lock file held across the whole confirmed-delivery
-      transaction) + a one-line acquire in the detector's context-rotate path. Hardens the
-      pre-existing `send`-vs-`watch` race. PREREQUISITE for pane-driving control — control is
-      not exposed until this lands.
-- [ ] 3.1 `internal/dash`: the three control handlers — route (`surface.Confirm.Submit`
-      via the `cmdSend` path + `relay.Route` addressing, acquiring the 3.0 cross-process lock),
-      notify (`discord.Post`), resume (the `flotilla resume` recipe path, per-agent locked +
-      button debounce) — each returning the library's TYPED outcome; each mirrored to the CoS
-      ledger with dash provenance (best-effort).
-- [ ] 3.2 Fail-closed security: non-loopback bind REFUSES to start without a token (startup
-      validation); control + write endpoints require `Authorization: Bearer` (token) when set,
-      constant-time compare, token from env/file (warn on `--auth-token`), never logged;
-      browser-CSRF defense (custom header + Origin) on ALL state-changing requests incl. loopback;
-      SSE on non-loopback authorized by a short-lived HttpOnly SameSite cookie (no URL token).
-- [ ] 3.3 Control UI: a route composer (`@desk` aware), an operator-note form, a resume
-      button on crashed desks; surface each typed outcome distinctly (busy/crashed/unconfirmed…);
-      a stale-state confirm dialog that restates the desk's live state+age (stale ≠ failure).
-- [ ] 3.4 Tests: each control handler maps to the right library call and surfaces each typed
-      error; the 3.0 lock — dash route + watch rotate to the same pane do NOT interleave; auth
-      gate (loopback token-free vs non-loopback-requires-token; missing/invalid token → 401/403
-      with no side effect); the fail-closed startup refusal; browser-CSRF rejection on loopback;
-      dash→ledger provenance entry. `go test -race ./...`.
-- [ ] 3.5 Docs: control section in `docs/dash-runbook.md` (the trust model, the browser-attacker
-      defenses, the non-loopback token requirement + SSH-tunnel-to-loopback remote recipe, the
-      typed outcomes).
-- [ ] 3.6 `/systems-review` + `/open-code-review` + `/storm` on the Phase 3 diff; iterate clean.
+Split by the pane-lock dependency: **3a (lock-free)** ships now; **3b (lock-dependent)**
+lands when flotilla-dev's cross-process pane lock is ready.
+
+### Phase 3a — control surface + notify (lock-free) — THIS PR
+- [x] 3a.1 `internal/dash/control`: the `Controller` seam (Route/Notify/Resume) + typed outcomes
+      (RouteResult/ResumeResult) + typed errors, mirroring the tracker's inject-a-fake pattern.
+- [x] 3a.2 **notify** real impl (`discord.Post` via the resolved XO webhook, username `operator(dash)`)
+      + best-effort CoS ledger mirror with dash provenance (`from=operator(dash) → <xo>`). `--secrets`
+      flag wired (notify disabled with a clear typed error when absent).
+- [x] 3a.3 route/resume **fail closed** (`ErrControlUnavailable` → 503) until the pane lock lands —
+      the dash NEVER drives a pane without the cross-process serialization (design §5).
+- [x] 3a.4 control handlers (route/notify/resume) behind the **same requireWrite browser-CSRF gate**
+      as tracker writes (custom header + Origin, loopback too); typed-error → honest HTTP status map;
+      POST-only (mux method-gated).
+- [x] 3a.5 Control UI tab: operator-note form (live), route composer, resume control (confirm); each
+      surfaces the typed outcome / gated-message honestly. Shared `postJSON` lifted into `dash.js`.
+- [x] 3a.6 Tests: control seam (notify happy via fake discord/cos seams + empty/over-length/
+      webhook-missing/post-fail/ledger-best-effort/inert-CoS; route/resume fail-closed); handlers
+      against a fake controller (notify happy, route/resume 503-gated, busy-outcome-is-200, CSRF gate,
+      method gate). `go test -race ./...` green.
+- [x] 3a.7 Docs: control section in `docs/dash-runbook.md` (notify live + `--secrets`; route/resume
+      pane-lock gating; loopback + SSH-tunnel; non-loopback auth as a tracked follow-on). README updated.
+- [ ] 3a.8 Coordinate the pane-lock seam/API with flotilla-dev (SENT — `flotilla send --from
+      flotilla-dash flotilla-dev`, delivered 2026-06-19; awaiting the final API).
+
+### Phase 3b — pane-driving control + auth surface (lock-dependent) — FOLLOW-ON
+- [ ] 3.0 **(shared-core, flotilla-dev)** cross-process pane-transaction lock in `internal/deliver`
+      + acquire in the detector's context-rotate. PREREQUISITE for route/resume. (Coordination sent.)
+- [ ] 3b.1 **route** real impl: `surface.Confirm.Submit` via `relay.Route` addressing, acquiring the
+      3.0 lock; typed outcome (delivered/busy/crashed/transient/unconfirmed); CoS mirror.
+- [ ] 3b.2 **resume** real impl: the `flotilla resume` recipe path (per-agent locked); typed outcome
+      (resumed/no-recipe/live-refused/ambiguous); CoS mirror. Un-gate route/resume.
+- [ ] 3b.3 (Optional, separate concern) non-loopback auth surface: token (env/file, warn on flag,
+      never logged), non-loopback fail-closed startup, bearer gate, SSE HttpOnly SameSite cookie.
+- [ ] 3b.4 Tests: route/resume → right library call + each typed outcome; the 3.0 lock — dash route +
+      watch rotate to the same pane do NOT interleave; stale-board-vs-live-action; dash→ledger provenance.
+- [ ] 3b.5 `/systems-review` + `/open-code-review` + `/storm` on the 3b diff; iterate clean.
+
+### Phase 3 gates
+- [x] 3.6 `/systems-review` + `/open-code-review` + `/storm` on the Phase 3a diff; iterated clean.
+      Trio converged: systems-review APPROVE, OCR clean (ES6-style findings were false positives vs the
+      deliberate ES5 vanilla-JS house style), STORM CLEAN — NO must-fix. Folded the polish: a SAFETY
+      RATCHET import-guard test (control links no pane-driving code while route/resume are gated — §5
+      fail-closed now CI-enforced by construction), federated-roster warning parity, honest JS outcome
+      default, a static "pending the pane lock" UX badge, doc-comment precision, a []rune micro-fix.
+      go test -race ./... green; vet+gofmt clean. (Phase 3b will run its own trio when the lock lands.)
 - [ ] 3.7 **Phase-3 checkpoint:** report; archive the openspec change when all phases land.
 
 ## Phase 4 — ergonomics (later, optional)

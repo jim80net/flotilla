@@ -227,6 +227,23 @@ Near-term:
       Channel **provisioning** is mechanical too — `flotilla channel create|list|delete`
       stands up the channels via the bot token (idempotent, Manage-Channels preflight,
       emits the binding), so the layout is self-service end to end.
+- [x] **`flotilla dash` — optional local web interface (read surface + issue
+      tracker).** A self-contained web UI served by the `flotilla` binary. The
+      **fleet view** reads the artifacts `flotilla watch` already writes: a live
+      fleet board (each desk's last-known state with three-state snapshot
+      freshness — absent / stale / fresh), the federation topology (channel → XO →
+      members), and the coordination history (the CoS ledger + the backlog
+      drive-queue) — a pure reader (no daemon, no pane probing, no fleet-state
+      writes), with live Server-Sent-Events updates. The **Issues tab** is a
+      native, GitHub-backed issue tracker (via `gh`): list / view / create /
+      comment / label / close, with a one-click `operator-idea` filter. The
+      **Control tab** exposes cnc actions over the existing delivery library:
+      post an operator note (live, via `discord.Post`, mirrored to the CoS
+      ledger), and route an instruction / resume a crashed desk (gated on the
+      cross-process pane lock, coordinated with core). Loopback by default; all
+      writes carry a browser-CSRF defense:
+      [docs/dash-runbook.md](./docs/dash-runbook.md). The token-gated
+      non-loopback bind is a tracked follow-on.
 - [ ] Release-sign-off workflow.
 - [x] Docs + an end-to-end quickstart that a newcomer can run cold — [docs/quickstart.md](./docs/quickstart.md) (cold-tested: install, send, clock).
 

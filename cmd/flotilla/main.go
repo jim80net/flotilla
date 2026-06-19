@@ -47,6 +47,8 @@ func run(args []string) error {
 		return cmdWatch(args[1:])
 	case "status":
 		return cmdStatus(args[1:])
+	case "dash":
+		return cmdDash(args[1:])
 	case "channel":
 		return cmdChannel(args[1:])
 	case "register":
@@ -83,6 +85,7 @@ usage:
   flotilla voice [--config <voice.env>]               operator↔XO Discord voice (needs a -tags voiceopus build)
   flotilla watch                                      relay + XO heartbeat clock daemon
   flotilla status                                     one line per desk: last-known state + XO ack age (reads the watch snapshot; no daemon)
+  flotilla dash [--bind 127.0.0.1:8787]               optional local web UI: fleet board + federation topology + coordination history (read-only; reads the watch artifacts; loopback only)
   flotilla channel create <name> [--type text|category] [--topic <t>] [--category <name|id>]
                                                       create a Discord channel via the bot (idempotent; emits an F#105 binding with --xo)
   flotilla channel list [--json]                      list the guild's channels (id, type, name, parent)
@@ -172,6 +175,25 @@ watch' (with change_detector: true) already writes, starts no daemon, and probes
 no panes. The states are the detector's view as of its last tick, so the header
 reports the snapshot's age — a stale read is never shown as live. With no readable
 snapshot it still lists the roster, every desk as 'unknown'.
+
+flags for 'dash':
+  --roster <path>         roster config (default ./flotilla.json or $FLOTILLA_ROSTER)
+  --snapshot-file <path>  the watch change-detector snapshot to read (default $FLOTILLA_SNAPSHOT_FILE, else <roster-dir>/flotilla-detector-state.json)
+  --ack-file <path>       XO liveness ack file to age (default $FLOTILLA_ACK_FILE, else <roster-dir>/flotilla-xo-alive)
+  --tracker-file <path>   backlog markdown the history view reads (default $FLOTILLA_TRACKER_FILE, else <roster-dir>/.flotilla-state.md)
+  --bind <addr>           local listen address (default 127.0.0.1:8787; loopback only in this phase)
+  --repo <owner/name>     GitHub repo for the issue tracker (reserved for the tracker phase; unused here)
+
+dash serves an OPTIONAL local web interface over the artifacts 'flotilla watch'
+already writes: a fleet board (each desk's last-known state with three-state
+snapshot freshness — absent/stale/fresh), the federation topology (channel→XO→
+members), and the coordination history (the CoS ledger + the backlog drive-queue).
+It is READ-ONLY — it starts no daemon, probes no panes, and writes no fleet state;
+'flotilla watch' remains the single writer, so the dash can never diverge from or
+double-probe the fleet. Live updates push over Server-Sent Events (with a JSON
+poll fallback). The default bind is loopback; a non-loopback bind is refused in
+this phase (the token-gated auth surface lands with the control phase — use an SSH
+tunnel to the loopback bind for remote access).
 
 flags for 'channel':
   create <name>     create a channel in the roster's guild_id via the bot token
