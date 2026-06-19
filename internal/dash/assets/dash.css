@@ -116,3 +116,85 @@ code { font-family: var(--mono); color: var(--ink); background: rgba(255,255,255
 .error { color: var(--err); padding: .5rem 0; }
 
 .foot { max-width: 1140px; margin: 0 auto; padding: 1rem 1.2rem 2rem; font-size: .78rem; }
+
+/* util */
+.hidden { display: none !important; }
+
+/* tab nav */
+.tabs { display: flex; gap: .3rem; }
+.tab {
+  font-family: var(--mono); font-size: .82rem; color: var(--ink-3);
+  background: transparent; border: 1px solid transparent; border-radius: var(--r-sm);
+  padding: .3rem .9rem; cursor: pointer; transition: color .2s, border-color .2s, background .2s;
+}
+.tab:hover { color: var(--ink-2); }
+.tab.active { color: var(--ink); border-color: var(--line); background: var(--abyss-3); }
+
+/* visible keyboard focus (WCAG 2.4.7) on all interactive controls */
+.tab:focus-visible, .btn:focus-visible,
+input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: 2px solid var(--cyan); outline-offset: 1px;
+}
+
+/* buttons */
+.btn {
+  font-family: var(--mono); font-size: .8rem; color: var(--ink-2);
+  background: var(--abyss-3); border: 1px solid var(--line); border-radius: var(--r-sm);
+  padding: .35rem .8rem; cursor: pointer; transition: border-color .2s, color .2s;
+}
+.btn:hover { color: var(--ink); border-color: var(--cyan-dim); }
+.btn:disabled { opacity: .5; cursor: default; }
+.btn-primary { color: var(--abyss); background: var(--cyan); border-color: var(--cyan); font-weight: 600; }
+.btn-primary:hover { color: var(--abyss); background: #6cf0df; }
+.btn-danger { color: var(--err); border-color: var(--err); }
+.btn-danger:hover { color: #fff; background: var(--err); }
+
+/* tracker controls */
+.tracker-controls { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+.filter-idea { font-size: .8rem; color: var(--amber); display: inline-flex; align-items: center; gap: .3rem; cursor: pointer; }
+#filter-state {
+  font-family: var(--mono); font-size: .8rem; color: var(--ink-2);
+  background: var(--abyss-3); border: 1px solid var(--line); border-radius: var(--r-sm); padding: .3rem .5rem;
+}
+
+/* issue list */
+.issues-list { display: grid; gap: 1px; background: var(--line-soft); }
+.issue-row {
+  display: grid; grid-template-columns: auto auto 1fr auto; gap: .7rem; align-items: center;
+  padding: .55rem 1rem; background: var(--abyss-2); cursor: pointer; transition: background .15s;
+}
+.issue-row:hover { background: var(--abyss-3); }
+.issue-num { color: var(--ink-3); font-size: .8rem; }
+.issue-title { color: var(--ink); }
+.issue-state {
+  font-size: .68rem; text-transform: uppercase; letter-spacing: .03em;
+  border-radius: 999px; padding: .05em .6em; border: 1px solid var(--line);
+}
+.issue-state.open { color: var(--ok); border-color: var(--ok); }
+.issue-state.closed { color: var(--ink-3); border-color: var(--line); }
+.issue-labels { display: inline-flex; gap: .35rem; flex-wrap: wrap; }
+.issue-label { font-size: .68rem; border: 1px solid; border-radius: 999px; padding: .02em .55em; }
+
+/* issue detail */
+.issue-detail { padding: 1rem; }
+.detail-meta { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; margin-bottom: .8rem; }
+.issue-link { color: var(--cyan); font-size: .8rem; text-decoration: none; }
+.issue-link:hover { text-decoration: underline; }
+.issue-body { white-space: pre-wrap; word-break: break-word; color: var(--ink-2); border: 1px solid var(--line-soft); border-radius: var(--r-sm); padding: .8rem; background: var(--abyss-3); }
+.comments { display: grid; gap: .6rem; }
+.comment { border: 1px solid var(--line-soft); border-radius: var(--r-sm); padding: .6rem .8rem; background: var(--abyss-3); }
+.comment-head { font-size: .74rem; margin-bottom: .3rem; }
+.comment-body { white-space: pre-wrap; word-break: break-word; color: var(--ink-2); }
+
+/* forms (create + detail actions) */
+.issue-form, .detail-actions { padding: 1rem; display: grid; gap: .7rem; }
+.detail-actions { border-top: 1px solid var(--line); margin-top: 1rem; }
+.issue-form input, .issue-form textarea, .detail-actions input, .detail-actions textarea {
+  font-family: var(--mono); font-size: .85rem; color: var(--ink);
+  background: var(--abyss-3); border: 1px solid var(--line); border-radius: var(--r-sm); padding: .5rem .7rem; width: 100%;
+}
+.issue-form textarea, .detail-actions textarea { resize: vertical; }
+.form-actions { display: flex; gap: .6rem; align-items: center; justify-content: flex-end; }
+.label-actions { display: grid; grid-template-columns: 1fr 1fr auto; gap: .5rem; align-items: center; }
+.form-msg { margin-right: auto; font-size: .8rem; color: var(--ink-3); }
+.form-msg.err { color: var(--err); }

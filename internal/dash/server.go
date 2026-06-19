@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/dash/tracker"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/watch"
 )
@@ -25,6 +26,7 @@ type Config struct {
 	LedgerPath   string // CoS ledger (cfg.CosLedger; "" when the CoS mirror is inert)
 	BacklogPath  string // backlog markdown (--tracker-file; default <roster-dir>/.flotilla-state.md)
 	Bind         string // listen address (default 127.0.0.1:8787)
+	Repo         string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
 }
 
 // Server is the dash HTTP server: a pure reader over the artifacts `flotilla
@@ -41,6 +43,8 @@ type Server struct {
 	mux       *http.ServeMux
 	hub       *hub
 	allowed   map[string]bool // Host-header allowlist (host:port forms)
+	origins   map[string]bool // Origin allowlist (scheme://host:port) for state-changing requests
+	tracker   tracker.Tracker // GitHub-backed issue tracker; nil when no --repo is configured
 }
 
 // NewServer validates the bind address (Phase 1 serves LOOPBACK ONLY — see
@@ -80,6 +84,18 @@ func NewServer(cfg Config) (*Server, error) {
 		mux:       http.NewServeMux(),
 		hub:       newHub(),
 		allowed:   buildHostAllowlist(cfg.Bind),
+		origins:   buildOriginAllowlist(cfg.Bind),
+	}
+	// The tracker is OPTIONAL: it is wired only when a repo is pinned. An invalid
+	// repo fails closed (NewServer errors) rather than serving a tracker that
+	// could be coaxed into a bad --repo; an empty repo leaves the tracker nil and
+	// its endpoints return ErrNoRepo (the read surface is unaffected).
+	if cfg.Repo != "" {
+		gh, terr := tracker.NewGH(cfg.Repo)
+		if terr != nil {
+			return nil, terr
+		}
+		s.tracker = gh
 	}
 	s.routes()
 	return s, nil
@@ -136,6 +152,18 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/history", s.handleHistory)
 	s.mux.HandleFunc("/events", s.handleEvents)
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticAssets()))))
+
+	// Issue tracker (Phase 2). Reads follow the open-on-loopback read posture
+	// (the Host-allowlist already wraps them); WRITES go through requireWrite,
+	// which enforces the browser-CSRF defense (custom header + Origin) on loopback
+	// too. Method-gating is the mux's job: a state-changing GET cannot reach a
+	// write handler because the write patterns are POST-only.
+	s.mux.HandleFunc("GET /api/issues", s.handleIssuesList)
+	s.mux.HandleFunc("GET /api/issues/{number}", s.handleIssueGet)
+	s.mux.HandleFunc("POST /api/issues", s.requireWrite(s.handleIssueCreate))
+	s.mux.HandleFunc("POST /api/issues/{number}/comments", s.requireWrite(s.handleIssueComment))
+	s.mux.HandleFunc("POST /api/issues/{number}/labels", s.requireWrite(s.handleIssueLabel))
+	s.mux.HandleFunc("POST /api/issues/{number}/close", s.requireWrite(s.handleIssueClose))
 }
 
 // --- read-model loading (the only file I/O; the builders stay pure) ---
@@ -226,7 +254,16 @@ func (s *Server) hostAllow(next http.Handler) http.Handler {
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
+	writeJSONStatus(w, http.StatusOK, v)
+}
+
+// writeJSONStatus writes v as JSON with an explicit status. The Content-Type is
+// set BEFORE WriteHeader — a header set after WriteHeader is silently dropped
+// (the headers are already on the wire), so a non-200 JSON response must set the
+// type first or the client sees a sniffed/empty content type.
+func writeJSONStatus(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(v)
@@ -261,6 +298,20 @@ func buildHostAllowlist(bind string) map[string]bool {
 		net.JoinHostPort(host, port):        true,
 	}
 	return allowed
+}
+
+// buildOriginAllowlist returns the set of acceptable Origin (and Referer-origin)
+// values for state-changing requests: the same loopback/bind host:port forms as
+// the Host allowlist, prefixed with the http scheme (the dash serves plaintext
+// http on loopback). A state-changing request whose Origin/Referer is present
+// must match one of these (anti-CSRF defense-in-depth alongside the custom
+// header — see requireWrite).
+func buildOriginAllowlist(bind string) map[string]bool {
+	origins := map[string]bool{}
+	for hostport := range buildHostAllowlist(bind) {
+		origins["http://"+hostport] = true
+	}
+	return origins
 }
 
 // validateBind enforces Phase 1's loopback-only posture. A non-loopback bind
