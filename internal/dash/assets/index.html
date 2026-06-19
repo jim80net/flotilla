@@ -12,6 +12,10 @@
     <div class="brand">
       <span class="brand-name">flotilla</span><span class="brand-dash">dash</span>
     </div>
+    <nav class="tabs" role="tablist">
+      <button id="tab-fleet" class="tab active" data-view="fleet" role="tab">Fleet</button>
+      <button id="tab-issues" class="tab" data-view="issues" role="tab">Issues</button>
+    </nav>
     <div class="bar-meta">
       <span class="muted">bound</span> <code>{{.Bind}}</code>
       <span id="conn" class="conn" title="live-update link">●</span>
@@ -22,7 +26,7 @@
        stale, or absent. Populated entirely by dash.js from /api/status. -->
   <div id="freshness" class="freshness" role="status" aria-live="polite"></div>
 
-  <main class="wrap">
+  <main id="view-fleet" class="wrap">
     <section class="panel">
       <div class="panel-head">
         <h2>Fleet board</h2>
@@ -57,10 +61,57 @@
     </section>
   </main>
 
+  <!-- Issue tracker (Phase 2): native GitHub-backed issues. All dynamic data
+       arrives via fetch of /api/issues — never server-rendered into a <script>.
+       Writes carry the X-Flotilla-Dash anti-CSRF header (set by dash.js). -->
+  <main id="view-issues" class="wrap hidden">
+    <section id="issues-listpanel" class="panel">
+      <div class="panel-head">
+        <h2>Issues <span id="issues-repo" class="muted"></span></h2>
+        <div class="tracker-controls">
+          <label class="filter-idea"><input type="checkbox" id="filter-idea" /> operator-idea only</label>
+          <select id="filter-state" aria-label="issue state">
+            <option value="open">open</option>
+            <option value="closed">closed</option>
+            <option value="all">all</option>
+          </select>
+          <button id="issues-refresh" class="btn">Refresh</button>
+          <button id="issues-new" class="btn btn-primary">New issue</button>
+        </div>
+      </div>
+      <div id="issues-list" class="issues-list"></div>
+    </section>
+
+    <!-- Create form (hidden until "New issue"). -->
+    <section id="issues-create" class="panel hidden">
+      <div class="panel-head"><h2>New issue</h2></div>
+      <form id="create-form" class="issue-form">
+        <input type="text" id="create-title" placeholder="Title (required)" maxlength="256" required />
+        <textarea id="create-body" placeholder="Body (markdown)" rows="6"></textarea>
+        <input type="text" id="create-labels" placeholder="Labels (comma-separated, e.g. operator-idea)" />
+        <div class="form-actions">
+          <span id="create-msg" class="form-msg"></span>
+          <button type="button" id="create-cancel" class="btn">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create issue</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Detail view (hidden until an issue is opened). -->
+    <section id="issues-detail" class="panel hidden">
+      <div class="panel-head">
+        <h2 id="detail-title"></h2>
+        <button id="detail-back" class="btn">← Back to list</button>
+      </div>
+      <div id="detail-body" class="issue-detail"></div>
+    </section>
+  </main>
+
   <footer class="foot">
-    <span class="muted">read-only · reads the artifacts <code>flotilla watch</code> writes · no pane probing</span>
+    <span class="muted">fleet view is read-only (reads what <code>flotilla watch</code> writes, no pane probing) · issues are written to GitHub via <code>gh</code></span>
   </footer>
 
   <script src="/static/dash.js"></script>
+  <script src="/static/tracker.js"></script>
 </body>
 </html>

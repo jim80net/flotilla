@@ -81,22 +81,31 @@
 
 ## Phase 2 — native GitHub-backed issue tracker
 
-- [ ] 2.1 `internal/dash/tracker`: a minimal Go interface (`List/Get/Create/Comment/Label/Close`)
-      with ONE `gh`-backed implementation; parse `gh … --json <explicit-fields>` (pinned field set);
-      defensive parse (unparseable/empty → typed error); map gh non-zero/non-JSON exits
-      (unauthenticated / rate-limited / repo-not-found / network) to typed errors. Inject-a-fake
-      for tests. NO strategy registry, NO config-selected provider (that is the deferred #103).
-- [ ] 2.2 `--repo owner/name` resolution PINNED AT STARTUP (default: the dash's working-dir repo, as
-      `gh` resolves) — never request-derived. Injection-safe invocation: bodies via stdin, `--`
-      option terminator, issue numbers validated as integers.
-- [ ] 2.3 Tracker UI: list (open issues + `operator-idea` label), detail (body + comments),
-      create / comment / label / close forms; close is confirmed explicitly.
-- [ ] 2.4 Gate issue WRITES behind the auth posture + the browser-CSRF defense (custom header +
-      Origin check, on loopback too); reads follow the read posture.
-- [ ] 2.5 Tests: backend against a fake `gh` runner (list/create/comment/close happy + the
-      gh-down typed-error paths: unauth / rate-limited / repo-not-found); handler auth + CSRF
-      gating on writes; injection-safe arg passing; over-length / missing-repo errors.
-- [ ] 2.6 Docs: tracker section in `docs/dash-runbook.md` (gh auth prerequisite, --repo).
+- [x] 2.1 `internal/dash/tracker`: a minimal Go interface (`List/Get/Create/Comment/Label/Close`)
+      with ONE `gh`-backed implementation (`gh.go`); parse `gh … --json=<explicit-fields>` (pinned
+      `listFields`/`detailFields`); defensive parse (unparseable → ErrParse, empty list → []Issue not
+      error); map gh non-zero/non-JSON exits (unauthenticated / rate-limited / repo-not-found /
+      network) to typed sentinel errors via `classify` (patterns verified against gh 2.45 live
+      stderr). Inject-a-fake `ghRunner` for tests. NO strategy registry, NO config-selected provider.
+- [x] 2.2 `--repo owner/name` resolution PINNED AT STARTUP (`resolveTrackerRepo`; default via
+      `tracker.ResolveDefaultRepo` = the working-dir repo as `gh` resolves; `$FLOTILLA_DASH_REPO`
+      also honored) — never request-derived. Injection-safe invocation: bodies via stdin
+      (`--body-file=-`), titles/labels via `--flag=value`, `--` option terminator before positional
+      numbers, issue numbers validated as positive integers, repo validated against `repoPattern`.
+- [x] 2.3 Tracker UI (`assets/tracker.js` + index/CSS): Fleet/Issues tab nav; list (open issues +
+      one-click `operator-idea` filter + state filter), detail (body + comments + GitHub link),
+      create / comment / label / close forms; close is confirmed explicitly (window.confirm).
+- [x] 2.4 Gate issue WRITES behind the browser-CSRF defense (`requireWrite`: custom `X-Flotilla-Dash`
+      header + Origin/Referer allowlist, on loopback too); method-gated (writes POST-only via the mux);
+      reads follow the open-on-loopback read posture. (Bearer token + SSE cookie stay Phase 3.)
+- [x] 2.5 Tests: backend against a fake `gh` runner (list/get/create/comment/label/close happy + the
+      gh-down typed-error paths: unauth / rate-limited / repo-not-found / network / unparseable);
+      handler CSRF gating on writes (missing-header → 403 no gh call, cross-origin → 403, non-browser
+      allowed, GET-on-write rejected); injection-safe arg passing (evil title/body/leading-dash, repo
+      pin unretargetable); over-length / empty / missing-repo / invalid-number errors. Plus a live
+      (env-gated) integration test exercising the REAL execRunner read path. `go test -race ./...` green.
+- [x] 2.6 Docs: tracker section in `docs/dash-runbook.md` (gh auth prerequisite, `--repo` pinning,
+      write-CSRF posture, `operator-idea` label) — gh commands cold-tested; README roadmap updated.
 - [ ] 2.7 `/systems-review` + `/open-code-review` + `/storm` on the Phase 2 diff; iterate clean.
 - [ ] 2.8 **Phase-2 checkpoint:** report; proposed Phase 3.
 

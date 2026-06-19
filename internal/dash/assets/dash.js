@@ -32,6 +32,11 @@
     });
   }
 
+  // Expose the small, single-sourced helpers so tracker.js reuses the SAME
+  // escapeHtml/getJSON (no duplicated XSS-escaping logic, no second fetch
+  // wrapper). Both scripts run in the page; this is the seam between them.
+  window.flotillaDash = { el: el, escapeHtml: escapeHtml, getJSON: getJSON };
+
   /* ── fleet board + freshness ─────────────────────────────────────────── */
   function renderBoard(data) {
     var fresh = data.freshness || { state: "absent", message: "" };
@@ -195,4 +200,23 @@
   }
 
   connect();
+
+  /* ── tab nav: Fleet ⇄ Issues ─────────────────────────────────────────── */
+  // The fleet view is the live, SSE-driven board; the issues view is the
+  // gh-backed tracker (tracker.js), which fetches on demand. Switching only
+  // toggles visibility — the fleet's live link keeps running underneath so the
+  // board is current the instant the operator switches back.
+  function showView(view) {
+    var fleet = view === "fleet";
+    el("view-fleet").classList.toggle("hidden", !fleet);
+    el("view-issues").classList.toggle("hidden", fleet);
+    el("freshness").classList.toggle("hidden", !fleet);
+    el("tab-fleet").classList.toggle("active", fleet);
+    el("tab-issues").classList.toggle("active", !fleet);
+    if (!fleet && window.flotillaTracker) window.flotillaTracker.show();
+  }
+  var tabs = document.querySelectorAll(".tab");
+  for (var i = 0; i < tabs.length; i++) {
+    tabs[i].addEventListener("click", function () { showView(this.getAttribute("data-view")); });
+  }
 })();
