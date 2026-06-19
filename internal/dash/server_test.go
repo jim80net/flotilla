@@ -159,8 +159,8 @@ func TestHandleIndex(t *testing.T) {
 	if !strings.Contains(body, "/static/dash.js") || !strings.Contains(body, "/static/dash.css") {
 		t.Error("index must reference the static assets")
 	}
-	if !strings.Contains(body, "/static/tracker.js") {
-		t.Error("index must reference the tracker assets")
+	if !strings.Contains(body, "/static/tracker.js") || !strings.Contains(body, "/static/control.js") {
+		t.Error("index must reference the tracker + control assets")
 	}
 	// The index is static chrome — it must NOT embed fleet data in a <script>.
 	if strings.Contains(body, "agents") {
@@ -171,7 +171,7 @@ func TestHandleIndex(t *testing.T) {
 func TestHandleStaticAssets(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 	srv, _ := newTestServer(t, singleFleetRoster, now)
-	for _, path := range []string{"/static/dash.js", "/static/dash.css", "/static/tracker.js"} {
+	for _, path := range []string{"/static/dash.js", "/static/dash.css", "/static/tracker.js", "/static/control.js"} {
 		rec := doGet(t, srv, path)
 		if rec.Code != 200 {
 			t.Errorf("%s code %d", path, rec.Code)

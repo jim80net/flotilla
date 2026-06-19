@@ -15,6 +15,7 @@
     <nav class="tabs" role="tablist">
       <button id="tab-fleet" class="tab active" data-view="fleet" role="tab" aria-selected="true" aria-controls="view-fleet">Fleet</button>
       <button id="tab-issues" class="tab" data-view="issues" role="tab" aria-selected="false" aria-controls="view-issues">Issues</button>
+      <button id="tab-control" class="tab" data-view="control" role="tab" aria-selected="false" aria-controls="view-control">Control</button>
     </nav>
     <div class="bar-meta">
       <span class="muted">bound</span> <code>{{.Bind}}</code>
@@ -107,11 +108,52 @@
     </section>
   </main>
 
+  <!-- cnc control (Phase 3): route an instruction, post an operator note, resume
+       a crashed desk. Writes carry the X-Flotilla-Dash anti-CSRF header. Route +
+       resume drive panes and are gated on the cross-process pane lock (they report
+       honestly until it lands); notify is live. -->
+  <main id="view-control" class="wrap hidden">
+    <section class="panel">
+      <div class="panel-head"><h2>Operator note</h2><span class="muted">post to the fleet channel</span></div>
+      <form id="notify-form" class="control-form">
+        <textarea id="notify-body" placeholder="Note to the fleet (posted to Discord under operator(dash))" rows="3"></textarea>
+        <div class="form-actions">
+          <span id="notify-msg" class="form-msg"></span>
+          <button type="submit" class="btn btn-primary">Post note</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>Route instruction</h2><span class="muted">deliver to an XO or @desk</span></div>
+      <form id="route-form" class="control-form">
+        <input type="text" id="route-target" placeholder="target (agent name or @desk)" />
+        <textarea id="route-body" placeholder="instruction" rows="3"></textarea>
+        <div class="form-actions">
+          <span id="route-msg" class="form-msg"></span>
+          <button type="submit" class="btn btn-primary">Route</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>Resume a crashed desk</h2><span class="muted">restart from its launch recipe</span></div>
+      <form id="resume-form" class="control-form">
+        <input type="text" id="resume-agent" placeholder="agent name" />
+        <div class="form-actions">
+          <span id="resume-msg" class="form-msg"></span>
+          <button type="submit" class="btn btn-danger">Resume</button>
+        </div>
+      </form>
+    </section>
+  </main>
+
   <footer class="foot">
-    <span class="muted">fleet view is read-only (reads what <code>flotilla watch</code> writes, no pane probing) · issues are written to GitHub via <code>gh</code></span>
+    <span class="muted">fleet view is read-only (reads what <code>flotilla watch</code> writes, no pane probing) · issues are written to GitHub via <code>gh</code> · control acts via the confirmed-delivery library</span>
   </footer>
 
   <script src="/static/dash.js"></script>
   <script src="/static/tracker.js"></script>
+  <script src="/static/control.js"></script>
 </body>
 </html>

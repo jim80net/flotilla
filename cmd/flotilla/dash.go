@@ -36,6 +36,7 @@ func cmdDash(args []string) error {
 	// resolved from the working directory the way `gh` does; if that fails the
 	// tracker is simply disabled (the read surface is unaffected).
 	repo := fs.String("repo", os.Getenv("FLOTILLA_DASH_REPO"), "GitHub repo for the issue tracker (owner/name; default: the working-dir repo as gh resolves it)")
+	secretsPath := fs.String("secrets", os.Getenv("FLOTILLA_SECRETS"), "secrets env file for the notify webhook (optional; notify is disabled without it)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -56,6 +57,7 @@ func cmdDash(args []string) error {
 		BacklogPath:  *trackerPath,
 		Bind:         *bind,
 		Repo:         pinnedRepo,
+		SecretsPath:  *secretsPath,
 	})
 	if err != nil {
 		return err

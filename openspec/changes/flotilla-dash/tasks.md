@@ -120,33 +120,46 @@
 
 ## Phase 3 — cnc control actions
 
-- [ ] 3.0 **(shared-core, coordinate with flotilla-dev)** cross-process pane-transaction
-      lock in `internal/deliver` (per-pane lock file held across the whole confirmed-delivery
-      transaction) + a one-line acquire in the detector's context-rotate path. Hardens the
-      pre-existing `send`-vs-`watch` race. PREREQUISITE for pane-driving control — control is
-      not exposed until this lands.
-- [ ] 3.1 `internal/dash`: the three control handlers — route (`surface.Confirm.Submit`
-      via the `cmdSend` path + `relay.Route` addressing, acquiring the 3.0 cross-process lock),
-      notify (`discord.Post`), resume (the `flotilla resume` recipe path, per-agent locked +
-      button debounce) — each returning the library's TYPED outcome; each mirrored to the CoS
-      ledger with dash provenance (best-effort).
-- [ ] 3.2 Fail-closed security: non-loopback bind REFUSES to start without a token (startup
-      validation); control + write endpoints require `Authorization: Bearer` (token) when set,
-      constant-time compare, token from env/file (warn on `--auth-token`), never logged;
-      browser-CSRF defense (custom header + Origin) on ALL state-changing requests incl. loopback;
-      SSE on non-loopback authorized by a short-lived HttpOnly SameSite cookie (no URL token).
-- [ ] 3.3 Control UI: a route composer (`@desk` aware), an operator-note form, a resume
-      button on crashed desks; surface each typed outcome distinctly (busy/crashed/unconfirmed…);
-      a stale-state confirm dialog that restates the desk's live state+age (stale ≠ failure).
-- [ ] 3.4 Tests: each control handler maps to the right library call and surfaces each typed
-      error; the 3.0 lock — dash route + watch rotate to the same pane do NOT interleave; auth
-      gate (loopback token-free vs non-loopback-requires-token; missing/invalid token → 401/403
-      with no side effect); the fail-closed startup refusal; browser-CSRF rejection on loopback;
-      dash→ledger provenance entry. `go test -race ./...`.
-- [ ] 3.5 Docs: control section in `docs/dash-runbook.md` (the trust model, the browser-attacker
-      defenses, the non-loopback token requirement + SSH-tunnel-to-loopback remote recipe, the
-      typed outcomes).
-- [ ] 3.6 `/systems-review` + `/open-code-review` + `/storm` on the Phase 3 diff; iterate clean.
+Split by the pane-lock dependency: **3a (lock-free)** ships now; **3b (lock-dependent)**
+lands when flotilla-dev's cross-process pane lock is ready.
+
+### Phase 3a — control surface + notify (lock-free) — THIS PR
+- [x] 3a.1 `internal/dash/control`: the `Controller` seam (Route/Notify/Resume) + typed outcomes
+      (RouteResult/ResumeResult) + typed errors, mirroring the tracker's inject-a-fake pattern.
+- [x] 3a.2 **notify** real impl (`discord.Post` via the resolved XO webhook, username `operator(dash)`)
+      + best-effort CoS ledger mirror with dash provenance (`from=operator(dash) → <xo>`). `--secrets`
+      flag wired (notify disabled with a clear typed error when absent).
+- [x] 3a.3 route/resume **fail closed** (`ErrControlUnavailable` → 503) until the pane lock lands —
+      the dash NEVER drives a pane without the cross-process serialization (design §5).
+- [x] 3a.4 control handlers (route/notify/resume) behind the **same requireWrite browser-CSRF gate**
+      as tracker writes (custom header + Origin, loopback too); typed-error → honest HTTP status map;
+      POST-only (mux method-gated).
+- [x] 3a.5 Control UI tab: operator-note form (live), route composer, resume control (confirm); each
+      surfaces the typed outcome / gated-message honestly. Shared `postJSON` lifted into `dash.js`.
+- [x] 3a.6 Tests: control seam (notify happy via fake discord/cos seams + empty/over-length/
+      webhook-missing/post-fail/ledger-best-effort/inert-CoS; route/resume fail-closed); handlers
+      against a fake controller (notify happy, route/resume 503-gated, busy-outcome-is-200, CSRF gate,
+      method gate). `go test -race ./...` green.
+- [x] 3a.7 Docs: control section in `docs/dash-runbook.md` (notify live + `--secrets`; route/resume
+      pane-lock gating; loopback + SSH-tunnel; non-loopback auth as a tracked follow-on). README updated.
+- [ ] 3a.8 Coordinate the pane-lock seam/API with flotilla-dev (SENT — `flotilla send --from
+      flotilla-dash flotilla-dev`, delivered 2026-06-19; awaiting the final API).
+
+### Phase 3b — pane-driving control + auth surface (lock-dependent) — FOLLOW-ON
+- [ ] 3.0 **(shared-core, flotilla-dev)** cross-process pane-transaction lock in `internal/deliver`
+      + acquire in the detector's context-rotate. PREREQUISITE for route/resume. (Coordination sent.)
+- [ ] 3b.1 **route** real impl: `surface.Confirm.Submit` via `relay.Route` addressing, acquiring the
+      3.0 lock; typed outcome (delivered/busy/crashed/transient/unconfirmed); CoS mirror.
+- [ ] 3b.2 **resume** real impl: the `flotilla resume` recipe path (per-agent locked); typed outcome
+      (resumed/no-recipe/live-refused/ambiguous); CoS mirror. Un-gate route/resume.
+- [ ] 3b.3 (Optional, separate concern) non-loopback auth surface: token (env/file, warn on flag,
+      never logged), non-loopback fail-closed startup, bearer gate, SSE HttpOnly SameSite cookie.
+- [ ] 3b.4 Tests: route/resume → right library call + each typed outcome; the 3.0 lock — dash route +
+      watch rotate to the same pane do NOT interleave; stale-board-vs-live-action; dash→ledger provenance.
+- [ ] 3b.5 `/systems-review` + `/open-code-review` + `/storm` on the 3b diff; iterate clean.
+
+### Phase 3 gates
+- [ ] 3.6 `/systems-review` + `/open-code-review` + `/storm` on the Phase 3a diff; iterate clean.
 - [ ] 3.7 **Phase-3 checkpoint:** report; archive the openspec change when all phases land.
 
 ## Phase 4 — ergonomics (later, optional)

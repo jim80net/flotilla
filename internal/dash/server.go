@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/dash/control"
 	"github.com/jim80net/flotilla/internal/dash/tracker"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/watch"
@@ -27,6 +28,7 @@ type Config struct {
 	BacklogPath  string // backlog markdown (--tracker-file; default <roster-dir>/.flotilla-state.md)
 	Bind         string // listen address (default 127.0.0.1:8787)
 	Repo         string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
+	SecretsPath  string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
 }
 
 // Server is the dash HTTP server: a pure reader over the artifacts `flotilla
@@ -42,9 +44,10 @@ type Server struct {
 	tmpl      *template.Template
 	mux       *http.ServeMux
 	hub       *hub
-	allowed   map[string]bool // Host-header allowlist (host:port forms)
-	origins   map[string]bool // Origin allowlist (scheme://host:port) for state-changing requests
-	tracker   tracker.Tracker // GitHub-backed issue tracker; nil when no --repo is configured
+	allowed   map[string]bool    // Host-header allowlist (host:port forms)
+	origins   map[string]bool    // Origin allowlist (scheme://host:port) for state-changing requests
+	tracker   tracker.Tracker    // GitHub-backed issue tracker; nil when no --repo is configured
+	control   control.Controller // cnc control (notify live; route/resume gated on the pane lock)
 }
 
 // NewServer validates the bind address (Phase 1 serves LOOPBACK ONLY — see
@@ -97,6 +100,10 @@ func NewServer(cfg Config) (*Server, error) {
 		}
 		s.tracker = gh
 	}
+	// The control surface is always wired: notify (discord.Post) is live when a
+	// secrets webhook is configured; route/resume fail closed until the
+	// cross-process pane lock lands (design §5). No pane is driven without it.
+	s.control = control.NewLibrary(rc, xo, cfg.SecretsPath)
 	s.routes()
 	return s, nil
 }
@@ -164,6 +171,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/issues/{number}/comments", s.requireWrite(s.handleIssueComment))
 	s.mux.HandleFunc("POST /api/issues/{number}/labels", s.requireWrite(s.handleIssueLabel))
 	s.mux.HandleFunc("POST /api/issues/{number}/close", s.requireWrite(s.handleIssueClose))
+
+	// cnc control (Phase 3) — state-changing, behind the same requireWrite
+	// browser-CSRF gate as tracker writes. notify is live; route/resume fail
+	// closed (503) until the cross-process pane lock lands.
+	s.mux.HandleFunc("POST /api/control/route", s.requireWrite(s.handleControlRoute))
+	s.mux.HandleFunc("POST /api/control/notify", s.requireWrite(s.handleControlNotify))
+	s.mux.HandleFunc("POST /api/control/resume", s.requireWrite(s.handleControlResume))
 }
 
 // --- read-model loading (the only file I/O; the builders stay pure) ---
