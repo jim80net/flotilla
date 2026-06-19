@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>flotilla dash — {{.XO}}</title>
+  <link rel="stylesheet" href="/static/dash.css" />
+</head>
+<body>
+  <header class="bar">
+    <div class="brand">
+      <span class="brand-name">flotilla</span><span class="brand-dash">dash</span>
+    </div>
+    <div class="bar-meta">
+      <span class="muted">bound</span> <code>{{.Bind}}</code>
+      <span id="conn" class="conn" title="live-update link">●</span>
+    </div>
+  </header>
+
+  <!-- Freshness banner: the operator's first read on whether the board is live,
+       stale, or absent. Populated entirely by dash.js from /api/status. -->
+  <div id="freshness" class="freshness" role="status" aria-live="polite"></div>
+
+  <main class="wrap">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Fleet board</h2>
+        <span id="board-meta" class="muted"></span>
+      </div>
+      <div id="board" class="board"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Federation topology</h2>
+        <span class="muted">channel → XO → members</span>
+      </div>
+      <div id="topology" class="topology"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Coordination history</h2>
+        <span class="muted">CoS ledger &amp; backlog</span>
+      </div>
+      <div class="history-grid">
+        <div>
+          <h3 class="sub">Backlog drive-queue</h3>
+          <div id="backlog" class="backlog"></div>
+        </div>
+        <div>
+          <h3 class="sub">Ledger <span class="muted">(most recent first)</span></h3>
+          <div id="ledger" class="ledger"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span class="muted">read-only · reads the artifacts <code>flotilla watch</code> writes · no pane probing</span>
+  </footer>
+
+  <script src="/static/dash.js"></script>
+</body>
+</html>
