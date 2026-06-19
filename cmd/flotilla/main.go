@@ -323,6 +323,17 @@ func cmdSend(args []string) error {
 	if err != nil {
 		return err
 	}
+	// Hold the per-pane TRANSACTION lock across the WHOLE confirmed delivery so this send
+	// (a separate process) cannot interleave with a concurrent `watch` /clear rotate or a
+	// flotilla-dash control action on the same pane — closing the pre-existing send-vs-watch
+	// race. Keyed by the resolved pane target (the same key Submit's per-call flock uses);
+	// bounded so a stuck holder never wedges the CLI. A timeout means another transaction held
+	// the pane too long — report it as not-delivered + retryable, never a silent partial send.
+	txn, err := deliver.AcquirePaneTxn(pane, deliver.PaneTxnTimeout)
+	if err != nil {
+		return fmt.Errorf("%s pane is busy (another delivery/rotate in progress) — NOT delivered; retry: %w", agentName, err)
+	}
+	defer txn.Release()
 	confirm := surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}
 	if err := confirm.Submit(drv, pane, message); err != nil {
 		switch {
