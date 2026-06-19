@@ -21,8 +21,12 @@ of whether the writers run in the same process or different processes (CLI `send
 the dash). The lock SHALL be a kernel advisory `flock` (auto-released on holder death — a
 crashed writer never wedges the pane) on a lockfile distinct from the per-call lockfile, so a
 per-call lock taken INSIDE a transaction's tmux calls does not self-deadlock against the held
-transaction lock. The lock SHALL be keyed by agent name (1:1 with a pane), so every
-transaction writer serializes on the same key without resolving the pane.
+transaction lock. The lock SHALL be keyed by the pane target via the same key function as the
+per-call flock (`paneLockKey(target)`), so every transaction writer (CLI send, the watch
+Injector, the detector rotate, the dash) computes the identical key for one pane and the lock
+protects the actual shared resource. The lock SHALL be caller-held (`Confirm.Submit` is
+unchanged — it takes only the per-call flock; the caller wraps the whole transaction),
+consistent with the established contract in `internal/surface/confirm.go`.
 
 #### Scenario: A dash delivery and a watch rotate do not interleave
 
@@ -56,11 +60,14 @@ on it cannot stall the detector's tick loop.
 ### Requirement: A consumable seam for in-process callers
 
 The transaction lock SHALL be exported from `internal/deliver` as a minimal seam
-(`AcquirePaneTxn(agent) (lock, error)` + `Release()`) that every confirmed-delivery caller
-in the flotilla binary (the CLI `send` path, the `watch` Injector, the detector rotate, and
-the dash control handler) acquires around its transaction. The in-process `PaneMutexes`
-mechanism SHALL be subsumed by this lock (the flock serializes same-process goroutines via
-distinct file descriptors), so there is one serialization mechanism, correct across processes.
+(`AcquirePaneTxn(target string, timeout time.Duration) (*PaneTxn, error)` + `(*PaneTxn).Release()`)
+that every confirmed-delivery caller in the flotilla binary (the CLI `send` path, the `watch`
+Injector, the detector rotate, and the dash control handler) acquires around its transaction.
+The in-process `PaneMutexes` mechanism SHALL be subsumed by this lock (the flock serializes
+same-process goroutines via distinct file descriptors), so there is one serialization
+mechanism, correct across processes. `flotilla resume` SHALL NOT take the transaction lock —
+it targets a crashed (shell) desk, which the detector never rotates, and it has its own
+liveness interlock; the per-call flock suffices.
 
 #### Scenario: The dash consumes the seam
 

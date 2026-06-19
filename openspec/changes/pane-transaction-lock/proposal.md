@@ -25,10 +25,16 @@ design §5), gated to Phase 3.
   (`~/.flotilla/pane-locks/<key>.txn`), acquired ONCE around an entire pane transaction (a
   confirmed delivery, or a context rotate) and held across all its tmux calls, so two
   transactions never interleave on one pane regardless of which process runs each. Exported
-  as the **seam dash consumes** (`AcquirePaneTxn(agent) (*PaneTxn, error)` + `Release()`).
-  - **Keyed by AGENT name** (1:1 with a pane), matching `PaneMutexes` — every transaction
-    writer (cmdSend, the watch Injector, the detector rotate, the dash control handler) has
-    the agent name, so they serialize on the same key with no pane resolution needed.
+  as the **seam dash consumes**:
+  `AcquirePaneTxn(target string, timeout time.Duration) (*PaneTxn, error)` + `(*PaneTxn).Release()`.
+  **Caller-held** — consistent with the established contract (`internal/surface/confirm.go:117-122`:
+  the caller may hold a higher-level per-pane lock across Submit; Submit/SendEnter take only the
+  per-call flock themselves). So `Confirm.Submit` is unchanged; each caller wraps it
+  (`AcquirePaneTxn(pane, t)` → `defer Release()` → `Submit`).
+  - **Keyed by pane TARGET** via the existing `paneLockKey(target)` — the SAME key the per-call
+    flock uses, so dash and watch compute the identical key for one pane, and the lock protects
+    the actual shared resource (the pane). Each caller already has the pane (to call Submit /
+    inject `/clear`).
   - **Distinct `.txn` lockfile** from the per-call `.lock` (so the per-call flock taken
     INSIDE a transaction's tmux calls never self-deadlocks against the held txn lock — flock
     is per-open-file-description, two fds to the same file in one process would block).
@@ -40,6 +46,11 @@ design §5), gated to Phase 3.
   The flock serializes in-process goroutines too (separate fds), so it subsumes `PaneMutexes`.
 - **Lower layer unchanged:** the existing per-call `.lock` flock (`internal/deliver/lock.go`)
   stays exactly as-is, guarding individual tmux calls.
+- **`resume` does NOT take the txn lock.** `flotilla resume` targets a CRASHED desk (a shell)
+  and has its own liveness interlock (refuses a LIVE pane without `--force`,
+  `cmd/flotilla/resume.go`). The detector only rotates a LIVE Working→Idle XO, so a desk being
+  resumed (crashed) is never concurrently rotated — the interlock + the per-call flock suffice.
+  Confirmed for the dash: wrap route in `AcquirePaneTxn`; do NOT wrap resume.
 
 ## Design points the trio must weigh (called out, not hidden)
 
