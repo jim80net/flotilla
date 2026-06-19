@@ -163,12 +163,63 @@ explicitly in the UI.** All issue content is passed to `gh` injection-safely
 (bodies via stdin, titles/labels via the `--flag=value` form), so a title or
 body starting with `-` can never be read as a flag.
 
+## cnc control (route / notify / resume)
+
+The **Control** tab exposes three actions, each a thin proxy over flotilla's
+existing, tested delivery library (it adds no new delivery mechanism) and each
+behind the same browser-CSRF gate as tracker writes (the `X-Flotilla-Dash`
+custom header + an `Origin` check, enforced on loopback too). Each surfaces the
+library's **typed outcome** honestly.
+
+| Action | Maps to | Status |
+|--------|---------|--------|
+| **Operator note** | `discord.Post` (the `flotilla notify` path) | **Live** — posts to the fleet channel under `operator(dash)`, mirrored to the CoS ledger with dash provenance |
+| **Route instruction** | `surface.Confirm.Submit` (the `flotilla send` path) | **Gated** — see the pane-lock note below |
+| **Resume a crashed desk** | the `flotilla resume` recipe path | **Gated** — see the pane-lock note below |
+
+### Operator note (live)
+
+Posting a note needs a Discord webhook for the XO. Provide a secrets file:
+
+```bash
+flotilla dash --roster ./flotilla.json --secrets ./flotilla-secrets.env
+# (or set $FLOTILLA_SECRETS). Without it, the note action returns a clear
+# "no Discord webhook configured" error; the rest of the dash is unaffected.
+```
+
+The note posts to the fleet channel under the username `operator(dash)` and is
+recorded in the CoS who-knows-what ledger as `operator(dash) → <xo>` so a
+dash-issued note is auditable alongside Discord traffic.
+
+### Route + resume are gated on the cross-process pane lock
+
+Routing an instruction and resuming a desk **drive agent panes**. Because the
+dash is a separate process from `flotilla watch`, a dash route and watch's
+detector context-rotate to the same pane could interleave and corrupt the
+composer unless they serialize via a **cross-process per-pane transaction lock**
+(design §5). That lock is a shared-core change coordinated with the
+core/flotilla-dev lane. Until it lands, route and resume **fail closed** — the UI
+shows a clear "pane control is not yet enabled (pane lock pending)" message and
+no pane is driven. When the lock ships, these light up with no dash-side API
+change.
+
+## Network binding & the non-loopback auth surface
+
+The dash is still **loopback-only** in this phase (the default `127.0.0.1` bind;
+a non-loopback bind is refused at startup). Remote access is via the SSH tunnel
+recipe above. The bearer-token + SSE-cookie auth surface that makes a *direct*
+non-loopback bind safe is a separate, tracked follow-on — it is not required for
+the loopback + SSH-tunnel deployment, which is fully supported today.
+
 ## What it does NOT do (this phase)
 
-- **No control.** Routing instructions, posting operator notes, and resuming
-  crashed desks are a later phase (they drive panes and need a cross-process lock).
-- **No writes to the fleet.** The dash writes only to GitHub (via `gh`), never to
-  a pane or to fleet state; the fleet view remains a pure reader.
+- **No direct non-loopback bind.** Use loopback + an SSH tunnel; the token-gated
+  non-loopback bind is a tracked follow-on.
+- **No pane-driving control until the lock lands.** Route + resume fail closed
+  until the cross-process pane lock ships (notify is live).
+- **No writes to fleet state.** The dash writes to GitHub (via `gh`) and to
+  Discord/the pane (via the delivery library); it never writes the detector
+  snapshot or other fleet state — `flotilla watch` remains the single writer.
 
 See [docs/watch-runbook.md](./watch-runbook.md) for the daemon that produces the
 snapshot the dash reads, and [docs/quickstart.md](./quickstart.md) to stand a fleet

@@ -14,7 +14,7 @@
   "use strict";
 
   var D = window.flotillaDash;
-  var el = D.el, escapeHtml = D.escapeHtml, getJSON = D.getJSON;
+  var el = D.el, escapeHtml = D.escapeHtml, getJSON = D.getJSON, postJSON = D.postJSON;
 
   var loaded = false; // lazy first-load when the Issues tab is first shown
 
@@ -23,25 +23,6 @@
   // could land after a newer one. Each fetch stamps an epoch; a response renders
   // only if it is still the latest (same pattern as dash.js's board refresh).
   var viewEpoch = 0;
-
-  /* ── transport ───────────────────────────────────────────────────────── */
-  // postJSON issues a state-changing request with the anti-CSRF custom header
-  // and surfaces the server's typed error message (data.error) on failure.
-  function postJSON(path, body) {
-    return fetch(path, {
-      method: "POST",
-      cache: "no-store",
-      headers: { "Content-Type": "application/json", "X-Flotilla-Dash": "1" },
-      body: body == null ? "" : JSON.stringify(body),
-    }).then(function (res) {
-      return res.text().then(function (text) {
-        var data = {};
-        if (text) { try { data = JSON.parse(text); } catch (e) { /* non-JSON */ } }
-        if (!res.ok) throw new Error(data.error || (path + " → " + res.status));
-        return data;
-      });
-    });
-  }
 
   // safeHref returns an escaped https?:// URL or "" — a scheme allowlist so a
   // non-http(s) URL (e.g. a javascript: scheme, which escapeHtml does NOT
