@@ -1,13 +1,13 @@
 # `flotilla dash` runbook
 
 `flotilla dash` serves an **optional** local web interface over the artifacts
-`flotilla watch` already writes. Phase 1 is a **pure reader**: it starts no
-daemon, probes no panes, and writes no fleet state — `flotilla watch` remains the
-single writer of fleet state, so the dash can never diverge from or double-probe
-the fleet. A fleet that never runs `flotilla dash` behaves identically to one
-without it.
+`flotilla watch` already writes, plus a **native, GitHub-backed issue tracker**.
+The fleet view is a **pure reader**: it starts no daemon, probes no panes, and
+writes no fleet state — `flotilla watch` remains the single writer of fleet
+state, so the dash can never diverge from or double-probe the fleet. A fleet that
+never runs `flotilla dash` behaves identically to one without it.
 
-It presents three read surfaces, all live-updating:
+The fleet view presents three read surfaces, all live-updating:
 
 - **Fleet board** — one row per roster desk: name, surface driver, and assessed
   state (idle / working / awaiting-input / awaiting-approval / errored / crashed /
@@ -61,8 +61,8 @@ vars, same `<roster-dir>/…` fallbacks:
 | backlog markdown    | `--tracker-file`   | `$FLOTILLA_TRACKER_FILE`, else `<roster-dir>/.flotilla-state.md` |
 | CoS ledger          | *(roster-derived)* | the roster's `cos_ledger` (inert when `cos_agent` is unset) |
 
-`--repo owner/name` is accepted for forward-compatibility with the issue tracker
-(a later phase) and is unused by the read surface.
+`--repo owner/name` pins the issue tracker's GitHub repo (see *Issue tracker*
+below). When omitted it is resolved from the working directory the way `gh` does.
 
 ## Three-state freshness (absent / stale / fresh)
 
@@ -106,12 +106,69 @@ Every handler also validates the `Host` header against an allowlist
 (`127.0.0.1` / `localhost` / `[::1]` at the bind port), so a DNS-rebinding page
 cannot reach the dash even on loopback.
 
+## Issue tracker (native, GitHub-backed)
+
+The **Issues** tab is a native tracker backed by your repo's GitHub Issues. It
+lists open issues (with a one-click **operator-idea** filter — the XO's
+convention for tracking operator suggestions), opens an issue's body + comments,
+and lets you create, comment, label, and close issues without leaving the dash.
+
+### Prerequisite: `gh` authenticated on the host
+
+The tracker shells out to the [GitHub CLI](https://cli.github.com/) (`gh`) and
+reuses its existing host authentication — **no new secret, no token wiring**.
+Confirm it before starting:
+
+```bash
+gh auth status          # must report logged in to github.com
+gh --version            # any recent gh (tested against 2.45)
+```
+
+If `gh` is not authenticated — or not installed at all — the tracker surfaces a
+clear error in the UI ("gh is not authenticated — run `gh auth login`" /
+"the `gh` CLI is not installed or not on PATH"); the fleet view is unaffected.
+
+The tracker is **last-writer-wins** against GitHub: it holds no local issue state
+and does no optimistic-concurrency check, so two tabs (or two operators) editing
+the same issue simply apply in order. Each gh call is also bounded by a 30-second
+timeout, after which the UI reports a gateway timeout rather than hanging.
+
+### Pinning the repo
+
+The target repo is **pinned at startup** and is never taken from a request — a
+browser page can never retarget an arbitrary repository.
+
+```bash
+# Explicit:
+flotilla dash --roster ./flotilla.json --repo owner/name
+
+# Or via the environment:
+FLOTILLA_DASH_REPO=owner/name flotilla dash --roster ./flotilla.json
+
+# Default: resolved from the working directory the way `gh` does. If the cwd is
+# not a gh-resolvable repo, the tracker is disabled (with a message on stderr)
+# and the fleet view still serves — pass --repo to enable it.
+```
+
+### Write safety (loopback, this phase)
+
+Issue writes (create / comment / label / close) are the dash's first
+state-changing requests. Because the operator's own browser is an untrusted
+actor even on loopback, every write requires a custom request header
+(`X-Flotilla-Dash: 1`) that the dash's own page sets but a cross-origin page
+cannot (it would trigger a CORS preflight the dash never approves), plus a
+server-side `Origin`/`Referer` check — so a malicious web page cannot forge a
+write even against the loopback bind. **Close is destructive and is confirmed
+explicitly in the UI.** All issue content is passed to `gh` injection-safely
+(bodies via stdin, titles/labels via the `--flag=value` form), so a title or
+body starting with `-` can never be read as a flag.
+
 ## What it does NOT do (this phase)
 
 - **No control.** Routing instructions, posting operator notes, and resuming
   crashed desks are a later phase (they drive panes and need a cross-process lock).
-- **No issue tracker.** The native GitHub-backed tracker is a later phase.
-- **No writes of any kind.** The dash only reads local files.
+- **No writes to the fleet.** The dash writes only to GitHub (via `gh`), never to
+  a pane or to fleet state; the fleet view remains a pure reader.
 
 See [docs/watch-runbook.md](./watch-runbook.md) for the daemon that produces the
 snapshot the dash reads, and [docs/quickstart.md](./quickstart.md) to stand a fleet
