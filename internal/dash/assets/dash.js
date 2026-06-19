@@ -32,10 +32,28 @@
     });
   }
 
-  // Expose the small, single-sourced helpers so tracker.js reuses the SAME
-  // escapeHtml/getJSON (no duplicated XSS-escaping logic, no second fetch
-  // wrapper). Both scripts run in the page; this is the seam between them.
-  window.flotillaDash = { el: el, escapeHtml: escapeHtml, getJSON: getJSON };
+  // postJSON issues a state-changing request with the anti-CSRF custom header and
+  // surfaces the server's typed error message (data.error) on failure. Shared by
+  // the tracker + control views so the header + error handling are single-sourced.
+  function postJSON(path, body) {
+    return fetch(path, {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json", "X-Flotilla-Dash": "1" },
+      body: body == null ? "" : JSON.stringify(body),
+    }).then(function (res) {
+      return res.text().then(function (text) {
+        var data = {};
+        if (text) { try { data = JSON.parse(text); } catch (e) { /* non-JSON */ } }
+        if (!res.ok) throw new Error(data.error || (path + " → " + res.status));
+        return data;
+      });
+    });
+  }
+
+  // Expose the small, single-sourced helpers so tracker.js + control.js reuse the
+  // SAME escapeHtml/getJSON/postJSON (no duplicated XSS-escaping or fetch logic).
+  window.flotillaDash = { el: el, escapeHtml: escapeHtml, getJSON: getJSON, postJSON: postJSON };
 
   /* ── fleet board + freshness ─────────────────────────────────────────── */
   function renderBoard(data) {
@@ -206,16 +224,17 @@
   // gh-backed tracker (tracker.js), which fetches on demand. Switching only
   // toggles visibility — the fleet's live link keeps running underneath so the
   // board is current the instant the operator switches back.
+  var VIEWS = ["fleet", "issues", "control"];
   function showView(view) {
-    var fleet = view === "fleet";
-    el("view-fleet").classList.toggle("hidden", !fleet);
-    el("view-issues").classList.toggle("hidden", fleet);
-    el("freshness").classList.toggle("hidden", !fleet);
-    el("tab-fleet").classList.toggle("active", fleet);
-    el("tab-issues").classList.toggle("active", !fleet);
-    el("tab-fleet").setAttribute("aria-selected", String(fleet));
-    el("tab-issues").setAttribute("aria-selected", String(!fleet));
-    if (!fleet && window.flotillaTracker) window.flotillaTracker.show();
+    VIEWS.forEach(function (v) {
+      var on = v === view;
+      el("view-" + v).classList.toggle("hidden", !on);
+      el("tab-" + v).classList.toggle("active", on);
+      el("tab-" + v).setAttribute("aria-selected", String(on));
+    });
+    // The freshness banner belongs to the live fleet board only.
+    el("freshness").classList.toggle("hidden", view !== "fleet");
+    if (view === "issues" && window.flotillaTracker) window.flotillaTracker.show();
   }
   var tabs = document.querySelectorAll(".tab");
   for (var i = 0; i < tabs.length; i++) {

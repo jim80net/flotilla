@@ -186,15 +186,19 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .comment-head { font-size: .74rem; margin-bottom: .3rem; }
 .comment-body { white-space: pre-wrap; word-break: break-word; color: var(--ink-2); }
 
-/* forms (create + detail actions) */
-.issue-form, .detail-actions { padding: 1rem; display: grid; gap: .7rem; }
+/* forms (create + detail actions + control) */
+.issue-form, .detail-actions, .control-form { padding: 1rem; display: grid; gap: .7rem; }
 .detail-actions { border-top: 1px solid var(--line); margin-top: 1rem; }
-.issue-form input, .issue-form textarea, .detail-actions input, .detail-actions textarea {
+.issue-form input, .issue-form textarea,
+.detail-actions input, .detail-actions textarea,
+.control-form input, .control-form textarea {
   font-family: var(--mono); font-size: .85rem; color: var(--ink);
   background: var(--abyss-3); border: 1px solid var(--line); border-radius: var(--r-sm); padding: .5rem .7rem; width: 100%;
 }
-.issue-form textarea, .detail-actions textarea { resize: vertical; }
+.issue-form textarea, .detail-actions textarea, .control-form textarea { resize: vertical; }
 .form-actions { display: flex; gap: .6rem; align-items: center; justify-content: flex-end; }
 .label-actions { display: grid; grid-template-columns: 1fr 1fr auto; gap: .5rem; align-items: center; }
 .form-msg { margin-right: auto; font-size: .8rem; color: var(--ink-3); }
 .form-msg.err { color: var(--err); }
+.form-msg.ok { color: var(--ok); }
+.gated-note { font-size: .72rem; color: var(--amber); border: 1px solid var(--amber); border-radius: 999px; padding: .05em .55em; }
