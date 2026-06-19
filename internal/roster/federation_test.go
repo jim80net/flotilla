@@ -71,9 +71,6 @@ func TestLoad_FederationChannels_FailClosed(t *testing.T) {
 		"member not an agent": `{
 		  "operator_user_id":"U","agents":[{"name":"a"}],
 		  "channels":[{"channel_id":"C","xo_agent":"a","members":["ghost"]}]}`,
-		"agent is xo of two bindings": `{
-		  "operator_user_id":"U","agents":[{"name":"a"}],
-		  "channels":[{"channel_id":"C1","xo_agent":"a"},{"channel_id":"C2","xo_agent":"a"}]}`,
 		"empty channel_id": `{
 		  "operator_user_id":"U","agents":[{"name":"a"}],
 		  "channels":[{"channel_id":"","xo_agent":"a"}]}`,
@@ -86,6 +83,59 @@ func TestLoad_FederationChannels_FailClosed(t *testing.T) {
 			t.Errorf("%s: expected load error, got nil", name)
 		}
 	}
+}
+
+func TestLoad_FederationChannels_XOHubsMultipleChannels(t *testing.T) {
+	// An agent MAY be the XO (hub) of MULTIPLE channels (XO→channels is one-to-many) —
+	// e.g. a flotilla XO is primary in both its C2-group channel and its own command
+	// channel. Channel→XO stays one-to-one (each channel routes to exactly one XO).
+	cfg, err := Load(writeRoster(t, `{
+	  "operator_user_id":"U",
+	  "agents":[{"name":"meta"},{"name":"alpha"},{"name":"be"}],
+	  "channels":[
+	    {"channel_id":"C_HOME","xo_agent":"alpha","members":["meta"]},
+	    {"channel_id":"C_CMD","xo_agent":"alpha","members":["be"]},
+	    {"channel_id":"C_META","xo_agent":"meta","members":["alpha"]}]}`))
+	if err != nil {
+		t.Fatalf("an XO hubbing multiple channels should load, got: %v", err)
+	}
+	// Each channel still routes to exactly one XO (one relay per channel).
+	if b, ok := cfg.BindingForChannel("C_CMD"); !ok || b.XOAgent != "alpha" {
+		t.Errorf("C_CMD should route to alpha, got %+v ok=%v", b, ok)
+	}
+	if b, ok := cfg.BindingForChannel("C_HOME"); !ok || b.XOAgent != "alpha" {
+		t.Errorf("C_HOME should route to alpha, got %+v ok=%v", b, ok)
+	}
+	// @-resolution / member scope is per-channel and unaffected: be is addressable in
+	// C_CMD but not C_HOME.
+	home, _ := cfg.BindingForChannel("C_HOME")
+	cmd, _ := cfg.BindingForChannel("C_CMD")
+	if contains(home.Members, "be") {
+		t.Errorf("be must NOT be a member of C_HOME (per-channel member scope): %+v", home.Members)
+	}
+	if !contains(cmd.Members, "be") {
+		t.Errorf("be must be a member of C_CMD: %+v", cmd.Members)
+	}
+	// ChannelForXO returns the XO's FIRST-listed (primary/home) binding.
+	if ch, ok := cfg.ChannelForXO("alpha"); !ok || ch != "C_HOME" {
+		t.Errorf("ChannelForXO(alpha) = %q ok=%v, want C_HOME (first-listed)", ch, ok)
+	}
+	// A channel bound twice (same channel → two XOs) is STILL rejected (the preserved
+	// one-relay-per-channel invariant).
+	if _, err := Load(writeRoster(t, `{
+	  "operator_user_id":"U","agents":[{"name":"a"},{"name":"b"}],
+	  "channels":[{"channel_id":"C","xo_agent":"a"},{"channel_id":"C","xo_agent":"b"}]}`)); err == nil {
+		t.Error("a channel bound to two XOs must still fail (one relay per channel)")
+	}
+}
+
+func contains(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestLoad_FederationChannels_WithPrimaryXO(t *testing.T) {

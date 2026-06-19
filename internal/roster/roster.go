@@ -220,12 +220,12 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("roster %q: channels[] and the legacy channel_id are mutually exclusive binding forms — use one (xo_agent may accompany channels[] as this daemon's primary/clock XO)", path)
 		}
 		seenChan := make(map[string]bool, len(c.Channels))
-		seenXO := make(map[string]bool, len(c.Channels))
 		for _, ch := range c.Channels {
 			if ch.ChannelID == "" {
 				return nil, fmt.Errorf("roster %q: a channel binding has an empty channel_id", path)
 			}
-			// Unique channel id ⇒ exactly one relay owns a channel (no double-delivery).
+			// THE load-bearing invariant: a unique channel id ⇒ exactly one relay owns a
+			// channel (no double-delivery). Channel→XO stays strictly one-to-one.
 			if seenChan[ch.ChannelID] {
 				return nil, fmt.Errorf("roster %q: channel %q is bound more than once (exactly one relay per channel)", path, ch.ChannelID)
 			}
@@ -236,13 +236,13 @@ func Load(path string) (*Config, error) {
 			if _, err := c.Agent(ch.XOAgent); err != nil {
 				return nil, fmt.Errorf("roster %q: channel %q xo_agent %q is not in agents", path, ch.ChannelID, ch.XOAgent)
 			}
-			// A channel has one hub: an agent is the xo_agent of at most one binding.
-			// (An agent MAY still be a MEMBER of several channels — that's the
-			// recursion, e.g. a project-XO is a member of fleet-command.)
-			if seenXO[ch.XOAgent] {
-				return nil, fmt.Errorf("roster %q: agent %q is the xo_agent of more than one channel binding", path, ch.XOAgent)
-			}
-			seenXO[ch.XOAgent] = true
+			// An agent MAY be the XO (hub) of MULTIPLE channels — XO→channels is
+			// one-to-many. A flotilla XO is primary both in its C2-group channel and its own
+			// command channel; the meta-XO is primary across the C2 group. The one-to-one
+			// direction (each channel → exactly one XO) is preserved by seenChan above; that
+			// is the routing-critical invariant. The XO's FIRST-listed binding is its
+			// primary/home channel for outbound ledger tagging (see ChannelForXO). An agent
+			// MAY also be a MEMBER of several channels (the recursion).
 			for _, m := range ch.Members {
 				if _, err := c.Agent(m); err != nil {
 					return nil, fmt.Errorf("roster %q: channel %q member %q is not in agents", path, ch.ChannelID, m)
@@ -333,10 +333,12 @@ func (c *Config) IsXO(name string) bool {
 	return false
 }
 
-// ChannelForXO returns the Discord channel an XO owns (the binding whose xo_agent is
-// name), for tagging that XO's outbound ledger entry. ok=false when no binding is
-// owned by name (then the caller records an empty channel — the ledger renders it as
-// "-"). For the legacy single-fleet form this is the synthesized binding's channel.
+// ChannelForXO returns the Discord channel an XO owns, for tagging that XO's outbound
+// ledger entry. When an XO hubs MULTIPLE channels, this returns its FIRST-listed binding —
+// its primary/home channel — so list an XO's home channel first among its bindings. ok=false
+// when no binding is owned by name (then the caller records an empty channel — the ledger
+// renders it as "-"). For the legacy single-fleet form this is the synthesized binding's
+// channel.
 func (c *Config) ChannelForXO(name string) (string, bool) {
 	for _, ch := range c.Bindings() {
 		if ch.XOAgent == name {
