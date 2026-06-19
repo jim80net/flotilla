@@ -350,6 +350,12 @@ func ParseLedgerLine(line string) LedgerEntry {
 // internal/dash and cannot import the package-main command, so the tiny,
 // stable status-vocabulary helpers are reimplemented here (with a parity test);
 // status.go remains the contract of record.
+//
+// TODO(dash, follow-up): lift effectiveSurface / deskStateLabel / humanizeAge
+// into a shared internal package (e.g. internal/fleetfmt) that both
+// cmd/flotilla (status.go) and internal/dash import, so there is one source of
+// truth. Deferred out of Phase 1 (it touches status.go, outside this phase's
+// scope); the parity test guards drift until then.
 func effectiveSurface(s string) string {
 	if s == "" {
 		return "claude-code"

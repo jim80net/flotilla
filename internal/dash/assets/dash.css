@@ -53,7 +53,9 @@ code { font-family: var(--mono); color: var(--ink); background: rgba(255,255,255
 }
 .freshness.show { display: block; }
 .freshness.fresh  { color: var(--ink-3); background: rgba(110,231,135,.04); }
-.freshness.stale  { color: #1a1208; background: var(--warn); font-weight: 600; }
+/* STALE is the alarming case (watch may be down) — render it RED + prominent
+   per design §3, so a frozen board can never be mistaken for a live one. */
+.freshness.stale  { color: #fff; background: var(--err); font-weight: 600; }
 .freshness.absent { color: var(--ink-2); background: rgba(255,107,107,.08); border-bottom-color: var(--err); }
 
 .wrap { max-width: 1140px; margin: 0 auto; padding: 1.2rem; display: grid; gap: 1.2rem; }

@@ -67,7 +67,16 @@
       rejection. `go test -race ./...`.
 - [x] 1.9 Docs: `docs/dash-runbook.md` (start, bind, what it reads, no-snapshot note);
       README roadmap line. Cold-tested the runbook's commands.
-- [ ] 1.10 `/systems-review` + `/open-code-review` + `/storm` on the Phase 1 diff; iterate clean.
+- [x] 1.10 `/systems-review` + `/open-code-review` + `/storm` on the Phase 1 diff; iterate clean.
+      ROUND 1: all three converged on ONE real defect — the SSE hub could deadlock/leak a goroutine
+      on graceful shutdown (a producer send blocking forever once run() exited on ctx-cancel).
+      FIXED with a hub `done` channel guarding every producer select (verified: shutdown with a live
+      SSE client now exits in ~0.1s, was a 5s hang + leak). Also folded: OCR's statSig silent-swallow
+      (documented as a deliberate change-trigger choice — authoritative freshness is in loadBoard),
+      STORM S1 (escapeHtml `'`), U1 ("settled?"→"settled unknown"), U2 (stale banner → RED per §3).
+      M1 (status-helper duplication) kept — justified (pkg main is unimportable), parity-tested, TODO
+      filed for a future shared-package extraction. All other axes (reader-only, loopback fail-closed,
+      Host-allowlist, status-superset, freshness, ledger parse, aliasing, XSS) verified CLEAN.
 - [ ] 1.11 **Phase-1 checkpoint:** report what landed / what's deferred / proposed Phase 2.
 
 ## Phase 2 — native GitHub-backed issue tracker

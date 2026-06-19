@@ -113,6 +113,37 @@ func TestHubContextCloses(t *testing.T) {
 	}
 }
 
+// TestHubShutdownNoBlock: once run() exits on ctx cancel, every producer
+// (add/remove/emit/count) must return promptly instead of blocking forever on a
+// receiver-less channel — otherwise a handler parked mid-register, or its
+// deferred remove, leaks a goroutine and stalls srv.Shutdown.
+func TestHubShutdownNoBlock(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	h := newHub()
+	go h.run(ctx)
+	c := &sseClient{events: make(chan string, 1)}
+	h.add(c)
+
+	cancel()
+	<-h.done // run has exited and closed done
+
+	// All producers must return well within the deadline (they select on done).
+	got := make(chan struct{})
+	go func() {
+		h.remove(c) // the deferred-remove path
+		_ = h.add(&sseClient{events: make(chan string, 1)})
+		h.emit("post-shutdown") // the poller racing shutdown
+		_ = h.count()
+		close(got)
+	}()
+	select {
+	case <-got:
+		// success — none of the producers blocked
+	case <-time.After(2 * time.Second):
+		t.Fatal("a hub producer blocked after run() exited — shutdown would leak a goroutine")
+	}
+}
+
 // --- file signature change detection ---
 
 func TestFileSigsChange(t *testing.T) {

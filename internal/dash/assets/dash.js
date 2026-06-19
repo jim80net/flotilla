@@ -21,7 +21,8 @@
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;"); // defense-in-depth for any single-quoted context
   }
 
   function getJSON(path) {
@@ -63,7 +64,7 @@
     var bits = [];
     if (data.xo) {
       var ack = xl.acked ? ("ack " + escapeHtml(xl.ack_age) + " ago") : "never acked";
-      var settled = xl.settled_known ? (xl.settled ? "settled" : "active") : "settled?";
+      var settled = xl.settled_known ? (xl.settled ? "settled" : "active") : "settled unknown";
       bits.push("XO " + escapeHtml(data.xo) + " · " + ack + " · " + settled);
     }
     meta.innerHTML = bits.join("");

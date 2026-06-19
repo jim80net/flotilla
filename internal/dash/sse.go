@@ -27,12 +27,21 @@ type sseClient struct {
 // hub is the SSE fan-out: a single set of registered clients plus the
 // register/unregister/broadcast channels that mutate it. One goroutine (run)
 // owns the client set, so no mutex is needed and fan-out is race-free.
+//
+// done is closed when run exits (on ctx cancel). Every client-facing producer
+// (add/remove/emit/count) selects on it so that, once the hub is shutting down,
+// a send no longer has a receiver — instead of blocking forever it falls
+// through. Without this a handler parked mid-register, or running its deferred
+// remove after run exits, would block the goroutine permanently and stall
+// srv.Shutdown (the graceful-stop invariant). The fix makes shutdown leak-free
+// and deterministic.
 type hub struct {
 	register   chan *sseClient
 	unregister chan *sseClient
 	broadcast  chan string
 	clients    map[*sseClient]bool
 	countReq   chan chan int // test/introspection: ask for the live client count
+	done       chan struct{} // closed by run on exit
 }
 
 func newHub() *hub {
@@ -42,12 +51,15 @@ func newHub() *hub {
 		broadcast:  make(chan string),
 		clients:    make(map[*sseClient]bool),
 		countReq:   make(chan chan int),
+		done:       make(chan struct{}),
 	}
 }
 
 // run owns the client set until ctx is cancelled. It is the ONLY goroutine that
-// touches s.clients, so registration, removal, and fan-out never race.
+// touches s.clients, so registration, removal, and fan-out never race. On exit
+// it closes done so producers stop blocking on the (now receiver-less) channels.
 func (h *hub) run(ctx context.Context) {
+	defer close(h.done)
 	for {
 		select {
 		case <-ctx.Done():
@@ -81,26 +93,45 @@ func (h *hub) run(ctx context.Context) {
 }
 
 // add registers a client, returning false if the connection cap is reached (the
-// caller then refuses the connection). It is safe to call from a handler
-// goroutine because it goes through the hub's channel, serialized by run.
+// caller then refuses the connection) OR the hub is shutting down. It is safe to
+// call from a handler goroutine: it goes through the hub's channel, serialized by
+// run, and never blocks past run's exit (the done guard).
 func (h *hub) add(c *sseClient) bool {
 	if h.count() >= maxSSEClients {
 		return false
 	}
-	h.register <- c
-	return true
+	select {
+	case h.register <- c:
+		return true
+	case <-h.done:
+		return false
+	}
 }
 
-func (h *hub) remove(c *sseClient) { h.unregister <- c }
+func (h *hub) remove(c *sseClient) {
+	select {
+	case h.unregister <- c:
+	case <-h.done:
+	}
+}
 
-func (h *hub) emit(msg string) { h.broadcast <- msg }
+func (h *hub) emit(msg string) {
+	select {
+	case h.broadcast <- msg:
+	case <-h.done:
+	}
+}
 
 // count returns the live client count (via the hub goroutine, so it is
-// consistent with run's view).
+// consistent with run's view); 0 once the hub is shutting down.
 func (h *hub) count() int {
 	reply := make(chan int)
-	h.countReq <- reply
-	return <-reply
+	select {
+	case h.countReq <- reply:
+		return <-reply
+	case <-h.done:
+		return 0
+	}
 }
 
 // handleEvents serves the SSE stream. It registers with the hub, streams events
@@ -189,6 +220,15 @@ type sigBundle struct {
 	snap, ledger, backlog fileSig
 }
 
+// statSig deliberately collapses "absent" and "stat error" to the same
+// zero-value signature. The poller is ONLY a change-TRIGGER: a signature change
+// tells clients to refetch /api/status (the authoritative read that reports the
+// honest absent/stale/fresh state via loadBoard). So a transient stat error has
+// only two harmless outcomes — no signature change (no event), or a single
+// spurious refresh when the file recovers (clients refetch the authoritative
+// read anyway). Logging here would spam stderr once per poll during an outage
+// for no operator benefit; the real freshness signal is surfaced by loadBoard,
+// not by this trigger. The swallow is intentional, not hidden.
 func statSig(path string) fileSig {
 	if path == "" {
 		return fileSig{}
