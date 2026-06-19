@@ -266,20 +266,78 @@ func (d *Detector) OperatorWake() {
 	}
 }
 
-// Tick runs one detector cycle: snapshot → liveness → diff → wake-or-sleep →
-// persist. It is the single per-interval writer; OperatorWake is the only other
-// writer and shares the mutex.
+// deferredWake records a wake decided UNDER d.mu but DELIVERED in the post-unlock tail
+// (runTail), so the wake's confirmed delivery — which acquires the cross-process pane
+// transaction lock on the Injector worker — is never decided while a bounded txn-lock wait
+// could be held under d.mu.
+type deferredWake struct {
+	kind    WakeKind
+	reasons []string
+}
+
+// Tick runs one detector cycle. The state machine (snapshot → liveness → diff → wake-or-sleep
+// → persist) runs UNDER d.mu in tickLocked; the pane-touching side effects it decides (the XO
+// context rotate and the wake deliveries) run AFTER the mutex is released, in runTail. This
+// split is load-bearing: both side effects acquire the cross-process pane TRANSACTION lock
+// (the rotate directly; a wake via the Injector's confirmed delivery), whose acquire is a
+// BOUNDED wait that an external process (the dash, a CLI send) can now make us wait out. Doing
+// that wait while holding d.mu would let an external delivery stall the detector's tick loop and
+// block OperatorWake; running it in the tail keeps d.mu held only for the lock-free state logic.
 func (d *Detector) Tick() {
+	pendingRotate, pendingWakes := d.tickLocked()
+	d.runTail(pendingRotate, pendingWakes)
+	// Durably persist the new baseline ONLY AFTER the tail has enqueued the wakes — restoring the
+	// at-least-once crash semantics the old in-line code had (enqueue-then-save). The in-memory
+	// baseline is already committed under d.mu in tickLocked (so subsequent ticks don't re-wake);
+	// deferring just the DURABLE write means a crash anywhere in save→tail leaves the on-disk
+	// snapshot showing the PRE-tick baseline, so the restart re-detects the transition and re-wakes
+	// rather than persisting "processed" while the wake was lost (cubic P1). The crash window now
+	// matches main's (enqueued-but-not-yet-delivered + saved), not the full multi-second rotate.
+	d.persist()
+}
+
+// runTail performs the tick's pane-touching side effects OUTSIDE d.mu. The ORDER is the
+// invariant the old in-line, under-mutex call gave for free: the /clear rotate is a
+// self-contained transaction that completes (acquires → clears → RELEASES the pane-txn lock)
+// BEFORE the continuation wake is enqueued, so the Injector — which re-acquires the same txn
+// lock for the delivery — always lands the continuation AFTER the rotate, never letting a
+// trailing /clear wipe a freshly delivered continuation.
+func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake) {
+	if pendingRotate && d.cfg.Rotate != nil {
+		if err := d.cfg.Rotate(); err != nil && !errors.Is(err, surface.ErrRestartRequired) {
+			log.Printf("flotilla watch: XO context rotate failed: %v (continuing without rotate)", err)
+		}
+	}
+	for _, w := range wakes {
+		if d.cfg.Wake != nil {
+			d.cfg.Wake(w.kind, w.reasons)
+		}
+	}
+}
+
+// persist durably writes the snapshot committed in-memory by tickLocked. It re-acquires d.mu
+// (the single-writer invariant — d.save touches writeFails/degraded, and OperatorWake may have
+// run in the unlock window) and is called by Tick AFTER runTail, so the durable commit lands
+// after the wakes are enqueued (at-least-once across a restart — see Tick).
+func (d *Detector) persist() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.save()
+}
+
+// tickLocked runs the lock-free-pure state machine under d.mu and RETURNS the side effects to
+// perform after unlock (a pending rotate + the ordered wakes). It is the single per-interval
+// writer of detector state; OperatorWake is the only other writer and shares the mutex.
+func (d *Detector) tickLocked() (pendingRotate bool, pendingWakes []deferredWake) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	woke := false
 	wake := func(kind WakeKind, reasons []string) {
 		woke = true
-		if d.cfg.Wake != nil {
-			d.cfg.Wake(kind, reasons)
-		}
+		pendingWakes = append(pendingWakes, deferredWake{kind, reasons})
 	}
+	requestRotate := func() { pendingRotate = true }
 
 	// 1. Gather current signals. Signal absent/unreadable carries the prior hash
 	//    forward (treat-unchanged — M4); states are shell-debounced (M2).
@@ -304,8 +362,7 @@ func (d *Detector) Tick() {
 		d.evalLiveness(cur) // still cover liveness from tick one
 		wake(WakeMaterial, []string{"change-detector started — reassess the fleet"})
 		d.quietTicks = 0
-		d.save()
-		return
+		return // durable save happens in Tick AFTER the tail enqueues this wake (at-least-once)
 	}
 
 	prev := d.snap
@@ -324,7 +381,7 @@ func (d *Detector) Tick() {
 	} else if xoFinishedTurn(prev, cur, d.cfg.XOAgent) && !cur.XOSettled {
 		// 5. XO self-continuation — only when nothing external fired this tick (an
 		//    external change already covers advancing the XO and resets the cap).
-		d.continueXO(&cur, wake)
+		d.continueXO(&cur, wake, requestRotate)
 	}
 
 	// 6. Max-quiet liveness ping (layer 3). Any wake above already refreshes
@@ -339,9 +396,12 @@ func (d *Detector) Tick() {
 		}
 	}
 
-	// 7. Persist the new baseline (fail-safe — H3).
+	// 7. Commit the new baseline IN-MEMORY (the diff source for the next tick, so a handled
+	//    transition isn't re-woken). The DURABLE write is deferred to Tick's d.persist() AFTER the
+	//    tail enqueues the wakes, so a crash before the durable commit re-detects on restart (H3 /
+	//    cubic-P1 at-least-once).
 	d.snap = cur
-	d.save()
+	return pendingRotate, pendingWakes
 }
 
 // continueXO handles the XO's own Working→Idle. It rotates to fresh context (unless awaiting an
@@ -350,15 +410,14 @@ func (d *Detector) Tick() {
 // anti-passivity fix) — and drives the top non-stuck item (WakeBacklog). Only when the gate is
 // satisfied (no unblocked items: empty / all-operator-blocked / awaiting / no backlog configured)
 // does the existing settle/continuation/cap logic apply, byte-identical to before.
-func (d *Detector) continueXO(cur *Snapshot, wake func(WakeKind, []string)) {
+func (d *Detector) continueXO(cur *Snapshot, wake func(WakeKind, []string), requestRotate func()) {
 	// Rotate between steps so each handling runs in fresh context — gated by the awaiting-operator
-	// veto (never wipe an outstanding question thread). Runs first on BOTH branches below.
+	// veto (never wipe an outstanding question thread). REQUEST it here (under d.mu); the actual
+	// /clear runs in runTail after the mutex is released (it acquires the pane-txn lock, a bounded
+	// cross-process wait that must not be held under d.mu — see Tick). The request is recorded
+	// BEFORE the wake below so the tail rotates, then enqueues the continuation, preserving order.
 	if d.cfg.Awaiting == nil || !d.cfg.Awaiting() {
-		if d.cfg.Rotate != nil {
-			if err := d.cfg.Rotate(); err != nil && !errors.Is(err, surface.ErrRestartRequired) {
-				log.Printf("flotilla watch: XO context rotate failed: %v (continuing without rotate)", err)
-			}
-		}
+		requestRotate()
 	}
 
 	// Consume the settle marker regardless (as before) — even in the override branch, so a stale
