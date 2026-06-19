@@ -150,7 +150,10 @@ func (g *GHTracker) Create(ctx context.Context, in CreateInput) (Issue, error) {
 	if title == "" {
 		return Issue{}, ErrEmptyTitle
 	}
-	if len(in.Title) > maxTitleLen {
+	// Cap the TRIMMED title — that is the value actually sent and stored, so the
+	// length check must match it (a title within the cap after trimming must not
+	// be rejected for surrounding whitespace).
+	if len(title) > maxTitleLen {
 		return Issue{}, fmt.Errorf("%w: title (max %d)", ErrTooLong, maxTitleLen)
 	}
 	if len(in.Body) > maxBodyLen {
@@ -328,6 +331,10 @@ func classify(stderr []byte, runErr error) error {
 // ghTimeout so a hung gh is killed instead of pinning the goroutine; a timeout
 // surfaces as context.DeadlineExceeded so classify maps it to ErrTimeout.
 func execRunner(ctx context.Context, args []string, stdin []byte) ([]byte, []byte, error) {
+	// Bound only a deadline-free call (the HTTP request path); a caller that
+	// already set a deadline (e.g. the startup resolve) keeps its own. Note this
+	// does not CLAMP a longer caller deadline — today every caller is either
+	// deadline-free or sets a deadline shorter than ghTimeout.
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, ghTimeout)
