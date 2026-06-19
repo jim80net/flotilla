@@ -1,0 +1,210 @@
+package dash
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"os"
+	"time"
+)
+
+// maxSSEClients caps concurrent SSE connections so a flood of EventSource
+// connections cannot exhaust goroutines/file descriptors. A client over the cap
+// is refused with 503 and falls back to polling /api/status.
+const maxSSEClients = 64
+
+// pollInterval is the stat-poll cadence for detecting artifact changes (design
+// §2: ~1s, stdlib-only — no fsnotify dependency in Phase 1).
+const pollInterval = time.Second
+
+// sseClient is one connected EventSource. events is buffered so a momentarily
+// slow reader does not block the hub's fan-out; a client whose buffer is full is
+// DROPPED (closed), never allowed to block the poller.
+type sseClient struct {
+	events chan string
+}
+
+// hub is the SSE fan-out: a single set of registered clients plus the
+// register/unregister/broadcast channels that mutate it. One goroutine (run)
+// owns the client set, so no mutex is needed and fan-out is race-free.
+type hub struct {
+	register   chan *sseClient
+	unregister chan *sseClient
+	broadcast  chan string
+	clients    map[*sseClient]bool
+	countReq   chan chan int // test/introspection: ask for the live client count
+}
+
+func newHub() *hub {
+	return &hub{
+		register:   make(chan *sseClient),
+		unregister: make(chan *sseClient),
+		broadcast:  make(chan string),
+		clients:    make(map[*sseClient]bool),
+		countReq:   make(chan chan int),
+	}
+}
+
+// run owns the client set until ctx is cancelled. It is the ONLY goroutine that
+// touches s.clients, so registration, removal, and fan-out never race.
+func (h *hub) run(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			for c := range h.clients {
+				close(c.events)
+				delete(h.clients, c)
+			}
+			return
+		case c := <-h.register:
+			h.clients[c] = true
+		case c := <-h.unregister:
+			if h.clients[c] {
+				delete(h.clients, c)
+				close(c.events)
+			}
+		case msg := <-h.broadcast:
+			for c := range h.clients {
+				// Non-blocking send: a client whose buffer is full is dropped (its
+				// events channel closed and removed) rather than blocking the hub.
+				select {
+				case c.events <- msg:
+				default:
+					delete(h.clients, c)
+					close(c.events)
+				}
+			}
+		case reply := <-h.countReq:
+			reply <- len(h.clients)
+		}
+	}
+}
+
+// add registers a client, returning false if the connection cap is reached (the
+// caller then refuses the connection). It is safe to call from a handler
+// goroutine because it goes through the hub's channel, serialized by run.
+func (h *hub) add(c *sseClient) bool {
+	if h.count() >= maxSSEClients {
+		return false
+	}
+	h.register <- c
+	return true
+}
+
+func (h *hub) remove(c *sseClient) { h.unregister <- c }
+
+func (h *hub) emit(msg string) { h.broadcast <- msg }
+
+// count returns the live client count (via the hub goroutine, so it is
+// consistent with run's view).
+func (h *hub) count() int {
+	reply := make(chan int)
+	h.countReq <- reply
+	return <-reply
+}
+
+// handleEvents serves the SSE stream. It registers with the hub, streams events
+// until the client disconnects (Request.Context().Done()) or the buffer overflows
+// (the hub drops it), and DEREGISTERS on exit so a disconnected client never
+// leaks. An initial event prompts the client to do its reconcile-on-connect read
+// of /api/status.
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	client := &sseClient{events: make(chan string, 8)}
+	if !s.hub.add(client) {
+		http.Error(w, "too many SSE clients — fall back to polling /api/status", http.StatusServiceUnavailable)
+		return
+	}
+	defer s.hub.remove(client)
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	// Prompt an immediate reconcile read on (re)connect.
+	fmt.Fprint(w, "event: update\ndata: connected\n\n")
+	flusher.Flush()
+
+	// A keepalive comment every 25s keeps intermediaries from idling the stream
+	// out before the IdleTimeout; it also detects a dead client promptly.
+	keepalive := time.NewTicker(25 * time.Second)
+	defer keepalive.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case msg, ok := <-client.events:
+			if !ok {
+				return // hub dropped or closed us
+			}
+			fmt.Fprintf(w, "event: update\ndata: %s\n\n", msg)
+			flusher.Flush()
+		case <-keepalive.C:
+			fmt.Fprint(w, ": keepalive\n\n")
+			flusher.Flush()
+		}
+	}
+}
+
+// poll is the single shared file poller. It stats the snapshot, ledger, and
+// backlog every pollInterval and emits an SSE update whenever any of their
+// (mtime,size) signatures change — so all connected clients refetch the JSON
+// endpoints. One poller serves every client (not one per connection).
+func (s *Server) poll(ctx context.Context) {
+	paths := []string{s.cfg.SnapshotPath, s.cfg.LedgerPath, s.cfg.BacklogPath}
+	prev := fileSigs(paths)
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			cur := fileSigs(paths)
+			if cur != prev {
+				prev = cur
+				s.hub.emit(s.now().UTC().Format(time.RFC3339))
+			}
+		}
+	}
+}
+
+// fileSig is a file's change signature: its modification time (unix nanos) and
+// size. Comparing (mtime,size) catches a same-second rewrite that changes the
+// size even when the mtime second is unchanged; a same-second same-size change
+// (rare) is reconciled by the client's /api/status poll, the authoritative read.
+type fileSig struct {
+	mtime int64
+	size  int64
+	exist bool
+}
+
+// sigBundle is the combined signature of all watched files (a comparable value
+// so the poller can detect "any change" with a single ==).
+type sigBundle struct {
+	snap, ledger, backlog fileSig
+}
+
+func statSig(path string) fileSig {
+	if path == "" {
+		return fileSig{}
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return fileSig{}
+	}
+	return fileSig{mtime: fi.ModTime().UnixNano(), size: fi.Size(), exist: true}
+}
+
+// fileSigs computes the combined signature for [snapshot, ledger, backlog].
+func fileSigs(paths []string) sigBundle {
+	return sigBundle{
+		snap:    statSig(paths[0]),
+		ledger:  statSig(paths[1]),
+		backlog: statSig(paths[2]),
+	}
+}

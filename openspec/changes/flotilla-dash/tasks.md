@@ -35,33 +35,38 @@
 
 ## Phase 1 — dash server + read cnc (zero blast radius)
 
-- [ ] 1.1 `cmd/flotilla/main.go`: add the `dash` switch arm + usage block.
-- [ ] 1.2 `cmd/flotilla/dash.go`: flags (`--roster`, `--snapshot-file`, `--ack-file`,
-      `--bind` [default `127.0.0.1:<port>`], `--auth-token`/`$FLOTILLA_DASH_TOKEN`,
-      `--repo` for the tracker), default-path resolution mirroring `status` EXACTLY.
-- [ ] 1.3 `internal/dash`: the read model — load snapshot (`watch.LoadSnapshot`),
+- [x] 1.1 `cmd/flotilla/main.go`: add the `dash` switch arm + usage block.
+- [x] 1.2 `cmd/flotilla/dash.go`: flags (`--roster`, `--snapshot-file`, `--ack-file`,
+      `--tracker-file`, `--bind` [default `127.0.0.1:8787`], `--repo` for the tracker —
+      accepted, unused), default-path resolution mirroring `status` EXACTLY.
+      NOTE: the `--auth-token`/`$FLOTILLA_DASH_TOKEN` machinery is deferred to the control
+      phase — it is coupled to the write-auth gate + the SSE-cookie auth that makes a
+      non-loopback bind safe. Phase 1 is loopback-ONLY and fails closed on any non-loopback
+      bind (a strict superset of "non-loopback without a token fails closed"), so an inert
+      Phase-1 token flag would be a footgun. Tracked for the control phase (§3.2).
+- [x] 1.3 `internal/dash`: the read model — load snapshot (`watch.LoadSnapshot`),
       ack age, roster bindings (`Config.Bindings()`), CoS ledger, backlog (`backlog.Parse`).
       Pure functions, unit-tested with in-memory artifacts + a pinned clock.
-- [ ] 1.4 `internal/dash`: the HTTP server (`net/http` + `ServeMux`), `embed.FS`
+- [x] 1.4 `internal/dash`: the HTTP server (`net/http` + `ServeMux`), `embed.FS`
       assets, `html/template` page render, `/api/status` (the `flotilla status --json`
       SUPERSET), `/api/topology`, `/api/history` JSON endpoints.
-- [ ] 1.5 `internal/dash`: SSE `/events` hub — ONE shared poller keyed on
+- [x] 1.5 `internal/dash`: SSE `/events` hub — ONE shared poller keyed on
       `(mtime,size)` of snapshot/ledger/backlog; per-client register/deregister on
       disconnect (`Request.Context().Done()`); non-blocking fan-out (drop slow clients);
-      connection cap; `http.Server` read/write/idle timeouts. `/api/status` JSON poll =
+      connection cap; `http.Server` read/idle timeouts. `/api/status` JSON poll =
       fallback + reconcile-on-reconnect read.
-- [ ] 1.6 Frontend (vanilla JS, no build): fleet board (three-state freshness),
+- [x] 1.6 Frontend (vanilla JS, no build): fleet board (three-state freshness),
       federation topology org chart, coordination history; SSE live-update wiring; dynamic
       data via `fetch`ed JSON only (never server-rendered into `<script>`); reuse `site/` CSS.
-- [ ] 1.7 Loopback bind by default; `Host`-header allowlist on every handler (anti-rebinding,
+- [x] 1.7 Loopback bind by default; `Host`-header allowlist on every handler (anti-rebinding,
       lands in P1 so the infra exists before writes); the three-state empty board (absent/stale/fresh).
-- [ ] 1.8 Tests: read-model purity (snapshot → board JSON; topology from bindings;
+- [x] 1.8 Tests: read-model purity (snapshot → board JSON; topology from bindings;
       ledger/backlog parse), the status-superset contract (name/state always; role for XO;
       effective surface), the three-state freshness paths, single-fleet (one-binding) topology,
       SSE hub (emit on `(mtime,size)` change, client deregister-on-disconnect), `Host`-allowlist
       rejection. `go test -race ./...`.
-- [ ] 1.9 Docs: `docs/dash-runbook.md` (start, bind, what it reads, no-snapshot note);
-      README roadmap line. Cold-test the runbook's commands.
+- [x] 1.9 Docs: `docs/dash-runbook.md` (start, bind, what it reads, no-snapshot note);
+      README roadmap line. Cold-tested the runbook's commands.
 - [ ] 1.10 `/systems-review` + `/open-code-review` + `/storm` on the Phase 1 diff; iterate clean.
 - [ ] 1.11 **Phase-1 checkpoint:** report what landed / what's deferred / proposed Phase 2.
 
