@@ -201,3 +201,4 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .form-msg { margin-right: auto; font-size: .8rem; color: var(--ink-3); }
 .form-msg.err { color: var(--err); }
 .form-msg.ok { color: var(--ok); }
+.gated-note { font-size: .72rem; color: var(--amber); border: 1px solid var(--amber); border-radius: 999px; padding: .05em .55em; }

@@ -51,8 +51,9 @@
     if (!body) return Promise.reject(new Error("instruction is required"));
     return postJSON("/api/control/route", { target: target, message: body }).then(function (res) {
       // The typed outcome (delivered/busy/crashed/transient/unconfirmed) is the
-      // truth — surface it distinctly, never a bare "ok".
-      var outcome = (res && res.outcome) || "delivered";
+      // truth — surface it distinctly, never a bare "ok" and never assume success
+      // on a missing outcome.
+      var outcome = (res && res.outcome) || "(no outcome reported)";
       var detail = res && res.detail ? " — " + res.detail : "";
       if (outcome === "delivered") { el("route-body").value = ""; }
       return "Outcome: " + outcome + detail;
@@ -67,7 +68,7 @@
       return Promise.reject(new Error("cancelled"));
     }
     return postJSON("/api/control/resume", { agent: agent }).then(function (res) {
-      var outcome = (res && res.outcome) || "resumed";
+      var outcome = (res && res.outcome) || "(no outcome reported)";
       var detail = res && res.detail ? " — " + res.detail : "";
       return "Outcome: " + outcome + detail;
     });

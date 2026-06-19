@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -58,8 +59,8 @@ func (c *LibraryController) Notify(_ context.Context, message string) error {
 	}
 	// This message IS operator-facing content — reject an over-length body cleanly
 	// (never silently truncate the operator's note), mirroring cmdNotify.
-	if len([]rune(message)) > discord.MaxContentRunes {
-		return fmt.Errorf("%w: %d chars (limit %d)", ErrOverLength, len([]rune(message)), discord.MaxContentRunes)
+	if n := len([]rune(message)); n > discord.MaxContentRunes {
+		return fmt.Errorf("%w: %d chars (limit %d)", ErrOverLength, n, discord.MaxContentRunes)
 	}
 	if c.secretsPath == "" {
 		return ErrWebhookMissing
@@ -99,7 +100,14 @@ func (c *LibraryController) mirrorToLedger(message string) {
 	if c.roster == nil || c.roster.CosLedger == "" {
 		return // CoS inert ⇒ no ledger
 	}
-	channel, _ := c.roster.ChannelForXO(c.xo)
+	channel, ok := c.roster.ChannelForXO(c.xo)
+	// A federated roster whose hub XO owns no channel binding is config drift —
+	// the entry still records (channel ""), but surface it (parity with cmdNotify)
+	// so the misconfiguration isn't masked. A legacy/clock-only XO legitimately
+	// owns no channel, so warn only in the federated case.
+	if !ok && len(c.roster.Channels) > 0 {
+		fmt.Fprintf(os.Stderr, "flotilla dash: XO %q has no channel binding in the federated roster — ledger entry tagged with no channel\n", c.xo)
+	}
 	_ = c.appendCos(c.roster.CosLedger, cos.Entry{
 		Time:    c.now(),
 		Channel: channel,

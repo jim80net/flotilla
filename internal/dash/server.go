@@ -50,9 +50,10 @@ type Server struct {
 	control   control.Controller // cnc control (notify live; route/resume gated on the pane lock)
 }
 
-// NewServer validates the bind address (Phase 1 serves LOOPBACK ONLY — see
-// validateBind), loads the roster, resolves the XO + freshness threshold, parses
-// the embedded page template, and wires the routes. It does not listen; call Run.
+// NewServer validates the bind address (LOOPBACK ONLY — see validateBind; the
+// token-gated non-loopback bind is a tracked follow-on), loads the roster,
+// resolves the XO + freshness threshold, parses the embedded page template,
+// wires the routes + the tracker/control surfaces. It does not listen; call Run.
 func NewServer(cfg Config) (*Server, error) {
 	if cfg.Bind == "" {
 		cfg.Bind = DefaultBind
@@ -328,12 +329,13 @@ func buildOriginAllowlist(bind string) map[string]bool {
 	return origins
 }
 
-// validateBind enforces Phase 1's loopback-only posture. A non-loopback bind
-// (LAN, 0.0.0.0) would expose an UNAUTHENTICATED read surface to the network;
-// the token + SSE-cookie auth gate that makes a non-loopback bind safe lands
-// with the control phase. Until then the dash fails closed: it refuses any
-// non-loopback bind rather than serving fleet state unauthenticated beyond the
-// host. Remote access is via an SSH tunnel to the loopback bind.
+// validateBind enforces the loopback-only posture. A non-loopback bind (LAN,
+// 0.0.0.0) would expose an UNAUTHENTICATED surface to the network; the bearer
+// token + SSE-cookie auth gate that makes a non-loopback bind safe is a tracked
+// follow-on (the non-loopback auth surface, deferred from this control phase).
+// Until it lands the dash fails closed: it refuses any non-loopback bind rather
+// than serving unauthenticated beyond the host. Remote access is via an SSH
+// tunnel to the loopback bind.
 func validateBind(bind string) error {
 	host, _, err := net.SplitHostPort(bind)
 	if err != nil {

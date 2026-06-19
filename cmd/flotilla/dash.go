@@ -13,18 +13,19 @@ import (
 	"github.com/jim80net/flotilla/internal/dash/tracker"
 )
 
-// cmdDash starts the optional local web interface (`flotilla dash`). Phase 1 is a
-// PURE READER: it serves a read-only fleet board, federation topology, and
-// coordination history over the artifacts `flotilla watch` already writes (the
-// detector snapshot, the XO ack file, the roster, the CoS ledger, the backlog).
-// It starts no daemon, probes no panes, and writes no fleet state — `flotilla
-// watch` stays the single writer (design §2).
+// cmdDash starts the optional local web interface (`flotilla dash`). The fleet
+// view is a PURE READER over the artifacts `flotilla watch` already writes (the
+// detector snapshot, the XO ack file, the roster, the CoS ledger, the backlog) —
+// it starts no daemon, probes no panes, and writes no fleet state (`flotilla
+// watch` stays the single writer, design §2). The dash also serves the native
+// issue tracker (via `gh`) and the cnc control surface (notify live;
+// route/resume gated on the cross-process pane lock).
 //
 // It mirrors `flotilla status`'s default-path resolution EXACTLY so the dash
 // reads precisely what watch writes (same env vars, same <roster-dir>/… fallbacks).
-// The default bind is loopback; Phase 1 serves loopback only (a non-loopback
-// bind, which needs the token + SSE-cookie auth gate, lands with the control
-// phase — the server fails closed on one until then).
+// The default bind is loopback; the dash serves loopback only (a non-loopback
+// bind, which needs the bearer-token + SSE-cookie auth gate, is a tracked
+// follow-on — the server fails closed on one until then).
 func cmdDash(args []string) error {
 	fs := flag.NewFlagSet("dash", flag.ContinueOnError)
 	rosterPath := fs.String("roster", rosterDefault(), "roster config path")
