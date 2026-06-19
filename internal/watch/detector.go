@@ -286,6 +286,14 @@ type deferredWake struct {
 func (d *Detector) Tick() {
 	pendingRotate, pendingWakes := d.tickLocked()
 	d.runTail(pendingRotate, pendingWakes)
+	// Durably persist the new baseline ONLY AFTER the tail has enqueued the wakes — restoring the
+	// at-least-once crash semantics the old in-line code had (enqueue-then-save). The in-memory
+	// baseline is already committed under d.mu in tickLocked (so subsequent ticks don't re-wake);
+	// deferring just the DURABLE write means a crash anywhere in save→tail leaves the on-disk
+	// snapshot showing the PRE-tick baseline, so the restart re-detects the transition and re-wakes
+	// rather than persisting "processed" while the wake was lost (cubic P1). The crash window now
+	// matches main's (enqueued-but-not-yet-delivered + saved), not the full multi-second rotate.
+	d.persist()
 }
 
 // runTail performs the tick's pane-touching side effects OUTSIDE d.mu. The ORDER is the
@@ -305,6 +313,16 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake) {
 			d.cfg.Wake(w.kind, w.reasons)
 		}
 	}
+}
+
+// persist durably writes the snapshot committed in-memory by tickLocked. It re-acquires d.mu
+// (the single-writer invariant — d.save touches writeFails/degraded, and OperatorWake may have
+// run in the unlock window) and is called by Tick AFTER runTail, so the durable commit lands
+// after the wakes are enqueued (at-least-once across a restart — see Tick).
+func (d *Detector) persist() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.save()
 }
 
 // tickLocked runs the lock-free-pure state machine under d.mu and RETURNS the side effects to
@@ -344,8 +362,7 @@ func (d *Detector) tickLocked() (pendingRotate bool, pendingWakes []deferredWake
 		d.evalLiveness(cur) // still cover liveness from tick one
 		wake(WakeMaterial, []string{"change-detector started — reassess the fleet"})
 		d.quietTicks = 0
-		d.save()
-		return
+		return // durable save happens in Tick AFTER the tail enqueues this wake (at-least-once)
 	}
 
 	prev := d.snap
@@ -379,11 +396,11 @@ func (d *Detector) tickLocked() (pendingRotate bool, pendingWakes []deferredWake
 		}
 	}
 
-	// 7. Persist the new baseline (fail-safe — H3). Persist happens under d.mu, BEFORE the
-	//    post-unlock tail rotates/wakes — a crash in that microscopic window simply re-cold-starts
-	//    on restart (one conservative reassess wake), so a missed continuation self-heals.
+	// 7. Commit the new baseline IN-MEMORY (the diff source for the next tick, so a handled
+	//    transition isn't re-woken). The DURABLE write is deferred to Tick's d.persist() AFTER the
+	//    tail enqueues the wakes, so a crash before the durable commit re-detects on restart (H3 /
+	//    cubic-P1 at-least-once).
 	d.snap = cur
-	d.save()
 	return pendingRotate, pendingWakes
 }
 

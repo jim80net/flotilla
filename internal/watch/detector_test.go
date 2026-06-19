@@ -358,6 +358,36 @@ func TestDetectorTailRotatesBeforeContinuationWake(t *testing.T) {
 	}
 }
 
+// At-least-once crash semantics (cubic P1): the DURABLE snapshot persist MUST happen AFTER the
+// tail enqueues the wakes — otherwise a crash in the save→tail window persists "transition
+// processed" while the wake is lost, and the restart (loading a non-cold snapshot) never re-wakes,
+// stalling the XO. Lock the ordering: a Working→Idle continuation tick must record persist LAST,
+// strictly after both the rotate and the continuation wake.
+func TestDetectorPersistsAfterWakes(t *testing.T) {
+	var mu sync.Mutex
+	var events []string
+	cfg := DetectorConfig{
+		XOAgent:  "hydra-ops",
+		Desks:    []string{"hydra-ops"},
+		Interval: time.Minute,
+		Assess:   func(string) surface.State { return surface.StateIdle },
+		AckAge:   func() time.Duration { return 0 },
+		Rotate:   func() error { mu.Lock(); defer mu.Unlock(); events = append(events, "rotate"); return nil },
+		Wake:     func(WakeKind, []string) { mu.Lock(); defer mu.Unlock(); events = append(events, "wake") },
+		Persist:  func(Snapshot) error { mu.Lock(); defer mu.Unlock(); events = append(events, "persist"); return nil },
+	}
+	d := NewDetector(cfg, filepath.Join(t.TempDir(), "missing.json"))
+	seed(d, map[string]surface.State{"hydra-ops": surface.StateWorking}, "h0")
+
+	d.Tick()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) != 3 || events[0] != "rotate" || events[1] != "wake" || events[2] != "persist" {
+		t.Fatalf("durable persist must follow the rotate+wake (at-least-once on crash), got %v", events)
+	}
+}
+
 // The whole point of the tickLocked/runTail split: the rotate's BOUNDED cross-process txn-lock
 // wait runs OUTSIDE d.mu, so it can never stall OperatorWake (which shares d.mu). Prove it by
 // making Rotate block: while a tick is parked in runTail's rotate, OperatorWake must still return
