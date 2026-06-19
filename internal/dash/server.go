@@ -254,7 +254,16 @@ func (s *Server) hostAllow(next http.Handler) http.Handler {
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
+	writeJSONStatus(w, http.StatusOK, v)
+}
+
+// writeJSONStatus writes v as JSON with an explicit status. The Content-Type is
+// set BEFORE WriteHeader — a header set after WriteHeader is silently dropped
+// (the headers are already on the wire), so a non-200 JSON response must set the
+// type first or the client sees a sniffed/empty content type.
+func writeJSONStatus(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(v)

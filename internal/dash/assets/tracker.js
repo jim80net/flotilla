@@ -18,6 +18,12 @@
 
   var loaded = false; // lazy first-load when the Issues tab is first shown
 
+  // A monotonic epoch guards against out-of-order renders: rapid filter toggles
+  // or list⇄detail navigation launch overlapping fetches, and an older response
+  // could land after a newer one. Each fetch stamps an epoch; a response renders
+  // only if it is still the latest (same pattern as dash.js's board refresh).
+  var viewEpoch = 0;
+
   /* ── transport ───────────────────────────────────────────────────────── */
   // postJSON issues a state-changing request with the anti-CSRF custom header
   // and surfaces the server's typed error message (data.error) on failure.
@@ -63,10 +69,13 @@
 
   function loadIssues() {
     showOnly("issues-listpanel");
+    var epoch = ++viewEpoch;
     var list = el("issues-list");
     list.innerHTML = '<div class="empty">Loading issues…</div>';
-    getJSON(currentFilter()).then(renderIssueList).catch(function (err) {
-      list.innerHTML = '<div class="error">Could not load issues: ' + escapeHtml(err.message) + "</div>";
+    getJSON(currentFilter()).then(function (doc) {
+      if (epoch === viewEpoch) renderIssueList(doc);
+    }).catch(function (err) {
+      if (epoch === viewEpoch) list.innerHTML = '<div class="error">Could not load issues: ' + escapeHtml(err.message) + "</div>";
     });
   }
 
@@ -98,11 +107,14 @@
   /* ── detail view ─────────────────────────────────────────────────────── */
   function openIssue(number) {
     showOnly("issues-detail");
+    var epoch = ++viewEpoch;
     el("detail-title").textContent = "#" + number;
     var body = el("detail-body");
     body.innerHTML = '<div class="empty">Loading issue #' + number + "…</div>";
-    getJSON("/api/issues/" + number).then(renderIssueDetail).catch(function (err) {
-      body.innerHTML = '<div class="error">Could not load issue #' + number + ": " + escapeHtml(err.message) + "</div>";
+    getJSON("/api/issues/" + number).then(function (it) {
+      if (epoch === viewEpoch) renderIssueDetail(it);
+    }).catch(function (err) {
+      if (epoch === viewEpoch) body.innerHTML = '<div class="error">Could not load issue #' + number + ": " + escapeHtml(err.message) + "</div>";
     });
   }
 

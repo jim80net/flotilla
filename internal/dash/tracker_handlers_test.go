@@ -222,6 +222,11 @@ func TestIssueCreate_HappyPath(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("code %d, want 201; body=%s", rec.Code, rec.Body.String())
 	}
+	// Content-Type must be JSON — set BEFORE WriteHeader(201), or the client sees
+	// a sniffed/empty type (cubic #125 P2).
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("create Content-Type = %q, want application/json", ct)
+	}
 	if f.lastCreate.Title != "new" || f.lastCreate.Body != "b" || len(f.lastCreate.Labels) != 1 {
 		t.Errorf("create input not forwarded: %+v", f.lastCreate)
 	}

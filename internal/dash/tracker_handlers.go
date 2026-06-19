@@ -101,8 +101,7 @@ func (s *Server) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 		writeTrackerError(w, err)
 		return
 	}
-	w.WriteHeader(http.StatusCreated)
-	writeJSON(w, issue)
+	writeJSONStatus(w, http.StatusCreated, issue)
 }
 
 // handleIssueComment serves POST /api/issues/{number}/comments.
