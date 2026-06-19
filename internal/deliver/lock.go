@@ -41,13 +41,17 @@ const (
 	// PaneTxnTimeout bounds how long a TRANSACTION writer waits for a pane's transaction lock
 	// (AcquirePaneTxn) before giving up and dropping its delivery. A whole transaction (a
 	// confirmed delivery: submit → poll Assess → re-send Enter, or a context rotate) holds the
-	// txn lock for its entire span — worst case a full surface.Confirm.Submit: the fast phase
-	// (maxSubmitAttempts×confirmPolls×confirmPollInterval ≈ 1.5s) plus the patient grace
-	// (confirmGracePolls×confirmGraceInterval ≈ 5s) ≈ 6.5s, plus tmux-call latency. The timeout
-	// must EXCEED that so a writer waits out a legitimately in-flight delivery on the same pane
-	// rather than spuriously dropping; 12s gives ~2× margin while still bounding a stuck holder
-	// (it is far below the change-detector tick interval, so a waiting rotate never stalls the
-	// clock). Callers pass this as the AcquirePaneTxn timeout; the dash passes the same.
+	// txn lock for its entire span. The SLEEP-dominated worst case of a full surface.Confirm.Submit
+	// is ~6.5s (fast phase maxSubmitAttempts×confirmPolls×confirmPollInterval ≈ 1.5s + patient
+	// grace confirmGracePolls×confirmGraceInterval ≈ 5s); on top of that each of its ~25 pane
+	// captures + Enter sends is a tmux call that takes the per-call .lock, so a HEALTHY server adds
+	// tens-to-low-hundreds of ms total but a SLOW/contended server adds more (the absolute ceiling
+	// is bounded only by deliver.commandTimeout per call — but a tmux server that hung that long is
+	// itself broken, and dropping is then the correct outcome). 12s sits a realistic ~1.5–2× above
+	// the ~7–8s a slow-but-alive delivery takes, so a writer waits out a legitimately in-flight
+	// delivery rather than spuriously dropping, while still bounding a genuinely stuck holder. It is
+	// far below the change-detector tick interval, so a waiting rotate never stalls the clock.
+	// Callers pass this as the AcquirePaneTxn timeout; the dash passes the same.
 	PaneTxnTimeout = 12 * time.Second
 
 	// paneLockSuffix / paneTxnSuffix name the two DISTINCT lockfiles per pane. The per-call lock

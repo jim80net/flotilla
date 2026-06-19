@@ -117,11 +117,22 @@ func cmdVoice(args []string) error {
 }
 
 // paneInjector is the real PaneInjector: busy via the surface driver's pane assessment, inject
-// via deliver.Send (which takes the per-pane cross-process lock, P1-2).
+// via deliver.Send. Voice is a SEPARATE process from `flotilla watch`, so — like cmdSend and the
+// dash control handler — it holds the per-pane TRANSACTION lock across its injection so a voice
+// paste cannot land between a watch confirmed-delivery's submit and its Enter-only retry (or in
+// the middle of a /clear rotate) on the same XO pane. Voice's Inject is a single deliver.Send, so
+// the txn hold is brief; the per-call .lock inside Send still guards the individual tmux call.
 type paneInjector struct {
 	pane string
 	drv  surface.Driver
 }
 
-func (p paneInjector) Busy() bool               { return p.drv.Assess(p.pane) == surface.StateWorking }
-func (p paneInjector) Inject(text string) error { return deliver.Send(p.pane, text) }
+func (p paneInjector) Busy() bool { return p.drv.Assess(p.pane) == surface.StateWorking }
+func (p paneInjector) Inject(text string) error {
+	txn, err := deliver.AcquirePaneTxn(p.pane, deliver.PaneTxnTimeout)
+	if err != nil {
+		return err
+	}
+	defer txn.Release()
+	return deliver.Send(p.pane, text)
+}

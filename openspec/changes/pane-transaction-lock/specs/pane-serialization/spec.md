@@ -61,15 +61,16 @@ on it cannot stall the detector's tick loop.
 
 The transaction lock SHALL be exported from `internal/deliver` as a minimal seam
 (`AcquirePaneTxn(target string, timeout time.Duration) (*PaneTxn, error)` + `(*PaneTxn).Release()`)
-that every confirmed-delivery caller in the flotilla binary (the CLI `send` path, the `watch`
-Injector, the detector rotate, and the dash control handler) acquires around its transaction.
-The in-process `PaneMutexes` mechanism SHALL be subsumed by this lock (the flock serializes
-same-process goroutines via distinct file descriptors), so there is one serialization
-mechanism, correct across processes. `flotilla resume` SHALL NOT take the transaction lock —
-it targets a crashed (shell) desk, which the detector never rotates, and it has its own
-liveness interlock; the per-call flock suffices.
+that every pane-transaction caller in the flotilla binary (the CLI `send` path, the `watch`
+Injector, the detector rotate, `flotilla voice`, and the dash control handler) acquires around
+its transaction, passing the RESOLVED pane target (the `deliver.ResolvePane` output) so every
+caller computes the identical `paneLockKey` for one pane. The in-process `PaneMutexes` mechanism
+SHALL be subsumed by this lock (the flock serializes same-process goroutines via distinct file
+descriptors), so there is one serialization mechanism, correct across processes. `flotilla resume`
+SHALL NOT take the transaction lock — it targets a crashed (shell) desk, which the detector never
+rotates, and it has its own liveness interlock; the per-call flock suffices.
 
 #### Scenario: The dash consumes the seam
 
-- **WHEN** the flotilla-dash Phase-3 control handler issues a route/resume action
-- **THEN** it acquires `AcquirePaneTxn(agent)` around the confirmed-delivery transaction, identically to the CLI `send` path, so the dash serializes with `watch` and `send`
+- **WHEN** the flotilla-dash Phase-3 control handler issues a route action
+- **THEN** it resolves the pane via `deliver.ResolvePane` and acquires `AcquirePaneTxn(pane, deliver.PaneTxnTimeout)` around the confirmed-delivery transaction, identically to the CLI `send` path, so the dash serializes with `watch`, `send`, and `voice`

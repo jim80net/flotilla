@@ -328,6 +328,77 @@ func TestDetectorRotateSkippedWhileAwaiting(t *testing.T) {
 	}
 }
 
+// The post-unlock tail (runTail) MUST perform the /clear rotate BEFORE it enqueues the
+// continuation wake — otherwise a trailing /clear would wipe the just-delivered continuation.
+// The in-line under-mutex call used to give this order for free; with the rotate moved to the
+// tail (so its cross-process txn-lock wait is off d.mu) the order is now straight-line code, so
+// lock it with a test: a Working→Idle XO tick must record "rotate" strictly before "wake".
+func TestDetectorTailRotatesBeforeContinuationWake(t *testing.T) {
+	var mu sync.Mutex
+	var events []string
+	cfg := DetectorConfig{
+		XOAgent:  "hydra-ops",
+		Desks:    []string{"hydra-ops"},
+		Interval: time.Minute,
+		Assess:   func(string) surface.State { return surface.StateIdle },
+		AckAge:   func() time.Duration { return 0 },
+		Rotate:   func() error { mu.Lock(); defer mu.Unlock(); events = append(events, "rotate"); return nil },
+		Wake:     func(WakeKind, []string) { mu.Lock(); defer mu.Unlock(); events = append(events, "wake") },
+		Persist:  func(Snapshot) error { return nil },
+	}
+	d := NewDetector(cfg, filepath.Join(t.TempDir(), "missing.json"))
+	seed(d, map[string]surface.State{"hydra-ops": surface.StateWorking}, "h0")
+
+	d.Tick() // XO Working→Idle (seeded Working, now assesses Idle) → continueXO → rotate + continuation
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) != 2 || events[0] != "rotate" || events[1] != "wake" {
+		t.Fatalf("tail must rotate THEN wake (so a /clear never wipes the continuation), got %v", events)
+	}
+}
+
+// The whole point of the tickLocked/runTail split: the rotate's BOUNDED cross-process txn-lock
+// wait runs OUTSIDE d.mu, so it can never stall OperatorWake (which shares d.mu). Prove it by
+// making Rotate block: while a tick is parked in runTail's rotate, OperatorWake must still return
+// promptly. If the rotate were still under d.mu (the old ordering), OperatorWake would deadlock
+// behind it until the timeout — the regression this restructure exists to prevent.
+func TestDetectorOperatorWakeNotBlockedByRotate(t *testing.T) {
+	rotating := make(chan struct{})
+	release := make(chan struct{})
+	cfg := DetectorConfig{
+		XOAgent:  "hydra-ops",
+		Desks:    []string{"hydra-ops"},
+		Interval: time.Minute,
+		Assess:   func(string) surface.State { return surface.StateIdle },
+		AckAge:   func() time.Duration { return 0 },
+		Rotate: func() error {
+			close(rotating) // signal the rotate has begun (we are in runTail, d.mu released)
+			<-release       // block here, holding the tick in the tail
+			return nil
+		},
+		Wake:    func(WakeKind, []string) {},
+		Persist: func(Snapshot) error { return nil },
+	}
+	d := NewDetector(cfg, filepath.Join(t.TempDir(), "missing.json"))
+	seed(d, map[string]surface.State{"hydra-ops": surface.StateWorking}, "h0")
+
+	tickDone := make(chan struct{})
+	go func() { d.Tick(); close(tickDone) }()
+	<-rotating // the tick is now parked inside the (blocked) rotate, in runTail
+
+	woke := make(chan struct{})
+	go func() { d.OperatorWake(); close(woke) }()
+	select {
+	case <-woke: // OperatorWake acquired d.mu and returned — proving the rotate is NOT under d.mu
+	case <-time.After(2 * time.Second):
+		t.Fatal("OperatorWake blocked behind a rotate — the rotate is being held under d.mu (the restructure regressed)")
+	}
+
+	close(release) // let the parked rotate finish so the tick goroutine exits cleanly
+	<-tickDone
+}
+
 func TestDetectorLivenessWedgeAndRecovery(t *testing.T) {
 	f := newFixture()
 	cfg := f.config("hydra-ops", []string{"hydra-ops"}, 3, "interval") // alert at K=3 intervals
