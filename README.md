@@ -227,6 +227,16 @@ Near-term:
       Channel **provisioning** is mechanical too — `flotilla channel create|list|delete`
       stands up the channels via the bot token (idempotent, Manage-Channels preflight,
       emits the binding), so the layout is self-service end to end.
+- [x] **`flotilla dash` — optional local web interface (read surface).** A
+      self-contained web UI served by the `flotilla` binary over the artifacts
+      `flotilla watch` already writes: a live fleet board (each desk's last-known
+      state with three-state snapshot freshness — absent / stale / fresh), the
+      federation topology (channel → XO → members), and the coordination history
+      (the CoS ledger + the backlog drive-queue). It is **read-only and optional**
+      — a pure reader (no daemon, no pane probing, no fleet-state writes), loopback
+      by default, with live Server-Sent-Events updates: [docs/dash-runbook.md](./docs/dash-runbook.md).
+      Command-and-control actions and a native GitHub-backed issue tracker are
+      planned follow-on phases.
 - [ ] Release-sign-off workflow.
 - [x] Docs + an end-to-end quickstart that a newcomer can run cold — [docs/quickstart.md](./docs/quickstart.md) (cold-tested: install, send, clock).
 

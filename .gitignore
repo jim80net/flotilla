@@ -55,3 +55,6 @@ htmlcov/
 # Same re-include for the doctor deploy: the per-host deploy/flotilla-doctor.env is
 # *.env-ignored (desired), but the install-test fixture ends in .env and CI needs it.
 !/deploy/testdata/flotilla-doctor.fixture.env
+
+# Desk-local scratch notes (per-desk working memory; never committed).
+.claude/desk-state/
