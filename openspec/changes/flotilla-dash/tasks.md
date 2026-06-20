@@ -145,18 +145,35 @@ lands when flotilla-dev's cross-process pane lock is ready.
 - [ ] 3a.8 Coordinate the pane-lock seam/API with flotilla-dev (SENT — `flotilla send --from
       flotilla-dash flotilla-dev`, delivered 2026-06-19; awaiting the final API).
 
-### Phase 3b — pane-driving control + auth surface (lock-dependent) — FOLLOW-ON
-- [ ] 3.0 **(shared-core, flotilla-dev)** cross-process pane-transaction lock in `internal/deliver`
-      + acquire in the detector's context-rotate. PREREQUISITE for route/resume. (Coordination sent.)
-- [ ] 3b.1 **route** real impl: `surface.Confirm.Submit` via `relay.Route` addressing, acquiring the
-      3.0 lock; typed outcome (delivered/busy/crashed/transient/unconfirmed); CoS mirror.
-- [ ] 3b.2 **resume** real impl: the `flotilla resume` recipe path (per-agent locked); typed outcome
-      (resumed/no-recipe/live-refused/ambiguous); CoS mirror. Un-gate route/resume.
-- [ ] 3b.3 (Optional, separate concern) non-loopback auth surface: token (env/file, warn on flag,
-      never logged), non-loopback fail-closed startup, bearer gate, SSE HttpOnly SameSite cookie.
-- [ ] 3b.4 Tests: route/resume → right library call + each typed outcome; the 3.0 lock — dash route +
-      watch rotate to the same pane do NOT interleave; stale-board-vs-live-action; dash→ledger provenance.
-- [ ] 3b.5 `/systems-review` + `/open-code-review` + `/storm` on the 3b diff; iterate clean.
+### Phase 3b — pane-driving control + auth surface (lock-dependent)
+- [x] 3.0 **(shared-core, flotilla-dev)** cross-process pane-transaction lock in `internal/deliver`
+      (`AcquirePaneTxn`/`PaneTxn.Release`, keyed on the resolved pane target) + acquire in the detector's
+      context-rotate. LANDED (PR #128, squash 1b300dc). Spec: openspec/changes/pane-transaction-lock.
+- [x] 3b.1 **route** real impl: resolve target (case-insensitive, @-tolerant, empty→XO) → driver →
+      `deliver.ResolvePane(agent.Title())` → `AcquirePaneTxn(pane)` → `surface.Confirm.Submit` → Release
+      — mirroring cmdSend EXACTLY; typed outcome (delivered/busy/crashed/transient/unconfirmed);
+      contention→busy/retryable (no silent partial); CoS mirror (operator(dash)→agent). Route UN-GATED.
+- [x] 3b.1-test The cross-process keying contract (flotilla-dev's highest-value guard):
+      TestRoute_KeysLockOnResolvedPaneTarget asserts the dash resolves via ResolvePane(agent.Title())
+      and keys the lock on the RESOLVED target (not the agent name) — identical to cmdSend;
+      TestRoute_LockBracketsSubmit asserts acquire→submit→release ordering (replaces the 3a import guard).
+- [ ] 3b.2 **resume** real impl — BLOCKED on extracting `runResume` (cmd/flotilla/resume.go, package main)
+      into a reusable library so the dash calls the SAME tested path, not a reimplementation. Resume stays
+      gated (ErrResumeUnavailable → 503, honest "use flotilla resume on the host" message). Tracked follow-on.
+- [ ] 3b.3 (Separate concern) non-loopback auth surface: token (env/file, warn on flag, never logged),
+      non-loopback fail-closed startup, bearer gate, SSE HttpOnly SameSite cookie. Tracked follow-on.
+- [ ] 3b.4 (with resume) the lock interleaving test (dash route + watch rotate to the same pane do NOT
+      interleave) once both run under the lock; stale-board-vs-live-action.
+- [x] 3b.5 `/systems-review` + `/open-code-review` + `/storm` on the 3b-route diff; iterated clean.
+      The lock-correctness core (resolved-target keying, lock bracketing/release, outcome mapping,
+      contention=busy-not-partial) was UNANIMOUSLY verified correct (no P1). Addressed: systems-review's
+      2 P2s — (A) ErrControlUnavailable→ErrResumeUnavailable comment-rot swept; (B) corrected the
+      false "@desk addressing exactly as Discord" claim (code comment + design §4) to honestly state the
+      dash resolves ROSTER-WIDE (host-console, no channel context) — behavior was already correct, the
+      doc was wrong. STORM's drift-guard added (TestNewLibrary_WiresRealResolvePane — production wires
+      deliver.ResolvePane by identity). Minor: softened the contention detail wording; federated
+      no-binding stderr-warning parity in the route ledger mirror. go test -race ./... green.
+      (resolveTarget roster-wide scoping surfaced to the operator as a noted federation-semantics choice.)
 
 ### Phase 3 gates
 - [x] 3.6 `/systems-review` + `/open-code-review` + `/storm` on the Phase 3a diff; iterated clean.

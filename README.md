@@ -238,12 +238,13 @@ Near-term:
       native, GitHub-backed issue tracker (via `gh`): list / view / create /
       comment / label / close, with a one-click `operator-idea` filter. The
       **Control tab** exposes cnc actions over the existing delivery library:
-      post an operator note (live, via `discord.Post`, mirrored to the CoS
-      ledger), and route an instruction / resume a crashed desk (gated on the
-      cross-process pane lock, coordinated with core). Loopback by default; all
-      writes carry a browser-CSRF defense:
-      [docs/dash-runbook.md](./docs/dash-runbook.md). The token-gated
-      non-loopback bind is a tracked follow-on.
+      post an operator note (`discord.Post`) and route an instruction
+      (`surface.Confirm.Submit`, confirmed delivery serialized cross-process by
+      the per-pane transaction lock), each mirrored to the CoS ledger; resume a
+      crashed desk is a tracked follow-on (its orchestration is being extracted
+      into a reusable library). Loopback by default; all writes carry a
+      browser-CSRF defense: [docs/dash-runbook.md](./docs/dash-runbook.md). The
+      token-gated non-loopback bind is a tracked follow-on.
 - [ ] Release-sign-off workflow.
 - [x] Docs + an end-to-end quickstart that a newcomer can run cold — [docs/quickstart.md](./docs/quickstart.md) (cold-tested: install, send, clock).
 

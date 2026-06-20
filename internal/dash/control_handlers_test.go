@@ -86,12 +86,12 @@ func TestControlNotify_WebhookMissing(t *testing.T) {
 
 // --- route / resume (gated on the pane lock → 503) ---
 
-func TestControlRoute_GatedReturns503(t *testing.T) {
-	f := &fakeController{routeErr: control.ErrControlUnavailable}
+func TestControlRoute_ForwardsInput(t *testing.T) {
+	f := &fakeController{routeRes: control.RouteResult{Target: "alpha", Outcome: control.OutcomeDelivered}}
 	srv := controlServer(t, f)
 	rec := doWrite(t, srv, "POST", "/api/control/route", `{"target":"alpha","message":"do X"}`)
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("code %d, want 503; body=%s", rec.Code, rec.Body.String())
+	if rec.Code != 200 {
+		t.Fatalf("code %d; body=%s", rec.Code, rec.Body.String())
 	}
 	if f.lastRouteTarget != "alpha" || f.lastRouteMsg != "do X" {
 		t.Errorf("route input not forwarded: %q / %q", f.lastRouteTarget, f.lastRouteMsg)
@@ -130,7 +130,7 @@ func TestControlRoute_BusyOutcomeIs200NotError(t *testing.T) {
 }
 
 func TestControlResume_GatedReturns503(t *testing.T) {
-	f := &fakeController{resumeErr: control.ErrControlUnavailable}
+	f := &fakeController{resumeErr: control.ErrResumeUnavailable}
 	srv := controlServer(t, f)
 	rec := doWrite(t, srv, "POST", "/api/control/resume", `{"agent":"alpha"}`)
 	if rec.Code != http.StatusServiceUnavailable {
