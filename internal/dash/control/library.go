@@ -2,14 +2,17 @@ package control
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/cos"
+	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/discord"
 	"github.com/jim80net/flotilla/internal/roster"
+	"github.com/jim80net/flotilla/internal/surface"
 )
 
 // dashProvenance is the CoS ledger "from" marker for a dash-issued action, so a
@@ -34,6 +37,16 @@ type LibraryController struct {
 	loadSecrets func(path string) (*roster.Secrets, error)
 	appendCos   func(path string, e cos.Entry) error
 	now         func() time.Time
+
+	// Route seams — the confirmed-delivery transaction. resolvePane + acquireTxn +
+	// submit mirror the cmdSend path (cmd/flotilla/main.go) EXACTLY so the dash
+	// keys the cross-process lock on the SAME resolved pane target as `flotilla
+	// send` and the watch Injector/rotate (the contract that makes the lock
+	// serialize cross-process — design §5).
+	getDriver   func(name string) (surface.Driver, bool)
+	resolvePane func(title string) (string, error)
+	acquireTxn  func(target string) (release func(), err error)
+	submit      func(drv surface.Driver, pane, text string) error
 }
 
 // NewLibrary builds the production controller. secretsPath may be "" (then notify
@@ -48,6 +61,22 @@ func NewLibrary(rc *roster.Config, xo, secretsPath string) *LibraryController {
 		loadSecrets: roster.LoadSecrets,
 		appendCos:   cos.Append,
 		now:         time.Now,
+		getDriver:   surface.Get,
+		resolvePane: deliver.ResolvePane,
+		// Wrap AcquirePaneTxn so the seam returns a plain release func; production
+		// uses the coordinated PaneTxnTimeout (identical to cmdSend + the Injector).
+		acquireTxn: func(target string) (func(), error) {
+			txn, err := deliver.AcquirePaneTxn(target, deliver.PaneTxnTimeout)
+			if err != nil {
+				return nil, err
+			}
+			return txn.Release, nil
+		},
+		// Confirm.Submit is UNCHANGED (it takes only the per-call flock); the
+		// transaction lock is held by Route around this call (caller-held, design §5).
+		submit: func(drv surface.Driver, pane, text string) error {
+			return surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}.Submit(drv, pane, text)
+		},
 	}
 }
 
@@ -80,16 +109,137 @@ func (c *LibraryController) Notify(_ context.Context, message string) error {
 	return nil
 }
 
-// Route is GATED until the cross-process pane lock lands (design §5): it drives a
-// pane and must serialize against watch's detector rotate, which requires the
-// lock. Fails closed.
-func (c *LibraryController) Route(_ context.Context, _, _ string) (RouteResult, error) {
-	return RouteResult{}, ErrControlUnavailable
+// Route delivers an instruction to a desk via the confirmed-delivery library,
+// serialized cross-process by the per-pane TRANSACTION lock (design §5). It
+// mirrors the cmdSend path EXACTLY: resolve the agent → its driver → its pane
+// (deliver.ResolvePane(agent.Title())) → acquire the txn lock keyed on that
+// resolved pane target → Confirm.Submit → Release. The typed surface outcome
+// (delivered/busy/crashed/transient/unconfirmed) is returned as a RouteResult
+// (these are informational outcomes the operator must see, NOT errors); only a
+// hard failure (unknown target, unknown surface, pane-resolution failure) is an
+// error. A lock-contention timeout is surfaced as a busy/not-delivered outcome
+// (retryable) — never a silent partial send.
+func (c *LibraryController) Route(_ context.Context, target, message string) (RouteResult, error) {
+	if strings.TrimSpace(message) == "" {
+		return RouteResult{}, ErrEmptyMessage
+	}
+	agentName, err := c.resolveTarget(target)
+	if err != nil {
+		return RouteResult{}, err
+	}
+	agent, err := c.roster.Agent(agentName)
+	if err != nil {
+		return RouteResult{}, ErrUnknownTarget
+	}
+	drv, ok := c.getDriver(agent.Surface)
+	if !ok {
+		return RouteResult{}, fmt.Errorf("agent %q: unknown surface %q", agentName, agent.Surface)
+	}
+	// Resolve the pane the SAME way cmdSend + the watch Injector/rotate do
+	// (deliver.ResolvePane(agent.Title())) — the lock keys on this exact target,
+	// so every transaction writer computes one identical key per pane (the
+	// cross-process serialization contract; a divergent resolve would silently
+	// fail to serialize).
+	pane, err := c.resolvePane(agent.Title())
+	if err != nil {
+		return RouteResult{}, fmt.Errorf("resolve pane for %s: %w", agentName, err)
+	}
+	release, err := c.acquireTxn(pane)
+	if err != nil {
+		// The transaction lock could not be taken — typically another transaction
+		// (a send/rotate/dash action) held the pane past the bound, but possibly a
+		// lock-dir/fs error. Either way: not delivered, retryable — never a silent
+		// partial send (flotilla-dev contract). The wording does not assert the
+		// cause (contention vs infra), only the honest outcome.
+		return RouteResult{Target: agentName, Outcome: OutcomeBusy, Detail: "pane unavailable (a delivery/rotate is in progress, or the pane lock could not be taken) — not delivered, retry"}, nil
+	}
+	defer release()
+
+	res := RouteResult{Target: agentName}
+	switch serr := c.submit(drv, pane, message); {
+	case serr == nil:
+		res.Outcome = OutcomeDelivered
+		c.mirrorRouteToLedger(agentName, message)
+	case errors.Is(serr, surface.ErrBusy):
+		res.Outcome, res.Detail = OutcomeBusy, "desk is busy (mid-turn) — not delivered, retry when it is idle"
+	case errors.Is(serr, surface.ErrCrashed):
+		res.Outcome, res.Detail = OutcomeCrashed, "desk is at a shell (crashed) — not delivered"
+	case errors.Is(serr, surface.ErrTransient):
+		res.Outcome, res.Detail = OutcomeTransient, "desk state is uncertain — not delivered, retry"
+	default: // ErrUnconfirmed, or a paste/lock error
+		res.Outcome, res.Detail = OutcomeUnconfirmed, "submit could not be confirmed — escalated, not delivered"
+	}
+	return res, nil
 }
 
-// Resume is GATED until the cross-process pane lock lands (design §5). Fails closed.
+// Resume is still gated: unlike route, its blocker is NOT the pane lock (a
+// crashed/shell desk is never rotated by the detector, and resume has its own
+// liveness interlock — flotilla-dev confirmed the per-call flock suffices). The
+// blocker is that the resume ORCHESTRATION (runResume) currently lives in package
+// main (cmd/flotilla/resume.go) and is not importable; wiring it needs that logic
+// extracted into a reusable library so the dash calls the SAME tested path rather
+// than a risky reimplementation. Tracked as a focused follow-on. Fails closed.
 func (c *LibraryController) Resume(_ context.Context, _ string) (ResumeResult, error) {
-	return ResumeResult{}, ErrControlUnavailable
+	return ResumeResult{}, ErrResumeUnavailable
+}
+
+// resolveTarget maps a route target to a canonical roster agent name: an empty
+// target → the XO; "@name"/"name" → the canonical agent (case-insensitive);
+// an unknown target → "" (the caller errors). The dash resolves ROSTER-WIDE —
+// it is a host-local operator console with no Discord channel context, so the
+// operator can address any desk in the roster. This deliberately DIFFERS from the
+// Discord relay, which scopes "@name" to the typed-in channel's members
+// (watch.memberResolver) so an @name never crosses a channel boundary. For a
+// single-fleet roster the two coincide (members == all agents); for a federated
+// roster the dash is intentionally boundary-transcending (the operator owns the
+// whole fleet). It is NOT a reuse of relay.Route.
+//
+// Roster names are unique only CASE-SENSITIVELY (roster.go:168), so "alpha" and
+// "Alpha" can both exist. An EXACT match therefore wins first (unambiguous — the
+// operator typed that exact name); only when there is no exact match and MORE
+// THAN ONE case-insensitive match remains is the target ambiguous
+// (ErrAmbiguousTarget) — rejected, never silently delivered to whichever is first.
+func (c *LibraryController) resolveTarget(target string) (string, error) {
+	t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(target), "@"))
+	if t == "" {
+		return c.xo, nil
+	}
+	var ci []string
+	for _, a := range c.roster.Agents {
+		if a.Name == t {
+			return a.Name, nil // exact match — unambiguous
+		}
+		if strings.EqualFold(a.Name, t) {
+			ci = append(ci, a.Name)
+		}
+	}
+	switch len(ci) {
+	case 0:
+		return "", ErrUnknownTarget
+	case 1:
+		return ci[0], nil
+	default:
+		return "", fmt.Errorf("%w: %q matches %v — use the exact name", ErrAmbiguousTarget, t, ci)
+	}
+}
+
+// mirrorRouteToLedger records a dash-routed instruction in the CoS ledger with
+// dash provenance (operator(dash) → <agent>), best-effort.
+func (c *LibraryController) mirrorRouteToLedger(agent, message string) {
+	if c.roster == nil || c.roster.CosLedger == "" {
+		return
+	}
+	channel, ok := c.roster.ChannelForXO(c.xo)
+	if !ok && len(c.roster.Channels) > 0 {
+		fmt.Fprintf(os.Stderr, "flotilla dash: XO %q has no channel binding in the federated roster — route ledger entry tagged with no channel\n", c.xo)
+	}
+	_ = c.appendCos(c.roster.CosLedger, cos.Entry{
+		Time:    c.now(),
+		Channel: channel,
+		From:    dashProvenance,
+		To:      agent,
+		Gist:    message,
+	})
 }
 
 // mirrorToLedger appends the dash note to the CoS who-knows-what ledger with dash

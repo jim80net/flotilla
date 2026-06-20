@@ -174,8 +174,8 @@ library's **typed outcome** honestly.
 | Action | Maps to | Status |
 |--------|---------|--------|
 | **Operator note** | `discord.Post` (the `flotilla notify` path) | **Live** — posts to the fleet channel under `operator(dash)`, mirrored to the CoS ledger with dash provenance |
-| **Route instruction** | `surface.Confirm.Submit` (the `flotilla send` path) | **Gated** — see the pane-lock note below |
-| **Resume a crashed desk** | the `flotilla resume` recipe path | **Gated** — see the pane-lock note below |
+| **Route instruction** | `surface.Confirm.Submit` (the `flotilla send` path) | **Live** — confirmed delivery, serialized cross-process by the per-pane transaction lock |
+| **Resume a crashed desk** | the `flotilla resume` recipe path | **Coming soon** — see the resume note below |
 
 ### Operator note (live)
 
@@ -191,17 +191,38 @@ The note posts to the fleet channel under the username `operator(dash)` and is
 recorded in the CoS who-knows-what ledger as `operator(dash) → <xo>` so a
 dash-issued note is auditable alongside Discord traffic.
 
-### Route + resume are gated on the cross-process pane lock
+### Route an instruction (live, lock-serialized)
 
-Routing an instruction and resuming a desk **drive agent panes**. Because the
-dash is a separate process from `flotilla watch`, a dash route and watch's
-detector context-rotate to the same pane could interleave and corrupt the
-composer unless they serialize via a **cross-process per-pane transaction lock**
-(design §5). That lock is a shared-core change coordinated with the
-core/flotilla-dev lane. Until it lands, route and resume **fail closed** — the UI
-shows a clear "pane control is not yet enabled (pane lock pending)" message and
-no pane is driven. When the lock ships, these light up with no dash-side API
-change.
+Routing **drives an agent's pane**. Because the dash is a separate process from
+`flotilla watch`, a dash route and watch's detector context-rotate to the same
+pane could interleave and corrupt the composer — so the dash holds the
+**cross-process per-pane transaction lock** (`deliver.AcquirePaneTxn`) across the
+whole confirmed delivery, exactly as `flotilla send` and the watch Injector do.
+The lock is keyed on the *resolved pane target* (`deliver.ResolvePane(agent.Title())`),
+the same key every transaction writer computes, so they serialize correctly.
+
+Route resolves the target the same way Discord routing does (case-insensitive,
+`@desk`-tolerant; an empty target goes to the XO) and surfaces the confirmed-
+delivery library's **typed outcome**: `delivered` / `busy` (mid-turn — retry) /
+`crashed` (desk is a shell) / `transient` (uncertain — retry) / `unconfirmed`
+(escalated). A lock-contention timeout is reported as busy/not-delivered
+(retryable) — never a silent partial send. Each delivered route is mirrored to
+the CoS ledger as `operator(dash) → <agent>`.
+
+> **Operational note (from the operator):** the transaction lock is **dormant**
+> until the dash control surface actually deploys — the running `watch`/binary
+> stay lockless+consistent for now. The operator sequences the coordinated
+> binary-rebuild + `watch`-restart when this is ready to go live.
+
+### Resume a crashed desk (coming soon)
+
+Resume is not yet wired from the dash — *not* because of the pane lock (a crashed/
+shell desk is never rotated by the detector, and resume has its own liveness
+interlock), but because the resume orchestration currently lives in the `flotilla`
+command and must first be extracted into a reusable library so the dash invokes
+the *same tested path* rather than a reimplementation. Until then the dash returns
+a clear "use `flotilla resume` on the host for now" message. Tracked as a focused
+follow-on.
 
 ## Network binding & the non-loopback auth surface
 
@@ -215,8 +236,8 @@ the loopback + SSH-tunnel deployment, which is fully supported today.
 
 - **No direct non-loopback bind.** Use loopback + an SSH tunnel; the token-gated
   non-loopback bind is a tracked follow-on.
-- **No pane-driving control until the lock lands.** Route + resume fail closed
-  until the cross-process pane lock ships (notify is live).
+- **No resume from the dash yet.** Use `flotilla resume` on the host until the
+  resume orchestration is extracted into a reusable library (tracked follow-on).
 - **No writes to fleet state.** The dash writes to GitHub (via `gh`) and to
   Discord/the pane (via the delivery library); it never writes the detector
   snapshot or other fleet state — `flotilla watch` remains the single writer.
