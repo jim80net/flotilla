@@ -74,7 +74,7 @@ func (s *Server) handleControlResume(w http.ResponseWriter, r *http.Request) {
 func writeControlError(w http.ResponseWriter, err error) {
 	status := http.StatusBadGateway
 	switch {
-	case errors.Is(err, control.ErrControlUnavailable),
+	case errors.Is(err, control.ErrResumeUnavailable),
 		errors.Is(err, control.ErrWebhookMissing):
 		status = http.StatusServiceUnavailable
 	case errors.Is(err, control.ErrUnknownTarget),

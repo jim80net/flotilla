@@ -81,10 +81,12 @@ type ResumeResult struct {
 // Typed errors. The HTTP layer maps these to honest statuses; the pane-driving
 // verbs return ErrControlUnavailable until the cross-process lock lands.
 var (
-	// ErrControlUnavailable: a pane-driving verb (Route/Resume) was called before
-	// the cross-process pane-transaction lock is installed. The dash NEVER drives
-	// a pane without the serialization (design §5) — it fails closed.
-	ErrControlUnavailable = errors.New("pane control is not yet enabled (the cross-process pane lock is pending — coordinated with flotilla-dev)")
+	// ErrResumeUnavailable: resume from the dash is not yet wired. Its blocker is
+	// NOT the pane lock (a crashed desk is never rotated; resume has its own
+	// liveness interlock) but that the resume orchestration lives in package main
+	// (cmd/flotilla/resume.go) and must be extracted into a reusable library so the
+	// dash calls the SAME tested path. Tracked follow-on; resume fails closed.
+	ErrResumeUnavailable = errors.New("resume from the dash is not yet wired (its orchestration is being extracted into a reusable library) — use `flotilla resume` on the host for now")
 	// ErrUnknownTarget: a route target that resolves to no roster agent/binding.
 	ErrUnknownTarget = errors.New("unknown route target (no matching agent or @desk)")
 	// ErrUnknownAgent: a resume agent not in the roster.
