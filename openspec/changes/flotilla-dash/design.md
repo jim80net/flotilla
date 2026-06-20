@@ -157,10 +157,15 @@ adds **no new delivery mechanism** — it is a UI over `send`/`notify`/`resume`.
 | Post an operator note  | `discord.Post(webhook, from, msg)` (the `cmdNotify` path, `:395`) | posted / webhook-missing / over-length |
 | Resume a crashed desk  | the `flotilla resume` recipe path (`cmd/flotilla/resume.go`) | resumed / no-recipe / live-refused / ambiguous |
 
-Routing reuses `relay.Route` semantics (`internal/relay/relay.go:41`) so `@desk`
-addressing in the dash behaves exactly as it does over Discord — the dash is just
-another front-end to the same routing primitive. The confirmed-delivery contract
-(idle-gate, composer-clear confirmation, never silent-drop — see the
+Routing uses the SAME case-insensitive, `@`-tolerant target resolution as Discord
+addressing (an empty target → the XO; `@name`/`name` → the canonical agent). It
+differs in scope deliberately: the Discord relay (`relay.Route` +
+`memberResolver`) scopes `@name` to the typed-in channel's members, but the dash
+is a host-local operator console with no channel context, so it resolves
+ROSTER-WIDE — the operator can address any desk. For a single-fleet roster these
+coincide; for a federated roster the dash is intentionally boundary-transcending
+(the operator owns the whole fleet). The confirmed-delivery contract (idle-gate,
+composer-clear confirmation, never silent-drop — see the
 `flotilla-confirmed-delivery` invariants) is preserved because the dash calls
 `Confirm.Submit` verbatim; it does not re-implement submission.
 

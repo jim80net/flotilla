@@ -5,11 +5,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/cos"
+	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 )
@@ -361,6 +363,29 @@ func TestRoute_SubmitOutcomesMapped(t *testing.T) {
 		if cap.events[len(cap.events)-1] != "release" {
 			t.Errorf("%v: lock must be released after a failed submit (events=%v)", tc.err, cap.events)
 		}
+	}
+}
+
+// TestNewLibrary_WiresRealResolvePane is the DRIFT guard: the seam-stubbed tests
+// above prove the plumbing (Route keys the lock on resolvePane's output), but they
+// cannot catch a production controller that wires a DIFFERENT resolver. This
+// asserts NewLibrary wires resolvePane = deliver.ResolvePane by function identity —
+// the SAME function cmdSend + the watch Injector use — so the cross-process lock
+// keys cannot silently diverge in a future refactor (a real ResolvePane(...) call
+// needs the live tmux fleet, so identity is the runnable proxy).
+func TestNewLibrary_WiresRealResolvePane(t *testing.T) {
+	dir := t.TempDir()
+	rosterPath := filepath.Join(dir, "flotilla.json")
+	if err := os.WriteFile(rosterPath, []byte(rosterCos), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rc, err := roster.Load(rosterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := NewLibrary(rc, "xo", "")
+	if reflect.ValueOf(c.resolvePane).Pointer() != reflect.ValueOf(deliver.ResolvePane).Pointer() {
+		t.Error("NewLibrary must wire resolvePane = deliver.ResolvePane (the shared lock-key source; a divergent resolver silently breaks cross-process serialization)")
 	}
 }
 

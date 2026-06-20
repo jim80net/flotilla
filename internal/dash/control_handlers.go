@@ -23,8 +23,9 @@ type resumeReq struct {
 }
 
 // handleControlRoute serves POST /api/control/route (deliver an instruction to a
-// desk via the confirmed-delivery library). Gated on the cross-process pane lock
-// (returns 503 until it lands).
+// desk via the confirmed-delivery library, serialized by the cross-process pane
+// transaction lock). Returns the typed outcome (delivered/busy/crashed/…) at 200;
+// a hard failure (unknown target/surface, pane-resolution) is an error status.
 func (s *Server) handleControlRoute(w http.ResponseWriter, r *http.Request) {
 	var req routeReq
 	if !decodeJSON(w, r, &req) {
@@ -53,7 +54,8 @@ func (s *Server) handleControlNotify(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleControlResume serves POST /api/control/resume (restart a crashed desk via
-// the resume recipe path). Gated on the cross-process pane lock (503 until it lands).
+// the resume recipe path). Still gated (503, ErrResumeUnavailable) until the
+// resume orchestration is extracted from package main into a reusable library.
 func (s *Server) handleControlResume(w http.ResponseWriter, r *http.Request) {
 	var req resumeReq
 	if !decodeJSON(w, r, &req) {
@@ -68,9 +70,9 @@ func (s *Server) handleControlResume(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeControlError maps a control typed error onto an HTTP status + an honest
-// JSON message (always surfaced). ErrControlUnavailable (the pane-lock gate) is a
-// 503 so the UI can show "control coming with the pane lock" distinctly; bad
-// input is 400; a webhook gap is 503; a downstream post failure is 502.
+// JSON message (always surfaced). ErrResumeUnavailable (resume not yet wired) and
+// ErrWebhookMissing are 503; an unknown target/agent is 404; bad input (empty/
+// over-length) is 400; a downstream delivery/post failure is 502.
 func writeControlError(w http.ResponseWriter, err error) {
 	status := http.StatusBadGateway
 	switch {

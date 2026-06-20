@@ -146,9 +146,12 @@ func (c *LibraryController) Route(_ context.Context, target, message string) (Ro
 	}
 	release, err := c.acquireTxn(pane)
 	if err != nil {
-		// Another transaction (a send/rotate/dash action) held the pane too long.
-		// Not delivered, retryable — never a silent partial (flotilla-dev contract).
-		return RouteResult{Target: agentName, Outcome: OutcomeBusy, Detail: "pane busy — another delivery or context-rotate is in progress; not delivered, retry"}, nil
+		// The transaction lock could not be taken — typically another transaction
+		// (a send/rotate/dash action) held the pane past the bound, but possibly a
+		// lock-dir/fs error. Either way: not delivered, retryable — never a silent
+		// partial send (flotilla-dev contract). The wording does not assert the
+		// cause (contention vs infra), only the honest outcome.
+		return RouteResult{Target: agentName, Outcome: OutcomeBusy, Detail: "pane unavailable (a delivery/rotate is in progress, or the pane lock could not be taken) — not delivered, retry"}, nil
 	}
 	defer release()
 
@@ -180,10 +183,16 @@ func (c *LibraryController) Resume(_ context.Context, _ string) (ResumeResult, e
 	return ResumeResult{}, ErrResumeUnavailable
 }
 
-// resolveTarget maps a route target to a canonical roster agent name (the SAME
-// case-insensitive, @-tolerant resolution relay.Route uses over Discord, via
-// memberResolver): an empty target → the XO; "@name"/"name" → the canonical
-// agent (case-insensitive); an unknown target → "" (the caller errors).
+// resolveTarget maps a route target to a canonical roster agent name: an empty
+// target → the XO; "@name"/"name" → the canonical agent (case-insensitive);
+// an unknown target → "" (the caller errors). The dash resolves ROSTER-WIDE —
+// it is a host-local operator console with no Discord channel context, so the
+// operator can address any desk in the roster. This deliberately DIFFERS from the
+// Discord relay, which scopes "@name" to the typed-in channel's members
+// (watch.memberResolver) so an @name never crosses a channel boundary. For a
+// single-fleet roster the two coincide (members == all agents); for a federated
+// roster the dash is intentionally boundary-transcending (the operator owns the
+// whole fleet). It is NOT a reuse of relay.Route.
 func (c *LibraryController) resolveTarget(target string) string {
 	t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(target), "@"))
 	if t == "" {
@@ -203,7 +212,10 @@ func (c *LibraryController) mirrorRouteToLedger(agent, message string) {
 	if c.roster == nil || c.roster.CosLedger == "" {
 		return
 	}
-	channel, _ := c.roster.ChannelForXO(c.xo)
+	channel, ok := c.roster.ChannelForXO(c.xo)
+	if !ok && len(c.roster.Channels) > 0 {
+		fmt.Fprintf(os.Stderr, "flotilla dash: XO %q has no channel binding in the federated roster — route ledger entry tagged with no channel\n", c.xo)
+	}
 	_ = c.appendCos(c.roster.CosLedger, cos.Entry{
 		Time:    c.now(),
 		Channel: channel,

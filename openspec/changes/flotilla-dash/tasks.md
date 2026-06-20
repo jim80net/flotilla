@@ -164,7 +164,16 @@ lands when flotilla-dev's cross-process pane lock is ready.
       non-loopback fail-closed startup, bearer gate, SSE HttpOnly SameSite cookie. Tracked follow-on.
 - [ ] 3b.4 (with resume) the lock interleaving test (dash route + watch rotate to the same pane do NOT
       interleave) once both run under the lock; stale-board-vs-live-action.
-- [ ] 3b.5 `/systems-review` + `/open-code-review` + `/storm` on the 3b-route diff; iterate clean.
+- [x] 3b.5 `/systems-review` + `/open-code-review` + `/storm` on the 3b-route diff; iterated clean.
+      The lock-correctness core (resolved-target keying, lock bracketing/release, outcome mapping,
+      contention=busy-not-partial) was UNANIMOUSLY verified correct (no P1). Addressed: systems-review's
+      2 P2s — (A) ErrControlUnavailable→ErrResumeUnavailable comment-rot swept; (B) corrected the
+      false "@desk addressing exactly as Discord" claim (code comment + design §4) to honestly state the
+      dash resolves ROSTER-WIDE (host-console, no channel context) — behavior was already correct, the
+      doc was wrong. STORM's drift-guard added (TestNewLibrary_WiresRealResolvePane — production wires
+      deliver.ResolvePane by identity). Minor: softened the contention detail wording; federated
+      no-binding stderr-warning parity in the route ledger mirror. go test -race ./... green.
+      (resolveTarget roster-wide scoping surfaced to the operator as a noted federation-semantics choice.)
 
 ### Phase 3 gates
 - [x] 3.6 `/systems-review` + `/open-code-review` + `/storm` on the Phase 3a diff; iterated clean.
