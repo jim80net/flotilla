@@ -83,7 +83,8 @@ func writeControlError(w http.ResponseWriter, err error) {
 		errors.Is(err, control.ErrUnknownAgent):
 		status = http.StatusNotFound
 	case errors.Is(err, control.ErrEmptyMessage),
-		errors.Is(err, control.ErrOverLength):
+		errors.Is(err, control.ErrOverLength),
+		errors.Is(err, control.ErrAmbiguousTarget):
 		status = http.StatusBadRequest
 	}
 	writeError(w, status, err.Error())

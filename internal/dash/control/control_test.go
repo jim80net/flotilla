@@ -298,6 +298,25 @@ func TestRoute_ResolvesCaseInsensitiveAndAtPrefix(t *testing.T) {
 	}
 }
 
+func TestRoute_CaseCollisionExactWinsElseAmbiguous(t *testing.T) {
+	// Roster names are unique only case-sensitively, so "alpha" + "Alpha" coexist.
+	rosterDup := `{"channel_id":"C1","xo_agent":"xo","cos_agent":"xo","heartbeat_interval":"20m","agents":[{"name":"xo"},{"name":"alpha"},{"name":"Alpha"}]}`
+	// An EXACT match is unambiguous and delivers.
+	c, _ := newTestController(t, rosterDup, secretsXO)
+	res, err := c.Route(context.Background(), "Alpha", "x")
+	if err != nil || res.Target != "Alpha" {
+		t.Fatalf("exact 'Alpha' → (%q, %v), want delivered to Alpha", res.Target, err)
+	}
+	// A case-insensitive collision with NO exact match is rejected, not guessed.
+	c2, cap2 := newTestController(t, rosterDup, secretsXO)
+	if _, err := c2.Route(context.Background(), "ALPHA", "x"); !errors.Is(err, ErrAmbiguousTarget) {
+		t.Errorf("ambiguous 'ALPHA' → %v, want ErrAmbiguousTarget", err)
+	}
+	if len(cap2.events) != 0 {
+		t.Error("an ambiguous target must not reach the pane")
+	}
+}
+
 func TestRoute_UnknownTarget(t *testing.T) {
 	c, cap := newTestController(t, rosterCos, secretsXO)
 	if _, err := c.Route(context.Background(), "ghost", "x"); !errors.Is(err, ErrUnknownTarget) {

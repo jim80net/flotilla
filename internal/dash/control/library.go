@@ -123,9 +123,9 @@ func (c *LibraryController) Route(_ context.Context, target, message string) (Ro
 	if strings.TrimSpace(message) == "" {
 		return RouteResult{}, ErrEmptyMessage
 	}
-	agentName := c.resolveTarget(target)
-	if agentName == "" {
-		return RouteResult{}, ErrUnknownTarget
+	agentName, err := c.resolveTarget(target)
+	if err != nil {
+		return RouteResult{}, err
 	}
 	agent, err := c.roster.Agent(agentName)
 	if err != nil {
@@ -193,17 +193,34 @@ func (c *LibraryController) Resume(_ context.Context, _ string) (ResumeResult, e
 // single-fleet roster the two coincide (members == all agents); for a federated
 // roster the dash is intentionally boundary-transcending (the operator owns the
 // whole fleet). It is NOT a reuse of relay.Route.
-func (c *LibraryController) resolveTarget(target string) string {
+//
+// Roster names are unique only CASE-SENSITIVELY (roster.go:168), so "alpha" and
+// "Alpha" can both exist. An EXACT match therefore wins first (unambiguous — the
+// operator typed that exact name); only when there is no exact match and MORE
+// THAN ONE case-insensitive match remains is the target ambiguous
+// (ErrAmbiguousTarget) — rejected, never silently delivered to whichever is first.
+func (c *LibraryController) resolveTarget(target string) (string, error) {
 	t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(target), "@"))
 	if t == "" {
-		return c.xo
+		return c.xo, nil
 	}
+	var ci []string
 	for _, a := range c.roster.Agents {
+		if a.Name == t {
+			return a.Name, nil // exact match — unambiguous
+		}
 		if strings.EqualFold(a.Name, t) {
-			return a.Name
+			ci = append(ci, a.Name)
 		}
 	}
-	return ""
+	switch len(ci) {
+	case 0:
+		return "", ErrUnknownTarget
+	case 1:
+		return ci[0], nil
+	default:
+		return "", fmt.Errorf("%w: %q matches %v — use the exact name", ErrAmbiguousTarget, t, ci)
+	}
 }
 
 // mirrorRouteToLedger records a dash-routed instruction in the CoS ledger with

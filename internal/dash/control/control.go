@@ -91,6 +91,10 @@ var (
 	ErrResumeUnavailable = errors.New("resume from the dash is not yet wired (its orchestration is being extracted into a reusable library) — use `flotilla resume` on the host for now")
 	// ErrUnknownTarget: a route target that resolves to no roster agent/binding.
 	ErrUnknownTarget = errors.New("unknown route target (no matching agent or @desk)")
+	// ErrAmbiguousTarget: a route target that matches more than one agent
+	// case-insensitively with no exact match (roster names are case-sensitively
+	// unique, so "alpha" + "Alpha" can coexist) — rejected, never guessed.
+	ErrAmbiguousTarget = errors.New("ambiguous route target (matches multiple agents by case) — use the exact name")
 	// ErrUnknownAgent: a resume agent not in the roster.
 	ErrUnknownAgent = errors.New("unknown agent")
 	// ErrEmptyMessage: a route/notify with no message body.
