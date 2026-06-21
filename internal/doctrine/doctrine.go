@@ -5,10 +5,12 @@
 // default seed from `workspace init`, so a freshly scaffolded agent is born with
 // the doctrine in place.
 //
-// The set ships two members:
-//   - the Rule of Three (span of control) — an IDENTITY-APPEND: its distilled text
-//     is appended into the agent's standing identity file so it loads once at launch
+// The set ships three members:
+//   - the Rule of Three (span of control) — an IDENTITY-APPEND guideline: its distilled
+//     text is appended into the agent's standing identity file so it loads once at launch
 //     via --append-system-prompt-file.
+//   - no-self-merge — an IDENTITY-APPEND rule: a desk never merges its own work; the
+//     agent one level above reviews and merges (the merge IS the independent review).
 //   - visibility-synthesis — a HEARTBEAT-SKILL: a whole-file curation skill written
 //     into the agent's workspace, loaded when the daemon emits a synthesis wake.
 //
@@ -81,6 +83,14 @@ const (
 	ruleOfThreeCloseMarker = "<!-- /flotilla:rule-of-three -->"
 )
 
+// The no-self-merge sentinel fence (same load-bearing role as the Rule-of-Three pair —
+// these exact strings appear in assets/skills/no-self-merge.md and the install keys
+// idempotency on the opening marker's presence).
+const (
+	noSelfMergeOpenMarker  = "<!-- flotilla:no-self-merge -->"
+	noSelfMergeCloseMarker = "<!-- /flotilla:no-self-merge -->"
+)
+
 // members is the registry. Adding a member is adding an entry here plus its embedded
 // asset; the install/seed loop iterates this slice and dispatches by Mechanism, so it
 // never needs to change as the set grows (a NEW mechanism additionally needs its
@@ -92,6 +102,17 @@ var members = []Member{
 		Content:     mustRead("assets/skills/rule-of-three.md"),
 		OpenMarker:  ruleOfThreeOpenMarker,
 		CloseMarker: ruleOfThreeCloseMarker,
+	},
+	{
+		// no-self-merge: a desk never merges its own work — the agent one level above
+		// reviews and merges (the merge IS the independent review). An identity-append
+		// like the Rule of Three, because it is a STRUCTURAL standing rule ("how the
+		// agent operates"), loaded once into the agent's identity, not a tick-time skill.
+		Name:        "no-self-merge",
+		Mechanism:   MechanismIdentityAppend,
+		Content:     mustRead("assets/skills/no-self-merge.md"),
+		OpenMarker:  noSelfMergeOpenMarker,
+		CloseMarker: noSelfMergeCloseMarker,
 	},
 	{
 		// visibility-synthesis: a whole-file curation skill (Tiers 2/3 of the
