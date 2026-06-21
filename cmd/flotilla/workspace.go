@@ -140,15 +140,17 @@ func cmdWorkspaceInit(args []string) error {
 	// and re-running init never duplicates it.
 	//
 	// MECHANISM COUPLING: this passes the WHOLE member set (doctrine.Members()), and
-	// Install only handles the identity-append mechanism — a member of any other kind
-	// hard-errors there (see internal/doctrine/install.go). When a 2nd mechanism ships it
-	// must be added to Install at the same time, or this seed (and `doctrine install`)
-	// starts erroring on the new member.
-	identityPath := filepath.Join(dir, identity)
-	results, err := doctrine.Install(identityPath, doctrine.Members())
+	// Install dispatches by mechanism — identity-append members append into the identity
+	// file, heartbeat-skill members write a whole file into the workspace dir. Install
+	// takes the workspace dir + the identity base filename (the dir lets a whole-file
+	// member resolve its workspace-relative target). When a NEW mechanism ships it must
+	// be added to Install at the same time, or this seed (and `doctrine install`) errors
+	// on the new member.
+	results, err := doctrine.Install(dir, identity, doctrine.Members())
 	if err != nil {
-		return fmt.Errorf("seed doctrine into %q: %w", identityPath, err)
+		return fmt.Errorf("seed doctrine into %q: %w", dir, err)
 	}
+	identityPath := filepath.Join(dir, identity)
 	reportDoctrineResults(results, identityPath)
 	noteNonClaudeLoadFastFollow(a.Surface, identityPath)
 
