@@ -5,21 +5,57 @@ import (
 	"testing"
 )
 
-// v1 ships EXACTLY one member — the Rule of Three. This locks the count so a
-// future member addition is a deliberate, reviewed change (and so the
-// member-count-agnostic install loop is exercised against the real registry, not
-// a fixture).
-func TestMembersV1ShipsExactlyOne(t *testing.T) {
+// memberByName resolves a registry member by name so tests do not depend on slice
+// order (the registry now holds more than one member).
+func memberByName(t *testing.T, name string) Member {
+	t.Helper()
+	for _, m := range Members() {
+		if m.Name == name {
+			return m
+		}
+	}
+	t.Fatalf("registry missing member %q", name)
+	return Member{}
+}
+
+// The registry ships EXACTLY two members: the Rule of Three (identity-append) and
+// visibility-synthesis (heartbeat-skill). This locks the count so a future member
+// addition is a deliberate, reviewed change (and so the member-count-agnostic
+// install loop is exercised against the real registry, not a fixture).
+func TestMembersRegistryContents(t *testing.T) {
 	members := Members()
-	if len(members) != 1 {
-		t.Fatalf("v1 registry should hold exactly one member, got %d", len(members))
+	if len(members) != 2 {
+		t.Fatalf("registry should hold exactly two members, got %d", len(members))
 	}
-	m := members[0]
-	if m.Name != "rule-of-three" {
-		t.Errorf("member name = %q, want %q", m.Name, "rule-of-three")
+	byName := map[string]Member{}
+	for _, m := range members {
+		byName[m.Name] = m
 	}
-	if m.Mechanism != MechanismIdentityAppend {
-		t.Errorf("member mechanism = %q, want %q", m.Mechanism, MechanismIdentityAppend)
+
+	rot, ok := byName["rule-of-three"]
+	if !ok {
+		t.Fatal("registry missing rule-of-three member")
+	}
+	if rot.Mechanism != MechanismIdentityAppend {
+		t.Errorf("rule-of-three mechanism = %q, want %q", rot.Mechanism, MechanismIdentityAppend)
+	}
+
+	vs, ok := byName["visibility-synthesis"]
+	if !ok {
+		t.Fatal("registry missing visibility-synthesis member")
+	}
+	if vs.Mechanism != MechanismHeartbeatSkill {
+		t.Errorf("visibility-synthesis mechanism = %q, want %q", vs.Mechanism, MechanismHeartbeatSkill)
+	}
+	if vs.TargetFile != "skills/visibility-synthesis.md" {
+		t.Errorf("visibility-synthesis TargetFile = %q, want %q", vs.TargetFile, "skills/visibility-synthesis.md")
+	}
+	if strings.TrimSpace(vs.Content) == "" {
+		t.Error("visibility-synthesis content is empty — the embed did not round-trip")
+	}
+	// A heartbeat-skill member carries no marker fence (whole-file, stat-based).
+	if vs.OpenMarker != "" || vs.CloseMarker != "" {
+		t.Errorf("heartbeat-skill member should carry no marker fence, got open=%q close=%q", vs.OpenMarker, vs.CloseMarker)
 	}
 }
 
@@ -27,7 +63,7 @@ func TestMembersV1ShipsExactlyOne(t *testing.T) {
 // guarantees the tree at build time) and carry the marker fence the append-idempotency
 // guard keys on, plus the load-bearing-marker note that travels with the block.
 func TestRuleOfThreeContentIsEmbeddedAndMarked(t *testing.T) {
-	m := Members()[0]
+	m := memberByName(t, "rule-of-three")
 	if strings.TrimSpace(m.Content) == "" {
 		t.Fatal("rule-of-three content is empty — the embed did not round-trip")
 	}

@@ -332,8 +332,14 @@ awaiting files). Add the lines to the XO's standing instructions:
 - [span-of-control.md](./span-of-control.md) — the Rule of Three: how a
   coordinating seat (XO / lead / boat) divides its attention — ≤ 3 active charges,
   the fourth forces a layer, aggregate upward, dispatch independent work in
-  parallel. flotilla ships it as a constitutional member (seeded by `workspace
-  init`, installed by `doctrine install`).
+  parallel. flotilla ships it as the *first* constitutional member (seeded by
+  `workspace init`, installed by `doctrine install`); the
+  [constitutional set](./span-of-control.md#the-constitutional-set--how-flotilla-ships-doctrine)
+  now ships a second member (visibility-synthesis) via a new `heartbeat-skill` mechanism.
+- [visibility.md](./visibility.md) — the stratified-visibility doctrine (Tiers 1/2/3):
+  Tier 1 is the mechanical per-desk mirror; Tiers 2/3 are the XO / meta-XO synthesis the
+  visibility-synthesis skill drives. Composes with the change-detector (whose working→idle
+  edge a synthesis is owed on) and the narrow-answer discipline above.
 - [quickstart.md §4 → "Reach the operator directly"](./quickstart.md#reach-the-operator-directly-flotilla-notify)
   — the `flotilla notify` command surface (webhook identity, `--file`/stdin, the
   2000-character limit).

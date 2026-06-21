@@ -450,6 +450,14 @@ bare message goes to `meta-xo` and `@alpha-xo` addresses the project-XO. An
 `@name` **never resolves outside the channel it was typed in** (so a desk is not
 reachable from `#fleet-command`, only its project-XO is).
 
+> **This example is a COMMAND-routing layout** (an XO's channel lists its desks as
+> `members`). **Visibility synthesis (Tiers 2/3) needs a different member shape** — each
+> agent owns its own home channel and lists its *parent* in `members[]`, with the
+> broadcast channel tagged `role="fleet-command"` (the shape the live fleet uses). See
+> [docs/visibility.md → The worked example](./visibility.md#the-worked-example). Synthesis
+> derives the hierarchy from `members[]`, so it only routes correctly over the home-channel
+> shape; the two layouts are not yet unified ([#139](https://github.com/jim80net/flotilla/issues/139)).
+
 > **The bot needs the Message Content intent in EVERY bound channel — not just
 > one.** With several channels it is easy to grant the intent/permissions in some
 > and miss one. A channel where the bot can't read content delivers messages with

@@ -44,6 +44,54 @@ func TestCmdWorkspaceInitScaffoldsAndIsIdempotent(t *testing.T) {
 	}
 }
 
+// workspace init seeds BOTH constitutional members — the rule-of-three
+// identity-append (into CLAUDE.md) AND the visibility-synthesis whole-file skill
+// (into skills/visibility-synthesis.md) — via the same doctrine.Install; a re-init
+// keeps both unchanged (the append detect-and-skips; the skill stat-and-keeps).
+func TestCmdWorkspaceInitSeedsBothConstitutionalMembers(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)
+	rosterPath := writeRosterFile(t, `{"agents":[{"name":"infra"}]}`)
+
+	if err := cmdWorkspaceInit([]string{"infra", "--roster", rosterPath}); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "infra")
+	identity := filepath.Join(dir, "CLAUDE.md")
+	skill := filepath.Join(dir, "skills", "visibility-synthesis.md")
+
+	idBody, err := os.ReadFile(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(idBody), "flotilla:rule-of-three") {
+		t.Error("workspace init did not seed the rule-of-three identity-append block")
+	}
+	skillBody, err := os.ReadFile(skill)
+	if err != nil {
+		t.Fatalf("workspace init did not seed the visibility-synthesis skill file: %v", err)
+	}
+	if len(strings.TrimSpace(string(skillBody))) == 0 {
+		t.Error("seeded visibility-synthesis skill file is empty")
+	}
+
+	// Operator edits the seeded skill; a re-init must KEEP it (stat-based), and the
+	// identity block detect-and-skips — both files survive a re-init verbatim.
+	const editedSkill = "OPERATOR-EDITED visibility-synthesis skill\n"
+	if err := os.WriteFile(skill, []byte(editedSkill), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmdWorkspaceInit([]string{"infra", "--roster", rosterPath}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(skill); string(got) != editedSkill {
+		t.Errorf("re-init clobbered the operator-edited skill file: %q", got)
+	}
+	if got, _ := os.ReadFile(identity); string(got) != string(idBody) {
+		t.Error("re-init changed the identity file (rule-of-three should detect-and-skip)")
+	}
+}
+
 func TestCmdWorkspaceInitUnknownAgentErrors(t *testing.T) {
 	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
 	rosterPath := writeRosterFile(t, `{"agents":[{"name":"infra"}]}`)
