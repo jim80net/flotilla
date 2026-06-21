@@ -23,46 +23,53 @@ write-path on the live Tier-1 mirror.
   `WakeSynthesis` can enqueue to a non-primary synthesizing XO — read the Injector enqueue path. (The
   GAP is the detector wake SEAM, `detector.go:68` + `watch.go:259`, which is XO-hardcoded — §5.)
 
-## 1. Routing — `ChannelsAwareOf` + `OwnedChannels` + the down-traversal read set (`internal/roster`)
+## 1. Routing — `OwnedChannels` + `AgentsBelow` + `AgentsAbove`, fleet-command-excluded (`internal/roster`)
 
-- [ ] 1.1 TEST: `ChannelsAwareOf(agent)` returns every channel id where the agent is a `member` OR the
-  `xo_agent`, over `Bindings()` — for the federated multi-channel form AND the legacy single-binding
-  form.
-- [ ] 1.2 TEST: `ChannelsAwareOf` is a pure read-only derivation — it does not mutate any binding's
-  `Members` slice (respect the read-only-slice contract).
-- [ ] 1.3 IMPL: add `ChannelsAwareOf(agent string) []string` to `internal/roster/roster.go`.
-- [ ] 1.4 TEST: `OwnedChannels(agent)` returns ALL channels where `ch.XOAgent == agent` (generalizing
-  `ChannelForXO`, which returns only the first) — for a single-home XO it returns one; for a multi-hub
-  XO it returns all.
-- [ ] 1.5 IMPL: add `OwnedChannels(agent string) []string` to `internal/roster/roster.go` (keep
+- [ ] 1.1 TEST + IMPL: a fleet-command predicate — `ch.Role == "fleet-command"` (a small helper or
+  inline). A fleet-command channel is a command/broadcast channel; its members are command targets, NOT
+  synthesis parents, so it contributes ZERO synthesis edges.
+- [ ] 1.2 TEST: `OwnedChannels(agent)` returns ALL channels where `ch.XOAgent == agent` (generalizing
+  `ChannelForXO`, which returns only the first), INCLUDING any fleet-command channel (it is a POST
+  target — the meta posts Tier-3 into #c2) — single-home XO → one; multi-hub XO → all.
+- [ ] 1.3 IMPL: add `OwnedChannels(agent string) []string` to `internal/roster/roster.go` (keep
   `ChannelForXO` as the primary-channel convenience; `OwnedChannels` is the full set).
-- [ ] 1.6 TEST: the synthesis READ AGENTS = the XOs of (`ChannelsAwareOf(agent)` MINUS
-  `OwnedChannels(agent)`), excluding the agent itself — i.e. `AgentsBelow(agent)`. For a multi-channel
-  XO that is BOTH a member of a peer's channel and the XO of its own, the read set excludes its own
-  channel/itself (the self-loop guard).
-- [ ] 1.7 IMPL: add the down-traversal read-set derivation (`AgentsBelow(agent string) []string`, the
-  XO agents of the read channels, minus self) to `internal/roster/roster.go`.
-- [ ] 1.8 TEST: `AgentsAbove(agent)` returns the synthesizing XOs ABOVE a boat — the XOs of every
-  channel that lists the boat as a member, minus the agent itself (the INVERSE of `AgentsBelow`). A
-  boat that is a member of TWO channels returns BOTH parent XOs (the many-to-many owed case). This is
-  the owed-marking resolver (re-trio P1-A), replacing the wrong-typed `BindingForChannel`.
-- [ ] 1.9 IMPL: add `AgentsAbove(agent string) []string` to `internal/roster/roster.go` (symmetric to
-  `AgentsBelow`, opposite traversal direction).
+- [ ] 1.4 TEST: `AgentsBelow(agent)` = `{ ch.XOAgent : agent ∈ ch.Members, ch.XOAgent != agent,
+  ch.Role != "fleet-command" }` over `Bindings()`. On the LIVE federated shape: a LEAF desk →
+  `{}` (it owns no channel listing it; it is only a member of the broadcast channel, excluded); a
+  project-XO → its boats with NO meta-XO leak; the meta-XO → exactly the project-XOs. The self-loop
+  guard (`!= agent`) AND the fleet-command exclusion are BOTH exercised (a member of the broadcast
+  channel does NOT pull the broadcaster into its read set — this is the implement-gate P0).
+- [ ] 1.5 IMPL: add `AgentsBelow(agent string) []string` to `internal/roster/roster.go`.
+- [ ] 1.6 TEST: `AgentsAbove(agent)` = `{ m : ch.XOAgent == agent, m ∈ ch.Members, m != agent,
+  ch.Role != "fleet-command" }` — the members of the NON-fleet-command channels the agent OWNS, minus
+  self; the owed-marking resolver (re-trio P1-A), replacing the wrong-typed `BindingForChannel`. Assert
+  it is the EXACT relational inverse of `AgentsBelow` (`C ∈ AgentsBelow(P) ⟺ P ∈ AgentsAbove(C)`) over
+  a fixture roster; a boat whose owned channel lists two parents returns BOTH. The root (whose only
+  owned channel is fleet-command) → `{}`.
+- [ ] 1.7 IMPL: add `AgentsAbove(agent string) []string` to `internal/roster/roster.go` (symmetric to
+  `AgentsBelow`, opposite direction; same fleet-command + self exclusions).
+- [ ] 1.8 TEST: `AgentsBelow` / `AgentsAbove` / `OwnedChannels` are pure read-only derivations — none
+  mutates any binding's `Members` slice (the read-only-slice contract).
 
-## 2. Membership-graph DAG assertion WITH self-edge exclusion (`internal/roster`)
+## 2. Membership-graph DAG assertion WITH self-edge AND fleet-command exclusion (`internal/roster`)
 
-- [ ] 2.1 TEST: `Load` ACCEPTS a roster whose home channel lists its own XO among its members (the
-  live #c2 `xo_agent=hydra-ops`/`members=[…,hydra-ops]` shape AND the legacy single-binding form where
-  the XO is a member) — the self-edge is EXCLUDED, not a false cycle. (Without this the live/legacy
-  roster would refuse to start.)
-- [ ] 2.2 TEST: `Load` REFUSES a roster with a MUTUAL cycle between two DISTINCT channels (channel-X's
-  XO is a member of channel-Y AND channel-Y's XO is a member of channel-X) with a clear error.
-- [ ] 2.3 TEST: `Load` ACCEPTS an acyclic federation (Tier-3 meta-XO channel with project-XOs as
-  members; each project channel with its boats as members; each home channel self-membership
-  excluded).
-- [ ] 2.4 IMPL: add a depth-first-search cycle check over the `Bindings()` edges to `roster.Load`,
+- [ ] 2.1 TEST: `Load` ACCEPTS the LIVE federated shape — a fleet-command broadcast channel
+  (`role="fleet-command"`, members = ALL agents) PLUS per-XO home channels (members = parent) PLUS the
+  two-tier project/meta structure. Without the fleet-command exclusion the broadcast channel's
+  `meta → {everyone}` edges close a cycle (e.g. `meta → leaf-of-a-subtree → … → meta`) and Load would
+  REFUSE — so this test is the regression guard for the implement-gate P0.
+- [ ] 2.2 TEST: `Load` ACCEPTS a roster whose home channel lists its own XO among its members (the
+  live home-channel self-membership AND the legacy single-binding form) — the self-edge is EXCLUDED,
+  not a false cycle.
+- [ ] 2.3 TEST: `Load` REFUSES a roster with a MUTUAL cycle between two DISTINCT NON-fleet-command
+  channels (channel-X's XO is a member of channel-Y AND channel-Y's XO is a member of channel-X) with a
+  clear error.
+- [ ] 2.5 TEST: `Load` ACCEPTS an acyclic federation (Tier-3 meta-XO + project-XOs + boats; each home
+  channel self-membership excluded; the fleet-command broadcast excluded).
+- [ ] 2.6 IMPL: add a depth-first-search cycle check over the synthesis-edge graph to `roster.Load`,
   fail-closed. Build the edge set as `ch.XOAgent → m` for each `m ∈ ch.Members` with `m != ch.XOAgent`
-  (DROP self-edges). Runs once at load, not on the hot path.
+  (DROP self-edges) AND `ch.Role != "fleet-command"` (DROP broadcast-channel edges — the implement-gate
+  P0). Runs once at load, not on the hot path.
 
 ## 3. Transcript-first read of the subordinates' latest state (read-only reuse)
 
@@ -142,49 +149,57 @@ synthesis is later shown to need finish-history rather than latest-state.
   embedded skill (the prompt is the thin trigger; the skill file carries the detailed curation
   instructions); enqueue `watch.Job{Agent: <synthesizing agent>, ...}`.
 
-## 8. The `heartbeat-skill` mechanism + the registry member + the Install signature change (`internal/doctrine`)
+## 8. The `heartbeat-skill` mechanism + the registry member + the Install signature change (`internal/doctrine`) — DONE (commit 798a5ea)
 
-- [ ] 8.1 TEST: `MechanismHeartbeatSkill` installs as a WHOLE-FILE member — a missing skill file in the
+- [x] 8.1 TEST: `MechanismHeartbeatSkill` installs as a WHOLE-FILE member — a missing skill file in the
   workspace is CREATED, an existing one is KEPT (operator edits survive), reported created/kept —
   decided by a STAT of the target file, NOT a marker fence.
-- [ ] 8.2 TEST: a whole-file member does NOT route through `appendOnce` (which hard-errors on an empty
+- [x] 8.2 TEST: a whole-file member does NOT route through `appendOnce` (which hard-errors on an empty
   `OpenMarker`, `install.go:85`); an identity-append member and a heartbeat-skill member install
   together via the SAME `doctrine.Install` loop with no LOOP change; the identity-append arm is
   unaffected.
-- [ ] 8.3 IMPL: add `MechanismHeartbeatSkill Mechanism = "heartbeat-skill"` to
+- [x] 8.3 IMPL: add `MechanismHeartbeatSkill Mechanism = "heartbeat-skill"` to
   `internal/doctrine/doctrine.go`; add a `TargetFile` (workspace-relative) field to `Member` (empty for
   identity-append, set for heartbeat-skill); add its whole-file STAT-based kept/created dispatch arm to
   `internal/doctrine/install.go` (the `switch m.Mechanism` second case — landed in THIS change per the
   MECHANISM COUPLING contract, `install.go:51-57`).
-- [ ] 8.4 IMPL: CHANGE the `doctrine.Install` SIGNATURE to `Install(workspaceDir string, members
-  []Member)`, DERIVING the identity path from `workspace.IdentityFileName` (Q-D resolved — one source
-  of truth for the layout; the whole-file member writes `<workspaceDir>/<TargetFile>`, which the
-  `identityPath`-only signature, `install.go:40`, cannot resolve). The whole-file CREATE does its OWN
-  `os.WriteFile`, disjoint from the identity-content `anyAppended` write-back (`install.go:72-76`).
-  Update BOTH call sites: `cmd/flotilla/workspace.go:148` and `cmd/flotilla/doctrine.go:50`.
-- [ ] 8.5 IMPL: register the visibility-synthesis member in the `members` slice
+- [x] 8.4 IMPL: CHANGE the `doctrine.Install` SIGNATURE to `Install(workspaceDir, identityFile string,
+  members []Member)` — the CALLER (which holds the surface) resolves `identityFile` via
+  `workspace.IdentityFileName(surface)` and passes it, keeping `internal/doctrine` dependency-free (a
+  deliberate refinement of Q-D, which said "derive from workspace.IdentityFileName" — but that would
+  force a workspace import; the caller already has the surface). Install joins `workspaceDir/identityFile`
+  for the append and `workspaceDir/<TargetFile>` for the whole-file. The whole-file CREATE does its OWN
+  `os.WriteFile` (+ `os.MkdirAll` of `skills/`), disjoint from the identity `anyAppended` write-back.
+  Update BOTH call sites: `cmd/flotilla/workspace.go` and `cmd/flotilla/doctrine.go`.
+- [x] 8.5 IMPL: register the visibility-synthesis member in the `members` slice
   (`Mechanism: MechanismHeartbeatSkill`, `TargetFile: "skills/visibility-synthesis.md"`, content from
   `internal/doctrine/assets/skills/visibility-synthesis.md`).
-- [ ] 8.6 TEST: `workspace init` seeds BOTH members (the Rule-of-Three identity-append AND the
+- [x] 8.6 TEST: `workspace init` seeds BOTH members (the Rule-of-Three identity-append AND the
   visibility-synthesis whole-file skill) via the same `doctrine.Install`; re-running init keeps both
   unchanged.
 
-## 9. The skill content (`internal/doctrine/assets/skills/visibility-synthesis.md`)
+## 9. The skill content (`internal/doctrine/assets/skills/visibility-synthesis.md`) — DONE (§8/§9, commit 798a5ea)
 
-- [ ] 9.1 Author the curation prompt: how to read the subordinates' latest transcript STATE (the agents
+- [x] 9.1 Author the curation prompt: how to read the subordinates' latest transcript STATE (the agents
   below, via the membership down-traversal), how to curate Tier 2 (domain rollup, grouped by boat,
   surface attention-worthy items, not a firehose), how to curate Tier 3 (#c2 headline + operator
-  decisions derived from full latest-turn text + drill-down pointers down the membership graph), and
+  decisions [best-effort over latest-turn state] + drill-down pointers down the membership graph), and
   the narrow-answer discipline (no manufactured synthesis — reply idle when nothing material changed).
-  Spell out acronyms. Embed under `internal/doctrine/assets/skills` (the existing `go:embed` tree,
-  `doctrine.go:23`).
+  Spell out acronyms. Embedded under `internal/doctrine/assets/skills` (the existing `go:embed` tree).
 
 ## 10. Docs
 
+- [ ] 10.0 Update `flotilla.example.json` AND `tools/landing-status/demo-roster.json` to the FEDERATED
+  shape INCLUDING a `role="fleet-command"` broadcast channel + per-XO home channels (members=parent) +
+  the two-tier project/meta structure (hydra-ops's explicit ask). The legacy single-binding STAR shape
+  these carry today is exactly why the design-trio missed the broadcast-channel P0 — the examples must
+  exercise the REAL federated topology so the gap can never slip again, and so the roster tests can load
+  a realistic fixture.
 - [ ] 10.1 `docs/visibility.md` — the stratified-visibility doctrine doc (the source of truth for the
   three tiers, the up-flow/inverse-drill-down, the TRANSCRIPT-FIRST LOCAL substrate, the topology
-  [each agent owns its home channel; its parent is a member], the routing down-traversal). Cross-link
-  from `docs/xo-doctrine.md` and the Tier-1 references.
+  [each agent owns its home channel; its parent is a member; the fleet-command broadcast channel is
+  EXCLUDED from synthesis edges], the routing down-traversal). Cross-link from `docs/xo-doctrine.md` and
+  the Tier-1 references.
 - [ ] 10.2 Update the constitutional-set member list reference (the README / doctrine docs) to note the
   second member (visibility-synthesis) and the `heartbeat-skill` mechanism — the "vocabulary extends
   with each new member kind" B1 promised, now realized.

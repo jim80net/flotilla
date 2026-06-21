@@ -79,31 +79,36 @@ latest transcript state, read directly.
   fleet); a subordinate whose pane will not resolve is cleanly skipped, never a crashed wake.
   Cross-host federation is out of scope for v1 (pairs with the #138 ledger).
 
-- **Routing — a down-traversal of the membership graph, no new schema.** The "tier below" an agent A
-  is the set of AGENTS whose channels list A as a member: `{ ch.XOAgent : A ∈ ch.Members }` over
-  `Bindings()` (`internal/roster/roster.go:289`). A reads each of those agents' latest transcript via
-  `claudestore`; A POSTS its synthesis to the channel A OWNS (`ChannelForXO(A)`, `roster.go:343`) via
-  `secrets.Webhook(A)` (`internal/roster/secrets.go:62`). This is a pure read-only derivation over
-  the F#105 `members[]` graph — the SAME graph Tier 1 routes on — with NO new roster schema. The
-  accessor that exposes the read channels (`ChannelsAwareOf`) and the down-traversal to their XO
-  agents are pure derivations over `Bindings()`, respecting the read-only-slice contract.
+- **Routing — a down-traversal of the membership graph, no new schema, fleet-command-excluded.** The
+  "tier below" an agent A is the set of AGENTS whose NON-fleet-command channels list A as a member:
+  `{ ch.XOAgent : A ∈ ch.Members, ch.XOAgent != A, ch.Role != "fleet-command" }` over `Bindings()`
+  (`internal/roster/roster.go:289`). A reads each of those agents' latest transcript; A POSTS its
+  synthesis to the channel(s) A OWNS (`OwnedChannels(A)`, generalizing `ChannelForXO`, `roster.go:343`)
+  via `secrets.Webhook(A)` — the post target INCLUDES the fleet-command channel (the meta posts Tier-3
+  into #c2). The owed direction is the inverse `AgentsAbove(A)` (the members of the non-fleet-command
+  channels A owns, minus self). Pure read-only derivations over the F#105 `members[]` graph — the SAME
+  graph Tier 1 routes on — with NO new roster schema, respecting the read-only-slice contract.
 
 - **Make the topology EXPLICIT (so it is never re-mis-read).** Each agent OWNS its home channel
   (`xo_agent == self`) and its PARENT is in that channel's `members[]` (verified live:
   `xo_agent=tactical-head members=[family-office]`; `xo_agent=family-office members=[hydra-ops]`).
-  So "read the tier below me" = read the agents whose channels list ME as a member (a DOWN-traversal
-  of the membership graph). systems-review mis-modeled this as inverted; it is not. The proposal,
-  design, and spec all state this topology plainly.
+  So "read the tier below me" = read the agents whose home channel lists ME as a member (a
+  DOWN-traversal of the membership graph). The ONE channel where `members[]` runs the OTHER way — the
+  fleet-command BROADCAST channel (`role="fleet-command"`, members = the meta-XO's full command list) —
+  is EXCLUDED from synthesis-edge derivation (the implement-gate P0): its members are command targets,
+  not synthesis parents. The proposal, design, and spec all state this topology plainly.
 
-- **Membership-graph acyclicity, asserted at roster load, fail-closed — WITH self-edge exclusion.**
-  "Read below, post own level" gives acyclicity for free IFF the membership graph is a directed
-  acyclic graph (DAG). The roster load SHALL assert the channel-membership graph is a DAG and REFUSE
-  to start otherwise. **CRITICAL: the check MUST exclude SELF-edges.** The live #c2 channel has
-  `xo_agent=hydra-ops` AND `hydra-ops ∈ members` (self-membership), and the legacy single-binding
-  form lists the XO among its own members (`roster.go:296-304`). A naive "XO → each member" edge
-  model would treat that self-membership as a cycle and REFUSE TO START THE LIVE ROSTER. The check
-  flags ONLY a MUTUAL membership between two DISTINCT channels as a cycle (channel-A's XO is a member
-  of channel-B and channel-B's XO is a member of channel-A).
+- **Membership-graph acyclicity, asserted at roster load, fail-closed — WITH self-edge AND
+  fleet-command exclusion.** "Read below, post own level" gives acyclicity for free IFF the
+  synthesis-edge graph is a DAG. The roster load SHALL assert it and REFUSE to start otherwise. The
+  edge model `ch.XOAgent → m` (for `m ∈ ch.Members`) applies TWO exclusions: **(1) self-edges**
+  (`m != ch.XOAgent` — the live home-channel self-membership and the legacy single-binding form,
+  `roster.go:296-304`, are NOT cycles), and **(2) fleet-command channels** (`ch.Role != "fleet-command"`
+  — the live broadcast channel lists all 12 agents; included, its `hydra-ops → {everyone}` edges close
+  cycles with the per-XO channels, e.g. `hydra-ops → flotilla-dash → flotilla-dev → hydra-ops`, and
+  refuse the live roster — empirically verified). A genuine cycle is a MUTUAL membership between two
+  DISTINCT non-fleet-command channels (channel-A's XO is a member of channel-B and channel-B's XO is a
+  member of channel-A).
 
 - **Cadence — a daemon-emitted `WakeSynthesis` wake-kind, with an agent param on the wake seam.** A
   new `WakeKind` (a sibling of `WakeContinuation` / `WakeMaterial` / `WakeBacklog` / `WakePing` in
@@ -191,12 +196,13 @@ latest transcript state, read directly.
 
 - **New capability spec:** `visibility-synthesis`.
 - **Affected code (implement phase, after the re-trio + on the ratified transcript-first substrate):**
-  - `internal/roster/roster.go` — net-new `ChannelsAwareOf(agent)` accessor (the channels an agent is
-    aware of, pure read-only derivation over `Bindings()`); the down-traversal `AgentsBelow(agent)`
-    (the XO agents of the channels A is a member of, minus self); the UP-traversal `AgentsAbove(agent)`
-    (the inverse — the synthesizing XOs of the channels that list A as a member, minus self — the
+  - `internal/roster/roster.go` — the down-traversal `AgentsBelow(agent)` (the XOs of the
+    NON-fleet-command channels that list A as a member, minus self) and its exact inverse
+    `AgentsAbove(agent)` (the members of the non-fleet-command channels A OWNS, minus self — the
     owed-marking resolver, replacing the wrong-typed `BindingForChannel`); generalize `ChannelForXO` →
-    an `OwnedChannels(agent)` accessor; a DAG acyclicity check in `Load` with SELF-edge exclusion.
+    an `OwnedChannels(agent)` accessor (post target, fleet-command INCLUDED); a `role=="fleet-command"`
+    predicate; a DAG acyclicity check in `Load` with BOTH self-edge AND fleet-command exclusion. All
+    pure read-only derivations over `Bindings()`.
   - `internal/watch/detector.go` — net-new `WakeSynthesis` `WakeKind`; a parallel agent-targeted
     `WakeAgent` seam (leaving the shipped `Wake` byte-identical); the per-synthesizing-agent
     "synthesis owed" set (resolved via `AgentsAbove`) + the durable, restart-surviving disk-sidecar

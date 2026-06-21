@@ -20,7 +20,11 @@ subordinate right now"), not an event log of every finish.
 **The topology (stated explicitly so routing is never mis-read):** each agent OWNS its home channel
 (`xo_agent == self`) and its PARENT is in that channel's `members[]` (e.g. `xo_agent=tactical-head
 members=[family-office]`; `xo_agent=family-office members=[hydra-ops]`). Therefore "read the tier BELOW
-me" = read the agents whose channels list ME as a member — a DOWN-traversal of the membership graph.
+me" = read the agents whose home channel lists ME as a member — a DOWN-traversal of the membership
+graph. The ONE channel where `members[]` runs the OTHER way is the fleet-command BROADCAST channel
+(`role == "fleet-command"`, whose members are the meta-XO's full command list); it is EXCLUDED from
+synthesis-edge derivation — its members are command targets, not synthesis parents. (Grounding the
+implementation in the live roster caught this; the legacy-star example rosters did not exercise it.)
 Command flows DOWN the graph; awareness flows UP; both are the SAME `members[]` graph traversed in
 opposite directions.
 
@@ -71,52 +75,73 @@ shipped Tier-1 mirror to source synthesis (no mirror-event ledger in this capabi
 - **WHEN** a synthesizing agent's read set includes a subordinate whose pane cannot be resolved on this host (or whose surface exposes no result reader)
 - **THEN** that subordinate is skipped from the rollup and the synthesis proceeds over the readable subordinates, rather than the wake failing
 
-### Requirement: Synthesis routing is a down-traversal of the membership graph
+### Requirement: Synthesis routing is a down-traversal of the membership graph, excluding fleet-command channels
 
 The system SHALL derive synthesis routing purely from the federation `members[]` graph, with NO new
-roster schema. For a synthesizing agent A, the tier BELOW A SHALL be the agents whose channels list A
-as a member: the XO of each channel where `A ∈ ch.Members` and that XO is not A itself. The system
-SHALL expose, as pure read-only derivations over `Bindings()` that do not mutate any binding: the
-channels an agent is aware of (`ChannelsAwareOf` — every channel where the agent is a member OR the
-channel's XO) and the channels an agent owns (`OwnedChannels` — every channel where the agent is the
-XO, generalizing the single-channel `ChannelForXO` to the multi-hub case). The agent's synthesis READ
-set SHALL be the channels it is aware of MINUS the channels it owns, and the read AGENTS SHALL be the
-XOs of those read channels — so the agent reads strictly the tier below and never its own channel. The
-synthesis POST target SHALL be the channel(s) the agent owns, delivered via that agent's webhook.
+roster schema. For a synthesizing agent A, the tier BELOW A (`AgentsBelow`) SHALL be the XO of each
+NON-fleet-command channel where `A ∈ ch.Members` and that XO is not A itself. The synthesizing PARENTS
+of an agent C (`AgentsAbove`, the owed-marking resolver) SHALL be the members — minus C — of the
+NON-fleet-command channels C owns; `AgentsAbove` SHALL be the exact relational inverse of `AgentsBelow`
+(`C ∈ AgentsBelow(P)` iff `P ∈ AgentsAbove(C)`). The system SHALL expose the channels an agent owns
+(`OwnedChannels` — every channel where the agent is the XO, generalizing the single-channel
+`ChannelForXO` to the multi-hub case; fleet-command INCLUDED). These SHALL be pure read-only
+derivations over `Bindings()` that do not mutate any binding. The agent reads strictly the tier below
+and never its own channel. The synthesis POST target SHALL be the channel(s) the agent owns — the
+fleet-command channel INCLUDED (the meta-XO posts its Tier-3 synthesis INTO it) — delivered via that
+agent's webhook. A `role == "fleet-command"` channel is a command/broadcast channel: its members are
+command targets, NOT synthesis parents, so it SHALL contribute ZERO synthesis edges (excluded from
+both `AgentsBelow` and `AgentsAbove`).
 
 #### Scenario: An XO reads its boats and posts to its own channel
 
 - **WHEN** an XO synthesizes
-- **THEN** its read set is the agents below it (the XOs of the channels it is a member of, excluding itself), and it posts the synthesis to the channel it owns
+- **THEN** its read set is the agents below it (the XOs of the non-fleet-command channels that list it as a member, excluding itself), and it posts the synthesis to the channel it owns
 
 #### Scenario: A multi-channel XO never reads its own post target (self-loop guard)
 
 - **WHEN** an agent is both a member of a peer's channel AND the XO of its own channel
 - **THEN** its synthesis read set excludes the channel it owns, so its read set can never equal its post target and it never synthesizes its own synthesis posts
 
-### Requirement: The membership graph is asserted acyclic at roster load, excluding self-edges, fail-closed
+#### Scenario: A leaf desk does not synthesize the meta-XO (fleet-command exclusion)
 
-The system SHALL assert that the channel-membership graph is a directed acyclic graph (DAG) at roster
-load, and SHALL REFUSE to start when it is cyclic, so the "read below, post own level" routing cannot
-form a synthesis feedback loop. The graph SHALL be built with an edge from each channel's XO to each
-of that channel's members EXCEPT the channel's own XO — i.e. a SELF-edge (an agent that is a member of
-its OWN channel) SHALL be EXCLUDED and is NOT a cycle. A cycle is ONLY a MUTUAL membership between two
-DISTINCT channels (channel-X's XO is a member of channel-Y and channel-Y's XO is a member of
-channel-X). The check SHALL run once at load (not on the synthesis hot path).
+- **WHEN** a leaf desk is a member of the fleet-command broadcast channel (whose XO is the meta-XO) but owns no channel of its own listing subordinates
+- **THEN** its synthesis read set is empty — the broadcast-channel membership does NOT pull the meta-XO into its read set — so the hierarchy is not inverted and no synthesis cycle forms
+
+#### Scenario: The meta-XO posts Tier-3 into the fleet-command channel it owns
+
+- **WHEN** the meta-XO synthesizes the project-XOs
+- **THEN** its read set is the project-XOs (the XOs of their non-fleet-command home channels that list the meta-XO), and it POSTS the Tier-3 synthesis into the fleet-command channel it owns (the post target includes fleet-command; only the read derivation excludes it)
+
+### Requirement: The membership graph is asserted acyclic at roster load, excluding self-edges AND fleet-command channels, fail-closed
+
+The system SHALL assert that the synthesis-edge graph is a directed acyclic graph (DAG) at roster load,
+and SHALL REFUSE to start when it is cyclic, so the "read below, post own level" routing cannot form a
+synthesis feedback loop. The graph SHALL be built with an edge from each channel's XO to each of that
+channel's members EXCEPT (1) the channel's own XO — a SELF-edge (an agent that is a member of its OWN
+channel) is EXCLUDED and is NOT a cycle — and EXCEPT (2) every edge from a `role == "fleet-command"`
+channel — a broadcast channel contributes NO synthesis edges, because its members are command targets,
+not synthesis parents. A cycle is ONLY a MUTUAL membership between two DISTINCT NON-fleet-command
+channels (channel-X's XO is a member of channel-Y and channel-Y's XO is a member of channel-X). The
+check SHALL run once at load (not on the synthesis hot path).
+
+#### Scenario: A fleet-command broadcast channel does not cycle the graph
+
+- **WHEN** the roster contains a fleet-command channel (`role="fleet-command"`) whose members include agents that are themselves XOs of their own home channels (the live broadcast shape — the meta-XO's channel lists the project-XOs, whose home channels in turn list the meta-XO)
+- **THEN** roster load succeeds — the fleet-command channel's edges are excluded, so the broadcast membership does not form a cycle with the per-XO home channels (without this exclusion the live roster would refuse to start)
 
 #### Scenario: A self-membership home channel loads (no false cycle)
 
-- **WHEN** the roster contains a channel whose XO is also listed among its own members (the live/legacy home-channel shape, e.g. #c2 with `xo_agent=hydra-ops` and `hydra-ops` in its members, or the legacy single-binding form)
+- **WHEN** the roster contains a channel whose XO is also listed among its own members (the live/legacy home-channel shape, or the legacy single-binding form)
 - **THEN** roster load succeeds (the self-edge is excluded; it is not treated as a cycle)
 
 #### Scenario: A cyclic federation refuses to start
 
-- **WHEN** the roster's channel-membership graph contains a mutual cycle between two DISTINCT channels (each lists the other's XO as a member)
+- **WHEN** the roster's synthesis-edge graph contains a mutual cycle between two DISTINCT non-fleet-command channels (each lists the other's XO as a member)
 - **THEN** roster load fails with a clear error and the daemon refuses to start
 
 #### Scenario: An acyclic federation loads and routes
 
-- **WHEN** the roster's channel-membership graph is acyclic (after excluding self-edges)
+- **WHEN** the roster's synthesis-edge graph is acyclic (after excluding self-edges and fleet-command channels)
 - **THEN** roster load succeeds and synthesis routing derives the read/post sets from it
 
 ### Requirement: A daemon-emitted WakeSynthesis wake-kind drives the cadence, targeting an arbitrary synthesizing agent
