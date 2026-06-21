@@ -35,14 +35,21 @@ only) per its extensibility seam.
 
 The system SHALL source visibility synthesis from a LOCAL TRANSCRIPT-FIRST substrate: a synthesizing
 agent SHALL read the LATEST turn-final state of each agent in the tier below it directly from that
-agent's local session transcript (via the same `claudestore.LatestTurnText` reader the Tier-1 mirror
-uses), and SHALL NOT read Discord channel history. The read SHALL be bounded — the latest turn per
-subordinate (N bounded reads for N subordinates), not an unbounded windowing pass over transcript
-history. The synthesis read SHALL be architecturally disjoint from the inbound relay
-(`relay.Accept`/`relay.Route`): it is a read-only local file read, never routed through the inbound
-command path, so a subordinate's transcript is never consumed as a command and a synthesis post is
-never re-injected as a command. The system SHALL NOT add any new write-path to the shipped Tier-1
-mirror to source synthesis (no mirror-event ledger in this capability).
+agent's local session, through the SAME surface-agnostic reader the Tier-1 mirror uses — the agent's
+`surface.ResultReader.LatestResult(pane)` (claude resolves it to `claudestore.LatestTurnText`, grok to
+the grok store), NOT a direct bind to `claudestore` (which would exclude a non-claude subordinate the
+mirror reads fine) — and SHALL NOT read Discord channel history. Reading a subordinate requires
+resolving its tmux pane on the synthesizer's host; the system SHALL treat a subordinate whose pane
+cannot be resolved (cross-host, or transiently gone) or whose surface exposes no `ResultReader` as a
+CLEAN SKIP from the rollup, never a failed synthesis. Synthesis therefore carries a v1 PRECONDITION:
+each read-set subordinate's session is HOST-LOCAL to the synthesizer (the single-host fleet);
+cross-host synthesis is out of scope for v1 (it pairs with the deferred finish-history ledger). The
+read SHALL be bounded — the latest turn per subordinate (N bounded reads for N subordinates), not an
+unbounded windowing pass over transcript history. The synthesis read SHALL be architecturally disjoint
+from the inbound relay (`relay.Accept`/`relay.Route`): it is a read-only local file read, never routed
+through the inbound command path, so a subordinate's transcript is never consumed as a command and a
+synthesis post is never re-injected as a command. The system SHALL NOT add any new write-path to the
+shipped Tier-1 mirror to source synthesis (no mirror-event ledger in this capability).
 
 #### Scenario: Synthesis reads subordinates' latest transcript state, not Discord
 
@@ -58,6 +65,11 @@ mirror to source synthesis (no mirror-event ledger in this capability).
 
 - **WHEN** a synthesizing agent reads its read set
 - **THEN** it reads the latest turn-final state of each subordinate (N bounded reads), not an unbounded windowing pass over each subordinate's transcript history
+
+#### Scenario: An unresolvable subordinate is cleanly skipped, not a failed synthesis
+
+- **WHEN** a synthesizing agent's read set includes a subordinate whose pane cannot be resolved on this host (or whose surface exposes no result reader)
+- **THEN** that subordinate is skipped from the rollup and the synthesis proceeds over the readable subordinates, rather than the wake failing
 
 ### Requirement: Synthesis routing is a down-traversal of the membership graph
 
@@ -112,10 +124,13 @@ channel-X). The check SHALL run once at load (not on the synthesis hot path).
 The system SHALL drive synthesis cadence from a daemon-emitted wake kind (`WakeSynthesis`), a sibling
 of the existing change-detector wake kinds, NOT from skill-self-scheduling. Because a synthesizing
 agent may be a project XO (Tier 2) or the meta-XO (Tier 3) and is generally NOT the daemon's single
-primary clock XO, the detector's wake seam SHALL carry an AGENT parameter (an agent on the wake
-callback, or a parallel agent-targeted wake), and the wake SHALL be enqueued to the SYNTHESIZING agent
-— the existing primary-XO-only wake path is insufficient. A boat-finish event SHALL mark synthesis
-"owed" for the channel's synthesizing XO, tracked in a per-synthesizing-agent owed-set. The detector
+primary clock XO, the detector's wake seam SHALL carry an AGENT parameter via a PARALLEL
+agent-targeted wake (leaving the existing primary-XO `Wake` path byte-identical), and the wake SHALL
+be enqueued to the SYNTHESIZING agent — the existing primary-XO-only wake path is insufficient. A
+boat-finish event SHALL mark synthesis "owed" for the synthesizing XO(s) ABOVE the finishing agent —
+resolved by the INVERSE membership traversal (the XOs of the channels that list the finishing agent as
+a member, minus self), NOT by a channel-id lookup; a finishing agent that is a member of SEVERAL
+channels marks EACH parent XO owed — tracked in a per-synthesizing-agent owed-set. The detector
 SHALL fire `WakeSynthesis` for that synthesizing agent on a digest sub-cadence (debounce-up): a burst
 of boat finishes SHALL coalesce into at most one synthesis wake per the digest cadence per synthesizing
 agent, and a fleet with no synthesis owed SHALL fire no synthesis wake (an idle fleet costs nothing).
@@ -148,12 +163,16 @@ The system SHALL gate synthesis on MATERIALITY — it SHALL synthesize only when
 has CHANGED since the last synthesis, so an active-but-unchanged fleet does not re-post an identical
 rollup and an idle fleet costs nothing. Because the transcript read is stateless (the latest turn per
 subordinate, resolved fresh each wake), the materiality state SHALL be a per-synthesizing-agent
-durable "last-seen" snapshot (e.g. a hash of each subordinate's last-synthesized turn text). This
-last-seen state SHALL be DAEMON/DISK-OWNED (the daemon's state or a disk sidecar), NOT skill-context
-state, because context rotation (`/clear`) wipes skill-context state — keeping the last-seen state in
-the skill would reintroduce the exact re-read bug the daemon-owned cadence exists to prevent. No
-separate ledger watermark is required (there is no append log under transcript-first); the durable
-last-seen snapshot plus the latest-state read together form the materiality mechanism.
+durable "last-seen" snapshot (a hash of each subordinate's last-synthesized turn text). This last-seen
+state SHALL be a DISK SIDECAR (NOT skill-context state, NOT in-memory-only detector state), surviving
+BOTH context rotation (`/clear` wipes skill-context state) AND daemon restart (an in-memory-only
+snapshot would re-post every subordinate as "new" on the first post-restart wake — a restart-storm). A
+missing or corrupt sidecar SHALL fail SAFE toward "all changed" (synthesize once), never toward
+silent-never-fire. A subordinate that is UNREADABLE on a given wake (its pane will not resolve) SHALL
+be EXCLUDED from the materiality computation for that wake (never hashed as empty), so a transient read
+failure neither spams a re-post nor suppresses a later real change. No separate ledger watermark is
+required (there is no append log under transcript-first); the durable last-seen snapshot plus the
+latest-state read together form the materiality mechanism.
 
 #### Scenario: Unchanged subordinate state yields no re-post
 
@@ -165,6 +184,16 @@ last-seen snapshot plus the latest-state read together form the materiality mech
 - **WHEN** the synthesizing agent's context is rotated (`/clear`) between synthesis wakes
 - **THEN** the durable daemon/disk-owned last-seen snapshot persists across the rotation, so the next synthesis does not re-read from scratch and re-post an unchanged rollup
 
+#### Scenario: The materiality state survives a daemon restart
+
+- **WHEN** the daemon restarts and no subordinate's latest state has changed since the last synthesis
+- **THEN** the disk-sidecar last-seen snapshot persists across the restart, so no WakeSynthesis fires (no restart-storm of re-posts)
+
+#### Scenario: A transiently-unreadable subordinate does not flap the wake
+
+- **WHEN** a subordinate's pane cannot be resolved on a given wake
+- **THEN** that subordinate is excluded from the materiality hash for that wake (not recorded as changed-to-empty), so its transient unreadability neither triggers a re-post nor suppresses a later real change
+
 ### Requirement: The synthesis skill ships as a heartbeat-skill constitutional member
 
 The system SHALL deliver the visibility-synthesis skill as a member of the installable constitutional
@@ -175,11 +204,12 @@ workspace-relative path (NOT appended into the agent's standing identity file), 
 tick-time discipline invoked when the daemon emits `WakeSynthesis`, not a structural identity rule. The
 member registry entry SHALL carry that workspace-relative target path. Because writing a whole-file
 member into the workspace requires the WORKSPACE directory (the install today receives only the
-identity-file path), the install entry point SHALL take a WORKSPACE-DIRECTORY parameter, updated at
-every call site in the same change. The whole-file member's install idempotency SHALL be STAT-based
-(a missing skill file is CREATED, an existing one is KEPT so operator edits survive), distinct from the
-identity-append marker guard (the marker-fenced append path SHALL NOT be used for a whole-file member,
-which carries no marker). Adding this member SHALL require no change to the install/seed iteration loop
+identity-file path), the install entry point SHALL take a WORKSPACE-DIRECTORY parameter and DERIVE the
+identity-file path from it (one source of truth for the workspace layout), updated at every call site
+in the same change. The whole-file member's install idempotency SHALL be STAT-based (a missing skill
+file is CREATED via its OWN file write, disjoint from the identity-append content write-back; an
+existing one is KEPT so operator edits survive), distinct from the identity-append marker guard (the
+marker-fenced append path SHALL NOT be used for a whole-file member, which carries no marker). Adding this member SHALL require no change to the install/seed iteration loop
 (which dispatches by mechanism); the new mechanism's whole-file write/load dispatch arm AND the install
 signature change SHALL land in the same change as the member (the mechanism-coupling contract).
 
@@ -206,7 +236,10 @@ needs the operator's attention, not a raw firehose. The system SHALL produce, fo
 (the meta-XO into the command-and-control channel), a fleet headline PLUS the open operator decisions
 PLUS drill-down pointers that follow the inverse of the membership graph (command channel → XO channel
 → boat channel → pane), so a reader can plumb to any depth. The operator-decisions SHALL be derived
-from the subordinates' FULL latest turn text (transcript-first), not from a lossy gist. Each synthesis
+from the subordinates' FULL latest turn text (transcript-first), not from a lossy gist; decision
+extraction is best-effort over each subordinate's CURRENT state — a decision raised then superseded
+WITHIN a burst can age out of the latest-turn window, and complete capture across a burst is the
+deferred finish-history ledger's job (issue #138), not a guarantee of this substrate. Each synthesis
 SHALL be governed by the narrow-answer discipline: when nothing material has changed since the last
 synthesis, the agent SHALL reply idle rather than manufacture a synthesis.
 

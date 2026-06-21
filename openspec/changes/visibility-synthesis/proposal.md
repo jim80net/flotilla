@@ -65,14 +65,19 @@ latest transcript state, read directly.
 ## What Changes
 
 - **A transcript-first synthesis read (the ratified LOCAL source).** A synthesizing agent reads the
-  LATEST STATE of each agent in the tier below it directly via `claudestore.LatestTurnText`
-  (`internal/claudestore/claudestore.go:294`) — resolve each subordinate's pane working directory
-  (`deliver.PaneCWD`, `internal/deliver/panecwd.go:20`), encode it, glob
-  `~/.claude/projects/<enc-cwd>/*.jsonl`, take the newest, extract the turn-final text. This is the
-  same reader Tier 1 already ships and uses; it is bounded (the LATEST turn per subordinate, N
-  bounded reads, not an unbounded windowing pass), relay-disjoint by construction (a read-only file
-  read, never a Discord read, never an inbound command), and adds NO new write-path. No ledger, no
-  new package, no change to the live Tier-1 mirror.
+  LATEST STATE of each agent in the tier below it through the SAME surface-agnostic seam the shipped
+  Tier-1 mirror uses: resolve the subordinate's pane (`deliver.ResolvePane(agentTitle(cfg, sub))`,
+  `cmd/flotilla/watch.go:580`), then `rr.LatestResult(pane)` on the agent's `surface.ResultReader`
+  (`watch.go:575-588` — for a claude desk this resolves to `claudestore.LatestTurnText`, for grok to
+  the grok store; a surface without a `ResultReader`, or a pane that won't resolve, is a CLEAN SKIP).
+  This is read-only reuse of the EXACT Tier-1 reader — NOT a direct bind to `claudestore` (which would
+  silently exclude a grok subordinate Tier 1 mirrors fine). It is bounded (the LATEST turn per
+  subordinate, N bounded reads, not an unbounded windowing pass), relay-disjoint by construction (a
+  read-only file read, never a Discord read, never an inbound command), and adds NO new write-path. No
+  ledger, no new package, no change to the live Tier-1 mirror. **Reachability invariant:** v1 requires
+  each read-set subordinate's pane to be HOST-LOCAL to the synthesizer (the single-host dogfood
+  fleet); a subordinate whose pane will not resolve is cleanly skipped, never a crashed wake.
+  Cross-host federation is out of scope for v1 (pairs with the #138 ledger).
 
 - **Routing — a down-traversal of the membership graph, no new schema.** The "tier below" an agent A
   is the set of AGENTS whose channels list A as a member: `{ ch.XOAgent : A ∈ ch.Members }` over
@@ -112,19 +117,26 @@ latest transcript state, read directly.
   (`detector.go:68`) and production hardcodes `injector.Enqueue(watch.Job{Agent: xo, ...})`
   (`cmd/flotilla/watch.go:259`); both wake ONLY the daemon's primary XO. A Tier-2 synthesis wake
   targets a PROJECT XO and a Tier-3 wake targets the meta-XO, so the wake seam SHALL carry an AGENT
-  parameter (an agent on the wake callback / a parallel `WakeAgent`), and the owed-state SHALL be
-  keyed by synthesizing agent. This is a real signature change, not "the Injector handles it."
+  parameter via a parallel `WakeAgent` (chosen over widening `Wake`, which would break every existing
+  primary-XO call site; the parallel keeps the shipped path byte-identical), and the owed-state SHALL
+  be keyed by synthesizing agent. The boat→XO owed resolution uses a new `AgentsAbove(agent)` accessor
+  (the inverse of `AgentsBelow` — the XOs of the channels that list the boat as a member, minus self),
+  NOT `BindingForChannel` (which takes a channel id, not the agent name the detector holds, and cannot
+  answer the many-channels-per-boat case). This is a real signature change, not "the Injector handles
+  it."
 
 - **A durable materiality/"owed" gate, daemon/disk-owned (NOT skill context — rotation wipes it).**
   Under transcript-first the read itself is stateless (the latest turn per subordinate, resolved
   fresh each wake — no watermark/offset to persist). But the MATERIALITY gate — synthesize only when
   a subordinate's state has CHANGED since the last synthesis, to preserve `$0`-idle and avoid
-  re-posting an unchanged rollup — needs a per-synthesizing-agent durable "last-seen" snapshot (e.g.
-  a hash of each subordinate's last-synthesized turn text), daemon/disk-owned. Context rotation
-  (`/clear`) wipes any skill-context state, so this MUST live in the daemon's state or a disk sidecar,
-  not in the skill. The spec requires this durable last-seen state and reconciles it with
-  transcript-first (no separate ledger watermark is needed — the latest-state read plus the durable
-  last-seen hash IS the materiality mechanism).
+  re-posting an unchanged rollup — needs a per-synthesizing-agent durable "last-seen" snapshot (a hash
+  of each subordinate's last-synthesized turn text). It SHALL be a DISK SIDECAR surviving BOTH context
+  rotation (`/clear` wipes skill-context state) AND daemon restart (an in-memory-only snapshot would
+  re-post every subordinate as "new" on the first post-restart wake — a restart-storm). An UNREADABLE
+  subordinate (pane won't resolve) is EXCLUDED from the hash, never hashed as empty (which would flap
+  the wake on a transient failure). The spec requires this durable last-seen state and reconciles it
+  with transcript-first (no separate ledger watermark is needed — the latest-state read plus the
+  durable last-seen hash IS the materiality mechanism).
 
 - **The synthesis member ships via B1's installable surface as a NEW `heartbeat-skill` mechanism.**
   This change EXTENDS B1's `Mechanism` vocabulary (which today is `identity-append` ONLY,
@@ -134,12 +146,14 @@ latest transcript state, read directly.
   a structural identity rule). **`doctrine.Install` needs a SIGNATURE CHANGE.** Its current signature
   is `Install(identityPath string, members []Member)` (`internal/doctrine/install.go:40`) — an
   identity-file path ONLY. A whole-file member writes `<workspace>/skills/visibility-synthesis.md`,
-  which an `identityPath`-only signature cannot resolve, so `Install` SHALL take a workspace-dir
-  param, changed at BOTH call sites (`cmd/flotilla/workspace.go:148`, `cmd/flotilla/doctrine.go:50`).
-  The whole-file idempotency SHALL be STAT-based (kept-if-exists) — NOT the marker fence, because the
-  identity-append marker guard `appendOnce` hard-errors on an empty `OpenMarker`
-  (`internal/doctrine/install.go:85`) and a whole-file member carries no marker. The skill CONTENT is
-  the curation prompt.
+  which an `identityPath`-only signature cannot resolve, so `Install` SHALL take a WORKSPACE-DIR param
+  and DERIVE the identity path from `workspace.IdentityFileName` (Q-D resolved — one source of truth
+  for the layout), changed at BOTH call sites (`cmd/flotilla/workspace.go:148`,
+  `cmd/flotilla/doctrine.go:50`). The whole-file idempotency SHALL be STAT-based (kept-if-exists) —
+  NOT the marker fence, because the identity-append marker guard `appendOnce` hard-errors on an empty
+  `OpenMarker` (`internal/doctrine/install.go:85`) and a whole-file member carries no marker; the
+  whole-file CREATE does its OWN `os.WriteFile`, disjoint from the identity-content write-back. The
+  skill CONTENT is the curation prompt.
 
 - **Generalize `ChannelForXO` → `OwnedChannels(agent)` for the multi-hub case.** `ChannelForXO`
   (`roster.go:343`) returns only the FIRST channel an XO owns; a multi-hub XO owns several. The
@@ -179,11 +193,15 @@ latest transcript state, read directly.
 - **Affected code (implement phase, after the re-trio + on the ratified transcript-first substrate):**
   - `internal/roster/roster.go` — net-new `ChannelsAwareOf(agent)` accessor (the channels an agent is
     aware of, pure read-only derivation over `Bindings()`); the down-traversal `AgentsBelow(agent)`
-    (the XO agents of the channels A is a member of, minus self); generalize `ChannelForXO` → an
-    `OwnedChannels(agent)` accessor; a DAG acyclicity check in `Load` with SELF-edge exclusion.
-  - `internal/watch/detector.go` — net-new `WakeSynthesis` `WakeKind`; an AGENT parameter on the
-    `Wake` seam (or a parallel `WakeAgent`); the per-synthesizing-agent "synthesis owed" + durable
-    last-seen materiality state; the digest sub-cadence that fires it.
+    (the XO agents of the channels A is a member of, minus self); the UP-traversal `AgentsAbove(agent)`
+    (the inverse — the synthesizing XOs of the channels that list A as a member, minus self — the
+    owed-marking resolver, replacing the wrong-typed `BindingForChannel`); generalize `ChannelForXO` →
+    an `OwnedChannels(agent)` accessor; a DAG acyclicity check in `Load` with SELF-edge exclusion.
+  - `internal/watch/detector.go` — net-new `WakeSynthesis` `WakeKind`; a parallel agent-targeted
+    `WakeAgent` seam (leaving the shipped `Wake` byte-identical); the per-synthesizing-agent
+    "synthesis owed" set (resolved via `AgentsAbove`) + the durable, restart-surviving disk-sidecar
+    last-seen materiality state (unreadable subordinates excluded); the digest sub-cadence that fires
+    it.
   - `internal/doctrine/doctrine.go` + `install.go` — net-new `MechanismHeartbeatSkill` value; a
     `TargetFile` (workspace-relative) field on `Member`; the whole-file STAT-based kept/created
     dispatch arm; the `Install` SIGNATURE change (a workspace-dir param) at both call sites

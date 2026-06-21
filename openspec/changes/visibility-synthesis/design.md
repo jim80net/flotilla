@@ -37,14 +37,19 @@ flows UP; both are the SAME `members[]` graph, traversed in opposite directions.
 The ratification fixed the substrate as LOCAL (not Discord channel history). Two local shapes were on
 the table:
 
-- **(a) Direct transcript read via `internal/claudestore` — the LATEST STATE of each subordinate.**
-  The synthesizing agent reads each subordinate's LOCAL session transcript directly. It knows its
-  subordinates from the membership graph (§2); for each it resolves the pane working directory
-  (`deliver.PaneCWD`, `internal/deliver/panecwd.go:20`), encodes it, globs
-  `~/.claude/projects/<enc-cwd>/*.jsonl`, takes the newest, and extracts the turn-final text
-  (`claudestore.LatestTurnText`, `internal/claudestore/claudestore.go:294`). The meta-XO reads the
-  project-XOs' latest state the same way. This is read-only reuse of the EXACT reader the shipped
-  Tier-1 mirror already uses — no new package, no new write-path.
+- **(a) Direct transcript read via the surface `ResultReader` seam — the LATEST STATE of each
+  subordinate.** The synthesizing agent reads each subordinate's LOCAL latest turn-final state
+  through the SAME polymorphic seam the shipped Tier-1 mirror uses: resolve the subordinate's pane
+  (`deliver.ResolvePane(agentTitle(cfg, sub))`, `cmd/flotilla/watch.go:580,601`), get the agent's
+  driver (`surface.Get`), and call `rr.LatestResult(pane)` on its `surface.ResultReader`
+  (`watch.go:575-588`). For a claude desk that resolves internally to `claudestore.LatestTurnText`
+  (`internal/surface/claude.go:39,106`); for a grok desk to the grok store
+  (`internal/surface/grok.go`); a subordinate whose driver has no `ResultReader` (or whose pane will
+  not resolve) is a CLEAN SKIP, exactly as Tier 1 skips an unreadable desk (`watch.go:530,577`). The
+  meta-XO reads the project-XOs' latest state the same way. This is read-only reuse of the EXACT
+  surface-agnostic reader the shipped Tier-1 mirror already uses — no new package, no new write-path —
+  and NOT a direct bind to `claudestore.LatestTurnText`, which would silently exclude a grok or
+  future-surface subordinate that Tier 1 mirrors fine.
 
 - **(b) A bounded local mirror-event LEDGER (the chief-of-staff substrate/integrator pattern).** The
   Tier-1 mirror, in addition to posting to Discord, appends ONE bounded event record per boat finish
@@ -99,11 +104,25 @@ Several ledger-era under-specs and concerns simply go away under transcript-firs
 
 ### What transcript-first still needs (and §3/§4 specify)
 
-- A bounded read contract: the LATEST turn per subordinate (one `LatestTurnText` per agent in the read
-  set), not an unbounded windowing pass. N subordinates ⇒ N bounded reads per wake.
+- A bounded read contract: the LATEST turn per subordinate (one `ResultReader.LatestResult` per agent
+  in the read set), not an unbounded windowing pass. N subordinates ⇒ N bounded reads per wake.
+- **The agent→pane→transcript resolution hop, made EXPLICIT (the re-trio's P1-B).** `LatestResult`
+  (and `LatestTurnText` beneath it) takes a tmux PANE, not an agent name — but the read set
+  (`AgentsBelow(A)`) yields agent NAMES. Synthesis SHALL resolve each subordinate name → pane title →
+  pane via `deliver.ResolvePane(agentTitle(cfg, sub))` (the SAME hop Tier 1 does, `watch.go:580`),
+  then call `LatestResult(pane)`. It does NOT re-derive cwd itself — `PaneCWD`→encode→glob is the
+  reader's INTERNALS, owned by `LatestResult`, not the caller's job.
+- **The single-host reachability invariant + fail-soft (the re-trio's P1-B).** A subordinate's
+  transcript is a local file resolvable only via its tmux pane on THIS host. v1 synthesis requires
+  every read-set subordinate's pane to be HOST-LOCAL to the synthesizer (true on the single-host
+  dogfood fleet). A subordinate whose pane will not resolve (cross-host, or transiently gone) is
+  CLEANLY SKIPPED from the rollup — never a crashed wake — mirroring Tier 1 (`watch.go:577`).
+  Cross-host federation (a meta-XO reading project-XOs on other hosts) is OUT OF SCOPE for v1 and
+  pairs naturally with the #138 ledger (a host-portable substrate). The spec states this as a
+  precondition, not an implicit assumption.
 - A DURABLE materiality gate (§3): the read is stateless, but "did a subordinate's state CHANGE since
-  I last synthesized" needs a daemon/disk-owned last-seen snapshot, because the skill's own context is
-  wiped by rotation.
+  I last synthesized" needs a daemon/disk-owned last-seen snapshot — surviving BOTH context rotation
+  AND daemon restart — because the skill's own context is wiped by rotation.
 
 ## 2. Routing — a down-traversal of the membership graph (no new schema)
 
@@ -178,13 +197,16 @@ target an ARBITRARY synthesizing agent — a PROJECT XO for Tier 2, the meta-XO 
 generally NOT the daemon's primary clock XO. This is a real signature change, RESOLVED here (it is
 normative, not an open question):
 
-- The wake seam SHALL carry an AGENT parameter. Either widen `Wake` to
-  `Wake func(agent string, kind WakeKind, reasons []string)`, or add a parallel
+- The wake seam SHALL carry an AGENT parameter, via a PARALLEL
   `WakeAgent func(agent string, kind WakeKind, reasons []string)` for the synthesis path while the
-  existing `Wake` keeps clocking the primary XO. The production composer
-  (`cmd/flotilla/watch.go:245-260`) enqueues `watch.Job{Agent: <synthesizing agent>, ...}` — the
-  Injector already addresses any agent, so the enqueue is general once the agent flows through the
-  seam.
+  existing `Wake` keeps clocking the primary XO UNCHANGED (the re-trio's P2-1, RESOLVED). The two
+  shapes are NOT equal-risk: WIDENING `Wake` to `Wake func(agent, kind, reasons)` is a breaking change
+  to the shipped primary-XO wake path (every existing call site must pass an agent), whereas a
+  parallel `WakeAgent` leaves the shipped path BYTE-IDENTICAL — which is the entire
+  inert-when-the-feature-is-absent risk story this change rests on. So the parallel `WakeAgent` is the
+  chosen, lower-blast-radius shape. The production composer (`cmd/flotilla/watch.go:245-260`) enqueues
+  `watch.Job{Agent: <synthesizing agent>, ...}` — the Injector already addresses any agent, so the
+  enqueue is general once the agent flows through the seam.
 - The detector's "synthesis owed" state SHALL be keyed by SYNTHESIZING agent (a per-agent owed-set,
   the way it tracks `pendingMirrors`), NOT a single primary-XO flag.
 - ONE detector, agent-keyed — not a per-XO detector (the recommendation, now resolved).
@@ -193,25 +215,44 @@ normative, not an open question):
 
 - A new `WakeKind`, `WakeSynthesis`, sibling of `WakeContinuation`/`WakeMaterial`/`WakeBacklog`/
   `WakePing` (`detector.go:30-45`).
-- **"Owed" marking.** A boat-finish event (the same confirmed Working→Idle transition Tier-1 mirrors
-  on) marks synthesis "owed" for the channel that boat belongs to — i.e. for that channel's XO (the
-  agent above it). The detector resolves the boat's channel → its XO via the roster
-  (`BindingForChannel(...).XOAgent`) and marks that XO owed. A project-XO's synthesis POST in turn
-  makes the meta-XO owed (the Q-E recursion — Tier 3 reads Tier 2's latest state the same way Tier 2
-  reads its boats').
+- **"Owed" marking (the re-trio's P1-A — a real desk→XO resolver, NOT `BindingForChannel`).** A
+  boat-finish event (the same confirmed Working→Idle transition Tier-1 mirrors on) marks synthesis
+  "owed" for the agent(s) ABOVE that boat. The detector resolves the finishing AGENT NAME → its
+  synthesizing parent(s) via a new `AgentsAbove(agent) []string` accessor — the INVERSE of
+  `AgentsBelow`: the XOs of every channel that lists `agent` as a member, minus self. (The earlier
+  draft cited `BindingForChannel(...).XOAgent`; that is WRONG-TYPED — `BindingForChannel(channelID
+  string)` (`roster.go:309`) takes a channel id, but the detector holds an agent NAME
+  (`pendingMirrors []string`, `detector.go:431`), and a boat MAY be a member of SEVERAL channels
+  (`roster.go:246`), so a single binding cannot answer "which XO is owed.") A boat shared across two
+  channels marks BOTH parents owed. A project-XO's synthesis POST in turn makes the meta-XO owed (the
+  Q-E recursion — Tier 3 reads Tier 2's latest state the same way Tier 2 reads its boats').
+  `AgentsAbove` (the owed direction) and `OwnedChannels` (the post fan-out direction) are the SAME
+  membership graph traversed in opposite directions — kept symmetric so they stay consistent.
 - **Digest sub-cadence (debounce-up).** The detector does NOT fire `WakeSynthesis` on every boat
   finish (a firehose, defeating curation). It fires on a digest sub-cadence: at most once per N
   intervals per synthesizing agent while that agent has synthesis owed. A burst of boat finishes
   coalesces into ONE curated synthesis wake; an idle fleet (nothing owed) fires nothing — `$0`-idle
   preserved.
-- **The DURABLE materiality gate (the trio's P1-b / P2-4, RESOLVED).** Under transcript-first the read
-  is stateless — there is NO watermark/offset to persist (no append log to tail). But the MATERIALITY
-  gate needs durable state: synthesize only when a subordinate's state has CHANGED since the last
-  synthesis, so an idle-but-non-empty fleet does not re-post an unchanged rollup. This last-seen
-  snapshot (e.g. a hash of each subordinate's last-synthesized turn text, keyed by synthesizing agent)
-  MUST be DAEMON/DISK-OWNED, because context rotation (`/clear`) wipes any skill-context state — the
-  exact bug `WakeSynthesis` exists to kill would return if the last-seen state lived in the skill. The
-  daemon tracks it (a snapshot/sidecar, or it passes "what changed since last fire" into the wake).
+- **The DURABLE materiality gate (the trio's P1-b / P2-4, RESOLVED + re-trio hardened).** Under
+  transcript-first the read is stateless — there is NO watermark/offset to persist (no append log to
+  tail). But the MATERIALITY gate needs durable state: synthesize only when a subordinate's state has
+  CHANGED since the last synthesis, so an idle-but-non-empty fleet does not re-post an unchanged
+  rollup. This last-seen snapshot (a hash of each subordinate's last-synthesized turn text, keyed by
+  synthesizing agent) MUST be DAEMON/DISK-OWNED, because context rotation (`/clear`) wipes any
+  skill-context state — the exact bug `WakeSynthesis` exists to kill would return if the last-seen
+  state lived in the skill.
+  - **It SHALL survive BOTH context rotation AND daemon restart (re-trio P2-4).** A DISK SIDECAR, not
+    in-memory detector state: an in-memory-only snapshot re-posts every subordinate's current state as
+    "new" on the first wake after a restart (a synthesis restart-storm). Persisted on disk, a restart
+    resumes against the last-seen state. The sidecar lives alongside the detector's existing snapshot,
+    keyed by synthesizing agent; a missing/corrupt sidecar fails SAFE toward "all changed"
+    (synthesize once), never toward silent-never-fire.
+  - **An UNREADABLE subordinate is EXCLUDED from the materiality computation (re-trio P2-4), never
+    hashed as empty.** A subordinate whose pane transiently won't resolve must NOT be recorded as
+    "changed to empty," then "changed back" on recovery — that would flap the wake. It is dropped from
+    the hash set for that wake (the same clean-skip as the read), so a transient pane-resolve failure
+    neither spams a wake nor suppresses a real change.
+
   This is the transcript-first analogue of the ledger revision's watermark — but it is a CHANGE-detect
   hash, not a read offset, and it carries NO separate-ledger-watermark requirement.
 - Runs in `runTail`, OUTSIDE `d.mu`, like every other wake — the synthesis prompt enqueue is a
@@ -253,8 +294,12 @@ member is"). B2 takes that seam:
   arm keys idempotency on the OPENING marker's presence (`appendOnce`, `install.go:84-88`), and
   `appendOnce` HARD-ERRORS if `OpenMarker == ""` (`install.go:85`). A whole-file member carries no
   marker, so it MUST NOT route through `appendOnce`. Its dispatch arm STATs the target file: if it
-  exists, KEEP it (report kept — operator edits survive); if absent, CREATE it (report created). The
-  identity-append arm is untouched.
+  exists, KEEP it (report kept — operator edits survive); if absent, CREATE it (report created). On
+  CREATE the arm performs its OWN `os.WriteFile(<workspaceDir>/<TargetFile>)` — a DIFFERENT file than
+  the identity file — and does NOT ride the identity-content write-back, which fires only
+  `if anyAppended` over the identity content (`install.go:72-76`). The whole-file write is independent
+  of that accumulator (the re-trio's P2-2); the implementer must not try to thread a workspace-file
+  write through the identity-content path. The identity-append arm is untouched.
 - **A `TargetFile` field on `Member`.** The whole-file member needs its workspace-relative path (e.g.
   `skills/visibility-synthesis.md`). Add a `TargetFile` field to `Member` (`doctrine.go:42-54`), empty
   for identity-append members, set for heartbeat-skill members. The install resolves
@@ -281,10 +326,15 @@ surfaced. It is the domain-level "here is where my desks are."
 The meta-XO synthesizes the project-XOs' latest state UP into #c2. The contract has three parts:
 
 1. **A fleet headline** — the one-paragraph "state of the fleet."
-2. **Open operator-decisions** — the items waiting on the operator, surfaced explicitly (this is the
-   one resource the operator is short on: attention). These are derived from the FULL latest turn text
-   of each project-XO (NOT a lossy gist — transcript-first reads full turns), so a decision is a
-   first-class extraction, not a 280-rune approximation.
+2. **Open operator-decisions (best-effort over the latest turn — the re-trio's P2-3)** — the
+   decisions waiting on the operator, surfaced explicitly (this is the one resource the operator is
+   short on: attention). These are derived from the FULL latest turn text of each project-XO (NOT a
+   lossy gist — transcript-first reads full turns), so a PRESENT decision is a first-class extraction,
+   not a 280-rune approximation. HONEST LIMIT: latest-state is temporally lossy — a decision a project
+   XO raised then moved PAST within a burst (so its latest turn is now unrelated work) can age out of
+   the one-turn window. So Tier-3 surfaces decisions present in each subordinate's CURRENT state;
+   complete capture of every decision raised-then-superseded across a burst is the #138 finish-history
+   ledger's job, not a promise this substrate can structurally keep.
 3. **Drill-down pointers** — the inverse of the membership graph: a reader plumbs #c2 → the XO channel
    → the boat channel → the pane. Each headline item names the XO channel (and, for a specific item,
    the boat) to drill into.
@@ -341,27 +391,48 @@ and writes nothing to a ledger. The spec asserts the orthogonality and that neit
   field + a STAT-based whole-file kept/created arm + the `Install` workspace-dir SIGNATURE change at
   both call sites + the multi-hub `OwnedChannels` generalization.
 
-## Open questions for the re-trio
+## Re-trio resolutions (the design's second-pass trio — systems-review + STORM — folded)
 
-- **Q-B — digest sub-cadence value + ownership.** What is N (intervals per synthesis), and is it
-  fixed, roster-configurable, or skill-judged-within-a-daemon-floor? Recommendation: a daemon floor
-  (the wake cannot fire more than once per N intervals per agent), with the skill free to reply
-  "nothing material, idle" — so the daemon bounds the rate and the skill bounds the content.
-- **Q-C — materiality hash granularity.** Is "changed" a hash of each subordinate's full latest turn,
-  or a coarser signal (the subordinate produced a NEW turn since last synthesis)? Recommendation: a
-  per-subordinate last-turn-text hash (a new identical turn is a no-op; any change is material) — the
-  daemon suppresses a wake with zero changed subordinates, and the skill still self-judges materiality
-  on the changes it does see.
-- **Q-D — `Install` signature shape.** Widen `Install` to take the workspace dir AND the identity path,
-  or take ONLY the workspace dir and derive the identity path from `workspace.IdentityFileName`?
-  Recommendation: take the workspace dir and derive the identity path (one source of truth for the
-  workspace layout), confirmed against both call sites in review.
-- **Q-E — multi-hub post fan-out.** When a synthesizing agent owns SEVERAL channels (`OwnedChannels`
-  returns >1), does it post the same synthesis to each, or a per-channel-scoped synthesis? The live
-  roster is single-home-channel-per-XO today; recommendation: post to the primary (first) owned
-  channel in v1, fan-out deferred until a real multi-hub XO needs it.
-- **Q-F — Tier-3 reads Tier-2 synthesis as latest STATE.** For #c2 to synthesize the XO channels, the
-  meta-XO reads each project-XO's LATEST TURN (transcript-first) — which, after a Tier-2 synthesis, IS
-  that XO's synthesis post reasoning. Confirm reading the project-XO's latest transcript turn (rather
-  than the posted Discord message) is the right Tier-3 substrate, and that it respects the DAG (it does
-  — the meta-XO is a reader-below of the project-XO's channel, never the reverse).
+The re-trio (2026-06-21, systems-review + STORM on the revised transcript-first design) confirmed NO
+P0/blocker; the substrate, routing direction, DAG self-edge exclusion, wake-seam, materiality, and
+install-signature decisions all verify SOUND against the live code, and the prior findings are
+genuinely folded. The new findings, all folded above:
+
+- **P1-A — owed-marking desk→XO resolver (§3).** Add `AgentsAbove(agent)` (inverse of `AgentsBelow`);
+  key the owed-set off ALL parents (a boat in 2 channels marks both); the cited
+  `BindingForChannel(...).XOAgent` was wrong-typed (channel id vs agent name). FOLDED.
+- **P1-B — agent→pane→transcript hop + host-local invariant (§1).** Read via the surface-agnostic
+  `surface.ResultReader.LatestResult(pane)` seam (the EXACT Tier-1 reader — NOT a direct `claudestore`
+  bind, which would exclude grok); resolve agent→pane via `ResolvePane(agentTitle(...))`; fail-soft
+  skip an unresolvable subordinate; name the single-host v1 invariant, cross-host → #138. FOLDED.
+- **P2-1 — the parallel `WakeAgent`, NOT widening `Wake` (§3).** Lower blast radius; keeps the shipped
+  path byte-identical. FOLDED.
+- **P2-2 — the whole-file arm does its OWN `os.WriteFile`, disjoint from the identity `anyAppended`
+  write-back (§4).** FOLDED.
+- **P2-3 — Tier-3 operator-decisions are best-effort over the latest turn; burst-completeness is #138
+  (§5).** FOLDED.
+- **P2-4 — materiality survives rotation AND restart (disk sidecar) and EXCLUDES an unreadable
+  subordinate (§3).** FOLDED.
+
+Open-question resolutions (both agents converged):
+
+- **Q-B — digest sub-cadence value + ownership → a daemon floor DERIVED from `heartbeat_interval`** (a
+  small multiple), NOT a new roster knob, with the skill free to reply idle. The daemon bounds the
+  rate; the skill bounds the content. The concrete multiple is confirmed in the implement review.
+- **Q-C — materiality hash granularity → a per-subordinate hash of the FULL latest turn text**, with
+  the unreadable-subordinate exclusion (P2-4) as the nailed failure mode. A new-identical turn is a
+  no-op; any change is material.
+- **Q-D — `Install` signature → `Install(workspaceDir string, members []Member)`, deriving the
+  identity path from `workspace.IdentityFileName`** (one source of truth for layout; `identityFilePath`,
+  `cmd/flotilla/doctrine.go:63-73`, already centralizes that derivation). RESOLVED in the design, NOT
+  deferred to the implement review.
+- **Q-E — multi-hub post fan-out → post to the PRIMARY (first) owned channel in v1**; the live roster
+  is single-home-per-XO. The `OwnedChannels` accessor still ships (the self-loop guard needs it); the
+  FAN-OUT is deferred until a real multi-hub XO needs it. It is the mirror direction of P1-A's
+  `AgentsAbove` — one graph, two directions — kept symmetric.
+- **Q-F — Tier-3 reads Tier-2's latest TRANSCRIPT state → CONFIRMED correct + DAG-respecting** (the
+  meta-XO is a reader-below of each project-XO's channel, never the reverse). Reading the transcript
+  (not the posted Discord message) is the right substrate — relay-disjoint, needs no Discord-read
+  primitive. The §5 prose reads "the project-XO's latest turn-final state (which, immediately after a
+  Tier-2 synthesis, IS that synthesis; otherwise its most recent activity)" — not an unconditional
+  "the latest turn IS the synthesis post."

@@ -9,11 +9,13 @@ write-path on the live Tier-1 mirror.
 
 ## 0. Verify-first (gates the implement phase)
 
-- [ ] 0.1 Confirm `claudestore.LatestTurnText` (`internal/claudestore/claudestore.go:294`) is the
-  read-only latest-state reader and that resolving a subordinate's cwd for it goes through
-  `deliver.PaneCWD` (`internal/deliver/panecwd.go:20`) → encode → glob
-  `~/.claude/projects/<enc-cwd>/*.jsonl` → newest. This is the SAME path Tier 1 uses; confirm it needs
-  NO change (read-only reuse).
+- [ ] 0.1 Confirm the surface-agnostic read seam: the synthesis read resolves each subordinate's pane
+  via `deliver.ResolvePane(agentTitle(cfg, sub))` (`cmd/flotilla/watch.go:580,601`) then calls
+  `rr.LatestResult(pane)` on the agent's `surface.ResultReader` (`watch.go:575-588`) — the EXACT path
+  Tier 1 uses (claude → `claudestore.LatestTurnText`, `internal/surface/claude.go:39,106`; grok → the
+  grok store). Confirm it needs NO change (read-only reuse) and that a surface without a `ResultReader`,
+  or an unresolvable pane, is a clean SKIP (`watch.go:530,577`). The bind is to the SEAM, NOT to
+  `claudestore` directly (which would exclude grok).
 - [ ] 0.2 Confirm the read is relay-disjoint (a read-only file read, never through
   `relay.Accept`/`relay.Route`, `internal/relay/relay.go:18-23`) and adds NO write-path to the Tier-1
   mirror.
@@ -40,6 +42,12 @@ write-path on the live Tier-1 mirror.
   channel/itself (the self-loop guard).
 - [ ] 1.7 IMPL: add the down-traversal read-set derivation (`AgentsBelow(agent string) []string`, the
   XO agents of the read channels, minus self) to `internal/roster/roster.go`.
+- [ ] 1.8 TEST: `AgentsAbove(agent)` returns the synthesizing XOs ABOVE a boat — the XOs of every
+  channel that lists the boat as a member, minus the agent itself (the INVERSE of `AgentsBelow`). A
+  boat that is a member of TWO channels returns BOTH parent XOs (the many-to-many owed case). This is
+  the owed-marking resolver (re-trio P1-A), replacing the wrong-typed `BindingForChannel`.
+- [ ] 1.9 IMPL: add `AgentsAbove(agent string) []string` to `internal/roster/roster.go` (symmetric to
+  `AgentsBelow`, opposite traversal direction).
 
 ## 2. Membership-graph DAG assertion WITH self-edge exclusion (`internal/roster`)
 
@@ -58,14 +66,18 @@ write-path on the live Tier-1 mirror.
 
 ## 3. Transcript-first read of the subordinates' latest state (read-only reuse)
 
-- [ ] 3.1 TEST: for a synthesizing agent, the read path resolves `AgentsBelow(agent)` and reads each
-  subordinate's latest turn-final text via `claudestore.LatestTurnText` (one bounded read per
-  subordinate), NOT an unbounded windowing pass and NOT any ledger.
+- [ ] 3.1 TEST: for a synthesizing agent, the read path resolves `AgentsBelow(agent)`, resolves each
+  subordinate's pane (`ResolvePane(agentTitle(...))`), and reads its latest turn-final text via the
+  agent's `surface.ResultReader.LatestResult(pane)` (one bounded read per subordinate), NOT an
+  unbounded windowing pass and NOT any ledger. A subordinate whose pane will not resolve, or whose
+  surface has no `ResultReader`, is cleanly SKIPPED (never a crashed wake).
 - [ ] 3.2 TEST: the read is read-only — it never writes a ledger, never touches the live Tier-1 mirror
   path, and never routes through the relay.
 - [ ] 3.3 IMPL: wire the synthesis read (in the `wake` composer / the synthesis helper) to
-  `AgentsBelow` + `claudestore.LatestTurnText` + `deliver.PaneCWD` for cwd resolution. No change to
-  `internal/claudestore` (read-only reuse). NO `internal/synthledger` package. NO Tier-1 mirror change.
+  `AgentsBelow` + `deliver.ResolvePane(agentTitle(...))` + `surface.ResultReader.LatestResult(pane)`
+  (the SAME seam Tier 1 uses), with the clean-skip on an unresolvable pane / no-`ResultReader` surface.
+  No change to `internal/claudestore` or `internal/surface` (read-only reuse). NO `internal/synthledger`
+  package. NO Tier-1 mirror change.
 
 ## 4. (REMOVED — the ledger is a fast-follow, GitHub issue #138)
 
@@ -85,15 +97,18 @@ synthesis is later shown to need finish-history rather than latest-state.
 - [ ] 5.4 TEST: the wake seam carries an AGENT parameter — the `WakeSynthesis` side-effect is enqueued
   in `runTail`, OUTSIDE `d.mu`, and is enqueued to the SYNTHESIZING agent (which may differ from
   `d.cfg.XOAgent`), proving the XO-hardcoded path (`watch.go:259` `Agent: xo`) no longer constrains it.
-- [ ] 5.5 IMPL: add `WakeSynthesis WakeKind`; widen the `Wake` callback to carry an agent
-  (`Wake func(agent string, kind WakeKind, reasons []string)`) OR add a parallel agent-targeted
-  `WakeAgent`; add the per-agent owed-set + digest-cadence counter in the detector; emit it in
-  `runTail` like the other wakes. Default cadence wired so an unconfigured deployment is inert. Resolve
-  Q-B (the daemon floor) in review.
-- [ ] 5.6 TEST + IMPL: the owed-set keying maps a boat's channel → its synthesizing XO via the roster
-  (`BindingForChannel(...).XOAgent`) so the wake targets the correct agent; a boat in a Tier-2 channel
-  marks its project XO owed, and a project-XO finishing a turn marks the meta-XO owed (the Q-F
-  recursion — Tier 3 reads Tier 2's latest STATE the same way Tier 2 reads its boats').
+- [ ] 5.5 IMPL: add `WakeSynthesis WakeKind`; add a PARALLEL agent-targeted
+  `WakeAgent func(agent string, kind WakeKind, reasons []string)` (NOT widening `Wake` — keep the
+  shipped primary-XO path byte-identical, re-trio P2-1); add the per-agent owed-set + digest-cadence
+  counter in the detector; emit it in `runTail` like the other wakes. The digest floor derives from
+  `heartbeat_interval` (a small multiple), NOT a new roster knob (Q-B resolved); confirm the concrete
+  multiple in review. Default cadence wired so an unconfigured deployment is inert.
+- [ ] 5.6 TEST + IMPL: the owed-set keying maps a finishing AGENT NAME → its synthesizing parent(s)
+  via `AgentsAbove(agent)` (NOT `BindingForChannel`, which takes a channel id — re-trio P1-A) so the
+  wake targets the correct agent(s); a boat that is a member of TWO channels marks BOTH parent XOs
+  owed; a boat in a Tier-2 channel marks its project XO owed, and a project-XO finishing a turn marks
+  the meta-XO owed (the Q-F recursion — Tier 3 reads Tier 2's latest STATE the same way Tier 2 reads
+  its boats').
 
 ## 6. The DURABLE materiality (last-seen) state (`internal/watch` / a disk sidecar)
 
@@ -104,9 +119,18 @@ synthesis is later shown to need finish-history rather than latest-state.
 - [ ] 6.2 TEST: the last-seen snapshot is DAEMON/DISK-OWNED and survives a simulated context rotation
   (it is NOT skill-context state) — after a rotation the next synthesis does not re-read-from-scratch
   and re-post an unchanged rollup.
-- [ ] 6.3 IMPL: add the durable last-seen snapshot to the detector state (or a disk sidecar); the
-  detector either suppresses the wake on zero-change or passes "what changed since last fire" into the
-  wake. Resolve Q-C (hash granularity: full-turn-text hash vs new-turn signal) in review.
+- [ ] 6.3 IMPL: add the durable last-seen snapshot as a DISK SIDECAR (keyed by synthesizing agent,
+  alongside the detector's existing snapshot); the detector either suppresses the wake on zero-change
+  or passes "what changed since last fire" into the wake. The hash is the per-subordinate FULL latest
+  turn text (Q-C resolved — a new-identical turn is a no-op, any change is material).
+- [ ] 6.4 TEST: the last-seen snapshot survives a DAEMON RESTART (it is a disk sidecar, not in-memory
+  detector state) — after a restart with unchanged subordinates, NO `WakeSynthesis` fires (no
+  restart-storm of re-posts). A missing/corrupt sidecar fails SAFE toward "all changed" (synthesize
+  once), never silent-never-fire. (re-trio P2-4)
+- [ ] 6.5 TEST: an UNREADABLE subordinate (pane won't resolve) is EXCLUDED from the materiality hash
+  for that wake — never hashed as empty — so a transient pane-resolve failure does not flap the wake
+  (neither spams a re-post on "change to empty" nor suppresses a real change on recovery). (re-trio
+  P2-4)
 
 ## 7. The `wake` prompt composer (`cmd/flotilla/watch.go`)
 
@@ -132,11 +156,12 @@ synthesis is later shown to need finish-history rather than latest-state.
   identity-append, set for heartbeat-skill); add its whole-file STAT-based kept/created dispatch arm to
   `internal/doctrine/install.go` (the `switch m.Mechanism` second case — landed in THIS change per the
   MECHANISM COUPLING contract, `install.go:51-57`).
-- [ ] 8.4 IMPL: CHANGE the `doctrine.Install` SIGNATURE to take a WORKSPACE-DIRECTORY parameter (the
-  whole-file member writes `<workspaceDir>/<TargetFile>`, which the `identityPath`-only signature,
-  `install.go:40`, cannot resolve). Update BOTH call sites: `cmd/flotilla/workspace.go:148` and
-  `cmd/flotilla/doctrine.go:50`. Resolve Q-D (pass workspace dir + identity path, or derive identity
-  path from workspace dir) in review.
+- [ ] 8.4 IMPL: CHANGE the `doctrine.Install` SIGNATURE to `Install(workspaceDir string, members
+  []Member)`, DERIVING the identity path from `workspace.IdentityFileName` (Q-D resolved — one source
+  of truth for the layout; the whole-file member writes `<workspaceDir>/<TargetFile>`, which the
+  `identityPath`-only signature, `install.go:40`, cannot resolve). The whole-file CREATE does its OWN
+  `os.WriteFile`, disjoint from the identity-content `anyAppended` write-back (`install.go:72-76`).
+  Update BOTH call sites: `cmd/flotilla/workspace.go:148` and `cmd/flotilla/doctrine.go:50`.
 - [ ] 8.5 IMPL: register the visibility-synthesis member in the `members` slice
   (`Mechanism: MechanismHeartbeatSkill`, `TargetFile: "skills/visibility-synthesis.md"`, content from
   `internal/doctrine/assets/skills/visibility-synthesis.md`).
@@ -171,6 +196,8 @@ synthesis is later shown to need finish-history rather than latest-state.
 - [ ] 11.3 Confirm the resolved design decisions land as specified (transcript-first substrate; DAG
   self-edge exclusion; the agent-param wake seam; the durable daemon/disk last-seen materiality; the
   heartbeat-skill whole-file STAT idempotency + the `Install` workspace-dir signature change).
-- [ ] 11.4 Resolve the remaining open questions in the re-trio (Q-B cadence value/ownership, Q-C
-  materiality hash granularity, Q-D `Install` signature shape, Q-E multi-hub post fan-out, Q-F
-  Tier-3-reads-Tier-2 latest-state recursion).
+- [ ] 11.4 The re-trio (2026-06-21, systems-review + STORM) RESOLVED the open questions — confirm they
+  land as decided: Q-B cadence = daemon floor derived from `heartbeat_interval`; Q-C = per-subordinate
+  full-latest-turn-text hash with the unreadable subordinate excluded; Q-D = `Install(workspaceDir,
+  members)` deriving the identity path; Q-E = post to the primary owned channel in v1, fan-out
+  deferred; Q-F = Tier-3 reads Tier-2's latest transcript state (confirmed DAG-respecting).
