@@ -265,13 +265,22 @@ func cmdWatch(args []string) error {
 		// names the agent's read set (AgentsBelow) + post target (OwnedChannels) + the per-tier
 		// contract; the detailed curation lives in the embedded visibility-synthesis skill. Inert
 		// unless the detector is wired with the synthesis seams below (gated on VisibilitySynthesis).
+		// The synthesis wake prompt injects `flotilla result --roster <path> <name>` so the woken agent
+		// can read its subordinates without a workspace skill (the harness-launch-agnostic path). Use the
+		// ABSOLUTE path the DAEMON actually loaded — not rosterDefault() and not a relative form — so the
+		// command resolves the live roster from the AGENT's own cwd (which differs from the daemon's). A
+		// filepath.Abs failure falls back to the raw flag value (already correct when it was absolute).
+		synthRosterPath := *rosterPath
+		if abs, err := filepath.Abs(*rosterPath); err == nil {
+			synthRosterPath = abs
+		}
 		wakeAgent := func(agent string, kind watch.WakeKind, reasons []string) {
 			if kind != watch.WakeSynthesis {
 				// The only agent-targeted kind today is synthesis; any other is a programming error.
 				log.Printf("flotilla watch: ignoring unexpected agent-targeted wake kind %v for %q", kind, agent)
 				return
 			}
-			body := synthesisWakeBody(agent, synthesisReadSet(cfg, agent), cfg.OwnedChannels(agent), ackInstr)
+			body := synthesisWakeBody(agent, synthRosterPath, synthesisReadSet(cfg, agent), cfg.OwnedChannels(agent), ackInstr)
 			injector.Enqueue(watch.Job{Agent: agent, Message: body, Kind: "detector"})
 		}
 
