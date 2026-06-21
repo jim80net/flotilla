@@ -68,21 +68,33 @@ func synthReadOneFromTurnFinal(turnFinal func(string) (string, bool, error)) fun
 	}
 }
 
-// synthesisWakeBody composes the WakeSynthesis prompt — the THIN trigger that points the agent at
-// its read set (the agents below it), its post target (the channel it owns), the per-tier output
-// contract, and the narrow-answer discipline. The detailed curation instructions live in the
-// embedded visibility-synthesis skill (internal/doctrine/assets/skills/visibility-synthesis.md),
-// which the prompt references rather than re-stating. ackInstr is appended so a synthesis-woken
-// agent re-acks liveness (a wake that never instructs an ack would falsely trip the AckAge wedge).
-func synthesisWakeBody(agent string, readSet, postChannels []string, ackInstr string) string {
+// synthesisWakeBody composes the WakeSynthesis prompt — the SELF-SUFFICIENT trigger that points the
+// agent at its read set (the agents below it), the CONCRETE read command for each, its post target
+// (the channel it owns), the per-tier output contract, and the narrow-answer discipline. It is
+// self-sufficient BY DESIGN: the skill (visibility-synthesis.md) defers the read mechanism to "the
+// daemon's wake prompt" and a DIRECTLY-LAUNCHED agent (no `flotilla workspace init`, no
+// `--append-system-prompt-file`) has no skill file to load — so the wake prompt itself names the
+// `flotilla result` command, making synthesis work harness-launch-agnostically (the workspace skill
+// is an enrichment, not a hard dependency). rosterPath is the path the DAEMON actually loaded (passed
+// absolute), so the command resolves the live roster regardless of the agent's own cwd. ackInstr is
+// appended so a synthesis-woken agent re-acks liveness (a wake that never instructs an ack would
+// falsely trip the AckAge wedge).
+func synthesisWakeBody(agent, rosterPath string, readSet, postChannels []string, ackInstr string) string {
 	var b strings.Builder
 	b.WriteString("[flotilla visibility-synthesis] You are OWED a curated rollup of the tier BELOW you. ")
-	b.WriteString("Run your `visibility-synthesis` skill.\n")
+	b.WriteString("Run your `visibility-synthesis` skill (or, if you have none, follow the contract below).\n")
 
 	if len(readSet) > 0 {
-		b.WriteString("READ (the agents below you — their LATEST turn-final state): ")
+		// Name the CONCRETE read command, not just the agent names — `flotilla result` is read-only
+		// (the same surface.ResultReader seam Tier 1 uses) and needs no workspace, so a directly-launched
+		// agent can service the synthesis. --roster carries the daemon's live path so it resolves from
+		// the agent's own cwd. Tier-3 reads project-XOs (themselves synthesizers) the same way — the
+		// command returns each subordinate's latest turn-final regardless of its tier.
+		b.WriteString("READ — for EACH agent below you, run `flotilla result --roster ")
+		b.WriteString(rosterPath)
+		b.WriteString(" <name>` to get its LATEST turn-final state. Your subordinates: ")
 		b.WriteString(strings.Join(readSet, ", "))
-		b.WriteString("\n")
+		b.WriteString(".\n")
 	} else {
 		b.WriteString("READ: (no subordinates resolve right now — reply idle)\n")
 	}
@@ -100,7 +112,14 @@ func synthesisWakeBody(agent string, readSet, postChannels []string, ackInstr st
 		"fleet-command channel) = a one-paragraph fleet HEADLINE + the open OPERATOR-DECISIONS (best-effort " +
 		"over each subordinate's latest turn) + DRILL-DOWN pointers down the channel graph.\n")
 	b.WriteString("DISCIPLINE: curate only what CHANGED since your last synthesis. If nothing material " +
-		"changed, reply 'idle' — never manufacture a synthesis.")
+		"changed, reply 'idle' — never manufacture a synthesis.\n")
+	// Mirror the skill's skip-on-unreadable discipline INTO the prompt — a directly-launched agent has
+	// no skill file, and during a rate-limit storm a subordinate's `flotilla result` may error or
+	// return its last errored turn. Without this, the agent might report an unreadable/errored
+	// subordinate as "changed" or "went silent", or fail the whole rollup for one.
+	b.WriteString("SKIP an unreadable subordinate: if `flotilla result <name>` errors or returns an " +
+		"error/rate-limited turn, treat that subordinate as UNKNOWN — synthesize over the ones you CAN " +
+		"read, never fail the whole rollup for one, and never report a skipped one as 'changed' or 'went silent'.")
 	b.WriteString(ackInstr)
 	return b.String()
 }

@@ -33,8 +33,11 @@ at a glance, then drill down only where they need to.
 
 Read the LATEST turn-final state of each agent BELOW you. "Below you" means the
 agents whose channels list you as a member — your subordinates. The flotilla daemon
-hands you this read set in the wake prompt; you do not have to compute the topology
-yourself.
+hands you this read set in the wake prompt — AND the concrete command to read each
+one: **`flotilla result --roster <path> <name>`** (read-only; it prints that agent's
+latest turn-final state from its session). Run it once per subordinate. You do not
+have to compute the topology or invent the read mechanism — the wake prompt carries
+both, so this works whether or not you have this skill file loaded.
 
 For each subordinate, read its CURRENT latest state (the substrate is
 "transcript-first": you read each subordinate's most recent turn directly from its
