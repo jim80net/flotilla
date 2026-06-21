@@ -283,8 +283,9 @@ state is noise, and noise spends the operator's attention for nothing.
 
 ## How it ships — the visibility-synthesis skill
 
-The synthesis doctrine ships as the **second member of flotilla's
-[constitutional set](./span-of-control.md#the-constitutional-set--how-flotilla-ships-doctrine)**,
+The synthesis doctrine ships as a member of flotilla's
+[constitutional set](./span-of-control.md#the-constitutional-set--how-flotilla-ships-doctrine)
+(the set ships three: Rule of Three + no-self-merge, both `identity-append`, and this one),
 delivered by a NEW mechanism, **`heartbeat-skill`**: a whole-file skill written into the
 agent's workspace (`<workspace>/skills/visibility-synthesis.md`), loaded when the daemon
 emits a synthesis wake. This is the structural-vs-tick-time distinction the set was built
@@ -324,8 +325,9 @@ shape](#the-worked-example) above, with the broadcast channel tagged `role="flee
 
 ## See also
 
-- [span-of-control.md](./span-of-control.md) — the Rule of Three, the *first*
-  constitutional member, and the constitutional set this skill plugs into as the second.
+- [span-of-control.md](./span-of-control.md) — the Rule of Three (the first
+  constitutional member) and the constitutional set this skill plugs into (it is the
+  `heartbeat-skill` member; no-self-merge is the other `identity-append` member).
 - [xo-doctrine.md](./xo-doctrine.md) — the operator ↔ XO contract, the narrow-answer and
   state-externalization disciplines, and the change-detector (whose working→idle edge synthesis
   is owed on).

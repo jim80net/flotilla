@@ -1,4 +1,4 @@
-# Span of control — the Rule of Three
+# Span of control — the Rule of Three (a guideline)
 
 How any coordinating agent (the **XO**, a **flotilla** lead, a **boat**) divides
 its attention across the work it owns. This is *operating doctrine* for the agent
@@ -24,42 +24,42 @@ so that independent work runs concurrently instead of one-at-a-time.
 > what the installer does for you). Everything above it is the *why* and the
 > *exact contract*.
 
-## The rule: no seat manages more than three active charges
+## The guideline: keep each seat to about three active charges
 
-> **No coordinating node — XO, flotilla lead, or boat — directly manages more
-> than THREE active subordinates or workstreams. When a fourth active charge
-> arrives, you do NOT take it on directly. You FIRST create a substratum: cluster
-> the charges into at most three groups, designate an owning lead for each group,
-> and recursively apply the same rule inside every group — until every layer
-> manages at most three.**
+> **A coordinating node — XO, flotilla lead, or boat — aims to keep its DIRECT
+> charges to about THREE active subordinates or workstreams. When a fourth active
+> charge would crowd you, prefer to grow a layer rather than carry it directly:
+> cluster the charges into a few coherent groups, designate an owning lead for each,
+> and apply the same guideline inside every group — so every layer keeps a
+> manageable span. This is a default to design toward, not a tripwire that fires on
+> the exact count of four; use judgment.**
 
-Three is the span of control. The number is not folklore: a coordinating agent
-holds each subordinate's state, last report, blockers, and next step in working
-memory, and that memory is finite (and, under the change-detector, *rotated* — see
-the [state-externalization contract](./xo-doctrine.md#the-state-externalization-contract-non-negotiable-when-this-is-on)).
-Past three active charges the lead stops coordinating and starts *thrashing*:
-reports go uncollected, a blocked desk sits unsurfaced, the operator-decision
-queue rots. The fourth charge is the signal — not to push harder, but to grow a
-layer.
+Three is the anchor, and the reasoning is not folklore: a coordinating agent holds
+each subordinate's state, last report, blockers, and next step in working memory, and
+that memory is finite (and, under the change-detector, *rotated* — see the
+[state-externalization contract](./xo-doctrine.md#the-state-externalization-contract-non-negotiable-when-this-is-on)).
+Past about three active charges a lead tends to stop coordinating and start
+*thrashing*: reports go uncollected, a blocked desk sits unsurfaced, the
+operator-decision queue rots. A growing pile of charges is the signal — not to push
+harder, but to grow a layer.
 
-**The rule FORCES the hierarchy.** You do not design the org chart up front and
-hope the work fits it. The work arrives, and on the fourth active charge the
-structure is *forced into existence*: the lead clusters and delegates, a new
-intermediate lead is born, and the tree deepens by exactly the amount the load
-demands. A flat fleet that never exceeds three charges never grows a layer; a
-fleet that takes on twenty workstreams grows precisely the depth that keeps every
-seat at ≤ 3. The shape is an output of the load, governed by one invariant.
+**The guideline SHAPES the hierarchy.** You do not design the org chart up front and
+hope the work fits it. The work arrives, and as charges accumulate the structure grows
+to fit: the lead clusters and delegates, a new intermediate lead is born, and the tree
+deepens by roughly the amount the load demands. A flat fleet that stays within a few
+charges never grows a layer; a fleet that takes on twenty workstreams grows about the
+depth that keeps every seat manageable. The shape is an output of the load.
 
-### Why three, not "a few"
+### Why a number at all (and why it's still a guideline)
 
-A hard number is a *mechanical* gate, the same way the self-continuation cap
-(`--max-self-continuations`, default 3) and the missed-ack threshold
-(`--max-missed-acks`, default 3) are mechanical gates. "Manage a reasonable
-number" is a judgment call an overloaded agent will always resolve in favor of
-taking on one more. "≤ 3, spawn a lead on the fourth" is a tripwire you cannot
-rationalize past. When in doubt, the rule decides — exactly as the narrow-answer
-discipline decides "advance or signal idle" without leaving room to manufacture
-work.
+Three is concrete enough to design toward — a useful anchor, the way the
+self-continuation cap (`--max-self-continuations`, default 3) and the missed-ack
+threshold (`--max-missed-acks`, default 3) are useful defaults. "Manage a reasonable
+number" is too vague for an overloaded agent to act on; "around three, and grow a layer
+when you start to fray" gives a usable shape without pretending the load respects a
+bright line. But it is a GUIDELINE, not a hard gate: exceed it briefly when the
+situation genuinely warrants, and let judgment — not a tripwire — decide when the
+reorganization is worth its cost.
 
 ## How the layers map to flotilla terms
 
@@ -98,10 +98,10 @@ If it reports once and is gone, it does not.)
 
 ## Reporting: each lead aggregates its ≤ 3 reports upward
 
-The span limit only buys you a readable fleet if reporting respects the same tree.
-**Each lead AGGREGATES the reports from its ≤ 3 charges into one rolled-up summary
-and passes THAT upward. The layer above sees at most three group summaries — never
-N raw node reports.**
+A manageable span only buys you a readable fleet if reporting respects the same tree.
+**Each lead AGGREGATES the reports from its handful of charges into one rolled-up
+summary and passes THAT upward. The layer above sees a few group summaries — never N
+raw node reports.**
 
 This is the upward dual of the downward span limit, and it is what keeps the
 operator's channel readable as the fleet scales. The operator (or meta-XO) reading
@@ -149,22 +149,22 @@ serializing work that has **no** dependency between the streams. (Discrimination
 test: *can I name the next concrete action on stream B without knowing stream A's
 result?* If yes, B is independent — dispatch it now, do not wait.)
 
-## Spawn discipline: grow the layer BEFORE taking the fourth charge
+## Spawn discipline: grow the layer when charges start to pile up
 
-The rule is enforced at one exact moment: **the arrival of a fourth active charge.
-At that moment, BEFORE accepting it, the lead spawns or designates an intermediate
-lead and re-clusters.** You do not accept the fourth charge "for now" and promise
-to reorganize later — "for now" is how a seat ends up holding twelve. The
-reorganization happens *first*, as one act with accepting the work:
+The natural moment to act is **when charges accumulate past what you can hold —
+typically around a fourth standing charge.** When you feel a seat fraying, grow the
+layer rather than carrying more directly. Don't keep accepting "for now" and promising
+to reorganize later — "for now" is how a seat ends up holding twelve. When you do grow
+the layer, the reorganization is one act with accepting the work:
 
-1. **Detect the fourth.** A fourth standing charge is queued for a seat already
-   holding three.
-2. **Cluster into ≤ 3 groups.** Partition the (now four+) charges into at most
-   three coherent groups — by domain, by objective, by dependency affinity.
+1. **Notice the crowding.** Charges are piling up past what the seat can coordinate
+   well (around a fourth standing charge is the usual cue — use judgment).
+2. **Cluster into a few groups.** Partition the charges into a handful of coherent
+   groups — by domain, by objective, by dependency affinity (aim for about three).
 3. **Designate a lead per group.** For each group, promote one charge to lead (or
    spawn a fresh coordinating agent / project-XO / boat) that owns the group and
    reports up as one aggregate.
-4. **Recurse.** If any group now holds more than three, apply the rule inside it.
+4. **Recurse.** If any group is itself crowded, apply the guideline inside it.
 5. **Then accept the work**, dispatched into the correct group.
 
 The mechanism flotilla already ships supports this directly: a new boat is a new
@@ -228,17 +228,18 @@ hand-rolling a prompt the installer does not own):
 1. **Add the rule to every coordinating agent's standing instructions.** Put a line
    in the XO's / lead's system prompt / `CLAUDE.md` / skills to the effect of:
 
-   > You manage at most THREE active charges (desks / workstreams) directly. On a
-   > fourth, FIRST cluster your charges into ≤ 3 groups, designate an owning lead
-   > per group, and delegate — recursively, until every seat manages ≤ 3. Aggregate
-   > your charges' reports into one rolled-up summary upward. Run independent
-   > workstreams CONCURRENTLY (dispatch all, then collect) — never serialize
-   > independent work.
+   > As a guideline, keep to about THREE active charges (desks / workstreams)
+   > directly. When a fourth would crowd you, prefer to grow a layer: cluster your
+   > charges into a few groups, designate an owning lead per group, and delegate —
+   > recursively, so every seat keeps a manageable span. Aggregate your charges'
+   > reports into one rolled-up summary upward. Run independent workstreams
+   > CONCURRENTLY (dispatch all, then collect) — never serialize independent work.
+   > Use judgment; this is a default to design toward, not a hard limit.
 
-2. **Apply it at every tier, not just the top.** The same line belongs in a
-   project-XO's instructions (≤ 3 boats), a boat's instructions (≤ 3 standing
+2. **Apply it at every tier, not just the top.** The same guideline belongs in a
+   project-XO's instructions (~3 boats), a boat's instructions (~3 standing
    sub-tasks; fan out transient sub-agents freely), and a meta-XO's instructions
-   (≤ 3 project-XOs). The rule is scale-invariant by design.
+   (~3 project-XOs). It is scale-invariant by design.
 
 3. **Reach for the existing mechanism on the fourth.** A new lead is a
    `flotilla workspace init <lead>` + a roster entry (a boat) or a clock-only
