@@ -9,17 +9,17 @@ write-path on the live Tier-1 mirror.
 
 ## 0. Verify-first (gates the implement phase)
 
-- [ ] 0.1 Confirm the surface-agnostic read seam: the synthesis read resolves each subordinate's pane
+- [x] 0.1 Confirm the surface-agnostic read seam: the synthesis read resolves each subordinate's pane
   via `deliver.ResolvePane(agentTitle(cfg, sub))` (`cmd/flotilla/watch.go:580,601`) then calls
   `rr.LatestResult(pane)` on the agent's `surface.ResultReader` (`watch.go:575-588`) — the EXACT path
   Tier 1 uses (claude → `claudestore.LatestTurnText`, `internal/surface/claude.go:39,106`; grok → the
   grok store). Confirm it needs NO change (read-only reuse) and that a surface without a `ResultReader`,
   or an unresolvable pane, is a clean SKIP (`watch.go:530,577`). The bind is to the SEAM, NOT to
   `claudestore` directly (which would exclude grok).
-- [ ] 0.2 Confirm the read is relay-disjoint (a read-only file read, never through
+- [x] 0.2 Confirm the read is relay-disjoint (a read-only file read, never through
   `relay.Accept`/`relay.Route`, `internal/relay/relay.go:18-23`) and adds NO write-path to the Tier-1
   mirror.
-- [ ] 0.3 Confirm the Injector addresses an arbitrary agent (`watch.Job{Agent: ...}`) so a
+- [x] 0.3 Confirm the Injector addresses an arbitrary agent (`watch.Job{Agent: ...}`) so a
   `WakeSynthesis` can enqueue to a non-primary synthesizing XO — read the Injector enqueue path. (The
   GAP is the detector wake SEAM, `detector.go:68` + `watch.go:259`, which is XO-hardcoded — §5.)
 
@@ -221,7 +221,7 @@ synthesis is later shown to need finish-history rather than latest-state.
   self-edge + fleet-command exclusion; the parallel `WakeAgent` seam; the durable disk-sidecar
   last-seen materiality surviving rotation+restart; heartbeat-skill whole-file STAT idempotency + the
   `Install(workspaceDir, identityFile, members)` signature).
-- [ ] 11.4 The re-trio (2026-06-21, systems-review + STORM) RESOLVED the open questions — confirm they
+- [x] 11.4 The re-trio (2026-06-21, systems-review + STORM) RESOLVED the open questions — confirm they
   land as decided: Q-B cadence = daemon floor derived from `heartbeat_interval`; Q-C = per-subordinate
   full-latest-turn-text hash with the unreadable subordinate excluded; Q-D = `Install(workspaceDir,
   members)` deriving the identity path; Q-E = post to the primary owned channel in v1, fan-out
