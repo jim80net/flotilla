@@ -180,6 +180,12 @@ type Detector struct {
 	wd          *Watchdog
 
 	// --- visibility synthesis (B2) state, guarded by the same d.mu single-writer invariant ---
+	// These in-memory maps need NO prune for roster-removed agents: their keys are only ever the
+	// AgentsAbove(name) parents of monitored desks, and AgentsAbove ⊆ Agents ⊆ Desks (members are
+	// validated in-roster at Load), so a key for a non-roster agent can never be inserted. A roster
+	// change requires a daemon restart (the roster loads once at start), which reconstructs them
+	// empty — so they are bounded by roster size and self-clear on the restart any change requires.
+	// (The DURABLE sidecar IS pruned at load — see NewDetector — because it persists across restarts.)
 	synthOwed      map[string]bool // synthesizing agent → has a rollup owed (a desk finished below it)
 	synthSinceFire map[string]int  // synthesizing agent → ticks since its last WakeSynthesis fired
 	synthState     SynthState      // the DURABLE last-seen materiality snapshot (loaded from the sidecar)
