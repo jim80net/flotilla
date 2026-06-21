@@ -329,13 +329,14 @@ awaiting files). Add the lines to the XO's standing instructions:
 
 ## See also
 
-- [span-of-control.md](./span-of-control.md) — the Rule of Three: how a
-  coordinating seat (XO / lead / boat) divides its attention — ≤ 3 active charges,
-  the fourth forces a layer, aggregate upward, dispatch independent work in
+- [span-of-control.md](./span-of-control.md) — the Rule of Three (a guideline): how a
+  coordinating seat (XO / lead / boat) divides its attention — aim for ~3 active charges,
+  grow a layer when they pile up, aggregate upward, dispatch independent work in
   parallel. flotilla ships it as the *first* constitutional member (seeded by
   `workspace init`, installed by `doctrine install`); the
   [constitutional set](./span-of-control.md#the-constitutional-set--how-flotilla-ships-doctrine)
-  now ships a second member (visibility-synthesis) via a new `heartbeat-skill` mechanism.
+  now ships **three** members — Rule of Three + no-self-merge (both `identity-append`) +
+  visibility-synthesis (the `heartbeat-skill` mechanism).
 - [visibility.md](./visibility.md) — the stratified-visibility doctrine (Tiers 1/2/3):
   Tier 1 is the mechanical per-desk mirror; Tiers 2/3 are the XO / meta-XO synthesis the
   visibility-synthesis skill drives. Composes with the change-detector (whose working→idle

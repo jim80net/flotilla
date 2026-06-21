@@ -14,9 +14,16 @@ to its XO; the XO reviews and merges. The XO surfaces its PR to the meta-XO; the
 meta-XO reviews and merges. Each level's output is reviewed by the level above. A
 boat never grades its own homework.
 
+**At the top of the hierarchy** — a seat with no level above it (the meta-XO, or a
+solo agent in a not-yet-federated fleet) — the **operator is the reviewer of last
+resort**: surface there. The rule is a *hierarchy-relative* control; it bottoms out at
+the operator, never at "I reviewed myself." Only a genuine apex with no operator review
+available at all merges its own clean-gated work — and that is a gap to close by growing
+the layer above, not a license to self-approve.
+
 **Why this is a rule, not a nicety.** Merge-on-clean-gates autonomy plus a shared git
-identity make a self-merge easy and INVISIBLE — nothing in the audit trail shows the
-independent review was skipped. The merge IS the review gate; a self-merge silently
+identity make a self-merge easy and INVISIBLE — nothing in the *git* audit trail shows
+the independent review was skipped. The merge IS the review gate; a self-merge silently
 removes it. For real-money, irreversible, or otherwise high-stakes work, that
 independent second pair of eyes is a control you do not give up.
 
