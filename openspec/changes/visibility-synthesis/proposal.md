@@ -116,18 +116,18 @@ latest transcript state, read directly.
   Self-scheduling breaks under the change-detector's idle-wake suppression (an idle fleet wakes
   nothing, so a skill that schedules itself "next tick" never runs) and under context rotation (the
   rotate wipes a self-set timer). Instead the daemon owns the cadence: a boat-finish event marks
-  synthesis "owed" for the affected channel's XO; the detector fires `WakeSynthesis` for that XO on a
-  digest sub-cadence (debounce-up), so an idle fleet costs nothing and a busy one synthesizes at a
-  bounded rate. The detector's `Wake` callback is `Wake func(kind WakeKind, reasons []string)`
+  synthesis "owed" for the boat's synthesizing PARENT(s); the detector fires `WakeSynthesis` for that
+  parent on a digest sub-cadence (debounce-up), so an idle fleet costs nothing and a busy one
+  synthesizes at a bounded rate. The detector's `Wake` callback is `Wake func(kind WakeKind, reasons []string)`
   (`detector.go:68`) and production hardcodes `injector.Enqueue(watch.Job{Agent: xo, ...})`
   (`cmd/flotilla/watch.go:259`); both wake ONLY the daemon's primary XO. A Tier-2 synthesis wake
   targets a PROJECT XO and a Tier-3 wake targets the meta-XO, so the wake seam SHALL carry an AGENT
   parameter via a parallel `WakeAgent` (chosen over widening `Wake`, which would break every existing
   primary-XO call site; the parallel keeps the shipped path byte-identical), and the owed-state SHALL
-  be keyed by synthesizing agent. The boat→XO owed resolution uses a new `AgentsAbove(agent)` accessor
-  (the inverse of `AgentsBelow` — the XOs of the channels that list the boat as a member, minus self),
-  NOT `BindingForChannel` (which takes a channel id, not the agent name the detector holds, and cannot
-  answer the many-channels-per-boat case). This is a real signature change, not "the Injector handles
+  be keyed by synthesizing agent. The boat→parent owed resolution uses the `AgentsAbove(agent)` accessor
+  (the inverse of `AgentsBelow` — the MEMBERS of the non-fleet-command channels the finishing agent
+  OWNS, minus self), NOT `BindingForChannel` (which takes a channel id, not the agent name the detector
+  holds, and cannot answer the many-channels-per-boat case). This is a real signature change, not "the Injector handles
   it."
 
 - **A durable materiality/"owed" gate, daemon/disk-owned (NOT skill context — rotation wipes it).**

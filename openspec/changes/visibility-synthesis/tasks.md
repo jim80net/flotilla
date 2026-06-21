@@ -23,50 +23,50 @@ write-path on the live Tier-1 mirror.
   `WakeSynthesis` can enqueue to a non-primary synthesizing XO — read the Injector enqueue path. (The
   GAP is the detector wake SEAM, `detector.go:68` + `watch.go:259`, which is XO-hardcoded — §5.)
 
-## 1. Routing — `OwnedChannels` + `AgentsBelow` + `AgentsAbove`, fleet-command-excluded (`internal/roster`)
+## 1. Routing — `OwnedChannels` + `AgentsBelow` + `AgentsAbove`, fleet-command-excluded (`internal/roster`) — DONE
 
-- [ ] 1.1 TEST + IMPL: a fleet-command predicate — `ch.Role == "fleet-command"` (a small helper or
-  inline). A fleet-command channel is a command/broadcast channel; its members are command targets, NOT
-  synthesis parents, so it contributes ZERO synthesis edges.
-- [ ] 1.2 TEST: `OwnedChannels(agent)` returns ALL channels where `ch.XOAgent == agent` (generalizing
+- [x] 1.1 TEST + IMPL: a SINGLE fleet-command predicate `(Channel).IsFleetCommand()` (one source of
+  truth — re-trio P3-1; not inline `== "fleet-command"` scattered across call sites). A fleet-command
+  channel's members are command targets, NOT synthesis parents, so it contributes ZERO synthesis edges.
+- [x] 1.2 TEST: `OwnedChannels(agent)` returns ALL channels where `ch.XOAgent == agent` (generalizing
   `ChannelForXO`, which returns only the first), INCLUDING any fleet-command channel (it is a POST
   target — the meta posts Tier-3 into #c2) — single-home XO → one; multi-hub XO → all.
-- [ ] 1.3 IMPL: add `OwnedChannels(agent string) []string` to `internal/roster/roster.go` (keep
+- [x] 1.3 IMPL: add `OwnedChannels(agent string) []string` to `internal/roster/roster.go` (keep
   `ChannelForXO` as the primary-channel convenience; `OwnedChannels` is the full set).
-- [ ] 1.4 TEST: `AgentsBelow(agent)` = `{ ch.XOAgent : agent ∈ ch.Members, ch.XOAgent != agent,
+- [x] 1.4 TEST: `AgentsBelow(agent)` = `{ ch.XOAgent : agent ∈ ch.Members, ch.XOAgent != agent,
   ch.Role != "fleet-command" }` over `Bindings()`. On the LIVE federated shape: a LEAF desk →
   `{}` (it owns no channel listing it; it is only a member of the broadcast channel, excluded); a
   project-XO → its boats with NO meta-XO leak; the meta-XO → exactly the project-XOs. The self-loop
   guard (`!= agent`) AND the fleet-command exclusion are BOTH exercised (a member of the broadcast
   channel does NOT pull the broadcaster into its read set — this is the implement-gate P0).
-- [ ] 1.5 IMPL: add `AgentsBelow(agent string) []string` to `internal/roster/roster.go`.
-- [ ] 1.6 TEST: `AgentsAbove(agent)` = `{ m : ch.XOAgent == agent, m ∈ ch.Members, m != agent,
+- [x] 1.5 IMPL: add `AgentsBelow(agent string) []string` to `internal/roster/roster.go`.
+- [x] 1.6 TEST: `AgentsAbove(agent)` = `{ m : ch.XOAgent == agent, m ∈ ch.Members, m != agent,
   ch.Role != "fleet-command" }` — the members of the NON-fleet-command channels the agent OWNS, minus
   self; the owed-marking resolver (re-trio P1-A), replacing the wrong-typed `BindingForChannel`. Assert
   it is the EXACT relational inverse of `AgentsBelow` (`C ∈ AgentsBelow(P) ⟺ P ∈ AgentsAbove(C)`) over
   a fixture roster; a boat whose owned channel lists two parents returns BOTH. The root (whose only
   owned channel is fleet-command) → `{}`.
-- [ ] 1.7 IMPL: add `AgentsAbove(agent string) []string` to `internal/roster/roster.go` (symmetric to
+- [x] 1.7 IMPL: add `AgentsAbove(agent string) []string` to `internal/roster/roster.go` (symmetric to
   `AgentsBelow`, opposite direction; same fleet-command + self exclusions).
-- [ ] 1.8 TEST: `AgentsBelow` / `AgentsAbove` / `OwnedChannels` are pure read-only derivations — none
+- [x] 1.8 TEST: `AgentsBelow` / `AgentsAbove` / `OwnedChannels` are pure read-only derivations — none
   mutates any binding's `Members` slice (the read-only-slice contract).
 
-## 2. Membership-graph DAG assertion WITH self-edge AND fleet-command exclusion (`internal/roster`)
+## 2. Membership-graph DAG assertion WITH self-edge AND fleet-command exclusion (`internal/roster`) — DONE
 
-- [ ] 2.1 TEST: `Load` ACCEPTS the LIVE federated shape — a fleet-command broadcast channel
+- [x] 2.1 TEST: `Load` ACCEPTS the LIVE federated shape — a fleet-command broadcast channel
   (`role="fleet-command"`, members = ALL agents) PLUS per-XO home channels (members = parent) PLUS the
   two-tier project/meta structure. Without the fleet-command exclusion the broadcast channel's
   `meta → {everyone}` edges close a cycle (e.g. `meta → leaf-of-a-subtree → … → meta`) and Load would
   REFUSE — so this test is the regression guard for the implement-gate P0.
-- [ ] 2.2 TEST: `Load` ACCEPTS a roster whose home channel lists its own XO among its members (the
+- [x] 2.2 TEST: `Load` ACCEPTS a roster whose home channel lists its own XO among its members (the
   live home-channel self-membership AND the legacy single-binding form) — the self-edge is EXCLUDED,
   not a false cycle.
-- [ ] 2.3 TEST: `Load` REFUSES a roster with a MUTUAL cycle between two DISTINCT NON-fleet-command
+- [x] 2.3 TEST: `Load` REFUSES a roster with a MUTUAL cycle between two DISTINCT NON-fleet-command
   channels (channel-X's XO is a member of channel-Y AND channel-Y's XO is a member of channel-X) with a
   clear error.
-- [ ] 2.5 TEST: `Load` ACCEPTS an acyclic federation (Tier-3 meta-XO + project-XOs + boats; each home
+- [x] 2.5 TEST: `Load` ACCEPTS an acyclic federation (Tier-3 meta-XO + project-XOs + boats; each home
   channel self-membership excluded; the fleet-command broadcast excluded).
-- [ ] 2.6 IMPL: add a depth-first-search cycle check over the synthesis-edge graph to `roster.Load`,
+- [x] 2.6 IMPL: add a depth-first-search cycle check over the synthesis-edge graph to `roster.Load`,
   fail-closed. Build the edge set as `ch.XOAgent → m` for each `m ∈ ch.Members` with `m != ch.XOAgent`
   (DROP self-edges) AND `ch.Role != "fleet-command"` (DROP broadcast-channel edges — the implement-gate
   P0). Runs once at load, not on the hot path.

@@ -55,8 +55,15 @@ type Channel struct {
 	// Members are the agents addressable via "@name" in this channel (this hub's
 	// desks; for the meta-XO, its project-XOs).
 	Members []string `json:"members,omitempty"`
-	// Role is an optional human label ("fleet-command" / "project") for notices and
-	// the setup helper; routing is uniform regardless of role.
+	// Role is an optional label ("fleet-command" / "project") for notices and the setup
+	// helper. COMMAND routing is uniform regardless of role, but SYNTHESIS routing
+	// (visibility-synthesis / B2) treats role=="fleet-command" as LOAD-BEARING: a
+	// fleet-command channel is a broadcast/command channel whose members are command
+	// targets, not synthesis parents, so it contributes ZERO synthesis edges (excluded from
+	// AgentsBelow / AgentsAbove / the load-time DAG check — see synthesis.go). A broadcast
+	// channel (members = many subordinates) that is NOT tagged fleet-command will form a
+	// synthesis cycle and Load will fail-closed refuse it — by design, surfacing the
+	// misconfiguration rather than silently inverting the hierarchy.
 	Role string `json:"role,omitempty"`
 }
 
@@ -250,6 +257,15 @@ func Load(path string) (*Config, error) {
 				}
 			}
 		}
+	}
+	// Synthesis routing (visibility-synthesis / B2) reads the tier below an agent and posts
+	// one level up; that is acyclic IFF the synthesis-edge graph is a DAG. Assert it
+	// fail-closed so a federation that would form a synthesis feedback loop refuses to start
+	// (self-edges AND fleet-command channels are excluded from the edge set — see
+	// assertSynthesisAcyclic). The legacy single binding is a star (no cycle) and passes
+	// trivially; a clock-only daemon has no bindings and passes.
+	if err := c.assertSynthesisAcyclic(); err != nil {
+		return nil, fmt.Errorf("roster %q: %w", path, err)
 	}
 	// cos_agent (the CoS context-mirror #108): validated fail-closed when set. CosLedger
 	// is resolved here to be non-empty IFF the mirror is active, so a single check

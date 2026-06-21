@@ -124,6 +124,19 @@ not synthesis parents. A cycle is ONLY a MUTUAL membership between two DISTINCT 
 channels (channel-X's XO is a member of channel-Y and channel-Y's XO is a member of channel-X). The
 check SHALL run once at load (not on the synthesis hot path).
 
+**Operational precondition (`role` is load-bearing):** a broadcast channel (one whose members include
+agents that are themselves XOs of their own home channels) MUST carry `role == "fleet-command"` to be
+excluded. An UNTAGGED broadcast channel (`role` unset, or any value other than the exact literal
+`"fleet-command"`) is NOT excluded, forms the cycle, and Load fail-closed REFUSES the daemon — by
+design: the refusal surfaces the misconfiguration rather than silently inverting the hierarchy. This
+inverts the prior "command routing is uniform regardless of role" property (`internal/roster/roster.go`
+`Channel.Role`), which the implementation updates.
+
+#### Scenario: An untagged broadcast channel fails the DAG check (role is load-bearing)
+
+- **WHEN** a roster contains a broadcast-shaped channel (its XO lists subordinates that own their own home channels listing that XO back) but the channel is NOT tagged `role="fleet-command"`
+- **THEN** roster load FAILS fail-closed with a cycle error (the misconfiguration is surfaced, not silently accepted); tagging the channel `role="fleet-command"` makes the same roster load
+
 #### Scenario: A fleet-command broadcast channel does not cycle the graph
 
 - **WHEN** the roster contains a fleet-command channel (`role="fleet-command"`) whose members include agents that are themselves XOs of their own home channels (the live broadcast shape — the meta-XO's channel lists the project-XOs, whose home channels in turn list the meta-XO)
@@ -153,9 +166,10 @@ primary clock XO, the detector's wake seam SHALL carry an AGENT parameter via a 
 agent-targeted wake (leaving the existing primary-XO `Wake` path byte-identical), and the wake SHALL
 be enqueued to the SYNTHESIZING agent — the existing primary-XO-only wake path is insufficient. A
 boat-finish event SHALL mark synthesis "owed" for the synthesizing XO(s) ABOVE the finishing agent —
-resolved by the INVERSE membership traversal (the XOs of the channels that list the finishing agent as
-a member, minus self), NOT by a channel-id lookup; a finishing agent that is a member of SEVERAL
-channels marks EACH parent XO owed — tracked in a per-synthesizing-agent owed-set. The detector
+resolved by `AgentsAbove` (the MEMBERS of the non-fleet-command channels the finishing agent OWNS,
+minus self; the exact inverse of `AgentsBelow`), NOT by a channel-id lookup; a finishing agent whose
+owned channel lists SEVERAL parents marks EACH parent owed — tracked in a per-synthesizing-agent
+owed-set. The detector
 SHALL fire `WakeSynthesis` for that synthesizing agent on a digest sub-cadence (debounce-up): a burst
 of boat finishes SHALL coalesce into at most one synthesis wake per the digest cadence per synthesizing
 agent, and a fleet with no synthesis owed SHALL fire no synthesis wake (an idle fleet costs nothing).
