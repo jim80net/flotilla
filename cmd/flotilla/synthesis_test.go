@@ -46,7 +46,7 @@ func TestSynthesisReadFailureIsCleanSkip(t *testing.T) {
 func TestSynthesisWakeBodyContents(t *testing.T) {
 	body := synthesisWakeBody("family-office", "/r/flotilla.json", []string{"v12-dev", "macro-desk"}, []string{"spark-xo"}, "\n(ack: touch /tmp/ack)")
 
-	for _, want := range []string{"v12-dev", "macro-desk", "spark-xo", "visibility-synthesis", "idle", "flotilla result"} {
+	for _, want := range []string{"v12-dev", "macro-desk", "spark-xo", "visibility-synthesis", "idle", "flotilla result", "SKIP an unreadable"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("synthesis wake body missing %q:\n%s", want, body)
 		}

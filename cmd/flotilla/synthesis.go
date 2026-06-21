@@ -112,7 +112,14 @@ func synthesisWakeBody(agent, rosterPath string, readSet, postChannels []string,
 		"fleet-command channel) = a one-paragraph fleet HEADLINE + the open OPERATOR-DECISIONS (best-effort " +
 		"over each subordinate's latest turn) + DRILL-DOWN pointers down the channel graph.\n")
 	b.WriteString("DISCIPLINE: curate only what CHANGED since your last synthesis. If nothing material " +
-		"changed, reply 'idle' — never manufacture a synthesis.")
+		"changed, reply 'idle' — never manufacture a synthesis.\n")
+	// Mirror the skill's skip-on-unreadable discipline INTO the prompt — a directly-launched agent has
+	// no skill file, and during a rate-limit storm a subordinate's `flotilla result` may error or
+	// return its last errored turn. Without this, the agent might report an unreadable/errored
+	// subordinate as "changed" or "went silent", or fail the whole rollup for one.
+	b.WriteString("SKIP an unreadable subordinate: if `flotilla result <name>` errors or returns an " +
+		"error/rate-limited turn, treat that subordinate as UNKNOWN — synthesize over the ones you CAN " +
+		"read, never fail the whole rollup for one, and never report a skipped one as 'changed' or 'went silent'.")
 	b.WriteString(ackInstr)
 	return b.String()
 }
