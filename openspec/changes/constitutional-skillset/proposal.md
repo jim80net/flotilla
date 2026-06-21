@@ -46,21 +46,27 @@ substrate does NOT exist as running code. hydra-ops **ratified a SPLIT (2026-06-
   repository, embedded into the `flotilla` binary via `go:embed` (the same self-contained-binary
   pattern as `internal/dash/assets.go:14`), and a new `flotilla doctrine install <agent>`
   subcommand (a sibling of `workspace init`, dispatched from `cmd/flotilla/main.go`). The install
-  is idempotent with the SAME kept/created write discipline `workspace init` already uses
-  (`cmd/flotilla/workspace.go:111-118`) for whole-file members, and a CONTENT-LEVEL marker guard
-  for members that append into an existing file (see below). `workspace init` is extended to SEED
-  the constitutional set by default, so a freshly scaffolded workspace is born with the doctrine
-  already in place.
+  is idempotent; B1's one member is an `identity-append`, so its idempotency is the CONTENT-LEVEL
+  marker guard (see below) — the same kept/created write discipline `workspace init` already uses
+  (`cmd/flotilla/workspace.go:109-119`) remains the inherited model the surface generalizes from,
+  available to a future whole-file member that owns its own file. `workspace init` is extended to
+  SEED the constitutional set by default, so a freshly scaffolded workspace is born with the
+  doctrine already in place.
 
-- **Two delivery mechanisms WITHIN the set (both supported; v1 exercises the first).** A
-  constitutional member declares HOW it loads. A **structural** rule (one that defines the agent's
-  standing identity — the Rule of Three is structural: it governs how the agent is organized for
-  the whole session) is appended into the agent's identity file and loaded ONCE at launch via
-  `--append-system-prompt-file`. A **tick-time** discipline (one that must re-assert on a cadence)
-  is delivered as a skill the agent invokes on its heartbeat / continuation wake. v1 ships exactly
-  one member, an `identity-append` structural rule; the `heartbeat-skill` mechanism is part of the
-  member-mechanism vocabulary the registry supports, so B2 plugs into the same seam without a
-  schema change. Neither mechanism is "the" home.
+- **The delivery mechanism B1 ships, and the seam that extends it.** A constitutional member
+  declares HOW it loads via a `Mechanism` value. B1 scopes the `Mechanism` vocabulary to exactly
+  what B1 uses: `identity-append` — a **structural** rule (one that defines the agent's standing
+  identity — the Rule of Three is structural: it governs how the agent is organized for the whole
+  session) appended into the agent's identity file and loaded ONCE at launch via
+  `--append-system-prompt-file`. B1 does NOT pre-specify or pre-test any other mechanism's install
+  path. The seam's extensibility is in the SHAPE, not a pre-baked enum: the registry is
+  member-count-agnostic, and the `Mechanism` vocabulary is EXTENSIBLE — a new member kind (for
+  example B2's heartbeat-driven local-read synthesis) adds its own `Mechanism` value plus the
+  write/load behavior that value implies WHEN B2 is designed against its ratified substrate. We do
+  not guess that contract now: B2's ratified substrate is a LOCAL-transcript READ on a heartbeat,
+  not a whole-file write, so pre-specifying a `heartbeat-skill` whole-file install path here would
+  be inventing a contract B2 may not want. The honest seam: the registry shape is stable; the
+  mechanism vocabulary extends with each new member kind.
 
 - **Member 1 — the Rule of Three doctrine (content; structural).** The span-of-control invariant
   (no coordinating seat manages more than three active charges; the fourth charge forces a layer)
@@ -84,10 +90,12 @@ substrate does NOT exist as running code. hydra-ops **ratified a SPLIT (2026-06-
   already-existing identity file.
 
 - **The extensibility seam (net-new; v1 holds exactly one member).** The constitutional set is a
-  registry of members, each carrying its name, target file, delivery mechanism (`identity-append`
-  vs `heartbeat-skill`), and embedded content. v1 registers EXACTLY one (the Rule of Three).
-  Adding a member is adding a registry entry plus its embedded asset — the seam is clean and the
-  install/seed loop is member-count-agnostic. WHICH further behaviors join the set
+  registry of members, each carrying its name, target file, delivery `Mechanism` (scoped in B1 to
+  `identity-append`, the only value B1 uses), and embedded content. v1 registers EXACTLY one (the
+  Rule of Three). Adding a member is adding a registry entry plus its embedded asset — the seam is
+  clean and the install/seed loop is member-count-agnostic. A member kind B1 does not ship (such as
+  B2's heartbeat-driven local-read synthesis) extends the `Mechanism` vocabulary with its own value
+  and the write/load behavior that value implies, designed WHEN that member is. WHICH further behaviors join the set
   (the visibility synthesis of B2, delegation-first, goalkeeper, fleet-rotation,
   narrow-answer-settle, and so on) is the operator's strategic lever, populated incrementally; this
   change does NOT pre-decide or enumerate the broader corpus.
@@ -138,13 +146,17 @@ substrate does NOT exist as running code. hydra-ops **ratified a SPLIT (2026-06-
   to `cmd/flotilla/workspace.go`; the one member asset (Rule-of-Three rule); a new
   `docs/span-of-control.md` doctrine doc. NO change to `internal/roster` (the `ChannelsAwareOf`
   accessor and the acyclicity check were synthesis-routing, now deferred to B2).
-- **Verify-first gate (binding, blocks the install build):** a live probe must confirm
-  `claude --append-system-prompt-file <sentinel>` COMPOSED with the real launch recipe
-  `claude --remote-control <name>` loads the sentinel file's contents into the session's system
-  prompt. `claude --help` (2026-06-21) confirms both flags exist with no documented conflict; the
-  NEW variable is the composition under `--remote-control`. This is an implement-phase task, not a
-  design blocker.
-- **Risk:** LOW. The surface is additive: whole-file members use idempotent kept/created writes,
-  the identity-append member uses a marker-guarded append-once-detect-and-skip guard, and the set
+- **Verify-first gate (binding, blocks the install build):** a live probe must confirm the ACTUAL
+  B1 runtime path end-to-end — an identity file shaped exactly as the install produces it (the bare
+  identity stub PLUS an APPENDED marked block after the stub) loaded via
+  `claude --append-system-prompt-file <identity>` COMPOSED with the real launch recipe
+  `claude --remote-control <name>` makes the APPENDED block's content reach the live session's
+  system prompt (not merely a standalone sentinel file). `claude --help` (2026-06-21) confirms both
+  flags exist with no documented conflict; the NEW variables are the composition under
+  `--remote-control` AND that an appended-after-the-stub block (the install's real output shape, not
+  a whole-file sentinel) survives into the prompt. This is an implement-phase task, not a design
+  blocker.
+- **Risk:** LOW. The surface is additive: B1's one member is an `identity-append` whose
+  marker-guarded append-once-detect-and-skip guard never overwrites an operator edit, and the set
   is default-seeded — no existing workspace file and no operator edit is overwritten. With the
   synthesis member deferred to B2, this change touches no daemon path and adds no roster routing.

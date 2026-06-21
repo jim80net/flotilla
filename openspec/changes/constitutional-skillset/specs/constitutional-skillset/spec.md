@@ -18,20 +18,21 @@ re-designed around a local substrate, and is NOT part of this capability's v1).
 The system SHALL ship its default constitutional doctrine as a versioned set of members embedded in
 the `flotilla` binary, installable into a per-agent workspace by a single command WITHOUT the
 operator writing a hook, a script, or hand-copying prose. Each member SHALL declare its name, its
-target file within the workspace, its delivery mechanism (a STRUCTURAL rule loaded once into the
-agent's standing identity, or a TICK-TIME discipline delivered as a heartbeat skill), and its
-content. The set SHALL be embedded so the binary remains self-contained (no external asset path to
-configure).
+target file within the workspace, its delivery `Mechanism`, and its content. v1's vocabulary SHALL
+be `identity-append` (a STRUCTURAL rule loaded once into the agent's standing identity); the
+`Mechanism` vocabulary is extensible per the extensibility requirement below. The set SHALL be
+embedded so the binary remains self-contained (no external asset path to configure).
 
-The install SHALL be idempotent, applying its idempotency at the granularity each member requires:
-
-- A WHOLE-FILE member (one written to its own target file) SHALL use kept/created semantics — a
-  target file already present in the workspace SHALL be KEPT (never overwritten — the operator may
-  have edited it), a missing target SHALL be CREATED, and each decision SHALL be reported.
-- An APPEND member (one whose content is appended into an existing file the workspace already owns,
-  such as the agent's identity file) SHALL use a content-level marker guard rather than
-  file-existence, because the target file always already exists (see the marker-guarded-append
-  requirement below).
+The install SHALL be idempotent, applying its idempotency at the granularity each member's mechanism
+requires. v1 ships exactly one `identity-append` member, whose idempotency is the content-level
+marker guard (below). The surface generalizes a second granularity for a future WHOLE-FILE member
+(one written to its own target file): kept/created semantics — a target file already present in the
+workspace SHALL be KEPT (never overwritten — the operator may have edited it), a missing target
+SHALL be CREATED, and each decision SHALL be reported. The two granularities apply to disjoint
+member kinds: an APPEND member (one whose content is appended into an existing file the workspace
+already owns, such as the agent's identity file) SHALL use the content-level marker guard rather
+than file-existence, because the target file always already exists (see the marker-guarded-append
+requirement below).
 
 #### Scenario: Installing the constitutional set into a fresh workspace
 
@@ -119,11 +120,14 @@ member, delivered as an `identity-append` structural rule.
 
 The constitutional set SHALL be a member registry such that adding a member is adding a registry
 entry plus its embedded asset, with no change to the install or seed logic (the install/seed loop is
-member-count-agnostic and dispatches each member by its declared mechanism). v1 SHALL register
-exactly one member (the Rule of Three). The registry's member-mechanism vocabulary SHALL include
-both `identity-append` (structural) and `heartbeat-skill` (tick-time), so a future member of either
-kind plugs into the same seam without a schema change. The set SHALL NOT pre-enumerate or hardcode a
-broader corpus; which further behaviors join the default set (including the forthcoming
+member-count-agnostic and dispatches each member by its declared `Mechanism`). v1 SHALL register
+exactly one member (the Rule of Three). The registry shape SHALL be stable while the `Mechanism`
+vocabulary remains EXTENSIBLE: v1 SHALL scope the `Mechanism` vocabulary to `identity-append`
+(structural) — the only value v1 uses — and a future member of a new kind (such as the forthcoming
+heartbeat-driven local-read synthesis member) SHALL extend the vocabulary with its own `Mechanism`
+value plus the write/load behavior that value implies, designed when that member is. The set SHALL
+NOT pre-enumerate or hardcode a broader corpus, NOR pre-specify the install behavior of a mechanism
+no shipped member uses; which further behaviors join the default set (including the forthcoming
 visibility-synthesis member) is an operator decision applied incrementally through the same seam.
 
 #### Scenario: Adding a member requires no install-logic change
