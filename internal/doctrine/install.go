@@ -48,13 +48,19 @@ func Install(identityPath string, members []Member) ([]Result, error) {
 	for _, m := range members {
 		switch m.Mechanism {
 		case MechanismIdentityAppend:
-			res, newContent, changed, ierr := appendOnce(m, content)
+			// MECHANISM COUPLING: the seed (workspace init) and `doctrine install` both
+			// call Install over the WHOLE member set, but Install only handles
+			// identity-append — any other mechanism hard-errors below. The day a 2nd
+			// mechanism ships it MUST be added here AT THE SAME TIME, or every caller
+			// passing a member of the new kind starts erroring. anyAppended(results)
+			// derives the write decision; appendOnce just returns the (possibly updated)
+			// content, so no per-member "changed" flag is needed.
+			res, newContent, ierr := appendOnce(m, content)
 			if ierr != nil {
 				return results, ierr
 			}
 			content = newContent
 			results = append(results, res)
-			_ = changed // content already updated in place; nothing else to do
 		default:
 			return results, fmt.Errorf("member %q: unsupported mechanism %q", m.Name, m.Mechanism)
 		}
@@ -75,12 +81,12 @@ func Install(identityPath string, members []Member) ([]Result, error) {
 // (possibly updated) file content. If the member's opening marker is already present
 // it returns a skip and leaves content unchanged; otherwise it appends the member's
 // marked block (separated from prior content by a blank line) and reports an append.
-func appendOnce(m Member, content string) (Result, string, bool, error) {
+func appendOnce(m Member, content string) (Result, string, error) {
 	if m.OpenMarker == "" || m.CloseMarker == "" {
-		return Result{}, content, false, fmt.Errorf("identity-append member %q has no marker fence", m.Name)
+		return Result{}, content, fmt.Errorf("identity-append member %q has no marker fence", m.Name)
 	}
 	if strings.Contains(content, m.OpenMarker) {
-		return Result{Member: m.Name, Action: ActionSkipped, Reason: "marker present"}, content, false, nil
+		return Result{Member: m.Name, Action: ActionSkipped, Reason: "marker present"}, content, nil
 	}
 	// Ensure exactly one blank line separates prior content from the appended block,
 	// so a stub that does or does not end in a newline both produce clean output.
@@ -93,7 +99,7 @@ func appendOnce(m Member, content string) (Result, string, bool, error) {
 	case strings.HasSuffix(content, "\n"):
 		sep = "\n"
 	}
-	return Result{Member: m.Name, Action: ActionAppended}, content + sep + m.Content, true, nil
+	return Result{Member: m.Name, Action: ActionAppended}, content + sep + m.Content, nil
 }
 
 func anyAppended(results []Result) bool {

@@ -52,6 +52,7 @@ func cmdDoctrineInstall(args []string) error {
 		return err
 	}
 	reportDoctrineResults(results, identityPath)
+	noteNonClaudeLoadFastFollow(a.Surface, identityPath)
 	return nil
 }
 
@@ -71,6 +72,28 @@ func identityFilePath(agent, surface string) (string, error) {
 	return filepath.Join(dir, identity), nil
 }
 
+// isClaudeSurface reports whether a surface uses the Claude Code launch/load path.
+// The empty default and "claude-code" are the Claude surfaces (matching
+// workspace.IdentityFileName); everything else (grok/aider/opencode/cursor) is a
+// non-Claude surface whose per-surface load is a documented fast-follow.
+func isClaudeSurface(surface string) bool {
+	return surface == "" || surface == "claude-code"
+}
+
+// noteNonClaudeLoadFastFollow prints a one-line NOTICE when doctrine is written for a
+// NON-Claude surface. The doctrine IS written (forward-correct: the native harness reads
+// its own identity file), but the generated launch recipe only wires the VERIFIED load
+// path for Claude Code (--append-system-prompt-file). Per-surface launch/load for
+// grok/aider/opencode is a documented fast-follow; this notice makes that
+// load-not-yet-wired limitation visible rather than silent.
+func noteNonClaudeLoadFastFollow(surface, identityPath string) {
+	if isClaudeSurface(surface) {
+		return
+	}
+	fmt.Printf("  note: doctrine written to %s; the verified load path is Claude Code — per-surface launch/load for %s is a fast-follow (the generated recipe launches claude).\n",
+		identityPath, surface)
+}
+
 // reportDoctrineResults prints one line per member, mirroring `workspace init`'s
 // kept/created reporting so the operator sees exactly what the install did.
 func reportDoctrineResults(results []doctrine.Result, identityPath string) {
@@ -79,7 +102,9 @@ func reportDoctrineResults(results []doctrine.Result, identityPath string) {
 		case doctrine.ActionAppended:
 			fmt.Printf("  appended %s → %s\n", r.Member, identityPath)
 		case doctrine.ActionSkipped:
-			fmt.Printf("  skipped  %s (%s)\n", r.Member, r.Reason)
+			// A skip is a success-noop (the member is already in place), not a failure —
+			// frame it that way so a newcomer re-running install/init isn't alarmed.
+			fmt.Printf("  already installed: %s (%s)\n", r.Member, r.Reason)
 		default:
 			fmt.Printf("  %-8s %s\n", r.Action, r.Member)
 		}

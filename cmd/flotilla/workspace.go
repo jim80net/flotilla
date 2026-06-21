@@ -96,6 +96,16 @@ func cmdWorkspaceInit(args []string) error {
 	// `--append-system-prompt-file` mechanism (a sentinel confirmed it loads the file's
 	// contents; --add-dir was refuted). cwd is left empty for the operator to fill —
 	// an empty cwd fails recipe validation, so resume errors clearly until it is set.
+	//
+	// CLAUDE-CODE-SPECIFIC: this recipe hardcodes `claude --append-system-prompt-file`
+	// for EVERY surface. The verified load path (and the verify-first probe) is Claude
+	// Code; for a non-Claude surface (grok/aider/opencode) the doctrine is still written
+	// into the surface's native identity file (forward-correct — the native harness reads
+	// it), but its load is NOT yet wired by this generated recipe. Per-surface launch/load
+	// is a documented fast-follow (openspec/changes/constitutional-skillset/proposal.md
+	// "Out of scope" → "Per-surface load mechanisms beyond Claude Code"). The seed below
+	// emits a runtime NOTICE for non-Claude surfaces so this limitation is visible, not
+	// silent.
 	launchTemplate := fmt.Sprintf(
 		`{"launch":"claude --append-system-prompt-file %s/%s -w %s","cwd":"","tmux":"flotilla:%s"}`+"\n",
 		dir, identity, agent, agent)
@@ -125,12 +135,19 @@ func cmdWorkspaceInit(args []string) error {
 	// marked block INTO it; the marker guard makes a re-init detect-and-skip rather than
 	// re-append, so a freshly scaffolded workspace is born with the doctrine in place
 	// and re-running init never duplicates it.
+	//
+	// MECHANISM COUPLING: this passes the WHOLE member set (doctrine.Members()), and
+	// Install only handles the identity-append mechanism — a member of any other kind
+	// hard-errors there (see internal/doctrine/install.go). When a 2nd mechanism ships it
+	// must be added to Install at the same time, or this seed (and `doctrine install`)
+	// starts erroring on the new member.
 	identityPath := filepath.Join(dir, identity)
 	results, err := doctrine.Install(identityPath, doctrine.Members())
 	if err != nil {
 		return fmt.Errorf("seed doctrine into %q: %w", identityPath, err)
 	}
 	reportDoctrineResults(results, identityPath)
+	noteNonClaudeLoadFastFollow(a.Surface, identityPath)
 
 	fmt.Printf("workspace ready: %s\n", dir)
 	fmt.Printf("  → edit %s: set \"cwd\" to %s's absolute worktree path before resuming.\n",

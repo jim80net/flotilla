@@ -34,5 +34,6 @@ remember its state across rotations — so it COUNTS against the three; only tru
 transient report-and-exit fan-out remains the unbounded floor.
 
 The full doctrine (the worked example, the layer-to-flotilla mapping, the spawn
-sequence) lives in `docs/span-of-control.md`.
+sequence) lives in the flotilla repository's `docs/span-of-control.md` — the
+running agent's worktree may not contain it.
 <!-- /flotilla:rule-of-three -->
