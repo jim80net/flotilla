@@ -195,12 +195,12 @@ synthesis is later shown to need finish-history rather than latest-state.
   these carry today is exactly why the design-trio missed the broadcast-channel P0 — the examples must
   exercise the REAL federated topology so the gap can never slip again, and so the roster tests can load
   a realistic fixture.
-- [ ] 10.1 `docs/visibility.md` — the stratified-visibility doctrine doc (the source of truth for the
+- [x] 10.1 `docs/visibility.md` — the stratified-visibility doctrine doc (the source of truth for the
   three tiers, the up-flow/inverse-drill-down, the TRANSCRIPT-FIRST LOCAL substrate, the topology
   [each agent owns its home channel; its parent is a member; the fleet-command broadcast channel is
   EXCLUDED from synthesis edges], the routing down-traversal). Cross-link from `docs/xo-doctrine.md` and
   the Tier-1 references.
-- [ ] 10.2 Update the constitutional-set member list reference (the README / doctrine docs) to note the
+- [x] 10.2 Update the constitutional-set member list reference (the README / doctrine docs) to note the
   second member (visibility-synthesis) and the `heartbeat-skill` mechanism — the "vocabulary extends
   with each new member kind" B1 promised, now realized.
 

@@ -246,12 +246,49 @@ precisely the hierarchy its load demands, keeps every seat inside its span of
 control, surfaces one aggregated picture upward, and works independent streams in
 parallel.
 
+## The constitutional set — how flotilla ships doctrine
+
+The Rule of Three is not a one-off. It is the first member of flotilla's
+**constitutional set** — the default operating doctrine a fleet needs to run well,
+embedded into the binary so it travels with the product rather than living as
+host-local assets. `flotilla workspace init` seeds the set into a fresh agent and
+`flotilla doctrine install <agent>` (re)installs it idempotently into an existing one;
+the install loop is **member-count-agnostic** and dispatches each member by its delivery
+**mechanism**.
+
+The set ships **two members today**, delivered by **two mechanisms** — the "vocabulary
+extends with each new member kind" the set was designed to grow into:
+
+| Member | Mechanism | Delivery | Loads |
+|---|---|---|---|
+| **Rule of Three** (span of control) | `identity-append` | distilled text appended (under a marker fence) into the agent's standing **identity file** | once at launch, via `--append-system-prompt-file` |
+| **[visibility-synthesis](./visibility.md)** (Tiers 2/3) | `heartbeat-skill` | a **whole-file** skill written into the agent's **workspace** (`skills/visibility-synthesis.md`) | when the daemon emits a synthesis wake |
+
+The two mechanisms encode a real distinction. `identity-append` is for a **structural
+identity rule** — *who the agent IS* (its standing organization, like the Rule of
+Three) — so it loads once into the system prompt and is fenced by a marker the installer
+keys idempotency on (re-runs detect the marker and skip, so your edits survive).
+`heartbeat-skill` is for a **tick-time discipline** — *what the agent DOES on a wake* (a
+skill the wake prompt references, like visibility synthesis) — so it is written as a
+whole file into the workspace, and its idempotency is **stat-based**: a missing file is
+created, an existing one is kept unchanged (operator edits survive a re-install). A
+whole-file member carries no marker fence and never routes through the identity-append
+path.
+
+Adding a member is adding a registry entry plus its embedded asset; a member that
+introduces a **new** mechanism also lands that mechanism's install behavior in the same
+change (the mechanism-coupling contract). Which further behaviors join the default set is
+the operator's strategic lever — the set is built to grow one member at a time.
+
 ## See also
 
 - [xo-doctrine.md](./xo-doctrine.md) — the operator ↔ XO contract and the
   narrow-answer / state-externalization disciplines this rule composes with; the
   "would the operator want to read this?" discrimination is the per-tier test for
   what an aggregating lead forwards upward.
+- [visibility.md](./visibility.md) — the stratified-visibility doctrine (Tiers 1/2/3);
+  visibility-synthesis is the *second* constitutional member, delivered by the
+  `heartbeat-skill` mechanism this set extends into.
 - [quickstart.md → Federated fleets](./quickstart.md#federated-fleets--per-project-channels--fleet-command)
   — the recursive meta-XO → project-XO → desk topology this rule governs.
 - [README.md](../README.md) — the hub-and-spoke premise ("one coherent picture and
