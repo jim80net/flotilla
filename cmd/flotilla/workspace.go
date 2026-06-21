@@ -28,13 +28,16 @@ func cmdWorkspace(args []string) error {
 	}
 }
 
-// parseWorkspaceArgs pulls the agent positional (accepted before OR after the flags,
-// the same migration-friendly ordering register/resume use) plus --roster.
-func parseWorkspaceArgs(sub string, args []string) (agent, rosterPath string, err error) {
+// parseAgentRosterArgs pulls the agent positional (accepted before OR after the flags,
+// the same migration-friendly ordering register/resume use) plus --roster. cmd is the
+// FULL command path (e.g. "workspace init", "doctrine install"), so the FlagSet name and
+// the usage error name the ACTUAL command — this helper is shared by `workspace` and
+// `doctrine`, and a workspace-hardcoded usage would misguide a `doctrine` caller.
+func parseAgentRosterArgs(cmd string, args []string) (agent, rosterPath string, err error) {
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		agent, args = args[0], args[1:]
 	}
-	fs := flag.NewFlagSet("workspace "+sub, flag.ContinueOnError)
+	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	rp := fs.String("roster", rosterDefault(), "roster config path")
 	if err = fs.Parse(args); err != nil {
 		return "", "", err
@@ -44,13 +47,13 @@ func parseWorkspaceArgs(sub string, args []string) (agent, rosterPath string, er
 		agent, rest = rest[0], rest[1:]
 	}
 	if agent == "" || len(rest) != 0 {
-		return "", "", fmt.Errorf("usage: flotilla workspace %s <agent> [--roster <path>]", sub)
+		return "", "", fmt.Errorf("usage: flotilla %s <agent> [--roster <path>]", cmd)
 	}
 	return agent, *rp, nil
 }
 
 func cmdWorkspacePath(args []string) error {
-	agent, _, err := parseWorkspaceArgs("path", args)
+	agent, _, err := parseAgentRosterArgs("workspace path", args)
 	if err != nil {
 		return err
 	}
@@ -68,7 +71,7 @@ func cmdWorkspacePath(args []string) error {
 // `--append-system-prompt-file <ws>/<identity>` recipe convention with an empty cwd the
 // operator fills in.
 func cmdWorkspaceInit(args []string) error {
-	agent, rosterPath, err := parseWorkspaceArgs("init", args)
+	agent, rosterPath, err := parseAgentRosterArgs("workspace init", args)
 	if err != nil {
 		return err
 	}

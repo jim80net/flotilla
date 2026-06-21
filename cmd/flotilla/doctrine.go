@@ -31,7 +31,7 @@ func cmdDoctrine(args []string) error {
 // already exist — `workspace init` writes it — so a missing workspace is a clear
 // error, not a silent scaffold.
 func cmdDoctrineInstall(args []string) error {
-	agent, rosterPath, err := parseWorkspaceArgs("doctrine install", args)
+	agent, rosterPath, err := parseAgentRosterArgs("doctrine install", args)
 	if err != nil {
 		return err
 	}
