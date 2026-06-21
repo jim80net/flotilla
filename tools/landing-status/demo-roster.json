@@ -1,5 +1,5 @@
 {
-  "_comment": "DEMO roster for the public landing-page status widget — a GENERIC sample fleet (xo + backend/frontend/data/infra, matching the quickstart and the how-diagram). It is NOT any real deployment. Used only to regenerate site/status.json via gen.sh; never wire the public widget to a real fleet (that would leak real desk names).",
+  "_comment": "DEMO roster for the public landing-page status widget — a GENERIC sample fleet (xo + backend/frontend/data/infra, matching the quickstart and the how-diagram). It is NOT any real deployment. Used only to regenerate site/status.json via gen.sh; never wire the public widget to a real fleet (that would leak real desk names). Federated to the REAL product topology — a fleet-command broadcast channel (role=fleet-command, members=command targets, EXCLUDED from synthesis routing) + per-XO home channels whose members are the PARENT up-link — so the example mirrors what ships; the legacy single-binding STAR it used to be is the shape that hid the broadcast-channel routing bug.",
   "agents": [
     { "name": "xo", "surface": "claude-code" },
     { "name": "backend", "surface": "claude-code" },
@@ -9,5 +9,13 @@
   ],
   "xo_agent": "xo",
   "heartbeat_interval": "20m",
-  "change_detector": true
+  "change_detector": true,
+  "channels": [
+    { "channel_id": "demo-fleet-command", "xo_agent": "xo", "role": "fleet-command",
+      "members": ["xo", "backend", "frontend", "data", "infra"] },
+    { "channel_id": "demo-backend", "xo_agent": "backend", "role": "project", "members": ["xo"] },
+    { "channel_id": "demo-frontend", "xo_agent": "frontend", "role": "project", "members": ["xo"] },
+    { "channel_id": "demo-data", "xo_agent": "data", "members": ["backend"] },
+    { "channel_id": "demo-infra", "xo_agent": "infra", "members": ["frontend"] }
+  ]
 }

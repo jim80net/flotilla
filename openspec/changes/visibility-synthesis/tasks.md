@@ -189,7 +189,7 @@ synthesis is later shown to need finish-history rather than latest-state.
 
 ## 10. Docs
 
-- [ ] 10.0 Update `flotilla.example.json` AND `tools/landing-status/demo-roster.json` to the FEDERATED
+- [x] 10.0 Update `flotilla.example.json` AND `tools/landing-status/demo-roster.json` to the FEDERATED
   shape INCLUDING a `role="fleet-command"` broadcast channel + per-XO home channels (members=parent) +
   the two-tier project/meta structure (hydra-ops's explicit ask). The legacy single-binding STAR shape
   these carry today is exactly why the design-trio missed the broadcast-channel P0 — the examples must
