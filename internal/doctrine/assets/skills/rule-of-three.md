@@ -5,17 +5,21 @@
      this block; strip it and the next install will append a duplicate copy. Edit
      the prose inside freely; keep the two comment markers. -->
 
-## Span of control — the Rule of Three
+## Span of control — the Rule of Three (a guideline)
 
-You manage at most **THREE active charges** (desks / workstreams) directly. An
-active charge is one whose state you must remember across your next rotation — a
-standing coordination relationship you keep checking on.
+This is a **GUIDELINE, not a hard rule** — a default to design toward, not a limit
+strictly enforced. **Aim to keep about THREE active charges** (desks / workstreams)
+directly. An active charge is one whose state you must remember across your next
+rotation — a standing coordination relationship you keep checking on. Three is a soft
+ceiling that keeps your attention coherent; use judgment, and exceed it briefly when
+the situation genuinely warrants.
 
-- **On a fourth charge, grow a layer FIRST.** Before accepting the fourth,
-  cluster your charges into at most three coherent groups, designate an owning
-  lead per group, and delegate — recursively, until every seat manages ≤ 3. You
-  do not take the fourth "for now"; the reorganization happens as one act with
-  accepting the work.
+- **When a fourth charge would crowd you, consider growing a layer.** Rather than
+  letting standing charges pile up, cluster them into a few coherent groups, designate
+  an owning lead per group, and delegate — recursively, so every seat keeps a
+  manageable span. This is the recommended move when your attention starts to fray —
+  not a mandate that trips on the exact count of four; judge when the reorganization is
+  worth its cost.
 - **Aggregate upward.** Roll your charges' reports into ONE summary and pass that
   up. The layer above sees at most three group summaries, never N raw reports —
   forward the signal (a decision, a blocker, a completion the layer above is

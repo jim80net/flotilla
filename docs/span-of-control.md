@@ -7,6 +7,12 @@ messages and clocks the turns; this page says how a lead should *structure* the
 work below it so that no single seat is ever managing more than it can hold, and
 so that independent work runs concurrently instead of one-at-a-time.
 
+> **The Rule of Three is a GUIDELINE, not a hard rule.** "Three active charges" is a
+> soft ceiling to design toward — a default that keeps attention coherent — not a
+> limit strictly enforced. Use judgment; exceed it briefly when the situation
+> genuinely warrants, and grow a layer when standing charges start to fray your
+> attention rather than the instant a fourth appears.
+
 > **Who this is for / how to use it.** flotilla does not own a lead's prompt — a
 > lead is an ordinary agent session (e.g. Claude Code) that *you* run. So this
 > doctrine becomes the default the same way every other agent behavior does: it
@@ -256,12 +262,13 @@ host-local assets. `flotilla workspace init` seeds the set into a fresh agent an
 the install loop is **member-count-agnostic** and dispatches each member by its delivery
 **mechanism**.
 
-The set ships **two members today**, delivered by **two mechanisms** — the "vocabulary
+The set ships **three members today**, delivered by **two mechanisms** — the "vocabulary
 extends with each new member kind" the set was designed to grow into:
 
 | Member | Mechanism | Delivery | Loads |
 |---|---|---|---|
-| **Rule of Three** (span of control) | `identity-append` | distilled text appended (under a marker fence) into the agent's standing **identity file** | once at launch, via `--append-system-prompt-file` |
+| **Rule of Three** (span of control, a guideline) | `identity-append` | distilled text appended (under a marker fence) into the agent's standing **identity file** | once at launch, via `--append-system-prompt-file` |
+| **no-self-merge** (a desk never merges its own work; the level above reviews + merges — the merge IS the independent review) | `identity-append` | distilled text appended (under a marker fence) into the agent's **identity file** | once at launch |
 | **[visibility-synthesis](./visibility.md)** (Tiers 2/3) | `heartbeat-skill` | a **whole-file** skill written into the agent's **workspace** (`skills/visibility-synthesis.md`) | when the daemon emits a synthesis wake |
 
 The two mechanisms encode a real distinction. `identity-append` is for a **structural
