@@ -206,8 +206,46 @@ func TestSynthesisIdleFleetFiresNothing(t *testing.T) {
 	}
 }
 
-// §5.4 — the synthesis wake is enqueued OUTSIDE d.mu (in runTail), and targets the SYNTHESIZING
-// agent which differs from d.cfg.XOAgent.
+// §5.4 (P1 regression) — the materiality READ (SynthRead = blocking tmux + transcript I/O in
+// production) runs OUTSIDE d.mu: OperatorWake returns while a synthesis read is parked. This is the
+// regression lock for the implement-gate P1 — against the pre-fix code (the read ran under d.mu in
+// decideSynthesis) this test would HANG, blocking the relay goroutine. It exercises the READ, where
+// the older TestSynthesisWakeTargetsArbitraryAgentOutsideMutex only exercised the DELIVERY.
+func TestSynthesisMaterialityReadRunsOutsideMutex(t *testing.T) {
+	f := newSynthFixture(t)
+	cfg := f.config("hydra-ops", []string{"hydra-ops", "family-office", "v12-dev"})
+	f.parents["v12-dev"] = []string{"family-office"}
+	cfg.Assess = func(a string) surface.State { return surface.StateIdle }
+
+	// A blocking SynthRead parks the materiality read; if it ran under d.mu, OperatorWake would block.
+	reading := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	cfg.SynthRead = func(a string) (string, bool) {
+		once.Do(func() { close(reading) })
+		<-release
+		return "text", true
+	}
+	d := f.newDet(t, cfg)
+	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle, "family-office": surface.StateIdle, "v12-dev": surface.StateWorking}, "h0")
+
+	tickDone := make(chan struct{})
+	go func() { d.Tick(); close(tickDone) }()
+	<-reading // parked inside the blocked materiality read (off d.mu, in runSynthesis)
+
+	woke := make(chan struct{})
+	go func() { d.OperatorWake(); close(woke) }()
+	select {
+	case <-woke:
+	case <-time.After(2 * time.Second):
+		t.Fatal("OperatorWake blocked behind a synthesis materiality READ — it is being held under d.mu (P1)")
+	}
+	close(release)
+	<-tickDone
+}
+
+// §5.4 — the synthesis wake DELIVERY runs OUTSIDE d.mu (in runSynthesis), and targets the
+// SYNTHESIZING agent which differs from d.cfg.XOAgent.
 func TestSynthesisWakeTargetsArbitraryAgentOutsideMutex(t *testing.T) {
 	f := newSynthFixture(t)
 	cfg := f.config("hydra-ops", []string{"hydra-ops", "family-office", "v12-dev"})

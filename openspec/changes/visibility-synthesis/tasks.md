@@ -71,16 +71,16 @@ write-path on the live Tier-1 mirror.
   (DROP self-edges) AND `ch.Role != "fleet-command"` (DROP broadcast-channel edges — the implement-gate
   P0). Runs once at load, not on the hot path.
 
-## 3. Transcript-first read of the subordinates' latest state (read-only reuse)
+## 3. Transcript-first read of the subordinates' latest state (read-only reuse) — DONE (5b79e3c)
 
-- [ ] 3.1 TEST: for a synthesizing agent, the read path resolves `AgentsBelow(agent)`, resolves each
+- [x] 3.1 TEST: for a synthesizing agent, the read path resolves `AgentsBelow(agent)`, resolves each
   subordinate's pane (`ResolvePane(agentTitle(...))`), and reads its latest turn-final text via the
   agent's `surface.ResultReader.LatestResult(pane)` (one bounded read per subordinate), NOT an
   unbounded windowing pass and NOT any ledger. A subordinate whose pane will not resolve, or whose
   surface has no `ResultReader`, is cleanly SKIPPED (never a crashed wake).
-- [ ] 3.2 TEST: the read is read-only — it never writes a ledger, never touches the live Tier-1 mirror
+- [x] 3.2 TEST: the read is read-only — it never writes a ledger, never touches the live Tier-1 mirror
   path, and never routes through the relay.
-- [ ] 3.3 IMPL: wire the synthesis read (in the `wake` composer / the synthesis helper) to
+- [x] 3.3 IMPL: wire the synthesis read (in the `wake` composer / the synthesis helper) to
   `AgentsBelow` + `deliver.ResolvePane(agentTitle(...))` + `surface.ResultReader.LatestResult(pane)`
   (the SAME seam Tier 1 uses), with the clean-skip on an unresolvable pane / no-`ResultReader` surface.
   No change to `internal/claudestore` or `internal/surface` (read-only reuse). NO `internal/synthledger`
@@ -93,59 +93,59 @@ transcript-first substrate there is NO mirror-event ledger and NO new write-path
 The finish-history ledger is deferred (issue #138, label `enhancement`), built ONLY iff
 synthesis is later shown to need finish-history rather than latest-state.
 
-## 5. The `WakeSynthesis` wake-kind + the agent-targeted wake seam + the digest cadence (`internal/watch/detector.go`)
+## 5. The `WakeSynthesis` wake-kind + the agent-targeted wake seam + the digest cadence (`internal/watch/detector.go`) — DONE (5b79e3c)
 
-- [ ] 5.1 TEST: a boat-finish (Working→Idle, non-XO) marks synthesis "owed" for that channel's XO,
+- [x] 5.1 TEST: a boat-finish (Working→Idle, non-XO) marks synthesis "owed" for that channel's XO,
   keyed in a per-SYNTHESIZING-agent owed-set (alongside the existing `pendingMirrors`).
-- [ ] 5.2 TEST: the detector fires `WakeSynthesis` for a synthesizing agent AT MOST once per the digest
+- [x] 5.2 TEST: the detector fires `WakeSynthesis` for a synthesizing agent AT MOST once per the digest
   sub-cadence per agent while it has synthesis owed (debounce-up — a burst coalesces to one).
-- [ ] 5.3 TEST: with no synthesis owed, no `WakeSynthesis` fires (idle `$0` cost; behavior
+- [x] 5.3 TEST: with no synthesis owed, no `WakeSynthesis` fires (idle `$0` cost; behavior
   byte-identical to before when the feature is inert).
-- [ ] 5.4 TEST: the wake seam carries an AGENT parameter — the `WakeSynthesis` side-effect is enqueued
+- [x] 5.4 TEST: the wake seam carries an AGENT parameter — the `WakeSynthesis` side-effect is enqueued
   in `runTail`, OUTSIDE `d.mu`, and is enqueued to the SYNTHESIZING agent (which may differ from
   `d.cfg.XOAgent`), proving the XO-hardcoded path (`watch.go:259` `Agent: xo`) no longer constrains it.
-- [ ] 5.5 IMPL: add `WakeSynthesis WakeKind`; add a PARALLEL agent-targeted
+- [x] 5.5 IMPL: add `WakeSynthesis WakeKind`; add a PARALLEL agent-targeted
   `WakeAgent func(agent string, kind WakeKind, reasons []string)` (NOT widening `Wake` — keep the
   shipped primary-XO path byte-identical, re-trio P2-1); add the per-agent owed-set + digest-cadence
   counter in the detector; emit it in `runTail` like the other wakes. The digest floor derives from
   `heartbeat_interval` (a small multiple), NOT a new roster knob (Q-B resolved); confirm the concrete
   multiple in review. Default cadence wired so an unconfigured deployment is inert.
-- [ ] 5.6 TEST + IMPL: the owed-set keying maps a finishing AGENT NAME → its synthesizing parent(s)
+- [x] 5.6 TEST + IMPL: the owed-set keying maps a finishing AGENT NAME → its synthesizing parent(s)
   via `AgentsAbove(agent)` (NOT `BindingForChannel`, which takes a channel id — re-trio P1-A) so the
   wake targets the correct agent(s); a boat that is a member of TWO channels marks BOTH parent XOs
   owed; a boat in a Tier-2 channel marks its project XO owed, and a project-XO finishing a turn marks
   the meta-XO owed (the Q-F recursion — Tier 3 reads Tier 2's latest STATE the same way Tier 2 reads
   its boats').
 
-## 6. The DURABLE materiality (last-seen) state (`internal/watch` / a disk sidecar)
+## 6. The DURABLE materiality (last-seen) state (`internal/watch` / a disk sidecar) — DONE (5b79e3c)
 
-- [ ] 6.1 TEST: the materiality gate is a per-synthesizing-agent durable last-seen snapshot (e.g. a
+- [x] 6.1 TEST: the materiality gate is a per-synthesizing-agent durable last-seen snapshot (e.g. a
   hash of each subordinate's last-synthesized turn text); when no subordinate's latest state has
   changed, no `WakeSynthesis` fires (and a fired wake whose subordinates are unchanged yields an idle
   reply, no re-post).
-- [ ] 6.2 TEST: the last-seen snapshot is DAEMON/DISK-OWNED and survives a simulated context rotation
+- [x] 6.2 TEST: the last-seen snapshot is DAEMON/DISK-OWNED and survives a simulated context rotation
   (it is NOT skill-context state) — after a rotation the next synthesis does not re-read-from-scratch
   and re-post an unchanged rollup.
-- [ ] 6.3 IMPL: add the durable last-seen snapshot as a DISK SIDECAR (keyed by synthesizing agent,
+- [x] 6.3 IMPL: add the durable last-seen snapshot as a DISK SIDECAR (keyed by synthesizing agent,
   alongside the detector's existing snapshot); the detector either suppresses the wake on zero-change
   or passes "what changed since last fire" into the wake. The hash is the per-subordinate FULL latest
   turn text (Q-C resolved — a new-identical turn is a no-op, any change is material).
-- [ ] 6.4 TEST: the last-seen snapshot survives a DAEMON RESTART (it is a disk sidecar, not in-memory
+- [x] 6.4 TEST: the last-seen snapshot survives a DAEMON RESTART (it is a disk sidecar, not in-memory
   detector state) — after a restart with unchanged subordinates, NO `WakeSynthesis` fires (no
   restart-storm of re-posts). A missing/corrupt sidecar fails SAFE toward "all changed" (synthesize
   once), never silent-never-fire. (re-trio P2-4)
-- [ ] 6.5 TEST: an UNREADABLE subordinate (pane won't resolve) is EXCLUDED from the materiality hash
+- [x] 6.5 TEST: an UNREADABLE subordinate (pane won't resolve) is EXCLUDED from the materiality hash
   for that wake — never hashed as empty — so a transient pane-resolve failure does not flap the wake
   (neither spams a re-post on "change to empty" nor suppresses a real change on recovery). (re-trio
   P2-4)
 
-## 7. The `wake` prompt composer (`cmd/flotilla/watch.go`)
+## 7. The `wake` prompt composer (`cmd/flotilla/watch.go`) — DONE (5b79e3c)
 
-- [ ] 7.1 TEST: a `WakeSynthesis` kind composes a prompt that points the agent at its read set (the
+- [x] 7.1 TEST: a `WakeSynthesis` kind composes a prompt that points the agent at its read set (the
   agents below it) + its post target (`OwnedChannels`/`ChannelForXO` via `secrets.Webhook`) + the
   per-tier output contract + the narrow-answer discipline (curate what CHANGED, else reply idle), and
   enqueues to the SYNTHESIZING agent (the new agent param), NOT the hardcoded primary `xo`.
-- [ ] 7.2 IMPL: add the `WakeSynthesis` case to the `wake` switch (`watch.go:245-260`); reference the
+- [x] 7.2 IMPL: add the `WakeSynthesis` case to the `wake` switch (`watch.go:245-260`); reference the
   embedded skill (the prompt is the thin trigger; the skill file carries the detailed curation
   instructions); enqueue `watch.Job{Agent: <synthesizing agent>, ...}`.
 
@@ -206,11 +206,21 @@ synthesis is later shown to need finish-history rather than latest-state.
 
 ## 11. Validation + review gates
 
-- [ ] 11.1 `openspec validate visibility-synthesis --strict` passes (already passing at design time).
-- [ ] 11.2 `/systems-review` + `/open-code-review` on the implementation diff — iterate until clean.
-- [ ] 11.3 Confirm the resolved design decisions land as specified (transcript-first substrate; DAG
-  self-edge exclusion; the agent-param wake seam; the durable daemon/disk last-seen materiality; the
-  heartbeat-skill whole-file STAT idempotency + the `Install` workspace-dir signature change).
+- [x] 11.1 `openspec validate visibility-synthesis --strict` passes.
+- [x] 11.2 Implementation-diff trio (systems-review + STORM, 2026-06-21) on the Go diff — clean after
+  the fold. BOTH independently CONFIRMED the implement-gate P1 (the materiality `SynthRead` =
+  blocking tmux + transcript I/O ran under `d.mu`, stalling the tick + blocking `OperatorWake`). FIXED:
+  split `decideSynthesis` into a pure `synthEligibleLocked` (under `d.mu`) + an off-`d.mu`
+  `runSynthesis` (read + materiality + short-relock commit + `WakeAgent`), sync-in-tail (not async —
+  synthesis commits state the next tick reads). P2 (the off-mutex test guarded only DELIVERY) FIXED:
+  added `TestSynthesisMaterialityReadRunsOutsideMutex` (parks the READ, asserts `OperatorWake` returns
+  — would hang pre-fix). P3 folded: prune stale sidecar synthesizer keys at load; design notes for
+  restart-re-derives-owed + enqueue-time-read-set. All else rated SOUND (byte-identical-absent,
+  $0-idle, cadence, materiality, routing, doctrine). `go test ./... -race` green.
+- [x] 11.3 Confirmed the resolved design decisions landed as specified (transcript-first substrate; DAG
+  self-edge + fleet-command exclusion; the parallel `WakeAgent` seam; the durable disk-sidecar
+  last-seen materiality surviving rotation+restart; heartbeat-skill whole-file STAT idempotency + the
+  `Install(workspaceDir, identityFile, members)` signature).
 - [ ] 11.4 The re-trio (2026-06-21, systems-review + STORM) RESOLVED the open questions — confirm they
   land as decided: Q-B cadence = daemon floor derived from `heartbeat_interval`; Q-C = per-subordinate
   full-latest-turn-text hash with the unreadable subordinate excluded; Q-D = `Install(workspaceDir,

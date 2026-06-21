@@ -290,8 +290,30 @@ normative, not an open question):
 
   This is the transcript-first analogue of the ledger revision's watermark — but it is a CHANGE-detect
   hash, not a read offset, and it carries NO separate-ledger-watermark requirement.
-- Runs in `runTail`, OUTSIDE `d.mu`, like every other wake — the synthesis prompt enqueue is a
+- Runs OUTSIDE `d.mu`, like every other pane-touching side effect — the synthesis prompt enqueue is a
   confirmed delivery that acquires the pane-txn lock, which must not be held under `d.mu`.
+
+### Implementation note — the materiality READ is off-mutex too (the implementation-gate P1)
+
+The implementation trio caught a P1: under transcript-first the materiality gate's read is no longer a
+cheap watermark compare — it is a BLOCKING `tmux`-resolve + transcript read (the same I/O the Tier-1
+mirror runs off-mutex). So NOT JUST the wake delivery but the materiality READ + decision must run
+outside `d.mu`, or a slow read stalls the tick loop and blocks `OperatorWake` (the relay goroutine).
+The detector therefore splits the work: a PURE, cheap decision UNDER `d.mu` (`synthEligibleLocked` —
+advance the cadence clock, pick the cadence-eligible owed agents, snapshot each one's read set +
+last-seen hashes) and an OFF-`d.mu` read+commit pass (`runSynthesis` — the blocking `SynthRead`s, the
+materiality compare, a SHORT re-lock to commit last-seen + reset the cadence + drain owed, then the
+agent-targeted `WakeAgent` delivery). It runs SYNCHRONOUSLY in the tail — NOT async like the
+observe-only mirror — because synthesis COMMITS last-seen state the next tick reads, so an async run
+could interleave two ticks' decisions; sync-in-tail removes the mutex stall without that ordering
+hazard.
+
+Two minor durability notes (trio P3, by design): (a) the owed-set (`synthOwed`) and the cadence
+counters are IN-MEMORY — a daemon restart re-derives owed-ness from the NEXT finish, not the last
+(the durable materiality sidecar survives, so at worst one rollup is delayed to the next finish, never
+silent data loss); (b) the wake prompt names the read set computed at ENQUEUE time — the skill treats
+the wake prompt as the source of truth for what to read. Stale synthesizer keys (an agent removed from
+the roster) are pruned from the sidecar at load.
 
 ### The prompt (the `wake` composer, `cmd/flotilla/watch.go:245-260`)
 
