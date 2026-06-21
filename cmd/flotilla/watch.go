@@ -265,14 +265,21 @@ func cmdWatch(args []string) error {
 		// names the agent's read set (AgentsBelow) + post target (OwnedChannels) + the per-tier
 		// contract; the detailed curation lives in the embedded visibility-synthesis skill. Inert
 		// unless the detector is wired with the synthesis seams below (gated on VisibilitySynthesis).
-		// The synthesis wake prompt injects `flotilla result --roster <path> <name>` so the woken agent
-		// can read its subordinates without a workspace skill (the harness-launch-agnostic path). Use the
-		// ABSOLUTE path the DAEMON actually loaded — not rosterDefault() and not a relative form — so the
-		// command resolves the live roster from the AGENT's own cwd (which differs from the daemon's). A
-		// filepath.Abs failure falls back to the raw flag value (already correct when it was absolute).
+		// The synthesis wake prompt injects `<flotilla-bin> result --roster <path> <name>` so the woken
+		// agent can read its subordinates without a workspace skill (the harness-launch-agnostic path).
+		// Inject the daemon's OWN ABSOLUTE binary path (os.Executable) and the absolute roster path — NOT
+		// bare `flotilla` and not rosterDefault() — because a DIRECTLY-LAUNCHED agent may have neither
+		// `flotilla` on its $PATH nor the daemon's cwd (the live fleet invokes ~/go/bin/flotilla by
+		// absolute path; bare `flotilla` does not resolve). Both fall back to a sensible default if their
+		// resolution errors (os.Executable only fails in exotic cases; an Abs failure means the flag was
+		// already absolute).
 		synthRosterPath := *rosterPath
 		if abs, err := filepath.Abs(*rosterPath); err == nil {
 			synthRosterPath = abs
+		}
+		synthBin := "flotilla" // fallback: bare command (PATH-dependent); the os.Executable path is the robust form
+		if exe, err := os.Executable(); err == nil {
+			synthBin = exe
 		}
 		wakeAgent := func(agent string, kind watch.WakeKind, reasons []string) {
 			if kind != watch.WakeSynthesis {
@@ -280,7 +287,7 @@ func cmdWatch(args []string) error {
 				log.Printf("flotilla watch: ignoring unexpected agent-targeted wake kind %v for %q", kind, agent)
 				return
 			}
-			body := synthesisWakeBody(agent, synthRosterPath, synthesisReadSet(cfg, agent), cfg.OwnedChannels(agent), ackInstr)
+			body := synthesisWakeBody(agent, synthBin, synthRosterPath, synthesisReadSet(cfg, agent), cfg.OwnedChannels(agent), ackInstr)
 			injector.Enqueue(watch.Job{Agent: agent, Message: body, Kind: "detector"})
 		}
 
