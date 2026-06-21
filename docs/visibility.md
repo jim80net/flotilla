@@ -165,6 +165,14 @@ A genuine cycle is a **mutual membership between two distinct non-fleet-command 
 an infinite mutual rollup. That refuses to start; the check runs once at load, never on
 the synthesis hot path.
 
+> **The DAG check runs UNCONDITIONALLY — even when `visibility_synthesis` is off.** It is a
+> roster-load invariant, not a synthesis-runtime one, so simply *rebuilding* to the binary that
+> includes this change makes `Load` refuse a roster with an untagged broadcast channel before the
+> opt-in is ever flipped. This is deliberate (the roster is malformed regardless of whether
+> synthesis acts on it) — but it means a deploy must tag every broadcast channel
+> `role="fleet-command"` *before* the new binary loads the roster, not as a later "turn synthesis
+> on" step.
+
 ## The cadence — a daemon-emitted synthesis wake
 
 Synthesis cadence is owned by the daemon, not by the skill scheduling itself. A skill that
@@ -206,7 +214,13 @@ not in-memory-only:
   suppresses a later real change.
 
 The read + materiality compare run *off* the detector mutex (a blocking tmux-resolve +
-transcript read), so a slow read never stalls the tick loop.
+transcript read), so a slow read never stalls the tick loop and never blocks an operator
+message. They run **synchronously in the tick tail**, though — not on a detached goroutine
+(synthesis commits the last-seen state the next tick reads, so an async run could interleave
+two ticks' decisions). The one cost: a cadence-eligible synthesis read defers the *next*
+tick's liveness re-evaluation by its own duration — bounded by the tmux command timeout (~10s)
+× the read-set size, negligible against the heartbeat interval (~20m) and the ticker
+coalesces the delay. The clock is paused, briefly and boundedly, never blocked.
 
 ## The output contracts
 
