@@ -57,6 +57,8 @@ func run(args []string) error {
 		return cmdResume(args[1:])
 	case "workspace":
 		return cmdWorkspace(args[1:])
+	case "doctrine":
+		return cmdDoctrine(args[1:])
 	case "push-snippet":
 		return cmdPushSnippet(args[1:])
 	case "result":
@@ -92,8 +94,9 @@ usage:
   flotilla channel delete <channel-id> --yes          delete a channel by snowflake id only (the one destructive verb)
   flotilla register <agent> [--pane <target>]         tag a pane so it resolves by a stable, drift-immune marker
   flotilla resume <agent> [--launch <path>] [--force]  (re)start a dead desk from its host-local launch recipe
-  flotilla workspace init <agent>                     scaffold the per-agent ~/.flotilla/<agent>/ home
+  flotilla workspace init <agent>                     scaffold the per-agent ~/.flotilla/<agent>/ home (seeds the constitutional doctrine)
   flotilla workspace path <agent>                     print an agent's workspace directory
+  flotilla doctrine install <agent>                   install flotilla's constitutional doctrine into an agent's workspace (idempotent)
   flotilla push-snippet <desk-agent>                  print the smart-push convention to append to a non-claude desk's identity file (secret-free; reports to the XO via send)
   flotilla result <agent>                             print a desk's FULL latest result from its harness session store (grok; read-only) — for long results the pane capture truncates
   flotilla version

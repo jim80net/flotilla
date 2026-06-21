@@ -329,6 +329,11 @@ awaiting files). Add the lines to the XO's standing instructions:
 
 ## See also
 
+- [span-of-control.md](./span-of-control.md) — the Rule of Three: how a
+  coordinating seat (XO / lead / boat) divides its attention — ≤ 3 active charges,
+  the fourth forces a layer, aggregate upward, dispatch independent work in
+  parallel. flotilla ships it as a constitutional member (seeded by `workspace
+  init`, installed by `doctrine install`).
 - [quickstart.md §4 → "Reach the operator directly"](./quickstart.md#reach-the-operator-directly-flotilla-notify)
   — the `flotilla notify` command surface (webhook identity, `--file`/stdin, the
   2000-character limit).
