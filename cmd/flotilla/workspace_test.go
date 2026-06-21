@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -69,12 +70,18 @@ func TestParseWorkspaceArgsOrdering(t *testing.T) {
 		{"infra", "--roster", "/r.json"},
 		{"--roster", "/r.json", "infra"},
 	} {
-		agent, rp, err := parseWorkspaceArgs("init", args)
+		agent, rp, err := parseAgentRosterArgs("workspace init", args)
 		if err != nil || agent != "infra" || rp != "/r.json" {
-			t.Errorf("parseWorkspaceArgs(%v) = (%q,%q,%v)", args, agent, rp, err)
+			t.Errorf("parseAgentRosterArgs(%v) = (%q,%q,%v)", args, agent, rp, err)
 		}
 	}
-	if _, _, err := parseWorkspaceArgs("init", nil); err == nil {
-		t.Error("parseWorkspaceArgs(no agent) = nil error, want usage error")
+	if _, _, err := parseAgentRosterArgs("workspace init", nil); err == nil {
+		t.Error("parseAgentRosterArgs(no agent) = nil error, want usage error")
+	}
+	// The usage error must name the ACTUAL command, not a hardcoded "workspace" — so a
+	// `doctrine install` caller's error guides the user to the right command (cubic P3).
+	_, _, err := parseAgentRosterArgs("doctrine install", nil)
+	if err == nil || !strings.Contains(err.Error(), "flotilla doctrine install") {
+		t.Errorf("doctrine-install usage error = %v, want it to name `flotilla doctrine install`", err)
 	}
 }
