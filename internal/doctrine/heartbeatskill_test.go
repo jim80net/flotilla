@@ -19,6 +19,23 @@ func fakeSkillMember(name, target, body string) Member {
 	}
 }
 
+// A heartbeat-skill member whose TargetFile is absolute or escapes the workspace via `..`
+// is REJECTED before any write (cubic P2 — defense-in-depth: a member can never write outside
+// the agent's workspace), and the escaping file is NOT created.
+func TestHeartbeatSkillRejectsEscapingTargetFile(t *testing.T) {
+	dir, identity := writeIdentity(t, "# desk\n")
+	for _, bad := range []string{"../escape.md", "skills/../../escape.md", "/etc/escape.md"} {
+		member := fakeSkillMember("vs", bad, "BODY\n")
+		if _, err := Install(dir, identity, []Member{member}); err == nil {
+			t.Errorf("TargetFile %q must be rejected (escapes workspace), got nil error", bad)
+		}
+	}
+	// Nothing was written outside the workspace.
+	if _, err := os.Stat(filepath.Join(filepath.Dir(dir), "escape.md")); !os.IsNotExist(err) {
+		t.Errorf("an escaping write leaked outside the workspace: %v", err)
+	}
+}
+
 // A heartbeat-skill member installs as a WHOLE FILE: a missing target is CREATED
 // (including its parent "skills/" dir), reported created.
 func TestHeartbeatSkillCreatesMissingFile(t *testing.T) {

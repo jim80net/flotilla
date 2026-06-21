@@ -118,7 +118,17 @@ func installWholeFile(m Member, workspaceDir string) (Result, error) {
 	if m.TargetFile == "" {
 		return Result{}, fmt.Errorf("heartbeat-skill member %q has no TargetFile", m.Name)
 	}
+	// Defense-in-depth (cubic P2): TargetFile is registry-controlled today, but it MUST be a
+	// workspace-relative, non-traversing path so a future member (or an edited registry) can never
+	// write OUTSIDE the agent's workspace. Reject an absolute path or one that escapes via `..`.
+	if filepath.IsAbs(m.TargetFile) {
+		return Result{}, fmt.Errorf("heartbeat-skill member %q TargetFile %q must be workspace-relative, not absolute", m.Name, m.TargetFile)
+	}
 	target := filepath.Join(workspaceDir, m.TargetFile)
+	if rel, err := filepath.Rel(filepath.Clean(workspaceDir), target); err != nil ||
+		rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return Result{}, fmt.Errorf("heartbeat-skill member %q TargetFile %q escapes the workspace dir", m.Name, m.TargetFile)
+	}
 	if _, err := os.Stat(target); err == nil {
 		return Result{Member: m.Name, Action: ActionKept, Reason: "file present"}, nil
 	} else if !os.IsNotExist(err) {
