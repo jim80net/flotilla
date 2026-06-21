@@ -42,3 +42,28 @@ func TestDetectorMirrorPanicRecoveredAndIsolated(t *testing.T) {
 		t.Fatalf("a panicking mirror must be recovered AND must not skip the other desks; mirrored=%v", mirrored)
 	}
 }
+
+// The per-desk mirror batch must run through MirrorDispatch (production wires it to `go run()` to
+// keep the mirror I/O off the tick goroutine). When set, the detector must use it rather than
+// calling the batch inline.
+func TestDetectorMirrorDispatchIsUsed(t *testing.T) {
+	dispatched, mirrored := 0, 0
+	cfg := DetectorConfig{
+		XOAgent:        "xo",
+		Desks:          []string{"xo", "deskA"},
+		Interval:       time.Minute,
+		Assess:         func(string) surface.State { return surface.StateIdle },
+		AckAge:         func() time.Duration { return 0 },
+		MirrorOnFinish: func(string) { mirrored++ },
+		MirrorDispatch: func(run func()) { dispatched++; run() }, // synchronous-recording stand-in for `go run()`
+		Persist:        func(Snapshot) error { return nil },
+	}
+	d := NewDetector(cfg, filepath.Join(t.TempDir(), "m.json"))
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "deskA": surface.StateWorking}, "h0")
+
+	d.Tick()
+
+	if dispatched != 1 || mirrored != 1 {
+		t.Fatalf("the mirror batch must run through MirrorDispatch; dispatched=%d mirrored=%d", dispatched, mirrored)
+	}
+}

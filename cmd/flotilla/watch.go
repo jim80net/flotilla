@@ -305,6 +305,7 @@ func cmdWatch(args []string) error {
 				return surface.RotateContext(xoDrv, pane)
 			},
 			MirrorOnFinish:      deskMirrorOnFinish(cfg, secrets),
+			MirrorDispatch:      func(run func()) { go run() }, // mirror I/O off the tick goroutine
 			Awaiting:            awaiting.Present,
 			SettleConsume:       settled.Consume,
 			Alert:               alert,

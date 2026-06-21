@@ -74,6 +74,13 @@ type DetectorConfig struct {
 	// affect the tick or delivery. Default nil ⇒ inert (no mirror; behavior byte-identical to before
 	// this change). The XO is deliberately excluded — it has its own mirror path.
 	MirrorOnFinish func(agent string)
+	// MirrorDispatch runs a tick's batch of per-desk mirrors. Production wires it to `go run()` so the
+	// mirror I/O (a transcript read + Discord posts) is FULLY DECOUPLED from the detector loop — even
+	// off-mutex, inline I/O on the tick goroutine could delay the next tick (and thus liveness eval)
+	// when Discord is slow (systems-review / open-code-review / cubic all flagged this). Default nil ⇒
+	// run the batch SYNCHRONOUSLY (deterministic for tests). The batch is panic-isolated per desk
+	// regardless (see mirrorOne), so an async run can never crash the daemon.
+	MirrorDispatch func(run func())
 	// Rotate rotates the XO context via surface.RotateContext (claude → /clear).
 	Rotate func() error
 	// Awaiting reports whether the awaiting-operator veto marker is present (gates
@@ -325,11 +332,17 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors []s
 	// like the wakes, OUTSIDE d.mu — a slow transcript read or Discord post must never stall the tick
 	// loop or block OperatorWake. The closure is observe-only + best-effort (it absorbs its own
 	// failures); the detector only fires the trigger.
-	for _, agent := range mirrors {
-		if d.cfg.MirrorOnFinish == nil {
-			break
+	if len(mirrors) > 0 && d.cfg.MirrorOnFinish != nil {
+		run := func() {
+			for _, agent := range mirrors {
+				d.mirrorOne(agent)
+			}
 		}
-		d.mirrorOne(agent)
+		if d.cfg.MirrorDispatch != nil {
+			d.cfg.MirrorDispatch(run) // production: `go run()` — decouple the mirror I/O from the tick loop
+		} else {
+			run() // default: synchronous (deterministic for tests)
+		}
 	}
 }
 

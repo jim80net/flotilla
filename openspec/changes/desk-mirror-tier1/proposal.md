@@ -20,7 +20,10 @@ deliberately deferred — Change B's scope must not gate Change A's door.
   resolve pane cwd (`deliver.PaneCWD`) → encode (every `/` and `.` → `-`) → glob
   `~/.claude/projects/<encoded-cwd>/*.jsonl` → newest by mtime. **Verified by
   live probe (2026-06-20):** the encoding holds for every live desk; dirs hold multiple sessions
-  (newest-mtime = active).
+  (newest-mtime = active). The encoding is Claude Code's own and is LOSSY (`/` and `.` both → `-`),
+  so two working dirs that differ only by `.`↔`/` collide to one project dir; the extractor verifies
+  the session's recorded `cwd` (present on every assistant entry) matches the desk's actual cwd and
+  SKIPS on mismatch, so one desk's turn is never posted to another's channel.
 - **Extraction (PORT the XO hook, do NOT re-derive).** The hook is the working reference for the
   hard turn-final extraction (the 4 bug-fixes). Walk the JSONL in reverse to the last
   `type=="assistant"` entry with a non-empty `text` content block; concatenate its `text` blocks

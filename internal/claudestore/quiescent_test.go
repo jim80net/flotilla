@@ -13,7 +13,9 @@ func TestWaitQuiescentWaitsUntilSizeStable(t *testing.T) {
 	defer func() { sleep, statSize = origSleep, origStat }()
 	sleep = func(time.Duration) {} // no real wait in the test
 
-	// 100 → 200 → 300 → 300 (the write settles on the 3rd beat).
+	// 100 → 200 → 300 → 300 (the write settles on the 3rd beat). Count the beats so we PROVE a
+	// stable (cur==prev) read was actually observed, not merely that reads were consumed: the
+	// initial read is 100, then three beats (200, 300, 300) — the third is the first cur==prev.
 	sizes := []int64{100, 200, 300, 300, 300}
 	i := 0
 	statSize = func(string) int64 {
@@ -23,9 +25,11 @@ func TestWaitQuiescentWaitsUntilSizeStable(t *testing.T) {
 		}
 		return v
 	}
+	beats := 0
+	sleep = func(time.Duration) { beats++ }
 	waitQuiescent("ignored")
-	if i < 3 {
-		t.Fatalf("waitQuiescent returned before the size stabilized (consumed %d reads, want >=3)", i)
+	if beats != 3 {
+		t.Fatalf("waitQuiescent should wait exactly 3 beats until the size stabilizes (100→200→300→300), got %d", beats)
 	}
 }
 

@@ -150,7 +150,13 @@ func LatestSession(cwd string) (path string, ok bool) {
 type transcriptEntry struct {
 	Type        string `json:"type"`
 	IsSidechain bool   `json:"isSidechain"`
-	Message     struct {
+	// Cwd is the working directory the session recorded for this entry (present on every
+	// user/assistant/attachment entry — live-probed 2026-06-20). It disambiguates the LOSSY project-dir
+	// encoding: because both '/' and '.' map to '-', two distinct working dirs (e.g. /a/my.app and
+	// /a/my/app) collide to one project directory; comparing the recorded cwd to the desk's actual cwd
+	// catches that collision so one desk's turn is never read from (and posted as) another's.
+	Cwd     string `json:"cwd"`
+	Message struct {
 		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`
@@ -195,9 +201,18 @@ func extractText(raw json.RawMessage) string {
 // that follow the real turn-final (the hook's "tool-result trigger blindness" fix), reading forward
 // once rather than indexing backward.
 func lastTurnText(jsonlPath string) (string, bool) {
+	text, _, ok := lastTurnTextWithCwd(jsonlPath)
+	return text, ok
+}
+
+// lastTurnTextWithCwd is lastTurnText plus the session's recorded working directory (the last
+// non-empty `cwd` seen), so the caller can verify the session actually belongs to the desk it
+// resolved — the guard against the lossy project-dir encoding collision. cwd is "" when no entry
+// recorded one (then the caller cannot verify and accepts, never a false skip).
+func lastTurnTextWithCwd(jsonlPath string) (text string, cwd string, ok bool) {
 	f, err := os.Open(jsonlPath)
 	if err != nil {
-		return "", false
+		return "", "", false
 	}
 	defer f.Close()
 
@@ -210,21 +225,24 @@ func lastTurnText(jsonlPath string) (string, bool) {
 		if json.Unmarshal(sc.Bytes(), &e) != nil {
 			continue // a torn/partial line is skipped, never fatal — keep the last VALID turn
 		}
+		if e.Cwd != "" {
+			cwd = e.Cwd // all entries share the session's cwd; last non-empty wins
+		}
 		if e.IsSidechain { // sub-agent output, not the desk's own turn
 			continue
 		}
 		if e.Type != "assistant" || e.Message.Role != "assistant" {
 			continue
 		}
-		if text := extractText(e.Message.Content); strings.TrimSpace(text) != "" {
-			last = text
+		if t := extractText(e.Message.Content); strings.TrimSpace(t) != "" {
+			last = t
 			found = true
 		}
 	}
 	if sc.Err() != nil { // an over-long line (ErrTooLong) or read error — report unread, don't post a fragment
-		return "", false
+		return "", "", false
 	}
-	return last, found
+	return last, cwd, found
 }
 
 // stripTags removes the harness-injected blocks Claude Code embeds in a turn — slash-command
@@ -264,8 +282,16 @@ func LatestTurnText(pane string) (text string, ok bool, err error) {
 		return "", false, nil
 	}
 	waitQuiescent(sessionPath) // let a still-flushing turn-final settle before extracting (no truncated post)
-	raw, ok := lastTurnText(sessionPath)
+	raw, sessionCwd, ok := lastTurnTextWithCwd(sessionPath)
 	if !ok {
+		return "", false, nil
+	}
+	// Lossy-encoding collision guard (cubic P2): the project dir is shared by any working dirs that
+	// encode alike ('/' and '.' both → '-'), so the newest-mtime session could belong to a DIFFERENT
+	// desk. If the session recorded a cwd and it disagrees with this pane's, it is a colliding desk's
+	// transcript — skip, never post one desk's turn to another's channel. A session with no recorded
+	// cwd is accepted (cannot verify ⇒ never a false skip).
+	if sessionCwd != "" && sessionCwd != cwd {
 		return "", false, nil
 	}
 	clean, substantive := stripAndClassify(raw)
