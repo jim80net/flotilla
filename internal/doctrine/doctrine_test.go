@@ -18,14 +18,15 @@ func memberByName(t *testing.T, name string) Member {
 	return Member{}
 }
 
-// The registry ships EXACTLY two members: the Rule of Three (identity-append) and
-// visibility-synthesis (heartbeat-skill). This locks the count so a future member
-// addition is a deliberate, reviewed change (and so the member-count-agnostic
-// install loop is exercised against the real registry, not a fixture).
+// The registry ships EXACTLY three members: the Rule of Three (identity-append),
+// no-self-merge (identity-append), and visibility-synthesis (heartbeat-skill). This
+// locks the count so a future member addition is a deliberate, reviewed change (and so
+// the member-count-agnostic install loop is exercised against the real registry, not a
+// fixture).
 func TestMembersRegistryContents(t *testing.T) {
 	members := Members()
-	if len(members) != 2 {
-		t.Fatalf("registry should hold exactly two members, got %d", len(members))
+	if len(members) != 3 {
+		t.Fatalf("registry should hold exactly three members, got %d", len(members))
 	}
 	byName := map[string]Member{}
 	for _, m := range members {
@@ -38,6 +39,20 @@ func TestMembersRegistryContents(t *testing.T) {
 	}
 	if rot.Mechanism != MechanismIdentityAppend {
 		t.Errorf("rule-of-three mechanism = %q, want %q", rot.Mechanism, MechanismIdentityAppend)
+	}
+
+	nsm, ok := byName["no-self-merge"]
+	if !ok {
+		t.Fatal("registry missing no-self-merge member")
+	}
+	if nsm.Mechanism != MechanismIdentityAppend {
+		t.Errorf("no-self-merge mechanism = %q, want %q", nsm.Mechanism, MechanismIdentityAppend)
+	}
+	if nsm.OpenMarker != noSelfMergeOpenMarker || nsm.CloseMarker != noSelfMergeCloseMarker {
+		t.Errorf("no-self-merge markers = open=%q close=%q, want the no-self-merge fence", nsm.OpenMarker, nsm.CloseMarker)
+	}
+	if strings.TrimSpace(nsm.Content) == "" {
+		t.Error("no-self-merge content is empty — the embed did not round-trip")
 	}
 
 	vs, ok := byName["visibility-synthesis"]
@@ -90,6 +105,47 @@ func TestRuleOfThreeContentIsEmbeddedAndMarked(t *testing.T) {
 	}
 	if !strings.Contains(inFence, "RE-DISPATCH") {
 		t.Error("recurring-fan-out sentence is not inside the marker fence")
+	}
+}
+
+// The Rule of Three is a GUIDELINE, not a hard rule (operator directive). Lock the
+// reframe so a future edit cannot silently restore hard-rule wording.
+func TestRuleOfThreeIsFramedAsGuideline(t *testing.T) {
+	m := memberByName(t, "rule-of-three")
+	for _, want := range []string{"guideline", "not a hard rule"} {
+		if !strings.Contains(strings.ToLower(m.Content), strings.ToLower(want)) {
+			t.Errorf("rule-of-three content should frame the rule as a guideline; missing %q", want)
+		}
+	}
+}
+
+// no-self-merge content must round-trip from the binary, carry its marker fence, and
+// state the load-bearing message (a desk never merges its own work; the merge is the
+// independent review), with the markers + note inside the fence so they travel with the
+// appended block.
+func TestNoSelfMergeContentIsEmbeddedAndMarked(t *testing.T) {
+	m := memberByName(t, "no-self-merge")
+	if strings.TrimSpace(m.Content) == "" {
+		t.Fatal("no-self-merge content is empty — the embed did not round-trip")
+	}
+	for _, want := range []string{
+		noSelfMergeOpenMarker,
+		noSelfMergeCloseMarker,
+		"LOAD-BEARING",              // the in-fence marker note
+		"do **NOT** merge your own", // the rule itself
+		"the merge IS the independent review",
+	} {
+		if !strings.Contains(m.Content, want) {
+			t.Errorf("no-self-merge content missing %q", want)
+		}
+	}
+	open := strings.Index(m.Content, noSelfMergeOpenMarker)
+	close := strings.Index(m.Content, noSelfMergeCloseMarker)
+	if open < 0 || close < 0 || open >= close {
+		t.Fatalf("markers out of order: open=%d close=%d", open, close)
+	}
+	if !strings.Contains(m.Content[open:close], "LOAD-BEARING") {
+		t.Error("load-bearing note is not inside the no-self-merge marker fence")
 	}
 }
 
