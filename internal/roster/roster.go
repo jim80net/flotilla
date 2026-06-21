@@ -122,6 +122,17 @@ type Config struct {
 	// ground). Empty ⇒ "none". Only consulted when ChangeDetector is on.
 	LivenessPingMode string `json:"liveness_ping_mode,omitempty"`
 
+	// VisibilitySynthesis opts into the visibility-synthesis (B2) heartbeat: when a desk finishes
+	// below a synthesizing agent (a project-XO for Tier 2, the meta-XO for Tier 3), the detector
+	// emits a WakeSynthesis to that agent so it curates a rollup of its subordinates' latest state
+	// up into its own channel. Routing is derived from the federation membership graph (AgentsBelow
+	// / AgentsAbove, fleet-command-excluded). Opt-in (default false ⇒ fully inert — no synthesis
+	// wake ever fires, behavior byte-identical to before this change). Builds on the change-detector
+	// (it rides the same tick + the AgentsAbove resolver) and the per-desk webhooks (the post
+	// target), so it is only effective when change_detector is on and secrets supply each
+	// synthesizing agent's channel webhook.
+	VisibilitySynthesis bool `json:"visibility_synthesis,omitempty"`
+
 	// --- federation (`federation-channels`); validated at load ---
 
 	// Channels binds Discord channels to XOs for federation (per-XO + fleet-command

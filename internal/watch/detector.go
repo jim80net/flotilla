@@ -42,6 +42,13 @@ const (
 	// reasons carry that item's raw line (the caller names it in the prompt). Emitted
 	// instead of settling while the backlog gate reports unblocked work remains.
 	WakeBacklog
+	// WakeSynthesis: the visibility-synthesis (B2) tick — a synthesizing agent is OWED a
+	// curated rollup of its subordinates' latest state (a desk finished below it, and a
+	// subordinate's state changed since the last synthesis). It targets an ARBITRARY
+	// synthesizing agent (a project XO for Tier 2, the meta-XO for Tier 3), NOT the
+	// daemon's primary clock XO, so it is delivered through the parallel WakeAgent seam,
+	// never the primary-XO Wake. The reasons name the subordinate(s) that changed.
+	WakeSynthesis
 )
 
 // DetectorConfig wires a Detector. The collaborators are injected so the whole
@@ -81,6 +88,42 @@ type DetectorConfig struct {
 	// run the batch SYNCHRONOUSLY (deterministic for tests). The batch is panic-isolated per desk
 	// regardless (see mirrorOne), so an async run can never crash the daemon.
 	MirrorDispatch func(run func())
+
+	// --- visibility synthesis (B2) — ALL inert by default (no synthesis wake ever fires when the
+	// feature is unconfigured; behavior byte-identical to before this change). ---
+
+	// WakeAgent is the PARALLEL agent-targeted wake seam for synthesis. The shipped primary-XO Wake
+	// is left BYTE-IDENTICAL (re-trio P2-1) — widening Wake would break every existing call site;
+	// a parallel seam keeps the inert-when-absent story intact. WakeSynthesis is delivered through
+	// HERE to an arbitrary synthesizing agent (a project XO / the meta-XO), never through Wake.
+	// Like the other side-effects it runs in runTail, OUTSIDE d.mu (its confirmed delivery acquires
+	// the pane-txn lock). Default nil ⇒ inert: no synthesis wake is ever delivered.
+	WakeAgent func(agent string, kind WakeKind, reasons []string)
+	// SynthParents resolves the synthesizing PARENT(s) OWED a rollup when a desk finishes — the
+	// roster's AgentsAbove(agent) (members of the non-fleet-command channels the agent owns, minus
+	// self). A boat in two channels marks BOTH owed; a project-XO finishing marks the meta-XO owed
+	// (the Tier-3 recursion). Default nil ⇒ inert: a finishing desk marks NOBODY owed, so the
+	// owed-set stays empty and no synthesis wake fires (byte-identical to before).
+	SynthParents func(agent string) []string
+	// SynthRead resolves a subordinate agent's latest turn-final text (ok=false ⇒ unreadable: pane
+	// won't resolve / surface has no ResultReader). The detector consults it for the materiality
+	// gate (did a subordinate's state change since the last synthesis). An unreadable subordinate is
+	// EXCLUDED from the materiality hash for that wake (never recorded as empty — no flap). Default
+	// nil ⇒ inert (the materiality gate sees no readable subordinates, so it never fires a wake).
+	SynthRead func(agent string) (string, bool)
+	// SynthEveryTicks is the digest sub-cadence (debounce-up): WakeSynthesis fires for an owed agent
+	// AT MOST once per this many ticks. It derives at the call site from heartbeat_interval (a small
+	// multiple). A burst of finishes coalesces to one wake; an idle fleet (nothing owed) fires
+	// nothing. NewDetector defaults it to a sensible floor when < 1.
+	SynthEveryTicks int
+	// SynthPersist / SynthLoad are the disk-sidecar I/O for the DURABLE last-seen materiality state,
+	// injected for testability (mirroring how Persist is injected). The sidecar survives BOTH
+	// context rotation AND daemon restart — an in-memory-only snapshot re-posts everything as "new"
+	// on the first post-restart wake (a restart-storm). NewDetectorWithSynthSidecar defaults them to
+	// SynthState.Save / LoadSynthState over the sidecar path. A missing/corrupt sidecar fails SAFE
+	// toward "all changed" (synthesize once), never silent-never-fire.
+	SynthPersist func(SynthState) error
+	SynthLoad    func() (SynthState, bool)
 	// Rotate rotates the XO context via surface.RotateContext (claude → /clear).
 	Rotate func() error
 	// Awaiting reports whether the awaiting-operator veto marker is present (gates
@@ -136,14 +179,26 @@ type Detector struct {
 	degraded    bool
 	wd          *Watchdog
 
+	// --- visibility synthesis (B2) state, guarded by the same d.mu single-writer invariant ---
+	synthOwed      map[string]bool // synthesizing agent → has a rollup owed (a desk finished below it)
+	synthSinceFire map[string]int  // synthesizing agent → ticks since its last WakeSynthesis fired
+	synthState     SynthState      // the DURABLE last-seen materiality snapshot (loaded from the sidecar)
+
 	stop      chan struct{}
 	done      chan struct{}
 	startOnce sync.Once
 	stopOnce  sync.Once
 }
 
+// synthEveryTicksDefault is the digest sub-cadence floor (in ticks) when the caller does not set
+// SynthEveryTicks. It bounds the rate of synthesis wakes (debounce-up); the skill bounds the
+// content. The call site derives the deployment value from heartbeat_interval (a small multiple).
+const synthEveryTicksDefault = 3
+
 // NewDetector builds a detector from config, loading any persisted snapshot (a
-// missing/corrupt one cold-starts → one conservative wake on the first tick).
+// missing/corrupt one cold-starts → one conservative wake on the first tick). The synthesis
+// materiality sidecar defaults to inert (no durable last-seen state, no synthesis wake);
+// production uses NewDetectorWithSynthSidecar to wire a durable sidecar path.
 func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
@@ -166,17 +221,41 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 	if cfg.BacklogStuckCap < 1 {
 		cfg.BacklogStuckCap = 5
 	}
+	if cfg.SynthEveryTicks < 1 {
+		cfg.SynthEveryTicks = synthEveryTicksDefault
+	}
+	if cfg.SynthParents == nil {
+		// No synthesis routing configured ⇒ a finishing desk marks NOBODY owed, so the owed-set
+		// stays empty and no synthesis wake ever fires (byte-identical to before this change).
+		cfg.SynthParents = func(string) []string { return nil }
+	}
+	if cfg.SynthLoad == nil {
+		// No durable sidecar wired ⇒ no last-seen state. With SynthLoad inert, the materiality gate
+		// has no persisted history; combined with the default-nil SynthRead/WakeAgent the synthesis
+		// path is fully inert. (Production wires a sidecar via NewDetectorWithSynthSidecar.)
+		cfg.SynthLoad = func() (SynthState, bool) { return SynthState{}, false }
+	}
+	if cfg.SynthPersist == nil {
+		cfg.SynthPersist = func(SynthState) error { return nil }
+	}
 	ping, alert := livenessParams(cfg.LivenessPingMode, cfg.MaxMissedAcks, cfg.MaxQuietIntervals)
 
 	snap, ok := LoadSnapshot(snapPath)
+	synthState, _ := cfg.SynthLoad() // a missing/corrupt sidecar (ok=false) fails safe to empty ⇒ all-changed
+	if synthState.LastSeen == nil {
+		synthState.LastSeen = map[string]map[string]string{}
+	}
 	d := &Detector{
-		cfg:           cfg,
-		pingEvery:     ping,
-		alertInterval: alert,
-		snap:          snap,
-		cold:          !ok,
-		driveCount:    map[string]int{},
-		shellStreak:   map[string]int{},
+		cfg:            cfg,
+		pingEvery:      ping,
+		alertInterval:  alert,
+		snap:           snap,
+		cold:           !ok,
+		driveCount:     map[string]int{},
+		shellStreak:    map[string]int{},
+		synthOwed:      map[string]bool{},
+		synthSinceFire: map[string]int{},
+		synthState:     synthState,
 		// The detector computes the staleness threshold itself (age > alertInterval×
 		// interval), so the watchdog only needs to trip on the first stale/crash
 		// signal and debounce — maxMissed=1.
@@ -185,6 +264,22 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 		done: make(chan struct{}),
 	}
 	return d
+}
+
+// NewDetectorWithSynthSidecar is NewDetector with the DURABLE visibility-synthesis materiality
+// sidecar wired to a disk path (alongside the detector's existing snapshot). The sidecar holds the
+// per-synthesizing-agent last-seen hash of each subordinate's latest turn text, so the materiality
+// gate survives BOTH context rotation AND a daemon restart (no synthesis restart-storm). A
+// missing/corrupt sidecar fails SAFE toward "all changed" (synthesize once). Production calls this;
+// tests that exercise synthesis pass an explicit sidecar path.
+func NewDetectorWithSynthSidecar(cfg DetectorConfig, snapPath, synthSidecarPath string) *Detector {
+	if cfg.SynthLoad == nil {
+		cfg.SynthLoad = func() (SynthState, bool) { return LoadSynthState(synthSidecarPath) }
+	}
+	if cfg.SynthPersist == nil {
+		cfg.SynthPersist = func(s SynthState) error { return s.Save(synthSidecarPath) }
+	}
+	return NewDetector(cfg, snapPath)
 }
 
 // livenessParams resolves the ping cadence and the wedge-alert window (both in
@@ -288,6 +383,10 @@ func (d *Detector) OperatorWake() {
 type deferredWake struct {
 	kind    WakeKind
 	reasons []string
+	// agent, when non-empty, routes the wake through the agent-targeted WakeAgent seam to a
+	// SYNTHESIZING agent (WakeSynthesis) instead of the primary-XO Wake. Empty ⇒ the shipped
+	// primary-XO path (Wake), byte-identical to before this change.
+	agent string
 }
 
 // Tick runs one detector cycle. The state machine (snapshot → liveness → diff → wake-or-sleep
@@ -324,6 +423,16 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors []s
 		}
 	}
 	for _, w := range wakes {
+		if w.agent != "" {
+			// A synthesis wake targets an ARBITRARY synthesizing agent (not the primary clock XO),
+			// so it is delivered through the parallel WakeAgent seam. The shipped Wake path is left
+			// untouched. Inert when WakeAgent is unwired (no synthesis wake is ever enqueued anyway,
+			// since the owed-set stays empty without SynthParents).
+			if d.cfg.WakeAgent != nil {
+				d.cfg.WakeAgent(w.agent, w.kind, w.reasons)
+			}
+			continue
+		}
 		if d.cfg.Wake != nil {
 			d.cfg.Wake(w.kind, w.reasons)
 		}
@@ -385,7 +494,7 @@ func (d *Detector) tickLocked() (pendingRotate bool, pendingWakes []deferredWake
 	woke := false
 	wake := func(kind WakeKind, reasons []string) {
 		woke = true
-		pendingWakes = append(pendingWakes, deferredWake{kind, reasons})
+		pendingWakes = append(pendingWakes, deferredWake{kind: kind, reasons: reasons})
 	}
 	requestRotate := func() { pendingRotate = true }
 
@@ -429,6 +538,14 @@ func (d *Detector) tickLocked() (pendingRotate bool, pendingWakes []deferredWake
 		}
 		if prev.DeskStates[name] == surface.StateWorking && cur.DeskStates[name] == surface.StateIdle {
 			pendingMirrors = append(pendingMirrors, name)
+			// 2c. Visibility-synthesis OWED marking (B2): a non-XO desk finishing a turn marks
+			//     synthesis owed for each of its synthesizing parent(s) — AgentsAbove(name). A boat in
+			//     two channels marks BOTH; a project-XO finishing marks the meta-XO (the Tier-3
+			//     recursion, since a project-XO is itself a non-XO "desk" below the meta). Inert when
+			//     SynthParents is the default (returns nil) — nobody is ever owed.
+			for _, parent := range d.cfg.SynthParents(name) {
+				d.synthOwed[parent] = true
+			}
 		}
 	}
 
@@ -449,6 +566,14 @@ func (d *Detector) tickLocked() (pendingRotate bool, pendingWakes []deferredWake
 		d.continueXO(&cur, wake, requestRotate)
 	}
 
+	// 5b. Visibility-synthesis wakes (B2). Decide UNDER d.mu which OWED synthesizing agents are due
+	//     a curated rollup this tick (digest sub-cadence + a DURABLE materiality gate), append them
+	//     to pendingWakes routed through the agent-targeted WakeAgent seam, and commit the materiality
+	//     state in-memory. These are DELIBERATELY separate from `woke`: a synthesis wake targets an
+	//     arbitrary synthesizing agent via WakeAgent, never the primary clock XO, so it must NOT reset
+	//     the primary XO's quiet/liveness counters below. Inert (no-op) when nothing is owed.
+	pendingWakes = append(pendingWakes, d.decideSynthesis()...)
+
 	// 6. Max-quiet liveness ping (layer 3). Any wake above already refreshes
 	//    liveness (L1), so only an entirely-quiet tick advances the quiet counter.
 	if woke {
@@ -467,6 +592,111 @@ func (d *Detector) tickLocked() (pendingRotate bool, pendingWakes []deferredWake
 	//    cubic-P1 at-least-once).
 	d.snap = cur
 	return pendingRotate, pendingWakes, pendingMirrors
+}
+
+// decideSynthesis is the visibility-synthesis (B2) wake decider, run UNDER d.mu from tickLocked. For
+// each OWED synthesizing agent (a desk finished below it since its last fire) it applies the digest
+// sub-cadence (debounce-up — at most one wake per SynthEveryTicks per agent) and the DURABLE
+// materiality gate (synthesize only when a subordinate's latest turn text CHANGED since last
+// synthesis). It returns the agent-targeted WakeSynthesis deferredWakes to enqueue in runTail, and
+// commits the per-agent last-seen materiality hashes in-memory (durably persisted alongside the
+// snapshot in d.save). It is a NO-OP when nothing is owed (the inert default), preserving $0-idle.
+//
+// Cadence: synthSinceFire[agent] is the tick count since the agent last fired; it advances every
+// tick for every owed agent, and an agent never seen before is eligible immediately (the map's zero
+// is treated as "fire now" by seeding it high on first owe). Materiality: a fire commits the fresh
+// hash set and CLEARS owed; a cadence-eligible-but-immaterial owe also clears owed (nothing changed
+// — a later finish re-owes); a NOT-yet-cadence-eligible owe is KEPT pending so a burst still
+// coalesces into one wake once the cadence window elapses.
+func (d *Detector) decideSynthesis() []deferredWake {
+	// Advance the digest cadence clock for every agent that has fired before, INDEPENDENT of whether
+	// it is owed this tick — so a long quiet period since the last synthesis makes the next owe
+	// immediately eligible (the cadence spaces consecutive WAKES, it does not penalize an idle gap).
+	for agent := range d.synthSinceFire {
+		d.synthSinceFire[agent]++
+	}
+	if len(d.synthOwed) == 0 {
+		return nil // nothing owed ⇒ no synthesis wake (the inert / $0-idle path)
+	}
+
+	// Deterministic order: iterate the configured desks first, then any extra owed agents, so the
+	// wake order (and thus tests) is stable rather than map-iteration-random.
+	order := make([]string, 0, len(d.synthOwed))
+	seen := map[string]bool{}
+	for _, name := range d.cfg.Desks {
+		if d.synthOwed[name] && !seen[name] {
+			order = append(order, name)
+			seen[name] = true
+		}
+	}
+	for agent := range d.synthOwed {
+		if !seen[agent] {
+			order = append(order, agent)
+			seen[agent] = true
+		}
+	}
+
+	var wakes []deferredWake
+	for _, agent := range order {
+		// Cadence eligibility: a never-fired agent (no synthSinceFire entry) is eligible at once; an
+		// agent that fired recently must wait out the digest window. The counters were advanced above.
+		if elapsed, known := d.synthSinceFire[agent]; known && elapsed < d.cfg.SynthEveryTicks {
+			continue // within the digest window — keep owed pending; the burst coalesces
+		}
+
+		// Cadence-eligible: consult the DURABLE materiality gate over this agent's read set.
+		readSet := d.synthReadSet(agent)
+		changed, fresh := materialSubordinates(d.synthState.LastSeen[agent], readSet, d.synthReadOne)
+
+		// Owe is consumed either way: a fire records what changed; an immaterial owe drops the
+		// pending trigger (a later finish re-owes). Keeping it would re-poll SynthRead every tick.
+		delete(d.synthOwed, agent)
+
+		if len(changed) == 0 {
+			continue // nothing material changed since last synthesis — suppress (no re-post)
+		}
+		// FIRE: commit the fresh last-seen hashes, reset the cadence counter, enqueue the wake.
+		if d.synthState.LastSeen == nil {
+			d.synthState.LastSeen = map[string]map[string]string{}
+		}
+		d.synthState.LastSeen[agent] = fresh
+		d.synthSinceFire[agent] = 0
+		wakes = append(wakes, deferredWake{kind: WakeSynthesis, reasons: changed, agent: agent})
+	}
+	return wakes
+}
+
+// synthReadSet returns the synthesizing agent's read set — the subordinates whose latest state it
+// rolls up. v1 uses the SAME relation as the owed-marking inverse: the agents whose finish would
+// mark THIS agent owed. The production caller resolves it via roster.AgentsBelow(agent); the
+// detector discovers it from the desks that name `agent` as a parent (SynthParents), so the
+// materiality read set and the owed-marking stay derived from one source. Order-stable (desk order).
+func (d *Detector) synthReadSet(agent string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, name := range d.cfg.Desks {
+		if name == agent || seen[name] {
+			continue
+		}
+		for _, parent := range d.cfg.SynthParents(name) {
+			if parent == agent {
+				out = append(out, name)
+				seen[name] = true
+				break
+			}
+		}
+	}
+	return out
+}
+
+// synthReadOne reads a subordinate's latest turn-final text via the injected SynthRead seam
+// (ok=false ⇒ unreadable — excluded from materiality). Defaults to unreadable when SynthRead is
+// unwired, keeping the synthesis path inert.
+func (d *Detector) synthReadOne(agent string) (string, bool) {
+	if d.cfg.SynthRead == nil {
+		return "", false
+	}
+	return d.cfg.SynthRead(agent)
 }
 
 // continueXO handles the XO's own Working→Idle. It rotates to fresh context (unless awaiting an
@@ -618,6 +848,19 @@ func (d *Detector) save() {
 		return
 	}
 	d.writeFails = 0
+
+	// Durably persist the visibility-synthesis materiality sidecar (B2) so the last-seen state
+	// survives a daemon restart (no synthesis restart-storm). Only written when synthesis has
+	// recorded state — an inert deployment (no last-seen entries) writes nothing, so a fleet
+	// without synthesis is byte-identical to before (no extra file). A sidecar write failure is
+	// logged and dropped: it can only cost an EXTRA synthesis on the next restart (the sidecar
+	// fails safe to all-changed), never a silent miss, so it must not trip the snapshot degrade
+	// path or alert.
+	if len(d.synthState.LastSeen) > 0 {
+		if err := d.cfg.SynthPersist(d.synthState); err != nil {
+			log.Printf("flotilla watch: synthesis sidecar persist failed: %v (continuing — at worst one extra synthesis after a restart)", err)
+		}
+	}
 }
 
 // xoFinishedTurn reports the XO's own Working→Idle transition (its self-
