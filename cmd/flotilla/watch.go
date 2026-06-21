@@ -328,6 +328,7 @@ func cmdWatch(args []string) error {
 		}
 		fmt.Printf("flotilla watch: change-detector running — XO=%s interval=%s ping-mode=%s ack=%s snapshot=%s\n",
 			xo, interval, mode, *ackPath, *snapshotPath)
+		logMirrorCoverage(cfg, secrets, xo)
 	} else {
 		// ---- legacy always-wake heartbeat ----
 		wd := watch.NewWatchdog(*maxMissed, alert)
@@ -528,6 +529,30 @@ func backlogWakeBody(items []string, backlogPath, ackInstr string) string {
 // never diverge. A surface without a ResultReader (none today besides claude/grok) is a clean SKIP.
 // Everything is OBSERVE-ONLY + BEST-EFFORT inside deskMirror.run — a failure to resolve, read, chunk,
 // or post is logged on one line and dropped, NEVER propagated to the tick or delivery.
+// logMirrorCoverage emits a ONE-TIME startup line naming which non-XO desks WILL mirror (a webhook
+// resolves) and which will NOT (no webhook ⇒ a silent per-desk SKIP at runtime). Without it, a
+// newcomer who set --secrets only for the alert webhook sees empty desk channels with no clue why —
+// the visibility door looks broken when it is merely unprovisioned. With secrets nil the mirror is
+// inert and this prints nothing.
+func logMirrorCoverage(cfg *roster.Config, secrets *roster.Secrets, xo string) {
+	if secrets == nil {
+		return
+	}
+	var withMirror, without []string
+	for _, a := range cfg.Agents {
+		if a.Name == xo {
+			continue // the XO has its own mirror path, not the per-desk one
+		}
+		if url, err := secrets.Webhook(a.Name); err == nil && url != "" {
+			withMirror = append(withMirror, a.Name)
+		} else {
+			without = append(without, a.Name)
+		}
+	}
+	fmt.Printf("flotilla watch: desk mirror — %d will mirror %v; %d have no webhook (will not mirror) %v\n",
+		len(withMirror), withMirror, len(without), without)
+}
+
 func deskMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets) func(agent string) {
 	if secrets == nil {
 		return nil

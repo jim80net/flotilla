@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/jim80net/flotilla/internal/discord"
 )
@@ -53,6 +54,7 @@ func (m deskMirror) run(agent string) {
 
 	chunks := discord.ChunkContent(text, mirrorChunkLimit)
 	n := len(chunks)
+	runes := utf8.RuneCountInString(text) // resplen: the canary diagnostic for a post-hoc truncation hunt
 	for i, chunk := range chunks {
 		body := chunk
 		if n > 1 {
@@ -65,5 +67,5 @@ func (m deskMirror) run(agent string) {
 			return
 		}
 	}
-	m.logf("flotilla watch: mirror POST %s %d chunks", agent, n)
+	m.logf("flotilla watch: mirror POST %s %d chunks resplen=%d", agent, n, runes)
 }

@@ -15,8 +15,11 @@ import "strings"
 // not bytes, for parity with MaxContentRunes / clampContent (a multi-byte rune is never split).
 //
 // Ported from the working XO mirror hook's chunk() (BUG-4 fix), with the byte-length checks replaced
-// by rune-length checks. An empty input yields a single empty chunk so a caller always has something
-// to post (matching the hook's `parts or [text[:lim]]`).
+// by rune-length checks. An empty input yields a single empty chunk (matching the hook's
+// `parts or [text[:lim]]`). NOTE: Discord rejects an empty `content`, so a caller that may pass
+// empty/whitespace input MUST pre-filter it or skip an empty resulting chunk. The per-desk mirror
+// pre-filters (it only chunks a turn that already classified as substantive), so it never hits this;
+// a future `notify --chunk` consumer must take the same care.
 func ChunkContent(text string, limit int) []string {
 	if limit < 1 {
 		limit = MaxContentRunes

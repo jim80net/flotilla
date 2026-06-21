@@ -34,6 +34,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/jim80net/flotilla/internal/deliver"
 )
@@ -43,6 +44,51 @@ import (
 // the cap to 16 megabytes, matching grokstore. An over-cap line surfaces bufio.ErrTooLong rather
 // than being silently truncated; lastTurnText reports the read as failed (ok=false) in that case.
 const maxLine = 16 << 20
+
+// quiescenceBeat / quiescenceMaxBeats bound the transcript-flush stabilization wait. The detector
+// fires the mirror on the CONFIRMED Working→Idle edge — later than the Stop hook (which fired AT
+// turn-end, right in the flush window, and so needed a stabilization loop, the hook's BUG-3). By the
+// time the detector observes Idle on a poll, the turn has almost always been fully flushed for a
+// while. This is the cheap backstop for the rare tick that lands in the sub-second window between the
+// spinner clearing and the final assistant message finishing its write: read the session file's size,
+// wait a beat, re-read, and require it to hold stable before extracting — so a still-flushing turn is
+// never read (and posted) truncated, the one failure class worse than silence. Bounded so a file that
+// keeps growing (a desk that resumed Working between our reads — should not happen post-Idle) can
+// never wedge the mirror. Runs in runTail, OUTSIDE the detector mutex, so the wait never touches the
+// clock.
+const (
+	quiescenceBeat     = 300 * time.Millisecond
+	quiescenceMaxBeats = 5
+)
+
+// sleep and statSize are injected so the stabilization is deterministically unit-testable (a test
+// pins sleep to a no-op and statSize to a scripted size sequence). Production uses the real clock +
+// filesystem.
+var (
+	sleep    = time.Sleep
+	statSize = func(path string) int64 {
+		if info, err := os.Stat(path); err == nil {
+			return info.Size()
+		}
+		return -1
+	}
+)
+
+// waitQuiescent blocks until path's size holds stable across one beat (or the bound elapses), so a
+// turn-final still being flushed to disk is not read mid-write. Size-stability is the signal the XO
+// hook used (BUG-3); for the detector's late Working→Idle edge it almost always passes on the first
+// re-check, costing one beat.
+func waitQuiescent(path string) {
+	prev := statSize(path)
+	for i := 0; i < quiescenceMaxBeats; i++ {
+		sleep(quiescenceBeat)
+		cur := statSize(path)
+		if cur == prev {
+			return
+		}
+		prev = cur
+	}
+}
 
 // encodeProjectDir encodes a pane's working directory to the directory name Claude Code uses under
 // ~/.claude/projects: every '/' AND '.' becomes '-'. Live-probed (2026-06-20):
@@ -217,6 +263,7 @@ func LatestTurnText(pane string) (text string, ok bool, err error) {
 	if !ok {
 		return "", false, nil
 	}
+	waitQuiescent(sessionPath) // let a still-flushing turn-final settle before extracting (no truncated post)
 	raw, ok := lastTurnText(sessionPath)
 	if !ok {
 		return "", false, nil

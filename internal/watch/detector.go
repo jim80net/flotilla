@@ -326,10 +326,30 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors []s
 	// loop or block OperatorWake. The closure is observe-only + best-effort (it absorbs its own
 	// failures); the detector only fires the trigger.
 	for _, agent := range mirrors {
-		if d.cfg.MirrorOnFinish != nil {
-			d.cfg.MirrorOnFinish(agent)
+		if d.cfg.MirrorOnFinish == nil {
+			break
 		}
+		d.mirrorOne(agent)
 	}
+}
+
+// mirrorOne invokes the per-desk visibility mirror with a recover() backstop. The mirror is
+// OBSERVE-ONLY, so a panic inside it (a future claudestore refactor, a nil-map deref) MUST be
+// swallowed + logged, never allowed to unwind through the detector goroutine and kill the
+// safety-critical clock. This is the STRUCTURAL guarantee — not merely by-inspection — that the
+// mirror can never harm the tick loop. (Wake/Rotate in the tail are deliberately NOT recovered: they
+// are FUNCTIONAL side-effects, and a panic there is a real bug that must surface, not a best-effort
+// post to absorb.) We keep the call SYNCHRONOUS rather than `go d.cfg.MirrorOnFinish(agent)`: a bare
+// goroutine's panic is UNRECOVERABLE and would crash the whole daemon (the opposite of the goal), and
+// the call already runs outside d.mu so it never blocks OperatorWake — a slow mirror only delays the
+// next ticker beat (which time.Ticker coalesces), negligible against the heartbeat interval.
+func (d *Detector) mirrorOne(agent string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("flotilla watch: desk mirror panicked for %q (recovered; tick unaffected): %v", agent, r)
+		}
+	}()
+	d.cfg.MirrorOnFinish(agent)
 }
 
 // persist durably writes the snapshot committed in-memory by tickLocked. It re-acquires d.mu
