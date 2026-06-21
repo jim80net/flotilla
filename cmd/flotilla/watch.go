@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -97,15 +98,19 @@ func cmdWatch(args []string) error {
 		*trackerPath = filepath.Join(rosterDir, ".flotilla-state.md")
 	}
 
-	// Load secrets once: the bot token (gateway) and the alert/notice webhook.
-	// A configured-but-broken secrets file is fatal — don't silently degrade to
-	// clock-only (the operator set --secrets expecting the relay).
+	// Load secrets once: the bot token (gateway), the alert/notice webhook, and — kept for the
+	// per-desk visibility mirror — the whole Secrets so each desk's own webhook can be resolved at
+	// mirror time (a webhook is channel-bound, so posting under a desk's webhook lands in its
+	// channel). A configured-but-broken secrets file is fatal — don't silently degrade to clock-only
+	// (the operator set --secrets expecting the relay).
 	var alertHook, botToken string
+	var secrets *roster.Secrets
 	if *secretsPath != "" {
-		secrets, err := roster.LoadSecrets(*secretsPath)
+		s, err := roster.LoadSecrets(*secretsPath)
 		if err != nil {
 			return err
 		}
+		secrets = s
 		botToken = secrets.BotToken()
 		if h, err := secrets.Webhook(xo); err == nil {
 			alertHook = h
@@ -299,6 +304,8 @@ func cmdWatch(args []string) error {
 				defer txn.Release()
 				return surface.RotateContext(xoDrv, pane)
 			},
+			MirrorOnFinish:      deskMirrorOnFinish(cfg, secrets),
+			MirrorDispatch:      func(run func()) { go run() }, // mirror I/O off the tick goroutine
 			Awaiting:            awaiting.Present,
 			SettleConsume:       settled.Consume,
 			Alert:               alert,
@@ -322,6 +329,7 @@ func cmdWatch(args []string) error {
 		}
 		fmt.Printf("flotilla watch: change-detector running — XO=%s interval=%s ping-mode=%s ack=%s snapshot=%s\n",
 			xo, interval, mode, *ackPath, *snapshotPath)
+		logMirrorCoverage(cfg, secrets, xo)
 	} else {
 		// ---- legacy always-wake heartbeat ----
 		wd := watch.NewWatchdog(*maxMissed, alert)
@@ -510,6 +518,84 @@ func backlogWakeBody(items []string, backlogPath, ackInstr string) string {
 		"genuinely operator-blocked, drive PREP and move to the next. Reply idle ONLY if every remaining " +
 		"backlog item is done or operator-blocked — the loop will NOT settle while unblocked work remains. " +
 		"Read the backlog file (" + backlogPath + "), not this conversation." + ackInstr
+}
+
+// deskMirrorOnFinish builds the detector's MirrorOnFinish side-effect: when a non-XO desk finishes a
+// turn, mirror its turn-final output to its home Discord channel. It returns nil — the detector's
+// inert default — when no secrets file is configured (no per-desk webhooks to post to), so a
+// deployment without --secrets keeps today's behavior byte-identically.
+//
+// The closure resolves each desk's surface driver and reads the turn-final through the SHARED
+// surface.ResultReader seam (the same path `flotilla result` uses), so the CLI and the auto-mirror
+// never diverge. A surface without a ResultReader (none today besides claude/grok) is a clean SKIP.
+// Everything is OBSERVE-ONLY + BEST-EFFORT inside deskMirror.run — a failure to resolve, read, chunk,
+// or post is logged on one line and dropped, NEVER propagated to the tick or delivery.
+// logMirrorCoverage emits a ONE-TIME startup line naming which non-XO desks WILL mirror (a webhook
+// resolves) and which will NOT (no webhook ⇒ a silent per-desk SKIP at runtime). Without it, a
+// newcomer who set --secrets only for the alert webhook sees empty desk channels with no clue why —
+// the visibility door looks broken when it is merely unprovisioned. With secrets nil the mirror is
+// inert and this prints nothing.
+func logMirrorCoverage(cfg *roster.Config, secrets *roster.Secrets, xo string) {
+	if secrets == nil {
+		return
+	}
+	var withMirror, without []string
+	for _, a := range cfg.Agents {
+		if a.Name == xo {
+			continue // the XO has its own mirror path, not the per-desk one
+		}
+		if url, err := secrets.Webhook(a.Name); err == nil && url != "" {
+			withMirror = append(withMirror, a.Name)
+		} else {
+			without = append(without, a.Name)
+		}
+	}
+	fmt.Printf("flotilla watch: desk mirror — %d will mirror %v; %d have no webhook (will not mirror) %v\n",
+		len(withMirror), withMirror, len(without), without)
+}
+
+func deskMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets) func(agent string) {
+	if secrets == nil {
+		return nil
+	}
+	return func(agent string) {
+		m := deskMirror{
+			webhook: func(a string) (string, bool) {
+				url, err := secrets.Webhook(a)
+				if err != nil || url == "" {
+					return "", false
+				}
+				return url, true
+			},
+			turnFinal: func(a string) (string, bool, error) {
+				drv, ok := surface.Get(agentSurface(cfg, a))
+				if !ok {
+					return "", false, fmt.Errorf("unknown surface for agent %q", a)
+				}
+				rr, ok := drv.(surface.ResultReader)
+				if !ok {
+					// No session-store reader for this surface — nothing substantive to mirror (clean skip).
+					return "", false, nil
+				}
+				pane, err := deliver.ResolvePane(agentTitle(cfg, a))
+				if err != nil {
+					return "", false, err
+				}
+				// LatestResult collapses "no substantive completed turn yet" and a genuine read failure
+				// into one error (its CLI contract). For the mirror BOTH are non-fatal — a SKIP, never a
+				// MIRROR-FAIL — so we return ok=false. The error is carried through ONLY so the decision
+				// log names the reason; deskMirror.run logs it as a SKIP, not a failure, and drops it.
+				text, err := rr.LatestResult(pane)
+				if err != nil {
+					return "", false, err
+				}
+				return text, true, nil
+			},
+			post: discord.Post,
+			logf: log.Printf,
+		}
+		m.run(agent)
+	}
 }
 
 // agentTitle returns the tmux pane title to resolve for an agent name.

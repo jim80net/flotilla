@@ -1,9 +1,11 @@
 package surface
 
 import (
+	"fmt"
 	"log"
 	"strings"
 
+	"github.com/jim80net/flotilla/internal/claudestore"
 	"github.com/jim80net/flotilla/internal/deliver"
 )
 
@@ -20,16 +22,21 @@ type claudeCode struct {
 	parseBusy   func(string) bool
 	send        func(string, string) error
 	clear       func(string) error
+	// ResultReader seam: read the desk's turn-final text from its Claude Code session transcript,
+	// keyed by the pane. Injectable so LatestResult is unit-testable without tmux or a real
+	// ~/.claude/projects tree (mirrors the grok driver's latestResult seam).
+	latestTurnText func(pane string) (string, bool, error)
 }
 
 func newClaudeCode() claudeCode {
 	return claudeCode{
-		paneCommand: deliver.PaneCommand,
-		isShell:     deliver.IsShell,
-		capturePane: deliver.CapturePane,
-		parseBusy:   deliver.ParseBusy,
-		send:        deliver.Send,
-		clear:       deliver.ClearContext,
+		paneCommand:    deliver.PaneCommand,
+		isShell:        deliver.IsShell,
+		capturePane:    deliver.CapturePane,
+		parseBusy:      deliver.ParseBusy,
+		send:           deliver.Send,
+		clear:          deliver.ClearContext,
+		latestTurnText: claudestore.LatestTurnText,
 	}
 }
 
@@ -89,6 +96,23 @@ func (c claudeCode) Assess(pane string) State {
 func (c claudeCode) Rotate(pane string) error { return c.clear(pane) }
 
 func (claudeCode) RotateStrategy() Strategy { return SlashCommand }
+
+// LatestResult implements ResultReader: the desk's turn-final assistant text, read from its Claude
+// Code session transcript (located from outside the session via the pane's working directory). This
+// is the SAME seam the per-desk auto-mirror reads through, so `flotilla result <claude-desk>` and
+// the mirror share one extraction path. A located-but-empty session (no completed turn yet, or a
+// pure-command-noise turn) surfaces a clear error rather than empty output — symmetric with grok's
+// "no assistant turn yet". A pane-cwd resolution failure (a tmux read error) propagates.
+func (c claudeCode) LatestResult(pane string) (string, error) {
+	text, ok, err := c.latestTurnText(pane)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("claude-code: no substantive completed turn for the desk at pane %q (no session located, no assistant turn yet, or the turn was pure command noise)", pane)
+	}
+	return text, nil
+}
 
 // ComposerPending implements surface.ComposerProbe: it reads the pane and classifies the
 // composer line so confirmed delivery can confirm on the composer CLEARING (the body left the
