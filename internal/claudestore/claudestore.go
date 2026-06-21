@@ -33,6 +33,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -110,35 +111,53 @@ func projectsRoot() (string, bool) {
 	return filepath.Join(home, ".claude", "projects"), true
 }
 
-// LatestSession returns the path of the most-recently-modified transcript (*.jsonl) under the
-// project directory for cwd, with ok=false when the home directory is unresolvable, the project
-// directory does not exist, or it holds no .jsonl files. A project directory accumulates many
-// sessions over a desk's life; the active one is the newest by mtime.
-func LatestSession(cwd string) (path string, ok bool) {
+// sessionsByMtime returns every transcript (*.jsonl) under cwd's project directory, NEWEST mtime
+// first, with ok=false when the home directory is unresolvable, the project directory does not
+// exist, or it holds no .jsonl files. A project directory accumulates many sessions over a desk's
+// life (and, under the lossy-encoding collision, possibly other desks' sessions too); the caller
+// walks newest-first and disambiguates by the recorded cwd.
+func sessionsByMtime(cwd string) ([]string, bool) {
 	root, ok := projectsRoot()
 	if !ok {
-		return "", false
+		return nil, false
 	}
 	dir := filepath.Join(root, encodeProjectDir(cwd))
 	matches, err := filepath.Glob(filepath.Join(dir, "*.jsonl"))
 	if err != nil || len(matches) == 0 {
-		return "", false
+		return nil, false
 	}
-	var newest string
-	var newestMod int64
+	type sessionMod struct {
+		path string
+		mod  int64
+	}
+	sms := make([]sessionMod, 0, len(matches))
 	for _, m := range matches {
 		info, err := os.Stat(m)
 		if err != nil {
 			continue // a file that vanished between glob and stat — skip it, never fail the whole read
 		}
-		if mod := info.ModTime().UnixNano(); newest == "" || mod > newestMod {
-			newest, newestMod = m, mod
-		}
+		sms = append(sms, sessionMod{m, info.ModTime().UnixNano()})
 	}
-	if newest == "" {
+	if len(sms) == 0 {
+		return nil, false
+	}
+	sort.SliceStable(sms, func(i, j int) bool { return sms[i].mod > sms[j].mod })
+	paths := make([]string, len(sms))
+	for i, s := range sms {
+		paths[i] = s.path
+	}
+	return paths, true
+}
+
+// LatestSession returns the path of the most-recently-modified transcript (*.jsonl) under the
+// project directory for cwd. A back-compat convenience over sessionsByMtime; LatestTurnText walks
+// ALL sessions newest-first (to disambiguate the encoding collision) rather than trusting this one.
+func LatestSession(cwd string) (path string, ok bool) {
+	sessions, ok := sessionsByMtime(cwd)
+	if !ok {
 		return "", false
 	}
-	return newest, true
+	return sessions[0], true
 }
 
 // transcriptEntry decodes the fields of a transcript line the extraction needs. `Type` is the
@@ -277,26 +296,39 @@ func LatestTurnText(pane string) (text string, ok bool, err error) {
 	if err != nil {
 		return "", false, err
 	}
-	sessionPath, ok := LatestSession(cwd)
+	text, ok = latestTurnTextForCwd(cwd)
+	return text, ok, nil
+}
+
+// latestTurnTextForCwd is LatestTurnText minus the tmux read, so the session selection + the
+// collision disambiguation are unit-testable. It walks the project dir's sessions NEWEST first and:
+//   - SKIPS a session whose recorded cwd disagrees with cwd — a COLLIDING desk's transcript (the
+//     lossy-encoding guard, cubic P2): keep looking for THIS desk's session rather than bailing, so a
+//     valid mirror is not dropped just because a colliding desk wrote more recently.
+//   - Once it reaches THIS desk's newest session (matching, or an unverifiable empty cwd), that
+//     session is AUTHORITATIVE — it returns that session's turn-final (or ok=false when it has none
+//     substantive). It does NOT fall through to an OLDER session in that case, because an older
+//     session's turn is stale and re-posting it would duplicate a turn already mirrored.
+func latestTurnTextForCwd(cwd string) (string, bool) {
+	sessions, ok := sessionsByMtime(cwd)
 	if !ok {
-		return "", false, nil
+		return "", false
 	}
-	waitQuiescent(sessionPath) // let a still-flushing turn-final settle before extracting (no truncated post)
-	raw, sessionCwd, ok := lastTurnTextWithCwd(sessionPath)
-	if !ok {
-		return "", false, nil
+	for _, sessionPath := range sessions {
+		waitQuiescent(sessionPath) // let a still-flushing turn-final settle before extracting (no truncated post)
+		raw, sessionCwd, ok := lastTurnTextWithCwd(sessionPath)
+		if sessionCwd != "" && sessionCwd != cwd {
+			continue // a colliding desk's session — keep looking for THIS desk's newest
+		}
+		// THIS desk's newest session (cwd matches, or is unverifiable) — authoritative; no stale fallback.
+		if !ok {
+			return "", false
+		}
+		clean, substantive := stripAndClassify(raw)
+		if !substantive {
+			return "", false
+		}
+		return clean, true
 	}
-	// Lossy-encoding collision guard (cubic P2): the project dir is shared by any working dirs that
-	// encode alike ('/' and '.' both → '-'), so the newest-mtime session could belong to a DIFFERENT
-	// desk. If the session recorded a cwd and it disagrees with this pane's, it is a colliding desk's
-	// transcript — skip, never post one desk's turn to another's channel. A session with no recorded
-	// cwd is accepted (cannot verify ⇒ never a false skip).
-	if sessionCwd != "" && sessionCwd != cwd {
-		return "", false, nil
-	}
-	clean, substantive := stripAndClassify(raw)
-	if !substantive {
-		return "", false, nil
-	}
-	return clean, true, nil
+	return "", false
 }
