@@ -43,33 +43,25 @@ func cmdDoctrineInstall(args []string) error {
 	if err != nil {
 		return err
 	}
-	identityPath, err := identityFilePath(agent, a.Surface)
+	dir, err := workspace.Dir(agent)
 	if err != nil {
 		return err
 	}
-	results, err := doctrine.Install(identityPath, doctrine.Members())
+	identity, err := workspace.IdentityFileName(a.Surface)
 	if err != nil {
 		return err
 	}
+	// Install takes the workspace dir + the identity base filename: the dir lets a
+	// whole-file (heartbeat-skill) member resolve its workspace-relative target, and
+	// the resolved filename keeps the doctrine package free of a workspace import.
+	results, err := doctrine.Install(dir, identity, doctrine.Members())
+	if err != nil {
+		return err
+	}
+	identityPath := filepath.Join(dir, identity)
 	reportDoctrineResults(results, identityPath)
 	noteNonClaudeLoadFastFollow(a.Surface, identityPath)
 	return nil
-}
-
-// identityFilePath resolves an agent's native identity file inside its workspace
-// (e.g. ~/.flotilla/<agent>/CLAUDE.md for claude-code, AGENTS.md for grok). It is the
-// single resolution point shared by `doctrine install` and the `workspace init` seed,
-// so both target the exact same file.
-func identityFilePath(agent, surface string) (string, error) {
-	dir, err := workspace.Dir(agent)
-	if err != nil {
-		return "", err
-	}
-	identity, err := workspace.IdentityFileName(surface)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, identity), nil
 }
 
 // isClaudeSurface reports whether a surface uses the Claude Code launch/load path.
@@ -101,9 +93,13 @@ func reportDoctrineResults(results []doctrine.Result, identityPath string) {
 		switch r.Action {
 		case doctrine.ActionAppended:
 			fmt.Printf("  appended %s → %s\n", r.Member, identityPath)
-		case doctrine.ActionSkipped:
-			// A skip is a success-noop (the member is already in place), not a failure —
-			// frame it that way so a newcomer re-running install/init isn't alarmed.
+		case doctrine.ActionCreated:
+			// A whole-file (heartbeat-skill) member written into the workspace.
+			fmt.Printf("  created  %s\n", r.Member)
+		case doctrine.ActionSkipped, doctrine.ActionKept:
+			// A skip/kept is a success-noop (the member is already in place), not a
+			// failure — frame it that way so a newcomer re-running install/init isn't
+			// alarmed.
 			fmt.Printf("  already installed: %s (%s)\n", r.Member, r.Reason)
 		default:
 			fmt.Printf("  %-8s %s\n", r.Action, r.Member)

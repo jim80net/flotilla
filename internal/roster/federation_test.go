@@ -89,13 +89,19 @@ func TestLoad_FederationChannels_XOHubsMultipleChannels(t *testing.T) {
 	// An agent MAY be the XO (hub) of MULTIPLE channels (XO→channels is one-to-many) —
 	// e.g. a flotilla XO is primary in both its C2-group channel and its own command
 	// channel. Channel→XO stays one-to-one (each channel routes to exactly one XO).
+	// C_META is the meta-XO's channel listing its SUBORDINATE alpha — that is, by
+	// definition, a fleet-command/broadcast channel (a per-XO home channel lists the XO's
+	// PARENT, not its subordinate). It carries role="fleet-command" so the synthesis DAG
+	// check excludes it; untagged, the meta↔alpha mutual membership (C_HOME lists meta in
+	// alpha's channel, C_META lists alpha in meta's) is a genuine synthesis cycle and Load
+	// fail-closed refuses it (the implement-gate P0). Command routing is unaffected by role.
 	cfg, err := Load(writeRoster(t, `{
 	  "operator_user_id":"U",
 	  "agents":[{"name":"meta"},{"name":"alpha"},{"name":"be"}],
 	  "channels":[
 	    {"channel_id":"C_HOME","xo_agent":"alpha","members":["meta"]},
 	    {"channel_id":"C_CMD","xo_agent":"alpha","members":["be"]},
-	    {"channel_id":"C_META","xo_agent":"meta","members":["alpha"]}]}`))
+	    {"channel_id":"C_META","xo_agent":"meta","role":"fleet-command","members":["alpha"]}]}`))
 	if err != nil {
 		t.Fatalf("an XO hubbing multiple channels should load, got: %v", err)
 	}

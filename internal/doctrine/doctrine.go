@@ -5,11 +5,17 @@
 // default seed from `workspace init`, so a freshly scaffolded agent is born with
 // the doctrine in place.
 //
-// v1 ships exactly one member — the Rule of Three (span of control) — delivered as
-// an identity-append: its distilled text is appended into the agent's standing
-// identity file so it loads once at launch via --append-system-prompt-file. The
-// registry is member-count-agnostic; adding a member is adding a registry entry
-// plus its embedded asset, with no change to the install or seed logic.
+// The set ships two members:
+//   - the Rule of Three (span of control) — an IDENTITY-APPEND: its distilled text
+//     is appended into the agent's standing identity file so it loads once at launch
+//     via --append-system-prompt-file.
+//   - visibility-synthesis — a HEARTBEAT-SKILL: a whole-file curation skill written
+//     into the agent's workspace, loaded when the daemon emits a synthesis wake.
+//
+// The registry is member-count-agnostic; the install/seed loop dispatches by
+// Mechanism. Adding a member is adding a registry entry plus its embedded asset (and,
+// for a new mechanism, its dispatch arm in install.go — the mechanism-coupling
+// contract).
 package doctrine
 
 import (
@@ -35,6 +41,15 @@ type Mechanism string
 // --append-system-prompt-file, rather than being re-typed on every heartbeat.
 const MechanismIdentityAppend Mechanism = "identity-append"
 
+// MechanismHeartbeatSkill writes a member's content as a WHOLE FILE into the agent's
+// workspace at the member's TargetFile (a workspace-relative path), rather than
+// appending into the identity file. It delivers a TICK-TIME discipline — a skill the
+// agent loads when the daemon emits a synthesis wake — NOT a structural identity rule.
+// Its install idempotency is STAT-based (a missing file is created via its own write;
+// an existing file is kept, so operator edits survive), distinct from the
+// marker-fenced identity-append guard. A whole-file member carries no marker fence.
+const MechanismHeartbeatSkill Mechanism = "heartbeat-skill"
+
 // Member is one constitutional asset and how it is delivered. An identity-append
 // member also carries the sentinel-marker pair its content is fenced with — the
 // install keys idempotency on the OPENING marker's presence in the identity file,
@@ -51,6 +66,11 @@ type Member struct {
 	// detects the marker and skips. Empty for non-append mechanisms.
 	OpenMarker  string
 	CloseMarker string
+	// TargetFile is the workspace-RELATIVE path a whole-file member is written to
+	// (e.g. "skills/visibility-synthesis.md"); the install resolves it against the
+	// workspace dir. It is EMPTY for identity-append members (which write the identity
+	// file, not a workspace-relative target) and REQUIRED for heartbeat-skill members.
+	TargetFile string
 }
 
 // The Rule-of-Three sentinel fence. These exact strings appear in the embedded
@@ -61,9 +81,10 @@ const (
 	ruleOfThreeCloseMarker = "<!-- /flotilla:rule-of-three -->"
 )
 
-// members is the v1 registry: exactly one entry. Adding a member is adding an entry
-// here plus its embedded asset; the install/seed loop iterates this slice and
-// dispatches by Mechanism, so it never needs to change as the set grows.
+// members is the registry. Adding a member is adding an entry here plus its embedded
+// asset; the install/seed loop iterates this slice and dispatches by Mechanism, so it
+// never needs to change as the set grows (a NEW mechanism additionally needs its
+// dispatch arm in install.go — the mechanism-coupling contract).
 var members = []Member{
 	{
 		Name:        "rule-of-three",
@@ -71,6 +92,16 @@ var members = []Member{
 		Content:     mustRead("assets/skills/rule-of-three.md"),
 		OpenMarker:  ruleOfThreeOpenMarker,
 		CloseMarker: ruleOfThreeCloseMarker,
+	},
+	{
+		// visibility-synthesis: a whole-file curation skill (Tiers 2/3 of the
+		// stratified-visibility doctrine), invoked when the daemon emits a synthesis
+		// wake. Delivered as a heartbeat-skill (workspace file), not an identity-append,
+		// because it is a tick-time discipline, not a structural identity rule.
+		Name:       "visibility-synthesis",
+		Mechanism:  MechanismHeartbeatSkill,
+		Content:    mustRead("assets/skills/visibility-synthesis.md"),
+		TargetFile: "skills/visibility-synthesis.md",
 	},
 }
 

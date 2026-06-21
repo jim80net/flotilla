@@ -22,13 +22,18 @@ func fakeAppendMember(name string) Member {
 	}
 }
 
-func writeIdentity(t *testing.T, body string) string {
+// writeIdentity scaffolds a workspace dir with a pre-existing identity file (as
+// `workspace init` always does) and returns (workspaceDir, identityFileName). The
+// Install signature takes the workspace dir + identity file name separately so the
+// whole-file mechanism can resolve workspace-relative target paths.
+func writeIdentity(t *testing.T, body string) (string, string) {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), "CLAUDE.md")
-	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+	dir := t.TempDir()
+	const identity = "CLAUDE.md"
+	if err := os.WriteFile(filepath.Join(dir, identity), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return p
+	return dir, identity
 }
 
 func readFile(t *testing.T, p string) string {
@@ -44,10 +49,11 @@ func readFile(t *testing.T, p string) string {
 // skips — exactly one opening and one closing marker remain.
 func TestInstallAppendsOnceAcrossRepeatedInstalls(t *testing.T) {
 	stub := "# infra — desk identity\n\nYou are the infra desk.\n"
-	p := writeIdentity(t, stub)
+	dir, identity := writeIdentity(t, stub)
+	p := filepath.Join(dir, identity)
 	member := Members()[0]
 
-	res1, err := Install(p, []Member{member})
+	res1, err := Install(dir, identity, []Member{member})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +61,7 @@ func TestInstallAppendsOnceAcrossRepeatedInstalls(t *testing.T) {
 		t.Fatalf("first install actions = %+v, want one appended", res1)
 	}
 
-	res2, err := Install(p, []Member{member})
+	res2, err := Install(dir, identity, []Member{member})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,8 +86,9 @@ func TestInstallAppendsOnceAcrossRepeatedInstalls(t *testing.T) {
 // — the marker guard detects-and-skips, touching nothing.
 func TestInstallPreservesOperatorEdits(t *testing.T) {
 	member := Members()[0]
-	p := writeIdentity(t, "# desk\n")
-	if _, err := Install(p, []Member{member}); err != nil {
+	dir, identity := writeIdentity(t, "# desk\n")
+	p := filepath.Join(dir, identity)
+	if _, err := Install(dir, identity, []Member{member}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -93,7 +100,7 @@ func TestInstallPreservesOperatorEdits(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := Install(p, []Member{member}); err != nil {
+	if _, err := Install(dir, identity, []Member{member}); err != nil {
 		t.Fatal(err)
 	}
 	got := readFile(t, p)
@@ -107,9 +114,10 @@ func TestInstallPreservesOperatorEdits(t *testing.T) {
 // both skip on the second, each independently.
 func TestInstallIsMemberCountAgnostic(t *testing.T) {
 	set := []Member{Members()[0], fakeAppendMember("second")}
-	p := writeIdentity(t, "# desk\n")
+	dir, identity := writeIdentity(t, "# desk\n")
+	p := filepath.Join(dir, identity)
 
-	res1, err := Install(p, set)
+	res1, err := Install(dir, identity, set)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +130,7 @@ func TestInstallIsMemberCountAgnostic(t *testing.T) {
 		}
 	}
 
-	res2, err := Install(p, set)
+	res2, err := Install(dir, identity, set)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,8 +151,8 @@ func TestInstallIsMemberCountAgnostic(t *testing.T) {
 // A missing identity file is an error: the install appends into an existing file the
 // workspace already owns; it does not create the identity file (workspace init does).
 func TestInstallErrorsOnMissingIdentityFile(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "does-not-exist.md")
-	if _, err := Install(p, Members()); err == nil {
+	dir := t.TempDir()
+	if _, err := Install(dir, "does-not-exist.md", Members()); err == nil {
 		t.Fatal("install against a missing identity file = nil error, want error")
 	}
 }

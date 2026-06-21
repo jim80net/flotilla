@@ -55,8 +55,15 @@ type Channel struct {
 	// Members are the agents addressable via "@name" in this channel (this hub's
 	// desks; for the meta-XO, its project-XOs).
 	Members []string `json:"members,omitempty"`
-	// Role is an optional human label ("fleet-command" / "project") for notices and
-	// the setup helper; routing is uniform regardless of role.
+	// Role is an optional label ("fleet-command" / "project") for notices and the setup
+	// helper. COMMAND routing is uniform regardless of role, but SYNTHESIS routing
+	// (visibility-synthesis / B2) treats role=="fleet-command" as LOAD-BEARING: a
+	// fleet-command channel is a broadcast/command channel whose members are command
+	// targets, not synthesis parents, so it contributes ZERO synthesis edges (excluded from
+	// AgentsBelow / AgentsAbove / the load-time DAG check — see synthesis.go). A broadcast
+	// channel (members = many subordinates) that is NOT tagged fleet-command will form a
+	// synthesis cycle and Load will fail-closed refuse it — by design, surfacing the
+	// misconfiguration rather than silently inverting the hierarchy.
 	Role string `json:"role,omitempty"`
 }
 
@@ -114,6 +121,17 @@ type Config struct {
 	// "consecutive" (ping every K-1, alert after ~2 missed pings — the middle
 	// ground). Empty ⇒ "none". Only consulted when ChangeDetector is on.
 	LivenessPingMode string `json:"liveness_ping_mode,omitempty"`
+
+	// VisibilitySynthesis opts into the visibility-synthesis (B2) heartbeat: when a desk finishes
+	// below a synthesizing agent (a project-XO for Tier 2, the meta-XO for Tier 3), the detector
+	// emits a WakeSynthesis to that agent so it curates a rollup of its subordinates' latest state
+	// up into its own channel. Routing is derived from the federation membership graph (AgentsBelow
+	// / AgentsAbove, fleet-command-excluded). Opt-in (default false ⇒ fully inert — no synthesis
+	// wake ever fires, behavior byte-identical to before this change). Builds on the change-detector
+	// (it rides the same tick + the AgentsAbove resolver) and the per-desk webhooks (the post
+	// target), so it is only effective when change_detector is on and secrets supply each
+	// synthesizing agent's channel webhook.
+	VisibilitySynthesis bool `json:"visibility_synthesis,omitempty"`
 
 	// --- federation (`federation-channels`); validated at load ---
 
@@ -250,6 +268,15 @@ func Load(path string) (*Config, error) {
 				}
 			}
 		}
+	}
+	// Synthesis routing (visibility-synthesis / B2) reads the tier below an agent and posts
+	// one level up; that is acyclic IFF the synthesis-edge graph is a DAG. Assert it
+	// fail-closed so a federation that would form a synthesis feedback loop refuses to start
+	// (self-edges AND fleet-command channels are excluded from the edge set — see
+	// assertSynthesisAcyclic). The legacy single binding is a star (no cycle) and passes
+	// trivially; a clock-only daemon has no bindings and passes.
+	if err := c.assertSynthesisAcyclic(); err != nil {
+		return nil, fmt.Errorf("roster %q: %w", path, err)
 	}
 	// cos_agent (the CoS context-mirror #108): validated fail-closed when set. CosLedger
 	// is resolved here to be non-empty IFF the mirror is active, so a single check

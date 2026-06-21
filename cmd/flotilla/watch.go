@@ -259,7 +259,40 @@ func cmdWatch(args []string) error {
 			injector.Enqueue(watch.Job{Agent: xo, Message: body, Kind: "detector"})
 		}
 
-		det := watch.NewDetector(watch.DetectorConfig{
+		// wakeAgent is the PARALLEL agent-targeted wake seam (visibility synthesis, B2). It enqueues a
+		// WakeSynthesis to an ARBITRARY synthesizing agent (a project XO / the meta-XO), NOT the
+		// hardcoded primary `xo` — the Injector already addresses any agent via Job.Agent. The body
+		// names the agent's read set (AgentsBelow) + post target (OwnedChannels) + the per-tier
+		// contract; the detailed curation lives in the embedded visibility-synthesis skill. Inert
+		// unless the detector is wired with the synthesis seams below (gated on VisibilitySynthesis).
+		wakeAgent := func(agent string, kind watch.WakeKind, reasons []string) {
+			if kind != watch.WakeSynthesis {
+				// The only agent-targeted kind today is synthesis; any other is a programming error.
+				log.Printf("flotilla watch: ignoring unexpected agent-targeted wake kind %v for %q", kind, agent)
+				return
+			}
+			body := synthesisWakeBody(agent, synthesisReadSet(cfg, agent), cfg.OwnedChannels(agent), ackInstr)
+			injector.Enqueue(watch.Job{Agent: agent, Message: body, Kind: "detector"})
+		}
+
+		// Visibility-synthesis (B2) seams — wired ONLY when the roster opts in (default OFF ⇒ all nil
+		// ⇒ the detector's inert default; no synthesis wake ever fires, behavior byte-identical). The
+		// digest sub-cadence derives from heartbeat_interval (Q-B): a small multiple bounds the wake
+		// rate while the skill bounds the content. The materiality read binds to the SHARED
+		// ResultReader seam (synthTurnFinal), the SAME path Tier 1 uses (NOT a claudestore bind).
+		var synthWakeAgent func(string, watch.WakeKind, []string)
+		var synthParents func(string) []string
+		var synthRead func(string) (string, bool)
+		synthEveryTicks := 0
+		synthSidecarPath := filepath.Join(rosterDir, "flotilla-synthesis-state.json")
+		if cfg.VisibilitySynthesis {
+			synthWakeAgent = wakeAgent
+			synthParents = synthParentsResolver(cfg)
+			synthRead = synthReadOneFromTurnFinal(synthTurnFinal(cfg))
+			synthEveryTicks = synthDigestTicks // a small multiple of the interval (Q-B)
+		}
+
+		det := watch.NewDetectorWithSynthSidecar(watch.DetectorConfig{
 			XOAgent:  xo,
 			Desks:    desks,
 			Interval: interval,
@@ -315,7 +348,11 @@ func cmdWatch(args []string) error {
 			MaxSelfContinuation: *maxSelfCont,
 			BacklogGate:         backlogGate,
 			BacklogStuckCap:     *backlogStuckCap,
-		}, *snapshotPath)
+			WakeAgent:           synthWakeAgent,
+			SynthParents:        synthParents,
+			SynthRead:           synthRead,
+			SynthEveryTicks:     synthEveryTicks,
+		}, *snapshotPath, synthSidecarPath)
 		det.Start()
 		defer det.Stop()
 		onAccepted = func(target string) {
@@ -330,6 +367,10 @@ func cmdWatch(args []string) error {
 		fmt.Printf("flotilla watch: change-detector running — XO=%s interval=%s ping-mode=%s ack=%s snapshot=%s\n",
 			xo, interval, mode, *ackPath, *snapshotPath)
 		logMirrorCoverage(cfg, secrets, xo)
+		if cfg.VisibilitySynthesis {
+			fmt.Printf("flotilla watch: visibility-synthesis ON — every %d ticks an OWED agent rolls up its tier below; sidecar=%s\n",
+				synthDigestTicks, synthSidecarPath)
+		}
 	} else {
 		// ---- legacy always-wake heartbeat ----
 		wd := watch.NewWatchdog(*maxMissed, alert)
