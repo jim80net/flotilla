@@ -66,6 +66,14 @@ type DetectorConfig struct {
 	// Wake enqueues an XO wake of the given kind with human-readable reasons; the
 	// caller composes the prompt (and appends the ack instruction — L1).
 	Wake func(kind WakeKind, reasons []string)
+	// MirrorOnFinish is the per-desk visibility side-effect: invoked once for each NON-XO desk that
+	// completed a unit of work this tick (a confirmed Working→Idle transition). The caller mirrors
+	// that desk's turn-final output to its home Discord channel. Like the wake/rotate side-effects it
+	// runs in runTail, OUTSIDE d.mu, so a slow transcript read or Discord post can never stall the
+	// tick loop. It is OBSERVE-ONLY and BEST-EFFORT — the closure must never let a mirror failure
+	// affect the tick or delivery. Default nil ⇒ inert (no mirror; behavior byte-identical to before
+	// this change). The XO is deliberately excluded — it has its own mirror path.
+	MirrorOnFinish func(agent string)
 	// Rotate rotates the XO context via surface.RotateContext (claude → /clear).
 	Rotate func() error
 	// Awaiting reports whether the awaiting-operator veto marker is present (gates
@@ -284,8 +292,8 @@ type deferredWake struct {
 // that wait while holding d.mu would let an external delivery stall the detector's tick loop and
 // block OperatorWake; running it in the tail keeps d.mu held only for the lock-free state logic.
 func (d *Detector) Tick() {
-	pendingRotate, pendingWakes := d.tickLocked()
-	d.runTail(pendingRotate, pendingWakes)
+	pendingRotate, pendingWakes, pendingMirrors := d.tickLocked()
+	d.runTail(pendingRotate, pendingWakes, pendingMirrors)
 	// Durably persist the new baseline ONLY AFTER the tail has enqueued the wakes — restoring the
 	// at-least-once crash semantics the old in-line code had (enqueue-then-save). The in-memory
 	// baseline is already committed under d.mu in tickLocked (so subsequent ticks don't re-wake);
@@ -302,7 +310,7 @@ func (d *Detector) Tick() {
 // BEFORE the continuation wake is enqueued, so the Injector — which re-acquires the same txn
 // lock for the delivery — always lands the continuation AFTER the rotate, never letting a
 // trailing /clear wipe a freshly delivered continuation.
-func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake) {
+func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors []string) {
 	if pendingRotate && d.cfg.Rotate != nil {
 		if err := d.cfg.Rotate(); err != nil && !errors.Is(err, surface.ErrRestartRequired) {
 			log.Printf("flotilla watch: XO context rotate failed: %v (continuing without rotate)", err)
@@ -311,6 +319,15 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake) {
 	for _, w := range wakes {
 		if d.cfg.Wake != nil {
 			d.cfg.Wake(w.kind, w.reasons)
+		}
+	}
+	// Per-desk visibility mirror (a NON-XO desk finished a turn this tick). Run LAST in the tail and,
+	// like the wakes, OUTSIDE d.mu — a slow transcript read or Discord post must never stall the tick
+	// loop or block OperatorWake. The closure is observe-only + best-effort (it absorbs its own
+	// failures); the detector only fires the trigger.
+	for _, agent := range mirrors {
+		if d.cfg.MirrorOnFinish != nil {
+			d.cfg.MirrorOnFinish(agent)
 		}
 	}
 }
@@ -328,7 +345,7 @@ func (d *Detector) persist() {
 // tickLocked runs the lock-free-pure state machine under d.mu and RETURNS the side effects to
 // perform after unlock (a pending rotate + the ordered wakes). It is the single per-interval
 // writer of detector state; OperatorWake is the only other writer and shares the mutex.
-func (d *Detector) tickLocked() (pendingRotate bool, pendingWakes []deferredWake) {
+func (d *Detector) tickLocked() (pendingRotate bool, pendingWakes []deferredWake, pendingMirrors []string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -367,6 +384,21 @@ func (d *Detector) tickLocked() (pendingRotate bool, pendingWakes []deferredWake
 
 	prev := d.snap
 
+	// 2b. Per-desk visibility mirror trigger: each NON-XO desk that completed a unit of work this
+	//     tick (a confirmed Working→Idle transition) is recorded for the post-unlock tail to mirror
+	//     to its home channel. Computed UNDER the lock from the same debounced states the diff uses,
+	//     but emitted OUTSIDE d.mu in runTail. This is reached only past the cold-start early-return
+	//     above, so the cold-start baseline emits NO mirrors (a desk that was already Idle when the
+	//     detector booted has not "finished a turn"). The XO is excluded — it has its own mirror.
+	for _, name := range d.cfg.Desks {
+		if name == d.cfg.XOAgent {
+			continue
+		}
+		if prev.DeskStates[name] == surface.StateWorking && cur.DeskStates[name] == surface.StateIdle {
+			pendingMirrors = append(pendingMirrors, name)
+		}
+	}
+
 	// 3. Liveness — independent of the diff (H3): crash (shell-debounced) +
 	//    wall-clock ack age. Kept in-memory + ack-file so a snapshot outage can
 	//    never blind the watchdog.
@@ -401,7 +433,7 @@ func (d *Detector) tickLocked() (pendingRotate bool, pendingWakes []deferredWake
 	//    tail enqueues the wakes, so a crash before the durable commit re-detects on restart (H3 /
 	//    cubic-P1 at-least-once).
 	d.snap = cur
-	return pendingRotate, pendingWakes
+	return pendingRotate, pendingWakes, pendingMirrors
 }
 
 // continueXO handles the XO's own Working→Idle. It rotates to fresh context (unless awaiting an

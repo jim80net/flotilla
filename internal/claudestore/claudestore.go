@@ -1,0 +1,229 @@
+// Package claudestore reads a Claude Code desk's turn-final assistant text from its own session
+// transcript, located from OUTSIDE the session (the watch daemon reads pane STATE, never a Stop-hook
+// payload, so it must find the transcript itself). This is the claude-code half of the generalizable
+// "read a desk's latest result from its harness session store" capability — the grok half is
+// internal/grokstore; the generalizable half is the surface.ResultReader interface + the
+// `flotilla result` command, which both this package and the auto-mirror read through.
+//
+// It ports the extraction logic of the working XO Discord-mirror Stop hook
+// (~/.claude/hooks/flotilla-xo-discord-mirror.sh), preserving its four hard-won bug-fixes, rather
+// than re-deriving them:
+//
+//   - walk BACK past trailing non-text entries (tool_result / tool_use / system / attachment / …)
+//     to the last text-bearing assistant turn — the hook's "tool-result trigger blindness" fix;
+//   - handle a message's `content` as EITHER a list of typed blocks OR a plain string;
+//   - take ONLY `text` blocks, skipping `thinking` and `tool_use` blocks;
+//   - SKIP sub-agent (`isSidechain`) entries — that is a sub-agent's output, not the desk's own turn;
+//   - strip harness-injected command tags and treat an empty residue as not-substantive (no post) —
+//     the hook's "command-tag poisoning" fix.
+//
+// Store layout (live-probed 2026-06-20): the active session for a desk lives under
+//
+//	~/.claude/projects/<encoded-cwd>/<session-id>.jsonl
+//
+// where <encoded-cwd> is the pane's working directory with every '/' AND '.' replaced by '-'
+// (e.g. /home/jim/workspace/github.com/jim80net/flotilla-dash ->
+// -home-jim-workspace-github-com-jim80net-flotilla-dash). A project directory holds MANY sessions;
+// the active one is the most-recently-modified .jsonl by mtime.
+package claudestore
+
+import (
+	"bufio"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+
+	"github.com/jim80net/flotilla/internal/deliver"
+)
+
+// maxLine bounds a single transcript line: a long turn's assistant content (or a fat tool_result
+// carried inline) can be tens of kilobytes — far above bufio.Scanner's 64 KB default — so we lift
+// the cap to 16 megabytes, matching grokstore. An over-cap line surfaces bufio.ErrTooLong rather
+// than being silently truncated; lastTurnText reports the read as failed (ok=false) in that case.
+const maxLine = 16 << 20
+
+// encodeProjectDir encodes a pane's working directory to the directory name Claude Code uses under
+// ~/.claude/projects: every '/' AND '.' becomes '-'. Live-probed (2026-06-20):
+// /home/jim/workspace/github.com/jim80net/flotilla-dash ->
+// -home-jim-workspace-github-com-jim80net-flotilla-dash.
+func encodeProjectDir(cwd string) string {
+	enc := strings.ReplaceAll(cwd, "/", "-")
+	return strings.ReplaceAll(enc, ".", "-")
+}
+
+// projectsRoot returns ~/.claude/projects, or ok=false when the home directory cannot be resolved
+// (the same fail-clear-not-bogus-path discipline as grokstore's empty-grokHome guard — never read a
+// relative ".claude/projects").
+func projectsRoot() (string, bool) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", false
+	}
+	return filepath.Join(home, ".claude", "projects"), true
+}
+
+// LatestSession returns the path of the most-recently-modified transcript (*.jsonl) under the
+// project directory for cwd, with ok=false when the home directory is unresolvable, the project
+// directory does not exist, or it holds no .jsonl files. A project directory accumulates many
+// sessions over a desk's life; the active one is the newest by mtime.
+func LatestSession(cwd string) (path string, ok bool) {
+	root, ok := projectsRoot()
+	if !ok {
+		return "", false
+	}
+	dir := filepath.Join(root, encodeProjectDir(cwd))
+	matches, err := filepath.Glob(filepath.Join(dir, "*.jsonl"))
+	if err != nil || len(matches) == 0 {
+		return "", false
+	}
+	var newest string
+	var newestMod int64
+	for _, m := range matches {
+		info, err := os.Stat(m)
+		if err != nil {
+			continue // a file that vanished between glob and stat — skip it, never fail the whole read
+		}
+		if mod := info.ModTime().UnixNano(); newest == "" || mod > newestMod {
+			newest, newestMod = m, mod
+		}
+	}
+	if newest == "" {
+		return "", false
+	}
+	return newest, true
+}
+
+// transcriptEntry decodes the fields of a transcript line the extraction needs. `Type` is the
+// top-level entry type (assistant / user / system / attachment / file-history-snapshot / …);
+// `IsSidechain` marks sub-agent output (skipped); `Message` carries the role + content for a message
+// entry. Content is a json.RawMessage because Claude Code writes it as EITHER a list of typed blocks
+// OR a plain string (see extractText) — decoding straight into one shape would silently drop the
+// other.
+type transcriptEntry struct {
+	Type        string `json:"type"`
+	IsSidechain bool   `json:"isSidechain"`
+	Message     struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	} `json:"message"`
+}
+
+// contentBlock is one typed block of a list-shaped message content. Only `text` blocks contribute to
+// the turn-final text; `thinking` and `tool_use` blocks are skipped (their Text is empty anyway).
+type contentBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+// extractText pulls the spoken text out of a message's content, whether it is a plain JSON string or
+// a list of typed blocks. For the list shape it concatenates ONLY the `text` blocks (skipping
+// `thinking` / `tool_use`), joined by newlines to match the hook's `"\n".join(...)`.
+func extractText(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	var blocks []contentBlock
+	if json.Unmarshal(raw, &blocks) == nil {
+		var parts []string
+		for _, b := range blocks {
+			if b.Type == "text" && b.Text != "" {
+				parts = append(parts, b.Text)
+			}
+		}
+		return strings.Join(parts, "\n")
+	}
+	return ""
+}
+
+// lastTurnText reverse-walks a transcript and returns the text of the last text-bearing assistant
+// turn — the desk's own turn-final output. ok=false means no such turn was found (or the file could
+// not be read), which the caller treats as "nothing substantive to mirror".
+//
+// The walk skips, in the hook's spirit: sub-agent (isSidechain) entries; every non-message entry
+// type (system / attachment / file-history-snapshot / ai-title / …); and, within an assistant
+// message, everything but its `text` blocks. By scanning the WHOLE file and keeping the LAST
+// qualifying assistant turn, it walks back past any trailing tool_result / tool_use / system entries
+// that follow the real turn-final (the hook's "tool-result trigger blindness" fix), reading forward
+// once rather than indexing backward.
+func lastTurnText(jsonlPath string) (string, bool) {
+	f, err := os.Open(jsonlPath)
+	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64<<10), maxLine)
+	var last string
+	found := false
+	for sc.Scan() {
+		var e transcriptEntry
+		if json.Unmarshal(sc.Bytes(), &e) != nil {
+			continue // a torn/partial line is skipped, never fatal — keep the last VALID turn
+		}
+		if e.IsSidechain { // sub-agent output, not the desk's own turn
+			continue
+		}
+		if e.Type != "assistant" || e.Message.Role != "assistant" {
+			continue
+		}
+		if text := extractText(e.Message.Content); strings.TrimSpace(text) != "" {
+			last = text
+			found = true
+		}
+	}
+	if sc.Err() != nil { // an over-long line (ErrTooLong) or read error — report unread, don't post a fragment
+		return "", false
+	}
+	return last, found
+}
+
+// stripTags removes the harness-injected blocks Claude Code embeds in a turn — slash-command
+// metadata, captured local-command output, and system reminders — so a turn whose only content is
+// command noise classifies as not-substantive. Ported from the hook's _STRIP regex (BUG-2 fix).
+var stripTags = regexp.MustCompile(
+	`(?s)<command-name>.*?</command-name>` +
+		`|<command-message>.*?</command-message>` +
+		`|<command-args>.*?</command-args>` +
+		`|<local-command-stdout>.*?</local-command-stdout>` +
+		`|<local-command-caveat>.*?</local-command-caveat>` +
+		`|<system-reminder>.*?</system-reminder>`,
+)
+
+// stripAndClassify strips the harness-injected command tags from a turn's text and reports whether
+// the residue is substantive. substantive=false (empty/whitespace residue) means the turn was pure
+// command noise — there is nothing for the desk to have "said", so the caller skips the post. The
+// returned clean text (the residue) is what gets mirrored.
+func stripAndClassify(text string) (clean string, substantive bool) {
+	clean = strings.TrimSpace(stripTags.ReplaceAllString(text, ""))
+	return clean, clean != ""
+}
+
+// LatestTurnText returns the desk's substantive turn-final text for the agent at the resolved pane:
+// it locates the active session for the pane's working directory, extracts the last text-bearing
+// assistant turn, and strips command-tag noise. ok=false means there is nothing substantive to
+// mirror — no session located, no completed assistant turn yet, or a turn that was pure command
+// noise. err is non-nil only when the pane's working directory could not be resolved (a tmux read
+// failure); a located-but-empty session is (ok=false, err=nil), never an error.
+func LatestTurnText(pane string) (text string, ok bool, err error) {
+	cwd, err := deliver.PaneCWD(pane)
+	if err != nil {
+		return "", false, err
+	}
+	sessionPath, ok := LatestSession(cwd)
+	if !ok {
+		return "", false, nil
+	}
+	raw, ok := lastTurnText(sessionPath)
+	if !ok {
+		return "", false, nil
+	}
+	clean, substantive := stripAndClassify(raw)
+	if !substantive {
+		return "", false, nil
+	}
+	return clean, true, nil
+}
