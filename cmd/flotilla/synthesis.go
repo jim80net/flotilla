@@ -79,18 +79,22 @@ func synthReadOneFromTurnFinal(turnFinal func(string) (string, bool, error)) fun
 // absolute), so the command resolves the live roster regardless of the agent's own cwd. ackInstr is
 // appended so a synthesis-woken agent re-acks liveness (a wake that never instructs an ack would
 // falsely trip the AckAge wedge).
-func synthesisWakeBody(agent, rosterPath string, readSet, postChannels []string, ackInstr string) string {
+func synthesisWakeBody(agent, binPath, rosterPath string, readSet, postChannels []string, ackInstr string) string {
 	var b strings.Builder
 	b.WriteString("[flotilla visibility-synthesis] You are OWED a curated rollup of the tier BELOW you. ")
 	b.WriteString("Run your `visibility-synthesis` skill (or, if you have none, follow the contract below).\n")
 
 	if len(readSet) > 0 {
-		// Name the CONCRETE read command, not just the agent names — `flotilla result` is read-only
-		// (the same surface.ResultReader seam Tier 1 uses) and needs no workspace, so a directly-launched
-		// agent can service the synthesis. --roster carries the daemon's live path so it resolves from
-		// the agent's own cwd. Tier-3 reads project-XOs (themselves synthesizers) the same way — the
-		// command returns each subordinate's latest turn-final regardless of its tier.
-		b.WriteString("READ — for EACH agent below you, run `flotilla result --roster ")
+		// Name the CONCRETE read command, not just the agent names — `result` is read-only (the same
+		// surface.ResultReader seam Tier 1 uses) and needs no workspace, so a directly-launched agent can
+		// service the synthesis. Use the daemon's OWN absolute binary path (binPath) — NOT bare `flotilla`
+		// — because a directly-launched agent may not have flotilla on its $PATH (the live fleet invokes
+		// ~/go/bin/flotilla by absolute path). --roster carries the daemon's live absolute path so it
+		// resolves from the agent's own cwd. Tier-3 reads project-XOs (themselves synthesizers) the same
+		// way — the command returns each subordinate's latest turn-final regardless of its tier.
+		b.WriteString("READ — for EACH agent below you, run `")
+		b.WriteString(binPath)
+		b.WriteString(" result --roster ")
 		b.WriteString(rosterPath)
 		b.WriteString(" <name>` to get its LATEST turn-final state. Your subordinates: ")
 		b.WriteString(strings.Join(readSet, ", "))

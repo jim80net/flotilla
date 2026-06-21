@@ -296,8 +296,10 @@ wake prompt references). `flotilla workspace init` seeds it and `flotilla doctri
 a missing one is created.
 
 The wake prompt the daemon enqueues is **self-sufficient for the READ**: it names the agent's read
-set, the CONCRETE read command for each subordinate (`flotilla result --roster <the-daemon's-path>
-<name>`, read-only — no workspace needed), its post target, the per-tier contract, and the
+set, the CONCRETE read command for each subordinate (`<flotilla-abs-path> result --roster
+<the-daemon's-path> <name>` — the daemon injects its OWN resolved binary path via `os.Executable`, so
+the command works even when the agent has no `flotilla` on its `$PATH`; read-only, no workspace
+needed), its post target, the per-tier contract, and the
 skip-an-unreadable-subordinate discipline. (The POST half — `flotilla notify` to the agent's webhook
 — still needs the agent's launch env to carry `FLOTILLA_SELF` + `FLOTILLA_SECRETS`, which a
 synthesizing XO already holds as a Discord-facing seat.) The embedded skill
