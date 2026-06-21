@@ -8,7 +8,7 @@
 
 ## 0. Verify-first live probe (BINDING — gates everything below)
 
-- [ ] 0.1 Confirm the ACTUAL B1 runtime path end-to-end — not merely that a standalone sentinel
+- [x] 0.1 Confirm the ACTUAL B1 runtime path end-to-end — not merely that a standalone sentinel
       file loads. Construct an identity file shaped EXACTLY as the install produces it: the bare
       identity stub (as `workspace init` writes at `cmd/flotilla/workspace.go:101`) FOLLOWED BY an
       APPENDED marked block (the sentinel-fenced Rule-of-Three block from 2.2) carrying a unique
@@ -26,7 +26,7 @@
 
 ## 1. `assets/skills/` — the embedded constitutional set (TDD)
 
-- [ ] 1.1 Create the versioned `assets/skills/` tree in-repo with the one member asset (section 3
+- [x] 1.1 Create the versioned `assets/skills/` tree in-repo with the one member asset (section 3
       authors the CONTENT). Embed it via `//go:embed` (model on `internal/dash/assets.go:14`)
       behind a small `internal/doctrine` package exposing the member registry: each member carries
       `Name`, `TargetFile` (where it lands in the workspace), `Mechanism`, and `Content` (read from
@@ -36,7 +36,7 @@
       arm). TEST: the registry lists EXACTLY the one v1 member; the member's embedded content is
       non-empty and its `TargetFile`/`Mechanism` are set (the v1 member's `Mechanism` is
       `identity-append`); the FS round-trips (the embed directive guarantees the tree at build time).
-- [ ] 1.2 The registry is member-count-agnostic (adding a member = adding a registry entry + its
+- [x] 1.2 The registry is member-count-agnostic (adding a member = adding a registry entry + its
       embedded asset; no install/seed code change). TEST: a SECOND fake `identity-append`-shaped
       registry entry (its own marker, its own target) flows through the install loop unchanged —
       table-driven over the registry, not hardcoded to one — proving the loop's count-agnosticism
@@ -44,7 +44,7 @@
 
 ## 2. `flotilla doctrine install` + `workspace init` seeding (TDD)
 
-- [ ] 2.1 `cmdDoctrineInstall(<agent> [--roster <path>])` — resolve the agent's workspace
+- [x] 2.1 `cmdDoctrineInstall(<agent> [--roster <path>])` — resolve the agent's workspace
       (`workspace.Dir`), iterate the member registry, and dispatch each member BY ITS `Mechanism`.
       B1's only mechanism is `identity-append`: it appends the member's distilled rule, wrapped in a
       sentinel-fenced marked block (see 2.2), to the agent's identity file (the file
@@ -56,7 +56,7 @@
       TEST with a temp `$FLOTILLA_WORKSPACE_ROOT`: first install applies the member; a second
       install is idempotent (the identity-append member's marker detected and skipped); an
       operator-edited member is preserved.
-- [ ] 2.2 **Marker-guarded append idempotency (fixes the trio's B1 P2).** The identity file is
+- [x] 2.2 **Marker-guarded append idempotency (fixes the trio's B1 P2).** The identity file is
       ALWAYS written by `workspace init` (`cmd/flotilla/workspace.go:101,107`), so it always exists
       by install time — file-existence kept/created cannot govern the append. Implement a
       content-level marker guard: the `identity-append` member's content is wrapped in a sentinel
@@ -69,9 +69,9 @@
       inside the block and adjacent to it survives a re-install verbatim. Keep this granularity
       DISTINCT from the whole-file kept/created path — they apply to disjoint member kinds and must
       not be conflated in the install loop.
-- [ ] 2.3 Register `doctrine` in the `cmd/flotilla/main.go` subcommand switch (sibling of
+- [x] 2.3 Register `doctrine` in the `cmd/flotilla/main.go` subcommand switch (sibling of
       `workspace`/`result`/`register`).
-- [ ] 2.4 Extend `cmdWorkspaceInit` (`cmd/flotilla/workspace.go`) to SEED the constitutional set by
+- [x] 2.4 Extend `cmdWorkspaceInit` (`cmd/flotilla/workspace.go`) to SEED the constitutional set by
       default after the base scaffold — calling the same install routine — so a freshly scaffolded
       workspace is born with the doctrine in place. The seed obeys the same per-member idempotency
       (whole-file members never overwrite a file the base scaffold or a prior run created; the
@@ -84,7 +84,7 @@
 
 ## 3. Member 1 — the Rule of Three doctrine asset (content)
 
-- [ ] 3.1 Land the span-of-control doctrine as `docs/span-of-control.md`, authored to
+- [x] 3.1 Land the span-of-control doctrine as `docs/span-of-control.md`, authored to
       `docs/xo-doctrine.md` house style from the draft (`.claude/handoffs/DRAFT-rule-of-three.md`):
       the ≤3-active-charges invariant, the fourth-charge-forces-a-layer mechanic, upward
       aggregation, and parallel-not-serial dispatch. Cross-link it from `docs/xo-doctrine.md` and
@@ -96,20 +96,20 @@
       Repoint all four to the correct anchor. COLD-TEST the landed doc (per
       cold-test-author-written-docs): enumerate every cross-link in `docs/span-of-control.md` and
       confirm each resolves to an existing heading/anchor in its target file — no link ships broken.
-- [ ] 3.2 Distil the structural rule into the embedded `identity-append` member asset (the concise
+- [x] 3.2 Distil the structural rule into the embedded `identity-append` member asset (the concise
       standing-instruction form from the draft's "Wiring it in" block), WRAPPED in the sentinel
       fence (2.2) — the text that gets appended to a coordinating agent's identity file so it loads
       once at launch. Keep it a faithful compression of `docs/span-of-control.md` (single source of
       truth; the asset is the distilled view). VERIFY the doc and the asset do not contradict (per
       cold-test-author-written-docs: every claim in the short asset traces to the long doc).
-- [ ] 3.3 INSIDE the sentinel fence (so it travels with the appended block), carry a one-line
+- [x] 3.3 INSIDE the sentinel fence (so it travels with the appended block), carry a one-line
       load-bearing-marker note, e.g. `<!-- the flotilla:rule-of-three marker fence above/below is
       load-bearing — do NOT delete it; install detects it to avoid re-appending this block -->`.
       Rationale: the marker IS the idempotency guard (2.2); if an operator strips the marker but
       keeps the prose, the next install no longer detects the block and re-appends a duplicate. The
       in-fence note tells a human editing the identity file why the comment markers must stay. TEST:
       the appended block contains the load-bearing note between the opening and closing markers.
-- [ ] 3.4 Add ONE sentence to the Rule-of-Three CONTENT (both `docs/span-of-control.md` and the
+- [x] 3.4 Add ONE sentence to the Rule-of-Three CONTENT (both `docs/span-of-control.md` and the
       distilled asset) naming the recurring-fan-out edge: a sub-agent that is RE-DISPATCHED every
       heartbeat is functionally a STANDING charge (you must remember its state across rotations), so
       it COUNTS against the three; only TRANSIENT report-and-exit fan-out remains the unbounded
@@ -121,7 +121,7 @@
 
 ## 4. `specs/constitutional-skillset/spec.md` (the capability deltas)
 
-- [ ] 4.1 The ADDED requirements are authored in this change's `specs/constitutional-skillset/spec.md`:
+- [x] 4.1 The ADDED requirements are authored in this change's `specs/constitutional-skillset/spec.md`:
       the installable surface (embedded set + idempotent install + default seed), the structural-rule
       identity-append delivery, the content-level marker-guarded append idempotency, the Rule-of-Three
       member, and the extensibility seam. (Authored alongside this tasks file.) NO synthesis or
@@ -129,8 +129,8 @@
 
 ## 5. Verify + gate
 
-- [ ] 5.1 `go build ./... && go test ./... -race` green; `go vet` clean; `gofmt` clean.
-- [ ] 5.2 `openspec validate constitutional-skillset --strict`.
+- [x] 5.1 `go build ./... && go test ./... -race` green; `go vet` clean; `gofmt` clean.
+- [x] 5.2 `openspec validate constitutional-skillset --strict`.
 - [ ] 5.3 Trio (systems-review + open-code-review + STORM) on the implementation — confirm the
       install is idempotent at BOTH granularities (whole-file kept/created never overwrites operator
       edits; the identity-append marker guard appends exactly once and detect-and-skips, preserving

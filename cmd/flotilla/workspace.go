@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jim80net/flotilla/internal/doctrine"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/workspace"
 )
@@ -117,6 +118,20 @@ func cmdWorkspaceInit(args []string) error {
 		}
 		fmt.Printf("  created %s\n", p)
 	}
+
+	// Seed the constitutional doctrine into the just-written identity stub, by REUSING
+	// the same install routine `doctrine install` uses — a single source of
+	// append-idempotency. The stub is written FIRST (above), so the seed appends the
+	// marked block INTO it; the marker guard makes a re-init detect-and-skip rather than
+	// re-append, so a freshly scaffolded workspace is born with the doctrine in place
+	// and re-running init never duplicates it.
+	identityPath := filepath.Join(dir, identity)
+	results, err := doctrine.Install(identityPath, doctrine.Members())
+	if err != nil {
+		return fmt.Errorf("seed doctrine into %q: %w", identityPath, err)
+	}
+	reportDoctrineResults(results, identityPath)
+
 	fmt.Printf("workspace ready: %s\n", dir)
 	fmt.Printf("  → edit %s: set \"cwd\" to %s's absolute worktree path before resuming.\n",
 		filepath.Join(dir, workspace.LaunchFileName), agent)
