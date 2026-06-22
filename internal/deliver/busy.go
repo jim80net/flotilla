@@ -2,8 +2,10 @@ package deliver
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -56,6 +58,26 @@ func CapturePane(target string) (string, error) {
 		return "", err
 	}
 	return string(out), nil
+}
+
+// CursorY returns the tmux pane's cursor ROW (`#{cursor_y}`), 0-based from the top of the visible
+// pane — the SAME indexing as the lines `CapturePane` returns, so `capturedLines[CursorY]` is the
+// line the cursor sits on. The cursor marks the focused input line: it is the input-focus signal
+// that lets the claude-code driver read the composer AT the cursor (e.g. a per-agent message
+// sub-composer rendered ABOVE a docked agents panel — outside a fixed bottom-of-pane window). Used
+// by the ComposerStateProbe; a read error propagates so the caller falls back to the spinner signal.
+func CursorY(target string) (int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "tmux", "display-message", "-p", "-t", target, "#{cursor_y}").Output()
+	if err != nil {
+		return 0, err
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0, fmt.Errorf("parse cursor_y %q: %w", strings.TrimSpace(string(out)), err)
+	}
+	return n, nil
 }
 
 // ParseBusy is the testable core: true when the captured pane shows an active

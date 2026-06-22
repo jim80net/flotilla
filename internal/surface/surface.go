@@ -112,28 +112,56 @@ type ComposerProbe interface {
 	ComposerPending(pane string) (pending bool, ok bool)
 }
 
-// InputBlockProbe is an OPTIONAL Driver capability: report whether the pane's composer is
-// UNREACHABLE because a focus-stealing UI overlay holds input focus — for Claude Code, the inline
-// background-agents panel. When the panel has focus, keystrokes navigate the panel (↑/↓ select,
-// Enter "view") instead of submitting to the composer, so a bracketed paste + Enter is silently
-// LOST or stranded (the body sits unsubmitted; retries stack pastes). Confirmed delivery
-// (Confirm.Submit) consults this BEFORE pasting and refuses to fire into a panel-blocked pane, and
-// in pollConfirm BEFORE the composer read (a panel-focused pane's empty composer above the docked
-// panel would otherwise read CLEARED and false-confirm a lost message).
-//
-// The claude-code driver detects it with a HEADER-ANCHORED span scan: anchor on the live
-// (bottom-most) panel header and look below it for the focus cursor on an agent-list row. Anchoring
-// on the live header (the panel docks at the pane bottom) makes detection invariant to the subagent
-// count and the selected row, and excludes a panel cursor echoed in scrollback.
-//
-// A Driver MAY implement it; callers type-assert and fall back (treat the pane as NOT blocked) when
-// it is absent or returns undetermined. It is READ-ONLY (never writes a pane), like ComposerProbe.
-type InputBlockProbe interface {
-	// InputBlocked reports whether the pane's composer is input-blocked behind a focus-stealing
-	// overlay. ok=true with blocked=true means the overlay provably has focus; ok=true with
-	// blocked=false means the composer is reachable; ok=false means undetermined (capture glitch /
-	// unrecognized render) — the caller MUST NOT treat the pane as blocked in that case.
-	InputBlocked(pane string) (blocked bool, ok bool)
+// ComposerDisposition is the classified state of the composer AT THE TERMINAL CURSOR (the focused
+// input line). It is the cursor-located successor to ComposerProbe's bottom-of-pane pending/cleared
+// read, which was BLIND to a sub-composer rendered above a docked agents panel.
+type ComposerDisposition int
+
+const (
+	// ComposerUndetermined: no readable cursor/prompt (capture glitch / unrecognized render). The
+	// caller MUST fall back to the Working spinner — never treat this as cleared.
+	ComposerUndetermined ComposerDisposition = iota
+	// ComposerCleared: the cursor's composer is empty — the body left it ⇒ the submit was accepted.
+	ComposerCleared
+	// ComposerPending: a body remains in the cursor's composer — the submit has not been accepted.
+	ComposerPending
+	// ComposerQueued: the input is queued behind a modal/turn ("Press up to edit queued messages")
+	// — a SOFT-SUCCESS: the message is not lost; it will deliver when the agent is free.
+	ComposerQueued
+	// ComposerSubAgent: the cursor is on a per-agent message sub-composer ("Message @<agent>") — a
+	// paste would MIS-DELIVER to that background agent. Confirmed delivery refuses to paste here.
+	ComposerSubAgent
+	// ComposerListNav: the cursor is on an agent-list row (panel navigation) — not a usable composer.
+	ComposerListNav
+)
+
+// String renders a disposition for logs/alert reasons.
+func (d ComposerDisposition) String() string {
+	switch d {
+	case ComposerCleared:
+		return "cleared"
+	case ComposerPending:
+		return "pending"
+	case ComposerQueued:
+		return "queued"
+	case ComposerSubAgent:
+		return "sub-composer"
+	case ComposerListNav:
+		return "list-nav"
+	default:
+		return "undetermined"
+	}
+}
+
+// ComposerStateProbe is an OPTIONAL Driver capability: report the ComposerDisposition at the cursor.
+// It supersedes ComposerProbe — reading AT the terminal cursor (the focused input) instead of a
+// fixed bottom-of-pane window, so a per-agent message sub-composer or a queued-message prompt is
+// classified correctly rather than missed. Confirmed delivery uses it as the delivery AUTHORITY
+// (post-submit Pending == blocked; Cleared/Queued == confirmed) and for the ONE pre-paste refuse
+// (SubAgent/ListNav would mis-deliver). A Driver MAY implement it; callers fall back to the Working
+// spinner on Undetermined or when it is absent. READ-ONLY (never writes a pane).
+type ComposerStateProbe interface {
+	ComposerState(pane string) ComposerDisposition
 }
 
 // DefaultSurface is used when an agent has no surface configured.

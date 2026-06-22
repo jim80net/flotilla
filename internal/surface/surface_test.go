@@ -2,7 +2,6 @@ package surface
 
 import (
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/jim80net/flotilla/internal/deliver"
@@ -126,66 +125,6 @@ func TestClaudeAssessParity(t *testing.T) {
 				t.Errorf("Assess = %v, want %v", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestParseComposerPending(t *testing.T) {
-	// The composer-cleared signal: classify Claude Code's composer line from real captured render.
-	// PENDING = a body the Enter has not taken; CLEARED = empty composer (submitted); UNDETERMINED
-	// = no prompt line found (fall back to the spinner).
-	const rule = "────────────────────────────────────────"
-	// The real hydra-ops capture (2026-06-17): a CLEARED composer with the post-turn survey modal
-	// rendered ABOVE it — the case that must not confuse the composer-line finder.
-	hydraCleared := strings.Join([]string{
-		"  Now — back to your original questions: the floor is yours.",
-		"",
-		"✻ Churned for 3m 34s",
-		"",
-		"● How is Claude doing this session? (optional)",
-		"  1: Bad    2: Fine   3: Good   0: Dismiss",
-		"",
-		rule,
-		"❯ ",
-		rule,
-		"  user@host:~ [Opus 4.8] ctx:35%                    /rc active",
-		"  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents",
-	}, "\n")
-	cases := []struct {
-		name        string
-		captured    string
-		wantPending bool
-		wantOK      bool
-	}{
-		{"empty composer → cleared", rule + "\n❯ \n" + rule + "\n  footer", false, true},
-		{"single-line body → pending", rule + "\n❯ operator: are you there?\n" + rule, true, true},
-		{"multi-line paste placeholder → pending", rule + "\n❯ [Pasted text +12 lines]\n" + rule, true, true},
-		{"working render, composer empty → cleared", "· Ideating… (6m · ↓ 23k tokens)\n" + rule + "\n❯ \n" + rule, false, true},
-		{"indented empty composer → cleared", "  ❯ \n  footer", false, true},
-		{"no composer prompt in tail → undetermined", "user@host:~$ \n  some shell output", false, false},
-		{"real hydra-ops capture with survey modal → cleared", hydraCleared, false, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			pending, ok := parseComposerPending(tc.captured)
-			if pending != tc.wantPending || ok != tc.wantOK {
-				t.Errorf("parseComposerPending = (pending=%v, ok=%v), want (pending=%v, ok=%v)", pending, ok, tc.wantPending, tc.wantOK)
-			}
-		})
-	}
-}
-
-func TestClaudeComposerPendingRoutesCaptureError(t *testing.T) {
-	// A capture error reads as UNDETERMINED (ok=false) so confirmation falls back to the spinner
-	// rather than misreading a glitch as "cleared".
-	boom := errors.New("tmux capture boom")
-	c := claudeCode{capturePane: func(string) (string, error) { return "", boom }}
-	if pending, ok := c.ComposerPending("0:0.0"); pending || ok {
-		t.Errorf("ComposerPending on capture error = (%v, %v), want (false, false)", pending, ok)
-	}
-	// And it routes a clean capture through the parser.
-	c.capturePane = func(string) (string, error) { return "──\n❯ \n──", nil }
-	if pending, ok := c.ComposerPending("0:0.0"); pending || !ok {
-		t.Errorf("ComposerPending on empty composer = (%v, %v), want (false, true)", pending, ok)
 	}
 }
 
