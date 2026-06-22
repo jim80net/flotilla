@@ -23,23 +23,32 @@ inline agents panel — Ctrl-C is the empirically-correct mechanism.)
 
 ## What Changes
 
-- **`deliver.SendCtrlC(pane)`** — send a single `C-c` to the pane (`tmux send-keys -t <pane> -- C-c`)
-  under the existing per-pane lock, mirroring `SendEnter`.
-- **A bounded re-probe-between self-heal** (`Confirm.Submit`): when the composer is blocked — the
-  pre-paste gate sees a SubAgent/ListNav overlay, OR the post-submit composer stays Pending after the
-  retries+grace — attempt recovery instead of immediately returning `ErrPanelBlocked`:
-  1. probe `ComposerState`; if **Cleared** → recovered, STOP;
-  2. else send ONE Ctrl-C, wait a short settle, re-probe;
-  3. repeat up to a small cap (covers the deepest observed overlay stack); never send a Ctrl-C into a
-     Cleared composer (the exit guard).
-  Ctrl-C clears the prompt input (per the docs), so a successful self-heal leaves an **empty**
-  composer — and the original message provably never landed (we were blocked), so the orchestration
-  **re-attempts the delivery ONCE** (a clean paste into the now-empty composer; no double-deliver, no
-  stacking). The single retry is recursion-guarded.
-- **The alert becomes truly last-resort.** `ErrPanelBlocked` (→ the #154 terminal operator alert) is
-  returned ONLY when the self-heal fails to reach a reachable composer within the cap, or the single
-  post-heal re-attempt is itself blocked. A self-healed delivery is a normal success (logged with a
-  "self-healed" note so the rate is observable).
+(The shape below is the DESIGN-TRIO-folded version — the original "Submit → detect → heal → re-attempt"
+carried three CRITICAL hazards against a live, self-mutating pane; see design.md. The safe shape is
+**pre-check + heal BEFORE submit**, relay-only, Idle-gated, default-off.)
+
+- **`deliver.SendCtrlC(pane)`** — send a single `C-c` (`tmux send-keys -t <pane> -- C-c`) under the
+  existing per-pane lock, mirroring `SendEnter`.
+- **`surface.SelfHealAndRetry`** — invoked ONLY by relay-kind callers (the watch Injector for
+  `isRelay` jobs, the `send`/`notify` CLI, the dash) — NOT kind-blind `Confirm.Submit` (a heartbeat/
+  detector tick must never fire an unsolicited Ctrl-C). When self-heal is ENABLED and the pre-paste
+  composer is an overlay (SubAgent/ListNav) on an IDLE pane, it runs a bounded re-probe-between
+  self-heal BEFORE calling `Submit`:
+  1. gate on `Assess==Idle` (never Ctrl-C a Working pane → never interrupt a turn);
+  2. probe `ComposerState`; if NOT an overlay → reachable, STOP (never Ctrl-C a recovered composer →
+     the documented exit-on-second-press can't trip);
+  3. else if the state is unchanged since the last press → STOP (no progress);
+  4. else send ONE Ctrl-C, settle, re-probe; cap at a small fixed count.
+  Then it calls `Submit` ONCE on the (now-clean) composer — exactly once, always, so there is no
+  re-attempt and structurally no double-deliver. A still-blocked composer → `Submit` returns
+  `ErrPanelBlocked` + the #154 alert (now truly last-resort).
+- **Post-submit Pending stays alert-only** (no auto-recovery): "Cleared after Ctrl-C" cannot be
+  distinguished from "the body just submitted," so a re-attempt there could double-deliver. Pre-paste
+  is the only double-deliver-safe hook.
+- **Default-OFF behind a kill-switch** (`FLOTILLA_SELF_HEAL=1` + a wired `SendCtrlC`), with an
+  exit-after-heal journal detector (a pane dropping to Shell shortly after a self-heal is logged as a
+  suspected self-heal exit) — because the worst case of this destructive primitive is killing a live
+  session. Enabled on the fleet only after a live recover-without-exit validation.
 
 ## Out of scope (separate follow-ups)
 

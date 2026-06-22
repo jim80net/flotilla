@@ -2,55 +2,63 @@
 
 ## ADDED Requirements
 
-### Requirement: Confirmed delivery self-heals a blocked composer before alerting
+### Requirement: A blocked composer is self-healed before submitting, safely against a live pane
 
-Confirmed delivery SHALL attempt to RECOVER an input-blocked composer automatically before reporting
-it blocked, when the driver supports it (a `ComposerStateProbe` and a Ctrl-C primitive). When a
-delivery is blocked — the pre-paste cursor is on a focus-stealing overlay (a per-agent sub-composer
-or an agent-list row), OR the composer stays Pending after the bounded retries+grace — the
-orchestration SHALL run a bounded self-heal: probe the composer state, and while it is not reachable,
-send a single Ctrl-C and re-probe, up to a small fixed cap. The self-heal SHALL NOT send a Ctrl-C
-into an already-reachable (Cleared) composer — it SHALL re-probe BEFORE each Ctrl-C and stop the
-instant the composer is reachable — because a second Ctrl-C at the main composer exits the session;
-re-probing between presses makes the self-heal safe against that exit regardless of how many overlay
-layers are stacked. Esc SHALL NOT be relied upon (it does not recover the inline agents panel).
+The system SHALL attempt to recover an input-blocked composer automatically before reporting it
+blocked, for OPERATOR-RELAY deliveries only, when self-heal is enabled and the driver supports it (a
+`ComposerStateProbe` and a Ctrl-C primitive). The self-heal SHALL run BEFORE any paste, only when the
+pre-paste composer is a focus-stealing overlay (a per-agent sub-composer or an agent-list row) on an
+IDLE pane. It SHALL be a bounded loop that, on each iteration: (1) aborts if the pane is not Idle (a
+busy pane is mid-turn — a Ctrl-C would interrupt the turn, so it MUST NOT be sent); (2) stops if the
+composer is no longer an overlay (reachable — a Ctrl-C MUST NOT be sent into a recovered composer,
+because a second Ctrl-C at the main composer exits the session); (3) stops if the composer state did
+not change since the previous press (no progress); (4) otherwise sends one Ctrl-C, waits a settle at
+least as long as the recovered-frame render latency, and re-probes; capped at a small fixed count.
+Esc SHALL NOT be used (it does not recover the inline agents panel). Self-heal SHALL be DISABLED by
+default and gated by a kill-switch that disables it instantly without a redeploy.
 
-#### Scenario: A one-layer block is recovered with no risk of exit
+#### Scenario: A reachable or busy composer receives no Ctrl-C
 
-- **WHEN** the composer is blocked by a single overlay layer
-- **THEN** the self-heal sends one Ctrl-C, re-probes, observes a reachable composer, and STOPS —
-  sending no further Ctrl-C (so the documented exit-on-second-press is never reached)
+- **WHEN** the composer is already reachable, OR the pane is mid-turn (Working)
+- **THEN** the self-heal sends no Ctrl-C (no exit, no turn interruption)
 
-#### Scenario: A reachable composer receives no Ctrl-C
+#### Scenario: An overlay is recovered and the press stops at the first reachable read
 
-- **WHEN** the composer is already reachable (Cleared) when the self-heal begins
-- **THEN** no Ctrl-C is sent
+- **WHEN** the composer is a focus-stealing overlay on an idle pane
+- **THEN** the self-heal sends one Ctrl-C per still-overlay re-probe and STOPS the instant the composer
+  is reachable, never sending a Ctrl-C into a recovered composer
 
-#### Scenario: A driver without the probe or the Ctrl-C primitive does not self-heal
+#### Scenario: Self-heal is off by default
 
-- **WHEN** the driver does not support composer-state probing or Ctrl-C
+- **WHEN** the kill-switch is not enabled (or the driver lacks the probe/Ctrl-C)
 - **THEN** no self-heal is attempted and delivery behaves exactly as before (the spinner authority +
   last-resort alert)
 
-### Requirement: A self-healed delivery re-attempts once without double-delivering; the alert is last-resort
+### Requirement: Self-heal submits exactly once and never double-delivers; the alert is last-resort
 
-When the self-heal reaches a reachable (Cleared, empty) composer, confirmed delivery SHALL re-attempt
-the delivery exactly ONCE and report the outcome of that re-attempt. The re-attempt is safe because
-the original body provably never landed (the delivery was blocked) and the recovered composer is
-empty, so the re-paste is the only copy — no double-deliver, no stacking. The single re-attempt SHALL
-be recursion-guarded (a healed delivery does not self-heal again). The orchestration SHALL re-attempt
-ONLY when the post-heal composer is empty (Cleared); if a body survived the self-heal it SHALL NOT
-re-paste. The input-blocked failure (and its operator alert) SHALL be returned ONLY when the self-heal
-does not reach a reachable composer within the cap, or the single re-attempt is itself blocked —
-making the alert a TRUE last-resort. A self-healed delivery SHALL be recorded with a note (the
-self-heal count) so the self-heal rate is observable.
+After the pre-paste self-heal, the system SHALL call the confirmed submit EXACTLY ONCE — there is no
+separate re-attempt — so the body is pasted at most once and a double-deliver is impossible by
+construction. If the self-heal recovered the composer, the single submit pastes into the clean
+composer and confirms; if it did not, the single submit re-detects the block and returns the
+input-blocked failure, so the operator alert fires ONLY as a true last-resort. The system SHALL NOT
+self-heal the POST-submit pending path (a composer that cleared after a Ctrl-C cannot be
+distinguished from a body that just submitted, so a recovery-and-resend there could double-deliver);
+that path keeps the last-resort alert. A self-healed delivery SHALL be recorded with the Ctrl-C count
+so the self-heal rate is observable, and a pane that drops to a shell shortly after a self-heal SHALL
+be logged as a suspected self-heal-induced exit.
 
-#### Scenario: A blocked delivery is self-healed and succeeds without an alert
+#### Scenario: A relay to an overlay-blocked desk self-heals and delivers with no alert
 
-- **WHEN** a delivery is blocked, the self-heal recovers the composer, and the single re-attempt confirms
-- **THEN** the delivery is reported successful (with a self-healed note) and NO operator alert fires
+- **WHEN** an operator relay targets an idle desk whose composer is a focus-stealing overlay, and the
+  self-heal recovers it
+- **THEN** the message is delivered by the single submit and no operator alert fires
 
-#### Scenario: The alert fires only when self-heal fails
+#### Scenario: A heartbeat/detector tick never self-heals
 
-- **WHEN** the self-heal cannot reach a reachable composer within the cap (or the re-attempt is blocked)
-- **THEN** the input-blocked failure is returned and the operator alert fires (last-resort)
+- **WHEN** a non-relay (heartbeat/detector) delivery targets a blocked composer
+- **THEN** no self-heal is attempted (no unsolicited Ctrl-C); the tick follows its normal not-idle policy
+
+#### Scenario: The alert fires only when self-heal cannot recover
+
+- **WHEN** the self-heal does not reach a reachable composer within the cap
+- **THEN** the single submit re-detects the block and the input-blocked operator alert fires (last-resort)
