@@ -337,8 +337,13 @@ func cmdSend(args []string) error {
 		return fmt.Errorf("%s pane is busy (another delivery/rotate in progress) — NOT delivered; retry: %w", agentName, err)
 	}
 	defer txn.Release()
+	// `flotilla send`/`notify` is an operator relay → route through the self-heal-capable submit
+	// (#156). Self-heal is inert unless FLOTILLA_SELF_HEAL is enabled (SendCtrlC unwired ⇒ == Submit).
 	confirm := surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}
-	if err := confirm.Submit(drv, pane, message); err != nil {
+	if surface.SelfHealEnabled() {
+		confirm.SendCtrlC = deliver.SendCtrlC
+	}
+	if err := confirm.SubmitWithSelfHeal(drv, pane, message); err != nil {
 		switch {
 		case errors.Is(err, surface.ErrBusy):
 			return fmt.Errorf("%s is busy (mid-turn) — NOT delivered; retry when it is idle", agentName)

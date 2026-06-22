@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"time"
 )
 
@@ -112,7 +113,37 @@ var ErrPanelBlocked = errors.New("surface: composer is input-blocked behind the 
 type Confirm struct {
 	SendEnter func(pane string) error // the idempotent Enter-only retry (deliver.SendEnter)
 	Sleep     func(time.Duration)     // the confirm-poll wait (time.Sleep)
+	// SendCtrlC is the OPTIONAL self-heal primitive (deliver.SendCtrlC): a Ctrl-C that escapes a
+	// focus-stealing agents-panel overlay back to the main composer. When nil, self-heal is DISABLED
+	// (SubmitWithSelfHeal == Submit) — the default-off kill-switch is "do not wire SendCtrlC". It is
+	// wired ONLY when FLOTILLA_SELF_HEAL is enabled, because Ctrl-C is destructive (a press into a
+	// recovered composer exits the session — see deliver.SendCtrlC + selfHeal's gates).
+	SendCtrlC func(pane string) error
 }
+
+// SelfHealEnabled is the #156 kill-switch: composer self-heal (bounded Ctrl-C recovery of a blocked
+// composer) is DEFAULT-OFF and enabled only by FLOTILLA_SELF_HEAL=1/true/yes. Ctrl-C is destructive
+// (a stray press can exit a session), so it ships off until live-validated, and the flag disables it
+// instantly with no redeploy. ONE definition, shared by the watch daemon, the CLI, and the dash.
+func SelfHealEnabled() bool {
+	switch os.Getenv("FLOTILLA_SELF_HEAL") {
+	case "1", "true", "TRUE", "yes":
+		return true
+	}
+	return false
+}
+
+// Self-heal timing (issue #156). Ctrl-C is DESTRUCTIVE; these gate its use.
+const (
+	// maxSelfHealCtrlC caps the bounded re-probe-between self-heal — covers the deepest observed
+	// overlay stack (sub-composer → panel → composer ≈ 2 layers) with headroom, then gives up
+	// (→ the last-resort alert) rather than press blindly toward the documented exit-on-second-press.
+	maxSelfHealCtrlC = 3
+	// selfHealSettle is the wait after each Ctrl-C before the re-probe, so the re-probe reads the
+	// RECOVERED frame, not a stale pre-press one (a stale read would see the overlay still and press
+	// again, over-shooting). Cross-ref deliver.clearComposeDelay (1s, the TUI's keystroke-render lag).
+	selfHealSettle = 1 * time.Second
+)
 
 // Submit delivers text to the pane via the driver and CONFIRMS the submit was accepted, with an
 // idle-gate and an idempotent Enter-only retry. It returns nil ONLY when the submit is confirmed —
@@ -255,6 +286,67 @@ func (c Confirm) Submit(d Driver, pane, text string) error {
 	}
 	logUnconfirmed(d, pane, sp, polls)
 	return ErrUnconfirmed
+}
+
+// SubmitWithSelfHeal is the RELAY-kind entrypoint (#156): it heals a pre-paste agents-panel overlay
+// BEFORE submitting, then submits EXACTLY ONCE. Only relay callers (the watch Injector for isRelay
+// jobs, the send/notify CLI, the dash control surface) invoke it — a heartbeat/detector tick calls
+// plain Submit, so a tick never fires an unsolicited destructive Ctrl-C (H2). Self-heal is a no-op
+// (== Submit) when SendCtrlC is unwired (the default-off kill-switch) or the driver has no
+// ComposerStateProbe.
+//
+// SCOPE — PRE-PASTE ONLY (C3): the heal runs only on a pre-paste overlay (SubAgent/ListNav) on an
+// IDLE pane. There is NO post-submit recovery and NO re-attempt: Submit is called exactly once in
+// every path, so a body that "just submitted (cleared)" can never be mistaken for "recovered → re-
+// send" — a double-deliver is impossible by construction.
+func (c Confirm) SubmitWithSelfHeal(d Driver, pane, text string) error {
+	if c.SendCtrlC != nil {
+		if sp, ok := d.(ComposerStateProbe); ok && d.Assess(pane) == StateIdle {
+			if st := sp.ComposerState(pane); st == ComposerSubAgent || st == ComposerListNav {
+				c.selfHeal(d, pane, sp)
+			}
+		}
+	}
+	return c.Submit(d, pane, text)
+}
+
+// selfHeal runs the bounded re-probe-between Ctrl-C loop to recover a focus-stealing overlay. SAFETY
+// (#156), every iteration: (a) gates on Assess==Idle — NEVER Ctrl-C a Working/Shell pane (a Ctrl-C
+// into a running turn INTERRUPTS it; a shell is gone); (b) stops the instant the composer is no
+// longer an overlay — NEVER sends a Ctrl-C into a recovered composer (the documented second-press-
+// exits hazard); (c) stops on no state change since the last press (an ignored Ctrl-C must not march
+// toward the exit). Capped at maxSelfHealCtrlC. Best-effort and verdict-free: the caller's single
+// Submit re-checks and alerts if the heal did not recover. The C1 residual (the agent itself
+// dismisses the overlay between our probe and our press) is shrunk by the per-iteration Idle gate and
+// made DETECTABLE — a pane that reads Shell during the loop is logged as a suspected self-heal exit.
+func (c Confirm) selfHeal(d Driver, pane string, sp ComposerStateProbe) {
+	prev := ComposerDisposition(-1) // an invalid value so the first no-progress check is false
+	for i := 0; i < maxSelfHealCtrlC; i++ {
+		switch d.Assess(pane) {
+		case StateShell:
+			log.Printf("flotilla: surface: SUSPECTED self-heal exit — pane %s is a shell after %d Ctrl-C", pane, i)
+			return
+		case StateIdle:
+			// ok to inspect and possibly press
+		default: // Working / Unknown / Awaiting* — busy or uncertain; do NOT press (no turn interrupt)
+			return
+		}
+		st := sp.ComposerState(pane)
+		if st != ComposerSubAgent && st != ComposerListNav {
+			return // reachable — never Ctrl-C a recovered composer
+		}
+		if st == prev {
+			log.Printf("flotilla: surface: self-heal stalled on %s (%s unchanged after a Ctrl-C) — giving up", pane, st)
+			return // no progress — another press would march toward the exit
+		}
+		prev = st
+		if err := c.SendCtrlC(pane); err != nil {
+			log.Printf("flotilla: surface: self-heal Ctrl-C to %s failed: %v", pane, err)
+			return
+		}
+		c.Sleep(selfHealSettle)
+	}
+	log.Printf("flotilla: surface: self-heal hit the %d-press cap on %s — still blocked (last-resort alert follows)", maxSelfHealCtrlC, pane)
 }
 
 // confirmRead is the outcome of one confirmation poll (see pollConfirm).

@@ -412,3 +412,167 @@ func TestConfirmSubmitNoStateProbeRestsOnSpinner(t *testing.T) {
 		t.Fatalf("err = %v, want nil (no-probe driver confirms by the spinner as before)", err)
 	}
 }
+
+// healStub (#156 self-heal): a driver whose ComposerState is an overlay until `recoverAt` Ctrl-C
+// presses have been sent (tracked via the shared *ctrlc counter the Confirm.SendCtrlC closure
+// increments), then Cleared. Assess follows assessSeq (default Idle). Records Submit calls.
+type healStub struct {
+	assessSeq []State
+	aIdx      int
+	overlay   ComposerDisposition   // SubAgent or ListNav (used when stateSeq is empty)
+	recoverAt int                   // ComposerState → Cleared once *ctrlc >= recoverAt (stateSeq empty)
+	stateSeq  []ComposerDisposition // optional: the disposition indexed by the Ctrl-C count (a CHANGING stack)
+	ctrlc     *int
+	submits   int
+}
+
+func (s *healStub) Name() string                { return "heal-stub" }
+func (s *healStub) Submit(string, string) error { s.submits++; return nil }
+func (s *healStub) Rotate(string) error         { return nil }
+func (s *healStub) RotateStrategy() Strategy    { return SlashCommand }
+func (s *healStub) Assess(string) State {
+	if len(s.assessSeq) == 0 {
+		return StateIdle
+	}
+	if s.aIdx >= len(s.assessSeq) {
+		return s.assessSeq[len(s.assessSeq)-1]
+	}
+	st := s.assessSeq[s.aIdx]
+	s.aIdx++
+	return st
+}
+func (s *healStub) ComposerState(string) ComposerDisposition {
+	if len(s.stateSeq) > 0 { // sequence mode: the disposition indexed by how many Ctrl-C have been sent
+		i := *s.ctrlc
+		if i >= len(s.stateSeq) {
+			i = len(s.stateSeq) - 1
+		}
+		return s.stateSeq[i]
+	}
+	if *s.ctrlc >= s.recoverAt {
+		return ComposerCleared
+	}
+	return s.overlay
+}
+
+// healConfirm builds a Confirm with a SendCtrlC recorder (*ctrlc) — self-heal ENABLED.
+func healConfirm(enter, ctrlc *int) Confirm {
+	c := newConfirm(enter)
+	c.SendCtrlC = func(string) error { *ctrlc++; return nil }
+	return c
+}
+
+func TestSubmitWithSelfHealDisabledIsPlainSubmit(t *testing.T) {
+	// SendCtrlC nil (the default-off kill-switch) → SubmitWithSelfHeal == Submit: zero Ctrl-C even on
+	// an overlay; falls through to the normal blocked path (ErrPanelBlocked).
+	enter, ctrlc := 0, 0
+	c := newConfirm(&enter) // SendCtrlC stays nil
+	d := &healStub{overlay: ComposerSubAgent, recoverAt: 99, ctrlc: &ctrlc}
+	err := c.SubmitWithSelfHeal(d, "0:0.0", "hi")
+	if ctrlc != 0 {
+		t.Errorf("Ctrl-C sent = %d, want 0 (self-heal disabled)", ctrlc)
+	}
+	if !errors.Is(err, ErrPanelBlocked) {
+		t.Errorf("err = %v, want ErrPanelBlocked (no heal → gate refuses the overlay)", err)
+	}
+}
+
+func TestSubmitWithSelfHealRecoversThenSubmitsOnce(t *testing.T) {
+	// A pre-paste overlay on an idle pane: self-heal sends Ctrl-C until recovered, then Submit is
+	// called EXACTLY ONCE into the clean composer → delivered. recoverAt=1 → one Ctrl-C.
+	enter, ctrlc := 0, 0
+	d := &healStub{overlay: ComposerSubAgent, recoverAt: 1, ctrlc: &ctrlc}
+	err := healConfirm(&enter, &ctrlc).SubmitWithSelfHeal(d, "0:0.0", "hi")
+	if err != nil {
+		t.Fatalf("err = %v, want nil (healed → submitted)", err)
+	}
+	if ctrlc != 1 {
+		t.Errorf("Ctrl-C sent = %d, want 1 (recovered after one press, then STOP — no Ctrl-C into the recovered composer)", ctrlc)
+	}
+	if d.submits != 1 {
+		t.Errorf("Submit calls = %d, want EXACTLY 1 (no re-attempt — double-deliver impossible)", d.submits)
+	}
+}
+
+func TestSubmitWithSelfHealNonOverlayDoesNotHeal(t *testing.T) {
+	// A reachable (Cleared) composer → no self-heal, Submit once. (The exit guard: never Ctrl-C a
+	// non-overlay composer.)
+	enter, ctrlc := 0, 0
+	d := &healStub{overlay: ComposerCleared, recoverAt: 0, ctrlc: &ctrlc} // already Cleared
+	if err := healConfirm(&enter, &ctrlc).SubmitWithSelfHeal(d, "0:0.0", "hi"); err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if ctrlc != 0 {
+		t.Errorf("Ctrl-C sent = %d, want 0 (composer reachable — never Ctrl-C it)", ctrlc)
+	}
+}
+
+func TestSelfHealIdleGateNeverCtrlCsAWorkingPane(t *testing.T) {
+	// C2: a pane that flips to Working mid-heal must NOT be Ctrl-C'd again (a Ctrl-C into a running
+	// turn interrupts it). assessSeq Idle (press once) → Working (abort).
+	enter, ctrlc := 0, 0
+	c := healConfirm(&enter, &ctrlc)
+	d := &healStub{assessSeq: []State{StateIdle, StateWorking}, overlay: ComposerSubAgent, recoverAt: 99, ctrlc: &ctrlc}
+	c.selfHeal(d, "0:0.0", d)
+	if ctrlc > 1 {
+		t.Errorf("Ctrl-C sent = %d, want ≤1 (Working aborts the loop — never interrupt a turn)", ctrlc)
+	}
+}
+
+func TestSelfHealStopsOnNoProgress(t *testing.T) {
+	// H1: a Ctrl-C that does not change the overlay state stops the loop (an ignored Ctrl-C must not
+	// march toward the exit). recoverAt=99 so ComposerState never changes → exactly one press.
+	enter, ctrlc := 0, 0
+	c := healConfirm(&enter, &ctrlc)
+	d := &healStub{overlay: ComposerListNav, recoverAt: 99, ctrlc: &ctrlc}
+	c.selfHeal(d, "0:0.0", d)
+	if ctrlc != 1 {
+		t.Errorf("Ctrl-C sent = %d, want 1 (state unchanged after the first press → stop)", ctrlc)
+	}
+}
+
+func TestSelfHealTwoLayerStackRecovers(t *testing.T) {
+	// A 2-layer overlay (sub-composer → panel → composer) that CHANGES disposition per press:
+	// SubAgent → ListNav → Cleared. selfHeal presses twice (each a new state, so no-progress never
+	// trips), then STOPS at Cleared. Exactly 2 Ctrl-C, never a 3rd into the recovered composer.
+	enter, ctrlc := 0, 0
+	c := healConfirm(&enter, &ctrlc)
+	d := &healStub{stateSeq: []ComposerDisposition{ComposerSubAgent, ComposerListNav, ComposerCleared}, ctrlc: &ctrlc}
+	c.selfHeal(d, "0:0.0", d)
+	if ctrlc != 2 {
+		t.Errorf("Ctrl-C sent = %d, want 2 (two-layer stack recovers in two presses, then STOP)", ctrlc)
+	}
+}
+
+func TestSelfHealCapExhausted(t *testing.T) {
+	// An overlay that keeps CHANGING but never reaches Cleared → the loop presses exactly
+	// maxSelfHealCtrlC times and hits the cap (then the caller's single Submit re-detects → alert).
+	enter, ctrlc := 0, 0
+	c := healConfirm(&enter, &ctrlc)
+	// alternates SubAgent/ListNav forever (always a state change, so no-progress never trips).
+	seq := []ComposerDisposition{}
+	for i := 0; i < maxSelfHealCtrlC+3; i++ {
+		if i%2 == 0 {
+			seq = append(seq, ComposerSubAgent)
+		} else {
+			seq = append(seq, ComposerListNav)
+		}
+	}
+	d := &healStub{stateSeq: seq, ctrlc: &ctrlc}
+	c.selfHeal(d, "0:0.0", d)
+	if ctrlc != maxSelfHealCtrlC {
+		t.Errorf("Ctrl-C sent = %d, want %d (cap-bounded; never unbounded toward the exit)", ctrlc, maxSelfHealCtrlC)
+	}
+}
+
+func TestSelfHealShellAborts(t *testing.T) {
+	// A pane that reads Shell during the loop aborts (no Ctrl-C into a gone session) — the exit
+	// detector path.
+	enter, ctrlc := 0, 0
+	c := healConfirm(&enter, &ctrlc)
+	d := &healStub{assessSeq: []State{StateShell}, overlay: ComposerSubAgent, recoverAt: 99, ctrlc: &ctrlc}
+	c.selfHeal(d, "0:0.0", d)
+	if ctrlc != 0 {
+		t.Errorf("Ctrl-C sent = %d, want 0 (Shell → abort)", ctrlc)
+	}
+}

@@ -132,30 +132,40 @@ func cmdWatch(args []string) error {
 	// confirms the Idle→Working edge, retries Enter-only (never re-pasting), and returns a typed
 	// error the Injector dispatches on (ErrBusy → defer; failure → loud alert). Closing the
 	// relay's silent-drop class.
+	// Self-heal (#156) is DEFAULT-OFF: SendCtrlC is wired only when FLOTILLA_SELF_HEAL is enabled (the
+	// kill-switch). When unwired, SubmitWithSelfHeal == Submit (inert), so relay and tick behave
+	// identically. Ctrl-C is destructive — see surface.selfHeal's safety gates.
 	confirm := surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}
-	injector := watch.NewInjector(func(agent, message string) error {
-		drv, ok := surface.Get(agentSurface(cfg, agent))
-		if !ok {
-			return fmt.Errorf("unknown surface for agent %q", agent)
+	if surface.SelfHealEnabled() {
+		confirm.SendCtrlC = deliver.SendCtrlC
+		log.Printf("flotilla watch: self-heal ENABLED (FLOTILLA_SELF_HEAL) — relay input-blocks attempt bounded Ctrl-C recovery")
+	}
+	// mkSend resolves the surface + pane + per-pane transaction lock, then submits via `submit`. The
+	// TRANSACTION lock spans the WHOLE confirmed-delivery sequence so no other transaction (the
+	// detector's /clear rotate, a `flotilla send`, a dash control action) interleaves between the
+	// submit and its Enter-only retry / self-heal.
+	mkSend := func(submit func(surface.Driver, string, string) error) watch.SendFunc {
+		return func(agent, message string) error {
+			drv, ok := surface.Get(agentSurface(cfg, agent))
+			if !ok {
+				return fmt.Errorf("unknown surface for agent %q", agent)
+			}
+			pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
+			if err != nil {
+				return err
+			}
+			txn, err := deliver.AcquirePaneTxn(pane, deliver.PaneTxnTimeout)
+			if err != nil {
+				return err
+			}
+			defer txn.Release()
+			return submit(drv, pane, message)
 		}
-		pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
-		if err != nil {
-			return err
-		}
-		// Hold the per-pane TRANSACTION lock across the WHOLE confirmed-delivery sequence so no
-		// other transaction — the detector's /clear rotate (same process), a `flotilla send`, or a
-		// flotilla-dash control action (other processes) — can interleave between the submit and
-		// the Enter-only retry. Keyed by the resolved pane target (the same key the per-call flock
-		// inside Submit uses), bounded so a stuck holder never wedges this worker. A timeout is a
-		// real delivery failure (the Injector escalates a relay, drops a tick) — the same class as
-		// a per-call lock-contention error.
-		txn, err := deliver.AcquirePaneTxn(pane, deliver.PaneTxnTimeout)
-		if err != nil {
-			return err
-		}
-		defer txn.Release()
-		return confirm.Submit(drv, pane, message)
-	}, 16)
+	}
+	injector := watch.NewInjector(mkSend(confirm.Submit), 16)
+	// RELAY-kind jobs route through the self-heal-capable submit; heartbeat/detector ticks keep the
+	// plain submit (a tick must never fire an unsolicited Ctrl-C — #156 H2). Inert when self-heal off.
+	injector.SetRelaySend(mkSend(confirm.SubmitWithSelfHeal))
 	// A failed/undeliverable RELAY (operator message) raises a LOUD alert — the inverse of the
 	// silent-success bug. Heartbeat/detector ticks never escalate (a stale tick is dropped).
 	injector.SetEscalate(alert)
