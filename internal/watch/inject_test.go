@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/jim80net/flotilla/internal/surface"
 )
 
 // captureLog redirects the stdlib logger to a buffer for the duration of a test
@@ -122,6 +124,61 @@ func TestInjectorDoesNotLogSuccessOnFailedDelivery(t *testing.T) {
 	}
 	if strings.Contains(got, "delivered to") {
 		t.Errorf("a failed delivery must not emit a success log: %q", got)
+	}
+}
+
+func TestInjectorPanelBlockedRelayRaisesActionableAlert(t *testing.T) {
+	// #152: a relay that fails ErrPanelBlocked must raise a TERMINAL, ACTIONABLE alert (recipient +
+	// payload preview + the keystroke action) — NOT deferred (a panel does not self-heal), NOT silent.
+	var alerts []string
+	var mu sync.Mutex
+	in := NewInjector(func(string, string) error { return surface.ErrPanelBlocked }, 1)
+	in.SetEscalate(func(s string) { mu.Lock(); alerts = append(alerts, s); mu.Unlock() })
+	in.Start()
+	in.Enqueue(Job{Agent: "family-office", Message: "please run the edge audit", Kind: "relay"})
+	in.Stop()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(alerts) != 1 {
+		t.Fatalf("got %d alerts, want exactly 1 (terminal, not deferred)", len(alerts))
+	}
+	a := alerts[0]
+	for _, want := range []string{"family-office", "agents panel", "keystroke", "please run the edge audit"} {
+		if !strings.Contains(a, want) {
+			t.Errorf("alert missing %q: %q", want, a)
+		}
+	}
+}
+
+func TestInjectorPanelBlockedTickDoesNotAlarm(t *testing.T) {
+	// A heartbeat/detector tick that hits ErrPanelBlocked must NOT alarm the operator (the next wake
+	// re-evaluates) — only relays escalate. The journal still records it.
+	var alerts int32
+	buf := captureLog(t)
+	in := NewInjector(func(string, string) error { return surface.ErrPanelBlocked }, 1)
+	in.SetEscalate(func(string) { atomic.AddInt32(&alerts, 1) })
+	in.Start()
+	in.Enqueue(Job{Agent: "memex", Message: "tick", Kind: "heartbeat"})
+	in.Stop()
+
+	if got := atomic.LoadInt32(&alerts); got != 0 {
+		t.Errorf("a heartbeat panel-block raised %d alerts, want 0 (ticks never alarm)", got)
+	}
+	if !strings.Contains(buf.String(), "PANEL-BLOCKED") {
+		t.Errorf("expected a PANEL-BLOCKED journal line, got %q", buf.String())
+	}
+}
+
+func TestPreviewBody(t *testing.T) {
+	// Bounded, single-line, rune-safe preview for the alert.
+	if got := previewBody("hello\n  world\t!"); got != "hello world !" {
+		t.Errorf("previewBody collapse = %q, want %q", got, "hello world !")
+	}
+	long := strings.Repeat("é", 200) // 200 multibyte runes
+	got := previewBody(long)
+	if r := []rune(got); len(r) != 161 || r[160] != '…' { // 160 runes + the ellipsis
+		t.Errorf("previewBody bound = %d runes (last %q), want 161 ending in …", len(r), string(r[len(r)-1]))
 	}
 }
 

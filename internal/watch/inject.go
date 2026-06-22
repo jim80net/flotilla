@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -155,6 +156,17 @@ func (in *Injector) deliver(j Job) {
 	case errors.Is(err, surface.ErrBusy), errors.Is(err, surface.ErrTransient):
 		// The composer is busy (or its state is transiently uncertain) — do NOT fire into it.
 		in.handleBusy(j, err)
+	case errors.Is(err, surface.ErrPanelBlocked):
+		// The desk's composer is input-blocked behind the agents panel (#152). TERMINAL — a panel
+		// does not self-heal on a timer, so it is NOT deferred like ErrBusy (deferring would just
+		// delay the alert). The body was never pasted (not lost in the panel, not stacked). For a
+		// relay, raise an ACTIONABLE alert: the recipient + the undelivered payload (bounded preview)
+		// + the manual-recovery action + the re-send hedge (the machine never double-submits, but a
+		// human re-send on a false non-delivery would).
+		if isRelay(j.Kind) {
+			in.raise("operator message to %q NOT delivered — input-blocked behind the Claude Code agents panel; it needs a human keystroke or click into the composer at its pane. The machine did not re-send; verify the turn did not already start before re-sending. Undelivered payload: %q", j.Agent, previewBody(j.Message))
+		}
+		log.Printf("flotilla watch: deliver to %q PANEL-BLOCKED — composer unreachable behind the agents panel (needs a manual keystroke): %v", j.Agent, err)
 	default:
 		// A real delivery failure (ErrCrashed / ErrUnconfirmed / a paste-fail / a resolve or
 		// lock-contention error). Never silent for an operator message.
@@ -163,6 +175,20 @@ func (in *Injector) deliver(j Job) {
 		}
 		log.Printf("flotilla watch: deliver to %q failed: %v", j.Agent, err)
 	}
+}
+
+// previewBody returns a bounded, single-line preview of an undelivered message body for an operator
+// alert: the full body lives in the journal log line; the alert carries enough to identify WHICH
+// message was lost without flooding the operator surface. Rune-bounded (not byte) so multibyte
+// content is never split mid-rune.
+func previewBody(body string) string {
+	const maxRunes = 160
+	flat := strings.Join(strings.Fields(body), " ") // collapse newlines/runs of whitespace
+	r := []rune(flat)
+	if len(r) <= maxRunes {
+		return flat
+	}
+	return string(r[:maxRunes]) + "…"
 }
 
 // handleBusy applies the kind-aware not-idle policy for a busy (ErrBusy) or transiently-

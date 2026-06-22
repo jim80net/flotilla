@@ -46,11 +46,12 @@ type Controller interface {
 type RouteOutcome string
 
 const (
-	OutcomeDelivered   RouteOutcome = "delivered"   // confirmed turn started
-	OutcomeBusy        RouteOutcome = "busy"        // pane Working — not submitted (retry)
-	OutcomeCrashed     RouteOutcome = "crashed"     // pane is a shell — not delivered
-	OutcomeTransient   RouteOutcome = "transient"   // uncertain state — re-assess
-	OutcomeUnconfirmed RouteOutcome = "unconfirmed" // submit not confirmed — escalated
+	OutcomeDelivered    RouteOutcome = "delivered"     // confirmed turn started
+	OutcomeBusy         RouteOutcome = "busy"          // pane Working — not submitted (retry)
+	OutcomeCrashed      RouteOutcome = "crashed"       // pane is a shell — not delivered
+	OutcomeTransient    RouteOutcome = "transient"     // uncertain state — re-assess
+	OutcomeUnconfirmed  RouteOutcome = "unconfirmed"   // submit not confirmed — escalated
+	OutcomeInputBlocked RouteOutcome = "input-blocked" // composer behind the agents panel — needs a keystroke
 )
 
 // RouteResult is what a Route returns to the UI: the resolved target + the typed
