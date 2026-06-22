@@ -165,3 +165,95 @@ func parseComposerPending(captured string) (pending bool, ok bool) {
 	}
 	return false, false
 }
+
+// panelHeaderHint is the inline background-agents panel's navigation hint, drawn on the panel's
+// header row (the agent list's top edge). It is the STRUCTURAL anchor for input-block detection:
+// the live panel docks at the pane bottom, so the bottom-most occurrence of this hint is the live
+// panel's top edge, and the focus cursor (if any) sits on an agent row BELOW it. Version-specific
+// like workingSpinner / the composer prompt — revalidate on a Claude Code TUI upgrade.
+const panelHeaderHint = "Enter to view"
+
+// agentRowGlyphs are the per-agent status glyphs that begin each agents-panel row: ◯ (U+25EF) an
+// idle agent, ● (U+25CF) an active one. A composer-prompt "❯" immediately followed by one of these
+// is the panel's FOCUS cursor on an agent row — not a pending composer.
+const agentRowGlyphs = "◯●"
+
+// ComposerProbe and InputBlockProbe are SIBLINGS: the composer probe reads the composer line; the
+// input-block probe reads the agents-panel focus. They are independent reads (a panel can be shown
+// with the composer focused, or focused itself); Confirm.Submit consults the input-block probe
+// FIRST so a panel-focused pane never reaches the composer classification.
+
+// InputBlocked implements surface.InputBlockProbe: it reads the pane and reports whether the inline
+// background-agents panel currently holds input focus (so a paste+Enter would be lost in the panel).
+// A capture error reads as UNDETERMINED (ok=false) so the caller falls back to NOT-blocked rather
+// than refusing a delivery off a glitch.
+func (c claudeCode) InputBlocked(pane string) (blocked bool, ok bool) {
+	captured, err := c.capturePane(pane)
+	if err != nil {
+		log.Printf("flotilla: surface(claude-code): input-block probe capture failed for %q: %v (undetermined)", pane, err)
+		return false, false
+	}
+	return parsePanelFocused(captured)
+}
+
+// parsePanelFocused detects the agents-panel-FOCUSED state from the pane's GEOMETRY. The live agents
+// panel docks at the ABSOLUTE BOTTOM of the pane (verified live: the agent rows are the last lines,
+// below the composer + footer). So:
+//   - when the panel is FOCUSED, its selection cursor sits on an agent row that is the BOTTOM-MOST
+//     "❯" prompt in the pane (rows below the selected one carry no "❯");
+//   - when the panel is NOT focused (or absent), the bottom-most "❯" is the COMPOSER itself.
+//
+// Scanning the WHOLE pane (no fixed line window) for the bottom-most "❯" makes this robust for a
+// LONG panel (many subagents — the cursor is still the bottom-most "❯" regardless of panel height
+// or which row is selected) AND excludes a panel echoed in scrollback (an echoed capture sits ABOVE
+// the live composer, so the live composer — not the echo — is the bottom-most "❯"). This is why the
+// rule needs neither a tail window nor header-anchoring to defeat the scrollback echo: the geometry
+// does it.
+//
+// Returns (true, true) when the bottom-most "❯" is an agent-row cursor AND the panel header is
+// present (the header corroborates a real panel, guarding the rare case of a composer whose literal
+// content begins with an agent glyph). Returns (false, true) otherwise (composer reachable, or no
+// "❯" at all). ok is true whenever the capture parsed; the capture-error case is handled by the
+// caller (InputBlocked returns ok=false on a capture error, never reaching here).
+//
+// NEAR-MISS CANARY: a bottom-most agent-row cursor with NO recognized header is logged and treated
+// as NOT blocked (a Claude Code TUI change that reworps the hint surfaces in the journal rather than
+// silently blocking every agent-glyph composer line). Geometry/glyphs are version-specific —
+// revalidate on a TUI upgrade.
+func parsePanelFocused(captured string) (blocked bool, ok bool) {
+	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
+	bottom := -1
+	for i := len(lines) - 1; i >= 0; i-- { // bottom-most line bearing a "❯" prompt
+		if strings.HasPrefix(strings.TrimLeft(lines[i], " \t"), "❯") {
+			bottom = i
+			break
+		}
+	}
+	if bottom < 0 || !isAgentRowCursor(lines[bottom]) {
+		return false, true // no "❯", or the bottom-most "❯" is the composer → reachable
+	}
+	for _, ln := range lines { // corroborate: a real panel draws its header
+		if strings.Contains(ln, panelHeaderHint) {
+			return true, true
+		}
+	}
+	log.Printf("flotilla: surface(claude-code): bottom-most prompt looks like an agent-row cursor but no panel header %q found — the TUI may have changed; input-block detection may be degraded", panelHeaderHint)
+	return false, true
+}
+
+// isAgentRowCursor reports whether a line is an agents-panel focus cursor: a "❯" prompt (after
+// leading whitespace) immediately followed (after whitespace) by an agent glyph (◯/●).
+func isAgentRowCursor(line string) bool {
+	rest := strings.TrimLeft(line, " \t")
+	after, found := strings.CutPrefix(rest, "❯")
+	if !found {
+		return false
+	}
+	g := strings.TrimLeft(after, " \t")
+	for _, glyph := range agentRowGlyphs {
+		if strings.HasPrefix(g, string(glyph)) {
+			return true
+		}
+	}
+	return false
+}

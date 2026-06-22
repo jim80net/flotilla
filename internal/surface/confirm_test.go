@@ -324,3 +324,116 @@ func TestConfirmSubmitPasteFailureNoEnterRetry(t *testing.T) {
 		t.Errorf("SendEnter calls = %d, want 0 (never Enter-retry a paste that didn't land)", enter)
 	}
 }
+
+// panelStub is a Driver that implements Assess + ComposerProbe + InputBlockProbe with scripted
+// sequences (each advancing one entry per call, repeating the last once exhausted), for the
+// input-block (#152) gate + pollConfirm-precedence tests. blockedSeq entries are (blocked, ok).
+type panelStub struct {
+	assessSeq   []State
+	aIdx        int
+	pendingSeq  [][2]bool // {pending, ok} for ComposerPending
+	pIdx        int
+	blockedSeq  [][2]bool // {blocked, ok} for InputBlocked
+	bIdx        int
+	submitCalls int
+}
+
+func (s *panelStub) Name() string                { return "panel-stub" }
+func (s *panelStub) Submit(string, string) error { s.submitCalls++; return nil }
+func (s *panelStub) Rotate(string) error         { return nil }
+func (s *panelStub) RotateStrategy() Strategy    { return SlashCommand }
+func (s *panelStub) Assess(string) State {
+	if s.aIdx >= len(s.assessSeq) {
+		return s.assessSeq[len(s.assessSeq)-1]
+	}
+	st := s.assessSeq[s.aIdx]
+	s.aIdx++
+	return st
+}
+func (s *panelStub) ComposerPending(string) (bool, bool) {
+	e := s.pendingSeq[min(s.pIdx, len(s.pendingSeq)-1)]
+	if s.pIdx < len(s.pendingSeq) {
+		s.pIdx++
+	}
+	return e[0], e[1]
+}
+func (s *panelStub) InputBlocked(string) (bool, bool) {
+	e := s.blockedSeq[min(s.bIdx, len(s.blockedSeq)-1)]
+	if s.bIdx < len(s.blockedSeq) {
+		s.bIdx++
+	}
+	return e[0], e[1]
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func TestConfirmSubmitGateRefusesPanelBlocked(t *testing.T) {
+	// #152: an Idle pane whose composer is input-blocked behind the agents panel must be REFUSED
+	// before any paste — never lost in the panel, never stacked. ⇒ ErrPanelBlocked; Submit ×0.
+	enter := 0
+	d := &panelStub{
+		assessSeq:  []State{StateIdle},      // gate passes the idle check
+		blockedSeq: [][2]bool{{true, true}}, // ...but the panel has focus
+		pendingSeq: [][2]bool{{false, true}},
+	}
+	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
+	if !errors.Is(err, ErrPanelBlocked) {
+		t.Fatalf("err = %v, want ErrPanelBlocked", err)
+	}
+	if d.submitCalls != 0 {
+		t.Errorf("Submit calls = %d, want 0 (refuse before pasting into the panel)", d.submitCalls)
+	}
+	if enter != 0 {
+		t.Errorf("SendEnter calls = %d, want 0 (no submit ⇒ no retry)", enter)
+	}
+}
+
+func TestConfirmSubmitPanelMidConfirmNotFalseCleared(t *testing.T) {
+	// SHIP-BLOCKER (trio A1): a panel that appears AFTER the gate, whose empty composer (above the
+	// docked panel) reads CLEARED, must NOT false-confirm. pollConfirm consults InputBlocked BEFORE
+	// ComposerPending, so it returns readPanelBlocked → ErrPanelBlocked, never nil.
+	enter := 0
+	d := &panelStub{
+		assessSeq:  []State{StateIdle},                     // gate Idle, then Idle forever (no spinner)
+		blockedSeq: [][2]bool{{false, true}, {true, true}}, // gate: not blocked; polls: blocked
+		pendingSeq: [][2]bool{{false, true}},               // composer reads CLEARED (the empty one above the panel)
+	}
+	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
+	if !errors.Is(err, ErrPanelBlocked) {
+		t.Fatalf("err = %v, want ErrPanelBlocked (panel-before-composer precedence; never false-cleared)", err)
+	}
+	if d.submitCalls != 1 {
+		t.Errorf("Submit calls = %d, want 1 (the gate passed, one paste, then the panel appeared)", d.submitCalls)
+	}
+}
+
+func TestConfirmSubmitStartedTurnThenPanelStillConfirms(t *testing.T) {
+	// A genuinely started turn (Working) that ALSO spawned subagents (opening the panel) must still
+	// CONFIRM: Working precedes the input-block check in pollConfirm, so a started turn is never
+	// misclassified as blocked. ⇒ nil.
+	enter := 0
+	d := &panelStub{
+		assessSeq:  []State{StateIdle, StateWorking},       // gate Idle, poll-1 Working (turn started)
+		blockedSeq: [][2]bool{{false, true}, {true, true}}, // gate clear; if reached, blocked — but Working wins
+		pendingSeq: [][2]bool{{false, true}},
+	}
+	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
+	if err != nil {
+		t.Fatalf("err = %v, want nil (Working precedes the panel check — started turn confirms)", err)
+	}
+}
+
+func TestConfirmSubmitNoInputBlockProbeUnchanged(t *testing.T) {
+	// A driver WITHOUT InputBlockProbe (composerStub) must behave exactly as before — the gate and
+	// pollConfirm both fall back, no new path taken. A normal composer-cleared confirm still works.
+	enter := 0
+	d := &composerStub{assessSeq: []State{StateIdle}, pendingSeq: [][2]bool{{false, true}}}
+	if err := newConfirm(&enter).Submit(d, "0:0.0", "hi"); err != nil {
+		t.Fatalf("err = %v, want nil (no-probe driver confirms by composer-clear as before)", err)
+	}
+}
