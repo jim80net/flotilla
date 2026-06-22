@@ -70,10 +70,14 @@ The system SHALL raise an operator-facing ALERT when a RELAY delivery (an operat
 message) fails with the input-blocked condition; the alert names the recipient, carries the undelivered
 payload (at least a bounded preview, with the full body in the log), and states the required action
 — the desk is input-blocked behind the agents panel and needs a human keystroke or click into the
-composer at its pane. A heartbeat/detector-kind delivery (a time-relative wake) SHALL NOT alarm on
-the input-blocked condition (the next wake re-evaluates), preserving the existing kind-awareness.
-The `send`/`notify` CLI SHALL report the input-blocked failure and exit non-zero rather than report
-success.
+composer at its pane. The alert SHALL be raised as a TERMINAL failure (escalate-and-report), NOT
+re-queued on the busy-defer path, because a focus-stealing panel does not self-clear on a timer. The
+alert SHALL hedge that the message may already have started a turn, so the operator verifies before
+re-sending (the system never double-submits automatically — the no-re-paste invariant — but a human
+re-send on a false non-delivery would). A heartbeat/detector-kind delivery (a time-relative wake)
+SHALL NOT alarm on the input-blocked condition (the next wake re-evaluates), preserving the existing
+kind-awareness. The `send`/`notify` CLI SHALL report the input-blocked failure and exit non-zero
+rather than report success.
 
 #### Scenario: A relay to an input-blocked desk alerts the operator with the payload
 

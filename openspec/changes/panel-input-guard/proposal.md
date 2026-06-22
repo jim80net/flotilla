@@ -49,33 +49,39 @@ instance, NOT a shipped guarantee — the shipped fix must STOP THE SILENT LOSS 
 
 - **Detect the panel-focused state (a new optional Driver capability).** Add
   `surface.InputBlockProbe` with `InputBlocked(pane) (blocked, ok bool)`. The claude-code driver
-  implements it: the pane is input-blocked when the **bottom-most `❯` in the live chrome is an
-  agent-row cursor** (`❯` then `◯`/`●` + a name) AND the panel header (`… Enter to view`) is present
-  in the tail. Scoped to the bottom-most live-chrome `❯` so a `❯ ◯…` echoed in scrollback (or a
-  printed capture) is never mistaken for the live panel cursor.
+  implements it with a **header-anchored span scan**: anchor on the LIVE (bottom-most)
+  `… Enter to view` panel header, then scan from there to the pane bottom for any agent-row cursor
+  (`❯` then `◯`/`●` + a name). Anchoring on the live header (the panel docks at the bottom) closes
+  three failure modes the design trio found in the first-draft "bottom-most `❯`" rule — a LONG panel
+  (memex's 8 subagents overflowing a fixed tail window → missed detection), a cursor on a MIDDLE
+  agent row, and a `❯ ◯…` echoed in scrollback — all at once. A near-miss canary logs a
+  cursor-without-recognized-header so a TUI hint drift is visible, not a silent paste-loss.
 
 - **Gate the submit — never paste into a panel (ask #1 + #3).** `Confirm.Submit` checks the probe
   in the idle-gate, AFTER `StateIdle`: if input-blocked, it returns a new `ErrPanelBlocked` WITHOUT
-  pasting — so the body is never lost in the panel and retries never stack. `pollConfirm` also
-  recognizes a panel that appears MID-confirm (the agent spawns subagents during the window) as
-  NOT-delivered, never as a confirmed/cleared submit.
+  pasting — so the body is never lost in the panel and retries never stack. `pollConfirm` consults
+  the probe **before** the composer read (the trio's SHIP-BLOCKER: a panel-focused pane's empty
+  composer would otherwise read CLEARED and FALSE-CONFIRM a lost message) so a panel that appears
+  MID-confirm is classified NOT-delivered, never as a confirmed/cleared submit. `parseComposerPending`
+  is left UNTOUCHED — with the probe checked first, it never runs on a panel-focused pane, so its
+  proven "never a false success" invariant is preserved (no risky edit).
 
-- **Fix `parseComposerPending` to skip the panel cursor.** The composer is the bottom-most `❯` that
-  is NOT an agent-row cursor; an `❯ ◯…`/`❯ ●…` line is the panel, not a pending composer.
+- **Route `ErrPanelBlocked` to a GENUINE, actionable operator alert — TERMINAL, not deferrable** (the
+  relay Injector, `internal/watch/inject.go`): the desk is input-blocked, the message was NOT
+  delivered. It goes in the escalate-and-drop `default` arm (a panel does not self-heal on a timer,
+  so it must NOT route through the busy-defer path). The alert names the recipient + carries the lost
+  payload (bounded preview) + states the action ("needs a keystroke / click into the composer at the
+  desk's pane") + hedges ("verify the turn did not already start before re-sending"). The
+  `send`/`notify` CLI reports "not delivered — input-blocked behind the agents panel" (error exit,
+  not silent success). The dash control surface maps it to a distinct outcome. (Composes with
+  `submit-confirm-disposition` — see below.)
 
-- **Route `ErrPanelBlocked` to a GENUINE, actionable operator alert** (the relay Injector,
-  `internal/watch/inject.go`): the desk is input-blocked, the message was NOT delivered — the alert
-  names the recipient + carries the lost payload (bounded preview) AND states the action ("needs a
-  human keystroke / click into the composer at the desk's pane"). The `send`/`notify` CLI reports
-  "not delivered — desk is input-blocked behind the agents panel" (error exit, not silent success).
-  The dash control surface maps it to a distinct outcome. (Composes with `submit-confirm-disposition`
-  — see below.)
-
-- **Best-effort focus restore before refusing (ask #1/#2), honestly bounded.** Before returning
-  `ErrPanelBlocked`, attempt a single restore (the validated recovery, IF the implementation spike
-  finds one that empirically works against a throwaway instance) and RE-CHECK; only refuse if still
-  blocked. Ships as detect+refuse+alert if no key/click recovery is validated — never claims a
-  recovery it didn't measure.
+- **The recovery is detect + refuse + alert; the auto-restore is dropped to a validated follow-up.**
+  Empirically NO injected key recovers the state; the only untried candidate (an SGR-mouse click)
+  risks landing as literal text on a live desk if mouse-mode is off. So this change does NOT attempt
+  auto-restore — it stops the silent loss and raises an actionable alert. A validated mouse-click
+  restore (`deliver.RestoreComposerFocus`) is a SEPARATE follow-up gated on a throwaway-instance
+  spike (never claims a recovery it didn't measure).
 
 ## Composition with `submit-confirm-disposition` (MSG-3)
 
@@ -109,9 +115,9 @@ disposition arms — no logical conflict, only a trivial textual merge in the sa
 ## Impact
 
 - **`internal/surface/surface.go`** — new `InputBlockProbe` optional capability.
-- **`internal/surface/claude.go`** — `InputBlocked` impl (panel-cursor detection) + `parseComposerPending` skips the panel cursor.
-- **`internal/surface/confirm.go`** — `ErrPanelBlocked`; idle-gate probe check (refuse pre-paste); `pollConfirm` panel-mid-confirm = not-delivered.
-- **`internal/watch/inject.go`** — route `ErrPanelBlocked` → actionable operator alert (recipient + payload + the keystroke action).
+- **`internal/surface/claude.go`** — `InputBlocked` impl (header-anchored panel-cursor detection). `parseComposerPending` UNCHANGED.
+- **`internal/surface/confirm.go`** — `ErrPanelBlocked`; idle-gate probe check (refuse pre-paste); `pollConfirm` consults the probe BEFORE the composer read (panel-mid-confirm = not-delivered, never false-cleared); one capture threaded per poll.
+- **`internal/watch/inject.go`** — route `ErrPanelBlocked` → the TERMINAL `default` arm → actionable operator alert (recipient + payload + the keystroke action + the re-send hedge); NOT the busy-defer path.
 - **`cmd/flotilla/main.go`** — `send`/`notify` reports input-blocked (error, not silent success).
 - **`internal/dash/control/library.go`** — a distinct input-blocked outcome.
 - **Risk:** LOW–MEDIUM. The new failure path strictly REPLACES a silent loss with a refusal + an
