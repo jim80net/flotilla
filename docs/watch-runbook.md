@@ -127,16 +127,22 @@ now means *a turn started*, not merely *the tmux keystrokes ran*. Concretely:
   than retried forever. A genuinely wedged/crashed XO is also caught by the liveness
   watchdog (see Down alerts).
 - **The XO's composer is input-blocked behind the Claude Code agents panel** → the inline
-  background-agents panel (the `↑/↓ to select · Enter to view` list) can steal input focus
-  from the composer; keystrokes then navigate the panel instead of submitting. Confirmed
-  delivery DETECTS this and **refuses to paste** (the body is never lost in the panel and
-  retries never stack), then raises a loud, TERMINAL alert: `… NOT delivered — input-blocked
-  behind the Claude Code agents panel; it needs a human keystroke or click into the composer
-  at its pane`. It is not deferred (a panel does not self-clear on a timer). **Recovery is a
-  manual keystroke/click at the pane** — no key reliably un-focuses the panel programmatically
-  (tested), so press a key or click the composer line at the desk's pane, then re-send. The
-  alert hedges to *verify the turn did not already start before re-sending* (the machine never
-  double-submits, but a human re-send on a false non-delivery would).
+  background-agents panel / a per-agent message sub-composer can steal input focus from the
+  main composer; keystrokes then navigate the overlay instead of submitting. Confirmed delivery
+  reads the composer AT THE CURSOR and DETECTS this; it refuses to paste into the wrong place
+  (the body is never lost or mis-delivered). **Auto-recovery (#156, opt-in):** when
+  `FLOTILLA_SELF_HEAL=1` is set, an OPERATOR-RELAY send to an overlay-blocked, idle desk first
+  attempts a bounded **Ctrl-C self-heal** — a Ctrl-C escapes the overlay back to the composer
+  (the empirically-correct key; Esc does NOT recover the inline panel). It is bounded and
+  **re-probes between each press, stopping the instant the composer is reachable** — never a
+  Ctrl-C into a recovered composer (Claude Code's "second Ctrl-C exits" would otherwise kill the
+  session), never a Ctrl-C into a Working pane (would interrupt the turn). On recovery the
+  message is delivered with no alert. The self-heal is **DEFAULT-OFF** (a destructive primitive)
+  and only attempted for relay kinds (a heartbeat/detector tick never fires Ctrl-C); flip
+  `FLOTILLA_SELF_HEAL=0` to disable instantly. If self-heal is off, fails, or can't recover, the
+  desk gets the loud TERMINAL alert (`… NOT delivered — its composer did not accept the message
+  …`) and **recovery is a manual keystroke at the pane** (a Ctrl-C, or click the composer), then
+  re-send. The alert hedges to *verify the turn did not already start before re-sending*.
 
 So a dropped operator message is **always** surfaced via the down-alert path — never
 silent. If you see a delivery alert, the message did **not** reach the XO; re-send once the

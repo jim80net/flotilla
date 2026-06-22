@@ -82,6 +82,7 @@ type SendFunc func(agent, message string) error
 type Injector struct {
 	jobs      chan Job
 	send      SendFunc
+	relaySend SendFunc      // optional: the RELAY-kind send path (self-heal-capable, #156). nil ⇒ relays use send.
 	stop      chan struct{} // worker: drain then exit
 	stopped   chan struct{} // Enqueue: stop accepting (closed once)
 	done      chan struct{}
@@ -90,6 +91,12 @@ type Injector struct {
 	escalate  func(string)             // optional: a LOUD operator alert for a failed/undeliverable relay
 	reEnqueue func(Job, time.Duration) // how a deferred relay is re-enqueued after a delay; injectable for tests
 }
+
+// SetRelaySend installs a distinct send path for RELAY-kind jobs (the operator-message kind), used to
+// route relays through the self-heal-capable submit (#156) while heartbeat/detector ticks keep the
+// plain send — a tick must never fire an unsolicited destructive Ctrl-C. nil (the default) ⇒ relays
+// use the plain send. Must be set before Start.
+func (in *Injector) SetRelaySend(relaySend SendFunc) { in.relaySend = relaySend }
 
 // SetMirror installs a hook called after each CONFIRMED delivery, for the audit
 // trail. Must be set before Start.
@@ -144,7 +151,13 @@ func (in *Injector) Start() {
 // tick). Any other error is a real delivery failure: a relay escalates LOUDLY (never silent),
 // a tick logs only. A failed delivery never kills the worker.
 func (in *Injector) deliver(j Job) {
-	err := in.send(j.Agent, j.Message)
+	// A RELAY (operator message) uses the self-heal-capable path when wired; a heartbeat/detector tick
+	// uses the plain send so a tick never fires an unsolicited Ctrl-C (#156 H2).
+	send := in.send
+	if in.relaySend != nil && isRelay(j.Kind) {
+		send = in.relaySend
+	}
+	err := send(j.Agent, j.Message)
 	switch {
 	case err == nil:
 		// Success log: make each CONFIRMED delivery auditable from journalctl, independent of

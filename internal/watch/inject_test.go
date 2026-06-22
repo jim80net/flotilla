@@ -182,6 +182,28 @@ func TestPreviewBody(t *testing.T) {
 	}
 }
 
+func TestInjectorRelaySendForRelayOnly(t *testing.T) {
+	// #156 H2: a RELAY job routes through the self-heal-capable relaySend; a heartbeat/detector tick
+	// uses the plain send (a tick must never trigger an unsolicited Ctrl-C). When relaySend is unset,
+	// relays use the plain send (inert default).
+	var plain, relay []string
+	in := NewInjector(func(agent, _ string) error { plain = append(plain, agent); return nil }, 1)
+	in.SetRelaySend(func(agent, _ string) error { relay = append(relay, agent); return nil })
+	in.Start()
+	in.Enqueue(Job{Agent: "relay-desk", Message: "m", Kind: "relay"})
+	in.Enqueue(Job{Agent: "bare-desk", Message: "m", Kind: ""}) // bare kind == relay
+	in.Enqueue(Job{Agent: "hb-desk", Message: "m", Kind: "heartbeat"})
+	in.Enqueue(Job{Agent: "det-desk", Message: "m", Kind: "detector"})
+	in.Stop()
+
+	if len(relay) != 2 || relay[0] != "relay-desk" || relay[1] != "bare-desk" {
+		t.Errorf("relaySend got %v, want [relay-desk bare-desk] (relay + bare-kind)", relay)
+	}
+	if len(plain) != 2 || plain[0] != "hb-desk" || plain[1] != "det-desk" {
+		t.Errorf("plain send got %v, want [hb-desk det-desk] (ticks never self-heal)", plain)
+	}
+}
+
 func TestInjectorEnqueueAfterStopDoesNotPanic(t *testing.T) {
 	// Regression: an in-flight relay handler may Enqueue after Stop. With the old
 	// close-from-sender design this was send-on-closed-channel → panic.
