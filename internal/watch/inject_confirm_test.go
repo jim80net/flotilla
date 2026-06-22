@@ -245,13 +245,12 @@ func TestRelayBusyThenIdleRegression0607(t *testing.T) {
 	}
 }
 
-// composerDriver is a surface.Driver that ALSO implements surface.ComposerProbe, for the
+// composerDriver is a surface.Driver that ALSO implements surface.ComposerStateProbe, for the
 // heavy-pane false-negative regression: Assess stays Idle (the spinner has not rendered) while the
 // composer reports CLEARED (the Enter was accepted) — the exact render the bug misread.
 type composerDriver struct {
-	submits  int
-	pending  bool // what ComposerPending reports
-	probable bool // ok flag ComposerPending returns
+	submits int
+	state   surface.ComposerDisposition // what ComposerState reports (the cursor-located disposition)
 }
 
 func (d *composerDriver) Name() string                     { return "composer" }
@@ -259,8 +258,8 @@ func (d *composerDriver) Submit(string, string) error      { d.submits++; return
 func (d *composerDriver) Rotate(string) error              { return nil }
 func (d *composerDriver) RotateStrategy() surface.Strategy { return surface.SlashCommand }
 func (d *composerDriver) Assess(string) surface.State      { return surface.StateIdle } // spinner never renders
-func (d *composerDriver) ComposerPending(string) (bool, bool) {
-	return d.pending, d.probable
+func (d *composerDriver) ComposerState(string) surface.ComposerDisposition {
+	return d.state
 }
 
 func TestRelayHeavyPaneComposerClearNoFalseAlarm(t *testing.T) {
@@ -268,7 +267,7 @@ func TestRelayHeavyPaneComposerClearNoFalseAlarm(t *testing.T) {
 	// past the confirm window (Assess stays Idle), but the composer CLEARS (the message landed).
 	// The relay must be reported DELIVERED (logged + mirrored) and must NOT raise the false
 	// "operator message NOT delivered" alarm — the operator-facing bug this change fixes.
-	drv := &composerDriver{pending: false, probable: true} // composer cleared = submit accepted
+	drv := &composerDriver{state: surface.ComposerCleared} // composer cleared = submit accepted
 	confirm := surface.Confirm{SendEnter: func(string) error { return nil }, Sleep: func(time.Duration) {}}
 	var mirrored, deferred []Job
 	var alerts []string
@@ -298,7 +297,7 @@ func TestRelayHeavyPaneComposerStaysPendingStillEscalates(t *testing.T) {
 	// The invariant guard, end-to-end: when the composer stays PENDING (the body never left it —
 	// a genuine non-delivery) and the spinner never appears, the relay MUST still raise the loud
 	// alarm. The false-negative fix must not weaken the never-silent-drop guarantee.
-	drv := &composerDriver{pending: true, probable: true} // body stuck in the composer
+	drv := &composerDriver{state: surface.ComposerPending} // body stuck in the composer
 	confirm := surface.Confirm{SendEnter: func(string) error { return nil }, Sleep: func(time.Duration) {}}
 	var mirrored []Job
 	var alerts []string

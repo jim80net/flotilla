@@ -2,8 +2,10 @@ package deliver
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -56,6 +58,37 @@ func CapturePane(target string) (string, error) {
 		return "", err
 	}
 	return string(out), nil
+}
+
+// CursorState returns the tmux pane's cursor ROW (`#{cursor_y}`, 0-based from the top of the visible
+// pane — the SAME indexing as the lines `CapturePane` returns, so `capturedLines[cursorY]` is the
+// line the cursor sits on) AND whether the pane is in a tmux MODE (`#{pane_in_mode}`: copy-mode,
+// view-mode, …). Both are read in ONE display-message call so they describe the same frame.
+//
+// The cursor marks the focused input line — the signal that lets the claude-code driver read the
+// composer AT the cursor (e.g. a per-agent message sub-composer rendered ABOVE a docked agents
+// panel, outside a fixed bottom-of-pane window). BUT in copy/view-mode the two coordinate spaces
+// DIVERGE: `capture-pane -p` returns the scrolled view while `#{cursor_y}` is the copy-mode cursor,
+// so `capturedLines[cursorY]` would read an arbitrary scrollback line and could MIS-CLASSIFY (e.g.
+// a prior composer render in scrollback as "cleared" → a false-confirm of an unsubmitted message).
+// So the caller MUST treat inMode=true as undetermined (fall back to the spinner — fail-safe). A
+// read error propagates for the same fallback.
+func CursorState(target string) (cursorY int, inMode bool, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "tmux", "display-message", "-p", "-t", target, "#{cursor_y} #{pane_in_mode}").Output()
+	if err != nil {
+		return 0, false, err
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) != 2 {
+		return 0, false, fmt.Errorf("unexpected cursor-state output %q", strings.TrimSpace(string(out)))
+	}
+	n, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return 0, false, fmt.Errorf("parse cursor_y %q: %w", fields[0], err)
+	}
+	return n, fields[1] == "1", nil
 }
 
 // ParseBusy is the testable core: true when the captured pane shows an active
