@@ -38,51 +38,48 @@ confirmed/cleared submit (the trio's SHIP-BLOCKER, A1).
 
 ## 2. The new probe capability (`internal/surface/surface.go`)
 
-- [ ] 2.1 IMPL: `InputBlockProbe` optional interface (doc mirrors `ComposerProbe`: read-only, MAY be
+- [x] 2.1 IMPL: `InputBlockProbe` optional interface (doc mirrors `ComposerProbe`: read-only, MAY be
   implemented, callers type-assert + fall back when absent).
 
 ## 3. Gate the submit + `pollConfirm` precedence (`internal/surface/confirm.go`)
 
-- [ ] 3.1 TEST: a driver whose `InputBlocked`→(true) at delivery time → `Confirm.Submit` returns
+- [x] 3.1 TEST: a driver whose `InputBlocked`→(true) at delivery time → `Confirm.Submit` returns
   `ErrPanelBlocked` and `d.Submit` (paste) is NEVER called (assert zero paste invocations — no
-  stacked paste). Idle-gate sees `StateIdle` first, THEN the probe.
-- [ ] 3.2 TEST (SHIP-BLOCKER A1): a panel-focused pane whose composer (above the docked panel) reads
+  stacked paste). Idle-gate sees `StateIdle` first, THEN the probe. (`TestConfirmSubmitGateRefusesPanelBlocked`)
+- [x] 3.2 TEST (SHIP-BLOCKER A1): a panel-focused pane whose composer (above the docked panel) reads
   EMPTY → `pollConfirm` returns `readPanelBlocked`, NOT `readCleared`; `check()` resets the cleared
-  streak; `Submit` returns `ErrPanelBlocked`, NEVER nil. This is the false-confirm-a-lost-message
-  regression the trio caught — lock it.
-- [ ] 3.3 TEST: a turn that genuinely started (Working / cleared-streak completes) and THEN a panel
-  appears → still CONFIRMED (the streak short-circuit returns before the later panel poll); no false
-  not-delivered.
-- [ ] 3.4 TEST: `InputBlocked`→(false) OR a no-probe driver → behavior is exactly as today, at BOTH
+  streak; `Submit` returns `ErrPanelBlocked`, NEVER nil. (`TestConfirmSubmitPanelMidConfirmNotFalseCleared`)
+- [x] 3.3 TEST: a turn that genuinely started (Working) and THEN a panel appears → still CONFIRMED
+  (Working precedes the panel check in pollConfirm). (`TestConfirmSubmitStartedTurnThenPanelStillConfirms`)
+- [x] 3.4 TEST: `InputBlocked`→(false) OR a no-probe driver → behavior is exactly as today, at BOTH
   the gate AND `pollConfirm` (the two type-assert sites both fall back identically — trio H2).
-- [ ] 3.5 IMPL: add `ErrPanelBlocked` sentinel; idle-gate probe check (after `StateIdle`, before
+  (`TestConfirmSubmitNoInputBlockProbeUnchanged`)
+- [x] 3.5 IMPL: `ErrPanelBlocked` sentinel; idle-gate probe check (after `StateIdle`, before
   `d.Submit`); `readPanelBlocked` in `pollConfirm` BEFORE the `ComposerPending` branch; `check()`
-  treats `readPanelBlocked` as streak-resetting and (at expiry / on settle) yields `ErrPanelBlocked`;
-  a `logPanelBlocked` diagnostic (the `ErrUnconfirmed`/`logUnconfirmed` path is NOT reached for a
-  panel block — trio A3). Thread ONE capture per poll across Assess/ComposerPending/InputBlocked
-  (Economist — bound per-poll latency).
+  treats `readPanelBlocked` as streak-resetting + settles `ErrPanelBlocked`; `logPanelBlocked`
+  (the `logUnconfirmed`/`ErrUnconfirmed` path is NOT reached for a panel block — trio A3).
+  Single-capture-per-poll DEFERRED as a visible TODO (M1; needs a Driver-interface change).
 
 ## 4. Route the callers — `ErrPanelBlocked` is TERMINAL, not deferrable
 
-- [ ] 4.1 TEST + IMPL (`internal/watch/inject.go`): a RELAY job returning `ErrPanelBlocked` raises the
-  operator ALERT via the `default` switch arm (NOT `handleBusy` — a panel does not self-heal; trio
-  H3), carrying recipient + bounded payload preview + the action + the hedge ("verify the turn did
-  not already start before re-sending" — trio S3). A heartbeat/detector-kind job does NOT alarm
-  (`isRelay` gate preserved).
-- [ ] 4.2 TEST + IMPL (`cmd/flotilla/main.go`): `send`/`notify` with `ErrPanelBlocked` prints
-  "not delivered — <agent> input-blocked behind the agents panel (needs a keystroke at its pane)"
-  and exits non-zero (not the silent-success path).
-- [ ] 4.3 TEST + IMPL (`internal/dash/control/library.go`): `ErrPanelBlocked` → a distinct
-  input-blocked outcome ONLY if the dash renders it distinctly; else reuse the failed outcome + a
-  reason string (trio E3 — don't add an enum value the UI doesn't differentiate).
+- [x] 4.1 TEST + IMPL (`internal/watch/inject.go`): a RELAY job returning `ErrPanelBlocked` raises the
+  operator ALERT in a dedicated terminal `case` BEFORE `default` (NOT `handleBusy` — trio H3),
+  carrying recipient + bounded payload preview (`previewBody`) + the action + the re-send hedge
+  (trio S3). A heartbeat/detector-kind job does NOT alarm. (`TestInjectorPanelBlockedRelayRaisesActionableAlert`,
+  `TestInjectorPanelBlockedTickDoesNotAlarm`, `TestPreviewBody`)
+- [x] 4.2 TEST + IMPL (`cmd/flotilla/main.go`): `send`/`notify` with `ErrPanelBlocked` reports
+  input-blocked + the manual-recovery action and returns an error (non-zero exit).
+- [x] 4.3 TEST + IMPL (`internal/dash/control/library.go`): `ErrPanelBlocked` → a distinct
+  `OutcomeInputBlocked` with an actionable detail string (the enum maps each sentinel to a distinct
+  outcome by design — `control.go` doc; trio E3 satisfied via the detail).
 
 ## 5. Docs + validation
 
-- [ ] 5.1 Update the surface/send doc(s) describing delivery failure modes to include the
-  input-blocked refusal + the actionable alert + the manual-recovery note.
-- [ ] 5.2 `openspec validate panel-input-guard --strict` passes.
-- [ ] 5.3 `/systems-review` + `/open-code-review` (+ STORM) on the IMPLEMENTATION diff — iterate
-  until clean. (OCR is most valuable here, on the code diff.)
+- [x] 5.1 Updated `docs/watch-runbook.md` delivery-failure section: the input-blocked refusal + the
+  actionable terminal alert + the manual-recovery note + the CLI behavior.
+- [x] 5.2 `openspec validate panel-input-guard --strict` passes.
+- [~] 5.3 `/systems-review` + STORM on the implementation diff — CLEAN after the re-reversal fold
+  (C1/H1/L2/M1 addressed). OCR re-running scoped (first pass timed out on the large combined diff).
 
 ## Follow-up (separate change, NOT in this one)
 
