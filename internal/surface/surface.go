@@ -112,6 +112,30 @@ type ComposerProbe interface {
 	ComposerPending(pane string) (pending bool, ok bool)
 }
 
+// InputBlockProbe is an OPTIONAL Driver capability: report whether the pane's composer is
+// UNREACHABLE because a focus-stealing UI overlay holds input focus — for Claude Code, the inline
+// background-agents panel. When the panel has focus, keystrokes navigate the panel (↑/↓ select,
+// Enter "view") instead of submitting to the composer, so a bracketed paste + Enter is silently
+// LOST or stranded (the body sits unsubmitted; retries stack pastes). Confirmed delivery
+// (Confirm.Submit) consults this BEFORE pasting and refuses to fire into a panel-blocked pane, and
+// in pollConfirm BEFORE the composer read (a panel-focused pane's empty composer above the docked
+// panel would otherwise read CLEARED and false-confirm a lost message).
+//
+// The claude-code driver detects it with a HEADER-ANCHORED span scan: anchor on the live
+// (bottom-most) panel header and look below it for the focus cursor on an agent-list row. Anchoring
+// on the live header (the panel docks at the pane bottom) makes detection invariant to the subagent
+// count and the selected row, and excludes a panel cursor echoed in scrollback.
+//
+// A Driver MAY implement it; callers type-assert and fall back (treat the pane as NOT blocked) when
+// it is absent or returns undetermined. It is READ-ONLY (never writes a pane), like ComposerProbe.
+type InputBlockProbe interface {
+	// InputBlocked reports whether the pane's composer is input-blocked behind a focus-stealing
+	// overlay. ok=true with blocked=true means the overlay provably has focus; ok=true with
+	// blocked=false means the composer is reachable; ok=false means undetermined (capture glitch /
+	// unrecognized render) — the caller MUST NOT treat the pane as blocked in that case.
+	InputBlocked(pane string) (blocked bool, ok bool)
+}
+
 // DefaultSurface is used when an agent has no surface configured.
 const DefaultSurface = "claude-code"
 

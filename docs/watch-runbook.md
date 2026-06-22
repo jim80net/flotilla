@@ -126,12 +126,23 @@ now means *a turn started*, not merely *the tmux keystrokes ran*. Concretely:
   loud alert (`… UNDELIVERABLE …` / `… NOT delivered …`) and the message is dropped rather
   than retried forever. A genuinely wedged/crashed XO is also caught by the liveness
   watchdog (see Down alerts).
+- **The XO's composer is input-blocked behind the Claude Code agents panel** → the inline
+  background-agents panel (the `↑/↓ to select · Enter to view` list) can steal input focus
+  from the composer; keystrokes then navigate the panel instead of submitting. Confirmed
+  delivery DETECTS this and **refuses to paste** (the body is never lost in the panel and
+  retries never stack), then raises a loud, TERMINAL alert: `… NOT delivered — input-blocked
+  behind the Claude Code agents panel; it needs a human keystroke or click into the composer
+  at its pane`. It is not deferred (a panel does not self-clear on a timer). **Recovery is a
+  manual keystroke/click at the pane** — no key reliably un-focuses the panel programmatically
+  (tested), so press a key or click the composer line at the desk's pane, then re-send. The
+  alert hedges to *verify the turn did not already start before re-sending* (the machine never
+  double-submits, but a human re-send on a false non-delivery would).
 
 So a dropped operator message is **always** surfaced via the down-alert path — never
 silent. If you see a delivery alert, the message did **not** reach the XO; re-send once the
 XO is idle (or recover it). `flotilla send` from the shell behaves the same: it prints
 `delivered … — turn confirmed` on success, or exits non-zero with `… is busy … NOT
-delivered` so you know to retry.
+delivered` / `… is input-blocked behind the Claude Code agents panel …` so you know to retry.
 
 Heartbeat / change-detector ticks flow through the same confirmed delivery (so they too
 recover a dropped Enter), but they are **time-relative**: a tick that arrives while the XO

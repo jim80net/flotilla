@@ -89,6 +89,15 @@ var ErrTransient = errors.New("surface: pane state is transiently uncertain — 
 // turn. A LOUD operator alert was already raised; the delivery is NOT successful.
 var ErrUnconfirmed = errors.New("surface: submit could not be confirmed — escalated, not delivered")
 
+// ErrPanelBlocked means the pane's composer is input-blocked behind a focus-stealing overlay (the
+// Claude Code inline background-agents panel): keystrokes navigate the panel, not the composer, so a
+// paste+Enter would be LOST in the panel. The submit was REFUSED (the body was never pasted — never
+// lost, never stacked) OR a panel appeared mid-confirm before any delivery signal. It is a TERMINAL
+// failure (a panel does not self-heal on a timer — unlike ErrBusy it is NOT deferred); the caller
+// raises an actionable alert (the desk needs a human keystroke/click at its pane). Sibling of
+// ErrBusy/ErrCrashed.
+var ErrPanelBlocked = errors.New("surface: composer is input-blocked behind the agents panel — not delivered")
+
 // Confirm carries the injectable collaborators for confirmed delivery so the orchestration
 // is unit-testable without a tmux server or a real clock. Production wires SendEnter to
 // deliver.SendEnter and Sleep to time.Sleep. Build it once per entrypoint and call Submit
@@ -133,6 +142,17 @@ func (c Confirm) Submit(d Driver, pane, text string) error {
 		return ErrTransient
 	}
 
+	// 1b. input-block gate — an Idle pane can still have its composer UNREACHABLE because the inline
+	//     agents panel holds focus (it shows no spinner, so Assess reads Idle). Pasting into it loses
+	//     the body in the panel and retries STACK pastes. If the driver can detect it, REFUSE before
+	//     pasting (the primary #152 fix). A driver without the probe falls through unchanged.
+	if probe, ok := d.(InputBlockProbe); ok {
+		if blocked, ok := probe.InputBlocked(pane); ok && blocked {
+			logPanelBlocked(pane, "gate")
+			return ErrPanelBlocked
+		}
+	}
+
 	// 2. attempt 1 — full paste + Enter. Capture Submit's error: a paste that did NOT land
 	//    (lock timeout / tmux failure) is returned (the caller escalates), NOT Enter-only-
 	//    retried. The no-re-paste idempotency invariant below holds BECAUSE we reach the retry
@@ -158,18 +178,30 @@ func (c Confirm) Submit(d Driver, pane, text string) error {
 	if p, ok := d.(ComposerProbe); ok {
 		probe = p
 	}
+	var inProbe InputBlockProbe
+	if p, ok := d.(InputBlockProbe); ok {
+		inProbe = p
+	}
 	polls := 0
 	clearedStreak := 0
 	// check performs one poll and reports whether confirmation is settled (and with what error:
-	// nil = confirmed, ErrCrashed = crashed). clearedStreak rides across polls and the grace phase.
+	// nil = confirmed, ErrCrashed = crashed, ErrPanelBlocked = a focus-stealing panel appeared).
+	// clearedStreak rides across polls and the grace phase.
 	check := func() (settled bool, err error) {
 		polls++
-		switch pollConfirm(d, pane, probe) {
+		switch pollConfirm(d, pane, probe, inProbe) {
 		case readWorking:
 			logConfirmed(pane, "working", polls)
 			return true, nil
 		case readCrashed:
 			return true, ErrCrashed
+		case readPanelBlocked:
+			// A panel grabbed focus AFTER the paste, before any delivery signal (Working/cleared-
+			// streak short-circuit BEFORE this — see pollConfirm precedence). The body is not
+			// confirmed delivered; classify NOT-delivered. A panel does not self-clear in-window, so
+			// settle now (like readCrashed) rather than wait out the grace.
+			logPanelBlocked(pane, "mid-confirm")
+			return true, ErrPanelBlocked
 		case readCleared:
 			if clearedStreak++; clearedStreak >= clearedConfirmPolls {
 				logConfirmed(pane, "composer-cleared", polls)
@@ -211,24 +243,39 @@ func (c Confirm) Submit(d Driver, pane, text string) error {
 type confirmRead int
 
 const (
-	readNone    confirmRead = iota // undetermined / no confirming signal this poll
-	readWorking                    // the Working spinner is up → a turn started
-	readCleared                    // the composer is empty → counts toward the stable-cleared streak
-	readPending                    // the body is still in the composer → a dropped/un-ingested Enter
-	readCrashed                    // the pane dropped to a shell → the agent process is gone
+	readNone         confirmRead = iota // undetermined / no confirming signal this poll
+	readWorking                         // the Working spinner is up → a turn started
+	readCleared                         // the composer is empty → counts toward the stable-cleared streak
+	readPending                         // the body is still in the composer → a dropped/un-ingested Enter
+	readCrashed                         // the pane dropped to a shell → the agent process is gone
+	readPanelBlocked                    // a focus-stealing agents panel appeared → the composer is unreachable
 )
 
-// pollConfirm performs ONE confirmation read of the pane. It assesses first (one capture) and only
-// probes the composer when not already Working/Shell, so the common confirmed-by-spinner poll
-// costs a single capture. The composer read distinguishes CLEARED from PENDING only when the probe
-// is DECISIVE (ok=true); an undetermined probe (capture glitch / surprise render) reads as
-// readNone so a glitch is never trusted as "cleared" — confirmation then rests on the spinner.
-func pollConfirm(d Driver, pane string, probe ComposerProbe) confirmRead {
+// pollConfirm performs ONE confirmation read of the pane. PRECEDENCE matters: a started turn
+// (Working) or a crash (Shell) win first; THEN the input-block probe (a focus-stealing panel) is
+// consulted BEFORE the composer read; only then the composer CLEARED/PENDING classification. The
+// panel-before-composer order is load-bearing: a panel-focused pane's empty composer (above the
+// docked panel) would read CLEARED and FALSE-CONFIRM a lost message — so the panel must short-
+// circuit to readPanelBlocked before ComposerPending is ever trusted. A Working turn that also
+// spawned a panel still confirms (readWorking precedes the panel check), so a genuinely-started
+// turn is never misclassified as blocked. The composer read distinguishes CLEARED from PENDING only
+// when DECISIVE (ok=true); an undetermined probe reads as readNone.
+func pollConfirm(d Driver, pane string, probe ComposerProbe, inProbe InputBlockProbe) confirmRead {
+	// TODO(perf, panel-input-guard design "M1"): Assess + InputBlocked + ComposerPending each
+	// capturePane — up to 3 tmux reads per poll (the panel case short-circuits at 2; the common
+	// confirmed case is 1). Threading one capture through all three needs a Driver-interface change
+	// (the probes capture internally by contract); deferred as a SHOULD-level optimization on a
+	// ms-scale read. Revisit if per-poll cost surfaces in practice.
 	switch d.Assess(pane) {
 	case StateWorking:
 		return readWorking
 	case StateShell:
 		return readCrashed
+	}
+	if inProbe != nil {
+		if blocked, ok := inProbe.InputBlocked(pane); ok && blocked {
+			return readPanelBlocked
+		}
 	}
 	if probe != nil {
 		if pending, ok := probe.ComposerPending(pane); ok {
@@ -251,6 +298,14 @@ func logConfirmed(pane, signal string, polls int) {
 		return
 	}
 	log.Printf("flotilla: surface: confirmed submit to %s via %s after %d polls", pane, signal, polls)
+}
+
+// logPanelBlocked records a refused/aborted submit because the agents panel held input focus, with
+// WHERE it was caught (the pre-paste "gate" — the common #152 case — or "mid-confirm" — a panel that
+// appeared during the confirm window). Distinct from logUnconfirmed so the journal names the cause
+// (a focus-stealing panel, not an opaque "could not be confirmed").
+func logPanelBlocked(pane, where string) {
+	log.Printf("flotilla: surface: PANEL-BLOCKED submit to %s (%s) — composer unreachable behind the agents panel; not delivered", pane, where)
 }
 
 // logUnconfirmed records a genuine non-delivery (the escalated case) with the diagnostic state, so

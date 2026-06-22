@@ -346,6 +346,8 @@ func cmdSend(args []string) error {
 			return fmt.Errorf("%s pane state is uncertain — NOT delivered; retry", agentName)
 		case errors.Is(err, surface.ErrCrashed):
 			return fmt.Errorf("%s is at a shell (crashed) — NOT delivered", agentName)
+		case errors.Is(err, surface.ErrPanelBlocked):
+			return fmt.Errorf("%s is input-blocked behind the Claude Code agents panel — NOT delivered; it needs a human keystroke or click into the composer at its pane, then retry", agentName)
 		default: // ErrUnconfirmed, or a paste/lock error
 			return fmt.Errorf("delivery to %s could not be confirmed: %w", agentName, err)
 		}

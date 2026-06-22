@@ -166,6 +166,8 @@ func (c *LibraryController) Route(_ context.Context, target, message string) (Ro
 		res.Outcome, res.Detail = OutcomeCrashed, "desk is at a shell (crashed) — not delivered"
 	case errors.Is(serr, surface.ErrTransient):
 		res.Outcome, res.Detail = OutcomeTransient, "desk state is uncertain — not delivered, retry"
+	case errors.Is(serr, surface.ErrPanelBlocked):
+		res.Outcome, res.Detail = OutcomeInputBlocked, "desk is input-blocked behind the agents panel — not delivered; needs a human keystroke or click into the composer at its pane"
 	default: // ErrUnconfirmed, or a paste/lock error
 		res.Outcome, res.Detail = OutcomeUnconfirmed, "submit could not be confirmed — escalated, not delivered"
 	}
