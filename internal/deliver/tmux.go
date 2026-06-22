@@ -6,6 +6,7 @@ package deliver
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -386,6 +387,36 @@ func SendCtrlJ(target, text string) error {
 // InjectSlash — factored here as the reusable confirmed-delivery retry keystroke.
 func sendEnterArgs(target string) []string {
 	return []string{"send-keys", "-t", target, "--", "Enter"}
+}
+
+func sendCtrlCArgs(target string) []string {
+	return []string{"send-keys", "-t", target, "--", "C-c"}
+}
+
+// SendCtrlC sends a single Ctrl-C (SIGINT keystroke) to the target pane under the per-pane lock. It
+// is the SELF-HEAL primitive (internal/surface self-heal): a Ctrl-C escapes Claude Code's inline
+// agents-panel / per-agent-message overlay back to the main composer. It is DESTRUCTIVE — Claude
+// Code's documented contract is "the first press clears the prompt input and a second press exits
+// Claude Code", so a Ctrl-C into an already-recovered (empty main) composer would EXIT the session.
+// The CALLER (surface.selfHeal) must therefore gate every press on (a) the pane being Idle (a Ctrl-C
+// into a running turn interrupts it) and (b) the composer still being an overlay (never a recovered
+// composer) — this primitive only sends the key. The marked log line is the audit signal the
+// exit-after-heal detector correlates with a subsequent Shell drop. Bounded by commandTimeout; takes
+// the per-pane cross-process lock like SendEnter.
+func SendCtrlC(target string) error {
+	lock, err := acquirePaneLock(target)
+	if err != nil {
+		return err
+	}
+	defer lock.Release()
+
+	log.Printf("flotilla: deliver: self-heal Ctrl-C → %s", target)
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	if err := exec.CommandContext(ctx, "tmux", sendCtrlCArgs(target)...).Run(); err != nil {
+		return fmt.Errorf("tmux send-keys C-c: %w", err)
+	}
+	return nil
 }
 
 // SendEnter submits a single Enter to the target pane under the per-pane lock. It is the

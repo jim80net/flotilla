@@ -52,6 +52,17 @@ type LibraryController struct {
 // NewLibrary builds the production controller. secretsPath may be "" (then notify
 // returns ErrWebhookMissing); roster + xo are required for webhook + ledger
 // resolution.
+// selfHealOn is the #156 kill-switch (mirrors cmd/flotilla's selfHealEnabled): composer self-heal is
+// DEFAULT-OFF, enabled only by FLOTILLA_SELF_HEAL=1/true. Ctrl-C is destructive, so it ships off
+// until live-validated.
+func selfHealOn() bool {
+	switch os.Getenv("FLOTILLA_SELF_HEAL") {
+	case "1", "true", "TRUE", "yes":
+		return true
+	}
+	return false
+}
+
 func NewLibrary(rc *roster.Config, xo, secretsPath string) *LibraryController {
 	return &LibraryController{
 		roster:      rc,
@@ -72,10 +83,15 @@ func NewLibrary(rc *roster.Config, xo, secretsPath string) *LibraryController {
 			}
 			return txn.Release, nil
 		},
-		// Confirm.Submit is UNCHANGED (it takes only the per-call flock); the
-		// transaction lock is held by Route around this call (caller-held, design §5).
+		// A dash control send is an operator relay → route through the self-heal-capable submit
+		// (#156). Self-heal is inert unless FLOTILLA_SELF_HEAL is enabled (SendCtrlC unwired ⇒
+		// SubmitWithSelfHeal == Submit). The transaction lock is held by Route around this call.
 		submit: func(drv surface.Driver, pane, text string) error {
-			return surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}.Submit(drv, pane, text)
+			c := surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}
+			if selfHealOn() {
+				c.SendCtrlC = deliver.SendCtrlC
+			}
+			return c.SubmitWithSelfHeal(drv, pane, text)
 		},
 	}
 }
