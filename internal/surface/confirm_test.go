@@ -373,6 +373,22 @@ func TestConfirmSubmitSubComposerMidConfirmIsBlocked(t *testing.T) {
 	}
 }
 
+func TestConfirmSubmitListNavMidConfirmIsBlocked(t *testing.T) {
+	// Symmetric to the sub-composer case: a list-nav overlay appearing mid-confirm → readPanelBlocked
+	// → ErrPanelBlocked (never a false-confirm). Submit ×1 (the gate read it cleared).
+	enter := 0
+	d := &stateStub{
+		assessSeq: []State{StateIdle},
+		stateSeq:  []ComposerDisposition{ComposerCleared, ComposerListNav}, // gate cleared; poll-1 list-nav
+	}
+	if err := newConfirm(&enter).Submit(d, "0:0.0", "hi"); !errors.Is(err, ErrPanelBlocked) {
+		t.Fatalf("err = %v, want ErrPanelBlocked (list-nav appeared mid-confirm)", err)
+	}
+	if d.submitCalls != 1 {
+		t.Errorf("Submit calls = %d, want 1", d.submitCalls)
+	}
+}
+
 func TestConfirmSubmitStartedTurnThenOverlayStillConfirms(t *testing.T) {
 	// A genuinely started turn (Working) that ALSO opened an overlay must still CONFIRM: Working
 	// precedes the ComposerState check in pollConfirm, so a started turn is never misclassified. ⇒ nil.

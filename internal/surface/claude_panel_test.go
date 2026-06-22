@@ -88,7 +88,7 @@ func TestClaudeComposerStateWiring(t *testing.T) {
 	memexCap := "  conversation\n  -- @hermes-ocr --\n" + prompt + nbsp + "Message @hermes-ocr…\n  ----\n  jim@host\n  " +
 		idleGlyph + " main\n  " + idleGlyph + " hookbug  idle"
 	c := claudeCode{
-		cursorY:     func(string) (int, error) { return 2, nil },
+		cursorState: func(string) (int, bool, error) { return 2, false, nil },
 		capturePane: func(string) (string, error) { return memexCap, nil },
 	}
 	if got := c.ComposerState("0:0.0"); got != ComposerSubAgent {
@@ -100,7 +100,7 @@ func TestClaudeComposerStateWiring(t *testing.T) {
 	// authority — this just isn't the sub-composer carve-out).
 	foCap := "  conversation\n  ----\n" + prompt + nbsp + "\n  ----\n  jim@host\n" + prompt + nbsp + idleGlyph + " portfoliosrc-fix  idle"
 	c2 := claudeCode{
-		cursorY:     func(string) (int, error) { return 2, nil },
+		cursorState: func(string) (int, bool, error) { return 2, false, nil },
 		capturePane: func(string) (string, error) { return foCap, nil },
 	}
 	if got := c2.ComposerState("0:0.0"); got != ComposerCleared {
@@ -110,16 +110,27 @@ func TestClaudeComposerStateWiring(t *testing.T) {
 
 func TestClaudeComposerStateUndetermined(t *testing.T) {
 	// A cursor read error → Undetermined; the caller falls back to the spinner.
-	c := claudeCode{cursorY: func(string) (int, error) { return 0, errors.New("no server") }}
+	c := claudeCode{cursorState: func(string) (int, bool, error) { return 0, false, errors.New("no server") }}
 	if got := c.ComposerState("0:0.0"); got != ComposerUndetermined {
 		t.Errorf("cursor read error = %v, want Undetermined", got)
 	}
 	// A capture error (after a good cursor read) → Undetermined.
 	c2 := claudeCode{
-		cursorY:     func(string) (int, error) { return 2, nil },
+		cursorState: func(string) (int, bool, error) { return 2, false, nil },
 		capturePane: func(string) (string, error) { return "", errors.New("glitch") },
 	}
 	if got := c2.ComposerState("0:0.0"); got != ComposerUndetermined {
 		t.Errorf("capture error = %v, want Undetermined", got)
+	}
+	// COPY-MODE (inMode=true): the cursor + capture coordinate spaces diverge, so even with a clean
+	// capture the result MUST be Undetermined (fail-safe to the spinner) — never a cursor-indexed
+	// mis-classification. The guard must short-circuit BEFORE capturePane (which here would return a
+	// "cleared" composer that must NOT be trusted).
+	c3 := claudeCode{
+		cursorState: func(string) (int, bool, error) { return 2, true, nil }, // pane in copy/view-mode
+		capturePane: func(string) (string, error) { return makePane(prompt+nbsp, 2), nil },
+	}
+	if got := c3.ComposerState("0:0.0"); got != ComposerUndetermined {
+		t.Errorf("copy-mode = %v, want Undetermined (cursor/capture coords diverge — fail-safe)", got)
 	}
 }

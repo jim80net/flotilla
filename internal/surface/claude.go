@@ -27,9 +27,10 @@ type claudeCode struct {
 	// keyed by the pane. Injectable so LatestResult is unit-testable without tmux or a real
 	// ~/.claude/projects tree (mirrors the grok driver's latestResult seam).
 	latestTurnText func(pane string) (string, bool, error)
-	// ComposerStateProbe seam: the pane's cursor row (the focused-input line). Injectable so
-	// ComposerState is unit-testable without a tmux server.
-	cursorY func(pane string) (int, error)
+	// ComposerStateProbe seam: the pane's cursor row (the focused-input line) + whether the pane is
+	// in a tmux mode (copy/view — in which the cursor and capture coordinate spaces diverge).
+	// Injectable so ComposerState is unit-testable without a tmux server.
+	cursorState func(pane string) (cursorY int, inMode bool, err error)
 }
 
 func newClaudeCode() claudeCode {
@@ -41,7 +42,7 @@ func newClaudeCode() claudeCode {
 		send:           deliver.Send,
 		clear:          deliver.ClearContext,
 		latestTurnText: claudestore.LatestTurnText,
-		cursorY:        deliver.CursorY,
+		cursorState:    deliver.CursorState,
 	}
 }
 
@@ -128,15 +129,28 @@ const (
 	agentRowGlyphs = "◯●"                               // ◯ idle / ● active agent (a cursor on a panel row)
 )
 
+// NOTE: agentRowGlyphs enumerates the two known agent-status glyphs. If Claude Code adds a third
+// (e.g. an error/running row glyph), a cursor on such a row classifies as Pending, not ListNav, so
+// the pre-paste carve-out would not refuse it — the post-submit authority still judges the result
+// (no silent loss), but the mis-deliver guard would miss. Version-specific like deliver.workingSpinner;
+// revalidate the glyph set on a TUI upgrade.
+
 // ComposerState implements surface.ComposerStateProbe: it reads the composer AT THE TERMINAL CURSOR
 // (the focused input line) and classifies it. Reading at the cursor — not a fixed bottom-of-pane
 // window — is what lets it SEE a per-agent message sub-composer or a queued-message prompt rendered
 // ABOVE a docked agents panel (the window-based ComposerProbe was blind to these). A cursor or
 // capture read error reads as Undetermined so confirmed delivery falls back to the Working spinner.
 func (c claudeCode) ComposerState(pane string) ComposerDisposition {
-	cy, err := c.cursorY(pane)
+	cy, inMode, err := c.cursorState(pane)
 	if err != nil {
 		log.Printf("flotilla: surface(claude-code): composer-state cursor read failed for %q: %v (undetermined)", pane, err)
+		return ComposerUndetermined
+	}
+	if inMode {
+		// Copy/view-mode: the cursor and capture coordinate spaces diverge, so a cursor-indexed line
+		// read would mis-classify (a scrollback composer render could false-confirm). Fail-safe to
+		// the spinner.
+		log.Printf("flotilla: surface(claude-code): pane %q is in a tmux mode (copy/view) — composer-state undetermined (spinner fallback)", pane)
 		return ComposerUndetermined
 	}
 	captured, err := c.capturePane(pane)

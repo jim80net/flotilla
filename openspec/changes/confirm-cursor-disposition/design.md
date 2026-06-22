@@ -81,6 +81,30 @@ ComposerState(pane):
   submit=blocked (or its held state), hydra-ops/healthy=Cleared — BEFORE the PR is called clean.
   (Cold-test the live artifact, never author-written fixtures — the rule #153 paid for twice.)
 
+## Impl-trio fold (systems-review + STORM on the diff)
+
+- **H1 (HIGH) — FIXED: copy/view-mode misalignment.** In a tmux mode, `#{cursor_y}` (the copy-mode
+  cursor) and `capture-pane -p` (the scrolled view) are DIFFERENT coordinate spaces, so a
+  cursor-indexed line read could mis-classify (a scrollback composer render → false "cleared" →
+  the silent drop, re-opened). Fixed: `deliver.CursorState` reads `#{cursor_y}` AND `#{pane_in_mode}`
+  in ONE display-message call; `ComposerState` returns Undetermined when `inMode` (fail-safe to the
+  spinner). Locked by a copy-mode test.
+- **M2 (residual, NAMED) — pre-paste carve-out TOCTOU.** The carve-out reads `ComposerState` once at
+  the gate; if focus moves onto a sub-composer BETWEEN the gate read and the paste, the body lands in
+  the sub-composer (mis-delivered) and only the post-submit `readPanelBlocked` reports it (the alert
+  hedges "verify the turn did not already start"). This is inherent to any paste-then-verify scheme
+  (no atomic "paste-iff-cursor-on-line-N" exists in tmux). ACCEPTED residual — named here so a future
+  iteration doesn't rediscover it live. (Sends are low-QPS and operator-driven; the window is small.)
+- **M1 (note) — per-poll exec budget.** A poll does `Assess` (≤2 tmux execs) + `ComposerState`
+  (`CursorState` + `CapturePane` = 2 execs) = up to 4 execs/100ms poll, and the gate adds one
+  `ComposerState` before paste. Acceptable on the low-QPS send path; `CursorState` folds cursor_y +
+  pane_in_mode into one call to bound it. A deeper single-capture-per-poll refactor (sharing one
+  capture across Assess/ComposerState) needs a Driver-interface change — deferred.
+- **L1 (note) — queued-as-delivered audit nuance.** A Queued submit returns nil (soft-success), so
+  the audit mirror logs it as "delivered" though it sits in the queue behind a modal. The spec
+  blesses queued=confirmed; threading a "delivered (queued)" flag into the mirror is a deferred
+  refinement, not a defect.
+
 ## Open question — RESOLVED by the reviewing XO (not the operator)
 
 The pre-paste sub-composer refuse (cursor-as-gate for the ONE mis-delivery case) was an XO call: a

@@ -245,7 +245,7 @@ func TestRelayBusyThenIdleRegression0607(t *testing.T) {
 	}
 }
 
-// composerDriver is a surface.Driver that ALSO implements surface.ComposerProbe, for the
+// composerDriver is a surface.Driver that ALSO implements surface.ComposerStateProbe, for the
 // heavy-pane false-negative regression: Assess stays Idle (the spinner has not rendered) while the
 // composer reports CLEARED (the Enter was accepted) — the exact render the bug misread.
 type composerDriver struct {
