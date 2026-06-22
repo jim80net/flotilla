@@ -42,18 +42,6 @@ const detectorContinuationBuiltin = "[flotilla change-detector] You just finishe
 // without operator input, and watches liveness (tick→ack) so a dead or
 // context-exhausted XO is surfaced. The inbound Discord relay is added on top
 // (it needs the gateway + Message Content intent); the clock needs neither.
-// selfHealEnabled is the #156 kill-switch: composer self-heal (bounded Ctrl-C recovery of a blocked
-// composer) is DEFAULT-OFF and enabled only by FLOTILLA_SELF_HEAL=1/true. Ctrl-C is destructive (a
-// stray press can exit a session), so it ships off until live-validated, and the flag disables it
-// instantly with no redeploy. Shared by the watch daemon, the CLI, and the dash wiring.
-func selfHealEnabled() bool {
-	switch os.Getenv("FLOTILLA_SELF_HEAL") {
-	case "1", "true", "TRUE", "yes":
-		return true
-	}
-	return false
-}
-
 func cmdWatch(args []string) error {
 	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
 	rosterPath := fs.String("roster", rosterDefault(), "roster config path")
@@ -148,7 +136,7 @@ func cmdWatch(args []string) error {
 	// kill-switch). When unwired, SubmitWithSelfHeal == Submit (inert), so relay and tick behave
 	// identically. Ctrl-C is destructive — see surface.selfHeal's safety gates.
 	confirm := surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}
-	if selfHealEnabled() {
+	if surface.SelfHealEnabled() {
 		confirm.SendCtrlC = deliver.SendCtrlC
 		log.Printf("flotilla watch: self-heal ENABLED (FLOTILLA_SELF_HEAL) — relay input-blocks attempt bounded Ctrl-C recovery")
 	}

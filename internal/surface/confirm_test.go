@@ -419,8 +419,9 @@ func TestConfirmSubmitNoStateProbeRestsOnSpinner(t *testing.T) {
 type healStub struct {
 	assessSeq []State
 	aIdx      int
-	overlay   ComposerDisposition // SubAgent or ListNav
-	recoverAt int                 // ComposerState → Cleared once *ctrlc >= recoverAt
+	overlay   ComposerDisposition   // SubAgent or ListNav (used when stateSeq is empty)
+	recoverAt int                   // ComposerState → Cleared once *ctrlc >= recoverAt (stateSeq empty)
+	stateSeq  []ComposerDisposition // optional: the disposition indexed by the Ctrl-C count (a CHANGING stack)
 	ctrlc     *int
 	submits   int
 }
@@ -441,6 +442,13 @@ func (s *healStub) Assess(string) State {
 	return st
 }
 func (s *healStub) ComposerState(string) ComposerDisposition {
+	if len(s.stateSeq) > 0 { // sequence mode: the disposition indexed by how many Ctrl-C have been sent
+		i := *s.ctrlc
+		if i >= len(s.stateSeq) {
+			i = len(s.stateSeq) - 1
+		}
+		return s.stateSeq[i]
+	}
 	if *s.ctrlc >= s.recoverAt {
 		return ComposerCleared
 	}
@@ -520,6 +528,40 @@ func TestSelfHealStopsOnNoProgress(t *testing.T) {
 	c.selfHeal(d, "0:0.0", d)
 	if ctrlc != 1 {
 		t.Errorf("Ctrl-C sent = %d, want 1 (state unchanged after the first press → stop)", ctrlc)
+	}
+}
+
+func TestSelfHealTwoLayerStackRecovers(t *testing.T) {
+	// A 2-layer overlay (sub-composer → panel → composer) that CHANGES disposition per press:
+	// SubAgent → ListNav → Cleared. selfHeal presses twice (each a new state, so no-progress never
+	// trips), then STOPS at Cleared. Exactly 2 Ctrl-C, never a 3rd into the recovered composer.
+	enter, ctrlc := 0, 0
+	c := healConfirm(&enter, &ctrlc)
+	d := &healStub{stateSeq: []ComposerDisposition{ComposerSubAgent, ComposerListNav, ComposerCleared}, ctrlc: &ctrlc}
+	c.selfHeal(d, "0:0.0", d)
+	if ctrlc != 2 {
+		t.Errorf("Ctrl-C sent = %d, want 2 (two-layer stack recovers in two presses, then STOP)", ctrlc)
+	}
+}
+
+func TestSelfHealCapExhausted(t *testing.T) {
+	// An overlay that keeps CHANGING but never reaches Cleared → the loop presses exactly
+	// maxSelfHealCtrlC times and hits the cap (then the caller's single Submit re-detects → alert).
+	enter, ctrlc := 0, 0
+	c := healConfirm(&enter, &ctrlc)
+	// alternates SubAgent/ListNav forever (always a state change, so no-progress never trips).
+	seq := []ComposerDisposition{}
+	for i := 0; i < maxSelfHealCtrlC+3; i++ {
+		if i%2 == 0 {
+			seq = append(seq, ComposerSubAgent)
+		} else {
+			seq = append(seq, ComposerListNav)
+		}
+	}
+	d := &healStub{stateSeq: seq, ctrlc: &ctrlc}
+	c.selfHeal(d, "0:0.0", d)
+	if ctrlc != maxSelfHealCtrlC {
+		t.Errorf("Ctrl-C sent = %d, want %d (cap-bounded; never unbounded toward the exit)", ctrlc, maxSelfHealCtrlC)
 	}
 }
 

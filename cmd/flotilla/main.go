@@ -340,7 +340,7 @@ func cmdSend(args []string) error {
 	// `flotilla send`/`notify` is an operator relay → route through the self-heal-capable submit
 	// (#156). Self-heal is inert unless FLOTILLA_SELF_HEAL is enabled (SendCtrlC unwired ⇒ == Submit).
 	confirm := surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}
-	if selfHealEnabled() {
+	if surface.SelfHealEnabled() {
 		confirm.SendCtrlC = deliver.SendCtrlC
 	}
 	if err := confirm.SubmitWithSelfHeal(drv, pane, message); err != nil {

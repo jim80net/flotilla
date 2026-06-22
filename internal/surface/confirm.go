@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"time"
 )
 
@@ -118,6 +119,18 @@ type Confirm struct {
 	// wired ONLY when FLOTILLA_SELF_HEAL is enabled, because Ctrl-C is destructive (a press into a
 	// recovered composer exits the session — see deliver.SendCtrlC + selfHeal's gates).
 	SendCtrlC func(pane string) error
+}
+
+// SelfHealEnabled is the #156 kill-switch: composer self-heal (bounded Ctrl-C recovery of a blocked
+// composer) is DEFAULT-OFF and enabled only by FLOTILLA_SELF_HEAL=1/true/yes. Ctrl-C is destructive
+// (a stray press can exit a session), so it ships off until live-validated, and the flag disables it
+// instantly with no redeploy. ONE definition, shared by the watch daemon, the CLI, and the dash.
+func SelfHealEnabled() bool {
+	switch os.Getenv("FLOTILLA_SELF_HEAL") {
+	case "1", "true", "TRUE", "yes":
+		return true
+	}
+	return false
 }
 
 // Self-heal timing (issue #156). Ctrl-C is DESTRUCTIVE; these gate its use.
