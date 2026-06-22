@@ -6,27 +6,35 @@ precedence check + detection. The risk to guard at every step: never FALSE-block
 merely displays background agents (composer focused), and never let a panel-focused pane read as a
 confirmed/cleared submit (the trio's SHIP-BLOCKER, A1).
 
-## 1. Panel detection — header-anchored span scan (`internal/surface/claude.go`)
+## 1. Panel detection — GEOMETRY-based whole-pane scan (`internal/surface/claude.go`)
 
-- [ ] 1.1 TEST: `parsePanelFocused` — a capture whose LIVE (bottom-most) `… Enter to view` header is
-  followed below by an agent-row cursor (`❯ ◯ <name> … idle`) → (true, true). Golden fixture: the
-  verified-live family-office capture.
-- [ ] 1.2 TEST: LONG panel (≥8 agent rows — the memex case) with the cursor on a MIDDLE row → still
-  (true, true). This is the case the retired fixed-N "bottom-most `❯`" rule MISSED; the header→bottom
-  span scan must find a middle-row cursor regardless of panel height.
-- [ ] 1.3 TEST: composer-focused-with-agents-DISPLAYED → (false, true) — header present, agent rows
-  present, but NO `❯` on any agent row below the header (the `❯` is on the composer).
-- [ ] 1.4 TEST: scrollback echo, two flavors → (false, true): (a) a lone `❯ ◯ …` line above a live
-  composer; (b) a FULL panel capture (header + rows + cursor) echoed ABOVE the live empty composer
-  (the proven flotilla-dev false positive). The bottom-most "Enter to view" must anchor to the LIVE
-  header so the echoed agent-row `❯` (above the live header) is excluded.
-- [ ] 1.5 TEST: no panel header in the capture → (false, true). And capture error → (false, false)
+> NOTE: the trio proposed a header-anchored scan; implementation re-derived a GEOMETRY rule
+> (whole-pane, bottom-most `❯`, agent-row test, header corroboration) after finding header-anchoring
+> false-positives on a full-panel echo with NO live panel. See design.md "Re-reversal during
+> implementation". P1-A's root cause was the fixed window (dropped via the whole-pane scan), not the
+> bottom-most logic.
+
+- [x] 1.1 TEST: `parsePanelFocused` — the golden verified-live family-office capture (empty composer
+  above; panel docked at bottom; cursor on the last agent row `❯ ◯ portfoliosrc-fix`) → (true, true).
+- [x] 1.2 TEST: LONG panel (8 agent rows — the memex case) with the cursor on a MIDDLE row → still
+  (true, true). Rows below the cursor carry no `❯`, so the cursor is the bottom-most `❯`; the
+  whole-pane scan (no window) finds it regardless of panel height — the case the FIXED WINDOW missed.
+- [x] 1.3 TEST: composer-focused-with-agents-DISPLAYED → (false, true) — header + agent rows present,
+  but the bottom-most `❯` is the composer (no `❯` on any agent row).
+- [x] 1.4 TEST: scrollback echo, two flavors → (false, true): (a) a lone `❯ ◯ …` line above a live
+  composer; (b) a FULL panel capture (header + rows + cursor) echoed above a live empty composer with
+  NO live panel (the proven flotilla-dev false positive — the case that breaks header-anchoring). The
+  live composer is the bottom-most `❯`, so the echoed cursor never decides.
+- [x] 1.5 TEST: no `❯` at all → (false, true). And capture error (via `InputBlocked`) → (false, false)
   (undetermined; caller falls back — no false block).
-- [ ] 1.6 TEST: near-miss canary — an agent-row `❯` present but NO recognized header → (false, true)
-  AND a diagnostic is logged (a TUI hint drift must be visible, not silently a paste-loss).
-- [ ] 1.7 IMPL: `parsePanelFocused` (anchor on the bottom-most `Enter to view`; scan header→bottom
-  for an agent-row `❯`) + `InputBlocked(pane)` (capture the FULL visible pane → parse), wired as
-  `surface.InputBlockProbe`. NOTE: `parseComposerPending` is NOT modified (trio H1).
+- [x] 1.6 TEST: near-miss canary — bottom-most `❯` is an agent-row cursor but NO recognized header →
+  (false, true) AND a diagnostic is logged (TUI hint drift must be visible, not a silent paste-loss).
+- [x] 1.7 TEST (residual): a `❯`-bearing non-agent line BELOW the panel cursor → (false, true) —
+  documents the verified-geometry residual (the guard degrades to NOT-blocked if a future TUI footer
+  appears below the cursor); intentional, matches today's geometry, flagged in design RESIDUAL.
+- [x] 1.8 IMPL: `parsePanelFocused` (whole-pane bottom-most `❯`; `isAgentRowCursor`; header
+  corroboration; canary) + `InputBlocked(pane)` (capture the FULL visible pane → parse), wired as
+  `surface.InputBlockProbe`. `parseComposerPending` NOT modified (trio H1).
 
 ## 2. The new probe capability (`internal/surface/surface.go`)
 

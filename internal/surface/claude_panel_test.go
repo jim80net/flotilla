@@ -61,6 +61,17 @@ func TestParsePanelFocused(t *testing.T) {
 	// noPrompt: no "❯" anywhere (e.g. mid-render).
 	noPrompt := "  conversation\n  ────\n  jim@host\n  ⏵⏵ auto mode"
 
+	// footerBelowCursor (RESIDUAL): a focused panel but with a "❯"-bearing NON-agent line BELOW the
+	// cursor. Per the verified geometry the panel cursor IS the bottom-most "❯"; if a future TUI ever
+	// renders a footer with a "❯" below the panel, the bottom-most "❯" is no longer the cursor and
+	// detection degrades to NOT-blocked. This documents that intentional residual (design RESIDUAL) —
+	// it matches today's geometry (no such footer exists) and degrades to today's behavior, no regression.
+	footerBelowCursor := "  conversation\n  ────\n❯ \n  ────\n  jim@host\n  ⏵⏵ auto mode\n" +
+		"  ● main      ↑/↓ to select · Enter to view\n" +
+		"  ◯ agent1 ... idle\n" +
+		"❯ ◯ agent2 ... idle\n" + // panel cursor
+		"❯ a hypothetical future footer line" // a NON-agent "❯" BELOW the cursor
+
 	cases := []struct {
 		name        string
 		capture     string
@@ -74,6 +85,7 @@ func TestParsePanelFocused(t *testing.T) {
 		{"scrollback echo (full panel, no live panel)", echoFullPanel, false, true},
 		{"composer text starting with a glyph, no header", composerText, false, true},
 		{"no prompt at all", noPrompt, false, true},
+		{"RESIDUAL: ❯ footer below the panel cursor (degrades to not-blocked)", footerBelowCursor, false, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

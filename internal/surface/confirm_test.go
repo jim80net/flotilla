@@ -358,18 +358,11 @@ func (s *panelStub) ComposerPending(string) (bool, bool) {
 	return e[0], e[1]
 }
 func (s *panelStub) InputBlocked(string) (bool, bool) {
-	e := s.blockedSeq[min(s.bIdx, len(s.blockedSeq)-1)]
+	e := s.blockedSeq[min(s.bIdx, len(s.blockedSeq)-1)] // min: the Go 1.21+ builtin
 	if s.bIdx < len(s.blockedSeq) {
 		s.bIdx++
 	}
 	return e[0], e[1]
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func TestConfirmSubmitGateRefusesPanelBlocked(t *testing.T) {

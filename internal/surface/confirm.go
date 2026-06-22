@@ -261,6 +261,11 @@ const (
 // turn is never misclassified as blocked. The composer read distinguishes CLEARED from PENDING only
 // when DECISIVE (ok=true); an undetermined probe reads as readNone.
 func pollConfirm(d Driver, pane string, probe ComposerProbe, inProbe InputBlockProbe) confirmRead {
+	// TODO(perf, panel-input-guard design "M1"): Assess + InputBlocked + ComposerPending each
+	// capturePane — up to 3 tmux reads per poll (the panel case short-circuits at 2; the common
+	// confirmed case is 1). Threading one capture through all three needs a Driver-interface change
+	// (the probes capture internally by contract); deferred as a SHOULD-level optimization on a
+	// ms-scale read. Revisit if per-poll cost surfaces in practice.
 	switch d.Assess(pane) {
 	case StateWorking:
 		return readWorking

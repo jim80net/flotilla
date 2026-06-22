@@ -51,14 +51,28 @@ SGR-mouse event under `?1006h`). Conclusion: **ship detect+refuse+alert; treat a
 spike** (validate a mouse-click `RestoreComposerFocus` against a throwaway Claude Code instance;
 include it ONLY if it empirically works; never fabricate a recovery).
 
-## Detection algorithm (the new probe) — HEADER-ANCHORED panel-span scan
+## Detection algorithm (the new probe) — GEOMETRY-based whole-pane scan
 
-The design-trio (STORM P1-A/S1/S2) retired the original "bottom-most `❯`" rule: it breaks on a
-LONG panel (e.g. memex's 8 subagents — the panel's bottom chrome can exceed a fixed tail window,
-pushing both the cursor and the composer out of view → missed detection → the silent loss returns
-for the exact desk #152 was filed against), and it is unproven for a cursor on a MIDDLE agent row.
-The replacement anchors on a STRUCTURAL landmark — the live panel header — which is invariant to
-the subagent count and the cursor's row:
+### Re-reversal during implementation (supersedes the trio's header-anchored proposal — RECORDED, not silent)
+
+The trio (STORM P1-A/S1/S2) proposed a HEADER-ANCHORED span scan to replace a first-draft
+bottom-most rule. Implementation found header-anchoring carries a **false positive the trio missed**,
+so the rule was re-derived to the GEOMETRY rule below. Recorded here so the reversal is documented,
+not a silently-dropped trio finding:
+
+- **P1-A's true root cause was the FIXED WINDOW, not the bottom-most logic.** The first draft
+  truncated to a fixed `N≈12` tail before scanning; an 8-subagent panel overflowed it. Scanning the
+  WHOLE captured pane fixes the long-panel miss while KEEPING the bottom-most rule. P1-A required
+  dropping the window, not abandoning bottom-most.
+- **Header-anchoring false-positives on a full-panel echo with NO live panel.** STORM S2 assumed
+  "the LIVE header is the bottom-most `Enter to view` line" — true only when a live panel exists.
+  When an entire panel capture is echoed into a desk's own scrollback and there is NO live panel
+  (the verified `flotilla-dev` case), the bottom-most header IS the echoed one, and scanning below it
+  finds the echoed cursor → it would BLOCK a healthy desk. The geometry rule does not: the live
+  composer is below the echo, so the bottom-most `❯` is the composer.
+
+The shipped GEOMETRY rule (whole-pane, bottom-most `❯`, header-corroborated) dominates header-
+anchoring on the echo case and matches it on the long-panel + middle-row cases:
 
 ```
 InputBlocked(pane) (blocked, ok bool):
@@ -67,53 +81,55 @@ InputBlocked(pane) (blocked, ok bool):
   return parsePanelFocused(captured)            // (blocked, true)
 
 parsePanelFocused(captured) (blocked, ok bool):
-  lines := split(captured)
-  // 1. Anchor: the LIVE panel header is the BOTTOM-MOST "… Enter to view" line. (A panel-capture
-  //    echoed into scrollback sits ABOVE the live composer/panel, so the bottom-most header is the
-  //    live one — this is what defeats the scrollback-echo false positive, structurally.)
-  hdr := last index i where lines[i] contains "Enter to view"
-  if hdr < 0: return false, true                // no live panel header → not blocked
-  // 2. Focus: any agent-row cursor in the panel SPAN (header → pane bottom). The focused row is
-  //    always below the header regardless of how many agents there are or which row is selected.
-  for i := hdr+1 .. len(lines)-1:
-     a := TrimLeft(lines[i], " \t")
-     if after, found := CutPrefix(a, "❯"); found:
-        g := TrimLeft(after, " \t")
-        if HasPrefix(g, "◯") || HasPrefix(g, "●"):
-           return true, true                     // ❯ cursor on an agent row, below the live header
-  return false, true                             // panel shown but cursor not on it (composer focused)
+  lines := split(captured)                       // whole pane, NOT pre-truncated to a window
+  bottom := bottom-most line bearing a "❯" prompt (after trimming leading whitespace)
+  if bottom < 0 OR not isAgentRowCursor(lines[bottom]):
+     return false, true                          // no "❯", or bottom-most "❯" is the composer → reachable
+  if any line contains "Enter to view":          // corroborate a real panel
+     return true, true
+  log canary "bottom-most prompt is an agent-row cursor but no panel header"  // possible TUI drift
+  return false, true
+
+isAgentRowCursor(line): "❯" (after trim) immediately followed (after ws) by an agent glyph (◯/●)
 ```
 
-**Why header-anchored dominates bottom-most (all three failure modes closed):**
-- **Long panel (memex 8 subagents):** the cursor row is found by scanning the whole header→bottom
-  span, never lost to a fixed window. We capture the full visible pane and locate the header, so the
-  panel's height is irrelevant.
-- **Cursor on a middle row:** scanning the span for ANY agent-row `❯` finds it wherever it sits.
-- **Scrollback echo (the proven `flotilla-dev` false positive):** the LIVE panel docks at the
-  bottom, so the bottom-most "Enter to view" is the live header; an echoed capture's header is above
-  it and its agent-row `❯` is above the live composer — excluded by anchoring on the live header and
-  scanning only BELOW it.
+**The load-bearing geometry fact (verified live, family-office %31, 2026-06-22):** the live agents
+panel docks at the ABSOLUTE BOTTOM of the pane (its agent rows are the last lines, below the
+composer + footer). So when FOCUSED, the panel's selection cursor is the bottom-most `❯`; when NOT
+focused (or no panel), the bottom-most `❯` is the composer. A scrollback echo sits ABOVE the live
+composer, so it is never the bottom-most `❯`. This single fact gives all three:
+- **Long panel (memex 8 subagents):** whole-pane scan (no window) → the cursor (the only agent-row
+  `❯`) is the bottom-most `❯`.
+- **Cursor on a middle row:** rows below it carry no `❯`, so it is still the bottom-most `❯`.
+- **Scrollback echo (lone OR full-panel, with or WITHOUT a live panel):** the live composer is the
+  bottom-most `❯`, so an echoed cursor above it never decides — closing the header-anchored gap.
 
-`headerPresent` (the anchor) + `cursorOnAgent` (focus) are still both required: a merely-DISPLAYED
-panel (composer focused) has the header but no `❯` on any agent row → not blocked, so a healthy desk
-running background agents still receives deliveries. Version-specific like
-`parseComposerPending`/`deliver.workingSpinner` (revalidate glyphs + the "Enter to view" hint on a
-Claude Code TUI upgrade). **Detection-coverage caveat (open):** this models the panel's
-LIST-with-focus sub-state. Claude Code's panel may have OTHER focus-stealing sub-states (e.g. an
-agent "view" sub-state with a different hint like "Esc to go back"). The restore/validation spike
-must enumerate the sub-states and confirm "Enter to view" is the only focus-stealing one, or broaden
-the header predicate to the full set of panel-chrome hints. A near-miss canary (below) makes a hint
-that drifts VISIBLE rather than silently reverting to data loss.
+`isAgentRowCursor(bottom-most ❯)` (focus) + a panel header somewhere (corroboration, guarding a
+composer whose literal content begins with an agent glyph) are both required. A merely-DISPLAYED
+panel (composer focused) has its `❯` on the composer → bottom-most `❯` is not an agent row → not
+blocked, so a healthy desk running background agents still receives deliveries.
 
-**Near-miss canary (P1-C):** when `cursorOnAgent` is true but no recognized header anchors it
-(`hdr < 0`), log a diagnostic — "agent-row cursor seen without a recognized panel header" — so a TUI
-upgrade that reworps the hint surfaces in the journal instead of silently degrading to a paste-loss.
+**Residual (verified-geometry dependent):** if a future Claude Code TUI renders a `❯`-bearing line
+BELOW the panel cursor (a new footer), the bottom-most `❯` would no longer be the cursor and
+detection degrades to NOT-blocked (today's behavior — no regression, but the guard would miss). This
+matches the CURRENT verified geometry (the panel cursor IS the bottom-most `❯`); revalidate on a TUI
+upgrade. Version-specific like `parseComposerPending`/`deliver.workingSpinner`.
 
-**Per-poll capture cost (Economist):** `Assess`, `ComposerPending`, and `InputBlocked` each call
-`capturePane` — three captures per confirm poll at `confirmPollInterval=100ms`. Implementation
-SHOULD thread a single capture through all three per poll (capture once, classify thrice) rather
-than three independent tmux reads, to bound per-poll latency on a heavy pane. (Mechanism-internal;
-no spec impact.)
+**Near-miss canary (P1-C):** when the bottom-most `❯` is an agent-row cursor but NO recognized
+header corroborates it, log a diagnostic — so a TUI change that reworps the "Enter to view" hint
+surfaces in the journal instead of silently degrading detection.
+
+**Detection-coverage caveat (open):** this models the panel's LIST-with-focus sub-state. Claude
+Code's panel may have OTHER focus-stealing sub-states (e.g. an agent "view" with "Esc to go back").
+The follow-up spike enumerates the sub-states and broadens the predicate if needed.
+
+**Per-poll capture cost (Economist, M1 — deferred with a visible TODO).** `Assess`, `InputBlocked`,
+and `ComposerPending` each call `capturePane`: up to 3 captures per poll at
+`confirmPollInterval=100ms` (the panel case short-circuits at 2; the common confirmed-by-spinner
+case is 1). Threading one capture through all three needs a Driver-interface change (the probes
+capture internally by interface contract) — out of proportion to a SHOULD-level optimization on a
+ms-scale tmux read. Left as a TODO in `pollConfirm` referencing this note (not silently dropped);
+revisit if the per-poll cost shows up in practice.
 
 ## Seam choice — optional probe, not a new State
 
@@ -210,13 +226,17 @@ keystroke/click at <pane>; verify the turn did not already start before re-sendi
   (detector liveness/materiality, resume interlock) for a submit-only concern. Caveat folded:
   `InputBlockProbe` is consulted at TWO sites (gate + `pollConfirm`) — both must fall back identically
   when the probe is absent (a grok/cursor desk behaves exactly as today). Tasks cover both fallbacks.
-- **Q2 (detection robustness) — RESOLVED: header-anchored span scan replaces bottom-most `❯`.** The
-  fixed-N tail overflowed on a long panel (memex 8 subagents — the documented #152 desk) and was
-  unproven for a middle-row cursor. The header-anchored rule (scan header→bottom for any agent-row
-  `❯`) closes the long-panel, middle-row, AND scrollback-echo modes together. A near-miss canary
-  logs a cursor-without-recognized-header so a TUI hint drift is visible. RESIDUAL (open, →spike):
-  enumerate the panel's OTHER focus-stealing sub-states (e.g. an agent "view" with "Esc to go back")
-  and confirm the header predicate covers them.
+- **Q2 (detection robustness) — RESOLVED, then RE-DERIVED in implementation to a GEOMETRY rule.**
+  The trio proposed a header-anchored span scan; implementation found it false-positives on a
+  full-panel echo with NO live panel (the echoed header becomes the bottom-most header), and that
+  P1-A's actual root cause was the fixed tail window, not the bottom-most logic. The shipped rule is
+  the GEOMETRY rule: whole-pane scan, bottom-most `❯`, agent-row test, header corroboration — which
+  closes the long-panel, middle-row, AND both scrollback-echo flavors (the live composer is always
+  the bottom-most `❯`). See the "Re-reversal during implementation" subsection above for the full
+  rationale; this supersedes the header-anchored proposal, recorded not silently dropped. A near-miss
+  canary logs a cursor-without-header (TUI hint drift). RESIDUAL (open, →spike): a future TUI footer
+  with a `❯` below the panel cursor would degrade to NOT-blocked; and the panel's OTHER focus-stealing
+  sub-states (e.g. an agent "view") are unenumerated — the follow-up spike covers both.
 - **Q3 (mid-confirm panel) — RESOLVED: not-delivered, with precedence + an alert hedge.** A genuinely
   started turn confirms (Working/cleared-streak) and `check()` returns BEFORE a later panel poll, so
   `readPanelBlocked` only fires when no delivery signal preceded it (correct not-delivered). The
