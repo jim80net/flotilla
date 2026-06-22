@@ -6,125 +6,131 @@ import (
 	"testing"
 )
 
-// Fixtures below mirror VERIFIED-LIVE captures (family-office %31, 2026-06-22): the agents panel
-// docks at the absolute bottom; a focused panel puts the "❯" cursor on an agent row (◯/●), with the
-// composer "❯ " above it. Glyphs: ❯ U+276F, ◯ U+25EF (idle), ● U+25CF (active).
+// Detection is CURSOR-based: classifyComposerLine classifies the line at the terminal cursor (the
+// focused input). These fixtures use the REAL bytes verified live on the spark fleet (2026-06-22):
+//
+//	prompt = U+276F "❯"
+//	nbsp   = U+00A0 NON-BREAKING space — Claude Code renders this (NOT ASCII 0x20) between the prompt
+//	         and the body. An ASCII-space fixture passed while the live pane returned the opposite —
+//	         the synthetic-fixture trap this corpus closes. We assert the const IS U+00A0 below.
+//	idle/active glyph = U+25EF "◯" / U+25CF "●".
+const (
+	prompt      = "❯"
+	nbsp        = "\u00a0"
+	idleGlyph   = "◯"
+	activeGlyph = "●"
+)
 
-// foFocused is the golden blocked capture: empty composer above, panel docked at the bottom with the
-// cursor on the LAST agent row (portfoliosrc-fix).
-const foFocused = `  Want me to kick off the edge audit + cost number now, and bring you the graded inventory?
-                                   new task? /clear to save 527.5k tokens
-  ────────────────────────────────────────────────────────────────────────────
-❯
-  ────────────────────────────────────────────────────────────────────────────
-  jim@rt-dgx-sp001:~/workspace/github.com/General-ML/spark-familyoffice [Opus 4.8] ctx:48%
-  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
-  ● main                                            ↑/↓ to select · Enter to view
-  ◯ predmkt-build     predmkt-build: You are a build agent ...                    idle
-❯ ◯ portfoliosrc-fix  portfoliosrc-fix: You are a focused build agent ...         idle`
+// makePane builds a capture whose line at index cursorAt is focusLine (realistic cursor_y was 64-69).
+func makePane(focusLine string, cursorAt int) string {
+	lines := make([]string, 0, cursorAt+3)
+	for i := 0; i < cursorAt; i++ {
+		lines = append(lines, "  prior conversation / chrome")
+	}
+	lines = append(lines, focusLine, "  --------", "  jim@host [Opus 4.8] ctx:48%")
+	return strings.Join(lines, "\n")
+}
 
-func TestParsePanelFocused(t *testing.T) {
-	// longMiddle: an 8-subagent panel (the memex case) with the cursor on a MIDDLE row — the case the
-	// retired fixed-window rule missed. Rows below the cursor carry no "❯", so the cursor is still the
-	// bottom-most "❯".
-	longMiddle := "  some conversation line\n  ────\n❯ \n  ────\n  jim@host [Opus 4.8] ctx:33%\n  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents\n" +
-		"  ● main                  ↑/↓ to select · Enter to view\n" +
-		"  ◯ agent1  ... idle\n" +
-		"  ◯ agent2  ... idle\n" +
-		"❯ ◯ agent3  ... idle\n" + // cursor here (middle)
-		"  ◯ agent4  ... idle\n" +
-		"  ◯ agent5  ... idle\n" +
-		"  ◯ agent6  ... idle\n" +
-		"  ◯ agent7  ... idle\n" +
-		"  ◯ agent8  ... idle"
-
-	// displayed: a panel is shown but the COMPOSER is focused (cursor on the composer, no "❯" on any
-	// agent row) — a healthy desk running background agents must still receive deliveries.
-	displayed := "  conversation\n  ────\n❯ \n  ────\n  jim@host [Opus 4.8]\n  ⏵⏵ auto mode · ← for agents\n" +
-		"  ● main      ↑/↓ to select · Enter to view\n" +
-		"  ◯ agent1  ... idle\n" +
-		"  ◯ agent2  ... idle"
-
-	// echoLone: a lone "❯ ◯ ..." line echoed in scrollback ABOVE a live empty composer (the proven
-	// flotilla-dev false positive). The live composer is the bottom-most "❯".
-	echoLone := "  ❯ ◯ portfoliosrc-fix  ... idle  (this is a printed capture in scrollback)\n  more conversation\n  ────\n❯ \n  ────\n  jim@host\n  ⏵⏵ auto mode"
-
-	// echoFullPanel: an ENTIRE panel capture (header + rows + cursor) echoed in scrollback above a
-	// live empty composer, with NO live panel. The bottom-most "❯" is the live composer.
-	echoFullPanel := "  ● main      ↑/↓ to select · Enter to view\n  ◯ agent1 ... idle\n  ❯ ◯ agent2 ... idle\n" +
-		"  (^ all the above was a printed capture)\n  more conversation\n  ────\n❯ \n  ────\n  jim@host\n  ⏵⏵ auto mode"
-
-	// composerText: a composer holding a body whose text begins with an agent glyph, no panel header.
-	// The header guard must prevent a false block.
-	composerText := "  conversation\n  ────\n❯ ◯ this is literally typed text starting with a circle\n  ────\n  jim@host\n  ⏵⏵ auto mode"
-
-	// noPrompt: no "❯" anywhere (e.g. mid-render).
-	noPrompt := "  conversation\n  ────\n  jim@host\n  ⏵⏵ auto mode"
-
-	// footerBelowCursor (RESIDUAL): a focused panel but with a "❯"-bearing NON-agent line BELOW the
-	// cursor. Per the verified geometry the panel cursor IS the bottom-most "❯"; if a future TUI ever
-	// renders a footer with a "❯" below the panel, the bottom-most "❯" is no longer the cursor and
-	// detection degrades to NOT-blocked. This documents that intentional residual (design RESIDUAL) —
-	// it matches today's geometry (no such footer exists) and degrades to today's behavior, no regression.
-	footerBelowCursor := "  conversation\n  ────\n❯ \n  ────\n  jim@host\n  ⏵⏵ auto mode\n" +
-		"  ● main      ↑/↓ to select · Enter to view\n" +
-		"  ◯ agent1 ... idle\n" +
-		"❯ ◯ agent2 ... idle\n" + // panel cursor
-		"❯ a hypothetical future footer line" // a NON-agent "❯" BELOW the cursor
-
+func TestClassifyComposerLine(t *testing.T) {
+	// Guard against the synthetic-fixture trap: the nbsp const MUST be the non-breaking space.
+	if nbsp != "\u00a0" {
+		t.Fatalf("nbsp const is %q, want U+00A0 — fixtures must use the real byte the live pane renders", nbsp)
+	}
 	cases := []struct {
-		name        string
-		capture     string
-		wantBlocked bool
-		wantOK      bool
+		name  string
+		focus string
+		want  ComposerDisposition
 	}{
-		{"family-office focused (golden)", foFocused, true, true},
-		{"long panel, cursor on middle row", longMiddle, true, true},
-		{"panel displayed, composer focused", displayed, false, true},
-		{"scrollback echo (lone cursor line)", echoLone, false, true},
-		{"scrollback echo (full panel, no live panel)", echoFullPanel, false, true},
-		{"composer text starting with a glyph, no header", composerText, false, true},
-		{"no prompt at all", noPrompt, false, true},
-		{"RESIDUAL: ❯ footer below the panel cursor (degrades to not-blocked)", footerBelowCursor, false, true},
+		// The three live states the geometry rule got wrong.
+		{"empty main composer → Cleared", prompt + nbsp, ComposerCleared},
+		{"per-agent message sub-composer → SubAgent", prompt + nbsp + "Message @hermes-ocr…", ComposerSubAgent},
+		{"queued behind a modal → Queued", prompt + nbsp + "Press up to edit queued messages", ComposerQueued},
+		// List-nav: cursor literally on an agent row.
+		{"cursor on an idle agent row → ListNav", prompt + nbsp + idleGlyph + " portfoliosrc-fix  idle", ComposerListNav},
+		{"cursor on an active agent row → ListNav", prompt + nbsp + activeGlyph + " hermes-ocr  idle", ComposerListNav},
+		// Main composer with the user's own draft → Pending (a body remains).
+		{"main composer with user text → Pending", prompt + nbsp + "operator: are you there?", ComposerPending},
+		// A draft that merely MENTIONS an agent mid-line is the main composer, not a sub-composer.
+		{"main composer mentioning @agent mid-line → Pending", prompt + nbsp + "ping @hermes-ocr re the PR", ComposerPending},
+		// Belt-and-suspenders: an ASCII-space sub-composer classifies the same (no regress if the TUI
+		// swaps the NBSP for a normal space).
+		{"ascii-space sub-composer → SubAgent", prompt + " Message @x", ComposerSubAgent},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			blocked, ok := parsePanelFocused(tc.capture)
-			if blocked != tc.wantBlocked || ok != tc.wantOK {
-				t.Errorf("parsePanelFocused = (%v, %v), want (%v, %v)", blocked, ok, tc.wantBlocked, tc.wantOK)
+			got := classifyComposerLine(makePane(tc.focus, 64), 64)
+			if got != tc.want {
+				t.Errorf("classifyComposerLine(%q) = %v, want %v", tc.focus, got, tc.want)
 			}
 		})
 	}
 }
 
-// TestClaudeInputBlockedCaptureError: a capture failure reads as UNDETERMINED (ok=false) so the
-// caller falls back to NOT blocked rather than refusing a delivery off a glitch.
-func TestClaudeInputBlockedCaptureError(t *testing.T) {
-	c := claudeCode{capturePane: func(string) (string, error) { return "", errors.New("tmux glitch") }}
-	blocked, ok := c.InputBlocked("0:0.0")
-	if blocked || ok {
-		t.Errorf("InputBlocked on capture error = (%v, %v), want (false, false)", blocked, ok)
+func TestClassifyComposerLineEdges(t *testing.T) {
+	cap := makePane(prompt+nbsp, 5)
+	if got := classifyComposerLine(cap, 9999); got != ComposerUndetermined {
+		t.Errorf("out-of-range cursorY = %v, want Undetermined", got)
+	}
+	if got := classifyComposerLine(cap, -1); got != ComposerUndetermined {
+		t.Errorf("negative cursorY = %v, want Undetermined", got)
+	}
+	// cursor on a NON-prompt line (no prompt glyph) → Undetermined (fall back to the spinner).
+	if got := classifyComposerLine("  plain conversation\n  more", 0); got != ComposerUndetermined {
+		t.Errorf("cursor on non-prompt line = %v, want Undetermined", got)
 	}
 }
 
-// TestClaudeInputBlockedFocused: the driver wires capture → parse → (true, true) on the golden capture.
-func TestClaudeInputBlockedFocused(t *testing.T) {
-	c := claudeCode{capturePane: func(string) (string, error) { return foFocused, nil }}
-	blocked, ok := c.InputBlocked("0:0.0")
-	if !blocked || !ok {
-		t.Errorf("InputBlocked on focused panel = (%v, %v), want (true, true)", blocked, ok)
+// TestClaudeComposerStateWiring: the driver threads cursorY + capturePane → classifyComposerLine,
+// using the real NBSP renders, including a sub-composer rendered ABOVE a docked panel (the memex
+// miss the bottom-of-pane window could not see).
+func TestClaudeComposerStateWiring(t *testing.T) {
+	// memex-like: cursor (y=2) on the sub-composer rendered above the panel rows below → SubAgent.
+	memexCap := "  conversation\n  -- @hermes-ocr --\n" + prompt + nbsp + "Message @hermes-ocr…\n  ----\n  jim@host\n  " +
+		idleGlyph + " main\n  " + idleGlyph + " hookbug  idle"
+	c := claudeCode{
+		cursorState: func(string) (int, bool, error) { return 2, false, nil },
+		capturePane: func(string) (string, error) { return memexCap, nil },
+	}
+	if got := c.ComposerState("0:0.0"); got != ComposerSubAgent {
+		t.Errorf("memex sub-composer ComposerState = %v, want SubAgent", got)
+	}
+
+	// family-office-like: cursor (y=2) on the empty MAIN composer, with a panel selection marker
+	// (prompt+◯) rendered BELOW it → Cleared (reachable-by-position; the post-submit state is the
+	// authority — this just isn't the sub-composer carve-out).
+	foCap := "  conversation\n  ----\n" + prompt + nbsp + "\n  ----\n  jim@host\n" + prompt + nbsp + idleGlyph + " portfoliosrc-fix  idle"
+	c2 := claudeCode{
+		cursorState: func(string) (int, bool, error) { return 2, false, nil },
+		capturePane: func(string) (string, error) { return foCap, nil },
+	}
+	if got := c2.ComposerState("0:0.0"); got != ComposerCleared {
+		t.Errorf("family-office main composer ComposerState = %v, want Cleared (the ◯ marker below is not focus)", got)
 	}
 }
 
-// TestParsePanelFocusedCanaryNoHeader: a bottom-most agent-row cursor with NO recognized header is
-// NOT blocked (degraded-safe) — the geometry alone isn't trusted without the header corroboration.
-func TestParsePanelFocusedCanaryNoHeader(t *testing.T) {
-	noHeader := "  conversation\n  ────\n  jim@host\n❯ ◯ agent1 ... idle"
-	if blocked, ok := parsePanelFocused(noHeader); blocked || !ok {
-		t.Errorf("parsePanelFocused(no header) = (%v, %v), want (false, true)", blocked, ok)
+func TestClaudeComposerStateUndetermined(t *testing.T) {
+	// A cursor read error → Undetermined; the caller falls back to the spinner.
+	c := claudeCode{cursorState: func(string) (int, bool, error) { return 0, false, errors.New("no server") }}
+	if got := c.ComposerState("0:0.0"); got != ComposerUndetermined {
+		t.Errorf("cursor read error = %v, want Undetermined", got)
 	}
-	// Sanity: the golden capture DOES contain the header hint (so the corroboration is real, not vacuous).
-	if !strings.Contains(foFocused, panelHeaderHint) {
-		t.Fatalf("golden fixture lost the panel header hint %q", panelHeaderHint)
+	// A capture error (after a good cursor read) → Undetermined.
+	c2 := claudeCode{
+		cursorState: func(string) (int, bool, error) { return 2, false, nil },
+		capturePane: func(string) (string, error) { return "", errors.New("glitch") },
+	}
+	if got := c2.ComposerState("0:0.0"); got != ComposerUndetermined {
+		t.Errorf("capture error = %v, want Undetermined", got)
+	}
+	// COPY-MODE (inMode=true): the cursor + capture coordinate spaces diverge, so even with a clean
+	// capture the result MUST be Undetermined (fail-safe to the spinner) — never a cursor-indexed
+	// mis-classification. The guard must short-circuit BEFORE capturePane (which here would return a
+	// "cleared" composer that must NOT be trusted).
+	c3 := claudeCode{
+		cursorState: func(string) (int, bool, error) { return 2, true, nil }, // pane in copy/view-mode
+		capturePane: func(string) (string, error) { return makePane(prompt+nbsp, 2), nil },
+	}
+	if got := c3.ComposerState("0:0.0"); got != ComposerUndetermined {
+		t.Errorf("copy-mode = %v, want Undetermined (cursor/capture coords diverge — fail-safe)", got)
 	}
 }

@@ -165,8 +165,8 @@ func TestInjectorPanelBlockedTickDoesNotAlarm(t *testing.T) {
 	if got := atomic.LoadInt32(&alerts); got != 0 {
 		t.Errorf("a heartbeat panel-block raised %d alerts, want 0 (ticks never alarm)", got)
 	}
-	if !strings.Contains(buf.String(), "PANEL-BLOCKED") {
-		t.Errorf("expected a PANEL-BLOCKED journal line, got %q", buf.String())
+	if !strings.Contains(buf.String(), "INPUT-BLOCKED") {
+		t.Errorf("expected an INPUT-BLOCKED journal line, got %q", buf.String())
 	}
 }
 

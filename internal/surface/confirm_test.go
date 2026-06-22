@@ -7,9 +7,9 @@ import (
 )
 
 // confirmStub is a Driver whose Assess returns a SCRIPTED sequence (advancing one State per
-// call, repeating the last once exhausted) and which records Submit calls. The Enter-only
-// retry and escalate are recorded via the Confirm config, so ConfirmSubmit is exercised with
-// zero tmux and zero wall-clock.
+// call, repeating the last once exhausted) and which records Submit calls. It implements NO
+// composer probe, so it exercises the spinner-only path. The Enter-only retry and escalate are
+// recorded via the Confirm config, so ConfirmSubmit is exercised with zero tmux and zero clock.
 type confirmStub struct {
 	assessSeq   []State
 	idx         int
@@ -41,7 +41,7 @@ func newConfirm(enter *int) Confirm {
 }
 
 func TestConfirmSubmitGate(t *testing.T) {
-	// The idle-gate (resolution #2): deliver ONLY when idle. Working→ErrBusy; Shell→ErrCrashed;
+	// The idle-gate: deliver ONLY when idle. Working→ErrBusy; Shell→ErrCrashed;
 	// Unknown/Awaiting/Errored→ErrTransient. In every non-idle case NO submit is attempted.
 	cases := []struct {
 		name    string
@@ -73,8 +73,7 @@ func TestConfirmSubmitGate(t *testing.T) {
 }
 
 func TestConfirmSubmitConfirmsOnWorkingEdge(t *testing.T) {
-	// Case a: submit-into-idle succeeds — gate Idle, first poll observes Working. ⇒ nil;
-	// Submit ×1; no Enter-only retry.
+	// submit-into-idle succeeds — gate Idle, first poll observes Working. ⇒ nil; Submit ×1; no retry.
 	enter := 0
 	d := &confirmStub{assessSeq: []State{StateIdle, StateWorking}} // gate, then poll-1
 	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
@@ -90,9 +89,8 @@ func TestConfirmSubmitConfirmsOnWorkingEdge(t *testing.T) {
 }
 
 func TestConfirmSubmitRetriesDroppedEnterThenConfirms(t *testing.T) {
-	// Case b: the Enter was dropped — gate Idle, attempt-1's confirmPolls all Idle, then a
-	// single Enter-only retry, then Working. ⇒ nil; Submit EXACTLY once (NO re-paste);
-	// SendEnter ×1.
+	// The Enter was dropped — gate Idle, attempt-1's confirmPolls all Idle, then a single Enter-only
+	// retry, then Working. ⇒ nil; Submit EXACTLY once (NO re-paste); SendEnter ×1.
 	seq := []State{StateIdle} // gate
 	for i := 0; i < confirmPolls; i++ {
 		seq = append(seq, StateIdle) // attempt-1 polls all idle (Enter dropped)
@@ -112,9 +110,9 @@ func TestConfirmSubmitRetriesDroppedEnterThenConfirms(t *testing.T) {
 	}
 }
 
-func TestConfirmSubmitNeverConfirmsBounded(t *testing.T) {
-	// Case c: never confirms — gate Idle, then always Idle. ⇒ ErrUnconfirmed; SendEnter
-	// EXACTLY maxSubmitAttempts-1 (bounded, no infinite loop). The caller escalates.
+func TestConfirmSubmitNoProbeNeverConfirmsBounded(t *testing.T) {
+	// A no-probe driver (confirmStub) that never shows the spinner — gate Idle, then always Idle. ⇒
+	// ErrUnconfirmed (ambiguous — no composer authority); SendEnter EXACTLY maxSubmitAttempts-1.
 	enter := 0
 	d := &confirmStub{assessSeq: []State{StateIdle}} // gate idle, then repeats Idle forever
 	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
@@ -129,22 +127,22 @@ func TestConfirmSubmitNeverConfirmsBounded(t *testing.T) {
 	}
 }
 
-// composerStub is a Driver that ALSO implements ComposerProbe, with scripted Assess and
-// ComposerPending sequences (each advancing one entry per call, repeating the last once
-// exhausted), for the composer-cleared confirmation path. The probe entries are (pending, ok).
-type composerStub struct {
+// stateStub is a Driver implementing ComposerStateProbe, scripting Assess + ComposerState sequences
+// (each advancing one entry per call, repeating the last once exhausted). The FIRST ComposerState
+// entry is consumed by the pre-paste gate; subsequent entries are poll reads.
+type stateStub struct {
 	assessSeq   []State
 	aIdx        int
-	pendingSeq  [][2]bool // {pending, ok}
-	pIdx        int
+	stateSeq    []ComposerDisposition
+	sIdx        int
 	submitCalls int
 }
 
-func (s *composerStub) Name() string                { return "composer-stub" }
-func (s *composerStub) Submit(string, string) error { s.submitCalls++; return nil }
-func (s *composerStub) Rotate(string) error         { return nil }
-func (s *composerStub) RotateStrategy() Strategy    { return SlashCommand }
-func (s *composerStub) Assess(string) State {
+func (s *stateStub) Name() string                { return "state-stub" }
+func (s *stateStub) Submit(string, string) error { s.submitCalls++; return nil }
+func (s *stateStub) Rotate(string) error         { return nil }
+func (s *stateStub) RotateStrategy() Strategy    { return SlashCommand }
+func (s *stateStub) Assess(string) State {
 	if s.aIdx >= len(s.assessSeq) {
 		return s.assessSeq[len(s.assessSeq)-1]
 	}
@@ -152,80 +150,75 @@ func (s *composerStub) Assess(string) State {
 	s.aIdx++
 	return st
 }
-func (s *composerStub) ComposerPending(string) (bool, bool) {
-	var e [2]bool
-	if s.pIdx >= len(s.pendingSeq) {
-		e = s.pendingSeq[len(s.pendingSeq)-1]
-	} else {
-		e = s.pendingSeq[s.pIdx]
-		s.pIdx++
+func (s *stateStub) ComposerState(string) ComposerDisposition {
+	if len(s.stateSeq) == 0 {
+		return ComposerUndetermined
 	}
-	return e[0], e[1]
+	if s.sIdx >= len(s.stateSeq) {
+		return s.stateSeq[len(s.stateSeq)-1]
+	}
+	d := s.stateSeq[s.sIdx]
+	s.sIdx++
+	return d
+}
+
+// dispSeq builds a ComposerState sequence: a gate entry (cleared, so the gate proceeds) followed by
+// n poll entries of disp.
+func dispSeq(gate ComposerDisposition, poll ComposerDisposition, n int) []ComposerDisposition {
+	out := []ComposerDisposition{gate}
+	for i := 0; i < n; i++ {
+		out = append(out, poll)
+	}
+	return out
 }
 
 func TestConfirmSubmitConfirmsOnComposerClear(t *testing.T) {
-	// THE regression for the false-negative bug: a heavy
-	// pane whose Working spinner NEVER renders inside the window, but whose composer reads CLEARED
-	// and STAYS cleared (the Enter was accepted). Spinner-only confirmation would have returned
-	// ErrUnconfirmed and the relay would have raised a FALSE alarm; the stable composer-cleared
-	// signal confirms it (within clearedConfirmPolls). ⇒ nil; Submit ×1; NO Enter-only retry.
+	// THE false-negative regression: a heavy pane whose Working spinner NEVER renders, but whose
+	// composer reads CLEARED and STAYS cleared (the Enter was accepted). ⇒ nil; Submit ×1; no retry.
 	enter := 0
-	d := &composerStub{
-		assessSeq:  []State{StateIdle},       // gate Idle, then Idle forever (spinner lagging)
-		pendingSeq: [][2]bool{{false, true}}, // composer cleared, and stays cleared (submitted)
+	d := &stateStub{
+		assessSeq: []State{StateIdle},                                      // gate Idle, then Idle forever
+		stateSeq:  []ComposerDisposition{ComposerCleared, ComposerCleared}, // gate cleared; polls cleared
 	}
 	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
 	if err != nil {
 		t.Fatalf("err = %v, want nil (confirmed by composer-clear despite no spinner)", err)
 	}
-	if d.submitCalls != 1 {
-		t.Errorf("Submit calls = %d, want 1", d.submitCalls)
-	}
-	if enter != 0 {
-		t.Errorf("SendEnter calls = %d, want 0 (composer already cleared — no retry)", enter)
+	if d.submitCalls != 1 || enter != 0 {
+		t.Errorf("Submit=%d enter=%d, want Submit=1 enter=0", d.submitCalls, enter)
 	}
 }
 
 func TestConfirmSubmitComposerDroppedEnterThenClears(t *testing.T) {
-	// A dropped Enter on a composer-probe driver: the composer stays PENDING through attempt 1, an
-	// Enter-only retry is sent, then the composer clears. ⇒ nil; Submit EXACTLY 1 (no re-paste);
-	// SendEnter ×1. Spinner never appears (heavy pane) — the composer signal carries it.
-	pending := make([][2]bool, 0)
-	for i := 0; i < confirmPolls; i++ {
-		pending = append(pending, [2]bool{true, true}) // attempt-1 polls: body still in composer
-	}
-	pending = append(pending, [2]bool{false, true}) // attempt-2 poll-1: cleared (retried Enter landed)
+	// A dropped Enter: the composer stays PENDING through attempt 1, an Enter-only retry, then clears.
+	// ⇒ nil; Submit EXACTLY 1 (no re-paste); SendEnter ×1.
+	seq := dispSeq(ComposerCleared, ComposerPending, confirmPolls) // gate cleared; attempt-1 polls pending
+	seq = append(seq, ComposerCleared)                             // attempt-2 poll-1: cleared (retry landed)
 	enter := 0
-	d := &composerStub{assessSeq: []State{StateIdle}, pendingSeq: pending}
+	d := &stateStub{assessSeq: []State{StateIdle}, stateSeq: seq}
 	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
 	if err != nil {
 		t.Fatalf("err = %v, want nil (confirmed after one Enter retry)", err)
 	}
-	if d.submitCalls != 1 {
-		t.Errorf("Submit calls = %d, want EXACTLY 1 (retry is Enter-only, never re-paste)", d.submitCalls)
-	}
-	if enter != 1 {
-		t.Errorf("SendEnter calls = %d, want 1", enter)
+	if d.submitCalls != 1 || enter != 1 {
+		t.Errorf("Submit=%d enter=%d, want Submit=1 enter=1 (retry is Enter-only)", d.submitCalls, enter)
 	}
 }
 
-func TestConfirmSubmitTransientEmptyThenPendingDoesNotFalseConfirm(t *testing.T) {
-	// The paste-ingestion-race guard (clearedConfirmPolls): the FIRST poll reads the composer empty
-	// because the bracketed paste has not been ingested YET — not because anything was submitted —
-	// and the submitting Enter raced that ingestion and was dropped. A single empty read must NOT
-	// confirm; the body renders as PENDING a poll later and resets the streak, so this is recovered
-	// (Enter retry) rather than reported as a (false) success. Here the body stays pending after the
-	// retries ⇒ ErrUnconfirmed (a genuine stuck message escalates), proving the single leading empty
-	// did NOT short-circuit to success.
-	seq := [][2]bool{{false, true}} // poll-1: empty (paste not ingested yet) — must not confirm alone
+func TestConfirmSubmitTransientEmptyThenPendingIsBlocked(t *testing.T) {
+	// The paste-ingestion-race guard (clearedConfirmPolls): a single leading empty read must NOT
+	// confirm; the body renders PENDING a poll later and resets the streak. Here it stays pending
+	// after the retries ⇒ BLOCKED (the body provably remained — the authority), proving the single
+	// transient-empty did not short-circuit to success.
+	seq := []ComposerDisposition{ComposerCleared, ComposerCleared} // gate cleared; poll-1 empty (not ingested)
 	for i := 0; i < 40; i++ {
-		seq = append(seq, [2]bool{true, true}) // thereafter: body rendered + stuck (Enter was dropped)
+		seq = append(seq, ComposerPending) // thereafter: body rendered + stuck (Enter dropped)
 	}
 	enter := 0
-	d := &composerStub{assessSeq: []State{StateIdle}, pendingSeq: seq}
+	d := &stateStub{assessSeq: []State{StateIdle}, stateSeq: seq}
 	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
-	if !errors.Is(err, ErrUnconfirmed) {
-		t.Fatalf("err = %v, want ErrUnconfirmed (a single transient-empty read must not false-confirm)", err)
+	if !errors.Is(err, ErrPanelBlocked) {
+		t.Fatalf("err = %v, want ErrPanelBlocked (a single transient-empty must not false-confirm; stays pending → blocked)", err)
 	}
 	if enter != maxSubmitAttempts-1 {
 		t.Errorf("SendEnter calls = %d, want %d", enter, maxSubmitAttempts-1)
@@ -233,16 +226,15 @@ func TestConfirmSubmitTransientEmptyThenPendingDoesNotFalseConfirm(t *testing.T)
 }
 
 func TestConfirmSubmitTransientEmptyThenStableClearRecovers(t *testing.T) {
-	// Same leading transient-empty as above, but after the Enter-only retry the composer reaches a
-	// STABLE cleared read (the retried Enter landed) ⇒ confirmed. Proves the guard recovers rather
-	// than over-blocking a real submit: a transient empty + later stable clear still succeeds.
-	seq := [][2]bool{{false, true}} // poll-1 empty (not ingested)
+	// Leading transient-empty, but after the Enter-only retry the composer reaches a STABLE cleared
+	// read ⇒ confirmed. Proves the guard recovers a real submit rather than over-blocking.
+	seq := []ComposerDisposition{ComposerCleared, ComposerCleared} // gate cleared; poll-1 empty (not ingested)
 	for i := 1; i < confirmPolls; i++ {
-		seq = append(seq, [2]bool{true, true}) // rest of attempt-1: pending (Enter was dropped)
+		seq = append(seq, ComposerPending) // rest of attempt-1: pending (Enter dropped)
 	}
-	seq = append(seq, [2]bool{false, true}, [2]bool{false, true}) // attempt-2: cleared, cleared (stable)
+	seq = append(seq, ComposerCleared, ComposerCleared) // attempt-2: cleared, cleared (stable)
 	enter := 0
-	d := &composerStub{assessSeq: []State{StateIdle}, pendingSeq: seq}
+	d := &stateStub{assessSeq: []State{StateIdle}, stateSeq: seq}
 	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
 	if err != nil {
 		t.Fatalf("err = %v, want nil (stable clear after the retry confirms)", err)
@@ -252,32 +244,48 @@ func TestConfirmSubmitTransientEmptyThenStableClearRecovers(t *testing.T) {
 	}
 }
 
-func TestConfirmSubmitEscalatesWhenComposerStaysPending(t *testing.T) {
-	// The never-silent-drop invariant: a GENUINE non-delivery — the body provably REMAINS in the
-	// composer (Enter never accepted) and the spinner never appears — must still escalate. ⇒
-	// ErrUnconfirmed; SendEnter bounded at maxSubmitAttempts-1. This is the positive-evidence
-	// failure the fix preserves while removing the false negatives.
+func TestConfirmSubmitPendingAfterRetriesIsBlocked(t *testing.T) {
+	// THE authority (the family-office case): the body provably REMAINS in the composer through the
+	// retries + grace (the submit never landed) ⇒ BLOCKED, regardless of cursor/geometry.
 	enter := 0
-	d := &composerStub{
-		assessSeq:  []State{StateIdle},      // idle forever (no spinner)
-		pendingSeq: [][2]bool{{true, true}}, // composer always pending (body stuck)
+	d := &stateStub{
+		assessSeq: []State{StateIdle},                                      // idle forever (no spinner)
+		stateSeq:  []ComposerDisposition{ComposerCleared, ComposerPending}, // gate cleared; polls pending forever
 	}
 	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
-	if !errors.Is(err, ErrUnconfirmed) {
-		t.Fatalf("err = %v, want ErrUnconfirmed (body never left the composer)", err)
+	if !errors.Is(err, ErrPanelBlocked) {
+		t.Fatalf("err = %v, want ErrPanelBlocked (composer stayed pending — the submit never landed)", err)
 	}
 	if enter != maxSubmitAttempts-1 {
 		t.Errorf("SendEnter calls = %d, want %d (bounded retries)", enter, maxSubmitAttempts-1)
 	}
 }
 
-func TestConfirmSubmitCrashedMidConfirm(t *testing.T) {
-	// The pane was idle at the gate, submit happened, then it dropped to a SHELL mid-confirm — the
-	// agent crashed. Confirmation short-circuits to ErrCrashed instead of waiting out the window.
+func TestConfirmSubmitQueuedIsSoftSuccess(t *testing.T) {
+	// The hydra-ops case: after submitting, the composer enters the QUEUED state ("Press up to edit
+	// queued messages") — the message is queued behind a modal/turn and will deliver. ⇒ nil (a
+	// soft-success), NOT a failure or an alarm.
 	enter := 0
-	d := &composerStub{
-		assessSeq:  []State{StateIdle, StateShell}, // gate Idle, then crashed
-		pendingSeq: [][2]bool{{true, true}},
+	d := &stateStub{
+		assessSeq: []State{StateIdle},
+		stateSeq:  []ComposerDisposition{ComposerCleared, ComposerQueued}, // gate cleared; poll-1 queued
+	}
+	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
+	if err != nil {
+		t.Fatalf("err = %v, want nil (queued is a soft-success — the message will deliver)", err)
+	}
+	if d.submitCalls != 1 {
+		t.Errorf("Submit calls = %d, want 1", d.submitCalls)
+	}
+}
+
+func TestConfirmSubmitCrashedMidConfirm(t *testing.T) {
+	// Idle at the gate, submit, then the pane dropped to a SHELL mid-confirm — the agent crashed. ⇒
+	// ErrCrashed (short-circuits, no waiting out the window).
+	enter := 0
+	d := &stateStub{
+		assessSeq: []State{StateIdle, StateShell},                          // gate Idle, then crashed
+		stateSeq:  []ComposerDisposition{ComposerCleared, ComposerPending}, // gate cleared (proceed)
 	}
 	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
 	if !errors.Is(err, ErrCrashed) {
@@ -285,18 +293,18 @@ func TestConfirmSubmitCrashedMidConfirm(t *testing.T) {
 	}
 }
 
-func TestConfirmSubmitProbeUndeterminedFallsBackToSpinner(t *testing.T) {
-	// When the composer probe cannot read the composer (ok=false — a capture glitch), confirmation
-	// must NOT treat it as cleared; it falls back to the spinner. Here Working appears only in the
-	// PATIENT grace phase (a genuinely slow start), and the fallback still confirms it. ⇒ nil.
+func TestConfirmSubmitUndeterminedFallsBackToSpinner(t *testing.T) {
+	// When ComposerState is Undetermined (capture/cursor glitch), confirmation must NOT treat it as
+	// cleared; it falls back to the spinner. Here Working appears only in the PATIENT grace phase, and
+	// the fallback still confirms it. ⇒ nil.
 	assess := []State{StateIdle} // gate
-	// fast phase: maxSubmitAttempts*confirmPolls Idle polls (probe undetermined throughout)
 	for i := 0; i < maxSubmitAttempts*confirmPolls; i++ {
-		assess = append(assess, StateIdle)
+		assess = append(assess, StateIdle) // fast phase: idle (probe undetermined throughout)
 	}
 	assess = append(assess, StateWorking) // grace poll-1: the slow spinner finally renders
 	enter := 0
-	d := &composerStub{assessSeq: assess, pendingSeq: [][2]bool{{false, false}}} // probe always undetermined
+	// gate Cleared (proceed), then Undetermined forever.
+	d := &stateStub{assessSeq: assess, stateSeq: []ComposerDisposition{ComposerCleared, ComposerUndetermined}}
 	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
 	if err != nil {
 		t.Fatalf("err = %v, want nil (spinner confirmed in the patient grace phase)", err)
@@ -307,9 +315,8 @@ func TestConfirmSubmitProbeUndeterminedFallsBackToSpinner(t *testing.T) {
 }
 
 func TestConfirmSubmitPasteFailureNoEnterRetry(t *testing.T) {
-	// Case g (OCR-H2/L3): the initial Submit returns an error (the body never landed). ⇒
-	// the wrapped error; SendEnter NEVER (no Enter-only retry on a paste that didn't land —
-	// the idempotency invariant requires Submit==nil before any Enter-only retry).
+	// The initial Submit returns an error (the body never landed). ⇒ the wrapped error; SendEnter
+	// NEVER (no Enter-only retry on a paste that didn't land — the idempotency invariant).
 	boom := errors.New("tmux load-buffer: lock busy")
 	enter := 0
 	d := &confirmStub{assessSeq: []State{StateIdle}, submitErr: boom}
@@ -317,116 +324,91 @@ func TestConfirmSubmitPasteFailureNoEnterRetry(t *testing.T) {
 	if !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want the wrapped Submit error %v", err, boom)
 	}
-	if d.submitCalls != 1 {
-		t.Errorf("Submit calls = %d, want 1", d.submitCalls)
-	}
-	if enter != 0 {
-		t.Errorf("SendEnter calls = %d, want 0 (never Enter-retry a paste that didn't land)", enter)
+	if d.submitCalls != 1 || enter != 0 {
+		t.Errorf("Submit=%d enter=%d, want Submit=1 enter=0", d.submitCalls, enter)
 	}
 }
 
-// panelStub is a Driver that implements Assess + ComposerProbe + InputBlockProbe with scripted
-// sequences (each advancing one entry per call, repeating the last once exhausted), for the
-// input-block (#152) gate + pollConfirm-precedence tests. blockedSeq entries are (blocked, ok).
-type panelStub struct {
-	assessSeq   []State
-	aIdx        int
-	pendingSeq  [][2]bool // {pending, ok} for ComposerPending
-	pIdx        int
-	blockedSeq  [][2]bool // {blocked, ok} for InputBlocked
-	bIdx        int
-	submitCalls int
-}
-
-func (s *panelStub) Name() string                { return "panel-stub" }
-func (s *panelStub) Submit(string, string) error { s.submitCalls++; return nil }
-func (s *panelStub) Rotate(string) error         { return nil }
-func (s *panelStub) RotateStrategy() Strategy    { return SlashCommand }
-func (s *panelStub) Assess(string) State {
-	if s.aIdx >= len(s.assessSeq) {
-		return s.assessSeq[len(s.assessSeq)-1]
-	}
-	st := s.assessSeq[s.aIdx]
-	s.aIdx++
-	return st
-}
-func (s *panelStub) ComposerPending(string) (bool, bool) {
-	e := s.pendingSeq[min(s.pIdx, len(s.pendingSeq)-1)]
-	if s.pIdx < len(s.pendingSeq) {
-		s.pIdx++
-	}
-	return e[0], e[1]
-}
-func (s *panelStub) InputBlocked(string) (bool, bool) {
-	e := s.blockedSeq[min(s.bIdx, len(s.blockedSeq)-1)] // min: the Go 1.21+ builtin
-	if s.bIdx < len(s.blockedSeq) {
-		s.bIdx++
-	}
-	return e[0], e[1]
-}
-
-func TestConfirmSubmitGateRefusesPanelBlocked(t *testing.T) {
-	// #152: an Idle pane whose composer is input-blocked behind the agents panel must be REFUSED
-	// before any paste — never lost in the panel, never stacked. ⇒ ErrPanelBlocked; Submit ×0.
+func TestConfirmSubmitGateRefusesSubComposer(t *testing.T) {
+	// #152 carve-out: an Idle pane whose CURSOR is on a per-agent message sub-composer must be REFUSED
+	// before any paste — a paste there mis-delivers to the wrong recipient. ⇒ ErrPanelBlocked; Submit ×0.
 	enter := 0
-	d := &panelStub{
-		assessSeq:  []State{StateIdle},      // gate passes the idle check
-		blockedSeq: [][2]bool{{true, true}}, // ...but the panel has focus
-		pendingSeq: [][2]bool{{false, true}},
+	d := &stateStub{
+		assessSeq: []State{StateIdle},                      // gate passes the idle check
+		stateSeq:  []ComposerDisposition{ComposerSubAgent}, // ...but the cursor is on the sub-composer
 	}
 	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
 	if !errors.Is(err, ErrPanelBlocked) {
 		t.Fatalf("err = %v, want ErrPanelBlocked", err)
 	}
-	if d.submitCalls != 0 {
-		t.Errorf("Submit calls = %d, want 0 (refuse before pasting into the panel)", d.submitCalls)
-	}
-	if enter != 0 {
-		t.Errorf("SendEnter calls = %d, want 0 (no submit ⇒ no retry)", enter)
+	if d.submitCalls != 0 || enter != 0 {
+		t.Errorf("Submit=%d enter=%d, want Submit=0 enter=0 (refuse before pasting — no mis-deliver)", d.submitCalls, enter)
 	}
 }
 
-func TestConfirmSubmitPanelMidConfirmNotFalseCleared(t *testing.T) {
-	// SHIP-BLOCKER (trio A1): a panel that appears AFTER the gate, whose empty composer (above the
-	// docked panel) reads CLEARED, must NOT false-confirm. pollConfirm consults InputBlocked BEFORE
-	// ComposerPending, so it returns readPanelBlocked → ErrPanelBlocked, never nil.
+func TestConfirmSubmitGateRefusesListNav(t *testing.T) {
+	// The other carve-out: the cursor on an agent-list row is refused pre-paste. ⇒ ErrPanelBlocked; Submit ×0.
 	enter := 0
-	d := &panelStub{
-		assessSeq:  []State{StateIdle},                     // gate Idle, then Idle forever (no spinner)
-		blockedSeq: [][2]bool{{false, true}, {true, true}}, // gate: not blocked; polls: blocked
-		pendingSeq: [][2]bool{{false, true}},               // composer reads CLEARED (the empty one above the panel)
+	d := &stateStub{assessSeq: []State{StateIdle}, stateSeq: []ComposerDisposition{ComposerListNav}}
+	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
+	if !errors.Is(err, ErrPanelBlocked) || d.submitCalls != 0 {
+		t.Errorf("err=%v Submit=%d, want ErrPanelBlocked + Submit=0", err, d.submitCalls)
+	}
+}
+
+func TestConfirmSubmitSubComposerMidConfirmIsBlocked(t *testing.T) {
+	// A sub-composer/list-nav that appears AFTER the gate (the gate read it cleared, so we pasted) →
+	// readPanelBlocked → ErrPanelBlocked, never a false-confirm. Submit ×1 (the gate passed).
+	enter := 0
+	d := &stateStub{
+		assessSeq: []State{StateIdle},                                       // gate Idle, then Idle forever
+		stateSeq:  []ComposerDisposition{ComposerCleared, ComposerSubAgent}, // gate cleared; poll-1 sub-composer
 	}
 	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
 	if !errors.Is(err, ErrPanelBlocked) {
-		t.Fatalf("err = %v, want ErrPanelBlocked (panel-before-composer precedence; never false-cleared)", err)
+		t.Fatalf("err = %v, want ErrPanelBlocked (sub-composer appeared mid-confirm)", err)
 	}
 	if d.submitCalls != 1 {
-		t.Errorf("Submit calls = %d, want 1 (the gate passed, one paste, then the panel appeared)", d.submitCalls)
+		t.Errorf("Submit calls = %d, want 1 (gate passed, one paste, then the overlay appeared)", d.submitCalls)
 	}
 }
 
-func TestConfirmSubmitStartedTurnThenPanelStillConfirms(t *testing.T) {
-	// A genuinely started turn (Working) that ALSO spawned subagents (opening the panel) must still
-	// CONFIRM: Working precedes the input-block check in pollConfirm, so a started turn is never
-	// misclassified as blocked. ⇒ nil.
+func TestConfirmSubmitListNavMidConfirmIsBlocked(t *testing.T) {
+	// Symmetric to the sub-composer case: a list-nav overlay appearing mid-confirm → readPanelBlocked
+	// → ErrPanelBlocked (never a false-confirm). Submit ×1 (the gate read it cleared).
 	enter := 0
-	d := &panelStub{
-		assessSeq:  []State{StateIdle, StateWorking},       // gate Idle, poll-1 Working (turn started)
-		blockedSeq: [][2]bool{{false, true}, {true, true}}, // gate clear; if reached, blocked — but Working wins
-		pendingSeq: [][2]bool{{false, true}},
+	d := &stateStub{
+		assessSeq: []State{StateIdle},
+		stateSeq:  []ComposerDisposition{ComposerCleared, ComposerListNav}, // gate cleared; poll-1 list-nav
+	}
+	if err := newConfirm(&enter).Submit(d, "0:0.0", "hi"); !errors.Is(err, ErrPanelBlocked) {
+		t.Fatalf("err = %v, want ErrPanelBlocked (list-nav appeared mid-confirm)", err)
+	}
+	if d.submitCalls != 1 {
+		t.Errorf("Submit calls = %d, want 1", d.submitCalls)
+	}
+}
+
+func TestConfirmSubmitStartedTurnThenOverlayStillConfirms(t *testing.T) {
+	// A genuinely started turn (Working) that ALSO opened an overlay must still CONFIRM: Working
+	// precedes the ComposerState check in pollConfirm, so a started turn is never misclassified. ⇒ nil.
+	enter := 0
+	d := &stateStub{
+		assessSeq: []State{StateIdle, StateWorking},                         // gate Idle, poll-1 Working
+		stateSeq:  []ComposerDisposition{ComposerCleared, ComposerSubAgent}, // gate clear; if reached, sub — but Working wins
 	}
 	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
 	if err != nil {
-		t.Fatalf("err = %v, want nil (Working precedes the panel check — started turn confirms)", err)
+		t.Fatalf("err = %v, want nil (Working precedes the ComposerState check)", err)
 	}
 }
 
-func TestConfirmSubmitNoInputBlockProbeUnchanged(t *testing.T) {
-	// A driver WITHOUT InputBlockProbe (composerStub) must behave exactly as before — the gate and
-	// pollConfirm both fall back, no new path taken. A normal composer-cleared confirm still works.
+func TestConfirmSubmitNoStateProbeRestsOnSpinner(t *testing.T) {
+	// A driver WITHOUT ComposerStateProbe (confirmStub) rests entirely on the spinner: gate proceeds
+	// (no carve-out), poll-1 Working ⇒ confirmed.
 	enter := 0
-	d := &composerStub{assessSeq: []State{StateIdle}, pendingSeq: [][2]bool{{false, true}}}
+	d := &confirmStub{assessSeq: []State{StateIdle, StateWorking}}
 	if err := newConfirm(&enter).Submit(d, "0:0.0", "hi"); err != nil {
-		t.Fatalf("err = %v, want nil (no-probe driver confirms by composer-clear as before)", err)
+		t.Fatalf("err = %v, want nil (no-probe driver confirms by the spinner as before)", err)
 	}
 }

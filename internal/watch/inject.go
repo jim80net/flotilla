@@ -157,16 +157,17 @@ func (in *Injector) deliver(j Job) {
 		// The composer is busy (or its state is transiently uncertain) — do NOT fire into it.
 		in.handleBusy(j, err)
 	case errors.Is(err, surface.ErrPanelBlocked):
-		// The desk's composer is input-blocked behind the agents panel (#152). TERMINAL — a panel
-		// does not self-heal on a timer, so it is NOT deferred like ErrBusy (deferring would just
-		// delay the alert). The body was never pasted (not lost in the panel, not stacked). For a
-		// relay, raise an ACTIONABLE alert: the recipient + the undelivered payload (bounded preview)
-		// + the manual-recovery action + the re-send hedge (the machine never double-submits, but a
-		// human re-send on a false non-delivery would).
+		// The desk's composer did NOT accept the message (#152): either a per-agent message
+		// sub-composer / agent-panel held focus (a paste would mis-deliver — refused before pasting),
+		// or the body provably stayed in the composer after the retries (the submit never landed). The
+		// journal line (surface logPanelBlocked) carries the precise reason. TERMINAL — it does not
+		// self-heal on a timer, so it is NOT deferred like ErrBusy. For a relay, raise an ACTIONABLE
+		// alert: the recipient + the undelivered payload + the manual-recovery action + the re-send
+		// hedge (the machine never double-submits, but a human re-send on a false non-delivery would).
 		if isRelay(j.Kind) {
-			in.raise("operator message to %q NOT delivered — input-blocked behind the Claude Code agents panel; it needs a human keystroke or click into the composer at its pane. The machine did not re-send; verify the turn did not already start before re-sending. Undelivered payload: %q", j.Agent, previewBody(j.Message))
+			in.raise("operator message to %q NOT delivered — its composer did not accept the message (input-blocked: a per-agent sub-composer/agents panel held focus, or the submit never landed). It needs attention at its pane (click/keystroke into the main composer). The machine did not re-send; verify the turn did not already start before re-sending. Undelivered payload: %q", j.Agent, previewBody(j.Message))
 		}
-		log.Printf("flotilla watch: deliver to %q PANEL-BLOCKED — composer unreachable behind the agents panel (needs a manual keystroke): %v", j.Agent, err)
+		log.Printf("flotilla watch: deliver to %q INPUT-BLOCKED — composer did not accept the message (needs attention at its pane): %v", j.Agent, err)
 	default:
 		// A real delivery failure (ErrCrashed / ErrUnconfirmed / a paste-fail / a resolve or
 		// lock-contention error). Never silent for an operator message.
