@@ -184,9 +184,12 @@ echo "Reloaded systemd user units."
 # applied to the live process — print the restart-to-apply command.
 if systemctl --user is-active --quiet flotilla-dash.service; then
   echo ""
-  echo "flotilla-dash is already RUNNING (e.g. the transient deploy unit). The persistent"
-  echo "unit is loaded but NOT yet applied to the live process. Apply it when ready:"
-  echo "  systemctl --user enable --now flotilla-dash.service   # persist across reboot + restart now"
+  echo "flotilla-dash is already RUNNING (e.g. the transient deploy unit). The (re)generated"
+  echo "unit is loaded but NOT yet applied to the live process — note 'enable --now' does"
+  echo "NOT restart an already-active service, so it would leave the running process on the"
+  echo "OLD definition. Apply it when ready:"
+  echo "  systemctl --user enable flotilla-dash.service          # persist across reboot"
+  echo "  systemctl --user restart flotilla-dash.service         # apply the new unit (replaces the transient process)"
 else
   echo ""
   echo "Next steps (operator/XO runs these — the installer does not auto-start):"
