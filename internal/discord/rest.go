@@ -2,6 +2,7 @@ package discord
 
 import (
 	"fmt"
+	"log"
 	"sort"
 	"strconv"
 	"time"
@@ -35,19 +36,37 @@ type channelMessagesFunc func(channelID string, limit int, beforeID, afterID, ar
 // the same websocket that just failed.
 type REST struct {
 	fetch channelMessagesFunc
+	sess  *discordgo.Session // retained only so Close() can release transport resources
 }
 
 // NewREST builds a REST client from the bot token. It constructs a discordgo
 // session (for the authenticated, rate-limited REST transport) but does not call
-// Open() — no websocket, no intents, no gateway lifecycle.
+// Open() — no websocket, no intents, no gateway lifecycle, and therefore NO
+// background goroutines (those start only on Open). One session is built per process
+// (daemon-lifetime for the poller; one-shot for the `inbox` CLI), not per request.
 func NewREST(botToken string) (*REST, error) {
 	s, err := discordgo.New("Bot " + botToken)
 	if err != nil {
 		return nil, fmt.Errorf("discord rest session: %w", err)
 	}
-	return &REST{fetch: func(ch string, limit int, before, after, around string) ([]*discordgo.Message, error) {
-		return s.ChannelMessages(ch, limit, before, after, around)
-	}}, nil
+	return &REST{
+		fetch: func(ch string, limit int, before, after, around string) ([]*discordgo.Message, error) {
+			return s.ChannelMessages(ch, limit, before, after, around)
+		},
+		sess: s,
+	}, nil
+}
+
+// Close releases the underlying session's transport. Safe on a never-Open()'d
+// session (discordgo's CloseWithCode is a no-op when no websocket is connected) and
+// safe to call on a nil/zero REST. The daemon's poller keeps its session for the
+// process lifetime (no Close needed — it dies with the process); the short-lived
+// `inbox` CLI defers it for hygiene.
+func (r *REST) Close() error {
+	if r == nil || r.sess == nil {
+		return nil
+	}
+	return r.sess.Close()
 }
 
 // MessagesAfter returns up to limit messages with id > afterID, in ASCENDING id
@@ -78,9 +97,9 @@ func (r *REST) MessagesAfter(channelID, afterID string, limit int) ([]Message, e
 // contain only dropped entries (a non-operator message, an unparseable id) would
 // look "short" and stop the walk early, stranding operator messages above it
 // (systems-review round 2). `after` advances by the raw max id for the same reason.
-func (r *REST) MessagesAfterPaged(channelID, afterID string, pageLimit, pageCap int) (out []Message, capped bool, err error) {
+func (r *REST) MessagesAfterPaged(channelID, afterID string, pageLimit, maxPages int) (out []Message, capped bool, err error) {
 	after := afterID
-	for page := 0; page < pageCap; page++ {
+	for page := 0; page < maxPages; page++ {
 		raw, err := r.fetch(channelID, pageLimit, "", after, "")
 		if err != nil {
 			return out, false, err
@@ -149,6 +168,12 @@ func project(raw []*discordgo.Message) []Message {
 		}
 		snow, ok := ParseSnowflake(m.ID)
 		if !ok {
+			// A real Discord message id is always a valid snowflake; a parse failure
+			// means an API-contract change or corruption. Such a message cannot be
+			// positioned in the cursor space, so it is dropped — but logged, so a
+			// mysterious missing message in the catch-up reconciler has an audit trail
+			// rather than vanishing silently.
+			log.Printf("flotilla discord: dropping message with unparseable id %q (not a snowflake)", m.ID)
 			continue
 		}
 		authorID := ""

@@ -66,6 +66,52 @@ func TestResolveInboxChannel_UnknownListsOptions(t *testing.T) {
 	}
 }
 
+// cubic #162 P2: --limit must work AFTER the positional <channel> (the documented
+// order), not only before it.
+func TestParseInboxArgs_FlagAfterPositional(t *testing.T) {
+	opts, err := parseInboxArgs([]string{"fleet-command", "--limit", "30"})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if opts.channel != "fleet-command" || opts.limit != 30 {
+		t.Fatalf("got channel=%q limit=%d, want fleet-command/30", opts.channel, opts.limit)
+	}
+}
+
+func TestParseInboxArgs_FlagBeforePositional(t *testing.T) {
+	opts, err := parseInboxArgs([]string{"--limit", "30", "fleet-command"})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if opts.channel != "fleet-command" || opts.limit != 30 {
+		t.Fatalf("got channel=%q limit=%d, want fleet-command/30", opts.channel, opts.limit)
+	}
+}
+
+func TestParseInboxArgs_ChannelOnlyDefaultLimit(t *testing.T) {
+	opts, err := parseInboxArgs([]string{"C_ALPHA"})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if opts.channel != "C_ALPHA" || opts.limit != 20 {
+		t.Fatalf("got channel=%q limit=%d, want C_ALPHA/20 (default)", opts.channel, opts.limit)
+	}
+}
+
+func TestParseInboxArgs_Errors(t *testing.T) {
+	cases := map[string][]string{
+		"no channel":         {"--limit", "5"},
+		"two positionals":    {"a", "b"},
+		"limit out of range": {"x", "--limit", "0"},
+		"limit too high":     {"x", "--limit", "9999"},
+	}
+	for name, args := range cases {
+		if _, err := parseInboxArgs(args); err == nil {
+			t.Errorf("%s: expected an error for %v", name, args)
+		}
+	}
+}
+
 func TestWriteInbox_FlagsAndOrder(t *testing.T) {
 	ts := time.Date(2026, 6, 22, 20, 54, 40, 0, time.UTC)
 	msgs := []discord.Message{

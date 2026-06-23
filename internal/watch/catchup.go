@@ -18,7 +18,7 @@ import (
 const (
 	defaultPollInterval = 30 * time.Second
 	defaultPageLimit    = 100            // Discord's max messages per REST page
-	defaultPageCap      = 5              // ≤500 messages drained per sweep; beyond → bulk-alert + next sweep
+	defaultMaxPages     = 5              // ≤500 messages drained per sweep; beyond → bulk-alert + next sweep
 	defaultBulkCap      = 5              // > this many recovered ⇒ alert, don't auto-relay
 	defaultStaleCeiling = 24 * time.Hour // oldest recovered older than this ⇒ alert (don't replay ancient directives)
 	defaultFailThresh   = 5              // consecutive failed sweeps ⇒ escalate the backstop-down alert once
@@ -27,7 +27,7 @@ const (
 // MessageReader is the subset of *discord.REST the poller needs — a seam so the
 // reconcile/disposition logic is unit-testable with a fake (no live Discord).
 type MessageReader interface {
-	MessagesAfterPaged(channelID, afterID string, pageLimit, pageCap int) ([]discord.Message, bool, error)
+	MessagesAfterPaged(channelID, afterID string, pageLimit, maxPages int) ([]discord.Message, bool, error)
 	Latest(channelID string) (discord.Message, bool, error)
 }
 
@@ -46,7 +46,7 @@ type Catchup struct {
 
 	pollInterval time.Duration
 	pageLimit    int
-	pageCap      int
+	maxPages     int
 	bulkCap      int
 	staleCeiling time.Duration
 	failThresh   int
@@ -77,7 +77,7 @@ func NewCatchup(cfg *roster.Config, rel *Relay, reader MessageReader, cursorPath
 		alert:        alert,
 		pollInterval: defaultPollInterval,
 		pageLimit:    defaultPageLimit,
-		pageCap:      defaultPageCap,
+		maxPages:     defaultMaxPages,
 		bulkCap:      defaultBulkCap,
 		staleCeiling: defaultStaleCeiling,
 		failThresh:   defaultFailThresh,
@@ -151,7 +151,7 @@ func (c *Catchup) sweepChannel(b roster.Channel) error {
 		return c.gate.initCursor(b.ChannelID, id)
 	}
 
-	batch, capped, err := c.reader.MessagesAfterPaged(b.ChannelID, strconv.FormatUint(cur, 10), c.pageLimit, c.pageCap)
+	batch, capped, err := c.reader.MessagesAfterPaged(b.ChannelID, strconv.FormatUint(cur, 10), c.pageLimit, c.maxPages)
 	if err != nil {
 		return err
 	}

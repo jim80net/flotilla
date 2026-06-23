@@ -19,30 +19,19 @@ import (
 // it starts no daemon, opens no gateway websocket, and never re-injects (re-relaying
 // from the CLI would bypass the gateway's operator-only Accept guard — out of scope).
 func cmdInbox(args []string) error {
-	fs := flag.NewFlagSet("inbox", flag.ContinueOnError)
-	rosterPath := fs.String("roster", rosterDefault(), "roster config path")
-	secretsPath := fs.String("secrets", os.Getenv("FLOTILLA_SECRETS"), "secrets env file path (for the bot token)")
-	limit := fs.Int("limit", 20, "number of recent messages to fetch (1-100)")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	rest := fs.Args()
-	if len(rest) != 1 {
-		return fmt.Errorf("usage: flotilla inbox <channel> [--limit N]\n  <channel> = a binding role or a raw channel id")
-	}
-	if *limit < 1 || *limit > 100 {
-		return fmt.Errorf("--limit must be 1-100 (Discord's max page is 100)")
-	}
-
-	cfg, err := roster.Load(*rosterPath)
+	opts, err := parseInboxArgs(args)
 	if err != nil {
 		return err
 	}
-	ch, err := resolveInboxChannel(cfg, rest[0])
+	cfg, err := roster.Load(opts.rosterPath)
 	if err != nil {
 		return err
 	}
-	token, err := botToken(*secretsPath)
+	ch, err := resolveInboxChannel(cfg, opts.channel)
+	if err != nil {
+		return err
+	}
+	token, err := botToken(opts.secretsPath)
 	if err != nil {
 		return err
 	}
@@ -50,12 +39,50 @@ func cmdInbox(args []string) error {
 	if err != nil {
 		return err
 	}
-	msgs, err := client.Recent(ch.ChannelID, *limit)
+	defer client.Close()
+	msgs, err := client.Recent(ch.ChannelID, opts.limit)
 	if err != nil {
 		return fmt.Errorf("fetch channel %s: %w", inboxLabel(ch), err)
 	}
 	writeInbox(os.Stdout, msgs, cfg.OperatorUserID, ch)
 	return nil
+}
+
+// inboxOpts is the parsed `inbox` invocation.
+type inboxOpts struct {
+	channel     string
+	limit       int
+	rosterPath  string
+	secretsPath string
+}
+
+// parseInboxArgs parses `inbox <channel> [--limit N] [--roster ..] [--secrets ..]`,
+// accepting flags on EITHER side of the positional <channel>. Go's flag package
+// stops at the first non-flag token, so a single Parse would reject the documented
+// `<channel> [--limit N]` order; we Parse the leading flags, pull the channel, then
+// Parse the trailing flags (cubic #162 P2). Pure (no I/O) so the ordering is testable.
+func parseInboxArgs(args []string) (inboxOpts, error) {
+	fs := flag.NewFlagSet("inbox", flag.ContinueOnError)
+	rosterPath := fs.String("roster", rosterDefault(), "roster config path")
+	secretsPath := fs.String("secrets", os.Getenv("FLOTILLA_SECRETS"), "secrets env file path (for the bot token)")
+	limit := fs.Int("limit", 20, "number of recent messages to fetch (1-100)")
+	if err := fs.Parse(args); err != nil {
+		return inboxOpts{}, err
+	}
+	if fs.NArg() == 0 {
+		return inboxOpts{}, fmt.Errorf("usage: flotilla inbox <channel> [--limit N]\n  <channel> = a binding role or a raw channel id")
+	}
+	channel := fs.Arg(0)
+	if err := fs.Parse(fs.Args()[1:]); err != nil { // flags AFTER the positional
+		return inboxOpts{}, err
+	}
+	if fs.NArg() != 0 {
+		return inboxOpts{}, fmt.Errorf("unexpected extra argument(s) %v — usage: flotilla inbox <channel> [--limit N]", fs.Args())
+	}
+	if *limit < 1 || *limit > 100 {
+		return inboxOpts{}, fmt.Errorf("--limit must be 1-100 (Discord's max page is 100)")
+	}
+	return inboxOpts{channel: channel, limit: *limit, rosterPath: *rosterPath, secretsPath: *secretsPath}, nil
 }
 
 // resolveInboxChannel maps a CLI <channel> arg to a bound channel: an exact
