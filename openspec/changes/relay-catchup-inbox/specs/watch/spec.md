@@ -90,10 +90,10 @@ cases (an alerted backlog has been surfaced; re-alerting it every sweep would be
 
 ### Requirement: The catch-up reconciler's own liveness is never silent
 
-Because this backstop exists precisely to make a silent ingestion failure loud, a reconciler that
-itself stops working SHALL NOT fail silently. The system SHALL escalate ONCE to the operator when the
-reconciler fails a threshold of consecutive sweeps (the at-least-once backstop is down while live
-gateway delivery continues), and SHALL re-arm the escalation on recovery.
+A reconciler that itself stops working SHALL NOT fail silently — this backstop exists precisely to make
+a silent ingestion failure loud. The system SHALL escalate ONCE to the operator when the reconciler
+fails a threshold of consecutive sweeps (the at-least-once backstop is down while live gateway delivery
+continues), and SHALL re-arm the escalation on recovery.
 
 #### Scenario: A persistently failing reconciler is escalated
 
