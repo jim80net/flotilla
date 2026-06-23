@@ -71,7 +71,7 @@ Load-bearing properties (assert across paths):
 
 - [x] 5.1 `go build ./...` and `go test ./internal/surface/... ./cmd/flotilla/...` green; G2 audit
   (every grok marker traces to §10).
-- [ ] 5.2 Implementation-trio (systems-review + open-code-review, parallel) on the diff; iterate clean.
-- [ ] 5.3 PR via the gh-token HTTPS bypass to hydra-ops's gate (reference #158 + this change). Record
+- [x] 5.2 Implementation-trio (systems-review + open-code-review, parallel) on the diff; iterate clean.
+- [x] 5.3 PR via the gh-token HTTPS bypass to hydra-ops's gate (reference #158 + this change). Record
   the out-of-scope follow-ups (grok `Close`, `workspace.go` identity-file, claude-path-uniformity) as
   issues.
