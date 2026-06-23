@@ -137,19 +137,20 @@ record baseline:
   │
   ├─ PHASE 2 — GRACEFUL CLOSE (the one irreversible step; the handoff is durable by here)   [locked]
   │   # CORRECTNESS-CRITICAL, not defense-in-depth: RespawnPane is ALWAYS `-k` (it kills whatever is in
-  │   # the pane), so confirming Shell BEFORE relaunch is the ONLY thing that prevents -k'ing a live
-  │   # session. (The Phase-1 re-verify already established Idle ∧ ComposerCleared at the cursor.)
-  │   Close(pane)                                # claude: slash-keys /exit (keystroke VERIFIED in 6.3
-  │       #            BEFORE the claude Close is trusted — see task ordering; the close→Shell gate is
-  │       #            the structural net if it is wrong)
+  │   # the pane), so confirming the old process is GONE BEFORE relaunch is the ONLY thing preventing
+  │   # a -k of a live session. (The Phase-1 re-verify already established Idle ∧ ComposerCleared.)
+  │   SetRemainOnExit(pane, on)                  # so /exit leaves a DEAD pane (claude-direct fleet desk:
+  │       #                                        no shell behind claude) instead of CLOSING the window
+  │   defer SetRemainOnExit(pane, off)           # restore steady-state on EVERY exit (incl. abort)
+  │   Close(pane)                                # claude: slash-keys /exit (single-keystroke-terminal,
+  │       #                                        verified in 6.3)
   │     └─ ErrNoGracefulClose (surface has no clean exit, e.g. grok-unverified / cursor)
   │          → fall back to RespawnPane-kill      # safe: handoff already durable
-  │   poll until Assess == Shell, within closeTimeout:
-  │     · Unknown (a transient capture glitch — Assess fails OPEN to Unknown) → RETRY the poll
-  │       (do not burn the timeout toward abort on a glitch)
-  │   └─ not Shell within the budget → ABORT (release lock): STATE-AWARE recovery copy —
-  │        "close did not confirm a shell; the desk MAY STILL BE LIVE — investigate; if confirmed dead,
-  │         recover with: flotilla resume <desk> --force"   (NEVER relaunch on a possibly-live session)
+  │   poll until pane_dead==1 (claude-direct) OR Assess==Shell (shell-backed), within closeTimeout:
+  │     · a transient pane_dead error / Assess==Unknown (capture glitch, fail-open) → RETRY the poll
+  │   └─ neither within the budget → ABORT (release lock + restore remain-on-exit): STATE-AWARE copy —
+  │        "close did not confirm the process exited; the desk MAY STILL BE LIVE — investigate; if
+  │         confirmed dead, recover with: flotilla resume <desk> --force"  (NEVER relaunch on a live pane)
   │
   ├─ PHASE 3 — RELAUNCH (reuse the hardened resume primitive)                                 [locked]
   │   RespawnPane(pane, cwd, recipe.Launch)      # reuses pane id → @flotilla_agent marker SURVIVES
@@ -204,22 +205,27 @@ default is named so the capability is never shippable with the floor effectively
 **closed-but-not-relaunched** or a **live-but-uncertain** desk — the artifact is durable either way; the
 state-aware abort copy names the exact recovery (Phase 2 / Phase 3 below).
 
-### Why the close→Shell confirmation matters (Phase 2 gate) — CORRECTNESS-CRITICAL
+### Why the close confirmation matters (Phase 2 gate) — CORRECTNESS-CRITICAL
 
 `RespawnPane` is **unconditionally `respawn-pane -k`** (`resume.go:108-117`): there is no kill-free
-relaunch, so it kills *whatever* foreground process is in the pane. Confirming the pane is a `Shell`
-(the old process already gone) BEFORE relaunching is therefore the ONLY thing that prevents `-k`'ing a
-LIVE session that the close did not actually end (a wedged composer, a wrong keystroke on an unverified
-harness). This gate is **correctness-critical, not defense-in-depth.** A close that does not confirm
-Shell ABORTS the relaunch entirely (never respawns). Because `Assess` fails OPEN to `Unknown` on a
-transient capture glitch (`claude.go:82-83,90-92`) and a running claude reads as `node` not a shell
-(`liveness.go:17`), the poll RETRIES on `Unknown` rather than treating a glitch as "not closed"; only a
-sustained non-Shell verdict aborts, with the state-aware recovery copy. The exact post-`/exit`
-`pane_current_command` MUST be confirmed to land in `knownShells` (`liveness.go:11`) during the 6.3
-live-validation BEFORE the claude `Close` keystroke is trusted (task ordering) — `/clear` slash-keys
-are verified for *context reset within a running session*, which is a DIFFERENT behaviour from
-*terminating the process to a shell*, so the `/exit`→shell behaviour is not inherited and must be
-measured, not assumed.
+relaunch, so it kills *whatever* foreground process is in the pane. Confirming the old process is
+PROVABLY GONE BEFORE relaunching is therefore the ONLY thing that prevents `-k`'ing a LIVE session that
+the close did not actually end. This gate is **correctness-critical, not defense-in-depth.**
+
+**The close-confirm mechanism (corrected by the 6.3 live validation, 2026-06-23):** the live fleet runs
+`claude --remote-control <name>` as the pane's **DIRECT process** (parent = the tmux server, no shell
+behind it), with the server's `remain-on-exit` **off**. So a graceful `/exit` *CLOSES the pane/window*
+— it never drops to a `knownShells` shell. A naive close→`Assess==Shell` gate would therefore time out
+and ABORT on **every** real desk (the pane vanishes → `Assess`→Unknown→never Shell). The fix
+(verified live): Phase 2 sets **`remain-on-exit on`** before the close, so `/exit` leaves a **DEAD pane**
+(`#{pane_dead}=1`, the pane + its `@flotilla_agent` marker preserved) instead of closing; the close is
+confirmed by **`pane_dead==1`** (the claude-direct case) **OR** `Assess==Shell` (a shell-backed desk);
+then `RespawnPane -k` revives the dead pane (reusing the id → marker survives, I3 holds); and
+`remain-on-exit` is restored **off** on every exit path (incl. abort), so the desk's steady-state crash
+behaviour is unchanged. A transient `pane_dead` read error / `Assess==Unknown` (the capture-glitch
+fail-open value, `claude.go:82-83,90-92`) is RETRIED, not treated as "closed"; only a confirmed
+dead-or-shell proceeds. `/exit` was confirmed **single-keystroke-terminal** (no confirm sub-prompt) in
+6.3, so the claude `Close` issues `/exit` directly.
 
 ## The SPI additions
 

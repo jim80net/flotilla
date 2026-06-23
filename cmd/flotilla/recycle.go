@@ -47,22 +47,24 @@ func defaultTimeouts() recycleTimeouts {
 // recycleOps are the tmux + surface operations runRecycle performs, injected so the
 // fail-closed decision core is unit-testable without a live tmux server or a real agent.
 type recycleOps struct {
-	resolve    func(want string) (string, deliver.ResolveOutcome, error)
-	paneID     func(target string) (string, error)                // deliver.PaneID (canonical self-recycle compare)
-	inMode     func(target string) (bool, error)                  // deliver.PaneInMode (copy-mode refuse)
-	assess     func(target string) surface.State                  // driver.Assess
-	composer   func(target string) surface.ComposerDisposition    // driver.ComposerState (required)
-	absent     func(cwd, path string) (bool, error)               // deliver.HandoffAbsentAtHead (t0 baseline; also git-tree gate)
-	durable    func(cwd, path string, minBytes int) (bool, error) // deliver.HandoffDurable
-	deliver    func(target, text string) error                    // confirmed delivery bound to the driver
-	closeFn    func(target string) error                          // driver.Close
-	selfHeal   func(target string)                                // optional (nil unless FLOTILLA_SELF_HEAL)
-	respawn    func(target, cwd, launch string) error             // deliver.RespawnPane (-k)
-	readMarker func(target string) (string, error)                // deliver.ReadMarker
-	stampGen   func(target, token string) error                   // deliver.StampRecycleGen
-	readGen    func(target string) (string, error)                // deliver.ReadRecycleGen
-	lock       func(target string) (release func(), err error)    // AcquirePaneTxn → Release
-	sleep      func(time.Duration)
+	resolve      func(want string) (string, deliver.ResolveOutcome, error)
+	paneID       func(target string) (string, error)                // deliver.PaneID (canonical self-recycle compare)
+	inMode       func(target string) (bool, error)                  // deliver.PaneInMode (copy-mode refuse)
+	assess       func(target string) surface.State                  // driver.Assess
+	composer     func(target string) surface.ComposerDisposition    // driver.ComposerState (required)
+	absent       func(cwd, path string) (bool, error)               // deliver.HandoffAbsentAtHead (t0 baseline; also git-tree gate)
+	durable      func(cwd, path string, minBytes int) (bool, error) // deliver.HandoffDurable
+	deliver      func(target, text string) error                    // confirmed delivery bound to the driver
+	closeFn      func(target string) error                          // driver.Close
+	remainOnExit func(target string, on bool) error                 // deliver.SetRemainOnExit (keep the pane on /exit)
+	paneDead     func(target string) (bool, error)                  // deliver.PaneDead (close-confirm: claude-direct)
+	selfHeal     func(target string)                                // optional (nil unless FLOTILLA_SELF_HEAL)
+	respawn      func(target, cwd, launch string) error             // deliver.RespawnPane (-k)
+	readMarker   func(target string) (string, error)                // deliver.ReadMarker
+	stampGen     func(target, token string) error                   // deliver.StampRecycleGen
+	readGen      func(target string) (string, error)                // deliver.ReadRecycleGen
+	lock         func(target string) (release func(), err error)    // AcquirePaneTxn → Release
+	sleep        func(time.Duration)
 }
 
 // recyclePlan is the resolved per-agent input to runRecycle. The handoff/takeover turn TEXTS
@@ -163,17 +165,28 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, error) {
 	}
 
 	// PHASE 2 — graceful close (the one irreversible step; the handoff is durable by here).
-	// RespawnPane is ALWAYS `-k`, so confirming Shell before the relaunch is the ONLY thing
-	// preventing a kill of a live session — correctness-critical, not defense-in-depth.
+	// RespawnPane is ALWAYS `-k`, so confirming the old process is GONE before the relaunch is
+	// the ONLY thing preventing a kill of a still-live session — correctness-critical, not
+	// defense-in-depth. The live fleet runs claude as the pane's DIRECT process with
+	// remain-on-exit OFF, so a graceful /exit would CLOSE the pane (destroying its marker)
+	// rather than drop to a shell. So set remain-on-exit ON first (the /exit then leaves a DEAD
+	// pane we can confirm + respawn), and restore it OFF after (steady-state crash behaviour
+	// unchanged). The close is confirmed by pane_dead (claude-direct) OR a Shell verdict
+	// (a shell-backed desk).
+	if err := ops.remainOnExit(target, true); err != nil {
+		return "", fmt.Errorf("phase 2: could not set remain-on-exit for %q (cannot safely close): %w — ABORT, desk untouched", p.agent, err)
+	}
+	defer func() { _ = ops.remainOnExit(target, false) }() // restore on every exit from here (incl. abort)
+
 	closeErr := ops.closeFn(target)
 	switch {
 	case closeErr == nil:
-		if !pollShell(ops, target, p.timeouts.close_) {
-			return "", fmt.Errorf("phase 2: the graceful close of %q did not confirm a shell within %s — the desk MAY STILL BE LIVE; investigate, and if confirmed dead recover with: flotilla resume %s --force (NOT relaunching on a possibly-live session)", p.agent, p.timeouts.close_, p.agent)
+		if !pollClosed(ops, target, p.timeouts.close_) {
+			return "", fmt.Errorf("phase 2: the graceful close of %q did not confirm the process exited within %s — the desk MAY STILL BE LIVE; investigate, and if confirmed dead recover with: flotilla resume %s --force (NOT relaunching on a possibly-live session)", p.agent, p.timeouts.close_, p.agent)
 		}
 	case errors.Is(closeErr, surface.ErrNoGracefulClose):
 		// No graceful close → the handoff-gated hard kill: RespawnPane -k IS the close+relaunch
-		// (safe — the handoff is durable). Skip the Shell-confirm; the respawn below kills it.
+		// (safe — the handoff is durable). Skip the close-confirm; the respawn below kills it.
 		log.Printf("flotilla: recycle: %q surface has no graceful close — using the handoff-gated kill fallback (respawn-kill)", p.agent)
 	default:
 		return "", fmt.Errorf("phase 2: closing %q failed: %w — ABORT (desk untouched by the relaunch)", p.agent, closeErr)
@@ -276,12 +289,18 @@ func pollHandoffGate(ops recycleOps, target string, p recyclePlan, timeout time.
 	return false
 }
 
-// pollShell waits for the pane to become a Shell after the close. A transient Unknown (Assess
-// fails OPEN to Unknown on a capture glitch) is RETRIED, not treated as "closed" — only a
-// confirmed Shell returns true, so this never relaunches on a live session.
-func pollShell(ops recycleOps, target string, timeout time.Duration) bool {
+// pollClosed waits for the agent process to be provably GONE after the close — by the pane
+// being DEAD (claude-direct fleet desk: /exit exits the pane's direct process, which with
+// remain-on-exit on leaves pane_dead=1) OR a Shell verdict (a shell-backed desk drops to bash).
+// A transient pane_dead read error or an Assess Unknown (the capture-glitch fail-open value) is
+// RETRIED, not treated as "closed" — only a confirmed dead-or-shell returns true, so the
+// relaunch never fires on a still-live session.
+func pollClosed(ops recycleOps, target string, timeout time.Duration) bool {
 	n := pollAttempts(timeout)
 	for i := 0; i <= n; i++ {
+		if dead, err := ops.paneDead(target); err == nil && dead {
+			return true
+		}
 		if ops.assess(target) == surface.StateShell {
 			return true
 		}
@@ -396,19 +415,21 @@ func cmdRecycle(args []string) error {
 		confirm.SendCtrlC = deliver.SendCtrlC
 	}
 	ops := recycleOps{
-		resolve:    deliver.Resolve,
-		paneID:     deliver.PaneID,
-		inMode:     deliver.PaneInMode,
-		assess:     drv.Assess,
-		composer:   probe.ComposerState,
-		absent:     deliver.HandoffAbsentAtHead,
-		durable:    deliver.HandoffDurable,
-		deliver:    func(target, text string) error { return confirm.Submit(drv, target, text) },
-		closeFn:    drv.Close,
-		respawn:    deliver.RespawnPane,
-		readMarker: deliver.ReadMarker,
-		stampGen:   deliver.StampRecycleGen,
-		readGen:    deliver.ReadRecycleGen,
+		resolve:      deliver.Resolve,
+		paneID:       deliver.PaneID,
+		inMode:       deliver.PaneInMode,
+		assess:       drv.Assess,
+		composer:     probe.ComposerState,
+		absent:       deliver.HandoffAbsentAtHead,
+		durable:      deliver.HandoffDurable,
+		deliver:      func(target, text string) error { return confirm.Submit(drv, target, text) },
+		closeFn:      drv.Close,
+		remainOnExit: deliver.SetRemainOnExit,
+		paneDead:     deliver.PaneDead,
+		respawn:      deliver.RespawnPane,
+		readMarker:   deliver.ReadMarker,
+		stampGen:     deliver.StampRecycleGen,
+		readGen:      deliver.ReadRecycleGen,
 		lock: func(target string) (func(), error) {
 			txn, err := deliver.AcquirePaneTxn(target, deliver.PaneTxnTimeout)
 			if err != nil {

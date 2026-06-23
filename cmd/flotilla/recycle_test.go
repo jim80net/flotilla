@@ -29,7 +29,8 @@ type recRec struct {
 	genGot          string // overrides what readGen returns at phase 4 (supersede simulation)
 	absentResult    bool
 	absentErr       error
-	lockedFlag      bool // set when the txn lock is taken (Phase 1 → close window)
+	lockedFlag      bool   // set when the txn lock is taken (Phase 1 → close window)
+	remainCalls     []bool // records SetRemainOnExit(on) calls (expect on then off-restore)
 }
 
 func happyRec() *recRec { return &recRec{markerGot: "the-key", absentResult: true} }
@@ -43,10 +44,10 @@ func (r *recRec) assess(string) surface.State {
 	case !r.closed:
 		return surface.StateIdle // phases 0, 1, re-verify
 	case r.closed && !r.respawned:
-		if r.closeNeverShell {
-			return surface.StateUnknown // transient glitch — pollShell must RETRY, not abort early
-		}
-		return surface.StateShell
+		// A claude-direct fleet desk never becomes a Shell on /exit (the pane goes DEAD — see
+		// paneDead below); a transient glitch reads Unknown. Either way pollClosed must not abort
+		// early; it confirms via paneDead. Shell is only for a shell-backed desk (not modeled here).
+		return surface.StateUnknown
 	case r.respawned && len(r.delivered) < 2:
 		return surface.StateIdle // phase 4 boot (handoff delivered, takeover not yet)
 	default:
@@ -67,15 +68,20 @@ func (r *recRec) composer(string) surface.ComposerDisposition {
 
 func fakeRecycleOps(r *recRec) recycleOps {
 	return recycleOps{
-		resolve:  func(string) (string, deliver.ResolveOutcome, error) { return "sess:0.1", deliver.ResolveUnique, nil },
-		paneID:   func(string) (string, error) { return "%5", nil },
-		inMode:   func(string) (bool, error) { return false, nil },
-		assess:   r.assess,
-		composer: r.composer,
-		absent:   func(string, string) (bool, error) { return r.absentResult, r.absentErr },
-		durable:  func(string, string, int) (bool, error) { return !r.failDurable, nil },
-		deliver:  func(_, text string) error { r.delivered = append(r.delivered, text); return nil },
-		closeFn:  func(string) error { r.closed = true; return r.closeErr },
+		resolve:      func(string) (string, deliver.ResolveOutcome, error) { return "sess:0.1", deliver.ResolveUnique, nil },
+		paneID:       func(string) (string, error) { return "%5", nil },
+		inMode:       func(string) (bool, error) { return false, nil },
+		assess:       r.assess,
+		composer:     r.composer,
+		absent:       func(string, string) (bool, error) { return r.absentResult, r.absentErr },
+		durable:      func(string, string, int) (bool, error) { return !r.failDurable, nil },
+		deliver:      func(_, text string) error { r.delivered = append(r.delivered, text); return nil },
+		closeFn:      func(string) error { r.closed = true; return r.closeErr },
+		remainOnExit: func(_ string, on bool) error { r.remainCalls = append(r.remainCalls, on); return nil },
+		// A claude-direct desk: after /exit the pane is DEAD (until the respawn). closeNeverShell
+		// models a close that never confirms (the process never exits / a stuck read) → pollClosed
+		// must retry then abort.
+		paneDead: func(string) (bool, error) { return r.closed && !r.respawned && !r.closeNeverShell, nil },
 		respawn:  func(string, string, string) error { r.respawned = true; return nil },
 		readMarker: func(string) (string, error) {
 			if r.markerGot == "" {
@@ -122,6 +128,26 @@ func TestRunRecycleHappyPath(t *testing.T) {
 	}
 	if !strings.Contains(msg, "recycled v12-dev") {
 		t.Errorf("msg = %q, want a success line", msg)
+	}
+	// remain-on-exit must be set ON before the close and restored OFF after (the claude-direct
+	// close mechanism). The close was confirmed via pane_dead (assess returns Unknown post-close,
+	// so reaching respawn proves pane_dead is the confirm signal).
+	if len(r.remainCalls) < 2 || r.remainCalls[0] != true || r.remainCalls[len(r.remainCalls)-1] != false {
+		t.Errorf("remainCalls = %v, want first=on(true) last=off(false restore)", r.remainCalls)
+	}
+}
+
+// TestRunRecycleAbortRestoresRemainOnExit: a Phase-2 close that never confirms must STILL restore
+// remain-on-exit off (the defer), so an aborted recycle doesn't change the desk's crash behaviour.
+func TestRunRecycleAbortRestoresRemainOnExit(t *testing.T) {
+	r := happyRec()
+	r.closeNeverShell = true
+	_, err := runRecycle(fakeRecycleOps(r), testPlan())
+	if err == nil {
+		t.Fatal("expected a close abort")
+	}
+	if len(r.remainCalls) == 0 || r.remainCalls[len(r.remainCalls)-1] != false {
+		t.Errorf("remainCalls = %v, want the restore (off) even on abort", r.remainCalls)
 	}
 }
 
