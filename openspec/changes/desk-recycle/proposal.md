@@ -41,32 +41,56 @@ reuses the pane id so the `@flotilla_agent` marker SURVIVES — the control chan
   claude→grok cutover + the capability-parity check.** Per #158's stated hard dependency; keeps the
   PR blast-radius bounded (does NOT couple the mechanism to family-office's real-money parity check).
 
+## What the design-trio rework changed (forks unchanged; mechanism + gate signals corrected)
+
+The trio caught one systematic blind spot: the first draft templated the handoff/takeover injection
+from MEMORY of the memex `/handoff` and `/takeover` skills. Reading the skill bodies shows BOTH are
+human-INTERACTIVE (a "/handoff" confirmation pause with NO commit step; a "/takeover" *"shall I
+start?"* pause) — so injecting the bare skills would deadlock a remote-driven recycle. The rework:
+inject **non-interactive recycle-specific turns** (not the bare skills) that produce the same
+artifacts; gate on **`Idle ∧ ComposerCleared`** (not `Idle` alone, which a skill-confirmation pause
+also reads); detect the handoff via a **recycle-DESIGNATED committed blob** (not mtime + whole-tree-
+clean); hold a **pipeline-spanning pane-txn lock** (and make `resume` take it too); add an **idle
+precondition** (Phase 0) and a **relaunch-generation idempotency marker**; use **per-phase timeouts**.
+
 ## What Changes
 
-- **`surface.Driver` gains `Close(pane) error`** — the per-surface graceful exit (claude/grok/aider/
-  opencode inject their own clean exit; a surface with no clean in-session exit returns
-  `ErrNoGracefulClose` so the caller falls back to a hard respawn-kill — safe ONLY because the handoff
-  is already durable by then). The pane drops to a Shell, which is exactly the state `resume` already
-  safely respawns into.
-- **An OPTIONAL `surface.RecycleBridge` capability** — `InjectHandoff(pane)` + `InjectTakeover(pane,
-  handoffPath)`, the two per-harness context hooks. Claude Code is the reference (memex `/handoff` +
-  `/takeover` skills). A surface WITHOUT the bridge cannot be context-preservingly recycled, and
-  `flotilla recycle` REFUSES cleanly (never a silent degrade). This is where the cross-harness bridge
-  (fork 3) is templated per harness.
-- **`flotilla recycle <desk>`** — the fail-closed lifecycle orchestration, with the safety-critical
-  decision core (`runRecycle`) separated from I/O and unit-tested à la `runResume`:
+- **`surface.Driver` gains `Close(pane) error`** — the per-surface graceful exit via slash-keys
+  (claude `/exit`, keystroke verified in the 6.3 live-validation; grok returns `ErrNoGracefulClose`
+  EXPLICITLY until #158 live-characterizes it; aider `/exit`; opencode/cursor `ErrNoGracefulClose`
+  unless a clean quit is confirmed). The caller falls back to a hard respawn-kill on
+  `ErrNoGracefulClose` — safe ONLY because the handoff is already durable by then. The pane drops to a
+  Shell, the state `resume` already safely respawns into.
+- **An OPTIONAL `surface.RecycleBridge` capability** — `HandoffPath(cwd, token)` (the per-harness
+  designated-handoff path convention), `HandoffTurn(path)` (the NON-INTERACTIVE self-committing
+  handoff instruction TEXT), `TakeoverTurn(path)` (the IMPERATIVE begin-work-immediately takeover
+  instruction TEXT). The two turn methods return TEXT (pure, unit-testable); the command delivers them
+  via CONFIRMED delivery. Claude Code is the reference. A surface WITHOUT the bridge cannot be
+  context-preservingly recycled, and `flotilla recycle` REFUSES cleanly (never a silent degrade). This
+  is where the cross-harness bridge (fork 3) is templated per harness.
+- **`flotilla recycle <desk>`** — the fail-closed lifecycle orchestration, the safety-critical
+  decision core (`runRecycle`) separated from I/O and unit-tested à la `runResume`, the WHOLE pipeline
+  under one held `AcquirePaneTxn` lock (and `cmdResume` changed to take the same lock):
   1. resolve the pane (marker-first; refuse on none/ambiguous);
-  2. `InjectHandoff`, then the **fail-closed completion gate**: poll until a FRESH handoff artifact
-     exists (mtime after injection) AND the pane is back to `Idle` AND durable outputs are committed
-     (tracked-tree clean + the handoff committed), within a timeout — else **ABORT** (the desk keeps
-     running, nothing closed; at-most-once-context-loss);
-  3. `Close`, then confirm the pane reached `Shell` within a timeout — else ABORT the relaunch (never
-     relaunch on top of a still-live session → no duplicate process);
-  4. relaunch via the existing `RespawnPane` (marker survives → control re-bound) and verify the
-     marker read-back;
-  5. wait for the fresh session to reach `Idle`, then `InjectTakeover(pane, handoffPath)` exactly once.
-- **`--dry-run`** prints the resolved plan (pane, recipe, the handoff/takeover turns it would inject)
-  without acting; **`--timeout`** bounds each gate.
+  2. **Phase 0 — idle precondition:** poll until `Idle ∧ ComposerCleared` (honour InjectSlash's
+     "only inject when idle" contract; the XO triggers on chapter-complete, often mid-turn) — else ABORT;
+  3. **Phase 1 — handoff:** deliver `HandoffTurn` via confirmed delivery, then the **fail-closed gate**:
+     poll until the DESIGNATED handoff blob is durable (committed at HEAD in a git tree, or on disk for
+     a non-git cwd, AND non-trivial) AND `Idle ∧ ComposerCleared`, within `--handoff-timeout` — else
+     **ABORT** (desk keeps running, nothing closed; at-most-once-context-LOSS);
+  4. **Phase 2 — close:** require `ComposerCleared` (selfHeal an overlay if enabled, else ABORT — never
+     fire `/exit` into an overlay), `Close`, then confirm `Shell` within `--close-timeout` (RETRY on a
+     transient `Unknown` glitch) — else ABORT naming the recovery (`flotilla resume <desk>` for a
+     closed-but-not-relaunched dead desk); never relaunch on a possibly-live session;
+  5. **Phase 3 — relaunch:** existing `RespawnPane` (marker survives → control re-bound), verify the
+     marker read-back, stamp `@flotilla_recycle_gen=<token>`;
+  6. **Phase 4 — takeover:** poll until `Idle ∧ ComposerCleared` within `--boot-timeout`, re-read the
+     gen marker (ABORT if superseded), deliver `TakeoverTurn` via confirmed delivery EXACTLY ONCE, then
+     poll for a `Working` edge (the resumption-confidence signal; best-effort) within `--takeover-timeout`.
+- **`--dry-run`** prints the resolved plan (pane, recipe, the designated path, the handoff/takeover
+  turns it would inject) without acting; **per-phase timeouts** (`--handoff-timeout`, `--close-timeout`,
+  `--boot-timeout`, `--takeover-timeout`) bound the gates, which have order-of-magnitude-different
+  latencies (a handoff turn is multi-minute; close/boot are seconds).
 - **Coordination protocol (a flotilla finding from this very parlay):** a recycled/remote desk and its
   remote XO MUST coordinate via **flotilla messages**, never an in-pane interactive menu — an in-pane
   `AskUserQuestion` is UNANSWERABLE by a remote XO over the relay (keystrokes navigate the menu, not
@@ -78,8 +102,10 @@ reuses the pane id so the `@flotilla_agent` marker SURVIVES — the control chan
 - **#158 — the claude→grok cutover + the capability-parity check** (does Grok's harness support
   subagents / parallel-review / git-PR / MCP, which family-office relies on, owning tactical-head's
   real-money order path). Gated on #157's same-harness proof. This change builds the bridge
-  cross-harness-CAPABLE (arbitrary recipe + a harness-agnostic handoff artifact) but exercises only
-  claude→claude.
+  cross-harness-READY (arbitrary recipe + a harness-agnostic handoff artifact + a per-driver
+  `RecycleBridge` SPI) but exercises only claude→claude; the only harness meeting the recycle-capable
+  bar today is Claude Code. ("The markdown bridge already works — this session is proof" is a
+  SAME-harness claim, NOT evidence for the cross-harness pillar; the spec does not stand it as such.)
 - **Deciding WHEN a chapter is complete** — the XO's judgment; #157 is the mechanism, the XO is the
   trigger.
 - **A structured/normalized handoff schema** (fork-3 option B) — deferred unless #158 shows the
@@ -88,17 +114,29 @@ reuses the pane id so the `@flotilla_agent` marker SURVIVES — the control chan
 ## Impact
 
 - **`internal/surface/surface.go`** — `Close` on `Driver`; `ErrNoGracefulClose`; the optional
-  `RecycleBridge` interface; a `Recycle(d, pane, …)`-style helper that routes the bridge + fallback.
-- **`internal/surface/{claude,grok,aider,opencode}.go`** — each implements `Close`; the claude driver
-  implements `RecycleBridge` (`/handoff`, `/takeover <path>`) as the reference.
+  `RecycleBridge` interface (`HandoffPath`/`HandoffTurn`/`TakeoverTurn`); a `RecycleSupport(d)
+  (RecycleBridge, bool)` type-assert helper for the clean refusal.
+- **`internal/surface/{claude,grok,aider,opencode}.go`** — each implements `Close` (claude `/exit`;
+  grok `ErrNoGracefulClose` until #158; aider `/exit`; opencode/cursor `ErrNoGracefulClose`); the
+  claude driver implements `RecycleBridge` (the `.claude/handoffs/` path convention + the non-
+  interactive handoff turn + the imperative takeover turn) as the reference.
 - **`cmd/flotilla/recycle.go`** (new) — the command + the `runRecycle` fail-closed core; reuses the
-  `resume` ops (resolve / respawn / readMarker / tag) and the launch-recipe resolution.
-- **`internal/deliver`** — a fresh-handoff detector (new file under a handoffs dir since a timestamp)
-  and a tracked-tree-clean check, both injectable.
-- **`docs/watch-runbook.md`** — the recycle procedure + the remote-parlay-via-message protocol.
+  `resume` ops (resolve / respawn / readMarker / tag) and the launch-recipe resolution; delivers turns
+  via `surface.Confirm`; holds `AcquirePaneTxn` across the pipeline.
+- **`cmd/flotilla/resume.go`** — `cmdResume` takes the SAME `AcquirePaneTxn` lock (so recycle×resume
+  cannot interleave on a pane — the race `resume.go:176-183` admits, which recycle widens).
+- **`internal/deliver`** — `HandoffDurable(cwd, designatedPath, minBytes)` (the committed-blob /
+  on-disk durability + minimum-viability check, git-root resolved from cwd) and the
+  `@flotilla_recycle_gen` pane-option stamp/read, both injectable. (The first draft's mtime
+  fresh-handoff detector and tracked-tree-clean check are REPLACED by this exact check.)
+- **`docs/watch-runbook.md`** — the recycle procedure + the remote-parlay-via-message protocol +
+  `--dry-run` as the recommended first step.
 - **Risk: HIGH.** Recycle CLOSES a live desk (the running session is intentionally ended; context is
   preserved by the handoff). Guarded by: the fail-closed completion gate (ABORT before any close if
-  the handoff is not durably confirmed — at-most-once-context-loss); the close→Shell confirmation
-  (never relaunch on a live session); reuse of the already-hardened `resume` relaunch/marker path; and
-  a mandatory **live claude→claude end-to-end validation on one real desk** (cold-test the artifact)
-  before the capability is used in anger — mirroring surface-self-heal's live-validation gate.
+  the handoff is not durably confirmed — at-most-once-context-LOSS); the `ComposerCleared`-before-close
+  guard + the close→Shell confirmation (retry-on-Unknown; never relaunch on a live session); the
+  pipeline-spanning pane-txn lock (no recycle×resume interleave; watch-delivery frozen); the relaunch-
+  generation idempotency marker (at-most-once takeover); reuse of the already-hardened `resume`
+  relaunch/marker path; and a mandatory **live claude→claude end-to-end validation on one real desk**
+  (cold-test the artifact) before the capability is used in anger — mirroring surface-self-heal's
+  live-validation gate.
