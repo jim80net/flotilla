@@ -135,9 +135,10 @@ func (claudeCode) HandoffTurn(designatedPath string) string {
 		"1. Write a complete handoff (follow the /handoff document FORMAT — objective, completed " +
 		"work, current state, remaining work, gotchas — enough for a fresh session to resume cold) " +
 		"to this EXACT path: " + designatedPath + "\n" +
-		"2. Commit it to the CURRENT branch: `git add -f " + designatedPath + " && git commit -m " +
-		"\"chore(recycle): handoff before recycle\"` (the -f is required — .claude/handoffs/ may be " +
-		"gitignored).\n" +
+		"2. Commit ONLY the handoff to the CURRENT branch (path-scoped, so a dirty index is not " +
+		"swept in): `git add -f " + designatedPath + " && git commit -m " +
+		"\"chore(recycle): handoff before recycle\" -- " + designatedPath + "` (the -f is required — " +
+		".claude/handoffs/ may be gitignored).\n" +
 		"3. Do NOT run the interactive /handoff skill, do NOT ask me to confirm or review, do NOT ask " +
 		"\"is anything missing\" — just write, commit, and stop. flotilla will close and relaunch this " +
 		"desk once the commit lands."

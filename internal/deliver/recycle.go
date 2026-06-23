@@ -77,9 +77,14 @@ func HandoffDurable(cwd, designatedPath string, minBytes int) (bool, error) {
 	// ls-tree line: "<mode> <type> <oid>\t<path>". The oid is the third space-separated field
 	// of the part before the tab. cat-file -s <oid> gives the blob's byte size.
 	meta, _, _ := strings.Cut(line, "\t")
-	fields := strings.Fields(meta)
+	fields := strings.Fields(meta) // "<mode> <type> <oid>"
 	if len(fields) < 3 {
 		return false, fmt.Errorf("unexpected git ls-tree output %q", line)
+	}
+	if fields[1] != "blob" {
+		// The designated handoff path resolved to a non-blob (a tree / submodule commit) — not a
+		// handoff file. Treat as not-durable (fail-closed) rather than sizing the wrong object.
+		return false, nil
 	}
 	size, err := blobSize(root, fields[2])
 	if err != nil {

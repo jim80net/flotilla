@@ -422,6 +422,14 @@ Requirements: the desk's working directory is a **git tree** and its surface is
 copy-mode / self-targeted (recycling the XO's own pane) desk is **refused
 cleanly**, never silently degraded.
 
+> **The launch recipe must be a COLD start.** Recycle relaunches via the desk's
+> launch recipe verbatim, so a recipe that resumes the prior session (e.g.
+> `claude --continue` / `--resume`) would relaunch into the OLD bloated context —
+> silently negating the "fresh context window" the whole feature exists for (the
+> handoff is still written and injected, but into a non-fresh session). Recycle
+> cannot detect this, so eyeball the `relaunch:` line in `--dry-run` first and
+> ensure the recipe is a cold launch (no `--continue`/`--resume`).
+
 ### Recovery from an abort (state-aware)
 
 - **Handoff never confirmed** → the desk is still running with its context — no

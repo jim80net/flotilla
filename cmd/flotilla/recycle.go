@@ -188,7 +188,7 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, error) {
 		return "", fmt.Errorf("phase 3: reading the marker back for %q failed: %w", p.agent, err)
 	}
 	if got != p.key {
-		return "", fmt.Errorf("phase 3: relaunched %q at %s but its @flotilla_agent marker reads %q (expected %q) — the fresh session is LIVE but contextless; hand it the chapter with: flotilla send %s 'read %s and take over per it, begin immediately'", p.agent, target, got, p.key, p.agent, p.designatedPath)
+		return "", fmt.Errorf("phase 3: relaunched %q at %s but its @flotilla_agent marker reads %q (expected %q) — the fresh session is LIVE but contextless; re-tag it (flotilla register %s --pane %s) then re-run recycle, or hand it the chapter directly with: flotilla send %s 'read %s and take over per it, begin immediately; you are remote-driven — parlay via a flotilla message, never an in-pane prompt'", p.agent, target, got, p.key, p.agent, target, p.agent, p.designatedPath)
 	}
 	if err := ops.stampGen(target, p.token); err != nil {
 		return "", fmt.Errorf("phase 3: stamping the recycle generation for %q failed: %w", p.agent, err)
@@ -349,6 +349,12 @@ func cmdRecycle(args []string) error {
 	recipe, err := workspace.ResolveRecipe(agentName, flat)
 	if err != nil {
 		return err
+	}
+	// Resolve cwd to its realpath so the durability check's git-root comparison
+	// (filepath.Rel of `git rev-parse --show-toplevel`, itself a realpath, vs the designated
+	// path) cannot break under a symlinked checkout (the designated path is joined onto cwd).
+	if real, rerr := filepath.EvalSymlinks(recipe.Cwd); rerr == nil {
+		recipe.Cwd = real
 	}
 
 	drv, ok := surface.Get(agentSurface(cfg, agentName))

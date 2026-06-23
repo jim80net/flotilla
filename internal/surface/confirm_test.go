@@ -579,3 +579,40 @@ func TestSelfHealShellAborts(t *testing.T) {
 		t.Errorf("Ctrl-C sent = %d, want 0 (Shell → abort)", ctrlc)
 	}
 }
+
+// --- Confirm.Heal: heal-only (NEVER submits) — the recycle Phase-2 close-guard entry point ---
+
+func TestHealDisabledIsNoOp(t *testing.T) {
+	// SendCtrlC nil (the default-off kill-switch) → Heal is a no-op: zero Ctrl-C, zero Submit.
+	enter, ctrlc := 0, 0
+	c := newConfirm(&enter) // SendCtrlC stays nil
+	d := &healStub{overlay: ComposerSubAgent, recoverAt: 99, ctrlc: &ctrlc}
+	c.Heal(d, "0:0.0")
+	if ctrlc != 0 || d.submits != 0 {
+		t.Errorf("Heal (disabled): ctrlc=%d submits=%d, want 0/0", ctrlc, d.submits)
+	}
+}
+
+func TestHealRecoversOverlayWithoutSubmitting(t *testing.T) {
+	// Idle pane on an overlay + self-heal wired: Heal presses Ctrl-C until recovered and NEVER
+	// calls Submit (the invariant that makes it safe for the close guard — no body is delivered).
+	enter, ctrlc := 0, 0
+	d := &healStub{overlay: ComposerSubAgent, recoverAt: 1, ctrlc: &ctrlc}
+	healConfirm(&enter, &ctrlc).Heal(d, "0:0.0")
+	if ctrlc != 1 {
+		t.Errorf("Heal: ctrlc=%d, want 1 (recovered after one press)", ctrlc)
+	}
+	if d.submits != 0 {
+		t.Errorf("Heal must NEVER Submit (got %d submits)", d.submits)
+	}
+}
+
+func TestHealSkipsWhenNotIdle(t *testing.T) {
+	// A Working pane is not idle → Heal must not press Ctrl-C (never interrupt a running turn) or submit.
+	enter, ctrlc := 0, 0
+	d := &healStub{assessSeq: []State{StateWorking}, overlay: ComposerSubAgent, recoverAt: 1, ctrlc: &ctrlc}
+	healConfirm(&enter, &ctrlc).Heal(d, "0:0.0")
+	if ctrlc != 0 || d.submits != 0 {
+		t.Errorf("Heal (not idle): ctrlc=%d submits=%d, want 0/0", ctrlc, d.submits)
+	}
+}
