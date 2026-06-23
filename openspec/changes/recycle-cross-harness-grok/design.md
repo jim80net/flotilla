@@ -252,3 +252,70 @@ fabrication audit PASSED — no invented grok markers, live-capture explicitly g
   `confirm-cursor-disposition` spec-ordering dependency are now named.
 - **G2 (OCR) — AwaitingApproval needs the aider-escalation pattern + wedge-timer note.** Folded into §7.
 - **G3/G4 (OCR, Low) — test pattern + path-divergence** confirmed consistent; folded into §7 scope.
+
+## 10. Live characterization results (throwaway grok session, 2026-06-23 — EMPIRICAL, not memory)
+
+Captured against a throwaway `grok -m grok-composer-2.5-fast` session in an isolated tmux session
+(`grokchar`), driven through each state, read-only `tmux capture-pane`. These are the ground-truth
+renders the grok `ComposerStateProbe` / `AwaitingApproval` classifiers are built from (per
+never-fabricate-empirical-values — NO marker here is recalled).
+
+### 10.1 Composer is a BOX; the cursor tracks it
+
+grok's composer is a box drawn with `╭─╮ │ ╰─╯` (light box chars), labelled `… Composer 2.5 Fast ─╯`
+on the bottom border. The input line is `  │ ❯ <body>                    │` — the `❯` (U+276F) prompt
+is preceded by a `│` (U+2502) LEFT border and the body is followed by spaces + a `│` RIGHT border.
+The terminal cursor SITS on this line (idle: x=6,y=72 right after `│ ❯ `; pending: x moved right with
+the body) — so a cursor-indexed probe (like claude's) is viable, but it MUST strip the `│` border
+before the `❯` (claude's `CutPrefix("❯")` alone would fail on grok's `│ ❯`).
+
+| State | cursor line (at cursorY) | bottom status line |
+|---|---|---|
+| **Cleared** (idle) | `│ ❯` + only spaces + `│` | `[stable]` OR `Shift+Tab:mode │ Ctrl+.:shortcuts` |
+| **Pending** | `│ ❯ <body>` + `│` | `Enter:send │ Shift+Tab:mode │ Ctrl+.:shortcuts` |
+| **Working** | `│ ❯` empty + `│` (box PERSISTS, cursor stays on it) | spinner `⠙ Waiting…` / `⇣<n>k` |
+| **Approval modal** | cursor is OFF the composer, on the `◆ Run … ⇣<n>k` line (NO `❯`) | `1/4:select │ Ctrl+o:yolo │ Ctrl+c:cancel` |
+
+### 10.2 grok `ComposerState` classifier (derived, verified across all 5 captures)
+
+Read the line at cursorY; strip leading whitespace; strip a leading `│` border + whitespace; then:
+`CutPrefix("❯")` — if absent → **Undetermined** (covers the approval modal, where the cursor is on
+the `◆ Run` line, and multi-line-pending continuation lines, which have no `❯`); else strip the
+trailing `│` + whitespace and the leading whitespace of the remainder → empty ⇒ **Cleared**,
+non-empty ⇒ **Pending**. grok has no docked-agents sub-composer / queued / list-nav states, so
+`ComposerQueued/SubAgent/ListNav` do not apply.
+
+**Gate-safety property holds (the load-bearing §2a requirement, now empirically confirmed):** on the
+approval modal the cursor is on `◆ Run …` (no `❯`) ⇒ `Undetermined` ⇒ NON-`Cleared` ⇒ the recycle
+`idleCleared` AND-gate fails closed; `/exit` is never fired into a modal. During **Working** the box
+persists so `ComposerState` reads `Cleared`, but `Assess==Working` (spinner) fails the AND — safe,
+exactly as claude behaves.
+
+### 10.3 grok `AwaitingApproval` (liveness; fixes the live #58/#158 mis-read)
+
+The approval modal renders a `┃` (U+2503 HEAVY bar) block — `┃ Allow <Verb> \`<path>\`?` + numbered
+options `1 (●)…4 (○)` — and the status line `N/M:select │ Ctrl+o:yolo │ Ctrl+c:cancel`. The `⇣<n>k`
+arrow is CO-PRESENT on the `◆ Run` line, which is why `parseGrokState` currently returns Working.
+Fix: in `parseGrokState`, check for the approval modal FIRST (anchor: the `N/M:select` status token
+AND/OR the `┃`+`Allow …?` block) → return `StateAwaitingApproval`, BEFORE the `⇣`/spinner Working
+check. (Conservative anchors only — the `select` status token is grok chrome, not prose.)
+
+### 10.4 P1 multi-line paste — RESOLVED (grok supports bracketed-paste multi-line)
+
+A 3-line body bracketed-pasted (`tmux load-buffer` + `paste-buffer -p`, the same bracketed-paste
+`deliver.Send` uses) landed as ONE composer body across 3 box lines with NO early submit. So grok's
+`Submit` delivers a multi-line handoff/takeover turn intact — **`SendCtrlJ` is NOT needed**; the
+existing `g.send = deliver.Send` is correct for the bridge turns. (The driver's `grok.go:73-77`
+"multi-line unconfirmed" caveat is now CONFIRMED safe for bracketed-paste; update that comment.)
+
+### 10.5 Identity file — `AGENTS.md` ASSUMPTION is WRONG (finding, not bundled)
+
+grok did NOT create or auto-load an `AGENTS.md` (nor a `MEMORY.md`) in the workspace at launch.
+grok's instruction model (from `grok --help` + binary strings) is `MEMORY.md` (workspace + global
+`~/.grok/memory/MEMORY.md`, opt-in via the `memory` subcommand / `--experimental-memory`), plus
+`--rules <RULES>` and `--system-prompt-override`. So `workspace.go:54-65`'s ASSUMED `AGENTS.md`-for-
+grok mapping is almost certainly INCORRECT — grok uses `MEMORY.md`/`--rules`, not `AGENTS.md`. This
+does NOT affect the recycle MECHANISM (the handoff carries chapter context, not the identity file),
+so it is OUT OF #158's recycle-driver scope — recorded as a follow-up (correct `workspace.go`'s grok
+identity mapping; relevant to where the family-office migration writes its persistent XO doctrine on
+grok). File as a separate issue; flag in the migration runbook (§6 step 1 capability-parity check).
