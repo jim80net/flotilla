@@ -42,13 +42,17 @@ if [[ ! -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
-# Load ONLY the known keys (so a stray line can never inject shell). Pre-clear them
-# so an inherited environment can't leak in. This is LOAD-BEARING for the OPTIONAL
-# keys: the flotilla binary itself reads $FLOTILLA_DASH_REPO and $FLOTILLA_SECRETS as
-# fallback defaults (see cmd/flotilla/dash.go), so the live host may EXPORT them —
-# without this pre-clear an inherited value would inject `--repo`/`--secrets` even when
-# the .env omits the optional key, silently breaking the byte-identical-when-unset
-# guarantee. The values must come from the .env ONLY.
+# Load ONLY the known keys (so a stray line can never inject shell). Pre-clear them so
+# an inherited shell environment can't leak into THIS GENERATE step. The repo case is
+# load-bearing: the installer's key (FLOTILLA_DASH_REPO) is the SAME name the binary
+# reads as a fallback (cmd/flotilla/dash.go), so the live host may export it — without
+# the pre-clear an inherited value would inject `--repo` even when the .env omits it.
+# The secrets case differs by name: the installer's key is FLOTILLA_DASH_SECRETS but the
+# binary's fallback is FLOTILLA_SECRETS — the installer never reads FLOTILLA_SECRETS, so
+# at generate time `--secrets` is driven by the .env key ONLY (the pre-clear of
+# FLOTILLA_DASH_SECRETS guards the symmetric case). The RUNTIME path (the binary
+# inheriting an ambient FLOTILLA_SECRETS/FLOTILLA_DASH_REPO when the flag is absent) is
+# closed separately by the unit's UnsetEnvironment= (see flotilla-dash.service.in).
 FLOTILLA_DASH_WORKDIR='' FLOTILLA_DASH_BIN='' FLOTILLA_DASH_ROSTER='' FLOTILLA_DASH_BIND='' FLOTILLA_DASH_REPO='' FLOTILLA_DASH_SECRETS=''
 while IFS= read -r line || [[ -n "$line" ]]; do
   line="${line%$'\r'}"
@@ -188,4 +192,12 @@ else
   echo "Next steps (operator/XO runs these — the installer does not auto-start):"
   echo "  systemctl --user enable --now flotilla-dash.service   # start now + on boot"
   echo "  journalctl --user -u flotilla-dash -f                 # follow logs"
+fi
+# WantedBy=default.target only auto-starts at boot when user lingering is enabled
+# (otherwise a --user manager runs only during a login session). Surface it as a
+# first-class durability prerequisite, not just a daemon-reload-failure footnote.
+if command -v loginctl >/dev/null 2>&1 && [[ "$(loginctl show-user "$USER" -p Linger --value 2>/dev/null)" != "yes" ]]; then
+  echo ""
+  echo "note: user lingering is OFF — the dash will NOT auto-start after a reboot until you run:"
+  echo "  loginctl enable-linger \"$USER\""
 fi

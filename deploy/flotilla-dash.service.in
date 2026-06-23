@@ -26,6 +26,16 @@ Environment=HOME=%h
 # PATH must include gh's dir (the tracker shells out to `gh`); the standard system
 # dirs cover the usual /usr/bin install, and %h/go/bin is appended for a go-installed gh.
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:%h/go/bin
+# The dash binary reads $FLOTILLA_SECRETS and $FLOTILLA_DASH_REPO as fallback defaults
+# when the corresponding flag is absent (cmd/flotilla/dash.go). Strip them from this
+# service's environment so the dash's config is EXACTLY what this unit declares — an
+# ambient export (e.g. one imported into the --user manager for interactive use) can
+# never silently enable the operator-note webhook or retarget the tracker at runtime
+# when the .env omitted it. This makes the "config comes from the .env ONLY" invariant
+# true at RUNTIME, not just at generate time (the installer's pre-clear handles the
+# generate-time path). When the .env DID set them, the explicit --secrets/--repo flags
+# below win regardless, so this is safe in every case.
+UnsetEnvironment=FLOTILLA_SECRETS FLOTILLA_DASH_REPO
 # The two trailing fragments after --bind are COMPUTED by the installer: each becomes
 # " --repo <owner/name>" / " --secrets <path>" (leading space included) when the
 # OPTIONAL key is set, or "" when unset — so an omitted option leaves this line

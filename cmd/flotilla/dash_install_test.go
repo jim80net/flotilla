@@ -28,7 +28,7 @@ var dashPlaceholderRe = regexp.MustCompile(`@FLOTILLA_[A-Z_]+@`)
 // (excludes comments, Description, Documentation) so the test asserts FUNCTIONAL
 // equivalence, not prose. Environment= IS included (the dash needs HOME + a gh-bearing
 // PATH); capturing the headers locks placement too.
-var dashFuncLineRe = regexp.MustCompile(`(?m)^(\[(?:Unit|Service|Install)\]|(?:Type|WorkingDirectory|Environment|ExecStart|RestartSec|Restart|StartLimitIntervalSec|StartLimitBurst|KillSignal|TimeoutStopSec|After|Wants|WantedBy)=.*)$`)
+var dashFuncLineRe = regexp.MustCompile(`(?m)^(\[(?:Unit|Service|Install)\]|(?:Type|WorkingDirectory|Environment|UnsetEnvironment|ExecStart|RestartSec|Restart|StartLimitIntervalSec|StartLimitBurst|KillSignal|TimeoutStopSec|After|Wants|WantedBy)=.*)$`)
 
 func renderDashUnit(t *testing.T, envPath string, extraEnv ...string) string {
 	t.Helper()
@@ -67,6 +67,7 @@ func TestDashInstallerGeneratesExpectedFunctionalUnit(t *testing.T) {
 		"WorkingDirectory=/srv/fleet",
 		"Environment=HOME=%h",
 		"Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:%h/go/bin",
+		"UnsetEnvironment=FLOTILLA_SECRETS FLOTILLA_DASH_REPO",
 		"ExecStart=%h/go/bin/flotilla dash --roster /srv/fleet/flotilla.json --bind 127.0.0.1:8787 --repo owner/name --secrets /srv/fleet/secrets.env",
 		"Restart=on-failure",
 		"RestartSec=5",
@@ -136,19 +137,33 @@ func TestDashInstallerOptionalArgsUnsetOmitted(t *testing.T) {
 	}
 }
 
-// THE EXPORTED-ENV NO-LEAK GUARD: the flotilla binary reads $FLOTILLA_DASH_REPO /
-// $FLOTILLA_SECRETS as fallbacks, so the live host may EXPORT them. The installer must
-// take the value from the .env ONLY — an inherited export must NOT inject --repo when
-// the .env omits it (the watch-backlog lesson).
-func TestDashInstallerInheritedEnvNoLeak(t *testing.T) {
+// GENERATE-TIME no-leak: FLOTILLA_DASH_REPO is the one key whose name the binary also
+// reads as a fallback, so the live host may EXPORT it; the installer pre-clears it and
+// takes the value from the .env ONLY, so an inherited export must NOT inject --repo
+// when the .env omits it (the watch-backlog lesson). (FLOTILLA_SECRETS is NOT a
+// generate-time vector — the installer never reads that name; its runtime path is
+// covered by TestDashInstallerUnsetEnvironmentClosesRuntimeLeak below.)
+func TestDashInstallerInheritedRepoNoLeak(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "minimal.env")
 	body := "FLOTILLA_DASH_WORKDIR=%h\nFLOTILLA_DASH_BIN=%h/go/bin/flotilla\nFLOTILLA_DASH_ROSTER=/srv/fleet/flotilla.json\nFLOTILLA_DASH_BIND=127.0.0.1:8787\n"
 	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gotExec := dashExecLine(t, renderDashUnit(t, p, "FLOTILLA_DASH_REPO=attacker/leak", "FLOTILLA_SECRETS=/leak/secrets.env"))
-	if strings.Contains(gotExec, "attacker/leak") || strings.Contains(gotExec, "--repo") || strings.Contains(gotExec, "--secrets") {
-		t.Errorf("inherited exported env LEAKED into ExecStart (must come from .env only):\n%s", gotExec)
+	gotExec := dashExecLine(t, renderDashUnit(t, p, "FLOTILLA_DASH_REPO=attacker/leak"))
+	if strings.Contains(gotExec, "attacker/leak") || strings.Contains(gotExec, "--repo") {
+		t.Errorf("inherited exported FLOTILLA_DASH_REPO LEAKED into ExecStart (must come from .env only):\n%s", gotExec)
+	}
+}
+
+// RUNTIME no-leak: the binary reads $FLOTILLA_SECRETS / $FLOTILLA_DASH_REPO as fallbacks
+// when the flag is absent, so an ambient value in the --user manager env could silently
+// enable notify / retarget the tracker at runtime even when the .env omitted it. The
+// unit's UnsetEnvironment= strips both from the service environment, so the dash's
+// config is EXACTLY what the unit declares. Lock that directive's presence.
+func TestDashInstallerUnsetEnvironmentClosesRuntimeLeak(t *testing.T) {
+	unit := renderDashUnit(t, dashFixtureEnv)
+	if !strings.Contains(unit, "UnsetEnvironment=FLOTILLA_SECRETS FLOTILLA_DASH_REPO") {
+		t.Errorf("unit must UnsetEnvironment the binary's env fallbacks (runtime no-leak):\n%s", unit)
 	}
 }
 
