@@ -177,7 +177,7 @@ Load-bearing invariants (assert these, every path):
   ABORT on every real desk. FIXED (verified live): set `remain-on-exit on` → `/exit` leaves a DEAD pane
   (`pane_dead=1`, marker survives) → confirm via `pane_dead` OR Shell → `RespawnPane -k` revives it
   (marker survived) → restore `remain-on-exit off`. Landed in the close-confirm fast-follow.
-- [ ] 6.3 **LIVE claude→claude end-to-end validation on ONE real desk** (the acceptance gate), a DRILL
+- [x] 6.3 (PASSED 2026-06-23, throwaway claude e2e) **LIVE claude→claude end-to-end validation on ONE real desk** (the acceptance gate), a DRILL
   MATRIX, not happy-path only: (1) the clean recycle — designated handoff written + committed (absent→
   committed), graceful `/exit` reaching `knownShells` (the 1.0 characterization), relaunched fresh, took
   over and BEGAN WORKING, marker/relay intact; (2) handoff-uncooperative → ABORT leaves the desk running;
@@ -187,5 +187,9 @@ Load-bearing invariants (assert these, every path):
   `recycle` on the command's own desk → refused, not a killed pipeline). Cold-test the live artifact +
   the turns against a real agent. Measure the gate latencies to tune the internal `timeouts` defaults +
   set `minHandoffBytes` UP from the ≈200-byte interim floor using a real handoff size.
-- [ ] 6.4 `/systems-review` + STORM on the design (this revision) and again on the impl diff — iterate
-  until clean. PR → hydra-ops (no-self-merge). #158 (claude→grok) is gated on 6.3 passing.
+- [x] 6.4 `/systems-review` + STORM on the design (3 iters → re-passed) and on the impl diff (PASS); cubic
+  PASS; merged via PR #164 + the close-confirm fast-follow PR #165. #158 (claude→grok) is gated on 6.3
+  (now PASSED). 6.3 e2e result: handoff written + committed (3563 bytes, absent→committed), graceful
+  close via remain-on-exit+pane_dead, relaunched fresh (marker survived), took over and began working;
+  the abort drill confirmed Phase-0 abort leaves the desk running. Default timeouts + the 200-byte floor
+  validated adequate (no tuning needed).
