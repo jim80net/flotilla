@@ -114,10 +114,13 @@ The relaunch reuses a kill-respawn primitive that kills whatever is in the pane,
 treat confirming the close worked as correctness-critical, not defensive. Before issuing the close, a
 recycle SHALL require the
 composer to be cleared (not on a focus-stealing overlay), healing the overlay where self-heal is
-available or ABORTING rather than firing the exit keystroke into an overlay. After issuing the close, a
-recycle SHALL confirm the pane has become a shell (the process exited) before relaunching, RETRYING on a
-transient uncertain (capture-glitch) reading rather than aborting early on it. If the close does not
-confirm a shell within the close timeout, the recycle SHALL ABORT the relaunch — it SHALL NOT relaunch
+available or ABORTING rather than firing the exit keystroke into an overlay. Because a harness may run as
+the pane's DIRECT process (so a graceful exit CLOSES the pane rather than dropping to a shell), the
+recycle SHALL set the pane's `remain-on-exit` ON before the close (so the exit leaves a DEAD-but-present
+pane the relaunch can revive) and SHALL restore it OFF on every exit path including abort. After issuing
+the close, a recycle SHALL confirm the old process has exited — by the pane being DEAD OR a shell verdict
+— before relaunching, RETRYING on a transient uncertain (capture-glitch) reading rather than aborting
+early on it. If the close does not confirm the process exited within the close timeout, the recycle SHALL ABORT the relaunch — it SHALL NOT relaunch
 on top of a possibly-live session — and the abort copy SHALL be STATE-AWARE: a desk that may still be
 live names investigation and `flotilla resume <desk> --force` (since `resume` refuses a non-shell pane
 without `--force`); a confirmed-dead desk names `flotilla resume <desk>`. When a surface reports no

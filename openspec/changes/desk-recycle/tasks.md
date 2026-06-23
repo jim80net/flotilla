@@ -170,6 +170,13 @@ Load-bearing invariants (assert these, every path):
   clear it or `FLOTILLA_SELF_HEAL=1` and re-run), `--dry-run` as the recommended first step, and the
   remote-parlay-via-message protocol.
 - [x] 6.2 `openspec validate desk-recycle --strict`.
+- [~] 6.3a (DONE 2026-06-23) `/exit` keystroke + fleet pane characterization: `/exit` is
+  SINGLE-KEYSTROKE-TERMINAL (no confirm sub-prompt). FOUND: the live fleet runs claude as the pane's
+  DIRECT process (parent = tmux server, no shell behind it) with `remain-on-exit` OFF, so `/exit` CLOSES
+  the pane — it never becomes a `knownShells` shell. The first draft's close→`Assess==Shell` gate would
+  ABORT on every real desk. FIXED (verified live): set `remain-on-exit on` → `/exit` leaves a DEAD pane
+  (`pane_dead=1`, marker survives) → confirm via `pane_dead` OR Shell → `RespawnPane -k` revives it
+  (marker survived) → restore `remain-on-exit off`. Landed in the close-confirm fast-follow.
 - [ ] 6.3 **LIVE claude→claude end-to-end validation on ONE real desk** (the acceptance gate), a DRILL
   MATRIX, not happy-path only: (1) the clean recycle — designated handoff written + committed (absent→
   committed), graceful `/exit` reaching `knownShells` (the 1.0 characterization), relaunched fresh, took
