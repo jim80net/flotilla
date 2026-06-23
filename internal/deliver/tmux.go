@@ -107,6 +107,15 @@ func InjectSlash(target, cmd string) error {
 // generalized out of it.
 func ClearContext(target string) error { return InjectSlash(target, "/clear") }
 
+// ExitSession injects Claude Code's `/exit` (the surface's graceful in-session close)
+// as literal slash-keys + Enter, ending the agent process so the pane drops to a shell.
+// It is a thin wrapper over InjectSlash (same idle-only contract as ClearContext). The
+// exact post-`/exit` behaviour (does it drop to a knownShells shell? is `/exit`
+// single-keystroke-terminal or does it open a confirm sub-prompt?) is verified in the
+// recycle live-validation (desk-recycle 6.3) BEFORE this is trusted as the claude close;
+// the recycle close→Shell gate is the structural net if it is wrong.
+func ExitSession(target string) error { return InjectSlash(target, "/exit") }
+
 // ResolvePane returns the tmux target (session:window.pane) of the pane for the
 // agent resolution key `want`. It resolves by a stable `@flotilla_agent` marker
 // first (immune to title drift) and falls back to the pane title; it errors if

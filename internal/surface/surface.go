@@ -70,6 +70,18 @@ type Driver interface {
 	Rotate(pane string) error
 	// RotateStrategy declares how this surface rotates context.
 	RotateStrategy() Strategy
+	// Close gracefully exits the agent's session in the pane (the per-surface clean
+	// exit, e.g. claude "/exit"), flushing the harness's own session store and dropping
+	// the pane to a Shell. It injects the surface's documented exit via the literal
+	// slash-keys mechanism (NOT bracketed-paste Submit — a slash pasted as a bracketed
+	// block may not trigger the harness's command parser). A surface with NO clean
+	// in-session exit (or whose exit keystroke is not yet live-verified, e.g. grok)
+	// returns ErrNoGracefulClose so the caller may fall back to a hard respawn-kill —
+	// safe ONLY when the caller has already preserved the session's context. Close MUST
+	// NOT blind-kill; the kill fallback is the caller's explicit decision. Per
+	// InjectSlash's contract, the CALLER ensures the pane is idle at the main composer
+	// before Close (recycle Phase 2 gates ComposerCleared first); Close only injects.
+	Close(pane string) error
 }
 
 // ResultReader is an OPTIONAL Driver capability: return the full text of the desk's latest
@@ -155,6 +167,14 @@ func Get(name string) (Driver, bool) {
 // ErrRestartRequired signals that a surface's context cannot be rotated in-session
 // and the caller must restart the agent's session instead.
 var ErrRestartRequired = errors.New("surface requires a process restart to rotate context")
+
+// ErrNoGracefulClose signals that a surface has no clean in-session exit (or whose
+// exit keystroke is not yet live-verified), so Close cannot gracefully end its
+// session. The caller may fall back to a hard respawn-kill — safe ONLY when it has
+// already preserved the session's context (e.g. recycle has made the handoff durable).
+// Mirrors ErrRestartRequired: a distinguished sentinel, never a guess. A driver that
+// returns this MUST NOT have injected any keystroke.
+var ErrNoGracefulClose = errors.New("surface has no graceful in-session close (use a handoff-gated kill fallback)")
 
 // RotateContext rotates a surface's context SAFELY. For a SlashCommand surface it
 // injects the surface's reset; for a RestartProcess surface it injects NOTHING and

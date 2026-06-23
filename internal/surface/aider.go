@@ -74,6 +74,11 @@ func (a aider) Rotate(pane string) error { return a.inject(pane, "/clear") }
 
 func (aider) RotateStrategy() Strategy { return SlashCommand }
 
+// Close gracefully exits aider by injecting "/exit" (aider's documented quit) as literal
+// slash-keys. The exact keystroke is verified when aider is exercised by recycle; until
+// then the recycle close→Shell gate is the structural net.
+func (a aider) Close(pane string) error { return a.inject(pane, "/exit") }
+
 // --- pure state classifier (the testable core, the aider analogue of deliver.ParseBusy) ---
 
 // aiderTail bounds every marker scan to the live bottom region of the pane, like

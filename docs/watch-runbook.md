@@ -367,3 +367,80 @@ XO is not auto-woken to resume coordination (a restart implies fresh context and
 the operator is in the loop) — re-engage it with an operator message, which
 clears any settled state and lands in its pane; the next material change or
 safety ping then resumes the normal cadence.
+
+## Recycle a desk's chapter — `flotilla recycle` (#157)
+
+`flotilla recycle <desk>` closes a desk's chapter and restarts it with a **fresh
+context window**, preserving the chapter via the desk's **own handoff** — so a
+desk never has to run until it compacts (post-compaction quality degrades). The
+**mechanism** is flotilla's; the **trigger** is the XO's judgment (it decides
+WHEN a chapter is logically complete). It is the context-preserving sibling of
+`resume`: `resume` (re)starts a *dead* desk and restores no context; `recycle`
+gracefully closes a *live* desk after its handoff is durable, then relaunches and
+hands the fresh session the handoff.
+
+### How to run it
+
+The XO runs `flotilla recycle <desk>` **in a pane it controls** (e.g. its own
+shell) and reads the phase-by-phase result on that command's stdout — status
+never goes into the recycled desk's composer. **Run `--dry-run` first** to
+preview the resolved plan (pane, recipe, the designated handoff path, the exact
+handoff/takeover turns it would inject) without acting:
+
+```bash
+flotilla recycle v12-dev --dry-run     # preview, no action, no lock
+flotilla recycle v12-dev               # execute the fail-closed pipeline
+```
+
+The outcome is also written to `~/.flotilla/<desk>/last-recycle.json` (atomic
+write), so it survives the process / a relay outage and a cold-pickup XO can read
+it. The whole pipeline can take up to ~7.5 minutes worst-case (a handoff turn is
+multi-minute; the close/boot/takeover edges are seconds) — beyond that, suspect
+the command itself is wedged.
+
+### The fail-closed pipeline (and its guarantee)
+
+1. **Idle precondition** — waits for the desk to be idle at a cleared composer
+   (the XO often triggers mid-turn); never injects into a busy pane.
+2. **Handoff** — injects a NON-INTERACTIVE turn telling the desk to write a
+   handoff (per the `/handoff` FORMAT, not the interactive skill) to a designated
+   path and `git add -f && commit` it, then stop. Gates on that blob going
+   **absent→committed** at HEAD AND non-trivial AND the turn returning to an idle
+   cleared composer. **If the handoff is not durably confirmed, recycle ABORTS —
+   the desk keeps running, nothing is closed** (the worst case is a no-op
+   recycle, never a lost handoff: *at-most-once handoff-artifact-loss*).
+3. **Graceful close** — only after the handoff is durable. Confirms the pane
+   becomes a shell before relaunching (the relaunch is an unconditional `-k`, so
+   this confirmation is what prevents killing a still-live session).
+4. **Relaunch** — reuses the pane id, so the `@flotilla_agent` marker survives and
+   the control channel re-binds for free; reuses the hardened `resume` path.
+5. **Takeover** — points the fresh session at the handoff with an imperative
+   begin-immediately turn, then watches for it to start working.
+
+Requirements: the desk's working directory is a **git tree** and its surface is
+**recycle-capable** (today: Claude Code). A non-git / non-recycle-capable /
+copy-mode / self-targeted (recycling the XO's own pane) desk is **refused
+cleanly**, never silently degraded.
+
+### Recovery from an abort (state-aware)
+
+- **Handoff never confirmed** → the desk is still running with its context — no
+  recovery needed; investigate why the desk didn't write/commit and re-run.
+- **Close did not confirm a shell** → the desk MAY still be live; investigate, and
+  if confirmed dead recover with `flotilla resume <desk> --force` (`resume`
+  refuses a non-shell pane without `--force`).
+- **Relaunched but the marker mismatched** → the fresh session is LIVE but
+  contextless; hand it the chapter with
+  `flotilla send <desk> 'read <handoff-path> and take over per it, begin immediately'`.
+- **A wedged composer / overlay blocked the close** → context is preserved and the
+  desk is still running; clear the overlay (or set `FLOTILLA_SELF_HEAL=1`) and
+  re-run.
+
+### Remote-desk coordination — parlay via message, never an in-pane menu
+
+A recycled desk is **remote-driven**: the injected takeover turn tells it to
+surface any clarification via a **flotilla message** (`flotilla notify` / a
+channel message), NEVER an in-pane interactive prompt (`AskUserQuestion` / a
+menu). A remote XO over the relay cannot answer an in-pane menu — keystrokes
+navigate it, they do not select. This is a flotilla coordination invariant, not a
+per-desk preference.

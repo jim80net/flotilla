@@ -21,6 +21,7 @@ func (s *confirmStub) Name() string                { return "stub" }
 func (s *confirmStub) Submit(string, string) error { s.submitCalls++; return s.submitErr }
 func (s *confirmStub) Rotate(string) error         { return nil }
 func (s *confirmStub) RotateStrategy() Strategy    { return SlashCommand }
+func (s *confirmStub) Close(string) error          { return nil }
 func (s *confirmStub) Assess(string) State {
 	if s.idx >= len(s.assessSeq) {
 		return s.assessSeq[len(s.assessSeq)-1] // repeat the last scripted state
@@ -142,6 +143,7 @@ func (s *stateStub) Name() string                { return "state-stub" }
 func (s *stateStub) Submit(string, string) error { s.submitCalls++; return nil }
 func (s *stateStub) Rotate(string) error         { return nil }
 func (s *stateStub) RotateStrategy() Strategy    { return SlashCommand }
+func (s *stateStub) Close(string) error          { return nil }
 func (s *stateStub) Assess(string) State {
 	if s.aIdx >= len(s.assessSeq) {
 		return s.assessSeq[len(s.assessSeq)-1]
@@ -430,6 +432,7 @@ func (s *healStub) Name() string                { return "heal-stub" }
 func (s *healStub) Submit(string, string) error { s.submits++; return nil }
 func (s *healStub) Rotate(string) error         { return nil }
 func (s *healStub) RotateStrategy() Strategy    { return SlashCommand }
+func (s *healStub) Close(string) error          { return nil }
 func (s *healStub) Assess(string) State {
 	if len(s.assessSeq) == 0 {
 		return StateIdle
