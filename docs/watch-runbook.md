@@ -409,9 +409,13 @@ the command itself is wedged.
    cleared composer. **If the handoff is not durably confirmed, recycle ABORTS —
    the desk keeps running, nothing is closed** (the worst case is a no-op
    recycle, never a lost handoff: *at-most-once handoff-artifact-loss*).
-3. **Graceful close** — only after the handoff is durable. Confirms the pane
-   becomes a shell before relaunching (the relaunch is an unconditional `-k`, so
-   this confirmation is what prevents killing a still-live session).
+3. **Graceful close** — only after the handoff is durable. A desk launched as its
+   pane's direct process (the live fleet's `claude --remote-control`) would *close*
+   the pane on `/exit` rather than drop to a shell, so recycle sets the pane's
+   `remain-on-exit` on first (the exit then leaves a *dead* pane to revive) and
+   confirms the close by the pane being **dead** (or a shell verdict) before
+   relaunching — the relaunch is an unconditional `-k`, so this confirmation is
+   what prevents killing a still-live session. `remain-on-exit` is restored after.
 4. **Relaunch** — reuses the pane id, so the `@flotilla_agent` marker survives and
    the control channel re-binds for free; reuses the hardened `resume` path.
 5. **Takeover** — points the fresh session at the handoff with an imperative

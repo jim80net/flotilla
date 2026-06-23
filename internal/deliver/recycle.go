@@ -160,6 +160,40 @@ func ReadRecycleGen(target string) (string, error) {
 	return strings.TrimRight(string(out), "\n"), nil
 }
 
+// SetRemainOnExit sets a pane's `remain-on-exit` option. recycle sets it ON before the
+// graceful close so that when the agent's process exits (claude `/exit`) the pane stays as a
+// DEAD pane (#{pane_dead}=1) instead of CLOSING — the live fleet runs claude as the pane's
+// DIRECT process (no shell behind it) with the server's remain-on-exit OFF, so without this a
+// graceful /exit would destroy the pane (and its @flotilla_agent marker) rather than leaving a
+// pane to respawn. recycle restores it OFF after the relaunch so the desk's steady-state
+// crash behaviour is unchanged. Per-pane (`-p`), so it never touches other desks.
+func SetRemainOnExit(target string, on bool) error {
+	val := "off"
+	if on {
+		val = "on"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	if err := exec.CommandContext(ctx, "tmux", "set-option", "-p", "-t", target, "remain-on-exit", val).Run(); err != nil {
+		return fmt.Errorf("tmux set-option remain-on-exit %s for pane %q: %w", val, target, err)
+	}
+	return nil
+}
+
+// PaneDead reports whether a pane is DEAD (`#{pane_dead}` == "1") — its process has exited but
+// the pane persists (only possible with remain-on-exit on). recycle confirms a graceful close
+// by pane_dead (the claude-direct fleet case) OR a shell verdict (a shell-backed desk), so the
+// relaunch is reached only after the old process is provably gone.
+func PaneDead(target string) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "tmux", "display-message", "-p", "-t", target, "#{pane_dead}").Output()
+	if err != nil {
+		return false, fmt.Errorf("tmux read pane_dead for %q: %w", target, err)
+	}
+	return strings.TrimSpace(string(out)) == "1", nil
+}
+
 // PaneInMode reports whether a pane is in a tmux copy/view mode (`#{pane_in_mode}` == "1").
 // recycle refuses up front when true: in copy-mode the cursor and capture coordinate spaces
 // diverge so the composer-state probe reads Undetermined, which would otherwise degrade every
