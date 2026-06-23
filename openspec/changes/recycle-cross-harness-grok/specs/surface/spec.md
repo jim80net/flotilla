@@ -18,7 +18,11 @@ live-confirmed 2026-06-23: a multi-line paste lands as ONE composer body with no
 recycle bridge's multi-line handoff/takeover turns deliver whole; no `SendCtrlJ` is needed). The
 driver SHALL declare its context-rotate strategy as `SlashCommand` with the reset command **`/new`**
 (confirmed in the official grok slash menu). Adding/replacing this driver SHALL NOT change any other
-driver's behavior.
+driver's behavior. (The driver's workspace identity-file mapping is intentionally NOT (re)specified
+here — the previously-asserted `AGENTS.md` mapping is contradicted by a live finding that grok uses
+`MEMORY.md`/`--rules`; correcting that mapping is a tracked follow-up, deliberately out of scope for
+this recycle-capability change, so this delta drops the stale `AGENTS.md` clause rather than carrying
+it forward.)
 
 The `grok` driver SHALL assess state Working-positive / Idle-default from LIVE-CAPTURED render markers.
 The Working signal SHALL be a grok-chrome processing indicator — the live streamed-token arrow `⇣`

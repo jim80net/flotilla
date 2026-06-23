@@ -25,14 +25,13 @@ func init() { Register(newGrok()) }
 // marker matched zero, so it always defaulted to Idle). Matching the driver to the deployed
 // reality is the fix.
 //
-// NOT YET CHARACTERIZED (follow-up, needs a live capture of the state): the official grok's
-// blocking gates (auth-needed / payment / a tool-approval prompt, if any). grok auto-executes
-// most tools, so blocking gates are rare; until one is captured this driver emits NO
-// AwaitingApproval — an auth-blocked desk reads Idle (a known gap). Liveness caveat: a desk that
-// CRASHES to a shell still alerts (the per-desk Shell debounce + the resolve-fail→Shell mapping),
-// but the ack-age WEDGE timer watches only the XO — so an auth-blocked-but-process-alive grok
-// desk is invisible to liveness until that gate is captured (#58 follow-up); the operator funds
-// the key, so this is rare.
+// BLOCKING GATES: the TOOL-APPROVAL gate is now characterized + emitted as AwaitingApproval (#158,
+// live-captured 2026-06-23 — see parseGrokState below). The AUTH-NEEDED / PAYMENT gates are NOT yet
+// captured; until they are, an auth/payment-blocked desk reads Idle (a known gap). Liveness caveat: a
+// desk that CRASHES to a shell still alerts (the per-desk Shell debounce + the resolve-fail→Shell
+// mapping), but the ack-age WEDGE timer watches only the XO — so an auth/payment-blocked-but-process-
+// alive grok desk is invisible to liveness until that gate is captured (#58 follow-up); the operator
+// funds the key, so this is rare.
 type grok struct {
 	paneCommand func(string) (string, error)
 	isShell     func(string) bool
@@ -227,10 +226,12 @@ func classifyGrokComposerLine(captured string, cursorY int) ComposerDisposition 
 	if !isPrompt {
 		return ComposerUndetermined
 	}
-	// Strip the trailing right border + spaces, then the body's leading whitespace. TrimRight's cutset
-	// " │" is the rune set {space, U+2502}, so it removes the spaces between body and the right border
-	// AND the border itself.
-	body := trimSpace(strings.TrimRight(after, " "+grokBoxBorder))
+	// Strip the trailing right border + its surrounding spaces, then the body's leading whitespace.
+	// We strip EXACTLY ONE trailing border (TrimSuffix), NOT a cutset that would also eat a user-typed
+	// box-drawing `│` at the end of the body — otherwise a lone typed `│` would false-read Cleared and
+	// a recycle would discard that draft (the claude classifier is fail-closed here; grok must match).
+	body := strings.TrimSuffix(strings.TrimRight(after, " "), grokBoxBorder) // drop trailing spaces (none — border is last), then the one border
+	body = trimSpace(strings.TrimRight(body, " "))                           // drop the spaces that sat between body and border, and the body's leading ws
 	if body == "" {
 		return ComposerCleared
 	}

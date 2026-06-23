@@ -168,6 +168,14 @@ func TestParseGrokStateApproval(t *testing.T) {
 	if got := parseGrokState("  Turn completed in 3.9s.\n  │ ❯  │\n  Shift+Tab:mode"); got != StateIdle {
 		t.Errorf("parseGrokState(idle) = %v, want Idle", got)
 	}
+	// Tail-scoping symmetry (mirrors the stale-arrow scrollback case): a modal's status line scrolled
+	// ABOVE the grokTail window, with an idle composer below, must NOT keep the desk reading
+	// AwaitingApproval — only the bottom chrome decides.
+	staleModal := "  1/4:select  │  Ctrl+o:yolo  │  Ctrl+c:cancel\n" + manyLines(14) +
+		"  Turn completed in 5.0s.\n  │ ❯  │\n  Shift+Tab:mode"
+	if got := parseGrokState(staleModal); got != StateIdle {
+		t.Errorf("parseGrokState(stale modal in scrollback + idle below) = %v, want Idle", got)
+	}
 }
 
 // TestClassifyGrokComposerLine: the cursor-indexed composer classifier over the §10 live captures.
@@ -189,6 +197,9 @@ func TestClassifyGrokComposerLine(t *testing.T) {
 	}{
 		{"empty composer at cursor → Cleared", cleared, 1, ComposerCleared},
 		{"composer with a pending body → Pending", pending, 1, ComposerPending},
+		// A lone user-typed box-drawing │ must NOT false-read Cleared (the recycle gate would discard
+		// the draft) — only the trailing RIGHT border is stripped, not a typed │ in the body.
+		{"body is a lone typed │ → Pending (not a false Cleared)", "  │ ❯ │                       │", 0, ComposerPending},
 		{"multi-line continuation row (no ❯) → Undetermined (non-Cleared, fail-closed)", multiline, 3, ComposerUndetermined},
 		{"approval modal: cursor on ◆ Run line (no ❯) → Undetermined (NOT Cleared — gate-safety)", modalCap, 0, ComposerUndetermined},
 		{"cursor past the captured range → Undetermined", cleared, 9999, ComposerUndetermined},
