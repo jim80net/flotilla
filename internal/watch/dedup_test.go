@@ -50,15 +50,16 @@ func TestLiveNew_RecordsButDoesNotAdvanceCursor(t *testing.T) {
 	}
 }
 
-func TestClassify_DedupsAgainstSeen_ReturnsMaxCursor(t *testing.T) {
+func TestClassify_DedupsAgainstSeen(t *testing.T) {
 	d := newTestDedup(t)
 	d.liveNew("CH", 20) // pretend the live path already relayed 20
-	toRelay, newCur := d.classify("CH", []discord.Message{dmsg(10), dmsg(20), dmsg(30)})
+	batch := []discord.Message{dmsg(10), dmsg(20), dmsg(30)}
+	toRelay := d.classify("CH", batch)
 	if got := snowIDs(toRelay); len(got) != 2 || got[0] != 10 || got[1] != 30 {
 		t.Fatalf("toRelay = %v, want [10 30] (20 already seen)", got)
 	}
-	if newCur != 30 {
-		t.Fatalf("newCursor = %d, want 30", newCur)
+	if got := MaxSnowflake(batch); got != 30 {
+		t.Fatalf("MaxSnowflake = %d, want 30", got)
 	}
 	// classify must NOT advance the durable cursor (that's commit's job, after enqueue).
 	if c, _ := d.cursorOf("CH"); c != 0 {
@@ -83,12 +84,13 @@ func TestLeapfrog_LiveAfterGapDoesNotOrphanGapMessages(t *testing.T) {
 		t.Fatalf("live m5 advanced cursor to %d, want 2 — the leapfrog bug", c)
 	}
 	// Next poll fetches after=2 → [3,4,5] ascending. m3,m4 must be recovered; m5 skipped (seen).
-	toRelay, newCur := d.classify("CH", []discord.Message{dmsg(3), dmsg(4), dmsg(5)})
+	batch := []discord.Message{dmsg(3), dmsg(4), dmsg(5)}
+	toRelay := d.classify("CH", batch)
 	if got := snowIDs(toRelay); len(got) != 2 || got[0] != 3 || got[1] != 4 {
 		t.Fatalf("recovered = %v, want [3 4] (gap messages); m5 already relayed live", got)
 	}
-	if newCur != 5 {
-		t.Fatalf("newCursor = %d, want 5", newCur)
+	if got := MaxSnowflake(batch); got != 5 {
+		t.Fatalf("MaxSnowflake = %d, want 5", got)
 	}
 }
 
@@ -101,7 +103,7 @@ func TestEnqueueThenCommit_CrashBeforeCommitReDelivers(t *testing.T) {
 	batch := []discord.Message{dmsg(10), dmsg(20)}
 
 	// Sweep 1: classify, then "crash" before commit (do NOT call commit).
-	toRelay, newCur := d.classify("CH", batch)
+	toRelay := d.classify("CH", batch)
 	if len(toRelay) != 2 {
 		t.Fatalf("sweep1 toRelay = %v, want [10 20]", snowIDs(toRelay))
 	}
@@ -115,15 +117,14 @@ func TestEnqueueThenCommit_CrashBeforeCommitReDelivers(t *testing.T) {
 		t.Fatalf("persisted cursor = %d after pre-commit crash, want 0 (re-fetch, not drop)", c)
 	}
 	// Sweep on restart re-fetches after=0 → re-delivers (duplicate, NOT a drop).
-	toRelay2, newCur2 := d2.classify("CH", batch)
+	toRelay2 := d2.classify("CH", batch)
 	if len(toRelay2) != 2 {
 		t.Fatalf("restart re-delivery = %v, want [10 20] (at-least-once)", snowIDs(toRelay2))
 	}
-	// After a clean commit, the cursor advances and persists.
-	if err := d2.commit("CH", newCur2); err != nil {
+	// After a clean commit (enqueue-then-commit), the cursor advances and persists.
+	if err := d2.commit("CH", MaxSnowflake(batch)); err != nil {
 		t.Fatal(err)
 	}
-	_ = newCur
 	d3 := newDedup(d.store, defaultSeenCap)
 	if c, _ := d3.cursorOf("CH"); c != 20 {
 		t.Fatalf("committed cursor = %d, want 20", c)
@@ -202,8 +203,8 @@ func TestDedup_RaceLiveNewVsClassifyCommit(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < 50; i++ {
 			batch := []discord.Message{dmsg(uint64(i*10 + 1)), dmsg(uint64(i*10 + 2))}
-			_, nc := d.classify("CH", batch)
-			_ = d.commit("CH", nc)
+			d.classify("CH", batch)
+			_ = d.commit("CH", MaxSnowflake(batch))
 		}
 	}()
 	wg.Wait()

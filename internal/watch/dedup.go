@@ -133,24 +133,23 @@ func (d *dedup) liveNew(channelID string, id uint64) bool {
 	return true
 }
 
-// classify partitions an ascending, contiguous-from-cursor batch (the poller's
-// fetched run) into the messages not already relayed (toRelay) and the new cursor
-// (the batch's max id — the top of the fully-processed contiguous run). It marks
-// toRelay as seen but DOES NOT advance the durable cursor and DOES NOT persist:
-// the caller MUST enqueue every toRelay message FIRST, then call commit (F7 —
-// enqueue-then-commit, so a crash in the window yields a duplicate, never a drop).
-func (d *dedup) classify(channelID string, batch []discord.Message) (toRelay []discord.Message, newCursor uint64) {
+// classify takes the operator-accepted candidates from a sweep (the poller applies
+// Accept + the empty-content guard FIRST, so seen holds only relayed ids — F4) and
+// returns those not already relayed (above the cursor and not in seen), marking them
+// seen. It DOES NOT advance the durable cursor and DOES NOT persist: the caller MUST
+// enqueue every returned message FIRST, then call commit (F7 — enqueue-then-commit,
+// so a crash in the window yields a duplicate, never a drop). The cursor is advanced
+// (by commit) over the FULL fetched batch, not just these candidates — so the
+// non-operator tail is not re-fetched every sweep — which is why the caller passes
+// commit the full batch's max id, computed via MaxSnowflake, NOT a value derived here.
+func (d *dedup) classify(channelID string, candidates []discord.Message) (toRelay []discord.Message) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	cur := d.cursor[channelID]
-	newCursor = cur
 	s := d.seenOfLocked(channelID)
-	for _, m := range batch {
+	for _, m := range candidates {
 		if m.SnowID <= cur {
 			continue // below the frontier — already processed
-		}
-		if m.SnowID > newCursor {
-			newCursor = m.SnowID
 		}
 		if s.has(m.SnowID) {
 			continue // already relayed by the live path
@@ -158,7 +157,20 @@ func (d *dedup) classify(channelID string, batch []discord.Message) (toRelay []d
 		s.add(m.SnowID)
 		toRelay = append(toRelay, m)
 	}
-	return toRelay, newCursor
+	return toRelay
+}
+
+// MaxSnowflake returns the largest SnowID in a batch, or 0 if empty. The poller
+// computes the new cursor over the FULL fetched batch (including non-operator
+// messages) with this, so committing advances past the non-operator tail.
+func MaxSnowflake(batch []discord.Message) uint64 {
+	var max uint64
+	for _, m := range batch {
+		if m.SnowID > max {
+			max = m.SnowID
+		}
+	}
+	return max
 }
 
 // commit advances the durable cursor to newCursor (monotonic), prunes the seen-set

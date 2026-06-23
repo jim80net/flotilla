@@ -2,6 +2,7 @@ package watch
 
 import (
 	"testing"
+	"time"
 
 	"github.com/jim80net/flotilla/internal/roster"
 )
@@ -53,12 +54,41 @@ func fedCfg() *roster.Config {
 
 func TestRelayDropsWebhookAndNonOperator(t *testing.T) {
 	r, c, _ := newRelayHarness(legacyCfg())
-	r.Handle("C1", "webhook-1", "op", "→ v12-dev: mirror echo") // our own mirror → dropped
-	r.Handle("C1", "", "intruder", "do evil")                   // non-operator → dropped
-	r.injector.Stop()                                           // drain
+	r.Handle("C1", "1000001", "webhook-1", "op", "→ v12-dev: mirror echo") // our own mirror → dropped
+	r.Handle("C1", "1000002", "", "intruder", "do evil")                   // non-operator → dropped
+	r.injector.Stop()                                                      // drain
 	if c.count() != 0 {
 		t.Errorf("delivered %d, want 0 (webhook + non-operator must be dropped)", c.count())
 	}
+}
+
+// With a dedup gate wired, the live path relays a message once and records its id;
+// a re-delivery of the SAME id (e.g. the poller also fetched it, or a duplicate
+// gateway event) is dropped — and the live path NEVER advances the cursor.
+func TestRelayWithGate_DedupsAndDoesNotAdvanceCursor(t *testing.T) {
+	r, c, _ := newRelayHarness(legacyCfg())
+	gate := newDedup(cursorStore{}, defaultSeenCap)
+	r.SetGate(gate)
+
+	r.Handle("C1", "100", "", "op", "ship it") // new id → relayed
+	r.Handle("C1", "100", "", "op", "ship it") // same id → deduped
+	waitForDelivered(t, c, 1)
+	time.Sleep(20 * time.Millisecond)
+	if c.count() != 1 {
+		t.Fatalf("delivered %d, want 1 (the second is a duplicate id)", c.count())
+	}
+	if cur, _ := gate.cursorOf("C1"); cur != 0 {
+		t.Fatalf("live path advanced cursor to %d, want 0 (leapfrog guard)", cur)
+	}
+}
+
+// An unparseable message id (never for real Discord data) bypasses the gate rather
+// than being silently dropped — fail-open on a malformed id.
+func TestRelayWithGate_UnparseableIDBypassesGate(t *testing.T) {
+	r, c, _ := newRelayHarness(legacyCfg())
+	r.SetGate(newDedup(cursorStore{}, defaultSeenCap))
+	r.Handle("C1", "not-a-snowflake", "", "op", "still deliver me")
+	waitForDelivered(t, c, 1)
 }
 
 // A message on a channel no binding owns is ignored even from the operator — the
@@ -66,7 +96,7 @@ func TestRelayDropsWebhookAndNonOperator(t *testing.T) {
 // not route an unbound channel either).
 func TestRelayDropsUnboundChannel(t *testing.T) {
 	r, c, _ := newRelayHarness(legacyCfg())
-	r.Handle("C_OTHER", "", "op", "status please") // operator, but unbound channel → dropped
+	r.Handle("C_OTHER", "1000003", "", "op", "status please") // operator, but unbound channel → dropped
 	r.injector.Stop()
 	if c.count() != 0 {
 		t.Errorf("delivered %d, want 0 (a message on an unbound channel must be dropped)", c.count())
@@ -79,8 +109,8 @@ func TestRelayDropsUnboundChannel(t *testing.T) {
 // spans several channels). It must never inject a blank turn into the XO pane.
 func TestRelayDropsEmptyContent(t *testing.T) {
 	r, c, _ := newRelayHarness(legacyCfg())
-	r.Handle("C1", "", "op", "")    // bot-without-intent shape → dropped
-	r.Handle("C1", "", "op", "   ") // whitespace-only → dropped
+	r.Handle("C1", "1000004", "", "op", "")    // bot-without-intent shape → dropped
+	r.Handle("C1", "1000005", "", "op", "   ") // whitespace-only → dropped
 	r.injector.Stop()
 	if c.count() != 0 {
 		t.Errorf("delivered %d, want 0 (empty/whitespace operator message must be dropped)", c.count())
@@ -89,10 +119,10 @@ func TestRelayDropsEmptyContent(t *testing.T) {
 
 func TestRelayRoutesOperatorMessage(t *testing.T) {
 	r, c, notices := newRelayHarness(legacyCfg())
-	r.Handle("C1", "", "op", "@v12-dev ship it")
-	r.Handle("C1", "", "op", "status please") // bare → XO
-	r.Handle("C1", "", "op", "@nope hello")   // unknown → XO + notice
-	r.injector.Stop()                         // drain
+	r.Handle("C1", "1000006", "", "op", "@v12-dev ship it")
+	r.Handle("C1", "1000007", "", "op", "status please") // bare → XO
+	r.Handle("C1", "1000008", "", "op", "@nope hello")   // unknown → XO + notice
+	r.injector.Stop()                                    // drain
 
 	if len(c.jobs) != 3 {
 		t.Fatalf("delivered %d, want 3", len(c.jobs))
@@ -115,7 +145,7 @@ func TestRelayRoutesOperatorMessage(t *testing.T) {
 // for #108). The mirror hook receives the whole Job, so OriginChannel must ride it.
 func TestRelaySetsOriginChannelOnJob(t *testing.T) {
 	r, c, _ := newRelayHarness(legacyCfg())
-	r.Handle("C1", "", "op", "status please")
+	r.Handle("C1", "1000009", "", "op", "status please")
 	r.injector.Stop()
 	if len(c.jobs) != 1 {
 		t.Fatalf("delivered %d, want 1", len(c.jobs))
@@ -134,10 +164,10 @@ func TestRelaySetsOriginChannelOnJob(t *testing.T) {
 // one tier up).
 func TestRelayRoutesByOriginChannel(t *testing.T) {
 	r, c, _ := newRelayHarness(fedCfg())
-	r.Handle("C_ALPHA", "", "op", "@alpha-be do x")   // project desk, in its project channel
-	r.Handle("C_ALPHA", "", "op", "status")           // bare → project-XO
-	r.Handle("C_CMD", "", "op", "@alpha-xo delegate") // project-XO, addressed from fleet-command
-	r.Handle("C_CMD", "", "op", "status")             // bare → meta-XO
+	r.Handle("C_ALPHA", "1000010", "", "op", "@alpha-be do x")   // project desk, in its project channel
+	r.Handle("C_ALPHA", "1000011", "", "op", "status")           // bare → project-XO
+	r.Handle("C_CMD", "1000012", "", "op", "@alpha-xo delegate") // project-XO, addressed from fleet-command
+	r.Handle("C_CMD", "1000013", "", "op", "status")             // bare → meta-XO
 	r.injector.Stop()
 
 	if len(c.jobs) != 4 {
@@ -165,9 +195,9 @@ func TestRelayRoutesByOriginChannel(t *testing.T) {
 func TestRelayMemberScopeIsolation(t *testing.T) {
 	r, c, notices := newRelayHarness(fedCfg())
 	// beta-be is a member of #beta, NOT of #alpha → unknown in #alpha → alpha-xo + notice.
-	r.Handle("C_ALPHA", "", "op", "@beta-be sneak in")
+	r.Handle("C_ALPHA", "1000014", "", "op", "@beta-be sneak in")
 	// alpha-be is a desk, NOT a member of #fleet-command → unknown there → meta-xo + notice.
-	r.Handle("C_CMD", "", "op", "@alpha-be reach down")
+	r.Handle("C_CMD", "1000015", "", "op", "@alpha-be reach down")
 	r.injector.Stop()
 
 	if len(c.jobs) != 2 {
@@ -188,8 +218,8 @@ func TestRelayMemberScopeIsolation(t *testing.T) {
 // federation, not just for the single-fleet case.
 func TestRelayPerChannelAuthAndSelfMirrorDrop(t *testing.T) {
 	r, c, _ := newRelayHarness(fedCfg())
-	r.Handle("C_ALPHA", "webhook-7", "op", "→ alpha-be: echo") // self-mirror in a project channel → dropped
-	r.Handle("C_CMD", "", "intruder", "@alpha-xo evil")        // non-operator in fleet-command → dropped
+	r.Handle("C_ALPHA", "1000016", "webhook-7", "op", "→ alpha-be: echo") // self-mirror in a project channel → dropped
+	r.Handle("C_CMD", "1000017", "", "intruder", "@alpha-xo evil")        // non-operator in fleet-command → dropped
 	r.injector.Stop()
 	if c.count() != 0 {
 		t.Errorf("delivered %d, want 0 (per-channel webhook + non-operator must drop)", c.count())
@@ -204,10 +234,10 @@ func TestRelayOnAcceptedReceivesRoutedTarget(t *testing.T) {
 	var targets []string
 	r := NewRelay(cfg, inj, func(target string) { targets = append(targets, target) }, nil)
 
-	r.Handle("C1", "", "op", "status please")     // bare → XO
-	r.Handle("C1", "", "op", "@v12-dev ship it")  // directed → desk
-	r.Handle("C1", "webhook-1", "op", "→ mirror") // dropped → no onAccepted
-	r.Handle("C1", "", "intruder", "evil")        // dropped → no onAccepted
+	r.Handle("C1", "1000018", "", "op", "status please")     // bare → XO
+	r.Handle("C1", "1000019", "", "op", "@v12-dev ship it")  // directed → desk
+	r.Handle("C1", "1000020", "webhook-1", "op", "→ mirror") // dropped → no onAccepted
+	r.Handle("C1", "1000021", "", "intruder", "evil")        // dropped → no onAccepted
 	inj.Stop()
 
 	if len(targets) != 2 || targets[0] != "hydra-ops" || targets[1] != "v12-dev" {

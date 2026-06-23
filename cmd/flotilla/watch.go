@@ -51,6 +51,7 @@ func cmdWatch(args []string) error {
 	// change-detector (heartbeat v2) paths + tuning; consulted only when the
 	// roster sets change_detector: true.
 	snapshotPath := fs.String("snapshot-file", os.Getenv("FLOTILLA_SNAPSHOT_FILE"), "change-detector snapshot file (default <roster-dir>/flotilla-detector-state.json)")
+	cursorPath := fs.String("relay-cursor-file", os.Getenv("FLOTILLA_RELAY_CURSOR_FILE"), "relay catch-up per-channel cursor file (default <roster-dir>/flotilla-relay-cursor.json); the at-least-once ingestion backstop's durable state")
 	awaitingPath := fs.String("awaiting-file", os.Getenv("FLOTILLA_AWAITING_FILE"), "awaiting-operator veto marker (default <roster-dir>/flotilla-xo-awaiting)")
 	settledPath := fs.String("settled-file", os.Getenv("FLOTILLA_SETTLED_FILE"), "XO settle (idle) marker (default <roster-dir>/flotilla-xo-settled)")
 	trackerPath := fs.String("tracker-file", os.Getenv("FLOTILLA_TRACKER_FILE"), "the XO's state tracker the continuation prompt names as {{tracker}} (default <roster-dir>/.flotilla-state.md); NOT hashed as a wake signal — it is the XO's own output")
@@ -87,6 +88,9 @@ func cmdWatch(args []string) error {
 	}
 	if *snapshotPath == "" {
 		*snapshotPath = filepath.Join(rosterDir, "flotilla-detector-state.json")
+	}
+	if *cursorPath == "" {
+		*cursorPath = filepath.Join(rosterDir, "flotilla-relay-cursor.json")
 	}
 	if *awaitingPath == "" {
 		*awaitingPath = filepath.Join(rosterDir, "flotilla-xo-awaiting")
@@ -499,8 +503,28 @@ func cmdWatch(args []string) error {
 	switch {
 	case len(channelIDs) > 0 && botToken != "" && cfg.OperatorUserID != "":
 		rel := watch.NewRelay(cfg, injector, onAccepted, func(msg string) { post("flotilla-watch", msg) })
+		// The REST-based at-least-once ingestion backstop (#161): a gateway gap (a
+		// reconnect/resume-failure window, a daemon-restart) drops MESSAGE_CREATE events
+		// the live relay never sees. NewCatchup builds the shared dedup gate, wires it into
+		// rel (the live path dedups against the poller), and the poller reconciles each
+		// channel against a durable cursor over REST — independent of the websocket that
+		// just failed. NON-FATAL: a REST construct failure degrades to live-only (the
+		// clock and the live relay are unaffected). Recovered notice → channel; bulk/stale
+		// + backstop-down → the loud alert. The gateway's OnReconnect kicks an immediate
+		// sweep so a reconnect gap is recovered in ~0s, not the poll interval.
+		var catchupKick func()
+		if rest, err := discord.NewREST(botToken); err != nil {
+			fmt.Fprintf(os.Stderr, "flotilla watch: WARNING — relay catch-up backstop failed to start (%v); running LIVE-RELAY-ONLY. A gateway-gap message may be lost without recovery. The clock and live relay are unaffected.\n", err)
+		} else {
+			cu := watch.NewCatchup(cfg, rel, rest, *cursorPath,
+				func(msg string) { post("flotilla-watch", msg) },
+				alert)
+			catchupKick = cu.Kick
+			go cu.Run(ctx)
+			fmt.Printf("flotilla watch: relay catch-up backstop active (cursor=%s)\n", *cursorPath)
+		}
 		factory := func() (gatewayController, error) {
-			gw, err := discord.NewGateway(botToken, channelIDs, rel.Handle)
+			gw, err := discord.NewGateway(botToken, channelIDs, rel.Handle, catchupKick)
 			if err != nil {
 				return nil, err
 			}
