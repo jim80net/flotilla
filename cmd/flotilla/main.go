@@ -63,6 +63,8 @@ func run(args []string) error {
 		return cmdPushSnippet(args[1:])
 	case "result":
 		return cmdResult(args[1:])
+	case "inbox":
+		return cmdInbox(args[1:])
 	case "version", "-v", "--version":
 		fmt.Println("flotilla " + version)
 		return nil
@@ -87,6 +89,7 @@ usage:
   flotilla voice [--config <voice.env>]               operator↔XO Discord voice (needs a -tags voiceopus build)
   flotilla watch                                      relay + XO heartbeat clock daemon
   flotilla status                                     one line per desk: last-known state + XO ack age (reads the watch snapshot; no daemon)
+  flotilla inbox <channel> [--limit N]                read recent messages of a bound channel over REST (role or channel id; recover a dropped operator message; read-only)
   flotilla dash [--bind 127.0.0.1:8787]               optional local web UI: fleet board + federation topology + coordination history (read-only; reads the watch artifacts; loopback only)
   flotilla channel create <name> [--type text|category] [--topic <t>] [--category <name|id>]
                                                       create a Discord channel via the bot (idempotent; emits an F#105 binding with --xo)

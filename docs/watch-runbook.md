@@ -157,6 +157,54 @@ escalates (XO liveness is the watchdog's job, see Down alerts). The trade is a s
 per-tick cost — up to ~1.75 s of confirm polling on a tick that has to retry — paid off the
 delivery worker, so it never stalls other desks.
 
+### At-least-once ingestion — gateway-gap recovery (#161)
+
+Confirmed delivery (above) guards the **delivery** layer — after a message reaches the
+relay. A separate failure class is a message that **never reaches the relay at all**: the
+Discord gateway websocket drops, and on a failed resume discordgo re-identifies (replaying
+no `MESSAGE_CREATE` events), so an operator message sent during that window is lost with no
+trace. (Measured on the live fleet: ~3 such gap-losing reconnects/day.)
+
+The daemon closes this with a **REST-based catch-up reconciler**, independent of the
+websocket (REST works precisely when the socket is unhealthy):
+
+- It keeps a **durable per-channel cursor** (`--relay-cursor-file`, default
+  `<roster-dir>/flotilla-relay-cursor.json`) of the highest message it has processed.
+- Every ~30 s — and **immediately on every gateway reconnect** — it fetches each bound
+  channel's messages after the cursor and recovers any operator message the live path
+  missed. The live path and the reconciler share a dedup set, so a message delivered live
+  is never re-delivered.
+- **First boot tail-initializes** the cursor (it never replays old history). A daemon
+  restart resumes from the durable cursor, so messages sent while it was down are recovered
+  too.
+- **Disposition:** a few recent recovered messages are **auto-delivered** in order with a
+  one-line `recovered N operator message(s) … via catch-up` notice. A **bulk or very old**
+  backlog (e.g. after a long outage) is **NOT** blind-injected — you get a loud alert
+  pointing you at `flotilla inbox` to review and re-send the still-relevant ones.
+- **The backstop watches itself:** if its REST sweep fails repeatedly (total outage), it
+  raises ONE alert that the at-least-once backstop is DOWN (live delivery continues), and
+  re-arms on recovery — so a silently-dead backstop can't re-create the very gap it fixes.
+
+It is **non-fatal**: if the REST client can't start, the daemon logs a warning and runs
+live-relay-only (the clock and live relay are unaffected). On startup you'll see
+`relay catch-up backstop active (cursor=…)`.
+
+### Reading or recovering a channel by hand — `flotilla inbox`
+
+To read recent messages of a bound channel directly over REST (e.g. to recover a message,
+or just to see what was said) — no daemon, read-only:
+
+```bash
+flotilla inbox <channel> [--limit N]      # <channel> = a binding role or a raw channel id
+flotilla inbox fleet-command --limit 30
+flotilla inbox 1511357941893304462
+```
+
+It prints the recent messages oldest-first with each one's timestamp, an authorship flag
+(`[OP]` operator, `[wh]` webhook/mirror, `[..]` other), id, and full (multi-line) content.
+A role shared by several channels is rejected as ambiguous — pass the channel id. (It is
+read-only; it does not re-inject — the catch-up reconciler already does automatic recovery.)
+
 ### Relay open is non-fatal (cold-boot / transient-network resilience)
 
 The safety-critical clock (heartbeat + watchdog) and the optional inbound relay

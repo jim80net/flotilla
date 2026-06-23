@@ -9,9 +9,16 @@ import (
 )
 
 // MessageHandler receives the fields the relay needs from each gateway message,
-// including the message's ORIGIN channel id so a multi-channel relay can route by
-// it. Narrow by design, so the gateway is decoupled from the relay/watch packages.
-type MessageHandler func(channelID, webhookID, authorID, content string)
+// including the message's ORIGIN channel id (so a multi-channel relay can route by
+// it) and the message ID (so the relay can deduplicate against the REST catch-up
+// poller — the at-least-once ingestion backstop). Narrow by design, so the gateway
+// is decoupled from the relay/watch packages.
+type MessageHandler func(channelID, messageID, webhookID, authorID, content string)
+
+// ReconnectHandler is called when the gateway (re)connects or resumes — the hook
+// the catch-up poller uses to fire an immediate sweep, collapsing recovery latency
+// for a reconnect gap from the poll interval to ~0. Optional; may be nil.
+type ReconnectHandler func()
 
 // Gateway streams a SET of Discord channels and dispatches their messages to a
 // handler. It is the inbound half of the bus (the relay); the send half stays
@@ -28,7 +35,7 @@ type Gateway struct {
 // of channelIDs. A message in any bound channel is dispatched with its origin
 // channel id (so the relay can route by it); messages in any other channel are
 // ignored.
-func NewGateway(botToken string, channelIDs []string, handler MessageHandler) (*Gateway, error) {
+func NewGateway(botToken string, channelIDs []string, handler MessageHandler, onReconnect ReconnectHandler) (*Gateway, error) {
 	s, err := discordgo.New("Bot " + botToken)
 	if err != nil {
 		return nil, fmt.Errorf("discord session: %w", err)
@@ -46,7 +53,7 @@ func NewGateway(botToken string, channelIDs []string, handler MessageHandler) (*
 		if m.Author != nil {
 			authorID = m.Author.ID
 		}
-		handler(m.ChannelID, m.WebhookID, authorID, m.Content)
+		handler(m.ChannelID, m.ID, m.WebhookID, authorID, m.Content)
 	})
 	// Log gateway flaps so a message lost during a reconnect window is
 	// explainable in the journal ("gateway disconnected 14:03 / resumed 14:03").
@@ -56,11 +63,23 @@ func NewGateway(botToken string, channelIDs []string, handler MessageHandler) (*
 	s.AddHandler(func(_ *discordgo.Session, _ *discordgo.Resumed) {
 		log.Printf("flotilla watch: gateway resumed")
 	})
+	// On every websocket (re)connect — initial, a clean resume, AND a re-identify
+	// after an Invalid Session (the gap-losing path) — fire the reconnect hook so
+	// the catch-up poller sweeps immediately. discordgo.Connect covers all three
+	// (a resume emits Resumed after Connect; a re-identify emits Ready after Connect),
+	// so hooking Connect catches the re-identify case the gap arises from.
+	if onReconnect != nil {
+		s.AddHandler(func(_ *discordgo.Session, _ *discordgo.Connect) {
+			onReconnect()
+		})
+	}
 	return &Gateway{session: s, channelIDs: channelIDs}, nil
 }
 
 // Open connects the gateway. discordgo auto-reconnects thereafter; messages sent
-// during a disconnect window are not replayed (the operator can resend).
+// during a disconnect window are not replayed on the websocket — they are recovered
+// by the REST catch-up reconciler (the at-least-once ingestion backstop, #161),
+// which the OnReconnect hook kicks immediately on every reconnect.
 func (g *Gateway) Open() error {
 	if err := g.session.Open(); err != nil {
 		return fmt.Errorf("open gateway: %w", err)
