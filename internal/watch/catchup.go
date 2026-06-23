@@ -191,9 +191,14 @@ func (c *Catchup) accepted(batch []discord.Message) []discord.Message {
 // it every sweep would be an alert storm — the operator recovers it via `inbox`).
 func (c *Catchup) disposition(b roster.Channel, toRelay []discord.Message, capped bool) {
 	if len(toRelay) == 0 {
+		// No OPERATOR messages recovered this sweep (the run may have been all
+		// non-operator chatter, even a full/capped page of it). Intentionally no alert
+		// here — there is nothing the operator needs to act on. The cursor still
+		// advances (caller), and any operator messages above a cap are surfaced by a
+		// later sweep continuing from the advanced cursor. Never a drop, only deferred.
 		return
 	}
-	oldest := toRelay[0].Timestamp // ascending — [0] is the oldest
+	oldest := toRelay[0].Timestamp // ascending — [0] is the oldest (classify preserves batch order)
 	tooOld := !oldest.IsZero() && c.now().Sub(oldest) > c.staleCeiling
 	if capped || len(toRelay) > c.bulkCap || tooOld {
 		if c.alert != nil {

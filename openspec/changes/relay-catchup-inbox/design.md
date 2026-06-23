@@ -285,13 +285,17 @@ used by the poller (first-boot uses `Latest`); `inbox` uses a plain recent fetch
 
 ## Gateway handler signature change
 
-`MessageHandler` gains the message **id** and **timestamp** so the live path can consult the gate:
+`MessageHandler` gains the message **id** so the live path can consult the gate. (The message
+**timestamp** is deliberately NOT threaded to the live path: the live path relays immediately
+regardless of age, so it never needs the timestamp; only the poller uses timestamps for the
+disposition's stale check, and it gets them from the REST `Message`. Carrying ts through the live
+handler would be dead weight — so the shipped signature is minimal: id only.)
 
 ```go
-type MessageHandler func(channelID, messageID, webhookID, authorID, content string, ts time.Time)
+type MessageHandler func(channelID, messageID, webhookID, authorID, content string)
 ```
 
-`gateway.go` passes `m.ID`/`m.Timestamp`; `Relay.Handle` runs **Accept + empty-guard FIRST, then**
+`gateway.go` passes `m.ID`; `Relay.Handle` runs **Accept + empty-guard FIRST, then**
 `liveNew` (F4 — so `seen` holds exactly the ids actually relayed, keeping Invariant-1's proof honest),
 enqueues iff new. Single production caller (`watch.go:503`) + relay tests update together. (A
 live-empty-but-poll-full message — gateway delivered blank for a missing Message Content intent — is
