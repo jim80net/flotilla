@@ -1,0 +1,43 @@
+[Unit]
+Description=flotilla dash — local web cnc + native issue tracker (loopback)
+Documentation=https://github.com/jim80net/flotilla
+# Ordering ONLY — the dash READS the artifacts `flotilla watch` writes, so starting
+# after watch gives a populated board at boot. It is NOT a dependency (no Wants/
+# Requires): the dash runs read-only without watch (it shows the absent/stale board
+# honestly), and a dash failure can never affect the safety-critical clock — fault
+# isolation by design (the dash starts no daemon; route is lock-serialized).
+After=flotilla-watch.service
+# A genuinely-fatal LOCAL startup error (a non-loopback --bind, which the dash
+# refuses; a malformed roster) fails fast — bound restarts so a misconfig surfaces
+# instead of crash-looping. A healthy dash never trips this.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# --- GENERATED from deploy/flotilla-dash.service.in by deploy/flotilla-dash-install.sh.
+#     Do NOT hand-edit the installed copy at ~/.config/systemd/user/flotilla-dash.service
+#     — edit deploy/flotilla-dash.env and re-run the installer. The host-specific paths
+#     live in one env file, so the unit stops drifting. ---
+WorkingDirectory=@FLOTILLA_DASH_WORKDIR@
+# HOME: the issue tracker shells out to `gh`, which reads ~/.config/gh, and the
+# binary's pane-lock dir is $HOME-based — set it explicitly so the unit is self-describing.
+Environment=HOME=%h
+# PATH must include gh's dir (the tracker shells out to `gh`); the standard system
+# dirs cover the usual /usr/bin install, and %h/go/bin is appended for a go-installed gh.
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:%h/go/bin
+# The two trailing fragments after --bind are COMPUTED by the installer: each becomes
+# " --repo <owner/name>" / " --secrets <path>" (leading space included) when the
+# OPTIONAL key is set, or "" when unset — so an omitted option leaves this line
+# byte-identical to a no-option install (no flag, no trailing space). Both are ALWAYS
+# substituted (to the fragment or to empty), so the "no placeholder survives" guard
+# still holds. (The token names are spelled in the installer, not here, so this comment
+# is not itself rewritten by the substitution.)
+ExecStart=@FLOTILLA_DASH_BIN@ dash --roster @FLOTILLA_DASH_ROSTER@ --bind @FLOTILLA_DASH_BIND@@FLOTILLA_DASH_REPO_ARG@@FLOTILLA_DASH_SECRETS_ARG@
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target
