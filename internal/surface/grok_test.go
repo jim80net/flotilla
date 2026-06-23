@@ -136,8 +136,123 @@ func TestGrokSubmitRotateRoute(t *testing.T) {
 	}
 }
 
-// The grok driver must satisfy the optional ResultReader capability (compile-time).
-var _ ResultReader = grok{}
+// The grok driver must satisfy the optional ResultReader capability (compile-time), and — since #158 —
+// the ComposerStateProbe + RecycleBridge capabilities (so a grok desk is recycle-capable).
+var (
+	_ ResultReader       = grok{}
+	_ ComposerStateProbe = grok{}
+	_ RecycleBridge      = grok{}
+)
+
+// TestParseGrokStateApproval: the tool-approval modal classifies AwaitingApproval, NOT Working, even
+// though the ⇣ streamed-token arrow is co-present on the modal's "◆ Run …" line (the live #58/#158 gap).
+// Fixtures LIVE-CAPTURED 2026-06-23 from a throwaway grok session (design.md §10.3) — not recalled.
+func TestParseGrokStateApproval(t *testing.T) {
+	// The exact captured modal tail: a ◆ Run line carrying ⇣19.0k, the ┃ Allow block, and the
+	// "1/4:select │ Ctrl+o:yolo │ Ctrl+c:cancel" status line.
+	modal := "    ◆ Run Edit `/tmp/grok-char/hello.txt` 10s                       11s ⇣19.0k [✗]\n" +
+		"\n  ┃\n  ┃  Allow Edit `/tmp/grok-char/hello.txt`?\n  ┃\n" +
+		"  ┃  1 (●) Yes, and don't ask again for anything (always-approve mode)\n" +
+		"  ┃  2 (○) Yes, allow all edits during this session\n  ┃  3 (○) Yes\n" +
+		"  ┃  4 (○) No, reject (type to add feedback)\n  ┃\n\n" +
+		"  1/4:select  │  Ctrl+o:yolo  │  Ctrl+c:cancel"
+	if got := parseGrokState(modal); got != StateAwaitingApproval {
+		t.Errorf("parseGrokState(approval modal) = %v, want AwaitingApproval (must precede the Working/⇣ check)", got)
+	}
+	// A genuine streaming turn (arrow, no modal chrome) still reads Working — the modal anchors must
+	// not over-fire on ordinary output.
+	if got := parseGrokState("  ⠙ Waiting… 0.4s ⇣127k [✗]"); got != StateWorking {
+		t.Errorf("parseGrokState(streaming) = %v, want Working", got)
+	}
+	// An idle finished turn still reads Idle.
+	if got := parseGrokState("  Turn completed in 3.9s.\n  │ ❯  │\n  Shift+Tab:mode"); got != StateIdle {
+		t.Errorf("parseGrokState(idle) = %v, want Idle", got)
+	}
+	// Tail-scoping symmetry (mirrors the stale-arrow scrollback case): a modal's status line scrolled
+	// ABOVE the grokTail window, with an idle composer below, must NOT keep the desk reading
+	// AwaitingApproval — only the bottom chrome decides.
+	staleModal := "  1/4:select  │  Ctrl+o:yolo  │  Ctrl+c:cancel\n" + manyLines(14) +
+		"  Turn completed in 5.0s.\n  │ ❯  │\n  Shift+Tab:mode"
+	if got := parseGrokState(staleModal); got != StateIdle {
+		t.Errorf("parseGrokState(stale modal in scrollback + idle below) = %v, want Idle", got)
+	}
+}
+
+// TestClassifyGrokComposerLine: the cursor-indexed composer classifier over the §10 live captures.
+func TestClassifyGrokComposerLine(t *testing.T) {
+	// Realistic grok composer-box renders (LIVE-CAPTURED 2026-06-23, design.md §10.1/§10.2). The
+	// classifier reads the line at cursorY; the box left/right borders (│) must be stripped.
+	const cleared = "  ╭────────╮\n  │ ❯                                              │\n  ╰──── Composer 2.5 Fast ─╯"
+	const pending = "  ╭────────╮\n  │ ❯ characterization pending body do not submit  │\n  ╰──── Composer 2.5 Fast ─╯"
+	// A multi-line pending body: the cursor on the THIRD (continuation) row, which has no ❯.
+	const multiline = "  ╭────────╮\n  │ ❯ line ONE                                     │\n  │   line TWO                                     │\n  │   line THREE                                   │\n  ╰──── Composer 2.5 Fast ─╯"
+	// The approval modal: the cursor sits on the ◆ Run line (no ❯), with the ┃ block below.
+	const modalCap = "    ◆ Run Edit `/x/hello.txt` 10s          11s ⇣19.0k [✗]\n\n  ┃\n  ┃  Allow Edit `/x/hello.txt`?\n  ┃\n  ┃  1 (●) Yes\n\n  1/4:select  │  Ctrl+o:yolo  │  Ctrl+c:cancel"
+
+	cases := []struct {
+		name     string
+		captured string
+		cursorY  int
+		want     ComposerDisposition
+	}{
+		{"empty composer at cursor → Cleared", cleared, 1, ComposerCleared},
+		{"composer with a pending body → Pending", pending, 1, ComposerPending},
+		// A lone user-typed box-drawing │ must NOT false-read Cleared (the recycle gate would discard
+		// the draft) — only the trailing RIGHT border is stripped, not a typed │ in the body.
+		{"body is a lone typed │ → Pending (not a false Cleared)", "  │ ❯ │                       │", 0, ComposerPending},
+		{"multi-line continuation row (no ❯) → Undetermined (non-Cleared, fail-closed)", multiline, 3, ComposerUndetermined},
+		{"approval modal: cursor on ◆ Run line (no ❯) → Undetermined (NOT Cleared — gate-safety)", modalCap, 0, ComposerUndetermined},
+		{"cursor past the captured range → Undetermined", cleared, 9999, ComposerUndetermined},
+		{"negative cursor → Undetermined", cleared, -1, ComposerUndetermined},
+		{"cursor on a plain (non-prompt) line → Undetermined", "  plain conversation line\n  more", 0, ComposerUndetermined},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyGrokComposerLine(tc.captured, tc.cursorY); got != tc.want {
+				t.Errorf("classifyGrokComposerLine = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestGrokComposerStateWiring: ComposerState threads cursorState + capturePane → classifyGrokComposerLine,
+// and fails safe (Undetermined) on a cursor read error or a tmux copy/view mode.
+func TestGrokComposerStateWiring(t *testing.T) {
+	const cleared = "  │ ❯                          │"
+	t.Run("idle cleared composer → Cleared", func(t *testing.T) {
+		g := grok{
+			cursorState: func(string) (int, bool, error) { return 0, false, nil },
+			capturePane: func(string) (string, error) { return cleared, nil },
+		}
+		if got := g.ComposerState("0:0.0"); got != ComposerCleared {
+			t.Errorf("ComposerState = %v, want Cleared", got)
+		}
+	})
+	t.Run("cursor read error → Undetermined", func(t *testing.T) {
+		g := grok{cursorState: func(string) (int, bool, error) { return 0, false, errBoom }}
+		if got := g.ComposerState("0:0.0"); got != ComposerUndetermined {
+			t.Errorf("ComposerState = %v, want Undetermined on cursor error", got)
+		}
+	})
+	t.Run("tmux copy/view mode → Undetermined", func(t *testing.T) {
+		g := grok{
+			cursorState: func(string) (int, bool, error) { return 0, true, nil }, // in mode
+			capturePane: func(string) (string, error) { return cleared, nil },
+		}
+		if got := g.ComposerState("0:0.0"); got != ComposerUndetermined {
+			t.Errorf("ComposerState = %v, want Undetermined in copy-mode", got)
+		}
+	})
+	t.Run("capture error → Undetermined", func(t *testing.T) {
+		g := grok{
+			cursorState: func(string) (int, bool, error) { return 0, false, nil },
+			capturePane: func(string) (string, error) { return "", errBoom },
+		}
+		if got := g.ComposerState("0:0.0"); got != ComposerUndetermined {
+			t.Errorf("ComposerState = %v, want Undetermined on capture error", got)
+		}
+	})
+}
 
 func TestGrokLatestResult(t *testing.T) {
 	t.Run("resolves cwd then reads the store", func(t *testing.T) {

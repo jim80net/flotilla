@@ -172,7 +172,10 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, error) {
 	// rather than drop to a shell. So set remain-on-exit ON first (the /exit then leaves a DEAD
 	// pane we can confirm + respawn), and restore it OFF after (steady-state crash behaviour
 	// unchanged). The close is confirmed by pane_dead (claude-direct) OR a Shell verdict
-	// (a shell-backed desk).
+	// (a shell-backed desk). For a surface that returns ErrNoGracefulClose (e.g. grok), this
+	// remain-on-exit toggle is a harmless NO-OP: that desk is never /exit-ed — Phase 3's
+	// RespawnPane -k kills it directly — so the dead-pane window remain-on-exit creates is never
+	// entered; the restore-OFF defer below still runs to keep crash behaviour unchanged.
 	if err := ops.remainOnExit(target, true); err != nil {
 		return "", fmt.Errorf("phase 2: could not set remain-on-exit for %q (cannot safely close): %w — ABORT, desk untouched", p.agent, err)
 	}
