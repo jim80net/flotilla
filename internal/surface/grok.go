@@ -46,6 +46,9 @@ type grok struct {
 	paneCWD      func(string) (string, error)
 	grokHome     string
 	latestResult func(grokHome, cwd string) (string, error)
+	// ComposerStateProbe seam (#158): the pane's cursor row + whether it is in a tmux mode (copy/view).
+	// Injectable so ComposerState is unit-testable without a tmux server (mirrors claude's cursorState).
+	cursorState func(pane string) (cursorY int, inMode bool, err error)
 }
 
 func newGrok() grok {
@@ -65,16 +68,16 @@ func newGrok() grok {
 		paneCWD:      deliver.PaneCWD,
 		grokHome:     grokHome,
 		latestResult: grokstore.LatestResult,
+		cursorState:  deliver.CursorState,
 	}
 }
 
 func (grok) Name() string { return "grok" }
 
-// Submit delivers a turn via the wired `send` (bracketed paste + Enter, deliver.Send). Single-line
-// delivery is live-confirmed against the official grok composer; whether its composer enables
-// bracketed-paste mode for MULTI-line bodies (so newlines land literally rather than submitting
-// each line) is not yet confirmed — if a multi-line capture shows early submits, wire `send` to
-// deliver.SendCtrlJ.
+// Submit delivers a turn via the wired `send` (bracketed paste + Enter, deliver.Send). Both single-
+// and MULTI-line delivery are live-confirmed against the official grok composer (2026-06-23, #158: a
+// multi-line bracketed paste lands as ONE composer body — newlines literal, no early submit), so the
+// recycle bridge's multi-line handoff/takeover turns deliver whole; no deliver.SendCtrlJ is needed.
 func (g grok) Submit(pane, text string) error { return g.send(pane, text) }
 
 // Assess resolves the pane's rendered state. capture-error returns Unknown (like the other
@@ -150,15 +153,124 @@ const grokWorkingArrow = "⇣"
 
 var grokSpinner = regexp.MustCompile(`[\x{2801}-\x{28FF}]`) // any non-blank braille spinner frame
 
+// grok's TOOL-APPROVAL modal anchors (LIVE-CAPTURED 2026-06-23, #158). The modal renders a ┃-bordered
+// block ("┃ Allow <Verb> `<path>`?" + numbered options) with a selection status line
+// "N/M:select  │  Ctrl+o:yolo  │  Ctrl+c:cancel". BOTH the "N/M:select" counter and the "Ctrl+o:yolo"
+// (always-approve) shortcut are modal-EXCLUSIVE grok chrome — neither appears in ordinary streamed
+// output or the idle/working composer — so they are safe, low-false-positive anchors.
+const grokApprovalYolo = "Ctrl+o:yolo"
+
+var grokApprovalSelect = regexp.MustCompile(`\d+/\d+:select`)
+
 // parseGrokState classifies a captured official-grok pane, claude-style (Working-positive,
-// Idle-default). Working iff the bottom chrome shows the streaming arrow ⇣ OR a braille spinner
-// frame; otherwise Idle (a finished turn shows "Turn completed in …" and an empty composer — no
-// arrow, no spinner). There is no AwaitingApproval branch yet (see the driver note: the official
-// grok's blocking gates are not yet live-captured).
+// Idle-default), with the tool-approval gate checked FIRST. A blocking modal must be detected before
+// the Working check because the streaming arrow ⇣ is CO-PRESENT on the modal's "◆ Run …" line — keying
+// Working first would mis-classify a desk blocked on approval as Working (the live #58/#158 gap, which
+// also leaves the desk invisible to the XO-only wedge timer). Order: AwaitingApproval (modal chrome) →
+// Working (arrow/spinner) → Idle (a finished turn shows an empty composer box, no arrow/spinner/modal).
 func parseGrokState(captured string) State {
 	tail := strings.Join(lastNNonEmptyLines(captured, grokTail), "\n")
+	if grokApprovalSelect.MatchString(tail) || strings.Contains(tail, grokApprovalYolo) {
+		return StateAwaitingApproval
+	}
 	if strings.Contains(tail, grokWorkingArrow) || grokSpinner.MatchString(tail) {
 		return StateWorking
 	}
 	return StateIdle
+}
+
+// --- ComposerStateProbe (#158): grok's cursor-indexed composer classifier ---
+
+// grok composer chrome (LIVE-CAPTURED 2026-06-23). The composer is a box (╭─╮ │ ╰─╯); the input line
+// AT THE CURSOR renders "│ ❯ <body>            │" — the ❯ prompt (U+276F) is preceded by a │ (U+2502)
+// left box border and the body is followed by spaces + a │ right border. Version-specific; revalidate
+// on a grok TUI upgrade.
+const (
+	grokComposerPrompt = "❯" // U+276F
+	grokBoxBorder      = "│" // U+2502 (the composer box vertical border)
+)
+
+// ComposerState implements surface.ComposerStateProbe: it reads the composer AT THE TERMINAL CURSOR and
+// classifies it. A cursor/capture read error, or a tmux copy/view mode (where the cursor and capture
+// coordinate spaces diverge), reads as Undetermined so confirmed delivery / the recycle gate falls back
+// to the Working spinner. grok has no docked-agents sub-composer, so only Cleared/Pending/Undetermined
+// apply (never Queued/SubAgent/ListNav).
+func (g grok) ComposerState(pane string) ComposerDisposition {
+	cy, inMode, err := g.cursorState(pane)
+	if err != nil {
+		return ComposerUndetermined
+	}
+	if inMode {
+		return ComposerUndetermined
+	}
+	captured, err := g.capturePane(pane)
+	if err != nil {
+		return ComposerUndetermined
+	}
+	return classifyGrokComposerLine(captured, cy)
+}
+
+// classifyGrokComposerLine classifies the line at cursorY (0-based) into a ComposerDisposition. It
+// strips grok's LEFT box border (│) before the ❯ prompt — claude's CutPrefix("❯") alone fails on grok's
+// "│ ❯". A cursor outside the captured range, or not on a "│ ❯" prompt line (the tool-approval modal,
+// where the cursor sits on the "◆ Run …" line; or a multi-line continuation row, which carries no ❯),
+// is Undetermined (the caller falls back to the spinner — non-Cleared, fail-closed). The trailing right
+// border + spaces are stripped so an EMPTY composer reads Cleared (the load-bearing gate-safety case).
+func classifyGrokComposerLine(captured string, cursorY int) ComposerDisposition {
+	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
+	if cursorY < 0 || cursorY >= len(lines) {
+		return ComposerUndetermined
+	}
+	line := trimSpace(lines[cursorY])                         // strip leading ws → "│ ❯ … │"
+	line = trimSpace(strings.TrimPrefix(line, grokBoxBorder)) // strip the left │ + ws → "❯ … │"
+	after, isPrompt := strings.CutPrefix(line, grokComposerPrompt)
+	if !isPrompt {
+		return ComposerUndetermined
+	}
+	// Strip the trailing right border + spaces, then the body's leading whitespace. TrimRight's cutset
+	// " │" is the rune set {space, U+2502}, so it removes the spaces between body and the right border
+	// AND the border itself.
+	body := trimSpace(strings.TrimRight(after, " "+grokBoxBorder))
+	if body == "" {
+		return ComposerCleared
+	}
+	return ComposerPending
+}
+
+// --- RecycleBridge (#158): grok's portable-markdown context-preservation policy ---
+
+// HandoffPath is grok's HARNESS-AGNOSTIC handoff convention: <cwd>/.flotilla/handoffs/recycle-<token>.md
+// (the product-owned home, NOT the claude-branded .claude/handoffs/). The token (command-supplied) leads
+// with a timestamp + a crypto/rand nonce, so the path is dated, unique, and absent-at-HEAD by construction.
+func (grok) HandoffPath(cwd, token string) string {
+	return filepath.Join(cwd, ".flotilla", "handoffs", "recycle-"+token+".md")
+}
+
+// HandoffTurn is grok's NON-INTERACTIVE, self-committing handoff instruction. grok has no /handoff skill
+// (so there is no interactive skill to forbid) and runs git/tools directly, so it force-commits via
+// `git add -f` (the handoffs dir may be gitignored). It must NOT ask for confirmation (remote-driven).
+func (grok) HandoffTurn(designatedPath string) string {
+	return "You are being RECYCLED by flotilla (an automated, REMOTE-DRIVEN chapter close — " +
+		"no human is at this pane to answer prompts). Do exactly this, then stop:\n" +
+		"1. Write a complete handoff (objective, completed work, current state, remaining work, " +
+		"gotchas — enough for a fresh session to resume cold) to this EXACT path: " + designatedPath + "\n" +
+		"2. Commit ONLY the handoff to the CURRENT branch (path-scoped, so a dirty index is not swept " +
+		"in): `git add -f \"" + designatedPath + "\" && git commit -m \"chore(recycle): handoff before " +
+		"recycle\" -- \"" + designatedPath + "\"` (the -f is required — the handoffs dir may be gitignored; " +
+		"the quotes guard a path with spaces).\n" +
+		"3. Do NOT ask me to confirm or review, do NOT ask \"is anything missing\" — just write, commit, " +
+		"and stop. flotilla will close and relaunch this desk once the commit lands."
+}
+
+// TakeoverTurn is grok's IMPERATIVE, begin-immediately takeover instruction for the fresh session. grok
+// has no /takeover skill; it tells the desk to read the handoff and work immediately, and to parlay any
+// question via a flotilla message (a remote XO cannot answer an in-pane prompt over the relay).
+func (grok) TakeoverTurn(designatedPath string) string {
+	return "You are a freshly-recycled flotilla desk with a clean context window, and you are " +
+		"REMOTE-DRIVEN (a remote XO drives you over the relay; no human is at this pane). " +
+		"Read this handoff and take over per it, then BEGIN WORK IMMEDIATELY: " + designatedPath + "\n" +
+		"Do NOT ask \"shall I start?\" or wait for confirmation — start executing the handoff's remaining " +
+		"work now. If you genuinely need a clarification, surface it via a flotilla MESSAGE (e.g. " +
+		"`flotilla notify --from <your-name> \"...\"`), NEVER an in-pane interactive prompt — a remote XO " +
+		"cannot answer an in-pane menu over the relay (keystrokes navigate it, they don't select)."
 }
