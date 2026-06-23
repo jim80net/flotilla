@@ -3,6 +3,7 @@ package watch
 import (
 	"strings"
 
+	"github.com/jim80net/flotilla/internal/discord"
 	"github.com/jim80net/flotilla/internal/relay"
 	"github.com/jim80net/flotilla/internal/roster"
 )
@@ -21,7 +22,15 @@ type Relay struct {
 	injector   *Injector
 	onAccepted func(target string) // clock hook, called with the routed target; may be nil
 	notify     func(string)        // post a one-line channel notice (unknown @agent); may be nil
+	gate       *dedup              // shared at-least-once gate; nil ⇒ no dedup (legacy/clock-only). See SetGate.
 }
+
+// SetGate wires the shared catch-up dedup gate. The live gateway path then records
+// each relayed message id in the gate (so the REST poller does not re-deliver it)
+// but NEVER advances the cursor (the leapfrog guard — only the poller advances it).
+// Optional: when unset, Handle behaves exactly as before (no dedup), so clock-only
+// and pre-catch-up configurations are unchanged.
+func (r *Relay) SetGate(g *dedup) { r.gate = g }
 
 // NewRelay builds the handler. The bare-message target and the @name member scope are
 // taken PER MESSAGE from the binding for the message's origin channel
@@ -40,7 +49,7 @@ func NewRelay(cfg *roster.Config, injector *Injector, onAccepted func(string), n
 // notifies the clock with the resolved target, and enqueues the delivery — tagging it
 // with the origin channel for the CoS-mirror seam (#108). The security-critical
 // Accept (operator-only, drop self-mirror) runs unchanged, PER channel.
-func (r *Relay) Handle(channelID, webhookID, authorID, content string) {
+func (r *Relay) Handle(channelID, messageID, webhookID, authorID, content string) {
 	binding, ok := r.cfg.BindingForChannel(channelID)
 	if !ok {
 		return // a message on a channel no binding owns — ignore (defense in depth)
@@ -55,9 +64,28 @@ func (r *Relay) Handle(channelID, webhookID, authorID, content string) {
 	// (the intent granted in some channels, missed in one), so without this guard a
 	// mis-permissioned channel would silently inject a blank turn into that channel's
 	// XO pane. Routing a blank is never desirable, so we drop it regardless of cause.
+	// (A live-empty message is also NOT recorded in the gate, so the catch-up poller —
+	// whose REST fetch carries full content — can still recover it later.)
 	if strings.TrimSpace(content) == "" {
 		return
 	}
+	// Dedup against the catch-up poller (Invariant 1: record-but-do-not-advance). Run
+	// AFTER Accept + the empty-guard so the seen-set holds only ids actually relayed.
+	// A message already relayed (live or recovered) is dropped here. An unparseable id
+	// (never for real Discord data) bypasses the gate rather than being silently lost.
+	if r.gate != nil {
+		if id, ok := discord.ParseSnowflake(messageID); ok && !r.gate.liveNew(channelID, id) {
+			return
+		}
+	}
+	r.route(channelID, binding, content)
+}
+
+// route applies the routing decision and enqueues the delivery. Shared by the live
+// gateway Handle (after the dedup gate) and the catch-up poller (after classify), so
+// both ingestion sources deliver through the identical Route + clock-hook + notice +
+// Enqueue seam.
+func (r *Relay) route(channelID string, binding roster.Channel, content string) {
 	d := relay.Route(content, binding.XOAgent, memberResolver(binding.Members))
 	if r.onAccepted != nil {
 		r.onAccepted(d.Agent) // operator activity IS a clock tick (target-aware)

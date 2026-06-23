@@ -138,7 +138,7 @@ const (
 // ComposerState implements surface.ComposerStateProbe: it reads the composer AT THE TERMINAL CURSOR
 // (the focused input line) and classifies it. Reading at the cursor — not a fixed bottom-of-pane
 // window — is what lets it SEE a per-agent message sub-composer or a queued-message prompt rendered
-// ABOVE a docked agents panel (the window-based ComposerProbe was blind to these). A cursor or
+// ABOVE a docked agents panel (the earlier window-based composer probe was blind to these). A cursor or
 // capture read error reads as Undetermined so confirmed delivery falls back to the Working spinner.
 func (c claudeCode) ComposerState(pane string) ComposerDisposition {
 	cy, inMode, err := c.cursorState(pane)
