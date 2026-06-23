@@ -176,7 +176,14 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, error) {
 	if err := ops.remainOnExit(target, true); err != nil {
 		return "", fmt.Errorf("phase 2: could not set remain-on-exit for %q (cannot safely close): %w — ABORT, desk untouched", p.agent, err)
 	}
-	defer func() { _ = ops.remainOnExit(target, false) }() // restore on every exit from here (incl. abort)
+	// Restore on every exit from here (incl. abort). A failed restore is SURFACED, not swallowed —
+	// leaving remain-on-exit on would change the desk's crash behaviour (a future crash would leave a
+	// dead pane instead of closing, breaking resume's cold-recovery), so name the manual fix.
+	defer func() {
+		if rerr := ops.remainOnExit(target, false); rerr != nil {
+			log.Printf("flotilla: recycle: WARNING — could not restore remain-on-exit=off for %q (%v); the pane's crash behaviour may be changed — reset it with: tmux set-option -p -t %s remain-on-exit off", p.agent, rerr, target)
+		}
+	}()
 
 	closeErr := ops.closeFn(target)
 	switch {
