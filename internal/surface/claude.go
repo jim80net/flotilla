@@ -3,6 +3,7 @@ package surface
 import (
 	"fmt"
 	"log"
+	"path/filepath"
 	"strings"
 	"unicode"
 
@@ -23,6 +24,9 @@ type claudeCode struct {
 	parseBusy   func(string) bool
 	send        func(string, string) error
 	clear       func(string) error
+	// Close seam: inject a slash command (e.g. "/exit") as literal slash-keys. Command-
+	// parameterized (unlike clear) so Close is unit-testable that it issues exactly "/exit".
+	slashKeys func(pane, cmd string) error
 	// ResultReader seam: read the desk's turn-final text from its Claude Code session transcript,
 	// keyed by the pane. Injectable so LatestResult is unit-testable without tmux or a real
 	// ~/.claude/projects tree (mirrors the grok driver's latestResult seam).
@@ -41,6 +45,7 @@ func newClaudeCode() claudeCode {
 		parseBusy:      deliver.ParseBusy,
 		send:           deliver.Send,
 		clear:          deliver.ClearContext,
+		slashKeys:      deliver.InjectSlash,
 		latestTurnText: claudestore.LatestTurnText,
 		cursorState:    deliver.CursorState,
 	}
@@ -102,6 +107,57 @@ func (c claudeCode) Assess(pane string) State {
 func (c claudeCode) Rotate(pane string) error { return c.clear(pane) }
 
 func (claudeCode) RotateStrategy() Strategy { return SlashCommand }
+
+// Close gracefully exits the claude session by injecting "/exit" as literal slash-keys
+// (the reference graceful close). The pane drops to a shell once the process exits; the
+// caller (recycle) confirms the Shell before any relaunch. The exact "/exit" keystroke
+// behaviour is verified in the recycle live-validation before it is trusted in anger.
+func (c claudeCode) Close(pane string) error { return c.slashKeys(pane, "/exit") }
+
+// --- RecycleBridge (the reference implementation; memex /handoff + /takeover FORMAT,
+//     driven non-interactively) ---
+
+// HandoffPath is the claude handoffs convention: <cwd>/.claude/handoffs/recycle-<token>.md.
+// The token (command-supplied) leads with a timestamp + a crypto/rand nonce, so the path is
+// dated, sortable, unique, and absent-at-HEAD by construction.
+func (claudeCode) HandoffPath(cwd, token string) string {
+	return filepath.Join(cwd, ".claude", "handoffs", "recycle-"+token+".md")
+}
+
+// HandoffTurn is the NON-INTERACTIVE, self-committing handoff instruction. It deliberately
+// references the /handoff FORMAT (the document structure) rather than invoking the /handoff
+// SKILL — the skill ends in an interactive "Is anything missing?" confirmation and has no
+// commit step, both of which would deadlock a remote-driven recycle. It force-commits
+// (git add -f) so a gitignored .claude/handoffs/ does not block the durable-blob gate.
+func (claudeCode) HandoffTurn(designatedPath string) string {
+	return "You are being RECYCLED by flotilla (an automated, REMOTE-DRIVEN chapter close — " +
+		"no human is at this pane to answer prompts). Do exactly this, then stop:\n" +
+		"1. Write a complete handoff (follow the /handoff document FORMAT — objective, completed " +
+		"work, current state, remaining work, gotchas — enough for a fresh session to resume cold) " +
+		"to this EXACT path: " + designatedPath + "\n" +
+		"2. Commit ONLY the handoff to the CURRENT branch (path-scoped, so a dirty index is not " +
+		"swept in): `git add -f \"" + designatedPath + "\" && git commit -m " +
+		"\"chore(recycle): handoff before recycle\" -- \"" + designatedPath + "\"` (the -f is required — " +
+		".claude/handoffs/ may be gitignored; the quotes guard a path with spaces).\n" +
+		"3. Do NOT run the interactive /handoff skill, do NOT ask me to confirm or review, do NOT ask " +
+		"\"is anything missing\" — just write, commit, and stop. flotilla will close and relaunch this " +
+		"desk once the commit lands."
+}
+
+// TakeoverTurn is the IMPERATIVE, begin-immediately takeover instruction for the fresh
+// session. It does NOT invoke the /takeover skill (whose step 5 pauses on "Shall I start?")
+// — it tells the desk to read the handoff and work immediately, and to parlay any question
+// via a flotilla message, never an in-pane menu (unanswerable by a remote XO over the relay).
+func (claudeCode) TakeoverTurn(designatedPath string) string {
+	return "You are a freshly-recycled flotilla desk with a clean context window, and you are " +
+		"REMOTE-DRIVEN (a remote XO drives you over the relay; no human is at this pane). " +
+		"Read this handoff and take over per it, then BEGIN WORK IMMEDIATELY: " + designatedPath + "\n" +
+		"Do NOT run the interactive /takeover skill, do NOT ask \"shall I start?\" or wait for " +
+		"confirmation — start executing the handoff's remaining work now. If you genuinely need a " +
+		"clarification, surface it via a flotilla MESSAGE (e.g. `flotilla notify --from <your-name> " +
+		"\"...\"`), NEVER an in-pane interactive prompt or AskUserQuestion menu — a remote XO cannot " +
+		"answer an in-pane menu over the relay (keystrokes navigate it, they don't select)."
+}
 
 // LatestResult implements ResultReader: the desk's turn-final assistant text, read from its Claude
 // Code session transcript (located from outside the session via the pane's working directory). This

@@ -310,6 +310,25 @@ func (c Confirm) SubmitWithSelfHeal(d Driver, pane, text string) error {
 	return c.Submit(d, pane, text)
 }
 
+// Heal runs the bounded overlay self-heal WITHOUT submitting anything — the heal-only entry point
+// for callers that need to clear a focus-stealing overlay before a non-Submit action (e.g. recycle's
+// Phase-2 close, which must reach the main composer before injecting /exit, but must NOT deliver a
+// turn). It is a no-op when SendCtrlC is unwired (the default-off #156 kill-switch), the driver has no
+// composer probe, or the pane is not idle on an overlay — the same gates SubmitWithSelfHeal applies
+// before its submit. Unlike SubmitWithSelfHeal it NEVER calls Submit, so it can never deliver a body.
+func (c Confirm) Heal(d Driver, pane string) {
+	if c.SendCtrlC == nil {
+		return
+	}
+	sp, ok := d.(ComposerStateProbe)
+	if !ok || d.Assess(pane) != StateIdle {
+		return
+	}
+	if st := sp.ComposerState(pane); st == ComposerSubAgent || st == ComposerListNav {
+		c.selfHeal(d, pane, sp)
+	}
+}
+
 // selfHeal runs the bounded re-probe-between Ctrl-C loop to recover a focus-stealing overlay. SAFETY
 // (#156), every iteration: (a) gates on Assess==Idle — NEVER Ctrl-C a Working/Shell pane (a Ctrl-C
 // into a running turn INTERRUPTS it; a shell is gone); (b) stops the instant the composer is no

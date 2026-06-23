@@ -102,6 +102,20 @@ func cmdResume(args []string) error {
 		return fmt.Errorf("agent %q: unknown surface %q (not a registered driver)", agentName, agentSurface(cfg, agentName))
 	}
 
+	// Serialize the in-place respawn against a concurrent recycle (or another resume) on the
+	// SAME pane: recycle holds this lock across its close→relaunch span, so taking it here
+	// closes the duplicate-process race the ResolveUnique branch would otherwise admit (the
+	// cold-create branch's residual race is unchanged — see runResume's ResolveNone default).
+	// Best-effort by marker: we lock the resolved pane if one exists; a cold-create (no pane)
+	// has nothing to lock. Bounded acquire → drop with a clear error (never wedges the clock).
+	if target, outcome, rerr := deliver.Resolve(agent.Title()); rerr == nil && outcome == deliver.ResolveUnique {
+		txn, lerr := deliver.AcquirePaneTxn(target, deliver.PaneTxnTimeout)
+		if lerr != nil {
+			return fmt.Errorf("resume %q: %w (a recycle or another resume holds the pane lock) — retry shortly", agentName, lerr)
+		}
+		defer txn.Release()
+	}
+
 	session, window := resumeTmuxTarget(recipe, agentName)
 	ops := resumeOps{
 		resolve:    deliver.Resolve,
