@@ -77,7 +77,9 @@ func NewGateway(botToken string, channelIDs []string, handler MessageHandler, on
 }
 
 // Open connects the gateway. discordgo auto-reconnects thereafter; messages sent
-// during a disconnect window are not replayed (the operator can resend).
+// during a disconnect window are not replayed on the websocket — they are recovered
+// by the REST catch-up reconciler (the at-least-once ingestion backstop, #161),
+// which the OnReconnect hook kicks immediately on every reconnect.
 func (g *Gateway) Open() error {
 	if err := g.session.Open(); err != nil {
 		return fmt.Errorf("open gateway: %w", err)

@@ -108,6 +108,17 @@ reintroducing #161. At-least-once requires enqueue-then-persist. (Duplicates: ra
 crash window, and a duplicated directive ≫ a dropped one — disclosed, not eliminated; exactly-once is
 impossible.)
 
+> RESIDUAL (honest disclosure, systems-review round 2): "enqueued" means the job has been handed to the
+> injector's in-memory queue (`injector.Enqueue` returns once the job is on the buffered channel —
+> `inject.go:256-261`), NOT that it has been delivered to the pane. So a crash in the narrow
+> (sub-second) window between `commit` persisting the cursor and the injector worker actually delivering
+> a still-buffered job loses that job with the cursor advanced past it. This is **the same class as the
+> live relay path's existing behavior** — a crash always loses in-memory-queued-but-undelivered jobs,
+> true of the live path today — so this change does **not introduce or worsen** that window; it is named
+> here for completeness, not as a new defect. Closing it fully would require committing the cursor only
+> on the injector's confirmed-delivery callback (couples the poller to async delivery + complicates
+> batch ordering) — not warranted for v1 given the window is symmetric with existing semantics.
+
 ### Invariant 3 — the cursor never advances past an unfetched older message (F1 — fail-closed pagination)
 
 Because `after=C` returns the **oldest** block above C (probed), each page is the contiguous-next

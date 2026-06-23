@@ -148,7 +148,7 @@ const (
 // Submit delivers text to the pane via the driver and CONFIRMS the submit was accepted, with an
 // idle-gate and an idempotent Enter-only retry. It returns nil ONLY when the submit is confirmed —
 // by the composer CLEARING (the body left the composer ⇒ the Enter was accepted; the fast, turn-
-// start-latency-INDEPENDENT signal, available when the driver implements ComposerProbe) OR the
+// start-latency-INDEPENDENT signal, available when the driver implements ComposerStateProbe) OR the
 // Idle→Working edge (the spinner; corroboration and the fallback for drivers without a composer
 // probe). Otherwise: ErrBusy / ErrCrashed / ErrTransient (no submit attempted), the wrapped submit
 // error (a paste that did not land), ErrCrashed (the pane dropped to a shell mid-confirm), or
