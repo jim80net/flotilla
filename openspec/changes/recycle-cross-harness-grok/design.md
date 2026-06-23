@@ -1,6 +1,7 @@
 # Design — Cross-harness recycle: make `grok` recycle-capable (#158)
 
-**Status:** DRAFT for the design-trio gate (systems-review + open-code-review) and hydra-ops review.
+**Status:** Design-trio gate PASSED (systems-review + open-code-review, both code-grounded); findings
+folded below (see §9). Ready for the formal openspec change + the live grok characterization.
 **Issue:** #158 — family-office migrate Claude Code → Grok surface (operator-directed).
 **Depends on:** #157 desk-recycle (MERGED, 6.3 live-validated). Unblocked.
 **Ratified fork (operator, via prior chapter handoff):** fork-3 — a **simple portable-markdown
@@ -53,11 +54,22 @@ grok-research was observed **blocked on a tool-approval modal** —
 ```
 
 — while its status line still showed `⇣89.0k`. The current `parseGrokState`
-(`grok.go:158-164`) keys Working on the `⇣` arrow OR a braille spinner, so it reads this
-**AwaitingApproval** state as **Working**. This is the documented `#58` "blocking gates not yet
-live-captured" gap — and it is now a **#158 prerequisite**: a recycle's Phase-0/Phase-1
-idle∧ComposerCleared gate must NEVER classify an approval modal as a cleared composer (that would
-fire `/exit` keystrokes into a live modal, mis-route, and at worst close a desk mid-decision). See §5.
+(`grok.go:158-164`) keys Working on the `⇣` arrow OR a braille spinner over the last 12 lines; the
+`⇣89.0k` in the tail forces **Working** here (a modal with no co-present arrow/spinner would instead
+fall through to the `return StateIdle` default — `grok.go:163`). Either way it MIS-classifies a
+blocking modal. This is the documented `#58` "blocking gates not yet live-captured" gap.
+
+**Precise gate-safety framing (per the design-trio P2 finding — the earlier draft mis-stated the
+danger).** The recycle gate is `idleCleared = Assess()==StateIdle && ComposerState()==ComposerCleared`
+(`recycle.go:251-252`), an AND. So a modal mis-read as **Working** is *fail-CLOSED* — the `Assess`
+arm fails, `pollIdleCleared`/`pollHandoffGate` never pass, recycle ABORTS on timeout, desk untouched
+(`recycle.go:126-128, 146-148`); `/exit` (Phase 2) is unreachable. The DANGEROUS path is the inverse:
+a modal mis-read as **Idle** (arrow scrolled off, no spinner frame in the tail — plausible, the modal
+is a static render) *conjoined with* `ComposerState` wrongly returning `ComposerCleared`. THAT fires
+`/exit` into a live modal. Therefore the **load-bearing safety property #158 must guarantee is:
+`ComposerState` returns NON-`Cleared` (and/or `Assess` returns non-`Idle`) on the approval modal.**
+`AwaitingApproval` as an assessed state is a liveness *nice-to-have* (XO escalation), NOT the gate-
+safety mechanism — the gate-safety mechanism is the composer-probe modal classification. See §5.
 
 ## 3. Migration mechanism — orchestrated, per ratified fork-3 (NO new heavy verb)
 
@@ -124,12 +136,24 @@ AwaitingApproval markers **MUST be live-captured, never written from memory**. R
 1. **Idle / cleared** — grok after "Turn completed in Xs." with an empty composer box. (Needed for
    `ComposerCleared` + the idle gate.)
 2. **Pending** — a body typed but not submitted. (Needed for `ComposerPending`.)
-3. **Approval modal** — the `Allow …?` / `1/4:select` render (captured in §2a). (Must classify as
-   NOT-cleared, and ideally drive `Assess → AwaitingApproval`.)
+3. **Approval modal** — the `Allow …?` / `1/4:select` render (captured in §2a). LOAD-BEARING: must
+   classify as NOT-`Cleared` (the gate-safety property, §2a); driving `Assess → AwaitingApproval` is
+   the liveness bonus (§G2).
 4. **Cursor behavior** — where grok's terminal cursor sits relative to the composer (claude's probe
    is cursor-indexed; grok pane `%21` reported cursor y=64 of height=77 with the modal at the
    bottom — grok's cursor may NOT track the composer the way claude's does, so a cursor-indexed
    classifier may need a different anchor — the box-char `❯`/`◆`/`U+2500` chrome).
+5. **Multi-line paste delivery (design-trio P1 — load-bearing).** Both bridge turns are MULTI-LINE
+   (numbered steps with literal `\n`, as claude's are — `claude.go:132-160`). grok's `Submit` routes
+   through `deliver.Send` (bracketed paste), and grok's bracketed-paste MULTI-line behavior is
+   explicitly UNCONFIRMED (`grok.go:73-77`: "if a multi-line capture shows early submits, wire `send`
+   to `deliver.SendCtrlJ`"). If grok lacks bracketed-paste mode, each `\n` submits early and the
+   handoff/takeover instruction FRAGMENTS — Phase 1 breaks. So the session MUST deliver a multi-line
+   body and verify it lands as ONE turn; if it fragments, the grok driver's `send` seam is wired to
+   `deliver.SendCtrlJ` (the same fix the driver doc names). This is a recycle-correctness gate, not
+   cosmetic.
+6. **Identity file** — confirm grok's instruction file is `AGENTS.md` (flagged `ASSUMED` at
+   `workspace.go:54-57`); free to verify in the same session, closes an open code `ASSUMED`.
 
 **Empirical prerequisite:** grok-research cannot be commandeered (active desk; currently mid-decision
 at an approval modal). The clean characterization harness is a **throwaway grok session** (exactly as
@@ -152,14 +176,40 @@ tactical-head's real-money order path, so the cutover TIMING is operator-owned.)
 2. family-office (Claude) writes + commits its handoff (claude `HandoffTurn`).
 3. Flip roster surface + launch recipe to grok (host-local config).
 4. `flotilla resume family-office` (relaunch on grok, fresh).
-5. Send grok the `TakeoverTurn` at the committed handoff path.
+5. Send grok the `TakeoverTurn` at the committed handoff path. **The path is the FROM-harness
+   (claude) path** (`<cwd>/.claude/handoffs/recycle-<token>.md`), sourced from the claude recycle's
+   status record `~/.flotilla/family-office/last-recycle.json` `handoff_path` field
+   (`recycle.go:489-493`) — NOT guessed, and NOT grok's own `.flotilla/handoffs/` path (grok's
+   `TakeoverTurn` is path-parametric, so handing it a `.claude/handoffs/` path is correct).
 6. Verify: full XO function, flotilla reachability, real-money order path intact — end-to-end.
 
 ## 7. Scope / phasing / what's NOT in
 
 **In #158 (flotilla code):** grok `ComposerStateProbe`, grok `RecycleBridge`, grok
-`AwaitingApproval` (gate safety) — all live-characterized; unit tests with fakes per the surface
-test pattern; spec deltas (surface + recycle).
+`AwaitingApproval` (liveness) + the gate-safe modal classification (the load-bearing property, §2a),
+multi-line `Submit` confirmation (→ `SendCtrlJ` if needed, §5.5) — all live-characterized; unit tests
+with fakes per the established surface test pattern (`grok_test.go` table classifier +
+`recycle_test.go` bridge-substring + `TestRecycleSupport`/`stubNoBridge` refuse coverage — KEEP the
+`stubNoBridge` case, since grok becoming recycle-capable removes the last in-tree refuse fixture).
+
+**Exact spec deltas this change MUST author (design-trio G1, High — the deltas, named):**
+- `openspec/specs/surface/spec.md:337` grok-driver requirement ("reduced state set"): it currently
+  mandates grok emit ONLY `Shell/Working/Idle` and **SHALL NOT** emit `AwaitingApproval` until the
+  gates are live-captured (`:354-357`). #158 live-captures the tool-approval gate, so this delta
+  **retracts that clause** and adds `AwaitingApproval` + the `ComposerStateProbe`/modal classification.
+- `openspec/specs/surface/spec.md:440`/`:458-460` RecycleBridge requirement ("Only Claude Code
+  implements the bridge today… this spec does NOT assert one exists"): amend to assert grok now
+  implements it, with the `.flotilla/handoffs/` convention as a second worked example (`:443`).
+- The `ComposerStateProbe` capability requirement is NOT yet in the active surface spec — it is parked
+  in the **unarchived** `confirm-cursor-disposition` change (`confirm-cursor-disposition/specs/
+  surface/spec.md`). **Spec-ordering dependency:** either that change archives first, or #158's
+  surface delta carries the requirement. Flag to hydra-ops; do NOT silently duplicate it.
+- `AwaitingApproval` wiring: mirror the **aider** precedent (`surface/spec.md:128` — "Emitting
+  AwaitingApproval and Errored activates XO escalation") and note that grok desks are today invisible
+  to the XO-only wedge timer (`grok.go:33-35`); making `AwaitingApproval` meaningful closes that.
+- `openspec/specs/recycle/spec.md:175-199` cross-harness-ready requirement: change "the only harness
+  meeting the recycle-capable bar today is Claude Code" → grok now meets it, and add an
+  orchestrated-migration scenario encoding the FROM/TO path-sourcing invariant (§6 step 5).
 **In #158 (operational):** the family-office migration runbook + live exercise.
 **NOT in #158 (follow-ups, filed/flagged):**
 - grok graceful `Close` live-characterization (optional polish; respawn-kill suffices).
@@ -170,11 +220,35 @@ test pattern; spec deltas (surface + recycle).
 
 ## 8. Open items for hydra-ops
 
-1. **Confirm fork-3 / option (C)** (orchestrated migration, no new verb) — believed ratified; proceed
-   unless redirected.
-2. **Throwaway-grok characterization session** — affirmed-envelope spend; heads-up that I'll spin one
-   to live-capture grok's composer/approval/idle renders (the impl-gating empirical step).
-3. **family-office cutover timing** — operator/hydra-ops-owned (real-money order path); #158 code +
-   runbook land first, the live cutover is scheduled separately.
-4. **SSH-agent push blocker** — `git fetch`/push currently fails ("1password ssh key … agent
-   communication failed"); the PR push will need this resolved (operator-owned).
+1. **fork-3 / option (C)** (orchestrated migration, no new verb) — CONFIRMED by hydra-ops (2026-06-23).
+2. **Throwaway-grok characterization session** — APPROVED by hydra-ops (affirmed Grok-subscription
+   envelope; the correct cold-test-the-live-artifact step). Proceeding.
+3. **family-office cutover timing** — CONFIRMED operator-timed by hydra-ops (real-money order path);
+   #158 code + runbook land first; hydra-ops gates/merges the PR like the others.
+4. **SSH-agent push blocker** — RESOLVED by hydra-ops: use the gh-token HTTPS bypass (per
+   `.claude/rules/git-push-bypass-1password.md`): `git -c credential.helper= -c
+   "url.https://x-access-token:$(gh auth token)@github.com/.insteadOf=git@github.com:" push origin
+   <branch>`. Not a blocker; the 1Password agent itself is flagged to the operator separately.
+
+## 9. Design-trio findings folded (systems-review + open-code-review, both code-grounded)
+
+Both reviews verified every factual/code claim in this design against source (all TRUE; the
+fabrication audit PASSED — no invented grok markers, live-capture explicitly gated). Findings folded:
+
+- **P1 (systems, load-bearing) — multi-line paste UNCONFIRMED for grok.** Folded into §5.5: the live
+  session MUST verify a multi-line body lands as one turn; wire `deliver.SendCtrlJ` if it fragments.
+- **P2 (systems) — §2a danger was mis-stated.** Folded into §2a: a Working mis-read is fail-CLOSED
+  (stalls); the load-bearing property is `ComposerState` non-`Cleared` on the modal.
+- **P2 (systems) — FROM/TO path sourcing.** Folded into §6 step 5: source the takeover path from the
+  claude recycle's `last-recycle.json` `handoff_path`.
+- **P2 (systems) — handoff-path git-root invariant.** The designated path MUST resolve under the git
+  work-tree containing the desk's cwd (`HandoffDurable`/`HandoffAbsentAtHead` compute
+  `filepath.Rel(gitTopLevel(cwd), path)` — `deliver/recycle.go:64-129`). `<cwd>/.flotilla/handoffs/`
+  satisfies this when cwd is inside the worktree; the spec delta states it explicitly (don't assume a
+  grok desk's cwd is the git root, as the claude bridge does in practice).
+- **P3 (systems) — `remainOnExit(true)` is a no-op on the grok kill-fallback path** (grok never
+  `/exit`s); harmless, worth a one-line code comment, not a behavior change.
+- **G1 (OCR, High) — spec deltas under-specified.** Folded into §7: the three requirements + the
+  `confirm-cursor-disposition` spec-ordering dependency are now named.
+- **G2 (OCR) — AwaitingApproval needs the aider-escalation pattern + wedge-timer note.** Folded into §7.
+- **G3/G4 (OCR, Low) — test pattern + path-divergence** confirmed consistent; folded into §7 scope.
