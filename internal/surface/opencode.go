@@ -73,6 +73,12 @@ func (c openCode) Rotate(pane string) error { return c.inject(pane, "/clear") }
 
 func (openCode) RotateStrategy() Strategy { return SlashCommand }
 
+// Close returns ErrNoGracefulClose: OpenCode's clean in-session quit keystroke is not
+// live-verified, so rather than guess (and risk injecting a non-command that lands as
+// literal text), it signals the caller to use the handoff-gated kill fallback — safe
+// because the caller has already preserved context. Mirrors grok's honest refusal.
+func (openCode) Close(pane string) error { return ErrNoGracefulClose }
+
 // --- pure state classifier (the testable core) ---
 
 // openCodeTail bounds the marker scan to the last N NON-EMPTY lines of the captured

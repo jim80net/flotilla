@@ -101,6 +101,13 @@ func (g grok) Rotate(pane string) error { return g.inject(pane, "/new") }
 
 func (grok) RotateStrategy() Strategy { return SlashCommand }
 
+// Close returns ErrNoGracefulClose: grok's "/exit" is NOT live-characterized (this driver
+// has a history of being written against the wrong product — see the type doc — so
+// asserting an unverified exit keystroke would repeat that error). #158 live-characterizes
+// grok's graceful close; until then the caller uses the handoff-gated kill fallback (safe —
+// the handoff is durable by the time Close is reached). An honest refusal, never a guess.
+func (grok) Close(pane string) error { return ErrNoGracefulClose }
+
 // LatestResult implements ResultReader: the full text of grok's latest completed turn, read from
 // the official grok session store (~/.grok), keyed by the desk pane's working directory. This is
 // what makes a grok desk fully readable — the pane capture shows only the visible tail, but a long

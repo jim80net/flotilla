@@ -21,6 +21,7 @@ func (s *confirmStub) Name() string                { return "stub" }
 func (s *confirmStub) Submit(string, string) error { s.submitCalls++; return s.submitErr }
 func (s *confirmStub) Rotate(string) error         { return nil }
 func (s *confirmStub) RotateStrategy() Strategy    { return SlashCommand }
+func (s *confirmStub) Close(string) error          { return nil }
 func (s *confirmStub) Assess(string) State {
 	if s.idx >= len(s.assessSeq) {
 		return s.assessSeq[len(s.assessSeq)-1] // repeat the last scripted state
@@ -142,6 +143,7 @@ func (s *stateStub) Name() string                { return "state-stub" }
 func (s *stateStub) Submit(string, string) error { s.submitCalls++; return nil }
 func (s *stateStub) Rotate(string) error         { return nil }
 func (s *stateStub) RotateStrategy() Strategy    { return SlashCommand }
+func (s *stateStub) Close(string) error          { return nil }
 func (s *stateStub) Assess(string) State {
 	if s.aIdx >= len(s.assessSeq) {
 		return s.assessSeq[len(s.assessSeq)-1]
@@ -430,6 +432,7 @@ func (s *healStub) Name() string                { return "heal-stub" }
 func (s *healStub) Submit(string, string) error { s.submits++; return nil }
 func (s *healStub) Rotate(string) error         { return nil }
 func (s *healStub) RotateStrategy() Strategy    { return SlashCommand }
+func (s *healStub) Close(string) error          { return nil }
 func (s *healStub) Assess(string) State {
 	if len(s.assessSeq) == 0 {
 		return StateIdle
@@ -574,5 +577,42 @@ func TestSelfHealShellAborts(t *testing.T) {
 	c.selfHeal(d, "0:0.0", d)
 	if ctrlc != 0 {
 		t.Errorf("Ctrl-C sent = %d, want 0 (Shell → abort)", ctrlc)
+	}
+}
+
+// --- Confirm.Heal: heal-only (NEVER submits) — the recycle Phase-2 close-guard entry point ---
+
+func TestHealDisabledIsNoOp(t *testing.T) {
+	// SendCtrlC nil (the default-off kill-switch) → Heal is a no-op: zero Ctrl-C, zero Submit.
+	enter, ctrlc := 0, 0
+	c := newConfirm(&enter) // SendCtrlC stays nil
+	d := &healStub{overlay: ComposerSubAgent, recoverAt: 99, ctrlc: &ctrlc}
+	c.Heal(d, "0:0.0")
+	if ctrlc != 0 || d.submits != 0 {
+		t.Errorf("Heal (disabled): ctrlc=%d submits=%d, want 0/0", ctrlc, d.submits)
+	}
+}
+
+func TestHealRecoversOverlayWithoutSubmitting(t *testing.T) {
+	// Idle pane on an overlay + self-heal wired: Heal presses Ctrl-C until recovered and NEVER
+	// calls Submit (the invariant that makes it safe for the close guard — no body is delivered).
+	enter, ctrlc := 0, 0
+	d := &healStub{overlay: ComposerSubAgent, recoverAt: 1, ctrlc: &ctrlc}
+	healConfirm(&enter, &ctrlc).Heal(d, "0:0.0")
+	if ctrlc != 1 {
+		t.Errorf("Heal: ctrlc=%d, want 1 (recovered after one press)", ctrlc)
+	}
+	if d.submits != 0 {
+		t.Errorf("Heal must NEVER Submit (got %d submits)", d.submits)
+	}
+}
+
+func TestHealSkipsWhenNotIdle(t *testing.T) {
+	// A Working pane is not idle → Heal must not press Ctrl-C (never interrupt a running turn) or submit.
+	enter, ctrlc := 0, 0
+	d := &healStub{assessSeq: []State{StateWorking}, overlay: ComposerSubAgent, recoverAt: 1, ctrlc: &ctrlc}
+	healConfirm(&enter, &ctrlc).Heal(d, "0:0.0")
+	if ctrlc != 0 || d.submits != 0 {
+		t.Errorf("Heal (not idle): ctrlc=%d submits=%d, want 0/0", ctrlc, d.submits)
 	}
 }

@@ -67,6 +67,7 @@ func (d *recordingDriver) Submit(string, string) error { d.submitCalls++; return
 func (d *recordingDriver) Assess(string) State         { return StateIdle }
 func (d *recordingDriver) Rotate(string) error         { d.rotateCalls++; return nil }
 func (d *recordingDriver) RotateStrategy() Strategy    { return d.strategy }
+func (d *recordingDriver) Close(string) error          { return nil }
 
 func TestRotateContextNeverInjectsIntoRestartSurface(t *testing.T) {
 	// THE GUARD (XO ruling): a RestartProcess surface must NEVER be injected into

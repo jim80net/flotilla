@@ -187,6 +187,7 @@ func (d *regrDriver) Name() string                     { return "regr" }
 func (d *regrDriver) Submit(string, string) error      { d.submits++; return nil }
 func (d *regrDriver) Rotate(string) error              { return nil }
 func (d *regrDriver) RotateStrategy() surface.Strategy { return surface.SlashCommand }
+func (d *regrDriver) Close(string) error               { return nil }
 func (d *regrDriver) Assess(string) surface.State {
 	if d.i >= len(d.assess) {
 		return d.assess[len(d.assess)-1]
@@ -257,6 +258,7 @@ func (d *composerDriver) Name() string                     { return "composer" }
 func (d *composerDriver) Submit(string, string) error      { d.submits++; return nil }
 func (d *composerDriver) Rotate(string) error              { return nil }
 func (d *composerDriver) RotateStrategy() surface.Strategy { return surface.SlashCommand }
+func (d *composerDriver) Close(string) error               { return nil }
 func (d *composerDriver) Assess(string) surface.State      { return surface.StateIdle } // spinner never renders
 func (d *composerDriver) ComposerState(string) surface.ComposerDisposition {
 	return d.state
