@@ -183,6 +183,10 @@ func lastAssistant(path, sessionID string) (string, error) {
 	return last, nil
 }
 
+// normMsg normalizes an operator message for an EXACT (not substring) anchor match: collapse all
+// whitespace runs to single spaces and trim (parity with claudestore.normMsg).
+func normMsg(s string) string { return strings.Join(strings.Fields(s), " ") }
+
 // replyAfterUserMsg scans a chat history and returns the text-bearing assistant entry following the
 // LATEST user entry carrying operatorMsg. A new occurrence of operatorMsg re-anchors. found=false ⇒
 // the matching user entry isn't recorded yet, or no assistant entry follows it. A scan error is
@@ -193,7 +197,7 @@ func replyAfterUserMsg(path, operatorMsg string) (text string, found bool, err e
 		return "", false, fmt.Errorf("grok store: open chat history: %w", err)
 	}
 	defer f.Close()
-	want := strings.TrimSpace(operatorMsg)
+	want := normMsg(operatorMsg)
 
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64<<10), maxLine)
@@ -206,12 +210,13 @@ func replyAfterUserMsg(path, operatorMsg string) (text string, found bool, err e
 		switch e.Type {
 		case "user":
 			ut, ok := extractText(e.Content)
-			uts := strings.TrimSpace(ut)
 			switch {
-			case ok && want != "" && strings.Contains(uts, want):
+			case ok && want != "" && normMsg(ut) == want:
+				// EXACT (whitespace-normalized) match, NOT a substring — parity with claudestore: a
+				// substring anchor would mis-route a later turn that merely contains a short message.
 				armed = true
 				text, found = "", false // (re-)anchor to this delivery of the operator message
-			case armed && uts != "":
+			case armed && strings.TrimSpace(ut) != "":
 				// A SUBSTANTIVE non-anchor user entry (a later prompt) CLOSES the reply window — a new
 				// turn began, so a later assistant entry is NOT the answer to THIS message.
 				armed = false

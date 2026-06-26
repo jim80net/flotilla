@@ -342,6 +342,11 @@ func replyAfterForCwd(cwd, operatorMsg string) (string, bool) {
 	return "", false
 }
 
+// normMsg normalizes an operator message for an EXACT (not substring) anchor match: collapse all
+// whitespace runs to single spaces and trim, so a paste that alters a newline/trailing space still
+// matches but a DIFFERENT message (or a turn that merely contains this one as a substring) does not.
+func normMsg(s string) string { return strings.Join(strings.Fields(s), " ") }
+
 // replyAfterUserMsg scans a transcript and returns the text-bearing assistant turn following the LATEST
 // user turn whose recorded text contains operatorMsg. A new occurrence of operatorMsg (a re-asked
 // message) re-anchors — the reply must follow the MOST RECENT delivery. cwd is the session's recorded
@@ -353,7 +358,7 @@ func replyAfterUserMsg(jsonlPath, operatorMsg string) (text string, cwd string, 
 		return "", "", false
 	}
 	defer f.Close()
-	want := strings.TrimSpace(operatorMsg)
+	want := normMsg(operatorMsg)
 
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64<<10), maxLine)
@@ -371,12 +376,17 @@ func replyAfterUserMsg(jsonlPath, operatorMsg string) (text string, cwd string, 
 		}
 		switch {
 		case e.Type == "user" && e.Message.Role == "user":
-			ut := strings.TrimSpace(extractText(e.Message.Content))
+			ut := extractText(e.Message.Content)
 			switch {
-			case want != "" && strings.Contains(ut, want):
+			case want != "" && normMsg(ut) == want:
+				// EXACT (whitespace-normalized) match — NOT a substring. A substring match would let a
+				// short/common operator message ("ok", "status?") re-anchor to a LATER turn that merely
+				// CONTAINS it (a self-cont prompt, a quote), mis-routing that turn's output. The relay
+				// records the operator message verbatim as a user turn (live-verified), so exact-after-
+				// whitespace-normalization is the correct, mis-route-proof anchor.
 				armed = true // (re-)anchor to this delivery of the operator message
 				text, found = "", false
-			case armed && ut != "":
+			case armed && strings.TrimSpace(ut) != "":
 				// A SUBSTANTIVE non-anchor user turn (a self-continuation wake, a later prompt) CLOSES the
 				// reply window — a new turn began, so a later assistant turn is NOT the answer to THIS
 				// message. (tool_result user entries have empty text, so they do NOT close it — the

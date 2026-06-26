@@ -134,13 +134,20 @@ func TestReplyWatch_MultiChunk_OrderedPosts(t *testing.T) {
 }
 
 // arm supersedes the prior watcher for the same XO (re-anchors to the new origin channel); a
-// superseded watcher must not route to the old channel.
+// superseded watcher must not route to the old channel. Deterministic: the reply is keyed on the
+// operator message — msg1 (chanA) NEVER lands, so chanA's watcher can only exit via the supersede
+// cancel (it never routes); msg2 (chanB) lands, so the surviving route targets chanB.
 func TestReplyRouter_ArmSupersedes(t *testing.T) {
 	var mu sync.Mutex
 	var routed []string
 	d := replyDeps{
-		reply: replySeq(replyResult{"", false, nil}, replyResult{"reply", true, nil}),
-		dest:  func(ch string) (string, bool) { return "wh-" + ch, true },
+		reply: func(agent, operatorMsg string) (string, bool, error) {
+			if operatorMsg == "msg2" {
+				return "the chanB reply", true, nil
+			}
+			return "", false, nil // msg1 (chanA) never lands — chanA's watcher only exits via cancel
+		},
+		dest: func(ch string) (string, bool) { return "wh-" + ch, true },
 		post: func(url, user, content string) error {
 			mu.Lock()
 			routed = append(routed, url)

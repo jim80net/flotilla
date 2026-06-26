@@ -90,3 +90,40 @@ func TestReplyAfterUserMsg_TrailingSelfContNotMisRouted(t *testing.T) {
 		t.Fatalf("got (%q,%v), want the real reply (NOT the trailing self-cont output)", text, found)
 	}
 }
+
+// cubic P1: a SHORT/common operator message must anchor by EXACT match, not substring — a later
+// non-anchor user turn that merely CONTAINS it must NOT re-anchor (which would mis-route its output).
+func TestReplyAfterUserMsg_SubstringDoesNotMisRoute(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.jsonl")
+	lines := []string{
+		`{"type":"user","cwd":"/p","message":{"role":"user","content":"ok"}}`, // the operator's short message
+		`{"type":"assistant","cwd":"/p","message":{"role":"assistant","content":[{"type":"text","text":"THE REAL REPLY to ok"}]}}`,
+		// a later self-cont prompt that CONTAINS "ok" as a substring — must NOT re-anchor:
+		`{"type":"user","cwd":"/p","message":{"role":"user","content":"looks ok, now continue the next task"}}`,
+		`{"type":"assistant","cwd":"/p","message":{"role":"assistant","content":[{"type":"text","text":"UNRELATED self-cont output"}]}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	text, _, found := replyAfterUserMsg(path, "ok")
+	if !found || text != "THE REAL REPLY to ok" {
+		t.Fatalf("got (%q,%v), want the real reply — a substring-containing later turn must not re-anchor", text, found)
+	}
+}
+
+// Whitespace-normalized exact match: a paste that alters whitespace still matches the same message.
+func TestReplyAfterUserMsg_WhitespaceNormalized(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.jsonl")
+	lines := []string{
+		`{"type":"user","cwd":"/p","message":{"role":"user","content":"status   report\nplease"}}`,
+		`{"type":"assistant","cwd":"/p","message":{"role":"assistant","content":[{"type":"text","text":"the status"}]}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if text, _, found := replyAfterUserMsg(path, "status report please"); !found || text != "the status" {
+		t.Fatalf("got (%q,%v), want a whitespace-normalized exact match to anchor", text, found)
+	}
+}

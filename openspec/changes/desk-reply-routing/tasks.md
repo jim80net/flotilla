@@ -12,35 +12,43 @@ Load-bearing properties (assert across paths):
 - **(R5) additive / no regression.** No change to the inbound relay, the detector tick, the XO
   Stop-hook, or the per-desk visibility mirror.
 
-## 1. Assistant-turn-COUNT seam (the store ground-truth marker)
+## 1. Content-correlation seam — `ReplyAfter` (the SHIPPED mechanism)
 
-- [x] 1.1 TEST FIRST (`internal/claudestore`): `assistantTurnCount(jsonlPath) (n int, ok bool)` over a
-  fixture transcript — counts `type==assistant && message.role==assistant` text-bearing turns; skips
-  user / tool_result / system / sidechain entries; a malformed line does not nuke the count.
-- [x] 1.2 Implement claudestore count (reuse `transcriptEntry` decode + the active-session resolution).
-- [x] 1.3 TEST FIRST (`internal/grokstore`): `assistantTurnCount(path,sessionID) (n int, err error)` —
-  counts `type==assistant` extractable entries (mirrors `lastAssistant`'s skip rules; no timestamps).
-- [x] 1.4 Implement grokstore count.
-- [x] 1.5 Surface seam: an OPTIONAL `ReplyWatch` capability (or extend `ResultReader`) the driver
-  implements — `LatestTurnMark(pane) (text string, count int, ok bool, err error)` — returning the
-  latest text-bearing assistant turn AND the assistant-turn count, so the watcher snapshots `count` at
-  delivery and detects `count>N` later. Claude + grok implement it; aider/opencode do not (→ escalate).
-  Compile-time asserts.
+> NOTE: an earlier draft used an assistant-turn-COUNT marker; the impl-trio found it mis-routes a
+> queued/interleaved turn (a count delta doesn't correlate WHICH turn answers). The shipped mechanism
+> CORRELATES the reply to the operator message's recorded USER turn — see §10 of design.md.
+
+- [x] 1.1 TEST FIRST (`internal/claudestore`): `replyAfterUserMsg(jsonlPath, operatorMsg) (text, cwd
+  string, found bool)` over a fixture transcript — anchor on the LATEST user turn whose recorded text
+  EXACT-matches operatorMsg (whitespace-normalized, NOT a substring), return the text-bearing assistant
+  turn following it; a substantive non-anchor user turn (a self-cont/later prompt) CLOSES the window;
+  tool_result/sidechain entries do not. Cases: reply-after-user, no-reply-yet, re-anchor-on-reask,
+  trailing-self-cont-not-mis-routed.
+- [x] 1.2 Implement claudestore `ReplyAfter`/`replyAfterForCwd`/`replyAfterUserMsg` (reuse
+  `transcriptEntry` decode + the collision-guarded active-session resolution + `normMsg`).
+- [x] 1.3 TEST FIRST (`internal/grokstore`): `replyAfterUserMsg(path, operatorMsg) (text string, found
+  bool, err error)` — same content-correlation over `chat_history.jsonl` (user/assistant entries).
+- [x] 1.4 Implement grokstore `ReplyAfter`/`replyAfterUserMsg` (reuse `resolveHistoryPath` + `normMsg`).
+- [x] 1.5 Surface seam: an OPTIONAL `ReplyReader` capability — `ReplyAfter(pane, operatorMsg) (text
+  string, found bool, err error)` — returning the XO's verbatim reply that follows operatorMsg's user
+  turn. Claude + grok implement it; aider/opencode do not (→ escalate). Compile-time asserts.
 
 ## 2. The replyWatcher (anchor → poll → extract → route → escalate)
 
-- [x] 2.1 TEST FIRST: a pure `replyRouter`/`replyWatcher` with injected collaborators (mark-reader,
-  webhook-resolver, post, alert, sleep) — NO tmux/store/Discord. Cases:
-  - count advances + quiescent → reads latest turn-final → posts chunked to the resolved webhook (R1/R3).
-  - count never advances within TTL → ALERT, no post (R2).
+- [x] 2.1 TEST FIRST: a pure `replyRouter`/`replyWatcher` with injected collaborators (reply-reader,
+  webhook-resolver, post, escalate, sleep) — NO tmux/store/Discord. Cases:
+  - reply found → posts chunked to the resolved webhook (R1/R3).
+  - soft TTL with no reply → escalate ONCE ("still working") but keep watching; a late reply still routes.
+  - hard TTL with no reply → ALERT, no post (R2).
   - origin-channel webhook unresolved → ALERT, no post (R2).
-  - surface lacks the mark capability (aider) → ALERT (R2).
-  - post returns error → ALERT, redaction-safe (R2).
+  - surface lacks `ReplyReader` (aider) → ALERT (R2).
+  - post returns error → partial-delivery ALERT (R2); the ESCALATION post error falls back to the
+    primary alert (never silent).
   - a newer message supersedes mid-watch → the prior watcher cancels; the route step re-checks ctx
-    before each chunk post so no stale reply to the old channel.
+    before each chunk post so no stale reply to the old channel; `Stop()` cancels in-flight on shutdown.
   - multi-chunk reply → `discord.ChunkContent` + ordered `(i/n)` posts.
-- [x] 2.2 Implement the watcher: snapshot `count=N` at anchor; poll `LatestTurnMark` at a fast cadence
-  (bounded TTL) until `count>N` + the read is stable (quiescence); extract + route; escalate per R2.
+- [x] 2.2 Implement the watcher: poll `ReplyAfter(pane, operatorMsg)` at a fast cadence (soft+hard TTL)
+  until the reply is found; route; escalate per R2 on every non-route outcome.
 - [x] 2.3 Per-XO single watcher: `map[xo]*watcher` + mutex; launch cancels the prior; route re-checks
   `ctx.Err()` before each post (supersede guard).
 

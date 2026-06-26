@@ -62,3 +62,22 @@ func TestReplyAfterUserMsg_TrailingPromptNotMisRouted(t *testing.T) {
 		t.Fatalf("got (%q,%v,%v), want the real reply (NOT the trailing prompt's output)", text, found, err)
 	}
 }
+
+// cubic P2 (parity): exact match, not substring — a later turn containing a short message must not re-anchor.
+func TestReplyAfterUserMsg_SubstringDoesNotMisRoute(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "chat_history.jsonl")
+	lines := []string{
+		`{"type":"user","content":[{"type":"text","text":"ok"}]}`,
+		`{"type":"assistant","content":[{"type":"text","text":"THE REAL REPLY to ok"}]}`,
+		`{"type":"user","content":[{"type":"text","text":"looks ok, continue"}]}`,
+		`{"type":"assistant","content":[{"type":"text","text":"UNRELATED output"}]}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	text, found, err := replyAfterUserMsg(path, "ok")
+	if err != nil || !found || text != "THE REAL REPLY to ok" {
+		t.Fatalf("got (%q,%v,%v), want the real reply (exact, not substring)", text, found, err)
+	}
+}

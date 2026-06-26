@@ -232,10 +232,13 @@ func newHotlineReplyRouter(parent context.Context, cfg *roster.Config, secrets *
 		post: discord.Post,
 		escalate: func(originChannel, msg string) {
 			// Route the escalation to the channel the operator messaged from; fall back to the primary
-			// operator channel if the origin webhook is unresolvable — so the operator ALWAYS sees it.
+			// operator channel if the origin webhook is unresolvable OR the post FAILS — so the operator
+			// ALWAYS sees it (an ignored post error here would be a hole in the never-silent guarantee).
 			if url, ok := replyDest(cfg, secrets, originChannel); ok {
-				_ = discord.Post(url, "flotilla-watch", "⚠️ "+msg)
-				return
+				if err := discord.Post(url, "flotilla-watch", "⚠️ "+msg); err == nil {
+					return
+				}
+				// the origin-channel post failed — fall through to the primary alert below
 			}
 			primaryAlert(msg)
 		},

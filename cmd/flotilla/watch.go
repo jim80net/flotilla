@@ -185,6 +185,10 @@ func cmdWatch(args []string) error {
 	if replyRtr != nil {
 		defer replyRtr.Stop() // cancel in-flight hotline watchers on shutdown (runs after <-ctx.Done())
 	}
+	// Log return-leg webhook coverage HERE (not in the change-detector branch): the router arms in
+	// BOTH the change-detector and the legacy clock modes, so a legacy-mode operator must also see a
+	// mis-provisioned federated XO at startup. No-op when secrets are absent.
+	logReplyLegCoverage(cfg, secrets)
 	injector.SetMirror(func(j watch.Job) {
 		// Heartbeat ticks and change-detector wakes fire automatically; a per-wake
 		// marker is pure noise in the operator's channel (XO liveness is covered by
@@ -407,7 +411,6 @@ func cmdWatch(args []string) error {
 		fmt.Printf("flotilla watch: change-detector running — XO=%s interval=%s ping-mode=%s ack=%s snapshot=%s\n",
 			xo, interval, mode, *ackPath, *snapshotPath)
 		logMirrorCoverage(cfg, secrets, xo)
-		logReplyLegCoverage(cfg, secrets) // #175: c2 hotline return-leg webhook coverage
 		if cfg.VisibilitySynthesis {
 			fmt.Printf("flotilla watch: visibility-synthesis ON — every %d ticks an OWED agent rolls up its tier below; sidecar=%s\n",
 				synthDigestTicks, synthSidecarPath)
