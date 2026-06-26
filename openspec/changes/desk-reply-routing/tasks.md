@@ -2,8 +2,8 @@
 
 Load-bearing properties (assert across paths):
 - **(R1) reliable, verbatim, every turn.** The reply is the XO's actual completed turn-final read from
-  the session store (count-based), so fast/queued/sub-tick turns are NOT dropped (the #175 bug) and the
-  operator gets the verbatim text, not a "read the pane" escalation.
+  the session store (content-correlated to the operator's user turn), so fast/queued/sub-tick turns are
+  NOT dropped (the #175 bug) and the operator gets the verbatim text, not a "read the pane" escalation.
 - **(R2) never silent.** Every non-route outcome (no new assistant turn within TTL, origin-channel
   webhook unresolved, post failure) raises a LOUD operator alert — never a journald-only skip.
 - **(R3) right destination.** The reply returns to the ORIGIN channel (the c2 channel the operator
