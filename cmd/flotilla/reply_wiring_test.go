@@ -51,6 +51,30 @@ func TestIsHotlineToChannelXO(t *testing.T) {
 	}
 }
 
+// #177: the LEGACY single-channel roster (channel_id + xo_agent, no channels[]) — the synthesized
+// binding's XO is the primary, and an operator message to it now ARMS the watcher (the path #177
+// changes for a single-fleet deployment; previously excluded).
+func TestIsHotlineToChannelXO_LegacyPrimary(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "roster.json")
+	js := `{"agents":[{"name":"hydra-ops"},{"name":"v12-dev"}],"xo_agent":"hydra-ops",
+	  "operator_user_id":"U","channel_id":"C_MAIN","heartbeat_interval":"20m"}`
+	if err := os.WriteFile(p, []byte(js), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := roster.Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isHotlineToChannelXO(cfg, watch.Job{Kind: "relay", Agent: "hydra-ops", OriginChannel: "C_MAIN"}) {
+		t.Error("legacy single-channel primary XO should ARM (#177 unified)")
+	}
+	// a heartbeat tick to the primary XO must NOT arm.
+	if isHotlineToChannelXO(cfg, watch.Job{Kind: "heartbeat", Agent: "hydra-ops", OriginChannel: "C_MAIN"}) {
+		t.Error("a heartbeat tick must not arm the watcher")
+	}
+}
+
 func TestReplyDest(t *testing.T) {
 	cfg := fedRoster(t)
 	dir := t.TempDir()
