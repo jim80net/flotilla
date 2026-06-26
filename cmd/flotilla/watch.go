@@ -178,6 +178,10 @@ func cmdWatch(args []string) error {
 	// noise in the operator's Discord channel (XO liveness is already covered by
 	// the ack file + the missed-ack down alert below). Posted via webhook, which
 	// the gateway's feedback filter drops — no loop.
+	// #175: the c2-hotline reply-watcher. When an operator message lands on a c2 channel's (federated)
+	// XO, watch that XO's session store for the reply and route it back to the channel — the return leg
+	// the primary XO already has via its Stop-hook. nil when secrets are absent (no webhooks to resolve).
+	replyRtr := newHotlineReplyRouter(cfg, secrets, alert)
 	injector.SetMirror(func(j watch.Job) {
 		// Heartbeat ticks and change-detector wakes fire automatically; a per-wake
 		// marker is pure noise in the operator's channel (XO liveness is covered by
@@ -186,6 +190,9 @@ func cmdWatch(args []string) error {
 			return
 		}
 		post("flotilla-watch", "→ "+j.Agent+": "+j.Message)
+		if replyRtr != nil && isHotlineToChannelXO(cfg, j) {
+			replyRtr.arm(j.Agent, j.OriginChannel) // watch the XO's reply, route it back to the c2 channel
+		}
 		// CoS context-mirror (#108): append this confirmed operator→XO relay delivery
 		// to the who-knows-what ledger, tagged with the origin channel (the #105
 		// Job.OriginChannel seam). Scoped to XO targets (a desk addressed via @name is
@@ -397,6 +404,7 @@ func cmdWatch(args []string) error {
 		fmt.Printf("flotilla watch: change-detector running — XO=%s interval=%s ping-mode=%s ack=%s snapshot=%s\n",
 			xo, interval, mode, *ackPath, *snapshotPath)
 		logMirrorCoverage(cfg, secrets, xo)
+		logReplyLegCoverage(cfg, secrets) // #175: c2 hotline return-leg webhook coverage
 		if cfg.VisibilitySynthesis {
 			fmt.Printf("flotilla watch: visibility-synthesis ON — every %d ticks an OWED agent rolls up its tier below; sidecar=%s\n",
 				synthDigestTicks, synthSidecarPath)
