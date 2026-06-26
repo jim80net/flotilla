@@ -72,7 +72,7 @@ Load-bearing properties (assert across paths):
 ## 6. Build, test, review, ship
 
 - [x] 6.1 `go build ./...` + `go test ./...` green; `go vet` clean.
-- [ ] 6.2 Implementation-trio: systems-review + open-code-review + STORM (per the standard gate) on the
+- [x] 6.2 Implementation-trio: systems-review + open-code-review + STORM (per the standard gate) on the
   diff; iterate until clean.
-- [ ] 6.3 PR via the gh-token bypass to hydra-ops's gate (reference #175 + this change). Note the
+- [x] 6.3 PR via the gh-token bypass to hydra-ops's gate (reference #175 + this change). Note the
   merged≠running deploy step (watch restart, operator/XO-timed).
