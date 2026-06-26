@@ -31,8 +31,8 @@ type claudeCode struct {
 	// keyed by the pane. Injectable so LatestResult is unit-testable without tmux or a real
 	// ~/.claude/projects tree (mirrors the grok driver's latestResult seam).
 	latestTurnText func(pane string) (string, bool, error)
-	// ReplyMarkReader seam (#175): the latest turn-final PLUS the assistant-turn count marker.
-	latestTurnMark func(pane string) (string, int, bool, error)
+	// ReplyReader seam (#175): the verbatim reply that follows a specific operator message's user turn.
+	replyAfter func(pane, operatorMsg string) (string, bool, error)
 	// ComposerStateProbe seam: the pane's cursor row (the focused-input line) + whether the pane is
 	// in a tmux mode (copy/view — in which the cursor and capture coordinate spaces diverge).
 	// Injectable so ComposerState is unit-testable without a tmux server.
@@ -49,7 +49,7 @@ func newClaudeCode() claudeCode {
 		clear:          deliver.ClearContext,
 		slashKeys:      deliver.InjectSlash,
 		latestTurnText: claudestore.LatestTurnText,
-		latestTurnMark: claudestore.LatestTurnMark,
+		replyAfter:     claudestore.ReplyAfter,
 		cursorState:    deliver.CursorState,
 	}
 }
@@ -179,10 +179,10 @@ func (c claudeCode) LatestResult(pane string) (string, error) {
 	return text, nil
 }
 
-// LatestTurnMark implements surface.ReplyMarkReader: the latest turn-final text plus the assistant-turn
-// count marker, read from the Claude Code transcript (the #175 c2-hotline reply-watch seam).
-func (c claudeCode) LatestTurnMark(pane string) (text string, count int, ok bool, err error) {
-	return c.latestTurnMark(pane)
+// ReplyAfter implements surface.ReplyReader: the XO's verbatim reply that follows operatorMsg's user
+// turn in the Claude Code transcript (the #175 c2-hotline correlation seam).
+func (c claudeCode) ReplyAfter(pane, operatorMsg string) (text string, found bool, err error) {
+	return c.replyAfter(pane, operatorMsg)
 }
 
 // Composer-line markers (verified live on the spark fleet, 2026-06-22). Version-specific —

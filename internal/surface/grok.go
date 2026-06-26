@@ -42,10 +42,11 @@ type grok struct {
 	// ResultReader seams (the full-result reader, #58 B): resolve the pane's cwd, then read the
 	// grok session store rooted at grokHome. Injectable so LatestResult is unit-testable without
 	// tmux or a real ~/.grok.
-	paneCWD          func(string) (string, error)
-	grokHome         string
-	latestResult     func(grokHome, cwd string) (string, error)
-	latestResultMark func(grokHome, cwd string) (string, int, error)
+	paneCWD      func(string) (string, error)
+	grokHome     string
+	latestResult func(grokHome, cwd string) (string, error)
+	// ReplyReader seam (#175): the verbatim reply that follows a specific operator message's user entry.
+	replyAfter func(grokHome, cwd, operatorMsg string) (string, bool, error)
 	// ComposerStateProbe seam (#158): the pane's cursor row + whether it is in a tmux mode (copy/view).
 	// Injectable so ComposerState is unit-testable without a tmux server (mirrors claude's cursorState).
 	cursorState func(pane string) (cursorY int, inMode bool, err error)
@@ -65,11 +66,11 @@ func newGrok() grok {
 		classify:     parseGrokState,
 		send:         deliver.Send,
 		inject:       deliver.InjectSlash,
-		paneCWD:          deliver.PaneCWD,
-		grokHome:         grokHome,
-		latestResult:     grokstore.LatestResult,
-		latestResultMark: grokstore.LatestResultMark,
-		cursorState:      deliver.CursorState,
+		paneCWD:      deliver.PaneCWD,
+		grokHome:     grokHome,
+		latestResult: grokstore.LatestResult,
+		replyAfter:   grokstore.ReplyAfter,
+		cursorState:  deliver.CursorState,
 	}
 }
 
@@ -127,23 +128,18 @@ func (g grok) LatestResult(pane string) (string, error) {
 	return g.latestResult(g.grokHome, cwd)
 }
 
-// LatestTurnMark implements surface.ReplyMarkReader (#175): the latest turn-final text plus the
-// assistant-turn count marker, read from the grok chat history. ok=false means "no substantive turn
-// yet" (the watcher keeps polling until the count rises; its TTL is the backstop for a persistent
-// store failure); err is reserved for a pane→cwd / store-home resolution failure.
-func (g grok) LatestTurnMark(pane string) (text string, count int, ok bool, err error) {
+// ReplyAfter implements surface.ReplyReader (#175): the XO's verbatim reply that follows operatorMsg's
+// user entry in the grok chat history. found=false ⇒ the reply hasn't landed yet (keep polling); err is
+// reserved for a pane→cwd / store-home / session resolution failure.
+func (g grok) ReplyAfter(pane, operatorMsg string) (text string, found bool, err error) {
 	cwd, err := g.paneCWD(pane)
 	if err != nil {
-		return "", 0, false, err
+		return "", false, err
 	}
 	if g.grokHome == "" {
-		return "", 0, false, fmt.Errorf("grok: cannot resolve the ~/.grok session store (no home directory)")
+		return "", false, fmt.Errorf("grok: cannot resolve the ~/.grok session store (no home directory)")
 	}
-	text, count, merr := g.latestResultMark(g.grokHome, cwd)
-	if merr != nil {
-		return "", count, false, nil // no assistant turn yet / transient store read — keep polling
-	}
-	return text, count, text != "", nil
+	return g.replyAfter(g.grokHome, cwd, operatorMsg)
 }
 
 // --- pure state classifier (the testable core) ---

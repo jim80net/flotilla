@@ -142,8 +142,8 @@ var (
 	_ ResultReader       = grok{}
 	_ ComposerStateProbe = grok{}
 	_ RecycleBridge      = grok{}
-	_ ReplyMarkReader    = grok{}       // #175 c2-hotline reply-watch seam
-	_ ReplyMarkReader    = claudeCode{} // claude implements it too (the reference)
+	_ ReplyReader        = grok{}       // #175 c2-hotline reply correlation seam
+	_ ReplyReader        = claudeCode{} // claude implements it too (the reference)
 )
 
 // TestParseGrokStateApproval: the tool-approval modal classifies AwaitingApproval, NOT Working, even

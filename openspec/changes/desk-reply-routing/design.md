@@ -295,3 +295,19 @@ store/surface method returning the assistant-turn COUNT (existing readers return
 **Status:** C GREENLIT (hydra-ops, on the operator's behalf, veto window open). Pre-checks DONE.
 Proceeding: openspec change → impl (count-marked transcript-watcher + federated-XO return-leg routing)
 → trio (systems+OCR+STORM) → PR. Pre-existing per-desk-visibility-mirror sub-tick-drop gap → filed #176.
+
+## 10. Impl-trio drove a pivot: COUNT → CONTENT-CORRELATION (the shipped mechanism)
+
+The first implementation used a session-store assistant-turn-COUNT marker (§9b). The implementation
+trio (systems + open-code-review + STORM, all three) converged on a LOAD-BEARING flaw: a bare count
+delta does not correlate WHICH turn answers the operator, so a QUEUED operator message (parked behind
+the XO's current turn) — or an interleaved turn — would route the WRONG, unrelated turn back as "the
+reply" (a wrong-answer, worse than the no-answer #175 exists to kill). The shipped mechanism therefore
+CORRELATES to the operator message's recorded USER turn and takes the following ASSISTANT turn
+(`claudestore.ReplyAfter` / `grokstore.ReplyAfter`) — eliminating the mis-route class AND the
+snapshot/timing race, with lower blast radius than disposition-plumbing (no confirm/inject-layer
+change). The §9b count description is SUPERSEDED by this section. Other trio findings folded: CI
+(gofmt + a `-race` test defect) fixed; watcher lifecycle tied to `replyRouter.Stop()` on daemon
+shutdown; soft+hard TTL (a long answer is escalated-once-but-still-routed, not lost); partial-multi-
+chunk post names the partial delivery; `discord.Post` hardened with `allowed_mentions:{parse:[]}` (a
+relayed reply never @pings). Stop-hook→watcher unification filed as a follow-up.

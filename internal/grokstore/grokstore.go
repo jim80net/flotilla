@@ -83,20 +83,21 @@ func LatestResult(grokHome, cwd string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	text, _, err := lastAssistant(path, sessionID)
-	return text, err
+	return lastAssistant(path, sessionID)
 }
 
-// LatestResultMark is LatestResult plus the chat history's text-bearing assistant-turn COUNT — the
-// #175 reply-watch marker (grok stores no per-entry timestamps, so a count is the uniform marker the
-// watcher snapshots at delivery and watches for an increase). A "no assistant turn yet" store yields
-// (\"\", 0, err) — the watcher treats the error as ok=false and keeps polling until the count rises.
-func LatestResultMark(grokHome, cwd string) (text string, count int, err error) {
-	path, sessionID, err := resolveHistoryPath(grokHome, cwd)
+// ReplyAfter returns the grok XO's verbatim reply to a specific operator message (the #175 hotline
+// correlation): the text-bearing ASSISTANT entry following the LATEST user entry carrying operatorMsg
+// in the active session's chat history. found=false ⇒ the reply has not landed yet (the user entry
+// isn't recorded, or no assistant entry follows it) — the watcher keeps polling. err is reserved for a
+// store/session resolution failure (no active session, ambiguous/unreadable history).
+func ReplyAfter(grokHome, cwd, operatorMsg string) (text string, found bool, err error) {
+	path, _, err := resolveHistoryPath(grokHome, cwd)
 	if err != nil {
-		return "", 0, err
+		return "", false, err
 	}
-	return lastAssistant(path, sessionID)
+	t, found, err := replyAfterUserMsg(path, operatorMsg)
+	return t, found, err
 }
 
 // resolveHistoryPath resolves the single chat_history.jsonl for the active grok session at cwd (the
@@ -140,10 +141,10 @@ func resolveHistoryPath(grokHome, cwd string) (path string, sessionID string, er
 // non-empty text. A malformed line is skipped (not fatal) so one bad line never hides a valid
 // result. An assistant entry whose content shape we can't decode is recorded so the caller can
 // distinguish "a turn exists but I couldn't read its content" from "no assistant turn yet".
-func lastAssistant(path, sessionID string) (text string, count int, err error) {
+func lastAssistant(path, sessionID string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return "", 0, fmt.Errorf("grok store: open chat history: %w", err)
+		return "", fmt.Errorf("grok store: open chat history: %w", err)
 	}
 	defer f.Close()
 
@@ -167,18 +168,57 @@ func lastAssistant(path, sessionID string) (text string, count int, err error) {
 		}
 		if t != "" {
 			last = t
-			count++ // a text-bearing assistant turn — the monotonic #175 reply-watch marker
 			found = true
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return "", 0, fmt.Errorf("grok store: scan chat history: %w", err)
+		return "", fmt.Errorf("grok store: scan chat history: %w", err)
 	}
 	if !found {
 		if sawUndecodable {
-			return "", 0, fmt.Errorf("grok store: session %s has assistant turn(s) but their content format was unrecognized (not string or text-blocks) — extractText needs a new shape", sessionID)
+			return "", fmt.Errorf("grok store: session %s has assistant turn(s) but their content format was unrecognized (not string or text-blocks) — extractText needs a new shape", sessionID)
 		}
-		return "", 0, fmt.Errorf("grok store: no assistant turn yet in session %s", sessionID)
+		return "", fmt.Errorf("grok store: no assistant turn yet in session %s", sessionID)
 	}
-	return last, count, nil
+	return last, nil
+}
+
+// replyAfterUserMsg scans a chat history and returns the text-bearing assistant entry following the
+// LATEST user entry carrying operatorMsg. A new occurrence of operatorMsg re-anchors. found=false ⇒
+// the matching user entry isn't recorded yet, or no assistant entry follows it. A scan error is
+// returned; an undecodable assistant shape is treated as not-yet (the watcher polls on).
+func replyAfterUserMsg(path, operatorMsg string) (text string, found bool, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", false, fmt.Errorf("grok store: open chat history: %w", err)
+	}
+	defer f.Close()
+	want := strings.TrimSpace(operatorMsg)
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64<<10), maxLine)
+	armed := false
+	for sc.Scan() {
+		var e chatEntry
+		if json.Unmarshal(sc.Bytes(), &e) != nil {
+			continue
+		}
+		switch e.Type {
+		case "user":
+			if t, ok := extractText(e.Content); ok && want != "" && strings.Contains(strings.TrimSpace(t), want) {
+				armed = true
+				text, found = "", false // (re-)anchor to this delivery of the operator message
+			}
+		case "assistant":
+			if armed {
+				if t, ok := extractText(e.Content); ok && t != "" {
+					text, found = t, true
+				}
+			}
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return "", false, fmt.Errorf("grok store: scan chat history: %w", err)
+	}
+	return text, found, nil
 }

@@ -181,7 +181,10 @@ func cmdWatch(args []string) error {
 	// #175: the c2-hotline reply-watcher. When an operator message lands on a c2 channel's (federated)
 	// XO, watch that XO's session store for the reply and route it back to the channel — the return leg
 	// the primary XO already has via its Stop-hook. nil when secrets are absent (no webhooks to resolve).
-	replyRtr := newHotlineReplyRouter(cfg, secrets, alert)
+	replyRtr := newHotlineReplyRouter(context.Background(), cfg, secrets, alert)
+	if replyRtr != nil {
+		defer replyRtr.Stop() // cancel in-flight hotline watchers on shutdown (runs after <-ctx.Done())
+	}
 	injector.SetMirror(func(j watch.Job) {
 		// Heartbeat ticks and change-detector wakes fire automatically; a per-wake
 		// marker is pure noise in the operator's channel (XO liveness is covered by
@@ -191,7 +194,7 @@ func cmdWatch(args []string) error {
 		}
 		post("flotilla-watch", "→ "+j.Agent+": "+j.Message)
 		if replyRtr != nil && isHotlineToChannelXO(cfg, j) {
-			replyRtr.arm(j.Agent, j.OriginChannel) // watch the XO's reply, route it back to the c2 channel
+			replyRtr.arm(j.Agent, j.OriginChannel, j.Message) // watch the XO's reply to THIS message, route it back
 		}
 		// CoS context-mirror (#108): append this confirmed operator→XO relay delivery
 		// to the who-knows-what ledger, tagged with the origin channel (the #105

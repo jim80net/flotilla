@@ -7,44 +7,62 @@ import (
 	"testing"
 )
 
-// The #175 reply-watch marker: count counts TEXT-bearing assistant turns and rises as the desk
-// produces new replies; user / tool_result / sidechain / empty-text-assistant entries do NOT count.
-func TestLastTurnTextWithCwdCount(t *testing.T) {
+// #175 content-correlation: the reply is the text-bearing assistant turn following the LATEST user
+// turn carrying the operator's message — NOT a bare turn-count delta (which would mis-route a queued
+// or interleaved turn).
+func TestReplyAfterUserMsg(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "s.jsonl")
 	lines := []string{
-		`{"type":"user","cwd":"/p","message":{"role":"user","content":"first operator message"}}`,
-		`{"type":"assistant","cwd":"/p","message":{"role":"assistant","content":[{"type":"text","text":"reply one"}]}}`,
-		`{"type":"assistant","cwd":"/p","message":{"role":"assistant","content":[{"type":"tool_use","text":""}]}}`, // tool-only: no text → not counted
-		`{"type":"tool_result","cwd":"/p"}`,                                                                          // not an assistant turn
-		`{"type":"user","cwd":"/p","message":{"role":"user","content":"second operator message"}}`,
-		`{"type":"assistant","cwd":"/p","isSidechain":true,"message":{"role":"assistant","content":[{"type":"text","text":"subagent noise"}]}}`, // sidechain → skipped
-		`{"type":"assistant","cwd":"/p","message":{"role":"assistant","content":[{"type":"text","text":"reply two"}]}}`,
+		// A PRIOR unrelated turn (e.g. a queued/self turn) — must NOT be routed as the reply.
+		`{"type":"assistant","cwd":"/p","message":{"role":"assistant","content":[{"type":"text","text":"prior unrelated turn"}]}}`,
+		// The operator's hotline message, recorded verbatim as a user turn.
+		`{"type":"user","cwd":"/p","message":{"role":"user","content":"what do you need from me"}}`,
+		`{"type":"assistant","cwd":"/p","message":{"role":"assistant","content":[{"type":"tool_use","text":""}]}}`, // tool-only, skipped
+		`{"type":"tool_result","cwd":"/p"}`,
+		`{"type":"assistant","cwd":"/p","message":{"role":"assistant","content":[{"type":"text","text":"here is what I need"}]}}`,
 	}
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	text, cwd, count, ok := lastTurnTextWithCwd(path)
-	if !ok || text != "reply two" || cwd != "/p" || count != 2 {
-		t.Fatalf("got (text=%q cwd=%q count=%d ok=%v), want (reply two, /p, 2, true) — only text-bearing non-sidechain assistant turns count", text, cwd, count, ok)
+	text, cwd, found := replyAfterUserMsg(path, "what do you need from me")
+	if !found || text != "here is what I need" || cwd != "/p" {
+		t.Fatalf("got (text=%q cwd=%q found=%v), want the turn AFTER the matching user msg (not the prior turn)", text, cwd, found)
 	}
 }
 
-// A transcript with no substantive latest turn still reports a count baseline (so the watcher can
-// snapshot before the reply lands), and ok=false.
-func TestLastTurnMarkBaselineBeforeReply(t *testing.T) {
+// Before the reply lands (the user msg is recorded but no assistant turn follows), found=false — the
+// watcher keeps polling rather than routing a stale prior turn.
+func TestReplyAfterUserMsg_NoReplyYet(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "s.jsonl")
-	// One prior text turn, then the operator's user message (no assistant reply yet).
 	lines := []string{
-		`{"type":"assistant","cwd":"/p","message":{"role":"assistant","content":[{"type":"text","text":"earlier turn"}]}}`,
-		`{"type":"user","cwd":"/p","message":{"role":"user","content":"what do you need from me"}}`,
+		`{"type":"assistant","cwd":"/p","message":{"role":"assistant","content":[{"type":"text","text":"prior turn"}]}}`,
+		`{"type":"user","cwd":"/p","message":{"role":"user","content":"hotline question"}}`,
 	}
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, _, count, ok := lastTurnTextWithCwd(path)
-	if !ok || count != 1 {
-		t.Fatalf("baseline got (count=%d ok=%v), want count=1 ok=true (one prior assistant turn; the user msg adds no assistant turn)", count, ok)
+	if _, _, found := replyAfterUserMsg(path, "hotline question"); found {
+		t.Fatal("found=true before any assistant turn follows the user msg — would route a stale prior turn")
+	}
+}
+
+// A re-asked message re-anchors to the LATEST occurrence (its reply, not the first one's).
+func TestReplyAfterUserMsg_ReAnchorsToLatest(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.jsonl")
+	lines := []string{
+		`{"type":"user","cwd":"/p","message":{"role":"user","content":"status?"}}`,
+		`{"type":"assistant","cwd":"/p","message":{"role":"assistant","content":[{"type":"text","text":"first answer"}]}}`,
+		`{"type":"user","cwd":"/p","message":{"role":"user","content":"status?"}}`,
+		`{"type":"assistant","cwd":"/p","message":{"role":"assistant","content":[{"type":"text","text":"second answer"}]}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	text, _, found := replyAfterUserMsg(path, "status?")
+	if !found || text != "second answer" {
+		t.Fatalf("got (%q,%v), want the LATEST occurrence's reply 'second answer'", text, found)
 	}
 }

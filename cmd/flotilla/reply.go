@@ -16,79 +16,81 @@ import (
 )
 
 // The c2-hotline reply-watcher (#175): when an operator message is confirmed-delivered to a channel's
-// XO, watch that XO's session store for the resulting turn-final and route it back to the ORIGIN
-// channel, attributed — for EVERY turn, NEVER silently. It detects the reply from the harness session
-// store (the ground truth of completed turns, via the ReplyMarkReader assistant-turn COUNT marker),
-// NOT from pane-rendered state (racy) nor the heartbeat-cadence detector (drops sub-interval turns).
+// XO, watch that XO's session store for the VERBATIM reply and route it back to the ORIGIN channel,
+// attributed — for EVERY turn, NEVER silently.
 //
-// Snapshot timing: the watcher is armed in the post-confirmed-delivery SetMirror hook. For a
-// substantive reply the working spinner renders, so confirm.Submit returns at turn-START (the
-// Idle→Working edge), making the snapshot count the pre-reply baseline. A degenerate sub-second turn
-// (no spinner, already finished by snapshot) is NOT mis-routed — its count is already advanced, the
-// watcher sees no further increase, and it ESCALATES on the TTL (never silent). Verbatim-content
-// correlation (match the user turn, take the following assistant turn) is a possible robustness
-// follow-up for that degenerate case.
+// CORRELATION (the load-bearing property): the reply is the assistant turn that FOLLOWS the operator
+// message's recorded USER turn in the session store (claudestore/grokstore ReplyAfter) — NOT a bare
+// turn-count delta. Anchoring to the user turn makes the reply the answer to THIS message, immune to a
+// QUEUED message (where the XO's current, unrelated turn would otherwise be mis-routed) or an
+// interleaved turn. It is also timing-independent — whether the reply already completed (a fast turn)
+// or lands later, ReplyAfter finds it — so there is no pane-state race and no heartbeat-tick dependency.
+//
+// TTL: a soft bound escalates ONCE ("still working, I'll route it when it lands") but KEEPS watching to
+// a hard bound, so a long XO answer is still routed rather than lost. Every non-route outcome is loud.
 
 const (
-	replyPollInterval = 1 * time.Second
-	replyTTL          = 5 * time.Minute
+	replyPollInterval = 2 * time.Second
+	replySoftTTL      = 5 * time.Minute  // no reply yet by here ⇒ escalate ONCE, keep watching
+	replyHardTTL      = 30 * time.Minute // give up watching (a federated XO answering a hotline can do real work)
 )
 
 // replyDeps are the injected collaborators the reply-watch decision logic needs, so the
-// snapshot→poll→route/escalate flow is unit-testable without tmux, a real session store, or Discord.
+// poll→route/escalate flow is unit-testable without tmux, a real session store, or Discord.
 type replyDeps struct {
-	// mark reads the XO's latest turn-final + the assistant-turn count marker (ReplyMarkReader via the
-	// agent's driver+pane). ok=false ⇒ no substantive turn yet; err ⇒ a session/pane read failure.
-	mark func(agent string) (text string, count int, ok bool, err error)
+	// reply reads the XO's VERBATIM reply to operatorMsg (ReplyReader.ReplyAfter via the agent's
+	// driver+pane): the assistant turn following operatorMsg's recorded user turn. found=false ⇒ the
+	// reply has not landed yet (keep polling); err ⇒ a session/pane read failure (transient — poll on,
+	// the hard TTL is the backstop).
+	reply func(agent, operatorMsg string) (text string, found bool, err error)
 	// dest resolves the ORIGIN channel's webhook (BindingForChannel→XOAgent→Webhook). ok=false ⇒ no
 	// route target — the watcher ESCALATES rather than silently dropping.
 	dest func(originChannel string) (url string, ok bool)
 	// post sends one chunk under the XO's identity to the origin-channel webhook.
 	post func(url, username, content string) error
-	// escalate raises a LOUD operator alert for the given origin channel (the never-silent backstop for
-	// every non-route outcome) — routed to the channel the operator messaged from, with a primary-channel
-	// fallback when the origin webhook is itself unresolvable, so the operator always sees it.
+	// escalate raises a LOUD operator alert for the given origin channel (the never-silent backstop) —
+	// routed to the channel the operator messaged from, with a primary-channel fallback when the origin
+	// webhook is itself unresolvable, so the operator always sees it.
 	escalate func(originChannel, msg string)
 	sleep    func(time.Duration)
-	logf  func(format string, args ...any)
-	ttl   time.Duration
+	logf     func(format string, args ...any)
+	softTTL  time.Duration
+	hardTTL  time.Duration
 	interval time.Duration
 }
 
-// runReplyWatch watches xo's store for the reply to a just-delivered operator hotline message and
-// routes it to originChannel. NEVER SILENT: every non-route outcome (unreadable session, no reply
-// within the TTL, no-substantive-text reply, unresolved webhook, post failure) escalates via alert.
-func runReplyWatch(ctx context.Context, d replyDeps, xo, originChannel string) {
-	_, baseN, _, err := d.mark(xo)
-	if err != nil {
-		d.escalate(originChannel, fmt.Sprintf("hotline: can't watch %s's reply to your message (session unreadable: %v) — read its pane", xo, err))
-		return
-	}
-	attempts := int(d.ttl / d.interval)
+// runReplyWatch polls xo's store for its reply to operatorMsg and routes it to originChannel. NEVER
+// SILENT: a found reply routes; otherwise the soft TTL escalates once ("still working") and the hard
+// TTL escalates a final "hasn't answered" — and route() escalates on a webhook miss / post failure.
+func runReplyWatch(ctx context.Context, d replyDeps, xo, originChannel, operatorMsg string) {
+	attempts := int(d.hardTTL / d.interval)
 	if attempts < 1 {
 		attempts = 1
 	}
+	softAt := int(d.softTTL / d.interval)
+	notified := false
 	for i := 0; i < attempts; i++ {
 		if ctx.Err() != nil {
-			return // superseded by a newer hotline message to this XO
+			return // superseded by a newer hotline message to this XO, or the daemon is shutting down
 		}
 		d.sleep(d.interval)
-		text, count, ok, err := d.mark(xo)
-		if err != nil || count <= baseN {
-			continue // no new assistant turn yet (or a transient store read) — keep polling until the TTL
-		}
-		if !ok || text == "" {
-			d.escalate(originChannel, fmt.Sprintf("hotline: %s answered your message but produced no substantive text — read its pane", xo))
+		text, found, err := d.reply(xo, operatorMsg)
+		if err == nil && found && text != "" {
+			d.route(ctx, xo, originChannel, text)
 			return
 		}
-		d.route(ctx, xo, originChannel, text)
-		return
+		if !notified && i >= softAt {
+			d.escalate(originChannel, fmt.Sprintf("hotline: %s is working on your message — I'll route the reply here when it lands (or read its pane)", xo))
+			notified = true
+		}
 	}
-	d.escalate(originChannel, fmt.Sprintf("hotline: %s has not answered your message within %s — read its pane", xo, d.ttl))
+	d.escalate(originChannel, fmt.Sprintf("hotline: %s has not answered your message within %s — read its pane", xo, d.hardTTL))
 }
 
 // route posts the XO's verbatim reply to the origin channel, attributed + chunked. It re-checks ctx
-// before each chunk so a watcher superseded mid-route never emits a stale reply to the old channel.
+// before each chunk so a watcher superseded mid-route never emits a stale reply to the old channel. A
+// failed chunk escalates and names the partial delivery so the operator knows to read the pane for the
+// remainder (the one place a long reply cannot be fully self-delivered).
 func (d replyDeps) route(ctx context.Context, xo, originChannel, text string) {
 	url, ok := d.dest(originChannel)
 	if !ok {
@@ -107,7 +109,7 @@ func (d replyDeps) route(ctx context.Context, xo, originChannel, text string) {
 			body = fmt.Sprintf("↩ %s (reply %d/%d):\n%s", xo, i+1, n, chunk)
 		}
 		if err := d.post(url, xo, body); err != nil {
-			d.escalate(originChannel, fmt.Sprintf("hotline: %s replied but I couldn't post it (chunk %d/%d failed) — read its pane", xo, i+1, n))
+			d.escalate(originChannel, fmt.Sprintf("hotline: %s replied but I could only post %d of %d parts (part %d failed) — read its pane for the rest", xo, i, n, i+1))
 			return
 		}
 	}
@@ -116,17 +118,20 @@ func (d replyDeps) route(ctx context.Context, xo, originChannel, text string) {
 
 // replyRouter manages per-XO hotline reply watchers. A newer hotline message to the same XO supersedes
 // (cancels) the prior watcher and re-anchors to the new origin channel — so the reply always goes to
-// the channel of the message the XO is currently answering.
+// the channel of the message the XO is currently answering. All watchers are children of the router's
+// parent context, so Stop() (wired to the daemon's shutdown) cancels every in-flight watcher.
 type replyRouter struct {
 	mu       sync.Mutex
+	parent   context.Context
 	gen      map[string]uint64
 	cancels  map[string]context.CancelFunc
 	deps     replyDeps
 	dispatch func(func()) // runs the watcher goroutine; injectable so tests run it synchronously
 }
 
-func newReplyRouter(deps replyDeps) *replyRouter {
+func newReplyRouter(parent context.Context, deps replyDeps) *replyRouter {
 	return &replyRouter{
+		parent:   parent,
 		gen:      map[string]uint64{},
 		cancels:  map[string]context.CancelFunc{},
 		deps:     deps,
@@ -134,27 +139,38 @@ func newReplyRouter(deps replyDeps) *replyRouter {
 	}
 }
 
-// arm launches (or supersedes) the reply-watcher for an operator hotline message to xo from
-// originChannel.
-func (r *replyRouter) arm(xo, originChannel string) {
+// arm launches (or supersedes) the reply-watcher for an operator hotline message (operatorMsg) to xo
+// from originChannel.
+func (r *replyRouter) arm(xo, originChannel, operatorMsg string) {
 	r.mu.Lock()
 	if cancel, ok := r.cancels[xo]; ok {
 		cancel() // supersede the prior watcher for this XO
 	}
 	r.gen[xo]++
 	g := r.gen[xo]
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(r.parent)
 	r.cancels[xo] = cancel
 	r.mu.Unlock()
 
 	r.dispatch(func() {
-		runReplyWatch(ctx, r.deps, xo, originChannel)
+		runReplyWatch(ctx, r.deps, xo, originChannel, operatorMsg)
 		r.mu.Lock()
 		if r.gen[xo] == g { // still the active watcher → clean up; a superseder owns its own entry
 			delete(r.cancels, xo)
 		}
 		r.mu.Unlock()
 	})
+}
+
+// Stop cancels every in-flight watcher (wired to the daemon shutdown), so no watcher keeps polling or
+// posts a reply after the daemon is told to stop.
+func (r *replyRouter) Stop() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, cancel := range r.cancels {
+		cancel()
+	}
+	r.cancels = map[string]context.CancelFunc{}
 }
 
 // --- wiring helpers (the real surface/store/Discord/alert collaborators) ---
@@ -189,27 +205,28 @@ func isHotlineToChannelXO(cfg *roster.Config, j watch.Job) bool {
 }
 
 // newHotlineReplyRouter builds the replyRouter wired to the real surface/store/Discord, or nil when
-// secrets are absent (no return-leg webhooks to resolve). primaryAlert is the daemon's loud alert (the
-// fallback when an escalation's own origin-channel webhook is unresolvable, so the operator always sees it).
-func newHotlineReplyRouter(cfg *roster.Config, secrets *roster.Secrets, primaryAlert func(string)) *replyRouter {
+// secrets are absent (no return-leg webhooks to resolve). parent is the daemon's shutdown context (so
+// Stop cancels in-flight watchers); primaryAlert is the daemon's loud alert (the fallback when an
+// escalation's own origin-channel webhook is unresolvable, so the operator always sees it).
+func newHotlineReplyRouter(parent context.Context, cfg *roster.Config, secrets *roster.Secrets, primaryAlert func(string)) *replyRouter {
 	if secrets == nil {
 		return nil
 	}
 	deps := replyDeps{
-		mark: func(agent string) (string, int, bool, error) {
+		reply: func(agent, operatorMsg string) (string, bool, error) {
 			drv, ok := surface.Get(agentSurface(cfg, agent))
 			if !ok {
-				return "", 0, false, fmt.Errorf("unknown surface for agent %q", agent)
+				return "", false, fmt.Errorf("unknown surface for agent %q", agent)
 			}
-			rr, ok := drv.(surface.ReplyMarkReader)
+			rr, ok := drv.(surface.ReplyReader)
 			if !ok {
-				return "", 0, false, fmt.Errorf("surface %q cannot read replies (no ReplyMarkReader)", drv.Name())
+				return "", false, fmt.Errorf("surface %q cannot read replies (no ReplyReader)", drv.Name())
 			}
 			pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
 			if err != nil {
-				return "", 0, false, err
+				return "", false, err
 			}
-			return rr.LatestTurnMark(pane)
+			return rr.ReplyAfter(pane, operatorMsg)
 		},
 		dest: func(originChannel string) (string, bool) { return replyDest(cfg, secrets, originChannel) },
 		post: discord.Post,
@@ -224,10 +241,11 @@ func newHotlineReplyRouter(cfg *roster.Config, secrets *roster.Secrets, primaryA
 		},
 		sleep:    time.Sleep,
 		logf:     log.Printf,
-		ttl:      replyTTL,
+		softTTL:  replySoftTTL,
+		hardTTL:  replyHardTTL,
 		interval: replyPollInterval,
 	}
-	return newReplyRouter(deps)
+	return newReplyRouter(parent, deps)
 }
 
 // logReplyLegCoverage prints, at startup, which c2-channel (federated) XOs have a resolvable

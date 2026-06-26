@@ -7,26 +7,38 @@ import (
 	"testing"
 )
 
-// The #175 reply-watch marker for grok: count counts TEXT-bearing assistant entries; user / system /
-// tool_result / reasoning / empty-text entries do NOT count, and the latest text is the reply.
-func TestLastAssistantCount(t *testing.T) {
+// #175 content-correlation for grok: the reply is the text-bearing assistant entry following the
+// LATEST user entry carrying the operator's message (not a bare turn-count delta).
+func TestReplyAfterUserMsg(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "chat_history.jsonl")
 	lines := []string{
-		`{"type":"system","content":"sys"}`,
-		`{"type":"user","content":[{"type":"text","text":"first operator msg"}]}`,
-		`{"type":"assistant","content":"reply one"}`,
+		`{"type":"assistant","content":"prior unrelated turn"}`, // a queued/self turn — NOT the reply
+		`{"type":"user","content":[{"type":"text","text":"what do you need from me"}]}`,
 		`{"type":"reasoning","content":"thinking"}`,
 		`{"type":"tool_result","content":"tool out"}`,
-		`{"type":"assistant","content":""}`, // empty assistant → not counted
-		`{"type":"user","content":[{"type":"text","text":"second operator msg"}]}`,
-		`{"type":"assistant","content":[{"type":"text","text":"reply two"}]}`,
+		`{"type":"assistant","content":[{"type":"text","text":"here is what I need"}]}`,
 	}
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	text, count, err := lastAssistant(path, "sess")
-	if err != nil || text != "reply two" || count != 2 {
-		t.Fatalf("got (text=%q count=%d err=%v), want (reply two, 2, nil) — only text-bearing assistant entries count", text, count, err)
+	text, found, err := replyAfterUserMsg(path, "what do you need from me")
+	if err != nil || !found || text != "here is what I need" {
+		t.Fatalf("got (text=%q found=%v err=%v), want the turn AFTER the matching user entry", text, found, err)
+	}
+}
+
+func TestReplyAfterUserMsg_NoReplyYet(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "chat_history.jsonl")
+	lines := []string{
+		`{"type":"assistant","content":"prior turn"}`,
+		`{"type":"user","content":[{"type":"text","text":"hotline q"}]}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, _ := replyAfterUserMsg(path, "hotline q"); found {
+		t.Fatal("found=true before any assistant entry follows the user msg")
 	}
 }
