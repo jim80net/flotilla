@@ -56,9 +56,9 @@ can MISS (the origin channel's XO has no `FLOTILLA_WEBHOOK_<XO>`). A miss must N
 reply (that is bug #175 on the reply leg) — see §3's escalate-on-miss.
 
 **No feedback loop (trio-verified):** the relay drops any inbound message carrying a non-empty
-`webhookID` (`internal/relay/relay.go:18-22`, fed by `gateway.go:56`) — so a reply posted via webhook
-is never re-ingested as an operator message. The attribution marker is cosmetic; the `webhookID` drop
-is the loop guard.
+`webhookID` (`internal/relay/relay.go:18-22`, fed by `internal/discord/gateway.go:56`) — so a reply
+posted via webhook is never re-ingested as an operator message. The attribution marker is cosmetic;
+the `webhookID` drop is the loop guard.
 
 ## 3. Option (a) — reply-watcher anchored to confirmed delivery (the corrected mechanism)
 
@@ -66,15 +66,27 @@ Instead of arming a map and waiting for the coarse detector tick, **anchor a bou
 the confirmed delivery edge** and watch THIS desk's turn to completion at a fast cadence:
 
 1. **Anchor (at confirmed relay delivery).** The `SetMirror` hook fires after a CONFIRMED relay
-   delivery (`inject.go:166`) — by which point `confirm.Submit` has already confirmed the desk's
-   `Idle→Working` edge (the desk is now working on the operator's message). When `j.Kind=="relay"` AND
-   `j.Agent` is a DESK (not an XO — XOs keep their reply path), launch (or supersede the desk's
-   existing) **reply-watcher** carrying `(agent, j.OriginChannel)`.
-2. **Watch to completion (fast cadence, independent of the 20m tick).** The watcher polls
-   `surface.Assess(pane)` at a fast interval (reuse the recycle `pollWorking`/`pollIdleCleared` pattern
-   — `cmd/flotilla/recycle.go`) until it observes the `Working→Idle` completion of this turn, bounded
-   by a TTL. Reads only (Assess/capture/ResultReader) — no pane writes, so no transaction lock needed
-   (Assess is safe concurrent with delivery, per the Driver contract).
+   delivery (`inject.go:166`). **IMPORTANT (trio re-review P1-A — corrected):** "confirmed delivery"
+   does NOT guarantee the desk is Working. `confirm.Submit` returns success on THREE distinct signals
+   (`confirm.go:228-248`): `readWorking` (spinner up — the turn IS running), `readCleared` (a stable
+   composer-cleared streak — the Enter was accepted, but a FAST turn can complete before the watcher's
+   first poll), and `readQueued` (a SOFT-SUCCESS — the message is QUEUED behind the desk's CURRENT,
+   unrelated turn; the operator's turn has NOT started). So the watcher must be **disposition-aware**,
+   not assume Working. The disposition is therefore **plumbed from `confirm.Submit` through the
+   SendFunc→`SetMirror` hook** (widen the hook to carry the delivery disposition) so the watcher acts
+   deterministically instead of racing `Assess`. When `j.Kind=="relay"` AND `j.Agent` is a DESK (not
+   an XO), launch (or supersede) the desk's **reply-watcher** carrying `(agent, j.OriginChannel,
+   disposition)`.
+2. **Watch to completion (fast cadence, independent of the 20m tick), disposition-aware.** Reuse the
+   recycle `pollWorking`→`pollIdleCleared` sequence (`recycle.go:324,275`), reads-only (no lock —
+   `Assess` is safe concurrent with delivery, `surface.go:58-60`):
+   - **Working:** `pollIdleCleared` (bounded by TTL) → on completion, route (§3.3).
+   - **Cleared:** `pollWorking` for a short start-window. If Working observed → `pollIdleCleared` →
+     route. If Working NEVER observed (the turn was sub-poll-fast OR trivial — indistinguishable by
+     `Assess`) → **escalate** (do NOT route an ambiguous turn-final).
+   - **Queued:** the operator's turn has not started (it's behind another) → **escalate** ("your
+     message to `<desk>` is queued behind its current turn; read its pane / it'll answer when free").
+     (v1 does not try to wait out an arbitrary queue — that ambiguity is option (b)'s to resolve.)
 3. **Route (on completion).** Read the desk's turn-final via the surface `ResultReader.LatestResult`
    (the SAME seam the per-desk mirror uses), chunk with `discord.ChunkContent`, and post each chunk to
    the origin-channel webhook (§2) under `username=<deskName>`, attributed (e.g. `↩ <desk> (reply to
@@ -83,10 +95,13 @@ the confirmed delivery edge** and watch THIS desk's turn to completion at a fast
    loud `alert`/`escalate` hook (`watch.go:133`, `inject.go:109`) — NOT the visibility mirror's
    journald-only SKIP:
    - TTL elapses with no completion → `alert("<desk> hasn't answered your message within <ttl>; read its pane")`.
+   - **turn-start not confirmed** (Cleared with no Working observed, or Queued — the §3.2 ambiguous
+     cases) → `alert("<desk> received your message but I couldn't confirm a distinct reply turn; read its pane")`.
    - origin-channel webhook unresolved (§2 miss) → `alert("<desk> replied to you but I can't route it (no webhook for <channel>); read its pane")`.
    - surface has no `ResultReader` (e.g. aider) → `alert(...)` (can't extract a turn-final).
    - chunk post fails → `alert(...)` (redaction-safe, like the per-desk mirror's MIRROR-FAIL).
-   This satisfies `watch/spec.md`'s "a dropped operator message is never silent" on the return path.
+   This satisfies `watch/spec.md`'s "A dropped operator message is never silent" requirement
+   (`spec.md:328`) on the return path — every non-route outcome is LOUD.
 
 **Why this is strictly better than arm/take-on-tick:**
 - **No sub-tick drop (P1-1):** the watcher's fast cadence catches any turn length; it does not depend
@@ -103,6 +118,9 @@ the confirmed delivery edge** and watch THIS desk's turn to completion at a fast
 **Concurrency model:** a per-desk single watcher (a `map[agent]*replyWatcher` guarded by a mutex);
 launching a new one cancels the prior (context cancellation). The watcher runs off the injector/detector
 goroutines (its own goroutine), reads-only, self-absorbing errors into the escalate hook.
+**Supersede guard (trio re-review P3-A):** the route step re-checks `ctx.Err()` immediately before each
+chunk post (mirroring the recycle generation re-check, `recycle.go:225-227`), so a watcher that was
+superseded mid-route does NOT emit a stale reply to the old origin channel.
 
 ### Restart caveat (trio P2-1/P2-2 — documented, not silently lost)
 
@@ -130,11 +148,14 @@ chapter** once (a) is validated live.
 
 ## 5. Scope / what's in (a)
 
-- **In:** the `replyWatcher` (anchor-at-delivery, fast-poll-to-completion, TTL, supersede); the
-  destination resolution (§2); attribution + chunking reuse; **loud escalation on every miss** (§3.4);
-  unit tests (consume-once/completion, TTL-expiry→escalate, webhook-miss→escalate, ResultReader-less→
-  escalate, supersede-re-anchors, no-self-turn-steal); a **`watch`** spec delta (a new reply-routing
-  requirement, tied to the existing feedback-loop-immunity requirement).
+- **In:** the disposition-plumbing (Submit signal → SetMirror hook); the `replyWatcher` (anchor-at-
+  delivery, disposition-aware poll-to-completion, TTL, supersede + ctx-guarded route); the destination
+  resolution (§2); attribution + chunking reuse; **loud escalation on every miss** (§3.4); unit tests:
+  Working→completion-routes, Cleared+Working→routes, Cleared+no-Working→escalate, Queued→escalate,
+  TTL→escalate, webhook-miss→escalate, ResultReader-less→escalate, **chunk-post-fail→escalate**,
+  supersede-re-anchors + ctx-guard-blocks-stale-post, no-self-turn-steal; a **`watch`** spec delta (a
+  new reply-routing requirement, ADDED, tied to `Feedback-loop immunity` (`watch/spec.md:33`) and
+  extending `A dropped operator message is never silent` (`watch/spec.md:328`) to the reply leg).
 - **NOT in:** option (b) (filed separately); retiring/centralizing the XO Stop-hook (b's job); changing
   the XO reply path; the existing per-desk visibility mirror's behavior (untouched). The pre-existing
   *visibility-mirror lossiness* (§1a) and the *per-desk-visibility-mirror spec gap* (§7 C-1) are
@@ -173,3 +194,35 @@ chapter** once (a) is validated live.
   `watch.go:179` (a comment). Corrected in §2.
 - **C-4 (OCR) — testability confirmed** (injectable-fakes pattern, à la `mirror_test.go` /
   `detector_mirror_test.go`); the correctness-bearing cases are now enumerated in §5.
+
+## 8. THE CRUX FORK (for hydra-ops / operator) — completion-detection mechanism
+
+Two design-trio rounds caught TWO load-bearing flaws (P1-1 tick-too-coarse; P1-A confirmed-delivery≠
+Working). Both trace to ONE hard problem: **reliably correlating a desk's turn-completion to the
+operator's message by observing the pane** is inherently racy (fast turns, queued turns, the 20m
+tick). This is exactly the problem option (b) (a first-class correlation id) exists to dissolve — so
+"(a) fast / (b) durable" share their hard part. The routing/destination/escalation/never-silent design
+(§2–§3.4) is SETTLED and correct; the open decision is *how to detect completion*:
+
+- **Option A — disposition-plumbed poll-watcher (this design; RECOMMENDED).** Flotilla-native, NO
+  per-pane hooks (aligns with b's "remove the Stop-hooks" direction). Cost: plumbs the Submit
+  disposition through the confirm/inject layer; the Cleared/Queued/sub-tick cases ESCALATE ("read the
+  pane") rather than always delivering the verbatim reply — so for fast/queued turns the operator
+  sometimes gets a loud "go look" instead of the text. Ships real value now; reusable.
+- **Option B — generalize the XO Stop-hook to every desk.** Fires EXACTLY on turn-completion (no
+  poll, no disposition race) → simpler, more reliable completion detection. Cost: a per-pane,
+  host-local Stop-hook on every desk — precisely the fragile per-pane machinery option (b) wants to
+  RETIRE. A step away from the durable direction.
+- **Option C — jump straight to (b) (correlation-id reply routing).** Since (a)'s hard part == (b)'s,
+  skip the watcher and build the first-class request/response now. Most work up front; no interim
+  heuristic; the true end-state. Larger chapter.
+
+**My recommendation:** **Option A** — it closes the operator's gap now, is flotilla-native (no
+per-pane hooks, consistent with b), and the escalate-on-ambiguity keeps it strictly never-silent. The
+verbatim-reply UX is best-effort for the common (Working) case and loud-fallback for the racy cases.
+If the operator wants the *verbatim* reply guaranteed for every turn (incl. fast/queued), that's
+Option C (b) and we should invest there instead of A.
+
+**Decision requested:** A (recommended, proceed now) / B / C. I'll proceed on **A** (openspec +
+implementation) under a veto window unless redirected — the routing half is settled regardless of the
+fork, so the work isn't wasted.
