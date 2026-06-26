@@ -36,7 +36,7 @@ func TestIsHotlineToChannelXO(t *testing.T) {
 		want bool
 	}{
 		{"federated c2-channel XO → arm", watch.Job{Kind: "relay", Agent: "alpha-xo", OriginChannel: "C_ALPHA"}, true},
-		{"primary XO (has Stop-hook) → no arm", watch.Job{Kind: "relay", Agent: "meta-xo", OriginChannel: "C_CMD"}, false},
+		{"primary XO → arm (#177 unified: the watcher is the return leg for ALL XOs)", watch.Job{Kind: "relay", Agent: "meta-xo", OriginChannel: "C_CMD"}, true},
 		{"a channel MEMBER (not the channel's XO) → no arm", watch.Job{Kind: "relay", Agent: "alpha-be", OriginChannel: "C_ALPHA"}, false},
 		{"XO addressed from the wrong channel → no arm", watch.Job{Kind: "relay", Agent: "alpha-xo", OriginChannel: "C_CMD"}, false},
 		{"non-relay (detector) → no arm", watch.Job{Kind: "detector", Agent: "alpha-xo", OriginChannel: "C_ALPHA"}, false},

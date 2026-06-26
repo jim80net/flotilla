@@ -194,10 +194,12 @@ func replyDest(cfg *roster.Config, secrets *roster.Secrets, originChannel string
 }
 
 // isHotlineToChannelXO reports whether j is an operator hotline message that NEEDS the watcher return
-// leg: a relay delivery whose target IS the origin channel's xo_agent, AND is NOT the primary XO (which
-// already has its host-local Stop-hook return leg — #175 scope is the FEDERATED c2-channel XOs).
+// leg: a relay delivery whose target IS the origin channel's xo_agent. This covers EVERY channel's XO,
+// INCLUDING the primary (#177 unified the primary XO into the flotilla-native watcher, retiring its
+// host-local Stop-hook — the watcher has the same replies-only semantics, more robustly). Heartbeat /
+// detector ticks (j.Kind != "relay") never arm it; a channel MEMBER (not the channel's XO) does not.
 func isHotlineToChannelXO(cfg *roster.Config, j watch.Job) bool {
-	if j.Kind != "relay" || j.OriginChannel == "" || j.Agent == cfg.XOAgent {
+	if j.Kind != "relay" || j.OriginChannel == "" {
 		return false
 	}
 	binding, ok := cfg.BindingForChannel(j.OriginChannel)
@@ -251,17 +253,17 @@ func newHotlineReplyRouter(parent context.Context, cfg *roster.Config, secrets *
 	return newReplyRouter(parent, deps)
 }
 
-// logReplyLegCoverage prints, at startup, which c2-channel (federated) XOs have a resolvable
-// return-leg webhook — so a mis-provisioned channel is visible at boot, not at the first dropped
-// reply. The primary XO is excluded (it uses its host-local Stop-hook).
+// logReplyLegCoverage prints, at startup, which channel XOs have a resolvable return-leg webhook — so a
+// mis-provisioned channel is visible at boot, not at the first dropped reply. Covers EVERY channel's XO
+// including the primary (#177: the watcher is the unified return leg for all XOs).
 func logReplyLegCoverage(cfg *roster.Config, secrets *roster.Secrets) {
 	if secrets == nil {
 		return
 	}
 	var withLeg, without []string
 	for _, ch := range cfg.Bindings() {
-		if ch.XOAgent == "" || ch.XOAgent == cfg.XOAgent {
-			continue // unbound, or the primary XO (Stop-hook return leg)
+		if ch.XOAgent == "" {
+			continue // unbound channel
 		}
 		if url, err := secrets.Webhook(ch.XOAgent); err == nil && url != "" {
 			withLeg = append(withLeg, ch.XOAgent)
