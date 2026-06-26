@@ -266,8 +266,32 @@ the proven extraction (`claudestore.lastTurnText` / `grokstore.LatestResult`), a
 <delivery marker>" read + the same destination/never-silent routing (§2–§3.4, settled). This is the
 recommended concrete implementation of **C** if the operator picks it.
 
-(Open: confirm the user-turn content-match is robust vs a timestamp-after-delivery snapshot; verify
-the grok `chat_history.jsonl` exposes the same per-turn structure — quick to ground when C is blessed.)
+### 9b. Pre-checks done — finalized correlation: COUNT-based (uniform across claude + grok)
 
-**Status:** routing half settled + kept warm; completion-detection implementation HELD for the
-operator's A/B/C steer (hydra-ops surfacing A-vs-C now). If C: implement via the §9a transcript-watcher.
+Both pre-checks ran (read-only, live stores):
+- **claude transcript** (`~/.claude/projects/<cwd>/<session>.jsonl`): per-entry **timestamps** present;
+  a relay-injected operator message is recorded **verbatim as a `user` turn** (live-confirmed). Empty
+  user turns (tool_results) must be skipped.
+- **grok** (`<grokHome>/sessions/<cwd>/<session>/chat_history.jsonl`): user + assistant turns present,
+  but **NO timestamp field** (keys: content/id/model_id/status/tool_calls/type/…).
+
+⇒ **Use a COUNT-based marker, not timestamps** (uniform, no per-entry-timestamp dependency):
+1. **Snapshot** at confirmed delivery: the XO's active-transcript **assistant-turn count** `N` (resolve
+   the active session file via the existing pane→cwd→store seam; the operator's message adds a `user`
+   turn, NOT an assistant turn, so `N` is unchanged by delivery).
+2. **Watch** (poll, bounded TTL): until the assistant-turn count `> N` AND the transcript is quiescent
+   (`claudestore.waitQuiescent` — the flush-stabilization already used).
+3. **Extract** the latest TEXT-bearing assistant turn (reuse `claudestore.lastTurnText` /
+   `grokstore.lastAssistant` — they already reverse-walk past trailing tool_use/tool_result) = the
+   verbatim reply. (Optional: confirm a `user` turn matching the operator's message appeared after the
+   snapshot — asserts ingestion.)
+4. **Route + never-silent** per §2/§3.4: post to the origin-channel webhook (attributed, chunked);
+   escalate loudly on TTL-no-new-assistant-turn / webhook-unresolved / post-fail.
+
+This dissolves every prior P1: no pane-observation race (Working/Cleared/Queued are irrelevant — the
+store records the actual completed turn), no 20m-tick dependency, reliable correlation. Seam needed: a
+store/surface method returning the assistant-turn COUNT (existing readers return only the latest text).
+
+**Status:** C GREENLIT (hydra-ops, on the operator's behalf, veto window open). Pre-checks DONE.
+Proceeding: openspec change → impl (count-marked transcript-watcher + federated-XO return-leg routing)
+→ trio (systems+OCR+STORM) → PR. Pre-existing per-desk-visibility-mirror sub-tick-drop gap → filed #176.
