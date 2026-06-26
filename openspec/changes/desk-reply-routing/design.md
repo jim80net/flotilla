@@ -226,3 +226,48 @@ Option C (b) and we should invest there instead of A.
 **Decision requested:** A (recommended, proceed now) / B / C. I'll proceed on **A** (openspec +
 implementation) under a veto window unless redirected — the routing half is settled regardless of the
 fork, so the work isn't wasted.
+
+## 9. REFRAME (operator, 2026-06-26) — this is the c2-channel↔XO HOTLINE return leg
+
+The operator did NOT type into a desk pane — they typed in the **#empath c2 channel**
+(`channel_id …1519598744872423424`, `xo_agent=empath-lead`), the INTENDED hotline to the empath XO.
+So #175 is the **designed c2-channel↔XO wiring with an incomplete RETURN leg**, not a workaround.
+Operator verbatim: *"channels in c2 are supposed to be my hotline to each XO; that wiring is
+incomplete and should be mechanically enforced; this is a task for flotilla-dev to execute."*
+
+Consequences for the design:
+- **The routing half is VALIDATED.** `BindingForChannel(originChannel)→XOAgent→secrets.Webhook` IS the
+  hotline routing — the target is always the channel's `xo_agent`, and the reply returns to that
+  channel. (The primary XO `hydra-ops` already has this return leg via its host-local Stop-hook; the
+  gap is the FEDERATED c2-channel XOs — empath-lead et al. — which lack it.)
+- **"Mechanically enforced" + "reliable hotline" ⇒ leans C, not A.** A escalates fast/queued/sub-tick
+  turns to a manual "read the pane" — which is the EXACT failure the operator just hit. A reliable
+  hotline must deliver the verbatim reply for EVERY turn. hydra-ops is surfacing A-vs-C to the operator.
+
+### 9a. The mechanism that makes C clean + flotilla-native — a TRANSCRIPT-WATCHER (verified feasible)
+
+A's unreliability is an artifact of observing the **pane** (the Working/Cleared/Queued race). But the
+harness **session store is the ground truth of completed turns**, and flotilla ALREADY reads it
+(`internal/claudestore`, `internal/grokstore` — the `ResultReader` seam). Verified structure
+(`claudestore.go:163-260`, live-probed): the claude transcript is JSONL with typed entries
+(`Type: user|assistant|system|queue-operation|…`, `Message.Role`, per-line `timestamp`) — so:
+
+- The operator's hotline message, delivered into the XO's session, is recorded as a **`user` turn**;
+  the **next `assistant` turn after it is the verbatim reply** → near-DETERMINISTIC correlation
+  (content-match the user turn, take the following assistant turn), no protocol change, no pane race.
+- It catches **fast/sub-tick turns** (they're in the transcript) AND **queued turns** (a
+  `queue-operation` entry is literally recorded) — exactly the cases A escalates.
+- It is **flotilla-native** (reads the store flotilla already reads — NO per-pane host-local Stop-hook,
+  unlike B) and reliable (NO 20m-tick dependency, unlike the detector path).
+
+**So "C done via a transcript-watcher" delivers the operator's ask — mechanically-enforced, reliable,
+verbatim-every-turn hotline — WITHOUT A's escalation compromise OR B's host-hook fragility.** It reuses
+the proven extraction (`claudestore.lastTurnText` / `grokstore.LatestResult`), adding a "turns since
+<delivery marker>" read + the same destination/never-silent routing (§2–§3.4, settled). This is the
+recommended concrete implementation of **C** if the operator picks it.
+
+(Open: confirm the user-turn content-match is robust vs a timestamp-after-delivery snapshot; verify
+the grok `chat_history.jsonl` exposes the same per-turn structure — quick to ground when C is blessed.)
+
+**Status:** routing half settled + kept warm; completion-detection implementation HELD for the
+operator's A/B/C steer (hydra-ops surfacing A-vs-C now). If C: implement via the §9a transcript-watcher.
