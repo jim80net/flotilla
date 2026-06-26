@@ -136,6 +136,18 @@ func (d ComposerDisposition) String() string {
 	}
 }
 
+// ReplyMarkReader is an OPTIONAL Driver capability (#175): return the desk's latest substantive
+// turn-final text AND a monotonic assistant-turn COUNT marker, both read from the harness session
+// store. The c2-hotline reply-watcher snapshots `count` when an operator message is confirmed-delivered
+// to a channel's XO (the operator message adds a USER turn, not an assistant turn, so `count` is the
+// pre-reply baseline) and polls until `count` increases (the XO's reply landed) and `ok` (there is
+// substantive text to route). Counting assistant turns — not per-entry timestamps — keeps the marker
+// uniform across harnesses whose stores record no timestamps (grok). `ok=false` means "no substantive
+// turn yet" (keep polling); `err` is non-nil only on a pane→cwd resolution failure. READ-ONLY.
+type ReplyMarkReader interface {
+	LatestTurnMark(pane string) (text string, count int, ok bool, err error)
+}
+
 // ComposerStateProbe is an OPTIONAL Driver capability: report the ComposerDisposition at the cursor.
 // It reads AT the terminal cursor (the focused input) instead of a
 // fixed bottom-of-pane window, so a per-agent message sub-composer or a queued-message prompt is

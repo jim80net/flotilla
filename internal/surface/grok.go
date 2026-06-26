@@ -42,9 +42,10 @@ type grok struct {
 	// ResultReader seams (the full-result reader, #58 B): resolve the pane's cwd, then read the
 	// grok session store rooted at grokHome. Injectable so LatestResult is unit-testable without
 	// tmux or a real ~/.grok.
-	paneCWD      func(string) (string, error)
-	grokHome     string
-	latestResult func(grokHome, cwd string) (string, error)
+	paneCWD          func(string) (string, error)
+	grokHome         string
+	latestResult     func(grokHome, cwd string) (string, error)
+	latestResultMark func(grokHome, cwd string) (string, int, error)
 	// ComposerStateProbe seam (#158): the pane's cursor row + whether it is in a tmux mode (copy/view).
 	// Injectable so ComposerState is unit-testable without a tmux server (mirrors claude's cursorState).
 	cursorState func(pane string) (cursorY int, inMode bool, err error)
@@ -64,10 +65,11 @@ func newGrok() grok {
 		classify:     parseGrokState,
 		send:         deliver.Send,
 		inject:       deliver.InjectSlash,
-		paneCWD:      deliver.PaneCWD,
-		grokHome:     grokHome,
-		latestResult: grokstore.LatestResult,
-		cursorState:  deliver.CursorState,
+		paneCWD:          deliver.PaneCWD,
+		grokHome:         grokHome,
+		latestResult:     grokstore.LatestResult,
+		latestResultMark: grokstore.LatestResultMark,
+		cursorState:      deliver.CursorState,
 	}
 }
 
@@ -123,6 +125,25 @@ func (g grok) LatestResult(pane string) (string, error) {
 		return "", fmt.Errorf("grok: cannot resolve the ~/.grok session store (no home directory)")
 	}
 	return g.latestResult(g.grokHome, cwd)
+}
+
+// LatestTurnMark implements surface.ReplyMarkReader (#175): the latest turn-final text plus the
+// assistant-turn count marker, read from the grok chat history. ok=false means "no substantive turn
+// yet" (the watcher keeps polling until the count rises; its TTL is the backstop for a persistent
+// store failure); err is reserved for a pane→cwd / store-home resolution failure.
+func (g grok) LatestTurnMark(pane string) (text string, count int, ok bool, err error) {
+	cwd, err := g.paneCWD(pane)
+	if err != nil {
+		return "", 0, false, err
+	}
+	if g.grokHome == "" {
+		return "", 0, false, fmt.Errorf("grok: cannot resolve the ~/.grok session store (no home directory)")
+	}
+	text, count, merr := g.latestResultMark(g.grokHome, cwd)
+	if merr != nil {
+		return "", count, false, nil // no assistant turn yet / transient store read — keep polling
+	}
+	return text, count, text != "", nil
 }
 
 // --- pure state classifier (the testable core) ---

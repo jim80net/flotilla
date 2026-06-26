@@ -31,6 +31,8 @@ type claudeCode struct {
 	// keyed by the pane. Injectable so LatestResult is unit-testable without tmux or a real
 	// ~/.claude/projects tree (mirrors the grok driver's latestResult seam).
 	latestTurnText func(pane string) (string, bool, error)
+	// ReplyMarkReader seam (#175): the latest turn-final PLUS the assistant-turn count marker.
+	latestTurnMark func(pane string) (string, int, bool, error)
 	// ComposerStateProbe seam: the pane's cursor row (the focused-input line) + whether the pane is
 	// in a tmux mode (copy/view — in which the cursor and capture coordinate spaces diverge).
 	// Injectable so ComposerState is unit-testable without a tmux server.
@@ -47,6 +49,7 @@ func newClaudeCode() claudeCode {
 		clear:          deliver.ClearContext,
 		slashKeys:      deliver.InjectSlash,
 		latestTurnText: claudestore.LatestTurnText,
+		latestTurnMark: claudestore.LatestTurnMark,
 		cursorState:    deliver.CursorState,
 	}
 }
@@ -174,6 +177,12 @@ func (c claudeCode) LatestResult(pane string) (string, error) {
 		return "", fmt.Errorf("claude-code: no substantive completed turn for the desk at pane %q (no session located, no assistant turn yet, or the turn was pure command noise)", pane)
 	}
 	return text, nil
+}
+
+// LatestTurnMark implements surface.ReplyMarkReader: the latest turn-final text plus the assistant-turn
+// count marker, read from the Claude Code transcript (the #175 c2-hotline reply-watch seam).
+func (c claudeCode) LatestTurnMark(pane string) (text string, count int, ok bool, err error) {
+	return c.latestTurnMark(pane)
 }
 
 // Composer-line markers (verified live on the spark fleet, 2026-06-22). Version-specific —

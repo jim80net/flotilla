@@ -79,16 +79,38 @@ func extractText(raw json.RawMessage) (string, bool) {
 // (resolved) cwd would not match. Today's deployment uses real paths; revisit with EvalSymlinks if
 // a symlinked worktree is ever used.
 func LatestResult(grokHome, cwd string) (string, error) {
+	path, sessionID, err := resolveHistoryPath(grokHome, cwd)
+	if err != nil {
+		return "", err
+	}
+	text, _, err := lastAssistant(path, sessionID)
+	return text, err
+}
+
+// LatestResultMark is LatestResult plus the chat history's text-bearing assistant-turn COUNT — the
+// #175 reply-watch marker (grok stores no per-entry timestamps, so a count is the uniform marker the
+// watcher snapshots at delivery and watches for an increase). A "no assistant turn yet" store yields
+// (\"\", 0, err) — the watcher treats the error as ok=false and keeps polling until the count rises.
+func LatestResultMark(grokHome, cwd string) (text string, count int, err error) {
+	path, sessionID, err := resolveHistoryPath(grokHome, cwd)
+	if err != nil {
+		return "", 0, err
+	}
+	return lastAssistant(path, sessionID)
+}
+
+// resolveHistoryPath resolves the single chat_history.jsonl for the active grok session at cwd (the
+// shared session-selection both readers use): active_sessions.json → sessionID → glob by session id.
+func resolveHistoryPath(grokHome, cwd string) (path string, sessionID string, err error) {
 	raw, err := os.ReadFile(filepath.Join(grokHome, "active_sessions.json"))
 	if err != nil {
-		return "", fmt.Errorf("grok store: read active_sessions.json: %w", err)
+		return "", "", fmt.Errorf("grok store: read active_sessions.json: %w", err)
 	}
 	var sessions []activeSession
 	if err := json.Unmarshal(raw, &sessions); err != nil {
-		return "", fmt.Errorf("grok store: parse active_sessions.json: %w", err)
+		return "", "", fmt.Errorf("grok store: parse active_sessions.json: %w", err)
 	}
 	want := filepath.Clean(cwd)
-	var sessionID string
 	for _, s := range sessions {
 		// First active session matching the cwd wins (the store has one open session per cwd).
 		if filepath.Clean(s.Cwd) == want {
@@ -97,20 +119,20 @@ func LatestResult(grokHome, cwd string) (string, error) {
 		}
 	}
 	if sessionID == "" {
-		return "", fmt.Errorf("grok store: no active grok session for cwd %q (is the desk running a turn-bearing grok session?)", cwd)
+		return "", "", fmt.Errorf("grok store: no active grok session for cwd %q (is the desk running a turn-bearing grok session?)", cwd)
 	}
 	// Glob by session-id under any cwd dir, so we never re-encode the cwd (the store url-encodes it).
 	matches, err := filepath.Glob(filepath.Join(grokHome, "sessions", "*", sessionID, "chat_history.jsonl"))
 	if err != nil {
-		return "", fmt.Errorf("grok store: glob session %s history: %w", sessionID, err)
+		return "", "", fmt.Errorf("grok store: glob session %s history: %w", sessionID, err)
 	}
 	switch len(matches) {
 	case 0:
-		return "", fmt.Errorf("grok store: no chat_history.jsonl for session %s", sessionID)
+		return "", "", fmt.Errorf("grok store: no chat_history.jsonl for session %s", sessionID)
 	case 1:
-		return lastAssistant(matches[0], sessionID)
+		return matches[0], sessionID, nil
 	default:
-		return "", fmt.Errorf("grok store: ambiguous — %d chat_history.jsonl files for session %s (%s)", len(matches), sessionID, strings.Join(matches, ", "))
+		return "", "", fmt.Errorf("grok store: ambiguous — %d chat_history.jsonl files for session %s (%s)", len(matches), sessionID, strings.Join(matches, ", "))
 	}
 }
 
@@ -118,10 +140,10 @@ func LatestResult(grokHome, cwd string) (string, error) {
 // non-empty text. A malformed line is skipped (not fatal) so one bad line never hides a valid
 // result. An assistant entry whose content shape we can't decode is recorded so the caller can
 // distinguish "a turn exists but I couldn't read its content" from "no assistant turn yet".
-func lastAssistant(path, sessionID string) (string, error) {
+func lastAssistant(path, sessionID string) (text string, count int, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return "", fmt.Errorf("grok store: open chat history: %w", err)
+		return "", 0, fmt.Errorf("grok store: open chat history: %w", err)
 	}
 	defer f.Close()
 
@@ -138,24 +160,25 @@ func lastAssistant(path, sessionID string) (string, error) {
 		if e.Type != "assistant" {
 			continue
 		}
-		text, ok := extractText(e.Content)
+		t, ok := extractText(e.Content)
 		if !ok {
 			sawUndecodable = true // an assistant turn we can't read — don't let it vanish silently
 			continue
 		}
-		if text != "" {
-			last = text
+		if t != "" {
+			last = t
+			count++ // a text-bearing assistant turn — the monotonic #175 reply-watch marker
 			found = true
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return "", fmt.Errorf("grok store: scan chat history: %w", err)
+		return "", 0, fmt.Errorf("grok store: scan chat history: %w", err)
 	}
 	if !found {
 		if sawUndecodable {
-			return "", fmt.Errorf("grok store: session %s has assistant turn(s) but their content format was unrecognized (not string or text-blocks) — extractText needs a new shape", sessionID)
+			return "", 0, fmt.Errorf("grok store: session %s has assistant turn(s) but their content format was unrecognized (not string or text-blocks) — extractText needs a new shape", sessionID)
 		}
-		return "", fmt.Errorf("grok store: no assistant turn yet in session %s", sessionID)
+		return "", 0, fmt.Errorf("grok store: no assistant turn yet in session %s", sessionID)
 	}
-	return last, nil
+	return last, count, nil
 }

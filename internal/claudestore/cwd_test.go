@@ -22,9 +22,9 @@ func TestLastTurnTextWithCwdCapturesCwd(t *testing.T) {
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	text, cwd, ok := lastTurnTextWithCwd(path)
-	if !ok || text != "the turn-final" || cwd != "/home/x/proj" {
-		t.Fatalf("lastTurnTextWithCwd = (%q, %q, %v), want the turn-final + its recorded cwd", text, cwd, ok)
+	text, cwd, count, ok := lastTurnTextWithCwd(path)
+	if !ok || text != "the turn-final" || cwd != "/home/x/proj" || count != 1 {
+		t.Fatalf("lastTurnTextWithCwd = (%q, %q, count=%d, %v), want the turn-final + its recorded cwd + count=1", text, cwd, count, ok)
 	}
 	// The thin wrapper still satisfies the existing (text, ok) contract.
 	if wt, wok := lastTurnText(path); !wok || wt != "the turn-final" {

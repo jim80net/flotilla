@@ -220,18 +220,21 @@ func extractText(raw json.RawMessage) string {
 // that follow the real turn-final (the hook's "tool-result trigger blindness" fix), reading forward
 // once rather than indexing backward.
 func lastTurnText(jsonlPath string) (string, bool) {
-	text, _, ok := lastTurnTextWithCwd(jsonlPath)
+	text, _, _, ok := lastTurnTextWithCwd(jsonlPath)
 	return text, ok
 }
 
 // lastTurnTextWithCwd is lastTurnText plus the session's recorded working directory (the last
 // non-empty `cwd` seen), so the caller can verify the session actually belongs to the desk it
 // resolved — the guard against the lossy project-dir encoding collision. cwd is "" when no entry
-// recorded one (then the caller cannot verify and accepts, never a false skip).
-func lastTurnTextWithCwd(jsonlPath string) (text string, cwd string, ok bool) {
+// recorded one (then the caller cannot verify and accepts, never a false skip). It ALSO returns
+// `count` — the number of TEXT-BEARING assistant turns in the transcript — a monotonic marker the
+// reply-watcher (#175) snapshots at message delivery and watches for an increase (a new assistant
+// turn ⇒ the XO's reply), uniform with grok's count (grok stores no per-entry timestamps).
+func lastTurnTextWithCwd(jsonlPath string) (text string, cwd string, count int, ok bool) {
 	f, err := os.Open(jsonlPath)
 	if err != nil {
-		return "", "", false
+		return "", "", 0, false
 	}
 	defer f.Close()
 
@@ -255,13 +258,14 @@ func lastTurnTextWithCwd(jsonlPath string) (text string, cwd string, ok bool) {
 		}
 		if t := extractText(e.Message.Content); strings.TrimSpace(t) != "" {
 			last = t
+			count++ // a text-bearing assistant turn — the monotonic reply-watch marker
 			found = true
 		}
 	}
 	if sc.Err() != nil { // an over-long line (ErrTooLong) or read error — report unread, don't post a fragment
-		return "", "", false
+		return "", "", 0, false
 	}
-	return last, cwd, found
+	return last, cwd, count, found
 }
 
 // stripTags removes the harness-injected blocks Claude Code embeds in a turn — slash-command
@@ -300,6 +304,20 @@ func LatestTurnText(pane string) (text string, ok bool, err error) {
 	return text, ok, nil
 }
 
+// LatestTurnMark is LatestTurnText plus the authoritative session's text-bearing assistant-turn COUNT
+// — the #175 reply-watch marker. The watcher snapshots `count` at confirmed delivery of an operator
+// hotline message (which adds a USER turn, not an assistant turn, so `count` is the pre-reply baseline)
+// and polls until `count` increases (the XO's reply) and `ok` (substantive text to route). `err` is
+// non-nil only on a pane-cwd resolution failure; a located-but-empty session is (ok=false, err=nil).
+func LatestTurnMark(pane string) (text string, count int, ok bool, err error) {
+	cwd, err := deliver.PaneCWD(pane)
+	if err != nil {
+		return "", 0, false, err
+	}
+	text, count, ok = latestTurnMarkForCwd(cwd)
+	return text, count, ok, nil
+}
+
 // latestTurnTextForCwd is LatestTurnText minus the tmux read, so the session selection + the
 // collision disambiguation are unit-testable. It walks the project dir's sessions NEWEST first and:
 //   - SKIPS a session whose recorded cwd disagrees with cwd — a COLLIDING desk's transcript (the
@@ -310,25 +328,35 @@ func LatestTurnText(pane string) (text string, ok bool, err error) {
 //     substantive). It does NOT fall through to an OLDER session in that case, because an older
 //     session's turn is stale and re-posting it would duplicate a turn already mirrored.
 func latestTurnTextForCwd(cwd string) (string, bool) {
-	sessions, ok := sessionsByMtime(cwd)
-	if !ok {
-		return "", false
+	text, _, ok := latestTurnMarkForCwd(cwd)
+	return text, ok
+}
+
+// latestTurnMarkForCwd is latestTurnTextForCwd plus the assistant-turn COUNT of the authoritative
+// session (the #175 reply-watch marker). `count` is the session's text-bearing assistant-turn count
+// even when the latest turn is not substantive (ok=false) — so the watcher can still snapshot a
+// baseline and detect the next turn. ok reflects whether the latest turn is a substantive turn-final
+// (the routable reply text).
+func latestTurnMarkForCwd(cwd string) (text string, count int, ok bool) {
+	sessions, found := sessionsByMtime(cwd)
+	if !found {
+		return "", 0, false
 	}
 	for _, sessionPath := range sessions {
 		waitQuiescent(sessionPath) // let a still-flushing turn-final settle before extracting (no truncated post)
-		raw, sessionCwd, ok := lastTurnTextWithCwd(sessionPath)
+		raw, sessionCwd, c, got := lastTurnTextWithCwd(sessionPath)
 		if sessionCwd != "" && sessionCwd != cwd {
 			continue // a colliding desk's session — keep looking for THIS desk's newest
 		}
 		// THIS desk's newest session (cwd matches, or is unverifiable) — authoritative; no stale fallback.
-		if !ok {
-			return "", false
+		if !got {
+			return "", c, false
 		}
 		clean, substantive := stripAndClassify(raw)
 		if !substantive {
-			return "", false
+			return "", c, false
 		}
-		return clean, true
+		return clean, c, true
 	}
-	return "", false
+	return "", 0, false
 }
