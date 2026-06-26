@@ -6,8 +6,9 @@
 
 The system SHALL provide a per-desk VISIBILITY mirror: when a NON-XO desk finishes a turn, the daemon
 SHALL post that desk's substantive turn-final to the DESK's OWN channel webhook
-(`secrets.Webhook(<desk>)`), under the desk's identity, chunked to Discord's limit — so the operator/XO
-can see what a desk has been doing in its own channel. This is DISTINCT from the operator↔XO hotline
+(`secrets.Webhook(<desk>)`), under the desk's identity, chunked below Discord's hard content limit (a
+per-chunk budget held under 2000 runes for headroom) — so the operator/XO can see what a desk has been
+doing in its own channel. This is DISTINCT from the operator↔XO hotline
 RETURN leg (which routes a reply to the OPERATOR's origin channel): the visibility mirror fires for
 EVERY non-XO desk turn and posts to the DESK's channel, not in response to an operator message.
 
@@ -17,8 +18,10 @@ propagate a failure, and it SHALL emit exactly one decision log line per finishe
 (the turn-final was mirrored, with its chunk count), or a MIRROR-FAIL (a chunk post failed,
 redaction-safe). The turn-final SHALL be read from the harness session store via the surface
 `ResultReader` — the SAME extraction `flotilla result` uses, so the CLI and the auto-mirror never
-diverge. Because it posts via a webhook, the relay's feedback-loop immunity (the `webhookID` drop)
-SHALL prevent the mirrored post from re-entering the relay.
+diverge. That extraction SHALL resolve the desk's OWN session by its working directory and SKIP a
+colliding desk's session (the lossy project-dir-encoding guard), so a desk's channel never carries
+another desk's turn-final. Because it posts via a webhook, the relay's feedback-loop immunity (the
+`webhookID` drop) SHALL prevent the mirrored post from re-entering the relay.
 
 The visibility mirror SHALL be TRIGGERED by the change-detector's sampled `Working→Idle` edge at the
 heartbeat-interval cadence. It is therefore explicitly BEST-EFFORT and LOSSY: a turn that starts AND
