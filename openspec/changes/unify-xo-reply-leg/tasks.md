@@ -6,5 +6,5 @@
 - [x] 4. Spec delta: MODIFY the #175 `watch` requirement (all XOs; Stop-hook retired). Prerequisite
   (`desk-reply-routing` archived, #179) SATISFIED; the MODIFY validates strict.
 - [x] 5. Cutover runbook in design §4 (coordinated host hook-retirement + binary deploy, no double-post);
-  EXECUTION is operator/XO-timed (held by hydra-ops, post-PR + post-QQQ-deadline).
+  EXECUTION is operator/XO-timed (the cutover window is scheduled with the operator post-PR-merge).
 - [x] 6. systems-review on the diff (APPROVE, no P1); findings folded; PR to hydra-ops's gate.
