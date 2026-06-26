@@ -45,6 +45,8 @@ type grok struct {
 	paneCWD      func(string) (string, error)
 	grokHome     string
 	latestResult func(grokHome, cwd string) (string, error)
+	// ReplyReader seam (#175): the verbatim reply that follows a specific operator message's user entry.
+	replyAfter func(grokHome, cwd, operatorMsg string) (string, bool, error)
 	// ComposerStateProbe seam (#158): the pane's cursor row + whether it is in a tmux mode (copy/view).
 	// Injectable so ComposerState is unit-testable without a tmux server (mirrors claude's cursorState).
 	cursorState func(pane string) (cursorY int, inMode bool, err error)
@@ -67,6 +69,7 @@ func newGrok() grok {
 		paneCWD:      deliver.PaneCWD,
 		grokHome:     grokHome,
 		latestResult: grokstore.LatestResult,
+		replyAfter:   grokstore.ReplyAfter,
 		cursorState:  deliver.CursorState,
 	}
 }
@@ -123,6 +126,20 @@ func (g grok) LatestResult(pane string) (string, error) {
 		return "", fmt.Errorf("grok: cannot resolve the ~/.grok session store (no home directory)")
 	}
 	return g.latestResult(g.grokHome, cwd)
+}
+
+// ReplyAfter implements surface.ReplyReader (#175): the XO's verbatim reply that follows operatorMsg's
+// user entry in the grok chat history. found=false ⇒ the reply hasn't landed yet (keep polling); err is
+// reserved for a pane→cwd / store-home / session resolution failure.
+func (g grok) ReplyAfter(pane, operatorMsg string) (text string, found bool, err error) {
+	cwd, err := g.paneCWD(pane)
+	if err != nil {
+		return "", false, err
+	}
+	if g.grokHome == "" {
+		return "", false, fmt.Errorf("grok: cannot resolve the ~/.grok session store (no home directory)")
+	}
+	return g.replyAfter(g.grokHome, cwd, operatorMsg)
 }
 
 // --- pure state classifier (the testable core) ---

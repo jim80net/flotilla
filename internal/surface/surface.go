@@ -136,6 +136,17 @@ func (d ComposerDisposition) String() string {
 	}
 }
 
+// ReplyReader is an OPTIONAL Driver capability (#175): return the desk's verbatim reply to a SPECIFIC
+// operator message, read from the harness session store. The c2-hotline reply-watcher polls it after an
+// operator message is confirmed-delivered to a channel's XO; it locates the operator message as a
+// recorded USER turn and returns the text-bearing ASSISTANT turn that FOLLOWS it. Correlating to the
+// user turn (not a bare turn-count delta) makes the reply the answer to THIS message — immune to a
+// queued or interleaved turn being mis-routed. found=false means "the reply has not landed yet" (keep
+// polling); err is non-nil only on a session/pane resolution failure. READ-ONLY.
+type ReplyReader interface {
+	ReplyAfter(pane, operatorMsg string) (text string, found bool, err error)
+}
+
 // ComposerStateProbe is an OPTIONAL Driver capability: report the ComposerDisposition at the cursor.
 // It reads AT the terminal cursor (the focused input) instead of a
 // fixed bottom-of-pane window, so a per-agent message sub-composer or a queued-message prompt is

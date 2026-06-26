@@ -36,6 +36,16 @@ const UserAgent = "flotilla (https://github.com/jim80net/flotilla)"
 type webhookPayload struct {
 	Username string `json:"username,omitempty"`
 	Content  string `json:"content"`
+	// AllowedMentions with an empty parse list SUPPRESSES all mentions: flotilla RELAYS content
+	// (operator↔agent traffic, an XO's verbatim reply, audit echoes) and must never let relayed text
+	// spuriously @ping a channel (an XO reply containing @here/@everyone would otherwise ping). flotilla
+	// posts never intentionally mention, so suppressing all is safe and is the right default (#175).
+	AllowedMentions allowedMentions `json:"allowed_mentions"`
+}
+
+// allowedMentions with Parse=[] tells Discord to parse NO mentions in the content.
+type allowedMentions struct {
+	Parse []string `json:"parse"`
 }
 
 // httpClient is the shared client for webhook posts.
@@ -55,7 +65,11 @@ func Post(webhookURL, username, content string) error {
 		return errors.New("invalid webhook URL")
 	}
 
-	body, err := json.Marshal(webhookPayload{Username: username, Content: clampContent(content)})
+	body, err := json.Marshal(webhookPayload{
+		Username:        username,
+		Content:         clampContent(content),
+		AllowedMentions: allowedMentions{Parse: []string{}},
+	})
 	if err != nil {
 		return fmt.Errorf("encode webhook payload: %w", err)
 	}
