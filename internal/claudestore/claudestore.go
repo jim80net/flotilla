@@ -371,9 +371,17 @@ func replyAfterUserMsg(jsonlPath, operatorMsg string) (text string, cwd string, 
 		}
 		switch {
 		case e.Type == "user" && e.Message.Role == "user":
-			if want != "" && strings.Contains(strings.TrimSpace(extractText(e.Message.Content)), want) {
+			ut := strings.TrimSpace(extractText(e.Message.Content))
+			switch {
+			case want != "" && strings.Contains(ut, want):
 				armed = true // (re-)anchor to this delivery of the operator message
 				text, found = "", false
+			case armed && ut != "":
+				// A SUBSTANTIVE non-anchor user turn (a self-continuation wake, a later prompt) CLOSES the
+				// reply window — a new turn began, so a later assistant turn is NOT the answer to THIS
+				// message. (tool_result user entries have empty text, so they do NOT close it — the
+				// tool-result walk-back to the real turn-final is preserved.)
+				armed = false
 			}
 		case e.Type == "assistant" && e.Message.Role == "assistant":
 			if armed {

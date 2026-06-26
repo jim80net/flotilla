@@ -66,3 +66,27 @@ func TestReplyAfterUserMsg_ReAnchorsToLatest(t *testing.T) {
 		t.Fatalf("got (%q,%v), want the LATEST occurrence's reply 'second answer'", text, found)
 	}
 }
+
+// A self-continuation wake (a NON-anchor user turn) recorded AFTER the reply must NOT let its output
+// overwrite the captured reply — the reply window closes at the next substantive user turn.
+func TestReplyAfterUserMsg_TrailingSelfContNotMisRouted(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.jsonl")
+	lines := []string{
+		`{"type":"user","cwd":"/p","message":{"role":"user","content":"what do you need from me"}}`,
+		`{"type":"assistant","cwd":"/p","message":{"role":"assistant","content":[{"type":"text","text":"THE REAL REPLY"}]}}`,
+		// a tool_result user entry (empty text) must NOT close the window prematurely:
+		`{"type":"user","cwd":"/p","message":{"role":"user","content":[{"type":"tool_result","text":""}]}}`,
+		`{"type":"assistant","cwd":"/p","message":{"role":"assistant","content":[{"type":"text","text":"THE REAL REPLY (after tool)"}]}}`,
+		// a self-continuation wake (substantive non-anchor user turn) CLOSES the window:
+		`{"type":"user","cwd":"/p","message":{"role":"user","content":"[flotilla change-detector] continue the next step"}}`,
+		`{"type":"assistant","cwd":"/p","message":{"role":"assistant","content":[{"type":"text","text":"LATER UNRELATED SELF-CONT OUTPUT"}]}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	text, _, found := replyAfterUserMsg(path, "what do you need from me")
+	if !found || text != "THE REAL REPLY (after tool)" {
+		t.Fatalf("got (%q,%v), want the real reply (NOT the trailing self-cont output)", text, found)
+	}
+}

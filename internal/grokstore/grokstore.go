@@ -205,9 +205,16 @@ func replyAfterUserMsg(path, operatorMsg string) (text string, found bool, err e
 		}
 		switch e.Type {
 		case "user":
-			if t, ok := extractText(e.Content); ok && want != "" && strings.Contains(strings.TrimSpace(t), want) {
+			ut, ok := extractText(e.Content)
+			uts := strings.TrimSpace(ut)
+			switch {
+			case ok && want != "" && strings.Contains(uts, want):
 				armed = true
 				text, found = "", false // (re-)anchor to this delivery of the operator message
+			case armed && uts != "":
+				// A SUBSTANTIVE non-anchor user entry (a later prompt) CLOSES the reply window — a new
+				// turn began, so a later assistant entry is NOT the answer to THIS message.
+				armed = false
 			}
 		case "assistant":
 			if armed {

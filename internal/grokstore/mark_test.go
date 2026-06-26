@@ -42,3 +42,23 @@ func TestReplyAfterUserMsg_NoReplyYet(t *testing.T) {
 		t.Fatal("found=true before any assistant entry follows the user msg")
 	}
 }
+
+// A trailing non-anchor user entry (later prompt) must not let its output overwrite the captured reply.
+func TestReplyAfterUserMsg_TrailingPromptNotMisRouted(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "chat_history.jsonl")
+	lines := []string{
+		`{"type":"user","content":[{"type":"text","text":"what do you need from me"}]}`,
+		`{"type":"assistant","content":[{"type":"text","text":"THE REAL REPLY"}]}`,
+		`{"type":"tool_result","content":"tool out"}`,
+		`{"type":"user","content":[{"type":"text","text":"a later unrelated prompt"}]}`,
+		`{"type":"assistant","content":[{"type":"text","text":"LATER UNRELATED OUTPUT"}]}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	text, found, err := replyAfterUserMsg(path, "what do you need from me")
+	if err != nil || !found || text != "THE REAL REPLY" {
+		t.Fatalf("got (%q,%v,%v), want the real reply (NOT the trailing prompt's output)", text, found, err)
+	}
+}
