@@ -178,9 +178,10 @@ func cmdWatch(args []string) error {
 	// noise in the operator's Discord channel (XO liveness is already covered by
 	// the ack file + the missed-ack down alert below). Posted via webhook, which
 	// the gateway's feedback filter drops — no loop.
-	// #175: the c2-hotline reply-watcher. When an operator message lands on a c2 channel's (federated)
-	// XO, watch that XO's session store for the reply and route it back to the channel — the return leg
-	// the primary XO already has via its Stop-hook. nil when secrets are absent (no webhooks to resolve).
+	// #175/#177: the c2-hotline reply-watcher. When an operator message lands on a channel's XO (ANY
+	// channel's XO including the primary — #177 unified them), watch that XO's session store for the
+	// reply and route it back to the channel — the flotilla-native return leg (the primary XO's old
+	// host-local Stop-hook is retired). nil when secrets are absent (no webhooks to resolve).
 	replyRtr := newHotlineReplyRouter(context.Background(), cfg, secrets, alert)
 	if replyRtr != nil {
 		defer replyRtr.Stop() // cancel in-flight hotline watchers on shutdown (runs after <-ctx.Done())
