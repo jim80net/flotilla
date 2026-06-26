@@ -300,6 +300,113 @@ func LatestTurnText(pane string) (text string, ok bool, err error) {
 	return text, ok, nil
 }
 
+// ReplyAfter returns the XO's verbatim reply to a specific operator message (the #175 hotline
+// correlation): it locates the operator's message as a recorded USER turn (the relay delivers it into
+// the session, where Claude records it verbatim) and returns the text-bearing ASSISTANT turn that
+// follows it. found=false means the reply has not landed yet (the user turn isn't recorded, or no
+// assistant turn follows it) — the watcher keeps polling. Correlating to the user turn (NOT a bare
+// turn-count delta) is what makes the reply the answer to THIS message, immune to a queued/interleaved
+// turn being mis-routed. err is non-nil only on a pane→cwd resolution failure.
+func ReplyAfter(pane, operatorMsg string) (text string, found bool, err error) {
+	cwd, err := deliver.PaneCWD(pane)
+	if err != nil {
+		return "", false, err
+	}
+	text, found = replyAfterForCwd(cwd, operatorMsg)
+	return text, found, nil
+}
+
+// replyAfterForCwd resolves the authoritative session for cwd (the same collision-guarded selection as
+// latestTurnTextForCwd) and returns the text-bearing assistant turn following the LATEST user turn that
+// carries operatorMsg.
+func replyAfterForCwd(cwd, operatorMsg string) (string, bool) {
+	sessions, ok := sessionsByMtime(cwd)
+	if !ok {
+		return "", false
+	}
+	for _, sessionPath := range sessions {
+		waitQuiescent(sessionPath)
+		raw, sessionCwd, found := replyAfterUserMsg(sessionPath, operatorMsg)
+		if sessionCwd != "" && sessionCwd != cwd {
+			continue // a colliding desk's session — keep looking for THIS desk's newest
+		}
+		if !found {
+			return "", false // THIS desk's authoritative session has no reply yet; no stale fallback
+		}
+		clean, substantive := stripAndClassify(raw)
+		if !substantive {
+			return "", false
+		}
+		return clean, true
+	}
+	return "", false
+}
+
+// normMsg normalizes an operator message for an EXACT (not substring) anchor match: collapse all
+// whitespace runs to single spaces and trim, so a paste that alters a newline/trailing space still
+// matches but a DIFFERENT message (or a turn that merely contains this one as a substring) does not.
+func normMsg(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+// replyAfterUserMsg scans a transcript and returns the text-bearing assistant turn following the LATEST
+// user turn whose recorded text contains operatorMsg. A new occurrence of operatorMsg (a re-asked
+// message) re-anchors — the reply must follow the MOST RECENT delivery. cwd is the session's recorded
+// cwd (the collision guard). found=false ⇒ the matching user turn isn't recorded yet, or no assistant
+// turn follows it.
+func replyAfterUserMsg(jsonlPath, operatorMsg string) (text string, cwd string, found bool) {
+	f, err := os.Open(jsonlPath)
+	if err != nil {
+		return "", "", false
+	}
+	defer f.Close()
+	want := normMsg(operatorMsg)
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64<<10), maxLine)
+	armed := false // saw the matching user turn; an assistant turn after it is the reply
+	for sc.Scan() {
+		var e transcriptEntry
+		if json.Unmarshal(sc.Bytes(), &e) != nil {
+			continue
+		}
+		if e.Cwd != "" {
+			cwd = e.Cwd
+		}
+		if e.IsSidechain {
+			continue
+		}
+		switch {
+		case e.Type == "user" && e.Message.Role == "user":
+			ut := extractText(e.Message.Content)
+			switch {
+			case want != "" && normMsg(ut) == want:
+				// EXACT (whitespace-normalized) match — NOT a substring. A substring match would let a
+				// short/common operator message ("ok", "status?") re-anchor to a LATER turn that merely
+				// CONTAINS it (a self-cont prompt, a quote), mis-routing that turn's output. The relay
+				// records the operator message verbatim as a user turn (live-verified), so exact-after-
+				// whitespace-normalization is the correct, mis-route-proof anchor.
+				armed = true // (re-)anchor to this delivery of the operator message
+				text, found = "", false
+			case armed && strings.TrimSpace(ut) != "":
+				// A SUBSTANTIVE non-anchor user turn (a self-continuation wake, a later prompt) CLOSES the
+				// reply window — a new turn began, so a later assistant turn is NOT the answer to THIS
+				// message. (tool_result user entries have empty text, so they do NOT close it — the
+				// tool-result walk-back to the real turn-final is preserved.)
+				armed = false
+			}
+		case e.Type == "assistant" && e.Message.Role == "assistant":
+			if armed {
+				if t := extractText(e.Message.Content); strings.TrimSpace(t) != "" {
+					text, found = t, true // the latest text-bearing assistant turn after the user msg
+				}
+			}
+		}
+	}
+	if sc.Err() != nil {
+		return "", "", false
+	}
+	return text, cwd, found
+}
+
 // latestTurnTextForCwd is LatestTurnText minus the tmux read, so the session selection + the
 // collision disambiguation are unit-testable. It walks the project dir's sessions NEWEST first and:
 //   - SKIPS a session whose recorded cwd disagrees with cwd — a COLLIDING desk's transcript (the
