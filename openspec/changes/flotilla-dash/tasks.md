@@ -121,7 +121,7 @@
 ## Phase 3 — cnc control actions
 
 Split by the pane-lock dependency: **3a (lock-free)** ships now; **3b (lock-dependent)**
-lands when flotilla-dev's cross-process pane lock is ready.
+lands when desk-core's cross-process pane lock is ready.
 
 ### Phase 3a — control surface + notify (lock-free) — THIS PR
 - [x] 3a.1 `internal/dash/control`: the `Controller` seam (Route/Notify/Resume) + typed outcomes
@@ -142,18 +142,18 @@ lands when flotilla-dev's cross-process pane lock is ready.
       method gate). `go test -race ./...` green.
 - [x] 3a.7 Docs: control section in `docs/dash-runbook.md` (notify live + `--secrets`; route/resume
       pane-lock gating; loopback + SSH-tunnel; non-loopback auth as a tracked follow-on). README updated.
-- [ ] 3a.8 Coordinate the pane-lock seam/API with flotilla-dev (SENT — `flotilla send --from
-      flotilla-dash flotilla-dev`, delivered 2026-06-19; awaiting the final API).
+- [ ] 3a.8 Coordinate the pane-lock seam/API with desk-core (SENT — `flotilla send --from
+      desk-j desk-core`, delivered 2026-06-19; awaiting the final API).
 
 ### Phase 3b — pane-driving control + auth surface (lock-dependent)
-- [x] 3.0 **(shared-core, flotilla-dev)** cross-process pane-transaction lock in `internal/deliver`
+- [x] 3.0 **(shared-core, desk-core)** cross-process pane-transaction lock in `internal/deliver`
       (`AcquirePaneTxn`/`PaneTxn.Release`, keyed on the resolved pane target) + acquire in the detector's
       context-rotate. LANDED (PR #128, squash 1b300dc). Spec: openspec/changes/pane-transaction-lock.
 - [x] 3b.1 **route** real impl: resolve target (case-insensitive, @-tolerant, empty→XO) → driver →
       `deliver.ResolvePane(agent.Title())` → `AcquirePaneTxn(pane)` → `surface.Confirm.Submit` → Release
       — mirroring cmdSend EXACTLY; typed outcome (delivered/busy/crashed/transient/unconfirmed);
       contention→busy/retryable (no silent partial); CoS mirror (operator(dash)→agent). Route UN-GATED.
-- [x] 3b.1-test The cross-process keying contract (flotilla-dev's highest-value guard):
+- [x] 3b.1-test The cross-process keying contract (desk-core's highest-value guard):
       TestRoute_KeysLockOnResolvedPaneTarget asserts the dash resolves via ResolvePane(agent.Title())
       and keys the lock on the RESOLVED target (not the agent name) — identical to cmdSend;
       TestRoute_LockBracketsSubmit asserts acquire→submit→release ordering (replaces the 3a import guard).

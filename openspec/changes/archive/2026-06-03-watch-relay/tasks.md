@@ -57,4 +57,4 @@
 - [x] 9.1 `gofmt`/`go vet`/`go build`/`go test -race` green
 - [x] 9.2 e2e: CLOCK validated live (heartbeat auto-ticked an idle XO with no operator input; watchdog alerted on unresponsive/shell-fallback). RELAY validated live (bot-as-operator message → gateway → accept → route → injected into the pane; Message Content intent confirmed).
 - [x] 9.3 Two reviewers, both addressed: (a) systems-review (design + implementation rounds) raised no P1 — its P2-1/2/3 + P3s were fixed; (b) cubic (the separate automated reviewer) raised 5 findings on PR #2 (2 P1, 3 P2) — all fixed, with 1 verified-stale re-anchor documented on the PR.
-- [x] 9.4 PR → merge → deploy as `flotilla-watch.service`; archive this change. (PR #2 merged ✅; deployed clock-only then RELAY enabled 2026-06-03 ✅ — gateway connected to #spark-c2, inbound relay active; archiving now.)
+- [x] 9.4 PR → merge → deploy as `flotilla-watch.service`; archive this change. (PR #2 merged ✅; deployed clock-only then RELAY enabled 2026-06-03 ✅ — gateway connected to #c2, inbound relay active; archiving now.)

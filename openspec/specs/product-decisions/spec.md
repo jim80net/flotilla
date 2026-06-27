@@ -148,7 +148,7 @@ spawn it.)
 #### Scenario: Dashboard / landing work arises
 
 - **WHEN** landing-site or dashboard work is needed
-- **THEN** it is routed to the dedicated flotilla-dash desk, and the core XO stays on core-flotilla work
+- **THEN** it is routed to the dedicated dashboard desk, and the core XO stays on core-flotilla work
 
 ### Requirement: Capability decisions live in their capability specs
 

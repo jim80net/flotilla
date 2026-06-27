@@ -1,11 +1,11 @@
 ## Why
 
-`grok-research` (xAI's official grok CLI) is a PULL-ONLY desk: the XO reads it by capturing its
+`desk-e` (xAI's official grok CLI) is a PULL-ONLY desk: the XO reads it by capturing its
 pane, but `tmux capture-pane` returns only the VISIBLE tail. A long grok turn (an 11-minute
 research result) scrolls off — the XO can't read the full result from the pane. The full,
 canonical result lives in grok's structured session store
 (`~/.grok/sessions/<cwd>/<session>/chat_history.jsonl`, the last `assistant` entry — verified
-10,287 chars for the SPCX turn). #58 part A made the detector correctly ASSESS grok; part B makes
+10,287 chars for one research turn). #58 part A made the detector correctly ASSESS grok; part B makes
 the desk's full output READABLE so it is a fully-coordinated pull desk.
 
 ## What Changes

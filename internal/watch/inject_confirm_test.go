@@ -33,7 +33,7 @@ func TestInjectorDefersBusyRelay(t *testing.T) {
 	// A busy RELAY is re-enqueued (deferred), not dropped, not yet escalated — and the
 	// re-enqueued copy carries deferrals+1 (OCR-H3: the count must ride the new Job).
 	r := newRig(surface.ErrBusy)
-	r.in.deliver(Job{Agent: "hydra-ops", Message: "hi", Kind: "relay"})
+	r.in.deliver(Job{Agent: "alpha-xo", Message: "hi", Kind: "relay"})
 	if len(r.deferred) != 1 {
 		t.Fatalf("deferred %d jobs, want 1 (a busy relay is re-enqueued)", len(r.deferred))
 	}
@@ -52,7 +52,7 @@ func TestInjectorBusyRelayEscalatesOnceAtThreshold(t *testing.T) {
 	// At busyEscalateAt deferrals, ONE loud alert fires (queued behind a long turn) and the
 	// message is still deferred (not yet dropped).
 	r := newRig(surface.ErrBusy)
-	r.in.deliver(Job{Agent: "hydra-ops", Kind: "relay", deferrals: busyEscalateAt - 1})
+	r.in.deliver(Job{Agent: "alpha-xo", Kind: "relay", deferrals: busyEscalateAt - 1})
 	if len(r.alerts) != 1 {
 		t.Fatalf("alerts = %d, want exactly 1 at the escalate threshold", len(r.alerts))
 	}
@@ -68,7 +68,7 @@ func TestInjectorBusyRelayBoundedDropAtMax(t *testing.T) {
 	// At maxRelayDeferrals the message is escalated AND DROPPED (no further re-enqueue) — the
 	// bound that prevents an unbounded timer chain against a wedged XO.
 	r := newRig(surface.ErrBusy)
-	r.in.deliver(Job{Agent: "hydra-ops", Kind: "relay", deferrals: maxRelayDeferrals - 1})
+	r.in.deliver(Job{Agent: "alpha-xo", Kind: "relay", deferrals: maxRelayDeferrals - 1})
 	if len(r.deferred) != 0 {
 		t.Errorf("deferred = %d, want 0 (the bound DROPS rather than re-enqueues)", len(r.deferred))
 	}
@@ -83,7 +83,7 @@ func TestInjectorDropsBusyTick(t *testing.T) {
 	for _, kind := range []string{"heartbeat", "detector"} {
 		for _, cause := range []error{surface.ErrBusy, surface.ErrTransient} {
 			r := newRig(cause)
-			r.in.deliver(Job{Agent: "hydra-ops", Kind: kind})
+			r.in.deliver(Job{Agent: "alpha-xo", Kind: kind})
 			if len(r.deferred) != 0 {
 				t.Errorf("%s/%v: deferred = %d, want 0 (a not-idle tick is dropped, not deferred)", kind, cause, len(r.deferred))
 			}
@@ -100,7 +100,7 @@ func TestInjectorTransientRelayReassessesThenDropsBounded(t *testing.T) {
 	// maxTransientReassess (much lower than the busy bound; a glitch clears fast).
 	t.Run("below the cap → re-assessed", func(t *testing.T) {
 		r := newRig(surface.ErrTransient)
-		r.in.deliver(Job{Agent: "hydra-ops", Kind: "relay"})
+		r.in.deliver(Job{Agent: "alpha-xo", Kind: "relay"})
 		if len(r.deferred) != 1 {
 			t.Errorf("deferred = %d, want 1 (a transient relay is re-assessed, not fired-into)", len(r.deferred))
 		}
@@ -110,7 +110,7 @@ func TestInjectorTransientRelayReassessesThenDropsBounded(t *testing.T) {
 	})
 	t.Run("at the transient cap → escalate + drop (NOT the busy bound)", func(t *testing.T) {
 		r := newRig(surface.ErrTransient)
-		r.in.deliver(Job{Agent: "hydra-ops", Kind: "relay", deferrals: maxTransientReassess - 1})
+		r.in.deliver(Job{Agent: "alpha-xo", Kind: "relay", deferrals: maxTransientReassess - 1})
 		if len(r.deferred) != 0 {
 			t.Errorf("deferred = %d, want 0 (transient is capped LOW and drops, not the 5-min busy bound)", len(r.deferred))
 		}
@@ -126,7 +126,7 @@ func TestInjectorRelayFailureEscalatesNoSuccess(t *testing.T) {
 	for _, e := range []error{surface.ErrUnconfirmed, surface.ErrCrashed} {
 		r := newRig(e)
 		buf := captureLog(t)
-		r.in.deliver(Job{Agent: "hydra-ops", Message: "important", Kind: "relay"})
+		r.in.deliver(Job{Agent: "alpha-xo", Message: "important", Kind: "relay"})
 		if len(r.alerts) != 1 {
 			t.Errorf("%v: alerts = %d, want 1 (loud on a failed operator message)", e, len(r.alerts))
 		}
@@ -143,7 +143,7 @@ func TestInjectorTickFailureDoesNotEscalate(t *testing.T) {
 	// A failed heartbeat/detector delivery logs but does NOT escalate (only operator messages
 	// are loud; XO liveness is the detector watchdog's job).
 	r := newRig(surface.ErrUnconfirmed)
-	r.in.deliver(Job{Agent: "hydra-ops", Kind: "detector"})
+	r.in.deliver(Job{Agent: "alpha-xo", Kind: "detector"})
 	if len(r.alerts) != 0 {
 		t.Errorf("alerts = %d, want 0 (a tick failure does not escalate)", len(r.alerts))
 	}
@@ -154,7 +154,7 @@ func TestInjectorConfirmedDeliveryLogsAndMirrors(t *testing.T) {
 	// preserved now that nil means "turn started", not "tmux ran").
 	r := newRig(nil)
 	buf := captureLog(t)
-	r.in.deliver(Job{Agent: "hydra-ops", Message: "go", Kind: "relay"})
+	r.in.deliver(Job{Agent: "alpha-xo", Message: "go", Kind: "relay"})
 	if len(r.mirrored) != 1 {
 		t.Errorf("mirrored = %d, want 1 (a confirmed delivery is mirrored)", len(r.mirrored))
 	}
@@ -210,13 +210,13 @@ func TestRelayBusyThenIdleRegression0607(t *testing.T) {
 	confirm := surface.Confirm{SendEnter: func(string) error { return nil }, Sleep: func(time.Duration) {}}
 	var mirrored, deferred []Job
 	var alerts []string
-	in := NewInjector(func(_, msg string) error { return confirm.Submit(drv, "hydra-ops-pane", msg) }, 0)
+	in := NewInjector(func(_, msg string) error { return confirm.Submit(drv, "alpha-xo-pane", msg) }, 0)
 	in.reEnqueue = func(j Job, _ time.Duration) { deferred = append(deferred, j) }
 	in.SetMirror(func(j Job) { mirrored = append(mirrored, j) })
 	in.SetEscalate(func(s string) { alerts = append(alerts, s) })
 
 	buf := captureLog(t)
-	job := Job{Agent: "hydra-ops", Message: "operator: are you there?", Kind: "relay"}
+	job := Job{Agent: "alpha-xo", Message: "operator: are you there?", Kind: "relay"}
 
 	// Delivery 1 — XO is mid-turn → deferred; NEVER submitted; NEVER logged/mirrored as delivered.
 	in.deliver(job)
@@ -273,13 +273,13 @@ func TestRelayHeavyPaneComposerClearNoFalseAlarm(t *testing.T) {
 	confirm := surface.Confirm{SendEnter: func(string) error { return nil }, Sleep: func(time.Duration) {}}
 	var mirrored, deferred []Job
 	var alerts []string
-	in := NewInjector(func(_, msg string) error { return confirm.Submit(drv, "hydra-ops-pane", msg) }, 0)
+	in := NewInjector(func(_, msg string) error { return confirm.Submit(drv, "alpha-xo-pane", msg) }, 0)
 	in.reEnqueue = func(j Job, _ time.Duration) { deferred = append(deferred, j) }
 	in.SetMirror(func(j Job) { mirrored = append(mirrored, j) })
 	in.SetEscalate(func(s string) { alerts = append(alerts, s) })
 
 	buf := captureLog(t)
-	in.deliver(Job{Agent: "hydra-ops", Message: "operator: exec summary", Kind: "relay"})
+	in.deliver(Job{Agent: "alpha-xo", Message: "operator: exec summary", Kind: "relay"})
 
 	if len(alerts) != 0 {
 		t.Fatalf("FALSE alarm raised on a delivered message: %v", alerts)
@@ -303,12 +303,12 @@ func TestRelayHeavyPaneComposerStaysPendingStillEscalates(t *testing.T) {
 	confirm := surface.Confirm{SendEnter: func(string) error { return nil }, Sleep: func(time.Duration) {}}
 	var mirrored []Job
 	var alerts []string
-	in := NewInjector(func(_, msg string) error { return confirm.Submit(drv, "hydra-ops-pane", msg) }, 0)
+	in := NewInjector(func(_, msg string) error { return confirm.Submit(drv, "alpha-xo-pane", msg) }, 0)
 	in.reEnqueue = func(Job, time.Duration) {}
 	in.SetMirror(func(j Job) { mirrored = append(mirrored, j) })
 	in.SetEscalate(func(s string) { alerts = append(alerts, s) })
 
-	in.deliver(Job{Agent: "hydra-ops", Message: "operator: exec summary", Kind: "relay"})
+	in.deliver(Job{Agent: "alpha-xo", Message: "operator: exec summary", Kind: "relay"})
 
 	if len(alerts) != 1 {
 		t.Fatalf("a genuine non-delivery did not escalate: alerts=%v", alerts)

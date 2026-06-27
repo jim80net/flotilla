@@ -228,7 +228,7 @@ func TestNotify_NoCosLedgerSkipsMirror(t *testing.T) {
 // on resolvePane's OUTPUT (not the agent name), (c) submit runs on that same pane.
 func TestRoute_KeysLockOnResolvedPaneTarget(t *testing.T) {
 	c, cap := newTestController(t, rosterCos, secretsXO)
-	cap.paneTarget = "spark:3.1" // what deliver.ResolvePane would return
+	cap.paneTarget = "the-fleet:3.1" // what deliver.ResolvePane would return
 	res, err := c.Route(context.Background(), "alpha", "do the thing")
 	if err != nil {
 		t.Fatalf("Route: %v", err)
@@ -236,10 +236,10 @@ func TestRoute_KeysLockOnResolvedPaneTarget(t *testing.T) {
 	if cap.resolvedTitle != agentTitle(t, c, "alpha") {
 		t.Errorf("resolvePane asked for %q, want the agent's Title()", cap.resolvedTitle)
 	}
-	if cap.txnTarget != "spark:3.1" {
-		t.Errorf("txn lock keyed on %q, want the resolved pane target %q (NOT the agent name)", cap.txnTarget, "spark:3.1")
+	if cap.txnTarget != "the-fleet:3.1" {
+		t.Errorf("txn lock keyed on %q, want the resolved pane target %q (NOT the agent name)", cap.txnTarget, "the-fleet:3.1")
 	}
-	if cap.submitPane != "spark:3.1" {
+	if cap.submitPane != "the-fleet:3.1" {
 		t.Errorf("submit ran on pane %q, want the resolved target", cap.submitPane)
 	}
 	if res.Outcome != OutcomeDelivered {

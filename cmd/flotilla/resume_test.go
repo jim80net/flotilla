@@ -19,12 +19,12 @@ func TestParseResumeArgs(t *testing.T) {
 		wantForce  bool
 		wantErr    bool
 	}{
-		{"agent only", []string{"hydra-ops"}, "hydra-ops", "", false, false},
-		{"agent then force", []string{"hydra-ops", "--force"}, "hydra-ops", "", true, false},
-		{"force then agent", []string{"--force", "hydra-ops"}, "hydra-ops", "", true, false},
-		{"agent then launch", []string{"hydra-ops", "--launch", "/tmp/l.json"}, "hydra-ops", "/tmp/l.json", false, false},
-		{"launch then agent", []string{"--launch", "/tmp/l.json", "hydra-ops"}, "hydra-ops", "/tmp/l.json", false, false},
-		{"launch=form and force", []string{"hydra-ops", "--launch=/tmp/l.json", "--force"}, "hydra-ops", "/tmp/l.json", true, false},
+		{"agent only", []string{"alpha-xo"}, "alpha-xo", "", false, false},
+		{"agent then force", []string{"alpha-xo", "--force"}, "alpha-xo", "", true, false},
+		{"force then agent", []string{"--force", "alpha-xo"}, "alpha-xo", "", true, false},
+		{"agent then launch", []string{"alpha-xo", "--launch", "/tmp/l.json"}, "alpha-xo", "/tmp/l.json", false, false},
+		{"launch then agent", []string{"--launch", "/tmp/l.json", "alpha-xo"}, "alpha-xo", "/tmp/l.json", false, false},
+		{"launch=form and force", []string{"alpha-xo", "--launch=/tmp/l.json", "--force"}, "alpha-xo", "/tmp/l.json", true, false},
 		{"no agent", []string{"--force"}, "", "", false, true},
 		{"empty", []string{}, "", "", false, true},
 		{"extra positional", []string{"a", "b"}, "", "", false, true},
@@ -58,7 +58,7 @@ func TestParseResumeArgsEnvDefault(t *testing.T) {
 	// $FLOTILLA_LAUNCH pre-fills the --launch default (mirrors watch's env-var
 	// defaults), overriding the roster-relative fallback.
 	t.Setenv("FLOTILLA_LAUNCH", "/env/launch.json")
-	_, _, launchPath, _, err := parseResumeArgs([]string{"hydra-ops"})
+	_, _, launchPath, _, err := parseResumeArgs([]string{"alpha-xo"})
 	if err != nil {
 		t.Fatalf("parseResumeArgs: %v", err)
 	}
@@ -94,7 +94,7 @@ func fakeOps(rec *resumeRec, target string, outcome deliver.ResolveOutcome, st s
 // can't-confirm-dead) pane is NEVER respawned without --force, and the marker is
 // never duplicated. Without this, the safety-critical interlock was untested.
 func TestRunResumeSafetyMatrix(t *testing.T) {
-	plan := resumePlan{agent: "v12-dev", key: "v12-dev", cwd: "/w", launch: "sleep 1", session: "flotilla", window: "v12-dev"}
+	plan := resumePlan{agent: "desk-a", key: "desk-a", cwd: "/w", launch: "sleep 1", session: "flotilla", window: "desk-a"}
 	forced := plan
 	forced.force = true
 
@@ -115,9 +115,9 @@ func TestRunResumeSafetyMatrix(t *testing.T) {
 		{"errored refuse", plan, "f:0.0", deliver.ResolveUnique, surface.StateErrored, "", false, true, false, false, false, false},
 		{"unknown refuse (cant confirm dead)", plan, "f:0.0", deliver.ResolveUnique, surface.StateUnknown, "", false, true, false, false, false, false},
 		// Dead shell → respawn; marker confirmed → no re-tag.
-		{"shell respawn confirmed", plan, "f:0.0", deliver.ResolveUnique, surface.StateShell, "v12-dev", false, false, true, false, false, false},
+		{"shell respawn confirmed", plan, "f:0.0", deliver.ResolveUnique, surface.StateShell, "desk-a", false, false, true, false, false, false},
 		// --force overrides a live state → respawn.
-		{"working force respawn", forced, "f:0.0", deliver.ResolveUnique, surface.StateWorking, "v12-dev", false, false, true, false, false, false},
+		{"working force respawn", forced, "f:0.0", deliver.ResolveUnique, surface.StateWorking, "desk-a", false, false, true, false, false, false},
 		// Untagged (title-resolved) dead desk → respawn + ADOPT (tag), not error.
 		{"shell untagged adopt", plan, "f:0.0", deliver.ResolveUnique, surface.StateShell, "", false, false, true, true, false, false},
 		// Wrong marker after respawn → error (respawn happened, no tag).
@@ -161,9 +161,9 @@ func TestResumeTmuxTarget(t *testing.T) {
 		wantSession string
 		wantWindow  string
 	}{
-		{"explicit tmux", launch.Recipe{Tmux: "flotilla:hydra-ops"}, "hydra-ops", "flotilla", "hydra-ops"},
-		{"explicit other session", launch.Recipe{Tmux: "work:desk"}, "hydra-ops", "work", "desk"},
-		{"absent tmux defaults to flotilla:<name>", launch.Recipe{}, "crypto-trend-dev", "flotilla", "crypto-trend-dev"},
+		{"explicit tmux", launch.Recipe{Tmux: "flotilla:alpha-xo"}, "alpha-xo", "flotilla", "alpha-xo"},
+		{"explicit other session", launch.Recipe{Tmux: "work:desk"}, "alpha-xo", "work", "desk"},
+		{"absent tmux defaults to flotilla:<name>", launch.Recipe{}, "desk-c", "flotilla", "desk-c"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

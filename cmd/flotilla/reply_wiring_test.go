@@ -57,7 +57,7 @@ func TestIsHotlineToChannelXO(t *testing.T) {
 func TestIsHotlineToChannelXO_LegacyPrimary(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "roster.json")
-	js := `{"agents":[{"name":"hydra-ops"},{"name":"v12-dev"}],"xo_agent":"hydra-ops",
+	js := `{"agents":[{"name":"alpha-xo"},{"name":"desk-a"}],"xo_agent":"alpha-xo",
 	  "operator_user_id":"U","channel_id":"C_MAIN","heartbeat_interval":"20m"}`
 	if err := os.WriteFile(p, []byte(js), 0o600); err != nil {
 		t.Fatal(err)
@@ -66,11 +66,11 @@ func TestIsHotlineToChannelXO_LegacyPrimary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !isHotlineToChannelXO(cfg, watch.Job{Kind: "relay", Agent: "hydra-ops", OriginChannel: "C_MAIN"}) {
+	if !isHotlineToChannelXO(cfg, watch.Job{Kind: "relay", Agent: "alpha-xo", OriginChannel: "C_MAIN"}) {
 		t.Error("legacy single-channel primary XO should ARM (#177 unified)")
 	}
 	// a heartbeat tick to the primary XO must NOT arm.
-	if isHotlineToChannelXO(cfg, watch.Job{Kind: "heartbeat", Agent: "hydra-ops", OriginChannel: "C_MAIN"}) {
+	if isHotlineToChannelXO(cfg, watch.Job{Kind: "heartbeat", Agent: "alpha-xo", OriginChannel: "C_MAIN"}) {
 		t.Error("a heartbeat tick must not arm the watcher")
 	}
 }

@@ -9,17 +9,17 @@ not a shipped cross-harness capability"** (`openspec/specs/recycle/spec.md:175-1
 operator-directed exercise that turns *ready* into *shipped*:
 
 > Operator (#158, 2026-06-22): *"once we've validated [recycle] works … across intra-Claude-Code
-> sessions, I want to move family-office from Claude Code to Grok, and have family-office run on the
+> sessions, I want to move beta-xo from Claude Code to Grok, and have beta-xo run on the
 > Grok subscription."*
 
 A `flotilla recycle` REFUSES cleanly on any surface lacking BOTH `surface.RecycleBridge` AND
 `surface.ComposerStateProbe` (`cmd/flotilla/recycle.go:392-399`). The `grok` driver
 (`internal/surface/grok.go`) implements **neither**, so a grok desk cannot be recycled and
-family-office cannot move to Grok. This change makes `grok` meet the recycle-capable bar — the
-**generalizable** flotilla cross-harness-drop-in capability — so the family-office-on-Grok migration
+beta-xo cannot move to Grok. This change makes `grok` meet the recycle-capable bar — the
+**generalizable** flotilla cross-harness-drop-in capability — so the beta-xo-on-Grok migration
 (the **circumstantial** instance) becomes an orchestrated runbook, not new code.
 
-A read-only capture this session also found grok-research **live-blocked on a tool-approval modal**
+A read-only capture this session also found desk-e **live-blocked on a tool-approval modal**
 that the current `parseGrokState` mis-reads (the documented #58 gap) — now a recycle-gate-safety
 prerequisite (a recycle's idle∧cleared gate must never treat an approval modal as a cleared composer).
 
@@ -31,7 +31,7 @@ prerequisite (a recycle's idle∧cleared gate must never treat an approval modal
    approval modal classifies NON-`Cleared` (verified: the cursor sits on the `◆ Run …` line, no `❯`).
 2. **grok `RecycleBridge`** — `HandoffPath` at the **harness-agnostic** `<cwd>/.flotilla/handoffs/
    recycle-<token>.md` (not claude-branded `.claude/handoffs/`); grok-worded non-interactive
-   self-committing `HandoffTurn` + imperative `TakeoverTurn` (no claude/memex skill references; grok
+   self-committing `HandoffTurn` + imperative `TakeoverTurn` (no claude/desk-l skill references; grok
    runs git/tools and has no `/handoff`,`/takeover` skills).
 3. **grok `AwaitingApproval`** — `parseGrokState` detects the approval modal (the `N/M:select` status
    token + the `┃ Allow …?` block) BEFORE the `⇣`/spinner Working check, fixing the live mis-read and
@@ -63,7 +63,7 @@ placement).
 - A general `flotilla migrate` verb (only if migrations become routine).
 - Correcting `workspace.go`'s grok identity-file mapping (`AGENTS.md` → `MEMORY.md`/`--rules`) — filed
   separately; relevant to the migration, not the recycle driver.
-- The actual family-office cutover — operator-timed (real-money order path); this change lands the
+- The actual beta-xo cutover — operator-timed (approval-sensitive order path); this change lands the
   code + the runbook first.
 
 ## Impact

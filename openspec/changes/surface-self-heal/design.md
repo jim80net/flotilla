@@ -2,10 +2,10 @@
 
 ## The mechanism (verified before designing, per the reviewing XO's ask)
 
-- **Recovery:** Ctrl-C clears the agents-panel/sub-composer focus back to the composer. hydra-ops
-  verified live 2/2 (memex sub-composer + family-office); corroborated by the post-recovery scan (all
+- **Recovery:** Ctrl-C clears the agents-panel/sub-composer focus back to the composer. alpha-xo
+  verified live 2/2 (desk-l sub-composer + beta-xo); corroborated by the post-recovery scan (all
   desks `cleared`). Esc — the *documented* overlay-exit — does NOT recover the inline panel (tested
-  by the operator, hydra-ops, and flotilla-dev), so Ctrl-C is the empirically-correct mechanism.
+  by the operator, alpha-xo, and desk-core), so Ctrl-C is the empirically-correct mechanism.
 - **The exit hazard (Claude Code docs, verbatim):** "the first press clears the prompt input and a
   second press exits Claude Code." A blind Ctrl-C ×2 on a 1-layer block recovers on the first press
   then EXITS on the second. Overlay depth is variable (list-nav = 1, sub-composer = 2), so the count
@@ -18,8 +18,8 @@
 The design-trio (systems-review + STORM) found the original "Submit → detect blocked → heal → re-attempt"
 shape carried three CRITICAL hazards, all instances of ONE blind spot: **the safety proof assumed a
 quiescent pane, but a live desk's agent mutates the pane on its own clock.** The restructure below
-fixes them structurally. (hydra-ops independently affirmed the re-probe-between core; the trio caught
-the concurrency surface hydra-ops's manual test didn't exercise.)
+fixes them structurally. (alpha-xo independently affirmed the re-probe-between core; the trio caught
+the concurrency surface alpha-xo's manual test didn't exercise.)
 
 ```
 SelfHealAndRetry(c, d, pane, text):                 // ONLY relay-kind callers invoke this (H2)
@@ -86,7 +86,7 @@ This is a DESTRUCTIVE primitive (Ctrl-C) whose worst case is killing a live agen
 
 ## Esc note (so a future reader doesn't "fix" it back)
 
-Esc is the DOCUMENTED overlay-exit, but the operator, hydra-ops, and flotilla-dev all tested it and it
+Esc is the DOCUMENTED overlay-exit, but the operator, alpha-xo, and desk-core all tested it and it
 does NOT recover the inline agents panel. The prior empirical search (Esc, Left, Right, Tab,
 kitty-Esc, focus-in+Esc, Enter, ctrl+x ctrl+k) found Ctrl-C is the ONLY recovery — hence a destructive
 primitive with a safety harness, not a benign key. Do not replace Ctrl-C with Esc.
@@ -97,7 +97,7 @@ Self-heal is **pre-paste-gate-only** (SubAgent/ListNav). The post-submit Pending
 `ErrPanelBlocked` + alert (NO auto-recovery), because "Cleared after Ctrl-C" cannot be distinguished
 from "the body just submitted" → a re-attempt could double-deliver. (A post-submit *recover-without-
 re-send* variant — Ctrl-C to free the composer, then alert — is a possible add if the XO wants it;
-surfaced to hydra-ops. Not in this scope.)
+surfaced to alpha-xo. Not in this scope.)
 
 ## Invariants
 

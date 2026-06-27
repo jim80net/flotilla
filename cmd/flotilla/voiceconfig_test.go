@@ -23,7 +23,7 @@ export XAI_API_KEY="xai-secret-value"
 VOICE_GUILD_ID=111
 VOICE_CHANNEL_ID = 222
 VOICE_OPERATOR_USER_ID=333
-VOICE_XO_AGENT=hydra-ops
+VOICE_XO_AGENT=alpha-xo
 VOICE_COST_CAP_USD=2.50
 `)
 	cfg, err := loadVoiceConfig(p)
@@ -31,7 +31,7 @@ VOICE_COST_CAP_USD=2.50
 		t.Fatal(err)
 	}
 	if cfg.XAIKey != "xai-secret-value" || cfg.GuildID != "111" || cfg.ChannelID != "222" ||
-		cfg.OperatorUserID != "333" || cfg.XOAgent != "hydra-ops" || cfg.CapUSD != 2.50 {
+		cfg.OperatorUserID != "333" || cfg.XOAgent != "alpha-xo" || cfg.CapUSD != 2.50 {
 		t.Errorf("parsed config wrong: %+v", *cfg)
 	}
 }

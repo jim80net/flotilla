@@ -10,7 +10,7 @@ restore where one is empirically available.
 
 ## Live ground truth (verified, not assumed)
 
-Captured from the un-mutated `family-office` (%31) pane, 2026-06-22 (the operator-facing desk the
+Captured from the un-mutated `beta-xo` (%31) pane, 2026-06-22 (the operator-facing desk the
 operator flagged). Pane height 77; the agents panel is the absolute bottom-most chrome:
 
 ```
@@ -19,7 +19,7 @@ operator flagged). Pane height 77; the agents panel is the absolute bottom-most 
   ──────────────────────────────────────────────────────────  ← box rule
 ❯                                                              ← COMPOSER (empty), col 0
   ──────────────────────────────────────────────────────────  ← box rule
-  jim@rt-dgx-sp001:…/spark-familyoffice [Opus 4.8] ctx:48%     ← status
+  operator@host:…/beta-xo [Opus 4.8] ctx:48%                   ← status
   ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents          ← mode (the "← for agents" hint)
   ● main                          ↑/↓ to select · Enter to view ← PANEL HEADER
   ◯ predmkt-build     predmkt-build: …                    idle
@@ -40,7 +40,7 @@ Key facts this dictates:
 
 ## Empirical recovery finding (drives the honesty of ask #2)
 
-On the stuck `memex` pane, via `tmux send-keys`, NONE of these cleared the panel:
+On the stuck `desk-l` pane, via `tmux send-keys`, NONE of these cleared the panel:
 `Escape`, `Right`, `Left`, `Tab`, kitty-encoded `Escape` (`1b 5b 32 37 75` = `ESC[27u`),
 `ESC[I`(focus-in)+`Escape`. Plus the operator's reported `Enter` / `ctrl+x ctrl+k` / `Right`.
 
@@ -67,7 +67,7 @@ not a silently-dropped trio finding:
 - **Header-anchoring false-positives on a full-panel echo with NO live panel.** STORM S2 assumed
   "the LIVE header is the bottom-most `Enter to view` line" — true only when a live panel exists.
   When an entire panel capture is echoed into a desk's own scrollback and there is NO live panel
-  (the verified `flotilla-dev` case), the bottom-most header IS the echoed one, and scanning below it
+  (the verified `desk-core` case), the bottom-most header IS the echoed one, and scanning below it
   finds the echoed cursor → it would BLOCK a healthy desk. The geometry rule does not: the live
   composer is below the echo, so the bottom-most `❯` is the composer.
 
@@ -93,12 +93,12 @@ parsePanelFocused(captured) (blocked, ok bool):
 isAgentRowCursor(line): "❯" (after trim) immediately followed (after ws) by an agent glyph (◯/●)
 ```
 
-**The load-bearing geometry fact (verified live, family-office %31, 2026-06-22):** the live agents
+**The load-bearing geometry fact (verified live, beta-xo %31, 2026-06-22):** the live agents
 panel docks at the ABSOLUTE BOTTOM of the pane (its agent rows are the last lines, below the
 composer + footer). So when FOCUSED, the panel's selection cursor is the bottom-most `❯`; when NOT
 focused (or no panel), the bottom-most `❯` is the composer. A scrollback echo sits ABOVE the live
 composer, so it is never the bottom-most `❯`. This single fact gives all three:
-- **Long panel (memex 8 subagents):** whole-pane scan (no window) → the cursor (the only agent-row
+- **Long panel (desk-l 8 subagents):** whole-pane scan (no window) → the cursor (the only agent-row
   `❯`) is the bottom-most `❯`.
 - **Cursor on a middle row:** rows below it carry no `❯`, so it is still the bottom-most `❯`.
 - **Scrollback echo (lone OR full-panel, with or WITHOUT a live panel):** the live composer is the

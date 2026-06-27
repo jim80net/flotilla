@@ -28,7 +28,7 @@ func (c *collector) count() int {
 
 func TestHeartbeatDisabled(t *testing.T) {
 	c := &collector{}
-	h := NewHeartbeat(0, "hydra-ops", "", c.enqueue, nil)
+	h := NewHeartbeat(0, "alpha-xo", "", c.enqueue, nil)
 	h.Start()
 	time.Sleep(40 * time.Millisecond)
 	h.Stop()
@@ -39,14 +39,14 @@ func TestHeartbeatDisabled(t *testing.T) {
 
 func TestHeartbeatFiresWhenIdle(t *testing.T) {
 	c := &collector{}
-	h := NewHeartbeat(20*time.Millisecond, "hydra-ops", "", c.enqueue, func(string) bool { return false })
+	h := NewHeartbeat(20*time.Millisecond, "alpha-xo", "", c.enqueue, func(string) bool { return false })
 	h.Start()
 	time.Sleep(120 * time.Millisecond)
 	h.Stop()
 	if c.count() == 0 {
 		t.Error("idle heartbeat never fired")
 	}
-	if c.jobs[0].Agent != "hydra-ops" || c.jobs[0].Message != DefaultHeartbeatPrompt {
+	if c.jobs[0].Agent != "alpha-xo" || c.jobs[0].Message != DefaultHeartbeatPrompt {
 		t.Errorf("tick = %+v, want XO + default prompt", c.jobs[0])
 	}
 }
@@ -54,7 +54,7 @@ func TestHeartbeatFiresWhenIdle(t *testing.T) {
 func TestHeartbeatSkippedWhenBusy(t *testing.T) {
 	c := &collector{}
 	var busy int32 = 1
-	h := NewHeartbeat(20*time.Millisecond, "hydra-ops", "", c.enqueue,
+	h := NewHeartbeat(20*time.Millisecond, "alpha-xo", "", c.enqueue,
 		func(string) bool { return atomic.LoadInt32(&busy) == 1 })
 	h.Start()
 	time.Sleep(120 * time.Millisecond)
@@ -66,7 +66,7 @@ func TestHeartbeatSkippedWhenBusy(t *testing.T) {
 
 func TestHeartbeatResetSuppressesTick(t *testing.T) {
 	c := &collector{}
-	h := NewHeartbeat(80*time.Millisecond, "hydra-ops", "", c.enqueue, func(string) bool { return false })
+	h := NewHeartbeat(80*time.Millisecond, "alpha-xo", "", c.enqueue, func(string) bool { return false })
 	h.Start()
 	// Reset every 20ms for 120ms — the 80ms timer should never elapse.
 	for i := 0; i < 6; i++ {
@@ -82,7 +82,7 @@ func TestHeartbeatResetSuppressesTick(t *testing.T) {
 func TestHeartbeatActivitySuppressesTick(t *testing.T) {
 	c := &collector{}
 	var n int64
-	h := NewHeartbeat(80*time.Millisecond, "hydra-ops", "", c.enqueue, func(string) bool { return false })
+	h := NewHeartbeat(80*time.Millisecond, "alpha-xo", "", c.enqueue, func(string) bool { return false })
 	h.SetPollInterval(10 * time.Millisecond)
 	// Fingerprint changes on every sample → the XO looks continuously active →
 	// the idle clock keeps resetting → the 80ms timer never elapses.
@@ -97,7 +97,7 @@ func TestHeartbeatActivitySuppressesTick(t *testing.T) {
 
 func TestHeartbeatActivityStableFires(t *testing.T) {
 	c := &collector{}
-	h := NewHeartbeat(40*time.Millisecond, "hydra-ops", "", c.enqueue, func(string) bool { return false })
+	h := NewHeartbeat(40*time.Millisecond, "alpha-xo", "", c.enqueue, func(string) bool { return false })
 	h.SetPollInterval(10 * time.Millisecond)
 	// A stable fingerprint (XO idle, pane unchanged) must NOT block the tick.
 	h.SetActivityProbe(func() string { return "stable-pane" })

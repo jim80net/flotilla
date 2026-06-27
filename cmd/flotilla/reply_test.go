@@ -50,11 +50,11 @@ func TestReplyWatch_RoutesWhenReplyFound(t *testing.T) {
 	d, posts, alerts := baseDeps()
 	// not-yet, not-yet, then the verbatim reply lands.
 	d.reply = replySeq(replyResult{"", false, nil}, replyResult{"", false, nil}, replyResult{"here is what I need from you", true, nil})
-	runReplyWatch(context.Background(), *d, "empath-lead", "chan123", "what do you need")
+	runReplyWatch(context.Background(), *d, "gamma-xo", "chan123", "what do you need")
 	if len(*alerts) != 0 {
 		t.Fatalf("unexpected alerts: %v", *alerts)
 	}
-	if len(*posts) != 1 || !strings.Contains((*posts)[0], "here is what I need") || !strings.HasPrefix((*posts)[0], "empath-lead|") {
+	if len(*posts) != 1 || !strings.Contains((*posts)[0], "here is what I need") || !strings.HasPrefix((*posts)[0], "gamma-xo|") {
 		t.Fatalf("posts = %v, want one attributed verbatim reply", *posts)
 	}
 }
@@ -64,7 +64,7 @@ func TestReplyWatch_SoftTTLThenLateReplyStillRoutes(t *testing.T) {
 	d, posts, alerts := baseDeps()
 	// soft TTL = 3 polls; reply lands on the 4th.
 	d.reply = replySeq(replyResult{"", false, nil}, replyResult{"", false, nil}, replyResult{"", false, nil}, replyResult{"late but real reply", true, nil})
-	runReplyWatch(context.Background(), *d, "empath-lead", "chan123", "q")
+	runReplyWatch(context.Background(), *d, "gamma-xo", "chan123", "q")
 	if len(*alerts) != 1 || !strings.Contains((*alerts)[0], "is working on your message") {
 		t.Fatalf("alerts = %v, want exactly one soft 'still working' escalation", *alerts)
 	}
@@ -76,7 +76,7 @@ func TestReplyWatch_SoftTTLThenLateReplyStillRoutes(t *testing.T) {
 func TestReplyWatch_HardTTL_Escalates(t *testing.T) {
 	d, posts, alerts := baseDeps()
 	d.reply = replySeq(replyResult{"", false, nil}) // never lands
-	runReplyWatch(context.Background(), *d, "empath-lead", "chan123", "q")
+	runReplyWatch(context.Background(), *d, "gamma-xo", "chan123", "q")
 	if len(*posts) != 0 {
 		t.Fatalf("must not post when no reply arrives: %v", *posts)
 	}
@@ -90,7 +90,7 @@ func TestReplyWatch_WebhookUnresolved_Escalates(t *testing.T) {
 	d, posts, alerts := baseDeps()
 	d.reply = replySeq(replyResult{"reply", true, nil})
 	d.dest = func(string) (string, bool) { return "", false }
-	runReplyWatch(context.Background(), *d, "empath-lead", "chan123", "q")
+	runReplyWatch(context.Background(), *d, "gamma-xo", "chan123", "q")
 	if len(*posts) != 0 {
 		t.Fatalf("must not post with no destination: %v", *posts)
 	}
@@ -103,7 +103,7 @@ func TestReplyWatch_PostError_EscalatesPartial(t *testing.T) {
 	d, _, alerts := baseDeps()
 	d.reply = replySeq(replyResult{"reply", true, nil})
 	d.post = func(string, string, string) error { return context.Canceled }
-	runReplyWatch(context.Background(), *d, "empath-lead", "chan123", "q")
+	runReplyWatch(context.Background(), *d, "gamma-xo", "chan123", "q")
 	if len(*alerts) != 1 || !strings.Contains((*alerts)[0], "read its pane for the rest") {
 		t.Fatalf("alerts = %v, want a partial-delivery escalation", *alerts)
 	}
@@ -114,7 +114,7 @@ func TestReplyWatch_SupersededBeforeRoute_NoStalePost(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // already superseded
 	d.reply = replySeq(replyResult{"reply", true, nil})
-	runReplyWatch(ctx, *d, "empath-lead", "chan123", "q")
+	runReplyWatch(ctx, *d, "gamma-xo", "chan123", "q")
 	if len(*posts) != 0 || len(*alerts) != 0 {
 		t.Fatalf("a superseded watcher must emit nothing: posts=%v alerts=%v", *posts, *alerts)
 	}
@@ -124,7 +124,7 @@ func TestReplyWatch_MultiChunk_OrderedPosts(t *testing.T) {
 	d, posts, alerts := baseDeps()
 	big := strings.Repeat("x", mirrorChunkLimit+50) // forces 2 chunks
 	d.reply = replySeq(replyResult{big, true, nil})
-	runReplyWatch(context.Background(), *d, "empath-lead", "chan123", "q")
+	runReplyWatch(context.Background(), *d, "gamma-xo", "chan123", "q")
 	if len(*alerts) != 0 {
 		t.Fatalf("unexpected alerts: %v", *alerts)
 	}
@@ -164,8 +164,8 @@ func TestReplyRouter_ArmSupersedes(t *testing.T) {
 	r := newReplyRouter(context.Background(), d)
 	done := make(chan struct{}, 2)
 	r.dispatch = func(f func()) { go func() { f(); done <- struct{}{} }() }
-	r.arm("empath-lead", "chanA", "msg1")
-	r.arm("empath-lead", "chanB", "msg2") // supersede → chanA's watcher cancels
+	r.arm("gamma-xo", "chanA", "msg1")
+	r.arm("gamma-xo", "chanB", "msg2") // supersede → chanA's watcher cancels
 	<-done
 	<-done
 	mu.Lock()
@@ -196,7 +196,7 @@ func TestReplyRouter_Stop(t *testing.T) {
 	r := newReplyRouter(context.Background(), d)
 	done := make(chan struct{}, 1)
 	r.dispatch = func(f func()) { go func() { f(); done <- struct{}{} }() }
-	r.arm("empath-lead", "chanA", "msg")
+	r.arm("gamma-xo", "chanA", "msg")
 	r.Stop()       // cancels the watcher's ctx
 	close(blocked) // unblock the sleep; the watcher should see ctx cancelled and exit without emitting
 	<-done

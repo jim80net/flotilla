@@ -115,7 +115,7 @@
       it COUNTS against the three; only TRANSIENT report-and-exit fan-out remains the unbounded
       floor. This sharpens the draft's "does this charge require me to remember its state across my
       next rotation?" discrimination test (draft lines 90-92) for the recurring case. FLAG in this
-      task: this is hydra-ops's doctrine knob — surface the exact sentence for hydra-ops to eyeball,
+      task: this is alpha-xo's doctrine knob — surface the exact sentence for alpha-xo to eyeball,
       since where the standing/transient line falls for recurring fan-out is an operating-doctrine
       judgment, not a mechanical one.
 
@@ -137,4 +137,4 @@
       operator edits); the seed never clobbers base scaffold files nor double-appends the block; the
       registry is member-count-agnostic and dispatches by mechanism.
 - [ ] 5.4 PR (reference this change); CI green. Report trio-clean + the ratification fork (install
-      mechanism + rejected-alternatives) to hydra-ops → hydra-ops merges on clean gates.
+      mechanism + rejected-alternatives) to alpha-xo → alpha-xo merges on clean gates.

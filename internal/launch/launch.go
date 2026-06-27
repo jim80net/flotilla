@@ -143,7 +143,7 @@ func (c *Config) Recipe(agent string) (Recipe, bool) {
 // one ":" with a non-empty session and a non-empty window, no tmux pane-index
 // suffix on the window (a trailing ".<digits>"), and no spaces in either half.
 // resume derives the pane itself, so a window ending in ".<digits>" (e.g.
-// "hydra-ops.0", "rel-1.2") is rejected — tmux would parse it as a pane
+// "alpha-xo.0", "rel-1.2") is rejected — tmux would parse it as a pane
 // reference, not a window name. A non-numeric dot (e.g. "my.app") is fine.
 // Spaces are rejected because they would break the downstream `tmux new-session
 // -s <session> -n <window>` argv. (\t \n \r are already rejected by the caller

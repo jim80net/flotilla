@@ -3,8 +3,8 @@
 ## 1. `internal/claudestore` — locate + extract (TDD)
 
 - [x] 1.1 `encodeProjectDir(cwd) string` — every `/` and `.` → `-`. TEST against the probe-verified
-      pairs (e.g. `/home/jim/workspace/github.com/jim80net/flotilla-dash` →
-      `-home-jim-workspace-github-com-jim80net-flotilla-dash`).
+      pairs (e.g. `/home/operator/fleet/desk-j` →
+      `-home-operator-fleet-desk-j`).
 - [x] 1.2 `LatestSession(cwd) (path string, ok bool)` — glob `~/.claude/projects/<enc>/*.jsonl`,
       newest by mtime; ok=false when the dir/glob is empty. TEST with a temp `$HOME` fixture +
       multiple jsonl with controlled mtimes (relative, not hardcoded dates).
@@ -60,4 +60,4 @@
       side-effect runs outside `d.mu`, never stalls the clock, never affects delivery; the extraction
       matches the hook's bug-fixes; the chunker is correct.
 - [ ] 6.4 PR; CI green; cubic via GraphQL `reviewThreads.isResolved` (author cubic-dev-ai). Report
-      trio-clean → hydra-ops merges the moment it lands.
+      trio-clean → alpha-xo merges the moment it lands.

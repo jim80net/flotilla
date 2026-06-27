@@ -72,7 +72,7 @@ func (r *REST) Close() error {
 // MessagesAfter returns up to limit messages with id > afterID, in ASCENDING id
 // order. Discord's `after` returns the OLDEST block above afterID (the contiguous
 // messages nearest the cursor), newest-first within the batch (verified by live
-// probe 2026-06-23, channel 1511357941893304462); we sort to ascending so a caller
+// probe 2026-06-23, channel 1500000000000000001); we sort to ascending so a caller
 // can walk forward and advance a cursor monotonically without leapfrogging.
 func (r *REST) MessagesAfter(channelID, afterID string, limit int) ([]Message, error) {
 	raw, err := r.fetch(channelID, limit, "", afterID, "")

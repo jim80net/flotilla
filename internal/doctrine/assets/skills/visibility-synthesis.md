@@ -108,16 +108,16 @@ A concrete #c2 shape (illustrative, not real fleet state):
 ```
 [fleet synthesis]
 
-HEADLINE: 2 of 3 fleets advancing. spark-fleet shipped the Tier-1 mirror (live).
+HEADLINE: 2 of 3 fleets advancing. alpha-fleet shipped the Tier-1 mirror (live).
 research-fleet is mid-backtest. ops-fleet idle.
 
 OPERATOR DECISIONS (2):
-  • spark-fleet — substrate ratification: option (a) vs (b).
-    Recommendation: (a). → drill: #spark-xo
+  • alpha-fleet — substrate ratification: option (a) vs (b).
+    Recommendation: (a). → drill: #alpha-xo
   • research-fleet — paid backtest budget top-up requested. → drill: #research-xo
 
 DRILL-DOWN:
-  • #spark-xo    — Tier-1 mirror merged; B1 merged; B2 in design.
+  • #alpha-xo    — Tier-1 mirror merged; B1 merged; B2 in design.
   • #research-xo — entry-confirmation backtest running (3 desks).
   • #ops-xo      — idle, last activity 41m ago.
 ```

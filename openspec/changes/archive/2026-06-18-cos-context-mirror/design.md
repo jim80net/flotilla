@@ -12,7 +12,7 @@ Per-XO channels (#105) are the feature — but they fragment the operator's atte
 across N channels. Each operator↔XO exchange happens in one channel; **no agent has
 the union.** The chief of staff (the meta-XO, operationally) needs the union to
 integrate "who-knows-what": which desk was told what, which decision was made in
-which side-conversation, what context a newly-dispatched desk is missing. Spark does
+which side-conversation, what context a newly-dispatched desk is missing. The-fleet does
 this by hand in `state/context-ledger.md`; #108 automates it.
 
 ## 2. The model: a deterministic mirror feeding a curated ledger
@@ -127,5 +127,5 @@ not the CoS region, without a self-wake loop).
 - **No LLM in the substrate.** flotilla's ledger write is deterministic; the
   intelligence is the CoS agent's doctrine, layered on top.
 - **No deployment desk names in the product.** `cos_agent` is a role knob;
-  `hydra-ops` / `state/context-ledger.md` are Spark's operational instance, the
+  `alpha-xo` / `state/context-ledger.md` are a private deployment's operational instance, the
   precedent — not the product surface.

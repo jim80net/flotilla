@@ -235,7 +235,7 @@ pre-existing `send`-vs-`watch` race.
 
 **Ownership & gating.** This lock lives in core (`internal/deliver` +
 a one-line acquire in the watch rotate path), so it is a **shared-core touchpoint
-coordinated with the core/flotilla-dev lane**, and it is gated to **Phase 3**
+coordinated with the core/desk-core lane**, and it is gated to **Phase 3**
 (control) — the read-only Phase 1 takes NO pane action and needs none of this.
 Until it lands, the dash MUST NOT expose pane-driving control. The spec records
 this as an explicit control-path requirement, and Phase 3's tests add "dash route
@@ -460,7 +460,7 @@ order above leads with the tracker because it carries no pane-injection risk.
   pane-transaction lock (§5) adds a lock to `internal/deliver` and a one-line
   acquire to the detector's context-rotate path. It is additive (it changes no
   format or contract), it hardens a pre-existing `send`-vs-`watch` race, and it is
-  **coordinated with the core/flotilla-dev lane** — not built in the read-only
+  **coordinated with the core/desk-core lane** — not built in the read-only
   Phase 1.
 - **No new third-party Go dependency:** stdlib HTTP + `embed`; `gh` is a
   subprocess (Phase 2), not a Go dependency.

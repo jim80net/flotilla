@@ -6,7 +6,7 @@ TDD throughout: write the failing test, then the code. Each group is one clean-c
 ## 0. Verify (DONE — provenance)
 
 - [x] 0.1 Probe Discord `after`-pagination ordering live (F1's mandated verify). Result (2026-06-23,
-      channel `1511357941893304462`): `after=C` returns the **OLDEST** messages above C (the
+      channel `1500000000000000001`): `after=C` returns the **OLDEST** messages above C (the
       contiguous block nearest the cursor), ordered **newest-first within the batch**. ⇒ the helper
       reverses to ascending; the upward walk + page cap are fail-closed.
 - [x] 0.2 Measure the base rate: 303 disconnects / 234 resumes / 46 connects over Jun 3–23; the 20:54

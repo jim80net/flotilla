@@ -5,7 +5,7 @@
 An operator Discord message can reach the bound channel, be **accepted by Discord**, and **never
 reach the agent — with NO alert**. Observed live (#161, 2026-06-22): the 20:54 home-channel message
 *"Don't be a deadbeat. Be proactive chief of staff"* showed in the channel from the operator but had
-**no `flotilla-watch: → hydra-ops:` relay echo and raised no not-delivered alert.** The operator only
+**no `flotilla-watch: → alpha-xo:` relay echo and raised no not-delivered alert.** The operator only
 found it by sending a separate nudge; the XO had to hand-roll a Discord-API call with the bot token to
 recover the original text. **A vanished operator directive with no trace** — strictly worse than the
 panel-block (#156), which at least stranded a desk *visibly*.

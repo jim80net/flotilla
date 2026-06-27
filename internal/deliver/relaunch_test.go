@@ -8,8 +8,8 @@ import "testing"
 
 func TestClassifyPanesMarkerWins(t *testing.T) {
 	// Pane A carries the marker (drifted title); pane B has a coincidental title.
-	out := "0:0.1\t✳ drifted\tv12-dev\n0:0.9\tv12-dev\t\n"
-	mk, ti := classifyPanes(out, "v12-dev")
+	out := "0:0.1\t✳ drifted\tdesk-a\n0:0.9\tdesk-a\t\n"
+	mk, ti := classifyPanes(out, "desk-a")
 	if len(mk) != 1 || mk[0] != "0:0.1" {
 		t.Errorf("markerMatches = %v, want [0:0.1]", mk)
 	}
@@ -22,15 +22,15 @@ func TestClassifyPanesMarkerWins(t *testing.T) {
 
 func TestClassifyPanesNoMatch(t *testing.T) {
 	out := "0:0.0\tsomething\t\n0:0.1\tother\t\n"
-	mk, ti := classifyPanes(out, "macro-desk-dev")
+	mk, ti := classifyPanes(out, "desk-b")
 	if len(mk) != 0 || len(ti) != 0 {
 		t.Errorf("classifyPanes(no match) = (%v,%v), want empty/empty", mk, ti)
 	}
 }
 
 func TestClassifyPanesDuplicateMarker(t *testing.T) {
-	out := "0:0.1\tfoo\tv12-dev\n1:0.0\tbar\tv12-dev\n"
-	mk, _ := classifyPanes(out, "v12-dev")
+	out := "0:0.1\tfoo\tdesk-a\n1:0.0\tbar\tdesk-a\n"
+	mk, _ := classifyPanes(out, "desk-a")
 	if len(mk) != 2 {
 		t.Errorf("markerMatches = %v, want 2 (ambiguous)", mk)
 	}
@@ -38,8 +38,8 @@ func TestClassifyPanesDuplicateMarker(t *testing.T) {
 
 func TestClassifyPanesTitleFallback(t *testing.T) {
 	// Untagged fleet (empty marker fields) — only title matches.
-	out := "0:0.0\thydra-ops\t\n0:0.3\t✳ v12-dev\t\n"
-	mk, ti := classifyPanes(out, "v12-dev")
+	out := "0:0.0\talpha-xo\t\n0:0.3\t✳ desk-a\t\n"
+	mk, ti := classifyPanes(out, "desk-a")
 	if len(mk) != 0 {
 		t.Errorf("markerMatches = %v, want empty (untagged fleet)", mk)
 	}

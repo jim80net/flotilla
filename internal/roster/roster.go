@@ -16,7 +16,7 @@ import (
 // Agent is one coordinated coding agent — a long-lived session in a tmux pane.
 type Agent struct {
 	// Name is the stable identifier used on the command line and as the
-	// agent's Discord identity (e.g. "v12-dev").
+	// agent's Discord identity (e.g. "desk-a").
 	Name string `json:"name"`
 	// TmuxTitle is the title of the tmux pane the agent runs in. Delivery
 	// resolves the pane by matching this title, so it survives pane

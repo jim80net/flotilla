@@ -18,7 +18,7 @@ func writeTemp(t *testing.T, body string) string {
 func TestLoadValid(t *testing.T) {
 	p := writeTemp(t, `{
 		"guild_id": "g", "channel_id": "c", "operator_user_id": "op",
-		"agents": [{"name": "hydra-ops"}, {"name": "v12-dev", "tmux_title": "v12"}]
+		"agents": [{"name": "alpha-xo"}, {"name": "desk-a", "tmux_title": "v12"}]
 	}`)
 	cfg, err := Load(p)
 	if err != nil {
@@ -33,10 +33,10 @@ func TestLoadValid(t *testing.T) {
 }
 
 func TestAgentTitleFallback(t *testing.T) {
-	if got := (Agent{Name: "hydra-ops"}).Title(); got != "hydra-ops" {
-		t.Errorf("Title fallback = %q, want hydra-ops", got)
+	if got := (Agent{Name: "alpha-xo"}).Title(); got != "alpha-xo" {
+		t.Errorf("Title fallback = %q, want alpha-xo", got)
 	}
-	if got := (Agent{Name: "v12-dev", TmuxTitle: "v12"}).Title(); got != "v12" {
+	if got := (Agent{Name: "desk-a", TmuxTitle: "v12"}).Title(); got != "v12" {
 		t.Errorf("Title explicit = %q, want v12", got)
 	}
 }
@@ -73,7 +73,7 @@ func TestAgentLookup(t *testing.T) {
 
 func TestSecrets(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "secrets.env")
-	body := "# comment\nFLOTILLA_BOT_TOKEN=tok\nFLOTILLA_WEBHOOK_HYDRA_OPS=https://example/h\n\nFLOTILLA_WEBHOOK_V12_DEV=https://example/v\n"
+	body := "# comment\nFLOTILLA_BOT_TOKEN=tok\nFLOTILLA_WEBHOOK_ALPHA_XO=https://example/h\n\nFLOTILLA_WEBHOOK_DESK_A=https://example/v\n"
 	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
 		t.Fatalf("write secrets: %v", err)
 	}
@@ -84,12 +84,12 @@ func TestSecrets(t *testing.T) {
 	if s.BotToken() != "tok" {
 		t.Errorf("BotToken = %q, want tok", s.BotToken())
 	}
-	if got := WebhookKey("v12-dev"); got != "FLOTILLA_WEBHOOK_V12_DEV" {
+	if got := WebhookKey("desk-a"); got != "FLOTILLA_WEBHOOK_DESK_A" {
 		t.Errorf("WebhookKey = %q", got)
 	}
-	url, err := s.Webhook("hydra-ops")
+	url, err := s.Webhook("alpha-xo")
 	if err != nil || url != "https://example/h" {
-		t.Errorf("Webhook(hydra-ops) = %q, %v", url, err)
+		t.Errorf("Webhook(alpha-xo) = %q, %v", url, err)
 	}
 	if _, err := s.Webhook("nope"); err == nil {
 		t.Error("Webhook(nope) = nil error, want error")
@@ -125,23 +125,23 @@ func TestLoadAgentSurface(t *testing.T) {
 }
 
 func TestLoadWatchConfigValidation(t *testing.T) {
-	if _, err := Load(writeTemp(t, `{"agents":[{"name":"hydra-ops"},{"name":"v12-dev"}],"xo_agent":"hydra-ops","heartbeat_interval":"20m"}`)); err != nil {
+	if _, err := Load(writeTemp(t, `{"agents":[{"name":"alpha-xo"},{"name":"desk-a"}],"xo_agent":"alpha-xo","heartbeat_interval":"20m"}`)); err != nil {
 		t.Fatalf("valid watch config rejected: %v", err)
 	}
-	if _, err := Load(writeTemp(t, `{"agents":[{"name":"hydra-ops"}],"xo_agent":"nope"}`)); err == nil {
+	if _, err := Load(writeTemp(t, `{"agents":[{"name":"alpha-xo"}],"xo_agent":"nope"}`)); err == nil {
 		t.Error("xo_agent not in agents = nil error, want error")
 	}
-	if _, err := Load(writeTemp(t, `{"agents":[{"name":"hydra-ops"}],"heartbeat_interval":"20mins"}`)); err == nil {
+	if _, err := Load(writeTemp(t, `{"agents":[{"name":"alpha-xo"}],"heartbeat_interval":"20mins"}`)); err == nil {
 		t.Error("bad heartbeat_interval = nil error, want error")
 	}
-	if _, err := Load(writeTemp(t, `{"agents":[{"name":"hydra-ops"}],"heartbeat_interval":"0"}`)); err != nil {
+	if _, err := Load(writeTemp(t, `{"agents":[{"name":"alpha-xo"}],"heartbeat_interval":"0"}`)); err != nil {
 		t.Errorf("heartbeat_interval \"0\" (disabled) should be valid: %v", err)
 	}
 }
 
 func TestLoadChangeDetectorValidation(t *testing.T) {
 	// change_detector with a positive interval + valid ping mode is accepted.
-	cfg, err := Load(writeTemp(t, `{"agents":[{"name":"hydra-ops"}],"xo_agent":"hydra-ops","heartbeat_interval":"20m","change_detector":true,"liveness_ping_mode":"none"}`))
+	cfg, err := Load(writeTemp(t, `{"agents":[{"name":"alpha-xo"}],"xo_agent":"alpha-xo","heartbeat_interval":"20m","change_detector":true,"liveness_ping_mode":"none"}`))
 	if err != nil {
 		t.Fatalf("valid change_detector config rejected: %v", err)
 	}
@@ -149,19 +149,19 @@ func TestLoadChangeDetectorValidation(t *testing.T) {
 		t.Errorf("change_detector fields not loaded: %+v", cfg)
 	}
 	// change_detector with no interval → error (it would never tick).
-	if _, err := Load(writeTemp(t, `{"agents":[{"name":"hydra-ops"}],"change_detector":true}`)); err == nil {
+	if _, err := Load(writeTemp(t, `{"agents":[{"name":"alpha-xo"}],"change_detector":true}`)); err == nil {
 		t.Error("change_detector without heartbeat_interval = nil error, want error")
 	}
 	// change_detector with disabled interval ("0") → error too.
-	if _, err := Load(writeTemp(t, `{"agents":[{"name":"hydra-ops"}],"change_detector":true,"heartbeat_interval":"0"}`)); err == nil {
+	if _, err := Load(writeTemp(t, `{"agents":[{"name":"alpha-xo"}],"change_detector":true,"heartbeat_interval":"0"}`)); err == nil {
 		t.Error("change_detector with heartbeat_interval \"0\" = nil error, want error")
 	}
 	// invalid liveness_ping_mode → error.
-	if _, err := Load(writeTemp(t, `{"agents":[{"name":"hydra-ops"}],"heartbeat_interval":"20m","liveness_ping_mode":"sometimes"}`)); err == nil {
+	if _, err := Load(writeTemp(t, `{"agents":[{"name":"alpha-xo"}],"heartbeat_interval":"20m","liveness_ping_mode":"sometimes"}`)); err == nil {
 		t.Error("invalid liveness_ping_mode = nil error, want error")
 	}
 	// empty liveness_ping_mode is valid (defaults to none at use).
-	if _, err := Load(writeTemp(t, `{"agents":[{"name":"hydra-ops"}],"heartbeat_interval":"20m"}`)); err != nil {
+	if _, err := Load(writeTemp(t, `{"agents":[{"name":"alpha-xo"}],"heartbeat_interval":"20m"}`)); err != nil {
 		t.Errorf("empty liveness_ping_mode should be valid: %v", err)
 	}
 }

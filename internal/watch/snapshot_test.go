@@ -13,8 +13,8 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "detector-state.json")
 	want := Snapshot{
 		DeskStates: map[string]surface.State{
-			"hydra-ops": surface.StateIdle,
-			"v12-dev":   surface.StateWorking,
+			"alpha-xo": surface.StateIdle,
+			"desk-a":   surface.StateWorking,
 		},
 		SignalHash: "abc123",
 		XOSettled:  true,
@@ -29,7 +29,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	if got.SignalHash != want.SignalHash || got.XOSettled != want.XOSettled {
 		t.Errorf("round-trip scalar mismatch: got %+v want %+v", got, want)
 	}
-	if got.DeskStates["hydra-ops"] != surface.StateIdle || got.DeskStates["v12-dev"] != surface.StateWorking {
+	if got.DeskStates["alpha-xo"] != surface.StateIdle || got.DeskStates["desk-a"] != surface.StateWorking {
 		t.Errorf("round-trip desk states mismatch: %+v", got.DeskStates)
 	}
 }
@@ -41,7 +41,7 @@ func TestLoadSnapshotLegacyTrackerHashShape(t *testing.T) {
 	// "signal_hash") — NOT a round-trip of the current struct, per the
 	// backward-compat-test-builds-old-shape discipline.
 	p := filepath.Join(t.TempDir(), "legacy.json")
-	legacy := `{"desk_states":{"v12-dev":3},"tracker_hash":"DEADBEEF","xo_settled":true}`
+	legacy := `{"desk_states":{"desk-a":3},"tracker_hash":"DEADBEEF","xo_settled":true}`
 	if err := os.WriteFile(p, []byte(legacy), 0o644); err != nil {
 		t.Fatalf("write legacy snapshot: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestLoadSnapshotLegacyTrackerHashShape(t *testing.T) {
 	if !got.XOSettled {
 		t.Error("xo_settled must survive the load")
 	}
-	if got.DeskStates["v12-dev"] != surface.StateIdle { // 3 == StateIdle
+	if got.DeskStates["desk-a"] != surface.StateIdle { // 3 == StateIdle
 		t.Errorf("desk_states must survive the load, got %+v", got.DeskStates)
 	}
 }

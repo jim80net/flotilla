@@ -14,16 +14,16 @@ confirmed/cleared submit (the trio's SHIP-BLOCKER, A1).
 > implementation". P1-A's root cause was the fixed window (dropped via the whole-pane scan), not the
 > bottom-most logic.
 
-- [x] 1.1 TEST: `parsePanelFocused` — the golden verified-live family-office capture (empty composer
+- [x] 1.1 TEST: `parsePanelFocused` — the golden verified-live beta-xo capture (empty composer
   above; panel docked at bottom; cursor on the last agent row `❯ ◯ portfoliosrc-fix`) → (true, true).
-- [x] 1.2 TEST: LONG panel (8 agent rows — the memex case) with the cursor on a MIDDLE row → still
+- [x] 1.2 TEST: LONG panel (8 agent rows — the desk-l case) with the cursor on a MIDDLE row → still
   (true, true). Rows below the cursor carry no `❯`, so the cursor is the bottom-most `❯`; the
   whole-pane scan (no window) finds it regardless of panel height — the case the FIXED WINDOW missed.
 - [x] 1.3 TEST: composer-focused-with-agents-DISPLAYED → (false, true) — header + agent rows present,
   but the bottom-most `❯` is the composer (no `❯` on any agent row).
 - [x] 1.4 TEST: scrollback echo, two flavors → (false, true): (a) a lone `❯ ◯ …` line above a live
   composer; (b) a FULL panel capture (header + rows + cursor) echoed above a live empty composer with
-  NO live panel (the proven flotilla-dev false positive — the case that breaks header-anchoring). The
+  NO live panel (the proven desk-core false positive — the case that breaks header-anchoring). The
   live composer is the bottom-most `❯`, so the echoed cursor never decides.
 - [x] 1.5 TEST: no `❯` at all → (false, true). And capture error (via `InputBlocked`) → (false, false)
   (undetermined; caller falls back — no false block).

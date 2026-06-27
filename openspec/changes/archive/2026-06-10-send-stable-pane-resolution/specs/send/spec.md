@@ -19,16 +19,16 @@ than one SHALL be an error — never a silent mis-delivery. An empty marker SHAL
 never match.
 
 #### Scenario: Marker resolves a pane whose title has drifted
-- **WHEN** a pane is tagged `@flotilla_agent=v12-dev` and its title later drifts to a task summary
-- **THEN** resolution of "v12-dev" still returns that pane, by the marker, regardless of the title
+- **WHEN** a pane is tagged `@flotilla_agent=desk-a` and its title later drifts to a task summary
+- **THEN** resolution of "desk-a" still returns that pane, by the marker, regardless of the title
 
 #### Scenario: Marker is authoritative over a coincidental title match
-- **WHEN** one pane carries the marker for "v12-dev" (with a drifted title) and another pane's title coincidentally matches "v12-dev"
+- **WHEN** one pane carries the marker for "desk-a" (with a drifted title) and another pane's title coincidentally matches "desk-a"
 - **THEN** resolution returns the marker-tagged pane
 
 #### Scenario: Untagged fleet falls back to title
-- **WHEN** no pane carries the marker and agent "v12-dev" runs in a pane titled "✳ v12-dev"
-- **THEN** resolution succeeds by title, and a request for "v12" does NOT match it
+- **WHEN** no pane carries the marker and agent "desk-a" runs in a pane titled "✳ desk-a"
+- **THEN** resolution succeeds by title, and a request for "desk" does NOT match it
 
 #### Scenario: Ambiguity in either tier is an error
 - **WHEN** two panes carry the same marker, or (absent any marker) two panes share the title

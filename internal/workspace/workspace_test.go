@@ -30,12 +30,12 @@ func TestRootDefaultsToHomeDotFlotilla(t *testing.T) {
 
 func TestDir(t *testing.T) {
 	t.Setenv(rootEnv, "/ws")
-	got, err := Dir("hydra-ops")
+	got, err := Dir("alpha-xo")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "/ws/hydra-ops" {
-		t.Errorf("Dir() = %q, want /ws/hydra-ops", got)
+	if got != "/ws/alpha-xo" {
+		t.Errorf("Dir() = %q, want /ws/alpha-xo", got)
 	}
 }
 

@@ -15,7 +15,7 @@ excluded. The convention SHALL be documented both in the specification and in a 
 backlog file itself.
 
 #### Scenario: A status marker classifies an item
-- **WHEN** the backlog contains `- [in-flight] ship the tactical PR` and `- [blocked] PR-E loss-cap values @operator`
+- **WHEN** the backlog contains `- [in-flight] ship a high-consequence PR` and `- [blocked] PR-E loss-cap values @operator`
 - **THEN** the first is classified unblocked and the second operator-blocked
 
 #### Scenario: A done item is excluded

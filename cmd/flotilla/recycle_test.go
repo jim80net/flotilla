@@ -103,7 +103,7 @@ func fakeRecycleOps(r *recRec) recycleOps {
 
 func testPlan() recyclePlan {
 	return recyclePlan{
-		agent: "v12-dev", key: "the-key", cwd: "/repo", launch: "claude --name v12-dev",
+		agent: "desk-a", key: "the-key", cwd: "/repo", launch: "claude --name desk-a",
 		token: "TOK", designatedPath: "/repo/.claude/handoffs/recycle-TOK.md",
 		handoffText: "HANDOFF", takeoverText: "TAKEOVER",
 		ownPane: "", minHandoffBytes: 200,
@@ -126,7 +126,7 @@ func TestRunRecycleHappyPath(t *testing.T) {
 	if len(r.delivered) != 2 || r.delivered[0] != "HANDOFF" || r.delivered[1] != "TAKEOVER" {
 		t.Errorf("delivered = %v, want [HANDOFF TAKEOVER] (takeover exactly once)", r.delivered)
 	}
-	if !strings.Contains(msg, "recycled v12-dev") {
+	if !strings.Contains(msg, "recycled desk-a") {
 		t.Errorf("msg = %q, want a success line", msg)
 	}
 	// remain-on-exit must be set ON before the close and restored OFF after (the claude-direct
@@ -248,7 +248,7 @@ func TestRunRecycleCloseNeverShell(t *testing.T) {
 	r := happyRec()
 	r.closeNeverShell = true // assess returns Unknown after the close (transient glitch)
 	_, err := runRecycle(fakeRecycleOps(r), testPlan())
-	if err == nil || !strings.Contains(err.Error(), "resume v12-dev --force") {
+	if err == nil || !strings.Contains(err.Error(), "resume desk-a --force") {
 		t.Fatalf("err = %v, want a state-aware dead-desk recovery copy naming --force", err)
 	}
 	if r.respawned {
@@ -329,10 +329,10 @@ func TestParseRecycleArgs(t *testing.T) {
 		wantDry   bool
 		wantErr   bool
 	}{
-		{"agent only", []string{"v12-dev"}, "v12-dev", false, false},
-		{"agent then dry", []string{"v12-dev", "--dry-run"}, "v12-dev", true, false},
-		{"dry then agent", []string{"--dry-run", "v12-dev"}, "v12-dev", true, false},
-		{"agent then launch", []string{"v12-dev", "--launch", "/tmp/l.json"}, "v12-dev", false, false},
+		{"agent only", []string{"desk-a"}, "desk-a", false, false},
+		{"agent then dry", []string{"desk-a", "--dry-run"}, "desk-a", true, false},
+		{"dry then agent", []string{"--dry-run", "desk-a"}, "desk-a", true, false},
+		{"agent then launch", []string{"desk-a", "--launch", "/tmp/l.json"}, "desk-a", false, false},
 		{"no agent", []string{"--dry-run"}, "", false, true},
 		{"empty", []string{}, "", false, true},
 		{"extra positional", []string{"a", "b"}, "", false, true},

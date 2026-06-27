@@ -22,7 +22,7 @@ reuses the pane id so the `@flotilla_agent` marker SURVIVES — the control chan
 2. **The context-bridge ORCHESTRATION** — drive the desk to emit its durable handoff, gate on that
    landing durably, only THEN close, relaunch, and point the fresh session at the handoff.
 
-## Decisions carried in (parlayed with hydra-ops via flotilla message, 2026-06-23)
+## Decisions carried in (parlayed with alpha-xo via flotilla message, 2026-06-23)
 
 - **Fork 1 — graceful close: a per-driver `Close()` on the SPI.** Consistent with the SPI's "Driver
   DECIDES, deliver EXECUTEs"; per-harness, unit-testable; flushes the harness session store before
@@ -39,12 +39,12 @@ reuses the pane id so the `@flotilla_agent` marker SURVIVES — the control chan
   necessary. Marked `operator-to-confirm` in the spec so #157 is not blocked on the escalation.
 - **Fork 4 — scope: #157 = the mechanism + a claude→claude same-harness end-to-end proof; #158 = the
   claude→grok cutover + the capability-parity check.** Per #158's stated hard dependency; keeps the
-  PR blast-radius bounded (does NOT couple the mechanism to family-office's real-money parity check).
+  PR blast-radius bounded (does NOT couple the mechanism to beta-xo's approval-sensitive parity check).
 
 ## What the design-trio rework changed (forks unchanged; mechanism + gate signals corrected)
 
 The trio caught one systematic blind spot: the first draft templated the handoff/takeover injection
-from MEMORY of the memex `/handoff` and `/takeover` skills. Reading the skill bodies shows BOTH are
+from MEMORY of the desk-l `/handoff` and `/takeover` skills. Reading the skill bodies shows BOTH are
 human-INTERACTIVE (a "/handoff" confirmation pause with NO commit step; a "/takeover" *"shall I
 start?"* pause) — so injecting the bare skills would deadlock a remote-driven recycle. The rework:
 inject **non-interactive recycle-specific turns** (not the bare skills) that produce the same
@@ -100,8 +100,8 @@ precondition** (Phase 0) and a **relaunch-generation idempotency marker**; use *
 ## Out of scope (separate follow-ups)
 
 - **#158 — the claude→grok cutover + the capability-parity check** (does Grok's harness support
-  subagents / parallel-review / git-PR / MCP, which family-office relies on, owning tactical-head's
-  real-money order path). Gated on #157's same-harness proof. This change builds the bridge
+  subagents / parallel-review / git-PR / MCP, which beta-xo relies on, owning delta-xo's
+  approval-sensitive order path). Gated on #157's same-harness proof. This change builds the bridge
   cross-harness-READY (arbitrary recipe + a harness-agnostic handoff artifact + a per-driver
   `RecycleBridge` SPI) but exercises only claude→claude; the only harness meeting the recycle-capable
   bar today is Claude Code. ("The markdown bridge already works — this session is proof" is a

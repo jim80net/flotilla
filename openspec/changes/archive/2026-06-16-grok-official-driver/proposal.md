@@ -1,12 +1,12 @@
 ## Why
 
-The `grok-research` desk runs **xAI's official grok CLI** (`~/.grok/bin/grok` — the "Grok
+The `desk-e` desk runs **xAI's official grok CLI** (`~/.grok/bin/grok` — the "Grok
 Composer 2.5 Fast" TUI with a structured `~/.grok` session store), but the `grok` surface driver
 (and its spec) were written against **`superagent-ai/grok-cli` ("grok-dev")** — a different
 product the operator does not run, which he calls outdated. **Measured:** all of the grok-dev
 driver's markers (`Planning next moves`/`enter queue`/x402/`Paste your xAI API key`) match ZERO
 against the live official-grok pane, so `parseGrokState` always defaulted to `StateIdle` and the
-change-detector could never see `grok-research` transition (it never diffed, never woke the XO on
+change-detector could never see `desk-e` transition (it never diffed, never woke the XO on
 a grok finish). The operator ruled REPLACE: match the driver — and the spec — to deployed reality.
 
 This also corrected a stale premise (`capture-pane returns blank / grok is a black hole`): live

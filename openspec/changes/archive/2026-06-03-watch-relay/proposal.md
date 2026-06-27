@@ -44,4 +44,4 @@ does the job. Design + a systems-review pass: `design.md`.
 - **Config:** new `roster.Config` fields, validated at load.
 - **Security:** the channel becomes a command-injection surface gated only by
   `operator_user_id`; the operator's Discord 2FA is the real boundary (same
-  posture as the tactical Hermes agent). Documented in design.md.
+  posture as a downstream high-consequence agent). Documented in design.md.

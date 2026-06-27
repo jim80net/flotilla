@@ -104,7 +104,7 @@ control cnc) with a checkpoint at each phase boundary.
   sub-package (GitHub issues via `gh`), embedded static assets, and docs (a
   `docs/dash-runbook.md` + a README roadmap line). No migration; no new
   third-party dependency in Phase 1 (stdlib HTTP + `gh` subprocess).
-- **One shared-core touchpoint (Phase 3 only, coordinated with flotilla-dev):**
+- **One shared-core touchpoint (Phase 3 only, coordinated with desk-core):**
   the control path requires per-pane serialization that holds ACROSS processes
   (the dash is a separate process from `flotilla watch`, so it cannot share
   watch's in-process pane mutex — see design §5). The fix generalizes that
@@ -112,7 +112,7 @@ control cnc) with a checkpoint at each phase boundary.
   `internal/deliver`, acquired by every confirmed-delivery caller AND the
   detector's context-rotate. This also hardens a latent `flotilla send`-vs-`watch`
   race that exists today. It is a small, additive core change, gated to Phase 3
-  and coordinated with the core (flotilla-dev) lane — NOT built in the read-only
+  and coordinated with the core (desk-core) lane — NOT built in the read-only
   Phase 1.
 - **Relationship to sibling issues:** the dash's read/reporting views ARE the
   first-class reporting surface #102 asked for (the periodic *push* digest stays

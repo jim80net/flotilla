@@ -11,7 +11,7 @@ both meet the recycle-capable bar** (grok added 2026-06-23, #158: it implements 
 harness-agnostic `<cwd>/.flotilla/handoffs/recycle-<token>.md` convention and `ComposerStateProbe` with
 a live-characterized cursor-indexed composer classifier; its `Close` returns `ErrNoGracefulClose`, so a
 grok recycle closes via the handoff-gated respawn-kill fallback). A cross-harness MIGRATION of a running
-desk (e.g. family-office Claude Code → Grok) is an ORCHESTRATED sequence over existing primitives — a
+desk (e.g. beta-xo Claude Code → Grok) is an ORCHESTRATED sequence over existing primitives — a
 handoff turn on the FROM harness, a roster surface + launch-recipe flip, a `flotilla resume` relaunch on
 the TO harness, and a takeover turn — NOT a single recycle call (one recycle resolves ONE driver for all
 phases); flotilla provides the recycle-capable drivers, the migration is an XO-run runbook. The recycle

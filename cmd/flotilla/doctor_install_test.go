@@ -92,7 +92,7 @@ func TestDoctorInstallerExampleEnvSubstitutesFully(t *testing.T) {
 func TestDoctorInstallerRejectsIncompleteEnv(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "incomplete.env")
 	// Provide only one required key; the other seven are missing.
-	if err := os.WriteFile(p, []byte("FLOTILLA_SELF=hydra-ops\n"), 0o644); err != nil {
+	if err := os.WriteFile(p, []byte("FLOTILLA_SELF=alpha-xo\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	out, err := exec.Command("bash", doctorInstallerSh, "--print", p).CombinedOutput()
@@ -109,7 +109,7 @@ func TestDoctorInstallerRejectsIncompleteEnv(t *testing.T) {
 func TestDoctorInstallerWarnsOnUnknownKey(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "extra.env")
 	body := "FLOTILLA_DOCTOR_DEST=%h/.local/bin/flotilla-doctor\n" +
-		"FLOTILLA_SELF=hydra-ops\n" +
+		"FLOTILLA_SELF=alpha-xo\n" +
 		"FLOTILLA_SECRETS=/srv/fleet/secrets.env\n" +
 		"FLOTILLA_WORKDIR=/srv/fleet\n" +
 		"FLOTILLA_BIN=%h/go/bin/flotilla\n" +
@@ -134,7 +134,7 @@ func TestDoctorInstallerWarnsOnUnknownKey(t *testing.T) {
 func TestDoctorInstallerRejectsPlaceholderInValue(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "evil.env")
 	body := "FLOTILLA_DOCTOR_DEST=@FLOTILLA_SELF@\n" +
-		"FLOTILLA_SELF=hydra-ops\n" +
+		"FLOTILLA_SELF=alpha-xo\n" +
 		"FLOTILLA_SECRETS=/srv/fleet/secrets.env\n" +
 		"FLOTILLA_WORKDIR=/srv/fleet\n" +
 		"FLOTILLA_BIN=%h/go/bin/flotilla\n" +

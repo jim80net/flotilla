@@ -4,9 +4,9 @@
 
 | Desk | Cursor line (focused input) | Truth | #153 verdict |
 |---|---|---|---|
-| family-office | `❯ ` then (after submit) the body remains | BLOCKED (submit never lands; PENDING ×25 polls) | blocked (geometry — by luck) |
-| memex | `❯ Message @hermes-ocr…` (sub-composer, cursor_y=64, ~13 lines above the docked panel) | BLOCKED (wrong focus) | MISSED (composer=undetermined: outside the bottom-10 window) |
-| hydra-ops | `❯ Press up to edit queued messages` (behind a session-rating modal) | QUEUED → will deliver (soft-success) | mis-reported as failure |
+| beta-xo | `❯ ` then (after submit) the body remains | BLOCKED (submit never lands; PENDING ×25 polls) | blocked (geometry — by luck) |
+| desk-l | `❯ Message @reviewer…` (sub-composer, cursor_y=64, ~13 lines above the docked panel) | BLOCKED (wrong focus) | MISSED (composer=undetermined: outside the bottom-10 window) |
+| alpha-xo | `❯ Press up to edit queued messages` (behind a session-rating modal) | QUEUED → will deliver (soft-success) | mis-reported as failure |
 
 Two lessons, both from cold-testing the LIVE pane (synthetic fixtures hid them): (a) the
 prompt→body separator is a **NON-BREAKING space U+00A0**, not ASCII; (b) cursor-on-main-composer
@@ -18,7 +18,7 @@ The ground truth for "blocked" is the **submit-confirm itself** — the body PRO
 composer (PENDING) after the bounded Enter-only retries + grace. This is positive evidence (the
 body is observably still there), never a geometry/cursor *prediction*. The cursor's only structural
 job is to tell the probe **WHERE the composer is** so it isn't blind to a sub-composer rendered
-above the docked panel (the memex miss). `cursor_y` indexes the captured visible lines 1:1
+above the docked panel (the desk-l miss). `cursor_y` indexes the captured visible lines 1:1
 (`capturedLines[cursor_y]` = the focused line; verified against `man tmux` + live).
 
 ## The disposition (classify the cursor's composer line)
@@ -53,7 +53,7 @@ ComposerState(pane):
    - **Pending** → not yet; reset the cleared streak; Enter-only retry (bounded).
    - Undetermined → fall back to the spinner window.
 5. **Window expiry:** still **Pending → `ErrPanelBlocked`** (BLOCKED — the body provably remained,
-   the family-office case; the authority). Never resolved (only Undetermined) → `ErrUnconfirmed`
+   the beta-xo case; the authority). Never resolved (only Undetermined) → `ErrUnconfirmed`
    (ambiguous — no probe could read it).
 
 `ErrPanelBlocked` carries a reason (sub-composer @agent / list-nav / composer-stuck) for the alert.
@@ -77,8 +77,8 @@ ComposerState(pane):
 
 - Unit fixtures use the REAL bytes: U+00A0 separator, the three live composer lines.
 - A LIVE validation pass (a throwaway that runs the real `ComposerState` + a dry classification
-  against the live panes) MUST show memex=SubAgent(blocked), family-office=Pending-after-a-real-
-  submit=blocked (or its held state), hydra-ops/healthy=Cleared — BEFORE the PR is called clean.
+  against the live panes) MUST show desk-l=SubAgent(blocked), beta-xo=Pending-after-a-real-
+  submit=blocked (or its held state), alpha-xo/healthy=Cleared — BEFORE the PR is called clean.
   (Cold-test the live artifact, never author-written fixtures — the rule #153 paid for twice.)
 
 ## Impl-trio fold (systems-review + STORM on the diff)

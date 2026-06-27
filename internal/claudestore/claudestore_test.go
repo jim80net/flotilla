@@ -12,8 +12,8 @@ func TestEncodeProjectDir(t *testing.T) {
 	// The probe-verified pair (2026-06-20): every '/' AND '.' becomes '-'.
 	cases := []struct{ cwd, want string }{
 		{
-			"/home/jim/workspace/github.com/jim80net/flotilla-dash",
-			"-home-jim-workspace-github-com-jim80net-flotilla-dash",
+			"/home/operator/fleet/desk-j",
+			"-home-operator-fleet-desk-j",
 		},
 		{"/srv/fleet/research", "-srv-fleet-research"},
 		{"/a.b/c", "-a-b-c"}, // a dot in a path component is encoded too

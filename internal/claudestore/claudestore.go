@@ -22,8 +22,8 @@
 //	~/.claude/projects/<encoded-cwd>/<session-id>.jsonl
 //
 // where <encoded-cwd> is the pane's working directory with every '/' AND '.' replaced by '-'
-// (e.g. /home/jim/workspace/github.com/jim80net/flotilla-dash ->
-// -home-jim-workspace-github-com-jim80net-flotilla-dash). A project directory holds MANY sessions;
+// (e.g. /home/operator/fleet/desk-j ->
+// -home-operator-fleet-desk-j). A project directory holds MANY sessions;
 // the active one is the most-recently-modified .jsonl by mtime.
 package claudestore
 
@@ -93,8 +93,8 @@ func waitQuiescent(path string) {
 
 // encodeProjectDir encodes a pane's working directory to the directory name Claude Code uses under
 // ~/.claude/projects: every '/' AND '.' becomes '-'. Live-probed (2026-06-20):
-// /home/jim/workspace/github.com/jim80net/flotilla-dash ->
-// -home-jim-workspace-github-com-jim80net-flotilla-dash.
+// /home/operator/fleet/desk-j ->
+// -home-operator-fleet-desk-j.
 func encodeProjectDir(cwd string) string {
 	enc := strings.ReplaceAll(cwd, "/", "-")
 	return strings.ReplaceAll(enc, ".", "-")

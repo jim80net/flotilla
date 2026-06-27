@@ -4,16 +4,16 @@ F#105 validates `channels[]` with **one XO = one channel** (`internal/roster/ros
 rejected an agent that was the `xo_agent` of more than one binding). But the operator's
 provisioned topology inherently needs an XO to be primary in **more than one** channel:
 
-- a **C2 group** of several channels (`#c2`, `#fo`, `#product`, `#pa`) where the meta-XO
-  (`hydra-ops`) is primary across the group; and
+- a **C2 group** of several channels (`#c2`, `#beta`, `#product`, `#desk-k`) where the meta-XO
+  (`alpha-xo`) is primary across the group; and
 - a **per-flotilla group**, each with its own command channel — so a flotilla XO is primary
-  in BOTH its C2-group channel (`#fo`/`#product`/`#pa`) AND its own command channel
-  (`#fo-command`/`#product-command`/…).
+  in BOTH its C2-group channel (`#beta`/`#product`/`#desk-k`) AND its own command channel
+  (`#beta-command`/`#product-command`/…).
 
 The one-XO-≤1-channel rule cannot express that two-level structure. Confirmed empirically:
-`roster.Load` on the operator's 14-channel map fails with *"agent family-office is the
-xo_agent of more than one channel binding"* (and the same for `hydra-ops`, `flotilla-dev`,
-`pa`). The alternative (collapse the structure to one channel per XO) deviates from what the
+`roster.Load` on the operator's 14-channel map fails with *"agent beta-xo is the
+xo_agent of more than one channel binding"* (and the same for `alpha-xo`, `desk-core`,
+`desk-k`). The alternative (collapse the structure to one channel per XO) deviates from what the
 operator specified.
 
 ## What Changes

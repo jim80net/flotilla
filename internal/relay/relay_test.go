@@ -22,7 +22,7 @@ func TestAccept(t *testing.T) {
 
 // resolve is a case-insensitive roster stub for routing tests.
 func resolve(token string) (string, bool) {
-	agents := []string{"hydra-ops", "v12-dev", "x-signal-dev"}
+	agents := []string{"alpha-xo", "desk-a", "desk-g"}
 	for _, a := range agents {
 		if equalFold(token, a) {
 			return a, true
@@ -51,16 +51,16 @@ func equalFold(a, b string) bool {
 }
 
 func TestRouteBareToXO(t *testing.T) {
-	d := Route("status check please", "hydra-ops", resolve)
-	if d.Agent != "hydra-ops" || d.Message != "status check please" || d.Notice != "" {
+	d := Route("status check please", "alpha-xo", resolve)
+	if d.Agent != "alpha-xo" || d.Message != "status check please" || d.Notice != "" {
 		t.Errorf("bare → XO: %+v", d)
 	}
 }
 
 func TestRouteDirectedMultiline(t *testing.T) {
-	d := Route("@v12-dev do X\nthen Y\nthen Z", "hydra-ops", resolve)
-	if d.Agent != "v12-dev" {
-		t.Errorf("agent = %q, want v12-dev", d.Agent)
+	d := Route("@desk-a do X\nthen Y\nthen Z", "alpha-xo", resolve)
+	if d.Agent != "desk-a" {
+		t.Errorf("agent = %q, want desk-a", d.Agent)
 	}
 	if d.Message != "do X\nthen Y\nthen Z" {
 		t.Errorf("multi-line body not preserved verbatim: %q", d.Message)
@@ -68,15 +68,15 @@ func TestRouteDirectedMultiline(t *testing.T) {
 }
 
 func TestRouteCaseInsensitive(t *testing.T) {
-	d := Route("@V12-Dev hi", "hydra-ops", resolve)
-	if d.Agent != "v12-dev" || d.Message != "hi" {
+	d := Route("@Desk-A hi", "alpha-xo", resolve)
+	if d.Agent != "desk-a" || d.Message != "hi" {
 		t.Errorf("case-insensitive route: %+v", d)
 	}
 }
 
 func TestRouteUnknownAgentFallsBackWithNotice(t *testing.T) {
-	d := Route("@nope do X", "hydra-ops", resolve)
-	if d.Agent != "hydra-ops" {
+	d := Route("@nope do X", "alpha-xo", resolve)
+	if d.Agent != "alpha-xo" {
 		t.Errorf("unknown agent should route to XO, got %q", d.Agent)
 	}
 	if d.Message != "@nope do X" {
@@ -88,15 +88,15 @@ func TestRouteUnknownAgentFallsBackWithNotice(t *testing.T) {
 }
 
 func TestRouteEscapeToXO(t *testing.T) {
-	d := Route("@@here please look", "hydra-ops", resolve)
-	if d.Agent != "hydra-ops" || d.Message != "@here please look" {
+	d := Route("@@here please look", "alpha-xo", resolve)
+	if d.Agent != "alpha-xo" || d.Message != "@here please look" {
 		t.Errorf("@@ escape: %+v", d)
 	}
 }
 
 func TestRouteBareAtNoBody(t *testing.T) {
-	d := Route("@v12-dev", "hydra-ops", resolve)
-	if d.Agent != "hydra-ops" || d.Message != "@v12-dev" {
+	d := Route("@desk-a", "alpha-xo", resolve)
+	if d.Agent != "alpha-xo" || d.Message != "@desk-a" {
 		t.Errorf("@name with no body should go to XO verbatim: %+v", d)
 	}
 }

@@ -244,10 +244,10 @@ func TagPane(target, key string) error {
 
 // titleMatchesName reports whether a tmux pane title belongs to the agent named
 // want. Claude Code renames its pane to "<status-glyph> <name>" (e.g.
-// "✳ v12-dev"), so exact equality fails on a live session. We accept the bare
+// "✳ desk-a"), so exact equality fails on a live session. We accept the bare
 // name, or a SINGLE-rune glyph prefix followed by the name. Constraining the
-// prefix to one rune rejects both "v12" (substring) and "build v12-dev"
-// (an unrelated multi-word pane) as matches for "v12-dev". This is the FALLBACK
+// prefix to one rune rejects both "desk" (substring) and "build desk-a"
+// (an unrelated multi-word pane) as matches for "desk-a". This is the FALLBACK
 // tier — once a pane is `flotilla register`-tagged, the marker resolves it and
 // the title no longer matters.
 func titleMatchesName(title, want string) bool {

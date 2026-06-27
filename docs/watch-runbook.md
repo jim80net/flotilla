@@ -197,7 +197,7 @@ or just to see what was said) — no daemon, read-only:
 ```bash
 flotilla inbox <channel> [--limit N]      # <channel> = a binding role or a raw channel id
 flotilla inbox fleet-command --limit 30
-flotilla inbox 1511357941893304462
+flotilla inbox 1500000000000000001
 ```
 
 It prints the recent messages oldest-first with each one's timestamp, an authorship flag
@@ -388,8 +388,8 @@ preview the resolved plan (pane, recipe, the designated handoff path, the exact
 handoff/takeover turns it would inject) without acting:
 
 ```bash
-flotilla recycle v12-dev --dry-run     # preview, no action, no lock
-flotilla recycle v12-dev               # execute the fail-closed pipeline
+flotilla recycle desk-a --dry-run      # preview, no action, no lock
+flotilla recycle desk-a                # execute the fail-closed pipeline
 ```
 
 The outcome is also written to `~/.flotilla/<desk>/last-recycle.json` (atomic

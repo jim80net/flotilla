@@ -93,7 +93,7 @@ recycle-capable does NOT require a graceful close.
 
 #### Scenario: The grok recycle bridge uses a harness-agnostic handoff path
 - **WHEN** the grok `RecycleBridge` computes a handoff path for a desk's cwd and a recycle token
-- **THEN** the path is `<cwd>/.flotilla/handoffs/recycle-<token>.md` (product-owned, not `.claude/handoffs/`), the handoff turn names that exact path and force-commits it, and neither turn references a claude/memex `/handoff`,`/takeover` skill
+- **THEN** the path is `<cwd>/.flotilla/handoffs/recycle-<token>.md` (product-owned, not `.claude/handoffs/`), the handoff turn names that exact path and force-commits it, and neither turn references a claude/desk-l `/handoff`,`/takeover` skill
 
 ### Requirement: A surface driver MAY expose the context-preservation policy a recycle drives
 

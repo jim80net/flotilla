@@ -27,7 +27,7 @@ func writeSecrets(t *testing.T, agent, webhookURL string) string {
 }
 
 func TestCmdNotifyPostsToAgentWebhookWithCorrectRequest(t *testing.T) {
-	const agent = "hydra-ops"
+	const agent = "alpha-xo"
 	var (
 		gotPath        string
 		gotUA          string
@@ -86,7 +86,7 @@ func TestCmdNotifyRejectsOverLimitMessageWithoutPosting(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	const agent = "macro-desk-dev"
+	const agent = "desk-b"
 	secrets := writeSecrets(t, agent, srv.URL)
 
 	// One rune over Discord's 2000-rune content limit.
@@ -145,7 +145,7 @@ func TestCmdNotifyMultibyteLimitCountedInRunes(t *testing.T) {
 }
 
 func TestCmdNotifyReadsBodyFromFile(t *testing.T) {
-	const agent = "hydra-ops"
+	const agent = "alpha-xo"
 	var gotContent string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -174,11 +174,11 @@ func TestCmdNotifyReadsBodyFromFile(t *testing.T) {
 func TestCmdNotifyMissingWebhookForAgentErrors(t *testing.T) {
 	// Secrets file exists but has no key for this agent → clean error, no panic.
 	secrets := writeSecrets(t, "someone-else", "https://example.test/hook")
-	err := cmdNotify([]string{"--from", "hydra-ops", "--secrets", secrets, "hi"})
+	err := cmdNotify([]string{"--from", "alpha-xo", "--secrets", secrets, "hi"})
 	if err == nil {
 		t.Fatal("cmdNotify(no webhook for agent) = nil error, want error")
 	}
-	if !strings.Contains(err.Error(), "hydra-ops") {
+	if !strings.Contains(err.Error(), "alpha-xo") {
 		t.Errorf("error %q should name the agent with no webhook", err.Error())
 	}
 }

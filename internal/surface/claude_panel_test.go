@@ -7,7 +7,7 @@ import (
 )
 
 // Detection is CURSOR-based: classifyComposerLine classifies the line at the terminal cursor (the
-// focused input). These fixtures use the REAL bytes verified live on the spark fleet (2026-06-22):
+// focused input). These fixtures use the REAL bytes verified live on a private deployment (2026-06-22):
 //
 //	prompt = U+276F "❯"
 //	nbsp   = U+00A0 NON-BREAKING space — Claude Code renders this (NOT ASCII 0x20) between the prompt
@@ -27,7 +27,7 @@ func makePane(focusLine string, cursorAt int) string {
 	for i := 0; i < cursorAt; i++ {
 		lines = append(lines, "  prior conversation / chrome")
 	}
-	lines = append(lines, focusLine, "  --------", "  jim@host [Opus 4.8] ctx:48%")
+	lines = append(lines, focusLine, "  --------", "  operator@host [Opus 4.8] ctx:48%")
 	return strings.Join(lines, "\n")
 }
 
@@ -43,15 +43,15 @@ func TestClassifyComposerLine(t *testing.T) {
 	}{
 		// The three live states the geometry rule got wrong.
 		{"empty main composer → Cleared", prompt + nbsp, ComposerCleared},
-		{"per-agent message sub-composer → SubAgent", prompt + nbsp + "Message @hermes-ocr…", ComposerSubAgent},
+		{"per-agent message sub-composer → SubAgent", prompt + nbsp + "Message @reviewer…", ComposerSubAgent},
 		{"queued behind a modal → Queued", prompt + nbsp + "Press up to edit queued messages", ComposerQueued},
 		// List-nav: cursor literally on an agent row.
 		{"cursor on an idle agent row → ListNav", prompt + nbsp + idleGlyph + " portfoliosrc-fix  idle", ComposerListNav},
-		{"cursor on an active agent row → ListNav", prompt + nbsp + activeGlyph + " hermes-ocr  idle", ComposerListNav},
+		{"cursor on an active agent row → ListNav", prompt + nbsp + activeGlyph + " reviewer  idle", ComposerListNav},
 		// Main composer with the user's own draft → Pending (a body remains).
 		{"main composer with user text → Pending", prompt + nbsp + "operator: are you there?", ComposerPending},
 		// A draft that merely MENTIONS an agent mid-line is the main composer, not a sub-composer.
-		{"main composer mentioning @agent mid-line → Pending", prompt + nbsp + "ping @hermes-ocr re the PR", ComposerPending},
+		{"main composer mentioning @agent mid-line → Pending", prompt + nbsp + "ping @reviewer re the PR", ComposerPending},
 		// Belt-and-suspenders: an ASCII-space sub-composer classifies the same (no regress if the TUI
 		// swaps the NBSP for a normal space).
 		{"ascii-space sub-composer → SubAgent", prompt + " Message @x", ComposerSubAgent},
@@ -81,30 +81,30 @@ func TestClassifyComposerLineEdges(t *testing.T) {
 }
 
 // TestClaudeComposerStateWiring: the driver threads cursorY + capturePane → classifyComposerLine,
-// using the real NBSP renders, including a sub-composer rendered ABOVE a docked panel (the memex
+// using the real NBSP renders, including a sub-composer rendered ABOVE a docked panel (the desk-l
 // miss the bottom-of-pane window could not see).
 func TestClaudeComposerStateWiring(t *testing.T) {
-	// memex-like: cursor (y=2) on the sub-composer rendered above the panel rows below → SubAgent.
-	memexCap := "  conversation\n  -- @hermes-ocr --\n" + prompt + nbsp + "Message @hermes-ocr…\n  ----\n  jim@host\n  " +
+	// desk-l-like: cursor (y=2) on the sub-composer rendered above the panel rows below → SubAgent.
+	deskLCap := "  conversation\n  -- @reviewer --\n" + prompt + nbsp + "Message @reviewer…\n  ----\n  operator@host\n  " +
 		idleGlyph + " main\n  " + idleGlyph + " hookbug  idle"
 	c := claudeCode{
 		cursorState: func(string) (int, bool, error) { return 2, false, nil },
-		capturePane: func(string) (string, error) { return memexCap, nil },
+		capturePane: func(string) (string, error) { return deskLCap, nil },
 	}
 	if got := c.ComposerState("0:0.0"); got != ComposerSubAgent {
-		t.Errorf("memex sub-composer ComposerState = %v, want SubAgent", got)
+		t.Errorf("desk-l sub-composer ComposerState = %v, want SubAgent", got)
 	}
 
-	// family-office-like: cursor (y=2) on the empty MAIN composer, with a panel selection marker
+	// beta-xo-like: cursor (y=2) on the empty MAIN composer, with a panel selection marker
 	// (prompt+◯) rendered BELOW it → Cleared (reachable-by-position; the post-submit state is the
 	// authority — this just isn't the sub-composer carve-out).
-	foCap := "  conversation\n  ----\n" + prompt + nbsp + "\n  ----\n  jim@host\n" + prompt + nbsp + idleGlyph + " portfoliosrc-fix  idle"
+	foCap := "  conversation\n  ----\n" + prompt + nbsp + "\n  ----\n  operator@host\n" + prompt + nbsp + idleGlyph + " portfoliosrc-fix  idle"
 	c2 := claudeCode{
 		cursorState: func(string) (int, bool, error) { return 2, false, nil },
 		capturePane: func(string) (string, error) { return foCap, nil },
 	}
 	if got := c2.ComposerState("0:0.0"); got != ComposerCleared {
-		t.Errorf("family-office main composer ComposerState = %v, want Cleared (the ◯ marker below is not focus)", got)
+		t.Errorf("beta-xo main composer ComposerState = %v, want Cleared (the ◯ marker below is not focus)", got)
 	}
 }
 

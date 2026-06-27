@@ -4,7 +4,7 @@
 
 #154 made an input-blocked composer DETECTED + reported (not a silent loss) — but recovery was a
 manual human keystroke, leaving the "operator not at the terminal" gap: a blocked desk stays blocked
-until a human clicks it. hydra-ops verified live (2/2: memex + family-office, 2026-06-22) that
+until a human clicks it. alpha-xo verified live (2/2: desk-l + beta-xo, 2026-06-22) that
 **Ctrl-C clears the agents-panel/sub-composer focus back to the composer WITHOUT exiting** — zero
 context loss, no restart. The block is **programmatically recoverable**, so flotilla should self-heal
 and reserve the operator alert for a genuine failure (issue #156, operator-directed).
@@ -13,12 +13,12 @@ and reserve the operator alert for a genuine failure (issue #156, operator-direc
 docs are explicit: *"the first [Ctrl-C] press clears the prompt input and a second press exits Claude
 Code."* So a **blind Ctrl-C ×2 is dangerous** — on a 1-layer block, the first Ctrl-C recovers to the
 main composer and the second walks toward the documented EXIT (killing the desk's session, the exact
-catastrophe we are preventing). hydra-ops's ×2 worked only because both presses hit STACKED overlays
+catastrophe we are preventing). alpha-xo's ×2 worked only because both presses hit STACKED overlays
 (sub-composer → panel → composer); the overlay depth is variable. The self-heal MUST therefore be a
 **bounded loop that re-probes the composer state between each Ctrl-C and stops the instant the
 composer is reachable (Cleared)** — so a Ctrl-C is NEVER sent into an already-recovered empty main
 composer, making it safe-by-construction against the exit-on-second-press. (Esc is the *documented*
-overlay-exit, but the operator + hydra-ops + flotilla-dev all tested Esc and it does NOT recover the
+overlay-exit, but the operator + alpha-xo + desk-core all tested Esc and it does NOT recover the
 inline agents panel — Ctrl-C is the empirically-correct mechanism.)
 
 ## What Changes
@@ -53,7 +53,7 @@ carried three CRITICAL hazards against a live, self-mutating pane; see design.md
 ## Out of scope (separate follow-ups)
 
 - **Named-session resume** (#156 deeper fallback for a genuine freeze that Ctrl-C cannot clear):
-  hydra-ops has added `--name <role>` to the desk launch recipes so a desk relaunches/resumes by
+  alpha-xo has added `--name <role>` to the desk launch recipes so a desk relaunches/resumes by
   role with the control channel re-bound. Wiring flotilla to trigger a relaunch is a separate change
   once the Ctrl-C self-heal proves insufficient for some state.
 - **Desk-lifecycle recycle** (#157) — XO-triggered close+restart-on-chapter-complete via

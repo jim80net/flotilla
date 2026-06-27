@@ -122,10 +122,10 @@ func TestMirrorNotify_DeskSenderNotLedgered(t *testing.T) {
 
 func TestMirrorNotify_InertWithoutCosAgent(t *testing.T) {
 	rosterPath, ledger := writeCosRoster(t, `{
-	  "operator_user_id":"U","channel_id":"C","xo_agent":"hydra-ops",
-	  "agents":[{"name":"hydra-ops"}]}`)
+	  "operator_user_id":"U","channel_id":"C","xo_agent":"alpha-xo",
+	  "agents":[{"name":"alpha-xo"}]}`)
 
-	mirrorNotifyToLedger(rosterPath, "hydra-ops", "hi")
+	mirrorNotifyToLedger(rosterPath, "alpha-xo", "hi")
 
 	if got := readLedger(t, ledger); got != "" {
 		t.Errorf("no cos_agent ⇒ inert, but ledger was written:\n%s", got)

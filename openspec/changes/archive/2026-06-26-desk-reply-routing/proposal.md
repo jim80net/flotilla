@@ -2,15 +2,15 @@
 
 ## Why
 
-The operator's **c2 channels are the hotline to each XO**: a message in `#empath`
-(`xo_agent=empath-lead`) routes to that XO via the relay (`BindingForChannel→XOAgent`). But the
-**return leg is incomplete** — only the PRIMARY XO (`hydra-ops`) mirrors its replies back to the
-operator (via a host-local `Stop`-hook). A FEDERATED c2-channel XO (empath-lead et al.) answers in its
+The operator's **c2 channels are the hotline to each XO**: a message in `#gamma`
+(`xo_agent=gamma-xo`) routes to that XO via the relay (`BindingForChannel→XOAgent`). But the
+**return leg is incomplete** — only the PRIMARY XO (`alpha-xo`) mirrors its replies back to the
+operator (via a host-local `Stop`-hook). A FEDERATED c2-channel XO (gamma-xo et al.) answers in its
 pane and the reply **never reaches the operator** — the operator asks and gets silence, the exact
 failure observed 2026-06-26.
 
 Operator (2026-06-26): *"channels in c2 are supposed to be my hotline to each XO; that wiring is
-incomplete and should be mechanically enforced; this is a task for flotilla-dev to execute."*
+incomplete and should be mechanically enforced; this is a task for desk-core to execute."*
 **Mechanically-enforced + reliable** ⇒ the verbatim reply must return for EVERY turn — not a
 best-effort that escalates fast/queued/short turns to "read the pane" (that IS the failure mode).
 

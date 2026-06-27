@@ -69,8 +69,8 @@ func TestNewGH_RejectsBadRepo(t *testing.T) {
 
 func TestList_HappyPath(t *testing.T) {
 	f := &fakeRunner{stdout: []byte(`[
-		{"number":116,"title":"a bug","state":"OPEN","labels":[{"name":"bug","color":"d73a4a"}],"author":{"login":"jim80net"},"updatedAt":"2026-06-18T06:48:12Z"},
-		{"number":115,"title":"an idea","state":"OPEN","labels":[{"name":"operator-idea"}],"author":{"login":"jim80net"},"updatedAt":"2026-06-18T06:34:59Z"}
+		{"number":116,"title":"a bug","state":"OPEN","labels":[{"name":"bug","color":"d73a4a"}],"author":{"login":"operator"},"updatedAt":"2026-06-18T06:48:12Z"},
+		{"number":115,"title":"an idea","state":"OPEN","labels":[{"name":"operator-idea"}],"author":{"login":"operator"},"updatedAt":"2026-06-18T06:34:59Z"}
 	]`)}
 	g := newFakeTracker(t, f)
 	issues, err := g.List(ctx(), ListFilter{})
@@ -234,7 +234,7 @@ func TestClassify_UnknownFailureNeverSwallowed(t *testing.T) {
 // --- Get ---
 
 func TestGet_HappyPath(t *testing.T) {
-	f := &fakeRunner{stdout: []byte(`{"number":106,"title":"t","body":"the body","state":"OPEN","labels":[],"author":{"login":"jim80net"},"comments":[{"author":{"login":"jim80net"},"body":"a comment","createdAt":"2026-06-18T03:00:20Z"}],"url":"https://github.com/jim80net/flotilla/issues/106"}`)}
+	f := &fakeRunner{stdout: []byte(`{"number":106,"title":"t","body":"the body","state":"OPEN","labels":[],"author":{"login":"operator"},"comments":[{"author":{"login":"operator"},"body":"a comment","createdAt":"2026-06-18T03:00:20Z"}],"url":"https://github.com/jim80net/flotilla/issues/106"}`)}
 	g := newFakeTracker(t, f)
 	issue, err := g.Get(ctx(), 106)
 	if err != nil {

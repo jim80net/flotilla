@@ -8,9 +8,9 @@ typing) is **silently lost or mis-routed**: the bracketed paste either lands in 
 the submitting Enter navigates the *panel* (the body sits unsubmitted — and retries STACK pastes),
 or the keystrokes drive the panel's ↑/↓ selection and the body never reaches the composer at all.
 
-This hit **live, operator-facing desks** (issue #152, operator-flagged PRIORITY): `family-office`
-stopped receiving the operator's messages and `memex` stranded a brokered message — both silently.
-The operator: *"it's now silently breaking ACTIVE desks … family-office not receiving the
+This hit **live, operator-facing desks** (issue #152, operator-flagged PRIORITY): `beta-xo`
+stopped receiving the operator's messages and `desk-l` stranded a brokered message — both silently.
+The operator: *"it's now silently breaking ACTIVE desks … beta-xo not receiving the
 OPERATOR's messages — he noticed."*
 
 **Root cause, confirmed in code + live capture.** A panel-focused pane shows no working spinner,
@@ -21,13 +21,13 @@ so `claudeCode.Assess` → `parseBusy`=false → **`StateIdle`** (`internal/surf
 the panel's *cursor* row (`❯ ◯ portfoliosrc-fix`) instead of the composer — misclassifying a
 panel-block as a "pending composer."
 
-**Live ground truth (un-mutated `family-office` pane, 2026-06-22).** The agents panel docks at the
+**Live ground truth (un-mutated `beta-xo` pane, 2026-06-22).** The agents panel docks at the
 ABSOLUTE BOTTOM of the pane, below the composer and footer; the focus cursor `❯` sits on the
 bottom-most agent row:
 
 ```
 ❯                                                  ← the composer (EMPTY), above the footer
-────  jim@…spark-familyoffice [Opus 4.8] ctx:48%
+────  operator@…beta-xo [Opus 4.8] ctx:48%
 ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
 ● main                          ↑/↓ to select · Enter to view   ← panel header
 ◯ predmkt-build  …  idle
@@ -53,7 +53,7 @@ instance, NOT a shipped guarantee — the shipped fix must STOP THE SILENT LOSS 
   `… Enter to view` panel header, then scan from there to the pane bottom for any agent-row cursor
   (`❯` then `◯`/`●` + a name). Anchoring on the live header (the panel docks at the bottom) closes
   three failure modes the design trio found in the first-draft "bottom-most `❯`" rule — a LONG panel
-  (memex's 8 subagents overflowing a fixed tail window → missed detection), a cursor on a MIDDLE
+  (desk-l's 8 subagents overflowing a fixed tail window → missed detection), a cursor on a MIDDLE
   agent row, and a `❯ ◯…` echoed in scrollback — all at once. A near-miss canary logs a
   cursor-without-recognized-header so a TUI hint drift is visible, not a silent paste-loss.
 

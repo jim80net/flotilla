@@ -9,12 +9,12 @@ import (
 func TestCursorStore_RoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cursor.json")
 	st := cursorStore{path: path}
-	in := map[string]uint64{"CH1": 100, "CH2": 1517261693468807260}
+	in := map[string]uint64{"CH1": 100, "CH2": 1500000000000000002}
 	if err := st.save(in); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	got := st.load()
-	if len(got) != 2 || got["CH1"] != 100 || got["CH2"] != 1517261693468807260 {
+	if len(got) != 2 || got["CH1"] != 100 || got["CH2"] != 1500000000000000002 {
 		t.Fatalf("round-trip = %v, want %v", got, in)
 	}
 }

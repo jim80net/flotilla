@@ -1,7 +1,7 @@
 ## Why
 
 The operator cannot see desk activity. Desk work happens in tmux panes (ephemeral) and never
-reaches Discord — today only the XO pane mirrors, via a circumstantial Spark `Stop` hook
+reaches Discord — today only the XO pane mirrors, via a circumstantial `Stop` hook
 (`~/.claude/hooks/flotilla-xo-discord-mirror.sh`). The per-desk channels + webhooks exist and are
 proven, but nothing auto-populates them, so the meta-XO is **hand-cranking** desk summaries into
 the channels by hand. Every hour this is delayed is an hour the operator can't see the fleet.

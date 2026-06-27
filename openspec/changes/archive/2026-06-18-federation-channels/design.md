@@ -253,7 +253,7 @@ Operator directive 2026-06-18 (issue #108): when the relay routes an inbound
 operator message by channel to an XO's pane, it should ALSO mirror that
 operator↔XO traffic to the **chief of staff** — a designated agent that catches
 every per-channel side-conversation and integrates "who-knows-what" context. The
-live Spark fleet already does this by hand in an operational `state/context-ledger.md`;
+live fleet already does this by hand in an operational `state/context-ledger.md`;
 #108 productizes the pattern. (The CoS is generalizable: a configured `cos_agent`,
 **not** any specific deployment's desk name — keep it host-neutral.)
 

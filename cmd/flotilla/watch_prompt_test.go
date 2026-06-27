@@ -41,8 +41,8 @@ func TestDetectorContinuationBuiltinNoWorkspace(t *testing.T) {
 // wedge alert (the liveness backstop for an always-driving, never-settling XO).
 func TestBacklogWakeBodyNamesItemAndAcks(t *testing.T) {
 	ack := "\n(To ack you are alive, run: touch /x/alive)"
-	body := backlogWakeBody([]string{"- [in-flight] ship the tactical PR"}, "/state/fleet-backlog.md", ack)
-	if !strings.Contains(body, "ship the tactical PR") {
+	body := backlogWakeBody([]string{"- [in-flight] ship the parser PR"}, "/state/fleet-backlog.md", ack)
+	if !strings.Contains(body, "ship the parser PR") {
 		t.Error("WakeBacklog body must NAME the driven item")
 	}
 	if !strings.HasSuffix(body, ack) {

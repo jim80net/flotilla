@@ -42,7 +42,7 @@ Load-bearing properties (assert across paths):
 
 - [x] 3.1 TEST FIRST (`recycle_test.go`): grok `HandoffPath(cwd, token)` ==
   `<cwd>/.flotilla/handoffs/recycle-<token>.md`; `HandoffTurn(path)` contains the path, a self-commit
-  (`git add -f`), the non-interactive/no-confirm instruction, and NO claude/memex skill reference;
+  (`git add -f`), the non-interactive/no-confirm instruction, and NO claude/desk-l skill reference;
   `TakeoverTurn(path)` contains the path, "begin immediately", the parlay-via-flotilla-message clause,
   and no `/takeover` skill reference. Mirror the claude `recycle_test.go` substring contracts.
 - [x] 3.2 Implement grok `HandoffPath`/`HandoffTurn`/`TakeoverTurn`. Compile-time assert
@@ -72,6 +72,6 @@ Load-bearing properties (assert across paths):
 - [x] 5.1 `go build ./...` and `go test ./internal/surface/... ./cmd/flotilla/...` green; G2 audit
   (every grok marker traces to §10).
 - [x] 5.2 Implementation-trio (systems-review + open-code-review, parallel) on the diff; iterate clean.
-- [x] 5.3 PR via the gh-token HTTPS bypass to hydra-ops's gate (reference #158 + this change). Record
+- [x] 5.3 PR via the gh-token HTTPS bypass to alpha-xo's gate (reference #158 + this change). Record
   the out-of-scope follow-ups (grok `Close`, `workspace.go` identity-file, claude-path-uniformity) as
   issues.

@@ -32,7 +32,7 @@ sweep on).
    beforeID, afterID, aroundID)` — a plain HTTP call; succeeds regardless of websocket state and does
    not require `Open()`.
 4. **`after`-pagination ordering — PROBED LIVE this session (F1's mandated verify), not recalled.**
-   On channel `1511357941893304462`: `GET .../messages?after=<C>&limit=2` returned the **two OLDEST
+   On channel `1500000000000000001`: `GET .../messages?after=<C>&limit=2` returned the **two OLDEST
    messages with id > C** (the block nearest the cursor), **ordered newest-first within the batch.**
    So `after=C` walks the contiguous block immediately above the cursor — the property the
    forward-walk + fail-closed page-cap rely on.

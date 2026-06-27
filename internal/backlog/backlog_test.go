@@ -14,12 +14,12 @@ const contractFixture = `# Fleet backlog
 - [next] this is in the GOALS section and must be ignored
 
 ## Backlog (prioritized; advance the top UNBLOCKED item every wake)
-- [in-flight] SPCX options analysis — before the open (tactical-head)
+- [in-flight] SPCX options analysis — before the open (delta-xo)
 - [in-flight] Grok desk up (flotilla-dev)
-- [in-flight] Equities/options framework extension (crypto-trend → tactical-head)
+- [in-flight] Equities/options framework extension (crypto-trend → delta-xo)
 - [next] Goal-driven loop mechanism (flotilla-dev)
 - [done] Inbound-path bug fix (flotilla-dev) — #71/#74 merged
-- [in-flight] PR-D multi-instrument tactical
+- [in-flight] PR-D multi-instrument rollout
 - [blocked] PR-E loss-cap values — awaiting operator value sign-off
 
 ## Operator decisions queued
@@ -69,7 +69,7 @@ func TestParseEdgeAndFailSafe(t *testing.T) {
 		}
 	})
 	t.Run("markerless item → Malformed AND Unblocked (err toward driving + flag)", func(t *testing.T) {
-		st := Parse("## Backlog\n1. **SPCX** (tactical-head, IN FLIGHT) — no bracket marker\n")
+		st := Parse("## Backlog\n1. **SPCX** (delta-xo, IN FLIGHT) — no bracket marker\n")
 		if st.Malformed != 1 {
 			t.Errorf("Malformed = %d, want 1 (a markerless item is flagged)", st.Malformed)
 		}

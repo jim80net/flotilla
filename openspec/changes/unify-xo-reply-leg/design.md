@@ -1,6 +1,6 @@
 # Design — Unify the primary-XO Stop-hook into the flotilla-native reply-watcher (#177)
 
-**Status:** DRAFT for the systems-review gate + hydra-ops review.
+**Status:** DRAFT for the systems-review gate + alpha-xo review.
 **Issue:** #177 (filed from #175). Follow-up to the c2-hotline reply-watcher (#178, merged + live).
 **Depends on:** #175 (the reply-watcher) — MERGED + deployed.
 
@@ -62,7 +62,7 @@ primary XO's reply posts TWICE. So the code-deploy and the hook-retirement MUST 
   disabled, as a rollback path); changing the federated-XO behavior (unchanged); the visibility-mirror
   gap (#176, separate).
 
-## 6. Open items for hydra-ops
+## 6. Open items for alpha-xo
 
 1. Confirm the unification (retire the Stop-hook, watcher covers all XOs) — recommended; the finding
    shows no visibility loss.

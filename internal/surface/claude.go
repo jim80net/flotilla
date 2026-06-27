@@ -117,7 +117,7 @@ func (claudeCode) RotateStrategy() Strategy { return SlashCommand }
 // behaviour is verified in the recycle live-validation before it is trusted in anger.
 func (c claudeCode) Close(pane string) error { return c.slashKeys(pane, "/exit") }
 
-// --- RecycleBridge (the reference implementation; memex /handoff + /takeover FORMAT,
+// --- RecycleBridge (the reference implementation; the /handoff + /takeover FORMAT,
 //     driven non-interactively) ---
 
 // HandoffPath is the claude handoffs convention: <cwd>/.claude/handoffs/recycle-<token>.md.
@@ -185,7 +185,7 @@ func (c claudeCode) ReplyAfter(pane, operatorMsg string) (text string, found boo
 	return c.replyAfter(pane, operatorMsg)
 }
 
-// Composer-line markers (verified live on the spark fleet, 2026-06-22). Version-specific —
+// Composer-line markers (verified live on a private deployment, 2026-06-22). Version-specific —
 // revalidate on a Claude Code TUI upgrade.
 const (
 	composerPrompt = "❯"                                // the composer prompt glyph (U+276F)

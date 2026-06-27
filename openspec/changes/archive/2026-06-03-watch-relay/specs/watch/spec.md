@@ -19,7 +19,7 @@ audit-mirror posts can never re-enter the relay. This guard SHALL hold even if
 the author authorization is later broadened.
 
 #### Scenario: The audit mirror does not feed back
-- **WHEN** the audit mirror posts `→ v12-dev: …` to the channel (a webhook message)
+- **WHEN** the audit mirror posts `→ desk-a: …` to the channel (a webhook message)
 - **THEN** `flotilla watch` ignores it (no self-injection storm)
 
 ### Requirement: Operator-only authorization
@@ -42,8 +42,8 @@ newlines. An unknown `@<agent>` SHALL post a one-line notice and route to the XO
 A leading `@@` SHALL escape to a literal `@…` routed to the XO.
 
 #### Scenario: Multi-line directed message preserved
-- **WHEN** the operator posts `@v12-dev do X` followed by additional lines
-- **THEN** the entire multi-line body is delivered to v12-dev as one prompt
+- **WHEN** the operator posts `@desk-a do X` followed by additional lines
+- **THEN** the entire multi-line body is delivered to desk-a as one prompt
 
 #### Scenario: Unknown agent falls back with notice
 - **WHEN** the operator posts `@nope do X` and `nope` is not a roster agent

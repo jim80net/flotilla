@@ -27,8 +27,8 @@ func legacyCfg() *roster.Config {
 	return &roster.Config{
 		OperatorUserID: "op",
 		ChannelID:      "C1",
-		XOAgent:        "hydra-ops",
-		Agents:         []roster.Agent{{Name: "hydra-ops"}, {Name: "v12-dev"}},
+		XOAgent:        "alpha-xo",
+		Agents:         []roster.Agent{{Name: "alpha-xo"}, {Name: "desk-a"}},
 	}
 }
 
@@ -54,9 +54,9 @@ func fedCfg() *roster.Config {
 
 func TestRelayDropsWebhookAndNonOperator(t *testing.T) {
 	r, c, _ := newRelayHarness(legacyCfg())
-	r.Handle("C1", "1000001", "webhook-1", "op", "→ v12-dev: mirror echo") // our own mirror → dropped
-	r.Handle("C1", "1000002", "", "intruder", "do evil")                   // non-operator → dropped
-	r.injector.Stop()                                                      // drain
+	r.Handle("C1", "1000001", "webhook-1", "op", "→ desk-a: mirror echo") // our own mirror → dropped
+	r.Handle("C1", "1000002", "", "intruder", "do evil")                  // non-operator → dropped
+	r.injector.Stop()                                                     // drain
 	if c.count() != 0 {
 		t.Errorf("delivered %d, want 0 (webhook + non-operator must be dropped)", c.count())
 	}
@@ -119,7 +119,7 @@ func TestRelayDropsEmptyContent(t *testing.T) {
 
 func TestRelayRoutesOperatorMessage(t *testing.T) {
 	r, c, notices := newRelayHarness(legacyCfg())
-	r.Handle("C1", "1000006", "", "op", "@v12-dev ship it")
+	r.Handle("C1", "1000006", "", "op", "@desk-a ship it")
 	r.Handle("C1", "1000007", "", "op", "status please") // bare → XO
 	r.Handle("C1", "1000008", "", "op", "@nope hello")   // unknown → XO + notice
 	r.injector.Stop()                                    // drain
@@ -127,13 +127,13 @@ func TestRelayRoutesOperatorMessage(t *testing.T) {
 	if len(c.jobs) != 3 {
 		t.Fatalf("delivered %d, want 3", len(c.jobs))
 	}
-	if c.jobs[0].Agent != "v12-dev" || c.jobs[0].Message != "ship it" {
+	if c.jobs[0].Agent != "desk-a" || c.jobs[0].Message != "ship it" {
 		t.Errorf("directed route wrong: %+v", c.jobs[0])
 	}
-	if c.jobs[1].Agent != "hydra-ops" || c.jobs[1].Message != "status please" {
+	if c.jobs[1].Agent != "alpha-xo" || c.jobs[1].Message != "status please" {
 		t.Errorf("bare route wrong: %+v", c.jobs[1])
 	}
-	if c.jobs[2].Agent != "hydra-ops" {
+	if c.jobs[2].Agent != "alpha-xo" {
 		t.Errorf("unknown-agent should fall back to XO: %+v", c.jobs[2])
 	}
 	if len(*notices) != 1 {
@@ -235,12 +235,12 @@ func TestRelayOnAcceptedReceivesRoutedTarget(t *testing.T) {
 	r := NewRelay(cfg, inj, func(target string) { targets = append(targets, target) }, nil)
 
 	r.Handle("C1", "1000018", "", "op", "status please")     // bare → XO
-	r.Handle("C1", "1000019", "", "op", "@v12-dev ship it")  // directed → desk
+	r.Handle("C1", "1000019", "", "op", "@desk-a ship it")   // directed → desk
 	r.Handle("C1", "1000020", "webhook-1", "op", "→ mirror") // dropped → no onAccepted
 	r.Handle("C1", "1000021", "", "intruder", "evil")        // dropped → no onAccepted
 	inj.Stop()
 
-	if len(targets) != 2 || targets[0] != "hydra-ops" || targets[1] != "v12-dev" {
-		t.Errorf("onAccepted targets = %v, want [hydra-ops v12-dev] (dropped messages must not fire)", targets)
+	if len(targets) != 2 || targets[0] != "alpha-xo" || targets[1] != "desk-a" {
+		t.Errorf("onAccepted targets = %v, want [alpha-xo desk-a] (dropped messages must not fire)", targets)
 	}
 }

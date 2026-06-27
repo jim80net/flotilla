@@ -142,7 +142,7 @@ func TestParseSnowflake(t *testing.T) {
 		want uint64
 		ok   bool
 	}{
-		{"1517261693468807260", 1517261693468807260, true},
+		{"1500000000000000002", 1500000000000000002, true},
 		{"0", 0, true},
 		{"", 0, false},
 		{"abc", 0, false},

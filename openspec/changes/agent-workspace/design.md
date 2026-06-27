@@ -60,7 +60,7 @@ the runbook MUST keep it a user service (or set `--workspace-root` explicitly).
 ### `launch.json` — the recipe (same fields, relocated + de-mapped)
 
 ```json
-{ "launch": "claude --append-system-prompt-file ~/.flotilla/hydra-ops/CLAUDE.md -w hydra-ops", "cwd": "/abs/worktree", "tmux": "flotilla:hydra-ops" }
+{ "launch": "claude --append-system-prompt-file ~/.flotilla/alpha-xo/CLAUDE.md -w alpha-xo", "cwd": "/abs/worktree", "tmux": "flotilla:alpha-xo" }
 ```
 
 The same `Recipe` the flat file used (`internal/launch/launch.go`), SAME validation
@@ -198,7 +198,7 @@ No workspace ⇒ every default at watch.go:66-80 / 257-261 is untouched ⇒ beha
 **The no-workspace path is purely additive — today's behavior bit-for-bit.** The
 *migration transition* is NOT invisible and the proposal must not claim it is:
 
-- Switching the tracker source (operator `mv .flotilla-state.md ~/.flotilla/hydra-ops/state.md`)
+- Switching the tracker source (operator `mv .flotilla-state.md ~/.flotilla/alpha-xo/state.md`)
   is a **hash-discontinuity** event. The detector's snapshot is keyed to the old
   path's content (`*snapshotPath`, watch.go:218); the first tick after the source
   switches to `state.md` hashes a different file than the persisted snapshot → **one

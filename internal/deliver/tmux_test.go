@@ -6,9 +6,9 @@ import (
 )
 
 func TestParsePane(t *testing.T) {
-	out := "0:0.0\thydra-ops\n0:0.1\tx-signal-dev\n0:0.3\tv12-dev\n"
+	out := "0:0.0\talpha-xo\n0:0.1\tdesk-g\n0:0.3\tdesk-a\n"
 
-	got, err := parsePane(out, "v12-dev")
+	got, err := parsePane(out, "desk-a")
 	if err != nil {
 		t.Fatalf("parsePane: %v", err)
 	}
@@ -22,8 +22,8 @@ func TestParsePane(t *testing.T) {
 }
 
 func TestParsePaneIgnoresBlankLines(t *testing.T) {
-	out := "\n0:0.0\thydra-ops\n\n"
-	got, err := parsePane(out, "hydra-ops")
+	out := "\n0:0.0\talpha-xo\n\n"
+	got, err := parsePane(out, "alpha-xo")
 	if err != nil {
 		t.Fatalf("parsePane: %v", err)
 	}
@@ -34,43 +34,43 @@ func TestParsePaneIgnoresBlankLines(t *testing.T) {
 
 func TestParsePaneAmbiguousIsError(t *testing.T) {
 	// Two panes share a title — must error, never silently pick one.
-	out := "0:0.0\tv12-dev\n1:0.0\tv12-dev\n"
-	if _, err := parsePane(out, "v12-dev"); err == nil {
+	out := "0:0.0\tdesk-a\n1:0.0\tdesk-a\n"
+	if _, err := parsePane(out, "desk-a"); err == nil {
 		t.Error("parsePane(duplicate title) = nil error, want ambiguity error")
 	}
 }
 
 func TestParsePaneExactMatchNotSubstring(t *testing.T) {
-	// "v12" must not match "v12-dev".
-	out := "0:0.0\tv12-dev\n"
-	if _, err := parsePane(out, "v12"); err == nil {
+	// "desk" must not match "desk-a".
+	out := "0:0.0\tdesk-a\n"
+	if _, err := parsePane(out, "desk"); err == nil {
 		t.Error("parsePane(substring) matched, want no match")
 	}
 }
 
 func TestParsePaneMatchesGlyphPrefixedTitle(t *testing.T) {
 	// Claude renames the pane to "<glyph> <name>"; the matcher must still find it.
-	out := "0:0.0\t⠂ hydra-ops\n0:0.3\t✳ v12-dev\n"
-	got, err := parsePane(out, "v12-dev")
+	out := "0:0.0\t⠂ alpha-xo\n0:0.3\t✳ desk-a\n"
+	got, err := parsePane(out, "desk-a")
 	if err != nil {
 		t.Fatalf("parsePane(glyph title): %v", err)
 	}
 	if got != "0:0.3" {
 		t.Errorf("target = %q, want 0:0.3", got)
 	}
-	// The glyph prefix must not let "v12" match "✳ v12-dev".
-	if _, err := parsePane(out, "v12"); err == nil {
-		t.Error("parsePane(v12) matched a glyph-prefixed v12-dev, want no match")
+	// The glyph prefix must not let "desk" match "✳ desk-a".
+	if _, err := parsePane(out, "desk"); err == nil {
+		t.Error("parsePane(desk) matched a glyph-prefixed desk-a, want no match")
 	}
 }
 
 func TestParsePaneMarkerResolvesDriftedTitle(t *testing.T) {
-	// The bug: a Claude desk launched as "macro-desk-dev" retitled itself to a
+	// The bug: a Claude desk launched as "desk-b" retitled itself to a
 	// task summary. With the stable @flotilla_agent marker it still resolves —
 	// the title is now irrelevant.
-	out := "0:0.0\t⠂ hydra-ops\t\n" +
-		"0:0.2\t✳ Design P4 believability scorecard\tmacro-desk-dev\n"
-	got, err := parsePane(out, "macro-desk-dev")
+	out := "0:0.0\t⠂ alpha-xo\t\n" +
+		"0:0.2\t✳ Design P4 believability scorecard\tdesk-b\n"
+	got, err := parsePane(out, "desk-b")
 	if err != nil {
 		t.Fatalf("parsePane(marker, drifted title): %v", err)
 	}
@@ -82,9 +82,9 @@ func TestParsePaneMarkerResolvesDriftedTitle(t *testing.T) {
 func TestParsePaneMarkerWinsOverTitleOfAnotherPane(t *testing.T) {
 	// Pane A carries the marker (its title drifted); pane B coincidentally has a
 	// title that would match. The authoritative marker must win.
-	out := "0:0.1\t✳ some drifted summary\tv12-dev\n" + // marker pane (drifted title)
-		"0:0.9\tv12-dev\t\n" // title-coincidence pane, untagged
-	got, err := parsePane(out, "v12-dev")
+	out := "0:0.1\t✳ some drifted summary\tdesk-a\n" + // marker pane (drifted title)
+		"0:0.9\tdesk-a\t\n" // title-coincidence pane, untagged
+	got, err := parsePane(out, "desk-a")
 	if err != nil {
 		t.Fatalf("parsePane: %v", err)
 	}
@@ -95,8 +95,8 @@ func TestParsePaneMarkerWinsOverTitleOfAnotherPane(t *testing.T) {
 
 func TestParsePaneMarkerAmbiguousIsError(t *testing.T) {
 	// Two panes tagged with the same marker = a mis-tagged fleet → never pick one.
-	out := "0:0.1\tfoo\tv12-dev\n1:0.0\tbar\tv12-dev\n"
-	if _, err := parsePane(out, "v12-dev"); err == nil {
+	out := "0:0.1\tfoo\tdesk-a\n1:0.0\tbar\tdesk-a\n"
+	if _, err := parsePane(out, "desk-a"); err == nil {
 		t.Error("parsePane(duplicate marker) = nil error, want ambiguity error")
 	}
 }
@@ -104,8 +104,8 @@ func TestParsePaneMarkerAmbiguousIsError(t *testing.T) {
 func TestParsePaneFallsBackToTitleWhenNoMarker(t *testing.T) {
 	// A fully untagged fleet (empty marker fields) resolves by title exactly as
 	// before — backward compatibility.
-	out := "0:0.0\thydra-ops\t\n0:0.3\t✳ v12-dev\t\n"
-	got, err := parsePane(out, "v12-dev")
+	out := "0:0.0\talpha-xo\t\n0:0.3\t✳ desk-a\t\n"
+	got, err := parsePane(out, "desk-a")
 	if err != nil {
 		t.Fatalf("parsePane(title fallback): %v", err)
 	}
@@ -119,7 +119,7 @@ func TestParsePaneMarkerDoesNotMatchEmptyWantOrEmptyMarker(t *testing.T) {
 	// a real name against a fleet of empty markers falls through to title (and
 	// here finds nothing) — it must not match an empty-marker pane.
 	out := "0:0.0\tsomething\t\n0:0.1\tother\t\n"
-	if _, err := parsePane(out, "macro-desk-dev"); err == nil {
+	if _, err := parsePane(out, "desk-b"); err == nil {
 		t.Error("empty markers must not match a non-empty want; expected not-found error")
 	}
 }
@@ -130,8 +130,8 @@ func TestParseFieldsRobustToTabInTitle(t *testing.T) {
 	cases := []struct {
 		line, target, title, marker string
 	}{
-		{"0:0.0\tplain title\tv12-dev", "0:0.0", "plain title", "v12-dev"},
-		{"0:0.0\thas\ta\ttab\tv12-dev", "0:0.0", "has\ta\ttab", "v12-dev"}, // tabs in title
+		{"0:0.0\tplain title\tdesk-a", "0:0.0", "plain title", "desk-a"},
+		{"0:0.0\thas\ta\ttab\tdesk-a", "0:0.0", "has\ta\ttab", "desk-a"}, // tabs in title
 		{"0:0.0\tuntagged title\t", "0:0.0", "untagged title", ""},         // empty marker
 		{"0:0.0\ttwo\ttab\t", "0:0.0", "two\ttab", ""},                     // tabby title, untagged
 		{"0:0.0\tonly title", "0:0.0", "only title", ""},                   // 2-field variant
@@ -148,9 +148,9 @@ func TestParseFieldsRobustToTabInTitle(t *testing.T) {
 func TestParsePaneMarkerResolvesTitleWithLiteralTab(t *testing.T) {
 	// A registered desk whose external TUI title contains a literal tab must
 	// still resolve by its marker — the bug a greedy SplitN would introduce.
-	out := "0:0.0\t⠂ hydra-ops\t\n" +
-		"0:0.2\t✳ build\tstep\t2\tmacro-desk-dev\n" // title has tabs; marker is last field
-	got, err := parsePane(out, "macro-desk-dev")
+	out := "0:0.0\t⠂ alpha-xo\t\n" +
+		"0:0.2\t✳ build\tstep\t2\tdesk-b\n" // title has tabs; marker is last field
+	got, err := parsePane(out, "desk-b")
 	if err != nil {
 		t.Fatalf("parsePane(tabbed title, marker): %v", err)
 	}
@@ -164,14 +164,14 @@ func TestTitleMatches(t *testing.T) {
 		title, want string
 		match       bool
 	}{
-		{"v12-dev", "v12-dev", true},       // bare name
-		{"✳ v12-dev", "v12-dev", true},     // single-glyph prefix (Claude live title)
-		{"⠂ hydra-ops", "hydra-ops", true}, // different spinner glyph
+		{"desk-a", "desk-a", true},       // bare name
+		{"✳ desk-a", "desk-a", true},     // single-glyph prefix (Claude live title)
+		{"⠂ alpha-xo", "alpha-xo", true}, // different spinner glyph
 		{"valbot", "valbot", true},
-		{"✳ v12-dev", "v12", false},      // substring must not match
-		{"my v12-dev", "v12-dev", false}, // multi-word prefix is not a glyph
-		{"build v12-dev", "v12-dev", false},
-		{"foo bar v12-dev", "v12-dev", false},
+		{"✳ desk-a", "desk", false},      // substring must not match
+		{"my desk-a", "desk-a", false}, // multi-word prefix is not a glyph
+		{"build desk-a", "desk-a", false},
+		{"foo bar desk-a", "desk-a", false},
 		{"", "", false},         // empty want must never match (defensive self-guard)
 		{"   ", "", false},      // whitespace-only title vs empty want must not match
 		{"anything", "", false}, // empty want against any title

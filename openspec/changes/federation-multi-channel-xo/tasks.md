@@ -28,7 +28,7 @@
       first-listed semantic; struct doc wording.
 - [ ] 3.2 PR; CI green; cubic via GraphQL isResolved; merge on clean gates.
 - [ ] 3.3 After merge: hand the operator the ready-to-paste `channels[]` (14-channel map +
-      `#spark-c2` with the FULL `agents[]` as members) + cutover steps: remove `channel_id`,
+      `#c2` with the FULL `agents[]` as members) + cutover steps: remove `channel_id`,
       restart `watch`, AND **create/verify each XO's `FLOTILLA_WEBHOOK_<XO>` in its
       FIRST-LISTED (home) channel** so outbound posts + ledger tags coincide (the trio's
       outbound-identity finding). List each XO's home channel FIRST in `channels[]`.
