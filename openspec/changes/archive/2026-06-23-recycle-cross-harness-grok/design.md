@@ -2,7 +2,7 @@
 
 **Status:** Design-trio gate PASSED (systems-review + open-code-review, both code-grounded); findings
 folded below (see §9). Ready for the formal openspec change + the live grok characterization.
-**Issue:** #158 — family-office migrate Claude Code → Grok surface (operator-directed).
+**Issue:** #158 — migrate a federated XO from Claude Code → Grok surface (operator-directed).
 **Depends on:** #157 desk-recycle (MERGED, 6.3 live-validated). Unblocked.
 **Ratified fork (operator, via prior chapter handoff):** fork-3 — a **simple portable-markdown
 bridge**; add a formal handoff schema ONLY if a flotilla-specific hard edge surfaces during the
@@ -17,13 +17,13 @@ Ship the **cross-harness recycle capability** the recycle spec already declares 
 > Claude Code — the design is cross-harness-READY, not a shipped cross-harness capability".
 
 Concretely: make the **`grok`** surface driver meet the recycle-capable bar, so a Grok desk can be
-recycled context-preserved exactly as a Claude desk is, and so **family-office** can migrate Claude
+recycled context-preserved exactly as a Claude desk is, and so **a federated XO** can migrate Claude
 Code → Grok re-activating from a Claude-Code-authored handoff, full XO function intact, on the Grok
-subscription (operator-directed spend; grok-research already runs on Grok).
+subscription (operator-directed spend; grok-desk already runs on Grok).
 
 This is the flotilla **cross-harness drop-in** pillar (agentize an existing harness without replacing
 it; inter-harness fleets). The grok recycle-capability is the *generalizable* capability; the
-family-office-on-Grok config is the *circumstantial* instance.
+federated-XO-on-Grok config is the *circumstantial* instance.
 
 ## 2. Code-grounded gap analysis (what blocks a grok recycle today)
 
@@ -40,12 +40,12 @@ no-silent-degrade invariant). The `grok` driver (`internal/surface/grok.go`) imp
 | `Close` graceful | ✅ `/exit` | ❌ `ErrNoGracefulClose` (`grok.go:109`) | tolerated (see §4) |
 | `AwaitingApproval` assessed-state | n/a | ❌ never emitted (`grok.go:33`) | **ADD** — gate safety (§5) |
 
-### 2a. Live finding (empirical, this session, read-only capture of grok-research pane `%21`)
+### 2a. Live finding (empirical, this session, read-only capture of grok-desk pane `%21`)
 
-grok-research was observed **blocked on a tool-approval modal** —
+grok-desk was observed **blocked on a tool-approval modal** —
 
 ```
-  ┃  Allow Edit `…/research/options_vol_edge/findings.md`?
+  ┃  Allow Edit `…/path/to/some/file.md`?
   ┃  1 (●) Yes, and don't ask again for anything (always-approve mode)
   ┃  2 (○) Yes, allow all edits during this session
   ┃  3 (○) Yes
@@ -84,12 +84,12 @@ pane, or vice-versa). Three options were considered:
 - **(B) A new `flotilla migrate` verb.** Cleaner separation but a whole new lifecycle command for a
   one-desk exercise. Rejected for #158 (premature; revisit only if migrations become routine).
 - **(C) Orchestrate with existing primitives + the portable-markdown handoff** — RATIFIED (fork-3):
-  1. Drive family-office (still Claude) to write the handoff to its designated path and commit it —
+  1. Drive the federated XO (still Claude) to write the handoff to its designated path and commit it —
      a `RecycleBridge.HandoffTurn` send (the claude bridge; the handoff body is already
      harness-agnostic markdown).
   2. Flip the roster `surface` (`claude-code` → `grok`) AND the launch recipe (claude command → grok
      command) in `state/flotilla.json` + `state/flotilla-launch.json` (host-local, circumstantial).
-  3. `flotilla resume family-office` — relaunches via the new (grok) recipe; resume does NOT restore
+  3. `flotilla resume xo` — relaunches via the new (grok) recipe; resume does NOT restore
      context (`resume.go:232`), so it comes up fresh.
   4. Send the grok session the `RecycleBridge.TakeoverTurn` pointing at the same committed handoff
      path; it reads the Claude-authored markdown and takes over.
@@ -112,7 +112,7 @@ itself is an operational runbook (§6) that the live exercise validates.
   `.flotilla/handoffs/` for uniformity is a follow-up question, NOT bundled here.)
 - **HandoffTurn** — the same non-interactive, self-committing instruction as claude's, retargeted:
   grok runs git/tools (it is editing files live — see §2a), so `git add -f <path> && git commit` is
-  available. Wording must NOT reference claude/memex skills; it references the handoff document
+  available. Wording must NOT reference claude harness-specific skills; it references the handoff document
   FORMAT only. grok has no `/handoff` skill, so the "do NOT run the interactive /handoff skill" clause
   is dropped; the imperative "write the document, commit, stop" remains.
 - **TakeoverTurn** — read the designated path, BEGIN IMMEDIATELY, parlay via a flotilla message never
@@ -155,7 +155,7 @@ AwaitingApproval markers **MUST be live-captured, never written from memory**. R
 6. **Identity file** — confirm grok's instruction file is `AGENTS.md` (flagged `ASSUMED` at
    `workspace.go:54-57`); free to verify in the same session, closes an open code `ASSUMED`.
 
-**Empirical prerequisite:** grok-research cannot be commandeered (active desk; currently mid-decision
+**Empirical prerequisite:** grok-desk cannot be commandeered (active desk; currently mid-decision
 at an approval modal). The clean characterization harness is a **throwaway grok session** (exactly as
 6.3 used a throwaway claude for the recycle live-validation). This is within the affirmed Grok
 subscription envelope (#158 is operator-directed grok spend; the subscription is flat, ~zero marginal
@@ -167,21 +167,21 @@ against the official grok CLI during the same session.
 
 ## 6. Migration runbook (the operational exercise — §3 option C)
 
-(Authored here for completeness; EXECUTED by hydra-ops/operator, not auto-fired — family-office owns
-tactical-head's real-money order path, so the cutover TIMING is operator-owned.)
+(Authored here for completeness; EXECUTED by the primary XO/operator, not auto-fired — the federated XO owns
+a high-consequence system's approval-sensitive order path, so the cutover TIMING is operator-owned.)
 
 1. **Capability-parity check FIRST** (per #158 acceptance): confirm Grok's harness supports
-   family-office's XO role — multi-agent reviews (silent-failure/OCR subagents), git/PR ops, MCP/tool
+   the federated XO's role — multi-agent reviews (silent-failure/OCR subagents), git/PR ops, MCP/tool
    access. If a genuine gap exists, surface it as a finding (do NOT silently degrade the desk).
-2. family-office (Claude) writes + commits its handoff (claude `HandoffTurn`).
+2. the federated XO (Claude) writes + commits its handoff (claude `HandoffTurn`).
 3. Flip roster surface + launch recipe to grok (host-local config).
-4. `flotilla resume family-office` (relaunch on grok, fresh).
+4. `flotilla resume xo` (relaunch on grok, fresh).
 5. Send grok the `TakeoverTurn` at the committed handoff path. **The path is the FROM-harness
    (claude) path** (`<cwd>/.claude/handoffs/recycle-<token>.md`), sourced from the claude recycle's
-   status record `~/.flotilla/family-office/last-recycle.json` `handoff_path` field
+   status record `~/.flotilla/xo/last-recycle.json` `handoff_path` field
    (`recycle.go:489-493`) — NOT guessed, and NOT grok's own `.flotilla/handoffs/` path (grok's
    `TakeoverTurn` is path-parametric, so handing it a `.claude/handoffs/` path is correct).
-6. Verify: full XO function, flotilla reachability, real-money order path intact — end-to-end.
+6. Verify: full XO function, flotilla reachability, approval-sensitive order path intact — end-to-end.
 
 ## 7. Scope / phasing / what's NOT in
 
@@ -203,14 +203,14 @@ with fakes per the established surface test pattern (`grok_test.go` table classi
 - The `ComposerStateProbe` capability requirement is NOT yet in the active surface spec — it is parked
   in the **unarchived** `confirm-cursor-disposition` change (`confirm-cursor-disposition/specs/
   surface/spec.md`). **Spec-ordering dependency:** either that change archives first, or #158's
-  surface delta carries the requirement. Flag to hydra-ops; do NOT silently duplicate it.
+  surface delta carries the requirement. Flag to the primary XO; do NOT silently duplicate it.
 - `AwaitingApproval` wiring: mirror the **aider** precedent (`surface/spec.md:128` — "Emitting
   AwaitingApproval and Errored activates XO escalation") and note that grok desks are today invisible
   to the XO-only wedge timer (`grok.go:33-35`); making `AwaitingApproval` meaningful closes that.
 - `openspec/specs/recycle/spec.md:175-199` cross-harness-ready requirement: change "the only harness
   meeting the recycle-capable bar today is Claude Code" → grok now meets it, and add an
   orchestrated-migration scenario encoding the FROM/TO path-sourcing invariant (§6 step 5).
-**In #158 (operational):** the family-office migration runbook + live exercise.
+**In #158 (operational):** the federated-XO migration runbook + live exercise.
 **NOT in #158 (follow-ups, filed/flagged):**
 - grok graceful `Close` live-characterization (optional polish; respawn-kill suffices).
 - Moving the claude bridge to `.flotilla/handoffs/` for path uniformity (uniformity question).
@@ -218,14 +218,14 @@ with fakes per the established surface test pattern (`grok_test.go` table classi
 - The fuller grok blocking-gate set (auth/payment) — #58; #158 covers the tool-approval gate it
   needs for recycle safety, the rest stays #58.
 
-## 8. Open items for hydra-ops
+## 8. Open items for the primary XO
 
-1. **fork-3 / option (C)** (orchestrated migration, no new verb) — CONFIRMED by hydra-ops (2026-06-23).
-2. **Throwaway-grok characterization session** — APPROVED by hydra-ops (affirmed Grok-subscription
+1. **fork-3 / option (C)** (orchestrated migration, no new verb) — CONFIRMED by the primary XO (2026-06-23).
+2. **Throwaway-grok characterization session** — APPROVED by the primary XO (affirmed Grok-subscription
    envelope; the correct cold-test-the-live-artifact step). Proceeding.
-3. **family-office cutover timing** — CONFIRMED operator-timed by hydra-ops (real-money order path);
-   #158 code + runbook land first; hydra-ops gates/merges the PR like the others.
-4. **SSH-agent push blocker** — RESOLVED by hydra-ops: use the gh-token HTTPS bypass (per
+3. **federated-XO cutover timing** — CONFIRMED operator-timed by the primary XO (approval-sensitive order path);
+   #158 code + runbook land first; the primary XO gates/merges the PR like the others.
+4. **SSH-agent push blocker** — RESOLVED by the primary XO: use the gh-token HTTPS bypass (per
    `.claude/rules/git-push-bypass-1password.md`): `git -c credential.helper= -c
    "url.https://x-access-token:$(gh auth token)@github.com/.insteadOf=git@github.com:" push origin
    <branch>`. Not a blocker; the 1Password agent itself is flagged to the operator separately.
@@ -317,5 +317,5 @@ grok's instruction model (from `grok --help` + binary strings) is `MEMORY.md` (w
 grok mapping is almost certainly INCORRECT — grok uses `MEMORY.md`/`--rules`, not `AGENTS.md`. This
 does NOT affect the recycle MECHANISM (the handoff carries chapter context, not the identity file),
 so it is OUT OF #158's recycle-driver scope — recorded as a follow-up (correct `workspace.go`'s grok
-identity mapping; relevant to where the family-office migration writes its persistent XO doctrine on
+identity mapping; relevant to where the federated-XO migration writes its persistent XO doctrine on
 grok). File as a separate issue; flag in the migration runbook (§6 step 1 capability-parity check).

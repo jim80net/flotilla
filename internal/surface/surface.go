@@ -22,7 +22,7 @@ const (
 )
 
 // String renders a State as a short lowercase label for logs and the
-// detector's targeted wake prompts (e.g. "v12-dev: entered shell").
+// detector's targeted wake prompts (e.g. "backend: entered shell").
 func (s State) String() string {
 	switch s {
 	case StateShell:

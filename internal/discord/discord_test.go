@@ -22,13 +22,13 @@ func TestPostSendsPayloadAndSucceedsOn204(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if err := Post(srv.URL, "hydra-ops", "→ v12-dev: ship it"); err != nil {
+	if err := Post(srv.URL, "xo", "→ frontend: ship it"); err != nil {
 		t.Fatalf("Post: %v", err)
 	}
-	if gotUser != "hydra-ops" {
-		t.Errorf("username = %q, want hydra-ops", gotUser)
+	if gotUser != "xo" {
+		t.Errorf("username = %q, want xo", gotUser)
 	}
-	if gotContent != "→ v12-dev: ship it" {
+	if gotContent != "→ frontend: ship it" {
 		t.Errorf("content = %q", gotContent)
 	}
 }

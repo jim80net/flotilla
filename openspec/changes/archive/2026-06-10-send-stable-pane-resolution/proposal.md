@@ -2,8 +2,8 @@
 
 flotilla resolves an agent to a tmux pane by matching its name against the pane
 **title**. Claude Code (and other TUIs) dynamically retitle their pane to a task
-summary on every turn (a pane launched as `macro-desk-dev` becomes
-`✳ Design P4 believability scorecard …` once it starts working), so title-based
+summary on every turn (a pane launched as `data` becomes
+`✳ Design the new feature …` once it starts working), so title-based
 resolution breaks: `flotilla send <name>` and the watch heartbeat's desk
 resolution fail with `no tmux pane titled "<name>"` until the title is manually
 re-pinned — and the drift recurs every turn (observed all session; the XO was

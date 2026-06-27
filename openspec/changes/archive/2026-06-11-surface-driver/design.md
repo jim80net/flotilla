@@ -136,4 +136,4 @@ returns Working/Idle/Shell matching the old `Busy`+`IsShell` truth table
 grok + cursor drivers (need creds + metered API + live-capture of their state
 glyphs on a real pane + installing the CLIs on the production host); making pane
 RESOLUTION driver-aware (#17); the change-detector v2 rotate caller. The
-Grok-native-X ↔ x-signal-dev synergy stays a NOTE.
+Grok-native data-source ↔ desk synergy stays a NOTE.

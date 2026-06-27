@@ -32,7 +32,7 @@ func newMirrorDet(t *testing.T, cfg DetectorConfig) *Detector {
 func TestDetectorMirrorsNonXODeskOnFinish(t *testing.T) {
 	var mu sync.Mutex
 	var mirrored []string
-	cfg := mirrorConfig("hydra-ops", []string{"hydra-ops", "v12-dev"}, func(a string) {
+	cfg := mirrorConfig("xo", []string{"xo", "backend"}, func(a string) {
 		mu.Lock()
 		defer mu.Unlock()
 		mirrored = append(mirrored, a)
@@ -40,21 +40,21 @@ func TestDetectorMirrorsNonXODeskOnFinish(t *testing.T) {
 	// Assess: the desk is Idle this tick (seeded Working below) → a Working→Idle finish.
 	cfg.Assess = func(a string) surface.State { return surface.StateIdle }
 	d := newMirrorDet(t, cfg)
-	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle, "v12-dev": surface.StateWorking}, "h0")
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateWorking}, "h0")
 
 	d.Tick()
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(mirrored) != 1 || mirrored[0] != "v12-dev" {
-		t.Errorf("MirrorOnFinish calls = %v, want exactly [v12-dev]", mirrored)
+	if len(mirrored) != 1 || mirrored[0] != "backend" {
+		t.Errorf("MirrorOnFinish calls = %v, want exactly [backend]", mirrored)
 	}
 }
 
 func TestDetectorDoesNotMirrorXO(t *testing.T) {
 	var mu sync.Mutex
 	var mirrored []string
-	cfg := mirrorConfig("hydra-ops", []string{"hydra-ops", "v12-dev"}, func(a string) {
+	cfg := mirrorConfig("xo", []string{"xo", "backend"}, func(a string) {
 		mu.Lock()
 		defer mu.Unlock()
 		mirrored = append(mirrored, a)
@@ -62,7 +62,7 @@ func TestDetectorDoesNotMirrorXO(t *testing.T) {
 	cfg.Assess = func(a string) surface.State { return surface.StateIdle }
 	d := newMirrorDet(t, cfg)
 	// Only the XO finished a turn (Working→Idle); the desk stayed Idle.
-	seed(d, map[string]surface.State{"hydra-ops": surface.StateWorking, "v12-dev": surface.StateIdle}, "h0")
+	seed(d, map[string]surface.State{"xo": surface.StateWorking, "backend": surface.StateIdle}, "h0")
 
 	d.Tick()
 
@@ -76,7 +76,7 @@ func TestDetectorDoesNotMirrorXO(t *testing.T) {
 func TestDetectorColdStartMirrorsNone(t *testing.T) {
 	var mu sync.Mutex
 	var mirrored []string
-	cfg := mirrorConfig("hydra-ops", []string{"hydra-ops", "v12-dev"}, func(a string) {
+	cfg := mirrorConfig("xo", []string{"xo", "backend"}, func(a string) {
 		mu.Lock()
 		defer mu.Unlock()
 		mirrored = append(mirrored, a)
@@ -107,19 +107,19 @@ func TestDetectorMirrorOnlyOnIdleNotShellOrUnknown(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var mu sync.Mutex
 			var mirrored []string
-			cfg := mirrorConfig("hydra-ops", []string{"hydra-ops", "v12-dev"}, func(a string) {
+			cfg := mirrorConfig("xo", []string{"xo", "backend"}, func(a string) {
 				mu.Lock()
 				defer mu.Unlock()
 				mirrored = append(mirrored, a)
 			})
 			cfg.Assess = func(a string) surface.State {
-				if a == "v12-dev" {
+				if a == "backend" {
 					return tc.to
 				}
 				return surface.StateIdle
 			}
 			d := newMirrorDet(t, cfg)
-			seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle, "v12-dev": surface.StateWorking}, "h0")
+			seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateWorking}, "h0")
 
 			// For the Shell case, two consecutive shells are needed to clear the debounce; either way the
 			// desk never reaches Idle, so it must never mirror.
@@ -141,13 +141,13 @@ func TestDetectorMirrorOnlyOnIdleNotShellOrUnknown(t *testing.T) {
 func TestDetectorMirrorDoesNotBlockOperatorWake(t *testing.T) {
 	mirroring := make(chan struct{})
 	release := make(chan struct{})
-	cfg := mirrorConfig("hydra-ops", []string{"hydra-ops", "v12-dev"}, func(string) {
+	cfg := mirrorConfig("xo", []string{"xo", "backend"}, func(string) {
 		close(mirroring) // the mirror has begun (we are in runTail, d.mu released)
 		<-release        // block here, holding the tick in the tail
 	})
 	cfg.Assess = func(string) surface.State { return surface.StateIdle }
 	d := newMirrorDet(t, cfg)
-	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle, "v12-dev": surface.StateWorking}, "h0")
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateWorking}, "h0")
 
 	tickDone := make(chan struct{})
 	go func() { d.Tick(); close(tickDone) }()
@@ -169,8 +169,8 @@ func TestDetectorMirrorDoesNotBlockOperatorWake(t *testing.T) {
 // panic and the tick proceeds normally (regression-locks the default-inert guarantee).
 func TestDetectorNilMirrorIsInert(t *testing.T) {
 	cfg := DetectorConfig{
-		XOAgent:  "hydra-ops",
-		Desks:    []string{"hydra-ops", "v12-dev"},
+		XOAgent:  "xo",
+		Desks:    []string{"xo", "backend"},
 		Interval: time.Minute,
 		Assess:   func(string) surface.State { return surface.StateIdle },
 		AckAge:   func() time.Duration { return 0 },
@@ -179,6 +179,6 @@ func TestDetectorNilMirrorIsInert(t *testing.T) {
 		// MirrorOnFinish left nil.
 	}
 	d := newMirrorDet(t, cfg)
-	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle, "v12-dev": surface.StateWorking}, "h0")
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateWorking}, "h0")
 	d.Tick() // must not panic
 }

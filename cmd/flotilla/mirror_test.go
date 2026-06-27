@@ -26,11 +26,11 @@ func TestDeskMirrorSkipsWhenNoWebhook(t *testing.T) {
 		post: func(string, string, string) error { posted++; return nil },
 		logf: recordLogf(&lines),
 	}
-	m.run("v12-dev")
+	m.run("backend")
 	if posted != 0 {
 		t.Errorf("posted %d chunks, want 0", posted)
 	}
-	if len(lines) != 1 || !strings.Contains(lines[0], "SKIP v12-dev: no webhook") {
+	if len(lines) != 1 || !strings.Contains(lines[0], "SKIP backend: no webhook") {
 		t.Errorf("decision lines = %v, want exactly one SKIP-no-webhook", lines)
 	}
 }
@@ -44,11 +44,11 @@ func TestDeskMirrorSkipsWhenNotSubstantive(t *testing.T) {
 		post:      func(string, string, string) error { posted++; return nil },
 		logf:      recordLogf(&lines),
 	}
-	m.run("v12-dev")
+	m.run("backend")
 	if posted != 0 {
 		t.Errorf("posted %d, want 0 (nothing substantive)", posted)
 	}
-	if len(lines) != 1 || !strings.Contains(lines[0], "SKIP v12-dev: no substantive") {
+	if len(lines) != 1 || !strings.Contains(lines[0], "SKIP backend: no substantive") {
 		t.Errorf("decision lines = %v, want exactly one SKIP-not-substantive", lines)
 	}
 }
@@ -61,8 +61,8 @@ func TestDeskMirrorSkipsOnReadError(t *testing.T) {
 		post:      func(string, string, string) error { t.Fatal("must not post on a read error"); return nil },
 		logf:      recordLogf(&lines),
 	}
-	m.run("v12-dev")
-	if len(lines) != 1 || !strings.Contains(lines[0], "SKIP v12-dev: read turn-final: tmux boom") {
+	m.run("backend")
+	if len(lines) != 1 || !strings.Contains(lines[0], "SKIP backend: read turn-final: tmux boom") {
 		t.Errorf("decision lines = %v, want exactly one SKIP-read-error naming the cause", lines)
 	}
 }
@@ -79,14 +79,14 @@ func TestDeskMirrorPostsSingleChunk(t *testing.T) {
 		},
 		logf: recordLogf(&lines),
 	}
-	m.run("v12-dev")
-	if gotURL != "https://wh" || gotUser != "v12-dev" {
+	m.run("backend")
+	if gotURL != "https://wh" || gotUser != "backend" {
 		t.Errorf("post got (url=%q, user=%q), want the desk's webhook + identity", gotURL, gotUser)
 	}
 	if gotBody != "a short report" {
 		t.Errorf("single-chunk body = %q, want the unprefixed text", gotBody)
 	}
-	if len(lines) != 1 || !strings.Contains(lines[0], "POST v12-dev 1 chunks") {
+	if len(lines) != 1 || !strings.Contains(lines[0], "POST backend 1 chunks") {
 		t.Errorf("decision lines = %v, want exactly one POST 1 chunks", lines)
 	}
 }
@@ -101,7 +101,7 @@ func TestDeskMirrorChunksOversizeAndPrefixes(t *testing.T) {
 		post:      func(_, _, body string) error { bodies = append(bodies, body); return nil },
 		logf:      recordLogf(&lines),
 	}
-	m.run("v12-dev")
+	m.run("backend")
 	if len(bodies) != 3 {
 		t.Fatalf("posted %d chunks, want 3", len(bodies))
 	}
@@ -110,7 +110,7 @@ func TestDeskMirrorChunksOversizeAndPrefixes(t *testing.T) {
 			t.Errorf("chunk %d missing the (i/N) prefix: %q", i+1, b[:10])
 		}
 	}
-	if len(lines) != 1 || !strings.Contains(lines[0], "POST v12-dev 3 chunks") {
+	if len(lines) != 1 || !strings.Contains(lines[0], "POST backend 3 chunks") {
 		t.Errorf("decision lines = %v, want exactly one POST 3 chunks", lines)
 	}
 }
@@ -131,11 +131,11 @@ func TestDeskMirrorStopsAndLogsOnPostFailure(t *testing.T) {
 		},
 		logf: recordLogf(&lines),
 	}
-	m.run("v12-dev")
+	m.run("backend")
 	if calls != 2 {
 		t.Errorf("post calls = %d, want 2 (stop on the first failure)", calls)
 	}
-	if len(lines) != 1 || !strings.Contains(lines[0], "MIRROR-FAIL v12-dev: chunk 2/3") {
+	if len(lines) != 1 || !strings.Contains(lines[0], "MIRROR-FAIL backend: chunk 2/3") {
 		t.Errorf("decision lines = %v, want exactly one MIRROR-FAIL naming the chunk", lines)
 	}
 }
@@ -149,7 +149,7 @@ func TestDeskMirrorNeverExceedsChunkLimit(t *testing.T) {
 		post:      func(_, _, body string) error { bodies = append(bodies, body); return nil },
 		logf:      func(string, ...any) {},
 	}
-	m.run("v12-dev")
+	m.run("backend")
 	for i, b := range bodies {
 		// Strip the "(i/N)\n" prefix before measuring the content chunk against the limit.
 		content := b

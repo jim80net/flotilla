@@ -1,0 +1,31 @@
+# flotilla private denylist — TEMPLATE
+#
+# Copy this file to  .flotilla/private-denylist  (which is gitignored) and fill
+# it with the identifiers that are specific to YOUR deployment — the names that
+# should never appear in a public artifact (code, tests, docs, issues, PRs).
+# The boundary guard (scripts/check-private-boundary.sh) reads it and fails CI on
+# a hit. In CI, provide the same content via the FLOTILLA_PRIVATE_DENYLIST repo
+# secret instead, so your list is never committed.
+#
+# One term or PCRE regex per line (the guard matches with `grep -P`). Blank lines
+# and #-comments ignored.
+# Keep it HIGH-SIGNAL: tokens with no legitimate generic use, so the guard never
+# flaps. Ambiguous words (a common noun that doubles as a desk name) are better
+# caught by review against docs/private-public-boundary.md than by this list.
+#
+# The lines below are ILLUSTRATIVE placeholders — replace them with your own.
+
+# --- your desk / agent names (the real ones, not the generic xo/backend/...) ---
+your-xo-name
+your-worker-desk-name
+
+# --- your org / venture / project names ---
+YourOrgName
+YourVentureName
+
+# --- your broker / data vendor / external services ---
+YourBrokerName
+YourDataVendor
+
+# --- your account-id shapes (regex) ---
+# ACCT[0-9]{6,}

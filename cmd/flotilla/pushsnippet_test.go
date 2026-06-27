@@ -9,9 +9,9 @@ import (
 
 func mixedRoster() *roster.Config {
 	return &roster.Config{
-		XOAgent: "hydra-ops",
+		XOAgent: "xo",
 		Agents: []roster.Agent{
-			{Name: "hydra-ops"},                   // the XO (claude-code)
+			{Name: "xo"},                          // the XO (claude-code)
 			{Name: "oc-dev", Surface: "opencode"}, // a non-claude desk
 			{Name: "pair", Surface: "aider"},      // a non-claude desk
 		},
@@ -26,7 +26,7 @@ func TestBuildPushSnippet(t *testing.T) {
 	}
 
 	// The push command is `flotilla send` to the XO, with the desk's + XO's names filled.
-	if !strings.Contains(out, "flotilla send --from oc-dev hydra-ops") {
+	if !strings.Contains(out, "flotilla send --from oc-dev xo") {
 		t.Errorf("snippet must instruct `flotilla send --from <desk> <xo>`; got:\n%s", out)
 	}
 	// It names the desk's native identity file (opencode → AGENTS.md).
@@ -68,7 +68,7 @@ func TestBuildPushSnippetRejectsNonRosterDeskAndXO(t *testing.T) {
 		t.Error("buildPushSnippet(non-roster desk) = nil error, want a rejection")
 	}
 	// Provisioning the XO itself for push is a mistake (it reports TO the XO).
-	if _, err := buildPushSnippet(cfg, "hydra-ops"); err == nil {
+	if _, err := buildPushSnippet(cfg, "xo"); err == nil {
 		t.Error("buildPushSnippet(the XO) = nil error, want a rejection (the XO is not a push-desk)")
 	}
 }

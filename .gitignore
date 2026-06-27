@@ -43,6 +43,10 @@ htmlcov/
 # filesystem layout; trusted at the secrets level, sibling of flotilla-secrets.env)
 /flotilla-launch.json
 
+# Your deployment's private denylist for the boundary guard (your real desk/org/
+# broker names). The .example template IS committed; your filled-in copy is not.
+/.flotilla/private-denylist
+
 # flotilla-watch host paths: the per-host deploy/flotilla-watch.env is already
 # ignored by *.env above (desired — per-host layout). The test fixture also ends in
 # .env, so *.env would catch it — re-include it explicitly so CI can see it. (The

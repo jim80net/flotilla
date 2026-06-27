@@ -9,7 +9,7 @@ import "fmt"
 //
 // THE FLEET-COMMAND OVERLOAD (the implement-gate P0). `members[]` carries two opposite
 // meanings. In a per-XO HOME channel, members is the agent's PARENT up-link (e.g.
-// tactical-head's channel lists [family-office]). In the fleet-command BROADCAST channel
+// the data desk's channel lists [xo]). In the fleet-command BROADCAST channel
 // it is the meta-XO's full command DOWN-list (every agent it can address). Read as a
 // synthesis edge, the broadcast channel inverts the hierarchy — a leaf desk that is a
 // member of it would treat the broadcaster (the meta-XO) as a subordinate, and the graph

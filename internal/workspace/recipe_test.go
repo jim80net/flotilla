@@ -24,13 +24,13 @@ func writeWorkspaceRecipe(t *testing.T, agent, json string) {
 }
 
 func TestLoadRecipePresentAndValid(t *testing.T) {
-	writeWorkspaceRecipe(t, "hydra-ops",
-		`{"launch":"claude -w hydra-ops","cwd":"/abs/worktree","tmux":"flotilla:hydra-ops"}`)
-	r, ok, err := LoadRecipe("hydra-ops")
+	writeWorkspaceRecipe(t, "xo",
+		`{"launch":"claude -w xo","cwd":"/abs/worktree","tmux":"flotilla:xo"}`)
+	r, ok, err := LoadRecipe("xo")
 	if err != nil || !ok {
 		t.Fatalf("LoadRecipe = (%+v, %v, %v), want a valid recipe", r, ok, err)
 	}
-	if r.Launch != "claude -w hydra-ops" || r.Cwd != "/abs/worktree" {
+	if r.Launch != "claude -w xo" || r.Cwd != "/abs/worktree" {
 		t.Errorf("recipe fields not parsed: %+v", r)
 	}
 }

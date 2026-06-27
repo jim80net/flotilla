@@ -87,8 +87,8 @@ func TestInjectorLogsSuccessfulDelivery(t *testing.T) {
 		wantLabel string
 		wantBytes int
 	}{
-		{"relay", Job{Agent: "v12-dev", Message: "ship it", Kind: "relay"}, "relay", len("ship it")},
-		{"heartbeat", Job{Agent: "hydra-ops", Message: "tick-tick", Kind: "heartbeat"}, "heartbeat", len("tick-tick")},
+		{"relay", Job{Agent: "backend", Message: "ship it", Kind: "relay"}, "relay", len("ship it")},
+		{"heartbeat", Job{Agent: "xo", Message: "tick-tick", Kind: "heartbeat"}, "heartbeat", len("tick-tick")},
 		{"bare kind reads as relay", Job{Agent: "xo", Message: "bare", Kind: ""}, "relay", len("bare")},
 	}
 	for _, tc := range cases {
@@ -135,7 +135,7 @@ func TestInjectorPanelBlockedRelayRaisesActionableAlert(t *testing.T) {
 	in := NewInjector(func(string, string) error { return surface.ErrPanelBlocked }, 1)
 	in.SetEscalate(func(s string) { mu.Lock(); alerts = append(alerts, s); mu.Unlock() })
 	in.Start()
-	in.Enqueue(Job{Agent: "family-office", Message: "please run the edge audit", Kind: "relay"})
+	in.Enqueue(Job{Agent: "data", Message: "please run the edge audit", Kind: "relay"})
 	in.Stop()
 
 	mu.Lock()
@@ -144,7 +144,7 @@ func TestInjectorPanelBlockedRelayRaisesActionableAlert(t *testing.T) {
 		t.Fatalf("got %d alerts, want exactly 1 (terminal, not deferred)", len(alerts))
 	}
 	a := alerts[0]
-	for _, want := range []string{"family-office", "agents panel", "keystroke", "please run the edge audit"} {
+	for _, want := range []string{"data", "agents panel", "keystroke", "please run the edge audit"} {
 		if !strings.Contains(a, want) {
 			t.Errorf("alert missing %q: %q", want, a)
 		}
@@ -159,7 +159,7 @@ func TestInjectorPanelBlockedTickDoesNotAlarm(t *testing.T) {
 	in := NewInjector(func(string, string) error { return surface.ErrPanelBlocked }, 1)
 	in.SetEscalate(func(string) { atomic.AddInt32(&alerts, 1) })
 	in.Start()
-	in.Enqueue(Job{Agent: "memex", Message: "tick", Kind: "heartbeat"})
+	in.Enqueue(Job{Agent: "data", Message: "tick", Kind: "heartbeat"})
 	in.Stop()
 
 	if got := atomic.LoadInt32(&alerts); got != 0 {

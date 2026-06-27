@@ -103,7 +103,7 @@ func fakeRecycleOps(r *recRec) recycleOps {
 
 func testPlan() recyclePlan {
 	return recyclePlan{
-		agent: "v12-dev", key: "the-key", cwd: "/repo", launch: "claude --name v12-dev",
+		agent: "backend", key: "the-key", cwd: "/repo", launch: "claude --name backend",
 		token: "TOK", designatedPath: "/repo/.claude/handoffs/recycle-TOK.md",
 		handoffText: "HANDOFF", takeoverText: "TAKEOVER",
 		ownPane: "", minHandoffBytes: 200,
@@ -126,7 +126,7 @@ func TestRunRecycleHappyPath(t *testing.T) {
 	if len(r.delivered) != 2 || r.delivered[0] != "HANDOFF" || r.delivered[1] != "TAKEOVER" {
 		t.Errorf("delivered = %v, want [HANDOFF TAKEOVER] (takeover exactly once)", r.delivered)
 	}
-	if !strings.Contains(msg, "recycled v12-dev") {
+	if !strings.Contains(msg, "recycled backend") {
 		t.Errorf("msg = %q, want a success line", msg)
 	}
 	// remain-on-exit must be set ON before the close and restored OFF after (the claude-direct
@@ -248,7 +248,7 @@ func TestRunRecycleCloseNeverShell(t *testing.T) {
 	r := happyRec()
 	r.closeNeverShell = true // assess returns Unknown after the close (transient glitch)
 	_, err := runRecycle(fakeRecycleOps(r), testPlan())
-	if err == nil || !strings.Contains(err.Error(), "resume v12-dev --force") {
+	if err == nil || !strings.Contains(err.Error(), "resume backend --force") {
 		t.Fatalf("err = %v, want a state-aware dead-desk recovery copy naming --force", err)
 	}
 	if r.respawned {
@@ -329,10 +329,10 @@ func TestParseRecycleArgs(t *testing.T) {
 		wantDry   bool
 		wantErr   bool
 	}{
-		{"agent only", []string{"v12-dev"}, "v12-dev", false, false},
-		{"agent then dry", []string{"v12-dev", "--dry-run"}, "v12-dev", true, false},
-		{"dry then agent", []string{"--dry-run", "v12-dev"}, "v12-dev", true, false},
-		{"agent then launch", []string{"v12-dev", "--launch", "/tmp/l.json"}, "v12-dev", false, false},
+		{"agent only", []string{"backend"}, "backend", false, false},
+		{"agent then dry", []string{"backend", "--dry-run"}, "backend", true, false},
+		{"dry then agent", []string{"--dry-run", "backend"}, "backend", true, false},
+		{"agent then launch", []string{"backend", "--launch", "/tmp/l.json"}, "backend", false, false},
 		{"no agent", []string{"--dry-run"}, "", false, true},
 		{"empty", []string{}, "", false, true},
 		{"extra positional", []string{"a", "b"}, "", false, true},

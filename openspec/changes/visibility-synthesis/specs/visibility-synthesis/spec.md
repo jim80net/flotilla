@@ -18,8 +18,8 @@ on any new write-path (no mirror-event ledger in v1). A rollup is a current-STAT
 subordinate right now"), not an event log of every finish.
 
 **The topology (stated explicitly so routing is never mis-read):** each agent OWNS its home channel
-(`xo_agent == self`) and its PARENT is in that channel's `members[]` (e.g. `xo_agent=tactical-head
-members=[family-office]`; `xo_agent=family-office members=[hydra-ops]`). Therefore "read the tier BELOW
+(`xo_agent == self`) and its PARENT is in that channel's `members[]` (e.g. `xo_agent=backend
+members=[fleet-a]`; `xo_agent=fleet-a members=[xo]`). Therefore "read the tier BELOW
 me" = read the agents whose home channel lists ME as a member — a DOWN-traversal of the membership
 graph. The ONE channel where `members[]` runs the OTHER way is the fleet-command BROADCAST channel
 (`role == "fleet-command"`, whose members are the meta-XO's full command list); it is EXCLUDED from

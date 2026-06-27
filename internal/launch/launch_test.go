@@ -17,19 +17,19 @@ func writeTemp(t *testing.T, body string) string {
 
 // rosterAgents is the standard fixture roster set used across the table tests.
 func rosterAgents() map[string]bool {
-	return map[string]bool{"hydra-ops": true, "crypto-trend-dev": true, "v12-dev": true}
+	return map[string]bool{"xo": true, "backend": true, "frontend": true}
 }
 
 func TestLoadValid(t *testing.T) {
 	p := writeTemp(t, `{
 		"agents": {
-			"hydra-ops": {
-				"launch": "claude -w hydra-ops",
+			"xo": {
+				"launch": "claude -w xo",
 				"cwd": "/srv/fleet/main",
-				"tmux": "flotilla:hydra-ops",
+				"tmux": "flotilla:xo",
 				"state": ".claude/handoffs/latest.md"
 			},
-			"crypto-trend-dev": {
+			"backend": {
 				"launch": "cd /tmp && claude --continue",
 				"cwd": "/srv/fleet/secondary"
 			}
@@ -39,49 +39,49 @@ func TestLoadValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	r, ok := cfg.Recipe("hydra-ops")
+	r, ok := cfg.Recipe("xo")
 	if !ok {
-		t.Fatal("Recipe(hydra-ops) not found")
+		t.Fatal("Recipe(xo) not found")
 	}
-	if r.Launch != "claude -w hydra-ops" {
+	if r.Launch != "claude -w xo" {
 		t.Errorf("Launch = %q", r.Launch)
 	}
 	if r.Cwd != "/srv/fleet/main" {
 		t.Errorf("Cwd = %q", r.Cwd)
 	}
-	if r.Tmux != "flotilla:hydra-ops" {
+	if r.Tmux != "flotilla:xo" {
 		t.Errorf("Tmux = %q", r.Tmux)
 	}
 	if r.State != ".claude/handoffs/latest.md" {
 		t.Errorf("State = %q", r.State)
 	}
 	// An agent in the roster but absent from the launch file is not resumable.
-	if _, ok := cfg.Recipe("v12-dev"); ok {
-		t.Error("Recipe(v12-dev) found, want absent (declared but not resumable)")
+	if _, ok := cfg.Recipe("frontend"); ok {
+		t.Error("Recipe(frontend) found, want absent (declared but not resumable)")
 	}
 }
 
 func TestLoadRejects(t *testing.T) {
 	cases := map[string]string{
-		"missing launch":     `{"agents": {"hydra-ops": {"cwd": "/abs"}}}`,
-		"empty launch":       `{"agents": {"hydra-ops": {"launch": "", "cwd": "/abs"}}}`,
-		"tab in launch":      `{"agents": {"hydra-ops": {"launch": "a\tb", "cwd": "/abs"}}}`,
-		"newline in launch":  `{"agents": {"hydra-ops": {"launch": "a\nb", "cwd": "/abs"}}}`,
-		"cr in launch":       `{"agents": {"hydra-ops": {"launch": "a\rb", "cwd": "/abs"}}}`,
-		"missing cwd":        `{"agents": {"hydra-ops": {"launch": "claude"}}}`,
-		"empty cwd":          `{"agents": {"hydra-ops": {"launch": "claude", "cwd": ""}}}`,
-		"relative cwd":       `{"agents": {"hydra-ops": {"launch": "claude", "cwd": "relative/path"}}}`,
-		"dot cwd":            `{"agents": {"hydra-ops": {"launch": "claude", "cwd": "."}}}`,
-		"tab in cwd":         `{"agents": {"hydra-ops": {"launch": "claude", "cwd": "/a\tb"}}}`,
-		"newline in cwd":     `{"agents": {"hydra-ops": {"launch": "claude", "cwd": "/a\nb"}}}`,
-		"tab in tmux":        `{"agents": {"hydra-ops": {"launch": "claude", "cwd": "/abs", "tmux": "a\tb:w"}}}`,
-		"newline in tmux":    `{"agents": {"hydra-ops": {"launch": "claude", "cwd": "/abs", "tmux": "a:w\nx"}}}`,
-		"tmux no colon":      `{"agents": {"hydra-ops": {"launch": "claude", "cwd": "/abs", "tmux": "flotilla"}}}`,
-		"tmux empty session": `{"agents": {"hydra-ops": {"launch": "claude", "cwd": "/abs", "tmux": ":w"}}}`,
-		"tmux empty window":  `{"agents": {"hydra-ops": {"launch": "claude", "cwd": "/abs", "tmux": "s:"}}}`,
-		"tmux double colon":  `{"agents": {"hydra-ops": {"launch": "claude", "cwd": "/abs", "tmux": "a:b:c"}}}`,
-		"tab in state":       `{"agents": {"hydra-ops": {"launch": "claude", "cwd": "/abs", "state": "a\tb"}}}`,
-		"newline in state":   `{"agents": {"hydra-ops": {"launch": "claude", "cwd": "/abs", "state": "a\nb"}}}`,
+		"missing launch":     `{"agents": {"xo": {"cwd": "/abs"}}}`,
+		"empty launch":       `{"agents": {"xo": {"launch": "", "cwd": "/abs"}}}`,
+		"tab in launch":      `{"agents": {"xo": {"launch": "a\tb", "cwd": "/abs"}}}`,
+		"newline in launch":  `{"agents": {"xo": {"launch": "a\nb", "cwd": "/abs"}}}`,
+		"cr in launch":       `{"agents": {"xo": {"launch": "a\rb", "cwd": "/abs"}}}`,
+		"missing cwd":        `{"agents": {"xo": {"launch": "claude"}}}`,
+		"empty cwd":          `{"agents": {"xo": {"launch": "claude", "cwd": ""}}}`,
+		"relative cwd":       `{"agents": {"xo": {"launch": "claude", "cwd": "relative/path"}}}`,
+		"dot cwd":            `{"agents": {"xo": {"launch": "claude", "cwd": "."}}}`,
+		"tab in cwd":         `{"agents": {"xo": {"launch": "claude", "cwd": "/a\tb"}}}`,
+		"newline in cwd":     `{"agents": {"xo": {"launch": "claude", "cwd": "/a\nb"}}}`,
+		"tab in tmux":        `{"agents": {"xo": {"launch": "claude", "cwd": "/abs", "tmux": "a\tb:w"}}}`,
+		"newline in tmux":    `{"agents": {"xo": {"launch": "claude", "cwd": "/abs", "tmux": "a:w\nx"}}}`,
+		"tmux no colon":      `{"agents": {"xo": {"launch": "claude", "cwd": "/abs", "tmux": "flotilla"}}}`,
+		"tmux empty session": `{"agents": {"xo": {"launch": "claude", "cwd": "/abs", "tmux": ":w"}}}`,
+		"tmux empty window":  `{"agents": {"xo": {"launch": "claude", "cwd": "/abs", "tmux": "s:"}}}`,
+		"tmux double colon":  `{"agents": {"xo": {"launch": "claude", "cwd": "/abs", "tmux": "a:b:c"}}}`,
+		"tab in state":       `{"agents": {"xo": {"launch": "claude", "cwd": "/abs", "state": "a\tb"}}}`,
+		"newline in state":   `{"agents": {"xo": {"launch": "claude", "cwd": "/abs", "state": "a\nb"}}}`,
 		"unknown agent":      `{"agents": {"not-a-real-agent": {"launch": "claude", "cwd": "/abs"}}}`,
 		"malformed json":     `{"agents": {`,
 	}
@@ -99,8 +99,8 @@ func TestLoadRejectsDuplicateTmuxTarget(t *testing.T) {
 	// same window — rejected (mirrors roster's shared-title rejection).
 	p := writeTemp(t, `{
 		"agents": {
-			"hydra-ops": {"launch": "claude", "cwd": "/a", "tmux": "flotilla:shared"},
-			"crypto-trend-dev": {"launch": "claude", "cwd": "/b", "tmux": "flotilla:shared"}
+			"xo": {"launch": "claude", "cwd": "/a", "tmux": "flotilla:shared"},
+			"backend": {"launch": "claude", "cwd": "/b", "tmux": "flotilla:shared"}
 		}
 	}`)
 	if _, err := Load(p, rosterAgents()); err == nil {
@@ -113,9 +113,9 @@ func TestLoadAllowsDistinctTmuxAndEmptyTmux(t *testing.T) {
 	// not a shared value), all load cleanly.
 	p := writeTemp(t, `{
 		"agents": {
-			"hydra-ops": {"launch": "claude", "cwd": "/a", "tmux": "flotilla:hydra-ops"},
-			"crypto-trend-dev": {"launch": "claude", "cwd": "/b"},
-			"v12-dev": {"launch": "claude", "cwd": "/c"}
+			"xo": {"launch": "claude", "cwd": "/a", "tmux": "flotilla:xo"},
+			"backend": {"launch": "claude", "cwd": "/b"},
+			"frontend": {"launch": "claude", "cwd": "/c"}
 		}
 	}`)
 	if _, err := Load(p, rosterAgents()); err != nil {
@@ -140,7 +140,7 @@ func TestLoadEmptyAgentsIsValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load(empty agents): %v", err)
 	}
-	if _, ok := cfg.Recipe("hydra-ops"); ok {
+	if _, ok := cfg.Recipe("xo"); ok {
 		t.Error("Recipe found in empty config, want absent")
 	}
 }
@@ -160,18 +160,18 @@ func TestDefaultPath(t *testing.T) {
 
 func TestValidTmuxTarget(t *testing.T) {
 	cases := map[string]bool{
-		"flotilla:hydra-ops": true,
-		"s:w":                true,
-		"s:w.0":              false, // trailing ".<digits>" = a tmux pane index, rejected
-		"s:rel-1.2":          false, // also a trailing ".<digits>" → pane-index ambiguous
-		"s:my.app":           true,  // a non-numeric dot is a legit window name
-		"flotilla":           false,
-		":w":                 false,
-		"s:":                 false,
-		"a:b:c":              false,
-		"a b:w":              false, // space in session
-		"s:w x":              false, // space in window
-		"":                   false,
+		"flotilla:xo": true,
+		"s:w":         true,
+		"s:w.0":       false, // trailing ".<digits>" = a tmux pane index, rejected
+		"s:rel-1.2":   false, // also a trailing ".<digits>" → pane-index ambiguous
+		"s:my.app":    true,  // a non-numeric dot is a legit window name
+		"flotilla":    false,
+		":w":          false,
+		"s:":          false,
+		"a:b:c":       false,
+		"a b:w":       false, // space in session
+		"s:w x":       false, // space in window
+		"":            false,
 	}
 	for in, want := range cases {
 		if got := validTmuxTarget(in); got != want {

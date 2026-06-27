@@ -11,10 +11,10 @@ func TestParseRegisterArgs(t *testing.T) {
 		wantPane  string
 		wantErr   bool
 	}{
-		{"agent then flag (the migration form)", []string{"macro-desk-dev", "--pane", "0:0.2"}, "", "macro-desk-dev", "0:0.2", false},
-		{"flag then agent", []string{"--pane", "0:0.2", "macro-desk-dev"}, "", "macro-desk-dev", "0:0.2", false},
-		{"agent only, pane from default ($TMUX_PANE)", []string{"macro-desk-dev"}, "%7", "macro-desk-dev", "%7", false},
-		{"agent with =flag form", []string{"macro-desk-dev", "--pane=%9"}, "", "macro-desk-dev", "%9", false},
+		{"agent then flag (the migration form)", []string{"backend", "--pane", "0:0.2"}, "", "backend", "0:0.2", false},
+		{"flag then agent", []string{"--pane", "0:0.2", "backend"}, "", "backend", "0:0.2", false},
+		{"agent only, pane from default ($TMUX_PANE)", []string{"backend"}, "%7", "backend", "%7", false},
+		{"agent with =flag form", []string{"backend", "--pane=%9"}, "", "backend", "%9", false},
 		{"no agent", []string{"--pane", "0:0.2"}, "", "", "", true},
 		{"empty", []string{}, "", "", "", true},
 		{"extra positional", []string{"a", "b"}, "", "", "", true},

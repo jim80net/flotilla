@@ -154,13 +154,13 @@ already write `flotilla-secrets.env`.
   "agents": {
     "infra": {
       "launch": "claude -w infra",
-      "cwd": "/home/me/work/infra-worktree",
+      "cwd": "/home/operator/work/infra-worktree",
       "tmux": "flotilla:infra",
       "state": ".claude/handoffs/latest.md"
     },
     "research": {
-      "launch": "cd /home/me/work/research && claude --continue",
-      "cwd": "/home/me/work/research"
+      "launch": "cd /home/operator/work/research && claude --continue",
+      "cwd": "/home/operator/work/research"
     }
   }
 }

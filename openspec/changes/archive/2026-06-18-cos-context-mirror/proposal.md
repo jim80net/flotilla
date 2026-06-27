@@ -7,7 +7,7 @@ in `#fleet-alpha`, operator↔beta-XO in `#fleet-beta`, operator↔meta-XO in
 siloed**: a desk acts without the cross-fleet picture; the chief of staff can't
 integrate decisions made in a channel it wasn't in.
 
-The live Spark fleet already compensates for this **by hand**, in an operational
+A private deployment's fleet already compensates for this **by hand**, in an operational
 `state/context-ledger.md` (a who-knows-what ledger the chief of staff maintains).
 Operator directive 2026-06-18 (#108): **productize it** — every operator↔XO
 exchange should be mirrored to the chief of staff, and the who-knows-what ledger
@@ -22,7 +22,7 @@ workflow (clearing the systems-review + OCR + STORM trio is the bar).
 
 - **Add the `cos` capability — a chief-of-staff context-integration layer.** A
   configured `cos_agent` (generalizable — **a role, not any deployment's desk
-  name**; Spark's is `hydra-ops`, but the product ships a `cos_agent` knob)
+  name**; a private deployment's is `xo`, but the product ships a `cos_agent` knob)
   receives a mirror of operator↔XO traffic across **all** channels and is the home
   of the who-knows-what ledger.
 - **Mirror both directions of operator↔XO traffic to the CoS:**
@@ -58,7 +58,7 @@ workflow (clearing the systems-review + OCR + STORM trio is the bar).
   authority and changes no relay security rule (operator-only + webhook-drop are
   untouched). The CoS reads context; it does not gain a back-channel to command
   desks.
-- **Generalizable, not Spark-specific.** `cos_agent` + a configurable ledger path;
+- **Generalizable, not deployment-specific.** `cos_agent` + a configurable ledger path;
   no deployment desk names baked in. `state/context-ledger.md` is the operational
   precedent, not the product surface.
 - **Affected surfaces (built in this change):** the `Injector.SetMirror` hook

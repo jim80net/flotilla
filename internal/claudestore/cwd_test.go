@@ -15,15 +15,15 @@ func TestLastTurnTextWithCwdCapturesCwd(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "s.jsonl")
 	lines := []string{
-		`{"type":"user","cwd":"/home/x/proj","message":{"role":"user","content":"hi"}}`,
-		`{"type":"assistant","cwd":"/home/x/proj","message":{"role":"assistant","content":[{"type":"text","text":"the turn-final"}]}}`,
+		`{"type":"user","cwd":"/home/user/proj","message":{"role":"user","content":"hi"}}`,
+		`{"type":"assistant","cwd":"/home/user/proj","message":{"role":"assistant","content":[{"type":"text","text":"the turn-final"}]}}`,
 		`{"type":"file-history-snapshot"}`, // a trailing non-message entry with no cwd — must not clobber it
 	}
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	text, cwd, ok := lastTurnTextWithCwd(path)
-	if !ok || text != "the turn-final" || cwd != "/home/x/proj" {
+	if !ok || text != "the turn-final" || cwd != "/home/user/proj" {
 		t.Fatalf("lastTurnTextWithCwd = (%q, %q, %v), want the turn-final + its recorded cwd", text, cwd, ok)
 	}
 	// The thin wrapper still satisfies the existing (text, ok) contract.
@@ -42,8 +42,8 @@ func TestLatestTurnTextForCwdRecoversAcrossCollision(t *testing.T) {
 
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	const myCwd = "/home/x/my.app"    // encodes to -home-x-my-app
-	const otherCwd = "/home/x/my/app" // ALSO encodes to -home-x-my-app — the collision
+	const myCwd = "/home/user/my.app"    // encodes to -home-user-my-app
+	const otherCwd = "/home/user/my/app" // ALSO encodes to -home-user-my-app — the collision
 	if encodeProjectDir(myCwd) != encodeProjectDir(otherCwd) {
 		t.Fatalf("test premise broken: %q and %q must encode alike", myCwd, otherCwd)
 	}

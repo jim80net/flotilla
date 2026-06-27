@@ -278,7 +278,7 @@ This is the brief's intended tradeoff (drive, don't idle); the operator owns it.
 
 ## Non-goals / deferred
 
-- The backlog CONTENTS (Spark-circumstantial; XO-owned). This change owns the parse convention +
+- The backlog CONTENTS (deployment-circumstantial; XO-owned). This change owns the parse convention +
   the gate mechanism (generalizable flotilla capability) — and **requires the XO write the backlog
   atomically** (temp+rename, mirroring the snapshot discipline, `detector.go:74-75`) so a
   mid-write read can't tear; documented in `xo-doctrine.md` (M3).

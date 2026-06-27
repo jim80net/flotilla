@@ -2,10 +2,10 @@
 
 ## Why
 
-The operator's **c2 channels are the hotline to each XO**: a message in `#empath`
-(`xo_agent=empath-lead`) routes to that XO via the relay (`BindingForChannel→XOAgent`). But the
-**return leg is incomplete** — only the PRIMARY XO (`hydra-ops`) mirrors its replies back to the
-operator (via a host-local `Stop`-hook). A FEDERATED c2-channel XO (empath-lead et al.) answers in its
+The operator's **c2 channels are the hotline to each XO**: a message in a federated c2 channel
+(`xo_agent=xo-2`) routes to that XO via the relay (`BindingForChannel→XOAgent`). But the
+**return leg is incomplete** — only the PRIMARY XO (`xo`) mirrors its replies back to the
+operator (via a host-local `Stop`-hook). A FEDERATED c2-channel XO (`xo-2` et al.) answers in its
 pane and the reply **never reaches the operator** — the operator asks and gets silence, the exact
 failure observed 2026-06-26.
 

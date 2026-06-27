@@ -13,7 +13,7 @@ func TestValidateAgentSurfaces(t *testing.T) {
 	// unregistered surface is a clear startup error (never a silent mis-drive).
 	ok := &roster.Config{Agents: []roster.Agent{
 		{Name: "xo"}, // empty → default claude-code
-		{Name: "v12-dev", Surface: "claude-code"}, // explicit default
+		{Name: "backend", Surface: "claude-code"}, // explicit default
 		{Name: "pair", Surface: "aider"},          // the aider driver
 		{Name: "oc", Surface: "opencode"},         // the opencode driver
 		{Name: "gk", Surface: "grok"},             // the grok driver

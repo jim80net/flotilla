@@ -47,36 +47,36 @@ func TestMaterialTransitions(t *testing.T) {
 func TestExternalMaterialExcludesXOAndSortsReasons(t *testing.T) {
 	prev := Snapshot{
 		DeskStates: map[string]surface.State{
-			"hydra-ops": surface.StateWorking, // the XO
-			"v12-dev":   surface.StateWorking,
-			"zeta-dev":  surface.StateWorking,
+			"xo":       surface.StateWorking, // the XO
+			"backend":  surface.StateWorking,
+			"zeta-dev": surface.StateWorking,
 		},
 		SignalHash: "h0",
 	}
 	cur := Snapshot{
 		DeskStates: map[string]surface.State{
-			"hydra-ops": surface.StateIdle, // XO finished — must be EXCLUDED (H2)
-			"v12-dev":   surface.StateIdle, // desk finished — material
-			"zeta-dev":  surface.StateIdle, // desk finished — material
+			"xo":       surface.StateIdle, // XO finished — must be EXCLUDED (H2)
+			"backend":  surface.StateIdle, // desk finished — material
+			"zeta-dev": surface.StateIdle, // desk finished — material
 		},
 		SignalHash: "h1", // external signal changed — material
 	}
-	ok, reasons := externalMaterial(prev, cur, "hydra-ops")
+	ok, reasons := externalMaterial(prev, cur, "xo")
 	if !ok {
 		t.Fatal("expected material changes")
 	}
 	if len(reasons) != 3 {
-		t.Fatalf("reasons = %v, want 3 (v12-dev, zeta-dev, signal; NOT the XO)", reasons)
+		t.Fatalf("reasons = %v, want 3 (backend, zeta-dev, signal; NOT the XO)", reasons)
 	}
 	// Stable order: desks sorted by name, signal last.
-	if reasons[0][:7] != "v12-dev" || reasons[1][:8] != "zeta-dev" {
+	if reasons[0][:7] != "backend" || reasons[1][:8] != "zeta-dev" {
 		t.Errorf("desk reasons not sorted: %v", reasons)
 	}
 	if reasons[2] != "external signal changed" {
 		t.Errorf("signal reason should be last: %v", reasons)
 	}
 	for _, r := range reasons {
-		if r[:9] == "hydra-ops" {
+		if r[:2] == "xo" {
 			t.Errorf("XO desk transition leaked into external material: %v", reasons)
 		}
 	}
@@ -88,20 +88,20 @@ func TestExternalMaterialColdStartSilent(t *testing.T) {
 	prev := Snapshot{DeskStates: map[string]surface.State{}}
 	cur := Snapshot{
 		DeskStates: map[string]surface.State{
-			"v12-dev": surface.StateIdle,
+			"backend": surface.StateIdle,
 			"zeta":    surface.StateWorking,
 		},
 		SignalHash: "h1",
 	}
-	if ok, reasons := externalMaterial(prev, cur, "hydra-ops"); ok {
+	if ok, reasons := externalMaterial(prev, cur, "xo"); ok {
 		t.Errorf("cold start should be silent, got %v", reasons)
 	}
 }
 
 func TestExternalMaterialSignalOnly(t *testing.T) {
-	prev := Snapshot{DeskStates: map[string]surface.State{"v12-dev": surface.StateIdle}, SignalHash: "h0"}
-	cur := Snapshot{DeskStates: map[string]surface.State{"v12-dev": surface.StateIdle}, SignalHash: "h1"}
-	ok, reasons := externalMaterial(prev, cur, "hydra-ops")
+	prev := Snapshot{DeskStates: map[string]surface.State{"backend": surface.StateIdle}, SignalHash: "h0"}
+	cur := Snapshot{DeskStates: map[string]surface.State{"backend": surface.StateIdle}, SignalHash: "h1"}
+	ok, reasons := externalMaterial(prev, cur, "xo")
 	if !ok || len(reasons) != 1 || reasons[0] != "external signal changed" {
 		t.Errorf("signal-only change = (%v,%v), want one external-signal reason", ok, reasons)
 	}
@@ -117,13 +117,13 @@ func TestExternalMaterialAiderApprovalAndErrorWakeXO(t *testing.T) {
 	// pane; here we feed the resulting states straight into externalMaterial.)
 	prev := Snapshot{DeskStates: map[string]surface.State{
 		"aider-desk": surface.StateWorking,
-		"hydra-ops":  surface.StateIdle, // the XO
+		"xo":         surface.StateIdle, // the XO
 	}}
 	cur := Snapshot{DeskStates: map[string]surface.State{
 		"aider-desk": surface.StateAwaitingApproval, // blocked on a (Y)es/(N)o prompt
-		"hydra-ops":  surface.StateIdle,
+		"xo":         surface.StateIdle,
 	}}
-	ok, reasons := externalMaterial(prev, cur, "hydra-ops")
+	ok, reasons := externalMaterial(prev, cur, "xo")
 	if !ok || len(reasons) != 1 || reasons[0] != "aider-desk: entered awaiting-approval" {
 		t.Fatalf("approval entry = (%v,%v), want one 'aider-desk: entered awaiting-approval'", ok, reasons)
 	}
@@ -131,9 +131,9 @@ func TestExternalMaterialAiderApprovalAndErrorWakeXO(t *testing.T) {
 	// And an entry into Errored.
 	cur2 := Snapshot{DeskStates: map[string]surface.State{
 		"aider-desk": surface.StateErrored,
-		"hydra-ops":  surface.StateIdle,
+		"xo":         surface.StateIdle,
 	}}
-	ok2, reasons2 := externalMaterial(prev, cur2, "hydra-ops")
+	ok2, reasons2 := externalMaterial(prev, cur2, "xo")
 	if !ok2 || len(reasons2) != 1 || reasons2[0] != "aider-desk: entered errored" {
 		t.Fatalf("error entry = (%v,%v), want one 'aider-desk: entered errored'", ok2, reasons2)
 	}
@@ -148,9 +148,9 @@ func TestExternalMaterialAiderApprovalAndErrorWakeXO(t *testing.T) {
 func TestExternalMaterialTrackerWritesDoNotWake(t *testing.T) {
 	// SignalHash unchanged (the tracker is not a signal source); only the XO's own
 	// pane churned — which externalMaterial excludes (H2). Result: no wake.
-	prev := Snapshot{DeskStates: map[string]surface.State{"hydra-ops": surface.StateWorking}, SignalHash: "h0"}
-	cur := Snapshot{DeskStates: map[string]surface.State{"hydra-ops": surface.StateIdle}, SignalHash: "h0"}
-	if ok, reasons := externalMaterial(prev, cur, "hydra-ops"); ok {
+	prev := Snapshot{DeskStates: map[string]surface.State{"xo": surface.StateWorking}, SignalHash: "h0"}
+	cur := Snapshot{DeskStates: map[string]surface.State{"xo": surface.StateIdle}, SignalHash: "h0"}
+	if ok, reasons := externalMaterial(prev, cur, "xo"); ok {
 		t.Errorf("the XO's own tracker writes must not produce an external wake, got %v", reasons)
 	}
 }

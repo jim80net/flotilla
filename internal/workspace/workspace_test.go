@@ -18,24 +18,24 @@ func TestRootHonorsOverride(t *testing.T) {
 
 func TestRootDefaultsToHomeDotFlotilla(t *testing.T) {
 	t.Setenv(rootEnv, "")
-	t.Setenv("HOME", "/home/tester")
+	t.Setenv("HOME", "/home/user")
 	got, err := Root()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join("/home/tester", ".flotilla"); got != want {
+	if want := filepath.Join("/home/user", ".flotilla"); got != want {
 		t.Errorf("Root() = %q, want %q", got, want)
 	}
 }
 
 func TestDir(t *testing.T) {
 	t.Setenv(rootEnv, "/ws")
-	got, err := Dir("hydra-ops")
+	got, err := Dir("xo")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "/ws/hydra-ops" {
-		t.Errorf("Dir() = %q, want /ws/hydra-ops", got)
+	if got != "/ws/xo" {
+		t.Errorf("Dir() = %q, want /ws/xo", got)
 	}
 }
 

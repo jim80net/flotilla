@@ -17,7 +17,7 @@ func init() { Register(newGrok()) }
 // with a structured ~/.grok session store) through the Driver interface. It is claude-style
 // (Working-positive, Idle-default) and resets with "/new".
 //
-// PROVENANCE — the render markers are LIVE-CAPTURED from the running grok-research desk on the
+// PROVENANCE — the render markers are LIVE-CAPTURED from the running grok-desk on the
 // official grok CLI (2026-06-16, #58). This REPLACES an earlier version of this driver written
 // against superagent-ai/grok-cli ("grok-dev"): that npm package is a DIFFERENT product the
 // operator does not run, and its markers (Planning next moves / enter queue / x402 payment) do

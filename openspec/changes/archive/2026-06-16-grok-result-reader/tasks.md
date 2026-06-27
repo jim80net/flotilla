@@ -24,7 +24,7 @@
 - [x] 3.1 IMPL `cmd/flotilla` `result <agent>`: resolve agent → driver + pane; if driver implements
       `ResultReader`, print `LatestResult`; else report "surface has no session-store reader (use the
       pane capture)". Read-only (never writes a pane). Register in the command dispatch + usage.
-- [x] 3.2 VERIFIED end-to-end (runtime path, read-only): `flotilla result grok-research` printed the full
+- [x] 3.2 VERIFIED end-to-end (runtime path, read-only): `flotilla result grok-desk` printed the full
       live result from ~/.grok; a claude-code desk reported the no-reader message, no pane write.
 
 ## 4. review + ship

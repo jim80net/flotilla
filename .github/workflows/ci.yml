@@ -94,3 +94,33 @@ jobs:
 
       - name: Test the voice build (codec round-trip + voice command, race detector)
         run: CGO_ENABLED=1 go test -tags voiceopus -race ./...
+
+  # The public/private boundary guard (docs/private-public-boundary.md): a
+  # deployment-specific identifier must never reach the public tree or open
+  # issues/PRs. The guard's BUILT-IN patterns (home paths, webhook URLs, secret
+  # shapes) run with no config; THIS deployment's own denylist is supplied via the
+  # FLOTILLA_PRIVATE_DENYLIST repo secret so the vocabulary is never committed. A
+  # fork with no secret set still gets the generic protection.
+  private-boundary:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Boundary guard (tree + open issues/PRs)
+        env:
+          # Unset on a fork → generic patterns only. The secret may be EITHER one
+          # term per line OR a single |-alternation; writing it to the denylist file
+          # (which the guard parses line-by-line and joins with |) handles both —
+          # avoiding the fail-open a raw multiline regex env value would cause.
+          FLOTILLA_PRIVATE_DENYLIST_SECRET: ${{ secrets.FLOTILLA_PRIVATE_DENYLIST }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "${FLOTILLA_PRIVATE_DENYLIST_SECRET}" ]; then
+            mkdir -p .flotilla
+            printf '%s\n' "${FLOTILLA_PRIVATE_DENYLIST_SECRET}" > .flotilla/private-denylist
+          fi
+          bash scripts/check-private-boundary.sh --issues

@@ -26,7 +26,7 @@ flotilla's own audit mirror posts via webhook, so its messages carry a non-empty
 later relaxed. The primary gate is `m.Author.ID == operator_user_id`. We do NOT
 drop on `Author.Bot` (it would eat a future trusted poster and conflates the
 mirror with any bot). A unit test feeds a synthetic mirror message
-(non-empty `WebhookID`, body `→ v12-dev: …`) and asserts it is dropped — a
+(non-empty `WebhookID`, body `→ backend: …`) and asserts it is dropped — a
 feedback loop here is an infinite self-injection storm.
 
 ### D2 — Heartbeat is idle-gated (review B2)
@@ -103,7 +103,7 @@ Discord's rate limiter and risk a temp-ban; SIGTERM does a graceful
 `heartbeat_interval` SHALL be parsed (Go duration) at load — a bad string
 refuses startup. `xo_agent` SHALL be validated to exist in `agents` at load — a
 typo must not silently break every bare message and heartbeat forever. The
-`watch` unit passes `--roster`/`--secrets` explicitly (matching hydra/tactical's
+`watch` unit passes `--roster`/`--secrets` explicitly (matching the desk units'
 env-file convention); no second default-path convention.
 
 ### D9 — Robustness + alerting hygiene (review N1, N4)
@@ -120,7 +120,7 @@ The channel is a command-injection surface gated ONLY by `operator_user_id`:
 arbitrary operator text is executed verbatim by whichever agent. That is the
 intended single-operator model, but it means (a) Discord-account compromise =
 full fleet command injection — the operator's **Discord 2FA is the real
-boundary** (required in the runbook; same posture as tactical Hermes); (b) a
+boundary** (required in the runbook; same posture as a federated agent surface); (b) a
 leaked `FLOTILLA_BOT_TOKEN` lets an attacker READ the channel — `chmod 600`,
 never logged; (c) there is no per-command authorization — the channel content is
 as sensitive as a root shell.
