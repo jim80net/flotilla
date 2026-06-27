@@ -132,10 +132,10 @@ func TestParseFieldsRobustToTabInTitle(t *testing.T) {
 	}{
 		{"0:0.0\tplain title\tdesk-a", "0:0.0", "plain title", "desk-a"},
 		{"0:0.0\thas\ta\ttab\tdesk-a", "0:0.0", "has\ta\ttab", "desk-a"}, // tabs in title
-		{"0:0.0\tuntagged title\t", "0:0.0", "untagged title", ""},         // empty marker
-		{"0:0.0\ttwo\ttab\t", "0:0.0", "two\ttab", ""},                     // tabby title, untagged
-		{"0:0.0\tonly title", "0:0.0", "only title", ""},                   // 2-field variant
-		{"0:0.0", "0:0.0", "", ""},                                         // target-only
+		{"0:0.0\tuntagged title\t", "0:0.0", "untagged title", ""},       // empty marker
+		{"0:0.0\ttwo\ttab\t", "0:0.0", "two\ttab", ""},                   // tabby title, untagged
+		{"0:0.0\tonly title", "0:0.0", "only title", ""},                 // 2-field variant
+		{"0:0.0", "0:0.0", "", ""},                                       // target-only
 	}
 	for _, c := range cases {
 		tg, ti, mk := parseFields(c.line)
@@ -168,7 +168,7 @@ func TestTitleMatches(t *testing.T) {
 		{"✳ desk-a", "desk-a", true},     // single-glyph prefix (Claude live title)
 		{"⠂ alpha-xo", "alpha-xo", true}, // different spinner glyph
 		{"valbot", "valbot", true},
-		{"✳ desk-a", "desk", false},      // substring must not match
+		{"✳ desk-a", "desk", false},    // substring must not match
 		{"my desk-a", "desk-a", false}, // multi-word prefix is not a glyph
 		{"build desk-a", "desk-a", false},
 		{"foo bar desk-a", "desk-a", false},

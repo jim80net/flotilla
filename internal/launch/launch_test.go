@@ -161,17 +161,17 @@ func TestDefaultPath(t *testing.T) {
 func TestValidTmuxTarget(t *testing.T) {
 	cases := map[string]bool{
 		"flotilla:alpha-xo": true,
-		"s:w":                true,
-		"s:w.0":              false, // trailing ".<digits>" = a tmux pane index, rejected
-		"s:rel-1.2":          false, // also a trailing ".<digits>" → pane-index ambiguous
-		"s:my.app":           true,  // a non-numeric dot is a legit window name
-		"flotilla":           false,
-		":w":                 false,
-		"s:":                 false,
-		"a:b:c":              false,
-		"a b:w":              false, // space in session
-		"s:w x":              false, // space in window
-		"":                   false,
+		"s:w":               true,
+		"s:w.0":             false, // trailing ".<digits>" = a tmux pane index, rejected
+		"s:rel-1.2":         false, // also a trailing ".<digits>" → pane-index ambiguous
+		"s:my.app":          true,  // a non-numeric dot is a legit window name
+		"flotilla":          false,
+		":w":                false,
+		"s:":                false,
+		"a:b:c":             false,
+		"a b:w":             false, // space in session
+		"s:w x":             false, // space in window
+		"":                  false,
 	}
 	for in, want := range cases {
 		if got := validTmuxTarget(in); got != want {

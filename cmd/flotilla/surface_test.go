@@ -12,11 +12,11 @@ func TestValidateAgentSurfaces(t *testing.T) {
 	// driver, and an explicit "claude-code" passes startup validation; an
 	// unregistered surface is a clear startup error (never a silent mis-drive).
 	ok := &roster.Config{Agents: []roster.Agent{
-		{Name: "xo"}, // empty → default claude-code
+		{Name: "xo"},                             // empty → default claude-code
 		{Name: "desk-a", Surface: "claude-code"}, // explicit default
-		{Name: "pair", Surface: "aider"},          // the aider driver
-		{Name: "oc", Surface: "opencode"},         // the opencode driver
-		{Name: "gk", Surface: "grok"},             // the grok driver
+		{Name: "pair", Surface: "aider"},         // the aider driver
+		{Name: "oc", Surface: "opencode"},        // the opencode driver
+		{Name: "gk", Surface: "grok"},            // the grok driver
 	}}
 	if err := validateAgentSurfaces(ok); err != nil {
 		t.Fatalf("validateAgentSurfaces(aider+default) = %v, want nil", err)

@@ -11,7 +11,7 @@ func mixedRoster() *roster.Config {
 	return &roster.Config{
 		XOAgent: "alpha-xo",
 		Agents: []roster.Agent{
-			{Name: "alpha-xo"},                   // the XO (claude-code)
+			{Name: "alpha-xo"},                    // the XO (claude-code)
 			{Name: "oc-dev", Surface: "opencode"}, // a non-claude desk
 			{Name: "pair", Surface: "aider"},      // a non-claude desk
 		},
