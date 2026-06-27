@@ -388,8 +388,8 @@ preview the resolved plan (pane, recipe, the designated handoff path, the exact
 handoff/takeover turns it would inject) without acting:
 
 ```bash
-flotilla recycle v12-dev --dry-run     # preview, no action, no lock
-flotilla recycle v12-dev               # execute the fail-closed pipeline
+flotilla recycle backend --dry-run     # preview, no action, no lock
+flotilla recycle backend               # execute the fail-closed pipeline
 ```
 
 The outcome is also written to `~/.flotilla/<desk>/last-recycle.json` (atomic

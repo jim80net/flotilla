@@ -247,7 +247,7 @@ func TestConfirmSubmitTransientEmptyThenStableClearRecovers(t *testing.T) {
 }
 
 func TestConfirmSubmitPendingAfterRetriesIsBlocked(t *testing.T) {
-	// THE authority (the family-office case): the body provably REMAINS in the composer through the
+	// THE authority (the federated-XO case): the body provably REMAINS in the composer through the
 	// retries + grace (the submit never landed) ⇒ BLOCKED, regardless of cursor/geometry.
 	enter := 0
 	d := &stateStub{
@@ -264,7 +264,7 @@ func TestConfirmSubmitPendingAfterRetriesIsBlocked(t *testing.T) {
 }
 
 func TestConfirmSubmitQueuedIsSoftSuccess(t *testing.T) {
-	// The hydra-ops case: after submitting, the composer enters the QUEUED state ("Press up to edit
+	// The primary-XO case: after submitting, the composer enters the QUEUED state ("Press up to edit
 	// queued messages") — the message is queued behind a modal/turn and will deliver. ⇒ nil (a
 	// soft-success), NOT a failure or an alarm.
 	enter := 0

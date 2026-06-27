@@ -6,7 +6,7 @@ found a LOAD-BEARING flaw in the first draft (a detector-tick-driven reply silen
 change.
 **Issue:** #175 — a desk's reply to an operator-direct message has no return path (only the XO pane
 mirrors back). Operator-filed.
-**Direction (operator via hydra-ops):** ship **(a) generalize the mirror** to close the gap fast;
+**Direction (operator via the primary XO):** ship **(a) generalize the mirror** to close the gap fast;
 **(b) flotilla-native reply-routing** as the durable end-state. The operator wants proper *mechanical*
 routing.
 
@@ -161,7 +161,7 @@ chapter** once (a) is validated live.
   *visibility-mirror lossiness* (§1a) and the *per-desk-visibility-mirror spec gap* (§7 C-1) are
   flagged as separate follow-ups, not fixed here.
 
-## 6. Open items for hydra-ops / the trio
+## 6. Open items for the primary XO / the trio
 
 1. **TTL value** for the reply-watcher (§3) — propose a few minutes (covers a normal desk answer; short
    enough that a stuck desk escalates promptly). Confirm against the longest expected operator-Q answer.
@@ -195,7 +195,7 @@ chapter** once (a) is validated live.
 - **C-4 (OCR) — testability confirmed** (injectable-fakes pattern, à la `mirror_test.go` /
   `detector_mirror_test.go`); the correctness-bearing cases are now enumerated in §5.
 
-## 8. THE CRUX FORK (for hydra-ops / operator) — completion-detection mechanism
+## 8. THE CRUX FORK (for the primary XO / operator) — completion-detection mechanism
 
 Two design-trio rounds caught TWO load-bearing flaws (P1-1 tick-too-coarse; P1-A confirmed-delivery≠
 Working). Both trace to ONE hard problem: **reliably correlating a desk's turn-completion to the
@@ -229,8 +229,8 @@ fork, so the work isn't wasted.
 
 ## 9. REFRAME (operator, 2026-06-26) — this is the c2-channel↔XO HOTLINE return leg
 
-The operator did NOT type into a desk pane — they typed in the **#empath c2 channel**
-(`channel_id …1519598744872423424`, `xo_agent=empath-lead`), the INTENDED hotline to the empath XO.
+The operator did NOT type into a desk pane — they typed in the **federated c2 channel**
+(`channel_id …1000000000000000000`, `xo_agent=xo-2`), the INTENDED hotline to that federated XO.
 So #175 is the **designed c2-channel↔XO wiring with an incomplete RETURN leg**, not a workaround.
 Operator verbatim: *"channels in c2 are supposed to be my hotline to each XO; that wiring is
 incomplete and should be mechanically enforced; this is a task for flotilla-dev to execute."*
@@ -238,11 +238,11 @@ incomplete and should be mechanically enforced; this is a task for flotilla-dev 
 Consequences for the design:
 - **The routing half is VALIDATED.** `BindingForChannel(originChannel)→XOAgent→secrets.Webhook` IS the
   hotline routing — the target is always the channel's `xo_agent`, and the reply returns to that
-  channel. (The primary XO `hydra-ops` already has this return leg via its host-local Stop-hook; the
-  gap is the FEDERATED c2-channel XOs — empath-lead et al. — which lack it.)
+  channel. (The primary XO `xo` already has this return leg via its host-local Stop-hook; the
+  gap is the FEDERATED c2-channel XOs — `xo-2` et al. — which lack it.)
 - **"Mechanically enforced" + "reliable hotline" ⇒ leans C, not A.** A escalates fast/queued/sub-tick
   turns to a manual "read the pane" — which is the EXACT failure the operator just hit. A reliable
-  hotline must deliver the verbatim reply for EVERY turn. hydra-ops is surfacing A-vs-C to the operator.
+  hotline must deliver the verbatim reply for EVERY turn. the primary XO is surfacing A-vs-C to the operator.
 
 ### 9a. The mechanism that makes C clean + flotilla-native — a TRANSCRIPT-WATCHER (verified feasible)
 
@@ -292,7 +292,7 @@ This dissolves every prior P1: no pane-observation race (Working/Cleared/Queued 
 store records the actual completed turn), no 20m-tick dependency, reliable correlation. Seam needed: a
 store/surface method returning the assistant-turn COUNT (existing readers return only the latest text).
 
-**Status:** C GREENLIT (hydra-ops, on the operator's behalf, veto window open). Pre-checks DONE.
+**Status:** C GREENLIT (the primary XO, on the operator's behalf, veto window open). Pre-checks DONE.
 Proceeding: openspec change → impl (count-marked transcript-watcher + federated-XO return-leg routing)
 → trio (systems+OCR+STORM) → PR. Pre-existing per-desk-visibility-mirror sub-tick-drop gap → filed #176.
 

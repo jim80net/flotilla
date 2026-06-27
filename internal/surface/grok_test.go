@@ -14,7 +14,7 @@ func TestGrokRegistered(t *testing.T) {
 
 func TestParseGrokState(t *testing.T) {
 	// Fixtures are LIVE-CAPTURED from the official grok CLI ("Grok Composer 2.5 Fast") on the
-	// running grok-research desk (2026-06-16, #58). Working-positive, Idle-default. The Working
+	// running grok-desk (2026-06-16, #58). Working-positive, Idle-default. The Working
 	// marker is the live streaming arrow ⇣ (U+21E3, present every frame of a turn); the gerund
 	// verb (Thinking…/Waiting…) and the leading spinner glyph vary. Idle/done shows
 	// "Turn completed in …" + an empty composer with NO arrow.

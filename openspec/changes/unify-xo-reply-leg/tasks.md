@@ -7,4 +7,4 @@
   (`desk-reply-routing` archived, #179) SATISFIED; the MODIFY validates strict.
 - [x] 5. Cutover runbook in design §4 (coordinated host hook-retirement + binary deploy, no double-post);
   EXECUTION is operator/XO-timed (the cutover window is scheduled with the operator post-PR-merge).
-- [x] 6. systems-review on the diff (APPROVE, no P1); findings folded; PR to hydra-ops's gate.
+- [x] 6. systems-review on the diff (APPROVE, no P1); findings folded; PR to the primary XO's gate.

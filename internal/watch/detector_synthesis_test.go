@@ -120,30 +120,30 @@ func (f *synthFixture) synthWakes() []agentWakeRec {
 // per synthesizing agent, and fires WakeSynthesis to that parent.
 func TestSynthesisOwedOnDeskFinish(t *testing.T) {
 	f := newSynthFixture(t)
-	cfg := f.config("hydra-ops", []string{"hydra-ops", "family-office", "v12-dev"})
-	f.parents["v12-dev"] = []string{"family-office"}
-	f.setSub("v12-dev", "built the thing")
+	cfg := f.config("xo", []string{"xo", "xo-2", "backend"})
+	f.parents["backend"] = []string{"xo-2"}
+	f.setSub("backend", "built the thing")
 	cfg.Assess = func(a string) surface.State { return surface.StateIdle }
 	d := f.newDet(t, cfg)
-	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle, "family-office": surface.StateIdle, "v12-dev": surface.StateWorking}, "h0")
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "xo-2": surface.StateIdle, "backend": surface.StateWorking}, "h0")
 
 	d.Tick()
 
 	got := f.synthWakes()
-	if len(got) != 1 || got[0].agent != "family-office" {
-		t.Fatalf("expected one synthesis wake to family-office, got %+v", got)
+	if len(got) != 1 || got[0].agent != "xo-2" {
+		t.Fatalf("expected one synthesis wake to xo-2, got %+v", got)
 	}
 }
 
 // §5.6 — a boat that is a member of TWO channels marks BOTH parents owed.
 func TestSynthesisOwedMarksBothParents(t *testing.T) {
 	f := newSynthFixture(t)
-	cfg := f.config("hydra-ops", []string{"hydra-ops", "p1", "p2", "boat"})
+	cfg := f.config("xo", []string{"xo", "p1", "p2", "boat"})
 	f.parents["boat"] = []string{"p1", "p2"}
 	f.setSub("boat", "did work")
 	cfg.Assess = func(a string) surface.State { return surface.StateIdle }
 	d := f.newDet(t, cfg)
-	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle, "p1": surface.StateIdle, "p2": surface.StateIdle, "boat": surface.StateWorking}, "h0")
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "p1": surface.StateIdle, "p2": surface.StateIdle, "boat": surface.StateWorking}, "h0")
 
 	d.Tick()
 
@@ -164,18 +164,18 @@ func TestSynthesisOwedMarksBothParents(t *testing.T) {
 // per synthesizing agent.
 func TestSynthesisDebouncesBurstToOneWake(t *testing.T) {
 	f := newSynthFixture(t)
-	cfg := f.config("hydra-ops", []string{"hydra-ops", "family-office", "a", "b"})
+	cfg := f.config("xo", []string{"xo", "xo-2", "a", "b"})
 	cfg.SynthEveryTicks = 3 // a wake at most once per 3 ticks per agent
-	f.parents["a"] = []string{"family-office"}
-	f.parents["b"] = []string{"family-office"}
+	f.parents["a"] = []string{"xo-2"}
+	f.parents["b"] = []string{"xo-2"}
 	f.setSub("a", "ta")
 	f.setSub("b", "tb")
 	d := f.newDet(t, cfg)
-	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle, "family-office": surface.StateIdle, "a": surface.StateWorking, "b": surface.StateWorking}, "h0")
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "xo-2": surface.StateIdle, "a": surface.StateWorking, "b": surface.StateWorking}, "h0")
 
 	// Tick 1: a finishes → owed, fires.
-	f.set("hydra-ops", surface.StateIdle)
-	f.set("family-office", surface.StateIdle)
+	f.set("xo", surface.StateIdle)
+	f.set("xo-2", surface.StateIdle)
 	f.set("a", surface.StateIdle)
 	f.set("b", surface.StateWorking)
 	d.Tick()
@@ -193,11 +193,11 @@ func TestSynthesisDebouncesBurstToOneWake(t *testing.T) {
 // stays byte-identical).
 func TestSynthesisIdleFleetFiresNothing(t *testing.T) {
 	f := newSynthFixture(t)
-	cfg := f.config("hydra-ops", []string{"hydra-ops", "family-office", "v12-dev"})
-	f.parents["v12-dev"] = []string{"family-office"}
+	cfg := f.config("xo", []string{"xo", "xo-2", "backend"})
+	f.parents["backend"] = []string{"xo-2"}
 	cfg.Assess = func(a string) surface.State { return surface.StateIdle }
 	d := f.newDet(t, cfg)
-	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle, "family-office": surface.StateIdle, "v12-dev": surface.StateIdle}, "h0")
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "xo-2": surface.StateIdle, "backend": surface.StateIdle}, "h0")
 
 	d.Tick()
 
@@ -213,8 +213,8 @@ func TestSynthesisIdleFleetFiresNothing(t *testing.T) {
 // the older TestSynthesisWakeTargetsArbitraryAgentOutsideMutex only exercised the DELIVERY.
 func TestSynthesisMaterialityReadRunsOutsideMutex(t *testing.T) {
 	f := newSynthFixture(t)
-	cfg := f.config("hydra-ops", []string{"hydra-ops", "family-office", "v12-dev"})
-	f.parents["v12-dev"] = []string{"family-office"}
+	cfg := f.config("xo", []string{"xo", "xo-2", "backend"})
+	f.parents["backend"] = []string{"xo-2"}
 	cfg.Assess = func(a string) surface.State { return surface.StateIdle }
 
 	// A blocking SynthRead parks the materiality read; if it ran under d.mu, OperatorWake would block.
@@ -227,7 +227,7 @@ func TestSynthesisMaterialityReadRunsOutsideMutex(t *testing.T) {
 		return "text", true
 	}
 	d := f.newDet(t, cfg)
-	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle, "family-office": surface.StateIdle, "v12-dev": surface.StateWorking}, "h0")
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "xo-2": surface.StateIdle, "backend": surface.StateWorking}, "h0")
 
 	tickDone := make(chan struct{})
 	go func() { d.Tick(); close(tickDone) }()
@@ -248,9 +248,9 @@ func TestSynthesisMaterialityReadRunsOutsideMutex(t *testing.T) {
 // SYNTHESIZING agent which differs from d.cfg.XOAgent.
 func TestSynthesisWakeTargetsArbitraryAgentOutsideMutex(t *testing.T) {
 	f := newSynthFixture(t)
-	cfg := f.config("hydra-ops", []string{"hydra-ops", "family-office", "v12-dev"})
-	f.parents["v12-dev"] = []string{"family-office"} // family-office != hydra-ops (the primary XO)
-	f.setSub("v12-dev", "x")
+	cfg := f.config("xo", []string{"xo", "xo-2", "backend"})
+	f.parents["backend"] = []string{"xo-2"} // xo-2 != xo (the primary XO)
+	f.setSub("backend", "x")
 	cfg.Assess = func(a string) surface.State { return surface.StateIdle }
 
 	// A blocking WakeAgent proves the side-effect runs outside d.mu (OperatorWake returns while parked).
@@ -258,15 +258,15 @@ func TestSynthesisWakeTargetsArbitraryAgentOutsideMutex(t *testing.T) {
 	release := make(chan struct{})
 	cfg.WakeAgent = func(agent string, kind WakeKind, reasons []string) {
 		if kind == WakeSynthesis {
-			if agent != "family-office" {
-				t.Errorf("synthesis wake must target the synthesizing agent family-office, got %q", agent)
+			if agent != "xo-2" {
+				t.Errorf("synthesis wake must target the synthesizing agent xo-2, got %q", agent)
 			}
 			close(waking)
 			<-release
 		}
 	}
 	d := f.newDet(t, cfg)
-	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle, "family-office": surface.StateIdle, "v12-dev": surface.StateWorking}, "h0")
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "xo-2": surface.StateIdle, "backend": surface.StateWorking}, "h0")
 
 	tickDone := make(chan struct{})
 	go func() { d.Tick(); close(tickDone) }()
@@ -287,12 +287,12 @@ func TestSynthesisWakeTargetsArbitraryAgentOutsideMutex(t *testing.T) {
 // wake EVER fires and behavior is byte-identical. A boat finish still mirrors / wakes as before.
 func TestSynthesisDefaultInert(t *testing.T) {
 	f := newFixture()
-	cfg := f.config("hydra-ops", []string{"hydra-ops", "v12-dev"}, 3, "none")
+	cfg := f.config("xo", []string{"xo", "backend"}, 3, "none")
 	// No WakeAgent / SynthParents / SynthRead set → inert.
 	d := newDet(t, f, cfg)
-	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle, "v12-dev": surface.StateWorking}, "h0")
-	f.set("hydra-ops", surface.StateIdle)
-	f.set("v12-dev", surface.StateIdle)
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateWorking}, "h0")
+	f.set("xo", surface.StateIdle)
+	f.set("backend", surface.StateIdle)
 	f.signal = "h0"
 
 	d.Tick() // must not panic; the WakeMaterial path is unchanged
@@ -308,15 +308,15 @@ func TestSynthesisDoesNotHijackPrimaryWake(t *testing.T) {
 	f := newSynthFixture(t)
 	var primaryWakes int
 	var pmu sync.Mutex
-	cfg := f.config("hydra-ops", []string{"hydra-ops", "family-office", "v12-dev"})
+	cfg := f.config("xo", []string{"xo", "xo-2", "backend"})
 	cfg.Wake = func(WakeKind, []string) { pmu.Lock(); primaryWakes++; pmu.Unlock() }
-	// v12-dev finishing is BOTH a desk-finish (WakeMaterial → primary XO via Wake) AND a synthesis
-	// owe (→ family-office via WakeAgent). Both must fire on their OWN seam.
-	f.parents["v12-dev"] = []string{"family-office"}
-	f.setSub("v12-dev", "x")
+	// backend finishing is BOTH a desk-finish (WakeMaterial → primary XO via Wake) AND a synthesis
+	// owe (→ xo-2 via WakeAgent). Both must fire on their OWN seam.
+	f.parents["backend"] = []string{"xo-2"}
+	f.setSub("backend", "x")
 	cfg.Assess = func(a string) surface.State { return surface.StateIdle }
 	d := f.newDet(t, cfg)
-	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle, "family-office": surface.StateIdle, "v12-dev": surface.StateWorking}, "h0")
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "xo-2": surface.StateIdle, "backend": surface.StateWorking}, "h0")
 
 	d.Tick()
 
@@ -325,8 +325,8 @@ func TestSynthesisDoesNotHijackPrimaryWake(t *testing.T) {
 	if primaryWakes != 1 {
 		t.Errorf("the desk-finish material wake must still fire through the primary Wake seam exactly once, got %d", primaryWakes)
 	}
-	if got := f.synthWakes(); len(got) != 1 || got[0].agent != "family-office" {
-		t.Errorf("the synthesis wake must fire through WakeAgent to family-office, got %+v", got)
+	if got := f.synthWakes(); len(got) != 1 || got[0].agent != "xo-2" {
+		t.Errorf("the synthesis wake must fire through WakeAgent to xo-2, got %+v", got)
 	}
 }
 
@@ -334,36 +334,36 @@ func TestSynthesisDoesNotHijackPrimaryWake(t *testing.T) {
 // suppressed (no re-post / no wake).
 func TestSynthesisMaterialitySuppressesUnchanged(t *testing.T) {
 	f := newSynthFixture(t)
-	cfg := f.config("hydra-ops", []string{"hydra-ops", "family-office", "v12-dev"})
+	cfg := f.config("xo", []string{"xo", "xo-2", "backend"})
 	cfg.SynthEveryTicks = 1
-	f.parents["v12-dev"] = []string{"family-office"}
-	f.setSub("v12-dev", "stable text")
+	f.parents["backend"] = []string{"xo-2"}
+	f.setSub("backend", "stable text")
 	d := f.newDet(t, cfg)
-	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle, "family-office": surface.StateIdle, "v12-dev": surface.StateWorking}, "h0")
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "xo-2": surface.StateIdle, "backend": surface.StateWorking}, "h0")
 
-	// Tick 1: v12-dev finishes with "stable text" → first synthesis (everything new) fires.
-	f.set("hydra-ops", surface.StateIdle)
-	f.set("family-office", surface.StateIdle)
-	f.set("v12-dev", surface.StateIdle)
+	// Tick 1: backend finishes with "stable text" → first synthesis (everything new) fires.
+	f.set("xo", surface.StateIdle)
+	f.set("xo-2", surface.StateIdle)
+	f.set("backend", surface.StateIdle)
 	d.Tick()
 	if got := f.synthWakes(); len(got) != 1 {
 		t.Fatalf("first synthesis should fire, got %+v", got)
 	}
 
-	// Tick 2: v12-dev finishes AGAIN but its latest text is UNCHANGED → materiality suppresses.
-	f.set("v12-dev", surface.StateWorking)
+	// Tick 2: backend finishes AGAIN but its latest text is UNCHANGED → materiality suppresses.
+	f.set("backend", surface.StateWorking)
 	d.Tick()
-	f.set("v12-dev", surface.StateIdle)
+	f.set("backend", surface.StateIdle)
 	d.Tick()
 	if got := f.synthWakes(); len(got) != 1 {
 		t.Fatalf("unchanged subordinate must not re-fire synthesis, got %d: %+v", len(got), got)
 	}
 
-	// Tick 3: v12-dev's text CHANGES → materiality allows a new synthesis.
-	f.set("v12-dev", surface.StateWorking)
+	// Tick 3: backend's text CHANGES → materiality allows a new synthesis.
+	f.set("backend", surface.StateWorking)
 	d.Tick()
-	f.setSub("v12-dev", "new text")
-	f.set("v12-dev", surface.StateIdle)
+	f.setSub("backend", "new text")
+	f.set("backend", surface.StateIdle)
 	d.Tick()
 	if got := f.synthWakes(); len(got) != 2 {
 		t.Fatalf("a changed subordinate must re-fire synthesis, got %d: %+v", len(got), got)
@@ -375,28 +375,28 @@ func TestSynthesisMaterialitySuppressesUnchanged(t *testing.T) {
 // over the SAME sidecar path simulates the restart.
 func TestSynthesisMaterialitySurvivesRestart(t *testing.T) {
 	f := newSynthFixture(t)
-	f.parents["v12-dev"] = []string{"family-office"}
-	f.setSub("v12-dev", "stable text")
+	f.parents["backend"] = []string{"xo-2"}
+	f.setSub("backend", "stable text")
 
 	// Detector A: first synthesis persists the last-seen sidecar.
-	cfgA := f.config("hydra-ops", []string{"hydra-ops", "family-office", "v12-dev"})
+	cfgA := f.config("xo", []string{"xo", "xo-2", "backend"})
 	dA := f.newDet(t, cfgA)
-	seed(dA, map[string]surface.State{"hydra-ops": surface.StateIdle, "family-office": surface.StateIdle, "v12-dev": surface.StateWorking}, "h0")
-	f.set("hydra-ops", surface.StateIdle)
-	f.set("family-office", surface.StateIdle)
-	f.set("v12-dev", surface.StateIdle)
+	seed(dA, map[string]surface.State{"xo": surface.StateIdle, "xo-2": surface.StateIdle, "backend": surface.StateWorking}, "h0")
+	f.set("xo", surface.StateIdle)
+	f.set("xo-2", surface.StateIdle)
+	f.set("backend", surface.StateIdle)
 	dA.Tick()
 	if got := f.synthWakes(); len(got) != 1 {
 		t.Fatalf("first synthesis should fire, got %+v", got)
 	}
 
 	// Detector B: a fresh detector over the SAME sidecar path (the restart). Subordinate unchanged.
-	cfgB := f.config("hydra-ops", []string{"hydra-ops", "family-office", "v12-dev"})
+	cfgB := f.config("xo", []string{"xo", "xo-2", "backend"})
 	dB := f.newDet(t, cfgB)
-	seed(dB, map[string]surface.State{"hydra-ops": surface.StateIdle, "family-office": surface.StateIdle, "v12-dev": surface.StateWorking}, "h0")
-	f.set("v12-dev", surface.StateWorking)
+	seed(dB, map[string]surface.State{"xo": surface.StateIdle, "xo-2": surface.StateIdle, "backend": surface.StateWorking}, "h0")
+	f.set("backend", surface.StateWorking)
 	dB.Tick()
-	f.set("v12-dev", surface.StateIdle)
+	f.set("backend", surface.StateIdle)
 	dB.Tick()
 	if got := f.synthWakes(); len(got) != 1 {
 		t.Fatalf("after restart, an unchanged subordinate must NOT re-fire synthesis (restart-storm), got %d: %+v", len(got), got)
@@ -407,25 +407,25 @@ func TestSynthesisMaterialitySurvivesRestart(t *testing.T) {
 // that wake (never hashed as empty), so a transient resolve failure neither flaps nor suppresses.
 func TestSynthesisMaterialityExcludesUnreadableSubordinate(t *testing.T) {
 	f := newSynthFixture(t)
-	cfg := f.config("hydra-ops", []string{"hydra-ops", "family-office", "sub1", "sub2"})
+	cfg := f.config("xo", []string{"xo", "xo-2", "sub1", "sub2"})
 	cfg.SynthEveryTicks = 1
-	f.parents["sub1"] = []string{"family-office"}
-	f.parents["sub2"] = []string{"family-office"}
+	f.parents["sub1"] = []string{"xo-2"}
+	f.parents["sub2"] = []string{"xo-2"}
 	f.setSub("sub1", "sub1 stable")
 	f.setSub("sub2", "sub2 stable")
 	d := f.newDet(t, cfg)
-	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle, "family-office": surface.StateIdle, "sub1": surface.StateWorking, "sub2": surface.StateIdle}, "h0")
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "xo-2": surface.StateIdle, "sub1": surface.StateWorking, "sub2": surface.StateIdle}, "h0")
 
 	// Tick 1: sub1 finishes → first synthesis (both readable) fires + records both hashes.
-	f.set("hydra-ops", surface.StateIdle)
-	f.set("family-office", surface.StateIdle)
+	f.set("xo", surface.StateIdle)
+	f.set("xo-2", surface.StateIdle)
 	f.set("sub1", surface.StateIdle)
 	d.Tick()
 	if got := f.synthWakes(); len(got) != 1 {
 		t.Fatalf("first synthesis should fire, got %+v", got)
 	}
 
-	// Tick 2: sub2 becomes UNREADABLE and sub1 unchanged. A finish re-owes family-office. The
+	// Tick 2: sub2 becomes UNREADABLE and sub1 unchanged. A finish re-owes xo-2. The
 	// unreadable sub2 must be EXCLUDED (not hashed as "" → "changed to empty"), and sub1 is
 	// unchanged → no material change → no re-fire (no flap).
 	f.setUnreadable("sub2")
@@ -442,14 +442,14 @@ func TestSynthesisMaterialityExcludesUnreadableSubordinate(t *testing.T) {
 // never silent-never-fire. A brand-new detector (no sidecar) fires on the first owed wake.
 func TestSynthesisMissingSidecarFiresOnce(t *testing.T) {
 	f := newSynthFixture(t)
-	cfg := f.config("hydra-ops", []string{"hydra-ops", "family-office", "v12-dev"})
-	f.parents["v12-dev"] = []string{"family-office"}
-	f.setSub("v12-dev", "anything")
+	cfg := f.config("xo", []string{"xo", "xo-2", "backend"})
+	f.parents["backend"] = []string{"xo-2"}
+	f.setSub("backend", "anything")
 	d := f.newDet(t, cfg) // sidecar path does not exist yet
-	seed(d, map[string]surface.State{"hydra-ops": surface.StateIdle, "family-office": surface.StateIdle, "v12-dev": surface.StateWorking}, "h0")
-	f.set("hydra-ops", surface.StateIdle)
-	f.set("family-office", surface.StateIdle)
-	f.set("v12-dev", surface.StateIdle)
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "xo-2": surface.StateIdle, "backend": surface.StateWorking}, "h0")
+	f.set("xo", surface.StateIdle)
+	f.set("xo-2", surface.StateIdle)
+	f.set("backend", surface.StateIdle)
 
 	d.Tick()
 	if got := f.synthWakes(); len(got) != 1 {

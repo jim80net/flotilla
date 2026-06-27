@@ -103,8 +103,8 @@ func oneChannelCfg() *roster.Config {
 	return &roster.Config{
 		OperatorUserID: "op",
 		ChannelID:      "C1",
-		XOAgent:        "hydra-ops",
-		Agents:         []roster.Agent{{Name: "hydra-ops"}},
+		XOAgent:        "xo",
+		Agents:         []roster.Agent{{Name: "xo"}},
 	}
 }
 

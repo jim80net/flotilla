@@ -4,7 +4,7 @@
 
 #157 asks for an XO-triggered "close the chapter, restart fresh" primitive that preserves context via
 flotilla scaffolding, so a desk never has to run until it compacts. #158 (gated on #157) then moves
-family-office claude→grok using the same primitive — so #157 is built cross-harness-**ready** (an
+a federated XO claude→grok using the same primitive — so #157 is built cross-harness-**ready** (an
 arbitrary launch recipe + a harness-agnostic handoff artifact + a per-driver bridge SPI), and #158
 adds + exercises the grok bridge. #157 itself exercises ONLY claude→claude (fork 4).
 
@@ -13,7 +13,7 @@ drives `recipe.Launch` verbatim and `RespawnPane` reuses the pane id so the `@fl
 survives. The new work is the **graceful close** and the **context-bridge orchestration** that wraps
 the existing relaunch in a fail-closed lifecycle.
 
-This design was parlayed with hydra-ops (the remote XO) over a flotilla message on 2026-06-23 (the
+This design was parlayed with the primary XO (the remote XO) over a flotilla message on 2026-06-23 (the
 four forks below), then the **design-trio (`/systems-review` + STORM) found a targeted NEEDS-REWORK**
 and this revision folds the trio's prioritized findings in. The forks STAND; the rework changed the
 *injection mechanism* and the *gate signals*, not the forks. Fork 3 (the cross-harness context
@@ -22,10 +22,9 @@ provisional default (portable markdown + a templated turn) so it is not blocked 
 
 ## The root correction this revision encodes (the trio's spine finding)
 
-The first draft templated the handoff/takeover injection from MEMORY of the memex `/handoff` and
+The first draft templated the handoff/takeover injection from MEMORY of the `/handoff` and
 `/takeover` skills, not from reading them — a direct violation of "read the source, every time."
-Reading the skill bodies (`~/.claude/plugins/cache/jim80net-plugins/memex-claude/1.8.0/skills/
-{handoff,takeover}/SKILL.md`) shows BOTH skills are **human-interactive and would deadlock a
+Reading the skill bodies (the harness's `handoff`/`takeover` `SKILL.md` files) shows BOTH skills are **human-interactive and would deadlock a
 remote-driven recycle**:
 
 - `/handoff` step 8 (`SKILL.md:205-212`) is an INTERACTIVE *"Is anything missing?"* confirmation, and
@@ -395,14 +394,14 @@ interleave on a pane.
 
 ## Coordination protocol — remote desks parlay via message (a flotilla finding)
 
-This parlay surfaced the rule the hard way: hydra-ops (a REMOTE XO over the relay) could not answer an
+This parlay surfaced the rule the hard way: the primary XO (a REMOTE XO over the relay) could not answer an
 in-pane `AskUserQuestion` — the relay delivers keystrokes that navigate the menu, not select an option
 (the panel-block class, #156). Recycle bakes this in: the imperative takeover turn (Phase 4) TELLS the
 fresh session it is remote-driven and to surface any clarification via a flotilla message
 (`flotilla notify` / a channel message), NEVER an interactive in-pane prompt. The recycle command
 itself emits all status to its own stdout/log (a side channel), never into the desk's composer
 (`agent-control-notices-to-side-channel`). This is a generalizable flotilla coordination invariant,
-not circumstantial Spark config.
+not circumstantial deployment config.
 
 **Operating model + outcome feedback (the trio's operability fix).** `flotilla recycle <desk>` is a
 shell command the XO runs IN A PANE IT CONTROLS, so the XO reads the phase-by-phase stdout there — that
@@ -426,9 +425,9 @@ is NOT evidence for the cross-harness pillar; the spec does not stand it as such
 - The handoff ARTIFACT is markdown — harness-agnostic by construction.
 - `RecycleBridge` is per-driver, so a grok bridge (its handoffs convention + a plain takeover turn) is
   a #158 addition behind the same interface, not a retrofit.
-- **Capability-parity is a #158 gate, surfaced not silently degraded:** before the family-office
-  cutover, #158 confirms Grok's harness supports subagents / parallel-review / git-PR / MCP (family-
-  office runs multi-agent reviews and owns tactical-head's real-money order path). If it genuinely
+- **Capability-parity is a #158 gate, surfaced not silently degraded:** before the federated XO's
+  cutover, #158 confirms Grok's harness supports subagents / parallel-review / git-PR / MCP (the
+  federated XO runs multi-agent reviews and owns a high-consequence system's approval-sensitive order path). If it genuinely
   cannot, that is an operator-facing finding, not a quiet downgrade.
 
 ## Alternatives considered (and rejected)

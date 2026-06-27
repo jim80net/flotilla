@@ -117,7 +117,7 @@ func (claudeCode) RotateStrategy() Strategy { return SlashCommand }
 // behaviour is verified in the recycle live-validation before it is trusted in anger.
 func (c claudeCode) Close(pane string) error { return c.slashKeys(pane, "/exit") }
 
-// --- RecycleBridge (the reference implementation; memex /handoff + /takeover FORMAT,
+// --- RecycleBridge (the reference implementation; the /handoff + /takeover FORMAT,
 //     driven non-interactively) ---
 
 // HandoffPath is the claude handoffs convention: <cwd>/.claude/handoffs/recycle-<token>.md.

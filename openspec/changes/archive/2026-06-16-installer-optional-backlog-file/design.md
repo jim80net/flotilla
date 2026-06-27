@@ -19,7 +19,7 @@ installer key so the gate is enabled the same anti-drift way.
 ### Decision: ExecStart-arg form, not `Environment=`
 Every other config in the unit (roster, secrets, ack-file) is an `ExecStart` argument, so a reader
 sees the flag explicitly in `systemctl cat` and there is ONE config mechanism. The `Environment=`
-form was only used in the Spark hand-made drop-in because the installer didn't support the flag yet.
+form was only used in a hand-made drop-in because the installer didn't support the flag yet.
 - **Alternatives considered:** `Environment=FLOTILLA_BACKLOG_FILE=…` (the binary reads it) — rejected
   for splitting config across two mechanisms and hiding the gate from the ExecStart line.
 
@@ -72,6 +72,6 @@ exists — so a missing file is a non-fatal warning (mirroring the `FLOTILLA_BIN
 
 ## Migration
 
-After merge, the XO replaces the live Spark drop-in
+After merge, the XO replaces the live hand-made drop-in
 (`~/.config/systemd/user/flotilla-watch.service.d/backlog.conf`) with the `.env` key + re-runs the
 installer. That deploy touches the safety-critical heartbeat clock and is the XO's to execute.

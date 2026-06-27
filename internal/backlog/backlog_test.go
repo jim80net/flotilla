@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// contractFixture mirrors the live fleet-backlog.md migrated to the item-line CONTRACT
+// contractFixture mirrors a fleet-backlog.md migrated to the item-line CONTRACT
 // (- [<status>] …): 5 unblocked (in-flight/next), 1 operator-blocked, plus other sections that
 // MUST be ignored. This is the backward-compat shape the gate parses in production.
 const contractFixture = `# Fleet backlog
@@ -14,13 +14,13 @@ const contractFixture = `# Fleet backlog
 - [next] this is in the GOALS section and must be ignored
 
 ## Backlog (prioritized; advance the top UNBLOCKED item every wake)
-- [in-flight] SPCX options analysis — before the open (tactical-head)
+- [in-flight] Auth token rotation — before the release (xo)
 - [in-flight] Grok desk up (flotilla-dev)
-- [in-flight] Equities/options framework extension (crypto-trend → tactical-head)
+- [in-flight] Search framework extension (backend → xo)
 - [next] Goal-driven loop mechanism (flotilla-dev)
 - [done] Inbound-path bug fix (flotilla-dev) — #71/#74 merged
-- [in-flight] PR-D multi-instrument tactical
-- [blocked] PR-E loss-cap values — awaiting operator value sign-off
+- [in-flight] PR-D multi-tenant pipeline
+- [blocked] PR-E retry-limit values — awaiting operator value sign-off
 
 ## Operator decisions queued
 - [next] this bullet is in a DIFFERENT section and must be ignored
@@ -50,8 +50,8 @@ func TestParseContractFixture(t *testing.T) {
 	if st.Items != 7 {
 		t.Errorf("Items = %d, want 7", st.Items)
 	}
-	if len(st.Unblocked) > 0 && !strings.Contains(st.Unblocked[0], "SPCX") {
-		t.Errorf("Unblocked[0] = %q, want the top (SPCX) item — file order is the drive priority", st.Unblocked[0])
+	if len(st.Unblocked) > 0 && !strings.Contains(st.Unblocked[0], "Auth") {
+		t.Errorf("Unblocked[0] = %q, want the top (Auth) item — file order is the drive priority", st.Unblocked[0])
 	}
 }
 
@@ -69,7 +69,7 @@ func TestParseEdgeAndFailSafe(t *testing.T) {
 		}
 	})
 	t.Run("markerless item → Malformed AND Unblocked (err toward driving + flag)", func(t *testing.T) {
-		st := Parse("## Backlog\n1. **SPCX** (tactical-head, IN FLIGHT) — no bracket marker\n")
+		st := Parse("## Backlog\n1. **Auth** (xo, IN FLIGHT) — no bracket marker\n")
 		if st.Malformed != 1 {
 			t.Errorf("Malformed = %d, want 1 (a markerless item is flagged)", st.Malformed)
 		}

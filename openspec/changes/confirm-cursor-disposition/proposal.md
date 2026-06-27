@@ -3,20 +3,20 @@
 ## Why
 
 #153 (panel-input-guard) shipped a **pre-paste geometry detector** for the agents-panel input-block.
-Live validation (hydra-ops, operator) proved the model wrong on two counts, both invisible to the
+Live validation (the primary XO, operator) proved the model wrong on two counts, both invisible to the
 synthetic fixtures:
 
-1. **Cursor/geometry position does NOT prove reachability.** `family-office`'s cursor sat on the
+1. **Cursor/geometry position does NOT prove reachability.** `backend`'s cursor sat on the
    MAIN composer, yet a real submit **pasted and stayed PENDING** (25 polls, never landed) — it is
    genuinely BLOCKED. So a pre-paste *predictor* (geometry OR cursor) cannot be the gate; the
    **submit-confirm itself is the ground truth**: composer PENDING after the Enter-only retries +
    grace == BLOCKED, regardless of cursor/geometry.
 2. **The composer probe was blind to a sub-composer.** `parseComposerPending` scans only the bottom
-   ~10 lines. `memex` was in a per-agent message SUB-COMPOSER (`❯ Message @hermes-ocr`) ~13 lines
+   ~10 lines. `data` was in a per-agent message SUB-COMPOSER (`❯ Message @reviewer`) ~13 lines
    above the docked panel — OUTSIDE the window → it read "undetermined", so #153 could not even
-   measure memex's pending state (the false-negative).
+   measure the desk's pending state (the false-negative).
 
-A third live state surfaced on `hydra-ops`: `❯ Press up to edit queued messages` — the message was
+A third live state surfaced on `xo`: `❯ Press up to edit queued messages` — the message was
 **QUEUED** behind a session-rating modal (will deliver), which the confirm currently mis-reports as
 a failure.
 
@@ -67,7 +67,7 @@ ONE narrow safety carve-out.
 
 - The confirm timing/poll constants (unchanged).
 - A mouse-click auto-restore (still a separate validated-or-dropped spike).
-- Manual recovery of the currently-stuck `family-office`/`memex` (a human keystroke; held).
+- Manual recovery of the currently-stuck `backend`/`data` (a human keystroke; held).
 
 ## Impact
 
@@ -81,4 +81,4 @@ ONE narrow safety carve-out.
 - **Risk:** MEDIUM — reworks the confirm classification. Guarded by: the authority is the
   positive-evidence pending-after-retries (never a guess); the pre-paste refuse is the narrow
   fail-safe; every undetermined path fails toward the spinner / not-blocked; real-capture fixtures
-  (family-office pending, memex sub-composer, hydra-ops queued) + a LIVE validation pass.
+  (backend pending, data sub-composer, xo queued) + a LIVE validation pass.

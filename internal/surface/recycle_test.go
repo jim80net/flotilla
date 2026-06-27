@@ -8,8 +8,8 @@ import (
 // TestClaudeHandoffPath: the designated path embeds the token under .claude/handoffs/.
 func TestClaudeHandoffPath(t *testing.T) {
 	c := newClaudeCode()
-	got := c.HandoffPath("/home/jim/work/spark", "20260623T141530.000000001-a3f91b2c")
-	want := "/home/jim/work/spark/.claude/handoffs/recycle-20260623T141530.000000001-a3f91b2c.md"
+	got := c.HandoffPath("/home/operator/work/project", "20260623T141530.000000001-a3f91b2c")
+	want := "/home/operator/work/project/.claude/handoffs/recycle-20260623T141530.000000001-a3f91b2c.md"
 	if got != want {
 		t.Errorf("HandoffPath = %q, want %q", got, want)
 	}
@@ -62,7 +62,7 @@ func TestClaudeTakeoverTurn(t *testing.T) {
 // TestHandoffTurnPathWithSpaces: a path with spaces is embedded verbatim (no truncation).
 func TestHandoffTurnPathWithSpaces(t *testing.T) {
 	c := newClaudeCode()
-	path := "/home/jim/my work/.claude/handoffs/recycle-tok.md"
+	path := "/home/operator/my work/.claude/handoffs/recycle-tok.md"
 	if !strings.Contains(c.HandoffTurn(path), path) {
 		t.Errorf("HandoffTurn dropped a spaced path")
 	}
@@ -89,8 +89,8 @@ func TestRecycleSupport(t *testing.T) {
 // .flotilla/handoffs/ (NOT the claude-branded .claude/handoffs/) — #158.
 func TestGrokHandoffPath(t *testing.T) {
 	g := newGrok()
-	got := g.HandoffPath("/home/jim/work/spark", "20260623T141530.000000001-a3f91b2c")
-	want := "/home/jim/work/spark/.flotilla/handoffs/recycle-20260623T141530.000000001-a3f91b2c.md"
+	got := g.HandoffPath("/home/operator/work/project", "20260623T141530.000000001-a3f91b2c")
+	want := "/home/operator/work/project/.flotilla/handoffs/recycle-20260623T141530.000000001-a3f91b2c.md"
 	if got != want {
 		t.Errorf("grok HandoffPath = %q, want %q", got, want)
 	}
@@ -100,7 +100,7 @@ func TestGrokHandoffPath(t *testing.T) {
 }
 
 // TestGrokHandoffTurn: the grok handoff turn names the exact path, force-commits, is non-interactive /
-// remote-driven, and references NO claude/memex skill (grok has no /handoff skill).
+// remote-driven, and references NO claude-side handoff skill (grok has no /handoff skill).
 func TestGrokHandoffTurn(t *testing.T) {
 	g := newGrok()
 	path := "/repo/.flotilla/handoffs/recycle-tok.md"
@@ -136,7 +136,7 @@ func TestGrokTakeoverTurn(t *testing.T) {
 // TestGrokTurnsPathWithSpaces: a path with spaces is embedded verbatim in both turns.
 func TestGrokTurnsPathWithSpaces(t *testing.T) {
 	g := newGrok()
-	path := "/home/jim/my work/.flotilla/handoffs/recycle-tok.md"
+	path := "/home/operator/my work/.flotilla/handoffs/recycle-tok.md"
 	if !strings.Contains(g.HandoffTurn(path), path) {
 		t.Errorf("grok HandoffTurn dropped a spaced path")
 	}

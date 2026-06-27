@@ -276,7 +276,7 @@ func (c Confirm) Submit(d Driver, pane, text string) error {
 	}
 
 	// 5. Window expiry — the AUTHORITY. A composer that PROVABLY still holds the body (Pending) after
-	//    all the retries + grace means the submit never landed: BLOCKED (the family-office case),
+	//    all the retries + grace means the submit never landed: BLOCKED (the approval-sensitive desk case),
 	//    regardless of cursor/geometry. Only an UNDETERMINED final read (no probe / unreadable) is
 	//    ambiguous → ErrUnconfirmed. (A no-probe driver — sp==nil — has no composer authority, so it
 	//    always lands here as ambiguous, exactly as before.)

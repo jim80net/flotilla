@@ -39,7 +39,7 @@ Read-Message-History permission expansion, and an unbounded-history cost/windowi
 The first revision then proposed a LOCAL mirror-event LEDGER (a chief-of-staff-style append log of
 boat-finish events). The re-trio split: STORM argued the ledger is an OVER-BUILD that inverts B1's
 bounded-scope lesson (~8 net-new surfaces, including a NEW write-path bolted onto the LIVE shipped
-Tier-1 mirror). **hydra-ops ratified (2026-06-21): the B2 substrate is TRANSCRIPT-FIRST, NOT a
+Tier-1 mirror). **The primary XO ratified (2026-06-21): the B2 substrate is TRANSCRIPT-FIRST, NOT a
 ledger.**
 
 **The ratified rationale — a rollup is a STATE view, not an event LOG.** A higher-tier synthesis
@@ -91,7 +91,7 @@ latest transcript state, read directly.
 
 - **Make the topology EXPLICIT (so it is never re-mis-read).** Each agent OWNS its home channel
   (`xo_agent == self`) and its PARENT is in that channel's `members[]` (verified live:
-  `xo_agent=tactical-head members=[family-office]`; `xo_agent=family-office members=[hydra-ops]`).
+  `xo_agent=backend members=[fleet-a]`; `xo_agent=fleet-a members=[xo]`).
   So "read the tier below me" = read the agents whose home channel lists ME as a member (a
   DOWN-traversal of the membership graph). The ONE channel where `members[]` runs the OTHER way — the
   fleet-command BROADCAST channel (`role="fleet-command"`, members = the meta-XO's full command list) —
@@ -104,8 +104,8 @@ latest transcript state, read directly.
   edge model `ch.XOAgent → m` (for `m ∈ ch.Members`) applies TWO exclusions: **(1) self-edges**
   (`m != ch.XOAgent` — the live home-channel self-membership and the legacy single-binding form,
   `roster.go:296-304`, are NOT cycles), and **(2) fleet-command channels** (`ch.Role != "fleet-command"`
-  — the live broadcast channel lists all 12 agents; included, its `hydra-ops → {everyone}` edges close
-  cycles with the per-XO channels, e.g. `hydra-ops → flotilla-dash → flotilla-dev → hydra-ops`, and
+  — the live broadcast channel lists all 12 agents; included, its `xo → {everyone}` edges close
+  cycles with the per-XO channels, e.g. `xo → desk-a → desk-b → xo`, and
   refuse the live roster — empirically verified). A genuine cycle is a MUTUAL membership between two
   DISTINCT non-fleet-command channels (channel-A's XO is a member of channel-B and channel-B's XO is a
   member of channel-A).

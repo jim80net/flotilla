@@ -31,7 +31,7 @@ SECOND member (a visibility-synthesis skill): it was specified to read "the Tier
 from Discord channel history, but flotilla is **SEND-ONLY to Discord** — the gateway is push-only
 `MESSAGE_CREATE` (`internal/discord/gateway.go:41-50`), there is no history-fetch primitive anywhere
 (grep-clean), and the relay drops inbound webhook posts (`internal/relay/relay.go:18-23`). That
-substrate does NOT exist as running code. hydra-ops **ratified a SPLIT (2026-06-21)**:
+substrate does NOT exist as running code. The primary XO **ratified a SPLIT (2026-06-21)**:
 
 - **B1 (THIS change):** ship the installable distribution surface + the Rule of Three NOW. This
   closes the circumstantial-asset gap and is independent of any synthesis substrate.
@@ -100,7 +100,7 @@ substrate does NOT exist as running code. hydra-ops **ratified a SPLIT (2026-06-
   narrow-answer-settle, and so on) is the operator's strategic lever, populated incrementally; this
   change does NOT pre-decide or enumerate the broader corpus.
 
-## Rejected alternatives (the primary-home question — surface to hydra-ops at ratification)
+## Rejected alternatives (the primary-home question — surface to the primary XO at ratification)
 
 - **Documentation-only (prose in `docs/`, no installer) — REJECTED as the primary home.** Prose a
   newcomer must find, read, and hand-copy into their agent's prompt is not a distribution surface;
@@ -141,7 +141,7 @@ substrate does NOT exist as running code. hydra-ops **ratified a SPLIT (2026-06-
 ## Impact
 
 - **New capability spec:** `constitutional-skillset`.
-- **Affected code (implement phase, after the trio + hydra-ops ratify):** new `assets/skills/`
+- **Affected code (implement phase, after the trio + the primary XO ratify):** new `assets/skills/`
   embedded tree; new `flotilla doctrine install` subcommand (`cmd/flotilla/`); the seed extension
   to `cmd/flotilla/workspace.go`; the one member asset (Rule-of-Three rule); a new
   `docs/span-of-control.md` doctrine doc. NO change to `internal/roster` (the `ChannelsAwareOf`

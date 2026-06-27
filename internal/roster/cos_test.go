@@ -53,12 +53,12 @@ func TestCosLedger_InertWhenCosAgentUnset(t *testing.T) {
 func TestIsXO(t *testing.T) {
 	// Legacy: the top-level xo_agent is the XO.
 	legacy, _ := Load(writeRoster(t, `{
-	  "operator_user_id":"U","channel_id":"C","xo_agent":"hydra-ops",
-	  "agents":[{"name":"hydra-ops"},{"name":"v12-dev"}]}`))
-	if !legacy.IsXO("hydra-ops") {
+	  "operator_user_id":"U","channel_id":"C","xo_agent":"xo",
+	  "agents":[{"name":"xo"},{"name":"backend"}]}`))
+	if !legacy.IsXO("xo") {
 		t.Error("legacy xo_agent should be an XO")
 	}
-	if legacy.IsXO("v12-dev") {
+	if legacy.IsXO("backend") {
 		t.Error("a desk is not an XO")
 	}
 	if legacy.IsXO("") {

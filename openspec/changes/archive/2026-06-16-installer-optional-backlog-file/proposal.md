@@ -5,7 +5,7 @@ The `Backlog-gated goal-driven continuation` requirement (watch spec) is opt-in 
 generates `~/.config/systemd/user/flotilla-watch.service` from `flotilla-watch.service.in` + a
 host-path `.env`) only knew the five REQUIRED keys. A host that wanted the backlog gate had to
 hand-write a systemd drop-in (`flotilla-watch.service.d/backlog.conf`) — exactly the unit drift the
-installer exists to prevent. The Spark host did this; the proper fix is an installer-supported
+installer exists to prevent. A private deployment's host did this; the proper fix is an installer-supported
 optional key so the gate is enabled the same anti-drift way as every other config.
 
 ## What Changes

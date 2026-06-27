@@ -63,4 +63,4 @@ relay-only, default-OFF, kill-switchable.
   occurrence), confirm the self-heal RECOVERS WITHOUT EXITING (the desk survives, composer reachable, a
   real send confirms) AND measure the Ctrl-C→rendered-Cleared latency to set `selfHealSettle`. Enable
   `FLOTILLA_SELF_HEAL` on the fleet only after this passes. Cold-test the live artifact, not unit stubs.
-- [ ] 6.4 `/systems-review` + STORM on the impl diff — iterate until clean. PR → hydra-ops (no-self-merge).
+- [ ] 6.4 `/systems-review` + STORM on the impl diff — iterate until clean. PR → the primary XO (no-self-merge).

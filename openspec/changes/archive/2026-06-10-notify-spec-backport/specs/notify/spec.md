@@ -23,11 +23,11 @@ file with no key for the sender SHALL produce a clean error that names the agent
 and the expected key — never a panic and never a post under a wrong identity.
 
 #### Scenario: Posts to the agent's own resolved webhook
-- **WHEN** notify runs with `--from hydra-ops` and the secrets file maps `FLOTILLA_WEBHOOK_HYDRA_OPS` to a webhook URL
-- **THEN** the request is sent to exactly that URL, with `username = "hydra-ops"`, `Content-Type: application/json`, and flotilla's explicit User-Agent
+- **WHEN** notify runs with `--from xo` and the secrets file maps `FLOTILLA_WEBHOOK_XO` to a webhook URL
+- **THEN** the request is sent to exactly that URL, with `username = "xo"`, `Content-Type: application/json`, and flotilla's explicit User-Agent
 
 #### Scenario: Missing webhook for the sender errors by name
-- **WHEN** notify runs with `--from hydra-ops` but the secrets file has no `FLOTILLA_WEBHOOK_HYDRA_OPS` key
+- **WHEN** notify runs with `--from xo` but the secrets file has no `FLOTILLA_WEBHOOK_XO` key
 - **THEN** the command errors, naming the agent (and the expected key), and posts nothing
 
 #### Scenario: Sender is required

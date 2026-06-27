@@ -24,7 +24,7 @@ the layer above, not a license to self-approve.
 **Why this is a rule, not a nicety.** Merge-on-clean-gates autonomy plus a shared git
 identity make a self-merge easy and INVISIBLE — nothing in the *git* audit trail shows
 the independent review was skipped. The merge IS the review gate; a self-merge silently
-removes it. For real-money, irreversible, or otherwise high-stakes work, that
+removes it. For approval-sensitive, irreversible, or otherwise high-stakes work, that
 independent second pair of eyes is a control you do not give up.
 
 **This does NOT slow autonomy.** Clean-gated work still merges without waiting on the

@@ -16,10 +16,10 @@ topology is stated plainly here, in the spec Purpose, and below in §2.
 **Each agent OWNS its home channel and its PARENT sits in that channel's `members[]`.** Concretely,
 verified against the LIVE roster:
 
-- `xo_agent = tactical-head`, `members = [family-office]` — the trade-desk channel: tactical-head
-  owns it; its parent family-office is a member.
-- `xo_agent = family-office`, `members = [hydra-ops]` — the project-XO channel: family-office owns
-  it; its parent (the meta-XO) hydra-ops is a member.
+- `xo_agent = backend`, `members = [fleet-a]` — the worker-desk channel: backend
+  owns it; its parent fleet-a is a member.
+- `xo_agent = fleet-a`, `members = [xo]` — the project-XO channel: fleet-a owns
+  it; its parent (the meta-XO) xo is a member.
 
 So the synthesis up-link of an agent C is **the members of the channel C OWNS** (its home channel);
 inverted, "the tier below me" = the agents whose OWN channel lists me as a member. An XO is listed in
@@ -33,21 +33,21 @@ same `members[]` graph, traversed in opposite directions.
 `members[]` is OVERLOADED, and grounding the implementation in the LIVE roster (per
 verify-before-acting) caught it where the design-trio and the legacy-star example rosters did not. In a
 per-XO home channel, `members` is the PARENT up-link (one agent). But the LIVE fleet-command channel —
-`xo_agent = hydra-ops`, `role = "fleet-command"`, `members = [all 12 agents]` — uses `members` as the
+`xo_agent = xo`, `role = "fleet-command"`, `members = [all 12 agents]` — uses `members` as the
 meta-XO's command/broadcast DOWN-list (everyone it can address), the OPPOSITE direction. Read as a
 synthesis up-link, that one channel is poison:
 
-- `AgentsBelow(tactical-head)` would include `hydra-ops` (a leaf desk "synthesizing" the meta-XO),
-  because tactical-head is a member of the broadcast channel whose XO is hydra-ops.
-- `AgentsBelow(family-office)` would include `hydra-ops` (its own boss).
-- The DAG check would find a CYCLE (`hydra-ops → … → hydra-ops`) and REFUSE TO START the live daemon.
+- `AgentsBelow(backend)` would include `xo` (a leaf desk "synthesizing" the meta-XO),
+  because backend is a member of the broadcast channel whose XO is xo.
+- `AgentsBelow(fleet-a)` would include `xo` (its own boss).
+- The DAG check would find a CYCLE (`xo → … → xo`) and REFUSE TO START the live daemon.
 
 **The fix (ratified, verified against the live roster): a `role == "fleet-command"` channel
 contributes ZERO synthesis edges.** Its members are command targets, not synthesis parents. Synthesis
 edges (AgentsBelow / AgentsAbove / the DAG) are derived ONLY from NON-fleet-command channels. `role`,
 cosmetic until now, becomes LOAD-BEARING for synthesis. With the fleet-command channel excluded the
-live topology is exactly two-tier and acyclic: `AgentsBelow(hydra-ops) = {the 5 project-XOs}`,
-`AgentsBelow(family-office) = {its 5 boats}` (no hydra-ops leak), leaves empty, DAG cycle = NONE. The
+live topology is exactly two-tier and acyclic: `AgentsBelow(xo) = {the 5 project-XOs}`,
+`AgentsBelow(fleet-a) = {its 5 desks}` (no xo leak), leaves empty, DAG cycle = NONE. The
 meta-XO still POSTS its Tier-3 synthesis INTO the fleet-command channel it owns; only the READ
 derivation excludes it. (A new schema field — `parent`/`reports_to` — was considered and REJECTED:
 `role` already exists for exactly this, no new schema.)
@@ -80,10 +80,10 @@ the table:
 
 ### Ratified: (a) transcript-first. (b) the ledger is a fast-follow.
 
-**hydra-ops ratified (a) TRANSCRIPT-FIRST.** The deciding question, surfaced by STORM and put to
-hydra-ops as the ratification fork, was: **does a higher-tier synthesis need the HISTORY of every
+**The primary XO ratified (a) TRANSCRIPT-FIRST.** The deciding question, surfaced by STORM and put to
+the primary XO as the ratification fork, was: **does a higher-tier synthesis need the HISTORY of every
 finish across a burst, or the LATEST STATE of each subordinate?** The answer is latest-state: a
-rollup is inherently a STATE view — "the trade-desk is building X, macro is on Y" — not an event log
+rollup is inherently a STATE view — "the backend desk is building X, the data desk is on Y" — not an event log
 to replay. So:
 
 1. **A rollup is current-STATE, not an event-LOG.** Tier 2/3 answers "where is each subordinate right
@@ -198,11 +198,11 @@ is built with an edge `ch.XOAgent → m` for each `m ∈ ch.Members` such that:
 - `m != ch.XOAgent` (DROP self-edges). An agent being a member of its OWN channel
   (`ch.XOAgent ∈ ch.Members` — the live home-channel self-membership and the legacy single-binding
   form, `Bindings()`, `roster.go:296-304`) is NOT a cycle; it is the normal home-channel shape. A naive
-  model would flag it as `hydra-ops → hydra-ops` and refuse to start.
+  model would flag it as `xo → xo` and refuse to start.
 - `ch.Role != "fleet-command"` (DROP the broadcast channel's edges — the implement-gate P0). The
   fleet-command channel lists all 12 agents as members for command addressing; included, it adds
-  `hydra-ops → {every agent}` edges that close cycles with the per-XO home channels (`hydra-ops →
-  flotilla-dash → flotilla-dev → hydra-ops`, empirically verified) and REFUSE the live roster.
+  `xo → {every agent}` edges that close cycles with the per-XO home channels (`xo →
+  desk-a → desk-b → xo`, empirically verified) and REFUSE the live roster.
 
 The cycle to genuinely catch is a MUTUAL membership between two DISTINCT non-fleet-command channels:
 channel-X's XO is a member of channel-Y AND channel-Y's XO is a member of channel-X (X's XO would
@@ -401,16 +401,16 @@ The meta-XO synthesizes the project-XOs' latest state UP into #c2. The contract 
 ```
 [flotilla #c2 — fleet synthesis · 2026-06-21T03:10Z]
 
-HEADLINE: 2 of 3 project fleets advancing. spark-fleet shipped the Tier-1 mirror
+HEADLINE: 2 of 3 project fleets advancing. fleet-a shipped the Tier-1 mirror
 (live, first POST 02:53). research-fleet is mid-backtest. ops-fleet idle.
 
 OPERATOR DECISIONS (2):
-  • spark-fleet — B2 substrate ratification: transcript-first (a) vs local-ledger (b).
-    Recommendation: (a) transcript-first. → drill: #spark-xo
+  • fleet-a — B2 substrate ratification: transcript-first (a) vs local-ledger (b).
+    Recommendation: (a) transcript-first. → drill: #fleet-a-xo
   • research-fleet — paid backtest budget top-up requested ($25). → drill: #research-xo
 
 DRILL-DOWN:
-  • #spark-xo  — desk-mirror-tier1 merged; constitutional-skillset (B1) merged; B2 in design.
+  • #fleet-a-xo  — desk-mirror-tier1 merged; constitutional-skillset (B1) merged; B2 in design.
   • #research-xo — entry-confirmation variants backtest running (3 desks).
   • #ops-xo    — idle, last activity 41m ago.
 ```
@@ -458,14 +458,14 @@ genuinely folded. The new findings, all folded above:
 - **P1-A — owed-marking desk→XO resolver (§3).** Add `AgentsAbove(agent)` (inverse of `AgentsBelow`);
   key the owed-set off ALL parents (a boat in 2 channels marks both); the cited
   `BindingForChannel(...).XOAgent` was wrong-typed (channel id vs agent name). FOLDED.
-- **P0 (caught at the IMPLEMENT gate, ratified by hydra-ops, §0/§2) — fleet-command channels contribute
+- **P0 (caught at the IMPLEMENT gate, ratified by the primary XO, §0/§2) — fleet-command channels contribute
   ZERO synthesis edges.** Grounding the implementation in the LIVE roster found that the design's
   `AgentsBelow` / DAG cycle on the live broadcast channel (`role="fleet-command"`, members=all 12):
-  `AgentsBelow(tactical-head)` wrongly = `{hydra-ops}`, and the DAG refused to start. Fix: derive
+  `AgentsBelow(backend)` wrongly = `{xo}`, and the DAG refused to start. Fix: derive
   AgentsBelow / AgentsAbove / the DAG edges ONLY from NON-fleet-command channels (`role` becomes
   load-bearing; the `parent`/`reports_to` schema alternative was rejected). The meta still POSTS Tier-3
   into the fleet-command channel it owns. The example/demo rosters are updated to the federated
-  broadcast shape so the gap can never slip again. FOLDED + independently re-verified by hydra-ops.
+  broadcast shape so the gap can never slip again. FOLDED + independently re-verified by the primary XO.
 - **P1-B — agent→pane→transcript hop + host-local invariant (§1).** Read via the surface-agnostic
   `surface.ResultReader.LatestResult(pane)` seam (the EXACT Tier-1 reader — NOT a direct `claudestore`
   bind, which would exclude grok); resolve agent→pane via `ResolvePane(agentTitle(...))`; fail-soft
