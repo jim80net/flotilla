@@ -242,7 +242,7 @@ Consequences for the design:
   gap is the FEDERATED c2-channel XOs — `xo-2` et al. — which lack it.)
 - **"Mechanically enforced" + "reliable hotline" ⇒ leans C, not A.** A escalates fast/queued/sub-tick
   turns to a manual "read the pane" — which is the EXACT failure the operator just hit. A reliable
-  hotline must deliver the verbatim reply for EVERY turn. the primary XO is surfacing A-vs-C to the operator.
+  hotline must deliver the verbatim reply for EVERY turn. The primary XO is surfacing A-vs-C to the operator.
 
 ### 9a. The mechanism that makes C clean + flotilla-native — a TRANSCRIPT-WATCHER (verified feasible)
 

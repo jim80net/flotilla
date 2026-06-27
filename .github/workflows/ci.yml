@@ -112,7 +112,15 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Boundary guard (tree + open issues/PRs)
         env:
-          # Empty when the secret is unset (a fork) → generic patterns only.
-          FLOTILLA_PRIVATE_DENYLIST: ${{ secrets.FLOTILLA_PRIVATE_DENYLIST }}
+          # Unset on a fork → generic patterns only. The secret may be EITHER one
+          # term per line OR a single |-alternation; writing it to the denylist file
+          # (which the guard parses line-by-line and joins with |) handles both —
+          # avoiding the fail-open a raw multiline regex env value would cause.
+          FLOTILLA_PRIVATE_DENYLIST_SECRET: ${{ secrets.FLOTILLA_PRIVATE_DENYLIST }}
           GH_TOKEN: ${{ github.token }}
-        run: bash scripts/check-private-boundary.sh --issues
+        run: |
+          if [ -n "${FLOTILLA_PRIVATE_DENYLIST_SECRET}" ]; then
+            mkdir -p .flotilla
+            printf '%s\n' "${FLOTILLA_PRIVATE_DENYLIST_SECRET}" > .flotilla/private-denylist
+          fi
+          bash scripts/check-private-boundary.sh --issues

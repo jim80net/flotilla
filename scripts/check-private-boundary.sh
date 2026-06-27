@@ -55,8 +55,11 @@ deployment_alternation=""
 if [ -n "${FLOTILLA_PRIVATE_DENYLIST:-}" ]; then
   deployment_alternation="$FLOTILLA_PRIVATE_DENYLIST"
 elif [ -f "$DENYLIST_FILE" ]; then
-  # one term/regex per line; strip comments + blanks; join with '|'
-  deployment_alternation="$(grep -vE '^\s*(#|$)' "$DENYLIST_FILE" | paste -sd '|' -)"
+  # one term/regex per line; strip comments + blanks; join with '|'. The `|| true`
+  # keeps a comment-only/empty file from aborting under `set -e` (grep exits 1 on no
+  # match) — an empty result is then treated as "no deployment denylist" below, so a
+  # freshly-copied template still runs the built-in generic checks.
+  deployment_alternation="$(grep -vE '^[[:space:]]*(#|$)' "$DENYLIST_FILE" | paste -sd '|' - || true)"
 fi
 
 # Assemble the full pattern (generic always; deployment only if configured).

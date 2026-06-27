@@ -7,7 +7,8 @@
 # a hit. In CI, provide the same content via the FLOTILLA_PRIVATE_DENYLIST repo
 # secret instead, so your list is never committed.
 #
-# One term or POSIX-extended regex per line. Blank lines and #-comments ignored.
+# One term or PCRE regex per line (the guard matches with `grep -P`). Blank lines
+# and #-comments ignored.
 # Keep it HIGH-SIGNAL: tokens with no legitimate generic use, so the guard never
 # flaps. Ambiguous words (a common noun that doubles as a desk name) are better
 # caught by review against docs/private-public-boundary.md than by this list.
