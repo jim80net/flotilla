@@ -19,6 +19,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The public/private boundary guard: flotilla is a PUBLIC product dogfooded on a
+  # private deployment, so public artifacts must NEVER carry deployment-specific
+  # identifiers (a fleet's desk names, org/venture/broker/vendor names, account
+  # ids). This greps a high-signal denylist across the tracked tree and fails on a
+  # hit — the executable form of docs/private-public-boundary.md, so a deployment
+  # specific can never silently re-enter the public surface. Fast + dependency-free,
+  # so it runs first.
+  private-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Boundary guard (no deployment specifics in public artifacts)
+        run: bash scripts/check-private-boundary.sh
+
   build-test:
     runs-on: ubuntu-latest
     steps:
