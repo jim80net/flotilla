@@ -37,6 +37,22 @@ const detectorContinuationBuiltin = "[flotilla change-detector] You just finishe
 	"work, and signal idle by running: touch {{settle}}. (Your context is rotated between steps " +
 	"— rely on durable state, not this conversation.)"
 
+// deskContinuationBuiltin is the recursive desk-heartbeat (#183) prompt — DISTINCT from the XO's
+// (design §8a/§8h). It is the NON-AUTHORIZING beat to an idle desk: advance only ALREADY-AUTHORIZED
+// in-flight work, and — load-bearing for the binary-Idle claude driver (§8a) — NEVER approve a
+// pending tool/permission/approval prompt on a heartbeat (a heartbeat is not authorization). It drops
+// the XO prompt's "context is rotated between steps" line (a desk is NOT rotated by this design) and
+// the {{tracker}} read-source (a leaf desk may keep no durable tracker — "continue your in-flight
+// task; if you've lost the thread, reply idle"). {{settle}} resolves to the DESK's own per-agent
+// settle marker; a workspace HEARTBEAT.md may override the wording.
+const deskContinuationBuiltin = "[flotilla heartbeat] You have been idle. Advance only the next clear, " +
+	"ALREADY-AUTHORIZED step of your in-flight task — reading durable state, not memory. If a tool, " +
+	"permission, or approval prompt is pending, do NOT approve it on this heartbeat (a heartbeat is not " +
+	"authorization) — reply idle by touching your settle marker. A task blocked only from landing (a " +
+	"push gate, a pending review) is NOT idle — advance it locally, then surface the blocker in one " +
+	"line. If nothing AUTHORIZED remains, or you've lost the thread, reply 'idle', do NOT manufacture " +
+	"work, and signal idle by running: touch {{settle}}."
+
 // cmdWatch runs the long-lived watch daemon. This is the CLOCK half: it
 // heartbeats the XO so a turn-based agent keeps advancing clear, authorized work
 // without operator input, and watches liveness (tick→ack) so a dead or
@@ -624,6 +640,39 @@ func backlogWakeBody(items []string, backlogPath, ackInstr string) string {
 		"genuinely operator-blocked, drive PREP and move to the next. Reply idle ONLY if every remaining " +
 		"backlog item is done or operator-blocked — the loop will NOT settle while unblocked work remains. " +
 		"Read the backlog file (" + backlogPath + "), not this conversation." + ackInstr
+}
+
+// deskHeartbeatBody resolves the recursive desk-heartbeat (#183) continuation prompt for ONE desk: it
+// runs the desk-continuation builtin through workspace.ResolvePrompt so a per-agent HEARTBEAT.md may
+// override the wording, substituting {{settle}} with the DESK's OWN per-agent settle path (resolved
+// via settleFor) — NOT the XO's. The XO-only {{tracker}} placeholder is absent from the desk builtin,
+// so an empty tracker is passed. ackInstr is appended so a beaten desk re-acks liveness (a wake that
+// never instructs an ack would falsely trip the AckAge wedge). A HEARTBEAT.md read error fails open to
+// the builtin (ResolvePrompt's posture). Pure relative to the panes (a file read of the override).
+func deskHeartbeatBody(agent string, settleFor func(string) string, ackInstr string) (string, error) {
+	body, err := workspace.ResolvePrompt(agent, deskContinuationBuiltin, "", settleFor(agent))
+	if err != nil {
+		return "", err
+	}
+	return body + ackInstr, nil
+}
+
+// newDeskHeartbeatDispatch builds the detector's WakeDeskHeartbeat seam (a func(agent)): it resolves
+// the desk-continuation body (per-agent HEARTBEAT.md + that desk's settle path) and enqueues it as an
+// AUDIT-SUPPRESSED Kind:"detector" job to the desk. Kind:"detector" is load-bearing twice over (design
+// §8d): SetMirror suppresses it (no operator-channel spam) AND it is isRelay-false, so a busy/
+// input-blocked pane drops it (fire-and-forget) rather than queueing into a focused modal. enqueue is
+// injected (the Injector's Enqueue) so the dispatch is unit-testable without tmux. A body-resolution
+// error is logged and the beat dropped — a broken optional HEARTBEAT.md must never crash the daemon.
+func newDeskHeartbeatDispatch(enqueue func(watch.Job), settleFor func(string) string, ackInstr string) func(string) {
+	return func(agent string) {
+		body, err := deskHeartbeatBody(agent, settleFor, ackInstr)
+		if err != nil {
+			log.Printf("flotilla watch: desk-heartbeat prompt resolve failed for %q: %v (beat dropped this tick)", agent, err)
+			return
+		}
+		enqueue(watch.Job{Agent: agent, Message: body, Kind: "detector"})
+	}
 }
 
 // deskMirrorOnFinish builds the detector's MirrorOnFinish side-effect: when a non-XO desk finishes a
