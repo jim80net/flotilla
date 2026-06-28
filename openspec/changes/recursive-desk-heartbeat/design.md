@@ -234,25 +234,32 @@ with `cur = d.debounce(name, Assess(name))`:
 - `cur` is Unknown/other (unassessable pane): no state change, no beat, NO cadence accrual — wait for a
   confirmed state (an unreadable pane is not a confirmed Idle).
 
-**Cap accounting (OFF `d.mu`, in `runDeskHeartbeats`, AFTER the delivery attempt, under a short re-lock):**
-the cap counts DELIVERED beats that produced no progress — an input-blocked drop is NOT a failed heartbeat
-(§8f). For each `name ∈ pendingDeskBeats`: deliver via `WakeDeskHeartbeat(name)` (G5 dispatcher; enqueues
-the desk-continuation `Job{Kind:"detector"}`, audit-suppressed). The dispatch reports delivered vs
-input-blocked (the injector drops a non-relay kind on `ErrPanelBlocked`, §8a). Then re-lock `d.mu` and:
-  - input-blocked → no cap change (the beat never landed; do NOT penalize the desk);
-  - delivered AND `deskProgressed[name]` was set → `deskNoProgress[name]=0` (responsive desk never caps);
-  - delivered AND not progressed → `deskNoProgress[name]++`; if `deskNoProgress[name] >= capN` → wedged:
-    raise ONE loud escalation to the owning XO (G6, edge-trigger on `==capN`) + `deskStopped[name]=true`
-    (stop beating until re-armed). Clear `deskProgressed[name]=false` after the accounting.
+**Cap accounting — CORRECTED (verified against the real injector, 2026-06-28).** An earlier draft put cap
+accounting OFF `d.mu` "after the delivery attempt" to avoid counting an input-blocked beat. That is
+**impossible and unnecessary**: the beat is delivered by `injector.Enqueue` (`watch.go:320`), which is
+FIRE-AND-FORGET — the injector worker delivers async and, for a `Kind:"detector"` job to a busy or
+input-blocked pane, **silently DROPS it** ("detector ticks never escalate — a stale tick is dropped; the
+next re-evaluates", `inject.go:106-107`). `runDeskHeartbeats` therefore never learns the per-beat outcome,
+so the cap CANNOT key on it. The correct model is purely PROGRESS-OBSERVABLE and lives in `tickLocked`
+(in-memory, no outcome needed): on an owed beat, `if deskProgressed[name] → deskNoProgress[name]=0` (the desk
+went Working since the last beat — responsive, never caps) `else deskNoProgress[name]++`; then
+`deskProgressed[name]=false`. If `deskNoProgress[name] >= capN` (edge-trigger on `==capN`) → wedged: append
+`name` to `pendingDeskEscalations` (the loud alert is raised off-mutex in `runDeskHeartbeats`, like the wake)
++ `deskStopped[name]=true` (stop beating until re-armed). So `tickLocked` decides BOTH the cadence and the
+cap (cheap in-memory state); `runDeskHeartbeats` only DELIVERS (enqueues the beats + raises the escalations),
+matching the `runSynthesis`/mirror off-mutex-delivery pattern.
+
+**Input-block interplay (the §8f concern, correctly placed).** A genuinely input-blocked desk (its
+agents-panel focused) reads Idle to the binary claude `Assess`, so the progress-based cap WOULD count its
+dropped beats toward `capN` and escalate. That is acceptable and NOT a false alarm: a focused-panel block is
+already detected, alerted, and auto-recovered by the independent panel-input-guard (#153/#156) — the
+desk-heartbeat escalation is a complementary "this desk has been Idle and un-progressing across N pokes"
+signal to its owning XO, which is TRUE. The two mechanisms are orthogonal; the cap does not need to (and
+cannot, given async fire-and-forget delivery) distinguish the drop cause. The approval-modal case is handled
+upstream by the §8a opt-OUT (approval-sensitive desks never beat) + the non-authorizing prompt.
 
 **Re-arm:** `AgentWake(name)` (G3, shipped) clears all five maps for `name` → the desk re-enters the cadence
 fresh (a stopped/wedged desk resumes beating once the operator re-engages it).
-
-**Why cap-accounting is off-mutex (the subtlety the live clock can't get wrong):** the owed-beat decision
-needs only in-memory state (cheap, under `d.mu`), but whether a beat COUNTS toward the wedged-cap depends on
-the delivery outcome (input-blocked vs landed), which is known only after the off-mutex dispatch. Doing cap
-accounting in `tickLocked` would penalize a desk for a beat that an input-block silently swallowed — a false
-"wedged" escalation. So `tickLocked` decides the cadence; `runDeskHeartbeats` decides the cap.
 
 **G4 TDD matrix (every transition is a test):** (1) cold-start tick → no beat; (2) Idle + cadence → one
 beat, cadence resets; (3) settled (marker consumed) → suppressed until re-arm; (4) Working → no beat, cadence
