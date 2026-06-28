@@ -14,9 +14,9 @@ import (
 
 	"github.com/jim80net/flotilla/internal/cos"
 	"github.com/jim80net/flotilla/internal/deliver"
-	"github.com/jim80net/flotilla/internal/discord"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
+	"github.com/jim80net/flotilla/internal/transport"
 	"github.com/jim80net/flotilla/internal/voice"
 )
 
@@ -373,8 +373,9 @@ func cmdSend(args []string) error {
 	if !shouldMirror(*noMirror, *doMirror, cfg.MirrorInterAgent) {
 		return nil
 	}
-	if n := len([]rune(message)); n > discord.MaxContentRunes {
-		fmt.Fprintf(os.Stderr, "flotilla: note — message is %d chars; the Discord audit copy is truncated to %d (the full message WAS delivered)\n", n, discord.MaxContentRunes)
+	runeCap := transportContentCap()
+	if n := len([]rune(message)); runeCap > 0 && n > runeCap {
+		fmt.Fprintf(os.Stderr, "flotilla: note — message is %d chars; the audit copy is truncated to %d (the full message WAS delivered)\n", n, runeCap)
 	}
 	if err := mirror(*secretsPath, *from, agentName, message); err != nil {
 		fmt.Fprintln(os.Stderr, "flotilla: WARNING — audit mirror skipped (message WAS delivered): "+err.Error())
@@ -426,8 +427,10 @@ func cmdNotify(args []string) error {
 	// Unlike the best-effort audit mirror (which truncates), this message IS the
 	// operator-facing content. Reject an over-length body cleanly rather than
 	// silently dropping the tail — the operator must see the whole message.
-	if n := len([]rune(message)); n > discord.MaxContentRunes {
-		return fmt.Errorf("message is %d chars; Discord's limit is %d — shorten it or split it (nothing was posted)", n, discord.MaxContentRunes)
+	if runeCap := transportContentCap(); runeCap > 0 {
+		if n := len([]rune(message)); n > runeCap {
+			return fmt.Errorf("message is %d chars; the transport's limit is %d — shorten it or split it (nothing was posted)", n, runeCap)
+		}
 	}
 
 	if *secretsPath == "" {
@@ -441,7 +444,11 @@ func cmdNotify(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := discord.Post(hook, *from, message); err != nil {
+	tr, err := outboundTransport(secrets)
+	if err != nil {
+		return err
+	}
+	if err := tr.Post(transport.NewWebhookDestination(hook), *from, message); err != nil {
 		return err
 	}
 	fmt.Printf("notified operator as %s\n", *from)
@@ -601,5 +608,31 @@ func mirror(secretsPath, from, agentName, message string) error {
 	if err != nil {
 		return err
 	}
-	return discord.Post(hook, from, fmt.Sprintf("→ %s: %s", agentName, message))
+	tr, err := outboundTransport(secrets)
+	if err != nil {
+		return err
+	}
+	return tr.Post(transport.NewWebhookDestination(hook), from, fmt.Sprintf("→ %s: %s", agentName, message))
+}
+
+// outboundTransport constructs the OUTBOUND coordination transport for a one-shot CLI
+// (send / notify / mirror) — the discord transport built with no bot token (Post,
+// MaxContentRunes, and Chunk need only the secrets; the inbound gateway is not used by
+// a CLI). It is the wiring-layer construction step that keeps the CLI's posting +
+// length-guard paths behind the Transport SPI instead of calling internal/discord
+// directly. The roster is not needed for a fixed-webhook Post, so it is omitted.
+func outboundTransport(secrets *roster.Secrets) (transport.Transport, error) {
+	return transport.Construct("", transport.Config{Secrets: secrets})
+}
+
+// transportContentCap returns the default transport's per-message content cap for the
+// CLI length guards, without a live session (the discord cap is a pure constant on the
+// constructed outbound transport). It replaces the leaked discord.MaxContentRunes const
+// at the CLI call sites with the transport's own declared cap.
+func transportContentCap() int {
+	tr, err := transport.Construct("", transport.Config{})
+	if err != nil {
+		return 0 // unreachable: the discord factory never errors without a bot token/cursor
+	}
+	return tr.MaxContentRunes()
 }

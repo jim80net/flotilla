@@ -57,6 +57,13 @@ func NewLibrary(rc *roster.Config, xo, secretsPath string) *LibraryController {
 		roster:      rc,
 		xo:          xo,
 		secretsPath: secretsPath,
+		// TODO(#188 Transport SPI, deferred to PR2): the dash control notify path still
+		// calls internal/discord directly (discord.Post + discord.MaxContentRunes). It is
+		// DEFERRED from PR1 because this is the dashboard's control surface — exactly the
+		// internal/dash territory the operator-gated PR2 web fork concerns (Option 1
+		// refactors internal/dash behind the Transport SPI). Re-pointing it now would
+		// pre-decide that operator fork. Tracked under the Transport SPI EPIC (#188) / the
+		// web-transport issue (#106).
 		post:        discord.Post,
 		loadSecrets: roster.LoadSecrets,
 		appendCos:   cos.Append,

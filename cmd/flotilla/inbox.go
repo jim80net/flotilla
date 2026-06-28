@@ -18,6 +18,14 @@ import (
 // instead of hand-rolling a Discord API call with the bot token. It is READ-ONLY:
 // it starts no daemon, opens no gateway websocket, and never re-injects (re-relaying
 // from the CLI would bypass the gateway's operator-only Accept guard — out of scope).
+//
+// TODO(#188 Transport SPI, deferred from PR1): this CLI still calls internal/discord
+// directly (discord.NewREST + client.Recent). It was DEFERRED from the PR1 extraction
+// because `Recent` (most-recent-N) is NOT in the transport.CatchUp capability (which is
+// MessagesAfter + Latest, the cursor-walk the live bus needs), and `inbox` is a
+// read-only history viewer rather than the live coordination bus. The follow-up decision
+// is: add a `Recent`/`HistoryReader` transport capability vs. leave inbox on
+// internal/discord. Tracked under the Transport SPI EPIC (#188).
 func cmdInbox(args []string) error {
 	opts, err := parseInboxArgs(args)
 	if err != nil {
