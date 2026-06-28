@@ -7,12 +7,13 @@ a Working/busy agent never heartbeated; a settled desk suppressed until re-armed
 money desks opt-OUT by default; cold-start owes no heartbeat; off-mutex delivery; audit-suppressed Kind.
 
 ## 1. Roster opt-OUT flag + money-desk default-opt-out
-- [ ] 1.1 TEST FIRST (`internal/roster`): `roster.Agent.Heartbeat *bool` (pointer — ABSENT ⇒ ON). A
+- [x] 1.1 TEST FIRST (`internal/roster`): `roster.Agent.Heartbeat *bool` (pointer — ABSENT ⇒ ON). A
   `Config.HeartbeatEnabled(agent) bool` resolver: absent ⇒ true; `false` ⇒ off; the primary XO ⇒ false
-  (excluded). A way to mark approval-sensitive/action desks default-OFF (a roster `no_heartbeat_default`
-  set, or a per-agent `role: approval-sensitive` → default-off) — decide the cleanest; assert an
-  approval-sensitive / order-placing desk resolves OFF absent an explicit `heartbeat: true`.
-- [ ] 1.2 Implement the flag + resolver.
+  (excluded). Approval-sensitive/action desks marked via a per-agent `approval_sensitive` bool →
+  default-off; assert an approval-sensitive / order-placing desk resolves OFF absent an explicit
+  `heartbeat: true` (and that an explicit `heartbeat: true` overrides it). [`heartbeat_test.go`]
+- [x] 1.2 Implement the flag + resolver. [`Agent.Heartbeat *bool` + `Agent.ApprovalSensitive bool` +
+  `Config.HeartbeatEnabled`]
 
 ## 2. Per-agent settle marker (namespace + re-arm)
 - [ ] 2.1 TEST FIRST (`internal/watch`): a per-agent `SettledMarker` keyed by agent → path
