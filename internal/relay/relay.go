@@ -11,14 +11,18 @@ import (
 	"unicode"
 )
 
-// Accept reports whether a gateway message should be acted on. It drops the
-// channel's own webhook posts (the audit mirror) author-agnostically as a
-// feedback guard that holds even if the author rule is later relaxed, then
-// requires the configured operator as the author.
-func Accept(webhookID, authorID, operatorID string) bool {
-	if webhookID != "" {
-		return false // a webhook post (our own mirror) must never re-enter the relay
-	}
+// Accept reports whether a gateway message should be acted on: it requires the
+// configured operator as the author.
+//
+// The self-mirror feedback guard (dropping the channel's OWN webhook posts) USED to
+// live here, keyed on a Discord webhook id. As of the Transport SPI extraction it
+// moved INTO the transport adapter (internal/transport's selfMirrorGuardAdapter),
+// which drops a self-post author-agnostically BEFORE this function is ever reached —
+// so a self-post can no longer arrive at the relay, and Accept no longer needs (or
+// carries) the Discord-shaped webhookID arm. This keeps the relay's decision logic
+// fully medium-agnostic. The guard remains author-agnostic at the adapter, so it
+// still holds even if this operator-author rule is later relaxed.
+func Accept(authorID, operatorID string) bool {
 	return operatorID != "" && authorID == operatorID
 }
 
