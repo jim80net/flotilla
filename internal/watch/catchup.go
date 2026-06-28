@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jim80net/flotilla/internal/discord"
 	"github.com/jim80net/flotilla/internal/relay"
 	"github.com/jim80net/flotilla/internal/roster"
+	"github.com/jim80net/flotilla/internal/transport"
 )
 
 // Catch-up reconciler defaults. The common case (a reconnect gap of 1-2 messages
@@ -24,11 +24,16 @@ const (
 	defaultFailThresh   = 5              // consecutive failed sweeps ⇒ escalate the backstop-down alert once
 )
 
-// MessageReader is the subset of *discord.REST the poller needs — a seam so the
-// reconcile/disposition logic is unit-testable with a fake (no live Discord).
+// MessageReader is the subset of the transport's catch-up capability the poller
+// needs — a seam so the reconcile/disposition logic is unit-testable with a fake (no
+// live transport). It is keyed by channel id (the poller's per-channel cursor space);
+// the production wiring adapts the transport.CatchUp capability (keyed by an opaque
+// Destination) to this string-keyed seam, so the reconcile logic is unchanged by the
+// extraction. Its message type is the medium-agnostic transport.Message (formerly
+// discord.Message — a faithful re-typing, field-for-field identical).
 type MessageReader interface {
-	MessagesAfterPaged(channelID, afterID string, pageLimit, maxPages int) ([]discord.Message, bool, error)
-	Latest(channelID string) (discord.Message, bool, error)
+	MessagesAfterPaged(channelID, afterID string, pageLimit, maxPages int) ([]transport.Message, bool, error)
+	Latest(channelID string) (transport.Message, bool, error)
 }
 
 // Catchup is the REST-based at-least-once ingestion backstop: a single goroutine
@@ -169,11 +174,19 @@ func (c *Catchup) sweepChannel(b roster.Channel) error {
 }
 
 // accepted filters a fetched batch to the operator-authored, non-empty, non-webhook
-// messages — the same Accept + empty-content policy the live path applies.
-func (c *Catchup) accepted(batch []discord.Message) []discord.Message {
-	out := make([]discord.Message, 0, len(batch))
+// messages — the same Accept + empty-content policy the live path applies. The
+// self-mirror drop (m.WebhookID != "") is applied INLINE here, author-agnostically:
+// the REST catch-up reads channel HISTORY, which includes the transport's own
+// webhook posts, so it must drop them the same way the live Subscribe adapter does.
+// (relay.Accept no longer carries the webhookID arm — it moved to the transport
+// adapter for the live path; the catch-up path applies the identical guard here.)
+func (c *Catchup) accepted(batch []transport.Message) []transport.Message {
+	out := make([]transport.Message, 0, len(batch))
 	for _, m := range batch {
-		if !relay.Accept(m.WebhookID, m.AuthorID, c.cfg.OperatorUserID) {
+		if m.WebhookID != "" {
+			continue // the transport's own webhook post (audit mirror) — never re-relay
+		}
+		if !relay.Accept(m.AuthorID, c.cfg.OperatorUserID) {
 			continue
 		}
 		if strings.TrimSpace(m.Content) == "" {
@@ -189,7 +202,7 @@ func (c *Catchup) accepted(batch []discord.Message) []discord.Message {
 // bulk-or-ancient (don't blind-inject a long-outage backlog out of context). The
 // cursor advances in BOTH cases (the alerted backlog has been surfaced; re-alerting
 // it every sweep would be an alert storm — the operator recovers it via `inbox`).
-func (c *Catchup) disposition(b roster.Channel, toRelay []discord.Message, capped bool) {
+func (c *Catchup) disposition(b roster.Channel, toRelay []transport.Message, capped bool) {
 	if len(toRelay) == 0 {
 		// No OPERATOR messages recovered this sweep (the run may have been all
 		// non-operator chatter, even a full/capped page of it). Intentionally no alert

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jim80net/flotilla/internal/discord"
 	"github.com/jim80net/flotilla/internal/roster"
+	"github.com/jim80net/flotilla/internal/transport"
 )
 
 // fakeReader is a fake MessageReader: Latest + MessagesAfterPaged return canned
@@ -15,25 +15,25 @@ import (
 // once, then empty) so a re-sweep does not re-deliver in tests.
 type fakeReader struct {
 	mu         sync.Mutex
-	latest     map[string]discord.Message
+	latest     map[string]transport.Message
 	latestOK   map[string]bool
-	paged      map[string][]discord.Message
+	paged      map[string][]transport.Message
 	capped     map[string]bool
 	err        error
 	pagedCalls int
 	latestErr  bool
 }
 
-func (f *fakeReader) Latest(ch string) (discord.Message, bool, error) {
+func (f *fakeReader) Latest(ch string) (transport.Message, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil && f.latestErr {
-		return discord.Message{}, false, f.err
+		return transport.Message{}, false, f.err
 	}
 	return f.latest[ch], f.latestOK[ch], nil
 }
 
-func (f *fakeReader) MessagesAfterPaged(ch, after string, pl, pc int) ([]discord.Message, bool, error) {
+func (f *fakeReader) MessagesAfterPaged(ch, after string, pl, pc int) ([]transport.Message, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.pagedCalls++
@@ -45,8 +45,8 @@ func (f *fakeReader) MessagesAfterPaged(ch, after string, pl, pc int) ([]discord
 	return out, f.capped[ch], nil
 }
 
-func opMsg(id uint64, ts time.Time) discord.Message {
-	return discord.Message{ID: itoa(id), SnowID: id, AuthorID: "op", Content: "do thing " + itoa(id), Timestamp: ts}
+func opMsg(id uint64, ts time.Time) transport.Message {
+	return transport.Message{ID: itoa(id), SnowID: id, AuthorID: "op", Content: "do thing " + itoa(id), Timestamp: ts}
 }
 
 // catchupHarness wires a Catchup over a real Relay + Injector whose confirmed-delivery
@@ -127,9 +127,9 @@ func TestNewCatchup_WiresGateIntoRelay(t *testing.T) {
 
 func TestCatchup_FirstBootTailInit_RelaysNothing(t *testing.T) {
 	r := &fakeReader{
-		latest:   map[string]discord.Message{"C1": opMsg(500, time.Now())},
+		latest:   map[string]transport.Message{"C1": opMsg(500, time.Now())},
 		latestOK: map[string]bool{"C1": true},
-		paged:    map[string][]discord.Message{},
+		paged:    map[string][]transport.Message{},
 		capped:   map[string]bool{},
 	}
 	h := newCatchupHarness(t, oneChannelCfg(), r)
@@ -149,9 +149,9 @@ func TestCatchup_FirstBootTailInit_RelaysNothing(t *testing.T) {
 func TestCatchup_RecoversFreshFewBatch(t *testing.T) {
 	now := time.Now()
 	r := &fakeReader{
-		latest:   map[string]discord.Message{},
+		latest:   map[string]transport.Message{},
 		latestOK: map[string]bool{},
-		paged: map[string][]discord.Message{"C1": {
+		paged: map[string][]transport.Message{"C1": {
 			opMsg(10, now.Add(-2*time.Second)), opMsg(20, now.Add(-1*time.Second)),
 		}},
 		capped: map[string]bool{},
@@ -174,11 +174,11 @@ func TestCatchup_RecoversFreshFewBatch(t *testing.T) {
 
 func TestCatchup_BulkBacklogAlertsNotRelays(t *testing.T) {
 	now := time.Now()
-	var batch []discord.Message
+	var batch []transport.Message
 	for i := uint64(1); i <= 10; i++ { // 10 > bulkCap 5
 		batch = append(batch, opMsg(i, now))
 	}
-	r := &fakeReader{paged: map[string][]discord.Message{"C1": batch}, capped: map[string]bool{}, latest: map[string]discord.Message{}, latestOK: map[string]bool{}}
+	r := &fakeReader{paged: map[string][]transport.Message{"C1": batch}, capped: map[string]bool{}, latest: map[string]transport.Message{}, latestOK: map[string]bool{}}
 	h := newCatchupHarness(t, oneChannelCfg(), r)
 	h.cu.gate.initCursor("C1", 0)
 	h.cu.sweep()
@@ -198,7 +198,7 @@ func TestCatchup_BulkBacklogAlertsNotRelays(t *testing.T) {
 
 func TestCatchup_AncientBacklogAlerts(t *testing.T) {
 	old := time.Now().Add(-48 * time.Hour) // older than staleCeiling 24h
-	r := &fakeReader{paged: map[string][]discord.Message{"C1": {opMsg(10, old), opMsg(20, old)}}, capped: map[string]bool{}, latest: map[string]discord.Message{}, latestOK: map[string]bool{}}
+	r := &fakeReader{paged: map[string][]transport.Message{"C1": {opMsg(10, old), opMsg(20, old)}}, capped: map[string]bool{}, latest: map[string]transport.Message{}, latestOK: map[string]bool{}}
 	h := newCatchupHarness(t, oneChannelCfg(), r)
 	h.cu.gate.initCursor("C1", 5)
 	h.cu.sweep()
@@ -214,7 +214,7 @@ func TestCatchup_AncientBacklogAlerts(t *testing.T) {
 func TestCatchup_CappedForcesAlert(t *testing.T) {
 	now := time.Now()
 	// only 2 recovered (under bulkCap) but capped=true → still alert (more remain above)
-	r := &fakeReader{paged: map[string][]discord.Message{"C1": {opMsg(10, now), opMsg(20, now)}}, capped: map[string]bool{"C1": true}, latest: map[string]discord.Message{}, latestOK: map[string]bool{}}
+	r := &fakeReader{paged: map[string][]transport.Message{"C1": {opMsg(10, now), opMsg(20, now)}}, capped: map[string]bool{"C1": true}, latest: map[string]transport.Message{}, latestOK: map[string]bool{}}
 	h := newCatchupHarness(t, oneChannelCfg(), r)
 	h.cu.gate.initCursor("C1", 5)
 	h.cu.sweep()
@@ -225,8 +225,8 @@ func TestCatchup_CappedForcesAlert(t *testing.T) {
 
 func TestCatchup_NonOperatorMessagesAdvanceCursorButAreNotRelayed(t *testing.T) {
 	now := time.Now()
-	noise := discord.Message{ID: "30", SnowID: 30, AuthorID: "someone-else", Content: "chatter", Timestamp: now}
-	r := &fakeReader{paged: map[string][]discord.Message{"C1": {opMsg(10, now), noise}}, capped: map[string]bool{}, latest: map[string]discord.Message{}, latestOK: map[string]bool{}}
+	noise := transport.Message{ID: "30", SnowID: 30, AuthorID: "someone-else", Content: "chatter", Timestamp: now}
+	r := &fakeReader{paged: map[string][]transport.Message{"C1": {opMsg(10, now), noise}}, capped: map[string]bool{}, latest: map[string]transport.Message{}, latestOK: map[string]bool{}}
 	h := newCatchupHarness(t, oneChannelCfg(), r)
 	h.cu.gate.initCursor("C1", 5)
 	h.cu.sweep()
@@ -238,7 +238,7 @@ func TestCatchup_NonOperatorMessagesAdvanceCursorButAreNotRelayed(t *testing.T) 
 }
 
 func TestCatchup_Kick_NonBlockingAndCoalesces(t *testing.T) {
-	h := newCatchupHarness(t, oneChannelCfg(), &fakeReader{paged: map[string][]discord.Message{}, capped: map[string]bool{}, latest: map[string]discord.Message{}, latestOK: map[string]bool{}})
+	h := newCatchupHarness(t, oneChannelCfg(), &fakeReader{paged: map[string][]transport.Message{}, capped: map[string]bool{}, latest: map[string]transport.Message{}, latestOK: map[string]bool{}})
 	// Kick must never block even when called repeatedly with no consumer.
 	for i := 0; i < 5; i++ {
 		h.cu.Kick()
@@ -250,7 +250,7 @@ func TestCatchup_Kick_NonBlockingAndCoalesces(t *testing.T) {
 }
 
 func TestCatchup_LivenessEscalatesOnceThenReArms(t *testing.T) {
-	r := &fakeReader{paged: map[string][]discord.Message{}, capped: map[string]bool{}, latest: map[string]discord.Message{"C1": opMsg(1, time.Now())}, latestOK: map[string]bool{"C1": true}}
+	r := &fakeReader{paged: map[string][]transport.Message{}, capped: map[string]bool{}, latest: map[string]transport.Message{"C1": opMsg(1, time.Now())}, latestOK: map[string]bool{"C1": true}}
 	h := newCatchupHarness(t, oneChannelCfg(), r)
 	h.cu.failThresh = 3
 

@@ -4,7 +4,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/jim80net/flotilla/internal/discord"
+	"github.com/jim80net/flotilla/internal/transport"
 )
 
 // defaultSeenCap bounds a per-channel seen-set. The set normally holds only ids in
@@ -142,7 +142,7 @@ func (d *dedup) liveNew(channelID string, id uint64) bool {
 // (by commit) over the FULL fetched batch, not just these candidates — so the
 // non-operator tail is not re-fetched every sweep — which is why the caller passes
 // commit the full batch's max id, computed via MaxSnowflake, NOT a value derived here.
-func (d *dedup) classify(channelID string, candidates []discord.Message) (toRelay []discord.Message) {
+func (d *dedup) classify(channelID string, candidates []transport.Message) (toRelay []transport.Message) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	cur := d.cursor[channelID]
@@ -163,7 +163,7 @@ func (d *dedup) classify(channelID string, candidates []discord.Message) (toRela
 // MaxSnowflake returns the largest SnowID in a batch, or 0 if empty. The poller
 // computes the new cursor over the FULL fetched batch (including non-operator
 // messages) with this, so committing advances past the non-operator tail.
-func MaxSnowflake(batch []discord.Message) uint64 {
+func MaxSnowflake(batch []transport.Message) uint64 {
 	var max uint64
 	for _, m := range batch {
 		if m.SnowID > max {

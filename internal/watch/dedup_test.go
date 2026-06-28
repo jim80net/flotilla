@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jim80net/flotilla/internal/discord"
+	"github.com/jim80net/flotilla/internal/transport"
 )
 
 func newTestDedup(t *testing.T) *dedup {
@@ -13,8 +13,8 @@ func newTestDedup(t *testing.T) *dedup {
 	return newDedup(cursorStore{path: filepath.Join(t.TempDir(), "cursor.json")}, defaultSeenCap)
 }
 
-func dmsg(id uint64) discord.Message {
-	return discord.Message{ID: itoa(id), SnowID: id, AuthorID: "op", Content: "m"}
+func dmsg(id uint64) transport.Message {
+	return transport.Message{ID: itoa(id), SnowID: id, AuthorID: "op", Content: "m"}
 }
 
 func itoa(n uint64) string {
@@ -29,7 +29,7 @@ func itoa(n uint64) string {
 	return string(b)
 }
 
-func snowIDs(ms []discord.Message) []uint64 {
+func snowIDs(ms []transport.Message) []uint64 {
 	out := make([]uint64, len(ms))
 	for i, m := range ms {
 		out[i] = m.SnowID
@@ -53,7 +53,7 @@ func TestLiveNew_RecordsButDoesNotAdvanceCursor(t *testing.T) {
 func TestClassify_DedupsAgainstSeen(t *testing.T) {
 	d := newTestDedup(t)
 	d.liveNew("CH", 20) // pretend the live path already relayed 20
-	batch := []discord.Message{dmsg(10), dmsg(20), dmsg(30)}
+	batch := []transport.Message{dmsg(10), dmsg(20), dmsg(30)}
 	toRelay := d.classify("CH", batch)
 	if got := snowIDs(toRelay); len(got) != 2 || got[0] != 10 || got[1] != 30 {
 		t.Fatalf("toRelay = %v, want [10 30] (20 already seen)", got)
@@ -84,7 +84,7 @@ func TestLeapfrog_LiveAfterGapDoesNotOrphanGapMessages(t *testing.T) {
 		t.Fatalf("live m5 advanced cursor to %d, want 2 — the leapfrog bug", c)
 	}
 	// Next poll fetches after=2 → [3,4,5] ascending. m3,m4 must be recovered; m5 skipped (seen).
-	batch := []discord.Message{dmsg(3), dmsg(4), dmsg(5)}
+	batch := []transport.Message{dmsg(3), dmsg(4), dmsg(5)}
 	toRelay := d.classify("CH", batch)
 	if got := snowIDs(toRelay); len(got) != 2 || got[0] != 3 || got[1] != 4 {
 		t.Fatalf("recovered = %v, want [3 4] (gap messages); m5 already relayed live", got)
@@ -100,7 +100,7 @@ func TestLeapfrog_LiveAfterGapDoesNotOrphanGapMessages(t *testing.T) {
 func TestEnqueueThenCommit_CrashBeforeCommitReDelivers(t *testing.T) {
 	d := newTestDedup(t)
 	d.initCursor("CH", 0)
-	batch := []discord.Message{dmsg(10), dmsg(20)}
+	batch := []transport.Message{dmsg(10), dmsg(20)}
 
 	// Sweep 1: classify, then "crash" before commit (do NOT call commit).
 	toRelay := d.classify("CH", batch)
@@ -202,7 +202,7 @@ func TestDedup_RaceLiveNewVsClassifyCommit(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 50; i++ {
-			batch := []discord.Message{dmsg(uint64(i*10 + 1)), dmsg(uint64(i*10 + 2))}
+			batch := []transport.Message{dmsg(uint64(i*10 + 1)), dmsg(uint64(i*10 + 2))}
 			d.classify("CH", batch)
 			_ = d.commit("CH", MaxSnowflake(batch))
 		}

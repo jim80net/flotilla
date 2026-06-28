@@ -3,9 +3,9 @@ package watch
 import (
 	"strings"
 
-	"github.com/jim80net/flotilla/internal/discord"
 	"github.com/jim80net/flotilla/internal/relay"
 	"github.com/jim80net/flotilla/internal/roster"
+	"github.com/jim80net/flotilla/internal/transport"
 )
 
 // Relay turns an accepted operator gateway message into a serialized delivery,
@@ -43,18 +43,21 @@ func NewRelay(cfg *roster.Config, injector *Injector, onAccepted func(string), n
 	return &Relay{cfg: cfg, injector: injector, onAccepted: onAccepted, notify: notify}
 }
 
-// Handle processes one gateway message (fields already extracted, including the origin
-// channelID). It resolves the channel's binding, drops non-operator and webhook
-// (self-mirror) messages, routes the message against that binding's XO + member scope,
-// notifies the clock with the resolved target, and enqueues the delivery — tagging it
-// with the origin channel for the CoS-mirror seam (#108). The security-critical
-// Accept (operator-only, drop self-mirror) runs unchanged, PER channel.
-func (r *Relay) Handle(channelID, messageID, webhookID, authorID, content string) {
+// Handle processes one operator message (fields already extracted by the transport
+// adapter, including the origin channelID). It matches the medium-agnostic
+// transport.MessageHandler 4-field projection: the transport's own self-mirror posts
+// were ALREADY dropped inside the transport adapter (author-agnostic webhook guard),
+// so no webhookID reaches here. It resolves the channel's binding, drops non-operator
+// messages, routes the message against that binding's XO + member scope, notifies the
+// clock with the resolved target, and enqueues the delivery — tagging it with the
+// origin channel for the CoS-mirror seam (#108). The security-critical operator-only
+// Accept runs unchanged, PER channel.
+func (r *Relay) Handle(channelID, messageID, authorID, content string) {
 	binding, ok := r.cfg.BindingForChannel(channelID)
 	if !ok {
 		return // a message on a channel no binding owns — ignore (defense in depth)
 	}
-	if !relay.Accept(webhookID, authorID, r.cfg.OperatorUserID) {
+	if !relay.Accept(authorID, r.cfg.OperatorUserID) {
 		return
 	}
 	// Drop an empty/whitespace-only operator message: there is nothing to deliver,
@@ -74,7 +77,7 @@ func (r *Relay) Handle(channelID, messageID, webhookID, authorID, content string
 	// A message already relayed (live or recovered) is dropped here. An unparseable id
 	// (never for real Discord data) bypasses the gate rather than being silently lost.
 	if r.gate != nil {
-		if id, ok := discord.ParseSnowflake(messageID); ok && !r.gate.liveNew(channelID, id) {
+		if id, ok := transport.ParseSnowflake(messageID); ok && !r.gate.liveNew(channelID, id) {
 			return
 		}
 	}
