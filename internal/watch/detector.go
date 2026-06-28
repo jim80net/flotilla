@@ -136,6 +136,39 @@ type DetectorConfig struct {
 	// own marker. nil ⇒ the per-agent fast settle is unconfigured (a desk settles only via the
 	// per-agent cap backstop). Like SettleConsume, it must fail toward NOT-settled.
 	DeskSettleConsume func(agent string) bool
+
+	// --- recursive desk-heartbeat (#183) — ALL inert by default. With HeartbeatEnabled nil the
+	// per-desk tickLocked block is skipped entirely, so the detector is BYTE-IDENTICAL to before
+	// this change (the regression-lock invariant; G4 TDD case 11). ---
+
+	// HeartbeatEnabled reports whether a monitored desk is eligible for the recursive heartbeat
+	// (the roster opt-OUT resolver: default-ON, approval-sensitive/XO default-OFF — see
+	// roster.Config.HeartbeatEnabled). nil ⇒ the WHOLE desk-heartbeat path is OFF (no beat, no cap,
+	// no escalation ever fires; the detector behaves exactly as before #183). A desk for which this
+	// returns false is never beaten — the primary XO (which keeps its own clock) and the
+	// approval-sensitive desks are excluded here.
+	HeartbeatEnabled func(agent string) bool
+	// WakeDeskHeartbeat delivers ONE desk-continuation beat to a desk that is OWED one (idle past
+	// its cadence, not settled, not stopped). Called OFF d.mu in runDeskHeartbeats (its confirmed
+	// delivery acquires the pane-txn lock — a bounded wait that must never be held under d.mu), like
+	// the synthesis wake. Fire-and-forget: a beat to a busy/input-blocked pane is silently dropped by
+	// the injector (a Kind:"detector" job never escalates), so the cap is progress-observable, never
+	// keyed on a delivery outcome. nil ⇒ no beat is ever delivered (inert).
+	WakeDeskHeartbeat func(agent string)
+	// DeskEscalate raises the LOUD cap-escalation for a wedged desk (idle + un-progressing across
+	// capN beats) to its owning XO (the channel the desk is a member of → that channel's XO, falling
+	// back to the primary XO). Called OFF d.mu in runDeskHeartbeats. Fires ONCE on the ==capN edge,
+	// then the desk is stopped until re-armed (AgentWake). nil ⇒ no escalation is ever delivered.
+	DeskEscalate func(agent string)
+	// DeskHeartbeatEveryTicks is the per-desk cadence: a desk is owed a beat after this many
+	// CONSECUTIVE idle ticks (the heartbeat interval, in ticks). NewDetector defaults < 1 to 1 (every
+	// idle tick), matching the design's "cadence = the heartbeat interval" (the daemon's tick IS the
+	// interval).
+	DeskHeartbeatEveryTicks int
+	// DeskHeartbeatCap is N — the consecutive no-progress beat bound before a desk is escalated +
+	// stopped (the §5.3 decision: N=3). NewDetector defaults < 1 to 3.
+	DeskHeartbeatCap int
+
 	// Alert raises a LOUD operator alert (down-alert path) — liveness + the H3
 	// persistence failure.
 	Alert func(string)
@@ -245,6 +278,15 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 	}
 	if cfg.SynthEveryTicks < 1 {
 		cfg.SynthEveryTicks = synthEveryTicksDefault
+	}
+	// Recursive desk-heartbeat (#183) cadence/cap defaults. These are inert unless HeartbeatEnabled
+	// is also wired (the per-desk tickLocked block is skipped when HeartbeatEnabled is nil), so
+	// defaulting them here never changes behavior for a pre-#183 deployment.
+	if cfg.DeskHeartbeatEveryTicks < 1 {
+		cfg.DeskHeartbeatEveryTicks = 1 // cadence = the heartbeat interval (the tick IS the interval)
+	}
+	if cfg.DeskHeartbeatCap < 1 {
+		cfg.DeskHeartbeatCap = 3 // §5.3: escalate after 3 consecutive no-progress beats
 	}
 	if cfg.SynthParents == nil {
 		// No synthesis routing configured ⇒ a finishing desk marks NOBODY owed, so the owed-set
@@ -469,13 +511,19 @@ type synthEligible struct {
 // that wait while holding d.mu would let an external delivery stall the detector's tick loop and
 // block OperatorWake; running it in the tail keeps d.mu held only for the lock-free state logic.
 func (d *Detector) Tick() {
-	pendingRotate, pendingWakes, pendingMirrors, pendingSynth := d.tickLocked()
+	pendingRotate, pendingWakes, pendingMirrors, pendingSynth, pendingDeskBeats, pendingDeskEscalations := d.tickLocked()
 	d.runTail(pendingRotate, pendingWakes, pendingMirrors)
 	// Visibility-synthesis (B2) runs AFTER runTail and OFF d.mu: its materiality read is BLOCKING
 	// tmux + transcript I/O that must NEVER execute under the detector mutex (it would stall the tick
 	// loop and block OperatorWake — the relay goroutine — exactly as the mirror path is kept off-mutex).
 	// It commits last-seen state under a short re-lock, so it precedes the durable persist below.
 	d.runSynthesis(pendingSynth)
+	// Recursive desk-heartbeat (#183) delivery runs AFTER runSynthesis and OFF d.mu: each beat's
+	// confirmed delivery and each escalation's loud alert acquire the pane-txn lock / post over the
+	// network — bounded waits that must never be held under the detector mutex (the same off-mutex
+	// discipline runSynthesis follows). The DECISION already happened under d.mu in tickLocked; this
+	// only delivers. Inert when the seams are nil.
+	d.runDeskHeartbeats(pendingDeskBeats, pendingDeskEscalations)
 	// Durably persist the new baseline ONLY AFTER the tail has enqueued the wakes — restoring the
 	// at-least-once crash semantics the old in-line code had (enqueue-then-save). The in-memory
 	// baseline is already committed under d.mu in tickLocked (so subsequent ticks don't re-wake);
@@ -553,7 +601,7 @@ func (d *Detector) persist() {
 // tickLocked runs the lock-free-pure state machine under d.mu and RETURNS the side effects to
 // perform after unlock (a pending rotate + the ordered wakes). It is the single per-interval
 // writer of detector state; OperatorWake is the only other writer and shares the mutex.
-func (d *Detector) tickLocked() (pendingRotate bool, pendingWakes []deferredWake, pendingMirrors []string, pendingSynth []synthEligible) {
+func (d *Detector) tickLocked() (pendingRotate bool, pendingWakes []deferredWake, pendingMirrors []string, pendingSynth []synthEligible, pendingDeskBeats []string, pendingDeskEscalations []string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -639,6 +687,15 @@ func (d *Detector) tickLocked() (pendingRotate bool, pendingWakes []deferredWake
 	//     quiet/liveness counters below. Inert (nil) when nothing is owed ($0-idle preserved).
 	pendingSynth = d.synthEligibleLocked()
 
+	// 5c. Recursive desk-heartbeat (#183) — decide per-desk beats + cap-escalations UNDER d.mu; the
+	//     DELIVERY (the actual beat enqueue + the loud escalation) runs OFF d.mu in runDeskHeartbeats,
+	//     mirroring runSynthesis (its confirmed delivery acquires the pane-txn lock, a bounded wait
+	//     that must never be held under the detector mutex). Reached only PAST the cold-start
+	//     early-return above, so the cold baseline owes NO beats — exactly like the mirror/synth
+	//     sections get cold-start suppression for free. Fully inert when HeartbeatEnabled is nil (the
+	//     loop is skipped), so the detector is byte-identical to before #183.
+	pendingDeskBeats, pendingDeskEscalations = d.deskHeartbeatLocked(cur)
+
 	// 6. Max-quiet liveness ping (layer 3). Any wake above already refreshes
 	//    liveness (L1), so only an entirely-quiet tick advances the quiet counter.
 	if woke {
@@ -656,7 +713,79 @@ func (d *Detector) tickLocked() (pendingRotate bool, pendingWakes []deferredWake
 	//    tail enqueues the wakes, so a crash before the durable commit re-detects on restart (H3 /
 	//    cubic-P1 at-least-once).
 	d.snap = cur
-	return pendingRotate, pendingWakes, pendingMirrors, pendingSynth
+	return pendingRotate, pendingWakes, pendingMirrors, pendingSynth, pendingDeskBeats, pendingDeskEscalations
+}
+
+// deskHeartbeatLocked is the recursive desk-heartbeat (#183) decision run UNDER d.mu from tickLocked.
+// It is the careful core — every per-desk transition (design §9) is decided here, in cheap in-memory
+// state, and returns the desks OWED a beat + the desks to ESCALATE; the actual delivery happens OFF
+// d.mu in runDeskHeartbeats. It is PURE relative to the panes (it touches only the five per-agent maps
+// + the injected DeskSettleConsume seam, which is a fail-safe file stat, not a pane read).
+//
+// The cap is PROGRESS-OBSERVABLE and decided HERE (NOT keyed on a delivery outcome): the beat is
+// fire-and-forget (a busy/input-blocked pane silently drops a Kind:"detector" job), so runDeskHeartbeats
+// never learns the per-beat outcome and the cap cannot depend on it. A desk that went Working since its
+// last beat (deskProgressed) is responsive and resets the cap; a desk that stayed idle across capN beats
+// is wedged and escalates ONCE (the ==capN edge) then stops.
+//
+// Inert when HeartbeatEnabled is nil — the whole loop is skipped, so the detector is byte-identical to
+// before #183 (the regression-lock).
+func (d *Detector) deskHeartbeatLocked(cur Snapshot) (beats, escalations []string) {
+	if d.cfg.HeartbeatEnabled == nil {
+		return nil, nil // feature OFF ⇒ byte-inert
+	}
+	cadence := d.cfg.DeskHeartbeatEveryTicks // defaulted >= 1 in NewDetector
+	capN := d.cfg.DeskHeartbeatCap           // defaulted >= 1 in NewDetector
+	for _, name := range d.cfg.Desks {
+		if name == d.cfg.XOAgent || !d.cfg.HeartbeatEnabled(name) {
+			continue // the primary XO keeps its own clock; an opted-out desk never beats
+		}
+		switch cur.DeskStates[name] {
+		case surface.StateWorking:
+			// Progress: the desk re-engaged. Latch progressed (so an owed beat after this never counts
+			// toward the cap), un-wedge it (progress clears a stop), and restart both the cadence and
+			// the cap — a freshly-idle desk gets a full cadence before its next beat.
+			d.deskProgressed[name] = true
+			delete(d.deskStopped, name)
+			d.deskNoProgress[name] = 0
+			d.deskSinceBeat[name] = 0
+			delete(d.deskSettled, name)
+		case surface.StateIdle:
+			// Consume the per-agent settle marker (fail-safe → not-settled). A desk that touched its
+			// marker is settled until re-armed.
+			if d.cfg.DeskSettleConsume != nil && d.cfg.DeskSettleConsume(name) {
+				d.deskSettled[name] = true
+			}
+			if d.deskSettled[name] || d.deskStopped[name] {
+				continue // a settled/stopped desk does not beat AND does not accrue cadence
+			}
+			d.deskSinceBeat[name]++
+			if d.deskSinceBeat[name] < cadence {
+				continue // cadence not yet elapsed
+			}
+			// Owed a beat.
+			beats = append(beats, name)
+			d.deskSinceBeat[name] = 0
+			// Cap accounting (progress-observable, in-memory, HERE — not off-mutex): a desk that went
+			// Working since its last beat is responsive (cap resets); otherwise it accrues no-progress.
+			if d.deskProgressed[name] {
+				d.deskNoProgress[name] = 0
+			} else {
+				d.deskNoProgress[name]++
+			}
+			d.deskProgressed[name] = false
+			if d.deskNoProgress[name] >= capN {
+				// Wedged: idle + un-progressing across capN beats. Escalate ONCE on the ==capN edge,
+				// then stop beating until re-armed (AgentWake).
+				escalations = append(escalations, name)
+				d.deskStopped[name] = true
+			}
+		default:
+			// Unknown/Shell/other (unassessable pane): no state change, no beat, NO cadence accrual —
+			// an unreadable pane is not a confirmed Idle, so it must not advance toward a beat.
+		}
+	}
+	return beats, escalations
 }
 
 // synthEligibleLocked is the visibility-synthesis (B2) decision run UNDER d.mu from tickLocked. It is
@@ -731,6 +860,27 @@ func (d *Detector) runSynthesis(eligible []synthEligible) {
 		changed, fresh := materialSubordinates(e.lastSeen, e.readSet, d.synthReadOne)
 		if d.commitSynthesisLocked(e.agent, changed, fresh) && d.cfg.WakeAgent != nil {
 			d.cfg.WakeAgent(e.agent, WakeSynthesis, changed)
+		}
+	}
+}
+
+// runDeskHeartbeats DELIVERS the recursive desk-heartbeat (#183) side effects decided UNDER d.mu in
+// deskHeartbeatLocked, OFF d.mu (the same off-mutex-delivery discipline as runSynthesis/the mirror).
+// Each beat is a fire-and-forget desk-continuation turn via WakeDeskHeartbeat (its confirmed delivery
+// acquires the pane-txn lock; a busy/input-blocked pane silently drops it). Each escalation raises the
+// LOUD cap-alert via DeskEscalate (the desk's owning XO). No detector state is touched here — the
+// cadence + cap were already committed in tickLocked — so this needs no re-lock. Inert when the seams
+// are nil (the decision returned nil slices anyway when HeartbeatEnabled is nil; this double-guards a
+// partially-wired config).
+func (d *Detector) runDeskHeartbeats(beats, escalations []string) {
+	for _, name := range beats {
+		if d.cfg.WakeDeskHeartbeat != nil {
+			d.cfg.WakeDeskHeartbeat(name)
+		}
+	}
+	for _, name := range escalations {
+		if d.cfg.DeskEscalate != nil {
+			d.cfg.DeskEscalate(name)
 		}
 	}
 }
