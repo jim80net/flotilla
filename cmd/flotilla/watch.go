@@ -17,9 +17,9 @@ import (
 	"github.com/jim80net/flotilla/internal/backlog"
 	"github.com/jim80net/flotilla/internal/cos"
 	"github.com/jim80net/flotilla/internal/deliver"
-	"github.com/jim80net/flotilla/internal/discord"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
+	"github.com/jim80net/flotilla/internal/transport"
 	"github.com/jim80net/flotilla/internal/watch"
 	"github.com/jim80net/flotilla/internal/workspace"
 )
@@ -123,9 +123,41 @@ func cmdWatch(args []string) error {
 	if alertHook == "" {
 		fmt.Fprintln(os.Stderr, "flotilla watch: WARNING — no alert webhook; down-alerts go to stderr (journald) only")
 	}
+
+	// Construct the coordination transport (discord) once for this daemon run — the
+	// stateful-transport CONSTRUCTION step (the SPI separates this from init-time
+	// REGISTRATION because the bot token / roster / cursor path are not available at
+	// init). The OUTBOUND half (Post, used by the down-alert + desk-mirror paths) needs
+	// only the roster + secrets, so it is built whenever secrets are present, even with
+	// no bot token (clock-only-with-alert-webhook). The INBOUND gateway + REST catch-up
+	// are wired later, in the relay block, only when a bot token is set. A construction
+	// failure (e.g. the catch-up REST session) is NON-FATAL: the daemon degrades to a
+	// transport-less post path (stderr) and the safety-critical clock keeps running.
+	var tr transport.Transport
+	if secrets != nil {
+		t, err := transport.Construct("", transport.Config{
+			BotToken:   botToken,
+			CursorPath: *cursorPath,
+			Roster:     cfg,
+			Secrets:    secrets,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "flotilla watch: WARNING — coordination transport construct failed (%v); down-alerts go to stderr only, relay disabled. The safety-critical clock is unaffected.\n", err)
+		} else {
+			tr = t
+			defer func() { _ = tr.Close() }()
+		}
+	}
+	// alertDest is the fixed down-alert webhook target (the XO's webhook), wrapped as a
+	// transport Destination so the post path is medium-agnostic. nil when there is no
+	// alert webhook OR no transport — post then degrades to stderr.
+	var alertDest transport.Destination
+	if tr != nil && alertHook != "" {
+		alertDest = transport.NewWebhookDestination(alertHook)
+	}
 	post := func(username, msg string) {
-		if alertHook != "" {
-			_ = discord.Post(alertHook, username, msg)
+		if tr != nil && alertDest != nil {
+			_ = tr.Post(alertDest, username, msg)
 		} else {
 			fmt.Fprintln(os.Stderr, "flotilla watch: "+msg)
 		}
@@ -182,7 +214,7 @@ func cmdWatch(args []string) error {
 	// channel's XO including the primary — #177 unified them), watch that XO's session store for the
 	// reply and route it back to the channel — the flotilla-native return leg (the primary XO's old
 	// host-local Stop-hook is retired). nil when secrets are absent (no webhooks to resolve).
-	replyRtr := newHotlineReplyRouter(context.Background(), cfg, secrets, alert)
+	replyRtr := newHotlineReplyRouter(context.Background(), cfg, secrets, tr, alert)
 	if replyRtr != nil {
 		defer replyRtr.Stop() // cancel in-flight hotline watchers on shutdown (runs after <-ctx.Done())
 	}
@@ -382,7 +414,7 @@ func cmdWatch(args []string) error {
 				defer txn.Release()
 				return surface.RotateContext(xoDrv, pane)
 			},
-			MirrorOnFinish:      deskMirrorOnFinish(cfg, secrets),
+			MirrorOnFinish:      deskMirrorOnFinish(cfg, secrets, tr),
 			MirrorDispatch:      func(run func()) { go run() }, // mirror I/O off the tick goroutine
 			Awaiting:            awaiting.Present,
 			SettleConsume:       settled.Consume,
@@ -516,37 +548,50 @@ func cmdWatch(args []string) error {
 		channelIDs = append(channelIDs, b.ChannelID)
 	}
 	switch {
-	case len(channelIDs) > 0 && botToken != "" && cfg.OperatorUserID != "":
+	case len(channelIDs) > 0 && botToken != "" && cfg.OperatorUserID != "" && tr != nil:
 		rel := watch.NewRelay(cfg, injector, onAccepted, func(msg string) { post("flotilla-watch", msg) })
+		// The destinations the bus subscribes to + reconciles: one per bound channel,
+		// resolved from the transport (the channel-id set stays inside the transport's
+		// Destination rather than leaking as bare strings to the gateway open).
+		dests := transportDestinations(tr, channelIDs)
 		// The REST-based at-least-once ingestion backstop (#161): a gateway gap (a
 		// reconnect/resume-failure window, a daemon-restart) drops MESSAGE_CREATE events
 		// the live relay never sees. NewCatchup builds the shared dedup gate, wires it into
 		// rel (the live path dedups against the poller), and the poller reconciles each
 		// channel against a durable cursor over REST — independent of the websocket that
-		// just failed. NON-FATAL: a REST construct failure degrades to live-only (the
+		// just failed. NON-FATAL: an absent catch-up capability degrades to live-only (the
 		// clock and the live relay are unaffected). Recovered notice → channel; bulk/stale
 		// + backstop-down → the loud alert. The gateway's OnReconnect kicks an immediate
 		// sweep so a reconnect gap is recovered in ~0s, not the poll interval.
+		//
+		// Catch-up is an OPTIONAL transport capability (type-asserted, mirroring
+		// surface.ResultReader): a transport whose live delivery cannot gap (a future
+		// loopback web transport) does not implement it, and the backstop is skipped
+		// cleanly. The discord transport implements it (the gateway gaps), adapted to the
+		// watch poller's string-channel-keyed MessageReader seam.
 		var catchupKick func()
-		if rest, err := discord.NewREST(botToken); err != nil {
-			fmt.Fprintf(os.Stderr, "flotilla watch: WARNING — relay catch-up backstop failed to start (%v); running LIVE-RELAY-ONLY. A gateway-gap message may be lost without recovery. The clock and live relay are unaffected.\n", err)
-		} else {
-			cu := watch.NewCatchup(cfg, rel, rest, *cursorPath,
+		if cap, ok := tr.(transport.CatchUp); ok {
+			reader := &transportCatchUpReader{cap: cap, dest: destByChannel(dests, channelIDs)}
+			cu := watch.NewCatchup(cfg, rel, reader, *cursorPath,
 				func(msg string) { post("flotilla-watch", msg) },
 				alert)
 			catchupKick = cu.Kick
 			go cu.Run(ctx)
 			fmt.Printf("flotilla watch: relay catch-up backstop active (cursor=%s)\n", *cursorPath)
+		} else {
+			fmt.Fprintln(os.Stderr, "flotilla watch: WARNING — the coordination transport has no catch-up capability; running LIVE-RELAY-ONLY. A gateway-gap message may be lost without recovery. The clock and live relay are unaffected.")
 		}
+		// The relay open is the transport's Subscribe, wrapped as the gatewayController
+		// the non-fatal-with-retry relayController consumes (Open = Subscribe, Close =
+		// transport teardown). Folding construct+subscribe into one factory attempt lets
+		// the single retry loop recover from either a construct or a subscribe failure —
+		// neither fatal to the safety-critical clock (the 2026-06-10 crash-loop guard).
 		factory := func() (gatewayController, error) {
-			gw, err := discord.NewGateway(botToken, channelIDs, rel.Handle, catchupKick)
-			if err != nil {
+			ctrl := &transportGateway{tr: tr, ctx: ctx, dests: dests, handler: rel.Handle, onReconnect: catchupKick}
+			if err := ctrl.Open(); err != nil {
 				return nil, err
 			}
-			if err := gw.Open(); err != nil {
-				return nil, err
-			}
-			return gw, nil
+			return ctrl, nil
 		}
 		// warn → stderr (journald) for routine per-attempt noise; note → stdout for
 		// active/recovered; escalate → the down-alert webhook (alert) so a SUSTAINED
@@ -660,8 +705,8 @@ func logMirrorCoverage(cfg *roster.Config, secrets *roster.Secrets, xo string) {
 		len(withMirror), withMirror, len(without), without)
 }
 
-func deskMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets) func(agent string) {
-	if secrets == nil {
+func deskMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr transport.Transport) func(agent string) {
+	if secrets == nil || tr == nil {
 		return nil
 	}
 	return func(agent string) {
@@ -697,7 +742,11 @@ func deskMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets) func(agent 
 				}
 				return text, true, nil
 			},
-			post: discord.Post,
+			post: func(url, username, content string) error {
+				// Post through the transport seam under the desk's resolved webhook
+				// destination (the credential stays inside the transport's Destination).
+				return tr.Post(transport.NewWebhookDestination(url), username, content)
+			},
 			logf: log.Printf,
 		}
 		m.run(agent)

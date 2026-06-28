@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"unicode/utf8"
 
-	"github.com/jim80net/flotilla/internal/discord"
+	"github.com/jim80net/flotilla/internal/transport"
 )
 
 // mirrorChunkLimit is the per-chunk rune budget for a mirrored turn-final. It sits below Discord's
@@ -15,7 +15,7 @@ const mirrorChunkLimit = 1900
 // deskMirror holds the injected collaborators the per-desk visibility mirror needs, so the
 // best-effort decision logic (resolve webhook → read turn-final → chunk → post) is unit-testable
 // without tmux, a real ~/.claude transcript tree, or a live Discord webhook. The watch daemon wires
-// these to the real implementations (secrets.Webhook, the surface ResultReader, discord.Post).
+// these to the real implementations (secrets.Webhook, the surface ResultReader, the transport Post).
 type deskMirror struct {
 	// webhook resolves an agent's channel-bound webhook URL; ok=false ⇒ no webhook configured (skip).
 	webhook func(agent string) (url string, ok bool)
@@ -52,7 +52,7 @@ func (m deskMirror) run(agent string) {
 		return
 	}
 
-	chunks := discord.ChunkContent(text, mirrorChunkLimit)
+	chunks := transport.Chunk(text, mirrorChunkLimit)
 	n := len(chunks)
 	runes := utf8.RuneCountInString(text) // resplen: the canary diagnostic for a post-hoc truncation hunt
 	for i, chunk := range chunks {
@@ -61,7 +61,7 @@ func (m deskMirror) run(agent string) {
 			body = fmt.Sprintf("(%d/%d)\n%s", i+1, n, chunk)
 		}
 		if err := m.post(url, agent, body); err != nil {
-			// A redaction-safe error (discord.Post never leaks the webhook URL). Stop on the first
+			// A redaction-safe error (the transport's Post never leaks the webhook URL). Stop on the first
 			// failure — the remaining chunks would post out of context anyway.
 			m.logf("flotilla watch: mirror MIRROR-FAIL %s: chunk %d/%d: %v", agent, i+1, n, err)
 			return

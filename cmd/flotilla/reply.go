@@ -9,9 +9,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/jim80net/flotilla/internal/deliver"
-	"github.com/jim80net/flotilla/internal/discord"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
+	"github.com/jim80net/flotilla/internal/transport"
 	"github.com/jim80net/flotilla/internal/watch"
 )
 
@@ -97,7 +97,7 @@ func (d replyDeps) route(ctx context.Context, xo, originChannel, text string) {
 		d.escalate(originChannel, fmt.Sprintf("hotline: %s replied to you but I can't route it (no webhook for the origin channel) — read its pane", xo))
 		return
 	}
-	chunks := discord.ChunkContent(text, mirrorChunkLimit)
+	chunks := transport.Chunk(text, mirrorChunkLimit)
 	n := len(chunks)
 	runes := utf8.RuneCountInString(text)
 	for i, chunk := range chunks {
@@ -210,9 +210,16 @@ func isHotlineToChannelXO(cfg *roster.Config, j watch.Job) bool {
 // secrets are absent (no return-leg webhooks to resolve). parent is the daemon's shutdown context (so
 // Stop cancels in-flight watchers); primaryAlert is the daemon's loud alert (the fallback when an
 // escalation's own origin-channel webhook is unresolvable, so the operator always sees it).
-func newHotlineReplyRouter(parent context.Context, cfg *roster.Config, secrets *roster.Secrets, primaryAlert func(string)) *replyRouter {
-	if secrets == nil {
+func newHotlineReplyRouter(parent context.Context, cfg *roster.Config, secrets *roster.Secrets, tr transport.Transport, primaryAlert func(string)) *replyRouter {
+	if secrets == nil || tr == nil {
 		return nil
+	}
+	// post sends one chunk to a resolved webhook URL through the transport seam (the
+	// credential stays inside the transport's Destination). The replyDeps.dest/post
+	// signatures stay url-string-based so the reply-watch decision logic — and its
+	// suite — are unchanged; only the wiring routes the send through the transport.
+	post := func(url, username, content string) error {
+		return tr.Post(transport.NewWebhookDestination(url), username, content)
 	}
 	deps := replyDeps{
 		reply: func(agent, operatorMsg string) (string, bool, error) {
@@ -231,13 +238,13 @@ func newHotlineReplyRouter(parent context.Context, cfg *roster.Config, secrets *
 			return rr.ReplyAfter(pane, operatorMsg)
 		},
 		dest: func(originChannel string) (string, bool) { return replyDest(cfg, secrets, originChannel) },
-		post: discord.Post,
+		post: post,
 		escalate: func(originChannel, msg string) {
 			// Route the escalation to the channel the operator messaged from; fall back to the primary
 			// operator channel if the origin webhook is unresolvable OR the post FAILS — so the operator
 			// ALWAYS sees it (an ignored post error here would be a hole in the never-silent guarantee).
 			if url, ok := replyDest(cfg, secrets, originChannel); ok {
-				if err := discord.Post(url, "flotilla-watch", "⚠️ "+msg); err == nil {
+				if err := post(url, "flotilla-watch", "⚠️ "+msg); err == nil {
 					return
 				}
 				// the origin-channel post failed — fall through to the primary alert below

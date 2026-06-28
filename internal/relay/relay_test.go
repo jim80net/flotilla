@@ -2,20 +2,20 @@ package relay
 
 import "testing"
 
+// TestAccept pins the relay's operator-author filter. NOTE: the self-mirror feedback
+// guard (dropping the channel's own webhook posts) NO LONGER lives here — it moved
+// into the transport adapter (internal/transport's selfMirrorGuardAdapter), where it
+// is pinned author-agnostically, including the adversarial sender==operator case. So
+// Accept's signature folded webhookID out: Accept(authorID, operatorID).
 func TestAccept(t *testing.T) {
 	const op = "111111111111111111"
-	// The single most important test: a webhook post (our own mirror) is dropped
-	// even if it somehow carried the operator's id — no feedback loop.
-	if Accept("webhook-123", op, op) {
-		t.Error("webhook message accepted; must be dropped (feedback guard)")
-	}
-	if !Accept("", op, op) {
+	if !Accept(op, op) {
 		t.Error("operator message rejected; should be accepted")
 	}
-	if Accept("", "someone-else", op) {
+	if Accept("someone-else", op) {
 		t.Error("non-operator message accepted; should be dropped")
 	}
-	if Accept("", "", op) {
+	if Accept("", op) {
 		t.Error("empty author accepted; should be dropped")
 	}
 }

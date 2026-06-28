@@ -127,6 +127,16 @@ inspect end to end:
   webhook identity. That gives you a durable, timestamped, phone-readable
   transcript of all coordination — the audit trail is a first-class feature,
   not an afterthought.
+- **Coordination bus — a pluggable transport.** The medium the operator and
+  agents talk over sits behind one `Transport` interface (subscribe to inbound
+  messages, post outbound, resolve an address to a delivery target), selected
+  from a name-keyed registry — the same shape as the surface driver below.
+  Discord is the default registered transport; a second medium can register
+  alongside it without re-plumbing the relay, the at-least-once catch-up
+  backstop, the reply leg, or the audit mirror. An optional `CatchUp` capability
+  (type-asserted) supplies the gap-recovery backstop only for a medium whose live
+  delivery can drop messages (the Discord gateway gap); a medium that cannot gap
+  omits it cleanly.
 - **Topology — hub and spoke.** One agent is the hub (the XO). You talk to
   the hub; the hub routes to the domain agents; the agents report back
   through the hub. Peer-to-peer traffic is brokered by the hub so there is
