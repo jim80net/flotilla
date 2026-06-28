@@ -225,7 +225,7 @@ PR1 re-points that seam at the transport's `CatchUp` capability instead of
 | Inbound subscribe | `internal/discord/gateway.go:38` `NewGateway`/`:83` `Open` + `:16` `MessageHandler` + `:71-75` `onReconnect` | `Transport.Subscribe(ctx, dests, handler, onReconnect)` — `discordTransport.Subscribe` builds + opens the gateway and forwards `onReconnect` (the #161 catchup-kick coupling). Its 5-arg discord `MessageHandler` (`channelID,messageID,webhookID,authorID,content`) adapts to the 4-field projection (`origin,id,sender,content`): a non-empty `webhookID` causes the adapter to DROP the message before `handler` (the self-mirror guard moves into the adapter — see "the honest self-mirror guard"), so `webhookID` is not carried across the seam |
 | Relay accept/route | `internal/relay/relay.go:18` `Accept` / `:41` `Route`; `internal/watch/relay.go:52` `Handle` → `Job{Agent,Message,Kind:"relay",OriginChannel}` (`:96`) | `Accept` SIGNATURE CHANGES (the `webhookID` arm folds into the adapter, see "the honest self-mirror guard"); `Route` + the `Job` enqueue are UNCHANGED. `Subscribe`'s handler feeds the SAME `Handle` (now without a `webhookID` field); the relay's `Handle`/`route` are updated only to drop the `webhookID` param |
 | Catch-up backstop | `internal/discord/rest.go:100` `MessagesAfterPaged` / `:123` `Latest`; per-channel cursor in `internal/watch/catchup.go` | OPTIONAL `CatchUp` capability; `internal/watch/catchup.go:29` `MessageReader` seam re-points at it |
-| Identity / addressing | `internal/roster/roster.go:49` `Channel{ChannelID,XOAgent,Members,Role}` + `internal/watch/relay.go:103` `memberResolver` | `ResolveDestination` consults the roster binding + `memberResolver` (the roster `Channel` binding stays the config-level identity; the SPI `Transport` is the delivery mechanism) |
+| Identity / addressing | `internal/roster/roster.go:61` `Channel{ChannelID,XOAgent,Members,Role}` + `internal/watch/relay.go:103` `memberResolver` | `ResolveDestination` consults the roster binding + `memberResolver` (the roster `Channel` binding stays the config-level identity; the SPI `Transport` is the delivery mechanism) |
 | Audit / visibility mirror | `cmd/flotilla/mirror.go:39` `deskMirror.run` | `deskMirror.post` (`mirror.go:63`) becomes `Transport.Post` instead of `discord.Post` — the mirror is transport-agnostic |
 | Config / secrets | `FLOTILLA_WEBHOOK_*`, bot token, channel ids in `internal/roster/secrets.go` | discord-transport construction reads them via the roster `Secrets`; the SPI does not change the secrets format |
 
@@ -284,7 +284,7 @@ as universal, defeating the per-medium point.)
 These are deliberately distinct concerns at different layers, and the rename
 exists precisely to keep them from colliding:
 
-- `roster.Channel` (`internal/roster/roster.go:49`) is the CONFIG-level binding —
+- `roster.Channel` (`internal/roster/roster.go:61`) is the CONFIG-level binding —
   which Discord channel id binds to which XO + member set. It is correctly named:
   a Discord *channel* is the thing it configures. It is UNCHANGED by this design.
 - `transport.Transport` is the delivery MECHANISM — the medium that carries
