@@ -16,10 +16,11 @@ money desks opt-OUT by default; cold-start owes no heartbeat; off-mutex delivery
   `Config.HeartbeatEnabled`]
 
 ## 2. Per-agent settle marker (namespace + re-arm)
-- [ ] 2.1 TEST FIRST (`internal/watch`): a per-agent `SettledMarker` keyed by agent → path
+- [x] 2.1 TEST FIRST (`internal/watch`): a per-agent `SettledMarkerSet` keyed by agent → path
   `<roster-dir>/flotilla-<agent>-settled`; `Consume(agent)` is path-scoped per agent (no collision with
-  the XO's marker or across desks); unreadable ⇒ NOT settled.
-- [ ] 2.2 Implement the per-agent marker set + the per-agent `{{settle}}` prompt-path resolution.
+  the XO's marker or across desks); unreadable/absent/unconfigured ⇒ NOT settled. [`settled_test.go`]
+- [x] 2.2 Implement the per-agent marker set + the per-agent settle prompt-path resolution
+  (`SettledMarkerSet{Path,Consume}`, reusing `SettledMarker.Consume` for the fail-safe stat+remove).
 
 ## 3. AgentWake (the per-agent re-arm) wired for ALL relay targets
 - [ ] 3.1 TEST FIRST (`internal/watch/detector_test.go`): `Detector.AgentWake(agent)` clears that

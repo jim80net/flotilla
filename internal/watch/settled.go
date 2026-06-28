@@ -3,6 +3,7 @@ package watch
 import (
 	"log"
 	"os"
+	"path/filepath"
 )
 
 // SettledMarker is the XO's "I have nothing to advance" signal. On a
@@ -51,4 +52,38 @@ func (m *SettledMarker) Consume() bool {
 		log.Printf("flotilla watch: settle marker %q observed but not removed: %v", m.path, err)
 	}
 	return true
+}
+
+// SettledMarkerSet is the per-agent analogue of SettledMarker (#183 recursive desk heartbeat).
+// Each desk the heartbeat re-engages signals "nothing to advance" by touching its OWN marker
+// (<dir>/flotilla-<agent>-settled) and replying idle; the detector Consume()s that marker to record
+// the desk as settled and suppress further heartbeats to it until it is re-armed. The paths are
+// per-agent so one desk's settle never consumes another desk's — or the XO's (whose marker is a
+// separately-configured path). An empty dir means the per-agent fast settle is unconfigured.
+type SettledMarkerSet struct {
+	dir string
+}
+
+// NewSettledMarkerSet builds a per-agent settle-marker set rooted at dir (the roster directory, the
+// same place the XO marker lives). An empty dir disables the per-agent fast settle (Consume is
+// always false), so settling relies on the per-agent cap backstop alone.
+func NewSettledMarkerSet(dir string) *SettledMarkerSet {
+	return &SettledMarkerSet{dir: dir}
+}
+
+// Path returns agent's settle-marker path — the exact path injected into that desk's continuation
+// prompt so the desk touches it to signal idle. Empty when the set is unconfigured or agent is
+// empty (no path to advertise).
+func (s *SettledMarkerSet) Path(agent string) string {
+	if s.dir == "" || agent == "" {
+		return ""
+	}
+	return filepath.Join(s.dir, "flotilla-"+agent+"-settled")
+}
+
+// Consume reports+removes agent's settle marker (delegating to SettledMarker for the fail-safe
+// stat+remove). Absent / unreadable / unconfigured → false (fail toward NOT-settled, keeping the
+// desk responsive — the same safe direction as the XO marker).
+func (s *SettledMarkerSet) Consume(agent string) bool {
+	return NewSettledMarker(s.Path(agent)).Consume()
 }
