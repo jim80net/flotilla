@@ -31,16 +31,22 @@ unchanged and SHALL remain independent of any concrete medium.
 
 ### Requirement: The Transport interface covers inbound, outbound, and addressing
 
-The `Transport` interface SHALL provide: `Subscribe(ctx, destinations, handler)` —
-deliver inbound operator messages on a set of destinations to a handler until
-close; `Post(dest, username, content)` — send outbound content under a display
-identity to a destination; `ResolveDestination(originChannel, bareOrMention)` —
-map an address typed in one origin to a delivery target + canonical agent name;
-and `Close()` — release the medium's transport. The inbound handler SHALL receive
-a NARROW, medium-agnostic projection (origin, message id, sender, content) so the
-relay packages are decoupled from any concrete medium. A destination SHALL be a
-typed value owned by the transport, never a stringly-typed leak of medium internals
-(e.g. a credential-bearing webhook URL) across the seam.
+The `Transport` interface SHALL provide: `Subscribe(ctx, destinations, handler,
+onReconnect)` — deliver inbound operator messages on a set of destinations to a
+handler until close, firing `onReconnect` on every (re)connect so the caller can
+kick the catch-up backstop immediately; `Post(dest, username, content)` — send
+outbound content under a display identity to a destination;
+`ResolveDestination(originChannel, bareOrMention)` — map an address typed in one
+origin to a delivery target + canonical agent name; `MaxContentRunes()` and
+`Chunk(text)` — the transport's OWN per-message content cap and chunking, so a
+medium-specific cap does not leak across the seam to callers; and `Close()` —
+release the medium's transport. The inbound handler SHALL receive a NARROW,
+medium-agnostic projection (origin, message id, sender, content) — the
+Discord-shaped `webhookID` SHALL NOT cross the seam (the self-mirror guard drops a
+self-post inside the adapter) — so the relay packages are decoupled from any
+concrete medium. A destination SHALL be a typed value owned by the transport,
+never a stringly-typed leak of medium internals (e.g. a credential-bearing webhook
+URL) across the seam.
 
 #### Scenario: Inbound subscribe feeds the relay a medium-agnostic projection
 
@@ -79,59 +85,85 @@ backstop cleanly when it is absent.
 - **WHEN** the bus reconciles a transport that does NOT implement `CatchUp` (its delivery cannot gap)
 - **THEN** the type-assertion fails, the backstop is skipped cleanly, and inbound delivery is unaffected — no spurious error, no required no-op implementation
 
-### Requirement: Extracting Discord behind the SPI preserves behavior byte-for-byte
+### Requirement: Extracting Discord behind the SPI preserves operator-facing behavior
 
 The system SHALL refactor the existing Discord coordination code (outbound post,
 inbound gateway subscribe, the REST catch-up backstop, and destination/address
 resolution) into a single registered `discord` transport obtained through the
-registry, with NO change to operator-facing behavior. The relay accept/route
-decision, the at-least-once catch-up semantics, the c2 reply leg, and the audit
-mirror SHALL be byte-identical to before the extraction. In particular, the
-self-mirror feedback guard (the transport's OWN outbound posts are never re-entered
-into the relay) SHALL be preserved as a property enforced inside the transport
-adapter. The proof obligation SHALL be that the existing relay, reply, mirror,
-and catch-up test suites pass UNCHANGED — a test that must be edited to stay green
-indicates the extraction changed behavior.
+registry, with NO change to operator-facing behavior. The relay route decision,
+the at-least-once catch-up semantics, the c2 reply leg, and the audit mirror SHALL
+behave identically to before the extraction. The ONLY intended signature change of
+the entire extraction SHALL be folding the Discord-shaped `webhookID` OUT of the
+inbound projection: the self-mirror feedback guard (the transport's OWN outbound
+posts are never re-entered into the relay) SHALL move INTO the transport adapter
+and SHALL remain AUTHOR-AGNOSTIC (it holds even if the operator-author rule is
+later relaxed), so a self-post is dropped before the handler is invoked rather than
+by the relay's accept filter. The proof obligation SHALL be that the existing
+relay-behavior, reply, mirror, and catch-up suites pass UNCHANGED, EXCEPT the relay
+accept-filter test, which SHALL be UPDATED for the `webhookID` fold and SHALL gain a
+NEW case asserting a self-post is dropped EVEN WHEN its sender equals the operator
+— any OTHER suite needing an edit to stay green indicates the extraction changed
+behavior.
 
 #### Scenario: Discord behavior is unchanged after extraction
 
 - **WHEN** an operator message is relayed, a reply is routed, a desk turn is mirrored, or a gateway-gap message is recovered through the extracted `discord` transport
-- **THEN** the routing, recovery, reply, and mirror behavior is identical to before the extraction, and the existing relay/reply/mirror/catch-up test suites pass unchanged
+- **THEN** the routing, recovery, reply, and mirror behavior is identical to before the extraction, and every existing relay-behavior/reply/mirror/catch-up suite passes unchanged except the deliberately-updated relay accept-filter test (the `webhookID` fold)
 
-#### Scenario: The self-mirror feedback guard survives the projection
+#### Scenario: The self-mirror feedback guard moves into the adapter and stays author-agnostic
 
-- **WHEN** the transport's own outbound (audit-mirror) post appears on a subscribed destination
-- **THEN** it is dropped before routing (it never re-enters the relay), exactly as the webhook-author feedback guard does today — the guard is enforced inside the transport adapter and pinned by the existing self-mirror-drop test
+- **WHEN** the transport's own outbound (audit-mirror) post appears on a subscribed destination, even when its sender id equals the operator id
+- **THEN** the transport adapter drops it before the handler is invoked (it never reaches the relay), author-agnostically — pinned by the updated self-mirror-drop case AND a new case asserting the drop holds when sender == operator
 
-### Requirement: A second transport binds loopback-only by construction
+### Requirement: A stateful transport has a defined lifecycle and degrades non-fatally
 
-The system SHALL provide a second registered transport, `web` (#106), that drives a
-loopback web medium through the `Transport` interface — subscribing to operator
-input, posting agent output, and resolving destinations — reusing the SAME relay
-accept/route decision logic and the SAME relay delivery job as the Discord path.
-The `web` transport SHALL bind to a LOOPBACK address only and SHALL REFUSE a
-non-loopback bind as a fail-closed construction error (the loopback-only posture
-of a host-confined MCP server), so the medium is reachable only from the host and
-never the network. There SHALL be no flag that opens the `web` transport to a
-non-loopback interface; widening it is a deliberate, separately-reviewed change.
-Adding the `web` transport SHALL NOT change the `discord` transport's behavior.
+The system SHALL support a stateful `Transport` that owns live, long-lived
+resources (the `discord` transport owns a gateway websocket session, a REST
+session, and — via the caller's context — a catch-up reconcile goroutine), UNLIKE
+a stateless surface `Driver`. The system SHALL separate transport REGISTRATION (at
+`init`, before secrets are loaded) from CONSTRUCTION (at daemon start, with the
+bot token + destinations + cursor path), and SHALL define a `Close` ordering that
+drains the catch-up goroutine before tearing down the session. The reconnect→catch-up coupling SHALL survive the seam:
+the transport SHALL expose a reconnect hook (via `Subscribe`'s `onReconnect`
+parameter) so a gateway (re)connect fires an immediate catch-up sweep, preserving
+the ~0s reconnect-gap recovery. A transport construction or subscribe failure SHALL
+degrade to clock-only / live-only and SHALL NEVER crash the safety-critical clock.
 
-#### Scenario: A web operator message routes through the shared relay logic
+#### Scenario: A reconnect kicks an immediate catch-up sweep
 
-- **WHEN** an operator message arrives on the `web` transport
-- **THEN** it is accepted/routed by the SAME relay decision logic and enqueued as the SAME relay delivery job as a Discord message — the inbound path is shared, only the medium differs
+- **WHEN** the live transport (re)connects after a gap
+- **THEN** the `onReconnect` hook fires the catch-up backstop immediately, so a reconnect-gap message is recovered in ~0s rather than after the full poll interval
 
-#### Scenario: A non-loopback bind is refused
+#### Scenario: A transport failure degrades non-fatally
 
-- **WHEN** the `web` transport is constructed with a non-loopback bind address
-- **THEN** construction fails closed with a clear error and no listener is opened — the medium can never be bound to a network-reachable interface without a deliberate, separately-reviewed change
+- **WHEN** constructing or subscribing the transport fails (a transient network/DNS blip at boot)
+- **THEN** the daemon degrades to clock-only / live-only and the safety-critical clock keeps running — the failure is never fatal to the clock
 
-#### Scenario: The web transport needs no catch-up backstop
+## NON-GOAL (deferred, operator-gated) — a second `web` transport
 
-- **WHEN** the `web` transport is reconciled
-- **THEN** because its loopback delivery cannot gap, it does not implement `CatchUp`, the backstop type-assertion is skipped cleanly, and inbound delivery is unaffected
+A second registered `web` transport (#106) is an explicit NON-GOAL of this
+change and is NOT specified as a satisfied requirement here. It is DEFERRED behind
+an operator decision because it collides with the ratified product decision that
+the dashboard is a SEPARATE dedicated desk
+(`openspec/specs/product-decisions/spec.md:141`). The reconciliation is an OPERATOR
+FORK to be resolved when the web transport is built:
 
-#### Scenario: discord is unaffected by adding web
+- **Option 1:** the `web` transport IS the existing `internal/dash` web surface,
+  refactored behind the `Transport` interface and reusing its already-proven
+  anti-DNS-rebinding Host allowlist and CSRF/Origin defenses
+  (`internal/dash/server.go:90-91`, `requireWrite`). This TOUCHES the
+  "dashboard = separate desk" decision and is therefore the operator's call.
+- **Option 2:** a separate second loopback web surface, distinct from the dash,
+  which must re-implement those same defenses.
 
-- **WHEN** the `web` transport is registered alongside `discord`
-- **THEN** the `discord` transport's subscribe/post/resolve/catch-up behavior is byte-identical to before, and the default transport remains `discord`
+When (and only when) the operator resolves that fork, the `web` transport SHALL
+bind to a LOOPBACK address only and SHALL REFUSE a non-loopback bind as a
+fail-closed construction error, SHALL honor the anti-DNS-rebinding Host allowlist
++ CSRF/Origin + an operator auth posture, SHALL NOT implement `CatchUp` (loopback
+delivery cannot gap), and SHALL NOT change the `discord` transport's behavior. No
+scenario in THIS change asserts that "a web operator message routes through a
+shared relay route" — that claim is deliberately omitted, because the shipping
+dashboard resolves roster-wide rather than per-origin, and reconciling the two is
+itself part of the deferred operator fork. These requirements are recorded as a
+NON-GOAL here so the design thinking is preserved, NOT as buildable spec this
+change satisfies.
