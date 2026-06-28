@@ -187,6 +187,48 @@ func TestLoad_AcceptsLiveFleetCommandShape(t *testing.T) {
 	}
 }
 
+// OwningXO resolves the XO that owns a desk — the cap-escalation target for the recursive
+// desk-heartbeat (#183 §8e). It must work in BOTH topologies: the federated home-channel shape
+// (where a leaf owns its home channel and AgentsAbove names its parent) AND the legacy star (where a
+// leaf owns no channel — AgentsAbove is EMPTY — and the owner is the XO of the channel it is a member
+// of). It falls back to the primary XO when neither resolves.
+func TestOwningXO_FederatedHomeChannel(t *testing.T) {
+	cfg := loadLiveShape(t)
+	// A leaf's owner is its project-XO (its home channel lists alpha-xo).
+	if got := cfg.OwningXO("alpha-be", "meta"); got != "alpha-xo" {
+		t.Errorf("OwningXO(alpha-be) = %q; want alpha-xo (the parent of its home channel)", got)
+	}
+	// A project-XO's owner is the meta-XO.
+	if got := cfg.OwningXO("alpha-xo", "meta"); got != "meta" {
+		t.Errorf("OwningXO(alpha-xo) = %q; want meta", got)
+	}
+	// The root (no parent) falls back to the supplied primary XO.
+	if got := cfg.OwningXO("meta", "meta"); got != "meta" {
+		t.Errorf("OwningXO(meta) = %q; want the primary-XO fallback meta", got)
+	}
+}
+
+func TestOwningXO_LegacyStarFallsBackToChannelXO(t *testing.T) {
+	// In the legacy star a leaf owns NO channel (AgentsAbove is empty); the owner is the XO of the
+	// single channel it is a member of — proving the §8e fallback, not the AgentsAbove path.
+	legacy, err := Load(writeRoster(t, `{
+	  "operator_user_id":"U","channel_id":"C1","xo_agent":"xo",
+	  "agents":[{"name":"xo"},{"name":"backend"},{"name":"frontend"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := legacy.AgentsAbove("backend"); len(got) != 0 {
+		t.Fatalf("precondition: a legacy-star leaf must have an EMPTY AgentsAbove, got %v", got)
+	}
+	if got := legacy.OwningXO("backend", "xo"); got != "xo" {
+		t.Errorf("OwningXO(backend) = %q; want xo (the channel it is a member of)", got)
+	}
+	// An unknown agent falls back to the primary XO, never a panic.
+	if got := legacy.OwningXO("ghost", "xo"); got != "xo" {
+		t.Errorf("OwningXO(ghost) = %q; want the fallback xo", got)
+	}
+}
+
 func TestLoad_AcceptsHomeChannelSelfMembership(t *testing.T) {
 	// A channel whose XO is also among its own members (the self-edge) is the normal
 	// home-channel shape, not a cycle.

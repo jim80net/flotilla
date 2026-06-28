@@ -37,6 +37,22 @@ const detectorContinuationBuiltin = "[flotilla change-detector] You just finishe
 	"work, and signal idle by running: touch {{settle}}. (Your context is rotated between steps " +
 	"— rely on durable state, not this conversation.)"
 
+// deskContinuationBuiltin is the recursive desk-heartbeat (#183) prompt — DISTINCT from the XO's
+// (design §8a/§8h). It is the NON-AUTHORIZING beat to an idle desk: advance only ALREADY-AUTHORIZED
+// in-flight work, and — load-bearing for the binary-Idle claude driver (§8a) — NEVER approve a
+// pending tool/permission/approval prompt on a heartbeat (a heartbeat is not authorization). It drops
+// the XO prompt's "context is rotated between steps" line (a desk is NOT rotated by this design) and
+// the {{tracker}} read-source (a leaf desk may keep no durable tracker — "continue your in-flight
+// task; if you've lost the thread, reply idle"). {{settle}} resolves to the DESK's own per-agent
+// settle marker; a workspace HEARTBEAT.md may override the wording.
+const deskContinuationBuiltin = "[flotilla heartbeat] You have been idle. Advance only the next clear, " +
+	"ALREADY-AUTHORIZED step of your in-flight task — reading durable state, not memory. If a tool, " +
+	"permission, or approval prompt is pending, do NOT approve it on this heartbeat (a heartbeat is not " +
+	"authorization) — reply idle by touching your settle marker. A task blocked only from landing (a " +
+	"push gate, a pending review) is NOT idle — advance it locally, then surface the blocker in one " +
+	"line. If nothing AUTHORIZED remains, or you've lost the thread, reply 'idle', do NOT manufacture " +
+	"work, and signal idle by running: touch {{settle}}."
+
 // cmdWatch runs the long-lived watch daemon. This is the CLOCK half: it
 // heartbeats the XO so a turn-based agent keeps advancing clear, authorized work
 // without operator input, and watches liveness (tick→ack) so a dead or
@@ -369,6 +385,21 @@ func cmdWatch(args []string) error {
 			synthEveryTicks = synthDigestTicks // a small multiple of the interval (Q-B)
 		}
 
+		// Recursive desk-heartbeat (#183) seams — DEFAULT-ON, roster opt-OUT (§5.2). HeartbeatEnabled
+		// is ALWAYS wired (the directive is universal); roster.Config.HeartbeatEnabled resolves the
+		// opt-OUT: the primary XO (its own clock), approval-sensitive desks (default-off, #184), and
+		// any agent explicitly `heartbeat: false` (incl. a federated sub-XO that runs its OWN daemon
+		// — the §8i double-drive opt-out is the roster flag, since this daemon cannot introspect
+		// another). The per-agent settle markers live alongside the XO marker in the roster dir
+		// (<dir>/flotilla-<agent>-settled). The cadence is the heartbeat interval — the detector's
+		// tick IS the interval, so DeskHeartbeatEveryTicks=1 (an idle desk is re-engaged within one
+		// interval). WakeDeskHeartbeat enqueues the non-authorizing desk-continuation beat (audit-
+		// suppressed); DeskEscalate raises the loud cap-alert to the desk's owning XO.
+		deskSettled := watch.NewSettledMarkerSet(rosterDir)
+		deskHeartbeatEnabled := func(agent string) bool { return cfg.HeartbeatEnabled(agent) }
+		wakeDeskHeartbeat := newDeskHeartbeatDispatch(injector.Enqueue, deskSettled.Path)
+		deskEscalate := newDeskEscalate(cfg, xo, alert)
+
 		det := watch.NewDetectorWithSynthSidecar(watch.DetectorConfig{
 			XOAgent:  xo,
 			Desks:    desks,
@@ -418,6 +449,7 @@ func cmdWatch(args []string) error {
 			MirrorDispatch:      func(run func()) { go run() }, // mirror I/O off the tick goroutine
 			Awaiting:            awaiting.Present,
 			SettleConsume:       settled.Consume,
+			DeskSettleConsume:   deskSettled.Consume,
 			Alert:               alert,
 			MaxMissedAcks:       *maxMissed,
 			MaxQuietIntervals:   *maxQuiet,
@@ -429,13 +461,26 @@ func cmdWatch(args []string) error {
 			SynthParents:        synthParents,
 			SynthRead:           synthRead,
 			SynthEveryTicks:     synthEveryTicks,
+			// Recursive desk-heartbeat (#183): default-ON, roster opt-OUT. Cadence = the heartbeat
+			// interval (the tick IS the interval ⇒ 1 tick); cap = 3 (NewDetector defaults 0 to 3).
+			HeartbeatEnabled:        deskHeartbeatEnabled,
+			WakeDeskHeartbeat:       wakeDeskHeartbeat,
+			DeskEscalate:            deskEscalate,
+			DeskHeartbeatEveryTicks: 1,
 		}, *snapshotPath, synthSidecarPath)
 		det.Start()
 		defer det.Stop()
 		onAccepted = func(target string) {
 			if target == xo {
 				det.OperatorWake() // an operator message re-engages a settled XO
+				return
 			}
+			// #183 G3.2 re-arm: an operator/XO message to a DESK re-engages its recursive heartbeat
+			// (clears settled+stopped, resets the cadence/cap counters), the per-agent analogue of
+			// OperatorWake. Without this a settled/wedged desk stays silent forever (design §8b). The
+			// relay routes @desk messages and calls onAccepted(deskName), so every non-XO target
+			// re-arms its own desk only.
+			det.AgentWake(target)
 		}
 		mode := cfg.LivenessPingMode
 		if mode == "" {
@@ -669,6 +714,50 @@ func backlogWakeBody(items []string, backlogPath, ackInstr string) string {
 		"genuinely operator-blocked, drive PREP and move to the next. Reply idle ONLY if every remaining " +
 		"backlog item is done or operator-blocked — the loop will NOT settle while unblocked work remains. " +
 		"Read the backlog file (" + backlogPath + "), not this conversation." + ackInstr
+}
+
+// deskHeartbeatBody resolves the recursive desk-heartbeat (#183) continuation prompt for ONE desk: it
+// runs the desk-continuation builtin through workspace.ResolvePrompt so a per-agent HEARTBEAT.md may
+// override the wording, substituting {{settle}} with the DESK's OWN per-agent settle path (resolved
+// via settleFor) — NOT the XO's. The XO-only {{tracker}} placeholder is absent from the desk builtin,
+// so an empty tracker is passed. A desk beat carries NO liveness-ack instruction: the AckAge wedge
+// watches the SINGLE XO ack file (a desk has no per-agent AckAge), so telling a beaten desk to touch
+// that file would let an idle desk mask a genuinely-dead XO from its own watchdog (G4 review P1). The
+// synthesis-wake sub-XO path shares this latent issue — tracked as #190. A HEARTBEAT.md read error
+// fails open to the builtin (ResolvePrompt's posture). Pure relative to the panes (a file read).
+func deskHeartbeatBody(agent string, settleFor func(string) string) (string, error) {
+	return workspace.ResolvePrompt(agent, deskContinuationBuiltin, "", settleFor(agent))
+}
+
+// newDeskHeartbeatDispatch builds the detector's WakeDeskHeartbeat seam (a func(agent)): it resolves
+// the desk-continuation body (per-agent HEARTBEAT.md + that desk's settle path) and enqueues it as an
+// AUDIT-SUPPRESSED Kind:"detector" job to the desk. Kind:"detector" is load-bearing twice over (design
+// §8d): SetMirror suppresses it (no operator-channel spam) AND it is isRelay-false, so a busy/
+// input-blocked pane drops it (fire-and-forget) rather than queueing into a focused modal. enqueue is
+// injected (the Injector's Enqueue) so the dispatch is unit-testable without tmux. A body-resolution
+// error is logged and the beat dropped — a broken optional HEARTBEAT.md must never crash the daemon.
+func newDeskHeartbeatDispatch(enqueue func(watch.Job), settleFor func(string) string) func(string) {
+	return func(agent string) {
+		body, err := deskHeartbeatBody(agent, settleFor)
+		if err != nil {
+			log.Printf("flotilla watch: desk-heartbeat prompt resolve failed for %q: %v (beat dropped this tick)", agent, err)
+			return
+		}
+		enqueue(watch.Job{Agent: agent, Message: body, Kind: "detector"})
+	}
+}
+
+// newDeskEscalate builds the detector's DeskEscalate seam (#183 §8e): when a desk is capped (idle +
+// un-progressing across N beats), it raises ONE LOUD operator-visible alert to the desk's OWNING XO —
+// the channel the desk is a member of / its parent (roster.OwningXO), falling back to the primary XO.
+// It uses the LOUD alert path (operator-visible), NOT a quiet WakeAgent to a possibly-idle parent: a
+// wedged desk must surface loudly, not be poked further. The detector fires this ONCE on the ==capN
+// edge then stops beating the desk; a re-arm (AgentWake) resumes the cadence.
+func newDeskEscalate(cfg *roster.Config, primaryXO string, alert func(string)) func(string) {
+	return func(agent string) {
+		owner := cfg.OwningXO(agent, primaryXO)
+		alert(fmt.Sprintf("desk-heartbeat: %q has been idle and un-progressing across the heartbeat cap — it appears WEDGED. Owning XO %q: check in on it (or re-engage it to clear the wedge). It will not be heartbeated again until re-engaged.", agent, owner))
+	}
 }
 
 // deskMirrorOnFinish builds the detector's MirrorOnFinish side-effect: when a non-XO desk finishes a

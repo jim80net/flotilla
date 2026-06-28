@@ -28,6 +28,18 @@ type Agent struct {
 	// ("claude-code"). Validated against the registered drivers at command
 	// startup (in cmd, to keep roster free of an internal/surface import).
 	Surface string `json:"surface,omitempty"`
+	// Heartbeat overrides the per-agent desk-heartbeat default (#183): the detector
+	// re-engages a desk that settles Idle mid-task on the clock cadence. A nil pointer
+	// means the default applies (ON for a general desk); false opts a deliberately-quiet
+	// desk OUT; true forces it ON. Pointer-with-omitempty so an ABSENT flag is
+	// distinguishable from an explicit false.
+	Heartbeat *bool `json:"heartbeat,omitempty"`
+	// ApprovalSensitive marks a high-consequence desk — one that places orders or spends.
+	// Such a desk defaults its heartbeat OFF (the #184 carve-out): the claude driver's
+	// Idle assessment is binary and cannot yet distinguish an approval-blocked desk from
+	// an idle one, so a default-on heartbeat could land text into a pending approval modal.
+	// An explicit Heartbeat=true overrides this once a genuine approval classifier exists.
+	ApprovalSensitive bool `json:"approval_sensitive,omitempty"`
 }
 
 // Title returns the tmux pane title to match for this agent.
@@ -359,6 +371,26 @@ func (c *Config) IsXO(name string) bool {
 		}
 	}
 	return false
+}
+
+// HeartbeatEnabled reports whether the recursive desk heartbeat (#183) re-engages this agent
+// when it settles Idle mid-task. The primary XO is excluded — it has its own clock (the daemon
+// heartbeat), so heartbeating it would double-drive. Resolution order: an explicit per-agent
+// Heartbeat flag wins; otherwise an approval-sensitive desk is OFF by default (the #184 carve-out);
+// otherwise a general desk is ON by default (the directive is universal). A name that is not a
+// roster agent is never heartbeated.
+func (c *Config) HeartbeatEnabled(name string) bool {
+	if name == "" || name == c.XOAgent {
+		return false
+	}
+	a, err := c.Agent(name)
+	if err != nil {
+		return false
+	}
+	if a.Heartbeat != nil {
+		return *a.Heartbeat
+	}
+	return !a.ApprovalSensitive
 }
 
 // ChannelForXO returns the Discord channel an XO owns, for tagging that XO's outbound
