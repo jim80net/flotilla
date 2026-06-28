@@ -49,12 +49,10 @@ const (
 	// daemon's primary clock XO, so it is delivered through the parallel WakeAgent seam,
 	// never the primary-XO Wake. The reasons name the subordinate(s) that changed.
 	WakeSynthesis
-	// WakeDeskHeartbeat: the recursive desk-heartbeat (#183) tick — an idle, non-settled,
-	// non-stopped desk is OWED a NON-AUTHORIZING continuation beat ("advance only
-	// already-authorized in-flight work; if nothing remains, reply idle by touching your
-	// settle marker"). It targets an ARBITRARY non-XO desk through the cmd-side wakeAgent
-	// dispatcher (Kind:"detector", audit-suppressed), never the primary-XO Wake. No reasons.
-	WakeDeskHeartbeat
+	// NOTE: the recursive desk-heartbeat (#183) does NOT add a WakeKind. A desk beat is delivered
+	// through the dedicated DetectorConfig.WakeDeskHeartbeat func(agent) seam → the cmd-side dispatch
+	// (Kind:"detector", audit-suppressed), NOT through the kind-routed Wake/WakeAgent vehicles — so no
+	// kind constant is needed (a dead one would imply a Wake(WakeDeskHeartbeat,…) path that doesn't exist).
 )
 
 // DetectorConfig wires a Detector. The collaborators are injected so the whole

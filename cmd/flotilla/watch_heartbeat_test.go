@@ -12,19 +12,22 @@ import (
 // package builtin and substitutes {{settle}} with the desk's OWN per-agent settle path. It MUST be:
 // (a) NON-AUTHORIZING (advance only already-authorized work; never approve a pending prompt),
 // (b) DISTINCT from the XO's continuation prompt (it drops the "context is rotated between steps" and
-//     the {{tracker}} read-source the XO prompt carries), and
-// (c) carry the agent's settle path + the ack instruction.
+//
+//	the {{tracker}} read-source the XO prompt carries), and
+//
+// (c) carry the agent's OWN settle path, and (d) carry NO liveness-ack instruction (a desk is not
+//
+//	the liveness-acked entity — see the no-ack-pollution regression below, G4 review P1 / #190).
 func TestDeskContinuationBuiltinNoWorkspace(t *testing.T) {
 	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir()) // no workspace dir for "backend"
 
 	settle := "/abs/state/flotilla-backend-settled"
-	ack := "\n(To ack you are alive, run: touch /x/alive)"
 	got, err := deskHeartbeatBody("backend", func(a string) string {
 		if a == "backend" {
 			return settle
 		}
 		return ""
-	}, ack)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,8 +44,14 @@ func TestDeskContinuationBuiltinNoWorkspace(t *testing.T) {
 			t.Errorf("desk prompt missing non-authorizing fragment %q\nfull: %q", want, got)
 		}
 	}
-	if !strings.HasSuffix(got, ack) {
-		t.Error("desk prompt MUST append the ack instruction (else a beaten desk never acks)")
+	// REGRESSION (G4 P1): a desk beat must carry NO liveness-ack instruction. The AckAge wedge watches
+	// the SINGLE XO ack file; instructing a beaten idle desk to touch it would let the desk mask a
+	// genuinely-dead XO from its own watchdog. The desk's ONLY file-touch instruction is its OWN settle
+	// marker (asserted above) — never the XO ack path.
+	for _, banned := range []string{"ack you are alive", "flotilla-xo-alive", "-alive"} {
+		if strings.Contains(got, banned) {
+			t.Errorf("desk prompt must NOT carry a liveness-ack instruction (%q reached the body)\nfull: %q", banned, got)
+		}
 	}
 	// DISTINCT from the XO's prompt: the desk is NOT context-rotated by this design, and it has no
 	// {{tracker}} read-source. Those XO-only fragments must be ABSENT.
@@ -64,7 +73,7 @@ func TestWakeAgentDispatchesDeskHeartbeat(t *testing.T) {
 
 	var enq []watch.Job
 	settle := func(a string) string { return "/abs/state/flotilla-" + a + "-settled" }
-	dispatch := newDeskHeartbeatDispatch(func(j watch.Job) { enq = append(enq, j) }, settle, "\n(ack)")
+	dispatch := newDeskHeartbeatDispatch(func(j watch.Job) { enq = append(enq, j) }, settle)
 
 	dispatch("backend")
 
@@ -80,6 +89,10 @@ func TestWakeAgentDispatchesDeskHeartbeat(t *testing.T) {
 	}
 	if !strings.Contains(j.Message, "ALREADY-AUTHORIZED") || !strings.Contains(j.Message, settle("backend")) {
 		t.Errorf("job body must be the non-authorizing desk prompt carrying backend's settle path; got %q", j.Message)
+	}
+	// REGRESSION (G4 P1): the enqueued beat must carry no XO liveness-ack instruction.
+	if strings.Contains(j.Message, "-alive") || strings.Contains(j.Message, "ack you are alive") {
+		t.Errorf("desk beat must NOT instruct touching the XO ack file; got %q", j.Message)
 	}
 }
 

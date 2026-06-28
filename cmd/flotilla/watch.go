@@ -365,7 +365,7 @@ func cmdWatch(args []string) error {
 		// suppressed); DeskEscalate raises the loud cap-alert to the desk's owning XO.
 		deskSettled := watch.NewSettledMarkerSet(rosterDir)
 		deskHeartbeatEnabled := func(agent string) bool { return cfg.HeartbeatEnabled(agent) }
-		wakeDeskHeartbeat := newDeskHeartbeatDispatch(injector.Enqueue, deskSettled.Path, ackInstr)
+		wakeDeskHeartbeat := newDeskHeartbeatDispatch(injector.Enqueue, deskSettled.Path)
 		deskEscalate := newDeskEscalate(cfg, xo, alert)
 
 		det := watch.NewDetectorWithSynthSidecar(watch.DetectorConfig{
@@ -675,15 +675,13 @@ func backlogWakeBody(items []string, backlogPath, ackInstr string) string {
 // runs the desk-continuation builtin through workspace.ResolvePrompt so a per-agent HEARTBEAT.md may
 // override the wording, substituting {{settle}} with the DESK's OWN per-agent settle path (resolved
 // via settleFor) — NOT the XO's. The XO-only {{tracker}} placeholder is absent from the desk builtin,
-// so an empty tracker is passed. ackInstr is appended so a beaten desk re-acks liveness (a wake that
-// never instructs an ack would falsely trip the AckAge wedge). A HEARTBEAT.md read error fails open to
-// the builtin (ResolvePrompt's posture). Pure relative to the panes (a file read of the override).
-func deskHeartbeatBody(agent string, settleFor func(string) string, ackInstr string) (string, error) {
-	body, err := workspace.ResolvePrompt(agent, deskContinuationBuiltin, "", settleFor(agent))
-	if err != nil {
-		return "", err
-	}
-	return body + ackInstr, nil
+// so an empty tracker is passed. A desk beat carries NO liveness-ack instruction: the AckAge wedge
+// watches the SINGLE XO ack file (a desk has no per-agent AckAge), so telling a beaten desk to touch
+// that file would let an idle desk mask a genuinely-dead XO from its own watchdog (G4 review P1). The
+// synthesis-wake sub-XO path shares this latent issue — tracked as #190. A HEARTBEAT.md read error
+// fails open to the builtin (ResolvePrompt's posture). Pure relative to the panes (a file read).
+func deskHeartbeatBody(agent string, settleFor func(string) string) (string, error) {
+	return workspace.ResolvePrompt(agent, deskContinuationBuiltin, "", settleFor(agent))
 }
 
 // newDeskHeartbeatDispatch builds the detector's WakeDeskHeartbeat seam (a func(agent)): it resolves
@@ -693,9 +691,9 @@ func deskHeartbeatBody(agent string, settleFor func(string) string, ackInstr str
 // input-blocked pane drops it (fire-and-forget) rather than queueing into a focused modal. enqueue is
 // injected (the Injector's Enqueue) so the dispatch is unit-testable without tmux. A body-resolution
 // error is logged and the beat dropped — a broken optional HEARTBEAT.md must never crash the daemon.
-func newDeskHeartbeatDispatch(enqueue func(watch.Job), settleFor func(string) string, ackInstr string) func(string) {
+func newDeskHeartbeatDispatch(enqueue func(watch.Job), settleFor func(string) string) func(string) {
 	return func(agent string) {
-		body, err := deskHeartbeatBody(agent, settleFor, ackInstr)
+		body, err := deskHeartbeatBody(agent, settleFor)
 		if err != nil {
 			log.Printf("flotilla watch: desk-heartbeat prompt resolve failed for %q: %v (beat dropped this tick)", agent, err)
 			return
