@@ -15,15 +15,11 @@ import (
 // imports internal/discord and the reconcile logic is unchanged by the extraction.
 
 // transportDestinations resolves one transport Destination per bound channel id (the
-// subscribe + reconcile target set). The discord transport builds an inbound
-// destination from each channel id; the channel-id set thus stays inside the
-// transport's Destination type rather than leaking to the gateway open as bare strings.
-func transportDestinations(_ transport.Transport, channelIDs []string) []transport.Destination {
-	out := make([]transport.Destination, 0, len(channelIDs))
-	for _, id := range channelIDs {
-		out = append(out, transport.NewDiscordDestination(id))
-	}
-	return out
+// subscribe + reconcile target set) by DELEGATING to the transport's own Destinations
+// seam — so the channel-id→Destination construction lives inside the transport (per the
+// SPI goal) and the wiring never constructs a medium-specific Destination itself.
+func transportDestinations(tr transport.Transport, channelIDs []string) []transport.Destination {
+	return tr.Destinations(channelIDs)
 }
 
 // destByChannel maps each channel id to its Destination, so the string-keyed watch

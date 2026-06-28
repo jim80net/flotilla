@@ -3,6 +3,7 @@ package transport
 import (
 	"fmt"
 	"sort"
+	"sync"
 
 	"github.com/jim80net/flotilla/internal/roster"
 )
@@ -11,6 +12,16 @@ import (
 // resolves to discord so a roster that predates the Transport SPI behaves exactly
 // as before this change.
 const DefaultTransport = "discord"
+
+// mu guards the package-global registry + factories maps. Unlike surface (whose
+// Register runs only at init(), before any goroutines), a Transport's Construct→
+// Register runs at RUNTIME — from the CLIs (cmdSend/cmdNotify/mirror/content-cap) and
+// watch startup. Today those calls are sequential (no live race), but the maps are
+// package-global mutable state reachable from runtime, so a mutex makes the registry
+// safe by construction rather than by an easily-broken "callers are sequential"
+// assumption. The lock is held only across the cheap map op, never across a Factory
+// call (Construct builds OUTSIDE the lock, then Registers under it).
+var mu sync.Mutex
 
 // registry holds CONSTRUCTED transports, keyed by name — the live instance Get
 // returns. It mirrors surface's name-keyed Driver registry (internal/surface
@@ -53,7 +64,11 @@ type Factory func(Config) (Transport, error)
 // Register adds a CONSTRUCTED transport to the registry (so Get resolves it by
 // name). Construct calls this after a Factory builds the live instance; a test may
 // call it directly with a fake. Mirrors surface.Register.
-func Register(t Transport) { registry[t.Name()] = t }
+func Register(t Transport) {
+	mu.Lock()
+	defer mu.Unlock()
+	registry[t.Name()] = t
+}
 
 // Get resolves a constructed transport by name; an empty name resolves to
 // DefaultTransport. Mirrors surface.Get. ok=false ⇒ no transport of that name has
@@ -62,6 +77,8 @@ func Get(name string) (Transport, bool) {
 	if name == "" {
 		name = DefaultTransport
 	}
+	mu.Lock()
+	defer mu.Unlock()
 	t, ok := registry[name]
 	return t, ok
 }
@@ -69,7 +86,11 @@ func Get(name string) (Transport, bool) {
 // RegisterFactory registers a transport's init-time factory under name. Called from
 // each transport's init() (discord.go's init registers the discord factory). A
 // duplicate name is a programming error (two transports claiming the same key).
-func RegisterFactory(name string, f Factory) { factories[name] = f }
+func RegisterFactory(name string, f Factory) {
+	mu.Lock()
+	defer mu.Unlock()
+	factories[name] = f
+}
 
 // Construct builds the live transport named name from cfg, registers it (so Get
 // resolves it), and returns it. An empty name resolves to DefaultTransport. It is
@@ -79,10 +100,19 @@ func Construct(name string, cfg Config) (Transport, error) {
 	if name == "" {
 		name = DefaultTransport
 	}
+	// Resolve the factory under the lock, then RELEASE it before calling f(cfg): the
+	// factory build (a live gateway/REST session) must not hold the registry lock, and
+	// f could itself touch the registry. Register (below) re-acquires the lock for the
+	// cheap insert.
+	mu.Lock()
 	f, ok := factories[name]
 	if !ok {
-		return nil, fmt.Errorf("unknown transport %q (known: %v)", name, knownFactories())
+		known := knownFactoriesLocked()
+		mu.Unlock()
+		return nil, fmt.Errorf("unknown transport %q (known: %v)", name, known)
 	}
+	mu.Unlock()
+
 	t, err := f(cfg)
 	if err != nil {
 		return nil, err
@@ -91,8 +121,9 @@ func Construct(name string, cfg Config) (Transport, error) {
 	return t, nil
 }
 
-// knownFactories returns the registered factory names, sorted, for a clear error.
-func knownFactories() []string {
+// knownFactoriesLocked returns the registered factory names, sorted, for a clear
+// error. The caller MUST hold mu (it reads the factories map).
+func knownFactoriesLocked() []string {
 	out := make([]string, 0, len(factories))
 	for name := range factories {
 		out = append(out, name)

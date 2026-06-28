@@ -41,6 +41,13 @@ type Transport interface {
 	// cannot gap.
 	Subscribe(ctx context.Context, destinations []Destination, handler MessageHandler, onReconnect func()) error
 
+	// Destinations builds one Destination per bound channel id — the subscribe +
+	// reconcile target set. The transport owns the channel-id→Destination construction
+	// (discord wraps each id in its opaque discordDestination), so the wiring never
+	// constructs a medium-specific Destination itself: the channel-id set is the only
+	// thing that crosses the seam, and the Destination shape stays inside the transport.
+	Destinations(channelIDs []string) []Destination
+
 	// Post sends content under a display identity (username) to a destination — the
 	// outbound half (internal/discord.Post today). The destination + identity are
 	// resolved by the caller via ResolveDestination / the roster, never hard-coded;

@@ -13,6 +13,7 @@ func (f *fakeTransport) Name() string { return f.name }
 func (f *fakeTransport) Subscribe(context.Context, []Destination, MessageHandler, func()) error {
 	return nil
 }
+func (f *fakeTransport) Destinations([]string) []Destination    { return nil }
 func (f *fakeTransport) Post(Destination, string, string) error { return nil }
 func (f *fakeTransport) ResolveDestination(string, string) (Destination, string, bool) {
 	return nil, "", false

@@ -49,6 +49,14 @@ func opMsg(id uint64, ts time.Time) transport.Message {
 	return transport.Message{ID: itoa(id), SnowID: id, AuthorID: "op", Content: "do thing " + itoa(id), Timestamp: ts}
 }
 
+// webhookMsg is the adversarial self-mirror case: a message carrying a non-empty
+// WebhookID AND authored by the operator. The webhook drop must fire ahead of the
+// operator-author Accept, so even an operator-authored self-mirror post is never
+// re-relayed through REST history.
+func webhookMsg(id uint64, ts time.Time) transport.Message {
+	return transport.Message{ID: itoa(id), SnowID: id, WebhookID: "wh1", AuthorID: "op", Content: "mirror " + itoa(id), Timestamp: ts}
+}
+
 // catchupHarness wires a Catchup over a real Relay + Injector whose confirmed-delivery
 // mirror records jobs, plus recording notify/alert sinks.
 type catchupHarness struct {
@@ -234,6 +242,42 @@ func TestCatchup_NonOperatorMessagesAdvanceCursorButAreNotRelayed(t *testing.T) 
 	// cursor advances past the non-operator tail (30), else it re-fetches forever.
 	if c, _ := h.cu.gate.cursorOf("C1"); c != 30 {
 		t.Fatalf("cursor = %d, want 30 (advances over non-operator tail)", c)
+	}
+}
+
+// TestCatchup_DropsSelfMirrorWebhookPost pins the SECOND arm of the self-mirror guard
+// (the catch-up arm, accepted()'s inline webhook drop in catchup.go). The REST catch-up
+// reads channel HISTORY, which includes the transport's OWN webhook audit-mirror posts;
+// if the guard regressed here, those self-posts would re-enter the relay and reopen the
+// feedback loop the live-path adapter guard closes. The fixture is the adversarial case:
+// the webhook post is ALSO authored by the operator, so the drop cannot rely on the
+// Accept author check — it must key on the webhook id alone. The post must NOT be
+// relayed, while the cursor still advances OVER it (else it re-fetches forever).
+func TestCatchup_DropsSelfMirrorWebhookPost(t *testing.T) {
+	now := time.Now()
+	r := &fakeReader{
+		paged: map[string][]transport.Message{"C1": {
+			webhookMsg(10, now), // the transport's own audit mirror (webhook set, author==operator)
+			opMsg(20, now),      // a genuine operator message — must still be delivered
+		}},
+		capped:   map[string]bool{},
+		latest:   map[string]transport.Message{},
+		latestOK: map[string]bool{},
+	}
+	h := newCatchupHarness(t, oneChannelCfg(), r)
+	h.cu.gate.initCursor("C1", 5)
+	h.cu.sweep()
+
+	// Exactly the genuine operator message is delivered; the webhook self-mirror is dropped.
+	waitForDelivered(t, h.col, 1)
+	time.Sleep(20 * time.Millisecond)
+	if got := h.col.count(); got != 1 {
+		t.Fatalf("delivered %d jobs, want 1 (the self-mirror webhook post must be dropped)", got)
+	}
+	// The cursor advances PAST the webhook post (20), else the dropped post is re-fetched
+	// every sweep forever.
+	if c, _ := h.cu.gate.cursorOf("C1"); c != 20 {
+		t.Fatalf("cursor = %d, want 20 (advances over the dropped self-mirror post)", c)
 	}
 }
 

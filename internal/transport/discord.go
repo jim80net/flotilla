@@ -3,6 +3,7 @@ package transport
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/jim80net/flotilla/internal/discord"
 	"github.com/jim80net/flotilla/internal/roster"
@@ -40,6 +41,9 @@ type discordTransport struct {
 
 	rest *discord.REST    // the catch-up backstop's REST client (nil if the cursor path is unset)
 	gw   *discord.Gateway // the live gateway session, set by Subscribe; closed by Close
+
+	closeOnce sync.Once // Close runs exactly once (the relayController Close + the deferred shutdown Close both fire)
+	closeErr  error     // the first-Close result, returned to every caller
 }
 
 // newDiscordTransport is the registered Factory: it builds the discord transport
@@ -71,19 +75,16 @@ func newDiscordTransport(cfg Config) (Transport, error) {
 // Name is the registry key.
 func (t *discordTransport) Name() string { return DefaultTransport }
 
-// Destinations enumerates the bound coordination destinations (one per roster
-// channel binding) the daemon subscribes to and posts against. It is the seam the
-// watch wiring uses to obtain the []Destination it passes to Subscribe, so the
-// channel-id set is resolved from the roster INSIDE the transport rather than leaked
-// to the caller as bare strings.
-func (t *discordTransport) Destinations() []Destination {
-	if t.cfg == nil {
-		return nil
-	}
-	bindings := t.cfg.Bindings()
-	out := make([]Destination, 0, len(bindings))
-	for _, b := range bindings {
-		out = append(out, discordDestination{channelID: b.ChannelID})
+// Destinations builds one inbound coordination Destination per channel id the daemon
+// subscribes to and reconciles. It is the seam the watch wiring calls to obtain the
+// []Destination it passes to Subscribe — the channel-id→Destination construction lives
+// INSIDE the transport (each id wrapped in the opaque discordDestination), so the
+// wiring never constructs a medium-specific Destination and the Destination shape never
+// leaks across the seam.
+func (t *discordTransport) Destinations(channelIDs []string) []Destination {
+	out := make([]Destination, 0, len(channelIDs))
+	for _, id := range channelIDs {
+		out = append(out, discordDestination{channelID: id})
 	}
 	return out
 }
@@ -186,20 +187,25 @@ func (t *discordTransport) Chunk(text string) []string {
 // Close tears down the gateway session (call after the caller has cancelled the
 // Subscribe ctx and drained its catch-up goroutine — the stateful-transport
 // lifecycle ordering). The REST client's transport is released too. Safe on a
-// never-subscribed transport (gw nil) and idempotent enough for a single shutdown.
+// never-subscribed transport (gw nil) and TRULY idempotent: the teardown runs exactly
+// once (via sync.Once), so the two shutdown paths that both call Close — the
+// relayController's gatewayController.Close AND cmdWatch's deferred transport Close —
+// never double-close the underlying discordgo session. Every caller gets the same
+// first-Close result rather than relying on discordgo's own double-Close tolerance.
 func (t *discordTransport) Close() error {
-	var firstErr error
-	if t.gw != nil {
-		if err := t.gw.Close(); err != nil {
-			firstErr = err
+	t.closeOnce.Do(func() {
+		if t.gw != nil {
+			if err := t.gw.Close(); err != nil {
+				t.closeErr = err
+			}
 		}
-	}
-	if t.rest != nil {
-		if err := t.rest.Close(); err != nil && firstErr == nil {
-			firstErr = err
+		if t.rest != nil {
+			if err := t.rest.Close(); err != nil && t.closeErr == nil {
+				t.closeErr = err
+			}
 		}
-	}
-	return firstErr
+	})
+	return t.closeErr
 }
 
 // --- CatchUp capability (the at-least-once REST backstop) ---
@@ -258,15 +264,6 @@ func projectMessages(in []discord.Message) []Message {
 		out[i] = projectMessage(m)
 	}
 	return out
-}
-
-// NewDiscordDestination builds a discord destination from a channel id (no webhook —
-// an inbound/subscribe target). It exists so the watch catch-up wiring can address a
-// bound channel by id through the CatchUp capability without the transport package
-// leaking discordDestination's shape. The webhook-bearing destination is built
-// internally by ResolveDestination (outbound).
-func NewDiscordDestination(channelID string) Destination {
-	return discordDestination{channelID: channelID}
 }
 
 // NewWebhookDestination builds a discord OUTBOUND destination from an already-resolved

@@ -21,6 +21,13 @@ func (f *fakeOutboundTransport) Name() string { return "fake" }
 func (f *fakeOutboundTransport) Subscribe(context.Context, []transport.Destination, transport.MessageHandler, func()) error {
 	return f.subscribeErr
 }
+func (f *fakeOutboundTransport) Destinations(channelIDs []string) []transport.Destination {
+	out := make([]transport.Destination, 0, len(channelIDs))
+	for range channelIDs {
+		out = append(out, transport.NewWebhookDestination(""))
+	}
+	return out
+}
 func (f *fakeOutboundTransport) Post(transport.Destination, string, string) error { return nil }
 func (f *fakeOutboundTransport) ResolveDestination(string, string) (transport.Destination, string, bool) {
 	return nil, "", false
