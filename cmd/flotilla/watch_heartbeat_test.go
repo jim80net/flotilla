@@ -111,3 +111,33 @@ func TestDeskEscalateRoutesToOwningXOViaLoudAlert(t *testing.T) {
 		t.Errorf("the escalation must route to the owning XO (xo); got %q", alerts[0])
 	}
 }
+
+// G7.2 — federation double-drive invariant (#183 §8i): a federated sub-XO that runs its OWN daemon is
+// opted OUT of THIS (parent) daemon's desk heartbeat via the roster `heartbeat: false` flag, so it is
+// driven by exactly one clock (its own), never both. This daemon cannot introspect another daemon, so
+// the opt-out is the roster flag — and HeartbeatEnabled (the seam the detector gates on) honors it.
+func TestDeskHeartbeatFederationDoubleDriveOptOut(t *testing.T) {
+	rosterPath := writeRosterFile(t, `{
+	  "xo_agent":"meta","operator_user_id":"U","heartbeat_interval":"20m",
+	  "agents":[{"name":"meta"},{"name":"sub-xo","heartbeat":false},{"name":"leaf"}],
+	  "channels":[
+	    {"channel_id":"C_CMD","xo_agent":"meta","role":"fleet-command","members":["meta","sub-xo","leaf"]},
+	    {"channel_id":"C_SUB","xo_agent":"sub-xo","members":["meta"]},
+	    {"channel_id":"C_LEAF","xo_agent":"leaf","members":["sub-xo"]}]}`)
+	cfg, err := roster.Load(rosterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The sub-XO that runs its own daemon is opted OUT of the parent's heartbeat (no double-drive).
+	if cfg.HeartbeatEnabled("sub-xo") {
+		t.Error("a federated sub-XO marked heartbeat:false must be opted OUT of the parent's desk heartbeat (§8i double-drive)")
+	}
+	// A general leaf below it is still heartbeated by this daemon (belt-and-suspenders recursion).
+	if !cfg.HeartbeatEnabled("leaf") {
+		t.Error("a general leaf desk must still be heartbeated default-ON")
+	}
+	// The primary XO is never desk-heartbeated (its own clock).
+	if cfg.HeartbeatEnabled("meta") {
+		t.Error("the primary XO must never be desk-heartbeated")
+	}
+}

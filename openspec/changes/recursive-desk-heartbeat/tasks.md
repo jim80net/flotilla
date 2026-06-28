@@ -31,36 +31,44 @@ money desks opt-OUT by default; cold-start owes no heartbeat; off-mutex delivery
   `onAccepted` to call AgentWake for every desk target is folded into group 7's cmd wire-up.)
 
 ## 4. Detector per-agent heartbeat state + Idle-gated trigger (parallel tickLocked section)
-- [ ] 4.1 TEST FIRST: per-agent in-memory state (quiet-counter, consecutive-cap, progressedSinceHeartbeat,
+- [x] 4.1 TEST FIRST: per-agent in-memory state (quiet-counter, consecutive-cap, progressedSinceHeartbeat,
   stopped) keyed by agent; a `pendingDeskHeartbeats` slice decided under `d.mu`. Cases: Idle + cadence-
   elapsed + not-settled + not-stopped + enabled ⇒ owed; Working ⇒ not owed (+ resets cap); settled ⇒ not
   owed; opted-out / primary-XO ⇒ never owed; cold-start tick ⇒ owes nothing.
-- [ ] 4.2 Implement the parallel `tickLocked` section (alongside the mirror/synthesis sections) + the
-  `runDeskHeartbeats` off-mutex tail (like `runSynthesis`). progressedSinceHeartbeat latches on into-Working,
-  clears on heartbeat-enqueue.
+  [`detector_heartbeat_g4_test.go` — the 11-case §9 matrix]
+- [x] 4.2 Implement the parallel `tickLocked` section (`deskHeartbeatLocked`, alongside the mirror/synthesis
+  sections) + the `runDeskHeartbeats` off-mutex tail (like `runSynthesis`) + the new DetectorConfig seams
+  (all inert when `HeartbeatEnabled` is nil). progressedSinceHeartbeat (`deskProgressed`) latches on
+  into-Working, clears on the owed beat.
 
-## 5. Delivery: extend the wakeAgent dispatcher + the desk-continuation prompt
-- [ ] 5.1 TEST FIRST (`cmd/flotilla`): the `wakeAgent` dispatcher handles a `WakeDeskHeartbeat` kind
-  (today it rejects non-synthesis kinds) → enqueues `Job{Agent, Message:<desk-prompt>, Kind:"detector"}`
-  (audit-suppressed). Assert the desk prompt is NON-AUTHORIZING + distinct from the XO's + carries the
-  agent's settle path.
-- [ ] 5.2 Implement the dispatcher extension + a `deskContinuationBuiltin` (workspace `HEARTBEAT.md`-override).
+## 5. Delivery: the WakeDeskHeartbeat dispatch + the desk-continuation prompt
+- [x] 5.1 TEST FIRST (`cmd/flotilla`): the dispatch enqueues `Job{Agent, Message:<desk-prompt>,
+  Kind:"detector"}` (audit-suppressed); the desk prompt is NON-AUTHORIZING + distinct from the XO's +
+  carries the agent's settle path. [`watch_heartbeat_test.go`]
+- [x] 5.2 Implement `newDeskHeartbeatDispatch` (the detector's `WakeDeskHeartbeat` seam) + a
+  `deskContinuationBuiltin` (workspace `HEARTBEAT.md`-override) + a `WakeDeskHeartbeat` WakeKind constant.
 
 ## 6. Cap → escalate-to-owning-XO via the LOUD alert (leaf-desk parent resolution)
-- [ ] 6.1 TEST FIRST: cap N=3 consecutive no-progress heartbeats → ONE loud alert (edge-trigger `==N`) +
-  stop; the escalation target = the channel XO the desk is a MEMBER of (`BindingForChannel(...).XOAgent`),
-  fallback primary XO (`AgentsAbove` is EMPTY for a leaf — assert the fallback); a Working edge or AgentWake
-  clears stopped + cap; an input-blocked drop does NOT count toward the cap.
-- [ ] 6.2 Implement the cap/escalate/reset matrix + the parent resolver.
+- [x] 6.1 TEST FIRST: cap N=3 consecutive no-progress heartbeats → ONE loud alert (edge-trigger `==N`) +
+  stop (detector-level, `detector_heartbeat_g4_test.go` case 6); the escalation target = the owning XO
+  (the channel the desk is a MEMBER of), fallback primary XO — `AgentsAbove` is EMPTY for a leaf, so the
+  fallback is asserted (`TestOwningXO_LegacyStarFallsBackToChannelXO`,
+  `TestDeskEscalateRoutesToOwningXOViaLoudAlert`); a Working edge or AgentWake clears stopped + cap (cases
+  4/5/7).
+- [x] 6.2 Implement the cap/escalate/reset matrix (in `deskHeartbeatLocked`) + the `roster.OwningXO`
+  resolver + `newDeskEscalate` (the loud-alert seam).
 
 ## 7. Wire + integration
-- [ ] 7.1 Wire the detector config (DeskHeartbeat enable, the cadence, the per-agent settle markers, the
-  AgentWake) in `cmd/flotilla/watch.go`; the cadence = the heartbeat interval; default-ON gated by the
-  roster resolver (§1).
-- [ ] 7.2 Federation double-drive invariant: a sub-XO that is the primary XO of another daemon is opt-OUT
-  of the parent's desk heartbeat.
-- [ ] 7.3 Byte-inert-when-disabled regression test (the detector's existing behavior unchanged when no
-  agent is heartbeat-enabled).
+- [x] 7.1 Wire the detector config (HeartbeatEnabled→roster resolver, cadence=1 tick, the per-agent settle
+  markers via `SettledMarkerSet` rooted at the roster dir, WakeDeskHeartbeat/DeskEscalate, and the
+  `AgentWake` re-arm from `onAccepted` for every non-XO target) in `cmd/flotilla/watch.go`; default-ON
+  gated by the roster resolver (§1).
+- [x] 7.2 Federation double-drive invariant: a sub-XO that is the primary XO of another daemon is opt-OUT
+  via the roster `heartbeat: false` flag (this daemon cannot introspect another).
+  [`TestDeskHeartbeatFederationDoubleDriveOptOut`]
+- [x] 7.3 Byte-inert-when-disabled regression: `TestDeskHeartbeat_ByteInertWhenUnwired` (detector-level) +
+  the existing detector/watch/roster suites passing UNCHANGED (the path is inert until `HeartbeatEnabled`
+  is wired).
 
 ## 8. Ship
 - [ ] 8.1 `go build ./...` + `go test -race ./...` green; `go vet` clean; `openspec validate --all --strict`.

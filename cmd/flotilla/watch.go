@@ -353,6 +353,21 @@ func cmdWatch(args []string) error {
 			synthEveryTicks = synthDigestTicks // a small multiple of the interval (Q-B)
 		}
 
+		// Recursive desk-heartbeat (#183) seams — DEFAULT-ON, roster opt-OUT (§5.2). HeartbeatEnabled
+		// is ALWAYS wired (the directive is universal); roster.Config.HeartbeatEnabled resolves the
+		// opt-OUT: the primary XO (its own clock), approval-sensitive desks (default-off, #184), and
+		// any agent explicitly `heartbeat: false` (incl. a federated sub-XO that runs its OWN daemon
+		// — the §8i double-drive opt-out is the roster flag, since this daemon cannot introspect
+		// another). The per-agent settle markers live alongside the XO marker in the roster dir
+		// (<dir>/flotilla-<agent>-settled). The cadence is the heartbeat interval — the detector's
+		// tick IS the interval, so DeskHeartbeatEveryTicks=1 (an idle desk is re-engaged within one
+		// interval). WakeDeskHeartbeat enqueues the non-authorizing desk-continuation beat (audit-
+		// suppressed); DeskEscalate raises the loud cap-alert to the desk's owning XO.
+		deskSettled := watch.NewSettledMarkerSet(rosterDir)
+		deskHeartbeatEnabled := func(agent string) bool { return cfg.HeartbeatEnabled(agent) }
+		wakeDeskHeartbeat := newDeskHeartbeatDispatch(injector.Enqueue, deskSettled.Path, ackInstr)
+		deskEscalate := newDeskEscalate(cfg, xo, alert)
+
 		det := watch.NewDetectorWithSynthSidecar(watch.DetectorConfig{
 			XOAgent:  xo,
 			Desks:    desks,
@@ -402,6 +417,7 @@ func cmdWatch(args []string) error {
 			MirrorDispatch:      func(run func()) { go run() }, // mirror I/O off the tick goroutine
 			Awaiting:            awaiting.Present,
 			SettleConsume:       settled.Consume,
+			DeskSettleConsume:   deskSettled.Consume,
 			Alert:               alert,
 			MaxMissedAcks:       *maxMissed,
 			MaxQuietIntervals:   *maxQuiet,
@@ -413,13 +429,26 @@ func cmdWatch(args []string) error {
 			SynthParents:        synthParents,
 			SynthRead:           synthRead,
 			SynthEveryTicks:     synthEveryTicks,
+			// Recursive desk-heartbeat (#183): default-ON, roster opt-OUT. Cadence = the heartbeat
+			// interval (the tick IS the interval ⇒ 1 tick); cap = 3 (NewDetector defaults 0 to 3).
+			HeartbeatEnabled:        deskHeartbeatEnabled,
+			WakeDeskHeartbeat:       wakeDeskHeartbeat,
+			DeskEscalate:            deskEscalate,
+			DeskHeartbeatEveryTicks: 1,
 		}, *snapshotPath, synthSidecarPath)
 		det.Start()
 		defer det.Stop()
 		onAccepted = func(target string) {
 			if target == xo {
 				det.OperatorWake() // an operator message re-engages a settled XO
+				return
 			}
+			// #183 G3.2 re-arm: an operator/XO message to a DESK re-engages its recursive heartbeat
+			// (clears settled+stopped, resets the cadence/cap counters), the per-agent analogue of
+			// OperatorWake. Without this a settled/wedged desk stays silent forever (design §8b). The
+			// relay routes @desk messages and calls onAccepted(deskName), so every non-XO target
+			// re-arms its own desk only.
+			det.AgentWake(target)
 		}
 		mode := cfg.LivenessPingMode
 		if mode == "" {
