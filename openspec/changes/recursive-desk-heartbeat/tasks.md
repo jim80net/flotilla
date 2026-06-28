@@ -23,10 +23,12 @@ money desks opt-OUT by default; cold-start owes no heartbeat; off-mutex delivery
   (`SettledMarkerSet{Path,Consume}`, reusing `SettledMarker.Consume` for the fail-safe stat+remove).
 
 ## 3. AgentWake (the per-agent re-arm) wired for ALL relay targets
-- [ ] 3.1 TEST FIRST (`internal/watch/detector_test.go`): `Detector.AgentWake(agent)` clears that
-  agent's settled state + resets its quiet/cap/stopped counters (the per-agent analogue of `OperatorWake`).
-- [ ] 3.2 Implement `AgentWake`; wire `cmd/flotilla/watch.go` `onAccepted` to call it for EVERY target
-  (not only the XO — the XO keeps `OperatorWake`; a desk target gets `AgentWake`).
+- [x] 3.1 TEST FIRST (`internal/watch/detector_heartbeat_test.go`): `Detector.AgentWake(agent)` clears
+  that agent's settled+stopped state + resets its cadence(`deskSinceBeat`)/cap(`deskNoProgress`)
+  counters, consumes its settle marker, touches ONLY that agent (isolation), no-ops on empty agent.
+- [x] 3.2 Implemented `AgentWake` + the per-agent state maps (`deskSettled/deskSinceBeat/deskNoProgress/
+  deskStopped/deskProgressed`) + `DetectorConfig.DeskSettleConsume`. (Wiring `cmd/flotilla/watch.go`
+  `onAccepted` to call AgentWake for every desk target is folded into group 7's cmd wire-up.)
 
 ## 4. Detector per-agent heartbeat state + Idle-gated trigger (parallel tickLocked section)
 - [ ] 4.1 TEST FIRST: per-agent in-memory state (quiet-counter, consecutive-cap, progressedSinceHeartbeat,

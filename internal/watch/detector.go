@@ -131,6 +131,11 @@ type DetectorConfig struct {
 	Awaiting func() bool
 	// SettleConsume reports+consumes the XO's settle marker (the fast idle signal).
 	SettleConsume func() bool
+	// DeskSettleConsume reports+consumes a DESK's per-agent settle marker (#183 recursive
+	// heartbeat): a desk the heartbeat re-engaged signals "nothing to advance" by touching its
+	// own marker. nil ⇒ the per-agent fast settle is unconfigured (a desk settles only via the
+	// per-agent cap backstop). Like SettleConsume, it must fail toward NOT-settled.
+	DeskSettleConsume func(agent string) bool
 	// Alert raises a LOUD operator alert (down-alert path) — liveness + the H3
 	// persistence failure.
 	Alert func(string)
@@ -189,6 +194,17 @@ type Detector struct {
 	synthOwed      map[string]bool // synthesizing agent → has a rollup owed (a desk finished below it)
 	synthSinceFire map[string]int  // synthesizing agent → ticks since its last WakeSynthesis fired
 	synthState     SynthState      // the DURABLE last-seen materiality snapshot (loaded from the sidecar)
+
+	// --- recursive desk-heartbeat (#183) per-agent state, guarded by the same d.mu single-writer
+	// invariant. Keyed only by monitored desks (⊆ Desks, validated in-roster), so — like the synth
+	// maps — they need no prune: they're bounded by roster size and self-clear on the restart any
+	// roster change requires. All in-memory (no durable snapshot): a restart cold-starts a desk's
+	// heartbeat cadence, which is conservative (one fresh re-engagement, never a missed escalation).
+	deskSettled    map[string]bool // desk signaled idle (per-agent marker consumed) → suppress until re-armed
+	deskSinceBeat  map[string]int  // ticks since the desk's last heartbeat fired (the cadence counter)
+	deskNoProgress map[string]int  // consecutive heartbeats with no intervening progress (the cap counter)
+	deskStopped    map[string]bool // capped + escalated → stop heartbeating until re-armed
+	deskProgressed map[string]bool // desk went Working since its last heartbeat → resets the cap
 
 	stop      chan struct{}
 	done      chan struct{}
@@ -277,6 +293,11 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 		synthOwed:      map[string]bool{},
 		synthSinceFire: map[string]int{},
 		synthState:     synthState,
+		deskSettled:    map[string]bool{},
+		deskSinceBeat:  map[string]int{},
+		deskNoProgress: map[string]int{},
+		deskStopped:    map[string]bool{},
+		deskProgressed: map[string]bool{},
 		// The detector computes the staleness threshold itself (age > alertInterval×
 		// interval), so the watchdog only needs to trip on the first stale/crash
 		// signal and debounce — maxMissed=1.
@@ -394,6 +415,29 @@ func (d *Detector) OperatorWake() {
 	// the XO on the next tick after the operator has re-engaged it.
 	if d.cfg.SettleConsume != nil {
 		_ = d.cfg.SettleConsume()
+	}
+}
+
+// AgentWake is the per-agent analogue of OperatorWake (#183 recursive desk heartbeat): the relay
+// calls it when an operator message is delivered to a DESK (or a federated sub-XO), re-arming that
+// agent's heartbeat. It clears the desk's settled + stopped state and resets its cadence and
+// no-progress (cap) counters so a re-engaged desk is heartbeated again from a clean slate, and drops
+// any settle signal the desk may have just dropped (so it cannot re-settle on the next tick after the
+// operator re-engaged it). Only the named agent's state is touched — a desk's wake never re-arms
+// another desk. Holds the same mutex as Tick so the two never race (the single-writer invariant).
+func (d *Detector) AgentWake(agent string) {
+	if agent == "" {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.deskSettled, agent)
+	delete(d.deskStopped, agent)
+	delete(d.deskSinceBeat, agent)
+	delete(d.deskNoProgress, agent)
+	delete(d.deskProgressed, agent)
+	if d.cfg.DeskSettleConsume != nil {
+		_ = d.cfg.DeskSettleConsume(agent)
 	}
 }
 
