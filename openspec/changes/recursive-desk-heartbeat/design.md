@@ -210,3 +210,54 @@ lost the thread, reply idle"). The `HEARTBEAT.md` per-agent override still appli
 existing XO-heartbeat / materiality / self-continuation / serialized-injection requirements + the §5/§8
 decisions) + `tasks.md` (bite-sized TDD, reusing the `detector_synthesis_test.go` agent-wake fixture
 pattern) before implementation.
+
+## 9. G4 implementation spec — every state transition traced (the careful core)
+
+The per-agent heartbeat decision lives in the existing per-desk loop in `tickLocked` (`detector.go:601`),
+reached ONLY past the cold-start early-return (`:584-591`) — so a cold baseline emits NO beats, for free,
+exactly as the visibility mirror gets cold-start suppression for free. Decided UNDER `d.mu`; DELIVERED and
+cap-accounted OFF `d.mu` in a new `runDeskHeartbeats` tail (mirroring `runSynthesis`), because delivery
+acquires the pane transaction lock — a bounded wait that must never be held under the detector mutex.
+
+Per monitored desk `name` (`name ∈ d.cfg.Desks`, `name != XOAgent`, gated on `d.cfg.HeartbeatEnabled(name)`),
+with `cur = d.debounce(name, Assess(name))`:
+
+**Transition table (under `d.mu`, in `tickLocked`):**
+- `cur == Working`: progress. `deskProgressed[name]=true`; clear `deskStopped[name]` (progress un-wedges);
+  `deskNoProgress[name]=0`; `deskSinceBeat[name]=0` (restart cadence — a freshly-idle desk gets a full
+  cadence before its first beat); clear `deskSettled[name]`.
+- `cur == Idle`: consume the per-agent marker — `if DeskSettleConsume!=nil && DeskSettleConsume(name) →
+  deskSettled[name]=true`. THEN: if `deskSettled[name] || deskStopped[name]` → no beat, NO cadence accrual
+  (a settled/stopped desk does not advance toward a beat). Else `deskSinceBeat[name]++`; if
+  `deskSinceBeat[name] >= cadenceTicks` → desk is OWED a beat: append `name` to `pendingDeskBeats`, reset
+  `deskSinceBeat[name]=0`. (Cap accounting is NOT done here — see below.)
+- `cur` is Unknown/other (unassessable pane): no state change, no beat, NO cadence accrual — wait for a
+  confirmed state (an unreadable pane is not a confirmed Idle).
+
+**Cap accounting (OFF `d.mu`, in `runDeskHeartbeats`, AFTER the delivery attempt, under a short re-lock):**
+the cap counts DELIVERED beats that produced no progress — an input-blocked drop is NOT a failed heartbeat
+(§8f). For each `name ∈ pendingDeskBeats`: deliver via `WakeDeskHeartbeat(name)` (G5 dispatcher; enqueues
+the desk-continuation `Job{Kind:"detector"}`, audit-suppressed). The dispatch reports delivered vs
+input-blocked (the injector drops a non-relay kind on `ErrPanelBlocked`, §8a). Then re-lock `d.mu` and:
+  - input-blocked → no cap change (the beat never landed; do NOT penalize the desk);
+  - delivered AND `deskProgressed[name]` was set → `deskNoProgress[name]=0` (responsive desk never caps);
+  - delivered AND not progressed → `deskNoProgress[name]++`; if `deskNoProgress[name] >= capN` → wedged:
+    raise ONE loud escalation to the owning XO (G6, edge-trigger on `==capN`) + `deskStopped[name]=true`
+    (stop beating until re-armed). Clear `deskProgressed[name]=false` after the accounting.
+
+**Re-arm:** `AgentWake(name)` (G3, shipped) clears all five maps for `name` → the desk re-enters the cadence
+fresh (a stopped/wedged desk resumes beating once the operator re-engages it).
+
+**Why cap-accounting is off-mutex (the subtlety the live clock can't get wrong):** the owed-beat decision
+needs only in-memory state (cheap, under `d.mu`), but whether a beat COUNTS toward the wedged-cap depends on
+the delivery outcome (input-blocked vs landed), which is known only after the off-mutex dispatch. Doing cap
+accounting in `tickLocked` would penalize a desk for a beat that an input-block silently swallowed — a false
+"wedged" escalation. So `tickLocked` decides the cadence; `runDeskHeartbeats` decides the cap.
+
+**G4 TDD matrix (every transition is a test):** (1) cold-start tick → no beat; (2) Idle + cadence → one
+beat, cadence resets; (3) settled (marker consumed) → suppressed until re-arm; (4) Working → no beat, cadence
++ cap reset, progressed set; (5) Idle→Working→Idle (progress) → cap resets, never escalates; (6) capN
+consecutive no-progress delivered beats → ONE escalation (edge `==capN`) + stopped, further ticks silent;
+(7) AgentWake after stopped → beats resume; (8) opted-out / approval-sensitive-default-off → never beats;
+(9) primary XO → never beats; (10) Unknown state → no beat, no cadence accrual; (11) input-blocked delivered
+beat → NOT counted toward the cap (no false escalation).
