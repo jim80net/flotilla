@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/watch"
 )
 
@@ -79,5 +80,34 @@ func TestWakeAgentDispatchesDeskHeartbeat(t *testing.T) {
 	}
 	if !strings.Contains(j.Message, "ALREADY-AUTHORIZED") || !strings.Contains(j.Message, settle("backend")) {
 		t.Errorf("job body must be the non-authorizing desk prompt carrying backend's settle path; got %q", j.Message)
+	}
+}
+
+// G6 — the cap-escalation (#183 §8e) raises ONE loud alert that NAMES the wedged desk + routes to its
+// OWNING XO (the channel it is a member of / its parent), via the loud Alert path — NOT a quiet wake.
+func TestDeskEscalateRoutesToOwningXOViaLoudAlert(t *testing.T) {
+	// Legacy star: the leaf "backend" is owned by "xo" (the channel it is a member of). AgentsAbove is
+	// empty for the leaf, so this proves the §8e channel-membership fallback (not AgentsAbove).
+	rosterPath := writeRosterFile(t, `{
+	  "operator_user_id":"U","channel_id":"C1","xo_agent":"xo",
+	  "agents":[{"name":"xo"},{"name":"backend"},{"name":"frontend"}]}`)
+	cfg, err := roster.Load(rosterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var alerts []string
+	escalate := newDeskEscalate(cfg, "xo", func(m string) { alerts = append(alerts, m) })
+
+	escalate("backend")
+
+	if len(alerts) != 1 {
+		t.Fatalf("a cap-escalation must raise exactly one loud alert, got %d", len(alerts))
+	}
+	if !strings.Contains(alerts[0], "backend") {
+		t.Errorf("the escalation must NAME the wedged desk; got %q", alerts[0])
+	}
+	if !strings.Contains(alerts[0], "xo") {
+		t.Errorf("the escalation must route to the owning XO (xo); got %q", alerts[0])
 	}
 }

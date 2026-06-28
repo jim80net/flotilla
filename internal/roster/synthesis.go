@@ -133,6 +133,41 @@ func (c *Config) assertSynthesisAcyclic() error {
 	return nil
 }
 
+// OwningXO resolves the XO that OWNS a desk — the cap-escalation target for the recursive
+// desk-heartbeat (#183 §8e: a wedged desk surfaces LOUDLY to its owning XO). It is topology-robust:
+//
+//  1. Federated home-channel shape — a desk that OWNS a (non-fleet-command) home channel naming its
+//     parent: AgentsAbove(agent) resolves the parent (a leaf → its project-XO, a project-XO → the
+//     meta-XO). The first parent is the owner.
+//  2. Legacy star — a leaf owns no channel (AgentsAbove is EMPTY); the owner is the XO of the
+//     (non-fleet-command) channel the desk is a MEMBER of.
+//  3. Fallback — neither resolves (the root, or an unknown agent): the supplied primaryXO.
+//
+// The fleet-command broadcast channel is excluded from the membership scan (its members are command
+// targets, not an ownership relation — the same load-bearing exclusion AgentsBelow/AgentsAbove make).
+// Read-only over Bindings(); never mutates a Members slice.
+func (c *Config) OwningXO(agent, primaryXO string) string {
+	if parents := c.AgentsAbove(agent); len(parents) > 0 {
+		return parents[0]
+	}
+	// The membership-scan fallback is for the LEGACY STAR ONLY (a leaf that owns no channel). In the
+	// federated home-channel shape a PARENT's home channel lists its child-XOs as members, so scanning
+	// memberships for an agent that DOES own a channel would invert the hierarchy (e.g. the meta is a
+	// member of each project-XO's home channel → it would resolve to a project-XO). An agent with an
+	// empty AgentsAbove that ALSO owns a channel is the federated ROOT → the primaryXO fallback.
+	if len(c.OwnedChannels(agent)) == 0 {
+		for _, ch := range c.Bindings() {
+			if ch.IsFleetCommand() || ch.XOAgent == agent {
+				continue
+			}
+			if memberOf(ch.Members, agent) {
+				return ch.XOAgent
+			}
+		}
+	}
+	return primaryXO
+}
+
 // memberOf reports whether name is in members.
 func memberOf(members []string, name string) bool {
 	for _, m := range members {

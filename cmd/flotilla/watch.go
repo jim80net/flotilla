@@ -675,6 +675,19 @@ func newDeskHeartbeatDispatch(enqueue func(watch.Job), settleFor func(string) st
 	}
 }
 
+// newDeskEscalate builds the detector's DeskEscalate seam (#183 §8e): when a desk is capped (idle +
+// un-progressing across N beats), it raises ONE LOUD operator-visible alert to the desk's OWNING XO —
+// the channel the desk is a member of / its parent (roster.OwningXO), falling back to the primary XO.
+// It uses the LOUD alert path (operator-visible), NOT a quiet WakeAgent to a possibly-idle parent: a
+// wedged desk must surface loudly, not be poked further. The detector fires this ONCE on the ==capN
+// edge then stops beating the desk; a re-arm (AgentWake) resumes the cadence.
+func newDeskEscalate(cfg *roster.Config, primaryXO string, alert func(string)) func(string) {
+	return func(agent string) {
+		owner := cfg.OwningXO(agent, primaryXO)
+		alert(fmt.Sprintf("desk-heartbeat: %q has been idle and un-progressing across the heartbeat cap — it appears WEDGED. Owning XO %q: check in on it (or re-engage it to clear the wedge). It will not be heartbeated again until re-engaged.", agent, owner))
+	}
+}
+
 // deskMirrorOnFinish builds the detector's MirrorOnFinish side-effect: when a non-XO desk finishes a
 // turn, mirror its turn-final output to its home Discord channel. It returns nil — the detector's
 // inert default — when no secrets file is configured (no per-desk webhooks to post to), so a
