@@ -152,6 +152,24 @@ func TestDeskHeartbeatJudgment_WarrantedTrueBeats(t *testing.T) {
 	}
 }
 
+// (J0) COLD-START with the warrant WIRED: the cold-start tick still owes NO beat (the cold-start
+// early-return precedes the per-desk decision), even though the warrant snapshot ran off-lock. This
+// preserves the #183 no-restart-storm guarantee on the judgment-enabled path.
+func TestDeskHeartbeatJudgment_ColdStartNoBeatWithWarrant(t *testing.T) {
+	f := newHBJFixture()
+	cfg := f.config("xo", []string{"xo", "backend"}, []string{"backend"}, 1, 3, true)
+	f.setWarranted("backend", true) // warranted, yet cold-start must still owe nothing
+	f.set("xo", surface.StateIdle)
+	f.set("backend", surface.StateIdle)
+	d := f.newDet(t, cfg) // cold (missing snapshot)
+
+	d.Tick()
+
+	if got := f.beatLog(); len(got) != 0 {
+		t.Fatalf("cold-start tick must owe no beat even with the warrant wired+true, got %v", got)
+	}
+}
+
 // (J2) WARRANTED-FALSE SUPPRESSES the beat AND is cap- and cadence-neutral (treated like a settled
 // tick): no beat, deskNoProgress unchanged, deskSinceBeat NOT advanced past the suppression.
 func TestDeskHeartbeatJudgment_NotWarrantedSuppressesCapAndCadenceNeutral(t *testing.T) {
