@@ -29,7 +29,6 @@ type hbjFixture struct {
 	settleNow   map[string]bool
 	warranted   map[string]bool // agent → HeartbeatWarranted (the #189 judgment); absent ⇒ true
 	warrantHits []string        // agents the warrant seam was consulted for, in order
-	ioUnderLock bool            // set true if the seam ever did file I/O while consulted (must stay false)
 	beats       []string
 	escalations []string
 }
@@ -257,35 +256,53 @@ func TestDeskHeartbeatJudgment_WedgeStillEscalates(t *testing.T) {
 	}
 }
 
-// (J6) OFF-MUTEX INVARIANT (load-bearing): the warrant seam invoked from the under-lock decision does
-// NO backlog file I/O while d.mu is held. The seam wired here records that it was consulted with
-// pre-computed data and never touches the filesystem; ioUnderLock must stay false. This locks the
-// detector's off-mutex invariant against a regression that reads a backlog under d.mu.
-func TestDeskHeartbeatJudgment_NoBacklogIOUnderLock(t *testing.T) {
+// (J6) OFF-MUTEX INVARIANT (load-bearing): the warrant seam — which is the cmd-wiring's backlog FILE
+// I/O — MUST be invoked OFF d.mu (in the phase-1 deskWarrantSnapshot, before tickLocked acquires the
+// lock), never under it. This is the detector's load-bearing off-mutex invariant: a backlog read under
+// d.mu would stall the tick loop and block OperatorWake (the relay goroutine).
+//
+// The proof is STRUCTURAL and deterministic: from inside the warrant seam we acquire d.mu via a method
+// that locks it (d.deskNoProgress read under d.mu through a tiny exported-for-test re-lock). Go's
+// sync.Mutex is NON-REENTRANT — if the seam ran while tickLocked already held d.mu, this re-lock would
+// DEADLOCK (the test would hang and fail). It succeeds precisely because the seam runs off-lock. The
+// seam doing real ReadFile is the production case; here we prove the SLOT it runs in is off-lock, which
+// is the thing a regression (reading the backlog under d.mu) would break.
+func TestDeskHeartbeatJudgment_WarrantSeamRunsOffLock(t *testing.T) {
 	f := newHBJFixture()
 	cfg := f.config("xo", []string{"xo", "backend"}, []string{"backend"}, 1, 3, true)
-	// Override the warrant seam with one that would FLAG if it did file I/O. It does none — it returns
-	// a pre-decided boolean — which is the whole point: the read happens off-lock at the cmd wiring.
+	var d *Detector
+	reentered := false
 	cfg.HeartbeatWarranted = func(a string) bool {
 		f.mu.Lock()
-		defer f.mu.Unlock()
 		f.warrantHits = append(f.warrantHits, a)
-		// A real os.ReadFile/backlog.Parse here would violate the invariant. We assert by construction
-		// that the seam is a pure lookup: it sets ioUnderLock only if it (wrongly) performed I/O.
-		// (No I/O performed ⇒ ioUnderLock stays false.)
+		f.mu.Unlock()
+		// Acquire the DETECTOR's mutex from inside the seam. If the seam ran under d.mu (the regression
+		// this test guards against), this would deadlock (sync.Mutex is non-reentrant) and the test would
+		// hang. It returns cleanly because the seam runs OFF-lock in deskWarrantSnapshot.
+		if d != nil {
+			d.mu.Lock()
+			reentered = true
+			d.mu.Unlock()
+		}
 		return true
 	}
 	f.set("xo", surface.StateIdle)
 	f.set("backend", surface.StateIdle)
-	d := f.newDet(t, cfg)
+	d = f.newDet(t, cfg)
 	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
 
-	d.Tick()
-	if f.ioUnderLock {
-		t.Fatal("the warrant seam performed backlog file I/O under d.mu — the off-mutex invariant is violated")
+	done := make(chan struct{})
+	go func() { d.Tick(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Tick deadlocked — the warrant seam was invoked UNDER d.mu (off-mutex invariant violated)")
+	}
+	if !reentered {
+		t.Fatal("the warrant seam re-lock did not run — the seam was not invoked off-lock as expected")
 	}
 	if len(f.warrantHits) == 0 {
-		t.Fatal("the warrant seam was never consulted — the conjunct is not wired into the decision")
+		t.Fatal("the warrant seam was never consulted — the judgment is not wired into the decision")
 	}
 }
 

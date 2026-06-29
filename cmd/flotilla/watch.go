@@ -749,12 +749,13 @@ func backlogStatusGate(path string, read func() ([]byte, error), alert func(stri
 }
 
 // deskWarrantedGate builds the #189 per-recipient HeartbeatWarranted seam (a func(agent) bool) that
-// the detector consults as the LAST conjunct of its desk-heartbeat decision. The backlog read is FILE
-// I/O and is performed HERE — OFF the detector lock — so the under-lock decision only ever calls a
-// pure boolean lookup (the detector's load-bearing off-mutex invariant, the same one synthesis + the
-// mirror honor). For each agent it reads that agent's OWN backlog (read is keyed by agent and resolves
-// <rosterDir>/flotilla-<agent>-backlog.md), parses it fresh each call (it is the desk's own output —
-// NOT content-hashed), and returns cfg.HeartbeatWarranted(agent, st).
+// the detector invokes in its PHASE-1 warrant snapshot (deskWarrantSnapshot), OFF the detector lock,
+// BEFORE the under-lock decision runs. The backlog read is FILE I/O and lives HERE — off d.mu — so the
+// under-lock phase-2 decision consults only the resulting pure boolean (the detector's load-bearing
+// off-mutex invariant, the same one synthesis + the mirror honor). For each agent it reads that agent's
+// OWN backlog (read is keyed by agent and resolves <rosterDir>/flotilla-<agent>-backlog.md), parses it
+// fresh each call (it is the desk's own output — NOT content-hashed), and returns
+// cfg.HeartbeatWarranted(agent, st).
 //
 // The fail-safe direction is toward WARRANTED (keep the desk moving — never the silent-stall #183
 // fixed):
@@ -768,8 +769,9 @@ func backlogStatusGate(path string, read func() ([]byte, error), alert func(stri
 //     a format slip is loud, never a silent always-beat. The latch re-arms after a clean read.
 //
 // read + alert are injected so the latch + fallback are unit-testable. The seam is called only from
-// the detector goroutine (under its mutex — but doing NO file I/O there; the I/O is HERE, off-lock,
-// invoked synchronously by the seam call), so the per-agent latch map is single-goroutine.
+// the detector's single Tick goroutine (in deskWarrantSnapshot, off d.mu), so the per-agent latch map
+// is single-goroutine — no concurrent Tick, and the other detector-state writers (OperatorWake/
+// AgentWake) never invoke this seam.
 func deskWarrantedGate(cfg *roster.Config, read func(agent string) ([]byte, bool, error), alert func(string)) func(agent string) bool {
 	flagged := map[string]bool{}
 	return func(agent string) bool {
