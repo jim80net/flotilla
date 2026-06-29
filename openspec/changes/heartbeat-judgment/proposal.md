@@ -36,8 +36,10 @@ by the same total/fail-safe `backlog.Parse`: the OPEN-QUESTIONS ledger is the `[
 `[needs-attention]` class that exists today; the AUTHORIZATIONS ledger is a NEW `[awaiting-auth]` status
 marker carved out of `[blocked]` (today a desk jams "awaiting operator value sign-off" into `[blocked]` —
 `internal/backlog/backlog_test.go:23` — conflating "blocked on a question" with "waiting on authorization").
-A backlog is resolved PER RECIPIENT (the recipient's own `<dir>/flotilla-<recipient>-backlog.md`, falling
-back to the shared fleet backlog), so "live actionable work for THIS recipient" is a real per-recipient read.
+A backlog is resolved PER RECIPIENT (the recipient's own `<dir>/flotilla-<recipient>-backlog.md`; a recipient
+with NO backlog falls back to ALWAYS-WARRANTED — the #183 behavior — NOT to the shared fleet backlog, which
+is the XO's drive queue and not "this recipient's work"; see design §4), so "live actionable work for THIS
+recipient" is a real per-recipient read.
 
 The recipient-behavior contract ON a warranted heartbeat is refined to encode the operator's principle: an
 idle desk is USUALLY a technical fault (rate-limit, or a turn that ended incomplete) → the default response
