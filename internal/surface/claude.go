@@ -185,7 +185,7 @@ func (c claudeCode) ReplyAfter(pane, operatorMsg string) (text string, found boo
 	return c.replyAfter(pane, operatorMsg)
 }
 
-// Composer-line markers (verified live on the spark fleet, 2026-06-22). Version-specific —
+// Composer-line markers (verified live on a running deployment, 2026-06-22). Version-specific —
 // revalidate on a Claude Code TUI upgrade.
 const (
 	composerPrompt = "❯"                                // the composer prompt glyph (U+276F)

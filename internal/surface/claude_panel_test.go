@@ -7,7 +7,7 @@ import (
 )
 
 // Detection is CURSOR-based: classifyComposerLine classifies the line at the terminal cursor (the
-// focused input). These fixtures use the REAL bytes verified live on the spark fleet (2026-06-22):
+// focused input). These fixtures use the REAL bytes verified live on a running deployment (2026-06-22):
 //
 //	prompt = U+276F "❯"
 //	nbsp   = U+00A0 NON-BREAKING space — Claude Code renders this (NOT ASCII 0x20) between the prompt
