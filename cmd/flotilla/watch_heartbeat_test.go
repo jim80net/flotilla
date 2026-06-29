@@ -65,6 +65,72 @@ func TestDeskContinuationBuiltinNoWorkspace(t *testing.T) {
 	}
 }
 
+// TestDeskContinuationBuiltinJudgmentContract asserts the #189 refinements to the desk-continuation
+// prompt: re-trigger-first (idle is usually a transient fault → resume the next authorized step),
+// never-sit-idle / opportunistic-work-if-blocked, the TWO-LEDGER recording instructions, the settle-
+// when-no-actionable clause, and the preserved non-authorizing clause. Load-bearing: the prompt MUST
+// QUOTE the EXACT literal `[awaiting-auth]` token the parser accepts (the §4 brittleness fix — a
+// near-miss spelling silently breaks the judgment), and MUST warn against the near-miss spellings.
+func TestDeskContinuationBuiltinJudgmentContract(t *testing.T) {
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
+
+	settle := "/abs/state/flotilla-backend-settled"
+	got, err := deskHeartbeatBody("backend", func(a string) string {
+		if a == "backend" {
+			return settle
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "{{") {
+		t.Errorf("unsubstituted placeholder remains: %q", got)
+	}
+
+	// (1) Re-trigger-first: idle is USUALLY a transient technical fault → resume the next authorized step.
+	for _, want := range []string{"transient", "RESUME", "ALREADY-AUTHORIZED"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("re-trigger-first fragment %q missing\nfull: %q", want, got)
+		}
+	}
+	// (2) Never sit idle; do opportunistic work if genuinely blocked.
+	for _, want := range []string{"GENUINELY blocked", "opportunistic", "Never sit idle"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("never-sit-idle fragment %q missing\nfull: %q", want, got)
+		}
+	}
+	// (3) Two-ledger recording, QUOTING the exact tokens. The open-questions ledger and the
+	//     authorizations ledger must both be named with the literal markers the parser reads.
+	for _, want := range []string{"[blocked]", "[needs-attention]", "[awaiting-auth]", "open-questions", "authorizations"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("two-ledger fragment %q missing\nfull: %q", want, got)
+		}
+	}
+	// (3a) Brittleness guard: the prompt warns against the near-miss spellings that silently break the
+	//      judgment (the parser recognizes ONLY `[awaiting-auth]`).
+	for _, want := range []string{"awaiting-authorization", "awaiting auth"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the prompt must warn against the near-miss spelling %q (the parser recognizes only [awaiting-auth])\nfull: %q", want, got)
+		}
+	}
+	// (4) Settle-when-no-actionable: once everything is done/blocked-and-tracked/awaiting-auth, reply
+	//     idle and touch the settle marker.
+	if !strings.Contains(got, "touch "+settle) {
+		t.Errorf("settle instruction missing the desk's own marker path\nfull: %q", got)
+	}
+	// (5) Non-authorizing preserved (#184 defense-in-depth).
+	if !strings.Contains(got, "do NOT approve") {
+		t.Errorf("non-authorizing clause must be preserved\nfull: %q", got)
+	}
+	// The XO ack path is still NEVER instructed (the G4 P1 regression-lock).
+	for _, banned := range []string{"flotilla-xo-alive", "-alive"} {
+		if strings.Contains(got, banned) {
+			t.Errorf("desk prompt must NOT carry a liveness-ack instruction (%q)\nfull: %q", banned, got)
+		}
+	}
+}
+
 // G5 — the wakeAgent dispatcher (today it rejects every non-synthesis kind) must handle the new
 // WakeDeskHeartbeat kind by enqueuing an audit-suppressed Kind:"detector" job to the named desk with
 // the desk-continuation body. (WakeSynthesis still works; an unknown kind is still rejected.)

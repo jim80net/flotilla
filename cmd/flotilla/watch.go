@@ -37,21 +37,43 @@ const detectorContinuationBuiltin = "[flotilla change-detector] You just finishe
 	"work, and signal idle by running: touch {{settle}}. (Your context is rotated between steps " +
 	"— rely on durable state, not this conversation.)"
 
-// deskContinuationBuiltin is the recursive desk-heartbeat (#183) prompt — DISTINCT from the XO's
-// (design §8a/§8h). It is the NON-AUTHORIZING beat to an idle desk: advance only ALREADY-AUTHORIZED
-// in-flight work, and — load-bearing for the binary-Idle claude driver (§8a) — NEVER approve a
-// pending tool/permission/approval prompt on a heartbeat (a heartbeat is not authorization). It drops
-// the XO prompt's "context is rotated between steps" line (a desk is NOT rotated by this design) and
-// the {{tracker}} read-source (a leaf desk may keep no durable tracker — "continue your in-flight
-// task; if you've lost the thread, reply idle"). {{settle}} resolves to the DESK's own per-agent
-// settle marker; a workspace HEARTBEAT.md may override the wording.
-const deskContinuationBuiltin = "[flotilla heartbeat] You have been idle. Advance only the next clear, " +
-	"ALREADY-AUTHORIZED step of your in-flight task — reading durable state, not memory. If a tool, " +
-	"permission, or approval prompt is pending, do NOT approve it on this heartbeat (a heartbeat is not " +
-	"authorization) — reply idle by touching your settle marker. A task blocked only from landing (a " +
-	"push gate, a pending review) is NOT idle — advance it locally, then surface the blocker in one " +
-	"line. If nothing AUTHORIZED remains, or you've lost the thread, reply 'idle', do NOT manufacture " +
-	"work, and signal idle by running: touch {{settle}}."
+// deskContinuationBuiltin is the recursive desk-heartbeat prompt — DISTINCT from the XO's (design
+// §8a/§8h). It is the NON-AUTHORIZING beat to an idle desk, refined by #189 to encode the operator's
+// re-trigger-first principle and the two-ledger recording contract:
+//
+//  1. RE-TRIGGER FIRST (the default): an idle desk is USUALLY a transient technical fault (a
+//     rate-limit, or a turn that ended before the work was done), so RESUME the next already-authorized
+//     in-flight step from durable state — never sit idle.
+//  2. NEVER SIT IDLE: if GENUINELY blocked on the current item, do opportunistic authorized work.
+//  3. RECORD INTO THE RIGHT LEDGER so the per-recipient judgment (#189) can settle the desk: a blocking
+//     question/dependency → mark it `[blocked]`/`[needs-attention]` (the open-questions ledger); a
+//     pending operator authorization → mark it with the EXACT literal `[awaiting-auth]` token (the
+//     authorizations ledger). The literal token is QUOTED on purpose — the parser recognizes ONLY
+//     `[awaiting-auth]`, so a near-miss like `[awaiting-authorization]` or `[awaiting auth]` would be
+//     flagged malformed AND drive forever, silently breaking the judgment (the §4 brittleness fix).
+//     Once EVERY item is `[done]`, open-questions, or `[awaiting-auth]`, there is no live actionable
+//     work: reply idle and touch the settle marker (the desk will not be heartbeated again until fresh
+//     actionable work appears or the operator re-engages it).
+//  4. NON-AUTHORIZING (preserved, #184 defense-in-depth): never approve a pending tool/permission/
+//     approval prompt on a heartbeat — a heartbeat is not authorization.
+//
+// It drops the XO prompt's "context is rotated between steps" line (a desk is NOT rotated by this
+// design) and the XO {{tracker}} read-source. {{settle}} resolves to the DESK's own per-agent settle
+// marker; a workspace HEARTBEAT.md may override the wording.
+const deskContinuationBuiltin = "[flotilla heartbeat] You have been idle. An idle desk is USUALLY a " +
+	"transient technical fault (a rate-limit, or a turn that ended before your work was done), so your " +
+	"DEFAULT action is to RESUME the next clear, ALREADY-AUTHORIZED step of your in-flight task — " +
+	"reading durable state, not this conversation. Never sit idle waiting: if you are GENUINELY blocked " +
+	"on the current item, do opportunistic authorized work instead. If a tool, permission, or approval " +
+	"prompt is pending, do NOT approve it on this heartbeat (a heartbeat is not authorization). Record a " +
+	"blocker into the right ledger so you can settle: mark a blocking question or dependency `[blocked]` " +
+	"(or `[needs-attention]`) in your backlog — that is your open-questions ledger; mark a pending " +
+	"operator authorization (a go/no-go, a spend) with the EXACT marker `[awaiting-auth]` (that literal " +
+	"spelling — NOT `[awaiting-authorization]` or `[awaiting auth]`; the parser recognizes only " +
+	"`[awaiting-auth]`) — that is your authorizations ledger. A task blocked only from landing (a push " +
+	"gate, a pending review) is NOT idle — advance it locally, then record the blocker. Once EVERY item " +
+	"is `[done]`, blocked-and-tracked, or `[awaiting-auth]`, you have no live actionable work: reply " +
+	"'idle', do NOT manufacture work, and signal idle by running: touch {{settle}}."
 
 // cmdWatch runs the long-lived watch daemon. This is the CLOCK half: it
 // heartbeats the XO so a turn-based agent keeps advancing clear, authorized work
