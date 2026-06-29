@@ -311,3 +311,61 @@ func TestWebTransport_WiresRealResolvePane(t *testing.T) {
 		t.Error("newWebTransport must wire resolvePane = deliver.ResolvePane (the shared lock-key source; a divergent resolver silently breaks cross-process serialization)")
 	}
 }
+
+// TestWebRouteAndDiscordWriterComputeSameLockKey is THE single-lock-key invariant the
+// PR3 (#198) live web ingress turns on: the lock key the WEB route consumes
+// (webDestination.PaneTarget(), now the dash route's AcquirePaneTxn key) MUST equal the
+// key the DISCORD writer (cmdSend / the watch Injector) computes for the SAME agent —
+// deliver.ResolvePane(agent.Title()) — or the cross-process flock keys diverge and the
+// two writers (the dash route's web ingress, and watch's discord ingress) silently fail
+// to serialize on a shared pane.
+//
+// deliver.ResolvePane needs a live tmux fleet, so we use ONE shared resolver R as the
+// runnable stand-in for it: BOTH the discord writer (which keys on R(agent.Title())) and
+// the web transport (whose resolvePane seam is R) draw from the IDENTICAL function, so
+// their keys are equal by construction. That they BOTH wire the real deliver.ResolvePane
+// in production is the identity guard above (TestWebTransport_WiresRealResolvePane) + the
+// dash's TestNewLibrary wiring; this test pins that GIVEN the shared resolver, the web
+// route's key == the discord writer's key for the same agent (no off-by-Title, no name-vs-
+// title slip), the property that makes Decision 4's simultaneous discord+web safe.
+func TestWebRouteAndDiscordWriterComputeSameLockKey(t *testing.T) {
+	rc := webTestRoster("xo", "alpha")
+	// Give the agent a tmux_title distinct from its name, so a name-vs-Title() slip in
+	// either writer would produce a DIFFERENT key and fail this test.
+	rc.Agents[1].TmuxTitle = "alpha-pane-title"
+	agent, err := rc.Agent("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// R is the ONE shared pane resolver standing in for deliver.ResolvePane. In production
+	// both writers wire deliver.ResolvePane itself (the identity guard); here R lets us run
+	// the equality without a live fleet.
+	resolved := map[string]string{"alpha-pane-title": "spark:7.4"}
+	R := func(title string) (string, error) { return resolved[title], nil }
+
+	// The DISCORD writer (cmdSend / Injector) keys the flock on R(agent.Title()).
+	discordKey, err := R(agent.Title())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The WEB route consumes webDestination.PaneTarget() as its key — the web transport's
+	// resolvePane seam is the SAME R.
+	wt := &webTransport{roster: rc, xo: "xo", resolvePane: R}
+	dest, gotAgent, ok := wt.ResolveDestination("", "alpha")
+	if !ok {
+		t.Fatal("web ResolveDestination(alpha) must resolve")
+	}
+	webKey := dest.(InboundTarget).PaneTarget()
+
+	if webKey != discordKey {
+		t.Errorf("web route lock key %q != discord writer lock key %q — the cross-process flock keys diverge; the two ingresses would NOT serialize on the shared pane", webKey, discordKey)
+	}
+	if webKey != "spark:7.4" {
+		t.Errorf("web route lock key = %q, want the resolved pane spark:7.4", webKey)
+	}
+	if gotAgent != "alpha" {
+		t.Errorf("web route resolved agent = %q, want alpha", gotAgent)
+	}
+}

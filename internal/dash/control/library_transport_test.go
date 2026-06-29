@@ -64,7 +64,9 @@ func newTransportTestController(t *testing.T, fakeTr transport.Transport) (*Libr
 	if err := os.WriteFile(secretsPath, []byte(secretsXO), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	c := NewLibrary(rc, "xo", secretsPath, fakeTr)
+	// This suite exercises the NOTIFY (outbound) path only, so the web (inbound) transport
+	// is an unused fake; fakeTr is the discord-backed notify transport under test.
+	c := NewLibrary(rc, "xo", secretsPath, fakeTr, &fakeNotifyTransport{maxRunes: 2000})
 	cap := &capture{}
 	c.appendCos = cap.append
 	c.now = func() time.Time { return fixedTime }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/jim80net/flotilla/internal/dash"
 	"github.com/jim80net/flotilla/internal/dash/tracker"
+	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/transport"
 )
 
@@ -60,6 +61,25 @@ func cmdDash(args []string) error {
 		return err
 	}
 
+	// Construct the INBOUND web transport — the route's roster-wide resolver. As of PR3
+	// (#198) the dash route is the LIVE web ingress: it resolves its target+pane THROUGH
+	// this transport's ResolveDestination (the ONE shared roster.ResolveTarget + the SAME
+	// deliver.ResolvePane every pane writer uses). It needs the roster (the resolver's
+	// source), so we load it here at the wiring boundary — the one place permitted to
+	// resolve the concrete media. (NewServer loads the roster again to validate it +
+	// resolve default paths; both read the same file, identical content. The web
+	// transport is the INBOUND seam, distinct from tr, the OUTBOUND notify medium —
+	// design Decision 1's direction asymmetry.) A construction failure is surfaced
+	// (fail-closed) rather than serving a dash whose route would nil-deref.
+	rc, err := roster.Load(*rosterPath)
+	if err != nil {
+		return fmt.Errorf("dash: load roster for the web transport: %w", err)
+	}
+	webTr, err := newDashWebTransport(rc)
+	if err != nil {
+		return err
+	}
+
 	// NewServer loads + validates the roster (fail-closed), resolves the
 	// <roster-dir>/… default paths, validates the bind (loopback-only here), and
 	// constructs the gh-backed tracker when a repo is pinned (fail-closed on a
@@ -73,6 +93,7 @@ func cmdDash(args []string) error {
 		Repo:         pinnedRepo,
 		SecretsPath:  *secretsPath,
 		Transport:    tr,
+		WebTransport: webTr,
 	})
 	if err != nil {
 		return err
@@ -120,4 +141,22 @@ func newDashTransport() (transport.Transport, error) {
 		return nil, fmt.Errorf("dash: construct the notify transport: %w", err)
 	}
 	return tr, nil
+}
+
+// newDashWebTransport constructs the WEB coordination transport that backs the dash
+// route's INBOUND resolution. As of PR3 (#198) the dash route is the LIVE web ingress: it
+// resolves its target+pane THROUGH this transport's ResolveDestination — the ONE shared
+// roster.ResolveTarget (so the dash route + the web transport cannot drift) plus the SAME
+// deliver.ResolvePane every other pane writer uses (so the cross-process per-pane lock keys
+// on the IDENTICAL resolved target — the serialization contract, design Decision 4 / §5).
+// Unlike the notify transport (the OUTBOUND discord medium), the web transport NEEDS the
+// roster — it is the resolver's source — so it is constructed with it (transport.Config.Roster).
+// The web factory fails closed without a roster; a construction failure is surfaced
+// (fail-closed) rather than serving a dash whose route would nil-deref.
+func newDashWebTransport(rc *roster.Config) (transport.Transport, error) {
+	wt, err := transport.Construct("web", transport.Config{Roster: rc})
+	if err != nil {
+		return nil, fmt.Errorf("dash: construct the web (route) transport: %w", err)
+	}
+	return wt, nil
 }

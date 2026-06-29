@@ -1,8 +1,11 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/transport"
 )
 
@@ -32,5 +35,52 @@ func TestNewDashTransport_IsDiscordBacked(t *testing.T) {
 	// const carried — behavior preserved).
 	if tr.MaxContentRunes() != 2000 {
 		t.Errorf("dash notify transport cap = %d, want 2000 (the discord medium cap)", tr.MaxContentRunes())
+	}
+}
+
+// dashWiringRoster writes a minimal roster file and loads it, for the web-transport
+// wiring test (the web transport's Construct needs the roster — the resolver's source).
+func dashWiringRoster(t *testing.T) *roster.Config {
+	t.Helper()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "flotilla.json")
+	const body = `{"channel_id":"C1","xo_agent":"xo","heartbeat_interval":"20m","agents":[{"name":"xo"},{"name":"alpha"}]}`
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rc, err := roster.Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rc
+}
+
+// TestNewDashWebTransport_IsWebBacked pins the dash route's INBOUND wiring (PR3 #198):
+// cmdDash constructs the WEB transport for the route's roster-wide resolution — the dash
+// route is now the LIVE web ingress, resolving its target+pane THROUGH this transport's
+// ResolveDestination. Distinct from newDashTransport (the discord-backed OUTBOUND notify
+// medium) — the two opposite-direction seams (design Decision 1). The web transport needs
+// the roster (the resolver's source), so it is constructed with it.
+func TestNewDashWebTransport_IsWebBacked(t *testing.T) {
+	rc := dashWiringRoster(t)
+	wt, err := newDashWebTransport(rc)
+	if err != nil {
+		t.Fatalf("newDashWebTransport: %v", err)
+	}
+	if wt == nil {
+		t.Fatal("newDashWebTransport must return a non-nil transport (NewServer fails closed on a nil WebTransport)")
+	}
+	if wt.Name() != "web" {
+		t.Errorf("dash route transport = %q, want the web transport (the inbound roster-wide resolver)", wt.Name())
+	}
+	// It owns no outbound post — the direction asymmetry: the web transport resolves
+	// inbound; its Post rejects (the only outbound the dash does is the Discord notify,
+	// posted by the discord transport, newDashTransport). This confirms newDashWebTransport
+	// wired the WEB transport, not the discord default. (The roster-wide ResolveDestination
+	// semantics are pinned in internal/transport/web_test.go with a fake pane resolver —
+	// here the real deliver.ResolvePane would need a live tmux fleet, so this asserts the
+	// medium identity, not a live pane resolution.)
+	if err := wt.Post(transport.NewInboundTarget("xo", "%1"), "u", "c"); err == nil {
+		t.Error("the dash route transport must be the WEB transport (Post rejects); a successful Post means the discord transport was wired by mistake")
 	}
 }

@@ -65,6 +65,17 @@ func (webDestination) isDestination() {}
 func (d webDestination) AgentName() string  { return d.agentName }
 func (d webDestination) PaneTarget() string { return d.paneTarget }
 
+// NewInboundTarget builds an InboundTarget from an already-resolved {agentName,
+// paneTarget} — the symmetric peer of NewWebhookDestination (which builds an OUTBOUND
+// post destination at the wiring boundary). It lets a caller OUTSIDE this package
+// construct the opaque inbound target (a value satisfying InboundTarget cannot be forged
+// elsewhere, because the isDestination marker is unexported), e.g. an alternative web
+// ingress that resolves the pane itself, or a test that injects a fixed inbound target.
+// The pane MUST be the deliver.ResolvePane key for the cross-process lock to serialize.
+func NewInboundTarget(agentName, paneTarget string) InboundTarget {
+	return webDestination{agentName: agentName, paneTarget: paneTarget}
+}
+
 // webTransport is the dashboard's coordination surface behind the Transport SPI. It
 // owns ONLY the INBOUND half: ResolveDestination resolves a roster-wide address (via
 // the ONE shared roster.ResolveTarget) to a webDestination the dash's delivery leg
@@ -73,12 +84,16 @@ func (d webDestination) PaneTarget() string { return d.paneTarget }
 // medium (Post rejects — the notify is a Discord post by the discord transport). Its
 // delivery is in-process/loopback and cannot gap, so it does NOT implement CatchUp.
 //
-// SCOPE (PR2, #188/#106): this transport is REGISTERED (init → RegisterFactory) but NOT YET
-// CONSTRUCTED in the dash runtime — the live ingress today is still POST /api/control/route →
-// LibraryController.Route → roster.ResolveTarget (which PR2 unified). ResolveDestination /
-// webDestination / Post-reject are test-covered scaffolding; PR3 (#198) constructs + wires this
-// transport as the actual ingress and pins the single-lock-key invariant (the route consumes
-// webDestination.paneTarget rather than re-resolving the pane).
+// SCOPE (PR3, #198): this transport is now LIVE. cmd/flotilla/dash.go constructs it
+// (Construct("web", Config{Roster})) and injects it into the dash control library, and
+// LibraryController.Route resolves its target+pane THROUGH ResolveDestination — consuming
+// the returned webDestination.paneTarget as the AcquirePaneTxn lock key rather than
+// re-resolving the pane (the single-lock-key invariant: the dash route + the watch Injector
+// key the cross-process flock on the IDENTICAL deliver.ResolvePane target, so they serialize).
+// The live ingress is POST /api/control/route → requireWrite/Host/Origin gates →
+// LibraryController.Route → webTransport.ResolveDestination → the deliver+surface delivery leg.
+// (PR2, #188/#106, shipped this transport REGISTERED-but-dormant — the route still did its own
+// resolveTarget+resolvePane then; PR3 routes through this transport and removed that.)
 type webTransport struct {
 	roster *roster.Config
 	xo     string // the hub XO an empty target resolves to (XOAgent, else Agents[0])

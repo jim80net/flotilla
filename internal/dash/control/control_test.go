@@ -5,15 +5,14 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/cos"
-	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
+	"github.com/jim80net/flotilla/internal/transport"
 )
 
 // fixedTime keeps ledger entries deterministic.
@@ -43,19 +42,25 @@ func newTestController(t *testing.T, rosterBody, secretsBody string) (*LibraryCo
 	if xo == "" {
 		xo = rc.Agents[0].Name
 	}
-	// Inject a discord-backed transport stand-in reporting the Discord 2000-rune cap
-	// (so the over-length guard byte-pins to the previous discord.MaxContentRunes
-	// behavior). The post seam is overridden below with cap.post, so these tests pin
-	// notify/route behavior independent of the transport's Post — the constructor CALL
-	// updates for the new param; the seam-override ASSERTIONS stay byte-pinned.
-	c := NewLibrary(rc, xo, secretsPath, &fakeNotifyTransport{maxRunes: 2000})
-	cap := &capture{paneTarget: "%5"}
+	// Inject a discord-backed NOTIFY transport stand-in reporting the Discord 2000-rune
+	// cap (so the over-length guard byte-pins to the previous discord.MaxContentRunes
+	// behavior), plus a WEB transport stand-in for the route's inbound resolution. The
+	// post seam is overridden below with cap.post, so these tests pin notify/route behavior
+	// independent of the transport's Post — the constructor CALL updates for the new params;
+	// the seam-override ASSERTIONS stay byte-pinned. As of PR3 (#198) Route resolves through
+	// the web transport's ResolveDestination; the capture's resolveDest seam (wired below)
+	// replicates exactly what the real web transport does — resolve the target through the
+	// SHARED roster.ResolveTarget, then resolvePane(agent.Title()) — so the byte-pinned Route
+	// assertions (resolvePane asked for the Title, lock keyed on the resolved pane, distinct
+	// unknown/ambiguous errors) hold UNCHANGED against the new seam.
+	c := NewLibrary(rc, xo, secretsPath, &fakeNotifyTransport{maxRunes: 2000}, &fakeNotifyTransport{maxRunes: 2000})
+	cap := &capture{paneTarget: "%5", rc: rc, xo: xo}
 	c.post = cap.post
 	c.appendCos = cap.append
 	c.now = func() time.Time { return fixedTime }
 	// Route seams: record the resolve→acquire→submit→release sequence so tests can
 	// assert the lock keys on the RESOLVED pane target and brackets the submit.
-	c.resolvePane = cap.resolvePane
+	c.resolveDest = cap.resolveDest
 	c.acquireTxn = cap.acquireTxn
 	c.submit = cap.submit
 	return c, cap
@@ -68,7 +73,11 @@ type capture struct {
 	ledger                             []cos.Entry
 	ledgerErr                          error
 
-	// Route seam recording.
+	// Route seam recording. rc + xo let resolveDest replicate the real web transport's
+	// resolution (the shared roster.ResolveTarget) so the distinct unknown/ambiguous
+	// sentinels and the Title()-keyed pane resolution are exercised exactly as in prod.
+	rc             *roster.Config
+	xo             string
 	paneTarget     string // what resolvePane returns
 	resolvedTitle  string // the title resolvePane was asked for
 	resolvePaneErr error
@@ -79,6 +88,27 @@ type capture struct {
 	submitText     string
 	submitErr      error
 	events         []string // ordered: "resolve","acquire","submit","release"
+}
+
+// resolveDest stands in for the web transport's ResolveDestination wired into the
+// controller's resolveDest seam. It replicates the real web transport EXACTLY: resolve
+// the target through the SHARED roster.ResolveTarget (so the distinct ErrUnknownTarget /
+// ErrAmbiguousTarget sentinels propagate), then resolvePane(agent.Title()) for the pane
+// target (the cross-process lock key). originChannel is ignored (roster-wide, Decision 2).
+func (c *capture) resolveDest(_, target string) (string, string, error) {
+	agentName, err := c.rc.ResolveTarget(c.xo, target)
+	if err != nil {
+		return "", "", err
+	}
+	agent, err := c.rc.Agent(agentName)
+	if err != nil {
+		return "", "", ErrUnknownTarget
+	}
+	pane, err := c.resolvePane(agent.Title())
+	if err != nil {
+		return "", "", err
+	}
+	return agentName, pane, nil
 }
 
 func (c *capture) resolvePane(title string) (string, error) {
@@ -390,14 +420,34 @@ func TestRoute_SubmitOutcomesMapped(t *testing.T) {
 	}
 }
 
-// TestNewLibrary_WiresRealResolvePane is the DRIFT guard: the seam-stubbed tests
-// above prove the plumbing (Route keys the lock on resolvePane's output), but they
-// cannot catch a production controller that wires a DIFFERENT resolver. This
-// asserts NewLibrary wires resolvePane = deliver.ResolvePane by function identity —
-// the SAME function cmdSend + the watch Injector use — so the cross-process lock
-// keys cannot silently diverge in a future refactor (a real ResolvePane(...) call
-// needs the live tmux fleet, so identity is the runnable proxy).
-func TestNewLibrary_WiresRealResolvePane(t *testing.T) {
+// recordingWebTransport is a web-transport stand-in for the PR3 drift guard: it
+// records the (originChannel, target) ResolveDestination was called with and returns a
+// fixed InboundTarget, so the test can prove the production controller's Route keys the
+// lock on the pane the WEB TRANSPORT resolved — not on a forked in-Route resolution.
+type recordingWebTransport struct {
+	transport.Transport  // embed so the unused methods are inherited (nil-safe: only ResolveDestination is called)
+	gotOrigin, gotTarget string
+	dest                 transport.Destination
+	agent                string
+	ok                   bool
+}
+
+func (r *recordingWebTransport) ResolveDestination(origin, target string) (transport.Destination, string, bool) {
+	r.gotOrigin, r.gotTarget = origin, target
+	return r.dest, r.agent, r.ok
+}
+
+// TestNewLibrary_RoutesThroughWebTransport is the PR3 (#198) DRIFT guard: the production
+// controller MUST resolve its route target+pane THROUGH the injected web transport's
+// ResolveDestination and key the lock on the pane THAT resolver returned — never a forked
+// in-Route resolution. The seam-stubbed Route tests above prove the plumbing; this proves
+// NewLibrary actually wires the seam to the injected webTr (a future refactor that
+// re-introduced an in-Route resolvePane would diverge the lock key and silently break
+// cross-process serialization). The companion fact — the web transport wires
+// deliver.ResolvePane (the SAME function cmdSend + the watch Injector use) — is pinned in
+// internal/transport (TestWebTransport_WiresRealResolvePane); together they prove the dash
+// route's lock key == deliver.ResolvePane(agent.Title()) == the discord writer's key.
+func TestNewLibrary_RoutesThroughWebTransport(t *testing.T) {
 	dir := t.TempDir()
 	rosterPath := filepath.Join(dir, "flotilla.json")
 	if err := os.WriteFile(rosterPath, []byte(rosterCos), 0o600); err != nil {
@@ -407,9 +457,34 @@ func TestNewLibrary_WiresRealResolvePane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := NewLibrary(rc, "xo", "", &fakeNotifyTransport{maxRunes: 2000})
-	if reflect.ValueOf(c.resolvePane).Pointer() != reflect.ValueOf(deliver.ResolvePane).Pointer() {
-		t.Error("NewLibrary must wire resolvePane = deliver.ResolvePane (the shared lock-key source; a divergent resolver silently breaks cross-process serialization)")
+	webTr := &recordingWebTransport{
+		dest:  transport.NewInboundTarget("alpha", "spark:9.2"),
+		agent: "alpha",
+		ok:    true,
+	}
+	c := NewLibrary(rc, "xo", "", &fakeNotifyTransport{maxRunes: 2000}, webTr)
+	// Drive Route with the real resolveDest seam, capturing only the lock + submit.
+	cap := &capture{}
+	c.acquireTxn = cap.acquireTxn
+	c.submit = cap.submit
+	res, err := c.Route(context.Background(), "@alpha", "go")
+	if err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	if webTr.gotTarget != "@alpha" {
+		t.Errorf("web ResolveDestination target = %q, want the route target @alpha (Route must resolve THROUGH the web transport)", webTr.gotTarget)
+	}
+	if webTr.gotOrigin != "" {
+		t.Errorf("web ResolveDestination originChannel = %q, want empty (roster-wide, Decision 2)", webTr.gotOrigin)
+	}
+	if cap.txnTarget != "spark:9.2" {
+		t.Errorf("txn lock keyed on %q, want the pane the WEB TRANSPORT resolved (spark:9.2) — not a forked in-Route resolution", cap.txnTarget)
+	}
+	if cap.submitPane != "spark:9.2" {
+		t.Errorf("submit ran on pane %q, want the web-transport-resolved pane", cap.submitPane)
+	}
+	if res.Target != "alpha" || res.Outcome != OutcomeDelivered {
+		t.Errorf("result = %+v, want delivered to alpha", res)
 	}
 }
 

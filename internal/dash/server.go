@@ -36,10 +36,19 @@ type Config struct {
 	// DISCORD transport). It is constructed at the wiring boundary
 	// (cmd/flotilla/dash.go) — the one place permitted to resolve the concrete medium
 	// + the webhook credential — and injected here as an interface VALUE, so
-	// internal/dash/control depends on internal/transport, not internal/discord. The
-	// web transport (the dash's INBOUND resolver) registers + is selected separately;
-	// it is NOT the notify's post medium (the direction asymmetry — design Decision 1).
+	// internal/dash/control depends on internal/transport, not internal/discord. This
+	// is the OUTBOUND seam (the direction asymmetry — design Decision 1).
 	Transport transport.Transport
+
+	// WebTransport is the INBOUND coordination transport: the route's roster-wide
+	// resolver. As of PR3 (#198) the dash route is the LIVE web ingress — it resolves
+	// its target+pane THROUGH this transport's ResolveDestination (the ONE shared
+	// roster.ResolveTarget + the SAME deliver.ResolvePane every pane writer uses) and
+	// keys the cross-process lock on the returned webDestination.paneTarget. It is the
+	// `web` transport, constructed at the wiring boundary (cmd/flotilla/dash.go) with the
+	// roster and injected here as an interface VALUE. Distinct from Transport (the
+	// OUTBOUND notify medium) — the two opposite-direction seams (design Decision 1).
+	WebTransport transport.Transport
 }
 
 // Server is the dash HTTP server: a pure reader over the artifacts `flotilla
@@ -113,15 +122,19 @@ func NewServer(cfg Config) (*Server, error) {
 		s.tracker = gh
 	}
 	// The control surface is always wired: notify posts through the injected
-	// (discord-backed) Transport when a secrets webhook is configured; route drives a
-	// pane through the cross-process lock; resume fails closed (design §5). The
-	// Transport is required — it is constructed at the wiring boundary and carries the
-	// notify's post medium + content cap; a nil one is a wiring bug, surfaced
-	// fail-closed rather than nil-dereferenced at the first notify.
+	// (discord-backed) Transport when a secrets webhook is configured; route resolves
+	// THROUGH the injected (web) WebTransport and drives a pane through the cross-process
+	// lock; resume fails closed (design §5). BOTH transports are required — they are
+	// constructed at the wiring boundary (the two opposite-direction seams); a nil one is
+	// a wiring bug, surfaced fail-closed rather than nil-dereferenced at the first
+	// notify/route.
 	if cfg.Transport == nil {
-		return nil, fmt.Errorf("dash: a coordination Transport is required (construct it at the wiring boundary and pass it via Config.Transport)")
+		return nil, fmt.Errorf("dash: a coordination Transport is required for the notify (construct it at the wiring boundary and pass it via Config.Transport)")
 	}
-	s.control = control.NewLibrary(rc, xo, cfg.SecretsPath, cfg.Transport)
+	if cfg.WebTransport == nil {
+		return nil, fmt.Errorf("dash: a WebTransport is required for the route's inbound resolution (construct the web transport at the wiring boundary and pass it via Config.WebTransport)")
+	}
+	s.control = control.NewLibrary(rc, xo, cfg.SecretsPath, cfg.Transport, cfg.WebTransport)
 	s.routes()
 	return s, nil
 }
