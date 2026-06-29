@@ -162,37 +162,50 @@ SHALL close the session gracefully.
 
 When the change-detector is enabled, the system SHALL run a deterministic (no-LLM)
 detector each tick that snapshots materiality signals — each monitored desk's
-assessed `surface` state and the state-tracker file's content hash — diffs them
-against a persisted prior snapshot, and wakes the XO ONLY on a material change,
-with a prompt naming what changed. When nothing material changed, the XO SHALL NOT
-be woken (an idle fleet costs nothing). The detector SHALL reuse the surface
-`Driver.Assess` for state (never raw pane bytes), so transient render flicker is
-not a change.
+assessed `surface` state and the optional **external signal-file**'s content hash
+(a file the XO does NOT write) — diffs them against a persisted prior snapshot, and
+wakes the XO ONLY on a material change, with a prompt naming what changed. When
+nothing material changed, the XO SHALL NOT be woken (an idle fleet costs nothing).
+The detector SHALL reuse the surface `Driver.Assess` for state (never raw pane
+bytes), so transient render flicker is not a change. The XO's own single-writer
+state tracker (`.flotilla-state.md`) SHALL NOT be a wake signal (it is the XO's own
+output; see "Material change …").
 
 #### Scenario: Idle fleet does not wake the XO
 - **WHEN** a detector tick finds no material change since the last snapshot
 - **THEN** the XO is not woken and no LLM turn is spent
 
 #### Scenario: A material change wakes the XO with a targeted prompt
-- **WHEN** a monitored desk transitions into an actionable state (or the tracker hash changes)
+- **WHEN** a monitored desk transitions into an actionable state (or the external signal-file hash changes)
 - **THEN** the XO is woken with a prompt naming the specific change
 
 ### Requirement: Material change is a curated transition set, not a raw diff
 
 A material change SHALL be any of: a desk transition INTO an actionable state —
 `Shell`, `Errored`, `AwaitingApproval`, `AwaitingInput`, or `Working→Idle`
-(finished a turn); a change in the state-tracker file hash; or XO self-continuation
-(below). A transition INTO `Working`, a no-change, and transitions into/out of an
-unknown/unassessable state SHALL NOT be material. The set SHALL be extensible
-without changing the detector loop.
+(finished a turn); a change in the optional **external signal-file** hash (a file
+the XO does NOT write); or XO self-continuation (below). A transition INTO
+`Working`, a no-change, and transitions into/out of an unknown/unassessable state
+SHALL NOT be material. The set SHALL be extensible without changing the detector
+loop.
 
 The materiality predicate SHALL key only on states the configured driver actually
 emits: for v1 (claude-code, which emits Shell/Working/Idle) the live signals are
-`→Shell` (debounced) and `Working→Idle` plus the tracker-hash; the
-`Errored`/`AwaitingApproval`/`AwaitingInput` branches activate automatically when
-a driver emits those states (no mandated dead branches). The XO's OWN transitions
+`→Shell` (debounced) and `Working→Idle` plus the external signal-file hash; the
+`Errored`/`AwaitingApproval`/`AwaitingInput` branches activate automatically when a
+driver emits those states (no mandated dead branches). The XO's OWN transitions
 SHALL feed only the self-continuation path, never the desk-finished wake (the XO
 pane is excluded from the desk branch).
+
+The XO's **single-writer state tracker** (`.flotilla-state.md`) SHALL NOT be a wake
+signal: because the XO writes it itself (the heartbeat instructs it to keep the
+tracker current), a tracker delta is the XO's own action and waking on it would
+re-wake the XO on its own writes (a self-perpetuating loop until the XO settles).
+Genuine external state changes the XO must react to SHALL be delivered via the
+external signal-file, which the XO does not write. A deployment whose tracker is
+genuinely multi-writer MAY point the external signal-file at that tracker to restore
+delta-as-wake behavior; the change-detector itself SHALL NOT hash the XO's own
+tracker as a wake signal.
 
 #### Scenario: The XO's own finish is self-continuation, not a desk wake
 - **WHEN** the XO pane transitions Working→Idle
@@ -205,6 +218,14 @@ pane is excluded from the desk branch).
 #### Scenario: A desk finishing or needing attention is material
 - **WHEN** a desk transitions Working→Idle, or into Shell/Errored/AwaitingApproval/AwaitingInput
 - **THEN** it is a material change and the XO is woken
+
+#### Scenario: The XO updating its own single-writer tracker does not self-wake
+- **WHEN** the XO writes `.flotilla-state.md` (its own single-writer tracker)
+- **THEN** no material wake is produced by the tracker delta
+
+#### Scenario: An external signal-file delta is a wake
+- **WHEN** the configured external signal-file's content hash changes (a file the XO does not write)
+- **THEN** it is a material change and the XO is woken with a prompt naming the external signal
 
 ### Requirement: XO self-continuation without a blind timer
 
@@ -536,7 +557,13 @@ The system SHALL mechanically provide the RETURN leg of the operator↔XO hotlin
 operator's hotline to its XO (an operator message in a bound channel routes to that channel's
 `xo_agent` via `BindingForChannel→XOAgent`), and when such a message is confirmed-delivered to the XO,
 the XO's resulting turn-final SHALL be routed back to that ORIGIN channel, attributed to the XO, for
-EVERY such turn (not best-effort).
+EVERY such turn (not best-effort). The watcher SHALL be the UNIFIED return leg for EVERY channel's XO,
+INCLUDING the PRIMARY XO (`cfg.XOAgent`): a relay delivery whose target is the origin channel's
+`xo_agent` arms it regardless of whether that XO is the primary or a federated one. The primary XO's
+prior host-local `Stop`-hook return leg is RETIRED — the watcher has the SAME replies-only semantics
+(it arms ONLY on an operator relay delivery, never a heartbeat/detector tick), provided more robustly
+(it knows the operator message at arm time and content-correlates from the store, with no
+transcript-archaeology, no Stop-vs-flush race, and no per-pane host script).
 
 The return leg SHALL detect the XO's reply from the harness SESSION STORE (the ground truth of
 completed turns), NOT from pane-rendered state and NOT from the change-detector's heartbeat-cadence
@@ -564,17 +591,23 @@ answer is routed rather than lost) and a HARD bound (the final give-up escalatio
 be per-XO single — a newer hotline message supersedes and re-anchors the prior — and SHALL NOT emit a
 stale reply to a superseded origin channel; in-flight watchers SHALL be cancelled on daemon shutdown.
 The return leg SHALL be read-only with respect to the XO's pane (it acquires no pane transaction lock)
-and SHALL NOT change the inbound relay, the detector tick, the primary XO's existing reply path, or the
-per-desk visibility mirror. Watchers are IN-MEMORY: a daemon restart between an operator message and
-its reply loses that in-flight reply (the operator re-asks) — v1 does not persist in-flight watchers.
+and SHALL NOT change the inbound relay, the detector tick, or the per-desk visibility mirror. Watchers
+are IN-MEMORY: a daemon restart between an operator message and its reply loses that in-flight reply
+(the operator re-asks) — v1 does not persist in-flight watchers.
 
-#### Scenario: A federated c2-channel XO's reply routes back to the operator
+#### Scenario: A channel XO's reply routes back to the operator (federated OR primary)
 
-- **WHEN** the operator sends a message in a c2 channel whose `xo_agent` is a federated XO, and that XO
-  produces a turn-final in response
-- **THEN** the XO's verbatim turn-final is posted back to that c2 channel (attributed to the XO),
-  detected from the session store as the assistant turn following the operator message's user turn —
-  including when the turn completes faster than the heartbeat interval
+- **WHEN** the operator sends a message in a bound channel whose `xo_agent` is that channel's XO —
+  whether a federated c2-channel XO or the PRIMARY XO — and that XO produces a turn-final in response
+- **THEN** the XO's verbatim turn-final is posted back to that channel (attributed to the XO), detected
+  from the session store as the assistant turn following the operator message's user turn — including
+  when the turn completes faster than the heartbeat interval
+
+#### Scenario: The primary XO uses the same watcher, not a host-local Stop-hook
+
+- **WHEN** the operator sends a message to the primary XO in its channel
+- **THEN** the reply routes back via the flotilla-native watcher (the same mechanism as a federated XO),
+  with no dependency on a per-pane host-local Stop-hook (which is retired)
 
 #### Scenario: A reply that never arrives is escalated, never silently dropped
 
@@ -689,4 +722,234 @@ materiality wakes, visibility mirror, or synthesis.
   synthesis turn is not also heartbeated (Idle-gated; a synthesis wake resets its quiet counter), and
   with the mechanism disabled the detector's XO-clock / materiality / mirror / synthesis behavior is
   byte-unchanged
+
+### Requirement: Per-agent continuation prompt and detector tracker from the workspace
+
+`flotilla watch` SHALL source the change-detector's **continuation** prompt and the
+detector's tracker file from the heartbeated/detected agent's workspace when present,
+with the existing roster/flag values as fallback. The continuation prompt comes from
+`~/.flotilla/<agent>/HEARTBEAT.md` (a template whose `{{tracker}}`/`{{settle}}`
+placeholders are substituted and whose ack instruction is appended) when present **and
+non-empty**, else the built-in continuation prompt; in legacy (non-detector) mode the
+order is `HEARTBEAT.md` → roster `heartbeat_message` → `DefaultHeartbeatPrompt`. The
+detector tracker resolves `~/.flotilla/<agent>/state.md` **(when non-empty)** →
+`--tracker-file`/`$FLOTILLA_TRACKER_FILE` → `<roster-dir>/.flotilla-state.md`. The
+non-empty guards are load-bearing: `flotilla workspace init` scaffolds EMPTY
+`HEARTBEAT.md`/`state.md`, and an empty file must NOT hijack the detector (a blank
+prompt, or a static empty-hash tracker that blinds the change signal). A deployment
+with no workspace SHALL behave exactly as before (same prompt, same tracker) — the
+change is additive on the no-workspace path.
+
+#### Scenario: A workspace HEARTBEAT.md overrides the detector continuation prompt
+- **WHEN** the heartbeated agent runs under the change-detector and has `~/.flotilla/<agent>/HEARTBEAT.md`
+- **THEN** the detector's continuation wake uses that template (placeholders substituted, ack appended), not the built-in prompt — and NOT the legacy `heartbeat_message`, which the detector never reads
+
+#### Scenario: The prompt's named tracker path equals the detector's hashed path
+- **WHEN** the tracker is resolved from the workspace `state.md`
+- **THEN** that one resolved path is BOTH the file the change-detector content-hashes AND the path substituted into the continuation prompt's `{{tracker}}` — they never diverge, so the XO updates the same file the detector watches
+
+#### Scenario: Switching the tracker source is a restart-time, not live, change
+- **WHEN** the operator relocates the tracker to the workspace `state.md`
+- **THEN** the new source takes effect on a `flotilla-watch` restart, and the first post-switch tick may emit one expected, harmless spurious material wake (the snapshot was keyed to the prior file)
+
+#### Scenario: No workspace leaves today's behavior unchanged
+- **WHEN** no workspace exists for the heartbeated agent
+- **THEN** the prompt and tracker resolve to the built-in/roster/flag defaults exactly as before
+
+#### Scenario: An empty scaffolded HEARTBEAT.md/state.md does not hijack the detector
+- **WHEN** the workspace exists but `HEARTBEAT.md` and/or `state.md` are empty (freshly scaffolded, not yet migrated)
+- **THEN** the empty `HEARTBEAT.md` falls back to the built-in prompt (never a blank wake) and the empty `state.md` falls back to the `--tracker-file`/default (never a static empty-hash that blinds the change signal)
+
+### Requirement: External gateway-health watchdog detects alive-but-disconnected
+
+The system SHALL provide an external watchdog (`flotilla-doctor`), a deterministic
+pure-shell health check fired periodically by a systemd timer, that detects the
+"`flotilla-watch` process alive but Discord gateway down" state — which the daemon
+itself cannot surface, because its relay-open failure is non-fatal and systemd's
+`Restart=on-failure` never fires. The check SHALL be pure (NO large-language-model
+call in the cheap path) and SHALL determine gateway health from observable state:
+the `flotilla-watch` unit is active, its MainPID resolves to a non-zero value, and
+that process owns at least one ESTABLISHED `:443` socket (flotilla connects only to
+Discord, so any established `:443` socket from its process identifier means the
+gateway is up). An error from the socket-inspection tool itself SHALL be treated as
+indeterminate and SHALL NOT cause an escalation.
+
+#### Scenario: Gateway up — no action
+- **WHEN** flotilla-watch is active, its MainPID resolves, and it owns an ESTABLISHED :443 socket
+- **THEN** the watchdog records the tick as healthy, clears any accumulated strikes, and takes no further action
+
+#### Scenario: Process alive but no gateway socket — flagged
+- **WHEN** flotilla-watch is active but owns no ESTABLISHED :443 socket
+- **THEN** the watchdog treats the gateway as down and begins the confirmation sequence
+
+#### Scenario: Socket-inspection tool error does not escalate
+- **WHEN** the socket-inspection tool itself errors (not "no sockets", but a tool failure)
+- **THEN** the watchdog treats the tick as indeterminate and does not escalate
+
+### Requirement: Sustained-down confirmation before escalation
+
+The watchdog SHALL require a sustained gateway-down before escalating, to avoid
+acting on a momentary reconnect between ticks. A first down reading SHALL be
+re-checked once after a short delay; if the recheck is healthy, the watchdog SHALL
+clear its state and take no action. A still-down recheck SHALL increment a strike
+counter persisted across ticks, and the watchdog SHALL escalate only once the strike
+count reaches a configurable threshold. With the default cadence and threshold this
+SHALL yield several minutes of confirmed-down before any escalation.
+
+#### Scenario: Momentary blip clears on recheck
+- **WHEN** a tick reads the gateway down but the single recheck reads it healthy
+- **THEN** the watchdog clears its strikes and does not escalate
+
+#### Scenario: Below-threshold strikes wait for more confirmation
+- **WHEN** the gateway is still down after the recheck but the strike count is below the configured threshold
+- **THEN** the watchdog records the strike and waits for subsequent ticks rather than escalating
+
+#### Scenario: Threshold reached escalates
+- **WHEN** the strike count reaches the configured threshold
+- **THEN** the watchdog escalates
+
+### Requirement: Escalation is notify-plus-diagnose, never restart
+
+On a confirmed sustained gateway-down the watchdog SHALL escalate by (1) firing a
+best-effort operator notify carrying a status payload, and (2) spawning a
+time-bounded headless recovery agent that diagnoses the cause and applies the right
+fix. The watchdog SHALL NEVER restart, stop, or otherwise control the
+`flotilla-watch` process: whether a restart is warranted is the recovery agent's
+decision after diagnosis, because the most common cause is a resolver failure that a
+blind restart does not fix and restarting the safety-critical clock is the
+operator's prerogative. The status payload SHALL include the gateway/process state,
+a journal tail, the liveness ack-file age, and a per-resolver DNS probe so the
+recovery agent can diagnose DNS first. The operator notify SHALL be best-effort: a
+notify failure (for example, the same outage that downed the gateway also blocking
+the notify) SHALL be logged and SHALL NOT prevent the recovery agent from running.
+The recovery agent SHALL run under the host's permission gate (fail-closed) and SHALL
+NOT be granted a permission bypass. A cooldown SHALL prevent re-spawning the recovery
+agent on every subsequent tick while it works or while the operator acts.
+
+#### Scenario: Escalation notifies and spawns the diagnosis agent
+- **WHEN** the watchdog escalates
+- **THEN** it fires a best-effort operator notify with the status payload and spawns the time-bounded recovery agent — and does not restart flotilla-watch
+
+#### Scenario: Notify failure does not block diagnosis
+- **WHEN** the operator notify fails (for example because the gateway-downing outage also blocks the notify)
+- **THEN** the watchdog logs the failure and still spawns the recovery agent
+
+#### Scenario: Cooldown prevents re-spawn storm
+- **WHEN** a prior escalation occurred within the cooldown window and the gateway is still down
+- **THEN** the watchdog does not spawn another recovery agent until the cooldown elapses
+
+### Requirement: Watchdog runs are single-flight and observe-only
+
+The watchdog SHALL prevent overlapping runs (a long run that spawns the recovery
+agent must not collide with the next timer tick) by acquiring an exclusive lock and
+exiting cleanly when the lock is already held. The watchdog SHALL be observe-only
+with respect to the daemon: it reads the daemon's externally-visible state
+(unit-active, process identifier, sockets, journal) and SHALL NOT import or mutate
+daemon internals.
+
+#### Scenario: Overlapping run exits cleanly
+- **WHEN** a watchdog run starts while a prior run still holds the lock
+- **THEN** the new run exits without performing a check or an escalation
+
+### Requirement: The cheap side-channel checker escalates to a full XO turn only on a real trigger
+
+The change-detector tick SHALL act as a cheap (pure-Go, no-LLM) side-channel
+checker that examines durable state — each monitored desk's assessed `surface`
+state and the external signal-file hash — and escalates to a full XO turn ONLY on
+one of a named, extensible trigger set: (1) an operator message (delivered
+immediately by the relay, which also clears the XO settled state); (2) a desk
+needing attention (a material desk transition); (3) an external signal-file delta;
+(4) XO self-continuation (the XO's own `Working→Idle`, bounded by the
+self-continuation cap); or (5) the max-quiet liveness ping (a clock-driven
+wedge-probe, independent of the other signals). Every other observed condition — a
+desk resuming work, render flicker, the XO advancing its own single-writer tracker,
+a steady idle state — SHALL NOT escalate (no XO turn). Adding a new trigger SHALL
+NOT require changing the detector loop shape.
+
+#### Scenario: Nothing actionable — no XO turn
+- **WHEN** a tick finds no operator message, no material desk transition, no external signal delta, the XO not self-continuing, and the ping cadence not reached
+- **THEN** the XO is not woken and no LLM turn is spent
+
+#### Scenario: A real trigger escalates to a full XO turn
+- **WHEN** any of the named triggers fires (operator message, desk needs attention, external signal delta, self-continuation, or the liveness ping)
+- **THEN** the XO is woken with a prompt naming the specific trigger
+
+### Requirement: External signal-file for non-XO wake deltas
+
+The system SHALL support an optional external signal file (`--signal-file`, env
+`$FLOTILLA_SIGNAL_FILE`) whose content-hash change is a material wake trigger. The
+signal file is for state the XO must react to but does NOT itself write (a desk or
+tool dropping a signal); keeping it distinct from the XO's own single-writer
+tracker is what prevents the XO's writes from self-waking it. When unconfigured,
+there SHALL be no external-signal trigger (absent → no signal), and a read error on
+the signal file SHALL be treated as unchanged (no wake-storm), the same fail-safe
+direction as the prior tracker-hash signal.
+
+#### Scenario: Unconfigured signal file is inert
+- **WHEN** no `--signal-file` is configured
+- **THEN** no external-signal wake is ever produced and the detector behaves as if the trigger is absent
+
+#### Scenario: A signal-file read error does not wake-storm
+- **WHEN** the configured signal file is momentarily unreadable
+- **THEN** the tick treats it as unchanged and produces no wake
+
+### Requirement: A per-desk visibility mirror posts each non-XO desk's turn-final to its own channel
+
+The system SHALL provide a per-desk VISIBILITY mirror: when a NON-XO desk finishes a turn, the daemon
+SHALL post that desk's substantive turn-final to the DESK's OWN channel webhook
+(`secrets.Webhook(<desk>)`), under the desk's identity, chunked below Discord's hard content limit (a
+per-chunk budget held under 2000 runes for headroom) — so the operator/XO can see what a desk has been
+doing in its own channel. This is DISTINCT from the operator↔XO hotline
+RETURN leg (which routes a reply to the OPERATOR's origin channel): the visibility mirror fires for
+EVERY non-XO desk turn and posts to the DESK's channel, not in response to an operator message.
+
+The visibility mirror SHALL be OBSERVE-ONLY and BEST-EFFORT: it SHALL NEVER affect the desk or
+propagate a failure, and it SHALL emit exactly one decision log line per finished desk — a clean SKIP
+(no webhook configured, no session-store reader for the surface, or no substantive turn-final), a POST
+(the turn-final was mirrored, with its chunk count), or a MIRROR-FAIL (a chunk post failed,
+redaction-safe). The turn-final SHALL be read from the harness session store via the surface
+`ResultReader` — the SAME extraction `flotilla result` uses, so the CLI and the auto-mirror never
+diverge. That extraction SHALL resolve the desk's OWN session by its working directory and SKIP a
+colliding desk's session (the lossy project-dir-encoding guard), so a desk's channel never carries
+another desk's turn-final. Because it posts via a webhook, the relay's feedback-loop immunity (the
+`webhookID` drop) SHALL prevent the mirrored post from re-entering the relay.
+
+The visibility mirror SHALL be TRIGGERED by the change-detector's sampled `Working→Idle` edge at the
+heartbeat-interval cadence. It is therefore explicitly BEST-EFFORT and LOSSY: a turn that starts AND
+finishes entirely within one detector-tick window is NOT observed and is NOT mirrored. A desk's channel
+is consequently a best-effort VIEW of its activity, NOT a reliable or complete record — and this
+property SHALL be documented so the channel is not mistaken for a complete log. (Making per-desk
+mirroring reliable — per-turn store-completion detection independent of the tick — is a separate,
+scoped change, NOT part of this requirement.)
+
+The daemon SHALL emit a startup coverage line naming which non-XO desks WILL mirror (a webhook
+resolves) and which will NOT (no webhook ⇒ a per-desk SKIP at runtime), so a mis-provisioned desk is
+visible at boot rather than at the first dropped mirror.
+
+#### Scenario: A non-XO desk's turn-final is mirrored to its own channel
+
+- **WHEN** a non-XO desk with a configured webhook finishes a turn that the detector observes (its
+  `Working→Idle` edge lands within a tick), and the turn has substantive turn-final text
+- **THEN** the desk's turn-final is posted to the desk's own channel webhook, under the desk's identity,
+  chunked, and exactly one POST decision line is logged
+
+#### Scenario: A desk with no webhook / no reader / no substantive turn is a clean skip
+
+- **WHEN** the mirror runs for a desk that has no configured webhook, OR whose surface has no
+  session-store reader, OR whose finished turn has no substantive turn-final
+- **THEN** the mirror posts nothing and logs exactly one SKIP decision line, and the desk is never
+  affected
+
+#### Scenario: A sub-tick turn is not mirrored (the documented best-effort lossiness)
+
+- **WHEN** a desk's turn starts and finishes entirely within one change-detector tick window (so the
+  detector samples Idle before and Idle after, never observing the `Working→Idle` edge)
+- **THEN** that turn is NOT mirrored — the desk channel is a best-effort view, not a complete record
+  (this is the documented property, not a silent defect the spec hides)
+
+#### Scenario: The mirrored post does not feed back into the relay
+
+- **WHEN** a desk's turn-final is posted to its channel via the webhook
+- **THEN** the relay drops it (the `webhookID` feedback-loop guard), so it is not re-ingested as an
+  operator message
 
