@@ -46,6 +46,13 @@ func (webDestination) isDestination() {}
 // ingress is the gated POST /api/control/route HTTP route) and no outbound post
 // medium (Post rejects — the notify is a Discord post by the discord transport). Its
 // delivery is in-process/loopback and cannot gap, so it does NOT implement CatchUp.
+//
+// SCOPE (PR2, #188/#106): this transport is REGISTERED (init → RegisterFactory) but NOT YET
+// CONSTRUCTED in the dash runtime — the live ingress today is still POST /api/control/route →
+// LibraryController.Route → roster.ResolveTarget (which PR2 unified). ResolveDestination /
+// webDestination / Post-reject are test-covered scaffolding; PR3 (#198) constructs + wires this
+// transport as the actual ingress and pins the single-lock-key invariant (the route consumes
+// webDestination.paneTarget rather than re-resolving the pane).
 type webTransport struct {
 	roster *roster.Config
 	xo     string // the hub XO an empty target resolves to (XOAgent, else Agents[0])
