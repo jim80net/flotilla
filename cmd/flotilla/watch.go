@@ -980,10 +980,21 @@ func mirrorRelayToLedger(cfg *roster.Config, j watch.Job) {
 	}
 }
 
-// agentSurface returns the surface name configured for an agent (empty ⇒ the
-// default driver). An unknown name falls back to "" so surface.Get resolves the
-// default rather than erroring on a non-roster name.
+// agentSurface returns the surface name a desk is CURRENTLY driven through, with
+// overlay-first precedence: the active-harness overlay's surface when set, else the
+// roster Agent.surface, else "" (the default driver). This is the seam that makes
+// watch/send/assess route to the LIVE harness after a `flotilla switch` with NO commit
+// to the portable roster — the overlay is the runtime source of truth for which harness
+// a desk runs.
+//
+// Reading the overlay is fail-SAFE: a missing overlay (the common, un-switched case) and
+// a torn/unreadable overlay BOTH fall through to the roster surface — a bad overlay must
+// never make a live desk unroutable. An unknown name falls back to "" so surface.Get
+// resolves the default rather than erroring on a non-roster name.
 func agentSurface(cfg *roster.Config, name string) string {
+	if ov, ok, err := workspace.ReadActiveOverlay(name); err == nil && ok && ov.Surface != "" {
+		return ov.Surface
+	}
 	if a, err := cfg.Agent(name); err == nil {
 		return a.Surface
 	}

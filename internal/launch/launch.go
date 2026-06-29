@@ -23,6 +23,9 @@ type Recipe struct {
 	// (a dead recipe surfaces as a dead pane the watchdog catches). Recipes are
 	// therefore shell-interpreted; the launch file is host-local and trusted at
 	// the secrets level.
+	//
+	// When no Primary/Fallbacks chain is declared, this flat Launch IS the
+	// primary slot (the backward-compatible default — see Slots).
 	Launch string `json:"launch"`
 	// Cwd (required) is the working directory / worktree to launch in. It MUST be
 	// absolute (a host-independent typo guard); existence is NOT checked at load —
@@ -37,6 +40,53 @@ type Recipe struct {
 	// for the operator/skill to drive `/takeover` (the CLI does NOT auto-inject it
 	// — see the design's Non-goals).
 	State string `json:"state,omitempty"`
+	// Primary (optional) is the head of an explicit harness failover chain. When
+	// it is nil (the common case), the flat Launch above is the implied primary
+	// slot — every existing recipe keeps working byte-identically. When it is set,
+	// it overrides the flat Launch as the primary harness. Cwd/Tmux/State stay
+	// recipe-level: the DESK (worktree + pane) is stable across a switch; only the
+	// foreground harness process changes.
+	Primary *HarnessSlot `json:"primary,omitempty"`
+	// Fallbacks (optional) are the ordered failover targets, tried primary-first
+	// then in declared order when a harness/subscription must be swapped out (e.g.
+	// a provider-wide throttle). Empty when no chain is declared.
+	Fallbacks []HarnessSlot `json:"fallbacks,omitempty"`
+}
+
+// HarnessSlot is one harness in a desk's failover chain: a specific surface +
+// launch command + logical provider, sharing the recipe-level Cwd/Tmux/State.
+type HarnessSlot struct {
+	// Surface names the slot's terminal-surface driver (e.g. "claude-code",
+	// "grok", "opencode"). Like roster.Agent.Surface it is a plain string here —
+	// the known-driver check is deferred to switch/resume time (in cmd), keeping
+	// this package free of an internal/surface import (an import cycle guard). An
+	// empty Surface on the IMPLIED primary slot is filled by the caller from the
+	// roster Agent.surface (or the default driver).
+	Surface string `json:"surface,omitempty"`
+	// Launch (required for an explicit slot) is this harness's shell command,
+	// holding to the same shape rules as the flat Recipe.Launch (non-empty, no
+	// \t/\n/\r — validated at load by ValidateRecipe).
+	Launch string `json:"launch"`
+	// Provider is the logical provider identity (e.g. "anthropic", "xai", "zai") —
+	// LOAD-BEARING for failover target selection: a server-side throttle poisons a
+	// whole provider, so failover must cross to a slot with a DIFFERENT provider.
+	// It is DISTINCT from SubscriptionID (two subscriptions of one provider share
+	// a provider).
+	Provider string `json:"provider,omitempty"`
+	// Model (optional) pins a model for this slot.
+	Model string `json:"model,omitempty"`
+	// SubscriptionID (optional) is a billing/account bucket WITHIN a provider (NOT
+	// a secret). An account-side throttle poisons only this bucket, leaving sibling
+	// subscriptions of the same provider usable.
+	SubscriptionID string `json:"subscription_id,omitempty"`
+}
+
+// ResolvedSlot is a chain slot paired with its canonical name ("primary" /
+// "fallback-N"), the form the overlay and routing layers address slots by.
+type ResolvedSlot struct {
+	// Name is the canonical slot name: "primary" or "fallback-<index>".
+	Name string
+	HarnessSlot
 }
 
 // Config is the host-local set of launch recipes, keyed by agent name.
@@ -128,6 +178,21 @@ func ValidateRecipe(where string, r Recipe) error {
 	if strings.ContainsAny(r.State, "\t\n\r") {
 		return fmt.Errorf("%s state %q contains a tab/newline", where, r.State)
 	}
+	// Per-slot validation for an explicit failover chain. It is surface-agnostic
+	// (non-empty launch, no \t\n\r) — the surface known-driver check is DEFERRED to
+	// switch/resume time to keep this package free of an internal/surface import
+	// (an import-cycle guard, mirroring roster's cmd-layer surface validation). An
+	// absent chain (the common case) skips this entirely.
+	if r.Primary != nil {
+		if err := validateSlot(fmt.Sprintf("%s primary slot", where), *r.Primary); err != nil {
+			return err
+		}
+	}
+	for i, f := range r.Fallbacks {
+		if err := validateSlot(fmt.Sprintf("%s fallback slot %d", where, i), f); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -137,6 +202,47 @@ func ValidateRecipe(where string, r Recipe) error {
 func (c *Config) Recipe(agent string) (Recipe, bool) {
 	r, ok := c.Agents[agent]
 	return r, ok
+}
+
+// Slots enumerates the recipe's harness chain in failover order: the primary
+// slot first, then each fallback. It is the single helper callers (switch /
+// resume / overlay resolution) use so the backward-compat rule lives in ONE
+// place: when no explicit Primary is declared, the flat Launch is synthesized as
+// the implied "primary" slot with an EMPTY Surface — the caller fills that from
+// the roster Agent.surface (or the default driver), exactly as before this
+// change. When an explicit Primary is declared it wins, and fallbacks follow as
+// "fallback-0", "fallback-1", …. The returned slots are addressed by these
+// canonical names by the active-harness overlay and routing.
+func (r Recipe) Slots() []ResolvedSlot {
+	slots := make([]ResolvedSlot, 0, 1+len(r.Fallbacks))
+	if r.Primary != nil {
+		slots = append(slots, ResolvedSlot{Name: "primary", HarnessSlot: *r.Primary})
+	} else {
+		// Backward-compat: the flat Launch is the implied primary slot. Surface is
+		// left empty for the caller to fill (roster surface or default); Cwd/Tmux/
+		// State stay recipe-level and are not slot fields.
+		slots = append(slots, ResolvedSlot{Name: "primary", HarnessSlot: HarnessSlot{Launch: r.Launch}})
+	}
+	for i, f := range r.Fallbacks {
+		slots = append(slots, ResolvedSlot{Name: fmt.Sprintf("fallback-%d", i), HarnessSlot: f})
+	}
+	return slots
+}
+
+// validateSlot checks one harness chain slot: launch required and free of
+// \t\n\r, holding to the same shape rule the flat Recipe.Launch obeys. The
+// surface known-driver check is intentionally NOT here — it is deferred to
+// switch/resume time (in cmd) to keep this package free of an internal/surface
+// import. `where` prefixes the error message (the caller passes the
+// agent-qualified slot label).
+func validateSlot(where string, s HarnessSlot) error {
+	if s.Launch == "" {
+		return fmt.Errorf("%s has an empty launch command", where)
+	}
+	if strings.ContainsAny(s.Launch, "\t\n\r") {
+		return fmt.Errorf("%s launch %q contains a tab/newline", where, s.Launch)
+	}
+	return nil
 }
 
 // validTmuxTarget reports whether s is a plain `session:window` target: exactly
