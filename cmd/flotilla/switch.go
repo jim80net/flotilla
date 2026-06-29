@@ -1,14 +1,21 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/deliver"
+	"github.com/jim80net/flotilla/internal/launch"
+	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
+	"github.com/jim80net/flotilla/internal/workspace"
 )
 
 // switch hands a desk's running pane from a FROM harness to a TO harness — handoff →
@@ -415,3 +422,660 @@ const (
 	switchBundleVersion = 1
 	switchHintVersion   = 1
 )
+
+// ---------------------------------------------------------------------------------------
+// Command-level wiring: parseSwitchArgs, cmdSwitch (real ops), --repair, GATE-4, idempotency
+// ---------------------------------------------------------------------------------------
+
+// switchRecord is the durable last-switch.json record (§6). It is written EAGERLY at each
+// recovery boundary (fsync+rename, via writeSwitchRecord — HARDER than recycle's best-effort
+// last-recycle.json) so the half-switched window is recoverable by --repair. `error` is
+// omitempty (a clean record omits it); `bundle_path` is recorded once the bundle lands.
+type switchRecord struct {
+	Token       string `json:"token"`
+	Phase       string `json:"phase"`
+	From        string `json:"from"`
+	To          string `json:"to"`
+	HandoffPath string `json:"handoff_path"`
+	BundlePath  string `json:"bundle_path,omitempty"`
+	OK          bool   `json:"ok"`
+	Error       string `json:"error,omitempty"`
+}
+
+// lastSwitchPath returns ~/.flotilla/<agent>/last-switch.json (sibling of last-recycle.json).
+func lastSwitchPath(agent string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".flotilla", agent, "last-switch.json"), nil
+}
+
+// writeSwitchRecord writes the record to ~/.flotilla/<agent>/last-switch.json DURABLY:
+// write-temp → fsync the temp file → rename. This HARDENS recycle's best-effort
+// writeLastRecycle (recycle.go:480-524) — last-switch.json is the recovery ground-truth for
+// the half-switched window (P1-B), so an error is RETURNED (the caller surfaces it / aborts),
+// never swallowed, and the bytes are forced to disk before the rename so a crash between the
+// relaunch and the overlay write cannot leave a torn-or-missing record.
+func writeSwitchRecord(agent string, rec switchRecord) error {
+	final, err := lastSwitchPath(agent)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(final)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create %s for the switch record: %w", dir, err)
+	}
+	data, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal switch record: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, "last-switch-*.json.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp for the switch record: %w", err)
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("write the switch record: %w", err)
+	}
+	// fsync the bytes to disk BEFORE the rename — the durability the recovery contract rests
+	// on (recycle's best-effort writer skips this; switch must not).
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("fsync the switch record: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("close the switch record temp: %w", err)
+	}
+	if err := os.Rename(tmpName, final); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("finalize the switch record: %w", err)
+	}
+	return nil
+}
+
+// readSwitchRecord reads ~/.flotilla/<agent>/last-switch.json. (record, false, nil) when
+// absent (the common, never-switched case); (record, true, nil) when present and parseable;
+// an unreadable/unparseable file is a returned error so --repair / idempotency fail-closed
+// rather than guessing.
+func readSwitchRecord(agent string) (switchRecord, bool, error) {
+	path, err := lastSwitchPath(agent)
+	if err != nil {
+		return switchRecord{}, false, err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return switchRecord{}, false, nil
+		}
+		return switchRecord{}, false, fmt.Errorf("read switch record %q: %w", path, err)
+	}
+	var rec switchRecord
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		return switchRecord{}, false, fmt.Errorf("parse switch record %q: %w", path, err)
+	}
+	return rec, true, nil
+}
+
+// isSwitchAlreadyComplete is the pure idempotency predicate: a record at phase=complete for
+// the SAME token means the switch already landed ⇒ a re-run is a no-op success. A different
+// token, or any non-complete phase (a half-switch), is NOT already-done.
+func isSwitchAlreadyComplete(rec switchRecord, token string) bool {
+	return rec.Token == token && rec.Phase == switchPhaseComplete
+}
+
+// parseSwitchArgs resolves the agent + the switch flags, accepting the agent positional
+// EITHER before or after the flags (à la parseRecycleArgs). Pure (no I/O) so the ordering +
+// the flag combinations are unit-tested. Exactly ONE lifecycle selector is required:
+// --to <slot-or-surface>, --auto (self-select the target), or --repair (reconcile only).
+// --to and --auto are mutually exclusive (auto self-selects; --to names the target). The
+// caller defaults launchPath to a roster-relative path after loading the roster when empty.
+func parseSwitchArgs(args []string) (agent, to, rosterPath, launchPath string, confirm, repair, force, auto bool, err error) {
+	fail := func(e error) (string, string, string, string, bool, bool, bool, bool, error) {
+		return "", "", "", "", false, false, false, false, e
+	}
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		agent, args = args[0], args[1:]
+	}
+	fs := flag.NewFlagSet("switch", flag.ContinueOnError)
+	toF := fs.String("to", "", "the TO slot (\"primary\"/\"fallback-N\") or a TO surface name (first matching fallback)")
+	rp := fs.String("roster", rosterDefault(), "roster config path")
+	lp := fs.String("launch", os.Getenv("FLOTILLA_LAUNCH"), "launch recipes path (default <roster-dir>/flotilla-launch.json)")
+	cf := fs.Bool("confirm", false, "confirm a switch of an approval_sensitive desk (required for those — GATE-4)")
+	rep := fs.Bool("repair", false, "reconcile active-harness.json from the LIVE pane after a half-switch")
+	fc := fs.Bool("force", false, "switch even if the desk is a live session (the resume --force semantics)")
+	au := fs.Bool("auto", false, "self-select the TO target from the failover chain (poison-aware)")
+	if err = fs.Parse(args); err != nil {
+		return fail(err)
+	}
+	rest := fs.Args()
+	if agent == "" && len(rest) >= 1 {
+		agent, rest = rest[0], rest[1:]
+	}
+	if agent == "" || len(rest) != 0 {
+		return fail(fmt.Errorf("usage: flotilla switch <agent> (--to <slot|surface> | --auto | --repair) [--confirm] [--force]"))
+	}
+	if *toF != "" && *au {
+		return fail(fmt.Errorf("--to and --auto are mutually exclusive: --auto self-selects the target, --to names it"))
+	}
+	if *toF == "" && !*au && !*rep {
+		return fail(fmt.Errorf("switch needs a target: pass --to <slot|surface>, --auto, or --repair"))
+	}
+	return agent, *toF, *rp, *lp, *cf, *rep, *fc, *au, nil
+}
+
+// switchGate4 enforces GATE-4 for the MANUAL path: an approval_sensitive desk (a desk that
+// places orders or spends — roster.go:39-44) is NEVER switched without an explicit operator
+// --confirm. (Auto-switch is unreachable here — cmdSwitch is the manual verb; the auto path's
+// refusal is at the watch ENQUEUE, P2.) An ordinary desk needs no confirm. The refusal names
+// approval_sensitive + the --confirm ack so the operator knows the exact escape hatch.
+func switchGate4(a roster.Agent, confirm bool) error {
+	if a.ApprovalSensitive && !confirm {
+		return fmt.Errorf("refusing to switch %q: it is approval_sensitive (places orders / spends) — a manual switch needs an explicit operator ack; re-run with --confirm to proceed", a.Name)
+	}
+	return nil
+}
+
+// resolveSwitchSlot resolves the TO slot from --to or --auto. fromSurface is the desk's
+// CURRENTLY-ACTIVE surface (overlay-first), used to fill the implied-primary slot's empty
+// surface (Slots() leaves it blank — recipe.go:221-224) and, for --auto, as the FROM
+// provider the poison-aware selector reasons against. Resolution:
+//   - auto ⇒ map the chain onto switchSlots and run the landed selectFailoverTarget with the
+//     (P0: empty) poison state + the current rate-limit scope (P0 has no live probe, so the
+//     blast radius is the conservative ServerSide — cross-provider). ok=false ⇒ refuse (P1-D).
+//   - --to a slot NAME ("primary"/"fallback-N") ⇒ that slot.
+//   - --to a SURFACE name ⇒ the FIRST chain slot whose Surface == that name (the step-5 P3
+//     fold: a surface may appear on several fallbacks; the first match wins).
+//   - else ⇒ a clear no-such-slot error (never a silent mis-target).
+func resolveSwitchSlot(chain launch.Recipe, fromSurface, to string, auto bool, poison PoisonState) (launch.ResolvedSlot, error) {
+	slots := chain.Slots()
+	// Fill the implied-primary slot's empty surface from the active surface (Slots leaves it
+	// blank for the caller to fill — recipe.go:221-224), so name/surface matching + the
+	// selector see a complete surface on every slot.
+	for i := range slots {
+		if slots[i].Surface == "" {
+			slots[i].Surface = fromSurface
+		}
+	}
+
+	if auto {
+		chainSel := make([]switchSlot, len(slots))
+		for i, s := range slots {
+			chainSel[i] = switchSlot{Surface: s.Surface, Provider: s.Provider, SubscriptionID: s.SubscriptionID, Slot: s.Name}
+		}
+		// P0: no live RateLimitProbe yet, so the poison state is empty and the scope is the
+		// conservative ServerSide (cross-provider). P2 wires the live scope + poison here.
+		chosen, ok := selectFailoverTarget(chainSel, poison, RateLimitServerSide)
+		if !ok {
+			return launch.ResolvedSlot{}, fmt.Errorf("no viable TO target for the switch: every fallback's provider is poisoned (auto-switch refuses — desk stays on its current harness)")
+		}
+		for _, s := range slots {
+			if s.Name == chosen.Slot {
+				return s, nil
+			}
+		}
+		return launch.ResolvedSlot{}, fmt.Errorf("internal: selector chose slot %q not in the chain", chosen.Slot)
+	}
+
+	// --to a slot NAME.
+	for _, s := range slots {
+		if s.Name == to {
+			return s, nil
+		}
+	}
+	// --to a SURFACE name → the FIRST matching slot (step-5 P3 fold).
+	for _, s := range slots {
+		if s.Surface == to {
+			return s, nil
+		}
+	}
+	return launch.ResolvedSlot{}, fmt.Errorf("no slot or surface named %q in %q's failover chain (slots: %s)", to, fromSurface, slotNames(slots))
+}
+
+// slotNames renders the chain's slot names for a clear error message.
+func slotNames(slots []launch.ResolvedSlot) string {
+	parts := make([]string, len(slots))
+	for i, s := range slots {
+		parts[i] = fmt.Sprintf("%s=%s", s.Name, s.Surface)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// cmdSwitch wires the real tmux/surface/git/durable ops + the resolved two-driver plan and
+// runs the fail-closed runSwitch core. It is the MANUAL operator verb (no auto lifecycle —
+// the auto path enqueues `flotilla switch --auto` from the detector at P2 and is unreachable
+// here). --repair is a distinct, non-acting reconcile mode handled first.
+func cmdSwitch(args []string) error {
+	agentName, to, rosterPath, launchPath, confirm, repair, force, auto, err := parseSwitchArgs(args)
+	if err != nil {
+		return err
+	}
+	_ = force // --force is accepted for parity with resume/recycle; the relaunch primitive (-k) is unconditional.
+
+	cfg, err := roster.Load(rosterPath)
+	if err != nil {
+		return err
+	}
+	agent, err := cfg.Agent(agentName)
+	if err != nil {
+		return err
+	}
+	if launchPath == "" {
+		launchPath = launch.DefaultPath(rosterPath)
+	}
+	var flat *launch.Config
+	if _, statErr := os.Stat(launchPath); statErr == nil {
+		rosterAgents := make(map[string]bool, len(cfg.Agents))
+		for _, a := range cfg.Agents {
+			rosterAgents[a.Name] = true
+		}
+		flat, err = launch.Load(launchPath, rosterAgents)
+		if err != nil {
+			return err
+		}
+	}
+	// Resolve the desk's failover CHAIN (workspace launch.json → flat) and its CURRENTLY-ACTIVE
+	// surface (overlay-first), so a switch FROM the live harness — not the roster default — is
+	// authored. ResolveActiveRecipe carries the chain (Primary/Fallbacks) for slot resolution.
+	chain, err := workspace.ResolveActiveRecipe(agentName, flat)
+	if err != nil {
+		return err
+	}
+	if real, rerr := filepath.EvalSymlinks(chain.Cwd); rerr == nil {
+		chain.Cwd = real
+	}
+	fromSurface := agentSurface(cfg, agentName)
+
+	// --repair: a distinct, non-acting reconcile mode. It reads the LIVE pane's harness and
+	// reconciles active-harness.json to match it (P1-B). It never closes/relaunches.
+	if repair {
+		ops := repairOps{
+			resolve:      deliver.Resolve,
+			paneCommand:  deliver.PaneCommand,
+			paneDead:     deliver.PaneDead,
+			readGen:      deliver.ReadSwitchGen,
+			readRecord:   readSwitchRecord,
+			writeOverlay: workspace.WriteActiveOverlay,
+		}
+		msg, rerr := runRepair(ops, agentName, chain, fromSurface)
+		if rerr != nil {
+			return rerr
+		}
+		fmt.Print(msg)
+		return nil
+	}
+
+	// GATE-4 (manual): an approval_sensitive desk needs an explicit --confirm.
+	if err := switchGate4(agent, confirm); err != nil {
+		return err
+	}
+
+	// Resolve the TO slot from --to or --auto (P0 poison state is empty).
+	toSlot, err := resolveSwitchSlot(chain, fromSurface, to, auto, PoisonState{})
+	if err != nil {
+		return err
+	}
+	toSurface := toSlot.Surface
+
+	// Resolve BOTH drivers and assert the recycle-capable bar for each (fail-closed, naming the
+	// incapable side). switchCapabilityRefusal returns the FROM + TO bridges to author the turns.
+	fromDrv, ok := surface.Get(fromSurface)
+	if !ok {
+		return fmt.Errorf("agent %q: unknown FROM surface %q (not a registered driver)", agentName, fromSurface)
+	}
+	toDrv, ok := surface.Get(toSurface)
+	if !ok {
+		return fmt.Errorf("agent %q: unknown TO surface %q (not a registered driver) — declared on slot %q", agentName, toSurface, toSlot.Name)
+	}
+	fromBridge, toBridge, err := switchCapabilityRefusal(agentName, fromDrv, toDrv)
+	if err != nil {
+		return err
+	}
+
+	token, err := recycleToken()
+	if err != nil {
+		return err
+	}
+	// Idempotency note: the manual verb mints a FRESH token per invocation, so a
+	// completed-token no-op never fires here — the contract is exercised by
+	// isSwitchAlreadyComplete (group 6) and becomes live when a caller REPLAYS a token (the
+	// P2 auto-retry path passes its in-flight token). Recording {token, phase, …} below is what
+	// lets that replay short-circuit.
+
+	projectRoot := chain.Cwd
+	neutralPath := switchHandoffPath(projectRoot, token)
+	bundlePath := switchBundlePath(projectRoot, agentName, token)
+
+	// Build the FROM-endpoint metadata for the bundle from the resolved chain slot whose
+	// surface matches the active FROM surface (so provider/subscription are recorded).
+	fromProvider, fromSub := fromSlotMeta(chain, fromSurface)
+
+	reason := "operator-manual"
+	if auto {
+		reason = "operator-auto"
+	}
+
+	plan := switchPlan{
+		agent: agentName, key: agent.Title(), cwd: projectRoot, launch: toSlot.Launch,
+		token: token, handoffPath: neutralPath,
+		fromSurface: fromSurface, toSurface: toSurface,
+		handoffText:     fromBridge.HandoffTurn(neutralPath),
+		takeoverText:    toBridge.TakeoverTurn(neutralPath),
+		ownPane:         os.Getenv("TMUX_PANE"),
+		minHandoffBytes: defaultMinHandoff,
+		timeouts:        defaultTimeouts(),
+	}
+
+	confirmSubmit := surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}
+	if surface.SelfHealEnabled() {
+		confirmSubmit.SendCtrlC = deliver.SendCtrlC
+	}
+
+	// recordPhase writes last-switch.json EAGERLY + DURABLY (fsync+rename) at each boundary.
+	recordPhase := func(phase string) error {
+		return writeSwitchRecord(agentName, switchRecord{
+			Token: token, Phase: phase, From: fromSurface, To: toSurface,
+			HandoffPath: neutralPath, BundlePath: bundlePath, OK: false,
+		})
+	}
+
+	// relaunched is the FROM→TO phase boundary, flipped by the respawn op (the single point in
+	// runSwitch where the pane stops running the FROM harness and starts the TO harness). The
+	// per-phase assess/composer bindings read it so phases 0–2 are gated by the FROM driver and
+	// phases 3–4 by the TO driver (design §2.3) — a faithful binding that does not reach into
+	// runSwitch's internals. The ops run on a single goroutine (runSwitch is sequential), so the
+	// bool needs no synchronization.
+	relaunched := false
+
+	ops := switchOps{
+		resolve: deliver.Resolve,
+		paneID:  deliver.PaneID,
+		inMode:  deliver.PaneInMode,
+		// assess/composer bind to the ACTIVE driver per phase: the FROM driver gates phases 0–2,
+		// the TO driver gates phases 3–4 (it is the surface the relaunched pane runs). The
+		// relaunched flag (flipped by respawn) is the boundary.
+		assess:       func(target string) surface.State { return activeDriver(fromDrv, toDrv, relaunched).Assess(target) },
+		composer:     switchComposer(fromDrv, toDrv, &relaunched),
+		absent:       deliver.HandoffAbsentAtHead,
+		durable:      deliver.HandoffDurable,
+		deliver:      switchDeliver(confirmSubmit, fromDrv, toDrv, &relaunched),
+		closeFn:      fromDrv.Close,
+		remainOnExit: deliver.SetRemainOnExit,
+		paneDead:     deliver.PaneDead,
+		respawn: func(target, cwd, lc string) error {
+			err := deliver.RespawnPane(target, cwd, lc)
+			if err == nil {
+				relaunched = true // FROM→TO boundary: subsequent assess/composer/deliver use the TO driver
+			}
+			return err
+		},
+		readMarker: deliver.ReadMarker,
+		stampGen:   deliver.StampSwitchGen,
+		readGen:    deliver.ReadSwitchGen,
+		lock: func(target string) (func(), error) {
+			txn, lerr := deliver.AcquirePaneTxn(target, deliver.PaneTxnTimeout)
+			if lerr != nil {
+				return nil, lerr
+			}
+			return txn.Release, nil
+		},
+		recordPhase: recordPhase,
+		writeOverlay: func() error {
+			return workspace.WriteActiveOverlay(agentName, workspace.ActiveOverlay{
+				Slot:           toSlot.Name,
+				Surface:        toSurface,
+				Provider:       toSlot.Provider,
+				SubscriptionID: toSlot.SubscriptionID,
+				SwitchedAt:     time.Now().UTC().Format(time.RFC3339),
+				SwitchToken:    token,
+				Reason:         reason,
+			})
+		},
+		writeBundle: func() error {
+			return writeContinuityBundle(bundlePath, continuityBundle{
+				BundleVersion:  switchBundleVersion,
+				ContinuityKind: "switch",
+				FlotillaAgent:  agentName,
+				ProjectRoot:    projectRoot,
+				From:           fromEndpoint(fromSurface, fromProvider, fromSub),
+				To:             bundleEndpoint{Surface: toSurface, Provider: toSlot.Provider, SubscriptionID: toSlot.SubscriptionID},
+				SwitchToken:    token,
+				HandoffPath:    neutralPath,
+				HintVersion:    switchHintVersion,
+				// GATE-3: a BARE-STRING pointer/hint ONLY — never corpus text or constraint prose.
+				// The bare string IS the mode discriminator memex coerces to {mode: <string>}
+				// (memex-hermes PR #21 §3); the desk identity is the structured `flotilla_agent`
+				// field, not the hint. "takeover-cross-harness" is the canonical switch mode.
+				MemexInjectionHint: "takeover-cross-harness",
+			})
+		},
+		sleep: time.Sleep,
+	}
+	if surface.SelfHealEnabled() {
+		ops.selfHeal = func(target string) { confirmSubmit.Heal(toDrv, target) }
+	}
+
+	msg, runErr := runSwitch(ops, plan)
+	// Record the terminal outcome (best-effort here — the eager records around the relaunch are
+	// the recovery ground-truth; this final stamp captures ok/error for status + idempotency).
+	finalPhase := switchPhaseComplete
+	if runErr != nil {
+		finalPhase = "error"
+	}
+	if werr := writeSwitchRecord(agentName, switchRecord{
+		Token: token, Phase: finalPhase, From: fromSurface, To: toSurface,
+		HandoffPath: neutralPath, BundlePath: bundlePath, OK: runErr == nil,
+		Error: errString(runErr),
+	}); werr != nil {
+		log.Printf("flotilla: switch: could not record the terminal switch outcome for %q: %v", agentName, werr)
+	}
+	if runErr != nil {
+		return runErr
+	}
+	fmt.Print(msg)
+	return nil
+}
+
+// errString renders an error for the durable record (empty for nil).
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+// activeDriver returns the driver gating the CURRENT phase: the FROM driver before the
+// relaunch (phases 0–2), the TO driver after (phases 3–4 — the surface the relaunched pane
+// runs). The boundary is the `relaunched` flag the respawn op flips. For the live fleet
+// (claude/grok) both drivers read the same pane capture identically, so the binding is mostly
+// correctness insurance; it becomes load-bearing the moment a driver's Assess diverges.
+func activeDriver(fromDrv, toDrv surface.Driver, relaunched bool) surface.Driver {
+	if relaunched {
+		return toDrv
+	}
+	return fromDrv
+}
+
+// switchComposer binds the composer probe to the ACTIVE driver per phase (FROM before the
+// relaunch, TO after — same boundary as activeDriver). Both recycle-capable surfaces implement
+// ComposerStateProbe (switchCapabilityRefusal proved it), so the type-asserts succeed; a
+// missing probe (impossible past the refusal) degrades to Undetermined (fail-closed: the gates
+// keep polling rather than false-passing a cleared composer).
+func switchComposer(fromDrv, toDrv surface.Driver, relaunched *bool) func(target string) surface.ComposerDisposition {
+	fromProbe, _ := fromDrv.(surface.ComposerStateProbe)
+	toProbe, _ := toDrv.(surface.ComposerStateProbe)
+	return func(target string) surface.ComposerDisposition {
+		probe := fromProbe
+		if *relaunched {
+			probe = toProbe
+		}
+		if probe == nil {
+			return surface.ComposerUndetermined
+		}
+		return probe.ComposerState(target)
+	}
+}
+
+// switchDeliver binds confirmed delivery to the ACTIVE driver: the FROM driver delivers the
+// Phase-1 handoff turn (pre-relaunch); the TO driver delivers the Phase-4 takeover turn
+// (post-relaunch — it is the surface the relaunched pane runs). The `relaunched` boundary flag
+// (flipped by respawn) selects the driver, so the binding tracks the actual phase rather than
+// a fragile call-count.
+func switchDeliver(confirm surface.Confirm, fromDrv, toDrv surface.Driver, relaunched *bool) func(target, text string) error {
+	return func(target, text string) error {
+		drv := fromDrv
+		if *relaunched {
+			drv = toDrv // the takeover turn runs on the TO harness
+		}
+		return confirm.Submit(drv, target, text)
+	}
+}
+
+// fromSlotMeta finds the chain slot whose surface matches the active FROM surface and returns
+// its provider/subscription, so the bundle records the FROM endpoint's provider coordinates.
+// A surface absent from the chain (a fresh launch / un-declared FROM) returns empties — the
+// bundle's `from` then degrades to surface-only (still valid, GATE-1).
+func fromSlotMeta(chain launch.Recipe, fromSurface string) (provider, subscription string) {
+	for _, s := range chain.Slots() {
+		if s.Surface == fromSurface {
+			return s.Provider, s.SubscriptionID
+		}
+	}
+	return "", ""
+}
+
+// fromEndpoint builds the OPTIONAL bundle `from` endpoint. A non-empty FROM surface yields a
+// populated endpoint; an empty FROM surface yields nil so the bundle omits `from` entirely
+// (GATE-1: a fresh launch carries no from-harness).
+func fromEndpoint(surfaceName, provider, subscription string) *bundleEndpoint {
+	if surfaceName == "" {
+		return nil
+	}
+	return &bundleEndpoint{Surface: surfaceName, Provider: provider, SubscriptionID: subscription}
+}
+
+// writeContinuityBundle writes the continuity bundle to its desk-scoped neutral path
+// atomically (temp + rename), creating the parent dir. It is called from the writeBundle op
+// BEFORE Phase 4, durability-gated by runSwitch (a bundle-write failure ABORTS before the
+// irreversible close — the bundle is part of the continuity contract).
+func writeContinuityBundle(path string, b continuityBundle) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create %s for the continuity bundle: %w", dir, err)
+	}
+	data, err := json.MarshalIndent(b, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal continuity bundle: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, "continuity-*.json.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp for the continuity bundle: %w", err)
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("write the continuity bundle: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("close the continuity bundle temp: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("finalize the continuity bundle: %w", err)
+	}
+	return nil
+}
+
+// repairOps are the read-mostly operations runRepair performs, injected so the reconcile
+// logic is unit-testable without a live pane. --repair reads the LIVE pane's harness and the
+// durable record (to know what to check), then writes the overlay to match the live pane.
+type repairOps struct {
+	resolve      func(want string) (string, deliver.ResolveOutcome, error)
+	paneCommand  func(target string) (string, error)            // deliver.PaneCommand (pane_current_command)
+	paneDead     func(target string) (bool, error)              // deliver.PaneDead
+	readGen      func(target string) (string, error)            // deliver.ReadSwitchGen (the stamped switch gen)
+	readRecord   func(agent string) (switchRecord, bool, error) // readSwitchRecord
+	writeOverlay func(agent string, ov workspace.ActiveOverlay) error
+}
+
+// runRepair reconciles active-harness.json from the LIVE pane after a half-switch (P1-B). It
+// consults the durable last-switch.json record ONLY to know what TO slot to expect; the live
+// PANE is the truth (verify-stale-empirical-status-before-propagating). When the live pane
+// carries the switch's stamped @flotilla_switch_gen (the relaunch landed), it writes the TO
+// overlay; when the pane is DEAD it reports the half-switch and names `flotilla resume
+// <agent>` rather than guessing; with no record there is nothing to repair.
+func runRepair(ops repairOps, agent string, chain launch.Recipe, fromSurface string) (string, error) {
+	rec, ok, err := ops.readRecord(agent)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return fmt.Sprintf("repair %s: no last-switch record — nothing to reconcile\n", agent), nil
+	}
+
+	target, outcome, err := ops.resolve(agent)
+	if err != nil {
+		return "", err
+	}
+	switch outcome {
+	case deliver.ResolveNone:
+		return "", fmt.Errorf("repair %s: no pane resolves for the desk — recover it with: flotilla resume %s", agent, agent)
+	case deliver.ResolveAmbiguous:
+		return "", fmt.Errorf("repair %s: more than one pane resolves (mis-tagged) — re-tag the right one with: flotilla register %s --pane <target>, then retry", agent, agent)
+	}
+
+	// A DEAD pane: the relaunch may have failed mid-switch (phase relaunching/overlay-pending).
+	// We do NOT guess an overlay for a dead pane — report the half-switch and name resume.
+	if dead, derr := ops.paneDead(target); derr != nil {
+		return "", fmt.Errorf("repair %s: reading pane liveness failed: %w", agent, derr)
+	} else if dead {
+		return fmt.Sprintf("repair %s: the pane is DEAD (last-switch phase %q, intended %s→%s) — the switch did not land; recover with: flotilla resume %s\n", agent, rec.Phase, rec.From, rec.To, agent), nil
+	}
+
+	// The pane is live. The authoritative signal that the TO relaunch landed is the stamped
+	// @flotilla_switch_gen matching the record's token (Phase 3 stamps it AFTER a confirmed
+	// marker read-back). pane_current_command is a corroborating liveness signal.
+	gen, err := ops.readGen(target)
+	if err != nil {
+		return "", fmt.Errorf("repair %s: reading the switch generation failed: %w", agent, err)
+	}
+	paneCmd, err := ops.paneCommand(target)
+	if err != nil {
+		return "", fmt.Errorf("repair %s: reading the pane command failed: %w", agent, err)
+	}
+	if deliver.IsShell(paneCmd) {
+		return fmt.Sprintf("repair %s: the pane is at a shell (%s) — the harness exited; recover with: flotilla resume %s\n", agent, paneCmd, agent), nil
+	}
+	if gen != rec.Token {
+		// The live pane does not carry THIS switch's gen — either the relaunch never happened
+		// (still the FROM harness) or a newer switch superseded it. Either way we must not write
+		// the stale record's TO overlay onto a pane that is not running it.
+		return fmt.Sprintf("repair %s: the live pane does NOT carry this switch's generation (record token %q, pane %q) — not reconciling to a stale TO; the desk is live on %s. If a newer switch ran, re-run repair after it; else the relaunch never landed, recover with: flotilla resume %s\n", agent, rec.Token, gen, paneCmd, agent), nil
+	}
+
+	// The relaunch landed: the live pane runs the TO harness. Reconcile the overlay to the TO
+	// slot resolved from the record's TO surface (the truth is the pane; the record names which
+	// TO slot the pane should be on).
+	toSlot, serr := resolveSwitchSlot(chain, fromSurface, rec.To, false, PoisonState{})
+	if serr != nil {
+		return "", fmt.Errorf("repair %s: the recorded TO surface %q is not in the desk's chain (%w) — reconcile manually", agent, rec.To, serr)
+	}
+	if err := ops.writeOverlay(agent, workspace.ActiveOverlay{
+		Slot:           toSlot.Name,
+		Surface:        toSlot.Surface,
+		Provider:       toSlot.Provider,
+		SubscriptionID: toSlot.SubscriptionID,
+		SwitchedAt:     time.Now().UTC().Format(time.RFC3339),
+		SwitchToken:    rec.Token,
+		Reason:         "repair-reconcile",
+	}); err != nil {
+		return "", fmt.Errorf("repair %s: writing the reconciled overlay failed: %w", agent, err)
+	}
+	return fmt.Sprintf("repair %s: reconciled active-harness.json to the live TO harness %s (slot %s, token %s)\n", agent, toSlot.Surface, toSlot.Name, rec.Token), nil
+}

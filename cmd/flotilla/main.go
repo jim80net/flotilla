@@ -57,6 +57,8 @@ func run(args []string) error {
 		return cmdResume(args[1:])
 	case "recycle":
 		return cmdRecycle(args[1:])
+	case "switch":
+		return cmdSwitch(args[1:])
 	case "workspace":
 		return cmdWorkspace(args[1:])
 	case "doctrine":
@@ -100,6 +102,7 @@ usage:
   flotilla register <agent> [--pane <target>]         tag a pane so it resolves by a stable, drift-immune marker
   flotilla resume <agent> [--launch <path>] [--force]  (re)start a dead desk from its host-local launch recipe
   flotilla recycle <agent> [--launch <path>] [--dry-run]  close a desk's chapter (handoff→graceful close→relaunch→takeover), fail-closed
+  flotilla switch <agent> (--to <slot|surface> | --auto | --repair) [--confirm] [--force]  hand a desk across harnesses (FROM handoff→relaunch on TO→TO takeover), fail-closed
   flotilla workspace init <agent>                     scaffold the per-agent ~/.flotilla/<agent>/ home (seeds the constitutional doctrine)
   flotilla workspace path <agent>                     print an agent's workspace directory
   flotilla doctrine install <agent>                   install flotilla's constitutional doctrine into an agent's workspace (idempotent)

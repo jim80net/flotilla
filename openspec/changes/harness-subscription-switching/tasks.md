@@ -65,16 +65,20 @@ Load-bearing properties (assert across paths — the 4 pinned gates + the P1 fin
   (GATE-1). NO consumer (Layer 2 / P4).
 
 ### 4. Manual `flotilla switch --to` (operator-only) + `--repair`
-- [ ] 4.1 TEST FIRST (`cmd/flotilla/switch_test.go`): `parseSwitchArgs` accepts `<agent> --to <slot>`
+- [x] 4.1 TEST FIRST (`cmd/flotilla/switch_test.go`): `parseSwitchArgs` accepts `<agent> --to <slot>`
   (and `--to <surface>` resolving to the first matching fallback, else error), `--confirm`, `--repair`,
-  `--force` (à la `parseRecycleArgs`, `recycle.go:529`).
-- [ ] 4.2 TEST (P1-B `--repair`): `--repair` reads the LIVE pane's harness (`pane_current_command` /
+  `--force`, AND `--auto` (à la `parseRecycleArgs`, `recycle.go:529`). `TestParseSwitchArgs` +
+  `TestResolveSwitchSlot` (slot/surface→first-fallback/auto-self-select/all-poisoned-refuse/error).
+- [x] 4.2 TEST (P1-B `--repair`): `--repair` reads the LIVE pane's harness (`pane_current_command` /
   stamped marker) and reconciles `active-harness.json` to match; a dead pane ⇒ report + name
-  `flotilla resume <agent>`.
-- [ ] 4.3 Implement `cmdSwitch` (wire real ops, manual path, no auto) + `--repair`; register the `switch`
-  subcommand. Manual path keeps recycle's lockless Phase-1 (singular operator switch).
-- [ ] 4.4 TEST (GATE-4 manual): `--to … --confirm` on an `approval_sensitive` desk succeeds; without
-  `--confirm` it refuses with the ack instruction.
+  `flotilla resume <agent>`. `TestRunRepairReconcilesFromLivePane` / `…DeadPaneReportsResume` /
+  `…NoRecordNothingToDo`.
+- [x] 4.3 Implement `cmdSwitch` (wire real ops, manual path, no auto) + `--repair`; register the `switch`
+  subcommand (`cmd/flotilla/main.go`). Manual path keeps recycle's lockless Phase-1 (singular operator
+  switch). `@flotilla_switch_gen` stamp/read added in `internal/deliver/switch.go` (parallel to recycle).
+- [x] 4.4 TEST (GATE-4 manual): `--to … --confirm` on an `approval_sensitive` desk succeeds; without
+  `--confirm` it refuses with the ack instruction. `TestSwitchGate4`. Idempotency predicate
+  (`isSwitchAlreadyComplete`) + record shape: `TestSwitchCompleteTokenIsNoOp` / `TestSwitchRecordShape`.
 
 ### 5. Provider-poison SELECTION unit tests (pure, no I/O)
 - [ ] 5.1 TEST: server-side `anthropic` poison ⇒ target selection picks the first fallback whose
