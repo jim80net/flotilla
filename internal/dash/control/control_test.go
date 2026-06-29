@@ -5,15 +5,14 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/cos"
-	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
+	"github.com/jim80net/flotilla/internal/transport"
 )
 
 // fixedTime keeps ledger entries deterministic.
@@ -43,19 +42,25 @@ func newTestController(t *testing.T, rosterBody, secretsBody string) (*LibraryCo
 	if xo == "" {
 		xo = rc.Agents[0].Name
 	}
-	// Inject a discord-backed transport stand-in reporting the Discord 2000-rune cap
-	// (so the over-length guard byte-pins to the previous discord.MaxContentRunes
-	// behavior). The post seam is overridden below with cap.post, so these tests pin
-	// notify/route behavior independent of the transport's Post — the constructor CALL
-	// updates for the new param; the seam-override ASSERTIONS stay byte-pinned.
-	c := NewLibrary(rc, xo, secretsPath, &fakeNotifyTransport{maxRunes: 2000})
-	cap := &capture{paneTarget: "%5"}
+	// Inject a discord-backed NOTIFY transport stand-in reporting the Discord 2000-rune
+	// cap (so the over-length guard byte-pins to the previous discord.MaxContentRunes
+	// behavior), plus a WEB transport stand-in for the route's inbound resolution. The
+	// post seam is overridden below with cap.post, so these tests pin notify/route behavior
+	// independent of the transport's Post — the constructor CALL updates for the new params;
+	// the seam-override ASSERTIONS stay byte-pinned. As of PR3 (#198) Route resolves through
+	// the web transport's ResolveDestination; the capture's resolveDest seam (wired below)
+	// replicates exactly what the real web transport does — resolve the target through the
+	// SHARED roster.ResolveTarget, then resolvePane(agent.Title()) — so the byte-pinned Route
+	// assertions (resolvePane asked for the Title, lock keyed on the resolved pane, distinct
+	// unknown/ambiguous errors) hold UNCHANGED against the new seam.
+	c := NewLibrary(rc, xo, secretsPath, &fakeNotifyTransport{maxRunes: 2000}, &fakeNotifyTransport{maxRunes: 2000})
+	cap := &capture{paneTarget: "%5", rc: rc, xo: xo}
 	c.post = cap.post
 	c.appendCos = cap.append
 	c.now = func() time.Time { return fixedTime }
 	// Route seams: record the resolve→acquire→submit→release sequence so tests can
 	// assert the lock keys on the RESOLVED pane target and brackets the submit.
-	c.resolvePane = cap.resolvePane
+	c.resolveDest = cap.resolveDest
 	c.acquireTxn = cap.acquireTxn
 	c.submit = cap.submit
 	return c, cap
@@ -68,7 +73,11 @@ type capture struct {
 	ledger                             []cos.Entry
 	ledgerErr                          error
 
-	// Route seam recording.
+	// Route seam recording. rc + xo let resolveDest replicate the real web transport's
+	// resolution (the shared roster.ResolveTarget) so the distinct unknown/ambiguous
+	// sentinels and the Title()-keyed pane resolution are exercised exactly as in prod.
+	rc             *roster.Config
+	xo             string
 	paneTarget     string // what resolvePane returns
 	resolvedTitle  string // the title resolvePane was asked for
 	resolvePaneErr error
@@ -79,6 +88,27 @@ type capture struct {
 	submitText     string
 	submitErr      error
 	events         []string // ordered: "resolve","acquire","submit","release"
+}
+
+// resolveDest stands in for the web transport's ResolveDestination wired into the
+// controller's resolveDest seam. It replicates the real web transport EXACTLY: resolve
+// the target through the SHARED roster.ResolveTarget (so the distinct ErrUnknownTarget /
+// ErrAmbiguousTarget sentinels propagate), then resolvePane(agent.Title()) for the pane
+// target (the cross-process lock key). originChannel is ignored (roster-wide, Decision 2).
+func (c *capture) resolveDest(_, target string) (string, string, error) {
+	agentName, err := c.rc.ResolveTarget(c.xo, target)
+	if err != nil {
+		return "", "", err
+	}
+	agent, err := c.rc.Agent(agentName)
+	if err != nil {
+		return "", "", ErrUnknownTarget
+	}
+	pane, err := c.resolvePane(agent.Title())
+	if err != nil {
+		return "", "", err
+	}
+	return agentName, pane, nil
 }
 
 func (c *capture) resolvePane(title string) (string, error) {
@@ -233,7 +263,7 @@ func TestNotify_NoCosLedgerSkipsMirror(t *testing.T) {
 // on resolvePane's OUTPUT (not the agent name), (c) submit runs on that same pane.
 func TestRoute_KeysLockOnResolvedPaneTarget(t *testing.T) {
 	c, cap := newTestController(t, rosterCos, secretsXO)
-	cap.paneTarget = "spark:3.1" // what deliver.ResolvePane would return
+	cap.paneTarget = "flotilla:3.1" // what deliver.ResolvePane would return
 	res, err := c.Route(context.Background(), "alpha", "do the thing")
 	if err != nil {
 		t.Fatalf("Route: %v", err)
@@ -241,10 +271,10 @@ func TestRoute_KeysLockOnResolvedPaneTarget(t *testing.T) {
 	if cap.resolvedTitle != agentTitle(t, c, "alpha") {
 		t.Errorf("resolvePane asked for %q, want the agent's Title()", cap.resolvedTitle)
 	}
-	if cap.txnTarget != "spark:3.1" {
-		t.Errorf("txn lock keyed on %q, want the resolved pane target %q (NOT the agent name)", cap.txnTarget, "spark:3.1")
+	if cap.txnTarget != "flotilla:3.1" {
+		t.Errorf("txn lock keyed on %q, want the resolved pane target %q (NOT the agent name)", cap.txnTarget, "flotilla:3.1")
 	}
-	if cap.submitPane != "spark:3.1" {
+	if cap.submitPane != "flotilla:3.1" {
 		t.Errorf("submit ran on pane %q, want the resolved target", cap.submitPane)
 	}
 	if res.Outcome != OutcomeDelivered {
@@ -390,14 +420,34 @@ func TestRoute_SubmitOutcomesMapped(t *testing.T) {
 	}
 }
 
-// TestNewLibrary_WiresRealResolvePane is the DRIFT guard: the seam-stubbed tests
-// above prove the plumbing (Route keys the lock on resolvePane's output), but they
-// cannot catch a production controller that wires a DIFFERENT resolver. This
-// asserts NewLibrary wires resolvePane = deliver.ResolvePane by function identity —
-// the SAME function cmdSend + the watch Injector use — so the cross-process lock
-// keys cannot silently diverge in a future refactor (a real ResolvePane(...) call
-// needs the live tmux fleet, so identity is the runnable proxy).
-func TestNewLibrary_WiresRealResolvePane(t *testing.T) {
+// recordingWebTransport is a web-transport stand-in for the PR3 drift guard: it
+// records the (originChannel, target) ResolveDestination was called with and returns a
+// fixed InboundTarget, so the test can prove the production controller's Route keys the
+// lock on the pane the WEB TRANSPORT resolved — not on a forked in-Route resolution.
+type recordingWebTransport struct {
+	transport.Transport  // embed so the unused methods are inherited (nil-safe: only ResolveDestination is called)
+	gotOrigin, gotTarget string
+	dest                 transport.Destination
+	agent                string
+	ok                   bool
+}
+
+func (r *recordingWebTransport) ResolveDestination(origin, target string) (transport.Destination, string, bool) {
+	r.gotOrigin, r.gotTarget = origin, target
+	return r.dest, r.agent, r.ok
+}
+
+// TestNewLibrary_RoutesThroughWebTransport is the PR3 (#198) DRIFT guard: the production
+// controller MUST resolve its route target+pane THROUGH the injected web transport's
+// ResolveDestination and key the lock on the pane THAT resolver returned — never a forked
+// in-Route resolution. The seam-stubbed Route tests above prove the plumbing; this proves
+// NewLibrary actually wires the seam to the injected webTr (a future refactor that
+// re-introduced an in-Route resolvePane would diverge the lock key and silently break
+// cross-process serialization). The companion fact — the web transport wires
+// deliver.ResolvePane (the SAME function cmdSend + the watch Injector use) — is pinned in
+// internal/transport (TestWebTransport_WiresRealResolvePane); together they prove the dash
+// route's lock key == deliver.ResolvePane(agent.Title()) == the discord writer's key.
+func TestNewLibrary_RoutesThroughWebTransport(t *testing.T) {
 	dir := t.TempDir()
 	rosterPath := filepath.Join(dir, "flotilla.json")
 	if err := os.WriteFile(rosterPath, []byte(rosterCos), 0o600); err != nil {
@@ -407,9 +457,236 @@ func TestNewLibrary_WiresRealResolvePane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := NewLibrary(rc, "xo", "", &fakeNotifyTransport{maxRunes: 2000})
-	if reflect.ValueOf(c.resolvePane).Pointer() != reflect.ValueOf(deliver.ResolvePane).Pointer() {
-		t.Error("NewLibrary must wire resolvePane = deliver.ResolvePane (the shared lock-key source; a divergent resolver silently breaks cross-process serialization)")
+	webTr := &recordingWebTransport{
+		dest:  transport.NewInboundTarget("alpha", "flotilla:9.2"),
+		agent: "alpha",
+		ok:    true,
+	}
+	c := NewLibrary(rc, "xo", "", &fakeNotifyTransport{maxRunes: 2000}, webTr)
+	// Drive Route with the real resolveDest seam, capturing only the lock + submit.
+	cap := &capture{}
+	c.acquireTxn = cap.acquireTxn
+	c.submit = cap.submit
+	res, err := c.Route(context.Background(), "@alpha", "go")
+	if err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	if webTr.gotTarget != "@alpha" {
+		t.Errorf("web ResolveDestination target = %q, want the route target @alpha (Route must resolve THROUGH the web transport)", webTr.gotTarget)
+	}
+	if webTr.gotOrigin != "" {
+		t.Errorf("web ResolveDestination originChannel = %q, want empty (roster-wide, Decision 2)", webTr.gotOrigin)
+	}
+	if cap.txnTarget != "flotilla:9.2" {
+		t.Errorf("txn lock keyed on %q, want the pane the WEB TRANSPORT resolved (flotilla:9.2) — not a forked in-Route resolution", cap.txnTarget)
+	}
+	if cap.submitPane != "flotilla:9.2" {
+		t.Errorf("submit ran on pane %q, want the web-transport-resolved pane", cap.submitPane)
+	}
+	if res.Target != "alpha" || res.Outcome != OutcomeDelivered {
+		t.Errorf("result = %+v, want delivered to alpha", res)
+	}
+}
+
+// newRouteErrorController builds the production controller (real NewLibrary-built
+// resolveDest closure) over an in-memory roster, injecting the given web transport.
+// It captures the lock/submit seams so a test can prove an error arm NEVER reaches
+// the pane (no acquire/submit), and drives Route through the REAL production closure
+// — NOT the capture's fake resolveDest. This is the lever the seam-stubbed Route
+// tests cannot pull: those override c.resolveDest, so the production closure's three
+// ok=false error arms + its non-inbound fail-closed arm are otherwise unexercised.
+func newRouteErrorController(t *testing.T, rosterBody string, webTr transport.Transport) (*LibraryController, *capture) {
+	t.Helper()
+	dir := t.TempDir()
+	rosterPath := filepath.Join(dir, "flotilla.json")
+	if err := os.WriteFile(rosterPath, []byte(rosterBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rc, err := roster.Load(rosterPath)
+	if err != nil {
+		t.Fatalf("roster.Load: %v", err)
+	}
+	xo := rc.XOAgent
+	if xo == "" {
+		xo = rc.Agents[0].Name
+	}
+	c := NewLibrary(rc, xo, "", &fakeNotifyTransport{maxRunes: 2000}, webTr)
+	cap := &capture{}
+	// Leave c.resolveDest as the REAL production closure; capture only the lock/submit
+	// so we can assert an error arm short-circuits before the pane.
+	c.acquireTxn = cap.acquireTxn
+	c.submit = cap.submit
+	return c, cap
+}
+
+// TestRoute_ProductionResolveDestErrorArms drives the REAL NewLibrary-built resolveDest
+// closure (library.go) through every failure arm the SPI's ok=false collapse forces it to
+// re-derive — the LIVE operator-facing error path the seam-stubbed Route tests never reach
+// (they override c.resolveDest). The web transport is a recordingWebTransport returning a
+// controlled (ok, dest); the re-derivation runs against the SAME shared roster.ResolveTarget,
+// so the closure must surface the PRECISE failure the HTTP layer maps (404 vs 400) — never a
+// wrong sentinel, never a silent drop. All four arms must short-circuit BEFORE the pane (no
+// acquire/submit) — a failed resolution must not reach a lock or a paste.
+func TestRoute_ProductionResolveDestErrorArms(t *testing.T) {
+	// rosterDup lets a case-insensitive collision (alpha + Alpha) produce ErrAmbiguousTarget
+	// from the shared resolver when the target is given in a non-exact case ("ALPHA").
+	const rosterDup = `{"channel_id":"C1","xo_agent":"xo","cos_agent":"xo","heartbeat_interval":"20m","agents":[{"name":"xo"},{"name":"alpha"},{"name":"Alpha"}]}`
+
+	cases := []struct {
+		name       string
+		rosterBody string
+		target     string
+		webTr      transport.Transport
+		// wantErrIs, if non-nil, is the sentinel the surfaced error must match
+		// (errors.Is). The HTTP layer (control_handlers.go:82-88) maps ErrUnknownTarget →
+		// 404 and ErrAmbiguousTarget → 400.
+		wantErrIs error
+		// wantNotErrIs are sentinels the error must NOT match — pinning that the
+		// pane-resolve / non-inbound arms are NOT mis-mapped to a 404/400 target error.
+		wantNotErrIs []error
+		// wantDetail, if non-empty, must appear in the error string (the non-silent
+		// pane-resolve / fail-closed wording).
+		wantDetail string
+	}{
+		{
+			// (a) webTr ok=false AND the shared resolver yields ErrUnknownTarget → the
+			// closure surfaces the unknown-target sentinel (HTTP 404).
+			name:       "ok_false_unknown_target",
+			rosterBody: rosterCos,
+			target:     "ghost", // no such agent in the roster
+			webTr:      &recordingWebTransport{ok: false},
+			wantErrIs:  ErrUnknownTarget,
+		},
+		{
+			// (b) webTr ok=false AND the shared resolver yields ErrAmbiguousTarget → the
+			// closure surfaces the ambiguous sentinel (HTTP 400).
+			name:       "ok_false_ambiguous_target",
+			rosterBody: rosterDup,
+			target:     "ALPHA", // case collision with no exact match
+			webTr:      &recordingWebTransport{ok: false},
+			wantErrIs:  ErrAmbiguousTarget,
+		},
+		{
+			// (c) webTr ok=false BUT the shared resolver SUCCEEDS — the resolver-ok-but-no-
+			// inbound-target edge. The failure was pane resolution; the closure surfaces a
+			// NON-SILENT pane-resolve error, NOT a wrong 404/400 target sentinel.
+			name:         "ok_false_but_resolver_succeeds_is_pane_resolve_error",
+			rosterBody:   rosterCos,
+			target:       "alpha", // resolves cleanly in the roster
+			webTr:        &recordingWebTransport{ok: false},
+			wantNotErrIs: []error{ErrUnknownTarget, ErrAmbiguousTarget},
+			wantDetail:   "resolve pane for",
+		},
+		{
+			// (d) webTr ok=true but the returned dest does NOT satisfy InboundTarget (a
+			// wiring bug — a webhook/outbound destination handed to the inbound seam). The
+			// closure FAILS CLOSED rather than delivering to an unknown pane — never a
+			// silent drop, never a wrong target sentinel.
+			name:       "ok_true_non_inbound_dest_fails_closed",
+			rosterBody: rosterCos,
+			target:     "alpha",
+			// A discord webhook Destination satisfies Destination but NOT InboundTarget.
+			webTr:        &recordingWebTransport{ok: true, dest: transport.NewWebhookDestination("https://discord.example/webhook/x"), agent: "alpha"},
+			wantNotErrIs: []error{ErrUnknownTarget, ErrAmbiguousTarget},
+			wantDetail:   "non-inbound destination",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, cap := newRouteErrorController(t, tc.rosterBody, tc.webTr)
+			res, err := c.Route(context.Background(), tc.target, "do the thing")
+			if err == nil {
+				t.Fatalf("Route → (%+v, nil), want a hard error from the production resolveDest closure", res)
+			}
+			if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
+				t.Errorf("err = %v, want errors.Is(%v)", err, tc.wantErrIs)
+			}
+			for _, not := range tc.wantNotErrIs {
+				if errors.Is(err, not) {
+					t.Errorf("err = %v, must NOT be %v (the pane-resolve / fail-closed arm must not be mis-mapped to a target sentinel)", err, not)
+				}
+			}
+			if tc.wantDetail != "" && !strings.Contains(err.Error(), tc.wantDetail) {
+				t.Errorf("err = %q, want it to contain %q (non-silent failure wording)", err.Error(), tc.wantDetail)
+			}
+			// Every error arm must short-circuit BEFORE the pane: no lock, no submit.
+			if len(cap.events) != 0 {
+				t.Errorf("a resolve failure reached the pane (events=%v), want none — no acquire/submit on a failed resolution", cap.events)
+			}
+			if cap.txnTarget != "" {
+				t.Errorf("a resolve failure keyed the lock on %q, want no lock at all", cap.txnTarget)
+			}
+		})
+	}
+}
+
+// TestRoute_ProductionResolveDestErrorArms_FailsIfArmBroken is the prove-it-fails
+// companion for arm (a): it documents the assertion that breaks if the production
+// closure stops surfacing the unknown-target sentinel. (Manual confirmation: temporarily
+// rewriting the closure's `return "", "", rerr` to swallow the error makes the (a) subtest
+// FAIL with "want errors.Is(unknown route target …)". Restored after confirming.) Kept as a
+// named anchor so a future reader knows the error arms are exercised against the real closure.
+func TestRoute_ProductionResolveDestErrorArms_FailsIfArmBroken(t *testing.T) {
+	c, cap := newRouteErrorController(t, rosterCos, &recordingWebTransport{ok: false})
+	_, err := c.Route(context.Background(), "ghost", "x")
+	if !errors.Is(err, ErrUnknownTarget) {
+		t.Fatalf("production resolveDest closure must surface ErrUnknownTarget for an unknown target; got %v", err)
+	}
+	if len(cap.events) != 0 {
+		t.Errorf("unknown target reached the pane (events=%v)", cap.events)
+	}
+}
+
+// TestWebAndControlXODerivationsConverge pins FOLD-2's load-bearing dependency: the
+// re-derivation in NewLibrary's resolveDest closure (library.go) is only correct because
+// the web transport's xo and the control library's xo are derived IDENTICALLY — both
+// "XOAgent else Agents[0]" from the SAME roster. This asserts the two derivation RULES
+// agree across rosters (one with an explicit xo_agent, one relying on the Agents[0]
+// fallback). If a future refactor let the web transport's xo diverge, the re-derivation
+// would mis-map the failure; this test is the canary. (#200 removes the re-derivation and
+// this dependency entirely by having the SPI return the precise sentinel.)
+func TestWebAndControlXODerivationsConverge(t *testing.T) {
+	cases := []struct {
+		name       string
+		rosterBody string
+		wantXO     string
+	}{
+		// xo_agent set explicitly → both derivations pick it.
+		{"explicit_xo_agent", rosterCos, "xo"},
+		// no xo_agent → both fall back to Agents[0].
+		{"agents_zero_fallback", `{"channel_id":"C1","heartbeat_interval":"20m","agents":[{"name":"backend"},{"name":"alpha"}]}`, "backend"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			rosterPath := filepath.Join(dir, "flotilla.json")
+			if err := os.WriteFile(rosterPath, []byte(tc.rosterBody), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			rc, err := roster.Load(rosterPath)
+			if err != nil {
+				t.Fatalf("roster.Load: %v", err)
+			}
+			// The control library's rule (internal/dash/server.go:93-96): xo_agent else
+			// Agents[0]. NewLibrary receives THIS xo and the resolveDest closure re-derives
+			// the failure against (rc, this xo).
+			controlXO := rc.XOAgent
+			if controlXO == "" {
+				controlXO = rc.Agents[0].Name
+			}
+			// The web transport's rule (internal/transport/web.go newWebTransport): the SAME
+			// xo_agent-else-Agents[0] derivation, applied to the SAME roster. transport
+			// exposes it via XOForRoster so the convergence is asserted against the transport
+			// package's OWN derivation function — not a copy that could silently drift.
+			webXO := transport.XOForRoster(rc)
+			if controlXO != tc.wantXO {
+				t.Errorf("control xo = %q, want %q", controlXO, tc.wantXO)
+			}
+			if webXO != controlXO {
+				t.Errorf("web transport xo = %q, control library xo = %q — the two derivations DIVERGED (the resolveDest re-derivation would mis-map; see library.go FOLD-2 comment / #200)", webXO, controlXO)
+			}
+		})
 	}
 }
 

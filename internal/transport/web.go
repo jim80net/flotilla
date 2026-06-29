@@ -23,6 +23,26 @@ func init() {
 // closed rather than building a transport that would nil-deref on the first resolve.
 var errWebNoRoster = errors.New("web transport: a roster is required (the roster-wide resolver resolves a target against it)")
 
+// InboundTarget is the EXPORTED accessor an inbound pane-delivery Destination
+// satisfies, so the delivery leg — which lives in a DIFFERENT package
+// (internal/dash/control) and cannot read the unexported webDestination fields —
+// reads the two values it needs through a typed contract: PaneTarget() (the
+// cross-process AcquirePaneTxn lock key) and AgentName() (the canonical roster name
+// for the result/ledger). The opaque SPI Destination marker (isDestination) stays
+// unexported so a caller cannot forge a Destination; InboundTarget is the narrow,
+// direction-specific window the INBOUND consumer type-asserts to. The OUTBOUND
+// (Post) destinations — discord's credential-bearing webhook — deliberately do NOT
+// satisfy it, keeping the direction asymmetry (design Decision 1) typed: an inbound
+// pane target and an outbound post target are not interchangeable.
+type InboundTarget interface {
+	Destination
+	// AgentName is the canonical roster agent the instruction is addressed to.
+	AgentName() string
+	// PaneTarget is the resolved tmux pane string — the cross-process lock key the
+	// delivery leg keys AcquirePaneTxn on (identical to every other pane writer's key).
+	PaneTarget() string
+}
+
 // webDestination is the web transport's concrete Destination: an INBOUND
 // pane-delivery target — a canonical roster agent name plus its resolved tmux pane
 // string. It carries NO credential (the direction asymmetry — design Decision 1):
@@ -31,13 +51,30 @@ var errWebNoRoster = errors.New("web transport: a roster is required (the roster
 // target, consumed by the dash's delivery leg (AcquirePaneTxn → Confirm.Submit),
 // NEVER by Post. A webDestination must never be handed to a Post — the web transport
 // has no meaningful outbound post (the only outbound the dash does is the Discord
-// notify, posted by the DISCORD transport).
+// notify, posted by the DISCORD transport). It satisfies InboundTarget so the
+// delivery leg (another package) reads {agentName, paneTarget} through that accessor.
 type webDestination struct {
 	agentName  string // the canonical roster agent the instruction is addressed to
 	paneTarget string // the resolved tmux pane string (the cross-process lock key)
 }
 
 func (webDestination) isDestination() {}
+
+// AgentName / PaneTarget satisfy InboundTarget — the typed window the dash delivery
+// leg reads (it cannot reach the unexported fields directly across the package seam).
+func (d webDestination) AgentName() string  { return d.agentName }
+func (d webDestination) PaneTarget() string { return d.paneTarget }
+
+// NewInboundTarget builds an InboundTarget from an already-resolved {agentName,
+// paneTarget} — the symmetric peer of NewWebhookDestination (which builds an OUTBOUND
+// post destination at the wiring boundary). It lets a caller OUTSIDE this package
+// construct the opaque inbound target (a value satisfying InboundTarget cannot be forged
+// elsewhere, because the isDestination marker is unexported), e.g. an alternative web
+// ingress that resolves the pane itself, or a test that injects a fixed inbound target.
+// The pane MUST be the deliver.ResolvePane key for the cross-process lock to serialize.
+func NewInboundTarget(agentName, paneTarget string) InboundTarget {
+	return webDestination{agentName: agentName, paneTarget: paneTarget}
+}
 
 // webTransport is the dashboard's coordination surface behind the Transport SPI. It
 // owns ONLY the INBOUND half: ResolveDestination resolves a roster-wide address (via
@@ -47,12 +84,16 @@ func (webDestination) isDestination() {}
 // medium (Post rejects — the notify is a Discord post by the discord transport). Its
 // delivery is in-process/loopback and cannot gap, so it does NOT implement CatchUp.
 //
-// SCOPE (PR2, #188/#106): this transport is REGISTERED (init → RegisterFactory) but NOT YET
-// CONSTRUCTED in the dash runtime — the live ingress today is still POST /api/control/route →
-// LibraryController.Route → roster.ResolveTarget (which PR2 unified). ResolveDestination /
-// webDestination / Post-reject are test-covered scaffolding; PR3 (#198) constructs + wires this
-// transport as the actual ingress and pins the single-lock-key invariant (the route consumes
-// webDestination.paneTarget rather than re-resolving the pane).
+// SCOPE (PR3, #198): this transport is now LIVE. cmd/flotilla/dash.go constructs it
+// (Construct("web", Config{Roster})) and injects it into the dash control library, and
+// LibraryController.Route resolves its target+pane THROUGH ResolveDestination — consuming
+// the returned webDestination.paneTarget as the AcquirePaneTxn lock key rather than
+// re-resolving the pane (the single-lock-key invariant: the dash route + the watch Injector
+// key the cross-process flock on the IDENTICAL deliver.ResolvePane target, so they serialize).
+// The live ingress is POST /api/control/route → requireWrite/Host/Origin gates →
+// LibraryController.Route → webTransport.ResolveDestination → the deliver+surface delivery leg.
+// (PR2, #188/#106, shipped this transport REGISTERED-but-dormant — the route still did its own
+// resolveTarget+resolvePane then; PR3 routes through this transport and removed that.)
 type webTransport struct {
 	roster *roster.Config
 	xo     string // the hub XO an empty target resolves to (XOAgent, else Agents[0])
@@ -64,22 +105,41 @@ type webTransport struct {
 	resolvePane func(title string) (string, error)
 }
 
+// XOForRoster derives the hub XO from a roster the SAME way the dash control library
+// does (internal/dash/server.go): the explicit XOAgent, else the first agent. It is
+// exported and used by newWebTransport itself so there is ONE derivation, not a copy:
+// the web transport's xo and the control library's xo therefore agree whenever they read
+// the same roster — the load-bearing invariant the dash control resolveDest closure's
+// failure-re-derivation depends on (it re-calls roster.ResolveTarget against (roster, xo),
+// and that re-derivation is only correct because both sides resolve the IDENTICAL xo; see
+// internal/dash/control/library.go and the #200 typed-error fast-follow). An empty/agentless
+// roster yields "" (newWebTransport rejects a nil roster separately).
+func XOForRoster(rc *roster.Config) string {
+	if rc == nil {
+		return ""
+	}
+	if rc.XOAgent != "" {
+		return rc.XOAgent
+	}
+	if len(rc.Agents) > 0 {
+		return rc.Agents[0].Name
+	}
+	return ""
+}
+
 // newWebTransport is the registered Factory: it builds the web transport from the
 // runtime Config. It reads the roster (the resolver's source) and derives the hub XO
-// the same way the dash does (XOAgent, else the first agent). The resolvePane seam is
+// via XOForRoster — the SAME derivation the dash control library applies, so the two xo
+// values converge (the resolveDest re-derivation invariant). The resolvePane seam is
 // wired to deliver.ResolvePane — the shared lock-key source. A missing roster fails
 // closed (errWebNoRoster).
 func newWebTransport(cfg Config) (Transport, error) {
 	if cfg.Roster == nil {
 		return nil, errWebNoRoster
 	}
-	xo := cfg.Roster.XOAgent
-	if xo == "" && len(cfg.Roster.Agents) > 0 {
-		xo = cfg.Roster.Agents[0].Name
-	}
 	return &webTransport{
 		roster:      cfg.Roster,
-		xo:          xo,
+		xo:          XOForRoster(cfg.Roster),
 		resolvePane: deliver.ResolvePane,
 	}, nil
 }

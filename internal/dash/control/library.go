@@ -50,28 +50,45 @@ type LibraryController struct {
 	appendCos       func(path string, e cos.Entry) error
 	now             func() time.Time
 
-	// Route seams — the confirmed-delivery transaction. resolvePane + acquireTxn +
-	// submit mirror the cmdSend path (cmd/flotilla/main.go) EXACTLY so the dash
-	// keys the cross-process lock on the SAME resolved pane target as `flotilla
-	// send` and the watch Injector/rotate (the contract that makes the lock
-	// serialize cross-process — design §5).
+	// Route seams — the confirmed-delivery transaction. As of PR3 (#198) Route
+	// resolves the target+pane THROUGH the injected WEB transport's ResolveDestination
+	// (resolveDest), so there is ONE roster-wide-resolve + pane-resolve site, not a
+	// second one re-implemented inside Route. resolveDest returns the canonical agent
+	// name + the resolved pane string (webDestination.paneTarget) — the cross-process
+	// AcquirePaneTxn lock key. Because the web transport wires deliver.ResolvePane (the
+	// SAME function cmdSend + the watch Injector/rotate use), the key the dash route
+	// computes is IDENTICAL to every other pane writer's — the contract that makes the
+	// flock serialize cross-process (design §5). acquireTxn + submit terminate the same
+	// lock-bracketed delivery the cmdSend path uses.
 	getDriver   func(name string) (surface.Driver, bool)
-	resolvePane func(title string) (string, error)
+	resolveDest func(originChannel, target string) (agentName, paneTarget string, err error)
 	acquireTxn  func(target string) (release func(), err error)
 	submit      func(drv surface.Driver, pane, text string) error
 }
 
 // NewLibrary builds the production controller. secretsPath may be "" (then notify
 // returns ErrWebhookMissing); roster + xo are required for webhook + ledger
-// resolution. tr is the coordination Transport that backs the notify's outbound
-// post: because the operator-note destination is a Discord webhook
-// (secrets.Webhook(xo)), tr is the DISCORD transport, constructed at the wiring
-// boundary (cmd/flotilla/dash.go) and injected here as an interface VALUE — so this
-// package depends on internal/transport, not on the concrete internal/discord
-// package. The notify resolves the webhook string from secrets, wraps it in a
-// transport.NewWebhookDestination, and posts via tr.Post; the over-length guard
-// reads tr.MaxContentRunes(). This closes the PR1 TODO(#188/#106) seam.
-func NewLibrary(rc *roster.Config, xo, secretsPath string, tr transport.Transport) *LibraryController {
+// resolution.
+//
+// TWO transports are injected, for the two opposite-direction seams (the direction
+// asymmetry — design Decision 1):
+//
+//   - notifyTr backs the notify's OUTBOUND post. Because the operator-note destination
+//     is a Discord webhook (secrets.Webhook(xo)), notifyTr is the DISCORD transport. The
+//     notify resolves the webhook string from secrets, wraps it in a
+//     transport.NewWebhookDestination, and posts via notifyTr.Post; the over-length guard
+//     reads notifyTr.MaxContentRunes(). (Closes the PR1 TODO(#188/#106) seam.)
+//   - webTr backs the route's INBOUND resolution. As of PR3 (#198) the dash route is the
+//     LIVE web ingress: Route resolves its target+pane THROUGH webTr.ResolveDestination
+//     (the ONE roster-wide resolver + the SAME deliver.ResolvePane the web transport
+//     wires), and consumes the returned webDestination.paneTarget as the AcquirePaneTxn
+//     lock key — NOT a second in-Route pane resolution. So the dash route + the watch
+//     Injector key the per-pane flock on the IDENTICAL resolved target (cross-process
+//     serialization, design §5).
+//
+// Both enter as interface VALUES at the wiring boundary (cmd/flotilla/dash.go), so this
+// package depends on internal/transport, not on the concrete internal/discord package.
+func NewLibrary(rc *roster.Config, xo, secretsPath string, notifyTr, webTr transport.Transport) *LibraryController {
 	return &LibraryController{
 		roster:      rc,
 		xo:          xo,
@@ -83,17 +100,66 @@ func NewLibrary(rc *roster.Config, xo, secretsPath string, tr transport.Transpor
 		// cmd/flotilla/watch.go uses for its down-alert post (Construct +
 		// NewWebhookDestination + tr.Post).
 		post: func(hook, username, content string) error {
-			return tr.Post(transport.NewWebhookDestination(hook), username, content)
+			return notifyTr.Post(transport.NewWebhookDestination(hook), username, content)
 		},
 		// The over-length guard reads the medium's own per-message cap from the
 		// transport (discord = 2000), not a hard-coded discord constant leaking across
 		// the seam.
-		maxContentRunes: tr.MaxContentRunes(),
+		maxContentRunes: notifyTr.MaxContentRunes(),
 		loadSecrets:     roster.LoadSecrets,
 		appendCos:       cos.Append,
 		now:             time.Now,
 		getDriver:       surface.Get,
-		resolvePane:     deliver.ResolvePane,
+		// The route resolves its target+pane through the WEB transport's ResolveDestination
+		// (PR3 #198): ONE roster-wide resolve (roster.ResolveTarget) + ONE pane resolve
+		// (deliver.ResolvePane, wired inside the web transport). Route consumes the returned
+		// webDestination.paneTarget as the lock key — the web route + every other pane writer
+		// thus key the flock on the identical resolved target. The returned Destination is the
+		// INBOUND target; we read its {agentName, paneTarget} via the exported InboundTarget
+		// accessor (the unexported webDestination fields are not visible across the package
+		// seam).
+		//
+		// The SPI's ResolveDestination collapses every failure into ok=false, but the HTTP
+		// layer maps unknown vs ambiguous targets to distinct statuses (404 vs 400) and the
+		// control tests pin those distinct sentinels. So on ok=false we re-derive the PRECISE
+		// reason from the SAME shared resolver (roster.ResolveTarget) — a pure function of
+		// (roster, xo, target), so calling it again yields the identical verdict with no risk
+		// of drift, and it touches NO pane resolution (the lock key still comes solely from
+		// the web transport's deliver.ResolvePane). If the shared resolver itself succeeds yet
+		// the web transport returned ok=false, the failure was pane resolution — surfaced as a
+		// pane-resolve error (the old Route's "resolve pane for %s" path), never a silent drop.
+		//
+		// LOAD-BEARING DEPENDENCY (re-derivation correctness): re-calling rc.ResolveTarget
+		// here yields the SAME verdict as the web transport's internal ResolveTarget ONLY
+		// because BOTH resolve against the IDENTICAL (roster, xo) pair. The web transport's
+		// xo and this control library's xo are each derived as "XOAgent else Agents[0]" from
+		// the SAME roster file: the control library's via internal/dash/server.go (xo passed
+		// into NewLibrary) and the web transport's via internal/transport/web.go's
+		// newWebTransport (transport.Construct("web", {Roster}) at cmd/flotilla/dash.go).
+		// Both read the same roster path with identical content (cmd/flotilla/dash.go notes
+		// this explicitly), so the two xo derivations CONVERGE and the empty-target ("→ XO")
+		// resolution agrees on both sides. If a future refactor let the web transport's xo
+		// diverge from the control library's, the re-derivation would mis-map the failure
+		// (e.g. attribute a different default-XO verdict) — the convergence is the invariant
+		// that keeps this re-derivation honest. The typed-error fast-follow (#200) removes the
+		// re-derivation entirely by having the SPI return the precise sentinel, eliminating
+		// this dependency.
+		resolveDest: func(originChannel, target string) (string, string, error) {
+			dest, agentName, ok := webTr.ResolveDestination(originChannel, target)
+			if ok {
+				if it, isInbound := dest.(transport.InboundTarget); isInbound {
+					return agentName, it.PaneTarget(), nil
+				}
+			}
+			if name, rerr := rc.ResolveTarget(xo, target); rerr != nil {
+				return "", "", rerr // ErrUnknownTarget / ErrAmbiguousTarget (the distinct sentinels)
+			} else if !ok {
+				return "", "", fmt.Errorf("resolve pane for %s: web transport returned no inbound target", name)
+			}
+			// ok==true but the destination did not satisfy InboundTarget — a wiring bug in the
+			// injected transport; fail closed rather than deliver to an unknown pane.
+			return "", "", fmt.Errorf("web transport resolved %q to a non-inbound destination %T", target, dest)
+		},
 		// Wrap AcquirePaneTxn so the seam returns a plain release func; production
 		// uses the coordinated PaneTxnTimeout (identical to cmdSend + the Injector).
 		acquireTxn: func(target string) (func(), error) {
@@ -148,20 +214,29 @@ func (c *LibraryController) Notify(_ context.Context, message string) error {
 }
 
 // Route delivers an instruction to a desk via the confirmed-delivery library,
-// serialized cross-process by the per-pane TRANSACTION lock (design §5). It
-// mirrors the cmdSend path EXACTLY: resolve the agent → its driver → its pane
-// (deliver.ResolvePane(agent.Title())) → acquire the txn lock keyed on that
-// resolved pane target → Confirm.Submit → Release. The typed surface outcome
-// (delivered/busy/crashed/transient/unconfirmed) is returned as a RouteResult
-// (these are informational outcomes the operator must see, NOT errors); only a
-// hard failure (unknown target, unknown surface, pane-resolution failure) is an
-// error. A lock-contention timeout is surfaced as a busy/not-delivered outcome
-// (retryable) — never a silent partial send.
+// serialized cross-process by the per-pane TRANSACTION lock (design §5). As of PR3
+// (#198) it is the LIVE web ingress: it resolves the target+pane THROUGH the injected
+// web transport's ResolveDestination (resolveDest) — the ONE roster-wide resolver +
+// the SAME deliver.ResolvePane every pane writer uses — and CONSUMES the returned
+// webDestination.paneTarget as the AcquirePaneTxn lock key (it does NOT re-resolve the
+// pane). So the dash route and the watch Injector key the flock on the IDENTICAL
+// resolved target — the cross-process serialization contract; a divergent resolve
+// would silently fail to serialize. After resolution it mirrors the cmdSend path:
+// agent → its driver → the txn lock (keyed on the resolved pane target) → Confirm.Submit
+// → Release. The typed surface outcome (delivered/busy/crashed/transient/unconfirmed)
+// is returned as a RouteResult (informational outcomes the operator must see, NOT
+// errors); only a hard failure (unknown/ambiguous target, unknown surface,
+// pane-resolution failure) is an error. A lock-contention timeout is surfaced as a
+// busy/not-delivered outcome (retryable) — never a silent partial send.
 func (c *LibraryController) Route(_ context.Context, target, message string) (RouteResult, error) {
 	if strings.TrimSpace(message) == "" {
 		return RouteResult{}, ErrEmptyMessage
 	}
-	agentName, err := c.resolveTarget(target)
+	// The web transport has no channel; resolution is roster-wide (Decision 2), so the
+	// originChannel is empty. resolveDest returns the canonical agent name + the resolved
+	// pane target (the lock key) in one shared resolution; its error carries the distinct
+	// ErrUnknownTarget / ErrAmbiguousTarget sentinel (HTTP-mapped to 404 / 400).
+	agentName, pane, err := c.resolveDest("", target)
 	if err != nil {
 		return RouteResult{}, err
 	}
@@ -172,15 +247,6 @@ func (c *LibraryController) Route(_ context.Context, target, message string) (Ro
 	drv, ok := c.getDriver(agent.Surface)
 	if !ok {
 		return RouteResult{}, fmt.Errorf("agent %q: unknown surface %q", agentName, agent.Surface)
-	}
-	// Resolve the pane the SAME way cmdSend + the watch Injector/rotate do
-	// (deliver.ResolvePane(agent.Title())) — the lock keys on this exact target,
-	// so every transaction writer computes one identical key per pane (the
-	// cross-process serialization contract; a divergent resolve would silently
-	// fail to serialize).
-	pane, err := c.resolvePane(agent.Title())
-	if err != nil {
-		return RouteResult{}, fmt.Errorf("resolve pane for %s: %w", agentName, err)
 	}
 	release, err := c.acquireTxn(pane)
 	if err != nil {
@@ -221,19 +287,6 @@ func (c *LibraryController) Route(_ context.Context, target, message string) (Ro
 // than a risky reimplementation. Tracked as a focused follow-on. Fails closed.
 func (c *LibraryController) Resume(_ context.Context, _ string) (ResumeResult, error) {
 	return ResumeResult{}, ErrResumeUnavailable
-}
-
-// resolveTarget maps a route target to a canonical roster agent name by delegating
-// to the ONE shared roster-wide resolver (roster.ResolveTarget) — the SAME function
-// the web transport's ResolveDestination calls, so the empty→XO default and the
-// exact-wins-else-ambiguous case-collision rule cannot drift between the dash control
-// surface and the web transport (transport spec "The roster-wide resolver is shared,
-// not forked"). The dash resolves ROSTER-WIDE (a host-local operator console with no
-// Discord channel context can address any desk), which is preserved verbatim inside
-// the shared resolver — see roster.ResolveTarget's doc for the boundary-transcending
-// rationale and the case-collision rule.
-func (c *LibraryController) resolveTarget(target string) (string, error) {
-	return c.roster.ResolveTarget(c.xo, target)
 }
 
 // mirrorRouteToLedger records a dash-routed instruction in the CoS ledger with
