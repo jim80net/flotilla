@@ -105,22 +105,41 @@ type webTransport struct {
 	resolvePane func(title string) (string, error)
 }
 
+// XOForRoster derives the hub XO from a roster the SAME way the dash control library
+// does (internal/dash/server.go): the explicit XOAgent, else the first agent. It is
+// exported and used by newWebTransport itself so there is ONE derivation, not a copy:
+// the web transport's xo and the control library's xo therefore agree whenever they read
+// the same roster — the load-bearing invariant the dash control resolveDest closure's
+// failure-re-derivation depends on (it re-calls roster.ResolveTarget against (roster, xo),
+// and that re-derivation is only correct because both sides resolve the IDENTICAL xo; see
+// internal/dash/control/library.go and the #200 typed-error fast-follow). An empty/agentless
+// roster yields "" (newWebTransport rejects a nil roster separately).
+func XOForRoster(rc *roster.Config) string {
+	if rc == nil {
+		return ""
+	}
+	if rc.XOAgent != "" {
+		return rc.XOAgent
+	}
+	if len(rc.Agents) > 0 {
+		return rc.Agents[0].Name
+	}
+	return ""
+}
+
 // newWebTransport is the registered Factory: it builds the web transport from the
 // runtime Config. It reads the roster (the resolver's source) and derives the hub XO
-// the same way the dash does (XOAgent, else the first agent). The resolvePane seam is
+// via XOForRoster — the SAME derivation the dash control library applies, so the two xo
+// values converge (the resolveDest re-derivation invariant). The resolvePane seam is
 // wired to deliver.ResolvePane — the shared lock-key source. A missing roster fails
 // closed (errWebNoRoster).
 func newWebTransport(cfg Config) (Transport, error) {
 	if cfg.Roster == nil {
 		return nil, errWebNoRoster
 	}
-	xo := cfg.Roster.XOAgent
-	if xo == "" && len(cfg.Roster.Agents) > 0 {
-		xo = cfg.Roster.Agents[0].Name
-	}
 	return &webTransport{
 		roster:      cfg.Roster,
-		xo:          xo,
+		xo:          XOForRoster(cfg.Roster),
 		resolvePane: deliver.ResolvePane,
 	}, nil
 }

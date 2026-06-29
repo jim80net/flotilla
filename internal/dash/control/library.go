@@ -128,6 +128,22 @@ func NewLibrary(rc *roster.Config, xo, secretsPath string, notifyTr, webTr trans
 		// the web transport's deliver.ResolvePane). If the shared resolver itself succeeds yet
 		// the web transport returned ok=false, the failure was pane resolution — surfaced as a
 		// pane-resolve error (the old Route's "resolve pane for %s" path), never a silent drop.
+		//
+		// LOAD-BEARING DEPENDENCY (re-derivation correctness): re-calling rc.ResolveTarget
+		// here yields the SAME verdict as the web transport's internal ResolveTarget ONLY
+		// because BOTH resolve against the IDENTICAL (roster, xo) pair. The web transport's
+		// xo and this control library's xo are each derived as "XOAgent else Agents[0]" from
+		// the SAME roster file: the control library's via internal/dash/server.go (xo passed
+		// into NewLibrary) and the web transport's via internal/transport/web.go's
+		// newWebTransport (transport.Construct("web", {Roster}) at cmd/flotilla/dash.go).
+		// Both read the same roster path with identical content (cmd/flotilla/dash.go notes
+		// this explicitly), so the two xo derivations CONVERGE and the empty-target ("→ XO")
+		// resolution agrees on both sides. If a future refactor let the web transport's xo
+		// diverge from the control library's, the re-derivation would mis-map the failure
+		// (e.g. attribute a different default-XO verdict) — the convergence is the invariant
+		// that keeps this re-derivation honest. The typed-error fast-follow (#200) removes the
+		// re-derivation entirely by having the SPI return the precise sentinel, eliminating
+		// this dependency.
 		resolveDest: func(originChannel, target string) (string, string, error) {
 			dest, agentName, ok := webTr.ResolveDestination(originChannel, target)
 			if ok {

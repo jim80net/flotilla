@@ -488,6 +488,208 @@ func TestNewLibrary_RoutesThroughWebTransport(t *testing.T) {
 	}
 }
 
+// newRouteErrorController builds the production controller (real NewLibrary-built
+// resolveDest closure) over an in-memory roster, injecting the given web transport.
+// It captures the lock/submit seams so a test can prove an error arm NEVER reaches
+// the pane (no acquire/submit), and drives Route through the REAL production closure
+// — NOT the capture's fake resolveDest. This is the lever the seam-stubbed Route
+// tests cannot pull: those override c.resolveDest, so the production closure's three
+// ok=false error arms + its non-inbound fail-closed arm are otherwise unexercised.
+func newRouteErrorController(t *testing.T, rosterBody string, webTr transport.Transport) (*LibraryController, *capture) {
+	t.Helper()
+	dir := t.TempDir()
+	rosterPath := filepath.Join(dir, "flotilla.json")
+	if err := os.WriteFile(rosterPath, []byte(rosterBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rc, err := roster.Load(rosterPath)
+	if err != nil {
+		t.Fatalf("roster.Load: %v", err)
+	}
+	xo := rc.XOAgent
+	if xo == "" {
+		xo = rc.Agents[0].Name
+	}
+	c := NewLibrary(rc, xo, "", &fakeNotifyTransport{maxRunes: 2000}, webTr)
+	cap := &capture{}
+	// Leave c.resolveDest as the REAL production closure; capture only the lock/submit
+	// so we can assert an error arm short-circuits before the pane.
+	c.acquireTxn = cap.acquireTxn
+	c.submit = cap.submit
+	return c, cap
+}
+
+// TestRoute_ProductionResolveDestErrorArms drives the REAL NewLibrary-built resolveDest
+// closure (library.go) through every failure arm the SPI's ok=false collapse forces it to
+// re-derive — the LIVE operator-facing error path the seam-stubbed Route tests never reach
+// (they override c.resolveDest). The web transport is a recordingWebTransport returning a
+// controlled (ok, dest); the re-derivation runs against the SAME shared roster.ResolveTarget,
+// so the closure must surface the PRECISE failure the HTTP layer maps (404 vs 400) — never a
+// wrong sentinel, never a silent drop. All four arms must short-circuit BEFORE the pane (no
+// acquire/submit) — a failed resolution must not reach a lock or a paste.
+func TestRoute_ProductionResolveDestErrorArms(t *testing.T) {
+	// rosterDup lets a case-insensitive collision (alpha + Alpha) produce ErrAmbiguousTarget
+	// from the shared resolver when the target is given in a non-exact case ("ALPHA").
+	const rosterDup = `{"channel_id":"C1","xo_agent":"xo","cos_agent":"xo","heartbeat_interval":"20m","agents":[{"name":"xo"},{"name":"alpha"},{"name":"Alpha"}]}`
+
+	cases := []struct {
+		name       string
+		rosterBody string
+		target     string
+		webTr      transport.Transport
+		// wantErrIs, if non-nil, is the sentinel the surfaced error must match
+		// (errors.Is). The HTTP layer (control_handlers.go:82-88) maps ErrUnknownTarget →
+		// 404 and ErrAmbiguousTarget → 400.
+		wantErrIs error
+		// wantNotErrIs are sentinels the error must NOT match — pinning that the
+		// pane-resolve / non-inbound arms are NOT mis-mapped to a 404/400 target error.
+		wantNotErrIs []error
+		// wantDetail, if non-empty, must appear in the error string (the non-silent
+		// pane-resolve / fail-closed wording).
+		wantDetail string
+	}{
+		{
+			// (a) webTr ok=false AND the shared resolver yields ErrUnknownTarget → the
+			// closure surfaces the unknown-target sentinel (HTTP 404).
+			name:       "ok_false_unknown_target",
+			rosterBody: rosterCos,
+			target:     "ghost", // no such agent in the roster
+			webTr:      &recordingWebTransport{ok: false},
+			wantErrIs:  ErrUnknownTarget,
+		},
+		{
+			// (b) webTr ok=false AND the shared resolver yields ErrAmbiguousTarget → the
+			// closure surfaces the ambiguous sentinel (HTTP 400).
+			name:       "ok_false_ambiguous_target",
+			rosterBody: rosterDup,
+			target:     "ALPHA", // case collision with no exact match
+			webTr:      &recordingWebTransport{ok: false},
+			wantErrIs:  ErrAmbiguousTarget,
+		},
+		{
+			// (c) webTr ok=false BUT the shared resolver SUCCEEDS — the resolver-ok-but-no-
+			// inbound-target edge. The failure was pane resolution; the closure surfaces a
+			// NON-SILENT pane-resolve error, NOT a wrong 404/400 target sentinel.
+			name:         "ok_false_but_resolver_succeeds_is_pane_resolve_error",
+			rosterBody:   rosterCos,
+			target:       "alpha", // resolves cleanly in the roster
+			webTr:        &recordingWebTransport{ok: false},
+			wantNotErrIs: []error{ErrUnknownTarget, ErrAmbiguousTarget},
+			wantDetail:   "resolve pane for",
+		},
+		{
+			// (d) webTr ok=true but the returned dest does NOT satisfy InboundTarget (a
+			// wiring bug — a webhook/outbound destination handed to the inbound seam). The
+			// closure FAILS CLOSED rather than delivering to an unknown pane — never a
+			// silent drop, never a wrong target sentinel.
+			name:       "ok_true_non_inbound_dest_fails_closed",
+			rosterBody: rosterCos,
+			target:     "alpha",
+			// A discord webhook Destination satisfies Destination but NOT InboundTarget.
+			webTr:        &recordingWebTransport{ok: true, dest: transport.NewWebhookDestination("https://discord.example/webhook/x"), agent: "alpha"},
+			wantNotErrIs: []error{ErrUnknownTarget, ErrAmbiguousTarget},
+			wantDetail:   "non-inbound destination",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, cap := newRouteErrorController(t, tc.rosterBody, tc.webTr)
+			res, err := c.Route(context.Background(), tc.target, "do the thing")
+			if err == nil {
+				t.Fatalf("Route → (%+v, nil), want a hard error from the production resolveDest closure", res)
+			}
+			if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
+				t.Errorf("err = %v, want errors.Is(%v)", err, tc.wantErrIs)
+			}
+			for _, not := range tc.wantNotErrIs {
+				if errors.Is(err, not) {
+					t.Errorf("err = %v, must NOT be %v (the pane-resolve / fail-closed arm must not be mis-mapped to a target sentinel)", err, not)
+				}
+			}
+			if tc.wantDetail != "" && !strings.Contains(err.Error(), tc.wantDetail) {
+				t.Errorf("err = %q, want it to contain %q (non-silent failure wording)", err.Error(), tc.wantDetail)
+			}
+			// Every error arm must short-circuit BEFORE the pane: no lock, no submit.
+			if len(cap.events) != 0 {
+				t.Errorf("a resolve failure reached the pane (events=%v), want none — no acquire/submit on a failed resolution", cap.events)
+			}
+			if cap.txnTarget != "" {
+				t.Errorf("a resolve failure keyed the lock on %q, want no lock at all", cap.txnTarget)
+			}
+		})
+	}
+}
+
+// TestRoute_ProductionResolveDestErrorArms_FailsIfArmBroken is the prove-it-fails
+// companion for arm (a): it documents the assertion that breaks if the production
+// closure stops surfacing the unknown-target sentinel. (Manual confirmation: temporarily
+// rewriting the closure's `return "", "", rerr` to swallow the error makes the (a) subtest
+// FAIL with "want errors.Is(unknown route target …)". Restored after confirming.) Kept as a
+// named anchor so a future reader knows the error arms are exercised against the real closure.
+func TestRoute_ProductionResolveDestErrorArms_FailsIfArmBroken(t *testing.T) {
+	c, cap := newRouteErrorController(t, rosterCos, &recordingWebTransport{ok: false})
+	_, err := c.Route(context.Background(), "ghost", "x")
+	if !errors.Is(err, ErrUnknownTarget) {
+		t.Fatalf("production resolveDest closure must surface ErrUnknownTarget for an unknown target; got %v", err)
+	}
+	if len(cap.events) != 0 {
+		t.Errorf("unknown target reached the pane (events=%v)", cap.events)
+	}
+}
+
+// TestWebAndControlXODerivationsConverge pins FOLD-2's load-bearing dependency: the
+// re-derivation in NewLibrary's resolveDest closure (library.go) is only correct because
+// the web transport's xo and the control library's xo are derived IDENTICALLY — both
+// "XOAgent else Agents[0]" from the SAME roster. This asserts the two derivation RULES
+// agree across rosters (one with an explicit xo_agent, one relying on the Agents[0]
+// fallback). If a future refactor let the web transport's xo diverge, the re-derivation
+// would mis-map the failure; this test is the canary. (#200 removes the re-derivation and
+// this dependency entirely by having the SPI return the precise sentinel.)
+func TestWebAndControlXODerivationsConverge(t *testing.T) {
+	cases := []struct {
+		name       string
+		rosterBody string
+		wantXO     string
+	}{
+		// xo_agent set explicitly → both derivations pick it.
+		{"explicit_xo_agent", rosterCos, "xo"},
+		// no xo_agent → both fall back to Agents[0].
+		{"agents_zero_fallback", `{"channel_id":"C1","heartbeat_interval":"20m","agents":[{"name":"backend"},{"name":"alpha"}]}`, "backend"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			rosterPath := filepath.Join(dir, "flotilla.json")
+			if err := os.WriteFile(rosterPath, []byte(tc.rosterBody), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			rc, err := roster.Load(rosterPath)
+			if err != nil {
+				t.Fatalf("roster.Load: %v", err)
+			}
+			// The control library's rule (internal/dash/server.go:93-96): xo_agent else
+			// Agents[0]. NewLibrary receives THIS xo and the resolveDest closure re-derives
+			// the failure against (rc, this xo).
+			controlXO := rc.XOAgent
+			if controlXO == "" {
+				controlXO = rc.Agents[0].Name
+			}
+			// The web transport's rule (internal/transport/web.go newWebTransport): the SAME
+			// xo_agent-else-Agents[0] derivation, applied to the SAME roster. transport
+			// exposes it via XOForRoster so the convergence is asserted against the transport
+			// package's OWN derivation function — not a copy that could silently drift.
+			webXO := transport.XOForRoster(rc)
+			if controlXO != tc.wantXO {
+				t.Errorf("control xo = %q, want %q", controlXO, tc.wantXO)
+			}
+			if webXO != controlXO {
+				t.Errorf("web transport xo = %q, control library xo = %q — the two derivations DIVERGED (the resolveDest re-derivation would mis-map; see library.go FOLD-2 comment / #200)", webXO, controlXO)
+			}
+		})
+	}
+}
+
 // --- Resume stays gated (its blocker is the package-main orchestration, not the lock) ---
 
 func TestResume_GatedPendingLibraryExtraction(t *testing.T) {
