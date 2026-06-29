@@ -68,10 +68,10 @@ layers:
    **The guard misses what it doesn't know — review for these leak classes the
    high-signal denylist won't catch:**
    - **Lowercase / generic-looking identifiers** — a `tmux` SESSION name
-     (`mysession:3.1` as a fixture pane target), a host short-name, an org slug
-     in lowercase. A denylist keyed on the capitalized brand (`\bSpark\b`) sails
-     right past `spark:3.1` in a test fixture. Use a generic session name
-     (`flotilla:3.1`) in fixtures.
+     (`myfleet:3.1` as a fixture pane target), a host short-name, an org slug
+     in lowercase. A denylist keyed on the capitalized brand (`\bMyfleet\b`)
+     sails right past a lowercase `myfleet:3.1` in a test fixture. Use a generic
+     session name (`flotilla:3.1`) in fixtures.
    - **Provenance comments** — "verified live on the `<fleet>` fleet,
      `<date>`", "the REAL bytes from `<deployment>`". These narrate where a
      fixture came from and name the deployment doing it. Say "a running
