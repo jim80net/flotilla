@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/backlog"
+	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
@@ -284,6 +286,69 @@ func TestDeskHeartbeatJudgment_NoBacklogIOUnderLock(t *testing.T) {
 	}
 	if len(f.warrantHits) == 0 {
 		t.Fatal("the warrant seam was never consulted — the conjunct is not wired into the decision")
+	}
+}
+
+// (J8) END-TO-END integration through the REAL roster.Config.HeartbeatWarranted + backlog.Parse: a
+// desk with a per-recipient backlog drives the full live loop across ticks —
+//   - actionable [in-flight] item ⇒ beaten on cadence;
+//   - the desk marks its last item [awaiting-auth] ⇒ next tick NOT beaten (legitimately idle,
+//     cap-neutral) — the judgment is a LIVE per-recipient decision, not a static config;
+//   - operator re-arm (AgentWake) + a fresh [next] item ⇒ beaten again.
+//
+// The warrant seam here is built EXACTLY as the cmd wiring builds it: parse a mutable per-recipient
+// backlog markdown through backlog.Parse, then cfg.HeartbeatWarranted(agent, st). This proves the
+// roster judgment, the backlog parser, and the detector conjunct compose correctly.
+func TestDeskHeartbeatJudgment_EndToEndAcrossTicks(t *testing.T) {
+	f := newHBJFixture()
+	// A real roster: "backend" is an eligible (default-ON) desk; "xo" is the primary clock XO.
+	rcfg := &roster.Config{
+		OperatorUserID: "op", ChannelID: "C1", XOAgent: "xo",
+		Agents: []roster.Agent{{Name: "xo"}, {Name: "backend"}},
+	}
+
+	// The per-recipient backlog, mutable across ticks (mimics the desk editing its own ledger file).
+	var mu sync.Mutex
+	backlogMD := "## Backlog\n- [in-flight] ship the feature\n" // start: live actionable work
+	setBacklog := func(md string) { mu.Lock(); backlogMD = md; mu.Unlock() }
+
+	cfg := f.config("xo", []string{"xo", "backend"}, []string{"backend"}, 1, 99 /* high cap so the test never escalates */, false)
+	// Wire the warrant seam through the REAL parser + REAL roster judgment (the production composition).
+	cfg.HeartbeatWarranted = func(agent string) bool {
+		mu.Lock()
+		md := backlogMD
+		mu.Unlock()
+		return rcfg.HeartbeatWarranted(agent, backlog.Parse(md))
+	}
+	f.set("xo", surface.StateIdle)
+	f.set("backend", surface.StateIdle)
+	d := f.newDet(t, cfg)
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
+
+	// Phase 1: actionable work ⇒ beaten on cadence.
+	d.Tick()
+	if got := f.beatLog(); len(got) != 1 || got[0] != "backend" {
+		t.Fatalf("phase 1 (actionable work) must beat backend, got %v", got)
+	}
+
+	// Phase 2: the desk marks its only item [awaiting-auth] ⇒ no more live actionable work ⇒ NOT beaten.
+	setBacklog("## Backlog\n- [awaiting-auth] flip the feed @operator\n")
+	for i := 0; i < 4; i++ {
+		d.Tick()
+	}
+	if got := f.beatLog(); len(got) != 1 {
+		t.Fatalf("phase 2 (all awaiting-auth) must NOT beat again — the desk is legitimately idle, got %v", got)
+	}
+	if got := f.escLog(); len(got) != 0 {
+		t.Fatalf("phase 2 must be cap-neutral (a parked desk is not a wedge), got escalations %v", got)
+	}
+
+	// Phase 3: operator re-arms the desk (AgentWake) AND a fresh [next] item appears ⇒ beaten again.
+	setBacklog("## Backlog\n- [awaiting-auth] flip the feed @operator\n- [next] start the next chunk\n")
+	d.AgentWake("backend")
+	d.Tick()
+	if got := f.beatLog(); len(got) != 2 || got[1] != "backend" {
+		t.Fatalf("phase 3 (re-arm + fresh actionable work) must beat backend again, got %v", got)
 	}
 }
 
