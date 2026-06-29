@@ -11,6 +11,7 @@ import (
 
 	"github.com/jim80net/flotilla/internal/dash"
 	"github.com/jim80net/flotilla/internal/dash/tracker"
+	"github.com/jim80net/flotilla/internal/transport"
 )
 
 // cmdDash starts the optional local web interface (`flotilla dash`). The fleet
@@ -47,6 +48,18 @@ func cmdDash(args []string) error {
 	// failing the whole dash — graceful degradation of one optional feature.
 	pinnedRepo := resolveTrackerRepo(*repo)
 
+	// Construct the coordination transport that backs the notify's outbound post —
+	// the DISCORD transport (the operator-note destination is a Discord webhook). The
+	// wiring boundary is the one place permitted to resolve the concrete medium; the
+	// credential itself is resolved by the control library (from --secrets) and wrapped
+	// at the post site (transport.NewWebhookDestination), so the transport needs no
+	// roster/secrets to post to a caller-resolved webhook — exactly the
+	// Construct + NewWebhookDestination pattern watch.go uses for its down-alert post.
+	tr, err := newDashTransport()
+	if err != nil {
+		return err
+	}
+
 	// NewServer loads + validates the roster (fail-closed), resolves the
 	// <roster-dir>/… default paths, validates the bind (loopback-only here), and
 	// constructs the gh-backed tracker when a repo is pinned (fail-closed on a
@@ -59,6 +72,7 @@ func cmdDash(args []string) error {
 		Bind:         *bind,
 		Repo:         pinnedRepo,
 		SecretsPath:  *secretsPath,
+		Transport:    tr,
 	})
 	if err != nil {
 		return err
@@ -86,4 +100,24 @@ func resolveTrackerRepo(flagRepo string) string {
 		return ""
 	}
 	return repo
+}
+
+// newDashTransport constructs the DISCORD coordination transport that backs the dash
+// notify's outbound post. The note's destination is a Discord webhook, so this is the
+// discord transport (transport.DefaultTransport), obtained from the registry via
+// Construct — the SAME mechanism watch.go uses (cmd/flotilla/watch.go) for its
+// down-alert post. An empty Config is correct: the control library resolves the XO's
+// webhook from --secrets and wraps it in a transport.NewWebhookDestination at the post
+// site, so the transport needs no roster/secrets to post to that caller-resolved
+// destination; it supplies only Post + the medium's content cap (MaxContentRunes). The
+// WEB transport — the dash's INBOUND roster-wide resolver — is registered and selected
+// separately; it is NOT the notify's post medium (the direction asymmetry, design
+// Decision 1). A construction failure is surfaced (fail-closed) rather than serving a
+// dash whose notify would nil-deref.
+func newDashTransport() (transport.Transport, error) {
+	tr, err := transport.Construct(transport.DefaultTransport, transport.Config{})
+	if err != nil {
+		return nil, fmt.Errorf("dash: construct the notify transport: %w", err)
+	}
+	return tr, nil
 }

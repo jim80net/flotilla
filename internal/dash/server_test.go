@@ -23,7 +23,7 @@ func newTestServer(t *testing.T, rosterBody string, now time.Time) (*Server, str
 	if err := os.WriteFile(rosterPath, []byte(rosterBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	srv, err := NewServer(Config{RosterPath: rosterPath, Bind: DefaultBind})
+	srv, err := NewServer(Config{RosterPath: rosterPath, Bind: DefaultBind, Transport: stubTransport{}})
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}

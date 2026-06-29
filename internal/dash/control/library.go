@@ -10,9 +10,9 @@ import (
 
 	"github.com/jim80net/flotilla/internal/cos"
 	"github.com/jim80net/flotilla/internal/deliver"
-	"github.com/jim80net/flotilla/internal/discord"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
+	"github.com/jim80net/flotilla/internal/transport"
 )
 
 // dashProvenance is the CoS ledger "from" marker for a dash-issued action, so a
@@ -22,21 +22,33 @@ import (
 const dashProvenance = "operator(dash)"
 
 // LibraryController is the ONE real Controller: thin proxies over the existing
-// delivery library. Notify (discord.Post) is live; Route and Resume drive panes
-// and FAIL CLOSED until the cross-process pane-transaction lock lands (design §5)
-// — they are wired to surface.Confirm.Submit / the resume recipe path in the
-// follow-up that integrates flotilla-dev's lock. The library calls are injected
-// as seams so the policy here is unit-testable without a real Discord/tmux.
+// delivery library. Notify posts through the injected Transport (the notify's
+// destination is a Discord operator-note webhook, so the injected transport is the
+// DISCORD transport — see NewLibrary); Route drives panes through the cross-process
+// pane-transaction lock; Resume fails closed (its orchestration is being extracted
+// into a reusable library, see Resume). The library calls are injected as seams so
+// the policy here is unit-testable without a real Discord/tmux. The dependency on
+// the concrete medium enters ONLY as an injected Transport interface value at the
+// wiring boundary (cmd/flotilla/dash.go), so this package no longer imports
+// internal/discord (the same decoupling PR1 established for the relay packages —
+// see no_discord_import_test.go).
 type LibraryController struct {
 	roster      *roster.Config
 	xo          string // the hub XO whose webhook a dash note posts under
 	secretsPath string // for the notify webhook ("" ⇒ notify unavailable)
 
 	// Seams (production wires the real library calls; tests inject fakes).
-	post        func(webhook, username, content string) error
-	loadSecrets func(path string) (*roster.Secrets, error)
-	appendCos   func(path string, e cos.Entry) error
-	now         func() time.Time
+	// post sends an operator note to a resolved webhook; in production it is the
+	// injected (discord-backed) Transport.Post, bound to a webhook Destination built
+	// at the call from the resolved hook (transport.NewWebhookDestination) — NOT a
+	// direct internal/discord.Post. maxContentRunes is the injected Transport's own
+	// per-message content cap (transport.MaxContentRunes()), so the over-length guard
+	// reads the medium's cap rather than a leaked discord constant.
+	post            func(webhook, username, content string) error
+	maxContentRunes int
+	loadSecrets     func(path string) (*roster.Secrets, error)
+	appendCos       func(path string, e cos.Entry) error
+	now             func() time.Time
 
 	// Route seams — the confirmed-delivery transaction. resolvePane + acquireTxn +
 	// submit mirror the cmdSend path (cmd/flotilla/main.go) EXACTLY so the dash
@@ -51,25 +63,37 @@ type LibraryController struct {
 
 // NewLibrary builds the production controller. secretsPath may be "" (then notify
 // returns ErrWebhookMissing); roster + xo are required for webhook + ledger
-// resolution.
-func NewLibrary(rc *roster.Config, xo, secretsPath string) *LibraryController {
+// resolution. tr is the coordination Transport that backs the notify's outbound
+// post: because the operator-note destination is a Discord webhook
+// (secrets.Webhook(xo)), tr is the DISCORD transport, constructed at the wiring
+// boundary (cmd/flotilla/dash.go) and injected here as an interface VALUE — so this
+// package depends on internal/transport, not on the concrete internal/discord
+// package. The notify resolves the webhook string from secrets, wraps it in a
+// transport.NewWebhookDestination, and posts via tr.Post; the over-length guard
+// reads tr.MaxContentRunes(). This closes the PR1 TODO(#188/#106) seam.
+func NewLibrary(rc *roster.Config, xo, secretsPath string, tr transport.Transport) *LibraryController {
 	return &LibraryController{
 		roster:      rc,
 		xo:          xo,
 		secretsPath: secretsPath,
-		// TODO(#188 Transport SPI, deferred to PR2): the dash control notify path still
-		// calls internal/discord directly (discord.Post + discord.MaxContentRunes). It is
-		// DEFERRED from PR1 because this is the dashboard's control surface — exactly the
-		// internal/dash territory the operator-gated PR2 web fork concerns (Option 1
-		// refactors internal/dash behind the Transport SPI). Re-pointing it now would
-		// pre-decide that operator fork. Tracked under the Transport SPI EPIC (#188) / the
-		// web-transport issue (#106).
-		post:        discord.Post,
-		loadSecrets: roster.LoadSecrets,
-		appendCos:   cos.Append,
-		now:         time.Now,
-		getDriver:   surface.Get,
-		resolvePane: deliver.ResolvePane,
+		// The notify's outbound post goes through the injected (discord-backed)
+		// Transport: the resolved webhook string is wrapped in an opaque webhook
+		// Destination (the credential stays inside the transport, never a caller-visible
+		// string) and posted via tr.Post — the SAME wiring-boundary pattern
+		// cmd/flotilla/watch.go uses for its down-alert post (Construct +
+		// NewWebhookDestination + tr.Post).
+		post: func(hook, username, content string) error {
+			return tr.Post(transport.NewWebhookDestination(hook), username, content)
+		},
+		// The over-length guard reads the medium's own per-message cap from the
+		// transport (discord = 2000), not a hard-coded discord constant leaking across
+		// the seam.
+		maxContentRunes: tr.MaxContentRunes(),
+		loadSecrets:     roster.LoadSecrets,
+		appendCos:       cos.Append,
+		now:             time.Now,
+		getDriver:       surface.Get,
+		resolvePane:     deliver.ResolvePane,
 		// Wrap AcquirePaneTxn so the seam returns a plain release func; production
 		// uses the coordinated PaneTxnTimeout (identical to cmdSend + the Injector).
 		acquireTxn: func(target string) (func(), error) {
@@ -99,9 +123,11 @@ func (c *LibraryController) Notify(_ context.Context, message string) error {
 		return ErrEmptyMessage
 	}
 	// This message IS operator-facing content — reject an over-length body cleanly
-	// (never silently truncate the operator's note), mirroring cmdNotify.
-	if n := len([]rune(message)); n > discord.MaxContentRunes {
-		return fmt.Errorf("%w: %d chars (limit %d)", ErrOverLength, n, discord.MaxContentRunes)
+	// (never silently truncate the operator's note), mirroring cmdNotify. The cap is
+	// the injected transport's own per-message limit (transport.MaxContentRunes()),
+	// not a leaked discord constant.
+	if n := len([]rune(message)); n > c.maxContentRunes {
+		return fmt.Errorf("%w: %d chars (limit %d)", ErrOverLength, n, c.maxContentRunes)
 	}
 	if c.secretsPath == "" {
 		return ErrWebhookMissing
@@ -197,44 +223,17 @@ func (c *LibraryController) Resume(_ context.Context, _ string) (ResumeResult, e
 	return ResumeResult{}, ErrResumeUnavailable
 }
 
-// resolveTarget maps a route target to a canonical roster agent name: an empty
-// target → the XO; "@name"/"name" → the canonical agent (case-insensitive);
-// an unknown target → "" (the caller errors). The dash resolves ROSTER-WIDE —
-// it is a host-local operator console with no Discord channel context, so the
-// operator can address any desk in the roster. This deliberately DIFFERS from the
-// Discord relay, which scopes "@name" to the typed-in channel's members
-// (watch.memberResolver) so an @name never crosses a channel boundary. For a
-// single-fleet roster the two coincide (members == all agents); for a federated
-// roster the dash is intentionally boundary-transcending (the operator owns the
-// whole fleet). It is NOT a reuse of relay.Route.
-//
-// Roster names are unique only CASE-SENSITIVELY (roster.go:168), so "alpha" and
-// "Alpha" can both exist. An EXACT match therefore wins first (unambiguous — the
-// operator typed that exact name); only when there is no exact match and MORE
-// THAN ONE case-insensitive match remains is the target ambiguous
-// (ErrAmbiguousTarget) — rejected, never silently delivered to whichever is first.
+// resolveTarget maps a route target to a canonical roster agent name by delegating
+// to the ONE shared roster-wide resolver (roster.ResolveTarget) — the SAME function
+// the web transport's ResolveDestination calls, so the empty→XO default and the
+// exact-wins-else-ambiguous case-collision rule cannot drift between the dash control
+// surface and the web transport (transport spec "The roster-wide resolver is shared,
+// not forked"). The dash resolves ROSTER-WIDE (a host-local operator console with no
+// Discord channel context can address any desk), which is preserved verbatim inside
+// the shared resolver — see roster.ResolveTarget's doc for the boundary-transcending
+// rationale and the case-collision rule.
 func (c *LibraryController) resolveTarget(target string) (string, error) {
-	t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(target), "@"))
-	if t == "" {
-		return c.xo, nil
-	}
-	var ci []string
-	for _, a := range c.roster.Agents {
-		if a.Name == t {
-			return a.Name, nil // exact match — unambiguous
-		}
-		if strings.EqualFold(a.Name, t) {
-			ci = append(ci, a.Name)
-		}
-	}
-	switch len(ci) {
-	case 0:
-		return "", ErrUnknownTarget
-	case 1:
-		return ci[0], nil
-	default:
-		return "", fmt.Errorf("%w: %q matches %v — use the exact name", ErrAmbiguousTarget, t, ci)
-	}
+	return c.roster.ResolveTarget(c.xo, target)
 }
 
 // mirrorRouteToLedger records a dash-routed instruction in the CoS ledger with

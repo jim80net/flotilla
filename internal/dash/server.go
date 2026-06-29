@@ -14,6 +14,7 @@ import (
 	"github.com/jim80net/flotilla/internal/dash/control"
 	"github.com/jim80net/flotilla/internal/dash/tracker"
 	"github.com/jim80net/flotilla/internal/roster"
+	"github.com/jim80net/flotilla/internal/transport"
 	"github.com/jim80net/flotilla/internal/watch"
 )
 
@@ -29,6 +30,16 @@ type Config struct {
 	Bind         string // listen address (default 127.0.0.1:8787)
 	Repo         string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
 	SecretsPath  string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
+
+	// Transport is the coordination transport backing the control surface's notify
+	// post (the operator note's destination is a Discord webhook, so this is the
+	// DISCORD transport). It is constructed at the wiring boundary
+	// (cmd/flotilla/dash.go) — the one place permitted to resolve the concrete medium
+	// + the webhook credential — and injected here as an interface VALUE, so
+	// internal/dash/control depends on internal/transport, not internal/discord. The
+	// web transport (the dash's INBOUND resolver) registers + is selected separately;
+	// it is NOT the notify's post medium (the direction asymmetry — design Decision 1).
+	Transport transport.Transport
 }
 
 // Server is the dash HTTP server: a pure reader over the artifacts `flotilla
@@ -101,10 +112,16 @@ func NewServer(cfg Config) (*Server, error) {
 		}
 		s.tracker = gh
 	}
-	// The control surface is always wired: notify (discord.Post) is live when a
-	// secrets webhook is configured; route/resume fail closed until the
-	// cross-process pane lock lands (design §5). No pane is driven without it.
-	s.control = control.NewLibrary(rc, xo, cfg.SecretsPath)
+	// The control surface is always wired: notify posts through the injected
+	// (discord-backed) Transport when a secrets webhook is configured; route drives a
+	// pane through the cross-process lock; resume fails closed (design §5). The
+	// Transport is required — it is constructed at the wiring boundary and carries the
+	// notify's post medium + content cap; a nil one is a wiring bug, surfaced
+	// fail-closed rather than nil-dereferenced at the first notify.
+	if cfg.Transport == nil {
+		return nil, fmt.Errorf("dash: a coordination Transport is required (construct it at the wiring boundary and pass it via Config.Transport)")
+	}
+	s.control = control.NewLibrary(rc, xo, cfg.SecretsPath, cfg.Transport)
 	s.routes()
 	return s, nil
 }
