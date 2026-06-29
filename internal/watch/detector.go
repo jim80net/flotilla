@@ -152,6 +152,19 @@ type DetectorConfig struct {
 	// returns false is never beaten — the primary XO (which keeps its own clock) and the
 	// approval-sensitive desks are excluded here.
 	HeartbeatEnabled func(agent string) bool
+	// HeartbeatWarranted is the #189 per-recipient JUDGMENT consulted as the LAST conjunct of the
+	// desk-heartbeat decision (after the HeartbeatEnabled HARD gate, the settle/stop checks, and the
+	// cadence): it reports whether there is OUTSTANDING ACTIONABLE WORK for the agent right now. It is
+	// a PURE lookup against a per-recipient warrant computed OFF d.mu (the cmd wiring does the backlog
+	// ReadFile+Parse off-lock and supplies an already-decided boolean; this seam NEVER does file I/O
+	// under the lock — the detector's load-bearing off-mutex invariant, honored by synthesis + the
+	// mirror). The judgment can ONLY suppress a beat the desk would otherwise receive — it can never
+	// resurrect a beat to an ineligible/settled/stopped/non-idle desk (it is the LAST gate). A
+	// not-warranted desk is treated like a settled desk for that tick: no beat, no cap accrual, no
+	// cadence accrual (it is legitimately idle, not wedged). nil ⇒ always-warranted ⇒ the trigger is
+	// IDENTICAL to the pre-judgment recursive heartbeat (#183 byte-inert on this axis — NewDetector
+	// defaults it to a func returning true).
+	HeartbeatWarranted func(agent string) bool
 	// WakeDeskHeartbeat delivers ONE desk-continuation beat to a desk that is OWED one (idle past
 	// its cadence, not settled, not stopped). Called OFF d.mu in runDeskHeartbeats (its confirmed
 	// delivery acquires the pane-txn lock — a bounded wait that must never be held under d.mu), like
@@ -291,6 +304,12 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 	}
 	if cfg.DeskHeartbeatCap < 1 {
 		cfg.DeskHeartbeatCap = 3 // §5.3: escalate after 3 consecutive no-progress beats
+	}
+	if cfg.HeartbeatWarranted == nil {
+		// #189: an unwired judgment defaults to ALWAYS-WARRANTED, so the desk-heartbeat trigger is
+		// byte-identical to the pre-judgment recursive heartbeat (#183). A deployment that does not
+		// wire per-recipient backlogs behaves exactly as #183 (the regression-lock on this axis).
+		cfg.HeartbeatWarranted = func(string) bool { return true }
 	}
 	if cfg.SynthParents == nil {
 		// No synthesis routing configured ⇒ a finishing desk marks NOBODY owed, so the owed-set
@@ -766,6 +785,20 @@ func (d *Detector) deskHeartbeatLocked(cur Snapshot) (beats, escalations []strin
 			d.deskSinceBeat[name]++
 			if d.deskSinceBeat[name] < cadence {
 				continue // cadence not yet elapsed
+			}
+			// #189 JUDGMENT — the LAST gate, evaluated only once the beat is otherwise owed (HARD gate
+			// passed, not settled/stopped, cadence elapsed). HeartbeatWarranted is a PURE lookup against
+			// a per-recipient warrant computed OFF d.mu (the cmd wiring reads+parses the backlog off-lock;
+			// NO file I/O runs here under the lock). A NOT-warranted desk is legitimately idle (no live
+			// actionable work — everything done, blocked-and-tracked, or awaiting-auth): treat it like a
+			// settled tick — reset the cadence counter (cadence-neutral: it does not re-trigger eligibility
+			// every tick) and continue WITHOUT touching the cap (cap-neutral: a not-warranted idle desk is
+			// not a wedge, so it accrues no no-progress). The judgment can ONLY suppress here; it never
+			// resurrects a beat the gates above withheld. Defaulted non-nil in NewDetector (always-true ⇒
+			// #183 byte-identical), so this is a pure narrowing of the #183 candidate set.
+			if d.cfg.HeartbeatWarranted != nil && !d.cfg.HeartbeatWarranted(name) {
+				d.deskSinceBeat[name] = 0
+				continue
 			}
 			// Owed a beat.
 			beats = append(beats, name)
