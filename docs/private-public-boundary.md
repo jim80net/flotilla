@@ -65,6 +65,21 @@ layers:
    guard never flaps; genuinely ambiguous deployment words are caught by review
    against this doc, not by the guard.
 
+   **The guard misses what it doesn't know — review for these leak classes the
+   high-signal denylist won't catch:**
+   - **Lowercase / generic-looking identifiers** — a `tmux` SESSION name
+     (`mysession:3.1` as a fixture pane target), a host short-name, an org slug
+     in lowercase. A denylist keyed on the capitalized brand (`\bSpark\b`) sails
+     right past `spark:3.1` in a test fixture. Use a generic session name
+     (`flotilla:3.1`) in fixtures.
+   - **Provenance comments** — "verified live on the `<fleet>` fleet,
+     `<date>`", "the REAL bytes from `<deployment>`". These narrate where a
+     fixture came from and name the deployment doing it. Say "a running
+     deployment" instead. The fixture's *value* (the captured bytes) is the
+     product; *whose* fleet produced it is the deployment.
+   The partition is the author's responsibility; add any such token you coin to
+   YOUR deployment denylist so the backstop catches the next one.
+
 ## If a breach happens
 
 1. **Assess exposure** — forks / clones / stars. Near-zero propagation means an
