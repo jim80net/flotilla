@@ -43,7 +43,12 @@ func newTestController(t *testing.T, rosterBody, secretsBody string) (*LibraryCo
 	if xo == "" {
 		xo = rc.Agents[0].Name
 	}
-	c := NewLibrary(rc, xo, secretsPath)
+	// Inject a discord-backed transport stand-in reporting the Discord 2000-rune cap
+	// (so the over-length guard byte-pins to the previous discord.MaxContentRunes
+	// behavior). The post seam is overridden below with cap.post, so these tests pin
+	// notify/route behavior independent of the transport's Post — the constructor CALL
+	// updates for the new param; the seam-override ASSERTIONS stay byte-pinned.
+	c := NewLibrary(rc, xo, secretsPath, &fakeNotifyTransport{maxRunes: 2000})
 	cap := &capture{paneTarget: "%5"}
 	c.post = cap.post
 	c.appendCos = cap.append
@@ -402,7 +407,7 @@ func TestNewLibrary_WiresRealResolvePane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := NewLibrary(rc, "xo", "")
+	c := NewLibrary(rc, "xo", "", &fakeNotifyTransport{maxRunes: 2000})
 	if reflect.ValueOf(c.resolvePane).Pointer() != reflect.ValueOf(deliver.ResolvePane).Pointer() {
 		t.Error("NewLibrary must wire resolvePane = deliver.ResolvePane (the shared lock-key source; a divergent resolver silently breaks cross-process serialization)")
 	}
