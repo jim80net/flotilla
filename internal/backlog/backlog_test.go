@@ -100,6 +100,50 @@ func TestParseEdgeAndFailSafe(t *testing.T) {
 			t.Errorf("%+v, want Blocked:2 Unblocked:0", st)
 		}
 	})
+	t.Run("awaiting-auth → its own ledger, settle-neutral, NOT unblocked, NOT blocked", func(t *testing.T) {
+		st := Parse("## Backlog\n- [awaiting-auth] flip the metered feed on @operator\n")
+		if st.AwaitingAuth != 1 {
+			t.Errorf("AwaitingAuth = %d, want 1 (the authorizations ledger is its own count)", st.AwaitingAuth)
+		}
+		if st.Blocked != 0 {
+			t.Errorf("Blocked = %d, want 0 (awaiting-auth is NOT operator-blocked — distinct ledgers)", st.Blocked)
+		}
+		if len(st.Unblocked) != 0 {
+			t.Errorf("len(Unblocked) = %d, want 0 (awaiting-auth is not actionable — settle-neutral)", len(st.Unblocked))
+		}
+		if st.Malformed != 0 {
+			t.Errorf("Malformed = %d, want 0 (awaiting-auth is a recognized marker)", st.Malformed)
+		}
+	})
+	t.Run("awaiting-auth marker word is matched case-insensitively", func(t *testing.T) {
+		st := Parse("## Backlog\n- [AWAITING-AUTH] a\n- [Awaiting-Auth] b\n")
+		if st.AwaitingAuth != 2 || len(st.Unblocked) != 0 || st.Malformed != 0 {
+			t.Errorf("%+v, want AwaitingAuth:2 Unblocked:0 Malformed:0 (case-insensitive word match)", st)
+		}
+	})
+	t.Run("near-miss awaiting-auth spellings are MALFORMED + actionable (warrant forever, never settle)", func(t *testing.T) {
+		// The brittleness guard: only the EXACT token `awaiting-auth` is recognized. A near-miss is
+		// flagged Malformed AND driven (counted in Unblocked) so the feature fails LOUD, not silent.
+		for _, near := range []string{"awaiting-authorization", "awaiting auth", "awaiting_auth"} {
+			st := Parse("## Backlog\n- [" + near + "] x\n")
+			if st.AwaitingAuth != 0 {
+				t.Errorf("[%s]: AwaitingAuth = %d, want 0 (only the exact `awaiting-auth` token is the auth ledger)", near, st.AwaitingAuth)
+			}
+			if st.Malformed != 1 || len(st.Unblocked) != 1 {
+				t.Errorf("[%s]: %+v, want Malformed:1 + in Unblocked (near-miss fails loud)", near, st)
+			}
+		}
+	})
+	t.Run("backward-compat: a backlog with no awaiting-auth parses identically (AwaitingAuth==0)", func(t *testing.T) {
+		st := Parse(contractFixture)
+		if st.AwaitingAuth != 0 {
+			t.Errorf("AwaitingAuth = %d, want 0 (the legacy contract fixture has no awaiting-auth items)", st.AwaitingAuth)
+		}
+		// And the pre-change classification is unchanged (proven by TestParseContractFixture too).
+		if len(st.Unblocked) != 5 || st.Blocked != 1 || st.Done != 1 || st.Malformed != 0 || st.Items != 7 {
+			t.Errorf("legacy fixture classification drifted: %+v", st)
+		}
+	})
 	t.Run("total / never panics on pathological input", func(t *testing.T) {
 		for _, in := range []string{"", "## Backlog", "## Backlog\n- [", "## Backlog\n- []\n", "\x00\n## Backlog\n- [in-flight]", strings.Repeat("- [in-flight] x\n", 1000)} {
 			_ = Parse(in) // must not panic

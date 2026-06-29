@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/jim80net/flotilla/internal/backlog"
 )
 
 // Agent is one coordinated coding agent — a long-lived session in a tmux pane.
@@ -391,6 +393,35 @@ func (c *Config) HeartbeatEnabled(name string) bool {
 		return *a.Heartbeat
 	}
 	return !a.ApprovalSensitive
+}
+
+// HeartbeatWarranted refines HeartbeatEnabled (#183, the HARD eligibility gate) into the #189
+// per-recipient JUDGMENT: given the recipient's already-parsed backlog Status (INJECTED — this
+// function does NO file I/O, keeping the roster filesystem-free), it reports whether a desk
+// heartbeat is warranted RIGHT NOW. The HARD gate is checked FIRST and can NEVER be overridden by
+// the judgment: an XO / approval-sensitive / explicitly opted-out / unknown agent returns false
+// regardless of how much actionable work its backlog shows. This re-check is intentional
+// defense-in-depth — the detector's own HeartbeatEnabled conjunct remains the PRIMARY hard gate;
+// do NOT collapse the two (they guard the same invariant at two layers on purpose).
+//
+// For an ELIGIBLE recipient the warrant predicate is: warranted = !Found || len(Unblocked) > 0.
+//   - len(Unblocked) > 0 ⇒ there is live actionable work ([in-flight]/[next], or a malformed item
+//     the parser drives via its fail-safe) ⇒ warrant a beat.
+//   - !Found ⇒ a present-but-sectionless (or absent-parse) backlog CANNOT prove there is no work,
+//     so it fails toward WARRANTED (keep the desk moving — the silent-stall regression #183 fixed).
+//   - The ONLY path to NOT-warranted is a cleanly-parsed Found backlog whose actionable set is
+//     empty — i.e. the recipient has affirmatively recorded that everything is [done], in the
+//     open-questions ledger ([blocked]/[needs-attention]), or in the authorizations ledger
+//     ([awaiting-auth]). Suppression requires PROOF of no work, never its absence.
+//
+// The caller (the cmd watch wiring) supplies the per-recipient parsed Status, read OFF the detector
+// lock; a recipient with no per-recipient backlog file is handled by the caller's missing-ledger
+// fallback (always-warranted), NOT here.
+func (c *Config) HeartbeatWarranted(name string, st backlog.Status) bool {
+	if !c.HeartbeatEnabled(name) {
+		return false // the HARD eligibility gate — never overridden by the judgment
+	}
+	return !st.Found || len(st.Unblocked) > 0
 }
 
 // ChannelForXO returns the Discord channel an XO owns, for tagging that XO's outbound

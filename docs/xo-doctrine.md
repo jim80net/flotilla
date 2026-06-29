@@ -243,19 +243,38 @@ section carrying a leading bracketed status marker:
 ## Backlog (prioritized — advance the top UNBLOCKED item each wake)
 - [in-flight] <task> (<owner desk>)      # being driven        → UNBLOCKED
 - [next] <task> (<owner desk>)           # not started          → UNBLOCKED
-- [blocked] <task> — awaiting <operator decision>   # human-gated → operator-blocked
-- [needs-attention] <task>               # deprioritized stuck   → operator-blocked
+- [blocked] <task> — awaiting <answer/dependency>   # human-gated → operator-blocked (open-questions ledger)
+- [needs-attention] <task>               # deprioritized stuck   → operator-blocked (open-questions ledger)
+- [awaiting-auth] <task> — awaiting <go/no-go or spend> @operator   # pending an authorization → authorizations ledger
 - [done] <task>                          # complete             → drained
 ```
 
 `in-flight`/`next` are unblocked (they keep the loop driving); `blocked`/
-`needs-attention` are operator-blocked (drive PREP on them, but they do not block
-settle); `done` is drained. **Maintain this format** — a line with no recognized
-`[status]` marker is FLAGGED (a loud alert) and treated as unblocked (the loop
-keeps driving, never silently misclassifies), so a format slip is loud, not
-silent. **Drain** by marking items `[done]` (or `[blocked]`) as they complete, and
-by **dispatching** unblocked items across desks/harnesses (not doing everything
+`needs-attention` are operator-blocked (the **open-questions ledger** — drive PREP
+on them, but they do not block settle); `awaiting-auth` is the **authorizations
+ledger** — work that is complete-pending an operator go/no-go or spend decision,
+settle-neutral and counted separately from blocked so authorization debt is not
+hidden in the blocked pile; `done` is drained. The `awaiting-auth` marker is the
+EXACT token `[awaiting-auth]` (case-insensitive on the word, fixed spelling) — a
+near-miss like `[awaiting-authorization]` or `[awaiting auth]` is UNRECOGNIZED,
+flagged malformed, and driven forever, so use the literal `[awaiting-auth]`.
+**Maintain this format** — a line with no recognized `[status]` marker is FLAGGED
+(a loud alert) and treated as unblocked (the loop keeps driving, never silently
+misclassifies), so a format slip is loud, not silent. **Drain** by marking items
+`[done]` (or `[blocked]`/`[awaiting-auth]`) as they complete, and by
+**dispatching** unblocked items across desks/harnesses (not doing everything
 yourself).
+
+**The per-recipient heartbeat judgment (`#189`).** When a desk keeps its OWN
+backlog at `<roster-dir>/flotilla-<desk>-backlog.md`, the recursive desk heartbeat
+becomes a *judgment*: that desk is heartbeated only while its backlog has live
+actionable (`[in-flight]`/`[next]`) work. Once every item is `[done]`,
+blocked-and-tracked (`[blocked]`/`[needs-attention]`), or `[awaiting-auth]`, the
+desk is legitimately idle and is NOT poked — it resumes being heartbeated when
+fresh actionable work appears or the operator re-engages it. A desk that keeps no
+per-recipient backlog is driven exactly as before (always-warranted). This is why
+a desk should record its blockers into the right ledger: doing so is what lets it
+settle quietly instead of being poked every cadence.
 
 **Per-item stuck handling.** If you are driven onto the same item repeatedly
 without it progressing, the detector escalates a loud alert naming that item and

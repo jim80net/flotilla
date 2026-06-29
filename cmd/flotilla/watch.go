@@ -37,21 +37,43 @@ const detectorContinuationBuiltin = "[flotilla change-detector] You just finishe
 	"work, and signal idle by running: touch {{settle}}. (Your context is rotated between steps " +
 	"— rely on durable state, not this conversation.)"
 
-// deskContinuationBuiltin is the recursive desk-heartbeat (#183) prompt — DISTINCT from the XO's
-// (design §8a/§8h). It is the NON-AUTHORIZING beat to an idle desk: advance only ALREADY-AUTHORIZED
-// in-flight work, and — load-bearing for the binary-Idle claude driver (§8a) — NEVER approve a
-// pending tool/permission/approval prompt on a heartbeat (a heartbeat is not authorization). It drops
-// the XO prompt's "context is rotated between steps" line (a desk is NOT rotated by this design) and
-// the {{tracker}} read-source (a leaf desk may keep no durable tracker — "continue your in-flight
-// task; if you've lost the thread, reply idle"). {{settle}} resolves to the DESK's own per-agent
-// settle marker; a workspace HEARTBEAT.md may override the wording.
-const deskContinuationBuiltin = "[flotilla heartbeat] You have been idle. Advance only the next clear, " +
-	"ALREADY-AUTHORIZED step of your in-flight task — reading durable state, not memory. If a tool, " +
-	"permission, or approval prompt is pending, do NOT approve it on this heartbeat (a heartbeat is not " +
-	"authorization) — reply idle by touching your settle marker. A task blocked only from landing (a " +
-	"push gate, a pending review) is NOT idle — advance it locally, then surface the blocker in one " +
-	"line. If nothing AUTHORIZED remains, or you've lost the thread, reply 'idle', do NOT manufacture " +
-	"work, and signal idle by running: touch {{settle}}."
+// deskContinuationBuiltin is the recursive desk-heartbeat prompt — DISTINCT from the XO's (design
+// §8a/§8h). It is the NON-AUTHORIZING beat to an idle desk, refined by #189 to encode the operator's
+// re-trigger-first principle and the two-ledger recording contract:
+//
+//  1. RE-TRIGGER FIRST (the default): an idle desk is USUALLY a transient technical fault (a
+//     rate-limit, or a turn that ended before the work was done), so RESUME the next already-authorized
+//     in-flight step from durable state — never sit idle.
+//  2. NEVER SIT IDLE: if GENUINELY blocked on the current item, do opportunistic authorized work.
+//  3. RECORD INTO THE RIGHT LEDGER so the per-recipient judgment (#189) can settle the desk: a blocking
+//     question/dependency → mark it `[blocked]`/`[needs-attention]` (the open-questions ledger); a
+//     pending operator authorization → mark it with the EXACT literal `[awaiting-auth]` token (the
+//     authorizations ledger). The literal token is QUOTED on purpose — the parser recognizes ONLY
+//     `[awaiting-auth]`, so a near-miss like `[awaiting-authorization]` or `[awaiting auth]` would be
+//     flagged malformed AND drive forever, silently breaking the judgment (the §4 brittleness fix).
+//     Once EVERY item is `[done]`, open-questions, or `[awaiting-auth]`, there is no live actionable
+//     work: reply idle and touch the settle marker (the desk will not be heartbeated again until fresh
+//     actionable work appears or the operator re-engages it).
+//  4. NON-AUTHORIZING (preserved, #184 defense-in-depth): never approve a pending tool/permission/
+//     approval prompt on a heartbeat — a heartbeat is not authorization.
+//
+// It drops the XO prompt's "context is rotated between steps" line (a desk is NOT rotated by this
+// design) and the XO {{tracker}} read-source. {{settle}} resolves to the DESK's own per-agent settle
+// marker; a workspace HEARTBEAT.md may override the wording.
+const deskContinuationBuiltin = "[flotilla heartbeat] You have been idle. An idle desk is USUALLY a " +
+	"transient technical fault (a rate-limit, or a turn that ended before your work was done), so your " +
+	"DEFAULT action is to RESUME the next clear, ALREADY-AUTHORIZED step of your in-flight task — " +
+	"reading durable state, not this conversation. Never sit idle waiting: if you are GENUINELY blocked " +
+	"on the current item, do opportunistic authorized work instead. If a tool, permission, or approval " +
+	"prompt is pending, do NOT approve it on this heartbeat (a heartbeat is not authorization). Record a " +
+	"blocker into the right ledger so you can settle: mark a blocking question or dependency `[blocked]` " +
+	"(or `[needs-attention]`) in your backlog — that is your open-questions ledger; mark a pending " +
+	"operator authorization (a go/no-go, a spend) with the EXACT marker `[awaiting-auth]` (that literal " +
+	"spelling — NOT `[awaiting-authorization]` or `[awaiting auth]`; the parser recognizes only " +
+	"`[awaiting-auth]`) — that is your authorizations ledger. A task blocked only from landing (a push " +
+	"gate, a pending review) is NOT idle — advance it locally, then record the blocker. Once EVERY item " +
+	"is `[done]`, blocked-and-tracked, or `[awaiting-auth]`, you have no live actionable work: reply " +
+	"'idle', do NOT manufacture work, and signal idle by running: touch {{settle}}."
 
 // cmdWatch runs the long-lived watch daemon. This is the CLOCK half: it
 // heartbeats the XO so a turn-based agent keeps advancing clear, authorized work
@@ -399,6 +421,26 @@ func cmdWatch(args []string) error {
 		deskHeartbeatEnabled := func(agent string) bool { return cfg.HeartbeatEnabled(agent) }
 		wakeDeskHeartbeat := newDeskHeartbeatDispatch(injector.Enqueue, deskSettled.Path)
 		deskEscalate := newDeskEscalate(cfg, xo, alert)
+		// #189 per-recipient heartbeat JUDGMENT — the warrant seam, ALWAYS wired (the judgment is
+		// universal, like the #183 default-ON). The backlog read is performed HERE, OFF the detector
+		// lock: deskWarrantedGate reads each agent's OWN backlog (<rosterDir>/flotilla-<agent>-backlog.md)
+		// fresh each call and returns cfg.HeartbeatWarranted(agent, st). A desk with NO per-recipient
+		// ledger self-defaults to WARRANTED (the missing-ledger fallback — NOT the shared backlog), so a
+		// deployment that keeps no per-recipient backlogs is #183-equivalent. The shared --backlog-file
+		// is deliberately NOT consulted here (it is the XO's drive queue, not a desk's work).
+		deskHeartbeatWarranted := deskWarrantedGate(cfg,
+			func(agent string) ([]byte, bool, error) {
+				p := filepath.Join(rosterDir, "flotilla-"+agent+"-backlog.md")
+				raw, err := os.ReadFile(p)
+				if err != nil {
+					if os.IsNotExist(err) {
+						return nil, false, nil // absent ⇒ missing-ledger fallback (warranted)
+					}
+					return nil, true, err // present-but-unreadable/torn ⇒ fail-safe (warranted)
+				}
+				return raw, true, nil
+			},
+			alert)
 
 		det := watch.NewDetectorWithSynthSidecar(watch.DetectorConfig{
 			XOAgent:  xo,
@@ -464,6 +506,7 @@ func cmdWatch(args []string) error {
 			// Recursive desk-heartbeat (#183): default-ON, roster opt-OUT. Cadence = the heartbeat
 			// interval (the tick IS the interval ⇒ 1 tick); cap = 3 (NewDetector defaults 0 to 3).
 			HeartbeatEnabled:        deskHeartbeatEnabled,
+			HeartbeatWarranted:      deskHeartbeatWarranted,
 			WakeDeskHeartbeat:       wakeDeskHeartbeat,
 			DeskEscalate:            deskEscalate,
 			DeskHeartbeatEveryTicks: 1,
@@ -702,6 +745,56 @@ func backlogStatusGate(path string, read func() ([]byte, error), alert func(stri
 			flagged = false
 		}
 		return st
+	}
+}
+
+// deskWarrantedGate builds the #189 per-recipient HeartbeatWarranted seam (a func(agent) bool) that
+// the detector invokes in its PHASE-1 warrant snapshot (deskWarrantSnapshot), OFF the detector lock,
+// BEFORE the under-lock decision runs. The backlog read is FILE I/O and lives HERE — off d.mu — so the
+// under-lock phase-2 decision consults only the resulting pure boolean (the detector's load-bearing
+// off-mutex invariant, the same one synthesis + the mirror honor). For each agent it reads that agent's
+// OWN backlog (read is keyed by agent and resolves <rosterDir>/flotilla-<agent>-backlog.md), parses it
+// fresh each call (it is the desk's own output — NOT content-hashed), and returns
+// cfg.HeartbeatWarranted(agent, st).
+//
+// The fail-safe direction is toward WARRANTED (keep the desk moving — never the silent-stall #183
+// fixed):
+//   - ABSENT per-recipient file ⇒ WARRANTED via the missing-ledger fallback (the desk has not opted
+//     into the judgment ⇒ driven exactly as #183). It does NOT fall back to the shared fleet backlog
+//     (that is the XO's drive queue, not THIS desk's; consulting it would warrant every ledger-less
+//     desk on a busy fleet — re-creating the indiscriminate poking this change exists to end).
+//   - UNREADABLE/torn present file ⇒ WARRANTED (fail-safe; a torn mid-write read self-heals next tick).
+//   - PRESENT-but-sectionless (Found=false) ⇒ WARRANTED via cfg.HeartbeatWarranted's !Found arm, AND a
+//     LOUD alert ONCE on the edge into that state (mirroring backlogStatusGate's alert-once latch), so
+//     a format slip is loud, never a silent always-beat. The latch re-arms after a clean read.
+//
+// read + alert are injected so the latch + fallback are unit-testable. The seam is called only from
+// the detector's single Tick goroutine (in deskWarrantSnapshot, off d.mu), so the per-agent latch map
+// is single-goroutine — no concurrent Tick, and the other detector-state writers (OperatorWake/
+// AgentWake) never invoke this seam.
+func deskWarrantedGate(cfg *roster.Config, read func(agent string) ([]byte, bool, error), alert func(string)) func(agent string) bool {
+	flagged := map[string]bool{}
+	return func(agent string) bool {
+		raw, exists, err := read(agent)
+		if !exists || err != nil {
+			// Absent (missing-ledger fallback) OR unreadable/torn (fail-safe): WARRANTED. Neither is a
+			// present-but-sectionless format slip, so re-arm the latch and do NOT alert.
+			flagged[agent] = false
+			return true
+		}
+		content := string(raw)
+		st := backlog.Parse(content)
+		// A present, readable file with NO "## Backlog" section (and non-empty content) is the format
+		// slip the !Found warrant arm keeps WARRANTED — alert ONCE on the edge so it is loud, not silent.
+		sectionless := !st.Found && strings.TrimSpace(content) != ""
+		switch {
+		case sectionless && !flagged[agent]:
+			alert(fmt.Sprintf("desk-heartbeat: %s backlog present but has no '## Backlog' section — fix the format; the judgment keeps the desk warranted meanwhile", agent))
+			flagged[agent] = true
+		case !sectionless:
+			flagged[agent] = false
+		}
+		return cfg.HeartbeatWarranted(agent, st)
 	}
 }
 

@@ -127,6 +127,7 @@
       '<div class="backlog-counts">' +
         '<span>' + (bl.items || 0) + " items</span>" +
         '<span class="count-blocked">' + (bl.blocked || 0) + " blocked</span>" +
+        (bl.awaiting_auth ? '<span class="count-awaiting-auth">' + bl.awaiting_auth + " awaiting-auth</span>" : "") +
         '<span class="count-done">' + (bl.done || 0) + " done</span>" +
         (bl.malformed ? '<span class="count-malformed">' + bl.malformed + " malformed</span>" : "") +
       "</div>";
