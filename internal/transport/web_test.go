@@ -67,7 +67,7 @@ func TestWebTransport_RegistersAndResolvesByName(t *testing.T) {
 // pane-delivery target consumed by the delivery leg, never by Post).
 func TestWebDestination_IsInboundCarriesNoCredential(t *testing.T) {
 	rc := webTestRoster("xo", "alpha")
-	wt := &webTransport{roster: rc, xo: "xo", resolvePane: fakeResolvePane("spark:3.1")}
+	wt := &webTransport{roster: rc, xo: "xo", resolvePane: fakeResolvePane("flotilla:3.1")}
 
 	dest, agent, ok := wt.ResolveDestination("", "alpha")
 	if !ok {
@@ -83,8 +83,8 @@ func TestWebDestination_IsInboundCarriesNoCredential(t *testing.T) {
 	// It carries the resolved {agentName, paneTarget} — and no credential field exists
 	// on the type at all (the direction asymmetry: an inbound pane target, not an
 	// outbound webhook).
-	if wd.agentName != "alpha" || wd.paneTarget != "spark:3.1" {
-		t.Errorf("webDestination = %+v, want {alpha, spark:3.1}", wd)
+	if wd.agentName != "alpha" || wd.paneTarget != "flotilla:3.1" {
+		t.Errorf("webDestination = %+v, want {alpha, flotilla:3.1}", wd)
 	}
 	// A webDestination must NEVER be a valid Post target — Post is the OUTBOUND seam
 	// the web transport does not own (its only outbound, the notify, is a Discord post
@@ -106,7 +106,7 @@ func TestWebDestination_IsInboundCarriesNoCredential(t *testing.T) {
 // route consume webDestination.paneTarget as the lock key rather than re-resolving.
 func TestWebDestination_SatisfiesInboundTarget(t *testing.T) {
 	rc := webTestRoster("xo", "alpha")
-	wt := &webTransport{roster: rc, xo: "xo", resolvePane: fakeResolvePane("spark:3.1")}
+	wt := &webTransport{roster: rc, xo: "xo", resolvePane: fakeResolvePane("flotilla:3.1")}
 
 	dest, _, ok := wt.ResolveDestination("", "alpha")
 	if !ok {
@@ -119,7 +119,7 @@ func TestWebDestination_SatisfiesInboundTarget(t *testing.T) {
 	if it.AgentName() != "alpha" {
 		t.Errorf("AgentName() = %q, want alpha", it.AgentName())
 	}
-	if it.PaneTarget() != "spark:3.1" {
+	if it.PaneTarget() != "flotilla:3.1" {
 		t.Errorf("PaneTarget() = %q, want the resolved pane target (the cross-process lock key)", it.PaneTarget())
 	}
 }
@@ -285,13 +285,13 @@ func TestWebDiscordCoexist(t *testing.T) {
 	// the SAME string a watch rotate / dash route to the same desk would key on (the
 	// per-pane flock convergence point — internal/deliver owns the flock itself).
 	wt := web.(*webTransport)
-	wt.resolvePane = fakeResolvePane("spark:3.1")
+	wt.resolvePane = fakeResolvePane("flotilla:3.1")
 	dest, _, ok := wt.ResolveDestination("ignored", "alpha")
 	if !ok {
 		t.Fatal("web ResolveDestination(alpha) must resolve")
 	}
-	if got := dest.(webDestination).paneTarget; got != "spark:3.1" {
-		t.Errorf("web lock key = %q, want the resolved pane target spark:3.1", got)
+	if got := dest.(webDestination).paneTarget; got != "flotilla:3.1" {
+		t.Errorf("web lock key = %q, want the resolved pane target flotilla:3.1", got)
 	}
 }
 
@@ -341,7 +341,7 @@ func TestWebRouteAndDiscordWriterComputeSameLockKey(t *testing.T) {
 	// R is the ONE shared pane resolver standing in for deliver.ResolvePane. In production
 	// both writers wire deliver.ResolvePane itself (the identity guard); here R lets us run
 	// the equality without a live fleet.
-	resolved := map[string]string{"alpha-pane-title": "spark:7.4"}
+	resolved := map[string]string{"alpha-pane-title": "flotilla:7.4"}
 	R := func(title string) (string, error) { return resolved[title], nil }
 
 	// The DISCORD writer (cmdSend / Injector) keys the flock on R(agent.Title()).
@@ -362,8 +362,8 @@ func TestWebRouteAndDiscordWriterComputeSameLockKey(t *testing.T) {
 	if webKey != discordKey {
 		t.Errorf("web route lock key %q != discord writer lock key %q — the cross-process flock keys diverge; the two ingresses would NOT serialize on the shared pane", webKey, discordKey)
 	}
-	if webKey != "spark:7.4" {
-		t.Errorf("web route lock key = %q, want the resolved pane spark:7.4", webKey)
+	if webKey != "flotilla:7.4" {
+		t.Errorf("web route lock key = %q, want the resolved pane flotilla:7.4", webKey)
 	}
 	if gotAgent != "alpha" {
 		t.Errorf("web route resolved agent = %q, want alpha", gotAgent)

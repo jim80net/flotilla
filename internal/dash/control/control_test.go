@@ -263,7 +263,7 @@ func TestNotify_NoCosLedgerSkipsMirror(t *testing.T) {
 // on resolvePane's OUTPUT (not the agent name), (c) submit runs on that same pane.
 func TestRoute_KeysLockOnResolvedPaneTarget(t *testing.T) {
 	c, cap := newTestController(t, rosterCos, secretsXO)
-	cap.paneTarget = "spark:3.1" // what deliver.ResolvePane would return
+	cap.paneTarget = "flotilla:3.1" // what deliver.ResolvePane would return
 	res, err := c.Route(context.Background(), "alpha", "do the thing")
 	if err != nil {
 		t.Fatalf("Route: %v", err)
@@ -271,10 +271,10 @@ func TestRoute_KeysLockOnResolvedPaneTarget(t *testing.T) {
 	if cap.resolvedTitle != agentTitle(t, c, "alpha") {
 		t.Errorf("resolvePane asked for %q, want the agent's Title()", cap.resolvedTitle)
 	}
-	if cap.txnTarget != "spark:3.1" {
-		t.Errorf("txn lock keyed on %q, want the resolved pane target %q (NOT the agent name)", cap.txnTarget, "spark:3.1")
+	if cap.txnTarget != "flotilla:3.1" {
+		t.Errorf("txn lock keyed on %q, want the resolved pane target %q (NOT the agent name)", cap.txnTarget, "flotilla:3.1")
 	}
-	if cap.submitPane != "spark:3.1" {
+	if cap.submitPane != "flotilla:3.1" {
 		t.Errorf("submit ran on pane %q, want the resolved target", cap.submitPane)
 	}
 	if res.Outcome != OutcomeDelivered {
@@ -458,7 +458,7 @@ func TestNewLibrary_RoutesThroughWebTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 	webTr := &recordingWebTransport{
-		dest:  transport.NewInboundTarget("alpha", "spark:9.2"),
+		dest:  transport.NewInboundTarget("alpha", "flotilla:9.2"),
 		agent: "alpha",
 		ok:    true,
 	}
@@ -477,10 +477,10 @@ func TestNewLibrary_RoutesThroughWebTransport(t *testing.T) {
 	if webTr.gotOrigin != "" {
 		t.Errorf("web ResolveDestination originChannel = %q, want empty (roster-wide, Decision 2)", webTr.gotOrigin)
 	}
-	if cap.txnTarget != "spark:9.2" {
-		t.Errorf("txn lock keyed on %q, want the pane the WEB TRANSPORT resolved (spark:9.2) — not a forked in-Route resolution", cap.txnTarget)
+	if cap.txnTarget != "flotilla:9.2" {
+		t.Errorf("txn lock keyed on %q, want the pane the WEB TRANSPORT resolved (flotilla:9.2) — not a forked in-Route resolution", cap.txnTarget)
 	}
-	if cap.submitPane != "spark:9.2" {
+	if cap.submitPane != "flotilla:9.2" {
 		t.Errorf("submit ran on pane %q, want the web-transport-resolved pane", cap.submitPane)
 	}
 	if res.Target != "alpha" || res.Outcome != OutcomeDelivered {
