@@ -399,6 +399,26 @@ func cmdWatch(args []string) error {
 		deskHeartbeatEnabled := func(agent string) bool { return cfg.HeartbeatEnabled(agent) }
 		wakeDeskHeartbeat := newDeskHeartbeatDispatch(injector.Enqueue, deskSettled.Path)
 		deskEscalate := newDeskEscalate(cfg, xo, alert)
+		// #189 per-recipient heartbeat JUDGMENT — the warrant seam, ALWAYS wired (the judgment is
+		// universal, like the #183 default-ON). The backlog read is performed HERE, OFF the detector
+		// lock: deskWarrantedGate reads each agent's OWN backlog (<rosterDir>/flotilla-<agent>-backlog.md)
+		// fresh each call and returns cfg.HeartbeatWarranted(agent, st). A desk with NO per-recipient
+		// ledger self-defaults to WARRANTED (the missing-ledger fallback — NOT the shared backlog), so a
+		// deployment that keeps no per-recipient backlogs is #183-equivalent. The shared --backlog-file
+		// is deliberately NOT consulted here (it is the XO's drive queue, not a desk's work).
+		deskHeartbeatWarranted := deskWarrantedGate(cfg,
+			func(agent string) ([]byte, bool, error) {
+				p := filepath.Join(rosterDir, "flotilla-"+agent+"-backlog.md")
+				raw, err := os.ReadFile(p)
+				if err != nil {
+					if os.IsNotExist(err) {
+						return nil, false, nil // absent ⇒ missing-ledger fallback (warranted)
+					}
+					return nil, true, err // present-but-unreadable/torn ⇒ fail-safe (warranted)
+				}
+				return raw, true, nil
+			},
+			alert)
 
 		det := watch.NewDetectorWithSynthSidecar(watch.DetectorConfig{
 			XOAgent:  xo,
@@ -464,6 +484,7 @@ func cmdWatch(args []string) error {
 			// Recursive desk-heartbeat (#183): default-ON, roster opt-OUT. Cadence = the heartbeat
 			// interval (the tick IS the interval ⇒ 1 tick); cap = 3 (NewDetector defaults 0 to 3).
 			HeartbeatEnabled:        deskHeartbeatEnabled,
+			HeartbeatWarranted:      deskHeartbeatWarranted,
 			WakeDeskHeartbeat:       wakeDeskHeartbeat,
 			DeskEscalate:            deskEscalate,
 			DeskHeartbeatEveryTicks: 1,
@@ -702,6 +723,54 @@ func backlogStatusGate(path string, read func() ([]byte, error), alert func(stri
 			flagged = false
 		}
 		return st
+	}
+}
+
+// deskWarrantedGate builds the #189 per-recipient HeartbeatWarranted seam (a func(agent) bool) that
+// the detector consults as the LAST conjunct of its desk-heartbeat decision. The backlog read is FILE
+// I/O and is performed HERE — OFF the detector lock — so the under-lock decision only ever calls a
+// pure boolean lookup (the detector's load-bearing off-mutex invariant, the same one synthesis + the
+// mirror honor). For each agent it reads that agent's OWN backlog (read is keyed by agent and resolves
+// <rosterDir>/flotilla-<agent>-backlog.md), parses it fresh each call (it is the desk's own output —
+// NOT content-hashed), and returns cfg.HeartbeatWarranted(agent, st).
+//
+// The fail-safe direction is toward WARRANTED (keep the desk moving — never the silent-stall #183
+// fixed):
+//   - ABSENT per-recipient file ⇒ WARRANTED via the missing-ledger fallback (the desk has not opted
+//     into the judgment ⇒ driven exactly as #183). It does NOT fall back to the shared fleet backlog
+//     (that is the XO's drive queue, not THIS desk's; consulting it would warrant every ledger-less
+//     desk on a busy fleet — re-creating the indiscriminate poking this change exists to end).
+//   - UNREADABLE/torn present file ⇒ WARRANTED (fail-safe; a torn mid-write read self-heals next tick).
+//   - PRESENT-but-sectionless (Found=false) ⇒ WARRANTED via cfg.HeartbeatWarranted's !Found arm, AND a
+//     LOUD alert ONCE on the edge into that state (mirroring backlogStatusGate's alert-once latch), so
+//     a format slip is loud, never a silent always-beat. The latch re-arms after a clean read.
+//
+// read + alert are injected so the latch + fallback are unit-testable. The seam is called only from
+// the detector goroutine (under its mutex — but doing NO file I/O there; the I/O is HERE, off-lock,
+// invoked synchronously by the seam call), so the per-agent latch map is single-goroutine.
+func deskWarrantedGate(cfg *roster.Config, read func(agent string) ([]byte, bool, error), alert func(string)) func(agent string) bool {
+	flagged := map[string]bool{}
+	return func(agent string) bool {
+		raw, exists, err := read(agent)
+		if !exists || err != nil {
+			// Absent (missing-ledger fallback) OR unreadable/torn (fail-safe): WARRANTED. Neither is a
+			// present-but-sectionless format slip, so re-arm the latch and do NOT alert.
+			flagged[agent] = false
+			return true
+		}
+		content := string(raw)
+		st := backlog.Parse(content)
+		// A present, readable file with NO "## Backlog" section (and non-empty content) is the format
+		// slip the !Found warrant arm keeps WARRANTED — alert ONCE on the edge so it is loud, not silent.
+		sectionless := !st.Found && strings.TrimSpace(content) != ""
+		switch {
+		case sectionless && !flagged[agent]:
+			alert(fmt.Sprintf("desk-heartbeat: %s backlog present but has no '## Backlog' section — fix the format; the judgment keeps the desk warranted meanwhile", agent))
+			flagged[agent] = true
+		case !sectionless:
+			flagged[agent] = false
+		}
+		return cfg.HeartbeatWarranted(agent, st)
 	}
 }
 

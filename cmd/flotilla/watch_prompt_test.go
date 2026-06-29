@@ -2,11 +2,116 @@ package main
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/workspace"
 )
+
+// loadWarrantCfg builds a minimal roster.Config with one eligible desk ("backend"), one
+// approval-sensitive opt-out desk ("trader"), and the XO — for the deskWarrantedGate tests.
+func loadWarrantCfg(t *testing.T) *roster.Config {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "roster.json")
+	js := `{
+	  "xo_agent":"xo","operator_user_id":"U","channel_id":"C","heartbeat_interval":"20m",
+	  "agents":[{"name":"xo"},{"name":"backend"},{"name":"trader","approval_sensitive":true}]
+	}`
+	if err := os.WriteFile(p, []byte(js), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := roster.Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+// deskWarrantedGate builds the #189 HeartbeatWarranted seam OFF the detector lock: it reads the
+// recipient's OWN backlog (absent ⇒ missing-ledger fallback ⇒ warranted, NOT the shared backlog),
+// parses a present file fresh each call, and returns cfg.HeartbeatWarranted(agent, st). An
+// unreadable/torn file ⇒ warranted; a present-but-sectionless file ⇒ warranted via the !Found arm
+// AND alerts ONCE on the edge. The read is INJECTED so the latch + fallback are unit-testable.
+func TestDeskWarrantedGate(t *testing.T) {
+	cfg := loadWarrantCfg(t)
+
+	// readState lets each subtest control what the per-recipient read returns per agent.
+	type rd struct {
+		content string
+		exists  bool
+		err     error
+	}
+	state := map[string]rd{}
+	var alerts []string
+	gate := deskWarrantedGate(cfg,
+		func(agent string) ([]byte, bool, error) {
+			r := state[agent]
+			if r.err != nil {
+				return nil, r.exists, r.err
+			}
+			return []byte(r.content), r.exists, nil
+		},
+		func(m string) { alerts = append(alerts, m) })
+
+	// (a) per-recipient file ABSENT ⇒ WARRANTED (missing-ledger fallback) — the shared backlog is
+	//     NEVER consulted (the read closure only sees the per-agent agent name; there is no shared path).
+	state["backend"] = rd{exists: false}
+	if !gate("backend") {
+		t.Error("absent per-recipient backlog ⇒ warranted (missing-ledger fallback)")
+	}
+
+	// (b) PRESENT with an [in-flight] item ⇒ warranted (live actionable work).
+	state["backend"] = rd{content: "## Backlog\n- [in-flight] ship it\n", exists: true}
+	if !gate("backend") {
+		t.Error("present backlog with actionable work ⇒ warranted")
+	}
+
+	// (c) PRESENT with everything parked ([blocked]/[awaiting-auth]/[done]) ⇒ NOT warranted (suppress).
+	state["backend"] = rd{content: "## Backlog\n- [blocked] q @op\n- [awaiting-auth] go @op\n- [done] x\n", exists: true}
+	if gate("backend") {
+		t.Error("present backlog with no actionable work ⇒ NOT warranted (suppress the beat)")
+	}
+
+	// (d) PRESENT but sectionless (Found=false) ⇒ warranted via the !Found arm AND alerts ONCE on the edge.
+	alerts = nil
+	state["backend"] = rd{content: "# Notes\nsome prose, no ## Backlog section\n", exists: true}
+	if !gate("backend") {
+		t.Error("present-but-sectionless backlog ⇒ warranted (cannot prove no work)")
+	}
+	gate("backend")
+	gate("backend")
+	if len(alerts) != 1 {
+		t.Errorf("present-but-sectionless must alert ONCE on the edge, got %d", len(alerts))
+	}
+	// A clean read re-arms the latch.
+	state["backend"] = rd{content: "## Backlog\n- [in-flight] work\n", exists: true}
+	gate("backend")
+	state["backend"] = rd{content: "# Notes\nprose again\n", exists: true}
+	gate("backend")
+	if len(alerts) != 2 {
+		t.Errorf("a re-armed latch must re-fire on a new sectionless edge, got %d alerts", len(alerts))
+	}
+
+	// (e) PRESENT but UNREADABLE/torn ⇒ warranted (fail-safe), no alert (a torn read self-heals).
+	alerts = nil
+	state["backend"] = rd{exists: true, err: errors.New("torn mid-write")}
+	if !gate("backend") {
+		t.Error("unreadable/torn per-recipient backlog ⇒ warranted (fail-safe)")
+	}
+	if len(alerts) != 0 {
+		t.Errorf("an unreadable/torn read must be SILENT, got %d alerts", len(alerts))
+	}
+
+	// (f) The HARD gate still wins: an approval-sensitive desk ("trader") with a backlog FULL of
+	//     actionable work is NOT warranted (cfg.HeartbeatWarranted returns false for the HARD-gated desk).
+	state["trader"] = rd{content: "## Backlog\n- [in-flight] place order\n", exists: true}
+	if gate("trader") {
+		t.Error("an approval-sensitive desk is HARD-gated off — never warranted even with actionable work")
+	}
+}
 
 // With NO workspace, the detector continuation prompt the XO receives must be exactly
 // what it was before the workspace feature: ResolvePrompt substitutes {{tracker}}/{{settle}}
