@@ -536,3 +536,152 @@ recycle-capable does NOT require a graceful close.
 - **WHEN** the grok `RecycleBridge` computes a handoff path for a desk's cwd and a recycle token
 - **THEN** the path is `<cwd>/.flotilla/handoffs/recycle-<token>.md` (product-owned, not `.claude/handoffs/`), the handoff turn names that exact path and force-commits it, and neither turn references a harness-specific `/handoff`,`/takeover` skill
 
+### Requirement: A surface driver MAY report that the pane's composer is input-blocked
+
+A surface driver MAY implement an OPTIONAL `InputBlockProbe`; the probe SHALL be READ-ONLY and
+report whether the pane's composer is unreachable because a focus-stealing UI overlay — for Claude
+Code, the inline background-agents panel — currently holds input focus, so keystrokes navigate the
+overlay instead of submitting to the composer. The probe (it never writes a pane) SHALL
+report THREE outcomes: input-blocked, not-blocked, and undetermined (a capture glitch / unrecognized
+render). A caller that cannot determine the state (undetermined, or a driver that does not implement
+the probe) SHALL NOT treat the pane as input-blocked — it falls back to the existing assessment, so
+an unknown render never falsely refuses a delivery.
+
+The claude-code driver SHALL detect the input-blocked state from the live pane tail by the agents
+panel's focus cursor: the bottom-most composer-prompt glyph (`❯`) in the live chrome sits on an
+AGENT-LIST row (the glyph is immediately followed by an agent status glyph and name) rather than on
+the composer, AND the panel's navigation hint is present in the tail. The detection SHALL be scoped
+to the bottom-most live-chrome prompt so a panel cursor echoed in scrollback (or a printed capture)
+is never mistaken for the live state.
+
+#### Scenario: A panel-focused pane reports input-blocked
+
+- **WHEN** the bottom-most composer-prompt glyph in the live pane tail is a cursor on an agent-list
+  row and the agents-panel navigation hint is present
+- **THEN** the probe reports input-blocked
+
+#### Scenario: A pane that merely DISPLAYS background agents (composer focused) is not blocked
+
+- **WHEN** the agents panel is shown but the bottom-most composer-prompt glyph is the composer
+  itself (no cursor sits on an agent-list row)
+- **THEN** the probe reports not-blocked, so a healthy desk running background agents still receives
+  deliveries
+
+#### Scenario: An agent-row cursor echoed in scrollback does not block
+
+- **WHEN** a captured pane contains an agent-row cursor line above a live composer prompt (e.g. a
+  prior capture printed into the pane)
+- **THEN** the probe decides on the bottom-most live-chrome prompt only and reports not-blocked
+
+### Requirement: Confirmed delivery refuses to paste into an input-blocked composer
+
+Confirmed delivery SHALL NOT submit into a pane whose composer is input-blocked. After the idle
+gate admits an `Idle` pane, the orchestration SHALL consult the driver's `InputBlockProbe` (when
+implemented) and, if the pane is input-blocked, SHALL NOT paste — it SHALL report a distinct
+input-blocked failure (NOT a generic unconfirmed result, and NOT the silent success of today). The
+body SHALL never be pasted into the panel and retries SHALL never stack pastes. Before refusing, the
+orchestration MAY make a single best-effort attempt to restore composer focus and re-check; it SHALL
+refuse only if the pane is still input-blocked, and SHALL NOT claim a restore it cannot verify. If a
+panel steals focus DURING the confirmation window (after the submit), the confirmation SHALL classify
+the pane as not-delivered rather than as a confirmed submit, and SHALL NOT re-paste the body.
+
+#### Scenario: A message to an input-blocked desk is not pasted and is reported not delivered
+
+- **WHEN** confirmed delivery is invoked on an `Idle` pane that the `InputBlockProbe` reports
+  input-blocked
+- **THEN** no paste is attempted, no Enter is sent, and the caller receives the distinct
+  input-blocked failure (the message is not lost in the panel and no paste is stacked)
+
+#### Scenario: A healthy desk delivery is unaffected
+
+- **WHEN** confirmed delivery is invoked on an `Idle` pane the probe reports not-blocked (or the
+  driver has no probe)
+- **THEN** delivery proceeds exactly as before
+
+### Requirement: An input-blocked delivery raises an actionable operator alert
+
+The system SHALL raise an operator-facing ALERT when a RELAY delivery (an operator/inter-agent
+message) fails with the input-blocked condition; the alert names the recipient, carries the undelivered
+payload (at least a bounded preview, with the full body in the log), and states the required action
+— the desk is input-blocked behind the agents panel and needs a human keystroke or click into the
+composer at its pane. The alert SHALL be raised as a TERMINAL failure (escalate-and-report), NOT
+re-queued on the busy-defer path, because a focus-stealing panel does not self-clear on a timer. The
+alert SHALL hedge that the message may already have started a turn, so the operator verifies before
+re-sending (the system never double-submits automatically — the no-re-paste invariant — but a human
+re-send on a false non-delivery would). A heartbeat/detector-kind delivery (a time-relative wake)
+SHALL NOT alarm on the input-blocked condition (the next wake re-evaluates), preserving the existing
+kind-awareness. The `send`/`notify` CLI SHALL report the input-blocked failure and exit non-zero
+rather than report success.
+
+#### Scenario: A relay to an input-blocked desk alerts the operator with the payload
+
+- **WHEN** a relay delivery fails input-blocked
+- **THEN** an operator alert fires naming the recipient, including the undelivered payload (or a
+  bounded preview), and stating that a human keystroke/click is needed at the desk's pane
+
+#### Scenario: The CLI does not report an input-blocked send as delivered
+
+- **WHEN** `flotilla send` / `notify` fails with the input-blocked condition
+- **THEN** it reports "not delivered — input-blocked behind the agents panel" and exits non-zero
+
+### Requirement: A blocked composer is self-healed before submitting, safely against a live pane
+
+The system SHALL attempt to recover an input-blocked composer automatically before reporting it
+blocked, for OPERATOR-RELAY deliveries only, when self-heal is enabled and the driver supports it (a
+`ComposerStateProbe` and a Ctrl-C primitive). The self-heal SHALL run BEFORE any paste, only when the
+pre-paste composer is a focus-stealing overlay (a per-agent sub-composer or an agent-list row) on an
+IDLE pane. It SHALL be a bounded loop that, on each iteration: (1) aborts if the pane is not Idle (a
+busy pane is mid-turn — a Ctrl-C would interrupt the turn, so it MUST NOT be sent); (2) stops if the
+composer is no longer an overlay (reachable — a Ctrl-C MUST NOT be sent into a recovered composer,
+because a second Ctrl-C at the main composer exits the session); (3) stops if the composer state did
+not change since the previous press (no progress); (4) otherwise sends one Ctrl-C, waits a settle at
+least as long as the recovered-frame render latency, and re-probes; capped at a small fixed count.
+Esc SHALL NOT be used (it does not recover the inline agents panel). Self-heal SHALL be DISABLED by
+default and gated by a kill-switch that disables it instantly without a redeploy.
+
+#### Scenario: A reachable or busy composer receives no Ctrl-C
+
+- **WHEN** the composer is already reachable, OR the pane is mid-turn (Working)
+- **THEN** the self-heal sends no Ctrl-C (no exit, no turn interruption)
+
+#### Scenario: An overlay is recovered and the press stops at the first reachable read
+
+- **WHEN** the composer is a focus-stealing overlay on an idle pane
+- **THEN** the self-heal sends one Ctrl-C per still-overlay re-probe and STOPS the instant the composer
+  is reachable, never sending a Ctrl-C into a recovered composer
+
+#### Scenario: Self-heal is off by default
+
+- **WHEN** the kill-switch is not enabled (or the driver lacks the probe/Ctrl-C)
+- **THEN** no self-heal is attempted and delivery behaves exactly as before (the spinner authority +
+  last-resort alert)
+
+### Requirement: Self-heal submits exactly once and never double-delivers; the alert is last-resort
+
+After the pre-paste self-heal, the system SHALL call the confirmed submit EXACTLY ONCE — there is no
+separate re-attempt — so the body is pasted at most once and a double-deliver is impossible by
+construction. If the self-heal recovered the composer, the single submit pastes into the clean
+composer and confirms; if it did not, the single submit re-detects the block and returns the
+input-blocked failure, so the operator alert fires ONLY as a true last-resort. The system SHALL NOT
+self-heal the POST-submit pending path (a composer that cleared after a Ctrl-C cannot be
+distinguished from a body that just submitted, so a recovery-and-resend there could double-deliver);
+that path keeps the last-resort alert. A self-healed delivery SHALL be recorded with the Ctrl-C count
+so the self-heal rate is observable, and a pane that drops to a shell shortly after a self-heal SHALL
+be logged as a suspected self-heal-induced exit.
+
+#### Scenario: A relay to an overlay-blocked desk self-heals and delivers with no alert
+
+- **WHEN** an operator relay targets an idle desk whose composer is a focus-stealing overlay, and the
+  self-heal recovers it
+- **THEN** the message is delivered by the single submit and no operator alert fires
+
+#### Scenario: A heartbeat/detector tick never self-heals
+
+- **WHEN** a non-relay (heartbeat/detector) delivery targets a blocked composer
+- **THEN** no self-heal is attempted (no unsolicited Ctrl-C); the tick follows its normal not-idle policy
+
+#### Scenario: The alert fires only when self-heal cannot recover
+
+- **WHEN** the self-heal does not reach a reachable composer within the cap
+- **THEN** the single submit re-detects the block and the input-blocked operator alert fires (last-resort)
+
