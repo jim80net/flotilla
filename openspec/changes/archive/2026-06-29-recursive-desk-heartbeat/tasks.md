@@ -71,6 +71,6 @@ money desks opt-OUT by default; cold-start owes no heartbeat; off-mutex delivery
   is wired).
 
 ## 8. Ship
-- [ ] 8.1 `go build ./...` + `go test -race ./...` green; `go vet` clean; `openspec validate --all --strict`.
-- [ ] 8.2 Impl-trio (systems+OCR+STORM) on the diff; iterate clean.
-- [ ] 8.3 PR to the reviewing XO's gate (reference #183 + the #184 approval-classifier unblock).
+- [x] 8.1 `go build ./...` + `go test -race ./...` green; `go vet` clean; `openspec validate --all --strict`.
+- [x] 8.2 Impl-trio (systems+OCR+STORM) on the diff; iterate clean.
+- [x] 8.3 PR to the reviewing XO's gate (reference #183 + the #184 approval-classifier unblock). (Merged as #191.)
