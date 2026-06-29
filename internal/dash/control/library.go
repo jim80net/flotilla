@@ -223,44 +223,17 @@ func (c *LibraryController) Resume(_ context.Context, _ string) (ResumeResult, e
 	return ResumeResult{}, ErrResumeUnavailable
 }
 
-// resolveTarget maps a route target to a canonical roster agent name: an empty
-// target → the XO; "@name"/"name" → the canonical agent (case-insensitive);
-// an unknown target → "" (the caller errors). The dash resolves ROSTER-WIDE —
-// it is a host-local operator console with no Discord channel context, so the
-// operator can address any desk in the roster. This deliberately DIFFERS from the
-// Discord relay, which scopes "@name" to the typed-in channel's members
-// (watch.memberResolver) so an @name never crosses a channel boundary. For a
-// single-fleet roster the two coincide (members == all agents); for a federated
-// roster the dash is intentionally boundary-transcending (the operator owns the
-// whole fleet). It is NOT a reuse of relay.Route.
-//
-// Roster names are unique only CASE-SENSITIVELY (roster.go:168), so "alpha" and
-// "Alpha" can both exist. An EXACT match therefore wins first (unambiguous — the
-// operator typed that exact name); only when there is no exact match and MORE
-// THAN ONE case-insensitive match remains is the target ambiguous
-// (ErrAmbiguousTarget) — rejected, never silently delivered to whichever is first.
+// resolveTarget maps a route target to a canonical roster agent name by delegating
+// to the ONE shared roster-wide resolver (roster.ResolveTarget) — the SAME function
+// the web transport's ResolveDestination calls, so the empty→XO default and the
+// exact-wins-else-ambiguous case-collision rule cannot drift between the dash control
+// surface and the web transport (transport spec "The roster-wide resolver is shared,
+// not forked"). The dash resolves ROSTER-WIDE (a host-local operator console with no
+// Discord channel context can address any desk), which is preserved verbatim inside
+// the shared resolver — see roster.ResolveTarget's doc for the boundary-transcending
+// rationale and the case-collision rule.
 func (c *LibraryController) resolveTarget(target string) (string, error) {
-	t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(target), "@"))
-	if t == "" {
-		return c.xo, nil
-	}
-	var ci []string
-	for _, a := range c.roster.Agents {
-		if a.Name == t {
-			return a.Name, nil // exact match — unambiguous
-		}
-		if strings.EqualFold(a.Name, t) {
-			ci = append(ci, a.Name)
-		}
-	}
-	switch len(ci) {
-	case 0:
-		return "", ErrUnknownTarget
-	case 1:
-		return ci[0], nil
-	default:
-		return "", fmt.Errorf("%w: %q matches %v — use the exact name", ErrAmbiguousTarget, t, ci)
-	}
+	return c.roster.ResolveTarget(c.xo, target)
 }
 
 // mirrorRouteToLedger records a dash-routed instruction in the CoS ledger with

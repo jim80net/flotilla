@@ -24,6 +24,8 @@ package control
 import (
 	"context"
 	"errors"
+
+	"github.com/jim80net/flotilla/internal/roster"
 )
 
 // Controller is the seam over the control actions. Notify + Route are live;
@@ -90,12 +92,15 @@ var (
 	// (cmd/flotilla/resume.go) and must be extracted into a reusable library so the
 	// dash calls the SAME tested path. Tracked follow-on; resume fails closed.
 	ErrResumeUnavailable = errors.New("resume from the dash is not yet wired (its orchestration is being extracted into a reusable library) — use `flotilla resume` on the host for now")
-	// ErrUnknownTarget: a route target that resolves to no roster agent/binding.
-	ErrUnknownTarget = errors.New("unknown route target (no matching agent or @desk)")
-	// ErrAmbiguousTarget: a route target that matches more than one agent
-	// case-insensitively with no exact match (roster names are case-sensitively
-	// unique, so "alpha" + "Alpha" can coexist) — rejected, never guessed.
-	ErrAmbiguousTarget = errors.New("ambiguous route target (matches multiple agents by case) — use the exact name")
+	// ErrUnknownTarget / ErrAmbiguousTarget are ALIASES of the roster package's
+	// canonical resolution sentinels — the dash control surface and the web transport
+	// resolve a roster-wide target through the ONE shared roster.ResolveTarget, so they
+	// surface the SAME sentinels. Re-exported here so the HTTP error mapping
+	// (control_handlers.go) and the existing tests' errors.Is(err, control.Err…) checks
+	// keep working unchanged after the resolver was extracted (transport spec "The
+	// roster-wide resolver is shared, not forked").
+	ErrUnknownTarget   = roster.ErrUnknownTarget
+	ErrAmbiguousTarget = roster.ErrAmbiguousTarget
 	// ErrUnknownAgent: a resume agent not in the roster.
 	ErrUnknownAgent = errors.New("unknown agent")
 	// ErrEmptyMessage: a route/notify with no message body.
