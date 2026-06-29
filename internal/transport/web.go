@@ -23,6 +23,26 @@ func init() {
 // closed rather than building a transport that would nil-deref on the first resolve.
 var errWebNoRoster = errors.New("web transport: a roster is required (the roster-wide resolver resolves a target against it)")
 
+// InboundTarget is the EXPORTED accessor an inbound pane-delivery Destination
+// satisfies, so the delivery leg — which lives in a DIFFERENT package
+// (internal/dash/control) and cannot read the unexported webDestination fields —
+// reads the two values it needs through a typed contract: PaneTarget() (the
+// cross-process AcquirePaneTxn lock key) and AgentName() (the canonical roster name
+// for the result/ledger). The opaque SPI Destination marker (isDestination) stays
+// unexported so a caller cannot forge a Destination; InboundTarget is the narrow,
+// direction-specific window the INBOUND consumer type-asserts to. The OUTBOUND
+// (Post) destinations — discord's credential-bearing webhook — deliberately do NOT
+// satisfy it, keeping the direction asymmetry (design Decision 1) typed: an inbound
+// pane target and an outbound post target are not interchangeable.
+type InboundTarget interface {
+	Destination
+	// AgentName is the canonical roster agent the instruction is addressed to.
+	AgentName() string
+	// PaneTarget is the resolved tmux pane string — the cross-process lock key the
+	// delivery leg keys AcquirePaneTxn on (identical to every other pane writer's key).
+	PaneTarget() string
+}
+
 // webDestination is the web transport's concrete Destination: an INBOUND
 // pane-delivery target — a canonical roster agent name plus its resolved tmux pane
 // string. It carries NO credential (the direction asymmetry — design Decision 1):
@@ -31,13 +51,19 @@ var errWebNoRoster = errors.New("web transport: a roster is required (the roster
 // target, consumed by the dash's delivery leg (AcquirePaneTxn → Confirm.Submit),
 // NEVER by Post. A webDestination must never be handed to a Post — the web transport
 // has no meaningful outbound post (the only outbound the dash does is the Discord
-// notify, posted by the DISCORD transport).
+// notify, posted by the DISCORD transport). It satisfies InboundTarget so the
+// delivery leg (another package) reads {agentName, paneTarget} through that accessor.
 type webDestination struct {
 	agentName  string // the canonical roster agent the instruction is addressed to
 	paneTarget string // the resolved tmux pane string (the cross-process lock key)
 }
 
 func (webDestination) isDestination() {}
+
+// AgentName / PaneTarget satisfy InboundTarget — the typed window the dash delivery
+// leg reads (it cannot reach the unexported fields directly across the package seam).
+func (d webDestination) AgentName() string  { return d.agentName }
+func (d webDestination) PaneTarget() string { return d.paneTarget }
 
 // webTransport is the dashboard's coordination surface behind the Transport SPI. It
 // owns ONLY the INBOUND half: ResolveDestination resolves a roster-wide address (via
