@@ -324,7 +324,7 @@ memex adapters do **not** inherently know the flotilla roster `agent` name. Bind
 
   "handoff_path": "/home/operator/work/project/.flotilla/handoffs/switch-20260629T031400....md",
 
-  "workspace_state_path": "/home/jim/.flotilla/grok-research/state.md",
+  "workspace_state_path": "/home/operator/.flotilla/grok-research/state.md",
 
   // Layer 2 seam — v1 bare string (memex-hermes PR #21)
   "hint_version": 1,
