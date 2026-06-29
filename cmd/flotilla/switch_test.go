@@ -43,9 +43,11 @@ type swRec struct {
 	lockedFlag      bool
 	remainCalls     []bool
 	// switch-only failure injections
-	bundleErr  error            // writeBundle fails (Phase 2 — pre-close abort)
-	overlayErr error            // writeOverlay fails (Phase 3b — half-switch, surfaced)
-	recordErr  map[string]error // recordPhase fails for a named phase
+	bundleErr   error            // writeBundle fails (Phase 2 — pre-close abort)
+	overlayErr  error            // writeOverlay fails (Phase 3b — half-switch, surfaced)
+	recordErr   map[string]error // recordPhase fails for a named phase
+	respawnErr  error            // respawn (Phase 3 relaunch) fails
+	deliverErr2 error            // the 2nd (takeover) deliver fails (Phase 4 escape hatch)
 }
 
 func happySwitch() *swRec {
@@ -78,18 +80,29 @@ func (r *swRec) composer(string) surface.ComposerDisposition {
 
 func fakeSwitchOps(r *swRec) switchOps {
 	return switchOps{
-		resolve:      func(string) (string, deliver.ResolveOutcome, error) { return "sess:0.1", deliver.ResolveUnique, nil },
-		paneID:       func(string) (string, error) { return "%5", nil },
-		inMode:       func(string) (bool, error) { return false, nil },
-		assess:       r.assess,
-		composer:     r.composer,
-		absent:       func(string, string) (bool, error) { return r.absentResult, r.absentErr },
-		durable:      func(string, string, int) (bool, error) { return !r.failDurable, nil },
-		deliver:      func(_, text string) error { r.delivered = append(r.delivered, text); return nil },
+		resolve:  func(string) (string, deliver.ResolveOutcome, error) { return "sess:0.1", deliver.ResolveUnique, nil },
+		paneID:   func(string) (string, error) { return "%5", nil },
+		inMode:   func(string) (bool, error) { return false, nil },
+		assess:   r.assess,
+		composer: r.composer,
+		absent:   func(string, string) (bool, error) { return r.absentResult, r.absentErr },
+		durable:  func(string, string, int) (bool, error) { return !r.failDurable, nil },
+		deliver: func(_, text string) error {
+			r.delivered = append(r.delivered, text)
+			// The 2nd deliver is the TAKEOVER turn (post-relaunch, Phase 4); fail it on demand
+			// to exercise the takeover escape hatch.
+			if len(r.delivered) == 2 && r.deliverErr2 != nil {
+				return r.deliverErr2
+			}
+			return nil
+		},
 		closeFn:      func(string) error { r.closed = true; return r.closeErr },
 		remainOnExit: func(_ string, on bool) error { r.remainCalls = append(r.remainCalls, on); return nil },
 		paneDead:     func(string) (bool, error) { return r.closed && !r.respawned && !r.closeNeverShell, nil },
 		respawn: func(string, string, string) error {
+			if r.respawnErr != nil {
+				return r.respawnErr // the relaunch failed; the pane is closed but not running the TO harness
+			}
 			r.respawned = true
 			r.events = append(r.events, "respawn")
 			return nil
@@ -432,6 +445,84 @@ func TestRunSwitchGenSuperseded(t *testing.T) {
 	}
 }
 
+// --- P1-A (the two-driver routing closures): the FROM driver gates/delivers BEFORE the
+//     `relaunched` flip, the TO driver AFTER it. This pins the load-bearing P1-A mechanism
+//     (activeDriver / switchComposer / switchDeliver) directly, so a future driver-divergence
+//     cannot silently route the wrong surface. ---
+
+// routingDriver is a DISTINGUISHABLE fake surface.Driver (+ ComposerStateProbe) whose Assess,
+// ComposerState, and Submit all report a fixed `id`, and which records every Submit call into a
+// shared sink — so the test can prove WHICH driver each closure routed to. Assess returns Idle so
+// Confirm.Submit proceeds to Submit; ComposerState returns Cleared so the pre-paste gate passes
+// and the post-submit confirm (composer-cleared) succeeds in one poll.
+type routingDriver struct {
+	id       string
+	state    surface.State
+	composer surface.ComposerDisposition
+	sink     *[]string // appended with id on every Submit
+}
+
+func (d routingDriver) Name() string                     { return d.id }
+func (d routingDriver) Assess(string) surface.State      { return d.state }
+func (d routingDriver) Rotate(string) error              { return nil }
+func (d routingDriver) RotateStrategy() surface.Strategy { return surface.SlashCommand }
+func (d routingDriver) Close(string) error               { return nil }
+func (d routingDriver) ComposerState(string) surface.ComposerDisposition {
+	return d.composer
+}
+func (d routingDriver) Submit(_, _ string) error {
+	*d.sink = append(*d.sink, d.id)
+	return nil
+}
+
+func TestSwitchTwoDriverClosureRouting(t *testing.T) {
+	var submits []string
+	// Two DISTINGUISHABLE drivers: the FROM driver assesses Working (a distinct identity from
+	// the TO driver's Idle), and each records a DIFFERENT id on Submit. The TO driver must be
+	// Idle so Confirm.Submit (which gates on Assess==Idle) actually reaches its Submit.
+	// FROM and TO are distinguishable on ALL THREE probe surfaces: Assess (Working vs Idle),
+	// ComposerState (SubAgent vs Cleared), and Submit (records "FROM" vs "TO").
+	fromDrv := routingDriver{id: "FROM", state: surface.StateWorking, composer: surface.ComposerSubAgent, sink: &submits}
+	toDrv := routingDriver{id: "TO", state: surface.StateIdle, composer: surface.ComposerCleared, sink: &submits}
+
+	relaunched := false
+	composer := switchComposer(fromDrv, toDrv, &relaunched)
+	deliver := switchDeliver(surface.Confirm{SendEnter: func(string) error { return nil }, Sleep: func(time.Duration) {}}, fromDrv, toDrv, &relaunched)
+
+	// BEFORE the flip — every closure routes to the FROM driver.
+	if got := activeDriver(fromDrv, toDrv, relaunched).Assess(""); got != surface.StateWorking {
+		t.Errorf("pre-flip activeDriver.Assess = %v, want the FROM driver's StateWorking", got)
+	}
+	if got := composer(""); got != surface.ComposerSubAgent { // the FROM driver's distinct disposition
+		t.Errorf("pre-flip composer = %v, want the FROM driver's ComposerSubAgent", got)
+	}
+	// The FROM driver assesses Working, so Confirm.Submit refuses BEFORE Submit (ErrBusy) — proving
+	// the deliver closure routed to the FROM driver (the Idle TO driver would have submitted).
+	if err := deliver("", "handoff"); err != surface.ErrBusy {
+		t.Fatalf("pre-flip deliver err = %v, want surface.ErrBusy (routed to the Working FROM driver)", err)
+	}
+	if len(submits) != 0 {
+		t.Errorf("pre-flip deliver must route to the FROM driver (Working ⇒ no Submit), got submits=%v", submits)
+	}
+
+	// FLIP — the FROM→TO boundary the respawn op sets.
+	relaunched = true
+
+	// AFTER the flip — every closure routes to the TO driver.
+	if got := activeDriver(fromDrv, toDrv, relaunched).Assess(""); got != surface.StateIdle {
+		t.Errorf("post-flip activeDriver.Assess = %v, want the TO driver's StateIdle", got)
+	}
+	if got := composer(""); got != surface.ComposerCleared { // the TO driver's distinct disposition
+		t.Errorf("post-flip composer = %v, want the TO driver's ComposerCleared", got)
+	}
+	if err := deliver("", "takeover"); err != nil {
+		t.Fatalf("post-flip deliver err = %v, want nil (the Idle TO driver submits)", err)
+	}
+	if len(submits) != 1 || submits[0] != "TO" {
+		t.Errorf("post-flip deliver must route to the TO driver's Submit, got submits=%v", submits)
+	}
+}
+
 // --- P1-B: eager-durable phase records in order; overlay written ONLY after relaunch ---
 
 func TestRunSwitchEagerDurablePhaseOrdering(t *testing.T) {
@@ -510,6 +601,47 @@ func TestRunSwitchOverlayWriteFailIsSurfacedHalfSwitch(t *testing.T) {
 	}
 	if !sawPending || sawComplete {
 		t.Errorf("durable trail should be overlay-pending (got events=%v)", r.events)
+	}
+}
+
+// Phase-3 relaunch failure ABORTS naming `flotilla resume <agent>`; the overlay is never
+// written and no "complete" record happens (the desk is closed, not running the TO harness).
+func TestRunSwitchRelaunchFailAbortsNamingResume(t *testing.T) {
+	r := happySwitch()
+	r.respawnErr = errors.New("respawn -k failed")
+	_, err := runSwitch(fakeSwitchOps(r), testSwitchPlan())
+	if err == nil || !strings.Contains(err.Error(), "phase 3") || !strings.Contains(err.Error(), "flotilla resume research") {
+		t.Fatalf("err = %v, want a phase-3 relaunch-fail abort naming `flotilla resume research`", err)
+	}
+	if r.respawned {
+		t.Error("a failed respawn must not be recorded as a landed relaunch")
+	}
+	for _, e := range r.events {
+		if e == "overlay" || e == switchPhaseOverlayPending || e == switchPhaseComplete {
+			t.Errorf("a failed relaunch must NOT write the overlay or record overlay-pending/complete (events=%v)", r.events)
+		}
+	}
+	if len(r.delivered) != 1 {
+		t.Errorf("a failed relaunch must NOT deliver the takeover turn (got %v)", r.delivered)
+	}
+}
+
+// Phase-4 takeover-deliver failure surfaces the desk as LIVE-but-un-taken-over and names the
+// `flotilla send … take over` escape copy (the relaunch already landed — the irreversible step
+// is done — so this is a surfaced live-desk recovery, not an abort that undoes anything).
+func TestRunSwitchTakeoverDeliverFailNamesEscapeHatch(t *testing.T) {
+	r := happySwitch()
+	r.deliverErr2 = errors.New("paste did not land")
+	_, err := runSwitch(fakeSwitchOps(r), testSwitchPlan())
+	if err == nil || !strings.Contains(err.Error(), "flotilla send") || !strings.Contains(err.Error(), "take over") {
+		t.Fatalf("err = %v, want a takeover-deliver failure naming the `flotilla send … take over` escape hatch", err)
+	}
+	if !r.respawned {
+		t.Error("the relaunch DID land before the takeover delivery (the desk is live on the TO harness)")
+	}
+	// Both turns were attempted (the takeover delivery is what failed).
+	if len(r.delivered) != 2 {
+		t.Errorf("the handoff + the (failing) takeover were both attempted (got %v)", r.delivered)
 	}
 }
 

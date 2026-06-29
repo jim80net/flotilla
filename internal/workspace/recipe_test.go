@@ -227,6 +227,50 @@ func TestResolveHarnessTornOverlayFallsBackToPrimary(t *testing.T) {
 	}
 }
 
+// TestResolveRecipeResumeIsBundleAndOverlayIndependent pins the GATE-1 RUNTIME half: a cold
+// resume on the TO harness needs NO continuity bundle / active-harness overlay / corpus. resume
+// resolves its recipe via ResolveRecipe (NOT ResolveActiveRecipe / the overlay), so with NO
+// active-harness.json present it yields a LAUNCHABLE primary recipe consulting only the launch
+// recipe. This test is the red tripwire: a future change that wires the bundle/overlay into the
+// resume resolution path breaks it.
+func TestResolveRecipeResumeIsBundleAndOverlayIndependent(t *testing.T) {
+	t.Setenv(rootEnv, t.TempDir()) // a clean workspace: no launch.json, no active-harness.json, no bundle
+	flat := &launch.Config{Agents: map[string]launch.Recipe{"data": {
+		Launch: "claude -w data",
+		Cwd:    "/abs",
+		// A failover chain EXISTS (a switch could route to grok), but resume must ignore it +
+		// the overlay and resolve the PRIMARY — the bundle/overlay are not its inputs.
+		Fallbacks: []launch.HarnessSlot{{Surface: "grok", Launch: "grok -w data", Provider: "xai"}},
+	}}}
+
+	// ResolveRecipe is the resume resolution path — it consults the launch recipe ONLY.
+	r, err := ResolveRecipe("data", flat)
+	if err != nil {
+		t.Fatalf("ResolveRecipe: %v", err)
+	}
+	if r.Launch == "" || r.Cwd != "/abs" {
+		t.Errorf("ResolveRecipe yielded a non-launchable recipe %+v (resume needs launch+cwd)", r)
+	}
+
+	// ResolveHarness with NO overlay present ⇒ the PRIMARY slot's launchable recipe — proving a
+	// cold resume routes to the primary harness with no overlay/bundle consulted.
+	slot, hr, err := ResolveHarness("data", flat)
+	if err != nil {
+		t.Fatalf("ResolveHarness (no overlay): %v", err)
+	}
+	if slot != SlotPrimary {
+		t.Errorf("slot = %q, want %q (no overlay ⇒ primary; resume is overlay-independent)", slot, SlotPrimary)
+	}
+	if hr.Launch != "claude -w data" {
+		t.Errorf("resume launch = %q, want the PRIMARY launch (not the fallback / an overlay slot)", hr.Launch)
+	}
+
+	// And the overlay file genuinely does NOT exist — the resolution above consulted no overlay.
+	if _, ok, oerr := ReadActiveOverlay("data"); ok || oerr != nil {
+		t.Errorf("ReadActiveOverlay = (ok=%v, err=%v), want absent — the bundle-independence premise", ok, oerr)
+	}
+}
+
 // TestResolveActiveRecipeView: the recipe-shaped view returns the active slot's recipe.
 func TestResolveActiveRecipeView(t *testing.T) {
 	t.Setenv(rootEnv, t.TempDir())

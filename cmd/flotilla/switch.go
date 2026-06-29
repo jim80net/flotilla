@@ -582,7 +582,7 @@ func switchGate4(a roster.Agent, confirm bool) error {
 
 // resolveSwitchSlot resolves the TO slot from --to or --auto. fromSurface is the desk's
 // CURRENTLY-ACTIVE surface (overlay-first), used to fill the implied-primary slot's empty
-// surface (Slots() leaves it blank — recipe.go:221-224) and, for --auto, as the FROM
+// surface (Slots() leaves it blank — launch.go:216-225) and, for --auto, as the FROM
 // provider the poison-aware selector reasons against. Resolution:
 //   - auto ⇒ map the chain onto switchSlots and run the landed selectFailoverTarget with the
 //     (P0: empty) poison state + the current rate-limit scope (P0 has no live probe, so the
@@ -594,7 +594,7 @@ func switchGate4(a roster.Agent, confirm bool) error {
 func resolveSwitchSlot(chain launch.Recipe, fromSurface, to string, auto bool, poison PoisonState) (launch.ResolvedSlot, error) {
 	slots := chain.Slots()
 	// Fill the implied-primary slot's empty surface from the active surface (Slots leaves it
-	// blank for the caller to fill — recipe.go:221-224), so name/surface matching + the
+	// blank for the caller to fill — launch.go:216-225), so name/surface matching + the
 	// selector see a complete surface on every slot.
 	for i := range slots {
 		if slots[i].Surface == "" {
@@ -845,7 +845,12 @@ func cmdSwitch(args []string) error {
 				To:             bundleEndpoint{Surface: toSurface, Provider: toSlot.Provider, SubscriptionID: toSlot.SubscriptionID},
 				SwitchToken:    token,
 				HandoffPath:    neutralPath,
-				HintVersion:    switchHintVersion,
+				// WorkspaceStatePath points a P4 consumer (memex) at the desk's persistent
+				// state/handoff doc — the recipe-level State pointer (launch.Recipe.State), the
+				// SAME pointer resume surfaces for /takeover. Empty (omitempty) when the recipe
+				// declares no State doc.
+				WorkspaceStatePath: chain.State,
+				HintVersion:        switchHintVersion,
 				// GATE-3: a BARE-STRING pointer/hint ONLY — never corpus text or constraint prose.
 				// The bare string IS the mode discriminator memex coerces to {mode: <string>}
 				// (memex-hermes PR #21 §3); the desk identity is the structured `flotilla_agent`
@@ -980,6 +985,15 @@ func writeContinuityBundle(path string, b continuityBundle) error {
 		tmp.Close()
 		os.Remove(tmpName)
 		return fmt.Errorf("write the continuity bundle: %w", err)
+	}
+	// fsync the bytes to disk BEFORE the rename — the bundle is the recovery/Layer-2
+	// continuity artifact (the writeBundle op is durability-gated like the handoff), so it
+	// must be fsync-durable, mirroring writeSwitchRecord. A crash between this write and the
+	// irreversible close must not leave a torn-or-missing bundle.
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("fsync the continuity bundle: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpName)
