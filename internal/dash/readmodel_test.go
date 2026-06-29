@@ -308,7 +308,7 @@ func TestBuildHistory(t *testing.T) {
 		strings.TrimRight(cos.Line(cos.Entry{Time: time.Date(2026, 6, 18, 11, 0, 0, 0, time.UTC), Channel: "C1", From: "xo", To: "operator", Gist: "second"}), "\n"),
 		"", // trailing blank line is skipped
 	}, "\n")
-	backlogMD := "## Backlog\n- [in-flight] build dash\n- [blocked] await review\n- [done] design\n"
+	backlogMD := "## Backlog\n- [in-flight] build dash\n- [blocked] await review\n- [awaiting-auth] flip feed @operator\n- [done] design\n"
 
 	doc := BuildHistory(ledger, backlogMD)
 	if len(doc.Ledger) != 2 {
@@ -323,6 +323,27 @@ func TestBuildHistory(t *testing.T) {
 	}
 	if len(doc.Backlog.Unblocked) != 1 || doc.Backlog.Blocked != 1 || doc.Backlog.Done != 1 {
 		t.Errorf("backlog classification = %+v", doc.Backlog)
+	}
+	// The authorizations ledger is surfaced separately from blocked (the split's whole rationale).
+	if doc.Backlog.AwaitingAuth != 1 {
+		t.Errorf("backlog AwaitingAuth = %d, want 1 (the authorizations ledger must reach the read-model)", doc.Backlog.AwaitingAuth)
+	}
+	// And it is encoded under its own JSON key so the dash can display it.
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"awaiting_auth":1`) {
+		t.Errorf("read-model JSON missing awaiting_auth:1: %s", raw)
+	}
+}
+
+// TestBuildHistory_NoAwaitingAuth pins backward-compatibility: a backlog with no
+// [awaiting-auth] items reports zero — the dash projection is additive.
+func TestBuildHistory_NoAwaitingAuth(t *testing.T) {
+	doc := BuildHistory("", "## Backlog\n- [in-flight] x\n- [blocked] y\n- [done] z\n")
+	if doc.Backlog.AwaitingAuth != 0 {
+		t.Errorf("AwaitingAuth = %d, want 0 (no awaiting-auth items)", doc.Backlog.AwaitingAuth)
 	}
 }
 

@@ -8,9 +8,18 @@
 //
 //   - [in-flight] <text>      dispatched / being driven  → UNBLOCKED (actionable)
 //   - [next] <text>           not started yet            → UNBLOCKED (actionable)
-//   - [blocked] <text>        waiting on the operator     → operator-blocked (drive PREP, don't settle on it)
-//   - [needs-attention] <text> deprioritized stuck item   → operator-blocked
+//   - [blocked] <text>        waiting on the operator     → operator-blocked (the OPEN-QUESTIONS ledger; drive PREP, don't settle on it)
+//   - [needs-attention] <text> deprioritized stuck item   → operator-blocked (open-questions ledger)
+//   - [awaiting-auth] <text>  pending an operator go/no-go → awaiting-authorization (the AUTHORIZATIONS ledger; settle-neutral, distinct from blocked)
 //   - [done] <text>           complete                    → excluded (drained)
+//
+// The OPEN-QUESTIONS ledger ([blocked]/[needs-attention]) and the AUTHORIZATIONS ledger
+// ([awaiting-auth]) are the two SETTLE-NEUTRAL classes: neither is actionable, so neither enters
+// Unblocked, but they are counted separately so "blocked on a question" is not conflated with
+// "awaiting an authorization" (the per-recipient heartbeat judgment and the dash both read the
+// two counts). The authorizations marker is the EXACT token `awaiting-auth` (case-insensitive on
+// the word, fixed spelling): a near-miss like `[awaiting-authorization]` is UNRECOGNIZED and falls
+// through to the fail-safe (Malformed + actionable) — so it fails LOUD, never silently settling.
 //
 // The marker word is matched case-insensitively. A `[x]` checkbox is accepted as done; a leading
 // `~~strike~~` or a `✅` is also read as done (lenient). Numbered (`1.`) and bulleted (`-`/`*`/`+`)
@@ -31,12 +40,13 @@ import (
 
 // Status is the backlog's settle-relevant classification.
 type Status struct {
-	Unblocked []string // ordered unblocked item raw lines (file priority) — the drive queue (the gate's trigger)
-	Blocked   int      // operator-blocked items — informational / test-observable (not read by the gate today)
-	Done      int      // completed items — informational / test-observable
-	Malformed int      // item lines lacking a recognized [status] marker (flagged; ALSO counted in Unblocked)
-	Items     int      // total item lines seen in the section — informational / test-observable
-	Found     bool     // a "## Backlog" section heading was located (distinguishes absent from present-but-empty)
+	Unblocked    []string // ordered unblocked item raw lines (file priority) — the drive queue (the gate's trigger)
+	Blocked      int      // operator-blocked items ([blocked]/[needs-attention]) — the OPEN-QUESTIONS ledger
+	AwaitingAuth int      // awaiting-authorization items ([awaiting-auth]) — the AUTHORIZATIONS ledger (settle-neutral, distinct from Blocked)
+	Done         int      // completed items — informational / test-observable
+	Malformed    int      // item lines lacking a recognized [status] marker (flagged; ALSO counted in Unblocked)
+	Items        int      // total item lines seen in the section — informational / test-observable
+	Found        bool     // a "## Backlog" section heading was located (distinguishes absent from present-but-empty)
 }
 
 // itemLine matches a markdown list item (numbered or bulleted) and captures the text after the
@@ -72,6 +82,8 @@ func Parse(md string) Status {
 			st.Done++
 		case clsBlocked:
 			st.Blocked++
+		case clsAwaitingAuth:
+			st.AwaitingAuth++
 		case clsUnblocked:
 			st.Unblocked = append(st.Unblocked, strings.TrimSpace(raw))
 		default: // clsMalformed — err toward driving AND flag
@@ -88,6 +100,7 @@ const (
 	clsMalformed cls = iota
 	clsUnblocked
 	clsBlocked
+	clsAwaitingAuth
 	clsDone
 )
 
@@ -101,7 +114,9 @@ func classify(rest string) cls {
 			case "done", "x":
 				return clsDone
 			case "blocked", "needs-attention":
-				return clsBlocked
+				return clsBlocked // the OPEN-QUESTIONS ledger
+			case "awaiting-auth":
+				return clsAwaitingAuth // the AUTHORIZATIONS ledger — exact token only (a near-miss falls through to Malformed)
 			case "in-flight", "next":
 				return clsUnblocked
 			default:

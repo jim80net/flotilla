@@ -105,6 +105,7 @@ code { font-family: var(--mono); color: var(--ink); background: rgba(255,255,255
 .backlog-item { padding: .35rem 0; border-bottom: 1px solid var(--line-soft); font-size: .85rem; }
 .backlog-counts { display: flex; gap: 1rem; margin-bottom: .5rem; font-size: .8rem; }
 .count-blocked { color: var(--warn); }
+.count-awaiting-auth { color: var(--cyan); }
 .count-done { color: var(--ok); }
 .count-malformed { color: var(--err); }
 .ledger-entry { padding: .4rem 0; border-bottom: 1px solid var(--line-soft); font-size: .82rem; }
