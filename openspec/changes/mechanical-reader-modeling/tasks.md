@@ -21,73 +21,73 @@ Load-bearing properties (assert across paths):
 ## P0 — brief on the mirror + the envelope + tier-1 structural lint (A + B + C-tier1)
 
 ### 1. The reader-map envelope type + schema validation + wire-format/detect (pure)
-- [ ] 1.1 TEST FIRST (`internal/readermap/envelope_test.go`): a well-formed `{audience, anchor, delta,
+- [x] 1.1 TEST FIRST (`internal/readermap/envelope_test.go`): a well-formed `{audience, anchor, delta,
   decision}` validates; a missing `decision` (neither an action nor `none`) is schema-invalid; an empty
   `anchor` is schema-invalid; an unrecognized `audience` value is ACCEPTED (open-stringly-typed); the
   known values `operator`/`desk:<name>`/`newcomer`/`maintainer` all validate.
-- [ ] 1.2 Implement the `Envelope` type + `Validate()` in a NEW `internal/readermap/` package (pure, no
+- [x] 1.2 Implement the `Envelope` type + `Validate()` in a NEW `internal/readermap/` package (pure, no
   I/O — testable without tmux/Discord), with `audience` open-stringly-typed and `decision`
   present-or-`none`.
-- [ ] 1.3 TEST FIRST (`internal/readermap/detect_test.go`): the three-way DETECT predicate on a free-text
+- [x] 1.3 TEST FIRST (`internal/readermap/detect_test.go`): the three-way DETECT predicate on a free-text
   turn-final string — a single parseable ```` ```reader-map ```` block ⇒ PRESENT+PARSEABLE (returns the
   envelope); a `reader-map` block that does not parse ⇒ MALFORMED; NO block ⇒ ABSENT (ordinary post); a
   SECOND `reader-map` block ⇒ MALFORMED. Missing and malformed are DISTINCT outcomes (key on block
   presence vs parse), so a no-brief turn is never conflated with a broken-brief turn.
-- [ ] 1.4 Implement `Detect(turnFinal string) (env *Envelope, outcome DetectOutcome)` — locate the
+- [x] 1.4 Implement `Detect(turnFinal string) (env *Envelope, outcome DetectOutcome)` — locate the
   fenced `reader-map` block, parse, classify PRESENT-PARSEABLE / MALFORMED / ABSENT (pure, deterministic).
 
 ### 2. Tier-1 structural lint (PRESENCE only) + render-from-fields (pure)
-- [ ] 2.1 TEST FIRST (`internal/readermap/lint_test.go`): tier-1 checks ONLY field presence/non-empty —
+- [x] 2.1 TEST FIRST (`internal/readermap/lint_test.go`): tier-1 checks ONLY field presence/non-empty —
   a slop-but-present envelope (`anchor:"my work"`, `delta:"made progress"`, `decision:"none"`) PASSES
   tier-1 (presence satisfied — tier-1 cannot judge content; tier-2 catches the slop); an empty `anchor`
   or a missing `decision` FAILS; the lint returns a typed result PASS / PRESENCE-FAIL, with NO model
   call and NO fuzzy prose match.
-- [ ] 2.2 TEST FIRST (`internal/readermap/render_test.go`): the published body is RENDERED from the
+- [x] 2.2 TEST FIRST (`internal/readermap/render_test.go`): the published body is RENDERED from the
   envelope fields in the fixed order `anchor` → `decision` → `delta`/body, so "opens from the reader's
   map, leads with the decision" holds BY CONSTRUCTION (assert the rendered body's prefix is the anchor
   and the decision precedes the delta) — NOT verified by matching desk prose.
-- [ ] 2.3 Implement `Tier1Lint(env Envelope) LintResult` (presence-only) + `Render(env Envelope) string`
+- [x] 2.3 Implement `Tier1Lint(env Envelope) LintResult` (presence-only) + `Render(env Envelope) string`
   in `internal/readermap/` (pure, deterministic, no model call).
 
 ### 3. `flotilla brief <desk>` riding the shipped mirror (secret-free)
-- [ ] 3.1 TEST FIRST (`cmd/flotilla/brief_test.go`): `parseBriefArgs` accepts `<desk>` (+ `--roster`);
+- [x] 3.1 TEST FIRST (`cmd/flotilla/brief_test.go`): `parseBriefArgs` accepts `<desk>` (+ `--roster`);
   `flotilla brief <desk>` injects a brief-REQUEST into the desk's pane (a `send`-class pane injection,
   secret-free — it MUST NOT read `$FLOTILLA_SECRETS` nor call `notify`); the brief request instructs the
   desk to emit the reader-map envelope block as its turn-final, and publication is the EXISTING mirror
   publishing the turn that CARRIES the envelope (assert the brief path does not introduce a second
   transport; the brief turn is correlated by the envelope block, not by "the next finish").
-- [ ] 3.2 TEST (SECRET-FREE invariant — about the DESK, not cmdBrief): the brief INJECTION never makes
+- [x] 3.2 TEST (SECRET-FREE invariant — about the DESK, not cmdBrief): the brief INJECTION never makes
   the desk hold secrets and never calls `notify` (the desk-forbidden path, `pushsnippet.go:29`) — the
   desk answers in-pane and the watch daemon's mirror (which holds secrets) publishes. cmdBrief is
   orchestrator-run, so it MAY read `--secrets` for the dark-desk pre-check (3.3); the invariant is the
   DESK-secret-free publish + no-notify, NOT that cmdBrief never touches secrets.
-- [ ] 3.3 TEST (DARK-DESK): when `--secrets` is provided, `flotilla brief` pre-checks each named desk's
+- [x] 3.3 TEST (DARK-DESK): when `--secrets` is provided, `flotilla brief` pre-checks each named desk's
   channel webhook resolves and REPORTS a desk with no resolvable webhook as dark (its brief cannot
   publish) at fan-out time — it does NOT return success while the brief silently never reaches a channel.
   Without `--secrets`, the pre-check is skipped with a note (the injection still proceeds).
-- [ ] 3.4 Implement `cmd/flotilla/brief.go` (`cmdBrief` + `parseBriefArgs` + the dark-desk pre-check);
+- [x] 3.4 Implement `cmd/flotilla/brief.go` (`cmdBrief` + `parseBriefArgs` + the dark-desk pre-check);
   register `brief` in `cmd/flotilla/main.go`. Publication is the mirror, not a desk-invoked primitive.
 
 ### 4. The sync pre-post pipeline inside `deskMirror` (detect+validate + C-tier1, posture, pipeline-shape)
-- [ ] 4.1 TEST FIRST (`cmd/flotilla/mirror_test.go`): `deskMirror.run` runs detect → validate → tier-1
+- [x] 4.1 TEST FIRST (`cmd/flotilla/mirror_test.go`): `deskMirror.run` runs detect → validate → tier-1
   BEFORE the post (inject a recording `post`); an enveloped brief that passes tier-1 posts (rendered
   body); a malformed envelope on the internal channel WARNS-and-posts + flags (never lost); an
   un-enveloped ordinary turn-final WARNS-and-posts un-flagged (today's behavior); EVERY outcome still
   emits exactly one decision log line (the mirror's existing invariant). On the mirror NOTHING is
   suppressed in P0 (the firewall, the only suppressing step, lands in P2).
-- [ ] 4.2 Implement the sync pre-post pipeline in `deskMirror.run` (`cmd/flotilla/mirror.go`) as an
+- [x] 4.2 Implement the sync pre-post pipeline in `deskMirror.run` (`cmd/flotilla/mirror.go`) as an
   ORDERED LIST OF PRE-POST STAGES (a pipeline-shape slice), so P2's firewall registers as stage-1 and
   P3's ledger append registers as a post-post stage WITHOUT re-cutting `run`. P0 stages: detect →
   validate → tier-1, warn-with-publish on the internal-channel egress (the mirror has no public egress;
   only the firewall suppresses, and it is P2). Add a fourth log verb for the future SUPPRESS outcome.
   Preserve OBSERVE-ONLY/BEST-EFFORT.
-- [ ] 4.3 TEST + assert `deskMirrorOnFinish` (`cmd/flotilla/watch.go:890`) wiring is unchanged except for
+- [x] 4.3 TEST + assert `deskMirrorOnFinish` (`cmd/flotilla/watch.go:890`) wiring is unchanged except for
   threading the pipeline (the `ResultReader`/webhook/`Post` collaborators stay identical; no new secret
   dependency).
 
 ### 5. P0 gate
-- [ ] 5.1 `openspec validate mechanical-reader-modeling --strict` green.
-- [ ] 5.2 `go build ./...` + `go test ./internal/readermap/... ./cmd/flotilla/...` green.
+- [x] 5.1 `openspec validate mechanical-reader-modeling --strict` green.
+- [x] 5.2 `go build ./...` + `go test ./internal/readermap/... ./cmd/flotilla/...` green.
 - [ ] 5.3 Manual proof: `flotilla brief <desk>` yields a published Discord brief from the desk's channel,
   secret-free (the #207 fraction-of-desks → every-desk proof).
 

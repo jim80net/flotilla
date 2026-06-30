@@ -5,12 +5,14 @@ import (
 	"strings"
 )
 
-// fenceTag is the info-string that labels the fenced code block carrying the
+// FenceTag is the info-string that labels the fenced code block carrying the
 // reader-map envelope JSON inside an otherwise free-text turn-final. A desk emits
 // its envelope as a ```reader-map fenced block; the publish path locates and parses
 // it. The tag (not a position convention) is what lets the mirror tell a brief
-// turn-final from ordinary prose without the desk calling any publish primitive.
-const fenceTag = "reader-map"
+// turn-final from ordinary prose without the desk calling any publish primitive. It
+// is exported so the brief-request prompt (which tells the desk this exact tag) and
+// the detector share ONE source and can never drift.
+const FenceTag = "reader-map"
 
 // DetectOutcome is the three-way classification of a turn-final with respect to a
 // reader-map envelope. The detect predicate keys on block PRESENCE; the validity
@@ -52,7 +54,7 @@ func (o DetectOutcome) String() string {
 // — empty/missing FIELDS still parse to OutcomePresent and are caught later by
 // Tier1Lint, keeping the detect (presence) and lint (field presence) axes distinct.
 func Detect(turnFinal string) (*Envelope, DetectOutcome) {
-	bodies := extractFencedBlocks(turnFinal, fenceTag)
+	bodies := extractFencedBlocks(turnFinal, FenceTag)
 	switch len(bodies) {
 	case 0:
 		return nil, OutcomeAbsent
