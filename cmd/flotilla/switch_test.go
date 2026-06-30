@@ -316,9 +316,9 @@ func TestRunSwitchRefusals(t *testing.T) {
 		{"copy-mode", func(o *switchOps) {
 			o.inMode = func(string) (bool, error) { return true, nil }
 		}, "", "copy"},
-		{"non-git", func(o *switchOps) {
-			o.absent = func(string, string) (bool, error) { return false, errors.New("not a git work-tree") }
-		}, "", "git work-tree"},
+		{"baseline-error", func(o *switchOps) {
+			o.absent = func(string, string) (bool, error) { return false, errors.New("stat handoff: permission denied") }
+		}, "", "handoff baseline check"},
 		{"pre-existing-blob", func(o *switchOps) {
 			o.absent = func(string, string) (bool, error) { return false, nil }
 		}, "", "already exists"},

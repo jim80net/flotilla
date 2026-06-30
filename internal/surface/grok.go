@@ -259,46 +259,40 @@ func classifyGrokComposerLine(captured string, cursorY int) ComposerDisposition 
 
 // HandoffPath is grok's HARNESS-AGNOSTIC handoff convention: <cwd>/.flotilla/handoffs/recycle-<token>.md
 // (the product-owned home, NOT the claude-branded .claude/handoffs/). The token (command-supplied) leads
-// with a timestamp + a crypto/rand nonce, so the path is dated, unique, and absent-at-HEAD by construction.
+// with a timestamp + a crypto/rand nonce, so the path is dated, unique, and absent-on-disk by construction.
 func (grok) HandoffPath(cwd, token string) string {
 	return filepath.Join(cwd, ".flotilla", "handoffs", "recycle-"+token+".md")
 }
 
-// HandoffTurn is grok's NON-INTERACTIVE, self-committing handoff instruction. grok has no /handoff skill
-// (so there is no interactive skill to forbid) and runs git/tools directly, so it force-commits via
-// `git add -f` (the handoffs dir may be gitignored). It must NOT ask for confirmation (remote-driven).
+// HandoffTurn is grok's NON-INTERACTIVE handoff instruction. grok has no /handoff skill (so there is
+// no interactive skill to forbid). The handoff is written as an untracked gitignored file; flotilla
+// gates durability on the file itself, never version control (#218).
 func (grok) HandoffTurn(designatedPath string) string {
 	return "You are being RECYCLED by flotilla (an automated, REMOTE-DRIVEN chapter close — " +
 		"no human is at this pane to answer prompts). Do exactly this, then stop:\n" +
 		"1. Write a complete handoff (objective, completed work, current state, remaining work, " +
 		"gotchas — enough for a fresh session to resume cold) to this EXACT path: " + designatedPath + "\n" +
-		"2. Commit ONLY the handoff to the CURRENT branch (path-scoped, so a dirty index is not swept " +
-		"in): `git add -f \"" + designatedPath + "\" && git commit -m \"chore(recycle): handoff before " +
-		"recycle\" -- \"" + designatedPath + "\"` (the -f is required — the handoffs dir may be gitignored; " +
-		"the quotes guard a path with spaces).\n" +
-		"3. Do NOT ask me to confirm or review, do NOT ask \"is anything missing\" — just write, commit, " +
-		"and stop. flotilla will close and relaunch this desk once the commit lands."
+		"2. Do NOT commit the handoff to git — it MUST remain an untracked file on disk (the path is " +
+		"gitignored; flotilla detects durability from the file itself, not version control). Do NOT run " +
+		"`git add` or `git commit` on it.\n" +
+		"3. Do NOT ask me to confirm or review, do NOT ask \"is anything missing\" — just write and stop. " +
+		"flotilla will close and relaunch this desk once the file lands on disk."
 }
 
 // TakeoverTurn is grok's IMPERATIVE, begin-immediately takeover instruction for the fresh session. grok
 // has no /takeover skill; it tells the desk to read the handoff and work immediately, and to parlay any
 // question via a flotilla message (a remote XO cannot answer an in-pane prompt over the relay).
 //
-// It also makes the handoff TRANSIENT: after reading it, the fresh session's FIRST action is to git rm
-// + commit the handoff off the branch — committed by HandoffTurn only to durably transfer it across the
-// recycle, it would otherwise leak (gitignored, deployment-specific) when the branch PRs to public main
-// (#212). Read → remove → work keeps it committed only for the transfer, gone before any feature PR.
+// After reading, the fresh session deletes the handoff file from disk (#218).
 func (grok) TakeoverTurn(designatedPath string) string {
 	return "You are a freshly-recycled flotilla desk with a clean context window, and you are " +
 		"REMOTE-DRIVEN (a remote XO drives you over the relay; no human is at this pane). " +
 		"Do this in order:\n" +
 		"1. Read this handoff in full and take over per it: " + designatedPath + "\n" +
-		"2. Then, as your first action after reading, REMOVE the transferred handoff from version control " +
-		"so it cannot leak into a later public PR (it is gitignored and carries deployment specifics; it " +
-		"was committed only to durably transfer it across the recycle, and you have read it now): " +
-		"`git rm -f \"" + designatedPath + "\" && git commit -m \"chore(recycle): drop transferred handoff\" " +
-		"-- \"" + designatedPath + "\"` (the -f ensures a coincidentally-dirty handoff cannot block the " +
-		"removal; path-scoped, so no other work is swept in).\n" +
+		"2. Then, as your first action after reading, DELETE the handoff file from disk so " +
+		"deployment-specific content cannot linger in the worktree (it is gitignored and must never " +
+		"enter version control; you have read it now): `rm -f \"" + designatedPath + "\"` (the -f avoids " +
+		"a spurious failure if the file is already gone; the quotes guard a path with spaces).\n" +
 		"3. Then BEGIN WORK IMMEDIATELY on the handoff's remaining work — do NOT ask \"shall I start?\" or " +
 		"wait for confirmation. If you genuinely need a clarification, surface it via a flotilla MESSAGE " +
 		"(e.g. `flotilla notify --from <your-name> \"...\"`), NEVER an in-pane interactive prompt — a " +

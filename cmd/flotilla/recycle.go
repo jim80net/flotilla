@@ -52,7 +52,7 @@ type recycleOps struct {
 	inMode       func(target string) (bool, error)                  // deliver.PaneInMode (copy-mode refuse)
 	assess       func(target string) surface.State                  // driver.Assess
 	composer     func(target string) surface.ComposerDisposition    // driver.ComposerState (required)
-	absent       func(cwd, path string) (bool, error)               // deliver.HandoffAbsentAtHead (t0 baseline; also git-tree gate)
+	absent       func(cwd, path string) (bool, error)               // deliver.HandoffAbsentAtHead (t0 baseline: absent on disk)
 	durable      func(cwd, path string, minBytes int) (bool, error) // deliver.HandoffDurable
 	deliver      func(target, text string) error                    // confirmed delivery bound to the driver
 	closeFn      func(target string) error                          // driver.Close
@@ -127,24 +127,23 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, error) {
 		return "", fmt.Errorf("phase 0: %q did not settle to idle at a cleared composer within %s — ABORT, desk untouched", p.agent, p.timeouts.boot)
 	}
 
-	// Baseline: the designated handoff is ABSENT at HEAD (also the git-work-tree gate). The
-	// Phase-1 gate then requires an ABSENT→COMMITTED transition, so a pre-existing blob cannot
-	// false-pass.
+	// Baseline: the designated handoff is ABSENT on disk. The Phase-1 gate then requires an
+	// ABSENT→PRESENT transition, so a pre-existing file cannot false-pass.
 	absent, err := ops.absent(p.cwd, p.designatedPath)
 	if err != nil {
-		return "", fmt.Errorf("recycle requires a git work-tree: %w", err)
+		return "", fmt.Errorf("handoff baseline check for %q: %w", p.designatedPath, err)
 	}
 	if !absent {
-		return "", fmt.Errorf("a blob already exists at the designated handoff path %s — refusing (the gate requires an absent→committed transition; this should be impossible with a unique token, so investigate)", p.designatedPath)
+		return "", fmt.Errorf("a blob already exists at the designated handoff path %s — refusing (the gate requires an absent→present transition; this should be impossible with a unique token, so investigate)", p.designatedPath)
 	}
 
-	// PHASE 1 — handoff (lockless): deliver the non-interactive self-committing turn, then gate
-	// on the designated blob going absent→committed-and-non-trivial AND idle∧cleared.
+	// PHASE 1 — handoff (lockless): deliver the non-interactive handoff turn, then gate on the
+	// designated file going absent→present-and-non-trivial AND idle∧cleared.
 	if err := ops.deliver(target, p.handoffText); err != nil {
 		return "", fmt.Errorf("phase 1: delivering the handoff turn to %q failed (desk untouched): %w", p.agent, err)
 	}
 	if !pollHandoffGate(ops, target, p, p.timeouts.handoff) {
-		return "", fmt.Errorf("phase 1: handoff not durably confirmed for %q within %s (no committed non-trivial %s, or the turn never returned to an idle cleared composer) — ABORT, desk still running, nothing closed", p.agent, p.timeouts.handoff, p.designatedPath)
+		return "", fmt.Errorf("phase 1: handoff not durably confirmed for %q within %s (no present non-trivial %s on disk, or the turn never returned to an idle cleared composer) — ABORT, desk still running, nothing closed", p.agent, p.timeouts.handoff, p.designatedPath)
 	}
 
 	// ACQUIRE the pane-txn lock for the irreversible span (Phases 2→4); released on return.

@@ -171,9 +171,9 @@ func TestRunRecycleResolveRefusals(t *testing.T) {
 		{"copy-mode", func(o *recycleOps) {
 			o.inMode = func(string) (bool, error) { return true, nil }
 		}, "copy"},
-		{"non-git", func(o *recycleOps) {
-			o.absent = func(string, string) (bool, error) { return false, errors.New("not a git work-tree") }
-		}, "git work-tree"},
+		{"baseline-error", func(o *recycleOps) {
+			o.absent = func(string, string) (bool, error) { return false, errors.New("stat handoff: permission denied") }
+		}, "handoff baseline check"},
 		{"pre-existing-blob", func(o *recycleOps) {
 			o.absent = func(string, string) (bool, error) { return false, nil }
 		}, "already exists"},
