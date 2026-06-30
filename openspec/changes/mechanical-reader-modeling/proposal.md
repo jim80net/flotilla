@@ -59,12 +59,18 @@ publish pipeline (full design in `docs/mechanical-reader-modeling-design.md`):
    CLI path**, NEVER in the best-effort auto-mirror.
 
 4. **Pillar D — the firewall: REFUSE, never strip (complements #202).** The publish path runs every
-   outbound artifact through the private-firewall detector (the static guard's denylist + #202's
-   pattern). On a hit it **refuses and bounces to the desk** with the offending token + its generic
-   abstraction *as a suggestion the desk applies in-context* — it NEVER silently rewrites (a runtime
-   strip would corrupt the modeled delta the operator's map ingests). #202 stays its OWN static-guard
-   PR (it guards committed fixtures, which never traverse the publish path); D reuses its regex at
-   runtime egress.
+   outbound artifact through the private-firewall detector (the gitignored deployment denylist + the
+   built-in generic patterns + the canonical `<prefix>:<n>.<m>` pattern this change introduces). On a hit
+   it **refuses and bounces to the desk** with the offending token + its generic abstraction *as a
+   suggestion the desk applies in-context* — it NEVER silently rewrites (a runtime strip would corrupt
+   the modeled delta the operator's map ingests). **P2 OWNS the pattern** (it is unbuilt; "reuse #202's
+   regex" is not possible); #202's static guard MIRRORS it when it ships (a conformance test enforces
+   equivalence, since the Go/RE2 runtime guard and the bash/PCRE static guard cannot share regex code —
+   they share the gitignored term-list data). Beside the fail-closed denylist, D carries an **advisory
+   WARN tier** (mechanism from the relaunch leak-scanner): a gitignored deployment DOMAIN-VOCABULARY set
+   that, on a hit, WARNS for human adjudication and still publishes — catching the leak class an
+   identifier match misses (**#151** = generic-looking domain words that deanonymize the deployment, e.g.
+   an example branch name). The mechanism ships; the vocabulary stays in the gitignored warnlist.
 
 5. **Pillar E — the dash renders the operator's map (the data/view #210 builds on).** A new
    append-only per-desk envelope ledger (`latest-delta.json`) written by the publish path; the dash
