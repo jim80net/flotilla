@@ -1,7 +1,9 @@
 package idlehold
 
 import (
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -18,6 +20,13 @@ func TestCheck_IdleHoldSignals(t *testing.T) {
 		{"only thing waiting", "The only thing waiting on you is whether to run tests.", "only-thing-waiting"},
 		{"your call end", "All gates green.\n\nYour call.", "your-call-nondecision"},
 		{"wait-only wake", "I'll check back in 10 minutes once you're ready — holding for your response.", "wait-only-wake"},
+		{"standing by", "Tests are green. Standing by for your go-ahead.", "standing-by"},
+		{"awaiting go-ahead", "Awaiting your go-ahead to merge.", "awaiting-go-ahead"},
+		{"let me know proceed", "Let me know how you'd like to proceed.", "let-me-know-proceed"},
+		{"ready when you are", "PR is ready. Ready when you are.", "ready-when-you-are"},
+		{"pending your input", "Pending your input on the next step.", "pending-your-input"},
+		{"holding pattern", "In a holding pattern until you respond.", "holding-pattern"},
+		{"should i proceed", "Should I proceed with the merge?", "should-i-proceed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -44,6 +53,37 @@ func TestCheck_GenuineDecisionCarveOuts(t *testing.T) {
 		if r := Check(text); r.IdleHold {
 			t.Errorf("genuine decision must NOT be idle-hold: %q (signal %q)", text, r.Signal)
 		}
+	}
+}
+
+func TestCheck_BlockedLedgerCarveOut(t *testing.T) {
+	text := "Blocked on the API key rotation. Marked `[blocked]` dependency on infra."
+	if r := Check(text); r.IdleHold {
+		t.Errorf("[blocked] ledger must NOT be idle-hold: signal %q", r.Signal)
+	}
+	text2 := "Recorded `[needs-attention]` waiting on the upstream schema change."
+	if r := Check(text2); r.IdleHold {
+		t.Errorf("[needs-attention] ledger must NOT be idle-hold: signal %q", r.Signal)
+	}
+}
+
+func TestCheck_PastTenseNarrationNotIdleHold(t *testing.T) {
+	cases := []string{
+		"I was holding for the build; it finished, so I shipped the fix.",
+		"We had been waiting on you but the gate cleared, so I merged.",
+		"Previously I was holding for your call — no longer; PR #12 is merged.",
+	}
+	for _, text := range cases {
+		if r := Check(text); r.IdleHold {
+			t.Errorf("past-tense narration must NOT be idle-hold: %q (signal %q)", text, r.Signal)
+		}
+	}
+}
+
+func TestCheck_QuotedRuleMentionNotIdleHold(t *testing.T) {
+	text := `Doctrine reminder: never end turns with "holding for your call" — I merged instead.`
+	if r := Check(text); r.IdleHold {
+		t.Errorf("quoted rule mention must NOT be idle-hold: signal %q", r.Signal)
 	}
 }
 
@@ -77,16 +117,40 @@ func TestTracker_ConsecutiveStrikes(t *testing.T) {
 	if !tr.Record("backend", hold) {
 		t.Fatal("second strike must meet threshold")
 	}
+	if tr.Strikes("backend") != 0 {
+		t.Fatalf("strikes must reset after threshold fires, got %d", tr.Strikes("backend"))
+	}
 }
 
-func TestTracker_ResetOnActingTurn(t *testing.T) {
+func TestTracker_NonMatchPreservesStrikes(t *testing.T) {
 	tr := NewTracker()
 	hold := Check("Waiting on you.")
 	tr.Record("backend", hold)
-	tr.Record("backend", Check("Shipped the fix and opened PR #99."))
-	if tr.Strikes("backend") != 0 {
-		t.Fatalf("acting turn must reset strikes, got %d", tr.Strikes("backend"))
+	// A non-match that slipped past detection must NOT zero strikes.
+	tr.Record("backend", Check("Merged the PR and ran tests."))
+	if tr.Strikes("backend") != 1 {
+		t.Fatalf("non-match must preserve strikes, got %d", tr.Strikes("backend"))
 	}
+	// Second hold still reaches threshold.
+	if !tr.Record("backend", hold) {
+		t.Fatal("second hold after missed detect must meet threshold")
+	}
+}
+
+func TestTracker_ConcurrentRecordRace(t *testing.T) {
+	tr := NewTracker()
+	hold := Check("Holding for your call.")
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			agent := fmt.Sprintf("desk-%d", n%5)
+			tr.Record(agent, hold)
+			_ = tr.Strikes(agent)
+		}(i)
+	}
+	wg.Wait()
 }
 
 func TestBreakPrompt_IncludesRecommendation(t *testing.T) {

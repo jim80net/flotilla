@@ -26,3 +26,6 @@ the harness must fight it mechanically, not by hoping the next prompt remembers.
   re-engagement only).
 - Changing the three genuine-decision carve-outs (they inherit the operator's standing
   rules verbatim).
+- XO idle-hold detection on the desk-finish path — the XO is excluded (it has its own
+  `continueXO` / backlog-gate anti-passivity loop). The motivating incident class included
+  XO stalls, but v1 targets desk turn-finals where the mirror trigger already fires.

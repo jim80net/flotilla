@@ -6,7 +6,8 @@
 //
 // A genuine operator decision is ONLY one of three kinds: new/not-yet-affirmed
 // money spend, irreversible/destructive action, or a genuine divergent fork with
-// real tradeoffs. Language that names one of those carve-outs is NOT idle-hold.
+// real tradeoffs. Language that names one of those carve-outs, or records a
+// tracked blocker in the open-questions ledger ([blocked]), is NOT idle-hold.
 // Everything else that ends a turn with "holding / waiting" is the antipattern
 // this package flags.
 package idlehold
@@ -14,18 +15,19 @@ package idlehold
 import (
 	"regexp"
 	"strings"
+	"sync"
 )
 
-// StrikeThreshold is how many consecutive idle-hold turn-finals (or wait-only
-// wakes) on the same agent trigger the forcing-function prompt. "Repeated" in
-// the issue maps to two strikes — one might be a slip; two is a pattern.
+// StrikeThreshold is how many idle-hold turn-finals (or wait-only wakes) on the
+// same agent trigger the forcing-function prompt. "Repeated" in the issue maps to
+// two strikes — one might be a slip; two is a pattern.
 const StrikeThreshold = 2
 
 // Result is the egress-agnostic verdict for one text body (a turn-final or a
 // scheduled wake message).
 type Result struct {
-	// IdleHold is true when the body matches an idle-hold signal AND does NOT
-	// carry a genuine-decision carve-out.
+	// IdleHold is true when the body matches an antipattern signal AND does NOT
+	// carry a genuine-decision or tracked-blocker carve-out.
 	IdleHold bool
 	// Signal names the matched antipattern class for logging (empty when IdleHold
 	// is false).
@@ -35,37 +37,50 @@ type Result struct {
 	Recommendation string
 }
 
+type idleHoldPattern struct {
+	signal     string
+	re         *regexp.Regexp
+	tenseGuard bool // reject past-tense narration ("was holding for …")
+	quoteGuard bool // reject quoted mentions of the rule
+}
+
 var (
-	// idleHoldPatterns are case-insensitive antipattern signals from the
-	// operator's standing rules (be-proactive, anti-hesitation corollary). Each
-	// entry is (signal name, compiled pattern).
-	idleHoldPatterns = []struct {
-		signal string
-		re     *regexp.Regexp
-	}{
+	idleHoldPatterns = []idleHoldPattern{
 		// More specific signals first — broader patterns below would shadow them.
-		{"only-thing-waiting", regexp.MustCompile(`(?i)\bthe\s+only\s+thing\s+waiting\b`)},
-		{"wait-only-wake", regexp.MustCompile(`(?i)\b(?:check\s+back|wake|ping)\s+(?:in|when|once)\b.{0,80}\b(?:wait|holding|your\s+(?:call|response))\b`)},
-		{"say-the-word", regexp.MustCompile(`(?i)\bsay\s+the\s+word\b`)},
-		{"want-me-or-leave", regexp.MustCompile(`(?i)\bwant\s+me\s+to\b.{0,120}\bor\s+(?:leave|wait|sit|stay)\b`)},
-		{"shall-i-or", regexp.MustCompile(`(?i)\bshall\s+i\b.{0,80}\bor\s+(?:leave|wait|not)\b`)},
-		{"your-call-nondecision", regexp.MustCompile(`(?i)(?:^|\n)\s*(?:so\s+)?your\s+call[.!?\s]*$`)},
-		{"permission-seek-end", regexp.MustCompile(`(?i)(?:^|\n)\s*(?:want|should)\s+(?:me\s+)?to\b.{0,60}[?]\s*$`)},
-		{"holding-for-call", regexp.MustCompile(`(?i)\bholding\s+(?:for|on)\b`)},
-		{"waiting-for-operator", regexp.MustCompile(`(?i)\bwaiting\s+(?:for|on)\s+(?:your|the\s+operator|you\b|your\s+call)`)},
-		{"scheduling-wait", regexp.MustCompile(`(?i)\b(?:i(?:'ll| will)|scheduling)\s+wait\b`)},
+		{signal: "only-thing-waiting", re: regexp.MustCompile(`(?i)\bthe\s+only\s+thing\s+waiting\b`)},
+		{signal: "wait-only-wake", re: regexp.MustCompile(`(?i)\b(?:check\s+back|wake|ping)\s+(?:in|when|once)\b.{0,80}\b(?:wait|holding|your\s+(?:call|response))\b`)},
+		{signal: "say-the-word", re: regexp.MustCompile(`(?i)\bsay\s+the\s+word\b`)},
+		{signal: "want-me-or-leave", re: regexp.MustCompile(`(?i)\bwant\s+me\s+to\b.{0,120}\bor\s+(?:leave|wait|sit|stay)\b`)},
+		{signal: "shall-i-or", re: regexp.MustCompile(`(?i)\bshall\s+i\b.{0,80}\bor\s+(?:leave|wait|not)\b`)},
+		{signal: "should-i-proceed", re: regexp.MustCompile(`(?i)\bshould\s+i\s+proceed\b`)},
+		{signal: "your-call-nondecision", re: regexp.MustCompile(`(?i)(?:^|\n)\s*(?:so\s+)?your\s+call[.!?\s]*$`)},
+		{signal: "permission-seek-end", re: regexp.MustCompile(`(?i)(?:^|\n)\s*(?:want|should)\s+(?:me\s+)?to\b.{0,60}[?]\s*$`)},
+		{signal: "standing-by", re: regexp.MustCompile(`(?i)\bstanding\s+by\b`)},
+		{signal: "awaiting-go-ahead", re: regexp.MustCompile(`(?i)\bawaiting\s+your\s+go[- ]?ahead\b`)},
+		{signal: "let-me-know-proceed", re: regexp.MustCompile(`(?i)\blet\s+me\s+know\s+how\s+you(?:'d| would)\s+like\s+to\s+proceed\b`)},
+		{signal: "ready-when-you-are", re: regexp.MustCompile(`(?i)\bready\s+when\s+you\s+are\b`)},
+		{signal: "pending-your-input", re: regexp.MustCompile(`(?i)\bpending\s+your\s+input\b`)},
+		{signal: "holding-pattern", re: regexp.MustCompile(`(?i)\bholding\s+pattern\b`)},
+		{signal: "holding-for-call", re: regexp.MustCompile(`(?i)\bholding\s+(?:for|on)\b`), tenseGuard: true, quoteGuard: true},
+		{signal: "waiting-for-operator", re: regexp.MustCompile(`(?i)\bwaiting\s+(?:for|on)\s+(?:your|the\s+operator|you\b|your\s+call)`), tenseGuard: true, quoteGuard: true},
+		{signal: "scheduling-wait", re: regexp.MustCompile(`(?i)\b(?:i(?:'ll| will)|scheduling)\s+wait\b`)},
 	}
 
 	// genuineDecisionPatterns exempt a body that names one of the three real
-	// operator decisions — spend, irreversible, or divergent fork.
+	// operator decisions, or records a tracked blocker the doctrine instructs
+	// agents to use instead of bare waiting.
 	genuineDecisionPatterns = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)\[awaiting-auth\]`),
+		regexp.MustCompile(`(?i)\[blocked\]`),
+		regexp.MustCompile(`(?i)\[needs-attention\]`),
 		regexp.MustCompile(`(?i)\b(?:new|not[- ]yet[- ]affirmed|unaffirmed)\s+(?:money\s+)?spend\b`),
 		regexp.MustCompile(`(?i)\b(?:metered|billable|paid\s+api|subscription\s+token|budget\s+cap|costs?\s+money)\b`),
 		regexp.MustCompile(`(?i)\b(?:irreversible|destructive|cannot\s+undo|hard[- ]to[- ]rollback|force[- ]push|delete\s+production)\b`),
 		regexp.MustCompile(`(?i)\b(?:mutually[- ]exclusive|divergent\s+direction|genuine\s+fork|two\s+(?:valid\s+)?approaches|real\s+tradeoffs?)\b`),
 		regexp.MustCompile(`(?i)\bdecision[- ]type:\s*(?:spend|irreversible|fork)\b`),
 	}
+
+	pastTenseBeforeRE = regexp.MustCompile(`(?i)\b(?:i\s+)?(?:was|were|had\s+been|have\s+been)\s+\w*\s*$`)
 
 	recommendationRE = regexp.MustCompile(`(?i)\bmy\s+recommendation\s+is[:\s]+(.+?)(?:\.|$|\n)`)
 )
@@ -80,7 +95,7 @@ func Check(text string) Result {
 		return Result{}
 	}
 	for _, p := range idleHoldPatterns {
-		if p.re.MatchString(text) {
+		if findIdleHoldMatch(text, p) != "" {
 			return Result{
 				IdleHold:       true,
 				Signal:         p.signal,
@@ -91,8 +106,47 @@ func Check(text string) Result {
 	return Result{}
 }
 
+func findIdleHoldMatch(text string, p idleHoldPattern) string {
+	loc := p.re.FindStringIndex(text)
+	if loc == nil {
+		return ""
+	}
+	if p.tenseGuard && isPastTenseContext(text[:loc[0]]) {
+		return ""
+	}
+	if p.quoteGuard && isQuotedMention(text, loc[0], loc[1]) {
+		return ""
+	}
+	return text[loc[0]:loc[1]]
+}
+
+func isPastTenseContext(before string) bool {
+	tail := before
+	if len(tail) > 80 {
+		tail = tail[len(tail)-80:]
+	}
+	return pastTenseBeforeRE.MatchString(tail)
+}
+
+func isQuotedMention(text string, start, end int) bool {
+	if start == 0 {
+		return false
+	}
+	open := text[start-1]
+	if open != '"' && open != '\'' && open != '`' {
+		return false
+	}
+	// Same-line closing quote after the match.
+	lineEnd := strings.Index(text[start:], "\n")
+	if lineEnd < 0 {
+		lineEnd = len(text) - start
+	}
+	segment := text[start : start+lineEnd]
+	return strings.Contains(segment, string(open))
+}
+
 // isGenuineDecision reports whether the body names one of the three real
-// operator decision types (the carve-outs from the anti-hesitation corollary).
+// operator decision types or a doctrine-prescribed tracked blocker.
 func isGenuineDecision(text string) bool {
 	for _, re := range genuineDecisionPatterns {
 		if re.MatchString(text) {
@@ -110,9 +164,12 @@ func extractRecommendation(text string) string {
 	return strings.TrimSpace(m[1])
 }
 
-// Tracker counts consecutive idle-hold strikes per agent. A non-idle-hold turn
-// resets the counter; reaching StrikeThreshold means the forcing function fires.
+// Tracker accrues idle-hold strikes per agent. Non-matches do NOT reset the
+// counter (a missed detection between two real holds must not zero strikes).
+// Strikes reset only after the threshold fires. The map is bounded by fleet size
+// in practice; retired agent keys linger harmlessly (one int each).
 type Tracker struct {
+	mu      sync.Mutex
 	strikes map[string]int
 }
 
@@ -122,18 +179,26 @@ func NewTracker() *Tracker {
 }
 
 // Record applies one Check result for an agent and reports whether the threshold
-// is met (forcing function should fire). A non-idle-hold result resets strikes.
+// is met (forcing function should fire). Non-idle-hold results leave strikes
+// unchanged. When the threshold is met, strikes reset for that agent after firing.
 func (t *Tracker) Record(agent string, r Result) (thresholdMet bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	if !r.IdleHold {
-		delete(t.strikes, agent)
 		return false
 	}
 	t.strikes[agent]++
-	return t.strikes[agent] >= StrikeThreshold
+	if t.strikes[agent] >= StrikeThreshold {
+		delete(t.strikes, agent)
+		return true
+	}
+	return false
 }
 
 // Strikes returns the current strike count for an agent (for tests).
 func (t *Tracker) Strikes(agent string) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	return t.strikes[agent]
 }
 

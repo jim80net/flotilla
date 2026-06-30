@@ -3,12 +3,18 @@
 Pure pattern matching — no I/O, no LLM. Two tiers:
 
 1. **Genuine-decision carve-out** (checked first): spend, irreversible, divergent-fork,
-   or the `[awaiting-auth]` marker ⇒ NOT idle-hold.
+   the `[awaiting-auth]` marker, or a tracked open-questions ledger entry (`[blocked]` /
+   `[needs-attention]`) ⇒ NOT idle-hold.
 2. **Antipattern signals** (from the operator's be-proactive / anti-hesitation rules):
-   holding/waiting language, permission-seeks, say-the-word, wait-only wake scheduling.
+   holding/waiting language, permission-seeks, say-the-word, wait-only wake scheduling,
+   standing-by / pending-input phrasing. `holding`/`waiting` matches apply tense and
+   quote guards so past-tense narration and quoted rule mentions do not fire.
 
-A per-agent `Tracker` accrues consecutive strikes; `StrikeThreshold = 2` fires the break
-prompt. An acting turn resets the counter.
+A per-agent `Tracker` (mutex-guarded — production runs the finish batch via
+`MirrorDispatch = go run()`) accrues strikes; `StrikeThreshold = 2` fires the break
+prompt. Non-matches do NOT reset strikes (a missed detection between two real holds
+must not zero the counter); strikes reset only after the threshold fires. The per-agent
+map is bounded by fleet size in practice (retired keys linger as one int each).
 
 ## Wiring
 

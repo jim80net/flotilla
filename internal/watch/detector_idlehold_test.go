@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/idlehold"
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
@@ -56,4 +57,36 @@ func TestDetectorIdleHoldNilInert(t *testing.T) {
 	d := newIdleHoldDet(t, cfg)
 	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateWorking}, "h0")
 	d.Tick()
+}
+
+// Production wires MirrorDispatch = go run(); idle-hold shares that batch. Overlapping
+// async dispatches must not race on the shared Tracker (regression for concurrent map writes).
+func TestDetectorIdleHoldAsyncDispatchRace(t *testing.T) {
+	tracker := idlehold.NewTracker()
+	var mu sync.Mutex
+	cfg := idleHoldConfig("xo", []string{"xo", "backend", "frontend"}, func(a string) {
+		r := idlehold.Check("Holding for your call on next steps.")
+		tracker.Record(a, r)
+		mu.Lock()
+		mu.Unlock()
+	})
+	cfg.MirrorDispatch = func(run func()) { go run() }
+	cfg.Assess = func(a string) surface.State { return surface.StateIdle }
+
+	d := newIdleHoldDet(t, cfg)
+	seed(d, map[string]surface.State{
+		"xo":       surface.StateIdle,
+		"backend":  surface.StateWorking,
+		"frontend": surface.StateWorking,
+	}, "h0")
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d.Tick()
+		}()
+	}
+	wg.Wait()
 }
