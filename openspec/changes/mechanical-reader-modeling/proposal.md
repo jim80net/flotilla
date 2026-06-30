@@ -76,7 +76,11 @@ publish pipeline (full design in `docs/mechanical-reader-modeling-design.md`):
 **The lint posture (the load-bearing rule — the operator must NEVER lose a brief to a lint):** PUBLIC
 git/GitHub artifacts (issues/PRs/commits) are **fail-closed** on any lint failure; operator briefs +
 internal Discord channels are **warn-with-publish + flag**. The firewall refuse (D) is fail-closed on
-BOTH egresses — a private leak is never published.
+BOTH egresses — a known-denylist leak is never published (the firewall is a denylist backstop, not a
+guarantee against a novel coined term — CLAUDE.md §1). The operator is protected from LOSING briefs (the
+warn-with-publish posture) and from KNOWN leaks (the firewall) — NOT from RECEIVING a deficient brief: a
+slop brief on an internal channel is flagged but still delivered, since never-lose-a-brief outranks
+never-publish-a-deficient-one.
 
 **Two egresses (no single chokepoint):** (1) the Discord runtime path (the mirror + the
 `notify`/`reply`/`brief` CLI) — envelope + lint + firewall attach here; (2) the git/GitHub static

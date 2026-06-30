@@ -69,7 +69,8 @@ The operator must NEVER lose a brief to a lint. Therefore:
   missing/malformed envelope) blocks the artifact. Latency is acceptable there.
 - **Operator briefs + internal Discord channels:** **warn-with-publish + flag** — the post is always
   delivered; a lint failure is recorded + surfaced, never a drop.
-- **The firewall refuse (D) is fail-closed on BOTH egresses** — a private leak is never published. On
+- **The firewall refuse (D) is fail-closed on BOTH egresses** — a known-denylist leak is never published
+  (a denylist backstop, not airtight against a novel coined term — CLAUDE.md §1). On
   the auto-mirror that means the post is SUPPRESSED + loudly logged (no interactive desk to bounce to
   mid-turn); on the CLI path the desk is bounced the offending token + a generic abstraction.
 - **A malformed envelope** (present but schema-invalid) is fail-closed everywhere — it is a
@@ -94,7 +95,9 @@ The operator must NEVER lose a brief to a lint. Therefore:
 
 - **P0 — A + B + C-tier1.** `flotilla brief` on the mirror; the envelope type + schema; the
   deterministic tier-1 structural lint, sync pre-post inside `deskMirror`. Makes brief-fanout
-  every-desk, modeled-shape. Smallest, highest-value, operator-visible cut.
+  every-desk + structural SHAPE (open-from-anchor/lead-with-decision by construction). NOT yet "modeled"
+  — tier-1 cannot judge content (structure ≠ modeling); the quality judge lands P1. Smallest,
+  highest-value, operator-visible cut.
 - **P1 — C-tier2 + templates.** The LLM reader-model judge on the CLI path; per-audience templates;
   fail-closed-public / warn-briefs.
 - **P2 — D (runtime firewall refuse) + the git pre-commit/pre-push hook.** Reuses #202's regex (which

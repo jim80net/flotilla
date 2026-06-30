@@ -5,28 +5,34 @@
 ### Requirement: The per-desk mirror runs a synchronous reader-modeling pipeline before each post
 
 `deskMirror.run` (`cmd/flotilla/mirror.go`) SHALL, BEFORE its existing post, run the synchronous
-reader-modeling pre-post pipeline — **(1) firewall refuse-check → (2) envelope validate → (3) tier-1
-structural lint** — and SHALL suppress the post when the firewall refuses or a public-egress lint
-fail-closes. The pipeline SHALL run SYNCHRONOUSLY inside `run` (before the post) precisely because a
-Discord message cannot be un-sent; it SHALL NOT be deferred to the async `MirrorDispatch` goroutine in
-a way that lets a refused artifact reach Discord. The mirror SHALL remain OBSERVE-ONLY and BEST-EFFORT
-for everything EXCEPT a fail-closed firewall refusal (which suppresses the post) and a public-egress
-lint failure: an ordinary internal channel turn-final that merely lacks an envelope SHALL still be
-warned-and-published (today's behavior preserved). Every pipeline outcome SHALL continue to emit exactly
-one decision log line (the mirror's existing one-line-per-outcome invariant), so a suppression is never
-silent.
+reader-modeling pre-post pipeline — **(1) firewall refuse-check → (2) envelope detect+validate →
+(3) tier-1 structural lint**. Because the mirror has NO public egress (every mirror post is an internal
+Discord channel), the ONLY step that SUPPRESSES a post on this path is the firewall refuse (a private
+leak); envelope-validate and tier-1 are **warn-with-publish** here — a structurally-deficient or
+un-enveloped turn-final is flagged but still published (never lost). The pipeline SHALL run SYNCHRONOUSLY
+inside `run` (before the post) precisely because a Discord message cannot be un-sent and the firewall
+refusal must happen before publish; it SHALL NOT be deferred to the async `MirrorDispatch` goroutine in
+a way that lets a leaking artifact reach Discord. The mirror SHALL remain OBSERVE-ONLY and BEST-EFFORT
+for everything EXCEPT a firewall refusal (which suppresses the post + raises an operator-visible
+signal). Every pipeline outcome SHALL continue to emit exactly one decision log line (the mirror's
+existing one-line-per-outcome invariant), so a suppression is never silent. **Phasing:** the
+envelope-validate + tier-1 arms land in P0; the firewall refuse arm is the P2 increment (per this
+change's phasing) — in the P0-shipped state the mirror pipeline is validate + tier-1 (warn) only, with
+no suppression.
 
-#### Scenario: The mirror runs the sync pipeline before posting
+#### Scenario: The mirror runs the sync pipeline before posting, suppressing only on a firewall leak
 
 - **WHEN** `deskMirror.run` is about to post a desk's turn-final
-- **THEN** it runs the firewall refuse-check, then envelope validate, then the tier-1 structural lint
-  synchronously before the post, and only posts if none of them suppresses the artifact
+- **THEN** it runs the firewall refuse-check, then envelope detect+validate, then tier-1 synchronously
+  before the post; it suppresses the post ONLY if the firewall refuses (a leak), and otherwise publishes
+  (warn-with-publish for a validate/tier-1 deficiency, since the mirror has no public egress)
 
 #### Scenario: A firewall hit suppresses the auto-mirror post and logs
 
-- **WHEN** a desk's auto-mirrored turn-final contains a private deployment specific
-- **THEN** the mirror suppresses the post (the leak never reaches Discord) and emits its one decision log
-  line naming the suppression, rather than posting
+- **WHEN** a desk's auto-mirrored turn-final contains a known-denylist private deployment specific
+- **THEN** the mirror suppresses the post (the leak never reaches Discord), emits its one decision log
+  line naming the suppression, AND raises an operator-visible signal (a flagged ledger entry and/or an
+  alert-webhook line) so the withheld turn-final does not vanish silently
 
 #### Scenario: An un-enveloped ordinary turn-final is still mirrored
 
