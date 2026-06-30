@@ -293,11 +293,12 @@ func (grok) TakeoverTurn(designatedPath string) string {
 		"REMOTE-DRIVEN (a remote XO drives you over the relay; no human is at this pane). " +
 		"Do this in order:\n" +
 		"1. Read this handoff in full and take over per it: " + designatedPath + "\n" +
-		"2. Then, as your FIRST action, REMOVE the transferred handoff from version control so it cannot " +
-		"leak into a later public PR (it is gitignored and carries deployment specifics; it was committed " +
-		"only to durably transfer it across the recycle, and you have read it now): " +
-		"`git rm \"" + designatedPath + "\" && git commit -m \"chore(recycle): drop transferred handoff\" " +
-		"-- \"" + designatedPath + "\"` (path-scoped, so no other work is swept in).\n" +
+		"2. Then, as your first action after reading, REMOVE the transferred handoff from version control " +
+		"so it cannot leak into a later public PR (it is gitignored and carries deployment specifics; it " +
+		"was committed only to durably transfer it across the recycle, and you have read it now): " +
+		"`git rm -f \"" + designatedPath + "\" && git commit -m \"chore(recycle): drop transferred handoff\" " +
+		"-- \"" + designatedPath + "\"` (the -f ensures a coincidentally-dirty handoff cannot block the " +
+		"removal; path-scoped, so no other work is swept in).\n" +
 		"3. Then BEGIN WORK IMMEDIATELY on the handoff's remaining work — do NOT ask \"shall I start?\" or " +
 		"wait for confirmation. If you genuinely need a clarification, surface it via a flotilla MESSAGE " +
 		"(e.g. `flotilla notify --from <your-name> \"...\"`), NEVER an in-pane interactive prompt — a " +

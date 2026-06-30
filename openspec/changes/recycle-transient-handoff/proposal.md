@@ -37,8 +37,22 @@ transferred) while closing the leak. It applies to both recycle-capable drivers 
 - **No change** to the handoff DURABILITY model: `HandoffTurn` still writes + force-commits, and the
   close is still gated on the committed blob. The only addition is the takeover's removal step.
 
+## Closure scope (honest)
+
+The transient removal closes the **net-diff** leak (the handoff is absent from the PR's net diff and,
+under a squash-merge, from `main`'s history). It relies on the **squash-merge policy** for full closure:
+the pre-squash branch commit list still carries the handoff-turn blob, and a non-squash merge would
+retain it in history. And it is **desk-driven, best-effort**: if a desk crashes mid-takeover before the
+`git rm`, the handoff stays committed until the next cleanup / PR-time boundary guard. A stronger,
+fully-mechanical alternative is a **command-side removal** (have `runRecycle` do the `git rm` after a
+confirmed takeover) — deferred (see Not in) because the command cannot safely mutate the desk's worktree
+index while the desk is mid-turn.
+
 ## Not in
 
+- A **command-side removal** (`runRecycle` removes the handoff after a confirmed takeover, instead of
+  instructing the desk) — stronger (no desk-discipline dependency) but it must not race the desk's
+  in-turn index; deferred as a follow-up.
 - Changing the durability model to avoid committing at all (the "disk file persists in the same
   worktree" option in #212) — that touches the durability gate and is a larger change; the transient
   removal is the smaller fix that keeps the gate intact.

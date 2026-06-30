@@ -24,12 +24,16 @@ recycle-capable surfaces (claude and grok) SHALL carry the read-then-remove take
   from version control (a path-scoped `git rm` + commit), then begins the handoff's remaining work — so
   the handoff does not persist on the branch
 
-#### Scenario: A recycled branch's public PR carries no handoff
+#### Scenario: A squash-merged recycled branch carries no handoff
 
-- **WHEN** a branch that was recycled later opens a PR to public `main`
-- **THEN** the transferred handoff is not present in the PR's net diff (the takeover removed it; a
-  squash-merge collapses the handoff-turn add and the takeover remove to nothing), so no deployment
-  specific leaks through the recycle handoff
+- **WHEN** a branch that was recycled later opens a PR to public `main` and is squash-merged (the
+  project's merge policy)
+- **THEN** the transferred handoff is not present in the PR's net diff and not in `main`'s history (the
+  takeover removed it; the squash collapses the handoff-turn add and the takeover remove to nothing), so
+  no deployment specific leaks through the recycle handoff. (NOTE: this closes the NET-DIFF leak; the
+  blob still exists in the pre-squash branch commit list and would persist in history under a
+  NON-squash merge — hence the squash-merge policy is load-bearing for full closure, and a desk that
+  crashes mid-takeover before the removal leaves the handoff committed until the next cleanup.)
 
 #### Scenario: The durability gate is unchanged
 
