@@ -34,8 +34,9 @@ without its pattern in the open-allowlist SHALL therefore be gated by constructi
 
 - **WHEN** a request path that path-cleans/dispatches to a gated handler is crafted to look like
   an open path (e.g. `/static/../api/status`)
-- **THEN** the gate resolves the mux-matched pattern (the gated `GET /api/status`) and refuses,
-  because the open-set decision is the same decision the mux uses to dispatch
+- **THEN** the gate resolves the mux-matched pattern (the gated bare `/api/status` — read routes are
+  registered bare, gated by absence from the open-set) and refuses, because the open-set decision is
+  the same decision the mux uses to dispatch
 
 #### Scenario: The open chrome and login routes are reachable without a credential
 

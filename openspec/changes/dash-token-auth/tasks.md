@@ -54,8 +54,14 @@ Load-bearing security invariants (assert across paths — each maps to a `dash-a
   credential; with NO token configured every request passes (no-op).
 - [ ] 3.2 TEST (INV-1 deny-by-default): register a SYNTHETIC new route pattern NOT in the
   open-allowlist and assert it is gated (401 without auth) — proves the default is closed. A
-  crafted `/static/../api/status` resolves to the gated `GET /api/status` pattern via `mux.Handler(r)`
-  and is refused (mux-matched-pattern, not raw-path keying).
+  crafted `/static/../api/status` resolves (after mux path-cleaning) to the gated bare `/api/status`
+  pattern via `mux.Handler(r)` and is refused (mux-matched-pattern, not raw-path keying). NB: the
+  read routes are registered BARE (`mux.Handler` returns `/api/status`, not `GET /api/status`) — fine,
+  they're gated by ABSENCE from the open-set, so their exact pattern string is irrelevant to the gate.
+- [ ] 3.2a IMPLEMENT (step-5 P1 fix): re-register the static route as `mux.Handle("GET /static/", …)`
+  (`server.go:192`, bare `/static/` today) so `mux.Handler(r)` returns `GET /static/` to MATCH the
+  `"GET /static/"` open-set member — else static assets gate and the login UI 401s. Only the OPEN-set
+  patterns must equal their registrations; this also method-gates static to GET.
 - [ ] 3.3 TEST (INV-3 bearer-first): a valid cookie + a garbage bearer resolves to `authCookie`
   (the garbage bearer fails first, the cookie wins).
 - [ ] 3.4 TEST (INV-7 rate-limit): `POST /api/auth/login` faster than the token-bucket refill is
