@@ -42,6 +42,20 @@ func RateLimitSupport(d Driver) (RateLimitProbe, bool) {
 	return p, ok
 }
 
+// RateLimitInstantProbe is an optional single-read throttle check (no 2-consecutive streak).
+// Auto-switch under-lock re-probe in a fresh switch subprocess uses this: the watch detector
+// already confirmed materiality in-process; the subprocess must not re-derive it from an empty
+// globalRateLimitStreak.
+type RateLimitInstantProbe interface {
+	RateLimitInstant(pane string) (limited bool, scope RateLimitScope, detail string)
+}
+
+// RateLimitInstantSupport type-asserts the optional single-read probe.
+func RateLimitInstantSupport(d Driver) (RateLimitInstantProbe, bool) {
+	p, ok := d.(RateLimitInstantProbe)
+	return p, ok
+}
+
 // rateLimitMaterialPolls is how many consecutive positive reads are required before
 // a throttle is treated as material (mirrors confirm.clearedConfirmPolls).
 const rateLimitMaterialPolls = 2

@@ -18,6 +18,7 @@ import (
 	"github.com/jim80net/flotilla/internal/cos"
 	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/idlehold"
+	"github.com/jim80net/flotilla/internal/launch"
 	"github.com/jim80net/flotilla/internal/readermap"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
@@ -467,7 +468,28 @@ func cmdWatch(args []string) error {
 		// prompt fires after StrikeThreshold idle-hold turn-finals.
 		idleHoldTracker := idlehold.NewTracker()
 
-		det := watch.NewDetectorWithSynthSidecar(watch.DetectorConfig{
+		// #205 auto-switch: load flat launch recipes for storm-cooldown + slot metadata.
+		launchPath := os.Getenv("FLOTILLA_LAUNCH")
+		if launchPath == "" {
+			launchPath = launch.DefaultPath(*rosterPath)
+		}
+		var flatLaunch *launch.Config
+		if _, statErr := os.Stat(launchPath); statErr == nil {
+			rosterAgents := make(map[string]bool, len(cfg.Agents))
+			for _, a := range cfg.Agents {
+				rosterAgents[a.Name] = true
+			}
+			if loaded, lerr := launch.Load(launchPath, rosterAgents); lerr == nil {
+				flatLaunch = loaded
+			}
+		}
+		var endAutoSwitch func(string)
+		autoSwitchOn := surface.AutoSwitchEnabled()
+		if autoSwitchOn {
+			log.Printf("flotilla watch: auto-switch ENABLED (FLOTILLA_AUTOSWITCH) — non-sensitive claude-code workers may auto-relocate on sustained throttle")
+		}
+
+		detCfg := watch.DetectorConfig{
 			XOAgent:  xo,
 			Desks:    desks,
 			Interval: interval,
@@ -492,9 +514,16 @@ func cmdWatch(args []string) error {
 			RateLimitMaterial: rateLimitMaterial(cfg),
 			RateLimitReset:    rateLimitReset(cfg),
 			RateLimitDispatch: func(run func()) { go run() },
-			SignalHash:        signalHash,
-			AckAge:            ack.Age,
-			Wake:              wake,
+			RateLimitAutoSwitchEligible: func(agent string) bool {
+				if !cfg.AutoSwitchEligible(agent) {
+					return false
+				}
+				// Claude-storm only: desks already on grok (or another FROM) are not candidates.
+				return agentSurface(cfg, agent) == surface.DefaultSurface
+			},
+			SignalHash: signalHash,
+			AckAge:     ack.Age,
+			Wake:       wake,
 			Rotate: func() error {
 				// Resolve the XO pane FIRST, then take the per-pane TRANSACTION lock keyed by that
 				// target (the same key every other transaction writer uses), so the /clear rotate
@@ -539,7 +568,18 @@ func cmdWatch(args []string) error {
 			WakeDeskHeartbeat:       wakeDeskHeartbeat,
 			DeskEscalate:            deskEscalate,
 			DeskHeartbeatEveryTicks: 1,
-		}, *snapshotPath, synthSidecarPath)
+		}
+		if autoSwitchOn {
+			probeMaterial := rateLimitMaterial(cfg)
+			detCfg.RateLimitAutoSwitchDispatch = func(run func()) { go run() }
+			detCfg.RateLimitAutoSwitch = newRateLimitAutoSwitchDispatch(cfg, *rosterPath, launchPath, flatLaunch, probeMaterial, func(agent string) {
+				if endAutoSwitch != nil {
+					endAutoSwitch(agent)
+				}
+			})
+		}
+		det := watch.NewDetectorWithSynthSidecar(detCfg, *snapshotPath, synthSidecarPath)
+		endAutoSwitch = det.EndAutoSwitchFlight
 		det.Start()
 		defer det.Stop()
 		onAccepted = func(target string) {
