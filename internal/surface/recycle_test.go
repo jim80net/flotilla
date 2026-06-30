@@ -1,6 +1,9 @@
 package surface
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -95,6 +98,36 @@ func TestRecycleSupport(t *testing.T) {
 	}
 	if _, ok := RecycleSupport(stubNoBridge{}); ok {
 		t.Error("a driver without the bridge must not type-assert as RecycleBridge")
+	}
+}
+
+// TestHandoffPathIsGitignored: recycle handoff paths must be gitignored so a routine
+// git add -A cannot stage deployment-specific content (#218).
+func TestHandoffPathIsGitignored(t *testing.T) {
+	root, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		t.Skip("not in a git work-tree — skip gitignore assertion")
+	}
+	repo := strings.TrimSpace(string(root))
+	token := "gitignore-assert-token"
+	// Desk cwd is the project root (the launch recipe cwd), not a package subdir.
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"claude", newClaudeCode().HandoffPath(repo, token)},
+		{"grok", newGrok().HandoffPath(repo, token)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.MkdirAll(filepath.Dir(tc.path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			defer os.Remove(tc.path)
+			if err := exec.Command("git", "check-ignore", "-q", "--", tc.path).Run(); err != nil {
+				t.Fatalf("git check-ignore %q failed — handoff path must be gitignored (#218)", tc.path)
+			}
+		})
 	}
 }
 

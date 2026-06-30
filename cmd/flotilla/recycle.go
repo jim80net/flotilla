@@ -378,9 +378,9 @@ func cmdRecycle(args []string) error {
 	if err != nil {
 		return err
 	}
-	// Resolve cwd to its realpath so the durability check's git-root comparison
-	// (filepath.Rel of `git rev-parse --show-toplevel`, itself a realpath, vs the designated
-	// path) cannot break under a symlinked checkout (the designated path is joined onto cwd).
+	// Resolve cwd to its realpath so the durability check's under-cwd validation
+	// (filepath.Rel of cwd vs the designated handoff path) cannot break under a symlinked
+	// checkout (the designated path is joined onto cwd).
 	if real, rerr := filepath.EvalSymlinks(recipe.Cwd); rerr == nil {
 		recipe.Cwd = real
 	}

@@ -36,6 +36,10 @@ htmlcov/
 # context — kept on disk, never committed).
 .claude/handoffs/
 
+# flotilla-owned handoff/switch artifacts (deployment-specific; never committed — #218).
+.flotilla/handoffs/
+.flotilla/switch/
+
 # Live roster (secret-free by design, but holds your real ids — keep the example committed)
 /flotilla.json
 
