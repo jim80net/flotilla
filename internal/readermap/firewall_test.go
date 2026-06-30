@@ -127,6 +127,35 @@ func TestFirewall_AllowlistedHomePlaceholderIsOK(t *testing.T) {
 	}
 }
 
+func TestFirewall_HomeAllowlistIsWholeSegmentAndCaseSensitive(t *testing.T) {
+	// A longer name that merely STARTS with a placeholder (operator-prod) is a real
+	// username and must REFUSE — the allowlist matches the WHOLE segment, not a prefix.
+	// A capitalized Users path (capital-O Operator) is likewise NOT the lowercase
+	// placeholder and must REFUSE. Both pin parity with the bash guard (case-sensitive,
+	// boundary-anchored), enforced by the conformance test.
+	for _, leak := range []string{"/home/" + "operator-prod/x", "/Users/" + "Operator/work"} {
+		if r := Check(leak, termSet(t, nil, nil)); r.Decision != FirewallRefuse {
+			t.Fatalf("%q must REFUSE (whole-segment, case-sensitive allowlist), got %v", leak, r.Decision)
+		}
+	}
+}
+
+func TestNewTermSet_EmptyMatchableTermRejected(t *testing.T) {
+	// A term that can match the empty string would silently neuter the rule — reject it.
+	if _, err := NewTermSet([]string{"(foo)?"}, nil); err == nil {
+		t.Fatal("an empty-matchable denylist term must be rejected, not silently accepted")
+	}
+}
+
+func TestFirewall_AnchoredDenyTermIsPerLine(t *testing.T) {
+	// With (?m), an anchored term matches per LINE (like grep), so a denylist term
+	// anchored to line-start catches it on a later line of a multi-line turn-final.
+	ts := termSet(t, []string{"^acme-desk"}, nil)
+	if r := Check("first line\nacme-desk on line two", ts); r.Decision != FirewallRefuse {
+		t.Fatalf("an anchored deny term must match per-line (multi-line turn-final), got %v", r.Decision)
+	}
+}
+
 // --- the advisory WARN tier --------------------------------------------------
 
 func TestFirewall_WarnlistTermWarnsNeverBlocks(t *testing.T) {

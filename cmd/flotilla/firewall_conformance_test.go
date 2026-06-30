@@ -16,11 +16,13 @@ import (
 // diverge" guarantee: it feeds a shared fixture corpus through BOTH engines with the
 // SAME deny/warn term lists and fails on any verdict mismatch.
 //
-// Scope: the SHARED surface — the deployment denylist, the advisory warnlist, and the
-// built-in deployment-agnostic generic patterns (home paths, secret shapes). The
+// Scope (named honestly — this corpus does NOT prove total equivalence): the SHARED
+// surface — the deployment denylist, the advisory warnlist, and the built-in
+// deployment-agnostic generic patterns (home paths incl. the boundary/case allowlist
+// edge cases, secret shapes), plus a multi-line case (anchored-term parity). The
 // canonical `<prefix>:<n>.<m>` pattern is Go-OWNED in P2 (the bash static guard mirrors
-// it under #202, which extends this corpus then); fixtures here avoid that shape so the
-// two engines are compared only where both currently implement the rule.
+// it under #202, which extends this corpus then); fixtures here avoid that shape, so it
+// has no cross-engine coverage yet — that is a known, sequenced gap, not a silent one.
 
 // the shared term lists fed to BOTH engines.
 var conformanceDeny = []string{"acme-desk", "AcmeCorp"}
@@ -41,11 +43,15 @@ var conformanceCorpus = []conformanceCase{
 	{"deny org", "deployed for AcmeCorp today", readermap.FirewallRefuse},
 	{"generic home leak", "the file is at /home/" + "alice/work/notes.md", readermap.FirewallRefuse},
 	{"allowlisted home placeholder", "docs use /home/operator/flotilla", readermap.FirewallOK},
+	{"home hyphen-username (boundary edge)", "the path /home/" + "operator-prod/x", readermap.FirewallRefuse},
+	{"Users capitalized (case edge)", "see /Users/" + "Operator/work", readermap.FirewallRefuse},
+	{"Users allowlisted placeholder", "see /Users/operator/work", readermap.FirewallOK},
 	{"github token", "token ghp_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345 here", readermap.FirewallRefuse},
 	{"aws key", "AKIA" + "0123456789ABCDEF in the config", readermap.FirewallRefuse},
 	{"warn vocab", "we flattened the position", readermap.FirewallWarn},
 	{"warn phrase", "the special daemon restarted", readermap.FirewallWarn},
 	{"deny beats warn", "the acme-desk flattened it", readermap.FirewallRefuse},
+	{"deny on second line (multiline parity)", "first line here\nthe acme-desk on line two", readermap.FirewallRefuse},
 }
 
 func TestFirewallConformance_GoMatchesBash(t *testing.T) {

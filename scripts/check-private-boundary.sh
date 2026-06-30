@@ -52,8 +52,8 @@ WARNLIST_FILE="${FLOTILLA_PRIVATE_WARNLIST_FILE:-$repo_root/.flotilla/private-wa
 # guard never flaps. "/home/operator" and friends are the generic placeholders
 # this project documents, so they are explicitly allowed.
 GENERIC_PATTERNS=(
-  '/home/(?!operator\b|user\b|runner\b|youruser\b|you\b)[a-z_][a-z0-9_-]*'
-  '/Users/(?!operator\b|user\b|you\b|youruser\b)[A-Za-z][A-Za-z0-9_-]*'
+  '/home/(?!(?:operator|user|runner|youruser|you)(?![a-z0-9_-]))[a-z_][a-z0-9_-]*'
+  '/Users/(?!(?:operator|user|you|youruser)(?![A-Za-z0-9_-]))[A-Za-z][A-Za-z0-9_-]*'
   'https?://(discord(app)?|slack)\.com/api/webhooks/[0-9]+/[A-Za-z0-9_-]{16,}'
   'ghp_[A-Za-z0-9]{20,}'
   'github_pat_[A-Za-z0-9_]{20,}'

@@ -126,6 +126,17 @@ func NewTermSet(deny, warn []string) (*TermSet, error) {
 	}, nil
 }
 
+// Configured reports whether a deployment denylist / warnlist was loaded (vs only the
+// built-in generic + canonical patterns). The watch daemon logs this at startup so an
+// unconfigured runtime firewall (e.g. the daemon's cwd has no .flotilla list and no env
+// is set) is VISIBLE at boot, not discovered at the first leak.
+func (ts *TermSet) Configured() (deny, warn bool) {
+	if ts == nil {
+		return false, false
+	}
+	return ts.deny != nil, ts.warn != nil
+}
+
 // Check runs text through the firewall in precedence order: (1) the fail-closed tier
 // (denylist → built-in generic patterns → canonical pattern) REFUSES on the first hit;
 // (2) the advisory warnlist WARNS only if nothing refused. Denylist precedence means a
@@ -170,8 +181,13 @@ func (g genericRule) firstLeak(text string) (token string, hit bool) {
 	for _, sm := range g.re.FindAllStringSubmatch(text, -1) {
 		seg := ""
 		if len(sm) > 1 {
-			seg = strings.ToLower(sm[1])
+			seg = sm[1]
 		}
+		// Exact, CASE-SENSITIVE match of the WHOLE captured segment — faithful to the
+		// bash guard's allowlist (which is case-sensitive and, with the matched fix,
+		// boundary-anchored). A longer name like "operator-prod" or a capitalized
+		// "Operator" is NOT the placeholder and must REFUSE; the conformance test pins
+		// this equivalence with both engines.
 		if !g.allow[seg] {
 			return sm[0], true
 		}
@@ -186,6 +202,13 @@ const denylistAbstraction = "a generic flotilla abstraction (a desk role like 't
 // compileAlternation joins non-empty terms with '|' and compiles the result. An empty
 // (or all-blank) list compiles to nil — "no list configured", so only the other tiers
 // apply (mirroring the bash guard's generic-always / deployment-only-if-configured model).
+//
+// The alternation is compiled with the (?m) multi-line flag so that an anchored term
+// (^foo / bar$) anchors per LINE — the same semantics as the bash guard's line-by-line
+// `grep`, so an operator who anchors a denylist term gets identical verdicts from both
+// engines (a turn-final is inherently multi-line). A term that can match the EMPTY
+// string (e.g. `(foo)?`) is rejected: it would make FindString return "" and silently
+// neuter the rule (or match everywhere) — a silent partition hole, fail-closed instead.
 func compileAlternation(terms []string) (*regexp.Regexp, error) {
 	var kept []string
 	for _, t := range terms {
@@ -196,7 +219,14 @@ func compileAlternation(terms []string) (*regexp.Regexp, error) {
 	if len(kept) == 0 {
 		return nil, nil
 	}
-	return regexp.Compile(strings.Join(kept, "|"))
+	re, err := regexp.Compile("(?m)" + strings.Join(kept, "|"))
+	if err != nil {
+		return nil, err
+	}
+	if re.MatchString("") {
+		return nil, fmt.Errorf("readermap: a term matches the empty string (it would match nothing or everything) — fix the pattern: %q", strings.Join(kept, "|"))
+	}
+	return re, nil
 }
 
 // uniqueMatches returns the distinct matches of re in text, order-preserving — the set

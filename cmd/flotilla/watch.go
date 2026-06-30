@@ -212,6 +212,15 @@ func cmdWatch(args []string) error {
 	if err != nil {
 		return err
 	}
+	// Make the firewall's configuration VISIBLE at boot — a silently-unconfigured
+	// deployment denylist (e.g. the daemon's cwd has no .flotilla list and no env is
+	// set) would otherwise look like the runtime guard is protecting when only the
+	// built-in generic + canonical patterns are on.
+	if dCfg, wCfg := firewall.Configured(); dCfg || wCfg {
+		fmt.Printf("flotilla watch: partition firewall — deployment denylist=%v, warnlist=%v (generic + canonical patterns always on)\n", dCfg, wCfg)
+	} else {
+		fmt.Println("flotilla watch: partition firewall — NO deployment denylist/warnlist configured (only built-in generic + canonical patterns; set .flotilla/private-denylist or $FLOTILLA_PRIVATE_DENYLIST)")
+	}
 
 	// confirm turns "the tmux keystrokes ran" into "a turn started": it idle-gates, submits,
 	// confirms the Idle→Working edge, retries Enter-only (never re-pasting), and returns a typed
