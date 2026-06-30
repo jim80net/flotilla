@@ -56,12 +56,15 @@ Load-bearing properties (assert across paths):
   desk to emit the reader-map envelope block as its turn-final, and publication is the EXISTING mirror
   publishing the turn that CARRIES the envelope (assert the brief path does not introduce a second
   transport; the brief turn is correlated by the envelope block, not by "the next finish").
-- [ ] 3.2 TEST (SECRET-FREE): the `brief` command code path never loads secrets and never calls the
-  notify path (assert by construction — `brief` takes only the roster, à la `buildPushSnippet`
-  `pushsnippet.go:71`).
-- [ ] 3.3 TEST (DARK-DESK): `flotilla brief` pre-checks each named desk's channel webhook resolves and
-  REPORTS a desk with no resolvable webhook as dark (its brief cannot publish) at fan-out time — it does
-  NOT return success while the brief silently never reaches a channel.
+- [ ] 3.2 TEST (SECRET-FREE invariant — about the DESK, not cmdBrief): the brief INJECTION never makes
+  the desk hold secrets and never calls `notify` (the desk-forbidden path, `pushsnippet.go:29`) — the
+  desk answers in-pane and the watch daemon's mirror (which holds secrets) publishes. cmdBrief is
+  orchestrator-run, so it MAY read `--secrets` for the dark-desk pre-check (3.3); the invariant is the
+  DESK-secret-free publish + no-notify, NOT that cmdBrief never touches secrets.
+- [ ] 3.3 TEST (DARK-DESK): when `--secrets` is provided, `flotilla brief` pre-checks each named desk's
+  channel webhook resolves and REPORTS a desk with no resolvable webhook as dark (its brief cannot
+  publish) at fan-out time — it does NOT return success while the brief silently never reaches a channel.
+  Without `--secrets`, the pre-check is skipped with a note (the injection still proceeds).
 - [ ] 3.4 Implement `cmd/flotilla/brief.go` (`cmdBrief` + `parseBriefArgs` + the dark-desk pre-check);
   register `brief` in `cmd/flotilla/main.go`. Publication is the mirror, not a desk-invoked primitive.
 

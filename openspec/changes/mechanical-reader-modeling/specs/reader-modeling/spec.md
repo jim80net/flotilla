@@ -20,10 +20,12 @@ marker (below), so an unrelated intervening turn is published as an ordinary (un
 and is NOT mistaken for the brief. The scope of `flotilla brief` is the desk's **channel** surface; the
 raw pane surface is explicitly out of scope.
 
-`flotilla brief` SHALL pre-check, at fan-out time, that each named desk's channel webhook resolves, and
-SHALL REPORT any desk with no resolvable webhook as a "dark" desk (its brief cannot be published) —
-rather than returning success while the desk's brief silently never reaches a channel (the unconfigured-
-webhook re-skin of the #207 failure).
+`flotilla brief` is run by the orchestrator (which holds the fleet secrets); when secrets are available
+it SHALL pre-check, at fan-out time, that each named desk's channel webhook resolves, and SHALL REPORT
+any desk with no resolvable webhook as a "dark" desk (its brief cannot be published) — rather than
+returning success while the desk's brief silently never reaches a channel (the unconfigured-webhook
+re-skin of the #207 failure). This pre-check is an ORCHESTRATOR capability and does NOT weaken the
+desk-secret-free invariant: the DESK still publishes via the mirror without ever holding a secret.
 
 #### Scenario: A brief call yields a published Discord brief, secret-free
 
