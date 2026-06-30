@@ -28,11 +28,14 @@ type RecycleBridge interface {
 	// handoffs dir does not block it), NOT ask for confirmation (remote-driven), then stop.
 	HandoffTurn(designatedPath string) string
 	// TakeoverTurn returns the IMPERATIVE takeover instruction TEXT for the freshly-
-	// relaunched session: read designatedPath and take over, BEGIN WORK IMMEDIATELY (NOT
-	// ask whether to start), and — being remote-driven — surface any clarification via a
-	// flotilla message, never an in-pane interactive prompt (a remote XO cannot answer an
-	// in-pane menu over the relay). The PATH is harness-agnostic markdown; only the wording
-	// is per-harness.
+	// relaunched session: read designatedPath and take over, then — as its FIRST action —
+	// `git rm` + commit the handoff off the branch (it was committed by HandoffTurn only to
+	// durably transfer it across the recycle; left committed, that gitignored,
+	// deployment-specific file leaks when the branch PRs to public main, #212), then BEGIN
+	// WORK IMMEDIATELY (NOT ask whether to start), and — being remote-driven — surface any
+	// clarification via a flotilla message, never an in-pane interactive prompt (a remote XO
+	// cannot answer an in-pane menu over the relay). The PATH is harness-agnostic markdown;
+	// only the wording is per-harness. read → remove → work keeps the handoff transient.
 	TakeoverTurn(designatedPath string) string
 }
 

@@ -48,7 +48,9 @@ func TestClaudeTakeoverTurn(t *testing.T) {
 		path,
 		"BEGIN WORK IMMEDIATELY",
 		"REMOTE-DRIVEN",
-		"flotilla", // parlay via a flotilla message
+		"flotilla",                 // parlay via a flotilla message
+		"git rm",                   // #212: remove the transferred handoff (transient)
+		"drop transferred handoff", // the removal commit message
 	} {
 		if !strings.Contains(turn, must) {
 			t.Errorf("TakeoverTurn missing %q\n--- turn ---\n%s", must, turn)
@@ -56,6 +58,10 @@ func TestClaudeTakeoverTurn(t *testing.T) {
 	}
 	if !strings.Contains(turn, "shall I start") && !strings.Contains(turn, `"shall I start?"`) {
 		t.Errorf("TakeoverTurn should explicitly override the skill's \"shall I start?\" pause")
+	}
+	// #212: the takeover must read BEFORE it removes (so the fresh session has the content).
+	if strings.Index(turn, "Read this handoff") > strings.Index(turn, "git rm") {
+		t.Errorf("TakeoverTurn must instruct READ before git rm (read → remove → work)\n%s", turn)
 	}
 }
 
@@ -123,10 +129,13 @@ func TestGrokTakeoverTurn(t *testing.T) {
 	g := newGrok()
 	path := "/repo/.flotilla/handoffs/recycle-tok.md"
 	turn := g.TakeoverTurn(path)
-	for _, must := range []string{path, "BEGIN WORK IMMEDIATELY", "REMOTE-DRIVEN", "flotilla", "shall I start"} {
+	for _, must := range []string{path, "BEGIN WORK IMMEDIATELY", "REMOTE-DRIVEN", "flotilla", "shall I start", "git rm", "drop transferred handoff"} {
 		if !strings.Contains(turn, must) {
 			t.Errorf("grok TakeoverTurn missing %q\n--- turn ---\n%s", must, turn)
 		}
+	}
+	if strings.Index(turn, "Read this handoff") > strings.Index(turn, "git rm") {
+		t.Errorf("grok TakeoverTurn must instruct READ before git rm (read → remove → work)\n%s", turn)
 	}
 	if strings.Contains(turn, "skill") {
 		t.Errorf("grok TakeoverTurn must not reference a skill (grok has no /takeover skill)\n%s", turn)

@@ -151,12 +151,26 @@ func (claudeCode) HandoffTurn(designatedPath string) string {
 // session. It does NOT invoke the /takeover skill (whose step 5 pauses on "Shall I start?")
 // — it tells the desk to read the handoff and work immediately, and to parlay any question
 // via a flotilla message, never an in-pane menu (unanswerable by a remote XO over the relay).
+//
+// It also makes the handoff TRANSIENT: after reading it, the fresh session's FIRST action is
+// to `git rm` + commit the handoff off the branch. The handoff is committed by HandoffTurn
+// only to durably transfer it across the recycle; left committed, that gitignored,
+// deployment-specific file would leak when the branch later PRs to public main (#212). Read
+// → remove → work keeps it committed only for the transfer, gone before any feature PR (and
+// a squash-merge collapses the add+remove to nothing).
 func (claudeCode) TakeoverTurn(designatedPath string) string {
 	return "You are a freshly-recycled flotilla desk with a clean context window, and you are " +
 		"REMOTE-DRIVEN (a remote XO drives you over the relay; no human is at this pane). " +
-		"Read this handoff and take over per it, then BEGIN WORK IMMEDIATELY: " + designatedPath + "\n" +
-		"Do NOT run the interactive /takeover skill, do NOT ask \"shall I start?\" or wait for " +
-		"confirmation — start executing the handoff's remaining work now. If you genuinely need a " +
+		"Do this in order:\n" +
+		"1. Read this handoff in full and take over per it: " + designatedPath + "\n" +
+		"2. Then, as your first action after reading, REMOVE the transferred handoff from version control " +
+		"so it cannot leak into a later public PR (it is gitignored and carries deployment specifics; it " +
+		"was committed only to durably transfer it across the recycle, and you have read it now): " +
+		"`git rm -f \"" + designatedPath + "\" && git commit -m \"chore(recycle): drop transferred handoff\" " +
+		"-- \"" + designatedPath + "\"` (the -f ensures a coincidentally-dirty handoff cannot block the " +
+		"removal; path-scoped, so no other work is swept in).\n" +
+		"3. Then BEGIN WORK IMMEDIATELY on the handoff's remaining work — do NOT run the interactive " +
+		"/takeover skill, do NOT ask \"shall I start?\" or wait for confirmation. If you genuinely need a " +
 		"clarification, surface it via a flotilla MESSAGE (e.g. `flotilla notify --from <your-name> " +
 		"\"...\"`), NEVER an in-pane interactive prompt or AskUserQuestion menu — a remote XO cannot " +
 		"answer an in-pane menu over the relay (keystrokes navigate it, they don't select)."
