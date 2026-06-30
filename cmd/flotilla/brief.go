@@ -15,8 +15,9 @@ import (
 )
 
 // briefArgs is the parsed `flotilla brief` invocation. desk is the desk to brief;
-// from is the orchestrator's identity (only used for messaging symmetry with send);
-// audience is the reader the brief is modeled for (default operator).
+// from is the orchestrator's identity issuing the request (recorded in the delivery
+// confirmation line for audit symmetry with send; the desk still publishes under its
+// OWN webhook identity, not from); audience is the reader the brief is modeled for.
 type briefArgs struct {
 	desk        string
 	from        string
@@ -149,9 +150,9 @@ func cmdBrief(args []string) error {
 	// confirm path `send` uses (so the desk actually starts the brief turn), holding
 	// the per-pane transaction lock so it cannot interleave with a watch rotate or a
 	// dash control action on the same pane.
-	// TODO(reader-modeling): this confirmed-delivery core duplicates cmdSend's; extract
-	// a shared confirmedDeliver(cfg, agent, message) helper in a follow-up (kept inline
-	// here to avoid refactoring the safety-critical send path during P0).
+	// TODO(#213): this confirmed-delivery core duplicates cmdSend's; extract a shared
+	// confirmedDeliver(cfg, agent, message) helper (kept inline here to avoid
+	// refactoring the safety-critical send path during P0).
 	pane, err := deliver.ResolvePane(agent.Title())
 	if err != nil {
 		return err
@@ -171,10 +172,16 @@ func cmdBrief(args []string) error {
 			return fmt.Errorf("%s is busy (mid-turn) — brief NOT delivered; retry when it is idle", a.desk)
 		case errors.Is(err, surface.ErrCrashed):
 			return fmt.Errorf("%s is at a shell (crashed) — brief NOT delivered", a.desk)
-		default: // ErrTransient / ErrUnconfirmed / ErrPanelBlocked / a paste-lock error
+		case errors.Is(err, surface.ErrPanelBlocked):
+			return fmt.Errorf("%s is input-blocked behind the agents panel — brief NOT delivered; it needs a human keystroke or click into the composer at its pane, then retry", a.desk)
+		default: // ErrTransient / ErrUnconfirmed / a paste-lock error
 			return fmt.Errorf("brief request to %s could not be confirmed: %w", a.desk, err)
 		}
 	}
-	fmt.Printf("brief request delivered to %s (pane %s) — turn confirmed; its turn-final publishes to its channel via the mirror\n", a.desk, pane)
+	if a.from != "" {
+		fmt.Printf("brief request from %s delivered to %s (pane %s) — turn confirmed; its turn-final publishes to its channel via the mirror\n", a.from, a.desk, pane)
+	} else {
+		fmt.Printf("brief request delivered to %s (pane %s) — turn confirmed; its turn-final publishes to its channel via the mirror\n", a.desk, pane)
+	}
 	return nil
 }

@@ -60,6 +60,9 @@ func (m deskMirror) run(agent string) {
 	// WARN-WITH-PUBLISH here, so a deficient or un-enveloped turn-final is flagged
 	// but never lost. An enveloped brief is RENDERED from its fields (modeled body).
 	body, rmNote, suppress := readerModelInternal(text)
+	// TODO(P2): the suppress arm is unreachable until the firewall stage lands (no P0
+	// step sets suppress=true). When P2 wires the firewall, add a test asserting a
+	// leaking turn-final → SUPPRESS log line + no post.
 	if suppress {
 		m.logf("flotilla watch: mirror SUPPRESS %s: %s", agent, rmNote)
 		return
@@ -93,24 +96,36 @@ func (m deskMirror) run(agent string) {
 //
 // The auto-mirror is an internal channel with no public egress, so the only step that
 // suppresses is the firewall refuse (a private leak) — that arm lands in P2 and is a
-// clean prepend here (set suppress=true on a firewall hit); in P0 nothing suppresses.
+// clean PREPEND here (set suppress=true on a firewall hit); in P0 nothing suppresses.
+// (The P3 envelope ledger is NOT a clean prepend: it needs the PARSED envelope, which
+// this function currently discards — P3 will re-thread the *readermap.Envelope through
+// this signature. So only the P2 firewall slots in without touching the parse.)
+//
 // Envelope-validate + tier-1 are warn-with-publish: an enveloped brief that passes
 // tier-1 is RENDERED from its fields (the modeled body); a tier-1-deficient or a
 // malformed envelope is published RAW and FLAGGED (never lost — never lose a brief);
 // an un-enveloped ordinary turn-final is published raw (today's back-compat behavior).
+//
+// NOTE (deliberate, spec'd): on the PASS path the published body is Render(env) — the
+// modeled envelope fields ONLY. Prose the desk wrote OUTSIDE the reader-map fence is
+// intentionally NOT republished (the spec's "body is rendered from the envelope
+// fields"). A reader-map fence thus means "this turn IS a brief; publish the modeled
+// envelope" — desks emit the fence only in response to `flotilla brief`, which trains
+// them to put the brief's substance INSIDE `delta`, not in surrounding prose. A turn
+// with no fence is Absent → published raw, so nothing is ever lost on a non-brief turn.
 func readerModelInternal(turnFinal string) (body, note string, suppress bool) {
 	// (P2) firewall refuse-check would go here as stage 1 — on a leak, return
-	// ("", "<token> leak", true). Not in P0.
+	// ("", "<token> leak", true). Not in P0; see the doc comment.
 	env, outcome := readermap.Detect(turnFinal)
 	switch outcome {
 	case readermap.OutcomePresent:
-		if lint := readermap.Tier1Lint(*env); lint.Pass {
+		lint := readermap.Tier1Lint(*env)
+		if lint.Pass {
 			return readermap.Render(*env), "modeled", false
-		} else {
-			// Deficient envelope: publish the desk's raw turn-final (preserve what it
-			// wrote — never lose) and flag the structural gap for the operator.
-			return turnFinal, "WARN tier1 " + lint.Reason, false
 		}
+		// Deficient envelope: publish the desk's raw turn-final (preserve what it
+		// wrote — never lose) and flag the structural gap for the operator.
+		return turnFinal, "WARN tier1 " + lint.Reason, false
 	case readermap.OutcomeMalformed:
 		return turnFinal, "WARN malformed reader-map envelope", false
 	default: // OutcomeAbsent — an ordinary, un-enveloped turn-final (back-compat).

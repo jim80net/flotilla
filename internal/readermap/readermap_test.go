@@ -8,7 +8,7 @@ import (
 func validEnvelope() Envelope {
 	return Envelope{
 		Audience: AudienceOperator,
-		Anchor:   "the databento backfill you are tracking",
+		Anchor:   "the data backfill you are tracking",
 		Delta:    "the head backfill finished; the gap is closed",
 		Decision: "none",
 	}
@@ -151,6 +151,57 @@ func TestDetect_UnterminatedFenceIsAbsent(t *testing.T) {
 	_, outcome := Detect(turn)
 	if outcome != OutcomeAbsent {
 		t.Fatalf("an unterminated fence is not a well-formed block (absent), got %v", outcome)
+	}
+}
+
+func TestDetect_ValidFirstMalformedSecondIsMalformed(t *testing.T) {
+	// Two reader-map blocks (first valid, second invalid JSON) are still TWO blocks —
+	// the count rule makes it Malformed before any per-block parse.
+	turn := "```reader-map\n" + `{"audience":"operator","anchor":"a","delta":"b","decision":"none"}` + "\n```\n" +
+		"```reader-map\n{broken]\n```"
+	if _, outcome := Detect(turn); outcome != OutcomeMalformed {
+		t.Fatalf("valid-first + malformed-second must be Malformed (two blocks), got %v", outcome)
+	}
+}
+
+func TestDetect_ValidFirstUnterminatedSecondIsPresent(t *testing.T) {
+	// A valid CLOSED first block followed by a second fence that never closes: the
+	// scanner collects block 1, then breaks on the unterminated second fence — so the
+	// first envelope is returned (Present). Pinning this chosen semantics.
+	turn := "```reader-map\n" + `{"audience":"operator","anchor":"a","delta":"b","decision":"none"}` + "\n```\n" +
+		"trailing ```reader-map\n{never closes"
+	env, outcome := Detect(turn)
+	if outcome != OutcomePresent || env == nil || env.Anchor != "a" {
+		t.Fatalf("valid-first + unterminated-second must return the first envelope (Present), got %v / %+v", outcome, env)
+	}
+}
+
+func TestDetect_CRLFTurnFinalParses(t *testing.T) {
+	turn := "intro\r\n```reader-map\r\n" +
+		`{"audience":"operator","anchor":"a","delta":"b","decision":"none"}` + "\r\n```\r\n"
+	env, outcome := Detect(turn)
+	if outcome != OutcomePresent || env == nil {
+		t.Fatalf("a CRLF turn-final must detect+parse (Present), got %v", outcome)
+	}
+	if env.Delta != "b" {
+		t.Errorf("CRLF body must parse cleanly without a stray CR; got delta %q", env.Delta)
+	}
+}
+
+func TestValidate_UnfilledPlaceholderRejected(t *testing.T) {
+	for _, field := range []string{"anchor", "delta", "decision"} {
+		e := validEnvelope()
+		switch field {
+		case "anchor":
+			e.Anchor = "<the reader's map entry this brief updates>"
+		case "delta":
+			e.Delta = "<what changed>"
+		case "decision":
+			e.Decision = "<the one action they must take, or \"none\">"
+		}
+		if err := e.Validate(); err == nil {
+			t.Fatalf("an unfilled <...> placeholder in %s must be rejected (template echo)", field)
+		}
 	}
 }
 

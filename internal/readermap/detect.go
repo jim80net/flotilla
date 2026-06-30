@@ -80,6 +80,9 @@ func Detect(turnFinal string) (*Envelope, DetectOutcome) {
 // plain text, not full CommonMark — and avoids a Markdown dependency.
 func extractFencedBlocks(text, tag string) []string {
 	var blocks []string
+	// Normalize CRLF so a Windows-authored turn-final's fence lines match and the
+	// collected body does not carry stray '\r' into the rendered delta.
+	text = strings.ReplaceAll(text, "\r\n", "\n")
 	lines := strings.Split(text, "\n")
 	for i := 0; i < len(lines); i++ {
 		open := strings.TrimSpace(lines[i])

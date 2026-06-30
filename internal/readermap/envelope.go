@@ -69,7 +69,30 @@ func (e Envelope) Validate() error {
 	if strings.TrimSpace(e.Decision) == "" {
 		return fmt.Errorf("readermap: decision is empty (use %q when no action is needed)", DecisionNone)
 	}
+	// Reject an UNFILLED template placeholder echoed verbatim from the brief request
+	// (e.g. anchor left as "<the reader's map entry this brief updates>"). Such a value
+	// is non-empty and would otherwise pass the presence check, then render to the
+	// reader as a literal placeholder — a deterministic failure mode tier-1 can and
+	// should catch (it does not require the tier-2 judge).
+	if isUnfilledPlaceholder(e.Anchor) {
+		return fmt.Errorf("readermap: anchor is an unfilled placeholder (%q) — fill it", strings.TrimSpace(e.Anchor))
+	}
+	if isUnfilledPlaceholder(e.Delta) {
+		return fmt.Errorf("readermap: delta is an unfilled placeholder (%q) — fill it", strings.TrimSpace(e.Delta))
+	}
+	if isUnfilledPlaceholder(e.Decision) {
+		return fmt.Errorf("readermap: decision is an unfilled placeholder (%q) — fill it or use %q", strings.TrimSpace(e.Decision), DecisionNone)
+	}
 	return nil
+}
+
+// isUnfilledPlaceholder reports whether s is an angle-bracket template placeholder
+// left unfilled (its trimmed form opens with '<' and closes with '>'), as in the
+// brief-request JSON template. It is a cheap, deterministic guard against a desk
+// echoing the template verbatim — NOT a content judgment (that is tier-2's job).
+func isUnfilledPlaceholder(s string) bool {
+	t := strings.TrimSpace(s)
+	return strings.HasPrefix(t, "<") && strings.HasSuffix(t, ">")
 }
 
 // DecisionIsNone reports whether the envelope's Decision is the explicit no-action
