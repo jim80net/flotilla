@@ -18,15 +18,15 @@ func memberByName(t *testing.T, name string) Member {
 	return Member{}
 }
 
-// The registry ships EXACTLY three members: the Rule of Three (identity-append),
-// no-self-merge (identity-append), and visibility-synthesis (heartbeat-skill). This
-// locks the count so a future member addition is a deliberate, reviewed change (and so
-// the member-count-agnostic install loop is exercised against the real registry, not a
-// fixture).
+// The registry ships EXACTLY four members: the Rule of Three (identity-append),
+// no-self-merge (identity-append), act-dont-idle-hold (identity-append), and
+// visibility-synthesis (heartbeat-skill). This locks the count so a future member
+// addition is a deliberate, reviewed change (and so the member-count-agnostic install
+// loop is exercised against the real registry, not a fixture).
 func TestMembersRegistryContents(t *testing.T) {
 	members := Members()
-	if len(members) != 3 {
-		t.Fatalf("registry should hold exactly three members, got %d", len(members))
+	if len(members) != 4 {
+		t.Fatalf("registry should hold exactly four members, got %d", len(members))
 	}
 	byName := map[string]Member{}
 	for _, m := range members {
@@ -53,6 +53,20 @@ func TestMembersRegistryContents(t *testing.T) {
 	}
 	if strings.TrimSpace(nsm.Content) == "" {
 		t.Error("no-self-merge content is empty — the embed did not round-trip")
+	}
+
+	ad, ok := byName["act-dont-idle-hold"]
+	if !ok {
+		t.Fatal("registry missing act-dont-idle-hold member")
+	}
+	if ad.Mechanism != MechanismIdentityAppend {
+		t.Errorf("act-dont-idle-hold mechanism = %q, want %q", ad.Mechanism, MechanismIdentityAppend)
+	}
+	if ad.OpenMarker != actDontIdleHoldOpenMarker || ad.CloseMarker != actDontIdleHoldCloseMarker {
+		t.Errorf("act-dont-idle-hold markers = open=%q close=%q, want the act-dont-idle-hold fence", ad.OpenMarker, ad.CloseMarker)
+	}
+	if strings.TrimSpace(ad.Content) == "" {
+		t.Error("act-dont-idle-hold content is empty — the embed did not round-trip")
 	}
 
 	vs, ok := byName["visibility-synthesis"]

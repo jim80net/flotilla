@@ -5,12 +5,14 @@
 // default seed from `workspace init`, so a freshly scaffolded agent is born with
 // the doctrine in place.
 //
-// The set ships three members:
+// The set ships four members:
 //   - the Rule of Three (span of control) — an IDENTITY-APPEND guideline: its distilled
 //     text is appended into the agent's standing identity file so it loads once at launch
 //     via --append-system-prompt-file.
 //   - no-self-merge — an IDENTITY-APPEND rule: a desk never merges its own work; the
 //     agent one level above reviews and merges (the merge IS the independent review).
+//   - act-dont-idle-hold — an IDENTITY-APPEND rule: execute authorized reversible work;
+//     never stall on a non-decision by holding or waiting.
 //   - visibility-synthesis — a HEARTBEAT-SKILL: a whole-file curation skill written
 //     into the agent's workspace, loaded when the daemon emits a synthesis wake.
 //
@@ -91,6 +93,12 @@ const (
 	noSelfMergeCloseMarker = "<!-- /flotilla:no-self-merge -->"
 )
 
+// The act-dont-idle-hold sentinel fence (same load-bearing role as the pairs above).
+const (
+	actDontIdleHoldOpenMarker  = "<!-- flotilla:act-dont-idle-hold -->"
+	actDontIdleHoldCloseMarker = "<!-- /flotilla:act-dont-idle-hold -->"
+)
+
 // members is the registry. Adding a member is adding an entry here plus its embedded
 // asset; the install/seed loop iterates this slice and dispatches by Mechanism, so it
 // never needs to change as the set grows (a NEW mechanism additionally needs its
@@ -113,6 +121,16 @@ var members = []Member{
 		Content:     mustRead("assets/skills/no-self-merge.md"),
 		OpenMarker:  noSelfMergeOpenMarker,
 		CloseMarker: noSelfMergeCloseMarker,
+	},
+	{
+		// act-dont-idle-hold: execute authorized reversible work; never stall on a
+		// non-decision by holding or waiting. An identity-append structural rule like
+		// no-self-merge — loaded once into the agent's identity at launch.
+		Name:        "act-dont-idle-hold",
+		Mechanism:   MechanismIdentityAppend,
+		Content:     mustRead("assets/skills/act-dont-idle-hold.md"),
+		OpenMarker:  actDontIdleHoldOpenMarker,
+		CloseMarker: actDontIdleHoldCloseMarker,
 	},
 	{
 		// visibility-synthesis: a whole-file curation skill (Tiers 2/3 of the

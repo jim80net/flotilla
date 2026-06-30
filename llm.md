@@ -159,3 +159,6 @@ user: they can now `flotilla send` work to any desk, the XO advances authorized
 work on its own, and (if they wired Discord) they drive the whole fleet from
 chat. Point them at `docs/quickstart.md` for the same flow at human pace, and
 `docs/xo-doctrine.md` + `docs/watch-runbook.md` for running an XO in production.
+`flotilla workspace init` seeds the constitutional doctrine (including
+act-dont-idle-hold — execute authorized work, don't stall on non-decisions); run
+`flotilla doctrine install <agent>` on existing desks to pick up new members.

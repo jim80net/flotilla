@@ -67,6 +67,9 @@ func TestCmdWorkspaceInitSeedsBothConstitutionalMembers(t *testing.T) {
 	if !strings.Contains(string(idBody), "flotilla:rule-of-three") {
 		t.Error("workspace init did not seed the rule-of-three identity-append block")
 	}
+	if !strings.Contains(string(idBody), "flotilla:act-dont-idle-hold") {
+		t.Error("workspace init did not seed the act-dont-idle-hold identity-append block")
+	}
 	skillBody, err := os.ReadFile(skill)
 	if err != nil {
 		t.Fatalf("workspace init did not seed the visibility-synthesis skill file: %v", err)

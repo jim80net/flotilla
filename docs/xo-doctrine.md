@@ -160,6 +160,26 @@ flotilla ships **A as the default.** B is deferred; if it lands later it will be
 opt-in and additive, not a replacement for the XO knowing how to address its
 operator directly.
 
+## Act — don't idle-hold on non-decisions
+
+The dominant way coordinated work dies is an agent **stalling on a non-decision** —
+ending turns with "holding for your call," scheduling wait-only wakes, or permission-
+seeking on work the goal already requires. flotilla fights this two ways:
+
+1. **Doctrine.** The `act-dont-idle-hold` constitutional member (seeded by
+   `workspace init`, installed by `doctrine install`) states the rule: when the next
+   step is clear, authorized, and reversible, **execute and report** — do not hold.
+   The three genuine operator decisions are spend, irreversible/destructive, and a
+   divergent fork; everything else is execution.
+2. **Harness.** When `change_detector` is enabled, the watch daemon classifies each
+   desk's turn-final on finish; two consecutive idle-hold strikes inject a break prompt
+   ordering the desk to act (defaulting to its stated recommendation) or escalate a
+   concrete blocker naming the decision-type.
+
+The XO applies the same standard to itself on continuation wakes: advance the next
+authorized step from durable state, or record a genuine blocker into the right ledger
+(`[blocked]` / `[awaiting-auth]`) — never a bare "waiting."
+
 ## The change-detector (heartbeat v2) and the discipline it demands
 
 When a deployment enables the **change-detector** (`change_detector: true` in the
@@ -354,8 +374,8 @@ awaiting files). Add the lines to the XO's standing instructions:
   parallel. flotilla ships it as the *first* constitutional member (seeded by
   `workspace init`, installed by `doctrine install`); the
   [constitutional set](./span-of-control.md#the-constitutional-set--how-flotilla-ships-doctrine)
-  now ships **three** members — Rule of Three + no-self-merge (both `identity-append`) +
-  visibility-synthesis (the `heartbeat-skill` mechanism).
+  now ships **four** members — Rule of Three + no-self-merge + act-dont-idle-hold
+  (all `identity-append`) + visibility-synthesis (the `heartbeat-skill` mechanism).
 - [visibility.md](./visibility.md) — the stratified-visibility doctrine (Tiers 1/2/3):
   Tier 1 is the mechanical per-desk mirror; Tiers 2/3 are the XO / meta-XO synthesis the
   visibility-synthesis skill drives. Composes with the change-detector (whose working→idle

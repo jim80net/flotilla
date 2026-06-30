@@ -85,6 +85,12 @@ type DetectorConfig struct {
 	// affect the tick or delivery. Default nil ⇒ inert (no mirror; behavior byte-identical to before
 	// this change). The XO is deliberately excluded — it has its own mirror path.
 	MirrorOnFinish func(agent string)
+	// IdleHoldOnFinish is the idle-hold antipattern side-effect (#216): invoked once
+	// for each NON-XO desk that completed a unit of work this tick (the same trigger
+	// as MirrorOnFinish). The caller reads the desk's turn-final, runs the mechanical
+	// detector, and injects a break prompt when consecutive strikes meet the threshold.
+	// Like MirrorOnFinish it runs in runTail OUTSIDE d.mu; default nil ⇒ inert.
+	IdleHoldOnFinish func(agent string)
 	// MirrorDispatch runs a tick's batch of per-desk mirrors. Production wires it to `go run()` so the
 	// mirror I/O (a transcript read + Discord posts) is FULLY DECOUPLED from the detector loop — even
 	// off-mutex, inline I/O on the tick goroutine could delay the next tick (and thus liveness eval)
@@ -587,10 +593,15 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors []s
 	// like the wakes, OUTSIDE d.mu — a slow transcript read or Discord post must never stall the tick
 	// loop or block OperatorWake. The closure is observe-only + best-effort (it absorbs its own
 	// failures); the detector only fires the trigger.
-	if len(mirrors) > 0 && d.cfg.MirrorOnFinish != nil {
+	if len(mirrors) > 0 && (d.cfg.MirrorOnFinish != nil || d.cfg.IdleHoldOnFinish != nil) {
 		run := func() {
 			for _, agent := range mirrors {
-				d.mirrorOne(agent)
+				if d.cfg.MirrorOnFinish != nil {
+					d.mirrorOne(agent)
+				}
+				if d.cfg.IdleHoldOnFinish != nil {
+					d.idleHoldOne(agent)
+				}
 			}
 		}
 		if d.cfg.MirrorDispatch != nil {
@@ -618,6 +629,17 @@ func (d *Detector) mirrorOne(agent string) {
 		}
 	}()
 	d.cfg.MirrorOnFinish(agent)
+}
+
+// idleHoldOne invokes the idle-hold break side-effect with the same recover()
+// backstop as mirrorOne — observe-only failures must never kill the clock.
+func (d *Detector) idleHoldOne(agent string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("flotilla watch: idle-hold break panicked for %q (recovered; tick unaffected): %v", agent, r)
+		}
+	}()
+	d.cfg.IdleHoldOnFinish(agent)
 }
 
 // persist durably writes the snapshot committed in-memory by tickLocked. It re-acquires d.mu

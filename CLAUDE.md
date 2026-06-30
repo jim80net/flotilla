@@ -62,6 +62,16 @@ Add the generalizable principle to this file so the next contributor and the
 next deployment inherit it. The long-term aim is for flotilla to be an operating
 system for agentic work; these semantics are part of that operating system.
 
-## 5. Setup
+## 5. Act — don't idle-hold on non-decisions
+
+When the next step is clear, authorized, and reversible, **execute it and report the
+result.** Do not end a turn holding or waiting on the operator for a choice they already
+made by stating the goal. The three genuine operator decisions are: new/not-yet-affirmed
+money spend, irreversible/destructive action, and a genuine divergent fork with real
+tradeoffs. Everything else is execution. flotilla ships this standard as the
+`act-dont-idle-hold` constitutional member (`flotilla doctrine install`); the harness
+also detects repeated idle-hold turn-finals and injects a break prompt.
+
+## 6. Setup
 
 To install and configure flotilla, see `llm.md`.
