@@ -178,6 +178,14 @@ const grokApprovalYolo = "Ctrl+o:yolo"
 
 var grokApprovalSelect = regexp.MustCompile(`\d+/\d+:select`)
 
+// grokRateLimitStatus matches rate-limit text on grok's braille-spinner STATUS line
+// (bottom chrome — same lastNNonEmptyLines region as parseGrokState). The line MUST
+// carry a braille spinner frame so streamed prose that merely mentions rate limits
+// does not match. Phrase from archived grok-dev STATUS_MESSAGES; the official grok
+// CLI rate-limit STATUS render is not yet live-fixture-verified — revalidate on a
+// real throttle before widening this anchor.
+var grokRateLimitStatus = regexp.MustCompile(`(?i)[\x{2801}-\x{28FF}].*\brate limit exceeded\b`)
+
 // parseGrokState classifies a captured official-grok pane, claude-style (Working-positive,
 // Idle-default), with the tool-approval gate checked FIRST. A blocking modal must be detected before
 // the Working check because the streaming arrow ⇣ is CO-PRESENT on the modal's "◆ Run …" line — keying
@@ -255,6 +263,31 @@ func classifyGrokComposerLine(captured string, cursorY int) ComposerDisposition 
 	return ComposerPending
 }
 
+// classifyGrokRateLimit reports whether grok's bottom STATUS chrome shows a rate-limit
+// throttle (braille-spinner line only — not prose in streamed output).
+func classifyGrokRateLimit(captured string) (bool, string) {
+	for _, line := range lastNNonEmptyLines(captured, grokTail) {
+		if grokRateLimitStatus.MatchString(line) {
+			return true, "Rate limit exceeded"
+		}
+	}
+	return false, ""
+}
+
+// RateLimited implements RateLimitProbe (#204): detects grok's rate-limit STATUS line
+// with 2-consecutive-read materiality discipline.
+func (g grok) RateLimited(pane string) (bool, RateLimitScope, string) {
+	captured, err := g.capturePane(pane)
+	if err != nil {
+		return false, 0, ""
+	}
+	hit, detail := classifyGrokRateLimit(captured)
+	if !globalRateLimitStreak.observe(pane, hit) {
+		return false, 0, ""
+	}
+	return true, RateLimitAccountSide, detail
+}
+
 // --- RecycleBridge (#158): grok's portable-markdown context-preservation policy ---
 
 // HandoffPath is grok's HARNESS-AGNOSTIC handoff convention: <cwd>/.flotilla/handoffs/recycle-<token>.md
@@ -298,3 +331,5 @@ func (grok) TakeoverTurn(designatedPath string) string {
 		"(e.g. `flotilla notify --from <your-name> \"...\"`), NEVER an in-pane interactive prompt — a " +
 		"remote XO cannot answer an in-pane menu over the relay (keystrokes navigate it, they don't select)."
 }
+
+var _ RateLimitProbe = grok{}

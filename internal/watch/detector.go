@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"sync"
 	"time"
 
@@ -65,6 +66,19 @@ type DetectorConfig struct {
 	// Assess resolves a desk's current surface state (resolve pane + Driver.Assess);
 	// an unresolvable pane SHOULD return StateUnknown (anti-flap, caught by ack age).
 	Assess func(agent string) surface.State
+	// RateLimitMaterial probes a desk for a material provider throttle (#204). ok=false
+	// when the surface lacks RateLimitProbe or the pane is unresolvable. Invoked OFF d.mu
+	// from runRateLimitProbes (never under tickLocked — pane capture is blocking tmux I/O).
+	// Results fold into the NEXT tick's wake decision. The probe's 2-consecutive-read
+	// discipline runs inside the driver.
+	RateLimitMaterial func(agent string) (limited bool, scope surface.RateLimitScope, detail string, ok bool)
+	// RateLimitReset clears a desk's rate-limit read streak when it leaves the probe
+	// candidate states (Idle/Errored). Invoked OFF d.mu alongside the probe batch.
+	RateLimitReset func(agent string)
+	// RateLimitDispatch runs the per-tick rate-limit probe batch. Production wires it to
+	// `go run()` (mirrors MirrorDispatch) so slow tmux reads cannot stall the tick loop.
+	// Default nil ⇒ synchronous (deterministic for tests).
+	RateLimitDispatch func(run func())
 	// SignalHash returns the OPTIONAL external signal file's content hash; ok=false
 	// when no signal file is configured or it is absent/unreadable (treated as
 	// unchanged — no wake-storm). This is NOT the XO's own state tracker: hashing the
@@ -264,6 +278,13 @@ type Detector struct {
 	deskStopped    map[string]bool // capped + escalated → stop heartbeating until re-armed
 	deskProgressed map[string]bool // desk went Working since its last heartbeat → resets the cap
 
+	// rateLimitActive suppresses repeat wakes for the same throttle episode (#204).
+	rateLimitActive map[string]bool
+	// rateLimitPending holds the PREVIOUS tick's off-mutex probe results (folded into
+	// the current tick's wake decision). Guarded by rateLimitProbeMu.
+	rateLimitPending map[string]rateLimitProbeResult
+	rateLimitProbeMu sync.Mutex
+
 	stop      chan struct{}
 	done      chan struct{}
 	startOnce sync.Once
@@ -356,21 +377,23 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 		}
 	}
 	d := &Detector{
-		cfg:            cfg,
-		pingEvery:      ping,
-		alertInterval:  alert,
-		snap:           snap,
-		cold:           !ok,
-		driveCount:     map[string]int{},
-		shellStreak:    map[string]int{},
-		synthOwed:      map[string]bool{},
-		synthSinceFire: map[string]int{},
-		synthState:     synthState,
-		deskSettled:    map[string]bool{},
-		deskSinceBeat:  map[string]int{},
-		deskNoProgress: map[string]int{},
-		deskStopped:    map[string]bool{},
-		deskProgressed: map[string]bool{},
+		cfg:              cfg,
+		pingEvery:        ping,
+		alertInterval:    alert,
+		snap:             snap,
+		cold:             !ok,
+		driveCount:       map[string]int{},
+		shellStreak:      map[string]int{},
+		synthOwed:        map[string]bool{},
+		synthSinceFire:   map[string]int{},
+		synthState:       synthState,
+		deskSettled:      map[string]bool{},
+		deskSinceBeat:    map[string]int{},
+		deskNoProgress:   map[string]int{},
+		deskStopped:      map[string]bool{},
+		deskProgressed:   map[string]bool{},
+		rateLimitActive:  map[string]bool{},
+		rateLimitPending: map[string]rateLimitProbeResult{},
 		// The detector computes the staleness threshold itself (age > alertInterval×
 		// interval), so the watchdog only needs to trip on the first stale/crash
 		// signal and debounce — maxMissed=1.
@@ -533,6 +556,20 @@ type synthEligible struct {
 	lastSeen map[string]string // a snapshot, compared off-mutex; the live state is committed in runSynthesis
 }
 
+// rateLimitProbeResult is one desk's off-mutex probe outcome, folded into the NEXT tick.
+type rateLimitProbeResult struct {
+	limited bool
+	scope   surface.RateLimitScope
+	ok      bool
+}
+
+// rateLimitWork is the per-tick rate-limit side-effect plan decided UNDER d.mu: which
+// desks to probe OFF mutex this tick, and which streaks to reset (left probed states).
+type rateLimitWork struct {
+	probe []string
+	reset []string
+}
+
 // Tick runs one detector cycle. The state machine (snapshot → liveness → diff → wake-or-sleep
 // → persist) runs UNDER d.mu in tickLocked; the pane-touching side effects it decides (the XO
 // context rotate and the wake deliveries) run AFTER the mutex is released, in runTail. This
@@ -549,8 +586,9 @@ func (d *Detector) Tick() {
 	// consults only an already-computed boolean and never touches the filesystem. Inert (nil) when the
 	// feature is off (HeartbeatEnabled nil) or the warrant seam is unwired.
 	warrant := d.deskWarrantSnapshot()
-	pendingRotate, pendingWakes, pendingMirrors, pendingSynth, pendingDeskBeats, pendingDeskEscalations := d.tickLocked(warrant)
+	pendingRotate, pendingWakes, pendingMirrors, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit := d.tickLocked(warrant)
 	d.runTail(pendingRotate, pendingWakes, pendingMirrors)
+	d.runRateLimitProbes(pendingRateLimit)
 	// Visibility-synthesis (B2) runs AFTER runTail and OFF d.mu: its materiality read is BLOCKING
 	// tmux + transcript I/O that must NEVER execute under the detector mutex (it would stall the tick
 	// loop and block OperatorWake — the relay goroutine — exactly as the mirror path is kept off-mutex).
@@ -655,7 +693,7 @@ func (d *Detector) persist() {
 // tickLocked runs the lock-free-pure state machine under d.mu and RETURNS the side effects to
 // perform after unlock (a pending rotate + the ordered wakes). It is the single per-interval
 // writer of detector state; OperatorWake is the only other writer and shares the mutex.
-func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pendingWakes []deferredWake, pendingMirrors []string, pendingSynth []synthEligible, pendingDeskBeats []string, pendingDeskEscalations []string) {
+func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pendingWakes []deferredWake, pendingMirrors []string, pendingSynth []synthEligible, pendingDeskBeats []string, pendingDeskEscalations []string, pendingRateLimit rateLimitWork) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -728,6 +766,12 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 		d.selfCont = 0
 		cur.XOSettled = false
 		wake(WakeMaterial, reasons)
+	} else if rateReasons := d.rateLimitWakesFromPendingLocked(); len(rateReasons) > 0 {
+		// 4b. Provider rate-limit (#204): wake from the PREVIOUS tick's off-mutex probes
+		// (auto-switch enqueue is P2 — #205; this path only notifies the XO).
+		d.selfCont = 0
+		cur.XOSettled = false
+		wake(WakeMaterial, rateReasons)
 	} else if xoFinishedTurn(prev, cur, d.cfg.XOAgent) && !cur.XOSettled {
 		// 5. XO self-continuation — only when nothing external fired this tick (an
 		//    external change already covers advancing the XO and resets the cap).
@@ -767,7 +811,8 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 	//    tail enqueues the wakes, so a crash before the durable commit re-detects on restart (H3 /
 	//    cubic-P1 at-least-once).
 	d.snap = cur
-	return pendingRotate, pendingWakes, pendingMirrors, pendingSynth, pendingDeskBeats, pendingDeskEscalations
+	pendingRateLimit = d.rateLimitWorkLocked(cur)
+	return pendingRotate, pendingWakes, pendingMirrors, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit
 }
 
 // deskWarrantSnapshot is the #189 PHASE-1 read, run OFF d.mu from Tick BEFORE tickLocked acquires the
@@ -1208,6 +1253,97 @@ func (d *Detector) save() {
 		if err := d.cfg.SynthPersist(d.synthState); err != nil {
 			log.Printf("flotilla watch: synthesis sidecar persist failed: %v (continuing — at worst one extra synthesis after a restart)", err)
 		}
+	}
+}
+
+// rateLimitWakesFromPendingLocked reads the PREVIOUS tick's off-mutex probe results and
+// returns material wake reasons. Called under d.mu. Edge-triggered: one wake per
+// throttle episode per desk (cleared when the probe stops reporting limited).
+func (d *Detector) rateLimitWakesFromPendingLocked() []string {
+	if d.cfg.RateLimitMaterial == nil {
+		return nil
+	}
+	d.rateLimitProbeMu.Lock()
+	pending := d.rateLimitPending
+	d.rateLimitProbeMu.Unlock()
+	if len(pending) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(pending))
+	for name := range pending {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var reasons []string
+	for _, name := range names {
+		res := pending[name]
+		if !res.ok || !res.limited {
+			delete(d.rateLimitActive, name)
+			continue
+		}
+		if d.rateLimitActive[name] {
+			continue // already woke for this episode
+		}
+		d.rateLimitActive[name] = true
+		reasons = append(reasons, name+": rate-limited ("+res.scope.String()+" — switch eligible)")
+	}
+	return reasons
+}
+
+// rateLimitWorkLocked decides which desks to probe OFF mutex this tick (Idle/Errored
+// non-XO desks) and which streaks to reset (desks that left the candidate states).
+// Pure under d.mu — NO pane I/O.
+func (d *Detector) rateLimitWorkLocked(cur Snapshot) rateLimitWork {
+	if d.cfg.RateLimitMaterial == nil {
+		return rateLimitWork{}
+	}
+	var work rateLimitWork
+	for _, name := range d.cfg.Desks {
+		if name == d.cfg.XOAgent {
+			continue
+		}
+		st := cur.DeskStates[name]
+		if st == surface.StateIdle || st == surface.StateErrored {
+			work.probe = append(work.probe, name)
+		} else {
+			delete(d.rateLimitActive, name)
+			work.reset = append(work.reset, name)
+		}
+	}
+	sort.Strings(work.probe)
+	sort.Strings(work.reset)
+	return work
+}
+
+// runRateLimitProbes executes the per-tick rate-limit probe batch OFF d.mu. Results are
+// stored for the NEXT tick's rateLimitWakesFromPendingLocked (fold-back). Production
+// dispatches async via RateLimitDispatch (mirrors MirrorDispatch).
+func (d *Detector) runRateLimitProbes(work rateLimitWork) {
+	if d.cfg.RateLimitMaterial == nil {
+		return
+	}
+	if len(work.probe) == 0 && len(work.reset) == 0 {
+		return
+	}
+	run := func() {
+		if d.cfg.RateLimitReset != nil {
+			for _, agent := range work.reset {
+				d.cfg.RateLimitReset(agent)
+			}
+		}
+		results := make(map[string]rateLimitProbeResult, len(work.probe))
+		for _, agent := range work.probe {
+			limited, scope, _, ok := d.cfg.RateLimitMaterial(agent)
+			results[agent] = rateLimitProbeResult{limited: limited, scope: scope, ok: ok}
+		}
+		d.rateLimitProbeMu.Lock()
+		d.rateLimitPending = results
+		d.rateLimitProbeMu.Unlock()
+	}
+	if d.cfg.RateLimitDispatch != nil {
+		d.cfg.RateLimitDispatch(run)
+	} else {
+		run()
 	}
 }
 
