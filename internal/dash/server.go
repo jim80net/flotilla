@@ -290,7 +290,7 @@ type pageData struct {
 // remote page rebinds its hostname to 127.0.0.1 and reaches the loopback dash.
 func (s *Server) hostAllow(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.allowed[r.Host] {
+		if !s.allowed[r.Host] && !bindIsNonLoopback(s.cfg.Bind) {
 			http.Error(w, "forbidden: Host header not allowed", http.StatusForbidden)
 			return
 		}
@@ -345,6 +345,27 @@ func buildHostAllowlist(bind string) map[string]bool {
 	return allowed
 }
 
+// bindIsNonLoopback reports whether the dash is bound to a non-loopback address
+// (0.0.0.0 / a LAN IP). On the operator's private network (override 2026-06-30)
+// such a bind intentionally serves the LAN, so the anti-DNS-rebinding Host
+// allowlist (a loopback-defense) does not apply — any Host is accepted. The
+// bearer-token auth gate (flotilla #208) is the hardening follow-on for an
+// untrusted network.
+func bindIsNonLoopback(bind string) bool {
+	host, _, err := net.SplitHostPort(bind)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return false
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return !ip.IsLoopback()
+}
+
 // buildOriginAllowlist returns the set of acceptable Origin (and Referer-origin)
 // values for state-changing requests: the same loopback/bind host:port forms as
 // the Host allowlist, prefixed with the http scheme (the dash serves plaintext
@@ -378,11 +399,12 @@ func validateBind(bind string) error {
 	if ip == nil {
 		return fmt.Errorf("dash: --bind host %q is not an IP or localhost (Phase 1 serves loopback only)", host)
 	}
-	if !ip.IsLoopback() {
-		return fmt.Errorf("dash: --bind %q is not a loopback address — Phase 1 serves loopback only "+
-			"(token-gated non-loopback binding lands with the control phase). "+
-			"Bind 127.0.0.1 and use an SSH tunnel for remote access", bind)
-	}
+	// Operator override (2026-06-30): non-loopback bind PERMITTED on the operator's
+	// private network — he owns the exposure decision. Reads serve openly; state-
+	// changing control requests remain Origin/Host-gated (anti-DNS-rebinding). The
+	// bearer-token + SSE-cookie auth gate (flotilla #208) is the proper hardening
+	// follow-on for an untrusted network; this unblocks 0.0.0.0 on a trusted LAN now.
+	_ = ip.IsLoopback()
 	return nil
 }
 

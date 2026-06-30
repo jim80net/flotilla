@@ -209,33 +209,39 @@ func TestHostAllowlist(t *testing.T) {
 	}
 }
 
-// --- bind validation (loopback-only fail-closed) ---
+// --- bind validation (permits IP or localhost; non-loopback allowed on a
+// trusted private network per the operator override — see validateBind /
+// bindIsNonLoopback. Only a non-IP, non-localhost host is rejected.) ---
 
 func TestValidateBind(t *testing.T) {
-	ok := []string{"127.0.0.1:8787", "localhost:8787", "[::1]:8080", "127.0.0.1:0"}
+	ok := []string{
+		"127.0.0.1:8787", "localhost:8787", "[::1]:8080", "127.0.0.1:0",
+		// non-loopback binds are permitted (operator override, trusted LAN)
+		"0.0.0.0:8787", "192.168.1.5:8787", "10.0.0.1:8080",
+	}
 	for _, b := range ok {
 		if err := validateBind(b); err != nil {
 			t.Errorf("validateBind(%q) = %v, want nil", b, err)
 		}
 	}
-	bad := []string{"0.0.0.0:8787", "192.168.1.5:8787", "example.com:8787", "10.0.0.1:8080"}
+	bad := []string{"example.com:8787", "not-an-ip:8787"} // non-IP, non-localhost host
 	for _, b := range bad {
 		if err := validateBind(b); err == nil {
-			t.Errorf("validateBind(%q) = nil, want a fail-closed error", b)
+			t.Errorf("validateBind(%q) = nil, want an error (non-IP host)", b)
 		}
 	}
 }
 
-func TestNewServer_RefusesNonLoopback(t *testing.T) {
+func TestNewServer_PermitsNonLoopbackBind(t *testing.T) {
 	dir := t.TempDir()
 	rosterPath := filepath.Join(dir, "flotilla.json")
 	_ = os.WriteFile(rosterPath, []byte(singleFleetRoster), 0o600)
 	_, err := NewServer(Config{RosterPath: rosterPath, Bind: "0.0.0.0:8787"})
-	if err == nil {
-		t.Fatal("NewServer must refuse a non-loopback bind (fail-closed)")
-	}
-	if !strings.Contains(err.Error(), "loopback") {
-		t.Errorf("error should explain loopback-only: %v", err)
+	// Operator override: a non-loopback bind is permitted, so NewServer must NOT
+	// reject it as loopback-only. (It may still error on other missing config —
+	// e.g. a coordination Transport — but that is not the bind gate.)
+	if err != nil && strings.Contains(err.Error(), "loopback") {
+		t.Errorf("NewServer must permit a non-loopback bind, got loopback rejection: %v", err)
 	}
 }
 
