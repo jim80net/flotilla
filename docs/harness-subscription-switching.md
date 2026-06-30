@@ -178,7 +178,7 @@ Per-driver phrase lists (live-capture gated, starting points):
 |---|---|---|---|
 | `claude-code` | `Server is temporarily limiting requests` | **ServerSide** (`provider: anthropic`) | **No** — `Assess` does not classify errors (`claude.go:88-106`) |
 | `claude-code` | per-account quota messages (TBD live capture) | AccountSide | **No** |
-| `grok` | `Rate limit exceeded` (per archived grok driver design) | TBD live capture | **Not verified in current `grok.go` classify path** |
+| `grok` | `rate limit exceeded` on braille-spinner STATUS line (binary: `rate limit exceeded; sleeping.`) | AccountSide (characterized) | **Yes** — anchored to bottom STATUS chrome, not scrollback prose (`grok.go`) |
 | `aider` | LiteLLM rate-limit strings | TBD | Partial — treated as **Working** (retry), not a switch signal (`aider.go:110-111`) |
 | `opencode` | TBD live capture | TBD | **No** |
 

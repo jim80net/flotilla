@@ -181,9 +181,28 @@ func TestParseGrokStateApproval(t *testing.T) {
 }
 
 func TestClassifyGrokRateLimitStatusChrome(t *testing.T) {
-	hit, detail := classifyGrokRateLimit("  ⠙ Rate limit exceeded… 0.4s\n  │ ❯  │\n  Shift+Tab:mode")
-	if !hit || detail == "" {
-		t.Fatalf("classifyGrokRateLimit(status chrome) = (%v, %q), want hit", hit, detail)
+	// Spinner STATUS line — structural parity with live Working captures (#58); phrase
+	// matches the official grok binary ("rate limit exceeded; sleeping.").
+	cases := []struct {
+		name     string
+		captured string
+	}{
+		{
+			name:     "spinner + ellipsis elapsed (Working-parity shape)",
+			captured: "  ⠙ Rate limit exceeded… 0.4s\n  │ ❯  │\n  Shift+Tab:mode",
+		},
+		{
+			name:     "spinner + binary phrase suffix",
+			captured: "  ⠦ rate limit exceeded; sleeping.\n  Turn completed in 1.2s.\n  │ ❯  │\n  Shift+Tab:mode",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hit, detail := classifyGrokRateLimit(tc.captured)
+			if !hit || detail == "" {
+				t.Fatalf("classifyGrokRateLimit(%q) = (%v, %q), want hit", tc.name, hit, detail)
+			}
+		})
 	}
 }
 
