@@ -96,6 +96,11 @@ type switchPlan struct {
 	ownPane                   string // $TMUX_PANE — the command's own pane (canonical self-switch compare)
 	minHandoffBytes           int
 	timeouts                  recycleTimeouts // SHARED with recycle (the phase timeouts are identical in shape)
+	// autoPath is true for detector-enqueued `flotilla switch --auto` (#205): acquire the pane-txn
+	// lock BEFORE Phase-1 handoff and live-re-probe the rate-limit under the lock (P1-C).
+	autoPath bool
+	// reprobeRateLimit is wired only on autoPath; a cleared probe ABORTS before handoff.
+	reprobeRateLimit func() (limited bool, ok bool)
 }
 
 // switchCapabilityRefusal returns a clean, surface-naming refusal when the FROM or TO
@@ -189,9 +194,26 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 		return "", fmt.Errorf("a blob already exists at the neutral switch handoff path %s — refusing (the gate requires an absent→present transition; this should be impossible with a unique token, so investigate)", p.handoffPath)
 	}
 
-	// PHASE 1 — FROM handoff (lockless): deliver the FROM driver's non-interactive handoff
-	// turn (it names the NEUTRAL path), then gate on that file going absent→present-and-non-
-	// trivial AND idle∧cleared.
+	var release func()
+	if p.autoPath {
+		// AUTO path (#205 / P1-C): lock BEFORE Phase-1 handoff; live-re-probe under the lock.
+		var err error
+		release, err = ops.lock(target)
+		if err != nil {
+			return "", fmt.Errorf("auto-switch: acquire pane transaction lock for %q: %w — ABORT, desk untouched", p.agent, err)
+		}
+		defer release()
+		if !idleClearedWithHeal(switchToRecycleOps(ops), target) {
+			return "", fmt.Errorf("auto-switch: %q is no longer idle at a cleared composer under lock — ABORT, desk untouched", p.agent)
+		}
+		if p.reprobeRateLimit != nil {
+			if limited, ok := p.reprobeRateLimit(); !ok || !limited {
+				return "", fmt.Errorf("auto-switch: rate-limit cleared under lock for %q — ABORT, desk untouched", p.agent)
+			}
+		}
+	}
+
+	// PHASE 1 — FROM handoff: lockless on the MANUAL path; under lock on the AUTO path.
 	if err := ops.deliver(target, p.handoffText); err != nil {
 		return "", fmt.Errorf("phase 1: delivering the handoff turn to %q failed (desk untouched): %w", p.agent, err)
 	}
@@ -199,24 +221,20 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 		return "", fmt.Errorf("phase 1: handoff not durably confirmed for %q within %s (no present non-trivial %s on disk, or the turn never returned to an idle cleared composer) — ABORT, desk still running on the %s harness, nothing closed", p.agent, p.timeouts.handoff, p.handoffPath, p.fromSurface)
 	}
 
-	// ACQUIRE the pane-txn lock for the irreversible span (Phases 2→4); released on return.
-	// SEAM (task 8.3 / P2): the AUTO (rate-limit-triggered) path MUST acquire this lock
-	// BEFORE the Phase-1 handoff (concurrent storm triggers make a double-handoff by two
-	// schedulers the norm) AND live-re-probe the rate-limit scope here (a now-cleared probe
-	// ABORTS the auto-switch — a stale RateLimited snapshot must not commit an irreversible
-	// switch). The MANUAL path is singular, so it keeps recycle's lockless Phase-1.
-	release, err := ops.lock(target)
-	if err != nil {
-		return "", fmt.Errorf("acquire pane transaction lock for %q: %w (another switch/recycle/resume holds it, or the heartbeat is mid-delivery) — ABORT, desk untouched", p.agent, err)
+	if !p.autoPath {
+		// MANUAL path: acquire the lock for the irreversible span (Phases 2→4) AFTER Phase 1.
+		var err error
+		release, err = ops.lock(target)
+		if err != nil {
+			return "", fmt.Errorf("acquire pane transaction lock for %q: %w (another switch/recycle/resume holds it, or the heartbeat is mid-delivery) — ABORT, desk untouched", p.agent, err)
+		}
+		defer release()
 	}
-	defer release()
 
-	// RE-VERIFY the Phase-1 gate UNDER the lock (P1-C — closes the post-handoff TOCTOU: if
-	// anything woke the desk during the unlocked Phase 1, we see it here and abort rather
-	// than closing a mid-turn desk). selfHeal an overlay if available; else a non-cleared
-	// composer fails.
+	// RE-VERIFY the Phase-1 gate UNDER the lock (P1-C — closes the post-handoff TOCTOU on the
+	// manual path; on the auto path re-confirms after handoff delivery).
 	if !idleClearedWithHeal(switchToRecycleOps(ops), target) {
-		return "", fmt.Errorf("phase 2 re-verify: %q is no longer idle at a cleared composer (a turn started in the unlocked window, or an overlay could not be healed) — ABORT, desk untouched", p.agent)
+		return "", fmt.Errorf("phase 2 re-verify: %q is no longer idle at a cleared composer (a turn started during handoff, or an overlay could not be healed) — ABORT, desk untouched", p.agent)
 	}
 	if dur, err := ops.durable(p.cwd, p.handoffPath, p.minHandoffBytes); err != nil || !dur {
 		return "", fmt.Errorf("phase 2 re-verify: the handoff blob is no longer durable for %q (%v) — ABORT, desk untouched", p.agent, err)
@@ -534,9 +552,9 @@ func isSwitchAlreadyComplete(rec switchRecord, token string) bool {
 // --to <slot-or-surface>, --auto (self-select the target), or --repair (reconcile only).
 // --to and --auto are mutually exclusive (auto self-selects; --to names the target). The
 // caller defaults launchPath to a roster-relative path after loading the roster when empty.
-func parseSwitchArgs(args []string) (agent, to, rosterPath, launchPath string, confirm, repair, force, auto bool, err error) {
-	fail := func(e error) (string, string, string, string, bool, bool, bool, bool, error) {
-		return "", "", "", "", false, false, false, false, e
+func parseSwitchArgs(args []string) (agent, to, rosterPath, launchPath, rateLimitScope string, confirm, repair, force, auto bool, err error) {
+	fail := func(e error) (string, string, string, string, string, bool, bool, bool, bool, error) {
+		return "", "", "", "", "", false, false, false, false, e
 	}
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		agent, args = args[0], args[1:]
@@ -549,6 +567,7 @@ func parseSwitchArgs(args []string) (agent, to, rosterPath, launchPath string, c
 	rep := fs.Bool("repair", false, "reconcile active-harness.json from the LIVE pane after a half-switch")
 	fc := fs.Bool("force", false, "switch even if the desk is a live session (the resume --force semantics)")
 	au := fs.Bool("auto", false, "self-select the TO target from the failover chain (poison-aware)")
+	rls := fs.String("rate-limit-scope", "", "rate-limit scope for --auto: server-side or account-side")
 	if err = fs.Parse(args); err != nil {
 		return fail(err)
 	}
@@ -565,7 +584,14 @@ func parseSwitchArgs(args []string) (agent, to, rosterPath, launchPath string, c
 	if *toF == "" && !*au && !*rep {
 		return fail(fmt.Errorf("switch needs a target: pass --to <slot|surface>, --auto, or --repair"))
 	}
-	return agent, *toF, *rp, *lp, *cf, *rep, *fc, *au, nil
+	scope := strings.TrimSpace(*rls)
+	if scope != "" && !*au {
+		return fail(fmt.Errorf("--rate-limit-scope is only valid with --auto"))
+	}
+	if *au && scope != "" && scope != "server-side" && scope != "account-side" {
+		return fail(fmt.Errorf("--rate-limit-scope must be server-side or account-side, got %q", scope))
+	}
+	return agent, *toF, *rp, *lp, scope, *cf, *rep, *fc, *au, nil
 }
 
 // switchGate4 enforces GATE-4 for the MANUAL path: an approval_sensitive desk (a desk that
@@ -591,7 +617,14 @@ func switchGate4(a roster.Agent, confirm bool) error {
 //   - --to a SURFACE name ⇒ the FIRST chain slot whose Surface == that name (the step-5 P3
 //     fold: a surface may appear on several fallbacks; the first match wins).
 //   - else ⇒ a clear no-such-slot error (never a silent mis-target).
-func resolveSwitchSlot(chain launch.Recipe, fromSurface, to string, auto bool, poison PoisonState) (launch.ResolvedSlot, error) {
+func parseRateLimitScopeFlag(scope string) RateLimitScope {
+	if scope == "account-side" {
+		return RateLimitAccountSide
+	}
+	return RateLimitServerSide
+}
+
+func resolveSwitchSlot(chain launch.Recipe, fromSurface, to string, auto bool, poison PoisonState, scope RateLimitScope) (launch.ResolvedSlot, error) {
 	slots := chain.Slots()
 	// Fill the implied-primary slot's empty surface from the active surface (Slots leaves it
 	// blank for the caller to fill — launch.go:216-225), so name/surface matching + the
@@ -607,9 +640,7 @@ func resolveSwitchSlot(chain launch.Recipe, fromSurface, to string, auto bool, p
 		for i, s := range slots {
 			chainSel[i] = switchSlot{Surface: s.Surface, Provider: s.Provider, SubscriptionID: s.SubscriptionID, Slot: s.Name}
 		}
-		// P0: no live RateLimitProbe yet, so the poison state is empty and the scope is the
-		// conservative ServerSide (cross-provider). P2 wires the live scope + poison here.
-		chosen, ok := selectFailoverTarget(chainSel, poison, RateLimitServerSide)
+		chosen, ok := selectFailoverTarget(chainSel, poison, scope)
 		if !ok {
 			return launch.ResolvedSlot{}, fmt.Errorf("no viable TO target for the switch: every fallback's provider is poisoned (auto-switch refuses — desk stays on its current harness)")
 		}
@@ -650,7 +681,7 @@ func slotNames(slots []launch.ResolvedSlot) string {
 // the auto path enqueues `flotilla switch --auto` from the detector at P2 and is unreachable
 // here). --repair is a distinct, non-acting reconcile mode handled first.
 func cmdSwitch(args []string) error {
-	agentName, to, rosterPath, launchPath, confirm, repair, force, auto, err := parseSwitchArgs(args)
+	agentName, to, rosterPath, launchPath, rateLimitScope, confirm, repair, force, auto, err := parseSwitchArgs(args)
 	if err != nil {
 		return err
 	}
@@ -714,8 +745,16 @@ func cmdSwitch(args []string) error {
 		return err
 	}
 
-	// Resolve the TO slot from --to or --auto (P0 poison state is empty).
-	toSlot, err := resolveSwitchSlot(chain, fromSurface, to, auto, PoisonState{})
+	poison := PoisonState{}
+	if auto {
+		var perr error
+		poison, perr = loadActivePoison(time.Now())
+		if perr != nil {
+			return perr
+		}
+	}
+	// Resolve the TO slot from --to or --auto (poison-aware when auto).
+	toSlot, err := resolveSwitchSlot(chain, fromSurface, to, auto, poison, parseRateLimitScopeFlag(rateLimitScope))
 	if err != nil {
 		return err
 	}
@@ -756,7 +795,11 @@ func cmdSwitch(args []string) error {
 
 	reason := "operator-manual"
 	if auto {
-		reason = "operator-auto"
+		if rateLimitScope == "account-side" {
+			reason = "rate-limit-auto-account-side"
+		} else {
+			reason = "rate-limit-auto-server-side"
+		}
 	}
 
 	plan := switchPlan{
@@ -768,6 +811,19 @@ func cmdSwitch(args []string) error {
 		ownPane:         os.Getenv("TMUX_PANE"),
 		minHandoffBytes: defaultMinHandoff,
 		timeouts:        defaultTimeouts(),
+		autoPath:        auto,
+	}
+	if auto {
+		if probe, ok := surface.RateLimitSupport(fromDrv); ok {
+			plan.reprobeRateLimit = func() (bool, bool) {
+				pane, rerr := deliver.ResolvePane(agent.Title())
+				if rerr != nil {
+					return false, false
+				}
+				limited, _, _ := probe.RateLimited(pane)
+				return limited, true
+			}
+		}
 	}
 
 	confirmSubmit := surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}
@@ -1076,7 +1132,7 @@ func runRepair(ops repairOps, agent string, chain launch.Recipe, fromSurface str
 	// The relaunch landed: the live pane runs the TO harness. Reconcile the overlay to the TO
 	// slot resolved from the record's TO surface (the truth is the pane; the record names which
 	// TO slot the pane should be on).
-	toSlot, serr := resolveSwitchSlot(chain, fromSurface, rec.To, false, PoisonState{})
+	toSlot, serr := resolveSwitchSlot(chain, fromSurface, rec.To, false, PoisonState{}, RateLimitServerSide)
 	if serr != nil {
 		return "", fmt.Errorf("repair %s: the recorded TO surface %q is not in the desk's chain (%w) — reconcile manually", agent, rec.To, serr)
 	}

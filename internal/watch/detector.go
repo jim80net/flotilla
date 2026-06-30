@@ -79,6 +79,13 @@ type DetectorConfig struct {
 	// `go run()` (mirrors MirrorDispatch) so slow tmux reads cannot stall the tick loop.
 	// Default nil ⇒ synchronous (deterministic for tests).
 	RateLimitDispatch func(run func())
+	// RateLimitAutoSwitchEligible gates detector-enqueued auto-switch (GATE-4 + coordination
+	// desks). Nil ⇒ no auto-switch candidates are collected.
+	RateLimitAutoSwitchEligible func(agent string) bool
+	// RateLimitAutoSwitch is invoked OFF d.mu with material throttle candidates. It MUST
+	// exec `flotilla switch <agent> --auto` over a side-channel argv array; status goes to
+	// logs only. Nil ⇒ byte-inert.
+	RateLimitAutoSwitch func(candidates []RateLimitAutoSwitchCandidate)
 	// SignalHash returns the OPTIONAL external signal file's content hash; ok=false
 	// when no signal file is configured or it is absent/unreadable (treated as
 	// unchanged — no wake-storm). This is NOT the XO's own state tracker: hashing the
@@ -284,6 +291,8 @@ type Detector struct {
 	// the current tick's wake decision). Guarded by rateLimitProbeMu.
 	rateLimitPending map[string]rateLimitProbeResult
 	rateLimitProbeMu sync.Mutex
+	// autoSwitchFlight dedupes one-in-flight auto-switch per desk (off d.mu).
+	autoSwitchFlight AutoSwitchFlight
 
 	stop      chan struct{}
 	done      chan struct{}
@@ -586,8 +595,9 @@ func (d *Detector) Tick() {
 	// consults only an already-computed boolean and never touches the filesystem. Inert (nil) when the
 	// feature is off (HeartbeatEnabled nil) or the warrant seam is unwired.
 	warrant := d.deskWarrantSnapshot()
-	pendingRotate, pendingWakes, pendingMirrors, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit := d.tickLocked(warrant)
+	pendingRotate, pendingWakes, pendingMirrors, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit, pendingAutoSwitch := d.tickLocked(warrant)
 	d.runTail(pendingRotate, pendingWakes, pendingMirrors)
+	d.runAutoSwitch(pendingAutoSwitch)
 	d.runRateLimitProbes(pendingRateLimit)
 	// Visibility-synthesis (B2) runs AFTER runTail and OFF d.mu: its materiality read is BLOCKING
 	// tmux + transcript I/O that must NEVER execute under the detector mutex (it would stall the tick
@@ -693,7 +703,7 @@ func (d *Detector) persist() {
 // tickLocked runs the lock-free-pure state machine under d.mu and RETURNS the side effects to
 // perform after unlock (a pending rotate + the ordered wakes). It is the single per-interval
 // writer of detector state; OperatorWake is the only other writer and shares the mutex.
-func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pendingWakes []deferredWake, pendingMirrors []string, pendingSynth []synthEligible, pendingDeskBeats []string, pendingDeskEscalations []string, pendingRateLimit rateLimitWork) {
+func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pendingWakes []deferredWake, pendingMirrors []string, pendingSynth []synthEligible, pendingDeskBeats []string, pendingDeskEscalations []string, pendingRateLimit rateLimitWork, pendingAutoSwitch []RateLimitAutoSwitchCandidate) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -766,12 +776,13 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 		d.selfCont = 0
 		cur.XOSettled = false
 		wake(WakeMaterial, reasons)
-	} else if rateReasons := d.rateLimitWakesFromPendingLocked(); len(rateReasons) > 0 {
-		// 4b. Provider rate-limit (#204): wake from the PREVIOUS tick's off-mutex probes
-		// (auto-switch enqueue is P2 — #205; this path only notifies the XO).
+	} else if rateReasons, autoCandidates := d.rateLimitMaterialFromPendingLocked(); len(rateReasons) > 0 {
+		// 4b. Provider rate-limit (#204/#205): wake from the PREVIOUS tick's off-mutex probes;
+		// auto-switch candidates dispatch OFF d.mu in runAutoSwitch.
 		d.selfCont = 0
 		cur.XOSettled = false
 		wake(WakeMaterial, rateReasons)
+		pendingAutoSwitch = autoCandidates
 	} else if xoFinishedTurn(prev, cur, d.cfg.XOAgent) && !cur.XOSettled {
 		// 5. XO self-continuation — only when nothing external fired this tick (an
 		//    external change already covers advancing the XO and resets the cap).
@@ -812,7 +823,7 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 	//    cubic-P1 at-least-once).
 	d.snap = cur
 	pendingRateLimit = d.rateLimitWorkLocked(cur)
-	return pendingRotate, pendingWakes, pendingMirrors, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit
+	return pendingRotate, pendingWakes, pendingMirrors, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit, pendingAutoSwitch
 }
 
 // deskWarrantSnapshot is the #189 PHASE-1 read, run OFF d.mu from Tick BEFORE tickLocked acquires the
@@ -1256,25 +1267,25 @@ func (d *Detector) save() {
 	}
 }
 
-// rateLimitWakesFromPendingLocked reads the PREVIOUS tick's off-mutex probe results and
-// returns material wake reasons. Called under d.mu. Edge-triggered: one wake per
-// throttle episode per desk (cleared when the probe stops reporting limited).
-func (d *Detector) rateLimitWakesFromPendingLocked() []string {
+// rateLimitMaterialFromPendingLocked reads the PREVIOUS tick's off-mutex probe results and
+// returns material wake reasons plus auto-switch candidates. Called under d.mu.
+// Edge-triggered: one wake per throttle episode per desk (cleared when the probe stops
+// reporting limited).
+func (d *Detector) rateLimitMaterialFromPendingLocked() (reasons []string, candidates []RateLimitAutoSwitchCandidate) {
 	if d.cfg.RateLimitMaterial == nil {
-		return nil
+		return nil, nil
 	}
 	d.rateLimitProbeMu.Lock()
 	pending := d.rateLimitPending
 	d.rateLimitProbeMu.Unlock()
 	if len(pending) == 0 {
-		return nil
+		return nil, nil
 	}
 	names := make([]string, 0, len(pending))
 	for name := range pending {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	var reasons []string
 	for _, name := range names {
 		res := pending[name]
 		if !res.ok || !res.limited {
@@ -1286,8 +1297,37 @@ func (d *Detector) rateLimitWakesFromPendingLocked() []string {
 		}
 		d.rateLimitActive[name] = true
 		reasons = append(reasons, name+": rate-limited ("+res.scope.String()+" — switch eligible)")
+		if d.cfg.RateLimitAutoSwitch != nil {
+			if d.cfg.RateLimitAutoSwitchEligible == nil || d.cfg.RateLimitAutoSwitchEligible(name) {
+				candidates = append(candidates, RateLimitAutoSwitchCandidate{Agent: name, Scope: res.scope})
+			}
+		}
 	}
-	return reasons
+	return reasons, candidates
+}
+
+// EndAutoSwitchFlight clears the per-desk in-flight marker after a side-channel auto-switch
+// subprocess completes. Wired from cmd/flotilla/watch.go into the dispatch callback.
+func (d *Detector) EndAutoSwitchFlight(agent string) {
+	d.autoSwitchFlight.End(agent)
+}
+
+// runAutoSwitch dispatches auto-switch candidates OFF d.mu (side-channel exec). One-in-flight
+// dedupe happens here via AutoSwitchFlight.TryBegin; the production callback must call End when
+// the subprocess completes.
+func (d *Detector) runAutoSwitch(candidates []RateLimitAutoSwitchCandidate) {
+	if len(candidates) == 0 || d.cfg.RateLimitAutoSwitch == nil {
+		return
+	}
+	dispatched := make([]RateLimitAutoSwitchCandidate, 0, len(candidates))
+	for _, c := range candidates {
+		if d.autoSwitchFlight.TryBegin(c.Agent) {
+			dispatched = append(dispatched, c)
+		}
+	}
+	if len(dispatched) > 0 {
+		d.cfg.RateLimitAutoSwitch(dispatched)
+	}
 }
 
 // rateLimitWorkLocked decides which desks to probe OFF mutex this tick (Idle/Errored

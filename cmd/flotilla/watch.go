@@ -18,6 +18,7 @@ import (
 	"github.com/jim80net/flotilla/internal/cos"
 	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/idlehold"
+	"github.com/jim80net/flotilla/internal/launch"
 	"github.com/jim80net/flotilla/internal/readermap"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
@@ -467,6 +468,23 @@ func cmdWatch(args []string) error {
 		// prompt fires after StrikeThreshold idle-hold turn-finals.
 		idleHoldTracker := idlehold.NewTracker()
 
+		// #205 auto-switch: load flat launch recipes for storm-cooldown + slot metadata.
+		launchPath := os.Getenv("FLOTILLA_LAUNCH")
+		if launchPath == "" {
+			launchPath = launch.DefaultPath(*rosterPath)
+		}
+		var flatLaunch *launch.Config
+		if _, statErr := os.Stat(launchPath); statErr == nil {
+			rosterAgents := make(map[string]bool, len(cfg.Agents))
+			for _, a := range cfg.Agents {
+				rosterAgents[a.Name] = true
+			}
+			if loaded, lerr := launch.Load(launchPath, rosterAgents); lerr == nil {
+				flatLaunch = loaded
+			}
+		}
+		var endAutoSwitch func(string)
+
 		det := watch.NewDetectorWithSynthSidecar(watch.DetectorConfig{
 			XOAgent:  xo,
 			Desks:    desks,
@@ -492,9 +510,17 @@ func cmdWatch(args []string) error {
 			RateLimitMaterial: rateLimitMaterial(cfg),
 			RateLimitReset:    rateLimitReset(cfg),
 			RateLimitDispatch: func(run func()) { go run() },
-			SignalHash:        signalHash,
-			AckAge:            ack.Age,
-			Wake:              wake,
+			RateLimitAutoSwitchEligible: func(agent string) bool {
+				return cfg.AutoSwitchEligible(agent)
+			},
+			RateLimitAutoSwitch: newRateLimitAutoSwitchDispatch(cfg, *rosterPath, launchPath, flatLaunch, func(agent string) {
+				if endAutoSwitch != nil {
+					endAutoSwitch(agent)
+				}
+			}),
+			SignalHash: signalHash,
+			AckAge:     ack.Age,
+			Wake:       wake,
 			Rotate: func() error {
 				// Resolve the XO pane FIRST, then take the per-pane TRANSACTION lock keyed by that
 				// target (the same key every other transaction writer uses), so the /clear rotate
@@ -540,6 +566,7 @@ func cmdWatch(args []string) error {
 			DeskEscalate:            deskEscalate,
 			DeskHeartbeatEveryTicks: 1,
 		}, *snapshotPath, synthSidecarPath)
+		endAutoSwitch = det.EndAutoSwitchFlight
 		det.Start()
 		defer det.Stop()
 		onAccepted = func(target string) {

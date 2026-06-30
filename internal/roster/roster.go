@@ -356,6 +356,30 @@ func (c *Config) BindingForChannel(channelID string) (Channel, bool) {
 	return Channel{}, false
 }
 
+// AutoSwitchEligible reports whether the watch detector MAY enqueue an automatic
+// harness switch for this agent. Coordination desks (every binding's xo_agent, the
+// primary xo_agent, and cos_agent) stay on their current harness; approval_sensitive
+// desks are refused at enqueue (GATE-4).
+func (c *Config) AutoSwitchEligible(name string) bool {
+	if name == "" {
+		return false
+	}
+	a, err := c.Agent(name)
+	if err != nil {
+		return false
+	}
+	if a.ApprovalSensitive {
+		return false
+	}
+	if c.IsXO(name) {
+		return false
+	}
+	if c.CosAgent != "" && name == c.CosAgent {
+		return false
+	}
+	return true
+}
+
 // IsXO reports whether name is an XO in this roster — the top-level primary
 // xo_agent OR the xo_agent of any channel binding (federation). The CoS outbound
 // mirror uses it to scope the ledger to XO→operator replies (a desk `notify` is

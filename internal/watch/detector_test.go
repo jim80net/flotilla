@@ -672,6 +672,106 @@ func TestDetectorRateLimitConcurrentUnderRace(t *testing.T) {
 	wg.Wait() // -race: rate-limit probe path must not race with OperatorWake
 }
 
+func TestDetectorAutoSwitchEnqueuesOncePerEpisode(t *testing.T) {
+	f := newFixture()
+	var autoCalls []RateLimitAutoSwitchCandidate
+	var det *Detector
+	cfg := f.config("xo", []string{"xo", "backend"}, 3, "none")
+	probeCalls := 0
+	cfg.RateLimitMaterial = func(agent string) (bool, surface.RateLimitScope, string, bool) {
+		if agent != "backend" {
+			return false, 0, "", false
+		}
+		probeCalls++
+		if probeCalls < 2 {
+			return false, surface.RateLimitServerSide, "", true
+		}
+		return true, surface.RateLimitServerSide, "limited", true
+	}
+	cfg.RateLimitAutoSwitchEligible = func(agent string) bool { return agent == "backend" }
+	cfg.RateLimitAutoSwitch = func(candidates []RateLimitAutoSwitchCandidate) {
+		autoCalls = append(autoCalls, candidates...)
+		for _, c := range candidates {
+			det.EndAutoSwitchFlight(c.Agent)
+		}
+	}
+	det = newDet(t, f, cfg)
+	d := det
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
+	f.set("xo", surface.StateIdle)
+	f.set("backend", surface.StateIdle)
+	f.signal = "h0"
+
+	d.Tick()
+	d.Tick()
+	d.Tick() // material episode + auto-switch candidate
+	if len(autoCalls) != 1 || autoCalls[0].Agent != "backend" {
+		t.Fatalf("auto-switch calls = %+v, want one backend candidate", autoCalls)
+	}
+	autoCalls = nil
+	d.Tick() // same episode — no second auto-switch
+	if len(autoCalls) != 0 {
+		t.Fatalf("tick 4 auto-switch = %+v, want none (edge-triggered)", autoCalls)
+	}
+}
+
+func TestDetectorAutoSwitchRefusesIneligibleDesk(t *testing.T) {
+	f := newFixture()
+	var autoCalls []RateLimitAutoSwitchCandidate
+	cfg := f.config("xo", []string{"xo", "backend"}, 3, "none")
+	cfg.RateLimitMaterial = func(agent string) (bool, surface.RateLimitScope, string, bool) {
+		return true, surface.RateLimitServerSide, "limited", true
+	}
+	cfg.RateLimitAutoSwitchEligible = func(string) bool { return false }
+	cfg.RateLimitAutoSwitch = func(candidates []RateLimitAutoSwitchCandidate) {
+		autoCalls = append(autoCalls, candidates...)
+	}
+	d := newDet(t, f, cfg)
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
+	f.set("backend", surface.StateIdle)
+	f.signal = "h0"
+	d.Tick()
+	d.Tick()
+	if len(autoCalls) != 0 {
+		t.Fatalf("ineligible desk must not auto-switch, got %+v", autoCalls)
+	}
+}
+
+func TestDetectorAutoSwitchConcurrentUnderRace(t *testing.T) {
+	f := newFixture()
+	var det *Detector
+	cfg := f.config("xo", []string{"xo", "backend"}, 3, "none")
+	cfg.RateLimitMaterial = func(agent string) (bool, surface.RateLimitScope, string, bool) {
+		time.Sleep(2 * time.Millisecond)
+		if agent != "backend" {
+			return false, 0, "", false
+		}
+		return true, surface.RateLimitServerSide, "limited", true
+	}
+	cfg.RateLimitAutoSwitchEligible = func(agent string) bool { return agent == "backend" }
+	cfg.RateLimitAutoSwitch = func(candidates []RateLimitAutoSwitchCandidate) {
+		for _, c := range candidates {
+			go func(agent string) {
+				time.Sleep(time.Millisecond)
+				det.EndAutoSwitchFlight(agent)
+			}(c.Agent)
+		}
+	}
+	cfg.RateLimitDispatch = func(run func()) { go run() }
+	det = newDet(t, f, cfg)
+	d := det
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
+	f.set("backend", surface.StateIdle)
+	f.signal = "h0"
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(2)
+		go func() { defer wg.Done(); d.Tick() }()
+		go func() { defer wg.Done(); d.OperatorWake() }()
+	}
+	wg.Wait() // -race: auto-switch flight map must not race with OperatorWake
+}
+
 func TestDetectorRateLimitSkipsWorkingDesk(t *testing.T) {
 	f := newFixture()
 	cfg := f.config("xo", []string{"xo", "backend"}, 3, "none")

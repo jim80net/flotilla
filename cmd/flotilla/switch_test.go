@@ -785,7 +785,7 @@ func TestParseSwitchArgs(t *testing.T) {
 		{"trailing junk", []string{"research", "--to", "primary", "extra"}, "", "", false, false, false, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			agent, to, _, _, confirm, repair, force, auto, err := parseSwitchArgs(tc.args)
+			agent, to, _, _, _, confirm, repair, force, auto, err := parseSwitchArgs(tc.args)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("expected an error, got agent=%q to=%q", agent, to)
@@ -824,7 +824,7 @@ func switchChainFixture() launch.Recipe {
 func TestResolveSwitchSlot(t *testing.T) {
 	chain := switchChainFixture()
 	t.Run("--to a slot name", func(t *testing.T) {
-		s, err := resolveSwitchSlot(chain, "claude-code", "fallback-0", false, PoisonState{})
+		s, err := resolveSwitchSlot(chain, "claude-code", "fallback-0", false, PoisonState{}, RateLimitServerSide)
 		if err != nil {
 			t.Fatalf("resolveSwitchSlot: %v", err)
 		}
@@ -833,13 +833,13 @@ func TestResolveSwitchSlot(t *testing.T) {
 		}
 	})
 	t.Run("--to primary", func(t *testing.T) {
-		s, err := resolveSwitchSlot(chain, "claude-code", "primary", false, PoisonState{})
+		s, err := resolveSwitchSlot(chain, "claude-code", "primary", false, PoisonState{}, RateLimitServerSide)
 		if err != nil || s.Name != "primary" || s.Surface != "claude-code" {
 			t.Fatalf("got %+v err=%v, want primary/claude-code", s, err)
 		}
 	})
 	t.Run("--to a surface picks the FIRST matching fallback", func(t *testing.T) {
-		s, err := resolveSwitchSlot(chain, "claude-code", "grok", false, PoisonState{})
+		s, err := resolveSwitchSlot(chain, "claude-code", "grok", false, PoisonState{}, RateLimitServerSide)
 		if err != nil {
 			t.Fatalf("resolveSwitchSlot: %v", err)
 		}
@@ -848,7 +848,7 @@ func TestResolveSwitchSlot(t *testing.T) {
 		}
 	})
 	t.Run("--to an unknown slot/surface errors", func(t *testing.T) {
-		_, err := resolveSwitchSlot(chain, "claude-code", "no-such", false, PoisonState{})
+		_, err := resolveSwitchSlot(chain, "claude-code", "no-such", false, PoisonState{}, RateLimitServerSide)
 		if err == nil || !strings.Contains(err.Error(), "no-such") {
 			t.Fatalf("err = %v, want a clear no-such-slot error", err)
 		}
@@ -856,7 +856,7 @@ func TestResolveSwitchSlot(t *testing.T) {
 	t.Run("--auto self-selects the first healthy non-FROM slot", func(t *testing.T) {
 		// P0 poison state is empty; auto self-selects via selectFailoverTarget. The FROM is the
 		// primary (claude-code/anthropic), so the first healthy slot in chain order is fallback-0.
-		s, err := resolveSwitchSlot(chain, "claude-code", "", true, PoisonState{})
+		s, err := resolveSwitchSlot(chain, "claude-code", "", true, PoisonState{}, RateLimitServerSide)
 		if err != nil {
 			t.Fatalf("auto resolveSwitchSlot: %v", err)
 		}
@@ -869,7 +869,7 @@ func TestResolveSwitchSlot(t *testing.T) {
 	})
 	t.Run("--auto refuses when every provider is poisoned", func(t *testing.T) {
 		poison := PoisonState{Providers: map[string]bool{"anthropic": true, "xai": true, "zai": true}}
-		_, err := resolveSwitchSlot(chain, "claude-code", "", true, poison)
+		_, err := resolveSwitchSlot(chain, "claude-code", "", true, poison, RateLimitServerSide)
 		if err == nil || !strings.Contains(err.Error(), "no viable") {
 			t.Fatalf("err = %v, want a fail-closed 'no viable target' refusal (P1-D)", err)
 		}
