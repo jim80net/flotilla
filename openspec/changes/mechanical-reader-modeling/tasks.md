@@ -169,10 +169,12 @@ ledger** (the ledger is P3). (d) `Check` is PURE; the file/env I/O lives OUTSIDE
   domain-vocab class on the CI/issue scan). Document both in `docs/private-public-boundary.md`. A
   CONFORMANCE TEST feeds a shared fixture corpus through BOTH the Go firewall and the bash guard and fails
   on any verdict mismatch (the only real "never diverge" guarantee, given two regex engines).
-- [ ] 7.5 Open question for the operator (surface, do not decide): on the PUBLIC git/CI egress, should a
-  warnlist hit exit 0 (advisory, the leakscan model) or require a human-ack override (e.g. a commit
-  trailer) before a possibly-deanonymizing term ships public? Default = exit-0 advisory; flag the ack
-  option.
+- [x] 7.5 RESOLVED (COS, 2026-06-30): on the PUBLIC git/CI egress a warnlist hit is **exit-0 ADVISORY**
+  (build it that way — it is a reversible flag). Reasoning: the WARN tier is high-false-positive by
+  construction (e.g. "flattens"), so a human-ack gate would train reflexive rubber-stamping and defeat
+  the guard when a real leak appears; the HARD tier (refuse+bounce) is the actual protection and always
+  blocks; advisory keeps a visible review trail without friction. (Operator informed of the knob; a
+  one-flag flip to hard-block-on-WARN is available if he wants it — do NOT hold impl for it.)
 
 ---
 
