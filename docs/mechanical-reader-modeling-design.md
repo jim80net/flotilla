@@ -1,98 +1,102 @@
 # Design — mechanical reader-modeling (flotilla core feature; public-relaunch bar)
 
-**Status:** design (flotilla-dev), routed to the standard-flow trio next. Top priority, sequenced ahead of #208/#207/#210 (which this subsumes).
-**Operator standard:** `~/.claude/rules/mechanical-reader-modeling-mental-map-is-the-product.md` — *"so-consistent-its-mechanical reader-modeling … the mental map is a CORE FEATURE of flotilla, and its lack is highly evident."* Given after the public repo's issues were judged "slop, zero reader modeling," taken private, and a quality relaunch demanded.
+**Status:** design v2 (design-trio folded — systems-review + OCR + STORM). The architecture (one enforcement point per egress; the envelope as the judge's contract; the dash as the view) was confirmed sound; v2 corrects the seam, owns the mechanical/judgment boundary, and fixes the clustering. Routed to openspec next.
+**Operator standard:** `~/.claude/rules/mechanical-reader-modeling-mental-map-is-the-product.md` — *"so-consistent-its-mechanical reader-modeling … the mental map is a CORE FEATURE of flotilla."* Given after the public repo's issues were judged "slop, zero modeling," taken private, relaunch demanded.
 
-## The problem, stated from the reader's seat
+## The problem, from the reader's seat
 
-flotilla's value is **keeping the operator's mental map of the fleet current with minimal attention.** Today that depends on each desk's *discipline* — to publish, and to write reader-modeled. Discipline fails predictably:
+flotilla's value is **keeping the operator's mental map of the fleet current with minimal attention.** Today that depends on each desk's *discipline* — to publish, and to write reader-modeled. Discipline fails predictably, and the trio pinned *why*:
 
-- **Publishing fails:** an all-XO brief call reached the operator from **2 of 17 desks** (#207) — the rest replied in-pane (invisible to the operator, who reads the channel) or were rate-limited. A free-text "post your brief" relies on the desk translating it into a `flotilla notify`; the natural behavior is an in-pane reply.
-- **Modeling fails:** the artifacts that *did* publish were "slop" — written from the author's internal state, not the reader's map; no lead-with-the-decision; unshared internal specifics the reader can't decode.
+- **Publishing fails — but NOT for lack of a mechanism.** A per-desk auto-publish **already ships**: `detector.go:MirrorOnFinish` fires on every non-XO desk's turn-finish; `cmd/flotilla/mirror.go:deskMirror.run` (wired at `watch.go:490`) reads the turn-final via the `surface.ResultReader` seam and posts it to the desk's channel under its webhook. The all-XO brief reached the operator from only **2 of 17 desks** (#207) because the fan-out was a free-text `flotilla send "post your brief to your channel"` that desks must translate into `flotilla notify` — and `cmd/flotilla/pushsnippet.go:14,29` **trains desks to NEVER run notify** (it needs fleet secrets a desk must not hold). The 2 diligent desks published; the rest correctly followed their training and replied in-pane. The fix is therefore *smaller*: route the brief through the **already-shipped mirror**, not a new notify-based primitive.
+- **Modeling fails — and this is the irreducible half.** The artifacts that did publish were "slop": written from the author's internal state, no lead-with-the-decision, unshared internal specifics. Structure alone cannot fix this (below).
 
-Both are the **same disease**: a quality that should be structural is left to per-desk memory. The feature is to make it **mechanical** — enforced at the one place every artifact passes through on its way to a reader: the **publish path**.
+## The mechanical / judgment boundary (read this first — the trio's crux)
 
-## The architecture — one chokepoint, four enforcements
+**Structure forces the SHAPE of reader-modeling; it cannot supply the CONTENT.** An envelope with an `anchor` and a `decision` field forces the body to open-from-anchor and lead-with-decision — but a desk can fill it `{anchor:"my work", delta:"made progress", decision:"none"}`, pass every structural lint, and model nothing. *Choosing the true anchor* (what THIS reader tracks) and *distilling the one decision* IS the reader-modeling judgment — the exact judgment that produced slop.
 
-Every reader-facing artifact (a brief, a desk message, an issue, a PR, a commit) leaves a desk through a **publish path**. flotilla already has the seam: `internal/watch/inject.go:SetMirror(func(Job))` fires after every confirmed delivery (the audit mirror; the CoS-mirror seam #108), and `flotilla notify --from <agent>` posts to a desk's operator channel. Today the publish path only *carries* bytes. This feature makes it the enforcement point for the four pillars:
+So the mechanical core of this feature is an **LLM reader-model judge on the publish path**, with the envelope as its **I/O contract** — not a JSON schema the desk fills and we declare victory. The honest division:
 
-```
- desk turn ─▶ PUBLISH PATH ─────────────────────────────────────▶ reader surface
-              │  A. deterministic publish (no in-pane-only)         (desk channel,
-              │  B. reader-map delta envelope (structured)           command group,
-              │  C. template + lint (open-from-map, lead-decision)   issue/PR/commit)
-              │  D. firewall strip (no unshared specifics)
-              └────────────────────────────────────────────────▶ E. dash renders the map
-```
+| Facet | Mechanism | Enforcement |
+|---|---|---|
+| Field PRESENCE (anchor non-empty, decision present or explicit "none", body opens with anchor + leads with decision) | **deterministic structural lint** | cheap, synchronous, fail-closed everywhere |
+| Field QUALITY (anchor is *really* the reader's map entry; decision is *the* decision; stands alone cold) | **LLM reader-model judge** reading as the named audience | costs a model call; runs on the willing-to-wait CLI path; fail-closed public, warn internal |
+| Unshared specifics (IDs, paths, codenames) | **firewall refuse** (reuses the static guard's detector) | cheap regex; refuse, never rewrite |
 
-### Pillar A — deterministic publish (subsumes #207)
+The design **does not over-claim** that the envelope makes writing modeled. The envelope makes the judge's job checkable and the dash's data uniform; the *judge* (or a desk's own structured-output pass) supplies the modeling.
 
-A first-class publish primitive so a brief/artifact **deterministically reaches the reader surface**, never an in-pane-only reply. Two mechanisms (the design picks/combines after the trio):
-- **`flotilla brief <desk>` / a `--publish` call:** the desk responds with *structured output* the harness PUBLISHES (→ `notify` to the desk's channel + the command-group mirror), not a free-text turn. The call deterministically yields a published artifact.
-- **Stop-hook auto-mirror for brief-turns** (like the existing XO Discord mirror via `SetMirror`): a brief-turn's final message is published automatically, so "post to your channel" can't degrade to an in-pane reply.
+## The egress map (corrected — there is no single chokepoint)
 
-The publish path is the single chokepoint B/C/D attach to — make publishing mechanical and the other three enforcements have one place to live.
+Reader-facing artifacts leave a desk by **two** distinct egresses, enforced differently:
 
-### Pillar B — the reader-map delta envelope
+1. **The Discord publish path (runtime):** turn-finals via `deskMirror`/`MirrorOnFinish`, and the explicit `flotilla notify`/`reply`/`brief` CLI calls. This is where the envelope + lint + firewall attach at runtime.
+2. **The git/GitHub path (static):** issues/PRs/commits authored by a desk via `gh`/`git` directly — these never traverse the Discord path. They are guarded by the **static** `scripts/check-private-boundary.sh` (already) + a pre-commit/pre-push lint hook (new), not the runtime path.
 
-Every published artifact carries a structured **reader-map delta** — the unit that updates a reader's map:
+A third surface — the **pane** the operator reads over a desk's shoulder — is inherently un-chokeable; the feature is "mechanical for the published surfaces," explicitly not the raw pane.
+
+## The five pillars (re-grounded)
+
+### Pillar A — deterministic publish on the SHIPPED mirror (subsumes #207)
+
+`flotilla brief <desk>`: the desk produces a brief whose turn-final is published by the **existing** `deskMirror`/`MirrorOnFinish` path (secret-free — the desk never touches fleet secrets, honoring `pushsnippet.go`'s invariant), to the desk's channel. Determinism comes from the mirror firing on turn-finish without desk cooperation — *not* from a new primitive the desk must remember to call, and *not* from `notify` (which desks are trained to refuse). This makes brief-fanout 2-of-17 → 17-of-17. (`brief --publish` as an explicit structured call is the same mirror path with an enforced envelope schema; the determinism is the mirror, not the call.) Scope: the **channel** surface; the pane surface is out of scope.
+
+### Pillar B — the reader-map delta envelope (the judge's I/O contract)
+
+Every published artifact carries a structured **reader-map delta**:
 
 ```jsonc
-{
-  "audience":  "operator" | "desk:<name>" | "newcomer" | "maintainer",
-  "anchor":    "what the reader is already tracking (their map entry this updates)",
-  "delta":     "what changed — in their terms",
-  "decision":  "the one action they must take" | "none"
-}
+{ "audience": "operator" | "desk:<name>" | "newcomer" | "maintainer",  // open-stringly-typed; extension path documented
+  "anchor":   "the reader's map entry this updates (in their terms)",
+  "delta":    "what changed",
+  "decision": "the one action they must take" | "none" }
 ```
 
-The artifact **body is structured from the envelope**: open from `anchor` → lead with `decision` → then the `delta` detail. A desk emitting a brief produces the envelope (structured output), not free prose — so "open from the map" and "lead with the decision" are *data*, not a writing tip. The envelope is also what Pillar E (the dash) renders and what the audit mirror records.
+**Authoring (open-Q2 resolved → desk structured-output):** the desk emits the envelope as structured output — i.e. the desk's own LLM exercises the modeling judgment at authoring time — and the publish path *validates the schema* (structural lint) and *checks the quality* (the judge, on the CLI path). Lint-derivation alone cannot manufacture the anchor/decision judgment, so the judgment must be exercised by an LLM (the desk's, validated by the path's). The envelope is the contract between them, and the uniform data the dash (E) renders.
 
-### Pillar C — template + lint (the standard, enforced)
+### Pillar C — two-tier lint (the standard, enforced honestly)
 
-A **reader-model linter** runs on the publish path and **refuses (or hard-flags) slop**:
-- **Structure:** the artifact opens from `anchor`, leads with `decision` (or an explicit "none"), is whole-and-concise. A brief that buries the decision, or dumps internal state with no anchor, fails the lint before it publishes.
-- **Per-audience templates:** operator-brief / desk-message / issue / PR / commit each have a template the publish path applies, so the structure is forced, not remembered.
-- **The cold-read test, mechanized:** a check that the artifact references no symbol it didn't introduce (the "stands alone" facet) — adjacent to the `documentation-newcomer-perspective` / cold-test-author-written-docs discipline.
+- **Tier 1 — structural lint (deterministic, sync, cheap):** envelope schema valid; `decision` present or explicit "none"; body opens with `anchor` and leads with `decision`; no firewall-denylist/pattern hit. Runs **synchronously inside `deskMirror` before the post** (so a refusal happens *before* publish — you cannot un-send a Discord message). Fail-closed everywhere; it only ever blocks on trivially-fixable missing structure, so it never traps a desk mid-incident on content.
+- **Tier 2 — semantic judge (LLM, async, on the willing-to-wait path):** anchor-is-real, opens-from-the-reader's-map, stands-alone-cold. Runs on the explicit `brief`/`notify` CLI path (the desk waits), **never** in the best-effort auto-mirror (a slow judge would stall or be skipped). Posture: **fail-closed for public-repo artifacts** (issues/PRs/commits — latency is acceptable there); **warn-with-publish + flag for operator briefs and internal channels** (the operator must NEVER lose a brief to a lint).
 
-Lint posture: **fail-closed for the public surface** (issues/PRs/commits to the public repo — a slop artifact can't ship), **warn-with-publish for fast internal channels** (don't block a desk mid-incident), tunable.
+### Pillar D — the firewall: REFUSE, never strip (complements #202)
 
-### Pillar D — the firewall strip (runtime, outbound)
+The publish path runs every outbound artifact through the private-firewall detector (the static guard's deployment denylist + #202's `<prefix>:<n>.<m>` / `#<deployment>-c2` pattern). On a hit it **refuses and bounces to the desk** with the offending token + its generic abstraction *as a suggestion the desk applies in-context* — it **never silently rewrites**. A runtime strip would generalize `spark:3.1`→`<a desk>` inside a sentence whose meaning depends on *which* desk, corrupting the modeled delta the operator's map ingests — worse than a refusal. This inherits the static guard's never-rewrite posture (it only ever fails). **#202 stays its own static-guard PR** (it guards committed fixtures, which never traverse the publish path — a separate, already-scoped, shippable-early deliverable); Pillar D *reuses its regex* at runtime egress. D complements #202; it does not subsume it.
 
-The publish path runs every outbound artifact through the **private-firewall strip**: deployment IDs, host IPs, private paths, internal codenames, real channel ids are **stripped or refused on the way to a reader surface** — automatic, not a reviewer's lucky catch. This lifts the existing boundary guard (`scripts/check-private-boundary.sh` + the deployment denylist) and the #202 pattern-based detector (`<prefix>:<n>.<m>` session targets, `#<deployment>-c2` channels) from **CI-on-the-tree** to **runtime-on-the-publish-path**. A private specific can never reach a reader because the publish path won't carry it. (The same partition the repo already enforces statically, now enforced dynamically at the exact egress.)
+### Pillar E — the dash renders the operator's map (the data/view #210 builds on)
 
-### Pillar E — the dash visualizes the operator's mental map (subsumes #210)
+A new minimal **per-desk envelope ledger** (append-only `latest-delta.json` per desk, written by the publish path next to the existing CoS ledger) is the data model. The dash (auth-gated by #208) reads it via the existing pure-reader-over-files pattern (`readFileOrEmpty` → an envelope-extended `HistoryDoc`) and renders the operator's mental map: per desk, the latest `anchor`→`delta` and any pending `decision`, glanceable, *pulled* not pushed (not another live surface to babysit). **This is the data model + view that #210 builds on — #210's full "see + manage conversations" UX and its dedicated UX-designer desk remain #210's scope.** Pillar E is the spine #210 renders against, not a replacement for it.
 
-The dash (auth-gated by #208) renders the operator's **mental map of the fleet** from the published reader-map deltas: per desk, the latest `anchor`→`delta` and any pending `decision`, as a living, conversation-centric map (#210) — *"here is what each desk changed and what's waiting on you,"* not a log to decode. The deltas (Pillar B) are the data model; the dash is the view. This is where "keep the operator's map current with minimal attention" becomes visible.
+## The ordered publish pipeline (composition — trio F6)
 
-## How it clusters the open issues (one feature)
+On the Discord runtime path, in order: **(D) firewall refuse-check FIRST** (before any modeling work is wasted) → **(B) envelope validate** → **(C-tier1) structural lint, sync, pre-post** → **post via the mirror** → **record to the envelope ledger (E)**. The **(C-tier2) semantic judge** runs only on the explicit CLI path *before* it hands off to the mirror, never in the best-effort auto-mirror. The git/GitHub path runs D + the structural lint as a **pre-commit/pre-push hook**.
 
-| Issue | Pillar | Relationship |
+## Clustering (corrected)
+
+| Issue | Pillar | Relationship (corrected) |
 |---|---|---|
-| **#207** mechanical publishing | A | The deterministic publish primitive IS Pillar A; this feature subsumes it. |
-| **#210** conversation-centric dash | E | The dash map view IS Pillar E. |
-| **#202** guard pattern-hardening | D | The runtime firewall strip reuses #202's pattern detector; #202 lands inside D. |
-| the reader-modeling standard | B, C | The envelope + lint mechanize the standard. |
+| **#207** mechanical publishing | A | Subsumed — `brief` on the shipped mirror; #207's real cause (notify forbidden to desks) named. |
+| **#210** conversation-centric dash | E | **NOT subsumed** — Pillar E delivers the map data model + view #210 builds on; the manage-conversations UX + UX-desk org stay #210's. |
+| **#202** guard pattern-hardening | D | **Complements** — #202 ships as its own static-guard PR (early); D reuses its regex at runtime egress. |
+| the reader-modeling standard | B, C | Mechanized — the envelope (shape) + the two-tier lint/judge (quality). |
 
-## Phasing (proposed openspec changes — refined in the trio)
+## Phasing (proposed openspec changes)
 
-- **P0 — publish chokepoint + envelope (A+B).** The deterministic publish primitive + the reader-map delta envelope (structured output → published). Subsumes #207. The foundation everything attaches to.
-- **P1 — lint + templates (C).** The reader-model linter + per-audience templates; fail-closed for the public surface, warn for fast channels.
-- **P2 — firewall strip (D).** The runtime outbound strip, reusing #202's detector; #202 folds in here.
-- **P3 — dash mental-map view (E).** The conversation-centric map render; subsumes #210.
+- **P0 — `brief` on the shipped mirror + the envelope (A+B).** Re-route brief-fanout through `deskMirror`; the structured envelope + the tier-1 structural lint, sync pre-post. Subsumes #207; immediately makes brief-fanout 17-of-17 with modeled-shape briefs. Smallest, highest-value cut.
+- **P1 — the semantic judge + templates (C-tier2).** The LLM reader-model judge on the CLI path; per-audience templates; fail-closed-public / warn-briefs.
+- **P2 — the runtime firewall refuse (D).** Reuses #202's regex (which ships independently as its static-guard PR) at the publish egress + the git pre-commit hook.
+- **P3 — the dash map view (E).** The envelope ledger + the map render #210 builds on.
 
-Each phase ships independently and is useful alone (P0 alone fixes #207's 2-of-17; P2 alone closes the leak class at runtime), but the envelope (B) is the spine the rest reads.
+P0 alone delivers operator-visible value (17-of-17 published, structurally-modeled). The envelope (B) is the spine the rest reads.
 
-## Open questions for the trio
-1. **Publish primitive shape:** `flotilla brief --publish` (explicit call) vs the Stop-hook auto-mirror vs both — which is deterministic *and* doesn't fight a desk's harness? (Grounded in the `SetMirror` seam + #207's two fix directions.)
-2. **Envelope authoring:** does the desk emit the envelope as structured output (a schema the harness enforces), or does the publish path *derive* `anchor`/`decision` by lint? Structured-output is more reliable; derivation is less intrusive.
-3. **Lint fail-closed vs warn:** where exactly is the line (public artifacts hard-fail; internal incident channels warn)? Avoid a lint that blocks a desk mid-incident.
-4. **Firewall strip vs refuse:** when the publish path finds a private specific, does it *strip* (generalize it) or *refuse* (bounce to the desk to fix)? Strip risks a wrong generalization; refuse risks blocking. Likely: refuse for public, strip-with-flag for internal.
-5. **Dash data source:** does the dash read the envelopes from the audit-mirror store, or a new per-desk delta ledger? Reuse the existing read-model (`BoardDoc`/`HistoryDoc`) where possible.
+## Open questions — resolved by the trio
+1. **Publish primitive →** `flotilla brief` on the **existing `deskMirror`/`MirrorOnFinish`** (secret-free, deterministic), NOT a new transport, NOT `notify`.
+2. **Envelope authoring →** **desk structured-output** (the desk's LLM exercises the judgment), validated by the path; the judge checks quality. Schema can't manufacture the judgment.
+3. **Lint posture →** public git/GitHub = **fail-closed**; operator briefs + internal channels = **warn-with-publish + flag**. Never lose a brief to a lint.
+4. **Strip vs refuse →** **refuse-bounce** (never silent-rewrite a modeled artifact); inherit the static guard's never-rewrite posture.
+5. **Dash source →** a new **per-desk envelope ledger**, read via the existing read-model pattern (extend `HistoryDoc`). Not `BoardDoc` (desk states), not the inbound `SetMirror` audit store.
 
 ## Verification themes (pre-spec)
-- A brief call deterministically yields a *published* Discord artifact (the #207 2-of-17 → 17-of-17 proof).
-- A slop artifact (no decision lead / no anchor) fails the public lint; a modeled one passes.
-- An artifact carrying a deployment specific is refused/stripped on the publish path (runtime, not CI).
-- The dash renders a desk's latest delta + pending decision from the envelope, cold-readable by the operator.
-- Back-compat: existing `notify`/`send` keep working; the envelope is additive (an un-enveloped message still publishes, flagged).
+- Brief-fanout deterministically yields a *published* Discord brief from every desk (the #207 2-of-17 → 17-of-17 proof), secret-free.
+- A slop envelope (`anchor:"my work"`, no decision) fails the tier-1 structural lint; a content-but-unmodeled one fails the tier-2 judge on a public artifact; a modeled one passes both.
+- An artifact carrying a deployment specific is **refused** (not stripped) on the publish path at runtime; a leaked *fixture* is caught by #202's *static* guard (the two egresses, separately).
+- The dash renders a desk's latest delta + pending decision from the envelope ledger, cold-readable by the operator, pulled not pushed.
+- Back-compat: existing `notify`/`send` keep working; an un-enveloped channel post warns + publishes; an un-enveloped public artifact fails closed.
