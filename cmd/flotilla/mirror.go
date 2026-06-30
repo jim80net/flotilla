@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"unicode/utf8"
 
+	"github.com/jim80net/flotilla/internal/readermap"
 	"github.com/jim80net/flotilla/internal/transport"
 )
 
@@ -52,20 +53,82 @@ func (m deskMirror) run(agent string) {
 		return
 	}
 
-	chunks := transport.Chunk(text, mirrorChunkLimit)
+	// The synchronous pre-post reader-modeling pipeline (runs BEFORE the post — a
+	// Discord message cannot be un-sent). On this auto-mirror (an INTERNAL channel,
+	// no public egress) the ONLY step that suppresses a post is the firewall refuse
+	// (a private leak — P2; never suppresses in P0); envelope-validate + tier-1 are
+	// WARN-WITH-PUBLISH here, so a deficient or un-enveloped turn-final is flagged
+	// but never lost. An enveloped brief is RENDERED from its fields (modeled body).
+	body, rmNote, suppress := readerModelInternal(text)
+	// TODO(P2): the suppress arm is unreachable until the firewall stage lands (no P0
+	// step sets suppress=true). When P2 wires the firewall, add a test asserting a
+	// leaking turn-final → SUPPRESS log line + no post.
+	if suppress {
+		m.logf("flotilla watch: mirror SUPPRESS %s: %s", agent, rmNote)
+		return
+	}
+
+	chunks := transport.Chunk(body, mirrorChunkLimit)
 	n := len(chunks)
-	runes := utf8.RuneCountInString(text) // resplen: the canary diagnostic for a post-hoc truncation hunt
+	runes := utf8.RuneCountInString(body) // resplen: the canary diagnostic for a post-hoc truncation hunt
 	for i, chunk := range chunks {
-		body := chunk
+		out := chunk
 		if n > 1 {
-			body = fmt.Sprintf("(%d/%d)\n%s", i+1, n, chunk)
+			out = fmt.Sprintf("(%d/%d)\n%s", i+1, n, chunk)
 		}
-		if err := m.post(url, agent, body); err != nil {
+		if err := m.post(url, agent, out); err != nil {
 			// A redaction-safe error (the transport's Post never leaks the webhook URL). Stop on the first
 			// failure — the remaining chunks would post out of context anyway.
 			m.logf("flotilla watch: mirror MIRROR-FAIL %s: chunk %d/%d: %v", agent, i+1, n, err)
 			return
 		}
 	}
-	m.logf("flotilla watch: mirror POST %s %d chunks resplen=%d", agent, n, runes)
+	if rmNote != "" {
+		m.logf("flotilla watch: mirror POST %s %d chunks resplen=%d %s", agent, n, runes, rmNote)
+	} else {
+		m.logf("flotilla watch: mirror POST %s %d chunks resplen=%d", agent, n, runes)
+	}
+}
+
+// readerModelInternal applies the INTERNAL-channel (warn-with-publish) reader-modeling
+// policy to a turn-final before the auto-mirror posts it, returning the body to post,
+// a status note for the single decision log line, and whether to SUPPRESS the post.
+//
+// The auto-mirror is an internal channel with no public egress, so the only step that
+// suppresses is the firewall refuse (a private leak) — that arm lands in P2 and is a
+// clean PREPEND here (set suppress=true on a firewall hit); in P0 nothing suppresses.
+// (The P3 envelope ledger is NOT a clean prepend: it needs the PARSED envelope, which
+// this function currently discards — P3 will re-thread the *readermap.Envelope through
+// this signature. So only the P2 firewall slots in without touching the parse.)
+//
+// Envelope-validate + tier-1 are warn-with-publish: an enveloped brief that passes
+// tier-1 is RENDERED from its fields (the modeled body); a tier-1-deficient or a
+// malformed envelope is published RAW and FLAGGED (never lost — never lose a brief);
+// an un-enveloped ordinary turn-final is published raw (today's back-compat behavior).
+//
+// NOTE (deliberate, spec'd): on the PASS path the published body is Render(env) — the
+// modeled envelope fields ONLY. Prose the desk wrote OUTSIDE the reader-map fence is
+// intentionally NOT republished (the spec's "body is rendered from the envelope
+// fields"). A reader-map fence thus means "this turn IS a brief; publish the modeled
+// envelope" — desks emit the fence only in response to `flotilla brief`, which trains
+// them to put the brief's substance INSIDE `delta`, not in surrounding prose. A turn
+// with no fence is Absent → published raw, so nothing is ever lost on a non-brief turn.
+func readerModelInternal(turnFinal string) (body, note string, suppress bool) {
+	// (P2) firewall refuse-check would go here as stage 1 — on a leak, return
+	// ("", "<token> leak", true). Not in P0; see the doc comment.
+	env, outcome := readermap.Detect(turnFinal)
+	switch outcome {
+	case readermap.OutcomePresent:
+		lint := readermap.Tier1Lint(*env)
+		if lint.Pass {
+			return readermap.Render(*env), "modeled", false
+		}
+		// Deficient envelope: publish the desk's raw turn-final (preserve what it
+		// wrote — never lose) and flag the structural gap for the operator.
+		return turnFinal, "WARN tier1 " + lint.Reason, false
+	case readermap.OutcomeMalformed:
+		return turnFinal, "WARN malformed reader-map envelope", false
+	default: // OutcomeAbsent — an ordinary, un-enveloped turn-final (back-compat).
+		return turnFinal, "", false
+	}
 }
