@@ -5,85 +5,111 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex,nofollow" />
   <title>flotilla dash — {{.XO}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/dash.css" />
 </head>
 <body>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-grain" aria-hidden="true"></div>
+
   <header class="bar">
     <div class="brand">
-      <span class="brand-name">flotilla</span><span class="brand-dash">dash</span>
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div class="brand-text">
+        <span class="brand-name">flotilla</span>
+        <span class="brand-dash">command</span>
+      </div>
     </div>
-    <nav class="tabs" role="tablist">
-      <button id="tab-fleet" class="tab active" data-view="fleet" role="tab" aria-selected="true" aria-controls="view-fleet">Fleet</button>
+    <nav class="tabs" role="tablist" aria-label="Dashboard views">
+      <button id="tab-fleet" class="tab active" data-view="fleet" role="tab" aria-selected="true" aria-controls="view-fleet">Desks</button>
       <button id="tab-issues" class="tab" data-view="issues" role="tab" aria-selected="false" aria-controls="view-issues">Issues</button>
       <button id="tab-control" class="tab" data-view="control" role="tab" aria-selected="false" aria-controls="view-control">Control</button>
     </nav>
     <div class="bar-meta">
-      <span class="muted">bound</span> <code>{{.Bind}}</code>
-      <span id="conn" class="conn" title="live-update link">●</span>
+      <span class="meta-label">bound</span>
+      <code class="meta-bind">{{.Bind}}</code>
+      <span id="conn" class="conn" role="status" aria-live="polite" aria-label="Live update link idle">
+        <span class="conn-ring" aria-hidden="true"></span>
+        <span class="conn-core" aria-hidden="true"></span>
+      </span>
     </div>
   </header>
 
-  <!-- Freshness banner: the operator's first read on whether the board is live,
-       stale, or absent. Populated entirely by dash.js from /api/status. -->
   <div id="freshness" class="freshness" role="status" aria-live="polite"></div>
 
-  <main id="view-fleet" class="wrap">
-    <section class="panel">
-      <div class="panel-head">
-        <h2>Fleet board</h2>
-        <span id="board-meta" class="muted"></span>
-      </div>
-      <div id="board" class="board"></div>
-    </section>
+  <main id="view-fleet" class="view wrap">
+    <div class="fleet-layout">
+      <section class="panel panel-primary">
+        <div class="panel-head">
+          <div>
+            <h2>Desk readouts</h2>
+            <p class="panel-desc">Live state from <code>flotilla watch</code> — no pane probing</p>
+          </div>
+          <span id="board-meta" class="xo-strip muted"></span>
+        </div>
+        <div id="board" class="board" role="list"></div>
+        <div class="state-legend" aria-hidden="true">
+          <span class="legend-item"><span class="legend-swatch state-idle"></span>idle</span>
+          <span class="legend-item"><span class="legend-swatch state-working"></span>working</span>
+          <span class="legend-item"><span class="legend-swatch state-awaiting-input"></span>awaiting</span>
+          <span class="legend-item"><span class="legend-swatch state-errored"></span>fault</span>
+        </div>
+      </section>
 
-    <section class="panel">
-      <div class="panel-head">
-        <h2>Federation topology</h2>
-        <span class="muted">channel → XO → members</span>
-      </div>
-      <div id="topology" class="topology"></div>
-    </section>
+      <aside class="panel panel-aside">
+        <div class="panel-head">
+          <div>
+            <h2>Relay map</h2>
+            <p class="panel-desc">channel → XO → members</p>
+          </div>
+        </div>
+        <div id="topology" class="topology"></div>
+      </aside>
+    </div>
 
-    <section class="panel">
+    <section class="panel panel-log">
       <div class="panel-head">
-        <h2>Coordination history</h2>
-        <span class="muted">CoS ledger &amp; backlog</span>
+        <div>
+          <h2>Mission log</h2>
+          <p class="panel-desc">CoS ledger and backlog drive-queue</p>
+        </div>
       </div>
       <div class="history-grid">
-        <div>
-          <h3 class="sub">Backlog drive-queue</h3>
+        <div class="log-pane">
+          <h3 class="sub">Backlog queue</h3>
           <div id="backlog" class="backlog"></div>
         </div>
-        <div>
-          <h3 class="sub">Ledger <span class="muted">(most recent first)</span></h3>
+        <div class="log-pane">
+          <h3 class="sub">Ledger <span class="muted">newest first</span></h3>
           <div id="ledger" class="ledger"></div>
         </div>
       </div>
     </section>
   </main>
 
-  <!-- Issue tracker (Phase 2): native GitHub-backed issues. All dynamic data
-       arrives via fetch of /api/issues — never server-rendered into a <script>.
-       Writes carry the X-Flotilla-Dash anti-CSRF header (set by dash.js). -->
-  <main id="view-issues" class="wrap hidden">
+  <main id="view-issues" class="view wrap hidden">
     <section id="issues-listpanel" class="panel">
       <div class="panel-head">
-        <h2>Issues <span id="issues-repo" class="muted"></span></h2>
+        <div>
+          <h2>Issues <span id="issues-repo" class="muted"></span></h2>
+          <p class="panel-desc">GitHub-backed tracker via <code>gh</code></p>
+        </div>
         <div class="tracker-controls">
           <label class="filter-idea"><input type="checkbox" id="filter-idea" /> operator-idea only</label>
-          <select id="filter-state" aria-label="issue state">
+          <select id="filter-state" aria-label="Issue state">
             <option value="open">open</option>
             <option value="closed">closed</option>
             <option value="all">all</option>
           </select>
-          <button id="issues-refresh" class="btn">Refresh</button>
-          <button id="issues-new" class="btn btn-primary">New issue</button>
+          <button id="issues-refresh" type="button" class="btn">Refresh</button>
+          <button id="issues-new" type="button" class="btn btn-primary">New issue</button>
         </div>
       </div>
       <div id="issues-list" class="issues-list"></div>
     </section>
 
-    <!-- Create form (hidden until "New issue"). -->
     <section id="issues-create" class="panel hidden">
       <div class="panel-head"><h2>New issue</h2></div>
       <form id="create-form" class="issue-form">
@@ -98,25 +124,25 @@
       </form>
     </section>
 
-    <!-- Detail view (hidden until an issue is opened). -->
     <section id="issues-detail" class="panel hidden">
       <div class="panel-head">
         <h2 id="detail-title"></h2>
-        <button id="detail-back" class="btn">← Back to list</button>
+        <button id="detail-back" type="button" class="btn">Back to list</button>
       </div>
       <div id="detail-body" class="issue-detail"></div>
     </section>
   </main>
 
-  <!-- cnc control (Phase 3): route an instruction, post an operator note, resume
-       a crashed desk. Writes carry the X-Flotilla-Dash anti-CSRF header. Route +
-       resume drive panes and are gated on the cross-process pane lock (they report
-       honestly until it lands); notify is live. -->
-  <main id="view-control" class="wrap hidden">
+  <main id="view-control" class="view wrap hidden">
     <section class="panel">
-      <div class="panel-head"><h2>Operator note</h2><span class="muted">post to the fleet channel</span></div>
+      <div class="panel-head">
+        <div>
+          <h2>Post to fleet channel</h2>
+          <p class="panel-desc">Operator note on Discord</p>
+        </div>
+      </div>
       <form id="notify-form" class="control-form">
-        <textarea id="notify-body" placeholder="Note to the fleet (posted to Discord under operator(dash))" rows="3"></textarea>
+        <textarea id="notify-body" placeholder="Note for the fleet (posted as operator(dash))" rows="3"></textarea>
         <div class="form-actions">
           <span id="notify-msg" class="form-msg"></span>
           <button type="submit" class="btn btn-primary">Post note</button>
@@ -125,10 +151,15 @@
     </section>
 
     <section class="panel">
-      <div class="panel-head"><h2>Route instruction</h2><span class="muted">deliver to an XO or @desk (confirmed)</span></div>
+      <div class="panel-head">
+        <div>
+          <h2>Route instruction</h2>
+          <p class="panel-desc">Confirmed delivery to an XO or @desk</p>
+        </div>
+      </div>
       <form id="route-form" class="control-form">
-        <input type="text" id="route-target" placeholder="target (agent name or @desk)" />
-        <textarea id="route-body" placeholder="instruction" rows="3"></textarea>
+        <input type="text" id="route-target" placeholder="Target (agent name or @desk)" />
+        <textarea id="route-body" placeholder="Instruction" rows="3"></textarea>
         <div class="form-actions">
           <span id="route-msg" class="form-msg"></span>
           <button type="submit" class="btn btn-primary">Route</button>
@@ -136,10 +167,16 @@
       </form>
     </section>
 
-    <section class="panel">
-      <div class="panel-head"><h2>Resume a crashed desk</h2><span class="gated-note">coming soon</span></div>
+    <section class="panel panel-gated">
+      <div class="panel-head">
+        <div>
+          <h2>Resume crashed desk</h2>
+          <p class="panel-desc">Relaunch a dead pane</p>
+        </div>
+        <span class="gated-note">coming soon</span>
+      </div>
       <form id="resume-form" class="control-form">
-        <input type="text" id="resume-agent" placeholder="agent name" />
+        <input type="text" id="resume-agent" placeholder="Agent name" />
         <div class="form-actions">
           <span id="resume-msg" class="form-msg"></span>
           <button type="submit" class="btn btn-danger">Resume</button>
@@ -149,7 +186,7 @@
   </main>
 
   <footer class="foot">
-    <span class="muted">fleet view is read-only (reads what <code>flotilla watch</code> writes, no pane probing) · issues are written to GitHub via <code>gh</code> · control acts via the confirmed-delivery library</span>
+    <span class="muted">Desks are read-only · Issues write to GitHub · Control uses confirmed delivery</span>
   </footer>
 
   <script src="/static/dash.js"></script>
