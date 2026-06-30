@@ -14,6 +14,7 @@ import (
 
 	"github.com/jim80net/flotilla/internal/cos"
 	"github.com/jim80net/flotilla/internal/deliver"
+	"github.com/jim80net/flotilla/internal/readermap"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/transport"
@@ -437,6 +438,23 @@ func cmdNotify(args []string) error {
 		if n := len([]rune(message)); n > runeCap {
 			return fmt.Errorf("message is %d chars; the transport's limit is %d — shorten it or split it (nothing was posted)", n, runeCap)
 		}
+	}
+
+	// The partition firewall (Pillar D) on the MANUAL CLI egress: a pure pre-check
+	// AFTER the body is resolved and BEFORE any post, so clean traffic is byte-identical
+	// (no output on OK). A Refuse BOUNCES the offending token + its generic abstraction
+	// so the desk fixes it in-context (nothing is posted); a Warn prints an advisory and
+	// still posts. A broken term list is fatal (a silent partition hole is the risk).
+	fw, err := LoadFirewall()
+	if err != nil {
+		return err
+	}
+	fwr := readermap.Check(message, fw)
+	if err := firewallBounce("notify", fwr); err != nil {
+		return err
+	}
+	if fwr.Decision == readermap.FirewallWarn {
+		fmt.Fprintf(os.Stderr, "notify: advisory — the message carries domain vocabulary %v; publishing anyway (review whether it deanonymizes the deployment)\n", fwr.WarnTerms)
 	}
 
 	if *secretsPath == "" {

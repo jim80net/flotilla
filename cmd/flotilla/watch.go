@@ -17,6 +17,7 @@ import (
 	"github.com/jim80net/flotilla/internal/backlog"
 	"github.com/jim80net/flotilla/internal/cos"
 	"github.com/jim80net/flotilla/internal/deliver"
+	"github.com/jim80net/flotilla/internal/readermap"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/transport"
@@ -202,6 +203,25 @@ func cmdWatch(args []string) error {
 	}
 	alert := func(msg string) { post("flotilla-watch", "⚠️ "+msg) }
 
+	// Load the partition firewall (Pillar D) ONCE — the runtime backstop that keeps a
+	// deployment specific from leaking into a desk's published turn-final. A broken
+	// term list (an uncompilable denylist regex) is FATAL, not silently skipped: a
+	// silent partition hole is the exact failure this guard exists to prevent (the same
+	// fail-fast posture as a configured-but-broken secrets file above).
+	firewall, err := LoadFirewall()
+	if err != nil {
+		return err
+	}
+	// Make the firewall's configuration VISIBLE at boot — a silently-unconfigured
+	// deployment denylist (e.g. the daemon's cwd has no .flotilla list and no env is
+	// set) would otherwise look like the runtime guard is protecting when only the
+	// built-in generic + canonical patterns are on.
+	if dCfg, wCfg := firewall.Configured(); dCfg || wCfg {
+		fmt.Printf("flotilla watch: partition firewall — deployment denylist=%v, warnlist=%v (generic + canonical patterns always on)\n", dCfg, wCfg)
+	} else {
+		fmt.Println("flotilla watch: partition firewall — NO deployment denylist/warnlist configured (only built-in generic + canonical patterns; set .flotilla/private-denylist or $FLOTILLA_PRIVATE_DENYLIST)")
+	}
+
 	// confirm turns "the tmux keystrokes ran" into "a turn started": it idle-gates, submits,
 	// confirms the Idle→Working edge, retries Enter-only (never re-pasting), and returns a typed
 	// error the Injector dispatches on (ErrBusy → defer; failure → loud alert). Closing the
@@ -252,7 +272,7 @@ func cmdWatch(args []string) error {
 	// channel's XO including the primary — #177 unified them), watch that XO's session store for the
 	// reply and route it back to the channel — the flotilla-native return leg (the primary XO's old
 	// host-local Stop-hook is retired). nil when secrets are absent (no webhooks to resolve).
-	replyRtr := newHotlineReplyRouter(context.Background(), cfg, secrets, tr, alert)
+	replyRtr := newHotlineReplyRouter(context.Background(), cfg, secrets, tr, firewall, alert)
 	if replyRtr != nil {
 		defer replyRtr.Stop() // cancel in-flight hotline watchers on shutdown (runs after <-ctx.Done())
 	}
@@ -487,7 +507,7 @@ func cmdWatch(args []string) error {
 				defer txn.Release()
 				return surface.RotateContext(xoDrv, pane)
 			},
-			MirrorOnFinish:      deskMirrorOnFinish(cfg, secrets, tr),
+			MirrorOnFinish:      deskMirrorOnFinish(cfg, secrets, tr, firewall, alert),
 			MirrorDispatch:      func(run func()) { go run() }, // mirror I/O off the tick goroutine
 			Awaiting:            awaiting.Present,
 			SettleConsume:       settled.Consume,
@@ -887,12 +907,14 @@ func logMirrorCoverage(cfg *roster.Config, secrets *roster.Secrets, xo string) {
 		len(withMirror), withMirror, len(without), without)
 }
 
-func deskMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr transport.Transport) func(agent string) {
+func deskMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr transport.Transport, firewall *readermap.TermSet, alert func(string)) func(agent string) {
 	if secrets == nil || tr == nil {
 		return nil
 	}
 	return func(agent string) {
 		m := deskMirror{
+			firewall: firewall,
+			alert:    alert,
 			webhook: func(a string) (string, bool) {
 				url, err := secrets.Webhook(a)
 				if err != nil || url == "" {

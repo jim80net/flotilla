@@ -229,8 +229,9 @@ blocks there. This is the deliberate trade: never-lose-a-brief outranks never-pu
 
 ### Requirement: The firewall REFUSES a private leak, never strips it
 
-The publish path SHALL run every outbound artifact through the private-firewall detector (the static
-guard's deployment denylist plus #202's `<prefix>:<n>.<m>` / `#<deployment>-c2` pattern). On a hit it
+The publish path SHALL run every outbound artifact through the private-firewall detector (the deployment
+denylist loaded from the gitignored term sources + the built-in generic patterns + the canonical
+`<prefix>:<n>.<m>` / `#<deployment>-c2` pattern this change introduces). On a hit it
 SHALL **REFUSE** the artifact and bounce to the desk the offending token together with its generic
 abstraction as a suggestion the desk applies in-context — it SHALL NEVER silently rewrite the artifact.
 A runtime strip is FORBIDDEN because generalizing a deployment specific inside a sentence whose meaning
@@ -240,13 +241,19 @@ firewall refuse SHALL be fail-closed on BOTH egresses (Discord runtime + git/Git
 (CLAUDE.md §1): it catches enumerated terms + the #202 pattern, but it does NOT catch a novel deployment
 term a desk coins — so the firewall is the backstop, not a guarantee of airtightness, and the spec does
 not over-claim that ALL leaks are caught. On the auto-mirror (no interactive desk to bounce to mid-turn)
-a hit SHALL SUPPRESS the post AND raise an operator-visible signal — a flagged "withheld for a possible
-leak" entry in the envelope ledger (E) and/or an alert-webhook line — so a withheld brief does not
-vanish into a journald line no human reads; on the CLI path the desk is bounced the token + abstraction
-in-context. Either way the mirror's one-decision-log-line invariant is preserved (a SUPPRESS is logged).
-This firewall REUSES #202's regex at runtime egress (shared source where feasible, so the runtime and
-static guards never diverge) and does NOT subsume #202 (which ships as its own static guard PR for
-committed fixtures that never traverse the publish path).
+a hit SHALL SUPPRESS the post AND raise an operator-visible signal so a withheld brief does not vanish
+into a journald line no human reads. **In P2 that signal is the ALERT-WEBHOOK line** (the daemon's
+existing alert path, threaded into the mirror); the flagged "withheld" entry in the envelope ledger (E)
+is the P3 enrichment, NOT a P2 dependency — P2 ships a live operator-visible signal without the ledger.
+On the MANUAL CLI path (`notify`) the desk is bounced the token + abstraction in-context; on the DAEMON
+reply-watcher path (no interactive turn) a hit SHALL SUPPRESS the route and ESCALATE (not bounce). Either
+way the mirror's one-decision-log-line invariant is preserved (a SUPPRESS is logged). **P2 OWNS the
+canonical `<prefix>:<n>.<m>` / `#<deployment>-c2` pattern** (it is not yet implemented anywhere — "reuse
+#202's regex" is not possible); #202's STATIC guard MIRRORS this pattern when it ships. Because the
+runtime guard is Go (RE2, no negative-lookahead) and the static guard is bash (PCRE), they CANNOT share
+regex code — they share the gitignored TERM-LIST data, and a CONFORMANCE TEST (a shared fixture corpus →
+identical Refuse/Warn/OK verdicts from both) is the actual non-divergence guarantee. The firewall does
+NOT subsume #202 (which guards committed fixtures off the publish path).
 
 #### Scenario: An artifact carrying a deployment specific is refused, not rewritten
 
@@ -259,8 +266,8 @@ committed fixtures that never traverse the publish path).
 
 - **WHEN** an ordinary auto-mirror turn-final contains a known-denylist deployment specific
 - **THEN** the post is suppressed (the leak is never published), the suppression is logged on the
-  mirror's one decision line, AND an operator-visible signal is raised (a flagged "withheld" ledger
-  entry and/or an alert-webhook line) so the withheld turn-final does not vanish silently
+  mirror's one decision line, AND an operator-visible signal is raised — in P2 the ALERT-WEBHOOK line
+  (the P3 ledger flag is later enrichment) — so the withheld turn-final does not vanish silently
 
 #### Scenario: A novel coined term is NOT caught by the denylist firewall
 
@@ -274,6 +281,36 @@ committed fixtures that never traverse the publish path).
 - **WHEN** a private specific is committed into a fixture (which never traverses the publish path)
 - **THEN** it is caught by the static `scripts/check-private-boundary.sh` / #202's static guard, not by
   the runtime firewall (the two egresses are guarded separately)
+
+### Requirement: The firewall has an advisory WARN tier for domain vocabulary, beside the fail-closed denylist
+
+The firewall SHALL provide, beside the fail-closed denylist, an ADVISORY WARN tier: a deployment-supplied
+set of DOMAIN-VOCABULARY terms loaded from a gitignored source (`.flotilla/private-warnlist` or an env
+var, exactly as the fail-closed denylist is loaded — the deployment vocabulary is NEVER hard-coded into
+the committed guard) that, on a hit, EMITS A WARNING for human adjudication and does NOT refuse, suppress,
+or fail. This catches the class an identifier match misses — a deployment's domain vocabulary embedded in
+free text or an example name (e.g. a branch name built from generic-looking domain words that
+deanonymizes the deployment) — which is too false-positive-prone to fail-close on but is worth a human
+look. The WARN tier SHALL be advisory on BOTH egresses: on the runtime path it logs + raises an
+operator-visible advisory and still PUBLISHES (never a suppress); on the static/CI guard it prints a WARN
+section and exits 0 (never a CI failure). The MECHANISM (an advisory domain-vocabulary tier) is the
+generalizable, shippable part; the domain vocabulary itself is circumstantial and stays in the
+deployment's gitignored warnlist. The WARN tier does NOT relax the fail-closed denylist — a denylist hit
+still REFUSES; the WARN tier only adds an advisory class below it.
+
+#### Scenario: A warnlist term warns but does not block
+
+- **WHEN** an outbound artifact contains a deployment domain-vocabulary term from the warnlist (but no
+  fail-closed denylist hit)
+- **THEN** a WARNING is emitted for human adjudication and the artifact is still published (runtime) /
+  the CI guard exits 0 with a WARN section — it is never refused, suppressed, or failed
+
+#### Scenario: The warnlist is loaded from a gitignored source, never hard-coded
+
+- **WHEN** the firewall/guard assembles its WARN tier
+- **THEN** the domain vocabulary is read from the gitignored `.flotilla/private-warnlist` (or the env
+  var), never from a term hard-coded into the committed guard (which would itself publish the deployment's
+  vocabulary)
 
 ### Requirement: The publish pipeline runs in a fixed order on the runtime path
 

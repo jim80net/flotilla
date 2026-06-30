@@ -7,8 +7,13 @@
 # a hit. In CI, provide the same content via the FLOTILLA_PRIVATE_DENYLIST repo
 # secret instead, so your list is never committed.
 #
-# One term or PCRE regex per line (the guard matches with `grep -P`). Blank lines
-# and #-comments ignored.
+# One term or regex per line (the static guard matches with `grep -P`; the runtime
+# firewall matches with Go RE2). Keep terms to the RE2-compatible subset — NO lookahead
+# or backreferences — because the runtime firewall compiles this list at `flotilla
+# watch` / `notify` startup and a non-RE2 construct is a FATAL boot error (fail-closed,
+# never a silently-skipped term). Matching is multi-line (anchors are per-line) and
+# CASE-SENSITIVE (enumerate case variants, or alternate them). Blank lines and
+# #-comments are ignored.
 # Keep it HIGH-SIGNAL: tokens with no legitimate generic use, so the guard never
 # flaps. Ambiguous words (a common noun that doubles as a desk name) are better
 # caught by review against docs/private-public-boundary.md than by this list.

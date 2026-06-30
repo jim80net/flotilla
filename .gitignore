@@ -47,6 +47,13 @@ htmlcov/
 # broker names). The .example template IS committed; your filled-in copy is not.
 /.flotilla/private-denylist
 
+# Your deployment's private WARNLIST — the advisory domain-vocabulary tier (your
+# trading/medical/legal/etc. jargon). A warnlist hit is ADVISORY (warn + publish /
+# CI exit 0), never a hard block. The .example template IS committed; your filled-in
+# copy is not — the vocabulary itself is circumstantial and must never reach the
+# public tree.
+/.flotilla/private-warnlist
+
 # flotilla-watch host paths: the per-host deploy/flotilla-watch.env is already
 # ignored by *.env above (desired — per-host layout). The test fixture also ends in
 # .env, so *.env would catch it — re-include it explicitly so CI can see it. (The

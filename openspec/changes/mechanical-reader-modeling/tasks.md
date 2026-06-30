@@ -115,21 +115,66 @@ Load-bearing properties (assert across paths):
 
 ## P2 — the runtime firewall refuse (D) + the git hook
 
-### 7. The firewall detector (reuses #202's regex) — refuse, never strip
-- [ ] 7.1 TEST FIRST (`internal/readermap/firewall_test.go`): an artifact with a denylisted deployment
-  term is REFUSED; one with the #202 `<prefix>:<n>.<m>` / `#<deployment>-c2` pattern (non-generic
-  prefix) is REFUSED; a generic-prefix (`flotilla:3.1`) passes; the refusal RETURNS the offending token
-  + a generic abstraction (it NEVER returns a rewritten body).
-- [ ] 7.2 Implement the firewall detector reusing the static guard's denylist + #202's regex (shared
-  source where feasible, so the runtime + static guards never diverge); refuse-bounce only, no rewrite.
-- [ ] 7.3 Wire the firewall as STEP 1 of the runtime pipeline in `deskMirror.run` (register it on the
-  P0 pipeline-shape slice — fail-closed: suppress + log + raise an operator-visible signal (flagged
-  ledger entry and/or alert-webhook line) on the auto-mirror; bounce the token + abstraction in-context
-  on the CLI path) and on the `notify`/`reply` CLI paths (the only behavior added to `notify` — clean
-  traffic stays byte-identical). Note the denylist limitation (CLAUDE.md §1): novel coined terms are not
-  caught — the firewall is the backstop, not a guarantee.
-- [ ] 7.4 The git pre-commit/pre-push hook running the firewall + tier-1 on issue/PR/commit artifacts off
-  the runtime path; document it in `docs/private-public-boundary.md`.
+### 7. The firewall detector (refuse, never strip) + the advisory WARN tier + the git hook
+
+Design-trio folded (P1/P2 findings): (a) **P2 OWNS the `<prefix>:<n>.<m>` pattern** — #202's pattern is
+unbuilt, so "reuse #202's regex" is vacuous; P2 defines it as the canonical Go source and #202's static
+guard MIRRORS it (a conformance test enforces equivalence). (b) **Share the DATA, not the CODE** — the
+bash guard is PCRE (uses lookahead, `check-private-boundary.sh:41`) and Go is RE2 (no lookahead), so the
+runtime + static guards CANNOT share regex code; they share the gitignored TERM LISTS and a conformance
+test asserts identical verdicts. (c) **The P2 operator-visible signal is the ALERT-WEBHOOK line, NOT the
+ledger** (the ledger is P3). (d) `Check` is PURE; the file/env I/O lives OUTSIDE `internal/readermap`.
+
+- [x] 7.1 TEST FIRST (`internal/readermap/firewall_test.go`, PURE — injected term-set, no I/O): a
+  denylisted term → REFUSE; the `<prefix>:<n>.<m>` / `#<deployment>-c2` pattern with a NON-allowlisted
+  prefix → REFUSE; an ALLOWLISTED generic prefix (`flotilla:3.1`, `session:1.2` — the precise allowlist
+  MUST be enumerated, since `session:window.pane` is a legitimate generic tmux shape used across the tree,
+  e.g. `recycle.go`, `internal/deliver/tmux.go`) → OK; a built-in generic leak (a non-allowlisted
+  `/home/<user>` path, a webhook URL, a secret shape) → REFUSE; a refusal RETURNS the offending token +
+  a generic abstraction and NEVER a rewritten body; a warnlist domain-vocab term (no denylist hit) → WARN
+  (advisory); a term on BOTH lists → REFUSE (denylist precedence); an ABSENT/empty denylist+warnlist →
+  only the generic patterns apply (no error, generic prose → OK — mirroring `check-private-boundary.sh`'s
+  generic-always / deployment-only-if-configured model). Typed `FirewallResult{Decision: Refuse|Warn|OK,
+  Token, Abstraction, WarnTerms}` (egress-agnostic; the SUPPRESS-vs-bounce rendering of a Refuse is the
+  caller's job, 7.3).
+- [x] 7.2 Implement the PURE detector `Check(text, termset) FirewallResult` in
+  `internal/readermap/firewall.go` (no I/O — preserves the package's pure/testable contract). Put the I/O
+  loader `LoadFirewall()` in `cmd/flotilla` (or a new I/O-bearing package), reading the SAME gitignored
+  sources the bash guard uses (`.flotilla/private-denylist` / `$FLOTILLA_PRIVATE_DENYLIST`; a NEW
+  `.flotilla/private-warnlist` / `$FLOTILLA_PRIVATE_WARNLIST`) + the built-in generic patterns + the
+  canonical `<prefix>:<n>.<m>` pattern (P2 owns it). NEVER hard-code deployment vocabulary. Refuse-bounce
+  only, no rewrite. Compile the alternation ONCE at load (not per-check — the hot auto-mirror path). RE2
+  cannot express the bash guard's negative-lookahead allowlist, so re-express it as match-then-filter
+  against the enumerated generic-prefix/home-placeholder allowlist.
+- [x] 7.2b PARTITION (P1 — the trading-vocab leak class): add `/.flotilla/private-warnlist` to
+  `.gitignore`; ship `.flotilla/private-warnlist.example` (illustrative placeholders only, mirroring
+  `private-denylist.example`); add `.flotilla/private-warnlist.example` to `check-private-boundary.sh`'s
+  `SELF_EXCLUDE`. The leakscan WARN fold MUST be hand-reviewed for vocab leakage — `check-private-boundary.sh`
+  self-excludes itself from its own scan, so a domain term hard-coded INTO the script would not be caught.
+- [x] 7.3 Wire the firewall as STAGE 1 of `deskMirror.run`'s pre-post pipeline (the P0 suppress seam —
+  on a Refuse set `suppress=true`; thread the daemon's existing `alert func(string)` (`watch.go:148`) into
+  `deskMirror` (a NEW field, wired in `deskMirrorOnFinish`) and raise it on a Refuse → the ALERT-WEBHOOK
+  line is the P2 operator-visible "withheld for a possible leak" signal, NOT the P3 ledger; a WARN raises
+  the same advisory and STILL posts). The MANUAL `notify` CLI path: Refuse → bounce token+abstraction
+  in-context, inserted as a pure pre-check AFTER `resolveMessage` and BEFORE `tr.Post` (`main.go`), so
+  clean traffic is byte-identical. The `reply` path is the DAEMON reply-watcher (not a willing-to-wait
+  CLI turn) — Refuse → SUPPRESS the route + `escalate(...)` (it already has an escalate collaborator),
+  NOT bounce. Denylist limitation (CLAUDE.md §1): novel coined terms are not caught; the WARN tier
+  narrows but does not close that gap.
+- [x] 7.4 The git **pre-push** hook (fail-closed) is the local backstop; **CI's `private-boundary` job is
+  the enforcing authority** (a local hook is `--no-verify`-bypassable). The hook scans the push RANGE/diff
+  (not the whole tree — `check-private-boundary.sh`'s `scan_tree` greps the tracked tree, so add a
+  staged/range mode or scope the hook to the diff). Fold the advisory WARN tier into
+  `check-private-boundary.sh` (a `private-warnlist` pass: WARN section + exit 0 — closing the #151
+  domain-vocab class on the CI/issue scan). Document both in `docs/private-public-boundary.md`. A
+  CONFORMANCE TEST feeds a shared fixture corpus through BOTH the Go firewall and the bash guard and fails
+  on any verdict mismatch (the only real "never diverge" guarantee, given two regex engines).
+- [x] 7.5 RESOLVED (COS, 2026-06-30): on the PUBLIC git/CI egress a warnlist hit is **exit-0 ADVISORY**
+  (build it that way — it is a reversible flag). Reasoning: the WARN tier is high-false-positive by
+  construction (e.g. "flattens"), so a human-ack gate would train reflexive rubber-stamping and defeat
+  the guard when a real leak appears; the HARD tier (refuse+bounce) is the actual protection and always
+  blocks; advisory keeps a visible review trail without friction. (Operator informed of the knob; a
+  one-flag flip to hard-block-on-WARN is available if he wants it — do NOT hold impl for it.)
 
 ---
 

@@ -46,9 +46,10 @@ Fixtures and examples should read as a **reference a developer learns from**
 ## The guard
 
 `scripts/check-private-boundary.sh` greps for leaks across the tracked tree (and,
-with `--issues`, open issues + PRs) and **fails on a hit**. It runs in CI on every
-push and PR (`.github/workflows/ci.yml`, the `private-boundary` job). It has two
-layers:
+with `--issues`, open issues + PRs; with `--file <path>`, one file's contents — the
+mode the pre-push hook and the conformance test use). It **fails on a fail-closed
+hit** and runs in CI on every push and PR (`.github/workflows/ci.yml`, the
+`private-boundary` job). It has two fail-closed layers plus an advisory third:
 
 1. **Built-in, deployment-agnostic patterns** — leaks that are private for
    *anyone*: absolute home paths revealing a username, chat webhook URLs, common
@@ -79,6 +80,74 @@ layers:
      product; *whose* fleet produced it is the deployment.
    The partition is the author's responsibility; add any such token you coin to
    YOUR deployment denylist so the backstop catches the next one.
+3. **Your deployment warnlist (advisory)** — your domain *vocabulary*, loaded the
+   same gitignored way but **never a failure**: a hit prints a `WARN` section and
+   exits 0. See "The advisory WARN tier" below.
+
+## Two egresses, one partition: the static guard AND the runtime firewall
+
+A deployment specific can reach the public in two ways, and each has its own guard:
+
+- **The static egress** — a specific committed into the tree, an issue, or a PR.
+  Guarded by `scripts/check-private-boundary.sh` (above) in CI.
+- **The runtime egress** — a specific a desk publishes through flotilla itself: an
+  auto-mirrored turn-final, a `flotilla notify` to the operator, a routed hotline
+  reply. Guarded by the **runtime firewall** (`internal/readermap`), the runtime
+  half of this same partition.
+
+The two guards share their **data** (the gitignored deny/warn term lists below), not
+their code — the runtime firewall is Go (RE2) and the static guard is bash (PCRE), so
+they cannot share regex. A **conformance test** (`firewall_conformance_test.go`) feeds
+a shared fixture corpus through both and fails on any verdict mismatch, so they can
+never silently diverge on the shared term-list surface.
+
+### The runtime firewall (refuse, never rewrite)
+
+Before flotilla publishes any outbound artifact it runs it through the firewall, which
+returns one of three verdicts:
+
+- **REFUSE** — a denylist term, a built-in generic leak (a username-revealing home
+  path, a webhook URL, a secret shape), or the canonical tmux `<desk>:<window>.<pane>`
+  / `#<deployment>-c2` reference. The artifact is **withheld and never rewritten** —
+  generalizing a specific *inside a sentence whose meaning depends on it* would corrupt
+  the message, which is worse than withholding it. What "withheld" means depends on the
+  egress: the auto-mirror **suppresses** the post and raises the operator alert; the
+  `notify` CLI **bounces** the offending token + its generic abstraction to the desk to
+  fix in-context; the daemon reply-watcher **suppresses** the route and **escalates**
+  (read-the-pane). Either way the leak is never published.
+- **WARN** — see the advisory tier below.
+- **OK** — published unchanged (clean traffic is byte-identical to before the firewall).
+
+The firewall is a **denylist + pattern** backstop: it catches enumerated terms and the
+canonical pattern, but **not a novel deployment word a desk coins** — the partition is
+still the author's responsibility (§ above). It is the net, not the substitute.
+
+### The advisory WARN tier (domain vocabulary)
+
+Beside the fail-closed denylist sits an **advisory** tier: your deployment's domain
+**vocabulary** — the jargon that, woven into ordinary prose or an example/branch name,
+would deanonymize your fleet even with no hard identifier present. It is loaded exactly
+like the denylist, from a gitignored source (the vocabulary is never committed):
+
+- copy `.flotilla/private-warnlist.example` → `.flotilla/private-warnlist`
+  (gitignored), one term/PCRE-regex per line; and/or
+- in CI, set the `FLOTILLA_PRIVATE_WARNLIST` repo secret to the same content.
+
+A warnlist hit is **advisory on both egresses**: the runtime publishes anyway with an
+operator-visible advisory; the static guard prints a `WARN` section and **exits 0**. It
+is high-false-positive by construction (a common word that doubles as domain jargon), so
+it earns a human glance, never a block — a human adjudicates each WARN. A **denylist hit
+still refuses** (denylist precedence); the WARN tier only adds an advisory class below
+the fail-closed one.
+
+### The git pre-push hook (local backstop)
+
+`scripts/hooks/pre-push` scans the **added lines of the commits you push** through the
+static guard, so a specific that reached a commit is caught before it leaves your
+machine. Install it with `scripts/install-hooks.sh` (sets `core.hooksPath`). It is a
+**backstop, not the authority** — a local hook is `--no-verify`-bypassable, so **CI's
+`private-boundary` job remains the enforcing gate**. The fail-closed tier blocks the
+push (exit 1); the advisory WARN tier prints but does not block.
 
 ## If a breach happens
 
