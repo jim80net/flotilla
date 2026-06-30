@@ -594,11 +594,12 @@ func parseSwitchArgs(args []string) (agent, to, rosterPath, launchPath, rateLimi
 	return agent, *toF, *rp, *lp, scope, *cf, *rep, *fc, *au, nil
 }
 
-// switchGate4 enforces GATE-4 for the MANUAL path: an approval_sensitive desk (a desk that
-// places orders or spends — roster.go:39-44) is NEVER switched without an explicit operator
-// --confirm. (Auto-switch is unreachable here — cmdSwitch is the manual verb; the auto path's
-// refusal is at the watch ENQUEUE, P2.) An ordinary desk needs no confirm. The refusal names
-// approval_sensitive + the --confirm ack so the operator knows the exact escape hatch.
+// switchGate4 enforces GATE-4 for every switch invocation, manual and auto: an
+// approval_sensitive desk (a desk that places orders or spends — roster.go:39-44) is NEVER
+// switched without an explicit operator --confirm. Auto-switch passes no --confirm, so
+// approval_sensitive is refused here (defense in depth alongside the watch ENQUEUE gate).
+// An ordinary desk needs no confirm. The refusal names approval_sensitive + the --confirm
+// ack so the operator knows the exact escape hatch.
 func switchGate4(a roster.Agent, confirm bool) error {
 	if a.ApprovalSensitive && !confirm {
 		return fmt.Errorf("refusing to switch %q: it is approval_sensitive (places orders / spends) — a manual switch needs an explicit operator ack; re-run with --confirm to proceed", a.Name)
@@ -740,9 +741,13 @@ func cmdSwitch(args []string) error {
 		return nil
 	}
 
-	// GATE-4 (manual): an approval_sensitive desk needs an explicit --confirm.
+	// GATE-4: approval_sensitive needs explicit --confirm (auto passes confirm=false).
 	if err := switchGate4(agent, confirm); err != nil {
 		return err
+	}
+
+	if auto && fromSurface != surface.DefaultSurface {
+		return fmt.Errorf("refusing auto-switch for %q: active harness is %q, not %s — Claude-storm auto-switch only relocates desks currently on claude-code", agentName, fromSurface, surface.DefaultSurface)
 	}
 
 	poison := PoisonState{}
@@ -814,13 +819,16 @@ func cmdSwitch(args []string) error {
 		autoPath:        auto,
 	}
 	if auto {
-		if probe, ok := surface.RateLimitSupport(fromDrv); ok {
+		// Under-lock re-probe uses a single pane read (RateLimitInstant), NOT the 2-consecutive
+		// globalRateLimitStreak — this subprocess starts with streak=0. Materiality was already
+		// confirmed in-process by the watch detector before dispatch.
+		if probe, ok := surface.RateLimitInstantSupport(fromDrv); ok {
 			plan.reprobeRateLimit = func() (bool, bool) {
 				pane, rerr := deliver.ResolvePane(agent.Title())
 				if rerr != nil {
 					return false, false
 				}
-				limited, _, _ := probe.RateLimited(pane)
+				limited, _, _ := probe.RateLimitInstant(pane)
 				return limited, true
 			}
 		}

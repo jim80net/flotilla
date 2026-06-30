@@ -86,6 +86,9 @@ type DetectorConfig struct {
 	// exec `flotilla switch <agent> --auto` over a side-channel argv array; status goes to
 	// logs only. Nil ⇒ byte-inert.
 	RateLimitAutoSwitch func(candidates []RateLimitAutoSwitchCandidate)
+	// RateLimitAutoSwitchDispatch runs the auto-switch callback. Production wires it to
+	// `go run()` so cap/storm/recipe file I/O cannot stall the tick loop. Default nil ⇒ sync.
+	RateLimitAutoSwitchDispatch func(run func())
 	// SignalHash returns the OPTIONAL external signal file's content hash; ok=false
 	// when no signal file is configured or it is absent/unreadable (treated as
 	// unchanged — no wake-storm). This is NOT the XO's own state tracker: hashing the
@@ -1269,8 +1272,11 @@ func (d *Detector) save() {
 
 // rateLimitMaterialFromPendingLocked reads the PREVIOUS tick's off-mutex probe results and
 // returns material wake reasons plus auto-switch candidates. Called under d.mu.
-// Edge-triggered: one wake per throttle episode per desk (cleared when the probe stops
-// reporting limited).
+// "Sustained" for the switch decision = the probe driver's 2-consecutive-read debounce
+// (RateLimitProbe) already applied before results land here. Edge-triggered: one wake (and
+// at most one auto-switch enqueue) per throttle episode per desk — cleared when the probe
+// stops reporting limited. Storm cooldown (≥2 reports / 10m) is separate: it poisons failover
+// targets only, not whether a candidate is collected here.
 func (d *Detector) rateLimitMaterialFromPendingLocked() (reasons []string, candidates []RateLimitAutoSwitchCandidate) {
 	if d.cfg.RateLimitMaterial == nil {
 		return nil, nil
@@ -1325,8 +1331,14 @@ func (d *Detector) runAutoSwitch(candidates []RateLimitAutoSwitchCandidate) {
 			dispatched = append(dispatched, c)
 		}
 	}
-	if len(dispatched) > 0 {
-		d.cfg.RateLimitAutoSwitch(dispatched)
+	if len(dispatched) == 0 {
+		return
+	}
+	run := func() { d.cfg.RateLimitAutoSwitch(dispatched) }
+	if d.cfg.RateLimitAutoSwitchDispatch != nil {
+		d.cfg.RateLimitAutoSwitchDispatch(run)
+	} else {
+		run()
 	}
 }
 

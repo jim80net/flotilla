@@ -24,8 +24,17 @@ func mapRateLimitScope(s surface.RateLimitScope) RateLimitScope {
 
 // newRateLimitAutoSwitchDispatch builds the detector's RateLimitAutoSwitch callback: argv-array
 // exec of `flotilla switch <agent> --auto`, storm-cooldown recording, cap gate, log side-channel
-// only. endFlight must be the detector's AutoSwitchFlight.End bound method.
-func newRateLimitAutoSwitchDispatch(cfg *roster.Config, rosterPath, launchPath string, flat *launch.Config, endFlight func(string)) func([]watch.RateLimitAutoSwitchCandidate) {
+// only. probeMaterial is the in-process RateLimitMaterial callback (streak state lives in the
+// watch process, not the switch subprocess). endFlight must be the detector's AutoSwitchFlight.End.
+//
+// Policy notes (#205):
+//   - "Sustained" throttle for the SWITCH decision = RateLimitProbe's 2-consecutive-read debounce
+//     in the watch process, edge-triggered once per episode (rateLimitActive).
+//   - Storm threshold (≥2 reports / 10m) gates only failover-target POISON (provider-cooldowns.json),
+//     not whether a switch fires — do not conflate the two.
+//   - No auto-revert: a transient storm permanently relocates workers to grok until the operator
+//     manually switches back (policy 4 / auto-revert deferred).
+func newRateLimitAutoSwitchDispatch(cfg *roster.Config, rosterPath, launchPath string, flat *launch.Config, probeMaterial func(agent string) (bool, surface.RateLimitScope, string, bool), endFlight func(string)) func([]watch.RateLimitAutoSwitchCandidate) {
 	bin := "flotilla"
 	if exe, err := os.Executable(); err == nil {
 		bin = exe
@@ -35,6 +44,14 @@ func newRateLimitAutoSwitchDispatch(cfg *roster.Config, rosterPath, launchPath s
 		for _, c := range candidates {
 			agent := c.Agent
 			scope := mapRateLimitScope(c.Scope)
+
+			// In-process final guard: materiality streak lives here; the switch subprocess must
+			// not re-derive it from an empty globalRateLimitStreak.
+			if limited, _, _, ok := probeMaterial(agent); !ok || !limited {
+				log.Printf("flotilla watch: auto-switch %q: throttle cleared before dispatch — skip", agent)
+				endFlight(agent)
+				continue
+			}
 
 			times, err := loadAutoSwitchCapTimes(agent)
 			if err != nil {

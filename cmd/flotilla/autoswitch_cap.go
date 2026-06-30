@@ -43,6 +43,17 @@ func loadAutoSwitchCapTimes(agent string) ([]time.Time, error) {
 	return f.Times, nil
 }
 
+func pruneAutoSwitchCapTimes(times []time.Time, now time.Time) []time.Time {
+	cutoff := now.Add(-autoSwitchCapWindow)
+	kept := times[:0]
+	for _, t := range times {
+		if t.After(cutoff) {
+			kept = append(kept, t)
+		}
+	}
+	return kept
+}
+
 func recordAutoSwitchCap(agent string, now time.Time) error {
 	path, err := autoSwitchCapPath(agent)
 	if err != nil {
@@ -52,6 +63,7 @@ func recordAutoSwitchCap(agent string, now time.Time) error {
 	if err != nil {
 		return err
 	}
+	times = pruneAutoSwitchCapTimes(times, now)
 	times = append(times, now)
 	raw, err := json.MarshalIndent(autoSwitchCapFile{Times: times}, "", "  ")
 	if err != nil {

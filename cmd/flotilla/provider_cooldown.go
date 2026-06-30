@@ -104,7 +104,9 @@ func (s *providerCooldownStore) pruneReports(now time.Time) {
 
 // recordStormReport appends a material throttle observation and poisons the provider
 // (server-side) or subscription bucket (account-side) when ≥stormReportThreshold
-// reports land inside stormReportWindow.
+// reports land inside stormReportWindow. Poison gates failover TARGET selection only —
+// it does not gate whether the detector enqueues a switch (that is the probe's 2-consecutive
+// debounce + per-episode edge in rateLimitMaterialFromPendingLocked).
 func (s *providerCooldownStore) recordStormReport(provider, subscription string, scope RateLimitScope, now time.Time) {
 	s.pruneReports(now)
 	var key string

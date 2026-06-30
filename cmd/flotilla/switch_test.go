@@ -901,6 +901,44 @@ func TestSwitchGate4(t *testing.T) {
 			t.Errorf("an ordinary desk must not require --confirm, got %v", err)
 		}
 	})
+	t.Run("approval_sensitive --auto without --confirm refused (GATE-4 on auto path)", func(t *testing.T) {
+		err := switchGate4(sensitive, false)
+		if err == nil {
+			t.Fatal("flotilla switch <approval_sensitive> --auto must refuse without --confirm")
+		}
+		if !strings.Contains(err.Error(), "approval_sensitive") {
+			t.Errorf("refusal = %q, want approval_sensitive named", err.Error())
+		}
+	})
+}
+
+func TestRunSwitchAutoPathUnderLockReprobe(t *testing.T) {
+	t.Run("cleared under lock aborts before handoff", func(t *testing.T) {
+		r := happySwitch()
+		p := testSwitchPlan()
+		p.autoPath = true
+		p.reprobeRateLimit = func() (bool, bool) { return false, true }
+		_, err := runSwitch(fakeSwitchOps(r), p)
+		if err == nil || !strings.Contains(err.Error(), "rate-limit cleared") {
+			t.Fatalf("err = %v, want rate-limit cleared abort", err)
+		}
+		if r.closed || len(r.delivered) != 0 {
+			t.Errorf("desk must be untouched on reprobe abort, got closed=%v delivered=%v", r.closed, r.delivered)
+		}
+	})
+	t.Run("still limited under lock proceeds", func(t *testing.T) {
+		r := happySwitch()
+		p := testSwitchPlan()
+		p.autoPath = true
+		p.reprobeRateLimit = func() (bool, bool) { return true, true }
+		_, err := runSwitch(fakeSwitchOps(r), p)
+		if err != nil {
+			t.Fatalf("runSwitch auto with positive reprobe: %v", err)
+		}
+		if !r.closed || !r.respawned {
+			t.Errorf("expected full switch, got closed=%v respawned=%v", r.closed, r.respawned)
+		}
+	})
 }
 
 // --- 4.2: --repair reconciles active-harness.json from the LIVE pane; a dead pane reports ---

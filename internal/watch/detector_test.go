@@ -715,6 +715,31 @@ func TestDetectorAutoSwitchEnqueuesOncePerEpisode(t *testing.T) {
 	}
 }
 
+func TestDetectorAutoSwitchSkipsNonClaudeFromSurface(t *testing.T) {
+	f := newFixture()
+	var autoCalls []RateLimitAutoSwitchCandidate
+	cfg := f.config("xo", []string{"xo", "backend"}, 3, "none")
+	cfg.RateLimitMaterial = func(agent string) (bool, surface.RateLimitScope, string, bool) {
+		return true, surface.RateLimitServerSide, "limited", true
+	}
+	fromSurface := "grok" // mirrors watch.go agentSurface != claude-code
+	cfg.RateLimitAutoSwitchEligible = func(agent string) bool {
+		return agent == "backend" && fromSurface == surface.DefaultSurface
+	}
+	cfg.RateLimitAutoSwitch = func(candidates []RateLimitAutoSwitchCandidate) {
+		autoCalls = append(autoCalls, candidates...)
+	}
+	d := newDet(t, f, cfg)
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
+	f.set("backend", surface.StateIdle)
+	f.signal = "h0"
+	d.Tick()
+	d.Tick()
+	if len(autoCalls) != 0 {
+		t.Fatalf("grok FROM desk must not auto-switch, got %+v", autoCalls)
+	}
+}
+
 func TestDetectorAutoSwitchRefusesIneligibleDesk(t *testing.T) {
 	f := newFixture()
 	var autoCalls []RateLimitAutoSwitchCandidate

@@ -484,8 +484,12 @@ func cmdWatch(args []string) error {
 			}
 		}
 		var endAutoSwitch func(string)
+		autoSwitchOn := surface.AutoSwitchEnabled()
+		if autoSwitchOn {
+			log.Printf("flotilla watch: auto-switch ENABLED (FLOTILLA_AUTOSWITCH) — non-sensitive claude-code workers may auto-relocate on sustained throttle")
+		}
 
-		det := watch.NewDetectorWithSynthSidecar(watch.DetectorConfig{
+		detCfg := watch.DetectorConfig{
 			XOAgent:  xo,
 			Desks:    desks,
 			Interval: interval,
@@ -511,13 +515,12 @@ func cmdWatch(args []string) error {
 			RateLimitReset:    rateLimitReset(cfg),
 			RateLimitDispatch: func(run func()) { go run() },
 			RateLimitAutoSwitchEligible: func(agent string) bool {
-				return cfg.AutoSwitchEligible(agent)
-			},
-			RateLimitAutoSwitch: newRateLimitAutoSwitchDispatch(cfg, *rosterPath, launchPath, flatLaunch, func(agent string) {
-				if endAutoSwitch != nil {
-					endAutoSwitch(agent)
+				if !cfg.AutoSwitchEligible(agent) {
+					return false
 				}
-			}),
+				// Claude-storm only: desks already on grok (or another FROM) are not candidates.
+				return agentSurface(cfg, agent) == surface.DefaultSurface
+			},
 			SignalHash: signalHash,
 			AckAge:     ack.Age,
 			Wake:       wake,
@@ -565,7 +568,17 @@ func cmdWatch(args []string) error {
 			WakeDeskHeartbeat:       wakeDeskHeartbeat,
 			DeskEscalate:            deskEscalate,
 			DeskHeartbeatEveryTicks: 1,
-		}, *snapshotPath, synthSidecarPath)
+		}
+		if autoSwitchOn {
+			probeMaterial := rateLimitMaterial(cfg)
+			detCfg.RateLimitAutoSwitchDispatch = func(run func()) { go run() }
+			detCfg.RateLimitAutoSwitch = newRateLimitAutoSwitchDispatch(cfg, *rosterPath, launchPath, flatLaunch, probeMaterial, func(agent string) {
+				if endAutoSwitch != nil {
+					endAutoSwitch(agent)
+				}
+			})
+		}
+		det := watch.NewDetectorWithSynthSidecar(detCfg, *snapshotPath, synthSidecarPath)
 		endAutoSwitch = det.EndAutoSwitchFlight
 		det.Start()
 		defer det.Stop()

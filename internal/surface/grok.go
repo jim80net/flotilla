@@ -277,12 +277,28 @@ func classifyGrokRateLimit(captured string) (bool, string) {
 // RateLimited implements RateLimitProbe (#204): detects grok's rate-limit STATUS line
 // with 2-consecutive-read materiality discipline.
 func (g grok) RateLimited(pane string) (bool, RateLimitScope, string) {
+	hit, scope, detail := g.rateLimitInstant(pane)
+	if !globalRateLimitStreak.observe(pane, hit) {
+		return false, 0, ""
+	}
+	if !hit {
+		return false, 0, ""
+	}
+	return true, scope, detail
+}
+
+// RateLimitInstant implements RateLimitInstantProbe: one pane read, no streak.
+func (g grok) RateLimitInstant(pane string) (bool, RateLimitScope, string) {
+	return g.rateLimitInstant(pane)
+}
+
+func (g grok) rateLimitInstant(pane string) (bool, RateLimitScope, string) {
 	captured, err := g.capturePane(pane)
 	if err != nil {
 		return false, 0, ""
 	}
 	hit, detail := classifyGrokRateLimit(captured)
-	if !globalRateLimitStreak.observe(pane, hit) {
+	if !hit {
 		return false, 0, ""
 	}
 	return true, RateLimitAccountSide, detail
