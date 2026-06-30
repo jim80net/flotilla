@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"sync"
 	"time"
 
@@ -65,6 +66,11 @@ type DetectorConfig struct {
 	// Assess resolves a desk's current surface state (resolve pane + Driver.Assess);
 	// an unresolvable pane SHOULD return StateUnknown (anti-flap, caught by ack age).
 	Assess func(agent string) surface.State
+	// RateLimitMaterial probes a desk for a material provider throttle (#204). ok=false
+	// when the surface lacks RateLimitProbe or the pane is unresolvable. The probe's
+	// 2-consecutive-read discipline runs inside the driver; this callback is invoked
+	// only for Idle/Errored desks (mid-turn desks wait — recycle Phase-0 discipline).
+	RateLimitMaterial func(agent string) (limited bool, scope surface.RateLimitScope, detail string, ok bool)
 	// SignalHash returns the OPTIONAL external signal file's content hash; ok=false
 	// when no signal file is configured or it is absent/unreadable (treated as
 	// unchanged — no wake-storm). This is NOT the XO's own state tracker: hashing the
@@ -264,6 +270,9 @@ type Detector struct {
 	deskStopped    map[string]bool // capped + escalated → stop heartbeating until re-armed
 	deskProgressed map[string]bool // desk went Working since its last heartbeat → resets the cap
 
+	// rateLimitActive suppresses repeat wakes for the same throttle episode (#204).
+	rateLimitActive map[string]bool
+
 	stop      chan struct{}
 	done      chan struct{}
 	startOnce sync.Once
@@ -356,21 +365,22 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 		}
 	}
 	d := &Detector{
-		cfg:            cfg,
-		pingEvery:      ping,
-		alertInterval:  alert,
-		snap:           snap,
-		cold:           !ok,
-		driveCount:     map[string]int{},
-		shellStreak:    map[string]int{},
-		synthOwed:      map[string]bool{},
-		synthSinceFire: map[string]int{},
-		synthState:     synthState,
-		deskSettled:    map[string]bool{},
-		deskSinceBeat:  map[string]int{},
-		deskNoProgress: map[string]int{},
-		deskStopped:    map[string]bool{},
-		deskProgressed: map[string]bool{},
+		cfg:             cfg,
+		pingEvery:       ping,
+		alertInterval:   alert,
+		snap:            snap,
+		cold:            !ok,
+		driveCount:      map[string]int{},
+		shellStreak:     map[string]int{},
+		synthOwed:       map[string]bool{},
+		synthSinceFire:  map[string]int{},
+		synthState:      synthState,
+		deskSettled:     map[string]bool{},
+		deskSinceBeat:   map[string]int{},
+		deskNoProgress:  map[string]int{},
+		deskStopped:     map[string]bool{},
+		deskProgressed:  map[string]bool{},
+		rateLimitActive: map[string]bool{},
 		// The detector computes the staleness threshold itself (age > alertInterval×
 		// interval), so the watchdog only needs to trip on the first stale/crash
 		// signal and debounce — maxMissed=1.
@@ -728,6 +738,12 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 		d.selfCont = 0
 		cur.XOSettled = false
 		wake(WakeMaterial, reasons)
+	} else if rateReasons := d.rateLimitMaterialLocked(cur); len(rateReasons) > 0 {
+		// 4b. Provider rate-limit (#204): surface a material wake for throttled idle/errored
+		// desks (auto-switch enqueue is P2 — #205; this path only notifies the XO).
+		d.selfCont = 0
+		cur.XOSettled = false
+		wake(WakeMaterial, rateReasons)
 	} else if xoFinishedTurn(prev, cur, d.cfg.XOAgent) && !cur.XOSettled {
 		// 5. XO self-continuation — only when nothing external fired this tick (an
 		//    external change already covers advancing the XO and resets the cap).
@@ -1209,6 +1225,43 @@ func (d *Detector) save() {
 			log.Printf("flotilla watch: synthesis sidecar persist failed: %v (continuing — at worst one extra synthesis after a restart)", err)
 		}
 	}
+}
+
+// rateLimitMaterialLocked scans non-XO desks for a material provider throttle and
+// returns wake reasons. Called under d.mu from tickLocked. Edge-triggered: one wake
+// per throttle episode per desk (cleared when the probe stops reporting limited).
+func (d *Detector) rateLimitMaterialLocked(cur Snapshot) []string {
+	if d.cfg.RateLimitMaterial == nil {
+		return nil
+	}
+	names := make([]string, 0, len(cur.DeskStates))
+	for name := range cur.DeskStates {
+		if name != d.cfg.XOAgent {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	var reasons []string
+	for _, name := range names {
+		st := cur.DeskStates[name]
+		if st != surface.StateIdle && st != surface.StateErrored {
+			if d.rateLimitActive[name] {
+				delete(d.rateLimitActive, name)
+			}
+			continue // mid-turn — wait for idle (recycle Phase-0 discipline)
+		}
+		limited, scope, _, ok := d.cfg.RateLimitMaterial(name)
+		if !ok || !limited {
+			delete(d.rateLimitActive, name)
+			continue
+		}
+		if d.rateLimitActive[name] {
+			continue // already woke for this episode
+		}
+		d.rateLimitActive[name] = true
+		reasons = append(reasons, name+": rate-limited ("+scope.String()+" — switch eligible)")
+	}
+	return reasons
 }
 
 // xoFinishedTurn reports the XO's own Working→Idle transition (its self-

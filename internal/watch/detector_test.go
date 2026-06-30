@@ -3,6 +3,7 @@ package watch
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -595,4 +596,69 @@ func TestDetectorOperatorWakeDuringTickRace(t *testing.T) {
 		go func() { defer wg.Done(); d.OperatorWake() }()
 	}
 	wg.Wait() // -race verifies no data race on the shared detector state (M3)
+}
+
+func TestDetectorRateLimitMaterialWake(t *testing.T) {
+	f := newFixture()
+	probeCalls := 0
+	cfg := f.config("xo", []string{"xo", "backend"}, 3, "none")
+	cfg.RateLimitMaterial = func(agent string) (bool, surface.RateLimitScope, string, bool) {
+		if agent != "backend" {
+			return false, 0, "", false
+		}
+		probeCalls++
+		if probeCalls < 2 {
+			return false, surface.RateLimitServerSide, "", true // streak building
+		}
+		return true, surface.RateLimitServerSide, "Server is temporarily limiting requests", true
+	}
+	d := newDet(t, f, cfg)
+	f.set("xo", surface.StateIdle)
+	f.set("backend", surface.StateIdle)
+	f.signal = "h0"
+
+	d.Tick() // cold-start wake only (no rate-limit probe — early return)
+	f.wakes = nil
+
+	d.Tick() // first probe call — not material yet (streak = 1)
+	if len(f.wakes) != 0 {
+		t.Fatalf("tick 1 wakes = %v, want none (streak < 2)", f.wakes)
+	}
+
+	d.Tick() // second probe call — material
+	if len(f.wakes) != 1 || f.wakes[0].kind != WakeMaterial {
+		t.Fatalf("tick 2 wakes = %+v, want one WakeMaterial", f.wakes)
+	}
+	if len(f.wakes[0].reasons) != 1 || f.wakes[0].reasons[0] != "backend: rate-limited (server-side — switch eligible)" {
+		t.Fatalf("reasons = %v", f.wakes[0].reasons)
+	}
+
+	f.wakes = nil
+	d.Tick() // same episode — no repeat wake
+	if len(f.wakes) != 0 {
+		t.Fatalf("tick 3 wakes = %v, want none (edge-triggered)", f.wakes)
+	}
+}
+
+func TestDetectorRateLimitSkipsWorkingDesk(t *testing.T) {
+	f := newFixture()
+	cfg := f.config("xo", []string{"xo", "backend"}, 3, "none")
+	cfg.RateLimitMaterial = func(agent string) (bool, surface.RateLimitScope, string, bool) {
+		return true, surface.RateLimitServerSide, "limited", true
+	}
+	d := newDet(t, f, cfg)
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateWorking}, "h0")
+	f.set("xo", surface.StateIdle)
+	f.set("backend", surface.StateWorking)
+	f.signal = "h0"
+	d.Tick()
+	f.wakes = nil
+	d.Tick()
+	for _, w := range f.wakes {
+		for _, r := range w.reasons {
+			if strings.Contains(r, "rate-limited") {
+				t.Fatalf("mid-turn desk must not rate-limit wake, got %v", f.wakes)
+			}
+		}
+	}
 }

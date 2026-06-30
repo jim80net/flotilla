@@ -176,6 +176,20 @@ func (claudeCode) TakeoverTurn(designatedPath string) string {
 		"answer an in-pane menu over the relay (keystrokes navigate it, they don't select)."
 }
 
+// RateLimited implements RateLimitProbe (#204): detects Anthropic's server-side throttle banner
+// in the current turn region with 2-consecutive-read materiality discipline.
+func (c claudeCode) RateLimited(pane string) (bool, RateLimitScope, string) {
+	captured, err := c.capturePane(pane)
+	if err != nil {
+		return false, 0, ""
+	}
+	hit, detail := deliver.ClaudeRateLimitHit(captured)
+	if !globalRateLimitStreak.observe(pane, hit) {
+		return false, 0, ""
+	}
+	return true, RateLimitServerSide, detail
+}
+
 // LatestResult implements ResultReader: the desk's turn-final assistant text, read from its Claude
 // Code session transcript (located from outside the session via the pane's working directory). This
 // is the SAME seam the per-desk auto-mirror reads through, so `flotilla result <claude-desk>` and
@@ -282,3 +296,5 @@ func isAgentGlyph(s string) bool {
 	}
 	return false
 }
+
+var _ RateLimitProbe = claudeCode{}

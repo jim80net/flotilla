@@ -255,6 +255,20 @@ func classifyGrokComposerLine(captured string, cursorY int) ComposerDisposition 
 	return ComposerPending
 }
 
+// RateLimited implements RateLimitProbe (#204): detects grok's rate-limit banner in the
+// current turn region with 2-consecutive-read materiality discipline.
+func (g grok) RateLimited(pane string) (bool, RateLimitScope, string) {
+	captured, err := g.capturePane(pane)
+	if err != nil {
+		return false, 0, ""
+	}
+	hit, detail := deliver.GrokRateLimitHit(captured)
+	if !globalRateLimitStreak.observe(pane, hit) {
+		return false, 0, ""
+	}
+	return true, RateLimitAccountSide, detail
+}
+
 // --- RecycleBridge (#158): grok's portable-markdown context-preservation policy ---
 
 // HandoffPath is grok's HARNESS-AGNOSTIC handoff convention: <cwd>/.flotilla/handoffs/recycle-<token>.md
@@ -304,3 +318,5 @@ func (grok) TakeoverTurn(designatedPath string) string {
 		"(e.g. `flotilla notify --from <your-name> \"...\"`), NEVER an in-pane interactive prompt — a " +
 		"remote XO cannot answer an in-pane menu over the relay (keystrokes navigate it, they don't select)."
 }
+
+var _ RateLimitProbe = grok{}

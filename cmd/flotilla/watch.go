@@ -489,9 +489,10 @@ func cmdWatch(args []string) error {
 				}
 				return drv.Assess(pane)
 			},
-			SignalHash: signalHash,
-			AckAge:     ack.Age,
-			Wake:       wake,
+			RateLimitMaterial: rateLimitMaterial(cfg),
+			SignalHash:        signalHash,
+			AckAge:            ack.Age,
+			Wake:              wake,
 			Rotate: func() error {
 				// Resolve the XO pane FIRST, then take the per-pane TRANSACTION lock keyed by that
 				// target (the same key every other transaction writer uses), so the /clear rotate
@@ -911,6 +912,27 @@ func logMirrorCoverage(cfg *roster.Config, secrets *roster.Secrets, xo string) {
 	}
 	fmt.Printf("flotilla watch: desk mirror — %d will mirror %v; %d have no webhook (will not mirror) %v\n",
 		len(withMirror), withMirror, len(without), without)
+}
+
+// rateLimitMaterial returns a DetectorConfig callback that probes a desk for a
+// material provider throttle (#204). ok=false when the surface lacks RateLimitProbe.
+func rateLimitMaterial(cfg *roster.Config) func(agent string) (bool, surface.RateLimitScope, string, bool) {
+	return func(agent string) (bool, surface.RateLimitScope, string, bool) {
+		drv, ok := surface.Get(agentSurface(cfg, agent))
+		if !ok {
+			return false, 0, "", false
+		}
+		probe, ok := surface.RateLimitSupport(drv)
+		if !ok {
+			return false, 0, "", false
+		}
+		pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
+		if err != nil {
+			return false, 0, "", false
+		}
+		limited, scope, detail := probe.RateLimited(pane)
+		return limited, scope, detail, true
+	}
 }
 
 // readDeskTurnFinal returns a desk's substantive turn-final via the shared
