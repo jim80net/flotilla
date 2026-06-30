@@ -70,14 +70,20 @@
     } else {
       board.innerHTML = agents.map(function (a) {
         var state = String(a.state || "unknown");
+        var stateClass = escapeHtml(state);
         var role = a.role ? '<span class="role">' + escapeHtml(a.role) + "</span>" : "";
         var staleTag = stale ? '<span class="stale-tag">stale</span>' : "";
         return (
-          '<div class="row' + (stale ? " stale" : "") + '">' +
-            '<span class="name">' + escapeHtml(a.name) + role + "</span>" +
-            '<span class="surface">' + escapeHtml(a.surface || "") + "</span>" +
-            '<span class="state ' + escapeHtml(state) + '">' + escapeHtml(state) + staleTag + "</span>" +
-          "</div>"
+          '<article class="desk' + (stale ? " desk-stale" : "") + '" role="listitem">' +
+            '<div class="desk-rail state-' + stateClass + '" aria-hidden="true"></div>' +
+            '<div class="desk-body">' +
+              '<header class="desk-head">' +
+                '<span class="desk-name">' + escapeHtml(a.name) + role + staleTag + "</span>" +
+                '<span class="desk-state state-' + stateClass + '">' + stateClass + "</span>" +
+              "</header>" +
+              '<span class="desk-surface">' + escapeHtml(a.surface || "—") + "</span>" +
+            "</div>" +
+          "</article>"
         );
       }).join("");
     }
@@ -189,6 +195,9 @@
   function setConn(state) {
     var c = el("conn");
     c.className = "conn " + state;
+    var label = state === "live" ? "Live update link connected" :
+      state === "down" ? "Live update link reconnecting" : "Live update link idle";
+    c.setAttribute("aria-label", label);
     c.title = state === "live" ? "live (SSE)" : state === "down" ? "reconnecting…" : "link";
   }
 
