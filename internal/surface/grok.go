@@ -181,9 +181,9 @@ var grokApprovalSelect = regexp.MustCompile(`\d+/\d+:select`)
 // grokRateLimitStatus matches rate-limit text on grok's braille-spinner STATUS line
 // (bottom chrome — same lastNNonEmptyLines region as parseGrokState). The line MUST
 // carry a braille spinner frame so streamed prose that merely mentions rate limits
-// does not match. Phrase from archived grok-dev STATUS_MESSAGES; the official grok
-// CLI rate-limit STATUS render is not yet live-fixture-verified — revalidate on a
-// real throttle before widening this anchor.
+// does not match. Phrase verified from the official grok CLI binary ("rate limit
+// exceeded; sleeping.") and anchored to the same spinner+elapsed STATUS chrome as
+// Working (live-captured 2026-06-16, #58 — structural parity with "⠙ Waiting… 0.4s").
 var grokRateLimitStatus = regexp.MustCompile(`(?i)[\x{2801}-\x{28FF}].*\brate limit exceeded\b`)
 
 // parseGrokState classifies a captured official-grok pane, claude-style (Working-positive,
