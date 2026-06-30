@@ -12,10 +12,6 @@ const RateLimitTailLines = 8
 // provider is hit.
 const ClaudeServerSidePhrase = "Server is temporarily limiting requests"
 
-// GrokRateLimitPhrase is the live-captured official grok CLI rate-limit text (archived
-// grok driver design, STATUS_MESSAGES). Scope characterized as account-side (per-key).
-const GrokRateLimitPhrase = "Rate limit exceeded"
-
 // TailRegion returns the last n lines of a captured pane (line-bounded, like ParseBusy).
 func TailRegion(captured string, n int) string {
 	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
@@ -31,15 +27,6 @@ func ClaudeRateLimitHit(captured string) (bool, string) {
 	tail := TailRegion(captured, RateLimitTailLines)
 	if strings.Contains(tail, ClaudeServerSidePhrase) {
 		return true, ClaudeServerSidePhrase
-	}
-	return false, ""
-}
-
-// GrokRateLimitHit reports whether the tail region shows grok's rate-limit banner.
-func GrokRateLimitHit(captured string) (bool, string) {
-	tail := TailRegion(captured, RateLimitTailLines)
-	if strings.Contains(tail, GrokRateLimitPhrase) {
-		return true, GrokRateLimitPhrase
 	}
 	return false, ""
 }

@@ -180,6 +180,20 @@ func TestParseGrokStateApproval(t *testing.T) {
 	}
 }
 
+func TestClassifyGrokRateLimitStatusChrome(t *testing.T) {
+	hit, detail := classifyGrokRateLimit("  ⠙ Rate limit exceeded… 0.4s\n  │ ❯  │\n  Shift+Tab:mode")
+	if !hit || detail == "" {
+		t.Fatalf("classifyGrokRateLimit(status chrome) = (%v, %q), want hit", hit, detail)
+	}
+}
+
+func TestClassifyGrokRateLimitProseNotMaterial(t *testing.T) {
+	captured := "The upstream API rate limit exceeded our quota.\n  Turn completed in 3s.\n  │ ❯  │\n  Shift+Tab:mode"
+	if hit, _ := classifyGrokRateLimit(captured); hit {
+		t.Fatal("prose mentioning rate limits without braille STATUS chrome must not hit")
+	}
+}
+
 // TestClassifyGrokComposerLine: the cursor-indexed composer classifier over the §10 live captures.
 func TestClassifyGrokComposerLine(t *testing.T) {
 	// Realistic grok composer-box renders (LIVE-CAPTURED 2026-06-23, design.md §10.1/§10.2). The

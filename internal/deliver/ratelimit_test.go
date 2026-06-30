@@ -28,10 +28,3 @@ func TestClaudeRateLimitHitScrollbackNotMaterial(t *testing.T) {
 		t.Fatal("scrollback-only banner must not hit — stale throttle")
 	}
 }
-
-func TestGrokRateLimitHit(t *testing.T) {
-	captured := strings.Repeat("\n", 20) + "Rate limit exceeded\n│ ❯            │"
-	if hit, detail := GrokRateLimitHit(captured); !hit || detail != GrokRateLimitPhrase {
-		t.Fatalf("grok hit = (%v, %q), want (true, %q)", hit, detail, GrokRateLimitPhrase)
-	}
-}

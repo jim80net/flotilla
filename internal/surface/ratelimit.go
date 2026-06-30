@@ -66,5 +66,17 @@ func (t *rateLimitStreak) observe(pane string, hit bool) bool {
 	return t.streak[pane] >= rateLimitMaterialPolls
 }
 
+func (t *rateLimitStreak) clear(pane string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.streak != nil {
+		delete(t.streak, pane)
+	}
+}
+
+// ClearRateLimitStreak drops the consecutive-read streak for a pane (e.g. when the desk
+// leaves Idle/Errored and is no longer a rate-limit probe candidate).
+func ClearRateLimitStreak(pane string) { globalRateLimitStreak.clear(pane) }
+
 // package-level streak shared by probe singletons (one registry driver per surface).
 var globalRateLimitStreak rateLimitStreak

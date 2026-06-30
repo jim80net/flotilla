@@ -490,6 +490,8 @@ func cmdWatch(args []string) error {
 				return drv.Assess(pane)
 			},
 			RateLimitMaterial: rateLimitMaterial(cfg),
+			RateLimitReset:    rateLimitReset(cfg),
+			RateLimitDispatch: func(run func()) { go run() },
 			SignalHash:        signalHash,
 			AckAge:            ack.Age,
 			Wake:              wake,
@@ -916,6 +918,7 @@ func logMirrorCoverage(cfg *roster.Config, secrets *roster.Secrets, xo string) {
 
 // rateLimitMaterial returns a DetectorConfig callback that probes a desk for a
 // material provider throttle (#204). ok=false when the surface lacks RateLimitProbe.
+// Invoked OFF d.mu from runRateLimitProbes — never under tickLocked.
 func rateLimitMaterial(cfg *roster.Config) func(agent string) (bool, surface.RateLimitScope, string, bool) {
 	return func(agent string) (bool, surface.RateLimitScope, string, bool) {
 		drv, ok := surface.Get(agentSurface(cfg, agent))
@@ -932,6 +935,25 @@ func rateLimitMaterial(cfg *roster.Config) func(agent string) (bool, surface.Rat
 		}
 		limited, scope, detail := probe.RateLimited(pane)
 		return limited, scope, detail, true
+	}
+}
+
+// rateLimitReset clears a desk's consecutive-read streak when it leaves the probe
+// candidate states (Idle/Errored).
+func rateLimitReset(cfg *roster.Config) func(agent string) {
+	return func(agent string) {
+		drv, ok := surface.Get(agentSurface(cfg, agent))
+		if !ok {
+			return
+		}
+		if _, ok := surface.RateLimitSupport(drv); !ok {
+			return
+		}
+		pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
+		if err != nil {
+			return
+		}
+		surface.ClearRateLimitStreak(pane)
 	}
 }
 

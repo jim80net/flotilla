@@ -38,6 +38,20 @@ func TestClaudeRateLimitGlitchResetsStreak(t *testing.T) {
 	}
 }
 
+func TestClaudeRateLimitProseNotMaterial(t *testing.T) {
+	c := claudeCode{
+		capturePane: func(string) (string, error) {
+			return "We discussed how the API rate limit exceeded our quota.\n❯ ", nil
+		},
+	}
+	pane := "claude-rate-limit-prose-pane"
+	for i := 0; i < 3; i++ {
+		if lim, _, _ := c.RateLimited(pane); lim {
+			t.Fatal("normal prose mentioning rate limits must not become material")
+		}
+	}
+}
+
 func TestClaudeRateLimitScrollbackNotMaterial(t *testing.T) {
 	c := claudeCode{
 		capturePane: func(string) (string, error) {

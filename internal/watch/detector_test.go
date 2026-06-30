@@ -608,10 +608,11 @@ func TestDetectorRateLimitMaterialWake(t *testing.T) {
 		}
 		probeCalls++
 		if probeCalls < 2 {
-			return false, surface.RateLimitServerSide, "", true // streak building
+			return false, surface.RateLimitServerSide, "", true
 		}
 		return true, surface.RateLimitServerSide, "Server is temporarily limiting requests", true
 	}
+	cfg.RateLimitReset = func(string) {}
 	d := newDet(t, f, cfg)
 	f.set("xo", surface.StateIdle)
 	f.set("backend", surface.StateIdle)
@@ -620,14 +621,19 @@ func TestDetectorRateLimitMaterialWake(t *testing.T) {
 	d.Tick() // cold-start wake only (no rate-limit probe — early return)
 	f.wakes = nil
 
-	d.Tick() // first probe call — not material yet (streak = 1)
+	d.Tick() // probe #1 OFF mutex → pending not material; fold-back: no wake yet
 	if len(f.wakes) != 0 {
-		t.Fatalf("tick 1 wakes = %v, want none (streak < 2)", f.wakes)
+		t.Fatalf("tick 1 wakes = %v, want none (pending fold-back)", f.wakes)
 	}
 
-	d.Tick() // second probe call — material
+	d.Tick() // read pending (not material) + probe #2 → pending material; still no wake
+	if len(f.wakes) != 0 {
+		t.Fatalf("tick 2 wakes = %v, want none (material pending folds next tick)", f.wakes)
+	}
+
+	d.Tick() // read pending (material) → wake
 	if len(f.wakes) != 1 || f.wakes[0].kind != WakeMaterial {
-		t.Fatalf("tick 2 wakes = %+v, want one WakeMaterial", f.wakes)
+		t.Fatalf("tick 3 wakes = %+v, want one WakeMaterial", f.wakes)
 	}
 	if len(f.wakes[0].reasons) != 1 || f.wakes[0].reasons[0] != "backend: rate-limited (server-side — switch eligible)" {
 		t.Fatalf("reasons = %v", f.wakes[0].reasons)
@@ -636,8 +642,34 @@ func TestDetectorRateLimitMaterialWake(t *testing.T) {
 	f.wakes = nil
 	d.Tick() // same episode — no repeat wake
 	if len(f.wakes) != 0 {
-		t.Fatalf("tick 3 wakes = %v, want none (edge-triggered)", f.wakes)
+		t.Fatalf("tick 4 wakes = %v, want none (edge-triggered)", f.wakes)
 	}
+}
+
+func TestDetectorRateLimitConcurrentUnderRace(t *testing.T) {
+	f := newFixture()
+	cfg := f.config("xo", []string{"xo", "backend"}, 3, "none")
+	cfg.RateLimitMaterial = func(agent string) (bool, surface.RateLimitScope, string, bool) {
+		time.Sleep(2 * time.Millisecond) // simulate slow tmux capture
+		if agent != "backend" {
+			return false, 0, "", false
+		}
+		return false, 0, "", true
+	}
+	cfg.RateLimitReset = func(string) {}
+	cfg.RateLimitDispatch = func(run func()) { go run() }
+	d := newDet(t, f, cfg)
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
+	f.set("xo", surface.StateIdle)
+	f.set("backend", surface.StateIdle)
+	f.signal = "h0"
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(2)
+		go func() { defer wg.Done(); d.Tick() }()
+		go func() { defer wg.Done(); d.OperatorWake() }()
+	}
+	wg.Wait() // -race: rate-limit probe path must not race with OperatorWake
 }
 
 func TestDetectorRateLimitSkipsWorkingDesk(t *testing.T) {
