@@ -125,7 +125,7 @@ runtime + static guards CANNOT share regex code; they share the gitignored TERM 
 test asserts identical verdicts. (c) **The P2 operator-visible signal is the ALERT-WEBHOOK line, NOT the
 ledger** (the ledger is P3). (d) `Check` is PURE; the file/env I/O lives OUTSIDE `internal/readermap`.
 
-- [ ] 7.1 TEST FIRST (`internal/readermap/firewall_test.go`, PURE — injected term-set, no I/O): a
+- [x] 7.1 TEST FIRST (`internal/readermap/firewall_test.go`, PURE — injected term-set, no I/O): a
   denylisted term → REFUSE; the `<prefix>:<n>.<m>` / `#<deployment>-c2` pattern with a NON-allowlisted
   prefix → REFUSE; an ALLOWLISTED generic prefix (`flotilla:3.1`, `session:1.2` — the precise allowlist
   MUST be enumerated, since `session:window.pane` is a legitimate generic tmux shape used across the tree,
@@ -137,7 +137,7 @@ ledger** (the ledger is P3). (d) `Check` is PURE; the file/env I/O lives OUTSIDE
   generic-always / deployment-only-if-configured model). Typed `FirewallResult{Decision: Refuse|Warn|OK,
   Token, Abstraction, WarnTerms}` (egress-agnostic; the SUPPRESS-vs-bounce rendering of a Refuse is the
   caller's job, 7.3).
-- [ ] 7.2 Implement the PURE detector `Check(text, termset) FirewallResult` in
+- [x] 7.2 Implement the PURE detector `Check(text, termset) FirewallResult` in
   `internal/readermap/firewall.go` (no I/O — preserves the package's pure/testable contract). Put the I/O
   loader `LoadFirewall()` in `cmd/flotilla` (or a new I/O-bearing package), reading the SAME gitignored
   sources the bash guard uses (`.flotilla/private-denylist` / `$FLOTILLA_PRIVATE_DENYLIST`; a NEW
@@ -146,12 +146,12 @@ ledger** (the ledger is P3). (d) `Check` is PURE; the file/env I/O lives OUTSIDE
   only, no rewrite. Compile the alternation ONCE at load (not per-check — the hot auto-mirror path). RE2
   cannot express the bash guard's negative-lookahead allowlist, so re-express it as match-then-filter
   against the enumerated generic-prefix/home-placeholder allowlist.
-- [ ] 7.2b PARTITION (P1 — the trading-vocab leak class): add `/.flotilla/private-warnlist` to
+- [x] 7.2b PARTITION (P1 — the trading-vocab leak class): add `/.flotilla/private-warnlist` to
   `.gitignore`; ship `.flotilla/private-warnlist.example` (illustrative placeholders only, mirroring
   `private-denylist.example`); add `.flotilla/private-warnlist.example` to `check-private-boundary.sh`'s
   `SELF_EXCLUDE`. The leakscan WARN fold MUST be hand-reviewed for vocab leakage — `check-private-boundary.sh`
   self-excludes itself from its own scan, so a domain term hard-coded INTO the script would not be caught.
-- [ ] 7.3 Wire the firewall as STAGE 1 of `deskMirror.run`'s pre-post pipeline (the P0 suppress seam —
+- [x] 7.3 Wire the firewall as STAGE 1 of `deskMirror.run`'s pre-post pipeline (the P0 suppress seam —
   on a Refuse set `suppress=true`; thread the daemon's existing `alert func(string)` (`watch.go:148`) into
   `deskMirror` (a NEW field, wired in `deskMirrorOnFinish`) and raise it on a Refuse → the ALERT-WEBHOOK
   line is the P2 operator-visible "withheld for a possible leak" signal, NOT the P3 ledger; a WARN raises
@@ -161,7 +161,7 @@ ledger** (the ledger is P3). (d) `Check` is PURE; the file/env I/O lives OUTSIDE
   CLI turn) — Refuse → SUPPRESS the route + `escalate(...)` (it already has an escalate collaborator),
   NOT bounce. Denylist limitation (CLAUDE.md §1): novel coined terms are not caught; the WARN tier
   narrows but does not close that gap.
-- [ ] 7.4 The git **pre-push** hook (fail-closed) is the local backstop; **CI's `private-boundary` job is
+- [x] 7.4 The git **pre-push** hook (fail-closed) is the local backstop; **CI's `private-boundary` job is
   the enforcing authority** (a local hook is `--no-verify`-bypassable). The hook scans the push RANGE/diff
   (not the whole tree — `check-private-boundary.sh`'s `scan_tree` greps the tracked tree, so add a
   staged/range mode or scope the hook to the diff). Fold the advisory WARN tier into

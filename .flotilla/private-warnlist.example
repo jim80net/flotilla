@@ -1,0 +1,37 @@
+# flotilla private WARNLIST — TEMPLATE (advisory domain-vocabulary tier)
+#
+# Copy this file to  .flotilla/private-warnlist  (which is gitignored) and fill it
+# with the DOMAIN VOCABULARY of YOUR deployment — the jargon that, embedded in free
+# text or an example name, would deanonymize your fleet even when no hard identifier
+# is present. The boundary guard (scripts/check-private-boundary.sh) and the runtime
+# firewall read it and, on a hit, WARN — they NEVER refuse, suppress, or fail CI on
+# it. In CI, provide the same content via the FLOTILLA_PRIVATE_WARNLIST repo secret
+# instead, so your vocabulary is never committed.
+#
+# WARNLIST vs DENYLIST — two distinct tiers:
+#   - private-denylist  → a hit is FAIL-CLOSED: refused (runtime) / CI exit 1. Use it
+#     for UNAMBIGUOUS identifiers (your real desk/org/broker names, account shapes).
+#   - private-warnlist  → a hit is ADVISORY: warn + still publish (runtime) / WARN
+#     section + CI exit 0. Use it for AMBIGUOUS domain vocabulary that is too
+#     false-positive-prone to fail-close on but is worth a human look.
+#
+# Why an advisory tier exists: an identifier scan misses a deployment's domain words
+# woven into ordinary prose or an example/branch name. Those words are high-signal
+# but high-false-positive, so they earn a human glance, not a hard block. A human
+# adjudicates each WARN.
+#
+# One term or PCRE regex per line (the guard matches with `grep -P`; the Go firewall
+# matches with RE2 — keep terms to the RE2-compatible subset so the two engines agree,
+# which the conformance test enforces). Blank lines and #-comments ignored.
+#
+# The lines below are ILLUSTRATIVE placeholders — replace them with your own.
+
+# --- your domain's jargon (single words or short phrases that name your domain) ---
+your-domain-jargon-term
+your-other-jargon-term
+
+# --- your domain's product / instrument / artifact names ---
+YourDomainArtifactName
+
+# --- multi-spelling vocabulary (a PCRE alternation on one line) ---
+# (foo[- ]?bar|baz[- ]?qux)
