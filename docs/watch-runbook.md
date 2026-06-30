@@ -404,11 +404,11 @@ the command itself is wedged.
    (the XO often triggers mid-turn); never injects into a busy pane.
 2. **Handoff** — injects a NON-INTERACTIVE turn telling the desk to write a
    handoff (per the `/handoff` FORMAT, not the interactive skill) to a designated
-   path and `git add -f && commit` it, then stop. Gates on that blob going
-   **absent→committed** at HEAD AND non-trivial AND the turn returning to an idle
-   cleared composer. **If the handoff is not durably confirmed, recycle ABORTS —
-   the desk keeps running, nothing is closed** (the worst case is a no-op
-   recycle, never a lost handoff: *at-most-once handoff-artifact-loss*).
+   gitignored path as an **untracked file** (never `git add`/`commit`), then stop.
+   Gates on that file going **absent→present on disk** AND non-trivial AND the turn
+   returning to an idle cleared composer. **If the handoff is not durably confirmed,
+   recycle ABORTS — the desk keeps running, nothing is closed** (the worst case is a
+   no-op recycle, never a lost handoff: *at-most-once handoff-artifact-loss*).
 3. **Graceful close** — only after the handoff is durable. A desk launched as its
    pane's direct process (the live fleet's `claude --remote-control`) would *close*
    the pane on `/exit` rather than drop to a shell, so recycle sets the pane's
@@ -421,10 +421,9 @@ the command itself is wedged.
 5. **Takeover** — points the fresh session at the handoff with an imperative
    begin-immediately turn, then watches for it to start working.
 
-Requirements: the desk's working directory is a **git tree** and its surface is
-**recycle-capable** (today: Claude Code). A non-git / non-recycle-capable /
-copy-mode / self-targeted (recycling the XO's own pane) desk is **refused
-cleanly**, never silently degraded.
+Requirements: its surface is **recycle-capable** (today: Claude Code and grok).
+A non-recycle-capable / copy-mode / self-targeted (recycling the XO's own pane)
+desk is **refused cleanly**, never silently degraded.
 
 > **The launch recipe must be a COLD start.** Recycle relaunches via the desk's
 > launch recipe verbatim, so a recipe that resumes the prior session (e.g.

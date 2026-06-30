@@ -30,7 +30,7 @@ import (
 // §5 (P1-B) for the full lifecycle + recovery invariants.
 //
 // The fail-closed gates are IDENTICAL in shape to recycle's (idle∧cleared poll, the
-// absent→committed→non-trivial durability gate, the pane-txn lock, the under-lock
+// absent→present→non-trivial durability gate, the pane-txn lock, the under-lock
 // re-verify, the marker read-back, the generation stamp); only TWO bridges are threaded
 // and the handoff path is a COMMAND-supplied harness-neutral path (§2.1, GATE-2). The
 // per-phase timeouts + the bounded-poll gates are SHARED with recycle (recyclePollInterval,
@@ -57,7 +57,7 @@ type switchOps struct {
 	inMode       func(target string) (bool, error)                  // deliver.PaneInMode (copy-mode refuse)
 	assess       func(target string) surface.State                  // FROM driver.Assess (Phase 0–2); TO driver.Assess (Phase 3–4)
 	composer     func(target string) surface.ComposerDisposition    // driver.ComposerState (required)
-	absent       func(cwd, path string) (bool, error)               // deliver.HandoffAbsentAtHead (t0 baseline; also git-tree gate)
+	absent       func(cwd, path string) (bool, error)               // deliver.HandoffAbsentAtHead (t0 baseline: absent on disk)
 	durable      func(cwd, path string, minBytes int) (bool, error) // deliver.HandoffDurable
 	deliver      func(target, text string) error                    // confirmed delivery bound to the active driver
 	closeFn      func(target string) error                          // FROM driver.Close
@@ -178,25 +178,25 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 		return "", fmt.Errorf("phase 0: %q did not settle to idle at a cleared composer within %s — ABORT, desk untouched (still on the %s harness)", p.agent, p.timeouts.boot, p.fromSurface)
 	}
 
-	// Baseline: the NEUTRAL switch handoff path is ABSENT at HEAD (also the git-work-tree
-	// gate). The Phase-1 gate then requires an ABSENT→COMMITTED transition on this neutral
-	// path (GATE-2), so a pre-existing blob cannot false-pass.
+	// Baseline: the NEUTRAL switch handoff path is ABSENT on disk. The Phase-1 gate then
+	// requires an ABSENT→PRESENT transition on this neutral path (GATE-2), so a pre-existing
+	// file cannot false-pass.
 	absent, err := ops.absent(p.cwd, p.handoffPath)
 	if err != nil {
-		return "", fmt.Errorf("switch requires a git work-tree: %w", err)
+		return "", fmt.Errorf("handoff baseline check for %q: %w", p.handoffPath, err)
 	}
 	if !absent {
-		return "", fmt.Errorf("a blob already exists at the neutral switch handoff path %s — refusing (the gate requires an absent→committed transition; this should be impossible with a unique token, so investigate)", p.handoffPath)
+		return "", fmt.Errorf("a blob already exists at the neutral switch handoff path %s — refusing (the gate requires an absent→present transition; this should be impossible with a unique token, so investigate)", p.handoffPath)
 	}
 
-	// PHASE 1 — FROM handoff (lockless): deliver the FROM driver's non-interactive
-	// self-committing handoff turn (it names the NEUTRAL path), then gate on that neutral
-	// blob going absent→committed-and-non-trivial AND idle∧cleared.
+	// PHASE 1 — FROM handoff (lockless): deliver the FROM driver's non-interactive handoff
+	// turn (it names the NEUTRAL path), then gate on that file going absent→present-and-non-
+	// trivial AND idle∧cleared.
 	if err := ops.deliver(target, p.handoffText); err != nil {
 		return "", fmt.Errorf("phase 1: delivering the handoff turn to %q failed (desk untouched): %w", p.agent, err)
 	}
 	if !pollHandoffGate(switchToRecycleOps(ops), target, switchToRecyclePlan(p), p.timeouts.handoff) {
-		return "", fmt.Errorf("phase 1: handoff not durably confirmed for %q within %s (no committed non-trivial %s, or the turn never returned to an idle cleared composer) — ABORT, desk still running on the %s harness, nothing closed", p.agent, p.timeouts.handoff, p.handoffPath, p.fromSurface)
+		return "", fmt.Errorf("phase 1: handoff not durably confirmed for %q within %s (no present non-trivial %s on disk, or the turn never returned to an idle cleared composer) — ABORT, desk still running on the %s harness, nothing closed", p.agent, p.timeouts.handoff, p.handoffPath, p.fromSurface)
 	}
 
 	// ACQUIRE the pane-txn lock for the irreversible span (Phases 2→4); released on return.

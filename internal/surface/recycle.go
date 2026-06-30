@@ -20,22 +20,20 @@ type RecycleBridge interface {
 	// (claude: <cwd>/.claude/handoffs/recycle-<token>.md). Naming the path up front makes
 	// detection EXACT (no mtime, no baseline set-difference) and hands the takeover phase
 	// the precise path. The token (command-supplied) leads with a timestamp and ends with
-	// a crypto/rand nonce, so the path is unique and absent-at-HEAD by construction.
+	// a crypto/rand nonce, so the path is unique and absent-on-disk by construction.
 	HandoffPath(cwd, token string) string
-	// HandoffTurn returns the NON-INTERACTIVE, self-committing handoff instruction TEXT to
-	// deliver: write a handoff (per the handoff FORMAT, not the interactive skill) to
-	// designatedPath, force-commit it to the current branch (git add -f, so a gitignored
-	// handoffs dir does not block it), NOT ask for confirmation (remote-driven), then stop.
+	// HandoffTurn returns the NON-INTERACTIVE handoff instruction TEXT to deliver: write a
+	// handoff (per the handoff FORMAT, not the interactive skill) to designatedPath as an
+	// untracked gitignored file (never git add/commit — #218), NOT ask for confirmation
+	// (remote-driven), then stop.
 	HandoffTurn(designatedPath string) string
 	// TakeoverTurn returns the IMPERATIVE takeover instruction TEXT for the freshly-
 	// relaunched session: read designatedPath and take over, then — as its FIRST action —
-	// `git rm` + commit the handoff off the branch (it was committed by HandoffTurn only to
-	// durably transfer it across the recycle; left committed, that gitignored,
-	// deployment-specific file leaks when the branch PRs to public main, #212), then BEGIN
-	// WORK IMMEDIATELY (NOT ask whether to start), and — being remote-driven — surface any
-	// clarification via a flotilla message, never an in-pane interactive prompt (a remote XO
-	// cannot answer an in-pane menu over the relay). The PATH is harness-agnostic markdown;
-	// only the wording is per-harness. read → remove → work keeps the handoff transient.
+	// delete the handoff file from disk (deployment-specific; must never enter version
+	// control), then BEGIN WORK IMMEDIATELY (NOT ask whether to start), and — being remote-
+	// driven — surface any clarification via a flotilla message, never an in-pane interactive
+	// prompt (a remote XO cannot answer an in-pane menu over the relay). The PATH is harness-
+	// agnostic markdown; only the wording is per-harness. read → delete → work.
 	TakeoverTurn(designatedPath string) string
 }
 
