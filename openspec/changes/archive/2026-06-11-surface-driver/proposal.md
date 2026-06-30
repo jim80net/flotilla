@@ -54,4 +54,4 @@ the production host) and follow in Phases 2-3.
   will be it); Phase 1 lands the safe seam.
 - **Out of scope (Phases 2-3, operator-gated):** grok + cursor drivers
   (creds + metered spend + live state-glyph capture + CLI install on the prod
-  host); driver-aware pane RESOLUTION (#17). Grok-X ↔ x-signal synergy = note only.
+  host); driver-aware pane RESOLUTION (#17). Grok-X ↔ a social-signal desk synergy = note only.
