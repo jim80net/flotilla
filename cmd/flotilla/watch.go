@@ -17,6 +17,7 @@ import (
 	"github.com/jim80net/flotilla/internal/backlog"
 	"github.com/jim80net/flotilla/internal/cos"
 	"github.com/jim80net/flotilla/internal/deliver"
+	"github.com/jim80net/flotilla/internal/idlehold"
 	"github.com/jim80net/flotilla/internal/readermap"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
@@ -462,6 +463,10 @@ func cmdWatch(args []string) error {
 			},
 			alert)
 
+		// #216 idle-hold antipattern: per-agent consecutive-strike tracker; the break
+		// prompt fires after StrikeThreshold idle-hold turn-finals.
+		idleHoldTracker := idlehold.NewTracker()
+
 		det := watch.NewDetectorWithSynthSidecar(watch.DetectorConfig{
 			XOAgent:  xo,
 			Desks:    desks,
@@ -508,6 +513,7 @@ func cmdWatch(args []string) error {
 				return surface.RotateContext(xoDrv, pane)
 			},
 			MirrorOnFinish:      deskMirrorOnFinish(cfg, secrets, tr, firewall, alert),
+			IdleHoldOnFinish:    idleHoldOnFinish(cfg, idleHoldTracker, injector.Enqueue),
 			MirrorDispatch:      func(run func()) { go run() }, // mirror I/O off the tick goroutine
 			Awaiting:            awaiting.Present,
 			SettleConsume:       settled.Consume,
@@ -907,6 +913,28 @@ func logMirrorCoverage(cfg *roster.Config, secrets *roster.Secrets, xo string) {
 		len(withMirror), withMirror, len(without), without)
 }
 
+// readDeskTurnFinal returns a desk's substantive turn-final via the shared
+// surface.ResultReader seam (the same path `flotilla result` and the auto-mirror use).
+func readDeskTurnFinal(cfg *roster.Config, agent string) (text string, ok bool, err error) {
+	drv, ok := surface.Get(agentSurface(cfg, agent))
+	if !ok {
+		return "", false, fmt.Errorf("unknown surface for agent %q", agent)
+	}
+	rr, ok := drv.(surface.ResultReader)
+	if !ok {
+		return "", false, nil
+	}
+	pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
+	if err != nil {
+		return "", false, err
+	}
+	text, err = rr.LatestResult(pane)
+	if err != nil {
+		return "", false, err
+	}
+	return text, true, nil
+}
+
 func deskMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr transport.Transport, firewall *readermap.TermSet, alert func(string)) func(agent string) {
 	if secrets == nil || tr == nil {
 		return nil
@@ -923,37 +951,39 @@ func deskMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr transpor
 				return url, true
 			},
 			turnFinal: func(a string) (string, bool, error) {
-				drv, ok := surface.Get(agentSurface(cfg, a))
-				if !ok {
-					return "", false, fmt.Errorf("unknown surface for agent %q", a)
-				}
-				rr, ok := drv.(surface.ResultReader)
-				if !ok {
-					// No session-store reader for this surface — nothing substantive to mirror (clean skip).
-					return "", false, nil
-				}
-				pane, err := deliver.ResolvePane(agentTitle(cfg, a))
-				if err != nil {
-					return "", false, err
-				}
-				// LatestResult collapses "no substantive completed turn yet" and a genuine read failure
-				// into one error (its CLI contract). For the mirror BOTH are non-fatal — a SKIP, never a
-				// MIRROR-FAIL — so we return ok=false. The error is carried through ONLY so the decision
-				// log names the reason; deskMirror.run logs it as a SKIP, not a failure, and drops it.
-				text, err := rr.LatestResult(pane)
-				if err != nil {
-					return "", false, err
-				}
-				return text, true, nil
+				return readDeskTurnFinal(cfg, a)
 			},
 			post: func(url, username, content string) error {
-				// Post through the transport seam under the desk's resolved webhook
-				// destination (the credential stays inside the transport's Destination).
 				return tr.Post(transport.NewWebhookDestination(url), username, content)
 			},
 			logf: log.Printf,
 		}
 		m.run(agent)
+	}
+}
+
+// idleHoldOnFinish builds the #216 idle-hold break seam: on each desk finish it
+// classifies the turn-final, accrues consecutive strikes, and injects the break
+// prompt when the threshold is met. nil tracker ⇒ inert.
+func idleHoldOnFinish(cfg *roster.Config, tracker *idlehold.Tracker, enqueue func(watch.Job)) func(agent string) {
+	if tracker == nil {
+		return nil
+	}
+	return func(agent string) {
+		text, ok, err := readDeskTurnFinal(cfg, agent)
+		if err != nil {
+			log.Printf("flotilla watch: idle-hold SKIP %s: read turn-final: %v", agent, err)
+			return
+		}
+		if !ok {
+			return
+		}
+		r := idlehold.Check(text)
+		if !tracker.Record(agent, r) {
+			return
+		}
+		log.Printf("flotilla watch: idle-hold break %s: signal=%s strikes=%d", agent, r.Signal, tracker.Strikes(agent))
+		enqueue(watch.Job{Agent: agent, Message: idlehold.BreakPrompt(r.Recommendation), Kind: "detector"})
 	}
 }
 
