@@ -179,7 +179,7 @@ func TestNoSelfMergeContentIsEmbeddedAndMarked(t *testing.T) {
 }
 
 // operating-principles content must round-trip from the binary, carry its marker fence
-// and load-bearing note, state the constitution's through-line, and enumerate the eight
+// and load-bearing note, state the constitution's through-line, and enumerate the nine
 // standing principles — with the markers + note inside the fence so they travel with the
 // appended block.
 func TestOperatingPrinciplesContentIsEmbeddedAndMarked(t *testing.T) {
@@ -198,8 +198,17 @@ func TestOperatingPrinciplesContentIsEmbeddedAndMarked(t *testing.T) {
 			t.Errorf("operating-principles content missing %q", want)
 		}
 	}
-	// All eight numbered principles must be present.
-	for i := 1; i <= 8; i++ {
+	for _, want := range []string{
+		"Coordinators delegate",
+		"preserve bandwidth",
+		"flotilla send",
+	} {
+		if !strings.Contains(m.Content, want) {
+			t.Errorf("operating-principles content missing coordinator delegation phrase %q", want)
+		}
+	}
+	// All nine numbered principles must be present.
+	for i := 1; i <= 9; i++ {
 		want := string(rune('0'+i)) + ". **"
 		if !strings.Contains(m.Content, want) {
 			t.Errorf("operating-principles content missing principle %q", want)

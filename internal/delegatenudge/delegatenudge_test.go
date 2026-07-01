@@ -1,0 +1,75 @@
+package delegatenudge
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestCheckDelegatesTurn(t *testing.T) {
+	text := "Dispatched the fix to @backend via flotilla send — they own the implementation now."
+	if r := Check(text); r.InlineBuild {
+		t.Fatalf("delegation turn should not IC-flag; got signal=%q", r.Signal)
+	}
+}
+
+func TestCheckICImplementTurn(t *testing.T) {
+	text := "Implemented the rate-limit probe in internal/surface/ratelimit.go and go test passed green."
+	if r := Check(text); !r.InlineBuild {
+		t.Fatal("hands-on implement+test turn should IC-flag")
+	}
+}
+
+func TestCheckPRMergeTurn(t *testing.T) {
+	text := "Opened PR #236 and merged after CI green. Ready for your review."
+	if r := Check(text); !r.InlineBuild {
+		t.Fatal("PR ship turn should IC-flag on a coordinator")
+	}
+}
+
+func TestCheckSynthesisOnlyCarveOut(t *testing.T) {
+	text := "Executive brief: fleet status — 3 desks working, 1 idle. Nothing needed from you."
+	if r := Check(text); r.InlineBuild {
+		t.Fatal("coordination-only synthesis should not IC-flag")
+	}
+}
+
+func TestCheckLivenessCarveOut(t *testing.T) {
+	text := "[flotilla change-detector] Liveness check — reply with a one-word ack."
+	if r := Check(text); r.InlineBuild {
+		t.Fatal("liveness ack should not IC-flag")
+	}
+}
+
+func TestTrackerThreshold(t *testing.T) {
+	tr := NewTracker()
+	ic := Result{InlineBuild: true, Signal: "test"}
+	if tr.Record("xo", ic) {
+		t.Fatal("first strike should not fire nudge")
+	}
+	if tr.Strikes("xo") != 1 {
+		t.Fatalf("strikes = %d, want 1", tr.Strikes("xo"))
+	}
+	if !tr.Record("xo", ic) {
+		t.Fatal("second strike should fire nudge")
+	}
+	if tr.Strikes("xo") != 0 {
+		t.Fatalf("strikes after fire = %d, want 0", tr.Strikes("xo"))
+	}
+}
+
+func TestTrackerNonICDoesNotReset(t *testing.T) {
+	tr := NewTracker()
+	ic := Result{InlineBuild: true, Signal: "test"}
+	tr.Record("xo", ic)
+	tr.Record("xo", Result{})
+	if tr.Strikes("xo") != 1 {
+		t.Fatalf("non-IC between strikes should preserve count; got %d", tr.Strikes("xo"))
+	}
+}
+
+func TestNudgePromptNamesAgent(t *testing.T) {
+	p := NudgePrompt("alpha-xo")
+	if p == "" || !strings.Contains(p, "alpha-xo") || !strings.Contains(p, "flotilla send") {
+		t.Fatalf("nudge prompt missing agent or dispatch instruction: %q", p)
+	}
+}

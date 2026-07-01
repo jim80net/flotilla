@@ -16,6 +16,7 @@ import (
 
 	"github.com/jim80net/flotilla/internal/backlog"
 	"github.com/jim80net/flotilla/internal/cos"
+	"github.com/jim80net/flotilla/internal/delegatenudge"
 	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/idlehold"
 	"github.com/jim80net/flotilla/internal/launch"
@@ -468,6 +469,9 @@ func cmdWatch(args []string) error {
 		// prompt fires after StrikeThreshold idle-hold turn-finals.
 		idleHoldTracker := idlehold.NewTracker()
 
+		// #232 coordinator delegation: every XO and CoS — not only the primary clock XO.
+		delegationTracker := delegatenudge.NewTracker()
+
 		// #205 auto-switch: load flat launch recipes for storm-cooldown + slot metadata.
 		launchPath := os.Getenv("FLOTILLA_LAUNCH")
 		if launchPath == "" {
@@ -546,23 +550,25 @@ func cmdWatch(args []string) error {
 				defer txn.Release()
 				return surface.RotateContext(xoDrv, pane)
 			},
-			MirrorOnFinish:      deskMirrorOnFinish(cfg, secrets, tr, firewall, alert),
-			IdleHoldOnFinish:    idleHoldOnFinish(cfg, idleHoldTracker, injector.Enqueue),
-			MirrorDispatch:      func(run func()) { go run() }, // mirror I/O off the tick goroutine
-			Awaiting:            awaiting.Present,
-			SettleConsume:       settled.Consume,
-			DeskSettleConsume:   deskSettled.Consume,
-			Alert:               alert,
-			MaxMissedAcks:       *maxMissed,
-			MaxQuietIntervals:   *maxQuiet,
-			LivenessPingMode:    cfg.LivenessPingMode,
-			MaxSelfContinuation: *maxSelfCont,
-			BacklogGate:         backlogGate,
-			BacklogStuckCap:     *backlogStuckCap,
-			WakeAgent:           synthWakeAgent,
-			SynthParents:        synthParents,
-			SynthRead:           synthRead,
-			SynthEveryTicks:     synthEveryTicks,
+			MirrorOnFinish:          deskMirrorOnFinish(cfg, secrets, tr, firewall, alert),
+			IdleHoldOnFinish:        idleHoldOnFinish(cfg, idleHoldTracker, injector.Enqueue),
+			IsCoordinator:           cfg.IsCoordinator,
+			DelegationNudgeOnFinish: delegationNudgeOnFinish(cfg, delegationTracker, injector.Enqueue),
+			MirrorDispatch:          func(run func()) { go run() }, // mirror I/O off the tick goroutine
+			Awaiting:                awaiting.Present,
+			SettleConsume:           settled.Consume,
+			DeskSettleConsume:       deskSettled.Consume,
+			Alert:                   alert,
+			MaxMissedAcks:           *maxMissed,
+			MaxQuietIntervals:       *maxQuiet,
+			LivenessPingMode:        cfg.LivenessPingMode,
+			MaxSelfContinuation:     *maxSelfCont,
+			BacklogGate:             backlogGate,
+			BacklogStuckCap:         *backlogStuckCap,
+			WakeAgent:               synthWakeAgent,
+			SynthParents:            synthParents,
+			SynthRead:               synthRead,
+			SynthEveryTicks:         synthEveryTicks,
 			// Recursive desk-heartbeat (#183): default-ON, roster opt-OUT. Cadence = the heartbeat
 			// interval (the tick IS the interval ⇒ 1 tick); cap = 3 (NewDetector defaults 0 to 3).
 			HeartbeatEnabled:        deskHeartbeatEnabled,
@@ -1045,6 +1051,35 @@ func deskMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr transpor
 			logf: log.Printf,
 		}
 		m.run(agent)
+	}
+}
+
+// delegationNudgeOnFinish builds the #232 coordinator delegation nudge: on each
+// coordinator finish (any XO or CoS, including the primary clock XO) it classifies
+// the turn-final for inline build/ship work without delegation and injects a
+// dispatch nudge when consecutive strikes meet the threshold.
+func delegationNudgeOnFinish(cfg *roster.Config, tracker *delegatenudge.Tracker, enqueue func(watch.Job)) func(agent string) {
+	if tracker == nil {
+		return nil
+	}
+	return func(agent string) {
+		if !cfg.IsCoordinator(agent) {
+			return
+		}
+		text, ok, err := readDeskTurnFinal(cfg, agent)
+		if err != nil {
+			log.Printf("flotilla watch: delegation-nudge SKIP %s: read turn-final: %v", agent, err)
+			return
+		}
+		if !ok {
+			return
+		}
+		r := delegatenudge.Check(text)
+		if !tracker.Record(agent, r) {
+			return
+		}
+		log.Printf("flotilla watch: delegation-nudge %s: inline-build signal", agent)
+		enqueue(watch.Job{Agent: agent, Message: delegatenudge.NudgePrompt(agent), Kind: "detector"})
 	}
 }
 

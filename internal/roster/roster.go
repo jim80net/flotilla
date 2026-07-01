@@ -399,6 +399,20 @@ func (c *Config) IsXO(name string) bool {
 	return false
 }
 
+// IsCoordinator reports whether name holds a coordinator role — any XO (see IsXO)
+// or the chief-of-staff (cos_agent). The delegation-nudge detector (#232) and
+// operating-principles doctrine apply to every coordinator, not only the primary
+// clock XO or the CoS in isolation.
+func (c *Config) IsCoordinator(name string) bool {
+	if name == "" {
+		return false
+	}
+	if c.IsXO(name) {
+		return true
+	}
+	return c.CosAgent != "" && name == c.CosAgent
+}
+
 // HeartbeatEnabled reports whether the recursive desk heartbeat (#183) re-engages this agent
 // when it settles Idle mid-task. The primary XO is excluded — it has its own clock (the daemon
 // heartbeat), so heartbeating it would double-drive. Resolution order: an explicit per-agent
