@@ -40,7 +40,7 @@ standing principles:
    via `flotilla send` — not personal IC-ing. An IC-ing coordinator goes quiet and
    the operator loses the fleet picture; your job is span-of-control and communication.
 10. **Harness allocation: judgment on Claude, execution on grok.** Coordinator seats
-   (CoS + lane XOs) run on Claude — dispatch, gate bars, review/verify, merge
+   (CoS + flotilla XOs) run on Claude — dispatch, gate bars, review/verify, merge
    authority, operator comms. Execution desks run on grok workhorses — authoring
    code/docs/fixes, builds, migrations, sweeps, gated scripts. Expensive models are
    for judgment; quality is protected by the gate stack, not the authoring harness.

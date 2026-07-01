@@ -126,7 +126,7 @@ Fleet roles split across harness tiers by design:
 
 | Seat | Harness | Work |
 |------|---------|------|
-| **Coordinators** (CoS + every lane XO) | **Claude** | Dispatch, gate bars, review/verify, merge authority, operator communication, synthesis |
+| **Coordinators** (CoS + every flotilla XO) | **Claude** | Dispatch, gate bars, review/verify, merge authority, operator communication, synthesis |
 | **Execution desks** | **grok workhorse** | Authoring code/docs/fixes, builds, migrations, sweeps, running gated scripts |
 
 **Rationale:** expensive models are for judgment, not typing. Quality is protected
