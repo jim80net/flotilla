@@ -1,6 +1,43 @@
 package surface
 
-import "testing"
+import (
+	"sync"
+	"testing"
+)
+
+func TestClaudeRateLimitInstantSingleRead(t *testing.T) {
+	c := claudeCode{
+		capturePane: func(string) (string, error) {
+			return "Server is temporarily limiting requests\n❯ ", nil
+		},
+	}
+	pane := "claude-rate-limit-instant-pane"
+	if lim, _, _ := c.RateLimited(pane); lim {
+		t.Fatal("streak probe: first read must not be material")
+	}
+	lim, scope, detail := c.RateLimitInstant(pane)
+	if !lim || scope != RateLimitServerSide || detail == "" {
+		t.Fatalf("instant probe on first read = (%v,%v,%q), want material ServerSide", lim, scope, detail)
+	}
+}
+
+func TestClaudeRateLimitInstantConcurrentUnderRace(t *testing.T) {
+	c := claudeCode{
+		capturePane: func(string) (string, error) {
+			return "Server is temporarily limiting requests\n❯ ", nil
+		},
+	}
+	pane := "claude-rate-limit-instant-race-pane"
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c.RateLimitInstant(pane)
+		}()
+	}
+	wg.Wait()
+}
 
 func TestClaudeRateLimitConsecutiveReads(t *testing.T) {
 	c := claudeCode{

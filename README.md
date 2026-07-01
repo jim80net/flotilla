@@ -143,6 +143,12 @@ inspect end to end:
   always one coherent picture and one accountable router. How the XO holds up
   its end — replying to you on Discord, and staying quiet on routine noise —
   is its operating doctrine: see [docs/xo-doctrine.md](./docs/xo-doctrine.md).
+- **Constitution — the Flotilla Operating Principles.** Every agent is born with
+  the eight standing principles that make coordination autonomous *and* safe
+  (act-with-guardrails, the money/irreversibility/fork gates, merge on clean gates
+  with an independent reviewer, verify-never-fabricate, …). `flotilla doctrine
+  install` appends the distilled constitution into each agent's identity; the full
+  prose is in [docs/OPERATING-PRINCIPLES.md](./docs/OPERATING-PRINCIPLES.md).
 - **Bounded autonomy — per-agent permission posture.** Each agent runs with
   its own allow-list, so it can act on safe operations unattended while
   still stopping for confirmation on risky ones. Coordination never implies

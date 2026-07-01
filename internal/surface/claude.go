@@ -172,12 +172,29 @@ func (claudeCode) TakeoverTurn(designatedPath string) string {
 // RateLimited implements RateLimitProbe (#204): detects Anthropic's server-side throttle banner
 // in the current turn region with 2-consecutive-read materiality discipline.
 func (c claudeCode) RateLimited(pane string) (bool, RateLimitScope, string) {
+	hit, scope, detail := c.rateLimitInstant(pane)
+	if !globalRateLimitStreak.observe(pane, hit) {
+		return false, 0, ""
+	}
+	if !hit {
+		return false, 0, ""
+	}
+	return true, scope, detail
+}
+
+// RateLimitInstant implements RateLimitInstantProbe: one pane read, no streak (under-lock
+// auto-switch re-probe in a fresh subprocess).
+func (c claudeCode) RateLimitInstant(pane string) (bool, RateLimitScope, string) {
+	return c.rateLimitInstant(pane)
+}
+
+func (c claudeCode) rateLimitInstant(pane string) (bool, RateLimitScope, string) {
 	captured, err := c.capturePane(pane)
 	if err != nil {
 		return false, 0, ""
 	}
 	hit, detail := deliver.ClaudeRateLimitHit(captured)
-	if !globalRateLimitStreak.observe(pane, hit) {
+	if !hit {
 		return false, 0, ""
 	}
 	return true, RateLimitServerSide, detail
