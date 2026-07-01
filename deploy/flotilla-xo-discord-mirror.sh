@@ -18,10 +18,15 @@
 #  BUG 8: forward-scan last text-bearing assistant (claudestore parity) + trigger
 #         walk skips tool_result-only user entries.
 # Chunking delegated to `flotilla notify --chunk` (BUG-4 belt-and-suspenders).
-SPARK=/home/jim/workspace/github.com/General-ML/spark
-ROSTER="$SPARK/state/flotilla.json"
-SECRETS="$SPARK/state/flotilla-secrets.env"
-FLOTILLA="$HOME/go/bin/flotilla"
+#
+# REQUIRED host env (set by the operator's private fleet-ops install — no defaults
+# in this public script): FLOTILLA_ROSTER, FLOTILLA_SECRETS. Optional: FLOTILLA_BIN
+# (defaults to `flotilla` on PATH). Fail-safe exit 0 when unset or missing.
+ROSTER="${FLOTILLA_ROSTER:-}"
+SECRETS="${FLOTILLA_SECRETS:-}"
+FLOTILLA="${FLOTILLA_BIN:-flotilla}"
+if [[ -z "$ROSTER" || -z "$SECRETS" ]]; then exit 0; fi
+if [[ ! -f "$ROSTER" || ! -f "$SECRETS" ]]; then exit 0; fi
 
 payload="$(cat 2>/dev/null)" || exit 0
 
