@@ -486,7 +486,9 @@ func cmdWatch(args []string) error {
 		var endAutoSwitch func(string)
 		autoSwitchOn := surface.AutoSwitchEnabled()
 		if autoSwitchOn {
-			log.Printf("flotilla watch: auto-switch ENABLED (FLOTILLA_AUTOSWITCH) — non-sensitive claude-code workers may auto-relocate on sustained throttle")
+			log.Printf("flotilla watch: auto-switch ON (default; disable with FLOTILLA_AUTOSWITCH=0) — non-sensitive workers may auto-relocate on sustained throttle, bounded by the safety guardrails")
+		} else {
+			log.Printf("flotilla watch: auto-switch DISABLED (FLOTILLA_AUTOSWITCH=0)")
 		}
 
 		detCfg := watch.DetectorConfig{
