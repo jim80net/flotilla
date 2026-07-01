@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jim80net/flotilla/internal/cos"
 	"github.com/jim80net/flotilla/internal/deliver"
@@ -136,13 +137,16 @@ flags for 'notify':
                     (default $FLOTILLA_SELF)
   --file <path>     read the message body from a file ('-' for stdin)
   --secrets <path>  secrets env file (default $FLOTILLA_SECRETS)
+  --chunk           split an over-limit body into sequential Discord messages
+                    (paragraph boundaries, (i/N) prefixes; used by the XO mirror hook)
 
 notify is the operator-facing outbound path: it posts <message> directly to the
 operator on Discord, under the <agent>'s own webhook identity, and does NOT
 inject into any tmux pane. Use it when an agent (typically the XO) wants to
 reach the operator — as opposed to 'send', which wakes another agent's pane and
-mirrors the wake to the audit channel. The message must be ≤ 2000 characters
-(Discord's hard limit); a longer body is rejected (nothing is posted).
+mirrors the wake to the audit channel. Without --chunk the message must be ≤ 2000
+characters (Discord's hard limit); a longer body is rejected (nothing is posted).
+With --chunk the full body is delivered across multiple messages.
 
 flags for 'speak':
   --file <path>     read the spoken text from a file ('-' for stdin)
@@ -401,6 +405,7 @@ func cmdNotify(args []string) error {
 	file := fs.String("file", "", "read message body from this file ('-' for stdin)")
 	secretsPath := fs.String("secrets", os.Getenv("FLOTILLA_SECRETS"), "secrets env file path")
 	rosterPath := fs.String("roster", rosterDefault(), "roster config path (for the CoS context-mirror; optional)")
+	chunk := fs.Bool("chunk", false, "split an over-limit body into sequential Discord messages")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -431,12 +436,13 @@ func cmdNotify(args []string) error {
 	if strings.TrimSpace(message) == "" {
 		return fmt.Errorf("message is empty")
 	}
-	// Unlike the best-effort audit mirror (which truncates), this message IS the
-	// operator-facing content. Reject an over-length body cleanly rather than
-	// silently dropping the tail — the operator must see the whole message.
-	if runeCap := transportContentCap(); runeCap > 0 {
-		if n := len([]rune(message)); n > runeCap {
-			return fmt.Errorf("message is %d chars; the transport's limit is %d — shorten it or split it (nothing was posted)", n, runeCap)
+	// Without --chunk, reject an over-length body cleanly (nothing is posted).
+	// With --chunk the XO mirror hook (and any caller) delivers the WHOLE body.
+	if !*chunk {
+		if runeCap := transportContentCap(); runeCap > 0 {
+			if n := len([]rune(message)); n > runeCap {
+				return fmt.Errorf("message is %d chars; the transport's limit is %d — shorten it, pass --chunk, or split it (nothing was posted)", n, runeCap)
+			}
 		}
 	}
 
@@ -472,10 +478,32 @@ func cmdNotify(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := tr.Post(transport.NewWebhookDestination(hook), *from, message); err != nil {
+	dest := transport.NewWebhookDestination(hook)
+	if *chunk {
+		chunks := transport.Chunk(message, mirrorChunkLimit)
+		n := len(chunks)
+		for i, part := range chunks {
+			body := part
+			if n > 1 {
+				body = fmt.Sprintf("(%d/%d)\n%s", i+1, n, part)
+			}
+			if err := tr.Post(dest, *from, body); err != nil {
+				return fmt.Errorf("notify: chunk %d/%d failed: %w", i+1, n, err)
+			}
+			if i < n-1 {
+				time.Sleep(400 * time.Millisecond)
+			}
+		}
+		if n > 1 {
+			fmt.Printf("notified operator as %s (%d chunks, %d chars)\n", *from, n, utf8.RuneCountInString(message))
+		} else {
+			fmt.Printf("notified operator as %s\n", *from)
+		}
+	} else if err := tr.Post(dest, *from, message); err != nil {
 		return err
+	} else {
+		fmt.Printf("notified operator as %s\n", *from)
 	}
-	fmt.Printf("notified operator as %s\n", *from)
 	// CoS context-mirror (#108): record this XO→operator reply in the who-knows-what
 	// ledger. Strictly best-effort + observe-only — the operator-facing post already
 	// succeeded, so it must never fail notify.
