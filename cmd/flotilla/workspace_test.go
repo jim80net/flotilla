@@ -25,10 +25,17 @@ func TestCmdWorkspaceInitScaffoldsAndIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := filepath.Join(root, "infra")
-	for _, f := range []string{"launch.json", "HEARTBEAT.md", "state.md", "CLAUDE.md"} {
+	for _, f := range []string{"launch.json", "HEARTBEAT.md", "state.md", "AGENTS.md"} {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			t.Errorf("expected %s scaffolded: %v", f, err)
 		}
+	}
+	launch, err := os.ReadFile(filepath.Join(dir, "launch.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(launch), "grok --model composer-2.5-fast") {
+		t.Errorf("execution desk launch = %q, want grok workhorse default", launch)
 	}
 
 	// Idempotent: a re-init must NOT clobber an existing (edited) file.
@@ -57,7 +64,7 @@ func TestCmdWorkspaceInitSeedsBothConstitutionalMembers(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := filepath.Join(root, "infra")
-	identity := filepath.Join(dir, "CLAUDE.md")
+	identity := filepath.Join(dir, "AGENTS.md")
 	skill := filepath.Join(dir, "skills", "visibility-synthesis.md")
 
 	idBody, err := os.ReadFile(identity)
@@ -110,8 +117,36 @@ func TestCmdWorkspaceInitGrokScaffoldsAgentsMd(t *testing.T) {
 	if err := cmdWorkspaceInit([]string{"g", "--roster", rosterPath}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "g", "AGENTS.md")); err != nil {
+	dir := filepath.Join(root, "g")
+	if _, err := os.Stat(filepath.Join(dir, "AGENTS.md")); err != nil {
 		t.Errorf("grok surface should scaffold AGENTS.md, not CLAUDE.md: %v", err)
+	}
+	launch, err := os.ReadFile(filepath.Join(dir, "launch.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(launch), "grok --model composer-2.5-fast") {
+		t.Errorf("grok launch = %q, want composer-2.5-fast workhorse recipe", launch)
+	}
+}
+
+func TestCmdWorkspaceInitCoordinatorScaffoldsClaude(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)
+	rosterPath := writeRosterFile(t, `{"xo_agent":"xo","agents":[{"name":"xo"}]}`)
+	if err := cmdWorkspaceInit([]string{"xo", "--roster", rosterPath}); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "xo")
+	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); err != nil {
+		t.Errorf("coordinator should scaffold CLAUDE.md: %v", err)
+	}
+	launch, err := os.ReadFile(filepath.Join(dir, "launch.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(launch), "claude --append-system-prompt-file") {
+		t.Errorf("coordinator launch = %q, want Claude management harness", launch)
 	}
 }
 

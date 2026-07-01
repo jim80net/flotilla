@@ -83,7 +83,8 @@ func cmdWorkspaceInit(args []string) error {
 	if err != nil {
 		return err
 	}
-	identity, err := workspace.IdentityFileName(a.Surface)
+	harnessSurface := harnessAllocationSurface(cfg, agent, a.Surface)
+	identity, err := workspace.IdentityFileName(harnessSurface)
 	if err != nil {
 		return err
 	}
@@ -95,23 +96,18 @@ func cmdWorkspaceInit(args []string) error {
 		return fmt.Errorf("create workspace %q: %w", dir, err)
 	}
 
-	// The identity is loaded at launch via the EMPIRICALLY-VERIFIED
-	// `--append-system-prompt-file` mechanism (a sentinel confirmed it loads the file's
-	// contents; --add-dir was refuted). cwd is left empty for the operator to fill —
-	// an empty cwd fails recipe validation, so resume errors clearly until it is set.
+	// cwd is left empty for the operator to fill — an empty cwd fails recipe validation,
+	// so resume errors clearly until it is set.
 	//
-	// CLAUDE-CODE-SPECIFIC: this recipe hardcodes `claude --append-system-prompt-file`
-	// for EVERY surface. The verified load path (and the verify-first probe) is Claude
-	// Code; for a non-Claude surface (grok/aider/opencode) the doctrine is still written
-	// into the surface's native identity file (forward-correct — the native harness reads
-	// it), but its load is NOT yet wired by this generated recipe. Per-surface launch/load
-	// is a documented fast-follow (openspec/changes/constitutional-skillset/proposal.md
-	// "Out of scope" → "Per-surface load mechanisms beyond Claude Code"). The seed below
-	// emits a runtime NOTICE for non-Claude surfaces so this limitation is visible, not
-	// silent.
-	launchTemplate := fmt.Sprintf(
-		`{"launch":"claude --append-system-prompt-file %s/%s -w %s","cwd":"","tmux":"flotilla:%s"}`+"\n",
-		dir, identity, agent, agent)
+	// Harness allocation (operating-principles §10): coordinators scaffold Claude;
+	// execution desks default to grok workhorses. Claude loads identity via the verified
+	// `--append-system-prompt-file` path; grok loads via `--rules "$(cat <ws>/<identity>)"`.
+	// Other surfaces (aider/opencode) still get doctrine in the native identity file but
+	// keep the Claude launch fast-follow until their load paths are verified.
+	launchTemplate, err := workspaceLaunchRecipe(dir, agent, identity, harnessSurface)
+	if err != nil {
+		return err
+	}
 	identityStub := fmt.Sprintf("# %s — desk identity\n\nYou are the %s desk. Describe this desk's standing role and task here.\n", agent, agent)
 
 	files := []struct{ name, content string }{
@@ -152,10 +148,47 @@ func cmdWorkspaceInit(args []string) error {
 	}
 	identityPath := filepath.Join(dir, identity)
 	reportDoctrineResults(results, identityPath)
-	noteNonClaudeLoadFastFollow(a.Surface, identityPath)
+	noteNonClaudeLoadFastFollow(harnessSurface, identityPath)
 
 	fmt.Printf("workspace ready: %s\n", dir)
 	fmt.Printf("  → edit %s: set \"cwd\" to %s's absolute worktree path before resuming.\n",
 		filepath.Join(dir, workspace.LaunchFileName), agent)
 	return nil
+}
+
+// harnessAllocationSurface applies operating-principles §10: coordinator seats
+// (any XO or CoS) always scaffold Claude; execution desks default to grok unless
+// the roster names another non-Claude surface explicitly.
+func harnessAllocationSurface(cfg *roster.Config, agent, rosterSurface string) string {
+	if cfg.IsCoordinator(agent) {
+		return "claude-code"
+	}
+	if rosterSurface == "" || rosterSurface == "claude-code" {
+		return "grok"
+	}
+	return rosterSurface
+}
+
+// workspaceLaunchRecipe returns the launch.json body for a harness surface.
+func workspaceLaunchRecipe(dir, agent, identity, surface string) (string, error) {
+	switch surface {
+	case "", "claude-code":
+		return fmt.Sprintf(
+			`{"launch":"claude --append-system-prompt-file %s/%s -w %s","cwd":"","tmux":"flotilla:%s"}`+"\n",
+			dir, identity, agent, agent), nil
+	case "grok":
+		return fmt.Sprintf(
+			`{"launch":"grok --model composer-2.5-fast --rules \"$(cat %s/%s)\" -w %s","cwd":"","tmux":"flotilla:%s"}`+"\n",
+			dir, identity, agent, agent), nil
+	default:
+		// Fast-follow: doctrine is written to the native identity file, but launch
+		// still emits the verified Claude recipe until that surface's load is proven.
+		id, err := workspace.IdentityFileName(surface)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf(
+			`{"launch":"claude --append-system-prompt-file %s/%s -w %s","cwd":"","tmux":"flotilla:%s"}`+"\n",
+			dir, id, agent, agent), nil
+	}
 }

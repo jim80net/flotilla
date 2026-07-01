@@ -1074,7 +1074,7 @@ func delegationNudgeOnFinish(cfg *roster.Config, tracker *delegatenudge.Tracker,
 		if !ok {
 			return
 		}
-		r := delegatenudge.Check(text)
+		r := delegatenudge.Check(text, agentSurface(cfg, agent))
 		if !tracker.Record(agent, r) {
 			return
 		}

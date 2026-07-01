@@ -18,7 +18,7 @@ func TestCmdDoctrineInstallAppendsOnce(t *testing.T) {
 	if err := cmdWorkspaceInit([]string{"infra", "--roster", rosterPath}); err != nil {
 		t.Fatal(err)
 	}
-	identity := filepath.Join(root, "infra", "CLAUDE.md")
+	identity := filepath.Join(root, "infra", "AGENTS.md")
 
 	// workspace init now seeds the doctrine; capture the post-seed state and verify a
 	// direct install is a no-op (detect-and-skip), exercising the install path itself.

@@ -10,7 +10,7 @@ The through-line: **an autonomous agent's job is to move the work forward on the
 operator's behalf, escalating only the few decisions that are genuinely the
 operator's.** Everything below is that principle, made mechanical.
 
-The concise, marker-fenced version of this file — the nine principle titles with
+The concise, marker-fenced version of this file — the ten principle titles with
 a one-sentence statement each — is what `flotilla doctrine install` appends into
 every agent's identity file (`internal/doctrine/assets/skills/operating-principles.md`).
 This document is the full prose the running agent's worktree may not contain.
@@ -117,6 +117,28 @@ coordinator on the wire.
 **Mechanically enforced:** `flotilla watch` runs a delegation-nudge detector on
 every coordinator's turn-final (#232). Consecutive inline-build turns without a
 delegation signal trigger a dispatch nudge injected into the coordinator's pane.
+The nudge applies only to **Claude-seat coordinators** — management harnesses,
+not grok workhorses.
+
+## 10. Harness allocation: judgment on Claude, execution on grok
+
+Fleet roles split across harness tiers by design:
+
+| Seat | Harness | Work |
+|------|---------|------|
+| **Coordinators** (CoS + every lane XO) | **Claude** | Dispatch, gate bars, review/verify, merge authority, operator communication, synthesis |
+| **Execution desks** | **grok workhorse** | Authoring code/docs/fixes, builds, migrations, sweeps, running gated scripts |
+
+**Rationale:** expensive models are for judgment, not typing. Quality is protected
+by the gate stack (review, CI, independent merge authority) — not by which harness
+authored the diff. A coordinator grinding implementation on a Claude seat burns
+bandwidth and violates both Principle 9 and this allocation.
+
+**Defaults:** `flotilla workspace init` scaffolds **grok** launch recipes for new
+execution desks and **Claude** for coordinators. Override only deliberately.
+
+**Mechanically enforced:** the delegation-nudge detector (#232) flags inline
+build-loops only on Claude-seat coordinators and nudges dispatch to grok desks.
 
 ---
 

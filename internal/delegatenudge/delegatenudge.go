@@ -17,6 +17,10 @@ import (
 // trigger the dispatch nudge. One slip might be urgent hands-on; two is a pattern.
 const StrikeThreshold = 2
 
+// ManagementHarness is the coordinator-seat surface (Claude). Execution work belongs
+// on grok workhorse desks — the nudge only fires for management-harness coordinators.
+const ManagementHarness = "claude-code"
+
 // Result is the verdict for one turn-final body.
 type Result struct {
 	// InlineBuild is true when the body shows hands-on build/ship work without a
@@ -54,10 +58,17 @@ var (
 	}
 )
 
-// Check classifies one turn-final. InlineBuild is true only when an IC signal matches,
+// IsManagementHarness reports whether surface is a coordinator (management) seat.
+// Empty surface defaults to claude-code per roster/surface conventions.
+func IsManagementHarness(surface string) bool {
+	return surface == "" || surface == ManagementHarness
+}
+
+// Check classifies one turn-final for a coordinator on the given harness surface.
+// InlineBuild is true only on management (Claude) seats, when an IC signal matches,
 // no delegation signal is present, and the turn is not a coordination-only carve-out.
-func Check(text string) Result {
-	if text == "" {
+func Check(text string, surface string) Result {
+	if text == "" || !IsManagementHarness(surface) {
 		return Result{}
 	}
 	if showsDelegation(text) {
@@ -147,10 +158,12 @@ func NudgePrompt(agent string) string {
 	b.WriteString(". Your recent turn(s) show hands-on build/ship work — IC-ing — ")
 	b.WriteString("instead of routing to desks. An IC-ing coordinator goes quiet and ")
 	b.WriteString("cannot communicate; the operator cannot see the fleet move.\n\n")
-	b.WriteString("Preserve your bandwidth: delegate multi-step implementation to a desk ")
-	b.WriteString("via `flotilla send @<desk> \"…\"` (or spawn/resume as appropriate). ")
-	b.WriteString("Stay on synthesis, routing, operator communication, and gate decisions.\n\n")
-	b.WriteString("On this turn: stop grinding inline — dispatch the build work, then ")
+	b.WriteString("Harness allocation: coordinator seats (Claude) are for judgment — ")
+	b.WriteString("dispatch, gate bars, review/verify, merge authority, operator comms. ")
+	b.WriteString("Execution (code, builds, migrations, sweeps) belongs on grok workhorse desks.\n\n")
+	b.WriteString("Preserve your bandwidth: route implementation via `flotilla send @<desk> \"…\"` ")
+	b.WriteString("(prefer a grok execution desk). Stay on synthesis, routing, and gate decisions.\n\n")
+	b.WriteString("On this turn: stop the inline build-loop — dispatch to a grok desk, then ")
 	b.WriteString("report what you routed and what you are holding for the operator.")
 	return b.String()
 }
