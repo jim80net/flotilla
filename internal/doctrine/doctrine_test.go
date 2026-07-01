@@ -18,19 +18,34 @@ func memberByName(t *testing.T, name string) Member {
 	return Member{}
 }
 
-// The registry ships EXACTLY four members: the Rule of Three (identity-append),
-// no-self-merge (identity-append), act-dont-idle-hold (identity-append), and
-// visibility-synthesis (heartbeat-skill). This locks the count so a future member
-// addition is a deliberate, reviewed change (and so the member-count-agnostic install
-// loop is exercised against the real registry, not a fixture).
+// The registry ships EXACTLY five members: operating-principles (identity-append),
+// the Rule of Three (identity-append), no-self-merge (identity-append),
+// act-dont-idle-hold (identity-append), and visibility-synthesis (heartbeat-skill).
+// This locks the count so a future member addition is a deliberate, reviewed change
+// (and so the member-count-agnostic install loop is exercised against the real
+// registry, not a fixture).
 func TestMembersRegistryContents(t *testing.T) {
 	members := Members()
-	if len(members) != 4 {
-		t.Fatalf("registry should hold exactly four members, got %d", len(members))
+	if len(members) != 5 {
+		t.Fatalf("registry should hold exactly five members, got %d", len(members))
 	}
 	byName := map[string]Member{}
 	for _, m := range members {
 		byName[m.Name] = m
+	}
+
+	op, ok := byName["operating-principles"]
+	if !ok {
+		t.Fatal("registry missing operating-principles member")
+	}
+	if op.Mechanism != MechanismIdentityAppend {
+		t.Errorf("operating-principles mechanism = %q, want %q", op.Mechanism, MechanismIdentityAppend)
+	}
+	if op.OpenMarker != operatingPrinciplesOpenMarker || op.CloseMarker != operatingPrinciplesCloseMarker {
+		t.Errorf("operating-principles markers = open=%q close=%q, want the operating-principles fence", op.OpenMarker, op.CloseMarker)
+	}
+	if strings.TrimSpace(op.Content) == "" {
+		t.Error("operating-principles content is empty — the embed did not round-trip")
 	}
 
 	rot, ok := byName["rule-of-three"]
@@ -160,6 +175,43 @@ func TestNoSelfMergeContentIsEmbeddedAndMarked(t *testing.T) {
 	}
 	if !strings.Contains(m.Content[open:close], "LOAD-BEARING") {
 		t.Error("load-bearing note is not inside the no-self-merge marker fence")
+	}
+}
+
+// operating-principles content must round-trip from the binary, carry its marker fence
+// and load-bearing note, state the constitution's through-line, and enumerate the eight
+// standing principles — with the markers + note inside the fence so they travel with the
+// appended block.
+func TestOperatingPrinciplesContentIsEmbeddedAndMarked(t *testing.T) {
+	m := memberByName(t, "operating-principles")
+	if strings.TrimSpace(m.Content) == "" {
+		t.Fatal("operating-principles content is empty — the embed did not round-trip")
+	}
+	for _, want := range []string{
+		operatingPrinciplesOpenMarker,
+		operatingPrinciplesCloseMarker,
+		"LOAD-BEARING",                  // the in-fence marker note
+		"Flotilla Operating Principles", // the constitution title
+		"docs/OPERATING-PRINCIPLES.md",  // the full-prose pointer
+	} {
+		if !strings.Contains(m.Content, want) {
+			t.Errorf("operating-principles content missing %q", want)
+		}
+	}
+	// All eight numbered principles must be present.
+	for i := 1; i <= 8; i++ {
+		want := string(rune('0'+i)) + ". **"
+		if !strings.Contains(m.Content, want) {
+			t.Errorf("operating-principles content missing principle %q", want)
+		}
+	}
+	open := strings.Index(m.Content, operatingPrinciplesOpenMarker)
+	close := strings.Index(m.Content, operatingPrinciplesCloseMarker)
+	if open < 0 || close < 0 || open >= close {
+		t.Fatalf("markers out of order: open=%d close=%d", open, close)
+	}
+	if !strings.Contains(m.Content[open:close], "LOAD-BEARING") {
+		t.Error("load-bearing note is not inside the operating-principles marker fence")
 	}
 }
 
