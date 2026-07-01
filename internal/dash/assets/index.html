@@ -19,13 +19,12 @@
       <span class="brand-mark" aria-hidden="true"></span>
       <div class="brand-text">
         <span class="brand-name">flotilla</span>
-        <span class="brand-dash">command</span>
+        <span class="brand-dash">conversations</span>
       </div>
     </div>
     <nav class="tabs" role="tablist" aria-label="Dashboard views">
-      <button id="tab-fleet" class="tab active" data-view="fleet" role="tab" aria-selected="true" aria-controls="view-fleet">Desks</button>
+      <button id="tab-conversations" class="tab active" data-view="conversations" role="tab" aria-selected="true" aria-controls="view-conversations">Conversations</button>
       <button id="tab-issues" class="tab" data-view="issues" role="tab" aria-selected="false" aria-controls="view-issues">Issues</button>
-      <button id="tab-control" class="tab" data-view="control" role="tab" aria-selected="false" aria-controls="view-control">Control</button>
     </nav>
     <div class="bar-meta">
       <span class="meta-label">bound</span>
@@ -39,54 +38,70 @@
 
   <div id="freshness" class="freshness" role="status" aria-live="polite"></div>
 
-  <main id="view-fleet" class="view wrap">
-    <div class="fleet-layout">
-      <section class="panel panel-primary">
+  <main id="view-conversations" class="view conv-wrap">
+    <div class="conv-layout">
+      <aside class="panel conv-rail" aria-label="Desk conversations">
+        <div class="panel-head conv-rail-head">
+          <div>
+            <h2>Fleet map</h2>
+            <p class="panel-desc">channel → desk threads</p>
+          </div>
+          <span id="rail-meta" class="xo-strip muted"></span>
+        </div>
+        <div id="conv-rail" class="conv-rail-list" role="list"></div>
+      </aside>
+
+      <section class="panel conv-main" aria-label="Selected conversation">
         <div class="panel-head">
           <div>
-            <h2>Desk readouts</h2>
-            <p class="panel-desc">Live state from <code>flotilla watch</code> — no pane probing</p>
+            <h2 id="conv-title">Conversation</h2>
+            <p id="conv-sub" class="panel-desc">Coordination history for the selected desk</p>
           </div>
-          <span id="board-meta" class="xo-strip muted"></span>
+          <div id="conv-desk-card" class="conv-desk-card" aria-live="polite"></div>
         </div>
-        <div id="board" class="board" role="list"></div>
-        <div class="state-legend" aria-hidden="true">
-          <span class="legend-item"><span class="legend-swatch state-idle"></span>idle</span>
-          <span class="legend-item"><span class="legend-swatch state-working"></span>working</span>
-          <span class="legend-item"><span class="legend-swatch state-awaiting-input"></span>awaiting</span>
-          <span class="legend-item"><span class="legend-swatch state-errored"></span>fault</span>
-        </div>
+        <div id="conv-map" class="conv-map muted" aria-live="polite"></div>
+        <div id="conv-thread" class="conv-thread" role="log" aria-live="polite"></div>
+        <section class="conv-fleet-strip">
+          <h3 class="sub">Drive queue</h3>
+          <div id="conv-backlog" class="conv-backlog"></div>
+        </section>
       </section>
 
-      <aside class="panel panel-aside">
+      <aside class="panel conv-act" aria-label="Intervene at this locus">
         <div class="panel-head">
           <div>
-            <h2>Relay map</h2>
-            <p class="panel-desc">channel → XO → members</p>
+            <h2>Intervene</h2>
+            <p class="panel-desc">Confirmed delivery at the selected locus</p>
           </div>
         </div>
-        <div id="topology" class="topology"></div>
+        <form id="route-form" class="control-form">
+          <label class="field-label" for="route-target">Target</label>
+          <input type="text" id="route-target" placeholder="Agent or @desk" />
+          <label class="field-label" for="route-body">Instruction</label>
+          <textarea id="route-body" placeholder="Route to the selected desk" rows="4"></textarea>
+          <div class="form-actions">
+            <span id="route-msg" class="form-msg"></span>
+            <button type="submit" class="btn btn-primary">Route</button>
+          </div>
+        </form>
+        <form id="notify-form" class="control-form conv-act-divider">
+          <label class="field-label" for="notify-body">Fleet note</label>
+          <textarea id="notify-body" placeholder="Operator note on Discord" rows="2"></textarea>
+          <div class="form-actions">
+            <span id="notify-msg" class="form-msg"></span>
+            <button type="submit" class="btn">Post note</button>
+          </div>
+        </form>
+        <form id="resume-form" class="control-form conv-act-divider panel-gated">
+          <label class="field-label" for="resume-agent">Resume crashed desk</label>
+          <input type="text" id="resume-agent" placeholder="Agent name" />
+          <div class="form-actions">
+            <span id="resume-msg" class="form-msg"></span>
+            <button type="submit" class="btn btn-danger">Resume</button>
+          </div>
+        </form>
       </aside>
     </div>
-
-    <section class="panel panel-log">
-      <div class="panel-head">
-        <div>
-          <h2>Mission log</h2>
-          <p class="panel-desc">CoS ledger and backlog drive-queue</p>
-        </div>
-      </div>
-      <div class="history-grid">
-        <div class="log-pane">
-          <h3 class="sub">Backlog queue</h3>
-          <div id="backlog" class="backlog"></div>
-        </div>
-        <div class="log-pane">
-          <h3 class="sub">Ledger <span class="muted">newest first</span></h3>
-          <div id="ledger" class="ledger"></div>
-        </div>
-      </div>
-    </section>
   </main>
 
   <main id="view-issues" class="view wrap hidden">
@@ -133,60 +148,8 @@
     </section>
   </main>
 
-  <main id="view-control" class="view wrap hidden">
-    <section class="panel">
-      <div class="panel-head">
-        <div>
-          <h2>Post to fleet channel</h2>
-          <p class="panel-desc">Operator note on Discord</p>
-        </div>
-      </div>
-      <form id="notify-form" class="control-form">
-        <textarea id="notify-body" placeholder="Note for the fleet (posted as operator(dash))" rows="3"></textarea>
-        <div class="form-actions">
-          <span id="notify-msg" class="form-msg"></span>
-          <button type="submit" class="btn btn-primary">Post note</button>
-        </div>
-      </form>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head">
-        <div>
-          <h2>Route instruction</h2>
-          <p class="panel-desc">Confirmed delivery to an XO or @desk</p>
-        </div>
-      </div>
-      <form id="route-form" class="control-form">
-        <input type="text" id="route-target" placeholder="Target (agent name or @desk)" />
-        <textarea id="route-body" placeholder="Instruction" rows="3"></textarea>
-        <div class="form-actions">
-          <span id="route-msg" class="form-msg"></span>
-          <button type="submit" class="btn btn-primary">Route</button>
-        </div>
-      </form>
-    </section>
-
-    <section class="panel panel-gated">
-      <div class="panel-head">
-        <div>
-          <h2>Resume crashed desk</h2>
-          <p class="panel-desc">Relaunch a dead pane</p>
-        </div>
-        <span class="gated-note">coming soon</span>
-      </div>
-      <form id="resume-form" class="control-form">
-        <input type="text" id="resume-agent" placeholder="Agent name" />
-        <div class="form-actions">
-          <span id="resume-msg" class="form-msg"></span>
-          <button type="submit" class="btn btn-danger">Resume</button>
-        </div>
-      </form>
-    </section>
-  </main>
-
   <footer class="foot">
-    <span class="muted">Desks are read-only · Issues write to GitHub · Control uses confirmed delivery</span>
+    <span class="muted">Conversations are read-only · Issues write to GitHub · Control uses confirmed delivery</span>
   </footer>
 
   <script src="/static/dash.js"></script>

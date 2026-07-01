@@ -1,13 +1,8 @@
-/* flotilla dash — read surface (vanilla JS, no build step).
+/* flotilla dash — conversation-centric read surface (#210).
  *
- * All dynamic data arrives via fetch() of the JSON endpoints — NEVER rendered
- * server-side into a <script> literal — so a desk name, ledger gist, or backlog
- * line can never become stored XSS. Everything inserted into the DOM goes
- * through textContent / escapeHtml.
- *
- * Live updates: an EventSource on /events; each "update" event triggers a
- * refetch of all three endpoints. /api/status is the poll fallback + the
- * reconcile-on-(re)connect read, so a dropped SSE link degrades to polling.
+ * IA: sidebar fleet map (channel → desks) → selected desk thread + inline control.
+ * All dynamic data via fetch() — never server-rendered into <script> literals.
+ * Live updates: EventSource on /events; /api/status is the poll fallback.
  */
 (function () {
   "use strict";
@@ -22,7 +17,7 @@
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;"); // defense-in-depth for any single-quoted context
+      .replace(/'/g, "&#39;");
   }
 
   function getJSON(path) {
@@ -32,9 +27,6 @@
     });
   }
 
-  // postJSON issues a state-changing request with the anti-CSRF custom header and
-  // surfaces the server's typed error message (data.error) on failure. Shared by
-  // the tracker + control views so the header + error handling are single-sourced.
   function postJSON(path, body) {
     return fetch(path, {
       method: "POST",
@@ -51,147 +43,307 @@
     });
   }
 
-  // Expose the small, single-sourced helpers so tracker.js + control.js reuse the
-  // SAME escapeHtml/getJSON/postJSON (no duplicated XSS-escaping or fetch logic).
   window.flotillaDash = { el: el, escapeHtml: escapeHtml, getJSON: getJSON, postJSON: postJSON };
 
-  /* ── fleet board + freshness ─────────────────────────────────────────── */
-  function renderBoard(data) {
+  /* ── cached read model (combined on refresh) ───────────────────────────── */
+  var cache = { status: null, topology: null, history: null };
+  var selectedDesk = null;
+
+  function agentMap(status) {
+    var map = {};
+    var agents = (status && Array.isArray(status.agents)) ? status.agents : [];
+    agents.forEach(function (a) { map[String(a.name).toLowerCase()] = a; });
+    return map;
+  }
+
+  function deskStateClass(state) {
+    return "state-" + escapeHtml(String(state || "unknown"));
+  }
+
+  function renderFreshness(data) {
     var fresh = data.freshness || { state: "absent", message: "" };
     var banner = el("freshness");
     banner.className = "freshness show " + escapeHtml(fresh.state);
     banner.textContent = fresh.message || "";
-
-    var agents = Array.isArray(data.agents) ? data.agents : [];
-    var stale = fresh.state === "stale";
-    var board = el("board");
-    if (!agents.length) {
-      board.innerHTML = '<div class="empty">No agents in the roster.</div>';
-    } else {
-      board.innerHTML = agents.map(function (a) {
-        var state = String(a.state || "unknown");
-        var stateClass = escapeHtml(state);
-        var role = a.role ? '<span class="role">' + escapeHtml(a.role) + "</span>" : "";
-        var staleTag = stale ? '<span class="stale-tag">stale</span>' : "";
-        return (
-          '<article class="desk' + (stale ? " desk-stale" : "") + '" role="listitem">' +
-            '<div class="desk-rail state-' + stateClass + '" aria-hidden="true"></div>' +
-            '<div class="desk-body">' +
-              '<header class="desk-head">' +
-                '<span class="desk-name">' + escapeHtml(a.name) + role + staleTag + "</span>" +
-                '<span class="desk-state state-' + stateClass + '">' + stateClass + "</span>" +
-              "</header>" +
-              '<span class="desk-surface">' + escapeHtml(a.surface || "—") + "</span>" +
-            "</div>" +
-          "</article>"
-        );
-      }).join("");
-    }
-
-    var meta = el("board-meta");
-    var xl = data.xo_liveness || {};
-    var bits = [];
-    if (data.xo) {
-      var ack = xl.acked ? ("ack " + escapeHtml(xl.ack_age) + " ago") : "never acked";
-      var settled = xl.settled_known ? (xl.settled ? "settled" : "active") : "settled unknown";
-      bits.push("XO " + escapeHtml(data.xo) + " · " + ack + " · " + settled);
-    }
-    meta.innerHTML = bits.join("");
+    return fresh;
   }
 
-  /* ── federation topology ─────────────────────────────────────────────── */
-  function renderTopology(data) {
-    var topo = el("topology");
-    var channels = Array.isArray(data.channels) ? data.channels : [];
-    if (!channels.length) {
-      topo.innerHTML = '<div class="topo-note">' + escapeHtml(data.note || "no topology") + "</div>";
+  function renderRailMeta(status, fresh) {
+    var meta = el("rail-meta");
+    var xl = status.xo_liveness || {};
+    var bits = [];
+    if (status.xo) {
+      var ack = xl.acked ? ("ack " + escapeHtml(xl.ack_age) + " ago") : "never acked";
+      var settled = xl.settled_known ? (xl.settled ? "settled" : "active") : "settled unknown";
+      bits.push(escapeHtml(status.xo) + " · " + ack + " · " + settled);
+    }
+    if (fresh.state === "stale") bits.push("snapshot stale");
+    meta.innerHTML = bits.join(" · ");
+  }
+
+  function buildRailGroups(topology) {
+    var channels = (topology && Array.isArray(topology.channels)) ? topology.channels : [];
+    if (!channels.length) return [];
+    return channels.map(function (ch) {
+      var desks = [];
+      var seen = {};
+      function add(name, role) {
+        var key = String(name).toLowerCase();
+        if (!name || seen[key]) return;
+        seen[key] = true;
+        desks.push({ name: name, role: role || "" });
+      }
+      add(ch.xo_agent, "xo");
+      (ch.members || []).forEach(function (m) { add(m, "member"); });
+      return {
+        channel_id: ch.channel_id,
+        role: ch.role || "",
+        desks: desks,
+      };
+    });
+  }
+
+  function ensureSelection(status, groups) {
+    if (selectedDesk) return;
+    if (status && status.xo) {
+      selectedDesk = status.xo;
       return;
     }
-    topo.innerHTML = channels.map(function (ch) {
-      var role = ch.role ? '<span class="chan-role">' + escapeHtml(ch.role) + "</span>" : "";
-      var members = (ch.members || []).map(function (m) {
-        return '<span class="member">' + escapeHtml(m) + "</span>";
+    for (var i = 0; i < groups.length; i++) {
+      if (groups[i].desks.length) {
+        selectedDesk = groups[i].desks[0].name;
+        return;
+      }
+    }
+  }
+
+  function renderConversationRail(status, topology, fresh) {
+    var groups = buildRailGroups(topology);
+    ensureSelection(status, groups);
+    var agents = agentMap(status);
+    var stale = fresh.state === "stale";
+    var rail = el("conv-rail");
+
+    if (!groups.length) {
+      rail.innerHTML = '<div class="topo-note">' + escapeHtml(topology.note || "no channel bindings") + "</div>";
+      return;
+    }
+
+    rail.innerHTML = groups.map(function (grp) {
+      var role = grp.role ? '<span class="chan-role">' + escapeHtml(grp.role) + "</span>" : "";
+      var items = grp.desks.map(function (d) {
+        var key = String(d.name).toLowerCase();
+        var a = agents[key] || {};
+        var state = String(a.state || "unknown");
+        var on = selectedDesk && String(selectedDesk).toLowerCase() === key;
+        var roleTag = d.role === "xo"
+          ? '<span class="conv-role xo">xo</span>'
+          : (d.role ? '<span class="conv-role">' + escapeHtml(d.role) + "</span>" : "");
+        return (
+          '<button type="button" class="conv-item' + (on ? " selected" : "") + (stale ? " desk-stale" : "") + '" ' +
+            'data-desk="' + escapeHtml(d.name) + '" role="listitem" aria-pressed="' + String(on) + '">' +
+            '<span class="conv-rail ' + deskStateClass(state) + '" aria-hidden="true"></span>' +
+            '<span class="conv-item-body">' +
+              '<span class="conv-item-name">' + escapeHtml(d.name) + roleTag + "</span>" +
+              '<span class="conv-item-state ' + deskStateClass(state) + '">' + escapeHtml(state) + "</span>" +
+            "</span>" +
+          "</button>"
+        );
       }).join("");
       return (
-        '<div class="chan">' +
-          '<div class="chan-head">' +
-            '<span class="chan-xo">' + escapeHtml(ch.xo_agent) + "</span>" +
-            '<span class="chan-id">#' + escapeHtml(ch.channel_id) + "</span>" +
-            role +
+        '<div class="conv-group">' +
+          '<div class="conv-group-head">' +
+            '<span class="chan-id">#' + escapeHtml(grp.channel_id) + "</span>" + role +
           "</div>" +
-          '<div class="members">' + (members || '<span class="muted">no members</span>') + "</div>" +
+          '<div class="conv-group-items" role="list">' + items + "</div>" +
+        "</div>"
+      );
+    }).join("");
+
+    var buttons = rail.querySelectorAll(".conv-item");
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].addEventListener("click", function () {
+        selectedDesk = this.getAttribute("data-desk");
+        renderConversations();
+        syncControlTargets();
+      });
+    }
+  }
+
+  function ledgerMatchesDesk(entry, desk) {
+    if (!desk) return false;
+    var d = String(desk).toLowerCase();
+    if (entry.parsed) {
+      var from = String(entry.from || "").toLowerCase();
+      var to = String(entry.to || "").toLowerCase();
+      if (from === d || to === d) return true;
+      if (to === "@" + d) return true;
+      return false;
+    }
+    var raw = String(entry.raw || "").toLowerCase();
+    return raw.indexOf(d) !== -1;
+  }
+
+  function renderDeskCard(status, fresh) {
+    var card = el("conv-desk-card");
+    if (!selectedDesk) {
+      card.innerHTML = "";
+      return;
+    }
+    var agents = agentMap(status);
+    var a = agents[String(selectedDesk).toLowerCase()] || {};
+    var state = String(a.state || "unknown");
+    var stale = fresh.state === "stale";
+    card.innerHTML =
+      '<article class="desk conv-desk-mini' + (stale ? " desk-stale" : "") + '">' +
+        '<div class="desk-rail ' + deskStateClass(state) + '" aria-hidden="true"></div>' +
+        '<div class="desk-body">' +
+          '<header class="desk-head">' +
+            '<span class="desk-name">' + escapeHtml(selectedDesk) + "</span>" +
+            '<span class="desk-state ' + deskStateClass(state) + '">' + escapeHtml(state) + "</span>" +
+          "</header>" +
+          '<span class="desk-surface">' + escapeHtml(a.surface || "—") + "</span>" +
+        "</div>" +
+      "</article>";
+  }
+
+  function renderConversationHeader(topology) {
+    el("conv-title").textContent = selectedDesk ? selectedDesk : "Conversation";
+    var channel = "—";
+    var groups = buildRailGroups(topology);
+    for (var i = 0; i < groups.length; i++) {
+      for (var j = 0; j < groups[i].desks.length; j++) {
+        if (String(groups[i].desks[j].name).toLowerCase() === String(selectedDesk || "").toLowerCase()) {
+          channel = "#" + groups[i].channel_id;
+          break;
+        }
+      }
+    }
+    el("conv-sub").textContent = selectedDesk
+      ? ("Coordination on " + channel + " — ledger filtered to this desk")
+      : "Select a desk from the fleet map";
+  }
+
+  function renderReaderMapPlaceholder() {
+    var map = el("conv-map");
+    map.innerHTML =
+      '<span class="conv-map-label">reader map</span>' +
+      '<span class="conv-map-empty">Envelope deltas land here when Pillar E ships (<code>latest-delta.json</code>).</span>';
+  }
+
+  function renderThread(history) {
+    var thread = el("conv-thread");
+    var entries = (history && Array.isArray(history.ledger)) ? history.ledger : [];
+    var filtered = selectedDesk
+      ? entries.filter(function (e) { return ledgerMatchesDesk(e, selectedDesk); })
+      : [];
+    if (!selectedDesk) {
+      thread.innerHTML = '<div class="empty">Pick a desk to read its coordination thread.</div>';
+      return;
+    }
+    if (!filtered.length) {
+      thread.innerHTML = '<div class="empty">No ledger entries for this desk yet.</div>';
+      return;
+    }
+    thread.innerHTML = filtered.map(function (e) {
+      if (!e.parsed) {
+        return '<div class="thread-msg thread-raw">' + escapeHtml(e.raw) + "</div>";
+      }
+      var deskKey = String(selectedDesk).toLowerCase();
+      var outbound = String(e.from || "").toLowerCase() === deskKey;
+      var cls = outbound ? "thread-out" : "thread-in";
+      return (
+        '<div class="thread-msg ' + cls + '">' +
+          '<header class="thread-head">' +
+            '<span class="thread-route">' + escapeHtml(e.from) + " → " + escapeHtml(e.to) + "</span>" +
+            '<time class="thread-time">' + escapeHtml(e.time) + "</time>" +
+          "</header>" +
+          (e.channel && e.channel !== "-"
+            ? '<span class="thread-chan muted">#' + escapeHtml(e.channel) + "</span>"
+            : "") +
+          '<p class="thread-gist">' + escapeHtml(e.gist) + "</p>" +
         "</div>"
       );
     }).join("");
   }
 
-  /* ── coordination history ────────────────────────────────────────────── */
-  function renderHistory(data) {
-    var bl = data.backlog || {};
-    var backlog = el("backlog");
+  function renderBacklogStrip(history) {
+    var bl = (history && history.backlog) ? history.backlog : {};
+    var box = el("conv-backlog");
     var counts =
       '<div class="backlog-counts">' +
         '<span>' + (bl.items || 0) + " items</span>" +
         '<span class="count-blocked">' + (bl.blocked || 0) + " blocked</span>" +
         (bl.awaiting_auth ? '<span class="count-awaiting-auth">' + bl.awaiting_auth + " awaiting-auth</span>" : "") +
         '<span class="count-done">' + (bl.done || 0) + " done</span>" +
-        (bl.malformed ? '<span class="count-malformed">' + bl.malformed + " malformed</span>" : "") +
       "</div>";
     var unblocked = Array.isArray(bl.unblocked) ? bl.unblocked : [];
     var items = unblocked.length
-      ? unblocked.map(function (line) { return '<div class="backlog-item">' + escapeHtml(line) + "</div>"; }).join("")
+      ? unblocked.map(function (line) {
+          return '<div class="backlog-item">' + escapeHtml(line) + "</div>";
+        }).join("")
       : (bl.found ? '<div class="empty">No unblocked items.</div>' : '<div class="empty">No backlog section found.</div>');
-    backlog.innerHTML = counts + items;
+    box.innerHTML = counts + items;
+  }
 
-    var ledger = el("ledger");
-    var entries = Array.isArray(data.ledger) ? data.ledger : [];
-    if (!entries.length) {
-      ledger.innerHTML = '<div class="empty">No coordination entries yet.</div>';
-      return;
+  function renderConversations() {
+    var status = cache.status || {};
+    var topology = cache.topology || {};
+    var history = cache.history || {};
+    var fresh = renderFreshness(status);
+    renderRailMeta(status, fresh);
+    renderConversationRail(status, topology, fresh);
+    renderConversationHeader(topology);
+    renderDeskCard(status, fresh);
+    renderReaderMapPlaceholder();
+    renderThread(history);
+    renderBacklogStrip(history);
+  }
+
+  function syncControlTargets() {
+    var routeTarget = el("route-target");
+    var resumeAgent = el("resume-agent");
+    if (selectedDesk) {
+      routeTarget.value = selectedDesk;
+      resumeAgent.value = selectedDesk;
     }
-    ledger.innerHTML = entries.map(function (e) {
-      if (e.parsed) {
-        return (
-          '<div class="ledger-entry">' +
-            '<span class="ledger-time">' + escapeHtml(e.time) + "</span> " +
-            '<span class="ledger-route">' + escapeHtml(e.from) + " → " + escapeHtml(e.to) + "</span>" +
-            (e.channel && e.channel !== "-" ? ' <span class="muted">#' + escapeHtml(e.channel) + "</span>" : "") +
-            '<span class="ledger-gist">' + escapeHtml(e.gist) + "</span>" +
-          "</div>"
-        );
-      }
-      return '<div class="ledger-entry ledger-raw">' + escapeHtml(e.raw) + "</div>";
-    }).join("");
   }
 
   /* ── refresh orchestration ───────────────────────────────────────────── */
-  // A monotonic epoch guards against out-of-order renders: SSE bursts + the poll
-  // fallback can launch overlapping refreshes, and an older response could land
-  // after a newer one. Each refresh stamps an epoch; a response only renders if
-  // it is still the latest, so a slow earlier fetch can never clobber the board
-  // with a stale snapshot.
   var refreshEpoch = 0;
   function refresh() {
     var epoch = ++refreshEpoch;
     function current() { return epoch === refreshEpoch; }
-    function errorIn(id, err) { if (current()) el(id).innerHTML = '<div class="error">' + escapeHtml(err.message) + "</div>"; }
 
-    getJSON("/api/status").then(function (d) { if (current()) renderBoard(d); }).catch(function (err) {
-      if (current()) el("board").innerHTML = '<div class="error">Could not load fleet status (' + escapeHtml(err.message) + ").</div>";
+    var pStatus = getJSON("/api/status").then(function (d) {
+      if (current()) cache.status = d;
+    }).catch(function (err) {
+      if (current()) {
+        cache.status = { freshness: { state: "absent", message: "Could not load fleet status (" + err.message + ")" } };
+      }
     });
-    getJSON("/api/topology").then(function (d) { if (current()) renderTopology(d); }).catch(function (err) {
-      errorIn("topology", err);
+
+    var pTopo = getJSON("/api/topology").then(function (d) {
+      if (current()) cache.topology = d;
+    }).catch(function (err) {
+      if (current()) cache.topology = { channels: [], note: err.message };
     });
-    getJSON("/api/history").then(function (d) { if (current()) renderHistory(d); }).catch(function (err) {
-      // A history failure must mark BOTH panes — leaving the backlog showing its
-      // previous (now-stale) content while the ledger shows an error would be
-      // inconsistent and misleading.
-      errorIn("ledger", err);
-      errorIn("backlog", err);
+
+    var pHist = getJSON("/api/history").then(function (d) {
+      if (current()) cache.history = d;
+    }).catch(function (err) {
+      if (current()) cache.history = { ledger: [], backlog: { found: false, unblocked: [] } };
+    });
+
+    return Promise.all([pStatus, pTopo, pHist]).then(function () {
+      if (current()) {
+        renderConversations();
+        syncControlTargets();
+      }
     });
   }
 
-  /* ── live link: SSE with a polling fallback ──────────────────────────── */
+  /* ── live link: SSE with polling fallback ────────────────────────────── */
   function setConn(state) {
     var c = el("conn");
     c.className = "conn " + state;
@@ -215,13 +367,8 @@
       stopPolling();
       refresh();
     });
-    // Stop the fallback poller as soon as the live link is (re)established — not
-    // only when an `update` event arrives — so a reconnect doesn't keep the
-    // redundant 5s refetch running.
     es.onopen = function () { setConn("live"); stopPolling(); };
     es.onerror = function () {
-      // EventSource auto-reconnects; meanwhile fall back to polling so the board
-      // never goes silently stale.
       setConn("down");
       if (!pollTimer) pollTimer = setInterval(refresh, POLL_FALLBACK_MS);
     };
@@ -229,12 +376,8 @@
 
   connect();
 
-  /* ── tab nav: Fleet ⇄ Issues ─────────────────────────────────────────── */
-  // The fleet view is the live, SSE-driven board; the issues view is the
-  // gh-backed tracker (tracker.js), which fetches on demand. Switching only
-  // toggles visibility — the fleet's live link keeps running underneath so the
-  // board is current the instant the operator switches back.
-  var VIEWS = ["fleet", "issues", "control"];
+  /* ── tab nav: Conversations ⇄ Issues ───────────────────────────────── */
+  var VIEWS = ["conversations", "issues"];
   function showView(view) {
     VIEWS.forEach(function (v) {
       var on = v === view;
@@ -242,8 +385,7 @@
       el("tab-" + v).classList.toggle("active", on);
       el("tab-" + v).setAttribute("aria-selected", String(on));
     });
-    // The freshness banner belongs to the live fleet board only.
-    el("freshness").classList.toggle("hidden", view !== "fleet");
+    el("freshness").classList.toggle("hidden", view !== "conversations");
     if (view === "issues" && window.flotillaTracker) window.flotillaTracker.show();
   }
   var tabs = document.querySelectorAll(".tab");
