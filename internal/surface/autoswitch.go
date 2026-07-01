@@ -1,14 +1,20 @@
 package surface
 
-import "os"
+import (
+	"os"
+	"strings"
+)
 
-// AutoSwitchEnabled is the #205 kill-switch: detector-enqueued harness auto-switch is
-// DEFAULT-OFF and enabled only by FLOTILLA_AUTOSWITCH=1/true/yes. Autonomous desk-flipping
-// is an operator veto-window deploy, not merge-time — ONE definition shared by watch + CLI.
+// AutoSwitchEnabled reports whether detector-enqueued harness auto-switch is on.
+// It DEFAULTS ON: the preferred posture is autonomy bounded by safety guardrails, not
+// autonomy gated on an operator's permission. The guardrails bound it — approval-sensitive
+// desks never auto-switch, the coordinator tier never auto-switches, only desks on the
+// primary surface are candidates, plus a storm-cooldown and per-desk switch caps. Disable
+// explicitly with FLOTILLA_AUTOSWITCH=0/false/no/off. ONE definition shared by watch + CLI.
 func AutoSwitchEnabled() bool {
-	switch os.Getenv("FLOTILLA_AUTOSWITCH") {
-	case "1", "true", "TRUE", "yes":
-		return true
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FLOTILLA_AUTOSWITCH"))) {
+	case "0", "false", "no", "off":
+		return false
 	}
-	return false
+	return true
 }
