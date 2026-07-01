@@ -5,7 +5,11 @@
 // default seed from `workspace init`, so a freshly scaffolded agent is born with
 // the doctrine in place.
 //
-// The set ships four members:
+// The set ships five members:
+//   - operating-principles — an IDENTITY-APPEND constitution: the eight standing
+//     Flotilla Operating Principles, distilled to one sentence each and appended into
+//     the agent's identity file so the constitution loads once at launch. The full
+//     prose lives in the repository's docs/OPERATING-PRINCIPLES.md.
 //   - the Rule of Three (span of control) — an IDENTITY-APPEND guideline: its distilled
 //     text is appended into the agent's standing identity file so it loads once at launch
 //     via --append-system-prompt-file.
@@ -77,6 +81,14 @@ type Member struct {
 	TargetFile string
 }
 
+// The operating-principles sentinel fence (same load-bearing role as the pairs below —
+// these exact strings appear in assets/skills/operating-principles.md and the install
+// keys idempotency on the opening marker's presence).
+const (
+	operatingPrinciplesOpenMarker  = "<!-- flotilla:operating-principles -->"
+	operatingPrinciplesCloseMarker = "<!-- /flotilla:operating-principles -->"
+)
+
 // The Rule-of-Three sentinel fence. These exact strings appear in the embedded
 // asset (assets/skills/rule-of-three.md) and are what the install's idempotency
 // guard detects — they are load-bearing, mirrored in the asset's in-fence note.
@@ -104,6 +116,18 @@ const (
 // never needs to change as the set grows (a NEW mechanism additionally needs its
 // dispatch arm in install.go — the mechanism-coupling contract).
 var members = []Member{
+	{
+		// operating-principles: the eight standing Flotilla Operating Principles — the
+		// constitution every agent runs on — distilled to one sentence each. An
+		// identity-append like the other structural rules, because it defines the agent's
+		// standing posture ("how the agent operates"), loaded once into its identity at
+		// launch. The full prose lives in the repository's docs/OPERATING-PRINCIPLES.md.
+		Name:        "operating-principles",
+		Mechanism:   MechanismIdentityAppend,
+		Content:     mustRead("assets/skills/operating-principles.md"),
+		OpenMarker:  operatingPrinciplesOpenMarker,
+		CloseMarker: operatingPrinciplesCloseMarker,
+	},
 	{
 		Name:        "rule-of-three",
 		Mechanism:   MechanismIdentityAppend,
