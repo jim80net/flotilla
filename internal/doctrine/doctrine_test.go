@@ -279,6 +279,9 @@ func TestExecutiveMiniBriefContent(t *testing.T) {
 	if open < 0 || close < 0 || open >= close {
 		t.Fatalf("markers out of order: open=%d close=%d", open, close)
 	}
+	if !strings.Contains(m.Content[open:close], "LOAD-BEARING") {
+		t.Error("load-bearing note is not inside the executive-mini-brief marker fence")
+	}
 }
 
 // Every identity-append member must declare a marker pair so the install can guard

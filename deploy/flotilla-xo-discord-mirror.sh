@@ -165,8 +165,12 @@ while True:
 if not resp or not resp.strip(): skip("no-assistant-text")
 
 def has_needs_you_line(text):
-    low = (text or "").lower()
-    return "waiting on you" in low or "nothing needs you" in low
+    """Doctrine mandates the needs-you line as the LAST line — not mid-body mention."""
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    if not lines:
+        return False
+    last = lines[-1].lower()
+    return last.startswith("waiting on you") or last.startswith("nothing needs you")
 
 if not has_needs_you_line(resp):
     lg("MINI-BRIEF-AUDIT", "missing explicit Waiting-on-you / Nothing-needs-you line")
