@@ -11,20 +11,28 @@ grep -q 'lines\[-1\]' "$SCRIPT"
 
 # Behavioral regression: last-line-only check (mid-body mention must not pass).
 python3 <<'PY'
+import re
+
 def has_action_status_close(text):
     lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
     if not lines:
         return False
     last = lines[-1].lower()
-    if last.startswith("waiting on you"):
-        return True
-    all_clear = (
-        "nothing needs you", "no action on your side", "no action needed",
-        "you're clear", "you are clear", "all handled", "all set",
-        "you're good", "you are good", "nothing further needed",
-        "nothing needed from you",
+    patterns = (
+        r"^waiting on you\b",
+        r"^nothing needs you\b",
+        r"^no action on your side\b",
+        r"^no action needed\b",
+        r"^you're clear\b",
+        r"^you are clear\b",
+        r"^all handled\b",
+        r"^all set\b",
+        r"^you're good\b",
+        r"^you are good\b",
+        r"^nothing further needed\b",
+        r"^nothing needed from you\b",
     )
-    return any(last.startswith(p) for p in all_clear)
+    return any(re.match(p, last) for p in patterns)
 
 ok = [
     ("closing waiting", "Bottom line.\n\nWaiting on you: merge when ready."),
@@ -40,6 +48,8 @@ fail = [
     ("mid-body only", "I was waiting on you to approve X.\n\nDetail footer here."),
     ("missing close", "Bottom line only.\nNo explicit close."),
     ("mention not last", "No action on your side mentioned mid-body.\nStill working."),
+    ("false positive youre clearly", "Summary.\nYou're clearly still needed on the fork."),
+    ("false positive all settings", "Done.\nAll settings saved for next deploy."),
 ]
 for name, text in fail:
     assert not has_action_status_close(text), f"expected fail: {name}"

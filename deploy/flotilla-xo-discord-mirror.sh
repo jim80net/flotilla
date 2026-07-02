@@ -171,15 +171,22 @@ def has_action_status_close(text):
     if not lines:
         return False
     last = lines[-1].lower()
-    if last.startswith("waiting on you"):
-        return True
-    all_clear = (
-        "nothing needs you", "no action on your side", "no action needed",
-        "you're clear", "you are clear", "all handled", "all set",
-        "you're good", "you are good", "nothing further needed",
-        "nothing needed from you",
+    # Word-boundary match — avoids false positives ("you're clearly", "all settings").
+    patterns = (
+        r"^waiting on you\b",
+        r"^nothing needs you\b",
+        r"^no action on your side\b",
+        r"^no action needed\b",
+        r"^you're clear\b",
+        r"^you are clear\b",
+        r"^all handled\b",
+        r"^all set\b",
+        r"^you're good\b",
+        r"^you are good\b",
+        r"^nothing further needed\b",
+        r"^nothing needed from you\b",
     )
-    return any(last.startswith(p) for p in all_clear)
+    return any(re.match(p, last) for p in patterns)
 
 if not has_action_status_close(resp):
     lg("MINI-BRIEF-AUDIT", "missing explicit action-status close on last line")
