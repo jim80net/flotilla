@@ -44,15 +44,24 @@ func TestSynthesisReadFailureIsCleanSkip(t *testing.T) {
 // post target (owned channel), the per-tier output contract, the narrow-answer discipline, and
 // references the embedded skill.
 func TestSynthesisWakeBodyContents(t *testing.T) {
-	body := synthesisWakeBody("xo", "/home/operator/go/bin/flotilla", "/r/flotilla.json", []string{"backend", "data"}, []string{"xo-2"}, "\n(ack: touch /tmp/ack)")
+	body := synthesisWakeBody("xo", "/home/operator/go/bin/flotilla", "/r/flotilla.json", []string{"backend", "data"}, []string{"xo-2"})
 
 	for _, want := range []string{"backend", "data", "xo-2", "visibility-synthesis", "idle", "result --roster", "SKIP an unreadable"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("synthesis wake body missing %q:\n%s", want, body)
 		}
 	}
-	if !strings.Contains(body, "/tmp/ack") {
-		t.Errorf("synthesis wake body must carry the ack instruction:\n%s", body)
+}
+
+// REGRESSION (#190): a synthesis wake targets a sub-coordinator rollup agent, NOT the daemon's
+// liveness-tracked clock XO — it must carry NO liveness-ack instruction (an idle sub-XO touching
+// the clock XO's ack file would mask a genuinely-dead coordinator).
+func TestSynthesisWakeBodyNoLivenessAck(t *testing.T) {
+	body := synthesisWakeBody("alpha-xo", "/home/operator/go/bin/flotilla", "/r/flotilla.json", []string{"backend"}, []string{"alpha-ch"})
+	for _, banned := range []string{"ack you are alive", "flotilla-xo-alive", "-alive", "To ack you are alive"} {
+		if strings.Contains(body, banned) {
+			t.Errorf("synthesis wake must NOT carry liveness-ack instruction (%q in body)\n%s", banned, body)
+		}
 	}
 }
 
@@ -62,7 +71,7 @@ func TestSynthesisWakeBodyContents(t *testing.T) {
 func TestSynthesisWakeBodyInjectsDaemonRosterPath(t *testing.T) {
 	const rosterPath = "/home/operator/workspace/the-fleet/state/flotilla.json"
 	const binPath = "/home/operator/go/bin/flotilla"
-	body := synthesisWakeBody("xo", binPath, rosterPath, []string{"backend"}, []string{"xo-2"}, "")
+	body := synthesisWakeBody("xo", binPath, rosterPath, []string{"backend"}, []string{"xo-2"})
 	want := binPath + " result --roster " + rosterPath + " <name>"
 	if !strings.Contains(body, want) {
 		t.Errorf("wake body must inject the daemon's roster path in the read command\nwant substring: %q\ngot:\n%s", want, body)
@@ -74,12 +83,12 @@ func TestSynthesisWakeBodyInjectsDaemonRosterPath(t *testing.T) {
 // ~/go/bin/flotilla by absolute path). The bare-`flotilla` fallback (when os.Executable errors) is
 // honored: synthesisWakeBody uses whatever binPath the caller passes.
 func TestSynthesisWakeBodyUsesAbsoluteBinaryPath(t *testing.T) {
-	abs := synthesisWakeBody("xo", "/home/operator/go/bin/flotilla", "/r.json", []string{"sub"}, []string{"c"}, "")
+	abs := synthesisWakeBody("xo", "/home/operator/go/bin/flotilla", "/r.json", []string{"sub"}, []string{"c"})
 	if !strings.Contains(abs, "`/home/operator/go/bin/flotilla result --roster /r.json <name>`") {
 		t.Errorf("read command must use the absolute binary path:\n%s", abs)
 	}
 	// The fallback path (bare "flotilla") is composed verbatim when the caller passes it.
-	fb := synthesisWakeBody("xo", "flotilla", "/r.json", []string{"sub"}, []string{"c"}, "")
+	fb := synthesisWakeBody("xo", "flotilla", "/r.json", []string{"sub"}, []string{"c"})
 	if !strings.Contains(fb, "`flotilla result --roster /r.json <name>`") {
 		t.Errorf("bare-flotilla fallback must compose verbatim:\n%s", fb)
 	}
@@ -89,7 +98,7 @@ func TestSynthesisWakeBodyUsesAbsoluteBinaryPath(t *testing.T) {
 // composes (it names the read set + discipline) so a misprovisioned post target never crashes the
 // wake; the empty post-target case degrades to a clear "no post target" note rather than a panic.
 func TestSynthesisWakeBodyNoPostTarget(t *testing.T) {
-	body := synthesisWakeBody("orphan", "/home/operator/go/bin/flotilla", "/r/flotilla.json", []string{"sub"}, nil, "")
+	body := synthesisWakeBody("orphan", "/home/operator/go/bin/flotilla", "/r/flotilla.json", []string{"sub"}, nil)
 	if !strings.Contains(body, "sub") {
 		t.Errorf("body must still name the read set even with no post target:\n%s", body)
 	}
@@ -120,7 +129,7 @@ func TestSynthesisWakeBodyPerTierReadSet(t *testing.T) {
 	const binPath = "/home/operator/go/bin/flotilla"
 	// Tier 2: alpha-xo reads its boats (alpha-be, alpha-data) — NOT meta-xo, NOT itself.
 	t2Read := synthesisReadSet(cfg, "alpha-xo")
-	t2Body := synthesisWakeBody("alpha-xo", binPath, rosterPath, t2Read, cfg.OwnedChannels("alpha-xo"), "")
+	t2Body := synthesisWakeBody("alpha-xo", binPath, rosterPath, t2Read, cfg.OwnedChannels("alpha-xo"))
 	for _, boat := range []string{"alpha-be", "alpha-data"} {
 		if !strings.Contains(t2Body, boat) {
 			t.Errorf("Tier-2 alpha-xo read set must name boat %q; read set=%v body=\n%s", boat, t2Read, t2Body)
@@ -133,7 +142,7 @@ func TestSynthesisWakeBodyPerTierReadSet(t *testing.T) {
 	// Tier 3: meta-xo reads the project-XOs (alpha-xo, beta-xo) — subordinates that are themselves
 	// synthesizers — via the SAME `flotilla result` command.
 	t3Read := synthesisReadSet(cfg, "meta-xo")
-	t3Body := synthesisWakeBody("meta-xo", binPath, rosterPath, t3Read, cfg.OwnedChannels("meta-xo"), "")
+	t3Body := synthesisWakeBody("meta-xo", binPath, rosterPath, t3Read, cfg.OwnedChannels("meta-xo"))
 	for _, xo := range []string{"alpha-xo", "beta-xo"} {
 		if !strings.Contains(t3Body, xo) {
 			t.Errorf("Tier-3 meta-xo read set must name project-XO %q; read set=%v body=\n%s", xo, t3Read, t3Body)
