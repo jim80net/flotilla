@@ -168,6 +168,38 @@ func TestCmdWorkspaceInitUnknownAgentErrors(t *testing.T) {
 	}
 }
 
+func TestCmdWorkspaceInitCodexScaffoldsAgentsAndRules(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)
+	repo := initTestGitRepo(t)
+	rosterPath := writeRosterFile(t, `{"agents":[{"name":"c","surface":"codex"}]}`)
+	if err := cmdWorkspaceInit(workspaceInitArgs("c", rosterPath, repo)); err != nil {
+		t.Fatal(err)
+	}
+	worktree := filepath.Join(filepath.Dir(repo), "c")
+	if _, err := os.Stat(filepath.Join(worktree, "AGENTS.md")); err != nil {
+		t.Errorf("codex surface should scaffold AGENTS.md in worktree: %v", err)
+	}
+	rules := filepath.Join(worktree, ".codex", "rules", "flotilla-desk.rules")
+	body, err := os.ReadFile(rules)
+	if err != nil {
+		t.Fatalf("codex desk rules not scaffolded: %v", err)
+	}
+	if !strings.Contains(string(body), `decision = "forbidden"`) || !strings.Contains(string(body), `"git", "merge"`) {
+		t.Errorf("codex rules missing merge forbid: %q", body)
+	}
+	launch, err := os.ReadFile(filepath.Join(root, "c", "launch.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(launch), "codex -m gpt-5.5-codex") {
+		t.Errorf("codex launch = %q, want gpt-5.5-codex recipe", launch)
+	}
+	if !strings.Contains(string(launch), "--ask-for-approval on-request") {
+		t.Errorf("codex launch missing on-request approval: %q", launch)
+	}
+}
+
 func TestCmdWorkspaceInitGrokScaffoldsAgentsMdInWorktree(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)

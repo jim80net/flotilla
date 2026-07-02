@@ -202,6 +202,12 @@ func cmdWorkspaceInit(args []string) error {
 	reportDoctrineResults(results, identityPath)
 	noteNonClaudeLoadFastFollow(harnessSurface, identityPath)
 
+	if harnessSurface == "codex" {
+		if err := scaffoldCodexDeskRules(worktreeAbs); err != nil {
+			return err
+		}
+	}
+
 	fmt.Printf("workspace ready: %s\n", hostDir)
 	fmt.Printf("  worktree: %s (branch %q)\n", worktreeAbs, opts.branch)
 	fmt.Printf("  identity: %s\n", identityPath)
@@ -244,8 +250,48 @@ func shellQuote(s string) string {
 }
 
 // workspaceLaunchCommand returns the shell launch command for a harness surface.
-// Identity files live in the worktree (worktreeAbs); grok loads AGENTS.md from cwd.
+// Identity files live in the worktree (worktreeAbs); grok and codex load AGENTS.md from cwd.
 // Paths and agent names are POSIX single-quoted — Recipe.Launch is sh -c interpreted.
+// codexDeskRules forbids execution desks from self-merging or pushing — the mechanical
+// complement to flotilla's no-self-merge doctrine. Codex loads project .codex/rules/
+// when the project is trusted ([rules docs](https://developers.openai.com/codex/rules)).
+const codexDeskRules = `# flotilla execution-desk rules — forbid merge/push (no-self-merge)
+prefix_rule(
+    pattern = ["git", "merge"],
+    decision = "forbidden",
+    justification = "Execution desks must not self-merge; surface the PR to the reviewer.",
+)
+prefix_rule(
+    pattern = ["git", "push"],
+    decision = "forbidden",
+    justification = "Execution desks must not push; the reviewer merges.",
+)
+prefix_rule(
+    pattern = ["gh", "pr", "merge"],
+    decision = "forbidden",
+    justification = "Execution desks must not merge via gh; surface to the XO.",
+)
+`
+
+func scaffoldCodexDeskRules(worktreeAbs string) error {
+	rulesDir := filepath.Join(worktreeAbs, ".codex", "rules")
+	if err := os.MkdirAll(rulesDir, 0o755); err != nil {
+		return fmt.Errorf("create codex rules dir: %w", err)
+	}
+	path := filepath.Join(rulesDir, "flotilla-desk.rules")
+	if _, statErr := os.Stat(path); statErr == nil {
+		fmt.Printf("  kept    %s\n", path)
+		return nil
+	} else if !os.IsNotExist(statErr) {
+		return fmt.Errorf("stat codex rules %q: %w", path, statErr)
+	}
+	if err := os.WriteFile(path, []byte(codexDeskRules), 0o644); err != nil {
+		return fmt.Errorf("write codex rules %q: %w", path, err)
+	}
+	fmt.Printf("  created %s\n", path)
+	return nil
+}
+
 func workspaceLaunchCommand(worktreeAbs, agent, identity, surface string) (string, error) {
 	switch surface {
 	case "", "claude-code":
@@ -253,6 +299,8 @@ func workspaceLaunchCommand(worktreeAbs, agent, identity, surface string) (strin
 			shellQuote(filepath.Join(worktreeAbs, identity)), shellQuote(agent)), nil
 	case "grok":
 		return "grok --model composer-2.5-fast", nil
+	case "codex":
+		return "codex -m gpt-5.5-codex --sandbox workspace-write --ask-for-approval on-request", nil
 	default:
 		id, err := workspace.IdentityFileName(surface)
 		if err != nil {
