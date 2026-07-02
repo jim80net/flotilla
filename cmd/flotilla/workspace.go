@@ -234,7 +234,7 @@ func harnessAllocationSurface(cfg *roster.Config, agent, rosterSurface string) s
 }
 
 // shellQuote wraps s in POSIX single quotes for sh -c launch recipes. Embedded
-// single quotes are escaped as '\'' (end quote, escaped quote, resume quote) so
+// single quotes are escaped as 0x27 0x5c 0x27 0x27 (quote, backslash, quote, quote) so
 // $, backticks, and $(...) inside the path are not expanded by the shell.
 func shellQuote(s string) string {
 	if s == "" {
