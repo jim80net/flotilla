@@ -134,7 +134,7 @@ by the gate stack (review, CI, independent merge authority) — not by which har
 authored the diff. A coordinator grinding implementation on a Claude seat burns
 bandwidth and violates both Principle 9 and this allocation.
 
-**Defaults:** `flotilla workspace init --repo <abs-path>` provisions a **git worktree**
+**Defaults:** `flotilla workspace init <agent> --repo <abs-path>` provisions a **git worktree**
 desk home, scaffolds **grok** launch recipes for execution desks and **Claude** for
 coordinators, and writes identity into the worktree. Override only deliberately.
 

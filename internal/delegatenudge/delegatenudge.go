@@ -123,12 +123,14 @@ func NewTracker() *Tracker {
 	return &Tracker{strikes: make(map[string]int)}
 }
 
-// Record applies one Check result. Non-matches leave strikes unchanged. When the
-// threshold is met, strikes reset after reporting thresholdMet=true.
+// Record applies one Check result. A non-IC turn resets the consecutive counter so
+// IC→delegate→IC requires two back-to-back IC turns to fire. When the threshold is
+// met, strikes reset after reporting thresholdMet=true.
 func (t *Tracker) Record(agent string, r Result) (thresholdMet bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if !r.InlineBuild {
+		delete(t.strikes, agent)
 		return false
 	}
 	t.strikes[agent]++
@@ -161,7 +163,7 @@ func NudgePrompt(agent string) string {
 	b.WriteString("Harness allocation: coordinator seats (Claude) are for judgment — ")
 	b.WriteString("dispatch, gate bars, review/verify, merge authority, operator comms. ")
 	b.WriteString("Execution (code, builds, migrations, sweeps) belongs on grok workhorse desks.\n\n")
-	b.WriteString("Preserve your bandwidth: route implementation via `flotilla send @<desk> \"…\"` ")
+	b.WriteString("Preserve your bandwidth: route implementation via `flotilla send <desk> \"…\"` ")
 	b.WriteString("(prefer a grok execution desk). Stay on synthesis, routing, and gate decisions.\n\n")
 	b.WriteString("On this turn: stop the inline build-loop — dispatch to a grok desk, then ")
 	b.WriteString("report what you routed and what you are holding for the operator.")

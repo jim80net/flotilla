@@ -106,6 +106,8 @@ func TestCmdWorkspaceInitScaffoldsWorktreeAndIsIdempotent(t *testing.T) {
 	}
 }
 
+// Seeds identity-append members into the worktree AGENTS.md (execution desks) and
+// the visibility-synthesis heartbeat skill into ~/.flotilla/<agent>/skills/.
 func TestCmdWorkspaceInitSeedsBothConstitutionalMembers(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)

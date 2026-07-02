@@ -238,8 +238,8 @@ func harnessAllocationSurface(cfg *roster.Config, agent, rosterSurface string) s
 func workspaceLaunchCommand(worktreeAbs, agent, identity, surface string) (string, error) {
 	switch surface {
 	case "", "claude-code":
-		return fmt.Sprintf("claude --append-system-prompt-file %s/%s -w %s",
-			worktreeAbs, identity, agent), nil
+		return fmt.Sprintf("claude --append-system-prompt-file %q -w %q",
+			filepath.Join(worktreeAbs, identity), agent), nil
 	case "grok":
 		return "grok --model composer-2.5-fast", nil
 	default:
@@ -247,7 +247,7 @@ func workspaceLaunchCommand(worktreeAbs, agent, identity, surface string) (strin
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("claude --append-system-prompt-file %s/%s -w %s",
-			worktreeAbs, id, agent), nil
+		return fmt.Sprintf("claude --append-system-prompt-file %q -w %q",
+			filepath.Join(worktreeAbs, id), agent), nil
 	}
 }

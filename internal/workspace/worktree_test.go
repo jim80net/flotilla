@@ -56,3 +56,10 @@ func TestProvisionWorktreeRejectsRelativeRepo(t *testing.T) {
 		t.Fatal("relative repo = nil error, want error")
 	}
 }
+
+func TestProvisionWorktreeRejectsRelativeWorktree(t *testing.T) {
+	err := ProvisionWorktree("/abs/repo", "branch", "relative/wt")
+	if err == nil {
+		t.Fatal("relative worktree = nil error, want error")
+	}
+}

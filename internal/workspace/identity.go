@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -27,9 +28,16 @@ func IdentityHome(agent, surface string) (dir, identityFile string, err error) {
 		}
 		return "", "", err
 	}
+	recipePath := filepath.Join(hostDir, LaunchFileName)
 	var r launch.Recipe
-	if json.Unmarshal(raw, &r) == nil && r.Cwd != "" && filepath.IsAbs(r.Cwd) {
-		return r.Cwd, identityFile, nil
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return "", "", fmt.Errorf("parse workspace recipe %q: %w", recipePath, err)
 	}
-	return hostDir, identityFile, nil
+	if r.Cwd == "" {
+		return hostDir, identityFile, nil
+	}
+	if !filepath.IsAbs(r.Cwd) {
+		return "", "", fmt.Errorf("workspace recipe %q: cwd %q is not absolute", recipePath, r.Cwd)
+	}
+	return r.Cwd, identityFile, nil
 }

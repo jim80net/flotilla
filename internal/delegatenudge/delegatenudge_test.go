@@ -59,13 +59,33 @@ func TestTrackerThreshold(t *testing.T) {
 	}
 }
 
-func TestTrackerNonICDoesNotReset(t *testing.T) {
+func TestTrackerNonICResetsStrikes(t *testing.T) {
 	tr := NewTracker()
 	ic := Result{InlineBuild: true, Signal: "test"}
 	tr.Record("xo", ic)
 	tr.Record("xo", Result{})
+	if tr.Strikes("xo") != 0 {
+		t.Fatalf("non-IC turn should reset strikes; got %d", tr.Strikes("xo"))
+	}
+}
+
+func TestTrackerICDelegateICNeedsTwoConsecutive(t *testing.T) {
+	tr := NewTracker()
+	ic := Result{InlineBuild: true, Signal: "test"}
+	tr.Record("xo", ic)
 	if tr.Strikes("xo") != 1 {
-		t.Fatalf("non-IC between strikes should preserve count; got %d", tr.Strikes("xo"))
+		t.Fatalf("first IC strike = %d, want 1", tr.Strikes("xo"))
+	}
+	tr.Record("xo", Result{}) // delegation / non-IC resets
+	if tr.Strikes("xo") != 0 {
+		t.Fatalf("after delegate reset strikes = %d, want 0", tr.Strikes("xo"))
+	}
+	tr.Record("xo", ic)
+	if tr.Strikes("xo") != 1 {
+		t.Fatalf("second IC alone = %d, want 1 (not consecutive with first)", tr.Strikes("xo"))
+	}
+	if !tr.Record("xo", ic) {
+		t.Fatal("two consecutive IC turns should fire nudge")
 	}
 }
 

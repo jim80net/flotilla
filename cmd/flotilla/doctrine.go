@@ -71,7 +71,7 @@ func isClaudeSurface(surface string) bool {
 }
 
 // harnessLaunchWired reports whether workspace init emits a verified launch/load recipe
-// for the surface (Claude via --append-system-prompt-file; grok via --rules cat).
+// for the surface (Claude via --append-system-prompt-file; grok loads AGENTS.md from cwd).
 func harnessLaunchWired(surface string) bool {
 	return isClaudeSurface(surface) || surface == "grok"
 }
