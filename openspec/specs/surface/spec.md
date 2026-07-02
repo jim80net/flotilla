@@ -582,8 +582,13 @@ input-blocked failure (NOT a generic unconfirmed result, and NOT the silent succ
 body SHALL never be pasted into the panel and retries SHALL never stack pastes. Before refusing, the
 orchestration MAY make a single best-effort attempt to restore composer focus and re-check; it SHALL
 refuse only if the pane is still input-blocked, and SHALL NOT claim a restore it cannot verify. If a
-panel steals focus DURING the confirmation window (after the submit), the confirmation SHALL classify
-the pane as not-delivered rather than as a confirmed submit, and SHALL NOT re-paste the body.
+focus-stealing overlay (sub-composer or list-nav) appears DURING the confirmation window BEFORE any
+confirming signal has settled (Working edge, stable composer-cleared streak, or Queued — see the
+composer-state-as-ground-truth requirement below), the confirmation SHALL classify via
+`readPanelBlocked` → BLOCKED (not-delivered) and SHALL NOT re-paste the body. If a confirming signal
+has already settled (the Enter landed: the body left the composer or a turn started), a subsequent
+overlay steal does NOT retract confirmation — the delivery remains confirmed. An overlay read only at
+window expiry without an earlier confirming signal falls through to `ErrUnconfirmed` (unchanged).
 
 #### Scenario: A message to an input-blocked desk is not pasted and is reported not delivered
 
@@ -694,7 +699,9 @@ BLOCKED (a distinct input-blocked failure), never silently successful. A Cleared
 or at window expiry) composer or a Queued state (during polls or at expiry) SHALL be reported as
 confirmed delivery (Queued is a soft-success — the message will deliver). Only an Undetermined final
 read (no probe / unreadable) SHALL yield `ErrUnconfirmed`. The confirm mechanism's no-re-paste
-invariant SHALL be preserved (retries are Enter-only).
+invariant SHALL be preserved (retries are Enter-only). This taxonomy cross-references the post-submit
+focus-steal rule above: overlay steal **before** any confirming signal settles → BLOCKED;
+overlay steal **after** a completed confirming signal → confirmed (body already submitted).
 
 #### Scenario: A composer that stays pending after the retries is blocked
 

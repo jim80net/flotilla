@@ -7,7 +7,7 @@ import (
 )
 
 func TestAdaptiveIntervalEnabled(t *testing.T) {
-	t.Setenv("FLOTILLA_ADAPTIVE_INTERVAL", "")
+	t.Setenv("FLOTILLA_ADAPTIVE_INTERVAL", "") // isolate from live host exports
 	if !AdaptiveIntervalEnabled() {
 		t.Fatal("default must be enabled")
 	}

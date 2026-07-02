@@ -6,6 +6,7 @@ import (
 )
 
 func TestAdaptiveIntervalEnabledFlag(t *testing.T) {
+	t.Setenv("FLOTILLA_ADAPTIVE_INTERVAL", "")
 	if !adaptiveIntervalEnabled("") {
 		t.Fatal("empty flag must fall through to env default (on)")
 	}
