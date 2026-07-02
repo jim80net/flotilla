@@ -63,6 +63,9 @@ func (s unackedStateStore) save(st unackedState, now time.Time) error {
 		return fmt.Errorf("marshal unacked state: %w", err)
 	}
 	dir := filepath.Dir(s.path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir unacked state dir: %w", err)
+	}
 	tmp, err := os.CreateTemp(dir, filepath.Base(s.path)+".tmp-*")
 	if err != nil {
 		return fmt.Errorf("create unacked state temp: %w", err)
