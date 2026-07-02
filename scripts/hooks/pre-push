@@ -1,18 +1,27 @@
 #!/usr/bin/env bash
-# pre-push — the LOCAL fail-closed backstop of the public/private partition.
+# pre-push — local backstop before push leaves this clone.
 #
-# It scans the ADDED lines of the commits being pushed (the push RANGE, not the whole
-# tree) through scripts/check-private-boundary.sh --file, so a deployment specific that
-# reached a commit is caught before it leaves your machine. This is a BACKSTOP, not the
-# authority: a local hook is `--no-verify`-bypassable, so CI's `private-boundary` job is
-# the enforcing gate of record. The advisory WARN tier (domain vocabulary) prints but
-# never blocks (exit 0); a fail-closed denylist/generic hit blocks the push (exit 1).
+# 1. Go hygiene (mirrors CI): gofmt -l . + go vet ./... — blocks on any unformatted file.
+# 2. Public/private partition: scans ADDED lines in the push range through
+#    scripts/check-private-boundary.sh --file.
+#
+# BACKSTOP only — `--no-verify` bypasses this; CI is the enforcing gate of record.
 #
 # Install:  git config core.hooksPath scripts/hooks
 #           (or: scripts/install-hooks.sh)
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+unformatted="$(gofmt -l .)"
+if [ -n "$unformatted" ]; then
+  echo "pre-push: gofmt would fail CI on:" >&2
+  echo "$unformatted" >&2
+  echo "Run: gofmt -w ." >&2
+  exit 1
+fi
+go vet ./...
 guard="$repo_root/scripts/check-private-boundary.sh"
 [ -x "$guard" ] || guard="bash $repo_root/scripts/check-private-boundary.sh"
 

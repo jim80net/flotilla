@@ -12,4 +12,4 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 git -C "$repo_root" config core.hooksPath scripts/hooks
 chmod +x "$repo_root/scripts/hooks/pre-push"
-echo "installed: core.hooksPath → scripts/hooks (pre-push partition backstop active)"
+echo "installed: core.hooksPath → scripts/hooks (pre-push: gofmt + go vet + partition backstop)"

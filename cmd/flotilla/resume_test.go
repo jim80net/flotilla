@@ -70,7 +70,7 @@ func TestParseResumeArgsEnvDefault(t *testing.T) {
 // matrix can assert "refused → nothing killed" / "dead → respawned" / etc.
 type resumeRec struct {
 	respawned, killed, tagged, newSession, newWindow bool
-	tagTarget                                      string
+	tagTarget                                        string
 }
 
 // fakeOps builds resumeOps from a fixed resolution + assessment + marker
@@ -99,13 +99,13 @@ func TestRunResumeSafetyMatrix(t *testing.T) {
 	forced.force = true
 
 	cases := []struct {
-		name                                                   string
-		plan                                                   resumePlan
-		target                                                 string
-		outcome                                                deliver.ResolveOutcome
-		st                                                     surface.State
-		marker                                                 string
-		hasSess                                                bool
+		name                                                               string
+		plan                                                               resumePlan
+		target                                                             string
+		outcome                                                            deliver.ResolveOutcome
+		st                                                                 surface.State
+		marker                                                             string
+		hasSess                                                            bool
 		wantErr, wantRespawn, wantKilled, wantTag, wantNewSess, wantNewWin bool
 	}{
 		// Fail-safe interlock: refuse every non-shell state without --force; respawn nothing.
