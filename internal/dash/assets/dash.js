@@ -48,6 +48,12 @@
   /* ── cached read model (combined on refresh) ───────────────────────────── */
   var cache = { status: null, topology: null, history: null };
   var selectedDesk = null;
+  // Whether the operator has edited a control target field (route/resume). Once
+  // touched, a background refresh must NOT overwrite it — otherwise a refresh
+  // landing mid-typing silently replaces the operator's target and the control
+  // action fires at a different desk than the field shows (#235 cubic P2). An
+  // explicit desk-selection (rail click) resets this and re-sets the fields.
+  var controlTargetsTouched = false;
 
   function agentMap(status) {
     var map = {};
@@ -165,7 +171,7 @@
       buttons[i].addEventListener("click", function () {
         selectedDesk = this.getAttribute("data-desk");
         renderConversations();
-        syncControlTargets();
+        syncControlTargets(true); // explicit desk-selection: set the targets authoritatively
       });
     }
   }
@@ -300,13 +306,18 @@
     renderBacklogStrip(history);
   }
 
-  function syncControlTargets() {
-    var routeTarget = el("route-target");
-    var resumeAgent = el("resume-agent");
-    if (selectedDesk) {
-      routeTarget.value = selectedDesk;
-      resumeAgent.value = selectedDesk;
-    }
+  // syncControlTargets prefills the route/resume target fields with the selected
+  // desk. `explicit` (a rail desk-click) sets them AUTHORITATIVELY and clears the
+  // touched flag — a deliberate "target this desk" action. A background refresh
+  // (explicit falsy) prefills ONLY when the operator has not edited the fields, so
+  // a refresh can never clobber an in-progress edit and misdirect the control
+  // action to the wrong desk (#235 cubic P2).
+  function syncControlTargets(explicit) {
+    if (!selectedDesk) return;
+    if (!explicit && controlTargetsTouched) return;
+    el("route-target").value = selectedDesk;
+    el("resume-agent").value = selectedDesk;
+    if (explicit) controlTargetsTouched = false;
   }
 
   /* ── refresh orchestration ───────────────────────────────────────────── */
@@ -392,4 +403,13 @@
   for (var i = 0; i < tabs.length; i++) {
     tabs[i].addEventListener("click", function () { showView(this.getAttribute("data-view")); });
   }
+
+  // Mark the control targets "touched" the instant the operator edits either field
+  // (type, paste, or clear all fire `input`), so a background refresh stops
+  // auto-prefilling and can never overwrite the operator's chosen target (#235).
+  // The fields are static chrome, so this one-time wiring holds for the session.
+  ["route-target", "resume-agent"].forEach(function (id) {
+    var field = el(id);
+    if (field) field.addEventListener("input", function () { controlTargetsTouched = true; });
+  });
 })();
