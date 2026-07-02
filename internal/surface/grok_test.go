@@ -43,6 +43,12 @@ func TestParseGrokState(t *testing.T) {
 			want:     StateWorking,
 		},
 		{
+			// Verb-agnostic: out-of-closed-list gerund + spinner+ellipsis+elapsed chrome → Working.
+			name:     "spinner + out-of-list gerund (Searching…) → Working",
+			captured: "  ⠹ Searching… 0.2s",
+			want:     StateWorking,
+		},
+		{
 			name:     "completed turn (Turn completed in … + ◆ stop, no arrow) → Idle",
 			captured: "  ◆ stop  [hooks: 2]\n\n  Turn completed in 3.9s.\n\n  ╭────╮\n  │ ❯  │\n  ╰──── Grok Composer 2.5 Fast ─╯\n  Shift+Tab:mode  │  Ctrl+.:shortcuts",
 			want:     StateIdle,

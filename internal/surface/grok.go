@@ -169,10 +169,13 @@ const grokWorkingArrow = "⇣"
 
 var grokSpinner = regexp.MustCompile(`[\x{2801}-\x{28FF}]`) // any non-blank braille spinner frame
 
-// grokSessionStatus matches an in-session processing status line (Thinking…/Waiting…/
-// Generating…). The launcher welcome menu can show a bare braille spinner WITHOUT this
-// prose — misreading it as Working blocks all sends on a dead-session menu (#216 evidence).
-var grokSessionStatus = regexp.MustCompile(`(?i)(?:Waiting|Thinking|Generating|Running)\x{2026}`)
+// grokSessionStatus matches the in-session processing STATUS chrome shared by live captures:
+// braille spinner + gerund (any word) + ellipsis + elapsed seconds (e.g. "⠙ Waiting… 0.4s",
+// "⠦ Thinking… 0.1s"). The leading verb VARIES (Thinking…/Waiting…/Searching…/…); we anchor
+// on the spinner+ellipsis+elapsed structure, not a closed verb list. The launcher welcome
+// menu shows a bare braille spinner WITHOUT this chrome — misreading it as Working blocks
+// all sends on a dead-session menu (#216 evidence).
+var grokSessionStatus = regexp.MustCompile(`[\x{2801}-\x{28FF}].+\x{2026}\s*\d+(?:\.\d+)?s`)
 
 // grok's TOOL-APPROVAL modal anchors (LIVE-CAPTURED 2026-06-23, #158). The modal renders a ┃-bordered
 // block ("┃ Allow <Verb> `<path>`?" + numbered options) with a selection status line
