@@ -19,16 +19,17 @@ func memberByName(t *testing.T, name string) Member {
 	return Member{}
 }
 
-// The registry ships EXACTLY five members: operating-principles (identity-append),
+// The registry ships EXACTLY six members: operating-principles (identity-append),
 // the Rule of Three (identity-append), no-self-merge (identity-append),
-// act-dont-idle-hold (identity-append), and visibility-synthesis (heartbeat-skill).
+// act-dont-idle-hold (identity-append), executive-mini-brief (identity-append),
+// and visibility-synthesis (heartbeat-skill).
 // This locks the count so a future member addition is a deliberate, reviewed change
 // (and so the member-count-agnostic install loop is exercised against the real
 // registry, not a fixture).
 func TestMembersRegistryContents(t *testing.T) {
 	members := Members()
-	if len(members) != 5 {
-		t.Fatalf("registry should hold exactly five members, got %d", len(members))
+	if len(members) != 6 {
+		t.Fatalf("registry should hold exactly six members, got %d", len(members))
 	}
 	byName := map[string]Member{}
 	for _, m := range members {
@@ -83,6 +84,20 @@ func TestMembersRegistryContents(t *testing.T) {
 	}
 	if strings.TrimSpace(ad.Content) == "" {
 		t.Error("act-dont-idle-hold content is empty — the embed did not round-trip")
+	}
+
+	emb, ok := byName["executive-mini-brief"]
+	if !ok {
+		t.Fatal("registry missing executive-mini-brief member")
+	}
+	if emb.Mechanism != MechanismIdentityAppend {
+		t.Errorf("executive-mini-brief mechanism = %q, want %q", emb.Mechanism, MechanismIdentityAppend)
+	}
+	if emb.OpenMarker != executiveMiniBriefOpenMarker || emb.CloseMarker != executiveMiniBriefCloseMarker {
+		t.Errorf("executive-mini-brief markers = open=%q close=%q, want the executive-mini-brief fence", emb.OpenMarker, emb.CloseMarker)
+	}
+	if strings.TrimSpace(emb.Content) == "" {
+		t.Error("executive-mini-brief content is empty — the embed did not round-trip")
 	}
 
 	vs, ok := byName["visibility-synthesis"]
@@ -226,8 +241,8 @@ func TestOperatingPrinciplesContentIsEmbeddedAndMarked(t *testing.T) {
 			t.Errorf("operating-principles content missing worktree-home phrase %q", want)
 		}
 	}
-	// All eleven numbered principles must be present.
-	for i := 1; i <= 11; i++ {
+	// All twelve numbered principles must be present.
+	for i := 1; i <= 12; i++ {
 		want := fmt.Sprintf("%d. **", i)
 		if !strings.Contains(m.Content, want) {
 			t.Errorf("operating-principles content missing principle %q", want)
@@ -240,6 +255,32 @@ func TestOperatingPrinciplesContentIsEmbeddedAndMarked(t *testing.T) {
 	}
 	if !strings.Contains(m.Content[open:close], "LOAD-BEARING") {
 		t.Error("load-bearing note is not inside the operating-principles marker fence")
+	}
+}
+
+func TestExecutiveMiniBriefContent(t *testing.T) {
+	m := memberByName(t, "executive-mini-brief")
+	if strings.TrimSpace(m.Content) == "" {
+		t.Fatal("executive-mini-brief content is empty — the embed did not round-trip")
+	}
+	for _, want := range []string{
+		"Bottom line first",
+		"Waiting on you",
+		"Nothing needs you",
+		"Discord mirror",
+		"what they do",
+	} {
+		if !strings.Contains(m.Content, want) {
+			t.Errorf("executive-mini-brief content missing %q", want)
+		}
+	}
+	open := strings.Index(m.Content, executiveMiniBriefOpenMarker)
+	close := strings.Index(m.Content, executiveMiniBriefCloseMarker)
+	if open < 0 || close < 0 || open >= close {
+		t.Fatalf("markers out of order: open=%d close=%d", open, close)
+	}
+	if !strings.Contains(m.Content[open:close], "LOAD-BEARING") {
+		t.Error("load-bearing note is not inside the executive-mini-brief marker fence")
 	}
 }
 

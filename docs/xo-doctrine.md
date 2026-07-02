@@ -160,6 +160,48 @@ flotilla ships **A as the default.** B is deferred; if it lands later it will be
 opt-in and additive, not a replacement for the XO knowing how to address its
 operator directly.
 
+Deployments that wire the **mechanical Stop-hook mirror**
+(`deploy/flotilla-xo-discord-mirror.sh`) post the XO's turn-final assistant text to
+Discord on every Stop — verbatim, with no discretionary trigger filtering. That makes
+**every turn-final an operator communication** whether or not the XO also calls
+`notify`. The shape below applies to both egress paths.
+
+## Operator communications — executive mini-briefs
+
+The operator is a **busy executive with many reports** — not watching your work move
+by move. Every operator-facing message (a `notify` reply, a decision request, a
+status answer, and **every turn-final** the mirror posts mechanically) must work for
+that reader in under twenty seconds without decoding internal vocabulary.
+
+**Four-part shape** (installed as the `executive-mini-brief` constitutional member via
+`workspace init` / `doctrine install`; principle 12 in the operating-principles
+constitution):
+
+1. **Bottom line first** — one or two plain-English sentences: what changed in *their*
+   world and whether anything needs them.
+2. **Mini brief** — two to five short bullets naming each work stream by **what it does
+   for them** ("the options-closing bug fix", "the fleet tooling upgrade"), where it
+   stands, and what happens next — not by issue numbers, branch names, or internal
+   codenames.
+3. **Detail footer (optional, last)** — PR numbers, SHAs, file paths, gate vocabulary,
+   compressed for drill-in only; often omitted entirely (the ledger holds identifiers).
+4. **Explicit close** — always end with exactly one of:
+   - `Waiting on you: <one concrete ask>` — or —
+   - `Nothing needs you.`
+
+Desk-to-desk and XO-internal traffic stays dense and precise; this register applies
+only to operator-facing surfaces. Principle 5 (reader-modeling) sets the posture;
+the `executive-mini-brief` block is the **mechanical shape** so coordinators do not
+rely on memory when the mirror fires.
+
+**Mirror contract:** the hook posts turn-final text verbatim — it does **not** rewrite
+or reformat. When part (4) is missing it logs `MINI-BRIEF-AUDIT` to
+`~/.claude/hooks/flotilla-xo-mirror.log` and posts anyway (v1 is log-only; doctrine
+injects the shape, the hook enforces observability). See
+`internal/doctrine/assets/skills/executive-mini-brief.md` and
+[OPERATING-PRINCIPLES.md §12](./OPERATING-PRINCIPLES.md#12-operator-turn-finals-are-executive-mini-briefs)
+for the full prose.
+
 ## Act — don't idle-hold on non-decisions
 
 The dominant way coordinated work dies is an agent **stalling on a non-decision** —
@@ -374,8 +416,9 @@ awaiting files). Add the lines to the XO's standing instructions:
   parallel. flotilla ships it as the *first* constitutional member (seeded by
   `workspace init`, installed by `doctrine install`); the
   [constitutional set](./span-of-control.md#the-constitutional-set--how-flotilla-ships-doctrine)
-  now ships **four** members — Rule of Three + no-self-merge + act-dont-idle-hold
-  (all `identity-append`) + visibility-synthesis (the `heartbeat-skill` mechanism).
+  now ships **six** members — operating-principles + Rule of Three + no-self-merge +
+  act-dont-idle-hold + executive-mini-brief (all `identity-append`) +
+  visibility-synthesis (the `heartbeat-skill` mechanism).
 - [visibility.md](./visibility.md) — the stratified-visibility doctrine (Tiers 1/2/3):
   Tier 1 is the mechanical per-desk mirror; Tiers 2/3 are the XO / meta-XO synthesis the
   visibility-synthesis skill drives. Composes with the change-detector (whose working→idle
