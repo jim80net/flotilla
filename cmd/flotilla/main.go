@@ -172,6 +172,8 @@ flags for 'watch':
   --settled-file <path>       XO settle/idle marker (default $FLOTILLA_SETTLED_FILE, else <roster-dir>/flotilla-xo-settled)
   --tracker-file <path>       the XO's {{tracker}} read-source — NOT hashed as a wake signal (default $FLOTILLA_TRACKER_FILE, else <roster-dir>/.flotilla-state.md)
   --signal-file <path>        OPTIONAL external signal file whose content-hash change wakes the XO (a file the XO does NOT write; $FLOTILLA_SIGNAL_FILE; unset ⇒ no external-signal trigger)
+  --interval <duration>       change-detector tick interval (overrides roster heartbeat_interval; $FLOTILLA_WATCH_INTERVAL)
+  --event-poll-interval <dur> fast desk turn-end poll (default 5s; $FLOTILLA_EVENT_POLL_INTERVAL; 0 disables)
   --max-quiet-intervals <n>   liveness ping cadence N, in intervals (0 ⇒ ping-mode default)
   --max-self-continuations <n> cap on consecutive XO self-continuations with no external change (default 3)
 

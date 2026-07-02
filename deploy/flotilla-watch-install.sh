@@ -48,7 +48,7 @@ fi
 # cmd/flotilla/watch.go), so without this pre-clear an inherited value would inject
 # `--backlog-file` even when the .env omits the optional key, silently breaking the
 # byte-identical-when-unset guarantee. The value must come from the .env ONLY.
-FLOTILLA_WORKDIR='' FLOTILLA_BIN='' FLOTILLA_ROSTER='' FLOTILLA_SECRETS='' FLOTILLA_ACK_FILE='' FLOTILLA_BACKLOG_FILE=''
+FLOTILLA_WORKDIR='' FLOTILLA_BIN='' FLOTILLA_ROSTER='' FLOTILLA_SECRETS='' FLOTILLA_ACK_FILE='' FLOTILLA_BACKLOG_FILE='' FLOTILLA_WATCH_INTERVAL='' FLOTILLA_EVENT_POLL_INTERVAL=''
 while IFS= read -r line || [[ -n "$line" ]]; do
   line="${line%$'\r'}"
   [[ -z "$line" || "$line" == \#* ]] && continue
@@ -60,7 +60,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   val="${val#"${val%%[![:space:]]*}"}"
   val="${val%"${val##*[![:space:]]}"}"
   case "$key" in
-    FLOTILLA_WORKDIR|FLOTILLA_BIN|FLOTILLA_ROSTER|FLOTILLA_SECRETS|FLOTILLA_ACK_FILE|FLOTILLA_BACKLOG_FILE)
+    FLOTILLA_WORKDIR|FLOTILLA_BIN|FLOTILLA_ROSTER|FLOTILLA_SECRETS|FLOTILLA_ACK_FILE|FLOTILLA_BACKLOG_FILE|FLOTILLA_WATCH_INTERVAL|FLOTILLA_EVENT_POLL_INTERVAL)
       printf -v "$key" '%s' "$val" ;;
     *) echo "warning: ignoring unknown key in $ENV_FILE: $key" >&2 ;;
   esac
@@ -78,7 +78,7 @@ fi
 # A value must never itself contain a template token, or a later substitution pass
 # would rewrite it (substitution is sequential). Implausible for a real path, but
 # cheap to make the substitution provably safe.
-for v in FLOTILLA_WORKDIR FLOTILLA_BIN FLOTILLA_ROSTER FLOTILLA_SECRETS FLOTILLA_ACK_FILE FLOTILLA_BACKLOG_FILE; do
+for v in FLOTILLA_WORKDIR FLOTILLA_BIN FLOTILLA_ROSTER FLOTILLA_SECRETS FLOTILLA_ACK_FILE FLOTILLA_BACKLOG_FILE FLOTILLA_WATCH_INTERVAL FLOTILLA_EVENT_POLL_INTERVAL; do
   if [[ "${!v}" == *@FLOTILLA_*@* ]]; then
     echo "error: $v contains a template placeholder token (@FLOTILLA_...@); refusing" >&2
     exit 1
@@ -114,6 +114,15 @@ else
   backlog_arg=""
 fi
 content="${content//@FLOTILLA_BACKLOG_ARG@/$backlog_arg}"
+
+latency_args=""
+if [[ -n "$FLOTILLA_WATCH_INTERVAL" ]]; then
+  latency_args+=" --interval $FLOTILLA_WATCH_INTERVAL"
+fi
+if [[ -n "$FLOTILLA_EVENT_POLL_INTERVAL" ]]; then
+  latency_args+=" --event-poll-interval $FLOTILLA_EVENT_POLL_INTERVAL"
+fi
+content="${content//@FLOTILLA_LATENCY_ARGS@/$latency_args}"
 
 # Fail loudly if any placeholder survived (a typo'd or newly-added template token).
 # The offender-grep charset includes * and . so it always prints SOMETHING that the

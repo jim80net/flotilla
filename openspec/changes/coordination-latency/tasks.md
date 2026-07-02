@@ -1,0 +1,6 @@
+- [x] 1. Openspec (proposal + design + watch delta)
+- [x] 2. `--interval` + `--event-poll-interval` on `flotilla watch`
+- [x] 3. `Detector.Poke` + debounced loop + `TurnEndPoller`
+- [x] 4. Deploy installer env wiring + tests
+- [x] 5. Unit tests (poller transition, poke debounce, installer fragments)
+- [ ] 6. PR → COS gate

@@ -253,6 +253,9 @@ type DetectorConfig struct {
 	// leaving the queue is escalated ONCE and deprioritized (the loop drives other items rather than
 	// spinning on it). NewDetector defaults it when < 1.
 	BacklogStuckCap int
+
+	// PokeDebounce coalesces event-driven TurnEndPoller pokes (default DefaultPokeDebounce).
+	PokeDebounce time.Duration
 }
 
 // Detector is the v2 heartbeat: a deterministic, no-LLM tick that wakes the XO
@@ -308,10 +311,12 @@ type Detector struct {
 	// autoSwitchFlight dedupes one-in-flight auto-switch per desk (off d.mu).
 	autoSwitchFlight AutoSwitchFlight
 
-	stop      chan struct{}
-	done      chan struct{}
-	startOnce sync.Once
-	stopOnce  sync.Once
+	stop         chan struct{}
+	done         chan struct{}
+	pokeCh       chan struct{}
+	pokeDebounce time.Duration
+	startOnce    sync.Once
+	stopOnce     sync.Once
 }
 
 // synthEveryTicksDefault is the digest sub-cadence floor (in ticks) when the caller does not set
@@ -420,9 +425,15 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 		// The detector computes the staleness threshold itself (age > alertInterval×
 		// interval), so the watchdog only needs to trip on the first stale/crash
 		// signal and debounce — maxMissed=1.
-		wd:   NewWatchdog(1, cfg.Alert),
-		stop: make(chan struct{}),
-		done: make(chan struct{}),
+		wd:     NewWatchdog(1, cfg.Alert),
+		stop:   make(chan struct{}),
+		done:   make(chan struct{}),
+		pokeCh: make(chan struct{}, 1),
+	}
+	if cfg.PokeDebounce <= 0 {
+		d.pokeDebounce = DefaultPokeDebounce
+	} else {
+		d.pokeDebounce = cfg.PokeDebounce
 	}
 	return d
 }
@@ -496,6 +507,15 @@ func (d *Detector) Stop() {
 	<-d.done
 }
 
+// Poke requests a debounced extra Tick (event-driven desk turn-end). Coalesced: at
+// most one signal is queued; repeated pokes within the debounce window reset the timer.
+func (d *Detector) Poke() {
+	select {
+	case d.pokeCh <- struct{}{}:
+	default:
+	}
+}
+
 func (d *Detector) loop() {
 	defer close(d.done)
 	if d.cfg.Interval <= 0 {
@@ -504,11 +524,33 @@ func (d *Detector) loop() {
 	}
 	t := time.NewTicker(d.cfg.Interval)
 	defer t.Stop()
+	var debounce *time.Timer
+	var debounceC <-chan time.Time
+	resetDebounce := func() {
+		if debounce != nil {
+			if !debounce.Stop() {
+				select {
+				case <-debounce.C:
+				default:
+				}
+			}
+		}
+		debounce = time.NewTimer(d.pokeDebounce)
+		debounceC = debounce.C
+	}
 	for {
 		select {
 		case <-d.stop:
+			if debounce != nil {
+				debounce.Stop()
+			}
 			return
 		case <-t.C:
+			d.Tick()
+		case <-d.pokeCh:
+			resetDebounce()
+		case <-debounceC:
+			debounceC = nil
 			d.Tick()
 		}
 	}
