@@ -76,11 +76,13 @@ func synthReadOneFromTurnFinal(turnFinal func(string) (string, bool, error)) fun
 // `--append-system-prompt-file`) has no skill file to load — so the wake prompt itself names the
 // `flotilla result` command, making synthesis work harness-launch-agnostically (the workspace skill
 // is an enrichment, not a hard dependency). rosterPath is the path the DAEMON actually loaded (passed
-// absolute), so the command resolves the live roster regardless of the agent's own cwd. A synthesis
-// wake targets a synthesizing sub-coordinator, NOT the daemon's liveness-tracked clock XO — it MUST
-// NOT carry a liveness-ack instruction (#190): an idle sub-XO touching the clock XO's ack file would
-// mask a genuinely-dead coordinator from the AckAge wedge.
-func synthesisWakeBody(agent, binPath, rosterPath string, readSet, postChannels []string) string {
+// absolute), so the command resolves the live roster regardless of the agent's own cwd. ackInstr is
+// appended ONLY when the wake's TARGET is the daemon's liveness-tracked clock XO (the caller passes
+// it for that agent only). Sub-coordinators MUST NOT receive it (#190): an idle project-XO touching
+// the clock XO's ack file would mask a genuinely-dead coordinator. The meta-XO MAY be the clock XO
+// (Tier-3 synthesis recursion) — when it is, the ack instruction must still land so AckAge does not
+// false-wedge during synthesis-only quiet stretches.
+func synthesisWakeBody(agent, binPath, rosterPath string, readSet, postChannels []string, ackInstr string) string {
 	var b strings.Builder
 	b.WriteString("[flotilla visibility-synthesis] You are OWED a curated rollup of the tier BELOW you. ")
 	b.WriteString("Run your `visibility-synthesis` skill (or, if you have none, follow the contract below).\n")
@@ -125,6 +127,7 @@ func synthesisWakeBody(agent, binPath, rosterPath string, readSet, postChannels 
 	b.WriteString("SKIP an unreadable subordinate: if `flotilla result <name>` errors or returns an " +
 		"error/rate-limited turn, treat that subordinate as UNKNOWN — synthesize over the ones you CAN " +
 		"read, never fail the whole rollup for one, and never report a skipped one as 'changed' or 'went silent'.")
+	b.WriteString(ackInstr)
 	return b.String()
 }
 
