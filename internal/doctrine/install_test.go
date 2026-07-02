@@ -53,7 +53,7 @@ func TestInstallAppendsOnceAcrossRepeatedInstalls(t *testing.T) {
 	p := filepath.Join(dir, identity)
 	member := Members()[0]
 
-	res1, err := Install(dir, identity, []Member{member})
+	res1, err := Install(dir, identity, []Member{member}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestInstallAppendsOnceAcrossRepeatedInstalls(t *testing.T) {
 		t.Fatalf("first install actions = %+v, want one appended", res1)
 	}
 
-	res2, err := Install(dir, identity, []Member{member})
+	res2, err := Install(dir, identity, []Member{member}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestInstallPreservesOperatorEdits(t *testing.T) {
 	member := Members()[0]
 	dir, identity := writeIdentity(t, "# desk\n")
 	p := filepath.Join(dir, identity)
-	if _, err := Install(dir, identity, []Member{member}); err != nil {
+	if _, err := Install(dir, identity, []Member{member}, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -100,7 +100,7 @@ func TestInstallPreservesOperatorEdits(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := Install(dir, identity, []Member{member}); err != nil {
+	if _, err := Install(dir, identity, []Member{member}, false); err != nil {
 		t.Fatal(err)
 	}
 	got := readFile(t, p)
@@ -117,7 +117,7 @@ func TestInstallIsMemberCountAgnostic(t *testing.T) {
 	dir, identity := writeIdentity(t, "# desk\n")
 	p := filepath.Join(dir, identity)
 
-	res1, err := Install(dir, identity, set)
+	res1, err := Install(dir, identity, set, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestInstallIsMemberCountAgnostic(t *testing.T) {
 		}
 	}
 
-	res2, err := Install(dir, identity, set)
+	res2, err := Install(dir, identity, set, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,87 @@ func TestInstallIsMemberCountAgnostic(t *testing.T) {
 // workspace already owns; it does not create the identity file (workspace init does).
 func TestInstallErrorsOnMissingIdentityFile(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := Install(dir, "does-not-exist.md", Members()); err == nil {
+	if _, err := Install(dir, "does-not-exist.md", Members(), false); err == nil {
 		t.Fatal("install against a missing identity file = nil error, want error")
+	}
+}
+
+// refresh replaces a drifted fenced block; identical content is a no-op.
+func TestInstallRefreshReplacesDriftedBlock(t *testing.T) {
+	member := Members()[1] // rule-of-three — distinctive body text for stale simulation
+	dir, identity := writeIdentity(t, "# desk\n")
+	p := filepath.Join(dir, identity)
+	if _, err := Install(dir, identity, []Member{member}, false); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate stale embedded content (marker present, body old).
+	body := readFile(t, p)
+	stale := strings.Replace(body, "Span of control", "STALE span of control", 1)
+	if err := os.WriteFile(p, []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Install(dir, identity, []Member{member}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 1 || res[0].Action != ActionRefreshed {
+		t.Fatalf("refresh actions = %+v, want one refreshed", res)
+	}
+	got := readFile(t, p)
+	if strings.Contains(got, "STALE span of control") {
+		t.Error("stale body survived refresh")
+	}
+	if !strings.Contains(got, member.OpenMarker) || !strings.Contains(got, "Span of control") {
+		t.Error("refreshed block missing current asset content")
+	}
+	if !strings.HasPrefix(got, "# desk\n") {
+		t.Error("content outside the fence was not preserved")
+	}
+}
+
+func TestInstallRefreshNoOpWhenContentCurrent(t *testing.T) {
+	dir, identity := writeIdentity(t, "# desk\n")
+	p := filepath.Join(dir, identity)
+	if _, err := Install(dir, identity, Members(), false); err != nil {
+		t.Fatal(err)
+	}
+	before := readFile(t, p)
+
+	res, err := Install(dir, identity, Members(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range res {
+		switch r.Action {
+		case ActionSkipped:
+			if r.Reason != "content current" && r.Reason != "marker present" {
+				t.Fatalf("refresh skip action = %+v, unexpected reason", r)
+			}
+		case ActionKept:
+			// heartbeat-skill whole-file members are unchanged under --refresh.
+		default:
+			t.Fatalf("refresh action = %+v, want skipped or kept", r)
+		}
+	}
+	if got := readFile(t, p); got != before {
+		t.Error("refresh rewrote an already-current block")
+	}
+}
+
+func TestInstallRefreshErrorsOnMissingCloseMarker(t *testing.T) {
+	member := Members()[1]
+	dir, identity := writeIdentity(t, "# desk\n")
+	p := filepath.Join(dir, identity)
+	if _, err := Install(dir, identity, []Member{member}, false); err != nil {
+		t.Fatal(err)
+	}
+	body := readFile(t, p)
+	body = strings.Replace(body, member.CloseMarker, "<!-- operator removed close -->", 1)
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Install(dir, identity, []Member{member}, true); err == nil {
+		t.Fatal("refresh with missing close marker = nil error, want error")
 	}
 }

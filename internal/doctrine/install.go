@@ -26,6 +26,9 @@ const (
 	// ActionKept: a whole-file (heartbeat-skill) member's target file already existed
 	// and was left untouched (operator edits survive).
 	ActionKept Action = "kept"
+	// ActionRefreshed: an identity-append member's marked block was present but its
+	// embedded content drifted from the binary; the fenced region was replaced.
+	ActionRefreshed Action = "refreshed"
 )
 
 // Result reports the install outcome for one member.
@@ -40,11 +43,11 @@ type Result struct {
 // member's mechanism. identityDir holds the native identity file (often the desk's
 // git worktree); skillDir holds heartbeat-skill whole files (~/.flotilla/<agent>/).
 // When skillDir is empty it defaults to identityDir (legacy single-dir layout).
-func InstallSplit(identityDir, skillDir, identityFile string, members []Member) ([]Result, error) {
+func InstallSplit(identityDir, skillDir, identityFile string, members []Member, refresh bool) ([]Result, error) {
 	if skillDir == "" {
 		skillDir = identityDir
 	}
-	return install(identityDir, skillDir, identityFile, members)
+	return install(identityDir, skillDir, identityFile, members, refresh)
 }
 
 // Install applies each member to an agent's workspace, keying idempotency on each
@@ -68,11 +71,11 @@ func InstallSplit(identityDir, skillDir, identityFile string, members []Member) 
 //
 // The loop iterates the given members and dispatches by Mechanism, so it is
 // member-count- and member-content-agnostic.
-func Install(workspaceDir, identityFile string, members []Member) ([]Result, error) {
-	return install(workspaceDir, workspaceDir, identityFile, members)
+func Install(workspaceDir, identityFile string, members []Member, refresh bool) ([]Result, error) {
+	return install(workspaceDir, workspaceDir, identityFile, members, refresh)
 }
 
-func install(identityDir, skillDir, identityFile string, members []Member) ([]Result, error) {
+func install(identityDir, skillDir, identityFile string, members []Member, refresh bool) ([]Result, error) {
 	identityPath := filepath.Join(identityDir, identityFile)
 	existing, err := os.ReadFile(identityPath)
 	if err != nil {
@@ -90,11 +93,18 @@ func install(identityDir, skillDir, identityFile string, members []Member) ([]Re
 			// MUST be added here AT THE SAME TIME, or every caller passing a member of the
 			// new kind starts erroring (the default arm below). The identity-append arm
 			// accumulates into `content`; the write-back fires only if it changed.
-			res, newContent, ierr := appendOnce(m, content)
+			var res Result
+			var newContent string
+			var ierr error
+			if refresh {
+				res, newContent, ierr = refreshOnce(m, content)
+			} else {
+				res, newContent, ierr = appendOnce(m, content)
+			}
 			if ierr != nil {
 				return results, ierr
 			}
-			if res.Action == ActionAppended {
+			if res.Action == ActionAppended || res.Action == ActionRefreshed {
 				identityTouched = true
 			}
 			content = newContent
@@ -156,6 +166,39 @@ func installWholeFile(m Member, workspaceDir string) (Result, error) {
 		return Result{}, fmt.Errorf("write skill file %q: %w", target, err)
 	}
 	return Result{Member: m.Name, Action: ActionCreated}, nil
+}
+
+// doctrineBlockEqual reports whether an installed fenced block matches the embedded
+// asset. Trailing newlines are ignored — append/write paths may differ by one `\n`
+// without semantic drift.
+func doctrineBlockEqual(installed, embedded string) bool {
+	return strings.TrimRight(installed, "\n") == strings.TrimRight(embedded, "\n")
+}
+
+// refreshOnce returns the install Result for an identity-append member under --refresh.
+// When the opening marker is absent it appends (same as appendOnce). When present it
+// requires the closing marker; if the fenced region bytes-equal the embedded asset it
+// skips, else it replaces open→close inclusive with the current asset content.
+func refreshOnce(m Member, content string) (Result, string, error) {
+	if m.OpenMarker == "" || m.CloseMarker == "" {
+		return Result{}, content, fmt.Errorf("identity-append member %q has no marker fence", m.Name)
+	}
+	if !strings.Contains(content, m.OpenMarker) {
+		return appendOnce(m, content)
+	}
+	openIdx := strings.Index(content, m.OpenMarker)
+	rest := content[openIdx:]
+	closeRel := strings.Index(rest, m.CloseMarker)
+	if closeRel < 0 {
+		return Result{}, content, fmt.Errorf("identity-append member %q: opening marker present but closing marker %q absent", m.Name, m.CloseMarker)
+	}
+	closeEnd := openIdx + closeRel + len(m.CloseMarker)
+	oldBlock := content[openIdx:closeEnd]
+	if doctrineBlockEqual(oldBlock, m.Content) {
+		return Result{Member: m.Name, Action: ActionSkipped, Reason: "content current"}, content, nil
+	}
+	newContent := content[:openIdx] + m.Content + content[closeEnd:]
+	return Result{Member: m.Name, Action: ActionRefreshed}, newContent, nil
 }
 
 // appendOnce returns the install Result for an identity-append member and the

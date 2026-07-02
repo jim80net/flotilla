@@ -26,7 +26,7 @@ func TestHeartbeatSkillRejectsEscapingTargetFile(t *testing.T) {
 	dir, identity := writeIdentity(t, "# desk\n")
 	for _, bad := range []string{"../escape.md", "skills/../../escape.md", "/etc/escape.md"} {
 		member := fakeSkillMember("vs", bad, "BODY\n")
-		if _, err := Install(dir, identity, []Member{member}); err == nil {
+		if _, err := Install(dir, identity, []Member{member}, false); err == nil {
 			t.Errorf("TargetFile %q must be rejected (escapes workspace), got nil error", bad)
 		}
 	}
@@ -42,7 +42,7 @@ func TestHeartbeatSkillCreatesMissingFile(t *testing.T) {
 	dir, identity := writeIdentity(t, "# desk\n")
 	member := fakeSkillMember("vs", "skills/visibility-synthesis.md", "SKILL BODY\n")
 
-	res, err := Install(dir, identity, []Member{member})
+	res, err := Install(dir, identity, []Member{member}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestHeartbeatSkillKeepsExistingFileWithOperatorEdits(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := Install(dir, identity, []Member{member})
+	res, err := Install(dir, identity, []Member{member}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,14 +91,14 @@ func TestHeartbeatSkillReinstallKeeps(t *testing.T) {
 	dir, identity := writeIdentity(t, "# desk\n")
 	member := fakeSkillMember("vs", "skills/visibility-synthesis.md", "BODY\n")
 
-	res1, err := Install(dir, identity, []Member{member})
+	res1, err := Install(dir, identity, []Member{member}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res1[0].Action != ActionCreated {
 		t.Fatalf("first install = %q, want created", res1[0].Action)
 	}
-	res2, err := Install(dir, identity, []Member{member})
+	res2, err := Install(dir, identity, []Member{member}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestHeartbeatSkillDoesNotRouteThroughAppendOnce(t *testing.T) {
 	// No OpenMarker/CloseMarker on a heartbeat-skill member; if it routed through
 	// appendOnce this would error on the empty marker fence.
 	member := fakeSkillMember("vs", "skills/visibility-synthesis.md", "BODY\n")
-	if _, err := Install(dir, identity, []Member{member}); err != nil {
+	if _, err := Install(dir, identity, []Member{member}, false); err != nil {
 		t.Fatalf("heartbeat-skill install errored (routed through appendOnce?): %v", err)
 	}
 }
@@ -124,7 +124,7 @@ func TestHeartbeatSkillDoesNotRouteThroughAppendOnce(t *testing.T) {
 func TestHeartbeatSkillEmptyTargetIsConfigError(t *testing.T) {
 	dir, identity := writeIdentity(t, "# desk\n")
 	member := fakeSkillMember("vs", "", "BODY\n")
-	if _, err := Install(dir, identity, []Member{member}); err == nil {
+	if _, err := Install(dir, identity, []Member{member}, false); err == nil {
 		t.Fatal("heartbeat-skill member with empty TargetFile = nil error, want config error")
 	}
 }
@@ -137,7 +137,7 @@ func TestInstallMixedMechanismsInOneLoop(t *testing.T) {
 	appendM := fakeAppendMember("structural")
 	skillM := fakeSkillMember("vs", "skills/visibility-synthesis.md", "SKILL BODY\n")
 
-	res, err := Install(dir, identity, []Member{appendM, skillM})
+	res, err := Install(dir, identity, []Member{appendM, skillM}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestHeartbeatSkillWritesEvenWhenIdentityAllSkip(t *testing.T) {
 	skillM := fakeSkillMember("vs", "skills/visibility-synthesis.md", "SKILL BODY\n")
 
 	// First install: append the identity member + create the skill.
-	if _, err := Install(dir, identity, []Member{appendM, skillM}); err != nil {
+	if _, err := Install(dir, identity, []Member{appendM, skillM}, false); err != nil {
 		t.Fatal(err)
 	}
 	// Capture the identity file's exact bytes, then DELETE the skill so the second
@@ -177,7 +177,7 @@ func TestHeartbeatSkillWritesEvenWhenIdentityAllSkip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := Install(dir, identity, []Member{appendM, skillM})
+	res, err := Install(dir, identity, []Member{appendM, skillM}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
