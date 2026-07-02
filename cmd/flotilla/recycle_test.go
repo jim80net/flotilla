@@ -2,6 +2,9 @@ package main
 
 import (
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +34,10 @@ type recRec struct {
 	absentErr       error
 	lockedFlag      bool   // set when the txn lock is taken (Phase 1 → close window)
 	remainCalls     []bool // records SetRemainOnExit(on) calls (expect on then off-restore)
+	// worktree-exit prompt simulation (Phase-2 close wedge)
+	worktreePrompt       bool
+	worktreePromptAnswer bool
+	menuChoices          []string
 }
 
 func happyRec() *recRec { return &recRec{markerGot: "the-key", absentResult: true} }
@@ -43,6 +50,8 @@ func (r *recRec) assess(string) surface.State {
 		return surface.StateWorking // a turn started in the unlocked window
 	case !r.closed:
 		return surface.StateIdle // phases 0, 1, re-verify
+	case r.closed && !r.respawned && r.worktreePrompt && !r.worktreePromptAnswer:
+		return surface.StateAwaitingInput
 	case r.closed && !r.respawned:
 		// A claude-direct fleet desk never becomes a Shell on /exit (the pane goes DEAD — see
 		// paneDead below); a transient glitch reads Unknown. Either way pollClosed must not abort
@@ -66,6 +75,8 @@ func (r *recRec) composer(string) surface.ComposerDisposition {
 	return surface.ComposerCleared
 }
 
+const worktreeExitCapture = "Exiting worktree session\n  1. Keep worktree\n  2. Remove worktree\nEnter to confirm"
+
 func fakeRecycleOps(r *recRec) recycleOps {
 	return recycleOps{
 		resolve:      func(string) (string, deliver.ResolveOutcome, error) { return "sess:0.1", deliver.ResolveUnique, nil },
@@ -81,7 +92,15 @@ func fakeRecycleOps(r *recRec) recycleOps {
 		// A claude-direct desk: after /exit the pane is DEAD (until the respawn). closeNeverShell
 		// models a close that never confirms (the process never exits / a stuck read) → pollClosed
 		// must retry then abort.
-		paneDead: func(string) (bool, error) { return r.closed && !r.respawned && !r.closeNeverShell, nil },
+		paneDead: func(string) (bool, error) {
+			if r.closeNeverShell || !r.closed || r.respawned {
+				return false, nil
+			}
+			if r.worktreePrompt && !r.worktreePromptAnswer {
+				return false, nil
+			}
+			return true, nil
+		},
 		respawn:  func(string, string, string) error { r.respawned = true; return nil },
 		readMarker: func(string) (string, error) {
 			if r.markerGot == "" {
@@ -98,6 +117,19 @@ func fakeRecycleOps(r *recRec) recycleOps {
 		},
 		lock:  func(string) (func(), error) { r.lockedFlag = true; return func() {}, nil },
 		sleep: func(time.Duration) {},
+		capturePane: func(string) (string, error) {
+			if r.worktreePrompt && !r.worktreePromptAnswer {
+				return worktreeExitCapture, nil
+			}
+			return "", nil
+		},
+		answerMenu: func(_ string, choice string) error {
+			r.menuChoices = append(r.menuChoices, choice)
+			r.worktreePromptAnswer = true
+			return nil
+		},
+		countDirty: func(string) (int, error) { return 2, nil },
+		cwd:        "/repo",
 	}
 }
 
@@ -116,7 +148,7 @@ func testPlan() recyclePlan {
 
 func TestRunRecycleHappyPath(t *testing.T) {
 	r := happyRec()
-	msg, err := runRecycle(fakeRecycleOps(r), testPlan())
+	msg, _, err := runRecycle(fakeRecycleOps(r), testPlan())
 	if err != nil {
 		t.Fatalf("runRecycle: %v", err)
 	}
@@ -142,7 +174,7 @@ func TestRunRecycleHappyPath(t *testing.T) {
 func TestRunRecycleAbortRestoresRemainOnExit(t *testing.T) {
 	r := happyRec()
 	r.closeNeverShell = true
-	_, err := runRecycle(fakeRecycleOps(r), testPlan())
+	_, _, err := runRecycle(fakeRecycleOps(r), testPlan())
 	if err == nil {
 		t.Fatal("expected a close abort")
 	}
@@ -186,7 +218,7 @@ func TestRunRecycleResolveRefusals(t *testing.T) {
 			if tc.name == "self-recycle" {
 				p.ownPane = "%9"
 			}
-			_, err := runRecycle(ops, p)
+			_, _, err := runRecycle(ops, p)
 			if err == nil || !strings.Contains(err.Error(), tc.wantSub) {
 				t.Fatalf("err = %v, want substring %q", err, tc.wantSub)
 			}
@@ -202,7 +234,7 @@ func TestRunRecycleResolveRefusals(t *testing.T) {
 func TestRunRecyclePhase0Abort(t *testing.T) {
 	r := happyRec()
 	r.failPhase0 = true
-	_, err := runRecycle(fakeRecycleOps(r), testPlan())
+	_, _, err := runRecycle(fakeRecycleOps(r), testPlan())
 	if err == nil || !strings.Contains(err.Error(), "phase 0") {
 		t.Fatalf("err = %v, want a phase-0 abort", err)
 	}
@@ -216,7 +248,7 @@ func TestRunRecyclePhase0Abort(t *testing.T) {
 func TestRunRecyclePhase1Abort(t *testing.T) {
 	r := happyRec()
 	r.failDurable = true
-	_, err := runRecycle(fakeRecycleOps(r), testPlan())
+	_, _, err := runRecycle(fakeRecycleOps(r), testPlan())
 	if err == nil || !strings.Contains(err.Error(), "phase 1") {
 		t.Fatalf("err = %v, want a phase-1 abort", err)
 	}
@@ -233,7 +265,7 @@ func TestRunRecyclePhase1Abort(t *testing.T) {
 func TestRunRecycleReverifyAbort(t *testing.T) {
 	r := happyRec()
 	r.failReverify = true // a turn starts in the unlocked window
-	_, err := runRecycle(fakeRecycleOps(r), testPlan())
+	_, _, err := runRecycle(fakeRecycleOps(r), testPlan())
 	if err == nil || !strings.Contains(err.Error(), "re-verify") {
 		t.Fatalf("err = %v, want an under-lock re-verify abort", err)
 	}
@@ -242,12 +274,92 @@ func TestRunRecycleReverifyAbort(t *testing.T) {
 	}
 }
 
+// --- worktree-exit prompt: unattended keep + dirty note (Phase-2 close wedge) ---
+
+func TestRunRecycleWorktreeExitPromptKeepsDirty(t *testing.T) {
+	r := happyRec()
+	r.worktreePrompt = true
+	msg, note, err := runRecycle(fakeRecycleOps(r), testPlan())
+	if err != nil {
+		t.Fatalf("runRecycle: %v", err)
+	}
+	if len(r.menuChoices) != 1 || r.menuChoices[0] != "1" {
+		t.Errorf("menuChoices = %v, want [1] (keep worktree)", r.menuChoices)
+	}
+	if !note.kept || note.dirtyN != 2 {
+		t.Errorf("note = %+v, want kept=true dirtyN=2", note)
+	}
+	if !strings.Contains(msg, "kept worktree, 2 uncommitted files") {
+		t.Errorf("msg = %q, want worktree dirty note in handoff line", msg)
+	}
+	if !r.respawned {
+		t.Error("worktree prompt must not wedge recycle — desk should relaunch")
+	}
+}
+
+func runGitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git %s in %s: %v", strings.Join(args, " "), dir, err)
+	}
+}
+
+func TestRunRecycleWorktreeDirtyGitEndToEnd(t *testing.T) {
+	repo := t.TempDir()
+	runGitIn(t, repo, "init")
+	if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitIn(t, repo, "add", "base.txt")
+	runGitIn(t, repo, "commit", "-m", "init")
+	worktree := filepath.Join(filepath.Dir(repo), "desk-wt")
+	runGitIn(t, repo, "worktree", "add", "-b", "desk", worktree)
+	if err := os.WriteFile(filepath.Join(worktree, "dirty.txt"), []byte("uncommitted"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	n, err := deliver.CountUncommitted(worktree)
+	if err != nil || n != 1 {
+		t.Fatalf("CountUncommitted = %d err=%v, want 1 nil", n, err)
+	}
+
+	answered := false
+	ops := recycleOps{
+		paneDead: func(string) (bool, error) { return answered, nil },
+		assess: func(string) surface.State {
+			if !answered {
+				return surface.StateAwaitingInput
+			}
+			return surface.StateUnknown
+		},
+		capturePane: func(string) (string, error) { return worktreeExitCapture, nil },
+		answerMenu: func(_ string, choice string) error {
+			if choice != "1" {
+				t.Errorf("choice = %q, want 1 (keep)", choice)
+			}
+			answered = true
+			return nil
+		},
+		countDirty: deliver.CountUncommitted,
+		cwd:        worktree,
+		sleep:      func(time.Duration) {},
+	}
+	note, ok := pollClosed(ops, "sess:0.1", 3*recyclePollInterval)
+	if !ok {
+		t.Fatal("pollClosed wedged on worktree-exit prompt")
+	}
+	if !note.kept || note.dirtyN != 1 {
+		t.Errorf("note = %+v, want kept=true dirtyN=1", note)
+	}
+}
+
 // --- I2: close→Shell abort + retry-on-Unknown (4.6) ---
 
 func TestRunRecycleCloseNeverShell(t *testing.T) {
 	r := happyRec()
 	r.closeNeverShell = true // assess returns Unknown after the close (transient glitch)
-	_, err := runRecycle(fakeRecycleOps(r), testPlan())
+	_, _, err := runRecycle(fakeRecycleOps(r), testPlan())
 	if err == nil || !strings.Contains(err.Error(), "resume backend --force") {
 		t.Fatalf("err = %v, want a state-aware dead-desk recovery copy naming --force", err)
 	}
@@ -261,7 +373,7 @@ func TestRunRecycleCloseNeverShell(t *testing.T) {
 func TestRunRecycleNoGracefulCloseFallsBackToKill(t *testing.T) {
 	r := happyRec()
 	r.closeErr = surface.ErrNoGracefulClose
-	msg, err := runRecycle(fakeRecycleOps(r), testPlan())
+	msg, _, err := runRecycle(fakeRecycleOps(r), testPlan())
 	if err != nil {
 		t.Fatalf("runRecycle (kill fallback): %v", err)
 	}
@@ -279,7 +391,7 @@ func TestRunRecycleNoGracefulCloseFallsBackToKill(t *testing.T) {
 func TestRunRecycleMarkerMismatch(t *testing.T) {
 	r := happyRec()
 	r.markerGot = "wrong-key"
-	_, err := runRecycle(fakeRecycleOps(r), testPlan())
+	_, _, err := runRecycle(fakeRecycleOps(r), testPlan())
 	if err == nil || !strings.Contains(err.Error(), "flotilla send") {
 		t.Fatalf("err = %v, want a marker-mismatch abort naming `flotilla send ... take over`", err)
 	}
@@ -290,7 +402,7 @@ func TestRunRecycleMarkerMismatch(t *testing.T) {
 func TestRunRecycleGenSuperseded(t *testing.T) {
 	r := happyRec()
 	r.genGot = "OTHER-TOKEN" // a superseding recycle re-stamped the pane
-	_, err := runRecycle(fakeRecycleOps(r), testPlan())
+	_, _, err := runRecycle(fakeRecycleOps(r), testPlan())
 	if err == nil || !strings.Contains(err.Error(), "superseded") {
 		t.Fatalf("err = %v, want a gen-superseded abort", err)
 	}
@@ -339,7 +451,7 @@ func TestParseRecycleArgs(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			agent, _, _, dry, err := parseRecycleArgs(c.args)
+			agent, _, _, dry, _, err := parseRecycleArgs(c.args)
 			if c.wantErr {
 				if err == nil {
 					t.Fatalf("parseRecycleArgs(%v) = nil error, want error", c.args)

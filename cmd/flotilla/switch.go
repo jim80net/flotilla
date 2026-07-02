@@ -179,7 +179,7 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 	}
 
 	// PHASE 0 — FROM idle precondition (lockless). The FROM driver gates idle∧cleared.
-	if !pollIdleCleared(switchToRecycleOps(ops), target, p.timeouts.boot) {
+	if !pollIdleCleared(switchToRecycleOps(ops, p.cwd, false), target, p.timeouts.boot) {
 		return "", fmt.Errorf("phase 0: %q did not settle to idle at a cleared composer within %s — ABORT, desk untouched (still on the %s harness)", p.agent, p.timeouts.boot, p.fromSurface)
 	}
 
@@ -203,7 +203,7 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 			return "", fmt.Errorf("auto-switch: acquire pane transaction lock for %q: %w — ABORT, desk untouched", p.agent, err)
 		}
 		defer release()
-		if !idleClearedWithHeal(switchToRecycleOps(ops), target) {
+		if !idleClearedWithHeal(switchToRecycleOps(ops, p.cwd, false), target) {
 			return "", fmt.Errorf("auto-switch: %q is no longer idle at a cleared composer under lock — ABORT, desk untouched", p.agent)
 		}
 		if p.reprobeRateLimit != nil {
@@ -217,7 +217,7 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 	if err := ops.deliver(target, p.handoffText); err != nil {
 		return "", fmt.Errorf("phase 1: delivering the handoff turn to %q failed (desk untouched): %w", p.agent, err)
 	}
-	if !pollHandoffGate(switchToRecycleOps(ops), target, switchToRecyclePlan(p), p.timeouts.handoff) {
+	if !pollHandoffGate(switchToRecycleOps(ops, p.cwd, false), target, switchToRecyclePlan(p), p.timeouts.handoff) {
 		return "", fmt.Errorf("phase 1: handoff not durably confirmed for %q within %s (no present non-trivial %s on disk, or the turn never returned to an idle cleared composer) — ABORT, desk still running on the %s harness, nothing closed", p.agent, p.timeouts.handoff, p.handoffPath, p.fromSurface)
 	}
 
@@ -233,7 +233,7 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 
 	// RE-VERIFY the Phase-1 gate UNDER the lock (P1-C — closes the post-handoff TOCTOU on the
 	// manual path; on the auto path re-confirms after handoff delivery).
-	if !idleClearedWithHeal(switchToRecycleOps(ops), target) {
+	if !idleClearedWithHeal(switchToRecycleOps(ops, p.cwd, false), target) {
 		return "", fmt.Errorf("phase 2 re-verify: %q is no longer idle at a cleared composer (a turn started during handoff, or an overlay could not be healed) — ABORT, desk untouched", p.agent)
 	}
 	if dur, err := ops.durable(p.cwd, p.handoffPath, p.minHandoffBytes); err != nil || !dur {
@@ -267,7 +267,7 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 	closeErr := ops.closeFn(target)
 	switch {
 	case closeErr == nil:
-		if !pollClosed(switchToRecycleOps(ops), target, p.timeouts.close_) {
+		if _, closed := pollClosed(switchToRecycleOps(ops, p.cwd, false), target, p.timeouts.close_); !closed {
 			return "", fmt.Errorf("phase 2: the graceful close of %q (%s harness) did not confirm the process exited within %s — the desk MAY STILL BE LIVE; investigate, and if confirmed dead recover with: flotilla resume %s --force (NOT relaunching on a possibly-live session)", p.agent, p.fromSurface, p.timeouts.close_, p.agent)
 		}
 	case errors.Is(closeErr, surface.ErrNoGracefulClose):
@@ -335,7 +335,7 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 	// PHASE 4 — TO takeover (point the fresh, clean-context session at the bridge,
 	// imperatively, via the TO driver's takeover turn naming the NEUTRAL path). Delivered
 	// ONCE, while @flotilla_switch_gen still matches (supersede-abort, mirror recycle.go:224-230).
-	if !pollIdleCleared(switchToRecycleOps(ops), target, p.timeouts.boot) {
+	if !pollIdleCleared(switchToRecycleOps(ops, p.cwd, false), target, p.timeouts.boot) {
 		return "", fmt.Errorf("phase 4: the relaunched %q (%s harness) did not reach idle at a cleared composer within %s — the desk is LIVE but un-taken-over; hand it the chapter with: flotilla send %s 'read %s and take over'", p.agent, p.toSurface, p.timeouts.boot, p.agent, p.handoffPath)
 	}
 	gen, err := ops.readGen(target)
@@ -350,7 +350,7 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 	}
 	// Best-effort resumption-confidence signal — success = the desk RESUMED, not just that the
 	// turn was typed. Its absence does NOT fail the switch (the takeover was delivered-confirmed).
-	if !pollWorking(switchToRecycleOps(ops), target, p.timeouts.takeover) {
+	if !pollWorking(switchToRecycleOps(ops, p.cwd, false), target, p.timeouts.takeover) {
 		log.Printf("flotilla: switch: %q took over on the %s harness but no Working edge observed within %s (the takeover was delivered-confirmed; the desk may be slow to start)", p.agent, p.toSurface, p.timeouts.takeover)
 	}
 	return fmt.Sprintf("switched %s: %s → %s → pane %s (handoff %s; closed gracefully, relaunched on %s, took over)\n", p.agent, p.fromSurface, p.toSurface, target, p.handoffPath, p.toSurface), nil
@@ -361,14 +361,19 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 // recycleOps value. switch REUSES those gates verbatim rather than re-implementing the
 // bounded-poll logic — they read only assess/composer/durable/paneDead/selfHeal/sleep, so
 // the adapter forwards exactly those. (The shared gates never touch the switch-only ops.)
-func switchToRecycleOps(ops switchOps) recycleOps {
+func switchToRecycleOps(ops switchOps, cwd string, removeWorktree bool) recycleOps {
 	return recycleOps{
-		assess:   ops.assess,
-		composer: ops.composer,
-		durable:  ops.durable,
-		paneDead: ops.paneDead,
-		selfHeal: ops.selfHeal,
-		sleep:    ops.sleep,
+		assess:         ops.assess,
+		composer:       ops.composer,
+		durable:        ops.durable,
+		paneDead:       ops.paneDead,
+		selfHeal:       ops.selfHeal,
+		sleep:          ops.sleep,
+		cwd:            cwd,
+		removeWorktree: removeWorktree,
+		capturePane:    deliver.CapturePane,
+		answerMenu:     deliver.SendMenuChoice,
+		countDirty:     deliver.CountUncommitted,
 	}
 }
 

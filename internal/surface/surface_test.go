@@ -113,6 +113,7 @@ func TestClaudeAssessParity(t *testing.T) {
 		{"busy spinner → working", "node", nil, false, "✻ Frosting… (3s · ↓ 25 tokens)", nil, StateWorking},
 		{"esc-to-interrupt → working", "node", nil, false, "doing\nesc to interrupt", nil, StateWorking},
 		{"idle composer → idle", "node", nil, false, "❯ \n  ⏵⏵ auto mode on", nil, StateIdle},
+		{"worktree-exit prompt → awaiting-input", "node", nil, false, "Exiting worktree session\n  1. Keep worktree\n  2. Remove worktree\nEnter to confirm", nil, StateAwaitingInput},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
