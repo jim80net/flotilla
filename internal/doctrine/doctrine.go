@@ -6,7 +6,7 @@
 // the doctrine in place.
 //
 // The set ships five members:
-//   - operating-principles — an IDENTITY-APPEND constitution: the eight standing
+//   - operating-principles — an IDENTITY-APPEND constitution: the eleven standing
 //     Flotilla Operating Principles, distilled to one sentence each and appended into
 //     the agent's identity file so the constitution loads once at launch. The full
 //     prose lives in the repository's docs/OPERATING-PRINCIPLES.md.
@@ -117,7 +117,7 @@ const (
 // dispatch arm in install.go — the mechanism-coupling contract).
 var members = []Member{
 	{
-		// operating-principles: the eight standing Flotilla Operating Principles — the
+		// operating-principles: the eleven standing Flotilla Operating Principles — the
 		// constitution every agent runs on — distilled to one sentence each. An
 		// identity-append like the other structural rules, because it defines the agent's
 		// standing posture ("how the agent operates"), loaded once into its identity at

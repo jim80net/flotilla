@@ -43,24 +43,22 @@ func cmdDoctrineInstall(args []string) error {
 	if err != nil {
 		return err
 	}
-	dir, err := workspace.Dir(agent)
+	harnessSurface := harnessAllocationSurface(cfg, agent, a.Surface)
+	identityDir, identity, err := workspace.IdentityHome(agent, harnessSurface)
 	if err != nil {
 		return err
 	}
-	identity, err := workspace.IdentityFileName(a.Surface)
+	hostDir, err := workspace.Dir(agent)
 	if err != nil {
 		return err
 	}
-	// Install takes the workspace dir + the identity base filename: the dir lets a
-	// whole-file (heartbeat-skill) member resolve its workspace-relative target, and
-	// the resolved filename keeps the doctrine package free of a workspace import.
-	results, err := doctrine.Install(dir, identity, doctrine.Members())
+	results, err := doctrine.InstallSplit(identityDir, hostDir, identity, doctrine.Members())
 	if err != nil {
 		return err
 	}
-	identityPath := filepath.Join(dir, identity)
+	identityPath := filepath.Join(identityDir, identity)
 	reportDoctrineResults(results, identityPath)
-	noteNonClaudeLoadFastFollow(a.Surface, identityPath)
+	noteNonClaudeLoadFastFollow(harnessSurface, identityPath)
 	return nil
 }
 
@@ -72,17 +70,20 @@ func isClaudeSurface(surface string) bool {
 	return surface == "" || surface == "claude-code"
 }
 
+// harnessLaunchWired reports whether workspace init emits a verified launch/load recipe
+// for the surface (Claude via --append-system-prompt-file; grok loads AGENTS.md from cwd).
+func harnessLaunchWired(surface string) bool {
+	return isClaudeSurface(surface) || surface == "grok"
+}
+
 // noteNonClaudeLoadFastFollow prints a one-line NOTICE when doctrine is written for a
-// NON-Claude surface. The doctrine IS written (forward-correct: the native harness reads
-// its own identity file), but the generated launch recipe only wires the VERIFIED load
-// path for Claude Code (--append-system-prompt-file). Per-surface launch/load for
-// grok/aider/opencode is a documented fast-follow; this notice makes that
-// load-not-yet-wired limitation visible rather than silent.
+// surface whose launch/load is not yet wired. Claude and grok are wired; aider/opencode
+// still get the fast-follow notice.
 func noteNonClaudeLoadFastFollow(surface, identityPath string) {
-	if isClaudeSurface(surface) {
+	if harnessLaunchWired(surface) {
 		return
 	}
-	fmt.Printf("  note: doctrine written to %s; the verified load path is Claude Code — per-surface launch/load for %s is a fast-follow (the generated recipe launches claude).\n",
+	fmt.Printf("  note: doctrine written to %s; per-surface launch/load for %s is a fast-follow (the generated recipe launches claude until that harness is verified).\n",
 		identityPath, surface)
 }
 

@@ -102,6 +102,11 @@ func (c claudeCode) Assess(pane string) State {
 	if c.parseBusy(captured) {
 		return StateWorking
 	}
+	// Claude Code's worktree-exit menu during /exit blocks unattended recycle; classify as
+	// AwaitingInput so pollClosed can answer it mechanically (keep worktree — fail-safe).
+	if deliver.ClaudeWorktreeExitPrompt(captured) {
+		return StateAwaitingInput
+	}
 	return StateIdle
 }
 

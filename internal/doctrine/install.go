@@ -37,6 +37,17 @@ type Result struct {
 }
 
 // Install applies each member to an agent's workspace, keying idempotency on each
+// member's mechanism. identityDir holds the native identity file (often the desk's
+// git worktree); skillDir holds heartbeat-skill whole files (~/.flotilla/<agent>/).
+// When skillDir is empty it defaults to identityDir (legacy single-dir layout).
+func InstallSplit(identityDir, skillDir, identityFile string, members []Member) ([]Result, error) {
+	if skillDir == "" {
+		skillDir = identityDir
+	}
+	return install(identityDir, skillDir, identityFile, members)
+}
+
+// Install applies each member to an agent's workspace, keying idempotency on each
 // member's mechanism. It dispatches per member:
 //
 //   - identity-append: the member's marked block is appended into the identity file
@@ -58,7 +69,11 @@ type Result struct {
 // The loop iterates the given members and dispatches by Mechanism, so it is
 // member-count- and member-content-agnostic.
 func Install(workspaceDir, identityFile string, members []Member) ([]Result, error) {
-	identityPath := filepath.Join(workspaceDir, identityFile)
+	return install(workspaceDir, workspaceDir, identityFile, members)
+}
+
+func install(identityDir, skillDir, identityFile string, members []Member) ([]Result, error) {
+	identityPath := filepath.Join(identityDir, identityFile)
 	existing, err := os.ReadFile(identityPath)
 	if err != nil {
 		return nil, fmt.Errorf("read identity file %q: %w", identityPath, err)
@@ -88,7 +103,7 @@ func Install(workspaceDir, identityFile string, members []Member) ([]Result, err
 			// Whole-file: its OWN write, disjoint from the identity-content write-back.
 			// It does NOT route through appendOnce (which hard-errors on an empty marker)
 			// and does NOT gate on identityTouched (that gates only the identity file).
-			res, ierr := installWholeFile(m, workspaceDir)
+			res, ierr := installWholeFile(m, skillDir)
 			if ierr != nil {
 				return results, ierr
 			}

@@ -1,6 +1,7 @@
 package doctrine
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -179,7 +180,7 @@ func TestNoSelfMergeContentIsEmbeddedAndMarked(t *testing.T) {
 }
 
 // operating-principles content must round-trip from the binary, carry its marker fence
-// and load-bearing note, state the constitution's through-line, and enumerate the eight
+// and load-bearing note, state the constitution's through-line, and enumerate the eleven
 // standing principles — with the markers + note inside the fence so they travel with the
 // appended block.
 func TestOperatingPrinciplesContentIsEmbeddedAndMarked(t *testing.T) {
@@ -198,9 +199,36 @@ func TestOperatingPrinciplesContentIsEmbeddedAndMarked(t *testing.T) {
 			t.Errorf("operating-principles content missing %q", want)
 		}
 	}
-	// All eight numbered principles must be present.
-	for i := 1; i <= 8; i++ {
-		want := string(rune('0'+i)) + ". **"
+	for _, want := range []string{
+		"Coordinators delegate",
+		"preserve bandwidth",
+		"flotilla send",
+	} {
+		if !strings.Contains(m.Content, want) {
+			t.Errorf("operating-principles content missing coordinator delegation phrase %q", want)
+		}
+	}
+	for _, want := range []string{
+		"Harness allocation",
+		"judgment on Claude",
+		"execution on grok",
+	} {
+		if !strings.Contains(m.Content, want) {
+			t.Errorf("operating-principles content missing harness-allocation phrase %q", want)
+		}
+	}
+	for _, want := range []string{
+		"Desk homes are repo worktrees",
+		"git worktree",
+		"organic rotation",
+	} {
+		if !strings.Contains(m.Content, want) {
+			t.Errorf("operating-principles content missing worktree-home phrase %q", want)
+		}
+	}
+	// All eleven numbered principles must be present.
+	for i := 1; i <= 11; i++ {
+		want := fmt.Sprintf("%d. **", i)
 		if !strings.Contains(m.Content, want) {
 			t.Errorf("operating-principles content missing principle %q", want)
 		}

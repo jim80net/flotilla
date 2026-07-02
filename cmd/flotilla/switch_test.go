@@ -738,7 +738,7 @@ func TestRunSwitchBundleWriteFailAbortsBeforeClose(t *testing.T) {
 // into recycle.go, this — and the recycle suite — would fail to compile or pass.)
 func TestRecycleSingleDriverCoreUntouchedBySwitch(t *testing.T) {
 	r := happyRec()
-	msg, err := runRecycle(fakeRecycleOps(r), testPlan())
+	msg, _, err := runRecycle(fakeRecycleOps(r), testPlan())
 	if err != nil {
 		t.Fatalf("runRecycle (single-driver core) regressed: %v", err)
 	}

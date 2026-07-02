@@ -80,6 +80,30 @@ func TestIsXO(t *testing.T) {
 	}
 }
 
+func TestIsCoordinator(t *testing.T) {
+	fed, _ := Load(writeRoster(t, `{
+	  "operator_user_id":"U","xo_agent":"meta-xo","cos_agent":"cos",
+	  "agents":[{"name":"meta-xo"},{"name":"alpha-xo"},{"name":"alpha-be"},{"name":"cos"}],
+	  "channels":[
+	    {"channel_id":"C_CMD","xo_agent":"meta-xo","members":["alpha-xo","cos"]},
+	    {"channel_id":"C_ALPHA","xo_agent":"alpha-xo","members":["alpha-be"]}]}`))
+	for _, coord := range []string{"meta-xo", "alpha-xo", "cos"} {
+		if !fed.IsCoordinator(coord) {
+			t.Errorf("IsCoordinator(%q) = false, want true", coord)
+		}
+	}
+	if fed.IsCoordinator("alpha-be") {
+		t.Error("a desk member is not a coordinator")
+	}
+	// cos_agent without IsXO overlap still counts.
+	onlyCos, _ := Load(writeRoster(t, `{
+	  "operator_user_id":"U","cos_agent":"cos",
+	  "agents":[{"name":"xo"},{"name":"cos"}]}`))
+	if !onlyCos.IsCoordinator("cos") {
+		t.Error("cos_agent alone should be a coordinator")
+	}
+}
+
 func TestChannelForXO(t *testing.T) {
 	fed, _ := Load(writeRoster(t, `{
 	  "operator_user_id":"U",

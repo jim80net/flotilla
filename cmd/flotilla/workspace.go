@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jim80net/flotilla/internal/doctrine"
+	"github.com/jim80net/flotilla/internal/launch"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/workspace"
 )
@@ -52,6 +54,48 @@ func parseAgentRosterArgs(cmd string, args []string) (agent, rosterPath string, 
 	return agent, *rp, nil
 }
 
+type workspaceInitOpts struct {
+	agent, rosterPath string
+	repo, branch      string
+	worktree          string
+}
+
+func parseWorkspaceInitArgs(args []string) (workspaceInitOpts, error) {
+	var agent string
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		agent, args = args[0], args[1:]
+	}
+	fs := flag.NewFlagSet("workspace init", flag.ContinueOnError)
+	rp := fs.String("roster", rosterDefault(), "roster config path")
+	repo := fs.String("repo", "", "main git repository (absolute path; required)")
+	branch := fs.String("branch", "", "worktree branch (defaults to agent name)")
+	worktree := fs.String("worktree", "", "worktree checkout path (default: sibling of repo named after agent)")
+	if err := fs.Parse(args); err != nil {
+		return workspaceInitOpts{}, err
+	}
+	rest := fs.Args()
+	if agent == "" && len(rest) >= 1 {
+		agent, rest = rest[0], rest[1:]
+	}
+	if agent == "" || len(rest) != 0 {
+		return workspaceInitOpts{}, fmt.Errorf("usage: flotilla workspace init <agent> --repo <abs-path> [--branch <name>] [--worktree <abs-path>] [--roster <path>]")
+	}
+	if *repo == "" {
+		return workspaceInitOpts{}, fmt.Errorf("workspace init %q: --repo is required — bare-directory desk homes are deprecated; provision a git worktree of the repo this desk works on", agent)
+	}
+	br := *branch
+	if br == "" {
+		br = agent
+	}
+	return workspaceInitOpts{
+		agent:      agent,
+		rosterPath: *rp,
+		repo:       *repo,
+		branch:     br,
+		worktree:   *worktree,
+	}, nil
+}
+
 func cmdWorkspacePath(args []string) error {
 	agent, _, err := parseAgentRosterArgs("workspace path", args)
 	if err != nil {
@@ -65,63 +109,70 @@ func cmdWorkspacePath(args []string) error {
 	return nil
 }
 
-// cmdWorkspaceInit scaffolds ~/.flotilla/<agent>/, creating only the files that are
-// missing and NEVER overwriting one that exists. It does not populate real host paths
-// (operator data): the launch.json carries the verified
-// `--append-system-prompt-file <ws>/<identity>` recipe convention with an empty cwd the
-// operator fills in.
+// cmdWorkspaceInit scaffolds ~/.flotilla/<agent>/ and a git worktree desk home.
+// Identity (AGENTS.md / CLAUDE.md) lives IN the worktree; the host workspace holds
+// launch recipe, heartbeat prompt, and tracker state only.
 func cmdWorkspaceInit(args []string) error {
-	agent, rosterPath, err := parseAgentRosterArgs("workspace init", args)
+	opts, err := parseWorkspaceInitArgs(args)
 	if err != nil {
 		return err
 	}
-	cfg, err := roster.Load(rosterPath)
+	cfg, err := roster.Load(opts.rosterPath)
 	if err != nil {
 		return err
 	}
-	a, err := cfg.Agent(agent)
+	a, err := cfg.Agent(opts.agent)
 	if err != nil {
 		return err
 	}
-	identity, err := workspace.IdentityFileName(a.Surface)
+	harnessSurface := harnessAllocationSurface(cfg, opts.agent, a.Surface)
+	identity, err := workspace.IdentityFileName(harnessSurface)
 	if err != nil {
 		return err
-	}
-	dir, err := workspace.Dir(agent)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("create workspace %q: %w", dir, err)
 	}
 
-	// The identity is loaded at launch via the EMPIRICALLY-VERIFIED
-	// `--append-system-prompt-file` mechanism (a sentinel confirmed it loads the file's
-	// contents; --add-dir was refuted). cwd is left empty for the operator to fill —
-	// an empty cwd fails recipe validation, so resume errors clearly until it is set.
-	//
-	// CLAUDE-CODE-SPECIFIC: this recipe hardcodes `claude --append-system-prompt-file`
-	// for EVERY surface. The verified load path (and the verify-first probe) is Claude
-	// Code; for a non-Claude surface (grok/aider/opencode) the doctrine is still written
-	// into the surface's native identity file (forward-correct — the native harness reads
-	// it), but its load is NOT yet wired by this generated recipe. Per-surface launch/load
-	// is a documented fast-follow (openspec/changes/constitutional-skillset/proposal.md
-	// "Out of scope" → "Per-surface load mechanisms beyond Claude Code"). The seed below
-	// emits a runtime NOTICE for non-Claude surfaces so this limitation is visible, not
-	// silent.
-	launchTemplate := fmt.Sprintf(
-		`{"launch":"claude --append-system-prompt-file %s/%s -w %s","cwd":"","tmux":"flotilla:%s"}`+"\n",
-		dir, identity, agent, agent)
-	identityStub := fmt.Sprintf("# %s — desk identity\n\nYou are the %s desk. Describe this desk's standing role and task here.\n", agent, agent)
+	repoAbs, err := filepath.Abs(opts.repo)
+	if err != nil {
+		return fmt.Errorf("resolve --repo: %w", err)
+	}
+	worktreeAbs := opts.worktree
+	if worktreeAbs == "" {
+		worktreeAbs = workspace.DefaultWorktreePath(repoAbs, opts.agent)
+	}
+	worktreeAbs, err = filepath.Abs(worktreeAbs)
+	if err != nil {
+		return fmt.Errorf("resolve worktree path: %w", err)
+	}
+	if err := workspace.ProvisionWorktree(repoAbs, opts.branch, worktreeAbs); err != nil {
+		return err
+	}
 
-	files := []struct{ name, content string }{
-		{workspace.LaunchFileName, launchTemplate},
+	hostDir, err := workspace.Dir(opts.agent)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(hostDir, 0o755); err != nil {
+		return fmt.Errorf("create host workspace %q: %w", hostDir, err)
+	}
+
+	recipe, err := buildLaunchRecipe(worktreeAbs, opts.agent, identity, harnessSurface)
+	if err != nil {
+		return err
+	}
+	recipeJSON, err := json.Marshal(recipe)
+	if err != nil {
+		return err
+	}
+
+	identityStub := fmt.Sprintf("# %s — desk identity\n\nYou are the %s desk. Describe this desk's standing role and task here.\n", opts.agent, opts.agent)
+
+	hostFiles := []struct{ name, content string }{
+		{workspace.LaunchFileName, string(recipeJSON) + "\n"},
 		{workspace.HeartbeatFileName, ""},
 		{workspace.StateFileName, ""},
-		{identity, identityStub},
 	}
-	for _, f := range files {
-		p := filepath.Join(dir, f.name)
+	for _, f := range hostFiles {
+		p := filepath.Join(hostDir, f.name)
 		if _, statErr := os.Stat(p); statErr == nil {
 			fmt.Printf("  kept    %s\n", p)
 			continue
@@ -132,30 +183,82 @@ func cmdWorkspaceInit(args []string) error {
 		fmt.Printf("  created %s\n", p)
 	}
 
-	// Seed the constitutional doctrine into the just-written identity stub, by REUSING
-	// the same install routine `doctrine install` uses — a single source of
-	// append-idempotency. The stub is written FIRST (above), so the seed appends the
-	// marked block INTO it; the marker guard makes a re-init detect-and-skip rather than
-	// re-append, so a freshly scaffolded workspace is born with the doctrine in place
-	// and re-running init never duplicates it.
-	//
-	// MECHANISM COUPLING: this passes the WHOLE member set (doctrine.Members()), and
-	// Install dispatches by mechanism — identity-append members append into the identity
-	// file, heartbeat-skill members write a whole file into the workspace dir. Install
-	// takes the workspace dir + the identity base filename (the dir lets a whole-file
-	// member resolve its workspace-relative target). When a NEW mechanism ships it must
-	// be added to Install at the same time, or this seed (and `doctrine install`) errors
-	// on the new member.
-	results, err := doctrine.Install(dir, identity, doctrine.Members())
-	if err != nil {
-		return fmt.Errorf("seed doctrine into %q: %w", dir, err)
+	identityPath := filepath.Join(worktreeAbs, identity)
+	if _, statErr := os.Stat(identityPath); statErr == nil {
+		fmt.Printf("  kept    %s\n", identityPath)
+	} else if os.IsNotExist(statErr) {
+		if err := os.WriteFile(identityPath, []byte(identityStub), 0o644); err != nil {
+			return fmt.Errorf("write %q: %w", identityPath, err)
+		}
+		fmt.Printf("  created %s\n", identityPath)
+	} else {
+		return fmt.Errorf("stat identity %q: %w", identityPath, statErr)
 	}
-	identityPath := filepath.Join(dir, identity)
-	reportDoctrineResults(results, identityPath)
-	noteNonClaudeLoadFastFollow(a.Surface, identityPath)
 
-	fmt.Printf("workspace ready: %s\n", dir)
-	fmt.Printf("  → edit %s: set \"cwd\" to %s's absolute worktree path before resuming.\n",
-		filepath.Join(dir, workspace.LaunchFileName), agent)
+	results, err := doctrine.InstallSplit(worktreeAbs, hostDir, identity, doctrine.Members())
+	if err != nil {
+		return fmt.Errorf("seed doctrine into %q: %w", worktreeAbs, err)
+	}
+	reportDoctrineResults(results, identityPath)
+	noteNonClaudeLoadFastFollow(harnessSurface, identityPath)
+
+	fmt.Printf("workspace ready: %s\n", hostDir)
+	fmt.Printf("  worktree: %s (branch %q)\n", worktreeAbs, opts.branch)
+	fmt.Printf("  identity: %s\n", identityPath)
 	return nil
+}
+
+func buildLaunchRecipe(worktreeAbs, agent, identity, surface string) (launch.Recipe, error) {
+	launchCmd, err := workspaceLaunchCommand(worktreeAbs, agent, identity, surface)
+	if err != nil {
+		return launch.Recipe{}, err
+	}
+	return launch.Recipe{
+		Launch: launchCmd,
+		Cwd:    worktreeAbs,
+		Tmux:   fmt.Sprintf("flotilla:%s", agent),
+	}, nil
+}
+
+// harnessAllocationSurface applies operating-principles §10: coordinator seats
+// (any XO or CoS) always scaffold Claude; execution desks default to grok unless
+// the roster names another non-Claude surface explicitly.
+func harnessAllocationSurface(cfg *roster.Config, agent, rosterSurface string) string {
+	if cfg.IsCoordinator(agent) {
+		return "claude-code"
+	}
+	if rosterSurface == "" || rosterSurface == "claude-code" {
+		return "grok"
+	}
+	return rosterSurface
+}
+
+// shellQuote wraps s in POSIX single quotes for sh -c launch recipes. Embedded
+// single quotes are escaped as 0x27 0x5c 0x27 0x27 (quote, backslash, quote, quote) so
+// $, backticks, and $(...) inside the path are not expanded by the shell.
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// workspaceLaunchCommand returns the shell launch command for a harness surface.
+// Identity files live in the worktree (worktreeAbs); grok loads AGENTS.md from cwd.
+// Paths and agent names are POSIX single-quoted — Recipe.Launch is sh -c interpreted.
+func workspaceLaunchCommand(worktreeAbs, agent, identity, surface string) (string, error) {
+	switch surface {
+	case "", "claude-code":
+		return fmt.Sprintf("claude --append-system-prompt-file %s -w %s",
+			shellQuote(filepath.Join(worktreeAbs, identity)), shellQuote(agent)), nil
+	case "grok":
+		return "grok --model composer-2.5-fast", nil
+	default:
+		id, err := workspace.IdentityFileName(surface)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("claude --append-system-prompt-file %s -w %s",
+			shellQuote(filepath.Join(worktreeAbs, id)), shellQuote(agent)), nil
+	}
 }
