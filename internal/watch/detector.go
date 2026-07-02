@@ -1333,11 +1333,11 @@ func (d *Detector) pickDriveTarget(queue []string) string {
 	return queue[0]
 }
 
-// pruneDriveCounts drops per-item counts for items no longer in the unblocked queue (drained, or
-// the XO marked them blocked/done), so a re-appearing item starts fresh and the map can't grow
-// unbounded.
+// pruneDriveCounts drops per-item driveCount and lastDriveAt entries for items no longer in the
+// unblocked queue (drained, or the XO marked them blocked/done), so a re-appearing item starts
+// fresh and neither map grows unbounded.
 func (d *Detector) pruneDriveCounts(queue []string) {
-	if len(d.driveCount) == 0 {
+	if len(d.driveCount) == 0 && len(d.lastDriveAt) == 0 {
 		return
 	}
 	live := make(map[string]struct{}, len(queue))
@@ -1347,6 +1347,11 @@ func (d *Detector) pruneDriveCounts(queue []string) {
 	for item := range d.driveCount {
 		if _, ok := live[item]; !ok {
 			delete(d.driveCount, item)
+		}
+	}
+	for item := range d.lastDriveAt {
+		if _, ok := live[item]; !ok {
+			delete(d.lastDriveAt, item)
 		}
 	}
 }
