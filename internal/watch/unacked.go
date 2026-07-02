@@ -111,7 +111,7 @@ func (u *UnackedBackstop) sweepChannel(b roster.Channel, st *unackedState, now t
 	if u.reader == nil || u.cfg.OperatorUserID == "" {
 		return false
 	}
-	raw, err := u.reader.Recent(b.ChannelID, u.lookback)
+	raw, err := u.recentCoveringAckWindow(b.ChannelID, now)
 	if err != nil {
 		log.Printf("flotilla watch: unacked scan failed for %s: %v", channelLabel(b), err)
 		return false
@@ -127,7 +127,7 @@ func (u *UnackedBackstop) sweepChannel(b roster.Channel, st *unackedState, now t
 	var changed bool
 	var newAlerts []unacked.Finding
 	for _, f := range findings {
-		idx, ok := st.index(f.MessageID)
+		idx, ok := st.index(f.ChannelID, f.MessageID)
 		if !ok {
 			newAlerts = append(newAlerts, f)
 			st.Records = append(st.Records, alertedRecord{
@@ -157,6 +157,47 @@ func (u *UnackedBackstop) sweepChannel(b roster.Channel, st *unackedState, now t
 		u.alert(formatUnackedDigest(b, newAlerts))
 	}
 	return changed
+}
+
+// recentCoveringAckWindow paginates Recent() until the oldest returned message is at
+// or before the AckWindow cutoff (or the safety cap is hit). A fixed small lookback
+// drops eligible operator messages on busy channels before they age into MinAge.
+func (u *UnackedBackstop) recentCoveringAckWindow(channelID string, now time.Time) ([]transport.Message, error) {
+	ack := u.scanCfg.AckWindow
+	if ack <= 0 {
+		ack = unacked.DefaultAckWindow
+	}
+	cutoff := now.Add(-ack)
+	limit := u.lookback
+	if limit < unacked.DefaultLookback {
+		limit = unacked.DefaultLookback
+	}
+	for {
+		batch, err := u.reader.Recent(channelID, limit)
+		if err != nil {
+			return nil, err
+		}
+		if len(batch) == 0 {
+			return batch, nil
+		}
+		oldest := batch[0].Timestamp
+		if oldest.IsZero() || !oldest.After(cutoff) {
+			return batch, nil
+		}
+		if len(batch) < limit {
+			log.Printf("flotilla watch: unacked history for channel %s ends at %s — AckWindow cutoff %s not reached", channelID, oldest, cutoff)
+			return batch, nil
+		}
+		if limit >= unacked.MaxRecentLookback {
+			log.Printf("flotilla watch: unacked lookback capped at %d for channel %s; very busy channel may miss alerts", unacked.MaxRecentLookback, channelID)
+			return batch, nil
+		}
+		next := limit + unacked.RecentPageGrowth
+		if next > unacked.MaxRecentLookback {
+			next = unacked.MaxRecentLookback
+		}
+		limit = next
+	}
 }
 
 func (u *UnackedBackstop) tryCoordinatorWake(b roster.Channel, f unacked.Finding) error {

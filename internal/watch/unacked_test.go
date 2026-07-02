@@ -131,3 +131,95 @@ func TestCoordinatorWakeBusyIsRetryable(t *testing.T) {
 	}
 	_ = unacked.DefaultMinAge
 }
+
+func TestUnackedState_IndexByChannelAndMessage(t *testing.T) {
+	now := time.Now()
+	st := unackedState{Records: []alertedRecord{
+		{MessageID: "100", ChannelID: "C1", AlertedAt: now},
+	}}
+	if _, ok := st.index("C2", "100"); ok {
+		t.Fatal("same message id on a different channel must not dedup")
+	}
+	if _, ok := st.index("C1", "100"); !ok {
+		t.Fatal("matching channel+message should dedup")
+	}
+}
+
+func TestRecentCoveringAckWindow_ExpandsPastDefaultLookback(t *testing.T) {
+	now := time.Date(2026, 7, 2, 14, 0, 0, 0, time.UTC)
+	var msgs []transport.Message
+	for i := 0; i < 120; i++ {
+		msgs = append(msgs, transport.Message{
+			ID:        "m",
+			AuthorID:  "noise",
+			Content:   "noise",
+			Timestamp: now.Add(-time.Duration(120-i) * time.Minute),
+		})
+	}
+	msgs[70] = transport.Message{
+		ID: "target", AuthorID: "op", Content: "Can you ship the fix?",
+		Timestamp: now.Add(-50 * time.Minute),
+	}
+	track := &limitTrackingRecent{msgs: msgs}
+	u := NewUnackedBackstop(&roster.Config{OperatorUserID: "op"}, track, "", func(string) {}, nil, nil)
+	u.now = func() time.Time { return now }
+
+	got, err := u.recentCoveringAckWindow("C1", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) < 100 {
+		t.Fatalf("expected expanded history (>=%d messages), got %d (limits tried %v)", 100, len(got), track.limits)
+	}
+	if got[0].Timestamp.After(now.Add(-unacked.DefaultAckWindow)) {
+		t.Fatalf("oldest message %v should reach AckWindow cutoff %v", got[0].Timestamp, now.Add(-unacked.DefaultAckWindow))
+	}
+}
+
+func TestUnackedBackstop_BusyChannelStillAlertsEligibleMessage(t *testing.T) {
+	now := time.Date(2026, 7, 2, 14, 0, 0, 0, time.UTC)
+	var msgs []transport.Message
+	for i := 0; i < 120; i++ {
+		msgs = append(msgs, transport.Message{
+			ID:        "noise",
+			AuthorID:  "other",
+			Content:   "channel chatter",
+			Timestamp: now.Add(-time.Duration(120-i) * time.Minute),
+		})
+	}
+	msgs[70] = transport.Message{
+		ID: "target", AuthorID: "op", Content: "Can you ship the fix?",
+		Timestamp: now.Add(-50 * time.Minute),
+	}
+	var alerts int
+	u := NewUnackedBackstop(
+		&roster.Config{OperatorUserID: "op", Channels: []roster.Channel{{ChannelID: "C1"}}},
+		&fakeRecent{byChannel: map[string][]transport.Message{"C1": msgs}},
+		"",
+		func(string) { alerts++ },
+		nil,
+		nil,
+	)
+	u.now = func() time.Time { return now }
+	st := unackedState{}
+	if !u.sweepChannel(roster.Channel{ChannelID: "C1"}, &st, now) {
+		t.Fatal("eligible operator message must alert even when >DefaultLookback newer messages exist")
+	}
+	if alerts != 1 {
+		t.Fatalf("alerts = %d, want 1", alerts)
+	}
+}
+
+type limitTrackingRecent struct {
+	msgs    []transport.Message
+	limits  []int
+}
+
+func (l *limitTrackingRecent) Recent(channelID string, limit int) ([]transport.Message, error) {
+	l.limits = append(l.limits, limit)
+	msgs := l.msgs
+	if limit <= 0 || limit >= len(msgs) {
+		return msgs, nil
+	}
+	return msgs[len(msgs)-limit:], nil
+}

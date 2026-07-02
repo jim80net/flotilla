@@ -105,9 +105,9 @@ func (s unackedStateStore) prune(st unackedState, now time.Time) unackedState {
 	return st
 }
 
-func (st *unackedState) index(messageID string) (int, bool) {
+func (st *unackedState) index(channelID, messageID string) (int, bool) {
 	for i, r := range st.Records {
-		if r.MessageID == messageID {
+		if r.ChannelID == channelID && r.MessageID == messageID {
 			return i, true
 		}
 	}
