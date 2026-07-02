@@ -270,6 +270,10 @@ type DetectorConfig struct {
 	// Activity ingests tick assess snapshots and turn-end/operator signals OFF d.mu
 	// for adaptive interval policy (PR 3). Nil ⇒ byte-inert.
 	Activity ActivityTracker
+
+	// AdaptiveInterval varies the live tick period from Activity output (PR 3).
+	// Nil ⇒ fixed cfg.Interval (byte-inert). Ticker mutations occur only in loop().
+	AdaptiveInterval AdaptiveInterval
 }
 
 // Detector is the v2 heartbeat: a deterministic, no-LLM tick that wakes the XO
@@ -331,6 +335,7 @@ type Detector struct {
 	stop         chan struct{}
 	done         chan struct{}
 	pokeCh       chan struct{}
+	intervalCh   chan time.Duration // buffered(1); loop goroutine owns ticker resets
 	pokeDebounce time.Duration
 	startOnce    sync.Once
 	stopOnce     sync.Once
@@ -461,10 +466,11 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 		// The detector computes the staleness threshold itself (age > alertWindow),
 		// so the watchdog only needs to trip on the first stale/crash
 		// signal and debounce — maxMissed=1.
-		wd:     NewWatchdog(1, cfg.Alert),
-		stop:   make(chan struct{}),
-		done:   make(chan struct{}),
-		pokeCh: make(chan struct{}, 1),
+		wd:         NewWatchdog(1, cfg.Alert),
+		stop:       make(chan struct{}),
+		done:       make(chan struct{}),
+		pokeCh:     make(chan struct{}, 1),
+		intervalCh: make(chan time.Duration, 1),
 	}
 	if cfg.PokeDebounce <= 0 {
 		d.pokeDebounce = DefaultPokeDebounce
@@ -573,7 +579,8 @@ func (d *Detector) loop() {
 		<-d.stop
 		return
 	}
-	t := time.NewTicker(d.cfg.Interval)
+	interval := d.currentInterval()
+	t := time.NewTicker(interval)
 	defer t.Stop()
 	var debounce *time.Timer
 	var debounceC <-chan time.Time
@@ -589,6 +596,11 @@ func (d *Detector) loop() {
 		debounce = time.NewTimer(d.pokeDebounce)
 		debounceC = debounce.C
 	}
+	resetTicker := func(newInterval time.Duration) {
+		drainTicker(t)
+		t.Stop()
+		t = time.NewTicker(newInterval)
+	}
 	for {
 		select {
 		case <-d.stop:
@@ -596,14 +608,47 @@ func (d *Detector) loop() {
 				debounce.Stop()
 			}
 			return
+		case newInterval := <-d.intervalCh:
+			resetTicker(newInterval)
 		case <-t.C:
 			d.Tick()
+			d.maybeQueueIntervalUpdate()
 		case <-d.pokeCh:
 			resetDebounce()
 		case <-debounceC:
 			debounceC = nil
 			d.Tick()
+			d.maybeQueueIntervalUpdate()
 		}
+	}
+}
+
+func (d *Detector) currentInterval() time.Duration {
+	if d.cfg.AdaptiveInterval != nil {
+		return d.cfg.AdaptiveInterval.Current()
+	}
+	return d.cfg.Interval
+}
+
+// maybeQueueIntervalUpdate reads activity + adaptive policy OFF d.mu and coalesces
+// a ticker reset request to the loop goroutine (the sole ticker owner).
+func (d *Detector) maybeQueueIntervalUpdate() {
+	if d.cfg.AdaptiveInterval == nil || d.cfg.Activity == nil {
+		return
+	}
+	snap := d.cfg.Activity.Snapshot(d.now())
+	interval, changed := d.cfg.AdaptiveInterval.Update(snap)
+	if !changed {
+		return
+	}
+	select {
+	case d.intervalCh <- interval:
+	default:
+		select {
+		case <-d.intervalCh:
+		default:
+		}
+		d.intervalCh <- interval
 	}
 }
 
