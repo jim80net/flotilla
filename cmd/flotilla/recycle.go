@@ -70,7 +70,7 @@ type recycleOps struct {
 	removeWorktree bool
 	capturePane    func(target string) (string, error)
 	answerMenu     func(target, choice string) error // deliver.SendMenuChoice ("1" keep, "2" remove)
-	countDirty     func(cwd string) (int, error)       // deliver.CountUncommitted
+	countDirty     func(cwd string) (int, error)     // deliver.CountUncommitted
 }
 
 // worktreeCloseNote records how pollClosed answered Claude Code's worktree-exit menu (empty

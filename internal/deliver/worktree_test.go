@@ -69,6 +69,12 @@ func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=flotilla-test",
+		"GIT_AUTHOR_EMAIL=test@invalid",
+		"GIT_COMMITTER_NAME=flotilla-test",
+		"GIT_COMMITTER_EMAIL=test@invalid",
+	)
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
 	}
