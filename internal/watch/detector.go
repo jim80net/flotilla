@@ -602,8 +602,9 @@ func (d *Detector) loop() {
 		debounceC = debounce.C
 	}
 	resetTicker := func(newInterval time.Duration) {
-		drainTicker(t)
-		t.Stop()
+		old := t
+		drainTicker(old)
+		old.Stop()
 		t = time.NewTicker(d.positiveTickInterval(newInterval))
 	}
 	for {

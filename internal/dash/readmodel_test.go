@@ -12,6 +12,17 @@ import (
 	"github.com/jim80net/flotilla/internal/watch"
 )
 
+func TestReferenceIntervalCeiling(t *testing.T) {
+	if got := ReferenceIntervalCeiling(20 * time.Minute); got != 20*time.Minute {
+		t.Errorf("ceiling(20m) = %v, want 20m", got)
+	}
+	t.Setenv("FLOTILLA_WATCH_INTERVAL", "15m")
+	if got := ReferenceIntervalCeiling(20 * time.Minute); got != 15*time.Minute {
+		t.Errorf("ceiling with env override = %v, want 15m", got)
+	}
+	t.Setenv("FLOTILLA_WATCH_INTERVAL", "")
+}
+
 func TestFreshnessThreshold(t *testing.T) {
 	if got := FreshnessThreshold(20 * time.Minute); got != 60*time.Minute {
 		t.Errorf("threshold(20m) = %v, want 60m", got)

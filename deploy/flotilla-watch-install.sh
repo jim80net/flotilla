@@ -48,7 +48,7 @@ fi
 # cmd/flotilla/watch.go), so without this pre-clear an inherited value would inject
 # `--backlog-file` even when the .env omits the optional key, silently breaking the
 # byte-identical-when-unset guarantee. The value must come from the .env ONLY.
-FLOTILLA_WORKDIR='' FLOTILLA_BIN='' FLOTILLA_ROSTER='' FLOTILLA_SECRETS='' FLOTILLA_ACK_FILE='' FLOTILLA_BACKLOG_FILE='' FLOTILLA_WATCH_INTERVAL='' FLOTILLA_EVENT_POLL_INTERVAL=''
+FLOTILLA_WORKDIR='' FLOTILLA_BIN='' FLOTILLA_ROSTER='' FLOTILLA_SECRETS='' FLOTILLA_ACK_FILE='' FLOTILLA_BACKLOG_FILE='' FLOTILLA_WATCH_INTERVAL='' FLOTILLA_EVENT_POLL_INTERVAL='' FLOTILLA_ADAPTIVE_INTERVAL='' FLOTILLA_INTERVAL_FLOOR='' FLOTILLA_INTERVAL_WARM='' FLOTILLA_INTERVAL_IDLE_STABLE='' FLOTILLA_INTERVAL_RELEASE_STEP=''
 while IFS= read -r line || [[ -n "$line" ]]; do
   line="${line%$'\r'}"
   [[ -z "$line" || "$line" == \#* ]] && continue
@@ -60,7 +60,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   val="${val#"${val%%[![:space:]]*}"}"
   val="${val%"${val##*[![:space:]]}"}"
   case "$key" in
-    FLOTILLA_WORKDIR|FLOTILLA_BIN|FLOTILLA_ROSTER|FLOTILLA_SECRETS|FLOTILLA_ACK_FILE|FLOTILLA_BACKLOG_FILE|FLOTILLA_WATCH_INTERVAL|FLOTILLA_EVENT_POLL_INTERVAL)
+    FLOTILLA_WORKDIR|FLOTILLA_BIN|FLOTILLA_ROSTER|FLOTILLA_SECRETS|FLOTILLA_ACK_FILE|FLOTILLA_BACKLOG_FILE|FLOTILLA_WATCH_INTERVAL|FLOTILLA_EVENT_POLL_INTERVAL|FLOTILLA_ADAPTIVE_INTERVAL|FLOTILLA_INTERVAL_FLOOR|FLOTILLA_INTERVAL_WARM|FLOTILLA_INTERVAL_IDLE_STABLE|FLOTILLA_INTERVAL_RELEASE_STEP)
       printf -v "$key" '%s' "$val" ;;
     *) echo "warning: ignoring unknown key in $ENV_FILE: $key" >&2 ;;
   esac
@@ -78,7 +78,7 @@ fi
 # A value must never itself contain a template token, or a later substitution pass
 # would rewrite it (substitution is sequential). Implausible for a real path, but
 # cheap to make the substitution provably safe.
-for v in FLOTILLA_WORKDIR FLOTILLA_BIN FLOTILLA_ROSTER FLOTILLA_SECRETS FLOTILLA_ACK_FILE FLOTILLA_BACKLOG_FILE FLOTILLA_WATCH_INTERVAL FLOTILLA_EVENT_POLL_INTERVAL; do
+for v in FLOTILLA_WORKDIR FLOTILLA_BIN FLOTILLA_ROSTER FLOTILLA_SECRETS FLOTILLA_ACK_FILE FLOTILLA_BACKLOG_FILE FLOTILLA_WATCH_INTERVAL FLOTILLA_EVENT_POLL_INTERVAL FLOTILLA_ADAPTIVE_INTERVAL FLOTILLA_INTERVAL_FLOOR FLOTILLA_INTERVAL_WARM FLOTILLA_INTERVAL_IDLE_STABLE FLOTILLA_INTERVAL_RELEASE_STEP; do
   if [[ "${!v}" == *@FLOTILLA_*@* ]]; then
     echo "error: $v contains a template placeholder token (@FLOTILLA_...@); refusing" >&2
     exit 1
@@ -123,6 +123,28 @@ if [[ -n "$FLOTILLA_EVENT_POLL_INTERVAL" ]]; then
   latency_args+=" --event-poll-interval $FLOTILLA_EVENT_POLL_INTERVAL"
 fi
 content="${content//@FLOTILLA_LATENCY_ARGS@/$latency_args}"
+
+adaptive_args=""
+if [[ -n "$FLOTILLA_ADAPTIVE_INTERVAL" ]]; then
+  case "$(printf '%s' "$FLOTILLA_ADAPTIVE_INTERVAL" | tr '[:upper:]' '[:lower:]')" in
+    0|false|no|off) adaptive_args+=" --adaptive-interval false" ;;
+    1|true|yes|on)  adaptive_args+=" --adaptive-interval true" ;;
+    *) echo "warning: ignoring unrecognized FLOTILLA_ADAPTIVE_INTERVAL=$FLOTILLA_ADAPTIVE_INTERVAL (use 0/1 or true/false)" >&2 ;;
+  esac
+fi
+if [[ -n "$FLOTILLA_INTERVAL_FLOOR" ]]; then
+  adaptive_args+=" --interval-floor $FLOTILLA_INTERVAL_FLOOR"
+fi
+if [[ -n "$FLOTILLA_INTERVAL_WARM" ]]; then
+  adaptive_args+=" --interval-warm $FLOTILLA_INTERVAL_WARM"
+fi
+if [[ -n "$FLOTILLA_INTERVAL_IDLE_STABLE" ]]; then
+  adaptive_args+=" --interval-idle-stable $FLOTILLA_INTERVAL_IDLE_STABLE"
+fi
+if [[ -n "$FLOTILLA_INTERVAL_RELEASE_STEP" ]]; then
+  adaptive_args+=" --interval-release-step $FLOTILLA_INTERVAL_RELEASE_STEP"
+fi
+content="${content//@FLOTILLA_ADAPTIVE_ARGS@/$adaptive_args}"
 
 # Fail loudly if any placeholder survived (a typo'd or newly-added template token).
 # The offender-grep charset includes * and . so it always prints SOMETHING that the

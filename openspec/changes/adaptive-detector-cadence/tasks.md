@@ -4,6 +4,6 @@
 - [ ] 3. PR 1: Wall-time sub-cadences (`referenceInterval` anchor; full P0 table)
 - [ ] 4. PR 2: `ActivityTracker` ingestion OFF `d.mu`
 - [ ] 5. PR 3: `AdaptiveInterval` + dynamic `Detector.loop` ticker
-- [ ] 6. PR 4: CLI/env/deploy + dash `FreshnessThreshold` wiring
+- [x] 6. PR 4: CLI/env/deploy + dash `FreshnessThreshold` wiring
 - [ ] 7. PR 5: Runbook + openspec promotion
 - [ ] 8. Canary 48h (`FLOOR=5m`) → GA default `ADAPTIVE_INTERVAL=true`, floor 2m

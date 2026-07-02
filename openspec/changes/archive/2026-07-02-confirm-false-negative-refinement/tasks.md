@@ -2,3 +2,4 @@
 - [x] Add expiry soft-success for `ComposerCleared` / `ComposerQueued`
 - [x] Unit tests: cleared-at-expiry, queued-late, queued-at-expiry
 - [x] openspec delta under `specs/surface/spec.md`
+- [x] archived to `openspec/specs/surface/spec.md` (2026-07-02)

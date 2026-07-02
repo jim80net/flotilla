@@ -99,8 +99,13 @@ func cmdWatch(args []string) error {
 	settledPath := fs.String("settled-file", os.Getenv("FLOTILLA_SETTLED_FILE"), "XO settle (idle) marker (default <roster-dir>/flotilla-xo-settled)")
 	trackerPath := fs.String("tracker-file", os.Getenv("FLOTILLA_TRACKER_FILE"), "the XO's state tracker the continuation prompt names as {{tracker}} (default <roster-dir>/.flotilla-state.md); NOT hashed as a wake signal — it is the XO's own output")
 	signalPath := fs.String("signal-file", os.Getenv("FLOTILLA_SIGNAL_FILE"), "optional external signal file whose content-hash change wakes the XO (a file the XO does NOT write; unset ⇒ no external-signal trigger)")
-	intervalFlag := fs.String("interval", "", "change-detector tick interval (overrides roster heartbeat_interval; env FLOTILLA_WATCH_INTERVAL; e.g. 5m, 20m)")
+	intervalFlag := fs.String("interval", "", "change-detector tick interval (overrides roster heartbeat_interval; env FLOTILLA_WATCH_INTERVAL; when adaptive ON this is the ceiling; e.g. 5m, 20m)")
 	eventPollFlag := fs.String("event-poll-interval", "", "fast desk-state poll for turn-end pokes (env FLOTILLA_EVENT_POLL_INTERVAL; default 5s; 0 disables)")
+	adaptiveFlag := fs.String("adaptive-interval", "", "adaptive detector tick policy (env FLOTILLA_ADAPTIVE_INTERVAL; default on; 0/false disables)")
+	intervalFloorFlag := fs.String("interval-floor", "", "adaptive Active-tier floor (env FLOTILLA_INTERVAL_FLOOR; default 2m)")
+	intervalWarmFlag := fs.String("interval-warm", "", "adaptive Warm tier (env FLOTILLA_INTERVAL_WARM; default 8m)")
+	intervalIdleStableFlag := fs.String("interval-idle-stable", "", "adaptive hysteresis before ceiling (env FLOTILLA_INTERVAL_IDLE_STABLE; default 10m)")
+	intervalReleaseStepFlag := fs.String("interval-release-step", "", "adaptive release decay cadence (env FLOTILLA_INTERVAL_RELEASE_STEP; default 5m)")
 	maxQuiet := fs.Int("max-quiet-intervals", 0, "change-detector liveness ping cadence N in intervals (0 ⇒ mode default)")
 	maxSelfCont := fs.Int("max-self-continuations", 3, "change-detector cap on consecutive XO self-continuations with no external change")
 	backlogPath := fs.String("backlog-file", os.Getenv("FLOTILLA_BACKLOG_FILE"), "the goal-driven loop's fleet backlog (markdown; - [<status>] items). Unset ⇒ the backlog gate is OFF (XO settles as before). Read fresh each tick, NOT content-hashed (it is the XO's own output)")
@@ -535,6 +540,29 @@ func cmdWatch(args []string) error {
 		if referenceInterval <= 0 {
 			referenceInterval = interval
 		}
+		ceiling := interval
+		adaptiveOn := adaptiveIntervalEnabled(*adaptiveFlag)
+		var adaptivePolicy watch.AdaptiveInterval
+		if adaptiveOn {
+			acfg := watch.DefaultAdaptiveConfig(ceiling)
+			if d, ok := optionalDuration(*intervalFloorFlag, "FLOTILLA_INTERVAL_FLOOR"); ok {
+				acfg.Floor = d
+			}
+			if d, ok := optionalDuration(*intervalWarmFlag, "FLOTILLA_INTERVAL_WARM"); ok {
+				acfg.Warm = d
+			}
+			if d, ok := optionalDuration(*intervalIdleStableFlag, "FLOTILLA_INTERVAL_IDLE_STABLE"); ok {
+				acfg.IdleStableFor = d
+			}
+			if d, ok := optionalDuration(*intervalReleaseStepFlag, "FLOTILLA_INTERVAL_RELEASE_STEP"); ok {
+				acfg.ReleaseStepEvery = d
+			}
+			adaptivePolicy = watch.NewAdaptiveInterval(acfg)
+			interval = adaptivePolicy.Current()
+			log.Printf("flotilla watch: adaptive-interval ON — cold-start at ceiling=%s floor=%s warm=%s (activity fail-safe Active until first tick ingests fleet state; restart has no durable tier)", acfg.Ceiling, acfg.Floor, acfg.Warm)
+		} else {
+			log.Printf("flotilla watch: adaptive-interval OFF — fixed tick %s", interval)
+		}
 		activity := watch.NewActivityTracker(watch.DefaultActivityConfig())
 		detCfg := watch.DetectorConfig{
 			XOAgent:           xo,
@@ -620,6 +648,7 @@ func cmdWatch(args []string) error {
 			DeskEscalate:            deskEscalate,
 			DeskHeartbeatEveryTicks: 1,
 			Activity:                activity,
+			AdaptiveInterval:        adaptivePolicy,
 		}
 		if autoSwitchOn {
 			probeMaterial := rateLimitMaterial(cfg)
@@ -658,8 +687,12 @@ func cmdWatch(args []string) error {
 		if mode == "" {
 			mode = "none"
 		}
+		intervalLabel := interval.String()
+		if adaptiveOn {
+			intervalLabel = "adaptive ceiling=" + ceiling.String() + " current=" + interval.String()
+		}
 		fmt.Printf("flotilla watch: change-detector running — XO=%s interval=%s event-poll=%s ping-mode=%s ack=%s snapshot=%s\n",
-			xo, interval, eventPollInterval, mode, *ackPath, *snapshotPath)
+			xo, intervalLabel, eventPollInterval, mode, *ackPath, *snapshotPath)
 		logMirrorCoverage(cfg, secrets, xo)
 		if cfg.VisibilitySynthesis {
 			fmt.Printf("flotilla watch: visibility-synthesis ON — every %d ticks an OWED agent rolls up its tier below; sidecar=%s\n",
@@ -1249,4 +1282,40 @@ func agentSurface(cfg *roster.Config, name string) string {
 		return a.Surface
 	}
 	return ""
+}
+
+// adaptiveIntervalEnabled resolves the adaptive master switch: explicit --adaptive-interval
+// wins, else FLOTILLA_ADAPTIVE_INTERVAL (default on).
+func adaptiveIntervalEnabled(flagVal string) bool {
+	if s := strings.TrimSpace(flagVal); s != "" {
+		switch strings.ToLower(s) {
+		case "0", "false", "no", "off":
+			return false
+		case "1", "true", "yes", "on":
+			return true
+		default:
+			// Unrecognized explicit value — fail closed to fixed tick (safer than guessing).
+			return false
+		}
+	}
+	return watch.AdaptiveIntervalEnabled()
+}
+
+// optionalDuration reads a positive duration from a CLI flag, else from envKey.
+func optionalDuration(flagVal, envKey string) (time.Duration, bool) {
+	if s := strings.TrimSpace(flagVal); s != "" {
+		d, err := time.ParseDuration(s)
+		if err != nil || d <= 0 {
+			return 0, false
+		}
+		return d, true
+	}
+	if s := strings.TrimSpace(os.Getenv(envKey)); s != "" {
+		d, err := time.ParseDuration(s)
+		if err != nil || d <= 0 {
+			return 0, false
+		}
+		return d, true
+	}
+	return 0, false
 }

@@ -1,10 +1,23 @@
 package watch
 
 import (
+	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
+
+// AdaptiveIntervalEnabled reports whether the fleet-wide adaptive detector tick is on.
+// DEFAULT ON at GA; disable explicitly with FLOTILLA_ADAPTIVE_INTERVAL=0/false/no/off.
+// ONE definition shared by watch CLI + deploy installer docs.
+func AdaptiveIntervalEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FLOTILLA_ADAPTIVE_INTERVAL"))) {
+	case "0", "false", "no", "off":
+		return false
+	}
+	return true
+}
 
 // AdaptiveConfig tunes the fleet-wide adaptive tick policy (PR 3).
 type AdaptiveConfig struct {

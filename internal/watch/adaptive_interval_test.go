@@ -1,9 +1,28 @@
 package watch
 
 import (
+	"os"
 	"testing"
 	"time"
 )
+
+func TestAdaptiveIntervalEnabled(t *testing.T) {
+	t.Setenv("FLOTILLA_ADAPTIVE_INTERVAL", "")
+	if !AdaptiveIntervalEnabled() {
+		t.Fatal("default must be enabled")
+	}
+	for _, off := range []string{"0", "false", "NO", "off"} {
+		t.Setenv("FLOTILLA_ADAPTIVE_INTERVAL", off)
+		if AdaptiveIntervalEnabled() {
+			t.Fatalf("%q must disable adaptive interval", off)
+		}
+	}
+	t.Setenv("FLOTILLA_ADAPTIVE_INTERVAL", "1")
+	if !AdaptiveIntervalEnabled() {
+		t.Fatal("1 must enable adaptive interval")
+	}
+	os.Unsetenv("FLOTILLA_ADAPTIVE_INTERVAL")
+}
 
 func testAdaptiveConfig() AdaptiveConfig {
 	return AdaptiveConfig{

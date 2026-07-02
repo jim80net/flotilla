@@ -284,6 +284,32 @@ func TestInstallerLatencyArgsSetAppendsFlags(t *testing.T) {
 	}
 }
 
+func adaptiveEnv(t *testing.T, extra map[string]string) string {
+	t.Helper()
+	return baseEnv(t, "adaptive.env", extra)
+}
+
+func TestInstallerAdaptiveArgsUnsetOmitsFragment(t *testing.T) {
+	unit := renderUnitEnv(t, adaptiveEnv(t, nil))
+	if strings.Contains(execLine(t, unit), "--adaptive-interval") {
+		t.Fatal("unset adaptive env must omit adaptive flags")
+	}
+}
+
+func TestInstallerAdaptiveArgsSetAppendsFlags(t *testing.T) {
+	unit := renderUnitEnv(t, adaptiveEnv(t, map[string]string{
+		"FLOTILLA_ADAPTIVE_INTERVAL":     "false",
+		"FLOTILLA_INTERVAL_FLOOR":        "3m",
+		"FLOTILLA_INTERVAL_WARM":         "6m",
+		"FLOTILLA_INTERVAL_IDLE_STABLE":  "12m",
+		"FLOTILLA_INTERVAL_RELEASE_STEP": "4m",
+	}))
+	want := "ExecStart=%h/go/bin/flotilla watch --roster /srv/fleet/flotilla.json --secrets /srv/fleet/secrets.env --ack-file /srv/fleet/xo-alive --adaptive-interval false --interval-floor 3m --interval-warm 6m --interval-idle-stable 12m --interval-release-step 4m"
+	if got := execLine(t, unit); got != want {
+		t.Errorf("ExecStart with adaptive env:\n got:  %q\n want: %q", got, want)
+	}
+}
+
 func TestInstallerBacklogInheritedEnvNoLeak(t *testing.T) {
 	unit := renderUnitEnv(t, backlogEnv(t, ""), "FLOTILLA_BACKLOG_FILE=/leak/should/not/appear.md")
 	// Scope the assertion to the ExecStart directive — the template's descriptive

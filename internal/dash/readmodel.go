@@ -14,6 +14,7 @@
 package dash
 
 import (
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -32,16 +33,29 @@ import (
 // documented common heartbeat (internal/roster/roster.go comments).
 const defaultHeartbeat = 20 * time.Minute
 
-// FreshnessThreshold derives the snapshot staleness threshold from the watch
-// tick cadence: a snapshot older than 3× the heartbeat interval is STALE (the
-// same K-window order the detector's liveness uses). A non-positive interval
-// (heartbeat disabled) falls back to defaultHeartbeat so the threshold is always
-// meaningful.
-func FreshnessThreshold(heartbeat time.Duration) time.Duration {
-	if heartbeat <= 0 {
-		heartbeat = defaultHeartbeat
+// ReferenceIntervalCeiling is the roster heartbeat_interval (the adaptive ceiling
+// anchor), optionally overridden by FLOTILLA_WATCH_INTERVAL — the same ceiling
+// watch uses for wall-time sub-cadences and dash freshness (K9), NOT the live
+// adaptive floor tick.
+func ReferenceIntervalCeiling(rosterHeartbeat time.Duration) time.Duration {
+	hb := rosterHeartbeat
+	if hb <= 0 {
+		hb = defaultHeartbeat
 	}
-	return 3 * heartbeat
+	if s := strings.TrimSpace(os.Getenv("FLOTILLA_WATCH_INTERVAL")); s != "" {
+		if d, err := time.ParseDuration(s); err == nil && d > 0 {
+			return d
+		}
+	}
+	return hb
+}
+
+// FreshnessThreshold derives the snapshot staleness threshold from the watch
+// reference ceiling: a snapshot older than 3× that interval is STALE (the same
+// K-window order the detector's liveness uses). A non-positive roster heartbeat
+// falls back to defaultHeartbeat so the threshold is always meaningful.
+func FreshnessThreshold(heartbeat time.Duration) time.Duration {
+	return 3 * ReferenceIntervalCeiling(heartbeat)
 }
 
 // Freshness is the three-state snapshot freshness (design §3): the operator
