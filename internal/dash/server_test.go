@@ -197,10 +197,15 @@ func TestControlTargetsNotClobberedGuard(t *testing.T) {
 	if !strings.Contains(js, "controlTargetsTouched") {
 		t.Error("dash.js must guard control-target prefill with the controlTargetsTouched flag (#235: a refresh must not clobber operator input)")
 	}
-	// The refresh path must call syncControlTargets in non-explicit (guarded) mode,
-	// while the explicit desk-selection path passes true — assert both forms exist.
+	// Assert BOTH call forms: the explicit desk-selection path passes true (set
+	// authoritatively), and the refresh path calls the GUARDED no-arg form (prefill
+	// only when untouched). Locking both is what keeps a future edit from either
+	// dropping the explicit set OR reintroducing an unconditional refresh-time set.
 	if !strings.Contains(js, "syncControlTargets(true)") {
 		t.Error("dash.js must set targets authoritatively only on explicit desk-selection (syncControlTargets(true))")
+	}
+	if !strings.Contains(js, "syncControlTargets();") {
+		t.Error("dash.js refresh path must call the GUARDED (non-explicit) syncControlTargets() — #235: a refresh must not force-set the target")
 	}
 	if !strings.Contains(js, `addEventListener("input"`) {
 		t.Error("dash.js must mark control targets touched on operator input (an input listener)")
