@@ -12,8 +12,9 @@ import (
 // (~/.flotilla/*/launch.json) and flat-file recipes for agents WITHOUT a workspace
 // (so the invariant spans both during migration). `target` is the resolving agent's
 // explicit tmux target — empty means no explicit target (resume derives the default
-// flotilla:<agent>, which never collides across distinct agents), so the check is a
-// no-op, matching the flat file's behaviour of only guarding explicit targets.
+// per-agent session flotilla-<agent>:desk, which never collides across distinct
+// agents), so the check is a no-op, matching the flat file's behaviour of only
+// guarding explicit targets.
 //
 // Unlike the flat file's fail-closed load, a malformed/unreadable OTHER workspace is
 // SKIPPED (surfaced in warnings), NOT fail-closed — a broken unrelated workspace MUST

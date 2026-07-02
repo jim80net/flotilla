@@ -21,6 +21,7 @@ type resumeOps struct {
 	assess     func(target string) surface.State
 	respawn    func(target, cwd, launch string) error
 	readMarker func(target string) (string, error)
+	killPane   func(target string) error
 	hasSession func(session string) (bool, error)
 	newSession func(session, name, cwd, launch string) (string, error)
 	newWindow  func(session, name, cwd, launch string) (string, error)
@@ -30,6 +31,7 @@ type resumeOps struct {
 // resumePlan is the resolved per-agent input to runResume.
 type resumePlan struct {
 	agent, key, cwd, launch, session, window string
+	perAgentSession                          bool
 	force                                    bool
 }
 
@@ -116,12 +118,13 @@ func cmdResume(args []string) error {
 		defer txn.Release()
 	}
 
-	session, window := resumeTmuxTarget(recipe, agentName)
+	session, window := launch.ResumeTarget(recipe, agentName)
 	ops := resumeOps{
 		resolve:    deliver.Resolve,
 		assess:     drv.Assess,
 		respawn:    deliver.RespawnPane,
 		readMarker: deliver.ReadMarker,
+		killPane:   deliver.KillPane,
 		hasSession: deliver.HasSession,
 		newSession: deliver.NewSession,
 		newWindow:  deliver.NewWindow,
@@ -129,7 +132,9 @@ func cmdResume(args []string) error {
 	}
 	plan := resumePlan{
 		agent: agentName, key: agent.Title(), cwd: recipe.Cwd, launch: recipe.Launch,
-		session: session, window: window, force: force,
+		session: session, window: window,
+		perAgentSession: launch.IsPerAgentSession(session),
+		force:           force,
 	}
 	msg, err := runResume(ops, plan)
 	if err != nil {
@@ -150,6 +155,20 @@ func runResume(ops resumeOps, p resumePlan) (string, error) {
 
 	switch outcome {
 	case deliver.ResolveUnique:
+		// Per-agent topology: a tagged pane in a session other than the target
+		// (typically a dead-shell orphan in the legacy shared flotilla session)
+		// blocks migration to flotilla-<agent>. Discard a dead shell (or --force on
+		// live) and cold-create in the target session; refuse if live without force.
+		if p.perAgentSession && deliver.PaneSession(target) != p.session {
+			st := ops.assess(target)
+			if !p.force && st != surface.StateShell {
+				return "", fmt.Errorf("%q: tagged pane %s is %s in session %q (target session %q) — close it first, or pass --force", p.agent, target, st, deliver.PaneSession(target), p.session)
+			}
+			if err := ops.killPane(target); err != nil {
+				return "", err
+			}
+			return coldCreateResume(ops, p, target)
+		}
 		// A pane already exists for this desk. FAIL-SAFE liveness interlock: respawn
 		// ONLY when the pane is a definitively-dead shell (or --force). Refuse on
 		// every other state — working / idle / awaiting-input / awaiting-approval /
@@ -188,35 +207,50 @@ func runResume(ops resumeOps, p resumePlan) (string, error) {
 		return "", fmt.Errorf("ambiguous: more than one tmux pane resolves for %q — the fleet is mis-tagged; re-tag the right one with: flotilla register %s --pane <target>, then retry", p.agent, p.agent)
 
 	default: // deliver.ResolveNone — genuine cold recovery
-		// An absent session covers TOTAL tmux-server death (the first tmux call
-		// cold-starts the server). Concurrency: resolve-by-marker-first above is the
-		// primary guard — a racing second invocation finds the first's tagged pane
-		// and respawns in place. A residual cold-create race remains (two cold
-		// invocations both passing ResolveNone before either tags); PR-1 does not add
-		// a lockfile — a second window is recoverable, operator-visible state, not a
-		// duplicate marker.
-		exists, err := ops.hasSession(p.session)
-		if err != nil {
-			return "", err
-		}
-		var newTarget string
-		if exists {
-			newTarget, err = ops.newWindow(p.session, p.window, p.cwd, p.launch)
-		} else {
-			newTarget, err = ops.newSession(p.session, p.window, p.cwd, p.launch)
-		}
-		if err != nil {
-			return "", err
-		}
-		// The cold-create branch is the only one that creates the marker. TagPane's
-		// read-back confirms it landed on the intended pane. If tagging fails the
-		// desk is ALREADY running (untagged) — say so, so the operator tags it
-		// rather than re-resuming into a second pane.
-		if err := ops.tag(newTarget, p.key); err != nil {
-			return "", fmt.Errorf("launched %s at %s but tagging failed: %w — the desk IS running; tag it with: flotilla register %s --pane %s", p.agent, newTarget, err, p.agent, newTarget)
-		}
-		return fmt.Sprintf("resumed %s (cold) → pane %s (tagged @flotilla_agent=%s)\n", p.agent, newTarget, p.key), nil
+		return coldCreateResume(ops, p, "")
 	}
+}
+
+// coldCreateResume creates a desk in p.session when no pane resolves (or after
+// discarding a stale tagged pane in the wrong session). discardedStale is
+// non-empty when migration killed an orphan pane first.
+func coldCreateResume(ops resumeOps, p resumePlan, discardedStale string) (string, error) {
+	// An absent session covers TOTAL tmux-server death (the first tmux call
+	// cold-starts the server). Concurrency: resolve-by-marker-first above is the
+	// primary guard — a racing second invocation finds the first's tagged pane
+	// and respawns in place. A residual cold-create race remains (two cold
+	// invocations both passing ResolveNone before either tags); PR-1 does not add
+	// a lockfile — a second window is recoverable, operator-visible state, not a
+	// duplicate marker.
+	exists, err := ops.hasSession(p.session)
+	if err != nil {
+		return "", err
+	}
+	var newTarget string
+	switch {
+	case exists && p.perAgentSession:
+		// Per-agent session exists but no pane resolved — do not add a second
+		// window; surface a clear recovery path (orphan session or mis-tag).
+		return "", fmt.Errorf("%q: per-agent session %q exists but no pane resolves for %q — kill the orphan session or tag the pane with: flotilla register %s --pane <target>", p.agent, p.session, p.key, p.agent)
+	case exists:
+		newTarget, err = ops.newWindow(p.session, p.window, p.cwd, p.launch)
+	default:
+		newTarget, err = ops.newSession(p.session, p.window, p.cwd, p.launch)
+	}
+	if err != nil {
+		return "", err
+	}
+	// The cold-create branch is the only one that creates the marker. TagPane's
+	// read-back confirms it landed on the intended pane. If tagging fails the
+	// desk is ALREADY running (untagged) — say so, so the operator tags it
+	// rather than re-resuming into a second pane.
+	if err := ops.tag(newTarget, p.key); err != nil {
+		return "", fmt.Errorf("launched %s at %s but tagging failed: %w — the desk IS running; tag it with: flotilla register %s --pane %s", p.agent, newTarget, err, p.agent, newTarget)
+	}
+	if discardedStale != "" {
+		return fmt.Sprintf("resumed %s (migrated, discarded stale %s) → pane %s (tagged @flotilla_agent=%s)\n", p.agent, discardedStale, newTarget, p.key), nil
+	}
+	return fmt.Sprintf("resumed %s (cold) → pane %s (tagged @flotilla_agent=%s)\n", p.agent, newTarget, p.key), nil
 }
 
 // printState surfaces the state pointer (if any) so the operator/skill can drive
@@ -230,19 +264,6 @@ func printState(agent string, r launch.Recipe) {
 		return
 	}
 	fmt.Printf("  state pointer: %s (drive /takeover from here — resume does NOT auto-restore context)\n", pointer)
-}
-
-// resumeTmuxTarget derives the (session, window) to cold-create into. A recipe
-// tmux of "session:window" splits there; an absent tmux defaults to the canonical
-// "flotilla" session with the agent name as the window (the design's
-// flotilla:<name> default). Validated at load (validTmuxTarget), so the split is
-// safe here.
-func resumeTmuxTarget(r launch.Recipe, agentName string) (session, window string) {
-	if r.Tmux != "" {
-		s, w, _ := strings.Cut(r.Tmux, ":")
-		return s, w
-	}
-	return "flotilla", agentName
 }
 
 // parseResumeArgs resolves the agent, roster path, launch path, and --force
