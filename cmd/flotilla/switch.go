@@ -359,7 +359,8 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 // switchToRecycleOps adapts the subset of switchOps the SHARED recycle poll-gates consume
 // (pollIdleCleared, pollHandoffGate, pollClosed, pollWorking, idleClearedWithHeal) into a
 // recycleOps value. switch REUSES those gates verbatim rather than re-implementing the
-// bounded-poll logic — they read only assess/composer/durable/paneDead/selfHeal/sleep, so
+// bounded-poll logic — they read assess/composer/durable/paneDead/selfHeal/sleep plus the
+// worktree-exit close helpers (capturePane, answerMenu, countDirty, cwd, removeWorktree), so
 // the adapter forwards exactly those. (The shared gates never touch the switch-only ops.)
 func switchToRecycleOps(ops switchOps, cwd string, removeWorktree bool) recycleOps {
 	return recycleOps{

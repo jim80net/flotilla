@@ -3,6 +3,7 @@ package deliver
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -21,6 +22,19 @@ func ClaudeWorktreeExitPrompt(captured string) bool {
 		strings.Contains(tail, "remove worktree")
 }
 
+// gitStableLocaleEnv returns os.Environ with LC_ALL and LANG forced to C so git's
+// English error strings (e.g. "not a git repository") match regardless of host locale.
+func gitStableLocaleEnv() []string {
+	env := make([]string, 0, len(os.Environ())+2)
+	for _, e := range os.Environ() {
+		if strings.HasPrefix(e, "LC_ALL=") || strings.HasPrefix(e, "LANG=") {
+			continue
+		}
+		env = append(env, e)
+	}
+	return append(env, "LC_ALL=C", "LANG=C")
+}
+
 // CountUncommitted returns the number of uncommitted paths in cwd per `git status
 // --porcelain` (modified, added, deleted, untracked). A non-git cwd returns (0, nil).
 func CountUncommitted(cwd string) (int, error) {
@@ -28,6 +42,7 @@ func CountUncommitted(cwd string) (int, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
 	cmd.Dir = cwd
+	cmd.Env = gitStableLocaleEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
