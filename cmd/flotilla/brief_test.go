@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jim80net/flotilla/internal/readermap"
+	"github.com/jim80net/flotilla/internal/roster"
 )
 
 func TestParseBriefArgs_DeskOrAllRequired(t *testing.T) {
@@ -114,6 +115,40 @@ func TestBuildBriefRequest_EmptyAudienceDefaultsOperator(t *testing.T) {
 	req := buildBriefRequest("")
 	if !strings.Contains(req, `"audience": "operator"`) {
 		t.Errorf("empty audience must default to operator; got %q", req)
+	}
+}
+
+func TestBriefTargets_SkipsPrimaryXO(t *testing.T) {
+	cfg := &roster.Config{
+		XOAgent: "cos",
+		Agents: []roster.Agent{
+			{Name: "cos"},
+			{Name: "backend"},
+			{Name: "frontend"},
+		},
+	}
+	got := briefTargets(cfg)
+	want := []string{"backend", "frontend"}
+	if len(got) != len(want) {
+		t.Fatalf("briefTargets = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("briefTargets = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestBriefTargets_SkipsAgents0WhenXOAgentEmpty(t *testing.T) {
+	cfg := &roster.Config{
+		Agents: []roster.Agent{
+			{Name: "lead-xo"},
+			{Name: "backend"},
+		},
+	}
+	got := briefTargets(cfg)
+	if len(got) != 1 || got[0] != "backend" {
+		t.Fatalf("with no XOAgent, briefTargets must skip Agents[0]; got %v", got)
 	}
 }
 

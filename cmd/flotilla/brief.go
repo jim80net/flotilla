@@ -63,8 +63,8 @@ func parseBriefArgs(args []string) (briefArgs, error) {
 }
 
 // parseBriefInterleavedArgs splits an optional desk name (accepted anywhere among the
-// args) from flag tokens so `brief --all --audience operator` and `brief backend --all`
-// both work — the stdlib flag parser stops at the first non-flag token.
+// args) from flag tokens so `brief --all --audience operator` and `brief --from cos
+// backend` both work — the stdlib flag parser stops at the first non-flag token.
 func parseBriefInterleavedArgs(args []string) (desk string, flagArgs []string, err error) {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -164,12 +164,23 @@ func cmdBrief(args []string) error {
 	return deliverBriefOne(cfg, secrets, a, a.desk)
 }
 
-// briefTargets returns every roster agent except the primary xo_agent — the same set
-// the per-desk mirror covers (logMirrorCoverage / detector pendingMirrors).
+// primaryXOAgent returns the hub XO name using the same rule as flotilla watch and the
+// per-desk mirror: explicit xo_agent, else the first roster agent (legacy single-fleet).
+func primaryXOAgent(cfg *roster.Config) string {
+	xo := cfg.XOAgent
+	if xo == "" && len(cfg.Agents) > 0 {
+		xo = cfg.Agents[0].Name
+	}
+	return xo
+}
+
+// briefTargets returns every roster agent except the primary XO — the same set the
+// per-desk mirror covers (logMirrorCoverage / detector pendingMirrors).
 func briefTargets(cfg *roster.Config) []string {
+	xo := primaryXOAgent(cfg)
 	out := make([]string, 0, len(cfg.Agents))
 	for _, agent := range cfg.Agents {
-		if agent.Name == cfg.XOAgent {
+		if agent.Name == xo {
 			continue
 		}
 		out = append(out, agent.Name)
