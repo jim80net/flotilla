@@ -129,8 +129,8 @@ standing principles:
 12. **Operator turn-finals are executive mini-briefs.** Every operator-facing message
    (including turn-finals the Discord mirror posts mechanically) leads with a plain-
    language bottom line, names work streams by what they do, puts IDs in a detail footer,
-   and ends with `Waiting on you: …` or `Nothing needs you.` — see the
-   `executive-mini-brief` doctrine block for the mechanical shape.
+   and closes with an explicit action-status line (one concrete ask or a varied all-clear) —
+   see the `executive-mini-brief` doctrine block for the mechanical shape.
 
 The full prose (each principle expanded, with the anti-patterns and the mechanical
 enforcement) lives in the flotilla repository's `docs/OPERATING-PRINCIPLES.md` — the
@@ -278,16 +278,20 @@ does not.**
 
 1. **Bottom line first (1–2 plain-English sentences).** What changed in *their* world
    and whether anything needs them. Example shape: "The fleet tooling upgrade passed
-   review and is ready to merge; nothing needs you."
+   review and is ready to merge; no action on your side."
 2. **Mini brief (2–5 short bullets or sentences).** Each active work stream: what it
    is **for them**, where it stands, what happens next. Name streams by **what they do**
    ("the options-closing bug fix", "the coordination upgrade") — not by issue numbers,
    branch names, or internal codenames.
 3. **Detail footer (optional, last).** PR numbers, SHAs, file paths, gate vocabulary —
    compressed, for drill-in only. Often omit entirely; the ledger holds identifiers.
-4. **Always end with exactly one of:**
-   - `Waiting on you: <one concrete ask>` — or —
-   - `Nothing needs you.`
+4. **Always close with the operator's action status — explicit, but in your own
+   words, varied from message to message.** Either state the one concrete ask
+   (e.g. `Waiting on you: <ask>`), or make clear no action is needed on their
+   side — phrased naturally in the context of that message ("no action on your
+   side", "all handled", "you're clear", or simply a bottom line that already
+   says so). Never close with one fixed formula repeated verbatim every turn —
+   a repeated stock phrase reads as a tic and stops carrying information.
 
 **Jargon discipline:** Never assume the operator knows internal vocabulary mid-skim
 (automated reviewer names, merge gates, worktree, roster, seat flip, etc.). Translate to

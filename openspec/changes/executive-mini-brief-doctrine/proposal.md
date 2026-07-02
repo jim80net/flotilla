@@ -13,7 +13,7 @@ operator communication and must read as an executive mini-brief in plain languag
 - **Operating principles** concise constitution adds principle 12 cross-referencing
   operator turn-finals and the mirror egress path.
 - **Mirror hook audit**: `deploy/flotilla-xo-discord-mirror.sh` logs when a posted
-  turn-final lacks an explicit "Waiting on you" / "Nothing needs you" line (posts
+  turn-final lacks an explicit action-status close on the last line (posts
   anyway — shape is doctrine-injected, not suppressed).
 - **XO doctrine doc** section on operator communications and the mirror contract.
 
