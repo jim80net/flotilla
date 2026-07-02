@@ -10,7 +10,7 @@ The through-line: **an autonomous agent's job is to move the work forward on the
 operator's behalf, escalating only the few decisions that are genuinely the
 operator's.** Everything below is that principle, made mechanical.
 
-The concise, marker-fenced version of this file — the ten principle titles with
+The concise, marker-fenced version of this file — the eleven principle titles with
 a one-sentence statement each — is what `flotilla doctrine install` appends into
 every agent's identity file (`internal/doctrine/assets/skills/operating-principles.md`).
 This document is the full prose the running agent's worktree may not contain.
@@ -134,11 +134,28 @@ by the gate stack (review, CI, independent merge authority) — not by which har
 authored the diff. A coordinator grinding implementation on a Claude seat burns
 bandwidth and violates both Principle 9 and this allocation.
 
-**Defaults:** `flotilla workspace init` scaffolds **grok** launch recipes for new
-execution desks and **Claude** for coordinators. Override only deliberately.
+**Defaults:** `flotilla workspace init --repo <abs-path>` provisions a **git worktree**
+desk home, scaffolds **grok** launch recipes for execution desks and **Claude** for
+coordinators, and writes identity into the worktree. Override only deliberately.
 
 **Mechanically enforced:** the delegation-nudge detector (#232) flags inline
 build-loops only on Claude-seat coordinators and nudges dispatch to grok desks.
+
+## 11. Desk homes are repo worktrees
+
+A desk's **home is a git worktree** of the repository it works on — sibling
+checkouts like `spark-tactical` / `spark-crypto` beside the main repo — **not** a
+bare directory under a workspace root (`~/workspace/<desk-name>`). That bare-dir
+pattern is deprecated.
+
+**Provision:** `flotilla workspace init <agent> --repo <abs-path> [--branch <name>]`
+creates the worktree, writes `AGENTS.md` or `CLAUDE.md` **inside** it, and sets
+`launch.json` cwd to the worktree. The host workspace (`~/.flotilla/<agent>/`)
+holds launch recipe, heartbeat, and tracker state only.
+
+**Rolling migration:** existing bare-dir grok desks move to a worktree at their
+**next organic rotation** — no forced mass migration. The Chief of Staff enforces
+at rotation time; the product default is what new provisioning produces.
 
 ---
 

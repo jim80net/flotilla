@@ -12,13 +12,13 @@ import (
 func TestCmdDoctrineInstallAppendsOnce(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)
+	repo := initTestGitRepo(t)
 	rosterPath := writeRosterFile(t, `{"agents":[{"name":"infra"}]}`)
 
-	// The identity file must already exist (workspace init writes it).
-	if err := cmdWorkspaceInit([]string{"infra", "--roster", rosterPath}); err != nil {
+	if err := cmdWorkspaceInit(workspaceInitArgs("infra", rosterPath, repo)); err != nil {
 		t.Fatal(err)
 	}
-	identity := filepath.Join(root, "infra", "AGENTS.md")
+	identity := filepath.Join(filepath.Dir(repo), "infra", "AGENTS.md")
 
 	// workspace init now seeds the doctrine; capture the post-seed state and verify a
 	// direct install is a no-op (detect-and-skip), exercising the install path itself.
@@ -50,11 +50,12 @@ func TestCmdDoctrineInstallAppendsOnce(t *testing.T) {
 func TestCmdDoctrineInstallTargetsPerSurfaceIdentity(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)
+	repo := initTestGitRepo(t)
 	rosterPath := writeRosterFile(t, `{"agents":[{"name":"g","surface":"grok"}]}`)
-	if err := cmdWorkspaceInit([]string{"g", "--roster", rosterPath}); err != nil {
+	if err := cmdWorkspaceInit(workspaceInitArgs("g", rosterPath, repo)); err != nil {
 		t.Fatal(err)
 	}
-	agents := filepath.Join(root, "g", "AGENTS.md")
+	agents := filepath.Join(filepath.Dir(repo), "g", "AGENTS.md")
 	body, err := os.ReadFile(agents)
 	if err != nil {
 		t.Fatalf("grok identity file AGENTS.md not found: %v", err)

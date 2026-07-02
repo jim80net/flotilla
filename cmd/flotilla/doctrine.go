@@ -43,23 +43,20 @@ func cmdDoctrineInstall(args []string) error {
 	if err != nil {
 		return err
 	}
-	dir, err := workspace.Dir(agent)
-	if err != nil {
-		return err
-	}
 	harnessSurface := harnessAllocationSurface(cfg, agent, a.Surface)
-	identity, err := workspace.IdentityFileName(harnessSurface)
+	identityDir, identity, err := workspace.IdentityHome(agent, harnessSurface)
 	if err != nil {
 		return err
 	}
-	// Install takes the workspace dir + the identity base filename: the dir lets a
-	// whole-file (heartbeat-skill) member resolve its workspace-relative target, and
-	// the resolved filename keeps the doctrine package free of a workspace import.
-	results, err := doctrine.Install(dir, identity, doctrine.Members())
+	hostDir, err := workspace.Dir(agent)
 	if err != nil {
 		return err
 	}
-	identityPath := filepath.Join(dir, identity)
+	results, err := doctrine.InstallSplit(identityDir, hostDir, identity, doctrine.Members())
+	if err != nil {
+		return err
+	}
+	identityPath := filepath.Join(identityDir, identity)
 	reportDoctrineResults(results, identityPath)
 	noteNonClaudeLoadFastFollow(harnessSurface, identityPath)
 	return nil

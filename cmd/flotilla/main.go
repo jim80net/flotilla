@@ -107,7 +107,7 @@ usage:
   flotilla resume <agent> [--launch <path>] [--force]  (re)start a dead desk from its host-local launch recipe
   flotilla recycle <agent> [--launch <path>] [--dry-run]  close a desk's chapter (handoff→graceful close→relaunch→takeover), fail-closed
   flotilla switch <agent> (--to <slot|surface> | --auto | --repair) [--confirm] [--force]  hand a desk across harnesses (FROM handoff→relaunch on TO→TO takeover), fail-closed
-  flotilla workspace init <agent>                     scaffold the per-agent ~/.flotilla/<agent>/ home (seeds the constitutional doctrine)
+  flotilla workspace init <agent> --repo <abs-path>   provision a desk git worktree + ~/.flotilla/<agent>/ host (seeds doctrine into the worktree)
   flotilla workspace path <agent>                     print an agent's workspace directory
   flotilla doctrine install <agent>                   install flotilla's constitutional doctrine into an agent's workspace (idempotent)
   flotilla push-snippet <desk-agent>                  print the smart-push convention to append to a non-claude desk's identity file (secret-free; reports to the XO via send)
