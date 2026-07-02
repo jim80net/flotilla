@@ -184,21 +184,32 @@ func TestInstallerRejectsPlaceholderInValue(t *testing.T) {
 // inherited-env-no-leak guard that protects the byte-identical guarantee on the live
 // fleet host (which exports FLOTILLA_BACKLOG_FILE for the binary to read).
 
-func backlogEnv(t *testing.T, backlog string) string {
+func baseEnv(t *testing.T, name string, extra map[string]string) string {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), "backlog.env")
+	p := filepath.Join(t.TempDir(), name)
 	body := "FLOTILLA_WORKDIR=/srv/fleet\n" +
 		"FLOTILLA_BIN=%h/go/bin/flotilla\n" +
 		"FLOTILLA_ROSTER=/srv/fleet/flotilla.json\n" +
 		"FLOTILLA_SECRETS=/srv/fleet/secrets.env\n" +
 		"FLOTILLA_ACK_FILE=/srv/fleet/xo-alive\n"
-	if backlog != "" {
-		body += "FLOTILLA_BACKLOG_FILE=" + backlog + "\n"
+	for k, v := range extra {
+		if v != "" {
+			body += k + "=" + v + "\n"
+		}
 	}
 	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return p
+}
+
+func backlogEnv(t *testing.T, backlog string) string {
+	t.Helper()
+	extra := map[string]string{}
+	if backlog != "" {
+		extra["FLOTILLA_BACKLOG_FILE"] = backlog
+	}
+	return baseEnv(t, "backlog.env", extra)
 }
 
 // (b) SET ⇒ exactly one ` --backlog-file <path>` appended after --ack-file.
@@ -245,6 +256,34 @@ func TestInstallerBacklogPathWithAmpersand(t *testing.T) {
 // guards the pre-clear: the live fleet host exports FLOTILLA_BACKLOG_FILE (the binary
 // reads it), so without the pre-clear the byte-identical-when-unset guarantee would
 // fail on exactly the host this work targets.
+func latencyEnv(t *testing.T, interval, eventPoll string) string {
+	t.Helper()
+	extra := map[string]string{}
+	if interval != "" {
+		extra["FLOTILLA_WATCH_INTERVAL"] = interval
+	}
+	if eventPoll != "" {
+		extra["FLOTILLA_EVENT_POLL_INTERVAL"] = eventPoll
+	}
+	return baseEnv(t, "latency.env", extra)
+}
+
+func TestInstallerLatencyArgsUnsetOmitsFragment(t *testing.T) {
+	unit := renderUnitEnv(t, latencyEnv(t, "", ""))
+	want := "ExecStart=%h/go/bin/flotilla watch --roster /srv/fleet/flotilla.json --secrets /srv/fleet/secrets.env --ack-file /srv/fleet/xo-alive"
+	if got := execLine(t, unit); got != want {
+		t.Errorf("ExecStart without latency env:\n got:  %q\n want: %q", got, want)
+	}
+}
+
+func TestInstallerLatencyArgsSetAppendsFlags(t *testing.T) {
+	unit := renderUnitEnv(t, latencyEnv(t, "5m", "3s"))
+	want := "ExecStart=%h/go/bin/flotilla watch --roster /srv/fleet/flotilla.json --secrets /srv/fleet/secrets.env --ack-file /srv/fleet/xo-alive --interval 5m --event-poll-interval 3s"
+	if got := execLine(t, unit); got != want {
+		t.Errorf("ExecStart with latency env:\n got:  %q\n want: %q", got, want)
+	}
+}
+
 func TestInstallerBacklogInheritedEnvNoLeak(t *testing.T) {
 	unit := renderUnitEnv(t, backlogEnv(t, ""), "FLOTILLA_BACKLOG_FILE=/leak/should/not/appear.md")
 	// Scope the assertion to the ExecStart directive — the template's descriptive

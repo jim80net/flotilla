@@ -98,6 +98,8 @@ func cmdWatch(args []string) error {
 	settledPath := fs.String("settled-file", os.Getenv("FLOTILLA_SETTLED_FILE"), "XO settle (idle) marker (default <roster-dir>/flotilla-xo-settled)")
 	trackerPath := fs.String("tracker-file", os.Getenv("FLOTILLA_TRACKER_FILE"), "the XO's state tracker the continuation prompt names as {{tracker}} (default <roster-dir>/.flotilla-state.md); NOT hashed as a wake signal — it is the XO's own output")
 	signalPath := fs.String("signal-file", os.Getenv("FLOTILLA_SIGNAL_FILE"), "optional external signal file whose content-hash change wakes the XO (a file the XO does NOT write; unset ⇒ no external-signal trigger)")
+	intervalFlag := fs.String("interval", "", "change-detector tick interval (overrides roster heartbeat_interval; env FLOTILLA_WATCH_INTERVAL; e.g. 5m, 20m)")
+	eventPollFlag := fs.String("event-poll-interval", "", "fast desk-state poll for turn-end pokes (env FLOTILLA_EVENT_POLL_INTERVAL; default 5s; 0 disables)")
 	maxQuiet := fs.Int("max-quiet-intervals", 0, "change-detector liveness ping cadence N in intervals (0 ⇒ mode default)")
 	maxSelfCont := fs.Int("max-self-continuations", 3, "change-detector cap on consecutive XO self-continuations with no external change")
 	backlogPath := fs.String("backlog-file", os.Getenv("FLOTILLA_BACKLOG_FILE"), "the goal-driven loop's fleet backlog (markdown; - [<status>] items). Unset ⇒ the backlog gate is OFF (XO settles as before). Read fresh each tick, NOT content-hashed (it is the XO's own output)")
@@ -124,6 +126,32 @@ func cmdWatch(args []string) error {
 	xoDrv, _ := surface.Get(agentSurface(cfg, xo))
 
 	interval := cfg.HeartbeatDur() // parsed + validated at load
+	intervalStr := strings.TrimSpace(*intervalFlag)
+	if intervalStr == "" {
+		intervalStr = strings.TrimSpace(os.Getenv("FLOTILLA_WATCH_INTERVAL"))
+	}
+	if intervalStr != "" {
+		d, err := time.ParseDuration(intervalStr)
+		if err != nil {
+			return fmt.Errorf("watch --interval %q: %w", intervalStr, err)
+		}
+		if d <= 0 {
+			return fmt.Errorf("watch --interval %q: must be positive", intervalStr)
+		}
+		interval = d
+	}
+	eventPollInterval := watch.DefaultEventPollInterval
+	eventPollStr := strings.TrimSpace(*eventPollFlag)
+	if eventPollStr == "" {
+		eventPollStr = strings.TrimSpace(os.Getenv("FLOTILLA_EVENT_POLL_INTERVAL"))
+	}
+	if eventPollStr != "" {
+		d, err := time.ParseDuration(eventPollStr)
+		if err != nil {
+			return fmt.Errorf("watch --event-poll-interval %q: %w", eventPollStr, err)
+		}
+		eventPollInterval = d
+	}
 	rosterDir := filepath.Dir(*rosterPath)
 	if *ackPath == "" {
 		*ackPath = filepath.Join(rosterDir, "flotilla-xo-alive")
@@ -592,8 +620,13 @@ func cmdWatch(args []string) error {
 		}
 		det := watch.NewDetectorWithSynthSidecar(detCfg, *snapshotPath, synthSidecarPath)
 		endAutoSwitch = det.EndAutoSwitchFlight
+		turnPoller := watch.NewTurnEndPoller(xo, desks, detCfg.Assess, det.Poke, eventPollInterval)
 		det.Start()
-		defer det.Stop()
+		turnPoller.Start()
+		defer func() {
+			turnPoller.Stop()
+			det.Stop()
+		}()
 		onAccepted = func(target string) {
 			if target == xo {
 				det.OperatorWake() // an operator message re-engages a settled XO
@@ -610,8 +643,8 @@ func cmdWatch(args []string) error {
 		if mode == "" {
 			mode = "none"
 		}
-		fmt.Printf("flotilla watch: change-detector running — XO=%s interval=%s ping-mode=%s ack=%s snapshot=%s\n",
-			xo, interval, mode, *ackPath, *snapshotPath)
+		fmt.Printf("flotilla watch: change-detector running — XO=%s interval=%s event-poll=%s ping-mode=%s ack=%s snapshot=%s\n",
+			xo, interval, eventPollInterval, mode, *ackPath, *snapshotPath)
 		logMirrorCoverage(cfg, secrets, xo)
 		if cfg.VisibilitySynthesis {
 			fmt.Printf("flotilla watch: visibility-synthesis ON — every %d ticks an OWED agent rolls up its tier below; sidecar=%s\n",

@@ -35,7 +35,7 @@ ExecStartPre=/bin/sh -c 'for i in $(seq 1 30); do getent hosts discord.com >/dev
 # leaves this line byte-identical to a no-backlog install. It is ALWAYS substituted
 # (to the fragment or to empty), so the installer's "no placeholder survives" guard
 # still holds.
-ExecStart=@FLOTILLA_BIN@ watch --roster @FLOTILLA_ROSTER@ --secrets @FLOTILLA_SECRETS@ --ack-file @FLOTILLA_ACK_FILE@@FLOTILLA_BACKLOG_ARG@
+ExecStart=@FLOTILLA_BIN@ watch --roster @FLOTILLA_ROSTER@ --secrets @FLOTILLA_SECRETS@ --ack-file @FLOTILLA_ACK_FILE@@FLOTILLA_BACKLOG_ARG@@FLOTILLA_LATENCY_ARGS@
 Restart=on-failure
 # RestartSec pairs with the StartLimitIntervalSec budget above: each restart cycle is
 # this 15s plus the ExecStartPre DNS-readiness wait. on-failure + the burst limit
