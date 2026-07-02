@@ -24,7 +24,8 @@
 #   1. Bottom line first (plain English, 1–2 sentences)
 #   2. Mini brief (2–5 bullets; name streams by what they DO)
 #   3. Detail footer optional (IDs/SHAs/paths last)
-#   4. Always end: "Waiting on you: …" OR "Nothing needs you."
+#   4. Always close with explicit action status on the LAST line (concrete ask OR
+#      varied all-clear — not one fixed verbatim formula every turn).
 # See internal/doctrine/assets/skills/executive-mini-brief.md (installed via
 # `flotilla doctrine install`). The hook logs MINI-BRIEF-AUDIT when (4) is missing.
 #
@@ -164,16 +165,24 @@ while True:
 
 if not resp or not resp.strip(): skip("no-assistant-text")
 
-def has_needs_you_line(text):
-    """Doctrine mandates the needs-you line as the LAST line — not mid-body mention."""
+def has_action_status_close(text):
+    """Doctrine mandates explicit action status on the LAST line — varied phrasing OK."""
     lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
     if not lines:
         return False
     last = lines[-1].lower()
-    return last.startswith("waiting on you") or last.startswith("nothing needs you")
+    if last.startswith("waiting on you"):
+        return True
+    all_clear = (
+        "nothing needs you", "no action on your side", "no action needed",
+        "you're clear", "you are clear", "all handled", "all set",
+        "you're good", "you are good", "nothing further needed",
+        "nothing needed from you",
+    )
+    return any(last.startswith(p) for p in all_clear)
 
-if not has_needs_you_line(resp):
-    lg("MINI-BRIEF-AUDIT", "missing explicit Waiting-on-you / Nothing-needs-you line")
+if not has_action_status_close(resp):
+    lg("MINI-BRIEF-AUDIT", "missing explicit action-status close on last line")
 
 # BUG-5: mechanical post — trigger logged only, never suppresses.
 residue = operator_residue(trig)

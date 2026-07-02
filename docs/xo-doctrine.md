@@ -185,9 +185,11 @@ constitution):
    codenames.
 3. **Detail footer (optional, last)** — PR numbers, SHAs, file paths, gate vocabulary,
    compressed for drill-in only; often omitted entirely (the ledger holds identifiers).
-4. **Explicit close** — always end with exactly one of:
-   - `Waiting on you: <one concrete ask>` — or —
-   - `Nothing needs you.`
+4. **Explicit action-status close** — always end by stating whether the operator must
+   act and on what (one concrete ask, e.g. `Waiting on you: <ask>`), or make clear no
+   action is needed on their side in fresh words varied from message to message ("no
+   action on your side", "all handled", "you're clear"). Never close with one fixed
+   formula repeated verbatim every turn.
 
 Desk-to-desk and XO-internal traffic stays dense and precise; this register applies
 only to operator-facing surfaces. Principle 5 (reader-modeling) sets the posture;

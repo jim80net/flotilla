@@ -174,7 +174,9 @@ member):
    codenames.
 3. **Detail footer (optional, last)** — PR numbers, SHAs, paths, gate vocabulary,
    compressed for drill-in only; often omitted entirely.
-4. **Explicit close** — always `Waiting on you: <ask>` or `Nothing needs you.`
+4. **Explicit action-status close** — always state whether the operator must act and on
+   what (one concrete ask), or make clear no action is needed — phrased naturally and
+   varied message to message. Never mandate one fixed verbatim closer every turn.
 
 Desk-to-desk traffic stays dense and precise; this register applies only to
 operator-facing surfaces. Principle 5 (reader-modeling) sets the posture; this principle

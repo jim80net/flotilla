@@ -265,14 +265,19 @@ func TestExecutiveMiniBriefContent(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Bottom line first",
-		"Waiting on you",
-		"Nothing needs you",
+		"action status",
+		"varied",
+		"fixed formula",
 		"Discord mirror",
 		"what they do",
 	} {
 		if !strings.Contains(m.Content, want) {
 			t.Errorf("executive-mini-brief content missing %q", want)
 		}
+	}
+	// The retired fixed-verbatim closer must NOT be mandated as the only all-clear shape.
+	if strings.Contains(m.Content, "Always end with exactly one of:") {
+		t.Error("executive-mini-brief must not mandate a fixed verbatim closer pair")
 	}
 	open := strings.Index(m.Content, executiveMiniBriefOpenMarker)
 	close := strings.Index(m.Content, executiveMiniBriefCloseMarker)

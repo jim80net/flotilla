@@ -51,8 +51,8 @@ standing principles:
 12. **Operator turn-finals are executive mini-briefs.** Every operator-facing message
    (including turn-finals the Discord mirror posts mechanically) leads with a plain-
    language bottom line, names work streams by what they do, puts IDs in a detail footer,
-   and ends with `Waiting on you: …` or `Nothing needs you.` — see the
-   `executive-mini-brief` doctrine block for the mechanical shape.
+   and closes with an explicit action-status line (one concrete ask or a varied all-clear) —
+   see the `executive-mini-brief` doctrine block for the mechanical shape.
 
 The full prose (each principle expanded, with the anti-patterns and the mechanical
 enforcement) lives in the flotilla repository's `docs/OPERATING-PRINCIPLES.md` — the
