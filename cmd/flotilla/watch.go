@@ -25,6 +25,7 @@ import (
 	"github.com/jim80net/flotilla/internal/stranded"
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/transport"
+	"github.com/jim80net/flotilla/internal/unacked"
 	"github.com/jim80net/flotilla/internal/watch"
 	"github.com/jim80net/flotilla/internal/workspace"
 )
@@ -95,6 +96,7 @@ func cmdWatch(args []string) error {
 	// roster sets change_detector: true.
 	snapshotPath := fs.String("snapshot-file", os.Getenv("FLOTILLA_SNAPSHOT_FILE"), "change-detector snapshot file (default <roster-dir>/flotilla-detector-state.json)")
 	cursorPath := fs.String("relay-cursor-file", os.Getenv("FLOTILLA_RELAY_CURSOR_FILE"), "relay catch-up per-channel cursor file (default <roster-dir>/flotilla-relay-cursor.json); the at-least-once ingestion backstop's durable state")
+	unackedPath := fs.String("unacked-file", os.Getenv("FLOTILLA_UNACKED_FILE"), "un-acked operator backstop dedup state (default <roster-dir>/flotilla-unacked-alerted.json)")
 	awaitingPath := fs.String("awaiting-file", os.Getenv("FLOTILLA_AWAITING_FILE"), "awaiting-operator veto marker (default <roster-dir>/flotilla-xo-awaiting)")
 	settledPath := fs.String("settled-file", os.Getenv("FLOTILLA_SETTLED_FILE"), "XO settle (idle) marker (default <roster-dir>/flotilla-xo-settled)")
 	trackerPath := fs.String("tracker-file", os.Getenv("FLOTILLA_TRACKER_FILE"), "the XO's state tracker the continuation prompt names as {{tracker}} (default <roster-dir>/.flotilla-state.md); NOT hashed as a wake signal — it is the XO's own output")
@@ -167,6 +169,9 @@ func cmdWatch(args []string) error {
 	}
 	if *cursorPath == "" {
 		*cursorPath = filepath.Join(rosterDir, "flotilla-relay-cursor.json")
+	}
+	if *unackedPath == "" {
+		*unackedPath = filepath.Join(rosterDir, "flotilla-unacked-alerted.json")
 	}
 	if *awaitingPath == "" {
 		*awaitingPath = filepath.Join(rosterDir, "flotilla-xo-awaiting")
@@ -854,6 +859,21 @@ func cmdWatch(args []string) error {
 		return fmt.Errorf("relay requires operator_user_id in the roster (channel binding + bot token are set) — set it, or remove the channel binding for clock-only")
 	default:
 		fmt.Println("flotilla watch: clock-only (relay disabled — set channel_id/channels[] + bot token + operator_user_id to enable)")
+	}
+
+	// Standing un-acked operator backstop (#234): REST history scan independent of
+	// gateway health. Alert-once per message id; coordinator wake retries on busy.
+	if len(channelIDs) > 0 && botToken != "" && cfg.OperatorUserID != "" && tr != nil {
+		if hist, ok := tr.(transport.RecentHistory); ok {
+			dests := transportDestinations(tr, channelIDs)
+			reader := &transportRecentReader{cap: hist, dest: destByChannel(dests, channelIDs)}
+			backstop := watch.NewUnackedBackstop(cfg, reader, *unackedPath, alert, mkSend(confirm.Submit), nil)
+			go backstop.Run(ctx)
+			fmt.Printf("flotilla watch: un-acked backstop active (state=%s scan=%s min-age=%s)\n",
+				*unackedPath, unacked.DefaultScanInterval, unacked.DefaultMinAge)
+		} else {
+			fmt.Fprintln(os.Stderr, "flotilla watch: WARNING — coordination transport has no recent-history capability; un-acked backstop disabled")
+		}
 	}
 
 	<-ctx.Done()
