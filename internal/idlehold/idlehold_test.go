@@ -153,6 +153,36 @@ func TestTracker_ConcurrentRecordRace(t *testing.T) {
 	wg.Wait()
 }
 
+func TestCheck_WatcherArmedWaitNotIdleHold(t *testing.T) {
+	// Carve-out: idle-hold trigger language co-present with watcher-armed phrase → NOT flagged.
+	carveOut := []string{
+		"3 named watchers armed on the sweep lane; holding for your call on the TG3 report. Wake scheduled 19:54Z.",
+		"Event-armed on TG3 prep — waiting on you for the sweep-disposition timed: tactical-head 19:54Z.",
+	}
+	for _, text := range carveOut {
+		if r := Check(text); r.IdleHold {
+			t.Errorf("watcher-armed + idle-hold trigger must NOT flag: %q (signal %q)", text, r.Signal)
+		}
+	}
+	// Control: same trigger language without watcher-armed phrase → must flag.
+	controls := []struct {
+		text   string
+		signal string
+	}{
+		{"Done the analysis. Holding for your call on next steps.", "holding-for-call"},
+		{"The PR is ready. Waiting on you to merge.", "waiting-for-operator"},
+	}
+	for _, tc := range controls {
+		r := Check(tc.text)
+		if !r.IdleHold {
+			t.Fatalf("control without watcher carve-out must be idle-hold: %q", tc.text)
+		}
+		if r.Signal != tc.signal {
+			t.Errorf("signal = %q, want %q", r.Signal, tc.signal)
+		}
+	}
+}
+
 func TestBreakPrompt_IncludesRecommendation(t *testing.T) {
 	p := BreakPrompt("merge PR #12")
 	if !strings.Contains(p, "merge PR #12") {

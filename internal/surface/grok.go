@@ -169,6 +169,14 @@ const grokWorkingArrow = "⇣"
 
 var grokSpinner = regexp.MustCompile(`[\x{2801}-\x{28FF}]`) // any non-blank braille spinner frame
 
+// grokSessionStatus matches the in-session processing STATUS chrome shared by live captures:
+// braille spinner + gerund (any word) + ellipsis + elapsed seconds (e.g. "⠙ Waiting… 0.4s",
+// "⠦ Thinking… 0.1s"). The leading verb VARIES (Thinking…/Waiting…/Searching…/…); we anchor
+// on the spinner+ellipsis+elapsed structure, not a closed verb list. The launcher welcome
+// menu shows a bare braille spinner WITHOUT this chrome — misreading it as Working blocks
+// all sends on a dead-session menu (#216 evidence).
+var grokSessionStatus = regexp.MustCompile(`[\x{2801}-\x{28FF}].+\x{2026}\s*\d+(?:\.\d+)?s`)
+
 // grok's TOOL-APPROVAL modal anchors (LIVE-CAPTURED 2026-06-23, #158). The modal renders a ┃-bordered
 // block ("┃ Allow <Verb> `<path>`?" + numbered options) with a selection status line
 // "N/M:select  │  Ctrl+o:yolo  │  Ctrl+c:cancel". BOTH the "N/M:select" counter and the "Ctrl+o:yolo"
@@ -197,10 +205,23 @@ func parseGrokState(captured string) State {
 	if grokApprovalSelect.MatchString(tail) || strings.Contains(tail, grokApprovalYolo) {
 		return StateAwaitingApproval
 	}
-	if strings.Contains(tail, grokWorkingArrow) || grokSpinner.MatchString(tail) {
+	if strings.Contains(tail, grokWorkingArrow) || grokInSessionProcessing(tail) {
 		return StateWorking
 	}
 	return StateIdle
+}
+
+func grokInSessionProcessing(tail string) bool {
+	// Rate-limit sleeping is in-turn (grok auto-resumes); no ellipsis+elapsed chrome on the
+	// live capture, but the spinner+phrase STATUS line must still read Working.
+	if grokRateLimitStatus.MatchString(tail) {
+		return true
+	}
+	if !grokSpinner.MatchString(tail) {
+		return false
+	}
+	// Bare launcher-menu spinner (no session-status prose, no streaming arrow) is idle.
+	return grokSessionStatus.MatchString(tail)
 }
 
 // --- ComposerStateProbe (#158): grok's cursor-indexed composer classifier ---

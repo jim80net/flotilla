@@ -43,6 +43,12 @@ func TestParseGrokState(t *testing.T) {
 			want:     StateWorking,
 		},
 		{
+			// Verb-agnostic: out-of-closed-list gerund + spinner+ellipsis+elapsed chrome → Working.
+			name:     "spinner + out-of-list gerund (Searching…) → Working",
+			captured: "  ⠹ Searching… 0.2s",
+			want:     StateWorking,
+		},
+		{
 			name:     "completed turn (Turn completed in … + ◆ stop, no arrow) → Idle",
 			captured: "  ◆ stop  [hooks: 2]\n\n  Turn completed in 3.9s.\n\n  ╭────╮\n  │ ❯  │\n  ╰──── Grok Composer 2.5 Fast ─╯\n  Shift+Tab:mode  │  Ctrl+.:shortcuts",
 			want:     StateIdle,
@@ -70,6 +76,11 @@ func TestParseGrokState(t *testing.T) {
 			// the tail) must NOT keep the desk reading Working after the turn finished.
 			captured: "  ⠙ Waiting… 1.2s ⇣99k [✗]\n" + manyLines(14) + "  Turn completed in 5.0s.\n  │ ❯  │\n  Shift+Tab:mode",
 			name:     "stale arrow in scrollback + completed below → Idle",
+			want:     StateIdle,
+		},
+		{
+			name:     "launcher welcome menu bare spinner → Idle (not Working)",
+			captured: "  Welcome to Grok\n  ⠙\n  ╭────╮\n  │ ❯  │\n  ╰──── Grok Composer 2.5 Fast ─╯\n  Shift+Tab:mode  │  Ctrl+.:shortcuts",
 			want:     StateIdle,
 		},
 	}
@@ -177,6 +188,16 @@ func TestParseGrokStateApproval(t *testing.T) {
 		"  Turn completed in 5.0s.\n  │ ❯  │\n  Shift+Tab:mode"
 	if got := parseGrokState(staleModal); got != StateIdle {
 		t.Errorf("parseGrokState(stale modal in scrollback + idle below) = %v, want Idle", got)
+	}
+}
+
+func TestParseGrokStateRateLimitSleepingWorking(t *testing.T) {
+	// Live capture (grok_test.go rate-limit fixture): spinner + phrase, NO ellipsis+elapsed.
+	// Must read Working — rate-limit sleeping is in-turn; a Working→Idle diff mid-throttle
+	// would mislead the turn-finished path.
+	captured := "  ⠦ rate limit exceeded; sleeping.\n  Turn completed in 1.2s.\n  │ ❯  │\n  Shift+Tab:mode"
+	if got := parseGrokState(captured); got != StateWorking {
+		t.Errorf("parseGrokState(rate limit sleeping) = %v, want Working", got)
 	}
 }
 
