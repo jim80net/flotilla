@@ -72,6 +72,11 @@ func TestParseGrokState(t *testing.T) {
 			name:     "stale arrow in scrollback + completed below → Idle",
 			want:     StateIdle,
 		},
+		{
+			name:     "launcher welcome menu bare spinner → Idle (not Working)",
+			captured: "  Welcome to Grok\n  ⠙\n  ╭────╮\n  │ ❯  │\n  ╰──── Grok Composer 2.5 Fast ─╯\n  Shift+Tab:mode  │  Ctrl+.:shortcuts",
+			want:     StateIdle,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

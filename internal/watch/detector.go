@@ -126,6 +126,11 @@ type DetectorConfig struct {
 	// work without delegation, and injects a dispatch nudge when strikes meet threshold.
 	// Like IdleHoldOnFinish it runs in runTail OUTSIDE d.mu; default nil ⇒ inert.
 	DelegationNudgeOnFinish func(agent string)
+	// StrandedHandoffOnFinish is the dropped gate-report side-effect (#216 extension):
+	// invoked once for each NON-XO desk that completed a unit of work this tick (same
+	// trigger as MirrorOnFinish). Detects turn-finals that settle gate work without
+	// reporting to the gate-holder and injects a break prompt. Default nil ⇒ inert.
+	StrandedHandoffOnFinish func(agent string)
 	// MirrorDispatch runs a tick's batch of per-desk mirrors. Production wires it to `go run()` so the
 	// mirror I/O (a transcript read + Discord posts) is FULLY DECOUPLED from the detector loop — even
 	// off-mutex, inline I/O on the tick goroutine could delay the next tick (and thus liveness eval)
@@ -840,7 +845,7 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors []s
 	// like the wakes, OUTSIDE d.mu — a slow transcript read or Discord post must never stall the tick
 	// loop or block OperatorWake. The closure is observe-only + best-effort (it absorbs its own
 	// failures); the detector only fires the trigger.
-	if len(mirrors) > 0 && (d.cfg.MirrorOnFinish != nil || d.cfg.IdleHoldOnFinish != nil) {
+	if len(mirrors) > 0 && (d.cfg.MirrorOnFinish != nil || d.cfg.IdleHoldOnFinish != nil || d.cfg.StrandedHandoffOnFinish != nil) {
 		run := func() {
 			for _, agent := range mirrors {
 				if d.cfg.MirrorOnFinish != nil {
@@ -848,6 +853,9 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors []s
 				}
 				if d.cfg.IdleHoldOnFinish != nil {
 					d.idleHoldOne(agent)
+				}
+				if d.cfg.StrandedHandoffOnFinish != nil {
+					d.strandedHandoffOne(agent)
 				}
 			}
 		}
@@ -899,6 +907,17 @@ func (d *Detector) idleHoldOne(agent string) {
 		}
 	}()
 	d.cfg.IdleHoldOnFinish(agent)
+}
+
+// strandedHandoffOne invokes the stranded gate-report break side-effect with the same
+// recover() backstop as mirrorOne.
+func (d *Detector) strandedHandoffOne(agent string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("flotilla watch: stranded-handoff break panicked for %q (recovered; tick unaffected): %v", agent, r)
+		}
+	}()
+	d.cfg.StrandedHandoffOnFinish(agent)
 }
 
 // delegationNudgeOne invokes the coordinator delegation nudge with the same recover()

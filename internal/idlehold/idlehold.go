@@ -80,6 +80,20 @@ var (
 		regexp.MustCompile(`(?i)\bdecision[- ]type:\s*(?:spend|irreversible|fork)\b`),
 	}
 
+	// watcherArmedPatterns exempt legitimate event-armed waits (standing watchers,
+	// timed sweeps) from idle-hold — distinct from tacit-third-option holding.
+	watcherArmedPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)\bwatchers?\s+armed\b`),
+		regexp.MustCompile(`(?i)\bevent[- ]armed\b`),
+		regexp.MustCompile(`(?i)\b(?:named|standing)\s+watchers?\b`),
+		regexp.MustCompile(`(?i)\b\d+\s+named\s+watchers?\b`),
+		regexp.MustCompile(`(?i)\bwake\s+scheduled\b`),
+		regexp.MustCompile(`(?i)\bsweep[- ]disposition\b`),
+		regexp.MustCompile(`(?i)\btimed:\b`),
+		regexp.MustCompile(`(?i)\bhotline\s+reply[- ]watcher\b`),
+		regexp.MustCompile(`(?i)\bno\s+operator[- ]decision\s+hold\b`),
+	}
+
 	pastTenseBeforeRE = regexp.MustCompile(`(?i)\b(?:i\s+)?(?:was|were|had\s+been|have\s+been)\s+\w*\s*$`)
 
 	recommendationRE = regexp.MustCompile(`(?i)\bmy\s+recommendation\s+is[:\s]+(.+?)(?:\.|$|\n)`)
@@ -91,7 +105,7 @@ func Check(text string) Result {
 	if text == "" {
 		return Result{}
 	}
-	if isGenuineDecision(text) {
+	if isGenuineDecision(text) || isWatcherArmedWait(text) {
 		return Result{}
 	}
 	for _, p := range idleHoldPatterns {
@@ -149,6 +163,15 @@ func isQuotedMention(text string, start, end int) bool {
 // operator decision types or a doctrine-prescribed tracked blocker.
 func isGenuineDecision(text string) bool {
 	for _, re := range genuineDecisionPatterns {
+		if re.MatchString(text) {
+			return true
+		}
+	}
+	return false
+}
+
+func isWatcherArmedWait(text string) bool {
+	for _, re := range watcherArmedPatterns {
 		if re.MatchString(text) {
 			return true
 		}

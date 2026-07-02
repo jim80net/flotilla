@@ -169,6 +169,11 @@ const grokWorkingArrow = "⇣"
 
 var grokSpinner = regexp.MustCompile(`[\x{2801}-\x{28FF}]`) // any non-blank braille spinner frame
 
+// grokSessionStatus matches an in-session processing status line (Thinking…/Waiting…/
+// Generating…). The launcher welcome menu can show a bare braille spinner WITHOUT this
+// prose — misreading it as Working blocks all sends on a dead-session menu (#216 evidence).
+var grokSessionStatus = regexp.MustCompile(`(?i)(?:Waiting|Thinking|Generating|Running)\x{2026}`)
+
 // grok's TOOL-APPROVAL modal anchors (LIVE-CAPTURED 2026-06-23, #158). The modal renders a ┃-bordered
 // block ("┃ Allow <Verb> `<path>`?" + numbered options) with a selection status line
 // "N/M:select  │  Ctrl+o:yolo  │  Ctrl+c:cancel". BOTH the "N/M:select" counter and the "Ctrl+o:yolo"
@@ -197,10 +202,18 @@ func parseGrokState(captured string) State {
 	if grokApprovalSelect.MatchString(tail) || strings.Contains(tail, grokApprovalYolo) {
 		return StateAwaitingApproval
 	}
-	if strings.Contains(tail, grokWorkingArrow) || grokSpinner.MatchString(tail) {
+	if strings.Contains(tail, grokWorkingArrow) || grokInSessionProcessing(tail) {
 		return StateWorking
 	}
 	return StateIdle
+}
+
+func grokInSessionProcessing(tail string) bool {
+	if !grokSpinner.MatchString(tail) {
+		return false
+	}
+	// Bare launcher-menu spinner (no session-status prose, no streaming arrow) is idle.
+	return grokSessionStatus.MatchString(tail)
 }
 
 // --- ComposerStateProbe (#158): grok's cursor-indexed composer classifier ---

@@ -22,6 +22,7 @@ import (
 	"github.com/jim80net/flotilla/internal/launch"
 	"github.com/jim80net/flotilla/internal/readermap"
 	"github.com/jim80net/flotilla/internal/roster"
+	"github.com/jim80net/flotilla/internal/stranded"
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/transport"
 	"github.com/jim80net/flotilla/internal/watch"
@@ -501,6 +502,9 @@ func cmdWatch(args []string) error {
 		// prompt fires after StrikeThreshold idle-hold turn-finals.
 		idleHoldTracker := idlehold.NewTracker()
 
+		// #216 stranded-handoff extension: gate work settled without gate-holder report.
+		strandedTracker := stranded.NewTracker()
+
 		// #232 coordinator delegation: every XO and CoS — not only the primary clock XO.
 		delegationTracker := delegatenudge.NewTracker()
 
@@ -590,6 +594,7 @@ func cmdWatch(args []string) error {
 			},
 			MirrorOnFinish:          deskMirrorOnFinish(cfg, secrets, tr, firewall, alert),
 			IdleHoldOnFinish:        idleHoldOnFinish(cfg, idleHoldTracker, injector.Enqueue),
+			StrandedHandoffOnFinish: strandedHandoffOnFinish(cfg, strandedTracker, injector.Enqueue),
 			IsCoordinator:           cfg.IsCoordinator,
 			DelegationNudgeOnFinish: delegationNudgeOnFinish(cfg, delegationTracker, injector.Enqueue),
 			MirrorDispatch:          func(run func()) { go run() }, // mirror I/O off the tick goroutine
@@ -1127,6 +1132,31 @@ func delegationNudgeOnFinish(cfg *roster.Config, tracker *delegatenudge.Tracker,
 		}
 		log.Printf("flotilla watch: delegation-nudge %s: inline-build signal", agent)
 		enqueue(watch.Job{Agent: agent, Message: delegatenudge.NudgePrompt(agent), Kind: "detector"})
+	}
+}
+
+// strandedHandoffOnFinish builds the #216 stranded-handoff break seam: on each desk
+// finish it classifies the turn-final for dropped gate reports and injects a break
+// prompt on detection. nil tracker ⇒ inert.
+func strandedHandoffOnFinish(cfg *roster.Config, tracker *stranded.Tracker, enqueue func(watch.Job)) func(agent string) {
+	if tracker == nil {
+		return nil
+	}
+	return func(agent string) {
+		text, ok, err := readDeskTurnFinal(cfg, agent)
+		if err != nil {
+			log.Printf("flotilla watch: stranded-handoff SKIP %s: read turn-final: %v", agent, err)
+			return
+		}
+		if !ok {
+			return
+		}
+		r := stranded.Check(text)
+		if !tracker.Record(agent, r) {
+			return
+		}
+		log.Printf("flotilla watch: stranded-handoff break %s: signal=%s", agent, r.Signal)
+		enqueue(watch.Job{Agent: agent, Message: stranded.NudgePrompt(agent), Kind: "detector"})
 	}
 }
 

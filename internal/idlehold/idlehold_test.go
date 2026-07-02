@@ -153,6 +153,19 @@ func TestTracker_ConcurrentRecordRace(t *testing.T) {
 	wg.Wait()
 }
 
+func TestCheck_WatcherArmedWaitNotIdleHold(t *testing.T) {
+	cases := []string{
+		"3 named watchers armed on the sweep lane; no operator-decision hold. Wake scheduled 19:54Z.",
+		"Event-armed on TG3 prep; timed: tactical-head 19:54Z sweep-disposition report.",
+		"Standing watchers on the hotline reply-watcher; legitimately waiting for the event.",
+	}
+	for _, text := range cases {
+		if r := Check(text); r.IdleHold {
+			t.Errorf("watcher-armed wait must NOT be idle-hold: %q (signal %q)", text, r.Signal)
+		}
+	}
+}
+
 func TestBreakPrompt_IncludesRecommendation(t *testing.T) {
 	p := BreakPrompt("merge PR #12")
 	if !strings.Contains(p, "merge PR #12") {
