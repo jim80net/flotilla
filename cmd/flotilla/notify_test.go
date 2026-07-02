@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -248,6 +249,59 @@ func TestCmdNotifyMissingSecretsPathErrors(t *testing.T) {
 	t.Setenv("FLOTILLA_SECRETS", "")
 	if err := cmdNotify([]string{"--from", "xo", "hi"}); err == nil {
 		t.Error("cmdNotify(no secrets path) = nil error, want error")
+	}
+}
+
+func TestCmdNotifyChunkSplitsOverLimitBody(t *testing.T) {
+	const agent = "xo"
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var p struct {
+			Content string `json:"content"`
+		}
+		_ = json.Unmarshal(body, &p)
+		bodies = append(bodies, p.Content)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	secrets := writeSecrets(t, agent, srv.URL)
+	long := strings.Repeat("a", mirrorChunkLimit*2+10) // forces 3 chunks
+	if err := cmdNotify([]string{"--from", agent, "--secrets", secrets, "--chunk", long}); err != nil {
+		t.Fatalf("cmdNotify --chunk: %v", err)
+	}
+	if len(bodies) != 3 {
+		t.Fatalf("posted %d chunks, want 3", len(bodies))
+	}
+	for i, b := range bodies {
+		if !strings.HasPrefix(b, fmt.Sprintf("(%d/3)\n", i+1)) {
+			t.Errorf("chunk %d missing (i/3) prefix: %q", i+1, b[:min(12, len(b))])
+		}
+	}
+}
+
+func TestCmdNotifyChunkSinglePartHasNoPrefix(t *testing.T) {
+	const agent = "xo"
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var p struct {
+			Content string `json:"content"`
+		}
+		_ = json.Unmarshal(body, &p)
+		got = p.Content
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	secrets := writeSecrets(t, agent, srv.URL)
+	short := "short mirror body"
+	if err := cmdNotify([]string{"--from", agent, "--secrets", secrets, "--chunk", short}); err != nil {
+		t.Fatalf("cmdNotify --chunk(short): %v", err)
+	}
+	if got != short {
+		t.Errorf("single-chunk body = %q, want unprefixed %q", got, short)
 	}
 }
 
