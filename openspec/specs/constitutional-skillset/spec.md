@@ -14,15 +14,15 @@ be `identity-append` (a STRUCTURAL rule loaded once into the agent's standing id
 embedded so the binary remains self-contained (no external asset path to configure).
 
 The install SHALL be idempotent, applying its idempotency at the granularity each member's mechanism
-requires. v1 ships exactly one `identity-append` member, whose idempotency is the content-level
-marker guard (below). The surface generalizes a second granularity for a future WHOLE-FILE member
-(one written to its own target file): kept/created semantics — a target file already present in the
-workspace SHALL be KEPT (never overwritten — the operator may have edited it), a missing target
-SHALL be CREATED, and each decision SHALL be reported. The two granularities apply to disjoint
-member kinds: an APPEND member (one whose content is appended into an existing file the workspace
-already owns, such as the agent's identity file) SHALL use the content-level marker guard rather
-than file-existence, because the target file always already exists (see the marker-guarded-append
-requirement below).
+requires. v1 ships five `identity-append` members (marker-guarded append into the identity file)
+and one `heartbeat-skill` member (whole-file kept/created semantics at its workspace-relative
+`TargetFile`). The two granularities apply to disjoint member kinds: an APPEND member (one whose
+content is appended into an existing file the workspace already owns, such as the agent's identity
+file) SHALL use the content-level marker guard rather than file-existence, because the target file
+always already exists (see the marker-guarded-append requirement below); a whole-file member SHALL
+use kept/created semantics — a target file already present in the workspace SHALL be KEPT (never
+overwritten — the operator may have edited it), a missing target SHALL be CREATED, and each decision
+SHALL be reported.
 
 #### Scenario: Installing the constitutional set into a fresh workspace
 
@@ -106,27 +106,56 @@ member, delivered as an `identity-append` structural rule.
 - **WHEN** the constitutional set is installed for a coordinating agent
 - **THEN** the agent's standing identity carries the ≤3-active-charges rule, the fourth-charge-forces-a-layer mechanic, upward aggregation, and parallel dispatch
 
+### Requirement: executive-mini-brief constitutional member
+
+The doctrine registry SHALL ship an `executive-mini-brief` `identity-append` member whose marked block
+defines the operator-facing turn-final format: bottom line first in plain English; 2–5 bullets naming
+work streams by what they do; identifiers compressed to an optional detail footer; and an explicit
+action-status close (one concrete ask or a varied all-clear — not one fixed verbatim formula every
+turn). `flotilla doctrine install` SHALL append the block idempotently (marker-detected skip).
+
+#### Scenario: doctrine install appends mini-brief block
+
+- **WHEN** `flotilla doctrine install <agent>` runs against an identity file lacking the
+  `flotilla:executive-mini-brief` opening marker
+- **THEN** the installer appends the member's fenced block into the agent's identity file
+
+### Requirement: mirror turn-final audit
+
+The XO Discord mirror hook SHALL log `MINI-BRIEF-AUDIT` when the turn-final's last line lacks an
+explicit action-status close (concrete ask or varied all-clear phrasing) and SHALL still post the
+text unchanged.
+
+#### Scenario: mirror posts and audits needs-you line
+
+- **WHEN** the hook extracts a non-empty assistant turn-final for the roster XO pane
+- **THEN** it posts via `flotilla notify --chunk` and logs audit status for the action-status close
+
 ### Requirement: The constitutional set is extensible without enumerating its future contents
 
 The constitutional set SHALL be a member registry such that adding a member is adding a registry
 entry plus its embedded asset, with no change to the install or seed logic (the install/seed loop is
 member-count-agnostic and dispatches each member by its declared `Mechanism`). v1 SHALL register
-exactly one member (the Rule of Three). The registry shape SHALL be stable while the `Mechanism`
-vocabulary remains EXTENSIBLE: v1 SHALL scope the `Mechanism` vocabulary to `identity-append`
-(structural) — the only value v1 uses — and a future member of a new kind (such as the forthcoming
-heartbeat-driven local-read synthesis member) SHALL extend the vocabulary with its own `Mechanism`
-value plus the write/load behavior that value implies, designed when that member is. The set SHALL
-NOT pre-enumerate or hardcode a broader corpus, NOR pre-specify the install behavior of a mechanism
-no shipped member uses; which further behaviors join the default set (including the forthcoming
-visibility-synthesis member) is an operator decision applied incrementally through the same seam.
+exactly six members as enumerated in `internal/doctrine` (`Members()`): `operating-principles`,
+`rule-of-three`, `no-self-merge`, `act-dont-idle-hold`, and `executive-mini-brief` (each
+`identity-append` into the agent's identity file), plus `visibility-synthesis` (`heartbeat-skill`
+written to `skills/visibility-synthesis.md`). The registry shape SHALL be stable while the
+`Mechanism` vocabulary remains EXTENSIBLE: v1 uses `identity-append` (structural rules loaded once
+at launch) and `heartbeat-skill` (a tick-time whole-file skill); a future member of a new kind
+SHALL extend the vocabulary with its own `Mechanism` value plus the write/load behavior that value
+implies, designed when that member is. The set SHALL NOT pre-enumerate or hardcode a broader corpus
+beyond the shipped registry, NOR pre-specify the install behavior of a mechanism no shipped member
+uses; which further behaviors join the default set is an operator decision applied incrementally
+through the same seam.
 
 #### Scenario: Adding a member requires no install-logic change
 
 - **WHEN** a new member is added to the registry with its embedded asset
 - **THEN** the install and seed paths distribute it with no change to their logic (they iterate the registry and dispatch by mechanism, not a fixed list)
 
-#### Scenario: v1 ships exactly one member
+#### Scenario: v1 ships the six registry members
 
-- **WHEN** the constitutional set is enumerated in v1
-- **THEN** it contains exactly the Rule of Three member, with the seam left open for the operator to add more
+- **WHEN** the constitutional set is enumerated in v1 (`doctrine.Members()`)
+- **THEN** it contains exactly the six members named above (five `identity-append`, one
+  `heartbeat-skill`), with the seam left open for the operator to add more
 

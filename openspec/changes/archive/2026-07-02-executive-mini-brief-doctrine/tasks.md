@@ -6,3 +6,4 @@
 - [x] 1.4 mirror hook needs-you audit + turn-final format header comment
 - [x] 1.5 doctrine tests (six members) + mirror script test
 - [x] 1.6 `docs/xo-doctrine.md` coordinator communications section
+- [x] 1.7 archived to `openspec/specs/constitutional-skillset/spec.md` (2026-07-02)

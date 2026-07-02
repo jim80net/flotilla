@@ -102,7 +102,7 @@ func NewServer(cfg Config) (*Server, error) {
 		cfg:       cfg,
 		roster:    rc,
 		xo:        xo,
-		threshold: FreshnessThreshold(rc.HeartbeatDur()),
+		threshold: FreshnessThreshold(rc.HeartbeatDur()), // ceiling via ReferenceIntervalCeiling (K9)
 		now:       time.Now,
 		tmpl:      tmpl,
 		mux:       http.NewServeMux(),
