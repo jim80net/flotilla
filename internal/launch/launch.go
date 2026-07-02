@@ -32,9 +32,10 @@ type Recipe struct {
 	// the file may be loaded on another host — so a missing dir surfaces as a
 	// clear resume-time error, not a load error.
 	Cwd string `json:"cwd"`
-	// Tmux (optional) is the target `session:window` to (re)create the pane in;
-	// empty defaults to `flotilla:<name>` (a canonical `flotilla` session, one
-	// window per agent) at resume time.
+	// Tmux (optional) is the target `session:window` to (re)create the pane in.
+	// Empty defaults at resume time to the per-agent session topology
+	// `flotilla-<name>:desk` (see ResumeTarget). Legacy recipes use the shared
+	// `flotilla` session with one window per agent (`flotilla:<name>`).
 	Tmux string `json:"tmux,omitempty"`
 	// State (optional) is a pointer to the desk's handoff/context doc, surfaced
 	// for the operator/skill to drive `/takeover` (the CLI does NOT auto-inject it

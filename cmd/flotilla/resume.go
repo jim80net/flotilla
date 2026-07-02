@@ -30,6 +30,7 @@ type resumeOps struct {
 // resumePlan is the resolved per-agent input to runResume.
 type resumePlan struct {
 	agent, key, cwd, launch, session, window string
+	perAgentSession                          bool
 	force                                    bool
 }
 
@@ -116,7 +117,7 @@ func cmdResume(args []string) error {
 		defer txn.Release()
 	}
 
-	session, window := resumeTmuxTarget(recipe, agentName)
+	session, window := launch.ResumeTarget(recipe, agentName)
 	ops := resumeOps{
 		resolve:    deliver.Resolve,
 		assess:     drv.Assess,
@@ -129,7 +130,9 @@ func cmdResume(args []string) error {
 	}
 	plan := resumePlan{
 		agent: agentName, key: agent.Title(), cwd: recipe.Cwd, launch: recipe.Launch,
-		session: session, window: window, force: force,
+		session: session, window: window,
+		perAgentSession: launch.IsPerAgentSession(session),
+		force:           force,
 	}
 	msg, err := runResume(ops, plan)
 	if err != nil {
@@ -200,9 +203,14 @@ func runResume(ops resumeOps, p resumePlan) (string, error) {
 			return "", err
 		}
 		var newTarget string
-		if exists {
+		switch {
+		case exists && p.perAgentSession:
+			// Per-agent session exists but no pane resolved — do not add a second
+			// window; surface a clear recovery path (orphan session or mis-tag).
+			return "", fmt.Errorf("%q: per-agent session %q exists but no pane resolves for %q — kill the orphan session or tag the pane with: flotilla register %s --pane <target>", p.agent, p.session, p.key, p.agent)
+		case exists:
 			newTarget, err = ops.newWindow(p.session, p.window, p.cwd, p.launch)
-		} else {
+		default:
 			newTarget, err = ops.newSession(p.session, p.window, p.cwd, p.launch)
 		}
 		if err != nil {
@@ -230,19 +238,6 @@ func printState(agent string, r launch.Recipe) {
 		return
 	}
 	fmt.Printf("  state pointer: %s (drive /takeover from here — resume does NOT auto-restore context)\n", pointer)
-}
-
-// resumeTmuxTarget derives the (session, window) to cold-create into. A recipe
-// tmux of "session:window" splits there; an absent tmux defaults to the canonical
-// "flotilla" session with the agent name as the window (the design's
-// flotilla:<name> default). Validated at load (validTmuxTarget), so the split is
-// safe here.
-func resumeTmuxTarget(r launch.Recipe, agentName string) (session, window string) {
-	if r.Tmux != "" {
-		s, w, _ := strings.Cut(r.Tmux, ":")
-		return s, w
-	}
-	return "flotilla", agentName
 }
 
 // parseResumeArgs resolves the agent, roster path, launch path, and --force

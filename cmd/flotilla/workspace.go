@@ -216,7 +216,7 @@ func buildLaunchRecipe(worktreeAbs, agent, identity, surface string) (launch.Rec
 	return launch.Recipe{
 		Launch: launchCmd,
 		Cwd:    worktreeAbs,
-		Tmux:   fmt.Sprintf("flotilla:%s", agent),
+		Tmux:   launch.DefaultPerAgentTmux(agent),
 	}, nil
 }
 

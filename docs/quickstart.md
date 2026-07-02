@@ -170,7 +170,8 @@ already write `flotilla-secrets.env`.
   pane's foreground process (so a compound `cd x && claude --continue` works).
 - `cwd` *(required, absolute)* — the working directory / worktree to launch in.
 - `tmux` *(optional)* — the `session:window` to create the pane in; default
-  `flotilla:<name>`.
+  `flotilla-<name>:desk` (one detached session per desk). Legacy recipes may
+  use the shared `flotilla:<name>` session.
 - `state` *(optional)* — a pointer to the desk's handoff/context doc, **printed**
   for you to drive `/takeover` (resume does **not** auto-restore context).
 

@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/jim80net/flotilla/internal/deliver"
-	"github.com/jim80net/flotilla/internal/launch"
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
@@ -126,8 +125,10 @@ func TestRunResumeSafetyMatrix(t *testing.T) {
 		{"ambiguous refuse", plan, "", deliver.ResolveAmbiguous, surface.StateUnknown, "", false, true, false, false, false, false},
 		// Cold create: no session → new-session + tag.
 		{"none no-session cold", plan, "", deliver.ResolveNone, surface.StateUnknown, "", false, false, false, true, true, false},
-		// Cold create: session exists → new-window + tag.
+		// Cold create: shared session exists → new-window + tag.
 		{"none has-session window", plan, "", deliver.ResolveNone, surface.StateUnknown, "", true, false, false, true, false, true},
+		// Cold create: per-agent session exists but no pane → refuse (no orphan window).
+		{"none per-agent session orphan", resumePlan{agent: "cos", key: "cos", cwd: "/w", launch: "sleep 1", session: "flotilla-cos", window: "desk", perAgentSession: true}, "", deliver.ResolveNone, surface.StateUnknown, "", true, true, false, false, false, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -148,28 +149,6 @@ func TestRunResumeSafetyMatrix(t *testing.T) {
 			}
 			if rec.newWindow != c.wantNewWin {
 				t.Errorf("newWindow = %v, want %v", rec.newWindow, c.wantNewWin)
-			}
-		})
-	}
-}
-
-func TestResumeTmuxTarget(t *testing.T) {
-	cases := []struct {
-		name        string
-		recipe      launch.Recipe
-		agent       string
-		wantSession string
-		wantWindow  string
-	}{
-		{"explicit tmux", launch.Recipe{Tmux: "flotilla:xo"}, "xo", "flotilla", "xo"},
-		{"explicit other session", launch.Recipe{Tmux: "work:desk"}, "xo", "work", "desk"},
-		{"absent tmux defaults to flotilla:<name>", launch.Recipe{}, "data", "flotilla", "data"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			s, w := resumeTmuxTarget(c.recipe, c.agent)
-			if s != c.wantSession || w != c.wantWindow {
-				t.Errorf("resumeTmuxTarget = (%q,%q), want (%q,%q)", s, w, c.wantSession, c.wantWindow)
 			}
 		})
 	}
