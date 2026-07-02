@@ -67,21 +67,87 @@ func TestDetectorAdaptiveNilByteInert(t *testing.T) {
 	}
 }
 
-func TestDetectorAdaptiveNonPositiveIntervalDoesNotPanic(t *testing.T) {
+// nonPositiveAdaptive stubs a broken policy engine that can emit non-positive intervals.
+type nonPositiveAdaptive struct {
+	current time.Duration
+}
+
+func (a *nonPositiveAdaptive) Current() time.Duration { return a.current }
+
+func (a *nonPositiveAdaptive) Update(ActivitySnapshot) (time.Duration, bool) {
+	return a.current, false
+}
+
+func TestAdaptiveZeroConfigNormalizesPositiveDefaults(t *testing.T) {
 	adaptive := NewAdaptiveInterval(AdaptiveConfig{Enabled: true})
-	if adaptive.Current() <= 0 {
-		t.Fatalf("normalized adaptive current must be positive, got %v", adaptive.Current())
+	if got := adaptive.Current(); got <= 0 {
+		t.Fatalf("zero-config normalize must yield positive current, got %v", got)
 	}
+}
+
+func TestDetectorPositiveTickIntervalClampsNonPositive(t *testing.T) {
 	f := newFixture()
 	cfg := f.config("xo", []string{"xo"}, 3, "none")
 	cfg.Interval = 50 * time.Millisecond
-	cfg.AdaptiveInterval = adaptive
+	d := NewDetector(cfg, t.TempDir()+"/snap.json")
+
+	fallback := 50 * time.Millisecond
+	for _, iv := range []time.Duration{0, -1, -time.Minute} {
+		if got := d.positiveTickInterval(iv); got != fallback {
+			t.Fatalf("positiveTickInterval(%v) = %v, want fallback %v", iv, got, fallback)
+		}
+	}
+	if got := d.positiveTickInterval(75 * time.Millisecond); got != 75*time.Millisecond {
+		t.Fatalf("positive interval must pass through, got %v", got)
+	}
+
+	cfg.Interval = 0
+	d2 := NewDetector(cfg, t.TempDir()+"/snap2.json")
+	if got := d2.positiveTickInterval(0); got != time.Millisecond {
+		t.Fatalf("zero cfg.Interval must clamp to 1ms floor, got %v", got)
+	}
+}
+
+func TestDetectorStartupClampsNonPositiveAdaptiveCurrent(t *testing.T) {
+	var ticks atomic.Int32
+	f := newFixture()
+	cfg := f.config("xo", []string{"xo"}, 3, "none")
+	cfg.Interval = 40 * time.Millisecond
+	cfg.AdaptiveInterval = &nonPositiveAdaptive{current: 0}
 	cfg.Activity = NewActivityTracker(testActivityConfig())
+	cfg.Persist = func(Snapshot) error { ticks.Add(1); return nil }
 	d := NewDetector(cfg, t.TempDir()+"/snap.json")
 	seed(d, map[string]surface.State{"xo": surface.StateIdle}, "h0")
 
 	d.Start()
-	d.Stop()
+	defer d.Stop()
+	time.Sleep(120 * time.Millisecond)
+	if ticks.Load() < 1 {
+		t.Fatal("startup with non-positive adaptive Current must clamp and tick")
+	}
+}
+
+func TestDetectorResetTickerClampsNonPositiveInterval(t *testing.T) {
+	var ticks atomic.Int32
+	f := newFixture()
+	cfg := f.config("xo", []string{"xo"}, 3, "none")
+	cfg.Interval = 35 * time.Millisecond
+	cfg.AdaptiveInterval = NewAdaptiveInterval(fastAdaptiveConfig())
+	cfg.Activity = NewActivityTracker(testActivityConfig())
+	cfg.Persist = func(Snapshot) error { ticks.Add(1); return nil }
+	d := NewDetector(cfg, t.TempDir()+"/snap.json")
+	seed(d, map[string]surface.State{"xo": surface.StateIdle}, "h0")
+
+	d.Start()
+	defer d.Stop()
+
+	for _, iv := range []time.Duration{0, -2 * time.Millisecond} {
+		d.intervalCh <- iv
+	}
+	time.Sleep(150 * time.Millisecond)
+	if ticks.Load() < 1 {
+		t.Fatal("resetTicker must survive non-positive intervalCh without panic")
+	}
 }
 
 func TestDetectorMaybeQueueIntervalUpdateCoalesces(t *testing.T) {
