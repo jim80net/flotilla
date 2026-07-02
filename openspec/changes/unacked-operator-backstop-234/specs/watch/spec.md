@@ -14,7 +14,8 @@ and pruned so records older than approximately seven days are dropped on load/sa
 The minimum message age threshold (`MinAge`) SHALL be explicit and SHALL be greater
 than or equal to the scan interval (monitoring-cadence-equals-alert-threshold: the
 fleet must have at least one full scan cycle to answer before a finding is raised).
-Production defaults: scan interval 30 minutes, `MinAge` 30 minutes.
+The maximum age threshold (`AckWindow`) SHALL gate findings on the upper bound.
+Production defaults: scan interval 30 minutes, `MinAge` 30 minutes, `AckWindow` 2 hours.
 
 #### Scenario: A young operator request is not flagged mid-answer
 - **WHEN** an operator posts a request younger than `MinAge`

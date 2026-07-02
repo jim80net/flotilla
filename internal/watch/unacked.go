@@ -93,8 +93,8 @@ func (u *UnackedBackstop) Run(ctx context.Context) {
 
 func (u *UnackedBackstop) sweep() {
 	now := u.now()
-	st := u.store.load(now)
-	changed := false
+	st, pruned := u.store.load(now)
+	changed := pruned
 	for _, b := range u.cfg.Bindings() {
 		if c := u.sweepChannel(b, &st, now); c {
 			changed = true

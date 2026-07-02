@@ -3,6 +3,7 @@ package unacked
 import (
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 var (
@@ -18,23 +19,41 @@ func looksLikeRequest(content string) bool {
 	if s == "" {
 		return false
 	}
-	if trivialAck.MatchString(s) {
+	body := stripLeadingAtMention(s)
+	if body == "" {
 		return false
 	}
-	if strings.Contains(s, "?") {
+	if trivialAck.MatchString(body) {
+		return false
+	}
+	if strings.Contains(body, "?") {
 		return true
 	}
 	if strings.HasPrefix(s, "@") {
-		return true
+		return true // @-addressed, non-trivial after desk prefix stripped
 	}
-	if requestLead.MatchString(s) {
+	if requestLead.MatchString(body) {
 		return true
 	}
 	// Longer operator prose without a question mark is often a directive.
-	if len([]rune(s)) >= 80 {
+	if len([]rune(body)) >= 80 {
 		return true
 	}
 	return false
+}
+
+// stripLeadingAtMention removes a leading @desk token (relay.Route shape) so
+// trivial-ack classification applies to "@xo thanks" the same as bare "thanks".
+func stripLeadingAtMention(s string) string {
+	if !strings.HasPrefix(s, "@") {
+		return s
+	}
+	afterAt := s[1:]
+	i := strings.IndexFunc(afterAt, unicode.IsSpace)
+	if i < 0 {
+		return ""
+	}
+	return strings.TrimLeft(afterAt[i:], " \t\r\n")
 }
 
 // isWorkingOnIt matches hotline soft-ack prose (aligned with reply.go escalation).

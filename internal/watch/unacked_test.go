@@ -1,7 +1,10 @@
 package watch
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -87,6 +90,38 @@ func TestUnackedBackstop_NoOperatorIDInert(t *testing.T) {
 	u := NewUnackedBackstop(&roster.Config{}, &fakeRecent{}, "", func(string) {}, nil, nil)
 	if u.sweepChannel(roster.Channel{ChannelID: "C1"}, &unackedState{}, time.Now()) {
 		t.Fatal("no operator id should be inert")
+	}
+}
+
+func TestUnackedBackstop_PrunePersistsOnQuietSweep(t *testing.T) {
+	now := time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "unacked.json")
+	st := unackedState{Records: []alertedRecord{
+		{MessageID: "old", AlertedAt: now.Add(-8 * 24 * time.Hour)},
+	}}
+	raw, err := json.Marshal(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &roster.Config{OperatorUserID: "op", Channels: []roster.Channel{{ChannelID: "C1"}}}
+	u := NewUnackedBackstop(cfg, &fakeRecent{byChannel: map[string][]transport.Message{"C1": {}}}, path,
+		func(string) { t.Fatal("quiet sweep must not alert") }, nil, nil)
+	u.now = func() time.Time { return now }
+	u.sweep()
+	out, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved unackedState
+	if err := json.Unmarshal(out, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.Records) != 0 {
+		t.Fatalf("pruned state should persist on quiet sweep; got %+v", saved.Records)
 	}
 }
 

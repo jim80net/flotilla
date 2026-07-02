@@ -74,9 +74,10 @@ type Finding struct {
 }
 
 // Scan inspects ascending channel history and returns un-acked operator requests.
-// Messages younger than MinAge are excluded. A fleet webhook reply after the
-// operator message counts as ack unless it is only a "working on it" with no
-// substantive follow-up within WorkingFollowUp.
+// Messages younger than MinAge or older than AckWindow are excluded (explicit age
+// gate — monitoring-cadence-equals-alert-threshold on the lower bound). A fleet
+// webhook reply after the operator message counts as ack unless it is only a
+// "working on it" with no substantive follow-up within WorkingFollowUp.
 func Scan(msgs []Message, channelID string, now time.Time, cfg Config) []Finding {
 	if cfg.OperatorUserID == "" || len(msgs) == 0 {
 		return nil
@@ -93,8 +94,8 @@ func Scan(msgs []Message, channelID string, now time.Time, cfg Config) []Finding
 		if age < cfg.MinAge {
 			continue
 		}
-		if age > cfg.AckWindow {
-			// Still report — the operator may have been waiting beyond the ack window.
+		if cfg.AckWindow > 0 && age > cfg.AckWindow {
+			continue
 		}
 		reason, unacked := lacksFleetAck(msgs, i, now, cfg)
 		if unacked {

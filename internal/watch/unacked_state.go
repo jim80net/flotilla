@@ -24,7 +24,7 @@ type unackedState struct {
 }
 
 // unackedStateStore persists dedup state for the un-acked backstop. Records older
-// than retention are pruned on every save so the file cannot grow unbounded.
+// than retention are pruned on every load and save so the file cannot grow unbounded.
 type unackedStateStore struct {
 	path      string
 	retention time.Duration
@@ -34,23 +34,25 @@ func newUnackedStateStore(path string, retention time.Duration) unackedStateStor
 	return unackedStateStore{path: path, retention: retention}
 }
 
-func (s unackedStateStore) load(now time.Time) unackedState {
+func (s unackedStateStore) load(now time.Time) (unackedState, bool) {
 	st := unackedState{}
 	if s.path == "" {
-		return st
+		return st, false
 	}
 	raw, err := os.ReadFile(s.path)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			log.Printf("flotilla watch: unacked state read failed for %q: %v (cold-starting)", s.path, err)
 		}
-		return st
+		return st, false
 	}
 	if err := json.Unmarshal(raw, &st); err != nil {
 		log.Printf("flotilla watch: unacked state at %q is corrupt: %v (cold-starting)", s.path, err)
-		return unackedState{}
+		return unackedState{}, false
 	}
-	return s.prune(st, now)
+	before := len(st.Records)
+	st = s.prune(st, now)
+	return st, len(st.Records) != before
 }
 
 func (s unackedStateStore) save(st unackedState, now time.Time) error {
