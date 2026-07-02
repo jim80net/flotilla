@@ -1,0 +1,4 @@
+- [x] Extend `confirmGracePolls` and bump `PaneTxnTimeout`
+- [x] Add expiry soft-success for `ComposerCleared` / `ComposerQueued`
+- [x] Unit tests: cleared-at-expiry, queued-late, queued-at-expiry
+- [x] openspec delta under `specs/surface/spec.md`

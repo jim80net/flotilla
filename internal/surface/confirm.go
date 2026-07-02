@@ -47,7 +47,10 @@ const (
 	// (claude-code) almost never reaches here — the composer clears the instant the Enter is
 	// accepted, so the fast phase confirms it without waiting on the spinner. Conservative default;
 	// validate/tune with the per-submit poll-count instrumentation (logConfirmed/logUnconfirmed).
-	confirmGracePolls    = 10
+	// confirmGracePolls extended (2026-07-02 false-negative refinement): slow post-error turn
+	// starts and late queued-message chrome can exceed the original 5s grace; 8s absorbs them
+	// without weakening the pending-at-expiry authority.
+	confirmGracePolls    = 16
 	confirmGraceInterval = 500 * time.Millisecond
 
 	// clearedConfirmPolls is how many CONSECUTIVE "composer cleared" reads are required before the
@@ -275,14 +278,23 @@ func (c Confirm) Submit(d Driver, pane, text string) error {
 		}
 	}
 
-	// 5. Window expiry — the AUTHORITY. A composer that PROVABLY still holds the body (Pending) after
-	//    all the retries + grace means the submit never landed: BLOCKED (the approval-sensitive desk case),
-	//    regardless of cursor/geometry. Only an UNDETERMINED final read (no probe / unreadable) is
-	//    ambiguous → ErrUnconfirmed. (A no-probe driver — sp==nil — has no composer authority, so it
-	//    always lands here as ambiguous, exactly as before.)
-	if sp != nil && sp.ComposerState(pane) == ComposerPending {
-		logPanelBlocked(pane, "pending-after-retries")
-		return ErrPanelBlocked
+	// 5. Window expiry — the AUTHORITY. Pending after all retries + grace ⇒ BLOCKED (positive
+	//    evidence the body remained). Cleared or Queued at expiry ⇒ soft-success (the heavy-pane
+	//    false-negative class: intermittent Undetermined reads prevented the stable-cleared streak
+	//    or a late queued prompt, but the composer is observably empty/queued — the Enter landed).
+	//    Only Undetermined (or a no-probe driver) ⇒ ErrUnconfirmed.
+	if sp != nil {
+		switch sp.ComposerState(pane) {
+		case ComposerPending:
+			logPanelBlocked(pane, "pending-after-retries")
+			return ErrPanelBlocked
+		case ComposerCleared:
+			logConfirmed(pane, "composer-cleared-at-expiry", polls)
+			return nil
+		case ComposerQueued:
+			logConfirmed(pane, "queued-at-expiry", polls)
+			return nil
+		}
 	}
 	logUnconfirmed(d, pane, sp, polls)
 	return ErrUnconfirmed
