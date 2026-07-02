@@ -44,15 +44,35 @@ func TestSynthesisReadFailureIsCleanSkip(t *testing.T) {
 // post target (owned channel), the per-tier output contract, the narrow-answer discipline, and
 // references the embedded skill.
 func TestSynthesisWakeBodyContents(t *testing.T) {
-	body := synthesisWakeBody("xo", "/home/operator/go/bin/flotilla", "/r/flotilla.json", []string{"backend", "data"}, []string{"xo-2"}, "\n(ack: touch /tmp/ack)")
+	body := synthesisWakeBody("xo", "/home/operator/go/bin/flotilla", "/r/flotilla.json", []string{"backend", "data"}, []string{"xo-2"}, "")
 
 	for _, want := range []string{"backend", "data", "xo-2", "visibility-synthesis", "idle", "result --roster", "SKIP an unreadable"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("synthesis wake body missing %q:\n%s", want, body)
 		}
 	}
-	if !strings.Contains(body, "/tmp/ack") {
-		t.Errorf("synthesis wake body must carry the ack instruction:\n%s", body)
+}
+
+// REGRESSION (#190): ack follows the liveness-tracked TARGET — sub-coordinators must NOT receive it.
+func TestSynthesisWakeBodyNoLivenessAckForSubCoordinator(t *testing.T) {
+	body := synthesisWakeBody("alpha-xo", "/home/operator/go/bin/flotilla", "/r/flotilla.json", []string{"backend"}, []string{"alpha-ch"}, "")
+	for _, banned := range []string{"ack you are alive", "flotilla-xo-alive", "-alive", "To ack you are alive"} {
+		if strings.Contains(body, banned) {
+			t.Errorf("sub-coordinator synthesis wake must NOT carry liveness-ack (%q in body)\n%s", banned, body)
+		}
+	}
+}
+
+// REGRESSION (#190 complement): when the meta-XO IS the clock XO, synthesis wakes to it MUST still
+// carry the ack instruction so AckAge does not false-wedge during synthesis-only quiet stretches.
+func TestSynthesisWakeBodyClockXOLivenessAck(t *testing.T) {
+	const ack = "\n(To ack you are alive, run: touch /state/flotilla-xo-alive)"
+	body := synthesisWakeBody("meta-xo", "/home/operator/go/bin/flotilla", "/r/flotilla.json", []string{"alpha-xo", "beta-xo"}, []string{"fleet-cmd"}, ack)
+	if !strings.Contains(body, ack) {
+		t.Errorf("clock-XO-target synthesis wake must append ackInstr; want %q in body\n%s", ack, body)
+	}
+	if !strings.Contains(body, "To ack you are alive") {
+		t.Errorf("clock-XO synthesis wake must name the ack touch command\n%s", body)
 	}
 }
 

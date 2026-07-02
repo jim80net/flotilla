@@ -77,8 +77,11 @@ func synthReadOneFromTurnFinal(turnFinal func(string) (string, bool, error)) fun
 // `flotilla result` command, making synthesis work harness-launch-agnostically (the workspace skill
 // is an enrichment, not a hard dependency). rosterPath is the path the DAEMON actually loaded (passed
 // absolute), so the command resolves the live roster regardless of the agent's own cwd. ackInstr is
-// appended so a synthesis-woken agent re-acks liveness (a wake that never instructs an ack would
-// falsely trip the AckAge wedge).
+// appended ONLY when the wake's TARGET is the daemon's liveness-tracked clock XO (the caller passes
+// it for that agent only). Sub-coordinators MUST NOT receive it (#190): an idle project-XO touching
+// the clock XO's ack file would mask a genuinely-dead coordinator. The meta-XO MAY be the clock XO
+// (Tier-3 synthesis recursion) — when it is, the ack instruction must still land so AckAge does not
+// false-wedge during synthesis-only quiet stretches.
 func synthesisWakeBody(agent, binPath, rosterPath string, readSet, postChannels []string, ackInstr string) string {
 	var b strings.Builder
 	b.WriteString("[flotilla visibility-synthesis] You are OWED a curated rollup of the tier BELOW you. ")

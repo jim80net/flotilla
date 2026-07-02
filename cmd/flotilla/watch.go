@@ -409,7 +409,11 @@ func cmdWatch(args []string) error {
 				log.Printf("flotilla watch: ignoring unexpected agent-targeted wake kind %v for %q", kind, agent)
 				return
 			}
-			body := synthesisWakeBody(agent, synthBin, synthRosterPath, synthesisReadSet(cfg, agent), cfg.OwnedChannels(agent), ackInstr)
+			ack := ""
+			if agent == xo {
+				ack = ackInstr // liveness ack follows the TARGET, not the wake kind (#190)
+			}
+			body := synthesisWakeBody(agent, synthBin, synthRosterPath, synthesisReadSet(cfg, agent), cfg.OwnedChannels(agent), ack)
 			injector.Enqueue(watch.Job{Agent: agent, Message: body, Kind: "detector"})
 		}
 
@@ -893,7 +897,7 @@ func backlogWakeBody(items []string, backlogPath, ackInstr string) string {
 // so an empty tracker is passed. A desk beat carries NO liveness-ack instruction: the AckAge wedge
 // watches the SINGLE XO ack file (a desk has no per-agent AckAge), so telling a beaten desk to touch
 // that file would let an idle desk mask a genuinely-dead XO from its own watchdog (G4 review P1). The
-// synthesis-wake sub-XO path shares this latent issue — tracked as #190. A HEARTBEAT.md read error
+// synthesis wake carries a liveness-ack instruction ONLY when its target IS the clock XO (#190). A HEARTBEAT.md read error
 // fails open to the builtin (ResolvePrompt's posture). Pure relative to the panes (a file read).
 func deskHeartbeatBody(agent string, settleFor func(string) string) (string, error) {
 	return workspace.ResolvePrompt(agent, deskContinuationBuiltin, "", settleFor(agent))
