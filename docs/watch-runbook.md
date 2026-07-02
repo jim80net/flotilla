@@ -68,7 +68,7 @@ Those are two separate deploy steps from the merge.
 
 After merging any PR that touches `cmd/flotilla/watch.go`, `internal/watch/`,
 `internal/relay/`, `internal/deliver/`, or `internal/surface/` — anything the
-running watch executes — redeploy in two steps:
+running watch executes — redeploy in three steps:
 
 ```bash
 # 1. Rebuild the binary from the merged code (safe + non-disruptive: the running
