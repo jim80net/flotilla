@@ -30,6 +30,7 @@ type detFixture struct {
 	rotateCalls int
 	rotateErr   error
 	backlog     backlog.Status // the goal-driven loop gate; zero ⇒ inert (no unblocked items)
+	clock       time.Time
 }
 
 type wakeRec struct {
@@ -38,7 +39,17 @@ type wakeRec struct {
 }
 
 func newFixture() *detFixture {
-	return &detFixture{states: map[string]surface.State{}, signalOK: true}
+	return &detFixture{
+		states:   map[string]surface.State{},
+		signalOK: true,
+		clock:    time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC),
+	}
+}
+
+func (f *detFixture) advance(d time.Duration) {
+	f.mu.Lock()
+	f.clock = f.clock.Add(d)
+	f.mu.Unlock()
 }
 
 func (f *detFixture) set(agent string, s surface.State) {
@@ -93,6 +104,11 @@ func (f *detFixture) config(xo string, desks []string, k int, mode string) Detec
 			defer f.mu.Unlock()
 			f.persisted = append(f.persisted, s)
 			return f.persistErr
+		},
+		Now: func() time.Time {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			return f.clock
 		},
 	}
 }
@@ -268,10 +284,7 @@ func TestDetectorSelfContinuationCap(t *testing.T) {
 	// Drive repeated XO Working→Idle with no external change and no settle marker.
 	contWakes := 0
 	for i := 0; i < 5; i++ {
-		f.set("xo", surface.StateWorking)
-		d.Tick()
-		f.set("xo", surface.StateIdle)
-		d.Tick()
+		xoFinishTurn(d, f)
 	}
 	f.mu.Lock()
 	for _, w := range f.wakes {
@@ -504,8 +517,9 @@ func TestDetectorMaxQuietPing(t *testing.T) {
 	f.signal = "h0"
 	f.ackAge = time.Minute // healthy, no alert
 
-	d.Tick() // quiet 1
-	d.Tick() // quiet 2 → ping fires
+	d.Tick() // quiet 1 — start the wall-time quiet clock
+	f.advance(2 * d.cfg.ReferenceInterval)
+	d.Tick() // quiet period elapsed → ping fires
 	pings := 0
 	f.mu.Lock()
 	for _, w := range f.wakes {
@@ -621,11 +635,13 @@ func TestDetectorRateLimitMaterialWake(t *testing.T) {
 	d.Tick() // cold-start wake only (no rate-limit probe — early return)
 	f.wakes = nil
 
+	f.advance(d.cfg.ReferenceInterval)
 	d.Tick() // probe #1 OFF mutex → pending not material; fold-back: no wake yet
 	if len(f.wakes) != 0 {
 		t.Fatalf("tick 1 wakes = %v, want none (pending fold-back)", f.wakes)
 	}
 
+	f.advance(d.cfg.ReferenceInterval)
 	d.Tick() // read pending (not material) + probe #2 → pending material; still no wake
 	if len(f.wakes) != 0 {
 		t.Fatalf("tick 2 wakes = %v, want none (material pending folds next tick)", f.wakes)
@@ -703,7 +719,9 @@ func TestDetectorAutoSwitchEnqueuesOncePerEpisode(t *testing.T) {
 	f.signal = "h0"
 
 	d.Tick()
+	f.advance(d.cfg.ReferenceInterval)
 	d.Tick()
+	f.advance(d.cfg.ReferenceInterval)
 	d.Tick() // material episode + auto-switch candidate
 	if len(autoCalls) != 1 || autoCalls[0].Agent != "backend" {
 		t.Fatalf("auto-switch calls = %+v, want one backend candidate", autoCalls)
@@ -795,6 +813,118 @@ func TestDetectorAutoSwitchConcurrentUnderRace(t *testing.T) {
 		go func() { defer wg.Done(); d.OperatorWake() }()
 	}
 	wg.Wait() // -race: auto-switch flight map must not race with OperatorWake
+}
+
+// xoFinishLiveTick drives one XO Working→Idle cycle and advances only the live tick
+// interval (not referenceInterval). Use when testing wall-gated sub-cadences at a
+// faster live tick than the roster ceiling.
+func xoFinishLiveTick(d *Detector, f *detFixture) {
+	f.set("xo", surface.StateWorking)
+	d.Tick()
+	f.set("xo", surface.StateIdle)
+	d.Tick()
+	f.advance(d.cfg.Interval)
+}
+
+func wallCadenceConfig(f *detFixture) DetectorConfig {
+	cfg := f.config("xo", []string{"xo"}, 3, "none")
+	cfg.Interval = 2 * time.Minute
+	cfg.ReferenceInterval = 20 * time.Minute
+	return cfg
+}
+
+func TestLivenessParamsWall(t *testing.T) {
+	ref := 20 * time.Minute
+	cases := []struct {
+		mode               string
+		k, n               int
+		wantPing, wantAlrt time.Duration
+	}{
+		{"interval", 3, 0, 40 * time.Minute, 60 * time.Minute},
+		{"consecutive", 3, 0, 40 * time.Minute, 80 * time.Minute},
+		{"none", 3, 0, 120 * time.Minute, 140 * time.Minute},
+		{"", 3, 0, 120 * time.Minute, 140 * time.Minute},
+		{"none", 3, 10, 200 * time.Minute, 220 * time.Minute},
+		{"interval", 1, 0, 20 * time.Minute, 40 * time.Minute},
+	}
+	for _, tc := range cases {
+		ping, alrt := livenessParamsWall(tc.mode, tc.k, ref, tc.n)
+		if ping != tc.wantPing || alrt != tc.wantAlrt {
+			t.Errorf("livenessParamsWall(%q,k=%d,n=%d,ref=20m) = (ping %v, alert %v), want (%v,%v)",
+				tc.mode, tc.k, tc.n, ping, alrt, tc.wantPing, tc.wantAlrt)
+		}
+		if alrt <= ping {
+			t.Errorf("livenessParamsWall(%q): alert %v must exceed ping %v", tc.mode, alrt, ping)
+		}
+	}
+}
+
+// PR 1 gate: at a 2m live tick, the continuation path must call requestRotate at most once
+// per referenceInterval even when the XO repeatedly finishes turns with an empty backlog.
+func TestDetectorContinueXORotateWall(t *testing.T) {
+	f := newFixture()
+	cfg := wallCadenceConfig(f)
+	d := newDet(t, f, cfg)
+	seed(d, map[string]surface.State{"xo": surface.StateIdle}, "h0")
+	f.signal = "h0"
+
+	for i := 0; i < 10; i++ {
+		xoFinishLiveTick(d, f)
+	}
+	if f.rotateCalls != 1 {
+		t.Fatalf("continuation rotates = %d, want 1 (at most one per referenceInterval at 2m live tick)", f.rotateCalls)
+	}
+
+	f.reset()
+	f.advance(20 * time.Minute)
+	xoFinishLiveTick(d, f)
+	if f.rotateCalls != 1 {
+		t.Fatalf("after referenceInterval elapsed, want one more rotate, got %d total in window", f.rotateCalls)
+	}
+}
+
+// PR 1 gate: rotate-on-settle is preserved — settle still rotates unless Awaiting, even when
+// continuationDue() is false because a recent continuation already fired.
+func TestDetectorContinueXOSettleRotate(t *testing.T) {
+	f := newFixture()
+	cfg := wallCadenceConfig(f)
+	d := newDet(t, f, cfg)
+	seed(d, map[string]surface.State{"xo": surface.StateWorking}, "h0")
+	f.signal = "h0"
+
+	// Continuation path: sets lastContinuationAt; only 2m later (not referenceInterval).
+	xoFinishLiveTick(d, f)
+	if f.rotateCalls != 1 {
+		t.Fatalf("precondition: continuation must rotate once, got %d", f.rotateCalls)
+	}
+	contRotates := f.rotateCalls
+
+	// Settle path within the same referenceInterval window — must still rotate.
+	f.settle = true
+	f.set("xo", surface.StateWorking)
+	d.Tick()
+	f.set("xo", surface.StateIdle)
+	d.Tick()
+
+	if f.rotateCalls != contRotates+1 {
+		t.Fatalf("settle must rotate even when !continuationDue(); rotates = %d, want %d", f.rotateCalls, contRotates+1)
+	}
+	if !d.snap.XOSettled {
+		t.Fatal("settle path must mark XO settled")
+	}
+
+	// Awaiting suppresses rotate on settle (unchanged contract).
+	f2 := newFixture()
+	d2 := newDet(t, f2, wallCadenceConfig(f2))
+	seed(d2, map[string]surface.State{"xo": surface.StateWorking}, "h0")
+	f2.signal = "h0"
+	f2.settle = true
+	f2.awaiting = true
+	f2.set("xo", surface.StateIdle)
+	d2.Tick()
+	if f2.rotateCalls != 0 {
+		t.Fatalf("settle must skip rotate while awaiting operator, got %d", f2.rotateCalls)
+	}
 }
 
 func TestDetectorRateLimitSkipsWorkingDesk(t *testing.T) {

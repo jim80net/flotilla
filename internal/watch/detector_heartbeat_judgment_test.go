@@ -31,6 +31,7 @@ type hbjFixture struct {
 	warrantHits []string        // agents the warrant seam was consulted for, in order
 	beats       []string
 	escalations []string
+	clock       time.Time
 }
 
 func newHBJFixture() *hbjFixture {
@@ -39,7 +40,14 @@ func newHBJFixture() *hbjFixture {
 		enabled:   map[string]bool{},
 		settleNow: map[string]bool{},
 		warranted: map[string]bool{},
+		clock:     time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC),
 	}
+}
+
+func (f *hbjFixture) advance(d time.Duration) {
+	f.mu.Lock()
+	f.clock = f.clock.Add(d)
+	f.mu.Unlock()
 }
 
 func (f *hbjFixture) set(agent string, s surface.State) {
@@ -99,6 +107,11 @@ func (f *hbjFixture) config(xo string, desks, enabledDesks []string, cadence, ca
 		},
 		DeskHeartbeatEveryTicks: cadence,
 		DeskHeartbeatCap:        cap,
+		Now: func() time.Time {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			return f.clock
+		},
 	}
 	if wireWarrant {
 		cfg.HeartbeatWarranted = func(a string) bool {
@@ -146,7 +159,9 @@ func TestDeskHeartbeatJudgment_WarrantedTrueBeats(t *testing.T) {
 	d := f.newDet(t, cfg)
 	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
 
-	d.Tick() // cadence 1 ⇒ owed a beat; warranted ⇒ beat delivered
+	d.Tick() // anchor first idle tick
+	f.advance(time.Minute)
+	d.Tick() // cadence elapsed ⇒ owed a beat; warranted ⇒ beat delivered
 	if got := f.beatLog(); len(got) != 1 || got[0] != "backend" {
 		t.Fatalf("warranted desk must beat, got %v", got)
 	}
@@ -181,8 +196,10 @@ func TestDeskHeartbeatJudgment_NotWarrantedSuppressesCapAndCadenceNeutral(t *tes
 	d := f.newDet(t, cfg)
 	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
 
+	d.Tick() // anchor first idle tick
 	for i := 0; i < 5; i++ {
-		d.Tick()
+		f.advance(time.Minute)
+		d.Tick() // cadence elapsed but not warranted ⇒ cadence-neutral suppress
 	}
 	if got := f.beatLog(); len(got) != 0 {
 		t.Fatalf("a not-warranted desk must NOT beat, got %v", got)
@@ -194,9 +211,9 @@ func TestDeskHeartbeatJudgment_NotWarrantedSuppressesCapAndCadenceNeutral(t *tes
 	if d.deskNoProgress["backend"] != 0 {
 		t.Errorf("deskNoProgress = %d, want 0 (a not-warranted idle tick accrues no cap)", d.deskNoProgress["backend"])
 	}
-	// Cadence-neutral: deskSinceBeat is NOT left mid-accrual into a beat — a suppressed tick is like settle.
-	if d.deskSinceBeat["backend"] != 0 {
-		t.Errorf("deskSinceBeat = %d, want 0 (a not-warranted idle tick is cadence-neutral, like settle)", d.deskSinceBeat["backend"])
+	// Cadence-neutral: deskBeatEligibleAt is cleared — a suppressed tick is like settle.
+	if _, ok := d.deskBeatEligibleAt["backend"]; ok {
+		t.Error("deskBeatEligibleAt must be cleared (a not-warranted idle tick is cadence-neutral, like settle)")
 	}
 }
 
@@ -216,6 +233,8 @@ func TestDeskHeartbeatJudgment_FlipsBackToWarranted(t *testing.T) {
 		t.Fatalf("not-warranted ⇒ no beat, got %v", got)
 	}
 	f.setWarranted("backend", true) // operator answered a question; a fresh [next] item appeared
+	d.Tick()                        // anchor
+	f.advance(time.Minute)
 	d.Tick()
 	if got := f.beatLog(); len(got) != 1 || got[0] != "backend" {
 		t.Fatalf("flipping back to warranted must resume beats, got %v", got)
@@ -235,11 +254,12 @@ func TestDeskHeartbeatJudgment_SeamNilIsByteIdentical(t *testing.T) {
 	d := f.newDet(t, cfg)
 	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
 
-	d.Tick() // deskSinceBeat 0→1, < 2 ⇒ no beat
+	d.Tick() // anchor first idle tick
 	if got := f.beatLog(); len(got) != 0 {
 		t.Fatalf("tick 1 (cadence not elapsed) must not beat, got %v", got)
 	}
-	d.Tick() // deskSinceBeat 1→2, >= 2 ⇒ ONE beat (exactly #183)
+	f.advance(2 * time.Minute) // cadence=2 ticks × 1m ref
+	d.Tick()                   // period elapsed ⇒ ONE beat (exactly #183)
 	if got := f.beatLog(); len(got) != 1 || got[0] != "backend" {
 		t.Fatalf("seam nil must be #183-identical: tick 2 must beat backend once, got %v", got)
 	}
@@ -261,7 +281,9 @@ func TestDeskHeartbeatJudgment_WedgeStillEscalates(t *testing.T) {
 	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
 
 	// cap=3: three no-progress beats ⇒ escalate ONCE on the ==3 edge, then stop.
-	for i := 0; i < 6; i++ {
+	d.Tick() // anchor
+	for i := 0; i < 3; i++ {
+		f.advance(time.Minute)
 		d.Tick()
 	}
 	beats := f.beatLog()
@@ -361,6 +383,8 @@ func TestDeskHeartbeatJudgment_EndToEndAcrossTicks(t *testing.T) {
 	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
 
 	// Phase 1: actionable work ⇒ beaten on cadence.
+	d.Tick() // anchor
+	f.advance(time.Minute)
 	d.Tick()
 	if got := f.beatLog(); len(got) != 1 || got[0] != "backend" {
 		t.Fatalf("phase 1 (actionable work) must beat backend, got %v", got)
@@ -381,6 +405,8 @@ func TestDeskHeartbeatJudgment_EndToEndAcrossTicks(t *testing.T) {
 	// Phase 3: operator re-arms the desk (AgentWake) AND a fresh [next] item appears ⇒ beaten again.
 	setBacklog("## Backlog\n- [awaiting-auth] flip the feed @operator\n- [next] start the next chunk\n")
 	d.AgentWake("backend")
+	d.Tick() // anchor
+	f.advance(time.Minute)
 	d.Tick()
 	if got := f.beatLog(); len(got) != 2 || got[1] != "backend" {
 		t.Fatalf("phase 3 (re-arm + fresh actionable work) must beat backend again, got %v", got)

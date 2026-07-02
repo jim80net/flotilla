@@ -16,11 +16,14 @@ func (f *detFixture) setBacklog(st backlog.Status) {
 }
 
 // xoFinishTurn drives one XO Working→Idle cycle (two ticks), the trigger for continueXO.
+// It advances the fake clock by referenceInterval after each finish so wall-gated continuation
+// and backlog drives remain testable at a sub-reference live tick.
 func xoFinishTurn(d *Detector, f *detFixture) {
 	f.set("xo", surface.StateWorking)
 	d.Tick()
 	f.set("xo", surface.StateIdle)
 	d.Tick()
+	f.advance(d.cfg.ReferenceInterval)
 }
 
 func TestBacklogGateVetoesSettleSignal(t *testing.T) {
@@ -132,15 +135,70 @@ func TestBacklogPerItemStuckDeprioritizes(t *testing.T) {
 		t.Errorf("stuck-item alerts = %d, want exactly 1 (escalate the stuck item ONCE)", stuckAlerts)
 	}
 
-	// A leaves the queue (the XO marked it [blocked]) → its drive count is pruned; re-adding it
+	// A leaves the queue (the XO marked it [blocked]) → its drive state is pruned; re-adding it
 	// later starts fresh (drive count 0, below the cap, so it is driven again before re-escalating).
 	f.setBacklog(backlog.Status{Unblocked: []string{B}})
 	xoFinishTurn(d, f)
 	d.mu.Lock()
 	_, aStillCounted := d.driveCount[A]
+	_, aStillStamped := d.lastDriveAt[A]
 	d.mu.Unlock()
 	if aStillCounted {
 		t.Error("driveCount for A was not pruned after it left the queue")
+	}
+	if aStillStamped {
+		t.Error("lastDriveAt for A was not pruned after it left the queue")
+	}
+}
+
+// Regression: pruneDriveCounts must clear lastDriveAt alongside driveCount so a re-appearing
+// item is not silently skipped until a full referenceInterval elapses.
+func TestBacklogPruneLastDriveAtOnQueueExit(t *testing.T) {
+	f := newFixture()
+	d := newDet(t, f, f.config("xo", []string{"xo"}, 3, "none"))
+	seed(d, map[string]surface.State{"xo": surface.StateIdle}, "h0")
+	f.signal = "h0"
+	item := "- [in-flight] ship it"
+	f.setBacklog(backlog.Status{Unblocked: []string{item}})
+
+	// Drive the item once (no clock advance — stay inside the referenceInterval window).
+	f.set("xo", surface.StateWorking)
+	d.Tick()
+	f.set("xo", surface.StateIdle)
+	d.Tick()
+	d.mu.Lock()
+	if _, ok := d.lastDriveAt[item]; !ok {
+		d.mu.Unlock()
+		t.Fatal("precondition: lastDriveAt must be set after a backlog drive")
+	}
+	d.mu.Unlock()
+
+	// Item leaves the queue; continueXO prunes both per-item maps.
+	f.setBacklog(backlog.Status{})
+	f.set("xo", surface.StateWorking)
+	d.Tick()
+	f.set("xo", surface.StateIdle)
+	d.Tick()
+	d.mu.Lock()
+	_, lastOk := d.lastDriveAt[item]
+	_, countOk := d.driveCount[item]
+	d.mu.Unlock()
+	if lastOk || countOk {
+		t.Fatalf("prune must drop lastDriveAt and driveCount for departed item (last=%v count=%v)", lastOk, countOk)
+	}
+
+	// Re-add within the same referenceInterval — must drive immediately, not defer.
+	f.setBacklog(backlog.Status{Unblocked: []string{item}})
+	f.reset()
+	f.set("xo", surface.StateWorking)
+	d.Tick()
+	f.set("xo", surface.StateIdle)
+	d.Tick()
+	if f.wakeCount() != 1 || f.lastWake().kind != WakeBacklog {
+		t.Fatalf("re-appearing item must drive immediately, got %+v", f.wakes)
+	}
+	if f.lastWake().reasons[0] != item {
+		t.Fatalf("want item %q driven, got %v", item, f.lastWake().reasons)
 	}
 }
 

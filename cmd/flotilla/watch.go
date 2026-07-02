@@ -527,10 +527,15 @@ func cmdWatch(args []string) error {
 			log.Printf("flotilla watch: auto-switch DISABLED (FLOTILLA_AUTOSWITCH=0)")
 		}
 
+		referenceInterval := cfg.HeartbeatDur()
+		if referenceInterval <= 0 {
+			referenceInterval = interval
+		}
 		detCfg := watch.DetectorConfig{
-			XOAgent:  xo,
-			Desks:    desks,
-			Interval: interval,
+			XOAgent:           xo,
+			Desks:             desks,
+			Interval:          interval,
+			ReferenceInterval: referenceInterval,
 			Assess: func(agent string) surface.State {
 				drv, ok := surface.Get(agentSurface(cfg, agent))
 				if !ok {
