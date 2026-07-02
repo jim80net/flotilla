@@ -8,9 +8,41 @@ import (
 	"github.com/jim80net/flotilla/internal/readermap"
 )
 
-func TestParseBriefArgs_DeskRequired(t *testing.T) {
+func TestParseBriefArgs_DeskOrAllRequired(t *testing.T) {
 	if _, err := parseBriefArgs([]string{"--from", "xo"}); err == nil {
-		t.Fatal("brief with no desk must error")
+		t.Fatal("brief with no desk and no --all must error")
+	}
+}
+
+func TestParseBriefArgs_AllWithoutDesk(t *testing.T) {
+	a, err := parseBriefArgs([]string{"--all", "--from", "cos", "--audience", "operator"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !a.all {
+		t.Error("want --all set")
+	}
+	if a.desk != "" {
+		t.Errorf("desk = %q, want empty with --all", a.desk)
+	}
+}
+
+func TestParseBriefArgs_AllAndDeskMutuallyExclusive(t *testing.T) {
+	if _, err := parseBriefArgs([]string{"--all", "backend"}); err == nil {
+		t.Fatal("--all and <desk> together must error")
+	}
+}
+
+func TestParseBriefArgs_InterleavedDesk(t *testing.T) {
+	a, err := parseBriefArgs([]string{"--from", "cos", "backend", "--audience", "newcomer"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if a.desk != "backend" {
+		t.Errorf("desk = %q, want backend", a.desk)
+	}
+	if a.audience != "newcomer" {
+		t.Errorf("audience = %q, want newcomer", a.audience)
 	}
 }
 
@@ -30,9 +62,13 @@ func TestParseBriefArgs_AcceptsDeskAndFlags(t *testing.T) {
 	}
 }
 
-func TestParseBriefArgs_FlagAfterDeskIsCaught(t *testing.T) {
-	if _, err := parseBriefArgs([]string{"backend", "--audience", "operator"}); err == nil {
-		t.Fatal("a flag placed AFTER the desk must be caught, not silently swallowed")
+func TestParseBriefArgs_FlagAfterDeskIsAccepted(t *testing.T) {
+	a, err := parseBriefArgs([]string{"backend", "--audience", "operator"})
+	if err != nil {
+		t.Fatalf("interleaved desk + flags must parse: %v", err)
+	}
+	if a.desk != "backend" || a.audience != "operator" {
+		t.Errorf("got desk=%q audience=%q", a.desk, a.audience)
 	}
 }
 
