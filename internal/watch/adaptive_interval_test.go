@@ -83,15 +83,29 @@ func TestAdaptiveIntervalDisabledByteInert(t *testing.T) {
 	}
 }
 
-func TestDrainTickerDropsPendingTick(t *testing.T) {
-	ticker := time.NewTicker(5 * time.Millisecond)
-	defer ticker.Stop()
-	<-ticker.C
-	drainTicker(ticker)
+func TestDrainTimeChanDropsPendingTick(t *testing.T) {
+	pending := make(chan time.Time, 1)
+	pending <- time.Now()
+	drainTimeChan(pending)
 	select {
-	case <-ticker.C:
-		t.Fatal("drainTicker must discard a pending tick before Stop/Reset")
+	case <-pending:
+		t.Fatal("drainTimeChan must discard a pending tick before Stop/Reset")
 	default:
+	}
+}
+
+func TestAdaptiveIntervalNormalizesMisorderedTiers(t *testing.T) {
+	cfg := AdaptiveConfig{
+		Enabled: true,
+		Floor:   20 * time.Minute,
+		Warm:    2 * time.Minute,
+		Ceiling: 8 * time.Minute,
+	}
+	ai := NewAdaptiveInterval(cfg)
+	t0 := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	interval, changed := ai.Update(snapAt(ActivityActive, t0))
+	if !changed || interval != 2*time.Minute {
+		t.Fatalf("misordered tiers should normalize to floor attack (%v, %v), want (2m, true)", interval, changed)
 	}
 }
 

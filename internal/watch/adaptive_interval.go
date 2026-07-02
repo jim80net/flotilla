@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"sort"
 	"sync"
 	"time"
 )
@@ -41,9 +42,7 @@ type adaptiveInterval struct {
 	idleSince       time.Time
 }
 
-// NewAdaptiveInterval builds the adaptive tick policy engine. When Enabled is false,
-// Update is a no-op and Current returns ceiling.
-func NewAdaptiveInterval(cfg AdaptiveConfig) AdaptiveInterval {
+func normalizeAdaptiveConfig(cfg AdaptiveConfig) AdaptiveConfig {
 	if cfg.Floor <= 0 {
 		cfg.Floor = 2 * time.Minute
 	}
@@ -53,16 +52,30 @@ func NewAdaptiveInterval(cfg AdaptiveConfig) AdaptiveInterval {
 	if cfg.Ceiling <= 0 {
 		cfg.Ceiling = 20 * time.Minute
 	}
+	tiers := []time.Duration{cfg.Floor, cfg.Warm, cfg.Ceiling}
+	sort.Slice(tiers, func(i, j int) bool { return tiers[i] < tiers[j] })
+	cfg.Floor, cfg.Warm, cfg.Ceiling = tiers[0], tiers[1], tiers[2]
 	if cfg.ReleaseStepEvery <= 0 {
 		cfg.ReleaseStepEvery = 5 * time.Minute
 	}
 	if cfg.IdleStableFor <= 0 {
 		cfg.IdleStableFor = 10 * time.Minute
 	}
-	start := cfg.Ceiling
-	if !cfg.Enabled {
-		start = cfg.Ceiling
+	return cfg
+}
+
+func clampAdaptiveCurrent(d time.Duration, cfg AdaptiveConfig) time.Duration {
+	if d <= 0 {
+		return cfg.Ceiling
 	}
+	return d
+}
+
+// NewAdaptiveInterval builds the adaptive tick policy engine. When Enabled is false,
+// Update is a no-op and Current returns ceiling.
+func NewAdaptiveInterval(cfg AdaptiveConfig) AdaptiveInterval {
+	cfg = normalizeAdaptiveConfig(cfg)
+	start := clampAdaptiveCurrent(cfg.Ceiling, cfg)
 	return &adaptiveInterval{cfg: cfg, current: start}
 }
 
@@ -92,13 +105,13 @@ func (a *adaptiveInterval) Update(snap ActivitySnapshot) (time.Duration, bool) {
 
 	if desired < a.current {
 		// Attack: tighten immediately; start the release cooldown from this instant.
-		a.current = desired
+		a.current = clampAdaptiveCurrent(desired, a.cfg)
 		a.lastReleaseStep = now
 		changed = true
 	} else if desired > a.current {
 		// Release: at most one tier per ReleaseStepEvery.
 		if a.lastReleaseStep.IsZero() || now.Sub(a.lastReleaseStep) >= a.cfg.ReleaseStepEvery {
-			next := a.stepUp(a.current)
+			next := clampAdaptiveCurrent(a.stepUp(a.current), a.cfg)
 			if next > desired {
 				next = desired
 			}
@@ -109,7 +122,7 @@ func (a *adaptiveInterval) Update(snap ActivitySnapshot) (time.Duration, bool) {
 			}
 		}
 	}
-	return a.current, changed
+	return clampAdaptiveCurrent(a.current, a.cfg), changed
 }
 
 func (a *adaptiveInterval) trackIdle(level ActivityLevel, now time.Time) {
@@ -157,13 +170,18 @@ func (a *adaptiveInterval) tierOf(d time.Duration) int {
 	return 2
 }
 
+// drainTimeChan discards one pending value from a tick channel when present.
+func drainTimeChan(c <-chan time.Time) {
+	select {
+	case <-c:
+	default:
+	}
+}
+
 // drainTicker discards a pending tick before Stop/Reset (poke-debounce discipline).
 func drainTicker(t *time.Ticker) {
 	if t == nil {
 		return
 	}
-	select {
-	case <-t.C:
-	default:
-	}
+	drainTimeChan(t.C)
 }

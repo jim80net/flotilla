@@ -579,7 +579,7 @@ func (d *Detector) loop() {
 		<-d.stop
 		return
 	}
-	interval := d.currentInterval()
+	interval := d.positiveTickInterval(d.currentInterval())
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	var debounce *time.Timer
@@ -599,7 +599,7 @@ func (d *Detector) loop() {
 	resetTicker := func(newInterval time.Duration) {
 		drainTicker(t)
 		t.Stop()
-		t = time.NewTicker(newInterval)
+		t = time.NewTicker(d.positiveTickInterval(newInterval))
 	}
 	for {
 		select {
@@ -630,6 +630,17 @@ func (d *Detector) currentInterval() time.Duration {
 	return d.cfg.Interval
 }
 
+// positiveTickInterval guards time.NewTicker from non-positive adaptive output.
+func (d *Detector) positiveTickInterval(iv time.Duration) time.Duration {
+	if iv > 0 {
+		return iv
+	}
+	if d.cfg.Interval > 0 {
+		return d.cfg.Interval
+	}
+	return time.Millisecond
+}
+
 // maybeQueueIntervalUpdate reads activity + adaptive policy OFF d.mu and coalesces
 // a ticker reset request to the loop goroutine (the sole ticker owner).
 func (d *Detector) maybeQueueIntervalUpdate() {
@@ -641,6 +652,7 @@ func (d *Detector) maybeQueueIntervalUpdate() {
 	if !changed {
 		return
 	}
+	interval = d.positiveTickInterval(interval)
 	select {
 	case d.intervalCh <- interval:
 	default:

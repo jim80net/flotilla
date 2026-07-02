@@ -67,6 +67,23 @@ func TestDetectorAdaptiveNilByteInert(t *testing.T) {
 	}
 }
 
+func TestDetectorAdaptiveNonPositiveIntervalDoesNotPanic(t *testing.T) {
+	adaptive := NewAdaptiveInterval(AdaptiveConfig{Enabled: true})
+	if adaptive.Current() <= 0 {
+		t.Fatalf("normalized adaptive current must be positive, got %v", adaptive.Current())
+	}
+	f := newFixture()
+	cfg := f.config("xo", []string{"xo"}, 3, "none")
+	cfg.Interval = 50 * time.Millisecond
+	cfg.AdaptiveInterval = adaptive
+	cfg.Activity = NewActivityTracker(testActivityConfig())
+	d := NewDetector(cfg, t.TempDir()+"/snap.json")
+	seed(d, map[string]surface.State{"xo": surface.StateIdle}, "h0")
+
+	d.Start()
+	d.Stop()
+}
+
 func TestDetectorMaybeQueueIntervalUpdateCoalesces(t *testing.T) {
 	f := newFixture()
 	cfg := f.config("xo", []string{"xo", "backend"}, 3, "none")
