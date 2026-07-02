@@ -60,6 +60,22 @@ func (r *transportCatchUpReader) Latest(channelID string) (transport.Message, bo
 	return r.cap.Latest(d)
 }
 
+// transportRecentReader adapts the transport's RecentHistory capability (keyed by
+// an opaque Destination) to the un-acked backstop's RecentHistoryReader seam
+// (keyed by channel id).
+type transportRecentReader struct {
+	cap  transport.RecentHistory
+	dest map[string]transport.Destination
+}
+
+func (r *transportRecentReader) Recent(channelID string, limit int) ([]transport.Message, error) {
+	d, ok := r.dest[channelID]
+	if !ok {
+		return nil, fmt.Errorf("no transport destination for channel %q", channelID)
+	}
+	return r.cap.Recent(d, limit)
+}
+
 // transportGateway adapts the transport's Subscribe (the inbound half) to the
 // gatewayController seam the non-fatal-with-retry relayController consumes. Open
 // subscribes (constructs+opens the live gateway as one attempt); Close tears the
@@ -86,6 +102,7 @@ func (g *transportGateway) Close() error { return g.tr.Close() }
 
 // compile-time assertions: the adapters satisfy the seams they bridge.
 var (
-	_ watch.MessageReader = (*transportCatchUpReader)(nil)
-	_ gatewayController   = (*transportGateway)(nil)
+	_ watch.MessageReader       = (*transportCatchUpReader)(nil)
+	_ watch.RecentHistoryReader = (*transportRecentReader)(nil)
+	_ gatewayController         = (*transportGateway)(nil)
 )

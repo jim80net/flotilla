@@ -228,6 +228,24 @@ func (t *discordTransport) MessagesAfter(dest Destination, afterID string, pageL
 	return projectMessages(msgs), capped, nil
 }
 
+// Recent returns up to limit of dest's most recent messages (ascending),
+// delegating to discord.REST.Recent and projecting to transport.Message. Part of
+// the OPTIONAL RecentHistory capability (#234 un-acked backstop).
+func (t *discordTransport) Recent(dest Destination, limit int) ([]Message, error) {
+	dd, ok := dest.(discordDestination)
+	if !ok {
+		return nil, fmt.Errorf("discord transport: Recent got a non-discord destination %T", dest)
+	}
+	if t.rest == nil {
+		return nil, fmt.Errorf("discord transport: recent history not configured (no REST client)")
+	}
+	msgs, err := t.rest.Recent(dd.channelID, limit)
+	if err != nil {
+		return nil, err
+	}
+	return projectMessages(msgs), nil
+}
+
 // Latest returns dest's most recent message (tail-init), delegating to
 // discord.REST.Latest and projecting to transport.Message.
 func (t *discordTransport) Latest(dest Destination) (Message, bool, error) {
