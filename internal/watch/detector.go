@@ -256,6 +256,16 @@ type DetectorConfig struct {
 
 	// PokeDebounce coalesces event-driven TurnEndPoller pokes (default DefaultPokeDebounce).
 	PokeDebounce time.Duration
+
+	// ReferenceInterval anchors wall-time sub-cadences (roster heartbeat_interval / ceiling).
+	// When zero, NewDetector defaults it to Interval.
+	ReferenceInterval time.Duration
+	// SynthEveryPeriod is the synthesis digest wall-time cadence (default 3 × ReferenceInterval).
+	SynthEveryPeriod time.Duration
+	// DeskHeartbeatPeriod is the per-desk heartbeat wall-time cadence (default ReferenceInterval).
+	DeskHeartbeatPeriod time.Duration
+	// RateLimitProbePeriod gates rate-limit probe batches (default ReferenceInterval).
+	RateLimitProbePeriod time.Duration
 }
 
 // Detector is the v2 heartbeat: a deterministic, no-LLM tick that wakes the XO
@@ -266,19 +276,21 @@ type DetectorConfig struct {
 type Detector struct {
 	mu sync.Mutex
 
-	cfg           DetectorConfig
-	pingEvery     int // mode-derived ping cadence (intervals); 0 disables pings
-	alertInterval int // mode-derived wedge-alert window (intervals)
+	cfg         DetectorConfig
+	pingPeriod  time.Duration // wall-time quiet-ping period; 0 disables pings
+	alertWindow time.Duration // wall-time AckAge wedge window
 
-	snap        Snapshot
-	cold        bool
-	quietTicks  int
-	selfCont    int
-	driveCount  map[string]int // per-item backlog drive counts (the goal-driven loop's stuck handling)
-	shellStreak map[string]int
-	writeFails  int
-	degraded    bool
-	wd          *Watchdog
+	snap               Snapshot
+	cold               bool
+	quietFSM           quietPingFSM
+	selfCont           int
+	lastContinuationAt time.Time
+	lastDriveAt        map[string]time.Time
+	driveCount         map[string]int // per-item backlog drive counts (the goal-driven loop's stuck handling)
+	shellStreak        map[string]int
+	writeFails         int
+	degraded           bool
+	wd                 *Watchdog
 
 	// --- visibility synthesis (B2) state, guarded by the same d.mu single-writer invariant ---
 	// These in-memory maps need NO prune for roster-removed agents: their keys are only ever the
@@ -287,20 +299,21 @@ type Detector struct {
 	// change requires a daemon restart (the roster loads once at start), which reconstructs them
 	// empty — so they are bounded by roster size and self-clear on the restart any change requires.
 	// (The DURABLE sidecar IS pruned at load — see NewDetector — because it persists across restarts.)
-	synthOwed      map[string]bool // synthesizing agent → has a rollup owed (a desk finished below it)
-	synthSinceFire map[string]int  // synthesizing agent → ticks since its last WakeSynthesis fired
-	synthState     SynthState      // the DURABLE last-seen materiality snapshot (loaded from the sidecar)
+	synthOwed        map[string]bool      // synthesizing agent → has a rollup owed (a desk finished below it)
+	synthSinceFireAt map[string]time.Time // synthesizing agent → wall time of last WakeSynthesis fire
+	synthState       SynthState           // the DURABLE last-seen materiality snapshot (loaded from the sidecar)
 
 	// --- recursive desk-heartbeat (#183) per-agent state, guarded by the same d.mu single-writer
 	// invariant. Keyed only by monitored desks (⊆ Desks, validated in-roster), so — like the synth
 	// maps — they need no prune: they're bounded by roster size and self-clear on the restart any
 	// roster change requires. All in-memory (no durable snapshot): a restart cold-starts a desk's
 	// heartbeat cadence, which is conservative (one fresh re-engagement, never a missed escalation).
-	deskSettled    map[string]bool // desk signaled idle (per-agent marker consumed) → suppress until re-armed
-	deskSinceBeat  map[string]int  // ticks since the desk's last heartbeat fired (the cadence counter)
-	deskNoProgress map[string]int  // consecutive heartbeats with no intervening progress (the cap counter)
-	deskStopped    map[string]bool // capped + escalated → stop heartbeating until re-armed
-	deskProgressed map[string]bool // desk went Working since its last heartbeat → resets the cap
+	deskSettled          map[string]bool      // desk signaled idle (per-agent marker consumed) → suppress until re-armed
+	deskBeatEligibleAt   map[string]time.Time // desk → last heartbeat fire (cadence anchor)
+	rateLimitLastProbeAt map[string]time.Time
+	deskNoProgress       map[string]int  // consecutive heartbeats with no intervening progress (the cap counter)
+	deskStopped          map[string]bool // capped + escalated → stop heartbeating until re-armed
+	deskProgressed       map[string]bool // desk went Working since its last heartbeat → resets the cap
 
 	// rateLimitActive suppresses repeat wakes for the same throttle episode (#204).
 	rateLimitActive map[string]bool
@@ -353,6 +366,22 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 	if cfg.SynthEveryTicks < 1 {
 		cfg.SynthEveryTicks = synthEveryTicksDefault
 	}
+	if cfg.ReferenceInterval <= 0 {
+		cfg.ReferenceInterval = cfg.Interval
+	}
+	if cfg.SynthEveryPeriod <= 0 {
+		cfg.SynthEveryPeriod = time.Duration(cfg.SynthEveryTicks) * cfg.ReferenceInterval
+	}
+	if cfg.DeskHeartbeatPeriod <= 0 {
+		ticks := cfg.DeskHeartbeatEveryTicks
+		if ticks < 1 {
+			ticks = 1
+		}
+		cfg.DeskHeartbeatPeriod = time.Duration(ticks) * cfg.ReferenceInterval
+	}
+	if cfg.RateLimitProbePeriod <= 0 {
+		cfg.RateLimitProbePeriod = cfg.ReferenceInterval
+	}
 	// Recursive desk-heartbeat (#183) cadence/cap defaults. These are inert unless HeartbeatEnabled
 	// is also wired (the per-desk tickLocked block is skipped when HeartbeatEnabled is nil), so
 	// defaulting them here never changes behavior for a pre-#183 deployment.
@@ -382,7 +411,7 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 	if cfg.SynthPersist == nil {
 		cfg.SynthPersist = func(SynthState) error { return nil }
 	}
-	ping, alert := livenessParams(cfg.LivenessPingMode, cfg.MaxMissedAcks, cfg.MaxQuietIntervals)
+	pingPeriod, alertWindow := livenessParamsWall(cfg.LivenessPingMode, cfg.MaxMissedAcks, cfg.ReferenceInterval, cfg.MaxQuietIntervals)
 
 	snap, ok := LoadSnapshot(snapPath)
 	synthState, _ := cfg.SynthLoad() // a missing/corrupt sidecar (ok=false) fails safe to empty ⇒ all-changed
@@ -405,25 +434,28 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 		}
 	}
 	d := &Detector{
-		cfg:              cfg,
-		pingEvery:        ping,
-		alertInterval:    alert,
-		snap:             snap,
-		cold:             !ok,
-		driveCount:       map[string]int{},
-		shellStreak:      map[string]int{},
-		synthOwed:        map[string]bool{},
-		synthSinceFire:   map[string]int{},
-		synthState:       synthState,
-		deskSettled:      map[string]bool{},
-		deskSinceBeat:    map[string]int{},
-		deskNoProgress:   map[string]int{},
-		deskStopped:      map[string]bool{},
-		deskProgressed:   map[string]bool{},
-		rateLimitActive:  map[string]bool{},
-		rateLimitPending: map[string]rateLimitProbeResult{},
-		// The detector computes the staleness threshold itself (age > alertInterval×
-		// interval), so the watchdog only needs to trip on the first stale/crash
+		cfg:                  cfg,
+		pingPeriod:           pingPeriod,
+		alertWindow:          alertWindow,
+		quietFSM:             quietPingFSM{pingPeriod: pingPeriod},
+		snap:                 snap,
+		cold:                 !ok,
+		driveCount:           map[string]int{},
+		lastDriveAt:          map[string]time.Time{},
+		shellStreak:          map[string]int{},
+		synthOwed:            map[string]bool{},
+		synthSinceFireAt:     map[string]time.Time{},
+		synthState:           synthState,
+		deskSettled:          map[string]bool{},
+		deskBeatEligibleAt:   map[string]time.Time{},
+		rateLimitLastProbeAt: map[string]time.Time{},
+		deskNoProgress:       map[string]int{},
+		deskStopped:          map[string]bool{},
+		deskProgressed:       map[string]bool{},
+		rateLimitActive:      map[string]bool{},
+		rateLimitPending:     map[string]rateLimitProbeResult{},
+		// The detector computes the staleness threshold itself (age > alertWindow),
+		// so the watchdog only needs to trip on the first stale/crash
 		// signal and debounce — maxMissed=1.
 		wd:     NewWatchdog(1, cfg.Alert),
 		stop:   make(chan struct{}),
@@ -497,6 +529,21 @@ func livenessParams(mode string, k, nOverride int) (pingEvery, alertIntervals in
 	return pingEvery, alertIntervals
 }
 
+// livenessParamsWall converts tick-count liveness params to wall-time periods anchored on ref.
+func livenessParamsWall(mode string, k int, ref time.Duration, nOverrideTicks int) (pingPeriod, alertWindow time.Duration) {
+	pingTicks, alertTicks := livenessParams(mode, k, nOverrideTicks)
+	pingPeriod = time.Duration(pingTicks) * ref
+	alertWindow = time.Duration(alertTicks) * ref
+	return pingPeriod, alertWindow
+}
+
+func (d *Detector) now() time.Time {
+	if d.cfg.Now != nil {
+		return d.cfg.Now()
+	}
+	return time.Now()
+}
+
 // Start launches the detector loop (ticks every Interval). interval <= 0 parks
 // it until Stop (disabled).
 func (d *Detector) Start() { d.startOnce.Do(func() { go d.loop() }) }
@@ -565,7 +612,11 @@ func (d *Detector) OperatorWake() {
 	defer d.mu.Unlock()
 	d.snap.XOSettled = false
 	d.selfCont = 0
-	d.quietTicks = 0
+	d.quietFSM.OnWake()
+	d.lastContinuationAt = time.Time{}
+	for item := range d.lastDriveAt {
+		delete(d.lastDriveAt, item)
+	}
 	// Clear per-item backlog drive counts: a fresh operator directive re-engages the loop and must
 	// not inherit a stale stuck-streak (which would wrongly fire a stuck alert / deprioritize an
 	// item on the next wake).
@@ -594,7 +645,7 @@ func (d *Detector) AgentWake(agent string) {
 	defer d.mu.Unlock()
 	delete(d.deskSettled, agent)
 	delete(d.deskStopped, agent)
-	delete(d.deskSinceBeat, agent)
+	delete(d.deskBeatEligibleAt, agent)
 	delete(d.deskNoProgress, agent)
 	delete(d.deskProgressed, agent)
 	if d.cfg.DeskSettleConsume != nil {
@@ -815,7 +866,7 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 		d.snap = cur
 		d.evalLiveness(cur) // still cover liveness from tick one
 		wake(WakeMaterial, []string{"change-detector started — reassess the fleet"})
-		d.quietTicks = 0
+		d.quietFSM.OnColdStart()
 		return // durable save happens in Tick AFTER the tail enqueues this wake (at-least-once)
 	}
 
@@ -901,12 +952,12 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 	// 6. Max-quiet liveness ping (layer 3). Any wake above already refreshes
 	//    liveness (L1), so only an entirely-quiet tick advances the quiet counter.
 	if woke {
-		d.quietTicks = 0
-	} else {
-		d.quietTicks++
-		if d.pingEvery > 0 && d.quietTicks >= d.pingEvery {
+		d.quietFSM.OnWake()
+	} else if d.pingPeriod > 0 {
+		now := d.now()
+		if d.quietFSM.OnQuietTick(now) {
 			wake(WakePing, nil)
-			d.quietTicks = 0
+			d.quietFSM.OnPingFired(now)
 		}
 	}
 
@@ -963,8 +1014,9 @@ func (d *Detector) deskHeartbeatLocked(cur Snapshot, warrant map[string]bool) (b
 	if d.cfg.HeartbeatEnabled == nil {
 		return nil, nil // feature OFF ⇒ byte-inert
 	}
-	cadence := d.cfg.DeskHeartbeatEveryTicks // defaulted >= 1 in NewDetector
-	capN := d.cfg.DeskHeartbeatCap           // defaulted >= 1 in NewDetector
+	period := d.cfg.DeskHeartbeatPeriod
+	capN := d.cfg.DeskHeartbeatCap // defaulted >= 1 in NewDetector
+	now := d.now()
 	for _, name := range d.cfg.Desks {
 		if name == d.cfg.XOAgent || !d.cfg.HeartbeatEnabled(name) {
 			continue // the primary XO keeps its own clock; an opted-out desk never beats
@@ -977,7 +1029,7 @@ func (d *Detector) deskHeartbeatLocked(cur Snapshot, warrant map[string]bool) (b
 			d.deskProgressed[name] = true
 			delete(d.deskStopped, name)
 			d.deskNoProgress[name] = 0
-			d.deskSinceBeat[name] = 0
+			delete(d.deskBeatEligibleAt, name)
 			delete(d.deskSettled, name)
 		case surface.StateIdle:
 			// Consume the per-agent settle marker (fail-safe → not-settled). A desk that touched its
@@ -988,8 +1040,12 @@ func (d *Detector) deskHeartbeatLocked(cur Snapshot, warrant map[string]bool) (b
 			if d.deskSettled[name] || d.deskStopped[name] {
 				continue // a settled/stopped desk does not beat AND does not accrue cadence
 			}
-			d.deskSinceBeat[name]++
-			if d.deskSinceBeat[name] < cadence {
+			last := d.deskBeatEligibleAt[name]
+			if last.IsZero() {
+				d.deskBeatEligibleAt[name] = now // anchor first idle tick (no beat yet)
+				continue
+			}
+			if now.Sub(last) < period {
 				continue // cadence not yet elapsed
 			}
 			// #189 JUDGMENT — the LAST gate, evaluated only once the beat is otherwise owed (HARD gate
@@ -1005,12 +1061,12 @@ func (d *Detector) deskHeartbeatLocked(cur Snapshot, warrant map[string]bool) (b
 			// not a wedge, so it accrues no no-progress). The judgment can ONLY suppress here; it never
 			// resurrects a beat the gates above withheld — a pure narrowing of the #183 candidate set.
 			if w, ok := warrant[name]; ok && !w {
-				d.deskSinceBeat[name] = 0
+				delete(d.deskBeatEligibleAt, name)
 				continue
 			}
 			// Owed a beat.
 			beats = append(beats, name)
-			d.deskSinceBeat[name] = 0
+			d.deskBeatEligibleAt[name] = now
 			// Cap accounting (progress-observable, in-memory, HERE — not off-mutex): a desk that went
 			// Working since its last beat is responsive (cap resets); otherwise it accrues no-progress.
 			if d.deskProgressed[name] {
@@ -1048,9 +1104,6 @@ func (d *Detector) deskHeartbeatLocked(cur Snapshot, warrant map[string]bool) (b
 // once the window elapses. Owed is consumed — and last-seen committed — only in runSynthesis, after
 // the read.
 func (d *Detector) synthEligibleLocked() []synthEligible {
-	for agent := range d.synthSinceFire {
-		d.synthSinceFire[agent]++
-	}
 	if len(d.synthOwed) == 0 {
 		return nil
 	}
@@ -1072,11 +1125,12 @@ func (d *Detector) synthEligibleLocked() []synthEligible {
 		}
 	}
 
+	now := d.now()
 	var out []synthEligible
 	for _, agent := range order {
-		// Cadence eligibility: a never-fired agent (no synthSinceFire entry) is eligible at once; one
+		// Cadence eligibility: a never-fired agent (no synthSinceFireAt entry) is eligible at once; one
 		// that fired recently waits out the digest window (its owe is KEPT — the burst coalesces).
-		if elapsed, known := d.synthSinceFire[agent]; known && elapsed < d.cfg.SynthEveryTicks {
+		if ts, known := d.synthSinceFireAt[agent]; known && now.Sub(ts) < d.cfg.SynthEveryPeriod {
 			continue
 		}
 		out = append(out, synthEligible{
@@ -1146,7 +1200,7 @@ func (d *Detector) commitSynthesisLocked(agent string, changed []string, fresh m
 		d.synthState.LastSeen = map[string]map[string]string{}
 	}
 	d.synthState.LastSeen[agent] = fresh
-	d.synthSinceFire[agent] = 0
+	d.synthSinceFireAt[agent] = d.now()
 	return true
 }
 
@@ -1203,35 +1257,30 @@ func (d *Detector) synthReadOne(agent string) (string, bool) {
 // satisfied (no unblocked items: empty / all-operator-blocked / awaiting / no backlog configured)
 // does the existing settle/continuation/cap logic apply, byte-identical to before.
 func (d *Detector) continueXO(cur *Snapshot, wake func(WakeKind, []string), requestRotate func()) {
-	// Rotate between steps so each handling runs in fresh context — gated by the awaiting-operator
-	// veto (never wipe an outstanding question thread). REQUEST it here (under d.mu); the actual
-	// /clear runs in runTail after the mutex is released (it acquires the pane-txn lock, a bounded
-	// cross-process wait that must not be held under d.mu — see Tick). The request is recorded
-	// BEFORE the wake below so the tail rotates, then enqueues the continuation, preserving order.
-	if d.cfg.Awaiting == nil || !d.cfg.Awaiting() {
-		requestRotate()
-	}
-
-	// Consume the settle marker regardless (as before) — even in the override branch, so a stale
-	// marker can't settle the XO on a later tick.
 	settleSignalled := d.cfg.SettleConsume != nil && d.cfg.SettleConsume()
 
-	// The backlog drive queue. An outstanding operator question (Awaiting) is a legitimate
-	// operator-gated pause: suppress the drive (treat as no unblocked work) — OperatorWake
-	// re-engages when the operator answers.
 	queue := d.cfg.BacklogGate().Unblocked
 	if d.cfg.Awaiting != nil && d.cfg.Awaiting() {
 		queue = nil
 	}
-	d.pruneDriveCounts(queue) // drop counts for items that left the queue (drained / marked blocked)
+	d.pruneDriveCounts(queue)
 
 	if len(queue) == 0 {
-		// Gate satisfied → TODAY'S behavior, unchanged. (Inert default ⇒ this is always the path.)
 		if settleSignalled {
+			if d.cfg.Awaiting == nil || !d.cfg.Awaiting() {
+				requestRotate()
+			}
 			cur.XOSettled = true
 			return
 		}
+		if !d.continuationDue() {
+			return
+		}
+		if d.cfg.Awaiting == nil || !d.cfg.Awaiting() {
+			requestRotate()
+		}
 		d.selfCont++
+		d.lastContinuationAt = d.now()
 		if d.selfCont > d.cfg.MaxSelfContinuation {
 			cur.XOSettled = true
 			log.Printf("flotilla watch: XO self-continuation hit the cap (%d) with no external change — forcing settled", d.cfg.MaxSelfContinuation)
@@ -1241,11 +1290,16 @@ func (d *Detector) continueXO(cur *Snapshot, wake func(WakeKind, []string), requ
 		return
 	}
 
-	// Unblocked items remain → NEVER settle (the self-signal & cap are overridden). Not in the
-	// empty-backlog runaway regime, so reset that counter.
 	d.selfCont = 0
-	target := d.pickDriveTarget(queue) // top item not over the stuck cap, else the top item
+	target := d.pickDriveTarget(queue)
+	if !d.backlogDriveDue(target) {
+		return
+	}
+	if d.cfg.Awaiting == nil || !d.cfg.Awaiting() {
+		requestRotate()
+	}
 	d.driveCount[target]++
+	d.lastDriveAt[target] = d.now()
 	if d.driveCount[target] == d.cfg.BacklogStuckCap {
 		// Just crossed the cap → escalate THIS item ONCE and deprioritize it (pickDriveTarget will
 		// prefer lower-priority items below the cap next time). The XO durably marks it
@@ -1255,6 +1309,16 @@ func (d *Detector) continueXO(cur *Snapshot, wake func(WakeKind, []string), requ
 		}
 	}
 	wake(WakeBacklog, []string{target})
+}
+
+func (d *Detector) continuationDue() bool {
+	return d.lastContinuationAt.IsZero() ||
+		d.now().Sub(d.lastContinuationAt) >= d.cfg.ReferenceInterval
+}
+
+func (d *Detector) backlogDriveDue(item string) bool {
+	t, ok := d.lastDriveAt[item]
+	return !ok || d.now().Sub(t) >= d.cfg.ReferenceInterval
 }
 
 // pickDriveTarget returns the highest-priority queued item whose drive count is still below the
@@ -1315,7 +1379,7 @@ func (d *Detector) evalLiveness(cur Snapshot) {
 	switch {
 	case crashed:
 		d.wd.Observe(false, true)
-	case shellStreak == 0 && d.cfg.AckAge() > time.Duration(d.alertInterval)*d.cfg.Interval:
+	case shellStreak == 0 && d.cfg.AckAge() > d.alertWindow:
 		// Wedged: alive (no shell suspicion) but not acking within the window. The
 		// `shellStreak == 0` guard means a tick where a shell is suspected but not
 		// yet confirmed does NOT fire the "wedged" message — the next tick confirms
@@ -1432,6 +1496,11 @@ func (d *Detector) runAutoSwitch(candidates []RateLimitAutoSwitchCandidate) {
 	}
 }
 
+func (d *Detector) rateLimitProbeDue(name string) bool {
+	t, ok := d.rateLimitLastProbeAt[name]
+	return !ok || d.now().Sub(t) >= d.cfg.RateLimitProbePeriod
+}
+
 // rateLimitWorkLocked decides which desks to probe OFF mutex this tick (Idle/Errored
 // non-XO desks) and which streaks to reset (desks that left the candidate states).
 // Pure under d.mu — NO pane I/O.
@@ -1446,6 +1515,9 @@ func (d *Detector) rateLimitWorkLocked(cur Snapshot) rateLimitWork {
 		}
 		st := cur.DeskStates[name]
 		if st == surface.StateIdle || st == surface.StateErrored {
+			if !d.rateLimitProbeDue(name) {
+				continue
+			}
 			work.probe = append(work.probe, name)
 		} else {
 			delete(d.rateLimitActive, name)
@@ -1454,6 +1526,10 @@ func (d *Detector) rateLimitWorkLocked(cur Snapshot) rateLimitWork {
 	}
 	sort.Strings(work.probe)
 	sort.Strings(work.reset)
+	now := d.now()
+	for _, name := range work.probe {
+		d.rateLimitLastProbeAt[name] = now
+	}
 	return work
 }
 

@@ -23,6 +23,7 @@ type hbFixture struct {
 	settleNow   map[string]bool // agent → settle marker present (consumed when read)
 	beats       []string        // WakeDeskHeartbeat agents, in delivery order
 	escalations []string        // DeskEscalate agents, in delivery order
+	clock       time.Time
 }
 
 func newHBFixture() *hbFixture {
@@ -30,7 +31,14 @@ func newHBFixture() *hbFixture {
 		states:    map[string]surface.State{},
 		enabled:   map[string]bool{},
 		settleNow: map[string]bool{},
+		clock:     time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC),
 	}
+}
+
+func (f *hbFixture) advance(d time.Duration) {
+	f.mu.Lock()
+	f.clock = f.clock.Add(d)
+	f.mu.Unlock()
 }
 
 func (f *hbFixture) set(agent string, s surface.State) {
@@ -85,6 +93,11 @@ func (f *hbFixture) config(xo string, desks, enabledDesks []string, cadence, cap
 		},
 		DeskHeartbeatEveryTicks: cadence,
 		DeskHeartbeatCap:        cap,
+		Now: func() time.Time {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			return f.clock
+		},
 	}
 }
 
@@ -141,15 +154,17 @@ func TestDeskHeartbeat_IdleCadenceBeats(t *testing.T) {
 	d := f.newDet(t, cfg)
 	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
 
-	d.Tick() // deskSinceBeat 0→1, < 2 ⇒ no beat
+	d.Tick() // anchor first idle tick — no beat
 	if got := f.beatLog(); len(got) != 0 {
 		t.Fatalf("tick 1 (cadence not elapsed) must not beat, got %v", got)
 	}
-	d.Tick() // deskSinceBeat 1→2, >= 2 ⇒ ONE beat, reset to 0
+	f.advance(2 * time.Minute) // cadence=2 ticks × 1m ref
+	d.Tick()                   // period elapsed ⇒ ONE beat
 	if got := f.beatLog(); len(got) != 1 || got[0] != "backend" {
 		t.Fatalf("tick 2 (cadence elapsed) must beat backend once, got %v", got)
 	}
-	d.Tick() // deskSinceBeat 0→1, < 2 ⇒ no new beat (cadence reset proven)
+	f.advance(time.Minute)
+	d.Tick() // within period after beat ⇒ no new beat
 	if got := f.beatLog(); len(got) != 1 {
 		t.Fatalf("tick 3 must not beat again (cadence reset), got %v", got)
 	}
@@ -175,7 +190,9 @@ func TestDeskHeartbeat_SettledSuppressedUntilRearm(t *testing.T) {
 
 	// re-arm: an operator/XO message re-engages it → beats resume on the next cadence.
 	d.AgentWake("backend")
-	d.Tick() // cadence 1: deskSinceBeat 0→1 >= 1 ⇒ beat
+	d.Tick() // anchor
+	f.advance(time.Minute)
+	d.Tick() // cadence 1: period elapsed ⇒ beat
 	if got := f.beatLog(); len(got) != 1 || got[0] != "backend" {
 		t.Fatalf("after AgentWake a settled desk must beat again, got %v", got)
 	}
@@ -191,7 +208,7 @@ func TestDeskHeartbeat_WorkingResetsAndLatchesProgress(t *testing.T) {
 	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
 	// pre-load some no-progress so the reset is observable
 	d.deskNoProgress["backend"] = 2
-	d.deskSinceBeat["backend"] = 5
+	d.deskBeatEligibleAt["backend"] = f.clock.Add(-5 * time.Minute)
 
 	f.set("backend", surface.StateWorking)
 	d.Tick()
@@ -199,8 +216,11 @@ func TestDeskHeartbeat_WorkingResetsAndLatchesProgress(t *testing.T) {
 	if got := f.beatLog(); len(got) != 0 {
 		t.Fatalf("a Working desk must not beat, got %v", got)
 	}
-	if d.deskNoProgress["backend"] != 0 || d.deskSinceBeat["backend"] != 0 {
-		t.Fatalf("Working must reset cap(%d) + cadence(%d) to 0", d.deskNoProgress["backend"], d.deskSinceBeat["backend"])
+	if d.deskNoProgress["backend"] != 0 {
+		t.Fatalf("Working must reset cap(%d) to 0", d.deskNoProgress["backend"])
+	}
+	if _, ok := d.deskBeatEligibleAt["backend"]; ok {
+		t.Fatal("Working must clear deskBeatEligibleAt cadence anchor")
 	}
 	if !d.deskProgressed["backend"] {
 		t.Fatal("Working must latch deskProgressed=true")
@@ -242,10 +262,12 @@ func TestDeskHeartbeat_CapEscalatesOnceThenStops(t *testing.T) {
 	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
 
 	// cadence=1, cap=3: each idle tick owes a beat and (no progress) increments the cap.
-	// tick1 → noProgress 0→1, beat; tick2 → 1→2, beat; tick3 → 2→3 == cap ⇒ escalate + stop.
+	// tick1 anchors; ticks 2–4 (spaced by the heartbeat period) owe beats until cap.
 	d.Tick()
-	d.Tick()
-	d.Tick()
+	for i := 0; i < 3; i++ {
+		f.advance(time.Minute)
+		d.Tick()
+	}
 	if got := f.beatLog(); len(got) != 3 {
 		t.Fatalf("expected 3 beats before the cap, got %v", got)
 	}
@@ -277,16 +299,21 @@ func TestDeskHeartbeat_RearmAfterStopResumesBeats(t *testing.T) {
 	d := f.newDet(t, cfg)
 	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
 
-	d.Tick()
-	d.Tick()
-	d.Tick() // capped + stopped
+	for i := 0; i < 4; i++ {
+		if i > 0 {
+			f.advance(time.Minute)
+		}
+		d.Tick()
+	} // capped + stopped
 	if !d.deskStopped["backend"] {
 		t.Fatal("precondition: backend must be stopped after the cap")
 	}
 	f.resetLog()
 
 	d.AgentWake("backend") // operator re-engages the wedged desk
-	d.Tick()               // cadence 1 ⇒ a fresh beat
+	d.Tick()               // anchor
+	f.advance(time.Minute)
+	d.Tick() // cadence elapsed ⇒ a fresh beat
 	if got := f.beatLog(); len(got) != 1 || got[0] != "backend" {
 		t.Fatalf("after AgentWake a stopped desk must beat again, got %v", got)
 	}
@@ -355,8 +382,8 @@ func TestDeskHeartbeat_UnknownNoBeatNoAccrual(t *testing.T) {
 	if got := f.beatLog(); len(got) != 0 {
 		t.Fatalf("an Unknown-state desk must never beat, got %v", got)
 	}
-	if d.deskSinceBeat["backend"] != 0 {
-		t.Fatalf("an Unknown-state desk must accrue no cadence, got %d", d.deskSinceBeat["backend"])
+	if _, ok := d.deskBeatEligibleAt["backend"]; ok {
+		t.Fatal("an Unknown-state desk must accrue no cadence anchor")
 	}
 }
 

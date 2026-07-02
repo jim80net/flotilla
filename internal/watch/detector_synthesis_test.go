@@ -22,6 +22,7 @@ type synthFixture struct {
 	subReadable map[string]bool     // subordinate agent → pane resolves (default true)
 	agentWakes  []agentWakeRec      // WakeAgent invocations
 	sidecarPath string
+	clock       time.Time
 }
 
 type agentWakeRec struct {
@@ -38,7 +39,14 @@ func newSynthFixture(t *testing.T) *synthFixture {
 		subText:     map[string]string{},
 		subReadable: map[string]bool{},
 		sidecarPath: filepath.Join(t.TempDir(), "flotilla-synthesis-state.json"),
+		clock:       time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC),
 	}
+}
+
+func (f *synthFixture) advance(d time.Duration) {
+	f.mu.Lock()
+	f.clock = f.clock.Add(d)
+	f.mu.Unlock()
 }
 
 func (f *synthFixture) set(agent string, s surface.State) {
@@ -94,6 +102,11 @@ func (f *synthFixture) config(xo string, desks []string) DetectorConfig {
 			f.mu.Lock()
 			defer f.mu.Unlock()
 			f.agentWakes = append(f.agentWakes, agentWakeRec{agent, kind, reasons})
+		},
+		Now: func() time.Time {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			return f.clock
 		},
 	}
 	return cfg
@@ -360,6 +373,7 @@ func TestSynthesisMaterialitySuppressesUnchanged(t *testing.T) {
 	}
 
 	// Tick 3: backend's text CHANGES → materiality allows a new synthesis.
+	f.advance(time.Minute) // digest cadence elapsed since the first fire
 	f.set("backend", surface.StateWorking)
 	d.Tick()
 	f.setSub("backend", "new text")

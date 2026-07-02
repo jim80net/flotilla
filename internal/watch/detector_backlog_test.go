@@ -16,11 +16,14 @@ func (f *detFixture) setBacklog(st backlog.Status) {
 }
 
 // xoFinishTurn drives one XO Working→Idle cycle (two ticks), the trigger for continueXO.
+// It advances the fake clock by referenceInterval after each finish so wall-gated continuation
+// and backlog drives remain testable at a sub-reference live tick.
 func xoFinishTurn(d *Detector, f *detFixture) {
 	f.set("xo", surface.StateWorking)
 	d.Tick()
 	f.set("xo", surface.StateIdle)
 	d.Tick()
+	f.advance(d.cfg.ReferenceInterval)
 }
 
 func TestBacklogGateVetoesSettleSignal(t *testing.T) {

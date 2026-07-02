@@ -1,6 +1,9 @@
 package watch
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // TestAgentWake_RearmsPerAgentState covers #183 group 3: AgentWake is the per-agent analogue of
 // OperatorWake — the relay calls it when an operator message reaches a DESK, re-arming that desk's
@@ -16,7 +19,7 @@ func TestAgentWake_RearmsPerAgentState(t *testing.T) {
 	// seed per-agent heartbeat state for two desks
 	d.deskSettled["backend"] = true
 	d.deskStopped["backend"] = true
-	d.deskSinceBeat["backend"] = 7
+	d.deskBeatEligibleAt["backend"] = time.Date(2026, 7, 2, 11, 0, 0, 0, time.UTC)
 	d.deskNoProgress["backend"] = 3
 	d.deskProgressed["backend"] = true
 	d.deskSettled["frontend"] = true
@@ -28,9 +31,9 @@ func TestAgentWake_RearmsPerAgentState(t *testing.T) {
 	if d.deskSettled["backend"] || d.deskStopped["backend"] || d.deskProgressed["backend"] {
 		t.Error("AgentWake must clear backend's settled/stopped/progressed flags")
 	}
-	if d.deskSinceBeat["backend"] != 0 || d.deskNoProgress["backend"] != 0 {
-		t.Errorf("AgentWake must reset backend's cadence(%d) + cap(%d) counters to 0",
-			d.deskSinceBeat["backend"], d.deskNoProgress["backend"])
+	if _, ok := d.deskBeatEligibleAt["backend"]; ok || d.deskNoProgress["backend"] != 0 {
+		t.Errorf("AgentWake must clear backend's cadence anchor + cap counter (cap=%d)",
+			d.deskNoProgress["backend"])
 	}
 	// frontend untouched — a desk's wake never re-arms another desk
 	if !d.deskSettled["frontend"] || d.deskNoProgress["frontend"] != 2 {
