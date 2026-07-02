@@ -135,6 +135,9 @@ func cmdWatch(args []string) error {
 		if err != nil {
 			return fmt.Errorf("watch --interval %q: %w", intervalStr, err)
 		}
+		if d <= 0 {
+			return fmt.Errorf("watch --interval %q: must be positive", intervalStr)
+		}
 		interval = d
 	}
 	eventPollInterval := watch.DefaultEventPollInterval

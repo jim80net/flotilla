@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"sync"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/surface"
@@ -23,8 +24,10 @@ type TurnEndPoller struct {
 	poke     func()
 	interval time.Duration
 
-	stop chan struct{}
-	done chan struct{}
+	stop      chan struct{}
+	done      chan struct{}
+	startOnce sync.Once
+	stopOnce  sync.Once
 
 	last map[string]surface.State
 }
@@ -45,22 +48,26 @@ func NewTurnEndPoller(xoAgent string, desks []string, assess func(string) surfac
 
 // Start launches the poll loop. Idempotent when interval <= 0.
 func (p *TurnEndPoller) Start() {
-	if p.interval <= 0 {
-		close(p.done)
-		return
-	}
-	go p.loop()
+	p.startOnce.Do(func() {
+		if p.interval <= 0 {
+			close(p.done)
+			return
+		}
+		go p.loop()
+	})
 }
 
-// Stop ends the poll loop and waits for exit.
+// Stop ends the poll loop and waits for exit. Idempotent.
 func (p *TurnEndPoller) Stop() {
-	select {
-	case <-p.done:
-		return
-	default:
-	}
-	close(p.stop)
-	<-p.done
+	p.stopOnce.Do(func() {
+		select {
+		case <-p.done:
+			return
+		default:
+		}
+		close(p.stop)
+		<-p.done
+	})
 }
 
 func (p *TurnEndPoller) loop() {

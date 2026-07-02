@@ -13,8 +13,6 @@ func TestTurnEndPollerDetectsDeskFinish(t *testing.T) {
 	assess := func(agent string) surface.State { return states[agent] }
 	var pokes atomic.Int32
 	p := NewTurnEndPoller("xo", []string{"xo", "backend"}, assess, func() { pokes.Add(1) }, time.Millisecond)
-	p.Start()
-	defer p.Stop()
 
 	// Seed cache (Working) — no poke yet.
 	p.pollOnce(true)

@@ -184,21 +184,32 @@ func TestInstallerRejectsPlaceholderInValue(t *testing.T) {
 // inherited-env-no-leak guard that protects the byte-identical guarantee on the live
 // fleet host (which exports FLOTILLA_BACKLOG_FILE for the binary to read).
 
-func backlogEnv(t *testing.T, backlog string) string {
+func baseEnv(t *testing.T, name string, extra map[string]string) string {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), "backlog.env")
+	p := filepath.Join(t.TempDir(), name)
 	body := "FLOTILLA_WORKDIR=/srv/fleet\n" +
 		"FLOTILLA_BIN=%h/go/bin/flotilla\n" +
 		"FLOTILLA_ROSTER=/srv/fleet/flotilla.json\n" +
 		"FLOTILLA_SECRETS=/srv/fleet/secrets.env\n" +
 		"FLOTILLA_ACK_FILE=/srv/fleet/xo-alive\n"
-	if backlog != "" {
-		body += "FLOTILLA_BACKLOG_FILE=" + backlog + "\n"
+	for k, v := range extra {
+		if v != "" {
+			body += k + "=" + v + "\n"
+		}
 	}
 	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return p
+}
+
+func backlogEnv(t *testing.T, backlog string) string {
+	t.Helper()
+	extra := map[string]string{}
+	if backlog != "" {
+		extra["FLOTILLA_BACKLOG_FILE"] = backlog
+	}
+	return baseEnv(t, "backlog.env", extra)
 }
 
 // (b) SET ⇒ exactly one ` --backlog-file <path>` appended after --ack-file.
@@ -247,22 +258,14 @@ func TestInstallerBacklogPathWithAmpersand(t *testing.T) {
 // fail on exactly the host this work targets.
 func latencyEnv(t *testing.T, interval, eventPoll string) string {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), "latency.env")
-	body := "FLOTILLA_WORKDIR=/srv/fleet\n" +
-		"FLOTILLA_BIN=%h/go/bin/flotilla\n" +
-		"FLOTILLA_ROSTER=/srv/fleet/flotilla.json\n" +
-		"FLOTILLA_SECRETS=/srv/fleet/secrets.env\n" +
-		"FLOTILLA_ACK_FILE=/srv/fleet/xo-alive\n"
+	extra := map[string]string{}
 	if interval != "" {
-		body += "FLOTILLA_WATCH_INTERVAL=" + interval + "\n"
+		extra["FLOTILLA_WATCH_INTERVAL"] = interval
 	}
 	if eventPoll != "" {
-		body += "FLOTILLA_EVENT_POLL_INTERVAL=" + eventPoll + "\n"
+		extra["FLOTILLA_EVENT_POLL_INTERVAL"] = eventPoll
 	}
-	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return p
+	return baseEnv(t, "latency.env", extra)
 }
 
 func TestInstallerLatencyArgsUnsetOmitsFragment(t *testing.T) {
