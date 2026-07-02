@@ -263,6 +263,53 @@ func TestConfirmSubmitPendingAfterRetriesIsBlocked(t *testing.T) {
 	}
 }
 
+func TestConfirmSubmitClearedAtExpiryAfterUndeterminedPolls(t *testing.T) {
+	// False-negative regression: intermittent Undetermined reads prevent the stable-cleared streak
+	// and the spinner never renders, but the composer is empty at expiry (the Enter landed).
+	totalPolls := maxSubmitAttempts*confirmPolls + confirmGracePolls
+	seq := []ComposerDisposition{ComposerCleared}
+	for i := 0; i < totalPolls; i++ {
+		seq = append(seq, ComposerUndetermined)
+	}
+	seq = append(seq, ComposerCleared) // expiry authority read
+	enter := 0
+	d := &stateStub{assessSeq: []State{StateIdle}, stateSeq: seq}
+	if err := newConfirm(&enter).Submit(d, "0:0.0", "hi"); err != nil {
+		t.Fatalf("err = %v, want nil (composer-cleared-at-expiry soft-success)", err)
+	}
+	if d.submitCalls != 1 {
+		t.Errorf("Submit calls = %d, want 1", d.submitCalls)
+	}
+}
+
+func TestConfirmSubmitQueuedLateInGrace(t *testing.T) {
+	// Queued chrome can appear after the fast phase when the agent was mid-turn/modal.
+	seq := []ComposerDisposition{ComposerCleared}
+	for i := 0; i < maxSubmitAttempts*confirmPolls+5; i++ {
+		seq = append(seq, ComposerUndetermined)
+	}
+	seq = append(seq, ComposerQueued)
+	enter := 0
+	d := &stateStub{assessSeq: []State{StateIdle}, stateSeq: seq}
+	if err := newConfirm(&enter).Submit(d, "0:0.0", "hi"); err != nil {
+		t.Fatalf("err = %v, want nil (late queued is soft-success)", err)
+	}
+}
+
+func TestConfirmSubmitQueuedAtExpiry(t *testing.T) {
+	totalPolls := maxSubmitAttempts*confirmPolls + confirmGracePolls
+	seq := []ComposerDisposition{ComposerCleared}
+	for i := 0; i < totalPolls; i++ {
+		seq = append(seq, ComposerUndetermined)
+	}
+	seq = append(seq, ComposerQueued)
+	enter := 0
+	d := &stateStub{assessSeq: []State{StateIdle}, stateSeq: seq}
+	if err := newConfirm(&enter).Submit(d, "0:0.0", "hi"); err != nil {
+		t.Fatalf("err = %v, want nil (queued-at-expiry soft-success)", err)
+	}
+}
+
 func TestConfirmSubmitQueuedIsSoftSuccess(t *testing.T) {
 	// The primary-XO case: after submitting, the composer enters the QUEUED state ("Press up to edit
 	// queued messages") — the message is queued behind a modal/turn and will deliver. ⇒ nil (a
