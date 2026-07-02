@@ -80,7 +80,15 @@ go install ./cmd/flotilla                # → fresh ~/go/bin/flotilla
 #    step — it briefly stops the safety-critical heartbeat clock, so do it
 #    deliberately, not as a reflex of the merge.
 systemctl --user restart flotilla-watch.service
+
+# 3. Refresh constitutional doctrine into every desk's identity file when the merge
+#    shipped updated embedded doctrine assets (identity-append blocks are marker-
+#    guarded; plain install skips present markers and would strand stale content).
+bash deploy/flotilla-doctrine-refresh.sh    # uses deploy/flotilla-watch.env paths
 ```
+
+Step 3 is identity-file only — it does not restart the watch daemon. Skip it when
+the merge did not change `internal/doctrine` embedded assets.
 
 Verify the swap took: the binary's mtime is fresh and the merged HEAD is in the
 build checkout —

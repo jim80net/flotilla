@@ -83,3 +83,36 @@ func TestCmdDoctrineInstallUnknownAgentErrors(t *testing.T) {
 		t.Fatal("doctrine install for an unknown agent = nil error, want error")
 	}
 }
+
+// --refresh replaces a drifted fenced block in an already-installed identity file.
+func TestCmdDoctrineInstallRefreshReplacesDriftedBlock(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)
+	repo := initTestGitRepo(t)
+	rosterPath := writeRosterFile(t, `{"agents":[{"name":"infra"}]}`)
+	if err := cmdWorkspaceInit(workspaceInitArgs("infra", rosterPath, repo)); err != nil {
+		t.Fatal(err)
+	}
+	identity := filepath.Join(filepath.Dir(repo), "infra", "AGENTS.md")
+	body, err := os.ReadFile(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := strings.Replace(string(body), "Span of control", "STALE span of control", 1)
+	if err := os.WriteFile(identity, []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmdDoctrineInstall([]string{"--refresh", "infra", "--roster", rosterPath}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(after), "STALE span of control") {
+		t.Error("refresh left stale doctrine content in place")
+	}
+	if !strings.Contains(string(after), "Span of control") {
+		t.Error("refresh did not restore current asset content")
+	}
+}

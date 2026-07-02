@@ -1,8 +1,11 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/jim80net/flotilla/internal/doctrine"
 	"github.com/jim80net/flotilla/internal/roster"
@@ -14,7 +17,7 @@ import (
 // workspace.
 func cmdDoctrine(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: flotilla doctrine install <agent> [--roster <path>]")
+		return fmt.Errorf("usage: flotilla doctrine install [--refresh] [--all] [<agent>] [--roster <path>]")
 	}
 	switch args[0] {
 	case "install":
@@ -24,21 +27,57 @@ func cmdDoctrine(args []string) error {
 	}
 }
 
-// cmdDoctrineInstall installs the constitutional set into an agent's workspace,
-// idempotently. The one v1 member is an identity-append: its marked block is appended
-// into the agent's identity file iff its opening marker is absent, else the install
-// detects the marker and skips (preserving operator edits). The identity file must
-// already exist — `workspace init` writes it — so a missing workspace is a clear
-// error, not a silent scaffold.
+// cmdDoctrineInstall installs the constitutional set into one or all roster agents'
+// workspaces, idempotently. Without --refresh, identity-append members append once
+// (marker-detected skip thereafter). With --refresh, a present marker replaces the
+// fenced region when embedded content drifted (byte-compare no-op when current).
 func cmdDoctrineInstall(args []string) error {
-	agent, rosterPath, err := parseAgentRosterArgs("doctrine install", args)
+	agent, flagArgs, err := parseDoctrineInstallArgs(args)
 	if err != nil {
 		return err
 	}
-	cfg, err := roster.Load(rosterPath)
+	fs := flag.NewFlagSet("doctrine install", flag.ContinueOnError)
+	refresh := fs.Bool("refresh", false, "replace fenced identity-append blocks when marker present and embedded content drifted")
+	all := fs.Bool("all", false, "install/refresh every agent in the roster")
+	rp := fs.String("roster", rosterDefault(), "roster config path")
+	if err := fs.Parse(flagArgs); err != nil {
+		return err
+	}
+	if len(fs.Args()) != 0 {
+		return fmt.Errorf("usage: flotilla doctrine install [--refresh] [--all] [<agent>] [--roster <path>]")
+	}
+	if *all && agent != "" {
+		return fmt.Errorf("usage: flotilla doctrine install [--refresh] [--all] [<agent>] [--roster <path>] (not both --all and <agent>)")
+	}
+	if !*all && agent == "" {
+		return fmt.Errorf("usage: flotilla doctrine install [--refresh] [--all] [<agent>] [--roster <path>]")
+	}
+
+	cfg, err := roster.Load(*rp)
 	if err != nil {
 		return err
 	}
+	if *all {
+		return cmdDoctrineInstallAll(cfg, *rp, *refresh)
+	}
+	return cmdDoctrineInstallOne(cfg, agent, *refresh)
+}
+
+func cmdDoctrineInstallAll(cfg *roster.Config, rosterPath string, refresh bool) error {
+	var failures int
+	for _, a := range cfg.Agents {
+		if err := cmdDoctrineInstallOne(cfg, a.Name, refresh); err != nil {
+			fmt.Fprintf(os.Stderr, "  error: %s: %v\n", a.Name, err)
+			failures++
+		}
+	}
+	if failures > 0 {
+		return fmt.Errorf("doctrine install --all: %d agent(s) failed (roster %s)", failures, rosterPath)
+	}
+	return nil
+}
+
+func cmdDoctrineInstallOne(cfg *roster.Config, agent string, refresh bool) error {
 	a, err := cfg.Agent(agent)
 	if err != nil {
 		return err
@@ -52,7 +91,7 @@ func cmdDoctrineInstall(args []string) error {
 	if err != nil {
 		return err
 	}
-	results, err := doctrine.InstallSplit(identityDir, hostDir, identity, doctrine.Members())
+	results, err := doctrine.InstallSplit(identityDir, hostDir, identity, doctrine.Members(), refresh)
 	if err != nil {
 		return err
 	}
@@ -60,6 +99,28 @@ func cmdDoctrineInstall(args []string) error {
 	reportDoctrineResults(results, identityPath)
 	noteNonClaudeLoadFastFollow(harnessSurface, identityPath)
 	return nil
+}
+
+// parseDoctrineInstallArgs splits agent (accepted anywhere among the args, like
+// register/resume) from flag tokens so `install --refresh infra --roster X` and
+// `install infra --refresh --roster X` both work — the stdlib flag parser stops at
+// the first non-flag token, so interleaved agent position must be peeled first.
+func parseDoctrineInstallArgs(args []string) (agent string, flagArgs []string, err error) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--roster" && i+1 < len(args):
+			flagArgs = append(flagArgs, a, args[i+1])
+			i++
+		case strings.HasPrefix(a, "-"):
+			flagArgs = append(flagArgs, a)
+		case agent == "":
+			agent = a
+		default:
+			return "", nil, fmt.Errorf("unexpected argument %q", a)
+		}
+	}
+	return agent, flagArgs, nil
 }
 
 // isClaudeSurface reports whether a surface uses the Claude Code launch/load path.
@@ -94,6 +155,8 @@ func reportDoctrineResults(results []doctrine.Result, identityPath string) {
 		switch r.Action {
 		case doctrine.ActionAppended:
 			fmt.Printf("  appended %s → %s\n", r.Member, identityPath)
+		case doctrine.ActionRefreshed:
+			fmt.Printf("  refreshed %s → %s\n", r.Member, identityPath)
 		case doctrine.ActionCreated:
 			// A whole-file (heartbeat-skill) member written into the workspace.
 			fmt.Printf("  created  %s\n", r.Member)

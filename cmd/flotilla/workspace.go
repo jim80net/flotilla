@@ -195,7 +195,7 @@ func cmdWorkspaceInit(args []string) error {
 		return fmt.Errorf("stat identity %q: %w", identityPath, statErr)
 	}
 
-	results, err := doctrine.InstallSplit(worktreeAbs, hostDir, identity, doctrine.Members())
+	results, err := doctrine.InstallSplit(worktreeAbs, hostDir, identity, doctrine.Members(), false)
 	if err != nil {
 		return fmt.Errorf("seed doctrine into %q: %w", worktreeAbs, err)
 	}

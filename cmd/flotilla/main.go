@@ -110,7 +110,7 @@ usage:
   flotilla switch <agent> (--to <slot|surface> | --auto | --repair) [--confirm] [--force]  hand a desk across harnesses (FROM handoff→relaunch on TO→TO takeover), fail-closed
   flotilla workspace init <agent> --repo <abs-path>   provision a desk git worktree + ~/.flotilla/<agent>/ host (seeds doctrine into the worktree)
   flotilla workspace path <agent>                     print an agent's workspace directory
-  flotilla doctrine install <agent>                   install flotilla's constitutional doctrine into an agent's workspace (idempotent)
+  flotilla doctrine install [--refresh] [--all] [<agent>]  install constitutional doctrine (idempotent; --refresh updates drifted fenced blocks)
   flotilla push-snippet <desk-agent>                  print the smart-push convention to append to a non-claude desk's identity file (secret-free; reports to the XO via send)
   flotilla result <agent>                             print a desk's FULL latest result from its harness session store (grok; read-only) — for long results the pane capture truncates
   flotilla version
