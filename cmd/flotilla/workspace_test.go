@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -203,6 +204,67 @@ func TestCmdWorkspaceInitCoordinatorScaffoldsClaudeInWorktree(t *testing.T) {
 	}
 	if !strings.Contains(string(launch), "claude --append-system-prompt-file") {
 		t.Errorf("coordinator launch = %q, want Claude management harness", launch)
+	}
+}
+
+func TestShellQuotePOSIX(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"", "''"},
+		{"plain", "'plain'"},
+		{`foo bar`, `'foo bar'`},
+		{`/desk/$HOME/x`, `'/desk/$HOME/x'`},
+		{`it's`, `'it'\''s'`},
+	}
+	for _, tc := range cases {
+		if got := shellQuote(tc.in); got != tc.want {
+			t.Errorf("shellQuote(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestWorkspaceLaunchCommandShellQuotesPathWithSpaceAndDollar(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "my desk", "$SECRET")
+	wantIdentity := filepath.Join(path, "CLAUDE.md")
+	agent := "xo seat"
+
+	for _, tc := range []struct {
+		name    string
+		surface string
+	}{
+		{"claude-code explicit", "claude-code"},
+		{"claude-code default empty", ""},
+		{"non-claude surface branch", "aider"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := workspaceLaunchCommand(path, agent, "CLAUDE.md", tc.surface)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(got, `"`) {
+				t.Errorf("launch must not use Go %%q double quotes (sh -c expands $ inside): %q", got)
+			}
+			wantFile := wantIdentity
+			if tc.surface == "aider" {
+				wantFile = filepath.Join(path, "CONVENTIONS.md")
+			}
+			if !strings.Contains(got, shellQuote(wantFile)) {
+				t.Errorf("launch = %q, want POSIX-quoted identity path %q", got, shellQuote(wantFile))
+			}
+			if !strings.Contains(got, shellQuote(agent)) {
+				t.Errorf("launch = %q, want POSIX-quoted agent %q", got, shellQuote(agent))
+			}
+			// sh -c must preserve the identity path literally (no $ expansion).
+			script := fmt.Sprintf("set -- %s; printf '%%s' \"$3\"", got)
+			out, err := exec.Command("sh", "-c", script).Output()
+			if err != nil {
+				t.Fatalf("sh -c parse launch: %v", err)
+			}
+			if string(out) != wantFile {
+				t.Errorf("sh parsed identity path = %q, want %q", out, wantFile)
+			}
+		})
 	}
 }
 

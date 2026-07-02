@@ -233,13 +233,24 @@ func harnessAllocationSurface(cfg *roster.Config, agent, rosterSurface string) s
 	return rosterSurface
 }
 
+// shellQuote wraps s in POSIX single quotes for sh -c launch recipes. Embedded
+// single quotes are escaped as '\'' (end quote, escaped quote, resume quote) so
+// $, backticks, and $(...) inside the path are not expanded by the shell.
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // workspaceLaunchCommand returns the shell launch command for a harness surface.
 // Identity files live in the worktree (worktreeAbs); grok loads AGENTS.md from cwd.
+// Paths and agent names are POSIX single-quoted — Recipe.Launch is sh -c interpreted.
 func workspaceLaunchCommand(worktreeAbs, agent, identity, surface string) (string, error) {
 	switch surface {
 	case "", "claude-code":
-		return fmt.Sprintf("claude --append-system-prompt-file %q -w %q",
-			filepath.Join(worktreeAbs, identity), agent), nil
+		return fmt.Sprintf("claude --append-system-prompt-file %s -w %s",
+			shellQuote(filepath.Join(worktreeAbs, identity)), shellQuote(agent)), nil
 	case "grok":
 		return "grok --model composer-2.5-fast", nil
 	default:
@@ -247,7 +258,7 @@ func workspaceLaunchCommand(worktreeAbs, agent, identity, surface string) (strin
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("claude --append-system-prompt-file %q -w %q",
-			filepath.Join(worktreeAbs, id), agent), nil
+		return fmt.Sprintf("claude --append-system-prompt-file %s -w %s",
+			shellQuote(filepath.Join(worktreeAbs, id)), shellQuote(agent)), nil
 	}
 }
