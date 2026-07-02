@@ -147,6 +147,25 @@ func NewSession(session, name, cwd, launch string) (target string, err error) {
 	return strings.TrimRight(string(out), "\n"), nil
 }
 
+// PaneSession returns the tmux session name from a pane target
+// (session:window.pane). Session names are everything before the first colon.
+func PaneSession(target string) string {
+	session, _, _ := strings.Cut(target, ":")
+	return session
+}
+
+// KillPane destroys a pane (`tmux kill-pane`). Resume uses this to discard a
+// dead-shell stale pane that still carries @flotilla_agent in the wrong session
+// so per-agent cold-migration can create flotilla-<agent> without ambiguity.
+func KillPane(target string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	if err := exec.CommandContext(ctx, "tmux", "kill-pane", "-t", target).Run(); err != nil {
+		return fmt.Errorf("tmux kill-pane %q: %w", target, err)
+	}
+	return nil
+}
+
 // ReadMarker reads a pane's @flotilla_agent marker back (`tmux display-message`),
 // trimmed. resume uses it after RespawnPane to CONFIRM the reused pane's marker
 // still equals the agent's key (a respawn reuses the pane id, so the per-pane

@@ -69,8 +69,8 @@ func TestParseResumeArgsEnvDefault(t *testing.T) {
 // resumeRec records which side effects runResume performed, so the safety
 // matrix can assert "refused → nothing killed" / "dead → respawned" / etc.
 type resumeRec struct {
-	respawned, tagged, newSession, newWindow bool
-	tagTarget                                string
+	respawned, killed, tagged, newSession, newWindow bool
+	tagTarget                                      string
 }
 
 // fakeOps builds resumeOps from a fixed resolution + assessment + marker
@@ -82,6 +82,7 @@ func fakeOps(rec *resumeRec, target string, outcome deliver.ResolveOutcome, st s
 		assess:     func(string) surface.State { return st },
 		respawn:    func(string, string, string) error { rec.respawned = true; return nil },
 		readMarker: func(string) (string, error) { return marker, nil },
+		killPane:   func(string) error { rec.killed = true; return nil },
 		hasSession: func(string) (bool, error) { return hasSess, nil },
 		newSession: func(_, _, _, _ string) (string, error) { rec.newSession = true; return "flotilla:0.0", nil },
 		newWindow:  func(_, _, _, _ string) (string, error) { rec.newWindow = true; return "flotilla:1.0", nil },
@@ -105,30 +106,36 @@ func TestRunResumeSafetyMatrix(t *testing.T) {
 		st                                                     surface.State
 		marker                                                 string
 		hasSess                                                bool
-		wantErr, wantRespawn, wantTag, wantNewSess, wantNewWin bool
+		wantErr, wantRespawn, wantKilled, wantTag, wantNewSess, wantNewWin bool
 	}{
 		// Fail-safe interlock: refuse every non-shell state without --force; respawn nothing.
-		{"working refuse", plan, "f:0.0", deliver.ResolveUnique, surface.StateWorking, "", false, true, false, false, false, false},
-		{"idle refuse", plan, "f:0.0", deliver.ResolveUnique, surface.StateIdle, "", false, true, false, false, false, false},
-		{"awaiting-approval refuse", plan, "f:0.0", deliver.ResolveUnique, surface.StateAwaitingApproval, "", false, true, false, false, false, false},
-		{"errored refuse", plan, "f:0.0", deliver.ResolveUnique, surface.StateErrored, "", false, true, false, false, false, false},
-		{"unknown refuse (cant confirm dead)", plan, "f:0.0", deliver.ResolveUnique, surface.StateUnknown, "", false, true, false, false, false, false},
+		{"working refuse", plan, "f:0.0", deliver.ResolveUnique, surface.StateWorking, "", false, true, false, false, false, false, false},
+		{"idle refuse", plan, "f:0.0", deliver.ResolveUnique, surface.StateIdle, "", false, true, false, false, false, false, false},
+		{"awaiting-approval refuse", plan, "f:0.0", deliver.ResolveUnique, surface.StateAwaitingApproval, "", false, true, false, false, false, false, false},
+		{"errored refuse", plan, "f:0.0", deliver.ResolveUnique, surface.StateErrored, "", false, true, false, false, false, false, false},
+		{"unknown refuse (cant confirm dead)", plan, "f:0.0", deliver.ResolveUnique, surface.StateUnknown, "", false, true, false, false, false, false, false},
 		// Dead shell → respawn; marker confirmed → no re-tag.
-		{"shell respawn confirmed", plan, "f:0.0", deliver.ResolveUnique, surface.StateShell, "backend", false, false, true, false, false, false},
+		{"shell respawn confirmed", plan, "f:0.0", deliver.ResolveUnique, surface.StateShell, "backend", false, false, true, false, false, false, false},
 		// --force overrides a live state → respawn.
-		{"working force respawn", forced, "f:0.0", deliver.ResolveUnique, surface.StateWorking, "backend", false, false, true, false, false, false},
+		{"working force respawn", forced, "f:0.0", deliver.ResolveUnique, surface.StateWorking, "backend", false, false, true, false, false, false, false},
 		// Untagged (title-resolved) dead desk → respawn + ADOPT (tag), not error.
-		{"shell untagged adopt", plan, "f:0.0", deliver.ResolveUnique, surface.StateShell, "", false, false, true, true, false, false},
+		{"shell untagged adopt", plan, "f:0.0", deliver.ResolveUnique, surface.StateShell, "", false, false, true, false, true, false, false},
 		// Wrong marker after respawn → error (respawn happened, no tag).
-		{"shell marker mismatch", plan, "f:0.0", deliver.ResolveUnique, surface.StateShell, "other", false, true, true, false, false, false},
+		{"shell marker mismatch", plan, "f:0.0", deliver.ResolveUnique, surface.StateShell, "other", false, true, true, false, false, false, false},
 		// Ambiguous → refuse; nothing done.
-		{"ambiguous refuse", plan, "", deliver.ResolveAmbiguous, surface.StateUnknown, "", false, true, false, false, false, false},
+		{"ambiguous refuse", plan, "", deliver.ResolveAmbiguous, surface.StateUnknown, "", false, true, false, false, false, false, false},
 		// Cold create: no session → new-session + tag.
-		{"none no-session cold", plan, "", deliver.ResolveNone, surface.StateUnknown, "", false, false, false, true, true, false},
+		{"none no-session cold", plan, "", deliver.ResolveNone, surface.StateUnknown, "", false, false, false, false, true, true, false},
 		// Cold create: shared session exists → new-window + tag.
-		{"none has-session window", plan, "", deliver.ResolveNone, surface.StateUnknown, "", true, false, false, true, false, true},
+		{"none has-session window", plan, "", deliver.ResolveNone, surface.StateUnknown, "", true, false, false, false, true, false, true},
 		// Cold create: per-agent session exists but no pane → refuse (no orphan window).
-		{"none per-agent session orphan", resumePlan{agent: "cos", key: "cos", cwd: "/w", launch: "sleep 1", session: "flotilla-cos", window: "desk", perAgentSession: true}, "", deliver.ResolveNone, surface.StateUnknown, "", true, true, false, false, false, false},
+		{"none per-agent session orphan", resumePlan{agent: "cos", key: "cos", cwd: "/w", launch: "sleep 1", session: "flotilla-cos", window: "desk", perAgentSession: true}, "", deliver.ResolveNone, surface.StateUnknown, "", true, true, false, false, false, false, false},
+		// Per-agent migration: stale dead shell in legacy session → kill + cold-create.
+		{"per-agent stale shell migrate", resumePlan{agent: "backend", key: "backend", cwd: "/w", launch: "sleep 1", session: "flotilla-backend", window: "desk", perAgentSession: true}, "flotilla:0.0", deliver.ResolveUnique, surface.StateShell, "backend", false, false, false, true, true, true, false},
+		// Per-agent migration: live desk in legacy session → refuse (no kill).
+		{"per-agent stale live refuse", resumePlan{agent: "backend", key: "backend", cwd: "/w", launch: "sleep 1", session: "flotilla-backend", window: "desk", perAgentSession: true}, "flotilla:0.0", deliver.ResolveUnique, surface.StateIdle, "backend", false, true, false, false, false, false, false},
+		// Per-agent migration: --force on live stale → kill + cold-create.
+		{"per-agent stale live force migrate", resumePlan{agent: "backend", key: "backend", cwd: "/w", launch: "sleep 1", session: "flotilla-backend", window: "desk", perAgentSession: true, force: true}, "flotilla:0.0", deliver.ResolveUnique, surface.StateIdle, "backend", false, false, false, true, true, true, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -140,6 +147,9 @@ func TestRunResumeSafetyMatrix(t *testing.T) {
 			}
 			if rec.respawned != c.wantRespawn {
 				t.Errorf("respawned = %v, want %v", rec.respawned, c.wantRespawn)
+			}
+			if rec.killed != c.wantKilled {
+				t.Errorf("killed = %v, want %v", rec.killed, c.wantKilled)
 			}
 			if rec.tagged != c.wantTag {
 				t.Errorf("tagged = %v, want %v", rec.tagged, c.wantTag)
