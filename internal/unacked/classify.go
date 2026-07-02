@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	trivialAck  = regexp.MustCompile(`(?i)^\s*(?:thanks?|thank you|ok(?:ay)?|yep|yes|no|👍|✅|done|got it|sounds good|perfect|great)\s*[.!]*\s*$`)
+	trivialAck = regexp.MustCompile(`(?i)^\s*(?:thanks?|thank you|ok(?:ay)?|yep|yes|no|👍|✅|done|got it|sounds good|perfect|great)\s*[.!]*\s*$`)
 	// Soft-ack phrases only — bare "on it" matches substantive prose ("focus on it next").
 	workingOnIt = regexp.MustCompile(`(?i)\b(?:working on (?:it|your)|still working(?: on)?|i(?:'|')?ll route|getting on it)\b`)
 	requestLead = regexp.MustCompile(`(?i)^(?:please|can you|could you|would you|need you to|go ahead|ship|fix|implement|review|merge|deploy|check|investigate|look into)\b`)

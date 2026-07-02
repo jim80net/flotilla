@@ -211,8 +211,8 @@ func TestUnackedBackstop_BusyChannelStillAlertsEligibleMessage(t *testing.T) {
 }
 
 type limitTrackingRecent struct {
-	msgs    []transport.Message
-	limits  []int
+	msgs   []transport.Message
+	limits []int
 }
 
 func (l *limitTrackingRecent) Recent(channelID string, limit int) ([]transport.Message, error) {
