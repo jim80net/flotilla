@@ -1,7 +1,7 @@
 ## Why
 
 The change-detector ticks on a **fixed** roster `heartbeat_interval` (typically 20m).
-PR #242 (`coordination-latency`) — landed in-tree, COS gate pending — adds fast
+PR #242 (`coordination-latency`) — merged (`6135f0b8`), deployed (`10m`/`5s`) — adds fast
 turn-end pokes so desk `Working→Idle` reaches the clock XO in ~8s, but the periodic
 tick itself stays fixed. The operator directive (2026-07-02) asks for a **mechanical
 fix to the fixed clock**: faster or slower depending on **turn progress**.

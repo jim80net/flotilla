@@ -1,9 +1,9 @@
-- [ ] 0. **Prerequisite:** `coordination-latency` (#242) COS merge
-- [ ] 1. Openspec (proposal + design + watch delta) — **this change**
+- [x] 0. **Prerequisite:** `coordination-latency` (#242) merged (`6135f0b8`) + deployed (`10m`/`5s`)
+- [x] 1. Openspec (proposal + design + watch delta) — **this change** (PR #243)
 - [ ] 2. PR 1: Wall-time sub-cadences (`referenceInterval` anchor; full P0 table)
 - [ ] 3. PR 2: `ActivityTracker` ingestion OFF `d.mu`
 - [ ] 4. PR 3: `AdaptiveInterval` + dynamic `Detector.loop` ticker
 - [ ] 5. PR 4: CLI/env/deploy + dash `FreshnessThreshold` wiring
 - [ ] 6. PR 5: Runbook + openspec promotion
 - [ ] 7. Canary 48h (`FLOOR=5m`) → GA default `ADAPTIVE_INTERVAL=true`, floor 2m
-- [ ] 8. COS gate on design → implementation dispatch
+- [ ] 8. **COS gate on design** → implementation dispatch (PR #243)

@@ -6,13 +6,13 @@
 | **Date** | 2026-07-02 |
 | **Status** | Draft — pending COS gate |
 | **Supersedes** | Static `--interval` knob from PR #242 (`coordination-latency`) as the durable latency answer |
-| **Depends on** | `coordination-latency` COS-gated — **implementation landed in-tree** (`Detector.Poke`, debounced `loop`, `TurnEndPoller`, `--interval` / `FLOTILLA_WATCH_INTERVAL` per `openspec/changes/coordination-latency/tasks.md`); **merge/COS gate pending** (task 6) |
+| **Depends on** | `coordination-latency` (#242) **merged** (`6135f0b8`) and **deployed** (`FLOTILLA_WATCH_INTERVAL=10m`, `FLOTILLA_EVENT_POLL_INTERVAL=5s`; event-pokes verified live) |
 
 ---
 
 ## Overview
 
-The change-detector in `internal/watch/detector.go` drives fleet coordination on a **fixed** `time.NewTicker(cfg.Interval)` (roster `heartbeat_interval`, typically 20m). PR #242 (`coordination-latency`) — **already implemented in-tree, COS gate pending** — adds event-driven `TurnEndPoller` pokes so desk `Working→Idle` transitions reach the clock XO in ~8s (5s poll + 3s debounce) without shortening the periodic tick. That is the right interim fix; this design **supersedes the static interval override** with an **adaptive tick cadence** that speeds up while turn progress is active and relaxes toward a ceiling when the fleet is idle.
+The change-detector in `internal/watch/detector.go` drives fleet coordination on a **fixed** `time.NewTicker(cfg.Interval)` (roster `heartbeat_interval`, typically 20m). PR #242 (`coordination-latency`) — **merged and deployed** — adds event-driven `TurnEndPoller` pokes so desk `Working→Idle` transitions reach the clock XO in ~8s (5s poll + 3s debounce) without shortening the periodic tick. That is the right interim fix; this design **supersedes the static interval override** with an **adaptive tick cadence** that speeds up while turn progress is active and relaxes toward a ceiling when the fleet is idle.
 
 The adaptive clock must not introduce a **third** pane-assess path. It consumes observations from the **existing** periodic tick assess and #242 poller poke events. Critically, several sub-cadences today count **ticks** tied to `cfg.Interval` (synthesis digest, desk heartbeats, quiet ping, liveness wedge, plus XO self-cont, backlog stuck cap, rate-limit probes). If the tick interval shrinks without decoupling those counters, liveness false-alarms, wake storms, and operator-visible cap/probe acceleration follow. This design decouples all coupled cadences to **wall time** anchored on `referenceInterval` first, then layers the adaptive policy.
 
@@ -53,7 +53,7 @@ Adaptive floor **adds** tick assesses on top of the poller baseline; poller is t
 case shellStreak == 0 && d.cfg.AckAge() > time.Duration(d.alertInterval)*d.cfg.Interval:
 ```
 
-### PR #242 interim (`coordination-latency`) — landed, COS gate pending
+### PR #242 interim (`coordination-latency`) — merged + deployed
 
 Implemented in-tree. Adds:
 
@@ -688,7 +688,7 @@ flotilla watch: assess-rate tick=270/hr poller=5760/hr desks_non_xo=8 desks_tick
 
 ## Rollout Plan
 
-1. **#242 COS gate** — implementation landed; merge gate pending.
+1. **#242** — merged (`6135f0b8`) + deployed (`10m`/`5s`) ✅
 2. **PR 1 (P0):** Wall-time sub-cadences only, adaptive OFF.
 3. **PR 2:** `ActivityTracker` ingest OFF `d.mu`.
 4. **PR 3:** `AdaptiveInterval` + dynamic `loop()`.
@@ -744,7 +744,7 @@ flotilla watch: assess-rate tick=270/hr poller=5760/hr desks_non_xo=8 desks_tick
 
 | Order | Title | Files (primary) | Deps | Description |
 |-------|-------|-----------------|------|-------------|
-| **PR 1** | `watch: decouple sub-cadences to wall time` | `detector.go`, `wall_cadence.go`, `quiet_ping.go`, `*_test.go` | #242 COS | Full P0 table migration |
+| **PR 1** | `watch: decouple sub-cadences to wall time` | `detector.go`, `wall_cadence.go`, `quiet_ping.go`, `*_test.go` | #242 ✅ | Full P0 table migration |
 | **PR 2** | `watch: activity tracker signal ingestion` | `activity.go`, `detector.go`, `watch.go` | PR 1 | OFF `d.mu` ingest |
 | **PR 3** | `watch: adaptive interval policy engine` | `adaptive_interval.go`, `detector.go` | PR 2 | Dynamic `loop()` + concurrency |
 | **PR 4** | `cmd/watch: adaptive interval CLI and env` | `watch.go`, `readmodel.go`, `deploy/*` | PR 3 | Flags + dash threshold |
