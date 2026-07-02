@@ -13,8 +13,10 @@ live adaptive or static tick duration. At minimum:
 - Recursive desk-heartbeat cadence
 - XO self-continuation cap and backlog stuck-cap drive accounting
 - Rate-limit probe batch cadence
-- `continueXO` context-rotate and wake gates (`requestRotate` MUST NOT run more
-  frequently than `referenceInterval` unless settle/awaiting exceptions apply)
+- `continueXO` continuation/backlog wake gates (`requestRotate` on those paths MUST
+  NOT run more frequently than `referenceInterval`). **Rotate-on-settle preserved:**
+  when the XO consumes its settle marker, `requestRotate` SHALL still run (gated
+  only on `Awaiting`, as today) before marking `XOSettled`.
 
 #### Scenario: No false wedged alert at 2m live tick
 

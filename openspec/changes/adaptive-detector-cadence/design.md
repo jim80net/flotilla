@@ -462,11 +462,13 @@ case surface.StateIdle:
 
 Preserves `detector.go:1007–1009` judgment semantics and `973–981` Working-branch cadence restart. Extend `detector_heartbeat_judgment_test.go` at 2m live tick / 20m `DeskHeartbeatPeriod`, including beat **not** owed immediately after Working→Idle transition.
 
-#### `continueXO` — integrated wall-time gates (rotate included)
+#### `continueXO` — integrated wall-time gates (rotate-on-settle preserved)
 
-Verified against `detector.go:1205–1257`: today `requestRotate()` runs **before** backlog/continuation logic (line 1211–1213). Wall gates must **`return` before `requestRotate()`** when not due — otherwise a 2m live tick rotates XO context every 2m while wakes are wall-gated (K10 violation).
+Verified against `detector.go:1205–1257`: today `requestRotate()` runs **unconditionally first** when not `Awaiting` (lines 1211–1213), **before** `SettleConsume` and the empty-backlog branch. A settling tick therefore **still rotates** — fresh context on idle is a deliberate property (XO idles clean; next wake starts fresh). PR 1 MUST preserve this.
 
-**Exception paths (unchanged, no wall gate):** `settleSignalled` on empty queue still sets `XOSettled` and returns (settle marker honored immediately). `Awaiting` veto still suppresses rotate only; wall gate applies to the wake path.
+Wall gates apply only to **continuation** and **backlog-drive** wakes/counters — not to the settle path. When `!continuationDue()` or `!backlogDriveDue()`, return **without** rotate or wake (fixes the 2m rotate storm while wakes are wall-gated). The settle path keeps today's rotate-then-settle ordering.
+
+**Awaiting veto (unchanged):** `requestRotate` suppressed only while `Awaiting()` is true.
 
 ```go
 func (d *Detector) continueXO(cur *Snapshot, wake func(WakeKind, []string), requestRotate func()) {
@@ -479,13 +481,18 @@ func (d *Detector) continueXO(cur *Snapshot, wake func(WakeKind, []string), requ
     d.pruneDriveCounts(queue)
 
     if len(queue) == 0 {
-        // --- empty backlog: continuation path ---
+        // --- empty backlog ---
         if settleSignalled {
+            // Rotate-on-settle preserved (today: rotate already ran at top; here we
+            // rotate explicitly before marking settled so semantics stay byte-identical).
+            if d.cfg.Awaiting == nil || !d.cfg.Awaiting() {
+                requestRotate()
+            }
             cur.XOSettled = true
-            return // settle honored; no rotate required
+            return
         }
         if !d.continuationDue() { // lastContinuationAt + ReferenceInterval
-            return // BEFORE requestRotate — no rotate, no wake, no selfCont++
+            return // no rotate, no wake, no selfCont++ — wall-gated
         }
         if d.cfg.Awaiting == nil || !d.cfg.Awaiting() {
             requestRotate()
@@ -504,7 +511,7 @@ func (d *Detector) continueXO(cur *Snapshot, wake func(WakeKind, []string), requ
     d.selfCont = 0
     target := d.pickDriveTarget(queue)
     if !d.backlogDriveDue(target) { // lastDriveAt[target] + ReferenceInterval
-        return // BEFORE requestRotate — no rotate, no wake, no driveCount++
+        return // no rotate, no wake, no driveCount++ — wall-gated
     }
     if d.cfg.Awaiting == nil || !d.cfg.Awaiting() {
         requestRotate()
@@ -528,7 +535,9 @@ func (d *Detector) backlogDriveDue(item string) bool {
 }
 ```
 
-PR 1 test: at 2m live tick, repeated XO `Working→Idle` with empty backlog must call `requestRotate` at most once per `referenceInterval`.
+PR 1 tests:
+- **Continuation path:** at 2m live tick, repeated XO `Working→Idle` with empty backlog and no settle signal must call `requestRotate` at most once per `referenceInterval`.
+- **Settle path:** XO `Working→Idle` with settle marker consumed must still call `requestRotate` (unless `Awaiting`) even when `!continuationDue()` — byte-identical to today.
 
 #### Rate-limit probes — wall-time gate
 
@@ -612,7 +621,7 @@ Periodic ticks **do not** wake the XO unless `tickLocked` finds material work. A
 | `evalLiveness` | `d.alertWindow` |
 | `synthEligibleLocked` | `synthSinceFireAt`; no per-tick increment |
 | `deskHeartbeatLocked` | `deskBeatEligibleAt`; Working-branch delete; judgment cadence-neutral branch |
-| `continueXO` | Integrated wall gates; `return` before `requestRotate` when not due |
+| `continueXO` | Wall-gated continuation/backlog; rotate-on-settle preserved |
 | `OperatorWake` / `AgentWake` | Wake reset table for wall-time fields |
 | `tickLocked` | `quietPingFSM`; wall-gated `continueXO`/probe |
 | `activity.go`, `adaptive_interval.go`, `wall_cadence.go`, `quiet_ping.go` | **New** |
@@ -734,7 +743,7 @@ flotilla watch: assess-rate tick=270/hr poller=5760/hr desks_non_xo=8 desks_tick
 | K7 | **Default floor = 2m** | Operator directive; incremental tick cost small vs poller |
 | K8 | **In-memory activity state only** | Conservative restart |
 | K9 | **Dash `FreshnessThreshold = 3 × referenceInterval`** | Avoid false STALE at 2m floor; still detect dead watch at ~60m for 20m roster |
-| K10 | **selfCont, BacklogStuckCap, rate-limit probes, and `continueXO` rotate/wake wall-gated on `referenceInterval` in PR 1** | `return` before `requestRotate` when not due; no 2m rotate storm |
+| K10 | **selfCont, BacklogStuckCap, rate-limit probes, and `continueXO` continuation/backlog wall-gated on `referenceInterval` in PR 1** | `return` without rotate/wake when not due; **rotate-on-settle preserved** (explicit rotate before `XOSettled`, gated only on `Awaiting`) |
 | K11 | **Backward compat scoped:** adaptive OFF + live interval == referenceInterval ⇒ sub-cadence byte-identical; static `--interval` override changes latency only post-PR1 | Honest compat claim |
 | K12 | **CoS/coordinator Working → Active via standard desk assess; GA default `FLOTILLA_ADAPTIVE_INTERVAL=true` after 48h canary** | Resolves federated meta-clock + rollout stance |
 
@@ -759,7 +768,8 @@ flotilla watch: assess-rate tick=270/hr poller=5760/hr desks_non_xo=8 desks_tick
 | `TestDetectorAckAgeWedge` (new/extended) | `detector_test.go` | No false wedge at 2m live tick when `AckAge` < 140m (`none`/K=3) |
 | `detector_synthesis_test.go` | existing + new case | 2m live tick, `SynthEveryPeriod=60m`: no fire before 60m; immediate eligibility when never-fired; owe coalescing after fire |
 | `detector_heartbeat_*_test.go` | existing + judgment | 2m live tick, `DeskHeartbeatPeriod=20m`: beat at 20m; not-warranted cadence-neutral; **Working→Idle does not beat until full period** |
-| `TestDetectorContinueXORotateWall` (new) | `detector_test.go` | 2m live tick: `requestRotate` at most once per `referenceInterval` on continuation path |
+| `TestDetectorContinueXORotateWall` (new) | `detector_test.go` | 2m live tick: continuation path — `requestRotate` at most once per `referenceInterval` |
+| `TestDetectorContinueXOSettleRotate` (new) | `detector_test.go` | Settle path — `requestRotate` still fires when settle consumed (unless `Awaiting`) |
 | `TestDetectorSelfContWall` (new) | `detector_test.go` | Cap not reached in < `MaxSelfContinuation × referenceInterval` at 2m tick |
 | `TestOperatorWakeResetsWallClocks` (new) | `detector_test.go` | `OperatorWake` clears `lastContinuationAt`/`lastDriveAt`; continuation not suppressed after re-engage |
 | `TestDetectorBacklogStuckWall` (new) | `detector_test.go` | Stuck alert not before `BacklogStuckCap × referenceInterval` at 2m tick |
