@@ -191,6 +191,16 @@ func TestParseGrokStateApproval(t *testing.T) {
 	}
 }
 
+func TestParseGrokStateRateLimitSleepingWorking(t *testing.T) {
+	// Live capture (grok_test.go rate-limit fixture): spinner + phrase, NO ellipsis+elapsed.
+	// Must read Working — rate-limit sleeping is in-turn; a Working→Idle diff mid-throttle
+	// would mislead the turn-finished path.
+	captured := "  ⠦ rate limit exceeded; sleeping.\n  Turn completed in 1.2s.\n  │ ❯  │\n  Shift+Tab:mode"
+	if got := parseGrokState(captured); got != StateWorking {
+		t.Errorf("parseGrokState(rate limit sleeping) = %v, want Working", got)
+	}
+}
+
 func TestClassifyGrokRateLimitStatusChrome(t *testing.T) {
 	// Spinner STATUS line — structural parity with live Working captures (#58); phrase
 	// matches the official grok binary ("rate limit exceeded; sleeping.").

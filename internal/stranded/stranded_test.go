@@ -33,6 +33,35 @@ func TestCheck_DroppedGateReport(t *testing.T) {
 	}
 }
 
+func TestCheck_PlannedSendStillStranded(t *testing.T) {
+	text := "CI green on head. Ready for COS merge gate. No self-merge.\n" +
+		"Next: run flotilla send --no-mirror cos with head SHA and CI status.\n\nidle"
+	r := Check(text)
+	if !r.Stranded {
+		t.Fatal("turn-final that only PLANS flotilla send must still be stranded")
+	}
+	if r.Signal != "gate-obligation-unreported" {
+		t.Fatalf("signal = %q, want gate-obligation-unreported", r.Signal)
+	}
+}
+
+func TestCheck_OpenFindingsResolvedVsUnresolved(t *testing.T) {
+	resolved := "Fix round pushed. Cubic re-run: NEW P3 — FIXED in abc123. No self-merge. Ready for COS merge.\n\nidle"
+	r := Check(resolved)
+	if r.Signal == "open-findings-settled" {
+		t.Fatal("resolved finding must not false-trigger open-findings signal")
+	}
+	if !r.Stranded || r.Signal != "gate-obligation-unreported" {
+		t.Fatalf("resolved finding + gate obligation want gate-obligation-unreported, got %+v", r)
+	}
+
+	unresolved := "NEW P2 unresolved on grok.go.\n\nidle"
+	r = Check(unresolved)
+	if !r.Stranded || r.Signal != "open-findings-settled" {
+		t.Fatalf("unresolved finding + idle want open-findings-settled, got %+v", r)
+	}
+}
+
 func TestCheck_GateReportedNotStranded(t *testing.T) {
 	cases := []string{
 		"Pushed c3432da. Surfaced to COS via flotilla send — turn confirmed. Ready for merge gate.",

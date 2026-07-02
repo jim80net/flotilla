@@ -212,6 +212,11 @@ func parseGrokState(captured string) State {
 }
 
 func grokInSessionProcessing(tail string) bool {
+	// Rate-limit sleeping is in-turn (grok auto-resumes); no ellipsis+elapsed chrome on the
+	// live capture, but the spinner+phrase STATUS line must still read Working.
+	if grokRateLimitStatus.MatchString(tail) {
+		return true
+	}
 	if !grokSpinner.MatchString(tail) {
 		return false
 	}

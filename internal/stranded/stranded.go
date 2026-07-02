@@ -31,11 +31,13 @@ var (
 	}
 
 	gateReportPatterns = []*regexp.Regexp{
-		regexp.MustCompile(`(?i)\bflotilla\s+send\b.{0,100}\bcos\b`),
-		regexp.MustCompile(`(?i)\b(?:surfaced|delivered|reported)\s+to\s+cos\b`),
+		// Execution evidence only — a mention/plan ("next: run flotilla send --to cos") is NOT a report.
+		regexp.MustCompile(`(?i)\bflotilla\s+send\b.{0,120}\b(?:turn\s+confirmed|delivered)\b`),
+		regexp.MustCompile(`(?i)\b(?:sent|surfaced|delivered|reported)\s+to\s+cos\b`),
 		regexp.MustCompile(`(?i)\bturn\s+confirmed\b.{0,60}\bcos\b`),
 		regexp.MustCompile(`(?i)\bgh\s+pr\s+comment\b`),
-		regexp.MustCompile(`(?i)\bgate\s+report\b`),
+		regexp.MustCompile(`(?i)\b(?:posted|delivered|surfaced)\b.{0,60}\bgate\s+report\b`),
+		regexp.MustCompile(`(?i)\bgate\s+report\b.{0,60}\b(?:posted|delivered|surfaced|to\s+cos)\b`),
 		regexp.MustCompile(`(?i)\bsurface\s+for\s+(?:COS\s+)?merge\b`),
 		regexp.MustCompile(`(?i)\bCOS\s+re[- ]?gate\b.{0,60}\b(?:posted|comment|report|complete)\b`),
 	}
@@ -43,8 +45,7 @@ var (
 	openFindingsPatterns = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)\b(?:unresolved|open)\s+(?:inline|thread|cubic)\b`),
 		regexp.MustCompile(`(?i)\bcubic\b.{0,160}\b(?:unresolved|open)\b`),
-		regexp.MustCompile(`(?i)\bP[123]\b.{0,100}\b(?:unresolved|unaddressed|open)\b`),
-		regexp.MustCompile(`(?i)\bNEW\s+P[123]\b`),
+		regexp.MustCompile(`(?i)\b(?:NEW\s+)?P[123]\b.{0,100}\b(?:unresolved|unaddressed|open)\b`),
 	}
 
 	settledPatterns = []*regexp.Regexp{
