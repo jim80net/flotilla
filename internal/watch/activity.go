@@ -25,7 +25,8 @@ type ActivitySnapshot struct {
 	XOSettled      bool
 	LastTurnEnd    time.Time
 	LastOperatorAt time.Time
-	ObservedAt     time.Time
+	LastIngestAt   time.Time // wall time of the most recent OnTickIngest (zero = never)
+	ObservedAt     time.Time // query time passed to Snapshot(now)
 }
 
 // ActivityTracker ingests detector observations. NO pane I/O.
@@ -123,11 +124,18 @@ func (t *activityTracker) Snapshot(now time.Time) ActivitySnapshot {
 		XOSettled:      t.obs.xoSettled,
 		LastTurnEnd:    t.obs.lastTurnEnd,
 		LastOperatorAt: t.obs.lastOperatorAt,
+		LastIngestAt:   t.obs.lastIngestAt,
 		ObservedAt:     now,
 	}
 	return snap
 }
 
+// levelLocked derives the activity tier from ingested state.
+//
+// Cold-start fail-safe: before the first OnTickIngest, xoSettled is false (zero
+// value), so level is ActivityActive. A coordination daemon must bias toward fast
+// polling until a tick proves the fleet is quiet — starting at Idle would mean a
+// slow ceiling tick on boot, which is the unsafe direction.
 func (t *activityTracker) levelLocked(now time.Time) ActivityLevel {
 	if t.obs.workingDesks > 0 || t.obs.xoWorking || !t.obs.xoSettled {
 		return ActivityActive

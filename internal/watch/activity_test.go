@@ -50,6 +50,38 @@ func TestActivityXOUnsettledElevatesActive(t *testing.T) {
 	}
 }
 
+func TestActivitySnapshotExposesStaleIngestAge(t *testing.T) {
+	at := NewActivityTracker(testActivityConfig())
+	ingestAt := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	queryAt := ingestAt.Add(30 * time.Minute)
+	at.OnTickIngest(ingestAt, "xo", map[string]surface.State{
+		"xo": surface.StateIdle,
+	}, true)
+	snap := at.Snapshot(queryAt)
+	if snap.ObservedAt != queryAt {
+		t.Fatalf("ObservedAt = %v, want query time %v", snap.ObservedAt, queryAt)
+	}
+	if snap.LastIngestAt != ingestAt {
+		t.Fatalf("LastIngestAt = %v, want ingest time %v (true signal age)", snap.LastIngestAt, ingestAt)
+	}
+	if snap.ObservedAt.Sub(snap.LastIngestAt) != 30*time.Minute {
+		t.Fatalf("consumers can derive ingest staleness: ObservedAt-LastIngestAt = %v, want 30m",
+			snap.ObservedAt.Sub(snap.LastIngestAt))
+	}
+}
+
+func TestActivityColdStartFailSafeActive(t *testing.T) {
+	at := NewActivityTracker(testActivityConfig())
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	snap := at.Snapshot(now)
+	if snap.Level != ActivityActive {
+		t.Fatalf("cold-start (no ingest yet) must be Active fail-safe, got %v", snap.Level)
+	}
+	if !snap.LastIngestAt.IsZero() {
+		t.Fatalf("cold-start LastIngestAt must be zero, got %v", snap.LastIngestAt)
+	}
+}
+
 func TestActivityIdleFleetSettled(t *testing.T) {
 	at := NewActivityTracker(testActivityConfig())
 	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
