@@ -33,6 +33,15 @@ change-detector's working→idle edge. **Tier 1 already ships** (`desk-mirror-ti
 pull request #135) and is *not* re-documented here; this page covers the synthesis
 tiers that consume it.
 
+**Eliciting operator-facing briefs (not free-text asks).** When a coordinator needs a
+reader-modeled status brief published to every boat channel, run `flotilla brief --all`
+(or `flotilla brief <desk>` for one boat). The command injects a structured brief
+request; the desk answers in-pane with a reader-map envelope; the Tier-1 mirror
+publishes the turn-final to that boat's channel automatically. Desks must **not** run
+`flotilla notify` (they do not hold fleet secrets). A free-text `flotilla send "post
+your brief…"` ask is unreliable by design — desks correctly reply in-pane and the
+operator never sees those answers ([#207](https://github.com/jim80net/flotilla/issues/207)).
+
 **Tier 2 — the XO channel (a curated domain rollup).** An Executive Officer (XO)
 synthesizes its boats' *latest state* UP into the XO's own channel: a compressed,
 grouped view of where each desk IS right now, with anything that needs the operator's

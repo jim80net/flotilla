@@ -14,47 +14,82 @@ import (
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
-// briefArgs is the parsed `flotilla brief` invocation. desk is the desk to brief;
-// from is the orchestrator's identity issuing the request (recorded in the delivery
-// confirmation line for audit symmetry with send; the desk still publishes under its
-// OWN webhook identity, not from); audience is the reader the brief is modeled for.
+// briefArgs is the parsed `flotilla brief` invocation. desk is the desk to brief when
+// not using --all; from is the orchestrator's identity issuing the request (recorded in
+// the delivery confirmation line for audit symmetry with send; the desk still publishes
+// under its OWN webhook identity, not from); audience is the reader the brief is modeled for.
 type briefArgs struct {
 	desk        string
+	all         bool
 	from        string
 	rosterPath  string
 	secretsPath string
 	audience    string
 }
 
-// parseBriefArgs parses `flotilla brief <desk> [--from] [--roster] [--secrets] [--audience]`.
-// It is split out so the parsing is unit-testable without tmux or Discord.
+// parseBriefArgs parses `flotilla brief [--all] [<desk>] [--from] [--roster] [--secrets] [--audience]`.
+// The desk positional may appear anywhere among the args (like doctrine install/register).
 func parseBriefArgs(args []string) (briefArgs, error) {
+	desk, flagArgs, err := parseBriefInterleavedArgs(args)
+	if err != nil {
+		return briefArgs{}, err
+	}
 	fs := flag.NewFlagSet("brief", flag.ContinueOnError)
 	from := fs.String("from", os.Getenv("FLOTILLA_SELF"), "orchestrator identity issuing the brief request")
 	rosterPath := fs.String("roster", rosterDefault(), "roster config path")
 	secretsPath := fs.String("secrets", os.Getenv("FLOTILLA_SECRETS"), "secrets env file path (for the dark-desk pre-check)")
 	audience := fs.String("audience", string(readermap.AudienceOperator), "the reader the brief is modeled for (operator|newcomer|maintainer|desk:<name>)")
-	if err := fs.Parse(args); err != nil {
+	all := fs.Bool("all", false, "brief every non-primary-XO agent in the roster")
+	if err := fs.Parse(flagArgs); err != nil {
 		return briefArgs{}, err
 	}
-	rest := fs.Args()
-	if len(rest) == 0 {
-		return briefArgs{}, fmt.Errorf("usage: flotilla brief <desk> [--audience <who>] [--roster <path>] [--secrets <path>]")
+	if len(fs.Args()) != 0 {
+		return briefArgs{}, fmt.Errorf("usage: flotilla brief [--all] [<desk>] [--audience <who>] [--roster <path>] [--secrets <path>]")
 	}
-	// Go's flag parser stops at the first positional, so a flag after the desk is
-	// silently swallowed — catch it (the same guard send/notify use).
-	for _, a := range rest[1:] {
-		if strings.HasPrefix(a, "-") {
-			return briefArgs{}, fmt.Errorf("unexpected %q after the desk name: put flags before the desk", a)
-		}
+	if *all && desk != "" {
+		return briefArgs{}, fmt.Errorf("usage: flotilla brief [--all] [<desk>] … (not both --all and <desk>)")
+	}
+	if !*all && desk == "" {
+		return briefArgs{}, fmt.Errorf("usage: flotilla brief [--all] [<desk>] [--audience <who>] [--roster <path>] [--secrets <path>]")
 	}
 	return briefArgs{
-		desk:        rest[0],
+		desk:        desk,
+		all:         *all,
 		from:        *from,
 		rosterPath:  *rosterPath,
 		secretsPath: *secretsPath,
 		audience:    strings.TrimSpace(*audience),
 	}, nil
+}
+
+// parseBriefInterleavedArgs splits an optional desk name (accepted anywhere among the
+// args) from flag tokens so `brief --all --audience operator` and `brief --from cos
+// backend` both work — the stdlib flag parser stops at the first non-flag token.
+func parseBriefInterleavedArgs(args []string) (desk string, flagArgs []string, err error) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--roster" && i+1 < len(args):
+			flagArgs = append(flagArgs, a, args[i+1])
+			i++
+		case a == "--secrets" && i+1 < len(args):
+			flagArgs = append(flagArgs, a, args[i+1])
+			i++
+		case a == "--audience" && i+1 < len(args):
+			flagArgs = append(flagArgs, a, args[i+1])
+			i++
+		case a == "--from" && i+1 < len(args):
+			flagArgs = append(flagArgs, a, args[i+1])
+			i++
+		case strings.HasPrefix(a, "-"):
+			flagArgs = append(flagArgs, a)
+		case desk == "":
+			desk = a
+		default:
+			return "", nil, fmt.Errorf("unexpected argument %q", a)
+		}
+	}
+	return desk, flagArgs, nil
 }
 
 // buildBriefRequest is the pure brief-request prompt injected into the desk's pane.
@@ -99,13 +134,12 @@ func deskIsDark(webhookURL string, webhookErr error) bool {
 	return webhookErr != nil || strings.TrimSpace(webhookURL) == ""
 }
 
-// cmdBrief elicits a reader-modeled brief from a desk and lets the shipped mirror
-// publish it (Pillar A). It is orchestrator-run: when --secrets is available it runs
-// the dark-desk pre-check (reporting a desk whose channel webhook does not resolve),
-// then injects the brief-request into the desk's pane via the SAME confirmed-delivery
-// path as `send` (idle-gate → submit → confirm a turn started). It never calls notify
-// and the DESK never touches a secret to publish — the watch daemon's deskMirror
-// publishes the desk's turn-final to its channel.
+// cmdBrief elicits a reader-modeled brief from one desk or every non-primary-XO agent
+// and lets the shipped mirror publish it (Pillar A). It is orchestrator-run: when
+// --secrets is available it runs the dark-desk pre-check (reporting a desk whose channel
+// webhook does not resolve), then injects the brief-request via the SAME confirmed-
+// delivery path as `send`. It never calls notify and the DESK never touches a secret to
+// publish — the watch daemon's deskMirror publishes the desk's turn-final to its channel.
 func cmdBrief(args []string) error {
 	a, err := parseBriefArgs(args)
 	if err != nil {
@@ -115,7 +149,62 @@ func cmdBrief(args []string) error {
 	if err != nil {
 		return err
 	}
-	agent, err := cfg.Agent(a.desk)
+	var secrets *roster.Secrets
+	if a.secretsPath != "" {
+		secrets, err = roster.LoadSecrets(a.secretsPath)
+		if err != nil {
+			return err
+		}
+	} else {
+		fmt.Fprintln(os.Stderr, "flotilla brief: note — no --secrets, skipping the dark-desk webhook pre-check (the brief is still injected)")
+	}
+	if a.all {
+		return cmdBriefAll(cfg, secrets, a)
+	}
+	return deliverBriefOne(cfg, secrets, a, a.desk)
+}
+
+// primaryXOAgent returns the hub XO name using the same rule as flotilla watch and the
+// per-desk mirror: explicit xo_agent, else the first roster agent (legacy single-fleet).
+func primaryXOAgent(cfg *roster.Config) string {
+	xo := cfg.XOAgent
+	if xo == "" && len(cfg.Agents) > 0 {
+		xo = cfg.Agents[0].Name
+	}
+	return xo
+}
+
+// briefTargets returns every roster agent except the primary XO — the same set the
+// per-desk mirror covers (logMirrorCoverage / detector pendingMirrors).
+func briefTargets(cfg *roster.Config) []string {
+	xo := primaryXOAgent(cfg)
+	out := make([]string, 0, len(cfg.Agents))
+	for _, agent := range cfg.Agents {
+		if agent.Name == xo {
+			continue
+		}
+		out = append(out, agent.Name)
+	}
+	return out
+}
+
+func cmdBriefAll(cfg *roster.Config, secrets *roster.Secrets, a briefArgs) error {
+	var failures int
+	for _, desk := range briefTargets(cfg) {
+		if err := deliverBriefOne(cfg, secrets, a, desk); err != nil {
+			fmt.Fprintf(os.Stderr, "  error: %s: %v\n", desk, err)
+			failures++
+		}
+	}
+	if failures > 0 {
+		return fmt.Errorf("flotilla brief --all: %d desk(s) failed (roster %s)", failures, a.rosterPath)
+	}
+	return nil
+}
+
+// deliverBriefOne injects a brief request into one desk after the dark-desk pre-check.
+func deliverBriefOne(cfg *roster.Config, secrets *roster.Secrets, a briefArgs, desk string) error {
+	agent, err := cfg.Agent(desk)
 	if err != nil {
 		return err
 	}
@@ -124,24 +213,18 @@ func cmdBrief(args []string) error {
 	// secret). When secrets are available, verify the desk's channel webhook resolves
 	// — a brief to a dark desk would be authored in-pane and then silently never
 	// reach the channel (the unconfigured-webhook re-skin of #207).
-	if a.secretsPath != "" {
-		secrets, serr := roster.LoadSecrets(a.secretsPath)
-		if serr != nil {
-			return serr
-		}
-		url, werr := secrets.Webhook(a.desk)
+	if secrets != nil {
+		url, werr := secrets.Webhook(desk)
 		if deskIsDark(url, werr) {
-			return fmt.Errorf("desk %q is DARK: its channel webhook does not resolve — its brief cannot be published (configure the webhook in secrets, then retry)", a.desk)
+			return fmt.Errorf("desk %q is DARK: its channel webhook does not resolve — its brief cannot be published (configure the webhook in secrets, then retry)", desk)
 		}
-	} else {
-		fmt.Fprintln(os.Stderr, "flotilla brief: note — no --secrets, skipping the dark-desk webhook pre-check (the brief is still injected)")
 	}
 
 	// Resolve the desk's surface driver (how it submits a turn). Unknown surface is a
 	// clear error, never a silent mis-drive.
 	drv, ok := surface.Get(agent.Surface)
 	if !ok {
-		return fmt.Errorf("desk %q: unknown surface %q", a.desk, agent.Surface)
+		return fmt.Errorf("desk %q: unknown surface %q", desk, agent.Surface)
 	}
 
 	message := buildBriefRequest(a.audience)
@@ -159,7 +242,7 @@ func cmdBrief(args []string) error {
 	}
 	txn, err := deliver.AcquirePaneTxn(pane, deliver.PaneTxnTimeout)
 	if err != nil {
-		return fmt.Errorf("%s pane is busy (another delivery/rotate in progress) — brief NOT delivered; retry: %w", a.desk, err)
+		return fmt.Errorf("%s pane is busy (another delivery/rotate in progress) — brief NOT delivered; retry: %w", desk, err)
 	}
 	defer txn.Release()
 	confirm := surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}
@@ -169,19 +252,19 @@ func cmdBrief(args []string) error {
 	if err := confirm.SubmitWithSelfHeal(drv, pane, message); err != nil {
 		switch {
 		case errors.Is(err, surface.ErrBusy):
-			return fmt.Errorf("%s is busy (mid-turn) — brief NOT delivered; retry when it is idle", a.desk)
+			return fmt.Errorf("%s is busy (mid-turn) — brief NOT delivered; retry when it is idle", desk)
 		case errors.Is(err, surface.ErrCrashed):
-			return fmt.Errorf("%s is at a shell (crashed) — brief NOT delivered", a.desk)
+			return fmt.Errorf("%s is at a shell (crashed) — brief NOT delivered", desk)
 		case errors.Is(err, surface.ErrPanelBlocked):
-			return fmt.Errorf("%s is input-blocked behind the agents panel — brief NOT delivered; it needs a human keystroke or click into the composer at its pane, then retry", a.desk)
+			return fmt.Errorf("%s is input-blocked behind the agents panel — brief NOT delivered; it needs a human keystroke or click into the composer at its pane, then retry", desk)
 		default: // ErrTransient / ErrUnconfirmed / a paste-lock error
-			return fmt.Errorf("brief request to %s could not be confirmed: %w", a.desk, err)
+			return fmt.Errorf("brief request to %s could not be confirmed: %w", desk, err)
 		}
 	}
 	if a.from != "" {
-		fmt.Printf("brief request from %s delivered to %s (pane %s) — turn confirmed; its turn-final publishes to its channel via the mirror\n", a.from, a.desk, pane)
+		fmt.Printf("brief request from %s delivered to %s (pane %s) — turn confirmed; its turn-final publishes to its channel via the mirror\n", a.from, desk, pane)
 	} else {
-		fmt.Printf("brief request delivered to %s (pane %s) — turn confirmed; its turn-final publishes to its channel via the mirror\n", a.desk, pane)
+		fmt.Printf("brief request delivered to %s (pane %s) — turn confirmed; its turn-final publishes to its channel via the mirror\n", desk, pane)
 	}
 	return nil
 }

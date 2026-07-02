@@ -6,11 +6,44 @@ import (
 	"testing"
 
 	"github.com/jim80net/flotilla/internal/readermap"
+	"github.com/jim80net/flotilla/internal/roster"
 )
 
-func TestParseBriefArgs_DeskRequired(t *testing.T) {
+func TestParseBriefArgs_DeskOrAllRequired(t *testing.T) {
 	if _, err := parseBriefArgs([]string{"--from", "xo"}); err == nil {
-		t.Fatal("brief with no desk must error")
+		t.Fatal("brief with no desk and no --all must error")
+	}
+}
+
+func TestParseBriefArgs_AllWithoutDesk(t *testing.T) {
+	a, err := parseBriefArgs([]string{"--all", "--from", "cos", "--audience", "operator"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !a.all {
+		t.Error("want --all set")
+	}
+	if a.desk != "" {
+		t.Errorf("desk = %q, want empty with --all", a.desk)
+	}
+}
+
+func TestParseBriefArgs_AllAndDeskMutuallyExclusive(t *testing.T) {
+	if _, err := parseBriefArgs([]string{"--all", "backend"}); err == nil {
+		t.Fatal("--all and <desk> together must error")
+	}
+}
+
+func TestParseBriefArgs_InterleavedDesk(t *testing.T) {
+	a, err := parseBriefArgs([]string{"--from", "cos", "backend", "--audience", "newcomer"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if a.desk != "backend" {
+		t.Errorf("desk = %q, want backend", a.desk)
+	}
+	if a.audience != "newcomer" {
+		t.Errorf("audience = %q, want newcomer", a.audience)
 	}
 }
 
@@ -30,9 +63,13 @@ func TestParseBriefArgs_AcceptsDeskAndFlags(t *testing.T) {
 	}
 }
 
-func TestParseBriefArgs_FlagAfterDeskIsCaught(t *testing.T) {
-	if _, err := parseBriefArgs([]string{"backend", "--audience", "operator"}); err == nil {
-		t.Fatal("a flag placed AFTER the desk must be caught, not silently swallowed")
+func TestParseBriefArgs_FlagAfterDeskIsAccepted(t *testing.T) {
+	a, err := parseBriefArgs([]string{"backend", "--audience", "operator"})
+	if err != nil {
+		t.Fatalf("interleaved desk + flags must parse: %v", err)
+	}
+	if a.desk != "backend" || a.audience != "operator" {
+		t.Errorf("got desk=%q audience=%q", a.desk, a.audience)
 	}
 }
 
@@ -78,6 +115,40 @@ func TestBuildBriefRequest_EmptyAudienceDefaultsOperator(t *testing.T) {
 	req := buildBriefRequest("")
 	if !strings.Contains(req, `"audience": "operator"`) {
 		t.Errorf("empty audience must default to operator; got %q", req)
+	}
+}
+
+func TestBriefTargets_SkipsPrimaryXO(t *testing.T) {
+	cfg := &roster.Config{
+		XOAgent: "cos",
+		Agents: []roster.Agent{
+			{Name: "cos"},
+			{Name: "backend"},
+			{Name: "frontend"},
+		},
+	}
+	got := briefTargets(cfg)
+	want := []string{"backend", "frontend"}
+	if len(got) != len(want) {
+		t.Fatalf("briefTargets = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("briefTargets = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestBriefTargets_SkipsAgents0WhenXOAgentEmpty(t *testing.T) {
+	cfg := &roster.Config{
+		Agents: []roster.Agent{
+			{Name: "lead-xo"},
+			{Name: "backend"},
+		},
+	}
+	got := briefTargets(cfg)
+	if len(got) != 1 || got[0] != "backend" {
+		t.Fatalf("with no XOAgent, briefTargets must skip Agents[0]; got %v", got)
 	}
 }
 
