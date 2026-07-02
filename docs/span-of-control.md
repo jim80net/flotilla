@@ -263,14 +263,16 @@ host-local assets. `flotilla workspace init` seeds the set into a fresh agent an
 the install loop is **member-count-agnostic** and dispatches each member by its delivery
 **mechanism**.
 
-The set ships **four members today**, delivered by **two mechanisms** — the "vocabulary
+The set ships **six members today**, delivered by **two mechanisms** — the "vocabulary
 extends with each new member kind" the set was designed to grow into:
 
 | Member | Mechanism | Delivery | Loads |
 |---|---|---|---|
-| **Rule of Three** (span of control, a guideline) | `identity-append` | distilled text appended (under a marker fence) into the agent's standing **identity file** | once at launch, via `--append-system-prompt-file` |
+| **[operating-principles](./OPERATING-PRINCIPLES.md)** (the twelve standing principles, distilled) | `identity-append` | distilled text appended (under a marker fence) into the agent's standing **identity file** | once at launch, via `--append-system-prompt-file` |
+| **Rule of Three** (span of control, a guideline) | `identity-append` | distilled text appended (under a marker fence) into the agent's **identity file** | once at launch |
 | **no-self-merge** (a desk never merges its own work; the level above reviews + merges — the merge IS the independent review) | `identity-append` | distilled text appended (under a marker fence) into the agent's **identity file** | once at launch |
 | **act-dont-idle-hold** (execute authorized reversible work; never stall on a non-decision) | `identity-append` | distilled text appended (under a marker fence) into the agent's **identity file** | once at launch |
+| **executive-mini-brief** (operator turn-finals: bottom line, plain-language streams, detail footer, explicit needs-you line) | `identity-append` | distilled text appended (under a marker fence) into the agent's **identity file** | once at launch |
 | **[visibility-synthesis](./visibility.md)** (Tiers 2/3) | `heartbeat-skill` | a **whole-file** skill written into the agent's **workspace** (`skills/visibility-synthesis.md`) | when the daemon emits a synthesis wake |
 
 The two mechanisms encode a real distinction. `identity-append` is for a **structural
@@ -296,8 +298,8 @@ the operator's strategic lever — the set is built to grow one member at a time
   "would the operator want to read this?" discrimination is the per-tier test for
   what an aggregating lead forwards upward.
 - [visibility.md](./visibility.md) — the stratified-visibility doctrine (Tiers 1/2/3);
-  visibility-synthesis is the *second* constitutional member, delivered by the
-  `heartbeat-skill` mechanism this set extends into.
+  visibility-synthesis is the `heartbeat-skill` member of this set (the only
+  tick-time discipline in v1).
 - [quickstart.md → Federated fleets](./quickstart.md#federated-fleets--per-project-channels--fleet-command)
   — the recursive meta-XO → project-XO → desk topology this rule governs.
 - [README.md](../README.md) — the hub-and-spoke premise ("one coherent picture and

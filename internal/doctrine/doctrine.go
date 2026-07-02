@@ -5,8 +5,8 @@
 // default seed from `workspace init`, so a freshly scaffolded agent is born with
 // the doctrine in place.
 //
-// The set ships five members:
-//   - operating-principles — an IDENTITY-APPEND constitution: the eleven standing
+// The set ships six members:
+//   - operating-principles — an IDENTITY-APPEND constitution: the twelve standing
 //     Flotilla Operating Principles, distilled to one sentence each and appended into
 //     the agent's identity file so the constitution loads once at launch. The full
 //     prose lives in the repository's docs/OPERATING-PRINCIPLES.md.
@@ -17,6 +17,9 @@
 //     agent one level above reviews and merges (the merge IS the independent review).
 //   - act-dont-idle-hold — an IDENTITY-APPEND rule: execute authorized reversible work;
 //     never stall on a non-decision by holding or waiting.
+//   - executive-mini-brief — an IDENTITY-APPEND rule: operator-facing turn-finals use
+//     the four-part mini-brief format (bottom line, plain-language streams, detail
+//     footer, explicit needs-you line); coordinators especially, mirror-posted verbatim.
 //   - visibility-synthesis — a HEARTBEAT-SKILL: a whole-file curation skill written
 //     into the agent's workspace, loaded when the daemon emits a synthesis wake.
 //
@@ -111,13 +114,19 @@ const (
 	actDontIdleHoldCloseMarker = "<!-- /flotilla:act-dont-idle-hold -->"
 )
 
+// The executive-mini-brief sentinel fence (operator turn-final format).
+const (
+	executiveMiniBriefOpenMarker  = "<!-- flotilla:executive-mini-brief -->"
+	executiveMiniBriefCloseMarker = "<!-- /flotilla:executive-mini-brief -->"
+)
+
 // members is the registry. Adding a member is adding an entry here plus its embedded
 // asset; the install/seed loop iterates this slice and dispatches by Mechanism, so it
 // never needs to change as the set grows (a NEW mechanism additionally needs its
 // dispatch arm in install.go — the mechanism-coupling contract).
 var members = []Member{
 	{
-		// operating-principles: the eleven standing Flotilla Operating Principles — the
+		// operating-principles: the twelve standing Flotilla Operating Principles — the
 		// constitution every agent runs on — distilled to one sentence each. An
 		// identity-append like the other structural rules, because it defines the agent's
 		// standing posture ("how the agent operates"), loaded once into its identity at
@@ -155,6 +164,15 @@ var members = []Member{
 		Content:     mustRead("assets/skills/act-dont-idle-hold.md"),
 		OpenMarker:  actDontIdleHoldOpenMarker,
 		CloseMarker: actDontIdleHoldCloseMarker,
+	},
+	{
+		// executive-mini-brief: operator-facing communications (including turn-finals
+		// the Discord mirror posts mechanically) use the four-part mini-brief shape.
+		Name:        "executive-mini-brief",
+		Mechanism:   MechanismIdentityAppend,
+		Content:     mustRead("assets/skills/executive-mini-brief.md"),
+		OpenMarker:  executiveMiniBriefOpenMarker,
+		CloseMarker: executiveMiniBriefCloseMarker,
 	},
 	{
 		// visibility-synthesis: a whole-file curation skill (Tiers 2/3 of the

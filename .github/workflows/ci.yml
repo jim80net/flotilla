@@ -68,6 +68,9 @@ jobs:
       - name: Test (race detector)
         run: go test -race ./...
 
+      - name: Mirror hook mini-brief audit smoke test
+        run: bash deploy/flotilla_xo_discord_mirror_test.sh
+
   # The voice process is the ONE binary built with `-tags voiceopus` (CGO + libopus):
   # opus_cgo.go is a first-party binding that `#cgo pkg-config: opus` → SYSTEM libopus on
   # every architecture (ubuntu-latest is amd64, so libopus-dev IS load-bearing here — there

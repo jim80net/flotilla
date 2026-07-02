@@ -133,6 +133,9 @@ func TestCmdWorkspaceInitSeedsBothConstitutionalMembers(t *testing.T) {
 	if !strings.Contains(string(idBody), "flotilla:act-dont-idle-hold") {
 		t.Error("workspace init did not seed the act-dont-idle-hold identity-append block into worktree")
 	}
+	if !strings.Contains(string(idBody), "flotilla:executive-mini-brief") {
+		t.Error("workspace init did not seed the executive-mini-brief identity-append block into worktree")
+	}
 	skillBody, err := os.ReadFile(skill)
 	if err != nil {
 		t.Fatalf("workspace init did not seed the visibility-synthesis skill file: %v", err)

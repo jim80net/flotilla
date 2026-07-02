@@ -19,6 +19,15 @@
 #         walk skips tool_result-only user entries.
 # Chunking delegated to `flotilla notify --chunk` (BUG-4 belt-and-suspenders).
 #
+# TURN-FINAL SHAPE (doctrine-injected — the hook posts verbatim, never rewrites):
+# Coordinators MUST write operator-facing turn-finals as executive mini-briefs:
+#   1. Bottom line first (plain English, 1–2 sentences)
+#   2. Mini brief (2–5 bullets; name streams by what they DO)
+#   3. Detail footer optional (IDs/SHAs/paths last)
+#   4. Always end: "Waiting on you: …" OR "Nothing needs you."
+# See internal/doctrine/assets/skills/executive-mini-brief.md (installed via
+# `flotilla doctrine install`). The hook logs MINI-BRIEF-AUDIT when (4) is missing.
+#
 # REQUIRED host env (set by the operator's private fleet-ops install — no defaults
 # in this public script): FLOTILLA_ROSTER, FLOTILLA_SECRETS. Optional: FLOTILLA_BIN
 # (defaults to `flotilla` on PATH). Fail-safe exit 0 when unset or missing.
@@ -154,6 +163,13 @@ while True:
     time.sleep(0.8)
 
 if not resp or not resp.strip(): skip("no-assistant-text")
+
+def has_needs_you_line(text):
+    low = (text or "").lower()
+    return "waiting on you" in low or "nothing needs you" in low
+
+if not has_needs_you_line(resp):
+    lg("MINI-BRIEF-AUDIT", "missing explicit Waiting-on-you / Nothing-needs-you line")
 
 # BUG-5: mechanical post — trigger logged only, never suppresses.
 residue = operator_residue(trig)
