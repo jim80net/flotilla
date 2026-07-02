@@ -266,6 +266,10 @@ type DetectorConfig struct {
 	DeskHeartbeatPeriod time.Duration
 	// RateLimitProbePeriod gates rate-limit probe batches (default ReferenceInterval).
 	RateLimitProbePeriod time.Duration
+
+	// Activity ingests tick assess snapshots and turn-end/operator signals OFF d.mu
+	// for adaptive interval policy (PR 3). Nil ⇒ byte-inert.
+	Activity ActivityTracker
 }
 
 // Detector is the v2 heartbeat: a deterministic, no-LLM tick that wakes the XO
@@ -609,7 +613,6 @@ func (d *Detector) loop() {
 // holds the same mutex as Tick so the two never race (M3).
 func (d *Detector) OperatorWake() {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	d.snap.XOSettled = false
 	d.selfCont = 0
 	d.quietFSM.OnWake()
@@ -628,6 +631,8 @@ func (d *Detector) OperatorWake() {
 	if d.cfg.SettleConsume != nil {
 		_ = d.cfg.SettleConsume()
 	}
+	d.mu.Unlock()
+	d.notifyOperatorActivity()
 }
 
 // AgentWake is the per-agent analogue of OperatorWake (#183 recursive desk heartbeat): the relay
@@ -642,7 +647,6 @@ func (d *Detector) AgentWake(agent string) {
 		return
 	}
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	delete(d.deskSettled, agent)
 	delete(d.deskStopped, agent)
 	delete(d.deskBeatEligibleAt, agent)
@@ -650,6 +654,36 @@ func (d *Detector) AgentWake(agent string) {
 	delete(d.deskProgressed, agent)
 	if d.cfg.DeskSettleConsume != nil {
 		_ = d.cfg.DeskSettleConsume(agent)
+	}
+	d.mu.Unlock()
+	d.notifyOperatorActivity()
+}
+
+func (d *Detector) notifyOperatorActivity() {
+	if d.cfg.Activity == nil {
+		return
+	}
+	d.cfg.Activity.OnOperatorActivity(d.now())
+}
+
+// ingestActivity records tick assess output and tick-diff turn-ends OFF d.mu.
+func (d *Detector) ingestActivity(pendingTurnEnds []string) {
+	if d.cfg.Activity == nil {
+		return
+	}
+	d.mu.Lock()
+	states := make(map[string]surface.State, len(d.snap.DeskStates))
+	for k, v := range d.snap.DeskStates {
+		states[k] = v
+	}
+	xoSettled := d.snap.XOSettled
+	xoAgent := d.cfg.XOAgent
+	d.mu.Unlock()
+
+	now := d.now()
+	d.cfg.Activity.OnTickIngest(now, xoAgent, states, xoSettled)
+	for _, agent := range pendingTurnEnds {
+		d.cfg.Activity.OnTurnEnd(agent, now)
 	}
 }
 
@@ -702,7 +736,8 @@ func (d *Detector) Tick() {
 	// consults only an already-computed boolean and never touches the filesystem. Inert (nil) when the
 	// feature is off (HeartbeatEnabled nil) or the warrant seam is unwired.
 	warrant := d.deskWarrantSnapshot()
-	pendingRotate, pendingWakes, pendingMirrors, pendingDelegation, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit, pendingAutoSwitch := d.tickLocked(warrant)
+	pendingRotate, pendingWakes, pendingMirrors, pendingDelegation, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit, pendingAutoSwitch, pendingTurnEnds := d.tickLocked(warrant)
+	d.ingestActivity(pendingTurnEnds)
 	d.runTail(pendingRotate, pendingWakes, pendingMirrors, pendingDelegation)
 	d.runAutoSwitch(pendingAutoSwitch)
 	d.runRateLimitProbes(pendingRateLimit)
@@ -833,7 +868,7 @@ func (d *Detector) persist() {
 // tickLocked runs the lock-free-pure state machine under d.mu and RETURNS the side effects to
 // perform after unlock (a pending rotate + the ordered wakes). It is the single per-interval
 // writer of detector state; OperatorWake is the only other writer and shares the mutex.
-func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pendingWakes []deferredWake, pendingMirrors []string, pendingDelegation []string, pendingSynth []synthEligible, pendingDeskBeats []string, pendingDeskEscalations []string, pendingRateLimit rateLimitWork, pendingAutoSwitch []RateLimitAutoSwitchCandidate) {
+func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pendingWakes []deferredWake, pendingMirrors []string, pendingDelegation []string, pendingSynth []synthEligible, pendingDeskBeats []string, pendingDeskEscalations []string, pendingRateLimit rateLimitWork, pendingAutoSwitch []RateLimitAutoSwitchCandidate, pendingTurnEnds []string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -884,6 +919,7 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 		}
 		if prev.DeskStates[name] == surface.StateWorking && cur.DeskStates[name] == surface.StateIdle {
 			pendingMirrors = append(pendingMirrors, name)
+			pendingTurnEnds = append(pendingTurnEnds, name)
 			// 2c. Visibility-synthesis OWED marking (B2): a non-XO desk finishing a turn marks
 			//     synthesis owed for each of its synthesizing parent(s) — AgentsAbove(name). A boat in
 			//     two channels marks BOTH; a project-XO finishing marks the meta-XO (the Tier-3
@@ -967,7 +1003,7 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 	//    cubic-P1 at-least-once).
 	d.snap = cur
 	pendingRateLimit = d.rateLimitWorkLocked(cur)
-	return pendingRotate, pendingWakes, pendingMirrors, pendingDelegation, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit, pendingAutoSwitch
+	return pendingRotate, pendingWakes, pendingMirrors, pendingDelegation, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit, pendingAutoSwitch, pendingTurnEnds
 }
 
 // deskWarrantSnapshot is the #189 PHASE-1 read, run OFF d.mu from Tick BEFORE tickLocked acquires the

@@ -33,6 +33,27 @@ func TestTurnEndPollerDetectsDeskFinish(t *testing.T) {
 	}
 }
 
+// Mirrors cmd/flotilla/watch.go poke wrapper: OnTurnEnd before Poke.
+func TestTurnEndPollerPokeWrapperRecordsTurnEnd(t *testing.T) {
+	states := map[string]surface.State{"backend": surface.StateWorking}
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	at := NewActivityTracker(testActivityConfig())
+	var poked atomic.Bool
+	p := NewTurnEndPoller("xo", []string{"xo", "backend"}, func(a string) surface.State { return states[a] }, func() {
+		at.OnTurnEnd("", now)
+		poked.Store(true)
+	}, time.Millisecond)
+	p.pollOnce(true)
+	states["backend"] = surface.StateIdle
+	p.pollOnce(false)
+	if !poked.Load() {
+		t.Fatal("desk finish must invoke poke wrapper")
+	}
+	if at.Snapshot(now).LastTurnEnd != now {
+		t.Fatalf("poke wrapper must record turn-end before poke, got %+v", at.Snapshot(now))
+	}
+}
+
 func TestTurnEndPollerIgnoresXOFinish(t *testing.T) {
 	states := map[string]surface.State{"xo": surface.StateWorking}
 	var pokes atomic.Int32

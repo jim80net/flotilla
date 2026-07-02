@@ -531,6 +531,7 @@ func cmdWatch(args []string) error {
 		if referenceInterval <= 0 {
 			referenceInterval = interval
 		}
+		activity := watch.NewActivityTracker(watch.DefaultActivityConfig())
 		detCfg := watch.DetectorConfig{
 			XOAgent:           xo,
 			Desks:             desks,
@@ -613,6 +614,7 @@ func cmdWatch(args []string) error {
 			WakeDeskHeartbeat:       wakeDeskHeartbeat,
 			DeskEscalate:            deskEscalate,
 			DeskHeartbeatEveryTicks: 1,
+			Activity:                activity,
 		}
 		if autoSwitchOn {
 			probeMaterial := rateLimitMaterial(cfg)
@@ -625,7 +627,10 @@ func cmdWatch(args []string) error {
 		}
 		det := watch.NewDetectorWithSynthSidecar(detCfg, *snapshotPath, synthSidecarPath)
 		endAutoSwitch = det.EndAutoSwitchFlight
-		turnPoller := watch.NewTurnEndPoller(xo, desks, detCfg.Assess, det.Poke, eventPollInterval)
+		turnPoller := watch.NewTurnEndPoller(xo, desks, detCfg.Assess, func() {
+			activity.OnTurnEnd("", time.Now())
+			det.Poke()
+		}, eventPollInterval)
 		det.Start()
 		turnPoller.Start()
 		defer func() {
