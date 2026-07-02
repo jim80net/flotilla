@@ -13,5 +13,5 @@
 - [x] 3.2 Wire in `cmd/flotilla/watch.go`: `--unacked-file`, start goroutine when relay prerequisites met.
 
 ## 4. Gate
-- [ ] 4.1 `go test -race ./...` green; `openspec validate unacked-operator-backstop-234 --strict` green; partition grep clean.
+- [x] 4.1 `go test -race ./...` green; `openspec validate unacked-operator-backstop-234 --strict` green; partition grep clean.
 - [ ] 4.2 Impl-trio + PR to operator/COS merge gate.
