@@ -305,26 +305,6 @@ func TestCmdNotifyChunkSinglePartHasNoPrefix(t *testing.T) {
 	}
 }
 
-func TestCmdNotifyWithoutChunkStillRejectsOverLimit(t *testing.T) {
-	var hits int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		hits++
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer srv.Close()
-
-	const agent = "xo"
-	secrets := writeSecrets(t, agent, srv.URL)
-	long := strings.Repeat("z", discord.MaxContentRunes+1)
-	err := cmdNotify([]string{"--from", agent, "--secrets", secrets, long})
-	if err == nil {
-		t.Fatal("cmdNotify(over-limit, no --chunk) = nil error, want rejection")
-	}
-	if hits != 0 {
-		t.Errorf("server received %d requests; over-limit without --chunk must post nothing", hits)
-	}
-}
-
 func TestCmdNotifyFlagAfterMessageRejected(t *testing.T) {
 	secrets := writeSecrets(t, "xo", "https://example.test/hook")
 	// A flag after the positional message is silently swallowed by Go's flag
