@@ -50,3 +50,17 @@ func TestTurnEndPollerZeroIntervalNoOp(t *testing.T) {
 	p.Start()
 	p.Stop() // must not hang
 }
+
+func TestStopBeforeStartNoHang(t *testing.T) {
+	finished := make(chan struct{})
+	go func() {
+		p := NewTurnEndPoller("xo", []string{"backend"}, func(string) surface.State { return surface.StateIdle }, func() {}, time.Millisecond)
+		p.Stop()
+		close(finished)
+	}()
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("Stop before Start hung")
+	}
+}

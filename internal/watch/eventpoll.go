@@ -2,6 +2,7 @@ package watch
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/surface"
@@ -28,6 +29,7 @@ type TurnEndPoller struct {
 	done      chan struct{}
 	startOnce sync.Once
 	stopOnce  sync.Once
+	running   atomic.Bool // true once the poll-loop goroutine is launched
 
 	last map[string]surface.State
 }
@@ -49,10 +51,16 @@ func NewTurnEndPoller(xoAgent string, desks []string, assess func(string) surfac
 // Start launches the poll loop. Idempotent when interval <= 0.
 func (p *TurnEndPoller) Start() {
 	p.startOnce.Do(func() {
+		select {
+		case <-p.done:
+			return
+		default:
+		}
 		if p.interval <= 0 {
 			close(p.done)
 			return
 		}
+		p.running.Store(true)
 		go p.loop()
 	})
 }
@@ -64,6 +72,10 @@ func (p *TurnEndPoller) Stop() {
 		case <-p.done:
 			return
 		default:
+		}
+		if !p.running.Load() {
+			close(p.done)
+			return
 		}
 		close(p.stop)
 		<-p.done
