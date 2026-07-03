@@ -232,7 +232,11 @@ func isTrailingEpilogue(last, prev string) bool {
 			return true
 		}
 	}
-	return len(prev) > len(last)*3 && len(last) < 250
+	// Observed narration epilogues often trail with a colon before the coordinator acts.
+	if strings.HasSuffix(last, ":") && len(last) < 200 {
+		return true
+	}
+	return false
 }
 
 // normMsg normalizes an operator message for an EXACT (not substring) anchor match: collapse all

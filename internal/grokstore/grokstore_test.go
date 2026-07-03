@@ -127,7 +127,7 @@ func TestLatestResultSkipsTrailingNarrationEpilogue(t *testing.T) {
 	history := strings.Join([]string{
 		`{"type":"user","content":"ship the PR"}`,
 		`{"type":"assistant","content":"**Bottom line:** Schema-v2 API is on main.\n\n- merged #312\n- tests green"}`,
-		`{"type":"assistant","content":"PR #312 opened. Let me report to COS."}`,
+		`{"type":"assistant","content":"PR #312 opened. Let me report to COS and update the ledger:"}`,
 	}, "\n")
 	home := writeStore(t, cwd, "s1", "%2Fsrv%2Ffleet%2Fresearch", history)
 	got, err := LatestResult(home, cwd)
@@ -139,6 +139,24 @@ func TestLatestResultSkipsTrailingNarrationEpilogue(t *testing.T) {
 	}
 	if !strings.Contains(got, "Schema-v2 API") {
 		t.Errorf("got %q, want substantive turn-final body", got)
+	}
+}
+
+func TestLatestResultShortFinalWinsOverLongIntermediate(t *testing.T) {
+	cwd := "/srv/fleet/research"
+	long := strings.Repeat("Working through the schema migration and dash integration. ", 8)
+	history := strings.Join([]string{
+		`{"type":"user","content":"status"}`,
+		`{"type":"assistant","content":"` + long + `"}`,
+		`{"type":"assistant","content":"Settled — standing by."}`,
+	}, "\n")
+	home := writeStore(t, cwd, "s1", "%2Fsrv%2Ffleet%2Fresearch", history)
+	got, err := LatestResult(home, cwd)
+	if err != nil {
+		t.Fatalf("LatestResult err = %v", err)
+	}
+	if got != "Settled — standing by." {
+		t.Errorf("got %q, want the short true turn-final (not stale intermediate)", got)
 	}
 }
 
