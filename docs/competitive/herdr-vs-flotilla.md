@@ -23,14 +23,14 @@ Mature, real product: ~6.1k GitHub stars, v0.7.0 (2026-06-15), 890 commits, acti
 | Persistent PTY panes, detach/reattach | ✅ mature | ➖ relies on your tmux | herdr ahead — owns the runtime |
 | Mouse-first TUI, themes, copy-mode | ✅ rich | ❌ not its job | herdr ahead |
 | SSH remote attach | ✅ native | ➖ via your tmux/ssh | herdr ahead |
-| Per-agent state detection | ✅ 14+ (heuristics + native hooks) | ✅ 3 drivers (claude/codex/grok) | herdr ahead on breadth + depth |
+| Per-agent state detection | ✅ 14+ (heuristics + native hooks) | ✅ 3 drivers — Claude Code, Codex, Grok (render markers live-captured) | herdr ahead on breadth + depth |
 | Socket/JSON API for agent→terminal control | ✅ extensive | ➖ CLI send/notify, not a terminal API | herdr richer |
 | **Hub-and-spoke delegation (one→many)** | ❌ explicitly NOT supported | ✅ core (XO→desks) | **flotilla — central differentiator** |
 | **Confirmed-delivery inter-agent messaging** | ❌ indirect state-share | ✅ send refuses dead panes | **flotilla ahead** |
 | **Durable auditable inter-agent transcript** | ➖ session/event logs | ✅ every instruction+reply mirrored+timestamped | **flotilla ahead** |
 | **Discord/chat/drive-from-phone** | ❌ none | ✅ Discord, per-agent webhooks | **flotilla — herdr absent** |
 | Change-detector heartbeat (cost-throttled) | ➖ event subs, no XO clock | ✅ watch clock + ctx rotation | flotilla ahead on autonomy-loop |
-| Federation (meta-XO over project-XOs) | ❌ | 🔜 roadmap | neither ships |
+| Federation (meta-XO over project-XOs) | ❌ | ✅ ships | flotilla — herdr absent |
 | Maturity (stars/releases/cadence) | ✅ ~6.1k★, v0.7.0 | ➖ early | herdr far ahead |
 | License | AGPL-3.0 + commercial | MIT | flotilla more permissive |
 

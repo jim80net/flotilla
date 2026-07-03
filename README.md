@@ -2,7 +2,7 @@
 
 > **flotilla is a drop-in chief of staff for the AI coding harnesses you've
 > already built.** Stop shuffling 10 terminal windows. flotilla turns separate
-> Claude Code / Aider / OpenCode / Grok sessions into one centrally coordinated
+> Claude Code / Codex / Grok sessions into one centrally coordinated
 > fleet. A single hub agent coordinates multiple streams of work and lets you
 > drive strategy, not implementation.
 
@@ -39,7 +39,7 @@ right below, in [Under the hood: the CLI](#under-the-hood-the-cli).)
 
 **What you get**
 
-- **Coordinate the harnesses you've already built** — Claude Code, Aider, OpenCode, and
+- **Coordinate the harnesses you've already built** — Claude Code, Codex, and
   Grok desks behind one interface; each stays an ordinary session you control,
   while the XO coordinates the work across them.
 - **One chief-of-staff agent in charge** — the XO routes work to the domain
@@ -144,7 +144,7 @@ inspect end to end:
   its end — replying to you on Discord, and staying quiet on routine noise —
   is its operating doctrine: see [docs/xo-doctrine.md](./docs/xo-doctrine.md).
 - **Constitution — the Flotilla Operating Principles.** Every agent is born with
-  the eight standing principles that make coordination autonomous *and* safe
+  the twelve standing principles that make coordination autonomous *and* safe
   (act-with-guardrails, the money/irreversibility/fork gates, merge on clean gates
   with an independent reviewer, verify-never-fabricate, …). `flotilla doctrine
   install` appends the distilled constitution into each agent's identity; the full
@@ -157,22 +157,24 @@ inspect end to end:
   a `surface` (default `claude-code`) that selects a *driver* — the per-harness
   policy for how flotilla submits a turn, assesses the pane's rendered state
   (working / idle / awaiting-approval / errored / shell-crash), and rotates
-  context. This lets a desk run Claude Code, **Aider**, … behind one interface,
-  so the fleet can mix harnesses. `claude-code`, `aider`, `opencode`, and `grok`
-  ship today. The Aider driver is the first to surface *awaiting-approval* and
-  *errored* states, so a desk blocked on a confirmation prompt or hitting an error
-  wakes the XO automatically; the OpenCode driver does the same with claude-style
-  polarity (its working indicator persists the whole turn). (Like `claude-code`, an
-  agent must run AS its pane's process — e.g. launch `aider …` / `opencode` directly,
-  not wrapped in `bash -c "… ; exec bash"` — so crash detection reads the agent, not
-  the wrapper shell.)
-  - **`grok` caveats** (read before adding a Grok desk): (1) **Grok auto-executes
-    shell commands and file edits WITHOUT prompting** — it has no per-action approval
-    gate, so a Grok desk acts on its environment unprompted (an operational hazard);
-    the driver emits a reduced state set accordingly. (2) The `grok` driver's render
-    markers are **source-verified, not yet live-captured** (Grok is xAI-only/metered,
-    so there is no $0 validation path) — live-capture validation is pending a funded
-    xAI session.
+  context. This lets desks run different harnesses behind one interface, so the
+  fleet can mix them. Drivers ship for **Claude Code, Codex, and Grok**, each
+  validated against its running TUI — Claude Code is the reference surface, and
+  the Codex and Grok render markers (including their tool-approval prompts) are
+  live-captured from the real CLIs. A desk blocked on a confirmation prompt or
+  hitting an error wakes the XO automatically. (An agent must run AS its pane's
+  process — launch the harness directly, not wrapped in `bash -c "… ; exec bash"`
+  — so crash detection reads the agent, not the wrapper shell.)
+  - **Codex** ships as an **execution** desk today. Running a Codex agent in a
+    *coordinator* (XO / chief-of-staff) seat is a design + supervised-trial item,
+    not yet a production default — see
+    [docs/coordinator-seat-swap-runbook.md](./docs/coordinator-seat-swap-runbook.md).
+  - **Grok caveat** (read before adding a Grok desk): the driver drives xAI's
+    official `grok` CLI, and its working / idle / tool-approval markers are
+    live-captured — but the **auth-needed and payment-required** gates are not yet
+    captured, so an auth- or payment-blocked Grok desk currently reads as *idle*
+    instead of raising an alert. Fund the key before relying on a Grok desk
+    unattended.
 
 ## Why these choices
 
@@ -224,19 +226,20 @@ Near-term:
       change and rotates its context after each handling — an idle fleet costs
       nothing: [docs/watch-runbook.md](./docs/watch-runbook.md).
 - [x] Per-agent **surface drivers** — drive heterogeneous harnesses through one
-      interface (`roster.agent.surface`, default `claude-code`). `claude-code`,
-      `aider`, and `opencode` ship today; both `aider` and `opencode` emit the full
-      assessed-state set (incl. awaiting-approval / errored). Build + validate is $0
-      via a local model (ollama); running a paid-model desk is a separate operator
-      spend choice. The `grok` driver also ships (source-verified; reduced state set
-      — Grok auto-executes unprompted). Cursor is next on the roadmap.
+      interface (`roster.agent.surface`, default `claude-code`). Drivers ship for
+      **Claude Code, Codex, and Grok**; the Codex and Grok render markers
+      (including their tool-approval prompts) are live-captured from the real
+      CLIs. Codex ships as an execution desk; the Codex *coordinator* seat is a
+      supervised-trial item (not yet a production default). Grok's auth-needed /
+      payment-required gates are not yet captured (a blocked Grok desk reads
+      *idle*). Cursor is next on the roadmap.
 - [x] **Inter-harness fleets** — a single fleet mixes harnesses: a Claude XO
-      coordinates Aider / OpenCode / Grok desks, each driven by its own driver
-      (send / assess / wake are all surface-agnostic — proven live with an OpenCode XO
-      driving a mixed fleet). Non-Claude desks are *pull-participants* (the XO collects
-      by reading their panes, cued by the driver assessment; they can't push reports):
-      [docs/inter-harness.md](./docs/inter-harness.md). Push-capable "smart desks" are a
-      follow-on.
+      coordinates Codex / Grok desks, each driven by its own driver (send /
+      assess / wake are all surface-agnostic). Non-Claude desks are
+      *pull-participants* (the XO collects by reading their panes, cued by the
+      driver assessment; they can't push reports):
+      [docs/inter-harness.md](./docs/inter-harness.md). Push-capable "smart desks"
+      are a follow-on.
 - [x] **Federation** — a recursive hub-and-spoke fleet across many Discord channels:
       each channel is bound to one XO (its hub) and the inbound relay routes by origin
       channel (a fleet-command channel binds a meta-XO whose members are project-XOs).
@@ -263,6 +266,20 @@ Near-term:
       token-gated non-loopback bind is a tracked follow-on.
 - [ ] Release-sign-off workflow.
 - [x] Docs + an end-to-end quickstart that a newcomer can run cold — [docs/quickstart.md](./docs/quickstart.md) (cold-tested: install, send, clock).
+
+## Documentation
+
+The full documentation set — organized by who you are (newcomer, coding agent,
+operator running a fleet, contributor) — is mapped in
+**[docs/README.md](./docs/README.md)**. Quick jumps:
+
+- **New here** → [docs/quickstart.md](./docs/quickstart.md) (install → first
+  message → the clock, runnable cold).
+- **A coding agent setting it up** → [llm.md](./llm.md).
+- **Running a fleet in production** → the operator runbooks
+  ([watch](./docs/watch-runbook.md), [federation](./docs/federation.md),
+  [dash](./docs/dash-runbook.md), [voice](./docs/voice-runbook.md)).
+- **The agent doctrine** → [docs/OPERATING-PRINCIPLES.md](./docs/OPERATING-PRINCIPLES.md).
 
 ## License
 

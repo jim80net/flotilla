@@ -180,7 +180,7 @@ constitution):
 1. **Bottom line first** — one or two plain-English sentences: what changed in *their*
    world and whether anything needs them.
 2. **Mini brief** — two to five short bullets naming each work stream by **what it does
-   for them** ("the options-closing bug fix", "the fleet tooling upgrade"), where it
+   for them** ("the login bug fix", "the fleet tooling upgrade"), where it
    stands, and what happens next — not by issue numbers, branch names, or internal
    codenames.
 3. **Detail footer (optional, last)** — PR numbers, SHAs, file paths, gate vocabulary,
@@ -238,13 +238,13 @@ maintains.
 
 ### Mixed-harness desks — lean on the driver `Assess`, and pull (don't expect push)
 
-When the fleet mixes harnesses (Aider / OpenCode / Grok / Cursor desks alongside
+When the fleet mixes harnesses (Codex / Grok / Cursor desks alongside
 Claude ones — see [inter-harness.md](./inter-harness.md)), the XO's desk-monitoring
 duty changes in two ways:
 
 - **Trust the driver-assessed state; don't eyeball a non-Claude render.** The
   change-detector already assesses each desk through *its own* surface driver and names
-  the state in the wake reason (`aid: finished a turn`, `aid: entered awaiting-approval`).
+  the state in the wake reason (`grok: finished a turn`, `grok: entered awaiting-approval`).
   Lean on that — do not re-classify a non-Claude pane by eye (its working / idle /
   approval render differs from Claude's, and the XO may misread it).
 - **Non-Claude desks are pull-participants by default.** An unprovisioned non-Claude

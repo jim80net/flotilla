@@ -1,5 +1,11 @@
 # Design — mechanical reader-modeling (flotilla core feature; public-relaunch bar)
 
+> **This is a design record, not a runnable guide.** It specifies a *proposed*
+> feature (a reader-model judge + firewall on desk publish paths). Most of what it
+> describes is unbuilt; where a piece already ships it says so inline. For the
+> reader-modeling *principle* it enforces, see
+> [OPERATING-PRINCIPLES.md §5](./OPERATING-PRINCIPLES.md).
+
 **Status:** design v2 (design-trio folded — systems-review + OCR + STORM). The architecture (one enforcement point per egress; the envelope as the judge's contract; the dash as the view) was confirmed sound; v2 corrects the seam, owns the mechanical/judgment boundary, and fixes the clustering. Routed to openspec next.
 **Operator standard:** `~/.claude/rules/mechanical-reader-modeling-mental-map-is-the-product.md` — *"so-consistent-its-mechanical reader-modeling … the mental map is a CORE FEATURE of flotilla."* Given after the public repo's issues were judged "slop, zero modeling," taken private, relaunch demanded.
 

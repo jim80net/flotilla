@@ -41,7 +41,7 @@ Fixtures and examples should read as a **reference a developer learns from**
   happens to be named after it).
 - Generic roles & concepts: "XO", "desk", "federation", "c2 channel", "the operator".
 - The public repo slug `jim80net/flotilla`, the LICENSE author, public CLI/model
-  names (grok, aider, opencode, …), and intentional fake placeholders in fixtures.
+  names (claude-code, codex, grok, …), and intentional fake placeholders in fixtures.
 
 ## The guard
 

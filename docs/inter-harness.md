@@ -2,8 +2,8 @@
 
 flotilla drives every desk through a per-agent **surface driver** (see
 `internal/surface`). Because delivery, assessment, and wake all resolve that driver
-*per desk*, a single fleet can mix harnesses: a Claude-Code XO can coordinate Aider,
-OpenCode, Grok (and Cursor, once it ships) desks — each driven correctly by its own
+*per desk*, a single fleet can mix harnesses: a Claude-Code XO can coordinate Codex
+and Grok desks (with Cursor on the roadmap) — each driven correctly by its own
 driver. This is flotilla's "drop-in agentize ANY harness, then run an inter-harness
 fleet" capability.
 
@@ -20,26 +20,27 @@ driver — there is no hard-coded Claude assumption in the path:
   (`cmd/flotilla/watch.go`), and the materiality gate routes the resulting
   `surface.State` generically.
 - **rotate** — `surface.RotateContext` injects each driver's reset (Claude `/clear`,
-  Aider `/clear`, Grok `/new`, Cursor `/new-chat`).
+  Codex `/clear`, Grok `/new`, Cursor `/new-chat`).
 
-This was **proven live** ($0, local ollama): a mixed Aider + OpenCode fleet with an
-**OpenCode XO** — `flotilla send` delivered to each desk via its driver, and
-`flotilla watch --change-detector` assessed each desk and woke the OpenCode XO via the
-OpenCode driver (`detector delivered to "ocx"`). A regression test
-(`internal/surface`: `TestMixedHarnessFleetRoutesPerDriver`) locks the per-driver
-routing.
+The routing is **surface-agnostic by construction** and locked by a regression test
+(`internal/surface`: `TestMixedHarnessFleetRoutesPerDriver`), which asserts that a
+mixed fleet routes each desk — and the XO — through its own driver's `Submit` /
+`Assess`. It has also been exercised live ($0, local ollama) with a mixed non-Claude
+fleet coordinated by a non-Claude XO: `flotilla send` delivered to each desk via its
+driver, and `flotilla watch --change-detector` assessed each desk and woke the XO
+through its driver.
 
 ## Non-Claude desks are PULL-PARTICIPANTS (read this before you mix)
 
 A **Claude-Code desk** has flotilla's skill set: it can `flotilla notify` / `flotilla
 send` to **push** reports to the operator or the XO, and it understands flotilla-command
-delegation. A **non-Claude desk** (Aider / OpenCode / Grok / Cursor) does *not* — it
+delegation. A **non-Claude desk** (Codex / Grok / Cursor) does *not* by default — it
 just runs turns in its own harness. So in a mixed fleet:
 
 - **Collect is pull.** The XO collects a non-Claude desk's result by **reading its
   pane / files** (a `tmux capture-pane`), *not* by expecting the desk to push a report.
   The desk's surface driver `Assess` (surfaced in the change-detector's material wake
-  reason, e.g. `aid: finished a turn` / `aid: entered awaiting-approval`) tells the XO
+  reason, e.g. `grok: finished a turn` / `grok: entered awaiting-approval`) tells the XO
   **WHEN** the turn finished or the desk is blocked; the pane content is the **WHAT**.
 - **Delegation is one-way.** The XO `Submit`s a turn; the desk reports back only through
   its rendered state + whatever it writes to files. There is no `flotilla notify` push
@@ -65,8 +66,9 @@ just runs turns in its own harness. So in a mixed fleet:
 A driver's `Submit` newline method is a per-driver choice: **bracketed paste**
 (`deliver.Send` — literal newlines, requires the harness to enable bracketed-paste
 mode) or **Ctrl+J keystrokes** (`deliver.SendCtrlJ` — for a harness without bracketed
-paste, or whose tmux newline is Ctrl+J). Claude-Code, Aider, and OpenCode use bracketed
-paste (confirmed live). Grok and Cursor's newline method is **not yet confirmed** — it
+paste, or whose tmux newline is Ctrl+J). Claude Code, Codex, and Grok use bracketed
+paste, confirmed live — Grok's multi-line paste is live-verified to land as a single
+composer body (#158). Cursor's newline method is **not yet confirmed** — it
 is deferred to their live-capture sessions (#58, #61); do not assume bracketed paste
 works for them until then.
 

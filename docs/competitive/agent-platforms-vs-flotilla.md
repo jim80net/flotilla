@@ -46,15 +46,14 @@ federation (Chief of Staff → project-XOs) as an operations concept. Those are 
 platforms' lane is autonomous application logic.
 
 **Coding harnesses are not this comparison.** Claude Code, Cursor, Codex, Grok CLI,
-etc. are the *substrate* flotilla coordinates — not competitors in this doc. Agent platforms
+and other terminal coding agents are the *substrate* flotilla coordinates — not
+competitors in this doc. Agent platforms
 sometimes *invoke* coding tools inside a sandbox; flotilla *routes work to* harnesses the
 operator already trusts in real sessions.
 
 **Harness coverage (2026-07, honest):** the **Codex surface driver** ships on main (OpenAI
 Codex CLI via flotilla's driver model). A **Codex coordinator seat** is code-complete with
-**supervised trial pending** — not yet a production-default posture. The **memex-codex adapter**
-(Phases 1c–6 complete) pairs memex capture with Codex desks; it is a memex integration, not a
-flotilla core dependency.
+**supervised trial pending** — not yet a production-default posture.
 
 ## Feature-by-feature
 

@@ -20,7 +20,7 @@ does not.**
    review and is ready to merge; no action on your side."
 2. **Mini brief (2–5 short bullets or sentences).** Each active work stream: what it
    is **for them**, where it stands, what happens next. Name streams by **what they do**
-   ("the options-closing bug fix", "the coordination upgrade") — not by issue numbers,
+   ("the login-timeout bug fix", "the coordination upgrade") — not by issue numbers,
    branch names, or internal codenames.
 3. **Detail footer (optional, last).** PR numbers, SHAs, file paths, gate vocabulary —
    compressed, for drill-in only. Often omit entirely; the ledger holds identifiers.
