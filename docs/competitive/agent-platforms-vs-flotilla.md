@@ -16,7 +16,7 @@ reads — treat as directional. For the terminal-multiplexer layer see
   wiring graphs; end-user surfaces are whatever you build on top (API, web app, Slack bot).
 - **flotilla** (github.com/jim80net/flotilla) — a **drop-in coordination layer over existing
   coding harnesses**. A hub "XO" agent fans work to domain desks running in real terminal
-  sessions (Claude Code, Aider, OpenCode, Grok, Codex, …), collects replies with confirmed
+  sessions (Claude Code, Codex, Grok, …), collects replies with confirmed
   delivery, and mirrors an auditable transcript to a chat channel the operator drives from
   their phone. Go CLI, MIT.
 
@@ -45,7 +45,7 @@ hub-and-spoke span-of-control doctrine for a human executive running many desks,
 federation (Chief of Staff → project-XOs) as an operations concept. Those are flotilla's lane; the
 platforms' lane is autonomous application logic.
 
-**Coding harnesses are not this comparison.** Claude Code, Cursor, Aider, Codex, Grok CLI,
+**Coding harnesses are not this comparison.** Claude Code, Cursor, Codex, Grok CLI,
 etc. are the *substrate* flotilla coordinates — not competitors in this doc. Agent platforms
 sometimes *invoke* coding tools inside a sandbox; flotilla *routes work to* harnesses the
 operator already trusts in real sessions.
