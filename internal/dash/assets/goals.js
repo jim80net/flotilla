@@ -538,14 +538,20 @@
   // Work items contribute only kind+label (their identity + count) — enough to
   // detect an add/remove/retitle; class/detail are excluded per contract #2 above.
   function structuralSig(goals) {
-    return JSON.stringify(goals.map(function (n) {
-      return [n.id, n.parent || "", n.depth || 0, n.scope || "", n.title || "",
-        n.description || "", n.owner || "",
-        // org-graph v2 enrichment — each is rendered into the card and changes its
-        // height, so a change must trigger a full rebuild (not an in-place text swap).
-        n.priorities || [], n.milestones || [], (n.harness && n.harness.surface) || "",
-        (n.work_items || []).map(function (wi) { return [wi.kind || "", wi.label || ""]; })];
-    }));
+    return JSON.stringify({
+      nodes: goals.map(function (n) {
+        return [n.id, n.parent || "", n.depth || 0, n.scope || "", n.title || "",
+          n.description || "", n.owner || "",
+          // org-graph v2 enrichment — each is rendered into the card and changes its
+          // height, so a change must trigger a full rebuild (not an in-place text swap).
+          n.priorities || [], n.milestones || [], (n.harness && n.harness.surface) || "",
+          (n.work_items || []).map(function (wi) { return [wi.kind || "", wi.label || ""]; })];
+      }),
+      // Collaboration membership drives clusterAdjacent — a lane change MOVES nodes
+      // (re-angles the cluster), so it is STRUCTURAL: fold it in so a collaborations-only
+      // change forces a full re-layout, not just an in-place SVG redraw (#324 Inc 3, #283).
+      collab: collaborations.map(function (c) { return [c.lane || "", (c.desks || []).join(",")]; }),
+    });
   }
 
   // updateInPlace refreshes each existing card's state token + inner content from

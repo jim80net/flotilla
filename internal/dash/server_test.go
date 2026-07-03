@@ -392,6 +392,13 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("structuralSig must include enrichment field %q (#283 height contract)", f)
 		}
 	}
+	// #324 Inc 3: collaboration membership drives clusterAdjacent (it MOVES nodes), so a
+	// lane change is structural — structuralSig must fold in collaborations, or a
+	// collaborations-only change would ride the in-place fast path and never re-cluster
+	// (cubic #335 P2).
+	if !strings.Contains(sig, "collab") || !strings.Contains(sig, "collaborations.map") {
+		t.Error("structuralSig must fold in collaborations so a lane change forces a re-layout (#335 P2)")
+	}
 
 	body := doGet(t, srv, "/").Body.String()
 	if !strings.Contains(body, "/static/goals.js") {
