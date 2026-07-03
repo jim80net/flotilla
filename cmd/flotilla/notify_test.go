@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -302,6 +304,118 @@ func TestCmdNotifyChunkSinglePartHasNoPrefix(t *testing.T) {
 	}
 	if got != short {
 		t.Errorf("single-chunk body = %q, want unprefixed %q", got, short)
+	}
+}
+
+func TestCmdNotifyAttachPostsMultipart(t *testing.T) {
+	const agent = "xo"
+	var (
+		gotContent string
+		gotFile    string
+		gotData    []byte
+		gotCT      string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCT = r.Header.Get("Content-Type")
+		mediaType, params, err := mime.ParseMediaType(gotCT)
+		if err != nil || mediaType != "multipart/form-data" {
+			t.Fatalf("Content-Type = %q, want multipart/form-data", gotCT)
+		}
+		mr := multipart.NewReader(r.Body, params["boundary"])
+		for {
+			part, err := mr.NextPart()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				t.Fatalf("read part: %v", err)
+			}
+			data, _ := io.ReadAll(part)
+			switch part.FormName() {
+			case "payload_json":
+				var p struct {
+					Content string `json:"content"`
+				}
+				_ = json.Unmarshal(data, &p)
+				gotContent = p.Content
+			case "files[0]":
+				gotFile = part.FileName()
+				gotData = data
+			}
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	secrets := writeSecrets(t, agent, srv.URL)
+	attach := filepath.Join(t.TempDir(), "proto.html")
+	if err := os.WriteFile(attach, []byte("<html>dash</html>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmdNotify([]string{"--from", agent, "--secrets", secrets, "--attach", attach, "here"}); err != nil {
+		t.Fatalf("cmdNotify --attach: %v", err)
+	}
+	if gotContent != "here" {
+		t.Errorf("content = %q, want %q", gotContent, "here")
+	}
+	if gotFile != "proto.html" || string(gotData) != "<html>dash</html>" {
+		t.Errorf("attachment = %q %q, want proto.html with body", gotFile, gotData)
+	}
+}
+
+func TestCmdNotifyAttachOnlyAllowed(t *testing.T) {
+	const agent = "xo"
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	secrets := writeSecrets(t, agent, srv.URL)
+	attach := filepath.Join(t.TempDir(), "only.bin")
+	if err := os.WriteFile(attach, []byte("payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmdNotify([]string{"--from", agent, "--secrets", secrets, "--attach", attach}); err != nil {
+		t.Fatalf("cmdNotify attach-only: %v", err)
+	}
+	if hits != 1 {
+		t.Errorf("server hits = %d, want 1", hits)
+	}
+}
+
+func TestCmdNotifyAttachMissingFailsClosed(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	const agent = "xo"
+	secrets := writeSecrets(t, agent, srv.URL)
+	err := cmdNotify([]string{"--from", agent, "--secrets", secrets, "--attach", filepath.Join(t.TempDir(), "nope.txt"), "hi"})
+	if err == nil {
+		t.Fatal("cmdNotify(bad attach) = nil, want error")
+	}
+	if hits != 0 {
+		t.Errorf("server received %d requests; bad attach must post NOTHING", hits)
+	}
+}
+
+func TestCmdNotifyAttachAndChunkRejected(t *testing.T) {
+	secrets := writeSecrets(t, "xo", "https://example.test/hook")
+	attach := filepath.Join(t.TempDir(), "x.txt")
+	if err := os.WriteFile(attach, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := cmdNotify([]string{"--from", "xo", "--secrets", secrets, "--chunk", "--attach", attach, "hi"})
+	if err == nil {
+		t.Fatal("cmdNotify --chunk --attach = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("error %q should reject --chunk with --attach", err.Error())
 	}
 }
 
