@@ -1,9 +1,11 @@
 /* =========================================================================
    flotilla landing — "fleet command console" aesthetic
-   Deep abyssal navy ground, phosphor-cyan signal + amber accent, geometric
-   grotesque display (Syne) over a monospace body (IBM Plex Mono). Grain +
+   Deep abyssal navy ground, phosphor-cyan signal + amber accent, a CONDENSED
+   display (Barlow Condensed — the same face the flotilla dash uses) over a
+   monospace body (IBM Plex Mono), so product + marketing share one look. Grain +
    faint signal-grid atmosphere. Mobile-first (the product's pitch is "run it
    from your phone"). No framework; CSS-only motion except the status widget.
+   Design tokens documented in docs/design/README.md.
    ========================================================================= */
 
 :root {
@@ -24,8 +26,8 @@
   --warn:       #ffb454;
   --busy:       #4fe3d0;
 
-  /* type */
-  --display: "Syne", ui-sans-serif, system-ui, sans-serif;
+  /* type — Barlow Condensed matches the dash display face (docs/design/README.md) */
+  --display: "Barlow Condensed", ui-sans-serif, system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
   /* metrics */
@@ -86,7 +88,10 @@ a { color: var(--cyan); text-decoration: none; }
 a:hover { color: var(--ink); }
 code { font-family: var(--mono); }
 
-h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.08; letter-spacing: -.01em; margin: 0; }
+/* Barlow Condensed is a condensed grotesque — it reads calmer near-neutral than the
+   tight negative tracking the previous geometric face needed. Condensed also means
+   headings take less width, which is the "too big" feel the operator flagged. */
+h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; letter-spacing: .005em; margin: 0; }
 
 .kicker {
   font-family: var(--mono);
@@ -116,10 +121,13 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.08; 
   display: flex; align-items: center; justify-content: space-between;
   max-width: var(--maxw); margin: 0 auto; padding: 1.1rem 1.5rem;
 }
-.brand { display: flex; align-items: center; gap: .55rem; color: var(--ink); }
+.brand { display: flex; align-items: center; gap: .5rem; color: var(--ink); }
 .brand-mark { color: var(--cyan); display: inline-flex; }
-.brand-name { font-family: var(--display); font-weight: 800; font-size: 1.18rem; letter-spacing: -.02em; }
-.nav-links { display: flex; align-items: center; gap: 1.4rem; font-size: .82rem; }
+/* Calmer brand: the dash mark is a lowercase Barlow Condensed wordmark, not a heavy
+   tight-tracked logo. Lighter weight + gentle tracking reads as an instrument, not a
+   startup masthead (operator: header "too big / too techno"). */
+.brand-name { font-family: var(--display); font-weight: 600; font-size: 1.08rem; letter-spacing: .04em; }
+.nav-links { display: flex; align-items: center; gap: 1.35rem; font-size: .8rem; }
 .nav-links a { color: var(--ink-3); }
 .nav-links a:hover { color: var(--ink); }
 .nav-cta {
@@ -162,7 +170,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.08; 
    non-wrapping code line (the install command, the start snippets) refuses to shrink
    and drags the whole column past the viewport (horizontal overflow on mobile). Let
    these columns shrink to the track so long lines scroll WITHIN their box instead. */
-.hero-copy, .hero-demo { min-width: 0; }
+.hero-copy, .hero-dash { min-width: 0; }
 
 .eyebrow {
   display: inline-flex; align-items: center; gap: .55rem;
@@ -174,7 +182,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.08; 
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.35} }
 
 .hero-headline {
-  font-size: clamp(2.1rem, 5.5vw, 3.5rem); font-weight: 800;
+  font-size: clamp(2rem, 5vw, 3.2rem); font-weight: 700;
   margin: 1.3rem 0 1.1rem;
 }
 .hero-headline .hl {
@@ -204,40 +212,84 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.08; 
 
 .hero-cta { display: flex; gap: .8rem; margin-top: 1.5rem; flex-wrap: wrap; }
 
-/* demo */
-.hero-demo {
+/* ── hero dash mock-up: a static picture of `flotilla dash`, Goals/org view ──
+   Styled from the same tokens as the live dash (docs/design/README.md). Pure
+   CSS; the nodes are % -positioned so the command-chart scales with the box. */
+.hero-dash {
   margin: 0; border: 1px solid var(--line); border-radius: var(--r);
   background: var(--abyss-2); overflow: hidden;
   box-shadow: 0 30px 80px -30px rgba(0,0,0,.8), 0 0 0 1px rgba(79,227,208,.06);
 }
-.demo-chrome {
-  display: flex; align-items: center; gap: .5rem;
-  padding: .65rem .9rem; border-bottom: 1px solid var(--line); background: var(--abyss-3);
+.dash-chrome {
+  display: flex; align-items: center; gap: .8rem;
+  padding: .55rem .8rem; border-bottom: 1px solid var(--line); background: var(--abyss-3);
 }
-.tl-dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
-.tl-dot.r { background: #ff5f57; } .tl-dot.y { background: #febc2e; } .tl-dot.g { background: #28c840; }
-.demo-title { margin-left: .6rem; font-size: .76rem; color: var(--ink-3); }
-.demo-canvas { padding: 1.1rem 1.1rem 1.3rem; font-size: .82rem; }
-.demo-media { display: block; width: 100%; height: auto; border-radius: var(--r-sm); }
-.chat-line { display: flex; gap: .6rem; padding: .42rem 0; border-bottom: 1px dashed var(--line-soft); }
-.chat-line:last-of-type { border-bottom: none; }
-.chat-line .who { font-weight: 600; flex-shrink: 0; min-width: 4.6em; }
-.who.op { color: var(--amber); }
-.who.xo { color: var(--cyan); }
-.who.be { color: #8ab4ff; }
-.chat-line.sys .who, .chat-line.sys .msg { color: var(--ink-3); font-style: italic; }
-.chat-line .msg { color: var(--ink-2); }
-.chat-line .ok { color: var(--ok); font-weight: 600; }
-.demo-caption { margin-top: .9rem; font-size: .68rem; color: var(--ink-3); letter-spacing: .04em; text-transform: uppercase; }
+.dash-brand { display: inline-flex; align-items: center; gap: .4rem; font-family: var(--display); font-weight: 600; letter-spacing: .04em; color: var(--ink); font-size: .92rem; }
+.dash-brand-mark { width: 12px; height: 12px; border-left: 2px solid var(--cyan); border-top: 2px solid var(--cyan); border-bottom: 2px solid var(--cyan-dim); display: inline-block; }
+.dash-brand-sub { color: var(--ink-3); font-weight: 500; }
+.dash-tabs { display: flex; gap: .1rem; margin-left: .4rem; }
+.dash-tab { font-family: var(--display); font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); padding: .2rem .55rem; border-radius: var(--r-sm); }
+.dash-tab.active { color: var(--ink); background: color-mix(in srgb, var(--cyan) 16%, transparent); }
+.dash-toggle { margin-left: auto; display: inline-flex; border: 1px solid var(--line-soft); border-radius: var(--r-sm); overflow: hidden; }
+.dash-toggle span { font-size: .6rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); padding: .18rem .5rem; }
+.dash-toggle span + span { border-left: 1px solid var(--line-soft); }
+.dash-toggle .on { background: color-mix(in srgb, var(--cyan) 18%, transparent); color: var(--ink); }
+
+.dash-canvas {
+  position: relative; aspect-ratio: 4 / 3.15; width: 100%;
+  background-image:
+    linear-gradient(var(--line-soft) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
+  background-size: 34px 34px; background-position: center;
+}
+.dash-spokes { position: absolute; inset: 0; width: 100%; height: 100%; }
+.dash-spokes line { stroke: var(--cyan); stroke-opacity: .32; stroke-width: 1; vector-effect: non-scaling-stroke; }
+
+.dnode {
+  position: absolute; transform: translate(-50%, -50%);
+  width: 33%; max-width: 210px; min-width: 120px;
+  background: var(--abyss-2); border: 1px solid var(--line);
+  border-left: 3px solid var(--ink-3); border-radius: var(--r-sm);
+  padding: .5rem .6rem; box-shadow: 0 8px 24px -14px rgba(0,0,0,.9);
+}
+.dnode.hub { width: 40%; max-width: 240px; border-left-color: var(--cyan); background: color-mix(in srgb, var(--cyan) 5%, var(--abyss-2)); }
+.dnode-eyebrow { font-family: var(--display); font-size: .55rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+.dnode-title { font-family: var(--display); font-weight: 600; color: var(--ink); font-size: .96rem; line-height: 1.1; margin-top: .05rem; }
+.dnode.hub .dnode-title { font-size: 1.1rem; }
+.dnode-list { margin-top: .3rem; }
+.dnode-list .dnl-lab { display: block; font-size: .5rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+.dnode-list ul { margin: .1rem 0 0; padding-left: 13px; }
+.dnode-list li { font-size: .66rem; color: var(--ink-2); line-height: 1.3; }
+.dnode-foot { display: flex; align-items: center; justify-content: space-between; gap: .4rem; margin-top: .4rem; }
+.dpill { font-family: var(--display); font-size: .58rem; letter-spacing: .05em; text-transform: uppercase; padding: .05rem .4rem; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.dpill.cyan { color: var(--cyan); } .dpill.ok { color: var(--ok); } .dpill.amber { color: var(--amber); }
+.dharness { font-size: .52rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); border: 1px solid var(--line-soft); border-radius: 3px; padding: 0 .3rem; white-space: nowrap; }
+/* status-tint the desk nodes' accent to match their pill */
+.dnode:has(.dpill.cyan) { border-left-color: var(--cyan); }
+.dnode:has(.dpill.ok) { border-left-color: var(--cyan-dim); }
+.dnode:has(.dpill.amber) { border-left-color: var(--amber); }
+
+.hero-dash figcaption { padding: .7rem .9rem .8rem; font-size: .66rem; color: var(--ink-3); letter-spacing: .03em; text-transform: uppercase; border-top: 1px solid var(--line-soft); }
+.hero-dash figcaption strong { color: var(--ink-2); }
+
+/* tighten the mock on narrow viewports so the nodes stay legible + don't overlap:
+   a taller canvas spreads the corner desks away from the center hub, smaller nodes
+   and a hub without its priority list keep everything clear. */
+@media (max-width: 520px) {
+  .dash-canvas { aspect-ratio: 4 / 4.7; }
+  .dnode { width: 38%; font-size: .9em; }
+  .dnode.hub { width: 44%; }
+  .dnode.hub .dnode-list { display: none; }
+}
 
 /* staggered hero reveal */
-.hero-copy > *, .hero-demo { animation: rise .7s cubic-bezier(.2,.7,.2,1) both; }
+.hero-copy > *, .hero-dash { animation: rise .7s cubic-bezier(.2,.7,.2,1) both; }
 .eyebrow { animation-delay: .02s; }
 .hero-headline { animation-delay: .08s; }
 .hero-sub { animation-delay: .16s; }
 .install { animation-delay: .24s; }
 .hero-cta { animation-delay: .32s; }
-.hero-demo { animation-delay: .3s; }
+.hero-dash { animation-delay: .3s; }
 @keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
 
 /* harness strip */
@@ -272,7 +324,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.08; 
   transition: border-color .2s, transform .2s;
 }
 .card:hover { border-color: var(--cyan-dim); transform: translateY(-3px); }
-.card-num { font-family: var(--display); font-weight: 800; font-size: .9rem; color: var(--cyan-dim); margin-bottom: .9rem; }
+.card-num { font-family: var(--display); font-weight: 700; font-size: .9rem; color: var(--cyan-dim); margin-bottom: .9rem; }
 .card h3 { font-size: 1.18rem; margin-bottom: .6rem; }
 .card p { font-size: .92rem; margin: 0; }
 .card p em { color: var(--ink-3); font-style: italic; }
@@ -364,7 +416,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.08; 
 @keyframes flow { to { stroke-dashoffset: -120; } }
 @media (max-width: 920px) { .diagram { position: static; } }
 @media (prefers-reduced-motion: reduce) {
-  .spokes path, .bus-link, .eyebrow .dot, .live-pulse, .hero-copy > *, .hero-demo { animation: none !important; }
+  .spokes path, .bus-link, .eyebrow .dot, .live-pulse, .hero-copy > *, .hero-dash { animation: none !important; }
 }
 
 .how-steps { list-style: none; counter-reset: step; margin: 0; padding: 0; display: grid; gap: 1.2rem; }
@@ -481,7 +533,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.08; 
 .start-steps li > div { min-width: 0; flex: 1; }
 .start-n {
   flex-shrink: 0; width: 2.1rem; height: 2.1rem; border-radius: 50%;
-  display: grid; place-items: center; font-family: var(--display); font-weight: 800;
+  display: grid; place-items: center; font-family: var(--display); font-weight: 700;
   color: var(--cyan); border: 1px solid var(--cyan-dim); background: rgba(79,227,208,.06);
 }
 .start-steps h3 { font-size: 1rem; margin: .15rem 0 .55rem; }
