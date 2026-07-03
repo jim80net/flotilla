@@ -20,8 +20,8 @@ func init() { Register(newCodex()) }
 // from codex-cli 0.142.5 binary strings (TUI footer/approval chrome) and MUST be revalidated on
 // a logged-in desk after operator auth — do not treat them as closed without that capture.
 //
-// BLOCKING GATES: approval chrome is characterized from binary strings; ComposerStateProbe is
-// NOT implemented v1 — confirmed delivery uses the Working-spinner fallback (confirm.go).
+// BLOCKING GATES: in-session composer/working markers are binary-sourced (codex-cli 0.142.5) and
+// MUST be revalidated post-auth on a logged-in desk before treating them as closed.
 type codex struct {
 	paneCommand  func(string) (string, error)
 	isShell      func(string) bool
@@ -33,6 +33,7 @@ type codex struct {
 	codexHome    string
 	latestResult func(codexHome, cwd string) (string, error)
 	replyAfter   func(codexHome, cwd, operatorMsg string) (string, bool, error)
+	cursorState  func(pane string) (cursorY int, inMode bool, err error)
 }
 
 func newCodex() codex {
@@ -51,6 +52,7 @@ func newCodex() codex {
 		codexHome:    codexHome,
 		latestResult: codexstore.LatestResult,
 		replyAfter:   codexstore.ReplyAfter,
+		cursorState:  deliver.CursorState,
 	}
 }
 
@@ -168,6 +170,47 @@ func codexIsLoginScreen(tail string) bool {
 
 func codexIsHooksGate(tail string) bool {
 	return strings.Contains(tail, codexHooksReview) && strings.Contains(tail, codexPressEnter)
+}
+
+// --- ComposerStateProbe: codex cursor-indexed composer classifier ---
+
+// codexComposerPrompt is the input-line glyph on an idle codex desk (binary-sourced 0.142.5;
+// codex_test idle fixture uses "› "). Revalidate post-auth on a logged-in desk.
+const codexComposerPrompt = "›" // U+203A
+
+// ComposerState implements surface.ComposerStateProbe: reads the composer at the terminal cursor.
+// A cursor/capture read error, or tmux copy/view mode, reads Undetermined (spinner fallback).
+func (c codex) ComposerState(pane string) ComposerDisposition {
+	cy, inMode, err := c.cursorState(pane)
+	if err != nil {
+		return ComposerUndetermined
+	}
+	if inMode {
+		return ComposerUndetermined
+	}
+	captured, err := c.capturePane(pane)
+	if err != nil {
+		return ComposerUndetermined
+	}
+	return classifyCodexComposerLine(captured, cy)
+}
+
+// classifyCodexComposerLine classifies the line at cursorY. Only a line whose trimmed body begins
+// with codexComposerPrompt is read; empty body after the prompt is Cleared (load-bearing for recycle
+// and confirmed delivery). Approval-modal rows (no › prompt) are Undetermined — fail-closed.
+func classifyCodexComposerLine(captured string, cursorY int) ComposerDisposition {
+	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
+	if cursorY < 0 || cursorY >= len(lines) {
+		return ComposerUndetermined
+	}
+	after, isPrompt := strings.CutPrefix(trimSpace(lines[cursorY]), codexComposerPrompt)
+	if !isPrompt {
+		return ComposerUndetermined
+	}
+	if trimSpace(after) == "" {
+		return ComposerCleared
+	}
+	return ComposerPending
 }
 
 // --- RecycleBridge: portable-markdown context preservation (parity with grok, #158) ---

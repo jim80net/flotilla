@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jim80net/flotilla/internal/roster"
+	"github.com/jim80net/flotilla/internal/surface"
 )
 
 func writeRosterFile(t *testing.T, body string) string {
@@ -251,6 +254,35 @@ func TestCmdWorkspaceInitGrokScaffoldsAgentsMdInWorktree(t *testing.T) {
 	}
 }
 
+func TestHarnessAllocationSurface(t *testing.T) {
+	cfg := &roster.Config{
+		XOAgent:  "xo",
+		CosAgent: "alpha-xo",
+		Agents: []roster.Agent{
+			{Name: "xo"},
+			{Name: "alpha-xo", Surface: "codex"},
+			{Name: "backend", Surface: "grok"},
+			{Name: "infra"},
+		},
+	}
+	cases := []struct {
+		agent, rosterSurface, want string
+	}{
+		{"xo", "", "claude-code"},
+		{"xo", "claude-code", "claude-code"},
+		{"alpha-xo", "codex", "codex"},
+		{"backend", "grok", "grok"},
+		{"infra", "", "grok"},
+		{"infra", "codex", "codex"},
+	}
+	for _, tc := range cases {
+		if got := harnessAllocationSurface(cfg, tc.agent, tc.rosterSurface); got != tc.want {
+			t.Errorf("harnessAllocationSurface(%q, %q) = %q, want %q",
+				tc.agent, tc.rosterSurface, got, tc.want)
+		}
+	}
+}
+
 func TestCmdWorkspaceInitCoordinatorScaffoldsClaudeInWorktree(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)
@@ -349,17 +381,54 @@ func TestWorkspaceLaunchCommandCodexCoordinatorExportsSecrets(t *testing.T) {
 	}
 }
 
-func TestCmdWorkspaceInitRefusesCodexCoordinatorWithoutProbe(t *testing.T) {
+func TestCmdWorkspaceInitCodexCoordinatorScaffoldsWithProbe(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)
 	repo := initTestGitRepo(t)
 	rosterPath := writeRosterFile(t, `{"xo_agent":"alpha-xo","agents":[{"name":"alpha-xo","surface":"codex"}]}`)
-	err := cmdWorkspaceInit(workspaceInitArgs("alpha-xo", rosterPath, repo))
-	if err == nil {
-		t.Fatal("init for codex coordinator without ComposerStateProbe = nil error, want refusal")
+	if err := cmdWorkspaceInit(workspaceInitArgs("alpha-xo", rosterPath, repo)); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "ComposerStateProbe") {
-		t.Errorf("error = %v, want ComposerStateProbe refusal", err)
+	worktree := filepath.Join(filepath.Dir(repo), "alpha-xo")
+	agents, err := os.ReadFile(filepath.Join(worktree, "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(agents), "flotilla:xo-outbound") {
+		t.Error("codex coordinator AGENTS.md should include xo-outbound doctrine")
+	}
+	rules, err := os.ReadFile(filepath.Join(worktree, ".codex", "rules", "flotilla-coordinator.rules"))
+	if err != nil {
+		t.Fatalf("coordinator rules not scaffolded: %v", err)
+	}
+	if strings.Contains(string(rules), `["gh", "pr", "merge"]`) {
+		t.Error("coordinator rules must not forbid gh pr merge")
+	}
+	launch, err := os.ReadFile(filepath.Join(root, "alpha-xo", "launch.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	launchText := string(launch)
+	for _, want := range []string{"FLOTILLA_SELF", "FLOTILLA_SECRETS", "codex -m gpt-5.5-codex"} {
+		if !strings.Contains(launchText, want) {
+			t.Errorf("coordinator launch missing %q in %s", want, launchText)
+		}
+	}
+}
+
+func TestRefuseCodexCoordinatorProbeGate(t *testing.T) {
+	drv, ok := surface.Get("codex")
+	if !ok {
+		t.Fatal("codex driver not registered")
+	}
+	if _, ok := drv.(surface.ComposerStateProbe); !ok {
+		if err := refuseCodexCoordinatorWithoutProbe("alpha-xo"); err == nil {
+			t.Fatal("want refusal when codex lacks ComposerStateProbe")
+		}
+		return
+	}
+	if err := refuseCodexCoordinatorWithoutProbe("alpha-xo"); err != nil {
+		t.Errorf("with ComposerStateProbe shipped, gate should pass: %v", err)
 	}
 }
 

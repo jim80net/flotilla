@@ -152,10 +152,51 @@ func TestCodexSubmitRotateRoute(t *testing.T) {
 }
 
 var (
-	_ ResultReader  = codex{}
-	_ ReplyReader   = codex{}
-	_ RecycleBridge = codex{}
+	_ ResultReader       = codex{}
+	_ ReplyReader        = codex{}
+	_ RecycleBridge      = codex{}
+	_ ComposerStateProbe = codex{}
 )
+
+func TestClassifyCodexComposerLine(t *testing.T) {
+	cases := []struct {
+		name     string
+		captured string
+		cursorY  int
+		want     ComposerDisposition
+	}{
+		{"empty › prompt → Cleared", "  Turn done.\n  › \n  / for commands", 1, ComposerCleared},
+		{"pending body after › → Pending", "  › draft in composer\n  / for commands", 0, ComposerPending},
+		{"approval row without › → Undetermined", "  [ ! ] Action Required\n  Approve for me", 0, ComposerUndetermined},
+		{"cursor out of range → Undetermined", "  › \n", 99, ComposerUndetermined},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyCodexComposerLine(tc.captured, tc.cursorY); got != tc.want {
+				t.Errorf("classifyCodexComposerLine = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCodexComposerStateWiring(t *testing.T) {
+	const cleared = "  › \n  / for commands"
+	t.Run("idle cleared composer → Cleared", func(t *testing.T) {
+		c := codex{
+			cursorState: func(string) (int, bool, error) { return 0, false, nil },
+			capturePane: func(string) (string, error) { return cleared, nil },
+		}
+		if got := c.ComposerState("0:0.0"); got != ComposerCleared {
+			t.Errorf("ComposerState = %v, want Cleared", got)
+		}
+	})
+	t.Run("cursor read error → Undetermined", func(t *testing.T) {
+		c := codex{cursorState: func(string) (int, bool, error) { return 0, false, errors.New("no server") }}
+		if got := c.ComposerState("0:0.0"); got != ComposerUndetermined {
+			t.Errorf("ComposerState = %v, want Undetermined", got)
+		}
+	})
+}
 
 func TestCodexLatestResult(t *testing.T) {
 	t.Run("resolves cwd then reads the store", func(t *testing.T) {

@@ -105,3 +105,35 @@ func TestCheckSkipsGrokSurface(t *testing.T) {
 		t.Fatal("grok workhorse surface should never IC-flag (harness allocation)")
 	}
 }
+
+func TestIsManagementHarnessCodex(t *testing.T) {
+	if !IsManagementHarness("codex") {
+		t.Fatal("codex coordinator surface should be a management harness")
+	}
+}
+
+func TestCheckCodexCoordinatorICTurn(t *testing.T) {
+	text := "Implemented the rate-limit probe in internal/surface/ratelimit.go and go test passed green."
+	if r := Check(text, "codex"); !r.InlineBuild {
+		t.Fatal("codex coordinator hands-on turn should IC-flag")
+	}
+}
+
+func TestCheckCodexCoordinatorDelegationTurn(t *testing.T) {
+	text := "Routed the fix to @backend via flotilla send — they own implementation."
+	if r := Check(text, "codex"); r.InlineBuild {
+		t.Fatal("codex coordinator delegation turn should not IC-flag")
+	}
+}
+
+func TestNudgePromptHarnessNeutral(t *testing.T) {
+	p := NudgePrompt("alpha-xo")
+	for _, claudeOnly := range []string{"Claude seat", "coordinator seats (Claude)"} {
+		if strings.Contains(p, claudeOnly) {
+			t.Fatalf("nudge prompt must be harness-neutral; found %q in: %s", claudeOnly, p)
+		}
+	}
+	if !strings.Contains(p, "execution desk") {
+		t.Fatalf("nudge prompt should mention execution desks: %q", p)
+	}
+}
