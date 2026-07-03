@@ -173,12 +173,33 @@
       (gated ? '<button class="gnode-respond" type="button" title="Respond to what this needs" aria-label="Respond">&#9888;</button>' : "") +
       '<button class="gnode-detail" type="button" title="Details" aria-label="Details">&#9432;</button>' +
       "</span>";
+    // org-graph v2 enrichment: priorities (flotilla-level, operator-facing) and
+    // milestones (desk-level current work) render as short ordered lists; the harness
+    // surface (grok / claude-code / …) renders as a subdued right-aligned badge in the
+    // foot (design §3). All are height-affecting → mirrored in structuralSig.
+    var prios = nodeList(n.priorities, "gnode-prios", "priorities");
+    var miles = nodeList(n.milestones, "gnode-miles", "current work");
+    var harness = (n.harness && n.harness.surface)
+      ? '<span class="gnode-harness" title="harness surface">' + escapeHtml(n.harness.surface) + "</span>"
+      : "";
     return controls +
-      '<div class="gnode-eyebrow">' + escapeHtml(n.scope) + owner + "</div>" +
+      '<div class="gnode-eyebrow">' + escapeHtml(scopeNoun(n)) + owner + "</div>" +
       '<div class="gnode-title">' + escapeHtml(n.title) + "</div>" +
-      desc +
-      '<div class="gnode-foot">' + pill + "</div>" +
+      desc + prios + miles +
+      '<div class="gnode-foot">' + pill + harness + "</div>" +
       itemsBlock;
+  }
+
+  // nodeList renders a short labeled ordered list (priorities / milestones), or "" when
+  // the field is absent/empty. Capped at 4 rows with a "+N more" tail so a long list
+  // can't blow up the card height (the drawer shows the full list).
+  function nodeList(arr, cls, label) {
+    var xs = Array.isArray(arr) ? arr : [];
+    if (!xs.length) return "";
+    var shown = xs.slice(0, 4);
+    var more = xs.length > 4 ? '<li class="gnode-list-more">+' + (xs.length - 4) + " more</li>" : "";
+    return '<div class="gnode-list ' + cls + '"><span class="gnode-list-lab">' + label + "</span><ul>" +
+      shown.map(function (x) { return "<li>" + escapeHtml(x) + "</li>"; }).join("") + more + "</ul></div>";
   }
 
   function nodeCard(n) {
@@ -321,6 +342,9 @@
     return JSON.stringify(goals.map(function (n) {
       return [n.id, n.parent || "", n.depth || 0, n.scope || "", n.title || "",
         n.description || "", n.owner || "",
+        // org-graph v2 enrichment — each is rendered into the card and changes its
+        // height, so a change must trigger a full rebuild (not an in-place text swap).
+        n.priorities || [], n.milestones || [], (n.harness && n.harness.surface) || "",
         (n.work_items || []).map(function (wi) { return [wi.kind || "", wi.label || ""]; })];
     }));
   }
@@ -369,7 +393,16 @@
   /* ── detail drawer + hover chain-highlight (Inc 2) ─────────────────────── */
   function cssIdEsc(id) { return String(id).replace(/["\\]/g, "\\$&"); }
   function cardEl(id) { return q("goals-nodes").querySelector('[data-id="' + cssIdEsc(id) + '"]'); }
-  function scopeNoun(n) { return n.scope === "fleet" ? "Flotilla" : n.scope === "project" ? "Desk" : "Task"; }
+  // scopeNoun maps the v2 scope to its UI label (design §1). Dual-reads the legacy v1
+  // tokens (fleet/project) defensively so a not-yet-recompiled fixture still labels
+  // correctly — the live API emits v2 (flotilla/desk/task).
+  function scopeNoun(n) {
+    var s = n.scope;
+    if (s === "flotilla" || s === "fleet") return "Flotilla";
+    if (s === "desk" || s === "project") return "Desk";
+    return "Task";
+  }
+  function isFlotilla(n) { return n.scope === "flotilla" || n.scope === "fleet"; }
 
   // convAgent resolves the deep-link target: the explicit conversation_agent, else
   // the first desk work-item's agent (a real thread), else the owner label.
@@ -402,6 +435,15 @@
 
   // drawerBody renders the node's detail from the SAME cached /api/goals data the
   // map draws — no extra endpoint. Every interpolated value is escaped.
+  // drawerList renders a full ordered list section (priorities / milestones) in the
+  // drawer, or "" when absent — parts.push("") is harmless (join ignores it).
+  function drawerList(arr, heading) {
+    var xs = Array.isArray(arr) ? arr : [];
+    if (!xs.length) return "";
+    return '<div class="gd-sec"><h4>' + heading + "</h4><ol class=\"gd-list\">" +
+      xs.map(function (x) { return "<li>" + escapeHtml(x) + "</li>"; }).join("") + "</ol></div>";
+  }
+
   function drawerBody(n) {
     var parts = [];
     // Deep-link to this cell's conversation (feedback #3): prefer the explicit
@@ -413,6 +455,13 @@
         '">Open ' + escapeHtml(agent) + "&rsquo;s conversation &rarr;</button></div>");
     }
     if (n.description) parts.push('<div class="gd-sec"><h4>What this is</h4><p>' + escapeHtml(n.description) + "</p></div>");
+    if (n.harness && n.harness.surface) {
+      parts.push('<div class="gd-sec gd-harness"><h4>Harness</h4><p>' + escapeHtml(n.harness.surface) + "</p></div>");
+    }
+    // org-graph v2: full priorities (flotilla) / milestones (desk) — the drawer shows
+    // the complete list (the node card caps at 4).
+    parts.push(drawerList(n.priorities, "Priorities"));
+    parts.push(drawerList(n.milestones, "Current work"));
     // Operator-gated items (awaiting / blocked) surfaced as the "waiting on you" call-out.
     var gated = (n.work_items || []).filter(function (wi) { return wi.class === "awaiting" || wi.class === "blocked"; });
     if (gated.length) {
@@ -429,7 +478,7 @@
     }
     var kids = (n.children || []).map(function (id) { return nodeById[id]; }).filter(Boolean);
     if (kids.length) {
-      parts.push('<div class="gd-sec"><h4>' + (n.scope === "fleet" ? "Workstreams" : "Tasks") + " (" + kids.length + ")</h4>" +
+      parts.push('<div class="gd-sec"><h4>' + (isFlotilla(n) ? "Desks" : "Tasks") + " (" + kids.length + ")</h4>" +
         kids.map(function (k) {
           var kv = visToken(k);
           return '<div class="gd-row"><span class="gd-row-l">' + escapeHtml(k.title || k.id) + "</span>" +

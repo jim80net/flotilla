@@ -1006,8 +1006,39 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gnode-owner { color: var(--cyan-dim); }
 .gnode-title { font-family: var(--display); font-weight: 600; color: var(--ink); line-height: 1.12; font-size: 1.02rem; margin-top: 2px; text-wrap: balance; }
 .gnode-desc { font-size: .74rem; color: var(--ink-2); line-height: 1.32; margin: 5px 0 0; }
-.gnode-foot { margin-top: 8px; }
+.gnode-foot { margin-top: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+/* flotilla (v2) — dual-read the legacy .gnode-fleet class during migration */
+.gnode-flotilla .gnode-title,
 .gnode-fleet .gnode-title { font-size: 1.2rem; }
+/* harness badge (org-graph v2 §3): subdued, right-aligned in the foot */
+.gnode-harness {
+  font-size: .58rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  border: 1px solid var(--line-soft, var(--line));
+  border-radius: var(--r-xs, 3px);
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+/* priorities / milestones — short labeled lists in the node card */
+.gnode-list { margin-top: 7px; }
+.gnode-list-lab {
+  display: block;
+  font-size: .55rem;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 2px;
+}
+/* block display (not flex — flex suppresses ::marker, killing the disc bullets); the
+   li spacing comes from margin instead of the flex gap (cubic #315 P2). */
+.gnode-list ul { margin: 0; padding-left: 14px; }
+.gnode-list li { font-size: .72rem; color: var(--ink-2); line-height: 1.28; }
+.gnode-list li + li { margin-top: 2px; }
+.gnode-list-more { list-style: none; margin-left: -14px; color: var(--ink-3); font-size: .66rem; }
+.gnode-miles ul { list-style: none; padding-left: 0; }
+.gnode-prios ul { list-style: disc; }
 
 /* node state treatments */
 .gnode.state-realized { border-color: rgba(110, 231, 135, .3); background: linear-gradient(180deg, rgba(19, 29, 43, .7), rgba(14, 22, 34, .7)); }
@@ -1185,6 +1216,9 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gd-convo:hover, .gd-convo:focus-visible { border-color: var(--cyan); background: rgba(79, 227, 208, .14); }
 .gd-sec { margin-bottom: 15px; }
 .gd-sec h4 { margin: 0 0 6px; font-size: .62rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+.gd-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.gd-list li { font-size: .8rem; line-height: 1.4; color: var(--ink-2); }
+.gd-harness p { color: var(--cyan-dim); text-transform: uppercase; letter-spacing: .06em; font-size: .74rem; }
 .gd-sec p { margin: 0; font-size: .82rem; line-height: 1.48; color: var(--ink-2); }
 .gd-ask { border: 1px solid rgba(255, 180, 84, .4); background: rgba(255, 180, 84, .06); border-radius: var(--r-sm); padding: 10px 12px; }
 .gd-ask-lab { font-size: .62rem; letter-spacing: .12em; text-transform: uppercase; color: var(--amber); margin-bottom: 5px; }
