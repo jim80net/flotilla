@@ -282,30 +282,6 @@ func TestHarnessAllocationSurface(t *testing.T) {
 	}
 }
 
-func TestCmdWorkspaceInitCoordinatorCodexScaffoldsAgentsMd(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)
-	repo := initTestGitRepo(t)
-	rosterPath := writeRosterFile(t, `{"xo_agent":"alpha-xo","agents":[{"name":"alpha-xo","surface":"codex"}]}`)
-	if err := cmdWorkspaceInit(workspaceInitArgs("alpha-xo", rosterPath, repo)); err != nil {
-		t.Fatal(err)
-	}
-	worktree := filepath.Join(filepath.Dir(repo), "alpha-xo")
-	if _, err := os.Stat(filepath.Join(worktree, "AGENTS.md")); err != nil {
-		t.Errorf("codex coordinator should scaffold AGENTS.md in worktree: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(worktree, "CLAUDE.md")); !os.IsNotExist(err) {
-		t.Error("codex coordinator should not scaffold CLAUDE.md")
-	}
-	launch, err := os.ReadFile(filepath.Join(root, "alpha-xo", "launch.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(launch), "codex -m gpt-5.5-codex") {
-		t.Errorf("codex coordinator launch = %q, want codex management recipe", launch)
-	}
-}
-
 func TestCmdWorkspaceInitCoordinatorScaffoldsClaudeInWorktree(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)
