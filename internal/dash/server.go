@@ -22,16 +22,17 @@ import (
 // (cmd/flotilla/dash.go) resolves these (default paths mirroring `status`) and
 // hands them to NewServer; the server itself does the per-request file I/O.
 type Config struct {
-	RosterPath    string // path to the roster file
-	SnapshotPath  string // detector snapshot (default <roster-dir>/flotilla-detector-state.json)
-	AckPath       string // XO liveness ack file (default <roster-dir>/flotilla-xo-alive)
-	LedgerPath    string // CoS ledger (cfg.CosLedger; "" when the CoS mirror is inert)
-	BacklogPath   string // backlog markdown (--tracker-file; default <roster-dir>/.flotilla-state.md)
-	GoalsPath     string // goals file the Goals view reads (default <roster-dir>/fleet-goals.json)
-	GoalsYAMLPath string // goals yaml source compiled on load (default <roster-dir>/fleet-goals.yaml)
-	Bind          string // listen address (default 127.0.0.1:8787)
-	Repo          string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
-	SecretsPath   string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
+	RosterPath       string // path to the roster file
+	SnapshotPath     string // detector snapshot (default <roster-dir>/flotilla-detector-state.json)
+	AckPath          string // XO liveness ack file (default <roster-dir>/flotilla-xo-alive)
+	LedgerPath       string // CoS ledger (cfg.CosLedger; "" when the CoS mirror is inert)
+	BacklogPath      string // backlog markdown (--tracker-file; default <roster-dir>/.flotilla-state.md)
+	GoalsPath        string // goals file the Goals view reads (default <roster-dir>/fleet-goals.json)
+	GoalsYAMLPath    string // goals yaml source compiled on load (default <roster-dir>/fleet-goals.yaml)
+	SessionMirrorDir string // per-agent session-mirror ledgers (default <roster-dir>/session-mirror)
+	Bind             string // listen address (default 127.0.0.1:8787)
+	Repo             string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
+	SecretsPath      string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
 
 	// Transport is the coordination transport backing the control surface's notify
 	// post (the operator note's destination is a Discord webhook, so this is the
@@ -191,6 +192,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/topology", s.handleTopology)
 	s.mux.HandleFunc("/api/history", s.handleHistory)
 	s.mux.HandleFunc("/api/goals", s.handleGoals)
+	s.mux.HandleFunc("/api/session-mirror", s.handleSessionMirror)
 	s.mux.HandleFunc("/events", s.handleEvents)
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticAssets()))))
 
@@ -476,6 +478,9 @@ func ResolvePaths(cfg Config, rc *roster.Config) Config {
 		} else {
 			cfg.GoalsYAMLPath = filepath.Join(dir, "fleet-goals.yaml")
 		}
+	}
+	if cfg.SessionMirrorDir == "" {
+		cfg.SessionMirrorDir = filepath.Join(dir, "session-mirror")
 	}
 	// The CoS ledger path is whatever the roster resolved (empty when the CoS
 	// mirror is inert — then the history view shows no ledger, honestly).

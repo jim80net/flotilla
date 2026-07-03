@@ -388,6 +388,9 @@ func TestResolvePaths(t *testing.T) {
 	if cfg.GoalsYAMLPath != filepath.Join(dir, "fleet-goals.yaml") {
 		t.Errorf("goals yaml path = %q (should default to <roster-dir>/fleet-goals.yaml)", cfg.GoalsYAMLPath)
 	}
+	if cfg.SessionMirrorDir != filepath.Join(dir, "session-mirror") {
+		t.Errorf("session mirror dir = %q (should default to <roster-dir>/session-mirror)", cfg.SessionMirrorDir)
+	}
 	if cfg.LedgerPath != filepath.Join(dir, "context-ledger.md") {
 		t.Errorf("ledger path = %q (should inherit roster CosLedger)", cfg.LedgerPath)
 	}
