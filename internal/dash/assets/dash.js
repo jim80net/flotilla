@@ -298,13 +298,16 @@
   // Guarded on selectedDesk so a slow response for a de-selected desk is dropped.
   // limit=100 fetches the full recent tail (the glance uses only the last entry) —
   // sized for the Inc 2 thread-merge, which reuses cache.mirror.entries in full.
+  // paintMirror re-renders BOTH mirror-dependent views — the glance (latest entry)
+  // and the thread (which now interleaves the full mirror history with the ledger).
+  function paintMirror() { renderSessionMirror(); renderThread(cache.history || {}); }
   function fetchMirror() {
     var want = selectedDesk;
-    if (!want) { cache.mirror = null; renderSessionMirror(); return; }
+    if (!want) { cache.mirror = null; paintMirror(); return; }
     getJSON("/api/session-mirror?agent=" + encodeURIComponent(want) + "&limit=100").then(function (d) {
-      if (selectedDesk === want) { cache.mirror = d; renderSessionMirror(); }
+      if (selectedDesk === want) { cache.mirror = d; paintMirror(); }
     }).catch(function (err) {
-      if (selectedDesk === want) { cache.mirror = { agent: want, entries: [], error: err.message }; renderSessionMirror(); }
+      if (selectedDesk === want) { cache.mirror = { agent: want, entries: [], error: err.message }; paintMirror(); }
     });
   }
 
@@ -319,41 +322,115 @@
     return h % 360;
   }
 
+  // mirrorEntriesForSelected returns the selected desk's session-mirror entries
+  // (ascending oldest→newest), or [] — guarded on identity so a stale cache.mirror
+  // still holding the PREVIOUS desk's doc never leaks into this desk's thread (the
+  // same cross-desk guard renderSessionMirror uses, #300 trio finding).
+  function mirrorEntriesForSelected() {
+    var doc = cache.mirror;
+    if (!doc || !selectedDesk) return [];
+    if (doc.agent && String(doc.agent).toLowerCase() !== String(selectedDesk).toLowerCase()) return [];
+    return Array.isArray(doc.entries) ? doc.entries : [];
+  }
+
+  var lastThreadKey = null; // dedup so an unchanged SSE/mirror tick doesn't re-announce the log / reset scroll
+
+  // renderThread interleaves TWO streams for the selected desk into one
+  // chronological timeline (design §2.4, Inc 2): the CoS relay ledger (messages
+  // to/from the desk) and the desk's OWN session-mirror turn-finals (its session
+  // output). Both are RFC3339-stamped — the ledger arrives newest-first, the mirror
+  // newest-last — so each is normalized to a parsed sort key and the merged list is
+  // ordered newest-first (matching the pre-merge thread order). Relay lines and
+  // session output are visually distinguished; the same per-speaker hue ties a
+  // desk's session output to its own relay lines. The merge is universal (it applies
+  // to coordinator and execution desks alike — both read as one timeline of "what
+  // was said to/from me" + "what I turned-final"), so no role branch is needed.
   function renderThread(history) {
     var thread = el("conv-thread");
-    var entries = (history && Array.isArray(history.ledger)) ? history.ledger : [];
-    var filtered = selectedDesk
-      ? entries.filter(function (e) { return ledgerMatchesDesk(e, selectedDesk); })
-      : [];
     if (!selectedDesk) {
+      if (lastThreadKey === "@none") return;
+      lastThreadKey = "@none";
       thread.innerHTML = '<div class="empty">Pick a desk to read its coordination thread.</div>';
       return;
     }
-    if (!filtered.length) {
-      thread.innerHTML = '<div class="empty">No ledger entries for this desk yet.</div>';
+    var ledger = (history && Array.isArray(history.ledger)) ? history.ledger : [];
+    var items = [];
+    ledger.forEach(function (e) {
+      if (!ledgerMatchesDesk(e, selectedDesk)) return;
+      items.push({ kind: "ledger", t: Date.parse(e.parsed ? e.time : ""), e: e });
+    });
+    mirrorEntriesForSelected().forEach(function (m) {
+      items.push({ kind: "mirror", t: Date.parse(m.ts), m: m });
+    });
+    if (!items.length) {
+      var emptyKey = "@empty:" + selectedDesk;
+      if (lastThreadKey === emptyKey) return;
+      lastThreadKey = emptyKey;
+      thread.innerHTML = '<div class="empty">No coordination history for this desk yet.</div>';
       return;
     }
-    thread.innerHTML = filtered.map(function (e) {
-      if (!e.parsed) {
-        return '<div class="thread-msg thread-raw">' + escapeHtml(e.raw) + "</div>";
-      }
-      var deskKey = String(selectedDesk).toLowerCase();
-      var outbound = String(e.from || "").toLowerCase() === deskKey;
-      var cls = outbound ? "thread-out" : "thread-in";
-      var hue = speakerHue(e.from); // colour the turn by its speaker
-      return (
-        '<div class="thread-msg ' + cls + '" style="--spk:hsl(' + hue + ' 55% 62%)">' +
-          '<header class="thread-head">' +
-            '<span class="thread-route"><b class="thread-from">' + escapeHtml(e.from) + "</b> &rarr; " + escapeHtml(e.to) + "</span>" +
-            '<time class="thread-time">' + escapeHtml(e.time) + "</time>" +
-          "</header>" +
-          (e.channel && e.channel !== "-"
-            ? '<span class="thread-chan muted">#' + escapeHtml(e.channel) + "</span>"
-            : "") +
-          '<p class="thread-gist">' + escapeHtml(e.gist) + "</p>" +
-        "</div>"
-      );
+    // Newest-first (descending). Unparseable timestamps (rare malformed/raw ledger
+    // lines with no time) sort to the bottom; Array.sort is stable (ES2019+) so
+    // their relative order is preserved.
+    items.sort(function (a, b) {
+      var at = isNaN(a.t) ? -Infinity : a.t, bt = isNaN(b.t) ? -Infinity : b.t;
+      return bt - at;
+    });
+    // Dedup: skip the innerHTML rewrite (which re-announces via the log's aria-live
+    // AND resets the operator's scroll) when the merged timeline is unchanged. The
+    // key folds each item's timestamp + a content hash so a same-second new entry
+    // still re-renders (mirrors the #300 glance dedup discipline).
+    var sig = selectedDesk + "#" + items.map(function (it) {
+      return it.kind === "mirror"
+        ? "m:" + (it.m.ts || "") + ":" + cheapHash(it.m.info || "")
+        : "l:" + (it.e.parsed ? it.e.time : "") + ":" + cheapHash(it.e.parsed ? it.e.gist : it.e.raw);
+    }).join("|");
+    if (sig === lastThreadKey) return;
+    lastThreadKey = sig;
+    thread.innerHTML = items.map(function (it) {
+      return it.kind === "mirror" ? threadMirrorMsg(it.m) : threadLedgerMsg(it.e);
     }).join("");
+  }
+
+  // threadLedgerMsg renders one CoS relay-ledger line (a message to/from the desk).
+  function threadLedgerMsg(e) {
+    if (!e.parsed) {
+      return '<div class="thread-msg thread-raw">' + escapeHtml(e.raw) + "</div>";
+    }
+    var deskKey = String(selectedDesk).toLowerCase();
+    var outbound = String(e.from || "").toLowerCase() === deskKey;
+    var cls = outbound ? "thread-out" : "thread-in";
+    var hue = speakerHue(e.from); // colour the turn by its speaker
+    return (
+      '<div class="thread-msg ' + cls + '" style="--spk:hsl(' + hue + ' 55% 62%)">' +
+        '<header class="thread-head">' +
+          '<span class="thread-route"><b class="thread-from">' + escapeHtml(e.from) + "</b> &rarr; " + escapeHtml(e.to) + "</span>" +
+          '<time class="thread-time">' + escapeHtml(e.time) + "</time>" +
+        "</header>" +
+        (e.channel && e.channel !== "-"
+          ? '<span class="thread-chan muted">#' + escapeHtml(e.channel) + "</span>"
+          : "") +
+        '<p class="thread-gist">' + escapeHtml(e.gist) + "</p>" +
+      "</div>"
+    );
+  }
+
+  // threadMirrorMsg renders a session-mirror entry (the desk's own turn-final at
+  // info level) as a distinct "session" turn, hue-matched to the desk's speaker
+  // colour so it reads as the same participant's output alongside its relay lines.
+  function threadMirrorMsg(m) {
+    var hue = speakerHue(selectedDesk);
+    var body = escapeHtml(m.info || "").replace(/\r?\n/g, "<br>");
+    return (
+      '<div class="thread-msg thread-mirror" style="--spk:hsl(' + hue + ' 55% 62%)">' +
+        '<header class="thread-head">' +
+          '<span class="thread-route"><b class="thread-from">' + escapeHtml(selectedDesk) + "</b> " +
+            '<span class="thread-kind">session</span></span>' +
+          '<time class="thread-time" datetime="' + escapeHtml(m.ts || "") + '" title="' + escapeHtml(m.ts || "") + '">' + escapeHtml(relTime(m.ts)) + "</time>" +
+        "</header>" +
+        '<div class="thread-mirror-body">' + (body || '<span class="muted">(no session output)</span>') + "</div>" +
+      "</div>"
+    );
   }
 
   function renderBacklogStrip(history) {
