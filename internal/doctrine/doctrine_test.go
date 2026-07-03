@@ -19,17 +19,17 @@ func memberByName(t *testing.T, name string) Member {
 	return Member{}
 }
 
-// The registry ships EXACTLY six members: operating-principles (identity-append),
+// The registry ships EXACTLY seven members: operating-principles (identity-append),
 // the Rule of Three (identity-append), no-self-merge (identity-append),
 // act-dont-idle-hold (identity-append), executive-mini-brief (identity-append),
-// and visibility-synthesis (heartbeat-skill).
+// xo-outbound (identity-append, coordinator-only), and visibility-synthesis (heartbeat-skill).
 // This locks the count so a future member addition is a deliberate, reviewed change
 // (and so the member-count-agnostic install loop is exercised against the real
 // registry, not a fixture).
 func TestMembersRegistryContents(t *testing.T) {
 	members := Members()
-	if len(members) != 6 {
-		t.Fatalf("registry should hold exactly six members, got %d", len(members))
+	if len(members) != 7 {
+		t.Fatalf("registry should hold exactly seven members, got %d", len(members))
 	}
 	byName := map[string]Member{}
 	for _, m := range members {
@@ -98,6 +98,23 @@ func TestMembersRegistryContents(t *testing.T) {
 	}
 	if strings.TrimSpace(emb.Content) == "" {
 		t.Error("executive-mini-brief content is empty — the embed did not round-trip")
+	}
+
+	xo, ok := byName["xo-outbound"]
+	if !ok {
+		t.Fatal("registry missing xo-outbound member")
+	}
+	if !xo.CoordinatorOnly {
+		t.Error("xo-outbound must be coordinator-only")
+	}
+	if xo.Mechanism != MechanismIdentityAppend {
+		t.Errorf("xo-outbound mechanism = %q, want %q", xo.Mechanism, MechanismIdentityAppend)
+	}
+	if xo.OpenMarker != xoOutboundOpenMarker || xo.CloseMarker != xoOutboundCloseMarker {
+		t.Errorf("xo-outbound markers = open=%q close=%q, want the xo-outbound fence", xo.OpenMarker, xo.CloseMarker)
+	}
+	if !strings.Contains(xo.Content, "flotilla notify") {
+		t.Error("xo-outbound content must mention flotilla notify")
 	}
 
 	vs, ok := byName["visibility-synthesis"]
@@ -303,5 +320,39 @@ func TestIdentityAppendMembersHaveMarkers(t *testing.T) {
 		if !strings.Contains(m.Content, m.OpenMarker) || !strings.Contains(m.Content, m.CloseMarker) {
 			t.Errorf("identity-append member %q content does not contain its declared markers", m.Name)
 		}
+	}
+}
+
+func TestMembersForAgentOmitsCoordinatorOnlyForExecutionDesk(t *testing.T) {
+	exec := MembersForAgent(false)
+	for _, m := range exec {
+		if m.CoordinatorOnly {
+			t.Errorf("execution desk set includes coordinator-only member %q", m.Name)
+		}
+	}
+	if len(exec) != 6 {
+		t.Fatalf("execution desk MembersForAgent len = %d, want 6", len(exec))
+	}
+	coord := MembersForAgent(true)
+	if len(coord) != 7 {
+		t.Fatalf("coordinator MembersForAgent len = %d, want 7", len(coord))
+	}
+}
+
+// workspace init stub plus coordinator identity-append members must fit Codex default
+// project_doc_max_bytes (32 KiB) with headroom for operator prose.
+func TestCoordinatorIdentityAppendBudgetUnder32KiB(t *testing.T) {
+	const codexDefaultDocMax = 32 * 1024
+	const workspaceStub = "# alpha-xo — desk identity\n\nYou are the alpha-xo desk. Describe this desk's standing role and task here.\n"
+	var n int
+	for _, m := range MembersForAgent(true) {
+		if m.Mechanism != MechanismIdentityAppend {
+			continue
+		}
+		n += len(m.Content)
+	}
+	total := len(workspaceStub) + n
+	if total >= codexDefaultDocMax {
+		t.Fatalf("coordinator identity-append total = %d bytes, want < %d", total, codexDefaultDocMax)
 	}
 }
