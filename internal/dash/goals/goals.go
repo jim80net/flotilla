@@ -117,6 +117,9 @@ func Parse(raw []byte) (*GoalsDoc, error) {
 		return nil, fmt.Errorf("parse goals yaml: %w", err)
 	}
 	roots := f.Goals
+	if roots == nil {
+		roots = []*GoalNode{} // "no goals yet" → tree:[], never JSON null (contract shape)
+	}
 	ids := map[string]bool{}
 	if err := validateAcyclic(roots, ids); err != nil {
 		return nil, err
@@ -202,6 +205,11 @@ func (d *GoalsDoc) find(id string) *GoalNode {
 func validateAcyclic(roots []*GoalNode, seen map[string]bool) error {
 	var walk func(n *GoalNode, ancestors map[string]bool) error
 	walk = func(n *GoalNode, ancestors map[string]bool) error {
+		if n == nil {
+			// A null yaml sequence entry (`- ` / an empty `children:` item) decodes to
+			// a nil node — a TYPED error, never a nil-deref panic (trio HIGH).
+			return fmt.Errorf("goals: a node is null (malformed yaml list entry)")
+		}
 		if n.ID == "" {
 			return fmt.Errorf("goals: a node has an empty id")
 		}
@@ -324,7 +332,9 @@ func itemStatus(wi WorkItem) string {
 }
 
 func emptyDoc() *GoalsDoc {
-	return &GoalsDoc{Tree: []*GoalNode{}, Rollups: map[string]string{}, GeneratedAt: nowRFC3339()}
+	// All slices/maps non-nil so the JSON is a consistent shape (tree:[], edges:[])
+	// on the "no goals file yet" path — a UI iterating edges/tree never hits null.
+	return &GoalsDoc{Tree: []*GoalNode{}, Edges: []Edge{}, Rollups: map[string]string{}, GeneratedAt: nowRFC3339()}
 }
 
 // nowRFC3339 is overridable in tests for a deterministic generated_at.

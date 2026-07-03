@@ -205,6 +205,30 @@ func TestParse_RejectsDuplicateAndCycle(t *testing.T) {
 	}
 }
 
+func TestParse_NullNodeIsTypedErrorNotPanic(t *testing.T) {
+	// A null list entry decodes to a nil node — must be a typed error, never a panic.
+	for _, y := range []string{
+		"version: 1\ngoals:\n  -\n", // null root
+		"version: 1\ngoals:\n  - id: a\n    title: A\n    status: active\n    children:\n      -\n", // null child
+	} {
+		if _, err := Parse([]byte(y)); err == nil {
+			t.Errorf("null node must be a typed error, got nil for:\n%s", y)
+		}
+	}
+}
+
+func TestParse_NoGoalsShapeIsEmptySlicesNotNull(t *testing.T) {
+	// A version-only file (no goals) must yield tree:[] and edges:[] (not JSON null),
+	// matching the missing-file empty doc — one consistent "no goals" shape.
+	d, err := Parse([]byte("version: 1\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Tree == nil || d.Edges == nil {
+		t.Errorf("no-goals file must have non-nil tree/edges slices, got tree=%v edges=%v", d.Tree, d.Edges)
+	}
+}
+
 func TestParse_Malformed(t *testing.T) {
 	if _, err := Parse([]byte("version: 1\ngoals: [this is not a list of maps")); err == nil {
 		t.Error("malformed yaml must be a typed error, not a silent empty tree")
