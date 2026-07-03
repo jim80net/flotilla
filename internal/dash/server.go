@@ -27,6 +27,7 @@ type Config struct {
 	AckPath      string // XO liveness ack file (default <roster-dir>/flotilla-xo-alive)
 	LedgerPath   string // CoS ledger (cfg.CosLedger; "" when the CoS mirror is inert)
 	BacklogPath  string // backlog markdown (--tracker-file; default <roster-dir>/.flotilla-state.md)
+	GoalsPath    string // fleet goals yaml (default <roster-dir>/fleet-goals.yaml; absent ⇒ empty map)
 	Bind         string // listen address (default 127.0.0.1:8787)
 	Repo         string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
 	SecretsPath  string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
@@ -209,6 +210,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/control/route", s.requireWrite(s.handleControlRoute))
 	s.mux.HandleFunc("POST /api/control/notify", s.requireWrite(s.handleControlNotify))
 	s.mux.HandleFunc("POST /api/control/resume", s.requireWrite(s.handleControlResume))
+
+	// Goals-map view (#267 section 4) — read-only, open on loopback like the other
+	// reads. MINIMAL, contract-faithful read path (internal/dash/goals); flotilla-dev's
+	// fuller internal/goals core supersedes it later behind the SAME GoalsDoc contract.
+	s.mux.HandleFunc("GET /api/goals", s.handleGoals)
+	s.mux.HandleFunc("GET /api/goals/{id}", s.handleGoalDetail)
 }
 
 // --- read-model loading (the only file I/O; the builders stay pure) ---
@@ -424,6 +431,9 @@ func ResolvePaths(cfg Config, rc *roster.Config) Config {
 	}
 	if cfg.BacklogPath == "" {
 		cfg.BacklogPath = filepath.Join(dir, ".flotilla-state.md")
+	}
+	if cfg.GoalsPath == "" {
+		cfg.GoalsPath = filepath.Join(dir, "fleet-goals.yaml")
 	}
 	// The CoS ledger path is whatever the roster resolved (empty when the CoS
 	// mirror is inert — then the history view shows no ledger, honestly).

@@ -79,10 +79,12 @@ goals:
         scope: project
         parent: coordinator-portability
         owner: beta-xo
-        status: paused           # awaiting an operator decision → renders amber
+        status: active
+        # An operator-gated item → status_display "awaiting" → renders amber
+        # ("your move"): the operator's decisions are a color on the map.
         work_items:
-          - kind: inline
-            text: "Pick the driver interface boundary (operator call)"
+          - kind: backlog
+            marker: "[awaiting-auth] pick the driver interface boundary (operator call)"
       - id: portable-seats
         title: "Live coordinator seat-swap without a fleet restart"
         scope: project

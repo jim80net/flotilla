@@ -34,6 +34,7 @@ func cmdDash(args []string) error {
 	snapshotPath := fs.String("snapshot-file", os.Getenv("FLOTILLA_SNAPSHOT_FILE"), "change-detector snapshot file (default <roster-dir>/flotilla-detector-state.json)")
 	ackPath := fs.String("ack-file", os.Getenv("FLOTILLA_ACK_FILE"), "XO liveness ack file (default <roster-dir>/flotilla-xo-alive)")
 	trackerPath := fs.String("tracker-file", os.Getenv("FLOTILLA_TRACKER_FILE"), "backlog markdown the history view reads (default <roster-dir>/.flotilla-state.md)")
+	goalsPath := fs.String("goals-file", os.Getenv("FLOTILLA_GOALS_FILE"), "fleet goals yaml the Goals view reads (default <roster-dir>/fleet-goals.yaml)")
 	bind := fs.String("bind", dash.DefaultBind, "local listen address (loopback only in this phase)")
 	// --repo pins the issue tracker's GitHub repo (owner/name). When empty it is
 	// resolved from the working directory the way `gh` does; if that fails the
@@ -89,6 +90,7 @@ func cmdDash(args []string) error {
 		SnapshotPath: *snapshotPath,
 		AckPath:      *ackPath,
 		BacklogPath:  *trackerPath,
+		GoalsPath:    *goalsPath,
 		Bind:         *bind,
 		Repo:         pinnedRepo,
 		SecretsPath:  *secretsPath,
