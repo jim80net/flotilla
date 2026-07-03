@@ -265,7 +265,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 .dash-toggle .on { background: color-mix(in srgb, var(--cyan) 18%, transparent); color: var(--ink); }
 
 .dash-canvas {
-  position: relative; aspect-ratio: 4 / 3.15; width: 100%;
+  position: relative; aspect-ratio: 4 / 3.6; width: 100%;
   background-color: var(--surface);
   background-image:
     linear-gradient(var(--grid-line) 1px, transparent 1px),
@@ -277,15 +277,22 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 
 .dnode {
   position: absolute; transform: translate(-50%, -50%);
-  width: 33%; max-width: 210px; min-width: 120px;
   background: var(--abyss-2); border: 1px solid var(--line);
   border-left: 3px solid var(--ink-3); border-radius: var(--r-sm);
   padding: .5rem .6rem; box-shadow: 0 8px 24px -14px rgba(74,58,30,.14);
 }
-.dnode.hub { width: 40%; max-width: 240px; border-left-color: var(--cyan); background: color-mix(in srgb, var(--cyan) 5%, var(--abyss-2)); }
+/* three tiers, sized so the command hierarchy reads at a glance:
+   chief of staff (hub) > flotilla (XO-led) > desk. */
+.dnode.hub { width: 33%; max-width: 215px; min-width: 128px; border-left-color: var(--cyan); background: color-mix(in srgb, var(--cyan) 6%, var(--abyss-2)); }
+.dnode.flotilla { width: 29%; max-width: 190px; min-width: 116px; background: color-mix(in srgb, var(--cyan) 4%, var(--card)); }
+.dnode.desk { width: 22%; max-width: 148px; min-width: 92px; }
 .dnode-eyebrow { font-family: var(--display); font-size: .55rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
-.dnode-title { font-family: var(--display); font-weight: 600; color: var(--ink); font-size: .96rem; line-height: 1.1; margin-top: .05rem; }
-.dnode.hub .dnode-title { font-size: 1.1rem; }
+.dnode-title { font-family: var(--display); font-weight: 600; color: var(--ink); font-size: .88rem; line-height: 1.1; margin-top: .05rem; }
+.dnode.hub .dnode-title { font-size: 1.06rem; }
+.dnode.flotilla .dnode-title { font-size: .96rem; }
+/* the XO badge — a teal chip that marks the flotilla layer as XO-led (distinct
+   from the muted harness chip); this is flotilla's differentiating tier */
+.dxo { font-family: var(--mono); font-size: .52rem; letter-spacing: .06em; text-transform: uppercase; color: var(--cyan); border: 1px solid color-mix(in srgb, var(--cyan) 42%, transparent); background: color-mix(in srgb, var(--cyan) 10%, transparent); border-radius: 3px; padding: 0 .3rem; white-space: nowrap; }
 .dnode-list { margin-top: .3rem; }
 .dnode-list .dnl-lab { display: block; font-size: .5rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
 .dnode-list ul { margin: .1rem 0 0; padding-left: 13px; }
@@ -302,14 +309,16 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 .hero-dash figcaption { padding: .7rem .9rem .8rem; font-size: .66rem; color: var(--ink-3); letter-spacing: .03em; text-transform: uppercase; border-top: 1px solid var(--line-soft); }
 .hero-dash figcaption strong { color: var(--ink-2); }
 
-/* tighten the mock on narrow viewports so the nodes stay legible + don't overlap:
-   a taller canvas spreads the corner desks away from the center hub, smaller nodes
-   and a hub without its priority list keep everything clear. */
+/* tighten the mock on narrow viewports so the three tiers stay legible + don't
+   overlap: a taller canvas spreads the rings apart, smaller nodes, and desks drop
+   their redundant eyebrow + harness chip so four fit the outer ring on a phone. */
 @media (max-width: 520px) {
-  .dash-canvas { aspect-ratio: 4 / 4.7; }
-  .dnode { width: 38%; font-size: .9em; }
-  .dnode.hub { width: 44%; }
-  .dnode.hub .dnode-list { display: none; }
+  .dash-canvas { aspect-ratio: 4 / 4.9; }
+  .dnode { font-size: .82em; padding: .4rem .45rem; }
+  .dnode.hub { width: 42%; min-width: 0; }
+  .dnode.flotilla { width: 36%; min-width: 0; }
+  .dnode.desk { width: 25%; min-width: 0; }
+  .dnode.desk .dnode-eyebrow, .dnode.desk .dharness { display: none; }
   /* the real tab labels (Conversations/Goals/Issues) need the room — drop the
      "your fleet" sub-wordmark so the mock chrome doesn't crowd on a phone */
   .dash-brand-sub { display: none; }

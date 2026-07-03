@@ -113,10 +113,12 @@
 
         <!-- HERO MOCK-UP: a static picture of `flotilla dash`, Goals view, in the
              command-chart (org) layout — the operator-priority hero. Pure HTML/CSS,
-             no live server, no framework. MOCK DATA ONLY: a generic example fleet
-             (a coordinator + backend/research/docs/infra desks) mirroring the public
-             quickstart roles — never a real deployment roster. -->
-        <figure class="hero-dash" aria-label="flotilla's fleet view: one coordinator in the center routing to backend, research, docs, and infra desks, each colored by whether it's working, idle, or waiting on you">
+             no live server, no framework. It shows the FULL command hierarchy that is
+             flotilla's differentiator: a chief of staff at the center → FLOTILLAS
+             (each led by an XO) on the inner ring → their DESKS on the outer ring —
+             never a coordinator wired straight to desks. MOCK DATA ONLY: a generic
+             example fleet — never a real deployment roster. -->
+        <figure class="hero-dash" aria-label="flotilla's fleet view: a chief of staff in the center, two flotillas each led by an XO around it, and each flotilla's desks on the outer ring, colored by whether they're working, idle, or waiting on you">
           <div class="dash-chrome">
             <span class="dash-brand"><span class="dash-brand-mark" aria-hidden="true"></span>flotilla <span class="dash-brand-sub">your fleet</span></span>
             <div class="dash-tabs" aria-hidden="true">
@@ -128,43 +130,58 @@
           </div>
 
           <div class="dash-canvas">
-            <!-- spoke edges: hub center (50,50) → each desk, drawn in a 0–100 space that
-                 stretches with the box (matches the % node positions). -->
+            <!-- spoke edges, drawn in a 0–100 space that stretches with the box (matches
+                 the % node positions): chief of staff (50,15) → each flotilla (27,44 /
+                 73,44), then each flotilla → its two desks on the outer ring. -->
             <svg class="dash-spokes" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-              <line x1="50" y1="50" x2="26" y2="25" /><line x1="50" y1="50" x2="74" y2="25" />
-              <line x1="50" y1="50" x2="26" y2="77" /><line x1="50" y1="50" x2="74" y2="77" />
+              <line x1="50" y1="15" x2="27" y2="44" /><line x1="50" y1="15" x2="73" y2="44" />
+              <line x1="27" y1="44" x2="13" y2="80" /><line x1="27" y1="44" x2="38" y2="80" />
+              <line x1="73" y1="44" x2="62" y2="80" /><line x1="73" y1="44" x2="87" y2="80" />
             </svg>
 
-            <div class="dnode hub" style="left:50%;top:50%">
-              <div class="dnode-eyebrow">Your chief of staff</div>
-              <div class="dnode-title">The coordinator</div>
-              <div class="dnode-list"><span class="dnl-lab">right now</span><ul><li>Shipped the migration</li><li>One call needs you</li></ul></div>
+            <!-- TIER 0 — the chief of staff, at the center of the fleet -->
+            <div class="dnode hub" style="left:50%;top:15%">
+              <div class="dnode-eyebrow">Chief of staff</div>
+              <div class="dnode-title">Your chief of staff</div>
               <div class="dnode-foot"><span class="dpill cyan">on&nbsp;it</span><span class="dharness">claude-code</span></div>
             </div>
 
-            <div class="dnode" style="left:26%;top:25%">
-              <div class="dnode-eyebrow">Desk · backend</div>
+            <!-- TIER 1 — flotillas, each LED BY AN XO (the layer that makes flotilla flotilla) -->
+            <div class="dnode flotilla" style="left:27%;top:44%">
+              <div class="dnode-eyebrow">Flotilla &middot; led by an XO</div>
+              <div class="dnode-title">Product flotilla</div>
+              <div class="dnode-foot"><span class="dpill cyan">on&nbsp;it</span><span class="dxo">product-xo</span></div>
+            </div>
+            <div class="dnode flotilla" style="left:73%;top:44%">
+              <div class="dnode-eyebrow">Flotilla &middot; led by an XO</div>
+              <div class="dnode-title">Research flotilla</div>
+              <div class="dnode-foot"><span class="dpill amber">needs&nbsp;you</span><span class="dxo">research-xo</span></div>
+            </div>
+
+            <!-- TIER 2 — the desks, each owned by a flotilla (never wired to the CoS directly) -->
+            <div class="dnode desk" style="left:13%;top:80%">
+              <div class="dnode-eyebrow">Desk &middot; backend</div>
               <div class="dnode-title">Backend</div>
               <div class="dnode-foot"><span class="dpill ok">idle</span><span class="dharness">grok</span></div>
             </div>
-            <div class="dnode" style="left:74%;top:25%">
-              <div class="dnode-eyebrow">Desk · research</div>
-              <div class="dnode-title">Research</div>
+            <div class="dnode desk" style="left:38%;top:80%">
+              <div class="dnode-eyebrow">Desk &middot; frontend</div>
+              <div class="dnode-title">Frontend</div>
               <div class="dnode-foot"><span class="dpill cyan">working</span><span class="dharness">codex</span></div>
             </div>
-            <div class="dnode" style="left:26%;top:77%">
-              <div class="dnode-eyebrow">Desk · docs</div>
-              <div class="dnode-title">Docs</div>
-              <div class="dnode-foot"><span class="dpill amber">needs&nbsp;you</span><span class="dharness">claude-code</span></div>
+            <div class="dnode desk" style="left:62%;top:80%">
+              <div class="dnode-eyebrow">Desk &middot; data</div>
+              <div class="dnode-title">Data</div>
+              <div class="dnode-foot"><span class="dpill cyan">working</span><span class="dharness">codex</span></div>
             </div>
-            <div class="dnode" style="left:74%;top:77%">
-              <div class="dnode-eyebrow">Desk · infra</div>
+            <div class="dnode desk" style="left:87%;top:80%">
+              <div class="dnode-eyebrow">Desk &middot; infra</div>
               <div class="dnode-title">Infra</div>
               <div class="dnode-foot"><span class="dpill ok">idle</span><span class="dharness">grok</span></div>
             </div>
           </div>
 
-          <figcaption><strong>Mock-up — illustrative.</strong> &middot; your whole fleet on one screen: the coordinator in the center, your desks around it, and the one that needs you flagged in amber — the same glance from your laptop or your phone</figcaption>
+          <figcaption><strong>Mock-up — illustrative.</strong> &middot; your whole fleet on one screen: the chief of staff at the center, each flotilla (led by its own XO) around it, and their desks on the outer ring — the one that needs you flagged in amber — the same glance from your laptop or your phone</figcaption>
         </figure>
       </div>
 
