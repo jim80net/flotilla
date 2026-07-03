@@ -29,6 +29,9 @@ func (f *fakeOutboundTransport) Destinations(channelIDs []string) []transport.De
 	return out
 }
 func (f *fakeOutboundTransport) Post(transport.Destination, string, string) error { return nil }
+func (f *fakeOutboundTransport) PostWithAttachments(transport.Destination, string, string, []string) error {
+	return nil
+}
 func (f *fakeOutboundTransport) ResolveDestination(string, string) (transport.Destination, string, bool) {
 	return nil, "", false
 }

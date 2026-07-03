@@ -152,6 +152,19 @@ func (t *discordTransport) Post(dest Destination, username, content string) erro
 	return discord.Post(dd.webhookURL, username, content)
 }
 
+// PostWithAttachments sends content and file attachments via the destination's
+// webhook (multipart payload_json + files[N]).
+func (t *discordTransport) PostWithAttachments(dest Destination, username, content string, attachPaths []string) error {
+	dd, ok := dest.(discordDestination)
+	if !ok {
+		return fmt.Errorf("discord transport: PostWithAttachments got a non-discord destination %T", dest)
+	}
+	if dd.webhookURL == "" {
+		return fmt.Errorf("discord transport: destination has no webhook URL")
+	}
+	return discord.PostWithAttachments(dd.webhookURL, username, content, attachPaths)
+}
+
 // ResolveDestination maps an originChannel to its XO's webhook destination: the
 // existing BindingForChannel→XOAgent→Webhook chain (the reply leg's replyDest),
 // moved behind the seam. ok=false ⇒ the origin owns no binding, its XO is unset, or
