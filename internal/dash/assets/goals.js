@@ -38,6 +38,7 @@
   var hoveredId = null;  // node currently hovered (re-applied after a render)
   var nodesWired = false;
   var kbdNav = false;    // true when focus is moving by keyboard (Tab) — gates focus-recenter
+  var modalReturn = null; // element to restore focus to when the intervention modal closes
 
   /* ── tier geometry (ported from the prototype: TIER_X=[40,470,900]) ─────── */
   // Columns are derived from depth so a tree deeper than the canonical 3 tiers
@@ -74,7 +75,7 @@
   function renderSituation(doc) {
     var c = doc.counts || {};
     var tiles = [
-      { k: "Fleet goals", v: c.fleet || 0, tone: "goal", d: (c.total || 0) + " nodes total" },
+      { k: "Flotillas", v: c.fleet || 0, tone: "goal", d: (c.total || 0) + " nodes total" },
       { k: "In flight", v: c.in_flight || 0, tone: "inflight", d: "desks working now" },
       { k: "Awaiting you", v: c.awaiting || 0, tone: "awaiting", d: "your decisions & blocks" },
       { k: "Realized", v: c.realized || 0, tone: "realized", d: "done & solidified" },
@@ -163,7 +164,17 @@
     var items = (n.work_items || []).map(workItem).join("");
     var itemsBlock = items ? '<div class="gnode-items">' + items + "</div>" : "";
     var pill = '<span class="gpill gpill-' + escapeHtml(vis) + '">' + escapeHtml(STATE_LABEL[vis] || vis) + "</span>";
-    return '<div class="gnode-eyebrow">' + escapeHtml(n.scope) + owner + "</div>" +
+    // Per-node controls (#302): a ⚠ Respond button on operator-gated nodes opens the
+    // waiting-on-you modal; a ⓘ Details button opens the detail drawer. The node
+    // body itself deep-links to Conversations (see wireNodes). Positioned absolute
+    // so they never change card height (#283 contract). The ⚠ tracks live status.
+    var gated = vis === "awaiting" || vis === "blocked";
+    var controls = '<span class="gnode-ctl">' +
+      (gated ? '<button class="gnode-respond" type="button" title="Respond to what this needs" aria-label="Respond">&#9888;</button>' : "") +
+      '<button class="gnode-detail" type="button" title="Details" aria-label="Details" tabindex="-1">&#9432;</button>' +
+      "</span>";
+    return controls +
+      '<div class="gnode-eyebrow">' + escapeHtml(n.scope) + owner + "</div>" +
       '<div class="gnode-title">' + escapeHtml(n.title) + "</div>" +
       desc +
       '<div class="gnode-foot">' + pill + "</div>" +
@@ -274,11 +285,13 @@
   }
 
   /* ── tier column headers (one per depth present) ───────────────────────── */
+  // Vocabulary per operator feedback #302: top-level = "flotilla", mid = "desk"
+  // (labels first; the scope-schema rename is flotilla-dev's v2).
   function tierLabel(depth) {
-    if (depth === 0) return "Fleet goals";
-    if (depth === 1) return "Workstreams";
-    if (depth === 2) return "Active tasks · desks";
-    return "Sub-goals";
+    if (depth === 0) return "Flotilla";
+    if (depth === 1) return "Desks";
+    if (depth === 2) return "Tasks";
+    return "Sub-tasks";
   }
   function renderTierLabels(maxDepth) {
     var out = [];
@@ -356,7 +369,7 @@
   /* ── detail drawer + hover chain-highlight (Inc 2) ─────────────────────── */
   function cssIdEsc(id) { return String(id).replace(/["\\]/g, "\\$&"); }
   function cardEl(id) { return q("goals-nodes").querySelector('[data-id="' + cssIdEsc(id) + '"]'); }
-  function scopeNoun(n) { return n.scope === "fleet" ? "Fleet goal" : n.scope === "project" ? "Workstream" : "Task"; }
+  function scopeNoun(n) { return n.scope === "fleet" ? "Flotilla" : n.scope === "project" ? "Desk" : "Task"; }
 
   // convAgent resolves the deep-link target: the explicit conversation_agent, else
   // the first desk work-item's agent (a real thread), else the owner label.
@@ -488,6 +501,51 @@
     if (card) card.focus({ preventScroll: true }); // return focus to the node that opened it
   }
 
+  // nodeActivate is the primary node action (#302): deep-link to the node's
+  // Conversations thread. A node with no conversation agent (an abstract flotilla
+  // aim) falls back to the detail drawer.
+  function nodeActivate(id) {
+    var n = nodeById[id];
+    if (!n) return;
+    var agent = convAgent(n);
+    if (agent && window.flotillaDash && window.flotillaDash.openConversation) {
+      window.flotillaDash.openConversation(agent);
+    } else {
+      openDrawer(id);
+    }
+  }
+
+  // openModal — the "waiting on you" intervention modal (#302): a situation brief
+  // (scope, description, the operator-gated items) + a text input for a response.
+  // The reply PATH is a stub for this prototype (wired to the control API later).
+  function openModal(id) {
+    var n = nodeById[id];
+    if (!n) return;
+    var gated = (n.work_items || []).filter(function (wi) { return wi.class === "awaiting" || wi.class === "blocked"; });
+    var brief = '<p class="gm-scope">' + escapeHtml(scopeNoun(n)) + "</p>" +
+      (n.description ? "<p>" + escapeHtml(n.description) + "</p>" : "") +
+      (gated.length
+        ? '<div class="gm-gated"><div class="gm-gated-lab">Waiting on you</div>' +
+          gated.map(function (wi) { return "<p>" + escapeHtml(wi.label || wi.kind || "") + (wi.detail ? " — " + escapeHtml(wi.detail) : "") + "</p>"; }).join("") +
+          "</div>"
+        : '<p class="muted">Nothing is gated on you here.</p>');
+    q("goals-modal-title").textContent = n.title || n.id;
+    q("goals-modal-brief").innerHTML = brief;
+    var ta = q("goals-modal-input");
+    if (ta) ta.value = "";
+    var m = q("goals-modal");
+    m.classList.add("open");
+    m.setAttribute("aria-hidden", "false");
+    modalReturn = document.activeElement;
+    if (ta) ta.focus();
+  }
+  function closeModal() {
+    var m = q("goals-modal");
+    if (m) { m.classList.remove("open"); m.setAttribute("aria-hidden", "true"); }
+    if (modalReturn && modalReturn.focus) modalReturn.focus({ preventScroll: true });
+    modalReturn = null;
+  }
+
   // reapplyTransient re-establishes selection + hover after a render. On an in-place
   // update the article keeps its .gnode-selected class, but on a full rebuild the
   // articles are replaced — so re-add the selection and refresh the open drawer's
@@ -516,13 +574,17 @@
     if (!nodesEl) return;
     nodesWired = true;
     nodesEl.addEventListener("click", function (e) {
+      var respond = e.target.closest(".gnode-respond");
+      if (respond) { var rc = respond.closest(".gnode"); if (rc) openModal(rc.getAttribute("data-id")); return; }
+      var detail = e.target.closest(".gnode-detail");
+      if (detail) { var dc = detail.closest(".gnode"); if (dc) openDrawer(dc.getAttribute("data-id")); return; }
       var card = e.target.closest(".gnode");
-      if (card) openDrawer(card.getAttribute("data-id"));
+      if (card) nodeActivate(card.getAttribute("data-id")); // #302: node body → its Conversations thread
     });
     nodesEl.addEventListener("keydown", function (e) {
       if (e.key !== "Enter" && e.key !== " ") return;
       var card = e.target.closest(".gnode");
-      if (card) { e.preventDefault(); openDrawer(card.getAttribute("data-id")); }
+      if (card) { e.preventDefault(); nodeActivate(card.getAttribute("data-id")); }
     });
     // Tabbing to a node that's panned off-screen recenters the map on it (the
     // transform equivalent of scroll-into-view — the world can't be scrolled). Only
@@ -581,9 +643,21 @@
     if (help) help.onclick = function () {
       help.setAttribute("aria-expanded", help.getAttribute("aria-expanded") === "true" ? "false" : "true");
     };
+    // Intervention modal (#302): close on the × / backdrop; the "Send" is a stub for
+    // this prototype (the reply path wires to the control API in a follow-on).
+    var modal = q("goals-modal");
+    if (modal) modal.addEventListener("click", function (e) {
+      if (e.target.closest(".gm-close") || e.target.classList.contains("goals-modal")) closeModal();
+    });
+    var send = q("goals-modal-send");
+    if (send) send.onclick = function () {
+      var note = q("goals-modal-note");
+      if (note) note.textContent = "Reply path is a prototype stub — not sent (wiring to the control API is a follow-on).";
+    };
     document.addEventListener("keydown", function (e) {
       if (e.key !== "Escape" || !isVisible()) return;
       if (help) help.setAttribute("aria-expanded", "false"); // Esc dismisses the tooltip too
+      if (q("goals-modal") && q("goals-modal").classList.contains("open")) { closeModal(); return; }
       closeDrawer();
     });
   }
