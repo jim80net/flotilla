@@ -116,8 +116,18 @@
         <div class="goals-legend" id="goals-legend" aria-hidden="true"></div>
       </div>
       <div id="goals-graph" class="goals-graph" role="tree" aria-label="Goal hierarchy">
-        <svg class="goals-edges" id="goals-edges" aria-hidden="true"></svg>
-        <div id="goals-columns" class="goals-columns"></div>
+        <div id="goals-viewport" class="goals-viewport">
+          <div id="goals-world" class="goals-world">
+            <svg class="goals-edges" id="goals-edges" aria-hidden="true"></svg>
+            <div id="goals-tierlabels" class="goals-tierlabels" aria-hidden="true"></div>
+            <div id="goals-nodes" class="goals-nodes"></div>
+          </div>
+          <div class="gzoomctl" role="toolbar" aria-label="Zoom controls">
+            <button id="goals-zin" type="button" title="Zoom in" aria-label="Zoom in">+</button>
+            <button id="goals-zout" type="button" title="Zoom out" aria-label="Zoom out">&minus;</button>
+            <button id="goals-zfit" type="button" class="fit" title="Fit whole map" aria-label="Fit whole map">FIT</button>
+          </div>
+        </div>
       </div>
       <div id="goals-empty" class="goals-empty muted hidden"></div>
     </section>

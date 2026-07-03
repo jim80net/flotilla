@@ -212,6 +212,49 @@ func TestControlTargetsNotClobberedGuard(t *testing.T) {
 	}
 }
 
+// TestGoalsCanvasAssets locks the Goals view's pan/zoom canvas (#280 Inc 1). The
+// Goals view was ported from the merged flex-column layout to the operator-approved
+// 2D Fleet Situation Map — an absolute tiered layout inside a transform-driven world
+// with wheel/drag pan-zoom. There is no JS test runner, so — consistent with the
+// other asset-content assertions — this locks (a) the canvas DOM the engine renders
+// into is present in the served index, and (b) the pan/zoom engine is present in the
+// served goals.js. Removing either (regressing to a static layout) fails here.
+func TestGoalsCanvasAssets(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+
+	rec := doGet(t, srv, "/static/goals.js")
+	if rec.Code != 200 || rec.Body.Len() == 0 {
+		t.Fatalf("/static/goals.js: code=%d len=%d (must be served)", rec.Code, rec.Body.Len())
+	}
+	js := rec.Body.String()
+	for _, marker := range []string{"setupPanZoom", "applyTransform", "fitOverview", "drawEdges"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must retain the pan/zoom canvas engine (missing %q)", marker)
+		}
+	}
+	// #283: keyed/diffed updates — a structural signature drives an in-place refresh
+	// that preserves element identity (focus + transient UI classes) across SSE
+	// ticks. Lock the engine so a regression to full-teardown-per-tick fails here.
+	for _, marker := range []string{"structuralSig", "updateInPlace"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must retain the keyed-update engine (missing %q) — #283", marker)
+		}
+	}
+
+	body := doGet(t, srv, "/").Body.String()
+	if !strings.Contains(body, "/static/goals.js") {
+		t.Error("index must reference the goals asset")
+	}
+	// The canvas DOM the engine binds to: a pan/zoom viewport → transformed world →
+	// (edges, tier labels, nodes) + zoom controls.
+	for _, id := range []string{"goals-viewport", "goals-world", "goals-nodes", "goals-edges", "goals-tierlabels", "goals-zin", "goals-zout", "goals-zfit"} {
+		if !strings.Contains(body, id) {
+			t.Errorf("index must contain the goals canvas element #%s", id)
+		}
+	}
+}
+
 // --- Host-allowlist (anti-DNS-rebinding) ---
 
 func TestHostAllowlist(t *testing.T) {

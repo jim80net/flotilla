@@ -1,44 +1,54 @@
-/* flotilla dash — Goals view (#267/#268).
+/* flotilla dash — Goals view (#267 / #280 UI): the Fleet Situation Map.
  *
- * The fleet's PURPOSE hierarchy: goal nodes in altitude columns (fleet → project
- * → task), each carrying live work-item chips whose status binds to the SAME
- * fleet board the Conversations view reads. Read-only. Structure comes from
- * /api/goals (compiled from fleet-goals.json); each node's `status_display` is
- * the ratified computed roll-up (blocked/awaiting/in-flight/achieved/active/
- * paused/cancelled). The visual token below is derived from it — `achieved`
- * renders as "realized" green, and an empty `active` node renders ghosted
- * ("aspirational"), a rendering refinement over the contract, not a new state.
+ * The fleet's PURPOSE hierarchy rendered as the operator-approved 2D canvas:
+ * goal nodes in altitude columns (fleet → project → task), pannable and
+ * zoomable, each carrying live work-item chips whose status binds to the SAME
+ * fleet board the Conversations view reads. Read-only. Structure + the ratified
+ * computed roll-up (`status_display`) come from /api/goals; the visual token is
+ * derived from it (`achieved` → "realized" green; an empty `active` node →
+ * "aspirational" ghost — a rendering refinement over the contract, not a state).
  *
- * Rendering is layout-then-connect: the browser lays the cards out in flex
- * columns, then edges are drawn from real DOM rects into an SVG overlay — so the
- * DAG connectors are always correct, with no hand-rolled coordinate engine.
+ * INCREMENT 1 (this file) ports the prototype's spatial engine — an absolute
+ * tiered layout inside a transform-driven pan/zoom world, with SVG edges drawn
+ * from the laid-out card geometry (not live DOM rects, so they are correct under
+ * any zoom). The card MARKUP + CSS are reused from the merged view, so work-item
+ * detail stays visible (no regression); the node-detail drawer, hover
+ * chain-highlight, event pulses, dependency lines and conversation deep-links
+ * are later increments layered on this canvas.
  */
 (function () {
   "use strict";
 
   var D = window.flotillaDash;
-  var el = D.el, escapeHtml = D.escapeHtml, getJSON = D.getJSON;
+  var escapeHtml = D.escapeHtml, getJSON = D.getJSON;
 
   var cache = null;      // last /api/goals document
+  var lastSig = null;    // stringified last-rendered doc — skip a no-op re-render
+  var lastStructSig = null; // structural signature — decides in-place update vs full re-layout
+  var laidOut = false;      // true only between a completed pass-2 and the next full rebuild
   var activated = false; // becomes true once the operator opens the Goals tab (lazy fetch)
-  var epoch = 0;         // fetch-ordering guard: a stale in-flight refresh never clobbers a newer one
+  var epoch = 0;         // fetch + deferred-layout ordering guard
 
-  function isVisible() {
-    var v = el("view-goals");
-    return v && !v.classList.contains("hidden");
-  }
+  var nodeById = {};     // id → RenderedGoal (with laid-out _x/_y/_w/_h attached)
+  var view = { scale: 1, tx: 0, ty: 0, worldW: 0, worldH: 0, fitted: false };
+  var panWired = false;
 
-  /* ── column altitude labels ──────────────────────────────────────────── */
-  function columnLabel(depth) {
-    if (depth === 0) return "Fleet goals";
-    if (depth === 1) return "Workstreams";
-    if (depth === 2) return "Tasks & desks";
-    return "Sub-goals";
-  }
+  /* ── tier geometry (ported from the prototype: TIER_X=[40,470,900]) ─────── */
+  // Columns are derived from depth so a tree deeper than the canonical 3 tiers
+  // still lays out one column per level (depth 0/1/2 reproduce the prototype's
+  // 40/470/900 exactly) instead of collapsing deep nodes into one overlapping
+  // column.
+  var COL_STEP = 430, COL_X0 = 40, DEFAULT_H = 60, GAP = 18, TOP = 46, PAD = 30;
+  function colX(depth) { return COL_X0 + depth * COL_STEP; }
+  function colW(depth) { return depth === 0 ? 320 : depth === 1 ? 270 : 290; }
+  function depthOf(n) { return n.depth || 0; }
+  function heightOf(n) { return n._h || DEFAULT_H; }
 
-  // visToken maps the ratified status_display onto a CSS state token. `achieved`
-  // renders as the green "realized" look; an `active` node with no work renders
-  // ghosted ("aspirational"). Everything else is the status_display value itself.
+  function q(id) { return document.getElementById(id); }
+  function isVisible() { var v = q("view-goals"); return v && !v.classList.contains("hidden"); }
+
+  // visToken maps the ratified status_display onto a CSS state token (identical
+  // to the merged view's mapping so the card styling is unchanged).
   function visToken(n) {
     var sd = n.status_display;
     if (sd === "achieved") return "realized";
@@ -54,7 +64,7 @@
     paused: "paused", cancelled: "cancelled",
   };
 
-  /* ── situation strip ─────────────────────────────────────────────────── */
+  /* ── situation strip + legend (unchanged from the merged view) ─────────── */
   function renderSituation(doc) {
     var c = doc.counts || {};
     var tiles = [
@@ -64,7 +74,7 @@
       { k: "Realized", v: c.realized || 0, tone: "realized", d: "done & solidified" },
       { k: "Aspirational", v: c.aspirational || 0, tone: "aspirational", d: "planned / not yet done" },
     ];
-    el("goals-situation").innerHTML = tiles.map(function (t) {
+    q("goals-situation").innerHTML = tiles.map(function (t) {
       return '<div class="gtile gtile-' + t.tone + '">' +
         '<div class="gtile-k">' + escapeHtml(t.k) + "</div>" +
         '<div class="gtile-v">' + escapeHtml(String(t.v)) + "</div>" +
@@ -78,12 +88,12 @@
       ["realized", "realized"], ["in-flight", "in flight"],
       ["awaiting", "awaiting you"], ["aspirational", "aspirational"],
     ];
-    el("goals-legend").innerHTML = items.map(function (i) {
+    q("goals-legend").innerHTML = items.map(function (i) {
       return '<span class="glegend"><span class="gdot gdot-' + i[0] + '"></span>' + escapeHtml(i[1]) + "</span>";
     }).join("");
   }
 
-  /* ── work-item chip ──────────────────────────────────────────────────── */
+  /* ── work-item chip + node card (markup reused from the merged view) ────── */
   function motif(cls) {
     if (cls === "in-flight") return '<span class="gmotif gmotif-build"><i></i><i></i><i></i></span>';
     if (cls === "done") return '<span class="gmotif gmotif-done">✓</span>';
@@ -104,28 +114,205 @@
       "</span>";
   }
 
-  /* ── node card ───────────────────────────────────────────────────────── */
-  function nodeCard(n) {
+  // nodeInner is the live-updatable content of a card (state pill + work-item
+  // chips + the text that carries status). It is regenerated on an in-place
+  // refresh; the article WRAPPER (identity, geometry, focus, transient classes)
+  // is left untouched — see updateInPlace.
+  //
+  // TWO CONTRACTS for later increments (Inc 2+):
+  //  1. Transient UI state (a drawer-selected marker, a hover-chain class, a
+  //     pulse) MUST be attached to the ARTICLE element, NOT its inner children —
+  //     an in-place refresh replaces the inner html but keeps the article, so only
+  //     article-level state survives an SSE tick.
+  //  2. Any field rendered here that can change the card's HEIGHT (currently only
+  //     title/description wrap and the work-item COUNT) MUST also be in
+  //     structuralSig, or an in-place update will leave stale geometry. The
+  //     excluded live fields (status_display, a work-item's class/detail) are
+  //     colour/text-only and the chip CSS pins each work-item to a fixed
+  //     single-line row (.gwi-label / .gwi-detail nowrap), so they can't.
+  function nodeInner(n) {
     var vis = visToken(n);
     var owner = n.owner ? '<span class="gnode-owner">led by ' + escapeHtml(n.owner) + "</span>" : "";
     var desc = n.description ? '<p class="gnode-desc">' + escapeHtml(n.description) + "</p>" : "";
     var items = (n.work_items || []).map(workItem).join("");
     var itemsBlock = items ? '<div class="gnode-items">' + items + "</div>" : "";
     var pill = '<span class="gpill gpill-' + escapeHtml(vis) + '">' + escapeHtml(STATE_LABEL[vis] || vis) + "</span>";
-    return '<article class="gnode gnode-' + escapeHtml(n.scope) + " state-" + escapeHtml(vis) + '" ' +
-      'data-id="' + escapeHtml(n.id) + '" data-parent="' + escapeHtml(n.parent || "") + '" role="treeitem" tabindex="0">' +
-      '<div class="gnode-eyebrow">' + escapeHtml(n.scope) + owner + "</div>" +
+    return '<div class="gnode-eyebrow">' + escapeHtml(n.scope) + owner + "</div>" +
       '<div class="gnode-title">' + escapeHtml(n.title) + "</div>" +
       desc +
       '<div class="gnode-foot">' + pill + "</div>" +
-      itemsBlock +
+      itemsBlock;
+  }
+
+  function nodeCard(n) {
+    var vis = visToken(n);
+    return '<article class="gnode gnode-' + escapeHtml(n.scope) + " state-" + escapeHtml(vis) + '" ' +
+      'data-id="' + escapeHtml(n.id) + '" data-parent="' + escapeHtml(n.parent || "") + '" ' +
+      'style="left:' + n._x + "px;top:" + n._y + "px;width:" + n._w + 'px" ' +
+      'role="treeitem" tabindex="0">' +
+      nodeInner(n) +
       "</article>";
   }
 
-  /* ── main render ─────────────────────────────────────────────────────── */
-  function render() {
+  /* ── layout: absolute tiered, bottom-up y-centering (ported) ───────────── */
+  // Two-pass: pass 1 inserts cards at their column x with a provisional y so the
+  // browser can measure real heights (titles wrap, work-item lists vary); pass 2
+  // assigns final y bottom-up and draws the edges from the measured geometry.
+  function buildNodeIndex(goals) {
+    nodeById = {};
+    goals.forEach(function (n) {
+      var d = depthOf(n);
+      n._x = colX(d); n._w = colW(d);
+      nodeById[n.id] = n;
+    });
+  }
+
+  // layoutY places leaves stacked and centers each parent on its children's
+  // span. A parent card taller than that span is NEVER allowed to rise above its
+  // subtree's top (which would collide with the previous sibling) and always
+  // pushes the cursor past its own bottom (so the next sibling clears it) — so a
+  // tall mid-node can't overlap a sibling subtree. Depth-derived columns mean a
+  // parent is always in a shallower column than its children, so parent↔child
+  // never share an x.
+  function layoutY(roots) {
+    var cursor = TOP, maxBot = TOP;
+    function place(n) {
+      var kids = (n.children || []).map(function (id) { return nodeById[id]; }).filter(Boolean);
+      var h = heightOf(n);
+      if (!kids.length) {
+        n._y = cursor;
+      } else {
+        var bandTop = cursor;
+        kids.forEach(place);
+        var top = Infinity, bot = -Infinity;
+        kids.forEach(function (k) { top = Math.min(top, k._y); bot = Math.max(bot, k._y + heightOf(k)); });
+        n._y = (top + bot) / 2 - h / 2;
+        if (n._y < bandTop) n._y = bandTop; // never rise into the previous sibling
+      }
+      var bottom = n._y + h;
+      if (bottom + GAP > cursor) cursor = bottom + GAP; // next sibling clears this card
+      maxBot = Math.max(maxBot, bottom);
+    }
+    roots.forEach(function (r) { place(r); cursor += GAP; });
+
+    var maxDepth = 0;
+    Object.keys(nodeById).forEach(function (id) { maxDepth = Math.max(maxDepth, depthOf(nodeById[id])); });
+    view.worldW = colX(maxDepth) + colW(maxDepth) + 40;
+    view.worldH = maxBot + 30;
+  }
+
+  /* ── edges: parent → child, from laid-out geometry ─────────────────────── */
+  function drawEdges() {
+    var svg = q("goals-edges");
+    if (!svg) return;
+    svg.setAttribute("width", view.worldW);
+    svg.setAttribute("height", view.worldH);
+    svg.setAttribute("viewBox", "0 0 " + view.worldW + " " + view.worldH);
+    var paths = [];
+    Object.keys(nodeById).forEach(function (id) {
+      var child = nodeById[id];
+      var parent = child.parent ? nodeById[child.parent] : null;
+      if (!parent) return;
+      var a = { x: parent._x + parent._w, y: parent._y + heightOf(parent) / 2 };
+      var b = { x: child._x, y: child._y + heightOf(child) / 2 };
+      var dx = Math.max(40, (b.x - a.x) * 0.5);
+      var state = escapeHtml(visToken(child)); // bounded enum, escaped for consistency + defense-in-depth
+      paths.push('<path class="gedge gedge-' + state + '" data-child="' + escapeHtml(id) +
+        '" d="M ' + a.x + " " + a.y + " C " + (a.x + dx) + " " + a.y + ", " +
+        (b.x - dx) + " " + b.y + ", " + b.x + " " + b.y + '"/>');
+    });
+    svg.innerHTML = paths.join("");
+  }
+
+  /* ── tier column headers (one per depth present) ───────────────────────── */
+  function tierLabel(depth) {
+    if (depth === 0) return "Fleet goals";
+    if (depth === 1) return "Workstreams";
+    if (depth === 2) return "Active tasks · desks";
+    return "Sub-goals";
+  }
+  function renderTierLabels(maxDepth) {
+    var out = [];
+    for (var d = 0; d <= maxDepth; d++) {
+      out.push('<div class="gtier-label" style="left:' + colX(d) + "px;width:" + colW(d) + 'px">' +
+        escapeHtml(tierLabel(d)) + "</div>");
+    }
+    q("goals-tierlabels").innerHTML = out.join("");
+  }
+
+  /* ── keyed update: refresh live status in place, keep layout + focus ───── */
+  // structuralSig captures ONLY the fields that affect layout or node identity —
+  // id/parent/depth/scope/title/description/owner and each work-item's structural
+  // fields (kind/label/ref/text). It deliberately EXCLUDES the live-changing bits
+  // (status_display, a work-item's class/detail) because those change colour + a
+  // pill word but never the card's size or position. When the structure is
+  // unchanged, an SSE refresh updates the existing cards in place — preserving
+  // element identity so keyboard focus and any transient UI classes (the drawer
+  // selection / hover chain / pulse that later increments add to the article)
+  // survive the tick, instead of being wiped by a full innerHTML teardown.
+  // The tuple is DELIBERATELY order-sensitive (JSON.stringify of an array): a
+  // reorder of goals[] changes the sig → a full rebuild → so updateInPlace's
+  // index-based children[i] ↔ goals[i] mapping is never handed a reordered array.
+  // Work items contribute only kind+label (their identity + count) — enough to
+  // detect an add/remove/retitle; class/detail are excluded per contract #2 above.
+  function structuralSig(goals) {
+    return JSON.stringify(goals.map(function (n) {
+      return [n.id, n.parent || "", n.depth || 0, n.scope || "", n.title || "",
+        n.description || "", n.owner || "",
+        (n.work_items || []).map(function (wi) { return [wi.kind || "", wi.label || ""]; })];
+    }));
+  }
+
+  // updateInPlace refreshes each existing card's state token + inner content from
+  // the new doc WITHOUT touching the article element's identity, geometry, or
+  // non-state classes. Cards are in goals[] order (structure unchanged ⇒ same
+  // order), so children[i] ↔ goals[i].
+  function updateInPlace(goals, nodesEl) {
+    goals.forEach(function (n, i) {
+      var card = nodesEl.children[i];
+      if (!card) return;
+      var want = "state-" + visToken(n);
+      if (!card.classList.contains(want)) {
+        // swap the state-* token via classList (robust to an empty state or a
+        // future transient class that also starts with "state-"); keep gnode /
+        // gnode-<scope> / any transient class.
+        for (var j = card.classList.length - 1; j >= 0; j--) {
+          if (card.classList[j] !== want && card.classList[j].indexOf("state-") === 0) card.classList.remove(card.classList[j]);
+        }
+        card.classList.add(want);
+      }
+      // Rewrite inner content only when it actually changed — cuts per-tick churn
+      // and preserves inner state on the cards that DID NOT change this tick.
+      var html = nodeInner(n);
+      if (card._inner !== html) { card.innerHTML = html; card._inner = html; }
+    });
+  }
+
+  // focus preserved across a FULL rebuild (which replaces the articles): remember
+  // the focused node id, restore focus to its new card after the rebuild.
+  function focusedNodeId() {
+    var a = document.activeElement;
+    var card = a && a.closest ? a.closest(".gnode") : null;
+    return card ? card.getAttribute("data-id") : null;
+  }
+  function restoreFocus(id) {
+    if (!id) return;
+    var card = q("goals-nodes").querySelector('[data-id="' + String(id).replace(/["\\]/g, "\\$&") + '"]');
+    // preventScroll: the map is transform-positioned, not scroll-positioned, so the
+    // default focus scroll-into-view would jerk the viewport/page to a card's raw
+    // world coordinate. The operator's pan/zoom owns framing.
+    if (card) card.focus({ preventScroll: true });
+  }
+
+  /* ── main render (two-pass measure) ────────────────────────────────────── */
+  // render(sig): sig is the JSON signature of the doc being rendered; it is committed
+  // to lastSig ONLY at each point the render actually completes (the synchronous
+  // empty/error paths, or the end of the deferred pass-2) — never before. sig is
+  // recomputed from cache when omitted (the show()/error paths).
+  function render(sig) {
     var doc = cache || {};
-    var graph = el("goals-graph"), cols = el("goals-columns"), empty = el("goals-empty");
+    if (sig === undefined) sig = JSON.stringify(doc);
+    var graph = q("goals-graph"), empty = q("goals-empty");
     renderSituation(doc);
     renderLegend();
 
@@ -135,99 +322,187 @@
       empty.textContent = doc.error
         ? ("Goals file could not be loaded: " + doc.error)
         : (doc.message || "No goals file configured.");
+      lastSig = sig; // a complete (synchronous) render
+      return;
+    }
+    var goals = Array.isArray(doc.goals) ? doc.goals : [];
+    if (!goals.length) {
+      graph.classList.add("hidden");
+      empty.classList.remove("hidden");
+      empty.textContent = "No goals defined yet.";
+      lastSig = sig; // a complete (synchronous) render
       return;
     }
     graph.classList.remove("hidden");
     empty.classList.add("hidden");
 
-    var goals = Array.isArray(doc.goals) ? doc.goals : [];
-    var maxDepth = 0;
-    goals.forEach(function (n) { if (n.depth > maxDepth) maxDepth = n.depth; });
+    var nodesEl = q("goals-nodes");
+    var ssig = structuralSig(goals);
 
-    var columns = [];
-    for (var d = 0; d <= maxDepth; d++) columns.push([]);
-    goals.forEach(function (n) { columns[n.depth].push(n); });
-
-    cols.innerHTML = columns.map(function (nodes, depth) {
-      var cards = nodes.map(nodeCard).join("");
-      return '<div class="gcol" data-depth="' + depth + '">' +
-        '<div class="gcol-head">' + escapeHtml(columnLabel(depth)) + "</div>" +
-        '<div class="gcol-cards">' + cards + "</div>" +
-        "</div>";
-    }).join("");
-
-    // Edges are drawn after the browser has laid the cards out.
-    requestAnimationFrame(drawEdges);
-  }
-
-  /* ── edges: parent → child, from real DOM rects ──────────────────────── */
-  function drawEdges() {
-    var cols = el("goals-columns"), svg = el("goals-edges");
-    if (!cols || !svg || !isVisible()) return;
-    var w = cols.scrollWidth, h = cols.scrollHeight;
-    svg.setAttribute("width", w);
-    svg.setAttribute("height", h);
-    svg.setAttribute("viewBox", "0 0 " + w + " " + h);
-
-    var cRect = cols.getBoundingClientRect();
-    function pt(node, right) {
-      var r = node.getBoundingClientRect();
-      return {
-        x: (right ? r.right : r.left) - cRect.left + cols.scrollLeft,
-        y: r.top + r.height / 2 - cRect.top + cols.scrollTop,
-      };
+    // In-place fast path: the structure is unchanged AND the canvas is already laid
+    // out, so only live status moved. Update the existing cards in place — keeping
+    // their geometry, keyboard focus, and any transient classes — and recolour the
+    // edges. No teardown, no re-layout, no rAF. (laidOut guards against updating a
+    // provisional/aborted DOM; the count guard against a desync.)
+    if (laidOut && ssig === lastStructSig && nodesEl.children.length === goals.length) {
+      goals.forEach(function (n) {
+        var prev = nodeById[n.id];
+        if (prev) { prev.status_display = n.status_display; prev.work_items = n.work_items; }
+      });
+      updateInPlace(goals, nodesEl);
+      drawEdges(); // child state may have changed → recolour (the SVG is stateless)
+      lastSig = sig;
+      return;
     }
-    var cards = cols.querySelectorAll(".gnode");
-    var byId = {};
-    cards.forEach(function (c) { byId[c.getAttribute("data-id")] = c; });
 
-    var paths = [];
-    cards.forEach(function (child) {
-      var pid = child.getAttribute("data-parent");
-      if (!pid || !byId[pid]) return;
-      var a = pt(byId[pid], true), b = pt(child, false);
-      var dx = Math.max(24, (b.x - a.x) * 0.5);
-      var state = (child.className.match(/state-([a-z-]+)/) || [])[1] || "active";
-      paths.push('<path class="gedge gedge-' + state + '" d="M ' + a.x + " " + a.y +
-        " C " + (a.x + dx) + " " + a.y + ", " + (b.x - dx) + " " + b.y + ", " + b.x + " " + b.y + '"/>');
+    // Structural change ⇒ full rebuild + re-layout. Preserve keyboard focus across
+    // the article replacement.
+    laidOut = false;
+    var keepFocus = focusedNodeId();
+    buildNodeIndex(goals);
+    var roots = goals.filter(function (n) { return !n.parent || !nodeById[n.parent]; });
+    var maxDepth = 0;
+    goals.forEach(function (n) { maxDepth = Math.max(maxDepth, depthOf(n)); });
+
+    // Pass 1: render at column x with provisional y=0 so heights can be measured.
+    goals.forEach(function (n) { n._y = 0; });
+    nodesEl.innerHTML = goals.map(nodeCard).join("");
+    renderTierLabels(maxDepth);
+
+    // Measure + final layout after the browser flushes layout. Guarded so a newer
+    // render (a refresh that landed between here and the frame) wins.
+    var myEpoch = epoch;
+    requestAnimationFrame(function () {
+      // Aborted — superseded by a newer refresh, or the tab went hidden (rAF is
+      // suspended in a backgrounded tab while dash.js keeps calling refresh()). Do
+      // NOT commit lastSig/lastStructSig/laidOut: the canvas is still at its
+      // provisional pass-1 layout, so the next refresh must re-render it rather than
+      // dedup-skip or in-place-update a half-finished map. show() re-renders on
+      // tab return.
+      if (myEpoch !== epoch || !isVisible()) return;
+      // Cards render in goals[] order, so children[i] ↔ goals[i] — read heights
+      // in one pass (all reads batched before any write) to avoid layout thrash.
+      goals.forEach(function (n, i) { n._h = nodesEl.children[i] ? nodesEl.children[i].offsetHeight : DEFAULT_H; });
+      layoutY(roots);
+      goals.forEach(function (n, i) {
+        var c = nodesEl.children[i];
+        if (c) { c.style.top = n._y + "px"; c._inner = nodeInner(n); } // seed _inner so the in-place dirty-skip works from tick 1
+      });
+      var world = q("goals-world");
+      world.style.width = view.worldW + "px";
+      world.style.height = view.worldH + "px";
+      drawEdges();
+      if (!view.fitted) { fit(); view.fitted = true; }
+      applyTransform();
+      restoreFocus(keepFocus);
+      lastStructSig = ssig; // commit ONLY after a complete pass-2 render
+      laidOut = true;
+      lastSig = sig;
     });
-    svg.innerHTML = paths.join("");
   }
 
-  /* ── lifecycle ───────────────────────────────────────────────────────── */
+  /* ── pan / zoom (ported) ───────────────────────────────────────────────── */
+  function applyTransform() {
+    var world = q("goals-world");
+    if (world) world.style.transform = "translate(" + view.tx + "px," + view.ty + "px) scale(" + view.scale + ")";
+  }
+
+  // fit: scale to width (never upscale past 1), anchor top so the task-column
+  // desks are legible on load; the operator pans/zooms for the rest.
+  function fit() {
+    var vp = q("goals-viewport");
+    if (!vp || !view.worldW || !view.worldH) return;
+    view.scale = Math.min(1, (vp.clientWidth - PAD * 2) / view.worldW);
+    view.tx = Math.max(PAD, (vp.clientWidth - view.worldW * view.scale) / 2);
+    view.ty = (view.worldH * view.scale < vp.clientHeight - PAD * 2)
+      ? (vp.clientHeight - view.worldH * view.scale) / 2 : PAD;
+  }
+
+  // fitOverview: zoom out so the whole DAG is on screen at once.
+  function fitOverview() {
+    var vp = q("goals-viewport");
+    if (!vp || !view.worldW || !view.worldH) return;
+    var sx = (vp.clientWidth - PAD * 2) / view.worldW, sy = (vp.clientHeight - PAD * 2) / view.worldH;
+    view.scale = Math.min(sx, sy, 1);
+    view.tx = (vp.clientWidth - view.worldW * view.scale) / 2;
+    view.ty = (vp.clientHeight - view.worldH * view.scale) / 2;
+    applyTransform();
+  }
+
+  function setupPanZoom() {
+    if (panWired) return;
+    var vp = q("goals-viewport");
+    if (!vp) return;
+    panWired = true;
+
+    vp.addEventListener("wheel", function (e) {
+      e.preventDefault();
+      var r = vp.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+      var f = e.deltaY < 0 ? 1.12 : 0.89;
+      var ns = Math.min(2.2, Math.max(0.25, view.scale * f));
+      view.tx = mx - (mx - view.tx) * (ns / view.scale);
+      view.ty = my - (my - view.ty) * (ns / view.scale);
+      view.scale = ns;
+      applyTransform();
+    }, { passive: false });
+
+    var drag = false, sx = 0, sy = 0;
+    function endDrag() { drag = false; vp.classList.remove("grabbing"); }
+    vp.addEventListener("pointerdown", function (e) {
+      if (e.target.closest(".gnode") || e.target.closest(".gzoomctl")) return;
+      drag = true; sx = e.clientX - view.tx; sy = e.clientY - view.ty;
+      vp.classList.add("grabbing"); vp.setPointerCapture(e.pointerId);
+    });
+    vp.addEventListener("pointermove", function (e) {
+      if (!drag) return;
+      view.tx = e.clientX - sx; view.ty = e.clientY - sy; applyTransform();
+    });
+    vp.addEventListener("pointerup", endDrag);
+    vp.addEventListener("pointercancel", endDrag);
+    vp.addEventListener("lostpointercapture", endDrag); // capture yanked without pointerup → don't strand drag
+
+    var zin = q("goals-zin"), zout = q("goals-zout"), zfit = q("goals-zfit");
+    if (zin) zin.onclick = function () { view.scale = Math.min(2.2, view.scale * 1.18); applyTransform(); };
+    if (zout) zout.onclick = function () { view.scale = Math.max(0.25, view.scale * 0.85); applyTransform(); };
+    if (zfit) zfit.onclick = fitOverview;
+  }
+
+  /* ── lifecycle ─────────────────────────────────────────────────────────── */
   function refresh() {
     if (!activated) return Promise.resolve();
     var e = ++epoch;
     return getJSON("/api/goals").then(function (doc) {
       if (e !== epoch) return; // a newer refresh already superseded this one
       cache = doc;
-      if (isVisible()) render();
+      var sig = JSON.stringify(doc);
+      if (sig === lastSig) return; // this exact doc is already FULLY rendered — skip
+      // Pass the sig to render, which commits lastSig only when the render actually
+      // COMPLETES. Committing here (before render) would falsely mark a doc rendered
+      // even if render's deferred pass-2 aborts (superseded / tab hidden) — then a
+      // later identical refresh would dedup-skip and strand the provisional canvas.
+      if (isVisible()) render(sig);
+      // Hidden: do not render and do not commit lastSig — show() renders on tab open.
     }).catch(function (err) {
       if (e !== epoch) return;
       cache = { found: false, error: err.message };
-      if (isVisible()) render();
+      if (isVisible()) render(); // render() computes + commits the error-state sig
     });
   }
 
   function show() {
     activated = true;
+    setupPanZoom();
     if (cache) { render(); } else { refresh(); }
   }
 
-  // Redraw edges on resize AND on horizontal scroll of the columns (the edge
-  // overlay is inside the scroller, but a debounced redraw keeps the connectors
-  // crisp through momentum scrolling / zoom). Both listeners are wired once.
-  var redrawTimer = null;
-  function scheduleRedraw() {
+  // Re-fit on resize (keeps the map framed); the transform is otherwise the
+  // operator's to drive via pan/zoom.
+  var resizeTimer = null;
+  window.addEventListener("resize", function () {
     if (!isVisible()) return;
-    clearTimeout(redrawTimer);
-    redrawTimer = setTimeout(drawEdges, 100);
-  }
-  window.addEventListener("resize", scheduleRedraw);
-  (function wireScroll() {
-    var cols = el("goals-columns");
-    if (cols) cols.addEventListener("scroll", scheduleRedraw, { passive: true });
-  })();
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () { fit(); applyTransform(); }, 120);
+  });
 
   window.flotillaGoals = { show: show, refresh: refresh };
 })();

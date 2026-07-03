@@ -75,6 +75,8 @@ func run(args []string) error {
 		return cmdInbox(args[1:])
 	case "goals":
 		return cmdGoals(args[1:])
+	case "accounts":
+		return cmdAccounts(args[1:])
 	case "version", "-v", "--version":
 		fmt.Println("flotilla " + version)
 		return nil
@@ -106,6 +108,8 @@ usage:
                                                       fail-closed validate fleet-goals.yaml (and json if present)
   flotilla goals compile [--roster <path>] [--yaml <path>] [--json <path>]
                                                       compile fleet-goals.yaml → fleet-goals.json (roster-adjacent)
+  flotilla accounts init <subscription-id>            scaffold Claude Code config dir + print one-time /login steps
+  flotilla accounts list [--json]                     subscription credential health (mtime/expiry only; no secrets)
   flotilla channel create <name> [--type text|category] [--topic <t>] [--category <name|id>]
                                                       create a Discord channel via the bot (idempotent; emits an F#105 binding with --xo)
   flotilla channel list [--json]                      list the guild's channels (id, type, name, parent)
