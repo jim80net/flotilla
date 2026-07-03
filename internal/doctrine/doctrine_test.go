@@ -19,17 +19,18 @@ func memberByName(t *testing.T, name string) Member {
 	return Member{}
 }
 
-// The registry ships EXACTLY seven members: operating-principles (identity-append),
+// The registry ships EXACTLY eight members: operating-principles (identity-append),
 // the Rule of Three (identity-append), no-self-merge (identity-append),
 // act-dont-idle-hold (identity-append), executive-mini-brief (identity-append),
-// xo-outbound (identity-append, coordinator-only), and visibility-synthesis (heartbeat-skill).
+// xo-outbound (identity-append, coordinator-only), operator-direct-tasking
+// (identity-append), and visibility-synthesis (heartbeat-skill).
 // This locks the count so a future member addition is a deliberate, reviewed change
 // (and so the member-count-agnostic install loop is exercised against the real
 // registry, not a fixture).
 func TestMembersRegistryContents(t *testing.T) {
 	members := Members()
-	if len(members) != 7 {
-		t.Fatalf("registry should hold exactly seven members, got %d", len(members))
+	if len(members) != 8 {
+		t.Fatalf("registry should hold exactly eight members, got %d", len(members))
 	}
 	byName := map[string]Member{}
 	for _, m := range members {
@@ -115,6 +116,23 @@ func TestMembersRegistryContents(t *testing.T) {
 	}
 	if !strings.Contains(xo.Content, "flotilla notify") {
 		t.Error("xo-outbound content must mention flotilla notify")
+	}
+
+	odt, ok := byName["operator-direct-tasking"]
+	if !ok {
+		t.Fatal("registry missing operator-direct-tasking member")
+	}
+	if odt.Mechanism != MechanismIdentityAppend {
+		t.Errorf("operator-direct-tasking mechanism = %q, want %q", odt.Mechanism, MechanismIdentityAppend)
+	}
+	if odt.OpenMarker != operatorDirectTaskingOpenMarker || odt.CloseMarker != operatorDirectTaskingCloseMarker {
+		t.Errorf("operator-direct-tasking markers = open=%q close=%q, want the operator-direct-tasking fence", odt.OpenMarker, odt.CloseMarker)
+	}
+	if strings.TrimSpace(odt.Content) == "" {
+		t.Error("operator-direct-tasking content is empty — the embed did not round-trip")
+	}
+	if !strings.Contains(odt.Content, "first-class authorization") {
+		t.Error("operator-direct-tasking content must state first-class authorization")
 	}
 
 	vs, ok := byName["visibility-synthesis"]
@@ -330,12 +348,12 @@ func TestMembersForAgentOmitsCoordinatorOnlyForExecutionDesk(t *testing.T) {
 			t.Errorf("execution desk set includes coordinator-only member %q", m.Name)
 		}
 	}
-	if len(exec) != 6 {
-		t.Fatalf("execution desk MembersForAgent len = %d, want 6", len(exec))
+	if len(exec) != 7 {
+		t.Fatalf("execution desk MembersForAgent len = %d, want 7", len(exec))
 	}
 	coord := MembersForAgent(true)
-	if len(coord) != 7 {
-		t.Fatalf("coordinator MembersForAgent len = %d, want 7", len(coord))
+	if len(coord) != 8 {
+		t.Fatalf("coordinator MembersForAgent len = %d, want 8", len(coord))
 	}
 }
 

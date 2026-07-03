@@ -5,7 +5,7 @@
 // default seed from `workspace init`, so a freshly scaffolded agent is born with
 // the doctrine in place.
 //
-// The set ships seven members:
+// The set ships eight members:
 //   - operating-principles — an IDENTITY-APPEND constitution: the twelve standing
 //     Flotilla Operating Principles, distilled to one sentence each and appended into
 //     the agent's identity file so the constitution loads once at launch. The full
@@ -22,6 +22,9 @@
 //     footer, explicit needs-you line); coordinators especially, mirror-posted verbatim.
 //   - xo-outbound — an IDENTITY-APPEND rule (coordinator-only): post operator-facing
 //     replies via `flotilla notify`; do not notify on heartbeat ticks or routine plumbing.
+//   - operator-direct-tasking — an IDENTITY-APPEND rule: operator-direct tasking is
+//     first-class authorization; execute and report to coordinator; coordinators record
+//     provenance and support (quality gates still apply to the work).
 //   - visibility-synthesis — a HEARTBEAT-SKILL: a whole-file curation skill written
 //     into the agent's workspace, loaded when the daemon emits a synthesis wake.
 //
@@ -130,6 +133,12 @@ const (
 	xoOutboundCloseMarker = "<!-- /flotilla:xo-outbound -->"
 )
 
+// The operator-direct-tasking sentinel fence (operator-direct authorization doctrine).
+const (
+	operatorDirectTaskingOpenMarker  = "<!-- flotilla:operator-direct-tasking -->"
+	operatorDirectTaskingCloseMarker = "<!-- /flotilla:operator-direct-tasking -->"
+)
+
 // members is the registry. Adding a member is adding an entry here plus its embedded
 // asset; the install/seed loop iterates this slice and dispatches by Mechanism, so it
 // never needs to change as the set grows (a NEW mechanism additionally needs its
@@ -192,6 +201,15 @@ var members = []Member{
 		OpenMarker:      xoOutboundOpenMarker,
 		CloseMarker:     xoOutboundCloseMarker,
 		CoordinatorOnly: true,
+	},
+	{
+		// operator-direct-tasking: operator-direct tasking is first-class authorization;
+		// execute and report to coordinator; coordinators record provenance and support.
+		Name:        "operator-direct-tasking",
+		Mechanism:   MechanismIdentityAppend,
+		Content:     mustRead("assets/skills/operator-direct-tasking.md"),
+		OpenMarker:  operatorDirectTaskingOpenMarker,
+		CloseMarker: operatorDirectTaskingCloseMarker,
 	},
 	{
 		// visibility-synthesis: a whole-file curation skill (Tiers 2/3 of the
