@@ -9,8 +9,10 @@ click through to Conversations; drive queue needs formatting; conversation threa
 turn-by-turn speaker color-coding (pairs with session-mirror Inc 2).
 
 Vocabulary: top-level **flotilla** (not "fleet goal"); mid-level **desk** (not
-"project/workstream"). Each node shows subdued harness/model badge; desk nodes carry
-milestones; each level lists active priorities linking to subordinates.
+"project/workstream"). **Org containers map tightly to goals** because flotillas/desks
+spin up/down without HR friction — fluid federation topology is the graph. Each node shows
+subdued harness/model badge; desk nodes carry milestones; each level lists active priorities
+linking to subordinates. Product thesis also ships on the public landing page.
 
 ## What Changes
 

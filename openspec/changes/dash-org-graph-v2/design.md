@@ -2,6 +2,29 @@
 
 **Status:** Proposal for trio + COS gate (extends dash-next-gen, does not replace session-mirror work).
 
+## 0. Product thesis — fluid org maps to goals
+
+Today's Goals map uses a **purpose hierarchy** (`fleet` / `project` / `task`) that poorly
+conveys **who is responsible for what**. Operator intent (2026-07-03, continued): the graph
+should mirror **command structure** (COS → flotilla XOs → desks) and align **objectives with
+org containers** so structure and accountability are visible in one surface.
+
+**Why flotilla is different from human org charts:** desks and flotillas spin up and down
+without HR friction. The product can therefore treat **organization as fluid** and let the
+goals graph **tight-map** to live federation topology — not a static reorg chart.
+
+**Design consequences:**
+
+| Principle | Product behavior |
+|---|---|
+| **Container = responsibility** | Each graph node is an org unit (flotilla or desk) with an `owner`, priorities, and child links to subordinates. |
+| **Agility** | Adding/retiring a desk or flotilla is a roster + goals-file edit, not a re-layout of unrelated purpose nodes. |
+| **Command & control** | COS-centered hub-spoke makes span-of-control legible; roll-up badges show blocked/awaiting/in-flight per subtree. |
+| **Runbooks follow org** | Desks/flotillas develop internal runbooks per container; memex/context capture is scoped to the unit (drives memex product, out of dash scope). |
+
+**Marketing:** this thesis is also **landing-page copy** (`site/index.html` § fluid organization)
+— the dash implements it; the public site explains why it matters.
+
 ## 1. Vocabulary (scope rename)
 
 | v1 `scope` | v2 `scope` | UI label |
