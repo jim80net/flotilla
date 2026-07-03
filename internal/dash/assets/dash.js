@@ -351,6 +351,9 @@
         renderConversations();
         syncControlTargets();
       }
+      // Keep the Goals view live off the same refresh cadence (SSE-triggered). It
+      // fetches /api/goals itself and no-ops until the operator has opened the tab.
+      if (window.flotillaGoals) window.flotillaGoals.refresh();
     });
   }
 
@@ -387,8 +390,8 @@
 
   connect();
 
-  /* ── tab nav: Conversations ⇄ Issues ───────────────────────────────── */
-  var VIEWS = ["conversations", "issues"];
+  /* ── tab nav: Conversations ⇄ Goals ⇄ Issues ───────────────────────── */
+  var VIEWS = ["conversations", "goals", "issues"];
   function showView(view) {
     VIEWS.forEach(function (v) {
       var on = v === view;
@@ -397,6 +400,7 @@
       el("tab-" + v).setAttribute("aria-selected", String(on));
     });
     el("freshness").classList.toggle("hidden", view !== "conversations");
+    if (view === "goals" && window.flotillaGoals) window.flotillaGoals.show();
     if (view === "issues" && window.flotillaTracker) window.flotillaTracker.show();
   }
   var tabs = document.querySelectorAll(".tab");
