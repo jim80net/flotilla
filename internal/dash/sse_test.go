@@ -186,7 +186,8 @@ func TestFileSigsChange(t *testing.T) {
 	snap := filepath.Join(dir, "snap.json")
 	ledger := filepath.Join(dir, "ledger.md")
 	backlog := filepath.Join(dir, "backlog.md")
-	paths := []string{snap, ledger, backlog}
+	goals := filepath.Join(dir, "fleet-goals.json")
+	paths := []string{snap, ledger, backlog, goals}
 
 	// All absent initially.
 	s0 := fileSigs(paths)
@@ -216,8 +217,18 @@ func TestFileSigsChange(t *testing.T) {
 	if err := os.WriteFile(ledger, []byte("l"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if fileSigs(paths) == s2 {
+	s3 := fileSigs(paths)
+	if s3 == s2 {
 		t.Error("ledger change must change the combined signature")
+	}
+
+	// Touching the goals file changes the combined signature too (so a structural
+	// goals edit pushes an SSE update the same way a snapshot/backlog change does).
+	if err := os.WriteFile(goals, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if fileSigs(paths) == s3 {
+		t.Error("goals change must change the combined signature")
 	}
 }
 

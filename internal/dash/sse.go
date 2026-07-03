@@ -204,7 +204,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 // (mtime,size) signatures change — so all connected clients refetch the JSON
 // endpoints. One poller serves every client (not one per connection).
 func (s *Server) poll(ctx context.Context) {
-	paths := []string{s.cfg.SnapshotPath, s.cfg.LedgerPath, s.cfg.BacklogPath}
+	paths := []string{s.cfg.SnapshotPath, s.cfg.LedgerPath, s.cfg.BacklogPath, s.cfg.GoalsPath}
 	prev := fileSigs(paths)
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
@@ -235,7 +235,7 @@ type fileSig struct {
 // sigBundle is the combined signature of all watched files (a comparable value
 // so the poller can detect "any change" with a single ==).
 type sigBundle struct {
-	snap, ledger, backlog fileSig
+	snap, ledger, backlog, goals fileSig
 }
 
 // statSig deliberately collapses "absent" and "stat error" to the same
@@ -258,11 +258,12 @@ func statSig(path string) fileSig {
 	return fileSig{mtime: fi.ModTime().UnixNano(), size: fi.Size(), exist: true}
 }
 
-// fileSigs computes the combined signature for [snapshot, ledger, backlog].
+// fileSigs computes the combined signature for [snapshot, ledger, backlog, goals].
 func fileSigs(paths []string) sigBundle {
 	return sigBundle{
 		snap:    statSig(paths[0]),
 		ledger:  statSig(paths[1]),
 		backlog: statSig(paths[2]),
+		goals:   statSig(paths[3]),
 	}
 }

@@ -27,6 +27,7 @@ type Config struct {
 	AckPath      string // XO liveness ack file (default <roster-dir>/flotilla-xo-alive)
 	LedgerPath   string // CoS ledger (cfg.CosLedger; "" when the CoS mirror is inert)
 	BacklogPath  string // backlog markdown (--tracker-file; default <roster-dir>/.flotilla-state.md)
+	GoalsPath    string // goals file the Goals view reads (default <roster-dir>/fleet-goals.json)
 	Bind         string // listen address (default 127.0.0.1:8787)
 	Repo         string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
 	SecretsPath  string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
@@ -188,6 +189,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/status", s.handleStatus)
 	s.mux.HandleFunc("/api/topology", s.handleTopology)
 	s.mux.HandleFunc("/api/history", s.handleHistory)
+	s.mux.HandleFunc("/api/goals", s.handleGoals)
 	s.mux.HandleFunc("/events", s.handleEvents)
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticAssets()))))
 
@@ -246,6 +248,33 @@ func (s *Server) loadHistory() HistoryDoc {
 	return BuildHistory(readFileOrEmpty(s.cfg.LedgerPath), readFileOrEmpty(s.cfg.BacklogPath))
 }
 
+// loadGoals reads the goals file fresh and builds the goals document, binding
+// live work-item status from the SAME board (desk states) and backlog the other
+// views read — so the Goals view can never diverge from the fleet board. A
+// missing goals file yields an honest Found=false document; a present-but-invalid
+// file surfaces the load error (structure is validated fail-closed) rather than a
+// partial tree. Issue work items are shown linked (unresolved) here — live issue
+// status resolution via the tracker is a tracked follow-on (the spec permits
+// `gh` at display time when configured).
+func (s *Server) loadGoals() GoalsDoc {
+	in := GoalsInputs{
+		Backlog:    readFileOrEmpty(s.cfg.BacklogPath),
+		DeskStates: agentStates(s.loadBoard()),
+	}
+	if s.cfg.GoalsPath != "" {
+		if b, err := os.ReadFile(s.cfg.GoalsPath); err == nil {
+			if gf, perr := ParseGoalsFile(b); perr != nil {
+				in.LoadErr = perr.Error()
+			} else {
+				in.File, in.FileOK = gf, true
+			}
+		}
+		// A missing/unreadable goals file leaves FileOK false → BuildGoals renders
+		// the honest "no goals file yet" message, never a fabricated tree.
+	}
+	return BuildGoals(in)
+}
+
 // --- handlers ---
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -273,6 +302,10 @@ func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.loadHistory())
+}
+
+func (s *Server) handleGoals(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.loadGoals())
 }
 
 // pageData is the (static) data the index template needs — no fleet data, just
@@ -424,6 +457,9 @@ func ResolvePaths(cfg Config, rc *roster.Config) Config {
 	}
 	if cfg.BacklogPath == "" {
 		cfg.BacklogPath = filepath.Join(dir, ".flotilla-state.md")
+	}
+	if cfg.GoalsPath == "" {
+		cfg.GoalsPath = filepath.Join(dir, "fleet-goals.json")
 	}
 	// The CoS ledger path is whatever the roster resolved (empty when the CoS
 	// mirror is inert — then the history view shows no ledger, honestly).

@@ -59,6 +59,7 @@ vars, same `<roster-dir>/…` fallbacks:
 | detector snapshot   | `--snapshot-file`  | `$FLOTILLA_SNAPSHOT_FILE`, else `<roster-dir>/flotilla-detector-state.json` |
 | XO liveness ack     | `--ack-file`       | `$FLOTILLA_ACK_FILE`, else `<roster-dir>/flotilla-xo-alive` |
 | backlog markdown    | `--tracker-file`   | `$FLOTILLA_TRACKER_FILE`, else `<roster-dir>/.flotilla-state.md` |
+| goals file          | `--goals-file`     | `$FLOTILLA_GOALS_FILE`, else `<roster-dir>/fleet-goals.json` |
 | CoS ledger          | *(roster-derived)* | the roster's `cos_ledger` (inert when `cos_agent` is unset) |
 
 `--repo owner/name` pins the issue tracker's GitHub repo (see *Issue tracker*
@@ -79,6 +80,36 @@ The board distinguishes *which* no-fresh-data case you are in:
 
 The dash never silently substitutes its own pane probe for a missing snapshot — it
 tells you honestly whether the fleet view is live, stale, or absent.
+
+## Goals view (the purpose hierarchy)
+
+The **Goals** tab (alongside Conversations and Issues) renders the fleet's goal
+hierarchy — a validated goal tree whose desk/backlog/issue/inline **work items**
+bind to live status. It answers "what is the fleet working toward, is it moving,
+and what needs me?" at a glance. It is **read-only** (the goal structure is
+coordinator-maintained; the edit surface is a separate lane).
+
+- **Structure** comes from `fleet-goals.json` (the `--goals-file` above). Each goal
+  node has an `id` (unique slug), `title`, optional `description`, `scope`
+  (`fleet` → `project` → `desk`, the altitude columns; inferred from depth when
+  omitted), optional `parent` and `owner`, and a declared `status`. The loader
+  validates the tree **fail-closed** — a cycle, a dangling `parent`, or a duplicate
+  `id` surfaces an error rather than a half-rendered graph.
+- **Work items** attach to a node via `work_items`: `desk` (an agent — status is
+  its live board state), `backlog` (a `match` substring — status from the backlog
+  markdown), `issue` (`owner/repo#N` — shown linked; live GitHub status is a
+  follow-on), `inline` (a `text` checklist item with a `done` flag).
+- **Roll-up + visual state** are computed at read time from the children and work
+  items: a working desk → *in flight* (cyan); an operator-gated item (`[blocked]`/
+  `[awaiting-auth]`, or a desk awaiting input/approval) → *awaiting you* (amber); a
+  crashed/errored desk → *blocked* (red); all done → *realized* (green); a
+  named-but-not-started end → *aspirational* (ghosted). A parent shows its most
+  salient child's state, so a single blocked leaf surfaces all the way up.
+
+See `fleet-goals.example.json` at the repo root for a complete, placeholder
+example. If no goals file exists the tab shows an honest "no goals file yet"
+message — it never fabricates a tree. For work-item status to resolve, point the
+dash's backlog path (`--tracker-file`) at the same backlog the goal-loop uses.
 
 ## Binding & remote access (loopback only in this phase)
 

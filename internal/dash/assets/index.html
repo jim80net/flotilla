@@ -24,6 +24,7 @@
     </div>
     <nav class="tabs" role="tablist" aria-label="Dashboard views">
       <button id="tab-conversations" class="tab active" data-view="conversations" role="tab" aria-selected="true" aria-controls="view-conversations">Conversations</button>
+      <button id="tab-goals" class="tab" data-view="goals" role="tab" aria-selected="false" aria-controls="view-goals">Goals</button>
       <button id="tab-issues" class="tab" data-view="issues" role="tab" aria-selected="false" aria-controls="view-issues">Issues</button>
     </nav>
     <div class="bar-meta">
@@ -104,6 +105,24 @@
     </div>
   </main>
 
+  <main id="view-goals" class="view goals-wrap hidden" aria-label="Fleet goals">
+    <section class="goals-situation" id="goals-situation" aria-label="Goals summary"></section>
+    <section class="panel goals-panel">
+      <div class="panel-head">
+        <div>
+          <h2>Fleet goals <span class="muted goals-sub">purpose hierarchy — desks roll up to fleet aims</span></h2>
+          <p class="panel-desc">Read-only · goal structure from <code>fleet-goals.json</code>, work-item status live from the fleet board</p>
+        </div>
+        <div class="goals-legend" id="goals-legend" aria-hidden="true"></div>
+      </div>
+      <div id="goals-graph" class="goals-graph" role="tree" aria-label="Goal hierarchy">
+        <svg class="goals-edges" id="goals-edges" aria-hidden="true"></svg>
+        <div id="goals-columns" class="goals-columns"></div>
+      </div>
+      <div id="goals-empty" class="goals-empty muted hidden"></div>
+    </section>
+  </main>
+
   <main id="view-issues" class="view wrap hidden">
     <section id="issues-listpanel" class="panel">
       <div class="panel-head">
@@ -149,10 +168,11 @@
   </main>
 
   <footer class="foot">
-    <span class="muted">Conversations are read-only · Issues write to GitHub · Control uses confirmed delivery</span>
+    <span class="muted">Conversations &amp; Goals are read-only · Issues write to GitHub · Control uses confirmed delivery</span>
   </footer>
 
   <script src="/static/dash.js"></script>
+  <script src="/static/goals.js"></script>
   <script src="/static/tracker.js"></script>
   <script src="/static/control.js"></script>
 </body>

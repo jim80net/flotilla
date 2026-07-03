@@ -1,0 +1,77 @@
+{
+  "//": "Example goals file for the flotilla dash Goals view. Copy to <roster-dir>/fleet-goals.json (or point --goals-file / FLOTILLA_GOALS_FILE at it). Structure (goals + work_items) is maintained by coordinators; work-item STATUS is resolved live at display time — a desk item from the fleet board snapshot, a backlog item from the backlog markdown, an issue from GitHub, an inline item from its done flag. All names below are placeholders.",
+  "version": 1,
+  "default_view": false,
+  "goals": [
+    {
+      "id": "ship-platform",
+      "title": "Ship the platform",
+      "description": "Get the core product into customers' hands, reliably.",
+      "scope": "fleet"
+    },
+    {
+      "id": "onboarding",
+      "title": "Onboarding flow",
+      "scope": "project",
+      "parent": "ship-platform",
+      "owner": "product-lead",
+      "work_items": [
+        { "kind": "desk", "agent": "builder", "label": "sign-up screens" },
+        { "kind": "backlog", "match": "onboarding", "label": "onboarding polish" }
+      ]
+    },
+    {
+      "id": "billing",
+      "title": "Billing",
+      "scope": "project",
+      "parent": "ship-platform",
+      "work_items": [
+        { "kind": "backlog", "match": "billing sign-off", "label": "pricing sign-off" },
+        { "kind": "issue", "ref": "example/repo#42", "label": "invoice PDF export" }
+      ]
+    },
+    {
+      "id": "search",
+      "title": "Search",
+      "scope": "project",
+      "parent": "ship-platform",
+      "work_items": [
+        { "kind": "desk", "agent": "researcher", "label": "ranking model" }
+      ]
+    },
+    {
+      "id": "search-index",
+      "title": "Index pipeline",
+      "scope": "desk",
+      "parent": "search",
+      "work_items": [
+        { "kind": "desk", "agent": "indexer", "label": "incremental indexer" }
+      ]
+    },
+    {
+      "id": "reliability",
+      "title": "Platform reliability",
+      "description": "Keep the lights on: observability, incident response, capacity.",
+      "scope": "fleet"
+    },
+    {
+      "id": "observability",
+      "title": "Observability",
+      "scope": "project",
+      "parent": "reliability",
+      "owner": "sre-lead",
+      "work_items": [
+        { "kind": "desk", "agent": "reviewer", "label": "dashboards" },
+        { "kind": "issue", "ref": "example/repo#7", "label": "tracing rollout" },
+        { "kind": "inline", "text": "define the golden signals", "done": true }
+      ]
+    },
+    {
+      "id": "incident-response",
+      "title": "Incident response",
+      "description": "On-call rotation and runbooks — not started yet.",
+      "scope": "project",
+      "parent": "reliability"
+    }
+  ]
+}

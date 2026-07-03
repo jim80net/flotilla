@@ -105,28 +105,91 @@ const (
 )
 
 // classify maps an item's post-marker text to a class via its LEADING bracketed status marker.
-// Only the leading `[marker]` is consulted (so a `[link]` later in the text never misclassifies,
-// and the lowercase prose word "done" inside the text never counts as the done marker).
+// It defers the marker vocabulary to markerOf (the single source of truth shared with
+// ClassifyLine / MatchInBacklog) and maps the normalized token onto the settle-relevant class.
 func classify(rest string) cls {
+	switch markerOf(rest) {
+	case "done":
+		return clsDone
+	case "blocked", "needs-attention":
+		return clsBlocked // the OPEN-QUESTIONS ledger
+	case "awaiting-auth":
+		return clsAwaitingAuth // the AUTHORIZATIONS ledger — exact token only (a near-miss falls through to Malformed)
+	case "in-flight", "next":
+		return clsUnblocked
+	default: // "malformed"
+		return clsMalformed // an unrecognized marker — flag it, don't guess
+	}
+}
+
+// markerOf extracts an item's normalized leading status marker from the text AFTER the list
+// glyph. Only the leading `[marker]` is consulted (so a `[link]` later in the text never
+// misclassifies, and the lowercase prose word "done" inside the text never counts as the done
+// marker). It returns one of "in-flight", "next", "blocked", "needs-attention", "awaiting-auth",
+// "done", or "malformed" (an unrecognized/missing marker; a leading `~~strike~~` or `✅` reads as
+// done). It is the ONE place the marker vocabulary lives; classify, ClassifyLine, and
+// MatchInBacklog all consult it so the settle semantics can never drift between the whole-file
+// Parse and the per-line resolvers the goals view uses.
+func markerOf(rest string) string {
 	if strings.HasPrefix(rest, "[") {
 		if end := strings.IndexByte(rest, ']'); end > 1 {
-			switch strings.ToLower(strings.TrimSpace(rest[1:end])) {
-			case "done", "x":
-				return clsDone
-			case "blocked", "needs-attention":
-				return clsBlocked // the OPEN-QUESTIONS ledger
-			case "awaiting-auth":
-				return clsAwaitingAuth // the AUTHORIZATIONS ledger — exact token only (a near-miss falls through to Malformed)
-			case "in-flight", "next":
-				return clsUnblocked
+			switch tok := strings.ToLower(strings.TrimSpace(rest[1:end])); tok {
+			case "x":
+				return "done"
+			case "done", "blocked", "needs-attention", "awaiting-auth", "in-flight", "next":
+				return tok
 			default:
-				return clsMalformed // an unrecognized marker — flag it, don't guess
+				return "malformed"
 			}
 		}
 	}
 	// No leading bracket marker. Lenient done detection (a struck or ✅-marked line); else malformed.
 	if strings.HasPrefix(rest, "~~") || strings.Contains(rest, "✅") {
-		return clsDone
+		return "done"
 	}
-	return clsMalformed
+	return "malformed"
+}
+
+// ClassifyLine classifies a SINGLE markdown list line by its leading status marker, returning the
+// normalized marker token markerOf yields ("in-flight", "next", "blocked", "needs-attention",
+// "awaiting-auth", "done", or "malformed"), or "" when the line is not a list item at all. It is
+// the per-line sibling of Parse — the SAME itemLine grammar and the SAME marker vocabulary — used
+// by the goals view to resolve one attached backlog item's status without re-parsing the file.
+func ClassifyLine(raw string) string {
+	m := itemLine.FindStringSubmatch(raw)
+	if m == nil {
+		return ""
+	}
+	return markerOf(m[1])
+}
+
+// MatchInBacklog returns the normalized marker of the FIRST "## Backlog" item line whose text
+// contains substr (case-insensitive), and whether any item matched. It applies the SAME section
+// grammar as Parse (the "## Backlog" heading toggles the section; any other "## " exits it) so a
+// goal's attached backlog item resolves against exactly the lines Parse would classify. A blank or
+// whitespace-only substr never matches (returns false) — an empty match string must not silently
+// bind to the first backlog line.
+func MatchInBacklog(md, substr string) (string, bool) {
+	needle := strings.ToLower(strings.TrimSpace(substr))
+	if needle == "" {
+		return "", false
+	}
+	inSection := false
+	for _, raw := range strings.Split(md, "\n") {
+		if strings.HasPrefix(raw, "## ") {
+			inSection = strings.HasPrefix(raw, "## Backlog")
+			continue
+		}
+		if !inSection {
+			continue
+		}
+		m := itemLine.FindStringSubmatch(raw)
+		if m == nil {
+			continue
+		}
+		if strings.Contains(strings.ToLower(raw), needle) {
+			return markerOf(m[1]), true
+		}
+	}
+	return "", false
 }
