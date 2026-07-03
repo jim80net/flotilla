@@ -162,30 +162,14 @@ func cmdWatch(args []string) error {
 		eventPollInterval = d
 	}
 	rosterDir := filepath.Dir(*rosterPath)
-	if *ackPath == "" {
-		*ackPath = filepath.Join(rosterDir, "flotilla-xo-alive")
-	}
-	if *snapshotPath == "" {
-		*snapshotPath = filepath.Join(rosterDir, "flotilla-detector-state.json")
-	}
-	if *cursorPath == "" {
-		*cursorPath = filepath.Join(rosterDir, "flotilla-relay-cursor.json")
-	}
-	if *queuePath == "" {
-		*queuePath = filepath.Join(rosterDir, "flotilla-relay-queue.json")
-	}
-	if *unackedPath == "" {
-		*unackedPath = filepath.Join(rosterDir, "flotilla-unacked-alerted.json")
-	}
-	if *awaitingPath == "" {
-		*awaitingPath = filepath.Join(rosterDir, "flotilla-xo-awaiting")
-	}
-	if *settledPath == "" {
-		*settledPath = filepath.Join(rosterDir, "flotilla-xo-settled")
-	}
-	if *trackerPath == "" {
-		*trackerPath = filepath.Join(rosterDir, ".flotilla-state.md")
-	}
+	defaultPath(ackPath, rosterDir, "flotilla-xo-alive")
+	defaultPath(snapshotPath, rosterDir, "flotilla-detector-state.json")
+	defaultPath(cursorPath, rosterDir, "flotilla-relay-cursor.json")
+	defaultPath(queuePath, rosterDir, "flotilla-relay-queue.json")
+	defaultPath(unackedPath, rosterDir, "flotilla-unacked-alerted.json")
+	defaultPath(awaitingPath, rosterDir, "flotilla-xo-awaiting")
+	defaultPath(settledPath, rosterDir, "flotilla-xo-settled")
+	defaultPath(trackerPath, rosterDir, ".flotilla-state.md")
 
 	// Load secrets once: the bot token (gateway), the alert/notice webhook, and — kept for the
 	// per-desk visibility mirror — the whole Secrets so each desk's own webhook can be resolved at
@@ -331,7 +315,7 @@ func cmdWatch(args []string) error {
 		// Heartbeat ticks and change-detector wakes fire automatically; a per-wake
 		// marker is pure noise in the operator's channel (XO liveness is covered by
 		// the ack file + the down alert). Only relayed operator traffic is mirrored.
-		if j.Kind == "heartbeat" || j.Kind == "detector" {
+		if j.Kind == watch.KindHeartbeat || j.Kind == watch.KindDetector {
 			return
 		}
 		post("flotilla-watch", "→ "+j.Agent+": "+j.Message)
@@ -423,7 +407,7 @@ func cmdWatch(args []string) error {
 					".\nCheck in on the affected desk(s) and advance any authorized coordination. If nothing is " +
 					"actionable, reply idle and signal it by running: touch " + *settledPath + "." + ackInstr
 			}
-			injector.Enqueue(watch.Job{Agent: xo, Message: body, Kind: "detector"})
+			injector.Enqueue(watch.Job{Agent: xo, Message: body, Kind: watch.KindDetector})
 		}
 
 		// wakeAgent is the PARALLEL agent-targeted wake seam (visibility synthesis, B2). It enqueues a
@@ -459,7 +443,7 @@ func cmdWatch(args []string) error {
 				ack = ackInstr // liveness ack follows the TARGET, not the wake kind (#190)
 			}
 			body := synthesisWakeBody(agent, synthBin, synthRosterPath, synthesisReadSet(cfg, agent), cfg.OwnedChannels(agent), ack)
-			injector.Enqueue(watch.Job{Agent: agent, Message: body, Kind: "detector"})
+			injector.Enqueue(watch.Job{Agent: agent, Message: body, Kind: watch.KindDetector})
 		}
 
 		// Visibility-synthesis (B2) seams — wired ONLY when the roster opts in (default OFF ⇒ all nil
@@ -1025,7 +1009,7 @@ func newDeskHeartbeatDispatch(enqueue func(watch.Job), settleFor func(string) st
 			log.Printf("flotilla watch: desk-heartbeat prompt resolve failed for %q: %v (beat dropped this tick)", agent, err)
 			return
 		}
-		enqueue(watch.Job{Agent: agent, Message: body, Kind: "detector"})
+		enqueue(watch.Job{Agent: agent, Message: body, Kind: watch.KindDetector})
 	}
 }
 
@@ -1215,7 +1199,7 @@ func delegationNudgeOnFinish(cfg *roster.Config, tracker *delegatenudge.Tracker,
 			return
 		}
 		log.Printf("flotilla watch: delegation-nudge %s: inline-build signal", agent)
-		enqueue(watch.Job{Agent: agent, Message: delegatenudge.NudgePrompt(agent), Kind: "detector"})
+		enqueue(watch.Job{Agent: agent, Message: delegatenudge.NudgePrompt(agent), Kind: watch.KindDetector})
 	}
 }
 
@@ -1240,7 +1224,7 @@ func strandedHandoffOnFinish(cfg *roster.Config, tracker *stranded.Tracker, enqu
 			return
 		}
 		log.Printf("flotilla watch: stranded-handoff break %s: signal=%s", agent, r.Signal)
-		enqueue(watch.Job{Agent: agent, Message: stranded.NudgePrompt(agent), Kind: "detector"})
+		enqueue(watch.Job{Agent: agent, Message: stranded.NudgePrompt(agent), Kind: watch.KindDetector})
 	}
 }
 
@@ -1265,7 +1249,7 @@ func idleHoldOnFinish(cfg *roster.Config, tracker *idlehold.Tracker, enqueue fun
 			return
 		}
 		log.Printf("flotilla watch: idle-hold break %s: signal=%s strikes=%d", agent, r.Signal, tracker.Strikes(agent))
-		enqueue(watch.Job{Agent: agent, Message: idlehold.BreakPrompt(r.Recommendation), Kind: "detector"})
+		enqueue(watch.Job{Agent: agent, Message: idlehold.BreakPrompt(r.Recommendation), Kind: watch.KindDetector})
 	}
 }
 
@@ -1350,6 +1334,16 @@ func adaptiveIntervalEnabled(flagVal string) bool {
 		}
 	}
 	return watch.AdaptiveIntervalEnabled()
+}
+
+// defaultPath sets *p to filepath.Join(parts...) only when *p is empty, so an
+// operator-supplied flag/env value always wins and an unset one falls back to the
+// roster-relative default. It factors out the ~identical unset-path defaulting
+// repeated for every watch state file (ack, snapshot, cursor, queue, …).
+func defaultPath(p *string, parts ...string) {
+	if *p == "" {
+		*p = filepath.Join(parts...)
+	}
 }
 
 // optionalDuration reads a positive duration from a CLI flag, else from envKey.

@@ -194,7 +194,7 @@ func (h *Heartbeat) loop() {
 			// down, skip the tick — don't wind a dead clock.
 			gated := h.gate != nil && h.gate()
 			if !gated && !h.busy(h.xoAgent) {
-				h.enqueue(Job{Agent: h.xoAgent, Message: h.prompt, Kind: "heartbeat"})
+				h.enqueue(Job{Agent: h.xoAgent, Message: h.prompt, Kind: KindHeartbeat})
 			}
 			t.Reset(h.interval)
 		}

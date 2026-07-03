@@ -221,7 +221,7 @@ func replyDest(cfg *roster.Config, secrets *roster.Secrets, originChannel string
 // host-local Stop-hook — the watcher has the same replies-only semantics, more robustly). Heartbeat /
 // detector ticks (j.Kind != "relay") never arm it; a channel MEMBER (not the channel's XO) does not.
 func isHotlineToChannelXO(cfg *roster.Config, j watch.Job) bool {
-	if j.Kind != "relay" || j.OriginChannel == "" {
+	if j.Kind != watch.KindRelay || j.OriginChannel == "" {
 		return false
 	}
 	binding, ok := cfg.BindingForChannel(j.OriginChannel)

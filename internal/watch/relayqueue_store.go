@@ -59,7 +59,7 @@ func (s relayQueueStore) load() []Job {
 			MessageID:      p.MessageID,
 			Agent:          p.Agent,
 			Message:        p.Message,
-			Kind:           "relay",
+			Kind:           KindRelay,
 			OriginChannel:  p.OriginChannel,
 			deferrals:      p.Deferrals,
 			enqueuedAt:     p.EnqueuedAt,
