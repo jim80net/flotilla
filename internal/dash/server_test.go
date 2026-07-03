@@ -233,6 +233,14 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("goals.js must retain the pan/zoom canvas engine (missing %q)", marker)
 		}
 	}
+	// #283: keyed/diffed updates — a structural signature drives an in-place refresh
+	// that preserves element identity (focus + transient UI classes) across SSE
+	// ticks. Lock the engine so a regression to full-teardown-per-tick fails here.
+	for _, marker := range []string{"structuralSig", "updateInPlace"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must retain the keyed-update engine (missing %q) — #283", marker)
+		}
+	}
 
 	body := doGet(t, srv, "/").Body.String()
 	if !strings.Contains(body, "/static/goals.js") {
