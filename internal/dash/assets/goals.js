@@ -39,6 +39,11 @@
   var nodesWired = false;
   var kbdNav = false;    // true when focus is moving by keyboard (Tab) — gates focus-recenter
   var modalReturn = null; // element to restore focus to when the intervention modal closes
+  // Layout mode (org-graph v2 §2/§7.4): "tree" = the tiered altitude columns (default,
+  // until the org UX is proven); "org" = hub-and-spoke — the coordinator (layout.hub_center)
+  // at the visual center, org units on concentric rings, spoke edges to children. A live
+  // toggle flips it (ship-live: reachable without a restart, not env-gated dormant).
+  var goalsLayout = "tree";
 
   /* ── tier geometry (ported from the prototype: TIER_X=[40,470,900]) ─────── */
   // Columns are derived from depth so a tree deeper than the canonical 3 tiers
@@ -259,6 +264,69 @@
     view.worldH = maxBot + 30;
   }
 
+  /* ── org (hub-and-spoke) layout — org-graph v2 §2 ──────────────────────── */
+  // The coordinator (the layout.hub_center node) sits at the world center; the fleet
+  // orbits on concentric rings (ring = distance-from-hub), each node's children fanned
+  // across the parent's angular slice (spoke geometry). With no hub_center hint, the
+  // roots themselves form ring 1 around an empty center. Positions are polar → the same
+  // absolute _x/_y the tree layout uses, so nodeCard/pan-zoom/keyed-update are unchanged.
+  var RING_STEP = 380;
+  function childrenOf(n) { return (n.children || []).map(function (id) { return nodeById[id]; }).filter(Boolean); }
+  function nodeCenter(n) { return { x: n._x + n._w / 2, y: n._y + heightOf(n) / 2 }; }
+  function layoutOrg(goals, roots) {
+    var center = null;
+    for (var i = 0; i < goals.length; i++) {
+      if (goals[i].layout && goals[i].layout.hub_center) { center = goals[i]; break; }
+    }
+    var maxDepth = 0;
+    goals.forEach(function (n) { maxDepth = Math.max(maxDepth, depthOf(n)); });
+    // rings from the hub: with a center node, its own subtree maps tree-depth d → ring d
+    // (outermost = maxDepth). BUT sibling roots (non-center roots) are placed AT ring 1,
+    // so their subtrees reach ring depth+1 — the outer ring is then maxDepth + 1. Without
+    // a center, roots are ring 1 likewise → maxDepth + 1. Size the world for the largest
+    // reachable ring so no node clips past the bounds (cubic #316 P2).
+    var hasSiblingRoot = false;
+    if (center) roots.forEach(function (r) { if (r !== center) hasSiblingRoot = true; });
+    var rings = (center && !hasSiblingRoot) ? Math.max(1, maxDepth) : (maxDepth + 1);
+    var radius = rings * RING_STEP;
+    var worldSize = 2 * radius + 360; // margin for the outermost cards
+    view.worldW = worldSize; view.worldH = worldSize;
+    var cx = worldSize / 2, cy = worldSize / 2;
+
+    // placed guards against a cycle in the (server-validated-acyclic) tree — the same
+    // defense-in-depth bound highlightChain carries; a repeat visit is skipped, never
+    // recursed (cubic #316 note).
+    var placed = {};
+    function placeSubtree(n, a0, a1, ring) {
+      if (placed[n.id]) return;
+      placed[n.id] = true;
+      var mid = (a0 + a1) / 2;
+      if (ring === 0) {
+        n._x = cx - n._w / 2; n._y = cy - heightOf(n) / 2;
+      } else {
+        var r = ring * RING_STEP;
+        n._x = cx + r * Math.cos(mid) - n._w / 2;
+        n._y = cy + r * Math.sin(mid) - heightOf(n) / 2;
+      }
+      var kids = childrenOf(n);
+      if (!kids.length) return;
+      var step = (a1 - a0) / kids.length;
+      kids.forEach(function (k, i) { placeSubtree(k, a0 + i * step, a0 + (i + 1) * step, ring + 1); });
+    }
+
+    var ring1;
+    if (center) {
+      center._x = cx - center._w / 2; center._y = cy - heightOf(center) / 2;
+      placed[center.id] = true; // the hub is placed here, not via placeSubtree
+      ring1 = childrenOf(center);
+      roots.forEach(function (r) { if (r !== center) ring1.push(r); }); // sibling flotillas orbit too
+    } else {
+      ring1 = roots.slice();
+    }
+    var n1 = ring1.length || 1, slice = (2 * Math.PI) / n1;
+    ring1.forEach(function (node, i) { placeSubtree(node, i * slice, (i + 1) * slice, 1); });
+  }
+
   /* ── edges: parent → child, from laid-out geometry ─────────────────────── */
   function drawEdges() {
     var svg = q("goals-edges");
@@ -271,13 +339,19 @@
       var child = nodeById[id];
       var parent = child.parent ? nodeById[child.parent] : null;
       if (!parent) return;
-      var a = { x: parent._x + parent._w, y: parent._y + heightOf(parent) / 2 };
-      var b = { x: child._x, y: child._y + heightOf(child) / 2 };
-      var dx = Math.max(40, (b.x - a.x) * 0.5);
       var state = escapeHtml(visToken(child)); // bounded enum, escaped for consistency + defense-in-depth
-      paths.push('<path class="gedge gedge-' + state + '" data-child="' + escapeHtml(id) +
-        '" d="M ' + a.x + " " + a.y + " C " + (a.x + dx) + " " + a.y + ", " +
-        (b.x - dx) + " " + b.y + ", " + b.x + " " + b.y + '"/>');
+      var d;
+      if (goalsLayout === "org") {
+        // radial spoke: a straight line from hub/parent center to child center.
+        var pc = nodeCenter(parent), cc = nodeCenter(child);
+        d = "M " + pc.x + " " + pc.y + " L " + cc.x + " " + cc.y;
+      } else {
+        var a = { x: parent._x + parent._w, y: parent._y + heightOf(parent) / 2 };
+        var b = { x: child._x, y: child._y + heightOf(child) / 2 };
+        var dx = Math.max(40, (b.x - a.x) * 0.5);
+        d = "M " + a.x + " " + a.y + " C " + (a.x + dx) + " " + a.y + ", " + (b.x - dx) + " " + b.y + ", " + b.x + " " + b.y;
+      }
+      paths.push('<path class="gedge gedge-' + state + '" data-child="' + escapeHtml(id) + '" d="' + d + '"/>');
     });
     // Cross-dependency edges (depends_on) — rendered as faint dashed arcs bowed out
     // to the right, visually distinct from the solid parent-child tree edges (a
@@ -286,12 +360,19 @@
       if (depEdges[di].kind !== "depends_on") continue; // only depends_on edges are dep arcs
       var f = nodeById[depEdges[di].from], t = nodeById[depEdges[di].to];
       if (!f || !t) continue;
-      var pa = { x: f._x + f._w, y: f._y + heightOf(f) / 2 };
-      var pb = { x: t._x + t._w, y: t._y + heightOf(t) / 2 };
-      var bow = 44 + Math.abs(pa.y - pb.y) * 0.12;
-      var cxx = Math.max(pa.x, pb.x) + bow;
-      paths.push('<path class="gdep" data-from="' + escapeHtml(depEdges[di].from) + '" data-to="' + escapeHtml(depEdges[di].to) +
-        '" d="M ' + pa.x + " " + pa.y + " C " + cxx + " " + pa.y + ", " + cxx + " " + pb.y + ", " + pb.x + " " + pb.y + '"/>');
+      var dd;
+      if (goalsLayout === "org") {
+        // center-to-center dashed chord (the column-relative bow is meaningless radially).
+        var fc = nodeCenter(f), tc = nodeCenter(t);
+        dd = "M " + fc.x + " " + fc.y + " L " + tc.x + " " + tc.y;
+      } else {
+        var pa = { x: f._x + f._w, y: f._y + heightOf(f) / 2 };
+        var pb = { x: t._x + t._w, y: t._y + heightOf(t) / 2 };
+        var bow = 44 + Math.abs(pa.y - pb.y) * 0.12;
+        var cxx = Math.max(pa.x, pb.x) + bow;
+        dd = "M " + pa.x + " " + pa.y + " C " + cxx + " " + pa.y + ", " + cxx + " " + pb.y + ", " + pb.x + " " + pb.y;
+      }
+      paths.push('<path class="gdep" data-from="' + escapeHtml(depEdges[di].from) + '" data-to="' + escapeHtml(depEdges[di].to) + '" d="' + dd + '"/>');
     }
     svg.innerHTML = paths.join("");
     // Index each edge by its child id for the hover chain-highlight (rebuilt every
@@ -799,7 +880,9 @@
     // Pass 1: render at column x with provisional y=0 so heights can be measured.
     goals.forEach(function (n) { n._y = 0; });
     nodesEl.innerHTML = goals.map(nodeCard).join("");
-    renderTierLabels(maxDepth);
+    // Tier column headers belong to the tree layout only — the org layout has no columns.
+    if (goalsLayout === "org") q("goals-tierlabels").innerHTML = "";
+    else renderTierLabels(maxDepth);
 
     // Measure + final layout after the browser flushes layout. Guarded so a newer
     // render (a refresh that landed between here and the frame) wins.
@@ -815,16 +898,21 @@
       // Cards render in goals[] order, so children[i] ↔ goals[i] — read heights
       // in one pass (all reads batched before any write) to avoid layout thrash.
       goals.forEach(function (n, i) { n._h = nodesEl.children[i] ? nodesEl.children[i].offsetHeight : DEFAULT_H; });
-      layoutY(roots);
+      if (goalsLayout === "org") layoutOrg(goals, roots);
+      else layoutY(roots);
       goals.forEach(function (n, i) {
         var c = nodesEl.children[i];
-        if (c) { c.style.top = n._y + "px"; c._inner = nodeInner(n); } // seed _inner so the in-place dirty-skip works from tick 1
+        // Both left AND top: the org layout moves x per node (radial), where the tree
+        // layout kept x fixed at its column. Setting left is a no-op in tree mode.
+        if (c) { c.style.left = n._x + "px"; c.style.top = n._y + "px"; c._inner = nodeInner(n); } // seed _inner so the in-place dirty-skip works from tick 1
       });
       var world = q("goals-world");
       world.style.width = view.worldW + "px";
       world.style.height = view.worldH + "px";
       drawEdges();
-      if (!view.fitted) { fit(); view.fitted = true; }
+      // Fit: the tree anchors top (columns read down); the org graph is a centered
+      // disc, so frame the whole thing centered.
+      if (!view.fitted) { (goalsLayout === "org" ? fitOverview : fit)(); view.fitted = true; }
       applyTransform();
       restoreFocus(keepFocus);
       reapplyTransient(); // re-select the drawer's node (articles were replaced) + re-light hover
@@ -964,10 +1052,44 @@
     });
   }
 
+  // setLayout flips tree ⇄ org and forces a full re-layout: the mode isn't per-node
+  // data, so it doesn't change structuralSig — null it to defeat the in-place fast path,
+  // reset the fit so the new geometry re-frames, and re-render.
+  function setLayout(mode) {
+    var next = mode === "org" ? "org" : "tree";
+    if (next === goalsLayout) return;
+    goalsLayout = next;
+    var btns = document.querySelectorAll(".glayout-btn");
+    for (var i = 0; i < btns.length; i++) {
+      var on = btns[i].getAttribute("data-layout") === goalsLayout;
+      btns[i].classList.toggle("active", on);
+      btns[i].setAttribute("aria-pressed", String(on));
+    }
+    lastStructSig = null; // force a full rebuild (not an in-place status swap)
+    view.fitted = false;  // re-frame for the new geometry
+    // Only render immediately when a doc is already cached — a toggle BEFORE the first
+    // fetch would otherwise render the empty doc and flash a false "No goals file
+    // configured" state. The new mode is retained and applies to the next render (the
+    // pending/next refresh) either way (cubic #316 P2).
+    if (cache && isVisible()) render();
+  }
+
+  var layoutWired = false;
+  function wireLayoutToggle() {
+    if (layoutWired) return;
+    var btns = document.querySelectorAll(".glayout-btn");
+    if (!btns.length) return;
+    layoutWired = true;
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].addEventListener("click", function () { setLayout(this.getAttribute("data-layout")); });
+    }
+  }
+
   function show() {
     activated = true;
     setupPanZoom();
     wireNodes();
+    wireLayoutToggle();
     if (cache) { render(); } else { refresh(); }
   }
 

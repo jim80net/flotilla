@@ -125,7 +125,13 @@
           </h2>
           <p class="panel-desc">Read-only · goal structure from <code>fleet-goals.json</code> · desk &amp; backlog status live from the fleet board; issues shown linked</p>
         </div>
-        <div class="goals-legend" id="goals-legend" aria-hidden="true"></div>
+        <div class="goals-head-right">
+          <div class="goals-layout-toggle" role="group" aria-label="Goals map layout">
+            <button type="button" class="glayout-btn active" data-layout="tree" aria-pressed="true" title="Tiered altitude columns">tree</button>
+            <button type="button" class="glayout-btn" data-layout="org" aria-pressed="false" title="Hub-and-spoke org map (coordinator at center)">org</button>
+          </div>
+          <div class="goals-legend" id="goals-legend" aria-hidden="true"></div>
+        </div>
       </div>
       <div id="goals-graph" class="goals-graph">
         <div id="goals-viewport" class="goals-viewport" tabindex="0" aria-label="Fleet goals map. Tab moves between goals; when the map itself is focused, arrow keys pan, plus and minus zoom, and zero fits.">

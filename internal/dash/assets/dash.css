@@ -418,6 +418,29 @@ code {
 .dbg-key { color: var(--ink-3); font-size: .66rem; }
 .dbg-val { color: var(--ink-2); word-break: break-word; white-space: pre-wrap; }
 .dbg-firewall .dbg-val { color: var(--amber); }
+/* goals map layout toggle (tree ⇄ org, org-graph v2 §2) */
+.goals-head-right { display: flex; align-items: center; gap: 12px; }
+.goals-layout-toggle {
+  display: inline-flex;
+  border: 1px solid var(--line-soft, var(--line));
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.glayout-btn {
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: .64rem;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: .22rem .55rem;
+  cursor: pointer;
+}
+.glayout-btn + .glayout-btn { border-left: 1px solid var(--line-soft, var(--line)); }
+.glayout-btn.active { background: color-mix(in srgb, var(--cyan) 18%, transparent); color: var(--ink-1); }
+.glayout-btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
+
 /* the info⇄debug segmented toggle */
 .conv-head-right { display: flex; align-items: center; gap: .6rem; }
 .mirror-verbosity {

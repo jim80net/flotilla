@@ -340,6 +340,14 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	if !strings.Contains(js, `"flotilla"`) || !strings.Contains(js, `s === "desk"`) {
 		t.Error("goals.js scopeNoun must read the v2 scope tokens (flotilla/desk) — #312")
 	}
+	// org-graph v2 Inc B: the hub-and-spoke layout + its live tree⇄org toggle,
+	// consuming layout.hub_center. drawEdges must branch on the mode (radial spokes vs
+	// tiered beziers), and the toggle must force a rebuild.
+	for _, marker := range []string{"layoutOrg", "goalsLayout", "hub_center", "setLayout", "glayout-btn"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must retain the org-graph v2 hub-spoke layout (missing %q) — Inc B", marker)
+		}
+	}
 	// structuralSig must include the enrichment (priorities/milestones/harness) so an
 	// add/remove of a height-affecting field triggers a full rebuild, not a stale
 	// in-place text swap. Guard the index BEFORE slicing (a missing function must
@@ -374,6 +382,10 @@ func TestGoalsCanvasAssets(t *testing.T) {
 		if !strings.Contains(body, id) {
 			t.Errorf("index must contain the goals canvas element #%s", id)
 		}
+	}
+	// Inc B: the tree⇄org layout toggle chrome.
+	if !strings.Contains(body, "glayout-btn") || !strings.Contains(body, `data-layout="org"`) {
+		t.Error("index must carry the tree⇄org goals layout toggle (glayout-btn / data-layout)")
 	}
 }
 
