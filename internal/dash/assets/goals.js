@@ -1159,12 +1159,17 @@
   }
 
   // Re-fit on resize (keeps the map framed); the transform is otherwise the
-  // operator's to drive via pan/zoom.
+  // operator's to drive via pan/zoom. Mode-aware, matching the first-layout branch:
+  // the tree top-anchors (fit), the org graph frames centered (fitOverview) — a
+  // resize on the default org view must NOT jump it to tree framing (cubic #327 P2).
   var resizeTimer = null;
   window.addEventListener("resize", function () {
     if (!isVisible()) return;
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(function () { fit(); applyTransform(); }, 120);
+    resizeTimer = setTimeout(function () {
+      (goalsLayout === "org" ? fitOverview : fit)();
+      applyTransform();
+    }, 120);
   });
 
   window.flotillaGoals = { show: show, refresh: refresh };
