@@ -227,6 +227,15 @@ type GoalsDoc struct {
 	Counts      GoalsCounts    `json:"counts"`
 }
 
+// GoalTrailerIssue is an open issue discovered via a `goal-id:` body trailer (coordinator
+// convention). The HTTP layer supplies these from the tracker read path; BuildGoals attaches
+// them under the referenced goal node without requiring a hand-edited work_items entry.
+type GoalTrailerIssue struct {
+	GoalID string // parsed slug from the issue body trailer
+	Ref    string // owner/repo#N
+	State  string // open|closed (only open trailers are attached today)
+}
+
 // GoalsInputs are the already-loaded values BuildGoals renders. Keeping the builder pure (no I/O,
 // no clock) is what makes the goals read model unit-testable, exactly like BoardInputs.
 type GoalsInputs struct {
@@ -238,6 +247,9 @@ type GoalsInputs struct {
 	Backlog     string            // the fleet backlog markdown (for kind=backlog resolution)
 	DeskStates  map[string]string // agent name (lowercased) → live board state label (for kind=desk)
 	IssueStates map[string]string // "owner/repo#N" → "open"|"closed" (optional; empty when the tracker is off)
+	// TrailerIssues are open issues carrying a goal-id: trailer (tracker read path). Each is
+	// merged onto the matching goal node's work_items at render time.
+	TrailerIssues []GoalTrailerIssue
 }
 
 // BuildGoals assembles the goals document. Pure: no I/O, no real time. Absent/error inputs produce
@@ -277,6 +289,7 @@ func BuildGoals(in GoalsInputs) GoalsDoc {
 		}
 		resolved[id] = items
 	}
+	mergeTrailerIssues(byID, resolved, in)
 
 	// Roll-up is memoized over the (acyclic) tree — each node computed once.
 	rollup := make(map[string]string, len(in.File.Goals))
@@ -590,6 +603,39 @@ func countNode(c *GoalsCounts, n RenderedGoal) {
 		c.Awaiting++
 	case "active", "paused", "cancelled":
 		c.Aspirational++
+	}
+}
+
+// mergeTrailerIssues appends issue work items from goal-id: body trailers onto the referenced
+// goal nodes. Authored work_items win on duplicate refs; unknown goal ids are ignored.
+func mergeTrailerIssues(byID map[string]*Goal, resolved map[string][]RenderedWorkItem, in GoalsInputs) {
+	if len(in.TrailerIssues) == 0 {
+		return
+	}
+	existing := make(map[string]map[string]bool, len(byID))
+	for id, items := range resolved {
+		refs := make(map[string]bool, len(items))
+		for _, it := range items {
+			if ref := strings.TrimSpace(it.Ref); ref != "" {
+				refs[ref] = true
+			}
+		}
+		existing[id] = refs
+	}
+	for _, tr := range in.TrailerIssues {
+		if byID[tr.GoalID] == nil {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(tr.State), "open") {
+			continue
+		}
+		ref := strings.TrimSpace(tr.Ref)
+		if ref == "" || existing[tr.GoalID][ref] {
+			continue
+		}
+		item := resolveItem(WorkItem{Kind: WorkIssue, Ref: ref}, in)
+		resolved[tr.GoalID] = append(resolved[tr.GoalID], item)
+		existing[tr.GoalID][ref] = true
 	}
 }
 

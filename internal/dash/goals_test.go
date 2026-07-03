@@ -327,6 +327,61 @@ func TestBuildGoals_Counts(t *testing.T) {
 	}
 }
 
+func TestBuildGoals_TrailerIssueMergedOntoGoal(t *testing.T) {
+	file := GoalsFile{Goals: []Goal{
+		{ID: "dash-next-gen", Title: "Dash next gen"},
+		{ID: "other", Title: "Other"},
+	}}
+	doc := BuildGoals(GoalsInputs{
+		File: file, FileOK: true,
+		IssueStates: map[string]string{"jim80net/flotilla#267": "open"},
+		TrailerIssues: []GoalTrailerIssue{{
+			GoalID: "dash-next-gen",
+			Ref:    "jim80net/flotilla#267",
+			State:  "open",
+		}},
+	})
+	g := indexByID(doc.Goals)["dash-next-gen"]
+	if len(g.WorkItems) != 1 {
+		t.Fatalf("expected one trailer issue on goal, got %+v", g.WorkItems)
+	}
+	if g.WorkItems[0].Ref != "jim80net/flotilla#267" || g.WorkItems[0].Class != "in-flight" {
+		t.Errorf("trailer issue render wrong: %+v", g.WorkItems[0])
+	}
+	if other := indexByID(doc.Goals)["other"]; len(other.WorkItems) != 0 {
+		t.Errorf("unreferenced goal should have no trailer items, got %+v", other.WorkItems)
+	}
+}
+
+func TestBuildGoals_TrailerIssueSkipsDuplicateRef(t *testing.T) {
+	file := GoalsFile{Goals: []Goal{
+		{ID: "g", Title: "G", WorkItems: []WorkItem{{Kind: WorkIssue, Ref: "owner/repo#1"}}},
+	}}
+	doc := BuildGoals(GoalsInputs{
+		File: file, FileOK: true,
+		IssueStates: map[string]string{"owner/repo#1": "open"},
+		TrailerIssues: []GoalTrailerIssue{{
+			GoalID: "g", Ref: "owner/repo#1", State: "open",
+		}},
+	})
+	if len(doc.Goals[0].WorkItems) != 1 {
+		t.Fatalf("duplicate trailer must not append, got %d items", len(doc.Goals[0].WorkItems))
+	}
+}
+
+func TestBuildGoals_TrailerIssueIgnoresClosed(t *testing.T) {
+	file := GoalsFile{Goals: []Goal{{ID: "g", Title: "G"}}}
+	doc := BuildGoals(GoalsInputs{
+		File: file, FileOK: true,
+		TrailerIssues: []GoalTrailerIssue{{
+			GoalID: "g", Ref: "owner/repo#9", State: "closed",
+		}},
+	})
+	if len(doc.Goals[0].WorkItems) != 0 {
+		t.Fatalf("closed trailer issue must not attach, got %+v", doc.Goals[0].WorkItems)
+	}
+}
+
 func TestBuildGoals_IssueLinkedAndResolved(t *testing.T) {
 	file := GoalsFile{Goals: []Goal{
 		{ID: "g", Title: "G", WorkItems: []WorkItem{

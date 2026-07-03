@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/dash/control"
@@ -254,14 +255,15 @@ func (s *Server) loadHistory() HistoryDoc {
 // views read — so the Goals view can never diverge from the fleet board. A
 // missing goals file yields an honest Found=false document; a present-but-invalid
 // file surfaces the load error (structure is validated fail-closed) rather than a
-// partial tree. Issue work items are shown linked (unresolved) here — live issue
-// status resolution via the tracker is a tracked follow-on (the spec permits
-// `gh` at display time when configured).
+// partial tree. When the tracker is configured, open issues with a goal-id:
+// trailer are merged onto the referenced goal node and issue states are resolved
+// for work-item roll-up.
 func (s *Server) loadGoals() GoalsDoc {
 	in := GoalsInputs{
 		Backlog:    readFileOrEmpty(s.cfg.BacklogPath),
 		DeskStates: agentStates(s.loadBoard()),
 	}
+	s.bindTrackerIssues(&in)
 	if s.cfg.GoalsPath != "" {
 		if err := maybeCompileGoalsFromYAML(s.cfg.GoalsYAMLPath, s.cfg.GoalsPath); err != nil {
 			in.LoadErr = err.Error()
@@ -282,6 +284,39 @@ func (s *Server) loadGoals() GoalsDoc {
 		in.GeneratedAt = s.now().UTC().Format(time.RFC3339)
 	}
 	return BuildGoals(in)
+}
+
+// bindTrackerIssues resolves live issue state and goal-id: trailers from the pinned
+// tracker when configured. Tracker failures are non-fatal — goals still render from
+// the goals file; issue work items fall back to linked/unresolved.
+func (s *Server) bindTrackerIssues(in *GoalsInputs) {
+	if s.tracker == nil || s.cfg.Repo == "" {
+		return
+	}
+	issues, err := s.tracker.List(context.Background(), tracker.ListFilter{
+		State:       "all",
+		Limit:       200,
+		IncludeBody: true,
+	})
+	if err != nil {
+		return
+	}
+	in.IssueStates = make(map[string]string, len(issues))
+	for _, iss := range issues {
+		ref := tracker.IssueRef(s.cfg.Repo, iss.Number)
+		state := strings.ToLower(strings.TrimSpace(iss.State))
+		switch state {
+		case "open", "closed":
+			in.IssueStates[ref] = state
+		}
+		if iss.GoalID != "" && state == "open" {
+			in.TrailerIssues = append(in.TrailerIssues, GoalTrailerIssue{
+				GoalID: iss.GoalID,
+				Ref:    ref,
+				State:  state,
+			})
+		}
+	}
 }
 
 // --- handlers ---
