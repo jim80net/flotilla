@@ -169,32 +169,55 @@ code {
 /* ── layout ─────────────────────────────────────────────────────────────── */
 .wrap { max-width: 1180px; margin: 0 auto; padding: 1.1rem 1.25rem 1.5rem; display: grid; gap: 1rem; }
 
-/* conversation-centric shell (#210) */
+/* ── Conversations — single-primary-scroll app shell (#326) ───────────────────
+   Base (mobile-first): the three zones stack and the PAGE provides one natural
+   document scroll — no inner scroll boxes at all. On wide viewports the view
+   becomes a FIXED app-shell (body.conv-shell-active, toggled by dash.js on this
+   tab): the page stops scrolling, the desk rail is stable navigation, and the
+   merged coordination thread owns the ONE reading scroll. The latest-state glance
+   and the drive queue are peripheral (a pinned clamped summary; a collapsible in
+   the context column) — never competing scroll regions. */
 .conv-wrap {
-  max-width: 1440px;
+  max-width: 1500px;
+  width: 100%;
   margin: 0 auto;
   padding: 1rem 1.25rem 1.5rem;
-}
-.conv-layout {
   display: grid;
-  grid-template-columns: 248px minmax(0, 1fr) 288px;
+  grid-template-columns: 1fr;
   gap: .85rem;
-  align-items: start;
 }
-@media (max-width: 1100px) {
-  .conv-layout { grid-template-columns: 220px minmax(0, 1fr); }
-  .conv-act { grid-column: 1 / -1; }
+/* each panel is a flex column so a pinned head can sit over a filling body */
+.conv-nav, .conv-thread-col, .conv-context { display: flex; flex-direction: column; min-width: 0; }
+.conv-nav .panel-head, .conv-thread-head, .conv-context > .panel-head { flex: 0 0 auto; }
+
+/* wide viewports → the fixed app-shell; the page never scrolls */
+@media (min-width: 1101px) {
+  body.conv-shell-active { height: 100dvh; overflow: hidden; display: flex; flex-direction: column; }
+  body.conv-shell-active .foot { flex: 0 0 auto; }
+  .conv-wrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    grid-template-columns: 250px minmax(0, 1fr) 300px;
+    grid-template-rows: minmax(0, 1fr);   /* the single row fills the shell height */
+    overflow: hidden;                     /* the shell frame itself never scrolls */
+  }
+  .conv-nav, .conv-thread-col, .conv-context { min-height: 0; }
+  .conv-rail-list    { flex: 1 1 auto; min-height: 0; overflow-y: auto; } /* nav scroll (picker) */
+  .conv-thread       { flex: 1 1 auto; min-height: 0; overflow-y: auto; } /* THE one reading scroll */
+  .conv-context-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; } /* actions column */
 }
-@media (max-width: 720px) {
-  .conv-layout { grid-template-columns: 1fr; }
+/* mid width → two columns (nav + thread); the context column drops full-width
+   below and the page scrolls naturally (no fixed shell under ~1100px) */
+@media (min-width: 721px) and (max-width: 1100px) {
+  .conv-wrap { grid-template-columns: 230px minmax(0, 1fr); }
+  .conv-context { grid-column: 1 / -1; }
 }
 
 .conv-rail-list {
   padding: .5rem .45rem .75rem;
   display: grid;
   gap: .65rem;
-  max-height: calc(100vh - 11rem);
-  overflow-y: auto;
+  align-content: start;
 }
 .conv-rail-head { padding: .75rem .85rem; }
 .conv-group-head {
@@ -272,24 +295,30 @@ code {
 }
 .conv-role.xo { color: var(--cyan); border-color: rgba(79, 227, 208, .45); }
 
-.conv-main .panel-head {
+.conv-thread-head {
   flex-wrap: wrap;
-  gap: .75rem;
+  gap: .5rem .75rem;
+  align-items: center;
 }
-.conv-desk-card { flex-shrink: 0; }
-.conv-desk-mini {
-  min-width: 168px;
-  max-width: 220px;
-}
+.cth-id { min-width: 0; }
+/* the desk card now lives full-width at the top of the context column */
+.conv-desk-card { width: 100%; }
+.conv-desk-mini { min-width: 0; max-width: none; width: 100%; }
+
+/* session-mirror glance (design §2.5) — the selected desk's latest turn-final,
+   pinned as a compact clamped summary directly under the thread header (NOT a
+   scroll box). It is the "latest state at a glance"; the full history is the
+   thread below it. */
 .conv-map {
-  margin: 0 1rem;
-  padding: .55rem .7rem;
-  border: 1px dashed var(--line-soft);
-  border-radius: var(--r-sm);
+  flex: 0 0 auto;
+  margin: 0;
+  padding: .5rem 1rem .55rem;
+  border-bottom: 1px solid var(--line-soft);
+  background: color-mix(in srgb, var(--cyan) 4%, var(--abyss-3));
   font-size: .74rem;
   display: flex;
   align-items: baseline;
-  gap: .65rem;
+  gap: .5rem;
   flex-wrap: wrap;
 }
 .conv-map-label {
@@ -300,20 +329,28 @@ code {
   color: var(--ink-3);
 }
 .conv-map-empty { color: var(--ink-3); }
-/* session-mirror glance (design §2.5) — the selected desk's latest turn-final */
 .mirror-when { color: var(--ink-3); font-size: .62rem; letter-spacing: .04em; margin-left: .4rem; font-variant-numeric: tabular-nums; }
+/* clamped to two lines — a peek at the latest turn-final, no inner scrollbar */
 .mirror-glance {
-  flex: 1 1 100%; color: var(--ink-2); line-height: 1.5; margin-top: .35rem;
-  max-height: 6.4em; overflow-y: auto; white-space: normal;
+  flex: 1 1 100%;
+  color: var(--ink-2);
+  line-height: 1.45;
+  margin-top: .2rem;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  /* safety: even where line-clamp is unsupported, the pinned peek clips (no
+     scrollbar) rather than growing the header — the thread stays the one scroll */
+  max-height: 2.9em;
+  overflow: hidden;
 }
 
+/* the PRIMARY reading surface — the one scroll on this view (wide viewports) */
 .conv-thread {
-  padding: .75rem 1rem 1rem;
+  padding: .85rem 1rem 1rem;
   display: grid;
   gap: .55rem;
-  max-height: 42vh;
-  overflow-y: auto;
-  border-bottom: 1px solid var(--line-soft);
+  align-content: start;
 }
 .thread-msg {
   border: 1px solid var(--line-soft);
@@ -386,10 +423,9 @@ code {
   color: var(--ink-3);
   vertical-align: middle;
 }
-.thread-mirror-body {
-  max-height: 14rem;
-  overflow-y: auto;
-}
+/* #326: a session-output turn expands fully inside the ONE thread scroll — no
+   per-message scroll box (that was a scroll-inside-scroll trap). Long turn-finals
+   simply take vertical space in the thread, which is the correct reading flow. */
 /* session-mirror debug tier (§2.3 UI half) — collapsible per-entry detail, shown
    only when the info⇄debug toggle is on debug. */
 .thread-debug {
@@ -464,16 +500,30 @@ code {
 .mv-btn.active { background: color-mix(in srgb, var(--cyan) 18%, transparent); color: var(--ink-1); }
 .mv-btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
 
-.conv-fleet-strip {
-  padding: .75rem 1rem 1rem;
+/* ── context column: desk card · drive queue · intervene (#326) ──────────────*/
+.conv-context-body { display: flex; flex-direction: column; }
+.conv-desk-card { padding: .85rem 1rem 0; }
+
+/* drive queue — a peripheral collapsible; counts + items render inline with NO
+   inner scroll (the context column scrolls as one region on wide viewports) */
+.conv-queue { padding: .6rem 1rem .35rem; }
+.conv-queue-sum {
+  display: flex; align-items: baseline; gap: .5rem;
+  cursor: pointer; list-style: none; user-select: none;
 }
+.conv-queue-sum::-webkit-details-marker { display: none; }
+.conv-queue-sum::before {
+  content: "\25B8"; color: var(--ink-3); font-size: .7rem;
+  transition: transform .15s var(--ease); transform-origin: center;
+}
+.conv-queue[open] .conv-queue-sum::before { transform: rotate(90deg); }
+.conv-queue-sum .sub { margin: 0; }
 .conv-backlog {
   border: 1px solid var(--line-soft);
   border-radius: var(--r-sm);
   padding: .55rem .65rem;
   background: var(--abyss-2);
-  max-height: 16vh;
-  overflow-y: auto;
+  margin-top: .5rem;
 }
 
 .conv-act-divider {
