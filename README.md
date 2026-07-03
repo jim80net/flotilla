@@ -267,6 +267,20 @@ Near-term:
 - [ ] Release-sign-off workflow.
 - [x] Docs + an end-to-end quickstart that a newcomer can run cold — [docs/quickstart.md](./docs/quickstart.md) (cold-tested: install, send, clock).
 
+## Documentation
+
+The full documentation set — organized by who you are (newcomer, coding agent,
+operator running a fleet, contributor) — is mapped in
+**[docs/README.md](./docs/README.md)**. Quick jumps:
+
+- **New here** → [docs/quickstart.md](./docs/quickstart.md) (install → first
+  message → the clock, runnable cold).
+- **A coding agent setting it up** → [llm.md](./llm.md).
+- **Running a fleet in production** → the operator runbooks
+  ([watch](./docs/watch-runbook.md), [federation](./docs/federation.md),
+  [dash](./docs/dash-runbook.md), [voice](./docs/voice-runbook.md)).
+- **The agent doctrine** → [docs/OPERATING-PRINCIPLES.md](./docs/OPERATING-PRINCIPLES.md).
+
 ## License
 
 [MIT](./LICENSE).
