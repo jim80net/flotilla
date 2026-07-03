@@ -246,6 +246,14 @@
     if (s < 86400) return Math.floor(s / 3600) + "h ago";
     return Math.floor(s / 86400) + "d ago";
   }
+  // cheapHash (djb2) folds the entry content into the dedup key — ts alone is
+  // RFC3339 second-resolution, so two entries in the same second would otherwise
+  // dedup-skip the newer one and render stale.
+  function cheapHash(s) {
+    var h = 5381, i = (s || "").length;
+    while (i) { h = ((h * 33) ^ s.charCodeAt(--i)) >>> 0; }
+    return h;
+  }
   var lastMirrorKey = null; // dedup key so an SSE tick doesn't re-announce / reset scroll
   function mirrorEmpty(text, key) {
     if (lastMirrorKey === key) return;
@@ -271,7 +279,10 @@
     var latest = entries[entries.length - 1]; // ascending order → newest is last
     // Dedup: skip the innerHTML rewrite (which re-announces via the aria-live region
     // AND resets the operator's scroll position) when the shown entry is unchanged.
-    var key = selectedDesk + "|" + (latest.ts || "");
+    // Key on ts PLUS a content hash+length — ts is second-resolution, so a new entry
+    // in the same second must still re-render (not dedup-skip as stale).
+    var info = latest.info || "";
+    var key = selectedDesk + "|" + (latest.ts || "") + "|" + info.length + ":" + cheapHash(info);
     if (key === lastMirrorKey) return;
     lastMirrorKey = key;
     var when = latest.ts
