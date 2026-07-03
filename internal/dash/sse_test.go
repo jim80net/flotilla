@@ -255,6 +255,34 @@ func TestFileSigsChange(t *testing.T) {
 	}
 }
 
+// TestPollEmitsOnGoalsYAMLChange: the poller emits when only the goals YAML
+// source changes (paths[4]), not just the compiled goals JSON.
+func TestPollEmitsOnGoalsYAMLChange(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, dir := newTestServer(t, singleFleetRoster, now)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go srv.hub.run(ctx)
+	go srv.poll(ctx)
+
+	c := &sseClient{events: make(chan string, 4)}
+	if !srv.hub.add(c) {
+		t.Fatal("could not register client")
+	}
+
+	yamlPath := filepath.Join(dir, "fleet-goals.yaml")
+	time.Sleep(50 * time.Millisecond)
+	if err := os.WriteFile(yamlPath, []byte("goals: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-c.events:
+	case <-time.After(3 * time.Second):
+		t.Fatal("poller did not emit an update on a goals yaml change")
+	}
+}
+
 // TestPollEmitsOnSessionMirrorChange: the poller emits when a session-mirror ledger
 // is appended, not only when snapshot/ledger/backlog/goals change.
 func TestPollEmitsOnSessionMirrorChange(t *testing.T) {
