@@ -263,6 +263,13 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("goals.js must retain the keyboard/a11y engine (missing %q) — #284", marker)
 		}
 	}
+	// #302: node click → Conversations (nodeActivate), the ⚠ respond modal (openModal),
+	// and the per-node control chips.
+	for _, marker := range []string{"nodeActivate", "openModal", "gnode-respond"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must retain the #302 interaction (missing %q)", marker)
+		}
+	}
 
 	body := doGet(t, srv, "/").Body.String()
 	if !strings.Contains(body, "/static/goals.js") {
@@ -273,7 +280,8 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	for _, id := range []string{
 		"goals-viewport", "goals-world", "goals-nodes", "goals-edges", "goals-tierlabels", "goals-zin", "goals-zout", "goals-zfit",
 		"goals-drawer", "goals-drawer-body", "goals-drawer-close", "goals-help", // Inc 2: drawer + help tooltip
-		"goals-live", // #284: aria-live status region
+		"goals-live",                                           // #284: aria-live status region
+		"goals-modal", "goals-modal-input", "goals-modal-send", // #302: intervention modal
 	} {
 		if !strings.Contains(body, id) {
 			t.Errorf("index must contain the goals canvas element #%s", id)
