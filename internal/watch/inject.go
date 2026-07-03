@@ -43,11 +43,32 @@ const (
 	maxTransientReassess = 5
 )
 
+// JobKind labels a delivery so the injector can apply kind-specific policy: a
+// relay is deferred-not-dropped when busy and escalated on failure, while a tick
+// (heartbeat/detector) is dropped and re-evaluated on the next interval. The wire
+// values ("relay"/"heartbeat"/"detector"/"") are the audit-mirror labels and are
+// load-bearing — do not renumber or restring them.
+type JobKind string
+
+const (
+	// KindDefault (the zero value) is treated as an operator relay: a bare Job{}
+	// with no Kind set is a relay (deferred-not-dropped, escalated on failure), so
+	// isRelay/deliveryKind read an empty Kind as "relay".
+	KindDefault JobKind = ""
+	// KindRelay is an operator message relayed to an agent's pane.
+	KindRelay JobKind = "relay"
+	// KindHeartbeat is the XO liveness/continuation tick.
+	KindHeartbeat JobKind = "heartbeat"
+	// KindDetector is a change-detector wake or a desk-heartbeat/nudge beat
+	// (audit-suppressed; a tick is dropped when busy and never escalates).
+	KindDetector JobKind = "detector"
+)
+
 // Job is one delivery: a message destined for an agent's pane.
 type Job struct {
 	Agent   string
 	Message string
-	Kind    string // "relay" | "heartbeat" | "detector" | "" — labels the audit mirror
+	Kind    JobKind // KindRelay | KindHeartbeat | KindDetector | KindDefault — labels the audit mirror
 	// OriginChannel is the Discord channel a relayed operator message arrived on
 	// (set by the relay when routing; empty for heartbeat/detector ticks). It is the
 	// CoS-mirror seam (companion change #108): the post-confirmed-delivery mirror hook
@@ -323,13 +344,13 @@ func (in *Injector) Stop() {
 // deliveryKind labels a delivery for the audit log. A bare Job (empty Kind) is
 // an operator relay (the relay handler always sets "relay"; the heartbeat sets
 // "heartbeat"; the detector sets "detector"), so it reads as "relay".
-func deliveryKind(kind string) string {
-	if kind == "" {
-		return "relay"
+func deliveryKind(kind JobKind) string {
+	if kind == KindDefault {
+		return string(KindRelay)
 	}
-	return kind
+	return string(kind)
 }
 
 // isRelay reports whether a job is an operator relay (an empty Kind is a bare relay). Relay
 // jobs are deferred-not-dropped when busy and escalated loudly on failure; ticks are not.
-func isRelay(kind string) bool { return kind == "" || kind == "relay" }
+func isRelay(kind JobKind) bool { return kind == KindDefault || kind == KindRelay }

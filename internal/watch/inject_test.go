@@ -213,3 +213,50 @@ func TestInjectorEnqueueAfterStopDoesNotPanic(t *testing.T) {
 	in.Enqueue(Job{Agent: "x", Message: "late"}) // must drop safely, not panic
 	in.Stop()                                    // idempotent
 }
+
+// TestJobKindWireValuesAndPolicy locks the audit-mirror wire values of the JobKind
+// constants and the relay-vs-tick policy split (isRelay / deliveryKind). The wire
+// strings are persisted in logs and consulted by the cmd-side mirror suppression,
+// so a rename here is a behavior change, not a refactor — this test fails it. It is
+// the behavior-preservation proof for the string→JobKind typed-enum change.
+func TestJobKindWireValuesAndPolicy(t *testing.T) {
+	// Wire values (the audit labels) are load-bearing and must not drift.
+	cases := []struct {
+		kind JobKind
+		wire string
+	}{
+		{KindDefault, ""},
+		{KindRelay, "relay"},
+		{KindHeartbeat, "heartbeat"},
+		{KindDetector, "detector"},
+	}
+	for _, c := range cases {
+		if string(c.kind) != c.wire {
+			t.Errorf("JobKind %v wire value = %q, want %q", c.kind, string(c.kind), c.wire)
+		}
+	}
+
+	// isRelay: an empty Kind (a bare Job{}) and an explicit relay are relays; ticks are not.
+	for kind, want := range map[JobKind]bool{
+		KindDefault:   true,
+		KindRelay:     true,
+		KindHeartbeat: false,
+		KindDetector:  false,
+	} {
+		if got := isRelay(kind); got != want {
+			t.Errorf("isRelay(%q) = %v, want %v", string(kind), got, want)
+		}
+	}
+
+	// deliveryKind: the empty Kind reads as "relay" in the audit log; others read verbatim.
+	for kind, want := range map[JobKind]string{
+		KindDefault:   "relay",
+		KindRelay:     "relay",
+		KindHeartbeat: "heartbeat",
+		KindDetector:  "detector",
+	} {
+		if got := deliveryKind(kind); got != want {
+			t.Errorf("deliveryKind(%q) = %q, want %q", string(kind), got, want)
+		}
+	}
+}

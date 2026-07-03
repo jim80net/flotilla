@@ -331,7 +331,7 @@ func cmdWatch(args []string) error {
 		// Heartbeat ticks and change-detector wakes fire automatically; a per-wake
 		// marker is pure noise in the operator's channel (XO liveness is covered by
 		// the ack file + the down alert). Only relayed operator traffic is mirrored.
-		if j.Kind == "heartbeat" || j.Kind == "detector" {
+		if j.Kind == watch.KindHeartbeat || j.Kind == watch.KindDetector {
 			return
 		}
 		post("flotilla-watch", "→ "+j.Agent+": "+j.Message)
@@ -423,7 +423,7 @@ func cmdWatch(args []string) error {
 					".\nCheck in on the affected desk(s) and advance any authorized coordination. If nothing is " +
 					"actionable, reply idle and signal it by running: touch " + *settledPath + "." + ackInstr
 			}
-			injector.Enqueue(watch.Job{Agent: xo, Message: body, Kind: "detector"})
+			injector.Enqueue(watch.Job{Agent: xo, Message: body, Kind: watch.KindDetector})
 		}
 
 		// wakeAgent is the PARALLEL agent-targeted wake seam (visibility synthesis, B2). It enqueues a
@@ -459,7 +459,7 @@ func cmdWatch(args []string) error {
 				ack = ackInstr // liveness ack follows the TARGET, not the wake kind (#190)
 			}
 			body := synthesisWakeBody(agent, synthBin, synthRosterPath, synthesisReadSet(cfg, agent), cfg.OwnedChannels(agent), ack)
-			injector.Enqueue(watch.Job{Agent: agent, Message: body, Kind: "detector"})
+			injector.Enqueue(watch.Job{Agent: agent, Message: body, Kind: watch.KindDetector})
 		}
 
 		// Visibility-synthesis (B2) seams — wired ONLY when the roster opts in (default OFF ⇒ all nil
@@ -1025,7 +1025,7 @@ func newDeskHeartbeatDispatch(enqueue func(watch.Job), settleFor func(string) st
 			log.Printf("flotilla watch: desk-heartbeat prompt resolve failed for %q: %v (beat dropped this tick)", agent, err)
 			return
 		}
-		enqueue(watch.Job{Agent: agent, Message: body, Kind: "detector"})
+		enqueue(watch.Job{Agent: agent, Message: body, Kind: watch.KindDetector})
 	}
 }
 
@@ -1215,7 +1215,7 @@ func delegationNudgeOnFinish(cfg *roster.Config, tracker *delegatenudge.Tracker,
 			return
 		}
 		log.Printf("flotilla watch: delegation-nudge %s: inline-build signal", agent)
-		enqueue(watch.Job{Agent: agent, Message: delegatenudge.NudgePrompt(agent), Kind: "detector"})
+		enqueue(watch.Job{Agent: agent, Message: delegatenudge.NudgePrompt(agent), Kind: watch.KindDetector})
 	}
 }
 
@@ -1240,7 +1240,7 @@ func strandedHandoffOnFinish(cfg *roster.Config, tracker *stranded.Tracker, enqu
 			return
 		}
 		log.Printf("flotilla watch: stranded-handoff break %s: signal=%s", agent, r.Signal)
-		enqueue(watch.Job{Agent: agent, Message: stranded.NudgePrompt(agent), Kind: "detector"})
+		enqueue(watch.Job{Agent: agent, Message: stranded.NudgePrompt(agent), Kind: watch.KindDetector})
 	}
 }
 
@@ -1265,7 +1265,7 @@ func idleHoldOnFinish(cfg *roster.Config, tracker *idlehold.Tracker, enqueue fun
 			return
 		}
 		log.Printf("flotilla watch: idle-hold break %s: signal=%s strikes=%d", agent, r.Signal, tracker.Strikes(agent))
-		enqueue(watch.Job{Agent: agent, Message: idlehold.BreakPrompt(r.Recommendation), Kind: "detector"})
+		enqueue(watch.Job{Agent: agent, Message: idlehold.BreakPrompt(r.Recommendation), Kind: watch.KindDetector})
 	}
 }
 

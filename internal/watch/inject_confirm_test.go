@@ -103,7 +103,7 @@ func TestInjectorBusyRelayRepeatsStaleEscalation(t *testing.T) {
 func TestInjectorDropsBusyTick(t *testing.T) {
 	// A heartbeat/detector tick is time-relative: a busy OR transient result DROPS it (the next
 	// tick re-evaluates), never deferred, never escalated.
-	for _, kind := range []string{"heartbeat", "detector"} {
+	for _, kind := range []JobKind{KindHeartbeat, KindDetector} {
 		for _, cause := range []error{surface.ErrBusy, surface.ErrTransient} {
 			r := newRig(cause)
 			r.in.deliver(Job{Agent: "xo", Kind: kind})
