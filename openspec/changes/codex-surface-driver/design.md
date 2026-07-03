@@ -45,8 +45,23 @@ codex -m gpt-5.5-codex --sandbox workspace-write --ask-for-approval on-request
 Codex loads `AGENTS.md` from cwd natively — no `--append-system-prompt-file` equivalent needed
 (worktree `AGENTS.md` from `flotilla workspace init`).
 
-**No-self-merge:** scaffold `<worktree>/.codex/rules/flotilla-desk.rules` with `forbidden`
-`prefix_rule` entries for `git merge`, `git push`, `gh pr merge` ([rules docs](https://developers.openai.com/codex/rules)).
+**No-self-merge (defense-in-depth):** scaffold `<worktree>/.codex/rules/flotilla-desk.rules`
+with `forbidden` `prefix_rule` entries ([rules docs](https://developers.openai.com/codex/rules)):
+
+- `gh pr merge` — PR self-merge
+- `git push <remote> main|master|HEAD:main|:main` — writes targeting the default branch
+- `git push --force|--force-with-lease|-f` — force-push when the flag immediately follows `push`
+
+**Intentionally allowed** (fleet doctrine): feature-branch `git push`, merge-forward
+`git merge origin/main` (prefix rules cannot express “merge only from origin/default” vs
+self-merge — doctrine + gate stack are the real control).
+
+**prefix_rule residual** (argv-prefix matching only; not a security boundary):
+
+- `git push origin <branch> --force` — force flag after remote/ref is not a matching prefix
+- Non-`origin`/`upstream` remote names pushing to `main`
+- Default-branch writes via refspecs not listed above
+
 Project `.codex/` loads when the project is trusted; flotilla desks operate in trusted worktrees.
 
 ## 5. Result reader (`codexstore`)

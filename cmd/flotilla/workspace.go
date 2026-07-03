@@ -252,24 +252,60 @@ func shellQuote(s string) string {
 // workspaceLaunchCommand returns the shell launch command for a harness surface.
 // Identity files live in the worktree (worktreeAbs); grok and codex load AGENTS.md from cwd.
 // Paths and agent names are POSIX single-quoted — Recipe.Launch is sh -c interpreted.
-// codexDeskRules forbids execution desks from self-merging or pushing — the mechanical
-// complement to flotilla's no-self-merge doctrine. Codex loads project .codex/rules/
-// when the project is trusted ([rules docs](https://developers.openai.com/codex/rules)).
-const codexDeskRules = `# flotilla execution-desk rules — forbid merge/push (no-self-merge)
-prefix_rule(
-    pattern = ["git", "merge"],
-    decision = "forbidden",
-    justification = "Execution desks must not self-merge; surface the PR to the reviewer.",
-)
-prefix_rule(
-    pattern = ["git", "push"],
-    decision = "forbidden",
-    justification = "Execution desks must not push; the reviewer merges.",
-)
+// codexDeskRules is a best-effort no-self-merge backstop for execution desks. prefix_rule
+// matches argv prefixes only (Codex rules docs) — feature-branch push and merge-forward
+// (git merge origin/main) are intentionally not blocked. Doctrine + gate stack remain the
+// real control; this file is defense-in-depth, not a security boundary.
+const codexDeskRules = `# flotilla execution-desk rules — no-self-merge backstop (defense-in-depth)
 prefix_rule(
     pattern = ["gh", "pr", "merge"],
     decision = "forbidden",
-    justification = "Execution desks must not merge via gh; surface to the XO.",
+    justification = "Execution desks must not merge PRs; surface to the reviewer.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "main"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "master"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "main"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "master"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "HEAD:main"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", ":main"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "--force"],
+    decision = "forbidden",
+    justification = "Execution desks must not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "--force-with-lease"],
+    decision = "forbidden",
+    justification = "Execution desks must not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "-f"],
+    decision = "forbidden",
+    justification = "Execution desks must not force-push; use ordinary feature-branch pushes.",
 )
 `
 

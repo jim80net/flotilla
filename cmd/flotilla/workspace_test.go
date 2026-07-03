@@ -185,8 +185,26 @@ func TestCmdWorkspaceInitCodexScaffoldsAgentsAndRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("codex desk rules not scaffolded: %v", err)
 	}
-	if !strings.Contains(string(body), `decision = "forbidden"`) || !strings.Contains(string(body), `"git", "merge"`) {
-		t.Errorf("codex rules missing merge forbid: %q", body)
+	rulesText := string(body)
+	for _, must := range []string{
+		`pattern = ["gh", "pr", "merge"]`,
+		`pattern = ["git", "push", "origin", "main"]`,
+		`pattern = ["git", "push", "--force"]`,
+		`must not merge PRs`,
+		`must not write to the default branch`,
+	} {
+		if !strings.Contains(rulesText, must) {
+			t.Errorf("codex rules missing %q in:\n%s", must, rulesText)
+		}
+	}
+	for _, mustNot := range []string{
+		`pattern = ["git", "merge"],`,
+		`pattern = ["git", "push"],`,
+		`must not push`,
+	} {
+		if strings.Contains(rulesText, mustNot) {
+			t.Errorf("codex rules must not contain wholesale forbid %q", mustNot)
+		}
 	}
 	launch, err := os.ReadFile(filepath.Join(root, "c", "launch.json"))
 	if err != nil {

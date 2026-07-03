@@ -15,7 +15,8 @@ agents with `surface: "codex"` fail `surface.Get` at startup and cannot be drive
   keyed by pane cwd (mirrors `grokstore`).
 - **`cmd/flotilla/workspace.go`** — codex launch recipe (`codex -m gpt-5.5-codex --sandbox
   workspace-write --ask-for-approval on-request`) + scaffold `.codex/rules/flotilla-desk.rules`
-  forbidding `git merge` / `git push` / `gh pr merge` (execution-desk permission bounding).
+  forbidding PR merge, default-branch push, and force-push via targeted `prefix_rule` entries
+  (feature-branch push + merge-forward remain allowed; see design §4 residuals).
 - **`internal/workspace/workspace.go`** — `codex` → `AGENTS.md` identity convention.
 - **`cmd/flotilla/doctrine.go`** — wire codex into `harnessLaunchWired` (AGENTS.md loads natively).
 
