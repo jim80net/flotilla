@@ -255,6 +255,19 @@ type GoalsDoc struct {
 	Goals       []RenderedGoal `json:"goals"` // depth-first tree emission (GoalsDoc.tree alias)
 	Edges       []GoalEdge     `json:"edges,omitempty"`
 	Counts      GoalsCounts    `json:"counts"`
+	// Collaborations groups desk NODES that jointly work one lane, drawn as a dotted
+	// container on the org map (#324 Inc 3). Empty when no lane binds ≥2 desks.
+	Collaborations []Collaboration `json:"collaborations,omitempty"`
+}
+
+// Collaboration is a set of desk nodes jointly working one lane (#324 Inc 3). GROUPING
+// MECHANISM — PRIMARY: a goal whose work_items name ≥2 desk agents that have nodes on the
+// map (the operator's codex-harness-lane example: one lane goal referencing several desks).
+// FALLBACK: a NON-flotilla goal with ≥2 desk-scope child nodes (shared parentage) — the
+// flotilla hub is excluded so "every desk under the fleet" is never mistaken for a lane.
+type Collaboration struct {
+	Lane  string   `json:"lane"`  // the binding goal's title (or id)
+	Desks []string `json:"desks"` // node ids of the collaborating desks (≥2)
 }
 
 // GoalTrailerIssue is an open issue discovered via a `goal-id:` body trailer (coordinator
@@ -394,7 +407,85 @@ func BuildGoals(in GoalsInputs) GoalsDoc {
 		emit(id, 0)
 	}
 	materializeRosterDesks(&doc, in)
+	doc.Collaborations = buildCollaborations(&doc)
 	return doc
+}
+
+// buildCollaborations derives the desk collaboration groups (#324 Inc 3). See the
+// Collaboration type for the mechanism (work-item refs primary, shared parentage fallback).
+func buildCollaborations(doc *GoalsDoc) []Collaboration {
+	// desk agent (lowercased) → its node id; node id → scope (for the fallback).
+	agentNode := make(map[string]string)
+	nodeScope := make(map[string]string, len(doc.Goals))
+	for i := range doc.Goals {
+		g := &doc.Goals[i]
+		nodeScope[g.ID] = g.Scope
+		if g.Scope != "desk" {
+			continue
+		}
+		if o := strings.ToLower(strings.TrimSpace(g.Owner)); o != "" {
+			agentNode[o] = g.ID
+		}
+		if c := strings.ToLower(strings.TrimSpace(g.ConversationAgent)); c != "" {
+			agentNode[c] = g.ID
+		}
+	}
+
+	var out []Collaboration
+	isLane := make(map[string]bool) // goals already emitted as a work-item lane
+
+	// PRIMARY: a goal whose work_items reference ≥2 distinct desk nodes.
+	for i := range doc.Goals {
+		g := &doc.Goals[i]
+		ids := deskNodesFromWorkItems(g.WorkItems, agentNode)
+		if len(ids) >= 2 {
+			out = append(out, Collaboration{Lane: laneLabel(g), Desks: ids})
+			isLane[g.ID] = true
+		}
+	}
+	// FALLBACK: a non-flotilla goal (the hub is excluded) with ≥2 desk-scope children.
+	for i := range doc.Goals {
+		g := &doc.Goals[i]
+		if isLane[g.ID] || g.Scope == "flotilla" {
+			continue
+		}
+		ids := make([]string, 0, len(g.Children))
+		for _, cid := range g.Children {
+			if nodeScope[cid] == "desk" {
+				ids = append(ids, cid)
+			}
+		}
+		if len(ids) >= 2 {
+			out = append(out, Collaboration{Lane: laneLabel(g), Desks: ids})
+		}
+	}
+	return out
+}
+
+// deskNodesFromWorkItems returns the node ids for the distinct desk agents referenced by a
+// goal's work items (first-seen order), skipping agents with no node on the map.
+func deskNodesFromWorkItems(items []RenderedWorkItem, agentNode map[string]string) []string {
+	seen := make(map[string]bool)
+	var ids []string
+	for _, wi := range items {
+		if wi.Kind != string(WorkDesk) || strings.TrimSpace(wi.Agent) == "" {
+			continue
+		}
+		id, ok := agentNode[strings.ToLower(strings.TrimSpace(wi.Agent))]
+		if !ok || seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func laneLabel(g *RenderedGoal) string {
+	if t := strings.TrimSpace(g.Title); t != "" {
+		return t
+	}
+	return g.ID
 }
 
 // materializeRosterDesks adds a first-class card for every roster desk that is a channel

@@ -359,6 +359,13 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	if !strings.Contains(js, `n.source !== "roster"`) {
 		t.Error("visToken must treat a roster-materialized desk as live, not aspirational (#324 Inc 2)")
 	}
+	// #324 Inc 3: collaboration containers — the doc's collaborations are consumed, desks in
+	// a group are clustered adjacent, and a dotted container is drawn around them.
+	for _, marker := range []string{"collaborations", "clusterAdjacent", "collabMarkup", "gcollab"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must retain the collaboration-container engine (missing %q) — #324 Inc 3", marker)
+		}
+	}
 	for _, marker := range []string{"leafCount", "reach(", "nodeW", "RING_GAP"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("goals.js must retain the #324 content-aware org geometry (missing %q)", marker)

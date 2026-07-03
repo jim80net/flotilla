@@ -1238,6 +1238,22 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gdep { fill: none; stroke: color-mix(in srgb, var(--violet) 45%, transparent); stroke-width: 1.3; stroke-dasharray: 2 5; }
 .gdep.lit { stroke: var(--violet); stroke-width: 2; stroke-dasharray: 2 5; }
 
+/* collaboration container (#324 Inc 3): a dotted violet hull around desks sharing a lane,
+   with a faint fill so the joint effort reads as one unit; behind the spokes + nodes. */
+.gcollab {
+  fill: color-mix(in srgb, var(--violet) 6%, transparent);
+  stroke: color-mix(in srgb, var(--violet) 55%, transparent);
+  stroke-width: 1.4;
+  stroke-dasharray: 3 5;
+}
+.gcollab-label {
+  fill: var(--violet);
+  font-family: var(--display, "Barlow Condensed"), sans-serif;
+  font-size: 12px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
 .goals-empty { padding: 30px; text-align: center; border: 1px dashed var(--line); border-radius: var(--r); }
 .goals-empty.hidden { display: none; }
 

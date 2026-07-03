@@ -162,6 +162,40 @@ func TestBuildGoals_MaterializeRosterDesks(t *testing.T) {
 	}
 }
 
+func TestBuildGoals_Collaborations(t *testing.T) {
+	// A lane goal whose work_items reference two desks (codex-dev, codex-review) — both
+	// authored desk nodes — must produce a collaboration group over their node ids.
+	file := GoalsFile{Goals: []Goal{
+		{ID: "flot", Title: "Fleet", Scope: "flotilla", Owner: "xo"},
+		{ID: "cdev", Title: "Codex dev", Scope: "desk", Parent: "flot", Owner: "codex-dev", ConversationAgent: "codex-dev"},
+		{ID: "crev", Title: "Codex review", Scope: "desk", Parent: "flot", Owner: "codex-review", ConversationAgent: "codex-review"},
+		{ID: "lane", Title: "Codex harness lane", Scope: "task", Parent: "flot", WorkItems: []WorkItem{
+			{Kind: WorkDesk, Agent: "codex-dev"},
+			{Kind: WorkDesk, Agent: "codex-review"},
+		}},
+	}}
+	doc := BuildGoals(GoalsInputs{File: file, FileOK: true, MetaXO: "xo"})
+	if len(doc.Collaborations) != 1 {
+		t.Fatalf("expected 1 collaboration, got %d: %+v", len(doc.Collaborations), doc.Collaborations)
+	}
+	cb := doc.Collaborations[0]
+	if cb.Lane != "Codex harness lane" {
+		t.Errorf("lane label = %q, want the goal title", cb.Lane)
+	}
+	if len(cb.Desks) != 2 || !goalIDsContain(cb.Desks, "cdev") || !goalIDsContain(cb.Desks, "crev") {
+		t.Errorf("collaboration desks = %v, want [cdev crev]", cb.Desks)
+	}
+	// A single-desk lane must NOT form a collaboration (needs ≥2).
+	file2 := GoalsFile{Goals: []Goal{
+		{ID: "flot", Title: "Fleet", Scope: "flotilla", Owner: "xo"},
+		{ID: "cdev", Title: "Codex dev", Scope: "desk", Parent: "flot", Owner: "codex-dev"},
+		{ID: "lane", Title: "Solo lane", Scope: "task", Parent: "flot", WorkItems: []WorkItem{{Kind: WorkDesk, Agent: "codex-dev"}}},
+	}}
+	if doc2 := BuildGoals(GoalsInputs{File: file2, FileOK: true}); len(doc2.Collaborations) != 0 {
+		t.Errorf("a single-desk lane must not form a collaboration, got %+v", doc2.Collaborations)
+	}
+}
+
 func TestBuildGoals_DeskIDCollision(t *testing.T) {
 	// An authored goal LITERALLY named "desk:beta" must not be clobbered by the card
 	// synthesized for member beta — the synthetic id is suffixed to stay unique.
