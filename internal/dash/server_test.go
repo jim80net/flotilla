@@ -399,6 +399,42 @@ func TestThreadMerge(t *testing.T) {
 	}
 }
 
+// TestDebugTier locks the session-mirror debug tier (design §2.3 UI half, UI Inc 3):
+// a live info⇄debug toggle reveals each mirror entry's collapsible debug detail
+// (reader-map envelope, mirror note, firewall warn-terms). The payload is always in
+// the ledger, so this is a render toggle — no dormant env gate. As with the other
+// asset-content locks, this asserts the engine's presence in the served assets so a
+// regression (dropping the tier or the toggle) fails here.
+func TestDebugTier(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{
+		"debugBlock",         // per-entry debug renderer
+		"setMirrorVerbosity", // the toggle handler
+		"mirrorVerbosity",    // the detail-level state (also folded into the dedup keys)
+		"thread-debug",       // the collapsible detail element
+		"warn_terms",         // firewall diag surfaced
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js must retain the §2.3 debug-tier engine (missing %q)", marker)
+		}
+	}
+	html := doGet(t, srv, "/").Body.String()
+	if !strings.Contains(html, "mv-btn") || !strings.Contains(html, `data-verbosity="debug"`) {
+		t.Error("index must carry the info⇄debug verbosity toggle (mv-btn / data-verbosity)")
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	if !strings.Contains(css, ".thread-debug") {
+		t.Error("dash.css must style the debug tier (.thread-debug)")
+	}
+	// cubic #309 P3: the mirror-body typography is folded into the shared thread-gist
+	// rule, not duplicated — assert the combined selector exists.
+	if !strings.Contains(css, ".thread-gist,\n.thread-mirror-body") {
+		t.Error("dash.css must share the thread-gist / thread-mirror-body base rule (no duplication — #309 P3)")
+	}
+}
+
 // --- Host-allowlist (anti-DNS-rebinding) ---
 
 func TestHostAllowlist(t *testing.T) {

@@ -48,6 +48,13 @@
   /* ── cached read model (combined on refresh) ───────────────────────────── */
   var cache = { status: null, topology: null, history: null, mirror: null };
   var selectedDesk = null;
+  // Session-mirror detail level (design §2.3 UI half). "info" = the readermap body
+  // only (clean default); "debug" additionally reveals each entry's collapsible
+  // debug tier (reader-map envelope, mirror note, firewall warn-terms). The full
+  // debug payload is ALWAYS present in the ledger — this is a live render toggle, so
+  // the tier ships ON-demand (no dormant env gate, no restart). Folded into the
+  // glance + thread dedup keys so flipping it forces a repaint.
+  var mirrorVerbosity = "info";
   // Whether the operator has edited a control target field (route/resume). Once
   // touched, a background refresh must NOT overwrite it — otherwise a refresh
   // landing mid-typing silently replaces the operator's target and the control
@@ -282,7 +289,9 @@
     // Key on ts PLUS a content hash+length — ts is second-resolution, so a new entry
     // in the same second must still re-render (not dedup-skip as stale).
     var info = latest.info || "";
-    var key = selectedDesk + "|" + (latest.ts || "") + "|" + info.length + ":" + cheapHash(info);
+    // Key includes the verbosity so a toggle flip (which changes what renders) forces
+    // a repaint instead of dedup-skipping as unchanged.
+    var key = selectedDesk + "|" + (latest.ts || "") + "|" + info.length + ":" + cheapHash(info) + "|" + mirrorVerbosity;
     if (key === lastMirrorKey) return;
     lastMirrorKey = key;
     var when = latest.ts
@@ -291,7 +300,47 @@
     var body = escapeHtml(latest.info || "").replace(/\r?\n/g, "<br>");
     el("conv-map").innerHTML =
       '<span class="conv-map-label">session mirror ' + when + "</span>" +
-      '<div class="mirror-glance">' + body + "</div>";
+      '<div class="mirror-glance">' + body + "</div>" + debugBlock(latest);
+  }
+
+  // debugBlock renders one entry's collapsible debug tier (design §2.3 UI half),
+  // shown only when the verbosity toggle is on "debug" AND the entry carries debug
+  // detail — otherwise "" (the info tier stays clean). The reader-map envelope is
+  // rendered as labeled rows (anchor / delta / decision / audience — the mental-map
+  // fields, not a raw JSON blob), then the mirror note and any firewall warn-terms.
+  function debugBlock(entry) {
+    if (mirrorVerbosity !== "debug") return "";
+    var d = entry && entry.debug;
+    if (!d) return "";
+    var parts = [];
+    var env = d.envelope;
+    if (env) {
+      var rows = [["anchor", env.anchor], ["delta", env.delta], ["decision", env.decision], ["audience", env.audience]]
+        .filter(function (r) { return r[1]; })
+        .map(function (r) { return '<div class="dbg-row"><span class="dbg-key">' + r[0] + '</span><span class="dbg-val">' + escapeHtml(String(r[1])) + "</span></div>"; })
+        .join("");
+      if (rows) parts.push('<div class="dbg-group"><div class="dbg-group-h">reader-map envelope</div>' + rows + "</div>");
+    }
+    if (d.mirror_note) {
+      parts.push('<div class="dbg-row"><span class="dbg-key">mirror note</span><span class="dbg-val">' + escapeHtml(d.mirror_note) + "</span></div>");
+    }
+    if (d.firewall && Array.isArray(d.firewall.warn_terms) && d.firewall.warn_terms.length) {
+      parts.push('<div class="dbg-row dbg-firewall"><span class="dbg-key">firewall</span><span class="dbg-val">' + escapeHtml(d.firewall.warn_terms.join(", ")) + "</span></div>");
+    }
+    if (!parts.length) return "";
+    return '<details class="thread-debug"><summary>debug detail</summary><div class="dbg-body">' + parts.join("") + "</div></details>";
+  }
+
+  // setMirrorVerbosity flips the detail level and repaints both mirror surfaces.
+  function setMirrorVerbosity(level) {
+    mirrorVerbosity = level === "debug" ? "debug" : "info";
+    var btns = document.querySelectorAll(".mv-btn");
+    for (var i = 0; i < btns.length; i++) {
+      var on = btns[i].getAttribute("data-verbosity") === mirrorVerbosity;
+      btns[i].classList.toggle("active", on);
+      btns[i].setAttribute("aria-pressed", String(on));
+    }
+    paintMirror();
   }
 
   // fetchMirror loads the selected desk's session mirror and re-renders the glance.
@@ -380,7 +429,7 @@
     // AND resets the operator's scroll) when the merged timeline is unchanged. The
     // key folds each item's timestamp + a content hash so a same-second new entry
     // still re-renders (mirrors the #300 glance dedup discipline).
-    var sig = selectedDesk + "#" + items.map(function (it) {
+    var sig = selectedDesk + "#" + mirrorVerbosity + "#" + items.map(function (it) {
       return it.kind === "mirror"
         ? "m:" + (it.m.ts || "") + ":" + cheapHash(it.m.info || "")
         : "l:" + (it.e.parsed ? it.e.time : "") + ":" + cheapHash(it.e.parsed ? it.e.gist : it.e.raw);
@@ -429,6 +478,7 @@
           '<time class="thread-time" datetime="' + escapeHtml(m.ts || "") + '" title="' + escapeHtml(m.ts || "") + '">' + escapeHtml(relTime(m.ts)) + "</time>" +
         "</header>" +
         '<div class="thread-mirror-body">' + (body || '<span class="muted">(no session output)</span>') + "</div>" +
+        debugBlock(m) +
       "</div>"
     );
   }
@@ -581,6 +631,14 @@
   var tabs = document.querySelectorAll(".tab");
   for (var i = 0; i < tabs.length; i++) {
     tabs[i].addEventListener("click", function () { showView(this.getAttribute("data-view")); });
+  }
+
+  // Session-mirror detail toggle (info ⇄ debug) — static chrome, wired once. Flipping
+  // it repaints the glance + thread at the new tier (the debug payload is already in
+  // the cache, so no fetch is needed).
+  var mvBtns = document.querySelectorAll(".mv-btn");
+  for (var mv = 0; mv < mvBtns.length; mv++) {
+    mvBtns[mv].addEventListener("click", function () { setMirrorVerbosity(this.getAttribute("data-verbosity")); });
   }
 
   // openConversation is the deep-link the Goals map calls (feedback #3): select a

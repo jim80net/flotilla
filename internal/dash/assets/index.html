@@ -58,7 +58,13 @@
             <h2 id="conv-title">Conversation</h2>
             <p id="conv-sub" class="panel-desc">Coordination history for the selected desk</p>
           </div>
-          <div id="conv-desk-card" class="conv-desk-card" aria-live="polite"></div>
+          <div class="conv-head-right">
+            <div class="mirror-verbosity" role="group" aria-label="Session mirror detail level">
+              <button type="button" class="mv-btn active" data-verbosity="info" aria-pressed="true">info</button>
+              <button type="button" class="mv-btn" data-verbosity="debug" aria-pressed="false">debug</button>
+            </div>
+            <div id="conv-desk-card" class="conv-desk-card" aria-live="polite"></div>
+          </div>
         </div>
         <div id="conv-map" class="conv-map muted" aria-live="polite"></div>
         <div id="conv-thread" class="conv-thread" role="log" aria-live="polite"></div>
