@@ -43,6 +43,11 @@ htmlcov/
 # Live roster (secret-free by design, but holds your real ids — keep the example committed)
 /flotilla.json
 
+# Real fleet goals (host-local, coordinator-maintained; the real ends/strategies are
+# circumstantial — keep fleet-goals.example.yaml committed, the real one host-local).
+/fleet-goals.yaml
+fleet-goals.yaml
+
 # Host-local launch recipes (holds this host's worktree paths — never commit the
 # filesystem layout; trusted at the secrets level, sibling of flotilla-secrets.env)
 /flotilla-launch.json

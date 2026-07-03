@@ -1,0 +1,114 @@
+# fleet-goals.example.yaml — GENERIC example for the dash Goals-map view (#267/#268).
+#
+# The REAL goals file lives host-local at <roster-dir>/fleet-goals.yaml (gitignored,
+# coordinator-maintained) — this committed example is sanitized (no account numbers,
+# host paths, channel IDs, or PII; goal/desk names at the level already public in the
+# design docs). It doubles as the fixture the Goals UI renders against and the
+# contract reference for flotilla-dev's /api/goals (section 3).
+#
+# Schema (design.md §4.2): a TREE of goal nodes (single `parent`), acyclic-validated at
+# load. Tiers are `scope` levels (fleet → project → task), NOT 1:1 with coordinator/XO/
+# desk — a level can hold stacked / co-dependent goals (operator feedback #2). Express
+# cross-dependencies with the optional `depends_on: [id]` hint (rendered as a faint
+# dependency line / gantt-style ID label, never as a re-parent — the primary hierarchy
+# stays a clean tree).
+
+version: 1
+
+goals:
+  # ── Tier 0: a fleet-level end ──────────────────────────────────────────────
+  - id: fleet-reliability
+    title: "Fleet stays observable and recoverable"
+    scope: fleet
+    parent: null
+    owner: xo               # coordinator role (generic)
+    status: active          # active | achieved | paused | cancelled
+    children:
+      # ── Tier 1: a workstream (strategy serving the goal) ──────────────────
+      - id: operator-surfaces
+        title: "Operator mental-map surfaces ship"
+        scope: project
+        parent: fleet-reliability
+        owner: alpha-xo
+        status: active
+        children:
+          # ── Tier 2: concrete tasks (a desk is an attachment, not a node) ──
+          - id: goals-map-view
+            title: "Goals-map view (this one)"
+            scope: task
+            parent: operator-surfaces
+            owner: flotilla-dash     # desk attached to the task
+            status: active
+            work_items:
+              - kind: issue
+                ref: "jim80net/flotilla#267"
+              - kind: inline
+                text: "Goals DAG design trio + operator prototype approval"
+          - id: session-mirror
+            title: "Tri-surface session mirroring (html/discord/tmux)"
+            scope: task
+            parent: operator-surfaces
+            owner: flotilla-dev
+            status: active
+            # A stacked/co-dependent sibling: the goals-map view deep-links into the
+            # conversations this produces — expressed as a faint dependency line.
+            depends_on: [goals-map-view]
+            work_items:
+              - kind: backlog
+                marker: "[in-flight] tri-surface mirror fanout"
+      - id: durable-deploy
+        title: "Dash serves reboot-durable, firewall-clean"
+        scope: project
+        parent: fleet-reliability
+        owner: alpha-xo
+        status: achieved         # rolls up green — done + solidified
+        work_items:
+          - kind: issue
+            ref: "jim80net/flotilla#167"
+
+  # ── Tier 0: a second fleet goal — carries an operator-gated + aspirational mix ─
+  - id: coordinator-portability
+    title: "Coordinator seats are portable across harnesses"
+    scope: fleet
+    parent: null
+    owner: xo
+    status: active
+    children:
+      - id: harness-abstraction
+        title: "Surface-driver SPI covers Claude / Grok / Cursor"
+        scope: project
+        parent: coordinator-portability
+        owner: beta-xo
+        status: paused           # awaiting an operator decision → renders amber
+        work_items:
+          - kind: inline
+            text: "Pick the driver interface boundary (operator call)"
+      - id: portable-seats
+        title: "Live coordinator seat-swap without a fleet restart"
+        scope: project
+        parent: coordinator-portability
+        owner: beta-xo
+        status: active
+        # Cross-tree dependency: this needs the harness abstraction first.
+        depends_on: [harness-abstraction]
+        work_items:
+          - kind: backlog
+            marker: "[blocked] seat-swap runbook depends on SPI"
+
+  # ── Tier 0: an aspirational (unrealized) end — ghosted in the map ────────────
+  - id: federation-up-down
+    title: "Meta-XO over project-XOs over desks (up/down federation)"
+    scope: fleet
+    parent: null
+    owner: xo
+    status: paused             # intended-but-not-started → aspirational styling
+    children:
+      - id: delegated-subfleet
+        title: "A sub-fleet rolls up to its own lead (delegated)"
+        scope: project
+        parent: federation-up-down
+        owner: gamma-lead        # federated: owned by a sub-fleet's lead, not this coordinator
+        status: active
+        work_items:
+          - kind: desk
+            ref: gamma-lead
