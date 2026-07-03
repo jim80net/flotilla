@@ -300,6 +300,12 @@ code {
   color: var(--ink-3);
 }
 .conv-map-empty { color: var(--ink-3); }
+/* session-mirror glance (design §2.5) — the selected desk's latest turn-final */
+.mirror-when { color: var(--ink-3); font-size: .62rem; letter-spacing: .04em; margin-left: .4rem; font-variant-numeric: tabular-nums; }
+.mirror-glance {
+  flex: 1 1 100%; color: var(--ink-2); line-height: 1.5; margin-top: .35rem;
+  max-height: 6.4em; overflow-y: auto; white-space: normal;
+}
 
 .conv-thread {
   padding: .75rem 1rem 1rem;

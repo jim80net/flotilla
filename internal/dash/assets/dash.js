@@ -46,7 +46,7 @@
   window.flotillaDash = { el: el, escapeHtml: escapeHtml, getJSON: getJSON, postJSON: postJSON };
 
   /* ── cached read model (combined on refresh) ───────────────────────────── */
-  var cache = { status: null, topology: null, history: null };
+  var cache = { status: null, topology: null, history: null, mirror: null };
   var selectedDesk = null;
   // Whether the operator has edited a control target field (route/resume). Once
   // touched, a background refresh must NOT overwrite it — otherwise a refresh
@@ -172,6 +172,7 @@
         selectedDesk = this.getAttribute("data-desk");
         renderConversations();
         syncControlTargets(true); // explicit desk-selection: set the targets authoritatively
+        fetchMirror();            // load the newly-selected desk's session mirror
       });
     }
   }
@@ -230,11 +231,81 @@
       : "Select a desk from the fleet map";
   }
 
-  function renderReaderMapPlaceholder() {
-    var map = el("conv-map");
-    map.innerHTML =
-      '<span class="conv-map-label">reader map</span>' +
-      '<span class="conv-map-empty">Envelope deltas land here when Pillar E ships (<code>latest-delta.json</code>).</span>';
+  // renderSessionMirror is the glance widget (design §2.5): the selected desk's
+  // LATEST session-mirror entry (the desk's own session output at info level),
+  // replacing the old reader-map placeholder. Reads /api/session-mirror
+  // (SessionMirrorDoc, entries ascending oldest→newest, so the latest is last).
+  // Degrades gracefully (empty state) when the endpoint or desk is absent — the
+  // full history thread is a follow-on increment.
+  function relTime(iso) {
+    var t = Date.parse(iso);
+    if (isNaN(t)) return iso || "";
+    var s = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (s < 60) return "just now";
+    if (s < 3600) return Math.floor(s / 60) + "m ago";
+    if (s < 86400) return Math.floor(s / 3600) + "h ago";
+    return Math.floor(s / 86400) + "d ago";
+  }
+  // cheapHash (djb2) folds the entry content into the dedup key — ts alone is
+  // RFC3339 second-resolution, so two entries in the same second would otherwise
+  // dedup-skip the newer one and render stale.
+  function cheapHash(s) {
+    var h = 5381, i = (s || "").length;
+    while (i) { h = ((h * 33) ^ s.charCodeAt(--i)) >>> 0; }
+    return h;
+  }
+  var lastMirrorKey = null; // dedup key so an SSE tick doesn't re-announce / reset scroll
+  function mirrorEmpty(text, key) {
+    if (lastMirrorKey === key) return;
+    lastMirrorKey = key;
+    el("conv-map").innerHTML = '<span class="conv-map-label">session mirror</span>' +
+      '<span class="conv-map-empty">' + text + "</span>";
+  }
+  function renderSessionMirror() {
+    if (!selectedDesk) { mirrorEmpty("Select a desk to see its latest session output.", "none"); return; }
+    var doc = cache.mirror || {};
+    // Identity guard: cache.mirror may still hold the PREVIOUS desk's doc (the async
+    // fetch for the new selection hasn't landed) — show a neutral loading state, never
+    // the wrong desk's turn-final under this desk's header.
+    if (doc.agent && String(doc.agent).toLowerCase() !== String(selectedDesk).toLowerCase()) {
+      mirrorEmpty("Loading…", "load:" + selectedDesk); return;
+    }
+    var entries = Array.isArray(doc.entries) ? doc.entries : [];
+    if (!entries.length) {
+      mirrorEmpty(doc.error ? "Session mirror unavailable." : "No session mirror yet for this desk.",
+        (doc.error ? "err:" : "empty:") + selectedDesk);
+      return;
+    }
+    var latest = entries[entries.length - 1]; // ascending order → newest is last
+    // Dedup: skip the innerHTML rewrite (which re-announces via the aria-live region
+    // AND resets the operator's scroll position) when the shown entry is unchanged.
+    // Key on ts PLUS a content hash+length — ts is second-resolution, so a new entry
+    // in the same second must still re-render (not dedup-skip as stale).
+    var info = latest.info || "";
+    var key = selectedDesk + "|" + (latest.ts || "") + "|" + info.length + ":" + cheapHash(info);
+    if (key === lastMirrorKey) return;
+    lastMirrorKey = key;
+    var when = latest.ts
+      ? '<time class="mirror-when" datetime="' + escapeHtml(latest.ts) + '" title="' + escapeHtml(latest.ts) + '">' + escapeHtml(relTime(latest.ts)) + "</time>"
+      : "";
+    var body = escapeHtml(latest.info || "").replace(/\r?\n/g, "<br>");
+    el("conv-map").innerHTML =
+      '<span class="conv-map-label">session mirror ' + when + "</span>" +
+      '<div class="mirror-glance">' + body + "</div>";
+  }
+
+  // fetchMirror loads the selected desk's session mirror and re-renders the glance.
+  // Guarded on selectedDesk so a slow response for a de-selected desk is dropped.
+  // limit=100 fetches the full recent tail (the glance uses only the last entry) —
+  // sized for the Inc 2 thread-merge, which reuses cache.mirror.entries in full.
+  function fetchMirror() {
+    var want = selectedDesk;
+    if (!want) { cache.mirror = null; renderSessionMirror(); return; }
+    getJSON("/api/session-mirror?agent=" + encodeURIComponent(want) + "&limit=100").then(function (d) {
+      if (selectedDesk === want) { cache.mirror = d; renderSessionMirror(); }
+    }).catch(function (err) {
+      if (selectedDesk === want) { cache.mirror = { agent: want, entries: [], error: err.message }; renderSessionMirror(); }
+    });
   }
 
   function renderThread(history) {
@@ -301,7 +372,7 @@
     renderConversationRail(status, topology, fresh);
     renderConversationHeader(topology);
     renderDeskCard(status, fresh);
-    renderReaderMapPlaceholder();
+    renderSessionMirror();
     renderThread(history);
     renderBacklogStrip(history);
   }
@@ -350,6 +421,7 @@
       if (current()) {
         renderConversations();
         syncControlTargets();
+        fetchMirror(); // keep the selected desk's session-mirror glance current on each tick
       }
       // Keep the Goals view live off the same refresh cadence (SSE-triggered). It
       // fetches /api/goals itself and no-ops until the operator has opened the tab.
@@ -417,6 +489,7 @@
     showView("conversations");
     renderConversations();
     syncControlTargets(true);
+    fetchMirror(); // load the deep-linked desk's session mirror (the identity guard hides the prior desk's until it lands)
     // Move focus into the now-visible Conversations view — the deep-link hid the
     // Goals view, so leaving focus on the goals node would strand it on <body>.
     var title = el("conv-title");

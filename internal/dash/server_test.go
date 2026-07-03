@@ -212,6 +212,64 @@ func TestControlTargetsNotClobberedGuard(t *testing.T) {
 	}
 }
 
+// TestSessionMirrorGlance locks the session-mirror glance widget (design §2.5): the
+// reader-map placeholder is replaced by a render that consumes /api/session-mirror.
+// No JS test runner, so this asserts the served dash.js has the render + fetch and
+// no longer carries the old placeholder.
+func TestSessionMirrorGlance(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{"renderSessionMirror", "/api/session-mirror", "fetchMirror"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js must consume the session mirror (missing %q) — design §2.5", marker)
+		}
+	}
+	if strings.Contains(js, "renderReaderMapPlaceholder") {
+		t.Error("dash.js must replace the reader-map placeholder with the session-mirror glance — design §2.5")
+	}
+}
+
+// TestHandleSessionMirror locks the /api/session-mirror contract the glance JS binds
+// to: { agent, entries:[{ts, info, ...}] } with entries ascending (newest last). This
+// guards the field names dash.js silently depends on (entries[last].ts / .info).
+func TestHandleSessionMirror(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, dir := newTestServer(t, singleFleetRoster, now)
+	mdir := filepath.Join(dir, "session-mirror")
+	if err := os.MkdirAll(mdir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// two lines, oldest first (append order = ascending)
+	lines := `{"ts":"2026-06-18T11:00:00Z","agent":"alpha","verbose":"v1","info":"older","debug":{"info":"older"},"suppressed":false}
+{"ts":"2026-06-18T12:00:00Z","agent":"alpha","verbose":"v2","info":"newest","debug":{"info":"newest"},"suppressed":false}
+`
+	if err := os.WriteFile(filepath.Join(mdir, "alpha.jsonl"), []byte(lines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec := doGet(t, srv, "/api/session-mirror?agent=alpha&limit=100")
+	if rec.Code != 200 {
+		t.Fatalf("code %d", rec.Code)
+	}
+	var doc struct {
+		Agent   string `json:"agent"`
+		Entries []struct {
+			TS   string `json:"ts"`
+			Info string `json:"info"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Agent != "alpha" || len(doc.Entries) != 2 {
+		t.Fatalf("doc = %+v", doc)
+	}
+	// ascending order — the LAST entry is the newest (what the glance renders)
+	if doc.Entries[len(doc.Entries)-1].Info != "newest" {
+		t.Errorf("entries must be ascending (newest last); got last=%q", doc.Entries[len(doc.Entries)-1].Info)
+	}
+}
+
 // TestGoalsCanvasAssets locks the Goals view's pan/zoom canvas (#280 Inc 1). The
 // Goals view was ported from the merged flex-column layout to the operator-approved
 // 2D Fleet Situation Map — an absolute tiered layout inside a transform-driven world
