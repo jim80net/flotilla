@@ -551,6 +551,58 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 }
 .start-aside p { font-size: .92rem; margin: 0 0 1.2rem; }
 .start-aside .btn { width: 100%; justify-content: center; margin-bottom: .7rem; }
+.start-aside .install { margin-bottom: 1.1rem; max-width: none; }
+
+/* ── narrative scene: "a day with flotilla" ──────────────────────────────────
+   A copy/structure component (issue #323), built from the SAME tokens as the
+   cards / how-steps — a bordered panel of stacked "moments", each with an amber
+   time label (the audit/bus accent) and a second-person line. Not a re-theme. */
+.scene {
+  border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--abyss-2); overflow: hidden;
+}
+.moment {
+  display: grid; grid-template-columns: 9rem 1fr; gap: 1.5rem;
+  padding: 1.6rem 1.7rem;
+}
+.moment + .moment { border-top: 1px solid var(--line-soft); }
+.moment-when {
+  font-family: var(--display); font-weight: 600; font-size: .8rem;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--amber);
+  padding-top: .15rem;
+}
+.moment h3 { font-size: 1.12rem; margin: 0 0 .5rem; }
+.moment p { font-size: .95rem; margin: 0; color: var(--ink-2); }
+/* the second-person beats — lift them to high-emphasis ink so the reader's own
+   actions in the scene stand out from the surrounding narration */
+.moment p .you { color: var(--ink); font-weight: 500; }
+@media (max-width: 620px) {
+  .moment { grid-template-columns: 1fr; gap: .55rem; padding: 1.35rem 1.25rem; }
+  .moment-when { padding-top: 0; }
+}
+
+/* ── paste-this-to-your-agent prompt block ───────────────────────────────────
+   The single next action: a copyable prompt. Same panel + copy-btn language as
+   the install one-liner, but the body WRAPS (it's a sentence, not a shell line)
+   and carries no "$" prefix. Tokens only. */
+.paste {
+  border: 1px solid rgba(79,227,208,.28); border-radius: var(--r);
+  background: linear-gradient(160deg, rgba(79,227,208,.06), var(--abyss-2));
+  overflow: hidden;
+}
+.paste-lead {
+  font-size: .68rem; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--cyan-dim); margin: 0; padding: 1rem 1.3rem .2rem;
+}
+.paste-body {
+  margin: 0; padding: .3rem 1.3rem 1.2rem; color: var(--ink);
+  font-size: .95rem; line-height: 1.65;
+}
+.paste-copy {
+  display: block; width: 100%; text-align: center;
+  border: none; border-top: 1px solid var(--line);
+  padding-top: .85rem; padding-bottom: .85rem;
+}
 
 /* ── mobile rhythm ──────────────────────────────────────────────────────────
    On a phone the desktop 4.5rem band rhythm reads as oversized dead space; tighten
