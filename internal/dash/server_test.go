@@ -168,6 +168,46 @@ func TestHandleIndex(t *testing.T) {
 	}
 }
 
+// TestGoalsLayoutEnvDefault locks the #317 env-seeded layout default: the index renders
+// the body's data-goals-layout from Config.GoalsLayout (org by default, tree when set),
+// and goals.js reads that attribute so a deployment can seed the default (the live toggle
+// still overrides).
+func TestGoalsLayoutEnvDefault(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+
+	// normalize: default org; "tree" (any case) honored; anything else → org.
+	for in, want := range map[string]string{"": "org", "org": "org", "tree": "tree", "TREE": "tree", "bogus": "org"} {
+		if got := normalizeGoalsLayout(in); got != want {
+			t.Errorf("normalizeGoalsLayout(%q) = %q, want %q", in, got, want)
+		}
+	}
+
+	// default (no env) → the index seeds org.
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	if body := doGet(t, srv, "/").Body.String(); !strings.Contains(body, `data-goals-layout="org"`) {
+		t.Error("index must seed the goals layout (default org) into the body attribute")
+	}
+
+	// tree seeded via Config → the index seeds tree.
+	dir := t.TempDir()
+	rosterPath := filepath.Join(dir, "flotilla.json")
+	if err := os.WriteFile(rosterPath, []byte(singleFleetRoster), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv2, err := NewServer(Config{RosterPath: rosterPath, Bind: DefaultBind, GoalsLayout: "tree", Transport: stubTransport{}, WebTransport: stubTransport{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body := doGet(t, srv2, "/").Body.String(); !strings.Contains(body, `data-goals-layout="tree"`) {
+		t.Error("a tree-seeded Config must render data-goals-layout=\"tree\"")
+	}
+
+	// goals.js consumes the attribute.
+	if js := doGet(t, srv, "/static/goals.js").Body.String(); !strings.Contains(js, "data-goals-layout") {
+		t.Error("goals.js must read the env-seeded default from data-goals-layout (#317)")
+	}
+}
+
 func TestHandleStaticAssets(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 	srv, _ := newTestServer(t, singleFleetRoster, now)
@@ -351,13 +391,22 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	// #324 Inc 1: org is the DEFAULT layout (operator UX blessing), and the org geometry
 	// is content-aware — leaf-weight angular packing + per-ring radii from card extents
 	// (no fixed RING_STEP), with narrower org cards.
-	if !strings.Contains(js, `var goalsLayout = "org"`) {
-		t.Error("goals.js must default goalsLayout to \"org\" (#324 operator UX blessing)")
+	// The default is org (operator UX blessing #324), now env-seedable via the body
+	// attribute (#317) — the IIFE reads data-goals-layout and falls back to "org".
+	if !strings.Contains(js, `return v === "tree" ? "tree" : "org"`) {
+		t.Error("goals.js must seed goalsLayout from data-goals-layout, defaulting org (#324/#317)")
 	}
 	// #324 Inc 2: a roster-materialized desk (source==="roster") is a live entity, never
 	// ghosted as aspirational even when it has no work/children.
 	if !strings.Contains(js, `n.source !== "roster"`) {
 		t.Error("visToken must treat a roster-materialized desk as live, not aspirational (#324 Inc 2)")
+	}
+	// #324 Inc 3: collaboration containers — the doc's collaborations are consumed, desks in
+	// a group are clustered adjacent, and a dotted container is drawn around them.
+	for _, marker := range []string{"collaborations", "clusterAdjacent", "collabMarkup", "gcollab"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must retain the collaboration-container engine (missing %q) — #324 Inc 3", marker)
+		}
 	}
 	for _, marker := range []string{"leafCount", "reach(", "nodeW", "RING_GAP"} {
 		if !strings.Contains(js, marker) {
@@ -384,6 +433,13 @@ func TestGoalsCanvasAssets(t *testing.T) {
 		if !strings.Contains(sig, f) {
 			t.Errorf("structuralSig must include enrichment field %q (#283 height contract)", f)
 		}
+	}
+	// #324 Inc 3: collaboration membership drives clusterAdjacent (it MOVES nodes), so a
+	// lane change is structural — structuralSig must fold in collaborations, or a
+	// collaborations-only change would ride the in-place fast path and never re-cluster
+	// (cubic #335 P2).
+	if !strings.Contains(sig, "collab") || !strings.Contains(sig, "collaborations.map") {
+		t.Error("structuralSig must fold in collaborations so a lane change forces a re-layout (#335 P2)")
 	}
 
 	body := doGet(t, srv, "/").Body.String()

@@ -180,7 +180,9 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
   .nav-links a {
     flex-shrink: 0; white-space: nowrap;
     font-size: .74rem; letter-spacing: .04em;
-    padding: .35em .65em; border-radius: 999px;
+    padding: .35em .8em; border-radius: 999px;
+    /* 44px touch target for the section-nav pills (docs/design/README §7) */
+    min-height: 44px; display: inline-flex; align-items: center;
     border: 1px solid var(--line-soft); background: color-mix(in srgb, var(--ink) 4%, transparent);
   }
   .nav-links a:hover { border-color: var(--cyan-dim); background: color-mix(in srgb, var(--cyan) 8%, transparent); }
@@ -556,6 +558,11 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 
 /* ── 30-second start ────────────────────────────────────────────────────── */
 .start-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 2.5rem; align-items: start; }
+/* grid tracks default to a min of min-content; a child with a non-wrapping line
+   (the install command, a URL) would otherwise expand its track past the phone
+   viewport. min-width:0 lets each column shrink to its track so long lines wrap
+   or scroll WITHIN their box instead of widening the page (#330). */
+.start-grid > * { min-width: 0; }
 @media (max-width: 860px) { .start-grid { grid-template-columns: 1fr; gap: 2rem; } }
 .start-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 1.2rem; }
 .start-steps li { display: flex; gap: 1.1rem; align-items: flex-start; min-width: 0; }
@@ -628,6 +635,11 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 .paste-body {
   margin: 0; padding: .3rem 1.3rem 1.2rem; color: var(--ink);
   font-size: .95rem; line-height: 1.65;
+  /* the prompt embeds a full https:// URL — an unbreakable token that, left
+     alone, sets this grid column's min-content width and drags the whole
+     "start" grid past a phone viewport (horizontal overflow, #330). Let the
+     URL wrap. */
+  overflow-wrap: anywhere;
 }
 .paste-copy {
   display: block; width: 100%; text-align: center;
