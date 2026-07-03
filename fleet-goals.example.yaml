@@ -37,7 +37,8 @@ goals:
             title: "Goals-map view (this one)"
             scope: task
             parent: operator-surfaces
-            owner: flotilla-dash     # desk attached to the task
+            owner: flotilla-dash          # desk attached to the task
+            conversation_agent: flotilla-dash  # cell deep-links to this agent's thread (#267 feedback #3)
             status: active
             work_items:
               - kind: issue
@@ -49,6 +50,7 @@ goals:
             scope: task
             parent: operator-surfaces
             owner: flotilla-dev
+            conversation_agent: flotilla-dev
             status: active
             # A stacked/co-dependent sibling: the goals-map view deep-links into the
             # conversations this produces — expressed as a faint dependency line.

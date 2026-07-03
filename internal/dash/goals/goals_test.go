@@ -120,6 +120,80 @@ func TestDetail_OwnerDeskAndMissing(t *testing.T) {
 	}
 }
 
+func TestParse_Edges(t *testing.T) {
+	// ws-active depends_on ws-done → one cross-dependency edge in GoalsDoc.edges[].
+	d, err := Parse([]byte(sampleYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Edges) != 1 {
+		t.Fatalf("edges = %+v, want 1 (ws-active→ws-done)", d.Edges)
+	}
+	e := d.Edges[0]
+	if e.From != "ws-active" || e.To != "ws-done" || e.Kind != "depends-on" {
+		t.Errorf("edge = %+v", e)
+	}
+}
+
+func TestParse_DanglingDependsOnRejected(t *testing.T) {
+	y := "version: 1\ngoals:\n  - id: a\n    title: A\n    status: active\n    depends_on: [ghost]\n"
+	if _, err := Parse([]byte(y)); err == nil || !strings.Contains(err.Error(), "unknown id") {
+		t.Errorf("a depends_on to an unknown id must be rejected, got %v", err)
+	}
+}
+
+func TestCompute_AuthoredPausedCancelledPrecedence(t *testing.T) {
+	// A paused/cancelled node keeps its authored state even with an in-flight child.
+	y := `
+version: 1
+goals:
+  - id: p
+    title: Paused
+    status: paused
+    children:
+      - id: pc
+        title: Child
+        status: active
+        work_items:
+          - kind: backlog
+            marker: "[in-flight] busy"
+  - id: c
+    title: Cancelled
+    status: cancelled
+`
+	d, _ := Parse([]byte(y))
+	if d.Rollups["p"] != "paused" {
+		t.Errorf("paused node = %q, want paused (authored precedence, not overridden by in-flight child)", d.Rollups["p"])
+	}
+	if d.Rollups["pc"] != "in-flight" {
+		t.Errorf("child = %q, want in-flight (children still computed)", d.Rollups["pc"])
+	}
+	if d.Rollups["c"] != "cancelled" {
+		t.Errorf("cancelled node = %q, want cancelled", d.Rollups["c"])
+	}
+}
+
+func TestCompute_VacuousLeafIsActiveNotAchieved(t *testing.T) {
+	// A leaf with zero children AND zero work items must be active, never achieved.
+	d, _ := Parse([]byte("version: 1\ngoals:\n  - id: leaf\n    title: Leaf\n    status: active\n"))
+	if d.Rollups["leaf"] != "active" {
+		t.Errorf("empty leaf = %q, want active (never vacuous-achieved)", d.Rollups["leaf"])
+	}
+	// An authored achieved leaf IS achieved (authored wins).
+	d2, _ := Parse([]byte("version: 1\ngoals:\n  - id: done\n    title: Done\n    status: achieved\n"))
+	if d2.Rollups["done"] != "achieved" {
+		t.Errorf("authored-achieved leaf = %q, want achieved", d2.Rollups["done"])
+	}
+}
+
+func TestParse_ConversationAgentPassthrough(t *testing.T) {
+	d, _ := Parse([]byte("version: 1\ngoals:\n  - id: g\n    title: T\n    status: active\n    conversation_agent: alpha\n"))
+	det, _ := d.Detail("g")
+	if det.Node.ConversationAgent != "alpha" {
+		t.Errorf("conversation_agent = %q, want alpha (deep-link ref)", det.Node.ConversationAgent)
+	}
+}
+
 func TestParse_RejectsDuplicateAndCycle(t *testing.T) {
 	dup := "version: 1\ngoals:\n  - id: x\n    title: A\n    status: active\n  - id: x\n    title: B\n    status: active\n"
 	if _, err := Parse([]byte(dup)); err == nil || !strings.Contains(err.Error(), "duplicate") {

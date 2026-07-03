@@ -26,16 +26,30 @@ import (
 // roll-up (drives the live blocked/awaiting/in-flight coloring). The UI reads
 // both. JSON tags are the contract the Goals view binds to.
 type GoalNode struct {
-	ID            string      `json:"id" yaml:"id"`
-	Title         string      `json:"title" yaml:"title"`
-	Scope         string      `json:"scope,omitempty" yaml:"scope"` // fleet | project | task
-	Parent        string      `json:"parent,omitempty" yaml:"parent"`
-	Owner         string      `json:"owner,omitempty" yaml:"owner"` // coordinator/desk role (generic)
-	Status        string      `json:"status" yaml:"status"`         // active | achieved | paused | cancelled (authored)
-	StatusDisplay string      `json:"status_display" yaml:"-"`      // computed roll-up (never from yaml)
-	DependsOn     []string    `json:"depends_on,omitempty" yaml:"depends_on"`
-	WorkItems     []WorkItem  `json:"work_items,omitempty" yaml:"work_items"`
-	Children      []*GoalNode `json:"children,omitempty" yaml:"children"`
+	ID     string `json:"id" yaml:"id"`
+	Title  string `json:"title" yaml:"title"`
+	Scope  string `json:"scope,omitempty" yaml:"scope"` // fleet | project | task
+	Parent string `json:"parent,omitempty" yaml:"parent"`
+	Owner  string `json:"owner,omitempty" yaml:"owner"` // coordinator/desk role (generic)
+	// ConversationAgent is the deep-link ref: clicking the node opens this agent's
+	// Conversations thread (#267 tri-surface mirroring). Falls back to Owner in the
+	// UI when unset.
+	ConversationAgent string      `json:"conversation_agent,omitempty" yaml:"conversation_agent"`
+	Status            string      `json:"status" yaml:"status"`    // active | achieved | paused | cancelled (authored)
+	StatusDisplay     string      `json:"status_display" yaml:"-"` // computed roll-up (never from yaml)
+	DependsOn         []string    `json:"depends_on,omitempty" yaml:"depends_on"`
+	WorkItems         []WorkItem  `json:"work_items,omitempty" yaml:"work_items"`
+	Children          []*GoalNode `json:"children,omitempty" yaml:"children"`
+}
+
+// Edge is a cross-dependency edge (depends_on), exposed flat in GoalsDoc.edges[] so
+// the UI can draw the faint dependency lines / gantt-style ID labels without walking
+// the tree (operator feedback #2). Structural parent/child (serves/realizes) stay in
+// the tree; edges[] carries only the cross-links.
+type Edge struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	Kind string `json:"kind"` // "depends-on"
 }
 
 // WorkItem binds a node to concrete work. Kind is issue|backlog|inline|desk; the
@@ -55,6 +69,7 @@ type WorkItem struct {
 // stamp. Matches design §6.1.
 type GoalsDoc struct {
 	Tree        []*GoalNode       `json:"tree"`
+	Edges       []Edge            `json:"edges"`
 	Rollups     map[string]string `json:"rollups"`
 	GeneratedAt string            `json:"generated_at"`
 }
@@ -102,14 +117,46 @@ func Parse(raw []byte) (*GoalsDoc, error) {
 		return nil, fmt.Errorf("parse goals yaml: %w", err)
 	}
 	roots := f.Goals
-	if err := validateAcyclic(roots); err != nil {
+	ids := map[string]bool{}
+	if err := validateAcyclic(roots, ids); err != nil {
+		return nil, err
+	}
+	edges, err := buildEdges(roots, ids)
+	if err != nil {
 		return nil, err
 	}
 	rollups := map[string]string{}
 	for _, n := range roots {
 		compute(n, rollups)
 	}
-	return &GoalsDoc{Tree: roots, Rollups: rollups, GeneratedAt: nowRFC3339()}, nil
+	return &GoalsDoc{Tree: roots, Edges: edges, Rollups: rollups, GeneratedAt: nowRFC3339()}, nil
+}
+
+// buildEdges flattens every node's depends_on into cross-dependency edges. A
+// depends_on referencing an unknown id is config drift (a typo) — a typed error,
+// not a silently-dropped edge. (A full depends_on cycle check is deferred to
+// flotilla-dev's core; the primary hierarchy is already tree-acyclic.)
+func buildEdges(roots []*GoalNode, ids map[string]bool) ([]Edge, error) {
+	edges := []Edge{}
+	var walk func(nodes []*GoalNode) error
+	walk = func(nodes []*GoalNode) error {
+		for _, n := range nodes {
+			for _, dep := range n.DependsOn {
+				if !ids[dep] {
+					return fmt.Errorf("goals: node %q depends_on unknown id %q", n.ID, dep)
+				}
+				edges = append(edges, Edge{From: n.ID, To: dep, Kind: "depends-on"})
+			}
+			if err := walk(n.Children); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := walk(roots); err != nil {
+		return nil, err
+	}
+	return edges, nil
 }
 
 // Detail returns the node + its work items + owner-desk hints for /api/goals/{id},
@@ -152,8 +199,7 @@ func (d *GoalsDoc) find(id string) *GoalNode {
 // via the parent references (children are structural, but a malformed file could
 // declare a child whose parent points elsewhere, or repeat an ID). Same fail-loud
 // discipline as roster.assertSynthesisAcyclic.
-func validateAcyclic(roots []*GoalNode) error {
-	seen := map[string]bool{}
+func validateAcyclic(roots []*GoalNode, seen map[string]bool) error {
 	var walk func(n *GoalNode, ancestors map[string]bool) error
 	walk = func(n *GoalNode, ancestors map[string]bool) error {
 		if n.ID == "" {
@@ -184,8 +230,17 @@ func validateAcyclic(roots []*GoalNode) error {
 }
 
 // compute fills StatusDisplay for a node and its subtree (post-order) + records it
-// in rollups. Implements design §4.4: blocked wins, then awaiting (operator-gated),
-// then in-flight, then achieved, else active. Reuses the backlog marker tokens.
+// in rollups. Rules (design §4.4 + the #268 fix-round deltas relayed by COS 2026-07-03):
+//   - AUTHORED PRECEDENCE: an authored `status` of paused or cancelled WINS over any
+//     computed roll-up — never silently overridden (a coordinator who paused/cancelled
+//     a node means it, regardless of child activity).
+//   - Otherwise (active / achieved authored) compute: blocked › awaiting › in-flight,
+//     then achieved, else active.
+//   - VACUOUS-ACHIEVED GUARD: a leaf with zero children AND zero work items computes
+//     "active", never "achieved" (only an authored `status: achieved` marks it done).
+//
+// Children are computed post-order first so their rollups exist regardless of the
+// parent's authored-precedence short-circuit.
 func compute(n *GoalNode, rollups map[string]string) string {
 	for i := range n.WorkItems {
 		n.WorkItems[i].Status = itemStatus(n.WorkItems[i])
@@ -206,37 +261,43 @@ func compute(n *GoalNode, rollups map[string]string) string {
 			allChildrenAchieved = false
 		}
 	}
-	itemBlocked, itemAwaiting, itemInFlight, itemsDone := false, false, false, true
-	for _, wi := range n.WorkItems {
-		switch wi.Status {
-		case "blocked":
-			itemBlocked = true
-			itemsDone = false
-		case "awaiting":
-			itemAwaiting = true
-			itemsDone = false
-		case "in-flight":
-			itemInFlight = true
-			itemsDone = false
-		case "done":
-			// counts as done
-		default:
-			itemsDone = false
-		}
-	}
 
 	var display string
 	switch {
-	case childBlocked || itemBlocked:
-		display = "blocked"
-	case childAwaiting || itemAwaiting:
-		display = "awaiting"
-	case childInFlight || itemInFlight:
-		display = "in-flight"
-	case n.Status == "achieved" || (allChildrenAchieved && (len(n.WorkItems) == 0 || itemsDone)):
-		display = "achieved"
+	case n.Status == "cancelled" || n.Status == "paused":
+		// Authored precedence — the coordinator's state is not overridden by activity.
+		display = n.Status
 	default:
-		display = "active"
+		itemBlocked, itemAwaiting, itemInFlight, itemsDone := false, false, false, true
+		for _, wi := range n.WorkItems {
+			switch wi.Status {
+			case "blocked":
+				itemBlocked, itemsDone = true, false
+			case "awaiting":
+				itemAwaiting, itemsDone = true, false
+			case "in-flight":
+				itemInFlight, itemsDone = true, false
+			case "done":
+				// counts as done
+			default:
+				itemsDone = false
+			}
+		}
+		leaf := len(n.Children) == 0 && len(n.WorkItems) == 0
+		switch {
+		case childBlocked || itemBlocked:
+			display = "blocked"
+		case childAwaiting || itemAwaiting:
+			display = "awaiting"
+		case childInFlight || itemInFlight:
+			display = "in-flight"
+		case n.Status == "achieved":
+			display = "achieved" // authored done
+		case !leaf && allChildrenAchieved && (len(n.WorkItems) == 0 || itemsDone):
+			display = "achieved" // all real children achieved, items done
+		default:
+			display = "active" // includes the vacuous leaf — never achieved by computation
+		}
 	}
 	n.StatusDisplay = display
 	rollups[n.ID] = display
