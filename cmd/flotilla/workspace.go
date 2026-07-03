@@ -483,7 +483,10 @@ func workspaceLaunchCommand(worktreeAbs, agent, identity, surface string, coordi
 		}
 		return base, nil
 	case "codex":
-		base := "codex -m gpt-5.5-codex --sandbox workspace-write --ask-for-approval on-request"
+		// gpt-5.5 (not gpt-5.5-codex): ChatGPT-auth desks reject the -codex slug — live-validated
+		// 2026-07-03 after operator codex login ("model is not supported when using Codex with a
+		// ChatGPT account"); default gpt-5.5 works in TUI and codex exec.
+		base := "codex -m gpt-5.5 --sandbox workspace-write --ask-for-approval on-request"
 		if coordinator {
 			return fmt.Sprintf("export FLOTILLA_SELF=%s; export FLOTILLA_SECRETS=\"${FLOTILLA_SECRETS:-$HOME/.config/flotilla/flotilla-secrets.env}\"; %s",
 				shellQuote(agent), base), nil

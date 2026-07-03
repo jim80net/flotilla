@@ -14,8 +14,8 @@
 - [x] 2.5 Grok coordinator generic parity mirror (§2 pattern) — **flotilla-dev** (grok-coordinator harness parity PR)
 
 ## 3. Codex coordinator surface (codex-harness-dev)
-- [ ] 3.1 Post-auth fixture capture (working/idle/approval/composer) — **[blocked: operator codex login]**
-- [ ] 3.2 `ComposerStateProbe` on codex driver — blocked on 3.1 for live validation
+- [x] 3.1 Post-auth fixture capture (working/idle/approval/composer) — LIVE 2026-07-03 ChatGPT auth, gpt-5.5 default
+- [x] 3.2 `ComposerStateProbe` on codex driver — binary-sourced `›` classifier; post-auth revalidation still on 3.1
 - [x] 3.3 Coordinator launch recipe: `FLOTILLA_SELF`, `FLOTILLA_SECRETS`, PATH
 - [x] 3.4 `scaffoldCodexCoordinatorRules` (distinct from execution `flotilla-desk.rules`)
 - [x] 3.5 `xo-outbound` doctrine member (coordinator-only identity-append)
@@ -23,8 +23,8 @@
 - [x] 3.7 **Code guard:** `workspace init` refuses codex coordinator until codex implements `ComposerStateProbe` (fail-closed in binary, not doctrine-only)
 
 ## 4. Validation
-- [ ] 4.1 Unit/integration: coordinator init scaffolds secrets launch + coordinator rules (after 2.1 + 3.2)
-- [ ] 4.2 Detector classifier smoke on codex turn-final fixtures — blocked on 3.1
+- [x] 4.1 Unit/integration: coordinator init scaffolds secrets launch + coordinator rules (PR #262 + 3.2)
+- [x] 4.2 Detector classifier smoke on codex turn-final fixtures
 - [x] 4.3 `go test ./...`
 
 ## 5. Supervised trial (post-implementation — operator gate)

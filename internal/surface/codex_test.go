@@ -33,14 +33,27 @@ func TestParseCodexState(t *testing.T) {
 			want:     StateAwaitingInput,
 		},
 		{
-			name:     "hooks trust gate → AwaitingInput",
+			name:     "hooks trust gate (binary) → AwaitingInput",
 			captured: "  Hooks need review\n  Press enter to continue\n  Trust all and continue",
 			want:     StateAwaitingInput,
 		},
 		{
-			name:     "approval modal Action Required → AwaitingApproval",
+			name: "hooks trust gate LIVE 2026-07-03 post-auth → AwaitingInput",
+			captured: "  Hooks need review\n  4 hooks are new or changed.\n" +
+				"  Press enter to confirm or esc to go back\n  Trust all and continue",
+			want: StateAwaitingInput,
+		},
+		{
+			name:     "approval modal Action Required (binary) → AwaitingApproval",
 			captured: "  [ ! ] Action Required\n  Approve for me\n  Decline this request",
 			want:     StateAwaitingApproval,
+		},
+		{
+			name: "on-request shell approval LIVE 2026-07-03 → AwaitingApproval",
+			captured: "  ◦ Running printf '%s\n" +
+				"  Would you like to run the following command?\n" +
+				"  › 1. Yes, proceed (y)\n  Press enter to confirm or esc to cancel",
+			want: StateAwaitingApproval,
 		},
 		{
 			name:     "main needs approval status → AwaitingApproval",
@@ -48,9 +61,15 @@ func TestParseCodexState(t *testing.T) {
 			want:     StateAwaitingApproval,
 		},
 		{
-			name:     "footer interrupt hint → Working",
+			name:     "footer interrupt hint (binary) → Working",
 			captured: "  streaming output above\n  esc to interrupt\n  /status",
 			want:     StateWorking,
+		},
+		{
+			name: "working spinner LIVE 2026-07-03 → Working",
+			captured: "  › Reply with exactly PONG and nothing else.\n" +
+				"  ◦ Working (0s • esc to interrupt)\n  › Find and fix a bug in @filename",
+			want: StateWorking,
 		},
 		{
 			name:     "task in progress guard → Working",
@@ -66,6 +85,12 @@ func TestParseCodexState(t *testing.T) {
 			name:     "idle empty composer → Idle (default)",
 			captured: "  Turn done.\n  › \n  / for commands",
 			want:     StateIdle,
+		},
+		{
+			name: "post-turn idle LIVE 2026-07-03 → Idle",
+			captured: "  • PONG\n  › Find and fix a bug in @filename\n" +
+				"  gpt-5.5 default · ~/workspace/…/example-repo",
+			want: StateIdle,
 		},
 		{
 			name:     "empty capture → Idle",
@@ -152,10 +177,52 @@ func TestCodexSubmitRotateRoute(t *testing.T) {
 }
 
 var (
-	_ ResultReader  = codex{}
-	_ ReplyReader   = codex{}
-	_ RecycleBridge = codex{}
+	_ ResultReader       = codex{}
+	_ ReplyReader        = codex{}
+	_ RecycleBridge      = codex{}
+	_ ComposerStateProbe = codex{}
 )
+
+func TestClassifyCodexComposerLine(t *testing.T) {
+	cases := []struct {
+		name     string
+		captured string
+		cursorY  int
+		want     ComposerDisposition
+	}{
+		{"empty › prompt → Cleared", "  Turn done.\n  › \n  / for commands", 1, ComposerCleared},
+		{"pending body after › → Pending", "  › draft in composer\n  / for commands", 0, ComposerPending},
+		{"placeholder hint LIVE 2026-07-03 → Pending", "  › Find and fix a bug in @filename\n  gpt-5.5 default", 0, ComposerPending},
+		{"approval row without › → Undetermined", "  [ ! ] Action Required\n  Approve for me", 0, ComposerUndetermined},
+		{"cursor out of range → Undetermined", "  › \n", 99, ComposerUndetermined},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyCodexComposerLine(tc.captured, tc.cursorY); got != tc.want {
+				t.Errorf("classifyCodexComposerLine = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCodexComposerStateWiring(t *testing.T) {
+	const cleared = "  › \n  / for commands"
+	t.Run("idle cleared composer → Cleared", func(t *testing.T) {
+		c := codex{
+			cursorState: func(string) (int, bool, error) { return 0, false, nil },
+			capturePane: func(string) (string, error) { return cleared, nil },
+		}
+		if got := c.ComposerState("0:0.0"); got != ComposerCleared {
+			t.Errorf("ComposerState = %v, want Cleared", got)
+		}
+	})
+	t.Run("cursor read error → Undetermined", func(t *testing.T) {
+		c := codex{cursorState: func(string) (int, bool, error) { return 0, false, errors.New("no server") }}
+		if got := c.ComposerState("0:0.0"); got != ComposerUndetermined {
+			t.Errorf("ComposerState = %v, want Undetermined", got)
+		}
+	})
+}
 
 func TestCodexLatestResult(t *testing.T) {
 	t.Run("resolves cwd then reads the store", func(t *testing.T) {

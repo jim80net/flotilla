@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/jim80net/flotilla/internal/roster"
+	"github.com/jim80net/flotilla/internal/surface"
 )
 
 func writeRosterFile(t *testing.T, body string) string {
@@ -214,8 +215,8 @@ func TestCmdWorkspaceInitCodexScaffoldsAgentsAndRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(launch), "codex -m gpt-5.5-codex") {
-		t.Errorf("codex launch = %q, want gpt-5.5-codex recipe", launch)
+	if !strings.Contains(string(launch), "codex -m gpt-5.5 ") {
+		t.Errorf("codex launch = %q, want gpt-5.5 recipe (ChatGPT-auth compatible)", launch)
 	}
 	if !strings.Contains(string(launch), "--ask-for-approval on-request") {
 		t.Errorf("codex launch missing on-request approval: %q", launch)
@@ -439,7 +440,7 @@ func TestWorkspaceLaunchCommandCodexCoordinatorExportsSecrets(t *testing.T) {
 	for _, want := range []string{
 		"export FLOTILLA_SELF='alpha-xo'",
 		`export FLOTILLA_SECRETS="${FLOTILLA_SECRETS:-$HOME/.config/flotilla/flotilla-secrets.env}"`,
-		"codex -m gpt-5.5-codex",
+		"codex -m gpt-5.5 ",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("codex coordinator launch missing %q in %q", want, got)
@@ -447,18 +448,82 @@ func TestWorkspaceLaunchCommandCodexCoordinatorExportsSecrets(t *testing.T) {
 	}
 }
 
-func TestCmdWorkspaceInitRefusesCodexCoordinatorWithoutProbe(t *testing.T) {
+func TestCmdWorkspaceInitCodexCoordinatorScaffoldsWithProbe(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)
 	repo := initTestGitRepo(t)
 	rosterPath := writeRosterFile(t, `{"xo_agent":"alpha-xo","agents":[{"name":"alpha-xo","surface":"codex"}]}`)
-	err := cmdWorkspaceInit(workspaceInitArgs("alpha-xo", rosterPath, repo))
-	if err == nil {
-		t.Fatal("init for codex coordinator without ComposerStateProbe = nil error, want refusal")
+	if err := cmdWorkspaceInit(workspaceInitArgs("alpha-xo", rosterPath, repo)); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "ComposerStateProbe") {
-		t.Errorf("error = %v, want ComposerStateProbe refusal", err)
+	worktree := filepath.Join(filepath.Dir(repo), "alpha-xo")
+	agents, err := os.ReadFile(filepath.Join(worktree, "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
 	}
+	if !strings.Contains(string(agents), "flotilla:xo-outbound") {
+		t.Error("codex coordinator AGENTS.md should include xo-outbound doctrine")
+	}
+	rules, err := os.ReadFile(filepath.Join(worktree, ".codex", "rules", "flotilla-coordinator.rules"))
+	if err != nil {
+		t.Fatalf("coordinator rules not scaffolded: %v", err)
+	}
+	if strings.Contains(string(rules), `["gh", "pr", "merge"]`) {
+		t.Error("coordinator rules must not forbid gh pr merge")
+	}
+	launch, err := os.ReadFile(filepath.Join(root, "alpha-xo", "launch.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	launchText := string(launch)
+	for _, want := range []string{"FLOTILLA_SELF", "FLOTILLA_SECRETS", "codex -m gpt-5.5 "} {
+		if !strings.Contains(launchText, want) {
+			t.Errorf("coordinator launch missing %q in %s", want, launchText)
+		}
+	}
+}
+
+// codexProbeGateStub is a codex-named driver WITHOUT ComposerStateProbe — exercises the
+// fail-closed refuse path once the real codex driver ships the probe (the old branch
+// that keyed off !ok on the type assert became dead).
+type codexProbeGateStub struct{}
+
+func (codexProbeGateStub) Name() string                     { return "codex" }
+func (codexProbeGateStub) Submit(string, string) error      { return nil }
+func (codexProbeGateStub) Assess(string) surface.State      { return surface.StateIdle }
+func (codexProbeGateStub) Rotate(string) error              { return nil }
+func (codexProbeGateStub) RotateStrategy() surface.Strategy { return surface.SlashCommand }
+func (codexProbeGateStub) Close(string) error               { return surface.ErrNoGracefulClose }
+
+func TestRefuseCodexCoordinatorProbeGate(t *testing.T) {
+	t.Run("refuses when codex driver lacks ComposerStateProbe", func(t *testing.T) {
+		real, ok := surface.Get("codex")
+		if !ok {
+			t.Fatal("codex driver not registered")
+		}
+		surface.Register(codexProbeGateStub{})
+		t.Cleanup(func() { surface.Register(real) })
+
+		err := refuseCodexCoordinatorWithoutProbe("alpha-xo")
+		if err == nil {
+			t.Fatal("want refusal when codex lacks ComposerStateProbe")
+		}
+		if !strings.Contains(err.Error(), "ComposerStateProbe") {
+			t.Fatalf("error = %q, want ComposerStateProbe in message", err)
+		}
+	})
+	t.Run("passes when shipped codex driver implements ComposerStateProbe", func(t *testing.T) {
+		drv, ok := surface.Get("codex")
+		if !ok {
+			t.Fatal("codex driver not registered")
+		}
+		if _, ok := drv.(surface.ComposerStateProbe); !ok {
+			t.Fatal("shipped codex driver must implement ComposerStateProbe")
+		}
+		if err := refuseCodexCoordinatorWithoutProbe("alpha-xo"); err != nil {
+			t.Errorf("with ComposerStateProbe shipped, gate should pass: %v", err)
+		}
+	})
 }
 
 func TestScaffoldCodexCoordinatorRulesAllowsMerge(t *testing.T) {
