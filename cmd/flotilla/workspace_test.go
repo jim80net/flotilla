@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jim80net/flotilla/internal/roster"
 )
 
 func writeRosterFile(t *testing.T, body string) string {
@@ -248,6 +250,59 @@ func TestCmdWorkspaceInitGrokScaffoldsAgentsMdInWorktree(t *testing.T) {
 	}
 	if !strings.Contains(string(launch), "grok --model composer-2.5-fast") {
 		t.Errorf("grok launch = %q, want composer-2.5-fast workhorse recipe", launch)
+	}
+}
+
+func TestHarnessAllocationSurface(t *testing.T) {
+	cfg := &roster.Config{
+		XOAgent:  "xo",
+		CosAgent: "alpha-xo",
+		Agents: []roster.Agent{
+			{Name: "xo"},
+			{Name: "alpha-xo", Surface: "codex"},
+			{Name: "backend", Surface: "grok"},
+			{Name: "infra"},
+		},
+	}
+	cases := []struct {
+		agent, rosterSurface, want string
+	}{
+		{"xo", "", "claude-code"},
+		{"xo", "claude-code", "claude-code"},
+		{"alpha-xo", "codex", "codex"},
+		{"backend", "grok", "grok"},
+		{"infra", "", "grok"},
+		{"infra", "codex", "codex"},
+	}
+	for _, tc := range cases {
+		if got := harnessAllocationSurface(cfg, tc.agent, tc.rosterSurface); got != tc.want {
+			t.Errorf("harnessAllocationSurface(%q, %q) = %q, want %q",
+				tc.agent, tc.rosterSurface, got, tc.want)
+		}
+	}
+}
+
+func TestCmdWorkspaceInitCoordinatorCodexScaffoldsAgentsMd(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)
+	repo := initTestGitRepo(t)
+	rosterPath := writeRosterFile(t, `{"xo_agent":"alpha-xo","agents":[{"name":"alpha-xo","surface":"codex"}]}`)
+	if err := cmdWorkspaceInit(workspaceInitArgs("alpha-xo", rosterPath, repo)); err != nil {
+		t.Fatal(err)
+	}
+	worktree := filepath.Join(filepath.Dir(repo), "alpha-xo")
+	if _, err := os.Stat(filepath.Join(worktree, "AGENTS.md")); err != nil {
+		t.Errorf("codex coordinator should scaffold AGENTS.md in worktree: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(worktree, "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Error("codex coordinator should not scaffold CLAUDE.md")
+	}
+	launch, err := os.ReadFile(filepath.Join(root, "alpha-xo", "launch.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(launch), "codex -m gpt-5.5-codex") {
+		t.Errorf("codex coordinator launch = %q, want codex management recipe", launch)
 	}
 }
 

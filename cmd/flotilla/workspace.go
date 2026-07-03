@@ -227,10 +227,13 @@ func buildLaunchRecipe(worktreeAbs, agent, identity, surface string) (launch.Rec
 }
 
 // harnessAllocationSurface applies operating-principles §10: coordinator seats
-// (any XO or CoS) always scaffold Claude; execution desks default to grok unless
-// the roster names another non-Claude surface explicitly.
+// default to Claude; an explicit roster surface "codex" selects a codex management
+// seat. Execution desks default to grok unless the roster names another surface.
 func harnessAllocationSurface(cfg *roster.Config, agent, rosterSurface string) string {
 	if cfg.IsCoordinator(agent) {
+		if rosterSurface == "codex" {
+			return "codex"
+		}
 		return "claude-code"
 	}
 	if rosterSurface == "" || rosterSurface == "claude-code" {

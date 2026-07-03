@@ -6,11 +6,11 @@
 - [x] 1.3 Surface to COS (no self-merge) — PR #261
 
 ## 2. Generic harness parity (flotilla-dev — coordinate, no duplicate PRs)
-- [ ] 2.0 Flag spec/impl seam to flotilla-dev: watch + workspace ADDED requirements in this change are implemented in their lane — avoid duplicate PRs
-- [ ] 2.1 `harnessAllocationSurface`: honor `surface: "codex"` for coordinators
-- [ ] 2.2 `delegatenudge`: `IsManagementHarness` includes codex; harness-neutral `NudgePrompt`
-- [ ] 2.3 Seat-swap + supervised-trial runbook (docs; roster template; rollback via `flotilla switch`)
-- [ ] 2.4 `flotilla.example.json` generic coordinator-on-codex example (role + surface fields)
+- [x] 2.0 Flag spec/impl seam to flotilla-dev: watch + workspace ADDED requirements in this change are implemented in their lane — avoid duplicate PRs
+- [x] 2.1 `harnessAllocationSurface`: honor `surface: "codex"` for coordinators
+- [x] 2.2 `delegatenudge`: `IsManagementHarness` includes codex; harness-neutral `NudgePrompt`
+- [x] 2.3 Seat-swap + supervised-trial runbook (docs; roster template; rollback via `flotilla switch`)
+- [x] 2.4 `flotilla.example.json` generic coordinator-on-codex example (role + surface fields)
 
 ## 3. Codex coordinator surface (codex-harness-dev)
 - [ ] 3.1 Post-auth fixture capture (working/idle/approval/composer) — operator gate
