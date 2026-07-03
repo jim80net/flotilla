@@ -853,21 +853,41 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gdot-awaiting { border: 1px solid var(--amber); background: rgba(255, 180, 84, .16); }
 .gdot-aspirational { border: 1px dashed var(--ink-3); background: transparent; }
 
-/* graph: horizontally-scrolling altitude columns + SVG edge overlay */
+/* graph: the pan/zoom Fleet Situation Map — an absolute tiered canvas inside a
+   transform-driven world (ported from the operator-approved prototype). */
 .goals-graph { position: relative; margin-top: 12px; }
 .goals-graph.hidden { display: none; }
-.goals-columns { position: relative; display: flex; gap: 64px; overflow-x: auto; padding: 4px 4px 14px; }
-.goals-edges { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; z-index: 0; }
-.gcol { position: relative; z-index: 1; min-width: 240px; display: flex; flex-direction: column; gap: 10px; }
-.gcol-head {
-  font-family: var(--display); font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
-  font-size: .72rem; color: var(--ink-3); border-bottom: 1px solid var(--line); padding-bottom: 6px;
+.goals-viewport {
+  position: relative; overflow: hidden; cursor: grab;
+  height: calc(100vh - 320px); min-height: 380px;
+  border: 1px solid var(--line); border-radius: var(--r); background:
+    linear-gradient(rgba(29, 43, 62, .16) 1px, transparent 1px) 0 0 / 34px 34px,
+    linear-gradient(90deg, rgba(29, 43, 62, .16) 1px, transparent 1px) 0 0 / 34px 34px;
 }
-.gcol-cards { display: flex; flex-direction: column; gap: 16px; }
+.goals-viewport.grabbing { cursor: grabbing; }
+.goals-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+.goals-edges { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; z-index: 0; }
+.goals-nodes { position: absolute; left: 0; top: 0; z-index: 1; }
+.goals-tierlabels { position: absolute; left: 0; top: 0; z-index: 1; pointer-events: none; }
+.gtier-label {
+  position: absolute; top: 0; font-family: var(--display); font-weight: 600; letter-spacing: .16em;
+  text-transform: uppercase; font-size: .72rem; color: var(--ink-3);
+  border-bottom: 1px solid var(--line); padding-bottom: 5px;
+}
 
-/* node card */
+/* zoom controls */
+.gzoomctl { position: absolute; left: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 6px; z-index: 14; }
+.gzoomctl button {
+  width: 32px; height: 32px; border-radius: 7px; border: 1px solid var(--line); background: var(--abyss-2);
+  color: var(--ink-2); cursor: pointer; font-size: 1rem; line-height: 1; font-family: var(--mono);
+  transition: border-color .16s var(--ease), color .16s var(--ease);
+}
+.gzoomctl button:hover { border-color: var(--cyan-dim); color: var(--cyan); }
+.gzoomctl .fit { font-size: .6rem; letter-spacing: .06em; }
+
+/* node card (absolutely positioned on the canvas; JS sets left/top/width) */
 .gnode {
-  position: relative; border: 1px solid var(--line); border-radius: var(--r);
+  position: absolute; border: 1px solid var(--line); border-radius: var(--r);
   background: linear-gradient(180deg, var(--hull), var(--abyss-3));
   padding: 10px 12px; overflow: hidden;
   transition: border-color .2s var(--ease), box-shadow .2s var(--ease), transform .15s var(--ease);
