@@ -328,6 +328,26 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("goals.js must retain the #302 interaction (missing %q)", marker)
 		}
 	}
+	// org-graph v2 Inc A (#312 schema): harness badge + priorities/milestones lists,
+	// and the v2 scope labels (scopeNoun reads flotilla/desk, not the retired
+	// fleet/project tokens). Also lock the enrichment into structuralSig so a
+	// height-affecting change forces a rebuild (#283).
+	for _, marker := range []string{"gnode-harness", "gnode-prios", "gnode-miles", "n.priorities", "n.milestones"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must retain the org-graph v2 enrichment (missing %q) — Inc A", marker)
+		}
+	}
+	if !strings.Contains(js, `"flotilla"`) || !strings.Contains(js, `s === "desk"`) {
+		t.Error("goals.js scopeNoun must read the v2 scope tokens (flotilla/desk) — #312")
+	}
+	// structuralSig must include the enrichment (priorities/milestones/harness) so an
+	// add/remove of a height-affecting field triggers a full rebuild, not a stale
+	// in-place text swap.
+	sigStart := strings.Index(js, "function structuralSig")
+	sigEnd := strings.Index(js[sigStart:], "function updateInPlace")
+	if sigStart < 0 || sigEnd < 0 || !strings.Contains(js[sigStart:sigStart+sigEnd], "n.priorities") {
+		t.Error("structuralSig must include the org-graph v2 enrichment fields (#283 height contract)")
+	}
 
 	body := doGet(t, srv, "/").Body.String()
 	if !strings.Contains(body, "/static/goals.js") {
