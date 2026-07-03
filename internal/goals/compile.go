@@ -8,6 +8,7 @@ import (
 
 // CompileJSON validates and serializes a File to fleet-goals.json bytes.
 func CompileJSON(f File) ([]byte, error) {
+	NormalizeFileScopes(&f)
 	if err := f.validate(); err != nil {
 		return nil, err
 	}

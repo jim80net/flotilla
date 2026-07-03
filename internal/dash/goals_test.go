@@ -294,14 +294,14 @@ func TestBuildGoals_OrderDepthAndScope(t *testing.T) {
 	if byID["a-fleet"].Depth != 0 || byID["b-project"].Depth != 1 || byID["c-task"].Depth != 2 {
 		t.Errorf("depths wrong: %d/%d/%d", byID["a-fleet"].Depth, byID["b-project"].Depth, byID["c-task"].Depth)
 	}
-	// Scope inferred from depth when unset — the ratified enum is fleet/project/task.
-	if byID["a-fleet"].Scope != "fleet" || byID["b-project"].Scope != "project" || byID["c-task"].Scope != "task" {
+	// Scope inferred from depth when unset — v2 API vocabulary is flotilla/desk/task.
+	if byID["a-fleet"].Scope != "flotilla" || byID["b-project"].Scope != "desk" || byID["c-task"].Scope != "task" {
 		t.Errorf("scope inference wrong: %q/%q/%q", byID["a-fleet"].Scope, byID["b-project"].Scope, byID["c-task"].Scope)
 	}
 }
 
 func TestBuildGoals_LegacyDeskScopeNormalizedToTask(t *testing.T) {
-	file := GoalsFile{Goals: []Goal{{ID: "g", Title: "G", Scope: ScopeDesk}}}
+	file := GoalsFile{Goals: []Goal{{ID: "g", Title: "G", Scope: ScopeDeskLeaf}}}
 	doc := BuildGoals(GoalsInputs{File: file, FileOK: true})
 	if doc.Goals[0].Scope != "task" {
 		t.Errorf("legacy scope 'desk' should normalize to 'task', got %q", doc.Goals[0].Scope)
@@ -319,7 +319,7 @@ func TestBuildGoals_Counts(t *testing.T) {
 	}}
 	doc := BuildGoals(GoalsInputs{File: file, FileOK: true, DeskStates: map[string]string{"w": "working"}})
 	c := doc.Counts
-	if c.Total != 3 || c.Fleet != 1 || c.Project != 2 {
+	if c.Total != 3 || c.Flotilla != 1 || c.Desk != 2 || c.Fleet != 1 || c.Project != 2 {
 		t.Errorf("scope counts wrong: %+v", c)
 	}
 	if c.Realized != 1 || c.InFlight != 1 || c.Aspirational != 1 {
@@ -453,6 +453,60 @@ func TestBuildGoals_DependsOnEdgesAndConversationAgent(t *testing.T) {
 	child := indexByID(doc.Goals)["child"]
 	if child.ConversationAgent != "builder" {
 		t.Fatalf("conversation_agent = %q, want builder", child.ConversationAgent)
+	}
+}
+
+func TestBuildGoals_V2FieldsAndHarness(t *testing.T) {
+	file := GoalsFile{Goals: []Goal{
+		{ID: "hub", Title: "Hub", Scope: ScopeFlotilla, Owner: "cos",
+			Priorities: []string{"Ship schema-v2"}, TopologyChannelID: " ch-1 "},
+		{ID: "desk", Title: "Desk", Scope: ScopeOrgDesk, Parent: "hub", Owner: "builder",
+			ConversationAgent: "builder", Milestones: []string{"PR merge"}},
+	}}
+	doc := BuildGoals(GoalsInputs{
+		File: file, FileOK: true,
+		AgentSurfaces: map[string]string{"builder": "grok"},
+		MetaXO:        "cos",
+	})
+	hub := indexByID(doc.Goals)["hub"]
+	if hub.Scope != "flotilla" || hub.TopologyChannelID != "ch-1" || len(hub.Priorities) != 1 {
+		t.Fatalf("hub v2 fields wrong: %+v", hub)
+	}
+	if hub.Layout == nil || !hub.Layout.HubCenter {
+		t.Fatalf("hub should be layout hub_center, got %+v", hub.Layout)
+	}
+	desk := indexByID(doc.Goals)["desk"]
+	if desk.Scope != "desk" || len(desk.Milestones) != 1 {
+		t.Fatalf("desk v2 fields wrong: %+v", desk)
+	}
+	if desk.Harness == nil || desk.Harness.Surface != "grok" {
+		t.Fatalf("desk harness wrong: %+v", desk.Harness)
+	}
+}
+
+func TestBuildGoals_V1ScopesDisplayAsV2(t *testing.T) {
+	file := GoalsFile{Goals: []Goal{
+		{ID: "root", Title: "R", Scope: ScopeFleet},
+		{ID: "mid", Title: "M", Scope: ScopeProject, Parent: "root"},
+	}}
+	doc := BuildGoals(GoalsInputs{File: file, FileOK: true})
+	if got := indexByID(doc.Goals)["root"].Scope; got != "flotilla" {
+		t.Errorf("fleet → flotilla, got %q", got)
+	}
+	if got := indexByID(doc.Goals)["mid"].Scope; got != "desk" {
+		t.Errorf("project → desk, got %q", got)
+	}
+}
+
+func TestBuildGoals_FlotillaSpokeLayout(t *testing.T) {
+	file := GoalsFile{Goals: []Goal{
+		{ID: "cos", Title: "COS", Scope: ScopeFlotilla},
+		{ID: "xo", Title: "XO", Scope: ScopeFlotilla, Parent: "cos"},
+	}}
+	doc := BuildGoals(GoalsInputs{File: file, FileOK: true, MetaXO: "cos"})
+	xo := indexByID(doc.Goals)["xo"]
+	if xo.Layout == nil || !xo.Layout.Spoke {
+		t.Fatalf("child flotilla node should be spoke, got %+v", xo.Layout)
 	}
 }
 
