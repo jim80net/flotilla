@@ -54,22 +54,8 @@
 - [ ] 5.3 Archive spec deltas to `openspec/specs/` on implementation merge
 - [ ] 5.4 Operator supervised trial — coordinators maintain goals for one project (operator gate)
 
-## 6. Merge deny-list backstop (queued after design merge — family-office escalation)
-
-Investigation (2026-07-03): `deploy/grok-permission-allowlist.json` and live launch recipes already
-carry `Bash(gh pr merge*)` in `never_autonomous.deny`, and codex desk rules forbid `gh pr merge`.
-The hole is **enforcement under grok `bypassPermissions` / `--always-approve`**: grok CLI `--deny`
-is prompting-mode-only; Q1 probe confirmed only the **gatekeeper hook layer** blocks Shell under
-bypass. Until the grok gatekeeper adapter enforces desk deny tiers, a desk can technically self-merge
-despite the allowlist on disk.
-
-- [ ] 6.1 Wire grok desk launches through gatekeeper PreToolUse with `never_autonomous` deny tier
-  (incl. `gh pr merge`) — parity with Q1 verdict (a)
-- [ ] 6.2 `flotilla workspace init` / `sync-grok-readonly-permissions.sh` — verify deny lands in
-  the enforced hook path, not only launch `--deny` flags + inert `.claude/settings.local.json`
-- [ ] 6.3 Headless regression: `validate-grok-permission-tiers.sh` deny-gh-merge probe under
-  `--always-approve` with gatekeeper enabled
-- [ ] 6.4 Document coordinator vs desk merge authority in runbook (codex rules already split)
+**Out of scope for this change (tracked separately):** grok desk merge-deny enforcement and
+private-boundary CI denylist wiring — flotilla#278 (deploy-security follow-up).
 
 ## Lane notes
 

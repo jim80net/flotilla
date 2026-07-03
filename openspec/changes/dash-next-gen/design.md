@@ -48,7 +48,7 @@ semantics (comments, close, labels) — not deleted.
 ┌──────────────────┬──────────────────────────────────────────────┐
 │ Goal tree/DAG    │ Selected goal detail                         │
 │ (fleet→project→  │ · title, description, owner coordinator      │
-│  desk scopes)    │ · child goals                                │
+│  task scopes)    │ · child goals                                │
 │                  │ · attached work items (backlog + issues)     │
 │ rollup badges:   │ · contributing desks + live state snippet    │
 │ blocked/unblocked│ · roll-up status (computed)                  │
@@ -180,7 +180,7 @@ conversation thread. Design decision:
 |---|---|
 | **GoalNode** | A node in the fleet purpose hierarchy |
 | **WorkItem** | A unit of trackable work attached to a goal (backlog line, issue ref, or inline item) |
-| **Scope** | Where the goal lives in federation: `fleet`, `project`, `desk` |
+| **Scope** | Where the goal lives in federation: `fleet`, `project`, `task` |
 
 ### 4.2 GoalNode schema (v1)
 
@@ -261,13 +261,15 @@ Precedence (first match wins):
 3. authored paused           → paused
 4. any child/item in-flight  → in-flight
 5. authored achieved AND all children/items done (or none) → achieved
-6. all children achieved AND all items done AND (children>0 OR items>0) → achieved
+6. all non-cancelled children achieved AND all items done AND (children>0 OR items>0) → achieved
 7. zero children AND zero items → active   # vacuous-achieved guard
 8. else → active
 ```
 
 Child goals contribute their computed `status_display` upward. Authored `paused`/`cancelled` are
-not silently dropped — they override idle/active when nothing is blocked or in-flight.
+not silently dropped — they override idle/active when nothing is blocked or in-flight. **Cancelled
+children are excluded** from the parent's "all children achieved" test (step 6): a cancelled
+sub-goal is a dead branch, not incomplete work — it does not hold the parent out of `achieved`.
 
 Blocked/unblocked classification reuses `backlog.Parse` markers (`[blocked]`, `[awaiting-auth]`,
 `[needs-attention]`). Issue state pulled from GitHub (`open` + label `blocked` optional).

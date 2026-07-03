@@ -90,10 +90,11 @@ Precedence (first match wins):
 2. Any child or attached work item classified `blocked` → `status_display: blocked`.
 3. Authored `paused` → `status_display: paused`.
 4. Any child or work item classified `in-flight` → `status_display: in-flight`.
-5. Authored `achieved` AND all children `achieved` (or none) AND all items `done` (or none) →
-   `status_display: achieved`.
-6. All children `achieved` AND all items `done` AND at least one child OR one work item exists →
-   `status_display: achieved`.
+5. Authored `achieved` AND all non-cancelled children `achieved` (or none) AND all items `done`
+   (or none) → `status_display: achieved`.
+6. All non-cancelled children `achieved` AND all items `done` AND at least one child OR one work
+   item exists → `status_display: achieved`. Cancelled children are excluded from this test — a
+   cancelled sub-goal is a dead branch and does not hold the parent out of `achieved`.
 7. Zero children AND zero work items → `status_display: active` (vacuous-achieved guard — an
    unscoped new node MUST NOT render as done).
 8. Otherwise → `status_display: active`.
