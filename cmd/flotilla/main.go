@@ -73,6 +73,8 @@ func run(args []string) error {
 		return cmdResult(args[1:])
 	case "inbox":
 		return cmdInbox(args[1:])
+	case "accounts":
+		return cmdAccounts(args[1:])
 	case "version", "-v", "--version":
 		fmt.Println("flotilla " + version)
 		return nil
@@ -100,6 +102,8 @@ usage:
   flotilla status                                     one line per desk: last-known state + XO ack age (reads the watch snapshot; no daemon)
   flotilla inbox <channel> [--limit N]                read recent messages of a bound channel over REST (role or channel id; recover a dropped operator message; read-only)
   flotilla dash [--bind 127.0.0.1:8787]               optional local web UI: fleet board + federation topology + coordination history (read-only; reads the watch artifacts; loopback only)
+  flotilla accounts init <subscription-id>            scaffold Claude Code config dir + print one-time /login steps
+  flotilla accounts list [--json]                     subscription credential health (mtime/expiry only; no secrets)
   flotilla channel create <name> [--type text|category] [--topic <t>] [--category <name|id>]
                                                       create a Discord channel via the bot (idempotent; emits an F#105 binding with --xo)
   flotilla channel list [--json]                      list the guild's channels (id, type, name, parent)

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jim80net/flotilla/internal/launch"
@@ -281,5 +282,33 @@ func TestResolveActiveRecipeView(t *testing.T) {
 	}
 	if r.Launch != "claude -w data" || r.Cwd != "/abs" {
 		t.Errorf("ResolveActiveRecipe = %+v, want the resolved recipe", r)
+	}
+}
+
+func TestSlotRecipeWrapsClaudeConfigDirFromSubscriptionID(t *testing.T) {
+	accountsRoot := t.TempDir()
+	t.Setenv("FLOTILLA_ACCOUNTS_ROOT", accountsRoot)
+	chain := launch.Recipe{
+		Cwd: "/abs",
+		Primary: &launch.HarnessSlot{
+			Surface:        "claude-code",
+			Launch:         "claude -w xo",
+			Provider:       "anthropic",
+			SubscriptionID: "anthropic-work",
+		},
+	}
+	r, ok, err := slotRecipeByName(chain, SlotPrimary)
+	if err != nil || !ok {
+		t.Fatalf("slotRecipeByName: ok=%v err=%v", ok, err)
+	}
+	if r.Launch == "claude -w xo" {
+		t.Fatalf("launch unchanged %q, want CLAUDE_CONFIG_DIR wrap", r.Launch)
+	}
+	if !strings.Contains(r.Launch, "CLAUDE_CONFIG_DIR=") || !strings.Contains(r.Launch, "anthropic-work") {
+		t.Fatalf("launch = %q, want config dir wrap for anthropic-work", r.Launch)
+	}
+	// stored chain launch string is unchanged
+	if chain.Primary.Launch != "claude -w xo" {
+		t.Errorf("stored primary launch mutated: %q", chain.Primary.Launch)
 	}
 }
