@@ -122,6 +122,26 @@ func TestLatestResultTrailingSlashCwdMatches(t *testing.T) {
 	}
 }
 
+func TestLatestResultSkipsTrailingNarrationEpilogue(t *testing.T) {
+	cwd := "/srv/fleet/research"
+	history := strings.Join([]string{
+		`{"type":"user","content":"ship the PR"}`,
+		`{"type":"assistant","content":"**Bottom line:** Schema-v2 API is on main.\n\n- merged #312\n- tests green"}`,
+		`{"type":"assistant","content":"PR #312 opened. Let me report to COS."}`,
+	}, "\n")
+	home := writeStore(t, cwd, "s1", "%2Fsrv%2Ffleet%2Fresearch", history)
+	got, err := LatestResult(home, cwd)
+	if err != nil {
+		t.Fatalf("LatestResult err = %v", err)
+	}
+	if strings.Contains(got, "Let me report") {
+		t.Errorf("got trailing narration %q, want substantive turn-final", got)
+	}
+	if !strings.Contains(got, "Schema-v2 API") {
+		t.Errorf("got %q, want substantive turn-final body", got)
+	}
+}
+
 func TestLatestResultAmbiguousMatchesError(t *testing.T) {
 	// If the same session-id appears under two cwd dirs (a corrupt/duplicated store), pick neither —
 	// surface the ambiguity loudly rather than silently taking matches[0] (systems-P3 / OCR-L3).
