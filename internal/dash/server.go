@@ -272,6 +272,10 @@ func (s *Server) loadGoals() GoalsDoc {
 		// A missing/unreadable goals file leaves FileOK false → BuildGoals renders
 		// the honest "no goals file yet" message, never a fabricated tree.
 	}
+	if in.FileOK && s.cfg.GoalsPath != "" {
+		in.SourcePath = s.cfg.GoalsPath
+		in.GeneratedAt = s.now().UTC().Format(time.RFC3339)
+	}
 	return BuildGoals(in)
 }
 

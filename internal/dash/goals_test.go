@@ -349,6 +349,33 @@ func TestBuildGoals_IssueLinkedAndResolved(t *testing.T) {
 	}
 }
 
+func TestParseGoalsFile_RejectsUnknownDependsOn(t *testing.T) {
+	data := []byte(`{"goals":[{"id":"a","title":"A","depends_on":["missing"]}]}`)
+	if _, err := ParseGoalsFile(data); err == nil || !strings.Contains(err.Error(), "depends_on") {
+		t.Fatalf("expected depends_on validation failure, got %v", err)
+	}
+}
+
+func TestBuildGoals_DependsOnEdgesAndConversationAgent(t *testing.T) {
+	file := GoalsFile{Version: 1, Goals: []Goal{
+		{ID: "parent", Title: "Parent"},
+		{ID: "child", Title: "Child", Parent: "parent", ConversationAgent: "builder",
+			DependsOn: []string{"parent"}},
+	}}
+	doc := BuildGoals(GoalsInputs{File: file, FileOK: true, SourcePath: "/roster/fleet-goals.json",
+		GeneratedAt: "2026-07-03T12:00:00Z"})
+	if doc.Version != 1 {
+		t.Fatalf("version = %d, want 1", doc.Version)
+	}
+	if len(doc.Edges) != 1 || doc.Edges[0].From != "child" || doc.Edges[0].To != "parent" || doc.Edges[0].Kind != "depends_on" {
+		t.Fatalf("edges = %+v, want child→parent depends_on", doc.Edges)
+	}
+	child := indexByID(doc.Goals)["child"]
+	if child.ConversationAgent != "builder" {
+		t.Fatalf("conversation_agent = %q, want builder", child.ConversationAgent)
+	}
+}
+
 // indexByID is a test helper mapping a rendered goals slice by id.
 func indexByID(goals []RenderedGoal) map[string]RenderedGoal {
 	m := make(map[string]RenderedGoal, len(goals))
