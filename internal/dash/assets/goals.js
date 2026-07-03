@@ -34,6 +34,7 @@
   var panWired = false;
   var edgeIndex = {};    // child id → { path, parent } — for the hover chain-highlight
   var depEdges = [];     // cross-dependency edges (GoalsDoc.edges: {from,to,kind:"depends_on"})
+  var collaborations = []; // desk collaboration groups (GoalsDoc.collaborations, #324 Inc 3)
   var selectedId = null; // node whose detail drawer is open (transient state: on the article)
   var hoveredId = null;  // node currently hovered (re-applied after a render)
   var nodesWired = false;
@@ -283,6 +284,28 @@
   // absolute _x/_y the tree layout uses, so nodeCard/pan-zoom/keyed-update are unchanged.
   var RING_GAP = 52; // radial breathing room between adjacent rings
   function childrenOf(n) { return (n.children || []).map(function (id) { return nodeById[id]; }).filter(Boolean); }
+
+  // collabIndexOf returns the collaboration group a node belongs to, or -1 (#324 Inc 3).
+  function collabIndexOf(id) {
+    for (var i = 0; i < collaborations.length; i++) {
+      if ((collaborations[i].desks || []).indexOf(id) >= 0) return i;
+    }
+    return -1;
+  }
+  // clusterAdjacent stable-sorts a sibling list so desks in the SAME collaboration sit
+  // next to each other (contiguous), keeping non-collaborating siblings in place — so the
+  // dotted container wraps a tight, adjacent cluster instead of a band across the ring.
+  function clusterAdjacent(nodes) {
+    if (!collaborations.length) return nodes;
+    return nodes
+      .map(function (n, i) { return { n: n, i: i, c: collabIndexOf(n.id) }; })
+      .sort(function (a, b) {
+        var ka = a.c < 0 ? collaborations.length : a.c;
+        var kb = b.c < 0 ? collaborations.length : b.c;
+        return ka !== kb ? ka - kb : a.i - b.i;
+      })
+      .map(function (x) { return x.n; });
+  }
   function nodeCenter(n) { return { x: n._x + n._w / 2, y: n._y + heightOf(n) / 2 }; }
 
   // layoutOrg is CONTENT-AWARE (#324): rings are sized from the actual card extents
@@ -375,7 +398,7 @@
         n._x = cx + rad * Math.cos(mid) - n._w / 2;
         n._y = cy + rad * Math.sin(mid) - heightOf(n) / 2;
       }
-      var kids = childrenOf(n);
+      var kids = clusterAdjacent(childrenOf(n)); // collaborating siblings sit together
       if (!kids.length) return;
       var total = 0; kids.forEach(function (k) { total += leaves[k.id]; });
       var cursor = a0;
@@ -387,14 +410,38 @@
     }
 
     if (center) { center._x = cx - center._w / 2; center._y = cy - heightOf(center) / 2; pplaced[center.id] = true; }
-    // ring-1 nodes split the full circle by leaf-weight, starting at the top (-π/2).
-    var total1 = 0; ring1.forEach(function (n) { total1 += leaves[n.id]; });
+    // ring-1 nodes split the full circle by leaf-weight, starting at the top (-π/2);
+    // clustered so collaborating desks are adjacent (their container stays tight).
+    var ordered1 = clusterAdjacent(ring1);
+    var total1 = 0; ordered1.forEach(function (n) { total1 += leaves[n.id]; });
     var cur = -Math.PI / 2;
-    ring1.forEach(function (n) {
+    ordered1.forEach(function (n) {
       var w = 2 * Math.PI * (leaves[n.id] / (total1 || 1));
       place(n, cur, cur + w);
       cur += w;
     });
+  }
+
+  // collabMarkup draws a dotted container (+ lane label) around each collaboration's desk
+  // nodes (#324 Inc 3). Org-mode only — the desks are clustered adjacent there, so the
+  // padded bounding box wraps a tight group. Rendered behind the edges + nodes.
+  function collabMarkup() {
+    if (goalsLayout !== "org" || !collaborations.length) return "";
+    var out = [];
+    collaborations.forEach(function (cb) {
+      var ns = (cb.desks || []).map(function (id) { return nodeById[id]; }).filter(Boolean);
+      if (ns.length < 2) return;
+      var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      ns.forEach(function (n) {
+        x0 = Math.min(x0, n._x); y0 = Math.min(y0, n._y);
+        x1 = Math.max(x1, n._x + n._w); y1 = Math.max(y1, n._y + heightOf(n));
+      });
+      var pad = 18;
+      x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
+      out.push('<rect class="gcollab" x="' + x0 + '" y="' + y0 + '" width="' + (x1 - x0) + '" height="' + (y1 - y0) + '" rx="16"/>');
+      out.push('<text class="gcollab-label" x="' + (x0 + 12) + '" y="' + (y0 + 17) + '">' + escapeHtml(cb.lane || "") + "</text>");
+    });
+    return out.join("");
   }
 
   /* ── edges: parent → child, from laid-out geometry ─────────────────────── */
@@ -444,7 +491,8 @@
       }
       paths.push('<path class="gdep" data-from="' + escapeHtml(depEdges[di].from) + '" data-to="' + escapeHtml(depEdges[di].to) + '" d="' + dd + '"/>');
     }
-    svg.innerHTML = paths.join("");
+    // Collaboration containers first so they sit BEHIND the spoke edges + nodes.
+    svg.innerHTML = collabMarkup() + paths.join("");
     // Index each edge by its child id for the hover chain-highlight (rebuilt every
     // draw since the SVG is regenerated).
     edgeIndex = {};
@@ -490,14 +538,20 @@
   // Work items contribute only kind+label (their identity + count) — enough to
   // detect an add/remove/retitle; class/detail are excluded per contract #2 above.
   function structuralSig(goals) {
-    return JSON.stringify(goals.map(function (n) {
-      return [n.id, n.parent || "", n.depth || 0, n.scope || "", n.title || "",
-        n.description || "", n.owner || "",
-        // org-graph v2 enrichment — each is rendered into the card and changes its
-        // height, so a change must trigger a full rebuild (not an in-place text swap).
-        n.priorities || [], n.milestones || [], (n.harness && n.harness.surface) || "",
-        (n.work_items || []).map(function (wi) { return [wi.kind || "", wi.label || ""]; })];
-    }));
+    return JSON.stringify({
+      nodes: goals.map(function (n) {
+        return [n.id, n.parent || "", n.depth || 0, n.scope || "", n.title || "",
+          n.description || "", n.owner || "",
+          // org-graph v2 enrichment — each is rendered into the card and changes its
+          // height, so a change must trigger a full rebuild (not an in-place text swap).
+          n.priorities || [], n.milestones || [], (n.harness && n.harness.surface) || "",
+          (n.work_items || []).map(function (wi) { return [wi.kind || "", wi.label || ""]; })];
+      }),
+      // Collaboration membership drives clusterAdjacent — a lane change MOVES nodes
+      // (re-angles the cluster), so it is STRUCTURAL: fold it in so a collaborations-only
+      // change forces a full re-layout, not just an in-place SVG redraw (#324 Inc 3, #283).
+      collab: collaborations.map(function (c) { return [c.lane || "", (c.desks || []).join(",")]; }),
+    });
   }
 
   // updateInPlace refreshes each existing card's state token + inner content from
@@ -917,6 +971,7 @@
     empty.classList.add("hidden");
     updateLive(doc.counts || {}); // announce the situation summary — success path only (see renderSituation)
     depEdges = Array.isArray(doc.edges) ? doc.edges : []; // cross-dependency edges for drawEdges
+    collaborations = Array.isArray(doc.collaborations) ? doc.collaborations : []; // desk lanes (#324 Inc 3)
 
     var nodesEl = q("goals-nodes");
     var ssig = structuralSig(goals);
