@@ -13,12 +13,10 @@ ALLOWLIST="${ROOT}/deploy/grok-permission-allowlist.json"
 CWD="${1:-$ROOT}"
 SCRATCH_REF="refs/heads/flotilla-deny-probe-$$-$(date +%s)"
 FAKE_PR="999999"
-CREATED_SCRATCH=0
 
 cleanup_scratch_ref() {
-  if [[ "$CREATED_SCRATCH" -eq 1 ]]; then
-    git -C "$CWD" push origin ":${SCRATCH_REF#refs/heads/}" 2>/dev/null || true
-  fi
+  # Per-run unique ref — unconditional best-effort delete cannot collide with real branches.
+  git -C "$CWD" push origin ":${SCRATCH_REF#refs/heads/}" 2>/dev/null || true
 }
 
 trap cleanup_scratch_ref EXIT

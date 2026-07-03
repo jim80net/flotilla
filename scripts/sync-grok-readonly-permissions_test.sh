@@ -95,6 +95,11 @@ if [[ ! -f "$backup" || ! -f "$state" ]]; then
   echo "revert selftest: apply must create launch backup and sync state" >&2
   exit 1
 fi
+second_out="$(FLOTILLA_LAUNCH="$launch" bash "${ROOT}/scripts/sync-grok-readonly-permissions.sh" 2>&1 || true)"
+if [[ "$second_out" != *"run --revert before re-applying"* ]]; then
+  echo "revert selftest: second apply without revert must refuse, got: $second_out" >&2
+  exit 1
+fi
 if grep -q -- '--custom-flag' "$launch"; then
   echo "revert selftest: apply should replace launch command" >&2
   exit 1

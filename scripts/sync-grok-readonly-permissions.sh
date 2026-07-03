@@ -90,8 +90,11 @@ def restore_desk_settings(name: str, desk_state: dict) -> None:
         return
     backup_path = pathlib.Path(backup)
     if not backup_path.is_file():
-        print(f"settings skip {name}: backup file missing {backup}", file=sys.stderr)
-        return
+        print(
+            f"sync-grok-permissions: settings backup missing for {name}: {backup}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(backup_path, settings_path)
     backup_path.unlink(missing_ok=True)
@@ -155,11 +158,21 @@ def grok_launch_cmd():
     return f"bash -lc {shlex.quote(inner)}"
 
 launch = launch_file()
+backup = backup_path()
+state_file = state_path()
+if backup.is_file() or state_file.is_file():
+    print(
+        "sync-grok-permissions: prior sync snapshot exists "
+        f"({backup.name} / {state_file.name}); run --revert before re-applying",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 with open(launch) as f:
     launch_doc = json.load(f)
 
 # Snapshot before any mutation so --revert can restore exact pre-sync state.
-shutil.copy2(launch, backup_path())
+shutil.copy2(launch, backup)
 desk_state: dict[str, dict] = {}
 for name, recipe in launch_doc.get("agents", {}).items():
     if "grok" not in recipe.get("launch", ""):
