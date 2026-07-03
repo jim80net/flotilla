@@ -353,6 +353,20 @@ func TestBuildGoals_TrailerIssueMergedOntoGoal(t *testing.T) {
 	}
 }
 
+func TestBuildGoals_TrailerIssueWithoutIssueStates(t *testing.T) {
+	file := GoalsFile{Goals: []Goal{{ID: "g", Title: "G"}}}
+	doc := BuildGoals(GoalsInputs{
+		File: file, FileOK: true,
+		TrailerIssues: []GoalTrailerIssue{{
+			GoalID: "g", Ref: "owner/repo#7", State: "open",
+		}},
+	})
+	items := doc.Goals[0].WorkItems
+	if len(items) != 1 || items[0].Class != "in-flight" || items[0].Detail != "open" {
+		t.Errorf("trailer state without IssueStates → in-flight/open, got %+v", items)
+	}
+}
+
 func TestBuildGoals_TrailerIssueSkipsDuplicateRef(t *testing.T) {
 	file := GoalsFile{Goals: []Goal{
 		{ID: "g", Title: "G", WorkItems: []WorkItem{{Kind: WorkIssue, Ref: "owner/repo#1"}}},

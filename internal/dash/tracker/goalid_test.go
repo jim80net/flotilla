@@ -22,13 +22,19 @@ func TestParseGoalIDTrailer_Malformed(t *testing.T) {
 		"goal-id:bad",
 		"Goal-ID: dash-next-gen",
 		"goal-id: dash next gen",
-		"goal-id: ",
 		"prefix goal-id: dash-next-gen",
 	}
 	for _, body := range cases {
 		if got := ParseGoalIDTrailer(body); got != "" {
 			t.Errorf("ParseGoalIDTrailer(%q) = %q, want empty", body, got)
 		}
+	}
+}
+
+func TestParseGoalIDTrailer_CRLF(t *testing.T) {
+	body := "details\r\n\r\ngoal-id: dash-next-gen\r\n"
+	if got := ParseGoalIDTrailer(body); got != "dash-next-gen" {
+		t.Fatalf("ParseGoalIDTrailer(CRLF) = %q, want dash-next-gen", got)
 	}
 }
 

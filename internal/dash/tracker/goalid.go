@@ -9,7 +9,7 @@ import (
 // goalIDTrailerLine matches a coordinator `goal-id: <slug>` trailer on its own line
 // anywhere in an issue body. The prefix is case-sensitive; the slug is captured
 // case-sensitively. Malformed lines (missing slug, invalid characters) do not match.
-var goalIDTrailerLine = regexp.MustCompile(`(?m)^[ \t]*goal-id:[ \t]+([A-Za-z0-9][A-Za-z0-9_.-]*)[ \t]*$`)
+var goalIDTrailerLine = regexp.MustCompile(`(?m)^[ \t]*goal-id:[ \t]+([A-Za-z0-9][A-Za-z0-9_.-]*)[ \t]*\r?$`)
 
 // ParseGoalIDTrailer extracts the goal slug from a `goal-id: <slug>` trailer line in
 // an issue body. It returns "" when the trailer is absent or malformed. The first valid

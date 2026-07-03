@@ -634,6 +634,14 @@ func mergeTrailerIssues(byID map[string]*Goal, resolved map[string][]RenderedWor
 			continue
 		}
 		item := resolveItem(WorkItem{Kind: WorkIssue, Ref: ref}, in)
+		// mergeTrailerIssues already trusts tr.State as open; when IssueStates is absent
+		// resolveItem falls back to linked/active — derive class from the trailer state instead.
+		if item.Class == "active" && item.Detail == "linked" {
+			if s := strings.TrimSpace(tr.State); s != "" {
+				item.Detail = s
+				item.Class = issueClass(s)
+			}
+		}
 		resolved[tr.GoalID] = append(resolved[tr.GoalID], item)
 		existing[tr.GoalID][ref] = true
 	}
