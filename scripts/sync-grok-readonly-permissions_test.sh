@@ -8,6 +8,10 @@ import json, shlex, subprocess, sys
 from pathlib import Path
 
 doc = json.loads(Path(sys.argv[1]).read_text())
+if "enforcement" not in doc:
+    raise SystemExit("allowlist must document enforcement block")
+if doc["enforcement"].get("always_approve_settings_deny") != "not_enforced":
+    raise SystemExit("enforcement.always_approve_settings_deny must be not_enforced")
 allow = doc["tiers"]["read_unprompted"]["allow"]
 deny = doc["tiers"]["never_autonomous"]["deny"]
 

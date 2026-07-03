@@ -1,7 +1,14 @@
 {
+  "_comment_enforcement": "Two delivery channels: (1) launch-recipe CLI --allow/--deny flags (sync-grok-readonly-permissions.sh) and (2) worktree .claude/settings.local.json permissions copy. Neither is a mechanical safety gate on desks running grok in always-approve posture (TUI 'always-approve mode' or CLI --always-approve): live probe 2026-07-03 confirmed deny globs are not enforced there (gh pr merge --help ran despite Bash(gh pr merge*)). Prompting mode WITHOUT always-approve: CLI --deny globs hard-deny matching commands (see scripts/validate-grok-permission-tiers.sh). PreToolUse hook deny under always-approve is gatekeeper-lane Q1 — not characterized here.",
+  "enforcement": {
+    "prompting_mode_cli_deny": "enforce",
+    "always_approve_cli_deny": "unreliable",
+    "always_approve_settings_deny": "not_enforced",
+    "pretooluse_hook_deny_under_always_approve": "gatekeeper_lane_q1"
+  },
   "tiers": {
     "read_unprompted": {
-      "description": "Safe reads unprompted. Explicit read-only git subcommands with git -C/--git-dir prefix variants.",
+      "description": "Safe reads unprompted in PROMPTING mode (no always-approve). With always-approve, allow tier reduces prompt friction only — not a hard unprompted grant. Explicit read-only git subcommands with git -C/--git-dir prefix variants.",
       "allow": [
         "Bash(gh pr list*)",
         "Bash(gh pr view*)",
@@ -107,7 +114,7 @@
       ]
     },
     "never_autonomous": {
-      "description": "Hard deny irreversible/coordinator-only ops incl. force push (+refspec), main/master push, and :refspec branch deletion.",
+      "description": "Irreversible/coordinator-only ops to deny in PROMPTING mode via CLI --deny (hard block when matched). Under always-approve posture this deny list is policy documentation + prompting-mode backstop only — NOT enforced on live always-approve desks; no-self-merge on execution grok desks is discipline + branch protection (gh pr merge is not blocked by branch protection). Mechanical enforcement requires gatekeeper PreToolUse hooks (gatekeeper lane) or flipping desks to prompting mode.",
       "deny": [
         "Bash(gh pr merge*)",
         "Bash(git push --force*)",
