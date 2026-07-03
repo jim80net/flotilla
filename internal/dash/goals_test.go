@@ -98,6 +98,116 @@ func TestBuildGoals_LoadError(t *testing.T) {
 	}
 }
 
+// --- BuildGoals: per-desk card materialization (#324 Inc 2) ---
+
+func TestBuildGoals_MaterializeRosterDesks(t *testing.T) {
+	// A flotilla hub (owner == the metaXO ⇒ hub-center) + one AUTHORED desk (owner alpha).
+	file := GoalsFile{Goals: []Goal{
+		{ID: "flot", Title: "Fleet", Scope: "flotilla", Owner: "xo"},
+		{ID: "alpha-goal", Title: "Alpha work", Scope: "desk", Parent: "flot", Owner: "alpha", ConversationAgent: "alpha"},
+	}}
+	in := GoalsInputs{
+		File: file, FileOK: true, MetaXO: "xo",
+		AgentSurfaces: map[string]string{"beta": "grok"},
+		DeskStates:    map[string]string{"beta": "working"},
+		// members: the xo (the hub), alpha (authored), beta (NOT authored → materialize).
+		Channels: []DeskChannel{{ChannelID: "C1", XOAgent: "xo", Members: []string{"xo", "alpha", "beta"}}},
+	}
+	doc := BuildGoals(in)
+	byID := make(map[string]RenderedGoal, len(doc.Goals))
+	for _, g := range doc.Goals {
+		byID[g.ID] = g
+	}
+
+	beta, ok := byID["desk:beta"]
+	if !ok {
+		t.Fatalf("beta (a roster member absent from the goals file) must be materialized; goals=%+v", doc.Goals)
+	}
+	if beta.Scope != "desk" || beta.Source != "roster" {
+		t.Errorf("materialized desk = scope %q source %q, want desk/roster", beta.Scope, beta.Source)
+	}
+	if beta.Parent != "flot" {
+		t.Errorf("materialized desk must parent under the hub (flot), got %q", beta.Parent)
+	}
+	if beta.Depth != 1 {
+		t.Errorf("materialized desk depth = %d, want hubDepth+1 = 1", beta.Depth)
+	}
+	if beta.Harness == nil || beta.Harness.Surface != "grok" {
+		t.Errorf("materialized desk harness = %+v, want surface grok from the roster", beta.Harness)
+	}
+	if beta.StatusDisplay != "in-flight" {
+		t.Errorf("beta is 'working' → status_display in-flight, got %q", beta.StatusDisplay)
+	}
+	// the hub is not a desk card; an authored desk is not duplicated.
+	if _, ok := byID["desk:xo"]; ok {
+		t.Error("the xo hub must not be materialized as a desk card")
+	}
+	if _, ok := byID["desk:alpha"]; ok {
+		t.Error("an authored desk (alpha) must not be duplicated as a roster card")
+	}
+	// the hub gained beta as a child (so the org layout parents it on the ring).
+	if flot := byID["flot"]; !goalIDsContain(flot.Children, "desk:beta") {
+		t.Errorf("hub children must include the materialized desk, got %v", flot.Children)
+	}
+	// DFS ordering contract: the materialized desk is INSERTED right after its hub node,
+	// not appended at the end (GoalsDoc: parent immediately precedes its children).
+	var order []string
+	for _, g := range doc.Goals {
+		order = append(order, g.ID)
+	}
+	for i, id := range order {
+		if id == "flot" && (i+1 >= len(order) || order[i+1] != "desk:beta") {
+			t.Errorf("materialized desk must immediately follow its hub (DFS contract); order=%v", order)
+		}
+	}
+}
+
+func TestBuildGoals_DeskIDCollision(t *testing.T) {
+	// An authored goal LITERALLY named "desk:beta" must not be clobbered by the card
+	// synthesized for member beta — the synthetic id is suffixed to stay unique.
+	file := GoalsFile{Goals: []Goal{
+		{ID: "flot", Title: "Fleet", Scope: "flotilla", Owner: "xo"},
+		{ID: "desk:beta", Title: "A goal named desk:beta", Scope: "task", Parent: "flot", Owner: "someone-else"},
+	}}
+	in := GoalsInputs{
+		File: file, FileOK: true, MetaXO: "xo",
+		Channels: []DeskChannel{{ChannelID: "C1", XOAgent: "xo", Members: []string{"xo", "beta"}}},
+	}
+	doc := BuildGoals(in)
+
+	authored, betaCard := 0, (*RenderedGoal)(nil)
+	for i := range doc.Goals {
+		g := &doc.Goals[i]
+		if g.ID == "desk:beta" {
+			authored++
+			if g.Source == "roster" {
+				t.Error("the authored desk:beta must be preserved, not replaced by the materialized card")
+			}
+		}
+		if g.Source == "roster" && strings.EqualFold(g.Owner, "beta") {
+			betaCard = g
+		}
+	}
+	if authored != 1 {
+		t.Errorf("the authored desk:beta must remain exactly once, found %d", authored)
+	}
+	if betaCard == nil {
+		t.Fatalf("member beta must still be materialized under a unique id; goals=%+v", doc.Goals)
+	}
+	if betaCard.ID == "desk:beta" {
+		t.Errorf("materialized beta must not collide with the authored id, got %q", betaCard.ID)
+	}
+}
+
+func goalIDsContain(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
+}
+
 // --- BuildGoals: live desk binding (the Stage-2 core) ---
 
 func TestBuildGoals_DeskLiveBinding(t *testing.T) {

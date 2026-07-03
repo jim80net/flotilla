@@ -20,6 +20,7 @@ package dash
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/jim80net/flotilla/internal/backlog"
@@ -211,6 +212,10 @@ type RenderedGoal struct {
 	Depth             int                `json:"depth"`
 	Children          []string           `json:"children"`
 	WorkItems         []RenderedWorkItem `json:"work_items"`
+	// Source is empty for a goal authored in the goals file; "roster" for a desk card
+	// materialized from the roster/topology (a first-class desk not written as a goal —
+	// #324 Inc 2). Lets the UI distinguish live-roster desks and group them (Inc 3).
+	Source string `json:"source,omitempty"`
 }
 
 // GoalsCounts is the situation-bar summary — goal counts by scope and by visual state.
@@ -236,7 +241,9 @@ type GoalEdge struct {
 
 // GoalsDoc is the /api/goals document: the rendered nodes (roots first, each parent immediately
 // before its children — depth-first — so the frontend can stream columns), cross-dependency edges,
-// the counts, and honest absent/error messaging (the dash never fabricates a tree).
+// the counts, and honest absent/error messaging (the dash never fabricates a tree). Roster-
+// materialized desk cards (#324 Inc 2) are INSERTED right after their hub node, preserving that
+// DFS ordering; hub-less desks (a fleet with no hub node) are appended as trailing roots.
 type GoalsDoc struct {
 	Version     int            `json:"version,omitempty"`
 	Found       bool           `json:"found"`
@@ -275,6 +282,20 @@ type GoalsInputs struct {
 	TrailerIssues []GoalTrailerIssue
 	AgentSurfaces map[string]string // agent name (lowercased) → harness surface
 	MetaXO        string            // federation hub agent for layout hints
+	// Channels is the roster/topology membership used to materialize per-desk cards
+	// (#324 Inc 2): every desk that is a channel member but NOT authored as a goal node
+	// still gets a first-class card on the map. Empty ⇒ no materialization (authored
+	// goals only), so the feature degrades cleanly when the roster has no bindings.
+	Channels []DeskChannel
+}
+
+// DeskChannel is the minimal channel membership BuildGoals needs to materialize desk
+// cards — kept local so BuildGoals stays pure (no roster dependency); loadGoals maps
+// roster.Bindings() into it.
+type DeskChannel struct {
+	ChannelID string
+	XOAgent   string
+	Members   []string
 }
 
 // BuildGoals assembles the goals document. Pure: no I/O, no real time. Absent/error inputs produce
@@ -372,7 +393,150 @@ func BuildGoals(in GoalsInputs) GoalsDoc {
 	for _, id := range roots {
 		emit(id, 0)
 	}
+	materializeRosterDesks(&doc, in)
 	return doc
+}
+
+// materializeRosterDesks adds a first-class card for every roster desk that is a channel
+// MEMBER but not already represented as an authored goal node (#324 Inc 2). Each becomes
+// a scope=desk RenderedGoal parented under its channel's hub, with live harness + status
+// from the same board the rest of the view reads — so desks are first-class citizens of
+// the command structure, not only goals-file nodes. Degrades to a no-op when the roster
+// has no channel bindings.
+func materializeRosterDesks(doc *GoalsDoc, in GoalsInputs) {
+	if len(in.Channels) == 0 {
+		return
+	}
+	// Agents already on the map (authored as a goal's owner or conversation_agent) must
+	// NOT get a duplicate card. The XO is the hub, not a desk card.
+	represented := make(map[string]bool)
+	for i := range doc.Goals {
+		g := &doc.Goals[i]
+		if o := strings.ToLower(strings.TrimSpace(g.Owner)); o != "" {
+			represented[o] = true
+		}
+		if c := strings.ToLower(strings.TrimSpace(g.ConversationAgent)); c != "" {
+			represented[c] = true
+		}
+	}
+	// Every node id already in use — synthetic desk ids MUST NOT collide with an authored
+	// id (a client keys on id; a duplicate would silently clobber). usedID reserves the
+	// chosen id and suffixes on collision so the desk still appears with a unique id.
+	usedID := make(map[string]bool, len(doc.Goals))
+	for i := range doc.Goals {
+		usedID[doc.Goals[i].ID] = true
+	}
+	uniqueID := func(base string) string {
+		id := base
+		for n := 2; usedID[id]; n++ {
+			id = base + "-" + strconv.Itoa(n)
+		}
+		usedID[id] = true
+		return id
+	}
+
+	// Collect the desks to add, grouped by their hub, so they can be INSERTED right after
+	// their hub node in doc.Goals — keeping the documented DFS ordering (a parent always
+	// immediately precedes its children) rather than appended at the end.
+	byHub := make(map[string][]RenderedGoal)
+	var noHub []RenderedGoal
+	seen := make(map[string]bool) // a desk in multiple channels is materialized once
+	for _, ch := range in.Channels {
+		hubID, hubDepth := deskHubFor(doc, ch, in.MetaXO)
+		xo := strings.ToLower(strings.TrimSpace(ch.XOAgent))
+		for _, m := range ch.Members {
+			name := strings.TrimSpace(m)
+			key := strings.ToLower(name)
+			if key == "" || key == xo || represented[key] || seen[key] {
+				continue
+			}
+			seen[key] = true
+			node := RenderedGoal{
+				ID:                uniqueID("desk:" + name),
+				Title:             name,
+				Scope:             "desk",
+				Owner:             name,
+				ConversationAgent: name,
+				Parent:            hubID,
+				Harness:           harnessSurface(in.AgentSurfaces, key),
+				Status:            string(StatusActive),
+				StatusDisplay:     deskDisplayStatus(in.DeskStates[key]),
+				Depth:             hubDepth + 1,
+				Children:          []string{},
+				WorkItems:         []RenderedWorkItem{},
+				Source:            "roster",
+			}
+			countNode(&doc.Counts, node)
+			if hubID == "" {
+				noHub = append(noHub, node) // no hub → a root, emitted at the end
+			} else {
+				byHub[hubID] = append(byHub[hubID], node)
+			}
+		}
+	}
+	if len(byHub) == 0 && len(noHub) == 0 {
+		return
+	}
+
+	// Rebuild the stream: each hub node, then its materialized desks immediately after it
+	// (and recorded as its children); hub-less desks become trailing roots.
+	out := make([]RenderedGoal, 0, len(doc.Goals)+len(noHub))
+	for i := range doc.Goals {
+		g := doc.Goals[i]
+		if desks := byHub[g.ID]; len(desks) > 0 {
+			for _, d := range desks {
+				g.Children = append(g.Children, d.ID)
+			}
+			out = append(out, g)
+			out = append(out, desks...)
+			continue
+		}
+		out = append(out, g)
+	}
+	out = append(out, noHub...)
+	doc.Goals = out
+}
+
+// deskHubFor picks the node a channel's materialized desks attach under: a flotilla goal
+// bound to the channel via topology_channel_id, else the layout hub-center, else the first
+// depth-0 root. Returns ("", -1) when the map has no hub — the desks then become roots
+// (parent "", depth 0) so they still appear rather than vanish.
+func deskHubFor(doc *GoalsDoc, ch DeskChannel, metaXO string) (string, int) {
+	for i := range doc.Goals {
+		if g := &doc.Goals[i]; g.TopologyChannelID != "" && g.TopologyChannelID == ch.ChannelID {
+			return g.ID, g.Depth
+		}
+	}
+	for i := range doc.Goals {
+		if g := &doc.Goals[i]; g.Layout != nil && g.Layout.HubCenter {
+			return g.ID, g.Depth
+		}
+	}
+	for i := range doc.Goals {
+		if doc.Goals[i].Depth == 0 {
+			return doc.Goals[i].ID, 0
+		}
+	}
+	return "", -1
+}
+
+// harnessSurface builds the harness badge for a materialized desk from the roster surface.
+func harnessSurface(surfaces map[string]string, key string) *GoalHarness {
+	if s := strings.TrimSpace(surfaces[key]); s != "" {
+		return &GoalHarness{Surface: s}
+	}
+	return nil
+}
+
+// deskDisplayStatus maps a live board state to a goal status_display token (reusing the
+// work-item deskClass mapping); an unknown/absent state shows as "active" — a desk that
+// exists but has no live signal is present, not blocked.
+func deskDisplayStatus(state string) string {
+	c := deskClass(state)
+	if c == "unknown" || c == "" {
+		return "active"
+	}
+	return c
 }
 
 // resolveItem binds one work item to its live status. This is the Stage-2 live-binding core: a
@@ -747,4 +911,21 @@ func agentSurfacesFromRoster(cfg *roster.Config) map[string]string {
 		}
 	}
 	return m
+}
+
+// deskChannelsFromRoster maps the roster's channel bindings into the minimal DeskChannel
+// shape BuildGoals materializes per-desk cards from (#324 Inc 2). Members are copied
+// defensively (Bindings() shares the Config's slice header).
+func deskChannelsFromRoster(cfg *roster.Config) []DeskChannel {
+	if cfg == nil {
+		return nil
+	}
+	bindings := cfg.Bindings()
+	out := make([]DeskChannel, 0, len(bindings))
+	for _, ch := range bindings {
+		members := make([]string, len(ch.Members))
+		copy(members, ch.Members)
+		out = append(out, DeskChannel{ChannelID: ch.ChannelID, XOAgent: ch.XOAgent, Members: members})
+	}
+	return out
 }

@@ -35,8 +35,11 @@
   /* ── label chips ─────────────────────────────────────────────────────── */
   function labelChips(labels) {
     return (labels || []).map(function (l) {
+      // Pass GitHub's raw label hue as --label; the CSS derives a legible chip
+      // (dark-ink text on a faint tint) so a light GitHub color (e.g. #a2eeef)
+      // never washes out on the warm-light surface. See dash.css .issue-label.
       var color = /^[0-9a-fA-F]{6}$/.test(l.color || "") ? l.color : "888888";
-      return '<span class="issue-label" style="border-color:#' + color + ';color:#' + color + '">' +
+      return '<span class="issue-label" style="--label:#' + color + '">' +
         escapeHtml(l.name) + "</span>";
     }).join("");
   }
