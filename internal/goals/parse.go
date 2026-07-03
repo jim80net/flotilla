@@ -24,6 +24,9 @@ type yamlGoal struct {
 	Owner             string         `yaml:"owner"`
 	Status            string         `yaml:"status"`
 	ConversationAgent string         `yaml:"conversation_agent"`
+	TopologyChannelID string         `yaml:"topology_channel_id"`
+	Priorities        []string       `yaml:"priorities"`
+	Milestones        []string       `yaml:"milestones"`
 	DependsOn         []string       `yaml:"depends_on"`
 	WorkItems         []yamlWorkItem `yaml:"work_items"`
 	Children          []*yamlGoal    `yaml:"children"`
@@ -117,6 +120,9 @@ func flattenGoals(nodes []*yamlGoal, structuralParent string, out *[]Goal) error
 			Owner:             n.Owner,
 			Status:            n.Status,
 			ConversationAgent: strings.TrimSpace(n.ConversationAgent),
+			TopologyChannelID: strings.TrimSpace(n.TopologyChannelID),
+			Priorities:        append([]string(nil), n.Priorities...),
+			Milestones:        append([]string(nil), n.Milestones...),
 			DependsOn:         append([]string(nil), n.DependsOn...),
 			WorkItems:         items,
 		})

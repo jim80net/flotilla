@@ -262,8 +262,10 @@ func (s *Server) loadHistory() HistoryDoc {
 // for work-item roll-up.
 func (s *Server) loadGoals() GoalsDoc {
 	in := GoalsInputs{
-		Backlog:    readFileOrEmpty(s.cfg.BacklogPath),
-		DeskStates: agentStates(s.loadBoard()),
+		Backlog:       readFileOrEmpty(s.cfg.BacklogPath),
+		DeskStates:    agentStates(s.loadBoard()),
+		AgentSurfaces: agentSurfacesFromRoster(s.roster),
+		MetaXO:        s.xo,
 	}
 	s.bindTrackerIssues(&in)
 	if s.cfg.GoalsPath != "" {

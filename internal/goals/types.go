@@ -17,6 +17,9 @@ type Goal struct {
 	Owner             string     `json:"owner,omitempty"`
 	Status            string     `json:"status,omitempty"`
 	ConversationAgent string     `json:"conversation_agent,omitempty"`
+	TopologyChannelID string     `json:"topology_channel_id,omitempty"`
+	Priorities        []string   `json:"priorities,omitempty"`
+	Milestones        []string   `json:"milestones,omitempty"`
 	DependsOn         []string   `json:"depends_on,omitempty"`
 	WorkItems         []WorkItem `json:"work_items,omitempty"`
 }
