@@ -1054,7 +1054,12 @@
   /* ── pan / zoom (ported) ───────────────────────────────────────────────── */
   function applyTransform() {
     var world = q("goals-world");
-    if (world) world.style.transform = "translate(" + view.tx + "px," + view.ty + "px) scale(" + view.scale + ")";
+    if (!world) return;
+    world.style.transform = "translate(" + view.tx + "px," + view.ty + "px) scale(" + view.scale + ")";
+    // Counter-scale the node controls so they stay screen-constant (tappable) as the map
+    // zooms out — inherited by every .gnode-ctl (mobile-QA #330). Only enlarge (never
+    // shrink below base) when zoomed out; base size when zoomed in.
+    world.style.setProperty("--ctl-scale", Math.max(1, 1 / (view.scale || 1)));
   }
 
   // fit: scale to width (never upscale past 1), anchor top so the task-column
@@ -1096,10 +1101,28 @@
       applyTransform();
     }, { passive: false });
 
+    // Deliberate-pan gate (#330): a touch-drag pans the map ONLY after the operator
+    // toggles "move map"; until then the viewport's touch-action:pan-y lets the gesture
+    // scroll the PAGE through the map (org is the phone default — no nested-scroll trap).
+    // Mouse panning is always on (desktop unchanged).
+    var touchPanActive = false;
+    var panlock = q("goals-panlock");
+    if (panlock) {
+      panlock.addEventListener("click", function () {
+        touchPanActive = !touchPanActive;
+        vp.classList.toggle("pan-active", touchPanActive);
+        panlock.classList.toggle("active", touchPanActive);
+        panlock.setAttribute("aria-pressed", String(touchPanActive));
+      });
+    }
+
     var drag = false, sx = 0, sy = 0;
     function endDrag() { drag = false; vp.classList.remove("grabbing"); }
     vp.addEventListener("pointerdown", function (e) {
       if (e.target.closest(".gnode") || e.target.closest(".gzoomctl")) return;
+      // On touch, do NOT capture the gesture unless pan mode is active — let it fall
+      // through to the browser's pan-y page scroll. Mouse always pans.
+      if (e.pointerType === "touch" && !touchPanActive) return;
       drag = true; sx = e.clientX - view.tx; sy = e.clientY - view.ty;
       vp.classList.add("grabbing"); vp.setPointerCapture(e.pointerId);
     });

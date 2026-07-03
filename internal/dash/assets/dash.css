@@ -1090,7 +1090,10 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .goals-graph { position: relative; margin-top: 12px; }
 .goals-graph.hidden { display: none; }
 .goals-viewport {
-  position: relative; overflow: hidden; cursor: grab; touch-action: none;
+  /* touch-action: pan-y lets a vertical touch-drag scroll the PAGE THROUGH the map by
+     default (no nested-scroll trap) — deliberate pan mode (.pan-active) reclaims the
+     gesture for the map. Mouse drag panning is unaffected by touch-action (#330). */
+  position: relative; overflow: hidden; cursor: grab; touch-action: pan-y;
   height: calc(100vh - 320px); min-height: 380px;
   border: 1px solid var(--line); border-radius: var(--r);
   background-color: var(--surface);
@@ -1100,6 +1103,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   background-size: 34px 34px;
 }
 .goals-viewport.grabbing { cursor: grabbing; }
+/* deliberate pan mode (touch): the map reclaims the touch gesture (#330). */
+.goals-viewport.pan-active { touch-action: none; }
 .goals-viewport:focus-visible { outline: 2px solid var(--cyan-dim); outline-offset: -2px; }
 .goals-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
 .goals-edges { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; z-index: 0; }
@@ -1120,6 +1125,11 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 }
 .gzoomctl button:hover { border-color: var(--cyan-dim); color: var(--cyan); }
 .gzoomctl .fit { font-size: .6rem; letter-spacing: .06em; }
+/* "move map" toggle: touch-only (mouse always pans). Wide enough for its label + a
+   comfortable tap target; active state signals the map now owns touch gestures (#330). */
+.gzoomctl .panlock { display: none; width: auto; min-height: 34px; padding: 0 .55rem; font-size: .58rem; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+.gzoomctl .panlock.active { border-color: var(--cyan); color: var(--cyan); background: color-mix(in srgb, var(--cyan) 14%, var(--abyss-2)); }
+@media (hover: none) { .gzoomctl .panlock { display: inline-flex; align-items: center; justify-content: center; } }
 
 /* node card (absolutely positioned on the canvas; JS sets left/top/width) */
 .gnode {
@@ -1267,19 +1277,31 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 
 /* #302 per-node controls — ⚠ respond (gated) + ⓘ details; hover/focus-revealed so
    the canvas stays clean. Absolutely positioned → never change card height. */
-.gnode-ctl { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; z-index: 2; }
+/* The node controls counter-scale the world's fit-to-view zoom (--ctl-scale = max(1,
+   1/scale), set on goals-world in applyTransform) so they stay SCREEN-CONSTANT — under a
+   0.3 phone fit-scale a 26px button would render ~8px (untappable, mobile-QA #330). The
+   inverse scale pins them to their 26px screen size (clears the WCAG 2.5.8 24px minimum);
+   transform-origin keeps them anchored at the card's top-right corner. */
+.gnode-ctl {
+  position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; z-index: 2;
+  transform: scale(var(--ctl-scale, 1));
+  transform-origin: top right;
+}
 .gnode-respond, .gnode-detail {
-  width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--line);
+  width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--line);
   background: var(--abyss-2); color: var(--ink-3); cursor: pointer; font-size: .82rem; line-height: 1;
   display: inline-flex; align-items: center; justify-content: center; padding: 0;
 }
 /* ⚠ respond is ALWAYS visible on a gated node (the operator must see what needs them);
-   ⓘ details is hover/focus-revealed to keep the canvas clean. */
+   ⓘ details is hover/focus-revealed to keep the canvas clean on pointer devices. */
 .gnode-respond { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 55%, transparent); }
 .gnode-respond:hover { background: color-mix(in srgb, var(--amber) 16%, transparent); }
 .gnode-detail { opacity: 0; transition: opacity .15s var(--ease); }
 .gnode:hover .gnode-detail, .gnode:focus-within .gnode-detail, .gnode:focus-visible .gnode-detail { opacity: 1; }
 .gnode-detail:hover { border-color: var(--cyan-dim); color: var(--cyan); }
+/* On touch (no hover), the ⓘ can never be hover-revealed — always show it so it's
+   reachable (mobile-QA #330). */
+@media (hover: none) { .gnode-detail { opacity: 1; } }
 
 /* #302 intervention modal — situation brief + response input */
 .goals-modal {

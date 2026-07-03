@@ -408,6 +408,24 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("goals.js must retain the collaboration-container engine (missing %q) — #324 Inc 3", marker)
 		}
 	}
+	// mobile-QA #330: the node controls counter-scale the fit-to-view zoom (--ctl-scale)
+	// so they stay screen-constant (tappable) on phone, and the css reveals ⓘ on touch.
+	if !strings.Contains(js, "--ctl-scale") {
+		t.Error("applyTransform must set --ctl-scale so node controls stay screen-constant under zoom (#330)")
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	if !strings.Contains(css, "var(--ctl-scale") || !strings.Contains(css, "@media (hover: none)") {
+		t.Error("dash.css must counter-scale .gnode-ctl and reveal ⓘ on touch (@media hover:none) — #330")
+	}
+	// mobile-QA #330: deliberate-pan gate — a touch-drag scrolls the PAGE through the map
+	// (touch-action:pan-y) until the operator toggles "move map" (pan-active → touch-action
+	// none). Mouse panning is unchanged.
+	if !strings.Contains(js, `e.pointerType === "touch"`) || !strings.Contains(js, "touchPanActive") {
+		t.Error("goals.js must gate touch panning behind a deliberate toggle (#330 nested-scroll trap)")
+	}
+	if !strings.Contains(css, "touch-action: pan-y") || !strings.Contains(css, ".pan-active") {
+		t.Error("dash.css must default the viewport to touch-action:pan-y and reclaim it on .pan-active (#330)")
+	}
 	for _, marker := range []string{"leafCount", "reach(", "nodeW", "RING_GAP"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("goals.js must retain the #324 content-aware org geometry (missing %q)", marker)
