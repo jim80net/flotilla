@@ -1,0 +1,5 @@
+// Package sessionmirror is the watch-written, dash-read append ledger for tri-surface
+// session mirroring (flotilla#267). Each non-suppressed desk mirror event is stored
+// as one JSON line under <roster-dir>/session-mirror/<agent>.jsonl with verbose, info,
+// and debug renderings derived from the same turn-final read as the Discord post.
+package sessionmirror

@@ -107,8 +107,12 @@ type DetectorConfig struct {
 	// runs in runTail, OUTSIDE d.mu, so a slow transcript read or Discord post can never stall the
 	// tick loop. It is OBSERVE-ONLY and BEST-EFFORT — the closure must never let a mirror failure
 	// affect the tick or delivery. Default nil ⇒ inert (no mirror; behavior byte-identical to before
-	// this change). The XO is deliberately excluded — it has its own mirror path.
+	// this change). The primary clock XO is deliberately excluded — it uses CoordinatorMirrorOnFinish.
 	MirrorOnFinish func(agent string)
+	// CoordinatorMirrorOnFinish is the primary-clock-XO visibility side-effect: invoked once when
+	// XOAgent completes Working→Idle (the coordinator finish hook). Project-XOs and execution desks
+	// use MirrorOnFinish instead. Same off-mutex / best-effort discipline. Default nil ⇒ inert.
+	CoordinatorMirrorOnFinish func(agent string)
 	// IdleHoldOnFinish is the idle-hold antipattern side-effect (#216): invoked once
 	// for each NON-XO desk that completed a unit of work this tick (the same trigger
 	// as MirrorOnFinish). The caller reads the desk's turn-final, runs the mechanical
@@ -799,9 +803,9 @@ func (d *Detector) Tick() {
 	// consults only an already-computed boolean and never touches the filesystem. Inert (nil) when the
 	// feature is off (HeartbeatEnabled nil) or the warrant seam is unwired.
 	warrant := d.deskWarrantSnapshot()
-	pendingRotate, pendingWakes, pendingMirrors, pendingDelegation, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit, pendingAutoSwitch, pendingTurnEnds := d.tickLocked(warrant)
+	pendingRotate, pendingWakes, pendingMirrors, pendingCoordinatorMirrors, pendingDelegation, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit, pendingAutoSwitch, pendingTurnEnds := d.tickLocked(warrant)
 	d.ingestActivity(pendingTurnEnds)
-	d.runTail(pendingRotate, pendingWakes, pendingMirrors, pendingDelegation)
+	d.runTail(pendingRotate, pendingWakes, pendingMirrors, pendingCoordinatorMirrors, pendingDelegation)
 	d.runAutoSwitch(pendingAutoSwitch)
 	d.runRateLimitProbes(pendingRateLimit)
 	// Visibility-synthesis (B2) runs AFTER runTail and OFF d.mu: its materiality read is BLOCKING
@@ -831,7 +835,7 @@ func (d *Detector) Tick() {
 // BEFORE the continuation wake is enqueued, so the Injector — which re-acquires the same txn
 // lock for the delivery — always lands the continuation AFTER the rotate, never letting a
 // trailing /clear wipe a freshly delivered continuation.
-func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors []string, delegationNudges []string) {
+func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors, coordinatorMirrors []string, delegationNudges []string) {
 	if pendingRotate && d.cfg.Rotate != nil {
 		if err := d.cfg.Rotate(); err != nil && !errors.Is(err, surface.ErrRestartRequired) {
 			log.Printf("flotilla watch: XO context rotate failed: %v (continuing without rotate)", err)
@@ -866,6 +870,18 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors []s
 			run() // default: synchronous (deterministic for tests)
 		}
 	}
+	if len(coordinatorMirrors) > 0 && d.cfg.CoordinatorMirrorOnFinish != nil {
+		run := func() {
+			for _, agent := range coordinatorMirrors {
+				d.coordinatorMirrorOne(agent)
+			}
+		}
+		if d.cfg.MirrorDispatch != nil {
+			d.cfg.MirrorDispatch(run)
+		} else {
+			run()
+		}
+	}
 	if len(delegationNudges) > 0 && d.cfg.DelegationNudgeOnFinish != nil {
 		run := func() {
 			for _, agent := range delegationNudges {
@@ -897,6 +913,17 @@ func (d *Detector) mirrorOne(agent string) {
 		}
 	}()
 	d.cfg.MirrorOnFinish(agent)
+}
+
+// coordinatorMirrorOne invokes the primary-clock-XO mirror with the same recover()
+// backstop as mirrorOne.
+func (d *Detector) coordinatorMirrorOne(agent string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("flotilla watch: coordinator mirror panicked for %q (recovered; tick unaffected): %v", agent, r)
+		}
+	}()
+	d.cfg.CoordinatorMirrorOnFinish(agent)
 }
 
 // idleHoldOne invokes the idle-hold break side-effect with the same recover()
@@ -945,7 +972,7 @@ func (d *Detector) persist() {
 // tickLocked runs the lock-free-pure state machine under d.mu and RETURNS the side effects to
 // perform after unlock (a pending rotate + the ordered wakes). It is the single per-interval
 // writer of detector state; OperatorWake is the only other writer and shares the mutex.
-func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pendingWakes []deferredWake, pendingMirrors []string, pendingDelegation []string, pendingSynth []synthEligible, pendingDeskBeats []string, pendingDeskEscalations []string, pendingRateLimit rateLimitWork, pendingAutoSwitch []RateLimitAutoSwitchCandidate, pendingTurnEnds []string) {
+func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pendingWakes []deferredWake, pendingMirrors, pendingCoordinatorMirrors []string, pendingDelegation []string, pendingSynth []synthEligible, pendingDeskBeats []string, pendingDeskEscalations []string, pendingRateLimit rateLimitWork, pendingAutoSwitch []RateLimitAutoSwitchCandidate, pendingTurnEnds []string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -991,10 +1018,12 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 	//     above, so the cold-start baseline emits NO mirrors (a desk that was already Idle when the
 	//     detector booted has not "finished a turn"). The XO is excluded — it has its own mirror.
 	for _, name := range d.cfg.Desks {
-		if name == d.cfg.XOAgent {
-			continue
-		}
 		if prev.DeskStates[name] == surface.StateWorking && cur.DeskStates[name] == surface.StateIdle {
+			if name == d.cfg.XOAgent {
+				pendingCoordinatorMirrors = append(pendingCoordinatorMirrors, name)
+				pendingTurnEnds = append(pendingTurnEnds, name)
+				continue
+			}
 			pendingMirrors = append(pendingMirrors, name)
 			pendingTurnEnds = append(pendingTurnEnds, name)
 			// 2c. Visibility-synthesis OWED marking (B2): a non-XO desk finishing a turn marks
@@ -1080,7 +1109,7 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 	//    cubic-P1 at-least-once).
 	d.snap = cur
 	pendingRateLimit = d.rateLimitWorkLocked(cur)
-	return pendingRotate, pendingWakes, pendingMirrors, pendingDelegation, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit, pendingAutoSwitch, pendingTurnEnds
+	return pendingRotate, pendingWakes, pendingMirrors, pendingCoordinatorMirrors, pendingDelegation, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit, pendingAutoSwitch, pendingTurnEnds
 }
 
 // deskWarrantSnapshot is the #189 PHASE-1 read, run OFF d.mu from Tick BEFORE tickLocked acquires the

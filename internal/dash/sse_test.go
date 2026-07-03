@@ -187,11 +187,13 @@ func TestFileSigsChange(t *testing.T) {
 	ledger := filepath.Join(dir, "ledger.md")
 	backlog := filepath.Join(dir, "backlog.md")
 	goals := filepath.Join(dir, "fleet-goals.json")
-	paths := []string{snap, ledger, backlog, goals}
+	goalsYAML := filepath.Join(dir, "fleet-goals.yaml")
+	mirrorDir := filepath.Join(dir, "session-mirror")
+	paths := []string{snap, ledger, backlog, goals, goalsYAML}
 
 	// All absent initially.
-	s0 := fileSigs(paths)
-	if s0 != fileSigs(paths) {
+	s0 := fileSigs(paths, mirrorDir)
+	if s0 != fileSigs(paths, mirrorDir) {
 		t.Fatal("absent signature should be stable")
 	}
 
@@ -199,7 +201,7 @@ func TestFileSigsChange(t *testing.T) {
 	if err := os.WriteFile(snap, []byte("a"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s1 := fileSigs(paths)
+	s1 := fileSigs(paths, mirrorDir)
 	if s1 == s0 {
 		t.Fatal("writing a file must change the signature")
 	}
@@ -208,7 +210,7 @@ func TestFileSigsChange(t *testing.T) {
 	if err := os.WriteFile(snap, []byte("abcd"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s2 := fileSigs(paths)
+	s2 := fileSigs(paths, mirrorDir)
 	if s2 == s1 {
 		t.Error("a size change must change the signature")
 	}
@@ -217,7 +219,7 @@ func TestFileSigsChange(t *testing.T) {
 	if err := os.WriteFile(ledger, []byte("l"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s3 := fileSigs(paths)
+	s3 := fileSigs(paths, mirrorDir)
 	if s3 == s2 {
 		t.Error("ledger change must change the combined signature")
 	}
@@ -227,8 +229,60 @@ func TestFileSigsChange(t *testing.T) {
 	if err := os.WriteFile(goals, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if fileSigs(paths) == s3 {
+	s4 := fileSigs(paths, mirrorDir)
+	if s4 == s3 {
 		t.Error("goals change must change the combined signature")
+	}
+
+	// Touching the goals YAML source must change the combined signature.
+	if err := os.WriteFile(goalsYAML, []byte("goals: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s5 := fileSigs(paths, mirrorDir)
+	if s5 == s4 {
+		t.Error("goals yaml change must change the combined signature")
+	}
+
+	// Appending a session-mirror ledger must change the combined signature.
+	if err := os.MkdirAll(mirrorDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mirrorDir, "alpha.jsonl"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if fileSigs(paths, mirrorDir) == s5 {
+		t.Error("session-mirror ledger change must change the combined signature")
+	}
+}
+
+// TestPollEmitsOnSessionMirrorChange: the poller emits when a session-mirror ledger
+// is appended, not only when snapshot/ledger/backlog/goals change.
+func TestPollEmitsOnSessionMirrorChange(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, dir := newTestServer(t, singleFleetRoster, now)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go srv.hub.run(ctx)
+	go srv.poll(ctx)
+
+	c := &sseClient{events: make(chan string, 4)}
+	if !srv.hub.add(c) {
+		t.Fatal("could not register client")
+	}
+
+	mirrorDir := filepath.Join(dir, "session-mirror")
+	time.Sleep(50 * time.Millisecond)
+	if err := os.MkdirAll(mirrorDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mirrorDir, "alpha.jsonl"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-c.events:
+	case <-time.After(3 * time.Second):
+		t.Fatal("poller did not emit an update on a session-mirror change")
 	}
 }
 
