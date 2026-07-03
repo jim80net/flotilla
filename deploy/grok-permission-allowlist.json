@@ -56,6 +56,8 @@
         "Bash(flotilla --help*)",
         "Bash(flotilla status*)",
         "Bash(flotilla result*)",
+        "Bash(touch */flotilla-*-settled)",
+        "Bash(touch */flotilla-*-alive)",
         "Bash(git show*)",
         "Bash(git * show*)",
         "Bash(git log*)",
