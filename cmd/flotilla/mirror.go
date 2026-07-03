@@ -47,6 +47,10 @@ type deskMirror struct {
 	now func() time.Time
 	// ledgerAppend overrides sessionmirror.Append for tests; nil ⇒ the real append.
 	ledgerAppend func(rosterDir, agent string, rec sessionmirror.Record) error
+	// ledgerOnly skips Discord posting after the session-mirror ledger append. The primary
+	// clock XO uses CoordinatorMirrorOnFinish with ledgerOnly=true: the XO Stop hook already
+	// posts via flotilla notify — a second post would double-publish.
+	ledgerOnly bool
 }
 
 // run performs the mirror for one finished desk. It is OBSERVE-ONLY and BEST-EFFORT: it never
@@ -58,10 +62,15 @@ type deskMirror struct {
 //	MIRROR-FAIL <agent>: <detail> — one or more chunk posts failed
 //	POST <agent> <n> chunks       — the turn-final was mirrored
 func (m deskMirror) run(agent string) {
-	url, ok := m.webhook(agent)
-	if !ok {
-		m.logf("flotilla watch: mirror SKIP %s: no webhook configured", agent)
-		return
+	postDiscord := !m.ledgerOnly
+	var url string
+	if postDiscord {
+		var ok bool
+		url, ok = m.webhook(agent)
+		if !ok {
+			m.logf("flotilla watch: mirror SKIP %s: no webhook configured", agent)
+			return
+		}
 	}
 	text, ok, err := m.turnFinal(agent)
 	if err != nil {
@@ -92,6 +101,17 @@ func (m deskMirror) run(agent string) {
 	}
 
 	m.appendSessionMirror(agent, text, d)
+
+	if !postDiscord {
+		body, rmNote := d.body, d.note
+		runes := utf8.RuneCountInString(body)
+		if rmNote != "" {
+			m.logf("flotilla watch: mirror LEDGER %s resplen=%d %s", agent, runes, rmNote)
+		} else {
+			m.logf("flotilla watch: mirror LEDGER %s resplen=%d", agent, runes)
+		}
+		return
+	}
 
 	body, rmNote := d.body, d.note
 	chunks := transport.Chunk(body, mirrorChunkLimit)

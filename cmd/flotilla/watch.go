@@ -632,7 +632,7 @@ func cmdWatch(args []string) error {
 				return surface.RotateContext(xoDrv, pane)
 			},
 			MirrorOnFinish:            deskMirrorOnFinish(cfg, secrets, tr, firewall, alert, rosterDir),
-			CoordinatorMirrorOnFinish: deskMirrorOnFinish(cfg, secrets, tr, firewall, alert, rosterDir),
+			CoordinatorMirrorOnFinish: coordinatorMirrorOnFinish(cfg, firewall, alert, rosterDir),
 			IdleHoldOnFinish:          idleHoldOnFinish(cfg, idleHoldTracker, injector.Enqueue),
 			StrandedHandoffOnFinish:   strandedHandoffOnFinish(cfg, strandedTracker, injector.Enqueue),
 			IsCoordinator:             cfg.IsCoordinator,
@@ -1137,6 +1137,29 @@ func readDeskTurnFinal(cfg *roster.Config, agent string) (text string, ok bool, 
 		return "", false, err
 	}
 	return text, true, nil
+}
+
+// coordinatorMirrorOnFinish builds the detector's CoordinatorMirrorOnFinish side-effect for the
+// primary clock XO: ledger-only session-mirror append with readerModelInternal derivation. Discord
+// posting is deliberately omitted — the XO Stop hook (deploy/flotilla-xo-discord-mirror.sh) already
+// posts the turn-final via flotilla notify, and a second deskMirror post would double-publish.
+func coordinatorMirrorOnFinish(cfg *roster.Config, firewall *readermap.TermSet, alert func(string), rosterDir string) func(agent string) {
+	if rosterDir == "" {
+		return nil
+	}
+	return func(agent string) {
+		m := deskMirror{
+			ledgerOnly: true,
+			firewall:   firewall,
+			alert:      alert,
+			rosterDir:  rosterDir,
+			turnFinal: func(a string) (string, bool, error) {
+				return readDeskTurnFinal(cfg, a)
+			},
+			logf: log.Printf,
+		}
+		m.run(agent)
+	}
 }
 
 func deskMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr transport.Transport, firewall *readermap.TermSet, alert func(string), rosterDir string) func(agent string) {
