@@ -11,6 +11,7 @@
 - [x] 2.2 `delegatenudge`: `IsManagementHarness` includes codex; harness-neutral `NudgePrompt` — **flotilla-dev** (PR #262)
 - [x] 2.3 Seat-swap + supervised-trial runbook — **flotilla-dev** (PR #262)
 - [x] 2.4 `flotilla.example.json` coordinator-on-codex example — **flotilla-dev** (PR #262)
+- [x] 2.5 Grok coordinator generic parity mirror (§2 pattern) — **flotilla-dev** (grok-coordinator harness parity PR)
 
 ## 3. Codex coordinator surface (codex-harness-dev)
 - [ ] 3.1 Post-auth fixture capture (working/idle/approval/composer) — **[blocked: operator codex login]**

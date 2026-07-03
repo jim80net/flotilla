@@ -99,10 +99,23 @@ func TestNudgePromptNamesAgent(t *testing.T) {
 	}
 }
 
-func TestCheckSkipsGrokSurface(t *testing.T) {
-	text := "Implemented the rate-limit probe and go test passed green."
+func TestIsManagementHarnessGrok(t *testing.T) {
+	if !IsManagementHarness("grok") {
+		t.Fatal("grok coordinator surface should be a management harness")
+	}
+}
+
+func TestCheckGrokCoordinatorICTurn(t *testing.T) {
+	text := "Implemented the rate-limit probe in internal/surface/ratelimit.go and go test passed green."
+	if r := Check(text, "grok"); !r.InlineBuild {
+		t.Fatal("grok coordinator hands-on turn should IC-flag")
+	}
+}
+
+func TestCheckGrokCoordinatorDelegationTurn(t *testing.T) {
+	text := "Routed the fix to @backend via flotilla send — they own implementation."
 	if r := Check(text, "grok"); r.InlineBuild {
-		t.Fatal("grok workhorse surface should never IC-flag (harness allocation)")
+		t.Fatal("grok coordinator delegation turn should not IC-flag")
 	}
 }
 

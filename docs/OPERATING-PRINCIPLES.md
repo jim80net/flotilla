@@ -117,17 +117,17 @@ coordinator on the wire.
 **Mechanically enforced:** `flotilla watch` runs a delegation-nudge detector on
 every coordinator's turn-final (#232). Consecutive inline-build turns without a
 delegation signal trigger a dispatch nudge injected into the coordinator's pane.
-The nudge applies only to **Claude-seat coordinators** — management harnesses,
-not grok workhorses.
+The nudge applies to **management-harness coordinators** (Claude by default; explicit
+`surface: "codex"` or `surface: "grok"` on the roster) — not execution workhorses.
 
-## 10. Harness allocation: judgment on Claude, execution on grok
+## 10. Harness allocation: judgment on coordinators, execution on workhorses
 
 Fleet roles split across harness tiers by design:
 
 | Seat | Harness | Work |
 |------|---------|------|
-| **Coordinators** (CoS + every flotilla XO) | **Claude** | Dispatch, gate bars, review/verify, merge authority, operator communication, synthesis |
-| **Execution desks** | **grok workhorse** | Authoring code/docs/fixes, builds, migrations, sweeps, running gated scripts |
+| **Coordinators** (CoS + every flotilla XO) | **Claude** (default); explicit **codex** or **grok** when rostered | Dispatch, gate bars, review/verify, merge authority, operator communication, synthesis |
+| **Execution desks** | **grok workhorse** (default) | Authoring code/docs/fixes, builds, migrations, sweeps, running gated scripts |
 
 **Rationale:** expensive models are for judgment, not typing. Quality is protected
 by the gate stack (review, CI, independent merge authority) — not by which harness
@@ -136,10 +136,12 @@ bandwidth and violates both Principle 9 and this allocation.
 
 **Defaults:** `flotilla workspace init <agent> --repo <abs-path>` provisions a **git worktree**
 desk home, scaffolds **grok** launch recipes for execution desks and **Claude** for
-coordinators, and writes identity into the worktree. Override only deliberately.
+coordinators, and writes identity into the worktree. Override only deliberately — e.g.
+`surface: "grok"` or `surface: "codex"` on a coordinator for harness-portable seats
+(see `docs/coordinator-seat-swap-runbook.md`).
 
 **Mechanically enforced:** the delegation-nudge detector (#232) flags inline
-build-loops only on Claude-seat coordinators and nudges dispatch to grok desks.
+build-loops on management-harness coordinators and nudges dispatch to execution desks.
 
 ## 11. Desk homes are repo worktrees
 

@@ -131,6 +131,11 @@ func cmdWorkspaceInit(args []string) error {
 			return err
 		}
 	}
+	if grokCoordinatorCandidate(cfg, opts.agent, a.Surface) {
+		if err := refuseGrokCoordinatorWithoutProbe(opts.agent); err != nil {
+			return err
+		}
+	}
 	isCoordinator := cfg.IsCoordinator(opts.agent)
 	harnessSurface := harnessAllocationSurface(cfg, opts.agent, a.Surface)
 	identity, err := workspace.IdentityFileName(harnessSurface)
@@ -218,6 +223,11 @@ func cmdWorkspaceInit(args []string) error {
 			return err
 		}
 	}
+	if harnessSurface == "grok" && isCoordinator {
+		if err := scaffoldGrokCoordinatorPermissions(worktreeAbs); err != nil {
+			return err
+		}
+	}
 
 	fmt.Printf("workspace ready: %s\n", hostDir)
 	fmt.Printf("  worktree: %s (branch %q)\n", worktreeAbs, opts.branch)
@@ -258,14 +268,16 @@ func buildLaunchRecipe(worktreeAbs, agent, identity, surface string, coordinator
 }
 
 // harnessAllocationSurface applies operating-principles §10: coordinator seats
-// default to Claude; an explicit roster surface "codex" selects a codex management
-// seat. Execution desks default to grok unless the roster names another surface.
+// default to Claude; explicit roster surface "codex" or "grok" selects a management
+// seat on that harness. Execution desks default to grok unless the roster names another surface.
 func harnessAllocationSurface(cfg *roster.Config, agent, rosterSurface string) string {
 	if cfg.IsCoordinator(agent) {
-		if rosterSurface == "codex" {
-			return "codex"
+		switch rosterSurface {
+		case "codex", "grok":
+			return rosterSurface
+		default:
+			return "claude-code"
 		}
-		return "claude-code"
 	}
 	if rosterSurface == "" || rosterSurface == "claude-code" {
 		return "grok"
@@ -464,7 +476,12 @@ func workspaceLaunchCommand(worktreeAbs, agent, identity, surface string, coordi
 		return fmt.Sprintf("claude --append-system-prompt-file %s -w %s",
 			shellQuote(filepath.Join(worktreeAbs, identity)), shellQuote(agent)), nil
 	case "grok":
-		return "grok --model composer-2.5-fast", nil
+		base := "grok --model composer-2.5-fast"
+		if coordinator {
+			return fmt.Sprintf("export FLOTILLA_SELF=%s; export FLOTILLA_SECRETS=\"${FLOTILLA_SECRETS:-$HOME/.config/flotilla/flotilla-secrets.env}\"; %s",
+				shellQuote(agent), base), nil
+		}
+		return base, nil
 	case "codex":
 		base := "codex -m gpt-5.5-codex --sandbox workspace-write --ask-for-approval on-request"
 		if coordinator {

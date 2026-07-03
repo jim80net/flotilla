@@ -260,6 +260,7 @@ func TestHarnessAllocationSurface(t *testing.T) {
 		Agents: []roster.Agent{
 			{Name: "xo"},
 			{Name: "alpha-xo", Surface: "codex"},
+			{Name: "beta-xo", Surface: "grok"},
 			{Name: "backend", Surface: "grok"},
 			{Name: "infra"},
 		},
@@ -270,6 +271,7 @@ func TestHarnessAllocationSurface(t *testing.T) {
 		{"xo", "", "claude-code"},
 		{"xo", "claude-code", "claude-code"},
 		{"alpha-xo", "codex", "codex"},
+		{"beta-xo", "grok", "grok"},
 		{"backend", "grok", "grok"},
 		{"infra", "", "grok"},
 		{"infra", "codex", "codex"},
@@ -364,6 +366,74 @@ func TestWorkspaceLaunchCommandShellQuotesPathWithSpaceAndDollar(t *testing.T) {
 	}
 }
 
+func TestWorkspaceLaunchCommandGrokCoordinatorExportsSecrets(t *testing.T) {
+	got, err := workspaceLaunchCommand("/desk", "beta-xo", "AGENTS.md", "grok", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"export FLOTILLA_SELF='beta-xo'",
+		`export FLOTILLA_SECRETS="${FLOTILLA_SECRETS:-$HOME/.config/flotilla/flotilla-secrets.env}"`,
+		"grok --model composer-2.5-fast",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("grok coordinator launch missing %q in %q", want, got)
+		}
+	}
+}
+
+func TestRefuseGrokCoordinatorWithoutProbePasses(t *testing.T) {
+	if err := refuseGrokCoordinatorWithoutProbe("beta-xo"); err != nil {
+		t.Fatalf("grok driver should implement ComposerStateProbe: %v", err)
+	}
+}
+
+func TestCmdWorkspaceInitCoordinatorGrokScaffoldsPermissions(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)
+	repo := initTestGitRepo(t)
+	rosterPath := writeRosterFile(t, `{"xo_agent":"beta-xo","agents":[{"name":"beta-xo","surface":"grok"}]}`)
+	if err := cmdWorkspaceInit(workspaceInitArgs("beta-xo", rosterPath, repo)); err != nil {
+		t.Fatal(err)
+	}
+	worktree := filepath.Join(filepath.Dir(repo), "beta-xo")
+	settingsPath := filepath.Join(worktree, ".claude", "settings.local.json")
+	body, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("grok coordinator should scaffold settings.local.json: %v", err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `"on_gatekeeper_error": "abstain"`) {
+		t.Errorf("coordinator settings missing abstain-on-error policy: %s", text)
+	}
+	if strings.Contains(text, "gh pr merge") && strings.Contains(text, `"deny"`) {
+		// crude: merge must not appear in deny array — verify via json parse
+	}
+	var settings struct {
+		Permissions struct {
+			Deny []string `json:"deny"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal(body, &settings); err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range settings.Permissions.Deny {
+		if strings.Contains(rule, "gh pr merge") {
+			t.Errorf("coordinator deny must not block gh pr merge: %q", rule)
+		}
+	}
+	if !strings.Contains(text, "flotilla notify") {
+		t.Error("coordinator allow should include flotilla notify")
+	}
+	launch, err := os.ReadFile(filepath.Join(root, "beta-xo", "launch.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(launch), "FLOTILLA_SELF") {
+		t.Errorf("grok coordinator launch should export FLOTILLA_SELF: %s", launch)
+	}
+}
+
 func TestWorkspaceLaunchCommandCodexCoordinatorExportsSecrets(t *testing.T) {
 	got, err := workspaceLaunchCommand("/desk", "alpha-xo", "AGENTS.md", "codex", true)
 	if err != nil {
@@ -428,5 +498,16 @@ func TestParseWorkspaceArgsOrdering(t *testing.T) {
 	_, _, err := parseAgentRosterArgs("doctrine install", nil)
 	if err == nil || !strings.Contains(err.Error(), "flotilla doctrine install") {
 		t.Errorf("doctrine-install usage error = %v, want it to name `flotilla doctrine install`", err)
+	}
+}
+
+func TestGrokCoordinatorAllowlistDeployMatchesEmbed(t *testing.T) {
+	deployPath := filepath.Join("..", "..", "deploy", "grok-coordinator-permission-allowlist.json")
+	deploy, err := os.ReadFile(deployPath)
+	if err != nil {
+		t.Fatalf("read deploy allowlist: %v", err)
+	}
+	if string(deploy) != string(grokCoordinatorAllowlistJSON) {
+		t.Fatalf("deploy/grok-coordinator-permission-allowlist.json drifted from embedded grok_coordinator_allowlist.json — sync copies before release")
 	}
 }

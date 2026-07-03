@@ -26,6 +26,7 @@ var managementHarnesses = map[string]struct{}{
 	"":                {},
 	ManagementHarness: {},
 	"codex":           {},
+	"grok":            {},
 }
 
 // Result is the verdict for one turn-final body.
