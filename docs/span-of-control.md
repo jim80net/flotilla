@@ -263,8 +263,10 @@ host-local assets. `flotilla workspace init` seeds the set into a fresh agent an
 the install loop is **member-count-agnostic** and dispatches each member by its delivery
 **mechanism**.
 
-The set ships **seven members today**, delivered by **two mechanisms** — the "vocabulary
-extends with each new member kind" the set was designed to grow into:
+The set ships **nine members today** (`doctrine.Members()`): seven `identity-append`
+and two `heartbeat-skill`, delivered by **two mechanisms** — the "vocabulary extends
+with each new member kind" the set was designed to grow into. (`xo-outbound` is
+coordinator-only, so execution desks receive eight.)
 
 | Member | Mechanism | Delivery | Loads |
 |---|---|---|---|
@@ -273,6 +275,8 @@ extends with each new member kind" the set was designed to grow into:
 | **no-self-merge** (a desk never merges its own work; the level above reviews + merges — the merge IS the independent review) | `identity-append` | distilled text appended (under a marker fence) into the agent's **identity file** | once at launch |
 | **act-dont-idle-hold** (execute authorized reversible work; never stall on a non-decision) | `identity-append` | distilled text appended (under a marker fence) into the agent's **identity file** | once at launch |
 | **executive-mini-brief** (operator turn-finals: bottom line, plain-language streams, detail footer, explicit needs-you line) | `identity-append` | distilled text appended (under a marker fence) into the agent's **identity file** | once at launch |
+| **xo-outbound** (coordinator notify discipline — reply to the operator with `flotilla notify`) | `identity-append` | distilled text appended (under a marker fence) into the coordinator's **identity file** | once at launch; **coordinator-only** |
+| **operator-direct-tasking** (operator-direct tasking is first-class authorization — execute and report) | `identity-append` | distilled text appended (under a marker fence) into the agent's **identity file** | once at launch |
 | **[visibility-synthesis](./visibility.md)** (Tiers 2/3) | `heartbeat-skill` | a **whole-file** skill written into the agent's **workspace** (`skills/visibility-synthesis.md`) | when the daemon emits a synthesis wake |
 | **[parade-formation](./parade.md)** (accomplishments parade) | `heartbeat-skill` | a **whole-file** skill written into the agent's **workspace** (`skills/parade-formation.md`) | when the operator runs `flotilla parade` |
 

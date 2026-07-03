@@ -212,6 +212,20 @@ func paradeRollupTargets(cfg *roster.Config) []string {
 	return out
 }
 
+// paradeSecrets loads secrets only for answer mode (individual parade requests run the
+// dark-desk webhook pre-check). Roll-up and fleet modes are read flows — they never touch
+// secrets even when FLOTILLA_SECRETS is set.
+func paradeSecrets(a paradeArgs) (*roster.Secrets, error) {
+	if a.mode != "" {
+		return nil, nil
+	}
+	if a.secretsPath == "" {
+		fmt.Fprintln(os.Stderr, "flotilla parade: note — no --secrets, skipping the dark-desk webhook pre-check (the parade request is still injected)")
+		return nil, nil
+	}
+	return roster.LoadSecrets(a.secretsPath)
+}
+
 // cmdParade elicits parade answers or coordinator roll-ups. Operator-triggered v1 — no daemon cadence.
 func cmdParade(args []string) error {
 	a, err := parseParadeArgs(args)
@@ -222,14 +236,9 @@ func cmdParade(args []string) error {
 	if err != nil {
 		return err
 	}
-	var secrets *roster.Secrets
-	if a.secretsPath != "" {
-		secrets, err = roster.LoadSecrets(a.secretsPath)
-		if err != nil {
-			return err
-		}
-	} else if a.mode == "" {
-		fmt.Fprintln(os.Stderr, "flotilla parade: note — no --secrets, skipping the dark-desk webhook pre-check (the parade request is still injected)")
+	secrets, err := paradeSecrets(a)
+	if err != nil {
+		return err
 	}
 	switch a.mode {
 	case "":

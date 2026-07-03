@@ -113,6 +113,35 @@ func TestParadeAnswerTargets_AllAgents(t *testing.T) {
 	}
 }
 
+func TestParadeSecrets_RollupIgnoresBogusSecretsPath(t *testing.T) {
+	a := paradeArgs{mode: "rollup", all: true, secretsPath: "/nonexistent/bogus-secrets.env"}
+	secrets, err := paradeSecrets(a)
+	if err != nil {
+		t.Fatalf("rollup mode must not load secrets: %v", err)
+	}
+	if secrets != nil {
+		t.Fatal("rollup mode should return nil secrets")
+	}
+}
+
+func TestParadeSecrets_FleetIgnoresBogusSecretsPath(t *testing.T) {
+	a := paradeArgs{mode: "fleet", secretsPath: "/nonexistent/bogus-secrets.env"}
+	secrets, err := paradeSecrets(a)
+	if err != nil {
+		t.Fatalf("fleet mode must not load secrets: %v", err)
+	}
+	if secrets != nil {
+		t.Fatal("fleet mode should return nil secrets")
+	}
+}
+
+func TestParadeSecrets_AnswerModeLoadsSecrets(t *testing.T) {
+	a := paradeArgs{mode: "", all: true, secretsPath: "/nonexistent/bogus-secrets.env"}
+	if _, err := paradeSecrets(a); err == nil {
+		t.Fatal("answer mode with a bogus secrets path must surface LoadSecrets error")
+	}
+}
+
 func TestParadeRollupTargets_OnlyCoordinatorsWithSubs(t *testing.T) {
 	rosterPath := writeRosterFile(t, `{
 	  "operator_user_id":"U",
