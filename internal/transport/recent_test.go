@@ -1,12 +1,19 @@
 package transport
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 type recentHistoryTransport struct {
 	fakeTransport
 }
 
 func (r *recentHistoryTransport) Recent(Destination, int) ([]Message, error) {
+	return nil, nil
+}
+
+func (r *recentHistoryTransport) RecentSince(Destination, time.Time) ([]Message, error) {
 	return nil, nil
 }
 

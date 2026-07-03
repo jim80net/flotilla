@@ -18,9 +18,12 @@ const (
 	defaultUnackedRetention = 7 * 24 * time.Hour
 )
 
-// RecentHistoryReader fetches the most recent messages in a channel (ascending).
+// RecentHistoryReader fetches channel history for the un-acked backstop (ascending).
 type RecentHistoryReader interface {
 	Recent(channelID string, limit int) ([]transport.Message, error)
+	// RecentSince returns messages with Timestamp >= since using non-overlapping
+	// backward pagination (Discord before-pages).
+	RecentSince(channelID string, since time.Time) ([]transport.Message, error)
 }
 
 // CoordinatorWake attempts a confirmed delivery to the coordinator pane. It
@@ -111,7 +114,12 @@ func (u *UnackedBackstop) sweepChannel(b roster.Channel, st *unackedState, now t
 	if u.reader == nil || u.cfg.OperatorUserID == "" {
 		return false
 	}
-	raw, err := u.recentCoveringAckWindow(b.ChannelID, now)
+	ack := u.scanCfg.AckWindow
+	if ack <= 0 {
+		ack = unacked.DefaultAckWindow
+	}
+	cutoff := now.Add(-ack)
+	raw, err := u.reader.RecentSince(b.ChannelID, cutoff)
 	if err != nil {
 		log.Printf("flotilla watch: unacked scan failed for %s: %v", channelLabel(b), err)
 		return false
@@ -157,47 +165,6 @@ func (u *UnackedBackstop) sweepChannel(b roster.Channel, st *unackedState, now t
 		u.alert(formatUnackedDigest(b, newAlerts))
 	}
 	return changed
-}
-
-// recentCoveringAckWindow paginates Recent() until the oldest returned message is at
-// or before the AckWindow cutoff (or the safety cap is hit). A fixed small lookback
-// drops eligible operator messages on busy channels before they age into MinAge.
-func (u *UnackedBackstop) recentCoveringAckWindow(channelID string, now time.Time) ([]transport.Message, error) {
-	ack := u.scanCfg.AckWindow
-	if ack <= 0 {
-		ack = unacked.DefaultAckWindow
-	}
-	cutoff := now.Add(-ack)
-	limit := u.lookback
-	if limit < unacked.DefaultLookback {
-		limit = unacked.DefaultLookback
-	}
-	for {
-		batch, err := u.reader.Recent(channelID, limit)
-		if err != nil {
-			return nil, err
-		}
-		if len(batch) == 0 {
-			return batch, nil
-		}
-		oldest := batch[0].Timestamp
-		if oldest.IsZero() || !oldest.After(cutoff) {
-			return batch, nil
-		}
-		if len(batch) < limit {
-			log.Printf("flotilla watch: unacked history for channel %s ends at %s — AckWindow cutoff %s not reached", channelID, oldest, cutoff)
-			return batch, nil
-		}
-		if limit >= unacked.MaxRecentLookback {
-			log.Printf("flotilla watch: unacked lookback capped at %d for channel %s; very busy channel may miss alerts", unacked.MaxRecentLookback, channelID)
-			return batch, nil
-		}
-		next := limit + unacked.RecentPageGrowth
-		if next > unacked.MaxRecentLookback {
-			next = unacked.MaxRecentLookback
-		}
-		limit = next
-	}
 }
 
 func (u *UnackedBackstop) tryCoordinatorWake(b roster.Channel, f unacked.Finding) error {

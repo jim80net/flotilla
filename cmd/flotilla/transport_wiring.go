@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jim80net/flotilla/internal/transport"
 	"github.com/jim80net/flotilla/internal/watch"
@@ -74,6 +75,14 @@ func (r *transportRecentReader) Recent(channelID string, limit int) ([]transport
 		return nil, fmt.Errorf("no transport destination for channel %q", channelID)
 	}
 	return r.cap.Recent(d, limit)
+}
+
+func (r *transportRecentReader) RecentSince(channelID string, since time.Time) ([]transport.Message, error) {
+	d, ok := r.dest[channelID]
+	if !ok {
+		return nil, fmt.Errorf("no transport destination for channel %q", channelID)
+	}
+	return r.cap.RecentSince(d, since)
 }
 
 // transportGateway adapts the transport's Subscribe (the inbound half) to the

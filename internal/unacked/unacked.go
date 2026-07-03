@@ -20,8 +20,6 @@ const (
 	DefaultAckWindow       = 2 * time.Hour
 	DefaultWorkingFollowUp = 30 * time.Minute
 	DefaultLookback        = 50
-	MaxRecentLookback      = 500 // cap for paginated Recent() expansion
-	RecentPageGrowth       = 50  // limit step while covering AckWindow
 )
 
 // Message is the scan input (transport.Message field-for-field at the seam).

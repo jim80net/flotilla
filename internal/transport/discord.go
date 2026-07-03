@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/jim80net/flotilla/internal/discord"
 	"github.com/jim80net/flotilla/internal/roster"
@@ -240,6 +241,22 @@ func (t *discordTransport) Recent(dest Destination, limit int) ([]Message, error
 		return nil, fmt.Errorf("discord transport: recent history not configured (no REST client)")
 	}
 	msgs, err := t.rest.Recent(dd.channelID, limit)
+	if err != nil {
+		return nil, err
+	}
+	return projectMessages(msgs), nil
+}
+
+// RecentSince returns messages back to since via before-paginated REST history.
+func (t *discordTransport) RecentSince(dest Destination, since time.Time) ([]Message, error) {
+	dd, ok := dest.(discordDestination)
+	if !ok {
+		return nil, fmt.Errorf("discord transport: RecentSince got a non-discord destination %T", dest)
+	}
+	if t.rest == nil {
+		return nil, fmt.Errorf("discord transport: recent history not configured (no REST client)")
+	}
+	msgs, err := t.rest.RecentSince(dd.channelID, since, 0)
 	if err != nil {
 		return nil, err
 	}

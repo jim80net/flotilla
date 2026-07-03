@@ -132,14 +132,112 @@ func (r *REST) Latest(channelID string) (Message, bool, error) {
 	return out[len(out)-1], true, nil
 }
 
+// ChannelMessagesMax is discordgo's per-request cap on ChannelMessages. Requests
+// above this are silently truncated — pagination must use non-overlapping before
+// pages rather than re-fetching an ever-wider tail.
+const ChannelMessagesMax = 100
+
+// DefaultRecentSinceMaxPages caps backward walks for time-bounded history (50 pages
+// × 100 msgs = 5000 messages worst-case per channel per sweep).
+const DefaultRecentSinceMaxPages = 50
+
 // Recent returns up to limit of the channel's most recent messages, ASCENDING.
-// The `inbox` command's read path.
+// Limits above ChannelMessagesMax are satisfied via non-overlapping before-pages.
 func (r *REST) Recent(channelID string, limit int) ([]Message, error) {
-	raw, err := r.fetch(channelID, limit, "", "", "")
-	if err != nil {
-		return nil, err
+	if limit <= 0 {
+		return nil, nil
 	}
-	return project(raw), nil
+	got, _, err := r.recentWalkBackward(channelID, recentWalkOpts{maxMessages: limit})
+	return got, err
+}
+
+// RecentSince returns ascending messages with Timestamp >= since, walking backward
+// from the channel head in non-overlapping before-pages until the cutoff is
+// reached or history is exhausted.
+func (r *REST) RecentSince(channelID string, since time.Time, maxPages int) ([]Message, error) {
+	if maxPages < 1 {
+		maxPages = DefaultRecentSinceMaxPages
+	}
+	got, _, err := r.recentWalkBackward(channelID, recentWalkOpts{since: since, maxPages: maxPages})
+	return got, err
+}
+
+type recentWalkOpts struct {
+	maxMessages int       // Recent: return the N newest messages
+	since       time.Time // RecentSince: stop when oldest page edge reaches since
+	maxPages    int       // page-budget cap (RecentSince); derived for Recent
+}
+
+// recentWalkBackward fetches channel history newest→oldest in before-pages, merges
+// ascending, and stops on count/cutoff/exhaustion. capped=true when maxPages stopped
+// the walk before the stop condition was met.
+func (r *REST) recentWalkBackward(channelID string, opts recentWalkOpts) (out []Message, capped bool, err error) {
+	pageLimit := ChannelMessagesMax
+	maxPages := opts.maxPages
+	if maxPages < 1 {
+		if opts.maxMessages > 0 {
+			maxPages = (opts.maxMessages + pageLimit - 1) / pageLimit
+		}
+		if maxPages < 1 {
+			maxPages = 1
+		}
+	}
+	haveSince := !opts.since.IsZero()
+	before := ""
+	for page := 0; page < maxPages; page++ {
+		reqLimit := pageLimit
+		if opts.maxMessages > 0 {
+			remaining := opts.maxMessages - len(out)
+			if remaining <= 0 {
+				break
+			}
+			if remaining < reqLimit {
+				reqLimit = remaining
+			}
+		}
+		raw, err := r.fetch(channelID, reqLimit, before, "", "")
+		if err != nil {
+			return nil, false, err
+		}
+		if len(raw) == 0 {
+			return trimSince(out, opts.since), false, nil
+		}
+		batch := project(raw)
+		if len(batch) == 0 {
+			return trimSince(out, opts.since), false, nil
+		}
+		if before == "" {
+			out = batch
+		} else {
+			out = append(batch, out...)
+		}
+		out = sortedUniqueAscending(out)
+		if opts.maxMessages > 0 && len(out) > opts.maxMessages {
+			out = out[len(out)-opts.maxMessages:]
+		}
+		oldest := out[0]
+		if haveSince && (oldest.Timestamp.IsZero() || !oldest.Timestamp.After(opts.since)) {
+			return trimSince(out, opts.since), false, nil
+		}
+		if len(raw) < reqLimit {
+			return trimSince(out, opts.since), false, nil
+		}
+		before = batch[0].ID
+	}
+	return trimSince(out, opts.since), true, nil
+}
+
+func trimSince(in []Message, since time.Time) []Message {
+	if since.IsZero() || len(in) == 0 {
+		return in
+	}
+	out := in[:0]
+	for _, m := range in {
+		if m.Timestamp.IsZero() || !m.Timestamp.Before(since) {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // ParseSnowflake parses a Discord snowflake id into a uint64. Empty or
