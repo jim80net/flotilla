@@ -127,8 +127,29 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.08; 
   border: 1px solid var(--line); padding: .45em .9em; border-radius: var(--r-sm);
 }
 .nav-cta:hover { border-color: var(--cyan-dim); }
+/* Mobile: horizontal scroll strip — all section links stay reachable (no hamburger). */
 @media (max-width: 760px) {
-  .nav-links a:not(.nav-cta) { display: none; }
+  .nav {
+    flex-wrap: wrap; align-items: center; gap: .55rem;
+    padding: .85rem 1rem 1rem;
+  }
+  .nav-links {
+    order: 3; width: 100%; flex-wrap: nowrap;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    gap: .65rem; padding: .15rem 0 .35rem;
+    scrollbar-width: none;
+    mask-image: linear-gradient(90deg, #000 90%, transparent);
+    -webkit-mask-image: linear-gradient(90deg, #000 90%, transparent);
+  }
+  .nav-links::-webkit-scrollbar { display: none; }
+  .nav-links a {
+    flex-shrink: 0; white-space: nowrap;
+    font-size: .74rem; letter-spacing: .04em;
+    padding: .35em .65em; border-radius: 999px;
+    border: 1px solid var(--line-soft); background: rgba(255,255,255,.02);
+  }
+  .nav-links a:hover { border-color: var(--cyan-dim); background: rgba(79,227,208,.04); }
+  .nav-cta { margin-left: auto; padding: .4em .75em; border-radius: var(--r-sm); }
 }
 
 /* ── hero ───────────────────────────────────────────────────────────────── */
@@ -233,9 +254,14 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.08; 
 .hs-chip.soon em { color: var(--cyan-dim); font-style: normal; }
 
 /* ── bands ──────────────────────────────────────────────────────────────── */
-.band { max-width: var(--maxw); margin: 0 auto; padding: 4.5rem 1.5rem; }
+.band {
+  max-width: var(--maxw); margin: 0 auto; padding: 4.5rem 1.5rem;
+  scroll-margin-top: 1rem; /* anchor jumps clear the nav strip */
+}
+.band + .band { border-top: 1px solid var(--line-soft); }
 .band-head { margin-bottom: 2.6rem; }
-.band-head h2 { font-size: clamp(1.6rem, 4vw, 2.4rem); margin-top: .7rem; max-width: 16em; }
+.band-head h2 { font-size: clamp(1.6rem, 4vw, 2.4rem); margin-top: .7rem; max-width: 20em; }
+#positioning .band-head h2 { max-width: 22em; }
 
 /* what — cards */
 .cards.three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.2rem; }
@@ -249,6 +275,71 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.08; 
 .card-num { font-family: var(--display); font-weight: 800; font-size: .9rem; color: var(--cyan-dim); margin-bottom: .9rem; }
 .card h3 { font-size: 1.18rem; margin-bottom: .6rem; }
 .card p { font-size: .92rem; margin: 0; }
+.card p em { color: var(--ink-3); font-style: italic; }
+
+/* positioning — altitude + pull-quote */
+.band-lede { font-size: 1.02rem; color: var(--ink-2); max-width: 42em; margin: .9rem 0 0; }
+.pull-quote {
+  margin: 0 0 2.2rem; padding: 1.5rem 1.6rem 1.4rem;
+  border-left: 3px solid var(--cyan);
+  background: linear-gradient(90deg, rgba(79,227,208,.07), transparent 68%);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+}
+.pull-quote p { margin: 0; font-size: 1.05rem; color: var(--ink); line-height: 1.65; }
+.pull-quote em { color: var(--cyan); font-style: normal; font-weight: 600; }
+.pull-aside {
+  display: block; margin-top: .75rem; font-size: .82rem;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3);
+}
+.altitude-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.1rem; margin-bottom: 1.6rem;
+}
+@media (max-width: 900px) { .altitude-grid { grid-template-columns: 1fr; } }
+.altitude-card {
+  padding: 1.35rem 1.3rem; border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--abyss-2);
+}
+.altitude-card.highlight {
+  border-color: rgba(79,227,208,.35);
+  background: linear-gradient(165deg, rgba(79,227,208,.08), var(--abyss-2));
+  box-shadow: 0 18px 50px -28px rgba(79,227,208,.35);
+}
+.altitude-tag {
+  font-size: .66rem; letter-spacing: .18em; text-transform: uppercase;
+  color: var(--ink-3); margin-bottom: .55rem;
+}
+.altitude-card.highlight .altitude-tag { color: var(--cyan-dim); }
+.altitude-card h3 { font-size: 1.12rem; margin-bottom: .35rem; }
+.altitude-examples { font-size: .76rem; color: var(--cyan-dim); margin: 0 0 .75rem; }
+.altitude-card p { font-size: .88rem; margin: 0; }
+.diff-strip {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1.1rem; margin-bottom: 1.2rem;
+}
+@media (max-width: 720px) { .diff-strip { grid-template-columns: 1fr; } }
+.diff-col {
+  padding: 1.25rem 1.3rem; border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--abyss-2);
+}
+.diff-col.flotilla-col { border-color: rgba(79,227,208,.28); }
+.diff-col h4 {
+  font-family: var(--display); font-size: .95rem; color: var(--ink);
+  margin: 0 0 .85rem;
+}
+.diff-col ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .55rem; }
+.diff-col li {
+  font-size: .86rem; padding-left: 1rem; position: relative;
+}
+.diff-col li::before { content: "›"; position: absolute; left: 0; color: var(--ink-3); }
+.diff-col.flotilla-col li::before { color: var(--cyan-dim); }
+.positioning-foot { font-size: .82rem; color: var(--ink-3); margin: 0; }
+.positioning-foot a { color: var(--cyan-dim); }
+.positioning-foot a:hover { color: var(--cyan); }
+@media (max-width: 600px) {
+  .pull-quote { padding: 1.15rem 1.1rem; margin-bottom: 1.6rem; }
+  .pull-quote p { font-size: .95rem; }
+  .altitude-grid { gap: .85rem; margin-bottom: 1.2rem; }
+  .diff-strip { gap: .85rem; }
+}
 
 /* how — grid */
 .how-grid { display: grid; grid-template-columns: .9fr 1.1fr; gap: 2.5rem; align-items: start; }
@@ -416,7 +507,9 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.08; 
   .hero { padding-top: 2rem; padding-bottom: 3rem; }
   .band { padding-top: 3rem; padding-bottom: 3rem; }
   .band-head { margin-bottom: 1.8rem; }
+  .band-head h2 { max-width: none; }
   .harness-strip { margin-top: 2.2rem; padding-top: 1.3rem; }
+  .hero-cta .btn { flex: 1 1 auto; justify-content: center; min-width: 9rem; }
 }
 
 /* ── footer ─────────────────────────────────────────────────────────────── */

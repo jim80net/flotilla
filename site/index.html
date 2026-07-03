@@ -54,12 +54,13 @@
       </span>
       <span class="brand-name">flotilla</span>
     </a>
-    <nav class="nav-links">
+    <nav class="nav-links" aria-label="page sections">
       <a href="#what">what</a>
+      <a href="#positioning">why</a>
       <a href="#org">organization</a>
       <a href="#how">how</a>
-      <a href="#arch">architecture</a>
-      <a href="#status">live status</a>
+      <a href="#arch">arch</a>
+      <a href="#status">status</a>
       <a href="#start">start</a>
       <a class="nav-cta" href="https://github.com/jim80net/flotilla" target="_blank" rel="noopener">
         GitHub ↗
@@ -74,7 +75,6 @@
         <div class="hero-copy">
           <div class="eyebrow">
             <span class="dot"></span>
-            <!-- COPY: status pill text — keep honest with README "v0, WIP" -->
             open source · v0, built in the open
           </div>
 
@@ -103,7 +103,6 @@
 
           <div class="hero-cta">
             <a class="btn btn-primary" href="https://github.com/jim80net/flotilla" target="_blank" rel="noopener">
-              <!-- COPY: primary CTA label -->
               Star on GitHub
               <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg>
             </a>
@@ -146,44 +145,122 @@
     <section class="band" id="what">
       <div class="band-head">
         <span class="kicker">01 — what it does</span>
-        <!-- COPY: section lede -->
-        <h2>Stop being the message bus for your own agents.</h2>
+        <h2>Three things that turn terminals into a fleet you run from chat.</h2>
       </div>
       <div class="cards three">
         <article class="card">
           <div class="card-num">01</div>
-          <h3>One hub for your whole fleet</h3>
+          <h3>Mixed harnesses, one roster</h3>
           <p>
-            Coordinate Claude Code, Aider, OpenCode, and Grok as a single fleet.
-            One XO routes work to the right desk and reports back, so you manage
-            many agents through one conversation instead of juggling terminals.
+            Claude Code, Aider, OpenCode, and Grok desks behind one interface.
+            Each stays an ordinary session you control; flotilla coordinates work
+            across them without replacing the tools you already trust.
           </p>
         </article>
         <article class="card">
           <div class="card-num">02</div>
-          <h3>A chief of staff that routes &amp; reports</h3>
+          <h3>Chat is the cockpit</h3>
           <p>
-            One hub agent &mdash; the executive officer (XO) &mdash; routes work to the
-            domain agents and collects their replies. You talk to one agent, not five,
-            and manage the whole fleet from your phone.
+            Message the XO like a colleague &mdash; <em>"what shipped overnight?"</em>,
+            <em>"benchmark the cache and report back."</em> It routes to the right desk,
+            collects replies, and answers in the same channel, from your phone.
           </p>
         </article>
         <article class="card">
           <div class="card-num">03</div>
-          <h3>Durable, auditable channel</h3>
+          <h3>Every turn on the record</h3>
           <p>
-            Every instruction and reply is mirrored to a chat channel under each
-            agent's own identity &mdash; a timestamped, phone-readable transcript of all
-            coordination. The audit trail is a first-class feature, not an afterthought.
+            Instructions and replies mirror to a dedicated channel under each agent's
+            identity. Confirmed delivery means the transcript never lies about what
+            landed &mdash; governance you can read back from anywhere.
           </p>
         </article>
       </div>
     </section>
 
+    <!-- ─────────────────── POSITIONING / ALTITUDE ─────────────────── -->
+    <section class="band" id="positioning">
+      <div class="band-head">
+        <span class="kicker">02 — why flotilla</span>
+        <h2>Frameworks build agents. flotilla runs your fleet.</h2>
+        <p class="band-lede">
+          Evaluators often bucket flotilla with agent orchestration platforms &mdash;
+          CrewAI, LangGraph, AutoGen. They solve a different job at a different altitude.
+        </p>
+      </div>
+
+      <blockquote class="pull-quote">
+        <p>
+          Agent frameworks help you <em>build</em> multi-agent software. flotilla helps you
+          <em>run</em> a fleet of coding agents you already trust &mdash; from a chat channel,
+          with confirmed delivery and a durable record of who told whom what.
+          <span class="pull-aside">Different job, different layer.</span>
+        </p>
+      </blockquote>
+
+      <div class="altitude-grid">
+        <article class="altitude-card">
+          <div class="altitude-tag">application layer</div>
+          <h3>Agent platforms</h3>
+          <p class="altitude-examples">CrewAI &middot; LangGraph &middot; AutoGen</p>
+          <p>
+            In-process SDKs for composing autonomous multi-agent <em>applications</em>.
+            You wire roles, tools, and handoffs in code; the operator is usually the developer
+            shipping the app.
+          </p>
+        </article>
+        <article class="altitude-card">
+          <div class="altitude-tag">runtime layer</div>
+          <h3>Terminal multiplexers</h3>
+          <p class="altitude-examples">herdr &middot; tmux &middot; Zellij</p>
+          <p>
+            Agent-aware terminals that make panes visible and persistent. They watch the
+            herd; they do not broker delegation or mirror an audit trail to your phone.
+          </p>
+        </article>
+        <article class="altitude-card highlight">
+          <div class="altitude-tag">operations layer</div>
+          <h3>flotilla</h3>
+          <p class="altitude-examples">chief of staff &middot; hub-and-spoke &middot; chat-first</p>
+          <p>
+            Drop-in coordination over harnesses you already run. One XO routes work to desks
+            in live sessions, confirms delivery, and mirrors every instruction and reply to a
+            channel you read from anywhere.
+          </p>
+        </article>
+      </div>
+
+      <div class="diff-strip">
+        <div class="diff-col">
+          <h4>What platforms optimize for</h4>
+          <ul>
+            <li>Autonomous throughput inside your codebase</li>
+            <li>Tool graphs and checkpointed workflows</li>
+            <li>Hosted observability for agent apps</li>
+          </ul>
+        </div>
+        <div class="diff-col flotilla-col">
+          <h4>What flotilla optimizes for</h4>
+          <ul>
+            <li>Executive span of control over a coding fleet</li>
+            <li>Confirmed delivery to live harness sessions</li>
+            <li>Phone-readable audit trail as the primary interface</li>
+          </ul>
+        </div>
+      </div>
+
+      <p class="positioning-foot">
+        Full analysis:
+        <a href="https://github.com/jim80net/flotilla/blob/main/docs/competitive/agent-platforms-vs-flotilla.md" target="_blank" rel="noopener">agent platforms vs flotilla</a>
+        &middot;
+        <a href="https://github.com/jim80net/flotilla/blob/main/docs/competitive/herdr-vs-flotilla.md" target="_blank" rel="noopener">herdr vs flotilla</a>
+      </p>
+    </section>
+
     <!-- ─────────────────── FLUID ORGANIZATION ─────────────────── -->
     <section class="band" id="org">
       <div class="band-head">
-        <span class="kicker">01b — organization that moves as fast as you do</span>
+        <span class="kicker">03 — organization that moves as fast as you do</span>
         <!-- COPY: fluid-org thesis — operator 2026-07-03; tighten for marketing -->
         <h2>Spin workstreams and desks up or down — the goals graph follows.</h2>
         <p>
@@ -204,9 +281,8 @@
     <!-- ─────────────────────── HOW IT WORKS ─────────────────────── -->
     <section class="band" id="how">
       <div class="band-head">
-        <span class="kicker">02 — how it works</span>
-        <!-- COPY: section lede -->
-        <h2>Hub and spoke, over tmux and a chat channel.</h2>
+        <span class="kicker">04 — how it works</span>
+        <h2>Hub and spoke over live sessions &mdash; tmux delivery, chat mirror.</h2>
       </div>
 
       <div class="how-grid">
@@ -284,9 +360,9 @@
             <span class="step-tag">topology</span>
             <h3>One hub routes the rest</h3>
             <p>
-              One agent is the hub (the XO). You talk to the hub; it routes to the domain
-              agents and collects their reports &mdash; so there is always one coherent
-              picture and one accountable router.
+              The XO is the single router &mdash; span-of-control over backend, frontend,
+              data, and infra desks. You get one coherent picture and one accountable
+              agent to message, not a mesh of peer agents.
             </p>
           </li>
           <li>
@@ -314,8 +390,7 @@
     <!-- ───────────────────── PLUGGABLE ARCHITECTURE ───────────────────── -->
     <section class="band" id="arch">
       <div class="band-head">
-        <span class="kicker">03 — pluggable architecture</span>
-        <!-- COPY: section lede -->
+        <span class="kicker">05 — architecture</span>
         <h2>Heterogeneous by design. One interface, many harnesses.</h2>
       </div>
 
@@ -335,9 +410,11 @@
             <ul>
               <li><b>Surface drivers</b> &mdash; Claude Code, Aider, OpenCode, Grok</li>
               <li><b>Inter-harness fleets</b> &mdash; one XO drives a mixed fleet</li>
+              <li><b>Federation</b> &mdash; meta-XO over project-XOs, channel-bound routing</li>
               <li><b>The self-continuing clock</b> &mdash; heartbeat + liveness watchdog</li>
               <li><b>Change-detector</b> &mdash; wake the XO only on a material change</li>
               <li><b>Inbound relay</b> &mdash; message the fleet from the channel</li>
+              <li><b><code>flotilla dash</code></b> &mdash; local web fleet board + issue tracker</li>
             </ul>
           </div>
           <!-- HONESTY: modes + interfaces are DESIGNED pluggable but NOT yet shipped.
@@ -345,6 +422,7 @@
           <div class="arch-col roadmap">
             <div class="arch-tag"><span class="soon-tick">◌</span> designed pluggable · roadmap</div>
             <ul>
+              <li><b>Goals map</b> &mdash; fleet goals as a first-class dashboard view</li>
               <li><b>Modes</b> &mdash; first-class behavior modes you drive the fleet by</li>
               <li><b>Interfaces</b> &mdash; pluggable surfaces; the chat channel is just one</li>
               <li><b>Reporting</b> &mdash; a richer reporting model beyond the mirror</li>
@@ -362,9 +440,8 @@
     <!-- ───────────────────── LIVE FLEET STATUS ───────────────────── -->
     <section class="band" id="status">
       <div class="band-head">
-        <span class="kicker">04 — live fleet status</span>
-        <!-- COPY: section lede -->
-        <h2>See the fleet at a glance.</h2>
+        <span class="kicker">06 — fleet status</span>
+        <h2>Your desks at a glance &mdash; even away from the terminal.</h2>
       </div>
 
       <!-- The widget fetches ./status.json and renders the table. status.json is
@@ -395,9 +472,8 @@
     <!-- ───────────────────── 30-SECOND START ───────────────────── -->
     <section class="band" id="start">
       <div class="band-head">
-        <span class="kicker">05 — 30-second start</span>
-        <!-- COPY: section lede -->
-        <h2>Install, send, see your fleet.</h2>
+        <span class="kicker">07 — get started</span>
+        <h2>Three commands from install to a running clock.</h2>
       </div>
 
       <div class="start-grid">
@@ -448,12 +524,12 @@ flotilla send --from me backend "pull origin main and run the tests"</code></pre
     <div class="footer-inner">
       <div class="footer-brand">
         <span class="brand-name">flotilla</span>
-        <!-- COPY: footer tagline -->
-        <p>Built in the open.</p>
+        <p>Coordination for coding fleets. Built in the open.</p>
       </div>
       <nav class="footer-links">
         <a href="https://github.com/jim80net/flotilla" target="_blank" rel="noopener">GitHub</a>
         <a href="https://github.com/jim80net/flotilla/blob/main/docs/quickstart.md" target="_blank" rel="noopener">Quickstart</a>
+        <a href="https://github.com/jim80net/flotilla/blob/main/docs/competitive/agent-platforms-vs-flotilla.md" target="_blank" rel="noopener">Positioning</a>
         <a href="https://github.com/jim80net/flotilla/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
       </nav>
     </div>
