@@ -333,9 +333,13 @@ code {
   margin-bottom: .25rem;
 }
 .thread-route {
-  color: var(--cyan);
+  color: var(--ink-3);
   font-size: .74rem;
 }
+/* the speaker's name in their stable per-speaker colour (#302 thread colour-coding) */
+.thread-from { color: var(--spk, var(--cyan)); font-weight: 600; }
+.thread-msg[style*="--spk"] { border-left: 3px solid var(--spk); }
+.thread-out.thread-msg[style*="--spk"] { border-left: 1px solid var(--line-soft); border-right: 3px solid var(--spk); }
 .thread-time {
   color: var(--ink-3);
   font-size: .68rem;
@@ -577,6 +581,17 @@ code {
   font-size: .8rem;
 }
 .backlog-item:last-child, .ledger-entry:last-child { border-bottom: 0; }
+/* #302 drive-queue: a status chip parsed from the [marker] + clean text */
+.backlog-item { display: flex; align-items: baseline; gap: .5rem; }
+.bq-marker {
+  flex: none; font-size: .58rem; letter-spacing: .07em; text-transform: uppercase;
+  padding: 1px 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-3);
+}
+.bq-text { color: var(--ink-2); min-width: 0; }
+.bq-in-flight .bq-marker, .bq-pending .bq-marker { color: var(--cyan); border-color: rgba(79, 227, 208, .4); }
+.bq-blocked .bq-marker, .bq-needs-attention .bq-marker { color: var(--err); border-color: rgba(255, 107, 107, .4); }
+.bq-awaiting-auth .bq-marker { color: var(--amber); border-color: rgba(255, 180, 84, .44); }
+.bq-done .bq-marker { color: var(--ok); border-color: rgba(110, 231, 135, .34); }
 .backlog-counts {
   display: flex; flex-wrap: wrap; gap: .5rem 1rem;
   margin-bottom: .55rem;
