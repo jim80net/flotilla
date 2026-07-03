@@ -127,13 +127,18 @@ func TestCompileJSON_RejectsEmptyID(t *testing.T) {
 }
 
 func TestParseYAML_RejectsSelfAndDuplicateDependsOn(t *testing.T) {
-	for _, y := range []string{
-		"version: 1\ngoals:\n  - {id: a, title: A, depends_on: [a]}\n",
-		"version: 1\ngoals:\n  - {id: a, title: A}\n  - {id: b, title: B, depends_on: [a, a]}\n",
-	} {
-		if _, err := ParseYAML([]byte(y)); err == nil {
-			t.Fatalf("malformed depends_on must error for:\n%s", y)
-		}
+	cases := []struct {
+		name, y string
+	}{
+		{"self", "version: 1\ngoals:\n  - {id: a, title: A, depends_on: [a]}\n"},
+		{"duplicate", "version: 1\ngoals:\n  - {id: a, title: A}\n  - {id: b, title: B, depends_on: [a, a]}\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := ParseYAML([]byte(tc.y)); err == nil {
+				t.Fatalf("malformed depends_on must error for:\n%s", tc.y)
+			}
+		})
 	}
 }
 
