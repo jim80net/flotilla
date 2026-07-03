@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/jim80net/flotilla/internal/accounts"
 	"github.com/jim80net/flotilla/internal/launch"
 )
 
@@ -203,13 +204,18 @@ func ResolveHarness(agent string, flat *launch.Config) (string, launch.Recipe, e
 		// No overlay, a torn overlay, or an overlay that names no slot ⇒ fail-safe to
 		// the primary slot. (A torn overlay is the fail-SAFE case, per the spec: never
 		// error the desk out on a bad overlay.)
-		return SlotPrimary, slotRecipe(chain, SlotPrimary), nil
+		r, err := slotRecipe(chain, SlotPrimary)
+		return SlotPrimary, r, err
 	}
-	r, found := slotRecipeByName(chain, ov.Slot)
+	r, found, err := slotRecipeByName(chain, ov.Slot)
+	if err != nil {
+		return "", launch.Recipe{}, err
+	}
 	if !found {
 		// The overlay names a slot the chain no longer has (stale chain edit / torn
 		// overlay) ⇒ fail-safe to primary rather than resolving an absent slot.
-		return SlotPrimary, slotRecipe(chain, SlotPrimary), nil
+		r, err := slotRecipe(chain, SlotPrimary)
+		return SlotPrimary, r, err
 	}
 	return ov.Slot, r, nil
 }
@@ -224,11 +230,13 @@ func ResolveActiveRecipe(agent string, flat *launch.Config) (launch.Recipe, erro
 // slotRecipe returns the recipe for a named slot of a resolved chain, panicking-free:
 // a name absent from the chain falls back to the resolved recipe unchanged (the primary
 // path's launch). Callers that must DISTINGUISH "slot not in chain" use slotRecipeByName.
-func slotRecipe(chain launch.Recipe, name string) launch.Recipe {
-	if r, ok := slotRecipeByName(chain, name); ok {
-		return r
+func slotRecipe(chain launch.Recipe, name string) (launch.Recipe, error) {
+	if r, ok, err := slotRecipeByName(chain, name); err != nil {
+		return launch.Recipe{}, err
+	} else if ok {
+		return r, nil
 	}
-	return chain
+	return chain, nil
 }
 
 // slotRecipeByName projects a named chain slot onto a recipe-for-slot: the slot's Launch
@@ -236,13 +244,17 @@ func slotRecipe(chain launch.Recipe, name string) launch.Recipe {
 // are preserved. It reports whether the chain contains the named slot. It consumes
 // launch.Recipe.Slots() so the backward-compat rule (undeclared chain ⇒ implied primary)
 // lives in ONE place (the launch package), never duplicated here.
-func slotRecipeByName(chain launch.Recipe, name string) (launch.Recipe, bool) {
+func slotRecipeByName(chain launch.Recipe, name string) (launch.Recipe, bool, error) {
 	for _, s := range chain.Slots() {
 		if s.Name == name {
 			out := chain // copy the shared desk fields (Cwd/Tmux/State, and the chain itself)
-			out.Launch = s.Launch
-			return out, true
+			launchCmd, err := accounts.WrapClaudeLaunch(s.Surface, s.SubscriptionID, s.Launch)
+			if err != nil {
+				return launch.Recipe{}, false, err
+			}
+			out.Launch = launchCmd
+			return out, true, nil
 		}
 	}
-	return launch.Recipe{}, false
+	return launch.Recipe{}, false, nil
 }

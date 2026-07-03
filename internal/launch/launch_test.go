@@ -300,6 +300,11 @@ func TestLoadRejectsBadChainSlot(t *testing.T) {
 		"fallback cr in launch": `{"agents": {"xo": {"launch": "claude", "cwd": "/abs",
 			"primary":   {"surface": "claude-code", "launch": "claude", "provider": "anthropic"},
 			"fallbacks": [{"surface": "grok", "launch": "a\rb", "provider": "xai"}]}}}`,
+		"primary bad subscription_id": `{"agents": {"xo": {"launch": "claude", "cwd": "/abs",
+			"primary": {"surface": "claude-code", "launch": "claude", "provider": "anthropic", "subscription_id": "Bad-ID"}}}`,
+		"fallback bad subscription_id": `{"agents": {"xo": {"launch": "claude", "cwd": "/abs",
+			"primary":   {"surface": "claude-code", "launch": "claude", "provider": "anthropic"},
+			"fallbacks": [{"surface": "claude-code", "launch": "claude", "provider": "anthropic", "subscription_id": "../escape"}]}}}`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
