@@ -348,6 +348,20 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("goals.js must retain the org-graph v2 hub-spoke layout (missing %q) — Inc B", marker)
 		}
 	}
+	// #324 Inc 1: org is the DEFAULT layout (operator UX blessing), and the org geometry
+	// is content-aware — leaf-weight angular packing + per-ring radii from card extents
+	// (no fixed RING_STEP), with narrower org cards.
+	if !strings.Contains(js, `var goalsLayout = "org"`) {
+		t.Error("goals.js must default goalsLayout to \"org\" (#324 operator UX blessing)")
+	}
+	for _, marker := range []string{"leafCount", "reach(", "nodeW", "RING_GAP"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must retain the #324 content-aware org geometry (missing %q)", marker)
+		}
+	}
+	if strings.Contains(js, "RING_STEP") {
+		t.Error("goals.js must drop the fixed RING_STEP — org radii are content-aware (#324)")
+	}
 	// structuralSig must include the enrichment (priorities/milestones/harness) so an
 	// add/remove of a height-affecting field triggers a full rebuild, not a stale
 	// in-place text swap. Guard the index BEFORE slicing (a missing function must
