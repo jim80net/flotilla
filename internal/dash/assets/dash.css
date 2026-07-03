@@ -1373,3 +1373,106 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gd-ask p { color: var(--ink); font-size: .82rem; }
 .gd-row { display: flex; justify-content: space-between; gap: 10px; align-items: center; font-size: .78rem; color: var(--ink-2); padding: 5px 0; border-bottom: 1px solid var(--line-soft, var(--line)); }
 .gd-row-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   Mobile flow (#330) — the instrument on a phone
+   ──────────────────────────────────────────────────────────────────────
+   Canonical breakpoints: 900px = tablet, 640px = phone (docs/design/README
+   §Mobile). Two disciplines enforced here: (1) NO horizontal overflow — the
+   dash never scrolls sideways (header wrap + a root clip guard); (2) 44px
+   touch targets on the controls a thumb drives. The third discipline — ONE
+   primary scroll — is owned per-view by its own shell (the Conversations
+   app-shell is mobile-first, #326); this block does not re-implement it.
+   Token VALUES are owned elsewhere (#325) — this block adds only responsive
+   layout + hit-area rules, no palette changes.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Safety net: the console never scrolls sideways. `clip` (not `hidden`) does
+   NOT create a scroll container, so the sticky header keeps sticking — the
+   overflow sources below are fixed at the root, this just guarantees it. */
+html, body { overflow-x: clip; }
+.view, .conv-wrap, .wrap, .goals-wrap { max-width: 100%; }
+
+/* Tablet + phone are touch surfaces (≤900px): every thumb-driven control is a
+   44px hit target, even where the desktop row still fits horizontally. Desktop
+   (mouse, >900px) keeps its denser chrome. Height-only bumps preserve the
+   existing horizontal rhythm; segmented micro-toggles get inline-flex so the
+   min-height actually grows the button box. */
+@media (max-width: 900px) {
+  .tab,
+  .btn,
+  .glayout-btn,
+  .mv-btn,
+  #filter-state,
+  .ghelp,
+  .gd-convo,
+  .gd-close,
+  .gm-close,
+  .conv-queue-sum,
+  .gzoomctl button { min-height: 44px; }
+  .tab,
+  .glayout-btn,
+  .mv-btn { display: inline-flex; align-items: center; justify-content: center; }
+  /* the drive-queue disclosure summary (#326) is a thumb-driven toggle — give it
+     the 44px row and vertically center its baseline-aligned label */
+  .conv-queue-sum { align-items: center; }
+  .gzoomctl button { width: 44px; }
+  .gd-close, .gm-close { width: 44px; height: 44px; }
+  /* text fields the operator types into — match the 44px control rhythm */
+  .control-form input,
+  .control-form textarea,
+  .issue-form input { min-height: 44px; }
+  /* the "operator-idea only" filter: the WHOLE label row is the tap target,
+     with a visibly larger checkbox inside it */
+  .filter-idea { min-height: 44px; }
+  .filter-idea input { width: 22px; height: 22px; }
+}
+
+/* Phone (≤640px): LAYOUT changes — wrap the header, collapse to one scroll,
+   full-bleed the overlays. (Touch-target sizing is handled by the ≤900 block
+   above; this block is structure only.) */
+@media (max-width: 640px) {
+  /* ── header: wrap the three groups instead of forcing a ~700px row ──
+     Row 1 = brand + live-dot; row 2 = the tabs, stretched full width. The
+     dev-only bind address is hidden on a phone (low value, high width); the
+     live-link dot stays (it carries meaning). */
+  .bar { flex-wrap: wrap; gap: .5rem .75rem; padding: .6rem .9rem; }
+  .brand { flex: 1 1 auto; min-width: 0; }
+  .bar-meta { order: 2; margin-left: auto; }
+  .bar-meta .meta-label, .bar-meta .meta-bind { display: none; }
+  .tabs { order: 3; flex: 1 1 100%; }
+  .tab { flex: 1 1 0; padding: .5rem .5rem; }
+
+  /* The "one primary scroll" discipline for the Conversations view is owned by
+     the #326 app-shell (dash.css §Conversations): its BASE is mobile-first —
+     the three zones stack, the page provides one natural scroll, and the inner
+     scroll boxes only appear as the fixed shell at ≥1101px. Nothing to release
+     here; the pinned glance peek + collapsible drive queue are intentional and
+     must NOT be un-clamped. */
+
+  .tracker-controls { width: 100%; }
+  .tracker-controls #filter-state,
+  .tracker-controls .btn { flex: 1 1 auto; }
+
+  /* the info|debug and tree|org segmented groups: give them room to breathe */
+  .conv-head-right { flex-wrap: wrap; gap: .5rem; }
+  .goals-head-right { flex-wrap: wrap; gap: 8px; }
+
+  /* ── goals map framing: the pan surface stays usable and its chrome is
+     tappable. The map's INTERACTION model (pan/zoom capture, node ⚠/ⓘ
+     controls that shrink under fit-zoom) is #324's geometry lane — noted,
+     not restructured here. ── */
+  .goals-viewport { height: 56vh; min-height: 300px; }
+  .goals-drawer { width: 100%; max-width: 100%; }
+  .gm-dialog { padding: 16px 16px; }
+  /* the help tooltip is left-anchored under a button near the right edge; on a
+     phone open it leftward so it stays fully on-screen instead of clipping. */
+  .ghelp-tip { left: auto; right: 0; }
+
+  /* situation tiles: two-up minimum, never a 1px sliver */
+  .gtile { flex: 1 1 44%; min-width: 44%; }
+
+  /* the intervene form fields already go full width; keep the actions row from
+     overflowing when the message + button collide */
+  .form-actions { flex-wrap: wrap; }
+}
