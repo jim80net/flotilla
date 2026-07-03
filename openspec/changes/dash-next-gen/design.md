@@ -129,7 +129,7 @@ event).
 {
   "ts": "2026-07-03T12:00:00Z",
   "agent": "backend",
-  "verbose_hash": "sha256:…",
+  "verbose": "<full turn-final text>",
   "info": "Anchor prose…\n\nDecision: …\n\nDelta…",
   "debug": { "info": "…", "envelope": {…}, "mirror_note": "modeled", "firewall": null },
   "suppressed": false
@@ -139,8 +139,10 @@ event).
 - **Writer:** `flotilla watch` only (same single-writer discipline as snapshot).
 - **Reader:** `flotilla dash` via `readmodel.BuildSessionMirror(agent, limit)`.
 - **Retention:** ring buffer per agent (default last 200 entries; configurable) — prevents unbounded
-  growth; verbose text stored once per entry (dash debug view; info view omits re-storing verbose
-  inline if size is a concern — v1 stores verbose in entry for simplicity with size cap).
+  growth. Each entry stores the full `verbose` turn-final text once (field name `verbose`, not a
+  hash). Dash `info` rendering uses `entry.info` only; `debug` may surface `entry.verbose` and the
+  structured `entry.debug` record. A per-entry size cap MAY truncate `verbose` fail-closed with a
+  logged warning — v1 default stores full text up to the cap.
 
 **CoS ledger unchanged in scope** — operator↔XO traffic stays in `context-ledger.md`. Session
 mirror is **desk session output**, not relay/notify. This closes the gap where desk Discord
@@ -190,14 +192,17 @@ goals:
     title: "Fleet stays observable and recoverable"
     scope: fleet
     parent: null
-    owner: xo          # coordinator agent name (generic role)
-    status: active     # active | achieved | paused | cancelled
+    owner: xo                    # coordinator agent name (generic role)
+    status: active               # authored: active | achieved | paused | cancelled
+    conversation_agent: null     # optional — roster agent for Conversations deep-link
+    depends_on: []               # optional — cross-dependency ids (NOT re-parenting)
     children:
       - id: dash-next-gen
         title: "Operator mental-map surfaces ship"
         scope: project
         parent: fleet-reliability
         owner: alpha-xo
+        conversation_agent: flotilla-dash   # goal cell → Conversations thread
         work_items:
           - kind: issue
             ref: "jim80net/flotilla#267"
@@ -205,35 +210,64 @@ goals:
             marker: "[in-flight] tri-surface mirror fanout"
           - kind: inline
             text: "Goals DAG design trio"
+      - id: session-mirror
+        title: "Tri-surface session mirroring"
+        scope: task
+        parent: fleet-reliability
+        owner: flotilla-dev
+        conversation_agent: flotilla-dev
+        depends_on: [dash-next-gen]   # faint dependency line; parent unchanged
+        work_items:
+          - kind: backlog
+            marker: "[in-flight] tri-surface mirror fanout"
 ```
 
-**DAG vs tree:** v1 enforces a **tree** (single `parent` per node) with explicit acyclic validation
-at load — same pattern as `roster.assertSynthesisAcyclic()`. v2 may add cross-links (`related:[]`)
-once the primary hierarchy proves value.
+**Tree + cross-links:** v1 enforces a **tree** (single `parent` per node) with explicit acyclic
+validation at load — same pattern as `roster.assertSynthesisAcyclic()`. Co-dependent goals that
+share a tier but are not parent/child are expressed with optional `depends_on: [id]` (operator
+feedback #267 note 2). The dash renders these as faint dependency lines / gantt-style ID labels;
+`depends_on` never re-parents a node. `fleet-goals.example.yaml` (flotilla-dash desk) is the
+reference fixture.
+
+**Conversation deep-link:** optional `conversation_agent` names the roster agent whose
+session-mirror thread the goal cell opens in Conversations (operator feedback #267 note 3: every
+cell deep-links to its conversation). Distinct from `work_items.kind: desk`, which attaches drive-
+queue state to the goal detail panel.
 
 **IDs:** slug strings (`[a-z0-9-]+`), unique within a roster's goals file.
 
 ### 4.3 WorkItem kinds
 
-| Kind | Binding | Maintainer |
-|---|---|---|
-| `issue` | `owner/repo#N` | Coordinator links; status pulled from `gh` on dash read |
-| `backlog` | Exact text match or marker key in `## Backlog` | Coordinator links; status from `backlog.Parse` |
-| `inline` | Free text checklist item | Coordinator edits goals file directly |
-| `desk` | Agent name | Implicit leaf — desk's drive queue rolls up to parent goal |
+| Kind | Binding | Roll-up resolution | Maintainer |
+|---|---|---|---|
+| `issue` | `owner/repo#N` | open → in-flight; closed → done; optional `blocked` label → blocked | Coordinator links; status from `gh` on dash read |
+| `backlog` | Exact text match or marker key in `## Backlog` | `[blocked]`/`[awaiting-auth]`/`[needs-attention]` → blocked; `[in-flight]`/`[pending]` → in-flight; `[done]` or absent → done | Coordinator links; status from `backlog.Parse` |
+| `inline` | Free text + optional `done: true` | `done: true` → done; otherwise → in-flight | Coordinator edits goals file directly |
+| `desk` | Agent name | snapshot `working`/`stale` → in-flight; snapshot `blocked` or drive-queue blocked marker → blocked; `idle` with no in-flight queue items → done | Coordinator links; state from watch snapshot + drive queue |
 
 ### 4.4 Roll-up semantics
 
-Computed at read time (pure function, no separate write path):
+Two fields per node:
+
+- **`status`** — coordinator-authored (`active`, `achieved`, `paused`, `cancelled`).
+- **`status_display`** — computed at read time for the operator (`blocked`, `in-flight`, `achieved`,
+  `active`, `paused`, `cancelled`).
+
+Precedence (first match wins):
 
 ```
-goal.status_display =
-  if any child blocked → "blocked"
-  else if any work_item blocked → "blocked"
-  else if any child or item in-flight → "in-flight"
-  else if all children achieved and items done → "achieved"
-  else → "active"
+1. authored cancelled        → cancelled
+2. any child/item blocked    → blocked
+3. authored paused           → paused
+4. any child/item in-flight  → in-flight
+5. authored achieved AND all children/items done (or none) → achieved
+6. all children achieved AND all items done AND (children>0 OR items>0) → achieved
+7. zero children AND zero items → active   # vacuous-achieved guard
+8. else → active
 ```
+
+Child goals contribute their computed `status_display` upward. Authored `paused`/`cancelled` are
+not silently dropped — they override idle/active when nothing is blocked or in-flight.
 
 Blocked/unblocked classification reuses `backlog.Parse` markers (`[blocked]`, `[awaiting-auth]`,
 `[needs-attention]`). Issue state pulled from GitHub (`open` + label `blocked` optional).
@@ -326,10 +360,14 @@ Success metric: operator opens dash and orients from Goals tab without reading a
 ### 6.1 New API endpoints
 
 ```
-GET /api/goals              → GoalsDoc { tree, rollups, generated_at }
+GET /api/goals              → GoalsDoc { version, tree[], edges[], rollups{}, generated_at, source_path }
 GET /api/goals/{id}         → GoalDetailDoc { node, work_items[], desk_states[] }
 GET /api/session-mirror     → ?agent=&limit=   SessionMirrorDoc
 ```
+
+`GoalsDoc.edges[]` carries cross-dependency links derived from each node's `depends_on`
+(`{from, to, kind: "depends_on"}`). `GoalNode.conversation_agent` is echoed in the tree so the
+dash can deep-link goal cells to Conversations without inferring from `work_items`.
 
 SSE `fileSigs` extended to poll `fleet-goals.json` + `session-mirror/` mtimes.
 
@@ -405,7 +443,8 @@ can land before dash desk UX.
 
 - Desk finish → Discord post unchanged (info); session-mirror jsonl appended; dash thread shows entry.
 - Dash `debug` shows envelope JSON; `info` does not.
-- `fleet-goals.yaml` acyclic load fails closed; roll-up marks parent blocked when child item blocked.
+- `fleet-goals.yaml` acyclic load fails closed; roll-up marks parent blocked when child item blocked;
+  empty node renders `active` not `achieved`; `depends_on` edges appear in `GoalsDoc.edges`.
 - Issue with `goal-id:` trailer appears on goal detail.
 - Execution desk mirror does not write to CoS ledger (scope boundary held).
 

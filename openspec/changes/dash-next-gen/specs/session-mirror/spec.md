@@ -7,15 +7,15 @@ surfaces (tmux verbose, Discord info, dash info/debug) without per-message verbo
 This capability extends the shipped `deskMirror` / `readerModelInternal` pipeline — it does not
 introduce a parallel publish transport.
 
-## Requirements
+## ADDED Requirements
 
 ### Requirement: Session mirror fanout derives all surface renderings from one turn-final
 
-When a desk or coordinator session completes a mirrored turn (the existing `Working→Idle` finish
-edge for non-XO desks, and the coordinator finish hook for XO/coordinator agents), the system
-SHALL read exactly one canonical turn-final via `readDeskTurnFinal` and SHALL derive surface
-renderings through the existing `readerModelInternal` pre-post pipeline
-(`cmd/flotilla/mirror.go`). The system SHALL NOT require desks to author per-surface variants.
+The system SHALL, on each mirrored turn completion (the existing `Working→Idle` finish edge for
+non-XO desks and the coordinator finish hook for XO/coordinator agents), read exactly one canonical
+turn-final via `readDeskTurnFinal` and derive all surface renderings through the existing
+`readerModelInternal` pre-post pipeline (`cmd/flotilla/mirror.go`). The system SHALL NOT require
+desks to author per-surface variants.
 
 #### Scenario: One finish produces info and verbose renderings
 
@@ -43,8 +43,9 @@ filter), Discord at `info` (the existing mirror publish body), dash at `info` or
 
 The system SHALL persist each non-suppressed mirror event to an append-only per-agent ledger under
 the roster directory (`session-mirror/<agent>.jsonl`), written only by `flotilla watch`. Each
-entry SHALL carry timestamp, agent, info body, debug record, and suppression flag. The dash SHALL
-read this ledger via pure read-model builders (no pane probe).
+entry SHALL carry timestamp, agent, full `verbose` turn-final text (field name `verbose`, not a
+hash), info body, debug record, and suppression flag. The dash SHALL read this ledger via pure
+read-model builders (no pane probe).
 
 #### Scenario: Dash conversation thread shows desk mirror history
 

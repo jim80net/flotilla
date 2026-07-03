@@ -70,8 +70,12 @@ Shared seams requiring coordination: `cmd/flotilla/mirror.go`, `internal/dash/re
 - `cmd/flotilla/mirror.go`, `internal/watch/detector.go` (mirror hook wiring)
 - `internal/dash/readmodel.go`, `internal/dash/server.go`, `internal/dash/assets/*`
 - **NEW** `internal/goals/`, `internal/sessionmirror/` (or equivalent)
-- `openspec/specs/dash`, **NEW** `goals`, **NEW** `session-mirror` capabilities
-- `openspec/specs/fleet-visibility`, `openspec/specs/reader-modeling` (deltas)
+- **Spec deltas in this change** (archive to `openspec/specs/` on implementation merge):
+  - `openspec/changes/dash-next-gen/specs/dash/` (delta over `openspec/changes/flotilla-dash/`)
+  - **NEW** `openspec/changes/dash-next-gen/specs/goals/`
+  - **NEW** `openspec/changes/dash-next-gen/specs/session-mirror/`
+  - `openspec/changes/dash-next-gen/specs/fleet-visibility/` (delta)
+  - `openspec/changes/dash-next-gen/specs/reader-modeling/` (delta)
 - `flotilla.example.json` optional goals-path example (generic only)
 
 ## References

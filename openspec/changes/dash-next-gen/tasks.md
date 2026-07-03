@@ -3,6 +3,9 @@
 ## 0. Design gate (this PR)
 
 - [x] 0.1 `proposal.md` + `design.md` + spec deltas + tasks
+- [x] 0.1b COS gate fix round — `depends_on` + `conversation_agent`, vacuous-achieved guard,
+  status precedence, inline/desk roll-up, SessionMirrorRecord `verbose` field, GoalsDoc `edges[]`,
+  proposal Impact paths, cubic thread replies
 - [ ] 0.2 Design trio review (systems-review + open-code-review + STORM)
 - [ ] 0.3 COS independent gate — design approved before implementation
 
@@ -26,10 +29,12 @@
 
 ## 3. Goals DAG core (flotilla-dev)
 
-- [ ] 3.1 `internal/goals/` — YAML schema, load, acyclic validate, compile to JSON
-- [ ] 3.2 `fleet-goals.yaml` example in `flotilla.example.json` comment block (generic goals only)
-- [ ] 3.3 Roll-up computation — children + backlog/issue status
-- [ ] 3.4 `GET /api/goals`, `GET /api/goals/{id}`
+- [ ] 3.1 `internal/goals/` — YAML schema (`depends_on`, `conversation_agent`), load, acyclic
+  validate, compile to JSON with `edges[]`
+- [ ] 3.2 `fleet-goals.yaml` example in `flotilla.example.json` comment block (generic goals only;
+  align with flotilla-dash `fleet-goals.example.yaml`)
+- [ ] 3.3 Roll-up computation — authored+computed precedence, vacuous guard, inline/desk resolution
+- [ ] 3.4 `GET /api/goals`, `GET /api/goals/{id}` (`GoalsDoc` with `edges[]`)
 - [ ] 3.5 `flotilla goals compile|validate|link` CLI (minimal — validate + link first)
 - [ ] 3.6 Issue `goal-id:` trailer parser in tracker read path
 - [ ] 3.7 Unit tests — acyclic reject, roll-up blocked/in-flight/achieved
@@ -49,8 +54,27 @@
 - [ ] 5.3 Archive spec deltas to `openspec/specs/` on implementation merge
 - [ ] 5.4 Operator supervised trial — coordinators maintain goals for one project (operator gate)
 
+## 6. Merge deny-list backstop (queued after design merge — family-office escalation)
+
+Investigation (2026-07-03): `deploy/grok-permission-allowlist.json` and live launch recipes already
+carry `Bash(gh pr merge*)` in `never_autonomous.deny`, and codex desk rules forbid `gh pr merge`.
+The hole is **enforcement under grok `bypassPermissions` / `--always-approve`**: grok CLI `--deny`
+is prompting-mode-only; Q1 probe confirmed only the **gatekeeper hook layer** blocks Shell under
+bypass. Until the grok gatekeeper adapter enforces desk deny tiers, a desk can technically self-merge
+despite the allowlist on disk.
+
+- [ ] 6.1 Wire grok desk launches through gatekeeper PreToolUse with `never_autonomous` deny tier
+  (incl. `gh pr merge`) — parity with Q1 verdict (a)
+- [ ] 6.2 `flotilla workspace init` / `sync-grok-readonly-permissions.sh` — verify deny lands in
+  the enforced hook path, not only launch `--deny` flags + inert `.claude/settings.local.json`
+- [ ] 6.3 Headless regression: `validate-grok-permission-tiers.sh` deny-gh-merge probe under
+  `--always-approve` with gatekeeper enabled
+- [ ] 6.4 Document coordinator vs desk merge authority in runbook (codex rules already split)
+
 ## Lane notes
 
 - **Do not** duplicate read paths in flotilla-dash desk — consume flotilla-dev APIs.
 - Coordinate before editing `cmd/flotilla/mirror.go` or `internal/dash/readmodel.go` across lanes.
 - Pillar E `latest-delta.json` references in docs — update to session-mirror jsonl on D1 merge.
+- `fleet-goals.example.yaml` on flotilla-dash `feat/dash-goals-map-267` is the live contract fixture;
+  design MUST stay aligned (especially `depends_on`, `conversation_agent`).
