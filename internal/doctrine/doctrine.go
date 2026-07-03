@@ -5,7 +5,7 @@
 // default seed from `workspace init`, so a freshly scaffolded agent is born with
 // the doctrine in place.
 //
-// The set ships six members:
+// The set ships seven members:
 //   - operating-principles — an IDENTITY-APPEND constitution: the twelve standing
 //     Flotilla Operating Principles, distilled to one sentence each and appended into
 //     the agent's identity file so the constitution loads once at launch. The full
@@ -20,6 +20,8 @@
 //   - executive-mini-brief — an IDENTITY-APPEND rule: operator-facing turn-finals use
 //     the four-part mini-brief format (bottom line, plain-language streams, detail
 //     footer, explicit needs-you line); coordinators especially, mirror-posted verbatim.
+//   - xo-outbound — an IDENTITY-APPEND rule (coordinator-only): post operator-facing
+//     replies via `flotilla notify`; do not notify on heartbeat ticks or routine plumbing.
 //   - visibility-synthesis — a HEARTBEAT-SKILL: a whole-file curation skill written
 //     into the agent's workspace, loaded when the daemon emits a synthesis wake.
 //
@@ -82,6 +84,8 @@ type Member struct {
 	// workspace dir. It is EMPTY for identity-append members (which write the identity
 	// file, not a workspace-relative target) and REQUIRED for heartbeat-skill members.
 	TargetFile string
+	// CoordinatorOnly, when true, installs only for coordinator agents (any XO or CoS).
+	CoordinatorOnly bool
 }
 
 // The operating-principles sentinel fence (same load-bearing role as the pairs below —
@@ -118,6 +122,12 @@ const (
 const (
 	executiveMiniBriefOpenMarker  = "<!-- flotilla:executive-mini-brief -->"
 	executiveMiniBriefCloseMarker = "<!-- /flotilla:executive-mini-brief -->"
+)
+
+// The xo-outbound sentinel fence (coordinator notify doctrine).
+const (
+	xoOutboundOpenMarker  = "<!-- flotilla:xo-outbound -->"
+	xoOutboundCloseMarker = "<!-- /flotilla:xo-outbound -->"
 )
 
 // members is the registry. Adding a member is adding an entry here plus its embedded
@@ -175,6 +185,15 @@ var members = []Member{
 		CloseMarker: executiveMiniBriefCloseMarker,
 	},
 	{
+		// xo-outbound: coordinator-only notify doctrine (distilled from docs/xo-doctrine.md).
+		Name:            "xo-outbound",
+		Mechanism:       MechanismIdentityAppend,
+		Content:         mustRead("assets/skills/xo-outbound.md"),
+		OpenMarker:      xoOutboundOpenMarker,
+		CloseMarker:     xoOutboundCloseMarker,
+		CoordinatorOnly: true,
+	},
+	{
 		// visibility-synthesis: a whole-file curation skill (Tiers 2/3 of the
 		// stratified-visibility doctrine), invoked when the daemon emits a synthesis
 		// wake. Delivered as a heartbeat-skill (workspace file), not an identity-append,
@@ -191,6 +210,23 @@ var members = []Member{
 func Members() []Member {
 	out := make([]Member, len(members))
 	copy(out, members)
+	return out
+}
+
+// MembersForAgent returns the constitutional set filtered for the agent's role.
+// Coordinator-only members (xo-outbound) are omitted for execution desks.
+func MembersForAgent(isCoordinator bool) []Member {
+	all := Members()
+	if isCoordinator {
+		return all
+	}
+	out := make([]Member, 0, len(all))
+	for _, m := range all {
+		if m.CoordinatorOnly {
+			continue
+		}
+		out = append(out, m)
+	}
 	return out
 }
 

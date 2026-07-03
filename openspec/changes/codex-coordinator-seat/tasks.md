@@ -1,29 +1,30 @@
 # Tasks — codex-coordinator-seat
 
-## 1. Design (this PR)
+## 1. Design
 - [x] 1.1 proposal.md + design.md + spec deltas
-- [ ] 1.2 Design trio (systems-review + open-code-review)
-- [x] 1.3 Surface to COS (no self-merge) — PR #261
+- [x] 1.2 Design trio (COS independent gate on PR #261)
+- [x] 1.3 Surface to COS — PR #261 merged (`cb87d53`)
 
-## 2. Generic harness parity (flotilla-dev — coordinate, no duplicate PRs)
-- [x] 2.0 Flag spec/impl seam to flotilla-dev: watch + workspace ADDED requirements in this change are implemented in their lane — avoid duplicate PRs
-- [x] 2.1 `harnessAllocationSurface`: honor `surface: "codex"` for coordinators
-- [x] 2.2 `delegatenudge`: `IsManagementHarness` includes codex; harness-neutral `NudgePrompt`
-- [x] 2.3 Seat-swap + supervised-trial runbook (docs; roster template; rollback via `flotilla switch`)
-- [x] 2.4 `flotilla.example.json` generic coordinator-on-codex example (role + surface fields)
+## 2. Generic harness parity (flotilla-dev — do NOT duplicate in this lane)
+- [x] 2.0 Lane seam flagged to flotilla-dev (COS dispatched); coordinate before touching `harnessAllocationSurface` or `delegatenudge`
+- [x] 2.1 `harnessAllocationSurface`: honor `surface: "codex"` for coordinators — **flotilla-dev** (PR #262)
+- [x] 2.2 `delegatenudge`: `IsManagementHarness` includes codex; harness-neutral `NudgePrompt` — **flotilla-dev** (PR #262)
+- [x] 2.3 Seat-swap + supervised-trial runbook — **flotilla-dev** (PR #262)
+- [x] 2.4 `flotilla.example.json` coordinator-on-codex example — **flotilla-dev** (PR #262)
 
 ## 3. Codex coordinator surface (codex-harness-dev)
-- [ ] 3.1 Post-auth fixture capture (working/idle/approval/composer) — operator gate
-- [ ] 3.2 `ComposerStateProbe` on codex driver
-- [ ] 3.3 Coordinator launch recipe: `FLOTILLA_SELF`, `FLOTILLA_SECRETS`, PATH
-- [ ] 3.4 `scaffoldCodexCoordinatorRules` (distinct from execution `flotilla-desk.rules`); refuse codex coordinator `workspace init` until ComposerStateProbe ships (code guard)
-- [ ] 3.5 `xo-outbound` doctrine member (coordinator-only identity-append)
-- [ ] 3.6 AGENTS.md budget test (constitutional + xo-outbound < 32 KiB)
+- [ ] 3.1 Post-auth fixture capture (working/idle/approval/composer) — **[blocked: operator codex login]**
+- [ ] 3.2 `ComposerStateProbe` on codex driver — blocked on 3.1 for live validation
+- [x] 3.3 Coordinator launch recipe: `FLOTILLA_SELF`, `FLOTILLA_SECRETS`, PATH
+- [x] 3.4 `scaffoldCodexCoordinatorRules` (distinct from execution `flotilla-desk.rules`)
+- [x] 3.5 `xo-outbound` doctrine member (coordinator-only identity-append)
+- [x] 3.6 AGENTS.md budget test (constitutional + xo-outbound < 32 KiB)
+- [x] 3.7 **Code guard:** `workspace init` refuses codex coordinator until codex implements `ComposerStateProbe` (fail-closed in binary, not doctrine-only)
 
 ## 4. Validation
-- [ ] 4.1 Unit/integration: coordinator init scaffolds secrets launch + coordinator rules
-- [ ] 4.2 Detector classifier smoke on codex turn-final fixtures
-- [ ] 4.3 `go test ./...`
+- [ ] 4.1 Unit/integration: coordinator init scaffolds secrets launch + coordinator rules (after 2.1 + 3.2)
+- [ ] 4.2 Detector classifier smoke on codex turn-final fixtures — blocked on 3.1
+- [x] 4.3 `go test ./...`
 
 ## 5. Supervised trial (post-implementation — operator gate)
 - [ ] 5.1 Provision one low-stakes project XO with `surface: "codex"`
