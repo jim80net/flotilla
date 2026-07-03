@@ -6,13 +6,14 @@ import "strings"
 // The legacy leaf alias scope=desk (pre-v2 task) is left unchanged here — depth-aware
 // disambiguation happens in the dash read model at render time.
 func NormalizeScope(scope string) string {
-	switch strings.TrimSpace(scope) {
+	trimmed := strings.TrimSpace(scope)
+	switch trimmed {
 	case "fleet":
 		return "flotilla"
 	case "project":
 		return "desk"
 	default:
-		return scope
+		return trimmed
 	}
 }
 

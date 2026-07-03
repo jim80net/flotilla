@@ -580,22 +580,6 @@ func nodeRollup(g *Goal, items []RenderedWorkItem, kids []string, rollupOf func(
 	return "active" // steps 8-9
 }
 
-// scopeOf returns the declared scope (normalized to the canonical enum), or infers one from depth
-// when the file omits it (0 → fleet, 1 → project, ≥2 → task).
-func scopeOf(declared GoalScope, depth int) GoalScope {
-	if declared != "" {
-		return normalizeScope(declared)
-	}
-	switch depth {
-	case 0:
-		return ScopeFleet
-	case 1:
-		return ScopeProject
-	default:
-		return ScopeTask
-	}
-}
-
 // displayScope emits the v2 API scope string (flotilla | desk | task), dual-reading v1 tokens.
 func displayScope(declared GoalScope, depth int) string {
 	if declared == "" {
@@ -622,20 +606,6 @@ func displayScope(declared GoalScope, depth int) string {
 		return "task"
 	default:
 		return string(declared)
-	}
-}
-
-// normalizeScope maps scopes onto roll-up buckets (legacy desk leaf alias → task).
-func normalizeScope(s GoalScope) GoalScope {
-	switch s {
-	case ScopeFleet, ScopeFlotilla:
-		return ScopeFlotilla
-	case ScopeProject:
-		return ScopeOrgDesk
-	case ScopeOrgDesk: // legacy leaf alias; v2 org desk disambiguated in displayScope
-		return ScopeTask
-	default:
-		return s
 	}
 }
 

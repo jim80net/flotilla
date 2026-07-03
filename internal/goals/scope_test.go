@@ -17,6 +17,12 @@ func TestNormalizeScope_V1ToV2(t *testing.T) {
 	}
 }
 
+func TestNormalizeScope_TrimsWhitespace(t *testing.T) {
+	if got := NormalizeScope("  task  "); got != "task" {
+		t.Errorf("NormalizeScope trims whitespace, got %q", got)
+	}
+}
+
 func TestCompileJSON_EmitsV2Scopes(t *testing.T) {
 	raw := []byte("version: 1\ngoals:\n  - {id: root, title: R, scope: fleet}\n  - {id: child, title: C, scope: project, parent: root}\n")
 	b, err := CompileYAML(raw)
