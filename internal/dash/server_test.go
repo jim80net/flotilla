@@ -347,6 +347,25 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	}
 }
 
+// TestConversationsFormatting locks the #302 Conversations rendering: the thread is
+// colour-coded by speaker (speakerHue → --spk) and the drive queue formats each
+// backlog line into a status chip (backlogItem → .bq-marker) instead of a raw blob.
+func TestConversationsFormatting(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{"speakerHue", "thread-from", "backlogItem", "bq-marker"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js must retain the #302 conversations formatting (missing %q)", marker)
+		}
+	}
+	// speakerHue must normalize like thread identity (case-insensitive, trimmed)
+	// so casing/spacing variants of one speaker share a colour (cubic #308 P2).
+	if !strings.Contains(js, `.trim().toLowerCase()`) {
+		t.Error("speakerHue must normalize the name (trim + lowercase) before hashing")
+	}
+}
+
 // --- Host-allowlist (anti-DNS-rebinding) ---
 
 func TestHostAllowlist(t *testing.T) {

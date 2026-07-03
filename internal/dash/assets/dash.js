@@ -308,6 +308,17 @@
     });
   }
 
+  // speakerHue maps a speaker name to a STABLE hue, so each participant keeps one
+  // colour across the thread (turn-by-turn, colour-coded by speaker — #302).
+  function speakerHue(name) {
+    // Normalize the same way thread identity is matched elsewhere
+    // (case-insensitive, whitespace-trimmed) so casing/spacing variants of one
+    // speaker resolve to a SINGLE colour, not several.
+    var h = 0, s = String(name || "").trim().toLowerCase();
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return h % 360;
+  }
+
   function renderThread(history) {
     var thread = el("conv-thread");
     var entries = (history && Array.isArray(history.ledger)) ? history.ledger : [];
@@ -329,10 +340,11 @@
       var deskKey = String(selectedDesk).toLowerCase();
       var outbound = String(e.from || "").toLowerCase() === deskKey;
       var cls = outbound ? "thread-out" : "thread-in";
+      var hue = speakerHue(e.from); // colour the turn by its speaker
       return (
-        '<div class="thread-msg ' + cls + '">' +
+        '<div class="thread-msg ' + cls + '" style="--spk:hsl(' + hue + ' 55% 62%)">' +
           '<header class="thread-head">' +
-            '<span class="thread-route">' + escapeHtml(e.from) + " → " + escapeHtml(e.to) + "</span>" +
+            '<span class="thread-route"><b class="thread-from">' + escapeHtml(e.from) + "</b> &rarr; " + escapeHtml(e.to) + "</span>" +
             '<time class="thread-time">' + escapeHtml(e.time) + "</time>" +
           "</header>" +
           (e.channel && e.channel !== "-"
@@ -356,11 +368,25 @@
       "</div>";
     var unblocked = Array.isArray(bl.unblocked) ? bl.unblocked : [];
     var items = unblocked.length
-      ? unblocked.map(function (line) {
-          return '<div class="backlog-item">' + escapeHtml(line) + "</div>";
-        }).join("")
+      ? unblocked.map(backlogItem).join("")
       : (bl.found ? '<div class="empty">No unblocked items.</div>' : '<div class="empty">No backlog section found.</div>');
     box.innerHTML = counts + items;
+  }
+
+  // backlogItem formats a raw backlog line into a status chip + clean text (#302):
+  // it strips the leading bullet + the [marker] token and renders the marker as a
+  // coloured chip, instead of dumping the raw markdown line.
+  function backlogItem(line) {
+    var raw = String(line == null ? "" : line);
+    var m = /^\s*[-*]?\s*\[([a-z][a-z0-9-]*)\]\s*(.*)$/i.exec(raw);
+    if (!m) {
+      return '<div class="backlog-item"><span class="bq-text">' + escapeHtml(raw.replace(/^\s*[-*]\s*/, "")) + "</span></div>";
+    }
+    var marker = m[1].toLowerCase();
+    return '<div class="backlog-item bq-' + escapeHtml(marker) + '">' +
+      '<span class="bq-marker">' + escapeHtml(marker.replace(/-/g, " ")) + "</span>" +
+      '<span class="bq-text">' + escapeHtml(m[2]) + "</span>" +
+      "</div>";
   }
 
   function renderConversations() {
