@@ -4,8 +4,8 @@
   Vanilla JS is used ONLY for the live fleet-status widget (see app.js).
 
   READER MODEL (issue #323): the reader is a busy technical HUMAN who already
-  pays for one or more coding-agent subscriptions (Claude Code / Codex / Grok /
-  Aider), has felt the pain of juggling multiple sessions that forget everything
+  pays for one or more coding-agent subscriptions (Claude Code / Codex / Grok),
+  has felt the pain of juggling multiple sessions that forget everything
   and need constant supervision, and is deciding in under a minute whether this
   solves THEIR life. Every section opens from that person's current pain, shows
   them THEMSELVES in the scene (second person), translates jargon on first use,
@@ -26,7 +26,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>flotilla — a chief of staff for the AI coding agents you already run</title>
 
-  <meta name="description" content="flotilla is a drop-in chief of staff for the AI coding agents you already run — Claude Code, Codex, Grok, Aider. One agent to talk to, your domains running in parallel, memory that carries across sessions, and a record of everything on your phone. No framework to rewrite into." />
+  <meta name="description" content="flotilla is a drop-in chief of staff for the AI coding agents you already run — Claude Code, Codex, Grok. One agent to talk to, your domains running in parallel, memory that carries across sessions, and a record of everything on your phone. No framework to rewrite into." />
 
   <meta property="og:title" content="flotilla" />
   <meta property="og:description" content="A drop-in chief of staff for the AI coding agents you already run." />
@@ -94,7 +94,7 @@
                the operator-authored hero copy is preserved. -->
           <p class="hero-sub">
             Stop shuffling 10 terminal windows. flotilla turns separate Claude Code /
-            Aider / OpenCode / Grok sessions into one centrally coordinated fleet. A
+            Codex / Grok sessions into one centrally coordinated fleet. A
             single hub agent coordinates multiple streams of work and lets you drive
             strategy, not implementation.
           </p>
@@ -120,11 +120,11 @@
           <div class="dash-chrome">
             <span class="dash-brand"><span class="dash-brand-mark" aria-hidden="true"></span>flotilla <span class="dash-brand-sub">your fleet</span></span>
             <div class="dash-tabs" aria-hidden="true">
-              <span class="dash-tab">Chat</span>
-              <span class="dash-tab active">Fleet</span>
-              <span class="dash-tab">Work</span>
+              <span class="dash-tab">Conversations</span>
+              <span class="dash-tab active">Goals</span>
+              <span class="dash-tab">Issues</span>
             </div>
-            <div class="dash-toggle" aria-hidden="true"><span>list</span><span class="on">map</span></div>
+            <div class="dash-toggle" aria-hidden="true"><span>tree</span><span class="on">org</span></div>
           </div>
 
           <div class="dash-canvas">
@@ -155,12 +155,12 @@
             <div class="dnode" style="left:26%;top:77%">
               <div class="dnode-eyebrow">Desk · docs</div>
               <div class="dnode-title">Docs</div>
-              <div class="dnode-foot"><span class="dpill amber">needs&nbsp;you</span><span class="dharness">aider</span></div>
+              <div class="dnode-foot"><span class="dpill amber">needs&nbsp;you</span><span class="dharness">claude-code</span></div>
             </div>
             <div class="dnode" style="left:74%;top:77%">
               <div class="dnode-eyebrow">Desk · infra</div>
               <div class="dnode-title">Infra</div>
-              <div class="dnode-foot"><span class="dpill ok">idle</span><span class="dharness">opencode</span></div>
+              <div class="dnode-foot"><span class="dpill ok">idle</span><span class="dharness">grok</span></div>
             </div>
           </div>
 
@@ -172,10 +172,8 @@
       <div class="harness-strip" aria-label="coding agents flotilla works with">
         <span class="hs-label">works with</span>
         <span class="hs-chip">Claude Code</span>
-        <span class="hs-chip">Aider</span>
-        <span class="hs-chip">OpenCode</span>
-        <span class="hs-chip">Grok</span>
         <span class="hs-chip">Codex</span>
+        <span class="hs-chip">Grok</span>
         <span class="hs-chip soon">Cursor <em>· on the roadmap</em></span>
       </div>
     </section>
@@ -348,7 +346,7 @@
         <span class="kicker">04 — the part that makes it easy</span>
         <h2>You keep the tools you already run. Nothing to rebuild.</h2>
         <p class="band-lede">
-          flotilla doesn't replace Claude Code, Codex, Grok, or Aider &mdash; it
+          flotilla doesn't replace Claude Code, Codex, or Grok &mdash; it
           sits over them. There's no new agent framework to learn and no migrating
           your work into someone else's runtime. You point the coding agent you
           already run at one file, and you're coordinated in minutes.
@@ -497,7 +495,7 @@
         <div class="arch-col shipped">
           <div class="arch-tag"><span class="tick">✓</span> real today</div>
           <ul>
-            <li><b>Mixed agents, one fleet</b> &mdash; Claude Code, Aider, OpenCode, Grok, and Codex desks together</li>
+            <li><b>Mixed agents, one fleet</b> &mdash; Claude Code, Codex, and Grok desks together</li>
             <li><b>One coordinator</b> &mdash; routes work, confirms delivery, reports back</li>
             <li><b>The full record</b> &mdash; every message mirrored to your chat channel</li>
             <li><b>A fleet that keeps its own clock</b> &mdash; advances approved work, flags a stuck desk</li>
@@ -528,8 +526,8 @@
         <h2>Don't set it up yourself. Tell your agent to.</h2>
         <p class="band-lede">
           You already run a coding agent that can install software and follow a
-          guide. So hand it the guide. Paste this into Claude Code, Codex, Grok,
-          or Aider &mdash; it does the rest and explains each step as it goes.
+          guide. So hand it the guide. Paste this into Claude Code, Codex, or
+          Grok &mdash; it does the rest and explains each step as it goes.
         </p>
       </div>
 
