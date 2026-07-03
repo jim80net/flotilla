@@ -46,8 +46,15 @@
   window.flotillaDash = { el: el, escapeHtml: escapeHtml, getJSON: getJSON, postJSON: postJSON };
 
   /* ── cached read model (combined on refresh) ───────────────────────────── */
-  var cache = { status: null, topology: null, history: null };
+  var cache = { status: null, topology: null, history: null, mirror: null };
   var selectedDesk = null;
+  // Session-mirror detail level (design §2.3 UI half). "info" = the readermap body
+  // only (clean default); "debug" additionally reveals each entry's collapsible
+  // debug tier (reader-map envelope, mirror note, firewall warn-terms). The full
+  // debug payload is ALWAYS present in the ledger — this is a live render toggle, so
+  // the tier ships ON-demand (no dormant env gate, no restart). Folded into the
+  // glance + thread dedup keys so flipping it forces a repaint.
+  var mirrorVerbosity = "info";
   // Whether the operator has edited a control target field (route/resume). Once
   // touched, a background refresh must NOT overwrite it — otherwise a refresh
   // landing mid-typing silently replaces the operator's target and the control
@@ -172,6 +179,7 @@
         selectedDesk = this.getAttribute("data-desk");
         renderConversations();
         syncControlTargets(true); // explicit desk-selection: set the targets authoritatively
+        fetchMirror();            // load the newly-selected desk's session mirror
       });
     }
   }
@@ -230,47 +238,249 @@
       : "Select a desk from the fleet map";
   }
 
-  function renderReaderMapPlaceholder() {
-    var map = el("conv-map");
-    map.innerHTML =
-      '<span class="conv-map-label">reader map</span>' +
-      '<span class="conv-map-empty">Envelope deltas land here when Pillar E ships (<code>latest-delta.json</code>).</span>';
+  // renderSessionMirror is the glance widget (design §2.5): the selected desk's
+  // LATEST session-mirror entry (the desk's own session output at info level),
+  // replacing the old reader-map placeholder. Reads /api/session-mirror
+  // (SessionMirrorDoc, entries ascending oldest→newest, so the latest is last).
+  // Degrades gracefully (empty state) when the endpoint or desk is absent — the
+  // full history thread is a follow-on increment.
+  function relTime(iso) {
+    var t = Date.parse(iso);
+    if (isNaN(t)) return iso || "";
+    var s = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (s < 60) return "just now";
+    if (s < 3600) return Math.floor(s / 60) + "m ago";
+    if (s < 86400) return Math.floor(s / 3600) + "h ago";
+    return Math.floor(s / 86400) + "d ago";
+  }
+  // cheapHash (djb2) folds the entry content into the dedup key — ts alone is
+  // RFC3339 second-resolution, so two entries in the same second would otherwise
+  // dedup-skip the newer one and render stale.
+  function cheapHash(s) {
+    var h = 5381, i = (s || "").length;
+    while (i) { h = ((h * 33) ^ s.charCodeAt(--i)) >>> 0; }
+    return h;
+  }
+  var lastMirrorKey = null; // dedup key so an SSE tick doesn't re-announce / reset scroll
+  function mirrorEmpty(text, key) {
+    if (lastMirrorKey === key) return;
+    lastMirrorKey = key;
+    el("conv-map").innerHTML = '<span class="conv-map-label">session mirror</span>' +
+      '<span class="conv-map-empty">' + text + "</span>";
+  }
+  function renderSessionMirror() {
+    if (!selectedDesk) { mirrorEmpty("Select a desk to see its latest session output.", "none"); return; }
+    var doc = cache.mirror || {};
+    // Identity guard: cache.mirror may still hold the PREVIOUS desk's doc (the async
+    // fetch for the new selection hasn't landed) — show a neutral loading state, never
+    // the wrong desk's turn-final under this desk's header.
+    if (doc.agent && String(doc.agent).toLowerCase() !== String(selectedDesk).toLowerCase()) {
+      mirrorEmpty("Loading…", "load:" + selectedDesk); return;
+    }
+    var entries = Array.isArray(doc.entries) ? doc.entries : [];
+    if (!entries.length) {
+      mirrorEmpty(doc.error ? "Session mirror unavailable." : "No session mirror yet for this desk.",
+        (doc.error ? "err:" : "empty:") + selectedDesk);
+      return;
+    }
+    var latest = entries[entries.length - 1]; // ascending order → newest is last
+    // Dedup: skip the innerHTML rewrite (which re-announces via the aria-live region
+    // AND resets the operator's scroll position) when the shown entry is unchanged.
+    // Key on ts PLUS a content hash+length — ts is second-resolution, so a new entry
+    // in the same second must still re-render (not dedup-skip as stale).
+    var info = latest.info || "";
+    // Key includes the verbosity so a toggle flip (which changes what renders) forces
+    // a repaint instead of dedup-skipping as unchanged.
+    var key = selectedDesk + "|" + (latest.ts || "") + "|" + info.length + ":" + cheapHash(info) + "|" + mirrorVerbosity;
+    if (key === lastMirrorKey) return;
+    lastMirrorKey = key;
+    var when = latest.ts
+      ? '<time class="mirror-when" datetime="' + escapeHtml(latest.ts) + '" title="' + escapeHtml(latest.ts) + '">' + escapeHtml(relTime(latest.ts)) + "</time>"
+      : "";
+    var body = escapeHtml(latest.info || "").replace(/\r?\n/g, "<br>");
+    el("conv-map").innerHTML =
+      '<span class="conv-map-label">session mirror ' + when + "</span>" +
+      '<div class="mirror-glance">' + body + "</div>" + debugBlock(latest);
   }
 
+  // debugBlock renders one entry's collapsible debug tier (design §2.3 UI half),
+  // shown only when the verbosity toggle is on "debug" AND the entry carries debug
+  // detail — otherwise "" (the info tier stays clean). The reader-map envelope is
+  // rendered as labeled rows (anchor / delta / decision / audience — the mental-map
+  // fields, not a raw JSON blob), then the mirror note and any firewall warn-terms.
+  function debugBlock(entry) {
+    if (mirrorVerbosity !== "debug") return "";
+    var d = entry && entry.debug;
+    if (!d) return "";
+    var parts = [];
+    var env = d.envelope;
+    if (env) {
+      var rows = [["anchor", env.anchor], ["delta", env.delta], ["decision", env.decision], ["audience", env.audience]]
+        .filter(function (r) { return r[1]; })
+        .map(function (r) { return '<div class="dbg-row"><span class="dbg-key">' + r[0] + '</span><span class="dbg-val">' + escapeHtml(String(r[1])) + "</span></div>"; })
+        .join("");
+      if (rows) parts.push('<div class="dbg-group"><div class="dbg-group-h">reader-map envelope</div>' + rows + "</div>");
+    }
+    if (d.mirror_note) {
+      parts.push('<div class="dbg-row"><span class="dbg-key">mirror note</span><span class="dbg-val">' + escapeHtml(d.mirror_note) + "</span></div>");
+    }
+    if (d.firewall && Array.isArray(d.firewall.warn_terms) && d.firewall.warn_terms.length) {
+      parts.push('<div class="dbg-row dbg-firewall"><span class="dbg-key">firewall</span><span class="dbg-val">' + escapeHtml(d.firewall.warn_terms.join(", ")) + "</span></div>");
+    }
+    if (!parts.length) return "";
+    return '<details class="thread-debug"><summary>debug detail</summary><div class="dbg-body">' + parts.join("") + "</div></details>";
+  }
+
+  // setMirrorVerbosity flips the detail level and repaints both mirror surfaces.
+  function setMirrorVerbosity(level) {
+    mirrorVerbosity = level === "debug" ? "debug" : "info";
+    var btns = document.querySelectorAll(".mv-btn");
+    for (var i = 0; i < btns.length; i++) {
+      var on = btns[i].getAttribute("data-verbosity") === mirrorVerbosity;
+      btns[i].classList.toggle("active", on);
+      btns[i].setAttribute("aria-pressed", String(on));
+    }
+    paintMirror();
+  }
+
+  // fetchMirror loads the selected desk's session mirror and re-renders the glance.
+  // Guarded on selectedDesk so a slow response for a de-selected desk is dropped.
+  // limit=100 fetches the full recent tail (the glance uses only the last entry) —
+  // sized for the Inc 2 thread-merge, which reuses cache.mirror.entries in full.
+  // paintMirror re-renders BOTH mirror-dependent views — the glance (latest entry)
+  // and the thread (which now interleaves the full mirror history with the ledger).
+  function paintMirror() { renderSessionMirror(); renderThread(cache.history || {}); }
+  function fetchMirror() {
+    var want = selectedDesk;
+    if (!want) { cache.mirror = null; paintMirror(); return; }
+    getJSON("/api/session-mirror?agent=" + encodeURIComponent(want) + "&limit=100").then(function (d) {
+      if (selectedDesk === want) { cache.mirror = d; paintMirror(); }
+    }).catch(function (err) {
+      if (selectedDesk === want) { cache.mirror = { agent: want, entries: [], error: err.message }; paintMirror(); }
+    });
+  }
+
+  // speakerHue maps a speaker name to a STABLE hue, so each participant keeps one
+  // colour across the thread (turn-by-turn, colour-coded by speaker — #302).
+  function speakerHue(name) {
+    // Normalize the same way thread identity is matched elsewhere
+    // (case-insensitive, whitespace-trimmed) so casing/spacing variants of one
+    // speaker resolve to a SINGLE colour, not several.
+    var h = 0, s = String(name || "").trim().toLowerCase();
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return h % 360;
+  }
+
+  // mirrorEntriesForSelected returns the selected desk's session-mirror entries
+  // (ascending oldest→newest), or [] — guarded on identity so a stale cache.mirror
+  // still holding the PREVIOUS desk's doc never leaks into this desk's thread (the
+  // same cross-desk guard renderSessionMirror uses, #300 trio finding).
+  function mirrorEntriesForSelected() {
+    var doc = cache.mirror;
+    if (!doc || !selectedDesk) return [];
+    if (doc.agent && String(doc.agent).toLowerCase() !== String(selectedDesk).toLowerCase()) return [];
+    return Array.isArray(doc.entries) ? doc.entries : [];
+  }
+
+  var lastThreadKey = null; // dedup so an unchanged SSE/mirror tick doesn't re-announce the log / reset scroll
+
+  // renderThread interleaves TWO streams for the selected desk into one
+  // chronological timeline (design §2.4, Inc 2): the CoS relay ledger (messages
+  // to/from the desk) and the desk's OWN session-mirror turn-finals (its session
+  // output). Both are RFC3339-stamped — the ledger arrives newest-first, the mirror
+  // newest-last — so each is normalized to a parsed sort key and the merged list is
+  // ordered newest-first (matching the pre-merge thread order). Relay lines and
+  // session output are visually distinguished; the same per-speaker hue ties a
+  // desk's session output to its own relay lines. The merge is universal (it applies
+  // to coordinator and execution desks alike — both read as one timeline of "what
+  // was said to/from me" + "what I turned-final"), so no role branch is needed.
   function renderThread(history) {
     var thread = el("conv-thread");
-    var entries = (history && Array.isArray(history.ledger)) ? history.ledger : [];
-    var filtered = selectedDesk
-      ? entries.filter(function (e) { return ledgerMatchesDesk(e, selectedDesk); })
-      : [];
     if (!selectedDesk) {
+      if (lastThreadKey === "@none") return;
+      lastThreadKey = "@none";
       thread.innerHTML = '<div class="empty">Pick a desk to read its coordination thread.</div>';
       return;
     }
-    if (!filtered.length) {
-      thread.innerHTML = '<div class="empty">No ledger entries for this desk yet.</div>';
+    var ledger = (history && Array.isArray(history.ledger)) ? history.ledger : [];
+    var items = [];
+    ledger.forEach(function (e) {
+      if (!ledgerMatchesDesk(e, selectedDesk)) return;
+      items.push({ kind: "ledger", t: Date.parse(e.parsed ? e.time : ""), e: e });
+    });
+    mirrorEntriesForSelected().forEach(function (m) {
+      items.push({ kind: "mirror", t: Date.parse(m.ts), m: m });
+    });
+    if (!items.length) {
+      var emptyKey = "@empty:" + selectedDesk;
+      if (lastThreadKey === emptyKey) return;
+      lastThreadKey = emptyKey;
+      thread.innerHTML = '<div class="empty">No coordination history for this desk yet.</div>';
       return;
     }
-    thread.innerHTML = filtered.map(function (e) {
-      if (!e.parsed) {
-        return '<div class="thread-msg thread-raw">' + escapeHtml(e.raw) + "</div>";
-      }
-      var deskKey = String(selectedDesk).toLowerCase();
-      var outbound = String(e.from || "").toLowerCase() === deskKey;
-      var cls = outbound ? "thread-out" : "thread-in";
-      return (
-        '<div class="thread-msg ' + cls + '">' +
-          '<header class="thread-head">' +
-            '<span class="thread-route">' + escapeHtml(e.from) + " → " + escapeHtml(e.to) + "</span>" +
-            '<time class="thread-time">' + escapeHtml(e.time) + "</time>" +
-          "</header>" +
-          (e.channel && e.channel !== "-"
-            ? '<span class="thread-chan muted">#' + escapeHtml(e.channel) + "</span>"
-            : "") +
-          '<p class="thread-gist">' + escapeHtml(e.gist) + "</p>" +
-        "</div>"
-      );
+    // Newest-first (descending). Unparseable timestamps (rare malformed/raw ledger
+    // lines with no time) sort to the bottom; Array.sort is stable (ES2019+) so
+    // their relative order is preserved.
+    items.sort(function (a, b) {
+      var at = isNaN(a.t) ? -Infinity : a.t, bt = isNaN(b.t) ? -Infinity : b.t;
+      return bt - at;
+    });
+    // Dedup: skip the innerHTML rewrite (which re-announces via the log's aria-live
+    // AND resets the operator's scroll) when the merged timeline is unchanged. The
+    // key folds each item's timestamp + a content hash so a same-second new entry
+    // still re-renders (mirrors the #300 glance dedup discipline).
+    var sig = selectedDesk + "#" + mirrorVerbosity + "#" + items.map(function (it) {
+      return it.kind === "mirror"
+        ? "m:" + (it.m.ts || "") + ":" + cheapHash(it.m.info || "")
+        : "l:" + (it.e.parsed ? it.e.time : "") + ":" + cheapHash(it.e.parsed ? it.e.gist : it.e.raw);
+    }).join("|");
+    if (sig === lastThreadKey) return;
+    lastThreadKey = sig;
+    thread.innerHTML = items.map(function (it) {
+      return it.kind === "mirror" ? threadMirrorMsg(it.m) : threadLedgerMsg(it.e);
     }).join("");
+  }
+
+  // threadLedgerMsg renders one CoS relay-ledger line (a message to/from the desk).
+  function threadLedgerMsg(e) {
+    if (!e.parsed) {
+      return '<div class="thread-msg thread-raw">' + escapeHtml(e.raw) + "</div>";
+    }
+    var deskKey = String(selectedDesk).toLowerCase();
+    var outbound = String(e.from || "").toLowerCase() === deskKey;
+    var cls = outbound ? "thread-out" : "thread-in";
+    var hue = speakerHue(e.from); // colour the turn by its speaker
+    return (
+      '<div class="thread-msg ' + cls + '" style="--spk:hsl(' + hue + ' 55% 62%)">' +
+        '<header class="thread-head">' +
+          '<span class="thread-route"><b class="thread-from">' + escapeHtml(e.from) + "</b> &rarr; " + escapeHtml(e.to) + "</span>" +
+          '<time class="thread-time">' + escapeHtml(e.time) + "</time>" +
+        "</header>" +
+        (e.channel && e.channel !== "-"
+          ? '<span class="thread-chan muted">#' + escapeHtml(e.channel) + "</span>"
+          : "") +
+        '<p class="thread-gist">' + escapeHtml(e.gist) + "</p>" +
+      "</div>"
+    );
+  }
+
+  // threadMirrorMsg renders a session-mirror entry (the desk's own turn-final at
+  // info level) as a distinct "session" turn, hue-matched to the desk's speaker
+  // colour so it reads as the same participant's output alongside its relay lines.
+  function threadMirrorMsg(m) {
+    var hue = speakerHue(selectedDesk);
+    var body = escapeHtml(m.info || "").replace(/\r?\n/g, "<br>");
+    return (
+      '<div class="thread-msg thread-mirror" style="--spk:hsl(' + hue + ' 55% 62%)">' +
+        '<header class="thread-head">' +
+          '<span class="thread-route"><b class="thread-from">' + escapeHtml(selectedDesk) + "</b> " +
+            '<span class="thread-kind">session</span></span>' +
+          '<time class="thread-time" datetime="' + escapeHtml(m.ts || "") + '" title="' + escapeHtml(m.ts || "") + '">' + escapeHtml(relTime(m.ts)) + "</time>" +
+        "</header>" +
+        '<div class="thread-mirror-body">' + (body || '<span class="muted">(no session output)</span>') + "</div>" +
+        debugBlock(m) +
+      "</div>"
+    );
   }
 
   function renderBacklogStrip(history) {
@@ -285,11 +495,25 @@
       "</div>";
     var unblocked = Array.isArray(bl.unblocked) ? bl.unblocked : [];
     var items = unblocked.length
-      ? unblocked.map(function (line) {
-          return '<div class="backlog-item">' + escapeHtml(line) + "</div>";
-        }).join("")
+      ? unblocked.map(backlogItem).join("")
       : (bl.found ? '<div class="empty">No unblocked items.</div>' : '<div class="empty">No backlog section found.</div>');
     box.innerHTML = counts + items;
+  }
+
+  // backlogItem formats a raw backlog line into a status chip + clean text (#302):
+  // it strips the leading bullet + the [marker] token and renders the marker as a
+  // coloured chip, instead of dumping the raw markdown line.
+  function backlogItem(line) {
+    var raw = String(line == null ? "" : line);
+    var m = /^\s*[-*]?\s*\[([a-z][a-z0-9-]*)\]\s*(.*)$/i.exec(raw);
+    if (!m) {
+      return '<div class="backlog-item"><span class="bq-text">' + escapeHtml(raw.replace(/^\s*[-*]\s*/, "")) + "</span></div>";
+    }
+    var marker = m[1].toLowerCase();
+    return '<div class="backlog-item bq-' + escapeHtml(marker) + '">' +
+      '<span class="bq-marker">' + escapeHtml(marker.replace(/-/g, " ")) + "</span>" +
+      '<span class="bq-text">' + escapeHtml(m[2]) + "</span>" +
+      "</div>";
   }
 
   function renderConversations() {
@@ -301,7 +525,7 @@
     renderConversationRail(status, topology, fresh);
     renderConversationHeader(topology);
     renderDeskCard(status, fresh);
-    renderReaderMapPlaceholder();
+    renderSessionMirror();
     renderThread(history);
     renderBacklogStrip(history);
   }
@@ -350,6 +574,7 @@
       if (current()) {
         renderConversations();
         syncControlTargets();
+        fetchMirror(); // keep the selected desk's session-mirror glance current on each tick
       }
       // Keep the Goals view live off the same refresh cadence (SSE-triggered). It
       // fetches /api/goals itself and no-ops until the operator has opened the tab.
@@ -408,6 +633,14 @@
     tabs[i].addEventListener("click", function () { showView(this.getAttribute("data-view")); });
   }
 
+  // Session-mirror detail toggle (info ⇄ debug) — static chrome, wired once. Flipping
+  // it repaints the glance + thread at the new tier (the debug payload is already in
+  // the cache, so no fetch is needed).
+  var mvBtns = document.querySelectorAll(".mv-btn");
+  for (var mv = 0; mv < mvBtns.length; mv++) {
+    mvBtns[mv].addEventListener("click", function () { setMirrorVerbosity(this.getAttribute("data-verbosity")); });
+  }
+
   // openConversation is the deep-link the Goals map calls (feedback #3): select a
   // desk's conversation thread and switch to the Conversations view. Mirrors the
   // rail's own desk-click (selectedDesk + render + authoritative control targets).
@@ -417,6 +650,7 @@
     showView("conversations");
     renderConversations();
     syncControlTargets(true);
+    fetchMirror(); // load the deep-linked desk's session mirror (the identity guard hides the prior desk's until it lands)
     // Move focus into the now-visible Conversations view — the deep-link hid the
     // Goals view, so leaving focus on the goals node would strand it on <body>.
     var title = el("conv-title");

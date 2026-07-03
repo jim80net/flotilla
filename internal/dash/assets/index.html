@@ -58,7 +58,13 @@
             <h2 id="conv-title">Conversation</h2>
             <p id="conv-sub" class="panel-desc">Coordination history for the selected desk</p>
           </div>
-          <div id="conv-desk-card" class="conv-desk-card" aria-live="polite"></div>
+          <div class="conv-head-right">
+            <div class="mirror-verbosity" role="group" aria-label="Session mirror detail level">
+              <button type="button" class="mv-btn active" data-verbosity="info" aria-pressed="true">info</button>
+              <button type="button" class="mv-btn" data-verbosity="debug" aria-pressed="false">debug</button>
+            </div>
+            <div id="conv-desk-card" class="conv-desk-card" aria-live="polite"></div>
+          </div>
         </div>
         <div id="conv-map" class="conv-map muted" aria-live="polite"></div>
         <div id="conv-thread" class="conv-thread" role="log" aria-live="polite"></div>
@@ -111,10 +117,10 @@
     <section class="panel goals-panel">
       <div class="panel-head">
         <div>
-          <h2>Fleet goals <span class="muted goals-sub">purpose hierarchy — desks roll up to fleet aims</span>
+          <h2>Flotilla goals <span class="muted goals-sub">purpose hierarchy — desks roll up to flotilla aims</span>
             <span class="ghelp-wrap">
               <button id="goals-help" class="ghelp" type="button" aria-label="What is this view?" aria-describedby="goals-help-tip" aria-expanded="false">?</button>
-              <span id="goals-help-tip" class="ghelp-tip" role="tooltip">The fleet's purpose hierarchy: <b>fleet goals</b>, the <b>workstreams</b> serving them, and the <b>tasks &amp; desks</b> doing the work. Colour is live status — green realized, cyan in flight, amber awaiting you, red blocked, ghosted aspirational. Drag to pan, scroll to zoom, click a node for detail.</span>
+              <span id="goals-help-tip" class="ghelp-tip" role="tooltip">The flotilla's purpose hierarchy: <b>flotilla</b> aims, the <b>desks</b> serving them, and the <b>tasks</b> doing the work. Colour is live status — green realized, cyan in flight, amber awaiting you, red blocked, ghosted aspirational. Drag to pan, scroll to zoom. Click a node to open its conversation; use ⓘ for detail, ⚠ to respond.</span>
             </span>
           </h2>
           <p class="panel-desc">Read-only · goal structure from <code>fleet-goals.json</code> · desk &amp; backlog status live from the fleet board; issues shown linked</p>
@@ -146,6 +152,20 @@
       </div>
       <div id="goals-empty" class="goals-empty muted hidden"></div>
     </section>
+    <!-- #302: waiting-on-you intervention modal (situation brief + response input; reply path is a prototype stub) -->
+    <div id="goals-modal" class="goals-modal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="goals-modal-title">
+      <div class="gm-dialog">
+        <button class="gm-close" type="button" aria-label="Close">&times;</button>
+        <h3 id="goals-modal-title" class="gm-title"></h3>
+        <div id="goals-modal-brief" class="gm-brief"></div>
+        <label class="gm-input-lab" for="goals-modal-input">Your response</label>
+        <textarea id="goals-modal-input" class="gm-input" rows="4" placeholder="Type a response to this desk…"></textarea>
+        <div class="gm-actions">
+          <span id="goals-modal-note" class="gm-note muted"></span>
+          <button id="goals-modal-send" type="button" class="btn btn-primary">Send</button>
+        </div>
+      </div>
+    </div>
   </main>
 
   <main id="view-issues" class="view wrap hidden">

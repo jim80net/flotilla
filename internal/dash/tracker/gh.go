@@ -89,7 +89,11 @@ func (g *GHTracker) Repo() string { return g.repo }
 // List lists issues matching filter. An empty (exit 0) result is an empty slice,
 // never an error; a gh failure is a typed error.
 func (g *GHTracker) List(ctx context.Context, filter ListFilter) ([]Issue, error) {
-	args := []string{"issue", "list", "--repo=" + g.repo, "--json=" + listFields}
+	fields := listFields
+	if filter.IncludeBody {
+		fields = listFields + ",body"
+	}
+	args := []string{"issue", "list", "--repo=" + g.repo, "--json=" + fields}
 	state := strings.ToLower(strings.TrimSpace(filter.State))
 	if state == "" {
 		state = "open"
@@ -121,6 +125,11 @@ func (g *GHTracker) List(ctx context.Context, filter ListFilter) ([]Issue, error
 	if issues == nil {
 		issues = []Issue{}
 	}
+	if filter.IncludeBody {
+		for i := range issues {
+			EnrichIssue(&issues[i])
+		}
+	}
 	return issues, nil
 }
 
@@ -140,6 +149,7 @@ func (g *GHTracker) Get(ctx context.Context, number int) (Issue, error) {
 	if uerr := json.Unmarshal(out, &issue); uerr != nil {
 		return Issue{}, fmt.Errorf("%w: gh issue view: %v", ErrParse, uerr)
 	}
+	EnrichIssue(&issue)
 	return issue, nil
 }
 

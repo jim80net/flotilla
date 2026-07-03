@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -200,12 +201,12 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 // poll is the single shared file poller. It stats the snapshot, ledger, backlog,
-// goals JSON, and goals YAML every pollInterval and emits an SSE update whenever
-// any of their (mtime,size) signatures change — so all connected clients refetch
-// the JSON endpoints. One poller serves every client (not one per connection).
+// goals JSON/YAML, and session-mirror ledgers every pollInterval and emits an SSE
+// update whenever any signature changes — so all connected clients refetch the
+// JSON endpoints. One poller serves every client (not one per connection).
 func (s *Server) poll(ctx context.Context) {
 	paths := []string{s.cfg.SnapshotPath, s.cfg.LedgerPath, s.cfg.BacklogPath, s.cfg.GoalsPath, s.cfg.GoalsYAMLPath}
-	prev := fileSigs(paths)
+	prev := fileSigs(paths, s.cfg.SessionMirrorDir)
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
@@ -213,7 +214,7 @@ func (s *Server) poll(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			cur := fileSigs(paths)
+			cur := fileSigs(paths, s.cfg.SessionMirrorDir)
 			if cur != prev {
 				prev = cur
 				s.hub.emit(s.now().UTC().Format(time.RFC3339))
@@ -236,6 +237,7 @@ type fileSig struct {
 // so the poller can detect "any change" with a single ==).
 type sigBundle struct {
 	snap, ledger, backlog, goals, goalsYAML fileSig
+	sessionMirror                           fileSig
 }
 
 // statSig deliberately collapses "absent" and "stat error" to the same
@@ -259,13 +261,44 @@ func statSig(path string) fileSig {
 }
 
 // fileSigs computes the combined signature for [snapshot, ledger, backlog, goals,
-// goalsYAML].
-func fileSigs(paths []string) sigBundle {
+// goalsYAML] plus the aggregated session-mirror/ ledger mtimes.
+func fileSigs(paths []string, sessionMirrorDir string) sigBundle {
 	return sigBundle{
-		snap:      statSig(paths[0]),
-		ledger:    statSig(paths[1]),
-		backlog:   statSig(paths[2]),
-		goals:     statSig(paths[3]),
-		goalsYAML: statSig(paths[4]),
+		snap:          statSig(paths[0]),
+		ledger:        statSig(paths[1]),
+		backlog:       statSig(paths[2]),
+		goals:         statSig(paths[3]),
+		goalsYAML:     statSig(paths[4]),
+		sessionMirror: sessionMirrorDirSig(sessionMirrorDir),
 	}
+}
+
+// sessionMirrorDirSig aggregates max(mtime) and sum(size) across *.jsonl ledgers
+// under session-mirror/ so append events fire SSE even when the directory mtime
+// itself is unchanged.
+func sessionMirrorDirSig(dir string) fileSig {
+	if dir == "" {
+		return fileSig{}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fileSig{}
+	}
+	var sig fileSig
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		fi, err := e.Info()
+		if err != nil {
+			continue
+		}
+		sig.exist = true
+		m := fi.ModTime().UnixNano()
+		if m > sig.mtime {
+			sig.mtime = m
+		}
+		sig.size += fi.Size()
+	}
+	return sig
 }

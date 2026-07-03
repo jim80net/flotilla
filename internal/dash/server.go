@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/dash/control"
@@ -22,16 +23,17 @@ import (
 // (cmd/flotilla/dash.go) resolves these (default paths mirroring `status`) and
 // hands them to NewServer; the server itself does the per-request file I/O.
 type Config struct {
-	RosterPath    string // path to the roster file
-	SnapshotPath  string // detector snapshot (default <roster-dir>/flotilla-detector-state.json)
-	AckPath       string // XO liveness ack file (default <roster-dir>/flotilla-xo-alive)
-	LedgerPath    string // CoS ledger (cfg.CosLedger; "" when the CoS mirror is inert)
-	BacklogPath   string // backlog markdown (--tracker-file; default <roster-dir>/.flotilla-state.md)
-	GoalsPath     string // goals file the Goals view reads (default <roster-dir>/fleet-goals.json)
-	GoalsYAMLPath string // goals yaml source compiled on load (default <roster-dir>/fleet-goals.yaml)
-	Bind          string // listen address (default 127.0.0.1:8787)
-	Repo          string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
-	SecretsPath   string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
+	RosterPath       string // path to the roster file
+	SnapshotPath     string // detector snapshot (default <roster-dir>/flotilla-detector-state.json)
+	AckPath          string // XO liveness ack file (default <roster-dir>/flotilla-xo-alive)
+	LedgerPath       string // CoS ledger (cfg.CosLedger; "" when the CoS mirror is inert)
+	BacklogPath      string // backlog markdown (--tracker-file; default <roster-dir>/.flotilla-state.md)
+	GoalsPath        string // goals file the Goals view reads (default <roster-dir>/fleet-goals.json)
+	GoalsYAMLPath    string // goals yaml source compiled on load (default <roster-dir>/fleet-goals.yaml)
+	SessionMirrorDir string // per-agent session-mirror ledgers (default <roster-dir>/session-mirror)
+	Bind             string // listen address (default 127.0.0.1:8787)
+	Repo             string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
+	SecretsPath      string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
 
 	// Transport is the coordination transport backing the control surface's notify
 	// post (the operator note's destination is a Discord webhook, so this is the
@@ -191,6 +193,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/topology", s.handleTopology)
 	s.mux.HandleFunc("/api/history", s.handleHistory)
 	s.mux.HandleFunc("/api/goals", s.handleGoals)
+	s.mux.HandleFunc("/api/session-mirror", s.handleSessionMirror)
 	s.mux.HandleFunc("/events", s.handleEvents)
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticAssets()))))
 
@@ -254,14 +257,15 @@ func (s *Server) loadHistory() HistoryDoc {
 // views read — so the Goals view can never diverge from the fleet board. A
 // missing goals file yields an honest Found=false document; a present-but-invalid
 // file surfaces the load error (structure is validated fail-closed) rather than a
-// partial tree. Issue work items are shown linked (unresolved) here — live issue
-// status resolution via the tracker is a tracked follow-on (the spec permits
-// `gh` at display time when configured).
+// partial tree. When the tracker is configured, open issues with a goal-id:
+// trailer are merged onto the referenced goal node and issue states are resolved
+// for work-item roll-up.
 func (s *Server) loadGoals() GoalsDoc {
 	in := GoalsInputs{
 		Backlog:    readFileOrEmpty(s.cfg.BacklogPath),
 		DeskStates: agentStates(s.loadBoard()),
 	}
+	s.bindTrackerIssues(&in)
 	if s.cfg.GoalsPath != "" {
 		if err := maybeCompileGoalsFromYAML(s.cfg.GoalsYAMLPath, s.cfg.GoalsPath); err != nil {
 			in.LoadErr = err.Error()
@@ -282,6 +286,39 @@ func (s *Server) loadGoals() GoalsDoc {
 		in.GeneratedAt = s.now().UTC().Format(time.RFC3339)
 	}
 	return BuildGoals(in)
+}
+
+// bindTrackerIssues resolves live issue state and goal-id: trailers from the pinned
+// tracker when configured. Tracker failures are non-fatal — goals still render from
+// the goals file; issue work items fall back to linked/unresolved.
+func (s *Server) bindTrackerIssues(in *GoalsInputs) {
+	if s.tracker == nil || s.cfg.Repo == "" {
+		return
+	}
+	issues, err := s.tracker.List(context.Background(), tracker.ListFilter{
+		State:       "all",
+		Limit:       200,
+		IncludeBody: true,
+	})
+	if err != nil {
+		return
+	}
+	in.IssueStates = make(map[string]string, len(issues))
+	for _, iss := range issues {
+		ref := tracker.IssueRef(s.cfg.Repo, iss.Number)
+		state := strings.ToLower(strings.TrimSpace(iss.State))
+		switch state {
+		case "open", "closed":
+			in.IssueStates[ref] = state
+		}
+		if iss.GoalID != "" && state == "open" {
+			in.TrailerIssues = append(in.TrailerIssues, GoalTrailerIssue{
+				GoalID: iss.GoalID,
+				Ref:    ref,
+				State:  state,
+			})
+		}
+	}
 }
 
 // --- handlers ---
@@ -476,6 +513,9 @@ func ResolvePaths(cfg Config, rc *roster.Config) Config {
 		} else {
 			cfg.GoalsYAMLPath = filepath.Join(dir, "fleet-goals.yaml")
 		}
+	}
+	if cfg.SessionMirrorDir == "" {
+		cfg.SessionMirrorDir = filepath.Join(dir, "session-mirror")
 	}
 	// The CoS ledger path is whatever the roster resolved (empty when the CoS
 	// mirror is inert — then the history view shows no ledger, honestly).
