@@ -241,38 +241,44 @@ queue state to the goal detail panel.
 | Kind | Binding | Roll-up resolution | Maintainer |
 |---|---|---|---|
 | `issue` | `owner/repo#N` | open → in-flight; closed → done; optional `blocked` label → blocked | Coordinator links; status from `gh` on dash read |
-| `backlog` | Exact text match or marker key in `## Backlog` | `[blocked]`/`[awaiting-auth]`/`[needs-attention]` → blocked; `[in-flight]`/`[pending]` → in-flight; `[done]` or absent → done | Coordinator links; status from `backlog.Parse` |
+| `backlog` | Exact text match or marker key in `## Backlog` | `[blocked]`/`[needs-attention]` → blocked; `[awaiting-auth]` → **awaiting** (operator-gated amber); `[in-flight]`/`[pending]` → in-flight; `[done]` or absent → done | Coordinator links; status from `backlog.Parse` |
 | `inline` | Free text + optional `done: true` | `done: true` → done; otherwise → in-flight | Coordinator edits goals file directly |
-| `desk` | Agent name | snapshot `working`/`stale` → in-flight; snapshot `blocked` or drive-queue blocked marker → blocked; `idle` with no in-flight queue items → done | Coordinator links; state from watch snapshot + drive queue |
+| `desk` | Agent name | snapshot `blocked` or drive-queue `[blocked]` → blocked; drive-queue `[awaiting-auth]` → awaiting; snapshot `working`/`stale` → in-flight; `idle` with no in-flight queue items → done | Coordinator links; state from watch snapshot + drive queue |
 
 ### 4.4 Roll-up semantics
 
 Two fields per node:
 
 - **`status`** — coordinator-authored (`active`, `achieved`, `paused`, `cancelled`).
-- **`status_display`** — computed at read time for the operator (`blocked`, `in-flight`, `achieved`,
-  `active`, `paused`, `cancelled`).
+- **`status_display`** — computed at read time for the operator (`blocked`, `awaiting`, `in-flight`,
+  `achieved`, `active`, `paused`, `cancelled`). `awaiting` is the operator-gated / "your move"
+  amber state — distinct from `blocked` (dependency/error) and from authored `paused` (coordinator
+  hold). Mapped from `[awaiting-auth]` backlog markers (#267 feedback #3).
 
 Precedence (first match wins):
 
 ```
 1. authored cancelled        → cancelled
 2. any child/item blocked    → blocked
-3. authored paused           → paused
-4. any child/item in-flight  → in-flight
-5. authored achieved AND all children/items done (or none) → achieved
-6. all non-cancelled children achieved AND all items done AND (children>0 OR items>0) → achieved
-7. zero children AND zero items → active   # vacuous-achieved guard
-8. else → active
+3. any child/item awaiting   → awaiting
+4. authored paused           → paused
+5. any child/item in-flight  → in-flight
+6. authored achieved AND all children/items done (or none) → achieved
+7. all non-cancelled children achieved AND all items done AND (children>0 OR items>0) → achieved
+8. zero children AND zero items → active   # vacuous-achieved guard
+9. else → active
 ```
 
 Child goals contribute their computed `status_display` upward. Authored `paused`/`cancelled` are
-not silently dropped — they override idle/active when nothing is blocked or in-flight. **Cancelled
-children are excluded** from the parent's "all children achieved" test (step 6): a cancelled
-sub-goal is a dead branch, not incomplete work — it does not hold the parent out of `achieved`.
+not silently dropped — they override idle/active when nothing is blocked, awaiting, or in-flight.
+**Cancelled children are excluded** from the parent's "all children achieved" test (step 7): a
+cancelled sub-goal is a dead branch, not incomplete work — it does not hold the parent out of
+`achieved`.
 
-Blocked/unblocked classification reuses `backlog.Parse` markers (`[blocked]`, `[awaiting-auth]`,
-`[needs-attention]`). Issue state pulled from GitHub (`open` + label `blocked` optional).
+Marker classification reuses `backlog.Parse`: `[blocked]`/`[needs-attention]` → blocked;
+`[awaiting-auth]` → awaiting. Issue state pulled from GitHub (`open` + label `blocked` optional).
+The flotilla-dash Stage-1 read path already uses this vocabulary; `internal/goals` MUST preserve
+it on drop-in swap.
 
 ### 4.5 Persistence location
 

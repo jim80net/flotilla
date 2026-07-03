@@ -33,11 +33,12 @@
   validate, compile to JSON with `edges[]`
 - [ ] 3.2 `fleet-goals.yaml` example in `flotilla.example.json` comment block (generic goals only;
   align with flotilla-dash `fleet-goals.example.yaml`)
-- [ ] 3.3 Roll-up computation — authored+computed precedence, vacuous guard, inline/desk resolution
+- [ ] 3.3 Roll-up computation — authored+computed precedence (incl. `awaiting` from
+  `[awaiting-auth]`), vacuous guard, inline/desk resolution
 - [ ] 3.4 `GET /api/goals`, `GET /api/goals/{id}` (`GoalsDoc` with `edges[]`)
 - [ ] 3.5 `flotilla goals compile|validate|link` CLI (minimal — validate + link first)
 - [ ] 3.6 Issue `goal-id:` trailer parser in tracker read path
-- [ ] 3.7 Unit tests — acyclic reject, roll-up blocked/in-flight/achieved
+- [ ] 3.7 Unit tests — acyclic reject, roll-up blocked/awaiting/in-flight/achieved
 
 ## 4. Dash Goals UI (flotilla-dash desk — coordinate)
 

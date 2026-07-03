@@ -81,40 +81,48 @@ child goals, and attached work items using the precedence rules below. Each goal
 status fields:
 
 - **`status`** — coordinator-authored lifecycle (`active`, `achieved`, `paused`, `cancelled`).
-- **`status_display`** — operator-facing roll-up computed at read time (`blocked`, `in-flight`,
-  `achieved`, `active`, `paused`, `cancelled`).
+- **`status_display`** — operator-facing roll-up computed at read time (`blocked`, `awaiting`,
+  `in-flight`, `achieved`, `active`, `paused`, `cancelled`). The `awaiting` value is the
+  operator-gated / "your move" amber state (mapped from `[awaiting-auth]` backlog markers and
+  equivalent operator-decision signals).
 
 Precedence (first match wins):
 
 1. Authored `cancelled` → `status_display: cancelled`.
 2. Any child or attached work item classified `blocked` → `status_display: blocked`.
-3. Authored `paused` → `status_display: paused`.
-4. Any child or work item classified `in-flight` → `status_display: in-flight`.
-5. Authored `achieved` AND all non-cancelled children `achieved` (or none) AND all items `done`
+3. Any child or attached work item classified `awaiting` → `status_display: awaiting`.
+4. Authored `paused` → `status_display: paused`.
+5. Any child or work item classified `in-flight` → `status_display: in-flight`.
+6. Authored `achieved` AND all non-cancelled children `achieved` (or none) AND all items `done`
    (or none) → `status_display: achieved`.
-6. All non-cancelled children `achieved` AND all items `done` AND at least one child OR one work
+7. All non-cancelled children `achieved` AND all items `done` AND at least one child OR one work
    item exists → `status_display: achieved`. Cancelled children are excluded from this test — a
    cancelled sub-goal is a dead branch and does not hold the parent out of `achieved`.
-7. Zero children AND zero work items → `status_display: active` (vacuous-achieved guard — an
+8. Zero children AND zero work items → `status_display: active` (vacuous-achieved guard — an
    unscoped new node MUST NOT render as done).
-8. Otherwise → `status_display: active`.
+9. Otherwise → `status_display: active`.
 
 Work-item classification:
 
-| Kind | `blocked` | `in-flight` | `done` |
-|---|---|---|---|
-| `issue` | open + `blocked` label (optional) | open | closed |
-| `backlog` | `[blocked]` / `[awaiting-auth]` / `[needs-attention]` marker | `[in-flight]` / `[pending]` | `[done]` or absent from active backlog |
-| `inline` | n/a | `done` absent or false | `done: true` |
-| `desk` | agent `blocked` in snapshot OR drive-queue marker blocked | agent `working` / `stale` | agent `idle` with no in-flight drive-queue items |
+| Kind | `blocked` | `awaiting` | `in-flight` | `done` |
+|---|---|---|---|---|
+| `issue` | open + `blocked` label (optional) | n/a | open | closed |
+| `backlog` | `[blocked]` / `[needs-attention]` | `[awaiting-auth]` | `[in-flight]` / `[pending]` | `[done]` or absent from active backlog |
+| `inline` | n/a | n/a | `done` absent or false | `done: true` |
+| `desk` | agent `blocked` in snapshot OR drive-queue marker blocked | drive-queue `[awaiting-auth]` marker | agent `working` / `stale` | agent `idle` with no in-flight drive-queue items |
 
-Child goals contribute their computed `status_display` to the parent roll-up (blocked and
-in-flight propagate upward; achieved only when the child itself is achieved).
+Child goals contribute their computed `status_display` to the parent roll-up (`blocked`, `awaiting`,
+and `in-flight` propagate upward; achieved only when the child itself is achieved).
 
 #### Scenario: A blocked backlog item blocks the parent goal roll-up
 
 - **WHEN** a goal has an attached backlog item marked `[blocked]`
 - **THEN** the goal's `status_display` is `blocked`
+
+#### Scenario: An awaiting-auth backlog item surfaces operator-gated amber
+
+- **WHEN** a goal has an attached backlog item marked `[awaiting-auth]`
+- **THEN** the goal's `status_display` is `awaiting` (not `blocked`)
 
 #### Scenario: An empty goal node is active, not achieved
 
@@ -123,7 +131,8 @@ in-flight propagate upward; achieved only when the child itself is achieved).
 
 #### Scenario: Authored paused survives when children are idle
 
-- **WHEN** a goal has authored `status: paused` and no child or item is blocked or in-flight
+- **WHEN** a goal has authored `status: paused` and no child or item is blocked, awaiting, or
+  in-flight
 - **THEN** its `status_display` is `paused`, not `active`
 
 ### Requirement: Coordinators maintain goal structure
