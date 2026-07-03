@@ -303,7 +303,7 @@ func TestWorkspaceLaunchCommandShellQuotesPathWithSpaceAndDollar(t *testing.T) {
 		{"non-claude surface branch", "aider"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := workspaceLaunchCommand(path, agent, "CLAUDE.md", tc.surface)
+			got, err := workspaceLaunchCommand(path, agent, "CLAUDE.md", tc.surface, false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -330,6 +330,54 @@ func TestWorkspaceLaunchCommandShellQuotesPathWithSpaceAndDollar(t *testing.T) {
 				t.Errorf("sh parsed identity path = %q, want %q", out, wantFile)
 			}
 		})
+	}
+}
+
+func TestWorkspaceLaunchCommandCodexCoordinatorExportsSecrets(t *testing.T) {
+	got, err := workspaceLaunchCommand("/desk", "alpha-xo", "AGENTS.md", "codex", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"export FLOTILLA_SELF='alpha-xo'",
+		`export FLOTILLA_SECRETS="${FLOTILLA_SECRETS:-$HOME/.config/flotilla/flotilla-secrets.env}"`,
+		"codex -m gpt-5.5-codex",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("codex coordinator launch missing %q in %q", want, got)
+		}
+	}
+}
+
+func TestCmdWorkspaceInitRefusesCodexCoordinatorWithoutProbe(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)
+	repo := initTestGitRepo(t)
+	rosterPath := writeRosterFile(t, `{"xo_agent":"alpha-xo","agents":[{"name":"alpha-xo","surface":"codex"}]}`)
+	err := cmdWorkspaceInit(workspaceInitArgs("alpha-xo", rosterPath, repo))
+	if err == nil {
+		t.Fatal("init for codex coordinator without ComposerStateProbe = nil error, want refusal")
+	}
+	if !strings.Contains(err.Error(), "ComposerStateProbe") {
+		t.Errorf("error = %v, want ComposerStateProbe refusal", err)
+	}
+}
+
+func TestScaffoldCodexCoordinatorRulesAllowsMerge(t *testing.T) {
+	worktree := filepath.Join(t.TempDir(), "xo")
+	if err := scaffoldCodexCoordinatorRules(worktree); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(worktree, ".codex", "rules", "flotilla-coordinator.rules"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if strings.Contains(text, `["gh", "pr", "merge"]`) {
+		t.Error("coordinator rules must not forbid gh pr merge")
+	}
+	if !strings.Contains(text, `["git", "push", "origin", "main"]`) {
+		t.Error("coordinator rules must still forbid default-branch push")
 	}
 }
 

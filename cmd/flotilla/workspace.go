@@ -11,6 +11,7 @@ import (
 	"github.com/jim80net/flotilla/internal/doctrine"
 	"github.com/jim80net/flotilla/internal/launch"
 	"github.com/jim80net/flotilla/internal/roster"
+	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/workspace"
 )
 
@@ -125,6 +126,12 @@ func cmdWorkspaceInit(args []string) error {
 	if err != nil {
 		return err
 	}
+	if codexCoordinatorCandidate(cfg, opts.agent, a.Surface) {
+		if err := refuseCodexCoordinatorWithoutProbe(opts.agent); err != nil {
+			return err
+		}
+	}
+	isCoordinator := cfg.IsCoordinator(opts.agent)
 	harnessSurface := harnessAllocationSurface(cfg, opts.agent, a.Surface)
 	identity, err := workspace.IdentityFileName(harnessSurface)
 	if err != nil {
@@ -155,7 +162,7 @@ func cmdWorkspaceInit(args []string) error {
 		return fmt.Errorf("create host workspace %q: %w", hostDir, err)
 	}
 
-	recipe, err := buildLaunchRecipe(worktreeAbs, opts.agent, identity, harnessSurface)
+	recipe, err := buildLaunchRecipe(worktreeAbs, opts.agent, identity, harnessSurface, isCoordinator)
 	if err != nil {
 		return err
 	}
@@ -195,7 +202,7 @@ func cmdWorkspaceInit(args []string) error {
 		return fmt.Errorf("stat identity %q: %w", identityPath, statErr)
 	}
 
-	results, err := doctrine.InstallSplit(worktreeAbs, hostDir, identity, doctrine.Members(), false)
+	results, err := doctrine.InstallSplit(worktreeAbs, hostDir, identity, doctrine.MembersForAgent(isCoordinator), false)
 	if err != nil {
 		return fmt.Errorf("seed doctrine into %q: %w", worktreeAbs, err)
 	}
@@ -203,7 +210,11 @@ func cmdWorkspaceInit(args []string) error {
 	noteNonClaudeLoadFastFollow(harnessSurface, identityPath)
 
 	if harnessSurface == "codex" {
-		if err := scaffoldCodexDeskRules(worktreeAbs); err != nil {
+		if isCoordinator {
+			if err := scaffoldCodexCoordinatorRules(worktreeAbs); err != nil {
+				return err
+			}
+		} else if err := scaffoldCodexDeskRules(worktreeAbs); err != nil {
 			return err
 		}
 	}
@@ -214,8 +225,28 @@ func cmdWorkspaceInit(args []string) error {
 	return nil
 }
 
-func buildLaunchRecipe(worktreeAbs, agent, identity, surface string) (launch.Recipe, error) {
-	launchCmd, err := workspaceLaunchCommand(worktreeAbs, agent, identity, surface)
+// codexCoordinatorCandidate reports whether the roster names this coordinator for the
+// codex harness (explicit surface: "codex"). harnessAllocationSurface parity is flotilla-dev
+// phase 1; the probe guard keys off the roster contract so init fails closed early.
+func codexCoordinatorCandidate(cfg *roster.Config, agent, rosterSurface string) bool {
+	return cfg.IsCoordinator(agent) && rosterSurface == "codex"
+}
+
+// refuseCodexCoordinatorWithoutProbe enforces the fail-closed gate: codex coordinators
+// require ComposerStateProbe before workspace init scaffolds a management seat.
+func refuseCodexCoordinatorWithoutProbe(agent string) error {
+	drv, ok := surface.Get("codex")
+	if !ok {
+		return fmt.Errorf("workspace init %q: codex coordinator provisioning refused — codex surface driver not registered", agent)
+	}
+	if _, ok := drv.(surface.ComposerStateProbe); !ok {
+		return fmt.Errorf("workspace init %q: codex coordinator provisioning refused — codex driver lacks ComposerStateProbe (ship probe before init)", agent)
+	}
+	return nil
+}
+
+func buildLaunchRecipe(worktreeAbs, agent, identity, surface string, coordinator bool) (launch.Recipe, error) {
+	launchCmd, err := workspaceLaunchCommand(worktreeAbs, agent, identity, surface, coordinator)
 	if err != nil {
 		return launch.Recipe{}, err
 	}
@@ -379,6 +410,148 @@ prefix_rule(
 )
 `
 
+// codexCoordinatorRules is the coordinator-seat backstop: default-branch and force-push
+// forbids like execution desks, but gh pr merge is allowed (independent-review merges).
+const codexCoordinatorRules = `# flotilla coordinator rules — reviewer merge allowed; default-branch backstop
+prefix_rule(
+    pattern = ["git", "push", "origin", "main"],
+    decision = "forbidden",
+    justification = "Do not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "master"],
+    decision = "forbidden",
+    justification = "Do not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "main"],
+    decision = "forbidden",
+    justification = "Do not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "master"],
+    decision = "forbidden",
+    justification = "Do not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "HEAD:main"],
+    decision = "forbidden",
+    justification = "Do not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", ":main"],
+    decision = "forbidden",
+    justification = "Do not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "main:main"],
+    decision = "forbidden",
+    justification = "Do not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "master:master"],
+    decision = "forbidden",
+    justification = "Do not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "refs/heads/main"],
+    decision = "forbidden",
+    justification = "Do not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "refs/heads/master"],
+    decision = "forbidden",
+    justification = "Do not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "main:main"],
+    decision = "forbidden",
+    justification = "Do not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "master:master"],
+    decision = "forbidden",
+    justification = "Do not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "refs/heads/main"],
+    decision = "forbidden",
+    justification = "Do not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "refs/heads/master"],
+    decision = "forbidden",
+    justification = "Do not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "--force"],
+    decision = "forbidden",
+    justification = "Do not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "--force-with-lease"],
+    decision = "forbidden",
+    justification = "Do not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "-f"],
+    decision = "forbidden",
+    justification = "Do not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "--force"],
+    decision = "forbidden",
+    justification = "Do not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "--force-with-lease"],
+    decision = "forbidden",
+    justification = "Do not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "-f"],
+    decision = "forbidden",
+    justification = "Do not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "--force"],
+    decision = "forbidden",
+    justification = "Do not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "--force-with-lease"],
+    decision = "forbidden",
+    justification = "Do not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "-f"],
+    decision = "forbidden",
+    justification = "Do not force-push; use ordinary feature-branch pushes.",
+)
+`
+
+func scaffoldCodexCoordinatorRules(worktreeAbs string) error {
+	rulesDir := filepath.Join(worktreeAbs, ".codex", "rules")
+	if err := os.MkdirAll(rulesDir, 0o755); err != nil {
+		return fmt.Errorf("create codex rules dir: %w", err)
+	}
+	path := filepath.Join(rulesDir, "flotilla-coordinator.rules")
+	if info, statErr := os.Stat(path); statErr == nil {
+		if info.IsDir() {
+			return fmt.Errorf("codex rules %q exists but is a directory — remove it and re-run workspace init", path)
+		}
+		fmt.Printf("  kept    %s\n", path)
+		return nil
+	} else if !os.IsNotExist(statErr) {
+		return fmt.Errorf("stat codex rules %q: %w", path, statErr)
+	}
+	if err := os.WriteFile(path, []byte(codexCoordinatorRules), 0o644); err != nil {
+		return fmt.Errorf("write codex rules %q: %w", path, err)
+	}
+	fmt.Printf("  created %s\n", path)
+	return nil
+}
+
 func scaffoldCodexDeskRules(worktreeAbs string) error {
 	rulesDir := filepath.Join(worktreeAbs, ".codex", "rules")
 	if err := os.MkdirAll(rulesDir, 0o755); err != nil {
@@ -401,7 +574,7 @@ func scaffoldCodexDeskRules(worktreeAbs string) error {
 	return nil
 }
 
-func workspaceLaunchCommand(worktreeAbs, agent, identity, surface string) (string, error) {
+func workspaceLaunchCommand(worktreeAbs, agent, identity, surface string, coordinator bool) (string, error) {
 	switch surface {
 	case "", "claude-code":
 		return fmt.Sprintf("claude --append-system-prompt-file %s -w %s",
@@ -409,7 +582,12 @@ func workspaceLaunchCommand(worktreeAbs, agent, identity, surface string) (strin
 	case "grok":
 		return "grok --model composer-2.5-fast", nil
 	case "codex":
-		return "codex -m gpt-5.5-codex --sandbox workspace-write --ask-for-approval on-request", nil
+		base := "codex -m gpt-5.5-codex --sandbox workspace-write --ask-for-approval on-request"
+		if coordinator {
+			return fmt.Sprintf("export FLOTILLA_SELF=%s; export FLOTILLA_SECRETS=\"${FLOTILLA_SECRETS:-$HOME/.config/flotilla/flotilla-secrets.env}\"; %s",
+				shellQuote(agent), base), nil
+		}
+		return base, nil
 	default:
 		id, err := workspace.IdentityFileName(surface)
 		if err != nil {

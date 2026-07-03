@@ -91,7 +91,7 @@ func cmdDoctrineInstallOne(cfg *roster.Config, agent string, refresh bool) error
 	if err != nil {
 		return err
 	}
-	results, err := doctrine.InstallSplit(identityDir, hostDir, identity, doctrine.Members(), refresh)
+	results, err := doctrine.InstallSplit(identityDir, hostDir, identity, doctrine.MembersForAgent(cfg.IsCoordinator(agent)), refresh)
 	if err != nil {
 		return err
 	}
