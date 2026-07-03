@@ -33,6 +33,7 @@
   var view = { scale: 1, tx: 0, ty: 0, worldW: 0, worldH: 0, fitted: false };
   var panWired = false;
   var edgeIndex = {};    // child id → { path, parent } — for the hover chain-highlight
+  var depEdges = [];     // cross-dependency edges (GoalsDoc.edges: {from,to,kind:"depends_on"})
   var selectedId = null; // node whose detail drawer is open (transient state: on the article)
   var hoveredId = null;  // node currently hovered (re-applied after a render)
   var nodesWired = false;
@@ -90,7 +91,7 @@
   function renderLegend() {
     var items = [
       ["realized", "realized"], ["in-flight", "in flight"],
-      ["awaiting", "awaiting you"], ["aspirational", "aspirational"],
+      ["awaiting", "awaiting you"], ["aspirational", "aspirational"], ["dep", "depends on"],
     ];
     q("goals-legend").innerHTML = items.map(function (i) {
       return '<span class="glegend"><span class="gdot gdot-' + i[0] + '"></span>' + escapeHtml(i[1]) + "</span>";
@@ -225,6 +226,20 @@
         '" d="M ' + a.x + " " + a.y + " C " + (a.x + dx) + " " + a.y + ", " +
         (b.x - dx) + " " + b.y + ", " + b.x + " " + b.y + '"/>');
     });
+    // Cross-dependency edges (depends_on) — rendered as faint dashed arcs bowed out
+    // to the right, visually distinct from the solid parent-child tree edges (a
+    // dependency is NOT a re-parenting; feedback #2). Emphasized on hover of an end.
+    for (var di = 0; di < depEdges.length; di++) {
+      if (depEdges[di].kind !== "depends_on") continue; // only depends_on edges are dep arcs
+      var f = nodeById[depEdges[di].from], t = nodeById[depEdges[di].to];
+      if (!f || !t) continue;
+      var pa = { x: f._x + f._w, y: f._y + heightOf(f) / 2 };
+      var pb = { x: t._x + t._w, y: t._y + heightOf(t) / 2 };
+      var bow = 44 + Math.abs(pa.y - pb.y) * 0.12;
+      var cxx = Math.max(pa.x, pb.x) + bow;
+      paths.push('<path class="gdep" data-from="' + escapeHtml(depEdges[di].from) + '" data-to="' + escapeHtml(depEdges[di].to) +
+        '" d="M ' + pa.x + " " + pa.y + " C " + cxx + " " + pa.y + ", " + cxx + " " + pb.y + ", " + pb.x + " " + pb.y + '"/>');
+    }
     svg.innerHTML = paths.join("");
     // Index each edge by its child id for the hover chain-highlight (rebuilt every
     // draw since the SVG is regenerated).
@@ -322,6 +337,15 @@
   function cardEl(id) { return q("goals-nodes").querySelector('[data-id="' + cssIdEsc(id) + '"]'); }
   function scopeNoun(n) { return n.scope === "fleet" ? "Fleet goal" : n.scope === "project" ? "Workstream" : "Task"; }
 
+  // convAgent resolves the deep-link target: the explicit conversation_agent, else
+  // the first desk work-item's agent (a real thread), else the owner label.
+  function convAgent(n) {
+    if (n.conversation_agent) return n.conversation_agent;
+    var items = n.work_items || [];
+    for (var i = 0; i < items.length; i++) { if (items[i].kind === "desk" && items[i].agent) return items[i].agent; }
+    return n.owner || null;
+  }
+
   // highlightChain lights the edges from a node up its parent chain to the root, so
   // hovering a task shows which workstream + fleet goal it rolls up to. Bounded
   // against a cycle the server should never emit.
@@ -333,10 +357,27 @@
     }
   }
 
+  // lightDeps emphasizes the cross-dependency arcs connected to a node (either end),
+  // so hovering a node reveals what it depends on / what depends on it.
+  function lightDeps(id, on) {
+    var svg = q("goals-edges");
+    if (!svg) return;
+    var els = svg.querySelectorAll('.gdep[data-from="' + cssIdEsc(id) + '"], .gdep[data-to="' + cssIdEsc(id) + '"]');
+    for (var i = 0; i < els.length; i++) els[i].classList.toggle("lit", on);
+  }
+
   // drawerBody renders the node's detail from the SAME cached /api/goals data the
   // map draws — no extra endpoint. Every interpolated value is escaped.
   function drawerBody(n) {
     var parts = [];
+    // Deep-link to this cell's conversation (feedback #3): prefer the explicit
+    // conversation_agent, then an actual desk work-item's agent (a routable
+    // thread), and only then the owner label (a lead role may have no thread).
+    var agent = convAgent(n);
+    if (agent) {
+      parts.push('<div class="gd-sec"><button class="gd-convo" type="button" data-agent="' + escapeHtml(agent) +
+        '">Open ' + escapeHtml(agent) + "&rsquo;s conversation &rarr;</button></div>");
+    }
     if (n.description) parts.push('<div class="gd-sec"><h4>What this is</h4><p>' + escapeHtml(n.description) + "</p></div>");
     // Operator-gated items (awaiting / blocked) surfaced as the "waiting on you" call-out.
     var gated = (n.work_items || []).filter(function (wi) { return wi.class === "awaiting" || wi.class === "blocked"; });
@@ -361,8 +402,19 @@
             '<span class="gpill gpill-' + escapeHtml(kv) + '">' + escapeHtml(STATE_LABEL[kv] || kv) + "</span></div>";
         }).join("") + "</div>");
     }
-    // Conversation deep-link is Inc 4 (gated on the conversation_agent field); the
-    // drawer shows detail only for now.
+    // Cross-dependencies — the gantt-style ID labels for feedback #2, shown cleanly
+    // in the drawer alongside the faint canvas arcs. Derived from GoalsDoc.edges
+    // (the API exposes dependencies there, not as a per-node field).
+    var deps = depEdges.filter(function (e) { return e.kind === "depends_on" && e.from === n.id; })
+      .map(function (e) { return nodeById[e.to]; }).filter(Boolean);
+    if (deps.length) {
+      parts.push('<div class="gd-sec"><h4>Depends on</h4>' +
+        deps.map(function (d) {
+          var dv = visToken(d);
+          return '<div class="gd-row"><span class="gd-row-l">' + escapeHtml(d.title || d.id) + "</span>" +
+            '<span class="gpill gpill-' + escapeHtml(dv) + '">' + escapeHtml(STATE_LABEL[dv] || dv) + "</span></div>";
+        }).join("") + "</div>");
+    }
     return parts.join("");
   }
 
@@ -431,7 +483,10 @@
         if (d && d.classList.contains("open")) fillDrawer(n);
       }
     }
-    if (hoveredId) { if (nodeById[hoveredId]) highlightChain(hoveredId, true); else hoveredId = null; }
+    if (hoveredId) {
+      if (nodeById[hoveredId]) { highlightChain(hoveredId, true); lightDeps(hoveredId, true); }
+      else hoveredId = null;
+    }
   }
 
   function wireNodes() {
@@ -455,16 +510,31 @@
       if (id === hoveredId) return; // still within the same card (delegation fires on inner spans too)
       hoveredId = id;
       highlightChain(id, true);
+      lightDeps(id, true);
     });
     nodesEl.addEventListener("mouseout", function (e) {
       var card = e.target.closest(".gnode");
       if (!card) return;
       if (e.relatedTarget && card.contains(e.relatedTarget)) return; // moving within the same card
-      highlightChain(card.getAttribute("data-id"), false);
-      if (hoveredId === card.getAttribute("data-id")) hoveredId = null;
+      var id = card.getAttribute("data-id");
+      highlightChain(id, false);
+      lightDeps(id, false);
+      if (hoveredId === id) hoveredId = null;
     });
     var close = q("goals-drawer-close");
     if (close) close.onclick = closeDrawer;
+    // Deep-link: the drawer's "Open …'s conversation" button jumps to that desk's
+    // Conversations thread (delegated — the body is rebuilt on each fill).
+    var drawer = q("goals-drawer");
+    if (drawer) drawer.addEventListener("click", function (e) {
+      var btn = e.target.closest(".gd-convo");
+      if (!btn) return;
+      var agent = btn.getAttribute("data-agent");
+      if (agent && window.flotillaDash && window.flotillaDash.openConversation) {
+        closeDrawer();
+        window.flotillaDash.openConversation(agent);
+      }
+    });
     // Help tooltip: also toggle on click (touch has no hover) — CSS shows it on
     // hover/focus AND when aria-expanded is true.
     var help = q("goals-help");
@@ -511,6 +581,7 @@
     }
     graph.classList.remove("hidden");
     empty.classList.add("hidden");
+    depEdges = Array.isArray(doc.edges) ? doc.edges : []; // cross-dependency edges for drawEdges
 
     var nodesEl = q("goals-nodes");
     var ssig = structuralSig(goals);
