@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/jim80net/flotilla/internal/backlog"
+	"github.com/jim80net/flotilla/internal/roster"
 )
 
 // GoalScope is a node's altitude in the hierarchy — the column it renders in (fleet → project →
@@ -30,12 +31,13 @@ import (
 type GoalScope string
 
 const (
-	ScopeFleet   GoalScope = "fleet"
-	ScopeProject GoalScope = "project"
-	ScopeTask    GoalScope = "task" // canonical leaf altitude (ratified goals spec)
-	// ScopeDesk is the pre-ratification alias for ScopeTask; normalizeScope maps it to
-	// ScopeTask so a legacy file still renders and counts correctly.
-	ScopeDesk GoalScope = "desk"
+	ScopeFleet    GoalScope = "fleet"    // v1 input
+	ScopeFlotilla GoalScope = "flotilla" // v2 org top-level
+	ScopeProject  GoalScope = "project"  // v1 input
+	ScopeOrgDesk  GoalScope = "desk"     // v2 org mid-level (ambiguous with legacy leaf alias)
+	ScopeTask     GoalScope = "task"     // canonical leaf altitude
+	// ScopeDeskLeaf is the pre-ratification alias for ScopeTask at leaf depth.
+	ScopeDeskLeaf GoalScope = "desk"
 )
 
 // GoalStatus is a node's declared lifecycle status (distinct from the COMPUTED roll-up). `active`
@@ -84,7 +86,10 @@ type Goal struct {
 	Owner             string     `json:"owner,omitempty"`
 	Status            GoalStatus `json:"status,omitempty"`
 	ConversationAgent string     `json:"conversation_agent,omitempty"` // Conversations deep-link target
-	DependsOn         []string   `json:"depends_on,omitempty"`         // cross-dependency ids (not re-parenting)
+	TopologyChannelID string     `json:"topology_channel_id,omitempty"`
+	Priorities        []string   `json:"priorities,omitempty"`
+	Milestones        []string   `json:"milestones,omitempty"`
+	DependsOn         []string   `json:"depends_on,omitempty"` // cross-dependency ids (not re-parenting)
 	WorkItems         []WorkItem `json:"work_items,omitempty"`
 }
 
@@ -175,16 +180,32 @@ type RenderedWorkItem struct {
 	Detail string `json:"detail"` // live state word (desk state, backlog marker, issue state, …)
 }
 
+// GoalHarness is the read-time harness badge (from roster surface, not stored in YAML).
+type GoalHarness struct {
+	Surface string `json:"surface,omitempty"`
+}
+
+// GoalLayout carries hub-spoke layout hints derived from topology + scope (org graph v2).
+type GoalLayout struct {
+	HubCenter bool `json:"hub_center,omitempty"`
+	Spoke     bool `json:"spoke,omitempty"`
+}
+
 // RenderedGoal is a goal node with its resolved work items, computed roll-up, and visual state.
 // Depth + Scope + Children let the frontend lay the tree out in altitude columns.
 type RenderedGoal struct {
 	ID                string             `json:"id"`
 	Title             string             `json:"title"`
 	Description       string             `json:"description,omitempty"`
-	Scope             string             `json:"scope"`
+	Scope             string             `json:"scope"` // v2 vocabulary: flotilla | desk | task
 	Parent            string             `json:"parent,omitempty"`
 	Owner             string             `json:"owner,omitempty"`
 	ConversationAgent string             `json:"conversation_agent,omitempty"`
+	TopologyChannelID string             `json:"topology_channel_id,omitempty"`
+	Priorities        []string           `json:"priorities,omitempty"`
+	Milestones        []string           `json:"milestones,omitempty"`
+	Harness           *GoalHarness       `json:"harness,omitempty"`
+	Layout            *GoalLayout        `json:"layout,omitempty"`
 	Status            string             `json:"status"`         // coordinator-authored lifecycle
 	StatusDisplay     string             `json:"status_display"` // computed roll-up (ratified spec): blocked|awaiting|in-flight|achieved|active|paused|cancelled
 	Depth             int                `json:"depth"`
@@ -195,9 +216,11 @@ type RenderedGoal struct {
 // GoalsCounts is the situation-bar summary — goal counts by scope and by visual state.
 type GoalsCounts struct {
 	Total        int `json:"total"`
-	Fleet        int `json:"fleet"`
-	Project      int `json:"project"`
+	Flotilla     int `json:"flotilla"`
+	Desk         int `json:"desk"` // org-container count (v2 mid-level)
 	Task         int `json:"task"`
+	Fleet        int `json:"fleet"`        // legacy mirror of flotilla
+	Project      int `json:"project"`      // legacy mirror of desk
 	Realized     int `json:"realized"`     // status_display achieved
 	InFlight     int `json:"in_flight"`    // status_display in-flight
 	Awaiting     int `json:"awaiting"`     // awaiting + blocked — the "needs attention" bucket
@@ -227,6 +250,15 @@ type GoalsDoc struct {
 	Counts      GoalsCounts    `json:"counts"`
 }
 
+// GoalTrailerIssue is an open issue discovered via a `goal-id:` body trailer (coordinator
+// convention). The HTTP layer supplies these from the tracker read path; BuildGoals attaches
+// them under the referenced goal node without requiring a hand-edited work_items entry.
+type GoalTrailerIssue struct {
+	GoalID string // parsed slug from the issue body trailer
+	Ref    string // owner/repo#N
+	State  string // open|closed (only open trailers are attached today)
+}
+
 // GoalsInputs are the already-loaded values BuildGoals renders. Keeping the builder pure (no I/O,
 // no clock) is what makes the goals read model unit-testable, exactly like BoardInputs.
 type GoalsInputs struct {
@@ -238,6 +270,11 @@ type GoalsInputs struct {
 	Backlog     string            // the fleet backlog markdown (for kind=backlog resolution)
 	DeskStates  map[string]string // agent name (lowercased) → live board state label (for kind=desk)
 	IssueStates map[string]string // "owner/repo#N" → "open"|"closed" (optional; empty when the tracker is off)
+	// TrailerIssues are open issues carrying a goal-id: trailer (tracker read path). Each is
+	// merged onto the matching goal node's work_items at render time.
+	TrailerIssues []GoalTrailerIssue
+	AgentSurfaces map[string]string // agent name (lowercased) → harness surface
+	MetaXO        string            // federation hub agent for layout hints
 }
 
 // BuildGoals assembles the goals document. Pure: no I/O, no real time. Absent/error inputs produce
@@ -277,6 +314,7 @@ func BuildGoals(in GoalsInputs) GoalsDoc {
 		}
 		resolved[id] = items
 	}
+	mergeTrailerIssues(byID, resolved, in)
 
 	// Roll-up is memoized over the (acyclic) tree — each node computed once.
 	rollup := make(map[string]string, len(in.File.Goals))
@@ -309,10 +347,16 @@ func BuildGoals(in GoalsInputs) GoalsDoc {
 		g := byID[id]
 		r := computeRollup(id)
 		items := resolved[id]
+		scope := displayScope(g.Scope, depth)
 		node := RenderedGoal{
 			ID: g.ID, Title: g.Title, Description: g.Description,
-			Scope: string(scopeOf(g.Scope, depth)), Parent: g.Parent, Owner: g.Owner,
+			Scope: scope, Parent: g.Parent, Owner: g.Owner,
 			ConversationAgent: strings.TrimSpace(g.ConversationAgent),
+			TopologyChannelID: strings.TrimSpace(g.TopologyChannelID),
+			Priorities:        append([]string(nil), g.Priorities...),
+			Milestones:        append([]string(nil), g.Milestones...),
+			Harness:           harnessFor(g, in.AgentSurfaces),
+			Layout:            layoutFor(g, scope, depth, in.MetaXO),
 			Status:            string(statusOrDefault(g.Status)),
 			StatusDisplay:     r,
 			Depth:             depth,
@@ -536,30 +580,64 @@ func nodeRollup(g *Goal, items []RenderedWorkItem, kids []string, rollupOf func(
 	return "active" // steps 8-9
 }
 
-// scopeOf returns the declared scope (normalized to the canonical enum), or infers one from depth
-// when the file omits it (0 → fleet, 1 → project, ≥2 → task).
-func scopeOf(declared GoalScope, depth int) GoalScope {
-	if declared != "" {
-		return normalizeScope(declared)
+// displayScope emits the v2 API scope string (flotilla | desk | task), dual-reading v1 tokens.
+func displayScope(declared GoalScope, depth int) string {
+	if declared == "" {
+		switch depth {
+		case 0:
+			return "flotilla"
+		case 1:
+			return "desk"
+		default:
+			return "task"
+		}
 	}
-	switch depth {
-	case 0:
-		return ScopeFleet
-	case 1:
-		return ScopeProject
+	switch declared {
+	case ScopeFleet, ScopeFlotilla:
+		return "flotilla"
+	case ScopeProject:
+		return "desk"
+	case ScopeTask:
+		return "task"
+	case ScopeOrgDesk: // v2 org mid-level at depth 1; legacy leaf alias elsewhere
+		if depth == 1 {
+			return "desk"
+		}
+		return "task"
 	default:
-		return ScopeTask
+		return string(declared)
 	}
 }
 
-// normalizeScope maps the legacy `desk` alias onto the canonical `task` scope; other values pass
-// through unchanged (an unrecognized scope is left as-authored so it is visible, not silently
-// coerced).
-func normalizeScope(s GoalScope) GoalScope {
-	if s == ScopeDesk {
-		return ScopeTask
+func harnessFor(g *Goal, surfaces map[string]string) *GoalHarness {
+	if len(surfaces) == 0 {
+		return nil
 	}
-	return s
+	for _, name := range []string{g.ConversationAgent, g.Owner} {
+		key := strings.ToLower(strings.TrimSpace(name))
+		if key == "" {
+			continue
+		}
+		if surf, ok := surfaces[key]; ok && surf != "" {
+			return &GoalHarness{Surface: surf}
+		}
+	}
+	return nil
+}
+
+func layoutFor(g *Goal, scope string, depth int, metaXO string) *GoalLayout {
+	meta := strings.ToLower(strings.TrimSpace(metaXO))
+	owner := strings.ToLower(strings.TrimSpace(g.Owner))
+	if meta != "" && owner == meta && depth == 0 {
+		return &GoalLayout{HubCenter: true}
+	}
+	if scope == "flotilla" && depth > 0 {
+		return &GoalLayout{Spoke: true}
+	}
+	if scope == "flotilla" && depth == 0 && meta == "" {
+		return &GoalLayout{HubCenter: true}
+	}
+	return nil
 }
 
 // statusOrDefault treats an empty declared status as active.
@@ -573,12 +651,14 @@ func statusOrDefault(s GoalStatus) GoalStatus {
 // countNode accumulates the situation-bar counts for one rendered node.
 func countNode(c *GoalsCounts, n RenderedGoal) {
 	c.Total++
-	switch normalizeScope(GoalScope(n.Scope)) {
-	case ScopeFleet:
+	switch n.Scope {
+	case "flotilla":
+		c.Flotilla++
 		c.Fleet++
-	case ScopeProject:
+	case "desk":
+		c.Desk++
 		c.Project++
-	case ScopeTask:
+	case "task":
 		c.Task++
 	}
 	switch n.StatusDisplay {
@@ -590,6 +670,47 @@ func countNode(c *GoalsCounts, n RenderedGoal) {
 		c.Awaiting++
 	case "active", "paused", "cancelled":
 		c.Aspirational++
+	}
+}
+
+// mergeTrailerIssues appends issue work items from goal-id: body trailers onto the referenced
+// goal nodes. Authored work_items win on duplicate refs; unknown goal ids are ignored.
+func mergeTrailerIssues(byID map[string]*Goal, resolved map[string][]RenderedWorkItem, in GoalsInputs) {
+	if len(in.TrailerIssues) == 0 {
+		return
+	}
+	existing := make(map[string]map[string]bool, len(byID))
+	for id, items := range resolved {
+		refs := make(map[string]bool, len(items))
+		for _, it := range items {
+			if ref := strings.TrimSpace(it.Ref); ref != "" {
+				refs[ref] = true
+			}
+		}
+		existing[id] = refs
+	}
+	for _, tr := range in.TrailerIssues {
+		if byID[tr.GoalID] == nil {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(tr.State), "open") {
+			continue
+		}
+		ref := strings.TrimSpace(tr.Ref)
+		if ref == "" || existing[tr.GoalID][ref] {
+			continue
+		}
+		item := resolveItem(WorkItem{Kind: WorkIssue, Ref: ref}, in)
+		// mergeTrailerIssues already trusts tr.State as open; when IssueStates is absent
+		// resolveItem falls back to linked/active — derive class from the trailer state instead.
+		if item.Class == "active" && item.Detail == "linked" {
+			if s := strings.TrimSpace(tr.State); s != "" {
+				item.Detail = s
+				item.Class = issueClass(s)
+			}
+		}
+		resolved[tr.GoalID] = append(resolved[tr.GoalID], item)
+		existing[tr.GoalID][ref] = true
 	}
 }
 
@@ -611,6 +732,19 @@ func agentStates(board BoardDoc) map[string]string {
 	m := make(map[string]string, len(board.Agents))
 	for _, a := range board.Agents {
 		m[strings.ToLower(a.Name)] = a.State
+	}
+	return m
+}
+
+func agentSurfacesFromRoster(cfg *roster.Config) map[string]string {
+	if cfg == nil {
+		return nil
+	}
+	m := make(map[string]string, len(cfg.Agents))
+	for _, a := range cfg.Agents {
+		if surf := strings.TrimSpace(a.Surface); surf != "" {
+			m[strings.ToLower(a.Name)] = surf
+		}
 	}
 	return m
 }

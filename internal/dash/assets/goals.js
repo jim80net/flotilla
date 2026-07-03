@@ -38,6 +38,7 @@
   var hoveredId = null;  // node currently hovered (re-applied after a render)
   var nodesWired = false;
   var kbdNav = false;    // true when focus is moving by keyboard (Tab) — gates focus-recenter
+  var modalReturn = null; // element to restore focus to when the intervention modal closes
 
   /* ── tier geometry (ported from the prototype: TIER_X=[40,470,900]) ─────── */
   // Columns are derived from depth so a tree deeper than the canonical 3 tiers
@@ -74,7 +75,7 @@
   function renderSituation(doc) {
     var c = doc.counts || {};
     var tiles = [
-      { k: "Fleet goals", v: c.fleet || 0, tone: "goal", d: (c.total || 0) + " nodes total" },
+      { k: "Flotillas", v: c.fleet || 0, tone: "goal", d: (c.total || 0) + " nodes total" },
       { k: "In flight", v: c.in_flight || 0, tone: "inflight", d: "desks working now" },
       { k: "Awaiting you", v: c.awaiting || 0, tone: "awaiting", d: "your decisions & blocks" },
       { k: "Realized", v: c.realized || 0, tone: "realized", d: "done & solidified" },
@@ -163,11 +164,42 @@
     var items = (n.work_items || []).map(workItem).join("");
     var itemsBlock = items ? '<div class="gnode-items">' + items + "</div>" : "";
     var pill = '<span class="gpill gpill-' + escapeHtml(vis) + '">' + escapeHtml(STATE_LABEL[vis] || vis) + "</span>";
-    return '<div class="gnode-eyebrow">' + escapeHtml(n.scope) + owner + "</div>" +
+    // Per-node controls (#302): a ⚠ Respond button on operator-gated nodes opens the
+    // waiting-on-you modal; a ⓘ Details button opens the detail drawer. The node
+    // body itself deep-links to Conversations (see wireNodes). Positioned absolute
+    // so they never change card height (#283 contract). The ⚠ tracks live status.
+    var gated = vis === "awaiting" || vis === "blocked";
+    var controls = '<span class="gnode-ctl">' +
+      (gated ? '<button class="gnode-respond" type="button" title="Respond to what this needs" aria-label="Respond">&#9888;</button>' : "") +
+      '<button class="gnode-detail" type="button" title="Details" aria-label="Details">&#9432;</button>' +
+      "</span>";
+    // org-graph v2 enrichment: priorities (flotilla-level, operator-facing) and
+    // milestones (desk-level current work) render as short ordered lists; the harness
+    // surface (grok / claude-code / …) renders as a subdued right-aligned badge in the
+    // foot (design §3). All are height-affecting → mirrored in structuralSig.
+    var prios = nodeList(n.priorities, "gnode-prios", "priorities");
+    var miles = nodeList(n.milestones, "gnode-miles", "current work");
+    var harness = (n.harness && n.harness.surface)
+      ? '<span class="gnode-harness" title="harness surface">' + escapeHtml(n.harness.surface) + "</span>"
+      : "";
+    return controls +
+      '<div class="gnode-eyebrow">' + escapeHtml(scopeNoun(n)) + owner + "</div>" +
       '<div class="gnode-title">' + escapeHtml(n.title) + "</div>" +
-      desc +
-      '<div class="gnode-foot">' + pill + "</div>" +
+      desc + prios + miles +
+      '<div class="gnode-foot">' + pill + harness + "</div>" +
       itemsBlock;
+  }
+
+  // nodeList renders a short labeled ordered list (priorities / milestones), or "" when
+  // the field is absent/empty. Capped at 4 rows with a "+N more" tail so a long list
+  // can't blow up the card height (the drawer shows the full list).
+  function nodeList(arr, cls, label) {
+    var xs = Array.isArray(arr) ? arr : [];
+    if (!xs.length) return "";
+    var shown = xs.slice(0, 4);
+    var more = xs.length > 4 ? '<li class="gnode-list-more">+' + (xs.length - 4) + " more</li>" : "";
+    return '<div class="gnode-list ' + cls + '"><span class="gnode-list-lab">' + label + "</span><ul>" +
+      shown.map(function (x) { return "<li>" + escapeHtml(x) + "</li>"; }).join("") + more + "</ul></div>";
   }
 
   function nodeCard(n) {
@@ -274,11 +306,13 @@
   }
 
   /* ── tier column headers (one per depth present) ───────────────────────── */
+  // Vocabulary per operator feedback #302: top-level = "flotilla", mid = "desk"
+  // (labels first; the scope-schema rename is flotilla-dev's v2).
   function tierLabel(depth) {
-    if (depth === 0) return "Fleet goals";
-    if (depth === 1) return "Workstreams";
-    if (depth === 2) return "Active tasks · desks";
-    return "Sub-goals";
+    if (depth === 0) return "Flotilla";
+    if (depth === 1) return "Desks";
+    if (depth === 2) return "Tasks";
+    return "Sub-tasks";
   }
   function renderTierLabels(maxDepth) {
     var out = [];
@@ -308,6 +342,9 @@
     return JSON.stringify(goals.map(function (n) {
       return [n.id, n.parent || "", n.depth || 0, n.scope || "", n.title || "",
         n.description || "", n.owner || "",
+        // org-graph v2 enrichment — each is rendered into the card and changes its
+        // height, so a change must trigger a full rebuild (not an in-place text swap).
+        n.priorities || [], n.milestones || [], (n.harness && n.harness.surface) || "",
         (n.work_items || []).map(function (wi) { return [wi.kind || "", wi.label || ""]; })];
     }));
   }
@@ -356,7 +393,16 @@
   /* ── detail drawer + hover chain-highlight (Inc 2) ─────────────────────── */
   function cssIdEsc(id) { return String(id).replace(/["\\]/g, "\\$&"); }
   function cardEl(id) { return q("goals-nodes").querySelector('[data-id="' + cssIdEsc(id) + '"]'); }
-  function scopeNoun(n) { return n.scope === "fleet" ? "Fleet goal" : n.scope === "project" ? "Workstream" : "Task"; }
+  // scopeNoun maps the v2 scope to its UI label (design §1). Dual-reads the legacy v1
+  // tokens (fleet/project) defensively so a not-yet-recompiled fixture still labels
+  // correctly — the live API emits v2 (flotilla/desk/task).
+  function scopeNoun(n) {
+    var s = n.scope;
+    if (s === "flotilla" || s === "fleet") return "Flotilla";
+    if (s === "desk" || s === "project") return "Desk";
+    return "Task";
+  }
+  function isFlotilla(n) { return n.scope === "flotilla" || n.scope === "fleet"; }
 
   // convAgent resolves the deep-link target: the explicit conversation_agent, else
   // the first desk work-item's agent (a real thread), else the owner label.
@@ -389,6 +435,15 @@
 
   // drawerBody renders the node's detail from the SAME cached /api/goals data the
   // map draws — no extra endpoint. Every interpolated value is escaped.
+  // drawerList renders a full ordered list section (priorities / milestones) in the
+  // drawer, or "" when absent — parts.push("") is harmless (join ignores it).
+  function drawerList(arr, heading) {
+    var xs = Array.isArray(arr) ? arr : [];
+    if (!xs.length) return "";
+    return '<div class="gd-sec"><h4>' + heading + "</h4><ol class=\"gd-list\">" +
+      xs.map(function (x) { return "<li>" + escapeHtml(x) + "</li>"; }).join("") + "</ol></div>";
+  }
+
   function drawerBody(n) {
     var parts = [];
     // Deep-link to this cell's conversation (feedback #3): prefer the explicit
@@ -400,6 +455,13 @@
         '">Open ' + escapeHtml(agent) + "&rsquo;s conversation &rarr;</button></div>");
     }
     if (n.description) parts.push('<div class="gd-sec"><h4>What this is</h4><p>' + escapeHtml(n.description) + "</p></div>");
+    if (n.harness && n.harness.surface) {
+      parts.push('<div class="gd-sec gd-harness"><h4>Harness</h4><p>' + escapeHtml(n.harness.surface) + "</p></div>");
+    }
+    // org-graph v2: full priorities (flotilla) / milestones (desk) — the drawer shows
+    // the complete list (the node card caps at 4).
+    parts.push(drawerList(n.priorities, "Priorities"));
+    parts.push(drawerList(n.milestones, "Current work"));
     // Operator-gated items (awaiting / blocked) surfaced as the "waiting on you" call-out.
     var gated = (n.work_items || []).filter(function (wi) { return wi.class === "awaiting" || wi.class === "blocked"; });
     if (gated.length) {
@@ -416,7 +478,7 @@
     }
     var kids = (n.children || []).map(function (id) { return nodeById[id]; }).filter(Boolean);
     if (kids.length) {
-      parts.push('<div class="gd-sec"><h4>' + (n.scope === "fleet" ? "Workstreams" : "Tasks") + " (" + kids.length + ")</h4>" +
+      parts.push('<div class="gd-sec"><h4>' + (isFlotilla(n) ? "Desks" : "Tasks") + " (" + kids.length + ")</h4>" +
         kids.map(function (k) {
           var kv = visToken(k);
           return '<div class="gd-row"><span class="gd-row-l">' + escapeHtml(k.title || k.id) + "</span>" +
@@ -488,6 +550,53 @@
     if (card) card.focus({ preventScroll: true }); // return focus to the node that opened it
   }
 
+  // nodeActivate is the primary node action (#302): deep-link to the node's
+  // Conversations thread. A node with no conversation agent (an abstract flotilla
+  // aim) falls back to the detail drawer.
+  function nodeActivate(id) {
+    var n = nodeById[id];
+    if (!n) return;
+    var agent = convAgent(n);
+    if (agent && window.flotillaDash && window.flotillaDash.openConversation) {
+      window.flotillaDash.openConversation(agent);
+    } else {
+      openDrawer(id);
+    }
+  }
+
+  // openModal — the "waiting on you" intervention modal (#302): a situation brief
+  // (scope, description, the operator-gated items) + a text input for a response.
+  // The reply PATH is a stub for this prototype (wired to the control API later).
+  function openModal(id) {
+    var n = nodeById[id];
+    if (!n) return;
+    var gated = (n.work_items || []).filter(function (wi) { return wi.class === "awaiting" || wi.class === "blocked"; });
+    var brief = '<p class="gm-scope">' + escapeHtml(scopeNoun(n)) + "</p>" +
+      (n.description ? "<p>" + escapeHtml(n.description) + "</p>" : "") +
+      (gated.length
+        ? '<div class="gm-gated"><div class="gm-gated-lab">Waiting on you</div>' +
+          gated.map(function (wi) { return "<p>" + escapeHtml(wi.label || wi.kind || "") + (wi.detail ? " — " + escapeHtml(wi.detail) : "") + "</p>"; }).join("") +
+          "</div>"
+        : '<p class="muted">Nothing is gated on you here.</p>');
+    q("goals-modal-title").textContent = n.title || n.id;
+    q("goals-modal-brief").innerHTML = brief;
+    var ta = q("goals-modal-input");
+    if (ta) ta.value = "";
+    var note = q("goals-modal-note");
+    if (note) note.textContent = ""; // clear the stub "not sent" note from a prior open
+    var m = q("goals-modal");
+    m.classList.add("open");
+    m.setAttribute("aria-hidden", "false");
+    modalReturn = document.activeElement;
+    if (ta) ta.focus();
+  }
+  function closeModal() {
+    var m = q("goals-modal");
+    if (m) { m.classList.remove("open"); m.setAttribute("aria-hidden", "true"); }
+    if (modalReturn && modalReturn.focus) modalReturn.focus({ preventScroll: true });
+    modalReturn = null;
+  }
+
   // reapplyTransient re-establishes selection + hover after a render. On an in-place
   // update the article keeps its .gnode-selected class, but on a full rebuild the
   // articles are replaced — so re-add the selection and refresh the open drawer's
@@ -516,13 +625,22 @@
     if (!nodesEl) return;
     nodesWired = true;
     nodesEl.addEventListener("click", function (e) {
+      var respond = e.target.closest(".gnode-respond");
+      if (respond) { var rc = respond.closest(".gnode"); if (rc) openModal(rc.getAttribute("data-id")); return; }
+      var detail = e.target.closest(".gnode-detail");
+      if (detail) { var dc = detail.closest(".gnode"); if (dc) openDrawer(dc.getAttribute("data-id")); return; }
       var card = e.target.closest(".gnode");
-      if (card) openDrawer(card.getAttribute("data-id"));
+      if (card) nodeActivate(card.getAttribute("data-id")); // #302: node body → its Conversations thread
     });
     nodesEl.addEventListener("keydown", function (e) {
       if (e.key !== "Enter" && e.key !== " ") return;
       var card = e.target.closest(".gnode");
-      if (card) { e.preventDefault(); openDrawer(card.getAttribute("data-id")); }
+      // Only the article itself deep-links on Enter; a control button (⚠ respond /
+      // ⓘ details) focused inside the card handles its OWN Enter (opens the modal /
+      // drawer) — don't preventDefault it here or the keyboard route to them is lost.
+      if (!card || e.target !== card) return;
+      e.preventDefault();
+      nodeActivate(card.getAttribute("data-id"));
     });
     // Tabbing to a node that's panned off-screen recenters the map on it (the
     // transform equivalent of scroll-into-view — the world can't be scrolled). Only
@@ -581,9 +699,32 @@
     if (help) help.onclick = function () {
       help.setAttribute("aria-expanded", help.getAttribute("aria-expanded") === "true" ? "false" : "true");
     };
+    // Intervention modal (#302): close on the × / backdrop; the "Send" is a stub for
+    // this prototype (the reply path wires to the control API in a follow-on).
+    var modal = q("goals-modal");
+    if (modal) modal.addEventListener("click", function (e) {
+      if (e.target.closest(".gm-close") || e.target.classList.contains("goals-modal")) closeModal();
+    });
+    // Focus trap (aria-modal): keep Tab / Shift+Tab cycling among the modal's
+    // controls (close, textarea, send) while it's open — Tab must not escape onto
+    // the background content behind the overlay.
+    if (modal) modal.addEventListener("keydown", function (e) {
+      if (e.key !== "Tab" || !modal.classList.contains("open")) return;
+      var f = modal.querySelectorAll(".gm-close, #goals-modal-input, #goals-modal-send");
+      if (!f.length) return;
+      var first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    });
+    var send = q("goals-modal-send");
+    if (send) send.onclick = function () {
+      var note = q("goals-modal-note");
+      if (note) note.textContent = "Reply path is a prototype stub — not sent (wiring to the control API is a follow-on).";
+    };
     document.addEventListener("keydown", function (e) {
       if (e.key !== "Escape" || !isVisible()) return;
       if (help) help.setAttribute("aria-expanded", "false"); // Esc dismisses the tooltip too
+      if (q("goals-modal") && q("goals-modal").classList.contains("open")) { closeModal(); return; }
       closeDrawer();
     });
   }

@@ -212,6 +212,64 @@ func TestControlTargetsNotClobberedGuard(t *testing.T) {
 	}
 }
 
+// TestSessionMirrorGlance locks the session-mirror glance widget (design §2.5): the
+// reader-map placeholder is replaced by a render that consumes /api/session-mirror.
+// No JS test runner, so this asserts the served dash.js has the render + fetch and
+// no longer carries the old placeholder.
+func TestSessionMirrorGlance(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{"renderSessionMirror", "/api/session-mirror", "fetchMirror"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js must consume the session mirror (missing %q) — design §2.5", marker)
+		}
+	}
+	if strings.Contains(js, "renderReaderMapPlaceholder") {
+		t.Error("dash.js must replace the reader-map placeholder with the session-mirror glance — design §2.5")
+	}
+}
+
+// TestHandleSessionMirror locks the /api/session-mirror contract the glance JS binds
+// to: { agent, entries:[{ts, info, ...}] } with entries ascending (newest last). This
+// guards the field names dash.js silently depends on (entries[last].ts / .info).
+func TestHandleSessionMirror(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, dir := newTestServer(t, singleFleetRoster, now)
+	mdir := filepath.Join(dir, "session-mirror")
+	if err := os.MkdirAll(mdir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// two lines, oldest first (append order = ascending)
+	lines := `{"ts":"2026-06-18T11:00:00Z","agent":"alpha","verbose":"v1","info":"older","debug":{"info":"older"},"suppressed":false}
+{"ts":"2026-06-18T12:00:00Z","agent":"alpha","verbose":"v2","info":"newest","debug":{"info":"newest"},"suppressed":false}
+`
+	if err := os.WriteFile(filepath.Join(mdir, "alpha.jsonl"), []byte(lines), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec := doGet(t, srv, "/api/session-mirror?agent=alpha&limit=100")
+	if rec.Code != 200 {
+		t.Fatalf("code %d", rec.Code)
+	}
+	var doc struct {
+		Agent   string `json:"agent"`
+		Entries []struct {
+			TS   string `json:"ts"`
+			Info string `json:"info"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Agent != "alpha" || len(doc.Entries) != 2 {
+		t.Fatalf("doc = %+v", doc)
+	}
+	// ascending order — the LAST entry is the newest (what the glance renders)
+	if doc.Entries[len(doc.Entries)-1].Info != "newest" {
+		t.Errorf("entries must be ascending (newest last); got last=%q", doc.Entries[len(doc.Entries)-1].Info)
+	}
+}
+
 // TestGoalsCanvasAssets locks the Goals view's pan/zoom canvas (#280 Inc 1). The
 // Goals view was ported from the merged flex-column layout to the operator-approved
 // 2D Fleet Situation Map — an absolute tiered layout inside a transform-driven world
@@ -263,6 +321,43 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("goals.js must retain the keyboard/a11y engine (missing %q) — #284", marker)
 		}
 	}
+	// #302: node click → Conversations (nodeActivate), the ⚠ respond modal (openModal),
+	// and the per-node control chips.
+	for _, marker := range []string{"nodeActivate", "openModal", "gnode-respond"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must retain the #302 interaction (missing %q)", marker)
+		}
+	}
+	// org-graph v2 Inc A (#312 schema): harness badge + priorities/milestones lists,
+	// and the v2 scope labels (scopeNoun reads flotilla/desk, not the retired
+	// fleet/project tokens). Also lock the enrichment into structuralSig so a
+	// height-affecting change forces a rebuild (#283).
+	for _, marker := range []string{"gnode-harness", "gnode-prios", "gnode-miles", "n.priorities", "n.milestones"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must retain the org-graph v2 enrichment (missing %q) — Inc A", marker)
+		}
+	}
+	if !strings.Contains(js, `"flotilla"`) || !strings.Contains(js, `s === "desk"`) {
+		t.Error("goals.js scopeNoun must read the v2 scope tokens (flotilla/desk) — #312")
+	}
+	// structuralSig must include the enrichment (priorities/milestones/harness) so an
+	// add/remove of a height-affecting field triggers a full rebuild, not a stale
+	// in-place text swap. Guard the index BEFORE slicing (a missing function must
+	// fail the test, not panic on js[-1:]) — cubic #315 P3.
+	sigStart := strings.Index(js, "function structuralSig")
+	if sigStart < 0 {
+		t.Fatal("goals.js must define structuralSig")
+	}
+	sigEnd := strings.Index(js[sigStart:], "function updateInPlace")
+	if sigEnd < 0 {
+		t.Fatal("structuralSig must precede updateInPlace in goals.js")
+	}
+	sig := js[sigStart : sigStart+sigEnd]
+	for _, f := range []string{"n.priorities", "n.milestones", "harness"} {
+		if !strings.Contains(sig, f) {
+			t.Errorf("structuralSig must include enrichment field %q (#283 height contract)", f)
+		}
+	}
 
 	body := doGet(t, srv, "/").Body.String()
 	if !strings.Contains(body, "/static/goals.js") {
@@ -273,11 +368,103 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	for _, id := range []string{
 		"goals-viewport", "goals-world", "goals-nodes", "goals-edges", "goals-tierlabels", "goals-zin", "goals-zout", "goals-zfit",
 		"goals-drawer", "goals-drawer-body", "goals-drawer-close", "goals-help", // Inc 2: drawer + help tooltip
-		"goals-live", // #284: aria-live status region
+		"goals-live",                                           // #284: aria-live status region
+		"goals-modal", "goals-modal-input", "goals-modal-send", // #302: intervention modal
 	} {
 		if !strings.Contains(body, id) {
 			t.Errorf("index must contain the goals canvas element #%s", id)
 		}
+	}
+}
+
+// TestConversationsFormatting locks the #302 Conversations rendering: the thread is
+// colour-coded by speaker (speakerHue → --spk) and the drive queue formats each
+// backlog line into a status chip (backlogItem → .bq-marker) instead of a raw blob.
+func TestConversationsFormatting(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{"speakerHue", "thread-from", "backlogItem", "bq-marker"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js must retain the #302 conversations formatting (missing %q)", marker)
+		}
+	}
+	// speakerHue must normalize like thread identity (case-insensitive, trimmed)
+	// so casing/spacing variants of one speaker share a colour (cubic #308 P2).
+	if !strings.Contains(js, `.trim().toLowerCase()`) {
+		t.Error("speakerHue must normalize the name (trim + lowercase) before hashing")
+	}
+}
+
+// TestThreadMerge locks the session-mirror ↔ CoS-ledger interleave (design §2.4,
+// UI Inc 2): renderThread merges the desk's own session-mirror turn-finals with
+// the relay ledger into one chronological timeline, with the cross-desk identity
+// guard, session-output styling, and the re-announce dedup. There is no JS test
+// runner in this repo, so — like the other asset-content locks — this asserts the
+// merge engine's presence in the served dash.js + css so a regression to
+// ledger-only (or a dropped guard/dedup) fails here.
+func TestThreadMerge(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{
+		"mirrorEntriesForSelected", // guarded read of cache.mirror.entries for the selected desk
+		"threadMirrorMsg",          // session-output turn renderer
+		"threadLedgerMsg",          // relay-line renderer
+		"thread-mirror",            // session-output styling hook
+		"lastThreadKey",            // re-announce / scroll-reset dedup
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js must retain the §2.4 thread-merge engine (missing %q)", marker)
+		}
+	}
+	// The interleave must SORT the two streams (ledger is newest-first, mirror
+	// newest-last) — a merge that forgot to sort would render out of order.
+	if !strings.Contains(js, "items.sort(") {
+		t.Error("renderThread must sort the merged ledger+mirror items chronologically")
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	if !strings.Contains(css, ".thread-mirror") {
+		t.Error("dash.css must style the session-output turn (.thread-mirror)")
+	}
+}
+
+// TestDebugTier locks the session-mirror debug tier (design §2.3 UI half, UI Inc 3):
+// a live info⇄debug toggle reveals each mirror entry's collapsible debug detail
+// (reader-map envelope, mirror note, firewall warn-terms). The payload is always in
+// the ledger, so this is a render toggle — no dormant env gate. As with the other
+// asset-content locks, this asserts the engine's presence in the served assets so a
+// regression (dropping the tier or the toggle) fails here.
+func TestDebugTier(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{
+		"debugBlock",         // per-entry debug renderer
+		"setMirrorVerbosity", // the toggle handler
+		"mirrorVerbosity",    // the detail-level state (also folded into the dedup keys)
+		"thread-debug",       // the collapsible detail element
+		"warn_terms",         // firewall diag surfaced
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js must retain the §2.3 debug-tier engine (missing %q)", marker)
+		}
+	}
+	html := doGet(t, srv, "/").Body.String()
+	if !strings.Contains(html, "mv-btn") || !strings.Contains(html, `data-verbosity="debug"`) {
+		t.Error("index must carry the info⇄debug verbosity toggle (mv-btn / data-verbosity)")
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	if !strings.Contains(css, ".thread-debug") {
+		t.Error("dash.css must style the debug tier (.thread-debug)")
+	}
+	// cubic #309 P3: the mirror-body typography is folded into the shared thread-gist
+	// rule, not duplicated. Assert the combined selector whitespace-insensitively (the
+	// two selectors sit on separate lines in source) so a CSS reformat can't spuriously
+	// fail this — collapse all whitespace, then check the comma-adjacent selector.
+	cssNoWS := strings.Join(strings.Fields(css), "")
+	if !strings.Contains(cssNoWS, ".thread-gist,.thread-mirror-body{") {
+		t.Error("dash.css must share the thread-gist / thread-mirror-body base rule (no duplication — #309 P3)")
 	}
 }
 
