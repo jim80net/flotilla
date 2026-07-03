@@ -171,7 +171,7 @@
     var gated = vis === "awaiting" || vis === "blocked";
     var controls = '<span class="gnode-ctl">' +
       (gated ? '<button class="gnode-respond" type="button" title="Respond to what this needs" aria-label="Respond">&#9888;</button>' : "") +
-      '<button class="gnode-detail" type="button" title="Details" aria-label="Details" tabindex="-1">&#9432;</button>' +
+      '<button class="gnode-detail" type="button" title="Details" aria-label="Details">&#9432;</button>' +
       "</span>";
     return controls +
       '<div class="gnode-eyebrow">' + escapeHtml(n.scope) + owner + "</div>" +
@@ -584,7 +584,12 @@
     nodesEl.addEventListener("keydown", function (e) {
       if (e.key !== "Enter" && e.key !== " ") return;
       var card = e.target.closest(".gnode");
-      if (card) { e.preventDefault(); nodeActivate(card.getAttribute("data-id")); }
+      // Only the article itself deep-links on Enter; a control button (⚠ respond /
+      // ⓘ details) focused inside the card handles its OWN Enter (opens the modal /
+      // drawer) — don't preventDefault it here or the keyboard route to them is lost.
+      if (!card || e.target !== card) return;
+      e.preventDefault();
+      nodeActivate(card.getAttribute("data-id"));
     });
     // Tabbing to a node that's panned off-screen recenters the map on it (the
     // transform equivalent of scroll-into-view — the world can't be scrolled). Only
