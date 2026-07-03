@@ -92,4 +92,3 @@ func TestHandleSessionMirror_EmptyLedger(t *testing.T) {
 		t.Errorf("entries = %v, want empty for missing ledger", doc.Entries)
 	}
 }
-

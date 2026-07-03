@@ -22,17 +22,17 @@ import (
 // (cmd/flotilla/dash.go) resolves these (default paths mirroring `status`) and
 // hands them to NewServer; the server itself does the per-request file I/O.
 type Config struct {
-	RosterPath    string // path to the roster file
-	SnapshotPath  string // detector snapshot (default <roster-dir>/flotilla-detector-state.json)
-	AckPath       string // XO liveness ack file (default <roster-dir>/flotilla-xo-alive)
-	LedgerPath    string // CoS ledger (cfg.CosLedger; "" when the CoS mirror is inert)
-	BacklogPath   string // backlog markdown (--tracker-file; default <roster-dir>/.flotilla-state.md)
-	GoalsPath     string // goals file the Goals view reads (default <roster-dir>/fleet-goals.json)
-	GoalsYAMLPath     string // goals yaml source compiled on load (default <roster-dir>/fleet-goals.yaml)
-	SessionMirrorDir  string // per-agent session-mirror ledgers (default <roster-dir>/session-mirror)
-	Bind              string // listen address (default 127.0.0.1:8787)
-	Repo          string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
-	SecretsPath   string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
+	RosterPath       string // path to the roster file
+	SnapshotPath     string // detector snapshot (default <roster-dir>/flotilla-detector-state.json)
+	AckPath          string // XO liveness ack file (default <roster-dir>/flotilla-xo-alive)
+	LedgerPath       string // CoS ledger (cfg.CosLedger; "" when the CoS mirror is inert)
+	BacklogPath      string // backlog markdown (--tracker-file; default <roster-dir>/.flotilla-state.md)
+	GoalsPath        string // goals file the Goals view reads (default <roster-dir>/fleet-goals.json)
+	GoalsYAMLPath    string // goals yaml source compiled on load (default <roster-dir>/fleet-goals.yaml)
+	SessionMirrorDir string // per-agent session-mirror ledgers (default <roster-dir>/session-mirror)
+	Bind             string // listen address (default 127.0.0.1:8787)
+	Repo             string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
+	SecretsPath      string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
 
 	// Transport is the coordination transport backing the control surface's notify
 	// post (the operator note's destination is a Discord webhook, so this is the
