@@ -375,6 +375,15 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	if !strings.Contains(css, "var(--ctl-scale") || !strings.Contains(css, "@media (hover: none)") {
 		t.Error("dash.css must counter-scale .gnode-ctl and reveal ⓘ on touch (@media hover:none) — #330")
 	}
+	// mobile-QA #330: deliberate-pan gate — a touch-drag scrolls the PAGE through the map
+	// (touch-action:pan-y) until the operator toggles "move map" (pan-active → touch-action
+	// none). Mouse panning is unchanged.
+	if !strings.Contains(js, `e.pointerType === "touch"`) || !strings.Contains(js, "touchPanActive") {
+		t.Error("goals.js must gate touch panning behind a deliberate toggle (#330 nested-scroll trap)")
+	}
+	if !strings.Contains(css, "touch-action: pan-y") || !strings.Contains(css, ".pan-active") {
+		t.Error("dash.css must default the viewport to touch-action:pan-y and reclaim it on .pan-active (#330)")
+	}
 	for _, marker := range []string{"leafCount", "reach(", "nodeW", "RING_GAP"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("goals.js must retain the #324 content-aware org geometry (missing %q)", marker)

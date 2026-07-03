@@ -1090,7 +1090,10 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .goals-graph { position: relative; margin-top: 12px; }
 .goals-graph.hidden { display: none; }
 .goals-viewport {
-  position: relative; overflow: hidden; cursor: grab; touch-action: none;
+  /* touch-action: pan-y lets a vertical touch-drag scroll the PAGE THROUGH the map by
+     default (no nested-scroll trap) — deliberate pan mode (.pan-active) reclaims the
+     gesture for the map. Mouse drag panning is unaffected by touch-action (#330). */
+  position: relative; overflow: hidden; cursor: grab; touch-action: pan-y;
   height: calc(100vh - 320px); min-height: 380px;
   border: 1px solid var(--line); border-radius: var(--r);
   background-color: var(--surface);
@@ -1100,6 +1103,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   background-size: 34px 34px;
 }
 .goals-viewport.grabbing { cursor: grabbing; }
+/* deliberate pan mode (touch): the map reclaims the touch gesture (#330). */
+.goals-viewport.pan-active { touch-action: none; }
 .goals-viewport:focus-visible { outline: 2px solid var(--cyan-dim); outline-offset: -2px; }
 .goals-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
 .goals-edges { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; z-index: 0; }
@@ -1120,6 +1125,11 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 }
 .gzoomctl button:hover { border-color: var(--cyan-dim); color: var(--cyan); }
 .gzoomctl .fit { font-size: .6rem; letter-spacing: .06em; }
+/* "move map" toggle: touch-only (mouse always pans). Wide enough for its label + a
+   comfortable tap target; active state signals the map now owns touch gestures (#330). */
+.gzoomctl .panlock { display: none; width: auto; min-height: 34px; padding: 0 .55rem; font-size: .58rem; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+.gzoomctl .panlock.active { border-color: var(--cyan); color: var(--cyan); background: color-mix(in srgb, var(--cyan) 14%, var(--abyss-2)); }
+@media (hover: none) { .gzoomctl .panlock { display: inline-flex; align-items: center; justify-content: center; } }
 
 /* node card (absolutely positioned on the canvas; JS sets left/top/width) */
 .gnode {
