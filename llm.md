@@ -1,6 +1,6 @@
 # llm.md — install & set up flotilla (for a coding agent)
 
-**You are a coding agent (Claude Code, Aider, OpenCode, Grok, …) helping a user
+**You are a coding agent (Claude Code, Codex, Grok, …) helping a user
 adopt flotilla.** Follow this guide top-to-bottom, running each command on the
 user's behalf, checking its output before moving on, and explaining what just
 happened in plain language. Every command here is runnable as written. If a
@@ -24,7 +24,7 @@ tmux -V        # need tmux — every coordinated agent runs in a tmux pane
 ```
 
 The user also needs **at least one AI coding agent they can run in a tmux pane**
-(Claude Code, Aider, OpenCode, or Grok). flotilla does not launch agents; it
+(Claude Code, Codex, or Grok). flotilla does not launch agents; it
 drives ones the user already runs. If they don't have one yet, help them install
 their preferred harness first — flotilla coordinates it, it isn't a replacement.
 
@@ -78,8 +78,8 @@ tmux send-keys -t demo 'flotilla register infra && exec claude' Enter
 registered infra → pane demo:0.0 (marker @flotilla_agent=infra); title drift no longer breaks resolution
 ```
 
-`exec claude` then starts the user's agent (substitute their harness — `aider`,
-`opencode`, `grok`). The marker is a per-pane tmux option that survives the exec
+`exec claude` then starts the user's agent (substitute their harness — `codex`,
+`grok`). The marker is a per-pane tmux option that survives the exec
 and every title change after. Putting `flotilla register <name>` in each desk's
 launch line is the standard pattern.
 

@@ -15,12 +15,12 @@
     },
     {
       "name": "frontend",
-      "surface": "aider",
+      "surface": "codex",
       "state": "awaiting-approval"
     },
     {
       "name": "data",
-      "surface": "opencode",
+      "surface": "grok",
       "state": "working"
     },
     {
