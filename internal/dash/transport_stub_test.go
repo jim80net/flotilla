@@ -21,6 +21,9 @@ func (stubTransport) Subscribe(context.Context, []transport.Destination, transpo
 }
 func (stubTransport) Destinations([]string) []transport.Destination    { return nil }
 func (stubTransport) Post(transport.Destination, string, string) error { return nil }
+func (stubTransport) PostWithAttachments(transport.Destination, string, string, []string) error {
+	return nil
+}
 func (stubTransport) ResolveDestination(string, string) (transport.Destination, string, bool) {
 	return nil, "", false
 }

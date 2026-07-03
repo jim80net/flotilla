@@ -15,6 +15,9 @@ func (f *fakeTransport) Subscribe(context.Context, []Destination, MessageHandler
 }
 func (f *fakeTransport) Destinations([]string) []Destination    { return nil }
 func (f *fakeTransport) Post(Destination, string, string) error { return nil }
+func (f *fakeTransport) PostWithAttachments(Destination, string, string, []string) error {
+	return nil
+}
 func (f *fakeTransport) ResolveDestination(string, string) (Destination, string, bool) {
 	return nil, "", false
 }
