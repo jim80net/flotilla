@@ -6,7 +6,7 @@ Operator feedback (2026-07-03): the Goals map should mirror **federation org str
 (hub-and-spoke with COS at center → flotilla XOs → desks), not only a purpose hierarchy.
 Interaction gaps: "Waiting on you" needs a modal brief + reply input; goal nodes should
 click through to Conversations; drive queue needs formatting; conversation thread needs
-turn-by-turn speaker color-coding (pairs with session-mirror Inc 2).
+turn-by-turn speaker color-coding (pairs with session-mirror Increment 2).
 
 Vocabulary: top-level **flotilla** (not "fleet goal"); mid-level **desk** (not
 "project/workstream"). **Org containers map tightly to goals** because flotillas/desks
