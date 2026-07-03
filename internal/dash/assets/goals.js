@@ -330,6 +330,7 @@
     });
     vp.addEventListener("pointerup", endDrag);
     vp.addEventListener("pointercancel", endDrag);
+    vp.addEventListener("lostpointercapture", endDrag); // capture yanked without pointerup → don't strand drag
 
     var zin = q("goals-zin"), zout = q("goals-zout"), zfit = q("goals-zfit");
     if (zin) zin.onclick = function () { view.scale = Math.min(2.2, view.scale * 1.18); applyTransform(); };

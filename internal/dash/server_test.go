@@ -240,7 +240,7 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	}
 	// The canvas DOM the engine binds to: a pan/zoom viewport → transformed world →
 	// (edges, tier labels, nodes) + zoom controls.
-	for _, id := range []string{"goals-viewport", "goals-world", "goals-nodes", "goals-edges", "goals-zin", "goals-zfit"} {
+	for _, id := range []string{"goals-viewport", "goals-world", "goals-nodes", "goals-edges", "goals-tierlabels", "goals-zin", "goals-zout", "goals-zfit"} {
 		if !strings.Contains(body, id) {
 			t.Errorf("index must contain the goals canvas element #%s", id)
 		}

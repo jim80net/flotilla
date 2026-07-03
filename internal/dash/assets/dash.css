@@ -858,7 +858,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .goals-graph { position: relative; margin-top: 12px; }
 .goals-graph.hidden { display: none; }
 .goals-viewport {
-  position: relative; overflow: hidden; cursor: grab;
+  position: relative; overflow: hidden; cursor: grab; touch-action: none;
   height: calc(100vh - 320px); min-height: 380px;
   border: 1px solid var(--line); border-radius: var(--r); background:
     linear-gradient(rgba(29, 43, 62, .16) 1px, transparent 1px) 0 0 / 34px 34px,
