@@ -250,6 +250,62 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.08; 
 .card h3 { font-size: 1.18rem; margin-bottom: .6rem; }
 .card p { font-size: .92rem; margin: 0; }
 
+/* positioning — altitude + pull-quote */
+.band-lede { font-size: 1.02rem; color: var(--ink-2); max-width: 42em; margin: .9rem 0 0; }
+.pull-quote {
+  margin: 0 0 2.2rem; padding: 1.5rem 1.6rem 1.4rem;
+  border-left: 3px solid var(--cyan);
+  background: linear-gradient(90deg, rgba(79,227,208,.07), transparent 68%);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+}
+.pull-quote p { margin: 0; font-size: 1.05rem; color: var(--ink); line-height: 1.65; }
+.pull-quote em { color: var(--cyan); font-style: normal; font-weight: 600; }
+.pull-aside {
+  display: block; margin-top: .75rem; font-size: .82rem;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3);
+}
+.altitude-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.1rem; margin-bottom: 1.6rem;
+}
+@media (max-width: 900px) { .altitude-grid { grid-template-columns: 1fr; } }
+.altitude-card {
+  padding: 1.35rem 1.3rem; border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--abyss-2);
+}
+.altitude-card.highlight {
+  border-color: rgba(79,227,208,.35);
+  background: linear-gradient(165deg, rgba(79,227,208,.08), var(--abyss-2));
+  box-shadow: 0 18px 50px -28px rgba(79,227,208,.35);
+}
+.altitude-tag {
+  font-size: .66rem; letter-spacing: .18em; text-transform: uppercase;
+  color: var(--ink-3); margin-bottom: .55rem;
+}
+.altitude-card.highlight .altitude-tag { color: var(--cyan-dim); }
+.altitude-card h3 { font-size: 1.12rem; margin-bottom: .35rem; }
+.altitude-examples { font-size: .76rem; color: var(--cyan-dim); margin: 0 0 .75rem; }
+.altitude-card p { font-size: .88rem; margin: 0; }
+.diff-strip {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1.1rem; margin-bottom: 1.2rem;
+}
+@media (max-width: 720px) { .diff-strip { grid-template-columns: 1fr; } }
+.diff-col {
+  padding: 1.25rem 1.3rem; border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--abyss-2);
+}
+.diff-col.flotilla-col { border-color: rgba(79,227,208,.28); }
+.diff-col h4 {
+  font-family: var(--display); font-size: .95rem; color: var(--ink);
+  margin: 0 0 .85rem;
+}
+.diff-col ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .55rem; }
+.diff-col li {
+  font-size: .86rem; padding-left: 1rem; position: relative;
+}
+.diff-col li::before { content: "›"; position: absolute; left: 0; color: var(--ink-3); }
+.diff-col.flotilla-col li::before { color: var(--cyan-dim); }
+.positioning-foot { font-size: .82rem; color: var(--ink-3); margin: 0; }
+
 /* how — grid */
 .how-grid { display: grid; grid-template-columns: .9fr 1.1fr; gap: 2.5rem; align-items: start; }
 @media (max-width: 920px) { .how-grid { grid-template-columns: 1fr; gap: 2rem; } }

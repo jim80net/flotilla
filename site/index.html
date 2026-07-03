@@ -56,6 +56,7 @@
     </a>
     <nav class="nav-links">
       <a href="#what">what</a>
+      <a href="#positioning">why flotilla</a>
       <a href="#how">how</a>
       <a href="#arch">architecture</a>
       <a href="#status">live status</a>
@@ -177,6 +178,85 @@
           </p>
         </article>
       </div>
+    </section>
+
+    <!-- ─────────────────── POSITIONING / ALTITUDE ─────────────────── -->
+    <section class="band" id="positioning">
+      <div class="band-head">
+        <span class="kicker">01a — a different layer</span>
+        <h2>Frameworks build agents. flotilla runs your fleet.</h2>
+        <p class="band-lede">
+          Evaluators often bucket flotilla with agent orchestration platforms &mdash;
+          CrewAI, LangGraph, AutoGen. They solve a different job at a different altitude.
+        </p>
+      </div>
+
+      <blockquote class="pull-quote">
+        <p>
+          Agent frameworks help you <em>build</em> multi-agent software. flotilla helps you
+          <em>run</em> a fleet of coding agents you already trust &mdash; from a chat channel,
+          with confirmed delivery and a durable record of who told whom what.
+          <span class="pull-aside">Different job, different layer.</span>
+        </p>
+      </blockquote>
+
+      <div class="altitude-grid">
+        <article class="altitude-card">
+          <div class="altitude-tag">application layer</div>
+          <h3>Agent platforms</h3>
+          <p class="altitude-examples">CrewAI &middot; LangGraph &middot; AutoGen</p>
+          <p>
+            In-process SDKs for composing autonomous multi-agent <em>applications</em>.
+            You wire roles, tools, and handoffs in code; the operator is usually the developer
+            shipping the app.
+          </p>
+        </article>
+        <article class="altitude-card">
+          <div class="altitude-tag">runtime layer</div>
+          <h3>Terminal multiplexers</h3>
+          <p class="altitude-examples">herdr &middot; tmux &middot; Zellij</p>
+          <p>
+            Agent-aware terminals that make panes visible and persistent. They watch the
+            herd; they do not broker delegation or mirror an audit trail to your phone.
+          </p>
+        </article>
+        <article class="altitude-card highlight">
+          <div class="altitude-tag">operations layer</div>
+          <h3>flotilla</h3>
+          <p class="altitude-examples">chief of staff &middot; hub-and-spoke &middot; chat-first</p>
+          <p>
+            Drop-in coordination over harnesses you already run. One XO routes work to desks
+            in live sessions, confirms delivery, and mirrors every instruction and reply to a
+            channel you read from anywhere.
+          </p>
+        </article>
+      </div>
+
+      <div class="diff-strip">
+        <div class="diff-col">
+          <h4>What platforms optimize for</h4>
+          <ul>
+            <li>Autonomous throughput inside your codebase</li>
+            <li>Tool graphs and checkpointed workflows</li>
+            <li>Hosted observability for agent apps</li>
+          </ul>
+        </div>
+        <div class="diff-col flotilla-col">
+          <h4>What flotilla optimizes for</h4>
+          <ul>
+            <li>Executive span of control over a coding fleet</li>
+            <li>Confirmed delivery to live harness sessions</li>
+            <li>Phone-readable audit trail as the primary interface</li>
+          </ul>
+        </div>
+      </div>
+
+      <p class="positioning-foot">
+        Full analysis:
+        <a href="https://github.com/jim80net/flotilla/blob/main/docs/competitive/agent-platforms-vs-flotilla.md" target="_blank" rel="noopener">agent platforms vs flotilla</a>
+        &middot;
+        <a href="https://github.com/jim80net/flotilla/blob/main/docs/competitive/herdr-vs-flotilla.md" target="_blank" rel="noopener">herdr vs flotilla</a>
+      </p>
     </section>
 
     <!-- ─────────────────────── HOW IT WORKS ─────────────────────── -->
