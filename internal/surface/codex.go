@@ -177,28 +177,9 @@ func (codex) HandoffPath(cwd, token string) string {
 }
 
 func (codex) HandoffTurn(designatedPath string) string {
-	return "You are being RECYCLED by flotilla (an automated, REMOTE-DRIVEN chapter close — " +
-		"no human is at this pane to answer prompts). Do exactly this, then stop:\n" +
-		"1. Write a complete handoff (objective, completed work, current state, remaining work, " +
-		"gotchas — enough for a fresh session to resume cold) to this EXACT path: " + designatedPath + "\n" +
-		"2. Do NOT commit the handoff to git — it MUST remain an untracked file on disk (the path is " +
-		"gitignored; flotilla detects durability from the file itself, not version control). Do NOT run " +
-		"`git add` or `git commit` on it.\n" +
-		"3. Do NOT ask me to confirm or review, do NOT ask \"is anything missing\" — just write and stop. " +
-		"flotilla will close and relaunch this desk once the file lands on disk."
+	return PortableMarkdownHandoffTurn(designatedPath)
 }
 
 func (codex) TakeoverTurn(designatedPath string) string {
-	return "You are a freshly-recycled flotilla desk with a clean context window, and you are " +
-		"REMOTE-DRIVEN (a remote XO drives you over the relay; no human is at this pane). " +
-		"Do this in order:\n" +
-		"1. Read this handoff in full and take over per it: " + designatedPath + "\n" +
-		"2. Then, as your first action after reading, DELETE the handoff file from disk so " +
-		"deployment-specific content cannot linger in the worktree (it is gitignored and must never " +
-		"enter version control; you have read it now): `rm -f \"" + designatedPath + "\"` (the -f avoids " +
-		"a spurious failure if the file is already gone; the quotes guard a path with spaces).\n" +
-		"3. Then BEGIN WORK IMMEDIATELY on the handoff's remaining work — do NOT ask \"shall I start?\" or " +
-		"wait for confirmation. If you genuinely need a clarification, surface it via a flotilla MESSAGE " +
-		"(e.g. `flotilla notify --from <your-name> \"...\"`), NEVER an in-pane interactive prompt — a " +
-		"remote XO cannot answer an in-pane menu over the relay (keystrokes navigate it, they don't select)."
+	return PortableMarkdownTakeoverTurn(designatedPath)
 }

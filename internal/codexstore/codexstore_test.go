@@ -45,6 +45,20 @@ func TestLatestResultResponseItem(t *testing.T) {
 	}
 }
 
+func TestReplyAfterResponseItem(t *testing.T) {
+	home := t.TempDir()
+	cwd := "/srv/fleet/xo"
+	meta := `{"timestamp":"2026-07-02T12:00:00Z","type":"session_meta","payload":{"cwd":"` + cwd + `"}}`
+	user := `{"type":"event_msg","payload":{"type":"user_message","message":"operator ping"}}`
+	item := `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"XO reply via response_item"}]}}`
+	writeRollout(t, home, cwd, meta+"\n"+user+"\n"+item+"\n")
+
+	got, found, err := ReplyAfter(home, cwd, "operator ping")
+	if err != nil || !found || got != "XO reply via response_item" {
+		t.Errorf("ReplyAfter = (%q, %v, %v), want response_item assistant reply", got, found, err)
+	}
+}
+
 func TestReplyAfter(t *testing.T) {
 	home := t.TempDir()
 	cwd := "/srv/fleet/xo"

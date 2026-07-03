@@ -56,8 +56,10 @@ Rollout JSONL format (from openai/codex `recorder_tests.rs`):
 - `{"type":"event_msg","payload":{"type":"agent_message","message":"..."}}`
 - `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"..."}]}}`
 
-Resolution: glob `~/.codex/sessions/**/rollout-*.jsonl`, match `session_meta.payload.cwd` to pane
-cwd, pick latest rollout by embedded timestamp. `LatestResult` / `ReplyAfter` mirror `grokstore`.
+Resolution: glob `~/.codex/sessions/*/*/*/rollout-*.jsonl` (Go `filepath.Glob` — no `**`
+globstar; four single-segment wildcards for YYYY/MM/DD), match `session_meta.payload.cwd` to
+pane cwd, pick latest rollout by filename timestamp. `LatestResult` / `ReplyAfter` mirror
+`grokstore`.
 
 ## 6. RecycleBridge
 

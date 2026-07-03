@@ -200,6 +200,16 @@ func TestCmdWorkspaceInitCodexScaffoldsAgentsAndRules(t *testing.T) {
 	}
 }
 
+func TestScaffoldCodexDeskRulesRejectsExistingDirectory(t *testing.T) {
+	worktree := filepath.Join(t.TempDir(), "desk")
+	if err := os.MkdirAll(filepath.Join(worktree, ".codex", "rules", "flotilla-desk.rules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := scaffoldCodexDeskRules(worktree); err == nil {
+		t.Fatal("want error when flotilla-desk.rules path is a directory")
+	}
+}
+
 func TestCmdWorkspaceInitGrokScaffoldsAgentsMdInWorktree(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)

@@ -279,7 +279,10 @@ func scaffoldCodexDeskRules(worktreeAbs string) error {
 		return fmt.Errorf("create codex rules dir: %w", err)
 	}
 	path := filepath.Join(rulesDir, "flotilla-desk.rules")
-	if _, statErr := os.Stat(path); statErr == nil {
+	if info, statErr := os.Stat(path); statErr == nil {
+		if info.IsDir() {
+			return fmt.Errorf("codex rules %q exists but is a directory — remove it and re-run workspace init", path)
+		}
 		fmt.Printf("  kept    %s\n", path)
 		return nil
 	} else if !os.IsNotExist(statErr) {

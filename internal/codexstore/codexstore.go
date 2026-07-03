@@ -131,14 +131,9 @@ func lastAgentText(path string) (string, error) {
 	sc.Buffer(make([]byte, 0, 64<<10), maxLine)
 	var last string
 	found := false
-	sawUndecodable := false
 	for sc.Scan() {
 		t, ok := extractAgentText(sc.Bytes())
 		if !ok {
-			continue
-		}
-		if t == "" {
-			sawUndecodable = true
 			continue
 		}
 		last = t
@@ -148,9 +143,6 @@ func lastAgentText(path string) (string, error) {
 		return "", fmt.Errorf("codex store: scan rollout: %w", err)
 	}
 	if !found {
-		if sawUndecodable {
-			return "", fmt.Errorf("codex store: rollout %s has agent turn(s) with unrecognized content shape", path)
-		}
 		return "", fmt.Errorf("codex store: no agent turn yet in %s", path)
 	}
 	return last, nil
@@ -220,29 +212,36 @@ func replyAfterUserMsg(path, operatorMsg string) (text string, found bool, err e
 	sc.Buffer(make([]byte, 0, 64<<10), maxLine)
 	armed := false
 	for sc.Scan() {
+		raw := sc.Bytes()
 		var line rolloutLine
-		if json.Unmarshal(sc.Bytes(), &line) != nil {
+		if json.Unmarshal(raw, &line) != nil {
 			continue
 		}
-		if line.Type != "event_msg" {
-			continue
-		}
-		var payload eventMsgPayload
-		if json.Unmarshal(line.Payload, &payload) != nil {
-			continue
-		}
-		switch payload.Type {
-		case "user_message":
-			switch {
-			case want != "" && normMsg(payload.Message) == want:
-				armed = true
-				text, found = "", false
-			case armed && strings.TrimSpace(payload.Message) != "":
-				armed = false
+		switch line.Type {
+		case "event_msg":
+			var payload eventMsgPayload
+			if json.Unmarshal(line.Payload, &payload) != nil {
+				continue
 			}
-		case "agent_message":
-			if armed && strings.TrimSpace(payload.Message) != "" {
-				text, found = payload.Message, true
+			switch payload.Type {
+			case "user_message":
+				switch {
+				case want != "" && normMsg(payload.Message) == want:
+					armed = true
+					text, found = "", false
+				case armed && strings.TrimSpace(payload.Message) != "":
+					armed = false
+				}
+			case "agent_message":
+				if armed && strings.TrimSpace(payload.Message) != "" {
+					text, found = payload.Message, true
+				}
+			}
+		case "response_item":
+			if armed {
+				if t, ok := extractAgentText(raw); ok {
+					text, found = t, true
+				}
 			}
 		}
 	}
