@@ -37,6 +37,7 @@
   var selectedId = null; // node whose detail drawer is open (transient state: on the article)
   var hoveredId = null;  // node currently hovered (re-applied after a render)
   var nodesWired = false;
+  var kbdNav = false;    // true when focus is moving by keyboard (Tab) — gates focus-recenter
 
   /* ── tier geometry (ported from the prototype: TIER_X=[40,470,900]) ─────── */
   // Columns are derived from depth so a tree deeper than the canonical 3 tiers
@@ -93,13 +94,16 @@
   // region), but ONLY when the summary changes — so a live-status tick that moved a
   // goal into "awaiting you" is announced, without chattering on every no-op refresh.
   var lastLive = "";
-  function updateLive(c) {
-    var msg = (c.awaiting || 0) + " awaiting you, " + (c.in_flight || 0) + " in flight, " +
-      (c.realized || 0) + " realized, of " + (c.total || 0) + " fleet goals.";
+  function announce(msg) {
     if (msg === lastLive) return;
     lastLive = msg;
     var region = q("goals-live");
     if (region) region.textContent = msg;
+  }
+  function updateLive(c) {
+    // "goal nodes" (not "fleet goals") — total counts all nodes, not just the fleet tier.
+    announce((c.awaiting || 0) + " awaiting you, " + (c.in_flight || 0) + " in flight, " +
+      (c.realized || 0) + " realized, of " + (c.total || 0) + " goal nodes.");
   }
 
   function renderLegend() {
@@ -518,13 +522,21 @@
       if (card) { e.preventDefault(); openDrawer(card.getAttribute("data-id")); }
     });
     // Tabbing to a node that's panned off-screen recenters the map on it (the
-    // transform equivalent of scroll-into-view — the world can't be scrolled).
+    // transform equivalent of scroll-into-view — the world can't be scrolled). Only
+    // on KEYBOARD focus: a mouse click (or a programmatic restoreFocus after a
+    // rebuild) must NOT yank the map — that would break the #283 "operator's pan/zoom
+    // owns framing" contract.
     nodesEl.addEventListener("focusin", function (e) {
+      if (!kbdNav) return;
       var card = e.target.closest(".gnode");
       if (!card) return;
       var n = nodeById[card.getAttribute("data-id")];
       if (n && !nodeVisible(n)) recenterOn(n);
     });
+    // Track focus modality: Tab means keyboard navigation; any pointer press means
+    // mouse/touch (so its focus won't recenter).
+    document.addEventListener("keydown", function (e) { if (e.key === "Tab") kbdNav = true; }, true);
+    document.addEventListener("pointerdown", function () { kbdNav = false; }, true);
     nodesEl.addEventListener("mouseover", function (e) {
       var card = e.target.closest(".gnode");
       if (!card) return;
@@ -589,6 +601,7 @@
       empty.textContent = doc.error
         ? ("Goals file could not be loaded: " + doc.error)
         : (doc.message || "No goals file configured.");
+      announce(empty.textContent); // mirror the state to the screen reader, not "0 of 0"
       lastSig = sig; // a complete (synchronous) render
       return;
     }
@@ -598,6 +611,7 @@
       graph.classList.add("hidden");
       empty.classList.remove("hidden");
       empty.textContent = "No goals defined yet.";
+      announce(empty.textContent);
       lastSig = sig; // a complete (synchronous) render
       return;
     }
@@ -742,6 +756,7 @@
     // focusable node treeitems inside — the map is one tab stop, its nodes another.
     vp.addEventListener("keydown", function (e) {
       if (e.target !== vp) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return; // never swallow native browser zoom (Ctrl/Cmd +/-/0)
       var step = 60, handled = true;
       switch (e.key) {
         case "ArrowLeft": view.tx += step; break;
@@ -758,20 +773,22 @@
   }
 
   // nodeVisible / recenterOn: a node moved off-screen by pan/zoom can't be scrolled
-  // into view (the world is transform-positioned, not scrolled) — so when keyboard
-  // focus lands on an off-screen node, recenter the world on it (and ensure a
-  // readable minimum zoom), the transform equivalent of scroll-into-view.
+  // into view (the world is transform-positioned, not scrolled) — so when KEYBOARD
+  // focus lands on an off-screen node, recenter the world on it, the transform
+  // equivalent of scroll-into-view. Visibility is judged on the node's CENTER (not
+  // full containment), so a node flush against an edge or taller than the viewport
+  // doesn't trigger a needless jump. The zoom is left untouched — the operator's
+  // chosen scale is theirs to keep (WCAG change-on-request).
   function nodeVisible(n) {
     var vp = q("goals-viewport");
     if (!vp || !n) return true;
-    var left = n._x * view.scale + view.tx, top = n._y * view.scale + view.ty;
-    var right = left + n._w * view.scale, bot = top + heightOf(n) * view.scale;
-    return left >= 0 && top >= 0 && right <= vp.clientWidth && bot <= vp.clientHeight;
+    var cx = (n._x + n._w / 2) * view.scale + view.tx;
+    var cy = (n._y + heightOf(n) / 2) * view.scale + view.ty;
+    return cx >= 0 && cx <= vp.clientWidth && cy >= 0 && cy <= vp.clientHeight;
   }
   function recenterOn(n) {
     var vp = q("goals-viewport");
     if (!vp || !n) return;
-    if (view.scale < 0.6) view.scale = 0.8; // a focused node must be legible
     view.tx = vp.clientWidth / 2 - (n._x + n._w / 2) * view.scale;
     view.ty = vp.clientHeight / 2 - (n._y + heightOf(n) / 2) * view.scale;
     applyTransform();

@@ -901,9 +901,10 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   transition: border-color .2s var(--ease), box-shadow .2s var(--ease), transform .15s var(--ease);
 }
 .gnode:hover { transform: translateY(-2px); border-color: var(--cyan-dim); }
-/* Focus ring: outline scales with the transformed world, so pair it with an
-   unscaled box-shadow halo that stays visible even when zoomed out. */
-.gnode:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; box-shadow: 0 0 0 3px rgba(79, 227, 208, .35); }
+/* Focus ring. Note the outline is inside the transformed world so it scales with
+   zoom; the focus-recenter (keyboard) brings a focused node to centre so the ring
+   is on-screen, and !important keeps it winning over the state-* box-shadows. */
+.gnode:focus-visible { outline: 2px solid var(--cyan) !important; outline-offset: 2px; }
 .gnode-eyebrow { font-size: .6rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); display: flex; gap: 8px; }
 .gnode-owner { color: var(--cyan-dim); }
 .gnode-title { font-family: var(--display); font-weight: 600; color: var(--ink); line-height: 1.12; font-size: 1.02rem; margin-top: 2px; text-wrap: balance; }
@@ -991,8 +992,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 /* "what this is" help — a hovertext tooltip, not a persistent panel (feedback #1) */
 .ghelp-wrap { position: relative; display: inline-block; }
 .ghelp {
-  width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line);
-  background: var(--abyss-2); color: var(--ink-3); font-size: .74rem; line-height: 1; cursor: help;
+  width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line);
+  background: var(--abyss-2); color: var(--ink-3); font-size: .76rem; line-height: 1; cursor: help;
   font-family: var(--mono); vertical-align: middle; padding: 0;
   display: inline-flex; align-items: center; justify-content: center;
 }
