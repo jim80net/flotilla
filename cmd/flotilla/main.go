@@ -122,6 +122,7 @@ flags for 'send':
                     the command line — avoids shell quoting of multi-line bodies
   --roster <path>   roster config (default ./flotilla.json or $FLOTILLA_ROSTER)
   --secrets <path>  secrets env file (default $FLOTILLA_SECRETS)
+  --attach <path>   attach files to the audit mirror post when mirroring (repeatable)
   --mirror          force-enable the Discord audit mirror for this send
   --no-mirror       force-disable it (--mirror and --no-mirror are mutually exclusive)
 
@@ -136,6 +137,8 @@ flags for 'notify':
   --from <name>     the agent whose webhook the message is posted under
                     (default $FLOTILLA_SELF)
   --file <path>     read the message body from a file ('-' for stdin)
+  --attach <path>   attach a file to the Discord message (repeatable; not the
+                    message body — use --file for that)
   --secrets <path>  secrets env file (default $FLOTILLA_SECRETS)
   --chunk           split an over-limit body into sequential Discord messages
                     (paragraph boundaries, (i/N) prefixes; used by the XO mirror hook)
@@ -146,7 +149,9 @@ inject into any tmux pane. Use it when an agent (typically the XO) wants to
 reach the operator — as opposed to 'send', which wakes another agent's pane and
 mirrors the wake to the audit channel. Without --chunk the message must be ≤ 2000
 characters (Discord's hard limit); a longer body is rejected (nothing is posted).
-With --chunk the full body is delivered across multiple messages.
+With --chunk the full body is delivered across multiple messages. --attach delivers
+files as Discord attachments (multipart webhook POST); oversize or unreadable paths
+fail closed (nothing is posted).
 
 flags for 'speak':
   --file <path>     read the spoken text from a file ('-' for stdin)
@@ -289,6 +294,8 @@ func cmdSend(args []string) error {
 	secretsPath := fs.String("secrets", os.Getenv("FLOTILLA_SECRETS"), "secrets env file path")
 	noMirror := fs.Bool("no-mirror", false, "force-skip the Discord audit mirror")
 	doMirror := fs.Bool("mirror", false, "force-enable the Discord audit mirror (overrides a default-off roster)")
+	var attachPaths attachPathsFlag
+	fs.Var(&attachPaths, "attach", "attach a file to the audit mirror Discord post (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -395,7 +402,7 @@ func cmdSend(args []string) error {
 	if n := len([]rune(message)); runeCap > 0 && n > runeCap {
 		fmt.Fprintf(os.Stderr, "flotilla: note — message is %d chars; the audit copy is truncated to %d (the full message WAS delivered)\n", n, runeCap)
 	}
-	if err := mirror(*secretsPath, *from, agentName, message); err != nil {
+	if err := mirror(*secretsPath, *from, agentName, message, attachPaths); err != nil {
 		fmt.Fprintln(os.Stderr, "flotilla: WARNING — audit mirror skipped (message WAS delivered): "+err.Error())
 	}
 	return nil
@@ -413,8 +420,13 @@ func cmdNotify(args []string) error {
 	secretsPath := fs.String("secrets", os.Getenv("FLOTILLA_SECRETS"), "secrets env file path")
 	rosterPath := fs.String("roster", rosterDefault(), "roster config path (for the CoS context-mirror; optional)")
 	chunk := fs.Bool("chunk", false, "split an over-limit body into sequential Discord messages")
+	var attachPaths attachPathsFlag
+	fs.Var(&attachPaths, "attach", "attach a file to the Discord message (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *chunk && len(attachPaths) > 0 {
+		return fmt.Errorf("--chunk and --attach are mutually exclusive")
 	}
 	if *from == "" {
 		return fmt.Errorf("--from is required (or set $FLOTILLA_SELF)")
@@ -436,11 +448,17 @@ func cmdNotify(args []string) error {
 			return fmt.Errorf("--file - requires piped stdin, but stdin is a terminal (nothing piped)")
 		}
 	}
-	message, err := resolveMessage(*file, rest, os.Stdin)
-	if err != nil {
-		return err
+	var message string
+	if *file != "" || len(rest) > 0 {
+		var err error
+		message, err = resolveMessage(*file, rest, os.Stdin)
+		if err != nil {
+			return err
+		}
+	} else if len(attachPaths) == 0 {
+		return fmt.Errorf("no message: provide text, --file <path>, or at least one --attach")
 	}
-	if strings.TrimSpace(message) == "" {
+	if strings.TrimSpace(message) == "" && len(attachPaths) == 0 {
 		return fmt.Errorf("message is empty")
 	}
 	// Without --chunk, reject an over-length body cleanly (nothing is posted).
@@ -506,8 +524,10 @@ func cmdNotify(args []string) error {
 		} else {
 			fmt.Printf("notified operator as %s\n", *from)
 		}
-	} else if err := tr.Post(dest, *from, message); err != nil {
+	} else if err := postOutbound(tr, dest, *from, message, attachPaths); err != nil {
 		return err
+	} else if len(attachPaths) > 0 {
+		fmt.Printf("notified operator as %s (%d attachment(s))\n", *from, len(attachPaths))
 	} else {
 		fmt.Printf("notified operator as %s\n", *from)
 	}
@@ -655,7 +675,7 @@ func shouldMirror(noMirror, doMirror, rosterDefault bool) bool {
 
 // mirror posts the delivered instruction to the audit channel under the
 // sender's webhook identity. Errors are returned for the caller to warn on.
-func mirror(secretsPath, from, agentName, message string) error {
+func mirror(secretsPath, from, agentName, message string, attachPaths []string) error {
 	if secretsPath == "" {
 		return fmt.Errorf("secrets unset (set --secrets/$FLOTILLA_SECRETS, or pass --no-mirror)")
 	}
@@ -671,7 +691,8 @@ func mirror(secretsPath, from, agentName, message string) error {
 	if err != nil {
 		return err
 	}
-	return tr.Post(transport.NewWebhookDestination(hook), from, fmt.Sprintf("→ %s: %s", agentName, message))
+	body := fmt.Sprintf("→ %s: %s", agentName, message)
+	return postOutbound(tr, transport.NewWebhookDestination(hook), from, body, attachPaths)
 }
 
 // outboundTransport constructs the OUTBOUND coordination transport for a one-shot CLI

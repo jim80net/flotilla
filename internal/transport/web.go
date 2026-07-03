@@ -172,6 +172,10 @@ func (t *webTransport) Post(dest Destination, _, _ string) error {
 	return fmt.Errorf("web transport: Post is unsupported — the web medium owns only inbound resolution (its only outbound, the notify, is a Discord post by the discord transport); got %T", dest)
 }
 
+func (t *webTransport) PostWithAttachments(dest Destination, _, _ string, _ []string) error {
+	return fmt.Errorf("web transport: PostWithAttachments is unsupported — file attachments post via the discord transport; got %T", dest)
+}
+
 // ResolveDestination maps a roster-wide address to an INBOUND pane-delivery target.
 // It resolves the agent name through the ONE shared roster.ResolveTarget (so the
 // dash control library and the web transport cannot drift — transport spec "The
