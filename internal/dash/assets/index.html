@@ -112,20 +112,20 @@
         <div>
           <h2>Fleet goals <span class="muted goals-sub">purpose hierarchy — desks roll up to fleet aims</span>
             <span class="ghelp-wrap">
-              <button id="goals-help" class="ghelp" type="button" aria-label="What is this view?">?</button>
-              <span class="ghelp-tip" role="tooltip">The fleet's purpose hierarchy: <b>fleet goals</b>, the <b>workstreams</b> serving them, and the <b>tasks &amp; desks</b> doing the work. Colour is live status — green realized, cyan in flight, amber awaiting you, red blocked, ghosted aspirational. Drag to pan, scroll to zoom, click a node for detail.</span>
+              <button id="goals-help" class="ghelp" type="button" aria-label="What is this view?" aria-describedby="goals-help-tip" aria-expanded="false">?</button>
+              <span id="goals-help-tip" class="ghelp-tip" role="tooltip">The fleet's purpose hierarchy: <b>fleet goals</b>, the <b>workstreams</b> serving them, and the <b>tasks &amp; desks</b> doing the work. Colour is live status — green realized, cyan in flight, amber awaiting you, red blocked, ghosted aspirational. Drag to pan, scroll to zoom, click a node for detail.</span>
             </span>
           </h2>
           <p class="panel-desc">Read-only · goal structure from <code>fleet-goals.json</code> · desk &amp; backlog status live from the fleet board; issues shown linked</p>
         </div>
         <div class="goals-legend" id="goals-legend" aria-hidden="true"></div>
       </div>
-      <div id="goals-graph" class="goals-graph" role="tree" aria-label="Goal hierarchy">
+      <div id="goals-graph" class="goals-graph">
         <div id="goals-viewport" class="goals-viewport">
           <div id="goals-world" class="goals-world">
             <svg class="goals-edges" id="goals-edges" aria-hidden="true"></svg>
             <div id="goals-tierlabels" class="goals-tierlabels" aria-hidden="true"></div>
-            <div id="goals-nodes" class="goals-nodes"></div>
+            <div id="goals-nodes" class="goals-nodes" role="tree" aria-label="Goal hierarchy"></div>
           </div>
           <div class="gzoomctl" role="toolbar" aria-label="Zoom controls">
             <button id="goals-zin" type="button" title="Zoom in" aria-label="Zoom in">+</button>
@@ -133,7 +133,7 @@
             <button id="goals-zfit" type="button" class="fit" title="Fit whole map" aria-label="Fit whole map">FIT</button>
           </div>
         </div>
-        <aside id="goals-drawer" class="goals-drawer" aria-hidden="true" aria-label="Goal detail">
+        <aside id="goals-drawer" class="goals-drawer" role="dialog" aria-modal="false" aria-hidden="true" aria-label="Goal detail">
           <button id="goals-drawer-close" class="gd-close" type="button" aria-label="Close detail">&times;</button>
           <div class="gd-head">
             <div id="goals-drawer-eyebrow" class="gd-eyebrow"></div>

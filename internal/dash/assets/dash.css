@@ -982,14 +982,15 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 }
 .ghelp:hover, .ghelp:focus-visible { border-color: var(--cyan-dim); color: var(--cyan); }
 .ghelp-tip {
-  position: absolute; left: 0; top: calc(100% + 8px); z-index: 30; width: 320px;
+  position: absolute; left: 0; top: calc(100% + 8px); z-index: 30; width: 320px; max-width: calc(100vw - 40px);
   background: rgba(10, 16, 25, .96); border: 1px solid var(--cyan-dim); border-radius: var(--r-sm);
   padding: 10px 12px; font-size: .74rem; line-height: 1.42; color: var(--ink-2); font-weight: 400;
   letter-spacing: 0; text-transform: none; box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .7);
   opacity: 0; visibility: hidden; transform: translateY(-3px); transition: opacity .16s var(--ease), transform .16s var(--ease), visibility .16s;
 }
 .ghelp-tip b { color: var(--ink); font-weight: 500; }
-.ghelp:hover + .ghelp-tip, .ghelp:focus-visible + .ghelp-tip, .ghelp-wrap:hover .ghelp-tip {
+/* shown on hover/focus AND on click (touch has no hover) via aria-expanded */
+.ghelp:hover + .ghelp-tip, .ghelp:focus-visible + .ghelp-tip, .ghelp[aria-expanded="true"] + .ghelp-tip, .ghelp-wrap:hover .ghelp-tip {
   opacity: 1; visibility: visible; transform: none;
 }
 
@@ -1012,6 +1013,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gd-title { font-family: var(--display); font-weight: 600; font-size: 1.32rem; color: var(--ink); line-height: 1.12; margin-top: 3px; padding-right: 30px; }
 .gd-pills { display: flex; gap: 8px; margin-top: 9px; flex-wrap: wrap; align-items: center; }
 .gd-owner { font-size: .68rem; color: var(--cyan-dim); }
+.gd-parent { font-size: .66rem; color: var(--ink-3); border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; }
 .gd-body { padding: 14px 16px; overflow-y: auto; flex: 1; }
 .gd-sec { margin-bottom: 15px; }
 .gd-sec h4 { margin: 0 0 6px; font-size: .62rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
