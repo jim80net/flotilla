@@ -86,6 +86,20 @@
         '<div class="gtile-d">' + escapeHtml(t.d) + "</div>" +
         "</div>";
     }).join("");
+    updateLive(c);
+  }
+
+  // updateLive announces the fleet-goal situation to a screen reader (an aria-live
+  // region), but ONLY when the summary changes — so a live-status tick that moved a
+  // goal into "awaiting you" is announced, without chattering on every no-op refresh.
+  var lastLive = "";
+  function updateLive(c) {
+    var msg = (c.awaiting || 0) + " awaiting you, " + (c.in_flight || 0) + " in flight, " +
+      (c.realized || 0) + " realized, of " + (c.total || 0) + " fleet goals.";
+    if (msg === lastLive) return;
+    lastLive = msg;
+    var region = q("goals-live");
+    if (region) region.textContent = msg;
   }
 
   function renderLegend() {
@@ -154,7 +168,7 @@
     return '<article class="gnode gnode-' + escapeHtml(n.scope) + " state-" + escapeHtml(vis) + '" ' +
       'data-id="' + escapeHtml(n.id) + '" data-parent="' + escapeHtml(n.parent || "") + '" ' +
       'style="left:' + n._x + "px;top:" + n._y + "px;width:" + n._w + 'px" ' +
-      'role="treeitem" tabindex="0">' +
+      'role="treeitem" aria-level="' + (depthOf(n) + 1) + '" tabindex="0">' +
       nodeInner(n) +
       "</article>";
   }
@@ -503,6 +517,14 @@
       var card = e.target.closest(".gnode");
       if (card) { e.preventDefault(); openDrawer(card.getAttribute("data-id")); }
     });
+    // Tabbing to a node that's panned off-screen recenters the map on it (the
+    // transform equivalent of scroll-into-view — the world can't be scrolled).
+    nodesEl.addEventListener("focusin", function (e) {
+      var card = e.target.closest(".gnode");
+      if (!card) return;
+      var n = nodeById[card.getAttribute("data-id")];
+      if (n && !nodeVisible(n)) recenterOn(n);
+    });
     nodesEl.addEventListener("mouseover", function (e) {
       var card = e.target.closest(".gnode");
       if (!card) return;
@@ -714,6 +736,45 @@
     if (zin) zin.onclick = function () { view.scale = Math.min(2.2, view.scale * 1.18); applyTransform(); };
     if (zout) zout.onclick = function () { view.scale = Math.max(0.25, view.scale * 0.85); applyTransform(); };
     if (zfit) zfit.onclick = fitOverview;
+
+    // Keyboard pan/zoom when the MAP CONTAINER itself holds focus (the viewport is
+    // tabbable). Guarded on e.target === vp so arrow keys still Tab between the
+    // focusable node treeitems inside — the map is one tab stop, its nodes another.
+    vp.addEventListener("keydown", function (e) {
+      if (e.target !== vp) return;
+      var step = 60, handled = true;
+      switch (e.key) {
+        case "ArrowLeft": view.tx += step; break;
+        case "ArrowRight": view.tx -= step; break;
+        case "ArrowUp": view.ty += step; break;
+        case "ArrowDown": view.ty -= step; break;
+        case "+": case "=": view.scale = Math.min(2.2, view.scale * 1.18); break;
+        case "-": case "_": view.scale = Math.max(0.25, view.scale * 0.85); break;
+        case "0": e.preventDefault(); fitOverview(); return;
+        default: handled = false;
+      }
+      if (handled) { e.preventDefault(); applyTransform(); }
+    });
+  }
+
+  // nodeVisible / recenterOn: a node moved off-screen by pan/zoom can't be scrolled
+  // into view (the world is transform-positioned, not scrolled) — so when keyboard
+  // focus lands on an off-screen node, recenter the world on it (and ensure a
+  // readable minimum zoom), the transform equivalent of scroll-into-view.
+  function nodeVisible(n) {
+    var vp = q("goals-viewport");
+    if (!vp || !n) return true;
+    var left = n._x * view.scale + view.tx, top = n._y * view.scale + view.ty;
+    var right = left + n._w * view.scale, bot = top + heightOf(n) * view.scale;
+    return left >= 0 && top >= 0 && right <= vp.clientWidth && bot <= vp.clientHeight;
+  }
+  function recenterOn(n) {
+    var vp = q("goals-viewport");
+    if (!vp || !n) return;
+    if (view.scale < 0.6) view.scale = 0.8; // a focused node must be legible
+    view.tx = vp.clientWidth / 2 - (n._x + n._w / 2) * view.scale;
+    view.ty = vp.clientHeight / 2 - (n._y + heightOf(n) / 2) * view.scale;
+    applyTransform();
   }
 
   /* ── lifecycle ─────────────────────────────────────────────────────────── */
