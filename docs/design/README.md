@@ -122,7 +122,117 @@ reads "techno startup", the opposite of the instrument voice.
 
 ---
 
-## 6. Where this is used
+## 7. Mobile
+
+Mobile-friendly is a **requirement**, not a nicety — the product's pitch is that
+you drive the fleet from your phone, so every surface must *flow* correctly on a
+phone: no sideways scroll, no cramped controls, no scroll-within-scroll traps.
+This section is the canonical contract. A standing UI-QA lane audits + fixes flow
+on every UI change against these rules.
+
+### 7.1 Canonical breakpoints
+
+Two breakpoints define phone/tablet behavior across surfaces:
+
+| Breakpoint | Name | What it governs |
+|---|---|---|
+| `≤ 640px` | **phone** | single-column stacking, header wrap, one-scroll release, full-bleed overlays |
+| `≤ 900px` | **tablet** | touch-target minimums (both phone and tablet are touch surfaces) |
+| `> 900px` | desktop | denser, mouse-precision chrome |
+
+A surface MAY add finer component breakpoints (the landing's editorial grids
+collapse at their own widths — hero at `920`, card grids at `860`, the nav strip
+at `760`), but the two canonical widths above define the phone/tablet contract and
+the disciplines below apply at them.
+
+### 7.2 Touch-target minimum — 44px
+
+Any control a **thumb drives** — tabs, buttons, segmented toggles, selects, text
+inputs, close buttons, zoom controls — is a **44px** minimum hit target at
+`≤ 900px`. Height-only bumps preserve the desktop horizontal rhythm; give a
+segmented micro-toggle `inline-flex` so the min-height grows its box:
+
+```css
+@media (max-width: 900px) {
+  .tab,
+  .btn,
+  .glayout-btn,
+  .mv-btn,
+  #filter-state,
+  .ghelp,
+  .gd-convo,
+  .gd-close,
+  .gm-close,
+  .gzoomctl button { min-height: 44px; }
+  .tab,
+  .glayout-btn,
+  .mv-btn { display: inline-flex; align-items: center; justify-content: center; }
+}
+```
+
+Exception: a checkbox may stay ~22px when its **whole label row** is the 44px
+target (`.filter-idea { min-height: 44px; }` with a 22px box inside).
+
+### 7.3 Scroll discipline — one primary scroll
+
+On a phone there is **ONE primary scroll**: the page. Never stack independent
+vertical scroll containers on a phone — a capped inner pane (a chat thread, a
+list rail, a drive-queue) becomes a scroll trap under a thumb. Release the
+desktop `max-height`/`overflow` caps at the phone breakpoint so the content flows
+into the page scroll:
+
+```css
+@media (max-width: 640px) {
+  .conv-rail-list,
+  .conv-thread,
+  .conv-backlog { max-height: none; overflow: visible; }
+}
+```
+
+A genuine pan/zoom canvas (the Goals map) is the one allowed nested surface; give
+it a bounded touch height and 44px chrome — never let it swallow the page scroll
+silently.
+
+### 7.4 No horizontal overflow
+
+The instrument never scrolls sideways. Three rules prevent it:
+
+1. **A clip guard at the root.** The dash uses `overflow-x: clip` (NOT `hidden` —
+   `clip` does not create a scroll container, so the sticky header keeps
+   sticking); the landing uses `overflow-x: hidden`.
+2. **Grid/flex children carry `min-width: 0`.** A track defaults to a `min-content`
+   floor; a child with a non-wrapping line will otherwise expand its track past
+   the viewport. `.start-grid > * { min-width: 0; }` is the pattern.
+3. **Long unbreakable tokens wrap or scroll in their box.** A URL or command in
+   prose gets `overflow-wrap: anywhere`; a shell one-liner gets `overflow-x: auto`
+   with `white-space: nowrap` so it scrolls within its card, not the page.
+
+### 7.5 What collapses where
+
+- **Dash header** — the brand + live-dot stay on row 1; the view tabs wrap to a
+  full-width row (`flex: 1 1 100%`), each tab stretched (`flex: 1 1 0`); the
+  dev-only bind address hides (`.bar-meta .meta-label, .bar-meta .meta-bind {
+  display: none; }`), the live dot stays.
+- **Conversations** — the 3-column shell (rail · thread · intervene) collapses to
+  a single column at `≤ 720px`; the panes then flow in the one page scroll.
+- **Goals** — the situation tiles go two-up (`≤ 640px`); the detail drawer becomes
+  a full-width overlay (`width: 100%`); the map viewport takes a bounded touch
+  height and 44px zoom controls.
+- **Landing** — the hero 2-column → 1-column (`≤ 920px`); the section nav becomes a
+  horizontal scroll strip (`≤ 760px`); card/altitude/start grids → single column;
+  band vertical rhythm tightens (`≤ 600px`).
+
+### 7.6 The test
+
+Load each surface cold at **390px** (phone), **768px** (tablet), **1440px**
+(desktop). At every width: `document.documentElement.scrollWidth` must equal the
+viewport width (no sideways scroll); no thumb-driven control below 44px; no nested
+scroll container on the phone except the Goals canvas. If any fails, it isn't
+mobile-friendly — fix before ship.
+
+---
+
+## 8. Where this is used
 
 - `internal/dash/assets/dash.css` — the source of the tokens; the live instrument.
 - `site/styles.css` — the landing site, styled to match (this book's first
