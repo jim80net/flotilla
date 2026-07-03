@@ -13,7 +13,10 @@ import (
 // history document via the pure sessionmirror builder. A missing ledger is an
 // honest empty document — the dash never fabricates entries.
 func (s *Server) loadSessionMirror(agent string, limit int) sessionmirror.HistoryDoc {
-	path := sessionmirror.LedgerPath(filepath.Dir(s.cfg.RosterPath), agent)
+	path, err := sessionmirror.LedgerPath(filepath.Dir(s.cfg.RosterPath), agent)
+	if err != nil {
+		return sessionmirror.BuildHistory(agent, nil, limit)
+	}
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return sessionmirror.BuildHistory(agent, nil, limit)
@@ -25,6 +28,10 @@ func (s *Server) handleSessionMirror(w http.ResponseWriter, r *http.Request) {
 	agent := r.URL.Query().Get("agent")
 	if agent == "" {
 		http.Error(w, "agent query parameter is required", http.StatusBadRequest)
+		return
+	}
+	if err := sessionmirror.ValidateAgentName(agent); err != nil {
+		http.Error(w, "invalid agent name", http.StatusBadRequest)
 		return
 	}
 	if _, err := s.roster.Agent(agent); err != nil {

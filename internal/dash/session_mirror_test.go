@@ -63,6 +63,16 @@ func TestHandleSessionMirror_MissingAgent(t *testing.T) {
 	}
 }
 
+func TestHandleSessionMirror_InvalidAgentName(t *testing.T) {
+	now := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+
+	rec := doGet(t, srv, "/api/session-mirror?agent=../escape")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status code %d, want 400 for path-unsafe agent", rec.Code)
+	}
+}
+
 func TestHandleSessionMirror_UnknownAgent(t *testing.T) {
 	now := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
 	srv, _ := newTestServer(t, singleFleetRoster, now)

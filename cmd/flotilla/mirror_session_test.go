@@ -32,7 +32,11 @@ func TestDeskMirror_AppendsSessionLedgerOnPost(t *testing.T) {
 		t.Errorf("discord body = %q, want modeled info body unchanged", posted)
 	}
 
-	raw, err := os.ReadFile(sessionmirror.LedgerPath(dir, "backend"))
+	path, err := sessionmirror.LedgerPath(dir, "backend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +82,11 @@ func TestDeskMirror_SuppressDoesNotAppendLedger(t *testing.T) {
 	if appended {
 		t.Fatal("suppressed mirror must not append session-mirror ledger")
 	}
-	if _, err := os.Stat(sessionmirror.LedgerPath(dir, "backend")); !os.IsNotExist(err) {
+	path, err := sessionmirror.LedgerPath(dir, "backend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("ledger file should not exist on suppress, stat err=%v", err)
 	}
 }
@@ -138,7 +146,11 @@ func TestDeskMirror_PrimaryXOLedgerOnlyInvariant(t *testing.T) {
 		t.Fatalf("primary XO ledger-only mirror posted %d times, want 0 (Stop hook owns Discord)", postCalls)
 	}
 
-	raw, err := os.ReadFile(sessionmirror.LedgerPath(dir, "xo"))
+	path, err := sessionmirror.LedgerPath(dir, "xo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +184,11 @@ func TestDeskMirror_LedgerOnlySkipsWithoutWebhook(t *testing.T) {
 	if postCalls != 0 {
 		t.Errorf("ledger-only mirror posted %d times, want 0", postCalls)
 	}
-	raw, err := os.ReadFile(sessionmirror.LedgerPath(dir, "xo"))
+	path, err := sessionmirror.LedgerPath(dir, "xo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,7 +3,6 @@ package sessionmirror
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -21,7 +20,10 @@ func TestAppendCreatesLedgerAndBuildHistory(t *testing.T) {
 	if err := Append(dir, "backend", rec, AppendOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	path := LedgerPath(dir, "backend")
+	path, err := LedgerPath(dir, "backend")
+	if err != nil {
+		t.Fatal(err)
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +51,11 @@ func TestAppendRetentionCapDropsOldest(t *testing.T) {
 			t.Fatalf("append %d: %v", i, err)
 		}
 	}
-	raw, err := os.ReadFile(LedgerPath(dir, "backend"))
+	path, err := LedgerPath(dir, "backend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +101,11 @@ func TestAppendReadsLargeLedgerLines(t *testing.T) {
 	if err := Append(dir, "backend", follow, AppendOptions{}); err != nil {
 		t.Fatalf("second append after large line: %v", err)
 	}
-	raw, err := os.ReadFile(LedgerPath(dir, "backend"))
+	path, err := LedgerPath(dir, "backend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +171,11 @@ func TestAppendANSIDenseVerboseAtCapRoundTrips(t *testing.T) {
 	if err := Append(dir, "backend", follow, AppendOptions{}); err != nil {
 		t.Fatalf("ledger wedged after ANSI-heavy line: %v", err)
 	}
-	raw, err := os.ReadFile(LedgerPath(dir, "backend"))
+	path, err := LedgerPath(dir, "backend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +211,11 @@ func TestAppendConcurrentSameAgentRespectsCap(t *testing.T) {
 	}
 	wg.Wait()
 
-	raw, err := os.ReadFile(LedgerPath(dir, "backend"))
+	path, err := LedgerPath(dir, "backend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,10 +225,11 @@ func TestAppendConcurrentSameAgentRespectsCap(t *testing.T) {
 	}
 }
 
-func TestLedgerPathJoinsRosterDir(t *testing.T) {
-	got := LedgerPath("/roster", "alpha-be")
-	want := filepath.Join("/roster", "session-mirror", "alpha-be.jsonl")
-	if got != want {
-		t.Errorf("LedgerPath = %q, want %q", got, want)
+func TestAppendRejectsUnsafeAgentName(t *testing.T) {
+	rec := NewRecord(Input{Agent: "backend", Verbose: "v", Info: "i"})
+	for _, agent := range []string{"../x", "a/b"} {
+		if err := Append(t.TempDir(), agent, rec, AppendOptions{}); err == nil {
+			t.Errorf("Append(%q) = nil, want validation error", agent)
+		}
 	}
 }

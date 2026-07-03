@@ -22,17 +22,16 @@ type AppendOptions struct {
 	MaxEntries int // 0 ⇒ DefaultMaxEntries
 }
 
-// LedgerPath returns the per-agent jsonl path under rosterDir.
-func LedgerPath(rosterDir, agent string) string {
-	return filepath.Join(rosterDir, "session-mirror", agent+".jsonl")
-}
-
 // Append appends one record to the agent ledger, enforcing a ring buffer of at most
 // MaxEntries lines. The write is atomic on compaction (temp + rename); a simple
 // append uses O_APPEND when under the cap.
 func Append(rosterDir, agent string, rec Record, opts AppendOptions) error {
-	if rosterDir == "" || agent == "" {
-		return fmt.Errorf("sessionmirror: roster dir and agent are required")
+	if rosterDir == "" {
+		return fmt.Errorf("sessionmirror: roster dir is required")
+	}
+	path, err := LedgerPath(rosterDir, agent)
+	if err != nil {
+		return err
 	}
 	max := opts.MaxEntries
 	if max <= 0 {
@@ -48,8 +47,6 @@ func Append(rosterDir, agent string, rec Record, opts AppendOptions) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("sessionmirror: mkdir %q: %w", dir, err)
 	}
-	path := filepath.Join(dir, agent+".jsonl")
-
 	return withFileLock(path, func() error {
 		entries, err := readLines(path)
 		if err != nil {

@@ -45,7 +45,11 @@ func TestDetectorFinish_MirrorCallbackCanAppendSessionLedger(t *testing.T) {
 	if posted != info {
 		t.Errorf("posted = %q, want info body %q", posted, info)
 	}
-	raw, err := os.ReadFile(sessionmirror.LedgerPath(dir, "backend"))
+	path, err := sessionmirror.LedgerPath(dir, "backend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
