@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Empirical grok permission enforcement matrix (flotilla-dev verification harness).
+# Empirical grok permission enforcement matrix (execution-desk verification harness).
 # Does NOT probe PreToolUse hook deny — that is gatekeeper-lane Q1.
 #
 # Usage: ./scripts/grok-permission-enforcement-probe.sh [repo-cwd]

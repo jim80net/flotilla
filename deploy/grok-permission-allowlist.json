@@ -1,10 +1,13 @@
 {
-  "_comment_enforcement": "Two delivery channels: (1) launch-recipe CLI --allow/--deny flags (sync-grok-readonly-permissions.sh) and (2) worktree .claude/settings.local.json permissions copy. Neither is a mechanical safety gate on desks running grok in always-approve posture (TUI 'always-approve mode' or CLI --always-approve): live probe 2026-07-03 confirmed deny globs are not enforced there (gh pr merge --help ran despite Bash(gh pr merge*)). Prompting mode WITHOUT always-approve: CLI --deny globs hard-deny matching commands (see scripts/validate-grok-permission-tiers.sh). PreToolUse hook deny under always-approve is gatekeeper-lane Q1 — not characterized here.",
+  "_comment_enforcement": "Operative posture on execution desks (2026-07-03 host verify): global ~/.grok/config.toml permission_mode=default; each execution-desk launch recipe passes explicit --always-approve. Mechanical guards under that posture: PreToolUse hook deny (gatekeeper lane, Q1) + branch protection + no-self-merge discipline — NOT the CLI/settings deny copy. Delivery channels: (1) launch-recipe CLI --allow/--deny flags (sync-grok-readonly-permissions.sh) and (2) worktree .claude/settings.local.json permissions copy. Under always-approve, live probe confirmed CLI --deny globs are unreliable (gh pr merge --help ran despite Bash(gh pr merge*)); allow tier is prompt-friction reduction only. Prompting mode WITHOUT always-approve: CLI --deny globs hard-deny matching commands (validate-grok-permission-tiers.sh). ~/.grok/requirements.toml lock (blocks --always-approve at CLI/TUI) is NOT deployed: incompatible with by-design always-approve execution recipes, user-writable/fails-open anyway — do not treat as a safety gate.",
   "enforcement": {
+    "global_permission_mode": "default",
+    "execution_desk_launch": "explicit_always_approve_per_recipe",
     "prompting_mode_cli_deny": "enforce",
     "always_approve_cli_deny": "unreliable",
     "always_approve_settings_deny": "not_enforced",
-    "pretooluse_hook_deny_under_always_approve": "gatekeeper_lane_q1"
+    "pretooluse_hook_deny_under_always_approve": "gatekeeper_lane_q1",
+    "requirements_toml_lock": "not_deployable_with_always_approve_recipes_fails_open_user_writable"
   },
   "tiers": {
     "read_unprompted": {
