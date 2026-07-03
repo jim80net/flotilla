@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/jim80net/flotilla/internal/dash"
 	"github.com/jim80net/flotilla/internal/goals"
@@ -32,15 +33,17 @@ func resolveGoalsPaths(rosterPath, yamlPath, jsonPath string) (goalsPaths, error
 
 func cmdGoals(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: flotilla goals validate|compile [--roster <path>] [--yaml <path>] [--json <path>]")
+		return fmt.Errorf("usage: flotilla goals validate|compile|link [--roster <path>] [--yaml <path>] [--json <path>]")
 	}
 	switch args[0] {
 	case "validate":
 		return cmdGoalsValidate(args[1:])
 	case "compile":
 		return cmdGoalsCompile(args[1:])
+	case "link":
+		return cmdGoalsLink(args[1:])
 	default:
-		return fmt.Errorf("unknown goals subcommand %q (try: validate, compile)", args[0])
+		return fmt.Errorf("unknown goals subcommand %q (try: validate, compile, link)", args[0])
 	}
 }
 
@@ -104,5 +107,54 @@ func cmdGoalsCompile(args []string) error {
 		return err
 	}
 	fmt.Printf("goals: compiled %d nodes — %s → %s\n", len(f.Goals), paths.yaml, paths.json)
+	return nil
+}
+
+func cmdGoalsLink(args []string) error {
+	fs := flag.NewFlagSet("goals link", flag.ContinueOnError)
+	rosterPath := fs.String("roster", rosterDefault(), "roster config path")
+	yamlPath := fs.String("yaml", os.Getenv("FLOTILLA_GOALS_YAML"), "goals source yaml (default <roster-dir>/fleet-goals.yaml)")
+	jsonPath := fs.String("json", "", "compiled output json (default <roster-dir>/fleet-goals.json)")
+	goalID := fs.String("goal", "", "goal id to attach the work item to (required)")
+	issueRef := fs.String("issue", "", "issue ref owner/repo#N")
+	backlogMatch := fs.String("backlog", "", "backlog marker or match text")
+	inlineText := fs.String("inline", "", "inline checklist text")
+	deskAgent := fs.String("desk", "", "desk agent name")
+	label := fs.String("label", "", "optional display label")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*goalID) == "" {
+		return fmt.Errorf("goals link: --goal is required")
+	}
+	paths, err := resolveGoalsPaths(*rosterPath, *yamlPath, *jsonPath)
+	if err != nil {
+		return err
+	}
+	kinds := 0
+	var item goals.WorkItem
+	if *issueRef != "" {
+		kinds++
+		item = goals.WorkItem{Kind: "issue", Ref: *issueRef, Label: *label}
+	}
+	if *backlogMatch != "" {
+		kinds++
+		item = goals.WorkItem{Kind: "backlog", Match: *backlogMatch, Label: *label}
+	}
+	if *inlineText != "" {
+		kinds++
+		item = goals.WorkItem{Kind: "inline", Text: *inlineText, Label: *label}
+	}
+	if *deskAgent != "" {
+		kinds++
+		item = goals.WorkItem{Kind: "desk", Agent: *deskAgent, Label: *label}
+	}
+	if kinds != 1 {
+		return fmt.Errorf("goals link: specify exactly one of --issue, --backlog, --inline, --desk")
+	}
+	if err := goals.LinkWorkItemFile(paths.yaml, paths.json, *goalID, item); err != nil {
+		return err
+	}
+	fmt.Printf("goals: linked %s onto %q — %s (compiled %s)\n", item.Kind, *goalID, paths.yaml, paths.json)
 	return nil
 }

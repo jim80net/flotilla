@@ -108,6 +108,8 @@ usage:
                                                       fail-closed validate fleet-goals.yaml (and json if present)
   flotilla goals compile [--roster <path>] [--yaml <path>] [--json <path>]
                                                       compile fleet-goals.yaml → fleet-goals.json (roster-adjacent)
+  flotilla goals link --goal <id> (--issue <ref> | --backlog <match> | --inline <text> | --desk <agent>)
+                                                      attach a work item to fleet-goals.yaml (preserves yaml comments) and recompile json
   flotilla accounts init <subscription-id>            scaffold Claude Code config dir + print one-time /login steps
   flotilla accounts list [--json]                     subscription credential health (mtime/expiry only; no secrets)
   flotilla channel create <name> [--type text|category] [--topic <t>] [--category <name|id>]
