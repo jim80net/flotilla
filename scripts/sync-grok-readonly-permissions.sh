@@ -70,14 +70,24 @@ def state_path() -> pathlib.Path:
 def desk_settings_backup(cwd: str) -> pathlib.Path:
     return pathlib.Path(cwd) / ".claude" / SETTINGS_BACKUP_NAME
 
-def restore_desk_settings(name: str, desk_state: dict) -> None:
+def validate_desk_revert(name: str, desk_state: dict) -> str | None:
     cwd = desk_state.get("cwd", "")
     if not cwd:
-        print(f"settings skip {name}: no cwd in state", file=sys.stderr)
-        return
+        return f"{name}: no cwd in state"
+    before = desk_state.get("settings_before", "absent")
+    if before == "absent":
+        return None
+    backup = desk_state.get("settings_backup")
+    if not backup:
+        return f"{name}: settings_before=present but no backup path in state"
+    if not pathlib.Path(backup).is_file():
+        return f"{name}: settings backup missing: {backup}"
+    return None
+
+def restore_desk_settings(name: str, desk_state: dict) -> None:
+    cwd = desk_state.get("cwd", "")
     settings_path = pathlib.Path(cwd) / ".claude" / "settings.local.json"
     before = desk_state.get("settings_before", "absent")
-    backup = desk_state.get("settings_backup")
     if before == "absent":
         if settings_path.exists():
             settings_path.unlink()
@@ -85,20 +95,16 @@ def restore_desk_settings(name: str, desk_state: dict) -> None:
         else:
             print(f"settings skip {name}: already absent")
         return
-    if not backup:
-        print(f"settings skip {name}: expected backup missing in state", file=sys.stderr)
-        return
-    backup_path = pathlib.Path(backup)
-    if not backup_path.is_file():
-        print(
-            f"sync-grok-permissions: settings backup missing for {name}: {backup}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    backup = desk_state["settings_backup"]
     settings_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(backup_path, settings_path)
-    backup_path.unlink(missing_ok=True)
+    shutil.copy2(backup, settings_path)
     print(f"settings restored {name}: from backup")
+
+def cleanup_desk_backups(state: dict) -> None:
+    for desk_state in state.get("desks", {}).values():
+        backup = desk_state.get("settings_backup")
+        if backup:
+            pathlib.Path(backup).unlink(missing_ok=True)
 
 if revert:
     launch = launch_file()
@@ -119,9 +125,20 @@ if revert:
         sys.exit(1)
     with open(state_file) as f:
         state = json.load(f)
+    errors = [
+        err
+        for name, desk_state in state.get("desks", {}).items()
+        if (err := validate_desk_revert(name, desk_state))
+    ]
+    if errors:
+        print("sync-grok-permissions: revert preflight failed (no changes made):", file=sys.stderr)
+        for err in errors:
+            print(f"  {err}", file=sys.stderr)
+        sys.exit(1)
     shutil.copy2(backup, launch)
     for name, desk_state in state.get("desks", {}).items():
         restore_desk_settings(name, desk_state)
+    cleanup_desk_backups(state)
     state_file.unlink(missing_ok=True)
     print(f"reverted launch from {backup}")
     sys.exit(0)

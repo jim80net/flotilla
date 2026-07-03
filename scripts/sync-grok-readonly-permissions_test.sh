@@ -95,7 +95,14 @@ if [[ ! -f "$backup" || ! -f "$state" ]]; then
   echo "revert selftest: apply must create launch backup and sync state" >&2
   exit 1
 fi
-second_out="$(FLOTILLA_LAUNCH="$launch" bash "${ROOT}/scripts/sync-grok-readonly-permissions.sh" 2>&1 || true)"
+set +e
+second_out="$(FLOTILLA_LAUNCH="$launch" bash "${ROOT}/scripts/sync-grok-readonly-permissions.sh" 2>&1)"
+second_rc=$?
+set -e
+if [[ $second_rc -eq 0 ]]; then
+  echo "revert selftest: second apply without revert must exit non-zero" >&2
+  exit 1
+fi
 if [[ "$second_out" != *"run --revert before re-applying"* ]]; then
   echo "revert selftest: second apply without revert must refuse, got: $second_out" >&2
   exit 1
@@ -125,4 +132,48 @@ then
   echo "revert selftest: should restore pre-sync settings.local.json" >&2
   exit 1
 fi
+# revert preflight: missing desk backup must not mutate launch.
+launch_mid="${tmpdir}/flotilla-launch-mid.json"
+launch_backup="${launch_mid}.bak-grok-permissions-sync"
+python3 - "$launch_mid" "$launch_backup" "$tmpdir" <<'PY'
+import json, pathlib, sys
+launch, launch_backup, tmp = sys.argv[1], pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])
+pathlib.Path(launch).write_text(
+    json.dumps({"agents": {"grok-a": {"launch": "SYNCED", "cwd": str(tmp)}}}) + "\n"
+)
+pathlib.Path(launch_backup).write_text(
+    json.dumps({"agents": {"grok-a": {"launch": "ORIGINAL", "cwd": str(tmp)}}}) + "\n"
+)
+state_path = pathlib.Path(launch).with_name(pathlib.Path(launch).name + ".grok-permissions-sync-state.json")
+state = {
+    "version": 1,
+    "launch_backup": str(launch_backup),
+    "desks": {
+        "grok-a": {
+            "cwd": str(tmp),
+            "settings_before": "present",
+            "settings_backup": str(tmp / ".claude" / "settings.local.json.bak-grok-permissions-sync"),
+        }
+    },
+}
+state_path.write_text(json.dumps(state, indent=2) + "\n")
+PY
+rm -f "${tmpdir}/.claude/settings.local.json.bak-grok-permissions-sync"
+set +e
+preflight_out="$(FLOTILLA_LAUNCH="$launch_mid" bash "${ROOT}/scripts/sync-grok-readonly-permissions.sh" --revert 2>&1)"
+preflight_rc=$?
+set -e
+if [[ $preflight_rc -eq 0 ]]; then
+  echo "revert preflight selftest: missing backup must exit non-zero" >&2
+  exit 1
+fi
+if [[ "$preflight_out" != *"revert preflight failed"* ]]; then
+  echo "revert preflight selftest: expected preflight failure, got: $preflight_out" >&2
+  exit 1
+fi
+if grep -q ORIGINAL "$launch_mid"; then
+  echo "revert preflight selftest: launch must not restore from backup when preflight fails" >&2
+  exit 1
+fi
+echo "revert preflight selftest: OK"
 echo "revert round-trip selftest: OK"
