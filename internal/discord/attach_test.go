@@ -79,6 +79,9 @@ func TestPostWithAttachmentsMultipartShape(t *testing.T) {
 	if len(gotNames) != 2 || gotNames[0] != "report.html" || gotNames[1] != "notes.txt" {
 		t.Errorf("filenames = %v, want [report.html notes.txt]", gotNames)
 	}
+	if len(gotBodies) != 2 {
+		t.Fatalf("file parts = %d, want 2", len(gotBodies))
+	}
 	if string(gotBodies[0]) != "<html>proto</html>" || string(gotBodies[1]) != "line two" {
 		t.Errorf("file bodies wrong: %q / %q", gotBodies[0], gotBodies[1])
 	}
@@ -94,6 +97,27 @@ func TestOpenAttachmentsRejectsMissing(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not found") {
 		t.Errorf("error %q should mention not found", err.Error())
+	}
+}
+
+func TestOpenAttachmentsRejectsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	_, err := OpenAttachments([]string{dir})
+	if err == nil {
+		t.Fatal("OpenAttachments(directory) = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "directory") {
+		t.Errorf("error %q should mention directory", err.Error())
+	}
+}
+
+func TestOpenAttachmentsRejectsNonRegular(t *testing.T) {
+	_, err := OpenAttachments([]string{"/dev/zero"})
+	if err == nil {
+		t.Fatal("OpenAttachments(/dev/zero) = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "not a regular file") {
+		t.Errorf("error %q should reject non-regular files", err.Error())
 	}
 }
 

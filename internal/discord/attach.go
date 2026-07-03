@@ -52,6 +52,10 @@ func OpenAttachments(paths []string) ([]attachmentFile, error) {
 			closeAttachments(out)
 			return nil, fmt.Errorf("attachment %q: is a directory, not a file", raw)
 		}
+		if !info.Mode().IsRegular() {
+			closeAttachments(out)
+			return nil, fmt.Errorf("attachment %q: not a regular file", raw)
+		}
 		if info.Size() > MaxAttachmentBytes {
 			closeAttachments(out)
 			return nil, fmt.Errorf("attachment %q: size %d bytes exceeds Discord limit %d bytes", raw, info.Size(), MaxAttachmentBytes)
