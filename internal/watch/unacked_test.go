@@ -165,7 +165,7 @@ func TestUnackedStateStore_PersistsPrunedLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(raw), `"old"`) {
-		t.Fatalf("pruned record must be persisted to disk; still in %s", raw)
+		t.Fatalf("pruned record not removed from persisted state; still in %s", raw)
 	}
 }
 
