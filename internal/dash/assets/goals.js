@@ -218,8 +218,13 @@
   }
 
   /* ── main render (two-pass measure) ────────────────────────────────────── */
-  function render() {
+  // render(sig): sig is the JSON signature of the doc being rendered; it is committed
+  // to lastSig ONLY at each point the render actually completes (the synchronous
+  // empty/error paths, or the end of the deferred pass-2) — never before. sig is
+  // recomputed from cache when omitted (the show()/error paths).
+  function render(sig) {
     var doc = cache || {};
+    if (sig === undefined) sig = JSON.stringify(doc);
     var graph = q("goals-graph"), empty = q("goals-empty");
     renderSituation(doc);
     renderLegend();
@@ -230,6 +235,7 @@
       empty.textContent = doc.error
         ? ("Goals file could not be loaded: " + doc.error)
         : (doc.message || "No goals file configured.");
+      lastSig = sig; // a complete (synchronous) render
       return;
     }
     var goals = Array.isArray(doc.goals) ? doc.goals : [];
@@ -237,6 +243,7 @@
       graph.classList.add("hidden");
       empty.classList.remove("hidden");
       empty.textContent = "No goals defined yet.";
+      lastSig = sig; // a complete (synchronous) render
       return;
     }
     graph.classList.remove("hidden");
@@ -257,7 +264,12 @@
     // render (a refresh that landed between here and the frame) wins.
     var myEpoch = epoch;
     requestAnimationFrame(function () {
-      if (myEpoch !== epoch || !isVisible()) return; // superseded, or view hidden (show() re-runs)
+      // Aborted — superseded by a newer refresh, or the tab went hidden (rAF is
+      // suspended in a backgrounded tab while dash.js keeps calling refresh()). Do
+      // NOT commit lastSig: the canvas is still at its provisional pass-1 layout, so
+      // the next refresh must re-render it rather than dedup-skip a half-finished map.
+      // show() re-renders on tab return.
+      if (myEpoch !== epoch || !isVisible()) return;
       // Cards render in goals[] order, so children[i] ↔ goals[i] — read heights
       // in one pass (all reads batched before any write) to avoid layout thrash.
       goals.forEach(function (n, i) { n._h = nodesEl.children[i] ? nodesEl.children[i].offsetHeight : DEFAULT_H; });
@@ -269,6 +281,7 @@
       drawEdges();
       if (!view.fitted) { fit(); view.fitted = true; }
       applyTransform();
+      lastSig = sig; // commit ONLY after a complete pass-2 render
     });
   }
 
@@ -346,14 +359,17 @@
       if (e !== epoch) return; // a newer refresh already superseded this one
       cache = doc;
       var sig = JSON.stringify(doc);
-      if (sig === lastSig) return; // nothing changed — skip the rebuild
-      lastSig = sig;
-      if (isVisible()) render();
+      if (sig === lastSig) return; // this exact doc is already FULLY rendered — skip
+      // Pass the sig to render, which commits lastSig only when the render actually
+      // COMPLETES. Committing here (before render) would falsely mark a doc rendered
+      // even if render's deferred pass-2 aborts (superseded / tab hidden) — then a
+      // later identical refresh would dedup-skip and strand the provisional canvas.
+      if (isVisible()) render(sig);
+      // Hidden: do not render and do not commit lastSig — show() renders on tab open.
     }).catch(function (err) {
       if (e !== epoch) return;
       cache = { found: false, error: err.message };
-      lastSig = null;
-      if (isVisible()) render();
+      if (isVisible()) render(); // render() computes + commits the error-state sig
     });
   }
 
