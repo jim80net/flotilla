@@ -89,7 +89,7 @@ func TestParseCodexState(t *testing.T) {
 		{
 			name: "post-turn idle LIVE 2026-07-03 → Idle",
 			captured: "  • PONG\n  › Find and fix a bug in @filename\n" +
-				"  gpt-5.5 default · ~/workspace/github.com/jim80net/codex-harness-dev",
+				"  gpt-5.5 default · ~/workspace/…/example-repo",
 			want: StateIdle,
 		},
 		{
