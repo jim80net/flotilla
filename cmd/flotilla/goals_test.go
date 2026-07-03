@@ -40,9 +40,11 @@ goals:
 func TestCmdGoalsValidateRejectsCycle(t *testing.T) {
 	dir := t.TempDir()
 	roster := filepath.Join(dir, "flotilla.json")
-	os.WriteFile(roster, []byte(`{"agents":[{"name":"xo"}]}`), 0o600)
+	if err := os.WriteFile(roster, []byte(`{"agents":[{"name":"xo"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	yaml := filepath.Join(dir, "fleet-goals.yaml")
-	os.WriteFile(yaml, []byte(`version: 1
+	if err := os.WriteFile(yaml, []byte(`version: 1
 goals:
   - id: a
     title: A
@@ -50,7 +52,9 @@ goals:
   - id: b
     title: B
     parent: a
-`), 0o600)
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	if err := cmdGoalsValidate([]string{"--roster", roster, "--yaml", yaml}); err == nil {
 		t.Fatal("cyclic yaml must fail validate")
 	}

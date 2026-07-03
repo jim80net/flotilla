@@ -64,10 +64,17 @@ func cmdGoalsValidate(args []string) error {
 	if err != nil {
 		return fmt.Errorf("goals validate: %w", err)
 	}
-	if jb, err := os.ReadFile(paths.json); err == nil {
-		if _, err := dash.ParseGoalsFile(jb); err != nil {
-			return fmt.Errorf("goals validate: json %q: %w", paths.json, err)
+	// Cross-check the compiled json if it exists. A missing json is fine (compile
+	// may not have run yet) — but any OTHER read error (permissions, a directory,
+	// I/O) is a real failure and must not be silently skipped (fail-closed, matching
+	// the yaml read above).
+	jb, err := os.ReadFile(paths.json)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("goals validate: read json %q: %w", paths.json, err)
 		}
+	} else if _, err := dash.ParseGoalsFile(jb); err != nil {
+		return fmt.Errorf("goals validate: json %q: %w", paths.json, err)
 	}
 	fmt.Printf("goals: ok (%d nodes) — %s\n", len(f.Goals), paths.yaml)
 	return nil
