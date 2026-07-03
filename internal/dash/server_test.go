@@ -257,6 +257,12 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	if !strings.Contains(doGet(t, srv, "/static/dash.js").Body.String(), "openConversation") {
 		t.Error("dash.js must expose window.flotillaDash.openConversation for the Goals deep-link — Inc 4")
 	}
+	// #284 a11y: keyboard pan/zoom + focus-recenter + the aria-live announcer.
+	for _, marker := range []string{"recenterOn", "nodeVisible", "updateLive"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must retain the keyboard/a11y engine (missing %q) — #284", marker)
+		}
+	}
 
 	body := doGet(t, srv, "/").Body.String()
 	if !strings.Contains(body, "/static/goals.js") {
@@ -267,6 +273,7 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	for _, id := range []string{
 		"goals-viewport", "goals-world", "goals-nodes", "goals-edges", "goals-tierlabels", "goals-zin", "goals-zout", "goals-zfit",
 		"goals-drawer", "goals-drawer-body", "goals-drawer-close", "goals-help", // Inc 2: drawer + help tooltip
+		"goals-live", // #284: aria-live status region
 	} {
 		if !strings.Contains(body, id) {
 			t.Errorf("index must contain the goals canvas element #%s", id)

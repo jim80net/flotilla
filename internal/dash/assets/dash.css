@@ -76,6 +76,11 @@ code {
   font-size: .92em;
 }
 .muted { color: var(--ink-3); }
+/* visually hidden but exposed to assistive tech (aria-live regions, labels) */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
 
 .bar, .freshness, .view, .foot { position: relative; z-index: 1; }
 
@@ -867,6 +872,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
     linear-gradient(90deg, rgba(29, 43, 62, .16) 1px, transparent 1px) 0 0 / 34px 34px;
 }
 .goals-viewport.grabbing { cursor: grabbing; }
+.goals-viewport:focus-visible { outline: 2px solid var(--cyan-dim); outline-offset: -2px; }
 .goals-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
 .goals-edges { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; z-index: 0; }
 .goals-nodes { position: absolute; left: 0; top: 0; z-index: 1; }
@@ -895,7 +901,10 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   transition: border-color .2s var(--ease), box-shadow .2s var(--ease), transform .15s var(--ease);
 }
 .gnode:hover { transform: translateY(-2px); border-color: var(--cyan-dim); }
-.gnode:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+/* Focus ring. Note the outline is inside the transformed world so it scales with
+   zoom; the focus-recenter (keyboard) brings a focused node to centre so the ring
+   is on-screen, and !important keeps it winning over the state-* box-shadows. */
+.gnode:focus-visible { outline: 2px solid var(--cyan) !important; outline-offset: 2px; }
 .gnode-eyebrow { font-size: .6rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); display: flex; gap: 8px; }
 .gnode-owner { color: var(--cyan-dim); }
 .gnode-title { font-family: var(--display); font-weight: 600; color: var(--ink); line-height: 1.12; font-size: 1.02rem; margin-top: 2px; text-wrap: balance; }
@@ -983,8 +992,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 /* "what this is" help — a hovertext tooltip, not a persistent panel (feedback #1) */
 .ghelp-wrap { position: relative; display: inline-block; }
 .ghelp {
-  width: 17px; height: 17px; border-radius: 50%; border: 1px solid var(--line);
-  background: var(--abyss-2); color: var(--ink-3); font-size: .68rem; line-height: 1; cursor: help;
+  width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line);
+  background: var(--abyss-2); color: var(--ink-3); font-size: .76rem; line-height: 1; cursor: help;
   font-family: var(--mono); vertical-align: middle; padding: 0;
   display: inline-flex; align-items: center; justify-content: center;
 }
@@ -1012,8 +1021,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 }
 .goals-drawer.open { transform: none; }
 .gd-close {
-  position: absolute; top: 10px; right: 12px; width: 26px; height: 26px; border-radius: 6px;
-  border: 1px solid var(--line); background: transparent; color: var(--ink-3); cursor: pointer; font-size: 1rem; line-height: 1;
+  position: absolute; top: 10px; right: 12px; width: 32px; height: 32px; border-radius: 6px;
+  border: 1px solid var(--line); background: transparent; color: var(--ink-3); cursor: pointer; font-size: 1.1rem; line-height: 1;
   display: flex; align-items: center; justify-content: center;
 }
 .gd-close:hover { border-color: var(--cyan-dim); color: var(--ink); }
