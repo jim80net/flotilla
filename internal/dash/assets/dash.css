@@ -351,7 +351,10 @@ code {
   font-size: .68rem;
 }
 .thread-chan { font-size: .68rem; display: block; margin-bottom: .15rem; }
-.thread-gist {
+/* thread-gist (relay-line body) and thread-mirror-body (session-output body) share
+   the same base typography — one rule, no duplication (cubic #309 P3). */
+.thread-gist,
+.thread-mirror-body {
   margin: 0;
   color: var(--ink-2);
   font-size: .8rem;
@@ -384,14 +387,59 @@ code {
   vertical-align: middle;
 }
 .thread-mirror-body {
-  margin: 0;
-  color: var(--ink-2);
-  font-size: .8rem;
-  white-space: pre-wrap;
-  word-break: break-word;
   max-height: 14rem;
   overflow-y: auto;
 }
+/* session-mirror debug tier (§2.3 UI half) — collapsible per-entry detail, shown
+   only when the info⇄debug toggle is on debug. */
+.thread-debug {
+  margin-top: .4rem;
+  border-top: 1px dashed var(--line-soft);
+  padding-top: .35rem;
+  font-size: .72rem;
+}
+.thread-debug > summary {
+  cursor: pointer;
+  color: var(--ink-3);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  font-size: .62rem;
+  user-select: none;
+}
+.thread-debug .dbg-body { margin-top: .35rem; display: grid; gap: .3rem; }
+.dbg-group-h {
+  color: var(--ink-3);
+  font-size: .6rem;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  margin-bottom: .15rem;
+}
+.dbg-row { display: grid; grid-template-columns: 5.5rem 1fr; gap: .4rem; align-items: baseline; }
+.dbg-key { color: var(--ink-3); font-size: .66rem; }
+.dbg-val { color: var(--ink-2); word-break: break-word; white-space: pre-wrap; }
+.dbg-firewall .dbg-val { color: var(--amber); }
+/* the info⇄debug segmented toggle */
+.conv-head-right { display: flex; align-items: center; gap: .6rem; }
+.mirror-verbosity {
+  display: inline-flex;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.mv-btn {
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: .66rem;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  padding: .2rem .5rem;
+  cursor: pointer;
+}
+.mv-btn + .mv-btn { border-left: 1px solid var(--line-soft); }
+.mv-btn.active { background: color-mix(in srgb, var(--cyan) 18%, transparent); color: var(--ink-1); }
+.mv-btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
 
 .conv-fleet-strip {
   padding: .75rem 1rem 1rem;
