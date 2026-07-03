@@ -5,9 +5,12 @@ import (
 	"bytes"
 )
 
-// maxLineBytes is the bufio.Scanner token cap for jsonl ledger lines. DefaultVerboseCap
-// runes can exceed the scanner's default 64KiB after JSON encoding and escaping.
-const maxLineBytes = 4 << 20 // 4 MiB
+// scannerJSONOverhead is headroom for ts/agent/info/debug fields outside verbose.
+const scannerJSONOverhead = 64 << 10 // 64 KiB
+
+// maxLineBytes is the bufio.Scanner token cap for one marshaled ledger line.
+// DefaultVerboseCap is in runes; UTF-8 needs up to 4 bytes/rune before JSON escaping.
+const maxLineBytes = DefaultVerboseCap*4 + scannerJSONOverhead
 
 func newLineScanner(data []byte) *bufio.Scanner {
 	sc := bufio.NewScanner(bytes.NewReader(data))

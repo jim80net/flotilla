@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -85,6 +86,33 @@ func TestDeskMirror_SuppressDoesNotAppendLedger(t *testing.T) {
 // TestDeskMirror_PrimaryXOLedgerOnlyInvariant documents the P1 gate: CoordinatorMirrorOnFinish
 // (primary clock XO) appends session-mirror and runs readerModelInternal but never posts to Discord.
 // The XO Stop hook already publishes via flotilla notify — a second post would double-publish.
+func TestDeskMirror_LedgerFailOmitsLedgerSuccess(t *testing.T) {
+	dir := t.TempDir()
+	var lines []string
+	turn := "coordinator turn-final body"
+
+	m := deskMirror{
+		ledgerOnly: true,
+		rosterDir:  dir,
+		turnFinal:  func(string) (string, bool, error) { return turn, true, nil },
+		post:       func(_, _, _ string) error { t.Fatal("must not post"); return nil },
+		logf:       recordLogf(&lines),
+		ledgerAppend: func(string, string, sessionmirror.Record) error {
+			return fmt.Errorf("disk full")
+		},
+	}
+	m.run("xo")
+
+	for _, line := range lines {
+		if strings.Contains(line, "mirror LEDGER xo") && !strings.Contains(line, "LEDGER-FAIL") {
+			t.Fatalf("false success audit line on append failure: %q", line)
+		}
+	}
+	if len(lines) != 1 || !strings.Contains(lines[0], "LEDGER-FAIL") {
+		t.Fatalf("decision lines = %v, want exactly one LEDGER-FAIL", lines)
+	}
+}
+
 func TestDeskMirror_PrimaryXOLedgerOnlyInvariant(t *testing.T) {
 	dir := t.TempDir()
 	postCalls := 0

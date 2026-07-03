@@ -1,9 +1,11 @@
 package sessionmirror
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -73,7 +75,8 @@ func TestAppendRequiresRosterDirAndAgent(t *testing.T) {
 
 func TestAppendReadsLargeLedgerLines(t *testing.T) {
 	dir := t.TempDir()
-	large := strings.Repeat("世", 100_000)
+	// Near DefaultVerboseCap — exercises scanner bound (verboseCap×4 + overhead).
+	large := strings.Repeat("世", DefaultVerboseCap-1)
 	rec := NewRecord(Input{
 		Agent:   "backend",
 		At:      time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC),
@@ -102,6 +105,42 @@ func TestAppendReadsLargeLedgerLines(t *testing.T) {
 	}
 	if doc.Entries[0].Verbose != large {
 		t.Error("large verbose entry lost on read-back")
+	}
+	if len(ParseLines(raw)) != 2 {
+		t.Fatal("ParseLines must not drop lines at/after the large record")
+	}
+}
+
+func TestAppendConcurrentSameAgentRespectsCap(t *testing.T) {
+	dir := t.TempDir()
+	const max = 5
+	const workers = 20
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			rec := NewRecord(Input{
+				Agent:   "backend",
+				At:      time.Unix(int64(i), 0).UTC(),
+				Verbose: "v",
+				Info:    fmt.Sprintf("entry-%02d", i),
+			})
+			if err := Append(dir, "backend", rec, AppendOptions{MaxEntries: max}); err != nil {
+				t.Errorf("append %d: %v", i, err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	raw, err := os.ReadFile(LedgerPath(dir, "backend"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := BuildHistory("backend", raw, 0)
+	if len(doc.Entries) != max {
+		t.Fatalf("entries = %d, want ring cap %d", len(doc.Entries), max)
 	}
 }
 
