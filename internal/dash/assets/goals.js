@@ -185,14 +185,16 @@
     var items = (n.work_items || []).map(workItem).join("");
     var itemsBlock = items ? '<div class="gnode-items">' + items + "</div>" : "";
     var pill = '<span class="gpill gpill-' + escapeHtml(vis) + '">' + escapeHtml(STATE_LABEL[vis] || vis) + "</span>";
-    // Per-node controls (#302): a ⚠ Respond button on operator-gated nodes opens the
-    // waiting-on-you modal; a ⓘ Details button opens the detail drawer. The node
-    // body itself deep-links to Conversations (see wireNodes). Positioned absolute
-    // so they never change card height (#283 contract). The ⚠ tracks live status.
+    // Per-node controls. #349 A2 SWAP: the node BODY now opens the detail drawer (the
+    // primary "see the thing" action); the conversation jump is a distinct labelled
+    // "→ desk" button (only on a routable node), synchronized with the drawer's own
+    // open-conversation. A ⚠ Respond button on operator-gated nodes opens the
+    // waiting-on-you modal. Positioned absolute so they never change card height (#283).
     var gated = vis === "awaiting" || vis === "blocked";
+    var routable = !!convAgent(n);
     var controls = '<span class="gnode-ctl">' +
       (gated ? '<button class="gnode-respond" type="button" title="Respond to what this needs" aria-label="Respond">&#9888;</button>' : "") +
-      '<button class="gnode-detail" type="button" title="Details" aria-label="Details">&#9432;</button>' +
+      (routable ? '<button class="gnode-godesk" type="button" title="Go to this desk’s conversation" aria-label="Go to desk">&#8594;&#8202;desk</button>' : "") +
       "</span>";
     // org-graph v2 enrichment: priorities (flotilla-level, operator-facing) and
     // milestones (desk-level current work) render as short ordered lists; the harness
@@ -738,6 +740,7 @@
     if (selectedId) { var c = cardEl(selectedId); if (c) c.classList.remove("gnode-selected"); }
     selectedId = null;
   }
+  var restoringNode = false; // true while the history controller restores a drawer (no re-push)
   function openDrawer(id) {
     var n = nodeById[id];
     if (!n) return;
@@ -749,6 +752,19 @@
     d.setAttribute("aria-hidden", "false");
     var close = q("goals-drawer-close");
     if (close) close.focus({ preventScroll: true }); // move focus into the dialog for keyboard users
+    // Opening a drawer is a reversible nav step (#349 A1) — Back closes it.
+    if (!restoringNode && window.flotillaDash && window.flotillaDash.pushNav) {
+      window.flotillaDash.pushNav({ view: "goals", node: id });
+    }
+  }
+  // restoreNode is the history controller's hook (#349 A1): open the drawer on the given
+  // node (or close it) WITHOUT pushing a new entry. Best-effort — if the node isn't in the
+  // freshly-rendered map yet, it no-ops rather than throwing.
+  function restoreNode(id) {
+    restoringNode = true;
+    if (id && nodeById[id]) openDrawer(id);
+    else closeDrawer();
+    restoringNode = false;
   }
   function closeDrawer() {
     var d = q("goals-drawer");
@@ -762,14 +778,21 @@
   // nodeActivate is the primary node action (#302): deep-link to the node's
   // Conversations thread. A node with no conversation agent (an abstract flotilla
   // aim) falls back to the detail drawer.
+  // nodeActivate is the primary node action (#349 A2): open the detail drawer — "the
+  // point is I need to see the thing". (Was: deep-link to Conversations; that jump is now
+  // the explicit → desk button / goToDesk.)
   function nodeActivate(id) {
+    if (nodeById[id]) openDrawer(id);
+  }
+
+  // goToDesk jumps to a node's Conversations thread — the → desk button, and the drawer's
+  // own open-conversation button, both route here (synchronized, #349 A2).
+  function goToDesk(id) {
     var n = nodeById[id];
     if (!n) return;
     var agent = convAgent(n);
     if (agent && window.flotillaDash && window.flotillaDash.openConversation) {
       window.flotillaDash.openConversation(agent);
-    } else {
-      openDrawer(id);
     }
   }
 
@@ -872,10 +895,10 @@
     nodesEl.addEventListener("click", function (e) {
       var respond = e.target.closest(".gnode-respond");
       if (respond) { var rc = respond.closest(".gnode"); if (rc) openModal(rc.getAttribute("data-id")); return; }
-      var detail = e.target.closest(".gnode-detail");
-      if (detail) { var dc = detail.closest(".gnode"); if (dc) openDrawer(dc.getAttribute("data-id")); return; }
+      var godesk = e.target.closest(".gnode-godesk");
+      if (godesk) { var gc = godesk.closest(".gnode"); if (gc) goToDesk(gc.getAttribute("data-id")); return; }
       var card = e.target.closest(".gnode");
-      if (card) nodeActivate(card.getAttribute("data-id")); // #302: node body → its Conversations thread
+      if (card) nodeActivate(card.getAttribute("data-id")); // #349 A2: node body → detail drawer
     });
     nodesEl.addEventListener("keydown", function (e) {
       if (e.key !== "Enter" && e.key !== " ") return;
@@ -1300,5 +1323,8 @@
     }, 120);
   });
 
-  window.flotillaGoals = { show: show, refresh: refresh };
+  window.flotillaGoals = {
+    show: show, refresh: refresh, restoreNode: restoreNode,
+    openNode: function () { return selectedId; }, // the open drawer's node id (or null) — for history state
+  };
 })();

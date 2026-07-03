@@ -180,6 +180,7 @@
         renderConversations();
         syncControlTargets(true); // explicit desk-selection: set the targets authoritatively
         fetchMirror();            // load the newly-selected desk's session mirror
+        pushNav({ view: "conversations", desk: selectedDesk }); // reversible (#349 A1)
       });
     }
   }
@@ -633,8 +634,44 @@
   }
   var tabs = document.querySelectorAll(".tab");
   for (var i = 0; i < tabs.length; i++) {
-    tabs[i].addEventListener("click", function () { showView(this.getAttribute("data-view")); });
+    tabs[i].addEventListener("click", function () {
+      var view = this.getAttribute("data-view");
+      showView(view);
+      pushNav({ view: view, desk: selectedDesk || null });
+    });
   }
+
+  /* ── browser history: every view / desk / goals-node change is a reversible nav
+     entry (#349 A1) — clicking into a conversation from the goals map is no longer a
+     one-way trap; Back/Forward restore the prior state. pushState is best-effort
+     (wrapped) so the SPA still works where history is unavailable. ─────────────────── */
+  var restoringNav = false;
+  function navHash(s) {
+    if (!s || (s.view || "conversations") === "conversations") return s && s.desk ? "#conv/" + encodeURIComponent(s.desk) : "#conv";
+    if (s.view === "goals") return s.node ? "#goals/" + encodeURIComponent(s.node) : "#goals";
+    return "#" + s.view;
+  }
+  function pushNav(state) {
+    if (restoringNav) return;
+    try { history.pushState(state, "", navHash(state)); } catch (e) { /* history unavailable — nav still works */ }
+  }
+  window.flotillaDash.pushNav = pushNav;
+  function applyNav(state) {
+    restoringNav = true;
+    var s = state || { view: "conversations" };
+    var view = s.view || "conversations";
+    if (view === "conversations" && s.desk) selectedDesk = s.desk;
+    showView(view);
+    if (view === "conversations") { renderConversations(); syncControlTargets(true); fetchMirror(); }
+    if (view === "goals" && window.flotillaGoals && window.flotillaGoals.restoreNode) {
+      if (window.flotillaGoals.show) window.flotillaGoals.show(); // ensure the map is rendered first
+      window.flotillaGoals.restoreNode(s.node || null);
+    }
+    restoringNav = false;
+  }
+  window.addEventListener("popstate", function (e) { applyNav(e.state); });
+  // Seed the initial entry so the very first Back has a target.
+  try { history.replaceState({ view: "conversations", desk: selectedDesk || null }, "", navHash({ view: "conversations", desk: selectedDesk })); } catch (e) { /* ignore */ }
   // Conversations is the default active tab — arm the fixed app-shell at startup
   // so the page doesn't scroll before the first tab interaction (#326).
   document.body.classList.add("conv-shell-active");
@@ -657,6 +694,7 @@
     renderConversations();
     syncControlTargets(true);
     fetchMirror(); // load the deep-linked desk's session mirror (the identity guard hides the prior desk's until it lands)
+    pushNav({ view: "conversations", desk: desk }); // reversible: Back returns to the goals map (#349 A1)
     // Move focus into the now-visible Conversations view — the deep-link hid the
     // Goals view, so leaving focus on the goals node would strand it on <body>.
     var title = el("conv-title");
