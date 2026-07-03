@@ -291,3 +291,93 @@ func ids(ms []Message) []string {
 	}
 	return out
 }
+
+// beforePagedFetch simulates discordgo's 100-msg cap and before-pagination. all is
+// ascending by snowflake id; timestamps are assigned per id for cutoff tests.
+type beforePagedFetch struct {
+	all     []*discordgo.Message
+	calls   int
+	befores []string
+}
+
+func (p *beforePagedFetch) fn(ch string, limit int, before, after, around string) ([]*discordgo.Message, error) {
+	p.calls++
+	p.befores = append(p.befores, before)
+	if after != "" || around != "" {
+		return nil, errors.New("beforePagedFetch: only before-walk supported")
+	}
+	if limit > ChannelMessagesMax {
+		limit = ChannelMessagesMax
+	}
+	var pool []*discordgo.Message
+	if before == "" {
+		pool = append(pool, p.all...)
+	} else {
+		beforeN, ok := ParseSnowflake(before)
+		if !ok {
+			return nil, errors.New("bad before id")
+		}
+		for _, m := range p.all {
+			n, ok := ParseSnowflake(m.ID)
+			if ok && n < beforeN {
+				pool = append(pool, m)
+			}
+		}
+	}
+	if len(pool) > limit {
+		pool = pool[len(pool)-limit:]
+	}
+	out := make([]*discordgo.Message, len(pool))
+	for i := range pool {
+		out[i] = pool[len(pool)-1-i]
+	}
+	return out, nil
+}
+
+func mkTimedAsc(n int, base time.Time, step time.Duration) []*discordgo.Message {
+	out := make([]*discordgo.Message, n)
+	for i := 0; i < n; i++ {
+		m := msg(itoaTest(uint64(i+1)), "op", "m")
+		m.Timestamp = base.Add(time.Duration(i) * step)
+		out[i] = m
+	}
+	return out
+}
+
+func TestRecent_PaginatesAboveDiscordCap(t *testing.T) {
+	p := &beforePagedFetch{all: mkAsc(250, 0)}
+	r := &REST{fetch: p.fn}
+	got, err := r.Recent("CH", 220)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 220 || got[0].ID != "31" || got[219].ID != "250" {
+		t.Fatalf("Recent paginated = len %d [%s..%s], want 220 msgs [31..250]", len(got), got[0].ID, got[len(got)-1].ID)
+	}
+	if p.calls != 3 {
+		t.Fatalf("calls=%d, want 3 non-overlapping before pages", p.calls)
+	}
+	if len(p.befores) != 3 || p.befores[1] == "" || p.befores[1] == p.befores[0] {
+		t.Fatalf("before chain = %v, want advancing before ids", p.befores)
+	}
+}
+
+func TestRecentSince_WalksBackwardUntilCutoff(t *testing.T) {
+	base := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	p := &beforePagedFetch{all: mkTimedAsc(250, base, time.Minute)}
+	r := &REST{fetch: p.fn}
+	cutoff := base.Add(50 * time.Minute) // ids 51+ are within AckWindow-style window
+	got, err := r.RecentSince("CH", cutoff, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 200 || got[0].ID != "51" || got[199].ID != "250" {
+		t.Fatalf("RecentSince = len %d [%s..%s], want 200 msgs [51..250]", len(got), got[0].ID, got[len(got)-1].ID)
+	}
+	if p.calls != 2 {
+		t.Fatalf("calls=%d, want 2 non-overlapping before pages", p.calls)
+	}
+	if got[0].Timestamp.Before(cutoff) {
+		t.Fatalf("oldest %v before cutoff %v", got[0].Timestamp, cutoff)
+	}
+}
