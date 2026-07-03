@@ -1,4 +1,5 @@
 {
+  "_comment_policy": "policy.on_gatekeeper_error is a posture marker for the external gatekeeper layer only — flotilla does not read or enforce it at runtime.",
   "policy": {
     "on_gatekeeper_error": "abstain",
     "description": "When the gatekeeper/permission layer errors, abstain and let the native permission system decide. Deny-on-error is opt-in only."
