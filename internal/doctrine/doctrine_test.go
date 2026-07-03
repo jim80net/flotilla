@@ -19,18 +19,19 @@ func memberByName(t *testing.T, name string) Member {
 	return Member{}
 }
 
-// The registry ships EXACTLY eight members: operating-principles (identity-append),
+// The registry ships EXACTLY nine members: operating-principles (identity-append),
 // the Rule of Three (identity-append), no-self-merge (identity-append),
 // act-dont-idle-hold (identity-append), executive-mini-brief (identity-append),
 // xo-outbound (identity-append, coordinator-only), operator-direct-tasking
-// (identity-append), and visibility-synthesis (heartbeat-skill).
+// (identity-append), visibility-synthesis (heartbeat-skill), and parade-formation
+// (heartbeat-skill).
 // This locks the count so a future member addition is a deliberate, reviewed change
 // (and so the member-count-agnostic install loop is exercised against the real
 // registry, not a fixture).
 func TestMembersRegistryContents(t *testing.T) {
 	members := Members()
-	if len(members) != 8 {
-		t.Fatalf("registry should hold exactly eight members, got %d", len(members))
+	if len(members) != 9 {
+		t.Fatalf("registry should hold exactly nine members, got %d", len(members))
 	}
 	byName := map[string]Member{}
 	for _, m := range members {
@@ -151,6 +152,26 @@ func TestMembersRegistryContents(t *testing.T) {
 	// A heartbeat-skill member carries no marker fence (whole-file, stat-based).
 	if vs.OpenMarker != "" || vs.CloseMarker != "" {
 		t.Errorf("heartbeat-skill member should carry no marker fence, got open=%q close=%q", vs.OpenMarker, vs.CloseMarker)
+	}
+
+	pf, ok := byName["parade-formation"]
+	if !ok {
+		t.Fatal("registry missing parade-formation member")
+	}
+	if pf.Mechanism != MechanismHeartbeatSkill {
+		t.Errorf("parade-formation mechanism = %q, want %q", pf.Mechanism, MechanismHeartbeatSkill)
+	}
+	if pf.TargetFile != "skills/parade-formation.md" {
+		t.Errorf("parade-formation TargetFile = %q, want %q", pf.TargetFile, "skills/parade-formation.md")
+	}
+	if strings.TrimSpace(pf.Content) == "" {
+		t.Error("parade-formation content is empty — the embed did not round-trip")
+	}
+	if !strings.Contains(pf.Content, "## Learnings") {
+		t.Error("parade-formation content must document the Learnings block")
+	}
+	if pf.OpenMarker != "" || pf.CloseMarker != "" {
+		t.Errorf("heartbeat-skill member should carry no marker fence, got open=%q close=%q", pf.OpenMarker, pf.CloseMarker)
 	}
 }
 
@@ -348,12 +369,12 @@ func TestMembersForAgentOmitsCoordinatorOnlyForExecutionDesk(t *testing.T) {
 			t.Errorf("execution desk set includes coordinator-only member %q", m.Name)
 		}
 	}
-	if len(exec) != 7 {
-		t.Fatalf("execution desk MembersForAgent len = %d, want 7", len(exec))
+	if len(exec) != 8 {
+		t.Fatalf("execution desk MembersForAgent len = %d, want 8", len(exec))
 	}
 	coord := MembersForAgent(true)
-	if len(coord) != 8 {
-		t.Fatalf("coordinator MembersForAgent len = %d, want 8", len(coord))
+	if len(coord) != 9 {
+		t.Fatalf("coordinator MembersForAgent len = %d, want 9", len(coord))
 	}
 }
 

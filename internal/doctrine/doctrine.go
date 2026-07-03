@@ -5,7 +5,7 @@
 // default seed from `workspace init`, so a freshly scaffolded agent is born with
 // the doctrine in place.
 //
-// The set ships eight members:
+// The set ships nine members:
 //   - operating-principles — an IDENTITY-APPEND constitution: the twelve standing
 //     Flotilla Operating Principles, distilled to one sentence each and appended into
 //     the agent's identity file so the constitution loads once at launch. The full
@@ -27,6 +27,8 @@
 //     provenance and support (quality gates still apply to the work).
 //   - visibility-synthesis — a HEARTBEAT-SKILL: a whole-file curation skill written
 //     into the agent's workspace, loaded when the daemon emits a synthesis wake.
+//   - parade-formation — a HEARTBEAT-SKILL: a whole-file accomplishments-parade skill
+//     written into the agent's workspace, loaded when the operator triggers a parade.
 //
 // The registry is member-count-agnostic; the install/seed loop dispatches by
 // Mechanism. Adding a member is adding a registry entry plus its embedded asset (and,
@@ -220,6 +222,15 @@ var members = []Member{
 		Mechanism:  MechanismHeartbeatSkill,
 		Content:    mustRead("assets/skills/visibility-synthesis.md"),
 		TargetFile: "skills/visibility-synthesis.md",
+	},
+	{
+		// parade-formation: a whole-file accomplishments-parade skill (the celebratory
+		// sibling of visibility-synthesis), invoked when the operator runs `flotilla parade`.
+		// Delivered as a heartbeat-skill (workspace file), not an identity-append.
+		Name:       "parade-formation",
+		Mechanism:  MechanismHeartbeatSkill,
+		Content:    mustRead("assets/skills/parade-formation.md"),
+		TargetFile: "skills/parade-formation.md",
 	},
 }
 

@@ -43,6 +43,8 @@ func run(args []string) error {
 		return cmdNotify(args[1:])
 	case "brief":
 		return cmdBrief(args[1:])
+	case "parade":
+		return cmdParade(args[1:])
 	case "speak":
 		return cmdSpeak(args[1:])
 	case "voice":
@@ -97,6 +99,9 @@ usage:
   flotilla notify --from <agent> <message>            post to the operator under <agent>'s webhook (no tmux)
   flotilla notify --from <agent> --file <path>        notify body from a file ('-' = stdin)
   flotilla brief [--all] [<desk>] [--audience <who>]  elicit a reader-modeled brief; the shipped mirror publishes it to the desk's channel (secret-free; not notify)
+  flotilla parade [--all] [<agent>]                   elicit four-domain parade answers (accomplishments, learnings, …); mirror publishes to each channel
+  flotilla parade rollup [--all] [<xo>]               wake coordinators to roll up subordinates' parade answers
+  flotilla parade fleet                               wake the primary XO for the operator fleet parade report
   flotilla speak <text>                               drop a short spoken reply on the voice outbound spool (non-blocking)
   flotilla speak --file <path>                         speak body from a file ('-' = stdin)
   flotilla voice [--config <voice.env>]               operator↔XO Discord voice (needs a -tags voiceopus build)
