@@ -193,22 +193,26 @@ be resumed. The launch file matches the default `.gitignore`'s
 `/flotilla-launch.json` line; if you point `--launch` at a non-default path, you
 own keeping it out of version control.
 
-### Per-agent workspace: `flotilla workspace`
+### Per-agent workspace: `flotilla workspace init`
 
-The flat `flotilla-launch.json` is being superseded by a per-agent **workspace**
-`~/.flotilla/<agent>/` — one home holding the desk's launch recipe (`launch.json`),
-its heartbeat prompt (`HEARTBEAT.md`), its working tracker (`state.md`), and its
-identity in the agent's native instruction file (`CLAUDE.md` for Claude Code,
-`AGENTS.md` for Grok/Cursor). Scaffold one:
+The flat `flotilla-launch.json` is superseded by a per-agent **workspace**. Each
+desk gets a git **worktree** of the repo it works on, plus a home directory
+`~/.flotilla/<agent>/` holding its launch recipe (`launch.json`), heartbeat
+prompt (`HEARTBEAT.md`), working tracker (`state.md`), and a `skills/` directory.
+Provision one — `--repo` is **required** (it names the repo to make a worktree
+of; bare-directory desk homes are deprecated):
 
 ```sh
-flotilla workspace init infra        # creates ~/.flotilla/infra/ (never clobbers)
-flotilla workspace path infra        # prints the directory
+flotilla workspace init infra --repo /abs/path/to/your/repo
+flotilla workspace path infra        # prints ~/.flotilla/infra
 ```
 
-Then edit `~/.flotilla/infra/launch.json` — set `cwd` to the agent's absolute
-worktree. The scaffolded `launch` loads the identity at startup via the
-(empirically verified) `claude --append-system-prompt-file ~/.flotilla/infra/CLAUDE.md -w infra`.
+This creates a worktree on a new branch named after the agent, scaffolds
+`~/.flotilla/infra/launch.json` with the desk's launch command and its worktree
+`cwd`, and seeds the constitutional doctrine into the worktree's native identity
+file (`CLAUDE.md` for a Claude desk, `AGENTS.md` for a Grok or Codex desk). Edit
+`launch.json` if you need to adjust the launch command or target.
+
 `flotilla resume` reads the workspace `launch.json` first and **falls back to the
 flat `flotilla-launch.json`** when no workspace exists, so migration is per-agent and
 nothing breaks until you move a desk over. The workspace lives under `$HOME` (the
