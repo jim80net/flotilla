@@ -26,6 +26,7 @@
 - [x] 4.1 Unit/integration: coordinator init scaffolds secrets launch + coordinator rules (PR #262 + 3.2)
 - [x] 4.2 Detector classifier smoke on codex turn-final fixtures
 - [x] 4.3 `go test ./...`
+- [x] 4.4 Placeholder→Pending live sanity (recycle idle-gate + fast-turn confirm) — CLOSED 2026-07-03
 
 ## 5. Supervised trial (post-implementation — operator gate)
 - [ ] 5.1 Provision one low-stakes project XO with `surface: "codex"`
