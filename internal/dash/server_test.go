@@ -212,6 +212,24 @@ func TestControlTargetsNotClobberedGuard(t *testing.T) {
 	}
 }
 
+// TestSessionMirrorGlance locks the session-mirror glance widget (design §2.5): the
+// reader-map placeholder is replaced by a render that consumes /api/session-mirror.
+// No JS test runner, so this asserts the served dash.js has the render + fetch and
+// no longer carries the old placeholder.
+func TestSessionMirrorGlance(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{"renderSessionMirror", "/api/session-mirror", "fetchMirror"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js must consume the session mirror (missing %q) — design §2.5", marker)
+		}
+	}
+	if strings.Contains(js, "renderReaderMapPlaceholder") {
+		t.Error("dash.js must replace the reader-map placeholder with the session-mirror glance — design §2.5")
+	}
+}
+
 // TestGoalsCanvasAssets locks the Goals view's pan/zoom canvas (#280 Inc 1). The
 // Goals view was ported from the merged flex-column layout to the operator-approved
 // 2D Fleet Situation Map — an absolute tiered layout inside a transform-driven world

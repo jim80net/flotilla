@@ -172,6 +172,7 @@
         selectedDesk = this.getAttribute("data-desk");
         renderConversations();
         syncControlTargets(true); // explicit desk-selection: set the targets authoritatively
+        fetchMirror();            // load the newly-selected desk's session mirror
       });
     }
   }
@@ -230,11 +231,46 @@
       : "Select a desk from the fleet map";
   }
 
-  function renderReaderMapPlaceholder() {
+  // renderSessionMirror is the glance widget (design §2.5): the selected desk's
+  // LATEST session-mirror entry (the desk's own session output at info level),
+  // replacing the old reader-map placeholder. Reads /api/session-mirror
+  // (SessionMirrorDoc, entries ascending oldest→newest, so the latest is last).
+  // Degrades gracefully (empty state) when the endpoint or desk is absent — the
+  // full history thread is a follow-on increment.
+  function renderSessionMirror() {
     var map = el("conv-map");
+    if (!selectedDesk) {
+      map.innerHTML = '<span class="conv-map-label">session mirror</span>' +
+        '<span class="conv-map-empty">Select a desk to see its latest session output.</span>';
+      return;
+    }
+    var doc = cache.mirror || {};
+    var entries = Array.isArray(doc.entries) ? doc.entries : [];
+    if (!entries.length) {
+      map.innerHTML = '<span class="conv-map-label">session mirror</span>' +
+        '<span class="conv-map-empty">' +
+        (doc.error ? "Session mirror unavailable." : "No session mirror yet for this desk.") +
+        "</span>";
+      return;
+    }
+    var latest = entries[entries.length - 1]; // ascending order → newest is last
+    var when = latest.ts ? '<time class="mirror-when">' + escapeHtml(latest.ts) + "</time>" : "";
+    var body = escapeHtml(latest.info || "").replace(/\n/g, "<br>");
     map.innerHTML =
-      '<span class="conv-map-label">reader map</span>' +
-      '<span class="conv-map-empty">Envelope deltas land here when Pillar E ships (<code>latest-delta.json</code>).</span>';
+      '<span class="conv-map-label">session mirror ' + when + "</span>" +
+      '<div class="mirror-glance">' + body + "</div>";
+  }
+
+  // fetchMirror loads the selected desk's session mirror and re-renders the glance.
+  // Guarded on selectedDesk so a slow response for a de-selected desk is dropped.
+  function fetchMirror() {
+    var want = selectedDesk;
+    if (!want) { cache.mirror = null; renderSessionMirror(); return; }
+    getJSON("/api/session-mirror?agent=" + encodeURIComponent(want) + "&limit=100").then(function (d) {
+      if (selectedDesk === want) { cache.mirror = d; renderSessionMirror(); }
+    }).catch(function (err) {
+      if (selectedDesk === want) { cache.mirror = { agent: want, entries: [], error: err.message }; renderSessionMirror(); }
+    });
   }
 
   function renderThread(history) {
@@ -301,7 +337,7 @@
     renderConversationRail(status, topology, fresh);
     renderConversationHeader(topology);
     renderDeskCard(status, fresh);
-    renderReaderMapPlaceholder();
+    renderSessionMirror();
     renderThread(history);
     renderBacklogStrip(history);
   }
@@ -350,6 +386,7 @@
       if (current()) {
         renderConversations();
         syncControlTargets();
+        fetchMirror(); // keep the selected desk's session-mirror glance current on each tick
       }
       // Keep the Goals view live off the same refresh cadence (SSE-triggered). It
       // fetches /api/goals itself and no-ops until the operator has opened the tab.
