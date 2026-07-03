@@ -87,7 +87,10 @@
         '<div class="gtile-d">' + escapeHtml(t.d) + "</div>" +
         "</div>";
     }).join("");
-    updateLive(c);
+    // NOTE: the aria-live announcement is NOT made here — renderSituation runs on
+    // every render (incl. error/empty), so announcing the count summary here would
+    // alternate with the error/empty announcement each refresh and defeat the dedup.
+    // render() announces the summary only on the success path.
   }
 
   // updateLive announces the fleet-goal situation to a screen reader (an aria-live
@@ -527,7 +530,10 @@
     // rebuild) must NOT yank the map — that would break the #283 "operator's pan/zoom
     // owns framing" contract.
     nodesEl.addEventListener("focusin", function (e) {
-      if (!kbdNav) return;
+      var kbd = kbdNav;
+      kbdNav = false; // one-shot: consume it here so a LATER programmatic focus
+      // (e.g. restoreFocus after a rebuild, or focus after a wheel-zoom) can't recenter
+      if (!kbd) return;
       var card = e.target.closest(".gnode");
       if (!card) return;
       var n = nodeById[card.getAttribute("data-id")];
@@ -617,6 +623,7 @@
     }
     graph.classList.remove("hidden");
     empty.classList.add("hidden");
+    updateLive(doc.counts || {}); // announce the situation summary — success path only (see renderSituation)
     depEdges = Array.isArray(doc.edges) ? doc.edges : []; // cross-dependency edges for drawEdges
 
     var nodesEl = q("goals-nodes");
