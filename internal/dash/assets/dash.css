@@ -964,3 +964,64 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 
 .goals-empty { padding: 30px; text-align: center; border: 1px dashed var(--line); border-radius: var(--r); }
 .goals-empty.hidden { display: none; }
+
+/* ── Inc 2: hover chain-highlight, selection, detail drawer, help tooltip ── */
+
+/* an edge lit by hovering its subtree */
+.gedge.lit { stroke: var(--cyan); stroke-width: 2.4; opacity: 1; }
+
+/* the node whose detail drawer is open */
+.gnode.gnode-selected { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan), 0 8px 24px -10px rgba(79, 227, 208, .6); }
+
+/* "what this is" help — a hovertext tooltip, not a persistent panel (feedback #1) */
+.ghelp-wrap { position: relative; display: inline-block; }
+.ghelp {
+  width: 17px; height: 17px; border-radius: 50%; border: 1px solid var(--line);
+  background: var(--abyss-2); color: var(--ink-3); font-size: .68rem; line-height: 1; cursor: help;
+  font-family: var(--mono); vertical-align: middle; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.ghelp:hover, .ghelp:focus-visible { border-color: var(--cyan-dim); color: var(--cyan); }
+.ghelp-tip {
+  position: absolute; left: 0; top: calc(100% + 8px); z-index: 30; width: 320px; max-width: calc(100vw - 40px);
+  background: rgba(10, 16, 25, .96); border: 1px solid var(--cyan-dim); border-radius: var(--r-sm);
+  padding: 10px 12px; font-size: .74rem; line-height: 1.42; color: var(--ink-2); font-weight: 400;
+  letter-spacing: 0; text-transform: none; box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .7);
+  opacity: 0; visibility: hidden; transform: translateY(-3px); transition: opacity .16s var(--ease), transform .16s var(--ease), visibility .16s;
+}
+.ghelp-tip b { color: var(--ink); font-weight: 500; }
+/* shown on hover/focus AND on click (touch has no hover) via aria-expanded */
+.ghelp:hover + .ghelp-tip, .ghelp:focus-visible + .ghelp-tip, .ghelp[aria-expanded="true"] + .ghelp-tip, .ghelp-wrap:hover .ghelp-tip {
+  opacity: 1; visibility: visible; transform: none;
+}
+
+/* detail drawer — slides in over the right of the graph on node click */
+.goals-drawer {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 360px; max-width: 82%; z-index: 20;
+  background: linear-gradient(180deg, var(--abyss-2), var(--abyss-3));
+  border-left: 1px solid var(--cyan-dim); box-shadow: -24px 0 48px -24px rgba(0, 0, 0, .7);
+  transform: translateX(100%); transition: transform .3s var(--ease);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.goals-drawer.open { transform: none; }
+.gd-close {
+  position: absolute; top: 10px; right: 12px; width: 26px; height: 26px; border-radius: 6px;
+  border: 1px solid var(--line); background: transparent; color: var(--ink-3); cursor: pointer; font-size: 1rem; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+}
+.gd-close:hover { border-color: var(--cyan-dim); color: var(--ink); }
+.gd-head { padding: 15px 16px 13px; border-bottom: 1px solid var(--line); }
+.gd-eyebrow { font-size: .62rem; letter-spacing: .13em; text-transform: uppercase; color: var(--ink-3); }
+.gd-title { font-family: var(--display); font-weight: 600; font-size: 1.32rem; color: var(--ink); line-height: 1.12; margin-top: 3px; padding-right: 30px; }
+.gd-pills { display: flex; gap: 8px; margin-top: 9px; flex-wrap: wrap; align-items: center; }
+.gd-owner { font-size: .68rem; color: var(--cyan-dim); }
+.gd-parent { font-size: .66rem; color: var(--ink-3); border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; }
+.gd-body { padding: 14px 16px; overflow-y: auto; flex: 1; }
+.gd-sec { margin-bottom: 15px; }
+.gd-sec h4 { margin: 0 0 6px; font-size: .62rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
+.gd-sec p { margin: 0; font-size: .82rem; line-height: 1.48; color: var(--ink-2); }
+.gd-ask { border: 1px solid rgba(255, 180, 84, .4); background: rgba(255, 180, 84, .06); border-radius: var(--r-sm); padding: 10px 12px; }
+.gd-ask-lab { font-size: .62rem; letter-spacing: .12em; text-transform: uppercase; color: var(--amber); margin-bottom: 5px; }
+.gd-ask p { color: var(--ink); font-size: .82rem; }
+.gd-row { display: flex; justify-content: space-between; gap: 10px; align-items: center; font-size: .78rem; color: var(--ink-2); padding: 5px 0; border-bottom: 1px solid var(--line-soft, var(--line)); }
+.gd-row-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

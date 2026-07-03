@@ -241,6 +241,12 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("goals.js must retain the keyed-update engine (missing %q) — #283", marker)
 		}
 	}
+	// Inc 2: node-detail drawer + hover chain-highlight + reapply-after-render.
+	for _, marker := range []string{"openDrawer", "highlightChain", "reapplyTransient"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must retain the detail-drawer / hover engine (missing %q) — Inc 2", marker)
+		}
+	}
 
 	body := doGet(t, srv, "/").Body.String()
 	if !strings.Contains(body, "/static/goals.js") {
@@ -248,7 +254,10 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	}
 	// The canvas DOM the engine binds to: a pan/zoom viewport → transformed world →
 	// (edges, tier labels, nodes) + zoom controls.
-	for _, id := range []string{"goals-viewport", "goals-world", "goals-nodes", "goals-edges", "goals-tierlabels", "goals-zin", "goals-zout", "goals-zfit"} {
+	for _, id := range []string{
+		"goals-viewport", "goals-world", "goals-nodes", "goals-edges", "goals-tierlabels", "goals-zin", "goals-zout", "goals-zfit",
+		"goals-drawer", "goals-drawer-body", "goals-drawer-close", "goals-help", // Inc 2: drawer + help tooltip
+	} {
 		if !strings.Contains(body, id) {
 			t.Errorf("index must contain the goals canvas element #%s", id)
 		}
