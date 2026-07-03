@@ -1,4 +1,4 @@
-package goals
+package goals_test
 
 import (
 	"encoding/json"
@@ -6,12 +6,13 @@ import (
 	"testing"
 
 	"github.com/jim80net/flotilla/internal/dash"
+	"github.com/jim80net/flotilla/internal/goals"
 )
 
 // rollupDoc parses YAML, compiles to the dash GoalsFile contract, and builds the rendered doc.
 func rollupDoc(t *testing.T, yaml string, extra ...func(*dash.GoalsInputs)) dash.GoalsDoc {
 	t.Helper()
-	f, err := ParseYAML([]byte(yaml))
+	f, err := goals.ParseYAML([]byte(yaml))
 	if err != nil {
 		t.Fatalf("ParseYAML: %v", err)
 	}
@@ -260,7 +261,7 @@ goals:
 }
 
 func TestRollup_ConversationAgentPassthrough(t *testing.T) {
-	f, err := ParseYAML([]byte(`version: 1
+	f, err := goals.ParseYAML([]byte(`version: 1
 goals:
   - id: g
     title: T
