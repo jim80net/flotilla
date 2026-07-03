@@ -776,19 +776,52 @@
   // openModal — the "waiting on you" intervention modal (#302): a situation brief
   // (scope, description, the operator-gated items) + a text input for a response.
   // The reply PATH is a stub for this prototype (wired to the control API later).
+  // renderBrief turns a decision-package markdown string into safe HTML (#347). It ESCAPES
+  // first (no raw HTML from the brief ever reaches the DOM), then applies a small, fixed
+  // markdown subset: #/##/### headings, - / * bullet lists, blank-line paragraphs, and
+  // inline **bold** + `code`. Enough for a real decision brief; nothing that can inject.
+  function renderBrief(md) {
+    var lines = escapeHtml(String(md == null ? "" : md)).split(/\r?\n/);
+    function inline(s) {
+      return s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/`([^`]+)`/g, "<code>$1</code>");
+    }
+    var out = [], list = null;
+    function flush() { if (list) { out.push("<ul>" + list.join("") + "</ul>"); list = null; } }
+    for (var i = 0; i < lines.length; i++) {
+      var ln = lines[i], h = /^(#{1,3})\s+(.*)$/.exec(ln), li = /^\s*[-*]\s+(.*)$/.exec(ln);
+      if (h) { flush(); out.push('<div class="gm-brief-h">' + inline(h[2]) + "</div>"); }
+      else if (li) { (list = list || []).push("<li>" + inline(li[1]) + "</li>"); }
+      else if (ln.trim() === "") { flush(); }
+      else { flush(); out.push("<p>" + inline(ln) + "</p>"); }
+    }
+    flush();
+    return out.join("");
+  }
+
+  var BRIEF_EMPTY = '<p class="gm-brief-empty muted">No decision brief yet — ask the desk for the recommendation, the value, and the tradeoff before deciding.</p>';
+
   function openModal(id) {
     var n = nodeById[id];
     if (!n) return;
     var gated = (n.work_items || []).filter(function (wi) { return wi.class === "awaiting" || wi.class === "blocked"; });
-    var brief = '<p class="gm-scope">' + escapeHtml(scopeNoun(n)) + "</p>" +
-      (n.description ? "<p>" + escapeHtml(n.description) + "</p>" : "") +
-      (gated.length
-        ? '<div class="gm-gated"><div class="gm-gated-lab">Waiting on you</div>' +
-          gated.map(function (wi) { return "<p>" + escapeHtml(wi.label || wi.kind || "") + (wi.detail ? " — " + escapeHtml(wi.detail) : "") + "</p>"; }).join("") +
-          "</div>"
-        : '<p class="muted">Nothing is gated on you here.</p>');
+    var parts = ['<p class="gm-scope">' + escapeHtml(scopeNoun(n)) + "</p>"];
+    if (n.description) parts.push("<p>" + escapeHtml(n.description) + "</p>");
+    // A node-level decision package renders in full (the decision is on the node itself).
+    if (n.brief) parts.push('<div class="gm-brief-full">' + renderBrief(n.brief) + "</div>");
+    if (gated.length) {
+      parts.push('<div class="gm-gated"><div class="gm-gated-lab">Waiting on you</div>' +
+        gated.map(function (wi) {
+          var head = '<p class="gm-gated-item">' + escapeHtml(wi.label || wi.kind || "") + (wi.detail ? " — " + escapeHtml(wi.detail) : "") + "</p>";
+          // The decision package inline (#347) — or an honest empty state when the desk
+          // has not attached one yet.
+          var body = wi.brief ? '<div class="gm-brief-full">' + renderBrief(wi.brief) + "</div>" : BRIEF_EMPTY;
+          return '<div class="gm-gated-row">' + head + body + "</div>";
+        }).join("") + "</div>");
+    } else if (!n.brief) {
+      parts.push('<p class="muted">Nothing is gated on you here.</p>');
+    }
     q("goals-modal-title").textContent = n.title || n.id;
-    q("goals-modal-brief").innerHTML = brief;
+    q("goals-modal-brief").innerHTML = parts.join("");
     var ta = q("goals-modal-input");
     if (ta) ta.value = "";
     var note = q("goals-modal-note");

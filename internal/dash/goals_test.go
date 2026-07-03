@@ -196,6 +196,35 @@ func TestBuildGoals_Collaborations(t *testing.T) {
 	}
 }
 
+// TestBuildGoals_DecisionBrief locks the #347 decision-package passthrough: a work item's
+// (and a node's) optional Brief reaches the /api/goals shape so the respond modal can render
+// it; an item without a brief stays empty (the modal shows the honest empty state).
+func TestBuildGoals_DecisionBrief(t *testing.T) {
+	file := GoalsFile{Goals: []Goal{
+		{ID: "g", Title: "G", Brief: "node-level decision package", WorkItems: []WorkItem{
+			{Kind: WorkInline, Text: "Kelly loss-cap — value sign-off", Brief: "## Recommendation\ncap at 0.25\n\n- value: capital protected\n- tradeoff: fewer entries"},
+			{Kind: WorkInline, Text: "no-brief item"},
+		}},
+	}}
+	doc := BuildGoals(GoalsInputs{File: file, FileOK: true})
+	if len(doc.Goals) != 1 {
+		t.Fatalf("goals = %d", len(doc.Goals))
+	}
+	node := doc.Goals[0]
+	if node.Brief != "node-level decision package" {
+		t.Errorf("node-level brief passthrough = %q", node.Brief)
+	}
+	if len(node.WorkItems) != 2 {
+		t.Fatalf("work items = %d", len(node.WorkItems))
+	}
+	if !strings.Contains(node.WorkItems[0].Brief, "Recommendation") {
+		t.Errorf("work-item brief must pass through, got %q", node.WorkItems[0].Brief)
+	}
+	if node.WorkItems[1].Brief != "" {
+		t.Errorf("an item without a brief must stay empty, got %q", node.WorkItems[1].Brief)
+	}
+}
+
 func TestBuildGoals_DeskIDCollision(t *testing.T) {
 	// An authored goal LITERALLY named "desk:beta" must not be clobbered by the card
 	// synthesized for member beta — the synthetic id is suffixed to stay unique.
