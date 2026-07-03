@@ -189,6 +189,8 @@ func TestCmdWorkspaceInitCodexScaffoldsAgentsAndRules(t *testing.T) {
 	for _, must := range []string{
 		`pattern = ["gh", "pr", "merge"]`,
 		`pattern = ["git", "push", "origin", "main"]`,
+		`pattern = ["git", "push", "origin", "main:main"]`,
+		`pattern = ["git", "push", "origin", "--force"]`,
 		`pattern = ["git", "push", "--force"]`,
 		`must not merge PRs`,
 		`must not write to the default branch`,

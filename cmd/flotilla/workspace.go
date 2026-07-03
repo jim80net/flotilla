@@ -293,6 +293,46 @@ prefix_rule(
     justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
 )
 prefix_rule(
+    pattern = ["git", "push", "origin", "main:main"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "master:master"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "refs/heads/main"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "refs/heads/master"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "main:main"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "master:master"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "refs/heads/main"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "refs/heads/master"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
     pattern = ["git", "push", "--force"],
     decision = "forbidden",
     justification = "Execution desks must not force-push; use ordinary feature-branch pushes.",
@@ -304,6 +344,36 @@ prefix_rule(
 )
 prefix_rule(
     pattern = ["git", "push", "-f"],
+    decision = "forbidden",
+    justification = "Execution desks must not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "--force"],
+    decision = "forbidden",
+    justification = "Execution desks must not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "--force-with-lease"],
+    decision = "forbidden",
+    justification = "Execution desks must not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "-f"],
+    decision = "forbidden",
+    justification = "Execution desks must not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "--force"],
+    decision = "forbidden",
+    justification = "Execution desks must not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "--force-with-lease"],
+    decision = "forbidden",
+    justification = "Execution desks must not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "-f"],
     decision = "forbidden",
     justification = "Execution desks must not force-push; use ordinary feature-branch pushes.",
 )

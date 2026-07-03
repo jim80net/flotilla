@@ -58,9 +58,10 @@ self-merge — doctrine + gate stack are the real control).
 
 **prefix_rule residual** (argv-prefix matching only; not a security boundary):
 
-- `git push origin <branch> --force` — force flag after remote/ref is not a matching prefix
-- Non-`origin`/`upstream` remote names pushing to `main`
-- Default-branch writes via refspecs not listed above
+- `git push <remote> <branch> --force` — force flag after a refspec is not a matching prefix
+  (`prefix_rule` has no infix/wildcard; `origin --force` and leading `--force` are covered)
+- Non-`origin`/`upstream` remote names pushing to `main`/`master`
+- Default-branch refspecs beyond the scaffolded literal set (e.g. `main:refs/heads/main`)
 
 Project `.codex/` loads when the project is trusted; flotilla desks operate in trusted worktrees.
 
