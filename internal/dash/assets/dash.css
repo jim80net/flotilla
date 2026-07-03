@@ -1267,19 +1267,31 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 
 /* #302 per-node controls — ⚠ respond (gated) + ⓘ details; hover/focus-revealed so
    the canvas stays clean. Absolutely positioned → never change card height. */
-.gnode-ctl { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; z-index: 2; }
+/* The node controls counter-scale the world's fit-to-view zoom (--ctl-scale = max(1,
+   1/scale), set on goals-world in applyTransform) so they stay SCREEN-CONSTANT — under a
+   0.3 phone fit-scale a 26px button would render ~8px (untappable, mobile-QA #330). The
+   inverse scale pins them to their 26px screen size (clears the WCAG 2.5.8 24px minimum);
+   transform-origin keeps them anchored at the card's top-right corner. */
+.gnode-ctl {
+  position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; z-index: 2;
+  transform: scale(var(--ctl-scale, 1));
+  transform-origin: top right;
+}
 .gnode-respond, .gnode-detail {
-  width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--line);
+  width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--line);
   background: var(--abyss-2); color: var(--ink-3); cursor: pointer; font-size: .82rem; line-height: 1;
   display: inline-flex; align-items: center; justify-content: center; padding: 0;
 }
 /* ⚠ respond is ALWAYS visible on a gated node (the operator must see what needs them);
-   ⓘ details is hover/focus-revealed to keep the canvas clean. */
+   ⓘ details is hover/focus-revealed to keep the canvas clean on pointer devices. */
 .gnode-respond { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 55%, transparent); }
 .gnode-respond:hover { background: color-mix(in srgb, var(--amber) 16%, transparent); }
 .gnode-detail { opacity: 0; transition: opacity .15s var(--ease); }
 .gnode:hover .gnode-detail, .gnode:focus-within .gnode-detail, .gnode:focus-visible .gnode-detail { opacity: 1; }
 .gnode-detail:hover { border-color: var(--cyan-dim); color: var(--cyan); }
+/* On touch (no hover), the ⓘ can never be hover-revealed — always show it so it's
+   reachable (mobile-QA #330). */
+@media (hover: none) { .gnode-detail { opacity: 1; } }
 
 /* #302 intervention modal — situation brief + response input */
 .goals-modal {

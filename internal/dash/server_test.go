@@ -366,6 +366,15 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("goals.js must retain the collaboration-container engine (missing %q) — #324 Inc 3", marker)
 		}
 	}
+	// mobile-QA #330: the node controls counter-scale the fit-to-view zoom (--ctl-scale)
+	// so they stay screen-constant (tappable) on phone, and the css reveals ⓘ on touch.
+	if !strings.Contains(js, "--ctl-scale") {
+		t.Error("applyTransform must set --ctl-scale so node controls stay screen-constant under zoom (#330)")
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	if !strings.Contains(css, "var(--ctl-scale") || !strings.Contains(css, "@media (hover: none)") {
+		t.Error("dash.css must counter-scale .gnode-ctl and reveal ⓘ on touch (@media hover:none) — #330")
+	}
 	for _, marker := range []string{"leafCount", "reach(", "nodeW", "RING_GAP"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("goals.js must retain the #324 content-aware org geometry (missing %q)", marker)

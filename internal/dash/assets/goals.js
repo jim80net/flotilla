@@ -1050,7 +1050,12 @@
   /* ── pan / zoom (ported) ───────────────────────────────────────────────── */
   function applyTransform() {
     var world = q("goals-world");
-    if (world) world.style.transform = "translate(" + view.tx + "px," + view.ty + "px) scale(" + view.scale + ")";
+    if (!world) return;
+    world.style.transform = "translate(" + view.tx + "px," + view.ty + "px) scale(" + view.scale + ")";
+    // Counter-scale the node controls so they stay screen-constant (tappable) as the map
+    // zooms out — inherited by every .gnode-ctl (mobile-QA #330). Only enlarge (never
+    // shrink below base) when zoomed out; base size when zoomed in.
+    world.style.setProperty("--ctl-scale", Math.max(1, 1 / (view.scale || 1)));
   }
 
   // fit: scale to width (never upscale past 1), anchor top so the task-column
