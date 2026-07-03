@@ -58,10 +58,12 @@ func TestLinkWorkItemYAML_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	found := false
 	for _, g := range f.Goals {
 		if g.ID != "child" {
 			continue
 		}
+		found = true
 		count := 0
 		for _, wi := range g.WorkItems {
 			if wi.Kind == "backlog" && wi.Match == "[in-flight] ship it" {
@@ -72,6 +74,47 @@ func TestLinkWorkItemYAML_Idempotent(t *testing.T) {
 			t.Fatalf("expected one backlog item, got %d", count)
 		}
 	}
+	if !found {
+		t.Fatal("child goal not found in parsed output")
+	}
+}
+
+func TestLinkWorkItemYAML_InlineIdempotentOnWhitespace(t *testing.T) {
+	text := "ship it"
+	out1, err := LinkWorkItemYAML([]byte(linkFixtureYAML), "child", WorkItem{
+		Kind: "inline",
+		Text: text,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out2, err := LinkWorkItemYAML(out1, "child", WorkItem{
+		Kind: "inline",
+		Text: "  " + text + "  ",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := ParseYAML(out2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range f.Goals {
+		if g.ID != "child" {
+			continue
+		}
+		count := 0
+		for _, wi := range g.WorkItems {
+			if wi.Kind == "inline" && strings.TrimSpace(wi.Text) == text {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Fatalf("whitespace-differing re-link should be idempotent, got %d inline items", count)
+		}
+		return
+	}
+	t.Fatal("child goal not found")
 }
 
 func TestLinkWorkItemYAML_PreservesComments(t *testing.T) {

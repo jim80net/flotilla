@@ -147,7 +147,7 @@ func workItemNodeMatches(wi *yaml.Node, item WorkItem) bool {
 		}
 		return match == strings.TrimSpace(item.Match)
 	case "inline":
-		return mappingScalar(wi, "text") == item.Text
+		return mappingScalar(wi, "text") == strings.TrimSpace(item.Text)
 	case "desk":
 		agent := mappingScalar(wi, "agent")
 		if agent == "" {
