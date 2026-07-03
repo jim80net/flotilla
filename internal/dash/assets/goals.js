@@ -118,6 +118,18 @@
   // chips + the text that carries status). It is regenerated on an in-place
   // refresh; the article WRAPPER (identity, geometry, focus, transient classes)
   // is left untouched — see updateInPlace.
+  //
+  // TWO CONTRACTS for later increments (Inc 2+):
+  //  1. Transient UI state (a drawer-selected marker, a hover-chain class, a
+  //     pulse) MUST be attached to the ARTICLE element, NOT its inner children —
+  //     an in-place refresh replaces the inner html but keeps the article, so only
+  //     article-level state survives an SSE tick.
+  //  2. Any field rendered here that can change the card's HEIGHT (currently only
+  //     title/description wrap and the work-item COUNT) MUST also be in
+  //     structuralSig, or an in-place update will leave stale geometry. The
+  //     excluded live fields (status_display, a work-item's class/detail) are
+  //     colour/text-only and the chip CSS pins each work-item to a fixed
+  //     single-line row (.gwi-label / .gwi-detail nowrap), so they can't.
   function nodeInner(n) {
     var vis = visToken(n);
     var owner = n.owner ? '<span class="gnode-owner">led by ' + escapeHtml(n.owner) + "</span>" : "";
@@ -238,11 +250,16 @@
   // element identity so keyboard focus and any transient UI classes (the drawer
   // selection / hover chain / pulse that later increments add to the article)
   // survive the tick, instead of being wiped by a full innerHTML teardown.
+  // The tuple is DELIBERATELY order-sensitive (JSON.stringify of an array): a
+  // reorder of goals[] changes the sig → a full rebuild → so updateInPlace's
+  // index-based children[i] ↔ goals[i] mapping is never handed a reordered array.
+  // Work items contribute only kind+label (their identity + count) — enough to
+  // detect an add/remove/retitle; class/detail are excluded per contract #2 above.
   function structuralSig(goals) {
     return JSON.stringify(goals.map(function (n) {
       return [n.id, n.parent || "", n.depth || 0, n.scope || "", n.title || "",
         n.description || "", n.owner || "",
-        (n.work_items || []).map(function (wi) { return [wi.kind || "", wi.label || "", wi.ref || "", wi.text || ""]; })];
+        (n.work_items || []).map(function (wi) { return [wi.kind || "", wi.label || ""]; })];
     }));
   }
 
@@ -254,10 +271,20 @@
     goals.forEach(function (n, i) {
       var card = nodesEl.children[i];
       if (!card) return;
-      var vis = visToken(n);
-      // swap only the state-* token; keep gnode / gnode-<scope> / any transient class
-      card.className = card.className.replace(/\bstate-[a-z-]+\b/, "state-" + vis);
-      card.innerHTML = nodeInner(n);
+      var want = "state-" + visToken(n);
+      if (!card.classList.contains(want)) {
+        // swap the state-* token via classList (robust to an empty state or a
+        // future transient class that also starts with "state-"); keep gnode /
+        // gnode-<scope> / any transient class.
+        for (var j = card.classList.length - 1; j >= 0; j--) {
+          if (card.classList[j] !== want && card.classList[j].indexOf("state-") === 0) card.classList.remove(card.classList[j]);
+        }
+        card.classList.add(want);
+      }
+      // Rewrite inner content only when it actually changed — cuts per-tick churn
+      // and preserves inner state on the cards that DID NOT change this tick.
+      var html = nodeInner(n);
+      if (card._inner !== html) { card.innerHTML = html; card._inner = html; }
     });
   }
 
@@ -271,7 +298,10 @@
   function restoreFocus(id) {
     if (!id) return;
     var card = q("goals-nodes").querySelector('[data-id="' + String(id).replace(/["\\]/g, "\\$&") + '"]');
-    if (card) card.focus();
+    // preventScroll: the map is transform-positioned, not scroll-positioned, so the
+    // default focus scroll-into-view would jerk the viewport/page to a card's raw
+    // world coordinate. The operator's pan/zoom owns framing.
+    if (card) card.focus({ preventScroll: true });
   }
 
   /* ── main render (two-pass measure) ────────────────────────────────────── */
@@ -354,7 +384,10 @@
       // in one pass (all reads batched before any write) to avoid layout thrash.
       goals.forEach(function (n, i) { n._h = nodesEl.children[i] ? nodesEl.children[i].offsetHeight : DEFAULT_H; });
       layoutY(roots);
-      goals.forEach(function (n, i) { if (nodesEl.children[i]) nodesEl.children[i].style.top = n._y + "px"; });
+      goals.forEach(function (n, i) {
+        var c = nodesEl.children[i];
+        if (c) { c.style.top = n._y + "px"; c._inner = nodeInner(n); } // seed _inner so the in-place dirty-skip works from tick 1
+      });
       var world = q("goals-world");
       world.style.width = view.worldW + "px";
       world.style.height = view.worldH + "px";
