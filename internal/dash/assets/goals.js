@@ -280,15 +280,26 @@
     }
     var maxDepth = 0;
     goals.forEach(function (n) { maxDepth = Math.max(maxDepth, depthOf(n)); });
-    // rings from the hub: with a center node, tree-depth d maps to ring d; without one,
-    // roots are ring 1, so the outermost ring is maxDepth + 1.
-    var rings = center ? Math.max(1, maxDepth) : maxDepth + 1;
+    // rings from the hub: with a center node, its own subtree maps tree-depth d → ring d
+    // (outermost = maxDepth). BUT sibling roots (non-center roots) are placed AT ring 1,
+    // so their subtrees reach ring depth+1 — the outer ring is then maxDepth + 1. Without
+    // a center, roots are ring 1 likewise → maxDepth + 1. Size the world for the largest
+    // reachable ring so no node clips past the bounds (cubic #316 P2).
+    var hasSiblingRoot = false;
+    if (center) roots.forEach(function (r) { if (r !== center) hasSiblingRoot = true; });
+    var rings = (center && !hasSiblingRoot) ? Math.max(1, maxDepth) : (maxDepth + 1);
     var radius = rings * RING_STEP;
     var worldSize = 2 * radius + 360; // margin for the outermost cards
     view.worldW = worldSize; view.worldH = worldSize;
     var cx = worldSize / 2, cy = worldSize / 2;
 
+    // placed guards against a cycle in the (server-validated-acyclic) tree — the same
+    // defense-in-depth bound highlightChain carries; a repeat visit is skipped, never
+    // recursed (cubic #316 note).
+    var placed = {};
     function placeSubtree(n, a0, a1, ring) {
+      if (placed[n.id]) return;
+      placed[n.id] = true;
       var mid = (a0 + a1) / 2;
       if (ring === 0) {
         n._x = cx - n._w / 2; n._y = cy - heightOf(n) / 2;
@@ -306,6 +317,7 @@
     var ring1;
     if (center) {
       center._x = cx - center._w / 2; center._y = cy - heightOf(center) / 2;
+      placed[center.id] = true; // the hub is placed here, not via placeSubtree
       ring1 = childrenOf(center);
       roots.forEach(function (r) { if (r !== center) ring1.push(r); }); // sibling flotillas orbit too
     } else {
@@ -1055,7 +1067,11 @@
     }
     lastStructSig = null; // force a full rebuild (not an in-place status swap)
     view.fitted = false;  // re-frame for the new geometry
-    if (isVisible()) render();
+    // Only render immediately when a doc is already cached — a toggle BEFORE the first
+    // fetch would otherwise render the empty doc and flash a false "No goals file
+    // configured" state. The new mode is retained and applies to the next render (the
+    // pending/next refresh) either way (cubic #316 P2).
+    if (cache && isVisible()) render();
   }
 
   var layoutWired = false;
