@@ -35,10 +35,13 @@ if [[ ! -f "$LAUNCH" ]]; then
 fi
 
 python3 - "$ALLOWLIST" "$LAUNCH" "$REVERT" <<'PY'
-import json, os, pathlib, shlex, shutil, subprocess, sys, time
+import json, os, pathlib, shlex, shutil, sys
 
 allowlist_path, launch_path, revert = sys.argv[1], sys.argv[2], int(sys.argv[3])
-PLAIN = "bash -lc 'grok -m grok-composer-2.5-fast'"
+
+LAUNCH_BACKUP_SUFFIX = ".bak-grok-permissions-sync"
+STATE_SUFFIX = ".grok-permissions-sync-state.json"
+SETTINGS_BACKUP_NAME = "settings.local.json.bak-grok-permissions-sync"
 
 # Authoring-breaking deny fragments — sync refuses to ship if present.
 FORBIDDEN_DENY_FRAGMENTS = (
@@ -55,80 +58,68 @@ FORBIDDEN_DENY_FRAGMENTS = (
     "git tag",
 )
 
-def find_revert_backup(launch_path: pathlib.Path) -> pathlib.Path | None:
-    parent = launch_path.parent
-    candidates = sorted(
-        parent.glob("flotilla-launch.json.bak-*"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    for path in candidates:
-        try:
-            with open(path) as f:
-                data = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            continue
-        for recipe in data.get("agents", {}).values():
-            cmd = recipe.get("launch", "")
-            if "grok" in cmd and "--deny" not in cmd:
-                return path
-    return None
+def launch_file() -> pathlib.Path:
+    return pathlib.Path(launch_path)
 
-def restore_settings(cwd: str, name: str) -> None:
-    sp = pathlib.Path(cwd) / ".claude" / "settings.local.json"
-    if not sp.exists():
-        print(f"settings skip {name}: already absent")
+def backup_path() -> pathlib.Path:
+    return launch_file().with_name(launch_file().name + LAUNCH_BACKUP_SUFFIX)
+
+def state_path() -> pathlib.Path:
+    return launch_file().with_name(launch_file().name + STATE_SUFFIX)
+
+def desk_settings_backup(cwd: str) -> pathlib.Path:
+    return pathlib.Path(cwd) / ".claude" / SETTINGS_BACKUP_NAME
+
+def restore_desk_settings(name: str, desk_state: dict) -> None:
+    cwd = desk_state.get("cwd", "")
+    if not cwd:
+        print(f"settings skip {name}: no cwd in state", file=sys.stderr)
         return
-    git_ok = subprocess.run(
-        ["git", "-C", cwd, "rev-parse", "--git-dir"], capture_output=True
-    ).returncode == 0
-    if git_ok:
-        tracked = (
-            subprocess.run(
-                ["git", "-C", cwd, "ls-files", "--error-unmatch", ".claude/settings.local.json"],
-                capture_output=True,
-            ).returncode
-            == 0
-        )
-        head = (
-            subprocess.run(
-                ["git", "-C", cwd, "cat-file", "-e", "HEAD:.claude/settings.local.json"],
-                capture_output=True,
-            ).returncode
-            == 0
-        )
-        if tracked and head:
-            subprocess.run(
-                ["git", "-C", cwd, "checkout", "HEAD", "--", ".claude/settings.local.json"],
-                check=True,
-            )
-            print(f"settings restored {name}: git HEAD")
-            return
-    sp.unlink()
-    print(f"settings restored {name}: deleted sync-written file")
+    settings_path = pathlib.Path(cwd) / ".claude" / "settings.local.json"
+    before = desk_state.get("settings_before", "absent")
+    backup = desk_state.get("settings_backup")
+    if before == "absent":
+        if settings_path.exists():
+            settings_path.unlink()
+            print(f"settings restored {name}: removed sync-created file")
+        else:
+            print(f"settings skip {name}: already absent")
+        return
+    if not backup:
+        print(f"settings skip {name}: expected backup missing in state", file=sys.stderr)
+        return
+    backup_path = pathlib.Path(backup)
+    if not backup_path.is_file():
+        print(f"settings skip {name}: backup file missing {backup}", file=sys.stderr)
+        return
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(backup_path, settings_path)
+    backup_path.unlink(missing_ok=True)
+    print(f"settings restored {name}: from backup")
 
 if revert:
-    launch_file = pathlib.Path(launch_path)
-    backup = find_revert_backup(launch_file)
-    if backup is None:
-        print("sync-grok-permissions: no pre-sync launch backup found", file=sys.stderr)
+    launch = launch_file()
+    backup = backup_path()
+    state_file = state_path()
+    if not backup.is_file():
+        print(
+            "sync-grok-permissions: no pre-sync launch backup found "
+            f"({backup}); run apply before --revert",
+            file=sys.stderr,
+        )
         sys.exit(1)
-    shutil.copy2(launch_file, launch_file.with_name(launch_file.name + f".bak-pre-revert-{int(time.time())}"))
-    with open(backup) as f:
-        backup_doc = json.load(f)
-    with open(launch_file) as f:
-        launch = json.load(f)
-    for name, recipe in launch.get("agents", {}).items():
-        if "grok" not in recipe.get("launch", ""):
-            continue
-        pre = backup_doc.get("agents", {}).get(name, {}).get("launch", PLAIN)
-        recipe["launch"] = pre
-        cwd = recipe.get("cwd", "")
-        if cwd:
-            restore_settings(cwd, name)
-    with open(launch_file, "w") as f:
-        json.dump(launch, f, indent=2)
-        f.write("\n")
+    if not state_file.is_file():
+        print(
+            f"sync-grok-permissions: missing sync state {state_file}; run apply before --revert",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    with open(state_file) as f:
+        state = json.load(f)
+    shutil.copy2(backup, launch)
+    for name, desk_state in state.get("desks", {}).items():
+        restore_desk_settings(name, desk_state)
+    state_file.unlink(missing_ok=True)
     print(f"reverted launch from {backup}")
     sys.exit(0)
 
@@ -163,15 +154,47 @@ def grok_launch_cmd():
     inner = " ".join(shlex.quote(a) for a in args)
     return f"bash -lc {shlex.quote(inner)}"
 
-with open(launch_path) as f:
-    launch = json.load(f)
+launch = launch_file()
+with open(launch) as f:
+    launch_doc = json.load(f)
+
+# Snapshot before any mutation so --revert can restore exact pre-sync state.
+shutil.copy2(launch, backup_path())
+desk_state: dict[str, dict] = {}
+for name, recipe in launch_doc.get("agents", {}).items():
+    if "grok" not in recipe.get("launch", ""):
+        continue
+    cwd = recipe.get("cwd", "")
+    if not cwd:
+        continue
+    settings_path = pathlib.Path(cwd) / ".claude" / "settings.local.json"
+    entry: dict = {"cwd": cwd}
+    if settings_path.is_file():
+        backup = desk_settings_backup(cwd)
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(settings_path, backup)
+        entry["settings_before"] = "present"
+        entry["settings_backup"] = str(backup)
+    else:
+        entry["settings_before"] = "absent"
+        entry["settings_backup"] = None
+    desk_state[name] = entry
+
+state_doc = {
+    "version": 1,
+    "launch_backup": str(backup_path()),
+    "desks": desk_state,
+}
+with open(state_path(), "w") as f:
+    json.dump(state_doc, f, indent=2)
+    f.write("\n")
 
 settings_doc = json.dumps(perms, indent=2) + "\n"
 launch_cmd = grok_launch_cmd()
 updated_worktrees = 0
 updated_recipes = 0
 
-for name, recipe in launch.get("agents", {}).items():
+for name, recipe in launch_doc.get("agents", {}).items():
     cmd = recipe.get("launch", "")
     if "grok" not in cmd:
         continue
@@ -188,12 +211,14 @@ for name, recipe in launch.get("agents", {}).items():
     updated_worktrees += 1
     print(f"synced {name}: {settings_path}")
 
-with open(launch_path, "w") as f:
-    json.dump(launch, f, indent=2)
+with open(launch, "w") as f:
+    json.dump(launch_doc, f, indent=2)
     f.write("\n")
 
 print(f"allow rules: {len(allow)} | deny rules: {len(deny)} (never-autonomous only)")
-print(f"launch recipes updated: {updated_recipes} in {launch_path}")
+print(f"launch backup: {backup_path()}")
+print(f"sync state: {state_path()}")
+print(f"launch recipes updated: {updated_recipes} in {launch}")
 print(f"worktree settings written: {updated_worktrees}")
 PY
 

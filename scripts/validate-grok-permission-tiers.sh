@@ -3,7 +3,7 @@
 #
 # Read-tier probes exercise unprompted allows. Deny-tier probes use NON-LIVE
 # targets only — if a deny rule is misconfigured and the command runs, there is
-# zero blast radius (nonexistent PR, scratch ref deleted after the run).
+# zero blast radius (nonexistent PR, unique scratch ref deleted after the run).
 #
 # Usage: ./scripts/validate-grok-permission-tiers.sh [repo-cwd]
 set -euo pipefail
@@ -11,20 +11,25 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ALLOWLIST="${ROOT}/deploy/grok-permission-allowlist.json"
 CWD="${1:-$ROOT}"
-SCRATCH_REF="refs/heads/tmp-deny-probe"
+SCRATCH_REF="refs/heads/flotilla-deny-probe-$$-$(date +%s)"
 FAKE_PR="999999"
+CREATED_SCRATCH=0
 
 cleanup_scratch_ref() {
-  git -C "$CWD" push origin ":${SCRATCH_REF}" 2>/dev/null || true
+  if [[ "$CREATED_SCRATCH" -eq 1 ]]; then
+    git -C "$CWD" push origin ":${SCRATCH_REF#refs/heads/}" 2>/dev/null || true
+  fi
 }
 
 trap cleanup_scratch_ref EXIT
-cleanup_scratch_ref
 
 python3 - "$ALLOWLIST" "$CWD" "$FAKE_PR" "$SCRATCH_REF" <<'PY'
-import json, subprocess, sys
+import json, shlex, subprocess, sys
 
 allowlist_path, cwd, fake_pr, scratch_ref = sys.argv[1:5]
+qcwd = shlex.quote(cwd)
+# Branch name for :refspec probes (strip refs/heads/ prefix).
+scratch_branch = scratch_ref.removeprefix("refs/heads/")
 
 with open(allowlist_path) as f:
     doc = json.load(f)
@@ -53,7 +58,7 @@ def denied(out: str) -> bool:
 tests = [
     (
         "read-git-C-show",
-        f"Run shell only, no commentary: git -C {cwd} show HEAD:go.mod | head -1",
+        f"Run shell only, no commentary: git -C {qcwd} show HEAD:go.mod | head -1",
         lambda out, rc: rc == 0 and "module " in out,
     ),
     (
@@ -63,12 +68,22 @@ tests = [
     ),
     (
         "deny-force-push-scratch-ref",
-        f"Run shell only: git -C {cwd} push --force origin HEAD:{scratch_ref} 2>&1",
+        f"Run shell only: git -C {qcwd} push --force origin HEAD:{scratch_ref} 2>&1",
+        lambda out, rc: denied(out),
+    ),
+    (
+        "deny-plus-refspec-force-main",
+        f"Run shell only: git -C {qcwd} push origin +HEAD:main 2>&1",
+        lambda out, rc: denied(out),
+    ),
+    (
+        "deny-colon-refspec-delete-main",
+        f"Run shell only: git -C {qcwd} push origin :main 2>&1",
         lambda out, rc: denied(out),
     ),
     (
         "authoring-checkout-not-hard-denied",
-        f"Run shell only: git -C {cwd} checkout - 2>&1",
+        f"Run shell only: git -C {qcwd} checkout - 2>&1",
         lambda out, rc: not denied(out),
     ),
 ]
