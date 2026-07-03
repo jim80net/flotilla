@@ -13,7 +13,7 @@
 - [x] 2.4 `flotilla.example.json` coordinator-on-codex example — **flotilla-dev** (PR #262)
 
 ## 3. Codex coordinator surface (codex-harness-dev)
-- [ ] 3.1 Post-auth fixture capture (working/idle/approval/composer) — **[blocked: operator codex login]**
+- [x] 3.1 Post-auth fixture capture (working/idle/approval/composer) — LIVE 2026-07-03 ChatGPT auth, gpt-5.5 default
 - [x] 3.2 `ComposerStateProbe` on codex driver — binary-sourced `›` classifier; post-auth revalidation still on 3.1
 - [x] 3.3 Coordinator launch recipe: `FLOTILLA_SELF`, `FLOTILLA_SECRETS`, PATH
 - [x] 3.4 `scaffoldCodexCoordinatorRules` (distinct from execution `flotilla-desk.rules`)
@@ -23,7 +23,7 @@
 
 ## 4. Validation
 - [x] 4.1 Unit/integration: coordinator init scaffolds secrets launch + coordinator rules (PR #262 + 3.2)
-- [ ] 4.2 Detector classifier smoke on codex turn-final fixtures — blocked on 3.1
+- [x] 4.2 Detector classifier smoke on codex turn-final fixtures
 - [x] 4.3 `go test ./...`
 
 ## 5. Supervised trial (post-implementation — operator gate)

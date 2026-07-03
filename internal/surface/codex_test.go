@@ -33,14 +33,27 @@ func TestParseCodexState(t *testing.T) {
 			want:     StateAwaitingInput,
 		},
 		{
-			name:     "hooks trust gate → AwaitingInput",
+			name:     "hooks trust gate (binary) → AwaitingInput",
 			captured: "  Hooks need review\n  Press enter to continue\n  Trust all and continue",
 			want:     StateAwaitingInput,
 		},
 		{
-			name:     "approval modal Action Required → AwaitingApproval",
+			name: "hooks trust gate LIVE 2026-07-03 post-auth → AwaitingInput",
+			captured: "  Hooks need review\n  4 hooks are new or changed.\n" +
+				"  Press enter to confirm or esc to go back\n  Trust all and continue",
+			want: StateAwaitingInput,
+		},
+		{
+			name:     "approval modal Action Required (binary) → AwaitingApproval",
 			captured: "  [ ! ] Action Required\n  Approve for me\n  Decline this request",
 			want:     StateAwaitingApproval,
+		},
+		{
+			name: "on-request shell approval LIVE 2026-07-03 → AwaitingApproval",
+			captured: "  ◦ Running printf '%s\n" +
+				"  Would you like to run the following command?\n" +
+				"  › 1. Yes, proceed (y)\n  Press enter to confirm or esc to cancel",
+			want: StateAwaitingApproval,
 		},
 		{
 			name:     "main needs approval status → AwaitingApproval",
@@ -48,9 +61,15 @@ func TestParseCodexState(t *testing.T) {
 			want:     StateAwaitingApproval,
 		},
 		{
-			name:     "footer interrupt hint → Working",
+			name:     "footer interrupt hint (binary) → Working",
 			captured: "  streaming output above\n  esc to interrupt\n  /status",
 			want:     StateWorking,
+		},
+		{
+			name: "working spinner LIVE 2026-07-03 → Working",
+			captured: "  › Reply with exactly PONG and nothing else.\n" +
+				"  ◦ Working (0s • esc to interrupt)\n  › Find and fix a bug in @filename",
+			want: StateWorking,
 		},
 		{
 			name:     "task in progress guard → Working",
@@ -66,6 +85,12 @@ func TestParseCodexState(t *testing.T) {
 			name:     "idle empty composer → Idle (default)",
 			captured: "  Turn done.\n  › \n  / for commands",
 			want:     StateIdle,
+		},
+		{
+			name: "post-turn idle LIVE 2026-07-03 → Idle",
+			captured: "  • PONG\n  › Find and fix a bug in @filename\n" +
+				"  gpt-5.5 default · ~/workspace/github.com/jim80net/codex-harness-dev",
+			want: StateIdle,
 		},
 		{
 			name:     "empty capture → Idle",
@@ -167,6 +192,7 @@ func TestClassifyCodexComposerLine(t *testing.T) {
 	}{
 		{"empty › prompt → Cleared", "  Turn done.\n  › \n  / for commands", 1, ComposerCleared},
 		{"pending body after › → Pending", "  › draft in composer\n  / for commands", 0, ComposerPending},
+		{"placeholder hint LIVE 2026-07-03 → Pending", "  › Find and fix a bug in @filename\n  gpt-5.5 default", 0, ComposerPending},
 		{"approval row without › → Undetermined", "  [ ! ] Action Required\n  Approve for me", 0, ComposerUndetermined},
 		{"cursor out of range → Undetermined", "  › \n", 99, ComposerUndetermined},
 	}

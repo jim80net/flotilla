@@ -15,13 +15,11 @@ func init() { Register(newCodex()) }
 // codex drives OpenAI's official Codex CLI (codex-cli, ~/.codex session store) through the
 // Driver interface. It is claude-style (Working-positive, Idle-default) and resets with "/clear".
 //
-// PROVENANCE — login/launcher markers are LIVE-CAPTURED from codex-cli 0.142.5 on this host
-// (2026-07-02, unauthenticated welcome screen). In-session working/approval markers are sourced
-// from codex-cli 0.142.5 binary strings (TUI footer/approval chrome) and MUST be revalidated on
-// a logged-in desk after operator auth — do not treat them as closed without that capture.
-//
-// BLOCKING GATES: in-session composer/working markers are binary-sourced (codex-cli 0.142.5) and
-// MUST be revalidated post-auth on a logged-in desk before treating them as closed.
+// PROVENANCE — login/hooks gates LIVE-CAPTURED 2026-07-02 (unauthenticated welcome) and
+// 2026-07-03 (post-auth hooks-trust gate, ChatGPT auth). Working/approval/idle composer markers
+// LIVE-CAPTURED 2026-07-03 from codex-cli 0.142.5 interactive TUI (model gpt-5.5 default,
+// --ask-for-approval on-request). Binary-sourced markers retained where live did not elicit them
+// ([ ! ] Action Required / Approve for me — auto-review path; still in binary 0.142.5).
 type codex struct {
 	paneCommand  func(string) (string, error)
 	isShell      func(string) bool
@@ -119,7 +117,7 @@ const (
 	codexSignInChatGPT = "Sign in with ChatGPT"
 )
 
-// Hooks-trust gate (binary-sourced; appears before first session when hooks changed).
+// Hooks-trust gate (LIVE-CAPTURED 2026-07-03 post-auth when ~/.codex/hooks.json changed).
 const (
 	codexHooksReview   = "Hooks need review"
 	codexPressEnter    = "Press enter to continue"
@@ -127,8 +125,11 @@ const (
 	codexSignInDevice  = "Sign in with Device Code"
 )
 
-// Approval modal chrome (binary-sourced codex-cli 0.142.5 — revalidate post-auth).
+// Approval modal chrome — on-request permission prompt LIVE-CAPTURED 2026-07-03; auto-review
+// strings binary-sourced 0.142.5 (not elicited live this session).
 var codexApprovalMarkers = []string{
+	"Would you like to run the following command?", // LIVE 2026-07-03 on-request shell approval
+	"Would you like to make the following edits?",  // binary 0.142.5 (edit approval sibling)
 	"[ ! ] Action Required",
 	"[ . ] Action Required",
 	"Approve for me",
@@ -169,13 +170,15 @@ func codexIsLoginScreen(tail string) bool {
 }
 
 func codexIsHooksGate(tail string) bool {
-	return strings.Contains(tail, codexHooksReview) && strings.Contains(tail, codexPressEnter)
+	// Live 2026-07-03 uses "Press enter to confirm"; login welcome uses "Press enter to continue".
+	return strings.Contains(tail, codexHooksReview) &&
+		(strings.Contains(tail, codexPressEnter) || strings.Contains(tail, "Press enter to confirm"))
 }
 
 // --- ComposerStateProbe: codex cursor-indexed composer classifier ---
 
-// codexComposerPrompt is the input-line glyph on an idle codex desk (binary-sourced 0.142.5;
-// codex_test idle fixture uses "› "). Revalidate post-auth on a logged-in desk.
+// codexComposerPrompt is the input-line glyph on an idle codex desk (LIVE-CAPTURED 2026-07-03
+// post-auth; placeholder hint "› Find and fix a bug in @filename" reads Pending, empty "› " Cleared).
 const codexComposerPrompt = "›" // U+203A
 
 // ComposerState implements surface.ComposerStateProbe: reads the composer at the terminal cursor.
