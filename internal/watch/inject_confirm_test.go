@@ -10,6 +10,12 @@ import (
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
+// deliveredCount is a race-safe delivery counter for injector worker tests.
+type deliveredCount struct{ n atomic.Int32 }
+
+func (d *deliveredCount) inc()     { d.n.Add(1) }
+func (d *deliveredCount) get() int { return int(d.n.Load()) }
+
 // rig builds an Injector wired for white-box dispatch tests: send returns a scripted error,
 // reEnqueue and escalate are recorded (no timers, no goroutine), so in.deliver(job) can be
 // called directly and its busy-defer / escalation policy inspected deterministically.
@@ -111,11 +117,8 @@ func TestInjectorDropsBusyTick(t *testing.T) {
 	}
 }
 
-func TestInjectorTransientRelayReassessesThenDropsBounded(t *testing.T) {
-	// A transiently-uncertain relay (Unknown/Awaiting/Errored ⇒ ErrTransient) is re-assessed —
-	// never fired-into, never silently dropped — on the SHORT transient cadence, and bounded by
-	// maxTransientReassess (much lower than the busy bound; a glitch clears fast).
-	t.Run("below the cap → re-assessed", func(t *testing.T) {
+func TestInjectorTransientRelayReassessesThenDurableQueue(t *testing.T) {
+	t.Run("below the cap → short re-assess", func(t *testing.T) {
 		r := newRig(surface.ErrTransient)
 		r.in.deliver(Job{Agent: "xo", Kind: "relay"})
 		if len(r.deferred) != 1 {
@@ -125,16 +128,30 @@ func TestInjectorTransientRelayReassessesThenDropsBounded(t *testing.T) {
 			t.Errorf("re-enqueued deferrals = %d, want 1", r.deferred[0].deferrals)
 		}
 	})
-	t.Run("at the transient cap → escalate + drop (NOT the busy bound)", func(t *testing.T) {
+	t.Run("at the transient cap → durable queue + busy cadence (never drop)", func(t *testing.T) {
 		r := newRig(surface.ErrTransient)
-		r.in.deliver(Job{Agent: "xo", Kind: "relay", deferrals: maxTransientReassess - 1})
-		if len(r.deferred) != 0 {
-			t.Errorf("deferred = %d, want 0 (transient is capped LOW and drops, not the 5-min busy bound)", len(r.deferred))
+		r.in.deliver(Job{Agent: "xo", Kind: "relay", MessageID: "300", deferrals: maxTransientReassess - 1})
+		if len(r.deferred) != 1 {
+			t.Errorf("deferred = %d, want 1 (transient exhaustion joins durable queue)", len(r.deferred))
 		}
 		if len(r.alerts) != 1 || !strings.Contains(r.alerts[0], "uncertain") {
-			t.Errorf("alerts = %v, want exactly one 'uncertain'-worded drop alert (not the busy wording)", r.alerts)
+			t.Errorf("alerts = %v, want one uncertain→durable escalation", r.alerts)
+		}
+		for _, a := range r.alerts {
+			if strings.Contains(a, "DROPPED") {
+				t.Errorf("operator relay must not drop: %q", a)
+			}
 		}
 	})
+}
+
+func TestInjectorReplayedJobGetsInitialQueuedAlert(t *testing.T) {
+	// A replayed job with deferrals>busyEscalateAt and no prior alert still gets a QUEUED notice.
+	r := newRig(surface.ErrBusy)
+	r.in.deliver(Job{Agent: "xo", Kind: "relay", MessageID: "400", deferrals: busyEscalateAt})
+	if len(r.alerts) != 1 || !strings.Contains(r.alerts[0], "QUEUED") {
+		t.Fatalf("alerts = %v, want initial QUEUED for replayed high-deferral job", r.alerts)
+	}
 }
 
 func TestInjectorRelayFailureEscalatesNoSuccess(t *testing.T) {

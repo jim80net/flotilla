@@ -14,8 +14,9 @@ raise a LOUD operator alert once at the short threshold (~30s), then repeat at a
 stale interval (default 30m) while the message remains queued — escalation is in addition to
 delivery, never instead of it. On watch restart, pending queue entries SHALL replay before new
 live traffic. A heartbeat or change-detector wake arriving while busy SHALL be dropped (the next
-tick re-evaluates), not deferred. A relay whose pane state stays transiently uncertain SHALL
-remain bounded (escalate + drop after a low reassess cap) — distinct from sustained busy.
+tick re-evaluates), not deferred. A relay whose pane state stays transiently uncertain SHALL re-assess on a short cadence, then
+join the durable disk-backed queue at the busy cadence (escalate once, never drop) — distinct
+from heartbeat/detector ticks which remain bounded-drop.
 
 #### Scenario: An operator message arriving mid-turn is deferred, then delivered when idle
 - **WHEN** an operator message is enqueued while the target assesses as `Working`

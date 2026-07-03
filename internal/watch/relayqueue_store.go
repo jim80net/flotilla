@@ -69,11 +69,18 @@ func (s relayQueueStore) load() []Job {
 	return out
 }
 
+// upsert persists a deferred operator relay when the on-disk record is new or materially
+// changed (alert transitions, first enqueue timestamp). Deferrals-only bumps every 5s are
+// skipped — the in-memory job carries the live count; disk holds delivery identity + alert state.
 func (s relayQueueStore) upsert(j Job) {
 	if s.path == "" || j.MessageID == "" || !isRelay(j.Kind) {
 		return
 	}
-	f := s.readFile()
+	f, err := s.readFileForUpdate()
+	if err != nil {
+		log.Printf("flotilla watch: relay queue read for upsert failed: %v (upserting single entry)", err)
+		f = relayQueueFile{}
+	}
 	entry := pendingRelay{
 		MessageID:      j.MessageID,
 		Agent:          j.Agent,
@@ -86,6 +93,9 @@ func (s relayQueueStore) upsert(j Job) {
 	replaced := false
 	for i, p := range f.Pending {
 		if p.MessageID == j.MessageID {
+			if !queueEntryMateriallyChanged(p, entry) {
+				return
+			}
 			f.Pending[i] = entry
 			replaced = true
 			break
@@ -99,11 +109,34 @@ func (s relayQueueStore) upsert(j Job) {
 	}
 }
 
+func queueEntryMateriallyChanged(prev, next pendingRelay) bool {
+	if prev.Agent != next.Agent || prev.Message != next.Message || prev.OriginChannel != next.OriginChannel {
+		return true
+	}
+	if prev.EnqueuedAt.IsZero() != next.EnqueuedAt.IsZero() {
+		return true
+	}
+	if !prev.EnqueuedAt.Equal(next.EnqueuedAt) {
+		return true
+	}
+	if prev.LastStaleAlert.IsZero() != next.LastStaleAlert.IsZero() {
+		return true
+	}
+	if !prev.LastStaleAlert.Equal(next.LastStaleAlert) {
+		return true
+	}
+	return false
+}
+
 func (s relayQueueStore) remove(messageID string) {
 	if s.path == "" || messageID == "" {
 		return
 	}
-	f := s.readFile()
+	f, err := s.readFileForUpdate()
+	if err != nil {
+		log.Printf("flotilla watch: relay queue read for remove failed: %v", err)
+		return
+	}
 	if len(f.Pending) == 0 {
 		return
 	}
@@ -122,16 +155,31 @@ func (s relayQueueStore) remove(messageID string) {
 	}
 }
 
-func (s relayQueueStore) readFile() relayQueueFile {
+// readFileForUpdate reads the queue for a mutating operation. A corrupt file is renamed to a
+// .corrupt-<timestamp> sidecar (preserving bytes for recovery) before returning empty — never
+// silently overwritten without logging.
+func (s relayQueueStore) readFileForUpdate() (relayQueueFile, error) {
+	if s.path == "" {
+		return relayQueueFile{}, nil
+	}
 	raw, err := os.ReadFile(s.path)
 	if err != nil {
-		return relayQueueFile{}
+		if os.IsNotExist(err) {
+			return relayQueueFile{}, nil
+		}
+		return relayQueueFile{}, fmt.Errorf("read relay queue %q: %w", s.path, err)
 	}
 	var f relayQueueFile
 	if err := json.Unmarshal(raw, &f); err != nil {
-		return relayQueueFile{}
+		sidecar := s.path + ".corrupt-" + time.Now().UTC().Format("20060102T150405Z")
+		if renameErr := os.Rename(s.path, sidecar); renameErr != nil {
+			log.Printf("flotilla watch: relay queue at %q is corrupt (%v) and rename to sidecar failed: %v", s.path, err, renameErr)
+		} else {
+			log.Printf("flotilla watch: relay queue at %q is corrupt (%v); preserved as %q", s.path, err, sidecar)
+		}
+		return relayQueueFile{}, fmt.Errorf("corrupt relay queue %q: %w", s.path, err)
 	}
-	return f
+	return f, nil
 }
 
 func (s relayQueueStore) save(f relayQueueFile) error {

@@ -222,44 +222,50 @@ func previewBody(body string) string {
 
 // handleBusy applies the kind-aware not-idle policy for a busy (ErrBusy) or transiently-
 // uncertain (ErrTransient) result. A heartbeat/detector tick is time-relative and is DROPPED
-// (the next tick re-evaluates; re-delivering a stale tick would double-prompt). A relay
-// (operator) message is DEFERRED — re-enqueued OFF the worker so it stays free — and never
-// silently lost. Busy relays retry until idle (disk-backed, #286) with periodic stale
-// escalation. Transient: a SHORT transientDeferDelay re-assess, capped low at
-// maxTransientReassess (a glitch clears fast; a pane that stays uncertain is broken and the
-// detector catches it).
+// (the next tick re-evaluates; re-delivering a stale tick would double-prompt). Operator relays
+// are never dropped: short transient re-assess, then durable disk-backed retry at the busy
+// cadence until deliverable (#286).
 func (in *Injector) handleBusy(j Job, cause error) {
 	if !isRelay(j.Kind) {
 		log.Printf("flotilla watch: drop %s to %q (not idle): %v", deliveryKind(j.Kind), j.Agent, cause)
 		return
 	}
 	j.deferrals++ // j is the worker's local copy; the incremented value rides the re-enqueue
-	if errors.Is(cause, surface.ErrTransient) {
-		if j.deferrals >= maxTransientReassess {
-			in.raise("operator message to %q NOT delivered — XO pane state stayed uncertain (%d attempts); DROPPED (non-busy class)", j.Agent, j.deferrals)
-			log.Printf("flotilla watch: relay to %q dropped after %d uncertain re-assessments", j.Agent, j.deferrals)
-			return
-		}
+	if errors.Is(cause, surface.ErrTransient) && j.deferrals < maxTransientReassess {
 		in.reEnqueue(j, transientDeferDelay)
 		return
 	}
-	// ErrBusy: a genuinely busy agent — defer at the busy cadence, never drop (#286).
 	now := in.clock()
 	if j.enqueuedAt.IsZero() {
 		j.enqueuedAt = now
 	}
-	if j.deferrals == busyEscalateAt {
-		in.raise("operator message to %q is QUEUED — the XO has been busy ~%s; will deliver when it goes idle", j.Agent, time.Duration(busyEscalateAt)*busyDeferDelay)
-		j.lastStaleAlert = now
-	} else if !j.lastStaleAlert.IsZero() && now.Sub(j.lastStaleAlert) >= relayStaleAlertInterval {
-		in.raise("operator message to %q still QUEUED — busy for ~%s total; will deliver when it goes idle", j.Agent, now.Sub(j.enqueuedAt).Round(time.Second))
-		j.lastStaleAlert = now
-	} else if j.lastStaleAlert.IsZero() && now.Sub(j.enqueuedAt) >= relayStaleAlertInterval {
-		in.raise("operator message to %q still QUEUED — busy for ~%s total; will deliver when it goes idle", j.Agent, now.Sub(j.enqueuedAt).Round(time.Second))
+	if errors.Is(cause, surface.ErrTransient) && j.deferrals == maxTransientReassess {
+		in.raise("operator message to %q is QUEUED — pane state stayed uncertain after %d quick checks; persisting to durable queue until deliverable", j.Agent, maxTransientReassess)
 		j.lastStaleAlert = now
 	}
+	in.maybeStaleEscalateRelay(&j, now)
 	in.queue.upsert(j)
 	in.reEnqueue(j, busyDeferDelay)
+}
+
+// maybeStaleEscalateRelay raises the initial QUEUED alert (including replayed jobs whose
+// deferrals already exceed busyEscalateAt) and periodic stale reminders every
+// relayStaleAlertInterval while the message remains queued.
+func (in *Injector) maybeStaleEscalateRelay(j *Job, now time.Time) {
+	if j.lastStaleAlert.IsZero() && j.deferrals >= busyEscalateAt {
+		in.raise("operator message to %q is QUEUED — waiting ~%s; will deliver when the agent goes idle", j.Agent, time.Duration(j.deferrals)*busyDeferDelay)
+		j.lastStaleAlert = now
+		return
+	}
+	if !j.lastStaleAlert.IsZero() && now.Sub(j.lastStaleAlert) >= relayStaleAlertInterval {
+		in.raise("operator message to %q still QUEUED — waiting ~%s total; will deliver when the agent goes idle", j.Agent, now.Sub(j.enqueuedAt).Round(time.Second))
+		j.lastStaleAlert = now
+		return
+	}
+	if j.lastStaleAlert.IsZero() && !j.enqueuedAt.IsZero() && now.Sub(j.enqueuedAt) >= relayStaleAlertInterval {
+		in.raise("operator message to %q still QUEUED — waiting ~%s total; will deliver when the agent goes idle", j.Agent, now.Sub(j.enqueuedAt).Round(time.Second))
+		j.lastStaleAlert = now
+	}
 }
 
 func (in *Injector) clock() time.Time {

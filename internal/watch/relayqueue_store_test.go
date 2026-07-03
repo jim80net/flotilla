@@ -3,6 +3,7 @@ package watch
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -38,26 +39,70 @@ func TestReplayRelayQueueEnqueuesPending(t *testing.T) {
 	q := newRelayQueueStore(path)
 	q.upsert(Job{MessageID: "99", Agent: "xo", Message: "hi", Kind: "relay", deferrals: 10})
 
-	var delivered int
+	var count deliveredCount
 	in := NewInjector(func(string, string) error {
-		delivered++
+		count.inc()
 		return nil
 	}, 4)
 	in.Start()
 	n := ReplayRelayQueue(in, path)
 	deadline := time.Now().Add(500 * time.Millisecond)
-	for delivered < 1 && time.Now().Before(deadline) {
+	for count.get() < 1 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	in.Stop()
 	if n != 1 {
 		t.Fatalf("replay count = %d, want 1", n)
 	}
-	if delivered != 1 {
-		t.Fatalf("delivered = %d, want 1 replayed job processed", delivered)
+	if count.get() != 1 {
+		t.Fatalf("delivered = %d, want 1 replayed job processed", count.get())
 	}
 	if len(q.load()) != 1 {
 		t.Fatal("entry remains on disk until explicit remove on confirm path")
+	}
+}
+
+func TestRelayQueueUpsertSkipsDeferralsOnlyBump(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "q.json")
+	q := newRelayQueueStore(path)
+	base := time.Date(2026, 7, 3, 5, 0, 0, 0, time.UTC)
+	j := Job{MessageID: "1", Agent: "xo", Message: "hi", Kind: "relay", deferrals: 1, enqueuedAt: base, lastStaleAlert: base}
+	q.upsert(j)
+	info1, _ := os.Stat(path)
+	j.deferrals = 99
+	q.upsert(j)
+	info2, _ := os.Stat(path)
+	if info1.ModTime() != info2.ModTime() {
+		t.Fatal("deferrals-only bump should not rewrite queue file")
+	}
+}
+
+func TestRelayQueueCorruptPreservedOnUpsert(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "q.json")
+	if err := os.WriteFile(path, []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	q := newRelayQueueStore(path)
+	q.upsert(Job{MessageID: "1", Agent: "xo", Message: "hi", Kind: "relay", enqueuedAt: time.Now()})
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hasCorrupt, hasQueue bool
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".corrupt-") {
+			hasCorrupt = true
+		}
+		if e.Name() == "q.json" {
+			hasQueue = true
+		}
+	}
+	if !hasCorrupt {
+		t.Fatal("corrupt queue should be renamed to a .corrupt sidecar")
+	}
+	if !hasQueue {
+		t.Fatal("new queue file should exist after upsert")
 	}
 }
 
