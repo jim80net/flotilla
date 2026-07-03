@@ -20,33 +20,30 @@
   "use strict";
 
   var D = window.flotillaDash;
-  var el = D.el, escapeHtml = D.escapeHtml, getJSON = D.getJSON;
+  var escapeHtml = D.escapeHtml, getJSON = D.getJSON;
 
   var cache = null;      // last /api/goals document
+  var lastSig = null;    // stringified last-rendered doc — skip a no-op re-render
   var activated = false; // becomes true once the operator opens the Goals tab (lazy fetch)
-  var epoch = 0;         // fetch-ordering guard: a stale in-flight refresh never clobbers a newer one
+  var epoch = 0;         // fetch + deferred-layout ordering guard
 
-  var nodeById = {};     // id → RenderedGoal (with laid-out x/y/w/h attached)
+  var nodeById = {};     // id → RenderedGoal (with laid-out _x/_y/_w/_h attached)
   var view = { scale: 1, tx: 0, ty: 0, worldW: 0, worldH: 0, fitted: false };
   var panWired = false;
 
-  /* ── tier geometry (ported from the prototype: TIER_X / widths) ────────── */
-  var TIER_X = [40, 470, 900];       // fleet | project | task column origins
-  var CARD_W = { 0: 320, 1: 270, 2: 290 };
-  var GAP = 18, TOP = 46, PAD = 30;  // vertical gap between leaves, top inset, viewport padding
+  /* ── tier geometry (ported from the prototype: TIER_X=[40,470,900]) ─────── */
+  // Columns are derived from depth so a tree deeper than the canonical 3 tiers
+  // still lays out one column per level (depth 0/1/2 reproduce the prototype's
+  // 40/470/900 exactly) instead of collapsing deep nodes into one overlapping
+  // column.
+  var COL_STEP = 430, COL_X0 = 40, DEFAULT_H = 60, GAP = 18, TOP = 46, PAD = 30;
+  function colX(depth) { return COL_X0 + depth * COL_STEP; }
+  function colW(depth) { return depth === 0 ? 320 : depth === 1 ? 270 : 290; }
+  function depthOf(n) { return n.depth || 0; }
+  function heightOf(n) { return n._h || DEFAULT_H; }
 
   function q(id) { return document.getElementById(id); }
   function isVisible() { var v = q("view-goals"); return v && !v.classList.contains("hidden"); }
-
-  // tierOf maps scope → column index (0 fleet, 1 project, 2 task), falling back
-  // to the node's depth for a tree that is deeper/shallower than the 3 canonical
-  // tiers so an unusual file still lays out.
-  function tierOf(n) {
-    if (n.scope === "fleet") return 0;
-    if (n.scope === "project") return 1;
-    if (n.scope === "task") return 2;
-    return Math.min(2, n.depth || 0);
-  }
 
   // visToken maps the ratified status_display onto a CSS state token (identical
   // to the merged view's mapping so the card styling is unchanged).
@@ -135,36 +132,49 @@
   }
 
   /* ── layout: absolute tiered, bottom-up y-centering (ported) ───────────── */
-  // Two-pass: pass 1 inserts cards at their tier x with a provisional y so the
+  // Two-pass: pass 1 inserts cards at their column x with a provisional y so the
   // browser can measure real heights (titles wrap, work-item lists vary); pass 2
-  // assigns final y bottom-up (leaves stacked; a parent centered on its children)
-  // and draws the edges from the measured geometry.
+  // assigns final y bottom-up and draws the edges from the measured geometry.
   function buildNodeIndex(goals) {
     nodeById = {};
-    goals.forEach(function (n) { n._x = TIER_X[tierOf(n)]; n._w = CARD_W[tierOf(n)]; nodeById[n.id] = n; });
+    goals.forEach(function (n) {
+      var d = depthOf(n);
+      n._x = colX(d); n._w = colW(d);
+      nodeById[n.id] = n;
+    });
   }
 
+  // layoutY places leaves stacked and centers each parent on its children's
+  // span. A parent card taller than that span is NEVER allowed to rise above its
+  // subtree's top (which would collide with the previous sibling) and always
+  // pushes the cursor past its own bottom (so the next sibling clears it) — so a
+  // tall mid-node can't overlap a sibling subtree. Depth-derived columns mean a
+  // parent is always in a shallower column than its children, so parent↔child
+  // never share an x.
   function layoutY(roots) {
-    var cursor = TOP;
+    var cursor = TOP, maxBot = TOP;
     function place(n) {
       var kids = (n.children || []).map(function (id) { return nodeById[id]; }).filter(Boolean);
+      var h = heightOf(n);
       if (!kids.length) {
         n._y = cursor;
-        cursor += (n._h || 60) + GAP;
-        return;
+      } else {
+        var bandTop = cursor;
+        kids.forEach(place);
+        var top = Infinity, bot = -Infinity;
+        kids.forEach(function (k) { top = Math.min(top, k._y); bot = Math.max(bot, k._y + heightOf(k)); });
+        n._y = (top + bot) / 2 - h / 2;
+        if (n._y < bandTop) n._y = bandTop; // never rise into the previous sibling
       }
-      kids.forEach(place);
-      var top = Infinity, bot = -Infinity;
-      kids.forEach(function (k) { top = Math.min(top, k._y); bot = Math.max(bot, k._y + (k._h || 60)); });
-      n._y = (top + bot) / 2 - (n._h || 60) / 2;
+      var bottom = n._y + h;
+      if (bottom + GAP > cursor) cursor = bottom + GAP; // next sibling clears this card
+      maxBot = Math.max(maxBot, bottom);
     }
     roots.forEach(function (r) { place(r); cursor += GAP; });
-    var maxBot = TOP;
-    Object.keys(nodeById).forEach(function (id) {
-      var n = nodeById[id];
-      maxBot = Math.max(maxBot, n._y + (n._h || 60));
-    });
-    view.worldW = TIER_X[2] + CARD_W[2] + 40;
+
+    var maxDepth = 0;
+    Object.keys(nodeById).forEach(function (id) { maxDepth = Math.max(maxDepth, depthOf(nodeById[id])); });
+    view.worldW = colX(maxDepth) + colW(maxDepth) + 40;
     view.worldH = maxBot + 30;
   }
 
@@ -180,10 +190,10 @@
       var child = nodeById[id];
       var parent = child.parent ? nodeById[child.parent] : null;
       if (!parent) return;
-      var a = { x: parent._x + parent._w, y: parent._y + (parent._h || 60) / 2 };
-      var b = { x: child._x, y: child._y + (child._h || 60) / 2 };
+      var a = { x: parent._x + parent._w, y: parent._y + heightOf(parent) / 2 };
+      var b = { x: child._x, y: child._y + heightOf(child) / 2 };
       var dx = Math.max(40, (b.x - a.x) * 0.5);
-      var state = visToken(child);
+      var state = escapeHtml(visToken(child)); // bounded enum, escaped for consistency + defense-in-depth
       paths.push('<path class="gedge gedge-' + state + '" data-child="' + escapeHtml(id) +
         '" d="M ' + a.x + " " + a.y + " C " + (a.x + dx) + " " + a.y + ", " +
         (b.x - dx) + " " + b.y + ", " + b.x + " " + b.y + '"/>');
@@ -191,13 +201,20 @@
     svg.innerHTML = paths.join("");
   }
 
-  /* ── tier column headers ───────────────────────────────────────────────── */
-  function renderTierLabels() {
-    var labels = ["Fleet goals", "Workstreams", "Tasks & desks"];
-    q("goals-tierlabels").innerHTML = labels.map(function (lbl, i) {
-      return '<div class="gtier-label" style="left:' + TIER_X[i] + "px;width:" + CARD_W[i] + 'px">' +
-        escapeHtml(lbl) + "</div>";
-    }).join("");
+  /* ── tier column headers (one per depth present) ───────────────────────── */
+  function tierLabel(depth) {
+    if (depth === 0) return "Fleet goals";
+    if (depth === 1) return "Workstreams";
+    if (depth === 2) return "Active tasks · desks";
+    return "Sub-goals";
+  }
+  function renderTierLabels(maxDepth) {
+    var out = [];
+    for (var d = 0; d <= maxDepth; d++) {
+      out.push('<div class="gtier-label" style="left:' + colX(d) + "px;width:" + colW(d) + 'px">' +
+        escapeHtml(tierLabel(d)) + "</div>");
+    }
+    q("goals-tierlabels").innerHTML = out.join("");
   }
 
   /* ── main render (two-pass measure) ────────────────────────────────────── */
@@ -215,31 +232,37 @@
         : (doc.message || "No goals file configured.");
       return;
     }
+    var goals = Array.isArray(doc.goals) ? doc.goals : [];
+    if (!goals.length) {
+      graph.classList.add("hidden");
+      empty.classList.remove("hidden");
+      empty.textContent = "No goals defined yet.";
+      return;
+    }
     graph.classList.remove("hidden");
     empty.classList.add("hidden");
 
-    var goals = Array.isArray(doc.goals) ? doc.goals : [];
     buildNodeIndex(goals);
     var roots = goals.filter(function (n) { return !n.parent || !nodeById[n.parent]; });
+    var maxDepth = 0;
+    goals.forEach(function (n) { maxDepth = Math.max(maxDepth, depthOf(n)); });
 
-    // Pass 1: render at tier x with provisional y=0 so heights can be measured.
+    // Pass 1: render at column x with provisional y=0 so heights can be measured.
     goals.forEach(function (n) { n._y = 0; });
     var nodesEl = q("goals-nodes");
     nodesEl.innerHTML = goals.map(nodeCard).join("");
-    renderTierLabels();
+    renderTierLabels(maxDepth);
 
-    // Measure, then pass 2 (final y + edges) after layout is flushed.
+    // Measure + final layout after the browser flushes layout. Guarded so a newer
+    // render (a refresh that landed between here and the frame) wins.
+    var myEpoch = epoch;
     requestAnimationFrame(function () {
-      if (!isVisible()) return; // measurement needs the view on-screen; show() re-runs it
-      goals.forEach(function (n) {
-        var card = nodesEl.querySelector('[data-id="' + cssEscape(n.id) + '"]');
-        n._h = card ? card.offsetHeight : 60;
-      });
+      if (myEpoch !== epoch || !isVisible()) return; // superseded, or view hidden (show() re-runs)
+      // Cards render in goals[] order, so children[i] ↔ goals[i] — read heights
+      // in one pass (all reads batched before any write) to avoid layout thrash.
+      goals.forEach(function (n, i) { n._h = nodesEl.children[i] ? nodesEl.children[i].offsetHeight : DEFAULT_H; });
       layoutY(roots);
-      goals.forEach(function (n) {
-        var card = nodesEl.querySelector('[data-id="' + cssEscape(n.id) + '"]');
-        if (card) card.style.top = n._y + "px";
-      });
+      goals.forEach(function (n, i) { if (nodesEl.children[i]) nodesEl.children[i].style.top = n._y + "px"; });
       var world = q("goals-world");
       world.style.width = view.worldW + "px";
       world.style.height = view.worldH + "px";
@@ -248,9 +271,6 @@
       applyTransform();
     });
   }
-
-  // cssEscape guards the attribute selector against ids with quotes/specials.
-  function cssEscape(s) { return String(s).replace(/["\\]/g, "\\$&"); }
 
   /* ── pan / zoom (ported) ───────────────────────────────────────────────── */
   function applyTransform() {
@@ -262,7 +282,7 @@
   // desks are legible on load; the operator pans/zooms for the rest.
   function fit() {
     var vp = q("goals-viewport");
-    if (!vp) return;
+    if (!vp || !view.worldW || !view.worldH) return;
     view.scale = Math.min(1, (vp.clientWidth - PAD * 2) / view.worldW);
     view.tx = Math.max(PAD, (vp.clientWidth - view.worldW * view.scale) / 2);
     view.ty = (view.worldH * view.scale < vp.clientHeight - PAD * 2)
@@ -272,7 +292,7 @@
   // fitOverview: zoom out so the whole DAG is on screen at once.
   function fitOverview() {
     var vp = q("goals-viewport");
-    if (!vp) return;
+    if (!vp || !view.worldW || !view.worldH) return;
     var sx = (vp.clientWidth - PAD * 2) / view.worldW, sy = (vp.clientHeight - PAD * 2) / view.worldH;
     view.scale = Math.min(sx, sy, 1);
     view.tx = (vp.clientWidth - view.worldW * view.scale) / 2;
@@ -298,6 +318,7 @@
     }, { passive: false });
 
     var drag = false, sx = 0, sy = 0;
+    function endDrag() { drag = false; vp.classList.remove("grabbing"); }
     vp.addEventListener("pointerdown", function (e) {
       if (e.target.closest(".gnode") || e.target.closest(".gzoomctl")) return;
       drag = true; sx = e.clientX - view.tx; sy = e.clientY - view.ty;
@@ -307,11 +328,13 @@
       if (!drag) return;
       view.tx = e.clientX - sx; view.ty = e.clientY - sy; applyTransform();
     });
-    vp.addEventListener("pointerup", function () { drag = false; vp.classList.remove("grabbing"); });
+    vp.addEventListener("pointerup", endDrag);
+    vp.addEventListener("pointercancel", endDrag);
 
-    q("goals-zin").onclick = function () { view.scale = Math.min(2.2, view.scale * 1.18); applyTransform(); };
-    q("goals-zout").onclick = function () { view.scale = Math.max(0.25, view.scale * 0.85); applyTransform(); };
-    q("goals-zfit").onclick = fitOverview;
+    var zin = q("goals-zin"), zout = q("goals-zout"), zfit = q("goals-zfit");
+    if (zin) zin.onclick = function () { view.scale = Math.min(2.2, view.scale * 1.18); applyTransform(); };
+    if (zout) zout.onclick = function () { view.scale = Math.max(0.25, view.scale * 0.85); applyTransform(); };
+    if (zfit) zfit.onclick = fitOverview;
   }
 
   /* ── lifecycle ─────────────────────────────────────────────────────────── */
@@ -321,10 +344,14 @@
     return getJSON("/api/goals").then(function (doc) {
       if (e !== epoch) return; // a newer refresh already superseded this one
       cache = doc;
+      var sig = JSON.stringify(doc);
+      if (sig === lastSig) return; // nothing changed — skip the rebuild
+      lastSig = sig;
       if (isVisible()) render();
     }).catch(function (err) {
       if (e !== epoch) return;
       cache = { found: false, error: err.message };
+      lastSig = null;
       if (isVisible()) render();
     });
   }
