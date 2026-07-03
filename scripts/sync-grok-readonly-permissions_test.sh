@@ -16,7 +16,7 @@ if enf.get("always_approve_settings_deny") != "not_enforced":
 allow = doc["tiers"]["read_unprompted"]["allow"]
 deny = doc["tiers"]["never_autonomous"]["deny"]
 
-args = ["grok", "-m", "grok-composer-2.5-fast"]
+args = ["grok", "-m", "grok-composer-2.5-fast", "--always-approve"]
 for rule in allow:
     args.extend(["--allow", rule])
 for rule in deny:
@@ -114,6 +114,10 @@ if [[ "$second_out" != *"run --revert before re-applying"* ]]; then
 fi
 if grep -q -- '--custom-flag' "$launch"; then
   echo "revert selftest: apply should replace launch command" >&2
+  exit 1
+fi
+if ! grep -q -- '--always-approve' "$launch"; then
+  echo "revert selftest: synced launch must include --always-approve" >&2
   exit 1
 fi
 

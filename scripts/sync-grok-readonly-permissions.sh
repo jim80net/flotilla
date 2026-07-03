@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Sync the canonical two-tier grok permission policy to:
 #   1. Each grok desk worktree: <cwd>/.claude/settings.local.json
-#   2. Each grok launch recipe in flotilla-launch.json (--allow/--deny CLI flags)
+#   2. Each grok launch recipe in flotilla-launch.json (--always-approve + --allow/--deny)
 #
 # Tier read_unprompted: safe reads unprompted (Bash(git *) covers git -C <path> show).
 # Tier never_autonomous: hard-deny only coordinator/irreversible ops — NEVER deny
@@ -166,7 +166,9 @@ for rule in deny:
 perms = {"permissions": {"allow": allow, "deny": deny}}
 
 def grok_launch_cmd():
-    args = ["grok", "-m", "grok-composer-2.5-fast"]
+    # Execution desks run always-approve (by-design); sync must emit it or the next
+    # apply regresses launch recipes to prompting mode.
+    args = ["grok", "-m", "grok-composer-2.5-fast", "--always-approve"]
     for rule in allow:
         args.extend(["--allow", rule])
     for rule in deny:
