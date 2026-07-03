@@ -21,7 +21,7 @@
 ## 5. Ship
 - [x] 5.1 `go test ./...`
 - [x] 5.2 Implementation trio
-- [ ] 5.3 PR surfaced to COS (no self-merge)
+- [x] 5.3 PR surfaced to COS (no self-merge) — #259 head 8080ba6; cubic fix round; split #260 for unacked
 
 ## Post-auth follow-ups (operator gate)
 - [ ] Live-capture working/idle/approval/composer fixtures after codex login
