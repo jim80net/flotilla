@@ -137,10 +137,12 @@ func resolveHistoryPath(grokHome, cwd string) (path string, sessionID string, er
 	}
 }
 
-// lastAssistant scans a chat_history.jsonl and returns the LAST assistant entry with extractable,
-// non-empty text. A malformed line is skipped (not fatal) so one bad line never hides a valid
-// result. An assistant entry whose content shape we can't decode is recorded so the caller can
-// distinguish "a turn exists but I couldn't read its content" from "no assistant turn yet".
+// lastAssistant scans a chat_history.jsonl and returns the substantive assistant text for the
+// latest completed turn. Grok may emit multiple assistant entries per turn — a short trailing
+// narration ("PR opened. Let me report…") after the real turn-final — so the reader walks
+// assistants since the last user message and drops a detected epilogue. A malformed line is
+// skipped (not fatal). An undecodable assistant shape is recorded so the caller can distinguish
+// "a turn exists but I couldn't read its content" from "no assistant turn yet".
 func lastAssistant(path, sessionID string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -150,24 +152,31 @@ func lastAssistant(path, sessionID string) (string, error) {
 
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64<<10), maxLine)
-	var last string
-	found := false
-	sawUndecodable := false
+	var (
+		turnAssistants []string
+		lastOverall    string
+		found          bool
+		sawUndecodable bool
+	)
 	for sc.Scan() {
 		var e chatEntry
 		if json.Unmarshal(sc.Bytes(), &e) != nil {
 			continue // skip a malformed line; keep the last VALID assistant entry
 		}
-		if e.Type != "assistant" {
-			continue
-		}
-		t, ok := extractText(e.Content)
-		if !ok {
-			sawUndecodable = true // an assistant turn we can't read — don't let it vanish silently
-			continue
-		}
-		if t != "" {
-			last = t
+		switch e.Type {
+		case "user":
+			turnAssistants = nil // a new turn began
+		case "assistant":
+			t, ok := extractText(e.Content)
+			if !ok {
+				sawUndecodable = true
+				continue
+			}
+			if strings.TrimSpace(t) == "" {
+				continue
+			}
+			turnAssistants = append(turnAssistants, t)
+			lastOverall = t
 			found = true
 		}
 	}
@@ -180,7 +189,66 @@ func lastAssistant(path, sessionID string) (string, error) {
 		}
 		return "", fmt.Errorf("grok store: no assistant turn yet in session %s", sessionID)
 	}
-	return last, nil
+	if len(turnAssistants) > 0 {
+		return selectSubstantiveAssistant(turnAssistants), nil
+	}
+	return lastOverall, nil
+}
+
+// maxEpiloguePeel bounds how many trailing narration lines grok may append after a turn-final.
+const maxEpiloguePeel = 4
+
+// selectSubstantiveAssistant picks the turn-final from the assistant entries grok emitted for one
+// user turn. Grok may append multiple short trailing narration lines — walk backward peeling
+// epilogues (bounded) until the first non-epilogue assistant entry.
+func selectSubstantiveAssistant(assistants []string) string {
+	if len(assistants) == 0 {
+		return ""
+	}
+	i := len(assistants) - 1
+	for peeled := 0; peeled < maxEpiloguePeel && i > 0; peeled++ {
+		if !isTrailingEpilogue(assistants[i], assistants[i-1]) {
+			break
+		}
+		i--
+	}
+	return assistants[i]
+}
+
+func isTrailingEpilogue(last, prev string) bool {
+	last = strings.TrimSpace(last)
+	prev = strings.TrimSpace(prev)
+	if last == "" || prev == "" {
+		return false
+	}
+	if len(last) > 400 {
+		return false
+	}
+	lower := strings.ToLower(last)
+	for _, phrase := range []string{
+		"let me report", "let me surface", "let me notify",
+		"i'll report", "i will report", "surfacing to",
+		"opened. let me", "pushed. let me", "merged. let me",
+	} {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	// Colon-suffixed narration: require narration shape so a legitimate colon-ended final
+	// ("Ready for operator review:") is not peeled when it lacks first-person action phrasing.
+	if strings.HasSuffix(last, ":") && len(last) < 200 && hasNarrationShape(lower) {
+		return true
+	}
+	return false
+}
+
+func hasNarrationShape(lower string) bool {
+	for _, prefix := range []string{"let me ", "i'll ", "i will ", "i am going to "} {
+		if strings.Contains(lower, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // normMsg normalizes an operator message for an EXACT (not substring) anchor match: collapse all
