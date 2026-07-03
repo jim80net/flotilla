@@ -799,6 +799,9 @@
   }
 
   var BRIEF_EMPTY = '<p class="gm-brief-empty muted">No decision brief yet — ask the desk for the recommendation, the value, and the tradeoff before deciding.</p>';
+  // hasBrief trims before the presence check so a whitespace-only brief shows the honest
+  // no-brief state instead of an empty rendered block (cubic #348 P2).
+  function hasBrief(s) { return !!(s && String(s).trim()); }
 
   function openModal(id) {
     var n = nodeById[id];
@@ -807,17 +810,17 @@
     var parts = ['<p class="gm-scope">' + escapeHtml(scopeNoun(n)) + "</p>"];
     if (n.description) parts.push("<p>" + escapeHtml(n.description) + "</p>");
     // A node-level decision package renders in full (the decision is on the node itself).
-    if (n.brief) parts.push('<div class="gm-brief-full">' + renderBrief(n.brief) + "</div>");
+    if (hasBrief(n.brief)) parts.push('<div class="gm-brief-full">' + renderBrief(n.brief) + "</div>");
     if (gated.length) {
       parts.push('<div class="gm-gated"><div class="gm-gated-lab">Waiting on you</div>' +
         gated.map(function (wi) {
           var head = '<p class="gm-gated-item">' + escapeHtml(wi.label || wi.kind || "") + (wi.detail ? " — " + escapeHtml(wi.detail) : "") + "</p>";
           // The decision package inline (#347) — or an honest empty state when the desk
           // has not attached one yet.
-          var body = wi.brief ? '<div class="gm-brief-full">' + renderBrief(wi.brief) + "</div>" : BRIEF_EMPTY;
+          var body = hasBrief(wi.brief) ? '<div class="gm-brief-full">' + renderBrief(wi.brief) + "</div>" : BRIEF_EMPTY;
           return '<div class="gm-gated-row">' + head + body + "</div>";
         }).join("") + "</div>");
-    } else if (!n.brief) {
+    } else if (!hasBrief(n.brief)) {
       parts.push('<p class="muted">Nothing is gated on you here.</p>');
     }
     q("goals-modal-title").textContent = n.title || n.id;

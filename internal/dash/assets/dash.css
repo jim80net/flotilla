@@ -1336,6 +1336,9 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   background: var(--surface, var(--abyss-2)); border: 1px solid var(--line-soft);
   border-radius: var(--r-sm); color: var(--ink-2); font-size: .82rem; line-height: 1.5;
   max-height: 40vh; overflow-y: auto;
+  /* user content — a long unbreakable token (a URL in a brief) must wrap, not overflow
+     (cubic #348 P3; matches .comment-body / .dbg-val). */
+  word-break: break-word;
 }
 .gm-brief-full p { margin: 0 0 .5em; }
 .gm-brief-full p:last-child { margin-bottom: 0; }
