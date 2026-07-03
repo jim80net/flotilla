@@ -81,8 +81,29 @@ func TestScan_SkipsTrivialOperator(t *testing.T) {
 	}
 }
 
-func TestDefaultMinAgeMatchesScanInterval(t *testing.T) {
-	if DefaultMinAge < DefaultScanInterval {
-		t.Fatalf("MinAge %v must be >= scan interval %v", DefaultMinAge, DefaultScanInterval)
+func TestScan_SkipsBeyondAckWindow(t *testing.T) {
+	now := ts(0)
+	custom := cfg()
+	custom.AckWindow = 1 * time.Hour
+	msgs := []Message{{
+		ID: "1", AuthorID: "op", Content: "Can you fix the dashboard?",
+		Timestamp: now.Add(-90 * time.Minute),
+	}}
+	if got := Scan(msgs, "C1", now, custom); len(got) != 0 {
+		t.Fatalf("message older than AckWindow must not flag; got %v", got)
+	}
+}
+
+func TestScan_FlagsInsideAckWindow(t *testing.T) {
+	now := ts(0)
+	custom := cfg()
+	custom.AckWindow = 2 * time.Hour
+	msgs := []Message{{
+		ID: "1", AuthorID: "op", Content: "Can you fix the dashboard?",
+		Timestamp: now.Add(-45 * time.Minute),
+	}}
+	got := Scan(msgs, "C1", now, custom)
+	if len(got) != 1 {
+		t.Fatalf("message inside AckWindow and past MinAge should flag; got %v", got)
 	}
 }

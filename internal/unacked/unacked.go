@@ -93,8 +93,8 @@ func Scan(msgs []Message, channelID string, now time.Time, cfg Config) []Finding
 		if age < cfg.MinAge {
 			continue
 		}
-		if age > cfg.AckWindow {
-			// Still report — the operator may have been waiting beyond the ack window.
+		if cfg.AckWindow > 0 && age > cfg.AckWindow {
+			continue // too old to keep surfacing — the backstop is for recent un-acked requests
 		}
 		reason, unacked := lacksFleetAck(msgs, i, now, cfg)
 		if unacked {

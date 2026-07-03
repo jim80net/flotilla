@@ -93,8 +93,8 @@ func (u *UnackedBackstop) Run(ctx context.Context) {
 
 func (u *UnackedBackstop) sweep() {
 	now := u.now()
-	st := u.store.load(now)
-	changed := false
+	st, pruned := u.store.load(now)
+	changed := pruned
 	for _, b := range u.cfg.Bindings() {
 		if c := u.sweepChannel(b, &st, now); c {
 			changed = true
@@ -127,7 +127,7 @@ func (u *UnackedBackstop) sweepChannel(b roster.Channel, st *unackedState, now t
 	var changed bool
 	var newAlerts []unacked.Finding
 	for _, f := range findings {
-		idx, ok := st.index(f.MessageID)
+		idx, ok := st.index(f.ChannelID, f.MessageID)
 		if !ok {
 			newAlerts = append(newAlerts, f)
 			st.Records = append(st.Records, alertedRecord{

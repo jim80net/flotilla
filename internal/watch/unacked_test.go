@@ -1,14 +1,15 @@
 package watch
 
 import (
-	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/transport"
-	"github.com/jim80net/flotilla/internal/unacked"
 )
 
 type fakeRecent struct {
@@ -90,9 +91,71 @@ func TestUnackedBackstop_NoOperatorIDInert(t *testing.T) {
 	}
 }
 
-func TestCoordinatorWakeBusyIsRetryable(t *testing.T) {
-	if !errors.Is(surface.ErrBusy, surface.ErrBusy) {
-		t.Fatal("sanity")
+func TestUnackedState_IndexKeysChannelAndMessage(t *testing.T) {
+	st := unackedState{Records: []alertedRecord{
+		{ChannelID: "C1", MessageID: "100"},
+		{ChannelID: "C2", MessageID: "100"},
+	}}
+	if _, ok := st.index("C1", "100"); !ok {
+		t.Fatal("want hit on matching channel+message")
 	}
-	_ = unacked.DefaultMinAge
+	if _, ok := st.index("C2", "999"); ok {
+		t.Fatal("same MessageID on a different channel must not alias")
+	}
+}
+
+func TestUnackedStateStore_PersistsPrunedLoad(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "flotilla-unacked-alerted.json")
+	now := time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC)
+	// retention=0 on write so the expired record lands on disk; load uses real retention.
+	writeStore := newUnackedStateStore(path, 0)
+	st := unackedState{Records: []alertedRecord{
+		{MessageID: "old", ChannelID: "C1", AlertedAt: now.Add(-8 * 24 * time.Hour)},
+	}}
+	if err := writeStore.save(st, now); err != nil {
+		t.Fatal(err)
+	}
+	readStore := newUnackedStateStore(path, 7*24*time.Hour)
+	loaded, pruned := readStore.load(now)
+	if !pruned {
+		t.Fatal("load must report pruned records")
+	}
+	if err := readStore.save(loaded, now); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"old"`) {
+		t.Fatalf("pruned record must be persisted; still in %s", raw)
+	}
+}
+
+func TestUnackedBackstop_SweepPersistsPrunedLoad(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "flotilla-unacked-alerted.json")
+	now := time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC)
+	writeStore := newUnackedStateStore(path, 0)
+	st := unackedState{Records: []alertedRecord{
+		{MessageID: "old", ChannelID: "C1", AlertedAt: now.Add(-8 * 24 * time.Hour)},
+	}}
+	if err := writeStore.save(st, now); err != nil {
+		t.Fatal(err)
+	}
+	store := newUnackedStateStore(path, 7*24*time.Hour)
+	u := &UnackedBackstop{
+		cfg:   &roster.Config{},
+		store: store,
+		now:   func() time.Time { return now },
+	}
+	u.sweep()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"old"`) {
+		t.Fatalf("sweep must persist pruned load even with no new findings; still in %s", raw)
+	}
 }
