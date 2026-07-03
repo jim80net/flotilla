@@ -70,12 +70,28 @@ func TestNewRecord_FirewallWarnInDebug(t *testing.T) {
 		MirrorNote:   "WARN firewall-vocab flatten",
 		FirewallWarn: []string{"flatten"},
 	})
-	diag, ok := rec.Debug.Firewall.(FirewallDiag)
-	if !ok {
-		t.Fatalf("firewall diag type = %T", rec.Debug.Firewall)
+	if rec.Debug.Firewall == nil {
+		t.Fatal("firewall diag missing")
 	}
-	if len(diag.WarnTerms) != 1 || diag.WarnTerms[0] != "flatten" {
-		t.Errorf("warn terms = %v", diag.WarnTerms)
+	if len(rec.Debug.Firewall.WarnTerms) != 1 || rec.Debug.Firewall.WarnTerms[0] != "flatten" {
+		t.Errorf("warn terms = %v", rec.Debug.Firewall.WarnTerms)
+	}
+}
+
+func TestNewRecord_FirewallRoundTripsJSON(t *testing.T) {
+	rec := NewRecord(Input{
+		Agent:        "backend",
+		Verbose:      "x",
+		Info:         "x",
+		FirewallWarn: []string{"flatten"},
+	})
+	line := MustLine(rec)
+	parsed := ParseLines(line)
+	if len(parsed) != 1 {
+		t.Fatalf("parsed entries = %d", len(parsed))
+	}
+	if parsed[0].Debug.Firewall == nil || parsed[0].Debug.Firewall.WarnTerms[0] != "flatten" {
+		t.Errorf("firewall after json round-trip = %+v", parsed[0].Debug.Firewall)
 	}
 }
 
@@ -89,7 +105,8 @@ func TestNewRecord_TruncatesVerboseAtCap(t *testing.T) {
 	if !strings.HasSuffix(rec.Verbose, "…[truncated]") {
 		t.Errorf("verbose = %q, want truncation marker", rec.Verbose)
 	}
-	if len([]rune(rec.Verbose)) > 10+len("…[truncated]") {
+	const truncMarker = "…[truncated]"
+	if len([]rune(rec.Verbose)) > 10+len([]rune(truncMarker)) {
 		t.Errorf("verbose runes exceed cap + marker: %d", len([]rune(rec.Verbose)))
 	}
 }

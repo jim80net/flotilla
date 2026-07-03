@@ -100,9 +100,12 @@ func (m deskMirror) run(agent string) {
 		return
 	}
 
-	m.appendSessionMirror(agent, text, d)
+	ledgerOK := m.appendSessionMirror(agent, text, d)
 
 	if !postDiscord {
+		if !ledgerOK {
+			return
+		}
 		body, rmNote := d.body, d.note
 		runes := utf8.RuneCountInString(body)
 		if rmNote != "" {
@@ -159,9 +162,9 @@ func (m deskMirror) mirrorNow() time.Time {
 
 // appendSessionMirror fans out the session-mirror ledger write after readerModelInternal
 // (same turn-final read — no second pane probe). Suppressed events never reach here.
-func (m deskMirror) appendSessionMirror(agent, verbose string, d mirrorDecision) {
+func (m deskMirror) appendSessionMirror(agent, verbose string, d mirrorDecision) bool {
 	if m.rosterDir == "" {
-		return
+		return false
 	}
 	rec := sessionmirror.NewRecord(sessionmirror.Input{
 		Agent:        agent,
@@ -180,7 +183,9 @@ func (m deskMirror) appendSessionMirror(agent, verbose string, d mirrorDecision)
 	}
 	if err := appendFn(m.rosterDir, agent, rec); err != nil {
 		m.logf("flotilla watch: mirror LEDGER-FAIL %s: %v", agent, err)
+		return false
 	}
+	return true
 }
 
 // readerModelInternal applies the INTERNAL-channel reader-modeling pipeline to a

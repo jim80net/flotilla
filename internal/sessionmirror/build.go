@@ -1,7 +1,6 @@
 package sessionmirror
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -34,7 +33,7 @@ func ParseLines(data []byte) []Record {
 		return nil
 	}
 	var out []Record
-	sc := bufio.NewScanner(bytes.NewReader(data))
+	sc := newLineScanner(data)
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
 		if len(line) == 0 {

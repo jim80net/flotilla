@@ -52,6 +52,9 @@ func TestDeskMirror_AppendsSessionLedgerOnPost(t *testing.T) {
 	if e.Debug.MirrorNote != "modeled" {
 		t.Errorf("debug mirror_note = %q", e.Debug.MirrorNote)
 	}
+	if len(lines) != 1 || !strings.Contains(lines[0], "POST backend") {
+		t.Errorf("decision lines = %v, want exactly one POST line", lines)
+	}
 }
 
 func TestDeskMirror_SuppressDoesNotAppendLedger(t *testing.T) {

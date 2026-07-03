@@ -19,7 +19,7 @@ type DebugRecord struct {
 	Info       string              `json:"info"`
 	Envelope   *readermap.Envelope `json:"envelope,omitempty"`
 	MirrorNote string              `json:"mirror_note,omitempty"`
-	Firewall   any                 `json:"firewall"` // null or FirewallDiag
+	Firewall   *FirewallDiag       `json:"firewall,omitempty"`
 }
 
 // FirewallDiag carries advisory firewall metadata for debug rendering.
@@ -58,9 +58,9 @@ func NewRecord(in Input) Record {
 	}
 	verbose := truncateRunes(in.Verbose, capN)
 
-	var fw any = nil
+	var fw *FirewallDiag
 	if len(in.FirewallWarn) > 0 {
-		fw = FirewallDiag{WarnTerms: append([]string(nil), in.FirewallWarn...)}
+		fw = &FirewallDiag{WarnTerms: append([]string(nil), in.FirewallWarn...)}
 	}
 
 	ts := in.At.UTC()

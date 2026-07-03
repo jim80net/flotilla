@@ -1,13 +1,22 @@
 package sessionmirror
 
 import (
-	"bufio"
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 )
+
+var fileLocks sync.Map // ledger path → *sync.Mutex
+
+func withFileLock(path string, fn func() error) error {
+	v, _ := fileLocks.LoadOrStore(path, &sync.Mutex{})
+	mu := v.(*sync.Mutex)
+	mu.Lock()
+	defer mu.Unlock()
+	return fn()
+}
 
 // AppendOptions configures ledger append retention.
 type AppendOptions struct {
@@ -43,28 +52,30 @@ func Append(rosterDir, agent string, rec Record, opts AppendOptions) error {
 	}
 	path := filepath.Join(dir, agent+".jsonl")
 
-	entries, err := readLines(path)
-	if err != nil {
-		return err
-	}
-	entries = append(entries, append([]byte(nil), line...))
-	if len(entries) > max {
-		entries = entries[len(entries)-max:]
-		return writeLinesAtomic(path, entries)
-	}
+	return withFileLock(path, func() error {
+		entries, err := readLines(path)
+		if err != nil {
+			return err
+		}
+		entries = append(entries, append([]byte(nil), line...))
+		if len(entries) > max {
+			entries = entries[len(entries)-max:]
+			return writeLinesAtomic(path, entries)
+		}
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return fmt.Errorf("sessionmirror: open %q: %w", path, err)
-	}
-	if _, err := f.Write(line); err != nil {
-		f.Close()
-		return fmt.Errorf("sessionmirror: append %q: %w", path, err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("sessionmirror: close %q: %w", path, err)
-	}
-	return nil
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			return fmt.Errorf("sessionmirror: open %q: %w", path, err)
+		}
+		if _, err := f.Write(line); err != nil {
+			f.Close()
+			return fmt.Errorf("sessionmirror: append %q: %w", path, err)
+		}
+		if err := f.Close(); err != nil {
+			return fmt.Errorf("sessionmirror: close %q: %w", path, err)
+		}
+		return nil
+	})
 }
 
 func readLines(path string) ([][]byte, error) {
@@ -76,7 +87,7 @@ func readLines(path string) ([][]byte, error) {
 		return nil, fmt.Errorf("sessionmirror: read %q: %w", path, err)
 	}
 	var out [][]byte
-	sc := bufio.NewScanner(bytes.NewReader(raw))
+	sc := newLineScanner(raw)
 	for sc.Scan() {
 		b := append([]byte(nil), sc.Bytes()...)
 		if len(b) == 0 {
