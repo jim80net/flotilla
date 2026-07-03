@@ -91,20 +91,25 @@ coordinator-maintained; the edit surface is a separate lane).
 
 - **Structure** comes from `fleet-goals.json` (the `--goals-file` above). Each goal
   node has an `id` (unique slug), `title`, optional `description`, `scope`
-  (`fleet` → `project` → `desk`, the altitude columns; inferred from depth when
-  omitted), optional `parent` and `owner`, and a declared `status`. The loader
-  validates the tree **fail-closed** — a cycle, a dangling `parent`, or a duplicate
-  `id` surfaces an error rather than a half-rendered graph.
+  (`fleet` → `project` → `task`, the altitude columns; inferred from depth when
+  omitted; the legacy `desk` value is accepted as an alias for `task`), optional
+  `parent` and `owner`, and an authored `status`. The loader validates the tree
+  **fail-closed** — a cycle, a dangling `parent`, or a duplicate `id` surfaces an
+  error rather than a half-rendered graph.
 - **Work items** attach to a node via `work_items`: `desk` (an agent — status is
   its live board state), `backlog` (a `match` substring — status from the backlog
   markdown), `issue` (`owner/repo#N` — shown linked; live GitHub status is a
   follow-on), `inline` (a `text` checklist item with a `done` flag).
-- **Roll-up + visual state** are computed at read time from the children and work
-  items: a working desk → *in flight* (cyan); an operator-gated item (`[blocked]`/
-  `[awaiting-auth]`, or a desk awaiting input/approval) → *awaiting you* (amber); a
-  crashed/errored desk → *blocked* (red); all done → *realized* (green); a
-  named-but-not-started end → *aspirational* (ghosted). A parent shows its most
-  salient child's state, so a single blocked leaf surfaces all the way up.
+- **`status_display`** (the operator-facing roll-up) is computed at read time per
+  the ratified precedence — authored `cancelled` first, then `blocked` ▸ `awaiting`
+  ▸ authored `paused` ▸ `in-flight` ▸ `achieved` ▸ `active`. Work-item mapping:
+  `[blocked]`/`[needs-attention]` or a crashed/errored desk → *blocked* (red);
+  `[awaiting-auth]` or a desk awaiting input/approval → *awaiting you* (amber); a
+  working desk / `[in-flight]` / an open issue / an unfinished inline → *in flight*
+  (cyan); `[done]` / a closed issue / a done inline / a backlog item absent from the
+  active backlog → *done*; an all-done node → *achieved* (green "realized"); an
+  empty node → *active* (rendered ghosted "aspirational"). A parent shows its most
+  salient child, so a single blocked leaf surfaces all the way up.
 
 See `fleet-goals.example.json` at the repo root for a complete, placeholder
 example. If no goals file exists the tab shows an honest "no goals file yet"

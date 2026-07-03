@@ -59,16 +59,16 @@ func TestHandleGoals_LiveDeskBinding(t *testing.T) {
 	}
 	byID := indexByID(doc.Goals)
 	// alpha is working AND the backlog item is in-flight → the dash node is in-flight.
-	if byID["dash"].State != "in-flight" {
-		t.Errorf("dash node should be in-flight (alpha working), got %q", byID["dash"].State)
+	if byID["dash"].StatusDisplay != "in-flight" {
+		t.Errorf("dash node should be in-flight (alpha working), got %q", byID["dash"].StatusDisplay)
 	}
-	// gate attaches a [blocked] backlog line → awaiting the operator.
-	if byID["gate"].State != "awaiting" {
-		t.Errorf("gate node should be awaiting (blocked backlog), got %q", byID["gate"].State)
+	// gate attaches a [blocked] backlog line → blocked (ratified: [blocked] → blocked, not awaiting).
+	if byID["gate"].StatusDisplay != "blocked" {
+		t.Errorf("gate node should be blocked ([blocked] backlog), got %q", byID["gate"].StatusDisplay)
 	}
-	// The fleet parent rolls up its children: any awaiting child → awaiting.
-	if byID["product"].State != "awaiting" {
-		t.Errorf("product should roll up awaiting from the gate child, got %q", byID["product"].State)
+	// The fleet parent rolls up its children: any blocked child → blocked.
+	if byID["product"].StatusDisplay != "blocked" {
+		t.Errorf("product should roll up blocked from the gate child, got %q", byID["product"].StatusDisplay)
 	}
 	// The desk work item carries the live board state word.
 	found := false

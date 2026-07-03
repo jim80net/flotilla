@@ -136,6 +136,8 @@ func markerOf(rest string) string {
 			switch tok := strings.ToLower(strings.TrimSpace(rest[1:end])); tok {
 			case "x":
 				return "done"
+			case "pending":
+				return "in-flight" // ratified goals spec lists [pending] as an in-flight synonym
 			case "done", "blocked", "needs-attention", "awaiting-auth", "in-flight", "next":
 				return tok
 			default:

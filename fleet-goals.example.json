@@ -42,7 +42,7 @@
     {
       "id": "search-index",
       "title": "Index pipeline",
-      "scope": "desk",
+      "scope": "task",
       "parent": "search",
       "work_items": [
         { "kind": "desk", "agent": "indexer", "label": "incremental indexer" }

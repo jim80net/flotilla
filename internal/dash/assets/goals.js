@@ -1,9 +1,13 @@
 /* flotilla dash — Goals view (#267/#268).
  *
  * The fleet's PURPOSE hierarchy: goal nodes in altitude columns (fleet → project
- * → desk), each carrying live work-item chips whose status binds to the SAME
+ * → task), each carrying live work-item chips whose status binds to the SAME
  * fleet board the Conversations view reads. Read-only. Structure comes from
- * /api/goals (compiled from fleet-goals.json); work-item status is live.
+ * /api/goals (compiled from fleet-goals.json); each node's `status_display` is
+ * the ratified computed roll-up (blocked/awaiting/in-flight/achieved/active/
+ * paused/cancelled). The visual token below is derived from it — `achieved`
+ * renders as "realized" green, and an empty `active` node renders ghosted
+ * ("aspirational"), a rendering refinement over the contract, not a new state.
  *
  * Rendering is layout-then-connect: the browser lays the cards out in flex
  * columns, then edges are drawn from real DOM rects into an SVG overlay — so the
@@ -17,6 +21,7 @@
 
   var cache = null;      // last /api/goals document
   var activated = false; // becomes true once the operator opens the Goals tab (lazy fetch)
+  var epoch = 0;         // fetch-ordering guard: a stale in-flight refresh never clobbers a newer one
 
   function isVisible() {
     var v = el("view-goals");
@@ -31,6 +36,18 @@
     return "Sub-goals";
   }
 
+  // visToken maps the ratified status_display onto a CSS state token. `achieved`
+  // renders as the green "realized" look; an `active` node with no work renders
+  // ghosted ("aspirational"). Everything else is the status_display value itself.
+  function visToken(n) {
+    var sd = n.status_display;
+    if (sd === "achieved") return "realized";
+    if (sd === "active" && !(n.work_items && n.work_items.length) && !(n.children && n.children.length)) {
+      return "aspirational";
+    }
+    return sd;
+  }
+
   var STATE_LABEL = {
     realized: "realized", "in-flight": "in flight", awaiting: "awaiting you",
     blocked: "blocked", active: "active", aspirational: "aspirational",
@@ -43,9 +60,9 @@
     var tiles = [
       { k: "Fleet goals", v: c.fleet || 0, tone: "goal", d: (c.total || 0) + " nodes total" },
       { k: "In flight", v: c.in_flight || 0, tone: "inflight", d: "desks working now" },
-      { k: "Awaiting you", v: c.awaiting || 0, tone: "awaiting", d: "your decisions & gates" },
+      { k: "Awaiting you", v: c.awaiting || 0, tone: "awaiting", d: "your decisions & blocks" },
       { k: "Realized", v: c.realized || 0, tone: "realized", d: "done & solidified" },
-      { k: "Aspirational", v: c.aspirational || 0, tone: "aspirational", d: "planned / not started" },
+      { k: "Aspirational", v: c.aspirational || 0, tone: "aspirational", d: "planned / not yet done" },
     ];
     el("goals-situation").innerHTML = tiles.map(function (t) {
       return '<div class="gtile gtile-' + t.tone + '">' +
@@ -67,7 +84,7 @@
   }
 
   /* ── work-item chip ──────────────────────────────────────────────────── */
-  function motif(kind, cls) {
+  function motif(cls) {
     if (cls === "in-flight") return '<span class="gmotif gmotif-build"><i></i><i></i><i></i></span>';
     if (cls === "done") return '<span class="gmotif gmotif-done">✓</span>';
     if (cls === "awaiting") return '<span class="gmotif gmotif-wait">○</span>';
@@ -80,7 +97,7 @@
     var label = escapeHtml(wi.label || wi.kind || "");
     var detail = wi.detail ? '<span class="gwi-detail">' + escapeHtml(wi.detail) + "</span>" : "";
     return '<span class="gwi gwi-' + escapeHtml(wi.class || "unknown") + '" title="' + kind + " · " + escapeHtml(wi.detail || "") + '">' +
-      motif(wi.kind, wi.class) +
+      motif(wi.class) +
       '<span class="gwi-kind">' + kind + "</span>" +
       '<span class="gwi-label">' + label + "</span>" +
       detail +
@@ -89,12 +106,13 @@
 
   /* ── node card ───────────────────────────────────────────────────────── */
   function nodeCard(n) {
+    var vis = visToken(n);
     var owner = n.owner ? '<span class="gnode-owner">led by ' + escapeHtml(n.owner) + "</span>" : "";
     var desc = n.description ? '<p class="gnode-desc">' + escapeHtml(n.description) + "</p>" : "";
     var items = (n.work_items || []).map(workItem).join("");
     var itemsBlock = items ? '<div class="gnode-items">' + items + "</div>" : "";
-    var pill = '<span class="gpill gpill-' + escapeHtml(n.state) + '">' + escapeHtml(STATE_LABEL[n.state] || n.state) + "</span>";
-    return '<article class="gnode gnode-' + escapeHtml(n.scope) + " state-" + escapeHtml(n.state) + '" ' +
+    var pill = '<span class="gpill gpill-' + escapeHtml(vis) + '">' + escapeHtml(STATE_LABEL[vis] || vis) + "</span>";
+    return '<article class="gnode gnode-' + escapeHtml(n.scope) + " state-" + escapeHtml(vis) + '" ' +
       'data-id="' + escapeHtml(n.id) + '" data-parent="' + escapeHtml(n.parent || "") + '" role="treeitem" tabindex="0">' +
       '<div class="gnode-eyebrow">' + escapeHtml(n.scope) + owner + "</div>" +
       '<div class="gnode-title">' + escapeHtml(n.title) + "</div>" +
@@ -179,10 +197,13 @@
   /* ── lifecycle ───────────────────────────────────────────────────────── */
   function refresh() {
     if (!activated) return Promise.resolve();
+    var e = ++epoch;
     return getJSON("/api/goals").then(function (doc) {
+      if (e !== epoch) return; // a newer refresh already superseded this one
       cache = doc;
       if (isVisible()) render();
     }).catch(function (err) {
+      if (e !== epoch) return;
       cache = { found: false, error: err.message };
       if (isVisible()) render();
     });
@@ -193,12 +214,20 @@
     if (cache) { render(); } else { refresh(); }
   }
 
-  var resizeTimer = null;
-  window.addEventListener("resize", function () {
+  // Redraw edges on resize AND on horizontal scroll of the columns (the edge
+  // overlay is inside the scroller, but a debounced redraw keeps the connectors
+  // crisp through momentum scrolling / zoom). Both listeners are wired once.
+  var redrawTimer = null;
+  function scheduleRedraw() {
     if (!isVisible()) return;
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(drawEdges, 120);
-  });
+    clearTimeout(redrawTimer);
+    redrawTimer = setTimeout(drawEdges, 100);
+  }
+  window.addEventListener("resize", scheduleRedraw);
+  (function wireScroll() {
+    var cols = el("goals-columns");
+    if (cols) cols.addEventListener("scroll", scheduleRedraw, { passive: true });
+  })();
 
   window.flotillaGoals = { show: show, refresh: refresh };
 })();

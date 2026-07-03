@@ -814,7 +814,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
     animation-iteration-count: 1 !important;
     transition-duration: .01ms !important;
   }
-  .desk:hover, .issue-row:hover { transform: none; }
+  .desk:hover, .issue-row:hover, .gnode:hover { transform: none; }
   .gmotif-build i { animation: none !important; }
   .gnode.state-in-flight::after { display: none; }
 }

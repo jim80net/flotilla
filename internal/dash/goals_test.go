@@ -74,10 +74,11 @@ func TestParseGoalsFile_RejectsBadJSON(t *testing.T) {
 }
 
 func TestParseGoalsFile_ToleratesUnknownFields(t *testing.T) {
-	// Forward-compat with the yaml-source authoring lane (may add fields the reader ignores).
-	data := []byte(`{"goals":[{"id":"a","title":"A","future_field":123}],"unknown_top":true}`)
+	// Forward-compat with the ratified spec's newer fields (conversation_agent, depends_on) and the
+	// yaml-source authoring lane — unknown fields are ignored, not rejected.
+	data := []byte(`{"goals":[{"id":"a","title":"A","conversation_agent":"x","depends_on":["b"],"future":1},{"id":"b","title":"B"}]}`)
 	if _, err := ParseGoalsFile(data); err != nil {
-		t.Fatalf("unknown fields must be tolerated, got %v", err)
+		t.Fatalf("unknown/newer fields must be tolerated, got %v", err)
 	}
 }
 
@@ -130,38 +131,44 @@ func TestBuildGoals_DeskLiveBinding(t *testing.T) {
 			t.Errorf("desk item %d = (%q,%q), want (%q,%q)", i, items[i].Detail, items[i].Class, w.detail, w.class)
 		}
 	}
-	// A crashed desk is the most salient → the node rolls up blocked.
-	if doc.Goals[0].Rollup != "blocked" || doc.Goals[0].State != "blocked" {
-		t.Errorf("node with a crashed desk should be blocked, got rollup=%q state=%q", doc.Goals[0].Rollup, doc.Goals[0].State)
+	// A crashed desk is the most salient → the node's status_display is blocked.
+	if doc.Goals[0].StatusDisplay != "blocked" {
+		t.Errorf("node with a crashed desk should be blocked, got %q", doc.Goals[0].StatusDisplay)
 	}
 }
 
-// --- BuildGoals: backlog binding ---
+// --- BuildGoals: backlog binding (ratified marker mapping) ---
 
 func TestBuildGoals_BacklogBinding(t *testing.T) {
-	md := "## Backlog\n- [in-flight] wire the goals view\n- [blocked] operator sign-off\n"
+	md := "## Backlog\n- [in-flight] wire the goals view\n- [blocked] operator sign-off\n- [awaiting-auth] go/no-go\n"
 	file := GoalsFile{Goals: []Goal{
 		{ID: "flight", Title: "Flight", WorkItems: []WorkItem{{Kind: WorkBacklog, Match: "goals view"}}},
-		{ID: "gate", Title: "Gate", WorkItems: []WorkItem{{Kind: WorkBacklog, Match: "sign-off"}}},
-		{ID: "miss", Title: "Miss", WorkItems: []WorkItem{{Kind: WorkBacklog, Match: "not present"}}},
+		{ID: "blk", Title: "Blocked", WorkItems: []WorkItem{{Kind: WorkBacklog, Match: "sign-off"}}},
+		{ID: "gate", Title: "Gate", WorkItems: []WorkItem{{Kind: WorkBacklog, Match: "go/no-go"}}},
+		{ID: "absent", Title: "Absent", WorkItems: []WorkItem{{Kind: WorkBacklog, Match: "not present"}}},
 	}}
 	doc := BuildGoals(GoalsInputs{File: file, FileOK: true, Backlog: md})
 	byID := indexByID(doc.Goals)
-	if byID["flight"].Rollup != "in-flight" {
-		t.Errorf("in-flight backlog item should roll up in-flight, got %q", byID["flight"].Rollup)
+	if byID["flight"].StatusDisplay != "in-flight" {
+		t.Errorf("[in-flight] backlog → in-flight, got %q", byID["flight"].StatusDisplay)
 	}
-	if byID["gate"].Rollup != "awaiting" || byID["gate"].State != "awaiting" {
-		t.Errorf("blocked backlog item should be awaiting, got rollup=%q", byID["gate"].Rollup)
+	if byID["blk"].StatusDisplay != "blocked" {
+		t.Errorf("[blocked] backlog → blocked (red, NOT awaiting), got %q", byID["blk"].StatusDisplay)
 	}
-	if byID["miss"].WorkItems[0].Class != "unknown" {
-		t.Errorf("an unmatched backlog item should be unknown, got %q", byID["miss"].WorkItems[0].Class)
+	if byID["gate"].StatusDisplay != "awaiting" {
+		t.Errorf("[awaiting-auth] backlog → awaiting (amber), got %q", byID["gate"].StatusDisplay)
+	}
+	// Ratified spec: a linked backlog item ABSENT from the active backlog is done (drained).
+	if byID["absent"].WorkItems[0].Class != "done" || byID["absent"].StatusDisplay != "achieved" {
+		t.Errorf("absent backlog item → done/achieved, got item=%q node=%q",
+			byID["absent"].WorkItems[0].Class, byID["absent"].StatusDisplay)
 	}
 }
 
-// --- BuildGoals: roll-up salience + declared status ---
+// --- BuildGoals: roll-up precedence (ratified 9-step order) ---
 
-func TestBuildGoals_RollupSalience(t *testing.T) {
-	// A parent with three children: one blocked, one in-flight, one achieved → blocked wins.
+func TestBuildGoals_BlockedBeatsInflight(t *testing.T) {
+	// One blocked child, one in-flight child, one achieved child → blocked wins.
 	file := GoalsFile{Goals: []Goal{
 		{ID: "root", Title: "Root"},
 		{ID: "c1", Title: "C1", Parent: "root", WorkItems: []WorkItem{{Kind: WorkDesk, Agent: "x"}}}, // crashed → blocked
@@ -170,73 +177,137 @@ func TestBuildGoals_RollupSalience(t *testing.T) {
 	}}
 	doc := BuildGoals(GoalsInputs{File: file, FileOK: true, DeskStates: map[string]string{"x": "crashed", "y": "working"}})
 	byID := indexByID(doc.Goals)
-	if byID["root"].Rollup != "blocked" {
-		t.Errorf("root should roll up blocked (most salient child), got %q", byID["root"].Rollup)
+	if byID["root"].StatusDisplay != "blocked" {
+		t.Errorf("root should be blocked (most salient child), got %q", byID["root"].StatusDisplay)
 	}
-	if byID["c3"].Rollup != "achieved" || byID["c3"].State != "realized" {
-		t.Errorf("declared-achieved child should be realized, got rollup=%q state=%q", byID["c3"].Rollup, byID["c3"].State)
+	if byID["c3"].StatusDisplay != "achieved" {
+		t.Errorf("declared-achieved child → achieved, got %q", byID["c3"].StatusDisplay)
 	}
 }
 
-func TestBuildGoals_AchievedWhenAllChildrenAchieved(t *testing.T) {
+func TestBuildGoals_BlockedBeatsAuthoredPaused(t *testing.T) {
+	// Ratified precedence: blocked (step 2) beats authored paused (step 4).
+	file := GoalsFile{Goals: []Goal{
+		{ID: "root", Title: "Root", Status: StatusPaused},
+		{ID: "c", Title: "C", Parent: "root", WorkItems: []WorkItem{{Kind: WorkDesk, Agent: "x"}}},
+	}}
+	doc := BuildGoals(GoalsInputs{File: file, FileOK: true, DeskStates: map[string]string{"x": "crashed"}})
+	if r := indexByID(doc.Goals)["root"].StatusDisplay; r != "blocked" {
+		t.Errorf("a paused parent with a blocked child must show blocked, got %q", r)
+	}
+}
+
+func TestBuildGoals_AuthoredPausedBeatsInflight(t *testing.T) {
+	// Ratified precedence: authored paused (step 4) beats in-flight (step 5).
+	file := GoalsFile{Goals: []Goal{
+		{ID: "root", Title: "Root", Status: StatusPaused},
+		{ID: "c", Title: "C", Parent: "root", WorkItems: []WorkItem{{Kind: WorkDesk, Agent: "x"}}},
+	}}
+	doc := BuildGoals(GoalsInputs{File: file, FileOK: true, DeskStates: map[string]string{"x": "working"}})
+	if r := indexByID(doc.Goals)["root"].StatusDisplay; r != "paused" {
+		t.Errorf("a paused parent with only an in-flight child should show paused, got %q", r)
+	}
+}
+
+func TestBuildGoals_CancelledShortCircuits(t *testing.T) {
+	// Step 1: authored cancelled wins over everything, even a blocked child.
+	file := GoalsFile{Goals: []Goal{
+		{ID: "root", Title: "Root", Status: StatusCancelled},
+		{ID: "c", Title: "C", Parent: "root", WorkItems: []WorkItem{{Kind: WorkDesk, Agent: "x"}}},
+	}}
+	doc := BuildGoals(GoalsInputs{File: file, FileOK: true, DeskStates: map[string]string{"x": "crashed"}})
+	if r := indexByID(doc.Goals)["root"].StatusDisplay; r != "cancelled" {
+		t.Errorf("authored cancelled short-circuits, got %q", r)
+	}
+}
+
+func TestBuildGoals_CancelledChildExcludedFromAchieved(t *testing.T) {
+	// A cancelled sub-goal is a dead branch and does not hold the parent out of achieved.
+	file := GoalsFile{Goals: []Goal{
+		{ID: "root", Title: "Root"},
+		{ID: "done1", Title: "Done", Parent: "root", Status: StatusAchieved},
+		{ID: "dead", Title: "Dead", Parent: "root", Status: StatusCancelled},
+	}}
+	doc := BuildGoals(GoalsInputs{File: file, FileOK: true})
+	if r := indexByID(doc.Goals)["root"].StatusDisplay; r != "achieved" {
+		t.Errorf("cancelled child must not hold parent out of achieved, got %q", r)
+	}
+}
+
+func TestBuildGoals_AchievedWhenAllDone(t *testing.T) {
 	file := GoalsFile{Goals: []Goal{
 		{ID: "root", Title: "Root"},
 		{ID: "c1", Title: "C1", Parent: "root", Status: StatusAchieved},
 		{ID: "c2", Title: "C2", Parent: "root", WorkItems: []WorkItem{{Kind: WorkInline, Text: "done thing", Done: true}}},
 	}}
 	doc := BuildGoals(GoalsInputs{File: file, FileOK: true})
-	if r := indexByID(doc.Goals)["root"].Rollup; r != "achieved" {
-		t.Errorf("root with all children/items done should be achieved, got %q", r)
+	if r := indexByID(doc.Goals)["root"].StatusDisplay; r != "achieved" {
+		t.Errorf("root with all children/items done → achieved, got %q", r)
 	}
 }
 
-func TestBuildGoals_DeclaredPausedAndCancelled(t *testing.T) {
-	file := GoalsFile{Goals: []Goal{
-		{ID: "p", Title: "P", Status: StatusPaused},
-		{ID: "x", Title: "X", Status: StatusCancelled},
-	}}
-	doc := BuildGoals(GoalsInputs{File: file, FileOK: true})
-	byID := indexByID(doc.Goals)
-	if byID["p"].State != "paused" || byID["x"].State != "cancelled" {
-		t.Errorf("declared paused/cancelled should map to their states, got %q / %q", byID["p"].State, byID["x"].State)
-	}
-}
-
-func TestBuildGoals_AspirationalWhenEmptyActive(t *testing.T) {
+func TestBuildGoals_EmptyNodeIsActiveNotAchieved(t *testing.T) {
+	// Ratified vacuous-achieved guard: an empty node is active, never achieved.
 	file := GoalsFile{Goals: []Goal{{ID: "dream", Title: "Someday"}}}
 	doc := BuildGoals(GoalsInputs{File: file, FileOK: true})
-	if doc.Goals[0].State != "aspirational" {
-		t.Errorf("an active node with no items/children is aspirational, got %q", doc.Goals[0].State)
+	if doc.Goals[0].StatusDisplay != "active" {
+		t.Errorf("empty node → active (not achieved), got %q", doc.Goals[0].StatusDisplay)
 	}
 }
 
-// --- BuildGoals: emission order, depth, scope inference, counts ---
+func TestBuildGoals_InlineNotDoneIsInflight(t *testing.T) {
+	file := GoalsFile{Goals: []Goal{
+		{ID: "g", Title: "G", WorkItems: []WorkItem{{Kind: WorkInline, Text: "todo"}}},
+	}}
+	doc := BuildGoals(GoalsInputs{File: file, FileOK: true})
+	if doc.Goals[0].WorkItems[0].Class != "in-flight" || doc.Goals[0].StatusDisplay != "in-flight" {
+		t.Errorf("inline without done:true → in-flight, got item=%q node=%q",
+			doc.Goals[0].WorkItems[0].Class, doc.Goals[0].StatusDisplay)
+	}
+}
+
+func TestBuildGoals_DeclaredPausedSurvivesIdle(t *testing.T) {
+	file := GoalsFile{Goals: []Goal{{ID: "p", Title: "P", Status: StatusPaused}}}
+	doc := BuildGoals(GoalsInputs{File: file, FileOK: true})
+	if doc.Goals[0].StatusDisplay != "paused" {
+		t.Errorf("authored paused with no active work → paused, got %q", doc.Goals[0].StatusDisplay)
+	}
+}
+
+// --- BuildGoals: emission order, depth, scope inference (task), counts ---
 
 func TestBuildGoals_OrderDepthAndScope(t *testing.T) {
 	file := GoalsFile{Goals: []Goal{
 		{ID: "b-project", Title: "B", Parent: "a-fleet"},
 		{ID: "a-fleet", Title: "A"},
-		{ID: "c-desk", Title: "C", Parent: "b-project"},
+		{ID: "c-task", Title: "C", Parent: "b-project"},
 	}}
 	doc := BuildGoals(GoalsInputs{File: file, FileOK: true})
-	// Depth-first from roots (file order of roots): a-fleet, then its subtree b-project, c-desk.
 	gotIDs := []string{doc.Goals[0].ID, doc.Goals[1].ID, doc.Goals[2].ID}
-	wantIDs := []string{"a-fleet", "b-project", "c-desk"}
+	wantIDs := []string{"a-fleet", "b-project", "c-task"}
 	for i := range wantIDs {
 		if gotIDs[i] != wantIDs[i] {
 			t.Fatalf("emission order = %v, want %v (parent must precede children)", gotIDs, wantIDs)
 		}
 	}
 	byID := indexByID(doc.Goals)
-	if byID["a-fleet"].Depth != 0 || byID["b-project"].Depth != 1 || byID["c-desk"].Depth != 2 {
-		t.Errorf("depths wrong: %d/%d/%d", byID["a-fleet"].Depth, byID["b-project"].Depth, byID["c-desk"].Depth)
+	if byID["a-fleet"].Depth != 0 || byID["b-project"].Depth != 1 || byID["c-task"].Depth != 2 {
+		t.Errorf("depths wrong: %d/%d/%d", byID["a-fleet"].Depth, byID["b-project"].Depth, byID["c-task"].Depth)
 	}
-	// Scope inferred from depth when unset.
-	if byID["a-fleet"].Scope != "fleet" || byID["b-project"].Scope != "project" || byID["c-desk"].Scope != "desk" {
-		t.Errorf("scope inference wrong: %q/%q/%q", byID["a-fleet"].Scope, byID["b-project"].Scope, byID["c-desk"].Scope)
+	// Scope inferred from depth when unset — the ratified enum is fleet/project/task.
+	if byID["a-fleet"].Scope != "fleet" || byID["b-project"].Scope != "project" || byID["c-task"].Scope != "task" {
+		t.Errorf("scope inference wrong: %q/%q/%q", byID["a-fleet"].Scope, byID["b-project"].Scope, byID["c-task"].Scope)
 	}
-	if byID["a-fleet"].Children[0] != "b-project" {
-		t.Errorf("children not wired: %+v", byID["a-fleet"].Children)
+}
+
+func TestBuildGoals_LegacyDeskScopeNormalizedToTask(t *testing.T) {
+	file := GoalsFile{Goals: []Goal{{ID: "g", Title: "G", Scope: ScopeDesk}}}
+	doc := BuildGoals(GoalsInputs{File: file, FileOK: true})
+	if doc.Goals[0].Scope != "task" {
+		t.Errorf("legacy scope 'desk' should normalize to 'task', got %q", doc.Goals[0].Scope)
+	}
+	if doc.Counts.Task != 1 {
+		t.Errorf("a desk/task node must be counted under Task, got %+v", doc.Counts)
 	}
 }
 
@@ -244,7 +315,7 @@ func TestBuildGoals_Counts(t *testing.T) {
 	file := GoalsFile{Goals: []Goal{
 		{ID: "f", Title: "F", Scope: ScopeFleet, Status: StatusAchieved},
 		{ID: "p1", Title: "P1", Scope: ScopeProject, WorkItems: []WorkItem{{Kind: WorkDesk, Agent: "w"}}},
-		{ID: "p2", Title: "P2", Scope: ScopeProject}, // empty active → aspirational
+		{ID: "p2", Title: "P2", Scope: ScopeProject}, // empty active
 	}}
 	doc := BuildGoals(GoalsInputs{File: file, FileOK: true, DeskStates: map[string]string{"w": "working"}})
 	c := doc.Counts
@@ -261,15 +332,20 @@ func TestBuildGoals_IssueLinkedAndResolved(t *testing.T) {
 		{ID: "g", Title: "G", WorkItems: []WorkItem{
 			{Kind: WorkIssue, Ref: "owner/repo#1"},
 			{Kind: WorkIssue, Ref: "owner/repo#2"},
+			{Kind: WorkIssue, Ref: "owner/repo#3"},
 		}},
 	}}
-	doc := BuildGoals(GoalsInputs{File: file, FileOK: true, IssueStates: map[string]string{"owner/repo#2": "closed"}})
+	doc := BuildGoals(GoalsInputs{File: file, FileOK: true, IssueStates: map[string]string{
+		"owner/repo#2": "closed", "owner/repo#3": "open"}})
 	items := doc.Goals[0].WorkItems
 	if items[0].Detail != "linked" || items[0].Class != "active" {
-		t.Errorf("unresolved issue should be linked/active, got %+v", items[0])
+		t.Errorf("unresolved issue → linked/active, got %+v", items[0])
 	}
 	if items[1].Detail != "closed" || items[1].Class != "done" {
-		t.Errorf("resolved closed issue should be done, got %+v", items[1])
+		t.Errorf("closed issue → done, got %+v", items[1])
+	}
+	if items[2].Detail != "open" || items[2].Class != "in-flight" {
+		t.Errorf("open issue → in-flight (ratified), got %+v", items[2])
 	}
 }
 

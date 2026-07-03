@@ -32,7 +32,10 @@ type GoalScope string
 const (
 	ScopeFleet   GoalScope = "fleet"
 	ScopeProject GoalScope = "project"
-	ScopeDesk    GoalScope = "desk"
+	ScopeTask    GoalScope = "task" // canonical leaf altitude (ratified goals spec)
+	// ScopeDesk is the pre-ratification alias for ScopeTask; normalizeScope maps it to
+	// ScopeTask so a legacy file still renders and counts correctly.
+	ScopeDesk GoalScope = "desk"
 )
 
 // GoalStatus is a node's declared lifecycle status (distinct from the COMPUTED roll-up). `active`
@@ -155,18 +158,17 @@ type RenderedWorkItem struct {
 // RenderedGoal is a goal node with its resolved work items, computed roll-up, and visual state.
 // Depth + Scope + Children let the frontend lay the tree out in altitude columns.
 type RenderedGoal struct {
-	ID          string             `json:"id"`
-	Title       string             `json:"title"`
-	Description string             `json:"description,omitempty"`
-	Scope       string             `json:"scope"`
-	Parent      string             `json:"parent,omitempty"`
-	Owner       string             `json:"owner,omitempty"`
-	Status      string             `json:"status"` // declared lifecycle status
-	Rollup      string             `json:"rollup"` // computed: achieved|in-flight|awaiting|blocked|active|paused|cancelled
-	State       string             `json:"state"`  // visual: realized|in-flight|awaiting|blocked|active|aspirational|paused|cancelled
-	Depth       int                `json:"depth"`
-	Children    []string           `json:"children"`
-	WorkItems   []RenderedWorkItem `json:"work_items"`
+	ID            string             `json:"id"`
+	Title         string             `json:"title"`
+	Description   string             `json:"description,omitempty"`
+	Scope         string             `json:"scope"`
+	Parent        string             `json:"parent,omitempty"`
+	Owner         string             `json:"owner,omitempty"`
+	Status        string             `json:"status"`         // coordinator-authored lifecycle
+	StatusDisplay string             `json:"status_display"` // computed roll-up (ratified spec): blocked|awaiting|in-flight|achieved|active|paused|cancelled
+	Depth         int                `json:"depth"`
+	Children      []string           `json:"children"`
+	WorkItems     []RenderedWorkItem `json:"work_items"`
 }
 
 // GoalsCounts is the situation-bar summary — goal counts by scope and by visual state.
@@ -174,11 +176,11 @@ type GoalsCounts struct {
 	Total        int `json:"total"`
 	Fleet        int `json:"fleet"`
 	Project      int `json:"project"`
-	Desk         int `json:"desk"`
-	Realized     int `json:"realized"`
-	InFlight     int `json:"in_flight"`
-	Awaiting     int `json:"awaiting"` // awaiting + blocked — the "needs attention" bucket
-	Aspirational int `json:"aspirational"`
+	Task         int `json:"task"`
+	Realized     int `json:"realized"`     // status_display achieved
+	InFlight     int `json:"in_flight"`    // status_display in-flight
+	Awaiting     int `json:"awaiting"`     // awaiting + blocked — the "needs attention" bucket
+	Aspirational int `json:"aspirational"` // active + paused + cancelled — not yet realized
 }
 
 // GoalsDoc is the /api/goals document: the rendered nodes (roots first, each parent immediately
@@ -264,12 +266,11 @@ func BuildGoals(in GoalsInputs) GoalsDoc {
 		node := RenderedGoal{
 			ID: g.ID, Title: g.Title, Description: g.Description,
 			Scope: string(scopeOf(g.Scope, depth)), Parent: g.Parent, Owner: g.Owner,
-			Status:    string(statusOrDefault(g.Status)),
-			Rollup:    r,
-			State:     visualState(r, len(items)+len(children[id])),
-			Depth:     depth,
-			Children:  append([]string(nil), children[id]...),
-			WorkItems: items,
+			Status:        string(statusOrDefault(g.Status)),
+			StatusDisplay: r,
+			Depth:         depth,
+			Children:      append([]string(nil), children[id]...),
+			WorkItems:     items,
 		}
 		doc.Goals = append(doc.Goals, node)
 		countNode(&doc.Counts, node)
@@ -303,23 +304,26 @@ func resolveItem(wi WorkItem, in GoalsInputs) RenderedWorkItem {
 			r.Detail = marker
 			r.Class = backlogClass(marker)
 		} else {
-			r.Detail = "unmatched"
-			r.Class = "unknown"
+			// Ratified spec: a linked backlog item ABSENT from the active backlog is done — the
+			// backlog is a live drive-queue that drops completed items, so absence means drained.
+			r.Detail, r.Class = "done", "done"
 		}
 	case WorkIssue:
 		r.Ref = wi.Ref
 		if s, ok := in.IssueStates[strings.TrimSpace(wi.Ref)]; ok {
 			r.Detail = s
-			r.Class = issueClass(s)
+			r.Class = issueClass(s) // ratified: open → in-flight, closed → done
 		} else {
-			r.Detail = "linked"
-			r.Class = "active" // an open, unresolved issue is planned work, not blocked
+			// Unresolved (the issue tracker is off, or this PR does not resolve live issue state):
+			// shown linked + neutral so it never fabricates an in-flight/done it did not verify.
+			r.Detail, r.Class = "linked", "active"
 		}
 	case WorkInline:
 		if wi.Done {
 			r.Detail, r.Class = "done", "done"
 		} else {
-			r.Detail, r.Class = "open", "active"
+			// Ratified spec: an inline item without done:true participates in roll-up as in-flight.
+			r.Detail, r.Class = "in progress", "in-flight"
 		}
 	default:
 		r.Detail, r.Class = "unknown", "unknown"
@@ -348,9 +352,12 @@ func itemLabel(wi WorkItem) string {
 }
 
 // deskClass maps a live board desk-state label (surface.State.String, plus the board's "crashed"/
-// "unknown") onto a work-item class. `working` is active in-flight work; the two `awaiting-*`
-// states need a human/operator (awaiting); `errored`/`crashed` are faults (blocked); `idle` and
-// `unknown` are neutral (active — a desk is attached but not currently moving the item).
+// "unknown") onto a work-item class, per the ratified goals-spec desk row. `working` is in-flight;
+// the two `awaiting-*` states are operator/human-gated (awaiting); `errored`/`crashed` are faults
+// (blocked). `idle` is left NEUTRAL (active) rather than the spec's "idle ⇒ done": the spec's done
+// rule is conditioned on "no in-flight drive-queue items", and this read model has the board state
+// but not per-desk drive-queue data — so it does not assert done it cannot verify (idle ⇒ done with
+// the drive-queue check is a tracked follow-on). `unknown` is neutral.
 func deskClass(state string) string {
 	switch state {
 	case "working":
@@ -366,17 +373,20 @@ func deskClass(state string) string {
 	}
 }
 
-// backlogClass maps a normalized backlog marker (backlog.MatchInBacklog) onto a work-item class.
-// `in-flight` is active work; `next` is planned-not-started (active); `blocked`/`needs-attention`
-// and `awaiting-auth` are operator-gated (awaiting); `done` is complete; a malformed/absent marker
-// is neutral (active) — never silently "done".
+// backlogClass maps a normalized backlog marker (backlog.MatchInBacklog / ClassifyLine) onto a
+// work-item class, per the ratified goals-spec table: `[in-flight]`/`[pending]` → in-flight;
+// `[blocked]`/`[needs-attention]` → blocked (a genuine block, red — NOT amber awaiting); only
+// `[awaiting-auth]` → awaiting (operator-gated, amber); `[done]` → done; `[next]`/malformed are
+// neutral (active).
 func backlogClass(marker string) string {
 	switch marker {
-	case "in-flight":
+	case "in-flight": // markerOf normalizes [pending] to in-flight
 		return "in-flight"
 	case "done":
 		return "done"
-	case "blocked", "needs-attention", "awaiting-auth":
+	case "blocked", "needs-attention":
+		return "blocked"
+	case "awaiting-auth":
 		return "awaiting"
 	case "next", "malformed":
 		return "active"
@@ -385,97 +395,105 @@ func backlogClass(marker string) string {
 	}
 }
 
-// issueClass maps a GitHub issue state onto a work-item class (closed = done; open = active work).
+// issueClass maps a GitHub issue state onto a work-item class, per the ratified spec: open → in-flight
+// (open issues are active work), closed → done.
 func issueClass(state string) string {
 	switch strings.ToLower(strings.TrimSpace(state)) {
 	case "closed":
 		return "done"
 	case "open":
-		return "active"
+		return "in-flight"
 	default:
 		return "unknown"
 	}
 }
 
-// nodeRollup computes a node's roll-up from its declared status, its resolved work items, and its
-// children's roll-ups (spec §"Roll-up status is computed from children and work items"). Salience
-// order: a declared terminal/hold status wins; else blocked ▸ awaiting ▸ in-flight ▸ (all done →
-// achieved) ▸ active. A neutral item/child (active/idle/unknown) counts toward the total but not
-// toward "done", so a node with any unfinished neutral work never reads as achieved.
+// nodeRollup computes a node's operator-facing status_display from its authored status, its
+// resolved work items, and its children's status_display, following the RATIFIED goals-spec
+// precedence (first match wins):
+//
+//  1. authored cancelled → cancelled
+//  2. any child/item blocked → blocked
+//  3. any child/item awaiting → awaiting
+//  4. authored paused → paused
+//  5. any child/item in-flight → in-flight
+//  6. authored achieved AND all non-cancelled children achieved (or none) AND all items done (or none) → achieved
+//  7. all non-cancelled children achieved AND all items done AND ≥1 child or item exists → achieved
+//     (cancelled children are a dead branch, excluded from the achieved test)
+//  8. zero children AND zero items → active (the vacuous-achieved guard)
+//  9. otherwise → active
 func nodeRollup(g *Goal, items []RenderedWorkItem, kids []string, rollupOf func(string) string) string {
-	switch statusOrDefault(g.Status) {
-	case StatusAchieved:
-		return "achieved"
-	case StatusPaused:
-		return "paused"
-	case StatusCancelled:
+	authored := statusOrDefault(g.Status)
+	if authored == StatusCancelled { // step 1
 		return "cancelled"
 	}
+
 	var hasBlocked, hasAwaiting, hasInflight bool
-	total, done := 0, 0
-	tally := func(class string) {
-		total++
-		switch class {
+	consideredChildren, achievedChildren := 0, 0 // non-cancelled children (the achieved test)
+	for _, c := range kids {
+		switch r := rollupOf(c); r {
+		case "blocked":
+			hasBlocked = true
+			consideredChildren++
+		case "awaiting":
+			hasAwaiting = true
+			consideredChildren++
+		case "in-flight":
+			hasInflight = true
+			consideredChildren++
+		case "cancelled":
+			// dead branch — excluded from the achieved test entirely
+		case "achieved":
+			consideredChildren++
+			achievedChildren++
+		default: // active / paused
+			consideredChildren++
+		}
+	}
+	itemsDone := 0
+	for _, it := range items {
+		switch it.Class {
 		case "blocked":
 			hasBlocked = true
 		case "awaiting":
 			hasAwaiting = true
 		case "in-flight":
 			hasInflight = true
-		case "done", "achieved":
-			done++
+		case "done":
+			itemsDone++
 		}
 	}
-	for _, it := range items {
-		tally(it.Class)
-	}
-	for _, c := range kids {
-		tally(rollupOf(c))
-	}
-	switch {
-	case hasBlocked:
-		return "blocked"
-	case hasAwaiting:
-		return "awaiting"
-	case hasInflight:
-		return "in-flight"
-	case total > 0 && done == total:
-		return "achieved"
-	default:
-		return "active"
-	}
-}
 
-// visualState maps a roll-up onto the node's visual state. An "active" node with NO work items and
-// NO children is aspirational (a named-but-not-started end — the ghosted "unrealized DAG"); an
-// active node that has work underway renders as plain active.
-func visualState(rollup string, childCount int) string {
-	switch rollup {
-	case "achieved":
-		return "realized"
-	case "in-flight":
-		return "in-flight"
-	case "awaiting":
-		return "awaiting"
-	case "blocked":
+	if hasBlocked { // step 2
 		return "blocked"
-	case "paused":
+	}
+	if hasAwaiting { // step 3
+		return "awaiting"
+	}
+	if authored == StatusPaused { // step 4
 		return "paused"
-	case "cancelled":
-		return "cancelled"
-	default: // active
-		if childCount == 0 {
-			return "aspirational"
-		}
-		return "active"
 	}
+	if hasInflight { // step 5
+		return "in-flight"
+	}
+	allChildrenAchieved := consideredChildren == achievedChildren // vacuously true when none
+	allItemsDone := itemsDone == len(items)                       // vacuously true when none
+	if allChildrenAchieved && allItemsDone {
+		if authored == StatusAchieved { // step 6 (allowed even with no structure)
+			return "achieved"
+		}
+		if len(kids)+len(items) > 0 { // step 7 (needs ≥1 child or item)
+			return "achieved"
+		}
+	}
+	return "active" // steps 8-9
 }
 
-// scopeOf returns the declared scope, or infers one from depth when the file omits it
-// (0 → fleet, 1 → project, ≥2 → desk).
+// scopeOf returns the declared scope (normalized to the canonical enum), or infers one from depth
+// when the file omits it (0 → fleet, 1 → project, ≥2 → task).
 func scopeOf(declared GoalScope, depth int) GoalScope {
 	if declared != "" {
-		return declared
+		return normalizeScope(declared)
 	}
 	switch depth {
 	case 0:
@@ -483,8 +501,18 @@ func scopeOf(declared GoalScope, depth int) GoalScope {
 	case 1:
 		return ScopeProject
 	default:
-		return ScopeDesk
+		return ScopeTask
 	}
+}
+
+// normalizeScope maps the legacy `desk` alias onto the canonical `task` scope; other values pass
+// through unchanged (an unrecognized scope is left as-authored so it is visible, not silently
+// coerced).
+func normalizeScope(s GoalScope) GoalScope {
+	if s == ScopeDesk {
+		return ScopeTask
+	}
+	return s
 }
 
 // statusOrDefault treats an empty declared status as active.
@@ -498,22 +526,22 @@ func statusOrDefault(s GoalStatus) GoalStatus {
 // countNode accumulates the situation-bar counts for one rendered node.
 func countNode(c *GoalsCounts, n RenderedGoal) {
 	c.Total++
-	switch GoalScope(n.Scope) {
+	switch normalizeScope(GoalScope(n.Scope)) {
 	case ScopeFleet:
 		c.Fleet++
 	case ScopeProject:
 		c.Project++
-	case ScopeDesk:
-		c.Desk++
+	case ScopeTask:
+		c.Task++
 	}
-	switch n.State {
-	case "realized":
+	switch n.StatusDisplay {
+	case "achieved":
 		c.Realized++
 	case "in-flight":
 		c.InFlight++
 	case "awaiting", "blocked":
 		c.Awaiting++
-	case "aspirational", "active", "paused", "cancelled":
+	case "active", "paused", "cancelled":
 		c.Aspirational++
 	}
 }
