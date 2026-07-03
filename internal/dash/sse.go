@@ -199,10 +199,10 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// poll is the single shared file poller. It stats the snapshot, ledger, and
-// backlog every pollInterval and emits an SSE update whenever any of their
-// (mtime,size) signatures change — so all connected clients refetch the JSON
-// endpoints. One poller serves every client (not one per connection).
+// poll is the single shared file poller. It stats the snapshot, ledger, backlog,
+// goals JSON, and goals YAML every pollInterval and emits an SSE update whenever
+// any of their (mtime,size) signatures change — so all connected clients refetch
+// the JSON endpoints. One poller serves every client (not one per connection).
 func (s *Server) poll(ctx context.Context) {
 	paths := []string{s.cfg.SnapshotPath, s.cfg.LedgerPath, s.cfg.BacklogPath, s.cfg.GoalsPath, s.cfg.GoalsYAMLPath}
 	prev := fileSigs(paths)
@@ -235,7 +235,7 @@ type fileSig struct {
 // sigBundle is the combined signature of all watched files (a comparable value
 // so the poller can detect "any change" with a single ==).
 type sigBundle struct {
-	snap, ledger, backlog, goals fileSig
+	snap, ledger, backlog, goals, goalsYAML fileSig
 }
 
 // statSig deliberately collapses "absent" and "stat error" to the same
@@ -258,12 +258,14 @@ func statSig(path string) fileSig {
 	return fileSig{mtime: fi.ModTime().UnixNano(), size: fi.Size(), exist: true}
 }
 
-// fileSigs computes the combined signature for [snapshot, ledger, backlog, goals].
+// fileSigs computes the combined signature for [snapshot, ledger, backlog, goals,
+// goalsYAML].
 func fileSigs(paths []string) sigBundle {
 	return sigBundle{
-		snap:    statSig(paths[0]),
-		ledger:  statSig(paths[1]),
-		backlog: statSig(paths[2]),
-		goals:   statSig(paths[3]),
+		snap:      statSig(paths[0]),
+		ledger:    statSig(paths[1]),
+		backlog:   statSig(paths[2]),
+		goals:     statSig(paths[3]),
+		goalsYAML: statSig(paths[4]),
 	}
 }

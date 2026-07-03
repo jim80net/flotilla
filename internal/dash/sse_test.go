@@ -187,7 +187,8 @@ func TestFileSigsChange(t *testing.T) {
 	ledger := filepath.Join(dir, "ledger.md")
 	backlog := filepath.Join(dir, "backlog.md")
 	goals := filepath.Join(dir, "fleet-goals.json")
-	paths := []string{snap, ledger, backlog, goals}
+	goalsYAML := filepath.Join(dir, "fleet-goals.yaml")
+	paths := []string{snap, ledger, backlog, goals, goalsYAML}
 
 	// All absent initially.
 	s0 := fileSigs(paths)
@@ -227,8 +228,46 @@ func TestFileSigsChange(t *testing.T) {
 	if err := os.WriteFile(goals, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if fileSigs(paths) == s3 {
+	s4 := fileSigs(paths)
+	if s4 == s3 {
 		t.Error("goals change must change the combined signature")
+	}
+
+	// Touching the goals YAML source must change the combined signature — poll()
+	// watches paths[4] (GoalsYAMLPath) and bare yaml edits must fire SSE.
+	if err := os.WriteFile(goalsYAML, []byte("goals: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if fileSigs(paths) == s4 {
+		t.Error("goals yaml change must change the combined signature")
+	}
+}
+
+// TestPollEmitsOnGoalsYAMLChange: the poller emits when only the goals YAML
+// source changes (paths[4]), not just the compiled goals JSON.
+func TestPollEmitsOnGoalsYAMLChange(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, dir := newTestServer(t, singleFleetRoster, now)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go srv.hub.run(ctx)
+	go srv.poll(ctx)
+
+	c := &sseClient{events: make(chan string, 4)}
+	if !srv.hub.add(c) {
+		t.Fatal("could not register client")
+	}
+
+	yamlPath := filepath.Join(dir, "fleet-goals.yaml")
+	time.Sleep(50 * time.Millisecond)
+	if err := os.WriteFile(yamlPath, []byte("goals: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-c.events:
+	case <-time.After(3 * time.Second):
+		t.Fatal("poller did not emit an update on a goals yaml change")
 	}
 }
 
