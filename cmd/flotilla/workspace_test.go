@@ -406,9 +406,6 @@ func TestCmdWorkspaceInitCoordinatorGrokScaffoldsPermissions(t *testing.T) {
 	if !strings.Contains(text, `"on_gatekeeper_error": "abstain"`) {
 		t.Errorf("coordinator settings missing abstain-on-error policy: %s", text)
 	}
-	if strings.Contains(text, "gh pr merge") && strings.Contains(text, `"deny"`) {
-		// crude: merge must not appear in deny array — verify via json parse
-	}
 	var settings struct {
 		Permissions struct {
 			Deny []string `json:"deny"`
