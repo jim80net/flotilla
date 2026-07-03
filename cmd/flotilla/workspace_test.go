@@ -215,8 +215,8 @@ func TestCmdWorkspaceInitCodexScaffoldsAgentsAndRules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(launch), "codex -m gpt-5.5-codex") {
-		t.Errorf("codex launch = %q, want gpt-5.5-codex recipe", launch)
+	if !strings.Contains(string(launch), "codex -m gpt-5.5 ") {
+		t.Errorf("codex launch = %q, want gpt-5.5 recipe (ChatGPT-auth compatible)", launch)
 	}
 	if !strings.Contains(string(launch), "--ask-for-approval on-request") {
 		t.Errorf("codex launch missing on-request approval: %q", launch)
@@ -373,7 +373,7 @@ func TestWorkspaceLaunchCommandCodexCoordinatorExportsSecrets(t *testing.T) {
 	for _, want := range []string{
 		"export FLOTILLA_SELF='alpha-xo'",
 		`export FLOTILLA_SECRETS="${FLOTILLA_SECRETS:-$HOME/.config/flotilla/flotilla-secrets.env}"`,
-		"codex -m gpt-5.5-codex",
+		"codex -m gpt-5.5 ",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("codex coordinator launch missing %q in %q", want, got)
@@ -409,7 +409,7 @@ func TestCmdWorkspaceInitCodexCoordinatorScaffoldsWithProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 	launchText := string(launch)
-	for _, want := range []string{"FLOTILLA_SELF", "FLOTILLA_SECRETS", "codex -m gpt-5.5-codex"} {
+	for _, want := range []string{"FLOTILLA_SELF", "FLOTILLA_SECRETS", "codex -m gpt-5.5 "} {
 		if !strings.Contains(launchText, want) {
 			t.Errorf("coordinator launch missing %q in %s", want, launchText)
 		}
