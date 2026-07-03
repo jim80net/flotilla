@@ -24,6 +24,8 @@
 
   var cache = null;      // last /api/goals document
   var lastSig = null;    // stringified last-rendered doc — skip a no-op re-render
+  var lastStructSig = null; // structural signature — decides in-place update vs full re-layout
+  var laidOut = false;      // true only between a completed pass-2 and the next full rebuild
   var activated = false; // becomes true once the operator opens the Goals tab (lazy fetch)
   var epoch = 0;         // fetch + deferred-layout ordering guard
 
@@ -112,22 +114,31 @@
       "</span>";
   }
 
-  function nodeCard(n) {
+  // nodeInner is the live-updatable content of a card (state pill + work-item
+  // chips + the text that carries status). It is regenerated on an in-place
+  // refresh; the article WRAPPER (identity, geometry, focus, transient classes)
+  // is left untouched — see updateInPlace.
+  function nodeInner(n) {
     var vis = visToken(n);
     var owner = n.owner ? '<span class="gnode-owner">led by ' + escapeHtml(n.owner) + "</span>" : "";
     var desc = n.description ? '<p class="gnode-desc">' + escapeHtml(n.description) + "</p>" : "";
     var items = (n.work_items || []).map(workItem).join("");
     var itemsBlock = items ? '<div class="gnode-items">' + items + "</div>" : "";
     var pill = '<span class="gpill gpill-' + escapeHtml(vis) + '">' + escapeHtml(STATE_LABEL[vis] || vis) + "</span>";
+    return '<div class="gnode-eyebrow">' + escapeHtml(n.scope) + owner + "</div>" +
+      '<div class="gnode-title">' + escapeHtml(n.title) + "</div>" +
+      desc +
+      '<div class="gnode-foot">' + pill + "</div>" +
+      itemsBlock;
+  }
+
+  function nodeCard(n) {
+    var vis = visToken(n);
     return '<article class="gnode gnode-' + escapeHtml(n.scope) + " state-" + escapeHtml(vis) + '" ' +
       'data-id="' + escapeHtml(n.id) + '" data-parent="' + escapeHtml(n.parent || "") + '" ' +
       'style="left:' + n._x + "px;top:" + n._y + "px;width:" + n._w + 'px" ' +
       'role="treeitem" tabindex="0">' +
-      '<div class="gnode-eyebrow">' + escapeHtml(n.scope) + owner + "</div>" +
-      '<div class="gnode-title">' + escapeHtml(n.title) + "</div>" +
-      desc +
-      '<div class="gnode-foot">' + pill + "</div>" +
-      itemsBlock +
+      nodeInner(n) +
       "</article>";
   }
 
@@ -217,6 +228,52 @@
     q("goals-tierlabels").innerHTML = out.join("");
   }
 
+  /* ── keyed update: refresh live status in place, keep layout + focus ───── */
+  // structuralSig captures ONLY the fields that affect layout or node identity —
+  // id/parent/depth/scope/title/description/owner and each work-item's structural
+  // fields (kind/label/ref/text). It deliberately EXCLUDES the live-changing bits
+  // (status_display, a work-item's class/detail) because those change colour + a
+  // pill word but never the card's size or position. When the structure is
+  // unchanged, an SSE refresh updates the existing cards in place — preserving
+  // element identity so keyboard focus and any transient UI classes (the drawer
+  // selection / hover chain / pulse that later increments add to the article)
+  // survive the tick, instead of being wiped by a full innerHTML teardown.
+  function structuralSig(goals) {
+    return JSON.stringify(goals.map(function (n) {
+      return [n.id, n.parent || "", n.depth || 0, n.scope || "", n.title || "",
+        n.description || "", n.owner || "",
+        (n.work_items || []).map(function (wi) { return [wi.kind || "", wi.label || "", wi.ref || "", wi.text || ""]; })];
+    }));
+  }
+
+  // updateInPlace refreshes each existing card's state token + inner content from
+  // the new doc WITHOUT touching the article element's identity, geometry, or
+  // non-state classes. Cards are in goals[] order (structure unchanged ⇒ same
+  // order), so children[i] ↔ goals[i].
+  function updateInPlace(goals, nodesEl) {
+    goals.forEach(function (n, i) {
+      var card = nodesEl.children[i];
+      if (!card) return;
+      var vis = visToken(n);
+      // swap only the state-* token; keep gnode / gnode-<scope> / any transient class
+      card.className = card.className.replace(/\bstate-[a-z-]+\b/, "state-" + vis);
+      card.innerHTML = nodeInner(n);
+    });
+  }
+
+  // focus preserved across a FULL rebuild (which replaces the articles): remember
+  // the focused node id, restore focus to its new card after the rebuild.
+  function focusedNodeId() {
+    var a = document.activeElement;
+    var card = a && a.closest ? a.closest(".gnode") : null;
+    return card ? card.getAttribute("data-id") : null;
+  }
+  function restoreFocus(id) {
+    if (!id) return;
+    var card = q("goals-nodes").querySelector('[data-id="' + String(id).replace(/["\\]/g, "\\$&") + '"]');
+    if (card) card.focus();
+  }
+
   /* ── main render (two-pass measure) ────────────────────────────────────── */
   // render(sig): sig is the JSON signature of the doc being rendered; it is committed
   // to lastSig ONLY at each point the render actually completes (the synchronous
@@ -249,6 +306,29 @@
     graph.classList.remove("hidden");
     empty.classList.add("hidden");
 
+    var nodesEl = q("goals-nodes");
+    var ssig = structuralSig(goals);
+
+    // In-place fast path: the structure is unchanged AND the canvas is already laid
+    // out, so only live status moved. Update the existing cards in place — keeping
+    // their geometry, keyboard focus, and any transient classes — and recolour the
+    // edges. No teardown, no re-layout, no rAF. (laidOut guards against updating a
+    // provisional/aborted DOM; the count guard against a desync.)
+    if (laidOut && ssig === lastStructSig && nodesEl.children.length === goals.length) {
+      goals.forEach(function (n) {
+        var prev = nodeById[n.id];
+        if (prev) { prev.status_display = n.status_display; prev.work_items = n.work_items; }
+      });
+      updateInPlace(goals, nodesEl);
+      drawEdges(); // child state may have changed → recolour (the SVG is stateless)
+      lastSig = sig;
+      return;
+    }
+
+    // Structural change ⇒ full rebuild + re-layout. Preserve keyboard focus across
+    // the article replacement.
+    laidOut = false;
+    var keepFocus = focusedNodeId();
     buildNodeIndex(goals);
     var roots = goals.filter(function (n) { return !n.parent || !nodeById[n.parent]; });
     var maxDepth = 0;
@@ -256,7 +336,6 @@
 
     // Pass 1: render at column x with provisional y=0 so heights can be measured.
     goals.forEach(function (n) { n._y = 0; });
-    var nodesEl = q("goals-nodes");
     nodesEl.innerHTML = goals.map(nodeCard).join("");
     renderTierLabels(maxDepth);
 
@@ -266,9 +345,10 @@
     requestAnimationFrame(function () {
       // Aborted — superseded by a newer refresh, or the tab went hidden (rAF is
       // suspended in a backgrounded tab while dash.js keeps calling refresh()). Do
-      // NOT commit lastSig: the canvas is still at its provisional pass-1 layout, so
-      // the next refresh must re-render it rather than dedup-skip a half-finished map.
-      // show() re-renders on tab return.
+      // NOT commit lastSig/lastStructSig/laidOut: the canvas is still at its
+      // provisional pass-1 layout, so the next refresh must re-render it rather than
+      // dedup-skip or in-place-update a half-finished map. show() re-renders on
+      // tab return.
       if (myEpoch !== epoch || !isVisible()) return;
       // Cards render in goals[] order, so children[i] ↔ goals[i] — read heights
       // in one pass (all reads batched before any write) to avoid layout thrash.
@@ -281,7 +361,10 @@
       drawEdges();
       if (!view.fitted) { fit(); view.fitted = true; }
       applyTransform();
-      lastSig = sig; // commit ONLY after a complete pass-2 render
+      restoreFocus(keepFocus);
+      lastStructSig = ssig; // commit ONLY after a complete pass-2 render
+      laidOut = true;
+      lastSig = sig;
     });
   }
 
