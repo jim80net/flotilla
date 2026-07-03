@@ -29,9 +29,11 @@
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <!-- Display: Space Mono (characterful monospace) avoided in favor of Syne (geometric grotesque)
-       paired with IBM Plex Mono for the terminal/code body. Distinctive, not generic. -->
-  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
+  <!-- Display: Barlow Condensed — the SAME condensed grotesque the flotilla dash uses
+       (internal/dash/assets), paired with IBM Plex Mono for the terminal/code body, so
+       the product and this page share one visual language. Calm + instrument-like, not
+       a loud geometric display. See docs/design/README.md. -->
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
 
   <link rel="stylesheet" href="./styles.css" />
 </head>
@@ -112,21 +114,60 @@
           </div>
         </div>
 
-        <!-- demo asset placeholder: a produced gif / asciinema cast drops in here -->
-        <figure class="hero-demo" aria-label="product demo">
-          <div class="demo-chrome">
-            <span class="tl-dot r"></span><span class="tl-dot y"></span><span class="tl-dot g"></span>
-            <span class="demo-title">Discord &middot; #fleet</span>
+        <!-- HERO MOCK-UP: a static picture of `flotilla dash`, Goals view, in the
+             command-chart (org) layout — the operator-priority hero. Pure HTML/CSS,
+             no live server, no framework. MOCK DATA ONLY: a generic example fleet
+             (xo hub + backend/frontend/data/infra desks) mirroring the public
+             quickstart roles — never a real deployment roster. -->
+        <figure class="hero-dash" aria-label="flotilla dash — Goals view in the command-chart (org) layout: an xo hub coordinating backend, frontend, data, and infra desks">
+          <div class="dash-chrome">
+            <span class="dash-brand"><span class="dash-brand-mark" aria-hidden="true"></span>flotilla <span class="dash-brand-sub">goals</span></span>
+            <div class="dash-tabs" aria-hidden="true">
+              <span class="dash-tab">Conversations</span>
+              <span class="dash-tab active">Goals</span>
+              <span class="dash-tab">Issues</span>
+            </div>
+            <div class="dash-toggle" aria-hidden="true"><span>tree</span><span class="on">org</span></div>
           </div>
-          <!-- Demo: a mocked Discord client (CLIENT chrome only — fake handles, no real
-               IDs) playing the operator's approved conversation. Source + artifacts
-               (flotilla-demo-source.html / .mp4 / .gif) tracked in site/assets/;
-               regenerate by recording flotilla-demo-source.html (chromium → ffmpeg). -->
-          <div class="demo-canvas" id="demo-canvas">
-            <img class="demo-media" src="./assets/flotilla-demo.gif"
-                 alt="flotilla driven from a chat channel: the operator asks for status and queues new work in plain language; the XO reports what just shipped, dispatches a desk to benchmark caching, and queues the next task" />
-            <div class="demo-caption"><strong>Mockup — illustrative.</strong> &middot; drive the fleet from chat — talk strategy, the XO runs implementation</div>
+
+          <div class="dash-canvas">
+            <!-- spoke edges: hub center (50,50) → each desk, drawn in a 0–100 space that
+                 stretches with the box (matches the % node positions). -->
+            <svg class="dash-spokes" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+              <line x1="50" y1="50" x2="26" y2="25" /><line x1="50" y1="50" x2="74" y2="25" />
+              <line x1="50" y1="50" x2="26" y2="77" /><line x1="50" y1="50" x2="74" y2="77" />
+            </svg>
+
+            <div class="dnode hub" style="left:50%;top:50%">
+              <div class="dnode-eyebrow">Flotilla · led by xo</div>
+              <div class="dnode-title">Fleet coordination</div>
+              <div class="dnode-list"><span class="dnl-lab">priorities</span><ul><li>Ship the goals map</li><li>Close review gates</li></ul></div>
+              <div class="dnode-foot"><span class="dpill cyan">in&nbsp;flight</span><span class="dharness">claude-code</span></div>
+            </div>
+
+            <div class="dnode" style="left:26%;top:25%">
+              <div class="dnode-eyebrow">Desk · backend</div>
+              <div class="dnode-title">Backend</div>
+              <div class="dnode-foot"><span class="dpill ok">idle</span><span class="dharness">grok</span></div>
+            </div>
+            <div class="dnode" style="left:74%;top:25%">
+              <div class="dnode-eyebrow">Desk · frontend</div>
+              <div class="dnode-title">Frontend</div>
+              <div class="dnode-foot"><span class="dpill cyan">in&nbsp;flight</span><span class="dharness">grok</span></div>
+            </div>
+            <div class="dnode" style="left:26%;top:77%">
+              <div class="dnode-eyebrow">Desk · data</div>
+              <div class="dnode-title">Data</div>
+              <div class="dnode-foot"><span class="dpill amber">awaiting&nbsp;you</span><span class="dharness">aider</span></div>
+            </div>
+            <div class="dnode" style="left:74%;top:77%">
+              <div class="dnode-eyebrow">Desk · infra</div>
+              <div class="dnode-title">Infra</div>
+              <div class="dnode-foot"><span class="dpill ok">idle</span><span class="dharness">opencode</span></div>
+            </div>
           </div>
+
+          <figcaption><strong>Mock-up — illustrative.</strong> &middot; the dash Goals map, command-chart layout: the hub coordinates every desk, colored by live status</figcaption>
         </figure>
       </div>
 
