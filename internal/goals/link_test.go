@@ -74,6 +74,36 @@ func TestLinkWorkItemYAML_Idempotent(t *testing.T) {
 	}
 }
 
+func TestLinkWorkItemYAML_PreservesComments(t *testing.T) {
+	raw := []byte(`version: 1
+# fleet-level comment
+goals:
+  - id: child
+    title: Child
+    # goal-level comment
+    work_items:
+      - kind: issue
+        ref: owner/repo#1
+`)
+	out, err := LinkWorkItemYAML(raw, "child", WorkItem{
+		Kind: "issue",
+		Ref:  "owner/repo#2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if !strings.Contains(s, "fleet-level comment") {
+		t.Fatalf("fleet comment lost:\n%s", s)
+	}
+	if !strings.Contains(s, "goal-level comment") {
+		t.Fatalf("goal comment lost:\n%s", s)
+	}
+	if !strings.Contains(s, "owner/repo#2") {
+		t.Fatalf("linked issue missing:\n%s", s)
+	}
+}
+
 func TestLinkWorkItemYAML_UnknownGoal(t *testing.T) {
 	if _, err := LinkWorkItemYAML([]byte(linkFixtureYAML), "missing", WorkItem{
 		Kind: "inline",
