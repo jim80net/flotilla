@@ -142,6 +142,45 @@ func TestLatestResultSkipsTrailingNarrationEpilogue(t *testing.T) {
 	}
 }
 
+func TestLatestResultSkipsDoubleTrailingNarrationEpilogue(t *testing.T) {
+	cwd := "/srv/fleet/research"
+	history := strings.Join([]string{
+		`{"type":"user","content":"ship it"}`,
+		`{"type":"assistant","content":"**Bottom line:** Feature shipped and tests green."}`,
+		`{"type":"assistant","content":"PR #318 opened. Let me report to COS:"}`,
+		`{"type":"assistant","content":"I will update the ledger next:"}`,
+	}, "\n")
+	home := writeStore(t, cwd, "s1", "%2Fsrv%2Ffleet%2Fresearch", history)
+	got, err := LatestResult(home, cwd)
+	if err != nil {
+		t.Fatalf("LatestResult err = %v", err)
+	}
+	if strings.Contains(got, "Let me report") || strings.Contains(got, "update the ledger") {
+		t.Errorf("got %q, want substantive turn-final (double epilogue peeled)", got)
+	}
+	if !strings.Contains(got, "Feature shipped") {
+		t.Errorf("got %q, want substantive body", got)
+	}
+}
+
+func TestLatestResultLegitColonEndedFinalSurvives(t *testing.T) {
+	cwd := "/srv/fleet/research"
+	long := strings.Repeat("Verified CI, cubic review, and merge-forward on the landing branch. ", 6)
+	history := strings.Join([]string{
+		`{"type":"user","content":"status"}`,
+		`{"type":"assistant","content":"` + long + `"}`,
+		`{"type":"assistant","content":"Ready for operator review:"}`,
+	}, "\n")
+	home := writeStore(t, cwd, "s1", "%2Fsrv%2Ffleet%2Fresearch", history)
+	got, err := LatestResult(home, cwd)
+	if err != nil {
+		t.Fatalf("LatestResult err = %v", err)
+	}
+	if got != "Ready for operator review:" {
+		t.Errorf("got %q, want legit colon-ended turn-final preserved", got)
+	}
+}
+
 func TestLatestResultShortFinalWinsOverLongIntermediate(t *testing.T) {
 	cwd := "/srv/fleet/research"
 	long := strings.Repeat("Working through the schema migration and dash integration. ", 8)
