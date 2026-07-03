@@ -11,6 +11,10 @@
 #   2. systemctl --user restart flotilla-watch.service   (when ready)
 #   3. bash deploy/flotilla-doctrine-refresh.sh          (this script)
 #
+# After provisioning a harness-portable coordinator seat (e.g. alpha-xo surface: codex),
+# run `flotilla doctrine install --refresh <agent>` for that seat before trial — see
+# docs/coordinator-seat-swap-runbook.md.
+#
 # Usage:
 #   bash deploy/flotilla-doctrine-refresh.sh [ENV_FILE]
 #

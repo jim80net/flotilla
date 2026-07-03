@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jim80net/flotilla/internal/roster"
 )
 
 func writeRosterFile(t *testing.T, body string) string {
@@ -248,6 +250,35 @@ func TestCmdWorkspaceInitGrokScaffoldsAgentsMdInWorktree(t *testing.T) {
 	}
 	if !strings.Contains(string(launch), "grok --model composer-2.5-fast") {
 		t.Errorf("grok launch = %q, want composer-2.5-fast workhorse recipe", launch)
+	}
+}
+
+func TestHarnessAllocationSurface(t *testing.T) {
+	cfg := &roster.Config{
+		XOAgent:  "xo",
+		CosAgent: "alpha-xo",
+		Agents: []roster.Agent{
+			{Name: "xo"},
+			{Name: "alpha-xo", Surface: "codex"},
+			{Name: "backend", Surface: "grok"},
+			{Name: "infra"},
+		},
+	}
+	cases := []struct {
+		agent, rosterSurface, want string
+	}{
+		{"xo", "", "claude-code"},
+		{"xo", "claude-code", "claude-code"},
+		{"alpha-xo", "codex", "codex"},
+		{"backend", "grok", "grok"},
+		{"infra", "", "grok"},
+		{"infra", "codex", "codex"},
+	}
+	for _, tc := range cases {
+		if got := harnessAllocationSurface(cfg, tc.agent, tc.rosterSurface); got != tc.want {
+			t.Errorf("harnessAllocationSurface(%q, %q) = %q, want %q",
+				tc.agent, tc.rosterSurface, got, tc.want)
+		}
 	}
 }
 
