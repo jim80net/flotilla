@@ -240,7 +240,10 @@
   // speakerHue maps a speaker name to a STABLE hue, so each participant keeps one
   // colour across the thread (turn-by-turn, colour-coded by speaker — #302).
   function speakerHue(name) {
-    var h = 0, s = String(name || "");
+    // Normalize the same way thread identity is matched elsewhere
+    // (case-insensitive, whitespace-trimmed) so casing/spacing variants of one
+    // speaker resolve to a SINGLE colour, not several.
+    var h = 0, s = String(name || "").trim().toLowerCase();
     for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
     return h % 360;
   }

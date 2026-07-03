@@ -301,6 +301,11 @@ func TestConversationsFormatting(t *testing.T) {
 			t.Errorf("dash.js must retain the #302 conversations formatting (missing %q)", marker)
 		}
 	}
+	// speakerHue must normalize like thread identity (case-insensitive, trimmed)
+	// so casing/spacing variants of one speaker share a colour (cubic #308 P2).
+	if !strings.Contains(js, `.trim().toLowerCase()`) {
+		t.Error("speakerHue must normalize the name (trim + lowercase) before hashing")
+	}
 }
 
 // --- Host-allowlist (anti-DNS-rebinding) ---
