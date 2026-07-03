@@ -193,7 +193,7 @@ func TestCmdWorkspaceInitCodexScaffoldsAgentsAndRules(t *testing.T) {
 		`pattern = ["git", "push", "origin", "--force"]`,
 		`pattern = ["git", "push", "--force"]`,
 		`must not merge PRs`,
-		`must not write to the default branch`,
+		`Do not write to the default branch`,
 	} {
 		if !strings.Contains(rulesText, must) {
 			t.Errorf("codex rules missing %q in:\n%s", must, rulesText)
