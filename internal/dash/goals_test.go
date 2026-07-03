@@ -356,6 +356,17 @@ func TestParseGoalsFile_RejectsUnknownDependsOn(t *testing.T) {
 	}
 }
 
+func TestParseGoalsFile_RejectsSelfAndDuplicateDependsOn(t *testing.T) {
+	for _, data := range [][]byte{
+		[]byte(`{"goals":[{"id":"a","title":"A","depends_on":["a"]}]}`),
+		[]byte(`{"goals":[{"id":"a","title":"A"},{"id":"b","title":"B","depends_on":["a","a"]}]}`),
+	} {
+		if _, err := ParseGoalsFile(data); err == nil {
+			t.Fatalf("malformed depends_on must error for %s", data)
+		}
+	}
+}
+
 func TestBuildGoals_DependsOnEdgesAndConversationAgent(t *testing.T) {
 	file := GoalsFile{Version: 1, Goals: []Goal{
 		{ID: "parent", Title: "Parent"},

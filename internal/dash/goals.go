@@ -142,10 +142,18 @@ func (gf GoalsFile) validate() error {
 		}
 	}
 	for _, g := range gf.Goals {
+		seenDep := make(map[string]bool, len(g.DependsOn))
 		for _, dep := range g.DependsOn {
 			if strings.TrimSpace(dep) == "" {
 				return fmt.Errorf("goals: goal %q has an empty depends_on entry", g.ID)
 			}
+			if dep == g.ID {
+				return fmt.Errorf("goals: goal %q cannot depend_on itself", g.ID)
+			}
+			if seenDep[dep] {
+				return fmt.Errorf("goals: goal %q has duplicate depends_on entry %q", g.ID, dep)
+			}
+			seenDep[dep] = true
 			if !ids[dep] {
 				return fmt.Errorf("goals: goal %q references unknown depends_on target %q", g.ID, dep)
 			}

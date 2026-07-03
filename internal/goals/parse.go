@@ -92,23 +92,24 @@ func flattenGoals(nodes []*yamlGoal, structuralParent string, out *[]Goal) error
 		if n == nil {
 			return fmt.Errorf("goals: a node is null (malformed yaml list entry)")
 		}
-		if strings.TrimSpace(n.ID) == "" {
+		id := strings.TrimSpace(n.ID)
+		if id == "" {
 			return fmt.Errorf("goals: a node has an empty id")
 		}
 		parent := structuralParent
 		if n.Parent != nil && n.Parent.isSet {
-			parent = n.Parent.value
+			parent = strings.TrimSpace(n.Parent.value)
 		}
-		if structuralParent != "" && n.Parent != nil && n.Parent.isSet && n.Parent.value != structuralParent {
+		if structuralParent != "" && n.Parent != nil && n.Parent.isSet && parent != structuralParent {
 			return fmt.Errorf("goals: node %q parent %q disagrees with structural parent %q",
-				n.ID, n.Parent.value, structuralParent)
+				id, parent, structuralParent)
 		}
 		items := make([]WorkItem, 0, len(n.WorkItems))
 		for _, wi := range n.WorkItems {
 			items = append(items, normalizeWorkItem(wi))
 		}
 		*out = append(*out, Goal{
-			ID:                strings.TrimSpace(n.ID),
+			ID:                id,
 			Title:             n.Title,
 			Description:       n.Description,
 			Scope:             n.Scope,
@@ -119,7 +120,7 @@ func flattenGoals(nodes []*yamlGoal, structuralParent string, out *[]Goal) error
 			DependsOn:         append([]string(nil), n.DependsOn...),
 			WorkItems:         items,
 		})
-		if err := flattenGoals(n.Children, n.ID, out); err != nil {
+		if err := flattenGoals(n.Children, id, out); err != nil {
 			return err
 		}
 	}
@@ -152,6 +153,9 @@ func normalizeWorkItem(wi yamlWorkItem) WorkItem {
 func (f File) validate() error {
 	ids := make(map[string]bool, len(f.Goals))
 	for _, g := range f.Goals {
+		if strings.TrimSpace(g.ID) == "" {
+			return fmt.Errorf("goals: a goal has an empty id (every node needs a unique slug)")
+		}
 		if ids[g.ID] {
 			return fmt.Errorf("goals: duplicate goal id %q", g.ID)
 		}
@@ -174,10 +178,18 @@ func (f File) validate() error {
 		}
 	}
 	for _, g := range f.Goals {
+		seenDep := make(map[string]bool, len(g.DependsOn))
 		for _, dep := range g.DependsOn {
 			if strings.TrimSpace(dep) == "" {
 				return fmt.Errorf("goals: goal %q has an empty depends_on entry", g.ID)
 			}
+			if dep == g.ID {
+				return fmt.Errorf("goals: goal %q cannot depend_on itself", g.ID)
+			}
+			if seenDep[dep] {
+				return fmt.Errorf("goals: goal %q has duplicate depends_on entry %q", g.ID, dep)
+			}
+			seenDep[dep] = true
 			if !ids[dep] {
 				return fmt.Errorf("goals: goal %q references unknown depends_on target %q", g.ID, dep)
 			}

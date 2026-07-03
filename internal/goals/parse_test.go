@@ -101,6 +101,42 @@ func TestParseYAML_RejectsDuplicateEmptyCycleDependsOn(t *testing.T) {
 	}
 }
 
+func TestParseYAML_WhitespaceIDParentConsistent(t *testing.T) {
+	y := `version: 1
+goals:
+  - id: " root "
+    title: Root
+    children:
+      - id: kid
+        title: Kid
+`
+	f, err := ParseYAML([]byte(y))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Goals[1].Parent != "root" {
+		t.Errorf("child parent = %q, want trimmed root", f.Goals[1].Parent)
+	}
+}
+
+func TestCompileJSON_RejectsEmptyID(t *testing.T) {
+	_, err := CompileJSON(File{Goals: []Goal{{ID: "", Title: "A"}}})
+	if err == nil || !strings.Contains(err.Error(), "empty id") {
+		t.Fatalf("empty id must fail compile, got %v", err)
+	}
+}
+
+func TestParseYAML_RejectsSelfAndDuplicateDependsOn(t *testing.T) {
+	for _, y := range []string{
+		"version: 1\ngoals:\n  - {id: a, title: A, depends_on: [a]}\n",
+		"version: 1\ngoals:\n  - {id: a, title: A}\n  - {id: b, title: B, depends_on: [a, a]}\n",
+	} {
+		if _, err := ParseYAML([]byte(y)); err == nil {
+			t.Fatalf("malformed depends_on must error for:\n%s", y)
+		}
+	}
+}
+
 func TestParseYAML_ParentDisagreesWithStructure(t *testing.T) {
 	y := `version: 1
 goals:
