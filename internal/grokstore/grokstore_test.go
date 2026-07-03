@@ -127,7 +127,7 @@ func TestLatestResultSkipsTrailingNarrationEpilogue(t *testing.T) {
 	history := strings.Join([]string{
 		`{"type":"user","content":"ship the PR"}`,
 		`{"type":"assistant","content":"**Bottom line:** Schema-v2 API is on main.\n\n- merged #312\n- tests green"}`,
-		`{"type":"assistant","content":"PR #312 opened. Let me report to COS."}`,
+		`{"type":"assistant","content":"PR #312 opened. Let me report to COS and update the ledger:"}`,
 	}, "\n")
 	home := writeStore(t, cwd, "s1", "%2Fsrv%2Ffleet%2Fresearch", history)
 	got, err := LatestResult(home, cwd)
@@ -139,6 +139,63 @@ func TestLatestResultSkipsTrailingNarrationEpilogue(t *testing.T) {
 	}
 	if !strings.Contains(got, "Schema-v2 API") {
 		t.Errorf("got %q, want substantive turn-final body", got)
+	}
+}
+
+func TestLatestResultSkipsDoubleTrailingNarrationEpilogue(t *testing.T) {
+	cwd := "/srv/fleet/research"
+	history := strings.Join([]string{
+		`{"type":"user","content":"ship it"}`,
+		`{"type":"assistant","content":"**Bottom line:** Feature shipped and tests green."}`,
+		`{"type":"assistant","content":"PR #318 opened. Let me report to COS:"}`,
+		`{"type":"assistant","content":"I will update the ledger next:"}`,
+	}, "\n")
+	home := writeStore(t, cwd, "s1", "%2Fsrv%2Ffleet%2Fresearch", history)
+	got, err := LatestResult(home, cwd)
+	if err != nil {
+		t.Fatalf("LatestResult err = %v", err)
+	}
+	if strings.Contains(got, "Let me report") || strings.Contains(got, "update the ledger") {
+		t.Errorf("got %q, want substantive turn-final (double epilogue peeled)", got)
+	}
+	if !strings.Contains(got, "Feature shipped") {
+		t.Errorf("got %q, want substantive body", got)
+	}
+}
+
+func TestLatestResultLegitColonEndedFinalSurvives(t *testing.T) {
+	cwd := "/srv/fleet/research"
+	long := strings.Repeat("Verified CI, cubic review, and merge-forward on the landing branch. ", 6)
+	history := strings.Join([]string{
+		`{"type":"user","content":"status"}`,
+		`{"type":"assistant","content":"` + long + `"}`,
+		`{"type":"assistant","content":"Ready for operator review:"}`,
+	}, "\n")
+	home := writeStore(t, cwd, "s1", "%2Fsrv%2Ffleet%2Fresearch", history)
+	got, err := LatestResult(home, cwd)
+	if err != nil {
+		t.Fatalf("LatestResult err = %v", err)
+	}
+	if got != "Ready for operator review:" {
+		t.Errorf("got %q, want legit colon-ended turn-final preserved", got)
+	}
+}
+
+func TestLatestResultShortFinalWinsOverLongIntermediate(t *testing.T) {
+	cwd := "/srv/fleet/research"
+	long := strings.Repeat("Working through the schema migration and dash integration. ", 8)
+	history := strings.Join([]string{
+		`{"type":"user","content":"status"}`,
+		`{"type":"assistant","content":"` + long + `"}`,
+		`{"type":"assistant","content":"Settled — standing by."}`,
+	}, "\n")
+	home := writeStore(t, cwd, "s1", "%2Fsrv%2Ffleet%2Fresearch", history)
+	got, err := LatestResult(home, cwd)
+	if err != nil {
+		t.Fatalf("LatestResult err = %v", err)
+	}
+	if got != "Settled — standing by." {
+		t.Errorf("got %q, want the short true turn-final (not stale intermediate)", got)
 	}
 }
 

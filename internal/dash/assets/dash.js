@@ -625,6 +625,9 @@
       el("tab-" + v).setAttribute("aria-selected", String(on));
     });
     el("freshness").classList.toggle("hidden", view !== "conversations");
+    // Conversations is the fixed single-scroll app-shell (#326): only on this tab
+    // does the page itself stop scrolling. Goals/Issues keep natural page scroll.
+    document.body.classList.toggle("conv-shell-active", view === "conversations");
     if (view === "goals" && window.flotillaGoals) window.flotillaGoals.show();
     if (view === "issues" && window.flotillaTracker) window.flotillaTracker.show();
   }
@@ -632,6 +635,9 @@
   for (var i = 0; i < tabs.length; i++) {
     tabs[i].addEventListener("click", function () { showView(this.getAttribute("data-view")); });
   }
+  // Conversations is the default active tab — arm the fixed app-shell at startup
+  // so the page doesn't scroll before the first tab interaction (#326).
+  document.body.classList.add("conv-shell-active");
 
   // Session-mirror detail toggle (info ⇄ debug) — static chrome, wired once. Flipping
   // it repaints the glance + thread at the new tier (the debug payload is already in

@@ -195,22 +195,24 @@ func lastAssistant(path, sessionID string) (string, error) {
 	return lastOverall, nil
 }
 
+// maxEpiloguePeel bounds how many trailing narration lines grok may append after a turn-final.
+const maxEpiloguePeel = 4
+
 // selectSubstantiveAssistant picks the turn-final from the assistant entries grok emitted for one
-// user turn. When the last entry is a short trailing narration, return the preceding substantive
-// assistant text instead.
+// user turn. Grok may append multiple short trailing narration lines — walk backward peeling
+// epilogues (bounded) until the first non-epilogue assistant entry.
 func selectSubstantiveAssistant(assistants []string) string {
 	if len(assistants) == 0 {
 		return ""
 	}
-	if len(assistants) == 1 {
-		return assistants[0]
+	i := len(assistants) - 1
+	for peeled := 0; peeled < maxEpiloguePeel && i > 0; peeled++ {
+		if !isTrailingEpilogue(assistants[i], assistants[i-1]) {
+			break
+		}
+		i--
 	}
-	last := assistants[len(assistants)-1]
-	prev := assistants[len(assistants)-2]
-	if isTrailingEpilogue(last, prev) {
-		return prev
-	}
-	return last
+	return assistants[i]
 }
 
 func isTrailingEpilogue(last, prev string) bool {
@@ -232,7 +234,21 @@ func isTrailingEpilogue(last, prev string) bool {
 			return true
 		}
 	}
-	return len(prev) > len(last)*3 && len(last) < 250
+	// Colon-suffixed narration: require narration shape so a legitimate colon-ended final
+	// ("Ready for operator review:") is not peeled when it lacks first-person action phrasing.
+	if strings.HasSuffix(last, ":") && len(last) < 200 && hasNarrationShape(lower) {
+		return true
+	}
+	return false
+}
+
+func hasNarrationShape(lower string) bool {
+	for _, prefix := range []string{"let me ", "i'll ", "i will ", "i am going to "} {
+		if strings.Contains(lower, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // normMsg normalizes an operator message for an EXACT (not substring) anchor match: collapse all

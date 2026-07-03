@@ -39,58 +39,72 @@
 
   <div id="freshness" class="freshness" role="status" aria-live="polite"></div>
 
+  <!--
+    Conversations IA (#326 — single primary scroll):
+      · Column 1 (conv-nav)      — stable channel→desk navigation; the ONE nav scroll.
+      · Column 2 (conv-thread-col) — the PRIMARY reading surface: a pinned header
+        (identity + latest-state glance + detail toggle) over the merged thread,
+        which owns the single reading scroll.
+      · Column 3 (conv-context)  — peripheral state + actions: desk card, the drive
+        queue (collapsible, no inner scroll), and the intervene forms.
+    On wide viewports the whole view is a fixed app-shell (the page never scrolls);
+    on narrow viewports it stacks into one natural document scroll (see dash.css).
+  -->
   <main id="view-conversations" class="view conv-wrap">
-    <div class="conv-layout">
-      <aside class="panel conv-rail" aria-label="Desk conversations">
-        <div class="panel-head conv-rail-head">
-          <div>
-            <h2>Fleet map</h2>
-            <p class="panel-desc">channel → desk threads</p>
-          </div>
-          <span id="rail-meta" class="xo-strip muted"></span>
+    <aside class="panel conv-nav" aria-label="Desk conversations">
+      <div class="panel-head conv-rail-head">
+        <div>
+          <h2>Fleet map</h2>
+          <p class="panel-desc">channel → desk threads</p>
         </div>
-        <div id="conv-rail" class="conv-rail-list" role="list"></div>
-      </aside>
+        <span id="rail-meta" class="xo-strip muted"></span>
+      </div>
+      <div id="conv-rail" class="conv-rail-list" role="list"></div>
+    </aside>
 
-      <section class="panel conv-main" aria-label="Selected conversation">
-        <div class="panel-head">
-          <div>
-            <h2 id="conv-title">Conversation</h2>
-            <p id="conv-sub" class="panel-desc">Coordination history for the selected desk</p>
-          </div>
-          <div class="conv-head-right">
-            <div class="mirror-verbosity" role="group" aria-label="Session mirror detail level">
-              <button type="button" class="mv-btn active" data-verbosity="info" aria-pressed="true">info</button>
-              <button type="button" class="mv-btn" data-verbosity="debug" aria-pressed="false">debug</button>
-            </div>
-            <div id="conv-desk-card" class="conv-desk-card" aria-live="polite"></div>
-          </div>
+    <section class="panel conv-thread-col" aria-label="Selected conversation">
+      <header class="panel-head conv-thread-head">
+        <div class="cth-id">
+          <h2 id="conv-title">Conversation</h2>
+          <p id="conv-sub" class="panel-desc">Coordination history for the selected desk</p>
         </div>
-        <div id="conv-map" class="conv-map muted" aria-live="polite"></div>
-        <div id="conv-thread" class="conv-thread" role="log" aria-live="polite"></div>
-        <section class="conv-fleet-strip">
-          <h3 class="sub">Drive queue</h3>
+        <div class="mirror-verbosity" role="group" aria-label="Session mirror detail level">
+          <button type="button" class="mv-btn active" data-verbosity="info" aria-pressed="true">info</button>
+          <button type="button" class="mv-btn" data-verbosity="debug" aria-pressed="false">debug</button>
+        </div>
+      </header>
+      <div id="conv-map" class="conv-map muted" aria-live="polite"></div>
+      <div id="conv-thread" class="conv-thread" role="log" aria-live="polite"></div>
+    </section>
+
+    <aside class="panel conv-context" aria-label="Desk context and controls">
+      <div class="panel-head">
+        <div>
+          <h2>Desk</h2>
+          <p class="panel-desc">state · drive queue · intervene</p>
+        </div>
+      </div>
+      <div class="conv-context-body">
+        <div id="conv-desk-card" class="conv-desk-card" aria-live="polite"></div>
+
+        <details class="conv-queue" open>
+          <summary class="conv-queue-sum">
+            <span class="sub">Drive queue</span>
+          </summary>
           <div id="conv-backlog" class="conv-backlog"></div>
-        </section>
-      </section>
+        </details>
 
-      <aside class="panel conv-act" aria-label="Intervene at this locus">
-        <div class="panel-head">
-          <div>
-            <h2>Intervene</h2>
-            <p class="panel-desc">Confirmed delivery at the selected locus</p>
-          </div>
-        </div>
-        <form id="route-form" class="control-form">
-          <label class="field-label" for="route-target">Target</label>
+        <form id="route-form" class="control-form conv-act-divider">
+          <label class="field-label" for="route-target">Route to desk</label>
           <input type="text" id="route-target" placeholder="Agent or @desk" />
           <label class="field-label" for="route-body">Instruction</label>
-          <textarea id="route-body" placeholder="Route to the selected desk" rows="4"></textarea>
+          <textarea id="route-body" placeholder="Route to the selected desk" rows="3"></textarea>
           <div class="form-actions">
             <span id="route-msg" class="form-msg"></span>
             <button type="submit" class="btn btn-primary">Route</button>
           </div>
         </form>
+
         <form id="notify-form" class="control-form conv-act-divider">
           <label class="field-label" for="notify-body">Fleet note</label>
           <textarea id="notify-body" placeholder="Operator note on Discord" rows="2"></textarea>
@@ -99,6 +113,7 @@
             <button type="submit" class="btn">Post note</button>
           </div>
         </form>
+
         <form id="resume-form" class="control-form conv-act-divider panel-gated">
           <label class="field-label" for="resume-agent">Resume crashed desk</label>
           <input type="text" id="resume-agent" placeholder="Agent name" />
@@ -107,8 +122,8 @@
             <button type="submit" class="btn btn-danger">Resume</button>
           </div>
         </form>
-      </aside>
-    </div>
+      </div>
+    </aside>
   </main>
 
   <main id="view-goals" class="view goals-wrap hidden" aria-label="Fleet goals">
@@ -125,7 +140,13 @@
           </h2>
           <p class="panel-desc">Read-only · goal structure from <code>fleet-goals.json</code> · desk &amp; backlog status live from the fleet board; issues shown linked</p>
         </div>
-        <div class="goals-legend" id="goals-legend" aria-hidden="true"></div>
+        <div class="goals-head-right">
+          <div class="goals-layout-toggle" role="group" aria-label="Goals map layout">
+            <button type="button" class="glayout-btn" data-layout="tree" aria-pressed="false" title="Tiered altitude columns">tree</button>
+            <button type="button" class="glayout-btn active" data-layout="org" aria-pressed="true" title="Hub-and-spoke org map (coordinator at center)">org</button>
+          </div>
+          <div class="goals-legend" id="goals-legend" aria-hidden="true"></div>
+        </div>
       </div>
       <div id="goals-graph" class="goals-graph">
         <div id="goals-viewport" class="goals-viewport" tabindex="0" aria-label="Fleet goals map. Tab moves between goals; when the map itself is focused, arrow keys pan, plus and minus zoom, and zero fits.">

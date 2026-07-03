@@ -340,6 +340,33 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	if !strings.Contains(js, `"flotilla"`) || !strings.Contains(js, `s === "desk"`) {
 		t.Error("goals.js scopeNoun must read the v2 scope tokens (flotilla/desk) — #312")
 	}
+	// org-graph v2 Inc B: the hub-and-spoke layout + its live tree⇄org toggle,
+	// consuming layout.hub_center. drawEdges must branch on the mode (radial spokes vs
+	// tiered beziers), and the toggle must force a rebuild.
+	for _, marker := range []string{"layoutOrg", "goalsLayout", "hub_center", "setLayout", "glayout-btn"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must retain the org-graph v2 hub-spoke layout (missing %q) — Inc B", marker)
+		}
+	}
+	// #324 Inc 1: org is the DEFAULT layout (operator UX blessing), and the org geometry
+	// is content-aware — leaf-weight angular packing + per-ring radii from card extents
+	// (no fixed RING_STEP), with narrower org cards.
+	if !strings.Contains(js, `var goalsLayout = "org"`) {
+		t.Error("goals.js must default goalsLayout to \"org\" (#324 operator UX blessing)")
+	}
+	// #324 Inc 2: a roster-materialized desk (source==="roster") is a live entity, never
+	// ghosted as aspirational even when it has no work/children.
+	if !strings.Contains(js, `n.source !== "roster"`) {
+		t.Error("visToken must treat a roster-materialized desk as live, not aspirational (#324 Inc 2)")
+	}
+	for _, marker := range []string{"leafCount", "reach(", "nodeW", "RING_GAP"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must retain the #324 content-aware org geometry (missing %q)", marker)
+		}
+	}
+	if strings.Contains(js, "RING_STEP") {
+		t.Error("goals.js must drop the fixed RING_STEP — org radii are content-aware (#324)")
+	}
 	// structuralSig must include the enrichment (priorities/milestones/harness) so an
 	// add/remove of a height-affecting field triggers a full rebuild, not a stale
 	// in-place text swap. Guard the index BEFORE slicing (a missing function must
@@ -374,6 +401,10 @@ func TestGoalsCanvasAssets(t *testing.T) {
 		if !strings.Contains(body, id) {
 			t.Errorf("index must contain the goals canvas element #%s", id)
 		}
+	}
+	// Inc B: the tree⇄org layout toggle chrome.
+	if !strings.Contains(body, "glayout-btn") || !strings.Contains(body, `data-layout="org"`) {
+		t.Error("index must carry the tree⇄org goals layout toggle (glayout-btn / data-layout)")
 	}
 }
 
