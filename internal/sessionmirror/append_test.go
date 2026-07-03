@@ -111,6 +111,69 @@ func TestAppendReadsLargeLedgerLines(t *testing.T) {
 	}
 }
 
+func TestMarshalLedgerLineFitsMaxBytesWithANSIEscapes(t *testing.T) {
+	// ANSI sequences are common in tmux turn-finals; JSON escaping expands them.
+	const esc = "\x1b[31m"
+	unit := esc + "x"
+	n := DefaultVerboseCap/len([]rune(unit)) + 1
+	verbose := truncateRunes(strings.Repeat(unit, n), DefaultVerboseCap)
+
+	rec := NewRecord(Input{
+		Agent:   "backend",
+		At:      time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC),
+		Verbose: verbose,
+		Info:    "modeled info body",
+	})
+	line, err := marshalLedgerLine(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(line) > maxLineBytes+1 { // +1 for trailing newline
+		t.Fatalf("marshaled line = %d bytes, want ≤ %d (+newline)", len(line), maxLineBytes)
+	}
+	if len(line) <= 1 {
+		t.Fatal("expected non-empty marshaled line")
+	}
+}
+
+func TestAppendANSIDenseVerboseAtCapRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	const esc = "\x1b[31m"
+	unit := esc + "x"
+	n := DefaultVerboseCap/len([]rune(unit)) + 1
+	verbose := truncateRunes(strings.Repeat(unit, n), DefaultVerboseCap)
+
+	rec := NewRecord(Input{
+		Agent:   "backend",
+		At:      time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC),
+		Verbose: verbose,
+		Info:    "info",
+	})
+	if err := Append(dir, "backend", rec, AppendOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	follow := NewRecord(Input{
+		Agent:   "backend",
+		At:      time.Date(2026, 7, 3, 12, 1, 0, 0, time.UTC),
+		Verbose: "next",
+		Info:    "next",
+	})
+	if err := Append(dir, "backend", follow, AppendOptions{}); err != nil {
+		t.Fatalf("ledger wedged after ANSI-heavy line: %v", err)
+	}
+	raw, err := os.ReadFile(LedgerPath(dir, "backend"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := BuildHistory("backend", raw, 0)
+	if len(doc.Entries) != 2 {
+		t.Fatalf("entries = %d, want 2", len(doc.Entries))
+	}
+	if len(ParseLines(raw)) != 2 {
+		t.Fatal("ParseLines dropped entries after ANSI-heavy line")
+	}
+}
+
 func TestAppendConcurrentSameAgentRespectsCap(t *testing.T) {
 	dir := t.TempDir()
 	const max = 5

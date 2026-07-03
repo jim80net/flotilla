@@ -1,7 +1,6 @@
 package sessionmirror
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -40,11 +39,10 @@ func Append(rosterDir, agent string, rec Record, opts AppendOptions) error {
 		max = DefaultMaxEntries
 	}
 
-	line, err := json.Marshal(rec)
+	line, err := marshalLedgerLine(rec)
 	if err != nil {
-		return fmt.Errorf("sessionmirror: marshal record: %w", err)
+		return err
 	}
-	line = append(line, '\n')
 
 	dir := filepath.Join(rosterDir, "session-mirror")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
