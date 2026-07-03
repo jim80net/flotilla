@@ -27,12 +27,10 @@ const busyDeferDelay = 5 * time.Second
 // sustained busy. Once per job, so a normal turn never cries wolf.
 const busyEscalateAt = 6
 
-// maxRelayDeferrals BOUNDS the busy defer: after this many re-enqueues (~maxRelayDeferrals×
-// busyDeferDelay ≈ 5 min) a relay that still cannot be delivered is escalated AND DROPPED,
-// rather than re-enqueued forever. An un-droppable message against a wedged XO would
-// otherwise be an unbounded timer chain; a genuinely wedged XO is independently crash/
-// wedge-alerted by the detector's liveness watchdog.
-const maxRelayDeferrals = 60
+// relayStaleAlertInterval is how long a still-busy operator relay waits between LOUD
+// stale escalations after the initial QUEUED alert. Escalation is IN ADDITION to delivery
+// — the message stays queued (and disk-backed) until the agent goes idle (#286).
+const relayStaleAlertInterval = 30 * time.Minute
 
 // transientDeferDelay / maxTransientReassess are the SHORT, low-capped policy for a relay
 // whose pane state is transiently UNCERTAIN (Unknown/Awaiting*/Errored ⇒ surface.ErrTransient),
@@ -57,10 +55,18 @@ type Job struct {
 	// per-channel traffic ("in #fleet-alpha, operator→alpha-xo: …") with full context.
 	// v1 only CARRIES it — today's audit-mirror behavior is unchanged.
 	OriginChannel string
+	// MessageID is the origin message's durable id (a Discord snowflake today). Set by the
+	// relay on ingest; keys the disk-backed pending queue (#286).
+	MessageID string
 	// deferrals counts how many times a BUSY relay job has been re-enqueued. It is internal
 	// to the Injector's busy-defer (deferJob increments it on a NEW copy before re-enqueue);
 	// senders MUST NOT set it — every Job{} literal leaves it zero, the correct start.
 	deferrals int
+	// enqueuedAt is when this relay was first deferred (operator busy). Internal; persisted
+	// in the relay queue file for stale-escalation timing across restarts.
+	enqueuedAt time.Time
+	// lastStaleAlert is when the last periodic stale escalation fired. Internal.
+	lastStaleAlert time.Time
 }
 
 // SendFunc delivers a message to an agent's pane and CONFIRMS a turn started. Production
@@ -90,6 +96,8 @@ type Injector struct {
 	mirror    func(Job)                // optional: called after a CONFIRMED delivery (audit trail)
 	escalate  func(string)             // optional: a LOUD operator alert for a failed/undeliverable relay
 	reEnqueue func(Job, time.Duration) // how a deferred relay is re-enqueued after a delay; injectable for tests
+	queue     relayQueueStore          // optional: disk-backed pending queue for deferred operator relays (#286)
+	now       func() time.Time         // clock for stale escalation; nil ⇒ time.Now()
 }
 
 // SetRelaySend installs a distinct send path for RELAY-kind jobs (the operator-message kind), used to
@@ -107,6 +115,10 @@ func (in *Injector) SetMirror(mirror func(Job)) { in.mirror = mirror }
 // detector ticks never escalate (a stale tick is dropped; the next re-evaluates). Must be set
 // before Start; nil ⇒ failures are logged only.
 func (in *Injector) SetEscalate(escalate func(string)) { in.escalate = escalate }
+
+// SetRelayQueue wires the disk-backed pending operator-relay queue (#286). Deferred busy
+// relays are upserted; confirmed deliveries remove by MessageID. Must be set before Start.
+func (in *Injector) SetRelayQueue(path string) { in.queue = newRelayQueueStore(path) }
 
 // NewInjector builds an injector with the given send function and queue buffer.
 func NewInjector(send SendFunc, buffer int) *Injector {
@@ -163,6 +175,9 @@ func (in *Injector) deliver(j Job) {
 		// Success log: make each CONFIRMED delivery auditable from journalctl, independent of
 		// the Discord mirror. Terse and body-free — the byte count stands in for the content.
 		log.Printf("flotilla watch: %s delivered to %q (%d bytes)", deliveryKind(j.Kind), j.Agent, len(j.Message))
+		if isRelay(j.Kind) && j.MessageID != "" {
+			in.queue.remove(j.MessageID)
+		}
 		if in.mirror != nil {
 			in.mirror(j) // audit only what actually landed (a confirmed turn)
 		}
@@ -207,38 +222,71 @@ func previewBody(body string) string {
 
 // handleBusy applies the kind-aware not-idle policy for a busy (ErrBusy) or transiently-
 // uncertain (ErrTransient) result. A heartbeat/detector tick is time-relative and is DROPPED
-// (the next tick re-evaluates; re-delivering a stale tick would double-prompt). A relay
-// (operator) message is DEFERRED — re-enqueued OFF the worker so it stays free — and never
-// silently lost, but also never re-enqueued forever: it is bounded and escalated, with the
-// cadence + bound + wording chosen by CAUSE. Busy: re-check every busyDeferDelay, one "QUEUED"
-// alert at busyEscalateAt, escalate+drop at maxRelayDeferrals (~5 min). Transient: a SHORT
-// transientDeferDelay re-assess, capped low at maxTransientReassess (a glitch clears fast; a
-// pane that stays uncertain is broken and the detector catches it).
+// (the next tick re-evaluates; re-delivering a stale tick would double-prompt). Operator relays
+// are never dropped: short transient re-assess, then durable disk-backed retry at the busy
+// cadence until deliverable (#286).
 func (in *Injector) handleBusy(j Job, cause error) {
 	if !isRelay(j.Kind) {
 		log.Printf("flotilla watch: drop %s to %q (not idle): %v", deliveryKind(j.Kind), j.Agent, cause)
 		return
 	}
 	j.deferrals++ // j is the worker's local copy; the incremented value rides the re-enqueue
-	if errors.Is(cause, surface.ErrTransient) {
-		if j.deferrals >= maxTransientReassess {
-			in.raise("operator message to %q NOT delivered — XO pane state stayed uncertain (%d attempts); DROPPED", j.Agent, j.deferrals)
-			log.Printf("flotilla watch: relay to %q dropped after %d uncertain re-assessments", j.Agent, j.deferrals)
-			return
-		}
+	if errors.Is(cause, surface.ErrTransient) && j.deferrals < maxTransientReassess {
 		in.reEnqueue(j, transientDeferDelay)
 		return
 	}
-	// ErrBusy: a genuinely busy XO — defer at the busy cadence, bounded.
-	if j.deferrals >= maxRelayDeferrals {
-		in.raise("operator message to %q UNDELIVERABLE — XO busy for too long (%d attempts); DROPPED", j.Agent, j.deferrals)
-		log.Printf("flotilla watch: relay to %q dropped after %d busy deferrals", j.Agent, j.deferrals)
+	now := in.clock()
+	if j.enqueuedAt.IsZero() {
+		j.enqueuedAt = now
+	}
+	if errors.Is(cause, surface.ErrTransient) && j.deferrals == maxTransientReassess {
+		in.raise("operator message to %q is QUEUED — pane state stayed uncertain after %d quick checks; persisting to durable queue until deliverable", j.Agent, maxTransientReassess)
+		j.lastStaleAlert = now
+	}
+	in.maybeStaleEscalateRelay(&j, now)
+	in.queue.upsert(j)
+	in.reEnqueue(j, busyDeferDelay)
+}
+
+// maybeStaleEscalateRelay raises the initial QUEUED alert (including replayed jobs whose
+// deferrals already exceed busyEscalateAt) and periodic stale reminders every
+// relayStaleAlertInterval while the message remains queued.
+func (in *Injector) maybeStaleEscalateRelay(j *Job, now time.Time) {
+	if j.lastStaleAlert.IsZero() && j.deferrals >= busyEscalateAt {
+		in.raise("operator message to %q is QUEUED — waiting ~%s; will deliver when the agent goes idle", j.Agent, time.Duration(j.deferrals)*busyDeferDelay)
+		j.lastStaleAlert = now
 		return
 	}
-	if j.deferrals == busyEscalateAt {
-		in.raise("operator message to %q is QUEUED — the XO has been busy ~%s; will deliver when it goes idle", j.Agent, time.Duration(busyEscalateAt)*busyDeferDelay)
+	if !j.lastStaleAlert.IsZero() && now.Sub(j.lastStaleAlert) >= relayStaleAlertInterval {
+		in.raise("operator message to %q still QUEUED — waiting ~%s total; will deliver when the agent goes idle", j.Agent, now.Sub(j.enqueuedAt).Round(time.Second))
+		j.lastStaleAlert = now
+		return
 	}
-	in.reEnqueue(j, busyDeferDelay)
+	if j.lastStaleAlert.IsZero() && !j.enqueuedAt.IsZero() && now.Sub(j.enqueuedAt) >= relayStaleAlertInterval {
+		in.raise("operator message to %q still QUEUED — waiting ~%s total; will deliver when the agent goes idle", j.Agent, now.Sub(j.enqueuedAt).Round(time.Second))
+		j.lastStaleAlert = now
+	}
+}
+
+func (in *Injector) clock() time.Time {
+	if in.now != nil {
+		return in.now()
+	}
+	return time.Now()
+}
+
+// ReplayRelayQueue loads disk-backed pending operator relays into the injector. Call once
+// after Start, before live gateway traffic (#286).
+func ReplayRelayQueue(in *Injector, path string) int {
+	q := newRelayQueueStore(path)
+	pending := q.load()
+	for _, j := range pending {
+		in.Enqueue(j)
+	}
+	if n := len(pending); n > 0 {
+		log.Printf("flotilla watch: replayed %d durable operator relay(s) from %q", n, path)
+	}
+	return len(pending)
 }
 
 // raise emits a LOUD operator alert (no-op if no escalate hook is wired).

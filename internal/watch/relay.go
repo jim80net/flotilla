@@ -81,14 +81,14 @@ func (r *Relay) Handle(channelID, messageID, authorID, content string) {
 			return
 		}
 	}
-	r.route(channelID, binding, content)
+	r.route(channelID, messageID, binding, content)
 }
 
 // route applies the routing decision and enqueues the delivery. Shared by the live
 // gateway Handle (after the dedup gate) and the catch-up poller (after classify), so
 // both ingestion sources deliver through the identical Route + clock-hook + notice +
 // Enqueue seam.
-func (r *Relay) route(channelID string, binding roster.Channel, content string) {
+func (r *Relay) route(channelID, messageID string, binding roster.Channel, content string) {
 	d := relay.Route(content, binding.XOAgent, memberResolver(binding.Members))
 	if r.onAccepted != nil {
 		r.onAccepted(d.Agent) // operator activity IS a clock tick (target-aware)
@@ -96,7 +96,13 @@ func (r *Relay) route(channelID string, binding roster.Channel, content string) 
 	if d.Notice != "" && r.notify != nil {
 		r.notify(d.Notice)
 	}
-	r.injector.Enqueue(Job{Agent: d.Agent, Message: d.Message, Kind: "relay", OriginChannel: channelID})
+	r.injector.Enqueue(Job{
+		Agent:         d.Agent,
+		Message:       d.Message,
+		Kind:          "relay",
+		OriginChannel: channelID,
+		MessageID:     messageID,
+	})
 }
 
 // memberResolver maps a (case-insensitive) token to a canonical roster agent name,

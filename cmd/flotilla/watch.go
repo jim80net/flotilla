@@ -96,6 +96,7 @@ func cmdWatch(args []string) error {
 	// roster sets change_detector: true.
 	snapshotPath := fs.String("snapshot-file", os.Getenv("FLOTILLA_SNAPSHOT_FILE"), "change-detector snapshot file (default <roster-dir>/flotilla-detector-state.json)")
 	cursorPath := fs.String("relay-cursor-file", os.Getenv("FLOTILLA_RELAY_CURSOR_FILE"), "relay catch-up per-channel cursor file (default <roster-dir>/flotilla-relay-cursor.json); the at-least-once ingestion backstop's durable state")
+	queuePath := fs.String("relay-queue-file", os.Getenv("FLOTILLA_RELAY_QUEUE_FILE"), "durable pending operator-relay queue (default <roster-dir>/flotilla-relay-queue.json); deferred busy relays survive restarts (#286)")
 	unackedPath := fs.String("unacked-file", os.Getenv("FLOTILLA_UNACKED_FILE"), "un-acked operator backstop dedup state (default <roster-dir>/flotilla-unacked-alerted.json)")
 	awaitingPath := fs.String("awaiting-file", os.Getenv("FLOTILLA_AWAITING_FILE"), "awaiting-operator veto marker (default <roster-dir>/flotilla-xo-awaiting)")
 	settledPath := fs.String("settled-file", os.Getenv("FLOTILLA_SETTLED_FILE"), "XO settle (idle) marker (default <roster-dir>/flotilla-xo-settled)")
@@ -169,6 +170,9 @@ func cmdWatch(args []string) error {
 	}
 	if *cursorPath == "" {
 		*cursorPath = filepath.Join(rosterDir, "flotilla-relay-cursor.json")
+	}
+	if *queuePath == "" {
+		*queuePath = filepath.Join(rosterDir, "flotilla-relay-queue.json")
 	}
 	if *unackedPath == "" {
 		*unackedPath = filepath.Join(rosterDir, "flotilla-unacked-alerted.json")
@@ -305,6 +309,7 @@ func cmdWatch(args []string) error {
 	// A failed/undeliverable RELAY (operator message) raises a LOUD alert — the inverse of the
 	// silent-success bug. Heartbeat/detector ticks never escalate (a stale tick is dropped).
 	injector.SetEscalate(alert)
+	injector.SetRelayQueue(*queuePath)
 	// Mirror relayed instructions to the audit channel in full. Heartbeat ticks
 	// are NOT mirrored: they fire every interval and a per-tick marker is pure
 	// noise in the operator's Discord channel (XO liveness is already covered by
@@ -342,6 +347,7 @@ func cmdWatch(args []string) error {
 		mirrorRelayToLedger(cfg, j)
 	})
 	injector.Start()
+	watch.ReplayRelayQueue(injector, *queuePath)
 	defer injector.Stop()
 
 	ack := watch.NewAckWatcher(*ackPath)
