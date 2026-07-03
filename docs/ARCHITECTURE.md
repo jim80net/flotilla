@@ -121,8 +121,9 @@ flotilla is dogfooded on a private trading fleet, so a public-facing artifact mu
 never leak private specifics (host paths, deployment IDs, operator PII). The
 firewall (`Check(text, *TermSet)`) is the egress scan: a typed `FirewallDecision`
 (allow / warn / block) over a set of deny/warn terms plus built-in canonical rules.
-Run `bin/leakscan.py` before any public publish; the firewall is the programmatic
-half of the same discipline.
+`scripts/check-private-boundary.sh` runs the same discipline in CI (the
+`private-boundary` job in `.github/workflows/ci.yml`) and via the `scripts/hooks/pre-push`
+hook before any public push; the firewall is its programmatic core.
 
 ---
 

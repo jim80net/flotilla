@@ -48,7 +48,7 @@ These are strengths, not findings — a new reader should study them as the hous
   which is the correct use of panic.
 - **`any`/`interface{}` is disciplined** — the handful of uses are JSON
   encode/decode helpers and variadic log args (`internal/dash/server.go:383`,
-  `internal/watch/inject.go:293`), not type-erased seams. No finding here.
+  `internal/watch/inject.go:314`), not type-erased seams. No finding here.
 - **The test suite is race-clean** and locks real behavior for the hard parts
   (the detector state machine, the injector's busy-defer, the dash read-model).
 
@@ -93,7 +93,7 @@ with it.
 so it's a dedicated PR. Filing it, not landing it.
 
 ### P1-3 · `cmd/flotilla` is a god-package (8,535 LOC) holding real domain logic
-`cmd/flotilla/` (33 non-test files)
+`cmd/flotilla/` (32 non-test files)
 
 The composition root carries more than wiring. `switch.go` (1,165 LOC, `runSwitch`
 gocyclo 43 at `cmd/flotilla/switch.go:150`) and `recycle.go` (628 LOC) hold the
@@ -170,12 +170,13 @@ that errors loudly for all duration flags, or — if silent-default is intention
 for the tuning knobs — a one-line doc comment on `optionalDuration` stating that
 choice so it reads as deliberate.
 
-### P2-4 · The `Transport` core interface is wide (11 methods)
+### P2-4 · The `Transport` core interface is wide (9 methods)
 `internal/transport/transport.go:26`
 
-`Transport` mixes inbound (`Subscribe`), outbound (`Post`,
-`PostWithAttachments`), addressing (`Destinations`, `ResolveDestination`), and
-chunking (`MaxContentRunes`, `Chunk`). The optional capabilities are already
+`Transport` bundles lifecycle (`Name`, `Close`), inbound (`Subscribe`), outbound
+(`Post`, `PostWithAttachments`), addressing (`Destinations`,
+`ResolveDestination`), and chunking (`MaxContentRunes`, `Chunk`) — nine methods.
+The optional capabilities are already
 segregated (`CatchUp`, `RecentHistory`, `InboundTarget`), so this is a mild ISP
 note, not a real problem — but the chunking pair is arguably a formatting concern
 that a second transport author must reimplement. Low priority.
@@ -218,7 +219,7 @@ is explicit rather than inferred.
 | 5 | P2 | `LivenessPingMode` / `WorkItem.Kind` stringly enums | `detector.go:252`, `goals/types.go:29` | Typed constants (WorkItem needs care) |
 | 6 | P2 | Front-end locked only by asset-grep tests | `internal/dash/server_test.go:280` | Behavior smoke test; stop symbol-sweeps |
 | 7 | P2 | Duration-flag failure policy inconsistent | `watch.go:143` vs `watch.go:1356` | One loud `durationFlag` helper |
-| 8 | P2 | `Transport` core interface wide (11 methods) | `internal/transport/transport.go:26` | Optional `ContentChunker` capability |
+| 8 | P2 | `Transport` core interface wide (9 methods) | `internal/transport/transport.go:26` | Optional `ContentChunker` capability |
 | 9 | P3 | Detector feature-comment creep | `detector.go:146` | Sub-structs (with #2) |
 | 10 | P3 | Confirm 35 `_ =` ignored errors are best-effort | 35 non-test sites | Sweep + annotate intent |
 
