@@ -16,7 +16,7 @@ reads — treat as directional. For the terminal-multiplexer layer see
   wiring graphs; end-user surfaces are whatever you build on top (API, web app, Slack bot).
 - **flotilla** (github.com/jim80net/flotilla) — a **drop-in coordination layer over existing
   coding harnesses**. A hub "XO" agent fans work to domain desks running in real terminal
-  sessions (Claude Code, Aider, OpenCode, Grok, …), collects replies with confirmed
+  sessions (Claude Code, Aider, OpenCode, Grok, Codex, …), collects replies with confirmed
   delivery, and mirrors an auditable transcript to a chat channel the operator drives from
   their phone. Go CLI, MIT.
 
@@ -42,13 +42,19 @@ orchestration inside a process you control**. They do **not** natively provide: 
 delivery into live tmux/PTY panes running commercial coding harnesses, (b) a durable
 operator-facing transcript mirrored to Discord/chat as the *primary* interface, (c)
 hub-and-spoke span-of-control doctrine for a human executive running many desks, or (d)
-federation (meta-XO → project-XOs) as an operations concept. Those are flotilla's lane; the
+federation (Chief of Staff → project-XOs) as an operations concept. Those are flotilla's lane; the
 platforms' lane is autonomous application logic.
 
 **Coding harnesses are not this comparison.** Claude Code, Cursor, Aider, Codex, Grok CLI,
 etc. are the *substrate* flotilla coordinates — not competitors in this doc. Agent platforms
 sometimes *invoke* coding tools inside a sandbox; flotilla *routes work to* harnesses the
 operator already trusts in real sessions.
+
+**Harness coverage (2026-07, honest):** the **Codex surface driver** ships on main (OpenAI
+Codex CLI via flotilla's driver model). A **Codex coordinator seat** is code-complete with
+**supervised trial pending** — not yet a production-default posture. The **memex-codex adapter**
+(Phases 1c–6 complete) pairs memex capture with Codex desks; it is a memex integration, not a
+flotilla core dependency.
 
 ## Feature-by-feature
 
@@ -63,7 +69,9 @@ operator already trusts in real sessions.
 | **Confirmed delivery to live harness sessions** | ❌ not the model | ✅ `send` refuses dead panes | **flotilla ahead** |
 | **Durable auditable inter-agent transcript** | ➖ traces/logs in your app | ✅ mirrored instructions + replies | **flotilla — governance product** |
 | Hub-and-spoke delegation (one→many) | ➖ varies (hierarchical crews / handoffs) | ✅ XO→desks, span-of-control doctrine | flotilla packages the org pattern |
-| Federation (meta-XO over project-XOs) | ❌ | 🔜 roadmap | neither ships fully |
+| Federation (Chief of Staff over project-XOs) | ❌ | ✅ channel-bound routing | flotilla ships; platforms lack this ops layer |
+| Codex surface driver | ➖ N/A | ✅ shipped | OpenAI Codex CLI via flotilla driver |
+| Codex coordinator seat | ➖ N/A | ◌ trial-pending | code-complete; supervised trial not production-default |
 | Cloud / hosted runtime | ✅ growing (CrewAI+, LangSmith, etc.) | ➖ operator-hosted CLI + tmux | platforms ahead on SaaS ops |
 | Language / runtime | Python/TS SDKs | Go CLI | different adoption curves |
 | License | Mixed (OSS + commercial tiers) | MIT | flotilla permissive |
@@ -116,8 +124,8 @@ fleet / chat-first operations** space open.
 4. **Complementary stack story** — a team *could* embed LangGraph inside a service desk while
    flotilla coordinates desks at the operations layer (no hard dependency without operator
    decision; same posture as herdr).
-5. **Federation** — meta-XO over project-XOs matches how engineering orgs actually scale;
-   natural for coordination, awkward to bolt onto an in-app crew graph.
+5. **Federation** — Chief of Staff over project-XOs matches how engineering orgs actually
+   scale; natural for coordination, awkward to bolt onto an in-app crew graph.
 
 ## Relationship to other competitive docs
 
