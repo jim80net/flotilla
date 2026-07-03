@@ -1,30 +1,51 @@
 /* =========================================================================
-   flotilla landing — "fleet command console" aesthetic
-   Deep abyssal navy ground, phosphor-cyan signal + amber accent, a CONDENSED
-   display (Barlow Condensed — the same face the flotilla dash uses) over a
-   monospace body (IBM Plex Mono), so product + marketing share one look. Grain +
-   faint signal-grid atmosphere. Mobile-first (the product's pitch is "run it
-   from your phone"). No framework; CSS-only motion except the status widget.
-   Design tokens documented in docs/design/README.md.
+   flotilla landing — "fleet command console" aesthetic, WARM LIGHT.
+   A warm-paper ground, near-white ivory panels lifted by soft warm shadows +
+   crisp warm borders, a deep-teal signal + ochre bus accent, warm ink. A
+   CONDENSED display (Barlow Condensed — the same face the flotilla dash uses)
+   over a monospace body (IBM Plex Mono), so product + marketing share ONE look:
+   the page that sells flotilla matches the warm-light instrument you install.
+   Faint warm grid + grain atmosphere. Mobile-first. No framework; CSS-only
+   motion except the status widget. Tokens = the dash design book
+   (docs/design/README.md); dark-theme names (--abyss*, --hull) are kept as
+   aliases so every existing var() reference resolves, and every dark-baked hue
+   literal is a color-mix() of a token so it re-derives on the light ground.
    ========================================================================= */
 
 :root {
-  /* palette */
-  --abyss:      #060a12;   /* page ground */
-  --abyss-2:    #0a1019;   /* panels */
-  --abyss-3:    #0e1622;   /* raised */
-  --hull:       #131d2b;   /* card */
-  --line:       #1d2b3e;   /* hairlines */
-  --line-soft:  #16212f;
-  --cyan:       #4fe3d0;   /* primary signal */
-  --cyan-dim:   #2a9f93;
-  --amber:      #ffb454;   /* accent / bus */
-  --ink:        #e8f0f7;   /* high text */
-  --ink-2:      #a7b8c9;   /* body text */
-  --ink-3:      #6b8096;   /* muted */
-  --ok:         #6ee787;
-  --warn:       #ffb454;
-  --busy:       #4fe3d0;
+  /* ── surfaces (warm light) — page is the deepest warm tone so panels pop ── */
+  --ground:     #efe7d8;   /* the page — warm parchment */
+  --surface:    #faf5ec;   /* panels — raised warm ivory */
+  --raised:     #f5eee1;   /* chrome: headers, tab strips, inputs */
+  --card:       #fffdf9;   /* top surface — cards / hover / active */
+
+  /* ── lines — warm taupe, deliberately visible for section separation ── */
+  --line:       #cdbb98;   /* primary border / hairline */
+  --line-soft:  #e0d5c0;   /* faint dividers, grid */
+
+  /* ── ink — warm near-black scale ── */
+  --ink-1:      #1f1810;
+  --ink:        #2b2318;   /* high-emphasis text */
+  --ink-2:      #544632;   /* body text */
+  --ink-3:      #6d5f42;   /* muted (AA on the page) */
+
+  /* ── accents + state (deep, AA-as-text on the warm surfaces) ── */
+  --cyan:       #017468;   /* primary signal */
+  --cyan-dim:   #2b7269;   /* secondary teal — kickers, hover */
+  --cyan-strong:#015a51;   /* primary-button hover */
+  --amber:      #8c5a0c;   /* ochre bus accent */
+  --violet:     #6f4ec9;
+  --ok:         #1c7439;   /* success / idle / realized */
+  --warn:       var(--amber);
+  --err:        #bd2f38;
+  --busy:       var(--cyan);
+
+  /* ── derived surface treatments (light-native elevation, not dark glow) ── */
+  --scrim:      rgba(43, 35, 24, .34);
+  --grid-line:  rgba(120, 100, 60, .10);
+  --shadow-sm:  0 1px 2px rgba(74, 58, 30, .06);
+  --shadow:     0 1px 2px rgba(74, 58, 30, .05), 0 4px 12px -2px rgba(74, 58, 30, .09);
+  --shadow-lg:  0 18px 44px -16px rgba(58, 44, 20, .30);
 
   /* type — Barlow Condensed matches the dash display face (docs/design/README.md) */
   --display: "Barlow Condensed", ui-sans-serif, system-ui, sans-serif;
@@ -34,6 +55,12 @@
   --maxw: 1140px;
   --r: 12px;
   --r-sm: 8px;
+
+  /* ── legacy aliases (dark-theme names → semantic light tokens) ── */
+  --abyss:      var(--ground);
+  --abyss-2:    var(--surface);
+  --abyss-3:    var(--raised);
+  --hull:       var(--card);
 }
 
 * { box-sizing: border-box; }
@@ -58,25 +85,25 @@ body {
 }
 .bg-grid {
   background-image:
-    linear-gradient(var(--line-soft) 1px, transparent 1px),
-    linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
   background-size: 64px 64px;
-  opacity: .35;
+  opacity: .6;
   /* fade the grid out toward the edges + bottom */
   -webkit-mask-image: radial-gradient(120% 90% at 50% 0%, #000 0%, transparent 78%);
           mask-image: radial-gradient(120% 90% at 50% 0%, #000 0%, transparent 78%);
 }
 .bg-grain {
-  opacity: .04;
+  opacity: .03;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  mix-blend-mode: overlay;
+  mix-blend-mode: multiply;
 }
-/* a soft cyan aurora behind the hero */
+/* a soft warm-teal aurora behind the hero */
 body::before {
   content: ""; position: fixed; z-index: 0; pointer-events: none;
   top: -20%; left: 50%; transform: translateX(-50%);
   width: 1100px; height: 700px;
-  background: radial-gradient(ellipse at center, rgba(79,227,208,.16), transparent 62%);
+  background: radial-gradient(ellipse at center, color-mix(in srgb, var(--cyan) 8%, transparent), transparent 62%);
   filter: blur(20px);
 }
 
@@ -109,11 +136,11 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 }
 .btn:hover { transform: translateY(-2px); }
 .btn-primary {
-  background: var(--cyan); color: #052420; font-weight: 600;
-  box-shadow: 0 0 0 1px rgba(79,227,208,.4), 0 8px 30px -8px rgba(79,227,208,.5);
+  background: var(--cyan); color: var(--card); font-weight: 600;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--cyan) 42%, transparent), 0 8px 30px -8px color-mix(in srgb, var(--cyan) 50%, transparent);
 }
-.btn-primary:hover { color: #052420; background: #6cf0de; }
-.btn-ghost { border-color: var(--line); color: var(--ink-2); background: rgba(255,255,255,.01); }
+.btn-primary:hover { color: var(--card); background: var(--cyan-strong); }
+.btn-ghost { border-color: var(--line); color: var(--ink-2); background: transparent; }
 .btn-ghost:hover { border-color: var(--cyan-dim); color: var(--ink); }
 
 /* ── nav ────────────────────────────────────────────────────────────────── */
@@ -154,9 +181,9 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
     flex-shrink: 0; white-space: nowrap;
     font-size: .74rem; letter-spacing: .04em;
     padding: .35em .65em; border-radius: 999px;
-    border: 1px solid var(--line-soft); background: rgba(255,255,255,.02);
+    border: 1px solid var(--line-soft); background: color-mix(in srgb, var(--ink) 4%, transparent);
   }
-  .nav-links a:hover { border-color: var(--cyan-dim); background: rgba(79,227,208,.04); }
+  .nav-links a:hover { border-color: var(--cyan-dim); background: color-mix(in srgb, var(--cyan) 8%, transparent); }
   .nav-cta { margin-left: auto; padding: .4em .75em; border-radius: var(--r-sm); }
 }
 
@@ -176,7 +203,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
   display: inline-flex; align-items: center; gap: .55rem;
   font-size: .74rem; letter-spacing: .12em; text-transform: uppercase;
   color: var(--ink-3); border: 1px solid var(--line);
-  padding: .4em .85em; border-radius: 999px; background: rgba(79,227,208,.03);
+  padding: .4em .85em; border-radius: 999px; background: color-mix(in srgb, var(--cyan) 7%, transparent);
 }
 .eyebrow .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); animation: blink 2.4s infinite; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.35} }
@@ -187,7 +214,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 }
 .hero-headline .hl {
   color: var(--cyan);
-  background: linear-gradient(180deg, transparent 62%, rgba(79,227,208,.18) 62%);
+  background: linear-gradient(180deg, transparent 62%, color-mix(in srgb, var(--cyan) 22%, transparent) 62%);
 }
 .hero-sub { font-size: 1.02rem; color: var(--ink-2); max-width: 34em; margin: 0 0 1.7rem; }
 
@@ -218,7 +245,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 .hero-dash {
   margin: 0; border: 1px solid var(--line); border-radius: var(--r);
   background: var(--abyss-2); overflow: hidden;
-  box-shadow: 0 30px 80px -30px rgba(0,0,0,.8), 0 0 0 1px rgba(79,227,208,.06);
+  box-shadow: 0 30px 80px -30px rgba(58,44,20,.16), 0 0 0 1px color-mix(in srgb, var(--cyan) 8%, transparent);
 }
 .dash-chrome {
   display: flex; align-items: center; gap: .8rem;
@@ -237,20 +264,21 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 
 .dash-canvas {
   position: relative; aspect-ratio: 4 / 3.15; width: 100%;
+  background-color: var(--surface);
   background-image:
-    linear-gradient(var(--line-soft) 1px, transparent 1px),
-    linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
   background-size: 34px 34px; background-position: center;
 }
 .dash-spokes { position: absolute; inset: 0; width: 100%; height: 100%; }
-.dash-spokes line { stroke: var(--cyan); stroke-opacity: .32; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.dash-spokes line { stroke: var(--cyan-dim); stroke-opacity: .5; stroke-width: 1; vector-effect: non-scaling-stroke; }
 
 .dnode {
   position: absolute; transform: translate(-50%, -50%);
   width: 33%; max-width: 210px; min-width: 120px;
   background: var(--abyss-2); border: 1px solid var(--line);
   border-left: 3px solid var(--ink-3); border-radius: var(--r-sm);
-  padding: .5rem .6rem; box-shadow: 0 8px 24px -14px rgba(0,0,0,.9);
+  padding: .5rem .6rem; box-shadow: 0 8px 24px -14px rgba(74,58,30,.14);
 }
 .dnode.hub { width: 40%; max-width: 240px; border-left-color: var(--cyan); background: color-mix(in srgb, var(--cyan) 5%, var(--abyss-2)); }
 .dnode-eyebrow { font-family: var(--display); font-size: .55rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
@@ -280,6 +308,9 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
   .dnode { width: 38%; font-size: .9em; }
   .dnode.hub { width: 44%; }
   .dnode.hub .dnode-list { display: none; }
+  /* the real tab labels (Conversations/Goals/Issues) need the room — drop the
+     "your fleet" sub-wordmark so the mock chrome doesn't crowd on a phone */
+  .dash-brand-sub { display: none; }
 }
 
 /* staggered hero reveal */
@@ -300,7 +331,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 .hs-label { font-size: .72rem; letter-spacing: .18em; text-transform: uppercase; color: var(--ink-3); }
 .hs-chip {
   font-size: .8rem; color: var(--ink-2); padding: .35em .8em;
-  border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.015);
+  border: 1px solid var(--line); border-radius: 999px; background: color-mix(in srgb, var(--ink) 4%, transparent);
 }
 .hs-chip.soon { color: var(--ink-3); border-style: dashed; }
 .hs-chip.soon em { color: var(--cyan-dim); font-style: normal; }
@@ -334,7 +365,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 .pull-quote {
   margin: 0 0 2.2rem; padding: 1.5rem 1.6rem 1.4rem;
   border-left: 3px solid var(--cyan);
-  background: linear-gradient(90deg, rgba(79,227,208,.07), transparent 68%);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--cyan) 10%, transparent), transparent 68%);
   border-radius: 0 var(--r-sm) var(--r-sm) 0;
 }
 .pull-quote p { margin: 0; font-size: 1.05rem; color: var(--ink); line-height: 1.65; }
@@ -352,9 +383,9 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
   background: var(--abyss-2);
 }
 .altitude-card.highlight {
-  border-color: rgba(79,227,208,.35);
-  background: linear-gradient(165deg, rgba(79,227,208,.08), var(--abyss-2));
-  box-shadow: 0 18px 50px -28px rgba(79,227,208,.35);
+  border-color: color-mix(in srgb, var(--cyan) 38%, transparent);
+  background: linear-gradient(165deg, color-mix(in srgb, var(--cyan) 10%, transparent), var(--abyss-2));
+  box-shadow: 0 18px 50px -28px color-mix(in srgb, var(--cyan) 38%, transparent);
 }
 .altitude-tag {
   font-size: .66rem; letter-spacing: .18em; text-transform: uppercase;
@@ -372,7 +403,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
   padding: 1.25rem 1.3rem; border: 1px solid var(--line); border-radius: var(--r);
   background: var(--abyss-2);
 }
-.diff-col.flotilla-col { border-color: rgba(79,227,208,.28); }
+.diff-col.flotilla-col { border-color: color-mix(in srgb, var(--cyan) 32%, transparent); }
 .diff-col h4 {
   font-family: var(--display); font-size: .95rem; color: var(--ink);
   margin: 0 0 .85rem;
@@ -407,7 +438,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 .diagram .nodes g:hover .node { stroke: var(--cyan); }
 .node-label { font-family: var(--mono); font-size: 10px; fill: var(--ink-2); }
 .hub-label { fill: var(--cyan); font-weight: 600; font-size: 13px; }
-.bus { fill: rgba(255,180,84,.06); stroke: var(--amber); stroke-width: 1.2; }
+.bus { fill: color-mix(in srgb, var(--amber) 10%, transparent); stroke: var(--amber); stroke-width: 1.2; }
 .bus-label { font-family: var(--mono); font-size: 9.5px; fill: var(--amber); letter-spacing: .03em; }
 .diagram figcaption { font-size: .78rem; color: var(--ink-3); margin-top: 1rem; line-height: 1.5; }
 /* animated signal traveling the spokes */
@@ -435,7 +466,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 .arch-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; }
 @media (max-width: 820px) { .arch-cols { grid-template-columns: 1fr; } }
 .arch-col { padding: 1.5rem; border: 1px solid var(--line); border-radius: var(--r); background: var(--abyss-2); }
-.arch-col.shipped { border-color: rgba(79,227,208,.28); background: linear-gradient(160deg, rgba(79,227,208,.05), var(--abyss-2)); }
+.arch-col.shipped { border-color: color-mix(in srgb, var(--cyan) 32%, transparent); background: linear-gradient(160deg, color-mix(in srgb, var(--cyan) 7%, transparent), var(--abyss-2)); }
 .arch-col.roadmap { border-style: dashed; }
 .arch-tag { font-size: .74rem; letter-spacing: .12em; text-transform: uppercase; margin-bottom: 1rem; display: flex; align-items: center; gap: .5rem; }
 .arch-col.shipped .arch-tag { color: var(--cyan); }
@@ -453,7 +484,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 .fleet-panel {
   border: 1px solid var(--line); border-radius: var(--r); overflow: hidden;
   background: var(--abyss-2);
-  box-shadow: 0 24px 60px -28px rgba(0,0,0,.7);
+  box-shadow: 0 24px 60px -28px rgba(58,44,20,.14);
 }
 .fleet-bar {
   display: flex; align-items: center; justify-content: space-between;
@@ -466,14 +497,14 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
    "Mockup — illustrative" treatment so a sample render is never read as live */
 .sample-badge {
   font-size: .6rem; letter-spacing: .12em; text-transform: uppercase;
-  color: var(--amber); border: 1px solid rgba(255,180,84,.4);
+  color: var(--amber); border: 1px solid color-mix(in srgb, var(--amber) 42%, transparent);
   padding: .15em .55em; border-radius: 999px; white-space: nowrap;
 }
 .fleet-note { font-size: .76rem; color: var(--ink-3); margin: .9rem 0 0; line-height: 1.55; }
 .fleet-note strong { color: var(--ink-2); }
 .fleet-note code { color: var(--cyan); }
-.live-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 0 0 rgba(79,227,208,.6); animation: pulse 2s infinite; }
-@keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(79,227,208,.5)} 70%{box-shadow:0 0 0 7px rgba(79,227,208,0)} 100%{box-shadow:0 0 0 0 rgba(79,227,208,0)} }
+.live-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 0 0 color-mix(in srgb, var(--cyan) 55%, transparent); animation: pulse 2s infinite; }
+@keyframes pulse { 0%{box-shadow:0 0 0 0 color-mix(in srgb, var(--cyan) 50%, transparent)} 70%{box-shadow:0 0 0 7px transparent} 100%{box-shadow:0 0 0 0 transparent} }
 .fleet-bar-meta { color: var(--ink-3); font-size: .76rem; }
 
 #fleet-status { padding: .4rem .4rem .6rem; }
@@ -499,14 +530,14 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
   border: 1px solid var(--line); white-space: nowrap;
 }
 .state .glyph { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-.state.working { color: var(--busy); border-color: rgba(79,227,208,.4); }
+.state.working { color: var(--busy); border-color: color-mix(in srgb, var(--cyan) 42%, transparent); }
 .state.working .glyph { background: var(--busy); box-shadow: 0 0 8px var(--busy); animation: blink 1.3s infinite; }
 .state.idle { color: var(--ink-3); }
 .state.idle .glyph { background: var(--ink-3); }
-.state.awaiting { color: var(--warn); border-color: rgba(255,180,84,.4); }
+.state.awaiting { color: var(--warn); border-color: color-mix(in srgb, var(--amber) 42%, transparent); }
 .state.awaiting .glyph { background: var(--warn); box-shadow: 0 0 8px var(--warn); animation: blink 1.6s infinite; }
-.state.errored { color: #ff6b6b; border-color: rgba(255,107,107,.4); }
-.state.errored .glyph { background: #ff6b6b; }
+.state.errored { color: var(--err); border-color: color-mix(in srgb, var(--err) 42%, transparent); }
+.state.errored .glyph { background: var(--err); }
 .state.offline { color: var(--ink-3); opacity: .7; }
 .state.offline .glyph { background: var(--ink-3); }
 
@@ -534,7 +565,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 .start-n {
   flex-shrink: 0; width: 2.1rem; height: 2.1rem; border-radius: 50%;
   display: grid; place-items: center; font-family: var(--display); font-weight: 700;
-  color: var(--cyan); border: 1px solid var(--cyan-dim); background: rgba(79,227,208,.06);
+  color: var(--cyan); border: 1px solid var(--cyan-dim); background: color-mix(in srgb, var(--cyan) 8%, transparent);
 }
 .start-steps h3 { font-size: 1rem; margin: .15rem 0 .55rem; }
 .start-steps pre {
@@ -586,8 +617,8 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
    the install one-liner, but the body WRAPS (it's a sentence, not a shell line)
    and carries no "$" prefix. Tokens only. */
 .paste {
-  border: 1px solid rgba(79,227,208,.28); border-radius: var(--r);
-  background: linear-gradient(160deg, rgba(79,227,208,.06), var(--abyss-2));
+  border: 1px solid color-mix(in srgb, var(--cyan) 32%, transparent); border-radius: var(--r);
+  background: linear-gradient(160deg, color-mix(in srgb, var(--cyan) 8%, transparent), var(--abyss-2));
   overflow: hidden;
 }
 .paste-lead {
