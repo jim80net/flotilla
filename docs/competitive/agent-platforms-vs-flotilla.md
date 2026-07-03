@@ -45,9 +45,9 @@ hub-and-spoke span-of-control doctrine for a human executive running many desks,
 federation (Chief of Staff → project-XOs) as an operations concept. Those are flotilla's lane; the
 platforms' lane is autonomous application logic.
 
-**Coding harnesses are not this comparison.** Claude Code, Codex, Grok CLI, and other
-terminal coding agents are the *substrate* flotilla coordinates — not competitors in this
-doc. Agent platforms
+**Coding harnesses are not this comparison.** Claude Code, Cursor, Codex, Grok CLI,
+and other terminal coding agents are the *substrate* flotilla coordinates — not
+competitors in this doc. Agent platforms
 sometimes *invoke* coding tools inside a sandbox; flotilla *routes work to* harnesses the
 operator already trusts in real sessions.
 

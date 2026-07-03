@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/dash.css" />
 </head>
-<body>
+<body data-goals-layout="{{.GoalsLayout}}">
   <div class="bg-grid" aria-hidden="true"></div>
   <div class="bg-grain" aria-hidden="true"></div>
 
@@ -159,6 +159,9 @@
             <button id="goals-zin" type="button" title="Zoom in" aria-label="Zoom in">+</button>
             <button id="goals-zout" type="button" title="Zoom out" aria-label="Zoom out">&minus;</button>
             <button id="goals-zfit" type="button" class="fit" title="Fit whole map" aria-label="Fit whole map">FIT</button>
+            <!-- touch-only: gate map panning behind a deliberate toggle so a touch-drag
+                 scrolls the PAGE through the map until activated (mobile-QA #330). -->
+            <button id="goals-panlock" type="button" class="panlock" aria-pressed="false" title="Move map — toggle to pan/zoom by touch" aria-label="Move map">&#10021; move</button>
           </div>
         </div>
         <aside id="goals-drawer" class="goals-drawer" role="dialog" aria-modal="false" aria-hidden="true" aria-label="Goal detail">

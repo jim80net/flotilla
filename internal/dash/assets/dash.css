@@ -1090,7 +1090,10 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .goals-graph { position: relative; margin-top: 12px; }
 .goals-graph.hidden { display: none; }
 .goals-viewport {
-  position: relative; overflow: hidden; cursor: grab; touch-action: none;
+  /* touch-action: pan-y lets a vertical touch-drag scroll the PAGE THROUGH the map by
+     default (no nested-scroll trap) — deliberate pan mode (.pan-active) reclaims the
+     gesture for the map. Mouse drag panning is unaffected by touch-action (#330). */
+  position: relative; overflow: hidden; cursor: grab; touch-action: pan-y;
   height: calc(100vh - 320px); min-height: 380px;
   border: 1px solid var(--line); border-radius: var(--r);
   background-color: var(--surface);
@@ -1100,6 +1103,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   background-size: 34px 34px;
 }
 .goals-viewport.grabbing { cursor: grabbing; }
+/* deliberate pan mode (touch): the map reclaims the touch gesture (#330). */
+.goals-viewport.pan-active { touch-action: none; }
 .goals-viewport:focus-visible { outline: 2px solid var(--cyan-dim); outline-offset: -2px; }
 .goals-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
 .goals-edges { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; z-index: 0; }
@@ -1120,6 +1125,11 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 }
 .gzoomctl button:hover { border-color: var(--cyan-dim); color: var(--cyan); }
 .gzoomctl .fit { font-size: .6rem; letter-spacing: .06em; }
+/* "move map" toggle: touch-only (mouse always pans). Wide enough for its label + a
+   comfortable tap target; active state signals the map now owns touch gestures (#330). */
+.gzoomctl .panlock { display: none; width: auto; min-height: 34px; padding: 0 .55rem; font-size: .58rem; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+.gzoomctl .panlock.active { border-color: var(--cyan); color: var(--cyan); background: color-mix(in srgb, var(--cyan) 14%, var(--abyss-2)); }
+@media (hover: none) { .gzoomctl .panlock { display: inline-flex; align-items: center; justify-content: center; } }
 
 /* node card (absolutely positioned on the canvas; JS sets left/top/width) */
 .gnode {
@@ -1267,19 +1277,31 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 
 /* #302 per-node controls — ⚠ respond (gated) + ⓘ details; hover/focus-revealed so
    the canvas stays clean. Absolutely positioned → never change card height. */
-.gnode-ctl { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; z-index: 2; }
+/* The node controls counter-scale the world's fit-to-view zoom (--ctl-scale = max(1,
+   1/scale), set on goals-world in applyTransform) so they stay SCREEN-CONSTANT — under a
+   0.3 phone fit-scale a 26px button would render ~8px (untappable, mobile-QA #330). The
+   inverse scale pins them to their 26px screen size (clears the WCAG 2.5.8 24px minimum);
+   transform-origin keeps them anchored at the card's top-right corner. */
+.gnode-ctl {
+  position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; z-index: 2;
+  transform: scale(var(--ctl-scale, 1));
+  transform-origin: top right;
+}
 .gnode-respond, .gnode-detail {
-  width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--line);
+  width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--line);
   background: var(--abyss-2); color: var(--ink-3); cursor: pointer; font-size: .82rem; line-height: 1;
   display: inline-flex; align-items: center; justify-content: center; padding: 0;
 }
 /* ⚠ respond is ALWAYS visible on a gated node (the operator must see what needs them);
-   ⓘ details is hover/focus-revealed to keep the canvas clean. */
+   ⓘ details is hover/focus-revealed to keep the canvas clean on pointer devices. */
 .gnode-respond { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 55%, transparent); }
 .gnode-respond:hover { background: color-mix(in srgb, var(--amber) 16%, transparent); }
 .gnode-detail { opacity: 0; transition: opacity .15s var(--ease); }
 .gnode:hover .gnode-detail, .gnode:focus-within .gnode-detail, .gnode:focus-visible .gnode-detail { opacity: 1; }
 .gnode-detail:hover { border-color: var(--cyan-dim); color: var(--cyan); }
+/* On touch (no hover), the ⓘ can never be hover-revealed — always show it so it's
+   reachable (mobile-QA #330). */
+@media (hover: none) { .gnode-detail { opacity: 1; } }
 
 /* #302 intervention modal — situation brief + response input */
 .goals-modal {
@@ -1373,3 +1395,106 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gd-ask p { color: var(--ink); font-size: .82rem; }
 .gd-row { display: flex; justify-content: space-between; gap: 10px; align-items: center; font-size: .78rem; color: var(--ink-2); padding: 5px 0; border-bottom: 1px solid var(--line-soft, var(--line)); }
 .gd-row-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   Mobile flow (#330) — the instrument on a phone
+   ──────────────────────────────────────────────────────────────────────
+   Canonical breakpoints: 900px = tablet, 640px = phone (docs/design/README
+   §Mobile). Two disciplines enforced here: (1) NO horizontal overflow — the
+   dash never scrolls sideways (header wrap + a root clip guard); (2) 44px
+   touch targets on the controls a thumb drives. The third discipline — ONE
+   primary scroll — is owned per-view by its own shell (the Conversations
+   app-shell is mobile-first, #326); this block does not re-implement it.
+   Token VALUES are owned elsewhere (#325) — this block adds only responsive
+   layout + hit-area rules, no palette changes.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Safety net: the console never scrolls sideways. `clip` (not `hidden`) does
+   NOT create a scroll container, so the sticky header keeps sticking — the
+   overflow sources below are fixed at the root, this just guarantees it. */
+html, body { overflow-x: clip; }
+.view, .conv-wrap, .wrap, .goals-wrap { max-width: 100%; }
+
+/* Tablet + phone are touch surfaces (≤900px): every thumb-driven control is a
+   44px hit target, even where the desktop row still fits horizontally. Desktop
+   (mouse, >900px) keeps its denser chrome. Height-only bumps preserve the
+   existing horizontal rhythm; segmented micro-toggles get inline-flex so the
+   min-height actually grows the button box. */
+@media (max-width: 900px) {
+  .tab,
+  .btn,
+  .glayout-btn,
+  .mv-btn,
+  #filter-state,
+  .ghelp,
+  .gd-convo,
+  .gd-close,
+  .gm-close,
+  .conv-queue-sum,
+  .gzoomctl button { min-height: 44px; }
+  .tab,
+  .glayout-btn,
+  .mv-btn { display: inline-flex; align-items: center; justify-content: center; }
+  /* the drive-queue disclosure summary (#326) is a thumb-driven toggle — give it
+     the 44px row and vertically center its baseline-aligned label */
+  .conv-queue-sum { align-items: center; }
+  .gzoomctl button { width: 44px; }
+  .gd-close, .gm-close { width: 44px; height: 44px; }
+  /* text fields the operator types into — match the 44px control rhythm */
+  .control-form input,
+  .control-form textarea,
+  .issue-form input { min-height: 44px; }
+  /* the "operator-idea only" filter: the WHOLE label row is the tap target,
+     with a visibly larger checkbox inside it */
+  .filter-idea { min-height: 44px; }
+  .filter-idea input { width: 22px; height: 22px; }
+}
+
+/* Phone (≤640px): LAYOUT changes — wrap the header, collapse to one scroll,
+   full-bleed the overlays. (Touch-target sizing is handled by the ≤900 block
+   above; this block is structure only.) */
+@media (max-width: 640px) {
+  /* ── header: wrap the three groups instead of forcing a ~700px row ──
+     Row 1 = brand + live-dot; row 2 = the tabs, stretched full width. The
+     dev-only bind address is hidden on a phone (low value, high width); the
+     live-link dot stays (it carries meaning). */
+  .bar { flex-wrap: wrap; gap: .5rem .75rem; padding: .6rem .9rem; }
+  .brand { flex: 1 1 auto; min-width: 0; }
+  .bar-meta { order: 2; margin-left: auto; }
+  .bar-meta .meta-label, .bar-meta .meta-bind { display: none; }
+  .tabs { order: 3; flex: 1 1 100%; }
+  .tab { flex: 1 1 0; padding: .5rem .5rem; }
+
+  /* The "one primary scroll" discipline for the Conversations view is owned by
+     the #326 app-shell (dash.css §Conversations): its BASE is mobile-first —
+     the three zones stack, the page provides one natural scroll, and the inner
+     scroll boxes only appear as the fixed shell at ≥1101px. Nothing to release
+     here; the pinned glance peek + collapsible drive queue are intentional and
+     must NOT be un-clamped. */
+
+  .tracker-controls { width: 100%; }
+  .tracker-controls #filter-state,
+  .tracker-controls .btn { flex: 1 1 auto; }
+
+  /* the info|debug and tree|org segmented groups: give them room to breathe */
+  .conv-head-right { flex-wrap: wrap; gap: .5rem; }
+  .goals-head-right { flex-wrap: wrap; gap: 8px; }
+
+  /* ── goals map framing: the pan surface stays usable and its chrome is
+     tappable. The map's INTERACTION model (pan/zoom capture, node ⚠/ⓘ
+     controls that shrink under fit-zoom) is #324's geometry lane — noted,
+     not restructured here. ── */
+  .goals-viewport { height: 56vh; min-height: 300px; }
+  .goals-drawer { width: 100%; max-width: 100%; }
+  .gm-dialog { padding: 16px 16px; }
+  /* the help tooltip is left-anchored under a button near the right edge; on a
+     phone open it leftward so it stays fully on-screen instead of clipping. */
+  .ghelp-tip { left: auto; right: 0; }
+
+  /* situation tiles: two-up minimum, never a 1px sliver */
+  .gtile { flex: 1 1 44%; min-width: 44%; }
+
+  /* the intervene form fields already go full width; keep the actions row from
+     overflowing when the message + button collide */
+  .form-actions { flex-wrap: wrap; }
+}

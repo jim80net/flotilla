@@ -34,6 +34,7 @@ type Config struct {
 	Bind             string // listen address (default 127.0.0.1:8787)
 	Repo             string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
 	SecretsPath      string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
+	GoalsLayout      string // initial Goals-map layout: "org" (default) | "tree" — the toggle still overrides live (#317/#324)
 
 	// Transport is the coordination transport backing the control surface's notify
 	// post (the operator note's destination is a Discord webhook, so this is the
@@ -85,6 +86,7 @@ func NewServer(cfg Config) (*Server, error) {
 	if err := validateBind(cfg.Bind); err != nil {
 		return nil, err
 	}
+	cfg.GoalsLayout = normalizeGoalsLayout(cfg.GoalsLayout)
 	rc, err := roster.Load(cfg.RosterPath)
 	if err != nil {
 		return nil, err
@@ -335,7 +337,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	// fetch of the JSON endpoints, never server-rendered into a <script> literal
 	// (anti-XSS — a desk name / ledger gist can never become stored script).
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	data := pageData{Bind: s.cfg.Bind, XO: s.xo}
+	data := pageData{Bind: s.cfg.Bind, XO: s.xo, GoalsLayout: s.cfg.GoalsLayout}
 	if err := s.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
 		http.Error(w, "template error", http.StatusInternalServerError)
 	}
@@ -360,8 +362,18 @@ func (s *Server) handleGoals(w http.ResponseWriter, r *http.Request) {
 // pageData is the (static) data the index template needs — no fleet data, just
 // chrome the page shows before its JS fetches the live JSON.
 type pageData struct {
-	Bind string
-	XO   string
+	Bind        string
+	XO          string
+	GoalsLayout string // "org" | "tree" — seeds the Goals-map layout toggle (#317)
+}
+
+// normalizeGoalsLayout resolves the initial Goals-map layout: "tree" when explicitly set,
+// else "org" (the operator-blessed default, #324). The live toggle still overrides it.
+func normalizeGoalsLayout(v string) string {
+	if strings.EqualFold(strings.TrimSpace(v), "tree") {
+		return "tree"
+	}
+	return "org"
 }
 
 // --- middleware + helpers ---

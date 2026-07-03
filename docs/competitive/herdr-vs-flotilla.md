@@ -23,7 +23,7 @@ Mature, real product: ~6.1k GitHub stars, v0.7.0 (2026-06-15), 890 commits, acti
 | Persistent PTY panes, detach/reattach | ✅ mature | ➖ relies on your tmux | herdr ahead — owns the runtime |
 | Mouse-first TUI, themes, copy-mode | ✅ rich | ❌ not its job | herdr ahead |
 | SSH remote attach | ✅ native | ➖ via your tmux/ssh | herdr ahead |
-| Per-agent state detection | ✅ 14+ (heuristics + native hooks) | ✅ drivers for Claude Code, Codex, Grok (render markers live-captured) | herdr ahead on breadth |
+| Per-agent state detection | ✅ 14+ (heuristics + native hooks) | ✅ 3 drivers — Claude Code, Codex, Grok (render markers live-captured) | herdr ahead on breadth + depth |
 | Socket/JSON API for agent→terminal control | ✅ extensive | ➖ CLI send/notify, not a terminal API | herdr richer |
 | **Hub-and-spoke delegation (one→many)** | ❌ explicitly NOT supported | ✅ core (XO→desks) | **flotilla — central differentiator** |
 | **Confirmed-delivery inter-agent messaging** | ❌ indirect state-share | ✅ send refuses dead panes | **flotilla ahead** |
