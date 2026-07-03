@@ -97,8 +97,8 @@ reads "techno startup", the opposite of the instrument voice.
 - **Harness badge** — a subdued, right-aligned uppercase micro-chip naming a
   surface (`grok`, `claude-code`, …). `--ink-3` on a `--line-soft` border.
 - **Segmented toggle** — two/three flush buttons in a bordered group; the active
-  one gets a `color-mix(--cyan 18%)` fill. Used for the dash `tree|org` layout
-  and `info|debug` verbosity toggles.
+  one gets a `color-mix(in srgb, var(--cyan) 18%, transparent)` fill. Used for the
+  dash `tree|org` layout and `info|debug` verbosity toggles.
 - **Goals canvas (command-chart)** — the hero pattern: an org node graph. Nodes
   are cards (`.gnode`) sized by scope (flotilla > desk > task); in **org** layout
   the coordinator sits at the visual center and org units orbit on rings with
