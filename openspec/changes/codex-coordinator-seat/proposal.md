@@ -15,7 +15,9 @@ necessary but not sufficient. Coordinators additionally need outbound operator p
 provisioning, detector turn-final classifiers, confirmed delivery at coordinator send volume,
 coordinator-scoped permission rules, and doctrine that fits Codex's AGENTS.md budget.
 
-## What Changes (design scope — implementation follows design PR)
+## What Changes
+
+Design scope only — implementation follows this design PR.
 
 - **Openspec design** naming codex-specific vs generic (flotilla-dev) workstreams, phased
   toward a supervised single-XO trial.

@@ -1,6 +1,6 @@
 # workspace Specification (delta) — codex coordinator seat
 
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Coordinator harness allocation respects explicit codex surface
 

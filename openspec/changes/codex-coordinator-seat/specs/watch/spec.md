@@ -1,6 +1,6 @@
 # watch Specification (delta) — codex coordinator seat
 
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Delegation nudge recognizes codex management harness
 
