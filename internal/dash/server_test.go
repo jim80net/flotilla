@@ -342,11 +342,21 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	}
 	// structuralSig must include the enrichment (priorities/milestones/harness) so an
 	// add/remove of a height-affecting field triggers a full rebuild, not a stale
-	// in-place text swap.
+	// in-place text swap. Guard the index BEFORE slicing (a missing function must
+	// fail the test, not panic on js[-1:]) — cubic #315 P3.
 	sigStart := strings.Index(js, "function structuralSig")
+	if sigStart < 0 {
+		t.Fatal("goals.js must define structuralSig")
+	}
 	sigEnd := strings.Index(js[sigStart:], "function updateInPlace")
-	if sigStart < 0 || sigEnd < 0 || !strings.Contains(js[sigStart:sigStart+sigEnd], "n.priorities") {
-		t.Error("structuralSig must include the org-graph v2 enrichment fields (#283 height contract)")
+	if sigEnd < 0 {
+		t.Fatal("structuralSig must precede updateInPlace in goals.js")
+	}
+	sig := js[sigStart : sigStart+sigEnd]
+	for _, f := range []string{"n.priorities", "n.milestones", "harness"} {
+		if !strings.Contains(sig, f) {
+			t.Errorf("structuralSig must include enrichment field %q (#283 height contract)", f)
+		}
 	}
 
 	body := doGet(t, srv, "/").Body.String()
