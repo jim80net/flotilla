@@ -533,6 +533,8 @@
     q("goals-modal-brief").innerHTML = brief;
     var ta = q("goals-modal-input");
     if (ta) ta.value = "";
+    var note = q("goals-modal-note");
+    if (note) note.textContent = ""; // clear the stub "not sent" note from a prior open
     var m = q("goals-modal");
     m.classList.add("open");
     m.setAttribute("aria-hidden", "false");
@@ -653,6 +655,17 @@
     var modal = q("goals-modal");
     if (modal) modal.addEventListener("click", function (e) {
       if (e.target.closest(".gm-close") || e.target.classList.contains("goals-modal")) closeModal();
+    });
+    // Focus trap (aria-modal): keep Tab / Shift+Tab cycling among the modal's
+    // controls (close, textarea, send) while it's open — Tab must not escape onto
+    // the background content behind the overlay.
+    if (modal) modal.addEventListener("keydown", function (e) {
+      if (e.key !== "Tab" || !modal.classList.contains("open")) return;
+      var f = modal.querySelectorAll(".gm-close, #goals-modal-input, #goals-modal-send");
+      if (!f.length) return;
+      var first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
     });
     var send = q("goals-modal-send");
     if (send) send.onclick = function () {
