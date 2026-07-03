@@ -49,19 +49,25 @@ type GoalNode struct {
 type Edge struct {
 	From string `json:"from"`
 	To   string `json:"to"`
-	Kind string `json:"kind"` // "depends-on"
+	Kind string `json:"kind"` // "depends_on" (ratified spec goals/spec.md line 43)
 }
 
 // WorkItem binds a node to concrete work. Kind is issue|backlog|inline|desk; the
 // binding field depends on the kind (ref for issue/desk, marker for backlog, text
-// for inline). Status is the minimal derived state (from the backlog marker
-// tokens) the UI shows without itself calling gh.
+// + done for inline). Status is the minimal derived state the UI shows without
+// itself calling gh: the minimal parser resolves the two YAML-DETERMINISTIC kinds
+// (backlog markers, inline done) fully, and leaves the two LIVE-RESOLVED kinds
+// (issue open/closed, desk snapshot state) NEUTRAL — the fuller internal/goals core
+// resolves those. Neutral is honest, not fabricated: an unresolvable issue is never
+// asserted done or in-flight (never-fabricate); it simply does not promote a node to
+// achieved on its own (see compute).
 type WorkItem struct {
 	Kind   string `json:"kind" yaml:"kind"`
 	Ref    string `json:"ref,omitempty" yaml:"ref"`
 	Marker string `json:"marker,omitempty" yaml:"marker"`
 	Text   string `json:"text,omitempty" yaml:"text"`
-	Status string `json:"status,omitempty" yaml:"-"` // derived (never from yaml): blocked|awaiting|in-flight|done|""
+	Done   bool   `json:"done,omitempty" yaml:"done"` // inline checklist completion
+	Status string `json:"status,omitempty" yaml:"-"`  // derived (never from yaml): blocked|awaiting|in-flight|done|""
 }
 
 // GoalsDoc is the /api/goals response: the goal tree, a flat id→status_display
@@ -148,7 +154,7 @@ func buildEdges(roots []*GoalNode, ids map[string]bool) ([]Edge, error) {
 				if !ids[dep] {
 					return fmt.Errorf("goals: node %q depends_on unknown id %q", n.ID, dep)
 				}
-				edges = append(edges, Edge{From: n.ID, To: dep, Kind: "depends-on"})
+				edges = append(edges, Edge{From: n.ID, To: dep, Kind: "depends_on"})
 			}
 			if err := walk(n.Children); err != nil {
 				return err
@@ -238,23 +244,36 @@ func validateAcyclic(roots []*GoalNode, seen map[string]bool) error {
 }
 
 // compute fills StatusDisplay for a node and its subtree (post-order) + records it
-// in rollups. Rules (design §4.4 + the #268 fix-round deltas relayed by COS 2026-07-03):
-//   - AUTHORED PRECEDENCE: an authored `status` of paused or cancelled WINS over any
-//     computed roll-up — never silently overridden (a coordinator who paused/cancelled
-//     a node means it, regardless of child activity).
-//   - Otherwise (active / achieved authored) compute: blocked › awaiting › in-flight,
-//     then achieved, else active.
-//   - VACUOUS-ACHIEVED GUARD: a leaf with zero children AND zero work items computes
-//     "active", never "achieved" (only an authored `status: achieved` marks it done).
+// in rollups, following the RATIFIED precedence (openspec/changes/dash-next-gen/
+// specs/goals/spec.md lines 89-103, "Roll-up status combines authored and computed
+// state"). First match wins:
 //
-// Children are computed post-order first so their rollups exist regardless of the
-// parent's authored-precedence short-circuit.
+//  1. authored cancelled                          → cancelled
+//  2. any child/item blocked                      → blocked
+//  3. any child/item awaiting                     → awaiting
+//  4. authored paused                             → paused
+//  5. any child/item in-flight                    → in-flight
+//  6. authored achieved + all non-cancelled kids achieved + items done → achieved
+//  7. all non-cancelled kids achieved + items done + ≥1 child/item      → achieved
+//  8. zero children AND zero items                → active (vacuous-achieved guard)
+//  9. otherwise                                   → active
+//
+// Two deltas from a naive reading: (a) a PAUSE does NOT hide a live blocker — only
+// authored cancelled (rule 1, a dead branch) outranks blocked; a paused node with a
+// blocked descendant renders blocked. (b) CANCELLED children are EXCLUDED from the
+// achieved test (rules 6/7) — a cancelled sub-goal is a dead branch and never holds
+// the parent out of achieved. Children propagate blocked/awaiting/in-flight upward;
+// they count toward achieved only if themselves achieved.
+//
+// Children are computed post-order first so their rollups exist before the parent
+// evaluates its precedence.
 func compute(n *GoalNode, rollups map[string]string) string {
 	for i := range n.WorkItems {
 		n.WorkItems[i].Status = itemStatus(n.WorkItems[i])
 	}
+
 	childBlocked, childAwaiting, childInFlight := false, false, false
-	allChildrenAchieved := len(n.Children) > 0
+	nonCancelledKids, nonCancelledAchievedKids := 0, 0
 	for _, c := range n.Children {
 		cd := compute(c, rollups) // compute each child EXACTLY once (post-order)
 		switch cd {
@@ -265,68 +284,88 @@ func compute(n *GoalNode, rollups map[string]string) string {
 		case "in-flight":
 			childInFlight = true
 		}
-		if cd != "achieved" {
-			allChildrenAchieved = false
+		if cd != "cancelled" { // cancelled kids are dead branches, excluded from the achieved test
+			nonCancelledKids++
+			if cd == "achieved" {
+				nonCancelledAchievedKids++
+			}
 		}
 	}
 
+	// Item signals. A neutral item (unresolved issue/desk) is NOT "done" — it holds a
+	// node out of achieved (we can't confirm completion) but is never asserted
+	// in-flight/blocked (never-fabricate). The full core resolves those live.
+	itemBlocked, itemAwaiting, itemInFlight, itemsDone := false, false, false, true
+	for _, wi := range n.WorkItems {
+		switch wi.Status {
+		case "blocked":
+			itemBlocked, itemsDone = true, false
+		case "awaiting":
+			itemAwaiting, itemsDone = true, false
+		case "in-flight":
+			itemInFlight, itemsDone = true, false
+		case "done":
+			// counts as done
+		default:
+			itemsDone = false // neutral/unresolved — not confirmed done
+		}
+	}
+
+	allKidsAchieved := nonCancelledKids == nonCancelledAchievedKids // vacuously true with 0 non-cancelled kids
+	hasStructure := len(n.Children) > 0 || len(n.WorkItems) > 0
+
 	var display string
 	switch {
-	case n.Status == "cancelled" || n.Status == "paused":
-		// Authored precedence — the coordinator's state is not overridden by activity.
-		display = n.Status
-	default:
-		itemBlocked, itemAwaiting, itemInFlight, itemsDone := false, false, false, true
-		for _, wi := range n.WorkItems {
-			switch wi.Status {
-			case "blocked":
-				itemBlocked, itemsDone = true, false
-			case "awaiting":
-				itemAwaiting, itemsDone = true, false
-			case "in-flight":
-				itemInFlight, itemsDone = true, false
-			case "done":
-				// counts as done
-			default:
-				itemsDone = false
-			}
-		}
-		leaf := len(n.Children) == 0 && len(n.WorkItems) == 0
-		switch {
-		case childBlocked || itemBlocked:
-			display = "blocked"
-		case childAwaiting || itemAwaiting:
-			display = "awaiting"
-		case childInFlight || itemInFlight:
-			display = "in-flight"
-		case n.Status == "achieved":
-			display = "achieved" // authored done
-		case !leaf && allChildrenAchieved && (len(n.WorkItems) == 0 || itemsDone):
-			display = "achieved" // all real children achieved, items done
-		default:
-			display = "active" // includes the vacuous leaf — never achieved by computation
-		}
+	case n.Status == "cancelled": // 1
+		display = "cancelled"
+	case childBlocked || itemBlocked: // 2 — a pause never hides a live blocker
+		display = "blocked"
+	case childAwaiting || itemAwaiting: // 3
+		display = "awaiting"
+	case n.Status == "paused": // 4 — outranks in-flight, yields to blocked/awaiting
+		display = "paused"
+	case childInFlight || itemInFlight: // 5
+		display = "in-flight"
+	case n.Status == "achieved" && allKidsAchieved && itemsDone: // 6 (authored; leaf ok)
+		display = "achieved"
+	case hasStructure && allKidsAchieved && itemsDone: // 7 (computed; ≥1 child/item)
+		display = "achieved"
+	default: // 8 (zero/zero) + 9 → active; the vacuous leaf is never achieved by computation
+		display = "active"
 	}
 	n.StatusDisplay = display
 	rollups[n.ID] = display
 	return display
 }
 
-// itemStatus derives a minimal work-item status from its binding — WITHOUT calling
-// gh (that richer resolution is flotilla-dev's core). Backlog markers carry the
-// tokens (reuses the backlog.Parse vocabulary); other kinds are neutral.
+// itemStatus derives a minimal work-item status from its binding, resolving only the
+// two YAML-DETERMINISTIC kinds — WITHOUT calling gh or reading the watch snapshot
+// (that live resolution is flotilla-dev's core):
+//   - backlog: the marker tokens (reuses the backlog.Parse vocabulary).
+//   - inline:  done → "done", otherwise "in-flight" (a bare checklist line is open work).
+//   - issue/desk: NEUTRAL ("") — live-resolved kinds the minimal parser does not fabricate.
 func itemStatus(wi WorkItem) string {
-	m := strings.ToLower(wi.Marker)
-	switch {
-	case strings.Contains(m, "[blocked]") || strings.Contains(m, "[needs-attention]"):
-		return "blocked"
-	case strings.Contains(m, "[awaiting-auth]"):
-		return "awaiting"
-	case strings.Contains(m, "[in-flight]"):
+	switch wi.Kind {
+	case "backlog":
+		m := strings.ToLower(wi.Marker)
+		switch {
+		case strings.Contains(m, "[blocked]") || strings.Contains(m, "[needs-attention]"):
+			return "blocked"
+		case strings.Contains(m, "[awaiting-auth]"):
+			return "awaiting"
+		case strings.Contains(m, "[in-flight]") || strings.Contains(m, "[pending]"):
+			return "in-flight"
+		case strings.Contains(m, "[done]"):
+			return "done"
+		default:
+			return ""
+		}
+	case "inline":
+		if wi.Done {
+			return "done"
+		}
 		return "in-flight"
-	case strings.Contains(m, "[done]"):
-		return "done"
-	default:
+	default: // issue, desk — live-resolved, left neutral
 		return ""
 	}
 }

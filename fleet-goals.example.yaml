@@ -64,9 +64,15 @@ goals:
         parent: fleet-reliability
         owner: alpha-xo
         status: achieved         # rolls up green — done + solidified
+        # A resolvable-done work item (inline done:true) so the roll-up reaches
+        # `achieved` from the YAML alone. Issue links (live open/closed) are a
+        # live-resolved kind the fuller core promotes; the minimal parser leaves them
+        # neutral, so an authored-achieved node earns green via a done marker, not an
+        # unresolved issue. (Issue kind is demonstrated on goals-map-view / #267.)
         work_items:
-          - kind: issue
-            ref: "jim80net/flotilla#167"
+          - kind: inline
+            text: "Reboot-durable systemd + firewall-clean deploy verified"
+            done: true
 
   # ── Tier 0: a second fleet goal — carries an operator-gated + aspirational mix ─
   - id: coordinator-portability

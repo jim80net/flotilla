@@ -130,8 +130,8 @@ func TestParse_Edges(t *testing.T) {
 		t.Fatalf("edges = %+v, want 1 (ws-active→ws-done)", d.Edges)
 	}
 	e := d.Edges[0]
-	if e.From != "ws-active" || e.To != "ws-done" || e.Kind != "depends-on" {
-		t.Errorf("edge = %+v", e)
+	if e.From != "ws-active" || e.To != "ws-done" || e.Kind != "depends_on" {
+		t.Errorf("edge = %+v (kind must be depends_on, ratified spec line 43)", e)
 	}
 }
 
@@ -143,7 +143,8 @@ func TestParse_DanglingDependsOnRejected(t *testing.T) {
 }
 
 func TestCompute_AuthoredPausedCancelledPrecedence(t *testing.T) {
-	// A paused/cancelled node keeps its authored state even with an in-flight child.
+	// A paused node outranks an in-flight child (rule 4 > 5); a cancelled node outranks
+	// everything (rule 1). (The pause-yields-to-a-blocker case is its own test above.)
 	y := `
 version: 1
 goals:
@@ -170,6 +171,88 @@ goals:
 	}
 	if d.Rollups["c"] != "cancelled" {
 		t.Errorf("cancelled node = %q, want cancelled", d.Rollups["c"])
+	}
+}
+
+func TestCompute_PauseYieldsToLiveBlockerNotInFlight(t *testing.T) {
+	// Ratified precedence (spec lines 89-103): a PAUSE outranks in-flight (rule 4 > 5)
+	// but a blocked/awaiting descendant outranks the pause (rules 2/3 > 4) — a pause
+	// never hides a live blocker. Only authored cancelled (rule 1) outranks blocked.
+	cases := []struct {
+		name, childMarker, want string
+	}{
+		{"blocked descendant surfaces through a pause", "[blocked] dep down", "blocked"},
+		{"awaiting descendant surfaces through a pause", "[awaiting-auth] operator call", "awaiting"},
+		{"in-flight descendant yields to the pause", "[in-flight] busy", "paused"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			y := "version: 1\ngoals:\n  - id: p\n    title: Paused\n    status: paused\n    children:\n" +
+				"      - id: pc\n        title: Child\n        status: active\n        work_items:\n" +
+				"          - kind: backlog\n            marker: \"" + tc.childMarker + "\"\n"
+			d, err := Parse([]byte(y))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if d.Rollups["p"] != tc.want {
+				t.Errorf("paused parent = %q, want %q", d.Rollups["p"], tc.want)
+			}
+		})
+	}
+}
+
+func TestCompute_CancelledChildExcludedFromAchieved(t *testing.T) {
+	// A cancelled sub-goal is a dead branch: it must NOT hold the parent out of
+	// achieved (spec rule 7). Parent has one achieved child + one cancelled child and
+	// no open items → achieved.
+	y := `
+version: 1
+goals:
+  - id: parent
+    title: Parent
+    status: active
+    children:
+      - id: done-kid
+        title: Done
+        status: achieved
+        work_items:
+          - kind: inline
+            text: shipped
+            done: true
+      - id: dead-kid
+        title: Cancelled
+        status: cancelled
+`
+	d, err := Parse([]byte(y))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Rollups["parent"] != "achieved" {
+		t.Errorf("parent = %q, want achieved (cancelled child is a dead branch, excluded)", d.Rollups["parent"])
+	}
+	if d.Rollups["dead-kid"] != "cancelled" {
+		t.Errorf("dead-kid = %q, want cancelled", d.Rollups["dead-kid"])
+	}
+}
+
+func TestCompute_InlineDoneVsBareIsInFlight(t *testing.T) {
+	// Inline is a YAML-deterministic kind: done:true → done, a bare line → in-flight.
+	d, _ := Parse([]byte("version: 1\ngoals:\n  - id: g\n    title: T\n    status: active\n    work_items:\n      - kind: inline\n        text: open work\n"))
+	if d.Rollups["g"] != "in-flight" {
+		t.Errorf("bare inline = %q, want in-flight (open checklist line)", d.Rollups["g"])
+	}
+	d2, _ := Parse([]byte("version: 1\ngoals:\n  - id: g\n    title: T\n    status: active\n    work_items:\n      - kind: inline\n        text: shipped\n        done: true\n"))
+	if d2.Rollups["g"] != "achieved" {
+		t.Errorf("inline done + one item = %q, want achieved (all items done, rule 7)", d2.Rollups["g"])
+	}
+}
+
+func TestCompute_UnresolvedIssueDoesNotOverAchieve(t *testing.T) {
+	// A live-resolved kind (issue) is neutral in the minimal parser — it must NOT let
+	// an active node roll up achieved (we can't confirm the issue is closed).
+	d, _ := Parse([]byte("version: 1\ngoals:\n  - id: g\n    title: T\n    status: active\n    work_items:\n      - kind: issue\n        ref: owner/repo#1\n"))
+	if d.Rollups["g"] != "active" {
+		t.Errorf("active node with only an unresolved issue = %q, want active (neutral issue never over-achieves)", d.Rollups["g"])
 	}
 }
 
