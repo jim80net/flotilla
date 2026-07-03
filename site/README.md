@@ -11,7 +11,7 @@ it from your phone").
 | file | what it is |
 |------|------------|
 | `index.html` | the page (hero, what / how / architecture / live status / 30-second start / footer) |
-| `styles.css` | the "fleet command console" theme — dark navy ground, phosphor-cyan + amber accents, Syne display over IBM Plex Mono |
+| `styles.css` | the "fleet command console" theme — dark navy ground, phosphor-cyan + amber accents, Barlow Condensed display (the dash face) over IBM Plex Mono; see `docs/design/README.md` |
 | `app.js` | copy-to-clipboard on the install one-liner + the live fleet-status widget |
 | `status.json` | **SAMPLE** fleet status (generic desks) so the widget renders live today |
 | `assets/` | drop the demo gif / asciinema cast here (see below) |
