@@ -55,6 +55,10 @@ type Transport interface {
 	// the transport's Destination and never cross the seam to the caller.
 	Post(dest Destination, username, content string) error
 
+	// PostWithAttachments sends content plus file attachments to a destination.
+	// Implementations that do not support file upload return a clear error.
+	PostWithAttachments(dest Destination, username, content string, attachPaths []string) error
+
 	// ResolveDestination maps an address typed in originChannel (a bare message, or
 	// "@name"/"@@…") to a delivery target + canonical agent name. It is the
 	// transport's binding/addressing seam — discord resolves a Discord channel id

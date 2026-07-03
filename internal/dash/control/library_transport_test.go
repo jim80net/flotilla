@@ -38,6 +38,9 @@ func (f *fakeNotifyTransport) Post(dest transport.Destination, username, content
 	f.postDest, f.postUser, f.postContent = dest, username, content
 	return f.postErr
 }
+func (f *fakeNotifyTransport) PostWithAttachments(dest transport.Destination, username, content string, _ []string) error {
+	return f.Post(dest, username, content)
+}
 func (f *fakeNotifyTransport) ResolveDestination(string, string) (transport.Destination, string, bool) {
 	return nil, "", false
 }
