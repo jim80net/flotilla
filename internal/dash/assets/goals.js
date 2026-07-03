@@ -43,9 +43,13 @@
   // (layout.hub_center) at the visual center, org units on concentric rings, spoke edges
   // to children. "tree" = the tiered altitude columns (the toggle alternative). Default is
   // ORG per the operator's UX blessing (#324), superseding design §7.4's provisional
-  // tree-default "until UX proven" — the UX is now proven. A live toggle flips it; #317
-  // will make the default env-overridable per deployment.
-  var goalsLayout = "org";
+  // tree-default "until UX proven". A deployment may seed the default via the
+  // FLOTILLA_DASH_GOALS_LAYOUT env → the body's data-goals-layout attribute (#317); the
+  // live toggle still overrides it at runtime.
+  var goalsLayout = (function () {
+    var v = (document.body && document.body.getAttribute("data-goals-layout")) || "";
+    return v === "tree" ? "tree" : "org";
+  })();
 
   /* ── tier geometry (ported from the prototype: TIER_X=[40,470,900]) ─────── */
   // Columns are derived from depth so a tree deeper than the canonical 3 tiers
@@ -1151,6 +1155,11 @@
     if (!btns.length) return;
     layoutWired = true;
     for (var i = 0; i < btns.length; i++) {
+      // Sync the active button to the seeded default (the markup hardcodes org active,
+      // but an env-seeded tree default must show tree active) — #317.
+      var on = btns[i].getAttribute("data-layout") === goalsLayout;
+      btns[i].classList.toggle("active", on);
+      btns[i].setAttribute("aria-pressed", String(on));
       btns[i].addEventListener("click", function () { setLayout(this.getAttribute("data-layout")); });
     }
   }
