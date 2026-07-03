@@ -168,6 +168,68 @@ func TestCmdWorkspaceInitUnknownAgentErrors(t *testing.T) {
 	}
 }
 
+func TestCmdWorkspaceInitCodexScaffoldsAgentsAndRules(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)
+	repo := initTestGitRepo(t)
+	rosterPath := writeRosterFile(t, `{"agents":[{"name":"c","surface":"codex"}]}`)
+	if err := cmdWorkspaceInit(workspaceInitArgs("c", rosterPath, repo)); err != nil {
+		t.Fatal(err)
+	}
+	worktree := filepath.Join(filepath.Dir(repo), "c")
+	if _, err := os.Stat(filepath.Join(worktree, "AGENTS.md")); err != nil {
+		t.Errorf("codex surface should scaffold AGENTS.md in worktree: %v", err)
+	}
+	rules := filepath.Join(worktree, ".codex", "rules", "flotilla-desk.rules")
+	body, err := os.ReadFile(rules)
+	if err != nil {
+		t.Fatalf("codex desk rules not scaffolded: %v", err)
+	}
+	rulesText := string(body)
+	for _, must := range []string{
+		`pattern = ["gh", "pr", "merge"]`,
+		`pattern = ["git", "push", "origin", "main"]`,
+		`pattern = ["git", "push", "origin", "main:main"]`,
+		`pattern = ["git", "push", "origin", "--force"]`,
+		`pattern = ["git", "push", "--force"]`,
+		`must not merge PRs`,
+		`must not write to the default branch`,
+	} {
+		if !strings.Contains(rulesText, must) {
+			t.Errorf("codex rules missing %q in:\n%s", must, rulesText)
+		}
+	}
+	for _, mustNot := range []string{
+		`pattern = ["git", "merge"],`,
+		`pattern = ["git", "push"],`,
+		`must not push`,
+	} {
+		if strings.Contains(rulesText, mustNot) {
+			t.Errorf("codex rules must not contain wholesale forbid %q", mustNot)
+		}
+	}
+	launch, err := os.ReadFile(filepath.Join(root, "c", "launch.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(launch), "codex -m gpt-5.5-codex") {
+		t.Errorf("codex launch = %q, want gpt-5.5-codex recipe", launch)
+	}
+	if !strings.Contains(string(launch), "--ask-for-approval on-request") {
+		t.Errorf("codex launch missing on-request approval: %q", launch)
+	}
+}
+
+func TestScaffoldCodexDeskRulesRejectsExistingDirectory(t *testing.T) {
+	worktree := filepath.Join(t.TempDir(), "desk")
+	if err := os.MkdirAll(filepath.Join(worktree, ".codex", "rules", "flotilla-desk.rules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := scaffoldCodexDeskRules(worktree); err == nil {
+		t.Fatal("want error when flotilla-desk.rules path is a directory")
+	}
+}
+
 func TestCmdWorkspaceInitGrokScaffoldsAgentsMdInWorktree(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)

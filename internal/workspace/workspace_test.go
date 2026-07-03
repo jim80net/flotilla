@@ -50,6 +50,7 @@ func TestIdentityFileName(t *testing.T) {
 		{"opencode", "AGENTS.md", false},   // OpenCode loads AGENTS.md natively (instruction.ts)
 		{"grok", "AGENTS.md", false},
 		{"cursor", "AGENTS.md", false},
+		{"codex", "AGENTS.md", false},
 		{"made-up", "", true},
 	}
 	for _, c := range cases {

@@ -49,7 +49,7 @@ func Dir(agent string) (string, error) {
 // IdentityFileName returns the desk identity file name for a surface, by the agent's
 // native convention: claude-code (and the empty default) → CLAUDE.md; aider →
 // CONVENTIONS.md (its documented conventions file, loaded via `aider --read
-// CONVENTIONS.md`); opencode/grok/cursor → AGENTS.md. An unknown surface is an error
+// CONVENTIONS.md`); opencode/grok/cursor/codex → AGENTS.md. An unknown surface is an error
 // rather than a guessed name — the per-surface load mechanism is verified per driver
 // (aider --read is documented; OpenCode loads AGENTS.md natively, packages/opencode/
 // src/session/instruction.ts; Grok → AGENTS.md (ASSUMED for xAI's official grok CLI — the
@@ -61,7 +61,7 @@ func IdentityFileName(surface string) (string, error) {
 		return "CLAUDE.md", nil
 	case "aider":
 		return "CONVENTIONS.md", nil
-	case "opencode", "grok", "cursor":
+	case "opencode", "grok", "cursor", "codex":
 		return "AGENTS.md", nil
 	default:
 		return "", fmt.Errorf("unknown surface %q: no identity-file convention", surface)

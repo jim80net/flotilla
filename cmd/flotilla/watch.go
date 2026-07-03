@@ -1022,7 +1022,7 @@ func newDeskEscalate(cfg *roster.Config, primaryXO string, alert func(string)) f
 //
 // The closure resolves each desk's surface driver and reads the turn-final through the SHARED
 // surface.ResultReader seam (the same path `flotilla result` uses), so the CLI and the auto-mirror
-// never diverge. A surface without a ResultReader (none today besides claude/grok) is a clean SKIP.
+// never diverge. A surface without a ResultReader is a clean SKIP.
 // Everything is OBSERVE-ONLY + BEST-EFFORT inside deskMirror.run — a failure to resolve, read, chunk,
 // or post is logged on one line and dropped, NEVER propagated to the tick or delivery.
 // logMirrorCoverage emits a ONE-TIME startup line naming which non-XO desks WILL mirror (a webhook

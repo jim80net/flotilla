@@ -96,6 +96,9 @@ func TestRecycleSupport(t *testing.T) {
 	if _, ok := RecycleSupport(newGrok()); !ok {
 		t.Error("grok should implement RecycleBridge (#158 — cross-harness recycle-capable)")
 	}
+	if _, ok := RecycleSupport(newCodex()); !ok {
+		t.Error("codex should implement RecycleBridge (grok-tier execution desk)")
+	}
 	if _, ok := RecycleSupport(stubNoBridge{}); ok {
 		t.Error("a driver without the bridge must not type-assert as RecycleBridge")
 	}

@@ -202,6 +202,12 @@ func cmdWorkspaceInit(args []string) error {
 	reportDoctrineResults(results, identityPath)
 	noteNonClaudeLoadFastFollow(harnessSurface, identityPath)
 
+	if harnessSurface == "codex" {
+		if err := scaffoldCodexDeskRules(worktreeAbs); err != nil {
+			return err
+		}
+	}
+
 	fmt.Printf("workspace ready: %s\n", hostDir)
 	fmt.Printf("  worktree: %s (branch %q)\n", worktreeAbs, opts.branch)
 	fmt.Printf("  identity: %s\n", identityPath)
@@ -244,8 +250,157 @@ func shellQuote(s string) string {
 }
 
 // workspaceLaunchCommand returns the shell launch command for a harness surface.
-// Identity files live in the worktree (worktreeAbs); grok loads AGENTS.md from cwd.
+// Identity files live in the worktree (worktreeAbs); grok and codex load AGENTS.md from cwd.
 // Paths and agent names are POSIX single-quoted — Recipe.Launch is sh -c interpreted.
+// codexDeskRules is a best-effort no-self-merge backstop for execution desks. prefix_rule
+// matches argv prefixes only (Codex rules docs) — feature-branch push and merge-forward
+// (git merge origin/main) are intentionally not blocked. Doctrine + gate stack remain the
+// real control; this file is defense-in-depth, not a security boundary.
+const codexDeskRules = `# flotilla execution-desk rules — no-self-merge backstop (defense-in-depth)
+prefix_rule(
+    pattern = ["gh", "pr", "merge"],
+    decision = "forbidden",
+    justification = "Execution desks must not merge PRs; surface to the reviewer.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "main"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "master"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "main"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "master"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "HEAD:main"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", ":main"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "main:main"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "master:master"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "refs/heads/main"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "refs/heads/master"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "main:main"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "master:master"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "refs/heads/main"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "refs/heads/master"],
+    decision = "forbidden",
+    justification = "Execution desks must not write to the default branch; push feature branches and surface a PR.",
+)
+prefix_rule(
+    pattern = ["git", "push", "--force"],
+    decision = "forbidden",
+    justification = "Execution desks must not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "--force-with-lease"],
+    decision = "forbidden",
+    justification = "Execution desks must not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "-f"],
+    decision = "forbidden",
+    justification = "Execution desks must not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "--force"],
+    decision = "forbidden",
+    justification = "Execution desks must not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "--force-with-lease"],
+    decision = "forbidden",
+    justification = "Execution desks must not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "origin", "-f"],
+    decision = "forbidden",
+    justification = "Execution desks must not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "--force"],
+    decision = "forbidden",
+    justification = "Execution desks must not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "--force-with-lease"],
+    decision = "forbidden",
+    justification = "Execution desks must not force-push; use ordinary feature-branch pushes.",
+)
+prefix_rule(
+    pattern = ["git", "push", "upstream", "-f"],
+    decision = "forbidden",
+    justification = "Execution desks must not force-push; use ordinary feature-branch pushes.",
+)
+`
+
+func scaffoldCodexDeskRules(worktreeAbs string) error {
+	rulesDir := filepath.Join(worktreeAbs, ".codex", "rules")
+	if err := os.MkdirAll(rulesDir, 0o755); err != nil {
+		return fmt.Errorf("create codex rules dir: %w", err)
+	}
+	path := filepath.Join(rulesDir, "flotilla-desk.rules")
+	if info, statErr := os.Stat(path); statErr == nil {
+		if info.IsDir() {
+			return fmt.Errorf("codex rules %q exists but is a directory — remove it and re-run workspace init", path)
+		}
+		fmt.Printf("  kept    %s\n", path)
+		return nil
+	} else if !os.IsNotExist(statErr) {
+		return fmt.Errorf("stat codex rules %q: %w", path, statErr)
+	}
+	if err := os.WriteFile(path, []byte(codexDeskRules), 0o644); err != nil {
+		return fmt.Errorf("write codex rules %q: %w", path, err)
+	}
+	fmt.Printf("  created %s\n", path)
+	return nil
+}
+
 func workspaceLaunchCommand(worktreeAbs, agent, identity, surface string) (string, error) {
 	switch surface {
 	case "", "claude-code":
@@ -253,6 +408,8 @@ func workspaceLaunchCommand(worktreeAbs, agent, identity, surface string) (strin
 			shellQuote(filepath.Join(worktreeAbs, identity)), shellQuote(agent)), nil
 	case "grok":
 		return "grok --model composer-2.5-fast", nil
+	case "codex":
+		return "codex -m gpt-5.5-codex --sandbox workspace-write --ask-for-approval on-request", nil
 	default:
 		id, err := workspace.IdentityFileName(surface)
 		if err != nil {

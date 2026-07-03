@@ -9,17 +9,19 @@
     { "name": "data" },
     { "name": "aider-desk", "surface": "aider" },
     { "name": "oc-desk", "surface": "opencode" },
-    { "name": "grok-desk", "surface": "grok" }
+    { "name": "grok-desk", "surface": "grok" },
+    { "name": "codex-desk", "surface": "codex" }
   ],
   "_comment_channels": "Federation bindings (the real product topology). EACH agent OWNS its home channel and lists its PARENT in members[] — so awareness rolls UP the graph. The ONE exception is the fleet-command BROADCAST channel (role=fleet-command), whose members are the meta-XO's command targets, NOT synthesis parents; it is EXCLUDED from visibility-synthesis routing + the load-time acyclicity check. An untagged broadcast channel forms a synthesis cycle and Load fail-closed refuses it. A single-XO fleet can drop channels[] entirely and use the legacy channel_id form.",
   "channels": [
     { "channel_id": "YOUR_FLEET_COMMAND_CHANNEL_ID", "xo_agent": "xo", "role": "fleet-command",
-      "members": ["xo", "backend", "frontend", "data", "aider-desk", "oc-desk", "grok-desk"] },
+      "members": ["xo", "backend", "frontend", "data", "aider-desk", "oc-desk", "grok-desk", "codex-desk"] },
     { "channel_id": "YOUR_BACKEND_CHANNEL_ID", "xo_agent": "backend", "role": "project", "members": ["xo"] },
     { "channel_id": "YOUR_FRONTEND_CHANNEL_ID", "xo_agent": "frontend", "role": "project", "members": ["xo"] },
     { "channel_id": "YOUR_DATA_CHANNEL_ID", "xo_agent": "data", "members": ["backend"] },
     { "channel_id": "YOUR_AIDER_CHANNEL_ID", "xo_agent": "aider-desk", "members": ["backend"] },
     { "channel_id": "YOUR_OC_CHANNEL_ID", "xo_agent": "oc-desk", "members": ["frontend"] },
-    { "channel_id": "YOUR_GROK_CHANNEL_ID", "xo_agent": "grok-desk", "members": ["frontend"] }
+    { "channel_id": "YOUR_GROK_CHANNEL_ID", "xo_agent": "grok-desk", "members": ["frontend"] },
+    { "channel_id": "YOUR_CODEX_CHANNEL_ID", "xo_agent": "codex-desk", "members": ["frontend"] }
   ]
 }
