@@ -68,7 +68,7 @@ Scan `<accounts-root>/*/claude-config/.credentials.json`. For each:
 |---|---|
 | `subscription_id` | directory name |
 | `config_dir` | absolute path |
-| `cred_mtime` | file mtime |
+| `cred_file_mtime` | file mtime |
 | `expires_at` | `claudeAiOauth.expiresAt` (ms epoch) if parseable |
 | `subscription_type` | `claudeAiOauth.subscriptionType` if parseable |
 | `status` | `missing-creds` / `unreadable` / `expired` / `ok` / `expires-soon` (<24h) |

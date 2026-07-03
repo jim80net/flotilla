@@ -13,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/jim80net/flotilla/internal/accounts"
 )
 
 // Recipe is one desk's host-local launch recipe.
@@ -242,6 +244,11 @@ func validateSlot(where string, s HarnessSlot) error {
 	}
 	if strings.ContainsAny(s.Launch, "\t\n\r") {
 		return fmt.Errorf("%s launch %q contains a tab/newline", where, s.Launch)
+	}
+	if strings.TrimSpace(s.SubscriptionID) != "" {
+		if err := accounts.ValidateID(s.SubscriptionID); err != nil {
+			return fmt.Errorf("%s subscription_id: %w", where, err)
+		}
 	}
 	return nil
 }

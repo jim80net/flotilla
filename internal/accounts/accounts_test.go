@@ -22,6 +22,22 @@ func TestValidateID(t *testing.T) {
 	}
 }
 
+func TestConfigDirNormalizesWhitespace(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(rootEnv, root)
+	dir, err := ConfigDir(" anthropic-work ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(root, "anthropic-work", ClaudeConfigSubdir)
+	if dir != want {
+		t.Errorf("ConfigDir = %q, want %q (trimmed id in path)", dir, want)
+	}
+	if strings.Contains(dir, " ") {
+		t.Errorf("path contains whitespace: %q", dir)
+	}
+}
+
 func TestConfigDirAndInit(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv(rootEnv, root)

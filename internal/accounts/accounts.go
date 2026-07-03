@@ -34,22 +34,31 @@ func Root() (string, error) {
 	return filepath.Join(home, ".flotilla", "accounts"), nil
 }
 
+// NormalizeID trims, validates, and returns the canonical subscription id used for
+// paths and lookups. Callers must use the returned id — not the raw input — so
+// validation and on-disk layout always agree.
+func NormalizeID(id string) (string, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "", fmt.Errorf("subscription id is required")
+	}
+	if !idPattern.MatchString(id) {
+		return "", fmt.Errorf("subscription id %q: want lowercase slug matching %s", id, idPattern.String())
+	}
+	return id, nil
+}
+
 // ValidateID rejects path-unsafe or empty subscription ids. IDs are lowercase slugs —
 // generic mechanism; deployment-specific names live only in host-local recipes.
 func ValidateID(id string) error {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return fmt.Errorf("subscription id is required")
-	}
-	if !idPattern.MatchString(id) {
-		return fmt.Errorf("subscription id %q: want lowercase slug matching %s", id, idPattern.String())
-	}
-	return nil
+	_, err := NormalizeID(id)
+	return err
 }
 
 // ConfigDir returns the absolute CLAUDE_CONFIG_DIR path for a subscription id.
 func ConfigDir(id string) (string, error) {
-	if err := ValidateID(id); err != nil {
+	id, err := NormalizeID(id)
+	if err != nil {
 		return "", err
 	}
 	root, err := Root()
@@ -79,7 +88,8 @@ func IsClaudeSurface(surface string) bool {
 // WrapClaudeLaunch prefixes a claude-code launch with CLAUDE_CONFIG_DIR when subscriptionID
 // is set. Idempotent: skips when launch already exports CLAUDE_CONFIG_DIR.
 func WrapClaudeLaunch(surface, subscriptionID, launch string) (string, error) {
-	if !IsClaudeSurface(surface) || strings.TrimSpace(subscriptionID) == "" {
+	subscriptionID = strings.TrimSpace(subscriptionID)
+	if !IsClaudeSurface(surface) || subscriptionID == "" {
 		return launch, nil
 	}
 	if strings.Contains(launch, "CLAUDE_CONFIG_DIR=") {

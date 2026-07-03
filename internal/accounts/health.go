@@ -47,7 +47,8 @@ func CredentialsPath(configDir string) string {
 
 // ProbeHealth reads non-secret metadata from a subscription config dir.
 func ProbeHealth(id string, now time.Time) (Health, error) {
-	if err := ValidateID(id); err != nil {
+	id, err := NormalizeID(id)
+	if err != nil {
 		return Health{}, err
 	}
 	dir, err := ConfigDir(id)
