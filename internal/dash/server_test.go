@@ -408,6 +408,13 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("goals.js must retain the collaboration-container engine (missing %q) — #324 Inc 3", marker)
 		}
 	}
+	// #347: the respond modal renders a gated item's decision package (brief markdown) in
+	// full, with an honest empty state when the desk hasn't attached one.
+	for _, marker := range []string{"renderBrief", "gm-brief-full", "No decision brief yet"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must render the decision brief in the respond modal (missing %q) — #347", marker)
+		}
+	}
 	// mobile-QA #330: the node controls counter-scale the fit-to-view zoom (--ctl-scale)
 	// so they stay screen-constant (tappable) on phone, and the css reveals ⓘ on touch.
 	if !strings.Contains(js, "--ctl-scale") {

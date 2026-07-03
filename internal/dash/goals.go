@@ -75,6 +75,12 @@ type WorkItem struct {
 	Text  string       `json:"text,omitempty"`  // kind=inline: the checklist text
 	Done  bool         `json:"done,omitempty"`  // kind=inline: whether the coordinator marked it done
 	Label string       `json:"label,omitempty"` // optional display label overriding the derived one
+	// Brief is the DECISION PACKAGE for an operator-gated item (markdown): the
+	// recommendation, the value, the tradeoff, the ask — everything the operator needs to
+	// decide WITHOUT leaving the respond modal (#347). Optional; empty ⇒ the modal shows an
+	// honest "no brief yet — ask the desk" state. The desk attaches it when marking the item
+	// operator-blocked (that doctrine is the fleet layer's, not the dash's).
+	Brief string `json:"brief,omitempty"`
 }
 
 // Goal is one goal node (the on-disk shape).
@@ -92,6 +98,9 @@ type Goal struct {
 	Milestones        []string   `json:"milestones,omitempty"`
 	DependsOn         []string   `json:"depends_on,omitempty"` // cross-dependency ids (not re-parenting)
 	WorkItems         []WorkItem `json:"work_items,omitempty"`
+	// Brief is a NODE-level decision package (markdown) — for a decision gated on the node
+	// itself rather than a single work item (#347). Same modal render + empty-state rules.
+	Brief string `json:"brief,omitempty"`
 }
 
 // GoalsFile is the roster-adjacent goals file (`fleet-goals.json`, the compiled cache the dash
@@ -177,8 +186,9 @@ type RenderedWorkItem struct {
 	Label  string `json:"label"`
 	Ref    string `json:"ref,omitempty"`
 	Agent  string `json:"agent,omitempty"`
-	Class  string `json:"class"`  // done | in-flight | awaiting | blocked | active | unknown
-	Detail string `json:"detail"` // live state word (desk state, backlog marker, issue state, …)
+	Class  string `json:"class"`           // done | in-flight | awaiting | blocked | active | unknown
+	Detail string `json:"detail"`          // live state word (desk state, backlog marker, issue state, …)
+	Brief  string `json:"brief,omitempty"` // decision package (markdown) for a gated item — rendered in the respond modal (#347)
 }
 
 // GoalHarness is the read-time harness badge (from roster surface, not stored in YAML).
@@ -216,6 +226,8 @@ type RenderedGoal struct {
 	// materialized from the roster/topology (a first-class desk not written as a goal —
 	// #324 Inc 2). Lets the UI distinguish live-roster desks and group them (Inc 3).
 	Source string `json:"source,omitempty"`
+	// Brief is a NODE-level decision package (markdown) rendered in the respond modal (#347).
+	Brief string `json:"brief,omitempty"`
 }
 
 // GoalsCounts is the situation-bar summary — goal counts by scope and by visual state.
@@ -396,6 +408,7 @@ func BuildGoals(in GoalsInputs) GoalsDoc {
 			Depth:             depth,
 			Children:          append([]string(nil), children[id]...),
 			WorkItems:         items,
+			Brief:             g.Brief,
 		}
 		doc.Goals = append(doc.Goals, node)
 		countNode(&doc.Counts, node)
@@ -635,7 +648,7 @@ func deskDisplayStatus(state string) string {
 // backlog markdown; an issue item reads the (optional) resolved issue state; an inline item carries
 // its coordinator-set done flag.
 func resolveItem(wi WorkItem, in GoalsInputs) RenderedWorkItem {
-	r := RenderedWorkItem{Kind: string(wi.Kind), Label: itemLabel(wi)}
+	r := RenderedWorkItem{Kind: string(wi.Kind), Label: itemLabel(wi), Brief: wi.Brief}
 	switch wi.Kind {
 	case WorkDesk:
 		r.Agent = wi.Agent
