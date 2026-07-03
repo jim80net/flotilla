@@ -364,6 +364,34 @@ code {
   max-width: 100%;
   justify-self: stretch;
 }
+/* session-output turn (§2.4 thread-merge): the desk's OWN turn-final, interleaved
+   with the relay lines. Full-width and visually distinct from a → b relay lines. */
+.thread-mirror {
+  justify-self: stretch;
+  max-width: 100%;
+  border-left: 3px solid var(--spk, var(--violet));
+  background: color-mix(in srgb, var(--spk, var(--violet)) 6%, var(--abyss-2));
+}
+.thread-kind {
+  display: inline-block;
+  font-size: .6rem;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: 0 .3rem;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-xs, 3px);
+  color: var(--ink-3);
+  vertical-align: middle;
+}
+.thread-mirror-body {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: .8rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 14rem;
+  overflow-y: auto;
+}
 
 .conv-fleet-strip {
   padding: .75rem 1rem 1rem;

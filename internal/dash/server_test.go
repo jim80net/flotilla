@@ -366,6 +366,39 @@ func TestConversationsFormatting(t *testing.T) {
 	}
 }
 
+// TestThreadMerge locks the session-mirror ↔ CoS-ledger interleave (design §2.4,
+// UI Inc 2): renderThread merges the desk's own session-mirror turn-finals with
+// the relay ledger into one chronological timeline, with the cross-desk identity
+// guard, session-output styling, and the re-announce dedup. There is no JS test
+// runner in this repo, so — like the other asset-content locks — this asserts the
+// merge engine's presence in the served dash.js + css so a regression to
+// ledger-only (or a dropped guard/dedup) fails here.
+func TestThreadMerge(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{
+		"mirrorEntriesForSelected", // guarded read of cache.mirror.entries for the selected desk
+		"threadMirrorMsg",          // session-output turn renderer
+		"threadLedgerMsg",          // relay-line renderer
+		"thread-mirror",            // session-output styling hook
+		"lastThreadKey",            // re-announce / scroll-reset dedup
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js must retain the §2.4 thread-merge engine (missing %q)", marker)
+		}
+	}
+	// The interleave must SORT the two streams (ledger is newest-first, mirror
+	// newest-last) — a merge that forgot to sort would render out of order.
+	if !strings.Contains(js, "items.sort(") {
+		t.Error("renderThread must sort the merged ledger+mirror items chronologically")
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	if !strings.Contains(css, ".thread-mirror") {
+		t.Error("dash.css must style the session-output turn (.thread-mirror)")
+	}
+}
+
 // --- Host-allowlist (anti-DNS-rebinding) ---
 
 func TestHostAllowlist(t *testing.T) {
