@@ -3,28 +3,33 @@
   flotilla landing page : single static page, no framework, no backend.
   Vanilla JS is used ONLY for the live fleet-status widget (see app.js).
 
-  COPY MARKERS: every spot whose final wording is NOT yet locked carries a
-  "COPY:" HTML comment. A later step slots the operator's final one-liner / hook
-  into those spots. Find them all with: grep -n "COPY:" index.html
-  The draft one-liner used below is a PLACEHOLDER (operator may tweak it).
-
-  ASSET MARKERS: an "ASSET:" HTML comment marks where a produced asset (the demo
-  gif / asciinema cast) drops in. Find them with: grep -n "ASSET:" index.html
+  READER MODEL (issue #323): the reader is a busy technical HUMAN who already
+  pays for one or more coding-agent subscriptions (Claude Code / Codex / Grok /
+  Aider), has felt the pain of juggling multiple sessions that forget everything
+  and need constant supervision, and is deciding in under a minute whether this
+  solves THEIR life. Every section opens from that person's current pain, shows
+  them THEMSELVES in the scene (second person), translates jargon on first use,
+  and ends knowing the one next action (tell the agent they already run to set
+  flotilla up — the literal prompt is in the last section).
 
   GENERIC ONLY: this page describes the open-source product. No private
-  deployment details appear anywhere : example agents are generic (xo, backend,
-  frontend, data), mirroring the public quickstart, NOT any host roster.
+  deployment details appear anywhere : example desks are generic (backend,
+  research, docs, infra), mirroring the public quickstart, NOT any host roster.
+
+  THEME IS FIXED (docs/design/README.md): this is copy + narrative-structure
+  work, not a re-theme. The two components added for the narrative (.scene and
+  .paste) are built from the SAME design tokens as everything else.
 -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>flotilla — a drop-in chief of staff for your AI coding harnesses</title>
+  <title>flotilla — a chief of staff for the AI coding agents you already run</title>
 
-  <meta name="description" content="flotilla is a drop-in chief of staff for the AI coding harnesses you've already built — turn separate Claude Code / Aider / OpenCode / Grok sessions into one centrally coordinated fleet, with a durable auditable record of everything." />
+  <meta name="description" content="flotilla is a drop-in chief of staff for the AI coding agents you already run — Claude Code, Codex, Grok, Aider. One agent to talk to, your domains running in parallel, memory that carries across sessions, and a record of everything on your phone. No framework to rewrite into." />
 
   <meta property="og:title" content="flotilla" />
-  <meta property="og:description" content="A drop-in chief of staff for the AI coding harnesses you've already built." />
+  <meta property="og:description" content="A drop-in chief of staff for the AI coding agents you already run." />
   <meta property="og:type" content="website" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -57,12 +62,10 @@
       <span class="brand-name">flotilla</span>
     </a>
     <nav class="nav-links" aria-label="page sections">
-      <a href="#what">what</a>
-      <a href="#positioning">why</a>
-      <a href="#org">organization</a>
+      <a href="#feel">the problem</a>
+      <a href="#day">a day with it</a>
+      <a href="#gives">what you get</a>
       <a href="#how">how</a>
-      <a href="#arch">arch</a>
-      <a href="#status">status</a>
       <a href="#start">start</a>
       <a class="nav-cta" href="https://github.com/jim80net/flotilla" target="_blank" rel="noopener">
         GitHub ↗
@@ -80,13 +83,15 @@
             open source · v0, built in the open
           </div>
 
-          <!-- HERO ONE-LINER — LOCKED to the operator's final wording (sentence 1). -->
+          <!-- HERO ONE-LINER — the operator's final wording (sentence 1). -->
           <h1 class="hero-headline">
             flotilla is a <span class="hl">drop-in chief of staff</span><br />
-            for the AI coding harnesses you've already built.
+            for the AI coding agents you already run.
           </h1>
 
-          <!-- HERO SUBHEAD — LOCKED to the operator's final wording (sentences 2–4, verbatim). -->
+          <!-- HERO SUBHEAD — LOCKED to the operator's final wording (verbatim). The
+               reader-modeling for #323 lives in the body sections + the demo caption;
+               the operator-authored hero copy is preserved. -->
           <p class="hero-sub">
             Stop shuffling 10 terminal windows. flotilla turns separate Claude Code /
             Aider / OpenCode / Grok sessions into one centrally coordinated fleet. A
@@ -94,22 +99,14 @@
             strategy, not implementation.
           </p>
 
-          <!-- install one-liner: module path verified against go.mod
-               (module github.com/jim80net/flotilla; entrypoint cmd/flotilla) -->
-          <div class="install" role="group" aria-label="install command">
-            <code id="install-cmd">go install github.com/jim80net/flotilla/cmd/flotilla@latest</code>
-            <button class="copy-btn" data-copy="#install-cmd" aria-label="copy install command">
-              <span class="copy-label">copy</span>
-            </button>
-          </div>
-
           <div class="hero-cta">
-            <a class="btn btn-primary" href="https://github.com/jim80net/flotilla" target="_blank" rel="noopener">
+            <a class="btn btn-primary" href="#start">
+              Set it up in minutes
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 12.5 2.5 7l1.4-1.4L7 8.7V1h2v7.7l3.1-3.1L13.5 7 8 12.5Z"/></svg>
+            </a>
+            <a class="btn btn-ghost" href="https://github.com/jim80net/flotilla" target="_blank" rel="noopener">
               Star on GitHub
               <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg>
-            </a>
-            <a class="btn btn-ghost" href="#start">
-              30-second start &darr;
             </a>
           </div>
         </div>
@@ -117,17 +114,17 @@
         <!-- HERO MOCK-UP: a static picture of `flotilla dash`, Goals view, in the
              command-chart (org) layout — the operator-priority hero. Pure HTML/CSS,
              no live server, no framework. MOCK DATA ONLY: a generic example fleet
-             (xo hub + backend/frontend/data/infra desks) mirroring the public
+             (a coordinator + backend/research/docs/infra desks) mirroring the public
              quickstart roles — never a real deployment roster. -->
-        <figure class="hero-dash" aria-label="flotilla dash — Goals view in the command-chart (org) layout: an xo hub coordinating backend, frontend, data, and infra desks">
+        <figure class="hero-dash" aria-label="flotilla's fleet view: one coordinator in the center routing to backend, research, docs, and infra desks, each colored by whether it's working, idle, or waiting on you">
           <div class="dash-chrome">
-            <span class="dash-brand"><span class="dash-brand-mark" aria-hidden="true"></span>flotilla <span class="dash-brand-sub">goals</span></span>
+            <span class="dash-brand"><span class="dash-brand-mark" aria-hidden="true"></span>flotilla <span class="dash-brand-sub">your fleet</span></span>
             <div class="dash-tabs" aria-hidden="true">
-              <span class="dash-tab">Conversations</span>
-              <span class="dash-tab active">Goals</span>
-              <span class="dash-tab">Issues</span>
+              <span class="dash-tab">Chat</span>
+              <span class="dash-tab active">Fleet</span>
+              <span class="dash-tab">Work</span>
             </div>
-            <div class="dash-toggle" aria-hidden="true"><span>tree</span><span class="on">org</span></div>
+            <div class="dash-toggle" aria-hidden="true"><span>list</span><span class="on">map</span></div>
           </div>
 
           <div class="dash-canvas">
@@ -139,10 +136,10 @@
             </svg>
 
             <div class="dnode hub" style="left:50%;top:50%">
-              <div class="dnode-eyebrow">Flotilla · led by xo</div>
-              <div class="dnode-title">Fleet coordination</div>
-              <div class="dnode-list"><span class="dnl-lab">priorities</span><ul><li>Ship the goals map</li><li>Close review gates</li></ul></div>
-              <div class="dnode-foot"><span class="dpill cyan">in&nbsp;flight</span><span class="dharness">claude-code</span></div>
+              <div class="dnode-eyebrow">Your chief of staff</div>
+              <div class="dnode-title">The coordinator</div>
+              <div class="dnode-list"><span class="dnl-lab">right now</span><ul><li>Shipped the migration</li><li>One call needs you</li></ul></div>
+              <div class="dnode-foot"><span class="dpill cyan">on&nbsp;it</span><span class="dharness">claude-code</span></div>
             </div>
 
             <div class="dnode" style="left:26%;top:25%">
@@ -151,14 +148,14 @@
               <div class="dnode-foot"><span class="dpill ok">idle</span><span class="dharness">grok</span></div>
             </div>
             <div class="dnode" style="left:74%;top:25%">
-              <div class="dnode-eyebrow">Desk · frontend</div>
-              <div class="dnode-title">Frontend</div>
-              <div class="dnode-foot"><span class="dpill cyan">in&nbsp;flight</span><span class="dharness">codex</span></div>
+              <div class="dnode-eyebrow">Desk · research</div>
+              <div class="dnode-title">Research</div>
+              <div class="dnode-foot"><span class="dpill cyan">working</span><span class="dharness">codex</span></div>
             </div>
             <div class="dnode" style="left:26%;top:77%">
-              <div class="dnode-eyebrow">Desk · data</div>
-              <div class="dnode-title">Data</div>
-              <div class="dnode-foot"><span class="dpill amber">awaiting&nbsp;you</span><span class="dharness">aider</span></div>
+              <div class="dnode-eyebrow">Desk · docs</div>
+              <div class="dnode-title">Docs</div>
+              <div class="dnode-foot"><span class="dpill amber">needs&nbsp;you</span><span class="dharness">aider</span></div>
             </div>
             <div class="dnode" style="left:74%;top:77%">
               <div class="dnode-eyebrow">Desk · infra</div>
@@ -167,169 +164,234 @@
             </div>
           </div>
 
-          <figcaption><strong>Mock-up — illustrative.</strong> &middot; the dash Goals map, command-chart layout: the hub coordinates every desk, colored by live status</figcaption>
+          <figcaption><strong>Mock-up — illustrative.</strong> &middot; your whole fleet on one screen: the coordinator in the center, your desks around it, and the one that needs you flagged in amber — the same glance from your laptop or your phone</figcaption>
         </figure>
       </div>
 
       <!-- harness marquee: the surfaces flotilla drives today -->
-      <div class="harness-strip" aria-label="supported harnesses">
-        <span class="hs-label">drives</span>
+      <div class="harness-strip" aria-label="coding agents flotilla works with">
+        <span class="hs-label">works with</span>
         <span class="hs-chip">Claude Code</span>
         <span class="hs-chip">Aider</span>
         <span class="hs-chip">OpenCode</span>
         <span class="hs-chip">Grok</span>
         <span class="hs-chip">Codex</span>
-        <span class="hs-chip soon">Cursor <em>· roadmap</em></span>
+        <span class="hs-chip soon">Cursor <em>· on the roadmap</em></span>
       </div>
     </section>
 
-    <!-- ─────────────────────── WHAT IT DOES ─────────────────────── -->
-    <section class="band" id="what">
+    <!-- ─────────────────────── THE PROBLEM ─────────────────────── -->
+    <section class="band" id="feel">
       <div class="band-head">
-        <span class="kicker">01 — what it does</span>
-        <h2>Three things that turn terminals into a fleet you run from chat.</h2>
+        <span class="kicker">01 — the problem you already have</span>
+        <h2>One coding agent was a superpower. Five is a second job.</h2>
+        <p class="band-lede">
+          You pay for Claude Code. Maybe Codex and Grok too. Each one, on its own,
+          is brilliant. Running several at once is where it falls apart — and if
+          that's your day, you already know exactly how.
+        </p>
       </div>
       <div class="cards three">
         <article class="card">
           <div class="card-num">01</div>
-          <h3>Mixed harnesses, one roster</h3>
+          <h3>You're the switchboard</h3>
           <p>
-            Claude Code, Aider, OpenCode, Grok, and Codex desks behind one interface.
-            Each stays an ordinary session you control; flotilla coordinates work
-            across them without replacing the tools you already trust.
+            A window open for every session, and you're the wire between them
+            &mdash; copy from this one, paste into that one, remember which is
+            waiting on you. The coordination is a job, and it's yours.
           </p>
         </article>
         <article class="card">
           <div class="card-num">02</div>
-          <h3>Chat is the cockpit</h3>
+          <h3>They forget everything</h3>
           <p>
-            Message the XO like a colleague &mdash; <em>"what shipped overnight?"</em>,
-            <em>"benchmark the cache and report back."</em> It routes to the right desk,
-            collects replies, and answers in the same channel, from your phone.
+            Every new session starts from zero. The conventions you set, the
+            decisions you made yesterday, what worked last time &mdash; gone.
+            You re-explain your own project, again, to the same tool.
           </p>
         </article>
         <article class="card">
           <div class="card-num">03</div>
-          <h3>Every turn on the record</h3>
+          <h3>Nothing moves unless you watch</h3>
           <p>
-            Instructions and replies mirror to a dedicated channel under each agent's
-            identity. Confirmed delivery means the transcript never lies about what
-            landed &mdash; governance you can read back from anywhere.
+            Look away and progress stops. So you babysit &mdash; not because the
+            work is hard, but because there's no one minding the fleet while
+            you step out for lunch.
           </p>
         </article>
       </div>
     </section>
 
-    <!-- ─────────────────── POSITIONING / ALTITUDE ─────────────────── -->
-    <section class="band" id="positioning">
+    <!-- ─────────────────────── A DAY WITH FLOTILLA ─────────────────────── -->
+    <section class="band" id="day">
       <div class="band-head">
-        <span class="kicker">02 — why flotilla</span>
-        <h2>Frameworks build agents. flotilla runs your fleet.</h2>
+        <span class="kicker">02 — a day with flotilla</span>
+        <h2>Picture the same day, run from one chat channel.</h2>
         <p class="band-lede">
-          Evaluators often bucket flotilla with agent orchestration platforms &mdash;
-          CrewAI, LangGraph, AutoGen. They solve a different job at a different altitude.
+          Nothing here needs a terminal open. You talk to one agent &mdash; your
+          chief of staff &mdash; and it runs the rest.
         </p>
       </div>
 
-      <blockquote class="pull-quote">
-        <p>
-          Agent frameworks help you <em>build</em> multi-agent software. flotilla helps you
-          <em>run</em> a fleet of coding agents you already trust &mdash; from a chat channel,
-          with confirmed delivery and a durable record of who told whom what.
-          <span class="pull-aside">Different job, different layer.</span>
-        </p>
-      </blockquote>
+      <div class="scene">
+        <div class="moment">
+          <div class="moment-when">8:12 · coffee</div>
+          <div>
+            <h3>You skim one brief, not ten sessions</h3>
+            <p>
+              You open the chat channel on your phone. Your chief of staff has a
+              two-line summary waiting: three things shipped overnight, one needs
+              your call. <span class="you">You reply &ldquo;go with option B&rdquo;</span>
+              and put the phone down. No terminal was opened.
+            </p>
+          </div>
+        </div>
+        <div class="moment">
+          <div class="moment-when">11:40 · heads-down</div>
+          <div>
+            <h3>Your desks work while you do your own thing</h3>
+            <p>
+              You're deep in your own editor. Meanwhile your backend desk is
+              running the migration you queued and your docs desk is rewriting a
+              guide. <span class="you">You're not watching either</span> &mdash;
+              and they don't need you to be.
+            </p>
+          </div>
+        </div>
+        <div class="moment">
+          <div class="moment-when">1:15 · lunch</div>
+          <div>
+            <h3>A result finds you, and you answer in a line</h3>
+            <p>
+              Your research desk finishes a benchmark; the coordinator posts the
+              result to your phone. <span class="you">You read it in the lunch
+              line and type &ldquo;ship it.&rdquo;</span> It routes to the right
+              desk and you get a confirmation that the message actually landed &mdash;
+              not a hope that it did.
+            </p>
+          </div>
+        </div>
+        <div class="moment">
+          <div class="moment-when">4:30 · new work lands</div>
+          <div>
+            <h3>A fresh desk that already knows your project</h3>
+            <p>
+              A new project comes in. <span class="you">You spin up a desk for it
+              in minutes</span> over a coding agent you already run &mdash; and it
+              starts already knowing your conventions and recent decisions, from a
+              memory that carried over, instead of from a blank slate.
+            </p>
+          </div>
+        </div>
+        <div class="moment">
+          <div class="moment-when">6:00 · signing off</div>
+          <div>
+            <h3>You close the laptop; the fleet keeps its own clock</h3>
+            <p>
+              <span class="you">You log off.</span> The coordinator keeps
+              advancing the work you already approved and stops to ask only when
+              something is genuinely yours to decide. Tomorrow's brief is already
+              being written.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
 
-      <div class="altitude-grid">
-        <article class="altitude-card">
-          <div class="altitude-tag">application layer</div>
-          <h3>Agent platforms</h3>
-          <p class="altitude-examples">CrewAI &middot; LangGraph &middot; AutoGen</p>
+    <!-- ─────────────────────── WHAT YOU GET ─────────────────────── -->
+    <section class="band" id="gives">
+      <div class="band-head">
+        <span class="kicker">03 — what you get</span>
+        <h2>Three ideas do the whole job. Here they are in plain words.</h2>
+      </div>
+      <div class="cards three">
+        <article class="card">
+          <div class="card-num">01</div>
+          <h3>Flotillas — your domains, run for you</h3>
           <p>
-            In-process SDKs for composing autonomous multi-agent <em>applications</em>.
-            You wire roles, tools, and handoffs in code; the operator is usually the developer
-            shipping the app.
+            Group your work into domains &mdash; backend, research, docs, infra
+            &mdash; and each gets its own small crew of agents that runs mostly on
+            its own. Start one when a project lands, retire it when it's done, so
+            the shape of your fleet follows the work instead of a flat pile of
+            to-dos. <em>(A flotilla is one such coordinated domain — the product is
+            named for them.)</em>
           </p>
         </article>
-        <article class="altitude-card">
-          <div class="altitude-tag">runtime layer</div>
-          <h3>Terminal multiplexers</h3>
-          <p class="altitude-examples">herdr &middot; tmux &middot; Zellij</p>
+        <article class="card">
+          <div class="card-num">02</div>
+          <h3>Memex — it remembers, and it learns</h3>
           <p>
-            Agent-aware terminals that make panes visible and persistent. They watch the
-            herd; they do not broker delegation or mirror an audit trail to your phone.
+            Each desk keeps its own memory &mdash; your conventions, the decisions
+            you've made, what worked last time &mdash; so it doesn't reset to zero
+            every session. That memory is
+            <a href="https://github.com/jim80net/memex-core" target="_blank" rel="noopener">memex</a>,
+            a companion project flotilla pairs with. Learning across sessions is
+            the point.
           </p>
         </article>
-        <article class="altitude-card highlight">
-          <div class="altitude-tag">operations layer</div>
-          <h3>flotilla</h3>
-          <p class="altitude-examples">chief of staff &middot; hub-and-spoke &middot; chat-first</p>
+        <article class="card">
+          <div class="card-num">03</div>
+          <h3>A chief of staff — one point of contact</h3>
           <p>
-            Drop-in coordination over harnesses you already run. One XO routes work to desks
-            in live sessions, confirms delivery, and mirrors every instruction and reply to a
-            channel you read from anywhere.
+            You don't manage five agents. You talk to one &mdash; the coordinator.
+            It takes your intent, routes it to the right desk, chases the replies,
+            and reports back in plain language. One conversation; the whole fleet
+            behind it.
           </p>
         </article>
+      </div>
+    </section>
+
+    <!-- ─────────────────────── KEEP YOUR TOOLS ─────────────────────── -->
+    <section class="band" id="yours">
+      <div class="band-head">
+        <span class="kicker">04 — the part that makes it easy</span>
+        <h2>You keep the tools you already run. Nothing to rebuild.</h2>
+        <p class="band-lede">
+          flotilla doesn't replace Claude Code, Codex, Grok, or Aider &mdash; it
+          sits over them. There's no new agent framework to learn and no migrating
+          your work into someone else's runtime. You point the coding agent you
+          already run at one file, and you're coordinated in minutes.
+        </p>
       </div>
 
       <div class="diff-strip">
         <div class="diff-col">
-          <h4>What platforms optimize for</h4>
+          <h4>Starting over on a framework</h4>
           <ul>
-            <li>Autonomous throughput inside your codebase</li>
-            <li>Tool graphs and checkpointed workflows</li>
-            <li>Hosted observability for agent apps</li>
+            <li>Rebuild your workflow inside a new agent runtime</li>
+            <li>Re-teach it the tools you already trust</li>
+            <li>Learn a new way of working before anything ships</li>
           </ul>
         </div>
         <div class="diff-col flotilla-col">
-          <h4>What flotilla optimizes for</h4>
+          <h4>Dropping flotilla in</h4>
           <ul>
-            <li>Executive span of control over a coding fleet</li>
-            <li>Confirmed delivery to live harness sessions</li>
-            <li>Phone-readable audit trail as the primary interface</li>
+            <li>Keep the exact coding agents you run today</li>
+            <li>Point one of them at a setup file &mdash; it installs the rest</li>
+            <li>Drive the fleet from chat within minutes</li>
           </ul>
         </div>
       </div>
 
       <p class="positioning-foot">
-        Full analysis:
+        Curious how flotilla compares to agent frameworks and terminal tools?
         <a href="https://github.com/jim80net/flotilla/blob/main/docs/competitive/agent-platforms-vs-flotilla.md" target="_blank" rel="noopener">agent platforms vs flotilla</a>
         &middot;
         <a href="https://github.com/jim80net/flotilla/blob/main/docs/competitive/herdr-vs-flotilla.md" target="_blank" rel="noopener">herdr vs flotilla</a>
       </p>
     </section>
 
-    <!-- ─────────────────── FLUID ORGANIZATION ─────────────────── -->
-    <section class="band" id="org">
-      <div class="band-head">
-        <span class="kicker">03 — organization that moves as fast as you do</span>
-        <!-- COPY: fluid-org thesis — operator 2026-07-03; tighten for marketing -->
-        <h2>Spin workstreams and desks up or down — the goals graph follows.</h2>
-        <p>
-          Human org charts lag reality. Your fleet's <strong>flotillas</strong> (coordinated
-          workstreams in the goals map) and <strong>desks</strong> (focused execution agents)
-          are cheap to create and retire — no reorg theater. The dash Goals map mirrors that
-          fluid federation: command structure and objectives stay aligned so you always see
-          <em>who owns what</em>, not a flat issue list divorced from responsibility.
-        </p>
-        <p>
-          Each container develops its own runbooks and context; that scoped memory is what
-          makes agent fleets durable across rotations — and it is why flotilla pairs with
-          tools like memex for capture at the desk and flotilla level.
-        </p>
-      </div>
-    </section>
-
     <!-- ─────────────────────── HOW IT WORKS ─────────────────────── -->
     <section class="band" id="how">
       <div class="band-head">
-        <span class="kicker">04 — how it works</span>
-        <h2>Hub and spoke over live sessions &mdash; tmux delivery, chat mirror.</h2>
+        <span class="kicker">05 — how it actually works</span>
+        <h2>One hub you talk to. Your desks around it. Everything on the record.</h2>
       </div>
 
       <div class="how-grid">
         <!-- inline SVG hub-and-spoke diagram -->
-        <figure class="diagram" aria-label="hub-and-spoke topology: an XO hub routes to domain agents; every message mirrors to a chat channel">
+        <figure class="diagram" aria-label="one coordinator hub routes your messages to backend, research, docs, and infra desks; every message is also copied to a chat channel you can read back">
           <svg viewBox="0 0 460 360" role="img">
             <defs>
               <radialGradient id="hubglow" cx="50%" cy="50%" r="50%">
@@ -356,7 +418,7 @@
             <!-- hub glow + node -->
             <circle cx="230" cy="180" r="64" fill="url(#hubglow)" />
             <circle class="hub" cx="230" cy="180" r="30" />
-            <text class="node-label hub-label" x="230" y="184" text-anchor="middle">XO</text>
+            <text class="node-label hub-label" x="230" y="184" text-anchor="middle">you → hub</text>
 
             <!-- spoke nodes -->
             <g class="nodes">
@@ -366,11 +428,11 @@
               </g>
               <g transform="translate(368,92)">
                 <circle class="node" r="22" />
-                <text class="node-label" y="4" text-anchor="middle">frontend</text>
+                <text class="node-label" y="4" text-anchor="middle">research</text>
               </g>
               <g transform="translate(92,268)">
                 <circle class="node" r="22" />
-                <text class="node-label" y="4" text-anchor="middle">data</text>
+                <text class="node-label" y="4" text-anchor="middle">docs</text>
               </g>
               <g transform="translate(368,268)">
                 <circle class="node" r="22" />
@@ -381,181 +443,132 @@
             <!-- the chat bus -->
             <g transform="translate(230,338)">
               <rect class="bus" x="-92" y="-20" width="184" height="40" rx="8" />
-              <text class="bus-label" y="5" text-anchor="middle">chat channel &middot; audit trail</text>
+              <text class="bus-label" y="5" text-anchor="middle">your chat channel &middot; full record</text>
             </g>
           </svg>
-          <figcaption>You talk to the hub. The hub routes to the domain agents and brokers their replies. Every message mirrors to the channel.</figcaption>
+          <figcaption>You talk to the hub. It routes your intent to the right desk and brings the replies back. Every message is also copied to your chat channel, so nothing is lost.</figcaption>
         </figure>
 
         <ol class="how-steps">
           <li>
-            <span class="step-tag">delivery &amp; wake</span>
-            <h3>Inject into a tmux pane</h3>
+            <span class="step-tag">you talk to one agent</span>
+            <h3>Chat is the whole interface</h3>
             <p>
-              Each agent lives in a <code>tmux</code> pane. flotilla delivers an
-              instruction by typing it into the target pane &mdash; the same thing you do
-              by hand. For a turn-based agent, the injection <em>is</em> the wake; there's
-              nothing to poll.
+              You message the coordinator like a colleague &mdash;
+              <em>&ldquo;what shipped overnight?&rdquo;</em>,
+              <em>&ldquo;benchmark the cache and report back.&rdquo;</em> From your
+              laptop or your phone. That's the entire cockpit.
             </p>
           </li>
           <li>
-            <span class="step-tag">topology</span>
-            <h3>One hub routes the rest</h3>
+            <span class="step-tag">it reaches your real sessions</span>
+            <h3>Delivered, and confirmed</h3>
             <p>
-              The XO is the single router &mdash; span-of-control over backend, frontend,
-              data, and infra desks. You get one coherent picture and one accountable
-              agent to message, not a mesh of peer agents.
+              The coordinator hands work to a desk running in a real session, and
+              tells you the message actually landed. If a desk has crashed, it says
+              so &mdash; it never quietly drops what you asked for.
             </p>
           </li>
           <li>
-            <span class="step-tag">audit &amp; read-back</span>
-            <h3>Mirror to a chat channel</h3>
+            <span class="step-tag">nothing gets lost</span>
+            <h3>Every message on the record</h3>
             <p>
-              Every instruction and reply is posted to a dedicated channel, each agent
-              under its own webhook identity &mdash; a durable, timestamped transcript you
-              can read back from any device.
+              Each instruction and reply is copied to your chat channel under the
+              sender's name &mdash; a timestamped history you can read back from any
+              device, so the log never disagrees with what happened.
             </p>
           </li>
           <li>
-            <span class="step-tag">bounded autonomy</span>
-            <h3>Per-agent permission posture</h3>
+            <span class="step-tag">it runs safely on its own</span>
+            <h3>Autonomy with a leash</h3>
             <p>
-              Each agent runs with its own allow-list, acting unattended on safe
-              operations while still stopping for confirmation on risky ones.
-              Coordination never implies unbounded authority.
+              Each desk acts unattended on safe work and stops for your OK on the
+              risky kind. Progress without babysitting; a hand on the brake when it
+              matters.
             </p>
           </li>
         </ol>
       </div>
-    </section>
 
-    <!-- ───────────────────── PLUGGABLE ARCHITECTURE ───────────────────── -->
-    <section class="band" id="arch">
-      <div class="band-head">
-        <span class="kicker">05 — architecture</span>
-        <h2>Heterogeneous by design. One interface, many harnesses.</h2>
-      </div>
-
-      <div class="arch-layout">
-        <div class="arch-lead">
-          <p>
-            Each agent declares a <code>surface</code> that selects a <em>driver</em> &mdash;
-            the per-harness policy for how flotilla submits a turn, reads the pane's
-            rendered state (working / idle / awaiting-approval / errored / crashed), and
-            rotates context. A single fleet can mix harnesses behind one interface.
+      <!-- HONESTY: what's shipped vs still on the roadmap, in the human's words.
+           Keep truthful to the repo — Codex driver ships; Codex coordinator seat
+           is a supervised trial; the goals-map dashboard view + Cursor are roadmap. -->
+      <div class="arch-cols">
+        <div class="arch-col shipped">
+          <div class="arch-tag"><span class="tick">✓</span> real today</div>
+          <ul>
+            <li><b>Mixed agents, one fleet</b> &mdash; Claude Code, Aider, OpenCode, Grok, and Codex desks together</li>
+            <li><b>One coordinator</b> &mdash; routes work, confirms delivery, reports back</li>
+            <li><b>The full record</b> &mdash; every message mirrored to your chat channel</li>
+            <li><b>A fleet that keeps its own clock</b> &mdash; advances approved work, flags a stuck desk</li>
+            <li><b>Drive it from your phone</b> &mdash; message the fleet from the channel</li>
+            <li><b>A local fleet board</b> &mdash; <code>flotilla dash</code>, your desks and work at a glance</li>
+          </ul>
+        </div>
+        <div class="arch-col roadmap">
+          <div class="arch-tag"><span class="soon-tick">◌</span> in trial · on the roadmap</div>
+          <ul>
+            <li><b>A Codex-run coordinator</b> &mdash; code-complete, in supervised trial</li>
+            <li><b>The goals map</b> &mdash; the domain view pictured up top, as a first-class dashboard</li>
+            <li><b>A Cursor desk</b> &mdash; the next coding agent we're adding</li>
+            <li><b>Richer reporting</b> &mdash; more than the chat mirror</li>
+          </ul>
+          <p class="roadmap-note">
+            v0, built in the open &mdash; so you can see exactly what's real and
+            what's next before you rely on it.
           </p>
         </div>
-
-        <div class="arch-cols">
-          <div class="arch-col shipped">
-            <div class="arch-tag"><span class="tick">✓</span> shipped today</div>
-            <ul>
-              <li><b>Surface drivers</b> &mdash; Claude Code, Aider, OpenCode, Grok, Codex</li>
-              <li><b>Inter-harness fleets</b> &mdash; one XO drives a mixed fleet</li>
-              <li><b>Federation</b> &mdash; Chief of Staff over project-XOs, channel-bound routing</li>
-              <li><b>The self-continuing clock</b> &mdash; heartbeat + liveness watchdog</li>
-              <li><b>Change-detector</b> &mdash; wake the XO only on a material change</li>
-              <li><b>Inbound relay</b> &mdash; message the fleet from the channel</li>
-              <li><b><code>flotilla dash</code></b> &mdash; local web fleet board + issue tracker</li>
-            </ul>
-          </div>
-          <!-- HONESTY: modes + interfaces are DESIGNED pluggable but NOT yet shipped.
-               README/roadmap flags them as targets; do not imply they exist. -->
-          <div class="arch-col roadmap">
-            <div class="arch-tag"><span class="soon-tick">◌</span> designed pluggable · roadmap</div>
-            <ul>
-              <li><b>Goals map</b> &mdash; fleet goals as a first-class dashboard view</li>
-              <li><b>Codex coordinator seat</b> &mdash; code-complete; supervised trial pending</li>
-              <li><b>Modes</b> &mdash; first-class behavior modes you drive the fleet by</li>
-              <li><b>Interfaces</b> &mdash; pluggable surfaces; the chat channel is just one</li>
-              <li><b>Reporting</b> &mdash; a richer reporting model beyond the mirror</li>
-              <li><b>Cursor driver</b> &mdash; next harness on the roadmap</li>
-            </ul>
-            <p class="roadmap-note">
-              These follow the same pluggability model the harness drivers already prove.
-              They're the target, not yet the implementation &mdash; built in the open.
-            </p>
-          </div>
-        </div>
       </div>
     </section>
 
-    <!-- ───────────────────── LIVE FLEET STATUS ───────────────────── -->
-    <section class="band" id="status">
-      <div class="band-head">
-        <span class="kicker">06 — fleet status</span>
-        <h2>Your desks at a glance &mdash; even away from the terminal.</h2>
-      </div>
-
-      <!-- The widget fetches ./status.json and renders the table. status.json is
-           REAL output of `flotilla status --json` run against a generic DEMO fleet
-           (regenerate via tools/landing-status/gen.sh) — not hand-authored, and
-           never a real deployment. The "sample · demo fleet" badge keeps that honest. -->
-      <div class="fleet-panel">
-        <div class="fleet-bar">
-          <span class="fleet-bar-title">
-            <span class="live-pulse" aria-hidden="true"></span>
-            flotilla&nbsp;status&nbsp;<span class="muted">--json</span>
-            <span class="sample-badge">sample · demo fleet</span>
-          </span>
-          <span class="fleet-bar-meta" id="fleet-meta">loading…</span>
-        </div>
-        <div id="fleet-status" data-src="./status.json">
-          <!-- vanilla JS in app.js renders the fleet table here -->
-          <p class="fleet-fallback">Fleet status renders here. <noscript>Enable JavaScript to see it live.</noscript></p>
-        </div>
-      </div>
-      <p class="fleet-note">
-        <strong>Sample — demo fleet.</strong> Real output of
-        <code>flotilla status --json</code> run against a generic example roster
-        (the same desks as the quickstart), not a live deployment.
-      </p>
-    </section>
-
-    <!-- ───────────────────── 30-SECOND START ───────────────────── -->
+    <!-- ───────────────────── SET IT UP ───────────────────── -->
     <section class="band" id="start">
       <div class="band-head">
-        <span class="kicker">07 — get started</span>
-        <h2>Three commands from install to a running clock.</h2>
+        <span class="kicker">06 — the one thing you do next</span>
+        <h2>Don't set it up yourself. Tell your agent to.</h2>
+        <p class="band-lede">
+          You already run a coding agent that can install software and follow a
+          guide. So hand it the guide. Paste this into Claude Code, Codex, Grok,
+          or Aider &mdash; it does the rest and explains each step as it goes.
+        </p>
       </div>
 
       <div class="start-grid">
-        <ol class="start-steps">
-          <li>
-            <span class="start-n">1</span>
-            <div>
-              <h3>Install</h3>
-              <pre><code>go install github.com/jim80net/flotilla/cmd/flotilla@latest</code></pre>
-            </div>
-          </li>
-          <li>
-            <span class="start-n">2</span>
-            <div>
-              <h3>Tag an agent you run, then send</h3>
-              <pre><code>flotilla register backend --pane demo:0.0
-flotilla send --from me backend "pull origin main and run the tests"</code></pre>
-              <p class="start-note">A stable marker survives the TUI retitling its pane;
-                <code>send</code> then confirms the turn actually started.</p>
-            </div>
-          </li>
-          <li>
-            <span class="start-n">3</span>
-            <div>
-              <h3>Run the self-continuing clock</h3>
-              <pre><code>flotilla watch --roster ./flotilla.json --ack-file ./flotilla-xo-alive</code></pre>
-            </div>
-          </li>
-        </ol>
+        <div>
+          <!-- the literal prompt the human pastes into the coding agent they run.
+               llm.md is the repo's agent-facing setup guide (verified present at
+               repo root); pointing an agent at it installs + configures flotilla. -->
+          <div class="paste" role="group" aria-label="prompt to paste into your coding agent">
+            <p class="paste-lead">Paste into your coding agent:</p>
+            <p class="paste-body" id="paste-prompt">Read https://github.com/jim80net/flotilla/blob/main/llm.md and set flotilla up for me: install it, tag one of the coding agents I already have running, deliver a first message to it, and start the coordinator. Explain each step in plain language as you go, and stop and tell me if anything is missing.</p>
+            <button class="copy-btn paste-copy" data-copy="#paste-prompt" aria-label="copy the prompt">
+              <span class="copy-label">copy the prompt</span>
+            </button>
+          </div>
+          <p class="start-note">
+            That guide walks the whole thing end-to-end &mdash; checking
+            prerequisites, installing, tagging your first agent, sending your first
+            message, and starting the self-continuing clock. Wiring the chat
+            channel is an optional last step.
+          </p>
+        </div>
+
         <aside class="start-aside">
           <p>
-            The full walkthrough &mdash; roster, the Discord audit mirror, the
-            self-continuing clock &mdash; runs cold from a clean machine.
+            Prefer to read it yourself first, or wire it up by hand? The quickstart
+            runs cold from a clean machine, and the install is a single command.
           </p>
+          <div class="install" role="group" aria-label="install command">
+            <code id="install-cmd">go install github.com/jim80net/flotilla/cmd/flotilla@latest</code>
+            <button class="copy-btn" data-copy="#install-cmd" aria-label="copy install command">
+              <span class="copy-label">copy</span>
+            </button>
+          </div>
           <a class="btn btn-primary" href="https://github.com/jim80net/flotilla/blob/main/docs/quickstart.md" target="_blank" rel="noopener">
             Read the quickstart ↗
           </a>
-          <a class="btn btn-ghost" href="https://github.com/jim80net/flotilla/blob/main/docs/xo-doctrine.md" target="_blank" rel="noopener">
-            XO doctrine ↗
+          <a class="btn btn-ghost" href="https://github.com/jim80net/flotilla" target="_blank" rel="noopener">
+            See it on GitHub ↗
           </a>
         </aside>
       </div>
@@ -567,12 +580,12 @@ flotilla send --from me backend "pull origin main and run the tests"</code></pre
     <div class="footer-inner">
       <div class="footer-brand">
         <span class="brand-name">flotilla</span>
-        <p>Coordination for coding fleets. Built in the open.</p>
+        <p>A chief of staff for the coding agents you already run. Built in the open.</p>
       </div>
       <nav class="footer-links">
         <a href="https://github.com/jim80net/flotilla" target="_blank" rel="noopener">GitHub</a>
         <a href="https://github.com/jim80net/flotilla/blob/main/docs/quickstart.md" target="_blank" rel="noopener">Quickstart</a>
-        <a href="https://github.com/jim80net/flotilla/blob/main/docs/competitive/agent-platforms-vs-flotilla.md" target="_blank" rel="noopener">Positioning</a>
+        <a href="https://github.com/jim80net/memex-core" target="_blank" rel="noopener">memex</a>
         <a href="https://github.com/jim80net/flotilla/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
       </nav>
     </div>
