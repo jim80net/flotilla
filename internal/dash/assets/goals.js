@@ -70,7 +70,12 @@
   function visToken(n) {
     var sd = n.status_display;
     if (sd === "achieved") return "realized";
-    if (sd === "active" && !(n.work_items && n.work_items.length) && !(n.children && n.children.length)) {
+    // An authored goal that is active-but-empty (no work, no children) reads as
+    // aspirational/planned. A roster-materialized DESK (#324 Inc 2), though, is a LIVE
+    // entity — its emptiness means "no live work signal right now", NOT "planned" — so
+    // it renders as active, never ghosted.
+    if (sd === "active" && n.source !== "roster" &&
+        !(n.work_items && n.work_items.length) && !(n.children && n.children.length)) {
       return "aspirational";
     }
     return sd;

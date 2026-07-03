@@ -266,6 +266,7 @@ func (s *Server) loadGoals() GoalsDoc {
 		DeskStates:    agentStates(s.loadBoard()),
 		AgentSurfaces: agentSurfacesFromRoster(s.roster),
 		MetaXO:        s.xo,
+		Channels:      deskChannelsFromRoster(s.roster),
 	}
 	s.bindTrackerIssues(&in)
 	if s.cfg.GoalsPath != "" {

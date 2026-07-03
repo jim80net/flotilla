@@ -354,6 +354,11 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	if !strings.Contains(js, `var goalsLayout = "org"`) {
 		t.Error("goals.js must default goalsLayout to \"org\" (#324 operator UX blessing)")
 	}
+	// #324 Inc 2: a roster-materialized desk (source==="roster") is a live entity, never
+	// ghosted as aspirational even when it has no work/children.
+	if !strings.Contains(js, `n.source !== "roster"`) {
+		t.Error("visToken must treat a roster-materialized desk as live, not aspirational (#324 Inc 2)")
+	}
 	for _, marker := range []string{"leafCount", "reach(", "nodeW", "RING_GAP"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("goals.js must retain the #324 content-aware org geometry (missing %q)", marker)

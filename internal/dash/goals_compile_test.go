@@ -40,8 +40,18 @@ goals:
 	if !doc.Found {
 		t.Fatalf("yaml should compile on load, got %+v", doc)
 	}
-	if len(doc.Goals) != 2 {
-		t.Fatalf("expected 2 goals, got %d", len(doc.Goals))
+	// The two AUTHORED goals compiled from the yaml must be present. (The doc may carry
+	// additional roster-materialized desk cards — #324 Inc 2 — for channel members not in
+	// the goals file, so assert the authored nodes by id rather than a raw count.)
+	byID := make(map[string]RenderedGoal, len(doc.Goals))
+	for _, g := range doc.Goals {
+		byID[g.ID] = g
+	}
+	if _, ok := byID["product"]; !ok {
+		t.Errorf("compiled doc missing authored goal 'product'; got %+v", doc.Goals)
+	}
+	if _, ok := byID["dash"]; !ok {
+		t.Errorf("compiled doc missing authored goal 'dash'; got %+v", doc.Goals)
 	}
 	jsonPath := filepath.Join(dir, "fleet-goals.json")
 	if _, err := os.Stat(jsonPath); err != nil {
