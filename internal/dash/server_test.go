@@ -429,8 +429,11 @@ func TestDebugTier(t *testing.T) {
 		t.Error("dash.css must style the debug tier (.thread-debug)")
 	}
 	// cubic #309 P3: the mirror-body typography is folded into the shared thread-gist
-	// rule, not duplicated — assert the combined selector exists.
-	if !strings.Contains(css, ".thread-gist,\n.thread-mirror-body") {
+	// rule, not duplicated. Assert the combined selector whitespace-insensitively (the
+	// two selectors sit on separate lines in source) so a CSS reformat can't spuriously
+	// fail this — collapse all whitespace, then check the comma-adjacent selector.
+	cssNoWS := strings.Join(strings.Fields(css), "")
+	if !strings.Contains(cssNoWS, ".thread-gist,.thread-mirror-body{") {
 		t.Error("dash.css must share the thread-gist / thread-mirror-body base rule (no duplication — #309 P3)")
 	}
 }
