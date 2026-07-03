@@ -416,20 +416,47 @@ func TestCmdWorkspaceInitCodexCoordinatorScaffoldsWithProbe(t *testing.T) {
 	}
 }
 
+// codexProbeGateStub is a codex-named driver WITHOUT ComposerStateProbe — exercises the
+// fail-closed refuse path once the real codex driver ships the probe (the old branch
+// that keyed off !ok on the type assert became dead).
+type codexProbeGateStub struct{}
+
+func (codexProbeGateStub) Name() string                     { return "codex" }
+func (codexProbeGateStub) Submit(string, string) error      { return nil }
+func (codexProbeGateStub) Assess(string) surface.State      { return surface.StateIdle }
+func (codexProbeGateStub) Rotate(string) error              { return nil }
+func (codexProbeGateStub) RotateStrategy() surface.Strategy { return surface.SlashCommand }
+func (codexProbeGateStub) Close(string) error               { return surface.ErrNoGracefulClose }
+
 func TestRefuseCodexCoordinatorProbeGate(t *testing.T) {
-	drv, ok := surface.Get("codex")
-	if !ok {
-		t.Fatal("codex driver not registered")
-	}
-	if _, ok := drv.(surface.ComposerStateProbe); !ok {
-		if err := refuseCodexCoordinatorWithoutProbe("alpha-xo"); err == nil {
+	t.Run("refuses when codex driver lacks ComposerStateProbe", func(t *testing.T) {
+		real, ok := surface.Get("codex")
+		if !ok {
+			t.Fatal("codex driver not registered")
+		}
+		surface.Register(codexProbeGateStub{})
+		t.Cleanup(func() { surface.Register(real) })
+
+		err := refuseCodexCoordinatorWithoutProbe("alpha-xo")
+		if err == nil {
 			t.Fatal("want refusal when codex lacks ComposerStateProbe")
 		}
-		return
-	}
-	if err := refuseCodexCoordinatorWithoutProbe("alpha-xo"); err != nil {
-		t.Errorf("with ComposerStateProbe shipped, gate should pass: %v", err)
-	}
+		if !strings.Contains(err.Error(), "ComposerStateProbe") {
+			t.Fatalf("error = %q, want ComposerStateProbe in message", err)
+		}
+	})
+	t.Run("passes when shipped codex driver implements ComposerStateProbe", func(t *testing.T) {
+		drv, ok := surface.Get("codex")
+		if !ok {
+			t.Fatal("codex driver not registered")
+		}
+		if _, ok := drv.(surface.ComposerStateProbe); !ok {
+			t.Fatal("shipped codex driver must implement ComposerStateProbe")
+		}
+		if err := refuseCodexCoordinatorWithoutProbe("alpha-xo"); err != nil {
+			t.Errorf("with ComposerStateProbe shipped, gate should pass: %v", err)
+		}
+	})
 }
 
 func TestScaffoldCodexCoordinatorRulesAllowsMerge(t *testing.T) {
