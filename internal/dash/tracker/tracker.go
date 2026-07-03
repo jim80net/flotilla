@@ -50,6 +50,9 @@ type ListFilter struct {
 	State string
 	Label string
 	Limit int
+	// IncludeBody requests issue bodies from gh (heavier fetch) so goal-id trailers
+	// can be parsed. The issues list UI leaves this false; the goals read path sets it.
+	IncludeBody bool
 }
 
 // CreateInput is a new-issue request. Title is required; Body and Labels are
@@ -77,6 +80,7 @@ type Issue struct {
 	URL       string    `json:"url,omitempty"`
 	Body      string    `json:"body,omitempty"`     // detail (Get) only
 	Comments  []Comment `json:"comments,omitempty"` // detail (Get) only
+	GoalID    string    `json:"goal_id,omitempty"`  // parsed from body `goal-id:` trailer (read path)
 }
 
 // Label is a GitHub label (name + color for the UI chip; description optional).
