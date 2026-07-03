@@ -408,6 +408,18 @@
     tabs[i].addEventListener("click", function () { showView(this.getAttribute("data-view")); });
   }
 
+  // openConversation is the deep-link the Goals map calls (feedback #3): select a
+  // desk's conversation thread and switch to the Conversations view. Mirrors the
+  // rail's own desk-click (selectedDesk + render + authoritative control targets).
+  function openConversation(desk) {
+    if (!desk) return;
+    selectedDesk = desk;
+    showView("conversations");
+    renderConversations();
+    syncControlTargets(true);
+  }
+  window.flotillaDash.openConversation = openConversation;
+
   // Mark the control targets "touched" the instant the operator edits either field
   // (type, paste, or clear all fire `input`), so a background refresh stops
   // auto-prefilling and can never overwrite the operator's chosen target (#235).

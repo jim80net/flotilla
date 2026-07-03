@@ -15,6 +15,7 @@
       "scope": "project",
       "parent": "ship-platform",
       "owner": "product-lead",
+      "conversation_agent": "product-lead",
       "work_items": [
         { "kind": "desk", "agent": "builder", "label": "sign-up screens" },
         { "kind": "backlog", "match": "onboarding", "label": "onboarding polish" }
@@ -35,6 +36,7 @@
       "title": "Search",
       "scope": "project",
       "parent": "ship-platform",
+      "depends_on": ["billing"],
       "work_items": [
         { "kind": "desk", "agent": "researcher", "label": "ranking model" }
       ]
@@ -44,6 +46,7 @@
       "title": "Index pipeline",
       "scope": "task",
       "parent": "search",
+      "conversation_agent": "indexer",
       "work_items": [
         { "kind": "desk", "agent": "indexer", "label": "incremental indexer" }
       ]
@@ -71,7 +74,8 @@
       "title": "Incident response",
       "description": "On-call rotation and runbooks — not started yet.",
       "scope": "project",
-      "parent": "reliability"
+      "parent": "reliability",
+      "depends_on": ["observability"]
     }
   ]
 }

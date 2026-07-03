@@ -247,6 +247,16 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("goals.js must retain the detail-drawer / hover engine (missing %q) — Inc 2", marker)
 		}
 	}
+	// Inc 4: dependency-line rendering + the conversation deep-link.
+	for _, marker := range []string{"depEdges", "lightDeps", "gd-convo"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must retain the dependency-line / deep-link engine (missing %q) — Inc 4", marker)
+		}
+	}
+	// dash.js must expose the deep-link hook the Goals drawer calls.
+	if !strings.Contains(doGet(t, srv, "/static/dash.js").Body.String(), "openConversation") {
+		t.Error("dash.js must expose window.flotillaDash.openConversation for the Goals deep-link — Inc 4")
+	}
 
 	body := doGet(t, srv, "/").Body.String()
 	if !strings.Contains(body, "/static/goals.js") {

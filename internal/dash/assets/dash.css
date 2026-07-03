@@ -852,6 +852,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gdot-in-flight, .gdot-inflight { border: 1px solid var(--cyan); background: rgba(79, 227, 208, .16); }
 .gdot-awaiting { border: 1px solid var(--amber); background: rgba(255, 180, 84, .16); }
 .gdot-aspirational { border: 1px dashed var(--ink-3); background: transparent; }
+.gdot-dep { border: 1px dashed #b088f0; background: transparent; }
 
 /* graph: the pan/zoom Fleet Situation Map — an absolute tiered canvas inside a
    transform-driven world (ported from the operator-approved prototype). */
@@ -962,6 +963,11 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gedge-blocked { stroke: rgba(255, 107, 107, .45); stroke-dasharray: 5 5; }
 .gedge-aspirational { stroke: rgba(107, 128, 150, .4); stroke-dasharray: 3 6; }
 
+/* cross-dependency arcs (depends_on) — faint dashed violet, distinct from the solid
+   teal/cyan parent-child tree edges; emphasized on hover of either endpoint */
+.gdep { fill: none; stroke: rgba(176, 136, 240, .3); stroke-width: 1.3; stroke-dasharray: 2 5; }
+.gdep.lit { stroke: #b088f0; stroke-width: 2; stroke-dasharray: 2 5; }
+
 .goals-empty { padding: 30px; text-align: center; border: 1px dashed var(--line); border-radius: var(--r); }
 .goals-empty.hidden { display: none; }
 
@@ -1017,6 +1023,13 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gd-owner { font-size: .68rem; color: var(--cyan-dim); }
 .gd-parent { font-size: .66rem; color: var(--ink-3); border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; }
 .gd-body { padding: 14px 16px; overflow-y: auto; flex: 1; }
+.gd-convo {
+  display: block; width: 100%; text-align: left; padding: 9px 12px;
+  border: 1px solid var(--cyan-dim); border-radius: var(--r-sm); background: rgba(79, 227, 208, .08);
+  color: var(--cyan); cursor: pointer; font-family: var(--mono); font-size: .8rem; letter-spacing: .01em;
+  transition: border-color .16s var(--ease), background .16s var(--ease);
+}
+.gd-convo:hover, .gd-convo:focus-visible { border-color: var(--cyan); background: rgba(79, 227, 208, .14); }
 .gd-sec { margin-bottom: 15px; }
 .gd-sec h4 { margin: 0 0 6px; font-size: .62rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; }
 .gd-sec p { margin: 0; font-size: .82rem; line-height: 1.48; color: var(--ink-2); }
