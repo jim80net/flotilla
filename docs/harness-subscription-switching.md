@@ -1,5 +1,12 @@
 # Design — Harness / subscription switching
 
+> **This is a design record, not a runnable guide.** It specifies the *proposed*
+> `flotilla switch` cross-harness failover mechanism; `flotilla switch`,
+> `RateLimitProbe`, `active-harness.json`, and the storm detector do **not** exist
+> yet. It is a point-in-time snapshot (2026-06-29) — some driver facts have since
+> moved on (the codex execution driver has shipped). For the shipped surface-driver
+> model, see [inter-harness.md](./inter-harness.md).
+
 **Status:** Approved — grok-research design lane **complete** (operator 2026-06-29). Routed to flotilla-dev for trio + implementation. Folds: provider-wide throttle (§2), fresh-launch/empty-corpus degrade (§3.6 B+C), memex PR #21 write-side (§3.2–3.5).
 **Problem:** A server-side Anthropic rate limit (`Server is temporarily limiting requests`) throttled every Claude-based desk at once and stalled the fleet. Today most desks share one harness (Claude Code) and one subscription class, so a single provider outage is a fleet-wide outage.  
 **Goal:** Let a desk **fail over** to a different harness/subscription while preserving enough context to continue work — extending flotilla's existing launch-recipe + surface-driver plumbing, not replacing it.
@@ -27,7 +34,7 @@ This design adds those four pieces as **extensions** to `launch.Recipe`, the wor
 | Recipe resolution (workspace wins over flat file) | `internal/workspace/recipe.go:46-66` | Add `ResolveActiveRecipe(agent)` that picks the slot named in `active-harness.json` |
 | `flotilla resume` runs arbitrary shell + cwd | `cmd/flotilla/resume.go:36-43`, `internal/launch/launch.go:20-25` | `switch` calls the same `runResume` primitive after updating the active slot |
 | Surface driver SPI (`Driver`, optional `RecycleBridge`, `ComposerStateProbe`, …) | `internal/surface/surface.go:61-85`, `internal/surface/recycle.go:17-37` | Add optional `RateLimitProbe`; extend `switch` to use FROM-driver handoff + TO-driver takeover |
-| Registered drivers | `claude-code`, `grok`, `aider`, `opencode` (`internal/surface/surface_test.go:30-36`) | Same registry; **cursor** and **codex** join when drivers ship. No cursor driver file exists in `internal/surface/` today |
+| Registered drivers | `claude-code`, `codex`, `grok` are the supported public surfaces; `aider` and `opencode` drivers are also present in the registry (`internal/surface/surface_test.go`) | Same registry; a **cursor** driver joins when it ships (no cursor driver file exists in `internal/surface/` today). *Note (updated): the codex execution driver has since shipped with live-captured render markers — this row predated it.* |
 | Roster `Agent.surface` + `approval_sensitive` | `internal/roster/roster.go:25-44` | Runtime overlay `~/.flotilla/<agent>/active-harness.json` consulted before roster; `approval_sensitive` gates auto-switch |
 | Context-preserving recycle (same harness) | `cmd/flotilla/recycle.go`, `RecycleBridge` on claude + grok | Cross-harness switch reuses handoff/takeover turns; opencode/aider lack `RecycleBridge` today (only `internal/surface/claude.go` + `grok.go` implement `HandoffPath`/`HandoffTurn`/`TakeoverTurn`) |
 | Cross-harness migration pattern (manual orchestration) | `openspec/changes/archive/2026-06-23-recycle-cross-harness-grok/design.md` §3 option (C) | Formalize as `flotilla switch` with idempotency + status record |

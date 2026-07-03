@@ -126,7 +126,7 @@ Fleet roles split across harness tiers by design:
 
 | Seat | Harness | Work |
 |------|---------|------|
-| **Coordinators** (CoS + every flotilla XO) | **Claude** (default); explicit **codex** or **grok** when rostered | Dispatch, gate bars, review/verify, merge authority, operator communication, synthesis |
+| **Coordinators** (CoS + every flotilla XO) | **Claude** (default); **codex** or **grok** coordinator seats are a supervised-trial capability, not yet a production default (see the [seat-swap runbook](./coordinator-seat-swap-runbook.md)) | Dispatch, gate bars, review/verify, merge authority, operator communication, synthesis |
 | **Execution desks** | **grok workhorse** (default) | Authoring code/docs/fixes, builds, migrations, sweeps, running gated scripts |
 
 **Rationale:** expensive models are for judgment, not typing. Quality is protected

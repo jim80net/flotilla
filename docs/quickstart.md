@@ -12,8 +12,8 @@ below is runnable as written — no prior flotilla knowledge assumed.
 - **Go 1.26+** (to build the binary; matches the module's `go` directive).
 - **tmux** — every coordinated agent runs in a tmux pane; flotilla delivers by
   typing into that pane.
-- **A supported agent you can run in a tmux pane** — Claude Code, Aider,
-  OpenCode, or Grok. flotilla does not launch agents; it talks to ones you
+- **A supported agent you can run in a tmux pane** — Claude Code, Codex, or
+  Grok. flotilla does not launch agents; it talks to ones you
   already run. This walkthrough uses Claude Code (the default surface). `send`
   **confirms a real turn started**, so its target must be a live agent: a pane
   that has dropped to a bare shell is treated as a *crashed* agent and the
