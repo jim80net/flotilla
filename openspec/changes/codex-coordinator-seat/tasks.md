@@ -3,7 +3,7 @@
 ## 1. Design (this PR)
 - [x] 1.1 proposal.md + design.md + spec deltas
 - [ ] 1.2 Design trio (systems-review + open-code-review)
-- [ ] 1.3 Surface to COS (no self-merge)
+- [x] 1.3 Surface to COS (no self-merge) — PR #261 head 413288f
 
 ## 2. Generic harness parity (flotilla-dev — coordinate, no duplicate PRs)
 - [ ] 2.1 `harnessAllocationSurface`: honor `surface: "codex"` for coordinators
