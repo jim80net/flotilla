@@ -32,6 +32,10 @@
   var nodeById = {};     // id → RenderedGoal (with laid-out _x/_y/_w/_h attached)
   var view = { scale: 1, tx: 0, ty: 0, worldW: 0, worldH: 0, fitted: false };
   var panWired = false;
+  var edgeIndex = {};    // child id → { path, parent } — for the hover chain-highlight
+  var selectedId = null; // node whose detail drawer is open (transient state: on the article)
+  var hoveredId = null;  // node currently hovered (re-applied after a render)
+  var nodesWired = false;
 
   /* ── tier geometry (ported from the prototype: TIER_X=[40,470,900]) ─────── */
   // Columns are derived from depth so a tree deeper than the canonical 3 tiers
@@ -222,6 +226,15 @@
         (b.x - dx) + " " + b.y + ", " + b.x + " " + b.y + '"/>');
     });
     svg.innerHTML = paths.join("");
+    // Index each edge by its child id for the hover chain-highlight (rebuilt every
+    // draw since the SVG is regenerated).
+    edgeIndex = {};
+    var pathEls = svg.querySelectorAll("path[data-child]");
+    for (var k = 0; k < pathEls.length; k++) {
+      var cid = pathEls[k].getAttribute("data-child");
+      var childNode = nodeById[cid];
+      edgeIndex[cid] = { path: pathEls[k], parent: childNode ? childNode.parent : null };
+    }
   }
 
   /* ── tier column headers (one per depth present) ───────────────────────── */
@@ -297,11 +310,172 @@
   }
   function restoreFocus(id) {
     if (!id) return;
-    var card = q("goals-nodes").querySelector('[data-id="' + String(id).replace(/["\\]/g, "\\$&") + '"]');
+    var card = cardEl(id);
     // preventScroll: the map is transform-positioned, not scroll-positioned, so the
     // default focus scroll-into-view would jerk the viewport/page to a card's raw
     // world coordinate. The operator's pan/zoom owns framing.
     if (card) card.focus({ preventScroll: true });
+  }
+
+  /* ── detail drawer + hover chain-highlight (Inc 2) ─────────────────────── */
+  function cssIdEsc(id) { return String(id).replace(/["\\]/g, "\\$&"); }
+  function cardEl(id) { return q("goals-nodes").querySelector('[data-id="' + cssIdEsc(id) + '"]'); }
+  function scopeNoun(n) { return n.scope === "fleet" ? "Fleet goal" : n.scope === "project" ? "Workstream" : "Task"; }
+
+  // highlightChain lights the edges from a node up its parent chain to the root, so
+  // hovering a task shows which workstream + fleet goal it rolls up to. Bounded
+  // against a cycle the server should never emit.
+  function highlightChain(id, on) {
+    var cur = id, guard = 0;
+    while (cur && edgeIndex[cur] && guard++ < 64) {
+      if (edgeIndex[cur].path) edgeIndex[cur].path.classList.toggle("lit", on);
+      cur = edgeIndex[cur].parent;
+    }
+  }
+
+  // drawerBody renders the node's detail from the SAME cached /api/goals data the
+  // map draws — no extra endpoint. Every interpolated value is escaped.
+  function drawerBody(n) {
+    var parts = [];
+    if (n.description) parts.push('<div class="gd-sec"><h4>What this is</h4><p>' + escapeHtml(n.description) + "</p></div>");
+    // Operator-gated items (awaiting / blocked) surfaced as the "waiting on you" call-out.
+    var gated = (n.work_items || []).filter(function (wi) { return wi.class === "awaiting" || wi.class === "blocked"; });
+    if (gated.length) {
+      parts.push('<div class="gd-sec"><div class="gd-ask"><div class="gd-ask-lab">Waiting on you</div>' +
+        gated.map(function (wi) { return "<p>" + escapeHtml(wi.label || wi.kind || "") + (wi.detail ? " — " + escapeHtml(wi.detail) : "") + "</p>"; }).join("") +
+        "</div></div>");
+    }
+    if ((n.work_items || []).length) {
+      parts.push('<div class="gd-sec"><h4>Work (' + n.work_items.length + ")</h4>" +
+        n.work_items.map(function (wi) {
+          return '<div class="gd-row"><span class="gd-row-l">' + escapeHtml(wi.label || wi.kind || "") + "</span>" +
+            '<span class="gwi-detail gwi-' + escapeHtml(wi.class || "unknown") + '">' + escapeHtml(wi.detail || wi.class || "") + "</span></div>";
+        }).join("") + "</div>");
+    }
+    var kids = (n.children || []).map(function (id) { return nodeById[id]; }).filter(Boolean);
+    if (kids.length) {
+      parts.push('<div class="gd-sec"><h4>' + (n.scope === "fleet" ? "Workstreams" : "Tasks") + " (" + kids.length + ")</h4>" +
+        kids.map(function (k) {
+          var kv = visToken(k);
+          return '<div class="gd-row"><span class="gd-row-l">' + escapeHtml(k.title || k.id) + "</span>" +
+            '<span class="gpill gpill-' + escapeHtml(kv) + '">' + escapeHtml(STATE_LABEL[kv] || kv) + "</span></div>";
+        }).join("") + "</div>");
+    }
+    // Conversation deep-link is Inc 4 (gated on the conversation_agent field); the
+    // drawer shows detail only for now.
+    return parts.join("");
+  }
+
+  var lastDrawerHtml = null; // dirty-check: don't rewrite the drawer body (and reset its scroll) on a no-op tick
+  function fillDrawer(n) {
+    var vis = visToken(n);
+    q("goals-drawer-eyebrow").textContent = scopeNoun(n);
+    q("goals-drawer-title").textContent = n.title || n.id;
+    var pills = '<span class="gpill gpill-' + escapeHtml(vis) + '">' + escapeHtml(STATE_LABEL[vis] || vis) + "</span>";
+    if (n.owner) pills += '<span class="gd-owner">led by ' + escapeHtml(n.owner) + "</span>";
+    // parent-goal pill — which fleet goal / workstream this rolls up to (prototype fidelity).
+    var parent = n.parent ? nodeById[n.parent] : null;
+    if (parent) pills += '<span class="gd-parent">&#8627; ' + escapeHtml(parent.title || parent.id) + "</span>";
+    q("goals-drawer-pills").innerHTML = pills;
+    // Rewrite the body only when it changed, so a background SSE tick never resets
+    // the operator's scroll position or text selection in the open drawer.
+    var html = drawerBody(n);
+    if (lastDrawerHtml !== html) { q("goals-drawer-body").innerHTML = html; lastDrawerHtml = html; }
+  }
+
+  function selectNode(id) {
+    deselect();
+    selectedId = id;
+    lastDrawerHtml = null; // a new selection always fills fresh
+    var card = cardEl(id);
+    if (card) card.classList.add("gnode-selected"); // transient state lives on the ARTICLE (#283 contract)
+  }
+  function deselect() {
+    if (selectedId) { var c = cardEl(selectedId); if (c) c.classList.remove("gnode-selected"); }
+    selectedId = null;
+  }
+  function openDrawer(id) {
+    var n = nodeById[id];
+    if (!n) return;
+    selectNode(id);
+    fillDrawer(n);
+    var d = q("goals-drawer");
+    if (!d) return;
+    d.classList.add("open");
+    d.setAttribute("aria-hidden", "false");
+    var close = q("goals-drawer-close");
+    if (close) close.focus({ preventScroll: true }); // move focus into the dialog for keyboard users
+  }
+  function closeDrawer() {
+    var d = q("goals-drawer");
+    if (d) { d.classList.remove("open"); d.setAttribute("aria-hidden", "true"); }
+    var card = selectedId ? cardEl(selectedId) : null;
+    lastDrawerHtml = null;
+    deselect();
+    if (card) card.focus({ preventScroll: true }); // return focus to the node that opened it
+  }
+
+  // reapplyTransient re-establishes selection + hover after a render. On an in-place
+  // update the article keeps its .gnode-selected class, but on a full rebuild the
+  // articles are replaced — so re-add the selection and refresh the open drawer's
+  // content (live status may have moved). If the selected node vanished (a
+  // structural change removed it), close the drawer.
+  function reapplyTransient() {
+    if (selectedId) {
+      var n = nodeById[selectedId];
+      if (!n) { closeDrawer(); }
+      else {
+        var card = cardEl(selectedId);
+        if (card) card.classList.add("gnode-selected");
+        var d = q("goals-drawer");
+        if (d && d.classList.contains("open")) fillDrawer(n);
+      }
+    }
+    if (hoveredId) { if (nodeById[hoveredId]) highlightChain(hoveredId, true); else hoveredId = null; }
+  }
+
+  function wireNodes() {
+    if (nodesWired) return;
+    var nodesEl = q("goals-nodes");
+    if (!nodesEl) return;
+    nodesWired = true;
+    nodesEl.addEventListener("click", function (e) {
+      var card = e.target.closest(".gnode");
+      if (card) openDrawer(card.getAttribute("data-id"));
+    });
+    nodesEl.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      var card = e.target.closest(".gnode");
+      if (card) { e.preventDefault(); openDrawer(card.getAttribute("data-id")); }
+    });
+    nodesEl.addEventListener("mouseover", function (e) {
+      var card = e.target.closest(".gnode");
+      if (!card) return;
+      var id = card.getAttribute("data-id");
+      if (id === hoveredId) return; // still within the same card (delegation fires on inner spans too)
+      hoveredId = id;
+      highlightChain(id, true);
+    });
+    nodesEl.addEventListener("mouseout", function (e) {
+      var card = e.target.closest(".gnode");
+      if (!card) return;
+      if (e.relatedTarget && card.contains(e.relatedTarget)) return; // moving within the same card
+      highlightChain(card.getAttribute("data-id"), false);
+      if (hoveredId === card.getAttribute("data-id")) hoveredId = null;
+    });
+    var close = q("goals-drawer-close");
+    if (close) close.onclick = closeDrawer;
+    // Help tooltip: also toggle on click (touch has no hover) — CSS shows it on
+    // hover/focus AND when aria-expanded is true.
+    var help = q("goals-help");
+    if (help) help.onclick = function () {
+      help.setAttribute("aria-expanded", help.getAttribute("aria-expanded") === "true" ? "false" : "true");
+    };
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape" || !isVisible()) return;
+      if (help) help.setAttribute("aria-expanded", "false"); // Esc dismisses the tooltip too
+      closeDrawer();
+    });
   }
 
   /* ── main render (two-pass measure) ────────────────────────────────────── */
@@ -317,6 +491,7 @@
     renderLegend();
 
     if (!doc.found) {
+      closeDrawer(); // a drawer open over the now-hidden graph would be stale
       graph.classList.add("hidden");
       empty.classList.remove("hidden");
       empty.textContent = doc.error
@@ -327,6 +502,7 @@
     }
     var goals = Array.isArray(doc.goals) ? doc.goals : [];
     if (!goals.length) {
+      closeDrawer();
       graph.classList.add("hidden");
       empty.classList.remove("hidden");
       empty.textContent = "No goals defined yet.";
@@ -351,6 +527,7 @@
       });
       updateInPlace(goals, nodesEl);
       drawEdges(); // child state may have changed → recolour (the SVG is stateless)
+      reapplyTransient(); // re-light hover chain + refresh the open drawer's live status
       lastSig = sig;
       return;
     }
@@ -395,6 +572,7 @@
       if (!view.fitted) { fit(); view.fitted = true; }
       applyTransform();
       restoreFocus(keepFocus);
+      reapplyTransient(); // re-select the drawer's node (articles were replaced) + re-light hover
       lastStructSig = ssig; // commit ONLY after a complete pass-2 render
       laidOut = true;
       lastSig = sig;
@@ -492,6 +670,7 @@
   function show() {
     activated = true;
     setupPanZoom();
+    wireNodes();
     if (cache) { render(); } else { refresh(); }
   }
 
