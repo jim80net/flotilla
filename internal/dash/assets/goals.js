@@ -230,6 +230,7 @@
     // to the right, visually distinct from the solid parent-child tree edges (a
     // dependency is NOT a re-parenting; feedback #2). Emphasized on hover of an end.
     for (var di = 0; di < depEdges.length; di++) {
+      if (depEdges[di].kind !== "depends_on") continue; // only depends_on edges are dep arcs
       var f = nodeById[depEdges[di].from], t = nodeById[depEdges[di].to];
       if (!f || !t) continue;
       var pa = { x: f._x + f._w, y: f._y + heightOf(f) / 2 };
@@ -336,6 +337,15 @@
   function cardEl(id) { return q("goals-nodes").querySelector('[data-id="' + cssIdEsc(id) + '"]'); }
   function scopeNoun(n) { return n.scope === "fleet" ? "Fleet goal" : n.scope === "project" ? "Workstream" : "Task"; }
 
+  // convAgent resolves the deep-link target: the explicit conversation_agent, else
+  // the first desk work-item's agent (a real thread), else the owner label.
+  function convAgent(n) {
+    if (n.conversation_agent) return n.conversation_agent;
+    var items = n.work_items || [];
+    for (var i = 0; i < items.length; i++) { if (items[i].kind === "desk" && items[i].agent) return items[i].agent; }
+    return n.owner || null;
+  }
+
   // highlightChain lights the edges from a node up its parent chain to the root, so
   // hovering a task shows which workstream + fleet goal it rolls up to. Bounded
   // against a cycle the server should never emit.
@@ -360,10 +370,10 @@
   // map draws — no extra endpoint. Every interpolated value is escaped.
   function drawerBody(n) {
     var parts = [];
-    // Deep-link to this cell's conversation (feedback #3) — the node's
-    // conversation_agent, falling back to its owner desk. Leads the drawer as its
-    // primary action; wired via delegation in wireNodes.
-    var agent = n.conversation_agent || n.owner;
+    // Deep-link to this cell's conversation (feedback #3): prefer the explicit
+    // conversation_agent, then an actual desk work-item's agent (a routable
+    // thread), and only then the owner label (a lead role may have no thread).
+    var agent = convAgent(n);
     if (agent) {
       parts.push('<div class="gd-sec"><button class="gd-convo" type="button" data-agent="' + escapeHtml(agent) +
         '">Open ' + escapeHtml(agent) + "&rsquo;s conversation &rarr;</button></div>");
@@ -395,7 +405,7 @@
     // Cross-dependencies — the gantt-style ID labels for feedback #2, shown cleanly
     // in the drawer alongside the faint canvas arcs. Derived from GoalsDoc.edges
     // (the API exposes dependencies there, not as a per-node field).
-    var deps = depEdges.filter(function (e) { return e.from === n.id; })
+    var deps = depEdges.filter(function (e) { return e.kind === "depends_on" && e.from === n.id; })
       .map(function (e) { return nodeById[e.to]; }).filter(Boolean);
     if (deps.length) {
       parts.push('<div class="gd-sec"><h4>Depends on</h4>' +

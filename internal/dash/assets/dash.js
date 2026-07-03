@@ -417,6 +417,10 @@
     showView("conversations");
     renderConversations();
     syncControlTargets(true);
+    // Move focus into the now-visible Conversations view — the deep-link hid the
+    // Goals view, so leaving focus on the goals node would strand it on <body>.
+    var title = el("conv-title");
+    if (title) { title.setAttribute("tabindex", "-1"); title.focus(); }
   }
   window.flotillaDash.openConversation = openConversation;
 
