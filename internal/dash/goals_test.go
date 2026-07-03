@@ -149,6 +149,54 @@ func TestBuildGoals_MaterializeRosterDesks(t *testing.T) {
 	if flot := byID["flot"]; !goalIDsContain(flot.Children, "desk:beta") {
 		t.Errorf("hub children must include the materialized desk, got %v", flot.Children)
 	}
+	// DFS ordering contract: the materialized desk is INSERTED right after its hub node,
+	// not appended at the end (GoalsDoc: parent immediately precedes its children).
+	var order []string
+	for _, g := range doc.Goals {
+		order = append(order, g.ID)
+	}
+	for i, id := range order {
+		if id == "flot" && (i+1 >= len(order) || order[i+1] != "desk:beta") {
+			t.Errorf("materialized desk must immediately follow its hub (DFS contract); order=%v", order)
+		}
+	}
+}
+
+func TestBuildGoals_DeskIDCollision(t *testing.T) {
+	// An authored goal LITERALLY named "desk:beta" must not be clobbered by the card
+	// synthesized for member beta — the synthetic id is suffixed to stay unique.
+	file := GoalsFile{Goals: []Goal{
+		{ID: "flot", Title: "Fleet", Scope: "flotilla", Owner: "xo"},
+		{ID: "desk:beta", Title: "A goal named desk:beta", Scope: "task", Parent: "flot", Owner: "someone-else"},
+	}}
+	in := GoalsInputs{
+		File: file, FileOK: true, MetaXO: "xo",
+		Channels: []DeskChannel{{ChannelID: "C1", XOAgent: "xo", Members: []string{"xo", "beta"}}},
+	}
+	doc := BuildGoals(in)
+
+	authored, betaCard := 0, (*RenderedGoal)(nil)
+	for i := range doc.Goals {
+		g := &doc.Goals[i]
+		if g.ID == "desk:beta" {
+			authored++
+			if g.Source == "roster" {
+				t.Error("the authored desk:beta must be preserved, not replaced by the materialized card")
+			}
+		}
+		if g.Source == "roster" && strings.EqualFold(g.Owner, "beta") {
+			betaCard = g
+		}
+	}
+	if authored != 1 {
+		t.Errorf("the authored desk:beta must remain exactly once, found %d", authored)
+	}
+	if betaCard == nil {
+		t.Fatalf("member beta must still be materialized under a unique id; goals=%+v", doc.Goals)
+	}
+	if betaCard.ID == "desk:beta" {
+		t.Errorf("materialized beta must not collide with the authored id, got %q", betaCard.ID)
+	}
 }
 
 func goalIDsContain(xs []string, want string) bool {

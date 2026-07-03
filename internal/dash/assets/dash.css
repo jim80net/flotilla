@@ -434,7 +434,12 @@ code {
   font-size: .64rem;
   letter-spacing: .06em;
   text-transform: uppercase;
-  padding: .22rem .55rem;
+  padding: .22rem .7rem;
+  /* org is the default layout — its toggle is a primary control; clear the WCAG 2.5.8
+     24px minimum touch target (was 23px) without looking chunky (#330 Fable QA lane). */
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
   cursor: pointer;
 }
 .glayout-btn + .glayout-btn { border-left: 1px solid var(--line-soft, var(--line)); }

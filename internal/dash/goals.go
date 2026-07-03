@@ -20,6 +20,7 @@ package dash
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/jim80net/flotilla/internal/backlog"
@@ -240,7 +241,9 @@ type GoalEdge struct {
 
 // GoalsDoc is the /api/goals document: the rendered nodes (roots first, each parent immediately
 // before its children — depth-first — so the frontend can stream columns), cross-dependency edges,
-// the counts, and honest absent/error messaging (the dash never fabricates a tree).
+// the counts, and honest absent/error messaging (the dash never fabricates a tree). Roster-
+// materialized desk cards (#324 Inc 2) are INSERTED right after their hub node, preserving that
+// DFS ordering; hub-less desks (a fleet with no hub node) are appended as trailing roots.
 type GoalsDoc struct {
 	Version     int            `json:"version,omitempty"`
 	Found       bool           `json:"found"`
@@ -416,11 +419,27 @@ func materializeRosterDesks(doc *GoalsDoc, in GoalsInputs) {
 			represented[c] = true
 		}
 	}
-	nodeIdx := make(map[string]int, len(doc.Goals))
+	// Every node id already in use — synthetic desk ids MUST NOT collide with an authored
+	// id (a client keys on id; a duplicate would silently clobber). usedID reserves the
+	// chosen id and suffixes on collision so the desk still appears with a unique id.
+	usedID := make(map[string]bool, len(doc.Goals))
 	for i := range doc.Goals {
-		nodeIdx[doc.Goals[i].ID] = i
+		usedID[doc.Goals[i].ID] = true
+	}
+	uniqueID := func(base string) string {
+		id := base
+		for n := 2; usedID[id]; n++ {
+			id = base + "-" + strconv.Itoa(n)
+		}
+		usedID[id] = true
+		return id
 	}
 
+	// Collect the desks to add, grouped by their hub, so they can be INSERTED right after
+	// their hub node in doc.Goals — keeping the documented DFS ordering (a parent always
+	// immediately precedes its children) rather than appended at the end.
+	byHub := make(map[string][]RenderedGoal)
+	var noHub []RenderedGoal
 	seen := make(map[string]bool) // a desk in multiple channels is materialized once
 	for _, ch := range in.Channels {
 		hubID, hubDepth := deskHubFor(doc, ch, in.MetaXO)
@@ -433,7 +452,7 @@ func materializeRosterDesks(doc *GoalsDoc, in GoalsInputs) {
 			}
 			seen[key] = true
 			node := RenderedGoal{
-				ID:                "desk:" + name,
+				ID:                uniqueID("desk:" + name),
 				Title:             name,
 				Scope:             "desk",
 				Owner:             name,
@@ -447,13 +466,35 @@ func materializeRosterDesks(doc *GoalsDoc, in GoalsInputs) {
 				WorkItems:         []RenderedWorkItem{},
 				Source:            "roster",
 			}
-			doc.Goals = append(doc.Goals, node)
 			countNode(&doc.Counts, node)
-			if hi, ok := nodeIdx[hubID]; ok {
-				doc.Goals[hi].Children = append(doc.Goals[hi].Children, node.ID)
+			if hubID == "" {
+				noHub = append(noHub, node) // no hub → a root, emitted at the end
+			} else {
+				byHub[hubID] = append(byHub[hubID], node)
 			}
 		}
 	}
+	if len(byHub) == 0 && len(noHub) == 0 {
+		return
+	}
+
+	// Rebuild the stream: each hub node, then its materialized desks immediately after it
+	// (and recorded as its children); hub-less desks become trailing roots.
+	out := make([]RenderedGoal, 0, len(doc.Goals)+len(noHub))
+	for i := range doc.Goals {
+		g := doc.Goals[i]
+		if desks := byHub[g.ID]; len(desks) > 0 {
+			for _, d := range desks {
+				g.Children = append(g.Children, d.ID)
+			}
+			out = append(out, g)
+			out = append(out, desks...)
+			continue
+		}
+		out = append(out, g)
+	}
+	out = append(out, noHub...)
+	doc.Goals = out
 }
 
 // deskHubFor picks the node a channel's materialized desks attach under: a flotilla goal
