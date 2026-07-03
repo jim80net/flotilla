@@ -39,11 +39,13 @@
   var nodesWired = false;
   var kbdNav = false;    // true when focus is moving by keyboard (Tab) — gates focus-recenter
   var modalReturn = null; // element to restore focus to when the intervention modal closes
-  // Layout mode (org-graph v2 §2/§7.4): "tree" = the tiered altitude columns (default,
-  // until the org UX is proven); "org" = hub-and-spoke — the coordinator (layout.hub_center)
-  // at the visual center, org units on concentric rings, spoke edges to children. A live
-  // toggle flips it (ship-live: reachable without a restart, not env-gated dormant).
-  var goalsLayout = "tree";
+  // Layout mode (org-graph v2 §2/§7.4). "org" = hub-and-spoke — the coordinator
+  // (layout.hub_center) at the visual center, org units on concentric rings, spoke edges
+  // to children. "tree" = the tiered altitude columns (the toggle alternative). Default is
+  // ORG per the operator's UX blessing (#324), superseding design §7.4's provisional
+  // tree-default "until UX proven" — the UX is now proven. A live toggle flips it; #317
+  // will make the default env-overridable per deployment.
+  var goalsLayout = "org";
 
   /* ── tier geometry (ported from the prototype: TIER_X=[40,470,900]) ─────── */
   // Columns are derived from depth so a tree deeper than the canonical 3 tiers
@@ -53,6 +55,10 @@
   var COL_STEP = 430, COL_X0 = 40, DEFAULT_H = 60, GAP = 18, TOP = 46, PAD = 30;
   function colX(depth) { return COL_X0 + depth * COL_STEP; }
   function colW(depth) { return depth === 0 ? 320 : depth === 1 ? 270 : 290; }
+  // Card width per layout. The tree uses wide altitude columns; the org (hub-spoke)
+  // graph uses narrower cards so the radial map packs tightly and reads as a node
+  // graph rather than a sprawl of columns (#324 — tighter, content-aware geometry).
+  function nodeW(depth) { return goalsLayout === "org" ? (depth === 0 ? 216 : 176) : colW(depth); }
   function depthOf(n) { return n.depth || 0; }
   function heightOf(n) { return n._h || DEFAULT_H; }
 
@@ -225,7 +231,7 @@
     nodeById = {};
     goals.forEach(function (n) {
       var d = depthOf(n);
-      n._x = colX(d); n._w = colW(d);
+      n._x = colX(d); n._w = nodeW(d);
       nodeById[n.id] = n;
     });
   }
@@ -270,61 +276,120 @@
   // across the parent's angular slice (spoke geometry). With no hub_center hint, the
   // roots themselves form ring 1 around an empty center. Positions are polar → the same
   // absolute _x/_y the tree layout uses, so nodeCard/pan-zoom/keyed-update are unchanged.
-  var RING_STEP = 380;
+  var RING_GAP = 52; // radial breathing room between adjacent rings
   function childrenOf(n) { return (n.children || []).map(function (id) { return nodeById[id]; }).filter(Boolean); }
   function nodeCenter(n) { return { x: n._x + n._w / 2, y: n._y + heightOf(n) / 2 }; }
+
+  // layoutOrg is CONTENT-AWARE (#324): rings are sized from the actual card extents
+  // (tight near the hub — no fixed-step waste) and children are angularly PACKED by
+  // subtree leaf-weight (a small subtree clusters near its parent's direction instead
+  // of spreading over an empty arc). Positions are polar → the same absolute _x/_y the
+  // tree layout writes, so nodeCard / pan-zoom / keyed-update / drawer / modal are
+  // unchanged. Runs in pass-2, so measured heights (n._h) are available.
   function layoutOrg(goals, roots) {
+    // 1. the hub (coordinator) — layout.hub_center; else an empty center + roots on ring 1.
     var center = null;
     for (var i = 0; i < goals.length; i++) {
       if (goals[i].layout && goals[i].layout.hub_center) { center = goals[i]; break; }
     }
-    var maxDepth = 0;
-    goals.forEach(function (n) { maxDepth = Math.max(maxDepth, depthOf(n)); });
-    // rings from the hub: with a center node, its own subtree maps tree-depth d → ring d
-    // (outermost = maxDepth). BUT sibling roots (non-center roots) are placed AT ring 1,
-    // so their subtrees reach ring depth+1 — the outer ring is then maxDepth + 1. Without
-    // a center, roots are ring 1 likewise → maxDepth + 1. Size the world for the largest
-    // reachable ring so no node clips past the bounds (cubic #316 P2).
-    var hasSiblingRoot = false;
-    if (center) roots.forEach(function (r) { if (r !== center) hasSiblingRoot = true; });
-    var rings = (center && !hasSiblingRoot) ? Math.max(1, maxDepth) : (maxDepth + 1);
-    var radius = rings * RING_STEP;
-    var worldSize = 2 * radius + 360; // margin for the outermost cards
-    view.worldW = worldSize; view.worldH = worldSize;
-    var cx = worldSize / 2, cy = worldSize / 2;
 
-    // placed guards against a cycle in the (server-validated-acyclic) tree — the same
-    // defense-in-depth bound highlightChain carries; a repeat visit is skipped, never
-    // recursed (cubic #316 note).
-    var placed = {};
-    function placeSubtree(n, a0, a1, ring) {
-      if (placed[n.id]) return;
-      placed[n.id] = true;
-      var mid = (a0 + a1) / 2;
-      if (ring === 0) {
-        n._x = cx - n._w / 2; n._y = cy - heightOf(n) / 2;
-      } else {
-        var r = ring * RING_STEP;
-        n._x = cx + r * Math.cos(mid) - n._w / 2;
-        n._y = cy + r * Math.sin(mid) - heightOf(n) / 2;
-      }
-      var kids = childrenOf(n);
-      if (!kids.length) return;
-      var step = (a1 - a0) / kids.length;
-      kids.forEach(function (k, i) { placeSubtree(k, a0 + i * step, a0 + (i + 1) * step, ring + 1); });
+    // 2. ring numbers (center = 0). A cycle guard (server validates acyclic) bounds it.
+    var ringOf = {}, seen = {};
+    function assignRing(n, r) {
+      if (seen[n.id]) return;
+      seen[n.id] = true;
+      ringOf[n.id] = r;
+      childrenOf(n).forEach(function (k) { assignRing(k, r + 1); });
     }
-
     var ring1;
     if (center) {
-      center._x = cx - center._w / 2; center._y = cy - heightOf(center) / 2;
-      placed[center.id] = true; // the hub is placed here, not via placeSubtree
+      ringOf[center.id] = 0; seen[center.id] = true;
       ring1 = childrenOf(center);
       roots.forEach(function (r) { if (r !== center) ring1.push(r); }); // sibling flotillas orbit too
     } else {
       ring1 = roots.slice();
     }
-    var n1 = ring1.length || 1, slice = (2 * Math.PI) / n1;
-    ring1.forEach(function (node, i) { placeSubtree(node, i * slice, (i + 1) * slice, 1); });
+    ring1.forEach(function (n) { assignRing(n, 1); });
+
+    // 3. subtree leaf-weight = angular demand (memoized, cycle-safe).
+    var leaves = {};
+    function leafCount(n, path) {
+      if (leaves[n.id] != null) return leaves[n.id];
+      if (path[n.id]) return 1; // cycle → treat as a leaf
+      path[n.id] = true;
+      var kids = childrenOf(n), c = 0;
+      kids.forEach(function (k) { c += leafCount(k, path); });
+      path[n.id] = false;
+      return (leaves[n.id] = Math.max(1, kids.length ? c : 1));
+    }
+    goals.forEach(function (n) { leafCount(n, {}); });
+
+    // 4. per-ring max card extents (measured) + node counts.
+    var maxRing = 0, maxH = {}, maxW = {}, countRing = {};
+    Object.keys(ringOf).forEach(function (id) {
+      var r = ringOf[id], n = nodeById[id];
+      if (!n) return;
+      maxRing = Math.max(maxRing, r);
+      maxH[r] = Math.max(maxH[r] || 0, heightOf(n));
+      maxW[r] = Math.max(maxW[r] || 0, n._w);
+      countRing[r] = (countRing[r] || 0) + 1;
+    });
+
+    // 5. content-aware ring radii: accumulate outward, each ring's clearance sized by
+    //    its cards' REACH — half the LARGER dimension (width dominates a wide card), so
+    //    a card at any angle clears the inner ring without a corner collision (cards are
+    //    wider than tall; a height-only gap let them overlap horizontally near the hub).
+    //    ALSO honor a circumference minimum so a crowded ring's cards don't overlap
+    //    tangentially. Inner rings stay tight — no fixed-step waste.
+    function reach(r) { return Math.max(maxW[r] || 200, maxH[r] || DEFAULT_H) / 2; }
+    var radius = [0];
+    for (var r = 1; r <= maxRing; r++) {
+      var accum = radius[r - 1] + reach(r - 1) + RING_GAP + reach(r);
+      var circMin = (countRing[r] * ((maxW[r] || 200) + 24)) / (2 * Math.PI);
+      radius[r] = Math.max(accum, circMin);
+    }
+
+    // 6. world sized to the outermost node extent, centered.
+    var outerR = (radius[maxRing] || 0) + reach(maxRing);
+    var worldSize = 2 * (outerR + 40);
+    view.worldW = worldSize; view.worldH = worldSize;
+    var cx = worldSize / 2, cy = worldSize / 2;
+
+    // 7. placement: a node sits at its ring radius + slice midpoint; its children take
+    //    sub-slices of the node's slice PROPORTIONAL to their leaf-weight — so a small
+    //    subtree packs tightly around the parent's direction, a large one gets the room.
+    var pplaced = {};
+    function place(n, a0, a1) {
+      if (pplaced[n.id]) return;
+      pplaced[n.id] = true;
+      var mid = (a0 + a1) / 2, rr = ringOf[n.id];
+      if (rr === 0) {
+        n._x = cx - n._w / 2; n._y = cy - heightOf(n) / 2;
+      } else {
+        var rad = radius[rr];
+        n._x = cx + rad * Math.cos(mid) - n._w / 2;
+        n._y = cy + rad * Math.sin(mid) - heightOf(n) / 2;
+      }
+      var kids = childrenOf(n);
+      if (!kids.length) return;
+      var total = 0; kids.forEach(function (k) { total += leaves[k.id]; });
+      var cursor = a0;
+      kids.forEach(function (k) {
+        var w = (a1 - a0) * (leaves[k.id] / (total || 1));
+        place(k, cursor, cursor + w);
+        cursor += w;
+      });
+    }
+
+    if (center) { center._x = cx - center._w / 2; center._y = cy - heightOf(center) / 2; pplaced[center.id] = true; }
+    // ring-1 nodes split the full circle by leaf-weight, starting at the top (-π/2).
+    var total1 = 0; ring1.forEach(function (n) { total1 += leaves[n.id]; });
+    var cur = -Math.PI / 2;
+    ring1.forEach(function (n) {
+      var w = 2 * Math.PI * (leaves[n.id] / (total1 || 1));
+      place(n, cur, cur + w);
+      cur += w;
+    });
   }
 
   /* ── edges: parent → child, from laid-out geometry ─────────────────────── */
@@ -1094,12 +1159,17 @@
   }
 
   // Re-fit on resize (keeps the map framed); the transform is otherwise the
-  // operator's to drive via pan/zoom.
+  // operator's to drive via pan/zoom. Mode-aware, matching the first-layout branch:
+  // the tree top-anchors (fit), the org graph frames centered (fitOverview) — a
+  // resize on the default org view must NOT jump it to tree framing (cubic #327 P2).
   var resizeTimer = null;
   window.addEventListener("resize", function () {
     if (!isVisible()) return;
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(function () { fit(); applyTransform(); }, 120);
+    resizeTimer = setTimeout(function () {
+      (goalsLayout === "org" ? fitOverview : fit)();
+      applyTransform();
+    }, 120);
   });
 
   window.flotillaGoals = { show: show, refresh: refresh };

@@ -115,7 +115,10 @@ Merge remains **client-side** (`/api/history` + `/api/session-mirror`); normaliz
 1. Ship UI labels (`flotilla`/`desk`) before YAML scope rename — cosmetic first.
 2. Parser dual-read `fleet`→`flotilla`, `project`→`desk`.
 3. Add optional `priorities` / `milestones` / `topology_channel_id` (ignored by v1 UI).
-4. Hub-spoke layout behind `FLOTILLA_DASH_GOALS_LAYOUT=tree|org` (default `tree` until UX proven).
+4. Hub-spoke layout behind `FLOTILLA_DASH_GOALS_LAYOUT=tree|org`. **Default is now `org`**
+   (operator UX blessing, #324 — the provisional `tree`-until-proven default is superseded);
+   `tree` remains the toggle alternative, and the env (#317) makes the default overridable
+   per deployment.
 
 ## 8. Acceptance (#302)
 
