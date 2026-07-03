@@ -13,10 +13,10 @@ because the target stayed busy.
    on `ErrBusy` — survives watch restarts.
 2. **No busy drop** — operator relays retry until idle, however long; remove `maxRelayDeferrals`
    drop for `ErrBusy`.
-3. **Periodic stale escalation** (default 30m, configurable) — loud alert but message stays queued.
+3. **Periodic stale escalation** (fixed 30m in v1) — loud alert but message stays queued.
 4. **Startup replay** — load pending queue into the injector before live gateway traffic.
-5. **Bounded policy unchanged** for non-operator kinds (heartbeat/detector) and transient
-   uncertain relay reassess (separate low cap).
+5. **Bounded drop unchanged** for non-operator kinds (heartbeat/detector). Transient-uncertain
+   operator relays join the durable queue after a short reassess cap (never drop).
 
 ## Impact
 

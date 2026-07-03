@@ -68,12 +68,18 @@ func TestRelayQueueUpsertSkipsDeferralsOnlyBump(t *testing.T) {
 	base := time.Date(2026, 7, 3, 5, 0, 0, 0, time.UTC)
 	j := Job{MessageID: "1", Agent: "xo", Message: "hi", Kind: "relay", deferrals: 1, enqueuedAt: base, lastStaleAlert: base}
 	q.upsert(j)
-	info1, _ := os.Stat(path)
+	afterFirst, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	j.deferrals = 99
 	q.upsert(j)
-	info2, _ := os.Stat(path)
-	if info1.ModTime() != info2.ModTime() {
-		t.Fatal("deferrals-only bump should not rewrite queue file")
+	afterSecond, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterFirst) != string(afterSecond) {
+		t.Fatalf("deferrals-only bump should not rewrite queue file\nfirst:  %s\nsecond: %s", afterFirst, afterSecond)
 	}
 }
 

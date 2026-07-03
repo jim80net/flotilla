@@ -10,8 +10,8 @@ than submitted into the active composer or blocking the single delivery worker �
 other desks proceeds meanwhile. Deferred operator relays SHALL be persisted to a host-local
 disk-backed queue keyed by the origin message id and SHALL NOT be dropped for sustained busy —
 delivery retries until the agent goes idle, however long that takes. A sustained-busy defer SHALL
-raise a LOUD operator alert once at the short threshold (~30s), then repeat at a configurable
-stale interval (default 30m) while the message remains queued — escalation is in addition to
+raise a LOUD operator alert once at the short threshold (~30s), then repeat at a fixed stale
+interval (30m in v1) while the message remains queued — escalation is in addition to
 delivery, never instead of it. On watch restart, pending queue entries SHALL replay before new
 live traffic. A heartbeat or change-detector wake arriving while busy SHALL be dropped (the next
 tick re-evaluates), not deferred. A relay whose pane state stays transiently uncertain SHALL re-assess on a short cadence, then
@@ -35,3 +35,9 @@ from heartbeat/detector ticks which remain bounded-drop.
 #### Scenario: A heartbeat tick arriving while busy is dropped, not deferred
 - **WHEN** a heartbeat or change-detector wake is ready while the target assesses as `Working`
 - **THEN** it is dropped (the next tick re-evaluates), not re-enqueued
+
+#### Scenario: A transient-uncertain operator relay joins the durable queue and is eventually delivered
+- **WHEN** an operator relay assesses as transiently uncertain (`ErrTransient`) through the short
+  reassess cap, then the pane becomes deliverable
+- **THEN** the relay is escalated once at cap exhaustion, persisted to the disk-backed queue,
+  retried at the busy cadence (never dropped), and delivered once the agent is idle/deliverable
