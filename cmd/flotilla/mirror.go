@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jim80net/flotilla/internal/readermap"
+	"github.com/jim80net/flotilla/internal/sessionmirror"
 	"github.com/jim80net/flotilla/internal/transport"
 )
 
@@ -38,6 +40,13 @@ type deskMirror struct {
 	// a withheld turn-final does not vanish into a journald line no human reads. nil ⇒
 	// no alert path wired (the signal degrades to the decision log line only).
 	alert func(string)
+	// rosterDir is the roster directory root for session-mirror/<agent>.jsonl append.
+	// Empty ⇒ session-mirror ledger write is inert (Discord-only deployments).
+	rosterDir string
+	// now supplies the ledger timestamp (tests pin it); nil ⇒ time.Now.
+	now func() time.Time
+	// ledgerAppend overrides sessionmirror.Append for tests; nil ⇒ the real append.
+	ledgerAppend func(rosterDir, agent string, rec sessionmirror.Record) error
 }
 
 // run performs the mirror for one finished desk. It is OBSERVE-ONLY and BEST-EFFORT: it never
@@ -82,6 +91,8 @@ func (m deskMirror) run(agent string) {
 		return
 	}
 
+	m.appendSessionMirror(agent, text, d)
+
 	body, rmNote := d.body, d.note
 	chunks := transport.Chunk(body, mirrorChunkLimit)
 	n := len(chunks)
@@ -110,11 +121,46 @@ func (m deskMirror) run(agent string) {
 // the post (the firewall refuse), and whether to raise the operator-visible alert
 // (with its agent-free detail, which run prefixes with the agent name).
 type mirrorDecision struct {
-	body        string
-	note        string
-	suppress    bool
-	alert       bool
-	alertDetail string
+	body         string
+	note         string
+	suppress     bool
+	alert        bool
+	alertDetail  string
+	envelope     *readermap.Envelope
+	firewallWarn []string
+}
+
+func (m deskMirror) mirrorNow() time.Time {
+	if m.now != nil {
+		return m.now()
+	}
+	return time.Now()
+}
+
+// appendSessionMirror fans out the session-mirror ledger write after readerModelInternal
+// (same turn-final read — no second pane probe). Suppressed events never reach here.
+func (m deskMirror) appendSessionMirror(agent, verbose string, d mirrorDecision) {
+	if m.rosterDir == "" {
+		return
+	}
+	rec := sessionmirror.NewRecord(sessionmirror.Input{
+		Agent:        agent,
+		At:           m.mirrorNow(),
+		Verbose:      verbose,
+		Info:         d.body,
+		MirrorNote:   d.note,
+		Envelope:     d.envelope,
+		FirewallWarn: d.firewallWarn,
+	})
+	appendFn := m.ledgerAppend
+	if appendFn == nil {
+		appendFn = func(rosterDir, agent string, rec sessionmirror.Record) error {
+			return sessionmirror.Append(rosterDir, agent, rec, sessionmirror.AppendOptions{})
+		}
+	}
+	if err := appendFn(m.rosterDir, agent, rec); err != nil {
+		m.logf("flotilla watch: mirror LEDGER-FAIL %s: %v", agent, err)
+	}
 }
 
 // readerModelInternal applies the INTERNAL-channel reader-modeling pipeline to a
@@ -146,6 +192,7 @@ type mirrorDecision struct {
 func readerModelInternal(turnFinal string, fw *readermap.TermSet) mirrorDecision {
 	// STAGE 1 — the partition firewall (runs before any modeling work).
 	var warnNote, warnDetail string
+	var firewallWarn []string
 	if fw != nil {
 		switch r := readermap.Check(turnFinal, fw); r.Decision {
 		case readermap.FirewallRefuse:
@@ -158,6 +205,7 @@ func readerModelInternal(turnFinal string, fw *readermap.TermSet) mirrorDecision
 		case readermap.FirewallWarn:
 			warnNote = "WARN firewall-vocab " + strings.Join(r.WarnTerms, ",")
 			warnDetail = fmt.Sprintf("published a turn-final carrying domain vocabulary %v (advisory — review for a deployment leak)", r.WarnTerms)
+			firewallWarn = append([]string(nil), r.WarnTerms...)
 		}
 	}
 
@@ -166,18 +214,20 @@ func readerModelInternal(turnFinal string, fw *readermap.TermSet) mirrorDecision
 	env, outcome := readermap.Detect(turnFinal)
 	switch outcome {
 	case readermap.OutcomePresent:
+		envCopy := *env
 		if lint := readermap.Tier1Lint(*env); lint.Pass {
-			d = mirrorDecision{body: readermap.Render(*env), note: "modeled"}
+			d = mirrorDecision{body: readermap.Render(*env), note: "modeled", envelope: &envCopy}
 		} else {
 			// Deficient envelope: publish the desk's raw turn-final (preserve what it
 			// wrote — never lose) and flag the structural gap for the operator.
-			d = mirrorDecision{body: turnFinal, note: "WARN tier1 " + lint.Reason}
+			d = mirrorDecision{body: turnFinal, note: "WARN tier1 " + lint.Reason, envelope: &envCopy}
 		}
 	case readermap.OutcomeMalformed:
 		d = mirrorDecision{body: turnFinal, note: "WARN malformed reader-map envelope"}
 	default: // OutcomeAbsent — an ordinary, un-enveloped turn-final (back-compat).
 		d = mirrorDecision{body: turnFinal}
 	}
+	d.firewallWarn = firewallWarn
 
 	// Fold the firewall WARN advisory in (it published — flag the note + raise the
 	// advisory alert, but never suppress).

@@ -631,26 +631,27 @@ func cmdWatch(args []string) error {
 				defer txn.Release()
 				return surface.RotateContext(xoDrv, pane)
 			},
-			MirrorOnFinish:          deskMirrorOnFinish(cfg, secrets, tr, firewall, alert),
-			IdleHoldOnFinish:        idleHoldOnFinish(cfg, idleHoldTracker, injector.Enqueue),
-			StrandedHandoffOnFinish: strandedHandoffOnFinish(cfg, strandedTracker, injector.Enqueue),
-			IsCoordinator:           cfg.IsCoordinator,
-			DelegationNudgeOnFinish: delegationNudgeOnFinish(cfg, delegationTracker, injector.Enqueue),
-			MirrorDispatch:          func(run func()) { go run() }, // mirror I/O off the tick goroutine
-			Awaiting:                awaiting.Present,
-			SettleConsume:           settled.Consume,
-			DeskSettleConsume:       deskSettled.Consume,
-			Alert:                   alert,
-			MaxMissedAcks:           *maxMissed,
-			MaxQuietIntervals:       *maxQuiet,
-			LivenessPingMode:        cfg.LivenessPingMode,
-			MaxSelfContinuation:     *maxSelfCont,
-			BacklogGate:             backlogGate,
-			BacklogStuckCap:         *backlogStuckCap,
-			WakeAgent:               synthWakeAgent,
-			SynthParents:            synthParents,
-			SynthRead:               synthRead,
-			SynthEveryTicks:         synthEveryTicks,
+			MirrorOnFinish:            deskMirrorOnFinish(cfg, secrets, tr, firewall, alert, rosterDir),
+			CoordinatorMirrorOnFinish: deskMirrorOnFinish(cfg, secrets, tr, firewall, alert, rosterDir),
+			IdleHoldOnFinish:          idleHoldOnFinish(cfg, idleHoldTracker, injector.Enqueue),
+			StrandedHandoffOnFinish:   strandedHandoffOnFinish(cfg, strandedTracker, injector.Enqueue),
+			IsCoordinator:             cfg.IsCoordinator,
+			DelegationNudgeOnFinish:   delegationNudgeOnFinish(cfg, delegationTracker, injector.Enqueue),
+			MirrorDispatch:            func(run func()) { go run() }, // mirror I/O off the tick goroutine
+			Awaiting:                  awaiting.Present,
+			SettleConsume:             settled.Consume,
+			DeskSettleConsume:         deskSettled.Consume,
+			Alert:                     alert,
+			MaxMissedAcks:             *maxMissed,
+			MaxQuietIntervals:         *maxQuiet,
+			LivenessPingMode:          cfg.LivenessPingMode,
+			MaxSelfContinuation:       *maxSelfCont,
+			BacklogGate:               backlogGate,
+			BacklogStuckCap:           *backlogStuckCap,
+			WakeAgent:                 synthWakeAgent,
+			SynthParents:              synthParents,
+			SynthRead:                 synthRead,
+			SynthEveryTicks:           synthEveryTicks,
 			// Recursive desk-heartbeat (#183): default-ON, roster opt-OUT. Cadence = the heartbeat
 			// interval (the tick IS the interval ⇒ 1 tick); cap = 3 (NewDetector defaults 0 to 3).
 			HeartbeatEnabled:        deskHeartbeatEnabled,
@@ -1138,14 +1139,15 @@ func readDeskTurnFinal(cfg *roster.Config, agent string) (text string, ok bool, 
 	return text, true, nil
 }
 
-func deskMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr transport.Transport, firewall *readermap.TermSet, alert func(string)) func(agent string) {
+func deskMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr transport.Transport, firewall *readermap.TermSet, alert func(string), rosterDir string) func(agent string) {
 	if secrets == nil || tr == nil {
 		return nil
 	}
 	return func(agent string) {
 		m := deskMirror{
-			firewall: firewall,
-			alert:    alert,
+			firewall:  firewall,
+			alert:     alert,
+			rosterDir: rosterDir,
 			webhook: func(a string) (string, bool) {
 				url, err := secrets.Webhook(a)
 				if err != nil || url == "" {
