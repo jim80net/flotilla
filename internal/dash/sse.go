@@ -204,7 +204,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 // (mtime,size) signatures change — so all connected clients refetch the JSON
 // endpoints. One poller serves every client (not one per connection).
 func (s *Server) poll(ctx context.Context) {
-	paths := []string{s.cfg.SnapshotPath, s.cfg.LedgerPath, s.cfg.BacklogPath, s.cfg.GoalsPath}
+	paths := []string{s.cfg.SnapshotPath, s.cfg.LedgerPath, s.cfg.BacklogPath, s.cfg.GoalsPath, s.cfg.GoalsYAMLPath}
 	prev := fileSigs(paths)
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()

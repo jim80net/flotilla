@@ -42,6 +42,34 @@ func LoadYAML(path string) (File, error) {
 	return ParseYAML(raw)
 }
 
+// MaybeCompileYAMLToJSON refreshes the compiled json cache when the yaml source is
+// newer than the json (or json is absent). A missing yaml is not an error.
+func MaybeCompileYAMLToJSON(yamlPath, jsonPath string) error {
+	if yamlPath == "" || jsonPath == "" {
+		return nil
+	}
+	yst, err := os.Stat(yamlPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("goals: stat yaml %q: %w", yamlPath, err)
+	}
+	jst, jerr := os.Stat(jsonPath)
+	if jerr != nil && !os.IsNotExist(jerr) {
+		return fmt.Errorf("goals: stat json %q: %w", jsonPath, jerr)
+	}
+	needCompile := os.IsNotExist(jerr) || yst.ModTime().After(jst.ModTime())
+	if !needCompile {
+		return nil
+	}
+	f, err := LoadYAML(yamlPath)
+	if err != nil {
+		return err
+	}
+	return WriteJSON(jsonPath, f)
+}
+
 // WriteJSON writes a compiled File to path (mode 0600).
 func WriteJSON(path string, f File) error {
 	b, err := CompileJSON(f)

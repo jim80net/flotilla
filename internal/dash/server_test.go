@@ -350,6 +350,9 @@ func TestResolvePaths(t *testing.T) {
 	if cfg.GoalsPath != filepath.Join(dir, "fleet-goals.json") {
 		t.Errorf("goals path = %q (should default to <roster-dir>/fleet-goals.json)", cfg.GoalsPath)
 	}
+	if cfg.GoalsYAMLPath != filepath.Join(dir, "fleet-goals.yaml") {
+		t.Errorf("goals yaml path = %q (should default to <roster-dir>/fleet-goals.yaml)", cfg.GoalsYAMLPath)
+	}
 	if cfg.LedgerPath != filepath.Join(dir, "context-ledger.md") {
 		t.Errorf("ledger path = %q (should inherit roster CosLedger)", cfg.LedgerPath)
 	}
