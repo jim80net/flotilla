@@ -36,7 +36,7 @@ if not any("git * show" in r for r in allow):
 for marker_rule in ("Bash(touch */flotilla-*-settled)", "Bash(touch */flotilla-*-alive)"):
     if marker_rule not in allow:
         raise SystemExit(f"expected coordination-marker allow {marker_rule!r}")
-if any(r.strip() in ("Bash(touch *)", "Bash(touch*") for r in allow):
+if any(r.strip() in ("Bash(touch *)", "Bash(touch*)") for r in allow):
     raise SystemExit("must not allow bare touch — marker paths only")
 
 if not any("git * push" in r and "force" in r for r in deny):
