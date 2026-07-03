@@ -76,14 +76,16 @@ type WorkItem struct {
 
 // Goal is one goal node (the on-disk shape).
 type Goal struct {
-	ID          string     `json:"id"`
-	Title       string     `json:"title"`
-	Description string     `json:"description,omitempty"`
-	Scope       GoalScope  `json:"scope,omitempty"`
-	Parent      string     `json:"parent,omitempty"`
-	Owner       string     `json:"owner,omitempty"`
-	Status      GoalStatus `json:"status,omitempty"`
-	WorkItems   []WorkItem `json:"work_items,omitempty"`
+	ID                string     `json:"id"`
+	Title             string     `json:"title"`
+	Description       string     `json:"description,omitempty"`
+	Scope             GoalScope  `json:"scope,omitempty"`
+	Parent            string     `json:"parent,omitempty"`
+	Owner             string     `json:"owner,omitempty"`
+	Status            GoalStatus `json:"status,omitempty"`
+	ConversationAgent string     `json:"conversation_agent,omitempty"` // Conversations deep-link target
+	DependsOn         []string   `json:"depends_on,omitempty"`         // cross-dependency ids (not re-parenting)
+	WorkItems         []WorkItem `json:"work_items,omitempty"`
 }
 
 // GoalsFile is the roster-adjacent goals file (`fleet-goals.json`, the compiled cache the dash
@@ -139,6 +141,24 @@ func (gf GoalsFile) validate() error {
 			seen[cur] = true
 		}
 	}
+	for _, g := range gf.Goals {
+		seenDep := make(map[string]bool, len(g.DependsOn))
+		for _, dep := range g.DependsOn {
+			if strings.TrimSpace(dep) == "" {
+				return fmt.Errorf("goals: goal %q has an empty depends_on entry", g.ID)
+			}
+			if dep == g.ID {
+				return fmt.Errorf("goals: goal %q cannot depend_on itself", g.ID)
+			}
+			if seenDep[dep] {
+				return fmt.Errorf("goals: goal %q has duplicate depends_on entry %q", g.ID, dep)
+			}
+			seenDep[dep] = true
+			if !ids[dep] {
+				return fmt.Errorf("goals: goal %q references unknown depends_on target %q", g.ID, dep)
+			}
+		}
+	}
 	return nil
 }
 
@@ -158,17 +178,18 @@ type RenderedWorkItem struct {
 // RenderedGoal is a goal node with its resolved work items, computed roll-up, and visual state.
 // Depth + Scope + Children let the frontend lay the tree out in altitude columns.
 type RenderedGoal struct {
-	ID            string             `json:"id"`
-	Title         string             `json:"title"`
-	Description   string             `json:"description,omitempty"`
-	Scope         string             `json:"scope"`
-	Parent        string             `json:"parent,omitempty"`
-	Owner         string             `json:"owner,omitempty"`
-	Status        string             `json:"status"`         // coordinator-authored lifecycle
-	StatusDisplay string             `json:"status_display"` // computed roll-up (ratified spec): blocked|awaiting|in-flight|achieved|active|paused|cancelled
-	Depth         int                `json:"depth"`
-	Children      []string           `json:"children"`
-	WorkItems     []RenderedWorkItem `json:"work_items"`
+	ID                string             `json:"id"`
+	Title             string             `json:"title"`
+	Description       string             `json:"description,omitempty"`
+	Scope             string             `json:"scope"`
+	Parent            string             `json:"parent,omitempty"`
+	Owner             string             `json:"owner,omitempty"`
+	ConversationAgent string             `json:"conversation_agent,omitempty"`
+	Status            string             `json:"status"`         // coordinator-authored lifecycle
+	StatusDisplay     string             `json:"status_display"` // computed roll-up (ratified spec): blocked|awaiting|in-flight|achieved|active|paused|cancelled
+	Depth             int                `json:"depth"`
+	Children          []string           `json:"children"`
+	WorkItems         []RenderedWorkItem `json:"work_items"`
 }
 
 // GoalsCounts is the situation-bar summary — goal counts by scope and by visual state.
@@ -183,15 +204,26 @@ type GoalsCounts struct {
 	Aspirational int `json:"aspirational"` // active + paused + cancelled — not yet realized
 }
 
+// GoalEdge is a cross-dependency link between goals (depends_on — not a parent edge).
+type GoalEdge struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	Kind string `json:"kind"` // depends_on
+}
+
 // GoalsDoc is the /api/goals document: the rendered nodes (roots first, each parent immediately
-// before its children — depth-first — so the frontend can stream columns), the counts, and honest
-// absent/error messaging (the dash never fabricates a tree).
+// before its children — depth-first — so the frontend can stream columns), cross-dependency edges,
+// the counts, and honest absent/error messaging (the dash never fabricates a tree).
 type GoalsDoc struct {
+	Version     int            `json:"version,omitempty"`
 	Found       bool           `json:"found"`
 	DefaultView bool           `json:"default_view"`
+	SourcePath  string         `json:"source_path,omitempty"`
+	GeneratedAt string         `json:"generated_at,omitempty"`
 	Error       string         `json:"error,omitempty"`
 	Message     string         `json:"message,omitempty"`
-	Goals       []RenderedGoal `json:"goals"`
+	Goals       []RenderedGoal `json:"goals"` // depth-first tree emission (GoalsDoc.tree alias)
+	Edges       []GoalEdge     `json:"edges,omitempty"`
 	Counts      GoalsCounts    `json:"counts"`
 }
 
@@ -201,6 +233,8 @@ type GoalsInputs struct {
 	File        GoalsFile         // the parsed goals file (zero value when absent)
 	FileOK      bool              // a goals file was present and parsed
 	LoadErr     string            // non-empty when a file existed but failed to parse/validate (surfaced honestly)
+	SourcePath  string            // path the goals file was read from (HTTP layer only)
+	GeneratedAt string            // RFC3339 UTC stamp when the doc was built (HTTP layer only)
 	Backlog     string            // the fleet backlog markdown (for kind=backlog resolution)
 	DeskStates  map[string]string // agent name (lowercased) → live board state label (for kind=desk)
 	IssueStates map[string]string // "owner/repo#N" → "open"|"closed" (optional; empty when the tracker is off)
@@ -256,7 +290,19 @@ func BuildGoals(in GoalsInputs) GoalsDoc {
 		return r
 	}
 
-	doc := GoalsDoc{Found: true, DefaultView: in.File.DefaultView, Goals: make([]RenderedGoal, 0, len(in.File.Goals))}
+	version := in.File.Version
+	if version == 0 {
+		version = 1
+	}
+	doc := GoalsDoc{
+		Found:       true,
+		Version:     version,
+		DefaultView: in.File.DefaultView,
+		SourcePath:  in.SourcePath,
+		GeneratedAt: in.GeneratedAt,
+		Edges:       buildDependsOnEdges(in.File.Goals),
+		Goals:       make([]RenderedGoal, 0, len(in.File.Goals)),
+	}
 	// Emit depth-first from roots (file order) so a parent always precedes its children.
 	var emit func(id string, depth int)
 	emit = func(id string, depth int) {
@@ -266,11 +312,12 @@ func BuildGoals(in GoalsInputs) GoalsDoc {
 		node := RenderedGoal{
 			ID: g.ID, Title: g.Title, Description: g.Description,
 			Scope: string(scopeOf(g.Scope, depth)), Parent: g.Parent, Owner: g.Owner,
-			Status:        string(statusOrDefault(g.Status)),
-			StatusDisplay: r,
-			Depth:         depth,
-			Children:      append([]string(nil), children[id]...),
-			WorkItems:     items,
+			ConversationAgent: strings.TrimSpace(g.ConversationAgent),
+			Status:            string(statusOrDefault(g.Status)),
+			StatusDisplay:     r,
+			Depth:             depth,
+			Children:          append([]string(nil), children[id]...),
+			WorkItems:         items,
 		}
 		doc.Goals = append(doc.Goals, node)
 		countNode(&doc.Counts, node)
@@ -544,6 +591,17 @@ func countNode(c *GoalsCounts, n RenderedGoal) {
 	case "active", "paused", "cancelled":
 		c.Aspirational++
 	}
+}
+
+// buildDependsOnEdges materializes cross-dependency links for GoalsDoc.edges.
+func buildDependsOnEdges(goals []Goal) []GoalEdge {
+	var edges []GoalEdge
+	for _, g := range goals {
+		for _, dep := range g.DependsOn {
+			edges = append(edges, GoalEdge{From: g.ID, To: dep, Kind: "depends_on"})
+		}
+	}
+	return edges
 }
 
 // agentStates flattens a board document's agents into the lowercased name→state map resolveItem's
