@@ -2,16 +2,15 @@ package watch
 
 import (
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/transport"
-	"github.com/jim80net/flotilla/internal/unacked"
 )
 
 type fakeRecent struct {
@@ -142,11 +141,58 @@ func TestUnackedBackstop_PrunePersistsOnQuietSweep(t *testing.T) {
 	}
 }
 
-func TestCoordinatorWakeBusyIsRetryable(t *testing.T) {
-	if !errors.Is(surface.ErrBusy, surface.ErrBusy) {
-		t.Fatal("sanity")
+func TestUnackedStateStore_PersistsPrunedLoad(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "flotilla-unacked-alerted.json")
+	now := time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC)
+	writeStore := newUnackedStateStore(path, 0)
+	st := unackedState{Records: []alertedRecord{
+		{MessageID: "old", ChannelID: "C1", AlertedAt: now.Add(-8 * 24 * time.Hour)},
+	}}
+	if err := writeStore.save(st, now); err != nil {
+		t.Fatal(err)
 	}
-	_ = unacked.DefaultMinAge
+	readStore := newUnackedStateStore(path, 7*24*time.Hour)
+	loaded, pruned := readStore.load(now)
+	if !pruned {
+		t.Fatal("load must report pruned records")
+	}
+	if err := readStore.save(loaded, now); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"old"`) {
+		t.Fatalf("pruned record must be persisted to disk; still in %s", raw)
+	}
+}
+
+func TestUnackedBackstop_SweepPersistsPrunedLoad(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "flotilla-unacked-alerted.json")
+	now := time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC)
+	writeStore := newUnackedStateStore(path, 0)
+	st := unackedState{Records: []alertedRecord{
+		{MessageID: "old", ChannelID: "C1", AlertedAt: now.Add(-8 * 24 * time.Hour)},
+	}}
+	if err := writeStore.save(st, now); err != nil {
+		t.Fatal(err)
+	}
+	u := &UnackedBackstop{
+		cfg:   &roster.Config{},
+		store: newUnackedStateStore(path, 7*24*time.Hour),
+		now:   func() time.Time { return now },
+	}
+	u.sweep()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"old"`) {
+		t.Fatalf("sweep must persist pruned load with no new findings; still in %s", raw)
+	}
 }
 
 func TestUnackedState_IndexByChannelAndMessage(t *testing.T) {

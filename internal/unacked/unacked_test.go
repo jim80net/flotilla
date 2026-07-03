@@ -89,11 +89,27 @@ func TestDefaultMinAgeMatchesScanInterval(t *testing.T) {
 
 func TestScan_SkipsBeyondAckWindow(t *testing.T) {
 	now := ts(0)
+	custom := cfg()
+	custom.AckWindow = 1 * time.Hour
 	msgs := []Message{{
 		ID: "1", AuthorID: "op", Content: "Can you fix the dashboard?",
-		Timestamp: now.Add(-3 * time.Hour),
+		Timestamp: now.Add(-90 * time.Minute),
 	}}
-	if got := Scan(msgs, "C1", now, cfg()); len(got) != 0 {
-		t.Fatalf("message older than AckWindow (2h) must not alert; got %v", got)
+	if got := Scan(msgs, "C1", now, custom); len(got) != 0 {
+		t.Fatalf("message older than AckWindow must not alert; got %v", got)
+	}
+}
+
+func TestScan_FlagsInsideAckWindow(t *testing.T) {
+	now := ts(0)
+	custom := cfg()
+	custom.AckWindow = 2 * time.Hour
+	msgs := []Message{{
+		ID: "1", AuthorID: "op", Content: "Can you fix the dashboard?",
+		Timestamp: now.Add(-45 * time.Minute),
+	}}
+	got := Scan(msgs, "C1", now, custom)
+	if len(got) != 1 {
+		t.Fatalf("message inside AckWindow and past MinAge should flag; got %v", got)
 	}
 }
