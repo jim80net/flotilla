@@ -162,30 +162,14 @@ func cmdWatch(args []string) error {
 		eventPollInterval = d
 	}
 	rosterDir := filepath.Dir(*rosterPath)
-	if *ackPath == "" {
-		*ackPath = filepath.Join(rosterDir, "flotilla-xo-alive")
-	}
-	if *snapshotPath == "" {
-		*snapshotPath = filepath.Join(rosterDir, "flotilla-detector-state.json")
-	}
-	if *cursorPath == "" {
-		*cursorPath = filepath.Join(rosterDir, "flotilla-relay-cursor.json")
-	}
-	if *queuePath == "" {
-		*queuePath = filepath.Join(rosterDir, "flotilla-relay-queue.json")
-	}
-	if *unackedPath == "" {
-		*unackedPath = filepath.Join(rosterDir, "flotilla-unacked-alerted.json")
-	}
-	if *awaitingPath == "" {
-		*awaitingPath = filepath.Join(rosterDir, "flotilla-xo-awaiting")
-	}
-	if *settledPath == "" {
-		*settledPath = filepath.Join(rosterDir, "flotilla-xo-settled")
-	}
-	if *trackerPath == "" {
-		*trackerPath = filepath.Join(rosterDir, ".flotilla-state.md")
-	}
+	defaultPath(ackPath, rosterDir, "flotilla-xo-alive")
+	defaultPath(snapshotPath, rosterDir, "flotilla-detector-state.json")
+	defaultPath(cursorPath, rosterDir, "flotilla-relay-cursor.json")
+	defaultPath(queuePath, rosterDir, "flotilla-relay-queue.json")
+	defaultPath(unackedPath, rosterDir, "flotilla-unacked-alerted.json")
+	defaultPath(awaitingPath, rosterDir, "flotilla-xo-awaiting")
+	defaultPath(settledPath, rosterDir, "flotilla-xo-settled")
+	defaultPath(trackerPath, rosterDir, ".flotilla-state.md")
 
 	// Load secrets once: the bot token (gateway), the alert/notice webhook, and — kept for the
 	// per-desk visibility mirror — the whole Secrets so each desk's own webhook can be resolved at
@@ -1350,6 +1334,16 @@ func adaptiveIntervalEnabled(flagVal string) bool {
 		}
 	}
 	return watch.AdaptiveIntervalEnabled()
+}
+
+// defaultPath sets *p to filepath.Join(parts...) only when *p is empty, so an
+// operator-supplied flag/env value always wins and an unset one falls back to the
+// roster-relative default. It factors out the ~identical unset-path defaulting
+// repeated for every watch state file (ack, snapshot, cursor, queue, …).
+func defaultPath(p *string, parts ...string) {
+	if *p == "" {
+		*p = filepath.Join(parts...)
+	}
 }
 
 // optionalDuration reads a positive duration from a CLI flag, else from envKey.
