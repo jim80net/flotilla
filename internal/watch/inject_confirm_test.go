@@ -64,16 +64,33 @@ func TestInjectorBusyRelayEscalatesOnceAtThreshold(t *testing.T) {
 	}
 }
 
-func TestInjectorBusyRelayBoundedDropAtMax(t *testing.T) {
-	// At maxRelayDeferrals the message is escalated AND DROPPED (no further re-enqueue) — the
-	// bound that prevents an unbounded timer chain against a wedged XO.
+func TestInjectorBusyRelayNeverDropsAfterLongDefer(t *testing.T) {
+	// Operator relays stay queued however long the agent stays busy (#286) — no UNDELIVERABLE drop.
 	r := newRig(surface.ErrBusy)
-	r.in.deliver(Job{Agent: "xo", Kind: "relay", deferrals: maxRelayDeferrals - 1})
-	if len(r.deferred) != 0 {
-		t.Errorf("deferred = %d, want 0 (the bound DROPS rather than re-enqueues)", len(r.deferred))
+	r.in.deliver(Job{Agent: "xo", Kind: "relay", MessageID: "100", deferrals: 59})
+	if len(r.deferred) != 1 {
+		t.Errorf("deferred = %d, want 1 (still re-enqueued after many busy deferrals)", len(r.deferred))
 	}
-	if len(r.alerts) != 1 || !strings.Contains(r.alerts[0], "UNDELIVERABLE") {
-		t.Errorf("alerts = %v, want exactly one UNDELIVERABLE drop alert", r.alerts)
+	for _, a := range r.alerts {
+		if strings.Contains(a, "UNDELIVERABLE") || strings.Contains(a, "DROPPED") {
+			t.Errorf("busy defer must not drop: alert = %q", a)
+		}
+	}
+}
+
+func TestInjectorBusyRelayRepeatsStaleEscalation(t *testing.T) {
+	base := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	r := newRig(surface.ErrBusy)
+	r.in.now = func() time.Time { return base.Add(31 * time.Minute) }
+	r.in.deliver(Job{
+		Agent: "xo", Kind: "relay", MessageID: "200", deferrals: 10,
+		enqueuedAt: base, lastStaleAlert: base,
+	})
+	if len(r.alerts) != 1 || !strings.Contains(r.alerts[0], "still QUEUED") {
+		t.Fatalf("alerts = %v, want one periodic stale escalation", r.alerts)
+	}
+	if len(r.deferred) != 1 {
+		t.Fatalf("deferred = %d, want 1 (message stays queued)", len(r.deferred))
 	}
 }
 
