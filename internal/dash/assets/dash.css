@@ -1612,7 +1612,20 @@ html, body { overflow-x: clip; }
 .pd-slide-body li { margin: .3rem 0; }
 .pd-slide-body strong { color: var(--ink); }
 .pd-slide-body code { font-family: var(--mono, "IBM Plex Mono", monospace); font-size: .9em; background: var(--abyss-3); padding: .06em .4em; border-radius: 4px; }
-.pd-slide-body a { color: var(--cyan); }
+/* dig-deeper links (parade v3): every claim can link to its source (PR, walk, brief,
+   transcript) — make them obvious so the slide reads as "click to expand". */
+.pd-slide-body a { color: var(--cyan); text-decoration: underline; text-underline-offset: 2px; }
+.pd-slide-body a::after { content: " ↗"; font-size: .8em; opacity: .7; }
+.pd-slide-body a:hover { color: var(--cyan-strong, var(--cyan)); }
+/* decision-brief callout (parade v3): a "> " block renders as a bordered brief box, giving an
+   open decision's 6-element brief its own weight on the decisions slides. */
+.pd-slide-body .pd-quote {
+  margin: 1rem 0; padding: .8rem 1.1rem; border-left: 3px solid var(--amber);
+  background: color-mix(in srgb, var(--amber) 8%, transparent); border-radius: var(--r-sm);
+}
+.pd-slide-body .pd-quote p { margin: .3rem 0; }
+.pd-slide-body .pd-quote p:first-child { margin-top: 0; }
+.pd-slide-body .pd-quote a::after { content: ""; }
 /* image refs render LARGE — the visual is the point of the slide. */
 .pd-slide-img { display: block; max-width: 100%; max-height: 62vh; width: auto; height: auto; margin: 1rem auto; border: 1px solid var(--line); border-radius: var(--r-sm); box-shadow: var(--shadow, 0 2px 10px rgba(0,0,0,.08)); }
 
