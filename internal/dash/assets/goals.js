@@ -88,8 +88,8 @@
 
   var STATE_LABEL = {
     realized: "realized", "in-flight": "in flight", awaiting: "awaiting you",
-    blocked: "blocked", active: "active", aspirational: "aspirational",
-    paused: "paused", cancelled: "cancelled",
+    blocked: "blocked", pending: "waiting on a dependency", active: "active",
+    aspirational: "aspirational", paused: "paused", cancelled: "cancelled",
   };
 
   /* ── situation strip + legend (unchanged from the merged view) ─────────── */
@@ -99,6 +99,7 @@
       { k: "Flotillas", v: c.fleet || 0, tone: "goal", d: (c.total || 0) + " nodes total" },
       { k: "In flight", v: c.in_flight || 0, tone: "inflight", d: "desks working now" },
       { k: "Awaiting you", v: c.awaiting || 0, tone: "awaiting", d: "your decisions & blocks" },
+      { k: "Pending", v: c.pending || 0, tone: "pending", d: "waiting on a dependency" },
       { k: "Realized", v: c.realized || 0, tone: "realized", d: "done & solidified" },
       { k: "Aspirational", v: c.aspirational || 0, tone: "aspirational", d: "planned / not yet done" },
     ];
@@ -134,7 +135,8 @@
   function renderLegend() {
     var items = [
       ["realized", "realized"], ["in-flight", "in flight"],
-      ["awaiting", "awaiting you"], ["aspirational", "aspirational"], ["dep", "depends on"],
+      ["awaiting", "awaiting you"], ["pending", "waiting on a dependency"],
+      ["aspirational", "aspirational"], ["dep", "depends on"],
     ];
     q("goals-legend").innerHTML = items.map(function (i) {
       return '<span class="glegend"><span class="gdot gdot-' + i[0] + '"></span>' + escapeHtml(i[1]) + "</span>";

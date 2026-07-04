@@ -447,6 +447,57 @@ func TestBuildGoals_DeclaredPausedSurvivesIdle(t *testing.T) {
 	}
 }
 
+func TestBuildGoals_Pending(t *testing.T) {
+	// #349 Inc 3 taxonomy: a would-be-active goal waiting on an unfinished depends_on target
+	// is dependency-gated → "pending" (a calm state distinct from blocked-red / awaiting-amber).
+	// Once every dependency is achieved it reverts to plain active.
+	t.Run("unfinished dependency → pending", func(t *testing.T) {
+		file := GoalsFile{Goals: []Goal{
+			{ID: "dep", Title: "Prereq"}, // empty → active (not achieved)
+			{ID: "waiter", Title: "Waits", DependsOn: []string{"dep"}},
+		}}
+		doc := BuildGoals(GoalsInputs{File: file, FileOK: true})
+		byID := indexByID(doc.Goals)
+		if byID["waiter"].StatusDisplay != "pending" {
+			t.Errorf("goal with an unfinished depends_on → pending, got %q", byID["waiter"].StatusDisplay)
+		}
+		if doc.Counts.Pending != 1 {
+			t.Errorf("counts.pending = %d, want 1", doc.Counts.Pending)
+		}
+		if byID["dep"].StatusDisplay != "active" {
+			t.Errorf("the dependency itself is untouched (active), got %q", byID["dep"].StatusDisplay)
+		}
+	})
+	t.Run("achieved dependency → stays active", func(t *testing.T) {
+		file := GoalsFile{Goals: []Goal{
+			{ID: "dep", Title: "Prereq", Status: StatusAchieved},
+			{ID: "waiter", Title: "Waits", DependsOn: []string{"dep"}},
+		}}
+		doc := BuildGoals(GoalsInputs{File: file, FileOK: true})
+		byID := indexByID(doc.Goals)
+		if byID["waiter"].StatusDisplay != "active" {
+			t.Errorf("goal whose only depends_on is achieved → active, got %q", byID["waiter"].StatusDisplay)
+		}
+		if doc.Counts.Pending != 0 {
+			t.Errorf("counts.pending = %d, want 0", doc.Counts.Pending)
+		}
+	})
+	t.Run("only would-be-active goals become pending", func(t *testing.T) {
+		// A goal with live in-flight work stays in-flight even if a dependency is unfinished —
+		// pending is strictly the calm "nothing to do but wait" state, not an override.
+		file := GoalsFile{Goals: []Goal{
+			{ID: "dep", Title: "Prereq"},
+			{ID: "busy", Title: "Busy", DependsOn: []string{"dep"},
+				WorkItems: []WorkItem{{Kind: WorkInline, Text: "todo"}}},
+		}}
+		doc := BuildGoals(GoalsInputs{File: file, FileOK: true})
+		byID := indexByID(doc.Goals)
+		if byID["busy"].StatusDisplay != "in-flight" {
+			t.Errorf("a goal with active work stays in-flight, not pending, got %q", byID["busy"].StatusDisplay)
+		}
+	})
+}
+
 // --- BuildGoals: emission order, depth, scope inference (task), counts ---
 
 func TestBuildGoals_OrderDepthAndScope(t *testing.T) {
