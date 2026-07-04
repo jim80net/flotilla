@@ -189,6 +189,33 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
   .nav-cta { margin-left: auto; padding: .4em .75em; border-radius: var(--r-sm); }
 }
 
+/* ── Independence Day banner ─────────────────────────────────────────────── */
+.id-banner {
+  position: relative; z-index: 1;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--cyan) 10%, var(--raised)),
+    color-mix(in srgb, var(--amber) 8%, var(--raised))
+  );
+}
+.id-banner-inner {
+  max-width: var(--maxw); margin: 0 auto; padding: .75rem 1.5rem;
+  display: flex; align-items: center; gap: .75rem;
+}
+.id-banner-flag { font-size: 1.25rem; flex-shrink: 0; }
+.id-banner-copy {
+  margin: 0; font-size: .82rem; line-height: 1.45; color: var(--ink-2);
+}
+.id-banner-copy strong { color: var(--ink); font-weight: 600; }
+.id-banner-copy a {
+  color: var(--cyan); font-weight: 500; white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .id-banner-inner { flex-wrap: wrap; padding: .65rem 1rem; }
+  .id-banner-copy a { white-space: normal; display: inline-block; margin-top: .15rem; }
+}
+
 /* ── hero ───────────────────────────────────────────────────────────────── */
 .hero { max-width: var(--maxw); margin: 0 auto; padding: 3rem 1.5rem 4rem; }
 .hero-inner {

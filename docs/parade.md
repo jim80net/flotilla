@@ -99,6 +99,19 @@ for the read command (absolute binary path + roster path injected), matching the
 visibility-synthesis pattern — the workspace skill enriches judgment but is not a hard
 dependency.
 
+## Two parade surfaces — fleet vs product
+
+The parade **ceremony** is one doctrine; the **archive** splits by audience:
+
+| Surface | Where | Content | Reader |
+|---|---|---|---|
+| **Fleet parade** | dash `/parade` (`--parades-dir` → host `state/parades/`) | **Every project-XO's** accomplishments, learnings, demos — trading, memory, ventures, product lanes, honest stand-downs | Operator dogfooding the fleet |
+| **Product / marketing parade** | public `site/parade/` (GitHub Pages) | The **open-source repo's** month-one story — commits, PRs, eras, generic only | Friends, prospects, marketing desk |
+
+**Dash `slides.md` is for the fleet.** A product-only inaugural deck belongs on the marketing site (or `slides-product.md` beside the fleet deck), not as the only parade the operator sees in the cockpit. Tier-3 fleet parades must roll up **all** project-XOs — revive inactive desks for honest answers when their lanes were quiet; a stand-down is a valid slide.
+
+Authoring: fleet decks follow [parade-slides v3](./design/parade-slides-v3.md) (`<XO> · Proud of` / `Learned` / `Need` / `Demo` per slide). Marketing decks may use era-by-era narrative instead.
+
 ## Orthogonal to visibility-synthesis
 
 | | Visibility synthesis | Parade formation |
