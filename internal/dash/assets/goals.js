@@ -1064,12 +1064,19 @@
     if (wi.kind === "desk" && wi.agent) return ' data-goto-desk="' + escapeHtml(wi.agent) + '"' + t;
     return t;
   }
-  function gatedRow(node, wi) {
+  // sameBrief compares two briefs by trimmed content — a gated item whose brief is
+  // identical to the node-level brief already shown above must NOT re-render it (the
+  // modal was printing the same six-element decision package twice; Wave 4 readability).
+  function sameBrief(a, b) { return hasBrief(a) && hasBrief(b) && String(a).trim() === String(b).trim(); }
+  function gatedRow(node, wi, nodeBrief) {
     var link = wi.kind === "desk" && wi.agent; // a routable item is a button; others are plain
     var head = "<" + (link ? "button type=\"button\"" : "div") + ' class="gm-gated-item' + (link ? " gm-item-link" : "") + '"' + itemLinkAttrs(wi, node) + ">" +
       escapeHtml(wi.label || wi.kind || "") + (wi.detail ? ' <span class="muted">— ' + escapeHtml(wi.detail) + "</span>" : "") +
       "</" + (link ? "button" : "div") + ">";
-    var body = hasBrief(wi.brief) ? '<div class="gm-brief-full">' + renderBrief(wi.brief) + "</div>" : BRIEF_EMPTY;
+    // Skip the brief body when it duplicates the node brief printed above; otherwise show
+    // the item's own brief (or the honest no-brief note).
+    var body = sameBrief(wi.brief, nodeBrief) ? ""
+      : (hasBrief(wi.brief) ? '<div class="gm-brief-full">' + renderBrief(wi.brief) + "</div>" : BRIEF_EMPTY);
     return '<div class="gm-gated-row">' + head + body + "</div>";
   }
 
@@ -1084,7 +1091,7 @@
     if (gated.length) {
       // Each gated item clicks through to its target + shows its decision package (#347/B4).
       parts.push('<div class="gm-gated"><div class="gm-gated-lab">Waiting on you</div>' +
-        gated.map(function (wi) { return gatedRow(n, wi); }).join("") + "</div>");
+        gated.map(function (wi) { return gatedRow(n, wi, n.brief); }).join("") + "</div>");
     } else {
       // B6: no DIRECT gate — surface the DOWNSTREAM decisions this node rolls up, each
       // routing into the descendant that actually owns it.
