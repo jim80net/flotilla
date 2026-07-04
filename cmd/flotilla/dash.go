@@ -42,6 +42,7 @@ func cmdDash(args []string) error {
 	repo := fs.String("repo", os.Getenv("FLOTILLA_DASH_REPO"), "GitHub repo for the issue tracker (owner/name; default: the working-dir repo as gh resolves it)")
 	secretsPath := fs.String("secrets", os.Getenv("FLOTILLA_SECRETS"), "secrets env file for the notify webhook (optional; notify is disabled without it)")
 	goalsLayout := fs.String("goals-layout", os.Getenv("FLOTILLA_DASH_GOALS_LAYOUT"), "initial Goals-map layout: org (default) | tree — the live toggle still overrides")
+	paradesDir := fs.String("parades-dir", os.Getenv("FLOTILLA_DASH_PARADES_DIR"), "parade archive dir the /parade page reads (default <roster-dir>/state/parades)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -92,6 +93,7 @@ func cmdDash(args []string) error {
 		AckPath:      *ackPath,
 		BacklogPath:  *trackerPath,
 		GoalsPath:    *goalsPath,
+		ParadesPath:  *paradesDir,
 		Bind:         *bind,
 		Repo:         pinnedRepo,
 		SecretsPath:  *secretsPath,

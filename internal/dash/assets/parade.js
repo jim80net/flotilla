@@ -1,0 +1,178 @@
+/* flotilla parade — a POWERPOINT-STYLE deck viewer over the parade archive.
+ * /api/parades gives every parade newest-first; each carries slides.md (the deck source:
+ * "---"-separated slides, first line per slide = title, image refs render large). The page
+ * OPENS as the newest deck; ← / → / tap-halves / swipe / arrow-keys navigate slides; a
+ * counter shows position; Escape (or "all parades") drops to the newest-first list — the
+ * progression — where tapping a parade opens its deck. report.md content ever reaches the
+ * DOM only through the escape-then-markdown pipeline (escape FIRST), so nothing can inject.
+ */
+(function () {
+  "use strict";
+  function el(id) { return document.getElementById(id); }
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
+  var PARADES = [], pIdx = 0, sIdx = 0, view = "list";
+
+  // resolve a slide image ref to a served URL: an http(s) ref passes through; anything else
+  // is treated as an asset basename under the parade's assets/ dir.
+  function imgURL(date, src) {
+    if (/^https?:\/\//i.test(src)) return src;
+    return "/parade-assets/" + encodeURIComponent(date) + "/" + encodeURIComponent(String(src).replace(/^.*\//, ""));
+  }
+
+  // escape-then-markdown for a slide body (mirrors goals.js renderBrief). Escapes FIRST, then
+  // a fixed subset: a block image line ![alt](src) renders LARGE; #.. headings; -/* bullets;
+  // blank-line paragraphs; inline **bold**, `code`, [text](http…). Images resolve via date.
+  function renderMd(date, md) {
+    var lines = String(md == null ? "" : md).replace(/\r\n/g, "\n").split("\n");
+    // inline() takes ALREADY-ESCAPED text and layers inline markdown on top. Its link href
+    // ($2) is already-escaped and valid in an attribute, so nothing is re-escaped here.
+    function inline(escd) {
+      return escd
+        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+        .replace(/`([^`]+)`/g, "<code>$1</code>")
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    }
+    var out = [], list = null;
+    function flush() { if (list) { out.push("<ul>" + list.join("") + "</ul>"); list = null; } }
+    for (var i = 0; i < lines.length; i++) {
+      var ln = lines[i];
+      // Parse an image ref from the RAW line so its src (a real basename / URL) is NOT
+      // HTML-escaped before imgURL builds the asset URL — escaping first would corrupt an
+      // '&' in the name and break the load. The FINAL url + alt are escaped for the attrs
+      // (cubic #373 P5).
+      var img = /^!\[([^\]]*)\]\(([^)\s]+)\)\s*$/.exec(ln);
+      if (img) { flush(); out.push('<img class="pd-slide-img" loading="lazy" src="' + esc(imgURL(date, img[2])) + '" alt="' + esc(img[1]) + '" />'); continue; }
+      var e = esc(ln); // escape the remaining text FIRST, then layer markdown
+      var h = /^(#{1,6})\s+(.*)$/.exec(e), li = /^\s*[-*]\s+(.*)$/.exec(e);
+      if (h) { flush(); out.push('<div class="pd-h pd-h' + Math.min(h[1].length, 4) + '">' + inline(h[2]) + "</div>"); }
+      else if (li) { (list = list || []).push("<li>" + inline(li[1]) + "</li>"); }
+      else if (e.trim() === "") { flush(); }
+      else { flush(); out.push("<p>" + inline(e) + "</p>"); }
+    }
+    flush();
+    return out.join("");
+  }
+
+  // parseSlides splits slides.md on a line that is exactly "---"; each slide's FIRST non-empty
+  // line is its title (a leading # is stripped), the rest is the body.
+  function parseSlides(md) {
+    var lines = String(md == null ? "" : md).replace(/\r\n/g, "\n").split("\n");
+    var chunks = [], cur = [];
+    for (var i = 0; i < lines.length; i++) {
+      if (/^---\s*$/.test(lines[i])) { chunks.push(cur.join("\n")); cur = []; }
+      else cur.push(lines[i]);
+    }
+    chunks.push(cur.join("\n"));
+    return chunks.map(function (c) { return c.trim(); }).filter(Boolean).map(function (chunk) {
+      var ls = chunk.split("\n");
+      var title = (ls.shift() || "").replace(/^#+\s*/, "").trim();
+      return { title: title, body: ls.join("\n").trim() };
+    });
+  }
+
+  function curSlides() { return parseSlides((PARADES[pIdx] || {}).slides || ""); }
+
+  /* ── deck view ─────────────────────────────────────────────────────────── */
+  function renderDeck() {
+    var par = PARADES[pIdx];
+    if (!par) { showList(); return; }
+    var slides = curSlides();
+    if (!slides.length) slides = [{ title: par.date, body: "*No slides yet for this parade.*" }];
+    if (sIdx < 0) sIdx = 0;
+    if (sIdx > slides.length - 1) sIdx = slides.length - 1;
+    var s = slides[sIdx];
+    el("pd-deck-date").textContent = par.date;
+    el("pd-counter").textContent = (sIdx + 1) + " / " + slides.length;
+    el("pd-slide").innerHTML =
+      (s.title ? '<h1 class="pd-slide-title">' + esc(s.title) + "</h1>" : "") +
+      '<div class="pd-slide-body">' + renderMd(par.date, s.body) + "</div>";
+    el("pd-prev").disabled = sIdx === 0;
+    el("pd-next").disabled = sIdx >= slides.length - 1;
+    var slideEl = el("pd-slide"); if (slideEl) slideEl.focus({ preventScroll: true });
+    el("pd-deck").hidden = false;
+    el("pd-list-view").hidden = true;
+    view = "deck";
+  }
+  function next() { if (sIdx < curSlides().length - 1) { sIdx++; renderDeck(); } }
+  function prev() { if (sIdx > 0) { sIdx--; renderDeck(); } }
+  function openDeck(i) { pIdx = i; sIdx = 0; renderDeck(); }
+
+  /* ── list view (the progression) ───────────────────────────────────────── */
+  function showList() {
+    el("pd-deck").hidden = true;
+    el("pd-list-view").hidden = false;
+    view = "list";
+  }
+  function renderList() {
+    var box = el("pd-list");
+    if (!box) return;
+    if (!PARADES.length) { box.innerHTML = '<div class="empty">No parades yet — the first one will appear here.</div>'; return; }
+    box.innerHTML = PARADES.map(function (p, i) {
+      var slides = parseSlides(p.slides || "");
+      var first = slides.length ? slides[0].title : "(empty)";
+      return '<button class="pd-listcard" type="button" data-i="' + i + '">' +
+        '<span class="pd-listcard-date">' + esc(p.date) + "</span>" +
+        '<span class="pd-listcard-meta">' + slides.length + " slide" + (slides.length === 1 ? "" : "s") +
+        " · " + esc(first) + "</span></button>";
+    }).join("");
+  }
+
+  /* ── wiring: arrows, tap-halves, swipe, keyboard, list clicks ──────────── */
+  function wire() {
+    el("pd-prev").addEventListener("click", function (e) { e.stopPropagation(); prev(); });
+    el("pd-next").addEventListener("click", function (e) { e.stopPropagation(); next(); });
+    el("pd-close").addEventListener("click", showList);
+    // tap the left/right half of the slide to page (ignore taps on links/images).
+    el("pd-stage").addEventListener("click", function (e) {
+      if (e.target.closest("a") || e.target.closest("button")) return;
+      var r = el("pd-stage").getBoundingClientRect();
+      if (e.clientX - r.left < r.width / 2) prev(); else next();
+    });
+    // swipe.
+    var x0 = null;
+    el("pd-stage").addEventListener("touchstart", function (e) { x0 = e.touches[0].clientX; }, { passive: true });
+    el("pd-stage").addEventListener("touchend", function (e) {
+      if (x0 == null) return;
+      var dx = e.changedTouches[0].clientX - x0; x0 = null;
+      if (Math.abs(dx) > 40) { if (dx < 0) next(); else prev(); }
+    }, { passive: true });
+    // keyboard: arrows page, Escape drops to the list.
+    document.addEventListener("keydown", function (e) {
+      if (view === "deck") {
+        if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") { e.preventDefault(); next(); }
+        else if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); prev(); }
+        else if (e.key === "Escape") { e.preventDefault(); showList(); }
+      }
+    });
+    // list card → open that deck.
+    el("pd-list").addEventListener("click", function (e) {
+      var card = e.target.closest("[data-i]");
+      if (card) openDeck(parseInt(card.getAttribute("data-i"), 10) || 0);
+    });
+  }
+
+  wire();
+  fetch("/api/parades", { cache: "no-store" })
+    .then(function (r) { if (!r.ok) throw new Error("/api/parades → " + r.status); return r.json(); })
+    .then(function (d) {
+      if (d && d.error) { // an archive read error is an ERROR state, not a false "no parades"
+        showList();
+        var b = el("pd-list");
+        if (b) b.innerHTML = '<div class="error">' + esc(d.error) + "</div>";
+        return;
+      }
+      PARADES = (d && d.parades) || [];
+      renderList();
+      if (PARADES.length) openDeck(0); else showList(); // open the newest deck; else the (empty) list
+    })
+    .catch(function (e) {
+      showList();
+      var box = el("pd-list");
+      if (box) box.innerHTML = '<div class="error">Could not load parades: ' + esc(e.message) + "</div>";
+    });
+})();

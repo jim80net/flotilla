@@ -31,6 +31,7 @@ type Config struct {
 	GoalsPath        string // goals file the Goals view reads (default <roster-dir>/fleet-goals.json)
 	GoalsYAMLPath    string // goals yaml source compiled on load (default <roster-dir>/fleet-goals.yaml)
 	SessionMirrorDir string // per-agent session-mirror ledgers (default <roster-dir>/session-mirror)
+	ParadesPath      string // parade archive: <dir>/<YYYY-MM-DD>/{report.md,assets/} (default <roster-dir>/state/parades)
 	Bind             string // listen address (default 127.0.0.1:8787)
 	Repo             string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
 	SecretsPath      string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
@@ -196,6 +197,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/history", s.handleHistory)
 	s.mux.HandleFunc("/api/goals", s.handleGoals)
 	s.mux.HandleFunc("/api/session-mirror", s.handleSessionMirror)
+	s.mux.HandleFunc("/api/parades", s.handleParades)
+	s.mux.HandleFunc("/parade", s.handleParadePage)
+	s.mux.HandleFunc("/parade-assets/{date}/{file}", s.handleParadeAsset)
 	s.mux.HandleFunc("/events", s.handleEvents)
 	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticAssets()))))
 
@@ -531,6 +535,9 @@ func ResolvePaths(cfg Config, rc *roster.Config) Config {
 	}
 	if cfg.SessionMirrorDir == "" {
 		cfg.SessionMirrorDir = filepath.Join(dir, "session-mirror")
+	}
+	if cfg.ParadesPath == "" {
+		cfg.ParadesPath = filepath.Join(dir, "state", "parades")
 	}
 	// The CoS ledger path is whatever the roster resolved (empty when the CoS
 	// mirror is inert — then the history view shows no ledger, honestly).
