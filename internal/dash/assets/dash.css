@@ -1315,6 +1315,9 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gedge-blocked { stroke: color-mix(in srgb, var(--err) 55%, transparent); stroke-dasharray: 5 5; }
 .gedge-pending { stroke: color-mix(in srgb, var(--violet) 50%, transparent); stroke-dasharray: 4 5; }
 .gedge-aspirational { stroke: color-mix(in srgb, var(--ink-3) 48%, transparent); stroke-dasharray: 3 6; }
+/* per-limb hue (mind map): the branch colour rides on an inline per-limb stroke; give the
+   limb edges a touch more weight so each coloured branch traces clearly out from the hub. */
+.gedge-limb { stroke-width: 2; opacity: .92; }
 
 /* cross-dependency arcs (depends_on) — faint dashed violet, distinct from the solid
    teal/cyan parent-child tree edges; emphasized on hover of either endpoint */

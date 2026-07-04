@@ -49,20 +49,39 @@ func TestParseParadeArgs_FleetNoExtras(t *testing.T) {
 	}
 }
 
-func TestBuildParadeRequest_FourDomainsAndLearnings(t *testing.T) {
+func TestBuildParadeRequest_OperatorDimensionCanon(t *testing.T) {
 	req := buildParadeRequest()
 	for _, want := range []string{
-		"ACCOMPLISHMENTS",
-		"WORKING ON NEXT",
-		"## Learnings",
-		"NEEDS HELP",
+		"proud of",
+		"learned",
+		"looking forward to",
+		"unblock or direction",
+		"PROUD OF:",
+		"LEARNED:",
+		"LOOKING FORWARD TO:",
+		"NEED:",
+		"DEMO:",
+		"demo LAST",
+		"walk-inspection",
+		"INCOMPLETE",
+		"decision-brief-on-blocked",
+		"unconditional",
 		"notify",
 		"Do NOT run",
-		"fleet-wide",
 	} {
 		if !strings.Contains(req, want) {
 			t.Errorf("parade request missing %q", want)
 		}
+	}
+	for _, banned := range []string{"ACCOMPLISHMENTS", "ACCOMPLISHED", "## Learnings", "NEEDS HELP", "WORKING ON NEXT"} {
+		if strings.Contains(req, banned) {
+			t.Errorf("parade request must not use legacy heading %q", banned)
+		}
+	}
+	needIdx := strings.Index(req, "NEED:")
+	demoIdx := strings.Index(req, "DEMO:")
+	if needIdx < 0 || demoIdx < 0 || demoIdx <= needIdx {
+		t.Errorf("canonical order wants DEMO after NEED; needIdx=%d demoIdx=%d", needIdx, demoIdx)
 	}
 }
 
@@ -73,8 +92,10 @@ func TestParadeRollupWakeBody_Tier2Contract(t *testing.T) {
 		"alpha-be",
 		"C_ALPHA",
 		"result --roster",
-		"Tier 2",
-		"## Learnings",
+		"operator canon",
+		"demo last",
+		"Learned",
+		"unconditional",
 		"UNKNOWN",
 		"fleet-learnings.md",
 	} {
@@ -87,9 +108,13 @@ func TestParadeRollupWakeBody_Tier2Contract(t *testing.T) {
 func TestParadeRollupWakeBody_Tier3Fleet(t *testing.T) {
 	body := paradeRollupWakeBody("meta-xo", "/bin/flotilla", "/r.json", []string{"alpha-xo", "beta-xo"}, []string{"C_CMD"}, true)
 	for _, want := range []string{
-		"Fleet parade",
-		"Tier 3",
-		"GROUPED BY XO",
+		"slides.md",
+		"parades-dir",
+		"/parade",
+		"PROUD OF",
+		"LEARNED",
+		"one slide per project-XO",
+		"epilogue",
 		"alpha-xo",
 		"beta-xo",
 	} {

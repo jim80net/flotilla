@@ -472,6 +472,28 @@ func TestHandleSessionMirror(t *testing.T) {
 	}
 }
 
+// TestMindmapLimbHue locks the mind-map per-limb hue (operator polish track): each top-level
+// limb (a hub child/root and its subtree) is coloured with a distinct hue that rides on the
+// branch EDGES, so the limbs are visually traceable while node cards keep their status colour.
+func TestMindmapLimbHue(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/goals.js").Body.String()
+	for _, marker := range []string{
+		"computeLimbHues",           // assigns a hue per limb (mind-map only)
+		"limbStroke",                // resolves a node's limb colour
+		"gedge-limb",                // the limb-coloured branch edge
+		`goalsLayout !== "mindmap"`, // guarded: no-op for tree/org (status edges preserved)
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must carry the mind-map per-limb hue (missing %q)", marker)
+		}
+	}
+	if css := doGet(t, srv, "/static/dash.css").Body.String(); !strings.Contains(css, ".gedge-limb") {
+		t.Error("dash.css must style the limb-coloured branch edge (.gedge-limb)")
+	}
+}
+
 // TestGoalsCanvasAssets locks the Goals view's pan/zoom canvas (#280 Inc 1). The
 // Goals view was ported from the merged flex-column layout to the operator-approved
 // 2D Fleet Situation Map — an absolute tiered layout inside a transform-driven world
