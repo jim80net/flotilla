@@ -89,8 +89,16 @@ OPENCODE_MODEL=<provider>/<model> opencode .
 | P5 | `RecycleBridge` + switch-target parity | medium |
 | P6 | Add `opencode` to `harnessAllocationSurface` coordinator switch | small (after P4) |
 
+## Coupled trial (operator/CoS 2026-07-04)
+
+**Shape:** `opencode-trial-xo` (grok project-XO) supervises this desk during the 48h
+succession trial. Trial XO dispatches pass-criteria exercises, gates outputs, reports to CoS.
+Desk stays **fleet-command member only** (pr-rep pattern) — no dedicated Discord channel.
+
+Pass criteria: host-local `succession-trial-pass-criteria.md` (fleet-ops state). Product PR #395.
+
 ## Boundaries
 
 - **Not in scope:** model quality eval — training desk.
 - **Blocked:** rostering opencode on a **coordinator** seat before P4 + supervised trial script.
-- **CoS gate:** channel/webhook mint + operator window before first `resume`.
+- **CoS gate:** trial-XO channel/webhook mint + operator veto window before first `resume`.
