@@ -92,10 +92,10 @@ func TestHandleParadeAsset_RejectsTraversalAndNonImage(t *testing.T) {
 		t.Errorf("valid image asset must serve, got code=%d body=%q", rec.Code, rec.Body.String())
 	}
 	for _, bad := range []string{
-		"/parade-assets/2026-07-04/report.md",        // not an image
-		"/parade-assets/2026-13-99/shot.png",         // bad date
-		"/parade-assets/2026-07-04/..%2freport.md",   // encoded traversal
-		"/parade-assets/2026-07-04/sub%2fshot.png",   // path separator in file
+		"/parade-assets/2026-07-04/report.md",      // not an image
+		"/parade-assets/2026-13-99/shot.png",       // bad date
+		"/parade-assets/2026-07-04/..%2freport.md", // encoded traversal
+		"/parade-assets/2026-07-04/sub%2fshot.png", // path separator in file
 	} {
 		if rec := doGet(t, srv, bad); rec.Code == 200 {
 			t.Errorf("%s must NOT serve (got 200)", bad)
