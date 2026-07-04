@@ -145,6 +145,15 @@
   function renderDoneHistory(doc) {
     var list = q("goals-done-list"), countEl = q("goals-done-count");
     if (!list) return;
+    if (countEl) countEl.textContent = "";
+    // Distinguish an ERROR / no-goals-file state from a genuine empty: when the goals doc
+    // could not be loaded (found === false), "No realized goals yet" would dress the error
+    // as a clean empty (implying goals loaded and none are done). Show an honest unavailable
+    // state instead — same discipline as the decision-brief modal's empty state (cubic #363).
+    if (!doc.found) {
+      list.innerHTML = '<div class="empty">Realized goals are unavailable — the goals map could not be loaded.</div>';
+      return;
+    }
     var goals = Array.isArray(doc.goals) ? doc.goals : [];
     var done = goals.filter(function (g) { return g.status_display === "achieved"; });
     if (countEl) countEl.textContent = done.length ? String(done.length) : "";

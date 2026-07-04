@@ -507,6 +507,11 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("goals.js must render the #349 Inc 5 history-of-done (missing %q)", marker)
 		}
 	}
+	// cubic #363 P2: the done panel must distinguish a load ERROR (found===false) from a
+	// genuine empty — an unavailable state, not "No realized goals yet" dressing an error.
+	if !strings.Contains(js, "Realized goals are unavailable") {
+		t.Error("renderDoneHistory must show an honest unavailable state when the goals doc fails to load (cubic #363 P2)")
+	}
 	// mobile-QA #330: the node controls counter-scale the fit-to-view zoom (--ctl-scale)
 	// so they stay screen-constant (tappable) on phone, and the css reveals ⓘ on touch.
 	if !strings.Contains(js, "--ctl-scale") {
