@@ -51,29 +51,42 @@ already renders the titles large; the structure is authored.
 
 ## (c) Decisions as briefs — leverage the 6-element decision brief
 
-Open decisions get their own slides, each presenting the decision using its existing
-**6-element decision brief** (recommendation / value / tradeoff / options / risk /
-ask — the same brief the goals `work_items` carry). Two ways, both supported today:
+Open decisions get their own slides, each presenting the decision using the fleet's
+**canonical 6-element decision brief** — the SAME template every operator decision
+uses (operator-preferences), not a parade-specific one. One fact, one home: reuse the
+canonical six, do not mint a parallel set. The six, in order:
+
+1. **What it is** — the decision in one line.
+2. **Concrete value (in dollars)** — the quantified upside/cost.
+3. **Mechanics on approval** — exactly what happens the moment it's approved.
+4. **Alternatives + tradeoffs** — the other options and what each costs.
+5. **Recommendation + safe default** — the call, and the safe fallback.
+6. **Reversibility** — how hard it is to undo.
+
+Two ways to put a brief on a slide, both supported today:
 
 1. **Link** to the brief's source (the PR/issue/goal it lives on) as a dig-deeper
    link (a).
-2. **Embed** the brief inline as a **`> ` blockquote callout** — the deck renders a
+2. **Embed** it inline as a **`> ` blockquote callout** — the deck renders a
    `> `-prefixed run as a bordered brief box (amber left-rule) so the decision reads
-   as a distinct, weighted ask:
+   as a distinct, weighted ask. Use the canonical six as the labels:
 
 ```
 # Decision · Make the mind-map the default layout
 
-> **Recommendation:** flip the goals default from org to mind-map.
-> **Value:** depth reads at a glance; the pinwheel cramming is gone.
-> **Tradeoff:** a bigger visual change for everyone at once.
-> **Ask:** approve the default flip, or keep org default + mind-map opt-in.
+> **What it is:** flip the goals map's default layout from org to mind-map.
+> **Value:** ~2 min/parade of the operator's read-time recovered (depth is legible at a glance instead of decoded from the pinwheel).
+> **On approval:** the default seed flips to mind-map; org/tree stay as toggle options; live desks pick it up on next load (no restart).
+> **Alternatives:** keep org default + mind-map opt-in (no change, but the depth problem persists); or a per-viewport default (more config, marginal gain).
+> **Recommendation:** flip to mind-map; safe default is keep-org if the read is close.
+> **Reversibility:** trivial — one seed value; flip back any time, no data migration.
 > **Source:** [the mind-map PRs](https://…)
 ```
 
-Paste the brief's 6 elements as `> ` lines. (A future extension could resolve a
-`[[brief:<goal-id>]]` reference by fetching `/api/goals` and rendering the live
-`work_item.brief` — deferred; the paste/link path covers it now.)
+Paste the canonical six as `> ` lines (a `> **Source:**` dig-deeper link is optional).
+(A future extension could resolve a `[[brief:<goal-id>]]` reference by fetching
+`/api/goals` and rendering the live `work_item.brief` — deferred; paste/link covers it
+now.)
 
 ## Renderer support summary
 
