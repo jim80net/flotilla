@@ -29,6 +29,7 @@ type yamlGoal struct {
 	Milestones        []string       `yaml:"milestones"`
 	DependsOn         []string       `yaml:"depends_on"`
 	WorkItems         []yamlWorkItem `yaml:"work_items"`
+	Brief             string         `yaml:"brief"`
 	Children          []*yamlGoal    `yaml:"children"`
 }
 
@@ -66,6 +67,7 @@ type yamlWorkItem struct {
 	Text   string `yaml:"text"`
 	Done   bool   `yaml:"done"`
 	Label  string `yaml:"label"`
+	Brief  string `yaml:"brief"`
 }
 
 // ParseYAML decodes and validates fleet-goals.yaml bytes into a flat File. Malformed YAML,
@@ -125,6 +127,7 @@ func flattenGoals(nodes []*yamlGoal, structuralParent string, out *[]Goal) error
 			Milestones:        append([]string(nil), n.Milestones...),
 			DependsOn:         append([]string(nil), n.DependsOn...),
 			WorkItems:         items,
+			Brief:             strings.TrimSpace(n.Brief),
 		})
 		if err := flattenGoals(n.Children, id, out); err != nil {
 			return err
@@ -142,6 +145,7 @@ func normalizeWorkItem(wi yamlWorkItem) WorkItem {
 		Text:  wi.Text,
 		Done:  wi.Done,
 		Label: strings.TrimSpace(wi.Label),
+		Brief: strings.TrimSpace(wi.Brief),
 	}
 	switch out.Kind {
 	case "desk":
