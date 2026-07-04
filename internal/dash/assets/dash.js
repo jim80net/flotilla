@@ -185,15 +185,20 @@
     }
   }
 
+  // ledgerParticipant normalizes a ledger from/to token to a bare desk name: a relay
+  // target may be written "@name" (the mention form the daemon uses for a desk address —
+  // see watch.go mirrorRelayToLedger) while an XO/operator is bare. Strip the leading "@"
+  // so a desk matches whether it appears as sender OR recipient, in either form. Handling
+  // "@" on ONLY the `to` side (the prior bug) dropped a desk's OWN OUTBOUND relay lines
+  // (from "@desk") from its thread.
+  function ledgerParticipant(tok) {
+    return String(tok || "").toLowerCase().replace(/^@/, "");
+  }
   function ledgerMatchesDesk(entry, desk) {
     if (!desk) return false;
-    var d = String(desk).toLowerCase();
+    var d = ledgerParticipant(desk);
     if (entry.parsed) {
-      var from = String(entry.from || "").toLowerCase();
-      var to = String(entry.to || "").toLowerCase();
-      if (from === d || to === d) return true;
-      if (to === "@" + d) return true;
-      return false;
+      return ledgerParticipant(entry.from) === d || ledgerParticipant(entry.to) === d;
     }
     var raw = String(entry.raw || "").toLowerCase();
     return raw.indexOf(d) !== -1;
@@ -447,8 +452,8 @@
     if (!e.parsed) {
       return '<div class="thread-msg thread-raw">' + escapeHtml(e.raw) + "</div>";
     }
-    var deskKey = String(selectedDesk).toLowerCase();
-    var outbound = String(e.from || "").toLowerCase() === deskKey;
+    var deskKey = ledgerParticipant(selectedDesk);
+    var outbound = ledgerParticipant(e.from) === deskKey;
     var cls = outbound ? "thread-out" : "thread-in";
     var hue = speakerHue(e.from); // colour the turn by its speaker
     return (
@@ -503,15 +508,21 @@
 
   // backlogItem formats a raw backlog line into a status chip + clean text (#302):
   // it strips the leading bullet + the [marker] token and renders the marker as a
-  // coloured chip, instead of dumping the raw markdown line.
+  // coloured chip, instead of dumping the raw markdown line. Each item is a button
+  // (#349 Inc 4 E10): clicking opens the full item in a focused modal, since the drive
+  // queue lives in a narrow column where a long item is otherwise cramped. The marker +
+  // text are carried on data-* so the handler needs no re-parse.
   function backlogItem(line) {
     var raw = String(line == null ? "" : line);
     var m = /^\s*[-*]?\s*\[([a-z][a-z0-9-]*)\]\s*(.*)$/i.exec(raw);
     if (!m) {
-      return '<div class="backlog-item"><span class="bq-text">' + escapeHtml(raw.replace(/^\s*[-*]\s*/, "")) + "</span></div>";
+      var text = raw.replace(/^\s*[-*]\s*/, "");
+      return '<div class="backlog-item" role="button" tabindex="0" data-bq-open data-bq-text="' + escapeHtml(text) + '">' +
+        '<span class="bq-text">' + escapeHtml(text) + "</span></div>";
     }
     var marker = m[1].toLowerCase();
-    return '<div class="backlog-item bq-' + escapeHtml(marker) + '">' +
+    return '<div class="backlog-item bq-' + escapeHtml(marker) + '" role="button" tabindex="0" data-bq-open' +
+      ' data-bq-marker="' + escapeHtml(marker.replace(/-/g, " ")) + '" data-bq-text="' + escapeHtml(m[2]) + '">' +
       '<span class="bq-marker">' + escapeHtml(marker.replace(/-/g, " ")) + "</span>" +
       '<span class="bq-text">' + escapeHtml(m[2]) + "</span>" +
       "</div>";
@@ -643,6 +654,69 @@
       pushNav({ view: view, desk: selectedDesk || null, node: node });
     });
   }
+
+  /* ── drive-queue item modal (#349 Inc 4 E10): a queue chip lives in a narrow column,
+     so clicking (or Enter/Space on) it opens the full item here, focused. Read-only —
+     the queue is a status surface; acting on an item is the control forms below. ────── */
+  var convModalReturn = null; // the drive-queue chip that opened the modal — refocused on close
+  function openConvModal(marker, text) {
+    var mk = el("conv-modal-marker");
+    mk.textContent = marker || "";
+    mk.style.display = marker ? "" : "none";
+    el("conv-modal-title").textContent = text || "";
+    var modal = el("conv-modal");
+    convModalReturn = document.activeElement; // the chip — restored on close (a11y)
+    modal.classList.add("open");
+    modal.setAttribute("aria-hidden", "false");
+    var x = modal.querySelector(".conv-modal-x");
+    if (x) x.focus();
+  }
+  function closeConvModal() {
+    var modal = el("conv-modal");
+    if (!modal.classList.contains("open")) return;
+    modal.classList.remove("open");
+    modal.setAttribute("aria-hidden", "true");
+    // Return focus to the chip that opened it (matches the goals-modal a11y contract).
+    if (convModalReturn && convModalReturn.focus && document.contains(convModalReturn)) {
+      convModalReturn.focus({ preventScroll: true });
+    }
+    convModalReturn = null;
+  }
+  (function wireConvModal() {
+    var backlog = el("conv-backlog");
+    if (backlog) {
+      backlog.addEventListener("click", function (e) {
+        var item = e.target.closest ? e.target.closest("[data-bq-open]") : null;
+        if (item) openConvModal(item.getAttribute("data-bq-marker"), item.getAttribute("data-bq-text"));
+      });
+      backlog.addEventListener("keydown", function (e) {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        var item = e.target.closest ? e.target.closest("[data-bq-open]") : null;
+        if (item) { e.preventDefault(); openConvModal(item.getAttribute("data-bq-marker"), item.getAttribute("data-bq-text")); }
+      });
+    }
+    var modal = el("conv-modal");
+    if (modal) {
+      modal.addEventListener("click", function (e) {
+        if (e.target.hasAttribute && e.target.hasAttribute("data-conv-modal-close")) closeConvModal();
+      });
+      // Focus trap (aria-modal): keep Tab / Shift+Tab cycling among the modal's focusable
+      // controls while it's open — Tab must not escape behind the backdrop onto the page
+      // below (cubic #361 P2; mirrors the goals-modal trap). The close × is the only
+      // focusable here, so both edges wrap back to it.
+      modal.addEventListener("keydown", function (e) {
+        if (e.key !== "Tab" || !modal.classList.contains("open")) return;
+        var f = modal.querySelectorAll(".conv-modal-x");
+        if (!f.length) return;
+        var first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      });
+    }
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") closeConvModal();
+    });
+  })();
 
   /* ── browser history: every view / desk / goals-node change is a reversible nav
      entry (#349 A1) — clicking into a conversation from the goals map is no longer a

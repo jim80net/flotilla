@@ -126,6 +126,17 @@
     </aside>
   </main>
 
+  <!-- #349 Inc 4 (E10): a drive-queue chip opens here in full — the context column is
+       narrow, so a long queued item is read focused in this modal instead of cramped. -->
+  <div id="conv-modal" class="conv-modal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="conv-modal-title">
+    <div class="conv-modal-backdrop" data-conv-modal-close></div>
+    <div class="conv-modal-card" role="document">
+      <button class="conv-modal-x" type="button" data-conv-modal-close aria-label="Close">×</button>
+      <div id="conv-modal-marker" class="conv-modal-marker"></div>
+      <h3 id="conv-modal-title" class="conv-modal-title"></h3>
+    </div>
+  </div>
+
   <main id="view-goals" class="view goals-wrap hidden" aria-label="Fleet goals">
     <div id="goals-live" class="sr-only" role="status" aria-live="polite"></div>
     <section class="goals-situation" id="goals-situation" aria-label="Goals summary"></section>
