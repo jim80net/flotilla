@@ -66,4 +66,4 @@ Deliberately deferred to follow-on increments (after the direction is blessed):
   sequence so a limb reads as a roadmap, not just a set.
 - **Make it the default** (env seed + operator blessing), then retire the pinwheel.
 
-(Objective labels are NOT deferred — they already ride the cards; see below.)
+(Objective labels are NOT deferred — they already ride the cards; see above.)
