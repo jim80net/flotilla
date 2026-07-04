@@ -99,10 +99,21 @@
     meta.innerHTML = bits.join(" · ");
   }
 
+  // coordinatorNames returns the coordinator agents the rail must always surface — the
+  // primary XO and, when distinct, the CoS (from /api/status). The coordinator's session
+  // IS mirrored to a ledger like any desk, but the rail is built from channel bindings, so
+  // a coordinator that isn't a channel xo_agent/member would be unreachable — the operator
+  // "can't even see the CoS's conversation" (F#383 criterion 1). Pinning them fixes that.
+  function coordinatorNames() {
+    var st = cache.status || {};
+    var out = [];
+    if (st.xo) out.push(st.xo);
+    if (st.cos && String(st.cos).toLowerCase() !== String(st.xo || "").toLowerCase()) out.push(st.cos);
+    return out;
+  }
   function buildRailGroups(topology) {
     var channels = (topology && Array.isArray(topology.channels)) ? topology.channels : [];
-    if (!channels.length) return [];
-    return channels.map(function (ch) {
+    var groups = channels.map(function (ch) {
       var desks = [];
       var seen = {};
       function add(name, role) {
@@ -119,6 +130,17 @@
         desks: desks,
       };
     });
+    // Pin any coordinator missing from every channel as a first-class "coordinator" group
+    // at the TOP of the rail, so the CoS thread is always followable regardless of topology.
+    var listed = {};
+    groups.forEach(function (g) { g.desks.forEach(function (d) { listed[String(d.name).toLowerCase()] = true; }); });
+    var pinned = [];
+    coordinatorNames().forEach(function (name) {
+      if (listed[String(name).toLowerCase()]) return; // already reachable via a channel
+      listed[String(name).toLowerCase()] = true;
+      pinned.push({ channel_id: "", role: "coordinator", coordinator: true, desks: [{ name: name, role: "xo" }] });
+    });
+    return pinned.concat(groups);
   }
 
   // channelForDesk returns the channel_id of the FIRST group listing a desk by name (its home
@@ -189,11 +211,14 @@
           "</button>"
         );
       }).join("");
+      // The pinned coordinator group has no channel — label it "coordinator" rather than
+      // rendering a bare "#". A real channel shows its "#id".
+      var head = grp.channel_id
+        ? '<span class="chan-id">#' + escapeHtml(grp.channel_id) + "</span>" + role
+        : '<span class="chan-id chan-coordinator">coordinator</span>';
       return (
-        '<div class="conv-group">' +
-          '<div class="conv-group-head">' +
-            '<span class="chan-id">#' + escapeHtml(grp.channel_id) + "</span>" + role +
-          "</div>" +
+        '<div class="conv-group' + (grp.coordinator ? " conv-group-coordinator" : "") + '">' +
+          '<div class="conv-group-head">' + head + "</div>" +
           '<div class="conv-group-items" role="list">' + items + "</div>" +
         "</div>"
       );
@@ -204,6 +229,7 @@
       buttons[i].addEventListener("click", function () {
         selectedDesk = this.getAttribute("data-desk");
         selectedChannel = this.getAttribute("data-channel"); // scope the selection to THIS channel copy (#370)
+        resetThreadScroll(); // a freshly selected thread opens at its latest message
         renderConversations();
         syncControlTargets(true); // explicit desk-selection: set the targets authoritatively
         fetchMirror();            // load the newly-selected desk's session mirror
@@ -449,12 +475,13 @@
       thread.innerHTML = '<div class="empty">No coordination history for this desk yet.</div>';
       return;
     }
-    // Newest-first (descending). Unparseable timestamps (rare malformed/raw ledger
-    // lines with no time) sort to the bottom; Array.sort is stable (ES2019+) so
-    // their relative order is preserved.
+    // Oldest-first (ascending) — chat convention: the latest message is at the BOTTOM,
+    // with the composer directly beneath it (F#383 criterion 5). Unparseable timestamps
+    // (rare malformed/raw ledger lines with no time) sort to the TOP (treated as oldest);
+    // Array.sort is stable (ES2019+) so their relative order is preserved.
     items.sort(function (a, b) {
       var at = isNaN(a.t) ? -Infinity : a.t, bt = isNaN(b.t) ? -Infinity : b.t;
-      return bt - at;
+      return at - bt;
     });
     // Dedup: skip the innerHTML rewrite (which re-announces via the log's aria-live
     // AND resets the operator's scroll) when the merged timeline is unchanged. The
@@ -470,6 +497,34 @@
     thread.innerHTML = items.map(function (it) {
       return it.kind === "mirror" ? threadMirrorMsg(it.m) : threadLedgerMsg(it.e);
     }).join("");
+    // Latest-at-bottom scroll discipline (F#383 criterion 5): if the operator is pinned to
+    // the bottom (the default, and whenever they scroll back down), keep the newest message
+    // in view; if they've scrolled UP into history, don't yank them — surface a jump-to-latest
+    // chip instead so a live tick can't steal their place.
+    if (threadPinned) scrollThreadToBottom();
+    else showThreadJump(true);
+  }
+
+  // ── thread composer + latest-at-bottom scroll (F#383 criteria 4 + 5) ──────────────
+  var threadPinned = true; // true ⇒ keep the newest message in view on each render
+  function scrollThreadToBottom() {
+    var t = el("conv-thread");
+    if (t) t.scrollTop = t.scrollHeight;
+  }
+  function showThreadJump(on) {
+    var j = el("thread-jump");
+    if (j) j.hidden = !on;
+  }
+  // A render for a NEWLY selected desk should always open at the bottom (freshest first-read).
+  function resetThreadScroll() {
+    threadPinned = true;
+    showThreadJump(false);
+    // A new selection gives a FRESH composer for that desk — the prior desk's draft, status
+    // line, and grown height must not bleed into the newly-selected desk's composer (cubic P3).
+    var m = el("thread-composer-msg");
+    if (m) { m.textContent = ""; m.className = "form-msg"; }
+    var ta = el("thread-composer-input");
+    if (ta) { ta.value = ""; ta.style.height = ""; }
   }
 
   // threadLedgerMsg renders one CoS relay-ledger line (a message to/from the desk).
@@ -565,6 +620,22 @@
     renderSessionMirror();
     renderThread(history);
     renderBacklogStrip(history);
+    syncComposer();
+  }
+
+  // syncComposer shows the thread composer for the selected desk/coordinator and labels it
+  // with that target — so the operator can type + send from the thread they're reading
+  // (F#383 criterion 4: presence AND discoverability). Hidden when nothing is selected.
+  function syncComposer() {
+    var form = el("thread-composer");
+    var ta = el("thread-composer-input");
+    if (!form || !ta) return;
+    if (selectedDesk) {
+      form.hidden = false;
+      ta.placeholder = "Message " + selectedDesk + "…";
+    } else {
+      form.hidden = true;
+    }
   }
 
   // syncControlTargets prefills the route/resume target fields with the selected
@@ -801,6 +872,7 @@
   function openConversation(desk) {
     if (!desk) return;
     selectedDesk = desk;
+    resetThreadScroll(); // open the deep-linked thread at its latest message
     showView("conversations");
     renderConversations();
     syncControlTargets(true);
@@ -821,4 +893,71 @@
     var field = el(id);
     if (field) field.addEventListener("input", function () { controlTargetsTouched = true; });
   });
+
+  // Thread composer + latest-at-bottom scroll wiring (F#383 criteria 4 + 5). The composer
+  // sends to the SELECTED desk/coordinator via the same route-to-pane relay the control
+  // column uses (/api/control/route) — the typed outcome is surfaced honestly (the pane
+  // lock can report busy/crashed/unconfirmed; never a fake success).
+  (function wireThreadComposer() {
+    var thread = el("conv-thread");
+    if (thread) {
+      thread.addEventListener("scroll", function () {
+        var nearBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 48;
+        threadPinned = nearBottom;
+        // Standard chat behavior: the jump-to-latest chip is offered whenever the operator
+        // has scrolled up into history, and hides the moment they're back at the bottom.
+        showThreadJump(!nearBottom);
+      });
+    }
+    var jump = el("thread-jump");
+    if (jump) jump.addEventListener("click", function () { threadPinned = true; showThreadJump(false); scrollThreadToBottom(); });
+
+    var form = el("thread-composer"), ta = el("thread-composer-input"), msg = el("thread-composer-msg");
+    function setMsg(text, kind) { if (msg) { msg.className = "form-msg" + (kind ? " " + kind : ""); msg.textContent = text; } }
+    function resizeComposer() { if (ta) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 120) + "px"; } }
+    if (form && ta) {
+      // inFlight guards against a DOUBLE-SEND: a fast second Enter (or Enter+click) can
+      // re-enter submit before the browser reflects btn.disabled — and requestSubmit()
+      // fires the submit event regardless of the button's disabled state. Both the submit
+      // handler and the Enter path check this flag, so exactly one POST goes out (cubic P2).
+      var inFlight = false;
+      // sameSel reports whether the currently-selected desk is still the one a send targeted —
+      // the operator may have switched desks mid-send, and the shared #thread-composer-msg /
+      // textarea belong to the NEW desk now, so an outcome must not land there (cubic P3).
+      function sameSel(target) { return String(selectedDesk || "").toLowerCase() === String(target).toLowerCase(); }
+      form.addEventListener("submit", function (ev) {
+        ev.preventDefault();
+        if (inFlight) return;
+        var target = selectedDesk, body = ta.value.trim();
+        if (!target) { setMsg("Select a desk first.", "err"); return; }
+        if (!body) { setMsg("Type a message.", "err"); return; }
+        var btn = form.querySelector("button");
+        inFlight = true;
+        setMsg("Sending…", "");
+        if (btn) btn.disabled = true;
+        postJSON("/api/control/route", { target: target, message: body }).then(function (res) {
+          var outcome = (res && res.outcome) || "(no outcome reported)";
+          var detail = res && res.detail ? " — " + res.detail : "";
+          // Bind the result to the desk the send TARGETED — if the operator moved on, don't
+          // clear the new desk's draft or mislabel its composer; the send still happened.
+          if (!sameSel(target)) return;
+          if (outcome === "delivered") { ta.value = ""; resizeComposer(); threadPinned = true; scrollThreadToBottom(); }
+          setMsg("Outcome: " + outcome + detail, outcome === "delivered" ? "ok" : "");
+        }).catch(function (err) { if (sameSel(target)) setMsg(err.message, "err"); }).then(function () {
+          inFlight = false;
+          if (btn) btn.disabled = false;
+        });
+      });
+      // Enter sends; Shift+Enter is a newline (chat convention). Guarded so a rapid
+      // double-Enter can't queue a second send while one is already in flight (cubic P2).
+      ta.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          if (inFlight) return;
+          if (form.requestSubmit) form.requestSubmit(); else form.dispatchEvent(new Event("submit", { cancelable: true }));
+        }
+      });
+      ta.addEventListener("input", resizeComposer);
+    }
+  })();
 })();

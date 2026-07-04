@@ -125,11 +125,17 @@ type XOLiveness struct {
 // liveness. The base fields are preserved exactly so the landing widget and the
 // dash speak the same contract.
 type BoardDoc struct {
-	GeneratedAt string        `json:"generated_at"` // snapshot mtime (RFC3339); "" when absent
-	XO          string        `json:"xo,omitempty"`
-	Agents      []AgentItem   `json:"agents"`
-	Freshness   FreshnessInfo `json:"freshness"`
-	XOLiveness  XOLiveness    `json:"xo_liveness"`
+	GeneratedAt string `json:"generated_at"` // snapshot mtime (RFC3339); "" when absent
+	XO          string `json:"xo,omitempty"`
+	// Cos is the chief-of-staff agent (roster cos_agent) when it is set AND distinct from
+	// the primary XO. The conversations rail pins the coordinator(s) — XO and CoS — as
+	// first-class threads even when neither is bound as a channel xo_agent, so the operator
+	// can always follow the coordinator's session (F#383 criterion 1). Empty when unset or
+	// identical to XO (the single-fleet dogfood case, where XO already IS the coordinator).
+	Cos        string        `json:"cos,omitempty"`
+	Agents     []AgentItem   `json:"agents"`
+	Freshness  FreshnessInfo `json:"freshness"`
+	XOLiveness XOLiveness    `json:"xo_liveness"`
 }
 
 // BoardInputs are the already-loaded, already-stat'd values the HTTP layer
@@ -166,6 +172,11 @@ func BuildBoard(in BoardInputs) BoardDoc {
 	if in.AckOK {
 		doc.XOLiveness.AckAge = humanizeAge(in.AckAge)
 		doc.XOLiveness.AckAgeSeconds = int64(in.AckAge.Round(time.Second).Seconds())
+	}
+	// Expose the CoS as a distinct coordinator only when the roster names one that isn't
+	// already the primary XO — so the rail can pin it without double-listing the XO.
+	if in.Cfg.CosAgent != "" && in.Cfg.CosAgent != in.XO {
+		doc.Cos = in.Cfg.CosAgent
 	}
 	for _, a := range in.Cfg.Agents {
 		item := AgentItem{

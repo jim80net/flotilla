@@ -37,8 +37,13 @@
         .replace(/`([^`]+)`/g, "<code>$1</code>")
         .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
     }
-    var out = [], list = null;
-    function flush() { if (list) { out.push("<ul>" + list.join("") + "</ul>"); list = null; } }
+    var out = [], list = null, quote = null;
+    function flushList() { if (list) { out.push("<ul>" + list.join("") + "</ul>"); list = null; } }
+    // A run of "> " lines renders as a blockquote callout — the parade's DECISION-BRIEF block
+    // (parade v3): the operator wanted open decisions presented as their brief, and a distinct
+    // callout gives the 6-element brief its own visual weight on a slide (#380 / deck v3).
+    function flushQuote() { if (quote) { out.push('<blockquote class="pd-quote">' + quote.join("") + "</blockquote>"); quote = null; } }
+    function flush() { flushList(); flushQuote(); }
     for (var i = 0; i < lines.length; i++) {
       var ln = lines[i];
       // Parse an image ref from the RAW line so its src (a real basename / URL) is NOT
@@ -47,10 +52,15 @@
       // (cubic #373 P5).
       var img = /^!\[([^\]]*)\]\(([^)\s]+)\)\s*$/.exec(ln);
       if (img) { flush(); out.push('<img class="pd-slide-img" loading="lazy" src="' + esc(imgURL(date, img[2])) + '" alt="' + esc(img[1]) + '" />'); continue; }
+      // Detect a "> " blockquote on the RAW line: '>' would be escaped to '&gt;' before a
+      // regex on the escaped text, so it must be matched pre-esc (like the image src). The
+      // captured content is then escaped + inline-marked for insertion.
+      var q = /^>\s?(.*)$/.exec(ln);
+      if (q) { flushList(); (quote = quote || []).push("<p>" + inline(esc(q[1])) + "</p>"); continue; }
       var e = esc(ln); // escape the remaining text FIRST, then layer markdown
       var h = /^(#{1,6})\s+(.*)$/.exec(e), li = /^\s*[-*]\s+(.*)$/.exec(e);
       if (h) { flush(); out.push('<div class="pd-h pd-h' + Math.min(h[1].length, 4) + '">' + inline(h[2]) + "</div>"); }
-      else if (li) { (list = list || []).push("<li>" + inline(li[1]) + "</li>"); }
+      else if (li) { flushQuote(); (list = list || []).push("<li>" + inline(li[1]) + "</li>"); }
       else if (e.trim() === "") { flush(); }
       else { flush(); out.push("<p>" + inline(e) + "</p>"); }
     }

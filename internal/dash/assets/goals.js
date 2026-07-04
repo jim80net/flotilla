@@ -52,7 +52,10 @@
   // live toggle still overrides it at runtime.
   var goalsLayout = (function () {
     var v = (document.body && document.body.getAttribute("data-goals-layout")) || "";
-    return (v === "tree" || v === "mindmap") ? v : "org";
+    // The operator retired org from the UI: the default is MIND MAP, "tree" is honored, and
+    // anything else (incl. a legacy "org" seed) falls back to mindmap. layoutOrg stays below,
+    // dormant — no org button, no org default.
+    return v === "tree" ? "tree" : "mindmap";
   })();
   // Radial modes (org pinwheel + the mind map) share card sizing, radial fit, no tier
   // labels, and center-anchored geometry — only their placement + edge shape differ. The
@@ -1061,12 +1064,19 @@
     if (wi.kind === "desk" && wi.agent) return ' data-goto-desk="' + escapeHtml(wi.agent) + '"' + t;
     return t;
   }
-  function gatedRow(node, wi) {
+  // sameBrief compares two briefs by trimmed content — a gated item whose brief is
+  // identical to the node-level brief already shown above must NOT re-render it (the
+  // modal was printing the same six-element decision package twice; Wave 4 readability).
+  function sameBrief(a, b) { return hasBrief(a) && hasBrief(b) && String(a).trim() === String(b).trim(); }
+  function gatedRow(node, wi, nodeBrief) {
     var link = wi.kind === "desk" && wi.agent; // a routable item is a button; others are plain
     var head = "<" + (link ? "button type=\"button\"" : "div") + ' class="gm-gated-item' + (link ? " gm-item-link" : "") + '"' + itemLinkAttrs(wi, node) + ">" +
       escapeHtml(wi.label || wi.kind || "") + (wi.detail ? ' <span class="muted">— ' + escapeHtml(wi.detail) + "</span>" : "") +
       "</" + (link ? "button" : "div") + ">";
-    var body = hasBrief(wi.brief) ? '<div class="gm-brief-full">' + renderBrief(wi.brief) + "</div>" : BRIEF_EMPTY;
+    // Skip the brief body when it duplicates the node brief printed above; otherwise show
+    // the item's own brief (or the honest no-brief note).
+    var body = sameBrief(wi.brief, nodeBrief) ? ""
+      : (hasBrief(wi.brief) ? '<div class="gm-brief-full">' + renderBrief(wi.brief) + "</div>" : BRIEF_EMPTY);
     return '<div class="gm-gated-row">' + head + body + "</div>";
   }
 
@@ -1081,7 +1091,7 @@
     if (gated.length) {
       // Each gated item clicks through to its target + shows its decision package (#347/B4).
       parts.push('<div class="gm-gated"><div class="gm-gated-lab">Waiting on you</div>' +
-        gated.map(function (wi) { return gatedRow(n, wi); }).join("") + "</div>");
+        gated.map(function (wi) { return gatedRow(n, wi, n.brief); }).join("") + "</div>");
     } else {
       // B6: no DIRECT gate — surface the DOWNSTREAM decisions this node rolls up, each
       // routing into the descendant that actually owns it.
@@ -1564,7 +1574,8 @@
   // per-node data, so it doesn't change structuralSig — null it to defeat the in-place fast
   // path, reset the fit so the new geometry re-frames, and re-render.
   function setLayout(mode) {
-    var next = (mode === "org" || mode === "mindmap") ? mode : "tree";
+    // UI offers tree | mind map (org retired); default is mindmap, tree when explicitly picked.
+    var next = mode === "tree" ? "tree" : "mindmap";
     if (next === goalsLayout) return;
     goalsLayout = next;
     var btns = document.querySelectorAll(".glayout-btn");

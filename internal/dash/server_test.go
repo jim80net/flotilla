@@ -175,17 +175,18 @@ func TestHandleIndex(t *testing.T) {
 func TestGoalsLayoutEnvDefault(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 
-	// normalize: default org; "tree" (any case) honored; anything else → org.
-	for in, want := range map[string]string{"": "org", "org": "org", "tree": "tree", "TREE": "tree", "bogus": "org"} {
+	// normalize: default MIND MAP (org retired from the UI); "tree" (any case) honored;
+	// anything else — incl. a legacy "org" seed — maps to mindmap.
+	for in, want := range map[string]string{"": "mindmap", "org": "mindmap", "mindmap": "mindmap", "tree": "tree", "TREE": "tree", "bogus": "mindmap"} {
 		if got := normalizeGoalsLayout(in); got != want {
 			t.Errorf("normalizeGoalsLayout(%q) = %q, want %q", in, got, want)
 		}
 	}
 
-	// default (no env) → the index seeds org.
+	// default (no env) → the index seeds mindmap.
 	srv, _ := newTestServer(t, singleFleetRoster, now)
-	if body := doGet(t, srv, "/").Body.String(); !strings.Contains(body, `data-goals-layout="org"`) {
-		t.Error("index must seed the goals layout (default org) into the body attribute")
+	if body := doGet(t, srv, "/").Body.String(); !strings.Contains(body, `data-goals-layout="mindmap"`) {
+		t.Error("index must seed the goals layout (default mindmap) into the body attribute")
 	}
 
 	// tree seeded via Config → the index seeds tree.
@@ -324,8 +325,110 @@ func TestConversationsWave2(t *testing.T) {
 		t.Error("index.html must carry the drive-queue item modal (#conv-modal) — #349 Inc 4 E10")
 	}
 	css := doGet(t, srv, "/static/dash.css").Body.String()
-	if !strings.Contains(css, ".conv-modal.open") || !strings.Contains(css, "360px") {
-		t.Error("dash.css must style the conv-modal (E10) and widen the context column to 360px (E9) — #349 Inc 4")
+	// Wave 4 desktop-space audit widened the drive-queue context column 360→420px so a
+	// queued line reads without clipping (the composite grid pins the exact value).
+	if !strings.Contains(css, ".conv-modal.open") || !strings.Contains(css, "1fr) 420px") {
+		t.Error("dash.css must style the conv-modal (E10) and set the context column to 420px (Wave 4 widen) — #349 Inc 4 / F#383")
+	}
+}
+
+// TestModalDesktopSpaceWave4 locks the Wave 4 (F#383) desktop-space + decision-log
+// readability pass: the respond modal breathes on desktop (min(960px,94vw), a two-column
+// brief|respond grid on wide viewports), the decision brief no longer sits in a nested
+// 40vh scroll, the drive-queue item modal is widened, the conversations shell is not
+// capped at the old 1500px, and an identical node/work-item brief is not rendered twice.
+func TestModalDesktopSpaceWave4(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	for _, marker := range []string{
+		"min(960px, 94vw)", // .gm-dialog widened from 520px
+		`grid-template-areas: "title title" "brief respond"`, // desktop two-column layout
+		"min(640px, 94vw)",  // .conv-modal-card widened from 460px
+		"max-width: 1760px", // .conv-wrap uncapped from 1500px (desktop not capped for mobile)
+	} {
+		if !strings.Contains(css, marker) {
+			t.Errorf("dash.css must carry the Wave 4 desktop-space marker %q (F#383)", marker)
+		}
+	}
+	// The decision brief must no longer be trapped in a nested 40vh scroll box (the modal's
+	// own scroll owns the reading now) — guard against the old cramping regressing.
+	if gi := strings.Index(css, ".gm-brief-full {"); gi >= 0 {
+		block := css[gi:]
+		if end := strings.Index(block, "}"); end >= 0 {
+			block = block[:end]
+		}
+		if strings.Contains(block, "max-height: 40vh") {
+			t.Error("dash.css .gm-brief-full must NOT re-introduce the nested 40vh scroll — the brief flows in the modal's own scroll (Wave 4)")
+		}
+	}
+	html := doGet(t, srv, "/").Body.String()
+	if !strings.Contains(html, `class="gm-respond"`) {
+		t.Error("index.html must wrap the response box in .gm-respond so the modal grid can place it beside the brief (Wave 4)")
+	}
+	js := doGet(t, srv, "/static/goals.js").Body.String()
+	if !strings.Contains(js, "sameBrief") {
+		t.Error("goals.js must de-duplicate an identical node/work-item brief in the respond modal (sameBrief) — Wave 4 readability")
+	}
+}
+
+// TestConversationsCoordinatorPinWave4 locks F#383 criterion 1's rail half: the
+// conversations rail pins the coordinator(s) as a first-class group even when neither is a
+// channel xo_agent/member — so the CoS thread is always followable (the "I can't even see
+// the CoS's conversation" gap). The identity half (BoardDoc.cos) is covered in readmodel_test.
+func TestConversationsCoordinatorPinWave4(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{
+		"coordinatorNames",       // derives the coordinators (xo + distinct cos) from /api/status
+		"conv-group-coordinator", // the pinned first-class group
+		"st.cos",                 // reads the CoS identity the board now exposes
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js must pin the coordinator thread first-class (missing %q) — F#383 criterion 1", marker)
+		}
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	if !strings.Contains(css, ".chan-coordinator") {
+		t.Error("dash.css must style the pinned coordinator group label (.chan-coordinator) — F#383")
+	}
+}
+
+// TestThreadComposerAndOrderWave4 locks F#383 criteria 4 + 5: a composer on the thread
+// (send to the selected desk/coordinator via the route-to-pane relay) and latest-at-bottom
+// ordering with a jump-to-latest affordance. Without a composer the standalone-conversations
+// test fails by definition — "a conversations page you cannot converse from."
+func TestThreadComposerAndOrderWave4(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	html := doGet(t, srv, "/").Body.String()
+	for _, marker := range []string{`id="thread-composer"`, `id="thread-composer-input"`, `id="thread-jump"`} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("index.html must carry the thread composer/jump element %q — F#383 criteria 4/5", marker)
+		}
+	}
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{
+		"syncComposer",         // composer shown + labelled for the selected desk
+		"scrollThreadToBottom", // latest-at-bottom pin
+		"showThreadJump",       // jump-to-latest affordance
+		`"/api/control/route"`, // the composer sends via the existing relay
+		"inFlight",             // cubic P2: a single in-flight guard prevents a double-send on fast Enter
+		"sameSel",              // cubic P3: the outcome binds to the desk the send targeted, not the new selection
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js must wire the thread composer / scroll (missing %q) — F#383 criteria 4/5", marker)
+		}
+	}
+	// The thread must sort ASCENDING (oldest first, latest at the bottom) — guard the exact
+	// comparator so a refactor can't silently flip it back to newest-first.
+	if !strings.Contains(js, "return at - bt;") || strings.Contains(js, "return bt - at;") {
+		t.Error("dash.js renderThread must sort ascending (return at - bt) — latest-at-bottom, F#383 criterion 5")
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	if !strings.Contains(css, ".thread-composer") || !strings.Contains(css, ".thread-jump") {
+		t.Error("dash.css must style the thread composer + jump chip (.thread-composer/.thread-jump) — F#383")
 	}
 }
 
@@ -450,11 +553,11 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	// #324 Inc 1: org is the DEFAULT layout (operator UX blessing), and the org geometry
 	// is content-aware — leaf-weight angular packing + per-ring radii from card extents
 	// (no fixed RING_STEP), with narrower org cards.
-	// The default is org (operator UX blessing #324), now env-seedable via the body
-	// attribute (#317) — the IIFE reads data-goals-layout and falls back to "org". The
-	// mind-map (org v3) is a third selectable mode; tree/mindmap honored, else org.
-	if !strings.Contains(js, `(v === "tree" || v === "mindmap") ? v : "org"`) {
-		t.Error("goals.js must seed goalsLayout from data-goals-layout, defaulting org (#324/#317)")
+	// The default is MIND MAP (operator retired org from the UI); env-seedable via the body
+	// attribute (#317) — the IIFE reads data-goals-layout and falls back to "mindmap"; "tree"
+	// is the only other selectable mode (org is dormant, no button, no default).
+	if !strings.Contains(js, `v === "tree" ? "tree" : "mindmap"`) {
+		t.Error("goals.js must seed goalsLayout from data-goals-layout, defaulting mindmap (org retired)")
 	}
 	// #324 Inc 2: a roster-materialized desk (source==="roster") is a live entity, never
 	// ghosted as aspirational even when it has no work/children.
@@ -643,9 +746,12 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("index must contain the goals canvas element #%s", id)
 		}
 	}
-	// Inc B: the tree⇄org layout toggle chrome.
-	if !strings.Contains(body, "glayout-btn") || !strings.Contains(body, `data-layout="org"`) {
-		t.Error("index must carry the tree⇄org goals layout toggle (glayout-btn / data-layout)")
+	// the tree | mind map layout toggle chrome (org retired from the UI, so no org button).
+	if !strings.Contains(body, "glayout-btn") || !strings.Contains(body, `data-layout="tree"`) || !strings.Contains(body, `data-layout="mindmap"`) {
+		t.Error("index must carry the tree | mind map goals layout toggle (glayout-btn / data-layout)")
+	}
+	if strings.Contains(body, `data-layout="org"`) {
+		t.Error("the org layout button must be retired from the UI (operator verdict) — no org button")
 	}
 }
 

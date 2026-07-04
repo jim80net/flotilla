@@ -75,6 +75,20 @@
       </header>
       <div id="conv-map" class="conv-map muted" aria-live="polite"></div>
       <div id="conv-thread" class="conv-thread" role="log" aria-live="polite"></div>
+      <!-- F#383 criteria 4+5: the thread reads latest-at-bottom (chat convention) and the
+           composer sits directly beneath the newest message — type + send to the selected
+           desk/coordinator via the same route-to-pane relay the control column uses. The
+           jump-to-latest chip appears when the operator has scrolled up into history. -->
+      <form id="thread-composer" class="thread-composer" hidden>
+        <!-- anchored to the composer's top edge so it clears a multi-line (grown) composer -->
+        <button id="thread-jump" class="thread-jump" type="button" hidden aria-label="Jump to the latest message">&#8595; Latest</button>
+        <textarea id="thread-composer-input" class="thread-composer-input" rows="1"
+          placeholder="Message the selected desk…" aria-label="Message the selected desk"></textarea>
+        <div class="thread-composer-row">
+          <span id="thread-composer-msg" class="form-msg"></span>
+          <button type="submit" class="btn btn-primary thread-composer-send">Send</button>
+        </div>
+      </form>
     </section>
 
     <aside class="panel conv-context" aria-label="Desk context and controls">
@@ -154,8 +168,7 @@
         <div class="goals-head-right">
           <div class="goals-layout-toggle" role="group" aria-label="Goals map layout">
             <button type="button" class="glayout-btn" data-layout="tree" aria-pressed="false" title="Tiered altitude columns">tree</button>
-            <button type="button" class="glayout-btn active" data-layout="org" aria-pressed="true" title="Hub-and-spoke org map (coordinator at center)">org</button>
-            <button type="button" class="glayout-btn" data-layout="mindmap" aria-pressed="false" title="Mind map — branches with sub-branches radiating as limbs">mind map</button>
+            <button type="button" class="glayout-btn active" data-layout="mindmap" aria-pressed="true" title="Mind map — branches with sub-branches radiating as limbs">mind map</button>
           </div>
           <div class="goals-legend" id="goals-legend" aria-hidden="true"></div>
         </div>
@@ -204,11 +217,13 @@
         <button class="gm-close" type="button" aria-label="Close">&times;</button>
         <h3 id="goals-modal-title" class="gm-title"></h3>
         <div id="goals-modal-brief" class="gm-brief"></div>
-        <label class="gm-input-lab" for="goals-modal-input">Your response</label>
-        <textarea id="goals-modal-input" class="gm-input" rows="4" placeholder="Type a response to this desk…"></textarea>
-        <div class="gm-actions">
-          <span id="goals-modal-note" class="gm-note muted"></span>
-          <button id="goals-modal-send" type="button" class="btn btn-primary">Send</button>
+        <div class="gm-respond">
+          <label class="gm-input-lab" for="goals-modal-input">Your response</label>
+          <textarea id="goals-modal-input" class="gm-input" rows="4" placeholder="Type a response to this desk…"></textarea>
+          <div class="gm-actions">
+            <span id="goals-modal-note" class="gm-note muted"></span>
+            <button id="goals-modal-send" type="button" class="btn btn-primary">Send</button>
+          </div>
         </div>
       </div>
     </div>

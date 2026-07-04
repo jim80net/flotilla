@@ -3,6 +3,7 @@ package dash
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -142,5 +143,24 @@ func TestHandleParadeAsset_RejectsTraversalAndNonImage(t *testing.T) {
 	}
 	if rec := doGet(t, srv, "/parade-assets/2026-07-04/a%26b.png"); rec.Code != 200 || rec.Body.String() != "AMP" {
 		t.Errorf("an ampersand-named asset must serve, got code=%d body=%q", rec.Code, rec.Body.String())
+	}
+}
+
+// TestParadeDeckRenderMarkers locks the parade deck's render support: markdown links
+// (dig-deeper sources) and the "> " decision-brief callout (parade v3). No JS runner, so
+// this asserts the served assets carry the render — removing either fails here.
+func TestParadeDeckRenderMarkers(t *testing.T) {
+	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/parade.js").Body.String()
+	if !strings.Contains(js, "rel=\"noopener\"") {
+		t.Error("parade.js must render markdown links (dig-deeper sources) — parade v3 (a)")
+	}
+	if !strings.Contains(js, "pd-quote") {
+		t.Error("parade.js must render a \"> \" blockquote as a decision-brief callout — parade v3 (c)")
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	if !strings.Contains(css, ".pd-quote") {
+		t.Error("dash.css must style the decision-brief callout (.pd-quote) — parade v3 (c)")
 	}
 }

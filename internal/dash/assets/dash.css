@@ -220,7 +220,8 @@ code {
    and the drive queue are peripheral (a pinned clamped summary; a collapsible in
    the context column) — never competing scroll regions. */
 .conv-wrap {
-  max-width: 1500px;
+  /* Wave 4: don't cap desktop for mobile's sake — use the viewport at 1440+ (was 1500). */
+  max-width: 1760px;
   width: 100%;
   margin: 0 auto;
   padding: 1rem 1.25rem 1.5rem;
@@ -239,7 +240,9 @@ code {
   .conv-wrap {
     flex: 1 1 auto;
     min-height: 0;
-    grid-template-columns: 250px minmax(0, 1fr) 360px;
+    /* Wave 4: the drive-queue context column widened 360→420 so a queued line reads
+       without clipping; the thread keeps the flexible middle and grows with the viewport. */
+    grid-template-columns: 250px minmax(0, 1fr) 420px;
     grid-template-rows: minmax(0, 1fr);   /* the single row fills the shell height */
     overflow: hidden;                     /* the shell frame itself never scrolls */
   }
@@ -394,6 +397,38 @@ code {
   gap: .55rem;
   align-content: start;
 }
+/* F#383 criteria 4+5: the composer is pinned at the bottom of the thread column, directly
+   beneath the newest message (the thread scrolls above it), and the jump-to-latest chip
+   floats just over it when the operator has scrolled up into history. */
+.conv-thread-col { position: relative; }
+.thread-composer {
+  position: relative; /* anchor for the jump-to-latest chip so it clears a grown composer */
+  flex: 0 0 auto;
+  border-top: 1px solid var(--line-soft);
+  padding: .6rem 1rem .75rem;
+  display: grid;
+  gap: .4rem;
+  background: color-mix(in srgb, var(--abyss-2) 60%, transparent);
+}
+.thread-composer[hidden] { display: none; }
+.thread-composer-input {
+  width: 100%; resize: none; min-height: 2.4rem; max-height: 120px;
+  background: var(--abyss); border: 1px solid var(--line); border-radius: var(--r-sm);
+  color: var(--ink); font-family: inherit; font-size: .86rem; line-height: 1.45; padding: .5rem .6rem;
+}
+.thread-composer-input:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
+.thread-composer-row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.thread-composer-row .form-msg { min-width: 0; overflow-wrap: anywhere; }
+.thread-jump {
+  /* anchored to the composer's TOP edge (bottom:100% of .thread-composer) so it always
+     floats just above the composer no matter how tall it has grown (cubic P3 overlap fix). */
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(100% + .5rem); z-index: 5;
+  font-family: var(--display); font-size: .68rem; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--abyss); background: var(--cyan); border: 0; border-radius: 999px;
+  padding: .32em .9em; cursor: pointer; box-shadow: var(--shadow, 0 2px 10px rgba(0,0,0,.25));
+}
+.thread-jump[hidden] { display: none; }
+.thread-jump:hover { filter: brightness(1.08); }
 .thread-msg {
   border: 1px solid var(--line-soft);
   border-radius: var(--r-sm);
@@ -748,6 +783,10 @@ code {
 .chan-head { display: flex; gap: .45rem; align-items: baseline; flex-wrap: wrap; }
 .chan-xo { color: var(--cyan); font-weight: 500; font-size: .82rem; }
 .chan-id { color: var(--ink-3); font-size: .72rem; }
+/* F#383: the pinned coordinator group reads first-class — a labelled header (not a bare
+   "#") in the coordinator accent, so the CoS thread is unmistakable at the top of the rail. */
+.chan-coordinator { color: var(--cyan); font-family: var(--display); letter-spacing: .08em; text-transform: uppercase; font-size: .62rem; }
+.conv-group-coordinator .conv-group-head { border-bottom: 1px solid color-mix(in srgb, var(--cyan) 25%, transparent); }
 .chan-role {
   font-family: var(--display);
   font-size: .58rem;
@@ -1353,7 +1392,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .conv-modal.open { display: flex; }
 .conv-modal-backdrop { position: absolute; inset: 0; background: var(--scrim); backdrop-filter: blur(2px); }
 .conv-modal-card {
-  position: relative; width: 460px; max-width: 100%; max-height: 80vh; overflow-y: auto;
+  /* Wave 4: a queued item read in full — wide enough to breathe on desktop, viewport-capped on mobile. */
+  position: relative; width: min(640px, 94vw); max-width: 100%; max-height: 80vh; overflow-y: auto;
   background: linear-gradient(180deg, var(--abyss-2), var(--abyss-3)); border: 1px solid var(--cyan-dim);
   border-radius: var(--r); box-shadow: var(--shadow-lg); padding: 20px 22px;
 }
@@ -1369,9 +1409,28 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 }
 .conv-modal-title { font-size: .95rem; line-height: 1.5; color: var(--ink); padding-right: 34px; overflow-wrap: anywhere; }
 .gm-dialog {
-  position: relative; width: 520px; max-width: 100%; max-height: 84vh; overflow-y: auto;
+  /* Wave 4 — the respond modal breathes on desktop. A 520px centre column wasted the
+     whole desktop width AND cramped the decision brief; now it uses min(960px, 94vw) and,
+     on wide viewports, lays the brief and the response box side by side (grid below) so the
+     brief has a real reading measure and the operator reads + responds without scrolling
+     between them. Mobile stacks (single column) via the base grid-template-areas. */
+  position: relative; width: min(960px, 94vw); max-width: 100%; max-height: 90vh; overflow-y: auto;
   background: linear-gradient(180deg, var(--abyss-2), var(--abyss-3)); border: 1px solid var(--cyan-dim);
-  border-radius: var(--r); box-shadow: var(--shadow-lg); padding: 20px 22px;
+  border-radius: var(--r); box-shadow: var(--shadow-lg); padding: 22px 26px;
+  display: grid; gap: 2px 26px; align-content: start;
+  grid-template-columns: 1fr;
+  grid-template-areas: "title" "brief" "respond";
+}
+.gm-title { grid-area: title; }
+#goals-modal-brief { grid-area: brief; min-width: 0; }
+.gm-respond { grid-area: respond; min-width: 0; }
+@media (min-width: 860px) {
+  .gm-dialog {
+    grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr);
+    grid-template-areas: "title title" "brief respond";
+  }
+  /* keep the response box in view while the brief scrolls in its own column */
+  .gm-respond { position: sticky; top: 0; align-self: start; }
 }
 .gm-close {
   position: absolute; top: 12px; right: 14px; width: 32px; height: 32px; border-radius: 6px;
@@ -1403,10 +1462,11 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 /* the decision package (#347): a bounded, scrollable rendered-markdown block so a long
    brief never blows out the modal, with headings/lists/emphasis for a real read. */
 .gm-brief-full {
-  margin: 6px 0 2px; padding: 8px 10px;
+  /* Wave 4: no nested scroll box. The brief flows and the modal's own scroll owns the
+     reading — a 40vh inner scroll inside an 84vh modal double-cramped the six elements. */
+  margin: 6px 0 2px; padding: 10px 13px;
   background: var(--surface, var(--abyss-2)); border: 1px solid var(--line-soft);
-  border-radius: var(--r-sm); color: var(--ink-2); font-size: .82rem; line-height: 1.5;
-  max-height: 40vh; overflow-y: auto;
+  border-radius: var(--r-sm); color: var(--ink-2); font-size: .86rem; line-height: 1.55;
   /* user content — a long unbreakable token (a URL in a brief) must wrap, not overflow
      (cubic #348 P3; matches .comment-body / .dbg-val). */
   word-break: break-word;
@@ -1416,8 +1476,11 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gm-brief-full ul { margin: .2em 0 .6em; padding-left: 1.1em; }
 .gm-brief-full li { margin: .15em 0; }
 .gm-brief-full code { font-family: var(--mono); background: color-mix(in srgb, var(--cyan) 10%, transparent); padding: 0 .3em; border-radius: 3px; }
-.gm-brief-h { font-family: var(--display); font-weight: 600; color: var(--ink); text-transform: uppercase; letter-spacing: .04em; font-size: .68rem; margin: .5em 0 .25em; }
-.gm-brief-h:first-child { margin-top: 0; }
+/* Wave 4 decision-log readability: each of the six brief elements (what-it-is, value,
+   mechanics, alternatives, recommendation, reversibility) reads as a scannable section —
+   a divider rule + more space above turns a flat wall of text into labelled parts. */
+.gm-brief-h { font-family: var(--display); font-weight: 600; color: var(--ink); text-transform: uppercase; letter-spacing: .05em; font-size: .72rem; margin: 1em 0 .3em; padding-top: .55em; border-top: 1px solid var(--line-soft); }
+.gm-brief-h:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
 .gm-brief-empty { font-style: italic; margin: 6px 0 2px; }
 .gm-input-lab { display: block; font-size: .64rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 5px; }
 .gm-input { width: 100%; background: var(--abyss); border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--ink); font-family: var(--mono); font-size: .84rem; padding: 8px 10px; resize: vertical; }
@@ -1612,7 +1675,20 @@ html, body { overflow-x: clip; }
 .pd-slide-body li { margin: .3rem 0; }
 .pd-slide-body strong { color: var(--ink); }
 .pd-slide-body code { font-family: var(--mono, "IBM Plex Mono", monospace); font-size: .9em; background: var(--abyss-3); padding: .06em .4em; border-radius: 4px; }
-.pd-slide-body a { color: var(--cyan); }
+/* dig-deeper links (parade v3): every claim can link to its source (PR, walk, brief,
+   transcript) — make them obvious so the slide reads as "click to expand". */
+.pd-slide-body a { color: var(--cyan); text-decoration: underline; text-underline-offset: 2px; }
+.pd-slide-body a::after { content: " ↗"; font-size: .8em; opacity: .7; }
+.pd-slide-body a:hover { color: var(--cyan-strong, var(--cyan)); }
+/* decision-brief callout (parade v3): a "> " block renders as a bordered brief box, giving an
+   open decision's 6-element brief its own weight on the decisions slides. */
+.pd-slide-body .pd-quote {
+  margin: 1rem 0; padding: .8rem 1.1rem; border-left: 3px solid var(--amber);
+  background: color-mix(in srgb, var(--amber) 8%, transparent); border-radius: var(--r-sm);
+}
+.pd-slide-body .pd-quote p { margin: .3rem 0; }
+.pd-slide-body .pd-quote p:first-child { margin-top: 0; }
+.pd-slide-body .pd-quote a::after { content: ""; }
 /* image refs render LARGE — the visual is the point of the slide. */
 .pd-slide-img { display: block; max-width: 100%; max-height: 62vh; width: auto; height: auto; margin: 1rem auto; border: 1px solid var(--line); border-radius: var(--r-sm); box-shadow: var(--shadow, 0 2px 10px rgba(0,0,0,.08)); }
 
