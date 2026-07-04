@@ -219,6 +219,15 @@ func TestHandleStaticAssets(t *testing.T) {
 		if rec.Body.Len() == 0 {
 			t.Errorf("%s served empty", path)
 		}
+		// A deploy must not leave a stale asset cached — the served assets carry no-cache so
+		// the browser revalidates (the goals-toggle regression was a stale-asset symptom).
+		if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
+			t.Errorf("%s Cache-Control = %q, want no-cache", path, cc)
+		}
+	}
+	// the index page (static chrome) must also be no-cache so a deploy is picked up.
+	if cc := doGet(t, srv, "/").Header().Get("Cache-Control"); cc != "no-cache" {
+		t.Errorf("index Cache-Control = %q, want no-cache", cc)
 	}
 }
 
