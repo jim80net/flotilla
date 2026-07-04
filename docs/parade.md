@@ -1,124 +1,89 @@
 # Parade formation — accomplishments roll-up
 
-The celebratory / retro sibling of [stratified visibility](./visibility.md). Where
-visibility-synthesis compresses *current state* for the operator's attention, parade
-formation compresses *accomplishments and learnings* for reflection and institutional
-memory. Awareness still rolls **UP the federation hierarchy**; the read substrate is
-the same transcript-first `flotilla result` seam.
+The celebratory / retro sibling of [stratified visibility](./visibility.md). Parade
+formation compresses *accomplishments, learnings, and product shape* for reflection;
+awareness rolls **UP** the federation hierarchy via the same `flotilla result` seam.
 
-> **Who this is for / how to use it.** Parade formation is *operating doctrine* for
-> every seat (four-domain answer) and for coordinating seats (Tier-2/3 roll-up) —
-> plus the `flotilla parade` CLI that triggers it. v1 is **operator-triggered**
-> (manual cadence); there is no daemon heartbeat yet. The
-> [parade-formation skill](#how-it-ships--the-parade-formation-skill) ships as a
-> constitutional `heartbeat-skill` member.
+> **Who this is for.** Every seat answers in-pane; coordinators roll up; the meta-XO
+> authors the fleet deck. Operator-triggered v1. Ships as the
+> [parade-formation skill](#how-it-ships--the-parade-formation-skill) (`heartbeat-skill`).
 
-## The three tiers (parallel to visibility)
+## Operator dimension canon
 
-| Tier | Who curates | Reads | Posts to | Shape |
-|---|---|---|---|---|
-| **1** | each seat (individual answer) | — (in-pane) | that seat's own channel | four-domain parade answer |
-| **2** | an **XO** | its boats' latest parade answers | the XO's own channel | domain parade rollup + consolidated learnings |
-| **3** | the **meta-XO** | the project-XOs' parade rollups | `#fleet-command` (`#c2`) | fleet headline + grouped-by-XO + fleet learnings |
+Verbatim operator intent (yardstick — fleet doctrine as of today):
 
-**Tier 1 — individual answers.** Each agent answers four domains in-pane when the
-operator runs `flotilla parade`. The watch daemon's Tier-1 mirror publishes each
-turn-final to that agent's channel — same mechanical path as `flotilla brief`.
+> **proud of** / **learned** / **looking forward to** / **need** (unblock or direction)
 
-**Tier 2 — domain roll-up.** A project-XO reads each boat's latest parade answer via
-`flotilla result`, curates wins and learnings, and posts to its own channel.
+Plus **demo** when demo-able. Headings use this canon exactly — see the skill for the
+shipped template beside this quote.
 
-**Tier 3 — fleet parade.** The meta-XO reads each project-XO's roll-up and produces
-the operator-facing fleet parade report: headline first, grouped by XO, consolidated
-`## Learnings`, optional needs-help flags, detail footer last.
+## The three tiers
 
-## The four domains
+| Tier | Who | Posts to | Shape |
+|---|---|---|---|
+| **1** | each seat | own channel | four-dimensions-plus-demo answer |
+| **2** | project-XO | XO channel | per-desk canon rollup + consolidated Learned |
+| **3** | meta-XO | `#c2` + parade archive | **one slide per project-XO** in `slides.md` |
 
-Every seat answers:
+Tier 1: `flotilla parade` → mirror publishes turn-final (same path as `flotilla brief`).
 
-1. **Accomplishments** (required) — what you are proud of; concrete wins.
-2. **Working on next** (optional) — omit if nothing notable.
-3. **Learnings** (required) — must include a `## Learnings` block; fleet-wide items
-   feed [learning propagation](#learnings-propagation).
-4. **Needs help** (optional) — omit if clear.
+Tier 3: meta-XO writes `<parades-dir>/<YYYY-MM-DD>/slides.md`; operator reviews at
+**`/parade`** (togglable deck viewer — ←/→ between slides). Thematic synthesis is an
+optional epilogue slide only.
 
-## Learnings propagation
+## Walk-inspection (pre-parade)
 
-Learnings must not vanish in chat. The skill requires:
+Defined once in the
+[parade-formation skill](../internal/doctrine/assets/skills/parade-formation.md)
+(**walk-inspection** vocabulary entry). Roughly 24h before parade: inspect, fix, capture
+`assets/`; parade consumes walk output.
 
-- A structured `## Learnings` block in every individual answer and every roll-up.
-- Coordinators aggregate learnings upward; the Tier-3 fleet parade's learnings block
-  is the authoritative capture input.
-- **Post-parade capture:** append fleet-wide learnings to a roster-adjacent
-  `fleet-learnings.md` (host-local, gitignored), then run a reflect / compound-learnings
-  pass on each fleet-wide item to promote into skills, identity rules, or memory stubs.
-- Extension point: future `flotilla parade capture` may automate persistence; v1 is
-  documented operator + coordinator runbook.
+## Dimension order and completeness
 
-## The substrate
+Canonical order (list, template, CLI agree): **Proud of → Learned → Looking forward to
+→ Need → Demo** (demo always last).
 
-Roll-up reads each subordinate's **latest turn-final** through the same
-`surface.ResultReader` seam as visibility-synthesis (`flotilla result --roster <path>
-<name>`). No Discord history, no ledger, no new write-path. Unreadable subordinates
-are cleanly skipped.
+| Rule | When INCOMPLETE |
+|---|---|
+| Demo-able without Demo section | say so plainly |
+| Substantive claim without source link | Proud of, Learned, **and** Need — unconditional |
+| Need without existing goals `brief` | name goal needing attach-brief |
 
-Topology derivation is identical to visibility-synthesis: `AgentsBelow` / `OwnedChannels`
-over the federation `members[]` graph, with `role="fleet-command"` excluded from reads.
+## Parade archive (`/parade`, #373)
 
-## Operator runbook (v1)
+| Piece | Convention |
+|---|---|
+| Dash page | `/parade` — deck viewer, newest parade opens first |
+| Archive root | `<parades-dir>` — default `<roster-dir>/state/parades` |
+| Override | `flotilla dash --parades-dir` or `FLOTILLA_DASH_PARADES_DIR` |
+| Per parade | `<parades-dir>/<YYYY-MM-DD>/slides.md` + `assets/` |
+| Slide breaks | `---` between slides (one per project-XO in fleet deck) |
+| Legacy | `report.md` fallback; prefer `slides.md` |
 
-Three commands, in order:
+Dash is reader-only — coordinators author decks; operator toggles through slides.
+
+## Learned propagation
+
+Fleet-wide **Learned** items → `<roster-dir>/fleet-learnings.md` → reflect /
+compound-learnings. See skill for coordinator steps.
+
+## Operator runbook
 
 ```bash
-# 1. Every seat answers the four domains (mirror publishes each channel).
+# 0. ~24h before: walk-inspection (skill vocabulary).
 flotilla parade --all
-
-# 2. Each coordinator rolls up its tier below (project-XOs and meta-XO if it has subs).
 flotilla parade rollup --all
-
-# 3. Primary XO produces the operator fleet parade into #c2.
-flotilla parade fleet
+flotilla parade fleet          # → slides.md + #c2 pointer
+# Operator reviews: /parade
 ```
 
-Single-agent variants:
+## How it ships
 
-```bash
-flotilla parade backend
-flotilla parade rollup alpha-xo
-```
-
-After the fleet parade posts: review `## Learnings`, append fleet-wide items to
-`fleet-learnings.md`, run reflect on each.
-
-## How it ships — the parade-formation skill
-
-The doctrine ships as a **`heartbeat-skill`** constitutional member
-(`skills/parade-formation.md`), delivered by `flotilla doctrine install <agent>` or
-`flotilla workspace init`. The `flotilla parade` wake prompts are **self-sufficient**
-for the read command (absolute binary path + roster path injected), matching the
-visibility-synthesis pattern — the workspace skill enriches judgment but is not a hard
-dependency.
-
-## Orthogonal to visibility-synthesis
-
-| | Visibility synthesis | Parade formation |
-|---|---|---|
-| Purpose | current state / attention | accomplishments / reflection |
-| Cadence | daemon heartbeat (opt-in) | operator-triggered (v1) |
-| Idle discipline | reply idle when nothing changed | honest quiet periods OK |
-| Learnings | not in scope | required + propagation path |
-
-Both share the same read topology and Tier-2/3 roll-up shape; they do not gate each other.
-
-## Wiring it in
-
-1. **Install the skill.** `flotilla doctrine install <agent>` on every seat (or
-   `flotilla workspace init` on fresh workspaces).
-2. **Run parades manually** with `flotilla parade` (no roster flag required for v1).
-3. **Capture learnings** after each fleet parade per the propagation section above.
+`skills/parade-formation.md` via `flotilla doctrine install` or `flotilla workspace init`.
+`flotilla parade` wake prompts are self-sufficient.
 
 ## See also
 
-- [visibility.md](./visibility.md) — stratified visibility (the state-roll-up sibling).
-- [span-of-control.md](./span-of-control.md) — the constitutional set both skills plug into.
-- [xo-doctrine.md](./xo-doctrine.md) — operator ↔ XO contract and reader-modeling discipline.
+- [visibility.md](./visibility.md) — stratified visibility sibling.
+- [span-of-control.md](./span-of-control.md) — constitutional set.
+- [xo-doctrine.md](./xo-doctrine.md) — operator ↔ XO contract.
