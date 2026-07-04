@@ -162,6 +162,43 @@ func TestBuildGoals_MaterializeRosterDesks(t *testing.T) {
 	}
 }
 
+func TestBuildGoals_CoordinatorNeverMaterializesAsDesk(t *testing.T) {
+	// The CoS / meta-XO (cos) OWNS the fleet-command channel and is a MEMBER (the parent, for
+	// awareness roll-up) of every flotilla channel. Without the coordinator guard it would
+	// materialize as a spoke desk under EVERY flotilla — the operator's "CoS wired into every
+	// flotilla" bug. It must appear ONLY as its hub node, never as a roster desk. Real leaf
+	// desks (alpha-be, beta-be) still materialize.
+	file := GoalsFile{Goals: []Goal{
+		{ID: "fleet", Title: "Fleet", Scope: "flotilla", Owner: "cos"},
+		{ID: "alpha", Title: "Alpha flotilla", Scope: "flotilla", Parent: "fleet", Owner: "alpha-xo", ConversationAgent: "alpha-xo"},
+		{ID: "beta", Title: "Beta flotilla", Scope: "flotilla", Parent: "fleet", Owner: "beta-xo", ConversationAgent: "beta-xo"},
+	}}
+	in := GoalsInputs{
+		File: file, FileOK: true, MetaXO: "cos",
+		Channels: []DeskChannel{
+			{ChannelID: "C_CMD", XOAgent: "cos", Members: []string{"alpha-xo", "beta-xo"}},
+			{ChannelID: "C_ALPHA", XOAgent: "alpha-xo", Members: []string{"cos", "alpha-be"}},
+			{ChannelID: "C_BETA", XOAgent: "beta-xo", Members: []string{"cos", "beta-be"}},
+		},
+	}
+	doc := BuildGoals(in)
+	for _, g := range doc.Goals {
+		if g.Source == "roster" && strings.EqualFold(strings.TrimSpace(g.Owner), "cos") {
+			t.Errorf("coordinator cos must NEVER materialize as a desk, found id=%q owner=%q source=%q", g.ID, g.Owner, g.Source)
+		}
+		if strings.HasPrefix(strings.ToLower(g.ID), "desk:cos") {
+			t.Errorf("coordinator cos must NEVER get a desk node, found id=%q", g.ID)
+		}
+	}
+	byID := indexByID(doc.Goals)
+	if _, ok := byID["desk:alpha-be"]; !ok {
+		t.Error("a real leaf desk (alpha-be) must still materialize")
+	}
+	if _, ok := byID["desk:beta-be"]; !ok {
+		t.Error("a real leaf desk (beta-be) must still materialize")
+	}
+}
+
 func TestBuildGoals_Collaborations(t *testing.T) {
 	// A lane goal whose work_items reference two desks (codex-dev, codex-review) — both
 	// authored desk nodes — must produce a collaboration group over their node ids.

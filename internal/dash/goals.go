@@ -541,6 +541,22 @@ func materializeRosterDesks(doc *GoalsDoc, in GoalsInputs) {
 		return id
 	}
 
+	// Coordinators are HUBS, never spoke desks. Any agent that OWNS a channel (its xo_agent)
+	// is a coordinator: the CoS / meta-XO owns the fleet-command channel AND is a MEMBER of
+	// every subordinate channel (it is listed as the parent, so awareness rolls UP the graph)
+	// — so without this guard it materializes as a desk under EVERY flotilla (the operator's
+	// "CoS wired into every flotilla" bug). Excluding every channel-owner (plus the layout
+	// hub) keeps a coordinator on the map only as its hub node, never duplicated as a spoke.
+	coordinators := make(map[string]bool)
+	if mx := strings.ToLower(strings.TrimSpace(in.MetaXO)); mx != "" {
+		coordinators[mx] = true
+	}
+	for _, ch := range in.Channels {
+		if x := strings.ToLower(strings.TrimSpace(ch.XOAgent)); x != "" {
+			coordinators[x] = true
+		}
+	}
+
 	// Collect the desks to add, grouped by their hub, so they can be INSERTED right after
 	// their hub node in doc.Goals — keeping the documented DFS ordering (a parent always
 	// immediately precedes its children) rather than appended at the end.
@@ -553,7 +569,7 @@ func materializeRosterDesks(doc *GoalsDoc, in GoalsInputs) {
 		for _, m := range ch.Members {
 			name := strings.TrimSpace(m)
 			key := strings.ToLower(name)
-			if key == "" || key == xo || represented[key] || seen[key] {
+			if key == "" || key == xo || coordinators[key] || represented[key] || seen[key] {
 				continue
 			}
 			seen[key] = true
