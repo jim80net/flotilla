@@ -16,6 +16,8 @@ import (
 
 	"github.com/jim80net/flotilla/internal/backlog"
 	"github.com/jim80net/flotilla/internal/cos"
+	"github.com/jim80net/flotilla/internal/dash"
+	"github.com/jim80net/flotilla/internal/decisionbrief"
 	"github.com/jim80net/flotilla/internal/delegatenudge"
 	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/idlehold"
@@ -508,6 +510,14 @@ func cmdWatch(args []string) error {
 		// #232 coordinator delegation: every XO and CoS — not only the primary clock XO.
 		delegationTracker := delegatenudge.NewTracker()
 
+		// #349 item D: auto decision-brief trigger when operator-gated goals lack a brief.
+		decisionBriefTracker := decisionbrief.NewTracker()
+		goalsJSONPath := filepath.Join(rosterDir, "fleet-goals.json")
+		if gp := strings.TrimSpace(os.Getenv("FLOTILLA_GOALS_FILE")); gp != "" {
+			goalsJSONPath = gp
+		}
+		var deskStateLabels func() map[string]string
+
 		// #205 auto-switch: load flat launch recipes for storm-cooldown + slot metadata.
 		launchPath := os.Getenv("FLOTILLA_LAUNCH")
 		if launchPath == "" {
@@ -621,6 +631,14 @@ func cmdWatch(args []string) error {
 			StrandedHandoffOnFinish:   strandedHandoffOnFinish(cfg, strandedTracker, injector.Enqueue),
 			IsCoordinator:             cfg.IsCoordinator,
 			DelegationNudgeOnFinish:   delegationNudgeOnFinish(cfg, delegationTracker, injector.Enqueue),
+			DecisionBriefOnTick: decisionBriefOnTick(
+				goalsJSONPath, *backlogPath, decisionBriefTracker, injector.Enqueue, cfg,
+				func() map[string]string {
+					if deskStateLabels == nil {
+						return nil
+					}
+					return deskStateLabels()
+				}),
 			MirrorDispatch:            func(run func()) { go run() }, // mirror I/O off the tick goroutine
 			Awaiting:                  awaiting.Present,
 			SettleConsume:             settled.Consume,
@@ -656,6 +674,7 @@ func cmdWatch(args []string) error {
 			})
 		}
 		det := watch.NewDetectorWithSynthSidecar(detCfg, *snapshotPath, synthSidecarPath)
+		deskStateLabels = det.DeskStateLabels
 		endAutoSwitch = det.EndAutoSwitchFlight
 		turnPoller := watch.NewTurnEndPoller(xo, desks, detCfg.Assess, func() {
 			activity.OnTurnEnd("", time.Now())
@@ -1225,6 +1244,65 @@ func strandedHandoffOnFinish(cfg *roster.Config, tracker *stranded.Tracker, enqu
 		}
 		log.Printf("flotilla watch: stranded-handoff break %s: signal=%s", agent, r.Signal)
 		enqueue(watch.Job{Agent: agent, Message: stranded.NudgePrompt(agent), Kind: watch.KindDetector})
+	}
+}
+
+// decisionBriefOnTick scans fleet-goals.json each detector tick for operator-gated
+// items missing a brief and dispatches the owning desk once per gap (#349 item D).
+func decisionBriefOnTick(
+	goalsPath, backlogPath string,
+	tracker *decisionbrief.Tracker,
+	enqueue func(watch.Job),
+	cfg *roster.Config,
+	deskStates func() map[string]string,
+) func() {
+	if tracker == nil {
+		return nil
+	}
+	return func() {
+		raw, err := os.ReadFile(goalsPath)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				log.Printf("flotilla watch: decision-brief SKIP: read goals %q: %v", goalsPath, err)
+			}
+			return
+		}
+		gf, err := dash.ParseGoalsFile(raw)
+		if err != nil {
+			log.Printf("flotilla watch: decision-brief SKIP: parse goals %q: %v", goalsPath, err)
+			return
+		}
+		var backlogMarkdown string
+		if backlogPath != "" {
+			if bb, rerr := os.ReadFile(backlogPath); rerr == nil {
+				backlogMarkdown = string(bb)
+			}
+		}
+		gaps := decisionbrief.FindGaps(decisionbrief.Inputs{
+			File: gf, FileOK: true,
+			Backlog: backlogMarkdown, DeskStates: deskStates(),
+		})
+		active := make(map[string]bool, len(gaps))
+		for _, g := range gaps {
+			owner := strings.TrimSpace(g.Owner)
+			if owner == "" {
+				log.Printf("flotilla watch: decision-brief SKIP goal %q: no owning desk", g.GoalID)
+				continue
+			}
+			if _, err := cfg.Agent(owner); err != nil {
+				log.Printf("flotilla watch: decision-brief SKIP goal %q: owner %q not in roster", g.GoalID, owner)
+				continue
+			}
+			key := decisionbrief.GapKey(g)
+			active[key] = true
+			if !tracker.ShouldDispatch(key) {
+				continue
+			}
+			log.Printf("flotilla watch: decision-brief dispatch %s → %s (class=%s)", g.GoalID, owner, g.Class)
+			enqueue(watch.Job{Agent: owner, Message: decisionbrief.DispatchPrompt(g), Kind: "detector"})
+			tracker.MarkDispatched(key)
+		}
+		tracker.Reconcile(active)
 	}
 }
 
