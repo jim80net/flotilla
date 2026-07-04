@@ -658,12 +658,14 @@
   /* ── drive-queue item modal (#349 Inc 4 E10): a queue chip lives in a narrow column,
      so clicking (or Enter/Space on) it opens the full item here, focused. Read-only —
      the queue is a status surface; acting on an item is the control forms below. ────── */
+  var convModalReturn = null; // the drive-queue chip that opened the modal — refocused on close
   function openConvModal(marker, text) {
     var mk = el("conv-modal-marker");
     mk.textContent = marker || "";
     mk.style.display = marker ? "" : "none";
     el("conv-modal-title").textContent = text || "";
     var modal = el("conv-modal");
+    convModalReturn = document.activeElement; // the chip — restored on close (a11y)
     modal.classList.add("open");
     modal.setAttribute("aria-hidden", "false");
     var x = modal.querySelector(".conv-modal-x");
@@ -674,6 +676,11 @@
     if (!modal.classList.contains("open")) return;
     modal.classList.remove("open");
     modal.setAttribute("aria-hidden", "true");
+    // Return focus to the chip that opened it (matches the goals-modal a11y contract).
+    if (convModalReturn && convModalReturn.focus && document.contains(convModalReturn)) {
+      convModalReturn.focus({ preventScroll: true });
+    }
+    convModalReturn = null;
   }
   (function wireConvModal() {
     var backlog = el("conv-backlog");
@@ -692,6 +699,18 @@
     if (modal) {
       modal.addEventListener("click", function (e) {
         if (e.target.hasAttribute && e.target.hasAttribute("data-conv-modal-close")) closeConvModal();
+      });
+      // Focus trap (aria-modal): keep Tab / Shift+Tab cycling among the modal's focusable
+      // controls while it's open — Tab must not escape behind the backdrop onto the page
+      // below (cubic #361 P2; mirrors the goals-modal trap). The close × is the only
+      // focusable here, so both edges wrap back to it.
+      modal.addEventListener("keydown", function (e) {
+        if (e.key !== "Tab" || !modal.classList.contains("open")) return;
+        var f = modal.querySelectorAll(".conv-modal-x");
+        if (!f.length) return;
+        var first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
       });
     }
     document.addEventListener("keydown", function (e) {
@@ -715,20 +734,26 @@
   }
   window.flotillaDash.pushNav = pushNav;
   function applyNav(state) {
+    // try/finally so a restore-time throw (a render/restore error) can NEVER leave the
+    // guard stuck true — a stuck guard would suppress every future pushNav and silently
+    // kill history for the rest of the session (cubic #354 P2).
     restoringNav = true;
-    var s = state || { view: "conversations" };
-    var view = s.view || "conversations";
-    // Set the selection to the state's desk — including CLEARING it on a desk:null state
-    // (Back to the seed must not leave the thread/header/mirror on the old desk; a null
-    // selection lets renderConversations re-pick the default) — cubic #351 P2.
-    if (view === "conversations") selectedDesk = s.desk || null;
-    showView(view);
-    if (view === "conversations") { renderConversations(); syncControlTargets(true); fetchMirror(); }
-    if (view === "goals" && window.flotillaGoals && window.flotillaGoals.restoreNode) {
-      if (window.flotillaGoals.show) window.flotillaGoals.show(); // ensure the map is rendered first
-      window.flotillaGoals.restoreNode(s.node || null);
+    try {
+      var s = state || { view: "conversations" };
+      var view = s.view || "conversations";
+      // Set the selection to the state's desk — including CLEARING it on a desk:null state
+      // (Back to the seed must not leave the thread/header/mirror on the old desk; a null
+      // selection lets renderConversations re-pick the default) — cubic #351 P2.
+      if (view === "conversations") selectedDesk = s.desk || null;
+      showView(view);
+      if (view === "conversations") { renderConversations(); syncControlTargets(true); fetchMirror(); }
+      if (view === "goals" && window.flotillaGoals && window.flotillaGoals.restoreNode) {
+        if (window.flotillaGoals.show) window.flotillaGoals.show(); // ensure the map is rendered first
+        window.flotillaGoals.restoreNode(s.node || null);
+      }
+    } finally {
+      restoringNav = false;
     }
-    restoringNav = false;
   }
   window.addEventListener("popstate", function (e) { applyNav(e.state); });
   // Seed the initial entry so the very first Back has a target.

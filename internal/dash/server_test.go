@@ -283,6 +283,16 @@ func TestConversationsWave2(t *testing.T) {
 			t.Errorf("dash.js must open a drive-queue item in the modal (missing %q) — #349 Inc 4 E10", marker)
 		}
 	}
+	// cubic #361 P2: the conv-modal must trap Tab focus (like the goals-modal) so Tab can't
+	// escape behind the backdrop, and must return focus to the opening chip on close.
+	if !strings.Contains(js, "convModalReturn") {
+		t.Error("conv-modal must return focus to the opening chip on close (convModalReturn) — cubic #361 P2")
+	}
+	if ci := strings.Index(js, "wireConvModal"); ci >= 0 {
+		if !strings.Contains(js[ci:], `e.key !== "Tab"`) {
+			t.Error("conv-modal must trap Tab focus inside the modal (mirrors the goals-modal trap) — cubic #361 P2")
+		}
+	}
 	// E11 filter half: symmetric @-normalization (the prior code matched @-prefix on `to`
 	// only, dropping a desk's own outbound relay lines from `from`).
 	if !strings.Contains(js, "ledgerParticipant") {
@@ -461,6 +471,18 @@ func TestGoalsCanvasAssets(t *testing.T) {
 		if !strings.Contains(dashJS, marker) {
 			t.Errorf("dash.js must retain the #349 browser-history controller (missing %q)", marker)
 		}
+	}
+	// cubic #354 P2: applyNav must reset the restoringNav guard in a finally — a throwing
+	// restore must never permanently suppress pushNav (history silently dead for the session).
+	if ai := strings.Index(dashJS, "function applyNav"); ai >= 0 {
+		if fi := strings.Index(dashJS[ai:], "} finally {"); fi < 0 || fi > 1600 {
+			t.Error("applyNav must wrap its body in try/finally so the restoringNav guard always resets (cubic #354 P2)")
+		}
+	}
+	// cubic #354 P2: the modal anchors focus-restore by NODE id (re-queried live on close),
+	// so an in-modal drill-in re-render can't leave close() focusing a detached element.
+	if !strings.Contains(js, "modalReturnId") {
+		t.Error("goals.js must anchor modal focus-restore by node id (modalReturnId) — cubic #354 P2")
 	}
 	// #349 B — click-through completeness: gated items click through to their target
 	// (gm-item-link), an aggregate node routes to its DOWNSTREAM decisions (downstreamGated),
