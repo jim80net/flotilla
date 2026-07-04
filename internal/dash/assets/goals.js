@@ -132,6 +132,29 @@
       (c.realized || 0) + " realized, of " + (c.total || 0) + " goal nodes.");
   }
 
+  // #349 Inc 5 F13: gather every realized goal into one "history of done" list. The live
+  // map greens/ghosts realized nodes so they recede; this panel makes completed goals
+  // legible in one place, with an honest empty state and a count. A row opens that goal's
+  // detail drawer (wired in the init block).
+  function renderDoneHistory(doc) {
+    var list = q("goals-done-list"), countEl = q("goals-done-count");
+    if (!list) return;
+    var goals = Array.isArray(doc.goals) ? doc.goals : [];
+    var done = goals.filter(function (g) { return g.status_display === "achieved"; });
+    if (countEl) countEl.textContent = done.length ? String(done.length) : "";
+    if (!done.length) {
+      list.innerHTML = '<div class="empty">No realized goals yet.</div>';
+      return;
+    }
+    list.innerHTML = done.map(function (g) {
+      return '<button class="gdone-row" type="button" data-open-node="' + escapeHtml(g.id) + '">' +
+        '<span class="gdone-check" aria-hidden="true">✓</span>' +
+        '<span class="gdone-title">' + escapeHtml(g.title || g.id) + "</span>" +
+        '<span class="gdone-scope">' + escapeHtml(scopeNoun(g)) + "</span>" +
+        "</button>";
+    }).join("");
+  }
+
   function renderLegend() {
     var items = [
       ["realized", "realized"], ["in-flight", "in flight"],
@@ -1039,6 +1062,12 @@
     if (help) help.onclick = function () {
       help.setAttribute("aria-expanded", help.getAttribute("aria-expanded") === "true" ? "false" : "true");
     };
+    // #349 Inc 5 F13: a history-of-done row opens that realized goal's detail drawer.
+    var doneList = q("goals-done-list");
+    if (doneList) doneList.addEventListener("click", function (e) {
+      var row = e.target.closest ? e.target.closest("[data-open-node]") : null;
+      if (row) openDrawer(row.getAttribute("data-open-node"));
+    });
     // Intervention modal (#302): close on the × / backdrop; the "Send" is a stub for
     // this prototype (the reply path wires to the control API in a follow-on).
     var modal = q("goals-modal");
@@ -1088,6 +1117,7 @@
     var graph = q("goals-graph"), empty = q("goals-empty");
     renderSituation(doc);
     renderLegend();
+    renderDoneHistory(doc); // #349 Inc 5 F13 — realized goals, on every path (empty-safe)
 
     if (!doc.found) {
       closeDrawer(); // a drawer open over the now-hidden graph would be stale
