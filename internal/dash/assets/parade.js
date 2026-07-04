@@ -1,7 +1,10 @@
-/* flotilla parade page — a read-only archive of the fleet's parade reports, newest first.
- * Data via fetch(/api/parades); each report.md renders through the SAME escape-then-markdown
- * pipeline the decision brief uses (escape FIRST, then a fixed markdown subset) so no raw HTML
- * from a report ever reaches the DOM. Images come from /parade-assets/<date>/<file>.
+/* flotilla parade — a POWERPOINT-STYLE deck viewer over the parade archive.
+ * /api/parades gives every parade newest-first; each carries slides.md (the deck source:
+ * "---"-separated slides, first line per slide = title, image refs render large). The page
+ * OPENS as the newest deck; ← / → / tap-halves / swipe / arrow-keys navigate slides; a
+ * counter shows position; Escape (or "all parades") drops to the newest-first list — the
+ * progression — where tapping a parade opens its deck. report.md content ever reaches the
+ * DOM only through the escape-then-markdown pipeline (escape FIRST), so nothing can inject.
  */
 (function () {
   "use strict";
@@ -12,10 +15,19 @@
       .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
-  // renderMd: escape-then-markdown (mirrors goals.js renderBrief). Escapes first, then a small
-  // fixed subset — #..#### headings, -/* bullet lists, blank-line paragraphs, inline **bold**,
-  // `code`, and [text](http(s)://…) links. Nothing here can inject markup.
-  function renderMd(md) {
+  var PARADES = [], pIdx = 0, sIdx = 0, view = "list";
+
+  // resolve a slide image ref to a served URL: an http(s) ref passes through; anything else
+  // is treated as an asset basename under the parade's assets/ dir.
+  function imgURL(date, src) {
+    if (/^https?:\/\//i.test(src)) return src;
+    return "/parade-assets/" + encodeURIComponent(date) + "/" + encodeURIComponent(String(src).replace(/^.*\//, ""));
+  }
+
+  // escape-then-markdown for a slide body (mirrors goals.js renderBrief). Escapes FIRST, then
+  // a fixed subset: a block image line ![alt](src) renders LARGE; #.. headings; -/* bullets;
+  // blank-line paragraphs; inline **bold**, `code`, [text](http…). Images resolve via date.
+  function renderMd(date, md) {
     var lines = esc(String(md == null ? "" : md)).split(/\r?\n/);
     function inline(s) {
       return s
@@ -26,8 +38,12 @@
     var out = [], list = null;
     function flush() { if (list) { out.push("<ul>" + list.join("") + "</ul>"); list = null; } }
     for (var i = 0; i < lines.length; i++) {
-      var ln = lines[i], h = /^(#{1,6})\s+(.*)$/.exec(ln), li = /^\s*[-*]\s+(.*)$/.exec(ln);
-      if (h) { flush(); out.push('<div class="pd-h pd-h' + Math.min(h[1].length, 4) + '">' + inline(h[2]) + "</div>"); }
+      var ln = lines[i];
+      var img = /^!\[([^\]]*)\]\(([^)\s]+)\)\s*$/.exec(ln);
+      var h = /^(#{1,6})\s+(.*)$/.exec(ln);
+      var li = /^\s*[-*]\s+(.*)$/.exec(ln);
+      if (img) { flush(); out.push('<img class="pd-slide-img" loading="lazy" src="' + esc(imgURL(date, img[2])) + '" alt="' + esc(img[1]) + '" />'); }
+      else if (h) { flush(); out.push('<div class="pd-h pd-h' + Math.min(h[1].length, 4) + '">' + inline(h[2]) + "</div>"); }
       else if (li) { (list = list || []).push("<li>" + inline(li[1]) + "</li>"); }
       else if (ln.trim() === "") { flush(); }
       else { flush(); out.push("<p>" + inline(ln) + "</p>"); }
@@ -36,40 +52,115 @@
     return out.join("");
   }
 
-  function gallery(date, assets) {
-    if (!assets || !assets.length) return "";
-    var imgs = assets.map(function (a) {
-      var src = "/parade-assets/" + encodeURIComponent(date) + "/" + encodeURIComponent(a);
-      return '<a class="pd-shot" href="' + esc(src) + '" target="_blank" rel="noopener" title="' + esc(a) + '">' +
-        '<img loading="lazy" src="' + esc(src) + '" alt="' + esc(a) + '" /></a>';
-    }).join("");
-    return '<div class="pd-gallery">' + imgs + "</div>";
-  }
-
-  function render(parades) {
-    var box = el("parade-list");
-    if (!box) return;
-    if (!parades || !parades.length) {
-      box.innerHTML = '<div class="empty">No parades yet — the first one will appear here.</div>';
-      return;
+  // parseSlides splits slides.md on a line that is exactly "---"; each slide's FIRST non-empty
+  // line is its title (a leading # is stripped), the rest is the body.
+  function parseSlides(md) {
+    var lines = String(md == null ? "" : md).replace(/\r\n/g, "\n").split("\n");
+    var chunks = [], cur = [];
+    for (var i = 0; i < lines.length; i++) {
+      if (/^---\s*$/.test(lines[i])) { chunks.push(cur.join("\n")); cur = []; }
+      else cur.push(lines[i]);
     }
-    box.innerHTML = parades.map(function (p) {
-      var report = (p.report && p.report.trim())
-        ? renderMd(p.report)
-        : '<p class="muted">No report yet for this parade.</p>';
-      return '<section class="pd-card">' +
-        '<header class="pd-date"><span class="pd-date-dot" aria-hidden="true"></span>' + esc(p.date) + "</header>" +
-        '<div class="pd-report">' + report + "</div>" +
-        gallery(p.date, p.assets) +
-        "</section>";
+    chunks.push(cur.join("\n"));
+    return chunks.map(function (c) { return c.trim(); }).filter(Boolean).map(function (chunk) {
+      var ls = chunk.split("\n");
+      var title = (ls.shift() || "").replace(/^#+\s*/, "").trim();
+      return { title: title, body: ls.join("\n").trim() };
+    });
+  }
+
+  function curSlides() { return parseSlides((PARADES[pIdx] || {}).slides || ""); }
+
+  /* ── deck view ─────────────────────────────────────────────────────────── */
+  function renderDeck() {
+    var par = PARADES[pIdx];
+    if (!par) { showList(); return; }
+    var slides = curSlides();
+    if (!slides.length) slides = [{ title: par.date, body: "*No slides yet for this parade.*" }];
+    if (sIdx < 0) sIdx = 0;
+    if (sIdx > slides.length - 1) sIdx = slides.length - 1;
+    var s = slides[sIdx];
+    el("pd-deck-date").textContent = par.date;
+    el("pd-counter").textContent = (sIdx + 1) + " / " + slides.length;
+    el("pd-slide").innerHTML =
+      (s.title ? '<h1 class="pd-slide-title">' + esc(s.title) + "</h1>" : "") +
+      '<div class="pd-slide-body">' + renderMd(par.date, s.body) + "</div>";
+    el("pd-prev").disabled = sIdx === 0;
+    el("pd-next").disabled = sIdx >= slides.length - 1;
+    var slideEl = el("pd-slide"); if (slideEl) slideEl.focus({ preventScroll: true });
+    el("pd-deck").hidden = false;
+    el("pd-list-view").hidden = true;
+    view = "deck";
+  }
+  function next() { if (sIdx < curSlides().length - 1) { sIdx++; renderDeck(); } }
+  function prev() { if (sIdx > 0) { sIdx--; renderDeck(); } }
+  function openDeck(i) { pIdx = i; sIdx = 0; renderDeck(); }
+
+  /* ── list view (the progression) ───────────────────────────────────────── */
+  function showList() {
+    el("pd-deck").hidden = true;
+    el("pd-list-view").hidden = false;
+    view = "list";
+  }
+  function renderList() {
+    var box = el("pd-list");
+    if (!box) return;
+    if (!PARADES.length) { box.innerHTML = '<div class="empty">No parades yet — the first one will appear here.</div>'; return; }
+    box.innerHTML = PARADES.map(function (p, i) {
+      var slides = parseSlides(p.slides || "");
+      var first = slides.length ? slides[0].title : "(empty)";
+      return '<button class="pd-listcard" type="button" data-i="' + i + '">' +
+        '<span class="pd-listcard-date">' + esc(p.date) + "</span>" +
+        '<span class="pd-listcard-meta">' + slides.length + " slide" + (slides.length === 1 ? "" : "s") +
+        " · " + esc(first) + "</span></button>";
     }).join("");
   }
 
+  /* ── wiring: arrows, tap-halves, swipe, keyboard, list clicks ──────────── */
+  function wire() {
+    el("pd-prev").addEventListener("click", function (e) { e.stopPropagation(); prev(); });
+    el("pd-next").addEventListener("click", function (e) { e.stopPropagation(); next(); });
+    el("pd-close").addEventListener("click", showList);
+    // tap the left/right half of the slide to page (ignore taps on links/images).
+    el("pd-stage").addEventListener("click", function (e) {
+      if (e.target.closest("a") || e.target.closest("button")) return;
+      var r = el("pd-stage").getBoundingClientRect();
+      if (e.clientX - r.left < r.width / 2) prev(); else next();
+    });
+    // swipe.
+    var x0 = null;
+    el("pd-stage").addEventListener("touchstart", function (e) { x0 = e.touches[0].clientX; }, { passive: true });
+    el("pd-stage").addEventListener("touchend", function (e) {
+      if (x0 == null) return;
+      var dx = e.changedTouches[0].clientX - x0; x0 = null;
+      if (Math.abs(dx) > 40) { if (dx < 0) next(); else prev(); }
+    }, { passive: true });
+    // keyboard: arrows page, Escape drops to the list.
+    document.addEventListener("keydown", function (e) {
+      if (view === "deck") {
+        if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") { e.preventDefault(); next(); }
+        else if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); prev(); }
+        else if (e.key === "Escape") { e.preventDefault(); showList(); }
+      }
+    });
+    // list card → open that deck.
+    el("pd-list").addEventListener("click", function (e) {
+      var card = e.target.closest("[data-i]");
+      if (card) openDeck(parseInt(card.getAttribute("data-i"), 10) || 0);
+    });
+  }
+
+  wire();
   fetch("/api/parades", { cache: "no-store" })
     .then(function (r) { if (!r.ok) throw new Error("/api/parades → " + r.status); return r.json(); })
-    .then(function (d) { render((d && d.parades) || []); })
+    .then(function (d) {
+      PARADES = (d && d.parades) || [];
+      renderList();
+      if (PARADES.length) openDeck(0); else showList(); // open the newest deck; else the (empty) list
+    })
     .catch(function (e) {
-      var box = el("parade-list");
+      showList();
+      var box = el("pd-list");
       if (box) box.innerHTML = '<div class="error">Could not load parades: ' + esc(e.message) + "</div>";
     });
 })();

@@ -18,11 +18,14 @@ import (
 	"strings"
 )
 
-// ParadeEntry is one archived parade: its date (the dir name), the raw report.md, and
-// the image asset filenames under assets/ (served via /parade-assets/<date>/<file>).
+// ParadeEntry is one archived parade: its date (the dir name), the raw slides.md deck
+// source (POWERPOINT-style: "---"-separated slides, first line per slide = title, image
+// refs render large), and the image asset filenames under assets/ (served via
+// /parade-assets/<date>/<file>). slides.md is preferred; a legacy report.md is read as a
+// fallback so an older parade still renders (as a single-deck source).
 type ParadeEntry struct {
 	Date   string   `json:"date"`
-	Report string   `json:"report"`
+	Slides string   `json:"slides"`
 	Assets []string `json:"assets"`
 }
 
@@ -48,9 +51,11 @@ func readParades(dir string) []ParadeEntry {
 	sort.Sort(sort.Reverse(sort.StringSlice(dates)))
 	for _, d := range dates {
 		pd := filepath.Join(dir, d)
-		report := ""
-		if b, err := os.ReadFile(filepath.Join(pd, "report.md")); err == nil {
-			report = string(b)
+		slides := ""
+		if b, err := os.ReadFile(filepath.Join(pd, "slides.md")); err == nil {
+			slides = string(b)
+		} else if b, err := os.ReadFile(filepath.Join(pd, "report.md")); err == nil {
+			slides = string(b) // legacy fallback — rendered as a single-deck source
 		}
 		assets := []string{}
 		if aents, err := os.ReadDir(filepath.Join(pd, "assets")); err == nil {
@@ -61,7 +66,7 @@ func readParades(dir string) []ParadeEntry {
 			}
 			sort.Strings(assets)
 		}
-		out = append(out, ParadeEntry{Date: d, Report: report, Assets: assets})
+		out = append(out, ParadeEntry{Date: d, Slides: slides, Assets: assets})
 	}
 	return out
 }

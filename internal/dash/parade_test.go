@@ -10,13 +10,13 @@ import (
 func TestReadParades_NewestFirstWithReportAndAssets(t *testing.T) {
 	dir := t.TempDir()
 	// two dated parades + a non-date dir that must be ignored.
-	mk := func(date, report string, assets ...string) {
+	mk := func(date, slides string, assets ...string) {
 		pd := filepath.Join(dir, date)
 		if err := os.MkdirAll(filepath.Join(pd, "assets"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if report != "" {
-			if err := os.WriteFile(filepath.Join(pd, "report.md"), []byte(report), 0o644); err != nil {
+		if slides != "" {
+			if err := os.WriteFile(filepath.Join(pd, "slides.md"), []byte(slides), 0o644); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -39,8 +39,19 @@ func TestReadParades_NewestFirstWithReportAndAssets(t *testing.T) {
 	if got[0].Date != "2026-07-04" || got[1].Date != "2026-07-03" {
 		t.Errorf("parades must be newest-first, got %q then %q", got[0].Date, got[1].Date)
 	}
-	if got[0].Report != "# newer" {
-		t.Errorf("report.md not read: %q", got[0].Report)
+	if got[0].Slides != "# newer" {
+		t.Errorf("slides.md not read: %q", got[0].Slides)
+	}
+	// legacy fallback: a parade with only report.md (no slides.md) is still read.
+	legacy := filepath.Join(dir, "2026-07-05")
+	if err := os.MkdirAll(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, "report.md"), []byte("# legacy deck"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if again := readParades(dir); again[0].Date != "2026-07-05" || again[0].Slides != "# legacy deck" {
+		t.Errorf("a legacy report.md (no slides.md) must fall back, got date=%q slides=%q", again[0].Date, again[0].Slides)
 	}
 	// assets: image files only, sorted; the .txt is excluded.
 	if len(got[1].Assets) != 2 || got[1].Assets[0] != "a.png" || got[1].Assets[1] != "z.png" {

@@ -4,35 +4,44 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex,nofollow" />
-  <title>flotilla — parades</title>
+  <title>flotilla — parade</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/dash.css" />
 </head>
-<body>
+<body class="parade-body">
   <div class="bg-grid" aria-hidden="true"></div>
   <div class="bg-grain" aria-hidden="true"></div>
 
-  <header class="bar">
-    <div class="brand">
-      <span class="brand-mark" aria-hidden="true"></span>
-      <div class="brand-text">
-        <span class="brand-name">flotilla</span>
-        <span class="brand-dash">parades</span>
-      </div>
+  <!-- DECK view: one slide at a time (arrows / tap / swipe / counter; Esc → the list) -->
+  <section id="pd-deck" class="pd-deck" aria-label="Parade slides" hidden>
+    <div class="pd-deck-bar">
+      <span id="pd-deck-date" class="pd-deck-date"></span>
+      <span id="pd-counter" class="pd-counter" aria-live="polite"></span>
+      <button id="pd-close" class="pd-close" type="button" aria-label="All parades (Escape)">▦ all parades</button>
     </div>
-    <nav class="tabs" role="tablist" aria-label="Back to the dashboard">
-      <a class="tab" href="/">← Dashboard</a>
-    </nav>
-  </header>
+    <div id="pd-stage" class="pd-stage">
+      <button id="pd-prev" class="pd-nav pd-prev" type="button" aria-label="Previous slide">‹</button>
+      <article id="pd-slide" class="pd-slide" tabindex="0"></article>
+      <button id="pd-next" class="pd-nav pd-next" type="button" aria-label="Next slide">›</button>
+    </div>
+  </section>
 
-  <main class="parade-wrap" aria-label="Fleet parades, newest first">
-    <p class="parade-intro muted">Each parade is a snapshot of the fleet's progress — accomplished, next, learned, need, and a demo. Newest first; scroll down to watch the progression.</p>
-    <div id="parade-list" class="parade-list" aria-live="polite"></div>
-  </main>
-
-  <footer class="foot">Parades are read-only · newest first · a snapshot of the fleet's progress over time.</footer>
+  <!-- LIST view: every parade newest-first (the progression); tap one to open its deck -->
+  <section id="pd-list-view" class="pd-list-view" aria-label="Parades, newest first" hidden>
+    <header class="bar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div class="brand-text"><span class="brand-name">flotilla</span><span class="brand-dash">parades</span></div>
+      </div>
+      <nav class="tabs"><a class="tab" href="/">← Dashboard</a></nav>
+    </header>
+    <main class="parade-wrap">
+      <p class="parade-intro muted">Every parade, newest first — the fleet's progress over time. Tap one to open its deck.</p>
+      <div id="pd-list" class="pd-list"></div>
+    </main>
+  </section>
 
   <script src="/static/parade.js"></script>
 </body>
