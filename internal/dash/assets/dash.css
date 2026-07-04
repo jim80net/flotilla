@@ -1590,3 +1590,46 @@ html, body { overflow-x: clip; }
      overflowing when the message + button collide */
   .form-actions { flex-wrap: wrap; }
 }
+/* ── Parade page (/parade) — read-only archive of parade reports, newest first ─────── */
+.parade-wrap { max-width: 820px; margin: 0 auto; padding: 1rem 1rem 3rem; }
+.parade-intro { font-size: .82rem; margin: .3rem 0 1.1rem; line-height: 1.5; }
+.parade-list { display: flex; flex-direction: column; gap: 1.1rem; }
+.pd-card {
+  background: var(--abyss-2); border: 1px solid var(--line); border-radius: var(--r);
+  box-shadow: var(--shadow, 0 1px 3px rgba(0,0,0,.06)); overflow: hidden;
+}
+.pd-date {
+  display: flex; align-items: center; gap: .55rem;
+  font-family: var(--display); font-size: 1.25rem; color: var(--ink);
+  padding: .8rem 1.1rem; border-bottom: 1px solid var(--line); background: var(--abyss-3);
+  font-variant-numeric: tabular-nums;
+}
+.pd-date-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--cyan); flex: none; }
+.pd-report { padding: 1rem 1.1rem; font-size: .84rem; line-height: 1.55; color: var(--ink-2); }
+.pd-report .pd-h { font-family: var(--display); color: var(--ink); margin: 1rem 0 .35rem; line-height: 1.2; }
+.pd-report .pd-h:first-child { margin-top: 0; }
+.pd-report .pd-h1 { font-size: 1.15rem; }
+.pd-report .pd-h2 { font-size: 1rem; }
+.pd-report .pd-h3, .pd-report .pd-h4 { font-size: .9rem; color: var(--ink-2); letter-spacing: .02em; }
+.pd-report p { margin: .45rem 0; }
+.pd-report ul { margin: .4rem 0 .6rem; padding-left: 1.15rem; }
+.pd-report li { margin: .18rem 0; }
+.pd-report strong { color: var(--ink); }
+.pd-report code { font-family: var(--mono, "IBM Plex Mono", monospace); font-size: .92em; background: var(--abyss-3); padding: .05em .35em; border-radius: 4px; }
+.pd-report a { color: var(--cyan); }
+.pd-report a:hover { text-decoration: underline; }
+/* image gallery — responsive grid; each shot is a ≥44px tappable link that opens full size */
+.pd-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .55rem; padding: 0 1.1rem 1.1rem; }
+.pd-shot {
+  display: block; min-height: 44px; border: 1px solid var(--line); border-radius: var(--r-sm);
+  overflow: hidden; background: var(--abyss-3); line-height: 0;
+}
+.pd-shot img { width: 100%; height: auto; display: block; }
+.pd-shot:hover { border-color: var(--cyan-dim, var(--cyan)); }
+.pd-shot:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+/* the "← Dashboard" back link reads as a tab; keep a comfortable mobile tap target */
+.parade-wrap ~ * a.tab, header.bar a.tab { min-height: 44px; display: inline-flex; align-items: center; text-decoration: none; }
+@media (max-width: 560px) {
+  .parade-wrap { padding: .75rem .75rem 2.5rem; }
+  .pd-gallery { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+}

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>flotilla — parades</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/dash.css" />
+</head>
+<body>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-grain" aria-hidden="true"></div>
+
+  <header class="bar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div class="brand-text">
+        <span class="brand-name">flotilla</span>
+        <span class="brand-dash">parades</span>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Back to the dashboard">
+      <a class="tab" href="/">← Dashboard</a>
+    </nav>
+  </header>
+
+  <main class="parade-wrap" aria-label="Fleet parades, newest first">
+    <p class="parade-intro muted">Each parade is a snapshot of the fleet's progress — accomplished, next, learned, need, and a demo. Newest first; scroll down to watch the progression.</p>
+    <div id="parade-list" class="parade-list" aria-live="polite"></div>
+  </main>
+
+  <footer class="foot">Parades are read-only · newest first · a snapshot of the fleet's progress over time.</footer>
+
+  <script src="/static/parade.js"></script>
+</body>
+</html>
