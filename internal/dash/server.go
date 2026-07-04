@@ -35,7 +35,7 @@ type Config struct {
 	Bind             string // listen address (default 127.0.0.1:8787)
 	Repo             string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
 	SecretsPath      string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
-	GoalsLayout      string // initial Goals-map layout: "org" (default) | "tree" — the toggle still overrides live (#317/#324)
+	GoalsLayout      string // initial Goals-map layout: "mindmap" (default) | "tree" — org retired from the UI; the live toggle still overrides (#317/#324)
 
 	// Transport is the coordination transport backing the control surface's notify
 	// post (the operator note's destination is a Discord webhook, so this is the
@@ -394,11 +394,15 @@ type pageData struct {
 
 // normalizeGoalsLayout resolves the initial Goals-map layout: "tree" when explicitly set,
 // else "org" (the operator-blessed default, #324). The live toggle still overrides it.
+// normalizeGoalsLayout resolves the env-seeded initial Goals layout. The operator retired
+// org from the UI ("I just want mind map or tree; org is just a precursor to mindmap"), so
+// the default is now MIND MAP; "tree" is honored; anything else — including the retired
+// "org" — maps to mindmap. (layoutOrg stays in goals.js, dormant.)
 func normalizeGoalsLayout(v string) string {
 	if strings.EqualFold(strings.TrimSpace(v), "tree") {
 		return "tree"
 	}
-	return "org"
+	return "mindmap"
 }
 
 // --- middleware + helpers ---
