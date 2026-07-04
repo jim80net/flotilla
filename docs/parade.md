@@ -7,7 +7,7 @@ memory. Awareness still rolls **UP the federation hierarchy**; the read substrat
 the same transcript-first `flotilla result` seam.
 
 > **Who this is for / how to use it.** Parade formation is *operating doctrine* for
-> every seat (four-domain answer) and for coordinating seats (Tier-2/3 roll-up) —
+> every seat (four-plus-demo answer) and for coordinating seats (Tier-2/3 roll-up) —
 > plus the `flotilla parade` CLI that triggers it. v1 is **operator-triggered**
 > (manual cadence); there is no daemon heartbeat yet. The
 > [parade-formation skill](#how-it-ships--the-parade-formation-skill) ships as a
@@ -17,13 +17,22 @@ the same transcript-first `flotilla result` seam.
 
 | Tier | Who curates | Reads | Posts to | Shape |
 |---|---|---|---|---|
-| **1** | each seat (individual answer) | — (in-pane) | that seat's own channel | four-domain parade answer |
+| **1** | each seat (individual answer) | — (in-pane) | that seat's own channel | four-plus-demo parade answer |
 | **2** | an **XO** | its boats' latest parade answers | the XO's own channel | domain parade rollup + consolidated learnings |
 | **3** | the **meta-XO** | the project-XOs' parade rollups | `#fleet-command` (`#c2`) | fleet headline + grouped-by-XO + fleet learnings |
 
-**Tier 1 — individual answers.** Each agent answers four domains in-pane when the
-operator runs `flotilla parade`. The watch daemon's Tier-1 mirror publishes each
-turn-final to that agent's channel — same mechanical path as `flotilla brief`.
+**Tier 1 — individual answers.** Each agent answers four domains **plus a demo
+element** in-pane when the operator runs `flotilla parade`. The watch daemon's
+Tier-1 mirror publishes each turn-final to that agent's channel — same mechanical
+path as `flotilla brief`.
+
+## Walk-inspection rhythm (pre-parade)
+
+Parades include **demos** — what is a parade without showing what was accomplished
+and what the shape of the product is now? A **walk** fires roughly **24 hours before**
+each parade: each seat inspects what it shipped, fixes what is broken, and produces
+demo assets (screenshot, short capture, or live link). The parade answer **consumes**
+walk output; fixes and demo assets come out of the walk, not improvised at parade time.
 
 **Tier 2 — domain roll-up.** A project-XO reads each boat's latest parade answer via
 `flotilla result`, curates wins and learnings, and posts to its own channel.
@@ -32,7 +41,7 @@ turn-final to that agent's channel — same mechanical path as `flotilla brief`.
 the operator-facing fleet parade report: headline first, grouped by XO, consolidated
 `## Learnings`, optional needs-help flags, detail footer last.
 
-## The four domains
+## The four-plus-demo domains
 
 Every seat answers:
 
@@ -41,6 +50,13 @@ Every seat answers:
 3. **Learnings** (required) — must include a `## Learnings` block; fleet-wide items
    feed [learning propagation](#learnings-propagation).
 4. **Needs help** (optional) — omit if clear.
+5. **Demo** (required when demo-able) — screenshot, short capture, or live link
+   showing the product's current shape (from the pre-parade walk). If the lane has no
+   demo-able product, say `DEMO: N/A` with a one-line reason.
+
+**Completeness rule:** a parade answer for a **demo-able product** without a DEMO
+section is **incomplete** — the skill requires the seat to say so plainly rather than
+presenting a status dump as a celebration.
 
 ## Learnings propagation
 
@@ -70,7 +86,8 @@ over the federation `members[]` graph, with `role="fleet-command"` excluded from
 Three commands, in order:
 
 ```bash
-# 1. Every seat answers the four domains (mirror publishes each channel).
+# 0. ~24h before: walk-inspection — inspect, fix, produce demo assets.
+# 1. Every seat answers four-plus-demo (mirror publishes each channel).
 flotilla parade --all
 
 # 2. Each coordinator rolls up its tier below (project-XOs and meta-XO if it has subs).
@@ -107,6 +124,7 @@ dependency.
 | Cadence | daemon heartbeat (opt-in) | operator-triggered (v1) |
 | Idle discipline | reply idle when nothing changed | honest quiet periods OK |
 | Learnings | not in scope | required + propagation path |
+| Demos | not in scope | required for demo-able products (from pre-parade walk) |
 
 Both share the same read topology and Tier-2/3 roll-up shape; they do not gate each other.
 
