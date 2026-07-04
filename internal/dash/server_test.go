@@ -414,6 +414,8 @@ func TestThreadComposerAndOrderWave4(t *testing.T) {
 		"scrollThreadToBottom", // latest-at-bottom pin
 		"showThreadJump",       // jump-to-latest affordance
 		`"/api/control/route"`, // the composer sends via the existing relay
+		"inFlight",             // cubic P2: a single in-flight guard prevents a double-send on fast Enter
+		"sameSel",              // cubic P3: the outcome binds to the desk the send targeted, not the new selection
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("dash.js must wire the thread composer / scroll (missing %q) — F#383 criteria 4/5", marker)

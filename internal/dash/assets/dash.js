@@ -516,7 +516,16 @@
     if (j) j.hidden = !on;
   }
   // A render for a NEWLY selected desk should always open at the bottom (freshest first-read).
-  function resetThreadScroll() { threadPinned = true; showThreadJump(false); }
+  function resetThreadScroll() {
+    threadPinned = true;
+    showThreadJump(false);
+    // A new selection gives a FRESH composer for that desk — the prior desk's draft, status
+    // line, and grown height must not bleed into the newly-selected desk's composer (cubic P3).
+    var m = el("thread-composer-msg");
+    if (m) { m.textContent = ""; m.className = "form-msg"; }
+    var ta = el("thread-composer-input");
+    if (ta) { ta.value = ""; ta.style.height = ""; }
+  }
 
   // threadLedgerMsg renders one CoS relay-ledger line (a message to/from the desk).
   function threadLedgerMsg(e) {
@@ -907,25 +916,44 @@
     function setMsg(text, kind) { if (msg) { msg.className = "form-msg" + (kind ? " " + kind : ""); msg.textContent = text; } }
     function resizeComposer() { if (ta) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 120) + "px"; } }
     if (form && ta) {
+      // inFlight guards against a DOUBLE-SEND: a fast second Enter (or Enter+click) can
+      // re-enter submit before the browser reflects btn.disabled — and requestSubmit()
+      // fires the submit event regardless of the button's disabled state. Both the submit
+      // handler and the Enter path check this flag, so exactly one POST goes out (cubic P2).
+      var inFlight = false;
+      // sameSel reports whether the currently-selected desk is still the one a send targeted —
+      // the operator may have switched desks mid-send, and the shared #thread-composer-msg /
+      // textarea belong to the NEW desk now, so an outcome must not land there (cubic P3).
+      function sameSel(target) { return String(selectedDesk || "").toLowerCase() === String(target).toLowerCase(); }
       form.addEventListener("submit", function (ev) {
         ev.preventDefault();
+        if (inFlight) return;
         var target = selectedDesk, body = ta.value.trim();
         if (!target) { setMsg("Select a desk first.", "err"); return; }
         if (!body) { setMsg("Type a message.", "err"); return; }
         var btn = form.querySelector("button");
+        inFlight = true;
         setMsg("Sending…", "");
         if (btn) btn.disabled = true;
         postJSON("/api/control/route", { target: target, message: body }).then(function (res) {
           var outcome = (res && res.outcome) || "(no outcome reported)";
           var detail = res && res.detail ? " — " + res.detail : "";
+          // Bind the result to the desk the send TARGETED — if the operator moved on, don't
+          // clear the new desk's draft or mislabel its composer; the send still happened.
+          if (!sameSel(target)) return;
           if (outcome === "delivered") { ta.value = ""; resizeComposer(); threadPinned = true; scrollThreadToBottom(); }
           setMsg("Outcome: " + outcome + detail, outcome === "delivered" ? "ok" : "");
-        }).catch(function (err) { setMsg(err.message, "err"); }).then(function () { if (btn) btn.disabled = false; });
+        }).catch(function (err) { if (sameSel(target)) setMsg(err.message, "err"); }).then(function () {
+          inFlight = false;
+          if (btn) btn.disabled = false;
+        });
       });
-      // Enter sends; Shift+Enter is a newline (chat convention).
+      // Enter sends; Shift+Enter is a newline (chat convention). Guarded so a rapid
+      // double-Enter can't queue a second send while one is already in flight (cubic P2).
       ta.addEventListener("keydown", function (e) {
         if (e.key === "Enter" && !e.shiftKey) {
           e.preventDefault();
+          if (inFlight) return;
           if (form.requestSubmit) form.requestSubmit(); else form.dispatchEvent(new Event("submit", { cancelable: true }));
         }
       });

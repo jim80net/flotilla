@@ -79,8 +79,9 @@
            composer sits directly beneath the newest message — type + send to the selected
            desk/coordinator via the same route-to-pane relay the control column uses. The
            jump-to-latest chip appears when the operator has scrolled up into history. -->
-      <button id="thread-jump" class="thread-jump" type="button" hidden aria-label="Jump to the latest message">&#8595; Latest</button>
       <form id="thread-composer" class="thread-composer" hidden>
+        <!-- anchored to the composer's top edge so it clears a multi-line (grown) composer -->
+        <button id="thread-jump" class="thread-jump" type="button" hidden aria-label="Jump to the latest message">&#8595; Latest</button>
         <textarea id="thread-composer-input" class="thread-composer-input" rows="1"
           placeholder="Message the selected desk…" aria-label="Message the selected desk"></textarea>
         <div class="thread-composer-row">
