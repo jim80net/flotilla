@@ -301,6 +301,15 @@ func TestConversationsWave2(t *testing.T) {
 	if strings.Contains(js, `to === "@" + d`) {
 		t.Error("dash.js must not carry the asymmetric @-only-on-`to` ledger match (the E11 filter bug) — #349 Inc 4")
 	}
+	// #370: rail selection is COMPOSITE (name + channel_id) — a desk name in several channels
+	// must highlight only the picked copy, not every copy. Requires selectedChannel + a
+	// data-channel attribute + the channel in the composite `on` check.
+	if !strings.Contains(js, "selectedChannel") || !strings.Contains(js, "data-channel") {
+		t.Error("dash.js rail selection must be channel-scoped (selectedChannel + data-channel) — #370")
+	}
+	if !strings.Contains(js, "grp.channel_id === selectedChannel") {
+		t.Error("dash.js rail highlight must require the channel to match (composite key), not the desk name alone — #370")
+	}
 	html := doGet(t, srv, "/").Body.String()
 	if !strings.Contains(html, `id="conv-modal"`) {
 		t.Error("index.html must carry the drive-queue item modal (#conv-modal) — #349 Inc 4 E10")

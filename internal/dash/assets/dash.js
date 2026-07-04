@@ -47,7 +47,12 @@
 
   /* ── cached read model (combined on refresh) ───────────────────────────── */
   var cache = { status: null, topology: null, history: null, mirror: null };
-  var selectedDesk = null;
+  // Selection is COMPOSITE — a desk name + the channel it was picked in. The SAME desk name
+  // can appear in several channel groups (e.g. the CoS is the XO of fleet-command AND a member
+  // of every project channel), so keying the rail highlight on the name alone lit up every
+  // copy at once (#370). selectedChannel scopes the highlight (and the header context) to the
+  // one row the operator picked; selectedDesk still drives the per-desk mirror/thread/controls.
+  var selectedDesk = null, selectedChannel = null;
   // Session-mirror detail level (design §2.3 UI half). "info" = the readermap body
   // only (clean default); "debug" additionally reveals each entry's collapsible
   // debug tier (reader-map envelope, mirror note, firewall warn-terms). The full
@@ -116,15 +121,29 @@
     });
   }
 
+  // channelForDesk returns the channel_id of the FIRST group listing a desk by name (its home
+  // context for an auto-selection), or "" if it's in no group.
+  function channelForDesk(groups, name) {
+    var want = String(name || "").toLowerCase();
+    for (var i = 0; i < groups.length; i++) {
+      for (var j = 0; j < groups[i].desks.length; j++) {
+        if (String(groups[i].desks[j].name).toLowerCase() === want) return groups[i].channel_id;
+      }
+    }
+    return "";
+  }
+
   function ensureSelection(status, groups) {
     if (selectedDesk) return;
     if (status && status.xo) {
       selectedDesk = status.xo;
+      selectedChannel = channelForDesk(groups, status.xo);
       return;
     }
     for (var i = 0; i < groups.length; i++) {
       if (groups[i].desks.length) {
         selectedDesk = groups[i].desks[0].name;
+        selectedChannel = groups[i].channel_id;
         return;
       }
     }
@@ -133,6 +152,10 @@
   function renderConversationRail(status, topology, fresh) {
     var groups = buildRailGroups(topology);
     ensureSelection(status, groups);
+    // A desk-ONLY selection (a goals "→ desk" jump, an old #conv/<desk> hash, any deep-link
+    // that carries no channel) would match no row under the composite key — backfill the
+    // desk's home channel so its row still highlights (cubic #378 P2).
+    if (selectedDesk && !selectedChannel) selectedChannel = channelForDesk(groups, selectedDesk);
     var agents = agentMap(status);
     var stale = fresh.state === "stale";
     var rail = el("conv-rail");
@@ -148,13 +171,16 @@
         var key = String(d.name).toLowerCase();
         var a = agents[key] || {};
         var state = String(a.state || "unknown");
-        var on = selectedDesk && String(selectedDesk).toLowerCase() === key;
+        // composite match: this row lights up ONLY when both the desk name AND its channel
+        // match the selection — so a desk that appears in several channels highlights just the
+        // picked copy, not all of them (#370).
+        var on = selectedDesk && String(selectedDesk).toLowerCase() === key && grp.channel_id === selectedChannel;
         var roleTag = d.role === "xo"
           ? '<span class="conv-role xo">xo</span>'
           : (d.role ? '<span class="conv-role">' + escapeHtml(d.role) + "</span>" : "");
         return (
           '<button type="button" class="conv-item' + (on ? " selected" : "") + (stale ? " desk-stale" : "") + '" ' +
-            'data-desk="' + escapeHtml(d.name) + '" role="listitem" aria-pressed="' + String(on) + '">' +
+            'data-desk="' + escapeHtml(d.name) + '" data-channel="' + escapeHtml(grp.channel_id) + '" role="listitem" aria-pressed="' + String(on) + '">' +
             '<span class="conv-rail ' + deskStateClass(state) + '" aria-hidden="true"></span>' +
             '<span class="conv-item-body">' +
               '<span class="conv-item-name">' + escapeHtml(d.name) + roleTag + "</span>" +
@@ -177,10 +203,11 @@
     for (var i = 0; i < buttons.length; i++) {
       buttons[i].addEventListener("click", function () {
         selectedDesk = this.getAttribute("data-desk");
+        selectedChannel = this.getAttribute("data-channel"); // scope the selection to THIS channel copy (#370)
         renderConversations();
         syncControlTargets(true); // explicit desk-selection: set the targets authoritatively
         fetchMirror();            // load the newly-selected desk's session mirror
-        pushNav({ view: "conversations", desk: selectedDesk }); // reversible (#349 A1)
+        pushNav({ view: "conversations", desk: selectedDesk, channel: selectedChannel }); // reversible (#349 A1)
       });
     }
   }
@@ -229,15 +256,13 @@
 
   function renderConversationHeader(topology) {
     el("conv-title").textContent = selectedDesk ? selectedDesk : "Conversation";
-    var channel = "—";
-    var groups = buildRailGroups(topology);
-    for (var i = 0; i < groups.length; i++) {
-      for (var j = 0; j < groups[i].desks.length; j++) {
-        if (String(groups[i].desks[j].name).toLowerCase() === String(selectedDesk || "").toLowerCase()) {
-          channel = "#" + groups[i].channel_id;
-          break;
-        }
-      }
+    // Show the SELECTED channel context (#370) — a desk can live in several channels, and the
+    // header must name the one that's active, not just the first group the name appears in. Fall
+    // back to resolving the desk's home channel if the selection has no channel yet.
+    var channel = selectedChannel ? "#" + selectedChannel : "—";
+    if (!selectedChannel && selectedDesk) {
+      var ch = channelForDesk(buildRailGroups(topology), selectedDesk);
+      if (ch) channel = "#" + ch;
     }
     el("conv-sub").textContent = selectedDesk
       ? ("Coordination on " + channel + " — ledger filtered to this desk")
@@ -744,7 +769,7 @@
       // Set the selection to the state's desk — including CLEARING it on a desk:null state
       // (Back to the seed must not leave the thread/header/mirror on the old desk; a null
       // selection lets renderConversations re-pick the default) — cubic #351 P2.
-      if (view === "conversations") selectedDesk = s.desk || null;
+      if (view === "conversations") { selectedDesk = s.desk || null; selectedChannel = s.channel || null; }
       showView(view);
       if (view === "conversations") { renderConversations(); syncControlTargets(true); fetchMirror(); }
       if (view === "goals" && window.flotillaGoals && window.flotillaGoals.restoreNode) {
@@ -757,7 +782,7 @@
   }
   window.addEventListener("popstate", function (e) { applyNav(e.state); });
   // Seed the initial entry so the very first Back has a target.
-  try { history.replaceState({ view: "conversations", desk: selectedDesk || null }, "", navHash({ view: "conversations", desk: selectedDesk })); } catch (e) { /* ignore */ }
+  try { history.replaceState({ view: "conversations", desk: selectedDesk || null, channel: selectedChannel || null }, "", navHash({ view: "conversations", desk: selectedDesk })); } catch (e) { /* ignore */ }
   // Conversations is the default active tab — arm the fixed app-shell at startup
   // so the page doesn't scroll before the first tab interaction (#326).
   document.body.classList.add("conv-shell-active");
