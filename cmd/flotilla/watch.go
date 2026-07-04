@@ -1357,16 +1357,17 @@ func validateAgentSurfaces(cfg *roster.Config) error {
 	return nil
 }
 
-// mirrorRelayToLedger appends a confirmed operator→XO relay delivery to the CoS
-// who-knows-what ledger (#108), tagged with the Job's origin channel (#105 seam), so
-// the chief of staff can see which side-conversation (and which XO) was told what.
-// Scoped to XO targets via cfg.IsXO — an operator message addressed to a DESK (@name)
-// is not operator↔XO traffic in v1, symmetric with the notify path's IsXO gate; the
-// broader scope (XO↔desk, operator↔desk) is design §6.3 Phase 2. cfg.CosLedger == ""
-// (cos_agent unset) ⇒ inert. BEST-EFFORT + observe-only: the confirmed delivery already
-// happened, so a ledger failure NEVER affects it — it is reported to stderr and ignored.
+// mirrorRelayToLedger appends a confirmed operator→<agent> relay delivery to the CoS
+// who-knows-what ledger (#108), tagged with the Job's origin channel (#105 seam), so the
+// chief of staff can see which side-conversation (and which desk/XO) was told what. #349
+// E11 source: v1 scoped this to XO targets only (an operator message to a DESK was deemed
+// out of the operator↔XO ledger, design §6.3 deferred); that Phase-2 scope is now realized
+// so an operator→desk relay also lands in the ledger — and therefore in that desk's dash
+// conversation thread. cfg.CosLedger == "" (cos_agent unset) ⇒ inert. BEST-EFFORT +
+// observe-only: the confirmed delivery already happened, so a ledger failure NEVER affects
+// it — it is reported to stderr and ignored.
 func mirrorRelayToLedger(cfg *roster.Config, j watch.Job) {
-	if cfg.CosLedger == "" || !cfg.IsXO(j.Agent) {
+	if cfg.CosLedger == "" {
 		return
 	}
 	if err := cos.Append(cfg.CosLedger, cos.Entry{

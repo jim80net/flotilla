@@ -407,6 +407,14 @@ func cmdSend(args []string) error {
 	}
 	fmt.Printf("delivered to %s (pane %s) — turn confirmed\n", agentName, pane)
 
+	// Record the confirmed relay to the CoS who-knows-what ledger, so it appears in both the
+	// coordinator's audit AND the RECIPIENT desk's dash conversation thread (#349 E11 source:
+	// `flotilla send` never recorded to the ledger, so CoS↔desk / desk↔desk relay lines were
+	// invisible and desk threads stayed empty). Independent of the Discord mirror below (the
+	// ledger is the internal audit; the mirror is the external copy). Inert when cos_agent is
+	// unset; BEST-EFFORT — the message is already delivered, so a ledger error never fails it.
+	mirrorSendToLedger(cfg, *from, agentName, message)
+
 	// Mirror to the Discord audit channel under the sender's identity. Inter-agent
 	// mirroring is DEFAULT-OFF (it cluttered the operator's Discord); precedence is
 	// --no-mirror (off) → --mirror (on) → roster mirror_inter_agent (default false).
@@ -555,25 +563,26 @@ func cmdNotify(args []string) error {
 	return nil
 }
 
-// mirrorNotifyToLedger appends an XO→operator notify to the CoS who-knows-what ledger
-// when cos_agent is configured AND the sender is an XO (a desk's notify is not
-// operator↔XO traffic in v1). It is BEST-EFFORT: a missing/unreadable roster, an inert
-// CoS, a non-XO sender, or an append error all just skip the ledger — the operator
-// post has already succeeded, and the mirror is observe-only, so it never fails notify.
+// mirrorNotifyToLedger appends a <sender>→operator notify to the CoS who-knows-what ledger
+// when cos_agent is configured. #349 E11 source: v1 scoped this to XO senders only (a desk's
+// notify was deemed out of the operator↔XO ledger, design §6.3 deferred); that Phase-2 scope
+// is now realized so a DESK's notify to the operator also lands in the ledger — and therefore
+// in that desk's dash conversation thread. It is BEST-EFFORT: a missing/unreadable roster, an
+// inert CoS, or an append error all just skip the ledger — the operator post already
+// succeeded, and the mirror is observe-only, so it never fails notify.
 func mirrorNotifyToLedger(rosterPath, from, message string) {
 	cfg, err := roster.Load(rosterPath)
 	if err != nil {
 		return // no/unreadable roster ⇒ no ledger (notify already succeeded)
 	}
-	if cfg.CosLedger == "" || !cfg.IsXO(from) {
-		return // CoS inert, or sender is not an XO ⇒ out of v1 scope
+	if cfg.CosLedger == "" {
+		return // CoS inert ⇒ no ledger
 	}
 	channel, ok := cfg.ChannelForXO(from)
-	// A federated roster (channels[] declared) whose clocked XO owns no channel binding
-	// is config drift — the entry still records (channel renders "-"), but surface it so
-	// the misconfiguration isn't masked. A legacy/clock-only XO legitimately owns no
-	// channel, so only warn in the federated case (OCR #109 Medium).
-	if !ok && len(cfg.Channels) > 0 {
+	// A federated roster (channels[] declared) whose sender owns no channel binding tags the
+	// entry with no channel ("-"). For an XO that is config drift worth surfacing; a desk that
+	// legitimately owns no channel is normal, so only warn when the sender is an XO (OCR #109).
+	if !ok && len(cfg.Channels) > 0 && cfg.IsXO(from) {
 		fmt.Fprintf(os.Stderr, "flotilla notify: XO %q has no channel binding in the federated roster — ledger entry tagged with no channel\n", from)
 	}
 	if err := cos.Append(cfg.CosLedger, cos.Entry{
@@ -584,6 +593,29 @@ func mirrorNotifyToLedger(rosterPath, from, message string) {
 		Gist:    message,
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "flotilla notify: cos ledger append failed: %v\n", err)
+	}
+}
+
+// mirrorSendToLedger records a confirmed `flotilla send` relay (from → to) to the CoS
+// who-knows-what ledger, tagged with the RECIPIENT's home channel. This is the CoS↔desk
+// (and desk↔desk) relay path that populates a desk's dash conversation thread. #349 E11
+// source: `flotilla send` never recorded to the ledger, so these relay lines were invisible
+// and a desk's own thread stayed empty regardless of the reader filter. Inert when cos_agent
+// is unset; BEST-EFFORT — the message is already delivered, so a ledger error is logged, not
+// fatal (failing here would tempt a retry into a double-send).
+func mirrorSendToLedger(cfg *roster.Config, from, to, message string) {
+	if cfg == nil || cfg.CosLedger == "" {
+		return
+	}
+	channel, _ := cfg.ChannelForXO(to) // the recipient's home channel; "" renders "-"
+	if err := cos.Append(cfg.CosLedger, cos.Entry{
+		Time:    time.Now(),
+		Channel: channel,
+		From:    from,
+		To:      to,
+		Gist:    message,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "flotilla send: cos ledger append failed: %v\n", err)
 	}
 }
 

@@ -12,7 +12,8 @@ import (
 
 // loadCosRoster writes a roster JSON to a temp dir, loads it, and returns the resolved
 // config (CosLedger defaulted beside the roster when cos_agent is set) for the relay
-// mirror tests, which gate on cfg.IsXO.
+// mirror tests. Recording is gated only on cos_agent (CosLedger != "") since #349 E11
+// realized the desk-relay scope; the IsXO gate is gone.
 func loadCosRoster(t *testing.T, body string) *roster.Config {
 	t.Helper()
 	dir := t.TempDir()
@@ -70,14 +71,17 @@ func TestMirrorRelay_InboundLedgeredWithOriginChannel(t *testing.T) {
 	}
 }
 
-func TestMirrorRelay_DeskTargetNotLedgered(t *testing.T) {
-	// An operator message addressed to a DESK (@alpha-be) is NOT operator↔XO traffic in
-	// v1 — symmetric with the notify path's IsXO gate (broader scope is design §6.3
-	// Phase 2). It must not be ledgered.
+func TestMirrorRelay_DeskTargetLedgered(t *testing.T) {
+	// #349 E11 source: an operator message addressed to a DESK (@alpha-be) is now recorded
+	// (the v1 IsXO gate / §6.3 deferral is realized), so it lands in alpha-be's dash thread.
 	cfg := loadCosRoster(t, cosFederatedRoster)
 	mirrorRelayToLedger(cfg, watch.Job{Agent: "alpha-be", Message: "do the thing", Kind: "relay", OriginChannel: "C_ALPHA"})
-	if got := readLedger(t, cfg.CosLedger); got != "" {
-		t.Errorf("operator→desk relay must NOT be ledgered, got:\n%s", got)
+	got := readLedger(t, cfg.CosLedger)
+	if !strings.Contains(got, "operator → alpha-be") || !strings.Contains(got, "C_ALPHA") {
+		t.Errorf("operator→desk relay must now be ledgered, got:\n%s", got)
+	}
+	if !strings.Contains(got, `"do the thing"`) {
+		t.Errorf("desk relay entry missing gist:\n%s", got)
 	}
 }
 
@@ -109,15 +113,47 @@ func TestMirrorNotify_XOReplyIsLedgered(t *testing.T) {
 	}
 }
 
-func TestMirrorNotify_DeskSenderNotLedgered(t *testing.T) {
-	// A desk's notify is not operator↔XO traffic in v1 → no ledger entry.
+func TestMirrorNotify_DeskSenderLedgered(t *testing.T) {
+	// #349 E11 source: a desk's notify to the operator is now recorded (v1 IsXO gate / §6.3
+	// deferral realized), so it lands in the desk's own dash thread. alpha-be owns no channel
+	// binding, so the entry tags no channel ("-") — the from→to line is what matters.
 	rosterPath, ledger := writeCosRoster(t, cosFederatedRoster)
 
 	mirrorNotifyToLedger(rosterPath, "alpha-be", "status update")
 
-	if got := readLedger(t, ledger); got != "" {
-		t.Errorf("a desk notify must NOT be ledgered, got:\n%s", got)
+	got := readLedger(t, ledger)
+	if !strings.Contains(got, "alpha-be → operator") {
+		t.Errorf("a desk notify must now be ledgered, got:\n%s", got)
 	}
+	if !strings.Contains(got, `"status update"`) {
+		t.Errorf("desk notify entry missing gist:\n%s", got)
+	}
+}
+
+func TestMirrorSend_LedgersRelay(t *testing.T) {
+	// #349 E11 source: `flotilla send` now records the confirmed relay (from → to) to the CoS
+	// ledger, tagged with the recipient's home channel — this is what populates a desk's dash
+	// conversation thread with CoS↔desk / desk↔desk traffic.
+	cfg := loadCosRoster(t, cosFederatedRoster)
+	mirrorSendToLedger(cfg, "meta-xo", "alpha-xo", "rebase and re-run CI")
+	got := readLedger(t, cfg.CosLedger)
+	if !strings.Contains(got, "meta-xo → alpha-xo") || !strings.Contains(got, "C_ALPHA") {
+		t.Errorf("send must be ledgered from→to with the recipient's channel, got:\n%s", got)
+	}
+	if !strings.Contains(got, `"rebase and re-run CI"`) {
+		t.Errorf("send entry missing gist:\n%s", got)
+	}
+}
+
+func TestMirrorSend_InertWhenCosLedgerEmpty(t *testing.T) {
+	// cos_agent unset ⇒ CosLedger == "" ⇒ no write, no panic.
+	cfg := loadCosRoster(t, `{
+	  "operator_user_id":"U","channel_id":"C","xo_agent":"alpha-xo",
+	  "agents":[{"name":"alpha-xo"}]}`)
+	if cfg.CosLedger != "" {
+		t.Fatalf("expected inert CosLedger, got %q", cfg.CosLedger)
+	}
+	mirrorSendToLedger(cfg, "alpha-xo", "alpha-be", "x") // must be a no-op
 }
 
 func TestMirrorNotify_InertWithoutCosAgent(t *testing.T) {
