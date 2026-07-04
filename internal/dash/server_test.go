@@ -219,6 +219,15 @@ func TestHandleStaticAssets(t *testing.T) {
 		if rec.Body.Len() == 0 {
 			t.Errorf("%s served empty", path)
 		}
+		// A deploy must not leave a stale asset cached — the served assets carry no-cache so
+		// the browser revalidates (the goals-toggle regression was a stale-asset symptom).
+		if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
+			t.Errorf("%s Cache-Control = %q, want no-cache", path, cc)
+		}
+	}
+	// the index page (static chrome) must also be no-cache so a deploy is picked up.
+	if cc := doGet(t, srv, "/").Header().Get("Cache-Control"); cc != "no-cache" {
+		t.Errorf("index Cache-Control = %q, want no-cache", cc)
 	}
 }
 
@@ -300,6 +309,15 @@ func TestConversationsWave2(t *testing.T) {
 	}
 	if strings.Contains(js, `to === "@" + d`) {
 		t.Error("dash.js must not carry the asymmetric @-only-on-`to` ledger match (the E11 filter bug) — #349 Inc 4")
+	}
+	// #370: rail selection is COMPOSITE (name + channel_id) — a desk name in several channels
+	// must highlight only the picked copy, not every copy. Requires selectedChannel + a
+	// data-channel attribute + the channel in the composite `on` check.
+	if !strings.Contains(js, "selectedChannel") || !strings.Contains(js, "data-channel") {
+		t.Error("dash.js rail selection must be channel-scoped (selectedChannel + data-channel) — #370")
+	}
+	if !strings.Contains(js, "grp.channel_id === selectedChannel") {
+		t.Error("dash.js rail highlight must require the channel to match (composite key), not the desk name alone — #370")
 	}
 	html := doGet(t, srv, "/").Body.String()
 	if !strings.Contains(html, `id="conv-modal"`) {
@@ -433,8 +451,9 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	// is content-aware — leaf-weight angular packing + per-ring radii from card extents
 	// (no fixed RING_STEP), with narrower org cards.
 	// The default is org (operator UX blessing #324), now env-seedable via the body
-	// attribute (#317) — the IIFE reads data-goals-layout and falls back to "org".
-	if !strings.Contains(js, `return v === "tree" ? "tree" : "org"`) {
+	// attribute (#317) — the IIFE reads data-goals-layout and falls back to "org". The
+	// mind-map (org v3) is a third selectable mode; tree/mindmap honored, else org.
+	if !strings.Contains(js, `(v === "tree" || v === "mindmap") ? v : "org"`) {
 		t.Error("goals.js must seed goalsLayout from data-goals-layout, defaulting org (#324/#317)")
 	}
 	// #324 Inc 2: a roster-materialized desk (source==="roster") is a live entity, never
@@ -561,13 +580,26 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Error("the .goals-layout-toggle rule itself must be flex:none so its buttons never clip on a squeezed header (cubic #368)")
 		}
 	}
-	for _, marker := range []string{"leafCount", "reach(", "nodeW", "RING_GAP"} {
+	// leafWeights (not leafCount): #364 extracted the shared leaf-weight helper used by org + mindmap.
+	for _, marker := range []string{"leafWeights", "reach(", "nodeW", "RING_GAP"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("goals.js must retain the #324 content-aware org geometry (missing %q)", marker)
 		}
 	}
 	if strings.Contains(js, "RING_STEP") {
 		t.Error("goals.js must drop the fixed RING_STEP — org radii are content-aware (#324)")
+	}
+	// mind-map (org v3): a third radial mode whose children fan LOCALLY from each parent
+	// (limbs + sub-branches) with curved edges. Selectable via the toggle; org stays default.
+	for _, marker := range []string{"layoutMindmap", "isRadial", `data-layout="mindmap"`} {
+		if !strings.Contains(js+doGet(t, srv, "/").Body.String(), marker) {
+			t.Errorf("goals map must carry the mind-map layout (missing %q)", marker)
+		}
+	}
+	// mind-map geometry must hold at real fleet depth: disjoint angular sectors + a
+	// collision-relaxation pass (the hub pinned) so 19+ nodes / deep chains don't overlap.
+	if !strings.Contains(js, "Collision relaxation") {
+		t.Error("layoutMindmap must run a collision-relaxation pass so real-depth fleets don't overlap")
 	}
 	// structuralSig must include the enrichment (priorities/milestones/harness) so an
 	// add/remove of a height-affecting field triggers a full rebuild, not a stale

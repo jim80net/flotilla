@@ -31,6 +31,7 @@ type Config struct {
 	GoalsPath        string // goals file the Goals view reads (default <roster-dir>/fleet-goals.json)
 	GoalsYAMLPath    string // goals yaml source compiled on load (default <roster-dir>/fleet-goals.yaml)
 	SessionMirrorDir string // per-agent session-mirror ledgers (default <roster-dir>/session-mirror)
+	ParadesPath      string // parade archive: <dir>/<YYYY-MM-DD>/{report.md,assets/} (default <roster-dir>/state/parades)
 	Bind             string // listen address (default 127.0.0.1:8787)
 	Repo             string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
 	SecretsPath      string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
@@ -196,8 +197,16 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/history", s.handleHistory)
 	s.mux.HandleFunc("/api/goals", s.handleGoals)
 	s.mux.HandleFunc("/api/session-mirror", s.handleSessionMirror)
+	s.mux.HandleFunc("/api/parades", s.handleParades)
+	s.mux.HandleFunc("/parade", s.handleParadePage)
+	s.mux.HandleFunc("/parade-assets/{date}/{file}", s.handleParadeAsset)
 	s.mux.HandleFunc("/events", s.handleEvents)
-	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticAssets()))))
+	// Static assets are served no-cache so a deploy's new goals.js / dash.css / dash.js is
+	// picked up on the next load — without this the browser holds stale JS/CSS and the
+	// operator sees a UI that doesn't match the shipped code (the goals-toggle regression
+	// reproduced to no code fault; the served assets carried no Cache-Control).
+	staticFS := http.StripPrefix("/static/", http.FileServer(http.FS(staticAssets())))
+	s.mux.Handle("/static/", noCacheHandler(staticFS))
 
 	// Issue tracker (Phase 2). Reads follow the open-on-loopback read posture
 	// (the Host-allowlist already wraps them); WRITES go through requireWrite,
@@ -328,6 +337,17 @@ func (s *Server) bindTrackerIssues(in *GoalsInputs) {
 
 // --- handlers ---
 
+// noCacheHandler wraps h so every response carries Cache-Control: no-cache. The browser then
+// revalidates each asset on load, so a deploy's fresh goals.js / dash.css / dash.js is served
+// instead of a stale cached copy. (The embedded assets have a zero modtime, so FileServer sets
+// no reliable Last-Modified; no-cache is what guarantees freshness after a deploy.)
+func noCacheHandler(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		h.ServeHTTP(w, r)
+	})
+}
+
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -336,6 +356,11 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	// The page is STATIC chrome; all dynamic fleet/issue data reaches it via
 	// fetch of the JSON endpoints, never server-rendered into a <script> literal
 	// (anti-XSS — a desk name / ledger gist can never become stored script).
+	// no-cache forces the browser to revalidate the page + its assets on every load,
+	// so a deploy is picked up immediately — a stale cached index/goals.js is what makes
+	// the operator see a UI that doesn't match the shipped code (the toggle-regression
+	// report reproduced to NO code fault; the assets carried no Cache-Control).
+	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	data := pageData{Bind: s.cfg.Bind, XO: s.xo, GoalsLayout: s.cfg.GoalsLayout}
 	if err := s.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
@@ -531,6 +556,9 @@ func ResolvePaths(cfg Config, rc *roster.Config) Config {
 	}
 	if cfg.SessionMirrorDir == "" {
 		cfg.SessionMirrorDir = filepath.Join(dir, "session-mirror")
+	}
+	if cfg.ParadesPath == "" {
+		cfg.ParadesPath = filepath.Join(dir, "state", "parades")
 	}
 	// The CoS ledger path is whatever the roster resolved (empty when the CoS
 	// mirror is inert — then the history view shows no ledger, honestly).

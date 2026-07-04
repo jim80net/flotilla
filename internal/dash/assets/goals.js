@@ -52,8 +52,12 @@
   // live toggle still overrides it at runtime.
   var goalsLayout = (function () {
     var v = (document.body && document.body.getAttribute("data-goals-layout")) || "";
-    return v === "tree" ? "tree" : "org";
+    return (v === "tree" || v === "mindmap") ? v : "org";
   })();
+  // Radial modes (org pinwheel + the mind map) share card sizing, radial fit, no tier
+  // labels, and center-anchored geometry — only their placement + edge shape differ. The
+  // tree is the odd one out (altitude columns).
+  function isRadial() { return goalsLayout === "org" || goalsLayout === "mindmap"; }
 
   /* ── tier geometry (ported from the prototype: TIER_X=[40,470,900]) ─────── */
   // Columns are derived from depth so a tree deeper than the canonical 3 tiers
@@ -66,7 +70,7 @@
   // Card width per layout. The tree uses wide altitude columns; the org (hub-spoke)
   // graph uses narrower cards so the radial map packs tightly and reads as a node
   // graph rather than a sprawl of columns (#324 — tighter, content-aware geometry).
-  function nodeW(depth) { return goalsLayout === "org" ? (depth === 0 ? 216 : 176) : colW(depth); }
+  function nodeW(depth) { return isRadial() ? (depth === 0 ? 216 : 176) : colW(depth); }
   function depthOf(n) { return n.depth || 0; }
   function heightOf(n) { return n._h || DEFAULT_H; }
 
@@ -357,6 +361,24 @@
   }
   function nodeCenter(n) { return { x: n._x + n._w / 2, y: n._y + heightOf(n) / 2 }; }
 
+  // leafWeights returns a memoized, cycle-safe map id→subtree-leaf-count — a node's angular
+  // DEMAND (its number of leaf descendants, min 1). Shared by BOTH radial layouts (org
+  // pinwheel + the mind map) so the identical demand model isn't cloned (cubic #364 P2).
+  function leafWeights(goals) {
+    var leaves = {};
+    function count(n, path) {
+      if (leaves[n.id] != null) return leaves[n.id];
+      if (path[n.id]) return 1; // cycle → treat as a leaf
+      path[n.id] = true;
+      var kids = childrenOf(n), c = 0;
+      kids.forEach(function (k) { c += count(k, path); });
+      path[n.id] = false;
+      return (leaves[n.id] = Math.max(1, kids.length ? c : 1));
+    }
+    goals.forEach(function (n) { count(n, {}); });
+    return leaves;
+  }
+
   // layoutOrg is CONTENT-AWARE (#324): rings are sized from the actual card extents
   // (tight near the hub — no fixed-step waste) and children are angularly PACKED by
   // subtree leaf-weight (a small subtree clusters near its parent's direction instead
@@ -388,18 +410,8 @@
     }
     ring1.forEach(function (n) { assignRing(n, 1); });
 
-    // 3. subtree leaf-weight = angular demand (memoized, cycle-safe).
-    var leaves = {};
-    function leafCount(n, path) {
-      if (leaves[n.id] != null) return leaves[n.id];
-      if (path[n.id]) return 1; // cycle → treat as a leaf
-      path[n.id] = true;
-      var kids = childrenOf(n), c = 0;
-      kids.forEach(function (k) { c += leafCount(k, path); });
-      path[n.id] = false;
-      return (leaves[n.id] = Math.max(1, kids.length ? c : 1));
-    }
-    goals.forEach(function (n) { leafCount(n, {}); });
+    // 3. subtree leaf-weight = angular demand (memoized, cycle-safe; shared helper).
+    var leaves = leafWeights(goals);
 
     // 4. per-ring max card extents (measured) + node counts.
     var maxRing = 0, maxH = {}, maxW = {}, countRing = {};
@@ -471,6 +483,135 @@
     });
   }
 
+  // layoutMindmap (org v3 — the mind map): unlike layoutOrg's concentric rings anchored at
+  // ONE center (which crams depth into a cramped pinwheel), each node's children fan out
+  // LOCALLY from that node, in the node's own outward direction — so depth reads as branches
+  // with sub-branches (limbs), not one ring. Ring-1 (the flotillas/roots) still splits the
+  // full circle by leaf-weight; every deeper node fans its children within a CAPPED wedge
+  // around the parent's outward heading, so a subtree stays a cohesive limb. Positions are the
+  // same absolute _x/_y the tree/org layouts use, so nodeCard/pan-zoom/keyed-update are
+  // unchanged; edges draw as organic curves (drawEdges mindmap branch). _dir carries a node's
+  // outward heading so its own children continue the limb outward.
+  function layoutMindmap(goals, roots) {
+    var center = null;
+    for (var i = 0; i < goals.length; i++) {
+      if (goals[i].layout && goals[i].layout.hub_center) { center = goals[i]; break; }
+    }
+    var ring1;
+    if (center) {
+      ring1 = childrenOf(center);
+      roots.forEach(function (r) { if (r !== center) ring1.push(r); });
+    } else {
+      ring1 = roots.slice();
+    }
+    // leaf-weight = angular demand (memoized, cycle-safe; shared helper — same as org).
+    var leaves = leafWeights(goals);
+    // per-node depth (for per-level segment length). Cycle-safe: a `seen` guard stops the
+    // traversal from looping on a cyclic graph (the server validates acyclic, but this path
+    // must not hang on bad/partial data — matching the other passes; cubic #364 P2).
+    var nodeDepth = {}, seenDepth = {};
+    (function setDepth(list, d) {
+      list.forEach(function (n) {
+        if (seenDepth[n.id]) return;
+        seenDepth[n.id] = true;
+        nodeDepth[n.id] = d;
+        setDepth(childrenOf(n), d + 1);
+      });
+    })(ring1, 1);
+    if (center) nodeDepth[center.id] = 0;
+
+    function segLen(d) { return 116 + 20 * Math.min(d, 4); } // base branch length per level
+    var GAP = 30; // tangential breathing room between adjacent sibling cards
+    var placed = {};
+
+    // place a node's children within the node's DISJOINT angular sector [a0,a1]: each child
+    // gets a sub-sector proportional to its leaf-weight and is positioned PARENT-RELATIVE at
+    // a segment length in the child's sub-sector midpoint. Disjoint sectors guarantee sibling
+    // AND cousin subtrees never angularly overlap (each subtree stays inside its wedge); the
+    // segment honours a circumference-minimum so a node's own children always arc-clear their
+    // card widths at that radius (the org circMin, applied locally). This is what tunes the
+    // limb geometry to hold at real fleet depth (19+ nodes, deep chains) without collisions.
+    function place(n, a0, a1) {
+      var kids = clusterAdjacent(childrenOf(n));
+      if (!kids.length) return;
+      var pc = nodeCenter(n), sector = a1 - a0, d = (nodeDepth[n.id] || 0) + 1;
+      var total = 0, need = 0;
+      kids.forEach(function (k) { total += leaves[k.id]; need += k._w + GAP; });
+      // radius: the larger of the base per-level length and the arc-fit radius (need/sector),
+      // plus clearance from the parent card — so narrow sectors push their children outward.
+      var seg = Math.max(segLen(d), sector > 0.02 ? need / sector : 0) + Math.max(n._w, heightOf(n)) / 2;
+      var cursor = a0;
+      kids.forEach(function (k) {
+        var w = sector * (leaves[k.id] / (total || 1));
+        var mid = kids.length === 1 ? (a0 + a1) / 2 : cursor + w / 2; // a lone child continues straight out
+        k._x = pc.x + seg * Math.cos(mid) - k._w / 2;
+        k._y = pc.y + seg * Math.sin(mid) - heightOf(k) / 2;
+        placed[k.id] = true;
+        place(k, cursor, cursor + w); // the child fans its own children within ITS sector
+        cursor += w;
+      });
+    }
+
+    // hub at the origin; ring-1 (flotillas/roots) splits the full circle by leaf-weight into
+    // disjoint sectors — each becomes a limb; place() then grows each limb outward.
+    if (center) { center._x = -center._w / 2; center._y = -heightOf(center) / 2; placed[center.id] = true; }
+    var ordered1 = clusterAdjacent(ring1), total1 = 0, need1 = 0;
+    ordered1.forEach(function (n) { total1 += leaves[n.id]; need1 += n._w + GAP; });
+    var seg1 = Math.max(segLen(1), need1 / (2 * Math.PI)) + 40;
+    var cur = -Math.PI / 2;
+    ordered1.forEach(function (n) {
+      var w = 2 * Math.PI * (leaves[n.id] / (total1 || 1)), mid = cur + w / 2;
+      n._x = seg1 * Math.cos(mid) - n._w / 2;
+      n._y = seg1 * Math.sin(mid) - heightOf(n) / 2;
+      placed[n.id] = true;
+      place(n, cur, cur + w);
+      cur += w;
+    });
+
+    // Collision relaxation: disjoint sectors bound the ANGLE, but parent-relative placement
+    // lets cousins in adjacent sectors drift close near the congested center. A few passes of
+    // gentle axis-aligned separation nudge any residual overlapping pair apart along their
+    // smaller-overlap axis — n is small (tens of nodes), so O(n²)×passes is cheap. The hub is
+    // pinned (it anchors the map); everything else may shift a little to clear.
+    var relaxIds = Object.keys(nodeById).filter(function (id) { return placed[id]; });
+    for (var pass = 0; pass < 40; pass++) {
+      var moved = false;
+      for (var ri = 0; ri < relaxIds.length; ri++) {
+        for (var rj = ri + 1; rj < relaxIds.length; rj++) {
+          var A = nodeById[relaxIds[ri]], B = nodeById[relaxIds[rj]];
+          var aw = A._w, ah = heightOf(A), bw = B._w, bh = heightOf(B);
+          var dx = (B._x + bw / 2) - (A._x + aw / 2), dy = (B._y + bh / 2) - (A._y + ah / 2);
+          var ox = (aw + bw) / 2 + 16 - Math.abs(dx), oy = (ah + bh) / 2 + 12 - Math.abs(dy);
+          if (ox <= 0 || oy <= 0) continue; // no overlap (with margin)
+          moved = true;
+          var aPin = center && A === center, bPin = center && B === center;
+          if (ox < oy) { // separate on x (the smaller penetration axis)
+            var px = (dx < 0 ? -1 : 1) * ox;
+            if (aPin) B._x += px; else if (bPin) A._x -= px; else { A._x -= px / 2; B._x += px / 2; }
+          } else { // separate on y
+            var py = (dy < 0 ? -1 : 1) * oy;
+            if (aPin) B._y += py; else if (bPin) A._y -= py; else { A._y -= py / 2; B._y += py / 2; }
+          }
+        }
+      }
+      if (!moved) break;
+    }
+
+    // shift the placed cloud into positive world coords + size the world to its extent.
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    Object.keys(nodeById).forEach(function (id) {
+      if (!placed[id]) return;
+      var n = nodeById[id];
+      minX = Math.min(minX, n._x); minY = Math.min(minY, n._y);
+      maxX = Math.max(maxX, n._x + n._w); maxY = Math.max(maxY, n._y + heightOf(n));
+    });
+    if (!isFinite(minX)) { minX = minY = 0; maxX = maxY = 100; }
+    var worldPad = 90, shx = worldPad - minX, shy = worldPad - minY;
+    Object.keys(nodeById).forEach(function (id) { if (!placed[id]) return; var n = nodeById[id]; n._x += shx; n._y += shy; });
+    view.worldW = (maxX - minX) + 2 * worldPad;
+    view.worldH = (maxY - minY) + 2 * worldPad;
+  }
+
   // collabMarkup draws a dotted container (+ lane label) around each collaboration's desk
   // nodes (#324 Inc 3). Org-mode only — the desks are clustered adjacent there, so the
   // padded bounding box wraps a tight group. Rendered behind the edges + nodes.
@@ -507,7 +648,16 @@
       if (!parent) return;
       var state = escapeHtml(visToken(child)); // bounded enum, escaped for consistency + defense-in-depth
       var d;
-      if (goalsLayout === "org") {
+      if (goalsLayout === "mindmap") {
+        // organic limb: a gently-bowed cubic from parent centre to child centre, so a
+        // branch reads as a curved connector rather than a straight spoke.
+        var mpc = nodeCenter(parent), mcc = nodeCenter(child);
+        var vx = mcc.x - mpc.x, vy = mcc.y - mpc.y, len = Math.hypot(vx, vy) || 1;
+        var nx = -vy / len, ny = vx / len, bow = Math.min(38, len * 0.16);
+        var mc1x = mpc.x + vx * 0.35 + nx * bow, mc1y = mpc.y + vy * 0.35 + ny * bow;
+        var mc2x = mpc.x + vx * 0.65 + nx * bow, mc2y = mpc.y + vy * 0.65 + ny * bow;
+        d = "M " + mpc.x + " " + mpc.y + " C " + mc1x + " " + mc1y + ", " + mc2x + " " + mc2y + ", " + mcc.x + " " + mcc.y;
+      } else if (goalsLayout === "org") {
         // radial spoke: a straight line from hub/parent center to child center.
         var pc = nodeCenter(parent), cc = nodeCenter(child);
         d = "M " + pc.x + " " + pc.y + " L " + cc.x + " " + cc.y;
@@ -527,7 +677,7 @@
       var f = nodeById[depEdges[di].from], t = nodeById[depEdges[di].to];
       if (!f || !t) continue;
       var dd;
-      if (goalsLayout === "org") {
+      if (isRadial()) {
         // center-to-center dashed chord (the column-relative bow is meaningless radially).
         var fc = nodeCenter(f), tc = nodeCenter(t);
         dd = "M " + fc.x + " " + fc.y + " L " + tc.x + " " + tc.y;
@@ -1213,8 +1363,8 @@
     // Pass 1: render at column x with provisional y=0 so heights can be measured.
     goals.forEach(function (n) { n._y = 0; });
     nodesEl.innerHTML = goals.map(nodeCard).join("");
-    // Tier column headers belong to the tree layout only — the org layout has no columns.
-    if (goalsLayout === "org") q("goals-tierlabels").innerHTML = "";
+    // Tier column headers belong to the tree layout only — the radial layouts have no columns.
+    if (isRadial()) q("goals-tierlabels").innerHTML = "";
     else renderTierLabels(maxDepth);
 
     // Measure + final layout after the browser flushes layout. Guarded so a newer
@@ -1231,7 +1381,8 @@
       // Cards render in goals[] order, so children[i] ↔ goals[i] — read heights
       // in one pass (all reads batched before any write) to avoid layout thrash.
       goals.forEach(function (n, i) { n._h = nodesEl.children[i] ? nodesEl.children[i].offsetHeight : DEFAULT_H; });
-      if (goalsLayout === "org") layoutOrg(goals, roots);
+      if (goalsLayout === "mindmap") layoutMindmap(goals, roots);
+      else if (goalsLayout === "org") layoutOrg(goals, roots);
       else layoutY(roots);
       goals.forEach(function (n, i) {
         var c = nodesEl.children[i];
@@ -1245,7 +1396,7 @@
       drawEdges();
       // Fit: the tree anchors top (columns read down); the org graph is a centered
       // disc, so frame the whole thing centered.
-      if (!view.fitted) { (goalsLayout === "org" ? fitOverview : fit)(); view.fitted = true; }
+      if (!view.fitted) { (isRadial() ? fitOverview : fit)(); view.fitted = true; }
       applyTransform();
       restoreFocus(keepFocus);
       reapplyTransient(); // re-select the drawer's node (articles were replaced) + re-light hover
@@ -1409,11 +1560,11 @@
     });
   }
 
-  // setLayout flips tree ⇄ org and forces a full re-layout: the mode isn't per-node
-  // data, so it doesn't change structuralSig — null it to defeat the in-place fast path,
-  // reset the fit so the new geometry re-frames, and re-render.
+  // setLayout flips between tree / org / mindmap and forces a full re-layout: the mode isn't
+  // per-node data, so it doesn't change structuralSig — null it to defeat the in-place fast
+  // path, reset the fit so the new geometry re-frames, and re-render.
   function setLayout(mode) {
-    var next = mode === "org" ? "org" : "tree";
+    var next = (mode === "org" || mode === "mindmap") ? mode : "tree";
     if (next === goalsLayout) return;
     goalsLayout = next;
     var btns = document.querySelectorAll(".glayout-btn");
@@ -1464,7 +1615,7 @@
     if (!isVisible()) return;
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(function () {
-      (goalsLayout === "org" ? fitOverview : fit)();
+      (isRadial() ? fitOverview : fit)();
       applyTransform();
     }, 120);
   });
