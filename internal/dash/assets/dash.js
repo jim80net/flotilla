@@ -637,7 +637,10 @@
     tabs[i].addEventListener("click", function () {
       var view = this.getAttribute("data-view");
       showView(view);
-      pushNav({ view: view, desk: selectedDesk || null });
+      // Capture the open goals drawer node too, so a tab-level Back/Forward that returns
+      // to Goals restores the drawer instead of dropping it (cubic #351 P2).
+      var node = (view === "goals" && window.flotillaGoals && window.flotillaGoals.openNode) ? window.flotillaGoals.openNode() : null;
+      pushNav({ view: view, desk: selectedDesk || null, node: node });
     });
   }
 
@@ -660,7 +663,10 @@
     restoringNav = true;
     var s = state || { view: "conversations" };
     var view = s.view || "conversations";
-    if (view === "conversations" && s.desk) selectedDesk = s.desk;
+    // Set the selection to the state's desk — including CLEARING it on a desk:null state
+    // (Back to the seed must not leave the thread/header/mirror on the old desk; a null
+    // selection lets renderConversations re-pick the default) — cubic #351 P2.
+    if (view === "conversations") selectedDesk = s.desk || null;
     showView(view);
     if (view === "conversations") { renderConversations(); syncControlTargets(true); fetchMirror(); }
     if (view === "goals" && window.flotillaGoals && window.flotillaGoals.restoreNode) {

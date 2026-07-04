@@ -758,12 +758,21 @@
     }
   }
   // restoreNode is the history controller's hook (#349 A1): open the drawer on the given
-  // node (or close it) WITHOUT pushing a new entry. Best-effort — if the node isn't in the
-  // freshly-rendered map yet, it no-ops rather than throwing.
+  // node (or close it) WITHOUT pushing a new entry. Restore-after-load (cubic #351 P2):
+  // a Back/Forward that lands on a node state while the goals data is still fetching would
+  // find nodeById empty — so instead of bailing (closing the drawer), it QUEUES the target
+  // and tryRestore() reapplies it the moment the render populates nodeById.
+  var pendingRestore; // undefined = nothing queued; null = restore-to-closed; string = target node id
   function restoreNode(id) {
+    pendingRestore = id || null;
+    tryRestore();
+  }
+  function tryRestore() {
+    if (pendingRestore === undefined) return;
     restoringNode = true;
-    if (id && nodeById[id]) openDrawer(id);
-    else closeDrawer();
+    if (pendingRestore === null) { closeDrawer(); pendingRestore = undefined; }
+    else if (nodeById[pendingRestore]) { openDrawer(pendingRestore); pendingRestore = undefined; }
+    // else: the node isn't rendered yet — keep the target and retry after the next render.
     restoringNode = false;
   }
   function closeDrawer() {
@@ -1052,6 +1061,7 @@
       updateInPlace(goals, nodesEl);
       drawEdges(); // child state may have changed → recolour (the SVG is stateless)
       reapplyTransient(); // re-light hover chain + refresh the open drawer's live status
+      tryRestore(); // a queued Back/Forward drawer target may now be renderable (#351 P2)
       lastSig = sig;
       return;
     }
@@ -1107,6 +1117,7 @@
       lastStructSig = ssig; // commit ONLY after a complete pass-2 render
       laidOut = true;
       lastSig = sig;
+      tryRestore(); // nodeById is now populated — apply a queued Back/Forward drawer target (#351 P2)
     });
   }
 
