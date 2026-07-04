@@ -1,6 +1,6 @@
 # OpenCode revival — trial desk design
 
-**Status:** ready for operator/CoS gate (driver re-verified 2026-07-04)
+**Status:** ready for operator/meta-XO gate (driver re-verified 2026-07-04)
 **Driver:** `internal/surface/opencode.go` (PR #56 era)
 **CLI probed:** OpenCode **v1.3.15** (`~/.opencode/bin/opencode`)
 
@@ -31,12 +31,12 @@ for a coordinator seat until `ComposerStateProbe` + outbound notify path ship.
 
 ## Trial desk charter
 
-Generic agent name: **`opencode-harness-dev`** (product lane; host-local roster entry).
+Generic agent name: **`oc-desk`** (product lane; host-local roster entry — see `flotilla.example.json`).
 
 | Field | Value |
 |-------|-------|
 | Surface | `opencode` |
-| Repo worktree | `jim80net/flotilla` (or `codex-harness-dev` parity repo) |
+| Repo worktree | `<org>/flotilla` (or any parity repo the trial targets) |
 | Identity file | `AGENTS.md` (OpenCode loads natively) |
 | Role | Execution desk only — **not** a coordinator trial |
 | Model | Operator picks via `opencode models` (e.g. GLM 5.2, GPT) — training desk evals judgment models separately |
@@ -60,12 +60,12 @@ OPENCODE_MODEL=<provider>/<model> opencode .
 
 ### Provision steps (supervised; no XO swap)
 
-1. `flotilla workspace init --repo <url> opencode-harness-dev --roster "$FLOTILLA_ROSTER"`
+1. `flotilla workspace init --repo <url> oc-desk --roster "$FLOTILLA_ROSTER"`
    — expect fast-follow notice; **override** `flotilla-launch.json` launch to `opencode .`
-2. `flotilla doctrine install --refresh opencode-harness-dev --roster "$FLOTILLA_ROSTER"`
+2. `flotilla doctrine install --refresh oc-desk --roster "$FLOTILLA_ROSTER"`
    — writes constitutional blocks into `AGENTS.md`
-3. Mint Discord webhook + channel binding (CoS/hydra-ops — not flotilla-dev)
-4. `flotilla resume opencode-harness-dev`
+3. Mint Discord webhook + channel binding (meta-XO / fleet ops — not the product desk)
+4. `flotilla resume oc-desk`
 5. Restart `flotilla-watch` if daemon started before first opencode roster entry
 
 ### Trial pass criteria (execution desk)
@@ -78,7 +78,7 @@ OPENCODE_MODEL=<provider>/<model> opencode .
 | 4 | Rotate `/clear` | context reset without shell drop |
 | 5 | Cross-harness read | optional: Claude desk writes; opencode desk reads same repo |
 
-### Product follow-ups (flotilla-dev lane)
+### Product follow-ups (product repo lane)
 
 | Priority | Item | Est. |
 |----------|------|------|
@@ -89,16 +89,16 @@ OPENCODE_MODEL=<provider>/<model> opencode .
 | P5 | `RecycleBridge` + switch-target parity | medium |
 | P6 | Add `opencode` to `harnessAllocationSurface` coordinator switch | small (after P4) |
 
-## Coupled trial (operator/CoS 2026-07-04)
+## Coupled trial (operator/meta-XO 2026-07-04)
 
-**Shape:** `opencode-trial-xo` (grok project-XO) supervises this desk during the 48h
-succession trial. Trial XO dispatches pass-criteria exercises, gates outputs, reports to CoS.
+**Shape:** `beta-xo` (grok project-XO) supervises `oc-desk` during the 48h succession trial.
+Trial XO dispatches pass-criteria exercises, gates outputs, reports to the meta-XO.
 Desk stays **fleet-command member only** (pr-rep pattern) — no dedicated Discord channel.
 
-Pass criteria: host-local `succession-trial-pass-criteria.md` (fleet-ops state). Product PR #395.
+Pass criteria: host-local trial doc in the deployment's roster state directory (not in this repo).
 
 ## Boundaries
 
 - **Not in scope:** model quality eval — training desk.
 - **Blocked:** rostering opencode on a **coordinator** seat before P4 + supervised trial script.
-- **CoS gate:** trial-XO channel/webhook mint + operator veto window before first `resume`.
+- **Meta-XO gate:** trial-XO channel/webhook mint + operator veto window before first `resume`.

@@ -92,7 +92,11 @@
   }
   function next() { if (sIdx < curSlides().length - 1) { sIdx++; renderDeck(); } }
   function prev() { if (sIdx > 0) { sIdx--; renderDeck(); } }
-  function openDeck(i) { pIdx = i; sIdx = 0; renderDeck(); }
+  function openDeck(i) {
+    var par = PARADES[i];
+    if (!par || par.error) { showList(); return; }
+    pIdx = i; sIdx = 0; renderDeck();
+  }
 
   function showList() {
     el("pd-deck").hidden = true;
@@ -107,6 +111,11 @@
       return;
     }
     box.innerHTML = PARADES.map(function (p, i) {
+      if (p.error) {
+        return '<div class="pd-listcard pd-listcard-error">' +
+          '<span class="pd-listcard-date">' + esc(p.date) + "</span>" +
+          '<span class="pd-listcard-meta error">Could not load: ' + esc(p.error) + "</span></div>";
+      }
       var slides = parseSlides(p.slides || "");
       var first = slides.length ? slides[0].title : "(empty)";
       return '<button class="pd-listcard" type="button" data-i="' + i + '">' +
@@ -153,8 +162,21 @@
         return r.text();
       })
       .then(function (text) {
-        return { date: entry.date, slides: text, assets: entry.assets || [] };
+        return { date: entry.date, slides: text, assets: entry.assets || [], error: null };
       });
+  }
+
+  function paradeFromSettled(entry, res) {
+    if (res.status === "fulfilled") return res.value;
+    var msg = (res.reason && res.reason.message) || "load failed";
+    return { date: entry.date, slides: "", assets: [], error: msg };
+  }
+
+  function firstOpenDeckIndex() {
+    for (var i = 0; i < PARADES.length; i++) {
+      if (!PARADES[i].error) return i;
+    }
+    return -1;
   }
 
   wire();
@@ -163,10 +185,12 @@
     .then(function (d) {
       var entries = (d && d.parades) || [];
       if (!entries.length) { renderList(); showList(); return; }
-      return Promise.all(entries.map(loadSlides)).then(function (loaded) {
-        PARADES = loaded.sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
+      return Promise.allSettled(entries.map(loadSlides)).then(function (results) {
+        PARADES = results.map(function (res, i) { return paradeFromSettled(entries[i], res); })
+          .sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
         renderList();
-        openDeck(0);
+        var open = firstOpenDeckIndex();
+        if (open >= 0) openDeck(open); else showList();
       });
     })
     .catch(function (e) {

@@ -1,7 +1,7 @@
 # Portable coordinator seat — readiness short-list
 
-**Status:** operator/CoS gate (succession program, 2026-07-04)
-**Scope:** What breaks if a **grok**, **codex**, or **opencode** seat runs XO/CoS duties —
+**Status:** operator/meta-XO gate (succession program, 2026-07-04)
+**Scope:** What breaks if a **grok**, **codex**, or **opencode** seat runs XO/meta-XO duties —
 gate reviews, merges, `flotilla notify`, doctrine adherence, detector loop, synthesis.
 
 Training desk owns **model** fitness; this doc owns **harness + seat plumbing**.
@@ -12,10 +12,10 @@ Era VI (#261, #263).
 
 ## Executive summary
 
-| Harness | Execution desk | Project-XO trial | CoS/meta-XO |
-|---------|----------------|------------------|-------------|
+| Harness | Execution desk | Project-XO trial | Meta-XO |
+|---------|----------------|------------------|---------|
 | **grok** | **Live** (many fleet desks) | **Code-ready** — supervised trial queued | Blocked until project-XO trial passes |
-| **codex** | **Live** (codex-memex-dev, etc.) | **Code-ready** — codex-harness-dev post-auth gate | Same |
+| **codex** | **Live** (`codex-desk`, etc.) | **Code-ready** — post-auth fixture gate | Same |
 | **opencode** | **Driver only** — no live desk | **Not ready** | **Not ready** |
 
 **Nearest non-Fable coordinator options today:** grok and codex (explicit `surface` on roster).
@@ -40,7 +40,7 @@ Lower rank = cheaper / unblocks more. "Blocks XO" = cannot pass supervised trial
 | Rank | Gap | Affects | Fix |
 |------|-----|---------|-----|
 | B1 | **`ComposerStateProbe` absent on opencode** | opencode XO | Cursor-indexed composer classifier (blocks confirmed send volume) |
-| B2 | **`ComposerStateProbe` on codex** — shipped but post-auth fixtures gate | codex XO | codex-harness-dev: live revalidate markers after auth |
+| B2 | **`ComposerStateProbe` on codex** — shipped but post-auth fixtures gate | codex XO | `codex-desk`: live revalidate markers after auth |
 | B3 | **`ResultReader` absent on opencode** | opencode XO | Turn-final path for mirror, synthesis, idle-hold, delegatenudge |
 | B4 | **`RecycleBridge` absent on opencode** | opencode XO, switch | Handoff/takeover + `flotilla switch` TO-target parity |
 | B5 | **`harnessAllocationSurface` / `IsManagementHarness` exclude opencode** | opencode XO | Add `opencode` to coordinator surface switch + delegatenudge map (after B1) |
@@ -54,15 +54,15 @@ Lower rank = cheaper / unblocks more. "Blocks XO" = cannot pass supervised trial
 | C1 | **No opencode coordinator launch env** (`FLOTILLA_SELF`, `FLOTILLA_SECRETS`) | opencode XO | Mirror grok/codex coordinator recipe in `workspaceLaunchCommand` |
 | C2 | **No opencode coordinator rules file** | opencode XO | Scaffold coordinator rules (merge allowed; default-branch deny) |
 | C3 | **Rate-limit / failover probes missing for opencode** | opencode, auto-switch | `RateLimitProbe` + harness-subscription-switching chain entry |
-| C4 | **CoS/meta-XO trial policy** | CoS | Runbook forbids CoS swap until project-XO trial passes — keep |
-| C5 | **Fable metered Jul 7** — empath-lead, inventrise-xo still on `claude-fable-5` | fleet | Operator succession pick per flotilla; not a plumbing fix |
+| C4 | **Meta-XO trial policy** | meta-XO | Runbook forbids meta-XO swap until project-XO trial passes — keep |
+| C5 | **Fable metered Jul 7** — other project-XO seats still on `claude-fable-5` | fleet | Operator succession pick per flotilla; not a plumbing fix |
 
 ## Per-harness XO duty matrix
 
 | XO duty | grok | codex | opencode |
 |---------|------|-------|----------|
 | `flotilla send` / confirmed delivery | Probe + tests shipped | Probe shipped | Spinner-only confirm; **residual silent-drop risk** |
-| `flotilla notify` (secrets) | Coordinator template allows | codex-harness-dev rules | **No recipe / rules** |
+| `flotilla notify` (secrets) | Coordinator template allows | codex coordinator rules | **No recipe / rules** |
 | `gh pr merge` (reviewer gate) | Allowed in coordinator template | Coordinator rules | **Not scaffolded** |
 | Turn-final mirror / synthesis | grok transcript reader | codexstore | **No ResultReader** |
 | `delegatenudge` IC detection | `IsManagementHarness("grok")` | `codex` included | **Not management harness** |
@@ -75,19 +75,19 @@ Lower rank = cheaper / unblocks more. "Blocks XO" = cannot pass supervised trial
 ## Recommended succession sequence (harness plumbing only)
 
 1. **Execute** supervised grok **or** codex project-XO trial (operator window) — proves seat parity.
-2. **Stand up** `opencode-harness-dev` execution desk — revives cheap multi-model path.
+2. **Stand up** `oc-desk` execution desk — revives cheap multi-model path.
 3. **Ship** opencode P1–P3 (launch wiring, #54, ResultReader).
 4. **Ship** opencode `ComposerStateProbe` — unblocks coordinator candidacy.
 5. **Re-run** supervised trial on opencode project-XO if operator wants a third harness option.
-6. Only then discuss CoS/meta-XO swap (operator gate).
+6. Only then discuss meta-XO swap (operator gate).
 
-## Operator decisions (for CoS rollup)
+## Operator decisions (for meta-XO rollup)
 
 | Decision | Recommendation | Default if silent |
 |----------|----------------|-------------------|
-| First project-XO trial harness | **grok** (flotilla-dev already on grok surface; probe shipped) | Schedule 48h supervised trial |
-| OpenCode trial desk | **Authorize** channel mint + `opencode-harness-dev` resume | Execution desk only |
-| CoS swap before Jul 7 | **Defer** until project-XO trial passes | Keep Fable on CoS through Jul 7 |
+| First project-XO trial harness | **grok** (a product desk already on grok surface; probe shipped) | Schedule 48h supervised trial |
+| OpenCode trial desk | **Authorize** channel mint + `oc-desk` resume | Execution desk only |
+| Meta-XO swap before Jul 7 | **Defer** until project-XO trial passes | Keep Fable on meta-XO through Jul 7 |
 
 ## Verification commands
 

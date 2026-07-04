@@ -105,6 +105,9 @@
   font-variant-numeric: tabular-nums;
 }
 .pd-listcard-meta { font-size: .76rem; color: var(--ink-3); }
+.pd-listcard-error { cursor: default; border-color: color-mix(in srgb, var(--err) 42%, transparent); }
+.pd-listcard-error:hover { border-color: color-mix(in srgb, var(--err) 42%, transparent); }
+.pd-listcard-error .pd-listcard-meta.error { color: var(--err); }
 
 .pd-deck[hidden], .pd-list-view[hidden] { display: none; }
 
