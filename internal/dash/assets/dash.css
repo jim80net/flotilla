@@ -239,7 +239,7 @@ code {
   .conv-wrap {
     flex: 1 1 auto;
     min-height: 0;
-    grid-template-columns: 250px minmax(0, 1fr) 300px;
+    grid-template-columns: 250px minmax(0, 1fr) 360px;
     grid-template-rows: minmax(0, 1fr);   /* the single row fills the shell height */
     overflow: hidden;                     /* the shell frame itself never scrolls */
   }
@@ -788,6 +788,11 @@ code {
 .backlog-item:last-child, .ledger-entry:last-child { border-bottom: 0; }
 /* #302 drive-queue: a status chip parsed from the [marker] + clean text */
 .backlog-item { display: flex; align-items: baseline; gap: .5rem; }
+/* #349 Inc 4 E10: each queue item is a button → opens the full item in a modal */
+.backlog-item[data-bq-open] { cursor: pointer; border-radius: var(--r-sm); padding-left: .3rem; padding-right: .3rem; margin: 0 -.3rem; }
+.backlog-item[data-bq-open]:hover { background: color-mix(in srgb, var(--cyan) 7%, transparent); }
+.backlog-item[data-bq-open]:focus-visible { outline: 2px solid var(--cyan); outline-offset: -1px; }
+.backlog-item[data-bq-open] .bq-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bq-marker {
   flex: none; font-size: .58rem; letter-spacing: .07em; text-transform: uppercase;
   padding: 1px 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-3);
@@ -1320,6 +1325,27 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   align-items: center; justify-content: center; padding: 1.5rem;
 }
 .goals-modal.open { display: flex; }
+
+/* #349 Inc 4 E10: drive-queue full-item modal — a focused read of one queued item. */
+.conv-modal { position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; padding: 1.5rem; }
+.conv-modal.open { display: flex; }
+.conv-modal-backdrop { position: absolute; inset: 0; background: var(--scrim); backdrop-filter: blur(2px); }
+.conv-modal-card {
+  position: relative; width: 460px; max-width: 100%; max-height: 80vh; overflow-y: auto;
+  background: linear-gradient(180deg, var(--abyss-2), var(--abyss-3)); border: 1px solid var(--cyan-dim);
+  border-radius: var(--r); box-shadow: var(--shadow-lg); padding: 20px 22px;
+}
+.conv-modal-x {
+  position: absolute; top: 12px; right: 14px; width: 32px; height: 32px; border-radius: 6px;
+  border: 1px solid var(--line); background: transparent; color: var(--ink-3); cursor: pointer; font-size: 1.1rem;
+  display: flex; align-items: center; justify-content: center;
+}
+.conv-modal-x:hover { border-color: var(--cyan-dim); color: var(--ink); }
+.conv-modal-marker {
+  font-size: .6rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
+  border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; display: inline-block; margin-bottom: 10px;
+}
+.conv-modal-title { font-size: .95rem; line-height: 1.5; color: var(--ink); padding-right: 34px; overflow-wrap: anywhere; }
 .gm-dialog {
   position: relative; width: 520px; max-width: 100%; max-height: 84vh; overflow-y: auto;
   background: linear-gradient(180deg, var(--abyss-2), var(--abyss-3)); border: 1px solid var(--cyan-dim);

@@ -270,6 +270,37 @@ func TestSessionMirrorGlance(t *testing.T) {
 	}
 }
 
+// TestConversationsWave2 locks #349 Inc 4: the drive-queue chip opens a full-item modal
+// (E10) and the relay-ledger thread filter normalizes the "@name" address form on BOTH
+// from and to (E11 filter half) so a desk's own OUTBOUND relay lines are no longer dropped.
+func TestConversationsWave2(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	// E10: queue chip → modal.
+	for _, marker := range []string{"openConvModal", "data-bq-open", "data-bq-text"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js must open a drive-queue item in the modal (missing %q) — #349 Inc 4 E10", marker)
+		}
+	}
+	// E11 filter half: symmetric @-normalization (the prior code matched @-prefix on `to`
+	// only, dropping a desk's own outbound relay lines from `from`).
+	if !strings.Contains(js, "ledgerParticipant") {
+		t.Error("dash.js must normalize @name symmetrically on ledger from/to (ledgerParticipant) — #349 Inc 4 E11")
+	}
+	if strings.Contains(js, `to === "@" + d`) {
+		t.Error("dash.js must not carry the asymmetric @-only-on-`to` ledger match (the E11 filter bug) — #349 Inc 4")
+	}
+	html := doGet(t, srv, "/").Body.String()
+	if !strings.Contains(html, `id="conv-modal"`) {
+		t.Error("index.html must carry the drive-queue item modal (#conv-modal) — #349 Inc 4 E10")
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	if !strings.Contains(css, ".conv-modal.open") || !strings.Contains(css, "360px") {
+		t.Error("dash.css must style the conv-modal (E10) and widen the context column to 360px (E9) — #349 Inc 4")
+	}
+}
+
 // TestHandleSessionMirror locks the /api/session-mirror contract the glance JS binds
 // to: { agent, entries:[{ts, info, ...}] } with entries ascending (newest last). This
 // guards the field names dash.js silently depends on (entries[last].ts / .info).
