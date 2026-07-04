@@ -433,8 +433,9 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	// is content-aware — leaf-weight angular packing + per-ring radii from card extents
 	// (no fixed RING_STEP), with narrower org cards.
 	// The default is org (operator UX blessing #324), now env-seedable via the body
-	// attribute (#317) — the IIFE reads data-goals-layout and falls back to "org".
-	if !strings.Contains(js, `return v === "tree" ? "tree" : "org"`) {
+	// attribute (#317) — the IIFE reads data-goals-layout and falls back to "org". The
+	// mind-map (org v3) is a third selectable mode; tree/mindmap honored, else org.
+	if !strings.Contains(js, `(v === "tree" || v === "mindmap") ? v : "org"`) {
 		t.Error("goals.js must seed goalsLayout from data-goals-layout, defaulting org (#324/#317)")
 	}
 	// #324 Inc 2: a roster-materialized desk (source==="roster") is a live entity, never
@@ -549,6 +550,13 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	}
 	if strings.Contains(js, "RING_STEP") {
 		t.Error("goals.js must drop the fixed RING_STEP — org radii are content-aware (#324)")
+	}
+	// mind-map (org v3): a third radial mode whose children fan LOCALLY from each parent
+	// (limbs + sub-branches) with curved edges. Selectable via the toggle; org stays default.
+	for _, marker := range []string{"layoutMindmap", "isRadial", `data-layout="mindmap"`} {
+		if !strings.Contains(js+doGet(t, srv, "/").Body.String(), marker) {
+			t.Errorf("goals map must carry the mind-map layout (missing %q)", marker)
+		}
 	}
 	// structuralSig must include the enrichment (priorities/milestones/harness) so an
 	// add/remove of a height-affecting field triggers a full rebuild, not a stale
