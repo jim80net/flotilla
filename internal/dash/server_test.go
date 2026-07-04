@@ -415,6 +415,22 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("goals.js must render the decision brief in the respond modal (missing %q) — #347", marker)
 		}
 	}
+	// #349 A2: cell-click SWAP — the node body opens the drawer (nodeActivate → openDrawer),
+	// the conversation jump is a distinct → desk button (goToDesk / gnode-godesk); and the
+	// drawer participates in browser history (restoreNode for the popstate restore).
+	for _, marker := range []string{"goToDesk", "gnode-godesk", "restoreNode"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must retain the #349 nav cell-swap + history hook (missing %q)", marker)
+		}
+	}
+	// dash.js owns the history controller: pushState per view/desk change + a popstate
+	// restore so navigation is reversible (#349 A1).
+	dashJS := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{"pushNav", "popstate", "history.pushState"} {
+		if !strings.Contains(dashJS, marker) {
+			t.Errorf("dash.js must retain the #349 browser-history controller (missing %q)", marker)
+		}
+	}
 	// mobile-QA #330: the node controls counter-scale the fit-to-view zoom (--ctl-scale)
 	// so they stay screen-constant (tappable) on phone, and the css reveals ⓘ on touch.
 	if !strings.Contains(js, "--ctl-scale") {

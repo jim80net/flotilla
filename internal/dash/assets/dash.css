@@ -1287,21 +1287,24 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   transform: scale(var(--ctl-scale, 1));
   transform-origin: top right;
 }
-.gnode-respond, .gnode-detail {
-  width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--line);
-  background: var(--abyss-2); color: var(--ink-3); cursor: pointer; font-size: .82rem; line-height: 1;
-  display: inline-flex; align-items: center; justify-content: center; padding: 0;
+.gnode-respond, .gnode-godesk {
+  height: 26px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--abyss-2); color: var(--ink-3); cursor: pointer; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
 }
-/* ⚠ respond is ALWAYS visible on a gated node (the operator must see what needs them);
-   ⓘ details is hover/focus-revealed to keep the canvas clean on pointer devices. */
-.gnode-respond { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 55%, transparent); }
+/* ⚠ respond is ALWAYS visible on a gated node (the operator must see what needs them). */
+.gnode-respond { width: 26px; padding: 0; font-size: .82rem; color: var(--amber); border-color: color-mix(in srgb, var(--amber) 55%, transparent); }
 .gnode-respond:hover { background: color-mix(in srgb, var(--amber) 16%, transparent); }
-.gnode-detail { opacity: 0; transition: opacity .15s var(--ease); }
-.gnode:hover .gnode-detail, .gnode:focus-within .gnode-detail, .gnode:focus-visible .gnode-detail { opacity: 1; }
-.gnode-detail:hover { border-color: var(--cyan-dim); color: var(--cyan); }
-/* On touch (no hover), the ⓘ can never be hover-revealed — always show it so it's
-   reachable (mobile-QA #330). */
-@media (hover: none) { .gnode-detail { opacity: 1; } }
+/* → desk — the conversation jump (was the node body's default action, #349 A2). Labelled,
+   so auto-width; hover/focus-revealed on pointer devices to keep the canvas clean, always
+   visible on touch (#330). */
+.gnode-godesk {
+  width: auto; padding: 0 6px; font-family: var(--display); font-size: .6rem;
+  letter-spacing: .04em; text-transform: uppercase; opacity: 0; transition: opacity .15s var(--ease);
+}
+.gnode:hover .gnode-godesk, .gnode:focus-within .gnode-godesk, .gnode:focus-visible .gnode-godesk { opacity: 1; }
+.gnode-godesk:hover { border-color: var(--cyan-dim); color: var(--cyan); }
+@media (hover: none) { .gnode-godesk { opacity: 1; } }
 
 /* #302 intervention modal — situation brief + response input */
 .goals-modal {
