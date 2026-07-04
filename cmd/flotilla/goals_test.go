@@ -1,10 +1,43 @@
 package main
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestCmdGoalsHelp(t *testing.T) {
+	for _, args := range [][]string{nil, {"--help"}, {"-h"}, {"help"}} {
+		if err := cmdGoals(args); err != nil {
+			t.Fatalf("cmdGoals(%v) = %v, want nil (usage printed)", args, err)
+		}
+	}
+}
+
+func TestGoalsUsageListsLinkFlags(t *testing.T) {
+	var buf bytes.Buffer
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	goalsUsage()
+	w.Close()
+	os.Stdout = old
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+	usage := buf.String()
+	for _, flag := range []string{"--roster", "--yaml", "--json", "--label", "--issue", "--backlog", "--inline", "--desk"} {
+		if !strings.Contains(usage, flag) {
+			t.Errorf("goalsUsage missing %s (must match cmdGoalsLink flag set)", flag)
+		}
+	}
+}
 
 func TestCmdGoalsValidateCompile(t *testing.T) {
 	dir := t.TempDir()
