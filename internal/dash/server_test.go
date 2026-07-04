@@ -283,6 +283,16 @@ func TestConversationsWave2(t *testing.T) {
 			t.Errorf("dash.js must open a drive-queue item in the modal (missing %q) — #349 Inc 4 E10", marker)
 		}
 	}
+	// cubic #361 P2: the conv-modal must trap Tab focus (like the goals-modal) so Tab can't
+	// escape behind the backdrop, and must return focus to the opening chip on close.
+	if !strings.Contains(js, "convModalReturn") {
+		t.Error("conv-modal must return focus to the opening chip on close (convModalReturn) — cubic #361 P2")
+	}
+	if ci := strings.Index(js, "wireConvModal"); ci >= 0 {
+		if !strings.Contains(js[ci:], `e.key !== "Tab"`) {
+			t.Error("conv-modal must trap Tab focus inside the modal (mirrors the goals-modal trap) — cubic #361 P2")
+		}
+	}
 	// E11 filter half: symmetric @-normalization (the prior code matched @-prefix on `to`
 	// only, dropping a desk's own outbound relay lines from `from`).
 	if !strings.Contains(js, "ledgerParticipant") {
