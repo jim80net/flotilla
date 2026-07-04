@@ -19,9 +19,18 @@ state* for attention; parade compresses *accomplishments and learnings* for refl
   Boats sit at the bottom of the hierarchy.
 - **meta-XO** — the top XO: it coordinates the project-XOs and owns the
   command-and-control channel (often called **#c2**).
+- **walk-inspection** — pre-parade rhythm: a **walk** fires roughly **24 hours before**
+  the parade. Each seat inspects what it shipped, fixes what is broken, and produces
+  **demo assets** (screenshot, short capture, or live link) showing the product's
+  current shape. The parade answer **consumes** walk output — do not improvise demos
+  at parade time if the walk already produced them.
+- **demo-able product** — work that produces something an operator can *see* or *try*
+  (UI, CLI output, a running service, a doc with a rendered preview). Purely internal
+  plumbing with no visible surface is not demo-able — say so explicitly rather than
+  padding.
 - **Tier 1 / Tier 2 / Tier 3** — the three altitudes of parade roll-up (parallel to
   visibility-synthesis):
-  - **Tier 1** is each seat's own four-domain answer (in-pane; the mirror publishes
+  - **Tier 1** is each seat's own four-plus-demo answer (in-pane; the mirror publishes
     it to that seat's channel — not your job when you are rolling up).
   - **Tier 2** is an XO curating its boats' parade answers UP into the XO's channel.
   - **Tier 3** is the meta-XO curating the project-XOs' parade rollups UP into #c2.
@@ -31,11 +40,17 @@ state* for attention; parade compresses *accomplishments and learnings* for refl
 - **the operator** — the human the whole fleet serves. Parade reports are reader-modeled
   for them: fleet headline first, plain language, IDs in the footer.
 
-## The four domains — every seat answers these
+## The four-plus-demo domains — every seat answers these
 
 When you receive an **individual parade request** (not a roll-up), answer all four
-domains in your turn-final. Use the structure below so coordinators and the operator
-can scan consistently.
+domains **plus the demo element** in your turn-final. Use the structure below so
+coordinators and the operator can scan consistently.
+
+**Demo completeness rule:** if your lane ships a **demo-able product** and your parade
+answer has **no DEMO section** (no screenshot, capture, or live link from the
+pre-parade walk), the answer is **INCOMPLETE** — say so plainly in ACCOMPLISHMENTS
+("demo missing — walk did not produce assets" or "demo pending") and do not present
+the parade as ready for operator review until the demo lands.
 
 ### (1) Accomplishments — required
 
@@ -67,6 +82,23 @@ Flag only when you genuinely need operator or coordinator intervention. Omit if 
 When present: one line per ask, with what you tried and what decision or resource you
 need.
 
+### (5) Demo — required when demo-able; explicit when not
+
+Show what was accomplished — **what is the shape of the product now?** Attach one
+demo element per demo-able product your lane owns this period:
+
+- **Screenshot** — still image of the current UI or rendered output.
+- **Short capture** — brief screen recording or GIF of the feature in action.
+- **Live link** — URL to a running staging instance, a public doc preview, or a
+  reproducible CLI invocation the operator can try.
+
+Demos come from the **pre-parade walk** (~24h before): the walk inspection produces
+fixes and demo assets; the parade **shows** them. Use generic attachment paths or
+host-local asset locations the mirror can publish — never deployment-specific secrets.
+
+If your lane has **no demo-able product** this period, include `DEMO: N/A (not
+demo-able — <one-line reason>)` so coordinators do not hunt for a missing attachment.
+
 ### Individual answer shape (Tier 1)
 
 ```
@@ -74,6 +106,9 @@ need.
 
 ACCOMPLISHMENTS:
   • …
+
+DEMO:                     ← required when demo-able; N/A line when not
+  • <screenshot / capture / live link — or "N/A (not demo-able — …)">
 
 WORKING ON NEXT:          ← omit section if nothing notable
   • …
@@ -119,8 +154,10 @@ Curate by tier. Compress, group, celebrate — never a firehose.
 Produce a **domain parade rollup**:
 
 - **Group by boat/desk.** One short block per subordinate: accomplishments (the
-  wins), optional next, learnings extracted from each `## Learnings` block, optional
-  needs-help flags.
+  wins), **demo** (link or note if missing/incomplete), optional next, learnings
+  extracted from each `## Learnings` block, optional needs-help flags.
+- **Surface missing demos.** If a demo-able desk omitted its DEMO section, flag it
+  at the top — an incomplete parade answer, not a silent skip.
 - **Compress hard.** A reader should grasp your domain's wins in a few seconds.
 - **Surface needs-help and fleet-wide learnings at the top.** Do not bury a blocker or
   a doctrine-worthy learning inside a per-desk line.
@@ -134,8 +171,9 @@ Produce an **operator parade report** with three parts:
 
 1. **Fleet headline** — one short paragraph celebrating the whole fleet. ("Fleet
    shipped X; research closed Y; ops unblocked Z.")
-2. **Grouped by XO** — under each project-XO name, the compressed wins, next items,
-   and needs-help flags from that domain. Plain language; no codenames without gloss.
+2. **Grouped by XO** — under each project-XO name, the compressed wins, **demos**
+   (or explicit "demo missing" flags), next items, and needs-help flags from that
+   domain. Plain language; no codenames without gloss.
 3. **Fleet learnings** — a consolidated `## Learnings` section: every fleet-wide
    learning from subordinate rollups, deduplicated, with attribution. This block is
    what post-parade capture consumes.
@@ -152,8 +190,8 @@ HEADLINE: A strong week — Tier-1 mirror live, parade formation shipped, two ba
 closed green. One open budget ask in research.
 
 BY DOMAIN:
-  alpha-xo — shipped the options-closing fix; data desk idle. Needs help: none.
-  beta-xo — entry-confirmation backtest finished; macro desk mid-sweep.
+  alpha-xo — shipped the options-closing fix (demo: screenshot attached); data desk idle.
+  beta-xo — entry-confirmation backtest finished (demo: live staging link); macro desk mid-sweep.
 
 ## Learnings
   • (alpha-be) Sentinel AND-guards need only one decisive arm — promote to skill.
@@ -206,6 +244,10 @@ block is the authoritative capture input.
 
 **Optional domains stay optional.** Omit "working on next" and "needs help" when there
 is nothing worth flagging — absence is signal, not laziness.
+
+**Demos are required for demo-able products.** A parade without showing what shipped
+is a status dump, not a celebration. Walk first (~24h), demo in the answer; say
+**incomplete** when a demo-able lane has no DEMO section.
 
 **Unreadable subordinates are unknown, not silent.** Synthesize over readable ones;
 never invent state for a skip.

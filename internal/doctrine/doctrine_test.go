@@ -184,6 +184,12 @@ func TestMembersRegistryContents(t *testing.T) {
 	if !strings.Contains(pf.Content, "## Learnings") {
 		t.Error("parade-formation content must document the Learnings block")
 	}
+	if !strings.Contains(pf.Content, "DEMO") || !strings.Contains(pf.Content, "INCOMPLETE") {
+		t.Error("parade-formation content must document the demo element and incompleteness rule")
+	}
+	if !strings.Contains(pf.Content, "walk-inspection") {
+		t.Error("parade-formation content must reference the pre-parade walk-inspection rhythm")
+	}
 	if pf.OpenMarker != "" || pf.CloseMarker != "" {
 		t.Errorf("heartbeat-skill member should carry no marker fence, got open=%q close=%q", pf.OpenMarker, pf.CloseMarker)
 	}
