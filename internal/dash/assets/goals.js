@@ -803,6 +803,48 @@
   // no-brief state instead of an empty rendered block (cubic #348 P2).
   function hasBrief(s) { return !!(s && String(s).trim()); }
 
+  // nodePath is the ancestor breadcrumb for a node ("hub › flotilla › desk › task") — a
+  // hover summary so a bare item (e.g. "TG3 prep idle") is legible in context (#349 B5).
+  function nodePath(n) {
+    var out = [], cur = n, guard = 0;
+    while (cur && guard++ < 20) { out.unshift(cur.title || cur.id); cur = cur.parent ? nodeById[cur.parent] : null; }
+    return out.join(" › ");
+  }
+  // downstreamGated collects the operator-gated work items from a node's DESCENDANTS (not
+  // itself). For an aggregate node whose ⚠ is a roll-up, the decisions live downstream —
+  // so the modal routes THERE instead of "nothing gated here, so why ask?" (#349 B6).
+  function downstreamGated(n, seen) {
+    seen = seen || {};
+    var out = [];
+    (n.children || []).forEach(function (cid) {
+      if (seen[cid]) return;
+      seen[cid] = true;
+      var c = nodeById[cid];
+      if (!c) return;
+      (c.work_items || []).forEach(function (wi) {
+        if (wi.class === "awaiting" || wi.class === "blocked") out.push({ node: c, wi: wi });
+      });
+      downstreamGated(c, seen).forEach(function (x) { out.push(x); });
+    });
+    return out;
+  }
+  // itemLinkAttrs marks a gated item CLICK-THROUGH to its target (#349 B4/B5): a desk item →
+  // its Conversations thread; anything else stays a plain (non-routing) row. The breadcrumb
+  // rides along as the title tooltip.
+  function itemLinkAttrs(wi, node) {
+    var t = ' title="' + escapeHtml(nodePath(node) + (wi.detail ? " · " + wi.detail : "")) + '"';
+    if (wi.kind === "desk" && wi.agent) return ' data-goto-desk="' + escapeHtml(wi.agent) + '"' + t;
+    return t;
+  }
+  function gatedRow(node, wi) {
+    var link = wi.kind === "desk" && wi.agent; // a routable item is a button; others are plain
+    var head = "<" + (link ? "button type=\"button\"" : "div") + ' class="gm-gated-item' + (link ? " gm-item-link" : "") + '"' + itemLinkAttrs(wi, node) + ">" +
+      escapeHtml(wi.label || wi.kind || "") + (wi.detail ? ' <span class="muted">— ' + escapeHtml(wi.detail) + "</span>" : "") +
+      "</" + (link ? "button" : "div") + ">";
+    var body = hasBrief(wi.brief) ? '<div class="gm-brief-full">' + renderBrief(wi.brief) + "</div>" : BRIEF_EMPTY;
+    return '<div class="gm-gated-row">' + head + body + "</div>";
+  }
+
   function openModal(id) {
     var n = nodeById[id];
     if (!n) return;
@@ -812,16 +854,23 @@
     // A node-level decision package renders in full (the decision is on the node itself).
     if (hasBrief(n.brief)) parts.push('<div class="gm-brief-full">' + renderBrief(n.brief) + "</div>");
     if (gated.length) {
+      // Each gated item clicks through to its target + shows its decision package (#347/B4).
       parts.push('<div class="gm-gated"><div class="gm-gated-lab">Waiting on you</div>' +
-        gated.map(function (wi) {
-          var head = '<p class="gm-gated-item">' + escapeHtml(wi.label || wi.kind || "") + (wi.detail ? " — " + escapeHtml(wi.detail) : "") + "</p>";
-          // The decision package inline (#347) — or an honest empty state when the desk
-          // has not attached one yet.
-          var body = hasBrief(wi.brief) ? '<div class="gm-brief-full">' + renderBrief(wi.brief) + "</div>" : BRIEF_EMPTY;
-          return '<div class="gm-gated-row">' + head + body + "</div>";
-        }).join("") + "</div>");
-    } else if (!hasBrief(n.brief)) {
-      parts.push('<p class="muted">Nothing is gated on you here.</p>');
+        gated.map(function (wi) { return gatedRow(n, wi); }).join("") + "</div>");
+    } else {
+      // B6: no DIRECT gate — surface the DOWNSTREAM decisions this node rolls up, each
+      // routing into the descendant that actually owns it.
+      var down = downstreamGated(n);
+      if (down.length) {
+        parts.push('<div class="gm-gated"><div class="gm-gated-lab">Downstream decisions</div>' +
+          '<p class="gm-down-note muted">Nothing is gated on this node itself — these are waiting under it:</p>' +
+          down.map(function (x) {
+            return '<div class="gm-gated-row"><button type="button" class="gm-gated-item gm-item-link" data-open-node="' + escapeHtml(x.node.id) + '" title="' + escapeHtml(nodePath(x.node)) + '">' +
+              escapeHtml(x.node.title || x.node.id) + ' <span class="muted">→ ' + escapeHtml(x.wi.label || x.wi.detail || x.wi.kind || "") + "</span></button></div>";
+          }).join("") + "</div>");
+      } else if (!hasBrief(n.brief)) {
+        parts.push('<p class="muted">Nothing is gated on you here.</p>');
+      }
     }
     q("goals-modal-title").textContent = n.title || n.id;
     q("goals-modal-brief").innerHTML = parts.join("");
@@ -948,7 +997,15 @@
     // this prototype (the reply path wires to the control API in a follow-on).
     var modal = q("goals-modal");
     if (modal) modal.addEventListener("click", function (e) {
-      if (e.target.closest(".gm-close") || e.target.classList.contains("goals-modal")) closeModal();
+      if (e.target.closest(".gm-close") || e.target.classList.contains("goals-modal")) { closeModal(); return; }
+      // #349 B4/B6: a gated item clicks through to its target — a desk item jumps to its
+      // Conversations thread; a downstream item drills into the descendant that owns it.
+      var link = e.target.closest(".gm-item-link");
+      if (link) {
+        var desk = link.getAttribute("data-goto-desk"), node = link.getAttribute("data-open-node");
+        if (desk && window.flotillaDash && window.flotillaDash.openConversation) { closeModal(); window.flotillaDash.openConversation(desk); }
+        else if (node) { openModal(node); } // re-render the modal on the descendant's decision
+      }
     });
     // Focus trap (aria-modal): keep Tab / Shift+Tab cycling among the modal's
     // controls (close, textarea, send) while it's open — Tab must not escape onto
