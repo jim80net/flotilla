@@ -39,7 +39,10 @@
   var hoveredId = null;  // node currently hovered (re-applied after a render)
   var nodesWired = false;
   var kbdNav = false;    // true when focus is moving by keyboard (Tab) — gates focus-recenter
-  var modalReturn = null; // element to restore focus to when the intervention modal closes
+  var modalReturn = null;   // fallback element to restore focus to when the modal closes
+  var modalReturnId = null; // #354 P2: the NODE id that opened the modal — re-queried live on
+                            // close so a drill-in / SSE re-render that replaced the trigger
+                            // element still restores focus (survives detach).
   // Layout mode (org-graph v2 §2/§7.4). "org" = hub-and-spoke — the coordinator
   // (layout.hub_center) at the visual center, org units on concentric rings, spoke edges
   // to children. "tree" = the tiered altitude columns (the toggle alternative). Default is
@@ -916,16 +919,35 @@
     var note = q("goals-modal-note");
     if (note) note.textContent = ""; // clear the stub "not sent" note from a prior open
     var m = q("goals-modal");
+    var wasOpen = m.classList.contains("open");
     m.classList.add("open");
     m.setAttribute("aria-hidden", "false");
-    modalReturn = document.activeElement;
+    // Anchor focus-restore ONLY on the first open (from closed). A drill-in re-render (B6
+    // "Downstream decisions" → openModal(descendant)) replaces the in-modal link that was
+    // just clicked, so capturing document.activeElement here would leave close() focusing a
+    // DETACHED element; and the opener node id is re-queried LIVE on close so an SSE map
+    // re-render that rebuilt the card still restores focus (cubic #354 P2). Keep the ORIGINAL
+    // external trigger across drill-ins.
+    if (!wasOpen) {
+      modalReturnId = id;                   // the node whose ⚠/pill opened this — re-queried on close
+      modalReturn = document.activeElement; // fallback for a non-node trigger
+    }
     if (ta) ta.focus();
   }
   function closeModal() {
     var m = q("goals-modal");
     if (m) { m.classList.remove("open"); m.setAttribute("aria-hidden", "true"); }
-    if (modalReturn && modalReturn.focus) modalReturn.focus({ preventScroll: true });
+    // Re-query the opening node's trigger LIVE — it may have been replaced by a drill-in
+    // re-render or an SSE map update since open — then fall back to the captured element.
+    var target = null;
+    if (modalReturnId) {
+      var card = cardEl(modalReturnId);
+      if (card) target = card.querySelector(".gnode-respond") || card.querySelector(".gpill") || card;
+    }
+    if (!target && modalReturn && modalReturn.focus && document.contains(modalReturn)) target = modalReturn;
+    if (target && target.focus) target.focus({ preventScroll: true });
     modalReturn = null;
+    modalReturnId = null;
   }
 
   // reapplyTransient re-establishes selection + hover after a render. On an in-place

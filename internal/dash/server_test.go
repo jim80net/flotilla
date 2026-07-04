@@ -431,6 +431,18 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("dash.js must retain the #349 browser-history controller (missing %q)", marker)
 		}
 	}
+	// cubic #354 P2: applyNav must reset the restoringNav guard in a finally — a throwing
+	// restore must never permanently suppress pushNav (history silently dead for the session).
+	if ai := strings.Index(dashJS, "function applyNav"); ai >= 0 {
+		if fi := strings.Index(dashJS[ai:], "} finally {"); fi < 0 || fi > 1600 {
+			t.Error("applyNav must wrap its body in try/finally so the restoringNav guard always resets (cubic #354 P2)")
+		}
+	}
+	// cubic #354 P2: the modal anchors focus-restore by NODE id (re-queried live on close),
+	// so an in-modal drill-in re-render can't leave close() focusing a detached element.
+	if !strings.Contains(js, "modalReturnId") {
+		t.Error("goals.js must anchor modal focus-restore by node id (modalReturnId) — cubic #354 P2")
+	}
 	// #349 B — click-through completeness: gated items click through to their target
 	// (gm-item-link), an aggregate node routes to its DOWNSTREAM decisions (downstreamGated),
 	// and the status pill opens the blockers list.
