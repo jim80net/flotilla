@@ -372,6 +372,66 @@ func TestModalDesktopSpaceWave4(t *testing.T) {
 	}
 }
 
+// TestConversationsCoordinatorPinWave4 locks F#383 criterion 1's rail half: the
+// conversations rail pins the coordinator(s) as a first-class group even when neither is a
+// channel xo_agent/member — so the CoS thread is always followable (the "I can't even see
+// the CoS's conversation" gap). The identity half (BoardDoc.cos) is covered in readmodel_test.
+func TestConversationsCoordinatorPinWave4(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{
+		"coordinatorNames",       // derives the coordinators (xo + distinct cos) from /api/status
+		"conv-group-coordinator", // the pinned first-class group
+		"st.cos",                 // reads the CoS identity the board now exposes
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js must pin the coordinator thread first-class (missing %q) — F#383 criterion 1", marker)
+		}
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	if !strings.Contains(css, ".chan-coordinator") {
+		t.Error("dash.css must style the pinned coordinator group label (.chan-coordinator) — F#383")
+	}
+}
+
+// TestThreadComposerAndOrderWave4 locks F#383 criteria 4 + 5: a composer on the thread
+// (send to the selected desk/coordinator via the route-to-pane relay) and latest-at-bottom
+// ordering with a jump-to-latest affordance. Without a composer the standalone-conversations
+// test fails by definition — "a conversations page you cannot converse from."
+func TestThreadComposerAndOrderWave4(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	html := doGet(t, srv, "/").Body.String()
+	for _, marker := range []string{`id="thread-composer"`, `id="thread-composer-input"`, `id="thread-jump"`} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("index.html must carry the thread composer/jump element %q — F#383 criteria 4/5", marker)
+		}
+	}
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{
+		"syncComposer",         // composer shown + labelled for the selected desk
+		"scrollThreadToBottom", // latest-at-bottom pin
+		"showThreadJump",       // jump-to-latest affordance
+		`"/api/control/route"`, // the composer sends via the existing relay
+		"inFlight",             // cubic P2: a single in-flight guard prevents a double-send on fast Enter
+		"sameSel",              // cubic P3: the outcome binds to the desk the send targeted, not the new selection
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js must wire the thread composer / scroll (missing %q) — F#383 criteria 4/5", marker)
+		}
+	}
+	// The thread must sort ASCENDING (oldest first, latest at the bottom) — guard the exact
+	// comparator so a refactor can't silently flip it back to newest-first.
+	if !strings.Contains(js, "return at - bt;") || strings.Contains(js, "return bt - at;") {
+		t.Error("dash.js renderThread must sort ascending (return at - bt) — latest-at-bottom, F#383 criterion 5")
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	if !strings.Contains(css, ".thread-composer") || !strings.Contains(css, ".thread-jump") {
+		t.Error("dash.css must style the thread composer + jump chip (.thread-composer/.thread-jump) — F#383")
+	}
+}
+
 // TestHandleSessionMirror locks the /api/session-mirror contract the glance JS binds
 // to: { agent, entries:[{ts, info, ...}] } with entries ascending (newest last). This
 // guards the field names dash.js silently depends on (entries[last].ts / .info).
