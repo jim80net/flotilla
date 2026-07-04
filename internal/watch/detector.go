@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -135,6 +136,11 @@ type DetectorConfig struct {
 	// trigger as MirrorOnFinish). Detects turn-finals that settle gate work without
 	// reporting to the gate-holder and injects a break prompt. Default nil ⇒ inert.
 	StrandedHandoffOnFinish func(agent string)
+	// DecisionBriefOnTick is the auto decision-brief side-effect (#349 item D): invoked
+	// once per detector tick (off d.mu, optionally async via MirrorDispatch). The caller
+	// scans the goals file for operator-gated items missing a brief and dispatches the
+	// owning desk. Default nil ⇒ inert.
+	DecisionBriefOnTick func()
 	// MirrorDispatch runs a tick's batch of per-desk mirrors. Production wires it to `go run()` so the
 	// mirror I/O (a transcript read + Discord posts) is FULLY DECOUPLED from the detector loop — even
 	// off-mutex, inline I/O on the tick goroutine could delay the next tick (and thus liveness eval)
@@ -894,6 +900,37 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors, co
 			run()
 		}
 	}
+	if d.cfg.DecisionBriefOnTick != nil {
+		run := func() { d.decisionBriefTickOne() }
+		if d.cfg.MirrorDispatch != nil {
+			d.cfg.MirrorDispatch(run)
+		} else {
+			run()
+		}
+	}
+}
+
+// DeskStateLabels returns the last committed per-desk state labels (lowercased agent
+// name → surface.State.String). Safe to call from DecisionBriefOnTick off d.mu.
+func (d *Detector) DeskStateLabels() map[string]string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make(map[string]string, len(d.snap.DeskStates))
+	for name, st := range d.snap.DeskStates {
+		out[strings.ToLower(name)] = st.String()
+	}
+	return out
+}
+
+// decisionBriefTickOne invokes the decision-brief scan with the same recover()
+// backstop as mirrorOne.
+func (d *Detector) decisionBriefTickOne() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("flotilla watch: decision-brief tick panicked (recovered; tick unaffected): %v", r)
+		}
+	}()
+	d.cfg.DecisionBriefOnTick()
 }
 
 // mirrorOne invokes the per-desk visibility mirror with a recover() backstop. The mirror is

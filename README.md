@@ -13,12 +13,31 @@ say to each other. You delegate through one hub, every instruction and reply is
 confirmed and mirrored to a chat channel, and you drive the whole fleet from
 Discord — even from your phone.
 
-> **Using a coding agent?** Point it at **[llm.md](./llm.md)** — it'll install
-> flotilla and walk you through setup end-to-end (prerequisites → install →
-> roster → your first cross-pane message → the self-continuing clock → optional
-> Discord).
-
 ## See it work
+
+flotilla gives you two windows on the same fleet: a **chat channel** you drive it
+from, and an optional **local dashboard** you watch it on.
+
+### Watch it — the dashboard
+
+`flotilla dash` is a self-contained local web interface (warm-light, loopback by
+default) that reads what the running fleet already writes — no extra daemon, no
+pane probing. The **Conversations** view puts every desk's coordination in one
+place: a fleet map with each desk's live state, the merged operator ↔ XO ↔ desk
+thread, each desk's turn-by-turn session history, and a control column to route
+work, post a note, or resume a crashed desk.
+
+![The flotilla dashboard Conversations view — a fleet map of desks with live states down the left, the coordination thread with each desk's session-mirror history in the center, and a control column to route work or post a note on the right](docs/assets/dash-conversations.png)
+
+The **Goals** view maps every desk's work up to the fleet's aims, drawing
+collaborating desks into one lane:
+
+![The flotilla dashboard Goals view — a goal map where per-desk lanes roll up to fleet-level aims, with two collaborating desks grouped inside a dotted container](docs/assets/dash-goals-org.png)
+
+> *Real captures of the dashboard, driven by a small synthetic demo fleet
+> (invented desk names) so nothing real is shown.*
+
+### Drive it from chat
 
 You drive the fleet from a chat channel — talk strategy, the XO runs implementation:
 
@@ -34,8 +53,13 @@ with confirmed delivery, so you drive the fleet from your phone and read back
 exactly what happened. Once it's running, there's no terminal to babysit — the
 chat is where you live.
 
-(Prefer to wire it up or poke at it directly? The CLI that powers all this is
-right below, in [Under the hood: the CLI](#under-the-hood-the-cli).)
+### Start here
+
+- **New to flotilla?** → **[docs/quickstart.md](./docs/quickstart.md)** — install
+  to your first cross-pane message and the self-continuing clock, runnable cold.
+- **Using a coding agent to set it up?** → **[llm.md](./llm.md)** — point your
+  agent at it and it installs flotilla and walks setup end-to-end (prerequisites →
+  install → roster → first message → the clock → optional Discord).
 
 **What you get**
 

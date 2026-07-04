@@ -19,19 +19,19 @@ func memberByName(t *testing.T, name string) Member {
 	return Member{}
 }
 
-// The registry ships EXACTLY nine members: operating-principles (identity-append),
+// The registry ships EXACTLY ten members: operating-principles (identity-append),
 // the Rule of Three (identity-append), no-self-merge (identity-append),
 // act-dont-idle-hold (identity-append), executive-mini-brief (identity-append),
 // xo-outbound (identity-append, coordinator-only), operator-direct-tasking
-// (identity-append), visibility-synthesis (heartbeat-skill), and parade-formation
-// (heartbeat-skill).
+// (identity-append), decision-brief-on-blocked (identity-append),
+// visibility-synthesis (heartbeat-skill), and parade-formation (heartbeat-skill).
 // This locks the count so a future member addition is a deliberate, reviewed change
 // (and so the member-count-agnostic install loop is exercised against the real
 // registry, not a fixture).
 func TestMembersRegistryContents(t *testing.T) {
 	members := Members()
-	if len(members) != 9 {
-		t.Fatalf("registry should hold exactly nine members, got %d", len(members))
+	if len(members) != 10 {
+		t.Fatalf("registry should hold exactly ten members, got %d", len(members))
 	}
 	byName := map[string]Member{}
 	for _, m := range members {
@@ -134,6 +134,20 @@ func TestMembersRegistryContents(t *testing.T) {
 	}
 	if !strings.Contains(odt.Content, "first-class authorization") {
 		t.Error("operator-direct-tasking content must state first-class authorization")
+	}
+
+	dbob, ok := byName["decision-brief-on-blocked"]
+	if !ok {
+		t.Fatal("registry missing decision-brief-on-blocked member")
+	}
+	if dbob.Mechanism != MechanismIdentityAppend {
+		t.Errorf("decision-brief-on-blocked mechanism = %q, want %q", dbob.Mechanism, MechanismIdentityAppend)
+	}
+	if dbob.OpenMarker != decisionBriefOnBlockedOpenMarker || dbob.CloseMarker != decisionBriefOnBlockedCloseMarker {
+		t.Errorf("decision-brief-on-blocked markers mismatch")
+	}
+	if !strings.Contains(dbob.Content, "six-element") {
+		t.Error("decision-brief-on-blocked content must mention six-element template")
 	}
 
 	vs, ok := byName["visibility-synthesis"]
@@ -369,12 +383,12 @@ func TestMembersForAgentOmitsCoordinatorOnlyForExecutionDesk(t *testing.T) {
 			t.Errorf("execution desk set includes coordinator-only member %q", m.Name)
 		}
 	}
-	if len(exec) != 8 {
-		t.Fatalf("execution desk MembersForAgent len = %d, want 8", len(exec))
+	if len(exec) != 9 {
+		t.Fatalf("execution desk MembersForAgent len = %d, want 9", len(exec))
 	}
 	coord := MembersForAgent(true)
-	if len(coord) != 9 {
-		t.Fatalf("coordinator MembersForAgent len = %d, want 9", len(coord))
+	if len(coord) != 10 {
+		t.Fatalf("coordinator MembersForAgent len = %d, want 10", len(coord))
 	}
 }
 

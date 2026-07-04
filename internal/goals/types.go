@@ -22,6 +22,7 @@ type Goal struct {
 	Milestones        []string   `json:"milestones,omitempty"`
 	DependsOn         []string   `json:"depends_on,omitempty"`
 	WorkItems         []WorkItem `json:"work_items,omitempty"`
+	Brief             string     `json:"brief,omitempty"` // goal-level decision package (#347/#349)
 }
 
 // WorkItem is one unit of work attached to a goal node (canonical #277 field names).
@@ -33,4 +34,5 @@ type WorkItem struct {
 	Text  string `json:"text,omitempty"`  // kind=inline
 	Done  bool   `json:"done,omitempty"`  // kind=inline
 	Label string `json:"label,omitempty"`
+	Brief string `json:"brief,omitempty"` // work-item decision package (#347/#349)
 }

@@ -5,7 +5,7 @@
 // default seed from `workspace init`, so a freshly scaffolded agent is born with
 // the doctrine in place.
 //
-// The set ships nine members:
+// The set ships ten members:
 //   - operating-principles — an IDENTITY-APPEND constitution: the twelve standing
 //     Flotilla Operating Principles, distilled to one sentence each and appended into
 //     the agent's identity file so the constitution loads once at launch. The full
@@ -25,6 +25,8 @@
 //   - operator-direct-tasking — an IDENTITY-APPEND rule: operator-direct tasking is
 //     first-class authorization; execute and report to coordinator; coordinators record
 //     provenance and support (quality gates still apply to the work).
+//   - decision-brief-on-blocked — an IDENTITY-APPEND rule: attach the six-element
+//     decision brief when marking an item operator-blocked (#349).
 //   - visibility-synthesis — a HEARTBEAT-SKILL: a whole-file curation skill written
 //     into the agent's workspace, loaded when the daemon emits a synthesis wake.
 //   - parade-formation — a HEARTBEAT-SKILL: a whole-file accomplishments-parade skill
@@ -141,6 +143,12 @@ const (
 	operatorDirectTaskingCloseMarker = "<!-- /flotilla:operator-direct-tasking -->"
 )
 
+// The decision-brief-on-blocked sentinel fence (#349 item D).
+const (
+	decisionBriefOnBlockedOpenMarker  = "<!-- flotilla:decision-brief-on-blocked -->"
+	decisionBriefOnBlockedCloseMarker = "<!-- /flotilla:decision-brief-on-blocked -->"
+)
+
 // members is the registry. Adding a member is adding an entry here plus its embedded
 // asset; the install/seed loop iterates this slice and dispatches by Mechanism, so it
 // never needs to change as the set grows (a NEW mechanism additionally needs its
@@ -212,6 +220,15 @@ var members = []Member{
 		Content:     mustRead("assets/skills/operator-direct-tasking.md"),
 		OpenMarker:  operatorDirectTaskingOpenMarker,
 		CloseMarker: operatorDirectTaskingCloseMarker,
+	},
+	{
+		// decision-brief-on-blocked: attach the six-element decision brief when marking
+		// an item operator-blocked — the dash modal renders it; empty is a defect (#349).
+		Name:        "decision-brief-on-blocked",
+		Mechanism:   MechanismIdentityAppend,
+		Content:     mustRead("assets/skills/decision-brief-on-blocked.md"),
+		OpenMarker:  decisionBriefOnBlockedOpenMarker,
+		CloseMarker: decisionBriefOnBlockedCloseMarker,
 	},
 	{
 		// visibility-synthesis: a whole-file curation skill (Tiers 2/3 of the
