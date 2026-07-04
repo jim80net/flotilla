@@ -28,9 +28,11 @@
   // a fixed subset: a block image line ![alt](src) renders LARGE; #.. headings; -/* bullets;
   // blank-line paragraphs; inline **bold**, `code`, [text](http…). Images resolve via date.
   function renderMd(date, md) {
-    var lines = esc(String(md == null ? "" : md)).split(/\r?\n/);
-    function inline(s) {
-      return s
+    var lines = String(md == null ? "" : md).replace(/\r\n/g, "\n").split("\n");
+    // inline() takes ALREADY-ESCAPED text and layers inline markdown on top. Its link href
+    // ($2) is already-escaped and valid in an attribute, so nothing is re-escaped here.
+    function inline(escd) {
+      return escd
         .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
         .replace(/`([^`]+)`/g, "<code>$1</code>")
         .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
@@ -39,14 +41,18 @@
     function flush() { if (list) { out.push("<ul>" + list.join("") + "</ul>"); list = null; } }
     for (var i = 0; i < lines.length; i++) {
       var ln = lines[i];
+      // Parse an image ref from the RAW line so its src (a real basename / URL) is NOT
+      // HTML-escaped before imgURL builds the asset URL — escaping first would corrupt an
+      // '&' in the name and break the load. The FINAL url + alt are escaped for the attrs
+      // (cubic #373 P5).
       var img = /^!\[([^\]]*)\]\(([^)\s]+)\)\s*$/.exec(ln);
-      var h = /^(#{1,6})\s+(.*)$/.exec(ln);
-      var li = /^\s*[-*]\s+(.*)$/.exec(ln);
-      if (img) { flush(); out.push('<img class="pd-slide-img" loading="lazy" src="' + esc(imgURL(date, img[2])) + '" alt="' + esc(img[1]) + '" />'); }
-      else if (h) { flush(); out.push('<div class="pd-h pd-h' + Math.min(h[1].length, 4) + '">' + inline(h[2]) + "</div>"); }
+      if (img) { flush(); out.push('<img class="pd-slide-img" loading="lazy" src="' + esc(imgURL(date, img[2])) + '" alt="' + esc(img[1]) + '" />'); continue; }
+      var e = esc(ln); // escape the remaining text FIRST, then layer markdown
+      var h = /^(#{1,6})\s+(.*)$/.exec(e), li = /^\s*[-*]\s+(.*)$/.exec(e);
+      if (h) { flush(); out.push('<div class="pd-h pd-h' + Math.min(h[1].length, 4) + '">' + inline(h[2]) + "</div>"); }
       else if (li) { (list = list || []).push("<li>" + inline(li[1]) + "</li>"); }
-      else if (ln.trim() === "") { flush(); }
-      else { flush(); out.push("<p>" + inline(ln) + "</p>"); }
+      else if (e.trim() === "") { flush(); }
+      else { flush(); out.push("<p>" + inline(e) + "</p>"); }
     }
     flush();
     return out.join("");
@@ -154,6 +160,12 @@
   fetch("/api/parades", { cache: "no-store" })
     .then(function (r) { if (!r.ok) throw new Error("/api/parades → " + r.status); return r.json(); })
     .then(function (d) {
+      if (d && d.error) { // an archive read error is an ERROR state, not a false "no parades"
+        showList();
+        var b = el("pd-list");
+        if (b) b.innerHTML = '<div class="error">' + esc(d.error) + "</div>";
+        return;
+      }
       PARADES = (d && d.parades) || [];
       renderList();
       if (PARADES.length) openDeck(0); else showList(); // open the newest deck; else the (empty) list

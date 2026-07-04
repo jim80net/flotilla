@@ -32,7 +32,10 @@ func TestReadParades_NewestFirstWithReportAndAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := readParades(dir)
+	got, err := readParades(dir)
+	if err != nil {
+		t.Fatalf("readParades: %v", err)
+	}
 	if len(got) != 2 {
 		t.Fatalf("expected 2 parades (non-date dir ignored), got %d: %+v", len(got), got)
 	}
@@ -50,7 +53,7 @@ func TestReadParades_NewestFirstWithReportAndAssets(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(legacy, "report.md"), []byte("# legacy deck"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if again := readParades(dir); again[0].Date != "2026-07-05" || again[0].Slides != "# legacy deck" {
+	if again, _ := readParades(dir); again[0].Date != "2026-07-05" || again[0].Slides != "# legacy deck" {
 		t.Errorf("a legacy report.md (no slides.md) must fall back, got date=%q slides=%q", again[0].Date, again[0].Slides)
 	}
 	// assets: image files only, sorted; the .txt is excluded.
@@ -62,22 +65,32 @@ func TestReadParades_NewestFirstWithReportAndAssets(t *testing.T) {
 	}
 }
 
-func TestReadParades_MissingDirIsEmpty(t *testing.T) {
-	got := readParades(filepath.Join(t.TempDir(), "does-not-exist"))
-	if len(got) != 0 {
-		t.Errorf("a missing parade dir must yield an empty list, got %+v", got)
+func TestReadParades_MissingDirIsEmptyButOtherErrorSurfaces(t *testing.T) {
+	// absent archive ⇒ honest empty, no error.
+	got, err := readParades(filepath.Join(t.TempDir(), "does-not-exist"))
+	if err != nil || len(got) != 0 {
+		t.Errorf("a missing parade dir must yield an empty list + no error, got %d entries err=%v", len(got), err)
+	}
+	// a path that is a FILE (not a dir) is NOT "no parades" — the error must surface (#363).
+	f := filepath.Join(t.TempDir(), "afile")
+	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readParades(f); err == nil {
+		t.Error("readParades on a non-directory must return an error, not a silent empty")
 	}
 }
 
 func TestIsParadeImage(t *testing.T) {
-	for _, ok := range []string{"a.png", "A.PNG", "b.jpg", "c.jpeg", "d.gif", "e.webp", "f.svg"} {
+	for _, ok := range []string{"a.png", "A.PNG", "b.jpg", "c.jpeg", "d.gif", "e.webp"} {
 		if !isParadeImage(ok) {
 			t.Errorf("%q should be an image", ok)
 		}
 	}
-	for _, no := range []string{"report.md", "notes.txt", "x", "y.pdf", ".png"} {
-		if no != ".png" && isParadeImage(no) {
-			t.Errorf("%q should NOT be an image", no)
+	// .svg is deliberately NOT allowed (active same-origin document — cubic #373).
+	for _, no := range []string{"report.md", "notes.txt", "x", "y.pdf", "f.svg"} {
+		if isParadeImage(no) {
+			t.Errorf("%q should NOT be a served image", no)
 		}
 	}
 }
@@ -111,5 +124,23 @@ func TestHandleParadeAsset_RejectsTraversalAndNonImage(t *testing.T) {
 		if rec := doGet(t, srv, bad); rec.Code == 200 {
 			t.Errorf("%s must NOT serve (got 200)", bad)
 		}
+	}
+
+	// #373 P1: a SYMLINK dropped in assets/ that escapes to a host file must NOT serve.
+	secret := filepath.Join(srv.cfg.ParadesPath, "2026-07-04", "report.md") // outside assets/
+	link := filepath.Join(pd, "escape.png")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Skipf("symlink unsupported on this platform: %v", err)
+	}
+	if rec := doGet(t, srv, "/parade-assets/2026-07-04/escape.png"); rec.Code == 200 {
+		t.Errorf("a symlink escaping assets/ must NOT serve, got 200 body=%q", rec.Body.String())
+	}
+
+	// #373 P2/P5: an asset whose name contains '&' must still serve (no double-escape).
+	if err := os.WriteFile(filepath.Join(pd, "a&b.png"), []byte("AMP"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if rec := doGet(t, srv, "/parade-assets/2026-07-04/a%26b.png"); rec.Code != 200 || rec.Body.String() != "AMP" {
+		t.Errorf("an ampersand-named asset must serve, got code=%d body=%q", rec.Code, rec.Body.String())
 	}
 }

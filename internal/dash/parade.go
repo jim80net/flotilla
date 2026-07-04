@@ -33,14 +33,18 @@ type ParadeEntry struct {
 // path-traversal guard for the asset route (a date can only be 10 safe chars).
 var paradeDateRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
-// readParades lists the parade archive newest-first. A missing directory is an honest
-// empty list (never an error) — the page then shows its empty state. ISO dates sort
-// lexically, so a reverse string sort IS newest-first.
-func readParades(dir string) []ParadeEntry {
+// readParades lists the parade archive newest-first. A MISSING directory is an honest empty
+// list (the page shows its empty state); any OTHER read error (bad perms, not-a-dir) is
+// RETURNED so the handler surfaces an error state rather than a silent "no parades" (same
+// honest-error discipline as #363). ISO dates sort lexically, so a reverse sort IS newest-first.
+func readParades(dir string) ([]ParadeEntry, error) {
 	out := []ParadeEntry{}
 	ents, err := os.ReadDir(dir)
 	if err != nil {
-		return out
+		if os.IsNotExist(err) {
+			return out, nil // absent archive ⇒ honest empty, not an error
+		}
+		return out, err
 	}
 	var dates []string
 	for _, e := range ents {
@@ -68,22 +72,29 @@ func readParades(dir string) []ParadeEntry {
 		}
 		out = append(out, ParadeEntry{Date: d, Slides: slides, Assets: assets})
 	}
-	return out
+	return out, nil
 }
 
-// isParadeImage gates which asset files the gallery serves — images only, so the route
-// can never be pointed at report.md or an arbitrary file.
+// isParadeImage gates which asset files the gallery serves — RASTER images only, so the
+// route can never be pointed at report.md, an arbitrary file, or an SVG (an active
+// same-origin document that can carry script; dropped to keep the gallery inert — cubic #373).
 func isParadeImage(name string) bool {
 	switch strings.ToLower(filepath.Ext(name)) {
-	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg":
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
 		return true
 	}
 	return false
 }
 
-// handleParades serves the parade archive as JSON (newest-first) for parade.js.
+// handleParades serves the parade archive as JSON (newest-first) for parade.js. A non-absent
+// read error surfaces as an "error" field so the page shows an error state, not a false empty.
 func (s *Server) handleParades(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]any{"parades": readParades(s.cfg.ParadesPath)})
+	parades, err := readParades(s.cfg.ParadesPath)
+	resp := map[string]any{"parades": parades}
+	if err != nil {
+		resp["error"] = "the parade archive could not be read"
+	}
+	writeJSON(w, resp)
 }
 
 // handleParadePage serves the parade page's static chrome (data arrives via /api/parades).
@@ -97,10 +108,12 @@ func (s *Server) handleParadePage(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(b)
 }
 
-// handleParadeAsset serves one image from a parade's assets/ dir. It is defence-in-depth
-// against path traversal: the date must be an ISO day, the file must be a bare image
-// basename (no separators, no ".."), and the resolved path must stay inside the parade's
-// assets/ dir. Anything else is a 404.
+// handleParadeAsset serves one image from a parade's assets/ dir. Defence-in-depth against
+// path traversal AND symlink escape: the date must be an ISO day; the file must be a bare
+// image basename (no separators, no ".."); and — because a symlink dropped in assets/ could
+// otherwise point at an arbitrary host file — BOTH the assets dir and the target are resolved
+// with EvalSymlinks and the RESOLVED target must stay inside the RESOLVED assets dir (cubic
+// #373 P1). Anything else (including a symlink that escapes, or a missing file) is a 404.
 func (s *Server) handleParadeAsset(w http.ResponseWriter, r *http.Request) {
 	date := r.PathValue("date")
 	file := r.PathValue("file")
@@ -109,11 +122,16 @@ func (s *Server) handleParadeAsset(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	base := filepath.Clean(filepath.Join(s.cfg.ParadesPath, date, "assets"))
-	full := filepath.Clean(filepath.Join(base, file))
-	if full != filepath.Join(base, file) || !strings.HasPrefix(full, base+string(os.PathSeparator)) {
+	base := filepath.Join(s.cfg.ParadesPath, date, "assets") // Join cleans; file is a bare basename
+	realBase, err := filepath.EvalSymlinks(base)
+	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	http.ServeFile(w, r, full)
+	realFull, err := filepath.EvalSymlinks(filepath.Join(base, file))
+	if err != nil || !strings.HasPrefix(realFull, realBase+string(os.PathSeparator)) {
+		http.NotFound(w, r) // missing, or a symlink escaping the resolved assets dir
+		return
+	}
+	http.ServeFile(w, r, realFull)
 }

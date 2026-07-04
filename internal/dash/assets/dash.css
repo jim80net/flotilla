@@ -1638,3 +1638,9 @@ html, body { overflow-x: clip; }
 /* an explicit display: on .pd-deck / .pd-list-view outranks the UA [hidden] rule, so hide
    them explicitly when toggled off — else the fixed-position deck stays over the list. */
 .pd-deck[hidden], .pd-list-view[hidden] { display: none; }
+/* parade LIST-view container + back link (plain nav — not a tablist, cubic #373) */
+.parade-wrap { max-width: 820px; margin: 0 auto; padding: 1rem 1rem 3rem; }
+.parade-intro { font-size: .82rem; margin: .3rem 0 1.1rem; line-height: 1.5; }
+.parade-topnav { display: flex; }
+.pd-topback { display: inline-flex; align-items: center; min-height: 44px; padding: 0 .8rem; border-radius: var(--r-sm); color: var(--ink-2); font-size: .82rem; text-decoration: none; }
+.pd-topback:hover { color: var(--ink); }
