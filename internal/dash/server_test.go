@@ -175,17 +175,18 @@ func TestHandleIndex(t *testing.T) {
 func TestGoalsLayoutEnvDefault(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 
-	// normalize: default org; "tree" (any case) honored; anything else → org.
-	for in, want := range map[string]string{"": "org", "org": "org", "tree": "tree", "TREE": "tree", "bogus": "org"} {
+	// normalize: default MIND MAP (org retired from the UI); "tree" (any case) honored;
+	// anything else — incl. a legacy "org" seed — maps to mindmap.
+	for in, want := range map[string]string{"": "mindmap", "org": "mindmap", "mindmap": "mindmap", "tree": "tree", "TREE": "tree", "bogus": "mindmap"} {
 		if got := normalizeGoalsLayout(in); got != want {
 			t.Errorf("normalizeGoalsLayout(%q) = %q, want %q", in, got, want)
 		}
 	}
 
-	// default (no env) → the index seeds org.
+	// default (no env) → the index seeds mindmap.
 	srv, _ := newTestServer(t, singleFleetRoster, now)
-	if body := doGet(t, srv, "/").Body.String(); !strings.Contains(body, `data-goals-layout="org"`) {
-		t.Error("index must seed the goals layout (default org) into the body attribute")
+	if body := doGet(t, srv, "/").Body.String(); !strings.Contains(body, `data-goals-layout="mindmap"`) {
+		t.Error("index must seed the goals layout (default mindmap) into the body attribute")
 	}
 
 	// tree seeded via Config → the index seeds tree.
@@ -450,11 +451,11 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	// #324 Inc 1: org is the DEFAULT layout (operator UX blessing), and the org geometry
 	// is content-aware — leaf-weight angular packing + per-ring radii from card extents
 	// (no fixed RING_STEP), with narrower org cards.
-	// The default is org (operator UX blessing #324), now env-seedable via the body
-	// attribute (#317) — the IIFE reads data-goals-layout and falls back to "org". The
-	// mind-map (org v3) is a third selectable mode; tree/mindmap honored, else org.
-	if !strings.Contains(js, `(v === "tree" || v === "mindmap") ? v : "org"`) {
-		t.Error("goals.js must seed goalsLayout from data-goals-layout, defaulting org (#324/#317)")
+	// The default is MIND MAP (operator retired org from the UI); env-seedable via the body
+	// attribute (#317) — the IIFE reads data-goals-layout and falls back to "mindmap"; "tree"
+	// is the only other selectable mode (org is dormant, no button, no default).
+	if !strings.Contains(js, `v === "tree" ? "tree" : "mindmap"`) {
+		t.Error("goals.js must seed goalsLayout from data-goals-layout, defaulting mindmap (org retired)")
 	}
 	// #324 Inc 2: a roster-materialized desk (source==="roster") is a live entity, never
 	// ghosted as aspirational even when it has no work/children.
@@ -643,9 +644,12 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("index must contain the goals canvas element #%s", id)
 		}
 	}
-	// Inc B: the tree⇄org layout toggle chrome.
-	if !strings.Contains(body, "glayout-btn") || !strings.Contains(body, `data-layout="org"`) {
-		t.Error("index must carry the tree⇄org goals layout toggle (glayout-btn / data-layout)")
+	// the tree | mind map layout toggle chrome (org retired from the UI, so no org button).
+	if !strings.Contains(body, "glayout-btn") || !strings.Contains(body, `data-layout="tree"`) || !strings.Contains(body, `data-layout="mindmap"`) {
+		t.Error("index must carry the tree | mind map goals layout toggle (glayout-btn / data-layout)")
+	}
+	if strings.Contains(body, `data-layout="org"`) {
+		t.Error("the org layout button must be retired from the UI (operator verdict) — no org button")
 	}
 }
 

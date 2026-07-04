@@ -52,7 +52,10 @@
   // live toggle still overrides it at runtime.
   var goalsLayout = (function () {
     var v = (document.body && document.body.getAttribute("data-goals-layout")) || "";
-    return (v === "tree" || v === "mindmap") ? v : "org";
+    // The operator retired org from the UI: the default is MIND MAP, "tree" is honored, and
+    // anything else (incl. a legacy "org" seed) falls back to mindmap. layoutOrg stays below,
+    // dormant — no org button, no org default.
+    return v === "tree" ? "tree" : "mindmap";
   })();
   // Radial modes (org pinwheel + the mind map) share card sizing, radial fit, no tier
   // labels, and center-anchored geometry — only their placement + edge shape differ. The
@@ -1564,7 +1567,8 @@
   // per-node data, so it doesn't change structuralSig — null it to defeat the in-place fast
   // path, reset the fit so the new geometry re-frames, and re-render.
   function setLayout(mode) {
-    var next = (mode === "org" || mode === "mindmap") ? mode : "tree";
+    // UI offers tree | mind map (org retired); default is mindmap, tree when explicitly picked.
+    var next = mode === "tree" ? "tree" : "mindmap";
     if (next === goalsLayout) return;
     goalsLayout = next;
     var btns = document.querySelectorAll(".glayout-btn");
