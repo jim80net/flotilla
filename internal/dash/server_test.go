@@ -431,6 +431,14 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("dash.js must retain the #349 browser-history controller (missing %q)", marker)
 		}
 	}
+	// #349 B — click-through completeness: gated items click through to their target
+	// (gm-item-link), an aggregate node routes to its DOWNSTREAM decisions (downstreamGated),
+	// and the status pill opens the blockers list.
+	for _, marker := range []string{"downstreamGated", "gm-item-link", "Downstream decisions", "data-goto-desk", "data-open-node"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must retain the #349 click-through completeness (missing %q)", marker)
+		}
+	}
 	// mobile-QA #330: the node controls counter-scale the fit-to-view zoom (--ctl-scale)
 	// so they stay screen-constant (tappable) on phone, and the css reveals ⓘ on touch.
 	if !strings.Contains(js, "--ctl-scale") {

@@ -150,11 +150,14 @@
     return '<span class="gmotif gmotif-dot"></span>';
   }
 
-  function workItem(wi) {
+  function workItem(wi, node) {
     var kind = escapeHtml(wi.kind || "");
     var label = escapeHtml(wi.label || wi.kind || "");
     var detail = wi.detail ? '<span class="gwi-detail">' + escapeHtml(wi.detail) + "</span>" : "";
-    return '<span class="gwi gwi-' + escapeHtml(wi.class || "unknown") + '" title="' + kind + " · " + escapeHtml(wi.detail || "") + '">' +
+    // #349 B5: the hover title carries a breadcrumb + status so a bare item ("TG3 prep
+    // idle") is legible in context ("what does that even mean?").
+    var tip = (node ? nodePath(node) + " · " : "") + (wi.label || wi.kind || "") + (wi.detail ? " · " + wi.detail : "");
+    return '<span class="gwi gwi-' + escapeHtml(wi.class || "unknown") + '" title="' + escapeHtml(tip) + '">' +
       motif(wi.class) +
       '<span class="gwi-kind">' + kind + "</span>" +
       '<span class="gwi-label">' + label + "</span>" +
@@ -182,7 +185,7 @@
     var vis = visToken(n);
     var owner = n.owner ? '<span class="gnode-owner">led by ' + escapeHtml(n.owner) + "</span>" : "";
     var desc = n.description ? '<p class="gnode-desc">' + escapeHtml(n.description) + "</p>" : "";
-    var items = (n.work_items || []).map(workItem).join("");
+    var items = (n.work_items || []).map(function (wi) { return workItem(wi, n); }).join("");
     var itemsBlock = items ? '<div class="gnode-items">' + items + "</div>" : "";
     var pill = '<span class="gpill gpill-' + escapeHtml(vis) + '">' + escapeHtml(STATE_LABEL[vis] || vis) + "</span>";
     // Per-node controls. #349 A2 SWAP: the node BODY now opens the detail drawer (the
@@ -955,6 +958,15 @@
       if (respond) { var rc = respond.closest(".gnode"); if (rc) openModal(rc.getAttribute("data-id")); return; }
       var godesk = e.target.closest(".gnode-godesk");
       if (godesk) { var gc = godesk.closest(".gnode"); if (gc) goToDesk(gc.getAttribute("data-id")); return; }
+      // #349 B3: clicking the STATUS PILL of a gated node opens the list of blockers (the
+      // respond modal) — "go through and clean those up." A non-gated pill falls through to
+      // the node body's detail-drawer action.
+      var pill = e.target.closest(".gpill");
+      if (pill) {
+        var pn = pill.closest(".gnode"), pnode = pn ? nodeById[pn.getAttribute("data-id")] : null;
+        var pv = pnode ? visToken(pnode) : "";
+        if (pv === "awaiting" || pv === "blocked") { openModal(pn.getAttribute("data-id")); return; }
+      }
       var card = e.target.closest(".gnode");
       if (card) nodeActivate(card.getAttribute("data-id")); // #349 A2: node body → detail drawer
     });

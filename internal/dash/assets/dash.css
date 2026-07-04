@@ -1331,7 +1331,20 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gm-gated-lab { font-size: .62rem; letter-spacing: .12em; text-transform: uppercase; color: var(--amber); margin-bottom: 5px; }
 .gm-gated p { color: var(--ink); margin: 4px 0; }
 .gm-gated-row + .gm-gated-row { margin-top: 10px; border-top: 1px dashed color-mix(in srgb, var(--amber) 30%, transparent); padding-top: 8px; }
-.gm-gated-item { font-weight: 600; }
+.gm-gated-item { font-weight: 600; color: var(--ink); }
+/* #349 B4/B6: a routable gated item is a left-aligned link-button that clicks through to
+   its target (a desk thread / the descendant that owns a downstream decision). */
+.gm-item-link {
+  display: block; width: 100%; text-align: left; padding: 2px 0;
+  background: none; border: 0; font: inherit; font-weight: 600; color: var(--cyan);
+  cursor: pointer;
+}
+.gm-item-link:hover { color: var(--cyan-strong, var(--cyan-dim)); text-decoration: underline; }
+.gm-item-link:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; border-radius: 3px; }
+.gm-down-note { font-size: .74rem; margin: 0 0 6px; }
+/* #349 B3: the status pill of a gated node is a clickable affordance (opens the blockers). */
+.gnode.state-awaiting .gpill, .gnode.state-blocked .gpill { cursor: pointer; }
+.gnode.state-awaiting .gpill:hover, .gnode.state-blocked .gpill:hover { filter: brightness(1.08); text-decoration: underline; }
 /* the decision package (#347): a bounded, scrollable rendered-markdown block so a long
    brief never blows out the modal, with headings/lists/emphasis for a real read. */
 .gm-brief-full {
