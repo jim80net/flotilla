@@ -1,0 +1,12 @@
+{
+  "parades": [
+    {
+      "date": "2026-07-04",
+      "slidesPath": "2026-07-04/slides.md",
+      "assets": [
+        "goals-map-before-pinwheel.png",
+        "goals-map-realdepth.png"
+      ]
+    }
+  ]
+}
