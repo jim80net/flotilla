@@ -181,26 +181,33 @@ func TestMembersRegistryContents(t *testing.T) {
 	if strings.TrimSpace(pf.Content) == "" {
 		t.Error("parade-formation content is empty — the embed did not round-trip")
 	}
-	if !strings.Contains(pf.Content, "## Learnings") {
-		t.Error("parade-formation content must document the Learnings block")
+	if !strings.Contains(pf.Content, "proud of") || !strings.Contains(pf.Content, "looking forward to") {
+		t.Error("parade-formation content must document the operator dimension canon")
+	}
+	if !strings.Contains(pf.Content, "LEARNED:") {
+		t.Error("parade-formation content must use LEARNED heading (not legacy Learnings)")
 	}
 	if !strings.Contains(pf.Content, "DEMO") || !strings.Contains(pf.Content, "INCOMPLETE") {
 		t.Error("parade-formation content must document the demo element and incompleteness rule")
 	}
 	if !strings.Contains(pf.Content, "walk-inspection") {
-		t.Error("parade-formation content must reference the pre-parade walk-inspection rhythm")
+		t.Error("parade-formation content must define walk-inspection in vocabulary")
+	}
+	if strings.Count(pf.Content, "24 hours before") > 1 {
+		t.Error("walk-inspection must be one-fact-one-home — define once in vocabulary, not duplicated")
 	}
 	if !strings.Contains(pf.Content, "slides.md") || !strings.Contains(pf.Content, "/parade") {
 		t.Error("parade-formation content must document slides.md deck layout and /parade archive")
 	}
-	if !strings.Contains(pf.Content, "hyperlinked") || !strings.Contains(pf.Content, "decision-brief") {
-		t.Error("parade-formation content must document hyperlink discipline and decision-brief NEEDS HELP")
+	if !strings.Contains(pf.Content, "unconditional") || !strings.Contains(pf.Content, "decision-brief") {
+		t.Error("parade-formation content must document unconditional hyperlink rule and decision-brief Need")
 	}
 	shape := pf.Content[strings.Index(pf.Content, "Individual answer shape"):]
-	acc := strings.Index(shape, "ACCOMPLISHMENTS:")
-	demo := strings.Index(shape, "DEMO:                     ")
-	if acc < 0 || demo < 0 || demo <= acc {
-		t.Error("parade-formation Tier-1 template must place DEMO after ACCOMPLISHMENTS (demo last)")
+	proud := strings.Index(shape, "PROUD OF:")
+	need := strings.Index(shape, "NEED:")
+	demo := strings.Index(shape, "DEMO:")
+	if proud < 0 || need < 0 || demo < 0 || !(proud < need && need < demo) {
+		t.Error("parade-formation Tier-1 template must order PROUD OF → NEED → DEMO (demo last)")
 	}
 	if pf.OpenMarker != "" || pf.CloseMarker != "" {
 		t.Errorf("heartbeat-skill member should carry no marker fence, got open=%q close=%q", pf.OpenMarker, pf.CloseMarker)

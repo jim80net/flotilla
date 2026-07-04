@@ -114,38 +114,40 @@ func parseParadeInterleavedArgs(args []string) (target string, flagArgs []string
 	return target, flagArgs, nil
 }
 
-// buildParadeRequest is the individual four-plus-demo parade prompt injected into a seat's pane.
+// buildParadeRequest is the individual four-dimensions-plus-demo parade prompt.
 func buildParadeRequest() string {
-	return `flotilla parade request — answer the four-plus-demo parade domains AS YOUR TURN-FINAL.
+	return `flotilla parade request — answer the operator dimension canon AS YOUR TURN-FINAL.
 
-Canonical order: ACCOMPLISHED → NEXT → LEARNED → NEED → DEMO (demo LAST).
-Pre-parade walk (~24h): demos come from walk-inspection assets. Run your parade-formation skill.
+Operator canon (use these headings exactly): proud of / learned / looking forward to /
+need (unblock or direction) — plus demo when demo-able.
 
-COMPLETENESS: demo-able lane without DEMO = INCOMPLETE; substantive claim without source link =
-INCOMPLETE; NEEDS HELP without an existing goals decision brief = INCOMPLETE (name goal needing
-attach-brief).
+Canonical order: PROUD OF → LEARNED → LOOKING FORWARD TO → NEED → DEMO (demo LAST).
+Pre-parade walk (~24h): demo assets from walk-inspection (see parade-formation skill).
 
-(1) ACCOMPLISHMENTS (required): concrete wins — every bullet hyperlinked to source (PR, issue, …).
-(2) WORKING ON NEXT (optional): omit if nothing notable.
-(3) LEARNINGS (required): fenced "## Learnings"; link evidence when applicable.
-(4) NEEDS HELP (optional): embed/link the existing goals brief (six-element decision-brief-on-blocked).
-    No brief yet → INCOMPLETE + which goal needs attach-brief.
-(5) DEMO (last; required when demo-able): assets/ path, capture, or live link from the walk.
+COMPLETENESS: demo-able without DEMO = INCOMPLETE; any substantive claim without source link =
+INCOMPLETE (Proud of, Learned, and Need — unconditional); Need without existing goals brief =
+INCOMPLETE (name goal needing attach-brief).
+
+PROUD OF (required): every bullet hyperlinked (PR, issue, …).
+LEARNED (required): every bullet hyperlinked — same rule, no carve-out.
+LOOKING FORWARD TO (optional): omit if nothing notable.
+NEED (optional): unblock or direction; embed/link goals brief (decision-brief-on-blocked).
+DEMO (last; required when demo-able): assets/, capture, or live link from walk.
 
 Use this shape:
 
 [parade answer]
 
-ACCOMPLISHMENTS:
+PROUD OF:
   • [win](https://github.com/…/pull/N)
 
-WORKING ON NEXT:          ← omit if nothing notable
+LEARNED:
+  • [lesson](https://github.com/…/issues/N)
+
+LOOKING FORWARD TO:       ← omit if nothing notable
   • …
 
-## Learnings
-  • …
-
-NEEDS HELP:               ← omit if none; else link goals brief
+NEED:                     ← omit if none
   • [goal G-… brief](…) — or INCOMPLETE: goal G-… needs attach-brief
 
 DEMO:                     ← always last
@@ -188,16 +190,16 @@ func paradeRollupWakeBody(agent, binPath, rosterPath string, readSet, postChanne
 
 	if fleet {
 		b.WriteString("CONTRACT (Tier 3 / fleet deck): write `<parades-dir>/<YYYY-MM-DD>/slides.md` + assets/ — " +
-			"one slide-group per project-XO with FULL four-plus-demo (ACCOMPLISHED, NEXT, LEARNED, NEED, DEMO last). " +
-			"NOT thematic one-liners. Optional fleet epilogue slide last only. Dash serves at /parade. " +
-			"Every claim hyperlinked; NEEDS HELP links existing goals briefs (INCOMPLETE if missing). " +
-			"Post a short #c2 pointer to /parade; channel IDs in footer only.\n")
+			"one slide per project-XO with FULL operator canon (PROUD OF, LEARNED, LOOKING FORWARD TO, NEED, DEMO last). " +
+			"NOT thematic one-liners. Operator toggles slides at /parade. Optional epilogue last only. " +
+			"Every substantive claim hyperlinked (Proud of, Learned, Need — unconditional). " +
+			"Need links existing goals briefs (INCOMPLETE if missing). Post #c2 pointer to /parade.\n")
 	} else {
-		b.WriteString("CONTRACT (Tier 2 / domain): per-desk full four-plus-demo blocks (DEMO last), hyperlinked claims, " +
-			"NEEDS HELP with goals brief links, flag INCOMPLETE for missing demos/links/briefs — plus consolidated ## Learnings.\n")
+		b.WriteString("CONTRACT (Tier 2 / domain): per-desk operator canon (demo last), all claims hyperlinked, " +
+			"Need with goals brief links, flag INCOMPLETE for missing demo/links/briefs — plus consolidated Learned.\n")
 	}
-	b.WriteString("DISCIPLINE: celebratory and honest — no manufactured wins. Per-XO decks not synthesis one-liners. " +
-		"Demos last, REQUIRED for demo-able products (from pre-parade walk). Learnings REQUIRED. " +
+	b.WriteString("DISCIPLINE: operator dimension canon headings exactly. Per-XO decks not one-liners. " +
+		"Demo last for demo-able lanes. Learned bullets hyperlinked unconditionally. " +
 		"SKIP an unreadable subordinate (treat as UNKNOWN, never as 'went silent'). " +
 		"After the fleet parade posts, coordinators persist fleet-wide learnings per the skill's propagation section " +
 		"(append to roster-adjacent fleet-learnings.md, then run reflect/compound-learnings on each fleet-wide item).\n")

@@ -49,20 +49,23 @@ func TestParseParadeArgs_FleetNoExtras(t *testing.T) {
 	}
 }
 
-func TestBuildParadeRequest_FourPlusDemoDomains(t *testing.T) {
+func TestBuildParadeRequest_OperatorDimensionCanon(t *testing.T) {
 	req := buildParadeRequest()
 	for _, want := range []string{
-		"ACCOMPLISHMENTS",
-		"DEMO",
-		"WORKING ON NEXT",
-		"## Learnings",
-		"NEEDS HELP",
+		"proud of",
+		"learned",
+		"looking forward to",
+		"unblock or direction",
+		"PROUD OF:",
+		"LEARNED:",
+		"LOOKING FORWARD TO:",
+		"NEED:",
+		"DEMO:",
 		"demo LAST",
 		"walk-inspection",
 		"INCOMPLETE",
 		"decision-brief-on-blocked",
-		"attach-brief",
-		"hyperlinked",
+		"unconditional",
 		"notify",
 		"Do NOT run",
 	} {
@@ -70,11 +73,15 @@ func TestBuildParadeRequest_FourPlusDemoDomains(t *testing.T) {
 			t.Errorf("parade request missing %q", want)
 		}
 	}
-	// DEMO section must follow NEEDS HELP in the canonical template.
-	needIdx := strings.Index(req, "NEEDS HELP:")
+	for _, banned := range []string{"ACCOMPLISHMENTS", "ACCOMPLISHED", "## Learnings", "NEEDS HELP", "WORKING ON NEXT"} {
+		if strings.Contains(req, banned) {
+			t.Errorf("parade request must not use legacy heading %q", banned)
+		}
+	}
+	needIdx := strings.Index(req, "NEED:")
 	demoIdx := strings.Index(req, "DEMO:")
 	if needIdx < 0 || demoIdx < 0 || demoIdx <= needIdx {
-		t.Errorf("canonical order wants DEMO after NEEDS HELP; needIdx=%d demoIdx=%d", needIdx, demoIdx)
+		t.Errorf("canonical order wants DEMO after NEED; needIdx=%d demoIdx=%d", needIdx, demoIdx)
 	}
 }
 
@@ -85,9 +92,10 @@ func TestParadeRollupWakeBody_Tier2Contract(t *testing.T) {
 		"alpha-be",
 		"C_ALPHA",
 		"result --roster",
-		"DEMO last",
-		"goals brief",
-		"INCOMPLETE",
+		"operator canon",
+		"demo last",
+		"Learned",
+		"unconditional",
 		"UNKNOWN",
 		"fleet-learnings.md",
 	} {
@@ -103,7 +111,9 @@ func TestParadeRollupWakeBody_Tier3Fleet(t *testing.T) {
 		"slides.md",
 		"parades-dir",
 		"/parade",
-		"one slide-group per project-XO",
+		"PROUD OF",
+		"LEARNED",
+		"one slide per project-XO",
 		"epilogue",
 		"alpha-xo",
 		"beta-xo",
