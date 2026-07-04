@@ -639,21 +639,21 @@ func cmdWatch(args []string) error {
 					}
 					return deskStateLabels()
 				}),
-			MirrorDispatch:            func(run func()) { go run() }, // mirror I/O off the tick goroutine
-			Awaiting:                  awaiting.Present,
-			SettleConsume:             settled.Consume,
-			DeskSettleConsume:         deskSettled.Consume,
-			Alert:                     alert,
-			MaxMissedAcks:             *maxMissed,
-			MaxQuietIntervals:         *maxQuiet,
-			LivenessPingMode:          cfg.LivenessPingMode,
-			MaxSelfContinuation:       *maxSelfCont,
-			BacklogGate:               backlogGate,
-			BacklogStuckCap:           *backlogStuckCap,
-			WakeAgent:                 synthWakeAgent,
-			SynthParents:              synthParents,
-			SynthRead:                 synthRead,
-			SynthEveryTicks:           synthEveryTicks,
+			MirrorDispatch:      func(run func()) { go run() }, // mirror I/O off the tick goroutine
+			Awaiting:            awaiting.Present,
+			SettleConsume:       settled.Consume,
+			DeskSettleConsume:   deskSettled.Consume,
+			Alert:               alert,
+			MaxMissedAcks:       *maxMissed,
+			MaxQuietIntervals:   *maxQuiet,
+			LivenessPingMode:    cfg.LivenessPingMode,
+			MaxSelfContinuation: *maxSelfCont,
+			BacklogGate:         backlogGate,
+			BacklogStuckCap:     *backlogStuckCap,
+			WakeAgent:           synthWakeAgent,
+			SynthParents:        synthParents,
+			SynthRead:           synthRead,
+			SynthEveryTicks:     synthEveryTicks,
 			// Recursive desk-heartbeat (#183): default-ON, roster opt-OUT. Cadence = the heartbeat
 			// interval (the tick IS the interval ⇒ 1 tick); cap = 3 (NewDetector defaults 0 to 3).
 			HeartbeatEnabled:        deskHeartbeatEnabled,

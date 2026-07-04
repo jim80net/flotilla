@@ -42,7 +42,7 @@ func TestDetectorDecisionBriefNilInert(t *testing.T) {
 	cfg := DetectorConfig{
 		XOAgent: "xo", Desks: []string{"xo"}, Interval: time.Minute,
 		AckAge: func() time.Duration { return 0 },
-		Wake: func(WakeKind, []string) {}, Persist: func(Snapshot) error { return nil },
+		Wake:   func(WakeKind, []string) {}, Persist: func(Snapshot) error { return nil },
 	}
 	cfg.Assess = func(string) surface.State { return surface.StateIdle }
 	d := NewDetector(cfg, filepath.Join(t.TempDir(), "snap.json"))

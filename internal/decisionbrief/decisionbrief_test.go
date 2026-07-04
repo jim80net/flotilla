@@ -19,8 +19,8 @@ func goalsFile(blockedBacklog string) dash.GoalsFile {
 
 func TestFindGaps_BacklogBlockedNoBrief(t *testing.T) {
 	gaps := FindGaps(Inputs{
-		File: goalsFile("[blocked] deploy to prod"),
-		FileOK: true,
+		File:    goalsFile("[blocked] deploy to prod"),
+		FileOK:  true,
 		Backlog: "## Backlog\n- [blocked] deploy to prod\n",
 	})
 	if len(gaps) != 1 {
@@ -48,8 +48,8 @@ func TestFindGaps_SkipsWhenBriefPresent(t *testing.T) {
 
 func TestFindGaps_SkipsInFlight(t *testing.T) {
 	gaps := FindGaps(Inputs{
-		File: goalsFile("[in-flight] implement feature"),
-		FileOK: true,
+		File:    goalsFile("[in-flight] implement feature"),
+		FileOK:  true,
 		Backlog: "## Backlog\n- [in-flight] implement feature\n",
 	})
 	if len(gaps) != 0 {
