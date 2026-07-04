@@ -495,6 +495,45 @@
   // same absolute _x/_y the tree/org layouts use, so nodeCard/pan-zoom/keyed-update are
   // unchanged; edges draw as organic curves (drawEdges mindmap branch). _dir carries a node's
   // outward heading so its own children continue the limb outward.
+  // ── per-limb hue (mind-map only) ──────────────────────────────────────────────
+  // Each top-level limb (a hub child / root and its whole subtree) gets a distinct hue so
+  // the branches are visually traceable out from the hub — the canonical mind-map look. The
+  // hue rides on the EDGES (the limbs themselves); node cards keep their STATUS colour, so
+  // limb-identity and status are two independent, non-clashing signals. Empty for tree/org.
+  var limbHueById = {};
+  // limbRing1 mirrors layoutMindmap's ring-1 selection so a limb's hue matches its geometry.
+  function limbRing1(goals, roots) {
+    var center = null;
+    for (var i = 0; i < goals.length; i++) {
+      if (goals[i].layout && goals[i].layout.hub_center) { center = goals[i]; break; }
+    }
+    if (!center) return roots.slice();
+    var ring1 = childrenOf(center);
+    roots.forEach(function (r) { if (r !== center) ring1.push(r); });
+    return ring1;
+  }
+  function computeLimbHues(goals, roots) {
+    limbHueById = {};
+    if (goalsLayout !== "mindmap") return;
+    var limbs = clusterAdjacent(limbRing1(goals, roots));
+    var n = limbs.length || 1;
+    limbs.forEach(function (root, i) {
+      // evenly spaced around the wheel (+ a small offset off pure red); the golden-ish
+      // spacing keeps adjacent limbs distinct even at high limb counts.
+      var hue = Math.round((i * 360) / n + 18) % 360;
+      (function paint(node, seen) {
+        if (!node || seen[node.id]) return; // cycle-safe (server validates acyclic; be defensive)
+        seen[node.id] = true;
+        limbHueById[node.id] = hue;
+        childrenOf(node).forEach(function (c) { paint(c, seen); });
+      })(root, {});
+    });
+  }
+  // limbStroke is the CSS colour for a node's limb, or "" when it has none (hub / non-mindmap).
+  function limbStroke(id) {
+    return (id in limbHueById) ? "hsl(" + limbHueById[id] + " 55% 62%)" : "";
+  }
+
   function layoutMindmap(goals, roots) {
     var center = null;
     for (var i = 0; i < goals.length; i++) {
@@ -660,6 +699,10 @@
         var mc1x = mpc.x + vx * 0.35 + nx * bow, mc1y = mpc.y + vy * 0.35 + ny * bow;
         var mc2x = mpc.x + vx * 0.65 + nx * bow, mc2y = mpc.y + vy * 0.65 + ny * bow;
         d = "M " + mpc.x + " " + mpc.y + " C " + mc1x + " " + mc1y + ", " + mc2x + " " + mc2y + ", " + mcc.x + " " + mcc.y;
+        // per-limb hue: colour the branch by its limb so each subtree traces out from the hub
+        // in one colour (status stays on the node cards). Only the mind map does this.
+        var mh = limbStroke(id);
+        if (mh) { paths.push('<path class="gedge gedge-limb" data-child="' + escapeHtml(id) + '" style="stroke:' + mh + '" d="' + d + '"/>'); return; }
       } else if (goalsLayout === "org") {
         // radial spoke: a straight line from hub/parent center to child center.
         var pc = nodeCenter(parent), cc = nodeCenter(child);
@@ -1367,6 +1410,7 @@
     var keepFocus = focusedNodeId();
     buildNodeIndex(goals);
     var roots = goals.filter(function (n) { return !n.parent || !nodeById[n.parent]; });
+    computeLimbHues(goals, roots); // per-limb hue for the mind map (no-op for tree/org)
     var maxDepth = 0;
     goals.forEach(function (n) { maxDepth = Math.max(maxDepth, depthOf(n)); });
 
