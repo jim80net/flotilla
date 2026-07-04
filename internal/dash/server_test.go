@@ -558,6 +558,11 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("goals map must carry the mind-map layout (missing %q)", marker)
 		}
 	}
+	// mind-map geometry must hold at real fleet depth: disjoint angular sectors + a
+	// collision-relaxation pass (the hub pinned) so 19+ nodes / deep chains don't overlap.
+	if !strings.Contains(js, "Collision relaxation") {
+		t.Error("layoutMindmap must run a collision-relaxation pass so real-depth fleets don't overlap")
+	}
 	// structuralSig must include the enrichment (priorities/milestones/harness) so an
 	// add/remove of a height-affecting field triggers a full rebuild, not a stale
 	// in-place text swap. Guard the index BEFORE slicing (a missing function must
