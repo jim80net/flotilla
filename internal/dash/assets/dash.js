@@ -180,6 +180,7 @@
         renderConversations();
         syncControlTargets(true); // explicit desk-selection: set the targets authoritatively
         fetchMirror();            // load the newly-selected desk's session mirror
+        pushNav({ view: "conversations", desk: selectedDesk }); // reversible (#349 A1)
       });
     }
   }
@@ -633,8 +634,56 @@
   }
   var tabs = document.querySelectorAll(".tab");
   for (var i = 0; i < tabs.length; i++) {
-    tabs[i].addEventListener("click", function () { showView(this.getAttribute("data-view")); });
+    tabs[i].addEventListener("click", function () {
+      var view = this.getAttribute("data-view");
+      showView(view);
+      // Capture the open goals drawer node too, so a tab-level Back/Forward that returns
+      // to Goals restores the drawer instead of dropping it (cubic #351 P2).
+      var node = (view === "goals" && window.flotillaGoals && window.flotillaGoals.openNode) ? window.flotillaGoals.openNode() : null;
+      pushNav({ view: view, desk: selectedDesk || null, node: node });
+    });
   }
+
+  /* ── browser history: every view / desk / goals-node change is a reversible nav
+     entry (#349 A1) — clicking into a conversation from the goals map is no longer a
+     one-way trap; Back/Forward restore the prior state. pushState is best-effort
+     (wrapped) so the SPA still works where history is unavailable. ─────────────────── */
+  var restoringNav = false;
+  function navHash(s) {
+    if (!s || (s.view || "conversations") === "conversations") return s && s.desk ? "#conv/" + encodeURIComponent(s.desk) : "#conv";
+    if (s.view === "goals") return s.node ? "#goals/" + encodeURIComponent(s.node) : "#goals";
+    return "#" + s.view;
+  }
+  function pushNav(state) {
+    if (restoringNav) return;
+    try { history.pushState(state, "", navHash(state)); } catch (e) { /* history unavailable — nav still works */ }
+  }
+  window.flotillaDash.pushNav = pushNav;
+  function applyNav(state) {
+    // try/finally so a restore-time throw (a render/restore error) can NEVER leave the
+    // guard stuck true — a stuck guard would suppress every future pushNav and silently
+    // kill history for the rest of the session (cubic #354 P2).
+    restoringNav = true;
+    try {
+      var s = state || { view: "conversations" };
+      var view = s.view || "conversations";
+      // Set the selection to the state's desk — including CLEARING it on a desk:null state
+      // (Back to the seed must not leave the thread/header/mirror on the old desk; a null
+      // selection lets renderConversations re-pick the default) — cubic #351 P2.
+      if (view === "conversations") selectedDesk = s.desk || null;
+      showView(view);
+      if (view === "conversations") { renderConversations(); syncControlTargets(true); fetchMirror(); }
+      if (view === "goals" && window.flotillaGoals && window.flotillaGoals.restoreNode) {
+        if (window.flotillaGoals.show) window.flotillaGoals.show(); // ensure the map is rendered first
+        window.flotillaGoals.restoreNode(s.node || null);
+      }
+    } finally {
+      restoringNav = false;
+    }
+  }
+  window.addEventListener("popstate", function (e) { applyNav(e.state); });
+  // Seed the initial entry so the very first Back has a target.
+  try { history.replaceState({ view: "conversations", desk: selectedDesk || null }, "", navHash({ view: "conversations", desk: selectedDesk })); } catch (e) { /* ignore */ }
   // Conversations is the default active tab — arm the fixed app-shell at startup
   // so the page doesn't scroll before the first tab interaction (#326).
   document.body.classList.add("conv-shell-active");
@@ -657,6 +706,7 @@
     renderConversations();
     syncControlTargets(true);
     fetchMirror(); // load the deep-linked desk's session mirror (the identity guard hides the prior desk's until it lands)
+    pushNav({ view: "conversations", desk: desk }); // reversible: Back returns to the goals map (#349 A1)
     // Move focus into the now-visible Conversations view — the deep-link hid the
     // Goals view, so leaving focus on the goals node would strand it on <body>.
     var title = el("conv-title");
