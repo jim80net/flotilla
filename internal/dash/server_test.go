@@ -494,6 +494,24 @@ func TestMindmapLimbHue(t *testing.T) {
 	}
 }
 
+// TestMindmapSequenceOrder locks F12: the mind map lays sibling branches out in the authored
+// `after` sequence so a limb reads as a roadmap. The server validation (sibling-scoped, acyclic)
+// is covered in goals_test; this locks the frontend ordering half.
+func TestMindmapSequenceOrder(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/goals.js").Body.String()
+	for _, marker := range []string{
+		"function sequenceOrder", // the stable topological sort by `after`
+		"n.after",                // it reads each node's authored after list
+		"sequenceOrder(ring1)",   // applied to the top-level limbs
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must order mind-map siblings by the authored `after` sequence (missing %q) — F12", marker)
+		}
+	}
+}
+
 // TestGoalsCanvasAssets locks the Goals view's pan/zoom canvas (#280 Inc 1). The
 // Goals view was ported from the merged flex-column layout to the operator-approved
 // 2D Fleet Situation Map — an absolute tiered layout inside a transform-driven world

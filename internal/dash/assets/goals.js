@@ -362,6 +362,33 @@
       })
       .map(function (x) { return x.n; });
   }
+  // sequenceOrder (F12): a STABLE topological sort of a sibling list by the authored `after`
+  // sequence — a node is emitted only once every sibling it comes `after` (that is in this set)
+  // has been emitted, otherwise siblings keep their original order. Cycle-safe: if no node is
+  // ready (a cycle — the server validates acyclic, so this is a defensive fallback), emit the
+  // earliest remaining to make progress. Used by the mind map so a limb reads as a roadmap.
+  function sequenceOrder(nodes) {
+    if (nodes.length < 2) return nodes.slice();
+    var inSet = {};
+    nodes.forEach(function (n) { inSet[n.id] = true; });
+    var preds = {};
+    nodes.forEach(function (n) {
+      preds[n.id] = (n.after || []).filter(function (a) { return inSet[a]; });
+    });
+    var emitted = {}, out = [], remaining = nodes.slice();
+    while (remaining.length) {
+      var pick = -1;
+      for (var i = 0; i < remaining.length; i++) {
+        var ready = preds[remaining[i].id].every(function (p) { return emitted[p]; });
+        if (ready) { pick = i; break; }
+      }
+      if (pick < 0) pick = 0; // cycle fallback — take the earliest remaining
+      var node = remaining.splice(pick, 1)[0];
+      emitted[node.id] = true;
+      out.push(node);
+    }
+    return out;
+  }
   function nodeCenter(n) { return { x: n._x + n._w / 2, y: n._y + heightOf(n) / 2 }; }
 
   // leafWeights returns a memoized, cycle-safe map id→subtree-leaf-count — a node's angular
@@ -515,7 +542,7 @@
   function computeLimbHues(goals, roots) {
     limbHueById = {};
     if (goalsLayout !== "mindmap") return;
-    var limbs = clusterAdjacent(limbRing1(goals, roots));
+    var limbs = sequenceOrder(limbRing1(goals, roots)); // hue follows the authored limb order (F12)
     var n = limbs.length || 1;
     limbs.forEach(function (root, i) {
       // evenly spaced around the wheel (+ a small offset off pure red); the golden-ish
@@ -574,7 +601,7 @@
     // card widths at that radius (the org circMin, applied locally). This is what tunes the
     // limb geometry to hold at real fleet depth (19+ nodes, deep chains) without collisions.
     function place(n, a0, a1) {
-      var kids = clusterAdjacent(childrenOf(n));
+      var kids = sequenceOrder(childrenOf(n)); // siblings in authored `after` order (F12)
       if (!kids.length) return;
       var pc = nodeCenter(n), sector = a1 - a0, d = (nodeDepth[n.id] || 0) + 1;
       var total = 0, need = 0;
@@ -597,7 +624,7 @@
     // hub at the origin; ring-1 (flotillas/roots) splits the full circle by leaf-weight into
     // disjoint sectors — each becomes a limb; place() then grows each limb outward.
     if (center) { center._x = -center._w / 2; center._y = -heightOf(center) / 2; placed[center.id] = true; }
-    var ordered1 = clusterAdjacent(ring1), total1 = 0, need1 = 0;
+    var ordered1 = sequenceOrder(ring1), total1 = 0, need1 = 0; // top-level limbs in authored order (F12)
     ordered1.forEach(function (n) { total1 += leaves[n.id]; need1 += n._w + GAP; });
     var seg1 = Math.max(segLen(1), need1 / (2 * Math.PI)) + 40;
     var cur = -Math.PI / 2;

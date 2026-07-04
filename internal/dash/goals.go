@@ -97,7 +97,12 @@ type Goal struct {
 	Priorities        []string   `json:"priorities,omitempty"`
 	Milestones        []string   `json:"milestones,omitempty"`
 	DependsOn         []string   `json:"depends_on,omitempty"` // cross-dependency ids (not re-parenting)
-	WorkItems         []WorkItem `json:"work_items,omitempty"`
+	// After orders SIBLING branches into a sequence so a limb reads as a roadmap, not a set
+	// (F12): "this goal comes after these sibling(s)". Distinct from depends_on — a sequence
+	// hint, not a hard dependency, and it never draws a dependency arc. Sibling-scoped +
+	// acyclic (validated). The mind map lays siblings out in this authored order.
+	After     []string   `json:"after,omitempty"`
+	WorkItems []WorkItem `json:"work_items,omitempty"`
 	// Brief is a NODE-level decision package (markdown) — for a decision gated on the node
 	// itself rather than a single work item (#347). Same modal render + empty-state rules.
 	Brief string `json:"brief,omitempty"`
@@ -174,6 +179,69 @@ func (gf GoalsFile) validate() error {
 			}
 		}
 	}
+	// `after` (F12 sequence ordering): each entry must name a distinct, existing SIBLING (same
+	// parent), never itself, and the resulting sequence graph must be acyclic — otherwise no
+	// valid roadmap order exists. Fails closed, mirroring the depends_on contract above.
+	for _, g := range gf.Goals {
+		seenAfter := make(map[string]bool, len(g.After))
+		for _, aft := range g.After {
+			if strings.TrimSpace(aft) == "" {
+				return fmt.Errorf("goals: goal %q has an empty after entry", g.ID)
+			}
+			if aft == g.ID {
+				return fmt.Errorf("goals: goal %q cannot come after itself", g.ID)
+			}
+			if seenAfter[aft] {
+				return fmt.Errorf("goals: goal %q has duplicate after entry %q", g.ID, aft)
+			}
+			seenAfter[aft] = true
+			if !ids[aft] {
+				return fmt.Errorf("goals: goal %q references unknown after target %q", g.ID, aft)
+			}
+			if parent[aft] != parent[g.ID] {
+				return fmt.Errorf("goals: goal %q after target %q is not a sibling (after orders siblings only)", g.ID, aft)
+			}
+		}
+	}
+	if err := checkAfterAcyclic(gf.Goals); err != nil {
+		return err
+	}
+	return nil
+}
+
+// checkAfterAcyclic detects a cycle in the `after` sequence graph (edge g → t for each t in
+// g.After, i.e. "g must come after t"). A cycle means the siblings cannot be linearised into a
+// roadmap order, so validation fails closed. DFS three-colour: a gray neighbour on the stack is
+// a back-edge (cycle). O(N + edges); N small.
+func checkAfterAcyclic(goals []Goal) error {
+	const (
+		white = 0
+		gray  = 1
+		black = 2
+	)
+	adj := make(map[string][]string, len(goals))
+	for _, g := range goals {
+		adj[g.ID] = append(adj[g.ID], g.After...)
+	}
+	color := make(map[string]int, len(goals))
+	var cyclicAt string
+	var visit func(id string) bool
+	visit = func(id string) bool {
+		color[id] = gray
+		for _, nb := range adj[id] {
+			if color[nb] == gray || (color[nb] == white && visit(nb)) {
+				cyclicAt = id
+				return true
+			}
+		}
+		color[id] = black
+		return false
+	}
+	for _, g := range goals {
+		if color[g.ID] == white && visit(g.ID) {
+			return fmt.Errorf("goals: cyclic `after` sequence detected at goal %q (a sibling order cannot loop)", cyclicAt)
+		}
+	}
 	return nil
 }
 
@@ -205,23 +273,26 @@ type GoalLayout struct {
 // RenderedGoal is a goal node with its resolved work items, computed roll-up, and visual state.
 // Depth + Scope + Children let the frontend lay the tree out in altitude columns.
 type RenderedGoal struct {
-	ID                string             `json:"id"`
-	Title             string             `json:"title"`
-	Description       string             `json:"description,omitempty"`
-	Scope             string             `json:"scope"` // v2 vocabulary: flotilla | desk | task
-	Parent            string             `json:"parent,omitempty"`
-	Owner             string             `json:"owner,omitempty"`
-	ConversationAgent string             `json:"conversation_agent,omitempty"`
-	TopologyChannelID string             `json:"topology_channel_id,omitempty"`
-	Priorities        []string           `json:"priorities,omitempty"`
-	Milestones        []string           `json:"milestones,omitempty"`
-	Harness           *GoalHarness       `json:"harness,omitempty"`
-	Layout            *GoalLayout        `json:"layout,omitempty"`
-	Status            string             `json:"status"`         // coordinator-authored lifecycle
-	StatusDisplay     string             `json:"status_display"` // computed roll-up (ratified spec): blocked|awaiting|in-flight|achieved|active|paused|cancelled
-	Depth             int                `json:"depth"`
-	Children          []string           `json:"children"`
-	WorkItems         []RenderedWorkItem `json:"work_items"`
+	ID                string       `json:"id"`
+	Title             string       `json:"title"`
+	Description       string       `json:"description,omitempty"`
+	Scope             string       `json:"scope"` // v2 vocabulary: flotilla | desk | task
+	Parent            string       `json:"parent,omitempty"`
+	Owner             string       `json:"owner,omitempty"`
+	ConversationAgent string       `json:"conversation_agent,omitempty"`
+	TopologyChannelID string       `json:"topology_channel_id,omitempty"`
+	Priorities        []string     `json:"priorities,omitempty"`
+	Milestones        []string     `json:"milestones,omitempty"`
+	Harness           *GoalHarness `json:"harness,omitempty"`
+	Layout            *GoalLayout  `json:"layout,omitempty"`
+	Status            string       `json:"status"`         // coordinator-authored lifecycle
+	StatusDisplay     string       `json:"status_display"` // computed roll-up (ratified spec): blocked|awaiting|in-flight|achieved|active|paused|cancelled
+	Depth             int          `json:"depth"`
+	Children          []string     `json:"children"`
+	// After is the authored sibling sequence (F12) — "this node comes after these siblings" —
+	// so the mind map can lay a limb out as a roadmap. Empty ⇒ no sequence constraint.
+	After     []string           `json:"after,omitempty"`
+	WorkItems []RenderedWorkItem `json:"work_items"`
 	// Source is empty for a goal authored in the goals file; "roster" for a desk card
 	// materialized from the roster/topology (a first-class desk not written as a goal —
 	// #324 Inc 2). Lets the UI distinguish live-roster desks and group them (Inc 3).
@@ -408,6 +479,7 @@ func BuildGoals(in GoalsInputs) GoalsDoc {
 			StatusDisplay:     r,
 			Depth:             depth,
 			Children:          append([]string(nil), children[id]...),
+			After:             append([]string(nil), g.After...),
 			WorkItems:         items,
 			Brief:             g.Brief,
 		}
