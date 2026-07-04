@@ -372,6 +372,29 @@ func TestModalDesktopSpaceWave4(t *testing.T) {
 	}
 }
 
+// TestConversationsCoordinatorPinWave4 locks F#383 criterion 1's rail half: the
+// conversations rail pins the coordinator(s) as a first-class group even when neither is a
+// channel xo_agent/member — so the CoS thread is always followable (the "I can't even see
+// the CoS's conversation" gap). The identity half (BoardDoc.cos) is covered in readmodel_test.
+func TestConversationsCoordinatorPinWave4(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{
+		"coordinatorNames",       // derives the coordinators (xo + distinct cos) from /api/status
+		"conv-group-coordinator", // the pinned first-class group
+		"st.cos",                 // reads the CoS identity the board now exposes
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js must pin the coordinator thread first-class (missing %q) — F#383 criterion 1", marker)
+		}
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	if !strings.Contains(css, ".chan-coordinator") {
+		t.Error("dash.css must style the pinned coordinator group label (.chan-coordinator) — F#383")
+	}
+}
+
 // TestHandleSessionMirror locks the /api/session-mirror contract the glance JS binds
 // to: { agent, entries:[{ts, info, ...}] } with entries ascending (newest last). This
 // guards the field names dash.js silently depends on (entries[last].ts / .info).

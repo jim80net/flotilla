@@ -99,10 +99,21 @@
     meta.innerHTML = bits.join(" · ");
   }
 
+  // coordinatorNames returns the coordinator agents the rail must always surface — the
+  // primary XO and, when distinct, the CoS (from /api/status). The coordinator's session
+  // IS mirrored to a ledger like any desk, but the rail is built from channel bindings, so
+  // a coordinator that isn't a channel xo_agent/member would be unreachable — the operator
+  // "can't even see the CoS's conversation" (F#383 criterion 1). Pinning them fixes that.
+  function coordinatorNames() {
+    var st = cache.status || {};
+    var out = [];
+    if (st.xo) out.push(st.xo);
+    if (st.cos && String(st.cos).toLowerCase() !== String(st.xo || "").toLowerCase()) out.push(st.cos);
+    return out;
+  }
   function buildRailGroups(topology) {
     var channels = (topology && Array.isArray(topology.channels)) ? topology.channels : [];
-    if (!channels.length) return [];
-    return channels.map(function (ch) {
+    var groups = channels.map(function (ch) {
       var desks = [];
       var seen = {};
       function add(name, role) {
@@ -119,6 +130,17 @@
         desks: desks,
       };
     });
+    // Pin any coordinator missing from every channel as a first-class "coordinator" group
+    // at the TOP of the rail, so the CoS thread is always followable regardless of topology.
+    var listed = {};
+    groups.forEach(function (g) { g.desks.forEach(function (d) { listed[String(d.name).toLowerCase()] = true; }); });
+    var pinned = [];
+    coordinatorNames().forEach(function (name) {
+      if (listed[String(name).toLowerCase()]) return; // already reachable via a channel
+      listed[String(name).toLowerCase()] = true;
+      pinned.push({ channel_id: "", role: "coordinator", coordinator: true, desks: [{ name: name, role: "xo" }] });
+    });
+    return pinned.concat(groups);
   }
 
   // channelForDesk returns the channel_id of the FIRST group listing a desk by name (its home
@@ -189,11 +211,14 @@
           "</button>"
         );
       }).join("");
+      // The pinned coordinator group has no channel — label it "coordinator" rather than
+      // rendering a bare "#". A real channel shows its "#id".
+      var head = grp.channel_id
+        ? '<span class="chan-id">#' + escapeHtml(grp.channel_id) + "</span>" + role
+        : '<span class="chan-id chan-coordinator">coordinator</span>';
       return (
-        '<div class="conv-group">' +
-          '<div class="conv-group-head">' +
-            '<span class="chan-id">#' + escapeHtml(grp.channel_id) + "</span>" + role +
-          "</div>" +
+        '<div class="conv-group' + (grp.coordinator ? " conv-group-coordinator" : "") + '">' +
+          '<div class="conv-group-head">' + head + "</div>" +
           '<div class="conv-group-items" role="list">' + items + "</div>" +
         "</div>"
       );

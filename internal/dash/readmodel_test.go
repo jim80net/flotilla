@@ -129,6 +129,41 @@ func TestBuildBoard_Fresh(t *testing.T) {
 	}
 }
 
+// TestBuildBoard_CosCoordinator locks F#383 criterion 1's identity half: the board
+// exposes the CoS as a distinct coordinator ONLY when the roster names one that isn't
+// already the primary XO — so the conversations rail can pin the CoS thread without
+// double-listing the XO. (The rail-pin half is asserted as a dash.js marker in server_test.)
+func TestBuildBoard_CosCoordinator(t *testing.T) {
+	base := watch.Snapshot{DeskStates: map[string]surface.State{"cos": surface.StateIdle, "alpha-xo": surface.StateIdle}}
+	// Distinct CoS ⇒ exposed.
+	doc := BuildBoard(BoardInputs{
+		Cfg: &roster.Config{CosAgent: "cos", Agents: []roster.Agent{{Name: "alpha-xo"}, {Name: "cos"}}},
+		XO:  "alpha-xo", Snap: base, SnapOK: true, Threshold: time.Hour,
+	})
+	if doc.Cos != "cos" {
+		t.Errorf("distinct cos_agent must be exposed as doc.Cos, got %q", doc.Cos)
+	}
+	if raw, _ := json.Marshal(doc); !strings.Contains(string(raw), `"cos":"cos"`) {
+		t.Errorf("board JSON must carry the cos field for a distinct coordinator\n%s", raw)
+	}
+	// CoS identical to the XO ⇒ NOT re-exposed (single-fleet dogfood: XO already IS the coordinator).
+	same := BuildBoard(BoardInputs{
+		Cfg: &roster.Config{CosAgent: "xo", Agents: []roster.Agent{{Name: "xo"}}},
+		XO:  "xo", Snap: watch.Snapshot{}, Threshold: time.Hour,
+	})
+	if same.Cos != "" {
+		t.Errorf("cos_agent identical to XO must not be re-exposed, got %q", same.Cos)
+	}
+	// No cos_agent ⇒ empty.
+	none := BuildBoard(BoardInputs{
+		Cfg: &roster.Config{Agents: []roster.Agent{{Name: "xo"}}},
+		XO:  "xo", Snap: watch.Snapshot{}, Threshold: time.Hour,
+	})
+	if none.Cos != "" {
+		t.Errorf("unset cos_agent must leave doc.Cos empty, got %q", none.Cos)
+	}
+}
+
 // TestBuildBoard_Absent: no snapshot ⇒ every desk unknown, generated_at empty,
 // settled NOT asserted, freshness absent.
 func TestBuildBoard_Absent(t *testing.T) {
