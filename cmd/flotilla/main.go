@@ -607,7 +607,11 @@ func mirrorSendToLedger(cfg *roster.Config, from, to, message string) {
 	if cfg == nil || cfg.CosLedger == "" {
 		return
 	}
-	channel, _ := cfg.ChannelForXO(to) // the recipient's home channel; "" renders "-"
+	// Resolve the recipient's channel by ownership OR membership: a pure desk owns no
+	// channel (ChannelForXO would return ""), but is a member of its parent's channel —
+	// ChannelForAgent finds that, so a desk-directed relay carries a real channel tag
+	// instead of "-" (cubic #362 P2). "" only when the recipient is in no binding.
+	channel, _ := cfg.ChannelForAgent(to)
 	if err := cos.Append(cfg.CosLedger, cos.Entry{
 		Time:    time.Now(),
 		Channel: channel,

@@ -135,10 +135,13 @@ func TestMirrorSend_LedgersRelay(t *testing.T) {
 	// ledger, tagged with the recipient's home channel — this is what populates a desk's dash
 	// conversation thread with CoS↔desk / desk↔desk traffic.
 	cfg := loadCosRoster(t, cosFederatedRoster)
-	mirrorSendToLedger(cfg, "meta-xo", "alpha-xo", "rebase and re-run CI")
+	// Send to a DESK (alpha-be) — a pure MEMBER of C_ALPHA that owns no channel — and assert
+	// the entry is tagged C_ALPHA resolved via membership (cubic #362 P2): a desk relay must
+	// carry its real channel, not "-", or the desk-thread grouping is lost.
+	mirrorSendToLedger(cfg, "alpha-xo", "alpha-be", "rebase and re-run CI")
 	got := readLedger(t, cfg.CosLedger)
-	if !strings.Contains(got, "meta-xo → alpha-xo") || !strings.Contains(got, "C_ALPHA") {
-		t.Errorf("send must be ledgered from→to with the recipient's channel, got:\n%s", got)
+	if !strings.Contains(got, "alpha-xo → alpha-be") || !strings.Contains(got, "C_ALPHA") {
+		t.Errorf("send to a desk must be ledgered from→to with the desk's channel (C_ALPHA via membership), got:\n%s", got)
 	}
 	if !strings.Contains(got, `"rebase and re-run CI"`) {
 		t.Errorf("send entry missing gist:\n%s", got)

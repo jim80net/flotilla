@@ -129,3 +129,25 @@ func TestChannelForXO(t *testing.T) {
 		t.Errorf("legacy ChannelForXO(xo) = %q,%v; want C1,true", ch, ok)
 	}
 }
+
+func TestChannelForAgent(t *testing.T) {
+	fed, _ := Load(writeRoster(t, `{
+	  "operator_user_id":"U",
+	  "agents":[{"name":"meta-xo"},{"name":"alpha-xo"},{"name":"alpha-be"}],
+	  "channels":[
+	    {"channel_id":"C_CMD","xo_agent":"meta-xo","members":["alpha-xo"]},
+	    {"channel_id":"C_ALPHA","xo_agent":"alpha-xo","members":["alpha-be"]}]}`))
+	// An owner resolves to the channel it owns.
+	if ch, ok := fed.ChannelForAgent("alpha-xo"); !ok || ch != "C_ALPHA" {
+		t.Errorf("ChannelForAgent(alpha-xo) = %q,%v; want C_ALPHA,true (owner)", ch, ok)
+	}
+	// A pure DESK owns no channel but is a MEMBER of its parent's — resolved via membership
+	// (this is the cubic #362 P2 fix; without it a desk relay tags no channel).
+	if ch, ok := fed.ChannelForAgent("alpha-be"); !ok || ch != "C_ALPHA" {
+		t.Errorf("ChannelForAgent(alpha-be) = %q,%v; want C_ALPHA,true (member)", ch, ok)
+	}
+	// An agent in no binding at all resolves to ok=false.
+	if _, ok := fed.ChannelForAgent("ghost"); ok {
+		t.Error("ChannelForAgent(unknown) should be ok=false")
+	}
+}

@@ -477,6 +477,27 @@ func (c *Config) ChannelForXO(name string) (string, bool) {
 	return "", false
 }
 
+// ChannelForAgent resolves the channel to tag an agent's ledger entry with, whether the
+// agent OWNS a channel (as its xo_agent) or is only a MEMBER of one. It prefers ownership
+// (its home channel, via ChannelForXO), then falls back to the first channel that lists the
+// agent in members[]. A pure desk in a flat topology owns no channel but is a member of its
+// parent's — resolving that membership is what lets a desk-directed relay carry a real
+// channel tag (else it renders "-" and loses the side-conversation grouping). ok=false only
+// when the agent is neither an owner nor a member of any binding.
+func (c *Config) ChannelForAgent(name string) (string, bool) {
+	if ch, ok := c.ChannelForXO(name); ok {
+		return ch, true
+	}
+	for _, ch := range c.Bindings() {
+		for _, m := range ch.Members {
+			if m == name {
+				return ch.ChannelID, true
+			}
+		}
+	}
+	return "", false
+}
+
 // Agent looks up an agent by name.
 func (c *Config) Agent(name string) (Agent, error) {
 	for _, a := range c.Agents {
