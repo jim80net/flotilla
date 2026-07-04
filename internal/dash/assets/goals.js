@@ -131,7 +131,10 @@
   }
   function updateLive(c) {
     // "goal nodes" (not "fleet goals") — total counts all nodes, not just the fleet tier.
-    announce((c.awaiting || 0) + " awaiting you, " + (c.in_flight || 0) + " in flight, " +
+    // Announce pending too, so the spoken summary matches the visual situation strip — a
+    // screen-reader user must hear about dependency-gated goals (cubic #359 P2).
+    announce((c.awaiting || 0) + " awaiting you, " + (c.pending || 0) + " pending, " +
+      (c.in_flight || 0) + " in flight, " +
       (c.realized || 0) + " realized, of " + (c.total || 0) + " goal nodes.");
   }
 
