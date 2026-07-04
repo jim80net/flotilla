@@ -149,6 +149,56 @@ channel on your phone, and read every reply back. It's optional — the clock an
 The XO replies to the user on Discord via `flotilla notify --from xo …` and
 stays quiet on routine traffic — see `docs/xo-doctrine.md`.
 
+## 7. (Optional) Fleet goals — validate, compile, link
+
+When the user wants a **goals map** in `flotilla dash` (not just the flat issue
+list), coordinators maintain `fleet-goals.yaml` beside the roster. The dash reads
+the compiled `fleet-goals.json`; the CLI keeps the two in sync.
+
+Copy the generic schema from `fleet-goals.example.yaml` in the repo, then place
+the user's file at `<roster-dir>/fleet-goals.yaml` (same directory as
+`flotilla.json`). Use generic goal and desk names (`xo`, `backend`, `frontend`,
+`data`) — not deployment-specific identifiers.
+
+**Validate** (fail-closed — run after every edit):
+
+```sh
+flotilla goals validate --roster ./flotilla.json
+```
+
+Expect `goals: ok (N nodes) — …/fleet-goals.yaml`.
+
+**Compile** yaml → json for the dash:
+
+```sh
+flotilla goals compile --roster ./flotilla.json
+```
+
+Expect `goals: compiled N nodes — fleet-goals.yaml → fleet-goals.json`.
+
+**Link** a work item onto a goal node (pick exactly one attachment kind):
+
+```sh
+# attach a GitHub issue
+flotilla goals link --goal operator-surfaces --issue jim80net/flotilla#267
+
+# attach a backlog marker
+flotilla goals link --goal fleet-reliability --backlog "[next] benchmark caching"
+
+# attach inline checklist text
+flotilla goals link --goal goals-map-view --inline "Wire the Goals tab in flotilla dash"
+
+# attach a desk (execution agent on the goal)
+flotilla goals link --goal goals-map-view --desk backend
+```
+
+Each `link` rewrites the yaml (preserving comments) and recompiles json. Tell the
+user the dash Goals view picks up changes on the next load (or via SSE when
+`flotilla dash` is already running).
+
+Human-paced walkthrough of the same cold-start flow lives in
+`docs/quickstart.md`; goal-file schema detail is in `fleet-goals.example.yaml`.
+
 ---
 
 ## Done — what you set up

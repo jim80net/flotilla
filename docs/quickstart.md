@@ -425,6 +425,22 @@ context ledger — is its own topic. When one project outgrows a single XO, or
 you want one place to steer many projects, see
 **[federation.md](./federation.md)**.
 
+## 7. (Optional) Fleet goals CLI
+
+Coordinators who use the dash **Goals** view maintain `fleet-goals.yaml` beside
+the roster and compile it to `fleet-goals.json` for the dash to read. The schema
+is documented in `fleet-goals.example.yaml` at the repo root (generic examples
+only).
+
+```sh
+flotilla goals validate --roster ./flotilla.json   # fail-closed after edits
+flotilla goals compile --roster ./flotilla.json     # yaml → json for the dash
+flotilla goals link --goal <id> --issue owner/repo#N   # attach work to a goal
+```
+
+A coding agent walking a user through setup should follow **`llm.md` §7** for the
+full validate / compile / link flow with examples.
+
 ## Troubleshooting
 
 - **`no tmux pane titled "X"`** — the pane title doesn't match the agent name.
