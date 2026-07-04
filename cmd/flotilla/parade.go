@@ -114,9 +114,12 @@ func parseParadeInterleavedArgs(args []string) (target string, flagArgs []string
 	return target, flagArgs, nil
 }
 
-// buildParadeRequest is the individual four-domain parade prompt injected into a seat's pane.
+// buildParadeRequest is the individual four-plus-demo parade prompt injected into a seat's pane.
 func buildParadeRequest() string {
-	return `flotilla parade request — answer the four parade domains AS YOUR TURN-FINAL.
+	return `flotilla parade request — answer the four-plus-demo parade domains AS YOUR TURN-FINAL.
+
+Pre-parade walk: demos come from the walk-inspection ~24h before (fixes + demo assets).
+If your lane ships a demo-able product and you have no DEMO section, your answer is INCOMPLETE — say so.
 
 (1) ACCOMPLISHMENTS (required): what you are proud of — concrete wins, not activity theater.
 (2) WORKING ON NEXT (optional): omit the section entirely if nothing notable.
@@ -124,6 +127,8 @@ func buildParadeRequest() string {
     Tag each learning fleet-wide (doctrine/skill) or local (desk-scoped). Fleet-wide learnings
     name a generic propagation target (skill, identity rule, memory) — never a deployment path.
 (4) NEEDS HELP (optional): omit if clear; one line per genuine ask.
+(5) DEMO (required when demo-able): screenshot, short capture, or live link showing the product's
+    current shape (from the walk). If not demo-able: "DEMO: N/A (not demo-able — …)".
 
 Use this shape:
 
@@ -131,6 +136,9 @@ Use this shape:
 
 ACCOMPLISHMENTS:
   • …
+
+DEMO:
+  • <screenshot / capture / live link — or N/A with reason>
 
 WORKING ON NEXT:          ← omit if nothing notable
   • …
@@ -178,14 +186,15 @@ func paradeRollupWakeBody(agent, binPath, rosterPath string, readSet, postChanne
 
 	if fleet {
 		b.WriteString("CONTRACT (Tier 3 / fleet): fleet HEADLINE celebrating the whole fleet + wins GROUPED BY XO + " +
-			"consolidated ## Learnings (deduplicated, attributed) + optional NEEDS HELP flags + detail footer " +
-			"(agent names / channel IDs only in the footer).\n")
+			"demos (or explicit demo-missing flags) + consolidated ## Learnings (deduplicated, attributed) + " +
+			"optional NEEDS HELP flags + detail footer (agent names / channel IDs only in the footer).\n")
 	} else {
-		b.WriteString("CONTRACT (Tier 2 / domain): curated roll-up GROUPED BY subordinate — accomplishments, optional next, " +
-			"extracted ## Learnings per desk, optional needs-help — plus a consolidated ## Learnings section at the top " +
-			"or end aggregating fleet-wide items.\n")
+		b.WriteString("CONTRACT (Tier 2 / domain): curated roll-up GROUPED BY subordinate — accomplishments, DEMO per desk " +
+			"(flag missing demos for demo-able lanes), optional next, extracted ## Learnings per desk, optional needs-help — " +
+			"plus a consolidated ## Learnings section at the top or end aggregating fleet-wide items.\n")
 	}
-	b.WriteString("DISCIPLINE: celebratory and honest — no manufactured wins. Learnings are REQUIRED in every roll-up. " +
+	b.WriteString("DISCIPLINE: celebratory and honest — no manufactured wins. Demos REQUIRED for demo-able products " +
+		"(from pre-parade walk). Learnings are REQUIRED in every roll-up. " +
 		"SKIP an unreadable subordinate (treat as UNKNOWN, never as 'went silent'). " +
 		"After the fleet parade posts, coordinators persist fleet-wide learnings per the skill's propagation section " +
 		"(append to roster-adjacent fleet-learnings.md, then run reflect/compound-learnings on each fleet-wide item).\n")

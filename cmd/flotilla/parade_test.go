@@ -49,13 +49,17 @@ func TestParseParadeArgs_FleetNoExtras(t *testing.T) {
 	}
 }
 
-func TestBuildParadeRequest_FourDomainsAndLearnings(t *testing.T) {
+func TestBuildParadeRequest_FourPlusDemoDomains(t *testing.T) {
 	req := buildParadeRequest()
 	for _, want := range []string{
 		"ACCOMPLISHMENTS",
+		"DEMO",
 		"WORKING ON NEXT",
 		"## Learnings",
 		"NEEDS HELP",
+		"walk-inspection",
+		"INCOMPLETE",
+		"screenshot",
 		"notify",
 		"Do NOT run",
 		"fleet-wide",
@@ -74,9 +78,11 @@ func TestParadeRollupWakeBody_Tier2Contract(t *testing.T) {
 		"C_ALPHA",
 		"result --roster",
 		"Tier 2",
+		"DEMO",
 		"## Learnings",
 		"UNKNOWN",
 		"fleet-learnings.md",
+		"pre-parade walk",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("rollup wake body missing %q:\n%s", want, body)
