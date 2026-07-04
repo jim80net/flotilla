@@ -190,6 +190,18 @@ func TestMembersRegistryContents(t *testing.T) {
 	if !strings.Contains(pf.Content, "walk-inspection") {
 		t.Error("parade-formation content must reference the pre-parade walk-inspection rhythm")
 	}
+	if !strings.Contains(pf.Content, "slides.md") || !strings.Contains(pf.Content, "/parade") {
+		t.Error("parade-formation content must document slides.md deck layout and /parade archive")
+	}
+	if !strings.Contains(pf.Content, "hyperlinked") || !strings.Contains(pf.Content, "decision-brief") {
+		t.Error("parade-formation content must document hyperlink discipline and decision-brief NEEDS HELP")
+	}
+	shape := pf.Content[strings.Index(pf.Content, "Individual answer shape"):]
+	acc := strings.Index(shape, "ACCOMPLISHMENTS:")
+	demo := strings.Index(shape, "DEMO:                     ")
+	if acc < 0 || demo < 0 || demo <= acc {
+		t.Error("parade-formation Tier-1 template must place DEMO after ACCOMPLISHMENTS (demo last)")
+	}
 	if pf.OpenMarker != "" || pf.CloseMarker != "" {
 		t.Errorf("heartbeat-skill member should carry no marker fence, got open=%q close=%q", pf.OpenMarker, pf.CloseMarker)
 	}

@@ -2,10 +2,11 @@
 
 You are reading this because the operator (or `flotilla parade`) triggered a **parade
 formation** wake. Your job is to CELEBRATE and CURATE what the fleet accomplished,
-surface what is next, capture learnings so they propagate, and name where help is
-needed — then post the rollup to the channel you own. Parade formation is the
-**celebratory / retro sibling** of visibility-synthesis: synthesis compresses *current
-state* for attention; parade compresses *accomplishments and learnings* for reflection.
+surface what is next, capture learnings so they propagate, name where help is needed,
+and **show** what shipped — then post the rollup to the channel you own. Parade
+formation is the **celebratory / retro sibling** of visibility-synthesis: synthesis
+compresses *current state* for attention; parade compresses *accomplishments and
+learnings* for reflection.
 
 ## Vocabulary (so this reads cold)
 
@@ -19,43 +20,67 @@ state* for attention; parade compresses *accomplishments and learnings* for refl
   Boats sit at the bottom of the hierarchy.
 - **meta-XO** — the top XO: it coordinates the project-XOs and owns the
   command-and-control channel (often called **#c2**).
-- **walk-inspection** — pre-parade rhythm: a **walk** fires roughly **24 hours before**
-  the parade. Each seat inspects what it shipped, fixes what is broken, and produces
-  **demo assets** (screenshot, short capture, or live link) showing the product's
-  current shape. The parade answer **consumes** walk output — do not improvise demos
-  at parade time if the walk already produced them.
+- **walk-inspection** — pre-parade rhythm documented in this skill (see below): a
+  **walk** fires roughly **24 hours before** the parade. Each seat inspects what it
+  shipped, fixes what is broken, and produces **demo assets** (screenshot, short
+  capture, or live link). The parade answer **consumes** walk output — do not
+  improvise demos at parade time if the walk already produced them.
 - **demo-able product** — work that produces something an operator can *see* or *try*
   (UI, CLI output, a running service, a doc with a rendered preview). Purely internal
   plumbing with no visible surface is not demo-able — say so explicitly rather than
   padding.
+- **parade archive** — host-local parade deck the dash serves at `/parade`:
+  `<parades-dir>/<YYYY-MM-DD>/slides.md` plus `assets/` (images referenced from
+  slides). Default `<parades-dir>` is `<roster-dir>/state/parades`; override with
+  `--parades-dir` or `FLOTILLA_DASH_PARADES_DIR`. Legacy `report.md` still renders
+  but **slides.md is the operative format** for new parades.
 - **Tier 1 / Tier 2 / Tier 3** — the three altitudes of parade roll-up (parallel to
   visibility-synthesis):
   - **Tier 1** is each seat's own four-plus-demo answer (in-pane; the mirror publishes
     it to that seat's channel — not your job when you are rolling up).
   - **Tier 2** is an XO curating its boats' parade answers UP into the XO's channel.
-  - **Tier 3** is the meta-XO curating the project-XOs' parade rollups UP into #c2.
+  - **Tier 3** is the meta-XO assembling the **fleet parade deck** (`slides.md`) for
+    the operator — one slide-group per project-XO, not thematic synthesis one-liners.
 - **turn-final state** — the last thing an agent said when it finished its most
   recent turn. For roll-up you read each subordinate's latest turn-final (the parade
   answer or rollup it posted).
-- **the operator** — the human the whole fleet serves. Parade reports are reader-modeled
-  for them: fleet headline first, plain language, IDs in the footer.
+- **the operator** — the human the whole fleet serves. Parade decks are reader-modeled
+  for them: per-XO full answers first; optional fleet epilogue last.
 
-## The four-plus-demo domains — every seat answers these
+## Walk-inspection rhythm (pre-parade)
 
-When you receive an **individual parade request** (not a roll-up), answer all four
-domains **plus the demo element** in your turn-final. Use the structure below so
-coordinators and the operator can scan consistently.
+Parades include **demos** — what is a parade without showing what was accomplished and
+what the shape of the product is now? Roughly **24 hours before** each parade, each
+seat runs a **walk**: inspect shipped work, fix what is broken, capture demo assets
+into the parade's `assets/` directory. The parade answer **shows** walk output; fixes
+and demo assets come from the walk, not improvised at parade time.
+
+## The four-plus-demo domains — canonical order
+
+When you receive an **individual parade request** (not a roll-up), answer in this
+**canonical order** (DEMO last — the operator reviews accomplishments and decisions
+before seeing product shape):
+
+1. **Accomplishments** (required)
+2. **Working on next** (optional)
+3. **Learnings** (required — `## Learnings` block)
+4. **Needs help** (optional — decision-brief discipline below)
+5. **Demo** (required when demo-able; explicit N/A when not)
 
 **Demo completeness rule:** if your lane ships a **demo-able product** and your parade
-answer has **no DEMO section** (no screenshot, capture, or live link from the
-pre-parade walk), the answer is **INCOMPLETE** — say so plainly in ACCOMPLISHMENTS
-("demo missing — walk did not produce assets" or "demo pending") and do not present
-the parade as ready for operator review until the demo lands.
+answer has **no DEMO section**, the answer is **INCOMPLETE** — say so plainly and do
+not present the parade as ready for operator review.
+
+**Hyperlink completeness rule:** every **substantive claim** in ACCOMPLISHMENTS,
+LEARNINGS, and NEEDS HELP must carry an **expanded source link** — a PR, issue,
+channel message, transcript path, brief file, or asset path. A claim without a source
+link is **INCOMPLETE**. Channel IDs alone in a footer are not enough.
 
 ### (1) Accomplishments — required
 
 What you are **proud of** this period. Concrete outcomes, shipped work, problems
 solved — not activity theater. One to five bullets; lead with the highest-signal win.
+**Every bullet hyperlinks** its source (`[merged PR #N](url)`, `[issue #N](url)`, etc.).
 
 ### (2) Working on next — optional
 
@@ -64,40 +89,30 @@ if nothing notable (do not pad with "continuing as before").
 
 ### (3) Learnings — required
 
-What you learned that should **outlive this chat**. This domain is load-bearing:
-learnings must not vanish when the parade ends. In your answer:
+What you learned that should **outlive this chat**. Tag fleet-wide vs local; name a
+generic propagation target for fleet-wide items. Include a fenced `## Learnings` block.
+**Link evidence** when the learning cites a specific incident (PR postmortem, issue,
+transcript).
 
-- State the learning in plain language (what happened, what you would do differently).
-- Tag whether it is **fleet-wide** (belongs in constitutional doctrine / a skill) or
-  **local** (desk- or project-scoped).
-- If fleet-wide, name the propagation target generically: a new or updated skill, a
-  rule in the agent identity file, or a memory stub — never a deployment-specific path.
+### (4) Needs help — optional; decision-brief discipline when present
 
-Include a fenced `## Learnings` block in your turn-final (see Step 1 shape below) so
-roll-up coordinators can extract learnings mechanically.
+Flag only when you genuinely need operator intervention. When present, this is **not**
+a one-line stub — it must surface the **existing decision brief**:
 
-### (4) Needs help — optional
+- For goals items: embed or link the `brief` field already written on the work item in
+  `fleet-goals.yaml` (the dash decision modal renders it). Follow the six-element
+  **decision-brief-on-blocked** template (what it is, value, mechanics on approval,
+  alternatives, recommendation, reversibility).
+- **No brief yet = INCOMPLETE** — state which goal ID needs `attach-brief` and do not
+  present the NEEDS HELP slide as ready until the brief is written and compiled.
 
-Flag only when you genuinely need operator or coordinator intervention. Omit if clear.
-When present: one line per ask, with what you tried and what decision or resource you
-need.
+Omit NEEDS HELP entirely when clear.
 
-### (5) Demo — required when demo-able; explicit when not
+### (5) Demo — required when demo-able; explicit when not (always last)
 
-Show what was accomplished — **what is the shape of the product now?** Attach one
-demo element per demo-able product your lane owns this period:
-
-- **Screenshot** — still image of the current UI or rendered output.
-- **Short capture** — brief screen recording or GIF of the feature in action.
-- **Live link** — URL to a running staging instance, a public doc preview, or a
-  reproducible CLI invocation the operator can try.
-
-Demos come from the **pre-parade walk** (~24h before): the walk inspection produces
-fixes and demo assets; the parade **shows** them. Use generic attachment paths or
-host-local asset locations the mirror can publish — never deployment-specific secrets.
-
-If your lane has **no demo-able product** this period, include `DEMO: N/A (not
-demo-able — <one-line reason>)` so coordinators do not hunt for a missing attachment.
+Show product shape — screenshot, short capture, or live link from the pre-parade walk.
+Reference assets as `assets/<filename>` when archived under the parade date directory.
+If not demo-able: `DEMO: N/A (not demo-able — <reason>)`.
 
 ### Individual answer shape (Tier 1)
 
@@ -105,19 +120,19 @@ demo-able — <one-line reason>)` so coordinators do not hunt for a missing atta
 [parade answer]
 
 ACCOMPLISHMENTS:
-  • …
-
-DEMO:                     ← required when demo-able; N/A line when not
-  • <screenshot / capture / live link — or "N/A (not demo-able — …)">
+  • [concrete win](https://github.com/…/pull/N)
 
 WORKING ON NEXT:          ← omit section if nothing notable
   • …
 
 ## Learnings
-  • …
+  • durable lesson — [evidence](url) if applicable
 
 NEEDS HELP:               ← omit section if none
-  • …
+  • [goal G-foo brief](path-or-dash-link) — or INCOMPLETE: goal G-foo needs attach-brief
+
+DEMO:                     ← always last; required when demo-able
+  • assets/screenshot.png — or live link — or N/A with reason
 ```
 
 Do NOT run `flotilla notify` and do NOT touch secrets — answer in-pane; the fleet
@@ -126,132 +141,101 @@ mirror publishes your turn-final to your channel automatically.
 ## Step 1 — read your subordinates' parade answers (roll-up only)
 
 Skip this step on an **individual** parade request. On a **roll-up** wake, read the
-LATEST turn-final of each agent BELOW you — the same read set visibility-synthesis
-uses. The wake prompt hands you the read set and the EXACT command:
+LATEST turn-final of each agent BELOW you:
 
 **`<flotilla> result --roster <path> <name>`**
 
-Run it once per subordinate. You are reading each subordinate's current parade answer
-or rollup, not scrolling history.
-
-Notes on the read:
-
-- One bounded read per subordinate — latest state only.
-- A subordinate you cannot read is CLEANLY SKIPPED. Roll up over the readable ones;
-  never fail the whole parade because one subordinate was unreadable, and do not
-  report a skipped subordinate as "went silent."
-- You are reading state, not taking commands.
-
-> The daemon's wake prompt is the source of truth for who your subordinates are and
-> how to reach them. The discipline below does not depend on accessor names.
+One bounded read per subordinate. Unreadable subordinates are CLEANLY SKIPPED.
 
 ## Step 2 — curate the roll-up (judgment)
 
-Curate by tier. Compress, group, celebrate — never a firehose.
-
 ### If you are a Tier-2 XO (boats → your channel)
 
-Produce a **domain parade rollup**:
+Produce a **domain parade rollup** grouped by boat/desk. Each subordinate block carries
+the full four-plus-demo shape (demo last), hyperlinked claims, and decision-brief links
+for any NEEDS HELP. Flag missing demos or unlinked claims as INCOMPLETE at the top.
+Include a consolidated `## Learnings` section.
 
-- **Group by boat/desk.** One short block per subordinate: accomplishments (the
-  wins), **demo** (link or note if missing/incomplete), optional next, learnings
-  extracted from each `## Learnings` block, optional needs-help flags.
-- **Surface missing demos.** If a demo-able desk omitted its DEMO section, flag it
-  at the top — an incomplete parade answer, not a silent skip.
-- **Compress hard.** A reader should grasp your domain's wins in a few seconds.
-- **Surface needs-help and fleet-wide learnings at the top.** Do not bury a blocker or
-  a doctrine-worthy learning inside a per-desk line.
-- **Preserve learnings.** Your rollup MUST include a consolidated `## Learnings`
-  section aggregating every subordinate's learnings (deduplicated, still attributed
-  by desk name in parentheses).
+### If you are the Tier-3 meta-XO (project-XOs → fleet parade deck)
 
-### If you are the Tier-3 meta-XO (project-XOs → #c2)
+Your **primary deliverable** is the fleet parade **deck** at
+`<parades-dir>/<YYYY-MM-DD>/slides.md` (plus `assets/`). The dash serves it at `/parade`.
 
-Produce an **operator parade report** with three parts:
+**Core structure — one slide-group per project-XO.** Each XO gets a full four-plus-demo
+section (ACCOMPLISHED, NEXT, LEARNED, NEED, DEMO — demo last). This is **not** a
+thematic synthesis deck of one-liners. Do not collapse an XO's parade into a single
+summary line.
 
-1. **Fleet headline** — one short paragraph celebrating the whole fleet. ("Fleet
-   shipped X; research closed Y; ops unblocked Z.")
-2. **Grouped by XO** — under each project-XO name, the compressed wins, **demos**
-   (or explicit "demo missing" flags), next items, and needs-help flags from that
-   domain. Plain language; no codenames without gloss.
-3. **Fleet learnings** — a consolidated `## Learnings` section: every fleet-wide
-   learning from subordinate rollups, deduplicated, with attribution. This block is
-   what post-parade capture consumes.
+**Optional epilogue only:** after all per-XO slide-groups, you MAY add one final
+`---`-delimited slide with a short fleet-wide thematic headline — celebration only,
+not a substitute for per-XO content.
 
-Put roster agent names and channel IDs in a **detail footer** only — the operator
-skims the headline and grouped body first.
-
-A concrete #c2 shape (illustrative, not real fleet state):
+**slides.md layout** (`---` separates slides for the dash deck viewer):
 
 ```
-[fleet parade]
+# Fleet Parade — YYYY-MM-DD
 
-HEADLINE: A strong week — Tier-1 mirror live, parade formation shipped, two backtests
-closed green. One open budget ask in research.
+---
+## alpha-xo
 
-BY DOMAIN:
-  alpha-xo — shipped the options-closing fix (demo: screenshot attached); data desk idle.
-  beta-xo — entry-confirmation backtest finished (demo: live staging link); macro desk mid-sweep.
+ACCOMPLISHMENTS:
+  • [shipped the options fix](https://github.com/…/pull/N)
+
+WORKING ON NEXT:
+  • …
 
 ## Learnings
-  • (alpha-be) Sentinel AND-guards need only one decisive arm — promote to skill.
-  • (beta-xo) Paid API probes before building on undocumented response shapes.
+  • (alpha-be) … — [PR review](url)
 
-NEEDS HELP (1):
-  • beta-xo — backtest budget top-up. → drill: #beta-xo
+NEEDS HELP:
+  • [goal G-budget brief](fleet-goals.yaml#…) — six-element brief embedded or linked
 
-DETAIL: agents alpha-xo, beta-xo, alpha-be, beta-macro; channels #alpha-xo, #beta-xo
+DEMO:
+  • assets/alpha-options.png
+
+---
+## beta-xo
+
+ACCOMPLISHMENTS:
+  • [closed backtest](https://github.com/…/pull/N)
+
+…
+
+---
+## Fleet epilogue (optional)
+
+One short celebratory paragraph — optional; never replaces per-XO slides above.
 ```
+
+After writing `slides.md`, post a short pointer in #c2 (link to `/parade` for the date).
+Channel IDs and agent names belong in a **detail footer** on the pointer post only.
 
 ## Step 3 — post to the channel you own
 
-Post your roll-up to YOUR channel (the channel you, the XO, own) — never to a
-subordinate's channel and never back down to a boat. The wake prompt names your post
-target.
+Post your roll-up to YOUR channel — never to a subordinate's channel.
 
 ## Learnings propagation — mechanical capture (coordinators)
 
-Learnings must not die in chat. After the fleet parade posts:
+After the fleet parade deck posts:
 
-1. **Extract** the consolidated `## Learnings` block from the Tier-3 fleet parade
-   (or your Tier-2 rollup if you are the highest tier that ran).
-2. **Persist** fleet-wide learnings to a roster-adjacent capture file the operator
-   owns (convention: `<roster-dir>/fleet-learnings.md` — append-only, one bullet per
-   learning with date and attributing desk). This file is host-local and gitignored;
-   it is the handoff surface for doctrine updates, not a public repo artifact.
-3. **Run learning capture** on each fleet-wide item — the generic pattern is a
-   `/reflect` or `/compound-learnings` pass: distill the learning into a reusable
-   skill, rule, or memory stub in the agent's constitutional workspace. Coordinators
-   schedule this; boats do not self-promote doctrine without review.
-4. **Extension point:** `flotilla doctrine install` and memex-style skill promotion
-   are the intended sinks. A future `flotilla parade capture` subcommand may automate
-   step 2; until then, the post-parade instruction in the operator runbook is:
-   review `## Learnings`, append to `fleet-learnings.md`, then run reflect on each
-   fleet-wide item.
-
-Local (desk-scoped) learnings stay in the desk's workspace notes; only fleet-wide
-items ride the propagation path above.
+1. **Extract** the consolidated `## Learnings` from per-XO slides (and epilogue if any).
+2. **Persist** fleet-wide learnings to `<roster-dir>/fleet-learnings.md` (append-only).
+3. **Run learning capture** (`/reflect` or `/compound-learnings`) on fleet-wide items.
 
 ## The parade discipline (read this every time)
 
-**Parade is celebratory, not performative.** Do not manufacture wins or pad learnings
-to look thorough. An honest "quiet period, nothing shipped" is a valid accomplishment
-line if true.
+**Parade is celebratory, not performative.** Honest quiet periods are valid.
 
-**Learnings are required and extracted.** Every individual answer and every roll-up
-includes `## Learnings`. Coordinators aggregate upward; the meta-XO's fleet learnings
-block is the authoritative capture input.
+**Per-XO decks, not synthesis one-liners.** The operator reviews each XO's full
+four-plus-demo answer; thematic synthesis is an optional epilogue only.
 
-**Optional domains stay optional.** Omit "working on next" and "needs help" when there
-is nothing worth flagging — absence is signal, not laziness.
+**Every claim hyperlinked.** Unlinked claims are INCOMPLETE.
 
-**Demos are required for demo-able products.** A parade without showing what shipped
-is a status dump, not a celebration. Walk first (~24h), demo in the answer; say
-**incomplete** when a demo-able lane has no DEMO section.
+**Open decisions need existing briefs.** NEEDS HELP without a goals `brief` is
+INCOMPLETE — name the goal needing attach-brief.
 
-**Unreadable subordinates are unknown, not silent.** Synthesize over readable ones;
-never invent state for a skip.
+**Demos last, required for demo-able products.** Walk first (~24h), demo in the answer.
 
-You are the altitude filter for celebration and institutional memory. Compress wins,
-surface help asks, carry learnings up, and point the operator to drill-down channels
-for detail.
+**Unreadable subordinates are unknown, not silent.**
+
+You are the altitude filter for celebration and institutional memory.

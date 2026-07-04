@@ -57,16 +57,24 @@ func TestBuildParadeRequest_FourPlusDemoDomains(t *testing.T) {
 		"WORKING ON NEXT",
 		"## Learnings",
 		"NEEDS HELP",
+		"demo LAST",
 		"walk-inspection",
 		"INCOMPLETE",
-		"screenshot",
+		"decision-brief-on-blocked",
+		"attach-brief",
+		"hyperlinked",
 		"notify",
 		"Do NOT run",
-		"fleet-wide",
 	} {
 		if !strings.Contains(req, want) {
 			t.Errorf("parade request missing %q", want)
 		}
+	}
+	// DEMO section must follow NEEDS HELP in the canonical template.
+	needIdx := strings.Index(req, "NEEDS HELP:")
+	demoIdx := strings.Index(req, "DEMO:")
+	if needIdx < 0 || demoIdx < 0 || demoIdx <= needIdx {
+		t.Errorf("canonical order wants DEMO after NEEDS HELP; needIdx=%d demoIdx=%d", needIdx, demoIdx)
 	}
 }
 
@@ -77,12 +85,11 @@ func TestParadeRollupWakeBody_Tier2Contract(t *testing.T) {
 		"alpha-be",
 		"C_ALPHA",
 		"result --roster",
-		"Tier 2",
-		"DEMO",
-		"## Learnings",
+		"DEMO last",
+		"goals brief",
+		"INCOMPLETE",
 		"UNKNOWN",
 		"fleet-learnings.md",
-		"pre-parade walk",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("rollup wake body missing %q:\n%s", want, body)
@@ -93,9 +100,11 @@ func TestParadeRollupWakeBody_Tier2Contract(t *testing.T) {
 func TestParadeRollupWakeBody_Tier3Fleet(t *testing.T) {
 	body := paradeRollupWakeBody("meta-xo", "/bin/flotilla", "/r.json", []string{"alpha-xo", "beta-xo"}, []string{"C_CMD"}, true)
 	for _, want := range []string{
-		"Fleet parade",
-		"Tier 3",
-		"GROUPED BY XO",
+		"slides.md",
+		"parades-dir",
+		"/parade",
+		"one slide-group per project-XO",
+		"epilogue",
 		"alpha-xo",
 		"beta-xo",
 	} {
