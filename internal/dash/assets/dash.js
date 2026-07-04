@@ -152,6 +152,10 @@
   function renderConversationRail(status, topology, fresh) {
     var groups = buildRailGroups(topology);
     ensureSelection(status, groups);
+    // A desk-ONLY selection (a goals "→ desk" jump, an old #conv/<desk> hash, any deep-link
+    // that carries no channel) would match no row under the composite key — backfill the
+    // desk's home channel so its row still highlights (cubic #378 P2).
+    if (selectedDesk && !selectedChannel) selectedChannel = channelForDesk(groups, selectedDesk);
     var agents = agentMap(status);
     var stale = fresh.state === "stale";
     var rail = el("conv-rail");
