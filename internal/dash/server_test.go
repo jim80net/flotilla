@@ -395,6 +395,41 @@ func TestConversationsCoordinatorPinWave4(t *testing.T) {
 	}
 }
 
+// TestThreadComposerAndOrderWave4 locks F#383 criteria 4 + 5: a composer on the thread
+// (send to the selected desk/coordinator via the route-to-pane relay) and latest-at-bottom
+// ordering with a jump-to-latest affordance. Without a composer the standalone-conversations
+// test fails by definition — "a conversations page you cannot converse from."
+func TestThreadComposerAndOrderWave4(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	html := doGet(t, srv, "/").Body.String()
+	for _, marker := range []string{`id="thread-composer"`, `id="thread-composer-input"`, `id="thread-jump"`} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("index.html must carry the thread composer/jump element %q — F#383 criteria 4/5", marker)
+		}
+	}
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{
+		"syncComposer",         // composer shown + labelled for the selected desk
+		"scrollThreadToBottom", // latest-at-bottom pin
+		"showThreadJump",       // jump-to-latest affordance
+		`"/api/control/route"`, // the composer sends via the existing relay
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js must wire the thread composer / scroll (missing %q) — F#383 criteria 4/5", marker)
+		}
+	}
+	// The thread must sort ASCENDING (oldest first, latest at the bottom) — guard the exact
+	// comparator so a refactor can't silently flip it back to newest-first.
+	if !strings.Contains(js, "return at - bt;") || strings.Contains(js, "return bt - at;") {
+		t.Error("dash.js renderThread must sort ascending (return at - bt) — latest-at-bottom, F#383 criterion 5")
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	if !strings.Contains(css, ".thread-composer") || !strings.Contains(css, ".thread-jump") {
+		t.Error("dash.css must style the thread composer + jump chip (.thread-composer/.thread-jump) — F#383")
+	}
+}
+
 // TestHandleSessionMirror locks the /api/session-mirror contract the glance JS binds
 // to: { agent, entries:[{ts, info, ...}] } with entries ascending (newest last). This
 // guards the field names dash.js silently depends on (entries[last].ts / .info).

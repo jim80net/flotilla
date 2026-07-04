@@ -229,6 +229,7 @@
       buttons[i].addEventListener("click", function () {
         selectedDesk = this.getAttribute("data-desk");
         selectedChannel = this.getAttribute("data-channel"); // scope the selection to THIS channel copy (#370)
+        resetThreadScroll(); // a freshly selected thread opens at its latest message
         renderConversations();
         syncControlTargets(true); // explicit desk-selection: set the targets authoritatively
         fetchMirror();            // load the newly-selected desk's session mirror
@@ -474,12 +475,13 @@
       thread.innerHTML = '<div class="empty">No coordination history for this desk yet.</div>';
       return;
     }
-    // Newest-first (descending). Unparseable timestamps (rare malformed/raw ledger
-    // lines with no time) sort to the bottom; Array.sort is stable (ES2019+) so
-    // their relative order is preserved.
+    // Oldest-first (ascending) — chat convention: the latest message is at the BOTTOM,
+    // with the composer directly beneath it (F#383 criterion 5). Unparseable timestamps
+    // (rare malformed/raw ledger lines with no time) sort to the TOP (treated as oldest);
+    // Array.sort is stable (ES2019+) so their relative order is preserved.
     items.sort(function (a, b) {
       var at = isNaN(a.t) ? -Infinity : a.t, bt = isNaN(b.t) ? -Infinity : b.t;
-      return bt - at;
+      return at - bt;
     });
     // Dedup: skip the innerHTML rewrite (which re-announces via the log's aria-live
     // AND resets the operator's scroll) when the merged timeline is unchanged. The
@@ -495,7 +497,26 @@
     thread.innerHTML = items.map(function (it) {
       return it.kind === "mirror" ? threadMirrorMsg(it.m) : threadLedgerMsg(it.e);
     }).join("");
+    // Latest-at-bottom scroll discipline (F#383 criterion 5): if the operator is pinned to
+    // the bottom (the default, and whenever they scroll back down), keep the newest message
+    // in view; if they've scrolled UP into history, don't yank them — surface a jump-to-latest
+    // chip instead so a live tick can't steal their place.
+    if (threadPinned) scrollThreadToBottom();
+    else showThreadJump(true);
   }
+
+  // ── thread composer + latest-at-bottom scroll (F#383 criteria 4 + 5) ──────────────
+  var threadPinned = true; // true ⇒ keep the newest message in view on each render
+  function scrollThreadToBottom() {
+    var t = el("conv-thread");
+    if (t) t.scrollTop = t.scrollHeight;
+  }
+  function showThreadJump(on) {
+    var j = el("thread-jump");
+    if (j) j.hidden = !on;
+  }
+  // A render for a NEWLY selected desk should always open at the bottom (freshest first-read).
+  function resetThreadScroll() { threadPinned = true; showThreadJump(false); }
 
   // threadLedgerMsg renders one CoS relay-ledger line (a message to/from the desk).
   function threadLedgerMsg(e) {
@@ -590,6 +611,22 @@
     renderSessionMirror();
     renderThread(history);
     renderBacklogStrip(history);
+    syncComposer();
+  }
+
+  // syncComposer shows the thread composer for the selected desk/coordinator and labels it
+  // with that target — so the operator can type + send from the thread they're reading
+  // (F#383 criterion 4: presence AND discoverability). Hidden when nothing is selected.
+  function syncComposer() {
+    var form = el("thread-composer");
+    var ta = el("thread-composer-input");
+    if (!form || !ta) return;
+    if (selectedDesk) {
+      form.hidden = false;
+      ta.placeholder = "Message " + selectedDesk + "…";
+    } else {
+      form.hidden = true;
+    }
   }
 
   // syncControlTargets prefills the route/resume target fields with the selected
@@ -826,6 +863,7 @@
   function openConversation(desk) {
     if (!desk) return;
     selectedDesk = desk;
+    resetThreadScroll(); // open the deep-linked thread at its latest message
     showView("conversations");
     renderConversations();
     syncControlTargets(true);
@@ -846,4 +884,52 @@
     var field = el(id);
     if (field) field.addEventListener("input", function () { controlTargetsTouched = true; });
   });
+
+  // Thread composer + latest-at-bottom scroll wiring (F#383 criteria 4 + 5). The composer
+  // sends to the SELECTED desk/coordinator via the same route-to-pane relay the control
+  // column uses (/api/control/route) — the typed outcome is surfaced honestly (the pane
+  // lock can report busy/crashed/unconfirmed; never a fake success).
+  (function wireThreadComposer() {
+    var thread = el("conv-thread");
+    if (thread) {
+      thread.addEventListener("scroll", function () {
+        var nearBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 48;
+        threadPinned = nearBottom;
+        // Standard chat behavior: the jump-to-latest chip is offered whenever the operator
+        // has scrolled up into history, and hides the moment they're back at the bottom.
+        showThreadJump(!nearBottom);
+      });
+    }
+    var jump = el("thread-jump");
+    if (jump) jump.addEventListener("click", function () { threadPinned = true; showThreadJump(false); scrollThreadToBottom(); });
+
+    var form = el("thread-composer"), ta = el("thread-composer-input"), msg = el("thread-composer-msg");
+    function setMsg(text, kind) { if (msg) { msg.className = "form-msg" + (kind ? " " + kind : ""); msg.textContent = text; } }
+    function resizeComposer() { if (ta) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 120) + "px"; } }
+    if (form && ta) {
+      form.addEventListener("submit", function (ev) {
+        ev.preventDefault();
+        var target = selectedDesk, body = ta.value.trim();
+        if (!target) { setMsg("Select a desk first.", "err"); return; }
+        if (!body) { setMsg("Type a message.", "err"); return; }
+        var btn = form.querySelector("button");
+        setMsg("Sending…", "");
+        if (btn) btn.disabled = true;
+        postJSON("/api/control/route", { target: target, message: body }).then(function (res) {
+          var outcome = (res && res.outcome) || "(no outcome reported)";
+          var detail = res && res.detail ? " — " + res.detail : "";
+          if (outcome === "delivered") { ta.value = ""; resizeComposer(); threadPinned = true; scrollThreadToBottom(); }
+          setMsg("Outcome: " + outcome + detail, outcome === "delivered" ? "ok" : "");
+        }).catch(function (err) { setMsg(err.message, "err"); }).then(function () { if (btn) btn.disabled = false; });
+      });
+      // Enter sends; Shift+Enter is a newline (chat convention).
+      ta.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          if (form.requestSubmit) form.requestSubmit(); else form.dispatchEvent(new Event("submit", { cancelable: true }));
+        }
+      });
+      ta.addEventListener("input", resizeComposer);
+    }
+  })();
 })();
