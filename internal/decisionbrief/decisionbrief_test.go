@@ -2,6 +2,8 @@ package decisionbrief
 
 import (
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/jim80net/flotilla/internal/dash"
@@ -74,22 +76,42 @@ func TestResolveOwner_ConversationAgentWins(t *testing.T) {
 	}
 }
 
-func TestTracker_Debounce(t *testing.T) {
+func TestTracker_TryClaimDebounce(t *testing.T) {
 	tr := NewTracker()
 	key := "goal-a:item"
 	active := map[string]bool{key: true}
 	tr.Reconcile(active)
-	if !tr.ShouldDispatch(key) {
-		t.Fatal("first dispatch should be allowed")
+	if !tr.TryClaim(key) {
+		t.Fatal("first claim should succeed")
 	}
-	tr.MarkDispatched(key)
-	if tr.ShouldDispatch(key) {
-		t.Fatal("second dispatch should be suppressed")
+	if tr.TryClaim(key) {
+		t.Fatal("second claim should be suppressed")
 	}
 	delete(active, key)
 	tr.Reconcile(active)
-	if !tr.ShouldDispatch(key) {
-		t.Fatal("cleared gap should re-arm dispatch")
+	if !tr.TryClaim(key) {
+		t.Fatal("cleared gap should re-arm claim")
+	}
+}
+
+// Overlapping async tick scans must not double-dispatch the same gap (#352 P2).
+func TestTracker_TryClaimConcurrentSingleWinner(t *testing.T) {
+	tr := NewTracker()
+	key := "ship-widget:[blocked] deploy"
+	var winners int32
+	var wg sync.WaitGroup
+	for i := 0; i < 64; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if tr.TryClaim(key) {
+				atomic.AddInt32(&winners, 1)
+			}
+		}()
+	}
+	wg.Wait()
+	if winners != 1 {
+		t.Errorf("TryClaim winners = %d, want exactly 1", winners)
 	}
 }
 

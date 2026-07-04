@@ -167,18 +167,17 @@ func (t *Tracker) Reconcile(active map[string]bool) {
 	}
 }
 
-// ShouldDispatch reports whether gap key has not yet been dispatched this cycle.
-func (t *Tracker) ShouldDispatch(key string) bool {
+// TryClaim atomically checks whether gap key is undispatched and marks it claimed.
+// Returns true only for the caller that wins the race — overlapping async tick
+// scans must use this instead of separate ShouldDispatch/MarkDispatched (#352 P2).
+func (t *Tracker) TryClaim(key string) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return !t.dispatched[key]
-}
-
-// MarkDispatched records that a gap key was dispatched.
-func (t *Tracker) MarkDispatched(key string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	if t.dispatched[key] {
+		return false
+	}
 	t.dispatched[key] = true
+	return true
 }
 
 // DispatchPrompt is injected into the owning desk when a gap is first detected.

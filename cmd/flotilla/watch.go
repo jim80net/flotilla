@@ -1274,7 +1274,12 @@ func decisionBriefOnTick(
 		}
 		var backlogMarkdown string
 		if backlogPath != "" {
-			if bb, rerr := os.ReadFile(backlogPath); rerr == nil {
+			bb, rerr := os.ReadFile(backlogPath)
+			if rerr != nil {
+				if !os.IsNotExist(rerr) {
+					log.Printf("flotilla watch: decision-brief: read backlog %q: %v (continuing without backlog binding)", backlogPath, rerr)
+				}
+			} else {
 				backlogMarkdown = string(bb)
 			}
 		}
@@ -1295,12 +1300,11 @@ func decisionBriefOnTick(
 			}
 			key := decisionbrief.GapKey(g)
 			active[key] = true
-			if !tracker.ShouldDispatch(key) {
+			if !tracker.TryClaim(key) {
 				continue
 			}
 			log.Printf("flotilla watch: decision-brief dispatch %s → %s (class=%s)", g.GoalID, owner, g.Class)
 			enqueue(watch.Job{Agent: owner, Message: decisionbrief.DispatchPrompt(g), Kind: "detector"})
-			tracker.MarkDispatched(key)
 		}
 		tracker.Reconcile(active)
 	}
