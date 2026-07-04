@@ -500,6 +500,18 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("goals.js must carry the #349 pending taxonomy token (missing %q)", marker)
 		}
 	}
+	// #349 Inc 5 F13 — history of done: realized goals gathered into a dedicated list
+	// (a row opens the goal's drawer). The client renders it; the CSS + HTML host it.
+	for _, marker := range []string{"renderDoneHistory", "gdone-row", "goals-done-list"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must render the #349 Inc 5 history-of-done (missing %q)", marker)
+		}
+	}
+	// cubic #363 P2: the done panel must distinguish a load ERROR (found===false) from a
+	// genuine empty — an unavailable state, not "No realized goals yet" dressing an error.
+	if !strings.Contains(js, "Realized goals are unavailable") {
+		t.Error("renderDoneHistory must show an honest unavailable state when the goals doc fails to load (cubic #363 P2)")
+	}
 	// mobile-QA #330: the node controls counter-scale the fit-to-view zoom (--ctl-scale)
 	// so they stay screen-constant (tappable) on phone, and the css reveals ⓘ on touch.
 	if !strings.Contains(js, "--ctl-scale") {
@@ -510,6 +522,13 @@ func TestGoalsCanvasAssets(t *testing.T) {
 		if !strings.Contains(css, marker) {
 			t.Errorf("dash.css must style the #349 pending taxonomy state (missing %q)", marker)
 		}
+	}
+	// #349 Inc 5 F13: the history-of-done panel is hosted in the page + styled.
+	if h := doGet(t, srv, "/").Body.String(); !strings.Contains(h, `id="goals-done"`) {
+		t.Error("index.html must host the #349 Inc 5 history-of-done panel (#goals-done)")
+	}
+	if !strings.Contains(css, ".gdone-row") || !strings.Contains(css, ".goals-done-list") {
+		t.Error("dash.css must style the #349 Inc 5 history-of-done (.gdone-row/.goals-done-list)")
 	}
 	if !strings.Contains(css, "var(--ctl-scale") || !strings.Contains(css, "@media (hover: none)") {
 		t.Error("dash.css must counter-scale .gnode-ctl and reveal ⓘ on touch (@media hover:none) — #330")

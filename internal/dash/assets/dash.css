@@ -1083,6 +1083,23 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 
 .goals-panel { display: flex; flex-direction: column; }
 .goals-legend { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+
+/* #349 Inc 5 F13: history-of-done panel — realized goals in one place, below the map. */
+.goals-done { margin-top: .85rem; padding: 0; }
+.goals-done-sum { cursor: pointer; padding: .7rem 1rem; display: flex; align-items: center; gap: .5rem; list-style: none; }
+.goals-done-sum::-webkit-details-marker { display: none; }
+.goals-done-sum::before { content: "▸"; color: var(--ink-3); font-size: .7rem; transition: transform .15s var(--ease); }
+.goals-done[open] .goals-done-sum::before { transform: rotate(90deg); }
+.goals-done-lab { font-family: var(--display); font-size: .84rem; color: var(--ink); letter-spacing: .02em; }
+.goals-done-count { font-size: .62rem; color: var(--ok); border: 1px solid color-mix(in srgb, var(--ok) 40%, transparent); border-radius: 999px; padding: 1px 7px; font-variant-numeric: tabular-nums; }
+.goals-done-count:empty { display: none; }
+.goals-done-list { padding: 0 .6rem .7rem; display: grid; gap: 4px; }
+.gdone-row { display: flex; align-items: baseline; gap: .55rem; width: 100%; text-align: left; background: none; border: 0; border-radius: var(--r-sm); padding: .4rem .5rem; cursor: pointer; font: inherit; color: var(--ink-2); }
+.gdone-row:hover { background: color-mix(in srgb, var(--ok) 8%, transparent); }
+.gdone-row:focus-visible { outline: 2px solid var(--ok); outline-offset: -1px; }
+.gdone-check { color: var(--ok); flex: none; font-size: .8rem; }
+.gdone-title { color: var(--ink); flex: 1; min-width: 0; }
+.gdone-scope { font-size: .58rem; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); flex: none; }
 .glegend { display: inline-flex; align-items: center; gap: 6px; font-size: .68rem; color: var(--ink-2); }
 .gdot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 .gdot-realized { border: 1px solid var(--ok-dim, #2f7d47); background: color-mix(in srgb, var(--ok) 22%, transparent); }

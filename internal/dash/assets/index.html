@@ -187,6 +187,16 @@
       </div>
       <div id="goals-empty" class="goals-empty muted hidden"></div>
     </section>
+    <!-- #349 Inc 5 F13: a history of DONE — realized goals gathered in one place. The live
+         map greens/ghosts completed nodes so they recede; the operator asked to see done
+         goals SOMEWHERE. Read-only; collapsed by default so it never crowds the map. -->
+    <details id="goals-done" class="panel goals-done">
+      <summary class="goals-done-sum">
+        <span class="goals-done-lab">History of done</span>
+        <span id="goals-done-count" class="goals-done-count"></span>
+      </summary>
+      <div id="goals-done-list" class="goals-done-list" aria-live="polite"></div>
+    </details>
     <!-- #302: waiting-on-you intervention modal (situation brief + response input; reply path is a prototype stub) -->
     <div id="goals-modal" class="goals-modal" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="goals-modal-title">
       <div class="gm-dialog">
