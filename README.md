@@ -246,24 +246,29 @@ Near-term:
       Channel **provisioning** is mechanical too — `flotilla channel create|list|delete`
       stands up the channels via the bot token (idempotent, Manage-Channels preflight,
       emits the binding), so the layout is self-service end to end.
-- [x] **`flotilla dash` — optional local web interface (read surface + issue
-      tracker).** A self-contained web UI served by the `flotilla` binary. The
-      **fleet view** reads the artifacts `flotilla watch` already writes: a live
-      fleet board (each desk's last-known state with three-state snapshot
-      freshness — absent / stale / fresh), the federation topology (channel → XO →
-      members), and the coordination history (the CoS ledger + the backlog
-      drive-queue) — a pure reader (no daemon, no pane probing, no fleet-state
-      writes), with live Server-Sent-Events updates. The **Issues tab** is a
-      native, GitHub-backed issue tracker (via `gh`): list / view / create /
-      comment / label / close, with a one-click `operator-idea` filter. The
-      **Control tab** exposes cnc actions over the existing delivery library:
-      post an operator note (`discord.Post`) and route an instruction
-      (`surface.Confirm.Submit`, confirmed delivery serialized cross-process by
-      the per-pane transaction lock), each mirrored to the CoS ledger; resume a
-      crashed desk is a tracked follow-on (its orchestration is being extracted
-      into a reusable library). Loopback by default; all writes carry a
-      browser-CSRF defense: [docs/dash-runbook.md](./docs/dash-runbook.md). The
-      token-gated non-loopback bind is a tracked follow-on.
+- [x] **`flotilla dash` — an optional local web interface.** A self-contained web
+      UI served by the `flotilla` binary, reading the artifacts `flotilla watch`
+      already writes (no daemon, no pane probing) with live Server-Sent-Events
+      updates and a warm-light default theme. Three tabs:
+      - **Conversations** (default) — per-desk cards, each with that desk's
+        turn-by-turn session history mirrored inline (at an *info* or *debug*
+        detail level), plus a context column of live control actions: post a fleet
+        note, route an instruction to a desk, or resume a crashed desk (writes are
+        serialized by the per-pane transaction lock and carry a browser-CSRF defense).
+      - **Goals** — the fleet's goal map, defaulting to an **org view** (per-desk
+        cards from the roster, with dotted containers grouping collaborating desks)
+        with a tree-view toggle. A ⚠ Respond control on an awaiting/blocked node
+        opens a decision brief; the reply path itself is a prototype, not yet wired
+        to the control API.
+      - **Issues** — a native, GitHub-backed issue tracker (via `gh`): list / view /
+        create / comment / label / close, with a one-click `operator-idea` filter.
+      Loopback by default; the token-gated non-loopback bind is a tracked follow-on:
+      [docs/dash-runbook.md](./docs/dash-runbook.md).
+- [x] **`flotilla parade` — fleet retro roll-up.** Elicits a four-domain retro from
+      each desk (accomplishments and learnings, plus optional next-steps and needs),
+      then rolls the answers up the federation hierarchy: `flotilla parade rollup` has
+      each XO curate its desks' answers, and `flotilla parade fleet` produces a single
+      operator fleet report. Operator-triggered (no daemon cadence).
 - [ ] Release-sign-off workflow.
 - [x] Docs + an end-to-end quickstart that a newcomer can run cold — [docs/quickstart.md](./docs/quickstart.md) (cold-tested: install, send, clock).
 
