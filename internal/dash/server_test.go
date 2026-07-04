@@ -542,6 +542,12 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	if !strings.Contains(css, "touch-action: pan-y") || !strings.Contains(css, ".pan-active") {
 		t.Error("dash.css must default the viewport to touch-action:pan-y and reclaim it on .pan-active (#330)")
 	}
+	// mobile clipped-button fix: the goals layout toggle (overflow:hidden) must NOT shrink and
+	// clip its buttons when the squeezed header row crushes it (seen at 768) — flex:none on the
+	// toggle + a wrapping goals panel-head so head-right drops below the title instead.
+	if !strings.Contains(css, ".goals-panel > .panel-head") || !strings.Contains(css, "flex: none") {
+		t.Error("dash.css must keep the goals layout toggle from clipping on a squeezed header (flex:none + wrapping panel-head)")
+	}
 	for _, marker := range []string{"leafCount", "reach(", "nodeW", "RING_GAP"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("goals.js must retain the #324 content-aware org geometry (missing %q)", marker)
