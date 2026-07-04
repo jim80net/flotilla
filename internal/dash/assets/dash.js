@@ -660,20 +660,26 @@
   }
   window.flotillaDash.pushNav = pushNav;
   function applyNav(state) {
+    // try/finally so a restore-time throw (a render/restore error) can NEVER leave the
+    // guard stuck true — a stuck guard would suppress every future pushNav and silently
+    // kill history for the rest of the session (cubic #354 P2).
     restoringNav = true;
-    var s = state || { view: "conversations" };
-    var view = s.view || "conversations";
-    // Set the selection to the state's desk — including CLEARING it on a desk:null state
-    // (Back to the seed must not leave the thread/header/mirror on the old desk; a null
-    // selection lets renderConversations re-pick the default) — cubic #351 P2.
-    if (view === "conversations") selectedDesk = s.desk || null;
-    showView(view);
-    if (view === "conversations") { renderConversations(); syncControlTargets(true); fetchMirror(); }
-    if (view === "goals" && window.flotillaGoals && window.flotillaGoals.restoreNode) {
-      if (window.flotillaGoals.show) window.flotillaGoals.show(); // ensure the map is rendered first
-      window.flotillaGoals.restoreNode(s.node || null);
+    try {
+      var s = state || { view: "conversations" };
+      var view = s.view || "conversations";
+      // Set the selection to the state's desk — including CLEARING it on a desk:null state
+      // (Back to the seed must not leave the thread/header/mirror on the old desk; a null
+      // selection lets renderConversations re-pick the default) — cubic #351 P2.
+      if (view === "conversations") selectedDesk = s.desk || null;
+      showView(view);
+      if (view === "conversations") { renderConversations(); syncControlTargets(true); fetchMirror(); }
+      if (view === "goals" && window.flotillaGoals && window.flotillaGoals.restoreNode) {
+        if (window.flotillaGoals.show) window.flotillaGoals.show(); // ensure the map is rendered first
+        window.flotillaGoals.restoreNode(s.node || null);
+      }
+    } finally {
+      restoringNav = false;
     }
-    restoringNav = false;
   }
   window.addEventListener("popstate", function (e) { applyNav(e.state); });
   // Seed the initial entry so the very first Back has a target.
