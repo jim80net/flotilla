@@ -432,6 +432,33 @@ func TestThreadComposerAndOrderWave4(t *testing.T) {
 	}
 }
 
+// TestMobileTouchTargets397 locks issue #397 (mobile COMPELLING bar): the primary controls
+// the ≤900px touch block previously missed — the drive-queue modal close, the jump-to-latest
+// chip, and the (touch-only) pan-lock toggle — are all ≥44px hit targets, per design-book #330.
+func TestMobileTouchTargets397(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	// The conv-modal close joins its already-covered siblings at a 44x44 hit box.
+	if !strings.Contains(css, ".gd-close, .gm-close, .conv-modal-x { width: 44px; height: 44px; }") {
+		t.Error("dash.css must give the drive-queue modal close (.conv-modal-x) a 44x44 touch target — #397")
+	}
+	// The jump-to-latest chip is in the ≤900px 44px min-height set.
+	if !strings.Contains(css, ".thread-jump,") {
+		t.Error("dash.css must raise the jump-to-latest chip (.thread-jump) to the 44px touch block — #397")
+	}
+	// The pan-lock toggle (shown only on touch) is bumped 34px → 44px.
+	if gi := strings.Index(css, ".gzoomctl .panlock {"); gi >= 0 {
+		if end := strings.Index(css[gi:], "}"); end >= 0 {
+			if rule := css[gi : gi+end]; !strings.Contains(rule, "min-height: 44px") {
+				t.Errorf("dash.css .gzoomctl .panlock must be min-height 44px (was 34px) — #397; rule=%q", rule)
+			}
+		}
+	} else {
+		t.Error("dash.css must retain the .gzoomctl .panlock rule")
+	}
+}
+
 // TestHandleSessionMirror locks the /api/session-mirror contract the glance JS binds
 // to: { agent, entries:[{ts, info, ...}] } with entries ascending (newest last). This
 // guards the field names dash.js silently depends on (entries[last].ts / .info).
