@@ -393,7 +393,7 @@ type pageData struct {
 }
 
 // normalizeGoalsLayout resolves the initial Goals-map layout: "tree" when explicitly set,
-// else "org" (the operator-blessed default, #324). The live toggle still overrides it.
+// else "mindmap" (the operator-blessed default — org was its precursor, retired from the UI). The live toggle still overrides it.
 // normalizeGoalsLayout resolves the env-seeded initial Goals layout. The operator retired
 // org from the UI ("I just want mind map or tree; org is just a precursor to mindmap"), so
 // the default is now MIND MAP; "tree" is honored; anything else — including the retired
