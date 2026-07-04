@@ -499,9 +499,14 @@ code {
 .dbg-val { color: var(--ink-2); word-break: break-word; white-space: pre-wrap; }
 .dbg-firewall .dbg-val { color: var(--amber); }
 /* goals map layout toggle (tree ⇄ org, org-graph v2 §2) */
-.goals-head-right { display: flex; align-items: center; gap: 12px; }
+.goals-head-right { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+/* The goals panel header is a flex row (title ⇢ head-right); at a squeezed width (e.g. 768)
+   the long title used to compress head-right and the toggle's overflow:hidden CLIPPED its
+   buttons. Let the header wrap so head-right drops below the title instead of being crushed. */
+.goals-panel > .panel-head { flex-wrap: wrap; }
 .goals-layout-toggle {
   display: inline-flex;
+  flex: none; /* never shrink below the toggle's buttons — overflow:hidden would clip them */
   border: 1px solid var(--line-soft, var(--line));
   border-radius: var(--r-sm);
   overflow: hidden;
