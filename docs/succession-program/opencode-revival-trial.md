@@ -41,10 +41,10 @@ Generic agent name: **`oc-desk`** (product lane; host-local roster entry — see
 | Role | Execution desk only — **not** a coordinator trial |
 | Model | Operator picks via `opencode models` (e.g. GLM 5.2, GPT) — training desk evals judgment models separately |
 
-### Launch recipe (manual until workspace init wired)
+### Launch recipe (workspace init wired — P1)
 
-`workspaceLaunchCommand` does **not** emit opencode yet (`harnessLaunchWired` = false; fast-follow
-notice). Trial uses a host-local launch recipe:
+`workspaceLaunchCommand` emits `opencode .` from the worktree cwd (`harnessLaunchWired` = true).
+Optional model pin remains host-local:
 
 ```bash
 # cwd = worktree root; OpenCode takes project path as positional
@@ -61,7 +61,7 @@ OPENCODE_MODEL=<provider>/<model> opencode .
 ### Provision steps (supervised; no XO swap)
 
 1. `flotilla workspace init --repo <url> oc-desk --roster "$FLOTILLA_ROSTER"`
-   — expect fast-follow notice; **override** `flotilla-launch.json` launch to `opencode .`
+   — launch recipe should be `opencode .` in `flotilla-launch.json`
 2. `flotilla doctrine install --refresh oc-desk --roster "$FLOTILLA_ROSTER"`
    — writes constitutional blocks into `AGENTS.md`
 3. Mint Discord webhook + channel binding (meta-XO / fleet ops — not the product desk)
@@ -82,7 +82,7 @@ OPENCODE_MODEL=<provider>/<model> opencode .
 
 | Priority | Item | Est. |
 |----------|------|------|
-| P1 | Wire `opencode` in `workspaceLaunchCommand` + `harnessLaunchWired` | small |
+| P1 | Wire `opencode` in `workspaceLaunchCommand` + `harnessLaunchWired` | **done** |
 | P2 | Live-elicit permission dialog markers (#54) on v1.3.15+ | small |
 | P3 | `ResultReader` for turn-final mirror/synthesis | medium |
 | P4 | `ComposerStateProbe` (coordinator prerequisite) | medium |

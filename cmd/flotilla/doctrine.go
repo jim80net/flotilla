@@ -132,14 +132,14 @@ func isClaudeSurface(surface string) bool {
 }
 
 // harnessLaunchWired reports whether workspace init emits a verified launch/load recipe
-// for the surface (Claude via --append-system-prompt-file; grok/codex load AGENTS.md from cwd).
+// for the surface (Claude via --append-system-prompt-file; grok/codex/opencode load AGENTS.md from cwd).
 func harnessLaunchWired(surface string) bool {
-	return isClaudeSurface(surface) || surface == "grok" || surface == "codex"
+	return isClaudeSurface(surface) || surface == "grok" || surface == "codex" || surface == "opencode"
 }
 
 // noteNonClaudeLoadFastFollow prints a one-line NOTICE when doctrine is written for a
-// surface whose launch/load is not yet wired. Claude, grok, and codex are wired; aider/opencode
-// still get the fast-follow notice.
+// surface whose launch/load is not yet wired. Claude, grok, codex, and opencode are wired;
+// aider still gets the fast-follow notice.
 func noteNonClaudeLoadFastFollow(surface, identityPath string) {
 	if harnessLaunchWired(surface) {
 		return

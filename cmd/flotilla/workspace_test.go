@@ -432,6 +432,37 @@ func TestCmdWorkspaceInitCoordinatorGrokScaffoldsPermissions(t *testing.T) {
 	}
 }
 
+func TestWorkspaceLaunchCommandOpenCode(t *testing.T) {
+	got, err := workspaceLaunchCommand("/desk", "oc-desk", "AGENTS.md", "opencode", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "opencode ." {
+		t.Errorf("opencode launch = %q, want %q", got, "opencode .")
+	}
+}
+
+func TestCmdWorkspaceInitOpenCodeScaffoldsLaunch(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)
+	repo := initTestGitRepo(t)
+	rosterPath := writeRosterFile(t, `{"agents":[{"name":"oc-desk","surface":"opencode"}]}`)
+	if err := cmdWorkspaceInit(workspaceInitArgs("oc-desk", rosterPath, repo)); err != nil {
+		t.Fatal(err)
+	}
+	worktree := filepath.Join(filepath.Dir(repo), "oc-desk")
+	if _, err := os.Stat(filepath.Join(worktree, "AGENTS.md")); err != nil {
+		t.Errorf("opencode surface should scaffold AGENTS.md in worktree: %v", err)
+	}
+	launch, err := os.ReadFile(filepath.Join(root, "oc-desk", "launch.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(launch), "opencode .") {
+		t.Errorf("opencode launch = %q, want opencode . recipe", launch)
+	}
+}
+
 func TestWorkspaceLaunchCommandCodexCoordinatorExportsSecrets(t *testing.T) {
 	got, err := workspaceLaunchCommand("/desk", "alpha-xo", "AGENTS.md", "codex", true)
 	if err != nil {

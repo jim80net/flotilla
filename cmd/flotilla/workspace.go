@@ -492,6 +492,9 @@ func workspaceLaunchCommand(worktreeAbs, agent, identity, surface string, coordi
 				shellQuote(agent), base), nil
 		}
 		return base, nil
+	case "opencode":
+		// OpenCode loads AGENTS.md from cwd; project path is the positional arg (trial doc P1).
+		return "opencode .", nil
 	default:
 		id, err := workspace.IdentityFileName(surface)
 		if err != nil {
