@@ -23,7 +23,7 @@ formation is the **celebratory / retro sibling** of visibility-synthesis.
   demo-able — say so explicitly.
 - **parade archive** — host-local deck the dash serves at **`/parade`**:
   `<parades-dir>/<YYYY-MM-DD>/slides.md` plus `assets/`. Default `<parades-dir>` is
-  `<roster-dir>/state/parades`; override with `flotilla dash --parades-dir` or
+  `<roster-dir>/parades`; override with `flotilla dash --parades-dir` or
   `FLOTILLA_DASH_PARADES_DIR`. Legacy `report.md` still renders; **slides.md is
   operative** for new parades.
 - **togglable presentation** — the `/parade` dash page is a deck viewer: each

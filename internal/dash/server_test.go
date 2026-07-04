@@ -960,8 +960,33 @@ func TestResolvePaths(t *testing.T) {
 	if cfg.SessionMirrorDir != filepath.Join(dir, "session-mirror") {
 		t.Errorf("session mirror dir = %q (should default to <roster-dir>/session-mirror)", cfg.SessionMirrorDir)
 	}
+	if cfg.ParadesPath != filepath.Join(dir, "parades") {
+		t.Errorf("parades path = %q (should default to <roster-dir>/parades)", cfg.ParadesPath)
+	}
 	if cfg.LedgerPath != filepath.Join(dir, "context-ledger.md") {
 		t.Errorf("ledger path = %q (should inherit roster CosLedger)", cfg.LedgerPath)
+	}
+
+	// #376: roster already in state/ — default must be state/parades, not state/state/parades.
+	stateDir := filepath.Join(dir, "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stateRoster := filepath.Join(stateDir, "flotilla.json")
+	if err := os.WriteFile(stateRoster, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rc2, err := loadInlineRosterAt(t, stateRoster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg2 := ResolvePaths(Config{RosterPath: stateRoster}, rc2)
+	wantParades := filepath.Join(stateDir, "parades")
+	if cfg2.ParadesPath != wantParades {
+		t.Errorf("state roster parades path = %q, want %q", cfg2.ParadesPath, wantParades)
+	}
+	if strings.Contains(cfg2.ParadesPath, filepath.Join("state", "state")) {
+		t.Errorf("parades path must not double state/: %q", cfg2.ParadesPath)
 	}
 }
 

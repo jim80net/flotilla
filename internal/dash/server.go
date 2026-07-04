@@ -31,7 +31,7 @@ type Config struct {
 	GoalsPath        string // goals file the Goals view reads (default <roster-dir>/fleet-goals.json)
 	GoalsYAMLPath    string // goals yaml source compiled on load (default <roster-dir>/fleet-goals.yaml)
 	SessionMirrorDir string // per-agent session-mirror ledgers (default <roster-dir>/session-mirror)
-	ParadesPath      string // parade archive: <dir>/<YYYY-MM-DD>/{report.md,assets/} (default <roster-dir>/state/parades)
+	ParadesPath      string // parade archive: <dir>/<YYYY-MM-DD>/{report.md,assets/} (default <roster-dir>/parades)
 	Bind             string // listen address (default 127.0.0.1:8787)
 	Repo             string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
 	SecretsPath      string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
@@ -169,7 +169,8 @@ func (s *Server) Run(ctx context.Context) error {
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 
-	fmt.Fprintf(os.Stderr, "flotilla dash: serving on http://%s (reading %s)\n", s.cfg.Bind, s.cfg.SnapshotPath)
+	fmt.Fprintf(os.Stderr, "flotilla dash: serving on http://%s (reading %s; parades %s)\n",
+		s.cfg.Bind, s.cfg.SnapshotPath, s.cfg.ParadesPath)
 	select {
 	case <-ctx.Done():
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -562,7 +563,9 @@ func ResolvePaths(cfg Config, rc *roster.Config) Config {
 		cfg.SessionMirrorDir = filepath.Join(dir, "session-mirror")
 	}
 	if cfg.ParadesPath == "" {
-		cfg.ParadesPath = filepath.Join(dir, "state", "parades")
+		// Sibling of the roster file — when the roster lives in state/ (the common
+		// deploy shape), <roster-dir>/parades is state/parades, NOT state/state/parades (#376).
+		cfg.ParadesPath = filepath.Join(dir, "parades")
 	}
 	// The CoS ledger path is whatever the roster resolved (empty when the CoS
 	// mirror is inert — then the history view shows no ledger, honestly).
