@@ -241,6 +241,7 @@ type GoalsCounts struct {
 	Realized     int `json:"realized"`     // status_display achieved
 	InFlight     int `json:"in_flight"`    // status_display in-flight
 	Awaiting     int `json:"awaiting"`     // awaiting + blocked — the "needs attention" bucket
+	Pending      int `json:"pending"`      // dependency-gated — waiting on an unfinished dependency (#349 Inc 3)
 	Aspirational int `json:"aspirational"` // active + paused + cancelled — not yet realized
 }
 
@@ -419,6 +420,7 @@ func BuildGoals(in GoalsInputs) GoalsDoc {
 	for _, id := range roots {
 		emit(id, 0)
 	}
+	relabelPending(&doc, byID)
 	materializeRosterDesks(&doc, in)
 	doc.Collaborations = buildCollaborations(&doc)
 	return doc
@@ -848,6 +850,37 @@ func nodeRollup(g *Goal, items []RenderedWorkItem, kids []string, rollupOf func(
 	return "active" // steps 8-9
 }
 
+// relabelPending distinguishes dependency-gated from decision-gated (#349 Inc 3): a goal
+// that is otherwise "active" (nothing blocked/awaiting/in-flight in its own subtree) but has
+// a depends_on target that is NOT yet achieved is waiting on a DEPENDENCY, not on an operator
+// decision or a failure — relabel it "pending" (a calmer, distinct state). This is a post-pass
+// over the FINISHED rollups: it reads each target's already-computed status_display, so there
+// is no recursion and a depends_on cycle cannot loop it.
+func relabelPending(doc *GoalsDoc, byID map[string]*Goal) {
+	statusByID := make(map[string]string, len(doc.Goals))
+	for i := range doc.Goals {
+		statusByID[doc.Goals[i].ID] = doc.Goals[i].StatusDisplay
+	}
+	for i := range doc.Goals {
+		g := &doc.Goals[i]
+		if g.StatusDisplay != "active" { // only a would-be-ready goal can become pending
+			continue
+		}
+		authored := byID[g.ID]
+		if authored == nil {
+			continue
+		}
+		for _, dep := range authored.DependsOn {
+			if s, ok := statusByID[dep]; ok && s != "achieved" {
+				g.StatusDisplay = "pending"
+				doc.Counts.Aspirational-- // it was counted as active → aspirational during emit
+				doc.Counts.Pending++
+				break
+			}
+		}
+	}
+}
+
 // displayScope emits the v2 API scope string (flotilla | desk | task), dual-reading v1 tokens.
 func displayScope(declared GoalScope, depth int) string {
 	if declared == "" {
@@ -936,6 +969,8 @@ func countNode(c *GoalsCounts, n RenderedGoal) {
 		c.InFlight++
 	case "awaiting", "blocked":
 		c.Awaiting++
+	case "pending":
+		c.Pending++
 	case "active", "paused", "cancelled":
 		c.Aspirational++
 	}

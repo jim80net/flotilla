@@ -1068,6 +1068,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gtile-goal { --tone: var(--ink-2); }
 .gtile-inflight { --tone: var(--cyan); }
 .gtile-awaiting { --tone: var(--amber); }
+.gtile-pending { --tone: var(--violet); }
 .gtile-realized { --tone: var(--ok); }
 .gtile-aspirational { --tone: var(--ink-3); }
 .gtile-k { font-size: .64rem; letter-spacing: .11em; text-transform: uppercase; color: var(--ink-3); }
@@ -1082,6 +1083,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gdot-realized { border: 1px solid var(--ok-dim, #2f7d47); background: color-mix(in srgb, var(--ok) 22%, transparent); }
 .gdot-in-flight, .gdot-inflight { border: 1px solid var(--cyan); background: color-mix(in srgb, var(--cyan) 22%, transparent); }
 .gdot-awaiting { border: 1px solid var(--amber); background: color-mix(in srgb, var(--amber) 22%, transparent); }
+.gdot-pending { border: 1px solid var(--violet); background: color-mix(in srgb, var(--violet) 22%, transparent); }
 .gdot-aspirational { border: 1px dashed var(--ink-3); background: transparent; }
 .gdot-dep { border: 1px dashed var(--violet); background: transparent; }
 
@@ -1194,6 +1196,9 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 @keyframes gscan { 0% { background-position: 130% 0; } 100% { background-position: -30% 0; } }
 .gnode.state-awaiting { border-color: color-mix(in srgb, var(--amber) 60%, var(--line)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--amber) 30%, transparent); }
 .gnode.state-blocked { border-color: color-mix(in srgb, var(--err) 60%, var(--line)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--err) 30%, transparent); }
+/* pending = dependency-gated: a calm violet (matches the depends_on arcs), NOT the
+   red/amber of a block or a decision — the goal is ready, it is only waiting upstream. */
+.gnode.state-pending { border-color: color-mix(in srgb, var(--violet) 55%, var(--line)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--violet) 26%, transparent); }
 .gnode.state-aspirational { border-style: dashed; border-color: var(--line); background: transparent; opacity: .66; }
 .gnode.state-aspirational .gnode-title { color: var(--ink-3); font-style: italic; }
 .gnode.state-paused { opacity: .6; }
@@ -1206,6 +1211,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gpill-in-flight { color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 45%, transparent); background: color-mix(in srgb, var(--cyan) 10%, transparent); }
 .gpill-awaiting { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 48%, transparent); background: color-mix(in srgb, var(--amber) 12%, transparent); }
 .gpill-blocked { color: var(--err); border-color: color-mix(in srgb, var(--err) 48%, transparent); background: color-mix(in srgb, var(--err) 12%, transparent); }
+.gpill-pending { color: var(--violet); border-color: color-mix(in srgb, var(--violet) 48%, transparent); background: color-mix(in srgb, var(--violet) 12%, transparent); }
 .gpill-aspirational, .gpill-active, .gpill-paused, .gpill-cancelled { color: var(--ink-3); }
 
 /* work-item chips */
@@ -1241,6 +1247,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gedge-realized { stroke: color-mix(in srgb, var(--ok) 42%, transparent); }
 .gedge-awaiting { stroke: color-mix(in srgb, var(--amber) 52%, transparent); stroke-dasharray: 5 5; }
 .gedge-blocked { stroke: color-mix(in srgb, var(--err) 55%, transparent); stroke-dasharray: 5 5; }
+.gedge-pending { stroke: color-mix(in srgb, var(--violet) 50%, transparent); stroke-dasharray: 4 5; }
 .gedge-aspirational { stroke: color-mix(in srgb, var(--ink-3) 48%, transparent); stroke-dasharray: 3 6; }
 
 /* cross-dependency arcs (depends_on) — faint dashed violet, distinct from the solid

@@ -451,12 +451,25 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("goals.js must retain the #349 click-through completeness (missing %q)", marker)
 		}
 	}
+	// #349 Inc 3 — taxonomy: a dependency-gated goal reads as PENDING (calm violet, tied to
+	// the depends_on arcs), distinct from decision-gated (awaiting/amber) and blocked (red).
+	// The client carries the legend/pill token; the server relabels it (see goals_test.go).
+	for _, marker := range []string{"pending", "waiting on a dependency"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must carry the #349 pending taxonomy token (missing %q)", marker)
+		}
+	}
 	// mobile-QA #330: the node controls counter-scale the fit-to-view zoom (--ctl-scale)
 	// so they stay screen-constant (tappable) on phone, and the css reveals ⓘ on touch.
 	if !strings.Contains(js, "--ctl-scale") {
 		t.Error("applyTransform must set --ctl-scale so node controls stay screen-constant under zoom (#330)")
 	}
 	css := doGet(t, srv, "/static/dash.css").Body.String()
+	for _, marker := range []string{".gpill-pending", ".gedge-pending", ".gnode.state-pending", ".gdot-pending"} {
+		if !strings.Contains(css, marker) {
+			t.Errorf("dash.css must style the #349 pending taxonomy state (missing %q)", marker)
+		}
+	}
 	if !strings.Contains(css, "var(--ctl-scale") || !strings.Contains(css, "@media (hover: none)") {
 		t.Error("dash.css must counter-scale .gnode-ctl and reveal ⓘ on touch (@media hover:none) — #330")
 	}
