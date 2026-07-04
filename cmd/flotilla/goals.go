@@ -39,7 +39,8 @@ usage:
                                                       fail-closed validate fleet-goals.yaml (and json if present)
   flotilla goals compile [--roster <path>] [--yaml <path>] [--json <path>]
                                                       compile fleet-goals.yaml → fleet-goals.json (roster-adjacent)
-  flotilla goals link --goal <id> (--issue <ref> | --backlog <match> | --inline <text> | --desk <agent>)
+  flotilla goals link --goal <id> [--roster <path>] [--yaml <path>] [--json <path>] [--label <text>]
+                      (--issue <ref> | --backlog <match> | --inline <text> | --desk <agent>)
                                                       attach a work item to fleet-goals.yaml (preserves yaml comments) and recompile json`)
 }
 
