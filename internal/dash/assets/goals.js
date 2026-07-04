@@ -520,46 +520,82 @@
     })(ring1, 1);
     if (center) nodeDepth[center.id] = 0;
 
-    function segLen(d) { return 120 + 22 * Math.min(d, 4); } // branch length grows gently outward
-    var MAX_FAN = 2.0; // radians (~115°): cap a node's children fan so a branch stays a limb
+    function segLen(d) { return 116 + 20 * Math.min(d, 4); } // base branch length per level
+    var GAP = 30; // tangential breathing room between adjacent sibling cards
     var placed = {};
 
-    // fan a node's children within a capped wedge centred on the node's outward heading.
-    function fanChildren(n) {
+    // place a node's children within the node's DISJOINT angular sector [a0,a1]: each child
+    // gets a sub-sector proportional to its leaf-weight and is positioned PARENT-RELATIVE at
+    // a segment length in the child's sub-sector midpoint. Disjoint sectors guarantee sibling
+    // AND cousin subtrees never angularly overlap (each subtree stays inside its wedge); the
+    // segment honours a circumference-minimum so a node's own children always arc-clear their
+    // card widths at that radius (the org circMin, applied locally). This is what tunes the
+    // limb geometry to hold at real fleet depth (19+ nodes, deep chains) without collisions.
+    function place(n, a0, a1) {
       var kids = clusterAdjacent(childrenOf(n));
       if (!kids.length) return;
-      var pc = nodeCenter(n), dir = n._dir;
-      var total = 0; kids.forEach(function (k) { total += leaves[k.id]; });
-      var span = kids.length === 1 ? 0 : Math.min(MAX_FAN, 0.5 * kids.length + 0.16 * total);
-      var cursor = dir - span / 2, d = (nodeDepth[n.id] || 0) + 1;
+      var pc = nodeCenter(n), sector = a1 - a0, d = (nodeDepth[n.id] || 0) + 1;
+      var total = 0, need = 0;
+      kids.forEach(function (k) { total += leaves[k.id]; need += k._w + GAP; });
+      // radius: the larger of the base per-level length and the arc-fit radius (need/sector),
+      // plus clearance from the parent card — so narrow sectors push their children outward.
+      var seg = Math.max(segLen(d), sector > 0.02 ? need / sector : 0) + Math.max(n._w, heightOf(n)) / 2;
+      var cursor = a0;
       kids.forEach(function (k) {
-        var w = span * (leaves[k.id] / (total || 1));
-        var kdir = kids.length === 1 ? dir : cursor + w / 2;
-        var seg = segLen(d) + Math.max(k._w, heightOf(k)) / 2; // clear the parent card
-        k._x = pc.x + seg * Math.cos(kdir) - k._w / 2;
-        k._y = pc.y + seg * Math.sin(kdir) - heightOf(k) / 2;
-        k._dir = kdir;
+        var w = sector * (leaves[k.id] / (total || 1));
+        var mid = kids.length === 1 ? (a0 + a1) / 2 : cursor + w / 2; // a lone child continues straight out
+        k._x = pc.x + seg * Math.cos(mid) - k._w / 2;
+        k._y = pc.y + seg * Math.sin(mid) - heightOf(k) / 2;
         placed[k.id] = true;
+        place(k, cursor, cursor + w); // the child fans its own children within ITS sector
         cursor += w;
-        fanChildren(k);
       });
     }
 
-    // hub at the origin; ring-1 splits the full circle by leaf-weight, each a limb outward.
-    if (center) { center._x = -center._w / 2; center._y = -heightOf(center) / 2; center._dir = 0; placed[center.id] = true; }
-    var ordered1 = clusterAdjacent(ring1), total1 = 0;
-    ordered1.forEach(function (n) { total1 += leaves[n.id]; });
+    // hub at the origin; ring-1 (flotillas/roots) splits the full circle by leaf-weight into
+    // disjoint sectors — each becomes a limb; place() then grows each limb outward.
+    if (center) { center._x = -center._w / 2; center._y = -heightOf(center) / 2; placed[center.id] = true; }
+    var ordered1 = clusterAdjacent(ring1), total1 = 0, need1 = 0;
+    ordered1.forEach(function (n) { total1 += leaves[n.id]; need1 += n._w + GAP; });
+    var seg1 = Math.max(segLen(1), need1 / (2 * Math.PI)) + 40;
     var cur = -Math.PI / 2;
     ordered1.forEach(function (n) {
-      var w = 2 * Math.PI * (leaves[n.id] / (total1 || 1));
-      var dir = cur + w / 2, seg = segLen(1) + 40;
-      n._x = seg * Math.cos(dir) - n._w / 2;
-      n._y = seg * Math.sin(dir) - heightOf(n) / 2;
-      n._dir = dir;
+      var w = 2 * Math.PI * (leaves[n.id] / (total1 || 1)), mid = cur + w / 2;
+      n._x = seg1 * Math.cos(mid) - n._w / 2;
+      n._y = seg1 * Math.sin(mid) - heightOf(n) / 2;
       placed[n.id] = true;
-      fanChildren(n);
+      place(n, cur, cur + w);
       cur += w;
     });
+
+    // Collision relaxation: disjoint sectors bound the ANGLE, but parent-relative placement
+    // lets cousins in adjacent sectors drift close near the congested center. A few passes of
+    // gentle axis-aligned separation nudge any residual overlapping pair apart along their
+    // smaller-overlap axis — n is small (tens of nodes), so O(n²)×passes is cheap. The hub is
+    // pinned (it anchors the map); everything else may shift a little to clear.
+    var relaxIds = Object.keys(nodeById).filter(function (id) { return placed[id]; });
+    for (var pass = 0; pass < 40; pass++) {
+      var moved = false;
+      for (var ri = 0; ri < relaxIds.length; ri++) {
+        for (var rj = ri + 1; rj < relaxIds.length; rj++) {
+          var A = nodeById[relaxIds[ri]], B = nodeById[relaxIds[rj]];
+          var aw = A._w, ah = heightOf(A), bw = B._w, bh = heightOf(B);
+          var dx = (B._x + bw / 2) - (A._x + aw / 2), dy = (B._y + bh / 2) - (A._y + ah / 2);
+          var ox = (aw + bw) / 2 + 16 - Math.abs(dx), oy = (ah + bh) / 2 + 12 - Math.abs(dy);
+          if (ox <= 0 || oy <= 0) continue; // no overlap (with margin)
+          moved = true;
+          var aPin = center && A === center, bPin = center && B === center;
+          if (ox < oy) { // separate on x (the smaller penetration axis)
+            var px = (dx < 0 ? -1 : 1) * ox;
+            if (aPin) B._x += px; else if (bPin) A._x -= px; else { A._x -= px / 2; B._x += px / 2; }
+          } else { // separate on y
+            var py = (dy < 0 ? -1 : 1) * oy;
+            if (aPin) B._y += py; else if (bPin) A._y -= py; else { A._y -= py / 2; B._y += py / 2; }
+          }
+        }
+      }
+      if (!moved) break;
+    }
 
     // shift the placed cloud into positive world coords + size the world to its extent.
     var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;

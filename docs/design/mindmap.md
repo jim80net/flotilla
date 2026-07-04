@@ -27,6 +27,30 @@ The **mind map** (`mindmap`) fixes the geometry: each node's children fan out
    ring), then shifted positive and sized to extent; pan/zoom + keyed-update are
    unchanged (positions are the same absolute `_x/_y` the other layouts use).
 
+### No-overlap discipline (tuned on real fleet depth)
+
+The first cut used a capped local wedge, which read fine on a shallow fixture but
+**collided at real depth** (19+ nodes, two XO layers). The tuned engine:
+
+- gives each subtree a **disjoint angular sector** proportional to its leaf-weight
+  (siblings/cousins never share angle), with a **local circumference-minimum** so a
+  node's children always arc-clear their card widths at their radius; then
+- runs a short **collision-relaxation** pass (the hub pinned) that nudges any
+  residual overlapping pair apart along its smaller-overlap axis.
+
+Verified overlap-free on a 19-node / depth-4 generic fixture at the real fleet's
+shape — see `assets/goals-map-realdepth-{before-pinwheel,after-mindmap}.png`
+(captured against a fresh snapshot, no stale banner).
+
+### Objective labels already ride the branches
+
+Goal text (title), **priorities** (flotilla-level) and **milestones** ("current
+work", desk-level) already render *on the cards* (org-graph v2 enrichment), not
+only in the drawer — the pinwheel just made them illegible by cramming the cards.
+The mind-map's legible limbs deliver the operator's "objective labels as layers"
+directly; no separate label pass is needed. The genuinely-additive follow-ons are
+**per-limb hue/grouping** and **sequence ordering** (F12).
+
 ## Status — first cut, UI-gate increment
 
 Shipped as a **third selectable mode** (`tree` / `org` / **mind map**); `org`
@@ -36,10 +60,10 @@ content-sized world.
 
 Deliberately deferred to follow-on increments (after the direction is blessed):
 
-- **Objective labels on branches** — surface `priorities` / `milestones` as branch
-  labels along the limb, not only inside the drawer.
 - **Per-limb grouping** — a hue / gentle hull per flotilla subtree so each limb
   reads as one unit.
 - **Sequence ordering** (F12) — order sibling branches by an authored `after:`
   sequence so a limb reads as a roadmap, not just a set.
 - **Make it the default** (env seed + operator blessing), then retire the pinwheel.
+
+(Objective labels are NOT deferred — they already ride the cards; see above.)
