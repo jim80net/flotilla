@@ -6,6 +6,14 @@ import (
 	"testing"
 )
 
+func TestCmdGoalsHelp(t *testing.T) {
+	for _, args := range [][]string{nil, {"--help"}, {"-h"}, {"help"}} {
+		if err := cmdGoals(args); err != nil {
+			t.Fatalf("cmdGoals(%v) = %v, want nil (usage printed)", args, err)
+		}
+	}
+}
+
 func TestCmdGoalsValidateCompile(t *testing.T) {
 	dir := t.TempDir()
 	roster := filepath.Join(dir, "flotilla.json")

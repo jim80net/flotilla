@@ -31,9 +31,22 @@ func resolveGoalsPaths(rosterPath, yamlPath, jsonPath string) (goalsPaths, error
 	return goalsPaths{yaml: yamlPath, json: jsonPath}, nil
 }
 
+func goalsUsage() {
+	fmt.Println(`flotilla goals — validate, compile, and link fleet-goals.yaml
+
+usage:
+  flotilla goals validate [--roster <path>] [--yaml <path>] [--json <path>]
+                                                      fail-closed validate fleet-goals.yaml (and json if present)
+  flotilla goals compile [--roster <path>] [--yaml <path>] [--json <path>]
+                                                      compile fleet-goals.yaml → fleet-goals.json (roster-adjacent)
+  flotilla goals link --goal <id> (--issue <ref> | --backlog <match> | --inline <text> | --desk <agent>)
+                                                      attach a work item to fleet-goals.yaml (preserves yaml comments) and recompile json`)
+}
+
 func cmdGoals(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: flotilla goals validate|compile|link [--roster <path>] [--yaml <path>] [--json <path>]")
+	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
+		goalsUsage()
+		return nil
 	}
 	switch args[0] {
 	case "validate":
