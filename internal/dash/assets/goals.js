@@ -361,6 +361,24 @@
   }
   function nodeCenter(n) { return { x: n._x + n._w / 2, y: n._y + heightOf(n) / 2 }; }
 
+  // leafWeights returns a memoized, cycle-safe map id→subtree-leaf-count — a node's angular
+  // DEMAND (its number of leaf descendants, min 1). Shared by BOTH radial layouts (org
+  // pinwheel + the mind map) so the identical demand model isn't cloned (cubic #364 P2).
+  function leafWeights(goals) {
+    var leaves = {};
+    function count(n, path) {
+      if (leaves[n.id] != null) return leaves[n.id];
+      if (path[n.id]) return 1; // cycle → treat as a leaf
+      path[n.id] = true;
+      var kids = childrenOf(n), c = 0;
+      kids.forEach(function (k) { c += count(k, path); });
+      path[n.id] = false;
+      return (leaves[n.id] = Math.max(1, kids.length ? c : 1));
+    }
+    goals.forEach(function (n) { count(n, {}); });
+    return leaves;
+  }
+
   // layoutOrg is CONTENT-AWARE (#324): rings are sized from the actual card extents
   // (tight near the hub — no fixed-step waste) and children are angularly PACKED by
   // subtree leaf-weight (a small subtree clusters near its parent's direction instead
@@ -392,18 +410,8 @@
     }
     ring1.forEach(function (n) { assignRing(n, 1); });
 
-    // 3. subtree leaf-weight = angular demand (memoized, cycle-safe).
-    var leaves = {};
-    function leafCount(n, path) {
-      if (leaves[n.id] != null) return leaves[n.id];
-      if (path[n.id]) return 1; // cycle → treat as a leaf
-      path[n.id] = true;
-      var kids = childrenOf(n), c = 0;
-      kids.forEach(function (k) { c += leafCount(k, path); });
-      path[n.id] = false;
-      return (leaves[n.id] = Math.max(1, kids.length ? c : 1));
-    }
-    goals.forEach(function (n) { leafCount(n, {}); });
+    // 3. subtree leaf-weight = angular demand (memoized, cycle-safe; shared helper).
+    var leaves = leafWeights(goals);
 
     // 4. per-ring max card extents (measured) + node counts.
     var maxRing = 0, maxH = {}, maxW = {}, countRing = {};
@@ -496,22 +504,21 @@
     } else {
       ring1 = roots.slice();
     }
-    // leaf-weight = angular demand (memoized, cycle-safe) — same model as org.
-    var leaves = {};
-    function leafCount(n, path) {
-      if (leaves[n.id] != null) return leaves[n.id];
-      if (path[n.id]) return 1;
-      path[n.id] = true;
-      var kids = childrenOf(n), c = 0;
-      kids.forEach(function (k) { c += leafCount(k, path); });
-      path[n.id] = false;
-      return (leaves[n.id] = Math.max(1, kids.length ? c : 1));
-    }
-    goals.forEach(function (n) { leafCount(n, {}); });
-    // depth (for per-level segment length).
-    var depthOf = {};
-    (function setDepth(list, d) { list.forEach(function (n) { depthOf[n.id] = d; setDepth(childrenOf(n), d + 1); }); })(ring1, 1);
-    if (center) depthOf[center.id] = 0;
+    // leaf-weight = angular demand (memoized, cycle-safe; shared helper — same as org).
+    var leaves = leafWeights(goals);
+    // per-node depth (for per-level segment length). Cycle-safe: a `seen` guard stops the
+    // traversal from looping on a cyclic graph (the server validates acyclic, but this path
+    // must not hang on bad/partial data — matching the other passes; cubic #364 P2).
+    var nodeDepth = {}, seenDepth = {};
+    (function setDepth(list, d) {
+      list.forEach(function (n) {
+        if (seenDepth[n.id]) return;
+        seenDepth[n.id] = true;
+        nodeDepth[n.id] = d;
+        setDepth(childrenOf(n), d + 1);
+      });
+    })(ring1, 1);
+    if (center) nodeDepth[center.id] = 0;
 
     function segLen(d) { return 116 + 20 * Math.min(d, 4); } // base branch length per level
     var GAP = 30; // tangential breathing room between adjacent sibling cards
@@ -527,7 +534,7 @@
     function place(n, a0, a1) {
       var kids = clusterAdjacent(childrenOf(n));
       if (!kids.length) return;
-      var pc = nodeCenter(n), sector = a1 - a0, d = (depthOf[n.id] || 0) + 1;
+      var pc = nodeCenter(n), sector = a1 - a0, d = (nodeDepth[n.id] || 0) + 1;
       var total = 0, need = 0;
       kids.forEach(function (k) { total += leaves[k.id]; need += k._w + GAP; });
       // radius: the larger of the base per-level length and the arc-fit radius (need/sector),
@@ -599,10 +606,10 @@
       maxX = Math.max(maxX, n._x + n._w); maxY = Math.max(maxY, n._y + heightOf(n));
     });
     if (!isFinite(minX)) { minX = minY = 0; maxX = maxY = 100; }
-    var PAD = 90, shx = PAD - minX, shy = PAD - minY;
+    var worldPad = 90, shx = worldPad - minX, shy = worldPad - minY;
     Object.keys(nodeById).forEach(function (id) { if (!placed[id]) return; var n = nodeById[id]; n._x += shx; n._y += shy; });
-    view.worldW = (maxX - minX) + 2 * PAD;
-    view.worldH = (maxY - minY) + 2 * PAD;
+    view.worldW = (maxX - minX) + 2 * worldPad;
+    view.worldH = (maxY - minY) + 2 * worldPad;
   }
 
   // collabMarkup draws a dotted container (+ lane label) around each collaboration's desk

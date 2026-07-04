@@ -543,7 +543,7 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	if !strings.Contains(css, "touch-action: pan-y") || !strings.Contains(css, ".pan-active") {
 		t.Error("dash.css must default the viewport to touch-action:pan-y and reclaim it on .pan-active (#330)")
 	}
-	for _, marker := range []string{"leafCount", "reach(", "nodeW", "RING_GAP"} {
+	for _, marker := range []string{"leafWeights", "reach(", "nodeW", "RING_GAP"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("goals.js must retain the #324 content-aware org geometry (missing %q)", marker)
 		}
