@@ -472,13 +472,6 @@ func TestHandleSessionMirror(t *testing.T) {
 	}
 }
 
-// TestGoalsCanvasAssets locks the Goals view's pan/zoom canvas (#280 Inc 1). The
-// Goals view was ported from the merged flex-column layout to the operator-approved
-// 2D Fleet Situation Map — an absolute tiered layout inside a transform-driven world
-// with wheel/drag pan-zoom. There is no JS test runner, so — consistent with the
-// other asset-content assertions — this locks (a) the canvas DOM the engine renders
-// into is present in the served index, and (b) the pan/zoom engine is present in the
-// served goals.js. Removing either (regressing to a static layout) fails here.
 // TestMindmapLimbHue locks the mind-map per-limb hue (operator polish track): each top-level
 // limb (a hub child/root and its subtree) is coloured with a distinct hue that rides on the
 // branch EDGES, so the limbs are visually traceable while node cards keep their status colour.
@@ -501,6 +494,13 @@ func TestMindmapLimbHue(t *testing.T) {
 	}
 }
 
+// TestGoalsCanvasAssets locks the Goals view's pan/zoom canvas (#280 Inc 1). The
+// Goals view was ported from the merged flex-column layout to the operator-approved
+// 2D Fleet Situation Map — an absolute tiered layout inside a transform-driven world
+// with wheel/drag pan-zoom. There is no JS test runner, so — consistent with the
+// other asset-content assertions — this locks (a) the canvas DOM the engine renders
+// into is present in the served index, and (b) the pan/zoom engine is present in the
+// served goals.js. Removing either (regressing to a static layout) fails here.
 func TestGoalsCanvasAssets(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 	srv, _ := newTestServer(t, singleFleetRoster, now)
