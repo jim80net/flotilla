@@ -114,7 +114,11 @@
       { k: "Aspirational", v: c.aspirational || 0, tone: "aspirational", d: "planned / not yet done" },
     ];
     q("goals-situation").innerHTML = tiles.map(function (t) {
-      return '<div class="gtile gtile-' + t.tone + '">' +
+      // #405 Inc 2: the "Awaiting you" tile opens the decision page (the full-cell drill-ins for
+      // the other tiles are Inc 3). It is a real button for keyboard + a11y.
+      var click = t.tone === "awaiting";
+      var attrs = click ? ' data-open-decisions role="button" tabindex="0" title="Open the decisions awaiting you"' : "";
+      return '<div class="gtile gtile-' + t.tone + (click ? " gtile-click" : "") + '"' + attrs + ">" +
         '<div class="gtile-k">' + escapeHtml(t.k) + "</div>" +
         '<div class="gtile-v">' + escapeHtml(String(t.v)) + "</div>" +
         '<div class="gtile-d">' + escapeHtml(t.d) + "</div>" +
@@ -1080,14 +1084,24 @@
   // inline **bold** + `code`. Enough for a real decision brief; nothing that can inject.
   function renderBrief(md) {
     var lines = escapeHtml(String(md == null ? "" : md)).split(/\r?\n/);
+    // inline: **bold**, `code`, and [text](https://…) reference links (#405 Inc 2 — "references
+    // littered throughout"). The URL is restricted to http(s) so nothing script-like reaches href;
+    // the text was escaped upfront, and entity-encoded URLs decode correctly inside the attribute.
     function inline(s) {
-      return s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/`([^`]+)`/g, "<code>$1</code>");
+      return s
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+        .replace(/`([^`]+)`/g, "<code>$1</code>");
     }
     var out = [], list = null;
     function flush() { if (list) { out.push("<ul>" + list.join("") + "</ul>"); list = null; } }
     for (var i = 0; i < lines.length; i++) {
-      var ln = lines[i], h = /^(#{1,3})\s+(.*)$/.exec(ln), li = /^\s*[-*]\s+(.*)$/.exec(ln);
-      if (h) { flush(); out.push('<div class="gm-brief-h">' + inline(h[2]) + "</div>"); }
+      var ln = lines[i];
+      // ![alt](https://…) — an illustrative demo image (#405 Inc 2, "when available").
+      var img = /^!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)\s*$/.exec(ln);
+      var h = /^(#{1,3})\s+(.*)$/.exec(ln), li = /^\s*[-*]\s+(.*)$/.exec(ln);
+      if (img) { flush(); out.push('<img class="gm-brief-img" src="' + img[2] + '" alt="' + img[1] + '" loading="lazy">'); }
+      else if (h) { flush(); out.push('<div class="gm-brief-h">' + inline(h[2]) + "</div>"); }
       else if (li) { (list = list || []).push("<li>" + inline(li[1]) + "</li>"); }
       else if (ln.trim() === "") { flush(); }
       else { flush(); out.push("<p>" + inline(ln) + "</p>"); }
@@ -1237,6 +1251,70 @@
     }
   }
 
+  // ── #405 Inc 2: the decision page (the operator's centerpiece) ────────────────────
+  // A full reading room for EVERY open decision. The canonical 6-element briefs are the data;
+  // this page formats them well: each decision shows which goal it drives (Context, linked into
+  // the map), then the brief — background / value / mechanics / options+tradeoffs / recommendation
+  // / reversibility — with references (links) and demo images rendered inline via renderBrief.
+  // Opened from the "Awaiting you" situation tile.
+  function gatherDecisions() {
+    var out = [];
+    Object.keys(nodeById).forEach(function (id) {
+      var n = nodeById[id];
+      if (!n) return;
+      // A node-level brief is a decision ONLY when the node itself is operator-gated
+      // (awaiting/blocked). Without this, a node carrying a brief in any other state would
+      // pollute the decision room with a non-decision — the exact anti-pattern this page kills.
+      var vis = visToken(n);
+      if (hasBrief(n.brief) && (vis === "awaiting" || vis === "blocked")) out.push({ node: n, label: "", brief: n.brief });
+      (n.work_items || []).forEach(function (wi) {
+        if ((wi.class === "awaiting" || wi.class === "blocked") && !sameBrief(wi.brief, n.brief)) {
+          out.push({ node: n, label: wi.label || wi.detail || wi.kind || "", brief: wi.brief });
+        }
+      });
+    });
+    return out;
+  }
+  function renderDecisionCard(dec, idx, total) {
+    var n = dec.node;
+    var titleItem = dec.label ? ' <span class="gdec-item muted">— ' + escapeHtml(dec.label) + "</span>" : "";
+    var body = hasBrief(dec.brief) ? renderBrief(dec.brief) : BRIEF_EMPTY;
+    return '<article class="gdec-card">' +
+      '<div class="gdec-eyebrow">Decision ' + (idx + 1) + " of " + total + " · " + escapeHtml(scopeNoun(n)) + "</div>" +
+      '<h3 class="gdec-card-title">' + escapeHtml(n.title || n.id) + titleItem + "</h3>" +
+      '<div class="gdec-ctx"><span class="gdec-ctx-lab">Drives</span> ' +
+        '<button type="button" class="gdec-ctx-link" data-gdec-goto="' + escapeHtml(n.id) + '" title="Open this goal in the map">' + escapeHtml(nodePath(n)) + "</button></div>" +
+      '<div class="gdec-brief gm-brief-full">' + body + "</div>" +
+      "</article>";
+  }
+  var decisionsReturn = null;
+  function openDecisions() {
+    var decs = gatherDecisions();
+    var list = q("gdec-list");
+    if (list) {
+      list.innerHTML = decs.length
+        ? decs.map(function (d, i) { return renderDecisionCard(d, i, decs.length); }).join("")
+        : '<div class="gdec-empty">Nothing is awaiting your decision right now.</div>';
+    }
+    var titleEl = q("gdec-title");
+    if (titleEl) titleEl.textContent = decs.length ? ("Decisions awaiting you · " + decs.length) : "Decisions awaiting you";
+    var m = q("goals-decisions");
+    if (!m) return;
+    decisionsReturn = document.activeElement;
+    m.classList.add("open");
+    m.setAttribute("aria-hidden", "false");
+    var close = m.querySelector(".gdec-close");
+    if (close) close.focus();
+  }
+  function closeDecisions() {
+    var m = q("goals-decisions");
+    if (!m || !m.classList.contains("open")) return;
+    m.classList.remove("open");
+    m.setAttribute("aria-hidden", "true");
+    if (decisionsReturn && decisionsReturn.focus && document.contains(decisionsReturn)) decisionsReturn.focus({ preventScroll: true });
+    decisionsReturn = null;
+  }
+
   function wireNodes() {
     if (nodesWired) return;
     var nodesEl = q("goals-nodes");
@@ -1362,9 +1440,28 @@
       var note = q("goals-modal-note");
       if (note) note.textContent = "Reply path is a prototype stub — not sent (wiring to the control API is a follow-on).";
     };
+    // #405 Inc 2: the decision page. The "Awaiting you" situation tile opens it; inside, the ×/
+    // backdrop close it and a card's "Drives" link jumps to that goal's detail in the map.
+    var sit = q("goals-situation");
+    if (sit) {
+      sit.addEventListener("click", function (e) {
+        if (e.target.closest("[data-open-decisions]")) openDecisions();
+      });
+      sit.addEventListener("keydown", function (e) {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        if (e.target.closest("[data-open-decisions]")) { e.preventDefault(); openDecisions(); }
+      });
+    }
+    var decEl = q("goals-decisions");
+    if (decEl) decEl.addEventListener("click", function (e) {
+      if (e.target.closest("[data-gdec-close]") || e.target.classList.contains("goals-decisions")) { closeDecisions(); return; }
+      var goto = e.target.closest("[data-gdec-goto]");
+      if (goto) { closeDecisions(); openDrawer(goto.getAttribute("data-gdec-goto")); }
+    });
     document.addEventListener("keydown", function (e) {
       if (e.key !== "Escape" || !isVisible()) return;
       if (help) help.setAttribute("aria-expanded", "false"); // Esc dismisses the tooltip too
+      if (q("goals-decisions") && q("goals-decisions").classList.contains("open")) { closeDecisions(); return; }
       if (q("goals-modal") && q("goals-modal").classList.contains("open")) { closeModal(); return; }
       closeDrawer();
     });

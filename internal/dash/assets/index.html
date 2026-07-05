@@ -227,6 +227,19 @@
         </div>
       </div>
     </div>
+
+    <!-- #405 Inc 2: the decision page — a full reading room for every open decision, opened from
+         the "Awaiting you" situation tile. Well-formatted beats feature-rich. -->
+    <div id="goals-decisions" class="goals-decisions" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="gdec-title">
+      <div class="gdec-backdrop" data-gdec-close></div>
+      <div class="gdec-sheet" role="document">
+        <header class="gdec-head">
+          <h2 id="gdec-title" class="gdec-title">Decisions awaiting you</h2>
+          <button class="gdec-close" type="button" data-gdec-close aria-label="Close decisions">&times;</button>
+        </header>
+        <div id="gdec-list" class="gdec-list"></div>
+      </div>
+    </div>
   </main>
 
   <main id="view-issues" class="view wrap hidden">
