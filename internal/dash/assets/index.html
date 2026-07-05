@@ -101,41 +101,16 @@
       <div class="conv-context-body">
         <div id="conv-desk-card" class="conv-desk-card" aria-live="polite"></div>
 
+        <!-- #405 Inc 4: the drive queue → "Work queue" (plain language, no jargon). The
+             Route-to-desk / Fleet-note / Resume-crashed-desk forms were CoS-internal skills,
+             not operator surfaces — dropped ("less is more"). The operator sends to a desk
+             from the thread composer, not from a separate control column. -->
         <details class="conv-queue" open>
           <summary class="conv-queue-sum">
-            <span class="sub">Drive queue</span>
+            <span class="sub">Work queue</span>
           </summary>
           <div id="conv-backlog" class="conv-backlog"></div>
         </details>
-
-        <form id="route-form" class="control-form conv-act-divider">
-          <label class="field-label" for="route-target">Route to desk</label>
-          <input type="text" id="route-target" placeholder="Agent or @desk" />
-          <label class="field-label" for="route-body">Instruction</label>
-          <textarea id="route-body" placeholder="Route to the selected desk" rows="3"></textarea>
-          <div class="form-actions">
-            <span id="route-msg" class="form-msg"></span>
-            <button type="submit" class="btn btn-primary">Route</button>
-          </div>
-        </form>
-
-        <form id="notify-form" class="control-form conv-act-divider">
-          <label class="field-label" for="notify-body">Fleet note</label>
-          <textarea id="notify-body" placeholder="Operator note on Discord" rows="2"></textarea>
-          <div class="form-actions">
-            <span id="notify-msg" class="form-msg"></span>
-            <button type="submit" class="btn">Post note</button>
-          </div>
-        </form>
-
-        <form id="resume-form" class="control-form conv-act-divider panel-gated">
-          <label class="field-label" for="resume-agent">Resume crashed desk</label>
-          <input type="text" id="resume-agent" placeholder="Agent name" />
-          <div class="form-actions">
-            <span id="resume-msg" class="form-msg"></span>
-            <button type="submit" class="btn btn-danger">Resume</button>
-          </div>
-        </form>
       </div>
     </aside>
   </main>

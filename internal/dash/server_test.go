@@ -482,6 +482,28 @@ func TestCoSThreadHonestRender405(t *testing.T) {
 	}
 }
 
+// TestSimplifyControlsQueue405 locks #405 Inc 4a: the CoS-internal control forms
+// (route-to-desk / fleet-note / resume-crashed-desk) are dropped from the operator UI, and the
+// jargon "Drive queue" is renamed to plain "Work queue". The operator sends to a desk from the
+// thread composer, not a separate control column.
+func TestSimplifyControlsQueue405(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	html := doGet(t, srv, "/").Body.String()
+	for _, gone := range []string{`id="route-form"`, `id="notify-form"`, `id="resume-form"`, "Drive queue"} {
+		if strings.Contains(html, gone) {
+			t.Errorf("index.html must DROP the CoS-internal control surface / jargon %q — #405 Inc 4", gone)
+		}
+	}
+	if !strings.Contains(html, "Work queue") {
+		t.Error("index.html must rename the drive queue to plain 'Work queue' — #405 Inc 4")
+	}
+	// The operator's per-thread composer must remain (that's how they message a desk now).
+	if !strings.Contains(html, `id="thread-composer"`) {
+		t.Error("index.html must keep the thread composer (the operator's message path) — #405 Inc 4")
+	}
+}
+
 // TestHandleSessionMirror locks the /api/session-mirror contract the glance JS binds
 // to: { agent, entries:[{ts, info, ...}] } with entries ascending (newest last). This
 // guards the field names dash.js silently depends on (entries[last].ts / .info).

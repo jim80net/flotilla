@@ -673,8 +673,11 @@
   function syncControlTargets(explicit) {
     if (!selectedDesk) return;
     if (!explicit && controlTargetsTouched) return;
-    el("route-target").value = selectedDesk;
-    el("resume-agent").value = selectedDesk;
+    // #405 Inc 4: the route/resume control fields were dropped — guard so their absence is a
+    // no-op (the operator now targets a desk via the thread composer, not a control column).
+    var rt = el("route-target"), ra = el("resume-agent");
+    if (rt) rt.value = selectedDesk;
+    if (ra) ra.value = selectedDesk;
     if (explicit) controlTargetsTouched = false;
   }
 
