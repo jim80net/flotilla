@@ -136,11 +136,16 @@ code {
   position: sticky; top: 0; z-index: 10;
 }
 .brand { display: flex; align-items: center; gap: .65rem; }
+/* hub-and-spoke SVG brand mark — one coordinator hub, four satellite desks.
+   The icon is an inline SVG with class="brand-mark" so it inherits the theme
+   colour token directly without a separate image fetch. Same glyph renders in
+   the dash header and on the parade page for consistent brand identity. */
 .brand-mark {
-  width: 10px; height: 28px;
-  border-left: 2px solid var(--cyan);
-  border-top: 2px solid var(--cyan);
-  border-bottom: 2px solid var(--cyan-dim);
+  width: 20px; height: 20px;
+  flex-shrink: 0;
+  fill: var(--cyan);
+  stroke: var(--cyan);
+  stroke-width: 1.5;
   opacity: .85;
 }
 .brand-text { display: flex; align-items: baseline; gap: .45rem; line-height: 1; }
@@ -932,6 +937,50 @@ code {
   color: var(--ink);
   background: var(--card);
   box-shadow: inset 0 0 0 1px var(--line), var(--shadow-sm);
+}
+
+/* The SPA view-tabs live in an inner role="tablist" group (cubic #416 P1). The
+   group carries the same flex + gap as the strip so all four items — the three
+   grouped tabs and the sibling Parade link — sit evenly, identical to before. */
+.tab-group { display: flex; gap: .15rem; align-items: center; }
+
+/* Parade tab is an <a> element styled to look like the other tabs.
+   Reset link defaults so it matches the button tabs visually. */
+.tab-parade {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+/* Pin the visited colour to the tab base token (var(--ink-3)) so a visited Parade
+   link matches the other tabs. `inherit` would pull from the <nav> parent (→ body
+   var(--ink-2)), rendering visited slightly darker than unvisited (cubic #416 P3).
+   Ordered after .tab:hover so hover still wins on the visited link (LVHA order). */
+.tab-parade:link,
+.tab-parade:visited { color: var(--ink-3); }
+.tab-parade:hover { color: var(--ink-2); }
+
+/* ── unseen-content dot (item 9) ────────────────────────────────────────────
+   A small indicator dot that appears on a tab when the operator has new content
+   they haven't viewed since their last visit. Cleared on tab open. The dot is
+   kept visible at all verbosity levels and is always aria-labelled so screen
+   readers hear "New content in <tab>" when it's active (aria-hidden="false").
+   Per-browser client signal — stored in localStorage, not synced across devices.
+──────────────────────────────────────────────────────────────────────────── */
+.unseen-dot {
+  display: inline-block;
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--cyan);
+  margin-left: .35rem;
+  vertical-align: middle;
+  flex-shrink: 0;
+  /* hidden until data-active="true" is set by JS */
+  opacity: 0;
+  transition: opacity .2s var(--ease);
+  pointer-events: none;
+}
+.unseen-dot[data-active="true"] {
+  opacity: 1;
 }
 
 .tab:focus-visible, .btn:focus-visible,
