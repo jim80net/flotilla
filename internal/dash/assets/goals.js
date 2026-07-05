@@ -109,9 +109,13 @@
       { k: "Flotillas", v: c.fleet || 0, tone: "goal", d: (c.total || 0) + " nodes total" },
       { k: "In flight", v: c.in_flight || 0, tone: "inflight", d: "desks working now" },
       { k: "Awaiting you", v: c.awaiting || 0, tone: "awaiting", d: "your decisions & blocks" },
-      { k: "Pending", v: c.pending || 0, tone: "pending", d: "waiting on a dependency" },
+      // #405 Inc 3 (Q2, operator-turned): keep Pending + Aspirational distinct but rename to plain
+      // language that cures the confusion — "Blocked" is dependency-gated (go unblock it),
+      // "Planned" is simply not-yet-started. (The operator leaned merge; the COS surfaces the
+      // divergence in the parade so one word can still flip it to a merge.)
+      { k: "Blocked", v: c.pending || 0, tone: "pending", d: "waiting on a dependency" },
       { k: "Realized", v: c.realized || 0, tone: "realized", d: "done & solidified" },
-      { k: "Aspirational", v: c.aspirational || 0, tone: "aspirational", d: "planned / not yet done" },
+      { k: "Planned", v: c.aspirational || 0, tone: "aspirational", d: "not started" },
     ];
     q("goals-situation").innerHTML = tiles.map(function (t) {
       // #405 Inc 2: the "Awaiting you" tile opens the decision page (the full-cell drill-ins for
@@ -144,7 +148,7 @@
     // "goal nodes" (not "fleet goals") — total counts all nodes, not just the fleet tier.
     // Announce pending too, so the spoken summary matches the visual situation strip — a
     // screen-reader user must hear about dependency-gated goals (cubic #359 P2).
-    announce((c.awaiting || 0) + " awaiting you, " + (c.pending || 0) + " pending, " +
+    announce((c.awaiting || 0) + " awaiting you, " + (c.pending || 0) + " blocked on a dependency, " +
       (c.in_flight || 0) + " in flight, " +
       (c.realized || 0) + " realized, of " + (c.total || 0) + " goal nodes.");
   }
