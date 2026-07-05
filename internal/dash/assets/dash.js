@@ -8,6 +8,7 @@
   "use strict";
 
   var POLL_FALLBACK_MS = 5000;
+  var queueItems = []; // structured /api/history backlog projection (#419)
 
   function el(id) { return document.getElementById(id); }
 
@@ -654,50 +655,73 @@
     );
   }
 
-  function renderBacklogStrip(history) {
+  // queueVisibleForDesk filters the fleet backlog to the selected desk/coordinator (#421).
+  // Items with an explicit @desk / →desk scope show only on that desk; unscoped items are
+  // coordinator/XO-level and show on the channel hub (xo_agent) or fleet xo.
+  function queueVisibleForDesk(item, desk, status, topology) {
+    if (!desk || !item) return false;
+    var deskL = String(desk).toLowerCase();
+    var scope = String(item.scope || "").toLowerCase();
+    if (scope) return scope === deskL;
+    var xo = ((status || {}).xo || "").toLowerCase();
+    if (deskL === xo) return true;
+    var groups = buildRailGroups(topology || {});
+    for (var i = 0; i < groups.length; i++) {
+      var g = groups[i];
+      if (selectedChannel && g.channel_id !== selectedChannel) continue;
+      var desks = g.desks || [];
+      for (var j = 0; j < desks.length; j++) {
+        if (desks[j].role === "xo" && String(desks[j].name || "").toLowerCase() === deskL) return true;
+      }
+    }
+    return false;
+  }
+
+  function renderBacklogStrip(history, status, topology) {
     var bl = (history && history.backlog) ? history.backlog : {};
     var box = el("conv-backlog");
+    var allItems = Array.isArray(bl.unblocked) ? bl.unblocked : [];
+    queueItems = allItems.filter(function (item) {
+      return queueVisibleForDesk(item, selectedDesk, status, topology);
+    });
+    var scopeLab = el("conv-queue-scope");
+    if (scopeLab) {
+      scopeLab.textContent = selectedDesk
+        ? ("scoped to " + selectedDesk + (queueItems.length ? " · " + queueItems.length + " item" + (queueItems.length === 1 ? "" : "s") : ""))
+        : "";
+    }
     var counts =
       '<div class="backlog-counts">' +
-        '<span>' + (bl.items || 0) + " items</span>" +
+        '<span>' + queueItems.length + " shown</span>" +
+        (allItems.length !== queueItems.length ? '<span class="muted">' + allItems.length + " fleet-wide</span>" : "") +
         '<span class="count-blocked">' + (bl.blocked || 0) + " blocked</span>" +
         (bl.awaiting_auth ? '<span class="count-awaiting-auth">' + bl.awaiting_auth + " awaiting-auth</span>" : "") +
         '<span class="count-done">' + (bl.done || 0) + " done</span>" +
       "</div>";
-    var unblocked = Array.isArray(bl.unblocked) ? bl.unblocked : [];
-    var items = unblocked.length
-      ? unblocked.map(backlogItem).join("")
-      : (bl.found ? '<div class="empty">No unblocked items.</div>' : '<div class="empty">No backlog section found.</div>');
+    var items = queueItems.length
+      ? queueItems.map(function (item, idx) { return backlogItem(item, idx); }).join("")
+      : (bl.found
+        ? (selectedDesk ? '<div class="empty">No work queued for ' + escapeHtml(selectedDesk) + ".</div>" : '<div class="empty">Select a desk.</div>')
+        : '<div class="empty">No backlog section found.</div>');
     box.innerHTML = counts + items;
   }
 
-  // backlogItem formats a raw backlog line into a status chip + clean text (#302):
-  // it strips the leading bullet + the [marker] token and renders the marker as a
-  // coloured chip, instead of dumping the raw markdown line. Each item is a button
-  // (#349 Inc 4 E10): clicking opens the full item in a focused modal, since the drive
-  // queue lives in a narrow column where a long item is otherwise cramped. The marker +
-  // text are carried on data-* so the handler needs no re-parse.
-  // backlogItem renders one backlog line as a structured row (#405 Inc 4b item 2a):
-  // the STATE marker is a distinct chip (bq-marker) and the text is in its own cell —
-  // bq-row drives a CSS grid that aligns chips across items so the queue reads as a
-  // table, not a text blob. Timestamps are NOT rendered — the backlog data has none.
-  function backlogItem(line) {
-    var raw = String(line == null ? "" : line);
-    var m = /^\s*[-*]?\s*\[([a-z][a-z0-9-]*)\]\s*(.*)$/i.exec(raw);
-    if (!m) {
-      // No [marker] token: there is no chip to align, so the text spans BOTH grid
-      // columns (bq-text-wide → grid-column: 1 / -1) and fills the full item width
-      // instead of being cramped into the 5.5rem chip column (#415 review).
-      var text = raw.replace(/^\s*[-*]\s*/, "");
-      return '<div class="backlog-item bq-row" role="button" tabindex="0" data-bq-open data-bq-text="' + escapeHtml(text) + '">' +
-        '<span class="bq-text bq-text-wide">' + escapeHtml(text) + "</span></div>";
+  // backlogItem renders one structured queue row (#302 list, #405 grid, #419 operator
+  // layer): status chip + operator-facing title. Clicking opens the reader-modeled modal.
+  function backlogItem(item, idx) {
+    if (!item || typeof item !== "object") {
+      item = { title: String(item == null ? "" : item), raw: String(item == null ? "" : item) };
     }
-    var marker = m[1].toLowerCase();
-    return '<div class="backlog-item bq-row bq-' + escapeHtml(marker) + '" role="button" tabindex="0" data-bq-open' +
-      ' data-bq-marker="' + escapeHtml(marker.replace(/-/g, " ")) + '" data-bq-text="' + escapeHtml(m[2]) + '">' +
-      '<span class="bq-marker">' + escapeHtml(marker.replace(/-/g, " ")) + "</span>" +
-      '<span class="bq-text">' + escapeHtml(m[2]) + "</span>" +
-      "</div>";
+    var marker = (item.status || "").toLowerCase();
+    var title = item.title || "Work item";
+    var markerLabel = marker ? marker.replace(/-/g, " ") : "";
+    if (!marker) {
+      return '<div class="backlog-item bq-row" role="button" tabindex="0" data-bq-open data-bq-index="' + idx + '">' +
+        '<span class="bq-text bq-text-wide">' + escapeHtml(title) + "</span></div>";
+    }
+    return '<div class="backlog-item bq-row bq-' + escapeHtml(marker) + '" role="button" tabindex="0" data-bq-open data-bq-index="' + idx + '">' +
+      '<span class="bq-marker">' + escapeHtml(markerLabel) + "</span>" +
+      '<span class="bq-text">' + escapeHtml(title) + "</span></div>";
   }
 
   function renderConversations() {
@@ -711,7 +735,7 @@
     renderDeskCard(status, fresh);
     renderSessionMirror();
     renderThread(history);
-    renderBacklogStrip(history);
+    renderBacklogStrip(history, status, topology);
     syncComposer();
   }
 
@@ -996,11 +1020,33 @@
      so clicking (or Enter/Space on) it opens the full item here, focused. Read-only —
      the queue is a status surface; acting on an item is the control forms below. ────── */
   var convModalReturn = null; // the drive-queue chip that opened the modal — refocused on close
-  function openConvModal(marker, text) {
+  function openConvModal(item) {
+    if (!item || typeof item !== "object") item = { title: String(item == null ? "" : item), internal: String(item == null ? "" : item) };
+    var marker = (item.status || "").replace(/-/g, " ");
     var mk = el("conv-modal-marker");
     mk.textContent = marker || "";
     mk.style.display = marker ? "" : "none";
-    el("conv-modal-title").textContent = text || "";
+    el("conv-modal-title").textContent = item.title || "Work item";
+    var summary = el("conv-modal-summary");
+    var summaryText = (item.summary || "").trim();
+    if (summary) {
+      // Visibility keys on whether a summary STRING is present, not on the element
+      // existing (it always does) — else an item with no summary shows an empty block
+      // (cubic #420 P2).
+      summary.textContent = summaryText;
+      summary.hidden = summaryText === "";
+    }
+    var internal = (item.internal || item.raw || "").trim();
+    var internalWrap = el("conv-modal-internal");
+    var internalBody = el("conv-modal-internal-body");
+    if (internal && internal !== summaryText && internal !== item.title) {
+      internalBody.textContent = internal;
+      internalWrap.hidden = false;
+      internalWrap.open = false;
+    } else {
+      internalBody.textContent = "";
+      internalWrap.hidden = true;
+    }
     var modal = el("conv-modal");
     convModalReturn = document.activeElement; // the chip — restored on close (a11y)
     modal.classList.add("open");
@@ -1024,12 +1070,19 @@
     if (backlog) {
       backlog.addEventListener("click", function (e) {
         var item = e.target.closest ? e.target.closest("[data-bq-open]") : null;
-        if (item) openConvModal(item.getAttribute("data-bq-marker"), item.getAttribute("data-bq-text"));
+        if (item) {
+          var idx = parseInt(item.getAttribute("data-bq-index"), 10);
+          openConvModal(queueItems[idx]);
+        }
       });
       backlog.addEventListener("keydown", function (e) {
         if (e.key !== "Enter" && e.key !== " ") return;
         var item = e.target.closest ? e.target.closest("[data-bq-open]") : null;
-        if (item) { e.preventDefault(); openConvModal(item.getAttribute("data-bq-marker"), item.getAttribute("data-bq-text")); }
+        if (item) {
+          e.preventDefault();
+          var idx = parseInt(item.getAttribute("data-bq-index"), 10);
+          openConvModal(queueItems[idx]);
+        }
       });
     }
     var modal = el("conv-modal");
@@ -1125,6 +1178,20 @@
   }
   window.flotillaDash.openConversation = openConversation;
 
+  // #421: Decisions/blockers reading room — header + situation tile, any view.
+  document.addEventListener("click", function (e) {
+    var trig = e.target.closest ? e.target.closest("[data-open-decisions]") : null;
+    if (!trig) return;
+    e.preventDefault();
+    if (window.flotillaGoals && window.flotillaGoals.openDecisions) window.flotillaGoals.openDecisions();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    var trig = e.target.closest ? e.target.closest("[data-open-decisions]") : null;
+    if (!trig) return;
+    e.preventDefault();
+    if (window.flotillaGoals && window.flotillaGoals.openDecisions) window.flotillaGoals.openDecisions();
+  });
 
   // Thread composer + latest-at-bottom scroll wiring (F#383 criteria 4 + 5). The composer
   // sends to the SELECTED desk/coordinator via the same route-to-pane relay the control

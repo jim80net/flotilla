@@ -281,13 +281,13 @@ type LedgerEntry struct {
 // BacklogInfo is the backlog drive-queue classification (a flat projection of
 // backlog.Status — what the XO is being driven on, what's blocked, what's done).
 type BacklogInfo struct {
-	Found        bool     `json:"found"`
-	Unblocked    []string `json:"unblocked"`
-	Blocked      int      `json:"blocked"`       // the OPEN-QUESTIONS ledger ([blocked]/[needs-attention])
-	AwaitingAuth int      `json:"awaiting_auth"` // the AUTHORIZATIONS ledger ([awaiting-auth]) — surfaced separately, not collapsed into blocked
-	Done         int      `json:"done"`
-	Malformed    int      `json:"malformed"`
-	Items        int      `json:"items"`
+	Found        bool        `json:"found"`
+	Unblocked    []QueueItem `json:"unblocked"`
+	Blocked      int         `json:"blocked"`       // the OPEN-QUESTIONS ledger ([blocked]/[needs-attention])
+	AwaitingAuth int         `json:"awaiting_auth"` // the AUTHORIZATIONS ledger ([awaiting-auth]) — surfaced separately, not collapsed into blocked
+	Done         int         `json:"done"`
+	Malformed    int         `json:"malformed"`
+	Items        int         `json:"items"`
 }
 
 // HistoryDoc is the coordination-history JSON: the CoS ledger entries
@@ -304,7 +304,7 @@ func BuildHistory(ledgerRaw, backlogRaw string) HistoryDoc {
 	st := backlog.Parse(backlogRaw)
 	doc.Backlog = BacklogInfo{
 		Found:        st.Found,
-		Unblocked:    append([]string(nil), st.Unblocked...),
+		Unblocked:    BuildQueueItems(st.Unblocked),
 		Blocked:      st.Blocked,
 		AwaitingAuth: st.AwaitingAuth,
 		Done:         st.Done,
@@ -312,7 +312,7 @@ func BuildHistory(ledgerRaw, backlogRaw string) HistoryDoc {
 		Items:        st.Items,
 	}
 	if doc.Backlog.Unblocked == nil {
-		doc.Backlog.Unblocked = []string{}
+		doc.Backlog.Unblocked = []QueueItem{}
 	}
 	return doc
 }

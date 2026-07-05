@@ -1474,24 +1474,39 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   transform: scale(var(--ctl-scale, 1));
   transform-origin: top right;
 }
-.gnode-respond, .gnode-godesk {
-  height: 26px; border-radius: 6px; border: 1px solid var(--line);
+/* #421: compact kebab menu — fixed screen size at any zoom; popout carries actions. */
+.gnode-kebab {
+  width: 22px; height: 22px; padding: 0; border-radius: 6px; border: 1px solid var(--line);
   background: var(--abyss-2); color: var(--ink-3); cursor: pointer; line-height: 1;
-  display: inline-flex; align-items: center; justify-content: center;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 1rem;
+  opacity: 0; transition: opacity .15s var(--ease);
 }
-/* ⚠ respond is ALWAYS visible on a gated node (the operator must see what needs them). */
-.gnode-respond { width: 26px; padding: 0; font-size: .82rem; color: var(--amber); border-color: color-mix(in srgb, var(--amber) 55%, transparent); }
-.gnode-respond:hover { background: color-mix(in srgb, var(--amber) 16%, transparent); }
-/* → desk — the conversation jump (was the node body's default action, #349 A2). Labelled,
-   so auto-width; hover/focus-revealed on pointer devices to keep the canvas clean, always
-   visible on touch (#330). */
-.gnode-godesk {
-  width: auto; padding: 0 6px; font-family: var(--display); font-size: .6rem;
-  letter-spacing: .04em; text-transform: uppercase; opacity: 0; transition: opacity .15s var(--ease);
+.gnode:hover .gnode-kebab, .gnode:focus-within .gnode-kebab, .gnode:focus-visible .gnode-kebab { opacity: 1; }
+@media (hover: none) { .gnode-kebab { opacity: 1; } }
+.gnode-kebab:hover { border-color: var(--cyan-dim); color: var(--cyan); }
+.gnode-pop {
+  position: absolute; top: 100%; right: 0; margin-top: 4px; min-width: 9.5rem;
+  background: var(--abyss-2); border: 1px solid var(--line); border-radius: var(--r-sm);
+  box-shadow: var(--shadow-lg); z-index: 4; padding: 4px; display: flex; flex-direction: column; gap: 2px;
 }
-.gnode:hover .gnode-godesk, .gnode:focus-within .gnode-godesk, .gnode:focus-visible .gnode-godesk { opacity: 1; }
-.gnode-godesk:hover { border-color: var(--cyan-dim); color: var(--cyan); }
-@media (hover: none) { .gnode-godesk { opacity: 1; } }
+.gnode-pop-item {
+  width: 100%; text-align: left; border: 0; background: transparent; color: var(--ink);
+  font-size: .78rem; padding: 6px 8px; border-radius: 4px; cursor: pointer;
+}
+.gnode-pop-item:hover { background: color-mix(in srgb, var(--cyan) 10%, transparent); color: var(--cyan); }
+
+/* Header decisions entry (#421) — global, badge when awaiting > 0. */
+.hdr-decisions {
+  margin-left: .35rem; border: 1px solid var(--line); background: transparent;
+  font-family: inherit; cursor: pointer; position: relative;
+}
+.hdr-decisions-hot { border-color: color-mix(in srgb, var(--amber) 55%, transparent); color: var(--amber); }
+.hdr-decisions-count {
+  margin-left: .35rem; font-size: .68rem; font-weight: 700;
+  background: color-mix(in srgb, var(--amber) 22%, transparent);
+  border-radius: 999px; padding: 0 .45em;
+}
+.conv-queue-scope { display: block; font-size: .68rem; margin-top: .15rem; }
 
 /* #302 intervention modal — situation brief + response input */
 .goals-modal {
@@ -1521,7 +1536,31 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   font-size: .6rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
   border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; display: inline-block; margin-bottom: 10px;
 }
-.conv-modal-title { font-size: .95rem; line-height: 1.5; color: var(--ink); padding-right: 34px; overflow-wrap: anywhere; }
+.conv-modal-title {
+  font-family: var(--display); font-size: 1.05rem; font-weight: 600; line-height: 1.35;
+  color: var(--ink); padding-right: 34px; margin: 0 0 .65rem; text-transform: none;
+  max-width: 42rem;
+  /* A long unbroken string (a URL, a token, an id) in a title must wrap inside the card,
+     not overflow its boundary (cubic #420 P2 — lost in a refactor, restored #421). */
+  overflow-wrap: anywhere;
+}
+.conv-modal-summary {
+  font-size: .92rem; line-height: 1.55; color: var(--ink-2); margin: 0 0 1rem;
+  max-width: 42rem; text-transform: none;
+}
+.conv-modal-internal {
+  margin-top: .5rem; max-width: 42rem; text-transform: none;
+}
+.conv-modal-internal > summary {
+  font-size: .72rem; letter-spacing: .04em; color: var(--ink-3); cursor: pointer;
+  text-transform: none; margin-bottom: .35rem;
+}
+.conv-modal-internal-body {
+  font-family: var(--mono); font-size: .78rem; line-height: 1.45; color: var(--ink-3);
+  white-space: pre-wrap; overflow-wrap: anywhere; margin: .5rem 0 0; padding: .65rem .75rem;
+  background: color-mix(in srgb, var(--abyss) 55%, transparent); border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm); text-transform: none;
+}
 .gm-dialog {
   /* Wave 4 — the respond modal breathes on desktop. A 520px centre column wasted the
      whole desktop width AND cramped the decision brief; now it uses min(960px, 94vw) and,

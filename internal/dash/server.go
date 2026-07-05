@@ -37,6 +37,20 @@ type Config struct {
 	SecretsPath      string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
 	GoalsLayout      string // initial Goals-map layout: "mindmap" (default) | "tree" — org retired from the UI; the live toggle still overrides (#317/#324)
 
+	// DisableAuthentication turns off the browser write gates (X-Flotilla-Dash header +
+	// Origin allowlist) on state-changing routes. Operator-only insecure mode until the
+	// bearer-token auth gate (#208) lands; set env DISABLE_AUTHENTICATION=1.
+	DisableAuthentication bool
+
+	// AllowedOrigins are additional exact Origin values (scheme://host:port, e.g.
+	// "http://192.168.1.50:8787") accepted by the state-changing write gate — the
+	// operator's DECLARED access origins for a non-loopback (LAN) bind. The write gate
+	// validates a browser Origin against this CONFIGURED allowlist, NOT the attacker-
+	// influenced request Host header, so a DNS-rebinding page (whose Origin is its own
+	// domain) is rejected. Wired from FLOTILLA_DASH_ALLOWED_ORIGINS (comma-separated) at
+	// cmd/flotilla/dash.go. Empty on a loopback bind (the loopback origins suffice).
+	AllowedOrigins []string
+
 	// Transport is the coordination transport backing the control surface's notify
 	// post (the operator note's destination is a Discord webhook, so this is the
 	// DISCORD transport). It is constructed at the wiring boundary
@@ -115,7 +129,10 @@ func NewServer(cfg Config) (*Server, error) {
 		mux:       http.NewServeMux(),
 		hub:       newHub(),
 		allowed:   buildHostAllowlist(cfg.Bind),
-		origins:   buildOriginAllowlist(cfg.Bind),
+		origins:   buildOriginAllowlist(cfg.Bind, cfg.AllowedOrigins),
+	}
+	if cfg.DisableAuthentication {
+		fmt.Fprintln(os.Stderr, "flotilla dash: WARNING — DISABLE_AUTHENTICATION is on; write-route CSRF gates are OFF (insecure mode until #208 lands)")
 	}
 	// The tracker is OPTIONAL: it is wired only when a repo is pinned. An invalid
 	// repo fails closed (NewServer errors) rather than serving a tracker that
@@ -491,15 +508,28 @@ func bindIsNonLoopback(bind string) bool {
 }
 
 // buildOriginAllowlist returns the set of acceptable Origin (and Referer-origin)
-// values for state-changing requests: the same loopback/bind host:port forms as
-// the Host allowlist, prefixed with the http scheme (the dash serves plaintext
-// http on loopback). A state-changing request whose Origin/Referer is present
-// must match one of these (anti-CSRF defense-in-depth alongside the custom
-// header — see requireWrite).
-func buildOriginAllowlist(bind string) map[string]bool {
+// values for state-changing requests: the loopback/bind host:port forms (prefixed
+// with the http scheme the dash serves), PLUS the operator's configured extra
+// origins (extra). A state-changing request whose Origin/Referer is present must
+// match one of these (anti-CSRF defense-in-depth alongside the custom header — see
+// requireWrite).
+//
+// The configured extras are how a non-loopback (LAN) bind is safely reached: the
+// operator DECLARES the exact origin they browse from (e.g. http://192.168.1.50:8787)
+// and only that origin is accepted — validated against this fixed allowlist, never
+// against the request Host header (which an attacker controls in a DNS-rebinding
+// attack). A LAN bind with no configured origins accepts only the loopback/bind
+// forms (fail-closed for writes: the operator must declare their access origin, or
+// run DISABLE_AUTHENTICATION=1 for the explicitly-insecure mode).
+func buildOriginAllowlist(bind string, extra []string) map[string]bool {
 	origins := map[string]bool{}
 	for hostport := range buildHostAllowlist(bind) {
 		origins["http://"+hostport] = true
+	}
+	for _, o := range extra {
+		if o = strings.TrimSpace(o); o != "" {
+			origins[o] = true
+		}
 	}
 	return origins
 }

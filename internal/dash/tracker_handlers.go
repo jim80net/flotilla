@@ -187,13 +187,15 @@ func (s *Server) handleIssueClose(w http.ResponseWriter, r *http.Request) {
 // safe land with the control phase (Phase 3); Phase 2 is loopback-only.
 func (s *Server) requireWrite(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Flotilla-Dash") != "1" {
-			http.Error(w, "forbidden: missing X-Flotilla-Dash header (anti-CSRF)", http.StatusForbidden)
-			return
-		}
-		if !s.originAllowed(r) {
-			http.Error(w, "forbidden: Origin not allowed (anti-CSRF)", http.StatusForbidden)
-			return
+		if !s.cfg.DisableAuthentication {
+			if r.Header.Get("X-Flotilla-Dash") != "1" {
+				http.Error(w, "forbidden: missing X-Flotilla-Dash header (anti-CSRF)", http.StatusForbidden)
+				return
+			}
+			if !s.originAllowed(r) {
+				http.Error(w, "forbidden: Origin not allowed (anti-CSRF)", http.StatusForbidden)
+				return
+			}
 		}
 		next(w, r)
 	}
@@ -205,6 +207,15 @@ func (s *Server) requireWrite(next http.HandlerFunc) http.HandlerFunc {
 // when a header IS present it must match, so a cross-origin browser forgery is
 // rejected.
 func (s *Server) originAllowed(r *http.Request) bool {
+	// A present Origin/Referer is validated against the CONFIGURED allowlist (the
+	// loopback/bind forms plus the operator's declared AllowedOrigins) — NEVER against
+	// the request Host header. Validating against the Host header re-opens DNS rebinding:
+	// an attacker page whose DNS resolves its own domain to the dash's LAN IP sends a
+	// matching Origin AND Host, so a Host-relative check would pass. A fixed allowlist
+	// does not contain the attacker's domain, so the forged write is rejected — while the
+	// operator's declared LAN origin (FLOTILLA_DASH_ALLOWED_ORIGINS) is accepted. A
+	// missing Origin/Referer is a non-browser client (already gated by the required custom
+	// header); DNS rebinding is a browser attack and always carries an Origin.
 	if origin := r.Header.Get("Origin"); origin != "" {
 		return s.origins[origin]
 	}
