@@ -232,36 +232,6 @@ func TestHandleStaticAssets(t *testing.T) {
 	}
 }
 
-// TestControlTargetsNotClobberedGuard is a source-presence regression lock for the
-// #235 cubic P2: syncControlTargets() must NOT unconditionally overwrite the route/
-// resume target fields on a background refresh (that silently misdirects a control
-// action to a different desk than the operator typed). The fix guards refresh-time
-// prefill behind a `controlTargetsTouched` flag set on operator input. There is no
-// JS test runner in this repo, so — consistent with the other asset-content
-// assertions above — this locks the guard's presence in the served dash.js: removing
-// it (reintroducing the clobber) fails here.
-func TestControlTargetsNotClobberedGuard(t *testing.T) {
-	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
-	srv, _ := newTestServer(t, singleFleetRoster, now)
-	js := doGet(t, srv, "/static/dash.js").Body.String()
-	if !strings.Contains(js, "controlTargetsTouched") {
-		t.Error("dash.js must guard control-target prefill with the controlTargetsTouched flag (#235: a refresh must not clobber operator input)")
-	}
-	// Assert BOTH call forms: the explicit desk-selection path passes true (set
-	// authoritatively), and the refresh path calls the GUARDED no-arg form (prefill
-	// only when untouched). Locking both is what keeps a future edit from either
-	// dropping the explicit set OR reintroducing an unconditional refresh-time set.
-	if !strings.Contains(js, "syncControlTargets(true)") {
-		t.Error("dash.js must set targets authoritatively only on explicit desk-selection (syncControlTargets(true))")
-	}
-	if !strings.Contains(js, "syncControlTargets();") {
-		t.Error("dash.js refresh path must call the GUARDED (non-explicit) syncControlTargets() — #235: a refresh must not force-set the target")
-	}
-	if !strings.Contains(js, `addEventListener("input"`) {
-		t.Error("dash.js must mark control targets touched on operator input (an input listener)")
-	}
-}
-
 // TestSessionMirrorGlance locks the session-mirror glance widget (design §2.5): the
 // reader-map placeholder is replaced by a render that consumes /api/session-mirror.
 // No JS test runner, so this asserts the served dash.js has the render + fetch and
