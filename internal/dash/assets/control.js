@@ -17,6 +17,7 @@
   // default, disable while in-flight, show a typed result/error honestly.
   function wire(formId, msgId, submit) {
     var form = el(formId), msg = el(msgId);
+    if (!form || !msg) return; // #405 Inc 4: the route/notify/resume control forms were dropped
     function setMsg(text, kind) { msg.className = "form-msg" + (kind ? " " + kind : ""); msg.textContent = text; }
     var btn = form.querySelector("button");
     form.addEventListener("submit", function (ev) {
