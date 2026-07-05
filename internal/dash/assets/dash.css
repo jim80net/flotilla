@@ -1138,6 +1138,53 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gtile-v { font-family: var(--display); font-weight: 600; font-size: 1.7rem; line-height: 1.05; color: var(--ink); font-variant-numeric: tabular-nums; margin-top: 2px; }
 .gtile-awaiting .gtile-v { color: var(--amber); }
 .gtile-d { font-size: .66rem; color: var(--ink-2); margin-top: 1px; }
+.gtile-click { cursor: pointer; }
+
+/* #405 Inc 3 Item 5: stat-cell click-to-highlight ─────────────────────────── */
+/* Active tile gets a teal inset ring so the operator sees which filter is on. */
+.gtile.gcell-active {
+  box-shadow: inset 0 0 0 2px var(--cyan);
+  background: color-mix(in srgb, var(--cyan) 7%, var(--card));
+}
+/* While a filter is active, dim ALL nodes; .gnode-hl (matching) restore full opacity. */
+#goals-nodes.gcell-focus .gnode { opacity: .15; transition: opacity .14s ease; }
+#goals-nodes.gcell-focus .gnode.gnode-hl { opacity: 1; }
+
+/* #405 Inc 3 Item 6a: realized look-back slider ─────────────────────────── */
+.grealized-slider {
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 14px 0;
+  font-size: 11px;
+}
+.grealized-lab { color: var(--ink-3); flex-shrink: 0; margin-right: 2px; }
+.grealized-btn {
+  padding: 1px 8px; border-radius: var(--r-xs);
+  border: 1px solid var(--line);
+  background: var(--raised); color: var(--ink-2);
+  font-size: 11px; cursor: pointer;
+  transition: background .1s, color .1s, border-color .1s;
+}
+.grealized-btn:hover { background: color-mix(in srgb, var(--cyan) 12%, var(--raised)); color: var(--ink); }
+.grealized-btn.active { background: var(--cyan); color: #fff; border-color: var(--cyan); }
+
+/* #405 Inc 3 Item 6b: graph-node hover tooltip ─────────────────────────── */
+.gnode-tip {
+  position: fixed; z-index: 2000; pointer-events: none;
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: var(--r-sm); padding: 6px 10px;
+  font-size: 12px; line-height: 1.45;
+  box-shadow: var(--shadow); max-width: 280px;
+  opacity: 0; transition: opacity .1s;
+}
+.gnode-tip.visible { opacity: 1; }
+.gnt-scope { color: var(--ink-3); font-size: 11px; text-transform: capitalize; }
+.gnt-meta { display: inline; font-size: 11px; color: var(--ink-3); }
+.gnt-realized  { color: var(--ok); }
+.gnt-in-flight { color: var(--cyan); }
+.gnt-awaiting  { color: var(--amber); }
+.gnt-blocked   { color: var(--err); }
+.gnt-pending   { color: var(--violet); }
+.gnt-aspirational { color: var(--ink-3); }
 
 .goals-panel { display: flex; flex-direction: column; }
 .goals-legend { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }

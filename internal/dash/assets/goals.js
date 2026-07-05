@@ -39,6 +39,20 @@
   var hoveredId = null;  // node currently hovered (re-applied after a render)
   var nodesWired = false;
   var kbdNav = false;    // true when focus is moving by keyboard (Tab) — gates focus-recenter
+  // #405 Inc 3 Items 5+6 ────────────────────────────────────────────────────────
+  // Item 5: stat-cell click-to-highlight. activeCellTone is the tone of the
+  // currently-active filter ("goal" | "inflight" | "pending" | "aspirational" |
+  // null). On a live-tick re-render, reapplyTransient() re-applies the filter so
+  // SSE updates don't wipe it.
+  var activeCellTone = null;
+  // Item 6a: realized look-back window. GoalsCounts is a point-in-time snapshot
+  // (no achieved_at timestamps yet — tracked for a follow-on); the control is
+  // wired and renders honestly, but the count is unchanged across windows until
+  // timestamps are added. See PR body for the follow-on gap.
+  var realizedWindow = "all"; // "1d" | "7d" | "30d" | "all"
+  // Item 6b: node hover tooltip — a fixed-positioned overlay that avoids the
+  // CSS transform on goals-world and uses screen coords directly.
+  var tipEl = null;
   var modalReturn = null;   // fallback element to restore focus to when the modal closes
   var modalReturnId = null; // #354 P2: the NODE id that opened the modal — re-queried live on
                             // close so a drill-in / SSE re-render that replaced the trigger
@@ -104,27 +118,190 @@
     aspirational: "planned", paused: "paused", cancelled: "cancelled",
   };
 
-  /* ── situation strip + legend (unchanged from the merged view) ─────────── */
+  // ── #405 Inc 3 Item 5: stat-cell click-to-highlight helpers ────────────────
+  // TONE_TO_SEL maps a tile tone to the CSS selector for its matching nodes.
+  var TONE_TO_SEL = {
+    "goal":        ".gnode-flotilla",    // "Flotillas" tile → flotilla-scope nodes
+    "inflight":    ".state-in-flight",   // "In flight" tile → in-flight state nodes
+    "pending":     ".state-pending",     // "Blocked" tile → pending state nodes
+    "aspirational":".state-aspirational",// "Planned" tile → aspirational state nodes
+  };
+
+  // applyFilter dims all nodes except those matching the tile's selector. Re-calling
+  // with the same tone re-applies (safe for reapplyTransient). The #goals-nodes
+  // container gets .gcell-focus (dims everything via CSS opacity); each matching node
+  // gets .gnode-hl (restores full opacity).
+  function applyFilter(tone) {
+    var nodesEl = q("goals-nodes"), sit = q("goals-situation");
+    if (!nodesEl || !TONE_TO_SEL[tone]) return;
+    activeCellTone = tone;
+    nodesEl.classList.add("gcell-focus");
+    var all = nodesEl.querySelectorAll(".gnode");
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].matches(TONE_TO_SEL[tone])) all[i].classList.add("gnode-hl");
+      else all[i].classList.remove("gnode-hl");
+    }
+    // Mark the active tile; clear any previously active tile.
+    if (sit) {
+      var tiles = sit.querySelectorAll("[data-filter-tone]");
+      for (var j = 0; j < tiles.length; j++) {
+        tiles[j].classList.toggle("gcell-active", tiles[j].getAttribute("data-filter-tone") === tone);
+      }
+    }
+  }
+
+  // clearFilter removes the cell filter: restores all nodes to full opacity.
+  function clearFilter() {
+    var nodesEl = q("goals-nodes"), sit = q("goals-situation");
+    if (nodesEl) {
+      nodesEl.classList.remove("gcell-focus");
+      var all = nodesEl.querySelectorAll(".gnode-hl");
+      for (var i = 0; i < all.length; i++) all[i].classList.remove("gnode-hl");
+    }
+    if (sit) {
+      var tiles = sit.querySelectorAll(".gcell-active");
+      for (var j = 0; j < tiles.length; j++) tiles[j].classList.remove("gcell-active");
+    }
+    activeCellTone = null;
+  }
+
+  // ── #405 Inc 3 Item 6a: realized look-back slider ───────────────────────────
+  // Inject a segment control once (idempotent). The control writes to realizedWindow
+  // and calls renderSituation to update the Realized tile's description copy. The
+  // actual Realized COUNT is the same for all windows until achieved_at timestamps are
+  // added to GoalsCounts — the slider is full infrastructure; the gap is explicitly
+  // disclosed in the tile description for non-"all" windows (and in the PR body).
+  var sliderWired = false;
+  function injectRealizedSlider() {
+    if (sliderWired) return;
+    var sit = q("goals-situation");
+    if (!sit) return;
+    sliderWired = true;
+    var bar = document.createElement("div");
+    bar.id = "goals-realized-slider";
+    bar.className = "grealized-slider";
+    bar.setAttribute("role", "group");
+    bar.setAttribute("aria-label", "Realized look-back window");
+    bar.innerHTML =
+      '<span class="grealized-lab">Realized window</span>' +
+      ["1d", "7d", "30d", "all"].map(function (w) {
+        return '<button type="button" class="grealized-btn' +
+          (w === realizedWindow ? " active" : "") +
+          '" data-window="' + w + '" aria-pressed="' + (w === realizedWindow) + '">' +
+          w + "</button>";
+      }).join("");
+    // Insert the bar above the tiles strip.
+    sit.parentNode.insertBefore(bar, sit);
+    bar.addEventListener("click", function (e) {
+      var btn = e.target.closest(".grealized-btn");
+      if (!btn) return;
+      var w = btn.getAttribute("data-window");
+      if (!w || w === realizedWindow) return;
+      realizedWindow = w;
+      var btns = bar.querySelectorAll(".grealized-btn");
+      for (var i = 0; i < btns.length; i++) {
+        var match = btns[i].getAttribute("data-window") === w;
+        btns[i].classList.toggle("active", match);
+        btns[i].setAttribute("aria-pressed", String(match));
+      }
+      // Re-render the situation strip so the Realized tile's description reflects the window.
+      if (cache) renderSituation(cache);
+    });
+  }
+
+  // ── #405 Inc 3 Item 6b: node hover tooltip ──────────────────────────────────
+  // A fixed-position overlay positioned at the cursor (screen coordinates), so it is
+  // unaffected by the CSS transform on goals-world. Injected once into document.body.
+  function ensureTip() {
+    if (!tipEl) {
+      tipEl = document.createElement("div");
+      tipEl.id = "goals-node-tip";
+      tipEl.className = "gnode-tip";
+      tipEl.setAttribute("role", "tooltip");
+      tipEl.setAttribute("aria-hidden", "true");
+      document.body.appendChild(tipEl);
+    }
+    return tipEl;
+  }
+
+  function showTip(n, x, y) {
+    var t = ensureTip();
+    var vis = visToken(n);
+    var stateLabel = STATE_LABEL[vis] || vis;
+    // "what it's doing": first active work item's detail or label.
+    var doing = "";
+    var items = n.work_items || [];
+    for (var i = 0; i < items.length; i++) {
+      var wi = items[i];
+      if (wi.class === "in-flight" || wi.class === "awaiting" || wi.class === "blocked") {
+        doing = wi.detail || wi.label || "";
+        break;
+      }
+    }
+    var meta = escapeHtml(stateLabel);
+    if (n.owner) meta += " · led by " + escapeHtml(n.owner);
+    if (doing) meta += " · " + escapeHtml(doing);
+    t.innerHTML =
+      '<span class="gnt-scope">' + escapeHtml(scopeNoun(n)) + "</span>" +
+      " <strong>" + escapeHtml(n.title || n.id) + "</strong>" +
+      "<br><span class=\"gnt-meta gnt-" + escapeHtml(vis) + "\">" + meta + "</span>";
+    // Position near cursor; clamp to viewport edges so the tooltip never clips.
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var m = 14;
+    var tx = x + m, ty = y + m;
+    // Read the actual rendered size if available; fall back to a generous estimate.
+    var tw = t.offsetWidth || 260, th = t.offsetHeight || 56;
+    if (tx + tw > vw - m) tx = x - tw - m;
+    if (ty + th > vh - m) ty = y - th - m;
+    t.style.left = Math.max(0, tx) + "px";
+    t.style.top  = Math.max(0, ty) + "px";
+    t.classList.add("visible");
+    t.setAttribute("aria-hidden", "false");
+  }
+
+  function hideTip() {
+    if (tipEl) {
+      tipEl.classList.remove("visible");
+      tipEl.setAttribute("aria-hidden", "true");
+    }
+  }
+
+  /* ── situation strip + legend ──────────────────────────────────────────── */
   function renderSituation(doc) {
     var c = doc.counts || {};
+    // Realized description: honest about the snapshot limitation until achieved_at
+    // timestamps land in GoalsCounts (follow-on — see PR body). For bounded windows the
+    // count is still the full snapshot; the description copy says so explicitly.
+    var realizedD = realizedWindow === "all"
+      ? "done & solidified"
+      : "in last " + realizedWindow + " (snapshot; timestamps not yet tracked)";
     var tiles = [
-      { k: "Flotillas", v: c.fleet || 0, tone: "goal", d: (c.total || 0) + " nodes total" },
-      { k: "In flight", v: c.in_flight || 0, tone: "inflight", d: "desks working now" },
-      { k: "Awaiting you", v: c.awaiting || 0, tone: "awaiting", d: "your decisions & blocks" },
-      // #405 Inc 3 (Q2, operator-turned): keep Pending + Aspirational distinct but rename to plain
-      // language that cures the confusion — "Blocked" is dependency-gated (go unblock it),
-      // "Planned" is simply not-yet-started. (The operator leaned merge; the COS surfaces the
-      // divergence in the parade so one word can still flip it to a merge.)
-      { k: "Blocked", v: c.pending || 0, tone: "pending", d: "waiting on a dependency" },
-      { k: "Realized", v: c.realized || 0, tone: "realized", d: "done & solidified" },
-      { k: "Planned", v: c.aspirational || 0, tone: "aspirational", d: "not started" },
+      // filter:"goal"|"inflight"|"pending"|"aspirational" → clicking highlights matching nodes.
+      // "Awaiting you" and "Realized" have no node-state filter (awaiting opens the decision
+      // page; realized is a done state, not a live-map filter with data coverage yet).
+      { k: "Flotillas",   v: c.fleet || 0,       tone: "goal",        d: (c.total || 0) + " nodes total",     filter: "goal" },
+      { k: "In flight",   v: c.in_flight || 0,   tone: "inflight",    d: "desks working now",                 filter: "inflight" },
+      { k: "Awaiting you",v: c.awaiting || 0,    tone: "awaiting",    d: "your decisions & blocks" },
+      // #405 Inc 3 (Q2): renamed Pending→Blocked, Aspirational→Planned.
+      { k: "Blocked",     v: c.pending || 0,     tone: "pending",     d: "waiting on a dependency",           filter: "pending" },
+      { k: "Realized",    v: c.realized || 0,    tone: "realized",    d: realizedD },
+      { k: "Planned",     v: c.aspirational || 0,tone: "aspirational",d: "not started",                       filter: "aspirational" },
     ];
     q("goals-situation").innerHTML = tiles.map(function (t) {
-      // #405 Inc 2: the "Awaiting you" tile opens the decision page (the full-cell drill-ins for
-      // the other tiles are Inc 3). It is a real button for keyboard + a11y.
-      var click = t.tone === "awaiting";
-      var attrs = click ? ' data-open-decisions role="button" tabindex="0" title="Open the decisions awaiting you"' : "";
-      return '<div class="gtile gtile-' + t.tone + (click ? " gtile-click" : "") + '"' + attrs + ">" +
+      var isDecisions = t.tone === "awaiting";
+      var isFilter    = !!t.filter;
+      var cls  = "gtile gtile-" + t.tone;
+      var attrs = "";
+      if (isDecisions) {
+        cls  += " gtile-click";
+        attrs = ' data-open-decisions role="button" tabindex="0" title="Open the decisions awaiting you"';
+      } else if (isFilter) {
+        cls  += " gtile-click";
+        // The title is read by screen readers; also serves as the visible tooltip on hover.
+        attrs = ' data-filter-tone="' + t.filter + '" role="button" tabindex="0"' +
+          ' title="Highlight ' + escapeHtml(t.k) + ' goals on the map — click again or press Escape to clear"';
+      }
+      return '<div class="' + cls + '"' + attrs + ">" +
         '<div class="gtile-k">' + escapeHtml(t.k) + "</div>" +
         '<div class="gtile-v">' + escapeHtml(String(t.v)) + "</div>" +
         '<div class="gtile-d">' + escapeHtml(t.d) + "</div>" +
@@ -1255,6 +1432,9 @@
       if (nodeById[hoveredId]) { highlightChain(hoveredId, true); lightDeps(hoveredId, true); }
       else hoveredId = null;
     }
+    // #405 Inc 3 Item 5: re-apply the stat-cell highlight after every render so SSE
+    // ticks (which replace or update node articles) don't wipe the active filter.
+    if (activeCellTone) applyFilter(activeCellTone);
   }
 
   // ── #405 Inc 2: the decision page (the operator's centerpiece) ────────────────────
@@ -1372,6 +1552,13 @@
     // mouse/touch (so its focus won't recenter).
     document.addEventListener("keydown", function (e) { if (e.key === "Tab") kbdNav = true; }, true);
     document.addEventListener("pointerdown", function () { kbdNav = false; }, true);
+    // #405 Inc 3 Item 6b: track mouse position so the tooltip follows the cursor.
+    var tipX = 0, tipY = 0;
+    nodesEl.addEventListener("mousemove", function (e) {
+      tipX = e.clientX; tipY = e.clientY;
+      // Reposition the tip if it is already visible (cursor moved within the card).
+      if (hoveredId && nodeById[hoveredId]) showTip(nodeById[hoveredId], tipX, tipY);
+    });
     nodesEl.addEventListener("mouseover", function (e) {
       var card = e.target.closest(".gnode");
       if (!card) return;
@@ -1380,6 +1567,8 @@
       hoveredId = id;
       highlightChain(id, true);
       lightDeps(id, true);
+      // #405 Inc 3 Item 6b: show the richer tooltip for this node.
+      if (nodeById[id]) showTip(nodeById[id], tipX, tipY);
     });
     nodesEl.addEventListener("mouseout", function (e) {
       var card = e.target.closest(".gnode");
@@ -1389,6 +1578,7 @@
       highlightChain(id, false);
       lightDeps(id, false);
       if (hoveredId === id) hoveredId = null;
+      hideTip(); // #405 Inc 3 Item 6b
     });
     var close = q("goals-drawer-close");
     if (close) close.onclick = closeDrawer;
@@ -1446,16 +1636,31 @@
       var note = q("goals-modal-note");
       if (note) note.textContent = "Reply path is a prototype stub — not sent (wiring to the control API is a follow-on).";
     };
-    // #405 Inc 2: the decision page. The "Awaiting you" situation tile opens it; inside, the ×/
-    // backdrop close it and a card's "Drives" link jumps to that goal's detail in the map.
+    // Situation strip: "Awaiting you" opens the decision page; filter tiles highlight
+    // their matching nodes. Re-clicking an active filter tile clears it (toggle).
     var sit = q("goals-situation");
     if (sit) {
       sit.addEventListener("click", function (e) {
-        if (e.target.closest("[data-open-decisions]")) openDecisions();
+        if (e.target.closest("[data-open-decisions]")) { openDecisions(); return; }
+        // #405 Inc 3 Item 5: stat-cell filter.
+        var tile = e.target.closest("[data-filter-tone]");
+        if (tile) {
+          var tone = tile.getAttribute("data-filter-tone");
+          if (activeCellTone === tone) clearFilter(); // toggle off on re-click
+          else applyFilter(tone);
+        }
       });
       sit.addEventListener("keydown", function (e) {
         if (e.key !== "Enter" && e.key !== " ") return;
-        if (e.target.closest("[data-open-decisions]")) { e.preventDefault(); openDecisions(); }
+        if (e.target.closest("[data-open-decisions]")) { e.preventDefault(); openDecisions(); return; }
+        // #405 Inc 3 Item 5: keyboard activation for filter tiles.
+        var tile = e.target.closest("[data-filter-tone]");
+        if (tile) {
+          e.preventDefault();
+          var tone = tile.getAttribute("data-filter-tone");
+          if (activeCellTone === tone) clearFilter();
+          else applyFilter(tone);
+        }
       });
     }
     var decEl = q("goals-decisions");
@@ -1469,6 +1674,8 @@
       if (help) help.setAttribute("aria-expanded", "false"); // Esc dismisses the tooltip too
       if (q("goals-decisions") && q("goals-decisions").classList.contains("open")) { closeDecisions(); return; }
       if (q("goals-modal") && q("goals-modal").classList.contains("open")) { closeModal(); return; }
+      // #405 Inc 3 Item 5: Escape clears the stat-cell highlight before closing the drawer.
+      if (activeCellTone) { clearFilter(); return; }
       closeDrawer();
     });
   }
@@ -1788,6 +1995,7 @@
     setupPanZoom();
     wireNodes();
     wireLayoutToggle();
+    injectRealizedSlider(); // #405 Inc 3 Item 6a: inject once on first tab activation
     if (cache) { render(); } else { refresh(); }
   }
 
