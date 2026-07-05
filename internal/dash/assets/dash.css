@@ -921,6 +921,11 @@ code {
   box-shadow: inset 0 0 0 1px var(--line), var(--shadow-sm);
 }
 
+/* The SPA view-tabs live in an inner role="tablist" group (cubic #416 P1). The
+   group carries the same flex + gap as the strip so all four items — the three
+   grouped tabs and the sibling Parade link — sit evenly, identical to before. */
+.tab-group { display: flex; gap: .15rem; align-items: center; }
+
 /* Parade tab is an <a> element styled to look like the other tabs.
    Reset link defaults so it matches the button tabs visually. */
 .tab-parade {
@@ -928,7 +933,13 @@ code {
   display: inline-flex;
   align-items: center;
 }
-.tab-parade:visited { color: inherit; }
+/* Pin the visited colour to the tab base token (var(--ink-3)) so a visited Parade
+   link matches the other tabs. `inherit` would pull from the <nav> parent (→ body
+   var(--ink-2)), rendering visited slightly darker than unvisited (cubic #416 P3).
+   Ordered after .tab:hover so hover still wins on the visited link (LVHA order). */
+.tab-parade:link,
+.tab-parade:visited { color: var(--ink-3); }
+.tab-parade:hover { color: var(--ink-2); }
 
 /* ── unseen-content dot (item 9) ────────────────────────────────────────────
    A small indicator dot that appears on a tab when the operator has new content

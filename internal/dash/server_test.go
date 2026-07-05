@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -603,6 +604,24 @@ func TestDashInc5Shell405(t *testing.T) {
 	if !strings.Contains(js, `.tab[data-view]`) {
 		t.Error(`dash.js must select only ".tab[data-view]" for the SPA click handler (not ".tab") so the Parade <a> is excluded — #405 Inc 5 item 8`)
 	}
+	// cubic #416 P1: only role="tab" elements may be direct children of role="tablist".
+	// The Parade <a> is a navigation-out link, not a tab, so it must live OUTSIDE the
+	// tablist — the three SPA view-tabs sit in an inner role="tablist" group, and the
+	// Parade link is a sibling in the nav (still visually a tab).
+	if strings.Contains(html, `class="tabs" role="tablist"`) {
+		t.Error(`index.html: role="tablist" must NOT be on the .tabs nav that contains the Parade <a> — an <a> is not a valid tablist child (cubic #416 P1)`)
+	}
+	if !strings.Contains(html, `class="tab-group" role="tablist"`) {
+		t.Error(`index.html: the three SPA view-tabs must be wrapped in an inner role="tablist" group (.tab-group) so only role="tab" elements are tablist children (cubic #416 P1)`)
+	}
+	// The tablist group must close BEFORE the Parade link — i.e. the Parade <a> is a
+	// sibling of the group, not inside it. html/template strips the HTML comments, so
+	// the group-closing </span> sits immediately before the Parade anchor (only
+	// whitespace between). This regex confirms the group closes, THEN the Parade <a>
+	// opens — the Parade link is outside role="tablist" (cubic #416 P1).
+	if !regexp.MustCompile(`</span>\s*<a id="tab-parade"`).MatchString(html) {
+		t.Error(`index.html: the Parade <a> must sit AFTER the tablist group closes (outside role="tablist") — cubic #416 P1`)
+	}
 
 	// ── Part B: Unseen-content dots ────────────────────────────────────────────
 	// Each SPA tab must carry an unseen-dot span.
@@ -632,12 +651,38 @@ func TestDashInc5Shell405(t *testing.T) {
 			t.Error("dash.js showView must call markTabViewed to clear the unseen dot on tab open — #405 Inc 5 item 9")
 		}
 	}
+	// cubic #416 P2: the issues signature must read the tracker's camelCase timestamp
+	// fields (updatedAt / createdAt — the gh `--json` shape), NOT snake_case, or an
+	// edit to an existing issue (count unchanged) never lights the dot.
+	if strings.Contains(js, "updated_at") || strings.Contains(js, "created_at") {
+		t.Error(`dash.js peekIssuesSig must read camelCase updatedAt/createdAt (not snake_case) — the /api/issues shape (cubic #416 P2)`)
+	}
+	if !strings.Contains(js, "updatedAt") {
+		t.Error(`dash.js peekIssuesSig must read the issue's updatedAt field — cubic #416 P2`)
+	}
+	// cubic #416 P2: the Parade dot must clear even on a fast click before its sig loads —
+	// the click handler defers navigation, peeks the sig, then stores it (pendingView +
+	// deferred nav). Guard the pending mechanism + the deferred-navigation path.
+	if !strings.Contains(js, "pendingView") {
+		t.Error("dash.js must track a pending tab-view so a fast Parade click records once the sig loads (cubic #416 P2)")
+	}
+	if !strings.Contains(js, "window.location.href = href") {
+		t.Error("dash.js Parade click must defer navigation until the sig is stored when it isn't yet loaded (cubic #416 P2)")
+	}
 	css := doGet(t, srv, "/static/dash.css").Body.String()
 	if !strings.Contains(css, ".unseen-dot") {
 		t.Error("dash.css must define .unseen-dot — #405 Inc 5 item 9")
 	}
 	if !strings.Contains(css, `data-active="true"`) {
 		t.Error(`dash.css must show the dot when data-active="true" — #405 Inc 5 item 9`)
+	}
+	// cubic #416 P3: the Parade link's visited colour must be the explicit tab token,
+	// not `inherit` (which would pull the parent nav → body var(--ink-2), darkening it).
+	if strings.Contains(css, ".tab-parade:visited { color: inherit") {
+		t.Error(`dash.css .tab-parade:visited must not use color: inherit (renders var(--ink-2), darker than the tab base) — cubic #416 P3`)
+	}
+	if !strings.Contains(css, ".tab-group") {
+		t.Error("dash.css must define .tab-group (the inner tablist flex group preserving the strip layout) — cubic #416 P1")
 	}
 
 	// ── Part C: Hub-and-spoke brand mark ──────────────────────────────────────

@@ -689,6 +689,7 @@
         fetchMirror(); // keep the selected desk's session-mirror glance current on each tick
         // Update the conversations unseen dot from the freshly-loaded ledger.
         unseenSigs.conversations = computeConvSig();
+        resolvePending("conversations");
         refreshDots();
         // Peek the other tabs' data sources to keep their unseen dots current.
         // Fire-and-forget: errors are swallowed inside each peek so a failing
@@ -741,12 +742,17 @@
      Signature sources:
        conversations — latest ledger ts + count (from cache.history; available each refresh)
        goals         — version + counts from /api/goals (peeked once per refresh cycle)
-       issues        — issue count + newest updated_at from /api/issues (peeked once)
+       issues        — issue count + newest updatedAt from /api/issues (peeked once)
        parade        — newest parade date from /api/parades (peeked once)
      Dot shows when currentSig !== storedSig; clears when operator opens that tab.
      Per-browser client signal — localStorage is not synced across devices.
   ─────────────────────────────────────────────────────────────────────────── */
   var unseenSigs = {};
+  // pendingView tracks a tab the operator has OPENED while its signature is not yet
+  // loaded (the async peek hasn't landed). markTabViewed can't store an empty sig, so
+  // it records the intent here; when the peek resolves, it stores the now-known sig so
+  // the dot stays cleared. Fixes the fast-click race on the Parade nav-out (cubic #416 P2).
+  var pendingView = {};
 
   function unseenKey(tab) { return "flotilla-tab-sig-" + tab; }
   function unseenDot(tab) { return document.getElementById("dot-" + tab); }
@@ -781,9 +787,31 @@
 
   function markTabViewed(tab) {
     var sig = unseenSigs[tab] || "";
-    if (!sig) return;
+    if (!sig) {
+      // The signature hasn't loaded yet — remember that the operator opened this tab
+      // and kick the peek so the sig arrives ASAP; the peek stores it on resolution.
+      pendingView[tab] = true;
+      peekTab(tab);
+      return;
+    }
+    delete pendingView[tab];
     try { localStorage.setItem(unseenKey(tab), sig); } catch (e) {}
     setDot(tab, false);
+  }
+
+  // peekTab (re)fetches the signature for one tab. Returns the fetch promise (or a
+  // resolved promise for conversations, whose sig comes from the shared refresh cache).
+  function peekTab(tab) {
+    if (tab === "goals") return peekGoalsSig();
+    if (tab === "issues") return peekIssuesSig();
+    if (tab === "parade") return peekParadeSig();
+    return Promise.resolve();
+  }
+
+  // resolvePending stores the now-known signature for a tab the operator already opened
+  // while its sig was still loading — so the dot stays cleared once the peek lands.
+  function resolvePending(tab) {
+    if (pendingView[tab] && unseenSigs[tab]) markTabViewed(tab);
   }
 
   // computeConvSig derives the conversations signature from the loaded cache — the
@@ -797,33 +825,41 @@
     return latestTs + "|" + String(ledger.length) + "|" + String(unblocked.length);
   }
 
-  // peekGoalsSig fetches /api/goals to derive the goals tab signature. Fire-and-forget;
-  // errors are silently swallowed so a missing goals doc never breaks the dot logic.
+  // peekGoalsSig fetches /api/goals to derive the goals tab signature. Errors are
+  // swallowed so a missing goals doc never breaks the dot logic. Returns the promise
+  // so a caller (a pending tab-view) can act once the sig lands.
   function peekGoalsSig() {
-    getJSON("/api/goals").then(function (g) {
+    return getJSON("/api/goals").then(function (g) {
       var v = (g && g.version != null) ? String(g.version) : "";
       var c = (g && g.counts) ? JSON.stringify(g.counts) : "";
       unseenSigs.goals = v + "|" + c;
+      resolvePending("goals");
       refreshDots();
     }).catch(function () {});
   }
 
   // peekIssuesSig fetches /api/issues (open, up to 50) to derive the issues tab signature.
+  // The tracker serializes gh's `--json` shape, so the timestamp fields are camelCase
+  // (updatedAt / createdAt — see internal/dash/tracker/tracker.go Issue struct), NOT
+  // snake_case. Reading updatedAt keeps the dot in sync when an existing issue is edited
+  // without the count changing (cubic #416 P2).
   function peekIssuesSig() {
-    getJSON("/api/issues?state=open&limit=50").then(function (d) {
+    return getJSON("/api/issues?state=open&limit=50").then(function (d) {
       var items = Array.isArray(d && d.issues) ? d.issues : (Array.isArray(d) ? d : []);
-      var newest = items.length ? (items[0].updated_at || items[0].created_at || "") : "";
+      var newest = items.length ? (items[0].updatedAt || items[0].createdAt || "") : "";
       unseenSigs.issues = String(items.length) + "|" + newest;
+      resolvePending("issues");
       refreshDots();
     }).catch(function () {});
   }
 
   // peekParadeSig fetches /api/parades to derive the parade tab signature (newest date).
   function peekParadeSig() {
-    getJSON("/api/parades").then(function (d) {
+    return getJSON("/api/parades").then(function (d) {
       var items = Array.isArray(d && d.parades) ? d.parades : [];
       var newest = items.length ? (items[0].date || "") : "";
       unseenSigs.parade = newest;
+      resolvePending("parade");
       refreshDots();
     }).catch(function () {});
   }
@@ -859,10 +895,21 @@
     });
   }
   // Parade tab: mark it viewed on click so the dot clears as the operator navigates out.
+  // The Parade link navigates the whole page away, unloading this script — so if the
+  // signature hasn't loaded yet, a bare markTabViewed would only queue a pending write
+  // that never runs (the page is gone). To fully close that race (cubic #416 P2): when
+  // the sig is unknown, DEFER navigation, peek the sig, store it, then navigate. When the
+  // sig is already known (the common case — the peek runs at load), store synchronously
+  // and let the browser navigate normally (no preventDefault).
   var paradeTabEl = el("tab-parade");
   if (paradeTabEl) {
-    paradeTabEl.addEventListener("click", function () {
-      markTabViewed("parade");
+    paradeTabEl.addEventListener("click", function (e) {
+      if (unseenSigs.parade) { markTabViewed("parade"); return; } // known → store + navigate
+      // Unknown sig: hold the navigation just long enough to record the view.
+      e.preventDefault();
+      var href = paradeTabEl.getAttribute("href") || "/parade";
+      var go = function () { window.location.href = href; };
+      peekParadeSig().then(function () { markTabViewed("parade"); }).then(go, go);
     });
   }
 
