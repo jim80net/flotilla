@@ -54,7 +54,7 @@ Canonical order (list, template, CLI agree): **Proud of → Learned → Looking 
 | Piece | Convention |
 |---|---|
 | Dash page | `/parade` — deck viewer, newest parade opens first |
-| Archive root | `<parades-dir>` — default `<roster-dir>/state/parades` |
+| Archive root | `<parades-dir>` — default `<roster-dir>/parades` |
 | Override | `flotilla dash --parades-dir` or `FLOTILLA_DASH_PARADES_DIR` |
 | Per parade | `<parades-dir>/<YYYY-MM-DD>/slides.md` + `assets/` |
 | Slide breaks | `---` between slides (one per project-XO in fleet deck) |
