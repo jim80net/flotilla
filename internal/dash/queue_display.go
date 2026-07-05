@@ -25,6 +25,9 @@ var (
 	internalJargon        = regexp.MustCompile(`(?i)(PR\s*#\d+|\b[0-9a-f]{7,40}\b|cos\s*gate|cubic|RFC3339|\d{4}-\d{2}-\d{2}T\d{2}:\d{2})`)
 	scopeAtAgent          = regexp.MustCompile(`(?i)@([a-z][a-z0-9-]*)\b`)
 	scopeArrowAgent       = regexp.MustCompile(`(?i)(?:→|->)\s*([a-z][a-z0-9-]*)\b`)
+	// Compiled ONCE (not per line) — these run in ParseQueueItemDisplay's per-line hot path.
+	listMarkerBody = regexp.MustCompile(`^\s*(?:\d+\.|[-*+])\s*\[[^\]]+\]\s*(.*)$`)
+	listGlyph      = regexp.MustCompile(`^\s*(?:\d+\.|[-*+])\s+`)
 )
 
 // ParseQueueItemDisplay turns one raw backlog markdown list line into the operator
@@ -86,14 +89,21 @@ func extractScope(body string) string {
 		}
 		return agent
 	}
-	if m := scopeArrowAgent.FindStringSubmatch(body); len(m) > 1 {
-		return strings.ToLower(strings.TrimSpace(m[1]))
+	for _, m := range scopeArrowAgent.FindAllStringSubmatch(body, -1) {
+		if len(m) < 2 {
+			continue
+		}
+		agent := strings.ToLower(strings.TrimSpace(m[1]))
+		if agent == "operator" {
+			continue // "→ operator" is coordinator/XO-level (a review ask), not a desk scope
+		}
+		return agent
 	}
 	return ""
 }
 
 func queueBodyAfterMarker(raw string) string {
-	m := regexp.MustCompile(`^\s*(?:\d+\.|[-*+])\s*\[[^\]]+\]\s*(.*)$`).FindStringSubmatch(raw)
+	m := listMarkerBody.FindStringSubmatch(raw)
 	if len(m) < 2 {
 		return stripListGlyph(raw)
 	}
@@ -101,7 +111,7 @@ func queueBodyAfterMarker(raw string) string {
 }
 
 func stripListGlyph(raw string) string {
-	return strings.TrimSpace(regexp.MustCompile(`^\s*(?:\d+\.|[-*+])\s+`).ReplaceAllString(raw, ""))
+	return strings.TrimSpace(listGlyph.ReplaceAllString(raw, ""))
 }
 
 func deriveTitle(body string) string {

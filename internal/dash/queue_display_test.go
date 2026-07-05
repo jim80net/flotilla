@@ -31,13 +31,19 @@ func TestParseQueueItemDisplayDerivesTitleBeforeJargon(t *testing.T) {
 }
 
 func TestParseQueueItemDisplayScope(t *testing.T) {
-	item := ParseQueueItemDisplay("- [in-flight] Ship dash :: Summary. @flotilla-dash")
-	if item.Scope != "flotilla-dash" {
-		t.Fatalf("scope = %q, want flotilla-dash", item.Scope)
-	}
-	item2 := ParseQueueItemDisplay("- [next] Fleet parade prep")
-	if item2.Scope != "" {
-		t.Fatalf("unscoped item scope = %q, want empty (coordinator)", item2.Scope)
+	for _, tc := range []struct {
+		name, raw, want string
+	}{
+		{"at-desk", "- [in-flight] Ship dash :: Summary. @flotilla-dash", "flotilla-dash"},
+		{"arrow-desk", "- [in-flight] Deploy canary → flotilla-dash", "flotilla-dash"}, // scopeArrowAgent path
+		{"arrow-desk-ascii", "- [next] Hand off -> macro-desk", "macro-desk"},          // -> variant
+		{"unscoped-coordinator", "- [next] Fleet parade prep", ""},                     // no scope token
+		{"at-operator-skipped", "- [blocked] @operator please review", ""},             // @operator is coordinator-level
+		{"arrow-operator-skipped", "- [awaiting-auth] Approve spend → operator", ""},   // → operator likewise (cubic #421 P3)
+	} {
+		if got := ParseQueueItemDisplay(tc.raw).Scope; got != tc.want {
+			t.Errorf("%s: scope = %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }
 
@@ -46,7 +52,17 @@ func TestBuildQueueItemsPreservesOrder(t *testing.T) {
 		"- [next] First item",
 		"- [in-flight] Second :: A short summary.",
 	})
-	if len(items) != 2 || items[0].Title == "" || items[1].Summary == "" {
-		t.Fatalf("items = %+v", items)
+	if len(items) != 2 {
+		t.Fatalf("want 2 items, got %d: %+v", len(items), items)
+	}
+	// Positional assertions — the projection preserves input order (not merely non-empty).
+	if items[0].Title != "First item" {
+		t.Errorf("items[0].Title = %q, want %q", items[0].Title, "First item")
+	}
+	if items[1].Title != "Second" {
+		t.Errorf("items[1].Title = %q, want %q", items[1].Title, "Second")
+	}
+	if items[1].Summary != "A short summary." {
+		t.Errorf("items[1].Summary = %q, want %q", items[1].Summary, "A short summary.")
 	}
 }

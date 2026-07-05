@@ -1665,7 +1665,9 @@
     var sit = q("goals-situation");
     if (sit) {
       sit.addEventListener("click", function (e) {
-        if (e.target.closest("[data-open-decisions]")) { openDecisions(); return; }
+        // [data-open-decisions] is owned by the single document-level handler in dash.js
+        // (it opens Decisions from ANY view, including this tile) — handling it here too
+        // double-fired openDecisions and could clobber decision state (cubic #421 P2).
         // #405 Inc 3 Item 5: stat-cell filter.
         var tile = e.target.closest("[data-filter-tone]");
         if (tile) {
@@ -1676,7 +1678,8 @@
       });
       sit.addEventListener("keydown", function (e) {
         if (e.key !== "Enter" && e.key !== " ") return;
-        if (e.target.closest("[data-open-decisions]")) { e.preventDefault(); openDecisions(); return; }
+        // [data-open-decisions] keyboard activation is owned by dash.js's document-level
+        // keydown handler (single owner — see the click handler above; cubic #421 P2).
         // #405 Inc 3 Item 5: keyboard activation for filter tiles.
         var tile = e.target.closest("[data-filter-tone]");
         if (tile) {

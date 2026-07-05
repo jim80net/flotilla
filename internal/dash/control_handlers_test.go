@@ -196,27 +196,68 @@ func TestControlRoute_DisableAuthentication(t *testing.T) {
 	}
 }
 
-// TestControlRoute_LANOriginAcceptsMatchingHost: on a non-loopback bind the browser
-// Origin uses the host the operator typed, not the bind address — accept same-host Origin.
-func TestControlRoute_LANOriginAcceptsMatchingHost(t *testing.T) {
-	f := &fakeController{routeRes: control.RouteResult{Target: "alpha", Outcome: control.OutcomeDelivered}}
+// lanServer builds a non-loopback (LAN) bound server with the given configured write-gate
+// origins — the fixture for the DNS-rebinding contract tests below.
+func lanServer(t *testing.T, allowedOrigins []string) *Server {
+	t.Helper()
 	dir := t.TempDir()
 	rosterPath := filepath.Join(dir, "flotilla.json")
 	if err := os.WriteFile(rosterPath, []byte(singleFleetRoster), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	srv, err := NewServer(Config{RosterPath: rosterPath, Bind: "0.0.0.0:8787", Transport: stubTransport{}, WebTransport: stubTransport{}})
+	srv, err := NewServer(Config{RosterPath: rosterPath, Bind: "0.0.0.0:8787", AllowedOrigins: allowedOrigins, Transport: stubTransport{}, WebTransport: stubTransport{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv.control = f
-	req := httptest.NewRequest("POST", "http://192.168.1.5:8787/api/control/route", strings.NewReader(`{"target":"alpha","message":"hi"}`))
-	req.Host = "192.168.1.5:8787"
+	srv.control = &fakeController{routeRes: control.RouteResult{Target: "alpha", Outcome: control.OutcomeDelivered}}
+	return srv
+}
+
+func lanRouteReq(originHost string) *http.Request {
+	req := httptest.NewRequest("POST", "http://"+originHost+"/api/control/route", strings.NewReader(`{"target":"alpha","message":"hi"}`))
+	req.Host = originHost
 	req.Header.Set("X-Flotilla-Dash", "1")
-	req.Header.Set("Origin", "http://192.168.1.5:8787")
+	req.Header.Set("Origin", "http://"+originHost)
+	return req
+}
+
+// TestControlRoute_LANRebindingOriginRejected: the DNS-rebinding attack — a page whose DNS
+// resolves the attacker's own domain to the dash's LAN IP sends a matching Origin AND Host.
+// A Host-relative check would pass; validating against the CONFIGURED allowlist rejects it.
+// (Regression for #421 cubic P1 — the write gate must NOT trust the request Host header.)
+func TestControlRoute_LANRebindingOriginRejected(t *testing.T) {
+	srv := lanServer(t, []string{"http://192.168.1.5:8787"}) // operator declared their LAN origin
+	req := lanRouteReq("attacker.example.com")               // but the forged request carries the attacker's origin+host
+	rec := httptest.NewRecorder()
+	srv.handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("rebinding Origin matching request Host → %d, want 403 (DNS-rebinding must be rejected); body=%s", rec.Code, rec.Body.String())
+	}
+	if srv.control.(*fakeController).calls != 0 {
+		t.Error("a rebinding-rejected write must never reach the controller")
+	}
+}
+
+// TestControlRoute_LANConfiguredOriginAccepted: the operator's DECLARED LAN origin
+// (FLOTILLA_DASH_ALLOWED_ORIGINS) is accepted — legitimate LAN access still works.
+func TestControlRoute_LANConfiguredOriginAccepted(t *testing.T) {
+	srv := lanServer(t, []string{"http://192.168.1.5:8787"})
+	req := lanRouteReq("192.168.1.5:8787")
 	rec := httptest.NewRecorder()
 	srv.handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("LAN same-host Origin → %d, want 200; body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("configured LAN Origin → %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestControlRoute_LANUnconfiguredOriginRejected: a LAN bind with NO declared origins fails
+// closed for writes — the operator must declare their access origin (or DISABLE_AUTHENTICATION).
+func TestControlRoute_LANUnconfiguredOriginRejected(t *testing.T) {
+	srv := lanServer(t, nil)
+	req := lanRouteReq("192.168.1.5:8787")
+	rec := httptest.NewRecorder()
+	srv.handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("unconfigured LAN Origin → %d, want 403 (fail-closed); body=%s", rec.Code, rec.Body.String())
 	}
 }

@@ -100,6 +100,7 @@ func cmdDash(args []string) error {
 		SecretsPath:           *secretsPath,
 		GoalsLayout:           *goalsLayout,
 		DisableAuthentication: dashEnvTruthy("DISABLE_AUTHENTICATION"),
+		AllowedOrigins:        dashEnvList("FLOTILLA_DASH_ALLOWED_ORIGINS"),
 		Transport:             tr,
 		WebTransport:          webTr,
 	})
@@ -173,4 +174,20 @@ func newDashWebTransport(rc *roster.Config) (transport.Transport, error) {
 func dashEnvTruthy(key string) bool {
 	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
 	return v == "1" || v == "true" || v == "yes" || v == "on"
+}
+
+// dashEnvList parses a comma-separated env var into a trimmed, non-empty list — used for
+// FLOTILLA_DASH_ALLOWED_ORIGINS (the operator's declared write-gate origins for a LAN bind).
+func dashEnvList(key string) []string {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

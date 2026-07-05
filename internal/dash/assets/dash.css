@@ -1540,6 +1540,9 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   font-family: var(--display); font-size: 1.05rem; font-weight: 600; line-height: 1.35;
   color: var(--ink); padding-right: 34px; margin: 0 0 .65rem; text-transform: none;
   max-width: 42rem;
+  /* A long unbroken string (a URL, a token, an id) in a title must wrap inside the card,
+     not overflow its boundary (cubic #420 P2 — lost in a refactor, restored #421). */
+  overflow-wrap: anywhere;
 }
 .conv-modal-summary {
   font-size: .92rem; line-height: 1.55; color: var(--ink-2); margin: 0 0 1rem;

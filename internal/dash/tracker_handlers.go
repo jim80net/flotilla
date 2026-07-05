@@ -207,12 +207,15 @@ func (s *Server) requireWrite(next http.HandlerFunc) http.HandlerFunc {
 // when a header IS present it must match, so a cross-origin browser forgery is
 // rejected.
 func (s *Server) originAllowed(r *http.Request) bool {
-	// On a private-network bind (0.0.0.0 / LAN IP) the browser's Origin uses the
-	// host the operator typed (192.168.x.x), not the bind address — accept any Origin
-	// that matches the request Host (same-origin in practice).
-	if bindIsNonLoopback(s.cfg.Bind) {
-		return originMatchesRequestHost(r)
-	}
+	// A present Origin/Referer is validated against the CONFIGURED allowlist (the
+	// loopback/bind forms plus the operator's declared AllowedOrigins) — NEVER against
+	// the request Host header. Validating against the Host header re-opens DNS rebinding:
+	// an attacker page whose DNS resolves its own domain to the dash's LAN IP sends a
+	// matching Origin AND Host, so a Host-relative check would pass. A fixed allowlist
+	// does not contain the attacker's domain, so the forged write is rejected — while the
+	// operator's declared LAN origin (FLOTILLA_DASH_ALLOWED_ORIGINS) is accepted. A
+	// missing Origin/Referer is a non-browser client (already gated by the required custom
+	// header); DNS rebinding is a browser attack and always carries an Origin.
 	if origin := r.Header.Get("Origin"); origin != "" {
 		return s.origins[origin]
 	}
@@ -222,30 +225,6 @@ func (s *Server) originAllowed(r *http.Request) bool {
 			return false
 		}
 		return s.origins[u.Scheme+"://"+u.Host]
-	}
-	return true
-}
-
-// originMatchesRequestHost accepts a browser Origin/Referer when its host matches
-// the request Host — the LAN-bind case where the allowlist cannot enumerate every
-// private IP/hostname the operator may type.
-func originMatchesRequestHost(r *http.Request) bool {
-	reqHost := r.Host
-	if reqHost == "" {
-		return false
-	}
-	check := func(raw string) bool {
-		u, err := url.Parse(raw)
-		if err != nil || u.Host == "" {
-			return false
-		}
-		return u.Host == reqHost
-	}
-	if origin := r.Header.Get("Origin"); origin != "" {
-		return check(origin)
-	}
-	if ref := r.Header.Get("Referer"); ref != "" {
-		return check(ref)
 	}
 	return true
 }

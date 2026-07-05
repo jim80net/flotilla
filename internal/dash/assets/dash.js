@@ -1030,11 +1030,11 @@
     var summary = el("conv-modal-summary");
     var summaryText = (item.summary || "").trim();
     if (summary) {
+      // Visibility keys on whether a summary STRING is present, not on the element
+      // existing (it always does) — else an item with no summary shows an empty block
+      // (cubic #420 P2).
       summary.textContent = summaryText;
-      summary.hidden = false;
-    } else {
-      summary.textContent = "";
-      summary.hidden = true;
+      summary.hidden = summaryText === "";
     }
     var internal = (item.internal || item.raw || "").trim();
     var internalWrap = el("conv-modal-internal");
