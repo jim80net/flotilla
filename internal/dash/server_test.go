@@ -1178,6 +1178,78 @@ func TestResolvePaths(t *testing.T) {
 	}
 }
 
+// TestGoalsCellDrillins405 locks #405 Inc 3 Items 5+6: stat-cell click-to-highlight,
+// realized look-back slider, and graph-node hover tooltip. These are the three
+// drill-in interaction features in the Goals view's situation strip and node canvas.
+func TestGoalsCellDrillins405(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/goals.js").Body.String()
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+
+	// ── Item 5: stat-cell click-to-highlight ──────────────────────────────────
+	// The four filterable tiles carry data-filter-tone so click delegation knows
+	// which nodes to highlight; the helper functions drive the DOM mutations.
+	for _, marker := range []string{
+		"activeCellTone",   // module-level state variable: which tone is active (null = none)
+		"TONE_TO_SEL",      // map from tile tone → CSS selector for matching nodes
+		"applyFilter",      // adds .gcell-focus + .gnode-hl to matching nodes
+		"clearFilter",      // removes .gcell-focus / .gnode-hl / .gcell-active
+		"data-filter-tone", // attribute on filterable tiles (click delegation key)
+		"gcell-active",     // CSS class on the pressed tile
+		"gnode-hl",         // CSS class on highlighted nodes
+		"gcell-focus",      // CSS class on #goals-nodes when a filter is active
+		"reapplyTransient", // called after every render — must re-apply activeCellTone
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must implement stat-cell highlight (missing %q) — #405 Inc 3 Item 5", marker)
+		}
+	}
+	// CSS must dim non-matching nodes and restore matching ones.
+	if !strings.Contains(css, "gcell-focus") {
+		t.Error("dash.css must carry the .gcell-focus opacity rule — #405 Inc 3 Item 5")
+	}
+	if !strings.Contains(css, "gcell-active") {
+		t.Error("dash.css must style the active-tile ring (.gcell-active) — #405 Inc 3 Item 5")
+	}
+	// The Flotillas filter must match BOTH the v2 flotilla class and the legacy
+	// v1 fleet class, so older/compat inputs still highlight (cubic #405 P2).
+	if !strings.Contains(js, ".gnode-flotilla, .gnode-fleet") {
+		t.Error("goals.js Flotillas filter must match both .gnode-flotilla and legacy .gnode-fleet — cubic #405 P2")
+	}
+
+	// ── Item 6a: realized look-back slider — DEFERRED (no dormant UI) ─────────
+	// GoalsCounts has no achieved_at timestamps, so a window slider would be a
+	// non-functional (dormant) control. It is intentionally NOT shipped; assert the
+	// slider markers are ABSENT so it can't sneak back in before the daemon emits
+	// done-history timestamps (the follow-on that lets it ship LIVE).
+	for _, absent := range []string{"grealized-slider", "grealized-btn", "injectRealizedSlider", "realizedWindow"} {
+		if strings.Contains(js, absent) {
+			t.Errorf("goals.js must NOT ship the dormant realized slider (found %q) — deferred pending done-history timestamps", absent)
+		}
+	}
+	if strings.Contains(css, ".grealized-") {
+		t.Error("dash.css must NOT carry the dormant realized slider styles (.grealized-*) — deferred")
+	}
+
+	// ── Item 6b: graph-node hover tooltip ────────────────────────────────────
+	for _, marker := range []string{
+		"gnode-tip", // tooltip element id / CSS class
+		"showTip",   // function: positions and populates the tooltip
+		"hideTip",   // function: hides the tooltip on mouseout
+		"ensureTip", // lazy singleton: injects the fixed-position overlay once
+		"gnt-scope", // CSS class on the scope line (Flotilla / Desk / Task)
+		"gnt-meta",  // CSS class on the status/owner/activity meta line
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must implement the node hover tooltip (missing %q) — #405 Inc 3 Item 6b", marker)
+		}
+	}
+	if !strings.Contains(css, ".gnode-tip") {
+		t.Error("dash.css must style the node hover tooltip (.gnode-tip) — #405 Inc 3 Item 6b")
+	}
+}
+
 // --- helpers ---
 
 func doGet(t *testing.T, srv *Server, path string) *httptest.ResponseRecorder {
