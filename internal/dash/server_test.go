@@ -604,6 +604,13 @@ func TestDashInc5Shell405(t *testing.T) {
 	if !strings.Contains(js, `.tab[data-view]`) {
 		t.Error(`dash.js must select only ".tab[data-view]" for the SPA click handler (not ".tab") so the Parade <a> is excluded — #405 Inc 5 item 8`)
 	}
+	// cubic #416 P2: the Parade defer-to-record-view path must NOT hijack modified
+	// clicks (⌘/Ctrl/Shift/Alt or non-primary button) — those open /parade in a new
+	// tab/window and must keep native browser behavior. The handler guards on the
+	// modifier keys before any preventDefault.
+	if !strings.Contains(js, `e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0`) {
+		t.Error(`dash.js Parade tab click must let modified/non-primary clicks navigate natively (guard before preventDefault) — cubic #416 P2`)
+	}
 	// cubic #416 P1: only role="tab" elements may be direct children of role="tablist".
 	// The Parade <a> is a navigation-out link, not a tab, so it must live OUTSIDE the
 	// tablist — the three SPA view-tabs sit in an inner role="tablist" group, and the

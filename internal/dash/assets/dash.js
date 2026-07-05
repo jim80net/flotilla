@@ -904,8 +904,14 @@
   var paradeTabEl = el("tab-parade");
   if (paradeTabEl) {
     paradeTabEl.addEventListener("click", function (e) {
+      // A modified click (⌘/Ctrl/Shift/Alt, or a non-primary button like middle-click)
+      // means "open /parade in a new tab/window" — THIS page stays loaded, so its own
+      // load-time peek + resolvePending will clear the dot; never hijack it into a
+      // same-tab window.location.href. Only plain left-clicks get the defer treatment
+      // (cubic #416 P2 — the defer must not steal new-tab opens).
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
       if (unseenSigs.parade) { markTabViewed("parade"); return; } // known → store + navigate
-      // Unknown sig: hold the navigation just long enough to record the view.
+      // Unknown sig, plain click: hold the navigation just long enough to record the view.
       e.preventDefault();
       var href = paradeTabEl.getAttribute("href") || "/parade";
       var go = function () { window.location.href = href; };
