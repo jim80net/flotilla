@@ -37,7 +37,7 @@ type Record struct {
 	Suppressed bool        `json:"suppressed"`
 }
 
-// Input is the pure builder input for a non-suppressed mirror event.
+// Input is the pure builder input for a mirror event.
 type Input struct {
 	Agent        string
 	At           time.Time
@@ -47,10 +47,14 @@ type Input struct {
 	Envelope     *readermap.Envelope
 	FirewallWarn []string
 	VerboseCap   int // 0 ⇒ DefaultVerboseCap
+	// Suppressed marks a record the firewall REFUSED for the public post but that is still kept
+	// in the PRIVATE, loopback-only ledger (#405/#406): the dash renders it "withheld from public"
+	// so the operator's view is honest — it reached their private dash but never Discord.
+	Suppressed bool
 }
 
-// NewRecord builds a ledger Record from mirror pipeline outputs. Suppressed events
-// are not appended — this builder is for the publish path only.
+// NewRecord builds a ledger Record from mirror pipeline outputs. It serves both the publish
+// path (Suppressed=false) and the firewall-refused private-ledger path (Suppressed=true).
 func NewRecord(in Input) Record {
 	capN := in.VerboseCap
 	if capN <= 0 {
@@ -79,7 +83,7 @@ func NewRecord(in Input) Record {
 			MirrorNote: in.MirrorNote,
 			Firewall:   fw,
 		},
-		Suppressed: false,
+		Suppressed: in.Suppressed,
 	}
 }
 

@@ -459,6 +459,29 @@ func TestMobileTouchTargets397(t *testing.T) {
 	}
 }
 
+// TestCoSThreadHonestRender405 locks the #406 fix-forward: the coordinator thread renders
+// firewall-refused turns HONESTLY (a "withheld from public" badge keyed on the record's
+// suppressed flag) and calibrates its forward-only history (backfill decision: don't pad a
+// misleadingly-thin past — mark where the recorded history begins).
+func TestCoSThreadHonestRender405(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{
+		"coordinatorHistoryNote", // forward-only history calibration on the coordinator thread
+		"m.suppressed",           // renders the withheld badge keyed on the record's suppressed flag
+		"thread-withheld",        // the "withheld from public" badge
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js must render the coordinator thread honestly (missing %q) — #406 fix-forward", marker)
+		}
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	if !strings.Contains(css, ".thread-withheld") || !strings.Contains(css, ".thread-calib") {
+		t.Error("dash.css must style the withheld badge (.thread-withheld) + the history calibration (.thread-calib) — #406")
+	}
+}
+
 // TestHandleSessionMirror locks the /api/session-mirror contract the glance JS binds
 // to: { agent, entries:[{ts, info, ...}] } with entries ascending (newest last). This
 // guards the field names dash.js silently depends on (entries[last].ts / .info).

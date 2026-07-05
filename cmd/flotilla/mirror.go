@@ -104,7 +104,7 @@ func (m deskMirror) run(agent string) {
 		// and its ledger stayed empty while desks populated. Keep the private ledger (the RAW
 		// turn-final so the operator sees what was withheld, plus the refuse marker); skip ONLY the
 		// public post. The firewall still fully protects the public egress below.
-		m.appendSessionMirror(agent, text, mirrorDecision{body: text, note: d.note})
+		m.appendSessionMirror(agent, text, mirrorDecision{body: text, note: d.note, suppress: true})
 		m.logf("flotilla watch: mirror SUPPRESS-POST %s (private ledger kept): %s", agent, d.note)
 		return
 	}
@@ -170,7 +170,10 @@ func (m deskMirror) mirrorNow() time.Time {
 }
 
 // appendSessionMirror fans out the session-mirror ledger write after readerModelInternal
-// (same turn-final read — no second pane probe). Suppressed events never reach here.
+// (same turn-final read — no second pane probe). It serves BOTH the publish path and the
+// firewall-refused path (#406): a refused turn is still kept in the PRIVATE, loopback-only
+// ledger with d.suppress set, so the record is marked Suppressed for the dash to render
+// "withheld from public" — only the public Discord post is skipped, never the private ledger.
 func (m deskMirror) appendSessionMirror(agent, verbose string, d mirrorDecision) bool {
 	if m.rosterDir == "" {
 		return false
@@ -183,6 +186,9 @@ func (m deskMirror) appendSessionMirror(agent, verbose string, d mirrorDecision)
 		MirrorNote:   d.note,
 		Envelope:     d.envelope,
 		FirewallWarn: d.firewallWarn,
+		// A firewall-refused turn is kept in the private ledger but marked so the dash renders
+		// it "withheld from public" — it never reached Discord (#406 fix-forward).
+		Suppressed: d.suppress,
 	})
 	appendFn := m.ledgerAppend
 	if appendFn == nil {
