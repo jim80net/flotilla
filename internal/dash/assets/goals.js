@@ -99,7 +99,9 @@
   var STATE_LABEL = {
     realized: "realized", "in-flight": "in flight", awaiting: "awaiting you",
     blocked: "blocked", pending: "waiting on a dependency", active: "active",
-    aspirational: "aspirational", paused: "paused", cancelled: "cancelled",
+    // #405 Inc 3 Q2: the aspirational state reads "planned" everywhere it surfaces (pill labels,
+    // the legend) to match the renamed "Planned" tile — sweep the rename, not just the tiles.
+    aspirational: "planned", paused: "paused", cancelled: "cancelled",
   };
 
   /* ── situation strip + legend (unchanged from the merged view) ─────────── */
@@ -189,7 +191,7 @@
     var items = [
       ["realized", "realized"], ["in-flight", "in flight"],
       ["awaiting", "awaiting you"], ["pending", "waiting on a dependency"],
-      ["aspirational", "aspirational"], ["dep", "depends on"],
+      ["aspirational", "planned"], ["dep", "depends on"],
     ];
     q("goals-legend").innerHTML = items.map(function (i) {
       return '<span class="glegend"><span class="gdot gdot-' + i[0] + '"></span>' + escapeHtml(i[1]) + "</span>";

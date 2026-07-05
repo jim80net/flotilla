@@ -534,6 +534,17 @@ func TestGoalsCellRenames405(t *testing.T) {
 	if strings.Contains(js, `k: "Pending"`) || strings.Contains(js, `k: "Aspirational"`) {
 		t.Error("goals.js must drop the jargon labels 'Pending'/'Aspirational' from the cells — #405 Inc 3 Q2")
 	}
+	// The rename must be SWEPT across every surface, not just the tiles (#411 cubic): the pill
+	// label + the legend read "planned", never the jargon "aspirational".
+	if !strings.Contains(js, `aspirational: "planned"`) || strings.Contains(js, `aspirational: "aspirational"`) {
+		t.Error("goals.js STATE_LABEL must map the aspirational state to 'planned' — #411 sweep")
+	}
+	if strings.Contains(js, `["aspirational", "aspirational"]`) {
+		t.Error("goals.js legend must label the aspirational dot 'planned', not 'aspirational' — #411 sweep")
+	}
+	if html := doGet(t, srv, "/").Body.String(); strings.Contains(html, "ghosted aspirational") {
+		t.Error("index.html help tooltip must read 'ghosted planned', not 'aspirational' — #411 sweep")
+	}
 }
 
 // TestDecisionPage405 locks #405 Inc 2 (the operator's centerpiece): the "Awaiting you" tile
