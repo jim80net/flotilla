@@ -912,6 +912,72 @@ func TestConversationsFormatting(t *testing.T) {
 	}
 }
 
+// TestRailRegroupAndQueueFormat405 locks #405 Inc 4b:
+//   - Part A (item 2a): the work queue renders each item as a structured row
+//     (bq-row grid: state-chip column + text column), not a text blob. Timestamps
+//     are NOT rendered (the backlog data carries none).
+//   - Part B (item 4): buildRailGroups regroups the rail into Fleet Command (XOs)
+//   - per-flotilla groups with the CoS filtered from every project channel. The
+//     coordinator-pin logic is preserved so the CoS thread stays reachable.
+func TestRailRegroupAndQueueFormat405(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+
+	// Part A — structured work-queue rows.
+	for _, marker := range []string{
+		"bq-row",    // CSS class that drives the grid layout on each item
+		"bq-marker", // the state chip column
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js backlogItem must render structured rows (missing %q) — #405 Inc 4b item 2a", marker)
+		}
+	}
+	// The structured row must NOT render timestamps — the backlog data has none and
+	// the decision was explicitly NO-timestamps.
+	if strings.Contains(js, "bq-time") || strings.Contains(js, "bq-ts") {
+		t.Error("backlogItem must not render timestamps — backlog items carry no per-item timestamp (#405 Inc 4b item 2a)")
+	}
+
+	// Part B — rail regroup (fleet-command + per-flotilla, CoS filtered).
+	for _, marker := range []string{
+		"cosKeys",          // filters coordinator names from per-flotilla member lists
+		"fleetCmdChannels", // fleet-command channel separation
+		"projectChannels",  // project/flotilla channel separation
+		"Fleet Command",    // label string for the Fleet Command group
+		"fleet-command",    // role string used in the regroup + CSS class
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js buildRailGroups must implement the fleet-command regroup (missing %q) — #405 Inc 4b item 4", marker)
+		}
+	}
+	// The coordinator-pin logic must remain (CoS must still be reachable even if not
+	// in any channel — the "coordinator" group is the fallback).
+	if !strings.Contains(js, "conv-group-coordinator") {
+		t.Error("buildRailGroups must retain the coordinator-pin group (conv-group-coordinator) — F#383 criterion 1")
+	}
+	// Fleet Command group must get a distinct CSS class separate from coordinator.
+	if !strings.Contains(js, "conv-group-fleet-command") {
+		t.Error("buildRailGroups must assign .conv-group-fleet-command to fleet-command groups — #405 Inc 4b item 4")
+	}
+
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	// Part A CSS: bq-row grid layout.
+	if !strings.Contains(css, ".backlog-item.bq-row") {
+		t.Error("dash.css must style the structured work-queue rows (.backlog-item.bq-row) — #405 Inc 4b item 2a")
+	}
+	if !strings.Contains(css, "grid-template-columns") {
+		t.Error("dash.css .bq-row must use a grid layout (grid-template-columns) to align chip + text — #405 Inc 4b")
+	}
+	// Part B CSS: Fleet Command group header style.
+	if !strings.Contains(css, ".chan-fleet-command") {
+		t.Error("dash.css must style the Fleet Command group label (.chan-fleet-command) — #405 Inc 4b item 4")
+	}
+	if !strings.Contains(css, ".conv-group-fleet-command") {
+		t.Error("dash.css must style the Fleet Command group container (.conv-group-fleet-command) — #405 Inc 4b item 4")
+	}
+}
+
 // TestThreadMerge locks the session-mirror ↔ CoS-ledger interleave (design §2.4,
 // UI Inc 2): renderThread merges the desk's own session-mirror turn-finals with
 // the relay ledger into one chronological timeline, with the cross-desk identity

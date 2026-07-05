@@ -105,25 +105,84 @@
     if (st.cos && String(st.cos).toLowerCase() !== String(st.xo || "").toLowerCase()) out.push(st.cos);
     return out;
   }
+  // buildRailGroups reorganises the topology channels into display groups (#405 Inc 4b item 4):
+  //   • Fleet Command group — the XOs / coordinators layer, built from fleet-command channels.
+  //   • One group per flotilla — the desks in each project channel, with the CoS filtered out.
+  //   • Legacy flat mode — when no channel carries a role annotation (backward compat).
+  // The coordinator-pin at the top remains: if a coordinator isn't reachable via any group,
+  // a first-class "coordinator" group is prepended so the operator can always see their thread.
   function buildRailGroups(topology) {
     var channels = (topology && Array.isArray(topology.channels)) ? topology.channels : [];
-    var groups = channels.map(function (ch) {
-      var desks = [];
-      var seen = {};
-      function add(name, role) {
-        var key = String(name).toLowerCase();
-        if (!name || seen[key]) return;
-        seen[key] = true;
-        desks.push({ name: name, role: role || "" });
+    // Coordinator identity keys (lower-cased) — used to filter the CoS out of per-flotilla
+    // member lists so it no longer appears as a member of every project channel (#405 4b).
+    var cosKeys = coordinatorNames().map(function (n) { return String(n).toLowerCase(); });
+    // Role-aware path: at least one channel carries "fleet-command" or "project".
+    var hasRoles = channels.some(function (ch) { return ch.role === "fleet-command" || ch.role === "project"; });
+
+    var groups = [];
+
+    if (hasRoles) {
+      // ── Fleet Command group: built from fleet-command channels (the XO layer) ──────
+      var fleetCmdChannels = channels.filter(function (ch) { return ch.role === "fleet-command"; });
+      var projectChannels  = channels.filter(function (ch) { return ch.role !== "fleet-command"; });
+
+      if (fleetCmdChannels.length) {
+        var cmdSeen = {};
+        var cmdDesks = [];
+        function addCmd(name, role) {
+          var key = String(name || "").toLowerCase();
+          if (!name || cmdSeen[key]) return;
+          cmdSeen[key] = true;
+          cmdDesks.push({ name: name, role: role || "" });
+        }
+        fleetCmdChannels.forEach(function (ch) {
+          addCmd(ch.xo_agent, "xo");
+          (ch.members || []).forEach(function (m) { addCmd(m, "member"); });
+        });
+        if (cmdDesks.length) {
+          groups.push({
+            channel_id: fleetCmdChannels[0].channel_id,
+            role: "fleet-command",
+            label: "Fleet Command",   // rendered instead of "#channel_id" in the header
+            desks: cmdDesks,
+          });
+        }
       }
-      add(ch.xo_agent, "xo");
-      (ch.members || []).forEach(function (m) { add(m, "member"); });
-      return {
-        channel_id: ch.channel_id,
-        role: ch.role || "",
-        desks: desks,
-      };
-    });
+
+      // ── Per-flotilla groups: one per project channel, CoS filtered out ────────────
+      projectChannels.forEach(function (ch) {
+        var seen = {};
+        var desks = [];
+        function addDesk(name, role) {
+          var key = String(name || "").toLowerCase();
+          if (!name || seen[key]) return;
+          if (cosKeys.indexOf(key) !== -1) return; // CoS is in Fleet Command, not every pairing
+          seen[key] = true;
+          desks.push({ name: name, role: role || "" });
+        }
+        addDesk(ch.xo_agent, "xo");
+        (ch.members || []).forEach(function (m) { addDesk(m, "member"); });
+        if (desks.length) {
+          groups.push({ channel_id: ch.channel_id, role: ch.role || "", desks: desks });
+        }
+      });
+    } else {
+      // ── Legacy flat-group logic (no role annotations — backward compat) ───────────
+      groups = channels.map(function (ch) {
+        var desks = [];
+        var seen = {};
+        function add(name, role) {
+          var key = String(name || "").toLowerCase();
+          if (!name || seen[key]) return;
+          seen[key] = true;
+          desks.push({ name: name, role: role || "" });
+        }
+        add(ch.xo_agent, "xo");
+        (ch.members || []).forEach(function (m) { add(m, "member"); });
+        return { channel_id: ch.channel_id, role: ch.role || "", desks: desks };
+      });
+    }
+
     // Pin any coordinator missing from every channel as a first-class "coordinator" group
     // at the TOP of the rail, so the CoS thread is always followable regardless of topology.
     var listed = {};
@@ -205,13 +264,20 @@
           "</button>"
         );
       }).join("");
-      // The pinned coordinator group has no channel — label it "coordinator" rather than
-      // rendering a bare "#". A real channel shows its "#id".
-      var head = grp.channel_id
-        ? '<span class="chan-id">#' + escapeHtml(grp.channel_id) + "</span>" + role
-        : '<span class="chan-id chan-coordinator">coordinator</span>';
+      // Group header: pinned coordinator → "coordinator" label; Fleet Command group →
+      // its "Fleet Command" label (not "#C_CMD"); a real project channel → "#id".
+      var head = grp.coordinator
+        ? '<span class="chan-id chan-coordinator">coordinator</span>'
+        : grp.label
+          ? '<span class="chan-id chan-fleet-command">' + escapeHtml(grp.label) + "</span>"
+          : grp.channel_id
+            ? '<span class="chan-id">#' + escapeHtml(grp.channel_id) + "</span>" + role
+            : '<span class="chan-id chan-coordinator">coordinator</span>';
+      var extraCls = grp.coordinator ? " conv-group-coordinator"
+                   : grp.role === "fleet-command" ? " conv-group-fleet-command"
+                   : "";
       return (
-        '<div class="conv-group' + (grp.coordinator ? " conv-group-coordinator" : "") + '">' +
+        '<div class="conv-group' + extraCls + '">' +
           '<div class="conv-group-head">' + head + "</div>" +
           '<div class="conv-group-items" role="list">' + items + "</div>" +
         "</div>"
@@ -611,16 +677,20 @@
   // (#349 Inc 4 E10): clicking opens the full item in a focused modal, since the drive
   // queue lives in a narrow column where a long item is otherwise cramped. The marker +
   // text are carried on data-* so the handler needs no re-parse.
+  // backlogItem renders one backlog line as a structured row (#405 Inc 4b item 2a):
+  // the STATE marker is a distinct chip (bq-marker) and the text is in its own cell —
+  // bq-row drives a CSS grid that aligns chips across items so the queue reads as a
+  // table, not a text blob. Timestamps are NOT rendered — the backlog data has none.
   function backlogItem(line) {
     var raw = String(line == null ? "" : line);
     var m = /^\s*[-*]?\s*\[([a-z][a-z0-9-]*)\]\s*(.*)$/i.exec(raw);
     if (!m) {
       var text = raw.replace(/^\s*[-*]\s*/, "");
-      return '<div class="backlog-item" role="button" tabindex="0" data-bq-open data-bq-text="' + escapeHtml(text) + '">' +
+      return '<div class="backlog-item bq-row" role="button" tabindex="0" data-bq-open data-bq-text="' + escapeHtml(text) + '">' +
         '<span class="bq-text">' + escapeHtml(text) + "</span></div>";
     }
     var marker = m[1].toLowerCase();
-    return '<div class="backlog-item bq-' + escapeHtml(marker) + '" role="button" tabindex="0" data-bq-open' +
+    return '<div class="backlog-item bq-row bq-' + escapeHtml(marker) + '" role="button" tabindex="0" data-bq-open' +
       ' data-bq-marker="' + escapeHtml(marker.replace(/-/g, " ")) + '" data-bq-text="' + escapeHtml(m[2]) + '">' +
       '<span class="bq-marker">' + escapeHtml(marker.replace(/-/g, " ")) + "</span>" +
       '<span class="bq-text">' + escapeHtml(m[2]) + "</span>" +

@@ -801,6 +801,11 @@ code {
    "#") in the coordinator accent, so the CoS thread is unmistakable at the top of the rail. */
 .chan-coordinator { color: var(--cyan); font-family: var(--display); letter-spacing: .08em; text-transform: uppercase; font-size: .62rem; }
 .conv-group-coordinator .conv-group-head { border-bottom: 1px solid color-mix(in srgb, var(--cyan) 25%, transparent); }
+/* #405 Inc 4b: Fleet Command group header — labels the XO layer first-class so the rail
+   reads as Command / per-flotilla structure, not a flat channel list. Symmetric with
+   the coordinator accent but uses a distinct teal tint so it stands apart. */
+.chan-fleet-command { color: var(--cyan); font-family: var(--display); letter-spacing: .1em; text-transform: uppercase; font-size: .62rem; font-weight: 600; }
+.conv-group-fleet-command .conv-group-head { border-bottom: 1px solid color-mix(in srgb, var(--cyan) 30%, transparent); background: color-mix(in srgb, var(--cyan) 4%, transparent); border-radius: var(--r-xs) var(--r-xs) 0 0; }
 .chan-role {
   font-family: var(--display);
   font-size: .58rem;
@@ -846,6 +851,14 @@ code {
 .backlog-item:last-child, .ledger-entry:last-child { border-bottom: 0; }
 /* #302 drive-queue: a status chip parsed from the [marker] + clean text */
 .backlog-item { display: flex; align-items: baseline; gap: .5rem; }
+/* #405 Inc 4b item 2a: bq-row — structured two-column row so the state chip and the text
+   are in fixed columns across all items; reads as a table, not a text blob. */
+.backlog-item.bq-row {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  align-items: center;
+  gap: .45rem;
+}
 /* #349 Inc 4 E10: each queue item is a button → opens the full item in a modal */
 .backlog-item[data-bq-open] { cursor: pointer; border-radius: var(--r-sm); padding-left: .3rem; padding-right: .3rem; margin: 0 -.3rem; }
 .backlog-item[data-bq-open]:hover { background: color-mix(in srgb, var(--cyan) 7%, transparent); }
@@ -854,6 +867,8 @@ code {
 .bq-marker {
   flex: none; font-size: .58rem; letter-spacing: .07em; text-transform: uppercase;
   padding: 1px 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-3);
+  /* In bq-row grid context: chip fills its column and centres so all chips align. */
+  display: inline-block; text-align: center; width: 100%; box-sizing: border-box;
 }
 .bq-text { color: var(--ink-2); min-width: 0; }
 .bq-in-flight .bq-marker, .bq-pending .bq-marker { color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 45%, transparent); }
