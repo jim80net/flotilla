@@ -48,6 +48,10 @@
       <!-- Parade opens the standalone parade page at /parade — a link, not an SPA
            panel toggle, so it is NOT a role="tab" child of the tablist. -->
       <a id="tab-parade" class="tab tab-parade" href="/parade">Parade<span class="unseen-dot" id="dot-parade" aria-label="New content in Parade" aria-hidden="true"></span></a>
+      <!-- #421: decisions/blockers reading room — reachable from every view, not buried in Goals. -->
+      <button id="hdr-decisions" class="tab hdr-decisions" type="button" data-open-decisions title="Open decisions and blockers awaiting you">
+        Decisions<span id="hdr-decisions-count" class="hdr-decisions-count" hidden></span>
+      </button>
     </nav>
     <div class="bar-meta">
       <span class="meta-label">bound</span>
@@ -130,6 +134,7 @@
         <details class="conv-queue" open>
           <summary class="conv-queue-sum">
             <span class="sub">Work queue</span>
+            <span id="conv-queue-scope" class="conv-queue-scope muted"></span>
           </summary>
           <div id="conv-backlog" class="conv-backlog"></div>
         </details>

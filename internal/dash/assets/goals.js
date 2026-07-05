@@ -263,6 +263,20 @@
         '<div class="gtile-d">' + escapeHtml(t.d) + "</div>" +
         "</div>";
     }).join("");
+    var hdrCount = q("hdr-decisions-count");
+    var hdrBtn = q("hdr-decisions");
+    var awaiting = c.awaiting || 0;
+    if (hdrCount && hdrBtn) {
+      if (awaiting > 0) {
+        hdrCount.textContent = String(awaiting);
+        hdrCount.hidden = false;
+        hdrBtn.classList.add("hdr-decisions-hot");
+      } else {
+        hdrCount.textContent = "";
+        hdrCount.hidden = true;
+        hdrBtn.classList.remove("hdr-decisions-hot");
+      }
+    }
     // NOTE: the aria-live announcement is NOT made here — renderSituation runs on
     // every render (incl. error/empty), so announcing the count summary here would
     // alternate with the error/empty announcement each refresh and defeat the dedup.
@@ -385,10 +399,19 @@
     // waiting-on-you modal. Positioned absolute so they never change card height (#283).
     var gated = vis === "awaiting" || vis === "blocked";
     var routable = !!convAgent(n);
-    var controls = '<span class="gnode-ctl">' +
-      (gated ? '<button class="gnode-respond" type="button" title="Respond to what this needs" aria-label="Respond">&#9888;</button>' : "") +
-      (routable ? '<button class="gnode-godesk" type="button" title="Go to this desk’s conversation" aria-label="Go to desk">&#8594;&#8202;desk</button>' : "") +
-      "</span>";
+    var agent = convAgent(n);
+    var menu = "";
+    if (gated || routable) {
+      menu = '<div class="gnode-pop" role="menu" hidden>' +
+        (routable ? '<button type="button" class="gnode-pop-item" role="menuitem" data-gnode-action="desk" data-gnode-agent="' + escapeHtml(agent) + '">Open conversation</button>' : "") +
+        (gated ? '<button type="button" class="gnode-pop-item" role="menuitem" data-gnode-action="respond" data-gnode-id="' + escapeHtml(n.id) + '">Respond</button>' : "") +
+        "</div>";
+    }
+    var controls = (gated || routable)
+      ? ('<span class="gnode-ctl" data-gnode-id="' + escapeHtml(n.id) + '">' +
+          '<button class="gnode-kebab" type="button" aria-haspopup="menu" aria-expanded="false" title="Actions" aria-label="Goal actions">&#8942;</button>' +
+          menu + "</span>")
+      : "";
     // org-graph v2 enrichment: priorities (flotilla-level, operator-facing) and
     // milestones (desk-level current work) render as short ordered lists; the harness
     // surface (grok / claude-code / …) renders as a subdued right-aligned badge in the
@@ -1360,7 +1383,7 @@
     var target = null;
     if (modalReturnId) {
       var card = cardEl(modalReturnId);
-      if (card) target = card.querySelector(".gnode-respond") || card.querySelector(".gpill") || card;
+      if (card) target = card.querySelector(".gnode-kebab") || card.querySelector(".gpill") || card;
     }
     if (!target && modalReturn && modalReturn.focus && document.contains(modalReturn)) target = modalReturn;
     if (target && target.focus) target.focus({ preventScroll: true });
@@ -1430,23 +1453,36 @@
       "</article>";
   }
   var decisionsReturn = null;
+  function indexGoalsNodes(doc) {
+    nodeById = {};
+    (Array.isArray(doc.goals) ? doc.goals : []).forEach(function (n) { nodeById[n.id] = n; });
+  }
   function openDecisions() {
-    var decs = gatherDecisions();
-    var list = q("gdec-list");
-    if (list) {
-      list.innerHTML = decs.length
-        ? decs.map(function (d, i) { return renderDecisionCard(d, i, decs.length); }).join("")
-        : '<div class="gdec-empty">Nothing is awaiting your decision right now.</div>';
+    function paint() {
+      var decs = gatherDecisions();
+      var list = q("gdec-list");
+      if (list) {
+        list.innerHTML = decs.length
+          ? decs.map(function (d, i) { return renderDecisionCard(d, i, decs.length); }).join("")
+          : '<div class="gdec-empty">Nothing is awaiting your decision right now.</div>';
+      }
+      var titleEl = q("gdec-title");
+      if (titleEl) titleEl.textContent = decs.length ? ("Decisions awaiting you · " + decs.length) : "Decisions awaiting you";
+      var m = q("goals-decisions");
+      if (!m) return;
+      decisionsReturn = document.activeElement;
+      m.classList.add("open");
+      m.setAttribute("aria-hidden", "false");
+      var close = m.querySelector(".gdec-close");
+      if (close) close.focus();
     }
-    var titleEl = q("gdec-title");
-    if (titleEl) titleEl.textContent = decs.length ? ("Decisions awaiting you · " + decs.length) : "Decisions awaiting you";
-    var m = q("goals-decisions");
-    if (!m) return;
-    decisionsReturn = document.activeElement;
-    m.classList.add("open");
-    m.setAttribute("aria-hidden", "false");
-    var close = m.querySelector(".gdec-close");
-    if (close) close.focus();
+    if (Object.keys(nodeById).length) { paint(); return; }
+    getJSON("/api/goals").then(function (doc) {
+      cache = doc;
+      indexGoalsNodes(doc);
+      renderSituation(doc);
+      paint();
+    }).catch(function () { paint(); });
   }
   function closeDecisions() {
     var m = q("goals-decisions");
@@ -1457,16 +1493,44 @@
     decisionsReturn = null;
   }
 
+  function closeAllGnodeMenus() {
+    document.querySelectorAll(".gnode-pop").forEach(function (p) { p.hidden = true; });
+    document.querySelectorAll(".gnode-kebab").forEach(function (b) { b.setAttribute("aria-expanded", "false"); });
+  }
+
   function wireNodes() {
     if (nodesWired) return;
     var nodesEl = q("goals-nodes");
     if (!nodesEl) return;
     nodesWired = true;
     nodesEl.addEventListener("click", function (e) {
-      var respond = e.target.closest(".gnode-respond");
-      if (respond) { var rc = respond.closest(".gnode"); if (rc) openModal(rc.getAttribute("data-id")); return; }
-      var godesk = e.target.closest(".gnode-godesk");
-      if (godesk) { var gc = godesk.closest(".gnode"); if (gc) goToDesk(gc.getAttribute("data-id")); return; }
+      var popItem = e.target.closest("[data-gnode-action]");
+      if (popItem) {
+        e.stopPropagation();
+        closeAllGnodeMenus();
+        var action = popItem.getAttribute("data-gnode-action");
+        if (action === "desk") {
+          var agent = popItem.getAttribute("data-gnode-agent");
+          if (agent && D.openConversation) D.openConversation(agent);
+        } else if (action === "respond") {
+          openModal(popItem.getAttribute("data-gnode-id"));
+        }
+        return;
+      }
+      var kebab = e.target.closest(".gnode-kebab");
+      if (kebab) {
+        e.stopPropagation();
+        var ctl = kebab.closest(".gnode-ctl");
+        var pop = ctl && ctl.querySelector(".gnode-pop");
+        var willOpen = pop && pop.hidden;
+        closeAllGnodeMenus();
+        if (willOpen && pop) {
+          pop.hidden = false;
+          kebab.setAttribute("aria-expanded", "true");
+        }
+        return;
+      }
+      closeAllGnodeMenus();
       // #349 B3: clicking the STATUS PILL of a gated node opens the list of blockers (the
       // respond modal) — "go through and clean those up." A non-gated pill falls through to
       // the node body's detail-drawer action.
@@ -1972,8 +2036,15 @@
     }, 120);
   });
 
+  // Prime situation counts for the header decisions badge before the Goals tab opens.
+  getJSON("/api/goals").then(function (doc) {
+    cache = cache || doc;
+    renderSituation(doc);
+  }).catch(function () {});
+
   window.flotillaGoals = {
     show: show, refresh: refresh, restoreNode: restoreNode,
     openNode: function () { return selectedId; }, // the open drawer's node id (or null) — for history state
+    openDecisions: openDecisions,
   };
 })();

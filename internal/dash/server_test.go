@@ -367,6 +367,42 @@ func TestWorkQueueModalOperatorFacing(t *testing.T) {
 	}
 }
 
+// TestDashOperatorUX421 locks operator feedback batch: scoped work queue, header
+// decisions entry, goals kebab menu, DISABLE_AUTHENTICATION wiring.
+func TestDashOperatorUX421(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{
+		"queueVisibleForDesk", "conv-queue-scope", "openDecisions",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js missing #421 marker %q", marker)
+		}
+	}
+	gjs := doGet(t, srv, "/static/goals.js").Body.String()
+	for _, marker := range []string{"gnode-kebab", "gnode-pop", "openDecisions", "hdr-decisions-count"} {
+		if !strings.Contains(gjs, marker) {
+			t.Errorf("goals.js missing #421 marker %q", marker)
+		}
+	}
+	if strings.Contains(gjs, "gnode-godesk") {
+		t.Error("goals.js must drop the wide →desk button (#421)")
+	}
+	html := doGet(t, srv, "/").Body.String()
+	if !strings.Contains(html, `id="hdr-decisions"`) || !strings.Contains(html, `id="conv-queue-scope"`) {
+		t.Error("index.html must carry header decisions + scoped queue labels — #421")
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	if !strings.Contains(css, ".gnode-kebab") || !strings.Contains(css, ".hdr-decisions") {
+		t.Error("dash.css must style kebab menu + header decisions — #421")
+	}
+	item := ParseQueueItemDisplay("- [in-flight] Do thing @alpha")
+	if item.Scope != "alpha" {
+		t.Errorf("scope = %q, want alpha", item.Scope)
+	}
+}
+
 // TestModalDesktopSpaceWave4 locks the Wave 4 (F#383) desktop-space + decision-log
 // readability pass: the respond modal breathes on desktop (min(960px,94vw), a two-column
 // brief|respond grid on wide viewports), the decision brief no longer sits in a nested
@@ -883,7 +919,7 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	}
 	// #302: node click → Conversations (nodeActivate), the ⚠ respond modal (openModal),
 	// and the per-node control chips.
-	for _, marker := range []string{"nodeActivate", "openModal", "gnode-respond"} {
+	for _, marker := range []string{"nodeActivate", "openModal", "gnode-kebab"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("goals.js must retain the #302 interaction (missing %q)", marker)
 		}
@@ -939,7 +975,7 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	// #349 A2: cell-click SWAP — the node body opens the drawer (nodeActivate → openDrawer),
 	// the conversation jump is a distinct → desk button (goToDesk / gnode-godesk); and the
 	// drawer participates in browser history (restoreNode for the popstate restore).
-	for _, marker := range []string{"goToDesk", "gnode-godesk", "restoreNode"} {
+	for _, marker := range []string{"gnode-kebab", "gnode-pop", "restoreNode"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("goals.js must retain the #349 nav cell-swap + history hook (missing %q)", marker)
 		}

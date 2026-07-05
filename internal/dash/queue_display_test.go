@@ -30,6 +30,17 @@ func TestParseQueueItemDisplayDerivesTitleBeforeJargon(t *testing.T) {
 	}
 }
 
+func TestParseQueueItemDisplayScope(t *testing.T) {
+	item := ParseQueueItemDisplay("- [in-flight] Ship dash :: Summary. @flotilla-dash")
+	if item.Scope != "flotilla-dash" {
+		t.Fatalf("scope = %q, want flotilla-dash", item.Scope)
+	}
+	item2 := ParseQueueItemDisplay("- [next] Fleet parade prep")
+	if item2.Scope != "" {
+		t.Fatalf("unscoped item scope = %q, want empty (coordinator)", item2.Scope)
+	}
+}
+
 func TestBuildQueueItemsPreservesOrder(t *testing.T) {
 	items := BuildQueueItems([]string{
 		"- [next] First item",

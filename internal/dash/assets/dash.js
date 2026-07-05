@@ -655,20 +655,54 @@
     );
   }
 
-  function renderBacklogStrip(history) {
+  // queueVisibleForDesk filters the fleet backlog to the selected desk/coordinator (#421).
+  // Items with an explicit @desk / →desk scope show only on that desk; unscoped items are
+  // coordinator/XO-level and show on the channel hub (xo_agent) or fleet xo.
+  function queueVisibleForDesk(item, desk, status, topology) {
+    if (!desk || !item) return false;
+    var deskL = String(desk).toLowerCase();
+    var scope = String(item.scope || "").toLowerCase();
+    if (scope) return scope === deskL;
+    var xo = ((status || {}).xo || "").toLowerCase();
+    if (deskL === xo) return true;
+    var groups = buildRailGroups(topology || {});
+    for (var i = 0; i < groups.length; i++) {
+      var g = groups[i];
+      if (selectedChannel && g.channel_id !== selectedChannel) continue;
+      var desks = g.desks || [];
+      for (var j = 0; j < desks.length; j++) {
+        if (desks[j].role === "xo" && String(desks[j].name || "").toLowerCase() === deskL) return true;
+      }
+    }
+    return false;
+  }
+
+  function renderBacklogStrip(history, status, topology) {
     var bl = (history && history.backlog) ? history.backlog : {};
     var box = el("conv-backlog");
+    var allItems = Array.isArray(bl.unblocked) ? bl.unblocked : [];
+    queueItems = allItems.filter(function (item) {
+      return queueVisibleForDesk(item, selectedDesk, status, topology);
+    });
+    var scopeLab = el("conv-queue-scope");
+    if (scopeLab) {
+      scopeLab.textContent = selectedDesk
+        ? ("scoped to " + selectedDesk + (queueItems.length ? " · " + queueItems.length + " item" + (queueItems.length === 1 ? "" : "s") : ""))
+        : "";
+    }
     var counts =
       '<div class="backlog-counts">' +
-        '<span>' + (bl.items || 0) + " items</span>" +
+        '<span>' + queueItems.length + " shown</span>" +
+        (allItems.length !== queueItems.length ? '<span class="muted">' + allItems.length + " fleet-wide</span>" : "") +
         '<span class="count-blocked">' + (bl.blocked || 0) + " blocked</span>" +
         (bl.awaiting_auth ? '<span class="count-awaiting-auth">' + bl.awaiting_auth + " awaiting-auth</span>" : "") +
         '<span class="count-done">' + (bl.done || 0) + " done</span>" +
       "</div>";
-    queueItems = Array.isArray(bl.unblocked) ? bl.unblocked : [];
     var items = queueItems.length
       ? queueItems.map(function (item, idx) { return backlogItem(item, idx); }).join("")
-      : (bl.found ? '<div class="empty">No unblocked items.</div>' : '<div class="empty">No backlog section found.</div>');
+      : (bl.found
+        ? (selectedDesk ? '<div class="empty">No work queued for ' + escapeHtml(selectedDesk) + ".</div>" : '<div class="empty">Select a desk.</div>')
+        : '<div class="empty">No backlog section found.</div>');
     box.innerHTML = counts + items;
   }
 
@@ -701,7 +735,7 @@
     renderDeskCard(status, fresh);
     renderSessionMirror();
     renderThread(history);
-    renderBacklogStrip(history);
+    renderBacklogStrip(history, status, topology);
     syncComposer();
   }
 
@@ -1144,6 +1178,20 @@
   }
   window.flotillaDash.openConversation = openConversation;
 
+  // #421: Decisions/blockers reading room — header + situation tile, any view.
+  document.addEventListener("click", function (e) {
+    var trig = e.target.closest ? e.target.closest("[data-open-decisions]") : null;
+    if (!trig) return;
+    e.preventDefault();
+    if (window.flotillaGoals && window.flotillaGoals.openDecisions) window.flotillaGoals.openDecisions();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    var trig = e.target.closest ? e.target.closest("[data-open-decisions]") : null;
+    if (!trig) return;
+    e.preventDefault();
+    if (window.flotillaGoals && window.flotillaGoals.openDecisions) window.flotillaGoals.openDecisions();
+  });
 
   // Thread composer + latest-at-bottom scroll wiring (F#383 criteria 4 + 5). The composer
   // sends to the SELECTED desk/coordinator via the same route-to-pane relay the control

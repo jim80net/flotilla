@@ -15,6 +15,7 @@ type QueueItem struct {
 	Status   string `json:"status"`
 	Title    string `json:"title"`
 	Summary  string `json:"summary,omitempty"`
+	Scope    string `json:"scope,omitempty"` // desk agent name; empty = coordinator/XO scope
 	Internal string `json:"internal,omitempty"`
 	Raw      string `json:"raw"`
 }
@@ -22,6 +23,8 @@ type QueueItem struct {
 var (
 	queueDisplayDelimiter = " :: "
 	internalJargon        = regexp.MustCompile(`(?i)(PR\s*#\d+|\b[0-9a-f]{7,40}\b|cos\s*gate|cubic|RFC3339|\d{4}-\d{2}-\d{2}T\d{2}:\d{2})`)
+	scopeAtAgent          = regexp.MustCompile(`(?i)@([a-z][a-z0-9-]*)\b`)
+	scopeArrowAgent       = regexp.MustCompile(`(?i)(?:→|->)\s*([a-z][a-z0-9-]*)\b`)
 )
 
 // ParseQueueItemDisplay turns one raw backlog markdown list line into the operator
@@ -66,7 +69,27 @@ func ParseQueueItemDisplay(rawLine string) QueueItem {
 	if item.Internal == item.Title || item.Internal == item.Summary {
 		item.Internal = body
 	}
+	item.Scope = extractScope(body)
 	return item
+}
+
+// extractScope returns the desk agent a backlog item is scoped to (@desk or → desk).
+// An empty scope means coordinator/XO-level (fleet-wide for the hub), not a desk item.
+func extractScope(body string) string {
+	for _, m := range scopeAtAgent.FindAllStringSubmatch(body, -1) {
+		if len(m) < 2 {
+			continue
+		}
+		agent := strings.ToLower(strings.TrimSpace(m[1]))
+		if agent == "operator" {
+			continue
+		}
+		return agent
+	}
+	if m := scopeArrowAgent.FindStringSubmatch(body); len(m) > 1 {
+		return strings.ToLower(strings.TrimSpace(m[1]))
+	}
+	return ""
 }
 
 func queueBodyAfterMarker(raw string) string {

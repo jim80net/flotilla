@@ -37,6 +37,11 @@ type Config struct {
 	SecretsPath      string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
 	GoalsLayout      string // initial Goals-map layout: "mindmap" (default) | "tree" — org retired from the UI; the live toggle still overrides (#317/#324)
 
+	// DisableAuthentication turns off the browser write gates (X-Flotilla-Dash header +
+	// Origin allowlist) on state-changing routes. Operator-only insecure mode until the
+	// bearer-token auth gate (#208) lands; set env DISABLE_AUTHENTICATION=1.
+	DisableAuthentication bool
+
 	// Transport is the coordination transport backing the control surface's notify
 	// post (the operator note's destination is a Discord webhook, so this is the
 	// DISCORD transport). It is constructed at the wiring boundary
@@ -116,6 +121,9 @@ func NewServer(cfg Config) (*Server, error) {
 		hub:       newHub(),
 		allowed:   buildHostAllowlist(cfg.Bind),
 		origins:   buildOriginAllowlist(cfg.Bind),
+	}
+	if cfg.DisableAuthentication {
+		fmt.Fprintln(os.Stderr, "flotilla dash: WARNING — DISABLE_AUTHENTICATION is on; write-route CSRF gates are OFF (insecure mode until #208 lands)")
 	}
 	// The tracker is OPTIONAL: it is wired only when a repo is pinned. An invalid
 	// repo fails closed (NewServer errors) rather than serving a tracker that

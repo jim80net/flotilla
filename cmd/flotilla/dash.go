@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -88,18 +89,19 @@ func cmdDash(args []string) error {
 	// constructs the gh-backed tracker when a repo is pinned (fail-closed on a
 	// malformed repo).
 	srv, err := dash.NewServer(dash.Config{
-		RosterPath:   *rosterPath,
-		SnapshotPath: *snapshotPath,
-		AckPath:      *ackPath,
-		BacklogPath:  *trackerPath,
-		GoalsPath:    *goalsPath,
-		ParadesPath:  *paradesDir,
-		Bind:         *bind,
-		Repo:         pinnedRepo,
-		SecretsPath:  *secretsPath,
-		GoalsLayout:  *goalsLayout,
-		Transport:    tr,
-		WebTransport: webTr,
+		RosterPath:            *rosterPath,
+		SnapshotPath:          *snapshotPath,
+		AckPath:               *ackPath,
+		BacklogPath:           *trackerPath,
+		GoalsPath:             *goalsPath,
+		ParadesPath:           *paradesDir,
+		Bind:                  *bind,
+		Repo:                  pinnedRepo,
+		SecretsPath:           *secretsPath,
+		GoalsLayout:           *goalsLayout,
+		DisableAuthentication: dashEnvTruthy("DISABLE_AUTHENTICATION"),
+		Transport:             tr,
+		WebTransport:          webTr,
 	})
 	if err != nil {
 		return err
@@ -165,4 +167,10 @@ func newDashWebTransport(rc *roster.Config) (transport.Transport, error) {
 		return nil, fmt.Errorf("dash: construct the web (route) transport: %w", err)
 	}
 	return wt, nil
+}
+
+// dashEnvTruthy reports whether an env var is set to a truthy value (1/true/yes/on).
+func dashEnvTruthy(key string) bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	return v == "1" || v == "true" || v == "yes" || v == "on"
 }

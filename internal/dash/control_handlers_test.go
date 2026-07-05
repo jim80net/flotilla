@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -171,5 +173,50 @@ func TestControl_GETOnControlRouteRejected(t *testing.T) {
 	}
 	if f.calls != 0 {
 		t.Error("a GET must never reach a control handler")
+	}
+}
+
+// TestControlRoute_DisableAuthentication allows writes when the operator enables
+// insecure mode (env DISABLE_AUTHENTICATION) until bearer auth (#208) lands.
+func TestControlRoute_DisableAuthentication(t *testing.T) {
+	f := &fakeController{routeRes: control.RouteResult{Target: "alpha", Outcome: control.OutcomeDelivered}}
+	srv, _ := newTestServer(t, singleFleetRoster, time.Now())
+	srv.cfg.DisableAuthentication = true
+	srv.control = f
+	req := httptest.NewRequest("POST", "http://127.0.0.1:8787/api/control/route", strings.NewReader(`{"target":"alpha","message":"hi"}`))
+	req.Host = "127.0.0.1:8787"
+	// Deliberately omit X-Flotilla-Dash and Origin.
+	rec := httptest.NewRecorder()
+	srv.handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("DISABLE_AUTHENTICATION route → %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if f.lastRouteTarget != "alpha" {
+		t.Errorf("route target = %q, want alpha", f.lastRouteTarget)
+	}
+}
+
+// TestControlRoute_LANOriginAcceptsMatchingHost: on a non-loopback bind the browser
+// Origin uses the host the operator typed, not the bind address — accept same-host Origin.
+func TestControlRoute_LANOriginAcceptsMatchingHost(t *testing.T) {
+	f := &fakeController{routeRes: control.RouteResult{Target: "alpha", Outcome: control.OutcomeDelivered}}
+	dir := t.TempDir()
+	rosterPath := filepath.Join(dir, "flotilla.json")
+	if err := os.WriteFile(rosterPath, []byte(singleFleetRoster), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv, err := NewServer(Config{RosterPath: rosterPath, Bind: "0.0.0.0:8787", Transport: stubTransport{}, WebTransport: stubTransport{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.control = f
+	req := httptest.NewRequest("POST", "http://192.168.1.5:8787/api/control/route", strings.NewReader(`{"target":"alpha","message":"hi"}`))
+	req.Host = "192.168.1.5:8787"
+	req.Header.Set("X-Flotilla-Dash", "1")
+	req.Header.Set("Origin", "http://192.168.1.5:8787")
+	rec := httptest.NewRecorder()
+	srv.handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("LAN same-host Origin → %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 }

@@ -187,13 +187,15 @@ func (s *Server) handleIssueClose(w http.ResponseWriter, r *http.Request) {
 // safe land with the control phase (Phase 3); Phase 2 is loopback-only.
 func (s *Server) requireWrite(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Flotilla-Dash") != "1" {
-			http.Error(w, "forbidden: missing X-Flotilla-Dash header (anti-CSRF)", http.StatusForbidden)
-			return
-		}
-		if !s.originAllowed(r) {
-			http.Error(w, "forbidden: Origin not allowed (anti-CSRF)", http.StatusForbidden)
-			return
+		if !s.cfg.DisableAuthentication {
+			if r.Header.Get("X-Flotilla-Dash") != "1" {
+				http.Error(w, "forbidden: missing X-Flotilla-Dash header (anti-CSRF)", http.StatusForbidden)
+				return
+			}
+			if !s.originAllowed(r) {
+				http.Error(w, "forbidden: Origin not allowed (anti-CSRF)", http.StatusForbidden)
+				return
+			}
 		}
 		next(w, r)
 	}
@@ -205,6 +207,12 @@ func (s *Server) requireWrite(next http.HandlerFunc) http.HandlerFunc {
 // when a header IS present it must match, so a cross-origin browser forgery is
 // rejected.
 func (s *Server) originAllowed(r *http.Request) bool {
+	// On a private-network bind (0.0.0.0 / LAN IP) the browser's Origin uses the
+	// host the operator typed (192.168.x.x), not the bind address — accept any Origin
+	// that matches the request Host (same-origin in practice).
+	if bindIsNonLoopback(s.cfg.Bind) {
+		return originMatchesRequestHost(r)
+	}
 	if origin := r.Header.Get("Origin"); origin != "" {
 		return s.origins[origin]
 	}
@@ -214,6 +222,30 @@ func (s *Server) originAllowed(r *http.Request) bool {
 			return false
 		}
 		return s.origins[u.Scheme+"://"+u.Host]
+	}
+	return true
+}
+
+// originMatchesRequestHost accepts a browser Origin/Referer when its host matches
+// the request Host — the LAN-bind case where the allowlist cannot enumerate every
+// private IP/hostname the operator may type.
+func originMatchesRequestHost(r *http.Request) bool {
+	reqHost := r.Host
+	if reqHost == "" {
+		return false
+	}
+	check := func(raw string) bool {
+		u, err := url.Parse(raw)
+		if err != nil || u.Host == "" {
+			return false
+		}
+		return u.Host == reqHost
+	}
+	if origin := r.Header.Get("Origin"); origin != "" {
+		return check(origin)
+	}
+	if ref := r.Header.Get("Referer"); ref != "" {
+		return check(ref)
 	}
 	return true
 }
