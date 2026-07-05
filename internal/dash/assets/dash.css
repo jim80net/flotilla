@@ -1528,6 +1528,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   display: flex; align-items: center; justify-content: center;
 }
 .gdec-close:hover { border-color: var(--cyan-dim); color: var(--ink); }
+.gdec-close:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .gdec-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 1.2rem 1.4rem 1.6rem; display: grid; gap: 1.2rem; }
 .gdec-empty { color: var(--ink-3); text-align: center; padding: 2rem 1rem; }
 .gdec-card {
@@ -1541,6 +1542,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gdec-ctx-lab { text-transform: uppercase; letter-spacing: .1em; font-size: .62rem; }
 .gdec-ctx-link { background: none; border: 0; padding: 0; font: inherit; color: var(--cyan); cursor: pointer; }
 .gdec-ctx-link:hover { text-decoration: underline; }
+.gdec-ctx-link:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; border-radius: 3px; }
 .gdec-brief { max-width: 74ch; font-size: .9rem; }
 @media (max-width: 640px) {
   .gdec-sheet { width: 100vw; max-height: 100dvh; margin: 0; border-radius: 0; border: 0; }

@@ -1262,7 +1262,11 @@
     Object.keys(nodeById).forEach(function (id) {
       var n = nodeById[id];
       if (!n) return;
-      if (hasBrief(n.brief)) out.push({ node: n, label: "", brief: n.brief });
+      // A node-level brief is a decision ONLY when the node itself is operator-gated
+      // (awaiting/blocked). Without this, a node carrying a brief in any other state would
+      // pollute the decision room with a non-decision — the exact anti-pattern this page kills.
+      var vis = visToken(n);
+      if (hasBrief(n.brief) && (vis === "awaiting" || vis === "blocked")) out.push({ node: n, label: "", brief: n.brief });
       (n.work_items || []).forEach(function (wi) {
         if ((wi.class === "awaiting" || wi.class === "blocked") && !sameBrief(wi.brief, n.brief)) {
           out.push({ node: n, label: wi.label || wi.detail || wi.kind || "", brief: wi.brief });
