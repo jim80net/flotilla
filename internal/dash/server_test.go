@@ -522,6 +522,37 @@ func TestHandleSessionMirror(t *testing.T) {
 	}
 }
 
+// TestDecisionPage405 locks #405 Inc 2 (the operator's centerpiece): the "Awaiting you" tile
+// opens a decision page — a reading room for every open decision, formatting the canonical
+// 6-element briefs with references (links) and demo images inline, each showing which goal it drives.
+func TestDecisionPage405(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	html := doGet(t, srv, "/").Body.String()
+	if !strings.Contains(html, `id="goals-decisions"`) || !strings.Contains(html, `id="gdec-list"`) {
+		t.Error("index.html must carry the decision-page surface (#goals-decisions / #gdec-list) — #405 Inc 2")
+	}
+	js := doGet(t, srv, "/static/goals.js").Body.String()
+	for _, marker := range []string{
+		"gatherDecisions",     // collects every open decision fleet-wide
+		"openDecisions",       // opens the reading room
+		"data-open-decisions", // the Awaiting-you tile trigger
+		"gdec-ctx-link",       // "Drives" — which goal the decision drives (linked)
+		"gm-brief-img",        // demo images rendered in a brief
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must implement the decision page (missing %q) — #405 Inc 2", marker)
+		}
+	}
+	// renderBrief must render reference links (the "references littered throughout" requirement).
+	if !strings.Contains(js, `rel="noopener noreferrer"`) {
+		t.Error("goals.js renderBrief must render reference links (http(s)-restricted anchors) — #405 Inc 2")
+	}
+	if css := doGet(t, srv, "/static/dash.css").Body.String(); !strings.Contains(css, ".gdec-sheet") || !strings.Contains(css, ".gdec-card") {
+		t.Error("dash.css must style the decision reading room (.gdec-sheet/.gdec-card) — #405 Inc 2")
+	}
+}
+
 // TestMindmapLimbHue locks the mind-map per-limb hue (operator polish track): each top-level
 // limb (a hub child/root and its subtree) is coloured with a distinct hue that rides on the
 // branch EDGES, so the limbs are visually traceable while node cards keep their status colour.
