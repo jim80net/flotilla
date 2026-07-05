@@ -1195,7 +1195,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gzoomctl .fit { font-size: .6rem; letter-spacing: .06em; }
 /* "move map" toggle: touch-only (mouse always pans). Wide enough for its label + a
    comfortable tap target; active state signals the map now owns touch gestures (#330). */
-.gzoomctl .panlock { display: none; width: auto; min-height: 34px; padding: 0 .55rem; font-size: .58rem; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+.gzoomctl .panlock { display: none; width: auto; min-height: 44px; padding: 0 .7rem; font-size: .58rem; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
 .gzoomctl .panlock.active { border-color: var(--cyan); color: var(--cyan); background: color-mix(in srgb, var(--cyan) 14%, var(--abyss-2)); }
 @media (hover: none) { .gzoomctl .panlock { display: inline-flex; align-items: center; justify-content: center; } }
 
@@ -1588,16 +1588,19 @@ html, body { overflow-x: clip; }
   .gd-convo,
   .gd-close,
   .gm-close,
+  .conv-modal-x,
+  .thread-jump,
   .conv-queue-sum,
   .gzoomctl button { min-height: 44px; }
   .tab,
   .glayout-btn,
-  .mv-btn { display: inline-flex; align-items: center; justify-content: center; }
+  .mv-btn,
+  .thread-jump { display: inline-flex; align-items: center; justify-content: center; }
   /* the drive-queue disclosure summary (#326) is a thumb-driven toggle — give it
      the 44px row and vertically center its baseline-aligned label */
   .conv-queue-sum { align-items: center; }
   .gzoomctl button { width: 44px; }
-  .gd-close, .gm-close { width: 44px; height: 44px; }
+  .gd-close, .gm-close, .conv-modal-x { width: 44px; height: 44px; }
   /* text fields the operator types into — match the 44px control rhythm */
   .control-form input,
   .control-form textarea,
