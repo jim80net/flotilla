@@ -63,13 +63,40 @@ func TestWriteThenLookupRoundtrip(t *testing.T) {
 
 func TestLookupMissForUnclampedGist(t *testing.T) {
 	dir := t.TempDir()
+	ts := time.Unix(0, 0).UTC().Format(time.RFC3339)
 	// A short gist that was never clamped (no marker) must not even attempt a lookup.
-	if _, ok := LookupBody(dir+"/ledger", time.Unix(0, 0).UTC().Format(time.RFC3339), "operator", "d", "short and complete"); ok {
+	if _, ok := LookupBody(dir+"/ledger", ts, "operator", "d", "short and complete"); ok {
 		t.Error("LookupBody returned ok for an unclamped gist")
 	}
-	// A clamped-looking gist with no companion file falls back cleanly (pre-#407 line).
-	if _, ok := LookupBody(dir+"/ledger", time.Unix(0, 0).UTC().Format(time.RFC3339), "operator", "d", "was clamped but no file…"); ok {
+	// A short gist that NATURALLY ends in the marker but is NOT the clamped LENGTH must not be
+	// treated as clamped (else it could hydrate another entry's body on a key collision).
+	if _, ok := LookupBody(dir+"/ledger", ts, "operator", "d", "a short thought that just trails off…"); ok {
+		t.Error("LookupBody treated a short natural-ellipsis gist as clamped")
+	}
+	// A genuinely clamped-LENGTH gist with no companion file falls back cleanly (pre-#407 line).
+	realClamp := clampGist(longBody(400, "past-the-clamp"))
+	if _, ok := LookupBody(dir+"/ledger", ts, "operator", "d", realClamp); ok {
 		t.Error("LookupBody returned ok with no companion file present")
+	}
+}
+
+// TestLookupNoCrossEntrySubstitution is the cubic #422 P1 regression: a short message that
+// naturally ends in "…" must NOT be hydrated with a DIFFERENT (clamped) same-key entry's body.
+func TestLookupNoCrossEntrySubstitution(t *testing.T) {
+	dir := t.TempDir()
+	ledger := dir + "/ledger"
+	ts := time.Unix(4242, 0).UTC()
+	// A long clamped message A at (ts, operator, d) writes a companion body file under the key.
+	longMsg := longBody(600, "the-long-clamped-message-tail")
+	if err := WriteBody(ledger, Entry{Time: ts, From: "operator", To: "d", Gist: longMsg}); err != nil {
+		t.Fatalf("WriteBody: %v", err)
+	}
+	// A SHORT message B at the SAME (ts, operator, d) that naturally ends in "…" — never
+	// clamped, so no companion of its own. Its lookup shares A's key, but must NOT return A's body.
+	shortNaturalEllipsis := "quick note, more soon…"
+	got, ok := LookupBody(ledger, ts.Format(time.RFC3339), "operator", "d", shortNaturalEllipsis)
+	if ok {
+		t.Fatalf("cross-entry substitution: short natural-ellipsis gist hydrated a different entry's body: %q", got)
 	}
 }
 

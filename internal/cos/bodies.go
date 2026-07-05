@@ -80,14 +80,21 @@ func WriteBody(ledgerPath string, e Entry) error {
 }
 
 // LookupBody returns the full body for a rendered ledger entry, if the companion store holds
-// one. clampedGist is the entry's gist as parsed from the ledger (it ends with clampMarker
-// when the body was clamped). It returns ok=false when the gist was not clamped, when no
-// companion file exists (e.g. a pre-#407 line, or a body-write that failed best-effort), or
-// on any read error — every miss falls back cleanly to the clamped gist. When several files
-// share the (ts,from,to) key, the one whose content begins with the de-marked gist prefix is
-// the exact match.
+// one. clampedGist is the entry's gist as parsed from the ledger. It returns ok=false when
+// the gist was not clamped, when no companion file exists (e.g. a pre-#407 line, or a
+// body-write that failed best-effort), or on any read error — every miss falls back cleanly
+// to the clamped gist.
+//
+// Clamp detection requires the gist to be EXACTLY the clamped shape: maxGistRunes runes plus
+// the marker rune. The marker suffix alone is insufficient — a short message that naturally
+// ends in "…" would then be treated as clamped and, on a same-second/same-parties key
+// collision, hydrate to ANOTHER entry's body (cubic #422 P1). The exact-length predicate
+// admits only genuinely-clamped gists, and we return ONLY a companion whose content begins
+// with the de-marked prefix — never a non-matching body — so a key collision can never
+// substitute a different entry's message.
 func LookupBody(ledgerPath, ts, from, to, clampedGist string) (string, bool) {
-	if !strings.HasSuffix(clampedGist, clampMarker) {
+	if !strings.HasSuffix(clampedGist, clampMarker) ||
+		utf8.RuneCountInString(clampedGist) != maxGistRunes+utf8.RuneCountInString(clampMarker) {
 		return "", false
 	}
 	prefix := strings.TrimSuffix(clampedGist, clampMarker)
@@ -95,26 +102,16 @@ func LookupBody(ledgerPath, ts, from, to, clampedGist string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	var fallback string
-	var haveFallback bool
 	for _, m := range matches {
 		b, err := os.ReadFile(m)
 		if err != nil {
 			continue
 		}
-		content := string(b)
-		if strings.HasPrefix(content, prefix) {
+		if content := string(b); strings.HasPrefix(content, prefix) {
 			return content, true
 		}
-		if !haveFallback {
-			fallback, haveFallback = content, true
-		}
 	}
-	// A single keyed file that does not prefix-match (e.g. the gist ended in a real "…"
-	// coincidence) is still a better full copy than the clamped line; but only trust it when
-	// it is the SOLE candidate, so an ambiguous multi-file key never renders the wrong body.
-	if haveFallback && len(matches) == 1 {
-		return fallback, true
-	}
+	// No prefix-matching companion → do NOT substitute a different entry's body; the caller
+	// renders the clamped gist (safe degradation, back-compat for pre-#407 lines).
 	return "", false
 }
