@@ -258,11 +258,14 @@ func TestConversationsWave2(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 	srv, _ := newTestServer(t, singleFleetRoster, now)
 	js := doGet(t, srv, "/static/dash.js").Body.String()
-	// E10: queue chip → modal.
-	for _, marker := range []string{"openConvModal", "data-bq-open", "data-bq-text"} {
+	// E10: queue chip → modal (structured index, not raw text attr — #419).
+	for _, marker := range []string{"openConvModal", "data-bq-open", "data-bq-index", "queueItems"} {
 		if !strings.Contains(js, marker) {
-			t.Errorf("dash.js must open a drive-queue item in the modal (missing %q) — #349 Inc 4 E10", marker)
+			t.Errorf("dash.js must open a drive-queue item in the modal (missing %q) — #349 Inc 4 E10 / #419", marker)
 		}
+	}
+	if strings.Contains(js, "data-bq-text") {
+		t.Error("dash.js must not carry raw backlog text in data-bq-text (operator-facing modal — #419)")
 	}
 	// cubic #361 P2: the conv-modal must trap Tab focus (like the goals-modal) so Tab can't
 	// escape behind the backdrop, and must return focus to the opening chip on close.
@@ -300,6 +303,67 @@ func TestConversationsWave2(t *testing.T) {
 	// queued line reads without clipping (the composite grid pins the exact value).
 	if !strings.Contains(css, ".conv-modal.open") || !strings.Contains(css, "1fr) 420px") {
 		t.Error("dash.css must style the conv-modal (E10) and set the context column to 420px (Wave 4 widen) — #349 Inc 4 / F#383")
+	}
+}
+
+// TestWorkQueueModalOperatorFacing locks #419: the work-queue modal renders an
+// operator-facing layer first (title/summary/status) and keeps internal ledger prose
+// in a collapsed section — never as the primary view. Fail-closed render-lint.
+func TestWorkQueueModalOperatorFacing(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, dir := newTestServer(t, singleFleetRoster, now)
+	backlogPath := filepath.Join(dir, ".flotilla-state.md")
+	jargonLine := "- [in-flight] Gate the watch scheduler :: Ready for merge tonight.\n"
+	jargonLine += "- [in-flight] COS GATE PR #414 SHA c1d47a5837106354bf2654cccc7d03b473ffd1de cubic verdict pending\n"
+	if err := os.WriteFile(backlogPath, []byte("## Backlog\n"+jargonLine), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec := doGet(t, srv, "/api/history")
+	var doc HistoryDoc
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Backlog.Unblocked) < 2 {
+		t.Fatalf("unblocked = %+v", doc.Backlog.Unblocked)
+	}
+	for _, item := range doc.Backlog.Unblocked {
+		if !TitleIsOperatorFacing(item.Title) {
+			t.Errorf("API title not operator-facing: %q (raw=%q)", item.Title, item.Raw)
+		}
+	}
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{
+		"conv-modal-summary",
+		"conv-modal-internal",
+		"item.title",
+		"item.internal",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js missing operator-facing modal marker %q — #419", marker)
+		}
+	}
+	if strings.Contains(js, `conv-modal-title").textContent = text`) {
+		t.Error("dash.js must not assign raw backlog text directly to conv-modal-title — #419")
+	}
+	html := doGet(t, srv, "/").Body.String()
+	for _, marker := range []string{
+		`id="conv-modal-summary"`,
+		`id="conv-modal-internal"`,
+		"Internal detail",
+	} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("index.html missing operator-facing modal element %q — #419", marker)
+		}
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	if strings.Contains(css, ".conv-modal-title {") {
+		block := css[strings.Index(css, ".conv-modal-title {"):]
+		if !strings.Contains(block[:min(200, len(block))], "text-transform: none") {
+			t.Error("conv-modal-title must not uppercase the primary view — #419")
+		}
+	}
+	if !strings.Contains(css, ".conv-modal-internal") || !strings.Contains(css, ".conv-modal-summary") {
+		t.Error("dash.css must style operator-facing modal sections — #419")
 	}
 }
 

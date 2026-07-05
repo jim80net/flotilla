@@ -1521,7 +1521,28 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   font-size: .6rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
   border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; display: inline-block; margin-bottom: 10px;
 }
-.conv-modal-title { font-size: .95rem; line-height: 1.5; color: var(--ink); padding-right: 34px; overflow-wrap: anywhere; }
+.conv-modal-title {
+  font-family: var(--display); font-size: 1.05rem; font-weight: 600; line-height: 1.35;
+  color: var(--ink); padding-right: 34px; margin: 0 0 .65rem; text-transform: none;
+  max-width: 42rem;
+}
+.conv-modal-summary {
+  font-size: .92rem; line-height: 1.55; color: var(--ink-2); margin: 0 0 1rem;
+  max-width: 42rem; text-transform: none;
+}
+.conv-modal-internal {
+  margin-top: .5rem; max-width: 42rem; text-transform: none;
+}
+.conv-modal-internal > summary {
+  font-size: .72rem; letter-spacing: .04em; color: var(--ink-3); cursor: pointer;
+  text-transform: none; margin-bottom: .35rem;
+}
+.conv-modal-internal-body {
+  font-family: var(--mono); font-size: .78rem; line-height: 1.45; color: var(--ink-3);
+  white-space: pre-wrap; overflow-wrap: anywhere; margin: .5rem 0 0; padding: .65rem .75rem;
+  background: color-mix(in srgb, var(--abyss) 55%, transparent); border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm); text-transform: none;
+}
 .gm-dialog {
   /* Wave 4 — the respond modal breathes on desktop. A 520px centre column wasted the
      whole desktop width AND cramped the decision brief; now it uses min(960px, 94vw) and,
