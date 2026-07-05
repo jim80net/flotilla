@@ -96,7 +96,16 @@ func (m deskMirror) run(agent string) {
 		m.alert(fmt.Sprintf("desk-mirror %s: %s", agent, d.alertDetail))
 	}
 	if d.suppress {
-		m.logf("flotilla watch: mirror SUPPRESS %s: %s", agent, d.note)
+		// The firewall REFUSE gags the PUBLIC Discord egress — but the session-mirror ledger is
+		// a PRIVATE, loopback-only operator surface (only the local dash reads it; it is never
+		// published). Gagging the operator's own coordinator/desk session FROM THEIR OWN private
+		// dash was the "CoS thread empty" bug (#405 Inc 1): the coordinator's turn-finals are dense
+		// with fleet-internal vocabulary, so they trip REFUSE far more than a desk's work output,
+		// and its ledger stayed empty while desks populated. Keep the private ledger (the RAW
+		// turn-final so the operator sees what was withheld, plus the refuse marker); skip ONLY the
+		// public post. The firewall still fully protects the public egress below.
+		m.appendSessionMirror(agent, text, mirrorDecision{body: text, note: d.note})
+		m.logf("flotilla watch: mirror SUPPRESS-POST %s (private ledger kept): %s", agent, d.note)
 		return
 	}
 

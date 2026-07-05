@@ -103,8 +103,10 @@ func firewallTermSet(t *testing.T, deny, warn []string) *readermap.TermSet {
 	return ts
 }
 
-// STAGE 1 firewall: a leaking turn-final is SUPPRESSED (never posted), logged on the
-// one decision line as a SUPPRESS, and raises the operator-visible alert.
+// STAGE 1 firewall: a leaking turn-final is withheld from the PUBLIC post (never posted),
+// logged on the one decision line as SUPPRESS-POST, and raises the operator-visible alert.
+// (The private loopback ledger is still kept — #405 Inc 1 — but this wiring has no rosterDir,
+// so the ledger append is inert here; the ledger-kept behavior is covered in mirror_session_test.)
 func TestDeskMirrorSuppressesAndAlertsOnFirewallRefuse(t *testing.T) {
 	var lines []string
 	var posted bool
@@ -121,8 +123,8 @@ func TestDeskMirrorSuppressesAndAlertsOnFirewallRefuse(t *testing.T) {
 	if posted {
 		t.Fatal("a firewall REFUSE must SUPPRESS the post (nothing published)")
 	}
-	if len(lines) != 1 || !strings.Contains(lines[0], "SUPPRESS backend") || !strings.Contains(lines[0], "firewall refuse") {
-		t.Fatalf("decision lines = %v, want exactly one SUPPRESS ... firewall refuse", lines)
+	if len(lines) != 1 || !strings.Contains(lines[0], "SUPPRESS-POST backend") || !strings.Contains(lines[0], "firewall refuse") {
+		t.Fatalf("decision lines = %v, want exactly one SUPPRESS-POST ... firewall refuse", lines)
 	}
 	if len(alerts) != 1 || !strings.Contains(alerts[0], "WITHHELD") || !strings.Contains(alerts[0], "backend") {
 		t.Fatalf("alerts = %v, want exactly one operator alert naming the withheld desk", alerts)
