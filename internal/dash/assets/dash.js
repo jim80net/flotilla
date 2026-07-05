@@ -685,9 +685,12 @@
     var raw = String(line == null ? "" : line);
     var m = /^\s*[-*]?\s*\[([a-z][a-z0-9-]*)\]\s*(.*)$/i.exec(raw);
     if (!m) {
+      // No [marker] token: there is no chip to align, so the text spans BOTH grid
+      // columns (bq-text-wide → grid-column: 1 / -1) and fills the full item width
+      // instead of being cramped into the 5.5rem chip column (#415 review).
       var text = raw.replace(/^\s*[-*]\s*/, "");
       return '<div class="backlog-item bq-row" role="button" tabindex="0" data-bq-open data-bq-text="' + escapeHtml(text) + '">' +
-        '<span class="bq-text">' + escapeHtml(text) + "</span></div>";
+        '<span class="bq-text bq-text-wide">' + escapeHtml(text) + "</span></div>";
     }
     var marker = m[1].toLowerCase();
     return '<div class="backlog-item bq-row bq-' + escapeHtml(marker) + '" role="button" tabindex="0" data-bq-open' +

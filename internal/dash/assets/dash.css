@@ -871,6 +871,9 @@ code {
   display: inline-block; text-align: center; width: 100%; box-sizing: border-box;
 }
 .bq-text { color: var(--ink-2); min-width: 0; }
+/* No-marker item: text spans both grid columns so it fills the full width rather
+   than being cramped into the 5.5rem chip column (#415 review). */
+.backlog-item.bq-row .bq-text-wide { grid-column: 1 / -1; }
 .bq-in-flight .bq-marker, .bq-pending .bq-marker { color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 45%, transparent); }
 .bq-blocked .bq-marker, .bq-needs-attention .bq-marker { color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, transparent); }
 .bq-awaiting-auth .bq-marker { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 48%, transparent); }

@@ -926,8 +926,9 @@ func TestRailRegroupAndQueueFormat405(t *testing.T) {
 
 	// Part A — structured work-queue rows.
 	for _, marker := range []string{
-		"bq-row",    // CSS class that drives the grid layout on each item
-		"bq-marker", // the state chip column
+		"bq-row",       // CSS class that drives the grid layout on each item
+		"bq-marker",    // the state chip column
+		"bq-text-wide", // no-marker items span both columns so text is not cramped (#415 review)
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("dash.js backlogItem must render structured rows (missing %q) — #405 Inc 4b item 2a", marker)
@@ -968,6 +969,11 @@ func TestRailRegroupAndQueueFormat405(t *testing.T) {
 	}
 	if !strings.Contains(css, "grid-template-columns") {
 		t.Error("dash.css .bq-row must use a grid layout (grid-template-columns) to align chip + text — #405 Inc 4b")
+	}
+	// A no-marker item's text must span both columns so it fills full width instead of
+	// being cramped into the 5.5rem chip column (#415 review).
+	if !strings.Contains(css, ".bq-text-wide") {
+		t.Error("dash.css must let no-marker items span both columns (.bq-text-wide grid-column) — #415 review")
 	}
 	// Part B CSS: Fleet Command group header style.
 	if !strings.Contains(css, ".chan-fleet-command") {
