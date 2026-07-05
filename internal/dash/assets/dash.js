@@ -687,6 +687,15 @@
       if (current()) {
         renderConversations();
         fetchMirror(); // keep the selected desk's session-mirror glance current on each tick
+        // Update the conversations unseen dot from the freshly-loaded ledger.
+        unseenSigs.conversations = computeConvSig();
+        refreshDots();
+        // Peek the other tabs' data sources to keep their unseen dots current.
+        // Fire-and-forget: errors are swallowed inside each peek so a failing
+        // endpoint never blocks the conversations render.
+        peekGoalsSig();
+        peekIssuesSig();
+        peekParadeSig();
       }
       // Keep the Goals view live off the same refresh cadence (SSE-triggered). It
       // fetches /api/goals itself and no-ops until the operator has opened the tab.
@@ -727,7 +736,99 @@
 
   connect();
 
-  /* ── tab nav: Conversations ⇄ Goals ⇄ Issues ───────────────────────── */
+  /* ── unseen-content dots per tab (item 9) ────────────────────────────────
+     Per-tab localStorage key: flotilla-tab-sig-{tabname}
+     Signature sources:
+       conversations — latest ledger ts + count (from cache.history; available each refresh)
+       goals         — version + counts from /api/goals (peeked once per refresh cycle)
+       issues        — issue count + newest updated_at from /api/issues (peeked once)
+       parade        — newest parade date from /api/parades (peeked once)
+     Dot shows when currentSig !== storedSig; clears when operator opens that tab.
+     Per-browser client signal — localStorage is not synced across devices.
+  ─────────────────────────────────────────────────────────────────────────── */
+  var unseenSigs = {};
+
+  function unseenKey(tab) { return "flotilla-tab-sig-" + tab; }
+  function unseenDot(tab) { return document.getElementById("dot-" + tab); }
+
+  function setDot(tab, active) {
+    var dot = unseenDot(tab);
+    if (!dot) return;
+    var val = active ? "true" : "false";
+    if (dot.getAttribute("data-active") === val) return;
+    dot.setAttribute("data-active", val);
+    dot.setAttribute("aria-hidden", active ? "false" : "true");
+  }
+
+  function refreshDots() {
+    ["conversations", "goals", "issues", "parade"].forEach(function (tab) {
+      var sig = unseenSigs[tab] || "";
+      if (!sig) return; // no data yet — leave dot hidden
+
+      // If this tab's SPA view is currently visible (not hidden), the operator is
+      // already looking at it — silently record as viewed instead of showing a dot.
+      var viewEl = el("view-" + tab);
+      if (viewEl && !viewEl.classList.contains("hidden")) {
+        markTabViewed(tab);
+        return;
+      }
+
+      var stored = "";
+      try { stored = localStorage.getItem(unseenKey(tab)) || ""; } catch (e) {}
+      setDot(tab, sig !== stored);
+    });
+  }
+
+  function markTabViewed(tab) {
+    var sig = unseenSigs[tab] || "";
+    if (!sig) return;
+    try { localStorage.setItem(unseenKey(tab), sig); } catch (e) {}
+    setDot(tab, false);
+  }
+
+  // computeConvSig derives the conversations signature from the loaded cache — the
+  // latest ledger entry's ts + total ledger count. Both are available after each refresh.
+  function computeConvSig() {
+    var hist = cache.history || {};
+    var ledger = Array.isArray(hist.ledger) ? hist.ledger : [];
+    var bl = hist.backlog || {};
+    var unblocked = Array.isArray(bl.unblocked) ? bl.unblocked : [];
+    var latestTs = ledger.length ? (ledger[ledger.length - 1].ts || "") : "";
+    return latestTs + "|" + String(ledger.length) + "|" + String(unblocked.length);
+  }
+
+  // peekGoalsSig fetches /api/goals to derive the goals tab signature. Fire-and-forget;
+  // errors are silently swallowed so a missing goals doc never breaks the dot logic.
+  function peekGoalsSig() {
+    getJSON("/api/goals").then(function (g) {
+      var v = (g && g.version != null) ? String(g.version) : "";
+      var c = (g && g.counts) ? JSON.stringify(g.counts) : "";
+      unseenSigs.goals = v + "|" + c;
+      refreshDots();
+    }).catch(function () {});
+  }
+
+  // peekIssuesSig fetches /api/issues (open, up to 50) to derive the issues tab signature.
+  function peekIssuesSig() {
+    getJSON("/api/issues?state=open&limit=50").then(function (d) {
+      var items = Array.isArray(d && d.issues) ? d.issues : (Array.isArray(d) ? d : []);
+      var newest = items.length ? (items[0].updated_at || items[0].created_at || "") : "";
+      unseenSigs.issues = String(items.length) + "|" + newest;
+      refreshDots();
+    }).catch(function () {});
+  }
+
+  // peekParadeSig fetches /api/parades to derive the parade tab signature (newest date).
+  function peekParadeSig() {
+    getJSON("/api/parades").then(function (d) {
+      var items = Array.isArray(d && d.parades) ? d.parades : [];
+      var newest = items.length ? (items[0].date || "") : "";
+      unseenSigs.parade = newest;
+      refreshDots();
+    }).catch(function () {});
+  }
+
+  /* ── tab nav: Conversations ⇄ Goals ⇄ Issues · Parade (nav-out) ──────── */
   var VIEWS = ["conversations", "goals", "issues"];
   function showView(view) {
     VIEWS.forEach(function (v) {
@@ -742,8 +843,11 @@
     document.body.classList.toggle("conv-shell-active", view === "conversations");
     if (view === "goals" && window.flotillaGoals) window.flotillaGoals.show();
     if (view === "issues" && window.flotillaTracker) window.flotillaTracker.show();
+    markTabViewed(view); // clear unseen dot when operator opens this tab
   }
-  var tabs = document.querySelectorAll(".tab");
+  // Only button tabs (those with data-view) are wired to showView. The Parade <a>
+  // tab navigates to /parade naturally — including firing its own click handler below.
+  var tabs = document.querySelectorAll(".tab[data-view]");
   for (var i = 0; i < tabs.length; i++) {
     tabs[i].addEventListener("click", function () {
       var view = this.getAttribute("data-view");
@@ -752,6 +856,13 @@
       // to Goals restores the drawer instead of dropping it (cubic #351 P2).
       var node = (view === "goals" && window.flotillaGoals && window.flotillaGoals.openNode) ? window.flotillaGoals.openNode() : null;
       pushNav({ view: view, desk: selectedDesk || null, node: node });
+    });
+  }
+  // Parade tab: mark it viewed on click so the dot clears as the operator navigates out.
+  var paradeTabEl = el("tab-parade");
+  if (paradeTabEl) {
+    paradeTabEl.addEventListener("click", function () {
+      markTabViewed("parade");
     });
   }
 

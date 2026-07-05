@@ -570,6 +570,110 @@ func TestDecisionPage405(t *testing.T) {
 	}
 }
 
+// TestDashInc5Shell405 locks the three shell items from #405 Inc 5:
+//   - Part A: Parade tab in the header nav that navigates to /parade (a navigation-out link).
+//   - Part B: Unseen-content dot on each tab, driven by per-browser localStorage signatures.
+//   - Part C: Hub-and-spoke brand mark SVG used consistently in the header.
+func TestDashInc5Shell405(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+
+	// ── Part A: Parade tab ─────────────────────────────────────────────────────
+	html := doGet(t, srv, "/").Body.String()
+	if !strings.Contains(html, `id="tab-parade"`) {
+		t.Error(`index.html must carry a Parade tab with id="tab-parade" — #405 Inc 5 item 8`)
+	}
+	if !strings.Contains(html, `href="/parade"`) {
+		t.Error(`index.html Parade tab must navigate to /parade (href="/parade") — #405 Inc 5 item 8`)
+	}
+	// Parade tab must NOT carry a data-view attribute (it is a navigation-out, not an SPA panel).
+	if i := strings.Index(html, `id="tab-parade"`); i >= 0 {
+		chunk := html[i : i+200]
+		if strings.Contains(chunk, `data-view="parade"`) {
+			t.Error(`Parade tab must not carry data-view="parade" — it is a nav-out link, not an SPA view — #405 Inc 5 item 8`)
+		}
+	}
+	// /parade must respond 200 (the standalone parade page is served).
+	if rec := doGet(t, srv, "/parade"); rec.Code != 200 {
+		t.Errorf("/parade page code %d, want 200 — #405 Inc 5 item 8", rec.Code)
+	}
+	// dash.js must only wire button tabs (those with data-view) to showView —
+	// the Parade <a> must not accidentally reach showView("parade") on click.
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	if !strings.Contains(js, `.tab[data-view]`) {
+		t.Error(`dash.js must select only ".tab[data-view]" for the SPA click handler (not ".tab") so the Parade <a> is excluded — #405 Inc 5 item 8`)
+	}
+
+	// ── Part B: Unseen-content dots ────────────────────────────────────────────
+	// Each SPA tab must carry an unseen-dot span.
+	for _, id := range []string{"dot-conversations", "dot-goals", "dot-issues", "dot-parade"} {
+		if !strings.Contains(html, `id="`+id+`"`) {
+			t.Errorf("index.html must carry unseen-dot element %q — #405 Inc 5 item 9", id)
+		}
+	}
+	// dash.js must carry the unseen-dot module functions.
+	for _, marker := range []string{
+		"unseenKey",      // localStorage key helper
+		"refreshDots",    // updates all dot visibility
+		"markTabViewed",  // clears the dot + stores signature on tab open
+		"computeConvSig", // derives conversations signature from cache.history
+		"peekGoalsSig",   // peeks /api/goals for goals signature
+		"peekIssuesSig",  // peeks /api/issues for issues signature
+		"peekParadeSig",  // peeks /api/parades for parade signature
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js must implement the unseen-dot module (missing %q) — #405 Inc 5 item 9", marker)
+		}
+	}
+	// showView must call markTabViewed so the dot clears when the operator opens a tab.
+	if si := strings.Index(js, "function showView"); si >= 0 {
+		// use a generous window — the function body includes several long comment lines
+		if !strings.Contains(js[si:si+900], "markTabViewed") {
+			t.Error("dash.js showView must call markTabViewed to clear the unseen dot on tab open — #405 Inc 5 item 9")
+		}
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	if !strings.Contains(css, ".unseen-dot") {
+		t.Error("dash.css must define .unseen-dot — #405 Inc 5 item 9")
+	}
+	if !strings.Contains(css, `data-active="true"`) {
+		t.Error(`dash.css must show the dot when data-active="true" — #405 Inc 5 item 9`)
+	}
+
+	// ── Part C: Hub-and-spoke brand mark ──────────────────────────────────────
+	// The brand mark must be an inline SVG (hub node + spokes + satellite nodes).
+	if !strings.Contains(html, `class="brand-mark"`) {
+		t.Error("index.html must carry the brand-mark element — #405 Inc 5 item 10")
+	}
+	// The SVG must include the hub circle and spoke lines (look for the characteristic
+	// viewBox and at least one circle + line element within the brand-mark section).
+	if !strings.Contains(html, `viewBox="0 0 24 24"`) {
+		t.Error("index.html brand-mark SVG must have viewBox='0 0 24 24' — #405 Inc 5 item 10")
+	}
+	if !strings.Contains(html, `cx="12" cy="12"`) {
+		t.Error("index.html brand-mark SVG must have a hub circle at (12,12) — #405 Inc 5 item 10")
+	}
+	// dash.css must style the brand-mark with fill/stroke (SVG, not border-based).
+	if !strings.Contains(css, "fill: var(--cyan)") {
+		t.Error("dash.css .brand-mark must use fill: var(--cyan) for the SVG icon — #405 Inc 5 item 10")
+	}
+	if strings.Contains(css, "border-left:") {
+		if i := strings.Index(css, ".brand-mark"); i >= 0 {
+			if strings.Contains(css[i:i+200], "border-left:") {
+				t.Error("dash.css .brand-mark must not use border-left (replaced by SVG icon) — #405 Inc 5 item 10")
+			}
+		}
+	}
+	// The parade page must also carry the hub-and-spoke brand mark.
+	paradeHTML := doGet(t, srv, "/parade").Body.String()
+	if !strings.Contains(paradeHTML, `class="brand-mark"`) {
+		t.Error("parade.html must carry the brand-mark SVG for consistent fleet identity — #405 Inc 5 item 10")
+	}
+	if !strings.Contains(paradeHTML, `cx="12" cy="12"`) {
+		t.Error("parade.html brand-mark SVG must have the hub circle at (12,12) — #405 Inc 5 item 10")
+	}
+}
+
 // TestMindmapLimbHue locks the mind-map per-limb hue (operator polish track): each top-level
 // limb (a hub child/root and its subtree) is coloured with a distinct hue that rides on the
 // branch EDGES, so the limbs are visually traceable while node cards keep their status colour.

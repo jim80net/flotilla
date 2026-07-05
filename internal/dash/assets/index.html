@@ -16,16 +16,32 @@
 
   <header class="bar">
     <div class="brand">
-      <span class="brand-mark" aria-hidden="true"></span>
+      <!-- hub-and-spoke brand mark: one hub node + four spokes to satellite nodes;
+           matches the fleet motif (one coordinator, several desks). Inline SVG so the
+           colour tracks the --cyan theme token without a separate fetch. -->
+      <svg class="brand-mark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <circle cx="12" cy="12" r="3"/>
+        <line x1="12" y1="9" x2="12" y2="3" stroke-linecap="round"/>
+        <line x1="15" y1="12" x2="21" y2="12" stroke-linecap="round"/>
+        <line x1="12" y1="15" x2="12" y2="21" stroke-linecap="round"/>
+        <line x1="9"  y1="12" x2="3"  y2="12" stroke-linecap="round"/>
+        <circle cx="12" cy="2"  r="2"/>
+        <circle cx="22" cy="12" r="2"/>
+        <circle cx="12" cy="22" r="2"/>
+        <circle cx="2"  cy="12" r="2"/>
+      </svg>
       <div class="brand-text">
         <span class="brand-name">flotilla</span>
         <span class="brand-dash">conversations</span>
       </div>
     </div>
     <nav class="tabs" role="tablist" aria-label="Dashboard views">
-      <button id="tab-conversations" class="tab active" data-view="conversations" role="tab" aria-selected="true" aria-controls="view-conversations">Conversations</button>
-      <button id="tab-goals" class="tab" data-view="goals" role="tab" aria-selected="false" aria-controls="view-goals">Goals</button>
-      <button id="tab-issues" class="tab" data-view="issues" role="tab" aria-selected="false" aria-controls="view-issues">Issues</button>
+      <button id="tab-conversations" class="tab active" data-view="conversations" role="tab" aria-selected="true" aria-controls="view-conversations">Conversations<span class="unseen-dot" id="dot-conversations" aria-label="New content in Conversations" aria-hidden="true"></span></button>
+      <button id="tab-goals" class="tab" data-view="goals" role="tab" aria-selected="false" aria-controls="view-goals">Goals<span class="unseen-dot" id="dot-goals" aria-label="New content in Goals" aria-hidden="true"></span></button>
+      <button id="tab-issues" class="tab" data-view="issues" role="tab" aria-selected="false" aria-controls="view-issues">Issues<span class="unseen-dot" id="dot-issues" aria-label="New content in Issues" aria-hidden="true"></span></button>
+      <!-- Parade is a navigation-out (opens the standalone parade page at /parade).
+           Styled as a tab for visual consistency; it is a link, not an SPA panel toggle. -->
+      <a id="tab-parade" class="tab tab-parade" href="/parade">Parade<span class="unseen-dot" id="dot-parade" aria-label="New content in Parade" aria-hidden="true"></span></a>
     </nav>
     <div class="bar-meta">
       <span class="meta-label">bound</span>
