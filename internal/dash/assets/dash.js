@@ -60,12 +60,6 @@
   // the tier ships ON-demand (no dormant env gate, no restart). Folded into the
   // glance + thread dedup keys so flipping it forces a repaint.
   var mirrorVerbosity = "info";
-  // Whether the operator has edited a control target field (route/resume). Once
-  // touched, a background refresh must NOT overwrite it — otherwise a refresh
-  // landing mid-typing silently replaces the operator's target and the control
-  // action fires at a different desk than the field shows (#235 cubic P2). An
-  // explicit desk-selection (rail click) resets this and re-sets the fields.
-  var controlTargetsTouched = false;
 
   function agentMap(status) {
     var map = {};
@@ -231,7 +225,6 @@
         selectedChannel = this.getAttribute("data-channel"); // scope the selection to THIS channel copy (#370)
         resetThreadScroll(); // a freshly selected thread opens at its latest message
         renderConversations();
-        syncControlTargets(true); // explicit desk-selection: set the targets authoritatively
         fetchMirror();            // load the newly-selected desk's session mirror
         pushNav({ view: "conversations", desk: selectedDesk, channel: selectedChannel }); // reversible (#349 A1)
       });
@@ -664,23 +657,6 @@
     }
   }
 
-  // syncControlTargets prefills the route/resume target fields with the selected
-  // desk. `explicit` (a rail desk-click) sets them AUTHORITATIVELY and clears the
-  // touched flag — a deliberate "target this desk" action. A background refresh
-  // (explicit falsy) prefills ONLY when the operator has not edited the fields, so
-  // a refresh can never clobber an in-progress edit and misdirect the control
-  // action to the wrong desk (#235 cubic P2).
-  function syncControlTargets(explicit) {
-    if (!selectedDesk) return;
-    if (!explicit && controlTargetsTouched) return;
-    // #405 Inc 4: the route/resume control fields were dropped — guard so their absence is a
-    // no-op (the operator now targets a desk via the thread composer, not a control column).
-    var rt = el("route-target"), ra = el("resume-agent");
-    if (rt) rt.value = selectedDesk;
-    if (ra) ra.value = selectedDesk;
-    if (explicit) controlTargetsTouched = false;
-  }
-
   /* ── refresh orchestration ───────────────────────────────────────────── */
   var refreshEpoch = 0;
   function refresh() {
@@ -710,7 +686,6 @@
     return Promise.all([pStatus, pTopo, pHist]).then(function () {
       if (current()) {
         renderConversations();
-        syncControlTargets();
         fetchMirror(); // keep the selected desk's session-mirror glance current on each tick
       }
       // Keep the Goals view live off the same refresh cadence (SSE-triggered). It
@@ -871,7 +846,7 @@
       // selection lets renderConversations re-pick the default) — cubic #351 P2.
       if (view === "conversations") { selectedDesk = s.desk || null; selectedChannel = s.channel || null; }
       showView(view);
-      if (view === "conversations") { renderConversations(); syncControlTargets(true); fetchMirror(); }
+      if (view === "conversations") { renderConversations(); fetchMirror(); }
       if (view === "goals" && window.flotillaGoals && window.flotillaGoals.restoreNode) {
         if (window.flotillaGoals.show) window.flotillaGoals.show(); // ensure the map is rendered first
         window.flotillaGoals.restoreNode(s.node || null);
@@ -904,7 +879,6 @@
     resetThreadScroll(); // open the deep-linked thread at its latest message
     showView("conversations");
     renderConversations();
-    syncControlTargets(true);
     fetchMirror(); // load the deep-linked desk's session mirror (the identity guard hides the prior desk's until it lands)
     pushNav({ view: "conversations", desk: desk }); // reversible: Back returns to the goals map (#349 A1)
     // Move focus into the now-visible Conversations view — the deep-link hid the
@@ -914,14 +888,6 @@
   }
   window.flotillaDash.openConversation = openConversation;
 
-  // Mark the control targets "touched" the instant the operator edits either field
-  // (type, paste, or clear all fire `input`), so a background refresh stops
-  // auto-prefilling and can never overwrite the operator's chosen target (#235).
-  // The fields are static chrome, so this one-time wiring holds for the session.
-  ["route-target", "resume-agent"].forEach(function (id) {
-    var field = el(id);
-    if (field) field.addEventListener("input", function () { controlTargetsTouched = true; });
-  });
 
   // Thread composer + latest-at-bottom scroll wiring (F#383 criteria 4 + 5). The composer
   // sends to the SELECTED desk/coordinator via the same route-to-pane relay the control
