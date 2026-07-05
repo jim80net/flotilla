@@ -81,6 +81,22 @@ type Channel struct {
 	Role string `json:"role,omitempty"`
 }
 
+// Schedule is one daily wall-clock dispatch the watch daemon may fire (#413).
+type Schedule struct {
+	// Name is a stable identifier (unique across schedules) used in logs and the
+	// durable last-fired sidecar.
+	Name string `json:"name"`
+	// At is the daily wall-clock time with an explicit timezone, e.g. "12:07Z" or
+	// "03:07+00:00". Parsed by ParseDailyAt at load.
+	At string `json:"at"`
+	// To names the roster agent that receives the prompt.
+	To string `json:"to"`
+	// Prompt is the delivery body inline, or a path to a host-local prompt file
+	// (preferred for long prompts). A path that exists on disk at fire time is read
+	// as file content; otherwise the string is sent verbatim.
+	Prompt string `json:"prompt"`
+}
+
 // Config is the committable, secret-free fleet description.
 type Config struct {
 	// GuildID and ChannelID identify the Discord coordination channel. Reserved
@@ -163,6 +179,13 @@ type Config struct {
 	// generalizable role, not a deployment desk name. Empty ⇒ the CoS mirror is inert
 	// (no mirror, no ledger — fully backward compatible).
 	CosAgent string `json:"cos_agent,omitempty"`
+	// Schedules are daemon-native daily wall-clock dispatches (#413): each entry
+	// names a slot (at, with explicit timezone), a target agent (to), and a prompt
+	// (inline or a host-local file path — file preferred for long prompts). Durable
+	// last-fired state lives in <roster-dir>/flotilla-schedule-state.json (not in
+	// the roster). Empty ⇒ the scheduler is inert.
+	Schedules []Schedule `json:"schedules,omitempty"`
+
 	// CosLedger is where the CoS context-mirror appends its deterministic
 	// who-knows-what ledger (the productized state/context-ledger.md). Optional;
 	// defaults at load to <roster-dir>/context-ledger.md when CosAgent is set.
@@ -292,6 +315,9 @@ func Load(path string) (*Config, error) {
 	if err := c.assertSynthesisAcyclic(); err != nil {
 		return nil, fmt.Errorf("roster %q: %w", path, err)
 	}
+	if err := c.validateSchedules(path); err != nil {
+		return nil, err
+	}
 	// cos_agent (the CoS context-mirror #108): validated fail-closed when set. CosLedger
 	// is resolved here to be non-empty IFF the mirror is active, so a single check
 	// (cfg.CosLedger != "") is the correct gate for every consumer: when cos_agent is
@@ -309,6 +335,37 @@ func Load(path string) (*Config, error) {
 		c.CosLedger = "" // inert: cos_ledger without cos_agent is ignored (the feature is gated on cos_agent)
 	}
 	return &c, nil
+}
+
+// validateSchedules checks schedules[] at load so a misconfigured daemon refuses
+// to start rather than silently skipping or double-firing.
+func (c *Config) validateSchedules(path string) error {
+	if len(c.Schedules) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(c.Schedules))
+	for _, sch := range c.Schedules {
+		if sch.Name == "" {
+			return fmt.Errorf("roster %q: a schedule has an empty name", path)
+		}
+		if seen[sch.Name] {
+			return fmt.Errorf("roster %q: duplicate schedule name %q", path, sch.Name)
+		}
+		seen[sch.Name] = true
+		if _, _, _, err := ParseDailyAt(sch.At); err != nil {
+			return fmt.Errorf("roster %q: schedule %q: %w", path, sch.Name, err)
+		}
+		if sch.To == "" {
+			return fmt.Errorf("roster %q: schedule %q has an empty to", path, sch.Name)
+		}
+		if _, err := c.Agent(sch.To); err != nil {
+			return fmt.Errorf("roster %q: schedule %q to %q is not in agents", path, sch.Name, sch.To)
+		}
+		if strings.TrimSpace(sch.Prompt) == "" {
+			return fmt.Errorf("roster %q: schedule %q has an empty prompt", path, sch.Name)
+		}
+	}
+	return nil
 }
 
 // HeartbeatDur returns the parsed heartbeat interval (0 when disabled).

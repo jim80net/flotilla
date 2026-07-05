@@ -29,5 +29,10 @@
     { "channel_id": "YOUR_OC_CHANNEL_ID", "xo_agent": "oc-desk", "members": ["frontend"] },
     { "channel_id": "YOUR_GROK_CHANNEL_ID", "xo_agent": "grok-desk", "members": ["frontend"] },
     { "channel_id": "YOUR_CODEX_CHANNEL_ID", "xo_agent": "codex-desk", "members": ["frontend"] }
+  ],
+  "_comment_schedules": "Daemon-native daily wall-clock dispatch (flotilla#413). Each at MUST include an explicit timezone (e.g. 12:07Z). Prompt may be inline or a host-local file path (preferred for long prompts). Durable last-fired state: <roster-dir>/flotilla-schedule-state.json.",
+  "schedules": [
+    { "name": "morning-parade", "at": "12:07Z", "to": "xo", "prompt": "prompts/morning-parade.md" },
+    { "name": "evening-walk", "at": "03:07Z", "to": "xo", "prompt": "prompts/evening-walk.md" }
   ]
 }
