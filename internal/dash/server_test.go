@@ -544,6 +544,31 @@ func TestHandleSessionMirror(t *testing.T) {
 	}
 }
 
+// TestGoalsCellRenames405 locks #405 Inc 3 (Q2, operator-turned): "Pending"/"Aspirational" are
+// renamed to plain language ("Blocked" / "Planned") that cures the confusion, kept distinct.
+func TestGoalsCellRenames405(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/goals.js").Body.String()
+	if !strings.Contains(js, `k: "Blocked"`) || !strings.Contains(js, `k: "Planned"`) {
+		t.Error("goals.js must rename the situation cells to 'Blocked' / 'Planned' — #405 Inc 3 Q2")
+	}
+	if strings.Contains(js, `k: "Pending"`) || strings.Contains(js, `k: "Aspirational"`) {
+		t.Error("goals.js must drop the jargon labels 'Pending'/'Aspirational' from the cells — #405 Inc 3 Q2")
+	}
+	// The rename must be SWEPT across every surface, not just the tiles (#411 cubic): the pill
+	// label + the legend read "planned", never the jargon "aspirational".
+	if !strings.Contains(js, `aspirational: "planned"`) || strings.Contains(js, `aspirational: "aspirational"`) {
+		t.Error("goals.js STATE_LABEL must map the aspirational state to 'planned' — #411 sweep")
+	}
+	if strings.Contains(js, `["aspirational", "aspirational"]`) {
+		t.Error("goals.js legend must label the aspirational dot 'planned', not 'aspirational' — #411 sweep")
+	}
+	if html := doGet(t, srv, "/").Body.String(); strings.Contains(html, "ghosted aspirational") {
+		t.Error("index.html help tooltip must read 'ghosted planned', not 'aspirational' — #411 sweep")
+	}
+}
+
 // TestDecisionPage405 locks #405 Inc 2 (the operator's centerpiece): the "Awaiting you" tile
 // opens a decision page — a reading room for every open decision, formatting the canonical
 // 6-element briefs with references (links) and demo images inline, each showing which goal it drives.
