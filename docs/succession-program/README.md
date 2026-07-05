@@ -10,6 +10,7 @@ Meta-XO and project-XO seats that do not depend on Claude/Fable subscriptions.
 |-----|---------|
 | [opencode-revival-trial.md](./opencode-revival-trial.md) | Stand up a trial OpenCode execution desk; re-verify driver vs current CLI |
 | [portable-coordinator-readiness.md](./portable-coordinator-readiness.md) | Ranked gap list: what breaks when grok/codex/opencode runs XO duties |
+| [coordinator-runbooks/](../coordinator-runbooks/README.md) | Generalized successor runbook package (bench-measured uplift; public) |
 
 **Gates:** design/readiness docs → operator/meta-XO gate. **No live meta-XO/XO seat swaps** without an
 operator-scheduled window. Supervised project-XO trials follow

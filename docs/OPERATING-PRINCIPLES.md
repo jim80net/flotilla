@@ -15,6 +15,13 @@ a one-sentence statement each — is what `flotilla doctrine install` appends in
 every agent's identity file (`internal/doctrine/assets/skills/operating-principles.md`).
 This document is the full prose the running agent's worktree may not contain.
 
+**Procedural companion:** [`coordinator-runbooks/README.md`](./coordinator-runbooks/README.md)
+— coordinator-seat runbooks (merge, deploy, comms, dispatch, incidents, ceremonies)
+that implement these principles in production. Cross-linked here; not duplicated.
+On a 16-scenario coordinator bench, that package measured +0.030 (grok-4.3) and
++0.053 (gpt-5.5) score lift, concentrated in communication-register and
+gate-procedure legs.
+
 ## 1. Prefer autonomy with guardrails; act, don't ask
 
 The default posture is to act on authorized work within safety guardrails — not
