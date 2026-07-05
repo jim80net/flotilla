@@ -51,7 +51,7 @@ func TestNonceUniqueValidAndSafe(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !isNonce(n) {
+		if !IsNonce(n) {
 			t.Fatalf("newNonce produced a non-nonce: %q", n)
 		}
 		if seen[n] {
@@ -60,8 +60,8 @@ func TestNonceUniqueValidAndSafe(t *testing.T) {
 		seen[n] = true
 	}
 	for _, bad := range []string{"", "ABC", "g0f1", "../evil", "de/ad", "dead beef", "dead.txt"} {
-		if isNonce(bad) {
-			t.Errorf("isNonce accepted a malformed/traversal token: %q", bad)
+		if IsNonce(bad) {
+			t.Errorf("IsNonce accepted a malformed/traversal token: %q", bad)
 		}
 	}
 }
@@ -107,7 +107,7 @@ func TestAppendMintsNonceAndWritesBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	nonce := nonceFromLine(string(raw))
-	if !isNonce(nonce) {
+	if !IsNonce(nonce) {
 		t.Fatalf("Append did not write a nonce; line=%q", raw)
 	}
 	got, ok := LookupBody(ledger, nonce)
@@ -148,7 +148,7 @@ func TestTwoSameSecondSamePrefixDistinctNonces(t *testing.T) {
 		t.Fatalf("want 2 ledger lines, got %d", len(lines))
 	}
 	nA, nB := nonceFromLine(lines[0]), nonceFromLine(lines[1])
-	if !isNonce(nA) || !isNonce(nB) || nA == nB {
+	if !IsNonce(nA) || !IsNonce(nB) || nA == nB {
 		t.Fatalf("expected two DISTINCT nonces, got %q and %q", nA, nB)
 	}
 	if got, _ := LookupBody(ledger, nA); got != strings.TrimSpace(a) {

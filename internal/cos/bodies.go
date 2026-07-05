@@ -46,21 +46,29 @@ func WillClamp(gist string) bool {
 	return utf8.RuneCountInString(strings.TrimSpace(gist)) > maxGistRunes
 }
 
+// nonceBytes is the companion nonce's entropy; NonceHexLen is its exact rendered width.
+const (
+	nonceBytes  = 16
+	NonceHexLen = 2 * nonceBytes // 32 lowercase hex chars
+)
+
 // newNonce returns a fresh 128-bit random identity as lowercase hex — unique per clamped
 // ledger line regardless of concurrency, and safe as a filename (hex only, no separators).
 func newNonce() (string, error) {
-	var b [16]byte
+	var b [nonceBytes]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(b[:]), nil
 }
 
-// isNonce reports whether s is a well-formed nonce (non-empty lowercase hex). The reader
-// validates a nonce parsed from a ledger line before using it in a path, so a malformed or
-// tampered token can never traverse out of the bodies dir.
-func isNonce(s string) bool {
-	if s == "" {
+// IsNonce reports whether s is a well-formed companion nonce: EXACTLY NonceHexLen lowercase
+// hex chars. It is the single shape check used everywhere a nonce crosses a trust boundary —
+// before any filesystem use (path safety, so a tampered token cannot traverse out of the
+// bodies dir) AND by the dash's ledger parser, which accepts a trailing token ONLY when it is
+// a genuine nonce and otherwise falls the whole line back to raw (never mis-structures junk).
+func IsNonce(s string) bool {
+	if len(s) != NonceHexLen {
 		return false
 	}
 	for _, r := range s {
@@ -75,7 +83,7 @@ func isNonce(s string) bool {
 // companion store under its nonce, best-effort. It writes ONE file with a single os.WriteFile
 // (no append → no interleaving), creating the bodies dir on demand.
 func WriteBody(ledgerPath, nonce, body string) error {
-	if !isNonce(nonce) {
+	if !IsNonce(nonce) {
 		return os.ErrInvalid
 	}
 	dir := BodiesDir(ledgerPath)
@@ -90,7 +98,7 @@ func WriteBody(ledgerPath, nonce, body string) error {
 // malformed nonce (e.g. a pre-#407 line carries none), or when no companion file exists (a
 // best-effort write that failed) — every miss falls back cleanly to the clamped audit gist.
 func LookupBody(ledgerPath, nonce string) (string, bool) {
-	if !isNonce(nonce) {
+	if !IsNonce(nonce) {
 		return "", false
 	}
 	b, err := os.ReadFile(filepath.Join(BodiesDir(ledgerPath), nonce+".txt"))

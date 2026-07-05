@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/backlog"
+	"github.com/jim80net/flotilla/internal/cos"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/watch"
@@ -379,14 +380,18 @@ func parseLedger(raw string) []LedgerEntry {
 func ParseLedgerLine(line string) LedgerEntry {
 	entry := LedgerEntry{Raw: line}
 	body := strings.TrimPrefix(line, "- ")
-	// Strip the optional companion-body nonce (#407): it trails the gist as ` #<nonce>`
-	// AFTER the gist's closing quote (the last '"' on the line), so removing it here leaves
-	// the four " · " fields intact. A pre-#407 line has nothing after the closing quote.
+	// Strip the optional companion-body nonce (#407): it trails the gist as ` #<nonce>` AFTER
+	// the gist's closing quote (the last '"' on the line). A genuine line has EITHER nothing
+	// there (unclamped) OR exactly that suffix with a valid nonce. Any other trailing content
+	// means this is not a genuine cos.Line → fall back to raw-only rather than mis-structuring
+	// a junk-suffixed line (cubic #422 P3 — validate the exact hex shape, same as hydration).
 	if q := strings.LastIndex(body, `"`); q >= 0 && q+1 < len(body) {
-		if tail := strings.TrimSpace(body[q+1:]); strings.HasPrefix(tail, "#") {
-			entry.Nonce = tail[1:]
-			body = body[:q+1]
+		nonce, ok := parseNonceSuffix(body[q+1:])
+		if !ok {
+			return entry // raw-only: a malformed/junk suffix
 		}
+		entry.Nonce = nonce
+		body = body[:q+1]
 	}
 	// Four fields separated by " · "; the gist (last field) is quoted and may
 	// itself contain the separator, so split into exactly four.
@@ -409,6 +414,22 @@ func ParseLedgerLine(line string) LedgerEntry {
 	entry.Gist = gist
 	entry.Parsed = true
 	return entry
+}
+
+// parseNonceSuffix returns the companion nonce iff tail is EXACTLY cos.Line's rendering of it
+// — a single space, '#', then a valid hex nonce (cos.IsNonce). Any other trailing content
+// yields ok=false, so ParseLedgerLine shows the whole line raw rather than accepting junk as
+// structure (cubic #422 P3). Same validation the hydration side applies before a filesystem read.
+func parseNonceSuffix(tail string) (string, bool) {
+	const marker = " #"
+	if !strings.HasPrefix(tail, marker) {
+		return "", false
+	}
+	nonce := tail[len(marker):]
+	if !cos.IsNonce(nonce) {
+		return "", false
+	}
+	return nonce, true
 }
 
 // effectiveSurface resolves an agent's surface name for display: an empty roster

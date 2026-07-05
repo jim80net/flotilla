@@ -44,6 +44,43 @@ func TestHydrateLedgerBodies_Pure(t *testing.T) {
 	}
 }
 
+// TestParseLedgerLineNonceValidation covers the trailing-nonce parse (cubic #422 P3): a valid
+// ` #<32-hex>` suffix is extracted; anything else after the gist's closing quote makes the
+// whole line fall back to raw-only rather than mis-structuring a junk suffix.
+func TestParseLedgerLineNonceValidation(t *testing.T) {
+	const validNonce = "0123456789abcdef0123456789abcdef" // 32 hex
+	base := `- 2026-07-05T00:00:00Z · c · operator → d · "hello there"`
+
+	// Valid nonce → structured, nonce extracted, gist clean.
+	e := ParseLedgerLine(base + " #" + validNonce)
+	if !e.Parsed || e.Nonce != validNonce || e.Gist != "hello there" {
+		t.Errorf("valid nonce line: parsed=%v nonce=%q gist=%q", e.Parsed, e.Nonce, e.Gist)
+	}
+
+	// Unclamped (no suffix) → structured, no nonce.
+	if e := ParseLedgerLine(base); !e.Parsed || e.Nonce != "" {
+		t.Errorf("unclamped line: parsed=%v nonce=%q", e.Parsed, e.Nonce)
+	}
+
+	// Junk suffixes → raw-only (not structured), no nonce leaked.
+	for _, junk := range []string{
+		" #short",                            // too short
+		" #" + validNonce + "extra",          // too long
+		" #0123456789ABCDEF0123456789abcdef", // uppercase (not lowercase hex)
+		" #zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", // non-hex
+		" garbage-without-hash",              // no hash marker
+		"#" + validNonce,                     // missing the leading space
+	} {
+		e := ParseLedgerLine(base + junk)
+		if e.Parsed {
+			t.Errorf("junk suffix %q must fall back to raw-only, got Parsed=true (nonce=%q)", junk, e.Nonce)
+		}
+		if e.Nonce != "" {
+			t.Errorf("junk suffix %q leaked a nonce %q", junk, e.Nonce)
+		}
+	}
+}
+
 // TestLongMessageFullFidelityEndToEnd is the #407 regression: a 3,000-char operator message
 // written through the REAL cos.Append path (audit line clamps the gist) must be rendered in
 // full by the dash thread via the companion store — never as the clamped copy.
