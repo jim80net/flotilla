@@ -13,6 +13,19 @@ relays the operator's inbound messages:
 The clock runs with no Discord configuration at all; the relay activates only
 when a `channel_id` + bot token are present.
 
+### Wall-clock schedules (`schedules[]`)
+
+The roster may declare daily wall-clock dispatches the daemon fires without
+operator input (flotilla#413). Each entry needs a unique `name`, an `at` time
+with an **explicit timezone** (e.g. `12:07Z` or `03:07+00:00`), a `to` agent,
+and a `prompt` (inline text or a **host-local file path** — preferred for long
+prompts). Durable last-fired state lives beside the roster at
+`<roster-dir>/flotilla-schedule-state.json` so a restart does not double-fire or
+silently skip a slot missed while the daemon was down (catch-up fires once with
+a `[schedule late: …]` prefix). Delivery uses the same injector path as
+change-detector wakes (`KindDetector` — dropped when the target pane is busy,
+re-evaluated on the next poll).
+
 ## Prerequisites
 
 1. **Install the binary:** `go install github.com/jim80net/flotilla/cmd/flotilla@latest` (or `go install ./cmd/flotilla` from a checkout) → `~/go/bin/flotilla`.

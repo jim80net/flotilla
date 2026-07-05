@@ -336,6 +336,16 @@ func cmdWatch(args []string) error {
 	watch.ReplayRelayQueue(injector, *queuePath)
 	defer injector.Stop()
 
+	// Daemon-native wall-clock scheduler (#413): durable last-fired sidecar beside the
+	// roster; poll loop + optional detector hook share one Scheduler (mutex-safe).
+	var sched *watch.Scheduler
+	scheduleSidecarPath := filepath.Join(rosterDir, "flotilla-schedule-state.json")
+	if len(cfg.Schedules) > 0 {
+		sched = watch.NewScheduler(cfg.Schedules, scheduleSidecarPath, rosterDir, injector.Enqueue)
+		fmt.Printf("flotilla watch: wall-clock scheduler active (%d schedule(s), sidecar=%s)\n",
+			len(cfg.Schedules), scheduleSidecarPath)
+	}
+
 	ack := watch.NewAckWatcher(*ackPath)
 	ackInstr := "\n(To ack you are alive, run: touch " + *ackPath + ")"
 
@@ -673,6 +683,9 @@ func cmdWatch(args []string) error {
 				}
 			})
 		}
+		if sched != nil {
+			detCfg.ScheduleOnTick = sched.Tick
+		}
 		det := watch.NewDetectorWithSynthSidecar(detCfg, *snapshotPath, synthSidecarPath)
 		deskStateLabels = det.DeskStateLabels
 		endAutoSwitch = det.EndAutoSwitchFlight
@@ -869,6 +882,10 @@ func cmdWatch(args []string) error {
 		return fmt.Errorf("relay requires operator_user_id in the roster (channel binding + bot token are set) — set it, or remove the channel binding for clock-only")
 	default:
 		fmt.Println("flotilla watch: clock-only (relay disabled — set channel_id/channels[] + bot token + operator_user_id to enable)")
+	}
+
+	if sched != nil {
+		go sched.Run(ctx)
 	}
 
 	// Standing un-acked operator backstop (#234): REST history scan independent of

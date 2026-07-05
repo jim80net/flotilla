@@ -141,6 +141,11 @@ type DetectorConfig struct {
 	// scans the goals file for operator-gated items missing a brief and dispatches the
 	// owning desk. Default nil ⇒ inert.
 	DecisionBriefOnTick func()
+	// ScheduleOnTick is the daemon-native wall-clock scheduler side-effect (#413):
+	// invoked once per detector tick (off d.mu, optionally async via MirrorDispatch).
+	// The caller evaluates roster schedules[] and enqueues due dispatches. Default nil ⇒
+	// inert. Production also runs a standalone poll loop for sub-interval accuracy.
+	ScheduleOnTick func()
 	// MirrorDispatch runs a tick's batch of per-desk mirrors. Production wires it to `go run()` so the
 	// mirror I/O (a transcript read + Discord posts) is FULLY DECOUPLED from the detector loop — even
 	// off-mutex, inline I/O on the tick goroutine could delay the next tick (and thus liveness eval)
@@ -908,6 +913,14 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors, co
 			run()
 		}
 	}
+	if d.cfg.ScheduleOnTick != nil {
+		run := func() { d.scheduleTickOne() }
+		if d.cfg.MirrorDispatch != nil {
+			d.cfg.MirrorDispatch(run)
+		} else {
+			run()
+		}
+	}
 }
 
 // DeskStateLabels returns the last committed per-desk state labels (lowercased agent
@@ -920,6 +933,17 @@ func (d *Detector) DeskStateLabels() map[string]string {
 		out[strings.ToLower(name)] = st.String()
 	}
 	return out
+}
+
+// scheduleTickOne invokes the wall-clock scheduler with the same recover() backstop
+// as mirrorOne.
+func (d *Detector) scheduleTickOne() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("flotilla watch: schedule tick panicked: %v", r)
+		}
+	}()
+	d.cfg.ScheduleOnTick()
 }
 
 // decisionBriefTickOne invokes the decision-brief scan with the same recover()
