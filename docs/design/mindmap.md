@@ -51,19 +51,23 @@ The mind-map's legible limbs deliver the operator's "objective labels as layers"
 directly; no separate label pass is needed. The genuinely-additive follow-ons are
 **per-limb hue/grouping** and **sequence ordering** (F12).
 
-## Status — first cut, UI-gate increment
+## Status — shipped + polished
 
-Shipped as a **third selectable mode** (`tree` / `org` / **mind map**); `org`
-stays the default so live use is undisturbed while the direction is reviewed. The
-first cut delivers the **skeleton**: limbs, sub-branch fans, curved edges,
-content-sized world.
+Shipped as a selectable mode and, after the operator's layout verdict ("I just want
+mind map or tree"), promoted to the **default** with `org` retired from the UI
+(`tree` / **mind map**). The skeleton (limbs, sub-branch fans, curved edges,
+content-sized world) landed first; the blessed follow-ons then shipped:
 
-Deliberately deferred to follow-on increments (after the direction is blessed):
-
-- **Per-limb grouping** — a hue / gentle hull per flotilla subtree so each limb
-  reads as one unit.
-- **Sequence ordering** (F12) — order sibling branches by an authored `after:`
-  sequence so a limb reads as a roadmap, not just a set.
-- **Make it the default** (env seed + operator blessing), then retire the pinwheel.
+- **Per-limb hue** ✅ (#387) — each top-level limb (a hub child/root + its subtree)
+  gets a distinct hue on its branch edges, so limbs are traceable while node cards
+  keep their status colour. See `computeLimbHues` / `.gedge-limb` in goals.js.
+- **Sequence ordering** (F12) ✅ — sibling branches lay out in an authored `after:`
+  sequence so a limb reads as a roadmap, not just a set. A goal's `after: [ids]`
+  names the sibling(s) it follows; the field is sibling-scoped + acyclic (validated
+  fail-closed, `checkAfterAcyclic`), distinct from `depends_on` (a sequence hint, not
+  a hard dependency — it draws no arc). The mind map orders siblings via
+  `sequenceOrder` (a stable, cycle-safe topological sort).
+- **Make it the default** ✅ (#384) — env seed + operator blessing; the pinwheel/org
+  layout is retired from the UI.
 
 (Objective labels are NOT deferred — they already ride the cards; see above.)

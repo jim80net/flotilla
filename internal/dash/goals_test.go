@@ -60,6 +60,68 @@ func TestParseGoalsFile_RejectsUnknownParent(t *testing.T) {
 	}
 }
 
+// --- F12 `after` (sibling sequence ordering) validation ---
+
+func TestParseGoalsFile_AfterValidSiblings(t *testing.T) {
+	data := []byte(`{"goals":[
+	  {"id":"root","title":"Root"},
+	  {"id":"a","title":"A","parent":"root"},
+	  {"id":"b","title":"B","parent":"root","after":["a"]}
+	]}`)
+	gf, err := ParseGoalsFile(data)
+	if err != nil {
+		t.Fatalf("valid sibling after must parse, got %v", err)
+	}
+	var b *Goal
+	for i := range gf.Goals {
+		if gf.Goals[i].ID == "b" {
+			b = &gf.Goals[i]
+		}
+	}
+	if b == nil || len(b.After) != 1 || b.After[0] != "a" {
+		t.Fatalf("goal b must retain after=[a], got %+v", b)
+	}
+}
+
+func TestParseGoalsFile_RejectsAfterNonSibling(t *testing.T) {
+	// `x` is under a different parent than `b` — after is sibling-scoped.
+	data := []byte(`{"goals":[
+	  {"id":"root","title":"Root"},
+	  {"id":"other","title":"Other"},
+	  {"id":"x","title":"X","parent":"other"},
+	  {"id":"b","title":"B","parent":"root","after":["x"]}
+	]}`)
+	if _, err := ParseGoalsFile(data); err == nil || !strings.Contains(err.Error(), "not a sibling") {
+		t.Fatalf("expected non-sibling after failure, got %v", err)
+	}
+}
+
+func TestParseGoalsFile_RejectsAfterUnknown(t *testing.T) {
+	data := []byte(`{"goals":[{"id":"a","title":"A","after":["ghost"]}]}`)
+	if _, err := ParseGoalsFile(data); err == nil || !strings.Contains(err.Error(), "unknown after target") {
+		t.Fatalf("expected unknown-after failure, got %v", err)
+	}
+}
+
+func TestParseGoalsFile_RejectsAfterSelf(t *testing.T) {
+	data := []byte(`{"goals":[{"id":"a","title":"A","after":["a"]}]}`)
+	if _, err := ParseGoalsFile(data); err == nil || !strings.Contains(err.Error(), "after itself") {
+		t.Fatalf("expected self-after failure, got %v", err)
+	}
+}
+
+func TestParseGoalsFile_RejectsAfterCycle(t *testing.T) {
+	// a after b, b after a — no valid roadmap order exists.
+	data := []byte(`{"goals":[
+	  {"id":"root","title":"Root"},
+	  {"id":"a","title":"A","parent":"root","after":["b"]},
+	  {"id":"b","title":"B","parent":"root","after":["a"]}
+	]}`)
+	if _, err := ParseGoalsFile(data); err == nil || !strings.Contains(err.Error(), "cyclic `after`") {
+		t.Fatalf("expected after-cycle failure, got %v", err)
+	}
+}
+
 func TestParseGoalsFile_RejectsEmptyID(t *testing.T) {
 	data := []byte(`{"goals":[{"id":"","title":"A"}]}`)
 	if _, err := ParseGoalsFile(data); err == nil {
