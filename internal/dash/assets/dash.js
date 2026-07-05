@@ -510,7 +510,7 @@
     // still re-renders (mirrors the #300 glance dedup discipline).
     var sig = selectedDesk + "#" + mirrorVerbosity + "#" + items.map(function (it) {
       return it.kind === "mirror"
-        ? "m:" + (it.m.ts || "") + ":" + cheapHash(it.m.info || "")
+        ? "m:" + (it.m.ts || "") + ":" + cheapHash(it.m.info || "") + ":" + (it.m.suppressed ? "1" : "0")
         : "l:" + (it.e.parsed ? it.e.time : "") + ":" + cheapHash(it.e.parsed ? it.e.gist : it.e.raw);
     }).join("|");
     if (sig === lastThreadKey) return;

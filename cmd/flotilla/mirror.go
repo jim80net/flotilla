@@ -170,7 +170,10 @@ func (m deskMirror) mirrorNow() time.Time {
 }
 
 // appendSessionMirror fans out the session-mirror ledger write after readerModelInternal
-// (same turn-final read — no second pane probe). Suppressed events never reach here.
+// (same turn-final read — no second pane probe). It serves BOTH the publish path and the
+// firewall-refused path (#406): a refused turn is still kept in the PRIVATE, loopback-only
+// ledger with d.suppress set, so the record is marked Suppressed for the dash to render
+// "withheld from public" — only the public Discord post is skipped, never the private ledger.
 func (m deskMirror) appendSessionMirror(agent, verbose string, d mirrorDecision) bool {
 	if m.rosterDir == "" {
 		return false
