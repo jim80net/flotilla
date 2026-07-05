@@ -82,6 +82,16 @@ func Append(path string, e Entry) error {
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("cos ledger close %q: %w", path, err)
 	}
+	// #407: the audit line (above) clamps the gist to keep the append atomic; when that
+	// clamps a real message, persist the FULL body to the loopback-only companion store so
+	// the dash can render the operator's complete words. Best-effort — the audit record has
+	// already landed durably, so a companion-write failure must NOT turn a successful append
+	// into an error (the dash simply falls back to the clamped gist for that entry).
+	if WillClamp(e.Gist) {
+		if err := WriteBody(path, e); err != nil {
+			fmt.Fprintf(os.Stderr, "flotilla: cos ledger companion body write failed (dash will show the clamped gist): %v\n", err)
+		}
+	}
 	return nil
 }
 
@@ -160,5 +170,5 @@ func clampGist(s string) string {
 	if len(r) <= maxGistRunes {
 		return s
 	}
-	return string(r[:maxGistRunes]) + "…"
+	return string(r[:maxGistRunes]) + clampMarker
 }

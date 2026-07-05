@@ -274,8 +274,14 @@ type LedgerEntry struct {
 	From    string `json:"from,omitempty"`
 	To      string `json:"to,omitempty"`
 	Gist    string `json:"gist,omitempty"`
-	Raw     string `json:"raw"`
-	Parsed  bool   `json:"parsed"`
+	// Body is the FULL message when the audit gist was clamped and the loopback-only
+	// companion store (#407) holds the complete text; empty when the gist was already
+	// complete or no companion body exists. The conversation thread renders Body when
+	// present, else Gist — so the operator never sees a clamped copy of his own words
+	// rendered as if complete.
+	Body   string `json:"body,omitempty"`
+	Raw    string `json:"raw"`
+	Parsed bool   `json:"parsed"`
 }
 
 // BacklogInfo is the backlog drive-queue classification (a flat projection of
@@ -295,6 +301,26 @@ type BacklogInfo struct {
 type HistoryDoc struct {
 	Ledger  []LedgerEntry `json:"ledger"`
 	Backlog BacklogInfo   `json:"backlog"`
+}
+
+// HydrateLedgerBodies fills each parsed entry's Body from the full-message companion store
+// (#407) via the resolver, which returns (fullBody, ok) for a (time, from, to, clampedGist).
+// A nil resolver, an unparsed entry, or a miss leaves Body empty (the thread falls back to
+// Gist). Pure w.r.t. its inputs: the filesystem lives entirely behind resolve, so the
+// hydration logic is unit-testable without a real store.
+func HydrateLedgerBodies(entries []LedgerEntry, resolve func(time, from, to, clampedGist string) (string, bool)) {
+	if resolve == nil {
+		return
+	}
+	for i := range entries {
+		e := &entries[i]
+		if !e.Parsed {
+			continue
+		}
+		if full, ok := resolve(e.Time, e.From, e.To, e.Gist); ok {
+			e.Body = full
+		}
+	}
 }
 
 // BuildHistory assembles the coordination history. Pure: the HTTP layer reads
