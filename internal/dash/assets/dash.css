@@ -502,6 +502,20 @@ code {
   color: var(--ink-3);
   vertical-align: middle;
 }
+/* #406 fix-forward: a firewall-refused turn is kept in the PRIVATE dash but was withheld from
+   the public channel — mark it honestly so it's never mistaken for something that was published. */
+.thread-withheld {
+  display: inline-block; font-size: .56rem; letter-spacing: .06em; text-transform: uppercase;
+  padding: 0 .4rem; border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent);
+  border-radius: 999px; color: var(--amber); vertical-align: middle; white-space: nowrap;
+}
+.thread-mirror.is-withheld { border-left-color: var(--amber); background: color-mix(in srgb, var(--amber) 6%, var(--abyss-2)); }
+/* #405/#406 backfill = forward-only: the coordinator thread's recorded history begins at its
+   first entry (pre-fix turns were withheld). Calibrate honestly rather than pad a thin past. */
+.thread-calib {
+  font-size: .74rem; color: var(--ink-3); text-align: center; line-height: 1.4;
+  padding: .45rem .7rem .55rem; margin: 0 0 .35rem; border-bottom: 1px dashed var(--line-soft);
+}
 /* #326: a session-output turn expands fully inside the ONE thread scroll — no
    per-message scroll box (that was a scroll-inside-scroll trap). Long turn-finals
    simply take vertical space in the thread, which is the correct reading flow. */

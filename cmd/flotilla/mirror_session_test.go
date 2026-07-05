@@ -99,6 +99,9 @@ func TestDeskMirror_SuppressKeepsPrivateLedgerSkipsPost(t *testing.T) {
 	if !strings.Contains(rec.Debug.MirrorNote, "firewall refuse") {
 		t.Errorf("the private ledger record must mark WHY it was withheld from Discord; MirrorNote=%q", rec.Debug.MirrorNote)
 	}
+	if !rec.Suppressed {
+		t.Error("a firewall-refused record must be marked Suppressed:true so the dash can render 'withheld from public' honestly (#406 fix-forward)")
+	}
 }
 
 // TestDeskMirror_PrimaryXOLedgerOnlyInvariant documents the P1 gate: CoordinatorMirrorOnFinish

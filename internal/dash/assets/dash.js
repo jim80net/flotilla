@@ -451,6 +451,27 @@
   // desk's session output to its own relay lines. The merge is universal (it applies
   // to coordinator and execution desks alike — both read as one timeline of "what
   // was said to/from me" + "what I turned-final"), so no role branch is needed.
+  // isCoordinatorThread reports whether the selected thread is a coordinator's (XO / CoS).
+  function isCoordinatorThread() {
+    var d = String(selectedDesk || "").toLowerCase();
+    return coordinatorNames().some(function (n) { return String(n).toLowerCase() === d; });
+  }
+  // coordinatorHistoryNote calibrates the coordinator thread honestly (#405/#406, backfill =
+  // forward-only): the coordinator's PRE-fix turns were withheld by the firewall bug and were
+  // never durably captured, so the thread's recorded history begins at its first entry. Rather
+  // than pad a misleadingly-thin past, we mark where the real history starts. Coordinator only.
+  function coordinatorHistoryNote(items) {
+    if (!isCoordinatorThread() || !items.length) return "";
+    var first = items[0]; // ascending order → items[0] is the oldest recorded turn
+    var ts = first.kind === "mirror" ? (first.m && first.m.ts) : (first.e && first.e.parsed ? first.e.time : "");
+    var when = "";
+    if (ts) {
+      var t = Date.parse(ts);
+      if (!isNaN(t)) when = " " + new Date(t).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    }
+    return '<div class="thread-calib">History begins' + escapeHtml(when) +
+      ' — earlier coordinator turns weren’t recorded (a firewall issue, since fixed). Shown from here down.</div>';
+  }
   function renderThread(history) {
     var thread = el("conv-thread");
     if (!selectedDesk) {
@@ -494,7 +515,7 @@
     }).join("|");
     if (sig === lastThreadKey) return;
     lastThreadKey = sig;
-    thread.innerHTML = items.map(function (it) {
+    thread.innerHTML = coordinatorHistoryNote(items) + items.map(function (it) {
       return it.kind === "mirror" ? threadMirrorMsg(it.m) : threadLedgerMsg(it.e);
     }).join("");
     // Latest-at-bottom scroll discipline (F#383 criterion 5): if the operator is pinned to
@@ -556,11 +577,16 @@
   function threadMirrorMsg(m) {
     var hue = speakerHue(selectedDesk);
     var body = escapeHtml(m.info || "").replace(/\r?\n/g, "<br>");
+    // #406 fix-forward: a firewall-refused turn is kept in the PRIVATE dash but was never posted
+    // to the public channel — render that honestly so a withheld turn is not mistaken for published.
+    var withheld = m.suppressed
+      ? ' <span class="thread-withheld" title="Kept in your private dashboard but withheld from the public channel by the partition firewall.">withheld from public</span>'
+      : "";
     return (
-      '<div class="thread-msg thread-mirror" style="--spk:hsl(' + hue + ' 55% 62%)">' +
+      '<div class="thread-msg thread-mirror' + (m.suppressed ? " is-withheld" : "") + '" style="--spk:hsl(' + hue + ' 55% 62%)">' +
         '<header class="thread-head">' +
           '<span class="thread-route"><b class="thread-from">' + escapeHtml(selectedDesk) + "</b> " +
-            '<span class="thread-kind">session</span></span>' +
+            '<span class="thread-kind">session</span>' + withheld + "</span>" +
           '<time class="thread-time" datetime="' + escapeHtml(m.ts || "") + '" title="' + escapeHtml(m.ts || "") + '">' + escapeHtml(relTime(m.ts)) + "</time>" +
         "</header>" +
         '<div class="thread-mirror-body">' + (body || '<span class="muted">(no session output)</span>') + "</div>" +
