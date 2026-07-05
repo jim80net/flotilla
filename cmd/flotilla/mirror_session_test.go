@@ -62,32 +62,42 @@ func TestDeskMirror_AppendsSessionLedgerOnPost(t *testing.T) {
 	}
 }
 
-func TestDeskMirror_SuppressDoesNotAppendLedger(t *testing.T) {
+// TestDeskMirror_SuppressKeepsPrivateLedgerSkipsPost locks #405 Inc 1: a firewall REFUSE gags
+// the PUBLIC Discord post, but the session-mirror ledger is a PRIVATE, loopback-only operator
+// surface — so the refused turn-final is STILL written to the private ledger (raw text + refuse
+// marker) while the public post is skipped. This is the fix for the "CoS thread empty" bug: the
+// coordinator's fleet-vocabulary-dense turn-finals were tripping REFUSE and vanishing from the
+// operator's own dash.
+func TestDeskMirror_SuppressKeepsPrivateLedgerSkipsPost(t *testing.T) {
 	dir := t.TempDir()
 	appended := false
+	var rec sessionmirror.Record
 	m := deskMirror{
 		rosterDir: dir,
 		webhook:   func(string) (string, bool) { return "https://wh", true },
 		turnFinal: func(string) (string, bool, error) { return "leak acme-desk token", true, nil },
-		post:      func(_, _, _ string) error { t.Fatal("must not post on suppress"); return nil },
-		logf:      func(string, ...any) {},
-		firewall:  firewallTermSet(t, []string{"acme-desk"}, nil),
-		alert:     func(string) {},
-		ledgerAppend: func(string, string, sessionmirror.Record) error {
+		post: func(_, _, _ string) error {
+			t.Fatal("firewall refuse must NOT post to the public Discord egress")
+			return nil
+		},
+		logf:     func(string, ...any) {},
+		firewall: firewallTermSet(t, []string{"acme-desk"}, nil),
+		alert:    func(string) {},
+		ledgerAppend: func(_, _ string, r sessionmirror.Record) error {
 			appended = true
+			rec = r
 			return nil
 		},
 	}
 	m.run("backend")
-	if appended {
-		t.Fatal("suppressed mirror must not append session-mirror ledger")
+	if !appended {
+		t.Fatal("firewall refuse must STILL append the PRIVATE (loopback-only) session-mirror ledger")
 	}
-	path, err := sessionmirror.LedgerPath(dir, "backend")
-	if err != nil {
-		t.Fatal(err)
+	if !strings.Contains(rec.Verbose, "leak acme-desk token") {
+		t.Errorf("the private ledger record must carry the RAW withheld turn-final so the operator sees it; Verbose=%q", rec.Verbose)
 	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("ledger file should not exist on suppress, stat err=%v", err)
+	if !strings.Contains(rec.Debug.MirrorNote, "firewall refuse") {
+		t.Errorf("the private ledger record must mark WHY it was withheld from Discord; MirrorNote=%q", rec.Debug.MirrorNote)
 	}
 }
 
