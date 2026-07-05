@@ -45,11 +45,11 @@
   // null). On a live-tick re-render, reapplyTransient() re-applies the filter so
   // SSE updates don't wipe it.
   var activeCellTone = null;
-  // Item 6a: realized look-back window. GoalsCounts is a point-in-time snapshot
-  // (no achieved_at timestamps yet — tracked for a follow-on); the control is
-  // wired and renders honestly, but the count is unchanged across windows until
-  // timestamps are added. See PR body for the follow-on gap.
-  var realizedWindow = "all"; // "1d" | "7d" | "30d" | "all"
+  // Item 6a (Realized look-back): DEFERRED. GoalsCounts is a point-in-time
+  // snapshot with no achieved_at timestamps, so a window slider would be dormant
+  // (non-functional) UI — which we don't ship. The Realized tile shows the live
+  // snapshot count; a windowed look-back is a follow-on that lands LIVE once the
+  // daemon emits done-history timestamps. See PR body / the tracking follow-on.
   // Item 6b: node hover tooltip — a fixed-positioned overlay that avoids the
   // CSS transform on goals-world and uses screen coords directly.
   var tipEl = null;
@@ -121,7 +121,10 @@
   // ── #405 Inc 3 Item 5: stat-cell click-to-highlight helpers ────────────────
   // TONE_TO_SEL maps a tile tone to the CSS selector for its matching nodes.
   var TONE_TO_SEL = {
-    "goal":        ".gnode-flotilla",    // "Flotillas" tile → flotilla-scope nodes
+    // "Flotillas" tile → flotilla-scope nodes. Match BOTH the v2 `flotilla` class and
+    // the legacy v1 `fleet` class (nodeCard emits gnode-<scope>, and scopeNoun/isFlotilla
+    // dual-read fleet) so older/compat inputs still highlight (cubic #405 P2).
+    "goal":        ".gnode-flotilla, .gnode-fleet",
     "inflight":    ".state-in-flight",   // "In flight" tile → in-flight state nodes
     "pending":     ".state-pending",     // "Blocked" tile → pending state nodes
     "aspirational":".state-aspirational",// "Planned" tile → aspirational state nodes
@@ -163,50 +166,6 @@
       for (var j = 0; j < tiles.length; j++) tiles[j].classList.remove("gcell-active");
     }
     activeCellTone = null;
-  }
-
-  // ── #405 Inc 3 Item 6a: realized look-back slider ───────────────────────────
-  // Inject a segment control once (idempotent). The control writes to realizedWindow
-  // and calls renderSituation to update the Realized tile's description copy. The
-  // actual Realized COUNT is the same for all windows until achieved_at timestamps are
-  // added to GoalsCounts — the slider is full infrastructure; the gap is explicitly
-  // disclosed in the tile description for non-"all" windows (and in the PR body).
-  var sliderWired = false;
-  function injectRealizedSlider() {
-    if (sliderWired) return;
-    var sit = q("goals-situation");
-    if (!sit) return;
-    sliderWired = true;
-    var bar = document.createElement("div");
-    bar.id = "goals-realized-slider";
-    bar.className = "grealized-slider";
-    bar.setAttribute("role", "group");
-    bar.setAttribute("aria-label", "Realized look-back window");
-    bar.innerHTML =
-      '<span class="grealized-lab">Realized window</span>' +
-      ["1d", "7d", "30d", "all"].map(function (w) {
-        return '<button type="button" class="grealized-btn' +
-          (w === realizedWindow ? " active" : "") +
-          '" data-window="' + w + '" aria-pressed="' + (w === realizedWindow) + '">' +
-          w + "</button>";
-      }).join("");
-    // Insert the bar above the tiles strip.
-    sit.parentNode.insertBefore(bar, sit);
-    bar.addEventListener("click", function (e) {
-      var btn = e.target.closest(".grealized-btn");
-      if (!btn) return;
-      var w = btn.getAttribute("data-window");
-      if (!w || w === realizedWindow) return;
-      realizedWindow = w;
-      var btns = bar.querySelectorAll(".grealized-btn");
-      for (var i = 0; i < btns.length; i++) {
-        var match = btns[i].getAttribute("data-window") === w;
-        btns[i].classList.toggle("active", match);
-        btns[i].setAttribute("aria-pressed", String(match));
-      }
-      // Re-render the situation strip so the Realized tile's description reflects the window.
-      if (cache) renderSituation(cache);
-    });
   }
 
   // ── #405 Inc 3 Item 6b: node hover tooltip ──────────────────────────────────
@@ -269,12 +228,9 @@
   /* ── situation strip + legend ──────────────────────────────────────────── */
   function renderSituation(doc) {
     var c = doc.counts || {};
-    // Realized description: honest about the snapshot limitation until achieved_at
-    // timestamps land in GoalsCounts (follow-on — see PR body). For bounded windows the
-    // count is still the full snapshot; the description copy says so explicitly.
-    var realizedD = realizedWindow === "all"
-      ? "done & solidified"
-      : "in last " + realizedWindow + " (snapshot; timestamps not yet tracked)";
+    // Realized is a live point-in-time snapshot (GoalsCounts has no achieved_at
+    // timestamps yet, so a windowed look-back is a follow-on — see PR body).
+    var realizedD = "done & solidified";
     var tiles = [
       // filter:"goal"|"inflight"|"pending"|"aspirational" → clicking highlights matching nodes.
       // "Awaiting you" and "Realized" have no node-state filter (awaiting opens the decision
@@ -1567,7 +1523,11 @@
       hoveredId = id;
       highlightChain(id, true);
       lightDeps(id, true);
-      // #405 Inc 3 Item 6b: show the richer tooltip for this node.
+      // #405 Inc 3 Item 6b: show the richer tooltip for this node. Seed the position
+      // from THIS event's cursor coords — on the first hover, mousemove has not yet
+      // fired, so tipX/tipY are still stale (0,0) and the tip would flash top-left
+      // (cubic #405 P3). Using e.clientX/Y places it at the cursor immediately.
+      tipX = e.clientX; tipY = e.clientY;
       if (nodeById[id]) showTip(nodeById[id], tipX, tipY);
     });
     nodesEl.addEventListener("mouseout", function (e) {
@@ -1995,7 +1955,6 @@
     setupPanZoom();
     wireNodes();
     wireLayoutToggle();
-    injectRealizedSlider(); // #405 Inc 3 Item 6a: inject once on first tab activation
     if (cache) { render(); } else { refresh(); }
   }
 

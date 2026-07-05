@@ -1140,24 +1140,24 @@ func TestGoalsCellDrillins405(t *testing.T) {
 	if !strings.Contains(css, "gcell-active") {
 		t.Error("dash.css must style the active-tile ring (.gcell-active) — #405 Inc 3 Item 5")
 	}
+	// The Flotillas filter must match BOTH the v2 flotilla class and the legacy
+	// v1 fleet class, so older/compat inputs still highlight (cubic #405 P2).
+	if !strings.Contains(js, ".gnode-flotilla, .gnode-fleet") {
+		t.Error("goals.js Flotillas filter must match both .gnode-flotilla and legacy .gnode-fleet — cubic #405 P2")
+	}
 
-	// ── Item 6a: realized look-back slider ────────────────────────────────────
-	for _, marker := range []string{
-		"realizedWindow",       // module-level state: "1d"|"7d"|"30d"|"all"
-		"injectRealizedSlider", // idempotent slider injection on first tab activation
-		"grealized-slider",     // container id / CSS class for the control bar
-		"grealized-btn",        // individual segment buttons
-		"data-window",          // button attribute (the window value)
-	} {
-		if !strings.Contains(js, marker) {
-			t.Errorf("goals.js must implement the realized look-back slider (missing %q) — #405 Inc 3 Item 6a", marker)
+	// ── Item 6a: realized look-back slider — DEFERRED (no dormant UI) ─────────
+	// GoalsCounts has no achieved_at timestamps, so a window slider would be a
+	// non-functional (dormant) control. It is intentionally NOT shipped; assert the
+	// slider markers are ABSENT so it can't sneak back in before the daemon emits
+	// done-history timestamps (the follow-on that lets it ship LIVE).
+	for _, absent := range []string{"grealized-slider", "grealized-btn", "injectRealizedSlider", "realizedWindow"} {
+		if strings.Contains(js, absent) {
+			t.Errorf("goals.js must NOT ship the dormant realized slider (found %q) — deferred pending done-history timestamps", absent)
 		}
 	}
-	if !strings.Contains(css, ".grealized-slider") {
-		t.Error("dash.css must style the realized slider (.grealized-slider) — #405 Inc 3 Item 6a")
-	}
-	if !strings.Contains(css, ".grealized-btn") {
-		t.Error("dash.css must style the slider buttons (.grealized-btn) — #405 Inc 3 Item 6a")
+	if strings.Contains(css, ".grealized-") {
+		t.Error("dash.css must NOT carry the dormant realized slider styles (.grealized-*) — deferred")
 	}
 
 	// ── Item 6b: graph-node hover tooltip ────────────────────────────────────
