@@ -571,7 +571,7 @@
     var sig = selectedDesk + "#" + mirrorVerbosity + "#" + items.map(function (it) {
       return it.kind === "mirror"
         ? "m:" + (it.m.ts || "") + ":" + cheapHash(it.m.info || "") + ":" + (it.m.suppressed ? "1" : "0")
-        : "l:" + (it.e.parsed ? it.e.time : "") + ":" + cheapHash(it.e.parsed ? it.e.gist : it.e.raw);
+        : "l:" + (it.e.parsed ? it.e.time : "") + ":" + cheapHash(it.e.parsed ? (it.e.body || it.e.gist) : it.e.raw);
     }).join("|");
     if (sig === lastThreadKey) return;
     lastThreadKey = sig;
@@ -626,7 +626,11 @@
         (e.channel && e.channel !== "-"
           ? '<span class="thread-chan muted">#' + escapeHtml(e.channel) + "</span>"
           : "") +
-        '<p class="thread-gist">' + escapeHtml(e.gist) + "</p>" +
+        // Render the FULL body when the companion store hydrated it (#407 — the audit gist
+        // is clamped to keep the ledger line atomic; the thread must never show that clamped
+        // copy as if it were the whole message). Falls back to the gist for short messages
+        // and pre-#407 lines.
+        '<p class="thread-gist">' + escapeHtml(e.body || e.gist) + "</p>" +
       "</div>"
     );
   }

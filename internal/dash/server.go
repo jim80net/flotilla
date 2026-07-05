@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/cos"
 	"github.com/jim80net/flotilla/internal/dash/control"
 	"github.com/jim80net/flotilla/internal/dash/tracker"
 	"github.com/jim80net/flotilla/internal/roster"
@@ -277,8 +278,17 @@ func (s *Server) loadBoard() BoardDoc {
 
 // loadHistory reads the ledger + backlog files fresh and builds the history
 // document. A missing/unreadable file reads as empty (the dash never fabricates).
+// Ledger entries whose audit gist was clamped (#407) are hydrated with their full
+// message from the loopback-only companion store so the thread renders the operator's
+// complete words, never a clamped copy shown as if whole.
 func (s *Server) loadHistory() HistoryDoc {
-	return BuildHistory(readFileOrEmpty(s.cfg.LedgerPath), readFileOrEmpty(s.cfg.BacklogPath))
+	doc := BuildHistory(readFileOrEmpty(s.cfg.LedgerPath), readFileOrEmpty(s.cfg.BacklogPath))
+	if s.cfg.LedgerPath != "" {
+		HydrateLedgerBodies(doc.Ledger, func(nonce string) (string, bool) {
+			return cos.LookupBody(s.cfg.LedgerPath, nonce)
+		})
+	}
+	return doc
 }
 
 // loadGoals reads the goals file fresh and builds the goals document, binding
