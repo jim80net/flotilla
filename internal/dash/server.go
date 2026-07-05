@@ -267,8 +267,8 @@ func (s *Server) loadBoard() BoardDoc {
 func (s *Server) loadHistory() HistoryDoc {
 	doc := BuildHistory(readFileOrEmpty(s.cfg.LedgerPath), readFileOrEmpty(s.cfg.BacklogPath))
 	if s.cfg.LedgerPath != "" {
-		HydrateLedgerBodies(doc.Ledger, func(t, from, to, clampedGist string) (string, bool) {
-			return cos.LookupBody(s.cfg.LedgerPath, t, from, to, clampedGist)
+		HydrateLedgerBodies(doc.Ledger, func(nonce string) (string, bool) {
+			return cos.LookupBody(s.cfg.LedgerPath, nonce)
 		})
 	}
 	return doc

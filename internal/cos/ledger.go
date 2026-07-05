@@ -58,6 +58,11 @@ type Entry struct {
 	// (see maxGistRunes); the full body lives in the pane/Discord, the ledger carries
 	// the gist for the who-knows-what picture.
 	Gist string
+	// Nonce is the companion-body identity (#407): when the gist is clamped, Append sets a
+	// unique nonce, renders it into the line (` #<nonce>` after the gist) AND names the
+	// full-body file `<nonce>.txt`, so the dash resolves the complete message by EXACT
+	// identity rather than a content/prefix scan. Empty for an unclamped entry (no companion).
+	Nonce string
 }
 
 // Append atomically appends one entry to the ledger at path, creating the file (and
@@ -71,6 +76,16 @@ type Entry struct {
 // error as best-effort: the mirror is observe-only and MUST NOT fail the operator's
 // delivery/reply path, so they log rather than propagate.
 func Append(path string, e Entry) error {
+	// #407: when the audit line will clamp a real message, mint a unique nonce BEFORE
+	// rendering the line so the nonce lands in BOTH the line (` #<nonce>`) and the companion
+	// filename — the dash then resolves the full body by exact identity. If the nonce can't
+	// be minted, fall through with none: the audit line still lands and the dash shows the
+	// clamped gist (never a failure of the delivery path).
+	if e.Nonce == "" && WillClamp(e.Gist) {
+		if n, err := newNonce(); err == nil {
+			e.Nonce = n
+		}
+	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("cos ledger open %q: %w", path, err)
@@ -82,13 +97,11 @@ func Append(path string, e Entry) error {
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("cos ledger close %q: %w", path, err)
 	}
-	// #407: the audit line (above) clamps the gist to keep the append atomic; when that
-	// clamps a real message, persist the FULL body to the loopback-only companion store so
-	// the dash can render the operator's complete words. Best-effort — the audit record has
-	// already landed durably, so a companion-write failure must NOT turn a successful append
-	// into an error (the dash simply falls back to the clamped gist for that entry).
-	if WillClamp(e.Gist) {
-		if err := WriteBody(path, e); err != nil {
+	// Persist the FULL body under the nonce, best-effort — the audit record has already
+	// landed durably, so a companion-write failure must NOT turn a successful append into an
+	// error (the dash simply falls back to the clamped gist for that entry).
+	if e.Nonce != "" {
+		if err := WriteBody(path, e.Nonce, e.Gist); err != nil {
 			fmt.Fprintf(os.Stderr, "flotilla: cos ledger companion body write failed (dash will show the clamped gist): %v\n", err)
 		}
 	}
@@ -118,8 +131,15 @@ func Line(e Entry) string {
 	if channel == "" {
 		channel = "-"
 	}
-	line := fmt.Sprintf("- %s · %s · %s → %s · %q\n",
-		e.Time.UTC().Format(time.RFC3339), flattenField(channel), flattenField(e.From), flattenField(e.To), clampGist(e.Gist))
+	// The optional companion-body nonce (#407) trails the quoted gist as ` #<nonce>`. It sits
+	// AFTER the gist's closing quote (the last '"' on the line), so the reader recovers it
+	// without disturbing the four " · " fields, and hex-only keeps the line single-physical.
+	suffix := ""
+	if e.Nonce != "" {
+		suffix = " #" + e.Nonce
+	}
+	line := fmt.Sprintf("- %s · %s · %s → %s · %q%s\n",
+		e.Time.UTC().Format(time.RFC3339), flattenField(channel), flattenField(e.From), flattenField(e.To), clampGist(e.Gist), suffix)
 	if len(line) > maxLineBytes {
 		// Backstop: the gist is already rune-clamped, but channel/from/to are unbounded
 		// by type. If a pathological field pushes the rendered line past PIPE_BUF, clip

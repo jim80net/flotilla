@@ -279,7 +279,11 @@ type LedgerEntry struct {
 	// complete or no companion body exists. The conversation thread renders Body when
 	// present, else Gist — so the operator never sees a clamped copy of his own words
 	// rendered as if complete.
-	Body   string `json:"body,omitempty"`
+	Body string `json:"body,omitempty"`
+	// Nonce is the companion-body identity (#407) parsed from the line's trailing
+	// ` #<nonce>` token; it resolves Body by EXACT identity (never a content scan). Empty
+	// for an unclamped entry or a pre-#407 line. Not serialized — an internal resolve key.
+	Nonce  string `json:"-"`
 	Raw    string `json:"raw"`
 	Parsed bool   `json:"parsed"`
 }
@@ -304,20 +308,21 @@ type HistoryDoc struct {
 }
 
 // HydrateLedgerBodies fills each parsed entry's Body from the full-message companion store
-// (#407) via the resolver, which returns (fullBody, ok) for a (time, from, to, clampedGist).
-// A nil resolver, an unparsed entry, or a miss leaves Body empty (the thread falls back to
-// Gist). Pure w.r.t. its inputs: the filesystem lives entirely behind resolve, so the
-// hydration logic is unit-testable without a real store.
-func HydrateLedgerBodies(entries []LedgerEntry, resolve func(time, from, to, clampedGist string) (string, bool)) {
+// (#407) via the resolver, which returns (fullBody, ok) for the entry's nonce — an EXACT
+// identity lookup, so two same-second messages sharing a clamped prefix still resolve to
+// their OWN bodies. A nil resolver, an entry with no nonce, or a miss leaves Body empty (the
+// thread falls back to Gist). Pure w.r.t. its inputs: the filesystem lives entirely behind
+// resolve, so the hydration logic is unit-testable without a real store.
+func HydrateLedgerBodies(entries []LedgerEntry, resolve func(nonce string) (string, bool)) {
 	if resolve == nil {
 		return
 	}
 	for i := range entries {
 		e := &entries[i]
-		if !e.Parsed {
+		if !e.Parsed || e.Nonce == "" {
 			continue
 		}
-		if full, ok := resolve(e.Time, e.From, e.To, e.Gist); ok {
+		if full, ok := resolve(e.Nonce); ok {
 			e.Body = full
 		}
 	}
@@ -365,7 +370,7 @@ func parseLedger(raw string) []LedgerEntry {
 
 // ParseLedgerLine parses one rendered cos.Line:
 //
-//   - <RFC3339> · <channel> · <from> → <to> · "<gist>"
+//   - <RFC3339> · <channel> · <from> → <to> · "<gist>"[ #<nonce>]
 //
 // On any deviation it returns an entry with only Raw set (Parsed=false) so a
 // malformed or future-format line is never dropped or mis-rendered — it is shown
@@ -374,6 +379,15 @@ func parseLedger(raw string) []LedgerEntry {
 func ParseLedgerLine(line string) LedgerEntry {
 	entry := LedgerEntry{Raw: line}
 	body := strings.TrimPrefix(line, "- ")
+	// Strip the optional companion-body nonce (#407): it trails the gist as ` #<nonce>`
+	// AFTER the gist's closing quote (the last '"' on the line), so removing it here leaves
+	// the four " · " fields intact. A pre-#407 line has nothing after the closing quote.
+	if q := strings.LastIndex(body, `"`); q >= 0 && q+1 < len(body) {
+		if tail := strings.TrimSpace(body[q+1:]); strings.HasPrefix(tail, "#") {
+			entry.Nonce = tail[1:]
+			body = body[:q+1]
+		}
+	}
 	// Four fields separated by " · "; the gist (last field) is quoted and may
 	// itself contain the separator, so split into exactly four.
 	parts := strings.SplitN(body, " · ", 4)

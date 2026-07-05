@@ -16,12 +16,12 @@ import (
 // alone; a nil resolver is a no-op.
 func TestHydrateLedgerBodies_Pure(t *testing.T) {
 	entries := []LedgerEntry{
-		{Parsed: true, Time: "T1", From: "operator", To: "d", Gist: "clamped one…"},
-		{Parsed: true, Time: "T2", From: "operator", To: "d", Gist: "short complete"},
-		{Parsed: false, Raw: "- malformed line"},
+		{Parsed: true, Nonce: "aa11", Gist: "clamped one…"},
+		{Parsed: true, Nonce: "", Gist: "short complete"}, // no nonce → not hydrated
+		{Parsed: false, Nonce: "bb22", Raw: "- malformed line"},
 	}
-	HydrateLedgerBodies(entries, func(t, from, to, gist string) (string, bool) {
-		if t == "T1" {
+	HydrateLedgerBodies(entries, func(nonce string) (string, bool) {
+		if nonce == "aa11" {
 			return "the FULL body for entry one, well past the clamp boundary", true
 		}
 		return "", false
@@ -30,7 +30,7 @@ func TestHydrateLedgerBodies_Pure(t *testing.T) {
 		t.Errorf("entry 0 Body not hydrated: %q", entries[0].Body)
 	}
 	if entries[1].Body != "" {
-		t.Errorf("entry 1 (resolver miss) must keep empty Body, got %q", entries[1].Body)
+		t.Errorf("entry 1 (no nonce) must keep empty Body, got %q", entries[1].Body)
 	}
 	if entries[2].Body != "" {
 		t.Errorf("entry 2 (unparsed) must not be hydrated, got %q", entries[2].Body)
@@ -74,8 +74,8 @@ func TestLongMessageFullFidelityEndToEnd(t *testing.T) {
 		t.Fatalf("read ledger: %v", err)
 	}
 	doc := BuildHistory(string(raw), "")
-	HydrateLedgerBodies(doc.Ledger, func(tm, from, to, gist string) (string, bool) {
-		return cos.LookupBody(ledger, tm, from, to, gist)
+	HydrateLedgerBodies(doc.Ledger, func(nonce string) (string, bool) {
+		return cos.LookupBody(ledger, nonce)
 	})
 
 	if len(doc.Ledger) != 1 {
@@ -89,12 +89,54 @@ func TestLongMessageFullFidelityEndToEnd(t *testing.T) {
 	if !strings.HasSuffix(e.Gist, "…") {
 		t.Error("clamped gist must end with the clamp marker")
 	}
+	if e.Nonce == "" {
+		t.Error("a clamped entry must carry a companion nonce parsed from the line")
+	}
 	// ...but the hydrated Body is the operator's COMPLETE message.
 	if e.Body != full {
 		t.Errorf("thread Body is not the full message:\n got %d runes\nwant %d runes", utf8.RuneCountInString(e.Body), utf8.RuneCountInString(full))
 	}
-	// And the render contract holds: the body starts with what the audit line showed.
-	if !strings.HasPrefix(e.Body, strings.TrimSuffix(e.Gist, "…")) {
-		t.Error("hydrated Body must start with the clamped-gist prefix")
+}
+
+// TestSameSecondSamePrefixResolveOwnBodies is the cubic #422 CLASS regression: two messages
+// in the same second, same parties, sharing an IDENTICAL clamped prefix (so identical audit
+// gists) must each render their OWN full body — the nonce identity disambiguates where a
+// content/prefix scan cannot.
+func TestSameSecondSamePrefixResolveOwnBodies(t *testing.T) {
+	dir := t.TempDir()
+	ledger := filepath.Join(dir, "ledger")
+	ts := time.Unix(5000, 0).UTC()
+	shared := strings.Repeat("shared prefix word ", 40) // > 280 runes of identical text
+	a := shared + " AAA-distinct-tail-for-message-one"
+	b := shared + " BBB-distinct-tail-for-message-two"
+	for _, g := range []string{a, b} {
+		if err := cos.Append(ledger, cos.Entry{Time: ts, Channel: "c", From: "operator", To: "flotilla-dash", Gist: g}); err != nil {
+			t.Fatalf("cos.Append: %v", err)
+		}
+	}
+	raw, err := os.ReadFile(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := BuildHistory(string(raw), "")
+	HydrateLedgerBodies(doc.Ledger, func(nonce string) (string, bool) {
+		return cos.LookupBody(ledger, nonce)
+	})
+	if len(doc.Ledger) != 2 {
+		t.Fatalf("want 2 entries, got %d", len(doc.Ledger))
+	}
+	// Both audit gists are identical (same clamped prefix) — the precondition for the class.
+	if doc.Ledger[0].Gist != doc.Ledger[1].Gist {
+		t.Fatal("test precondition failed: the two clamped gists must be identical")
+	}
+	got := map[string]bool{}
+	for _, e := range doc.Ledger {
+		if e.Body == "" {
+			t.Fatalf("entry not hydrated (nonce=%q)", e.Nonce)
+		}
+		got[e.Body] = true
+	}
+	if !got[strings.TrimSpace(a)] || !got[strings.TrimSpace(b)] || len(got) != 2 {
+		t.Errorf("each message must resolve to its OWN body; got %d distinct bodies (cross-entry substitution)", len(got))
 	}
 }
