@@ -111,7 +111,8 @@ func materialReasonAgent(reason string) string {
 }
 
 // groupMaterialByOwner partitions desk-scoped material reasons by OwningXO. Fleet-wide
-// reasons are returned in primary for the clock layer; owners are sorted for stable wake order.
+// reasons are returned in primary for the clock layer; map iteration order is undefined —
+// callers sort owners for stable wake order.
 func groupMaterialByOwner(reasons []string, owningXO func(agent string) string) (primary []string, byOwner map[string][]string) {
 	byOwner = map[string][]string{}
 	for _, r := range reasons {

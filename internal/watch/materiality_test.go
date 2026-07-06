@@ -139,12 +139,6 @@ func TestExternalMaterialAiderApprovalAndErrorWakeXO(t *testing.T) {
 	}
 }
 
-// A single-writer tracker's content is the XO's OWN output; it must NOT reach the
-// wake materiality set at all. The detector never feeds the tracker hash into the
-// snapshot's SignalHash (only the optional external --signal-file does), so a
-// tracker edit produces no SignalHash delta and therefore no wake. This asserts the
-// predicate-level guarantee: equal SignalHash across the diff ⇒ no signal reason,
-// regardless of desk churn the XO itself caused.
 func TestGroupMaterialByOwnerFederated(t *testing.T) {
 	owning := func(agent string) string {
 		switch agent {
@@ -185,6 +179,12 @@ func TestGroupMaterialByOwnerLegacyStar(t *testing.T) {
 	}
 }
 
+// A single-writer tracker's content is the XO's OWN output; it must NOT reach the
+// wake materiality set at all. The detector never feeds the tracker hash into the
+// snapshot's SignalHash (only the optional external --signal-file does), so a
+// tracker edit produces no SignalHash delta and therefore no wake. This asserts the
+// predicate-level guarantee: equal SignalHash across the diff ⇒ no signal reason,
+// regardless of desk churn the XO itself caused.
 func TestExternalMaterialTrackerWritesDoNotWake(t *testing.T) {
 	// SignalHash unchanged (the tracker is not a signal source); only the XO's own
 	// pane churned — which externalMaterial excludes (H2). Result: no wake.

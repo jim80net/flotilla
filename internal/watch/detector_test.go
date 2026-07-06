@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/backlog"
+	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
@@ -464,10 +465,16 @@ func TestDetectorTailRotatesBeforeAdjutantSeam(t *testing.T) {
 			events = append(events, "rotate")
 			return nil
 		},
-		AdjutantSeamOnFinish: func() {
+		AdjutantFor: func(owner string) string {
+			if owner == "xo" {
+				return "xo-adj"
+			}
+			return ""
+		},
+		AdjutantSeamOnFinish: func(owner string) {
 			mu.Lock()
 			defer mu.Unlock()
-			events = append(events, "adjutant-seam")
+			events = append(events, "adjutant-seam:"+owner)
 		},
 		Wake:    func(WakeKind, []string) {},
 		Persist: func(Snapshot) error { return nil },
@@ -479,8 +486,36 @@ func TestDetectorTailRotatesBeforeAdjutantSeam(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(events) != 2 || events[0] != "rotate" || events[1] != "adjutant-seam" {
+	if len(events) != 2 || events[0] != "rotate" || events[1] != "adjutant-seam:xo" {
 		t.Fatalf("tail must rotate THEN adjutant seam, got %v", events)
+	}
+}
+
+func TestDetectorAdjutantSeamPerOwner(t *testing.T) {
+	f := newFixture()
+	var drained []string
+	cfg := f.config("cos", []string{"cos", "alpha-xo"}, 3, "none")
+	cfg.AdjutantFor = func(owner string) string {
+		if owner == "alpha-xo" {
+			return "alpha-adj"
+		}
+		return ""
+	}
+	cfg.AdjutantSeamOnFinish = func(owner string) { drained = append(drained, owner) }
+	d := newDet(t, f, cfg)
+	seed(d, map[string]surface.State{"cos": surface.StateIdle, "alpha-xo": surface.StateIdle}, "h0")
+	f.set("cos", surface.StateIdle)
+	f.set("alpha-xo", surface.StateIdle)
+	d.Tick()
+	if len(drained) != 0 {
+		t.Fatalf("steady fleet should not drain, got %v", drained)
+	}
+	f.set("alpha-xo", surface.StateWorking)
+	d.Tick()
+	f.set("alpha-xo", surface.StateIdle)
+	d.Tick()
+	if len(drained) != 1 || drained[0] != "alpha-xo" {
+		t.Fatalf("alpha-xo seam drain = %v, want [alpha-xo]", drained)
 	}
 }
 
@@ -968,6 +1003,26 @@ func TestLivenessParamsWall(t *testing.T) {
 		if alrt <= ping {
 			t.Errorf("livenessParamsWall(%q): alert %v must exceed ping %v", tc.mode, alrt, ping)
 		}
+	}
+}
+
+// #467: with rotate policy never, backlog drive must deliver WakeBacklog without rotating.
+func TestDetectorContinueXOBacklogSkipsRotateWhenPolicyNever(t *testing.T) {
+	f := newFixture()
+	cfg := f.config("xo", []string{"xo"}, 3, "none")
+	cfg.RotatePolicy = roster.XORotateNever
+	cfg.ReferenceInterval = time.Minute
+	f.backlog = backlog.Status{Unblocked: []string{"ship the knob PR"}}
+	d := newDet(t, f, cfg)
+	seed(d, map[string]surface.State{"xo": surface.StateWorking}, "h0")
+	f.signal = "h0"
+	f.set("xo", surface.StateIdle)
+	d.Tick()
+	if f.rotateCalls != 0 {
+		t.Fatalf("rotate policy never: got %d rotate calls, want 0", f.rotateCalls)
+	}
+	if f.wakeCount() != 1 || f.lastWake().kind != WakeBacklog {
+		t.Fatalf("want one WakeBacklog, got %+v", f.wakes)
 	}
 }
 

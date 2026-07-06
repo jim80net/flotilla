@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/backlog"
+	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
@@ -122,10 +123,14 @@ type DetectorConfig struct {
 	// XOAgent completes Working→Idle (the coordinator finish hook). Project-XOs and execution desks
 	// use MirrorOnFinish instead. Same off-mutex / best-effort discipline. Default nil ⇒ inert.
 	CoordinatorMirrorOnFinish func(agent string)
-	// AdjutantSeamOnFinish fires when XOAgent completes Working→Idle — the leader seam for
-	// adjutant buffer drain (#439). Ping-independent (unlike WakeContinuation, which stops when
-	// settled). Default nil ⇒ inert.
-	AdjutantSeamOnFinish func()
+	// AdjutantFor reports the adjutant agent for a coordinator layer, or "" when none.
+	// Used with AdjutantSeamOnFinish for per-owner buffer drain (#438 stackable_wakes).
+	// nil ⇒ only the primary XO seam fires (legacy).
+	AdjutantFor func(owner string) string
+	// AdjutantSeamOnFinish fires when a coordinator leader's seam opens — drain that
+	// layer's adjutant buffer (#439). owner is the coordinator layer (primary or project).
+	// Default nil ⇒ inert.
+	AdjutantSeamOnFinish func(owner string)
 	// IdleHoldOnFinish is the idle-hold antipattern side-effect (#216): invoked once
 	// for each NON-XO desk that completed a unit of work this tick (the same trigger
 	// as MirrorOnFinish). The caller reads the desk's turn-final, runs the mechanical
@@ -203,6 +208,9 @@ type DetectorConfig struct {
 	SynthLoad    func() (SynthState, bool)
 	// Rotate rotates the XO context via surface.RotateContext (claude → /clear).
 	Rotate func() error
+	// RotatePolicy gates idle-edge rotation requests from continueXO (#467). Zero
+	// value (or always) preserves legacy behavior; never/handoff suppress bare /clear.
+	RotatePolicy roster.XORotatePolicy
 	// Awaiting reports whether the awaiting-operator veto marker is present (gates
 	// the rotate only).
 	Awaiting func() bool
@@ -827,9 +835,9 @@ func (d *Detector) Tick() {
 	// consults only an already-computed boolean and never touches the filesystem. Inert (nil) when the
 	// feature is off (HeartbeatEnabled nil) or the warrant seam is unwired.
 	warrant := d.deskWarrantSnapshot()
-	pendingRotate, pendingWakes, pendingMirrors, pendingCoordinatorMirrors, pendingDelegation, pendingAdjutantSeam, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit, pendingAutoSwitch, pendingTurnEnds := d.tickLocked(warrant)
+	pendingRotate, pendingWakes, pendingMirrors, pendingCoordinatorMirrors, pendingDelegation, pendingAdjutantSeams, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit, pendingAutoSwitch, pendingTurnEnds := d.tickLocked(warrant)
 	d.ingestActivity(pendingTurnEnds)
-	d.runTail(pendingRotate, pendingWakes, pendingMirrors, pendingCoordinatorMirrors, pendingDelegation, pendingAdjutantSeam)
+	d.runTail(pendingRotate, pendingWakes, pendingMirrors, pendingCoordinatorMirrors, pendingDelegation, pendingAdjutantSeams)
 	d.runAutoSwitch(pendingAutoSwitch)
 	d.runRateLimitProbes(pendingRateLimit)
 	// Visibility-synthesis (B2) runs AFTER runTail and OFF d.mu: its materiality read is BLOCKING
@@ -859,7 +867,7 @@ func (d *Detector) Tick() {
 // BEFORE the continuation wake is enqueued, so the Injector — which re-acquires the same txn
 // lock for the delivery — always lands the continuation AFTER the rotate, never letting a
 // trailing /clear wipe a freshly delivered continuation.
-func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors, coordinatorMirrors []string, delegationNudges []string, pendingAdjutantSeam bool) {
+func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors, coordinatorMirrors []string, delegationNudges []string, pendingAdjutantSeams []string) {
 	if pendingRotate && d.cfg.Rotate != nil {
 		if err := d.cfg.Rotate(); err != nil && !errors.Is(err, surface.ErrRestartRequired) {
 			log.Printf("flotilla watch: XO context rotate failed: %v (continuing without rotate)", err)
@@ -867,8 +875,10 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors, co
 	}
 	// Adjutant seam enqueue runs AFTER rotate (same invariant as continuation wakes: a trailing
 	// /clear must not wipe a freshly delivered brief) and BEFORE the other wake deliveries.
-	if pendingAdjutantSeam && d.cfg.AdjutantSeamOnFinish != nil {
-		d.cfg.AdjutantSeamOnFinish()
+	if d.cfg.AdjutantSeamOnFinish != nil {
+		for _, owner := range pendingAdjutantSeams {
+			d.cfg.AdjutantSeamOnFinish(owner)
+		}
 	}
 	for _, w := range wakes {
 		if w.owner != "" && d.cfg.WakeLayer != nil {
@@ -1053,7 +1063,7 @@ func (d *Detector) persist() {
 // tickLocked runs the lock-free-pure state machine under d.mu and RETURNS the side effects to
 // perform after unlock (a pending rotate + the ordered wakes). It is the single per-interval
 // writer of detector state; OperatorWake is the only other writer and shares the mutex.
-func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pendingWakes []deferredWake, pendingMirrors, pendingCoordinatorMirrors []string, pendingDelegation []string, pendingAdjutantSeam bool, pendingSynth []synthEligible, pendingDeskBeats []string, pendingDeskEscalations []string, pendingRateLimit rateLimitWork, pendingAutoSwitch []RateLimitAutoSwitchCandidate, pendingTurnEnds []string) {
+func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pendingWakes []deferredWake, pendingMirrors, pendingCoordinatorMirrors []string, pendingDelegation []string, pendingAdjutantSeams []string, pendingSynth []synthEligible, pendingDeskBeats []string, pendingDeskEscalations []string, pendingRateLimit rateLimitWork, pendingAutoSwitch []RateLimitAutoSwitchCandidate, pendingTurnEnds []string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -1084,7 +1094,12 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 			wakeLayer(owner, WakeMaterial, byOwner[owner])
 		}
 	}
-	requestRotate := func() { pendingRotate = true }
+	requestRotate := func() {
+		if !d.cfg.RotatePolicy.AllowsIdleEdgeRotate() {
+			return
+		}
+		pendingRotate = true
+	}
 
 	// 1. Gather current signals. Signal absent/unreadable carries the prior hash
 	//    forward (treat-unchanged — M4); states are shell-debounced (M2).
@@ -1213,8 +1228,24 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 	//    cubic-P1 at-least-once).
 	d.snap = cur
 	pendingRateLimit = d.rateLimitWorkLocked(cur)
-	pendingAdjutantSeam = xoSeam && d.cfg.AdjutantSeamOnFinish != nil
-	return pendingRotate, pendingWakes, pendingMirrors, pendingCoordinatorMirrors, pendingDelegation, pendingAdjutantSeam, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit, pendingAutoSwitch, pendingTurnEnds
+	if d.cfg.AdjutantSeamOnFinish != nil {
+		if d.cfg.AdjutantFor == nil {
+			if xoSeam {
+				pendingAdjutantSeams = append(pendingAdjutantSeams, d.cfg.XOAgent)
+			}
+		} else {
+			for _, name := range d.cfg.Desks {
+				if d.cfg.AdjutantFor(name) == "" {
+					continue
+				}
+				if prev.DeskStates[name] == surface.StateWorking && cur.DeskStates[name] == surface.StateIdle {
+					pendingAdjutantSeams = append(pendingAdjutantSeams, name)
+				}
+			}
+			sort.Strings(pendingAdjutantSeams)
+		}
+	}
+	return pendingRotate, pendingWakes, pendingMirrors, pendingCoordinatorMirrors, pendingDelegation, pendingAdjutantSeams, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit, pendingAutoSwitch, pendingTurnEnds
 }
 
 // deskWarrantSnapshot is the #189 PHASE-1 read, run OFF d.mu from Tick BEFORE tickLocked acquires the

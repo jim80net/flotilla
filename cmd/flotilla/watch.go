@@ -412,18 +412,19 @@ func cmdWatch(args []string) error {
 		leaderAckPath := *ackPath // resolved per-coordinator path (legacy fallback when present)
 		layerBufferPath := roster.LayerBufferPath(rosterDir, xo)
 
-		drainAdjutantSeam := func() {
-			if primaryAdjutant == "" {
+		drainAdjutantSeamFor := func(owner string) {
+			if cfg.AdjutantFor(owner) == "" {
 				return
 			}
-			brief, ok, clearAfter := adjutantSeamBrief(layerBufferPath, xo, rosterDir)
+			bufferPath := roster.LayerBufferPath(rosterDir, owner)
+			brief, ok, clearAfter := adjutantSeamBrief(bufferPath, owner, rosterDir)
 			if !ok {
 				return
 			}
-			injector.Enqueue(watch.Job{Agent: xo, Message: brief, Kind: watch.KindDetector})
+			injector.Enqueue(watch.Job{Agent: owner, Message: brief, Kind: watch.KindDetector})
 			if clearAfter {
-				if err := adjutantbuffer.Clear(layerBufferPath); err != nil {
-					log.Printf("flotilla watch: adjutant buffer clear after enqueue failed: %v", err)
+				if err := adjutantbuffer.Clear(bufferPath); err != nil {
+					log.Printf("flotilla watch: adjutant buffer clear after enqueue failed for %q: %v", owner, err)
 				}
 			}
 		}
@@ -625,6 +626,13 @@ func cmdWatch(args []string) error {
 			log.Printf("flotilla watch: adaptive-interval OFF — fixed tick %s", interval)
 		}
 		activity := watch.NewActivityTracker(watch.DefaultActivityConfig())
+		xoRotate, err := roster.ResolveXORotate(cfg.XORotate, os.Getenv("FLOTILLA_XO_ROTATE"))
+		if err != nil {
+			return fmt.Errorf("flotilla watch: invalid xo_rotate policy (roster xo_rotate / FLOTILLA_XO_ROTATE): %w", err)
+		}
+		if !xoRotate.AllowsIdleEdgeRotate() {
+			log.Printf("flotilla watch: xo_rotate=%s — idle-edge context rotation suppressed (roster xo_rotate / FLOTILLA_XO_ROTATE)", xoRotate)
+		}
 		detCfg := watch.DetectorConfig{
 			XOAgent:           xo,
 			Desks:             desks,
@@ -658,9 +666,10 @@ func cmdWatch(args []string) error {
 				// Claude-storm only: desks already on grok (or another FROM) are not candidates.
 				return agentSurface(cfg, agent) == surface.DefaultSurface
 			},
-			SignalHash: signalHash,
-			AckAge:     ack.Age,
-			Wake:       wake,
+			SignalHash:   signalHash,
+			AckAge:       ack.Age,
+			Wake:         wake,
+			RotatePolicy: xoRotate,
 			Rotate: func() error {
 				// Resolve the XO pane FIRST, then take the per-pane TRANSACTION lock keyed by that
 				// target (the same key every other transaction writer uses), so the /clear rotate
@@ -683,7 +692,8 @@ func cmdWatch(args []string) error {
 			},
 			MirrorOnFinish:            deskMirrorOnFinish(cfg, secrets, tr, firewall, alert, rosterDir),
 			CoordinatorMirrorOnFinish: coordinatorMirrorOnFinish(cfg, firewall, alert, rosterDir),
-			AdjutantSeamOnFinish:      drainAdjutantSeam,
+			AdjutantFor:               func(owner string) string { return cfg.AdjutantFor(owner) },
+			AdjutantSeamOnFinish:      drainAdjutantSeamFor,
 			IdleHoldOnFinish:          idleHoldOnFinish(cfg, idleHoldTracker, injector.Enqueue),
 			StrandedHandoffOnFinish:   strandedHandoffOnFinish(cfg, strandedTracker, injector.Enqueue),
 			IsCoordinator:             cfg.IsCoordinator,
