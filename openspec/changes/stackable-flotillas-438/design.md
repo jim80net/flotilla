@@ -342,9 +342,15 @@ a one-time **charter turn**: leader states what the adjutant may do solo; adjuta
 proposes defaults from transcript-analysis findings; leader affirms or edits. Charter stored
 at `<roster-dir>/flotilla-<xo>-adjutant-charter.md`.
 
+**Required-minimum charter (operator/COS, cubic P2):** negotiation MAY extend solo
+authority beyond the floor, but SHALL NOT omit **liveness ack** — touching
+`flotilla-<xo>-alive` on ping is exactly the mechanical tier the adjutant exists for.
+A charter excluding liveness ack is misconfiguration; pings route unconditionally to the
+configured adjutant, so ack authority is not optional.
+
 When leader is **absent** (Shell/crash): adjutant operates within chartered bounds only;
-anything outside charter waits or escalates to parent layer. Exact bounds **not fixed in
-this design** — negotiate at first presentation per operator directive.
+anything outside charter waits or escalates to parent layer. Solo-authority bounds beyond
+the required minimum are negotiated at first presentation per operator directive.
 
 ### Harness allocation (operator: desk-tier or LLM ok)
 
@@ -400,7 +406,7 @@ only). Prompt carries the **adjutant contract** (triage + observe + buffer + sea
 injection), seeded as a `heartbeat-skill` or identity block.
 
 Liveness ping for layer: when adjutant enabled, ping targets **adjutant**; adjutant
-touches leader's `flotilla-<xo>-alive` when chartered to do so.
+SHALL touch leader's `flotilla-<xo>-alive` (required-minimum charter — not optional).
 
 ---
 
@@ -596,7 +602,7 @@ Likely intent ( **hypothesis only — do not implement until operator affirms** 
 | Adjutant acts on judgment item | Authority boundary + prompt contract; no merge in adjutant identity |
 | Coordinator starved of mechanical context | Digest includes "handled" summary + judgment queue |
 | Operator message delayed by digest | Urgent passthrough bypasses adjutant entirely |
-| Per-XO liveness false wedge | Adjutant acks coordinator file; child-down escalates to parent adjutant |
+| Per-XO liveness false wedge | Required-minimum charter mandates liveness ack; misconfiguration rejected at pairing |
 | Operator PENDING clause changes comms | Flag section; no speculative routing beyond table above |
 
 ---

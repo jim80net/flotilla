@@ -94,14 +94,26 @@ leader at the next seam.
 ### Requirement: Per-coordinator liveness SHALL use layer ack files
 
 When an adjutant is configured for a layer, liveness pings SHALL target the
-adjutant, which MAY touch the leader's `<roster-dir>/flotilla-<xo>-alive` file when
-chartered to do so. A leader that misses K consecutive acks SHALL raise a down-alert
-to its parent layer.
+adjutant. The adjutant SHALL touch the leader's `<roster-dir>/flotilla-<xo>-alive`
+file as a mechanical duty. Liveness ack is part of the **required-minimum charter**
+for any configured adjutant pair — not an optional charter grant. A leader that
+misses K consecutive acks SHALL raise a down-alert to its parent layer.
 
-#### Scenario: Adjutant acks leader liveness when chartered
+**Required-minimum charter (load-bearing):** first-presentation negotiation MAY extend
+solo authority beyond the minimum, but SHALL NOT omit liveness ack. A charter that
+would exclude liveness ack is a misconfiguration; the pair MUST NOT operate with
+routing that sends pings to an adjutant lacking ack authority.
+
+#### Scenario: Adjutant acks leader liveness (required minimum)
 
 - **WHEN** a liveness ping targets the `alpha-xo` layer
 - **AND** `alpha-adj` is configured for `alpha-xo`
-- **AND** the pair's adjutant charter permits liveness ack
 - **THEN** the ping wake SHALL be enqueued to `alpha-adj`
 - **AND** `flotilla-alpha-xo-alive` SHALL be touched by the adjutant
+
+#### Scenario: Charter without liveness ack is rejected
+
+- **WHEN** first-presentation charter negotiation would omit liveness ack
+- **THEN** the pair SHALL NOT be treated as operational for layered liveness routing
+- **AND** liveness pings SHALL NOT target the adjutant until the charter includes
+  liveness ack
