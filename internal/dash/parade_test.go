@@ -164,3 +164,28 @@ func TestParadeDeckRenderMarkers(t *testing.T) {
 		t.Error("dash.css must style the decision-brief callout (.pd-quote) — parade v3 (c)")
 	}
 }
+
+// TestParadeTableRenderMarkers locks the deck renderer's TABLE support (#427/#428): GFM
+// pipe-tables AND literal HTML <table> blocks both render as a real styled table, always
+// rebuilt through the escape-then-inline path (cell markup stripped to text, never passed
+// through). No JS runner, so this asserts the served assets carry the machinery.
+func TestParadeTableRenderMarkers(t *testing.T) {
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/parade.js").Body.String()
+	for marker, why := range map[string]string{
+		"isTableDelimiter": "GFM pipe-table delimiter detection (#428)",
+		"pd-table":         "the shared styled-table emit (#428)",
+		"parseHtmlTable":   "HTML <table> blocks parsed for their cell TEXT (#427)",
+		"decodeEntities":   "source entities decoded before the render-side escape (#427)",
+		"cellAlign":        "alignment restricted to a fixed keyword set (#427)",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("parade.js missing table-render marker %q — %s", marker, why)
+		}
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	if !strings.Contains(css, ".pd-table") {
+		t.Error("dash.css must style the deck table (.pd-table) — #428")
+	}
+}
