@@ -27,10 +27,11 @@ Composes with:
 
 **In:**
 - Design + P0 implementation path for subprocess ceremony runner
-- Per-surface one-shot harness verification (claude/grok/codex/opencode)
+- Per-surface one-shot harness verification (claude/grok/codex in P0; opencode in P1)
 - Durable-write serialization guard (anchor-replace races)
 - Scheduler/roster opt-in `mode: ephemeral` for ceremony-class dispatches
-- Short completion ping to standing pane after confirmed artifact write
+- Short completion ping to standing pane after ceremony success; `CommitFired` per overlay
+  `commit_on` (`artifact` for walks, `ping` for ack-required — never on subprocess start)
 
 **Out of P0 (follow-ons named):**
 - Memex integration for walk findings (#369 item 3)

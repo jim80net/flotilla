@@ -37,10 +37,11 @@ harness.
 | **claude-code** | `claude -p/--print "<prompt>"` | **Yes** | `--print` documented; doctor uses `claude --print` |
 | **grok** | `grok -p/--single "<prompt>"` or `--prompt-file <path>` | **Yes** | `--single` = "prints response to stdout and exits"; `--permission-mode` + `--always-approve` for unattended |
 | **codex** | `codex exec "<prompt>"` | **Yes** | `codex exec` subcommand is explicitly non-interactive |
-| **opencode** | `opencode run "<message>"` | **Yes** (CLI help) | `opencode run` exists; **live exit-code / cwd behavior not yet probed** — P0 gate includes one live smoke per surface before claiming parity |
+| **opencode** | `opencode run "<message>"` | **Yes** (CLI help) | `opencode run` exists; **live exit-code / cwd behavior not yet probed** — live smoke deferred to **P1** (see Phasing) |
 
 **Falsified assumption to drop:** "every surface needs a tmux pane to run a ceremony." Three of four
-already expose headless/single-turn CLIs; opencode needs a live probe in P0 implementation, not design.
+already expose headless/single-turn CLIs. **P0 live-probe gate applies to claude/grok/codex only**;
+opencode parity waits on P1 verification.
 
 ---
 
@@ -124,23 +125,40 @@ func Run(ctx context.Context, spec Spec, launch launch.Recipe, surface string) R
 func BuildOneShotArgv(surface, prompt string, cwd string) ([]string, error)
 ```
 
-**Pure policy** in `internal/ceremony`; **watch** wires scheduler → `ceremony.Run` when
-`schedule.mode == "ephemeral"` (default for new ceremony schedules).
+**Pure policy** in `internal/ceremony`; **watch** wires scheduler → `ceremony.Run` when the
+resolved schedule entry has `mode: ephemeral` (opt-in per entry — shipped code default remains
+`standing`; see Open questions #1).
 
 ### Host-local ceremony overlay (not committable roster)
 
-`artifacts`, `write_locks`, and `mode` live in a **host-local overlay** beside the roster
-(gitignored, secrets-trust level) — same partition as `flotilla-launch.json`. The committable
-`roster.Schedule` struct gains only `mode` (optional, default `standing`) in a follow-on schema
-bump; artifact paths stay host-local to avoid polluting the public roster contract.
+`artifacts`, `write_locks`, `commit_on`, and `mode` live in a **host-local overlay** beside the
+roster (gitignored, secrets-trust level) — same partition as `flotilla-launch.json`. The
+committable `roster.Schedule` struct gains only `mode` (optional, default `standing`) in a
+follow-on schema bump; artifact paths and `commit_on` stay host-local to avoid polluting the
+public roster contract.
+
+**Mode source-of-truth (load-bearing):** at load, merge overlay entry over roster schedule by
+name. Precedence when both exist:
+
+| Field | Winner | Notes |
+|-------|--------|-------|
+| `mode` | Overlay if set, else roster `mode`, else `standing` | Transition: overlay is dogfood lever until roster schema bump ships |
+| `artifacts`, `write_locks`, `commit_on` | Overlay only | Never committable; absent overlay ⇒ no ephemeral ceremony metadata |
+| `at`, `to`, `prompt` | Roster | Portable schedule identity unchanged |
+
+Once the committable roster gains `mode`, **overlay `mode` still wins when present** (operator
+can force per-host behavior without a roster PR). Overlay does not gain committable fields beyond
+what stays host-local; `artifacts` / `write_locks` / `commit_on` remain overlay-only permanently.
 
 ```json
 {
   "schedules": {
     "walk-agent-a": {
       "mode": "ephemeral",
+      "commit_on": "artifact",
       "artifacts": ["state/scorecards/walk-agent-a.yaml"],
-      "write_locks": ["<roster-dir>/fleet-backlog.md"]
+      "write_locks": ["<roster-dir>/fleet-backlog.md"],
+      "max_subprocess_retries": 3
     }
   }
 }
@@ -160,7 +178,7 @@ reverse-engineerable. Ephemeral runner uses explicit per-surface templates resol
 | claude-code | `claude -p <prompt>` | `--permission-mode` per desk policy; document gatekeeper parity |
 | grok | `grok -p <prompt>` or `--prompt-file` | `--permission-mode` + `--always-approve` for unattended tool use |
 | codex | `codex exec <prompt>` | config.toml overrides via `-c` as needed |
-| opencode | `opencode run <message>` | **P0 live probe required** before claiming parity |
+| opencode | `opencode run <message>` | **P1 live probe required** before claiming parity; fail-closed in P0 |
 | aider, cursor-agent | — | **Fail-closed** at load: `mode: ephemeral` rejected for surfaces without one-shot |
 
 Prompt delivery: prefer `--prompt-file` (host-local temp in roster dir) over argv length limits.
@@ -200,6 +218,24 @@ artifact paths). Prevents replay from re-injecting register into standing pane.
 
 Host-local overlay field `commit_on: artifact | ping` (default `artifact` for walk-shaped entries).
 
+**Never `CommitFired` on subprocess start** — committing at enqueue/spawn reintroduces the
+silent-drop `#369` exists to kill (subprocess hangs or pane never sees a ping ⇒ schedule stuck
+until manual clear). The trigger is always **post-success** per `commit_on` below.
+
+### Subprocess failure escalation (poison ceremony guard)
+
+A ceremony that fails every tick (bad prompt, missing binary, persistent artifact miss) must not
+replay forever. Overlay fields (defaults shown):
+
+| Field | Default | Behavior |
+|-------|---------|----------|
+| `max_subprocess_retries` | `3` | Consecutive subprocess failures before escalation |
+| `escalate_after` | same as max | LOUD operator alert naming schedule + last error |
+| Post-escalation | — | Schedule row marked **poisoned** in sidecar; no further auto-fire until operator clears |
+
+Replay of an in-flight `subprocess` phase (artifact idempotent re-check) does not increment the
+failure counter; only exit≠0 or artifact-miss after exit 0 counts.
+
 ### Durable-write serialization (load-bearing — do not ship without)
 
 **Problem:** two ephemeral runners replacing the same anchor (e.g. `fleet-backlog.md`) race.
@@ -236,14 +272,20 @@ With:
 
 ```
 Tick → ceremony.Run (subprocess, off injector worker)
-     → on success: enqueue completion ping only
-     → CommitFired on ping confirmed (#369)
+     → on subprocess success (exit 0 + artifacts verified):
+         read commit_on from overlay (default artifact for walk-shaped entries)
+         if commit_on == artifact:
+             CommitFired now
+             enqueue completion ping best-effort (KindSchedule; LOUD escalate on ping failure)
+         if commit_on == ping:
+             enqueue completion ping only
+             CommitFired on confirmed ping delivery (#369)
+     → never CommitFired on subprocess start
 ```
 
-`last_fired` still commits on **confirmed delivery of the ping**, not on subprocess start — same
-#369 semantics extended: subprocess completion is necessary but not sufficient until the standing
-desk acknowledges the short ping (or artifact-only mode for desks without standing pane — see open
-question).
+`CommitFired` timing is **per-class** via overlay `commit_on` — not a single global ping gate.
+Walk/scorecard (`artifact`): artifact presence is the schedule ack; ping is notification only.
+Parade/ack-required (`ping`): #369 confirmed-delivery semantics apply to the completion ping.
 
 ### Relation to #369 items
 
@@ -259,11 +301,13 @@ question).
 ## Phasing
 
 - **P0 (after #369 merge):** `internal/ceremony` subprocess runner; argv table for
-  claude/grok/codex; flock serialization; host-local overlay + scheduler `mode: ephemeral` branch;
-  ephemeral phase machine; completion ping via `KindSchedule`; tests with `agent-a`/`agent-b`;
-  one live probe per supported surface on dogfood host.
+  claude/grok/codex (**opencode fail-closed** until P1); flock serialization; host-local overlay +
+  scheduler `mode: ephemeral` branch; ephemeral phase machine; per-class `commit_on`; subprocess
+  failure escalation (`max_subprocess_retries`); completion ping via `KindSchedule`; tests with
+  `agent-a`/`agent-b`; one live probe each for **claude/grok/codex** on dogfood host.
 - **P1:** `flotilla ceremony run` CLI; migrate `flotilla parade` off standing-pane injection;
-  visibility-synthesis ephemeral path; opencode live verification; staging-file merge for anchors.
+  visibility-synthesis ephemeral path; **opencode live verification + argv enablement**;
+  staging-file merge for anchors.
 - **P2:** Optional tmux visibility window; dash surfacing of in-flight ceremony runs.
 
 **Explicitly out of P0:** `flotilla parade` CLI (`cmd/flotilla/parade.go` — still standing-pane),
@@ -275,12 +319,15 @@ visibility-synthesis wakes (`WakeSynthesis`), desk heartbeat beats.
 
 1. **Default mode flip:** Should new generic `flotilla.example.json` schedules default to
    `ephemeral`, or stay `standing` until dogfood proves subprocess parity on all coordinator surfaces?
-   Design recommends: example shows `ephemeral`; shipped default in code stays `standing` until
-   operator affirms flip on private roster.
+   Design recommends: example **may** show `ephemeral` as documentation; **shipped code default
+   stays `standing`** until operator affirms flip on private roster. New schedules are not
+   ephemeral-by-default without an explicit `mode` set.
 
-2. **Artifact-only success:** If the standing desk has no live pane (crashed), is subprocess exit +
-   artifact presence sufficient to `CommitFired`, with escalate-only (no ping)? Design leans **yes**
-   for walk scorecards; **no** for parades that require coordinator ack.
+2. **Artifact-only success — RESOLVED (design gate):** Encoded in `commit_on` per class.
+   - Walk/scorecard (`commit_on: artifact`): subprocess exit 0 + artifact present ⇒ `CommitFired`
+     even if the standing pane is down; completion ping is best-effort with LOUD escalate on failure.
+   - Parade/ack-required (`commit_on: ping`): `CommitFired` only on confirmed completion ping (#369).
+   - **Never** commit at subprocess start in either class.
 
 3. **Coordinator ceremonies:** CoS/XO walks use the same subprocess path with their launch recipe cwd
    — confirm no special-case "coordinator must stay interactive" carve-out.
