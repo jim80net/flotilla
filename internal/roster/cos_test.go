@@ -104,6 +104,35 @@ func TestIsCoordinator(t *testing.T) {
 	}
 }
 
+func TestCoordinatorSet(t *testing.T) {
+	fed, _ := Load(writeRoster(t, `{
+	  "operator_user_id":"U","xo_agent":"meta-xo","cos_agent":"cos",
+	  "agents":[{"name":"meta-xo"},{"name":"alpha-xo"},{"name":"alpha-be"},{"name":"cos"}],
+	  "channels":[
+	    {"channel_id":"C_CMD","xo_agent":"meta-xo","members":["alpha-xo","cos"]},
+	    {"channel_id":"C_ALPHA","xo_agent":"alpha-xo","members":["alpha-be"]}]}`))
+	set := fed.CoordinatorSet()
+	// The set is exactly the coordinators (XOs + CoS) — a desk member is excluded.
+	for _, coord := range []string{"meta-xo", "alpha-xo", "cos"} {
+		if !set[coord] {
+			t.Errorf("CoordinatorSet missing coordinator %q", coord)
+		}
+	}
+	if set["alpha-be"] {
+		t.Error("CoordinatorSet must not include a desk member")
+	}
+	if len(set) != 3 {
+		t.Errorf("CoordinatorSet size = %d, want 3 (%v)", len(set), set)
+	}
+	// Equivalence with the single-agent IsCoordinator over every named agent (the two must
+	// never diverge — CoordinatorSet is the O(n) form of IsCoordinator).
+	for _, a := range []string{"meta-xo", "alpha-xo", "alpha-be", "cos"} {
+		if set[a] != fed.IsCoordinator(a) {
+			t.Errorf("CoordinatorSet[%q]=%v disagrees with IsCoordinator=%v", a, set[a], fed.IsCoordinator(a))
+		}
+	}
+}
+
 func TestChannelForXO(t *testing.T) {
 	fed, _ := Load(writeRoster(t, `{
 	  "operator_user_id":"U",

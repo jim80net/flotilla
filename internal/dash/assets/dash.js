@@ -117,6 +117,18 @@
     // Coordinator identity keys (lower-cased) — used to filter the CoS out of per-flotilla
     // member lists so it no longer appears as a member of every project channel (#405 4b).
     var cosKeys = coordinatorNames().map(function (n) { return String(n).toLowerCase(); });
+    // Coordinator SET (roster-authoritative via topology.coordinators — XOs + CoS). Fleet
+    // Command lists ONLY coordinators; a non-coordinator channel member groups under "Desks"
+    // instead (operator-direct #421 follow-up). Fall back to a client-side derivation (the
+    // pinned coordinators + every channel's XO) for a server that predates topology.coordinators.
+    var coordList = (topology && Array.isArray(topology.coordinators) && topology.coordinators.length)
+      ? topology.coordinators
+      : coordinatorNames().concat(channels.map(function (ch) { return ch.xo_agent; }));
+    var coordSet = {};
+    coordList.forEach(function (n) { if (n) coordSet[String(n).toLowerCase()] = true; });
+    function isCoord(name) { return !!coordSet[String(name || "").toLowerCase()]; }
+    // The CoS key (lower-cased) — a coordinator, but badged "cos" not "xo" in Fleet Command.
+    var cosKey = (cache.status && cache.status.cos) ? String(cache.status.cos).toLowerCase() : "";
     // Role-aware path: at least one channel carries "fleet-command" or "project".
     var hasRoles = channels.some(function (ch) { return ch.role === "fleet-command" || ch.role === "project"; });
 
@@ -127,6 +139,7 @@
       var fleetCmdChannels = channels.filter(function (ch) { return ch.role === "fleet-command"; });
       var projectChannels  = channels.filter(function (ch) { return ch.role !== "fleet-command"; });
 
+      var deskOverflow = []; // non-coordinator members of fleet-command channels → the "Desks" group
       if (fleetCmdChannels.length) {
         var cmdSeen = {};
         var cmdDesks = [];
@@ -136,9 +149,16 @@
           cmdSeen[key] = true;
           cmdDesks.push({ name: name, role: role || "" });
         }
+        // Badge the CoS "cos" and every other coordinator "xo" — computed BEFORE insert so it is
+        // right even when the CoS is itself a channel's xo_agent (our fleet: the CoS OWNS the
+        // fleet-command channel). A row inserted "xo" then deduped would badge the CoS wrong (P2).
+        function coordRole(name) { return String(name).toLowerCase() === cosKey ? "cos" : "xo"; }
         fleetCmdChannels.forEach(function (ch) {
-          addCmd(ch.xo_agent, "xo");
-          (ch.members || []).forEach(function (m) { addCmd(m, "member"); });
+          addCmd(ch.xo_agent, coordRole(ch.xo_agent)); // a channel's own XO is a coordinator by definition
+          (ch.members || []).forEach(function (m) {
+            if (isCoord(m)) addCmd(m, coordRole(m));  // a coordinator (project XO / CoS) belongs in Fleet Command
+            else if (m) deskOverflow.push(m);         // a plain desk does NOT — it groups under "Desks"
+          });
         });
         if (cmdDesks.length) {
           groups.push({
@@ -167,6 +187,22 @@
           groups.push({ channel_id: ch.channel_id, role: ch.role || "", desks: desks });
         }
       });
+
+      // ── "Desks" group: fleet-command members that are NOT coordinators and are not already
+      // shown in a per-flotilla group — so a desk that lives only in the command channel is
+      // grouped here rather than mislisted under Fleet Command or dropped entirely. ──
+      var shownInGroup = {};
+      groups.forEach(function (g) { g.desks.forEach(function (d) { shownInGroup[String(d.name).toLowerCase()] = true; }); });
+      var deskGroup = [], deskSeen = {};
+      deskOverflow.forEach(function (m) {
+        var key = String(m).toLowerCase();
+        if (deskSeen[key] || shownInGroup[key]) return;
+        deskSeen[key] = true;
+        deskGroup.push({ name: m, role: "member" });
+      });
+      if (deskGroup.length) {
+        groups.push({ channel_id: "", role: "desks", label: "Desks", desks: deskGroup });
+      }
     } else {
       // ── Legacy flat-group logic (no role annotations — backward compat) ───────────
       groups = channels.map(function (ch) {
@@ -270,7 +306,7 @@
       var head = grp.coordinator
         ? '<span class="chan-id chan-coordinator">coordinator</span>'
         : grp.label
-          ? '<span class="chan-id chan-fleet-command">' + escapeHtml(grp.label) + "</span>"
+          ? '<span class="chan-id ' + (grp.role === "desks" ? "chan-desks" : "chan-fleet-command") + '">' + escapeHtml(grp.label) + "</span>"
           : grp.channel_id
             ? '<span class="chan-id">#' + escapeHtml(grp.channel_id) + "</span>" + role
             : '<span class="chan-id chan-coordinator">coordinator</span>';

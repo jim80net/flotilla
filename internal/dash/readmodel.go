@@ -15,6 +15,7 @@ package dash
 
 import (
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -240,10 +241,15 @@ type TopologyChannel struct {
 // no channels[]) yields an empty Channels with an explanatory Note.
 type TopologyDoc struct {
 	Channels []TopologyChannel `json:"channels"`
-	Note     string            `json:"note,omitempty"`
+	// Coordinators is the roster-authoritative set of coordinator agents (XOs + the CoS,
+	// per roster.IsCoordinator), sorted. The conversations rail uses it to keep the "Fleet
+	// Command" group to coordinators ONLY — a channel member that is not a coordinator groups
+	// under "Desks" instead (#421 follow-up). Empty when the roster names no coordinators.
+	Coordinators []string `json:"coordinators,omitempty"`
+	Note         string   `json:"note,omitempty"`
 }
 
-// BuildTopology renders the roster's effective bindings. Pure (reads cfg only).
+// BuildTopology renders the roster's effective bindings + the coordinator set. Pure (reads cfg only).
 func BuildTopology(cfg *roster.Config) TopologyDoc {
 	bindings := cfg.Bindings()
 	doc := TopologyDoc{Channels: make([]TopologyChannel, 0, len(bindings))}
@@ -259,6 +265,16 @@ func BuildTopology(cfg *roster.Config) TopologyDoc {
 			Members:   members,
 			Role:      ch.Role,
 		})
+	}
+	// The coordinator set (XOs + CoS) computed in ONE pass by the roster (CoordinatorSet) —
+	// not IsCoordinator-per-agent, which re-scans the bindings each call (O(n²)). The roster
+	// is still the single source of truth for who is a coordinator.
+	if coords := cfg.CoordinatorSet(); len(coords) > 0 {
+		doc.Coordinators = make([]string, 0, len(coords))
+		for a := range coords {
+			doc.Coordinators = append(doc.Coordinators, a)
+		}
+		sort.Strings(doc.Coordinators)
 	}
 	if len(doc.Channels) == 0 {
 		doc.Note = "no channel bindings configured (a clock-only daemon: no channel_id and no channels[]) — there is no federation topology to render"

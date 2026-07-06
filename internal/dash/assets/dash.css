@@ -810,6 +810,9 @@ code {
    reads as Command / per-flotilla structure, not a flat channel list. Symmetric with
    the coordinator accent but uses a distinct teal tint so it stands apart. */
 .chan-fleet-command { color: var(--cyan); font-family: var(--display); letter-spacing: .1em; text-transform: uppercase; font-size: .62rem; font-weight: 600; }
+/* "Desks" group header — non-coordinator desks that live in the command channel; a subdued
+   section label, visually distinct from the cyan Fleet Command header (#421 follow-up). */
+.chan-desks { color: var(--ink-3); font-family: var(--display); letter-spacing: .1em; text-transform: uppercase; font-size: .62rem; font-weight: 600; }
 .conv-group-fleet-command .conv-group-head { border-bottom: 1px solid color-mix(in srgb, var(--cyan) 30%, transparent); background: color-mix(in srgb, var(--cyan) 4%, transparent); border-radius: var(--r-xs) var(--r-xs) 0 0; }
 .chan-role {
   font-family: var(--display);
