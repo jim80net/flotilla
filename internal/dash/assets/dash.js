@@ -1001,8 +1001,8 @@
     }).catch(function () {});
   }
 
-  /* ── tab nav: Conversations ⇄ Goals ⇄ Issues · Parade (nav-out) ──────── */
-  var VIEWS = ["conversations", "goals", "issues"];
+  /* ── tab nav: Conversations ⇄ Goals ⇄ Issues ⇄ Decisions · Parade (nav-out) ──────── */
+  var VIEWS = ["conversations", "goals", "issues", "decisions"];
   function showView(view) {
     VIEWS.forEach(function (v) {
       var on = v === view;
@@ -1012,12 +1012,19 @@
     });
     el("freshness").classList.toggle("hidden", view !== "conversations");
     // Conversations is the fixed single-scroll app-shell (#326): only on this tab
-    // does the page itself stop scrolling. Goals/Issues keep natural page scroll.
+    // does the page itself stop scrolling. Goals/Issues/Decisions keep natural page scroll.
     document.body.classList.toggle("conv-shell-active", view === "conversations");
     if (view === "goals" && window.flotillaGoals) window.flotillaGoals.show();
     if (view === "issues" && window.flotillaTracker) window.flotillaTracker.show();
-    markTabViewed(view); // clear unseen dot when operator opens this tab
+    // #429: Decisions is a first-class tab — repaint the reading room on every open so
+    // the list is fresh per visit (same lazy-fetch semantics the modal had).
+    if (view === "decisions" && window.flotillaGoals && window.flotillaGoals.openDecisions) window.flotillaGoals.openDecisions();
+    // Decisions carries a live awaiting-COUNT badge (goals.js renderSituation), not an
+    // unseen dot — a count is the stronger signal, so it is not in the dot system.
+    if (view !== "decisions") markTabViewed(view); // clear unseen dot when operator opens this tab
   }
+  // #429: goals.js routes a decision card's "Drives" link back into the Goals map.
+  window.flotillaDash.showView = showView;
   // Only button tabs (those with data-view) are wired to showView. The Parade <a>
   // tab navigates to /parade naturally — including firing its own click handler below.
   var tabs = document.querySelectorAll(".tab[data-view]");
@@ -1218,19 +1225,30 @@
   }
   window.flotillaDash.openConversation = openConversation;
 
-  // #421: Decisions/blockers reading room — header + situation tile, any view.
+  // #421/#429: any [data-open-decisions] trigger (the goals "Awaiting you" tile) routes
+  // to the Decisions TAB — a reversible nav entry, same as clicking the tab itself.
+  // Single owner: goals.js deliberately does not handle this attribute (cubic #421 P2).
+  function openDecisionsView() {
+    showView("decisions");
+    pushNav({ view: "decisions" });
+    // The trigger (the goals tile) is hidden with its view — move focus into the
+    // now-visible page so keyboard users aren't stranded on <body> (mirrors the
+    // openConversation deep-link's focus handoff).
+    var title = el("gdec-title");
+    if (title) { title.setAttribute("tabindex", "-1"); title.focus(); }
+  }
   document.addEventListener("click", function (e) {
     var trig = e.target.closest ? e.target.closest("[data-open-decisions]") : null;
     if (!trig) return;
     e.preventDefault();
-    if (window.flotillaGoals && window.flotillaGoals.openDecisions) window.flotillaGoals.openDecisions();
+    openDecisionsView();
   });
   document.addEventListener("keydown", function (e) {
     if (e.key !== "Enter" && e.key !== " ") return;
     var trig = e.target.closest ? e.target.closest("[data-open-decisions]") : null;
     if (!trig) return;
     e.preventDefault();
-    if (window.flotillaGoals && window.flotillaGoals.openDecisions) window.flotillaGoals.openDecisions();
+    openDecisionsView();
   });
 
   // Thread composer + latest-at-bottom scroll wiring (F#383 criteria 4 + 5). The composer
