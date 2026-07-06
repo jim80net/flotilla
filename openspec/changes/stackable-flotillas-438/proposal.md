@@ -1,54 +1,69 @@
-# Proposal — stackable flotillas (#438)
+# Proposal — stackable flotillas + coordinator adjutants (#438 + #439)
 
-## Problem
+## Why
 
-Today **one** `flotilla watch` daemon monitors the entire roster and routes **every**
-desk material-change edge to the **primary** `xo_agent` (the CoS). During a fleet-wide
-recycle the CoS absorbed a dozen finish-edges that belonged to squadron XOs — pane-state
-administration, liveness, and coordination at a scale the CoS cannot delegate.
+Two related bottlenecks surfaced during the 2026-07-06 fleet-wide recycle:
 
-The operator directive (2026-07-06, via CoS): flotilla must become **stackable** — each
-XO administers change-detection, liveness, recycle, and pane recovery for **its own
-subtree**; the CoS is the top-of-stack XO; summaries roll up, **only escalations cross
-layers**. The operator's message was **cut off** at "addressing communication paths
-betw…"; the remainder is requested and will be folded into the design when it arrives.
+1. **Wrong layer (#438):** One `flotilla watch` daemon routes **every** desk
+   material-change edge to the **primary** `xo_agent` (CoS). The CoS absorbed ~10
+   finish-edges that belonged to squadron XOs — pane-state administration at a scale
+   it cannot span-of-control.
 
-## What changes
+2. **Wrong seat (#439):** Even when edges reach the right coordinator, **judgment
+   work** (merge gates, operator replies, design reads) is constantly preempted by
+   **mechanical interrupts** — liveness acks, finish-edge check-ins, busy-pane
+   retries, recycle failures. Each interrupt either preempts judgment or queues
+   behind it.
 
-An architecture shift (design + phased implementation) so the **roster federation graph**
-(`channels[].xo_agent` + `members[]`) drives **detector wake routing** and **escalation
-ownership**, not only visibility-synthesis routing (which already uses `AgentsBelow` /
-`AgentsAbove` / `OwningXO`).
+The operator directives (2026-07-06, via CoS):
 
-## Sibling issues (same lane, named in design)
+- **#438:** Flotilla must be **stackable** — each XO administers detector edges for
+  its own subtree; CoS is top-of-stack; summaries roll up, only escalations cross
+  layers. Message was **cut off** at "addressing communication paths betw…" —
+  remainder requested.
+- **#439:** Every XO/CoS gets an **assistant/adjutant** seat that fields its
+  interrupt stream first, handles mechanical items autonomously, and forwards only
+  judgment items as a batched digest; urgent items pass through immediately.
+
+**Design them together:** the adjutant is plausibly the **per-layer detector
+consumer** — scoped edges (#438) land on the adjutant, not the judgment seat.
+
+## What Changes
+
+One combined architecture (design + phased implementation):
+
+| Pattern | What it answers |
+|---------|----------------|
+| **Stackable flotillas (#438)** | *Which* edges reach a layer (`OwningXO` / `AgentsBelow`) |
+| **Coordinator adjutant (#439)** | *Who* fields those edges first (adjutant → digest → XO) |
+
+## Sibling issues (same lane)
 
 | Issue | Relationship |
 |-------|----------------|
-| **#436** recycle abort escalation | Fold into owning-XO model: abort reaches the XO that owns the recycled desk, not only a log file |
-| **#437** coordinator self-rotation | Every coordinator seat (not only CoS) needs mechanical handoff + takeover; stackable model makes this a per-XO capability |
+| **#436** recycle abort escalation | Adjutant handles prescribed recovery; judgment escalation if recovery fails |
+| **#437** coordinator self-rotation | Every coordinator + adjutant pair needs mechanical chapter-close |
 
 ## Scope
 
-**In (this change — design gate):**
+**In (design gate):**
 
-- `design.md`: current detector/ack topology map, three approaches, recommended phased plan
-- Per-XO detector scoping via existing `OwningXO` / `AgentsBelow`
-- Escalation path (recycle abort, wedged desk, crash) aligned to owning layer
-- Migration story for a live federated fleet
-- Communication-paths section with **PENDING** operator clause flagged
+- Combined `design.md`: topology map, stackable routing, adjutant interrupt model,
+  authority boundary, digest + urgent-passthrough, migration
+- Roster binding for adjutant ↔ coordinator (minimal schema)
+- Communication-paths section with **PENDING** operator clause (#438 cut-off)
 
-**Out (implementation — follow-on PRs after operator gate):**
+**Out (post-gate implementation):**
 
-- Code changes to `internal/watch/detector.go` wake routing
-- Per-XO ack/settle sidecar files
-- `flotilla recycle` abort inject (#436)
-- `flotilla recycle --self` (#437)
-- Nested multi-daemon topology (cross-host; named as Phase 3 option)
+- Detector wake routing to adjutant when configured
+- Adjutant mechanical handlers (ack, retry, PR sweep, abort)
+- Digest delivery seam to coordinator
+- #436 / #437 implementation PRs
 
 ## Success criteria (design gate)
 
-1. A reader coming cold from `main` can diagram today's topology and the proposed stack.
-2. The recommended approach reuses roster hierarchy — no parallel ownership model.
-3. #436 and #437 are explicitly positioned in the escalation / rotation story.
-4. Migration is incremental (feature-flag or phased rollout), not a fleet-stop cutover.
-5. Generic examples only (`xo`, `alpha-xo`, `backend` from `flotilla.example.json`).
+1. Reader can diagram today vs the combined stack + adjutant model.
+2. #438 routing and #439 interrupt handling are one story, not two silos.
+3. Authority boundary is explicit (adjutant mechanical yes; gate/merge/operator-reply no).
+4. Urgent passthrough criteria named (operator messages, timed windows).
+5. Generic examples only (`xo`, `alpha-xo`, `alpha-adj` from `flotilla.example.json` shape).

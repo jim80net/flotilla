@@ -1,6 +1,9 @@
-# Design — stackable flotillas (#438)
+# Design — stackable flotillas + coordinator adjutants (#438 + #439)
 
 **Status:** Design-only (operator-direct, 2026-07-06). Implementation follows operator gate.
+
+This document treats **#438** (which edges reach which layer) and **#439** (who fields
+those edges) as **one architecture** — the adjutant is the per-layer detector consumer.
 
 ## Operator input — pending clause
 
@@ -15,11 +18,18 @@ beyond what is grounded here without operator affirmation.
 
 ---
 
-## The gap, stated in one line
+## The gap, stated in two lines
 
-The change-detector is a **fleet-wide** state machine with a **single clock XO**; every
-material desk transition wakes that one coordinator, while the roster already encodes a
-**tree of XOs** that should each administer their own subtree.
+1. **#438 — wrong layer:** The change-detector is a **fleet-wide** state machine with a
+   **single clock XO**; every material desk transition wakes that one coordinator, while
+   the roster already encodes a **tree of XOs** that should each administer their own
+   subtree.
+
+2. **#439 — wrong seat:** Coordinators doing **judgment** (merge gates, operator replies,
+   design reads) are constantly interrupted by **mechanical** edges (liveness acks,
+   finish-edge check-ins, busy retries, recycle aborts). During the 2026-07-06 recycle the
+   CoS absorbed ~10 finish-edges mid-investigation — even correct-layer routing would still
+   pollute the judgment seat unless something fields mechanical work first.
 
 ---
 
@@ -88,38 +98,52 @@ correct; **silent** was not — the coordinator learned only by reading the scri
 
 ---
 
-## Target topology (stackable flotilla)
+## Target topology (stackable flotilla + adjutant pair)
 
 ### Mental model
 
-A **flotilla is stackable**: each layer is the same shape — an XO coordinates its charges,
-administers detector edges for **its subtree**, rolls summaries up, and escalates only what
-its layer cannot resolve. The CoS is **not a different species**; it is the **top-of-stack
-XO**.
+A **flotilla is stackable**: each layer is the same shape — a **coordinator pair**
+(judgment seat + adjutant) administers detector edges for **its subtree**, rolls summaries
+up, and escalates only what its layer cannot resolve. The CoS is **not a different
+species**; it is the **top-of-stack coordinator** with its own adjutant.
 
 ```
-                    ┌──────────────┐
-                    │  CoS (meta)  │  ← primary xo_agent / top of stack
-                    └──────┬───────┘
-           ┌───────────────┼───────────────┐
-           ▼               ▼               ▼
-    ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
-    │  alpha-xo   │ │  beta-xo    │ │  gamma-xo   │  ← project XOs
-    └──────┬──────┘ └──────┬──────┘ └─────────────┘
-           ▼               ▼
-      ┌─────────┐     ┌─────────┐
-      │ backend │     │ frontend│  ← boats
-      └─────────┘     └─────────┘
+                         ┌──────────────┐
+                         │  xo (meta)   │  judgment — merge gates, operator replies
+                         └──────┬───────┘
+                                │ digest (batched) + urgent (immediate)
+                         ┌──────▼───────┐
+                         │  xo-adj      │  adjutant — fields interrupt stream first
+                         └──────┬───────┘
+                ┌───────────────┼───────────────┐
+                ▼               ▼               ▼
+         ┌─────────────┐ ┌─────────────┐
+         │  alpha-xo   │ │  beta-xo    │  judgment seats (coordinators)
+         └──────┬──────┘ └──────┬──────┘
+                │               │
+         ┌──────▼──────┐ ┌──────▼──────┐
+         │ alpha-adj   │ │  beta-adj   │  adjutants — mechanical IC
+         └──────┬──────┘ └─────────────┘
+                ▼
+           ┌─────────┐
+           │ backend │  boats
+           └─────────┘
+
+Detector ──► AdjutantFor(OwningXO(A))   [when adjutant configured]
+         └──► OwningXO(A)               [fallback: no adjutant]
+Adjutant ──► mechanical handle locally OR batched digest ──► coordinator
+Urgent     ──► bypass adjutant ──► coordinator immediately
 ```
 
-**Routing rule (material edges):** a material change on agent `A` wakes
-`OwningXO(A, primaryXO)` — already defined in `roster.Config.OwningXO` for cap escalation.
-The primary XO receives material wakes only for agents **directly below** it in the
-federation graph (its `AgentsBelow(meta)`), not for every leaf in the fleet.
+**Routing rule (#438):** a material change on agent `A` is scoped to
+`OwningXO(A, primaryXO)` — already defined in `roster.Config.OwningXO`.
 
-**Escalation rule:** an event the owning XO cannot resolve (recycle abort, sustained down,
-cross-squadron blocker) **bubbles one layer** via `AgentsAbove(owner)[0]` — same graph,
-opposite direction.
+**Consumer rule (#439):** when the owning coordinator has a configured adjutant, the wake
+lands on the **adjutant** first; the coordinator sees only digest + urgent items.
+
+**Escalation rule:** mechanical items the adjutant cannot resolve (recycle abort after
+prescribed recovery fails, sustained child-XO down) **bubble one layer** to the parent's
+adjutant (or coordinator if no adjutant) via `AgentsAbove(owner)[0]`.
 
 ---
 
@@ -171,7 +195,135 @@ finish-history (#138) forces it. **C** is the explicit sequence: A → (#436,#43
 
 ---
 
-## Recommended approach: **C** (A now, B later)
+## Recommended approach: **C + adjutant pair** (scoped routing now, adjutant as consumer)
+
+Ship **A** (scoped wake routing) and **adjutant-as-consumer** together in Phase 1 when
+both flags are enabled. Defer nested daemons (**B**) to Phase 5.
+
+---
+
+## Coordinator adjutant (#439)
+
+### Role
+
+An **adjutant** (assistant seat) per coordinator is a **lightweight execution-tier
+session** that sits between the detector and the judgment coordinator. It is the
+**direct consumer** of that layer's interrupt stream.
+
+| Stream item | Adjutant action | Coordinator sees |
+|-------------|-----------------|------------------|
+| Liveness ping / ack obligation | Touch `flotilla-<xo>-alive` mechanically | Nothing (unless adjutant misses K acks → parent escalation) |
+| Finish-edge (`Working→Idle`) | Note in layer ledger; optional `flotilla result` snapshot | Digest line only if judgment needed (PR surfaced, blocker, operator-decision marker) |
+| Busy-pane retry (`send` refused) | Retry with backoff; log outcome | Digest if still busy after cap |
+| Surfaced PR sweep | `gh pr list` / backlog scan for subtree; nudge owning desk | Digest: "N PRs awaiting review" with pointers |
+| Recycle abort (#436) | Run prescribed `resume --force` or escalate | Digest if recovery fails or timed window applies |
+| Operator message (relay) | **Urgent passthrough** — forward immediately | Full message, no batching |
+| Timed trading window | **Urgent passthrough** — roster `urgent_window` match | Full alert, no batching |
+| Merge gate / operator reply / spend | Never act | Digest item tagged `judgment-required` |
+
+### Authority boundary (load-bearing)
+
+**Adjutant MAY (mechanical, reversible):**
+
+- Touch liveness/settle markers on behalf of its coordinator layer
+- Retry `flotilla send` to subtree desks when pane was busy
+- Run read-only probes (`flotilla result`, `flotilla status`, `gh pr view`)
+- Execute prescribed recovery commands explicitly named in escalation text (`resume --force`)
+- Append to layer-local mechanical ledger (finish-edge log, retry log)
+
+**Adjutant MAY NOT (judgment):**
+
+- Merge PRs or self-gate work (no-self-merge applies to coordinators; adjutant is not a coordinator)
+- Reply to operator on judgment questions
+- Authorize spend or irreversible actions
+- Dispatch new work not already authorized in durable state
+- Rotate or recycle the judgment coordinator without explicit escalation
+
+### Harness allocation (design fork — pick at implement gate)
+
+| Option | Shape | Pros | Cons |
+|--------|-------|------|------|
+| **D1. Grok adjutant (recommended)** | `surface: grok` workhorse per `alpha-adj` | Matches harness-allocation doctrine (judgment on Claude, execution on grok); LLM handles ambiguous mechanical cases | Token cost per layer |
+| **D2. Rule-engine subset** | Go daemon rules for ack/retry; LLM only for sweep | Cheapest for pure mechanical | Two codepaths; ambiguous cases need fallback |
+| **D3. Hybrid** | Rules for ack + ping; grok adjutant for sweep/digest composition | Best cost/coverage tradeoff | More moving parts |
+
+**Recommendation:** **D1** for P0 (one harness path, dogfood grok workhorses); extract
+mechanical rules to D3 incrementally if cost bites.
+
+### Digest vs urgent passthrough
+
+**Digest (batched):** Adjutant accumulates judgment-tagged items in
+`<roster-dir>/flotilla-<xo>-digest.md` (or in-memory with durable flush). Delivers to
+coordinator when:
+
+- Digest sub-cadence fires (default: same as `heartbeat_interval` for that layer), OR
+- N items accumulated (default: 5), OR
+- Coordinator is idle/settled and digest is non-empty
+
+Digest shape (illustrative):
+
+```
+[adjutant digest — alpha-xo layer]
+
+MECHANICAL (handled): 3 finish-edges logged; 2 busy-retries succeeded; liveness acked.
+
+JUDGMENT (3):
+  • backend PR #412 surfaced — CI green, awaiting alpha-xo review
+  • frontend [awaiting-auth] spend gate on data feed
+  • macro-desk recycle abort — resume --force failed; needs coordinator
+```
+
+**Urgent passthrough (immediate, no batching):**
+
+1. **Operator messages** — relay targets coordinator (or coordinator's channel with
+   `@xo`); adjutant does NOT hold operator traffic. Implementation: relay `onAccepted`
+   routes operator-origin messages to **coordinator pane**, not adjutant. Adjutant
+   stream is detector/recycle/heartbeat class only.
+2. **Timed trading windows** — roster `urgent_windows[]` (new, optional): wall-clock
+   windows where any subtree material edge or abort is urgent-passthrough to coordinator.
+   Example: `{ "name": "open-bell", "cron": "…", "subtree": "alpha-xo" }`.
+
+### Roster binding (minimal schema)
+
+```jsonc
+// flotilla.example.json shape — generic names only
+{
+  "agents": [
+    { "name": "xo" },
+    { "name": "xo-adj", "surface": "grok", "adjutant_for": "xo" },
+    { "name": "alpha-xo", "surface": "claude-code" },
+    { "name": "alpha-adj", "surface": "grok", "adjutant_for": "alpha-xo" },
+    { "name": "backend" }
+  ]
+}
+```
+
+Resolution: `AdjutantFor(coordinator)` scans agents for `adjutant_for == coordinator`.
+Inverse: `CoordinatorFor(adj)` for liveness file naming. No adjutant configured ⇒ wakes
+go to coordinator directly (backward compatible).
+
+**Channel topology:** Adjutants are **fleet-internal** — no dedicated Discord channel
+(pr-rep pattern: member of fleet-command only, or no channel). Tier-1 mirror posts
+adjutant turn-finals only when judgment-relevant (opt-in) or to coordinator channel under
+adjutant webhook — **defer to implement gate**; default silent.
+
+### Adjutant as detector consumer (the #438 + #439 join)
+
+Today's `wake()` targets primary XO. Proposed routing chain:
+
+```
+externalMaterial(prev,cur)
+  → group reasons by OwningXO(agent)
+  → target := AdjutantFor(owner) ?? owner
+  → WakeInterrupt(target, Material, reasons⊆subtree)
+```
+
+`WakeInterrupt` is an extension of the existing `WakeAgent` parallel seam (today:
+`WakeSynthesis` only). Prompt carries the **adjutant contract** (mechanical-first
+discipline + digest rules), seeded as a `heartbeat-skill` or identity block.
+
+Liveness ping for layer: when `stackable_wakes` + adjutant enabled, ping targets
+**adjutant**; adjutant touches coordinator's `flotilla-<xo>-alive` as mechanical duty.
 
 ---
 
@@ -179,16 +331,18 @@ finish-history (#138) forces it. **C** is the explicit sequence: A → (#436,#43
 
 ### Wake routing table
 
-| Event | Today | Proposed |
-|-------|-------|----------|
-| Leaf `backend` Working→Idle | Wake primary XO | Wake `OwningXO(backend)` (= `alpha-xo`) |
-| `alpha-xo` Working→Idle | Wake primary XO | Self-continuation on `alpha-xo`; mark CoS owed synthesis (existing B2) |
-| `backend` entered Shell (crash) | Wake primary XO | Wake `OwningXO(backend)` |
-| Provider rate-limit on `frontend` | Wake primary XO | Wake `OwningXO(frontend)` |
-| External signal file | Wake primary XO | Wake **primary XO only** (fleet-wide signal stays at top) |
-| Cold-start reassess | Wake primary XO | Wake **primary XO only** (conservative fleet boot) |
-| Desk heartbeat cap wedge | Alert names owner | **Also** inject wake to `OwningXO` with prescribed action |
-| Recycle phase-2 abort (#436) | Log only | Inject to `OwningXO(recycled)` with phase + recovery cmd |
+| Event | Today | Proposed (stackable + adjutant) |
+|-------|-------|--------------------------------|
+| Leaf `backend` Working→Idle | Wake primary XO | Wake `AdjutantFor(OwningXO(backend))` — adjutant notes + digest |
+| `alpha-xo` Working→Idle | Wake primary XO | Self-continuation on `alpha-xo`; synthesis owed to parent (B2) |
+| `backend` entered Shell (crash) | Wake primary XO | Wake layer adjutant; urgent if `urgent_windows` match |
+| Provider rate-limit on `frontend` | Wake primary XO | Wake layer adjutant; retry/switch mechanical |
+| Liveness ping | Wake primary XO | Wake layer adjutant; adjutant acks coordinator alive file |
+| External signal file | Wake primary XO | Wake **top-layer adjutant or xo** only |
+| Cold-start reassess | Wake primary XO | Wake **top-layer adjutant or xo** only |
+| Desk heartbeat cap wedge | Alert names owner | Adjutant wake + loud alert; digest to coordinator if unwedged |
+| Recycle phase-2 abort (#436) | Log only | Inject to layer adjutant; mechanical recovery → digest on failure |
+| Operator relay message | To addressed agent | To **coordinator** (urgent passthrough — bypass adjutant) |
 
 ### Subtree membership (reuse roster — no new schema)
 
@@ -240,20 +394,18 @@ boat event ──► OwningXO (project-XO)
                         • operator-decision / spend / irreversible (existing doctrine)
 ```
 
-### #436 — recycle abort (fold into owning-XO model)
+### #436 — recycle abort (adjutant handles, coordinator judges)
 
 When `flotilla recycle <agent>` exits non-zero:
 
-1. Resolve `owner := OwningXO(agent, primaryXO)`.
-2. Inject a **material-class** message to `owner`'s pane (same injector, `KindDetector` or
-   new `KindEscalation`):
-   - agent name, phase reached, stderr summary, prescribed `resume --force` command.
-3. Mirror to operator channel **under owner's webhook** (not only script log).
+1. Resolve `owner := OwningXO(agent, primaryXO)` and `target := AdjutantFor(owner) ?? owner`.
+2. Inject escalation to `target` (adjutant prompt: attempt prescribed recovery mechanically).
+3. On recovery success: log to mechanical ledger; no coordinator wake.
+4. On recovery failure or timed window: **urgent passthrough** digest item to coordinator.
+5. Mirror to operator channel under layer webhook (not only script log).
 
-Default-on when `FLOTILLA_SELF` or roster flag set; `--no-escalate` for scripting escape hatch.
-
-**Acceptance (#436):** phase-2 abort during unattended recycle reaches the owning XO without
-log archaeology.
+**Acceptance (#436):** phase-2 abort during unattended recycle reaches the layer adjutant
+without log archaeology; coordinator woken only if adjutant cannot recover.
 
 ### #437 — coordinator self-rotation (sibling)
 
@@ -293,13 +445,15 @@ only a Discord alert the primary may miss.
 | XO → CoS rollup | Visibility synthesis Tier 3 | `WakeSynthesis` → meta |
 | XO → XO | `flotilla send` | Peer coordination (doctrine: prefer hierarchy) |
 
-### Proposed additions (P0/P1 — grounded in stackable model)
+### Proposed additions (P0/P1 — stackable + adjutant)
 
 | Direction | Mechanism |
 |-----------|-----------|
-| Detector → owning XO | Scoped `WakeMaterial` (this design) |
-| Recycle abort → owning XO | #436 inject |
-| Child XO → parent XO escalation | `flotilla send` or auto-inject on sustained failure |
+| Detector → layer adjutant | Scoped `WakeInterrupt` → `AdjutantFor(OwningXO)` |
+| Adjutant → coordinator | Batched digest (judgment items) |
+| Operator → coordinator | Relay urgent passthrough (bypass adjutant) |
+| Recycle abort → layer adjutant | #436 inject; mechanical recovery first |
+| Child layer → parent layer | Adjutant escalation digest; coordinator if unresolvable |
 | CoS → project-XO tasking | Existing relay + send (unchanged) |
 
 ### [PENDING] Operator clause — cross-layer communication
@@ -328,10 +482,12 @@ Likely intent ( **hypothesis only — do not implement until operator affirms** 
 | Phase | Deliverable | Fleet impact |
 |-------|-------------|--------------|
 | **0** | This design + operator gate | None |
-| **1** | Scoped material wakes (`stackable_wakes`) | Project-XOs start receiving their subtree edges; CoS quietens |
-| **2** | Per-XO ack/settle/liveness | Each XO accountable for its own heartbeat; CoS alerted when child XO down |
-| **3** | #436 recycle abort inject | Unattended recycle failures surface to owning XO |
-| **4** | #437 `recycle --self` | Coordinator rotations mechanical at every layer |
+| **1a** | `stackable_wakes` — scoped routing | Subtree edges scoped to owning layer |
+| **1b** | `adjutant_for` binding + wake to adjutant | Mechanical stream fields adjutant; coordinator digests |
+| **1c** | Operator urgent passthrough | Relay bypasses adjutant for operator messages |
+| **2** | Per-layer ack/settle/liveness via adjutant | Adjutant acks coordinator alive file |
+| **3** | #436 recycle abort → adjutant | Mechanical recovery before coordinator wake |
+| **4** | #437 `recycle --self` | Coordinator + adjutant chapter-close pairs |
 | **5** (optional) | Nested daemons per host | Cross-host / hard isolation |
 
 ### Cutover checklist (Phase 1)
@@ -357,26 +513,29 @@ Likely intent ( **hypothesis only — do not implement until operator affirms** 
 
 | Risk | Mitigation |
 |------|------------|
-| Wake storm to many XOs one tick | Group reasons per owner; one wake per owner per tick (existing synthesis debounce pattern) |
-| Project-XO idle while subtree active | Material edges wake project-XO; synthesis cadence provides rollup; CoS sees Tier 3 |
-| Per-XO liveness false wedge | Separate ack files; child-down escalates to parent after K misses |
+| Wake storm to many XOs one tick | Group per owner; one adjutant wake per layer per tick |
+| Adjutant acts on judgment item | Authority boundary + prompt contract; no merge in adjutant identity |
+| Coordinator starved of mechanical context | Digest includes "handled" summary + judgment queue |
+| Operator message delayed by digest | Urgent passthrough bypasses adjutant entirely |
+| Per-XO liveness false wedge | Adjutant acks coordinator file; child-down escalates to parent adjutant |
 | Operator PENDING clause changes comms | Flag section; no speculative routing beyond table above |
 
 ---
 
 ## Verification plan (post-implementation)
 
-1. **Routing:** `backend` finish → wake enqueued to `alpha-xo` only (unit test on reason grouping).
-2. **CoS quiet:** fleet-wide recycle simulation — CoS wake count ≪ desk count.
-3. **#436:** forced phase-2 abort → owning XO pane receives inject (integration test with fake injector).
-4. **Legacy star:** single-XO roster — all edges still wake `xo`.
-5. **Synthesis regression:** B2 wakes unchanged (existing `detector_synthesis_test.go`).
+1. **Routing:** `backend` finish → wake enqueued to `alpha-adj` when `adjutant_for` set.
+2. **CoS quiet:** fleet-wide recycle — CoS/co-adj wake count ≪ desk count; coordinator gets digest not N interrupts.
+3. **#436:** phase-2 abort → `alpha-adj` receives inject; coordinator woken only on recovery failure.
+4. **Urgent:** operator relay to `alpha-xo` bypasses `alpha-adj`.
+5. **Legacy star:** no adjutant → edges wake `xo` (unchanged).
+6. **Synthesis regression:** B2 wakes unchanged (`detector_synthesis_test.go`).
 
 ---
 
 ## References
 
-- GitHub **#438** (this change), **#436** (recycle abort), **#437** (coordinator self-rotation)
+- GitHub **#438** (stackable), **#439** (adjutant), **#436** (recycle abort), **#437** (self-rotation)
 - `docs/visibility.md` — federation graph / AgentsBelow
 - `docs/ARCHITECTURE.md` — single watch daemon
 - `internal/roster/synthesis.go` — `OwningXO`, `AgentsBelow`, `AgentsAbove`
