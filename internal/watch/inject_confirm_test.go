@@ -100,6 +100,26 @@ func TestInjectorBusyRelayRepeatsStaleEscalation(t *testing.T) {
 	}
 }
 
+func TestInjectorDetectorClaimAbortOnBusyDrop(t *testing.T) {
+	var aborted []string
+	r := newRig(surface.ErrBusy)
+	r.in.SetDetectorClaimHooks(nil, func(key string) { aborted = append(aborted, key) })
+	r.in.deliver(Job{Agent: "frontend", Kind: KindDetector, ClaimKey: "gate:[blocked] sign-off"})
+	if len(aborted) != 1 || aborted[0] != "gate:[blocked] sign-off" {
+		t.Fatalf("aborted = %v, want one abort for decision-brief claim key", aborted)
+	}
+}
+
+func TestInjectorDetectorClaimConfirmOnDelivery(t *testing.T) {
+	var confirmed []string
+	r := newRig(nil)
+	r.in.SetDetectorClaimHooks(func(key string) { confirmed = append(confirmed, key) }, nil)
+	r.in.deliver(Job{Agent: "frontend", Kind: KindDetector, ClaimKey: "gate:[blocked] sign-off"})
+	if len(confirmed) != 1 || confirmed[0] != "gate:[blocked] sign-off" {
+		t.Fatalf("confirmed = %v, want one confirm for decision-brief claim key", confirmed)
+	}
+}
+
 func TestInjectorDropsBusyTick(t *testing.T) {
 	// A heartbeat/detector tick is time-relative: a busy OR transient result DROPS it (the next
 	// tick re-evaluates), never deferred, never escalated.

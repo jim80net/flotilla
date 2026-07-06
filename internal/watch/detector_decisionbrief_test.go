@@ -40,7 +40,7 @@ func TestDetectorDecisionBriefOnTick(t *testing.T) {
 
 // Production wires MirrorDispatch = go run(); overlapping ticks must not double-fire
 // the hook. Each tick still invokes DecisionBriefOnTick once; concurrency safety
-// lives in decisionbrief.Tracker.TryClaim (see cmd/flotilla/watch_decisionbrief_test.go).
+// lives in decisionbrief.Tracker.TryBeginDispatch (see cmd/flotilla/watch_decisionbrief_test.go).
 func TestDetectorDecisionBriefAsyncOverlappingTicks(t *testing.T) {
 	var (
 		mu    sync.Mutex

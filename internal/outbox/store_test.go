@@ -83,7 +83,10 @@ func TestCorruptPreservedOnUpsert(t *testing.T) {
 		t.Fatal(err)
 	}
 	NewStore(path).Upsert(Entry{ID: "1", Sender: "xo", Recipient: "cos", Message: "x", EnqueuedAt: time.Now()})
-	entries, _ := os.ReadDir(dir)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var hasCorrupt bool
 	for _, e := range entries {
 		if strings.Contains(e.Name(), ".corrupt-") {
