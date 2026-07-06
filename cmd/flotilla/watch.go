@@ -1178,10 +1178,15 @@ func adjutantDualObservationContract(leader string) string {
 // When an adjutant is configured and the material is not urgent-class, items buffer at the seam.
 func enqueueLayerMaterialWake(cfg *roster.Config, rosterDir, primaryXO, owner string, reasons []string, primaryAckInstr, primarySettledPath string, enqueue func(watch.Job)) {
 	adjutant := cfg.AdjutantFor(owner)
-	leaderAckPath := roster.ResolveLayerClockPath(rosterDir, owner, "", "flotilla-xo-alive", "alive")
-	settledPath := roster.ResolveLayerClockPath(rosterDir, owner, "", "flotilla-xo-settled", "settled")
+	var leaderAckPath, settledPath string
 	if owner == primaryXO {
+		leaderAckPath = roster.ResolveLayerClockPath(rosterDir, owner, "", "flotilla-xo-alive", "alive")
 		settledPath = primarySettledPath
+	} else {
+		// Non-primary layers use canonical per-coordinator paths only — never alias onto
+		// the primary's legacy flotilla-xo-* files (#471).
+		leaderAckPath = roster.LayerAckPath(rosterDir, owner)
+		settledPath = roster.LayerSettledPath(rosterDir, owner)
 	}
 	bufferPath := roster.LayerBufferPath(rosterDir, owner)
 	ackInstr := primaryAckInstr

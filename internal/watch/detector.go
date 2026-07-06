@@ -1095,7 +1095,7 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 		pendingWakes = append(pendingWakes, deferredWake{kind: kind, reasons: reasons})
 	}
 	wakeLayer := func(owner string, kind WakeKind, reasons []string) {
-		woke = true
+		// Layer wakes must not advance the primary quiet/liveness clock (#470).
 		pendingWakes = append(pendingWakes, deferredWake{kind: kind, reasons: reasons, owner: owner})
 	}
 	deliverMaterial := func(reasons []string) {
@@ -1106,6 +1106,12 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 		primary, byOwner := groupMaterialByOwner(reasons, d.cfg.OwningXO)
 		if len(primary) > 0 {
 			wake(WakeMaterial, primary)
+		}
+		// Primary-owned desk material lands in byOwner[XOAgent], not the fleet-wide
+		// primary slice — route it through wake() so the primary clock advances (#487 P1).
+		if owned := byOwner[d.cfg.XOAgent]; len(owned) > 0 {
+			wake(WakeMaterial, owned)
+			delete(byOwner, d.cfg.XOAgent)
 		}
 		owners := make([]string, 0, len(byOwner))
 		for owner := range byOwner {
@@ -1150,6 +1156,19 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 	}
 
 	prev := d.snap
+
+	applyPrimaryMaterialClock := func(reasons []string) {
+		if !d.cfg.StackableWakes || d.cfg.OwningXO == nil {
+			d.selfCont = 0
+			cur.XOSettled = false
+			return
+		}
+		primary, byOwner := groupMaterialByOwner(reasons, d.cfg.OwningXO)
+		if len(primary) > 0 || len(byOwner[d.cfg.XOAgent]) > 0 {
+			d.selfCont = 0
+			cur.XOSettled = false
+		}
+	}
 
 	// 2b. Per-desk visibility mirror trigger: each NON-XO desk that completed a unit of work this
 	//     tick (a confirmed Working→Idle transition) is recorded for the post-unlock tail to mirror
@@ -1200,14 +1219,12 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 	//    settled XO and resets the self-continuation cap.
 	xoSeam := xoFinishedTurn(prev, cur, d.cfg.XOAgent)
 	if ext, reasons := externalMaterial(prev, cur, d.cfg.XOAgent); ext {
-		d.selfCont = 0
-		cur.XOSettled = false
+		applyPrimaryMaterialClock(reasons)
 		deliverMaterial(reasons)
 	} else if rateReasons, autoCandidates := d.rateLimitMaterialFromPendingLocked(); len(rateReasons) > 0 {
 		// 4b. Provider rate-limit (#204/#205): wake from the PREVIOUS tick's off-mutex probes;
 		// auto-switch candidates dispatch OFF d.mu in runAutoSwitch.
-		d.selfCont = 0
-		cur.XOSettled = false
+		applyPrimaryMaterialClock(rateReasons)
 		deliverMaterial(rateReasons)
 		pendingAutoSwitch = autoCandidates
 	} else if xoSeam && !cur.XOSettled {
