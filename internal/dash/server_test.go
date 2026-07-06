@@ -741,6 +741,29 @@ func TestDecisionsCountUnified451(t *testing.T) {
 	}
 }
 
+// TestBriefTableRenderMarkers450 locks GFM pipe-table support in the BRIEF renderer
+// (decision cards / respond modal / drawer): #447 gave the parade renderer tables, but
+// briefs — the surface built for structured decision content (cost tables, tradeoff
+// matrices) — still rendered raw pipes (#450). Same escape-first shape, ported.
+func TestBriefTableRenderMarkers450(t *testing.T) {
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/goals.js").Body.String()
+	for _, marker := range []string{
+		"isTableDelimiter", // header+delimiter detection (never mistakes prose pipes)
+		"splitTableRow",    // \|-aware cell splitting
+		"tableAligns",      // fixed {left,center,right} alignment set
+		"gm-table",         // the brief table emit
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js renderBrief must support GFM pipe tables (missing %q) — #450", marker)
+		}
+	}
+	if css := doGet(t, srv, "/static/dash.css").Body.String(); !strings.Contains(css, ".gm-table") {
+		t.Error("dash.css must style the brief table (.gm-table) — #450")
+	}
+}
+
 // TestDashInc5Shell405 locks the three shell items from #405 Inc 5:
 //   - Part A: Parade tab in the header nav that navigates to /parade (a navigation-out link).
 //   - Part B: Unseen-content dot on each tab, driven by per-browser localStorage signatures.

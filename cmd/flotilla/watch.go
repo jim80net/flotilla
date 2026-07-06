@@ -165,13 +165,15 @@ func cmdWatch(args []string) error {
 		eventPollInterval = d
 	}
 	rosterDir := filepath.Dir(*rosterPath)
-	defaultPath(ackPath, rosterDir, "flotilla-xo-alive")
+	// Per-coordinator clock sidecars (#439 phase 1b): canonical flotilla-<xo>-{alive,settled,awaiting}
+	// with legacy flotilla-xo-* fallback when that file already exists on disk.
+	*ackPath = roster.ResolveLayerClockPath(rosterDir, xo, *ackPath, "flotilla-xo-alive", "alive")
+	*awaitingPath = roster.ResolveLayerClockPath(rosterDir, xo, *awaitingPath, "flotilla-xo-awaiting", "awaiting")
+	*settledPath = roster.ResolveLayerClockPath(rosterDir, xo, *settledPath, "flotilla-xo-settled", "settled")
 	defaultPath(snapshotPath, rosterDir, "flotilla-detector-state.json")
 	defaultPath(cursorPath, rosterDir, "flotilla-relay-cursor.json")
 	defaultPath(queuePath, rosterDir, "flotilla-relay-queue.json")
 	defaultPath(unackedPath, rosterDir, "flotilla-unacked-alerted.json")
-	defaultPath(awaitingPath, rosterDir, "flotilla-xo-awaiting")
-	defaultPath(settledPath, rosterDir, "flotilla-xo-settled")
 	defaultPath(trackerPath, rosterDir, ".flotilla-state.md")
 
 	// Load secrets once: the bot token (gateway), the alert/notice webhook, and — kept for the
@@ -407,7 +409,7 @@ func cmdWatch(args []string) error {
 		continuationPrompt += ackInstr
 
 		primaryAdjutant := cfg.AdjutantFor(xo)
-		leaderAckPath := *ackPath
+		leaderAckPath := *ackPath // resolved per-coordinator path (legacy fallback when present)
 		layerBufferPath := roster.LayerBufferPath(rosterDir, xo)
 
 		drainAdjutantSeam := func() {

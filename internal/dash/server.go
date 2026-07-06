@@ -590,7 +590,11 @@ func ResolvePaths(cfg Config, rc *roster.Config) Config {
 		cfg.SnapshotPath = filepath.Join(dir, "flotilla-detector-state.json")
 	}
 	if cfg.AckPath == "" {
-		cfg.AckPath = filepath.Join(dir, "flotilla-xo-alive")
+		xo := rc.XOAgent
+		if xo == "" && len(rc.Agents) > 0 {
+			xo = rc.Agents[0].Name
+		}
+		cfg.AckPath = roster.ResolveLayerClockPath(dir, xo, "", "flotilla-xo-alive", "alive")
 	}
 	if cfg.BacklogPath == "" {
 		cfg.BacklogPath = filepath.Join(dir, ".flotilla-state.md")
