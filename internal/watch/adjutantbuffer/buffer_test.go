@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 )
 
@@ -91,24 +90,54 @@ func TestAppendAfterQuarantineCreatesFreshFile(t *testing.T) {
 	}
 }
 
-func TestSaveUsesUniqueTempNames(t *testing.T) {
+// Append is single-writer (watch detector thread). Sequential appends must preserve every item.
+func TestSequentialAppendPreservesAllItems(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "flotilla-xo-buffer.json")
-	var wg sync.WaitGroup
-	errs := make(chan error, 4)
-	for i := 0; i < 4; i++ {
-		wg.Add(1)
-		go func(n int) {
-			defer wg.Done()
-			errs <- Append(path, "xo", []string{string(rune('a' + n))})
-		}(i)
-	}
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		if err != nil {
+	want := []string{"a", "b", "c", "d"}
+	for _, r := range want {
+		if err := Append(path, "xo", []string{r}); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if got := Len(path); got != len(want) {
+		t.Fatalf("Len = %d, want %d (single-writer sequential appends must not lose items)", got, len(want))
+	}
+	f, ok, _, err := Peek(path)
+	if err != nil || !ok {
+		t.Fatalf("Peek: ok=%v err=%v", ok, err)
+	}
+	seen := make(map[string]bool, len(want))
+	for _, it := range f.Items {
+		seen[it.Reason] = true
+	}
+	for _, r := range want {
+		if !seen[r] {
+			t.Fatalf("missing reason %q after sequential appends; items=%+v", r, f.Items)
+		}
+	}
+}
+
+func TestLoadCorruptQuarantineRenameFailure(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "flotilla-xo-buffer.json")
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	_, quarantined, err := load(path)
+	if err == nil {
+		t.Fatal("expected error when quarantine rename fails")
+	}
+	if quarantined {
+		t.Fatal("quarantined must be false when rename fails")
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatal("corrupt file must remain when quarantine rename fails")
 	}
 }
 

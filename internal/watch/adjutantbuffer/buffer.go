@@ -23,6 +23,10 @@ type File struct {
 }
 
 // Append adds reasons to the buffer file, creating it when absent.
+//
+// Single-writer contract: the watch daemon's detector calls Append synchronously from one
+// goroutine per buffer path (one material-change wake at a time). Append is read-modify-write
+// and is not safe under concurrent writers — callers must serialize.
 func Append(path, leader string, reasons []string) error {
 	if path == "" || leader == "" || len(reasons) == 0 {
 		return nil
@@ -129,9 +133,9 @@ func load(path string) (File, bool, error) {
 		sidecar := path + ".corrupt-" + time.Now().UTC().Format("20060102T150405Z")
 		if renameErr := os.Rename(path, sidecar); renameErr != nil {
 			log.Printf("flotilla watch: adjutant buffer at %q is corrupt (%v) and rename to sidecar failed: %v", path, err, renameErr)
-		} else {
-			log.Printf("flotilla watch: adjutant buffer at %q is corrupt (%v); preserved as %q", path, err, sidecar)
+			return File{}, false, fmt.Errorf("corrupt buffer %q: %w (quarantine rename failed: %v)", path, err, renameErr)
 		}
+		log.Printf("flotilla watch: adjutant buffer at %q is corrupt (%v); preserved as %q", path, err, sidecar)
 		return File{}, true, nil
 	}
 	return f, false, nil
