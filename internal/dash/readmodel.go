@@ -15,6 +15,7 @@ package dash
 
 import (
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -240,14 +241,34 @@ type TopologyChannel struct {
 // no channels[]) yields an empty Channels with an explanatory Note.
 type TopologyDoc struct {
 	Channels []TopologyChannel `json:"channels"`
-	Note     string            `json:"note,omitempty"`
+	// Coordinators is the roster-authoritative set of coordinator agents (XOs + the CoS,
+	// per roster.IsCoordinator), sorted. The conversations rail uses it to keep the "Fleet
+	// Command" group to coordinators ONLY — a channel member that is not a coordinator groups
+	// under "Desks" instead (#421 follow-up). Empty when the roster names no coordinators.
+	Coordinators []string `json:"coordinators,omitempty"`
+	Note         string   `json:"note,omitempty"`
 }
 
-// BuildTopology renders the roster's effective bindings. Pure (reads cfg only).
+// BuildTopology renders the roster's effective bindings + the coordinator set. Pure (reads cfg only).
 func BuildTopology(cfg *roster.Config) TopologyDoc {
 	bindings := cfg.Bindings()
 	doc := TopologyDoc{Channels: make([]TopologyChannel, 0, len(bindings))}
+	// Collect the coordinator set from every candidate agent (channel XOs + members + the
+	// primary XO + CoS), filtered through the roster's single IsCoordinator definition so the
+	// rail can never diverge from the roster's notion of "coordinator".
+	coordSet := map[string]bool{}
+	addCoord := func(a string) {
+		if a != "" && !coordSet[a] && cfg.IsCoordinator(a) {
+			coordSet[a] = true
+		}
+	}
+	addCoord(cfg.XOAgent)
+	addCoord(cfg.CosAgent)
 	for _, ch := range bindings {
+		addCoord(ch.XOAgent)
+		for _, m := range ch.Members {
+			addCoord(m)
+		}
 		// Copy Members defensively: Bindings() shares the Config's slice header in
 		// the federation path (its documented read-only contract), and the board's
 		// JSON must not alias roster-owned memory.
@@ -259,6 +280,13 @@ func BuildTopology(cfg *roster.Config) TopologyDoc {
 			Members:   members,
 			Role:      ch.Role,
 		})
+	}
+	if len(coordSet) > 0 {
+		doc.Coordinators = make([]string, 0, len(coordSet))
+		for a := range coordSet {
+			doc.Coordinators = append(doc.Coordinators, a)
+		}
+		sort.Strings(doc.Coordinators)
 	}
 	if len(doc.Channels) == 0 {
 		doc.Note = "no channel bindings configured (a clock-only daemon: no channel_id and no channels[]) — there is no federation topology to render"

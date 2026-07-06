@@ -272,6 +272,39 @@ func TestBuildTopology_Federated(t *testing.T) {
 	}
 }
 
+// TestBuildTopology_Coordinators: the coordinator set is XOs + CoS only (roster.IsCoordinator);
+// a plain desk that is merely a MEMBER of the fleet-command channel is NOT a coordinator — this
+// is what keeps the rail's "Fleet Command" group to coordinators (#421 follow-up).
+func TestBuildTopology_Coordinators(t *testing.T) {
+	cfg, err := loadInlineRoster(t, `{
+		"xo_agent": "meta",
+		"cos_agent": "cos",
+		"agents": [{"name": "meta"}, {"name": "cos"}, {"name": "xo-a"}, {"name": "desk-x"}],
+		"channels": [
+			{"channel_id": "Cmeta", "xo_agent": "meta", "members": ["cos", "xo-a", "desk-x"], "role": "fleet-command"},
+			{"channel_id": "Ca", "xo_agent": "xo-a", "members": [], "role": "project"}
+		]
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := BuildTopology(cfg)
+	want := []string{"cos", "meta", "xo-a"} // sorted; desk-x (member-only) excluded
+	if len(doc.Coordinators) != len(want) {
+		t.Fatalf("coordinators = %v, want %v", doc.Coordinators, want)
+	}
+	for i, c := range want {
+		if doc.Coordinators[i] != c {
+			t.Errorf("coordinators[%d] = %q, want %q (full: %v)", i, doc.Coordinators[i], c, doc.Coordinators)
+		}
+	}
+	for _, c := range doc.Coordinators {
+		if c == "desk-x" {
+			t.Error("desk-x is a member-only desk and must NOT be a coordinator")
+		}
+	}
+}
+
 func TestBuildTopology_ClockOnly(t *testing.T) {
 	// No channel_id and no channels[] ⇒ no bindings, an explanatory note.
 	cfg, err := loadInlineRoster(t, `{"xo_agent": "xo", "agents": [{"name": "xo"}]}`)
