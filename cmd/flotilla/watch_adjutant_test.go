@@ -79,8 +79,9 @@ func TestAdjutantCharterPairingBody(t *testing.T) {
 }
 
 func TestLeaderCharterPairingBody(t *testing.T) {
-	got := leaderCharterPairingBody("alpha-xo", "alpha-adj", "/state/flotilla-alpha-xo-adjutant-charter.md")
-	for _, want := range []string{"alpha-xo", "alpha-adj", "adjutant-charter.md", "liveness ack"} {
+	const ack = "/state/legacy/flotilla-xo-alive"
+	got := leaderCharterPairingBody("alpha-xo", "alpha-adj", "/state/flotilla-alpha-xo-adjutant-charter.md", ack)
+	for _, want := range []string{"alpha-xo", "alpha-adj", "adjutant-charter.md", "liveness ack", ack} {
 		if !strings.Contains(got, want) {
 			t.Errorf("leader charter pairing missing %q\nfull: %s", want, got)
 		}

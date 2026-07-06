@@ -1094,14 +1094,14 @@ func adjutantCharterPairingBody(leader, adjutant, charterPath, leaderAckPath str
 }
 
 // leaderCharterPairingBody asks the coordinator to affirm the adjutant charter (#439 2.5).
-func leaderCharterPairingBody(leader, adjutant, charterPath string) string {
+func leaderCharterPairingBody(leader, adjutant, charterPath, leaderAckPath string) string {
 	return "[flotilla change-detector] First-presentation charter pairing with adjutant " + adjutant +
 		" — establish what " + adjutant + " may do without you.\n\n" +
 		"Your duty:\n" +
 		"1. Review " + adjutant + "'s proposed solo-authority bounds.\n" +
 		"2. Affirm or edit — especially mechanical handling, recovery attempts, and escalation thresholds.\n" +
 		"3. Ensure the written charter at " + charterPath + " includes liveness ack on evaluation ticks " +
-		"(touch flotilla-" + leader + "-alive; mandatory minimum).\n\n" +
+		"(touch " + leaderAckPath + "; mandatory minimum).\n\n" +
 		"This is a one-time pairing turn; buffered interrupts resume laminar flow after the charter lands."
 }
 
@@ -1130,9 +1130,11 @@ func adjutantBufferedNoteBody(leader string, n int) string {
 }
 
 // layerCharterMissing reports whether the first-presentation charter sidecar is absent.
+// Fail toward pairing: any stat error (not just NotExist) triggers re-negotiation rather
+// than silently treating an unreadable path as charter-present.
 func layerCharterMissing(charterPath string) bool {
 	_, err := os.Stat(charterPath)
-	return os.IsNotExist(err)
+	return err != nil
 }
 
 // enqueueAdjutantCharterPairing wakes adjutant+leader once when charter is missing (#439 2.5).
@@ -1152,7 +1154,7 @@ func enqueueAdjutantCharterPairing(adjutant, leader, rosterDir, leaderAckPath st
 	})
 	enqueue(watch.Job{
 		Agent:   leader,
-		Message: leaderCharterPairingBody(leader, adjutant, charterPath),
+		Message: leaderCharterPairingBody(leader, adjutant, charterPath, leaderAckPath),
 		Kind:    watch.KindDetector,
 	})
 }

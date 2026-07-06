@@ -37,14 +37,14 @@ func LayerAckPath(rosterDir, coordinator string) string {
 }
 
 // LayerSettledPath returns the canonical per-coordinator settle/idle marker path
-// (flotilla-<coordinator>-settled). Watch and status resolve the on-disk path via
+// (flotilla-<coordinator>-settled). Watch resolves the on-disk path via
 // ResolveLayerClockPath so legacy flotilla-xo-settled files keep working until migrated.
 func LayerSettledPath(rosterDir, coordinator string) string {
 	return layerClockPath(rosterDir, coordinator, "settled")
 }
 
 // LayerAwaitingPath returns the canonical per-coordinator awaiting-operator veto marker path
-// (flotilla-<coordinator>-awaiting). Watch and status resolve the on-disk path via
+// (flotilla-<coordinator>-awaiting). Watch resolves the on-disk path via
 // ResolveLayerClockPath so legacy flotilla-xo-awaiting files keep working until migrated.
 func LayerAwaitingPath(rosterDir, coordinator string) string {
 	return layerClockPath(rosterDir, coordinator, "awaiting")
