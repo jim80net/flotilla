@@ -29,8 +29,10 @@ recycle-then-ceremony). No special one-shot runner.
 
 ## Out of scope / unaffected
 
-- **#440** stackable flotillas + adjutant (P0, separate design — unaffected)
 - Subprocess / one-shot argv ceremony runner (#435 — withdrawn)
+
+**Cross-ref (#440, merged):** chapter-end detection/dispatch ownership lives on the adjutant
+evaluate step (evaluation-tick amendment confirmed on #439) — see `design.md` gate nits.
 
 ## Design-process requirement
 

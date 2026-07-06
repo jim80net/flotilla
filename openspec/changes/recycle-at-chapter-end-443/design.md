@@ -70,6 +70,30 @@ Implementation locus (TBD at gate): watch detector edges, coordinator `flotilla 
 `flotilla recycle --on-chapter-end` hook from CI — design gate picks one P0 signal (likely
 **PR merged** for execution desks).
 
+### Stacked-PR false positive (gate nit #1)
+
+Per-PR merge is a strong chapter-end *candidate* but a dangerous default trigger in stacked-PR
+workflows: merging PR *N* of an *M*-PR lane while PRs *N+1…M* remain open would recycle the desk
+mid-stack, destroying the worktree context the stack depends on and firing a false chapter-end.
+**Suppression rule (recommended):** chapter-end recycle fires only on **lane-done** — the
+dispatched lane (or stack) is fully merged/closed, backlog shows `[done]` on all in-flight items
+for that lane, and no sibling PR in the same stack remains open — not on **any-PR-merge**. If
+lane-done detection is not ship-ready in P0, carry **stacked-PR false positive** as a named open
+question with default posture *suggest-only* until lane-boundary semantics exist (may ride as P3).
+
+### Adjutant trigger ownership (gate nit #2)
+
+#440 is merged and the evaluation-tick amendment is confirmed: stale-leader timeout routes to the
+adjutant as ack→evaluate→act-by-tier, not a dead-man ack to the leader. In that world, **chapter-end
+detection and recycle dispatch ownership** belongs on the **adjutant evaluate step**, not on a blind
+per-PR webhook hitting the desk pane. The adjutant observes lane-done (stack suppression above),
+PR-at-gate, and settled backlog as part of evaluate; on lane-done it **schedules**
+`flotilla recycle <desk>` as a mechanical act-by-tier item (immediate for urgent-class, else at the
+leader's next seam with a brief naming the chapter closed). The change-detector remains the transport
+for material edges; the adjutant is the **policy consumer** that distinguishes "PR merged mid-stack"
+from "lane chapter actually ended." Coordinator seats: same evaluate step on the layer adjutant,
+pairing with #437 for `recycle --self`.
+
 ### 2. Ceremonies ride recycle (no special runner)
 
 ```
@@ -120,11 +144,15 @@ forks that re-open the #435 subprocess question.
 
 ## Open questions (operator gate)
 
-1. **Auto vs suggest:** should chapter-end recycle run unattended after PR merge, or wake the
+1. **Auto vs suggest:** should chapter-end recycle run unattended after lane-done, or wake the
    coordinator to confirm?
-2. **P0 signal:** PR-merged only for execution desks first, or lane-settled simultaneously?
+2. **P0 signal:** lane-done (preferred) vs PR-merged-only for execution desks first — if
+   lane-boundary detection slips P0, stacked-PR false positive stays open with suggest-only default.
 3. **Ceremony timing:** recycle immediately before each scheduled ceremony, or only when session
    age/chapter-count exceeds threshold?
+4. **Lane-done semantics (P3-eligible):** exact stack membership source (Graphite metadata,
+   branch naming, backlog lane id) — suppression rule is stated; binding mechanism may ride
+   implementation.
 
 ---
 
@@ -133,4 +161,4 @@ forks that re-open the #435 subprocess question.
 - GitHub **#443** (this design), **#436** (abort escalation), **#437** (coordinator self-rotation)
 - Closed **#435** / flotilla#443 — operator redirect text
 - `openspec/changes/archive/2026-06-23-desk-recycle/design.md` — recycle state machine
-- **#440** stackable/adjutant — parallel P0, unaffected
+- **#440** stackable/adjutant + evaluation-tick amendment — chapter-end trigger ownership (adjutant evaluate step)
