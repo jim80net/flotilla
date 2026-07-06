@@ -62,27 +62,20 @@ func TestDeskMirror_AppendsSessionLedgerOnPost(t *testing.T) {
 	}
 }
 
-// TestDeskMirror_SuppressKeepsPrivateLedgerSkipsPost locks #405 Inc 1: a firewall REFUSE gags
-// the PUBLIC Discord post, but the session-mirror ledger is a PRIVATE, loopback-only operator
-// surface — so the refused turn-final is STILL written to the private ledger (raw text + refuse
-// marker) while the public post is skipped. This is the fix for the "CoS thread empty" bug: the
-// coordinator's fleet-vocabulary-dense turn-finals were tripping REFUSE and vanishing from the
-// operator's own dash.
-func TestDeskMirror_SuppressKeepsPrivateLedgerSkipsPost(t *testing.T) {
+// TestDeskMirror_FleetInternalVocabPostsAndLedgers locks #465: deployment vocabulary on a
+// fleet-internal mirror path posts to the operator channel AND appends the dash ledger —
+// the partition firewall does not run on operator surfaces.
+func TestDeskMirror_FleetInternalVocabPostsAndLedgers(t *testing.T) {
 	dir := t.TempDir()
 	appended := false
 	var rec sessionmirror.Record
+	var posted string
 	m := deskMirror{
 		rosterDir: dir,
 		webhook:   func(string) (string, bool) { return "https://wh", true },
 		turnFinal: func(string) (string, bool, error) { return "leak acme-desk token", true, nil },
-		post: func(_, _, _ string) error {
-			t.Fatal("firewall refuse must NOT post to the public Discord egress")
-			return nil
-		},
-		logf:     func(string, ...any) {},
-		firewall: firewallTermSet(t, []string{"acme-desk"}, nil),
-		alert:    func(string) {},
+		post:      func(_, _, body string) error { posted = body; return nil },
+		logf:      func(string, ...any) {},
 		ledgerAppend: func(_, _ string, r sessionmirror.Record) error {
 			appended = true
 			rec = r
@@ -90,17 +83,17 @@ func TestDeskMirror_SuppressKeepsPrivateLedgerSkipsPost(t *testing.T) {
 		},
 	}
 	m.run("backend")
+	if posted != "leak acme-desk token" {
+		t.Fatalf("fleet-internal mirror must post deployment vocabulary; got %q", posted)
+	}
 	if !appended {
-		t.Fatal("firewall refuse must STILL append the PRIVATE (loopback-only) session-mirror ledger")
+		t.Fatal("fleet-internal mirror must append the session-mirror ledger")
 	}
 	if !strings.Contains(rec.Verbose, "leak acme-desk token") {
-		t.Errorf("the private ledger record must carry the RAW withheld turn-final so the operator sees it; Verbose=%q", rec.Verbose)
+		t.Errorf("ledger must carry the raw turn-final; Verbose=%q", rec.Verbose)
 	}
-	if !strings.Contains(rec.Debug.MirrorNote, "firewall refuse") {
-		t.Errorf("the private ledger record must mark WHY it was withheld from Discord; MirrorNote=%q", rec.Debug.MirrorNote)
-	}
-	if !rec.Suppressed {
-		t.Error("a firewall-refused record must be marked Suppressed:true so the dash can render 'withheld from public' honestly (#406 fix-forward)")
+	if rec.Suppressed {
+		t.Error("fleet-internal mirror must not mark Suppressed — firewall does not run here (#465)")
 	}
 }
 
@@ -229,7 +222,7 @@ func TestReaderModelInternal_DerivationForSessionMirror(t *testing.T) {
 	turn := "prose\n\n```reader-map\n" +
 		`{"audience":"operator","anchor":"A","delta":"D","decision":"ship it"}` +
 		"\n```"
-	d := readerModelInternal(turn, nil)
+	d := readerModelInternal(turn)
 	if d.body == turn {
 		t.Fatal("enveloped brief must render modeled info body")
 	}

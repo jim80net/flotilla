@@ -22,7 +22,6 @@ import (
 	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/idlehold"
 	"github.com/jim80net/flotilla/internal/launch"
-	"github.com/jim80net/flotilla/internal/readermap"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/stranded"
 	"github.com/jim80net/flotilla/internal/surface"
@@ -238,25 +237,6 @@ func cmdWatch(args []string) error {
 	}
 	alert := func(msg string) { post("flotilla-watch", "⚠️ "+msg) }
 
-	// Load the partition firewall (Pillar D) ONCE — the runtime backstop that keeps a
-	// deployment specific from leaking into a desk's published turn-final. A broken
-	// term list (an uncompilable denylist regex) is FATAL, not silently skipped: a
-	// silent partition hole is the exact failure this guard exists to prevent (the same
-	// fail-fast posture as a configured-but-broken secrets file above).
-	firewall, err := LoadFirewall()
-	if err != nil {
-		return err
-	}
-	// Make the firewall's configuration VISIBLE at boot — a silently-unconfigured
-	// deployment denylist (e.g. the daemon's cwd has no .flotilla list and no env is
-	// set) would otherwise look like the runtime guard is protecting when only the
-	// built-in generic + canonical patterns are on.
-	if dCfg, wCfg := firewall.Configured(); dCfg || wCfg {
-		fmt.Printf("flotilla watch: partition firewall — deployment denylist=%v, warnlist=%v (generic + canonical patterns always on)\n", dCfg, wCfg)
-	} else {
-		fmt.Println("flotilla watch: partition firewall — NO deployment denylist/warnlist configured (only built-in generic + canonical patterns; set .flotilla/private-denylist or $FLOTILLA_PRIVATE_DENYLIST)")
-	}
-
 	// confirm turns "the tmux keystrokes ran" into "a turn started": it idle-gates, submits,
 	// confirms the Idle→Working edge, retries Enter-only (never re-pasting), and returns a typed
 	// error the Injector dispatches on (ErrBusy → defer; failure → loud alert). Closing the
@@ -308,7 +288,7 @@ func cmdWatch(args []string) error {
 	// channel's XO including the primary — #177 unified them), watch that XO's session store for the
 	// reply and route it back to the channel — the flotilla-native return leg (the primary XO's old
 	// host-local Stop-hook is retired). nil when secrets are absent (no webhooks to resolve).
-	replyRtr := newHotlineReplyRouter(context.Background(), cfg, secrets, tr, firewall, alert)
+	replyRtr := newHotlineReplyRouter(context.Background(), cfg, secrets, tr, alert)
 	if replyRtr != nil {
 		defer replyRtr.Stop() // cancel in-flight hotline watchers on shutdown (runs after <-ctx.Done())
 	}
@@ -690,8 +670,8 @@ func cmdWatch(args []string) error {
 				defer txn.Release()
 				return surface.RotateContext(xoDrv, pane)
 			},
-			MirrorOnFinish:            deskMirrorOnFinish(cfg, secrets, tr, firewall, alert, rosterDir),
-			CoordinatorMirrorOnFinish: coordinatorMirrorOnFinish(cfg, firewall, alert, rosterDir),
+			MirrorOnFinish:            deskMirrorOnFinish(cfg, secrets, tr, rosterDir),
+			CoordinatorMirrorOnFinish: coordinatorMirrorOnFinish(cfg, rosterDir),
 			AdjutantFor:               func(owner string) string { return cfg.AdjutantFor(owner) },
 			AdjutantSeamOnFinish:      drainAdjutantSeamFor,
 			IdleHoldOnFinish:          idleHoldOnFinish(cfg, idleHoldTracker, injector.Enqueue),
@@ -1374,15 +1354,13 @@ func readDeskTurnFinal(cfg *roster.Config, agent string) (text string, ok bool, 
 // primary clock XO: ledger-only session-mirror append with readerModelInternal derivation. Discord
 // posting is deliberately omitted — the XO Stop hook (deploy/flotilla-xo-discord-mirror.sh) already
 // posts the turn-final via flotilla notify, and a second deskMirror post would double-publish.
-func coordinatorMirrorOnFinish(cfg *roster.Config, firewall *readermap.TermSet, alert func(string), rosterDir string) func(agent string) {
+func coordinatorMirrorOnFinish(cfg *roster.Config, rosterDir string) func(agent string) {
 	if rosterDir == "" {
 		return nil
 	}
 	return func(agent string) {
 		m := deskMirror{
 			ledgerOnly: true,
-			firewall:   firewall,
-			alert:      alert,
 			rosterDir:  rosterDir,
 			turnFinal: func(a string) (string, bool, error) {
 				return readDeskTurnFinal(cfg, a)
@@ -1393,14 +1371,12 @@ func coordinatorMirrorOnFinish(cfg *roster.Config, firewall *readermap.TermSet, 
 	}
 }
 
-func deskMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr transport.Transport, firewall *readermap.TermSet, alert func(string), rosterDir string) func(agent string) {
+func deskMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr transport.Transport, rosterDir string) func(agent string) {
 	if secrets == nil || tr == nil {
 		return nil
 	}
 	return func(agent string) {
 		m := deskMirror{
-			firewall:  firewall,
-			alert:     alert,
 			rosterDir: rosterDir,
 			webhook: func(a string) (string, bool) {
 				url, err := secrets.Webhook(a)

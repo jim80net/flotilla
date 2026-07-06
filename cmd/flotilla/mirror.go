@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -30,16 +29,6 @@ type deskMirror struct {
 	post func(url, username, content string) error
 	// logf writes exactly one journald decision line per mirror.
 	logf func(format string, args ...any)
-	// firewall is the compiled partition firewall (Pillar D); nil ⇒ no firewall
-	// configured (the P0 behavior — nothing suppresses). It is STAGE 1 of the
-	// pre-post pipeline: a Refuse SUPPRESSES the post (a private leak is never
-	// published); a Warn publishes anyway with an advisory.
-	firewall *readermap.TermSet
-	// alert raises the operator-visible signal (the daemon's existing alert-webhook
-	// line) when the firewall withholds a leaking post or flags domain vocabulary, so
-	// a withheld turn-final does not vanish into a journald line no human reads. nil ⇒
-	// no alert path wired (the signal degrades to the decision log line only).
-	alert func(string)
 	// rosterDir is the roster directory root for session-mirror/<agent>.jsonl append.
 	// Empty ⇒ session-mirror ledger write is inert (Discord-only deployments).
 	rosterDir string
@@ -83,31 +72,13 @@ func (m deskMirror) run(agent string) {
 	}
 
 	// The synchronous pre-post reader-modeling pipeline (runs BEFORE the post — a
-	// Discord message cannot be un-sent). STAGE 1 is the partition firewall (Pillar
-	// D): a Refuse SUPPRESSES the post (a private leak is never published) and raises
-	// the operator-visible alert; a Warn publishes anyway with an advisory alert.
+	// Discord message cannot be un-sent). The partition firewall (Pillar D) does NOT
+	// run here: dash + operator-channel mirroring are fleet-internal surfaces (#465).
 	// Envelope-validate + tier-1 are WARN-WITH-PUBLISH, so a deficient or un-enveloped
 	// turn-final is flagged but never lost. An enveloped brief is RENDERED from its
-	// fields (modeled body).
-	d := readerModelInternal(text, m.firewall)
-	// The firewall's operator-visible signal (P2): the ALERT-WEBHOOK line, raised on a
-	// Refuse (withheld) AND a Warn (published-but-flagged) so neither vanishes silently.
-	if d.alert && m.alert != nil {
-		m.alert(fmt.Sprintf("desk-mirror %s: %s", agent, d.alertDetail))
-	}
-	if d.suppress {
-		// The firewall REFUSE gags the PUBLIC Discord egress — but the session-mirror ledger is
-		// a PRIVATE, loopback-only operator surface (only the local dash reads it; it is never
-		// published). Gagging the operator's own coordinator/desk session FROM THEIR OWN private
-		// dash was the "CoS thread empty" bug (#405 Inc 1): the coordinator's turn-finals are dense
-		// with fleet-internal vocabulary, so they trip REFUSE far more than a desk's work output,
-		// and its ledger stayed empty while desks populated. Keep the private ledger (the RAW
-		// turn-final so the operator sees what was withheld, plus the refuse marker); skip ONLY the
-		// public post. The firewall still fully protects the public egress below.
-		m.appendSessionMirror(agent, text, mirrorDecision{body: text, note: d.note, suppress: true})
-		m.logf("flotilla watch: mirror SUPPRESS-POST %s (private ledger kept): %s", agent, d.note)
-		return
-	}
+	// fields (modeled body). Public-repo egress is guarded by the static
+	// check-private-boundary.sh + pre-push hook instead.
+	d := readerModelInternal(text)
 
 	ledgerOK := m.appendSessionMirror(agent, text, d)
 
@@ -149,17 +120,11 @@ func (m deskMirror) run(agent string) {
 }
 
 // mirrorDecision is the outcome of the pre-post pipeline for one turn-final: the body
-// to publish, the status note for the single decision log line, whether to SUPPRESS
-// the post (the firewall refuse), and whether to raise the operator-visible alert
-// (with its agent-free detail, which run prefixes with the agent name).
+// to publish and the status note for the single decision log line.
 type mirrorDecision struct {
-	body         string
-	note         string
-	suppress     bool
-	alert        bool
-	alertDetail  string
-	envelope     *readermap.Envelope
-	firewallWarn []string
+	body     string
+	note     string
+	envelope *readermap.Envelope
 }
 
 func (m deskMirror) mirrorNow() time.Time {
@@ -170,25 +135,18 @@ func (m deskMirror) mirrorNow() time.Time {
 }
 
 // appendSessionMirror fans out the session-mirror ledger write after readerModelInternal
-// (same turn-final read — no second pane probe). It serves BOTH the publish path and the
-// firewall-refused path (#406): a refused turn is still kept in the PRIVATE, loopback-only
-// ledger with d.suppress set, so the record is marked Suppressed for the dash to render
-// "withheld from public" — only the public Discord post is skipped, never the private ledger.
+// (same turn-final read — no second pane probe).
 func (m deskMirror) appendSessionMirror(agent, verbose string, d mirrorDecision) bool {
 	if m.rosterDir == "" {
 		return false
 	}
 	rec := sessionmirror.NewRecord(sessionmirror.Input{
-		Agent:        agent,
-		At:           m.mirrorNow(),
-		Verbose:      verbose,
-		Info:         d.body,
-		MirrorNote:   d.note,
-		Envelope:     d.envelope,
-		FirewallWarn: d.firewallWarn,
-		// A firewall-refused turn is kept in the private ledger but marked so the dash renders
-		// it "withheld from public" — it never reached Discord (#406 fix-forward).
-		Suppressed: d.suppress,
+		Agent:      agent,
+		At:         m.mirrorNow(),
+		Verbose:    verbose,
+		Info:       d.body,
+		MirrorNote: d.note,
+		Envelope:   d.envelope,
 	})
 	appendFn := m.ledgerAppend
 	if appendFn == nil {
@@ -204,23 +162,19 @@ func (m deskMirror) appendSessionMirror(agent, verbose string, d mirrorDecision)
 }
 
 // readerModelInternal applies the INTERNAL-channel reader-modeling pipeline to a
-// turn-final before the auto-mirror posts it. The pipeline is ORDERED:
+// turn-final before the auto-mirror posts it to dash / operator-channel surfaces.
+// The partition firewall (Pillar D) does NOT run here — fleet-internal surfaces may
+// legitimately carry deployment names (#465). Public-repo egress is guarded by the
+// static check-private-boundary.sh + pre-push hook instead.
 //
-//	STAGE 1 — the partition firewall (Pillar D), fw != nil:
-//	  Refuse → SUPPRESS the post (a private leak is never published) + raise the
-//	           operator alert (the withheld turn-final does not vanish silently).
-//	  Warn   → publish anyway, but FLAG it + raise an advisory alert (domain
-//	           vocabulary that may deanonymize the deployment — a human glance).
-//	STAGE 2 — envelope detect → validate → tier-1 (warn-with-publish):
-//	  an enveloped brief that passes tier-1 is RENDERED from its fields (modeled body);
-//	  a tier-1-deficient or malformed envelope is published RAW and FLAGGED (never lost
-//	  — never lose a brief); an un-enveloped ordinary turn-final is published raw
-//	  (today's back-compat behavior).
+// Pipeline: envelope detect → validate → tier-1 (warn-with-publish):
+//   an enveloped brief that passes tier-1 is RENDERED from its fields (modeled body);
+//   a tier-1-deficient or malformed envelope is published RAW and FLAGGED (never lost
+//   — never lose a brief); an un-enveloped ordinary turn-final is published raw
+//   (today's back-compat behavior).
 //
-// The firewall runs FIRST so no modeling work is wasted on an artifact that will be
-// refused (the spec's fixed pipeline order). (The P3 envelope ledger is NOT a clean
-// prepend: it needs the PARSED envelope this function discards — P3 will re-thread the
-// *readermap.Envelope through this signature.)
+// (The P3 envelope ledger is NOT a clean prepend: it needs the PARSED envelope this
+// function discards — P3 will re-thread the *readermap.Envelope through this signature.)
 //
 // NOTE (deliberate, spec'd): on the PASS path the published body is Render(env) — the
 // modeled envelope fields ONLY. Prose the desk wrote OUTSIDE the reader-map fence is
@@ -229,27 +183,8 @@ func (m deskMirror) appendSessionMirror(agent, verbose string, d mirrorDecision)
 // envelope" — desks emit the fence only in response to `flotilla brief`, which trains
 // them to put the brief's substance INSIDE `delta`, not in surrounding prose. A turn
 // with no fence is Absent → published raw, so nothing is ever lost on a non-brief turn.
-func readerModelInternal(turnFinal string, fw *readermap.TermSet) mirrorDecision {
-	// STAGE 1 — the partition firewall (runs before any modeling work).
-	var warnNote, warnDetail string
-	var firewallWarn []string
-	if fw != nil {
-		switch r := readermap.Check(turnFinal, fw); r.Decision {
-		case readermap.FirewallRefuse:
-			return mirrorDecision{
-				note:        "firewall refuse: " + r.Token,
-				suppress:    true,
-				alert:       true,
-				alertDetail: fmt.Sprintf("WITHHELD a turn-final — possible private leak %q (suggest: %s)", r.Token, r.Abstraction),
-			}
-		case readermap.FirewallWarn:
-			warnNote = "WARN firewall-vocab " + strings.Join(r.WarnTerms, ",")
-			warnDetail = fmt.Sprintf("published a turn-final carrying domain vocabulary %v (advisory — review for a deployment leak)", r.WarnTerms)
-			firewallWarn = append([]string(nil), r.WarnTerms...)
-		}
-	}
-
-	// STAGE 2 — envelope detect → validate → tier-1 (warn-with-publish).
+func readerModelInternal(turnFinal string) mirrorDecision {
+	// Envelope detect → validate → tier-1 (warn-with-publish).
 	var d mirrorDecision
 	env, outcome := readermap.Detect(turnFinal)
 	switch outcome {
@@ -266,19 +201,6 @@ func readerModelInternal(turnFinal string, fw *readermap.TermSet) mirrorDecision
 		d = mirrorDecision{body: turnFinal, note: "WARN malformed reader-map envelope"}
 	default: // OutcomeAbsent — an ordinary, un-enveloped turn-final (back-compat).
 		d = mirrorDecision{body: turnFinal}
-	}
-	d.firewallWarn = firewallWarn
-
-	// Fold the firewall WARN advisory in (it published — flag the note + raise the
-	// advisory alert, but never suppress).
-	if warnNote != "" {
-		if d.note == "" {
-			d.note = warnNote
-		} else {
-			d.note = warnNote + "; " + d.note
-		}
-		d.alert = true
-		d.alertDetail = warnDetail
 	}
 	return d
 }
