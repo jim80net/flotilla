@@ -117,10 +117,21 @@ func TestLoadRejectsAdjutantWithoutPingMode(t *testing.T) {
 	}
 }
 
-func TestLayerAckPath(t *testing.T) {
-	got := LayerAckPath("/state", "alpha-xo")
-	want := "/state/flotilla-alpha-xo-alive"
-	if got != want {
-		t.Errorf("LayerAckPath = %q, want %q", got, want)
+func TestLayerSidecarPaths(t *testing.T) {
+	tests := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"ack", LayerAckPath("/state", "alpha-xo"), "/state/flotilla-alpha-xo-alive"},
+		{"buffer", LayerBufferPath("/state", "alpha-xo"), "/state/flotilla-alpha-xo-buffer.json"},
+		{"charter", LayerCharterPath("/state", "alpha-xo"), "/state/flotilla-alpha-xo-adjutant-charter.md"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.got != tc.want {
+				t.Errorf("%s = %q, want %q", tc.name, tc.got, tc.want)
+			}
+		})
 	}
 }
