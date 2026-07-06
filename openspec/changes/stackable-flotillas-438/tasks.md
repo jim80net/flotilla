@@ -1,4 +1,4 @@
-# Tasks — coordinator assistant P0 (#439) + stackable scoping (#438)
+# Tasks — coordinator adjutant P0 (#439) + stackable scoping (#438)
 
 > Design gate only. **#439 outranks implementation queue.**
 
@@ -14,14 +14,14 @@
 - [ ] 1.8 Operator gate on design PR (#440)
 - [ ] 1.9 Fold #438 comms-path remainder when forwarded
 
-## Implementation (post-gate — P0 assistant first)
+## Implementation (post-gate — P0 adjutant first)
 
-- [ ] 2.1 Roster field `assistant_for` (+ legacy `adjutant_for` alias)
-- [ ] 2.2 Assistant as interrupt consumer; buffer sidecar `flotilla-<xo>-buffer.json`
+- [ ] 2.1 Roster field `adjutant_for` (+ legacy `assistant_for` alias)
+- [ ] 2.2 Adjutant as interrupt consumer; buffer sidecar `flotilla-<xo>-buffer.json`
 - [ ] 2.3 Dual observation: subtree desks + leader pane state; seam detection
 - [ ] 2.4 Seam injection brief (consolidated, not per-edge interrupts)
-- [ ] 2.5 First-presentation charter turn + `flotilla-<xo>-assistant-charter.md`
+- [ ] 2.5 First-presentation charter turn + `flotilla-<xo>-adjutant-charter.md`
 - [ ] 2.6 Urgent passthrough: operator relay + `urgent_windows[]`
-- [ ] 2.7 #438 `stackable_wakes` scoping (Phase 2 — after pilot assistant)
-- [ ] 2.8 #436 recycle abort → assistant; #437 self-rotation pairs
+- [ ] 2.7 #438 `stackable_wakes` scoping (Phase 2 — after pilot adjutant)
+- [ ] 2.8 #436 recycle abort → adjutant; #437 self-rotation pairs
 - [ ] 2.9 Tests + `docs/watch-runbook.md` + `flotilla.example.json`

@@ -2,7 +2,7 @@
 
 **Status:** TODO — required before operator gates implementation policy.
 
-**Purpose:** Ground assistant seam-injection policy and solo-authority charter defaults in
+**Purpose:** Ground adjutant seam-injection policy and solo-authority charter defaults in
 **organic patterns from real sessions**, per operator directive (issue #439 comments
 2026-07-06).
 
@@ -36,4 +36,4 @@ summary at operator gate alongside `design.md`.
 
 ---
 
-*Placeholder — analysis runs on flotilla-dev lane before implementation PR.*
+*Placeholder — analysis runs on a pilot design lane before implementation PR.*
