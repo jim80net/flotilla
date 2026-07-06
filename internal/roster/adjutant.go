@@ -34,6 +34,16 @@ func LayerAckPath(rosterDir, coordinator string) string {
 	return filepath.Join(rosterDir, "flotilla-"+coordinator+"-alive")
 }
 
+// LayerBufferPath returns the adjutant interrupt buffer sidecar for a coordinator layer.
+func LayerBufferPath(rosterDir, coordinator string) string {
+	return filepath.Join(rosterDir, "flotilla-"+coordinator+"-buffer.json")
+}
+
+// LayerCharterPath returns the first-presentation charter file for a coordinator/adjutant pair.
+func LayerCharterPath(rosterDir, coordinator string) string {
+	return filepath.Join(rosterDir, "flotilla-"+coordinator+"-adjutant-charter.md")
+}
+
 func (c *Config) validateAdjutantBindings(path string) error {
 	seen := make(map[string]string) // coordinator → adjutant name
 	for _, a := range c.Agents {

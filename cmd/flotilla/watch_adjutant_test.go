@@ -16,11 +16,11 @@ func TestAdjutantPingBodyTouchesLeaderAck(t *testing.T) {
 	}
 }
 
-func TestAdjutantMaterialBodyNamesLeaderAndTriage(t *testing.T) {
-	got := adjutantMaterialBody("xo", []string{"backend Working→Idle"})
-	for _, want := range []string{"xo", "backend Working→Idle", "Triage", "buffer judgment"} {
+func TestAdjutantBufferedNoteBody(t *testing.T) {
+	got := adjutantBufferedNoteBody("xo", 2)
+	for _, want := range []string{"Buffered 2", "xo", "next seam"} {
 		if !strings.Contains(got, want) {
-			t.Errorf("adjutant material missing %q\nfull: %s", want, got)
+			t.Errorf("buffered note missing %q\nfull: %s", want, got)
 		}
 	}
 }

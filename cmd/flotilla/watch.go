@@ -29,6 +29,7 @@ import (
 	"github.com/jim80net/flotilla/internal/transport"
 	"github.com/jim80net/flotilla/internal/unacked"
 	"github.com/jim80net/flotilla/internal/watch"
+	"github.com/jim80net/flotilla/internal/watch/adjutantbuffer"
 	"github.com/jim80net/flotilla/internal/workspace"
 )
 
@@ -407,6 +408,7 @@ func cmdWatch(args []string) error {
 
 		primaryAdjutant := cfg.AdjutantFor(xo)
 		leaderAckPath := *ackPath
+		layerBufferPath := roster.LayerBufferPath(rosterDir, xo)
 
 		wake := func(kind watch.WakeKind, reasons []string) {
 			var body string
@@ -416,6 +418,11 @@ func cmdWatch(args []string) error {
 				// Judgment/continuation stays on the leader — adjutant observes, does not replace.
 				switch kind {
 				case watch.WakeContinuation:
+					if primaryAdjutant != "" {
+						if brief, ok := adjutantSeamBrief(layerBufferPath, xo, rosterDir); ok {
+							injector.Enqueue(watch.Job{Agent: xo, Message: brief, Kind: watch.KindDetector})
+						}
+					}
 					body = continuationPrompt
 				default:
 					body = backlogWakeBody(reasons, *backlogPath, ackInstr)
@@ -429,8 +436,11 @@ func cmdWatch(args []string) error {
 				}
 			default: // WakeMaterial
 				if primaryAdjutant != "" {
+					if err := adjutantbuffer.Append(layerBufferPath, xo, reasons); err != nil {
+						log.Printf("flotilla watch: adjutant buffer append failed: %v", err)
+					}
 					target = primaryAdjutant
-					body = adjutantMaterialBody(xo, reasons)
+					body = adjutantBufferedNoteBody(xo, len(reasons))
 				} else {
 					body = leaderMaterialBody(reasons, *settledPath, ackInstr)
 				}
@@ -1043,11 +1053,25 @@ func leaderMaterialBody(reasons []string, settledPath, ackInstr string) string {
 		"actionable, reply idle and signal it by running: touch " + settledPath + "." + ackInstr
 }
 
-// adjutantMaterialBody delivers the interrupt stream to the adjutant first (#439 phase 1a).
-func adjutantMaterialBody(leader string, reasons []string) string {
-	return "[flotilla adjutant] Material change(s) detected for " + leader + "'s layer: " + strings.Join(reasons, "; ") +
-		".\nTriage per your charter: handle mechanical items locally (including liveness ack on ping); " +
-		"buffer judgment items for " + leader + "'s next seam — do not interrupt mid-thought."
+// adjutantBufferedNoteBody notifies the adjutant that items were buffered (#439 phase 1b).
+func adjutantBufferedNoteBody(leader string, n int) string {
+	return "[flotilla adjutant] Buffered " + fmt.Sprintf("%d", n) + " interrupt(s) for " + leader +
+		"'s layer. Triage mechanical items locally (liveness ack on ping). Judgment items stay buffered until " +
+		leader + "'s next seam — the leader receives a consolidated brief then, not mid-thought."
+}
+
+// adjutantSeamBrief drains the layer buffer and formats the leader inject at a seam.
+func adjutantSeamBrief(bufferPath, leader, rosterDir string) (string, bool) {
+	f, ok, err := adjutantbuffer.Drain(bufferPath)
+	if err != nil {
+		log.Printf("flotilla watch: adjutant buffer drain failed: %v", err)
+		return "", false
+	}
+	if !ok {
+		return "", false
+	}
+	_, charterErr := os.Stat(roster.LayerCharterPath(rosterDir, leader))
+	return adjutantbuffer.FormatBrief(leader, f, os.IsNotExist(charterErr)), true
 }
 
 // backlogWakeBody composes the goal-driven loop's WakeBacklog prompt: it NAMES the driven item(s)
