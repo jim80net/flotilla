@@ -708,6 +708,36 @@ func TestDecisionPage405(t *testing.T) {
 	}
 }
 
+// TestDecisionsCountUnified451 locks the one-population rule: the tab badge showed the
+// server's gated-NODE count (6) while the page header counted decision CARDS (3) —
+// same screen, two numbers (#451). Every decisions surface (badge, Awaiting-you tile,
+// page header, screen-reader announcement) now derives from ONE client-side count over
+// the same population the reading room lists — which itself gained the briefless gated
+// nodes it used to hide.
+func TestDecisionsCountUnified451(t *testing.T) {
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/goals.js").Body.String()
+	for _, marker := range []string{
+		"decisionsCount",             // the single derivation every surface reads
+		"ONE population, ONE number", // the briefless-gated-node inclusion in gatherDecisions
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must unify the decisions count (missing %q) — #451", marker)
+		}
+	}
+	// The badge/tile/announcement must not read the server node-population count anymore.
+	for _, stale := range []string{
+		"hdrCount.textContent = String(c.awaiting",
+		`announce((c.awaiting`,
+		`v: c.awaiting`,
+	} {
+		if strings.Contains(js, stale) {
+			t.Errorf("goals.js still reads counts.awaiting for a decisions surface (%q) — #451", stale)
+		}
+	}
+}
+
 // TestDashInc5Shell405 locks the three shell items from #405 Inc 5:
 //   - Part A: Parade tab in the header nav that navigates to /parade (a navigation-out link).
 //   - Part B: Unseen-content dot on each tab, driven by per-browser localStorage signatures.

@@ -292,13 +292,18 @@
     var winCount = realizedInWindow(doc, realizedWindow);
     var realizedV = winCount === null ? (c.realized || 0) : winCount;
     var realizedD = winCount === null ? "done & solidified" : "achieved in the last " + realizedWindow;
+    // #451: the ONE decisions number — the same gatherDecisions population the reading
+    // room lists — shown by the tile, the tab badge, and the page header alike. The old
+    // badge counted gated NODES (server counts.awaiting) while the page listed decision
+    // CARDS; 6 vs 3 on the same screen destroyed trust in the number.
+    var decisions = decisionsCount(doc);
     var tiles = [
       // filter:"goal"|"inflight"|"pending"|"aspirational" → clicking highlights matching nodes.
       // "Awaiting you" and "Realized" have no node-state filter (awaiting opens the decision
       // page; realized is a done state, not a live-map filter with data coverage yet).
       { k: "Flotillas",   v: c.fleet || 0,       tone: "goal",        d: (c.total || 0) + " nodes total",     filter: "goal" },
       { k: "In flight",   v: c.in_flight || 0,   tone: "inflight",    d: "desks working now",                 filter: "inflight" },
-      { k: "Awaiting you",v: c.awaiting || 0,    tone: "awaiting",    d: "your decisions & blocks" },
+      { k: "Awaiting you",v: decisions,          tone: "awaiting",    d: "your decisions & blocks" },
       // #405 Inc 3 (Q2): renamed Pending→Blocked, Aspirational→Planned.
       { k: "Blocked",     v: c.pending || 0,     tone: "pending",     d: "waiting on a dependency",           filter: "pending" },
       { k: "Realized",    v: realizedV,          tone: "realized",    d: realizedD },
@@ -325,10 +330,11 @@
         "</div>";
     }).join("");
     // #429: the awaiting-count badge lives on the Decisions TAB (the reading room is a
-    // first-class view, not a header-button modal). Same hot/badge semantics as before.
+    // first-class view, not a header-button modal). #451: it shows the SAME decisions
+    // count as the tile and the page header — never the node-population count again.
     var hdrCount = q("hdr-decisions-count");
     var hdrBtn = q("tab-decisions");
-    var awaiting = c.awaiting || 0;
+    var awaiting = decisions;
     if (hdrCount && hdrBtn) {
       if (awaiting > 0) {
         hdrCount.textContent = String(awaiting);
@@ -356,11 +362,13 @@
     var region = q("goals-live");
     if (region) region.textContent = msg;
   }
-  function updateLive(c) {
+  function updateLive(c, doc) {
     // "goal nodes" (not "fleet goals") — total counts all nodes, not just the fleet tier.
     // Announce pending too, so the spoken summary matches the visual situation strip — a
     // screen-reader user must hear about dependency-gated goals (cubic #359 P2).
-    announce((c.awaiting || 0) + " awaiting you, " + (c.pending || 0) + " blocked on a dependency, " +
+    // #451: the awaiting clause speaks the SAME decisions count the tile/badge show —
+    // a screen-reader user must never hear a different number than the sighted one sees.
+    announce(decisionsCount(doc) + " awaiting you, " + (c.pending || 0) + " blocked on a dependency, " +
       (c.in_flight || 0) + " in flight, " +
       (c.realized || 0) + " realized, of " + (c.total || 0) + " goal nodes.");
   }
@@ -1502,23 +1510,46 @@
   // the map), then the brief — background / value / mechanics / options+tradeoffs / recommendation
   // / reversibility — with references (links) and demo images rendered inline via renderBrief.
   // Opened from the "Awaiting you" situation tile.
-  function gatherDecisions() {
+  // gatherDecisions collects the decision population from an index (default: the module
+  // nodeById). The optional index keeps the count PURE for callers that hold a doc the
+  // module hasn't indexed yet (#451: renderSituation runs before render() rebuilds
+  // nodeById, so counting the module state would count the PREVIOUS doc).
+  function gatherDecisions(index) {
+    var byId = index || nodeById;
     var out = [];
-    Object.keys(nodeById).forEach(function (id) {
-      var n = nodeById[id];
+    Object.keys(byId).forEach(function (id) {
+      var n = byId[id];
       if (!n) return;
       // A node-level brief is a decision ONLY when the node itself is operator-gated
       // (awaiting/blocked). Without this, a node carrying a brief in any other state would
       // pollute the decision room with a non-decision — the exact anti-pattern this page kills.
       var vis = visToken(n);
-      if (hasBrief(n.brief) && (vis === "awaiting" || vis === "blocked")) out.push({ node: n, label: "", brief: n.brief });
+      var gated = vis === "awaiting" || vis === "blocked";
+      var before = out.length;
+      if (hasBrief(n.brief) && gated) out.push({ node: n, label: "", brief: n.brief });
       (n.work_items || []).forEach(function (wi) {
         if ((wi.class === "awaiting" || wi.class === "blocked") && !sameBrief(wi.brief, n.brief)) {
           out.push({ node: n, label: wi.label || wi.detail || wi.kind || "", brief: wi.brief });
         }
       });
+      // #451: a gated node with NO brief and NO gated work items is still a real decision
+      // the operator owes — it was on the map (and in the old badge count) but invisible
+      // in the reading room, which is how the badge and the page header could disagree.
+      // Include it with the honest no-brief placeholder: ONE population, ONE number.
+      if (gated && out.length === before) out.push({ node: n, label: "", brief: "" });
     });
     return out;
+  }
+  // decisionsCount is THE number every decisions surface shows — the tab badge, the
+  // "Awaiting you" tile, the reading-room header, and the cards themselves all count
+  // the same gatherDecisions population (#451: badge 6 vs header 3 destroyed trust in
+  // the number; two count sources may never disagree again). Pure over the doc it is
+  // handed — no module-index side effects, no stale-index ordering hazards.
+  function decisionsCount(doc) {
+    if (!doc || !Array.isArray(doc.goals)) return 0;
+    var byId = {};
+    doc.goals.forEach(function (n) { if (n && n.id) byId[n.id] = n; });
+    return gatherDecisions(byId).length;
   }
   function renderDecisionCard(dec, idx, total) {
     var n = dec.node;
@@ -1839,7 +1870,7 @@
     }
     graph.classList.remove("hidden");
     empty.classList.add("hidden");
-    updateLive(doc.counts || {}); // announce the situation summary — success path only (see renderSituation)
+    updateLive(doc.counts || {}, doc); // announce the situation summary — success path only (see renderSituation)
     depEdges = Array.isArray(doc.edges) ? doc.edges : []; // cross-dependency edges for drawEdges
     collaborations = Array.isArray(doc.collaborations) ? doc.collaborations : []; // desk lanes (#324 Inc 3)
 
