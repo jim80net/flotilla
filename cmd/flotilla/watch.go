@@ -405,21 +405,37 @@ func cmdWatch(args []string) error {
 		}
 		continuationPrompt += ackInstr
 
+		primaryAdjutant := cfg.AdjutantFor(xo)
+		leaderAckPath := *ackPath
+
 		wake := func(kind watch.WakeKind, reasons []string) {
 			var body string
+			target := xo
 			switch kind {
-			case watch.WakeContinuation:
-				body = continuationPrompt
+			case watch.WakeContinuation, watch.WakeBacklog:
+				// Judgment/continuation stays on the leader — adjutant observes, does not replace.
+				switch kind {
+				case watch.WakeContinuation:
+					body = continuationPrompt
+				default:
+					body = backlogWakeBody(reasons, *backlogPath, ackInstr)
+				}
 			case watch.WakePing:
-				body = "[flotilla change-detector] Liveness check — reply with a one-line ack only; take no other action." + ackInstr
-			case watch.WakeBacklog:
-				body = backlogWakeBody(reasons, *backlogPath, ackInstr)
+				if primaryAdjutant != "" {
+					target = primaryAdjutant
+					body = adjutantPingBody(xo, leaderAckPath)
+				} else {
+					body = leaderPingBody(leaderAckPath)
+				}
 			default: // WakeMaterial
-				body = "[flotilla change-detector] Material change(s) detected: " + strings.Join(reasons, "; ") +
-					".\nCheck in on the affected desk(s) and advance any authorized coordination. If nothing is " +
-					"actionable, reply idle and signal it by running: touch " + *settledPath + "." + ackInstr
+				if primaryAdjutant != "" {
+					target = primaryAdjutant
+					body = adjutantMaterialBody(xo, reasons)
+				} else {
+					body = leaderMaterialBody(reasons, *settledPath, ackInstr)
+				}
 			}
-			injector.Enqueue(watch.Job{Agent: xo, Message: body, Kind: watch.KindDetector})
+			injector.Enqueue(watch.Job{Agent: target, Message: body, Kind: watch.KindDetector})
 		}
 
 		// wakeAgent is the PARALLEL agent-targeted wake seam (visibility synthesis, B2). It enqueues a
@@ -1005,6 +1021,33 @@ func deskWarrantedGate(cfg *roster.Config, read func(agent string) ([]byte, bool
 		}
 		return cfg.HeartbeatWarranted(agent, st)
 	}
+}
+
+// leaderPingBody is the primary-coordinator liveness ping (no adjutant configured).
+func leaderPingBody(ackPath string) string {
+	return "[flotilla change-detector] Liveness check — reply with a one-line ack only; take no other action." +
+		"\n(To ack you are alive, run: touch " + ackPath + ")"
+}
+
+// adjutantPingBody routes liveness to the layer adjutant (#439 phase 3 mechanical tier):
+// the adjutant touches the leader's ack file; the leader is not interrupted.
+func adjutantPingBody(leader, leaderAckPath string) string {
+	return "[flotilla adjutant] Liveness check for " + leader + " — touch the leader alive file only; take no other action." +
+		"\n(To ack " + leader + ", run: touch " + leaderAckPath + ")"
+}
+
+// leaderMaterialBody is the legacy material-change wake to the coordinator pane.
+func leaderMaterialBody(reasons []string, settledPath, ackInstr string) string {
+	return "[flotilla change-detector] Material change(s) detected: " + strings.Join(reasons, "; ") +
+		".\nCheck in on the affected desk(s) and advance any authorized coordination. If nothing is " +
+		"actionable, reply idle and signal it by running: touch " + settledPath + "." + ackInstr
+}
+
+// adjutantMaterialBody delivers the interrupt stream to the adjutant first (#439 phase 1a).
+func adjutantMaterialBody(leader string, reasons []string) string {
+	return "[flotilla adjutant] Material change(s) detected for " + leader + "'s layer: " + strings.Join(reasons, "; ") +
+		".\nTriage per your charter: handle mechanical items locally (including liveness ack on ping); " +
+		"buffer judgment items for " + leader + "'s next seam — do not interrupt mid-thought."
 }
 
 // backlogWakeBody composes the goal-driven loop's WakeBacklog prompt: it NAMES the driven item(s)

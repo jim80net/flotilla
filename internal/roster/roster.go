@@ -42,6 +42,13 @@ type Agent struct {
 	// an idle one, so a default-on heartbeat could land text into a pending approval modal.
 	// An explicit Heartbeat=true overrides this once a genuine approval classifier exists.
 	ApprovalSensitive bool `json:"approval_sensitive,omitempty"`
+	// AdjutantFor binds this agent as the adjutant (mechanical interrupt consumer) for
+	// the named coordinator. Legacy alias assistant_for is accepted at load. An adjutant
+	// receives layer interrupts (liveness pings, material edges) before the leader sees
+	// them; see openspec/changes/stackable-flotillas-438/design.md.
+	AdjutantFor string `json:"adjutant_for,omitempty"`
+	// AssistantFor is the legacy alias for adjutant_for (same semantics).
+	AssistantFor string `json:"assistant_for,omitempty"`
 }
 
 // Title returns the tmux pane title to match for this agent.
@@ -151,6 +158,12 @@ type Config struct {
 	// "consecutive" (ping every K-1, alert after ~2 missed pings — the middle
 	// ground). Empty ⇒ "none". Only consulted when ChangeDetector is on.
 	LivenessPingMode string `json:"liveness_ping_mode,omitempty"`
+
+	// StackableWakes opts into per-layer material-wake routing (#438): each material desk
+	// transition is scoped to OwningXO instead of exclusively the primary xo_agent. Default
+	// false (absent ⇒ legacy primary-XO-only routing). Requires adjutant_for bindings for
+	// laminar flow when enabled — see stackable-flotillas-438 design.
+	StackableWakes bool `json:"stackable_wakes,omitempty"`
 
 	// VisibilitySynthesis opts into the visibility-synthesis (B2) heartbeat: when a desk finishes
 	// below a synthesizing agent (a project-XO for Tier 2, the meta-XO for Tier 3), the detector
@@ -316,6 +329,9 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("roster %q: %w", path, err)
 	}
 	if err := c.validateSchedules(path); err != nil {
+		return nil, err
+	}
+	if err := c.validateAdjutantBindings(path); err != nil {
 		return nil, err
 	}
 	// cos_agent (the CoS context-mirror #108): validated fail-closed when set. CosLedger
