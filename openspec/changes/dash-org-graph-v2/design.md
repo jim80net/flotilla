@@ -68,8 +68,8 @@ desk children that map to channel members; `depends_on` edges remain cross-links
   children:
     - id: macro-desk
       scope: desk
-      owner: macro-desk-dev
-      conversation_agent: macro-desk-dev
+      owner: macro-desk
+      conversation_agent: macro-desk
       milestones:        # desk-level current work
         - "Backfill OHLCV through Friday"
         - "PR #297 merge"

@@ -153,7 +153,7 @@ build-loops on management-harness coordinators and nudges dispatch to execution 
 ## 11. Desk homes are repo worktrees
 
 A desk's **home is a git worktree** of the repository it works on — sibling
-checkouts like `spark-tactical` / `spark-crypto` beside the main repo — **not** a
+checkouts like `project-a-tactical` / `project-b-crypto` beside the main repo — **not** a
 bare directory under a workspace root (`~/workspace/<desk-name>`). That bare-dir
 pattern is deprecated.
 
