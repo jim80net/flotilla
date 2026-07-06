@@ -33,15 +33,19 @@ func ParseXORotate(s string) (XORotatePolicy, error) {
 }
 
 // ResolveXORotate picks the effective policy: env FLOTILLA_XO_ROTATE overrides roster
-// xo_rotate; both unset ⇒ always (no silent behavior change).
-func ResolveXORotate(rosterVal, envVal string) XORotatePolicy {
+// xo_rotate; both unset ⇒ always (no silent behavior change). Invalid values return
+// an error — env typos must fail closed (not silently revert to always).
+func ResolveXORotate(rosterVal, envVal string) (XORotatePolicy, error) {
 	raw := strings.TrimSpace(rosterVal)
 	if e := strings.TrimSpace(envVal); e != "" {
 		raw = e
 	}
 	p, err := ParseXORotate(raw)
-	if err != nil || p == "" {
-		return XORotateAlways
+	if err != nil {
+		return "", err
 	}
-	return p
+	if p == "" {
+		return XORotateAlways, nil
+	}
+	return p, nil
 }

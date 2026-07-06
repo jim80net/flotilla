@@ -626,7 +626,10 @@ func cmdWatch(args []string) error {
 			log.Printf("flotilla watch: adaptive-interval OFF — fixed tick %s", interval)
 		}
 		activity := watch.NewActivityTracker(watch.DefaultActivityConfig())
-		xoRotate := roster.ResolveXORotate(cfg.XORotate, os.Getenv("FLOTILLA_XO_ROTATE"))
+		xoRotate, err := roster.ResolveXORotate(cfg.XORotate, os.Getenv("FLOTILLA_XO_ROTATE"))
+		if err != nil {
+			return fmt.Errorf("flotilla watch: invalid xo_rotate policy (roster xo_rotate / FLOTILLA_XO_ROTATE): %w", err)
+		}
 		if !xoRotate.AllowsIdleEdgeRotate() {
 			log.Printf("flotilla watch: xo_rotate=%s — idle-edge context rotation suppressed (roster xo_rotate / FLOTILLA_XO_ROTATE)", xoRotate)
 		}

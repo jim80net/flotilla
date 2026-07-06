@@ -29,14 +29,28 @@ func TestParseXORotate(t *testing.T) {
 }
 
 func TestResolveXORotate(t *testing.T) {
-	if got := ResolveXORotate("", ""); got != XORotateAlways {
-		t.Fatalf("unset = %q, want always", got)
+	got, err := ResolveXORotate("", "")
+	if err != nil || got != XORotateAlways {
+		t.Fatalf("unset = (%q, %v), want (always, nil)", got, err)
 	}
-	if got := ResolveXORotate("never", ""); got != XORotateNever {
-		t.Fatalf("roster never = %q", got)
+	got, err = ResolveXORotate("never", "")
+	if err != nil || got != XORotateNever {
+		t.Fatalf("roster never = (%q, %v)", got, err)
 	}
-	if got := ResolveXORotate("always", "never"); got != XORotateNever {
-		t.Fatalf("env overrides roster: got %q, want never", got)
+	got, err = ResolveXORotate("always", "never")
+	if err != nil || got != XORotateNever {
+		t.Fatalf("env overrides roster: got (%q, %v), want (never, nil)", got, err)
+	}
+}
+
+func TestResolveXORotateEnvTypoFailsClosed(t *testing.T) {
+	// Deploy-critical: a typo in FLOTILLA_XO_ROTATE must NOT silently revert to always.
+	got, err := ResolveXORotate("never", "nevr")
+	if err == nil {
+		t.Fatalf("env typo nevr must error, got policy %q", got)
+	}
+	if got != "" {
+		t.Fatalf("env typo must not return a policy, got %q", got)
 	}
 }
 
