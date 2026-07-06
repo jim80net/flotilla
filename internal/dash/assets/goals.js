@@ -45,11 +45,13 @@
   // null). On a live-tick re-render, reapplyTransient() re-applies the filter so
   // SSE updates don't wipe it.
   var activeCellTone = null;
-  // Item 6a (Realized look-back): DEFERRED. GoalsCounts is a point-in-time
-  // snapshot with no achieved_at timestamps, so a window slider would be dormant
-  // (non-functional) UI — which we don't ship. The Realized tile shows the live
-  // snapshot count; a windowed look-back is a follow-on that lands LIVE once the
-  // daemon emits done-history timestamps. See PR body / the tracking follow-on.
+  // Item 6a (Realized look-back) — LIVE as of #418: the server records roll-up
+  // transitions in goals-done.jsonl and stamps achieved_at (+ achieved_seed) onto
+  // currently-achieved goals, so a bounded window counts REAL history. Seeds (goals
+  // already achieved when history began — true achieve time unknown) are excluded
+  // from bounded windows rather than counted as fabricated recency.
+  var realizedWindow = "all"; // "1d" | "7d" | "30d" | "all"
+  var WINDOW_MS = { "1d": 864e5, "7d": 7 * 864e5, "30d": 30 * 864e5 };
   // Item 6b: node hover tooltip — a fixed-positioned overlay that avoids the
   // CSS transform on goals-world and uses screen coords directly.
   var tipEl = null;
@@ -218,12 +220,70 @@
     }
   }
 
+  // realizedInWindow counts goals achieved within the look-back window — achieved NOW,
+  // carrying a real (non-seed) achieved_at inside the window. Returns null for "all"
+  // (the point-in-time snapshot count is the honest total).
+  function realizedInWindow(doc, w) {
+    var ms = WINDOW_MS[w];
+    if (!ms) return null;
+    var cutoff = Date.now() - ms;
+    var goals = Array.isArray(doc.goals) ? doc.goals : [];
+    var n = 0;
+    goals.forEach(function (g) {
+      if (g.status_display !== "achieved" || !g.achieved_at || g.achieved_seed) return;
+      var t = Date.parse(g.achieved_at);
+      if (isFinite(t) && t >= cutoff) n++;
+    });
+    return n;
+  }
+
+  // ── #418: realized look-back slider (revived from #405 Inc 3 Item 6a, now LIVE) ────
+  // A segment control above the situation tiles; picking a window re-renders the strip
+  // so the Realized tile counts real done-history inside it.
+  var sliderWired = false;
+  function injectRealizedSlider() {
+    if (sliderWired) return;
+    var sit = q("goals-situation");
+    if (!sit) return;
+    sliderWired = true;
+    var bar = document.createElement("div");
+    bar.id = "goals-realized-slider";
+    bar.className = "grealized-slider";
+    bar.setAttribute("role", "group");
+    bar.setAttribute("aria-label", "Realized look-back window");
+    bar.innerHTML =
+      '<span class="grealized-lab">Realized window</span>' +
+      ["1d", "7d", "30d", "all"].map(function (w) {
+        return '<button type="button" class="grealized-btn' +
+          (w === realizedWindow ? " active" : "") +
+          '" data-window="' + w + '" aria-pressed="' + (w === realizedWindow) + '">' +
+          w + "</button>";
+      }).join("");
+    sit.parentNode.insertBefore(bar, sit);
+    bar.addEventListener("click", function (e) {
+      var btn = e.target.closest(".grealized-btn");
+      if (!btn) return;
+      var w = btn.getAttribute("data-window");
+      if (!w || w === realizedWindow) return;
+      realizedWindow = w;
+      var btns = bar.querySelectorAll(".grealized-btn");
+      for (var i = 0; i < btns.length; i++) {
+        var match = btns[i].getAttribute("data-window") === w;
+        btns[i].classList.toggle("active", match);
+        btns[i].setAttribute("aria-pressed", String(match));
+      }
+      if (cache) renderSituation(cache); // the Realized tile re-counts for the new window
+    });
+  }
+
   /* ── situation strip + legend ──────────────────────────────────────────── */
   function renderSituation(doc) {
     var c = doc.counts || {};
-    // Realized is a live point-in-time snapshot (GoalsCounts has no achieved_at
-    // timestamps yet, so a windowed look-back is a follow-on — see PR body).
-    var realizedD = "done & solidified";
+    // Realized: the "all" window is the live point-in-time snapshot count; a bounded
+    // window counts real recorded achievements inside it (#418 done-history).
+    var winCount = realizedInWindow(doc, realizedWindow);
+    var realizedV = winCount === null ? (c.realized || 0) : winCount;
+    var realizedD = winCount === null ? "done & solidified" : "achieved in the last " + realizedWindow;
     var tiles = [
       // filter:"goal"|"inflight"|"pending"|"aspirational" → clicking highlights matching nodes.
       // "Awaiting you" and "Realized" have no node-state filter (awaiting opens the decision
@@ -233,7 +293,7 @@
       { k: "Awaiting you",v: c.awaiting || 0,    tone: "awaiting",    d: "your decisions & blocks" },
       // #405 Inc 3 (Q2): renamed Pending→Blocked, Aspirational→Planned.
       { k: "Blocked",     v: c.pending || 0,     tone: "pending",     d: "waiting on a dependency",           filter: "pending" },
-      { k: "Realized",    v: c.realized || 0,    tone: "realized",    d: realizedD },
+      { k: "Realized",    v: realizedV,          tone: "realized",    d: realizedD },
       { k: "Planned",     v: c.aspirational || 0,tone: "aspirational",d: "not started",                       filter: "aspirational" },
     ];
     q("goals-situation").innerHTML = tiles.map(function (t) {
@@ -319,12 +379,29 @@
       return;
     }
     list.innerHTML = done.map(function (g) {
+      // #418: show WHEN the goal was achieved where history recorded it. A seed stamp
+      // (already achieved when history began) has no known achieve time — omit rather
+      // than fabricate recency.
+      var when = (g.achieved_at && !g.achieved_seed)
+        ? '<span class="gdone-when">' + escapeHtml(relTime(g.achieved_at)) + "</span>" : "";
       return '<button class="gdone-row" type="button" data-open-node="' + escapeHtml(g.id) + '">' +
         '<span class="gdone-check" aria-hidden="true">✓</span>' +
         '<span class="gdone-title">' + escapeHtml(g.title || g.id) + "</span>" +
+        when +
         '<span class="gdone-scope">' + escapeHtml(scopeNoun(g)) + "</span>" +
         "</button>";
     }).join("");
+  }
+
+  // relTime renders an ISO stamp as a coarse relative age ("14m ago" / "6h ago" / "3d ago").
+  function relTime(iso) {
+    var t = Date.parse(iso);
+    if (!isFinite(t)) return "";
+    var mins = Math.max(0, Math.floor((Date.now() - t) / 60000));
+    if (mins < 60) return mins + "m ago";
+    var hrs = Math.floor(mins / 60);
+    if (hrs < 48) return hrs + "h ago";
+    return Math.floor(hrs / 24) + "d ago";
   }
 
   function renderLegend() {
@@ -1978,6 +2055,7 @@
     activated = true;
     setupPanZoom();
     wireNodes();
+    injectRealizedSlider(); // #418: revive the look-back control (now live data)
     if (cache) { render(); } else { refresh(); }
   }
 

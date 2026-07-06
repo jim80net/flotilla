@@ -1465,18 +1465,18 @@ func TestGoalsCellDrillins405(t *testing.T) {
 		t.Error("goals.js Flotillas filter must match both .gnode-flotilla and legacy .gnode-fleet — cubic #405 P2")
 	}
 
-	// ── Item 6a: realized look-back slider — DEFERRED (no dormant UI) ─────────
-	// GoalsCounts has no achieved_at timestamps, so a window slider would be a
-	// non-functional (dormant) control. It is intentionally NOT shipped; assert the
-	// slider markers are ABSENT so it can't sneak back in before the daemon emits
-	// done-history timestamps (the follow-on that lets it ship LIVE).
-	for _, absent := range []string{"grealized-slider", "grealized-btn", "injectRealizedSlider", "realizedWindow"} {
-		if strings.Contains(js, absent) {
-			t.Errorf("goals.js must NOT ship the dormant realized slider (found %q) — deferred pending done-history timestamps", absent)
+	// ── Item 6a: realized look-back slider — LIVE as of #418 ─────────────────
+	// The slider was stripped while dormant (no achieved_at data — ship-live rule);
+	// #418's done-history data layer un-deferred it. The control must now ship AND
+	// count real history: the guard flips from absence to liveness — a slider whose
+	// window doesn't read achieved_at would be dormant UI sneaking back in.
+	for _, marker := range []string{"grealized-slider", "grealized-btn", "injectRealizedSlider", "realizedWindow", "realizedInWindow"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must ship the LIVE realized slider (missing %q) — #418", marker)
 		}
 	}
-	if strings.Contains(css, ".grealized-") {
-		t.Error("dash.css must NOT carry the dormant realized slider styles (.grealized-*) — deferred")
+	if !strings.Contains(css, ".grealized-") {
+		t.Error("dash.css must style the realized slider (.grealized-*) — #418")
 	}
 
 	// ── Item 6b: graph-node hover tooltip ────────────────────────────────────

@@ -1196,6 +1196,24 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 #goals-nodes.gcell-focus .gnode { opacity: .15; transition: opacity .14s ease; }
 #goals-nodes.gcell-focus .gnode.gnode-hl { opacity: 1; }
 
+/* #418: realized look-back slider (revived from #405 Inc 3 Item 6a, now live data) ── */
+.grealized-slider {
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 14px 0;
+  font-size: 11px;
+}
+.grealized-lab { color: var(--ink-3); flex-shrink: 0; margin-right: 2px; }
+.grealized-btn {
+  padding: 1px 8px; border-radius: var(--r-xs);
+  border: 1px solid var(--line);
+  background: var(--raised); color: var(--ink-2);
+  font-size: 11px; cursor: pointer;
+  transition: background .1s, color .1s, border-color .1s;
+}
+.grealized-btn:hover { background: color-mix(in srgb, var(--cyan) 12%, var(--raised)); color: var(--ink); }
+.grealized-btn.active { background: var(--cyan); color: #fff; border-color: var(--cyan); }
+.grealized-btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
+
 /* #405 Inc 3 Item 6b: graph-node hover tooltip ─────────────────────────── */
 .gnode-tip {
   position: fixed; z-index: 2000; pointer-events: none;
@@ -1234,6 +1252,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gdone-check { color: var(--ok); flex: none; font-size: .8rem; }
 .gdone-title { color: var(--ink); flex: 1; min-width: 0; }
 .gdone-scope { font-size: .58rem; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); flex: none; }
+/* #418: recorded achieve time on a done row ("3d ago"); absent for seeds (time unknown). */
+.gdone-when { font-size: .66rem; color: var(--ink-3); flex: none; font-variant-numeric: tabular-nums; }
 .glegend { display: inline-flex; align-items: center; gap: 6px; font-size: .68rem; color: var(--ink-2); }
 .gdot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 .gdot-realized { border: 1px solid var(--ok-dim, #2f7d47); background: color-mix(in srgb, var(--ok) 22%, transparent); }

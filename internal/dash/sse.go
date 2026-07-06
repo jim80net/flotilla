@@ -216,6 +216,15 @@ func (s *Server) poll(ctx context.Context) {
 		case <-ticker.C:
 			cur := fileSigs(paths, s.cfg.SessionMirrorDir)
 			if cur != prev {
+				// #418: a change to any goals-roll-up input (board snapshot, backlog,
+				// goals json/yaml) is a done-history observation trigger — loadGoals
+				// records achieve/regress transitions, so history accrues even when no
+				// browser is open. Async: the tracker bind inside loadGoals can be slow
+				// and must not delay the SSE emit; the recorder serializes appends.
+				if cur.snap != prev.snap || cur.backlog != prev.backlog ||
+					cur.goals != prev.goals || cur.goalsYAML != prev.goalsYAML {
+					go s.loadGoals()
+				}
 				prev = cur
 				s.hub.emit(s.now().UTC().Format(time.RFC3339))
 			}
