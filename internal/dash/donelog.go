@@ -62,6 +62,12 @@ func ReadDoneLog(path string) (map[string]DoneEntry, error) {
 		if err := json.Unmarshal(sc.Bytes(), &e); err != nil || e.ID == "" || e.TS == "" {
 			continue // per-row recovery: skip the bad line, keep the history
 		}
+		// A row whose ts is not RFC3339 is as corrupt as unparsable JSON — letting it
+		// become a goal's LATEST entry would erase a prior valid stamp and hide the
+		// goal from bounded windows downstream (cubic #449 P2).
+		if _, err := time.Parse(time.RFC3339, e.TS); err != nil {
+			continue
+		}
 		out[e.ID] = e
 	}
 	return out, sc.Err()

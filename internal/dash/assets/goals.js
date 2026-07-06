@@ -274,6 +274,14 @@
       }
       if (cache) renderSituation(cache); // the Realized tile re-counts for the new window
     });
+    // A bounded window ages against the WALL CLOCK, not the data: with the doc unchanged
+    // (refresh dedups on its signature), a goal falling out of the 1d/7d/30d window would
+    // stay counted forever (cubic #449 P2). Re-count the strip once a minute while a
+    // bounded window is active and the map is visible — cheap (six tiles), and "all"
+    // never needs it (the snapshot count doesn't age).
+    setInterval(function () {
+      if (realizedWindow !== "all" && cache && isVisible()) renderSituation(cache);
+    }, 60000);
   }
 
   /* ── situation strip + legend ──────────────────────────────────────────── */

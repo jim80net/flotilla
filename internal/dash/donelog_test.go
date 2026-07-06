@@ -26,6 +26,9 @@ func TestReadDoneLog_MissingBadAndLatestWins(t *testing.T) {
 		`{"id":"b","ts":"2026-07-02T00:00:00Z","achieved":true}`,
 		`{"id":"a","ts":"2026-07-03T00:00:00Z","achieved":false}`,
 		`{"ts":"2026-07-03T00:00:00Z","achieved":true}`, // no id → skipped
+		// A corrupt ts must not become b's LATEST entry (it would erase the valid stamp
+		// and hide b from bounded windows) — skipped like any other bad row (cubic #449 P2).
+		`{"id":"b","ts":"yesterday-ish","achieved":false}`,
 	}, "\n") + "\n"
 	if err := os.WriteFile(p, []byte(lines), 0o644); err != nil {
 		t.Fatal(err)

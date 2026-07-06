@@ -221,9 +221,19 @@ func (s *Server) poll(ctx context.Context) {
 				// records achieve/regress transitions, so history accrues even when no
 				// browser is open. Async: the tracker bind inside loadGoals can be slow
 				// and must not delay the SSE emit; the recorder serializes appends.
+				// Recovered: an unrecovered panic in ANY goroutine kills the process, and
+				// this one is background bookkeeping — it must never take the dash down
+				// (cubic #449 P1). The next trigger simply observes again.
 				if cur.snap != prev.snap || cur.backlog != prev.backlog ||
 					cur.goals != prev.goals || cur.goalsYAML != prev.goalsYAML {
-					go s.loadGoals()
+					go func() {
+						defer func() {
+							if r := recover(); r != nil {
+								fmt.Fprintf(os.Stderr, "flotilla dash: goals done-history observation panicked (recovered): %v\n", r)
+							}
+						}()
+						s.loadGoals()
+					}()
 				}
 				prev = cur
 				s.hub.emit(s.now().UTC().Format(time.RFC3339))
