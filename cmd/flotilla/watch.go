@@ -451,7 +451,7 @@ func cmdWatch(args []string) error {
 						// Evaluation ticks require an established charter (#439 spec).
 						body = adjutantCharterPairingBody(xo, primaryAdjutant, charterPath, leaderAckPath)
 					} else {
-						body = adjutantEvaluationTickBody(xo, leaderAckPath, layerBufferPath)
+						body = adjutantEvaluationTickBody(xo, leaderAckPath, layerBufferPath, charterPath)
 					}
 				} else {
 					body = leaderPingBody(leaderAckPath)
@@ -1132,10 +1132,16 @@ func leaderPingBody(ackPath string) string {
 		"\n(To ack you are alive, run: touch " + ackPath + ")"
 }
 
+// adjutantCharterGovernanceLine reminds recurring adjutant prompts where durable classification
+// rules live (#469 addendum — charter amendments must survive past one session turn).
+func adjutantCharterGovernanceLine(charterPath string) string {
+	return "\nYour charter at " + charterPath + " governs classification — consult it before composing any brief."
+}
+
 // adjutantEvaluationTickBody routes a stale-leader timeout to the adjutant as an
 // evaluation tick (#439 operator amendment): ack → evaluate → act-by-tier — not a
 // dead-man's ack to the leader.
-func adjutantEvaluationTickBody(leader, leaderAckPath, bufferPath string) string {
+func adjutantEvaluationTickBody(leader, leaderAckPath, bufferPath, charterPath string) string {
 	return "[flotilla adjutant] Evaluation tick for " + leader +
 		" — leader alive file is stale (timeout signal; not a dead-man ack to the leader).\n\n" +
 		"Three-step duty (required-minimum charter):\n" +
@@ -1146,6 +1152,7 @@ func adjutantEvaluationTickBody(leader, leaderAckPath, bufferPath string) string
 		"3. ACT BY TIER — all-quiet → ack only, no leader interrupt; work-found → buffer judgment items " +
 		"in " + bufferPath + " and inject a digest at " + leader + "'s next seam (immediately if urgent-class).\n\n" +
 		"This tick catches idle-holding: leader idle but queue not empty is work-found, not all-quiet." +
+		adjutantCharterGovernanceLine(charterPath) +
 		adjutantDualObservationContract(leader)
 }
 
@@ -1198,6 +1205,7 @@ func enqueueLayerMaterialWake(cfg *roster.Config, rosterDir, primaryXO, owner st
 		settledPath = roster.LayerSettledPath(rosterDir, owner)
 	}
 	bufferPath := roster.LayerBufferPath(rosterDir, owner)
+	charterPath := roster.LayerCharterPath(rosterDir, owner)
 	ackInstr := primaryAckInstr
 	if owner != primaryXO {
 		ackInstr = "\n(To ack you are alive, run: touch " + leaderAckPath + ")"
@@ -1211,7 +1219,7 @@ func enqueueLayerMaterialWake(cfg *roster.Config, rosterDir, primaryXO, owner st
 			body = leaderMaterialBody(reasons, settledPath, ackInstr)
 		} else {
 			target = adjutant
-			body = adjutantBufferedNoteBody(owner, len(reasons))
+			body = adjutantBufferedNoteBody(owner, len(reasons), charterPath)
 		}
 	} else {
 		body = leaderMaterialBody(reasons, settledPath, ackInstr)
@@ -1227,11 +1235,12 @@ func leaderMaterialBody(reasons []string, settledPath, ackInstr string) string {
 }
 
 // adjutantBufferedNoteBody notifies the adjutant that items were buffered (#439 phase 1b).
-func adjutantBufferedNoteBody(leader string, n int) string {
+func adjutantBufferedNoteBody(leader string, n int, charterPath string) string {
 	return "[flotilla adjutant] Buffered " + fmt.Sprintf("%d", n) + " interrupt(s) for " + leader +
 		"'s layer. Triage mechanical items locally. Judgment items stay buffered until " +
 		leader + "'s next seam — the leader receives a consolidated brief then, not mid-thought. " +
 		"On evaluation ticks: ack → evaluate → act-by-tier." +
+		adjutantCharterGovernanceLine(charterPath) +
 		adjutantDualObservationContract(leader)
 }
 

@@ -37,3 +37,21 @@ in a prior seam brief unless the underlying edge occurrence changes (delta-only 
 - **GIVEN** a buffer sidecar containing blank reason strings
 - **WHEN** the buffer is loaded
 - **THEN** those entries SHALL be dropped and SHALL NOT appear in briefs or counts
+
+### Requirement: Recurring adjutant prompts re-present the charter path
+
+Every recurring adjutant detector prompt (evaluation tick, buffered-item note) SHALL name
+the layer charter path and instruct the adjutant to consult it before composing any brief,
+so charter amendments survive past one session turn.
+
+#### Scenario: Evaluation tick names charter
+
+- **GIVEN** an established adjutant charter at `flotilla-<coordinator>-adjutant-charter.md`
+- **WHEN** the watch daemon routes a stale-leader evaluation tick to the adjutant
+- **THEN** the prompt body SHALL include the charter path and a consult-before-brief line
+
+#### Scenario: Buffered-item note names charter
+
+- **GIVEN** material is buffered for an adjutant-owned layer
+- **WHEN** the adjutant receives the buffered-item notification
+- **THEN** the prompt body SHALL include the charter path and a consult-before-brief line
