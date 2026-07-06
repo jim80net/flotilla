@@ -1787,12 +1787,14 @@ html, body { overflow-x: clip; }
      high width); the live-link dot stays (it carries meaning). */
   .bar { padding: .6rem .9rem; }
   .bar-meta .meta-label, .bar-meta .meta-bind { display: none; }
-  /* #429: five tabs no longer fit one 390px row. Dissolve the tablist span into the
-     strip's flex context (role="tablist" survives display:contents in the modern a11y
-     tree) and let the strip WRAP — every tab visible, none scrolled off-screen. nowrap
-     keeps each label whole so rows break BETWEEN tabs, never mid-label. */
+  /* #429: five tabs no longer fit one 390px row — WRAP the strip and the tablist
+     group itself, keeping .tab-group a real box (cubic #446 P2: display:contents can
+     drop the role="tablist" container from some engines' accessibility trees). Every
+     tab stays visible and tappable; nowrap keeps each label whole so rows break
+     BETWEEN tabs, never mid-label. */
   .tabs { flex-wrap: wrap; }
-  .tab-group { display: contents; }
+  .tab-group { flex: 1 1 auto; flex-wrap: wrap; min-width: 0; }
+  .tab-parade { flex: 1 1 auto; }
   .tab { flex: 1 1 0; padding: .5rem .5rem; white-space: nowrap; }
 
   /* The "one primary scroll" discipline for the Conversations view is owned by

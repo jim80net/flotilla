@@ -76,7 +76,9 @@
     On wide viewports the whole view is a fixed app-shell (the page never scrolls);
     on narrow viewports it stacks into one natural document scroll (see dash.css).
   -->
-  <main id="view-conversations" class="view conv-wrap">
+  <!-- Each SPA view is the tab panel its tab controls (cubic #446 P3): role="tabpanel"
+       + aria-labelledby close the tab→panel relationship the aria-controls half implies. -->
+  <main id="view-conversations" class="view conv-wrap" role="tabpanel" aria-labelledby="tab-conversations">
     <aside class="panel conv-nav" aria-label="Desk conversations">
       <div class="panel-head conv-rail-head">
         <div>
@@ -158,7 +160,7 @@
     </div>
   </div>
 
-  <main id="view-goals" class="view goals-wrap hidden" aria-label="Fleet goals">
+  <main id="view-goals" class="view goals-wrap hidden" role="tabpanel" aria-labelledby="tab-goals" aria-label="Fleet goals">
     <div id="goals-live" class="sr-only" role="status" aria-live="polite"></div>
     <section class="goals-situation" id="goals-situation" aria-label="Goals summary"></section>
     <section class="panel goals-panel">
@@ -238,7 +240,7 @@
        as a FULL PAGE — no modal, no backdrop, no secondary scrollbar; the document owns
        the one scroll. Reached from the top nav, the goals "Awaiting you" tile, and any
        [data-open-decisions] trigger. Well-formatted beats feature-rich. -->
-  <main id="view-decisions" class="view wrap hidden" aria-label="Decisions awaiting you">
+  <main id="view-decisions" class="view wrap hidden" role="tabpanel" aria-labelledby="tab-decisions" aria-label="Decisions awaiting you">
     <section class="panel decisions-panel">
       <div class="panel-head">
         <div>
@@ -250,7 +252,7 @@
     </section>
   </main>
 
-  <main id="view-issues" class="view wrap hidden">
+  <main id="view-issues" class="view wrap hidden" role="tabpanel" aria-labelledby="tab-issues">
     <section id="issues-listpanel" class="panel">
       <div class="panel-head">
         <div>
