@@ -143,8 +143,20 @@ name. Precedence when both exist:
 | Field | Winner | Notes |
 |-------|--------|-------|
 | `mode` | Overlay if set, else roster `mode`, else `standing` | Transition: overlay is dogfood lever until roster schema bump ships |
-| `artifacts`, `write_locks`, `commit_on` | Overlay only | Never committable; absent overlay ⇒ no ephemeral ceremony metadata |
+| `artifacts`, `write_locks`, `commit_on` | Overlay only | Never committable; required when mode resolves to `ephemeral` (see load-time rule below) |
 | `at`, `to`, `prompt` | Roster | Portable schedule identity unchanged |
+
+**Load-time validation (fail-closed):** when any schedule resolves to `mode: ephemeral` (from
+overlay or roster), `roster.Load` MUST reject the config unless the overlay contains a **complete**
+entry for that schedule name:
+
+- non-empty `artifacts` (≥1 path; empty list vacuously passes verification and must not compile)
+- valid `commit_on` if set (`artifact` | `ping`; default `artifact` for walk-shaped entries)
+- `write_locks` paths absolute when present
+
+A roster entry with `mode: ephemeral` and **no overlay row** (or a row missing required fields) is
+**not deployable** — the daemon refuses to start rather than running a ceremony that produces nothing
+and still `CommitFired`.
 
 Once the committable roster gains `mode`, **overlay `mode` still wins when present** (operator
 can force per-host behavior without a roster PR). Overlay does not gain committable fields beyond
@@ -194,7 +206,9 @@ After `ceremony.Run` succeeds (exit 0 + artifact checks):
 Enqueued via injector as **`KindSchedule`** (post-#369 relay-defer policy). **Max ~120 bytes** —
 no ceremony body, no register.
 
-On ping failure: LOUD escalate; pending row stays until confirm or operator clears.
+On ping failure: LOUD escalate; pending row stays until confirm or operator clears. **Enqueue
+precedes `CommitFired` in artifact mode** (below) so a crash after subprocess success still leaves
+a pending row to replay — never silent notification loss.
 
 ### Ephemeral pending phase machine (extends #369 sidecar)
 
@@ -203,7 +217,7 @@ On ping failure: LOUD escalate; pending row stays until confirm or operator clea
 | Phase | Meaning | ReplayPending behavior |
 |-------|---------|------------------------|
 | `subprocess` | Child running | Re-spawn subprocess (idempotent artifact check) |
-| `ping` | Subprocess done; ping not yet confirmed | Re-enqueue completion ping only — **never** ceremony body |
+| `ping` | Subprocess done; ping enqueued, not yet confirmed (or `CommitFired` pending for artifact mode) | Re-enqueue completion ping only — **never** ceremony body; subprocess not re-run if artifacts already present |
 | (absent) | Standing mode (#369 today) | Replay full `Message` as today |
 
 Ceremony prompt text is **not** stored in pending rows for ephemeral schedules (only a hash +
@@ -211,16 +225,26 @@ artifact paths). Prevents replay from re-injecting register into standing pane.
 
 ### CommitFired policy (per ceremony class)
 
-| Class | `CommitFired` when | Example |
-|-------|-------------------|---------|
-| Walk / scorecard | Subprocess exit 0 + artifact present; ping best-effort | `commit_on: artifact` |
-| Parade / ack-required | Completion ping confirmed | `commit_on: ping` |
+| Class | `CommitFired` when | Pending row role |
+|-------|-------------------|------------------|
+| Walk / scorecard | Subprocess exit 0 + artifact present + completion ping **enqueued** | `ping` phase replays notification until confirm; schedule ack does not wait for confirm |
+| Parade / ack-required | Completion ping **confirmed** (#369) | `ping` phase until confirm; schedule ack == confirm |
 
 Host-local overlay field `commit_on: artifact | ping` (default `artifact` for walk-shaped entries).
 
-**Never `CommitFired` on subprocess start** — committing at enqueue/spawn reintroduces the
-silent-drop `#369` exists to kill (subprocess hangs or pane never sees a ping ⇒ schedule stuck
-until manual clear). The trigger is always **post-success** per `commit_on` below.
+**Never `CommitFired` on subprocess start** — committing at spawn reintroduces the silent-drop
+`#369` exists to kill.
+
+**Artifact vs ping — one coherent story each:**
+
+- **`commit_on: artifact`:** artifact presence is the schedule-success predicate; the completion
+  ping is still a `KindSchedule` delivery with a durable pending row. **Order:** enqueue ping
+  first (pending `phase=ping` exists) → `CommitFired` only after enqueue succeeds. A crash before
+  enqueue ⇒ no `CommitFired`, ceremony re-attempts. A crash after enqueue ⇒ `ReplayPending`
+  re-delivers the ping (subprocess not re-run when artifact already present). Ping confirm is
+  **not** required for `CommitFired`; LOUD escalate + pending replay handle notification gaps.
+- **`commit_on: ping`:** enqueue ping → `CommitFired` only on confirmed delivery (#369). Pending
+  row is the sole recovery path until confirm.
 
 ### Subprocess failure escalation (poison ceremony guard)
 
@@ -274,18 +298,18 @@ With:
 Tick → ceremony.Run (subprocess, off injector worker)
      → on subprocess success (exit 0 + artifacts verified):
          read commit_on from overlay (default artifact for walk-shaped entries)
+         enqueue completion ping (KindSchedule) → pending row phase=ping
          if commit_on == artifact:
-             CommitFired now
-             enqueue completion ping best-effort (KindSchedule; LOUD escalate on ping failure)
+             CommitFired after enqueue succeeds (artifact already verified)
+             ping confirm not required; pending replays on failure (LOUD escalate)
          if commit_on == ping:
-             enqueue completion ping only
-             CommitFired on confirmed ping delivery (#369)
+             CommitFired only on confirmed ping delivery (#369)
+     → if enqueue fails: no CommitFired; pending/subprocess replay per phase machine
      → never CommitFired on subprocess start
 ```
 
-`CommitFired` timing is **per-class** via overlay `commit_on` — not a single global ping gate.
-Walk/scorecard (`artifact`): artifact presence is the schedule ack; ping is notification only.
-Parade/ack-required (`ping`): #369 confirmed-delivery semantics apply to the completion ping.
+`CommitFired` timing is **per-class** via overlay `commit_on`. Both classes enqueue the ping
+**before** schedule ack when `commit_on: artifact`; only ping-mode waits for confirm before ack.
 
 ### Relation to #369 items
 
@@ -324,8 +348,9 @@ visibility-synthesis wakes (`WakeSynthesis`), desk heartbeat beats.
    ephemeral-by-default without an explicit `mode` set.
 
 2. **Artifact-only success — RESOLVED (design gate):** Encoded in `commit_on` per class.
-   - Walk/scorecard (`commit_on: artifact`): subprocess exit 0 + artifact present ⇒ `CommitFired`
-     even if the standing pane is down; completion ping is best-effort with LOUD escalate on failure.
+   - Walk/scorecard (`commit_on: artifact`): subprocess exit 0 + artifact present ⇒ enqueue ping
+     (pending row) ⇒ `CommitFired` after enqueue succeeds; standing pane down does not block schedule
+     ack; notification recovers via pending replay + LOUD escalate.
    - Parade/ack-required (`commit_on: ping`): `CommitFired` only on confirmed completion ping (#369).
    - **Never** commit at subprocess start in either class.
 
