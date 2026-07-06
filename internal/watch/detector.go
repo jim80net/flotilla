@@ -1107,6 +1107,12 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 		if len(primary) > 0 {
 			wake(WakeMaterial, primary)
 		}
+		// Primary-owned desk material lands in byOwner[XOAgent], not the fleet-wide
+		// primary slice — route it through wake() so the primary clock advances (#487 P1).
+		if owned := byOwner[d.cfg.XOAgent]; len(owned) > 0 {
+			wake(WakeMaterial, owned)
+			delete(byOwner, d.cfg.XOAgent)
+		}
 		owners := make([]string, 0, len(byOwner))
 		for owner := range byOwner {
 			owners = append(owners, owner)
@@ -1157,8 +1163,8 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 			cur.XOSettled = false
 			return
 		}
-		primary, _ := groupMaterialByOwner(reasons, d.cfg.OwningXO)
-		if len(primary) > 0 {
+		primary, byOwner := groupMaterialByOwner(reasons, d.cfg.OwningXO)
+		if len(primary) > 0 || len(byOwner[d.cfg.XOAgent]) > 0 {
 			d.selfCont = 0
 			cur.XOSettled = false
 		}

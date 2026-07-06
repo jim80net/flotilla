@@ -6,8 +6,14 @@
 
 When `stackable_wakes` is enabled, material reasons routed only to non-primary coordinator
 layers SHALL NOT set the primary `woke` flag, SHALL NOT reset the primary quiet/liveness ping
-FSM, and SHALL NOT clear primary `XOSettled` or reset `selfCont`. Primary clock mutations
-SHALL occur only when at least one material reason targets the primary layer.
+FSM, and SHALL NOT clear primary `XOSettled` or reset `selfCont`. Primary clock mutations SHALL occur when at least one material reason targets the primary
+layer (fleet-wide reasons in the primary slice, or desk-scoped reasons whose OwningXO is
+the primary XO). Material routed only to non-primary project layers SHALL NOT advance the
+primary clock.
+
+#### Scenario: Primary-owned desk material re-engages the primary clock
+- **WHEN** a desk owned by the primary XO finishes and `stackable_wakes` is enabled
+- **THEN** the material wake routes through the primary `Wake` path and clears primary settled state
 
 #### Scenario: Subtree-only material preserves primary quiet state
 - **WHEN** a tick delivers material only to a project layer via `WakeLayer`

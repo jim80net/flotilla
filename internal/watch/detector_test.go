@@ -212,6 +212,40 @@ func TestDetectorStackableWakesSubtreeOnlyPreservesPrimaryClock(t *testing.T) {
 	}
 }
 
+// #487 P1: primary-owned desk material must use the primary wake path, not WakeLayer.
+func TestDetectorStackableWakesPrimaryOwnedDeskUsesPrimaryWake(t *testing.T) {
+	f := newFixture()
+	cfg := f.config("cos", []string{"cos", "frontend"}, 3, "none")
+	cfg.StackableWakes = true
+	cfg.OwningXO = func(string) string { return "cos" }
+	layerCalled := false
+	cfg.WakeLayer = func(string, WakeKind, []string) { layerCalled = true }
+	d := newDet(t, f, cfg)
+	seed(d, map[string]surface.State{"cos": surface.StateWorking, "frontend": surface.StateWorking}, "h0")
+	f.set("cos", surface.StateWorking)
+	f.set("frontend", surface.StateWorking)
+	f.set("cos", surface.StateIdle)
+	f.settle = true
+	f.signal = "h0"
+	d.Tick()
+	if !d.snap.XOSettled {
+		t.Fatal("primary should settle")
+	}
+
+	f.reset()
+	f.set("frontend", surface.StateIdle)
+	d.Tick()
+	if layerCalled {
+		t.Fatal("primary-owned desk material must not route through WakeLayer")
+	}
+	if f.wakeCount() != 1 || f.lastWake().kind != WakeMaterial {
+		t.Fatalf("primary-owned desk material must wake primary, got %+v", f.wakes)
+	}
+	if d.snap.XOSettled {
+		t.Fatal("primary-owned desk material must re-engage settled primary")
+	}
+}
+
 func TestDetectorStackableWakesScopesSubtreeToOwner(t *testing.T) {
 	f := newFixture()
 	cfg := f.config("cos", []string{"cos", "alpha-xo", "backend"}, 3, "none")
