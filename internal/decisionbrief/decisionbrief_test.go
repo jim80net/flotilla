@@ -36,6 +36,44 @@ func TestFindGaps_BacklogBlockedNoBrief(t *testing.T) {
 	}
 }
 
+func TestFindGaps_SkipsGoalLevelWhenWorkItemBriefPresent(t *testing.T) {
+	// #365: node roll-up may be operator-gated while brief lives on work_items[].brief.
+	f := dash.GoalsFile{Goals: []dash.Goal{{
+		ID: "ship-widget", Title: "Ship",
+		ConversationAgent: "frontend",
+		WorkItems: []dash.WorkItem{{
+			Kind: dash.WorkDesk, Agent: "frontend",
+			Brief: "What: x. Value: $0. Mechanics: y. Alternatives: z. Recommendation: a. Reversibility: easy.",
+		}},
+	}}}
+	gaps := FindGaps(Inputs{
+		File: f, FileOK: true,
+		Backlog:    "## Backlog\n- [blocked] unrelated\n",
+		DeskStates: map[string]string{"frontend": "working"},
+	})
+	if len(gaps) != 0 {
+		t.Fatalf("gaps = %+v, want none when work_items[].brief is present", gaps)
+	}
+}
+
+func TestGapStillOpen(t *testing.T) {
+	in := Inputs{
+		File: goalsFile("[blocked] deploy"), FileOK: true,
+		Backlog: "## Backlog\n- [blocked] deploy\n",
+	}
+	gaps := FindGaps(in)
+	if len(gaps) != 1 {
+		t.Fatal("need one gap")
+	}
+	if !GapStillOpen(in, gaps[0]) {
+		t.Fatal("gap should still be open")
+	}
+	in.File.Goals[0].WorkItems[0].Brief = "filled"
+	if GapStillOpen(in, gaps[0]) {
+		t.Fatal("gap should close when brief lands")
+	}
+}
+
 func TestFindGaps_SkipsWhenBriefPresent(t *testing.T) {
 	f := goalsFile("[blocked] deploy")
 	f.Goals[0].WorkItems[0].Brief = "What: deploy. Value: $0. Mechanics: click approve."

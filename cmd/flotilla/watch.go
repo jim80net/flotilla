@@ -556,7 +556,8 @@ func cmdWatch(args []string) error {
 		delegationTracker := delegatenudge.NewTracker()
 
 		// #349 item D: auto decision-brief trigger when operator-gated goals lack a brief.
-		decisionBriefTracker := decisionbrief.NewTracker()
+		decisionBriefClaimsPath := filepath.Join(rosterDir, "flotilla-decision-brief-claims.json")
+		decisionBriefTracker := decisionbrief.LoadTracker(decisionBriefClaimsPath)
 		goalsJSONPath := filepath.Join(rosterDir, "fleet-goals.json")
 		if gp := strings.TrimSpace(os.Getenv("FLOTILLA_GOALS_FILE")); gp != "" {
 			goalsJSONPath = gp
@@ -687,7 +688,7 @@ func cmdWatch(args []string) error {
 			IsCoordinator:             cfg.IsCoordinator,
 			DelegationNudgeOnFinish:   delegationNudgeOnFinish(cfg, delegationTracker, injector.Enqueue),
 			DecisionBriefOnTick: decisionBriefOnTick(
-				goalsJSONPath, *backlogPath, decisionBriefTracker, injector.Enqueue, cfg,
+				goalsJSONPath, *backlogPath, decisionBriefClaimsPath, decisionBriefTracker, injector.Enqueue, cfg,
 				func() map[string]string {
 					if deskStateLabels == nil {
 						return nil
@@ -1479,7 +1480,7 @@ func strandedHandoffOnFinish(cfg *roster.Config, tracker *stranded.Tracker, enqu
 // decisionBriefOnTick scans fleet-goals.json each detector tick for operator-gated
 // items missing a brief and dispatches the owning desk once per gap (#349 item D).
 func decisionBriefOnTick(
-	goalsPath, backlogPath string,
+	goalsPath, backlogPath, claimsPath string,
 	tracker *decisionbrief.Tracker,
 	enqueue func(watch.Job),
 	cfg *roster.Config,
@@ -1489,33 +1490,11 @@ func decisionBriefOnTick(
 		return nil
 	}
 	return func() {
-		raw, err := os.ReadFile(goalsPath)
+		in, err := loadDecisionBriefInputs(goalsPath, backlogPath, deskStates())
 		if err != nil {
-			if !os.IsNotExist(err) {
-				log.Printf("flotilla watch: decision-brief SKIP: read goals %q: %v", goalsPath, err)
-			}
 			return
 		}
-		gf, err := dash.ParseGoalsFile(raw)
-		if err != nil {
-			log.Printf("flotilla watch: decision-brief SKIP: parse goals %q: %v", goalsPath, err)
-			return
-		}
-		var backlogMarkdown string
-		if backlogPath != "" {
-			bb, rerr := os.ReadFile(backlogPath)
-			if rerr != nil {
-				if !os.IsNotExist(rerr) {
-					log.Printf("flotilla watch: decision-brief: read backlog %q: %v (continuing without backlog binding)", backlogPath, rerr)
-				}
-			} else {
-				backlogMarkdown = string(bb)
-			}
-		}
-		gaps := decisionbrief.FindGaps(decisionbrief.Inputs{
-			File: gf, FileOK: true,
-			Backlog: backlogMarkdown, DeskStates: deskStates(),
-		})
+		gaps := decisionbrief.FindGaps(in)
 		active := make(map[string]bool, len(gaps))
 		for _, g := range gaps {
 			owner := strings.TrimSpace(g.Owner)
@@ -1529,6 +1508,11 @@ func decisionBriefOnTick(
 			}
 			key := decisionbrief.GapKey(g)
 			active[key] = true
+			fresh, ferr := loadDecisionBriefInputs(goalsPath, backlogPath, deskStates())
+			if ferr != nil || !decisionbrief.GapStillOpen(fresh, g) {
+				log.Printf("flotilla watch: decision-brief SKIP stale %s (brief landed or gate cleared)", key)
+				continue
+			}
 			if !tracker.TryClaim(key) {
 				continue
 			}
@@ -1536,7 +1520,40 @@ func decisionBriefOnTick(
 			enqueue(watch.Job{Agent: owner, Message: decisionbrief.DispatchPrompt(g), Kind: "detector"})
 		}
 		tracker.Reconcile(active)
+		if err := tracker.Save(claimsPath); err != nil {
+			log.Printf("flotilla watch: decision-brief claims save failed: %v", err)
+		}
 	}
+}
+
+func loadDecisionBriefInputs(goalsPath, backlogPath string, deskStates map[string]string) (decisionbrief.Inputs, error) {
+	raw, err := os.ReadFile(goalsPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Printf("flotilla watch: decision-brief SKIP: read goals %q: %v", goalsPath, err)
+		}
+		return decisionbrief.Inputs{}, err
+	}
+	gf, err := dash.ParseGoalsFile(raw)
+	if err != nil {
+		log.Printf("flotilla watch: decision-brief SKIP: parse goals %q: %v", goalsPath, err)
+		return decisionbrief.Inputs{}, err
+	}
+	var backlogMarkdown string
+	if backlogPath != "" {
+		bb, rerr := os.ReadFile(backlogPath)
+		if rerr != nil {
+			if !os.IsNotExist(rerr) {
+				log.Printf("flotilla watch: decision-brief: read backlog %q: %v (continuing without backlog binding)", backlogPath, rerr)
+			}
+		} else {
+			backlogMarkdown = string(bb)
+		}
+	}
+	return decisionbrief.Inputs{
+		File: gf, FileOK: true,
+		Backlog: backlogMarkdown, DeskStates: deskStates,
+	}, nil
 }
 
 // idleHoldOnFinish builds the #216 idle-hold break seam: on each desk finish it

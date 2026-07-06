@@ -93,6 +93,12 @@ func FindGaps(in Inputs) []Gap {
 		if hasGatedItem {
 			continue // gated work items carry briefs — roll-up blocked is satisfied
 		}
+		// Briefs live at work_items[].brief (#365): do not fire a node-level trigger when any
+		// work item already carries a decision package (desk execution items may be in-flight
+		// while the node roll-up is still operator-gated).
+		if anyWorkItemBriefPresent(g) {
+			continue
+		}
 		if operatorGated(rendered.StatusDisplay) && strings.TrimSpace(g.Brief) == "" {
 			gaps = append(gaps, Gap{
 				GoalID: g.ID, GoalTitle: g.Title,
@@ -119,6 +125,26 @@ func itemKey(wi dash.WorkItem, ric dash.RenderedWorkItem) string {
 	default:
 		return ric.Label
 	}
+}
+
+func anyWorkItemBriefPresent(g dash.Goal) bool {
+	for _, wi := range g.WorkItems {
+		if strings.TrimSpace(wi.Brief) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// GapStillOpen reports whether target is still among FindGaps results (dispatch-time re-verify).
+func GapStillOpen(in Inputs, target Gap) bool {
+	want := GapKey(target)
+	for _, g := range FindGaps(in) {
+		if GapKey(g) == want {
+			return true
+		}
+	}
+	return false
 }
 
 // GapKey is the stable tracker id for a gap (re-arm when brief appears or class clears).
