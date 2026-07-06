@@ -46,16 +46,13 @@ func cmdStatus(args []string) error {
 	if *snapshotPath == "" {
 		*snapshotPath = filepath.Join(rosterDir, "flotilla-detector-state.json")
 	}
-	if *ackPath == "" {
-		*ackPath = filepath.Join(rosterDir, "flotilla-xo-alive")
-	}
-
 	// The XO is the explicit xo_agent, else the first agent (watch's own rule).
 	// roster.Load guarantees a non-empty Agents slice, so [0] is safe.
 	xo := cfg.XOAgent
 	if xo == "" {
 		xo = cfg.Agents[0].Name
 	}
+	*ackPath = roster.ResolveLayerClockPath(rosterDir, xo, *ackPath, "flotilla-xo-alive", "alive")
 
 	snap, snapOK := watch.LoadSnapshot(*snapshotPath)
 	if *asJSON {

@@ -2,6 +2,7 @@ package roster
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -32,7 +33,43 @@ func (c *Config) AdjutantFor(coordinator string) string {
 // LayerAckPath returns the per-coordinator liveness ack sidecar for coordinator
 // (e.g. flotilla-alpha-xo-alive under rosterDir).
 func LayerAckPath(rosterDir, coordinator string) string {
-	return filepath.Join(rosterDir, "flotilla-"+coordinator+"-alive")
+	return layerClockPath(rosterDir, coordinator, "alive")
+}
+
+// LayerSettledPath returns the per-coordinator settle/idle marker sidecar.
+func LayerSettledPath(rosterDir, coordinator string) string {
+	return layerClockPath(rosterDir, coordinator, "settled")
+}
+
+// LayerAwaitingPath returns the per-coordinator awaiting-operator veto marker sidecar.
+func LayerAwaitingPath(rosterDir, coordinator string) string {
+	return layerClockPath(rosterDir, coordinator, "awaiting")
+}
+
+func layerClockPath(rosterDir, coordinator, suffix string) string {
+	return filepath.Join(rosterDir, "flotilla-"+coordinator+"-"+suffix)
+}
+
+// ResolveLayerClockPath picks the on-disk path for a coordinator clock artifact.
+// An explicit flag/env path always wins. Otherwise the per-coordinator canonical path
+// is preferred; when only the legacy flotilla-xo-* file exists, that path is kept so
+// existing deployments behave byte-identically until the operator migrates.
+func ResolveLayerClockPath(rosterDir, coordinator, explicit, legacyBasename, suffix string) string {
+	if strings.TrimSpace(explicit) != "" {
+		return explicit
+	}
+	legacy := filepath.Join(rosterDir, legacyBasename)
+	if coordinator == "" {
+		return legacy
+	}
+	layer := layerClockPath(rosterDir, coordinator, suffix)
+	if _, err := os.Stat(layer); err == nil {
+		return layer
+	}
+	if _, err := os.Stat(legacy); err == nil {
+		return legacy
+	}
+	return layer
 }
 
 // LayerBufferPath returns the adjutant interrupt buffer sidecar for a coordinator layer.

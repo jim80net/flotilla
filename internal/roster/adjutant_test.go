@@ -1,6 +1,10 @@
 package roster
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestAdjutantFor_ResolvesBinding(t *testing.T) {
 	cfg := &Config{
@@ -124,6 +128,8 @@ func TestLayerSidecarPaths(t *testing.T) {
 		want string
 	}{
 		{"ack", LayerAckPath("/state", "alpha-xo"), "/state/flotilla-alpha-xo-alive"},
+		{"settled", LayerSettledPath("/state", "alpha-xo"), "/state/flotilla-alpha-xo-settled"},
+		{"awaiting", LayerAwaitingPath("/state", "alpha-xo"), "/state/flotilla-alpha-xo-awaiting"},
 		{"buffer", LayerBufferPath("/state", "alpha-xo"), "/state/flotilla-alpha-xo-buffer.json"},
 		{"charter", LayerCharterPath("/state", "alpha-xo"), "/state/flotilla-alpha-xo-adjutant-charter.md"},
 	}
@@ -133,5 +139,30 @@ func TestLayerSidecarPaths(t *testing.T) {
 				t.Errorf("%s = %q, want %q", tc.name, tc.got, tc.want)
 			}
 		})
+	}
+}
+
+func TestResolveLayerClockPath(t *testing.T) {
+	dir := t.TempDir()
+	legacy := filepath.Join(dir, "flotilla-xo-alive")
+	layer := filepath.Join(dir, "flotilla-cos-alive")
+
+	if got := ResolveLayerClockPath(dir, "cos", "/explicit", "flotilla-xo-alive", "alive"); got != "/explicit" {
+		t.Fatalf("explicit = %q", got)
+	}
+	if got := ResolveLayerClockPath(dir, "cos", "", "flotilla-xo-alive", "alive"); got != layer {
+		t.Fatalf("greenfield = %q, want %q", got, layer)
+	}
+	if err := os.WriteFile(legacy, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := ResolveLayerClockPath(dir, "cos", "", "flotilla-xo-alive", "alive"); got != legacy {
+		t.Fatalf("legacy fallback = %q, want %q", got, legacy)
+	}
+	if err := os.WriteFile(layer, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := ResolveLayerClockPath(dir, "cos", "", "flotilla-xo-alive", "alive"); got != layer {
+		t.Fatalf("layer preferred = %q, want %q", got, layer)
 	}
 }
