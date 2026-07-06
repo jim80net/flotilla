@@ -1489,6 +1489,11 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   background: var(--abyss-2); border: 1px solid var(--line); border-radius: var(--r-sm);
   box-shadow: var(--shadow-lg); z-index: 4; padding: 4px; display: flex; flex-direction: column; gap: 2px;
 }
+/* The menu is CLOSED by default and opens only when the kebab clears its `hidden` attribute
+   (goals.js). An author `display:flex` OVERRIDES the UA `[hidden]{display:none}`, which made
+   every routable/gated graph card show its "Open conversation"/"Respond" popup permanently,
+   overflowing the node (P0 #421 regression). This higher-specificity rule restores `hidden`. */
+.gnode-pop[hidden] { display: none; }
 .gnode-pop-item {
   width: 100%; text-align: left; border: 0; background: transparent; color: var(--ink);
   font-size: .78rem; padding: 6px 8px; border-radius: 4px; cursor: pointer;
