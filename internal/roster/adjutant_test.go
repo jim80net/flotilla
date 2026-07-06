@@ -147,6 +147,9 @@ func TestResolveLayerClockPath(t *testing.T) {
 	legacy := filepath.Join(dir, "flotilla-xo-alive")
 	layer := filepath.Join(dir, "flotilla-cos-alive")
 
+	if got := ResolveLayerClockPath(dir, "", "", "flotilla-xo-alive", "alive"); got != legacy {
+		t.Fatalf("empty coordinator = %q, want legacy %q", got, legacy)
+	}
 	if got := ResolveLayerClockPath(dir, "cos", "/explicit", "flotilla-xo-alive", "alive"); got != "/explicit" {
 		t.Fatalf("explicit = %q", got)
 	}
