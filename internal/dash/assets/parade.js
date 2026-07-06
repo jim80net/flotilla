@@ -70,11 +70,18 @@
       .replace(/&amp;/gi, "&"); // last, so a literal "&amp;lt;" decodes to "&lt;", not "<"
   }
   // cellAlign reads an alignment from a th/td attribute string — a fixed keyword set, so
-  // nothing attacker-shaped can reach the style attribute renderTable emits.
+  // nothing attacker-shaped can reach the style attribute renderTable emits. It matches
+  // only a REAL quoted style attribute's whole text-align declaration, or a REAL align
+  // attribute whose value is exactly the keyword (cubic #447 P3: a data-align attr, a
+  // title mentioning "text-align: left", or align="lefty" must NOT infer alignment).
   function cellAlign(attrs) {
-    var m = /text-align\s*:\s*(left|center|right)/i.exec(attrs) ||
-            /\balign\s*=\s*["']?(left|center|right)/i.exec(attrs);
-    return m ? m[1].toLowerCase() : "";
+    var style = /(?:^|\s)style\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(attrs);
+    if (style) {
+      var d = /(?:^|;)\s*text-align\s*:\s*(left|center|right)\s*(?:;|$)/i.exec(style[1] || style[2] || "");
+      if (d) return d[1].toLowerCase();
+    }
+    var a = /(?:^|\s)align\s*=\s*(?:"(left|center|right)"|'(left|center|right)'|(left|center|right)(?=[\s>]|$))/i.exec(attrs);
+    return a ? (a[1] || a[2] || a[3]).toLowerCase() : "";
   }
   // parseHtmlTable extracts rows of {head, align, text} cells from a raw <table> block.
   // Nested markup inside a cell is stripped to its text (a deck table cell is prose).
@@ -164,6 +171,13 @@
           var hbody = (headIsTh ? hrows.slice(1) : hrows).map(function (r) {
             return r.map(function (c) { return c.text; });
           });
+          // A rebuilt HTML table keeps EVERY authored cell: pad a short <th> row out to
+          // the widest body row (cubic #447 P2) — unlike the pipe path, where GFM says
+          // extra body cells are ignored. Padded columns get blank headers, no alignment.
+          if (hhead) {
+            var maxW = hbody.reduce(function (n, r) { return Math.max(n, r.length); }, hhead.length);
+            while (hhead.length < maxW) hhead.push("");
+          }
           out.push(renderTable(hhead, hbody, hrows[0].map(function (c) { return c.align; })));
           i = end; // the for-loop's i++ advances past the closing-tag line
           continue;
