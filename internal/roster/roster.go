@@ -88,6 +88,12 @@ type Channel struct {
 	Role string `json:"role,omitempty"`
 }
 
+// UrgentWindow matches material-change reasons that bypass the adjutant buffer (#439).
+type UrgentWindow struct {
+	// Match is a case-insensitive substring; any reason containing it is urgent.
+	Match string `json:"match"`
+}
+
 // Schedule is one daily wall-clock dispatch the watch daemon may fire (#413).
 type Schedule struct {
 	// Name is a stable identifier (unique across schedules) used in logs and the
@@ -158,6 +164,11 @@ type Config struct {
 	// "consecutive" (ping every K-1, alert after ~2 missed pings — the middle
 	// ground). Empty ⇒ "none". Only consulted when ChangeDetector is on.
 	LivenessPingMode string `json:"liveness_ping_mode,omitempty"`
+
+	// UrgentWindows declares substring matches on material-change reasons that cut through
+	// the adjutant buffer to the leader immediately (#439 phase 1c). Operator relay
+	// messages always bypass the buffer via the KindRelay delivery path.
+	UrgentWindows []UrgentWindow `json:"urgent_windows,omitempty"`
 
 	// StackableWakes opts into per-layer material-wake routing (#438): each material desk
 	// transition is scoped to OwningXO instead of exclusively the primary xo_agent. Default

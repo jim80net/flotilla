@@ -3,6 +3,7 @@ package roster
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 )
 
 // adjutantTarget returns the coordinator this agent adjutants for, preferring
@@ -42,6 +43,23 @@ func LayerBufferPath(rosterDir, coordinator string) string {
 // LayerCharterPath returns the first-presentation charter file for a coordinator/adjutant pair.
 func LayerCharterPath(rosterDir, coordinator string) string {
 	return filepath.Join(rosterDir, "flotilla-"+coordinator+"-adjutant-charter.md")
+}
+
+// UrgentMaterial reports whether any reason matches an urgent_windows entry (phase 1c).
+func (c *Config) UrgentMaterial(reasons []string) bool {
+	if len(c.UrgentWindows) == 0 || len(reasons) == 0 {
+		return false
+	}
+	for _, r := range reasons {
+		rl := strings.ToLower(r)
+		for _, w := range c.UrgentWindows {
+			m := strings.TrimSpace(w.Match)
+			if m != "" && strings.Contains(rl, strings.ToLower(m)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (c *Config) validateAdjutantBindings(path string) error {

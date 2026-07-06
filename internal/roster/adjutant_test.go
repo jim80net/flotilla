@@ -78,6 +78,16 @@ func TestLoadAdjutantBindingsFederated(t *testing.T) {
 	}
 }
 
+func TestUrgentMaterialMatch(t *testing.T) {
+	cfg := &Config{UrgentWindows: []UrgentWindow{{Match: "approval_sensitive"}}}
+	if !cfg.UrgentMaterial([]string{"frontend approval_sensitive throttle"}) {
+		t.Fatal("expected urgent match")
+	}
+	if cfg.UrgentMaterial([]string{"backend Working→Idle"}) {
+		t.Fatal("expected no urgent match")
+	}
+}
+
 func TestLayerAckPath(t *testing.T) {
 	got := LayerAckPath("/state", "alpha-xo")
 	want := "/state/flotilla-alpha-xo-alive"

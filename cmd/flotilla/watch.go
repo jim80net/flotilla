@@ -435,7 +435,7 @@ func cmdWatch(args []string) error {
 					body = leaderPingBody(leaderAckPath)
 				}
 			default: // WakeMaterial
-				if primaryAdjutant != "" {
+				if primaryAdjutant != "" && !cfg.UrgentMaterial(reasons) {
 					if err := adjutantbuffer.Append(layerBufferPath, xo, reasons); err != nil {
 						log.Printf("flotilla watch: adjutant buffer append failed: %v", err)
 					}
