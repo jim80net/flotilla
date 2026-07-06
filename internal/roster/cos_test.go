@@ -80,6 +80,38 @@ func TestIsXO(t *testing.T) {
 	}
 }
 
+// #460: solo execution desks own a mirror channel as sole xo_agent with no
+// subordinate members — span of control zero, so not coordinators.
+func TestIsCoordinator_SoloDeskChannelNotCoordinator(t *testing.T) {
+	solo, _ := Load(writeRoster(t, `{
+	  "operator_user_id":"U","xo_agent":"meta-xo","cos_agent":"cos",
+	  "agents":[{"name":"meta-xo"},{"name":"product-skill-dev"},{"name":"cos"}],
+	  "channels":[
+	    {"channel_id":"C_CMD","xo_agent":"meta-xo","members":["product-skill-dev","cos"]},
+	    {"channel_id":"C_PSKILL","xo_agent":"product-skill-dev","members":[]}]}`))
+	if !solo.IsCoordinator("meta-xo") {
+		t.Error("primary xo_agent must remain coordinator")
+	}
+	if !solo.IsCoordinator("cos") {
+		t.Error("cos_agent must remain coordinator")
+	}
+	if solo.IsCoordinator("product-skill-dev") {
+		t.Error("solo desk owning only its mirror channel must NOT be coordinator")
+	}
+}
+
+func TestIsCoordinator_SelfOnlyMemberNotCoordinator(t *testing.T) {
+	cfg, _ := Load(writeRoster(t, `{
+	  "operator_user_id":"U","xo_agent":"meta-xo",
+	  "agents":[{"name":"meta-xo"},{"name":"desk"}],
+	  "channels":[
+	    {"channel_id":"C_CMD","xo_agent":"meta-xo","members":["desk"]},
+	    {"channel_id":"C_DESK","xo_agent":"desk","members":["desk"]}]}`))
+	if cfg.IsCoordinator("desk") {
+		t.Error("xo_agent whose only member is itself must NOT be coordinator")
+	}
+}
+
 func TestIsCoordinator(t *testing.T) {
 	fed, _ := Load(writeRoster(t, `{
 	  "operator_user_id":"U","xo_agent":"meta-xo","cos_agent":"cos",

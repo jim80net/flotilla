@@ -489,25 +489,44 @@ func (c *Config) IsXO(name string) bool {
 	return false
 }
 
-// IsCoordinator reports whether name holds a coordinator role — any XO (see IsXO)
-// or the chief-of-staff (cos_agent). The delegation-nudge detector (#232) and
-// operating-principles doctrine apply to every coordinator, not only the primary
-// clock XO or the CoS in isolation.
+// hasSpanOfControl reports whether name is xo_agent of at least one binding with a
+// member other than name itself (#460). Owning a solo mirror channel is not coordination.
+func (c *Config) hasSpanOfControl(name string) bool {
+	for _, ch := range c.Bindings() {
+		if ch.XOAgent != name {
+			continue
+		}
+		for _, m := range ch.Members {
+			if m != name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// IsCoordinator reports whether name holds a coordinator role — the primary xo_agent,
+// the chief-of-staff (cos_agent), or a binding xo_agent with span of control > 0
+// (at least one channel member besides itself; #460). IsXO is broader (any channel
+// owner); use IsCoordinator for delegation-nudge (#232) and coordinator doctrine.
 func (c *Config) IsCoordinator(name string) bool {
 	if name == "" {
 		return false
 	}
-	if c.IsXO(name) {
+	if c.XOAgent != "" && name == c.XOAgent {
 		return true
 	}
-	return c.CosAgent != "" && name == c.CosAgent
+	if c.CosAgent != "" && name == c.CosAgent {
+		return true
+	}
+	return c.hasSpanOfControl(name)
 }
 
 // CoordinatorSet returns EVERY coordinator agent (each name for which IsCoordinator is true) —
-// the primary XO, the CoS, and every binding's XO — computed in a SINGLE pass. Callers that
-// classify MANY agents (e.g. the dash rail's Fleet Command grouping) use this instead of
-// IsCoordinator-per-agent, which re-scans the bindings on each call (O(n²) over a member list).
-// The returned map is the caller's to keep.
+// the primary XO, the CoS, and every binding XO with span of control — computed in a SINGLE
+// pass. Callers that classify MANY agents (e.g. the dash rail's Fleet Command grouping) use
+// this instead of IsCoordinator-per-agent, which re-scans the bindings on each call (O(n²)
+// over a member list). The returned map is the caller's to keep.
 func (c *Config) CoordinatorSet() map[string]bool {
 	set := make(map[string]bool)
 	if c.XOAgent != "" {
@@ -517,8 +536,15 @@ func (c *Config) CoordinatorSet() map[string]bool {
 		set[c.CosAgent] = true
 	}
 	for _, ch := range c.Bindings() {
-		if ch.XOAgent != "" {
-			set[ch.XOAgent] = true
+		xo := ch.XOAgent
+		if xo == "" || set[xo] {
+			continue
+		}
+		for _, m := range ch.Members {
+			if m != xo {
+				set[xo] = true
+				break
+			}
 		}
 	}
 	return set
