@@ -1066,10 +1066,16 @@ func deskWarrantedGate(cfg *roster.Config, read func(agent string) ([]byte, bool
 	alerted := map[string]string{} // agent → sha256 of the last-ALERTED headingless content (#479)
 	return func(agent string) bool {
 		raw, exists, err := read(agent)
-		if !exists || err != nil {
-			// Absent (missing-ledger fallback) OR unreadable/torn (fail-safe): WARRANTED. Neither is a
-			// present-but-sectionless format slip, so clear the latch and do NOT alert.
+		if !exists {
+			// Absent (missing-ledger fallback): WARRANTED, latch cleared — a deleted ledger resets
+			// the state, so a re-created file is a genuinely new file and may alert afresh.
 			delete(alerted, agent)
+			return true
+		}
+		if err != nil {
+			// Unreadable/torn (fail-safe): WARRANTED, latch KEPT — a transient read glitch must not
+			// make the SAME unchanged broken bytes re-alert once the read heals (cubic #480 P2);
+			// "repeat only when the file changes or after a clean read" survives the glitch.
 			return true
 		}
 		content := string(raw)

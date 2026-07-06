@@ -116,14 +116,29 @@ func TestDeskWarrantedGate(t *testing.T) {
 		t.Errorf("a cleared latch must re-fire on a new sectionless edge, got %d alerts", len(alerts))
 	}
 
-	// (e) PRESENT but UNREADABLE/torn ⇒ warranted (fail-safe), no alert (a torn read self-heals).
+	// (e) PRESENT but UNREADABLE/torn ⇒ warranted (fail-safe), no alert (a torn read self-heals) —
+	//     AND the latch survives the glitch: the same unchanged broken bytes must not re-alert
+	//     after the read heals (cubic #480 P2). An ABSENT file, by contrast, resets the latch
+	//     (a re-created ledger is a genuinely new file).
 	alerts = nil
+	broken := "# Notes\nheadingless before, during, and after the glitch\n"
+	state["backend"] = rd{content: broken, exists: true}
+	gate("backend") // alert 1: first sight of this broken content
 	state["backend"] = rd{exists: true, err: errors.New("torn mid-write")}
 	if !gate("backend") {
 		t.Error("unreadable/torn per-recipient backlog ⇒ warranted (fail-safe)")
 	}
-	if len(alerts) != 0 {
-		t.Errorf("an unreadable/torn read must be SILENT, got %d alerts", len(alerts))
+	state["backend"] = rd{content: broken, exists: true}
+	gate("backend") // healed read of the SAME bytes — must stay silent
+	if len(alerts) != 1 {
+		t.Errorf("a torn-read glitch must not re-alert unchanged broken content, got %d alerts", len(alerts))
+	}
+	state["backend"] = rd{exists: false}
+	gate("backend") // absent clears the latch...
+	state["backend"] = rd{content: broken, exists: true}
+	gate("backend") // ...so a re-created file (even with the same bytes) alerts afresh
+	if len(alerts) != 2 {
+		t.Errorf("a re-created ledger must alert afresh after absence, got %d alerts", len(alerts))
 	}
 
 	// (f) The HARD gate still wins: an approval-sensitive desk ("trader") with a backlog FULL of
