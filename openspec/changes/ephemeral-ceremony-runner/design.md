@@ -86,12 +86,102 @@ with weaker isolation guarantee.
 standing context (destructive to in-flight work); does not solve register poisoning — only resets
 after damage. **Fails the operator's stated concern.**
 
+### D. Ephemeral desk — spawn via resume/launch, run ceremony, tear down (operator gate round 3)
+
+Stand up a **throwaway desk pane** with existing machinery (`deliver.NewWindow` /
+`deliver.NewSession` + `launch.Recipe.Launch`), inject the ceremony via `deliver` + surface
+driver (same path as today's standing-pane schedules), wait for completion, then tear the pane
+down. Two teardown shapes:
+
+| Teardown | Mechanism | What dogfood shows |
+|----------|-----------|-------------------|
+| **D1 — kill-pane** | `tmux kill-window` / `kill-pane` after exit or idle timeout | Reliable when the harness process actually exited; no handoff artifact |
+| **D2 — recycle close** | `flotilla recycle` phase-2 graceful close (`/exit` + `remain-on-exit` poll) | **Empirically flaky** — 2026-07-06 fleet-wide recycle hit phase-2 aborts (graceful close timeout, subagent dialogs, busy panes); `cmd/flotilla/recycle.go` names this explicitly |
+
+**Pros:** Reuses the **same** launch recipe, surface drivers, confirmed delivery, and cwd/worktree
+inheritance as fleet work — no parallel per-surface argv table; operator can `tmux attach` to the
+throwaway window during the run.
+
+**Cons:** Higher **latency** (harness cold-boot in tmux vs `claude -p` direct exec); **tmux/pane
+tax** (create + destroy every tick); ceremony transcript lives in throwaway scrollback (better than
+standing pane, still recoverable on mistake); **detector noise** if the ephemeral pane is roster-tagged
+or mis-tagged as a desk (`Working→Idle` finish-edges wake coordinators — the 2026-07-06 recycle
+storm is the canonical failure mode). D2 adds handoff/recycle weight inappropriate for a bounded
+side task. D1 avoids graceful-close flakiness but still pays boot + pane overhead.
+
+**Off-roster variant (D′):** spawn an **untagged** `flotilla-ceremony:<run-id>` window (not in
+`roster.Desks[]`) to suppress detector edges — then the design reimplements a private mini-launch
+path without reusing standing-desk resolution, and still needs a completion signal (idle poll or
+process exit) before kill-pane.
+
 ---
 
-## Recommended approach: **A (subprocess-first)**, with optional B for debug
+## Gate round 3 — alternatives considered (operator 2026-07-06 13:29Z)
 
-Ship **A** as the product default. Add `FLOTILLA_CEREMONY_TMUX=1` or `--ceremony-visible` later
-for operators who want tmux visibility — not P0.
+**Operator question (verbatim):** *"Have you considered the tradeoffs between simply standing up a
+desk and tearing it down afterward? … we need to do better about not keeping sessions around
+unnecessarily without managing the context of those sessions. Adding a one shot runner may be
+working around the problem, instead of dealing with it head on."*
+
+### Comparison — subprocess one-shot (A) vs ephemeral desk spawn/teardown (D)
+
+| Dimension | **A — subprocess one-shot** | **D — ephemeral desk spawn/teardown** |
+|-----------|----------------------------|---------------------------------------|
+| **Reuse of existing primitives** | `launch.Recipe` for **cwd only**; new `BuildOneShotArgv` per surface; doctor precedent (`claude --print`) | Full `Recipe.Launch` + `deliver` + surface drivers — **no second argv table** |
+| **Teardown reliability** | **Process exit** is the completion signal; no graceful-close phase | D1 kill-pane: good when process exited; D2 recycle close: **same flaky phase-2** as fleet recycle |
+| **tmux / pane overhead** | **None** for ceremony body (log + artifacts only) | Create + destroy pane/window **per fire** |
+| **Detector noise** | **Off assess loop** — no `Working→Idle` edge | Tagged desk ⇒ finish-edges; untagged D′ ⇒ custom poll/kill path |
+| **Latency** | **Low** — exec one-shot CLI in desk cwd | **High** — tmux session boot + interactive harness startup |
+| **Context isolation** | **Total** — standing pane never sees ceremony body | **Good** — ceremony in throwaway pane, not standing; scrollback still exists |
+| **Standing-session lifecycle** | **Does not fix** — standing pane still long-lived | **Does not fix** — standing pane still long-lived; adds ephemeral panes on top |
+
+**Honest read:** D wins on **primitive reuse** and **operator visibility**. A wins on **teardown
+reliability, latency, detector silence, and operational weight** for bounded artifact-producing
+ceremonies. Neither option retires unnecessary standing sessions — that is a **separate** problem.
+
+### Root problem — session lifecycle vs ceremony isolation
+
+The operator is **right** about the deeper issue. The root failure mode is twofold:
+
+1. **Ceremony-class work routed through standing sessions** — register poisoning (this design's
+   immediate target).
+2. **Standing sessions kept alive without context discipline** — sessions persist across days/weeks
+   with no policy for when to rotate, recycle, or retire capacity that is not doing coordination
+   work. `RotateContext` wipes in place but is destructive and not wired as a lifecycle gate;
+   `flotilla recycle` is chapter-close, not "this session has served its purpose."
+
+**Is subprocess a workaround?** Only if we pretend it solves (2). It does **not**. Scoped
+honestly, subprocess is the right **execution substrate for ceremony-class side work** — bounded,
+artifact-producing, no need for standing coordination context — matching how `flotilla-doctor`
+already runs recovery headlessly. It is **not** a substitute for fleet-wide session-lifecycle
+policy.
+
+**Head-on track (paired, not deferred silently):**
+
+| Policy | What it addresses | Relationship to this design |
+|--------|-------------------|----------------------------|
+| **Ceremony never in standing pane** | Register poisoning from walks/parades | **This PR** — `mode: ephemeral` subprocess default for ceremony schedules |
+| **Standing-session lifecycle gates** | Sessions kept without purpose / unmanaged context | **Follow-on** — explicit product policy: idle-age rotate, coordinator chapter-close (#437), retire desks that exist only as ceremony hosts; dogfood via rotation runbooks |
+| **Detector scoped to coordination** | Finish-edge storms from non-coordination churn | **#438 stackable scoping** (sibling) — wrong-layer wakes; ephemeral subprocess avoids adding ceremony churn to assess loop |
+
+Ephemeral desk (D) would **also** stop ceremony injection into the standing pane, but pays teardown
+and detector tax without advancing session-lifecycle policy any further than subprocess does. After
+this comparison, **subprocess remains P0** — not sunk-cost defense; D loses on the dimensions that
+matter for tick-fired bounded work on a live fleet.
+
+**Optional later:** `FLOTILLA_CEREMONY_TMUX=1` / approach **B** (one-shot command in a throwaway
+tmux window) for operators who want attach visibility — still not full interactive desk spawn (D).
+
+---
+
+## Recommended approach: **A (subprocess-first)** — confirmed after gate round 3
+
+Ship **A** as the product default for ceremony schedules. Pair with an explicit **session-lifecycle
+follow-on** (standing-session discipline) so this design is not misread as the whole answer to
+"context sessions we should not keep." Add `FLOTILLA_CEREMONY_TMUX=1` or `--ceremony-visible`
+(approach B) later for attach visibility — not P0. **Do not** adopt D (full spawn/teardown desk
+per ceremony) as P0: reuse benefit does not outweigh teardown/latency/detector costs on dogfood
+evidence.
 
 ---
 
@@ -324,6 +414,11 @@ Tick → ceremony.Run (subprocess, off injector worker)
 
 ## Phasing
 
+- **Follow-on (session lifecycle — head-on track, out of this PR):** product policy for
+  standing sessions kept without coordination work — idle-age `RotateContext` gates,
+  coordinator `recycle --self` (#437), retire ceremony-only standing capacity; dogfood metrics
+  on session age vs rotate/recycle cadence. Addresses operator gate round 3 "sessions kept
+  unnecessarily" concern; **not** implemented by subprocess alone.
 - **P0 (after #369 merge):** `internal/ceremony` subprocess runner; argv table for
   claude/grok/codex (**opencode fail-closed** until P1); flock serialization; host-local overlay +
   scheduler `mode: ephemeral` branch; ephemeral phase machine; per-class `commit_on`; subprocess
@@ -356,6 +451,10 @@ visibility-synthesis wakes (`WakeSynthesis`), desk heartbeat beats.
 
 3. **Coordinator ceremonies:** CoS/XO walks use the same subprocess path with their launch recipe cwd
    — confirm no special-case "coordinator must stay interactive" carve-out.
+
+4. **Session-lifecycle policy defaults (follow-on):** what idle age / context-fill threshold should
+   trigger standing-session rotate vs recycle vs retire? Design defers to dogfood on the paired
+   follow-on; subprocess ceremonies do not remove the need for this decision.
 
 ---
 

@@ -18,10 +18,17 @@ in a **throwaway subprocess** (one-shot harness invocation), writes artifacts on
 agreed durable paths, tears down, and pings the standing session with a **short completion
 line** (never the ceremony transcript).
 
+**Gate round 3 (operator 13:29Z):** design compares subprocess one-shot vs **ephemeral desk
+spawn/teardown** (resume/launch → ceremony → kill-pane or recycle close). Subprocess remains
+P0 after honest tradeoff analysis (teardown reliability, latency, detector noise). The deeper
+point is accepted: **standing-session lifecycle/context discipline** is a separate head-on
+track — this PR fixes ceremony-in-standing-pane, not fleet-wide session retirement policy.
+
 Composes with:
 - **#369** walk-cadence confirmed delivery (standing-pane path remains for non-ceremony traffic)
 - **`RotateContext`** (session hygiene — orthogonal; does not replace disposable invocation)
 - **`launch.Recipe` / `ProvisionWorktree`** (cwd + worktree inheritance)
+- **Session-lifecycle follow-on** (idle-age rotate, #437 chapter-close) — named in design, out of P0 scope
 
 ## Scope
 
