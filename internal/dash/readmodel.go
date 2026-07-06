@@ -253,22 +253,7 @@ type TopologyDoc struct {
 func BuildTopology(cfg *roster.Config) TopologyDoc {
 	bindings := cfg.Bindings()
 	doc := TopologyDoc{Channels: make([]TopologyChannel, 0, len(bindings))}
-	// Collect the coordinator set from every candidate agent (channel XOs + members + the
-	// primary XO + CoS), filtered through the roster's single IsCoordinator definition so the
-	// rail can never diverge from the roster's notion of "coordinator".
-	coordSet := map[string]bool{}
-	addCoord := func(a string) {
-		if a != "" && !coordSet[a] && cfg.IsCoordinator(a) {
-			coordSet[a] = true
-		}
-	}
-	addCoord(cfg.XOAgent)
-	addCoord(cfg.CosAgent)
 	for _, ch := range bindings {
-		addCoord(ch.XOAgent)
-		for _, m := range ch.Members {
-			addCoord(m)
-		}
 		// Copy Members defensively: Bindings() shares the Config's slice header in
 		// the federation path (its documented read-only contract), and the board's
 		// JSON must not alias roster-owned memory.
@@ -281,9 +266,12 @@ func BuildTopology(cfg *roster.Config) TopologyDoc {
 			Role:      ch.Role,
 		})
 	}
-	if len(coordSet) > 0 {
-		doc.Coordinators = make([]string, 0, len(coordSet))
-		for a := range coordSet {
+	// The coordinator set (XOs + CoS) computed in ONE pass by the roster (CoordinatorSet) —
+	// not IsCoordinator-per-agent, which re-scans the bindings each call (O(n²)). The roster
+	// is still the single source of truth for who is a coordinator.
+	if coords := cfg.CoordinatorSet(); len(coords) > 0 {
+		doc.Coordinators = make([]string, 0, len(coords))
+		for a := range coords {
 			doc.Coordinators = append(doc.Coordinators, a)
 		}
 		sort.Strings(doc.Coordinators)

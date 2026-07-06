@@ -149,12 +149,15 @@
           cmdSeen[key] = true;
           cmdDesks.push({ name: name, role: role || "" });
         }
+        // Badge the CoS "cos" and every other coordinator "xo" — computed BEFORE insert so it is
+        // right even when the CoS is itself a channel's xo_agent (our fleet: the CoS OWNS the
+        // fleet-command channel). A row inserted "xo" then deduped would badge the CoS wrong (P2).
+        function coordRole(name) { return String(name).toLowerCase() === cosKey ? "cos" : "xo"; }
         fleetCmdChannels.forEach(function (ch) {
-          addCmd(ch.xo_agent, "xo"); // a channel's own XO is a coordinator by definition
+          addCmd(ch.xo_agent, coordRole(ch.xo_agent)); // a channel's own XO is a coordinator by definition
           (ch.members || []).forEach(function (m) {
-            // a coordinator (project XO / CoS) belongs in Fleet Command — the CoS badged "cos"
-            if (isCoord(m)) addCmd(m, String(m).toLowerCase() === cosKey ? "cos" : "xo");
-            else if (m) deskOverflow.push(m);     // a plain desk does NOT — it groups under "Desks"
+            if (isCoord(m)) addCmd(m, coordRole(m));  // a coordinator (project XO / CoS) belongs in Fleet Command
+            else if (m) deskOverflow.push(m);         // a plain desk does NOT — it groups under "Desks"
           });
         });
         if (cmdDesks.length) {

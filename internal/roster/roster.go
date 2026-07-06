@@ -470,6 +470,27 @@ func (c *Config) IsCoordinator(name string) bool {
 	return c.CosAgent != "" && name == c.CosAgent
 }
 
+// CoordinatorSet returns EVERY coordinator agent (each name for which IsCoordinator is true) —
+// the primary XO, the CoS, and every binding's XO — computed in a SINGLE pass. Callers that
+// classify MANY agents (e.g. the dash rail's Fleet Command grouping) use this instead of
+// IsCoordinator-per-agent, which re-scans the bindings on each call (O(n²) over a member list).
+// The returned map is the caller's to keep.
+func (c *Config) CoordinatorSet() map[string]bool {
+	set := make(map[string]bool)
+	if c.XOAgent != "" {
+		set[c.XOAgent] = true
+	}
+	if c.CosAgent != "" {
+		set[c.CosAgent] = true
+	}
+	for _, ch := range c.Bindings() {
+		if ch.XOAgent != "" {
+			set[ch.XOAgent] = true
+		}
+	}
+	return set
+}
+
 // HeartbeatEnabled reports whether the recursive desk heartbeat (#183) re-engages this agent
 // when it settles Idle mid-task. The primary XO is excluded — it has its own clock (the daemon
 // heartbeat), so heartbeating it would double-drive. Resolution order: an explicit per-agent
