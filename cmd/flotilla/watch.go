@@ -410,11 +410,20 @@ func cmdWatch(args []string) error {
 				return
 			}
 			bufferPath := roster.LayerBufferPath(rosterDir, owner)
-			brief, ok, clearAfter := adjutantSeamBrief(bufferPath, owner, rosterDir)
+			deliveredPath := roster.LayerBufferDeliveredPath(rosterDir, owner)
+			brief, ok, clearAfter, recordItems := adjutantSeamBrief(bufferPath, deliveredPath, owner, rosterDir)
 			if !ok {
+				if clearAfter {
+					if err := adjutantbuffer.Clear(bufferPath); err != nil {
+						log.Printf("flotilla watch: adjutant buffer clear after all-consumed skip failed for %q: %v", owner, err)
+					}
+				}
 				return
 			}
 			injector.Enqueue(watch.Job{Agent: owner, Message: brief, Kind: watch.KindDetector})
+			if err := adjutantbuffer.RecordDelivered(deliveredPath, owner, recordItems); err != nil {
+				log.Printf("flotilla watch: adjutant delivered ledger record failed for %q: %v", owner, err)
+			}
 			if clearAfter {
 				if err := adjutantbuffer.Clear(bufferPath); err != nil {
 					log.Printf("flotilla watch: adjutant buffer clear after enqueue failed for %q: %v", owner, err)
@@ -1256,20 +1265,26 @@ func enqueueAdjutantCharterPairing(adjutant, leader, rosterDir, leaderAckPath st
 	})
 }
 
-// adjutantSeamBrief peeks the layer buffer and formats the leader inject at a seam. The caller
-// must Clear the sidecar only AFTER enqueue (enqueue-then-delete — same at-least-once window as
-// detector persist).
-func adjutantSeamBrief(bufferPath, leader, rosterDir string) (brief string, ok bool, clearAfter bool) {
+// adjutantSeamBrief peeks the layer buffer, applies consumed-item dedup (#469), and formats the
+// leader inject at a seam. The caller must Clear the sidecar only AFTER enqueue (enqueue-then-delete
+// — same at-least-once window as detector persist). recordItems is the post-dedup list to ledger.
+func adjutantSeamBrief(bufferPath, deliveredPath, leader, rosterDir string) (brief string, ok bool, clearAfter bool, recordItems []adjutantbuffer.Item) {
 	f, hasItems, quarantined, err := adjutantbuffer.Peek(bufferPath)
 	if err != nil {
 		log.Printf("flotilla watch: adjutant buffer peek failed: %v", err)
-		return "", false, false
+		return "", false, false, nil
 	}
 	if !hasItems && !quarantined {
-		return "", false, false
+		return "", false, false, nil
+	}
+	delivered, err := adjutantbuffer.LoadDelivered(deliveredPath)
+	if err != nil {
+		log.Printf("flotilla watch: adjutant delivered ledger load failed: %v", err)
+		return "", false, false, nil
 	}
 	_, charterErr := os.Stat(roster.LayerCharterPath(rosterDir, leader))
-	return adjutantbuffer.FormatBrief(leader, f, os.IsNotExist(charterErr), quarantined), true, hasItems
+	brief, recordItems, ok = adjutantbuffer.PrepareInject(leader, f, delivered, os.IsNotExist(charterErr), quarantined)
+	return brief, ok, hasItems, recordItems
 }
 
 // backlogWakeBody composes the goal-driven loop's WakeBacklog prompt: it NAMES the driven item(s)

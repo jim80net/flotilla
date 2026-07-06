@@ -12,8 +12,10 @@ import (
 
 // Item is one buffered interrupt for a coordinator layer.
 type Item struct {
-	At     time.Time `json:"at"`
-	Reason string    `json:"reason"`
+	At        time.Time `json:"at"`
+	Reason    string    `json:"reason"`
+	Key       string    `json:"key,omitempty"`
+	StateHash string    `json:"state_hash,omitempty"`
 }
 
 // File is the durable layer queue sidecar (flotilla-<xo>-buffer.json).
@@ -44,7 +46,12 @@ func Append(path, leader string, reasons []string) error {
 		if r == "" {
 			continue
 		}
-		f.Items = append(f.Items, Item{At: now, Reason: r})
+		f.Items = append(f.Items, Item{
+			At:        now,
+			Reason:    r,
+			Key:       itemKey(r),
+			StateHash: itemStateHash(r, now),
+		})
 	}
 	return save(path, f)
 }
@@ -107,9 +114,7 @@ func FormatBrief(leader string, f File, charterMissing, corruptQuarantined bool)
 		b.WriteString(" (evaluation-tick ack is required minimum).\n\n")
 	}
 	if len(f.Items) == 0 {
-		if corruptQuarantined {
-			return b.String()
-		}
+		return b.String()
 	}
 	since := time.Since(oldest(f.Items))
 	fmt.Fprintf(&b, "Since your last seam (%s ago): %d buffered item(s) need your judgment.\n", humanSince(since), len(f.Items))
@@ -138,6 +143,7 @@ func load(path string) (File, bool, error) {
 		log.Printf("flotilla watch: adjutant buffer at %q is corrupt (%v); preserved as %q", path, err, sidecar)
 		return File{}, true, nil
 	}
+	f.Items = normalizeItems(f.Items)
 	return f, false, nil
 }
 
