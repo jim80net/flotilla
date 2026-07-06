@@ -57,20 +57,13 @@
   var modalReturnId = null; // #354 P2: the NODE id that opened the modal — re-queried live on
                             // close so a drill-in / SSE re-render that replaced the trigger
                             // element still restores focus (survives detach).
-  // Layout mode (org-graph v2 §2/§7.4). "org" = hub-and-spoke — the coordinator
-  // (layout.hub_center) at the visual center, org units on concentric rings, spoke edges
-  // to children. "tree" = the tiered altitude columns (the toggle alternative). Default is
-  // ORG per the operator's UX blessing (#324), superseding design §7.4's provisional
-  // tree-default "until UX proven". A deployment may seed the default via the
-  // FLOTILLA_DASH_GOALS_LAYOUT env → the body's data-goals-layout attribute (#317); the
-  // live toggle still overrides it at runtime.
-  var goalsLayout = (function () {
-    var v = (document.body && document.body.getAttribute("data-goals-layout")) || "";
-    // The operator retired org from the UI: the default is MIND MAP, "tree" is honored, and
-    // anything else (incl. a legacy "org" seed) falls back to mindmap. layoutOrg stays below,
-    // dormant — no org button, no org default.
-    return v === "tree" ? "tree" : "mindmap";
-  })();
+  // Layout mode. The Goals map renders as a MIND MAP ONLY (operator directive 2026-07-06:
+  // "mind-map should be the only view option" — the tree/mind-map toggle was removed). The
+  // "tree" (tiered altitude columns) and "org" (hub-and-spoke) geometries below stay in the
+  // code DORMANT and unreachable — there is no picker and no seed that can activate them — so
+  // this is a view-picker simplification, not a rebuild of the map. Any config/env that used
+  // to seed "tree" is redirected to mindmap server-side (normalizeGoalsLayout).
+  var goalsLayout = "mindmap";
   // Radial modes (org pinwheel + the mind map) share card sizing, radial fit, no tier
   // labels, and center-anchored geometry — only their placement + edge shape differ. The
   // tree is the odd one out (altitude columns).
@@ -1978,50 +1971,13 @@
     });
   }
 
-  // setLayout flips between tree / org / mindmap and forces a full re-layout: the mode isn't
-  // per-node data, so it doesn't change structuralSig — null it to defeat the in-place fast
-  // path, reset the fit so the new geometry re-frames, and re-render.
-  function setLayout(mode) {
-    // UI offers tree | mind map (org retired); default is mindmap, tree when explicitly picked.
-    var next = mode === "tree" ? "tree" : "mindmap";
-    if (next === goalsLayout) return;
-    goalsLayout = next;
-    var btns = document.querySelectorAll(".glayout-btn");
-    for (var i = 0; i < btns.length; i++) {
-      var on = btns[i].getAttribute("data-layout") === goalsLayout;
-      btns[i].classList.toggle("active", on);
-      btns[i].setAttribute("aria-pressed", String(on));
-    }
-    lastStructSig = null; // force a full rebuild (not an in-place status swap)
-    view.fitted = false;  // re-frame for the new geometry
-    // Only render immediately when a doc is already cached — a toggle BEFORE the first
-    // fetch would otherwise render the empty doc and flash a false "No goals file
-    // configured" state. The new mode is retained and applies to the next render (the
-    // pending/next refresh) either way (cubic #316 P2).
-    if (cache && isVisible()) render();
-  }
-
-  var layoutWired = false;
-  function wireLayoutToggle() {
-    if (layoutWired) return;
-    var btns = document.querySelectorAll(".glayout-btn");
-    if (!btns.length) return;
-    layoutWired = true;
-    for (var i = 0; i < btns.length; i++) {
-      // Sync the active button to the seeded default (the markup hardcodes org active,
-      // but an env-seeded tree default must show tree active) — #317.
-      var on = btns[i].getAttribute("data-layout") === goalsLayout;
-      btns[i].classList.toggle("active", on);
-      btns[i].setAttribute("aria-pressed", String(on));
-      btns[i].addEventListener("click", function () { setLayout(this.getAttribute("data-layout")); });
-    }
-  }
+  // (The tree/mind-map layout picker and its two wiring functions were removed 2026-07-06:
+  // the map renders as a mind map only, so there is nothing to switch between.)
 
   function show() {
     activated = true;
     setupPanZoom();
     wireNodes();
-    wireLayoutToggle();
     if (cache) { render(); } else { refresh(); }
   }
 

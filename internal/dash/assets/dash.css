@@ -558,32 +558,8 @@ code {
    the long title used to compress head-right and the toggle's overflow:hidden CLIPPED its
    buttons. Let the header wrap so head-right drops below the title instead of being crushed. */
 .goals-panel > .panel-head { flex-wrap: wrap; }
-.goals-layout-toggle {
-  display: inline-flex;
-  flex: none; /* never shrink below the toggle's buttons — overflow:hidden would clip them */
-  border: 1px solid var(--line-soft, var(--line));
-  border-radius: var(--r-sm);
-  overflow: hidden;
-}
-.glayout-btn {
-  border: 0;
-  background: transparent;
-  color: var(--ink-3);
-  font: inherit;
-  font-size: .64rem;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  padding: .22rem .7rem;
-  /* org is the default layout — its toggle is a primary control; clear the WCAG 2.5.8
-     24px minimum touch target (was 23px) without looking chunky (#330 Fable QA lane). */
-  min-height: 30px;
-  display: inline-flex;
-  align-items: center;
-  cursor: pointer;
-}
-.glayout-btn + .glayout-btn { border-left: 1px solid var(--line-soft, var(--line)); }
-.glayout-btn.active { background: color-mix(in srgb, var(--cyan) 18%, transparent); color: var(--ink-1); }
-.glayout-btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
+/* The Goals map layout toggle (.goals-layout-toggle / .glayout-btn) was removed 2026-07-06 —
+   the map is mind-map-only, so there is no picker to style. */
 
 /* the info⇄debug segmented toggle */
 .conv-head-right { display: flex; align-items: center; gap: .6rem; }
@@ -1784,7 +1760,6 @@ html, body { overflow-x: clip; }
 @media (max-width: 900px) {
   .tab,
   .btn,
-  .glayout-btn,
   .mv-btn,
   #filter-state,
   .ghelp,
@@ -1796,7 +1771,6 @@ html, body { overflow-x: clip; }
   .conv-queue-sum,
   .gzoomctl button { min-height: 44px; }
   .tab,
-  .glayout-btn,
   .mv-btn,
   .thread-jump { display: inline-flex; align-items: center; justify-content: center; }
   /* the drive-queue disclosure summary (#326) is a thumb-driven toggle — give it
