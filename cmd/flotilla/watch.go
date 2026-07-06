@@ -443,7 +443,13 @@ func cmdWatch(args []string) error {
 			case watch.WakePing:
 				if primaryAdjutant != "" {
 					target = primaryAdjutant
-					body = adjutantEvaluationTickBody(xo, leaderAckPath, layerBufferPath)
+					charterPath := roster.LayerCharterPath(rosterDir, xo)
+					if layerCharterMissing(charterPath) {
+						// Evaluation ticks require an established charter (#439 spec).
+						body = adjutantCharterPairingBody(xo, primaryAdjutant, charterPath, leaderAckPath)
+					} else {
+						body = adjutantEvaluationTickBody(xo, leaderAckPath, layerBufferPath)
+					}
 				} else {
 					body = leaderPingBody(leaderAckPath)
 				}
@@ -736,6 +742,7 @@ func cmdWatch(args []string) error {
 			det.Poke()
 		}, eventPollInterval)
 		det.Start()
+		enqueueAdjutantCharterPairing(primaryAdjutant, xo, rosterDir, leaderAckPath, injector.Enqueue)
 		turnPoller.Start()
 		defer func() {
 			turnPoller.Stop()
@@ -1068,7 +1075,42 @@ func adjutantEvaluationTickBody(leader, leaderAckPath, bufferPath string) string
 		"unanswered operator items. Distinguish all-quiet (nothing to do) from work-found (quiet but stuck).\n" +
 		"3. ACT BY TIER — all-quiet → ack only, no leader interrupt; work-found → buffer judgment items " +
 		"in " + bufferPath + " and inject a digest at " + leader + "'s next seam (immediately if urgent-class).\n\n" +
-		"This tick catches idle-holding: leader idle but queue not empty is work-found, not all-quiet."
+		"This tick catches idle-holding: leader idle but queue not empty is work-found, not all-quiet." +
+		adjutantDualObservationContract(leader)
+}
+
+// adjutantCharterPairingBody is the first-presentation charter turn for a new adjutant pair (#439 2.5).
+func adjutantCharterPairingBody(leader, adjutant, charterPath, leaderAckPath string) string {
+	return "[flotilla adjutant] First-presentation charter pairing for " + leader +
+		" — negotiate solo-authority bounds with the leader and write the durable charter.\n\n" +
+		"Your duty:\n" +
+		"1. Propose defaults for what you may do without " + leader + " (mechanical handling, liveness ack, recovery attempts).\n" +
+		"2. Coordinate a one-time charter turn with " + leader + " — leader affirms or edits your proposal.\n" +
+		"3. Write the agreed charter to:\n   " + charterPath + "\n\n" +
+		"Required minimum (non-negotiable): on evaluation ticks you MUST ack liveness by touching:\n   " +
+		leaderAckPath + "\n\n" +
+		"Evaluation ticks are gated until this charter exists. Solo authority beyond the minimum is negotiated, not invented." +
+		adjutantDualObservationContract(leader)
+}
+
+// leaderCharterPairingBody asks the coordinator to affirm the adjutant charter (#439 2.5).
+func leaderCharterPairingBody(leader, adjutant, charterPath string) string {
+	return "[flotilla change-detector] First-presentation charter pairing with adjutant " + adjutant +
+		" — establish what " + adjutant + " may do without you.\n\n" +
+		"Your duty:\n" +
+		"1. Review " + adjutant + "'s proposed solo-authority bounds.\n" +
+		"2. Affirm or edit — especially mechanical handling, recovery attempts, and escalation thresholds.\n" +
+		"3. Ensure the written charter at " + charterPath + " includes liveness ack on evaluation ticks " +
+		"(touch flotilla-" + leader + "-alive; mandatory minimum).\n\n" +
+		"This is a one-time pairing turn; buffered interrupts resume laminar flow after the charter lands."
+}
+
+// adjutantDualObservationContract is the prompt-contract for dual desk+leader observation (#439 2.3).
+func adjutantDualObservationContract(leader string) string {
+	return "\n\nDual observation (standing duty):\n" +
+		"1. Desk stream — subtree desks under " + leader + ": pane Assess state, finish-edges, crash/shell.\n" +
+		"2. Leader stream — " + leader + ": Working/Idle, settle/awaiting markers, turn-final tail.\n" +
+		"Buffer when leader is Working without await marker; inject consolidated briefs at Idle/settled seams."
 }
 
 // leaderMaterialBody is the legacy material-change wake to the coordinator pane.
@@ -1083,7 +1125,36 @@ func adjutantBufferedNoteBody(leader string, n int) string {
 	return "[flotilla adjutant] Buffered " + fmt.Sprintf("%d", n) + " interrupt(s) for " + leader +
 		"'s layer. Triage mechanical items locally. Judgment items stay buffered until " +
 		leader + "'s next seam — the leader receives a consolidated brief then, not mid-thought. " +
-		"On evaluation ticks: ack → evaluate → act-by-tier."
+		"On evaluation ticks: ack → evaluate → act-by-tier." +
+		adjutantDualObservationContract(leader)
+}
+
+// layerCharterMissing reports whether the first-presentation charter sidecar is absent.
+func layerCharterMissing(charterPath string) bool {
+	_, err := os.Stat(charterPath)
+	return os.IsNotExist(err)
+}
+
+// enqueueAdjutantCharterPairing wakes adjutant+leader once when charter is missing (#439 2.5).
+func enqueueAdjutantCharterPairing(adjutant, leader, rosterDir, leaderAckPath string, enqueue func(watch.Job)) {
+	if adjutant == "" {
+		return
+	}
+	charterPath := roster.LayerCharterPath(rosterDir, leader)
+	if !layerCharterMissing(charterPath) {
+		return
+	}
+	log.Printf("flotilla watch: adjutant charter pairing — %s/%s (missing %s)", leader, adjutant, charterPath)
+	enqueue(watch.Job{
+		Agent:   adjutant,
+		Message: adjutantCharterPairingBody(leader, adjutant, charterPath, leaderAckPath),
+		Kind:    watch.KindDetector,
+	})
+	enqueue(watch.Job{
+		Agent:   leader,
+		Message: leaderCharterPairingBody(leader, adjutant, charterPath),
+		Kind:    watch.KindDetector,
+	})
 }
 
 // adjutantSeamBrief peeks the layer buffer and formats the leader inject at a seam. The caller
