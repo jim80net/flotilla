@@ -169,28 +169,27 @@ func TestHandleIndex(t *testing.T) {
 	}
 }
 
-// TestGoalsLayoutEnvDefault locks the #317 env-seeded layout default: the index renders
-// the body's data-goals-layout from Config.GoalsLayout (org by default, tree when set),
-// and goals.js reads that attribute so a deployment can seed the default (the live toggle
-// still overrides).
-func TestGoalsLayoutEnvDefault(t *testing.T) {
+// TestGoalsLayoutMindmapOnly locks the mind-map-only Goals rendering (operator 2026-07-06):
+// the tree/mind-map toggle was removed, so normalizeGoalsLayout REDIRECTS every seed (incl. a
+// legacy "tree"/"org") to the mind map, the body always renders data-goals-layout="mindmap",
+// and the assets carry no layout picker.
+func TestGoalsLayoutMindmapOnly(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 
-	// normalize: default MIND MAP (org retired from the UI); "tree" (any case) honored;
-	// anything else — incl. a legacy "org" seed — maps to mindmap.
-	for in, want := range map[string]string{"": "mindmap", "org": "mindmap", "mindmap": "mindmap", "tree": "tree", "TREE": "tree", "bogus": "mindmap"} {
-		if got := normalizeGoalsLayout(in); got != want {
-			t.Errorf("normalizeGoalsLayout(%q) = %q, want %q", in, got, want)
+	// Every seed normalizes to mindmap — no dead tree/org layout target.
+	for _, in := range []string{"", "org", "mindmap", "tree", "TREE", "bogus"} {
+		if got := normalizeGoalsLayout(in); got != "mindmap" {
+			t.Errorf("normalizeGoalsLayout(%q) = %q, want mindmap (mind-map-only)", in, got)
 		}
 	}
 
-	// default (no env) → the index seeds mindmap.
+	// default → the index seeds mindmap.
 	srv, _ := newTestServer(t, singleFleetRoster, now)
 	if body := doGet(t, srv, "/").Body.String(); !strings.Contains(body, `data-goals-layout="mindmap"`) {
-		t.Error("index must seed the goals layout (default mindmap) into the body attribute")
+		t.Error("index must seed data-goals-layout=\"mindmap\"")
 	}
 
-	// tree seeded via Config → the index seeds tree.
+	// A legacy tree-seeded Config is REDIRECTED to mindmap (no dead tree target left behind).
 	dir := t.TempDir()
 	rosterPath := filepath.Join(dir, "flotilla.json")
 	if err := os.WriteFile(rosterPath, []byte(singleFleetRoster), 0o600); err != nil {
@@ -200,13 +199,18 @@ func TestGoalsLayoutEnvDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if body := doGet(t, srv2, "/").Body.String(); !strings.Contains(body, `data-goals-layout="tree"`) {
-		t.Error("a tree-seeded Config must render data-goals-layout=\"tree\"")
+	body2 := doGet(t, srv2, "/").Body.String()
+	if !strings.Contains(body2, `data-goals-layout="mindmap"`) || strings.Contains(body2, `data-goals-layout="tree"`) {
+		t.Error("a legacy tree-seeded Config must be REDIRECTED to data-goals-layout=\"mindmap\"")
 	}
 
-	// goals.js consumes the attribute.
-	if js := doGet(t, srv, "/static/goals.js").Body.String(); !strings.Contains(js, "data-goals-layout") {
-		t.Error("goals.js must read the env-seeded default from data-goals-layout (#317)")
+	// The layout picker is gone from the assets — no toggle markup, no toggle JS.
+	html := doGet(t, srv, "/").Body.String()
+	if strings.Contains(html, "goals-layout-toggle") || strings.Contains(html, "glayout-btn") {
+		t.Error("index.html must not carry the removed layout toggle")
+	}
+	if js := doGet(t, srv, "/static/goals.js").Body.String(); strings.Contains(js, "setLayout") || strings.Contains(js, "wireLayoutToggle") {
+		t.Error("goals.js must not carry the removed layout-toggle logic")
 	}
 }
 
@@ -936,22 +940,21 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	if !strings.Contains(js, `"flotilla"`) || !strings.Contains(js, `s === "desk"`) {
 		t.Error("goals.js scopeNoun must read the v2 scope tokens (flotilla/desk) — #312")
 	}
-	// org-graph v2 Inc B: the hub-and-spoke layout + its live tree⇄org toggle,
-	// consuming layout.hub_center. drawEdges must branch on the mode (radial spokes vs
-	// tiered beziers), and the toggle must force a rebuild.
-	for _, marker := range []string{"layoutOrg", "goalsLayout", "hub_center", "setLayout", "glayout-btn"} {
+	// The org-graph v2 hub-spoke GEOMETRY stays in the code, dormant — the tree/mind-map/org
+	// LAYOUT PICKER was removed (setLayout/glayout-btn), but layoutOrg + hub_center remain so
+	// this is a view-picker simplification, not a rebuild of the map.
+	for _, marker := range []string{"layoutOrg", "goalsLayout", "hub_center"} {
 		if !strings.Contains(js, marker) {
-			t.Errorf("goals.js must retain the org-graph v2 hub-spoke layout (missing %q) — Inc B", marker)
+			t.Errorf("goals.js must retain the dormant org-graph v2 geometry (missing %q)", marker)
 		}
 	}
-	// #324 Inc 1: org is the DEFAULT layout (operator UX blessing), and the org geometry
-	// is content-aware — leaf-weight angular packing + per-ring radii from card extents
-	// (no fixed RING_STEP), with narrower org cards.
-	// The default is MIND MAP (operator retired org from the UI); env-seedable via the body
-	// attribute (#317) — the IIFE reads data-goals-layout and falls back to "mindmap"; "tree"
-	// is the only other selectable mode (org is dormant, no button, no default).
-	if !strings.Contains(js, `v === "tree" ? "tree" : "mindmap"`) {
-		t.Error("goals.js must seed goalsLayout from data-goals-layout, defaulting mindmap (org retired)")
+	// Mind-map-only (operator 2026-07-06): goalsLayout is a constant "mindmap" — no tree/org
+	// seed read, and the toggle logic is gone.
+	if !strings.Contains(js, `var goalsLayout = "mindmap"`) {
+		t.Error("goals.js must hardcode goalsLayout to the mind map (mind-map-only)")
+	}
+	if strings.Contains(js, "setLayout") || strings.Contains(js, "wireLayoutToggle") {
+		t.Error("goals.js must not carry the removed layout-toggle logic")
 	}
 	// #324 Inc 2: a roster-materialized desk (source==="roster") is a live entity, never
 	// ghosted as aspirational even when it has no work/children.
@@ -1058,24 +1061,14 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	if !strings.Contains(css, "touch-action: pan-y") || !strings.Contains(css, ".pan-active") {
 		t.Error("dash.css must default the viewport to touch-action:pan-y and reclaim it on .pan-active (#330)")
 	}
-	// mobile clipped-button fix: the goals layout toggle (overflow:hidden) must NOT shrink and
-	// clip its buttons when the squeezed header row crushes it (seen at 768) — flex:none on the
-	// toggle itself + a wrapping goals panel-head so head-right drops below the title instead.
-	// Scope the flex:none check to the .goals-layout-toggle rule body — other unrelated rules
-	// also use flex:none, so a bare Contains would pass even if the toggle lost it (cubic #368).
+	// The goals panel-head still wraps so head-right (the legend) drops below the title on a
+	// squeezed header. The layout toggle it once held was removed (mind-map-only 2026-07-06),
+	// so its .goals-layout-toggle / .glayout-btn CSS must be gone.
 	if !strings.Contains(css, ".goals-panel > .panel-head") {
-		t.Error("dash.css must let the goals panel-head wrap so the toggle isn't crushed (.goals-panel > .panel-head)")
+		t.Error("dash.css must let the goals panel-head wrap (.goals-panel > .panel-head)")
 	}
-	if i := strings.Index(css, ".goals-layout-toggle {"); i < 0 {
-		t.Error("dash.css must define the .goals-layout-toggle rule")
-	} else {
-		block := css[i:]
-		if end := strings.Index(block, "}"); end >= 0 {
-			block = block[:end]
-		}
-		if !strings.Contains(block, "flex: none") {
-			t.Error("the .goals-layout-toggle rule itself must be flex:none so its buttons never clip on a squeezed header (cubic #368)")
-		}
+	if strings.Contains(css, ".goals-layout-toggle {") || strings.Contains(css, ".glayout-btn ") || strings.Contains(css, ".glayout-btn{") || strings.Contains(css, ".glayout-btn,") {
+		t.Error("dash.css must not retain the removed layout-toggle rules (.goals-layout-toggle / .glayout-btn)")
 	}
 	// leafWeights (not leafCount): #364 extracted the shared leaf-weight helper used by org + mindmap.
 	for _, marker := range []string{"leafWeights", "reach(", "nodeW", "RING_GAP"} {
@@ -1086,11 +1079,11 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	if strings.Contains(js, "RING_STEP") {
 		t.Error("goals.js must drop the fixed RING_STEP — org radii are content-aware (#324)")
 	}
-	// mind-map (org v3): a third radial mode whose children fan LOCALLY from each parent
-	// (limbs + sub-branches) with curved edges. Selectable via the toggle; org stays default.
-	for _, marker := range []string{"layoutMindmap", "isRadial", `data-layout="mindmap"`} {
-		if !strings.Contains(js+doGet(t, srv, "/").Body.String(), marker) {
-			t.Errorf("goals map must carry the mind-map layout (missing %q)", marker)
+	// mind-map: the SOLE radial rendering (children fan LOCALLY from each parent — limbs +
+	// sub-branches — with curved edges). The layout functions stay; the picker is gone.
+	for _, marker := range []string{"layoutMindmap", "isRadial"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must carry the mind-map layout (missing %q)", marker)
 		}
 	}
 	// mind-map geometry must hold at real fleet depth: disjoint angular sectors + a
@@ -1140,12 +1133,10 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("index must contain the goals canvas element #%s", id)
 		}
 	}
-	// the tree | mind map layout toggle chrome (org retired from the UI, so no org button).
-	if !strings.Contains(body, "glayout-btn") || !strings.Contains(body, `data-layout="tree"`) || !strings.Contains(body, `data-layout="mindmap"`) {
-		t.Error("index must carry the tree | mind map goals layout toggle (glayout-btn / data-layout)")
-	}
-	if strings.Contains(body, `data-layout="org"`) {
-		t.Error("the org layout button must be retired from the UI (operator verdict) — no org button")
+	// The layout picker is GONE — the map is mind-map-only (operator 2026-07-06). No toggle
+	// chrome of any layout (tree/mindmap/org) may remain in the markup.
+	if strings.Contains(body, "glayout-btn") || strings.Contains(body, "goals-layout-toggle") || strings.Contains(body, "data-layout=") {
+		t.Error("index must NOT carry the removed goals layout toggle (mind-map-only)")
 	}
 }
 

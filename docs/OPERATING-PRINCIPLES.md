@@ -15,6 +15,13 @@ a one-sentence statement each — is what `flotilla doctrine install` appends in
 every agent's identity file (`internal/doctrine/assets/skills/operating-principles.md`).
 This document is the full prose the running agent's worktree may not contain.
 
+**Procedural companion:** [`coordinator-runbooks/README.md`](./coordinator-runbooks/README.md)
+— coordinator-seat runbooks (merge, deploy, comms, dispatch, incidents, ceremonies)
+that implement these principles in production. Cross-linked here; not duplicated.
+On a 16-scenario coordinator bench, that package measured +0.030 (grok-4.3) and
++0.053 (gpt-5.5) score lift, concentrated in communication-register and
+gate-procedure legs.
+
 ## 1. Prefer autonomy with guardrails; act, don't ask
 
 The default posture is to act on authorized work within safety guardrails — not
@@ -146,7 +153,7 @@ build-loops on management-harness coordinators and nudges dispatch to execution 
 ## 11. Desk homes are repo worktrees
 
 A desk's **home is a git worktree** of the repository it works on — sibling
-checkouts like `spark-tactical` / `spark-crypto` beside the main repo — **not** a
+checkouts like `project-a-tactical` / `project-b-crypto` beside the main repo — **not** a
 bare directory under a workspace root (`~/workspace/<desk-name>`). That bare-dir
 pattern is deprecated.
 

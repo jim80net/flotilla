@@ -36,7 +36,7 @@ type Config struct {
 	Bind             string // listen address (default 127.0.0.1:8787)
 	Repo             string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
 	SecretsPath      string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
-	GoalsLayout      string // initial Goals-map layout: "mindmap" (default) | "tree" — org retired from the UI; the live toggle still overrides (#317/#324)
+	GoalsLayout      string // always normalized to "mindmap" — the Goals map is mind-map-only (tree/org retired; toggle removed 2026-07-06)
 
 	// DisableAuthentication turns off the browser write gates (X-Flotilla-Dash header +
 	// Origin allowlist) on state-changing routes. Operator-only insecure mode until the
@@ -417,19 +417,16 @@ func (s *Server) handleGoals(w http.ResponseWriter, r *http.Request) {
 type pageData struct {
 	Bind        string
 	XO          string
-	GoalsLayout string // "org" | "tree" — seeds the Goals-map layout toggle (#317)
+	GoalsLayout string // always "mindmap" — the Goals map is mind-map-only (see normalizeGoalsLayout)
 }
 
-// normalizeGoalsLayout resolves the initial Goals-map layout: "tree" when explicitly set,
-// else "mindmap" (the operator-blessed default — org was its precursor, retired from the UI). The live toggle still overrides it.
-// normalizeGoalsLayout resolves the env-seeded initial Goals layout. The operator retired
-// org from the UI ("I just want mind map or tree; org is just a precursor to mindmap"), so
-// the default is now MIND MAP; "tree" is honored; anything else — including the retired
-// "org" — maps to mindmap. (layoutOrg stays in goals.js, dormant.)
+// normalizeGoalsLayout resolves the Goals-map layout. The operator directed (2026-07-06) that
+// the mind map is the ONLY Goals rendering — the tree/mind-map toggle was removed — so this
+// ALWAYS returns "mindmap", REDIRECTING any legacy seed ("tree", "org", or the
+// FLOTILLA_DASH_GOALS_LAYOUT env / --goals-layout flag) to the mind map rather than leaving a
+// dead layout target. The frontend also hardcodes mindmap; this keeps the seeded body
+// attribute consistent.
 func normalizeGoalsLayout(v string) string {
-	if strings.EqualFold(strings.TrimSpace(v), "tree") {
-		return "tree"
-	}
 	return "mindmap"
 }
 

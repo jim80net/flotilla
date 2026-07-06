@@ -42,7 +42,7 @@ func cmdDash(args []string) error {
 	// tracker is simply disabled (the read surface is unaffected).
 	repo := fs.String("repo", os.Getenv("FLOTILLA_DASH_REPO"), "GitHub repo for the issue tracker (owner/name; default: the working-dir repo as gh resolves it)")
 	secretsPath := fs.String("secrets", os.Getenv("FLOTILLA_SECRETS"), "secrets env file for the notify webhook (optional; notify is disabled without it)")
-	goalsLayout := fs.String("goals-layout", os.Getenv("FLOTILLA_DASH_GOALS_LAYOUT"), "initial Goals-map layout: mindmap (default) | tree — the live toggle still overrides")
+	goalsLayout := fs.String("goals-layout", os.Getenv("FLOTILLA_DASH_GOALS_LAYOUT"), "DEPRECATED — the Goals map is mind-map-only; any value is redirected to the mind map")
 	paradesDir := fs.String("parades-dir", os.Getenv("FLOTILLA_DASH_PARADES_DIR"), "parade archive dir the /parade page reads (default <roster-dir>/parades)")
 	if err := fs.Parse(args); err != nil {
 		return err

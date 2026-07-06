@@ -14,7 +14,7 @@ func TestParseGoalsFile_Valid(t *testing.T) {
 	  "goals": [
 	    {"id": "trading", "title": "Trading", "scope": "fleet"},
 	    {"id": "eqo", "title": "Equities", "scope": "project", "parent": "trading",
-	     "work_items": [{"kind": "desk", "agent": "tactical-head"}]}
+	     "work_items": [{"kind": "desk", "agent": "trade-desk"}]}
 	  ]
 	}`)
 	gf, err := ParseGoalsFile(data)
@@ -24,7 +24,7 @@ func TestParseGoalsFile_Valid(t *testing.T) {
 	if !gf.DefaultView || len(gf.Goals) != 2 || gf.Goals[1].Parent != "trading" {
 		t.Fatalf("parsed shape wrong: %+v", gf)
 	}
-	if gf.Goals[1].WorkItems[0].Agent != "tactical-head" {
+	if gf.Goals[1].WorkItems[0].Agent != "trade-desk" {
 		t.Fatalf("work item not parsed: %+v", gf.Goals[1].WorkItems)
 	}
 }
