@@ -36,7 +36,7 @@ run the standard dev workflow to the clean-gate bar, and surface to the operator
 ```
 operator
   └── meta-xo / cos ............. Chief of Staff — fleet heartbeat clock
-        ├── product-xo ............ sub-XO over a product line
+        ├── project-xo ............ sub-XO over a product line
         │     ├── backend ......... execution desk
         │     ├── frontend ........ execution desk
         │     └── data ............ execution desk

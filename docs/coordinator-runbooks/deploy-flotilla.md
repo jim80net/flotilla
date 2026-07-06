@@ -5,14 +5,14 @@ does **nothing** until you rebuild the binary and restart the services that run 
 Pair with [`watch-runbook.md`](../watch-runbook.md) and
 [`dash-runbook.md`](../dash-runbook.md) for unit installation.
 
-Substitute your host paths below (`$FLOTILLA_BIN`, `$FLOTILLA_SRC`, `$ROSTER_DIR`).
+Substitute your host binary path below (`$FLOTILLA_BIN`, typically `$HOME/go/bin/flotilla`).
 
 ## Ground truth
 
 | Piece | Typical path |
 |---|---|
 | Binary | `$HOME/go/bin/flotilla` |
-| Source | your checkout of this repo |
+| Source (deploy) | `origin/main` via a fresh remote clone — not a local working checkout |
 | Dash service | `flotilla-dash.service` (user unit) |
 | Watch service | `flotilla-watch.service` (user unit) |
 | Working directory | roster-adjacent dir (units pass `--roster`, `--backlog`, …) |
@@ -21,11 +21,12 @@ Substitute your host paths below (`$FLOTILLA_BIN`, `$FLOTILLA_SRC`, `$ROSTER_DIR
 
 ### 1. Build in a throwaway clone
 
-Do not `git reset --hard` a live checkout desks may be using.
+Do not build from a local working checkout (desks may have uncommitted state; the
+checkout may lag `origin/main`). Clone from the remote and pin to `origin/main`:
 
 ```bash
 BUILD=/tmp/flotilla-build-$(date +%s)
-git clone "$FLOTILLA_SRC" "$BUILD"
+git clone https://github.com/<owner>/flotilla.git "$BUILD"
 cd "$BUILD"
 git fetch origin main && git reset --hard origin/main
 git rev-parse HEAD    # record deployed SHA

@@ -33,7 +33,7 @@ differentiator: flotilla ships not just the coordination **tool** but **measured
 operating doctrine** for the seats that run it.
 
 The bench methodology (scenario set, grading rubric, fabrication disqualifier) is
-documented in [`docs/succession-program/`](../succession-program/README.md). This
+documented in [`succession-program/README.md` — Coordinator bench methodology](../succession-program/README.md#coordinator-bench-methodology-se-6). This
 package is the **generalized successor** of the private deployment's transition
 letter + skills — scrubbed for any fleet.
 
