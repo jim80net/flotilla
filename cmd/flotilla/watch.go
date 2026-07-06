@@ -404,6 +404,7 @@ func cmdWatch(args []string) error {
 		primaryAdjutant := cfg.AdjutantFor(xo)
 		leaderAckPath := *ackPath // resolved per-coordinator path (legacy fallback when present)
 		layerBufferPath := roster.LayerBufferPath(rosterDir, xo)
+		seamClaims := newAdjutantSeamClaims()
 
 		drainAdjutantSeamFor := func(owner string) {
 			if cfg.AdjutantFor(owner) == "" {
@@ -420,15 +421,13 @@ func cmdWatch(args []string) error {
 				}
 				return
 			}
-			injector.Enqueue(watch.Job{Agent: owner, Message: brief, Kind: watch.KindDetector})
-			if err := adjutantbuffer.RecordDelivered(deliveredPath, owner, recordItems); err != nil {
-				log.Printf("flotilla watch: adjutant delivered ledger record failed for %q: %v", owner, err)
-			}
-			if clearAfter {
-				if err := adjutantbuffer.Clear(bufferPath); err != nil {
-					log.Printf("flotilla watch: adjutant buffer clear after enqueue failed for %q: %v", owner, err)
-				}
-			}
+			claimKey := adjutantSeamClaimKey(owner)
+			seamClaims.register(claimKey, adjutantSeamClaim{
+				owner: owner, bufferPath: bufferPath, deliveredPath: deliveredPath, recordItems: recordItems,
+			})
+			injector.Enqueue(watch.Job{
+				Agent: owner, Message: brief, Kind: watch.KindDetector, ClaimKey: claimKey,
+			})
 		}
 
 		wake := func(kind watch.WakeKind, reasons []string) {
@@ -586,12 +585,22 @@ func cmdWatch(args []string) error {
 		decisionBriefTracker := decisionbrief.LoadTracker(decisionBriefClaimsPath)
 		injector.SetDetectorClaimHooks(
 			func(key string) {
+				if isAdjutantSeamClaimKey(key) {
+					seamClaims.confirm(key)
+					return
+				}
 				decisionBriefTracker.Confirm(key)
 				if err := decisionBriefTracker.Save(decisionBriefClaimsPath); err != nil {
 					log.Printf("flotilla watch: decision-brief claims save failed: %v", err)
 				}
 			},
-			decisionBriefTracker.Abort,
+			func(key string) {
+				if isAdjutantSeamClaimKey(key) {
+					seamClaims.abort(key)
+					return
+				}
+				decisionBriefTracker.Abort(key)
+			},
 		)
 		goalsJSONPath := filepath.Join(rosterDir, "fleet-goals.json")
 		if gp := strings.TrimSpace(os.Getenv("FLOTILLA_GOALS_FILE")); gp != "" {
@@ -1275,8 +1284,8 @@ func enqueueAdjutantCharterPairing(adjutant, leader, rosterDir, leaderAckPath st
 }
 
 // adjutantSeamBrief peeks the layer buffer, applies consumed-item dedup (#469), and formats the
-// leader inject at a seam. The caller must Clear the sidecar only AFTER enqueue (enqueue-then-delete
-// — same at-least-once window as detector persist). recordItems is the post-dedup list to ledger.
+// leader inject at a seam. recordItems is recorded and the buffer cleared only on confirmed
+// delivery via ClaimKey hooks (#488 P2) — not at enqueue.
 func adjutantSeamBrief(bufferPath, deliveredPath, leader, rosterDir string) (brief string, ok bool, clearAfter bool, recordItems []adjutantbuffer.Item) {
 	f, hasItems, quarantined, err := adjutantbuffer.Peek(bufferPath)
 	if err != nil {
@@ -1286,10 +1295,13 @@ func adjutantSeamBrief(bufferPath, deliveredPath, leader, rosterDir string) (bri
 	if !hasItems && !quarantined {
 		return "", false, false, nil
 	}
-	delivered, err := adjutantbuffer.LoadDelivered(deliveredPath)
+	delivered, ledgerQuarantined, err := adjutantbuffer.LoadDelivered(deliveredPath)
 	if err != nil {
 		log.Printf("flotilla watch: adjutant delivered ledger load failed: %v", err)
 		return "", false, false, nil
+	}
+	if ledgerQuarantined {
+		log.Printf("flotilla watch: adjutant delivered ledger for %q quarantined — continuing with empty dedup state", leader)
 	}
 	_, charterErr := os.Stat(roster.LayerCharterPath(rosterDir, leader))
 	brief, recordItems, ok = adjutantbuffer.PrepareInject(leader, f, delivered, os.IsNotExist(charterErr), quarantined)

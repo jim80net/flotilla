@@ -55,3 +55,18 @@ so charter amendments survive past one session turn.
 - **GIVEN** material is buffered for an adjutant-owned layer
 - **WHEN** the adjutant receives the buffered-item notification
 - **THEN** the prompt body SHALL include the charter path and a consult-before-brief line
+
+#### Scenario: Seam brief records delivery only on confirm
+
+- **GIVEN** a seam brief KindDetector job with ClaimKey `adjutant-seam:<owner>`
+- **WHEN** delivery is busy-dropped before the leader accepts the brief
+- **THEN** the buffer SHALL remain intact and the delivered ledger SHALL NOT record the items
+- **AND WHEN** delivery confirms
+- **THEN** the daemon SHALL record delivered identities and clear the buffer
+
+#### Scenario: Corrupt delivered ledger fails open
+
+- **GIVEN** `flotilla-<coordinator>-buffer-delivered.json` is corrupt on disk
+- **WHEN** the seam drain loads the ledger
+- **THEN** the file SHALL be quarantined to a `.corrupt-<timestamp>` sidecar
+- **AND** dedup SHALL proceed with an empty ledger (no permanent lane wedge)

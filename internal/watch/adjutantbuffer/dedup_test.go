@@ -1,6 +1,8 @@
 package adjutantbuffer
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -120,12 +122,66 @@ func TestRecordDeliveredRoundTrip(t *testing.T) {
 	if err := RecordDelivered(path, "xo", []Item{it}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := LoadDelivered(path)
+	got, _, err := LoadDelivered(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !got.Has(it.Key, it.StateHash) {
 		t.Fatalf("delivered ledger missing %+v: %+v", it, got)
+	}
+}
+
+func TestLoadDeliveredQuarantinesCorruptLedger(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "flotilla-xo-buffer-delivered.json")
+	if err := os.WriteFile(path, []byte("{bad"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, quarantined, err := LoadDelivered(path)
+	if err != nil || !quarantined {
+		t.Fatalf("LoadDelivered corrupt: f=%+v quarantined=%v err=%v", f, quarantined, err)
+	}
+	if len(f.Entries) != 0 {
+		t.Fatalf("quarantined ledger should fail-open empty, got %+v", f)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hasCorrupt bool
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".corrupt-") {
+			hasCorrupt = true
+		}
+		if e.Name() == filepath.Base(path) {
+			t.Fatal("corrupt ledger should be renamed")
+		}
+	}
+	if !hasCorrupt {
+		t.Fatal("expected .corrupt sidecar")
+	}
+}
+
+func TestRecordDeliveredPrunesLedgerGrowth(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "flotilla-xo-buffer-delivered.json")
+	at := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < maxDeliveredLedgerEntries+10; i++ {
+		it := Item{
+			At: at.Add(time.Duration(i) * time.Second), Reason: fmt.Sprintf("desk%d: edge", i),
+		}
+		it.Key = itemKey(it.Reason)
+		it.StateHash = itemStateHash(it.Reason, it.At)
+		if err := RecordDelivered(path, "xo", []Item{it}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, _, err := LoadDelivered(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Entries) != maxDeliveredLedgerEntries {
+		t.Fatalf("entries = %d, want cap %d", len(got.Entries), maxDeliveredLedgerEntries)
 	}
 }
 

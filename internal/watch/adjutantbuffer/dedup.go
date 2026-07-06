@@ -5,11 +5,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
+
+// maxDeliveredLedgerEntries caps delivered-ledger growth per layer (#469 F3).
+const maxDeliveredLedgerEntries = 512
 
 // DeliveredEntry records one item identity delivered in a prior seam brief (#469).
 type DeliveredEntry struct {
@@ -88,31 +91,38 @@ func FilterUndelivered(items []Item, delivered DeliveredFile) []Item {
 	return out
 }
 
-// LoadDelivered reads the consumed-item ledger. Missing file is an empty ledger.
-func LoadDelivered(path string) (DeliveredFile, error) {
+// LoadDelivered reads the consumed-item ledger. Missing file is an empty ledger. A corrupt
+// file is quarantined to a .corrupt-<timestamp> sidecar and an empty ledger is returned
+// (fail-open dedup — #488 P2).
+func LoadDelivered(path string) (f DeliveredFile, quarantined bool, err error) {
 	if path == "" {
-		return DeliveredFile{}, nil
+		return DeliveredFile{}, false, nil
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return DeliveredFile{}, nil
+			return DeliveredFile{}, false, nil
 		}
-		return DeliveredFile{}, fmt.Errorf("read delivered ledger %q: %w", path, err)
+		return DeliveredFile{}, false, fmt.Errorf("read delivered ledger %q: %w", path, err)
 	}
-	var f DeliveredFile
 	if err := json.Unmarshal(raw, &f); err != nil {
-		return DeliveredFile{}, fmt.Errorf("corrupt delivered ledger %q: %w", path, err)
+		sidecar := path + ".corrupt-" + time.Now().UTC().Format("20060102T150405Z")
+		if renameErr := os.Rename(path, sidecar); renameErr != nil {
+			log.Printf("flotilla watch: adjutant delivered ledger at %q is corrupt (%v) and rename failed: %v", path, err, renameErr)
+			return DeliveredFile{}, false, fmt.Errorf("corrupt delivered ledger %q: %w (quarantine rename failed: %v)", path, err, renameErr)
+		}
+		log.Printf("flotilla watch: adjutant delivered ledger at %q is corrupt (%v); preserved as %q", path, err, sidecar)
+		return DeliveredFile{}, true, nil
 	}
-	return f, nil
+	return f, false, nil
 }
 
-// RecordDelivered appends delivered item identities after a successful seam enqueue (#469).
+// RecordDelivered appends delivered item identities after confirmed seam delivery (#469).
 func RecordDelivered(path, leader string, items []Item) error {
 	if path == "" || leader == "" || len(items) == 0 {
 		return nil
 	}
-	f, err := LoadDelivered(path)
+	f, _, err := LoadDelivered(path)
 	if err != nil {
 		return err
 	}
@@ -134,38 +144,15 @@ func RecordDelivered(path, leader string, items []Item) error {
 		seen[id] = true
 		f.Entries = append(f.Entries, DeliveredEntry{Key: it.Key, StateHash: it.StateHash})
 	}
-	return saveDelivered(path, f)
+	f.Entries = pruneDeliveredEntries(f.Entries)
+	return atomicWriteJSON(path, f)
 }
 
-func saveDelivered(path string, f DeliveredFile) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("mkdir delivered ledger dir: %w", err)
+func pruneDeliveredEntries(entries []DeliveredEntry) []DeliveredEntry {
+	if len(entries) <= maxDeliveredLedgerEntries {
+		return entries
 	}
-	raw, err := json.MarshalIndent(f, "", "  ")
-	if err != nil {
-		return err
-	}
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return fmt.Errorf("create delivered temp in %q: %w", dir, err)
-	}
-	tmpName := tmp.Name()
-	cleanup := func() { _ = os.Remove(tmpName) }
-	if _, err := tmp.Write(raw); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return fmt.Errorf("write delivered temp %q: %w", tmpName, err)
-	}
-	if err := tmp.Close(); err != nil {
-		cleanup()
-		return fmt.Errorf("close delivered temp %q: %w", tmpName, err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		cleanup()
-		return fmt.Errorf("rename delivered ledger %q: %w", path, err)
-	}
-	return nil
+	return entries[len(entries)-maxDeliveredLedgerEntries:]
 }
 
 // PrepareInject applies consumed-item dedup and composes the leader seam brief (#469).

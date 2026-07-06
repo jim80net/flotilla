@@ -148,34 +148,7 @@ func load(path string) (File, bool, error) {
 }
 
 func save(path string, f File) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("mkdir buffer dir: %w", err)
-	}
-	raw, err := json.MarshalIndent(f, "", "  ")
-	if err != nil {
-		return err
-	}
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return fmt.Errorf("create buffer temp in %q: %w", dir, err)
-	}
-	tmpName := tmp.Name()
-	cleanup := func() { _ = os.Remove(tmpName) }
-	if _, err := tmp.Write(raw); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return fmt.Errorf("write buffer temp %q: %w", tmpName, err)
-	}
-	if err := tmp.Close(); err != nil {
-		cleanup()
-		return fmt.Errorf("close buffer temp %q: %w", tmpName, err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		cleanup()
-		return fmt.Errorf("rename buffer %q: %w", path, err)
-	}
-	return nil
+	return atomicWriteJSON(path, f)
 }
 
 func oldest(items []Item) time.Time {

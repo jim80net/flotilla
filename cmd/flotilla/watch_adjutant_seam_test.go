@@ -30,6 +30,9 @@ func TestAdjutantSeamBriefSkipsAllConsumedAndClearsBuffer(t *testing.T) {
 	if !clearAfter {
 		t.Fatal("buffer with only consumed items should still clear")
 	}
+	if len(record) != 0 {
+		t.Fatalf("all-consumed must not produce record items, got %+v", record)
+	}
 }
 
 func TestAdjutantSeamBriefInjectsFreshDeltaOnly(t *testing.T) {
@@ -57,8 +60,14 @@ func TestAdjutantSeamBriefInjectsFreshDeltaOnly(t *testing.T) {
 	if err := adjutantbuffer.Append(bufferPath, "xo", []string{reason}); err != nil {
 		t.Fatal(err)
 	}
-	brief, ok, _, record := adjutantSeamBrief(bufferPath, deliveredPath, "xo", dir)
+	brief, ok, clearAfter, record := adjutantSeamBrief(bufferPath, deliveredPath, "xo", dir)
 	if !ok || len(record) != 1 {
 		t.Fatalf("fresh delta must inject, ok=%v record=%+v brief=%q", ok, record, brief)
+	}
+	if !clearAfter {
+		t.Fatal("fresh buffer items must set clearAfter for post-confirm clear")
+	}
+	if brief == "" {
+		t.Fatal("brief must be non-empty for inject path")
 	}
 }
