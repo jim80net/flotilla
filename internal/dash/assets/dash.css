@@ -1897,6 +1897,20 @@ html, body { overflow-x: clip; }
 }
 .pd-slide-body .pd-quote p { margin: .3rem 0; }
 .pd-slide-body .pd-quote p:first-child { margin-top: 0; }
+/* GFM pipe-tables (the scoreboard slide) — render as a real table, not raw pipes. */
+.pd-slide-body .pd-table {
+  /* fixed layout + full width so columns share the slide evenly and a long unbroken cell
+     cannot push the table past the slide edge (where .pd-stage overflow:hidden clips it). */
+  border-collapse: collapse; margin: .8rem 0; width: 100%; font-size: .88em; table-layout: fixed;
+}
+.pd-slide-body .pd-table th, .pd-slide-body .pd-table td {
+  border: 1px solid var(--line, var(--abyss-3)); padding: .4rem .7rem; text-align: left; vertical-align: top;
+  /* wrap long unbroken strings (URLs, ids, hashes) inside the cell rather than overflowing. */
+  overflow-wrap: anywhere; word-break: break-word;
+}
+.pd-slide-body .pd-table th { font-family: var(--display); font-weight: 600; color: var(--ink); background: var(--abyss-3); }
+.pd-slide-body .pd-table td { color: var(--ink-2); }
+.pd-slide-body .pd-table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--ink) 4%, transparent); }
 .pd-slide-body .pd-quote a::after { content: ""; }
 /* image refs render LARGE — the visual is the point of the slide. */
 .pd-slide-img { display: block; max-width: 100%; max-height: 62vh; width: auto; height: auto; margin: 1rem auto; border: 1px solid var(--line); border-radius: var(--r-sm); box-shadow: var(--shadow, 0 2px 10px rgba(0,0,0,.08)); }
