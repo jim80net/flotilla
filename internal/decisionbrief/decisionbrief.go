@@ -172,14 +172,20 @@ func ResolveOwner(g dash.Goal) string {
 }
 
 // Tracker suppresses re-dispatch for the same gap until it clears or gains a brief.
+// pending holds in-flight enqueues (not yet confirmed); dispatched is persisted only
+// after confirmed delivery — a busy-dropped detector tick must not leave a durable claim (#365 P1).
 type Tracker struct {
 	mu         sync.Mutex
+	pending    map[string]bool
 	dispatched map[string]bool
 }
 
 // NewTracker builds an empty gap tracker.
 func NewTracker() *Tracker {
-	return &Tracker{dispatched: make(map[string]bool)}
+	return &Tracker{
+		pending:    make(map[string]bool),
+		dispatched: make(map[string]bool),
+	}
 }
 
 // Reconcile drops tracker entries for gaps that are no longer active.
@@ -193,17 +199,40 @@ func (t *Tracker) Reconcile(active map[string]bool) {
 	}
 }
 
-// TryClaim atomically checks whether gap key is undispatched and marks it claimed.
-// Returns true only for the caller that wins the race — overlapping async tick
-// scans must use this instead of separate ShouldDispatch/MarkDispatched (#352 P2).
-func (t *Tracker) TryClaim(key string) bool {
+// TryBeginDispatch atomically checks whether gap key is not already pending or
+// confirmed-dispatched and marks it pending. Returns true only for the caller that
+// wins the race — overlapping async tick scans must use this instead of separate
+// ShouldDispatch/MarkDispatched (#352 P2). Pending is in-memory only; Confirm
+// promotes to dispatched after the injector confirms delivery.
+func (t *Tracker) TryBeginDispatch(key string) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.dispatched[key] {
+	if t.dispatched[key] || t.pending[key] {
 		return false
 	}
-	t.dispatched[key] = true
+	t.pending[key] = true
 	return true
+}
+
+// Confirm promotes a pending gap key to dispatched after confirmed delivery.
+func (t *Tracker) Confirm(key string) {
+	if key == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.pending, key)
+	t.dispatched[key] = true
+}
+
+// Abort clears a pending gap key without recording a dispatch (busy drop or delivery failure).
+func (t *Tracker) Abort(key string) {
+	if key == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.pending, key)
 }
 
 // DispatchPrompt is injected into the owning desk when a gap is first detected.

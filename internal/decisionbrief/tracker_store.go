@@ -71,6 +71,11 @@ func (t *Tracker) Save(path string) error {
 		cleanup()
 		return fmt.Errorf("write decision-brief claims temp: %w", err)
 	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("fsync decision-brief claims temp: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		cleanup()
 		return fmt.Errorf("close decision-brief claims temp: %w", err)

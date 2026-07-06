@@ -94,6 +94,9 @@ type Job struct {
 	lastStaleAlert time.Time
 	// Sender is the originating agent for KindSend jobs (keys the per-sender outbox file).
 	Sender string
+	// ClaimKey is the decision-brief gap key for KindDetector jobs; the watch daemon sets it
+	// so the injector can confirm or abort the in-memory claim on delivery outcome (#365 P1).
+	ClaimKey string
 }
 
 // SendFunc delivers a message to an agent's pane and CONFIRMS a turn started. Production
@@ -125,9 +128,11 @@ type Injector struct {
 	reEnqueue    func(Job, time.Duration)                // how a deferred relay is re-enqueued after a delay; injectable for tests
 	queue        relayQueueStore                         // optional: disk-backed pending queue for deferred operator relays (#286)
 	rosterDir    string                                  // roster directory for per-sender outbox persistence (#475)
-	onSend       func(sender, recipient, message string) // optional: post-confirm hook for swept sends (ledger)
-	onOutboxDone func(sender, id string)                 // optional: clear in-flight sweep guard (#475)
-	now          func() time.Time                        // clock for stale escalation; nil ⇒ time.Now()
+	onSend            func(sender, recipient, message string) // optional: post-confirm hook for swept sends (ledger)
+	onOutboxDone      func(sender, id string)                 // optional: clear in-flight sweep guard (#475)
+	onDetectorConfirm func(claimKey string)                   // optional: durable claim after confirmed detector delivery (#365)
+	onDetectorAbort   func(claimKey string)                   // optional: release in-memory claim on busy drop / failure (#365)
+	now               func() time.Time                        // clock for stale escalation; nil ⇒ time.Now()
 }
 
 // SetRelaySend installs a distinct send path for RELAY-kind jobs (the operator-message kind), used to
@@ -161,6 +166,15 @@ func (in *Injector) SetSendDelivered(fn func(sender, recipient, message string))
 // SetOutboxDone installs a hook called when a KindSend job finishes (success or terminal failure).
 // Must be set before Start.
 func (in *Injector) SetOutboxDone(fn func(sender, id string)) { in.onOutboxDone = fn }
+
+// SetDetectorClaimHooks installs confirm/abort hooks for KindDetector jobs carrying ClaimKey
+// (decision-brief dispatches). Confirm runs after confirmed delivery; abort runs on busy drop
+// or any terminal/non-busy failure so an in-memory claim is not persisted (#365 P1).
+// Must be set before Start.
+func (in *Injector) SetDetectorClaimHooks(confirm, abort func(claimKey string)) {
+	in.onDetectorConfirm = confirm
+	in.onDetectorAbort = abort
+}
 
 // NewInjector builds an injector with the given send function and queue buffer.
 func NewInjector(send SendFunc, buffer int) *Injector {
@@ -229,6 +243,9 @@ func (in *Injector) deliver(j Job) {
 			}
 			in.outboxDone(j)
 		}
+		if j.Kind == KindDetector && j.ClaimKey != "" && in.onDetectorConfirm != nil {
+			in.onDetectorConfirm(j.ClaimKey)
+		}
 		if in.mirror != nil && isRelay(j.Kind) {
 			in.mirror(j) // audit only operator relays that actually landed
 		}
@@ -250,6 +267,7 @@ func (in *Injector) deliver(j Job) {
 		if j.Kind == KindSend {
 			in.outboxDone(j)
 		}
+		in.abortDetectorClaim(j)
 	default:
 		// A real delivery failure (ErrCrashed / ErrUnconfirmed / a paste-fail / a resolve or
 		// lock-contention error). Never silent for an operator message.
@@ -259,7 +277,14 @@ func (in *Injector) deliver(j Job) {
 		if j.Kind == KindSend {
 			in.outboxDone(j)
 		}
+		in.abortDetectorClaim(j)
 		log.Printf("flotilla watch: deliver to %q failed: %v", j.Agent, err)
+	}
+}
+
+func (in *Injector) abortDetectorClaim(j Job) {
+	if j.Kind == KindDetector && j.ClaimKey != "" && in.onDetectorAbort != nil {
+		in.onDetectorAbort(j.ClaimKey)
 	}
 }
 
@@ -300,6 +325,7 @@ func (in *Injector) logDelivered(j Job) {
 func (in *Injector) handleBusy(j Job, cause error) {
 	if !isDeferredDelivery(j.Kind) {
 		log.Printf("flotilla watch: drop %s to %q (not idle): %v", deliveryKind(j.Kind), j.Agent, cause)
+		in.abortDetectorClaim(j)
 		return
 	}
 	j.deferrals++ // j is the worker's local copy; the incremented value rides the re-enqueue

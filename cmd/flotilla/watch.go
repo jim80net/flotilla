@@ -558,6 +558,15 @@ func cmdWatch(args []string) error {
 		// #349 item D: auto decision-brief trigger when operator-gated goals lack a brief.
 		decisionBriefClaimsPath := filepath.Join(rosterDir, "flotilla-decision-brief-claims.json")
 		decisionBriefTracker := decisionbrief.LoadTracker(decisionBriefClaimsPath)
+		injector.SetDetectorClaimHooks(
+			func(key string) {
+				decisionBriefTracker.Confirm(key)
+				if err := decisionBriefTracker.Save(decisionBriefClaimsPath); err != nil {
+					log.Printf("flotilla watch: decision-brief claims save failed: %v", err)
+				}
+			},
+			decisionBriefTracker.Abort,
+		)
 		goalsJSONPath := filepath.Join(rosterDir, "fleet-goals.json")
 		if gp := strings.TrimSpace(os.Getenv("FLOTILLA_GOALS_FILE")); gp != "" {
 			goalsJSONPath = gp
@@ -1509,15 +1518,22 @@ func decisionBriefOnTick(
 			key := decisionbrief.GapKey(g)
 			active[key] = true
 			fresh, ferr := loadDecisionBriefInputs(goalsPath, backlogPath, deskStates())
-			if ferr != nil || !decisionbrief.GapStillOpen(fresh, g) {
+			if ferr != nil {
+				log.Printf("flotilla watch: decision-brief SKIP %s: dispatch-time re-read failed: %v", key, ferr)
+				continue
+			}
+			if !decisionbrief.GapStillOpen(fresh, g) {
 				log.Printf("flotilla watch: decision-brief SKIP stale %s (brief landed or gate cleared)", key)
 				continue
 			}
-			if !tracker.TryClaim(key) {
+			if !tracker.TryBeginDispatch(key) {
 				continue
 			}
 			log.Printf("flotilla watch: decision-brief dispatch %s → %s (class=%s)", g.GoalID, owner, g.Class)
-			enqueue(watch.Job{Agent: owner, Message: decisionbrief.DispatchPrompt(g), Kind: "detector"})
+			enqueue(watch.Job{
+				Agent: owner, Message: decisionbrief.DispatchPrompt(g),
+				Kind: watch.KindDetector, ClaimKey: key,
+			})
 		}
 		tracker.Reconcile(active)
 		if err := tracker.Save(claimsPath); err != nil {

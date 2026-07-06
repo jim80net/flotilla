@@ -4,7 +4,7 @@
 
 The auto decision-brief detector re-dispatched brief requests for items that already
 carry briefs on `work_items[].brief`, costing desk turns. Restart amnesia (in-memory
-TryClaim) and pre-compile scan staleness compounded the misfires.
+TryBeginDispatch / Confirm) and pre-compile scan staleness compounded the misfires.
 
 ## What Changes
 
