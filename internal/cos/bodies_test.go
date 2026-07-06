@@ -176,8 +176,8 @@ func TestPruneBodies_RetentionAndSafety(t *testing.T) {
 	ledger := dir + "/cos-ledger.md"
 	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
 
-	// Three bodies: fresh, just-inside-retention, and stale; plus two files the pruner
-	// must never touch (a non-nonce name and a nonce-named non-.txt).
+	// Three bodies: fresh, just-inside-retention, and stale; plus two ancient files the
+	// pruner must never touch (a non-nonce name and a nonce-named non-.txt).
 	mk := func(nonce, body string, age time.Duration) {
 		t.Helper()
 		if err := WriteBody(ledger, nonce, body); err != nil {
@@ -194,12 +194,18 @@ func TestPruneBodies_RetentionAndSafety(t *testing.T) {
 	mk(fresh, "fresh body", time.Hour)
 	mk(edge, "edge body", BodyRetention-time.Minute)
 	mk(stale, "stale body", BodyRetention+time.Hour)
-	notOurs := BodiesDir(ledger) + "/README.txt"
-	if err := os.WriteFile(notOurs, []byte("keep"), 0o600); err != nil {
-		t.Fatal(err)
+	old := now.Add(-2 * BodyRetention)
+	notOurs := []string{
+		BodiesDir(ledger) + "/README.txt",                                   // non-nonce name
+		BodiesDir(ledger) + "/" + strings.Repeat("e", NonceHexLen) + ".bak", // nonce-named, wrong extension
 	}
-	if err := os.Chtimes(notOurs, now.Add(-2*BodyRetention), now.Add(-2*BodyRetention)); err != nil {
-		t.Fatal(err)
+	for _, p := range notOurs {
+		if err := os.WriteFile(p, []byte("keep"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	PruneBodies(ledger, now)
@@ -213,11 +219,16 @@ func TestPruneBodies_RetentionAndSafety(t *testing.T) {
 	if _, ok := LookupBody(ledger, stale); ok {
 		t.Error("a body past retention must be pruned (its entry falls back to the gist)")
 	}
-	if _, err := os.Stat(notOurs); err != nil {
-		t.Error("a non-nonce file in the dir is not ours to delete")
+	for _, p := range notOurs {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("%s is not ours to delete (non-nonce name / wrong extension)", p)
+		}
 	}
 	// Pruning a store that doesn't exist is a silent no-op (best-effort discipline).
-	PruneBodies(dir+"/no-such-ledger.md", now)
+	// The ledger sits in a NON-existent subdirectory so its BodiesDir truly doesn't
+	// exist — a sibling ledger in `dir` would resolve to the SAME bodies/ dir the
+	// writes above created and never exercise this path (cubic #452 P3).
+	PruneBodies(dir+"/nowhere/no-such-ledger.md", now)
 }
 
 // The Append path prunes as it writes: a clamped append with entry time T removes bodies
