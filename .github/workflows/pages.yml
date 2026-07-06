@@ -1,23 +1,28 @@
 # Deploy the marketing landing page (site/) to GitHub Pages.
 #
-# ── DOES NOT AUTO-GO-LIVE ────────────────────────────────────────────────────
-# This workflow is intentionally MANUAL-ONLY (workflow_dispatch). There is no
-# push/pull_request trigger, so merging the landing page to main publishes
-# NOTHING. The site goes live only when an operator both (1) enables Pages and
-# (2) dispatches this workflow.
+# ── AUTO-DEPLOYS ON SITE MERGES (#400) ───────────────────────────────────────
+# A merge to main that touches site/ (or this workflow) publishes automatically —
+# site updates are routine content work, not operator-gated (the manual-only
+# design predated Pages being live and required a hand dispatch for every copy
+# change). Manual dispatch remains as a fallback/re-publish path. Publishing
+# stays FAIL-CLOSED until Pages is enabled: with no Pages source configured the
+# deploy step has nowhere to publish and errors — it cannot accidentally make
+# anything public.
 #
 # ── THE ONE STEP THE OPERATOR TAKES TO ENABLE PAGES ──────────────────────────
 #   GitHub repo → Settings → Pages → "Build and deployment"
 #     → Source: **GitHub Actions**
-# Then: Actions tab → "Deploy landing page (GitHub Pages)" → "Run workflow".
-# (Until the Source is set to GitHub Actions, the deploy step has nowhere to
-# publish and will fail closed — it cannot accidentally make the repo public.)
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: Deploy landing page (GitHub Pages)
 
 on:
-  workflow_dispatch: {}   # manual only — never on push/PR, so it never auto-publishes
+  workflow_dispatch: {}   # manual fallback / re-publish
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/pages.yml"
 
 # Least-privilege token scoped for Pages deployment.
 permissions:
