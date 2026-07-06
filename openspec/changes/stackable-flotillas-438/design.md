@@ -1,9 +1,13 @@
-# Design — stackable flotillas + coordinator adjutants (#438 + #439)
+# Design — coordinator assistant (P0 #439) + stackable scoping (#438)
 
-**Status:** Design-only (operator-direct, 2026-07-06). Implementation follows operator gate.
+**Status:** Design-only (operator-direct, 2026-07-06). **#439 is P0** — outranks the rest
+of the flotilla-dev queue. Implementation follows operator gate.
 
-This document treats **#438** (which edges reach which layer) and **#439** (who fields
-those edges) as **one architecture** — the adjutant is the per-layer detector consumer.
+**Priority order:** design **#439 first** (laminar flow for leaders). **#438 rides as the
+scoping layer** — it answers *which* edges reach a coordinator layer; #439 answers *who
+buffers them*, *when the leader sees them*, and *at what seam*.
+
+The assistant is plausibly the **per-layer detector consumer** once #438 scoping is enabled.
 
 ## Operator input — pending clause
 
@@ -18,18 +22,89 @@ beyond what is grounded here without operator affirmation.
 
 ---
 
-## The gap, stated in two lines
+## P0 — laminar flow (#439)
 
-1. **#438 — wrong layer:** The change-detector is a **fleet-wide** state machine with a
-   **single clock XO**; every material desk transition wakes that one coordinator, while
-   the roster already encodes a **tree of XOs** that should each administer their own
-   subtree.
+### What the operator asked for (refined, 2026-07-06 ~13:05Z)
 
-2. **#439 — wrong seat:** Coordinators doing **judgment** (merge gates, operator replies,
-   design reads) are constantly interrupted by **mechanical** edges (liveness acks,
-   finish-edge check-ins, busy retries, recycle aborts). During the 2026-07-06 recycle the
-   CoS absorbed ~10 finish-edges mid-investigation — even correct-layer routing would still
-   pollute the judgment seat unless something fields mechanical work first.
+> The assistant should be **letting its leader think**, not just mechanically working the
+> machine.
+
+The assistant's job is not "handle mechanical interrupts cheaply." It is to give the leader
+**laminar flow** — judgment work proceeds without turbulent interruption; interrupts are
+**triaged**, **buffered**, and **injected at the next best seam**, not mid-thought.
+
+### Core role (operator + CoS distillation)
+
+| Duty | What it means |
+|------|----------------|
+| **Triage** | Classify each incoming edge: handle now, buffer, pass urgent, escalate judgment |
+| **Observe desks** | Read subtree desk state (`flotilla result`, pane assess, finish-edges) |
+| **Observe leader** | Read coordinator state (Working/Idle/settled, awaiting marker, turn-final tail) — know when the leader is *in thought* |
+| **Buffer** | Hold non-urgent items in a durable layer queue until a seam opens |
+| **Inject at seam** | Deliver buffered items when the leader is at a natural break — idle, settled, post-turn, not mid-composition |
+
+**Harness:** desk-tier **or** LLM is fine (operator: not prescriptive). A rule-engine
+subset may handle pure mechanical items; seam judgment likely needs an LLM or attentive
+desk-tier observer.
+
+### Laminar flow vs turbulent interrupt
+
+```
+TURBULENT (today):
+  detector edge ──► leader pane IMMEDIATELY (mid design read, mid merge review)
+
+LAMINAR (target):
+  detector edge ──► assistant ──► triage ──► buffer ──► wait for seam ──► leader
+                      │                         │
+                      └── mechanical handle ────┘ (leader never sees it)
+```
+
+Urgent items (operator messages, timed trading windows) may still **cut through** — but the
+default is seam-aware injection, not fire-on-arrival.
+
+### Open question: assistant without the leader
+
+When the coordinator pane is **gone** (crash, recycle gap, sustained Shell), what may the
+assistant do alone?
+
+**Operator candidate:** negotiate terms **after first presentation** — the assistant and
+leader establish an explicit charter on first pairing (what the assistant may do solo, what
+must wait for the leader).
+
+**Design stance:** do **not** invent the solo-authority policy a priori. Run the
+**transcript-analysis step** (below) first; present findings; negotiate charter with
+operator at gate.
+
+---
+
+## Design gate — transcript analysis (load-bearing)
+
+Before locking injection policy or solo-authority bounds, the design process SHALL include a
+**post-facto transcript-analysis step** on **real coordinator sessions** from dogfooding:
+
+1. **Sample** — pull N coordinator turn-finals + session transcripts where interrupt
+   storms occurred (2026-07-06 fleet recycle is the canonical case; add 2–3 prior episodes).
+2. **Mine** — tag each interrupt: arrival time, leader state (working/idle), whether it
+   preempted judgment, what the coordinator did next, what *would have been* a better seam.
+3. **Pattern** — extract organic negotiation/injection patterns (what coordinators already
+   do when they delegate IC work; what they refuse; what they wish had waited).
+4. **Ground policy** — seam-detection heuristics, buffer TTLs, and solo-authority charter
+   draft **derived from evidence**, not invented in the design doc.
+
+Deliverable: `transcript-analysis.md` appendix (or fleet-ops host-local analysis referenced
+generically in the public design) presented **with** this design at operator gate.
+
+**This step is part of P0 design completion**, not a post-implementation afterthought.
+
+---
+
+## The gap (scoping layer #438 — secondary)
+
+**#438 — wrong layer:** The change-detector is a **fleet-wide** state machine with a
+**single clock XO**; every material desk transition wakes that one coordinator, while the
+roster already encodes a **tree of XOs** that should each administer their own subtree.
+Even a perfect assistant cannot fix routing every edge to the CoS — scoping must land so
+each assistant only sees **its layer's** interrupt stream.
 
 ---
 
@@ -195,93 +270,97 @@ finish-history (#138) forces it. **C** is the explicit sequence: A → (#436,#43
 
 ---
 
-## Recommended approach: **C + adjutant pair** (scoped routing now, adjutant as consumer)
+## Recommended approach
 
-Ship **A** (scoped wake routing) and **adjutant-as-consumer** together in Phase 1 when
-both flags are enabled. Defer nested daemons (**B**) to Phase 5.
+**P0:** Assistant + laminar flow (transcript analysis → charter → seam injection).
+**P1:** #438 scoping (`stackable_wakes`) so each assistant sees only its layer's stream.
+**P2+:** #436/#437, nested daemons optional.
+
+Do **not** ship scoping without an assistant consumer — routing edges to the leader pane
+without a buffer defeats laminar flow. Do **not** ship assistant injection policy without
+transcript analysis — seam rules must be evidence-grounded.
 
 ---
 
-## Coordinator adjutant (#439)
+## Coordinator assistant (#439) — detailed model
 
-### Role
+### Assistant seat
 
-An **adjutant** (assistant seat) per coordinator is a **lightweight execution-tier
-session** that sits between the detector and the judgment coordinator. It is the
-**direct consumer** of that layer's interrupt stream.
+An **assistant** (adjutant) per coordinator sits between the interrupt stream and the
+leader. It is the **direct consumer** of that layer's detector/recycle/heartbeat traffic
+(#438 scoping determines which edges belong to the layer).
 
-| Stream item | Adjutant action | Coordinator sees |
-|-------------|-----------------|------------------|
-| Liveness ping / ack obligation | Touch `flotilla-<xo>-alive` mechanically | Nothing (unless adjutant misses K acks → parent escalation) |
-| Finish-edge (`Working→Idle`) | Note in layer ledger; optional `flotilla result` snapshot | Digest line only if judgment needed (PR surfaced, blocker, operator-decision marker) |
-| Busy-pane retry (`send` refused) | Retry with backoff; log outcome | Digest if still busy after cap |
-| Surfaced PR sweep | `gh pr list` / backlog scan for subtree; nudge owning desk | Digest: "N PRs awaiting review" with pointers |
-| Recycle abort (#436) | Run prescribed `resume --force` or escalate | Digest if recovery fails or timed window applies |
-| Operator message (relay) | **Urgent passthrough** — forward immediately | Full message, no batching |
-| Timed trading window | **Urgent passthrough** — roster `urgent_window` match | Full alert, no batching |
-| Merge gate / operator reply / spend | Never act | Digest item tagged `judgment-required` |
+### Triage taxonomy
 
-### Authority boundary (load-bearing)
+| Class | Examples | Default action |
+|-------|----------|----------------|
+| **Mechanical** | Liveness ack, busy retry, finish-edge log | Handle; leader never sees |
+| **Judgment** | PR review gate, `[awaiting-auth]`, operator decision | Buffer → inject at seam |
+| **Urgent** | Operator relay, timed trading window | Cut through to leader immediately |
+| **Escalation** | Recycle abort unrecoverable, child coordinator down | Buffer unless urgent window; leader at seam |
 
-**Adjutant MAY (mechanical, reversible):**
+### Dual observation (load-bearing)
 
-- Touch liveness/settle markers on behalf of its coordinator layer
-- Retry `flotilla send` to subtree desks when pane was busy
-- Run read-only probes (`flotilla result`, `flotilla status`, `gh pr view`)
-- Execute prescribed recovery commands explicitly named in escalation text (`resume --force`)
-- Append to layer-local mechanical ledger (finish-edge log, retry log)
+The assistant watches **two streams** continuously:
 
-**Adjutant MAY NOT (judgment):**
+1. **Desk stream** — subtree pane states, `flotilla result`, finish-edges, crash/shell.
+2. **Leader stream** — coordinator `Assess()` state, settle/awaiting markers, whether a
+   turn is in flight (Working), whether the leader just finished (Idle edge = seam candidate).
 
-- Merge PRs or self-gate work (no-self-merge applies to coordinators; adjutant is not a coordinator)
-- Reply to operator on judgment questions
-- Authorize spend or irreversible actions
-- Dispatch new work not already authorized in durable state
-- Rotate or recycle the judgment coordinator without explicit escalation
+**Seam detection (v1 heuristics — refine via transcript analysis):**
 
-### Harness allocation (design fork — pick at implement gate)
+- Leader `Idle` + settle marker consumed → **open seam**
+- Leader `Working→Idle` just fired → **open seam** (post-turn)
+- Leader `Working` + no await marker → **closed seam** (buffer)
+- Leader `AwaitingInput` / approval pending → **closed seam** (do not stack)
 
-| Option | Shape | Pros | Cons |
-|--------|-------|------|------|
-| **D1. Grok adjutant (recommended)** | `surface: grok` workhorse per `alpha-adj` | Matches harness-allocation doctrine (judgment on Claude, execution on grok); LLM handles ambiguous mechanical cases | Token cost per layer |
-| **D2. Rule-engine subset** | Go daemon rules for ack/retry; LLM only for sweep | Cheapest for pure mechanical | Two codepaths; ambiguous cases need fallback |
-| **D3. Hybrid** | Rules for ack + ping; grok adjutant for sweep/digest composition | Best cost/coverage tradeoff | More moving parts |
+Injection policy is **evidence-grounded** after transcript analysis; the table above is
+the starting hypothesis only.
 
-**Recommendation:** **D1** for P0 (one harness path, dogfood grok workhorses); extract
-mechanical rules to D3 incrementally if cost bites.
+### Buffer + injection
 
-### Digest vs urgent passthrough
-
-**Digest (batched):** Adjutant accumulates judgment-tagged items in
-`<roster-dir>/flotilla-<xo>-digest.md` (or in-memory with durable flush). Delivers to
-coordinator when:
-
-- Digest sub-cadence fires (default: same as `heartbeat_interval` for that layer), OR
-- N items accumulated (default: 5), OR
-- Coordinator is idle/settled and digest is non-empty
-
-Digest shape (illustrative):
+Buffered items live in `<roster-dir>/flotilla-<xo>-buffer.json` (durable, ordered,
+priority-tagged). On seam open, assistant injects a **consolidated brief** — not item-by-item
+interrupts:
 
 ```
-[adjutant digest — alpha-xo layer]
+[assistant brief — alpha-xo layer]
 
-MECHANICAL (handled): 3 finish-edges logged; 2 busy-retries succeeded; liveness acked.
+Since your last seam (14m ago): handled 4 mechanical items.
 
-JUDGMENT (3):
-  • backend PR #412 surfaced — CI green, awaiting alpha-xo review
-  • frontend [awaiting-auth] spend gate on data feed
-  • macro-desk recycle abort — resume --force failed; needs coordinator
+Needs you (2):
+  • backend PR #412 — CI green, review gate
+  • frontend [awaiting-auth] — spend gate
+
+Escalation (0).
 ```
 
-**Urgent passthrough (immediate, no batching):**
+### First-presentation charter (without-leader negotiation)
 
-1. **Operator messages** — relay targets coordinator (or coordinator's channel with
-   `@xo`); adjutant does NOT hold operator traffic. Implementation: relay `onAccepted`
-   routes operator-origin messages to **coordinator pane**, not adjutant. Adjutant
-   stream is detector/recycle/heartbeat class only.
-2. **Timed trading windows** — roster `urgent_windows[]` (new, optional): wall-clock
-   windows where any subtree material edge or abort is urgent-passthrough to coordinator.
-   Example: `{ "name": "open-bell", "cron": "…", "subtree": "alpha-xo" }`.
+On **first pairing** (assistant provisioned or leader recycled), assistant and leader run
+a one-time **charter turn**: leader states what the assistant may do solo; assistant
+proposes defaults from transcript-analysis findings; leader affirms or edits. Charter stored
+at `<roster-dir>/flotilla-<xo>-assistant-charter.md`.
+
+When leader is **absent** (Shell/crash): assistant operates within chartered bounds only;
+anything outside charter waits or escalates to parent layer. Exact bounds **not fixed in
+this design** — negotiate at first presentation per operator directive.
+
+### Harness allocation (operator: desk-tier or LLM ok)
+
+| Option | Shape | Fit |
+|--------|-------|-----|
+| **H1. LLM assistant** | grok/claude/aider desk per `alpha-adj` | Seam judgment, triage ambiguity, brief composition |
+| **H2. Desk-tier observer** | Lightweight harness watching panes + running rules | Pure mechanical + simple seam detect |
+| **H3. Hybrid (likely P0)** | Rule-engine for ack/retry/liveness; LLM assistant for triage + brief + seam | Cost/coverage balance |
+
+**Recommendation:** **H3** — but seam/injection thresholds come from **transcript analysis**,
+not this doc.
+
+### Urgent passthrough (unchanged)
+
+1. **Operator messages** — relay injects to **leader pane** directly (assistant does not buffer).
+2. **Timed trading windows** — roster `urgent_windows[]`; matching edges cut through.
 
 ### Roster binding (minimal schema)
 
@@ -290,40 +369,38 @@ JUDGMENT (3):
 {
   "agents": [
     { "name": "xo" },
-    { "name": "xo-adj", "surface": "grok", "adjutant_for": "xo" },
+    { "name": "xo-asst", "surface": "grok", "assistant_for": "xo" },
     { "name": "alpha-xo", "surface": "claude-code" },
-    { "name": "alpha-adj", "surface": "grok", "adjutant_for": "alpha-xo" },
+    { "name": "alpha-asst", "surface": "grok", "assistant_for": "alpha-xo" },
     { "name": "backend" }
   ]
 }
 ```
 
-Resolution: `AdjutantFor(coordinator)` scans agents for `adjutant_for == coordinator`.
-Inverse: `CoordinatorFor(adj)` for liveness file naming. No adjutant configured ⇒ wakes
-go to coordinator directly (backward compatible).
+Resolution: `AssistantFor(coordinator)` scans agents for `assistant_for == coordinator`
+(legacy alias `adjutant_for` accepted). No assistant configured ⇒ wakes go to coordinator
+directly (backward compatible).
 
-**Channel topology:** Adjutants are **fleet-internal** — no dedicated Discord channel
-(pr-rep pattern: member of fleet-command only, or no channel). Tier-1 mirror posts
-adjutant turn-finals only when judgment-relevant (opt-in) or to coordinator channel under
-adjutant webhook — **defer to implement gate**; default silent.
+**Channel topology:** Assistants are **fleet-internal** — no dedicated Discord channel
+(pr-rep pattern: member of fleet-command only, or no channel). Default silent.
 
-### Adjutant as detector consumer (the #438 + #439 join)
+### Assistant as detector consumer (#438 scoping + #439 laminar flow)
 
 Today's `wake()` targets primary XO. Proposed routing chain:
 
 ```
 externalMaterial(prev,cur)
   → group reasons by OwningXO(agent)
-  → target := AdjutantFor(owner) ?? owner
+  → target := AssistantFor(owner) ?? owner
   → WakeInterrupt(target, Material, reasons⊆subtree)
 ```
 
-`WakeInterrupt` is an extension of the existing `WakeAgent` parallel seam (today:
-`WakeSynthesis` only). Prompt carries the **adjutant contract** (mechanical-first
-discipline + digest rules), seeded as a `heartbeat-skill` or identity block.
+`WakeInterrupt` extends the existing `WakeAgent` parallel seam (today: `WakeSynthesis`
+only). Prompt carries the **assistant contract** (triage + observe + buffer + seam
+injection), seeded as a `heartbeat-skill` or identity block.
 
-Liveness ping for layer: when `stackable_wakes` + adjutant enabled, ping targets
-**adjutant**; adjutant touches coordinator's `flotilla-<xo>-alive` as mechanical duty.
+Liveness ping for layer: when assistant enabled, ping targets **assistant**; assistant
+touches leader's `flotilla-<xo>-alive` when chartered to do so.
 
 ---
 
@@ -477,18 +554,20 @@ Likely intent ( **hypothesis only — do not implement until operator affirms** 
 4. **Dogfood order** — one squadron (e.g. flotilla-dev subtree) first, then family-office,
    then full fleet.
 
-### Phase plan
+### Phase plan (P0-first)
 
 | Phase | Deliverable | Fleet impact |
 |-------|-------------|--------------|
-| **0** | This design + operator gate | None |
-| **1a** | `stackable_wakes` — scoped routing | Subtree edges scoped to owning layer |
-| **1b** | `adjutant_for` binding + wake to adjutant | Mechanical stream fields adjutant; coordinator digests |
-| **1c** | Operator urgent passthrough | Relay bypasses adjutant for operator messages |
-| **2** | Per-layer ack/settle/liveness via adjutant | Adjutant acks coordinator alive file |
-| **3** | #436 recycle abort → adjutant | Mechanical recovery before coordinator wake |
-| **4** | #437 `recycle --self` | Coordinator + adjutant chapter-close pairs |
-| **5** (optional) | Nested daemons per host | Cross-host / hard isolation |
+| **0a** | This design + **transcript analysis** appendix | Evidence for seam policy + charter defaults |
+| **0b** | Operator gate on combined design | None |
+| **1a** | `assistant_for` binding + assistant as interrupt consumer | Laminar flow on one pilot layer (one XO pair) |
+| **1b** | Buffer + seam injection + first-presentation charter | Leader sees briefs at seams, not N interrupts |
+| **1c** | Operator urgent passthrough | Relay bypasses assistant buffer |
+| **2** | `stackable_wakes` — #438 scoping | Each assistant sees only its subtree stream |
+| **3** | Per-layer liveness via assistant | Assistant acks leader alive file |
+| **4** | #436 recycle abort → assistant | Recovery within charter; leader at seam on failure |
+| **5** | #437 `recycle --self` | Leader + assistant chapter-close pairs |
+| **6** (optional) | Nested daemons | Cross-host |
 
 ### Cutover checklist (Phase 1)
 

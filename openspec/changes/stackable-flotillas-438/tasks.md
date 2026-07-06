@@ -1,29 +1,27 @@
-# Tasks — stackable flotillas + coordinator adjutants (#438 + #439)
+# Tasks — coordinator assistant P0 (#439) + stackable scoping (#438)
 
-> Design gate only. Implementation tasks activate after operator affirms `design.md`.
+> Design gate only. **#439 outranks implementation queue.**
 
 ## Design (this PR)
 
-- [x] 1.1 Map current detector/ack topology with code cites
-- [x] 1.2 Propose three approaches; recommend phased hybrid (A → #436/#437 → optional B)
-- [x] 1.3 Document per-XO scoping via `OwningXO` / `AgentsBelow` (no parallel ownership model)
-- [x] 1.4 Fold #436 recycle-abort and #437 self-rotation into escalation story
-- [x] 1.5 Migration story + `stackable_wakes` feature-flag rollout
-- [x] 1.6 Communication-paths section with PENDING operator clause flagged
-- [x] 1.7 Integrate #439 adjutant as per-layer detector consumer (combined with #438)
-- [x] 1.8 Authority boundary, digest cadence, urgent passthrough criteria
-- [ ] 1.9 Operator gate on design PR
-- [ ] 1.10 Fold operator's remainder ("communication paths betw…") when forwarded
+- [x] 1.1 Map current detector/ack topology
+- [x] 1.2 #438 scoping via `OwningXO` / `AgentsBelow`
+- [x] 1.3 Fold #436 / #437 into escalation story
+- [x] 1.4 Reframe #439 as **laminar flow** (triage + observe desk + observe leader + buffer + seam inject)
+- [x] 1.5 First-presentation charter for without-leader bounds (negotiate, not invent)
+- [ ] 1.6 **Transcript analysis** — mine coordinator sessions (2026-07-06 recycle + prior); appendix `transcript-analysis.md`
+- [ ] 1.7 Ground seam/injection heuristics + charter defaults from 1.6 findings
+- [ ] 1.8 Operator gate on design PR (#440)
+- [ ] 1.9 Fold #438 comms-path remainder when forwarded
 
-## Implementation (post-gate — not this PR)
+## Implementation (post-gate — P0 assistant first)
 
-- [ ] 2.1 Roster flags `stackable_wakes` + agent field `adjutant_for`
-- [ ] 2.2 `AdjutantFor(coordinator)` resolver; group material reasons by `OwningXO`
-- [ ] 2.3 Extend `WakeAgent` seam for `WakeInterrupt` → adjutant (fallback: coordinator)
-- [ ] 2.4 Adjutant prompt contract (mechanical-first + digest discipline) as heartbeat-skill
-- [ ] 2.5 Per-layer ack via adjutant touching `flotilla-<xo>-alive`
-- [ ] 2.6 Digest sidecar + delivery to coordinator; urgent passthrough for operator relay
-- [ ] 2.7 #436: recycle abort inject to layer adjutant; mechanical recovery path
-- [ ] 2.8 #437: `flotilla recycle --self` for coordinator + adjutant pairs
-- [ ] 2.9 Tests: routing, adjutant fallback, urgent bypass, legacy star, synthesis regression
-- [ ] 2.10 `docs/watch-runbook.md` + `flotilla.example.json` adjutant block
+- [ ] 2.1 Roster field `assistant_for` (+ legacy `adjutant_for` alias)
+- [ ] 2.2 Assistant as interrupt consumer; buffer sidecar `flotilla-<xo>-buffer.json`
+- [ ] 2.3 Dual observation: subtree desks + leader pane state; seam detection
+- [ ] 2.4 Seam injection brief (consolidated, not per-edge interrupts)
+- [ ] 2.5 First-presentation charter turn + `flotilla-<xo>-assistant-charter.md`
+- [ ] 2.6 Urgent passthrough: operator relay + `urgent_windows[]`
+- [ ] 2.7 #438 `stackable_wakes` scoping (Phase 2 — after pilot assistant)
+- [ ] 2.8 #436 recycle abort → assistant; #437 self-rotation pairs
+- [ ] 2.9 Tests + `docs/watch-runbook.md` + `flotilla.example.json`

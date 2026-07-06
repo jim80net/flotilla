@@ -22,16 +22,16 @@ existing federation channel graph (`channels[].xo_agent`, `channels[].members[]`
 - **THEN** it SHALL contribute zero edges to `OwningXO` / `AgentsBelow` /
   `AgentsAbove` (same exclusion as visibility-synthesis)
 
-### Requirement: Adjutant binding SHALL be orthogonal to channel graph
+### Requirement: Assistant binding SHALL be orthogonal to channel graph
 
-The `adjutant_for` agent field SHALL bind an adjutant seat to a coordinator by
-name. It SHALL NOT alter federation channel membership or synthesis routing. An
-adjutant MAY be fleet-internal (no owned channel) while its coordinator owns a
+The `assistant_for` agent field (legacy alias `adjutant_for`) SHALL bind an assistant
+seat to a leader by name. It SHALL NOT alter federation channel membership or synthesis
+routing. An assistant MAY be fleet-internal (no owned channel) while its leader owns a
 home channel.
 
-#### Scenario: Adjutant resolves without channel ownership
+#### Scenario: Assistant resolves without channel ownership
 
-- **WHEN** agent `alpha-adj` has `adjutant_for: alpha-xo`
-- **AND** `alpha-adj` owns no channel binding
-- **THEN** `AdjutantFor(alpha-xo)` SHALL resolve to `alpha-adj`
-- **AND** `AgentsBelow(alpha-adj)` SHALL be empty (adjutant is not a coordinator)
+- **WHEN** agent `alpha-asst` has `assistant_for: alpha-xo`
+- **AND** `alpha-asst` owns no channel binding
+- **THEN** `AssistantFor(alpha-xo)` SHALL resolve to `alpha-asst`
+- **AND** `AgentsBelow(alpha-asst)` SHALL be empty (assistant is not a coordinator)
