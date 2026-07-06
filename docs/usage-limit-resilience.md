@@ -46,10 +46,11 @@ Restore preferred tier: `flotilla switch <agent> --to primary` when limits clear
 
 ## Auto-switch eligibility today
 
-Watch auto-switch (`FLOTILLA_AUTO_SWITCH=1`) applies to **non-XO execution desks** only
-(`AutoSwitchEligible` — coordinators and `approval_sensitive` desks are refused at
-enqueue). Coordinator downgrade is **manual switch** until a follow-up extends
-auto-downgrade to XO seats (#466 phase 2).
+Watch auto-switch is **ON by default** (`surface.AutoSwitchEnabled` — disable explicitly
+with `FLOTILLA_AUTOSWITCH=0`, `false`, `no`, or `off`). When enabled, it applies to
+**non-XO execution desks** only (`AutoSwitchEligible` — coordinators and
+`approval_sensitive` desks are refused at enqueue). Coordinator downgrade is **manual
+switch** until a follow-up extends auto-downgrade to XO seats (#466 phase 2).
 
 ## Ledger / turn-final provenance
 

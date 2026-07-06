@@ -1,6 +1,6 @@
 {
   "_comment": "Host-local launch recipes (copy to <roster-dir>/flotilla-launch.json or per-agent ~/.flotilla/<agent>/launch.json). Gitignored in production — this committed example shows the usage-limit downgrade SHAPE for #466. Agent keys MUST match flotilla.json. Launch commands are illustrative — pin your operator-ratified models in the real file.",
-  "_comment_failover": "primary + fallbacks[] is the per-seat usage-limit policy. Account-side throttles prefer a same-provider fallback (model downgrade). Server-side throttles cross providers (harness switch). flotilla switch <agent> --to <slot> applies a slot; watch auto-switch applies to non-XO execution desks when FLOTILLA_AUTO_SWITCH=1.",
+  "_comment_failover": "primary + fallbacks[] is the per-seat usage-limit policy. Account-side throttles prefer a same-provider fallback (model downgrade). Server-side throttles cross providers (harness switch). flotilla switch <agent> --to <slot> applies a slot; watch auto-switch is ON by default (disable with FLOTILLA_AUTOSWITCH=0) for non-XO execution desks.",
   "agents": {
     "xo": {
       "launch": "claude --model opus -w xo",
