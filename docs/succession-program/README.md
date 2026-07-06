@@ -10,7 +10,38 @@ Meta-XO and project-XO seats that do not depend on Claude/Fable subscriptions.
 |-----|---------|
 | [opencode-revival-trial.md](./opencode-revival-trial.md) | Stand up a trial OpenCode execution desk; re-verify driver vs current CLI |
 | [portable-coordinator-readiness.md](./portable-coordinator-readiness.md) | Ranked gap list: what breaks when grok/codex/opencode runs XO duties |
+| [coordinator-runbooks/](../coordinator-runbooks/README.md) | Generalized successor runbook package (bench-measured uplift; public) |
 
 **Gates:** design/readiness docs → operator/meta-XO gate. **No live meta-XO/XO seat swaps** without an
 operator-scheduled window. Supervised project-XO trials follow
 [coordinator-seat-swap-runbook.md](../coordinator-seat-swap-runbook.md).
+
+## Coordinator bench methodology (SE-6)
+
+The measured uplift numbers in
+[`coordinator-runbooks/README.md`](../coordinator-runbooks/README.md) come from a
+**16-scenario coordinator evaluation** — replayable episodes extracted from real
+production coordination, not ad-hoc prompts.
+
+**Scenario set.** Each scenario is a self-contained coordinator task (dispatch,
+gate, operator comms, incident triage, synthesis) with a frozen context bundle so
+different models and runbook conditions can be compared on the same input.
+
+**Grading rubric.** Six dimensions score each response (communication register,
+gate procedure, verification discipline, dispatch posture, operator decision
+handling, incident response). Scores are 0–2 per dimension with cited justification.
+
+**Fabrication disqualifier.** Any response that states an unverified empirical
+claim as fact (status, metric, merge result, test outcome) caps at FAIL regardless
+of fluency — the bar matches Principle 8 (verify; never fabricate).
+
+**Runbook A/B.** Baseline: coordinator identity + constitutional principles only.
+Treatment: the same seat plus the [`coordinator-runbooks/`](../coordinator-runbooks/)
+package. Measured lifts (model, baseline, with-runbooks, Δ) live in the canonical
+table at [`coordinator-runbooks/README.md` — Why this package exists](../coordinator-runbooks/README.md#why-this-package-exists--measured-uplift);
+gains concentrated in communication-register and gate-procedure legs.
+
+Deployment-specific scenario text, calibration answers, and error-taxonomy instances
+stay in host-local private research state. This section documents the **public
+methodology**; the published scores were measured on that private scenario set and
+are not independently reproducible from the public tree alone.

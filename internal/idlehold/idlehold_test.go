@@ -157,7 +157,7 @@ func TestCheck_WatcherArmedWaitNotIdleHold(t *testing.T) {
 	// Carve-out: idle-hold trigger language co-present with watcher-armed phrase → NOT flagged.
 	carveOut := []string{
 		"3 named watchers armed on the sweep lane; holding for your call on the TG3 report. Wake scheduled 19:54Z.",
-		"Event-armed on TG3 prep — waiting on you for the sweep-disposition timed: tactical-head 19:54Z.",
+		"Event-armed on TG3 prep — waiting on you for the sweep-disposition timed: trade-desk 19:54Z.",
 	}
 	for _, text := range carveOut {
 		if r := Check(text); r.IdleHold {

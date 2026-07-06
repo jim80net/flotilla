@@ -7,7 +7,7 @@
 > moved on (the codex execution driver has shipped). For the shipped surface-driver
 > model, see [inter-harness.md](./inter-harness.md).
 
-**Status:** Approved — grok-research design lane **complete** (operator 2026-06-29). Routed to flotilla-dev for trio + implementation. Folds: provider-wide throttle (§2), fresh-launch/empty-corpus degrade (§3.6 B+C), memex PR #21 write-side (§3.2–3.5).
+**Status:** Approved — research-desk design lane **complete** (operator 2026-06-29). Routed to flotilla-dev for trio + implementation. Folds: provider-wide throttle (§2), fresh-launch/empty-corpus degrade (§3.6 B+C), memex PR #21 write-side (§3.2–3.5).
 **Problem:** A server-side Anthropic rate limit (`Server is temporarily limiting requests`) throttled every Claude-based desk at once and stalled the fleet. Today most desks share one harness (Claude Code) and one subscription class, so a single provider outage is a fleet-wide outage.  
 **Goal:** Let a desk **fail over** to a different harness/subscription while preserving enough context to continue work — extending flotilla's existing launch-recipe + surface-driver plumbing, not replacing it.
 
@@ -278,7 +278,7 @@ memex reads the bundle at takeover and needs a **deterministic, harness-neutral 
 | Component | Rule |
 |---|---|
 | `<project_root>` | Recipe `cwd` (realpath'd at switch time, same as recycle `recipe.Cwd` eval, `recycle.go:382-387`) |
-| `<flotilla_agent>` | Roster agent name (e.g. `grok-research`) — **desk-scoped** segment so sibling desks sharing a worktree do not collide |
+| `<flotilla_agent>` | Roster agent name (e.g. `research-desk`) — **desk-scoped** segment so sibling desks sharing a worktree do not collide |
 | `<switch_token>` | Same crypto token as switch lifecycle (`recycle.go:337-346` format) |
 
 **Durability gate:** bundle file MUST pass the same `HandoffDurable`-class gate as the handoff (`recycle.go:163-165`) before Phase 4 takeover. Write-then-takeover ordering unchanged.
@@ -312,7 +312,7 @@ memex adapters do **not** inherently know the flotilla roster `agent` name. Bind
 {
   "bundle_version": 1,
   "continuity_kind": "switch",          // "switch" | "fresh" | "recycle"
-  "flotilla_agent": "grok-research",    // REQUIRED — desk binding (§3.3)
+  "flotilla_agent": "research-desk",    // REQUIRED — desk binding (§3.3)
   "project_root": "/home/operator/work/project",
 
   "from": {                             // OPTIONAL — null on fresh launch
@@ -331,11 +331,11 @@ memex adapters do **not** inherently know the flotilla roster `agent` name. Bind
 
   "handoff_path": "/home/operator/work/project/.flotilla/handoffs/switch-20260629T031400....md",
 
-  "workspace_state_path": "/home/operator/.flotilla/grok-research/state.md",
+  "workspace_state_path": "/home/operator/.flotilla/research-desk/state.md",
 
   // Layer 2 seam — v1 bare string (memex-hermes PR #21)
   "hint_version": 1,
-  "memex_injection_hint": "takeover-cross-harness:project=grok-research"
+  "memex_injection_hint": "takeover-cross-harness:project=research-desk"
 }
 ```
 
@@ -365,20 +365,20 @@ memex adapters do **not** inherently know the flotilla roster `agent` name. Bind
 
 #### Scenario A — Cross-harness switch (mechanism path — ships P0)
 
-**Given:** desk `grok-research` on claude hits `RateLimitServerSide`  
-**When:** `flotilla switch grok-research --auto` completes  
+**Given:** desk `research-desk` on claude hits `RateLimitServerSide`  
+**When:** `flotilla switch research-desk --auto` completes
 **Then:**
 
 1. Handoff committed at `<project_root>/.flotilla/handoffs/switch-<token>.md` — **this alone preserves context**
-2. Bundle written at `<project_root>/.flotilla/switch/grok-research/continuity-<token>.json` (durability-gated); `last-switch.json` records `bundle_path`
+2. Bundle written at `<project_root>/.flotilla/switch/research-desk/continuity-<token>.json` (durability-gated); `last-switch.json` records `bundle_path`
 3. Takeover turn delivered to grok AFTER handoff (+ bundle when written) are durable
 4. Desk continues work via handoff **even if memex is offline or corpus is empty** (#20 not landed)
 5. *(Layer 2, P4+)* memex reads bundle → `hint_version` + bare-string hint → corpus query → surfaces into grok
 
 #### Scenario B — Fresh desk launch, no FROM-harness (load-bearing)
 
-**Given:** cold-start `grok-research` on grok — no prior switch  
-**When:** `flotilla resume grok-research` succeeds  
+**Given:** cold-start `research-desk` on grok — no prior switch  
+**When:** `flotilla resume research-desk` succeeds
 **Then:**
 
 1. No handoff; `from` absent; bundle absent OR minimal (`continuity_kind: "fresh"`, `to` only)
