@@ -279,6 +279,12 @@ func cmdWatch(args []string) error {
 	// silent-success bug. Heartbeat/detector ticks never escalate (a stale tick is dropped).
 	injector.SetEscalate(alert)
 	injector.SetRelayQueue(*queuePath)
+	injector.SetRosterDir(rosterDir)
+	outboxSweeper := watch.NewOutboxSweeper(rosterDir, injector.Enqueue)
+	injector.SetSendDelivered(func(sender, recipient, message string) {
+		mirrorSendToLedger(cfg, sender, recipient, message)
+	})
+	injector.SetOutboxDone(outboxSweeper.Release)
 	// Mirror relayed instructions to the audit channel in full. Heartbeat ticks
 	// are NOT mirrored: they fire every interval and a per-tick marker is pure
 	// noise in the operator's Discord channel (XO liveness is already covered by
@@ -317,6 +323,7 @@ func cmdWatch(args []string) error {
 	})
 	injector.Start()
 	watch.ReplayRelayQueue(injector, *queuePath)
+	outboxSweeper.SweepAll()
 	defer injector.Stop()
 
 	// Daemon-native wall-clock scheduler (#413): durable last-fired sidecar beside the
@@ -335,6 +342,7 @@ func cmdWatch(args []string) error {
 	// onAccepted is the relay's clock hook: legacy resets the heartbeat timer; v2
 	// clears the detector's settled flag when the message targets the XO.
 	var onAccepted func(string)
+	legacyClockMode := false
 
 	if cfg.ChangeDetector {
 		// ---- heartbeat v2: the change-detector (wake only on a material change) ----
@@ -726,6 +734,7 @@ func cmdWatch(args []string) error {
 		if sched != nil {
 			detCfg.ScheduleOnTick = sched.Tick
 		}
+		detCfg.OutboxSweepOnTick = func() { outboxSweeper.SweepAll() }
 		det := watch.NewDetectorWithSynthSidecar(detCfg, *snapshotPath, synthSidecarPath)
 		deskStateLabels = det.DeskStateLabels
 		endAutoSwitch = det.EndAutoSwitchFlight
@@ -768,6 +777,7 @@ func cmdWatch(args []string) error {
 				synthDigestTicks, synthSidecarPath)
 		}
 	} else {
+		legacyClockMode = true
 		// ---- legacy always-wake heartbeat ----
 		wd := watch.NewWatchdog(*maxMissed, alert)
 
@@ -839,6 +849,21 @@ func cmdWatch(args []string) error {
 	// SIGTERM/SIGINT unwinds the retry cleanly, no leak).
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
+
+	if legacyClockMode {
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					outboxSweeper.SweepAll()
+				}
+			}
+		}()
+	}
 
 	// Inbound relay (optional): needs at least one channel binding + a bot token
 	// (and the bot's privileged Message Content intent) AND an operator_user_id —
