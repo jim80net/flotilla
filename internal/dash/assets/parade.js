@@ -78,6 +78,11 @@
   }
   // parseHtmlTable extracts rows of {head, align, text} cells from a raw <table> block.
   // Nested markup inside a cell is stripped to its text (a deck table cell is prose).
+  // KNOWN LIMITATION (regex, not a parser): an attribute value containing '>' (e.g.
+  // title="a > b") truncates that tag's [^>]* match, which can drop the cell/row. The
+  // failure mode is DEGRADATION ONLY — unmatched content falls through to escaped text
+  // via the caller's zero-rows path; nothing can inject. Accepted for deck sources,
+  // whose tables are exporter/author-plain.
   function parseHtmlTable(src) {
     var rows = [], rowRe = /<tr[^>]*>([\s\S]*?)<\/tr\s*>/gi, m;
     while ((m = rowRe.exec(src))) {
