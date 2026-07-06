@@ -1952,7 +1952,12 @@
     if (laidOut && ssig === lastStructSig && nodesEl.children.length === goals.length) {
       goals.forEach(function (n) {
         var prev = nodeById[n.id];
-        if (prev) { prev.status_display = n.status_display; prev.work_items = n.work_items; }
+        // brief is deliberately NOT structural (a brief edit must not re-layout the map),
+        // so it must be copied here like the live-status fields — otherwise the module
+        // index holds a stale brief and every nodeById reader (gatherDecisions' instant
+        // paint, the respond modal, the drawer) transiently splits/merges a decision
+        // until the next full re-index (#458 gate-review P3).
+        if (prev) { prev.status_display = n.status_display; prev.work_items = n.work_items; prev.brief = n.brief; }
       });
       updateInPlace(goals, nodesEl);
       drawEdges(); // child state may have changed → recolour (the SVG is stateless)
