@@ -1450,30 +1450,65 @@
   function indexGoalsNodes(doc) {
     nodeById = {};
     (Array.isArray(doc.goals) ? doc.goals : []).forEach(function (n) { nodeById[n.id] = n; });
+    // A flat re-index carries no laid-out geometry (_x/_y). Invalidate the map's render
+    // signatures so its next render takes the FULL layout path — an in-place update over
+    // bare nodes would compute NaN positions.
+    laidOut = false; lastStructSig = null; lastSig = null;
   }
-  // #429: the reading room is a first-class TAB, not a modal. openDecisions PAINTS the
-  // full-page list into #view-decisions — dash.js's showView("decisions") calls it on
-  // every tab open, so the list is fresh per visit. No open/close state, no focus trap,
-  // no Esc-close: the tab strip owns navigation and the document owns the one scroll.
-  function openDecisions() {
-    function paint() {
-      var decs = gatherDecisions();
-      var list = q("gdec-list");
-      if (list) {
-        list.innerHTML = decs.length
-          ? decs.map(function (d, i) { return renderDecisionCard(d, i, decs.length); }).join("")
-          : '<div class="gdec-empty">Nothing is awaiting your decision right now.</div>';
-      }
-      var titleEl = q("gdec-title");
-      if (titleEl) titleEl.textContent = decs.length ? ("Decisions awaiting you · " + decs.length) : "Decisions awaiting you";
+  // #429: the reading room is a first-class TAB, not a modal.
+  function decisionsVisible() {
+    var v = q("view-decisions");
+    return v && !v.classList.contains("hidden");
+  }
+  // paintDecisions renders the page from the current cache/nodeById. Honest states (the
+  // done-history discipline, cubic #363): a doc that failed to load must NOT masquerade
+  // as a clean "nothing awaiting you" — the error is the finding.
+  function paintDecisions() {
+    var list = q("gdec-list");
+    if (!list) return;
+    var titleEl = q("gdec-title");
+    if (titleEl) titleEl.textContent = "Decisions awaiting you";
+    if (!cache) { list.innerHTML = '<div class="gdec-empty">Loading decisions…</div>'; return; }
+    if (cache.found === false) {
+      list.innerHTML = '<div class="gdec-empty">The fleet goals data is unavailable right now, so decisions can&#8217;t be listed. This page reloads on the next visit or live update.</div>';
+      return;
     }
-    if (Object.keys(nodeById).length) { paint(); return; }
+    // The load-time badge prime sets cache without indexing; index on demand so the
+    // first paint reads the real doc instead of an empty map.
+    if (!Object.keys(nodeById).length) indexGoalsNodes(cache);
+    var decs = gatherDecisions();
+    list.innerHTML = decs.length
+      ? decs.map(function (d, i) { return renderDecisionCard(d, i, decs.length); }).join("")
+      : '<div class="gdec-empty">Nothing is awaiting your decision right now.</div>';
+    if (titleEl && decs.length) titleEl.textContent = "Decisions awaiting you · " + decs.length;
+    lastDecsSig = JSON.stringify(cache);
+  }
+  // lastDecsSig dedups live-tick repaints of the decisions page (the map's lastSig is
+  // reset by every flat re-index, so it can't serve): an unchanged doc must not churn
+  // the list's DOM (and blow away focus) on every poll.
+  var lastDecsSig = null;
+  // openDecisions runs on every Decisions-tab open (dash.js showView): paint instantly
+  // from the last-known doc, then ALWAYS refetch — a standalone tab must not fossilize
+  // its first-load list (the old modal only fetched when the map had never rendered).
+  // The shared epoch orders this fetch against refresh() so a stale response never
+  // overwrites a newer doc.
+  function openDecisions() {
+    paintDecisions();
+    var e = ++epoch;
     getJSON("/api/goals").then(function (doc) {
+      if (e !== epoch) return;
       cache = doc;
       indexGoalsNodes(doc);
       renderSituation(doc);
-      paint();
-    }).catch(function () { paint(); });
+      if (decisionsVisible()) paintDecisions();
+    }).catch(function () {
+      if (e !== epoch) return;
+      // Keep a last-known-good list; only surface the unavailable state when empty-handed.
+      if (!Object.keys(nodeById).length && decisionsVisible()) {
+        cache = cache && cache.found !== false ? cache : { found: false };
+        paintDecisions();
+      }
+    });
   }
 
   function closeAllGnodeMenus() {
@@ -1934,7 +1969,9 @@
 
   /* ── lifecycle ─────────────────────────────────────────────────────────── */
   function refresh() {
-    if (!activated) return Promise.resolve();
+    // #429: a live tick must also reach the Decisions tab — it reads the same doc, and
+    // it can be the operator's ONLY open view (the goals map never activated).
+    if (!activated && !decisionsVisible()) return Promise.resolve();
     var e = ++epoch;
     return getJSON("/api/goals").then(function (doc) {
       if (e !== epoch) return; // a newer refresh already superseded this one
@@ -1946,11 +1983,19 @@
       // even if render's deferred pass-2 aborts (superseded / tab hidden) — then a
       // later identical refresh would dedup-skip and strand the provisional canvas.
       if (isVisible()) render(sig);
+      // #429: the operator is reading the decisions page — re-index + repaint it (own
+      // dedup: the flat re-index resets lastSig, so sig can't dedup this branch).
+      else if (decisionsVisible() && sig !== lastDecsSig) {
+        indexGoalsNodes(doc);
+        renderSituation(doc);
+        paintDecisions();
+      }
       // Hidden: do not render and do not commit lastSig — show() renders on tab open.
     }).catch(function (err) {
       if (e !== epoch) return;
       cache = { found: false, error: err.message };
       if (isVisible()) render(); // render() computes + commits the error-state sig
+      else if (decisionsVisible()) paintDecisions(); // honest unavailable state (#429)
     });
   }
 

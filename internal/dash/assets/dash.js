@@ -1231,6 +1231,11 @@
   function openDecisionsView() {
     showView("decisions");
     pushNav({ view: "decisions" });
+    // The trigger (the goals tile) is hidden with its view — move focus into the
+    // now-visible page so keyboard users aren't stranded on <body> (mirrors the
+    // openConversation deep-link's focus handoff).
+    var title = el("gdec-title");
+    if (title) { title.setAttribute("tabindex", "-1"); title.focus(); }
   }
   document.addEventListener("click", function (e) {
     var trig = e.target.closest ? e.target.closest("[data-open-decisions]") : null;

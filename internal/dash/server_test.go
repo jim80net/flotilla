@@ -668,14 +668,21 @@ func TestDecisionPage405(t *testing.T) {
 	js := doGet(t, srv, "/static/goals.js").Body.String()
 	for _, marker := range []string{
 		"gatherDecisions",     // collects every open decision fleet-wide
-		"openDecisions",       // paints the reading room page
+		"openDecisions",       // per-open entry: instant paint + always refetch (#429)
+		"paintDecisions",      // the pure painter, also driven by live ticks (#429)
+		"decisionsVisible",    // live ticks reach the open tab (#429)
 		"data-open-decisions", // the Awaiting-you tile trigger
 		"gdec-ctx-link",       // "Drives" — which goal the decision drives (linked)
 		"gm-brief-img",        // demo images rendered in a brief
 	} {
 		if !strings.Contains(js, marker) {
-			t.Errorf("goals.js must implement the decision page (missing %q) — #405 Inc 2", marker)
+			t.Errorf("goals.js must implement the decision page (missing %q) — #405 Inc 2 / #429", marker)
 		}
+	}
+	// #429 + the cubic #363 discipline: a failed goals load must surface an honest
+	// unavailable state, never a clean-looking "nothing awaiting you".
+	if !strings.Contains(js, "unavailable right now") {
+		t.Error("goals.js paintDecisions must render an honest unavailable state on a failed goals load — #429")
 	}
 	// renderBrief must render reference links (the "references littered throughout" requirement).
 	if !strings.Contains(js, `rel="noopener noreferrer"`) {
