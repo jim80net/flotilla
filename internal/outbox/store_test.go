@@ -102,6 +102,31 @@ func TestInvalidAgentRejected(t *testing.T) {
 }
 
 // Acceptance (#475): pending entries survive a watch-daemon restart (disk is source of truth).
+// Regression (#475 P1): Remove racing Enqueue must not drop the fresh entry.
+func TestOutboxLockPreventsLostUpdate(t *testing.T) {
+	dir := t.TempDir()
+	path, _ := Path(dir, "alpha")
+	st := NewStore(path)
+	st.Upsert(Entry{ID: "old", Sender: "alpha", Recipient: "cos", Message: "stale", EnqueuedAt: time.Now()})
+
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 50; i++ {
+			st.Remove("old")
+		}
+		close(done)
+	}()
+	id, err := Enqueue(dir, "alpha", "cos", "fresh report")
+	<-done
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := st.Load()
+	if len(got) != 1 || got[0].ID != id {
+		t.Fatalf("after concurrent remove+enqueue, outbox = %+v, want fresh id %q", got, id)
+	}
+}
+
 func TestOutboxSurvivesDaemonRestart(t *testing.T) {
 	dir := t.TempDir()
 	id, err := Enqueue(dir, "venture-xo", "cos", "deploy verified")

@@ -9,7 +9,7 @@ manually retried — the MESSAGE layer dropped the result while every agent did 
 ## What Changes
 
 1. **Sender-side retry-with-backoff** — `flotilla send` re-attempts on `ErrBusy`/`ErrTransient`
-   with exponential backoff before giving up.
+   (3 quick attempts, ≤~35s) before queueing; long busy windows are the outbox's job.
 2. **Per-sender durable outbox** — `<roster-dir>/flotilla-<agent>-outbox.json`; entries survive
    restarts.
 3. **Watch heartbeat sweep** — the daemon enqueues pending outbox sends as `KindSend` jobs on

@@ -16,9 +16,11 @@ import (
 // Sender-side retry policy for a bounced `flotilla send` (#475). Inline retries cover short
 // busy windows; exhausted attempts fall through to the durable per-sender outbox.
 const (
-	sendRetryInitial     = 5 * time.Second
-	sendRetryMax         = 60 * time.Second
-	sendRetryMaxAttempts = 12
+	sendRetryInitial = 5 * time.Second
+	sendRetryMax     = 60 * time.Second
+	// Three quick attempts (~5s + ~10s sleeps) then queue — the sending desk must not
+	// block for minutes; the durable outbox + watch sweep carry the long busy window.
+	sendRetryMaxAttempts = 3
 )
 
 func deliverSendOnce(drv surface.Driver, pane, message string) error {
@@ -101,17 +103,17 @@ func enqueueOrFailSend(rosterPath, sender, recipient, message string, deliveryEr
 }
 
 // deliverOrQueueSend attempts confirmed delivery with inline retry; on sustained busy/transient
-// failure it enqueues to the sender's durable outbox and returns success (queued).
-func deliverOrQueueSend(cfg *roster.Config, rosterPath, sender, recipient string, drv surface.Driver, pane, message string) error {
-	err := deliverSendWithRetry(drv, pane, recipient, message)
+// failure it enqueues to the sender's durable outbox and returns queued=true (not delivered).
+func deliverOrQueueSend(cfg *roster.Config, rosterPath, sender, recipient string, drv surface.Driver, pane, message string) (queued bool, err error) {
+	err = deliverSendWithRetry(drv, pane, recipient, message)
 	if err == nil {
 		fmt.Printf("delivered to %s (pane %s) — turn confirmed\n", recipient, pane)
 		mirrorSendToLedger(cfg, sender, recipient, message)
-		return nil
+		return false, nil
 	}
 	var busy errRetryableBusy
 	if errors.As(err, &busy) || errors.Is(err, surface.ErrBusy) || errors.Is(err, surface.ErrTransient) {
-		return enqueueOrFailSend(rosterPath, sender, recipient, message, err)
+		return true, enqueueOrFailSend(rosterPath, sender, recipient, message, err)
 	}
-	return err
+	return false, err
 }

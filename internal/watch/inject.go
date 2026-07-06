@@ -151,12 +151,15 @@ func (in *Injector) SetEscalate(escalate func(string)) { in.escalate = escalate 
 func (in *Injector) SetRelayQueue(path string) { in.queue = newRelayQueueStore(path) }
 
 // SetRosterDir wires the roster directory for per-sender outbox persistence (#475).
+// Must be set before Start.
 func (in *Injector) SetRosterDir(dir string) { in.rosterDir = dir }
 
 // SetSendDelivered installs a hook called after a CONFIRMED KindSend delivery (e.g. ledger append).
+// Must be set before Start.
 func (in *Injector) SetSendDelivered(fn func(sender, recipient, message string)) { in.onSend = fn }
 
 // SetOutboxDone installs a hook called when a KindSend job finishes (success or terminal failure).
+// Must be set before Start.
 func (in *Injector) SetOutboxDone(fn func(sender, id string)) { in.onOutboxDone = fn }
 
 // NewInjector builds an injector with the given send function and queue buffer.

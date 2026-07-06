@@ -87,58 +87,63 @@ func (s Store) Load() []Entry {
 }
 
 // Upsert persists an entry when new or materially changed (not deferrals-only bumps).
+// The read-modify-write runs under a cross-process flock so CLI Enqueue and watch Remove
+// cannot lost-update each other (#475 P1).
 func (s Store) Upsert(e Entry) {
 	if s.path == "" || e.ID == "" {
 		return
 	}
-	f, err := s.readFileForUpdate()
-	if err != nil {
-		log.Printf("flotilla outbox: read for upsert failed: %v (upserting single entry)", err)
-		f = file{}
-	}
-	replaced := false
-	for i, p := range f.Pending {
-		if p.ID == e.ID {
-			if !entryMateriallyChanged(p, e) {
-				return
-			}
-			f.Pending[i] = e
-			replaced = true
-			break
+	if err := s.withLock(func() error {
+		f, err := s.readFileForUpdate()
+		if err != nil {
+			log.Printf("flotilla outbox: read for upsert failed: %v (upserting single entry)", err)
+			f = file{}
 		}
-	}
-	if !replaced {
-		f.Pending = append(f.Pending, e)
-	}
-	if err := s.save(f); err != nil {
+		replaced := false
+		for i, p := range f.Pending {
+			if p.ID == e.ID {
+				if !entryMateriallyChanged(p, e) {
+					return nil
+				}
+				f.Pending[i] = e
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			f.Pending = append(f.Pending, e)
+		}
+		return s.save(f)
+	}); err != nil {
 		log.Printf("flotilla outbox: upsert failed: %v", err)
 	}
 }
 
-// Remove deletes an entry by id.
+// Remove deletes an entry by id under the same flock as Upsert.
 func (s Store) Remove(id string) {
 	if s.path == "" || id == "" {
 		return
 	}
-	f, err := s.readFileForUpdate()
-	if err != nil {
-		log.Printf("flotilla outbox: read for remove failed: %v", err)
-		return
-	}
-	if len(f.Pending) == 0 {
-		return
-	}
-	next := f.Pending[:0]
-	for _, p := range f.Pending {
-		if p.ID != id {
-			next = append(next, p)
+	if err := s.withLock(func() error {
+		f, err := s.readFileForUpdate()
+		if err != nil {
+			return fmt.Errorf("read for remove: %w", err)
 		}
-	}
-	if len(next) == len(f.Pending) {
-		return
-	}
-	f.Pending = next
-	if err := s.save(f); err != nil {
+		if len(f.Pending) == 0 {
+			return nil
+		}
+		next := f.Pending[:0]
+		for _, p := range f.Pending {
+			if p.ID != id {
+				next = append(next, p)
+			}
+		}
+		if len(next) == len(f.Pending) {
+			return nil
+		}
+		f.Pending = next
+		return s.save(f)
+	}); err != nil {
 		log.Printf("flotilla outbox: remove failed: %v", err)
 	}
 }
@@ -161,7 +166,17 @@ func Enqueue(rosterDir, sender, recipient, message string) (string, error) {
 		Message:    message,
 		EnqueuedAt: now,
 	}
-	NewStore(path).Upsert(entry)
+	st := NewStore(path)
+	if err := st.withLock(func() error {
+		f, rerr := st.readFileForUpdate()
+		if rerr != nil {
+			f = file{}
+		}
+		f.Pending = append(f.Pending, entry)
+		return st.save(f)
+	}); err != nil {
+		return "", fmt.Errorf("outbox enqueue: %w", err)
+	}
 	return id, nil
 }
 

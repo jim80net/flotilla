@@ -373,8 +373,13 @@ func cmdSend(args []string) error {
 		return err
 	}
 	// Inline retry-with-backoff, then durable per-sender outbox on sustained busy (#475).
-	if err := deliverOrQueueSend(cfg, *rosterPath, *from, agentName, drv, pane, message); err != nil {
+	queued, err := deliverOrQueueSend(cfg, *rosterPath, *from, agentName, drv, pane, message)
+	if err != nil {
 		return err
+	}
+	if queued {
+		// Queued ≠ delivered — skip audit mirror and ledger (watch delivers later).
+		return nil
 	}
 
 	// Mirror to the Discord audit channel under the sender's identity. Inter-agent
