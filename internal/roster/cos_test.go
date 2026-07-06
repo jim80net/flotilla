@@ -100,6 +100,23 @@ func TestIsCoordinator_SoloDeskChannelNotCoordinator(t *testing.T) {
 	}
 }
 
+// #481: supervisor-as-member desk channels must not classify execution desks as coordinators.
+func TestIsCoordinator_SupervisorAsMemberNotCoordinator(t *testing.T) {
+	cfg, _ := Load(writeRoster(t, `{
+	  "operator_user_id":"U","xo_agent":"meta-xo","cos_agent":"cos",
+	  "agents":[{"name":"meta-xo"},{"name":"project-xo"},{"name":"build-desk"},{"name":"cos"}],
+	  "channels":[
+	    {"channel_id":"C_CMD","xo_agent":"meta-xo","members":["project-xo","cos"]},
+	    {"channel_id":"C_PROJ","xo_agent":"project-xo","members":["cos"]},
+	    {"channel_id":"C_BUILD","xo_agent":"build-desk","members":["project-xo"]}]}`))
+	if !cfg.IsCoordinator("project-xo") {
+		t.Error("project-xo supervising build-desk must remain coordinator")
+	}
+	if cfg.IsCoordinator("build-desk") {
+		t.Error("execution desk with only supervisor-as-member must NOT be coordinator")
+	}
+}
+
 func TestIsCoordinator_SelfOnlyMemberNotCoordinator(t *testing.T) {
 	cfg, _ := Load(writeRoster(t, `{
 	  "operator_user_id":"U","xo_agent":"meta-xo",

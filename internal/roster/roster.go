@@ -170,6 +170,9 @@ type Config struct {
 	// /clear until handoff-gated recycle at chapter ends — same as never until #443).
 	// FLOTILLA_XO_ROTATE env overrides this field at watch startup.
 	XORotate string `json:"xo_rotate,omitempty"`
+	// DelegationNudge gates the coordinator IC-ing delegation nudge (#232, #481):
+	// on (default) or off. FLOTILLA_DELEGATION_NUDGE env overrides at watch startup.
+	DelegationNudge string `json:"delegation_nudge,omitempty"`
 
 	// UrgentWindows declares substring matches on material-change reasons that cut through
 	// the adjutant buffer to the leader immediately (#439 phase 1c). Operator relay
@@ -295,6 +298,9 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("roster %q: invalid liveness_ping_mode %q (want none|interval|consecutive)", path, c.LivenessPingMode)
 	}
 	if _, err := ParseXORotate(c.XORotate); err != nil {
+		return nil, fmt.Errorf("roster %q: %w", path, err)
+	}
+	if _, err := ParseDelegationNudge(c.DelegationNudge); err != nil {
 		return nil, fmt.Errorf("roster %q: %w", path, err)
 	}
 	// The change-detector ticks on heartbeat_interval; without one it would never
@@ -498,20 +504,59 @@ func (c *Config) IsXO(name string) bool {
 	return false
 }
 
-// hasSpanOfControl reports whether name is xo_agent of at least one binding with a
-// member other than name itself (#460). Owning a solo mirror channel is not coordination.
+// hasSpanOfControl reports whether name coordinates subordinate agents (#460, #481).
+// Two federation shapes coexist:
+//   - Coordinator home: xo_agent=name lists execution desks (non-XO members) as subordinates.
+//   - Desk home (supervisor-as-member): execution desk xo_agent lists coordinator XOs as
+//     observers; span is detected when name appears on such a desk channel as supervisor.
+//
+// A coordinator listed only as supervision observer on another coordinator's home channel
+// (e.g. cos on a project-XO channel) does not confer span — those members are IsXO.
 func (c *Config) hasSpanOfControl(name string) bool {
 	for _, ch := range c.Bindings() {
 		if ch.XOAgent != name {
 			continue
 		}
 		for _, m := range ch.Members {
-			if m != name {
+			if m != name && !c.IsXO(m) {
+				return true
+			}
+		}
+	}
+	for _, ch := range c.Bindings() {
+		if ch.XOAgent == name || ch.XOAgent == "" {
+			continue
+		}
+		// Primary / CoS home channels list members for fleet visibility — not span edges.
+		if ch.XOAgent == c.XOAgent || ch.XOAgent == c.CosAgent {
+			continue
+		}
+		if !c.channelIsSupervisorObserverHome(ch) {
+			continue
+		}
+		for _, m := range ch.Members {
+			if m == name {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// channelIsSupervisorObserverHome reports the desk-home shape (#481): every non-self member
+// is an XO supervision observer; the channel owner is the execution desk.
+func (c *Config) channelIsSupervisorObserverHome(ch Channel) bool {
+	hasObserver := false
+	for _, m := range ch.Members {
+		if m == ch.XOAgent {
+			continue
+		}
+		hasObserver = true
+		if !c.IsXO(m) {
+			return false
+		}
+	}
+	return hasObserver
 }
 
 // IsCoordinator reports whether name holds a coordinator role — the primary xo_agent,
@@ -544,16 +589,12 @@ func (c *Config) CoordinatorSet() map[string]bool {
 	if c.CosAgent != "" {
 		set[c.CosAgent] = true
 	}
-	for _, ch := range c.Bindings() {
-		xo := ch.XOAgent
-		if xo == "" || set[xo] {
+	for _, a := range c.Agents {
+		if set[a.Name] {
 			continue
 		}
-		for _, m := range ch.Members {
-			if m != xo {
-				set[xo] = true
-				break
-			}
+		if c.hasSpanOfControl(a.Name) {
+			set[a.Name] = true
 		}
 	}
 	return set
