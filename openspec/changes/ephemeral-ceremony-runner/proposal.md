@@ -32,15 +32,22 @@ Composes with:
 - Scheduler/roster opt-in `mode: ephemeral` for ceremony-class dispatches
 - Short completion ping to standing pane after confirmed artifact write
 
-**Out (this change):**
+**Out of P0 (follow-ons named):**
 - Memex integration for walk findings (#369 item 3)
 - R&D lane ephemeral spawn (#369 item 4)
-- Replacing all `KindDetector` desk heartbeats (only ceremony-class schedules/prompts)
+- `flotilla parade` CLI standing-pane injection (P1)
+- Visibility-synthesis `WakeSynthesis` beats (P1)
+- Desk heartbeat continuation beats (always out)
 
-## Success criteria
+## Prerequisites
 
-1. A scheduled walk/parade fires in a subprocess with fresh context; standing pane receives
-   only `"<ceremony> complete — see <path>"`.
+**#369** (schedule confirmed-delivery, `KindSchedule`) merges before P0 implementation.
+
+## Success criteria (P0 — scheduler `mode: ephemeral` only)
+
+1. A scheduled walk fires in a subprocess with fresh context; standing pane receives only a
+   short completion line (`"<ceremony> complete — see <path>"`).
 2. Artifact lands at the declared durable path; no ceremony transcript injected into standing session.
-3. Two concurrent ceremonies targeting the same anchor-replace file serialize (no clobber).
+3. Two concurrent ephemeral ceremonies targeting the same `write_lock` path serialize (flock).
 4. Generic product code — synthetic agent names in tests/fixtures; no deployment topology in repo.
+5. `mode: standing` schedules remain byte-identical to today's behavior (regression tests).

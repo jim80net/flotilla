@@ -2,6 +2,14 @@
 
 **Status:** Design-only (operator-raised concern, 2026-07-06). Implementation follows operator gate.
 
+## Prerequisites
+
+**#369 confirmed-delivery for schedules must merge before P0 implementation.** Branch
+`feat/schedule-confirmed-delivery-369` adds `KindSchedule`, deferred `last_fired` commit via
+`CommitFired`, and durable `pending` + `ReplayPending`. On `main` today schedules still enqueue
+`KindDetector` (busy-drop) and commit `last_fired` at enqueue — the ephemeral runner builds on
+#369's delivery semantics for the **completion ping only**, not the ceremony body.
+
 ## The gap, stated in one line
 
 Ceremony dispatches (walk, parade, visibility synthesis beats) inject **full ceremony prompts**
@@ -14,12 +22,13 @@ harness.
 
 | Seam | Location | What it gives this design |
 |------|----------|---------------------------|
-| Standing-pane injection | `cmd/flotilla/watch.go` — scheduler `KindSchedule`, `newDeskHeartbeatDispatch` | Today every ceremony goes through the injector into the **registered standing pane** |
+| Standing-pane injection | `cmd/flotilla/watch.go` — scheduler (`KindDetector` on main; `KindSchedule` post-#369), `flotilla parade` CLI | Scheduled ceremonies + operator parade CLI inject full prompts into the **standing pane** |
+| Desk heartbeat (out of scope) | `newDeskHeartbeatDispatch` | Continuation beats — **not** ceremony-class; unchanged by this design |
 | Session hygiene (not disposable) | `internal/surface/surface.go:192` `RotateContext` | Wipes standing context **in place** after the fact; does not isolate one task |
 | Host cwd / worktree | `internal/launch/launch.go` `Recipe.Cwd`; `internal/workspace/worktree.go` `ProvisionWorktree` | Ceremony runner inherits desk filesystem context without new access machinery |
 | Headless precedent | `deploy/flotilla-doctor.sh` — `claude --print` recovery agent | Proves subprocess one-shot is already trusted for **side-channel** work |
 | Tmux pane creation | `internal/deliver/resume.go` `NewWindow` / `NewSession` | Optional visibility path; not required for subprocess-first |
-| Confirmed delivery (#369) | `internal/watch/inject.go` `KindSchedule` | Standing pane still receives **short pings** via confirmed-delivery; ceremony body does not |
+| Confirmed delivery (#369) | `internal/watch/inject.go` `KindSchedule` (post-#369) | Completion **ping** uses relay-defer policy; ceremony subprocess is off-injector |
 
 ## One-shot harness verification (first design obligation — probed 2026-07-06)
 
@@ -118,24 +127,43 @@ func BuildOneShotArgv(surface, prompt string, cwd string) ([]string, error)
 **Pure policy** in `internal/ceremony`; **watch** wires scheduler → `ceremony.Run` when
 `schedule.mode == "ephemeral"` (default for new ceremony schedules).
 
-### Roster / schedule extension
+### Host-local ceremony overlay (not committable roster)
+
+`artifacts`, `write_locks`, and `mode` live in a **host-local overlay** beside the roster
+(gitignored, secrets-trust level) — same partition as `flotilla-launch.json`. The committable
+`roster.Schedule` struct gains only `mode` (optional, default `standing`) in a follow-on schema
+bump; artifact paths stay host-local to avoid polluting the public roster contract.
 
 ```json
 {
-  "name": "walk-agent-a",
-  "at": "08:00Z",
-  "to": "agent-a",
-  "prompt": "prompts/walk.md",
-  "mode": "ephemeral",
-  "artifacts": ["state/scorecards/walk-agent-a.yaml"],
-  "write_locks": ["fleet-backlog.md"]
+  "schedules": {
+    "walk-agent-a": {
+      "mode": "ephemeral",
+      "artifacts": ["state/scorecards/walk-agent-a.yaml"],
+      "write_locks": ["<roster-dir>/fleet-backlog.md"]
+    }
+  }
 }
 ```
 
-- `mode`: `"ephemeral"` | `"standing"` (default **`standing`** for backward compat until operator
-  flips fleet config — dogfood migration is host-local roster, not repo defaults).
-- `artifacts` / `write_locks`: host-local roster fields (gitignored fleet config), validated at load.
-- Generic example in `flotilla.example.json` uses `agent-a` / `agent-b` synthetic names only.
+- `write_locks`: **absolute paths** (validated at load). Relative paths rejected fail-closed.
+- Generic docs use `agent-a` / `agent-b` only.
+
+### One-shot argv table (not parsed from `Recipe.Launch`)
+
+`Recipe.Launch` is an interactive shell compound (`cd x && claude --continue`) — **not**
+reverse-engineerable. Ephemeral runner uses explicit per-surface templates resolved via
+`workspace.ResolveActiveRecipe` + `agentSurface()` (overlay-first, same as watch delivery):
+
+| Surface | argv template | Unattended flags |
+|---------|---------------|------------------|
+| claude-code | `claude -p <prompt>` | `--permission-mode` per desk policy; document gatekeeper parity |
+| grok | `grok -p <prompt>` or `--prompt-file` | `--permission-mode` + `--always-approve` for unattended tool use |
+| codex | `codex exec <prompt>` | config.toml overrides via `-c` as needed |
+| opencode | `opencode run <message>` | **P0 live probe required** before claiming parity |
+| aider, cursor-agent | — | **Fail-closed** at load: `mode: ephemeral` rejected for surfaces without one-shot |
+
+Prompt delivery: prefer `--prompt-file` (host-local temp in roster dir) over argv length limits.
 
 ### Completion ping (standing session — minimal poisoning)
 
@@ -145,11 +173,32 @@ After `ceremony.Run` succeeds (exit 0 + artifact checks):
 [flotilla ceremony] walk-agent-a complete — scorecard: state/scorecards/walk-agent-a.yaml
 ```
 
-Enqueued via existing injector as `KindSchedule` or a dedicated `KindCeremonyPing` treated like
-schedule (confirmed delivery per #369). **Max ~120 bytes** — no ceremony body, no register.
+Enqueued via injector as **`KindSchedule`** (post-#369 relay-defer policy). **Max ~120 bytes** —
+no ceremony body, no register.
 
-On failure: LOUD escalate (same posture as undelivered relay), pending row stays until operator
-clears or retry succeeds.
+On ping failure: LOUD escalate; pending row stays until confirm or operator clears.
+
+### Ephemeral pending phase machine (extends #369 sidecar)
+
+`schedulePending` gains `phase` for `mode: ephemeral` entries:
+
+| Phase | Meaning | ReplayPending behavior |
+|-------|---------|------------------------|
+| `subprocess` | Child running | Re-spawn subprocess (idempotent artifact check) |
+| `ping` | Subprocess done; ping not yet confirmed | Re-enqueue completion ping only — **never** ceremony body |
+| (absent) | Standing mode (#369 today) | Replay full `Message` as today |
+
+Ceremony prompt text is **not** stored in pending rows for ephemeral schedules (only a hash +
+artifact paths). Prevents replay from re-injecting register into standing pane.
+
+### CommitFired policy (per ceremony class)
+
+| Class | `CommitFired` when | Example |
+|-------|-------------------|---------|
+| Walk / scorecard | Subprocess exit 0 + artifact present; ping best-effort | `commit_on: artifact` |
+| Parade / ack-required | Completion ping confirmed | `commit_on: ping` |
+
+Host-local overlay field `commit_on: artifact | ping` (default `artifact` for walk-shaped entries).
 
 ### Durable-write serialization (load-bearing — do not ship without)
 
@@ -162,8 +211,12 @@ clears or retry succeeds.
 2. Hold lock for subprocess duration + artifact verify.
 3. Release on exit.
 
-If lock unavailable (another ceremony holds it): **queue locally** in watch (same serialize pattern
-as injector — one runner per anchor at a time), escalate if wait exceeds `relayStaleAlertInterval`.
+If lock unavailable (another ceremony holds it): **queue locally** in watch (one runner per anchor),
+escalate if wait exceeds `relayStaleAlertInterval`.
+
+**Limitation (P0):** flock serializes ephemeral runners only. The **standing interactive harness**
+can still write the same anchor without flock. P0 accepts this for dogfood; P1 staging-file merge
+if observed in practice.
 
 **Alternatives considered:**
 - *Funnel through standing XO* — reintroduces poisoning on the XO pane for merge work. Reject for
@@ -205,12 +258,16 @@ question).
 
 ## Phasing
 
-- **P0 (design gate → implement):** `internal/ceremony` subprocess runner; claude/grok/codex
-  argv builders; flock serialization; roster `mode: ephemeral`; scheduler branch; completion ping;
-  tests with synthetic `agent-a`/`agent-b`; one live probe per surface on dogfood host.
-- **P1:** `flotilla ceremony run` CLI for manual/adhoc ceremonies; opencode live verification;
-  staging-file merge pattern for multi-writer anchors if lock contention is too coarse.
+- **P0 (after #369 merge):** `internal/ceremony` subprocess runner; argv table for
+  claude/grok/codex; flock serialization; host-local overlay + scheduler `mode: ephemeral` branch;
+  ephemeral phase machine; completion ping via `KindSchedule`; tests with `agent-a`/`agent-b`;
+  one live probe per supported surface on dogfood host.
+- **P1:** `flotilla ceremony run` CLI; migrate `flotilla parade` off standing-pane injection;
+  visibility-synthesis ephemeral path; opencode live verification; staging-file merge for anchors.
 - **P2:** Optional tmux visibility window; dash surfacing of in-flight ceremony runs.
+
+**Explicitly out of P0:** `flotilla parade` CLI (`cmd/flotilla/parade.go` — still standing-pane),
+visibility-synthesis wakes (`WakeSynthesis`), desk heartbeat beats.
 
 ---
 
