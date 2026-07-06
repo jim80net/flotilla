@@ -1894,10 +1894,14 @@ html, body { overflow-x: clip; }
 .pd-slide-body .pd-quote p:first-child { margin-top: 0; }
 /* GFM pipe-tables (the scoreboard slide) — render as a real table, not raw pipes. */
 .pd-slide-body .pd-table {
-  border-collapse: collapse; margin: .8rem 0; width: 100%; font-size: .88em;
+  /* fixed layout + full width so columns share the slide evenly and a long unbroken cell
+     cannot push the table past the slide edge (where .pd-stage overflow:hidden clips it). */
+  border-collapse: collapse; margin: .8rem 0; width: 100%; font-size: .88em; table-layout: fixed;
 }
 .pd-slide-body .pd-table th, .pd-slide-body .pd-table td {
   border: 1px solid var(--line, var(--abyss-3)); padding: .4rem .7rem; text-align: left; vertical-align: top;
+  /* wrap long unbroken strings (URLs, ids, hashes) inside the cell rather than overflowing. */
+  overflow-wrap: anywhere; word-break: break-word;
 }
 .pd-slide-body .pd-table th { font-family: var(--display); font-weight: 600; color: var(--ink); background: var(--abyss-3); }
 .pd-slide-body .pd-table td { color: var(--ink-2); }
