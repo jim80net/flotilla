@@ -708,6 +708,39 @@ func TestDecisionPage405(t *testing.T) {
 	}
 }
 
+// TestDecisionsCountUnified451 locks the one-population rule: the tab badge showed the
+// server's gated-NODE count (6) while the page header counted decision CARDS (3) —
+// same screen, two numbers (#451). Every decisions surface (badge, Awaiting-you tile,
+// page header, screen-reader announcement) now derives from ONE client-side count over
+// the same population the reading room lists — which itself gained the briefless gated
+// nodes it used to hide.
+func TestDecisionsCountUnified451(t *testing.T) {
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/goals.js").Body.String()
+	for _, marker := range []string{
+		"decisionsCount",             // the single derivation every surface reads
+		"ONE population, ONE number", // the briefless-gated-node inclusion in gatherDecisions
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must unify the decisions count (missing %q) — #451", marker)
+		}
+	}
+	// The badge/tile/announcement must not read the server node-population count anymore.
+	// Each marker is the EXACT old-code pattern (the badge read c.awaiting via a variable
+	// indirection, `awaiting = c.awaiting || 0` — cubic #458 P3: a marker string that never
+	// existed in the old code guards nothing).
+	for _, stale := range []string{
+		"awaiting = c.awaiting", // the badge's old source (var awaiting = c.awaiting || 0)
+		`announce((c.awaiting`,  // the old screen-reader clause
+		`v: c.awaiting`,         // the old Awaiting-you tile value
+	} {
+		if strings.Contains(js, stale) {
+			t.Errorf("goals.js still reads counts.awaiting for a decisions surface (%q) — #451", stale)
+		}
+	}
+}
+
 // TestBriefTableRenderMarkers450 locks GFM pipe-table support in the BRIEF renderer
 // (decision cards / respond modal / drawer): #447 gave the parade renderer tables, but
 // briefs — the surface built for structured decision content (cost tables, tradeoff
