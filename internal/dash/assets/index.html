@@ -173,10 +173,8 @@
           <p class="panel-desc">Read-only · goal structure from <code>fleet-goals.json</code> · desk &amp; backlog status live from the fleet board; issues shown linked</p>
         </div>
         <div class="goals-head-right">
-          <div class="goals-layout-toggle" role="group" aria-label="Goals map layout">
-            <button type="button" class="glayout-btn" data-layout="tree" aria-pressed="false" title="Tiered altitude columns">tree</button>
-            <button type="button" class="glayout-btn active" data-layout="mindmap" aria-pressed="true" title="Mind map — branches with sub-branches radiating as limbs">mind map</button>
-          </div>
+          <!-- The Goals map renders as a mind map only (operator directive 2026-07-06): the
+               tree/mind-map layout toggle was removed so mind map is the sole rendering. -->
           <div class="goals-legend" id="goals-legend" aria-hidden="true"></div>
         </div>
       </div>
