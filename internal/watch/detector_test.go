@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/backlog"
+	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
@@ -894,6 +895,26 @@ func TestLivenessParamsWall(t *testing.T) {
 		if alrt <= ping {
 			t.Errorf("livenessParamsWall(%q): alert %v must exceed ping %v", tc.mode, alrt, ping)
 		}
+	}
+}
+
+// #467: with rotate policy never, backlog drive must deliver WakeBacklog without rotating.
+func TestDetectorContinueXOBacklogSkipsRotateWhenPolicyNever(t *testing.T) {
+	f := newFixture()
+	cfg := f.config("xo", []string{"xo"}, 3, "none")
+	cfg.RotatePolicy = roster.XORotateNever
+	cfg.ReferenceInterval = time.Minute
+	f.backlog = backlog.Status{Unblocked: []string{"ship the knob PR"}}
+	d := newDet(t, f, cfg)
+	seed(d, map[string]surface.State{"xo": surface.StateWorking}, "h0")
+	f.signal = "h0"
+	f.set("xo", surface.StateIdle)
+	d.Tick()
+	if f.rotateCalls != 0 {
+		t.Fatalf("rotate policy never: got %d rotate calls, want 0", f.rotateCalls)
+	}
+	if f.wakeCount() != 1 || f.lastWake().kind != WakeBacklog {
+		t.Fatalf("want one WakeBacklog, got %+v", f.wakes)
 	}
 }
 

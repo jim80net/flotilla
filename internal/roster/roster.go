@@ -164,6 +164,12 @@ type Config struct {
 	// "consecutive" (ping every K-1, alert after ~2 missed pings — the middle
 	// ground). Empty ⇒ "none". Only consulted when ChangeDetector is on.
 	LivenessPingMode string `json:"liveness_ping_mode,omitempty"`
+	// XORotate gates idle-edge context rotation in continueXO (#467):
+	// always (default — rotate before every continuation/backlog/settle wake),
+	// never (preserve session; harness compaction only), or handoff (suppress bare
+	// /clear until handoff-gated recycle at chapter ends — same as never until #443).
+	// FLOTILLA_XO_ROTATE env overrides this field at watch startup.
+	XORotate string `json:"xo_rotate,omitempty"`
 
 	// UrgentWindows declares substring matches on material-change reasons that cut through
 	// the adjutant buffer to the leader immediately (#439 phase 1c). Operator relay
@@ -287,6 +293,9 @@ func Load(path string) (*Config, error) {
 	case "", "none", "interval", "consecutive":
 	default:
 		return nil, fmt.Errorf("roster %q: invalid liveness_ping_mode %q (want none|interval|consecutive)", path, c.LivenessPingMode)
+	}
+	if _, err := ParseXORotate(c.XORotate); err != nil {
+		return nil, fmt.Errorf("roster %q: %w", path, err)
 	}
 	// The change-detector ticks on heartbeat_interval; without one it would never
 	// run (and never check liveness). Refuse to start rather than silently no-op.

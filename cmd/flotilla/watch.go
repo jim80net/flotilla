@@ -626,6 +626,13 @@ func cmdWatch(args []string) error {
 			log.Printf("flotilla watch: adaptive-interval OFF — fixed tick %s", interval)
 		}
 		activity := watch.NewActivityTracker(watch.DefaultActivityConfig())
+		xoRotate, err := roster.ResolveXORotate(cfg.XORotate, os.Getenv("FLOTILLA_XO_ROTATE"))
+		if err != nil {
+			return fmt.Errorf("flotilla watch: invalid xo_rotate policy (roster xo_rotate / FLOTILLA_XO_ROTATE): %w", err)
+		}
+		if !xoRotate.AllowsIdleEdgeRotate() {
+			log.Printf("flotilla watch: xo_rotate=%s — idle-edge context rotation suppressed (roster xo_rotate / FLOTILLA_XO_ROTATE)", xoRotate)
+		}
 		detCfg := watch.DetectorConfig{
 			XOAgent:           xo,
 			Desks:             desks,
@@ -659,9 +666,10 @@ func cmdWatch(args []string) error {
 				// Claude-storm only: desks already on grok (or another FROM) are not candidates.
 				return agentSurface(cfg, agent) == surface.DefaultSurface
 			},
-			SignalHash: signalHash,
-			AckAge:     ack.Age,
-			Wake:       wake,
+			SignalHash:   signalHash,
+			AckAge:       ack.Age,
+			Wake:         wake,
+			RotatePolicy: xoRotate,
 			Rotate: func() error {
 				// Resolve the XO pane FIRST, then take the per-pane TRANSACTION lock keyed by that
 				// target (the same key every other transaction writer uses), so the /clear rotate
