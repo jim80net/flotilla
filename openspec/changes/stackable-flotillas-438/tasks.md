@@ -16,6 +16,7 @@
 
 ## Implementation (post-gate — P0 adjutant first)
 
+- [ ] 2.0 **Evaluation tick** (operator amendment #439 2026-07-06): stale-leader timeout → adjutant ack+evaluate+act-by-tier; subsumes idle-hold class — **first increment, before ack-only hardens**
 - [ ] 2.1 Roster field `adjutant_for` (+ legacy `assistant_for` alias)
 - [ ] 2.2 Adjutant as interrupt consumer; buffer sidecar `flotilla-<xo>-buffer.json`
 - [ ] 2.3 Dual observation: subtree desks + leader pane state; seam detection

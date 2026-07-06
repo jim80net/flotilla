@@ -372,6 +372,44 @@ func TestDetectorTailRotatesBeforeContinuationWake(t *testing.T) {
 	}
 }
 
+// AdjutantSeamOnFinish enqueues a leader brief wake — same pane-ordering contract as the
+// continuation wake: rotate MUST complete before the seam enqueue so a trailing /clear never
+// wipes the just-delivered adjutant brief.
+func TestDetectorTailRotatesBeforeAdjutantSeam(t *testing.T) {
+	var mu sync.Mutex
+	var events []string
+	cfg := DetectorConfig{
+		XOAgent:  "xo",
+		Desks:    []string{"xo"},
+		Interval: time.Minute,
+		Assess:   func(string) surface.State { return surface.StateIdle },
+		AckAge:   func() time.Duration { return 0 },
+		Rotate: func() error {
+			mu.Lock()
+			defer mu.Unlock()
+			events = append(events, "rotate")
+			return nil
+		},
+		AdjutantSeamOnFinish: func() {
+			mu.Lock()
+			defer mu.Unlock()
+			events = append(events, "adjutant-seam")
+		},
+		Wake:    func(WakeKind, []string) {},
+		Persist: func(Snapshot) error { return nil },
+	}
+	d := NewDetector(cfg, filepath.Join(t.TempDir(), "missing.json"))
+	seed(d, map[string]surface.State{"xo": surface.StateWorking}, "h0")
+
+	d.Tick()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) != 2 || events[0] != "rotate" || events[1] != "adjutant-seam" {
+		t.Fatalf("tail must rotate THEN adjutant seam, got %v", events)
+	}
+}
+
 // At-least-once crash semantics (cubic P1): the DURABLE snapshot persist MUST happen AFTER the
 // tail enqueues the wakes — otherwise a crash in the save→tail window persists "transition
 // processed" while the wake is lost, and the restart (loading a non-cold snapshot) never re-wakes,

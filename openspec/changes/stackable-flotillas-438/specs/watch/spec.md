@@ -91,29 +91,60 @@ leader at the next seam.
 - **AND** the leader SHALL be briefed only if recovery fails, an urgent window applies,
   or a seam opens with the item still pending
 
-### Requirement: Per-coordinator liveness SHALL use layer ack files
+### Requirement: Stale-leader timeout SHALL route an evaluation tick to the adjutant
 
-When an adjutant is configured for a layer, liveness pings SHALL target the
-adjutant. The adjutant SHALL touch the leader's `<roster-dir>/flotilla-<xo>-alive`
-file as a mechanical duty. Liveness ack is part of the **required-minimum charter**
-for any configured adjutant pair — not an optional charter grant. A leader that
-misses K consecutive acks SHALL raise a down-alert to its parent layer.
+When an adjutant is configured for a layer, a stale-leader timeout (the leader's
+`<roster-dir>/flotilla-<xo>-alive` ack file exceeds the liveness window) SHALL NOT
+be a dead-man's ack probe to the leader. It SHALL enqueue an **evaluation tick** to
+the adjutant — a signal that the leader has gone quiet long enough to warrant a sweep.
+
+On each evaluation tick the adjutant SHALL perform three steps in order:
+
+1. **Ack** — touch the leader's alive file (mechanical liveness; mandatory-charter
+   clause stands);
+2. **Evaluate** — sweep the leader's real situation: unhandled edges, surfaced PRs
+   waiting at gates, stale lanes, unanswered operator items; distinguish **all-quiet**
+   ("nothing to do") from **work-found** ("quiet but something stuck");
+3. **Act by tier** — all-quiet → ack only (no leader interrupt); work-found → prepare
+   a digest and inject at the next seam (immediately if urgent-class per charter or
+   `urgent_windows[]`).
+
+This evaluation step SHALL subsume the idle-hold detector class: "leader idle but
+queue not" is caught mechanically in step 2, not by a separate idle-hold nudge to
+the leader.
+
+A leader that remains unacked after the adjutant's mechanical ack (process truly
+gone) SHALL still raise a down-alert to its parent layer per the existing watchdog.
 
 **Required-minimum charter (load-bearing):** first-presentation negotiation MAY extend
-solo authority beyond the minimum, but SHALL NOT omit liveness ack. A charter that
-would exclude liveness ack is a misconfiguration; the pair MUST NOT operate with
-routing that sends pings to an adjutant lacking ack authority.
+solo authority beyond the minimum, but SHALL NOT omit step 1 (liveness ack). A charter
+that would exclude liveness ack is misconfiguration.
 
-#### Scenario: Adjutant acks leader liveness (required minimum)
+#### Scenario: Stale timeout enqueues evaluation tick to adjutant
 
-- **WHEN** a liveness ping targets the `alpha-xo` layer
+- **WHEN** the `alpha-xo` layer ack file is stale beyond the liveness window
 - **AND** `alpha-adj` is configured for `alpha-xo`
-- **THEN** the ping wake SHALL be enqueued to `alpha-adj`
-- **AND** `flotilla-alpha-xo-alive` SHALL be touched by the adjutant
+- **THEN** the evaluation tick SHALL be enqueued to `alpha-adj` (not `alpha-xo`)
+- **AND** the tick prompt SHALL instruct ack → evaluate → act-by-tier
+
+#### Scenario: All-quiet evaluation ends at mechanical ack
+
+- **WHEN** `alpha-adj` receives an evaluation tick
+- **AND** the evaluate step finds no unhandled work in `alpha-xo`'s layer
+- **THEN** `alpha-adj` SHALL touch `flotilla-alpha-xo-alive`
+- **AND** `alpha-xo` SHALL NOT receive a direct interrupt
+
+#### Scenario: Work-found evaluation buffers for seam
+
+- **WHEN** `alpha-adj` receives an evaluation tick
+- **AND** the evaluate step finds PRs at gates or stale lanes in `alpha-xo`'s layer
+- **THEN** `alpha-adj` SHALL touch `flotilla-alpha-xo-alive`
+- **AND** judgment items SHALL be buffered for a consolidated brief at `alpha-xo`'s
+  next seam
 
 #### Scenario: Charter without liveness ack is rejected
 
-- **WHEN** first-presentation charter negotiation would omit liveness ack
-- **THEN** the pair SHALL NOT be treated as operational for layered liveness routing
-- **AND** liveness pings SHALL NOT target the adjutant until the charter includes
+- **WHEN** first-presentation charter negotiation would omit liveness ack (step 1)
+- **THEN** the pair SHALL NOT be treated as operational for layered evaluation routing
+- **AND** evaluation ticks SHALL NOT target the adjutant until the charter includes
   liveness ack

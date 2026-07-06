@@ -29,6 +29,7 @@ import (
 	"github.com/jim80net/flotilla/internal/transport"
 	"github.com/jim80net/flotilla/internal/unacked"
 	"github.com/jim80net/flotilla/internal/watch"
+	"github.com/jim80net/flotilla/internal/watch/adjutantbuffer"
 	"github.com/jim80net/flotilla/internal/workspace"
 )
 
@@ -405,21 +406,59 @@ func cmdWatch(args []string) error {
 		}
 		continuationPrompt += ackInstr
 
+		primaryAdjutant := cfg.AdjutantFor(xo)
+		leaderAckPath := *ackPath
+		layerBufferPath := roster.LayerBufferPath(rosterDir, xo)
+
+		drainAdjutantSeam := func() {
+			if primaryAdjutant == "" {
+				return
+			}
+			brief, ok, clearAfter := adjutantSeamBrief(layerBufferPath, xo, rosterDir)
+			if !ok {
+				return
+			}
+			injector.Enqueue(watch.Job{Agent: xo, Message: brief, Kind: watch.KindDetector})
+			if clearAfter {
+				if err := adjutantbuffer.Clear(layerBufferPath); err != nil {
+					log.Printf("flotilla watch: adjutant buffer clear after enqueue failed: %v", err)
+				}
+			}
+		}
+
 		wake := func(kind watch.WakeKind, reasons []string) {
 			var body string
+			target := xo
 			switch kind {
-			case watch.WakeContinuation:
-				body = continuationPrompt
+			case watch.WakeContinuation, watch.WakeBacklog:
+				// Judgment/continuation stays on the leader — adjutant observes, does not replace.
+				switch kind {
+				case watch.WakeContinuation:
+					body = continuationPrompt
+				default:
+					body = backlogWakeBody(reasons, *backlogPath, ackInstr)
+				}
 			case watch.WakePing:
-				body = "[flotilla change-detector] Liveness check — reply with a one-line ack only; take no other action." + ackInstr
-			case watch.WakeBacklog:
-				body = backlogWakeBody(reasons, *backlogPath, ackInstr)
+				if primaryAdjutant != "" {
+					target = primaryAdjutant
+					body = adjutantEvaluationTickBody(xo, leaderAckPath, layerBufferPath)
+				} else {
+					body = leaderPingBody(leaderAckPath)
+				}
 			default: // WakeMaterial
-				body = "[flotilla change-detector] Material change(s) detected: " + strings.Join(reasons, "; ") +
-					".\nCheck in on the affected desk(s) and advance any authorized coordination. If nothing is " +
-					"actionable, reply idle and signal it by running: touch " + *settledPath + "." + ackInstr
+				if primaryAdjutant != "" && !cfg.UrgentMaterial(reasons) {
+					if err := adjutantbuffer.Append(layerBufferPath, xo, reasons); err != nil {
+						log.Printf("flotilla watch: adjutant buffer append failed, falling back to leader wake: %v", err)
+						body = leaderMaterialBody(reasons, *settledPath, ackInstr)
+					} else {
+						target = primaryAdjutant
+						body = adjutantBufferedNoteBody(xo, len(reasons))
+					}
+				} else {
+					body = leaderMaterialBody(reasons, *settledPath, ackInstr)
+				}
 			}
-			injector.Enqueue(watch.Job{Agent: xo, Message: body, Kind: watch.KindDetector})
+			injector.Enqueue(watch.Job{Agent: target, Message: body, Kind: watch.KindDetector})
 		}
 
 		// wakeAgent is the PARALLEL agent-targeted wake seam (visibility synthesis, B2). It enqueues a
@@ -637,6 +676,7 @@ func cmdWatch(args []string) error {
 			},
 			MirrorOnFinish:            deskMirrorOnFinish(cfg, secrets, tr, firewall, alert, rosterDir),
 			CoordinatorMirrorOnFinish: coordinatorMirrorOnFinish(cfg, firewall, alert, rosterDir),
+			AdjutantSeamOnFinish:      drainAdjutantSeam,
 			IdleHoldOnFinish:          idleHoldOnFinish(cfg, idleHoldTracker, injector.Enqueue),
 			StrandedHandoffOnFinish:   strandedHandoffOnFinish(cfg, strandedTracker, injector.Enqueue),
 			IsCoordinator:             cfg.IsCoordinator,
@@ -1005,6 +1045,59 @@ func deskWarrantedGate(cfg *roster.Config, read func(agent string) ([]byte, bool
 		}
 		return cfg.HeartbeatWarranted(agent, st)
 	}
+}
+
+// leaderPingBody is the primary-coordinator liveness ping (no adjutant configured).
+func leaderPingBody(ackPath string) string {
+	return "[flotilla change-detector] Liveness check — reply with a one-line ack only; take no other action." +
+		"\n(To ack you are alive, run: touch " + ackPath + ")"
+}
+
+// adjutantEvaluationTickBody routes a stale-leader timeout to the adjutant as an
+// evaluation tick (#439 operator amendment): ack → evaluate → act-by-tier — not a
+// dead-man's ack to the leader.
+func adjutantEvaluationTickBody(leader, leaderAckPath, bufferPath string) string {
+	return "[flotilla adjutant] Evaluation tick for " + leader +
+		" — leader alive file is stale (timeout signal; not a dead-man ack to the leader).\n\n" +
+		"Three-step duty (required-minimum charter):\n" +
+		"1. ACK — touch the leader alive file (mechanical liveness; mandatory):\n" +
+		"   touch " + leaderAckPath + "\n" +
+		"2. EVALUATE — sweep " + leader + "'s layer: unhandled edges, PRs at gates, stale lanes, " +
+		"unanswered operator items. Distinguish all-quiet (nothing to do) from work-found (quiet but stuck).\n" +
+		"3. ACT BY TIER — all-quiet → ack only, no leader interrupt; work-found → buffer judgment items " +
+		"in " + bufferPath + " and inject a digest at " + leader + "'s next seam (immediately if urgent-class).\n\n" +
+		"This tick catches idle-holding: leader idle but queue not empty is work-found, not all-quiet."
+}
+
+// leaderMaterialBody is the legacy material-change wake to the coordinator pane.
+func leaderMaterialBody(reasons []string, settledPath, ackInstr string) string {
+	return "[flotilla change-detector] Material change(s) detected: " + strings.Join(reasons, "; ") +
+		".\nCheck in on the affected desk(s) and advance any authorized coordination. If nothing is " +
+		"actionable, reply idle and signal it by running: touch " + settledPath + "." + ackInstr
+}
+
+// adjutantBufferedNoteBody notifies the adjutant that items were buffered (#439 phase 1b).
+func adjutantBufferedNoteBody(leader string, n int) string {
+	return "[flotilla adjutant] Buffered " + fmt.Sprintf("%d", n) + " interrupt(s) for " + leader +
+		"'s layer. Triage mechanical items locally. Judgment items stay buffered until " +
+		leader + "'s next seam — the leader receives a consolidated brief then, not mid-thought. " +
+		"On evaluation ticks: ack → evaluate → act-by-tier."
+}
+
+// adjutantSeamBrief peeks the layer buffer and formats the leader inject at a seam. The caller
+// must Clear the sidecar only AFTER enqueue (enqueue-then-delete — same at-least-once window as
+// detector persist).
+func adjutantSeamBrief(bufferPath, leader, rosterDir string) (brief string, ok bool, clearAfter bool) {
+	f, hasItems, quarantined, err := adjutantbuffer.Peek(bufferPath)
+	if err != nil {
+		log.Printf("flotilla watch: adjutant buffer peek failed: %v", err)
+		return "", false, false
+	}
+	if !hasItems && !quarantined {
+		return "", false, false
+	}
+	_, charterErr := os.Stat(roster.LayerCharterPath(rosterDir, leader))
+	return adjutantbuffer.FormatBrief(leader, f, os.IsNotExist(charterErr), quarantined), true, hasItems
 }
 
 // backlogWakeBody composes the goal-driven loop's WakeBacklog prompt: it NAMES the driven item(s)

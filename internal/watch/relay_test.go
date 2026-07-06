@@ -57,6 +57,32 @@ func fedCfg() *roster.Config {
 // selfMirrorGuardAdapter), so a self-post never reaches Handle at all and webhookID
 // is no longer a Handle argument. The webhook-drop property is pinned at the adapter
 // level (internal/transport's selfmirror tests, including the sender==operator case).
+// Operator relay delivers to the addressed coordinator directly — never the adjutant
+// (#439 phase 1c urgent passthrough; KindRelay bypasses the adjutant buffer by design).
+func TestRelayOperatorToCoordinatorBypassesAdjutant(t *testing.T) {
+	cfg := &roster.Config{
+		OperatorUserID: "op",
+		ChannelID:      "C1",
+		XOAgent:        "alpha-xo",
+		Agents: []roster.Agent{
+			{Name: "alpha-xo"},
+			{Name: "alpha-adj", AdjutantFor: "alpha-xo"},
+		},
+	}
+	r, c, _ := newRelayHarness(cfg)
+	r.Handle("C1", "200", "op", "status?")
+	waitForDelivered(t, c, 1)
+	c.mu.Lock()
+	j := c.jobs[0]
+	c.mu.Unlock()
+	if j.Agent != "alpha-xo" {
+		t.Errorf("relay target = %q, want alpha-xo (adjutant must not intercept operator relay)", j.Agent)
+	}
+	if j.Kind != KindRelay {
+		t.Errorf("kind = %v, want KindRelay", j.Kind)
+	}
+}
+
 func TestRelayDropsNonOperator(t *testing.T) {
 	r, c, _ := newRelayHarness(legacyCfg())
 	r.Handle("C1", "1000002", "intruder", "do evil") // non-operator → dropped

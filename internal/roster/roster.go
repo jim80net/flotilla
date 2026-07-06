@@ -42,6 +42,13 @@ type Agent struct {
 	// an idle one, so a default-on heartbeat could land text into a pending approval modal.
 	// An explicit Heartbeat=true overrides this once a genuine approval classifier exists.
 	ApprovalSensitive bool `json:"approval_sensitive,omitempty"`
+	// AdjutantFor binds this agent as the adjutant (mechanical interrupt consumer) for
+	// the named coordinator. Legacy alias assistant_for is accepted at load. An adjutant
+	// receives layer interrupts (liveness pings, material edges) before the leader sees
+	// them; see openspec/changes/stackable-flotillas-438/design.md.
+	AdjutantFor string `json:"adjutant_for,omitempty"`
+	// AssistantFor is the legacy alias for adjutant_for (same semantics).
+	AssistantFor string `json:"assistant_for,omitempty"`
 }
 
 // Title returns the tmux pane title to match for this agent.
@@ -79,6 +86,12 @@ type Channel struct {
 	// synthesis cycle and Load will fail-closed refuse it — by design, surfacing the
 	// misconfiguration rather than silently inverting the hierarchy.
 	Role string `json:"role,omitempty"`
+}
+
+// UrgentWindow matches material-change reasons that bypass the adjutant buffer (#439).
+type UrgentWindow struct {
+	// Match is a case-insensitive substring; any reason containing it is urgent.
+	Match string `json:"match"`
 }
 
 // Schedule is one daily wall-clock dispatch the watch daemon may fire (#413).
@@ -152,6 +165,17 @@ type Config struct {
 	// ground). Empty ⇒ "none". Only consulted when ChangeDetector is on.
 	LivenessPingMode string `json:"liveness_ping_mode,omitempty"`
 
+	// UrgentWindows declares substring matches on material-change reasons that cut through
+	// the adjutant buffer to the leader immediately (#439 phase 1c). Operator relay
+	// messages always bypass the buffer via the KindRelay delivery path.
+	UrgentWindows []UrgentWindow `json:"urgent_windows,omitempty"`
+
+	// StackableWakes opts into per-layer material-wake routing (#438): each material desk
+	// transition is scoped to OwningXO instead of exclusively the primary xo_agent. Default
+	// false (absent ⇒ legacy primary-XO-only routing). Requires adjutant_for bindings for
+	// laminar flow when enabled — see stackable-flotillas-438 design.
+	StackableWakes bool `json:"stackable_wakes,omitempty"`
+
 	// VisibilitySynthesis opts into the visibility-synthesis (B2) heartbeat: when a desk finishes
 	// below a synthesizing agent (a project-XO for Tier 2, the meta-XO for Tier 3), the detector
 	// emits a WakeSynthesis to that agent so it curates a rollup of its subordinates' latest state
@@ -219,6 +243,12 @@ func Load(path string) (*Config, error) {
 	for _, a := range c.Agents {
 		if a.Name == "" {
 			return nil, fmt.Errorf("roster %q has an agent with an empty name", path)
+		}
+		if err := validateSafeAgentName(path, a.Name, "agent name"); err != nil {
+			return nil, err
+		}
+		if err := validateSafeAgentName(path, a.adjutantTarget(), "adjutant_for target"); err != nil {
+			return nil, err
 		}
 		if seenName[a.Name] {
 			return nil, fmt.Errorf("roster %q has duplicate agent %q", path, a.Name)
@@ -316,6 +346,9 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("roster %q: %w", path, err)
 	}
 	if err := c.validateSchedules(path); err != nil {
+		return nil, err
+	}
+	if err := c.validateAdjutantBindings(path); err != nil {
 		return nil, err
 	}
 	// cos_agent (the CoS context-mirror #108): validated fail-closed when set. CosLedger

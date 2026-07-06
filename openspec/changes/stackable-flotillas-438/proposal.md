@@ -27,6 +27,11 @@ to ground seam/injection policy and solo-authority charter defaults (not invente
 **Open question (operator):** what the adjutant does without the leader — candidate:
 negotiate terms at first presentation; charter stored durably per pair.
 
+**Operator amendment (2026-07-06 ~14:05Z, post-#440-merge, confirmed on #439):** a
+stale-leader timeout is an **evaluation tick** to the adjutant (ack → evaluate →
+act-by-tier), not a dead-man's ack to the leader. Subsumes the idle-hold detector class.
+Lands in the **first implementation increment** before code hardens around ack-only.
+
 ## Sibling issues
 
 | Issue | Relationship |
