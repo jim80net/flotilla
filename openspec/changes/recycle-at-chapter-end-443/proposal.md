@@ -25,7 +25,7 @@ recycle-then-ceremony). No special one-shot runner.
 
 - Seam inventory (standing-pane injection, `RotateContext`, launch/recycle/resume, #369 schedule delivery)
 - #369 ordering: confirmed-delivery / `KindSchedule` before ceremony composition changes
-- Teardown evidence: 2026-07-06 fleet recycle — 21/24 clean; phase-2 graceful close is the flaky phase (subagent dialogs, busy panes)
+- Teardown evidence: a recent fleet-wide recycle exercise showed graceful close is the least reliable phase (subagent dialogs, busy panes)
 
 ## Out of scope / unaffected
 

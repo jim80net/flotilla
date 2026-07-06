@@ -34,9 +34,10 @@ On `main` today schedules still use `KindDetector` + enqueue-time `last_fired`. 
 `KindSchedule`, deferred `CommitFired`, `ReplayPending`. **Ceremony composition that depends on
 confirmed schedule delivery builds on #369** — same ordering analysis as #435; not re-litigated here.
 
-### Teardown reliability (fact — 2026-07-06 fleet recycle)
+### Teardown reliability (observed)
 
-Fleet-wide serial recycle: **21/24 clean**; **3 abort classes** (catalogued on #436):
+A recent fleet-wide recycle exercise showed the graceful-close phase is the least reliable.
+**Three abort classes** (catalogued on #436):
 
 | Class | Symptom | Why it blocks chapter-end habit |
 |-------|---------|--------------------------------|
