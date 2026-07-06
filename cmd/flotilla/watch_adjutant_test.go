@@ -5,20 +5,34 @@ import (
 	"testing"
 )
 
-func TestAdjutantPingBodyTouchesLeaderAck(t *testing.T) {
+func TestAdjutantEvaluationTickBodyThreeStepDuty(t *testing.T) {
 	const leader = "alpha-xo"
 	const ack = "/state/flotilla-alpha-xo-alive"
-	got := adjutantPingBody(leader, ack)
-	for _, want := range []string{leader, ack, "touch " + ack} {
+	const buf = "/state/flotilla-alpha-xo-buffer.json"
+	got := adjutantEvaluationTickBody(leader, ack, buf)
+	for _, want := range []string{
+		"Evaluation tick",
+		leader,
+		"timeout signal",
+		"not a dead-man ack",
+		"1. ACK",
+		"touch " + ack,
+		"2. EVALUATE",
+		"all-quiet",
+		"work-found",
+		"3. ACT BY TIER",
+		buf,
+		"idle-holding",
+	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("adjutant ping missing %q\nfull: %s", want, got)
+			t.Errorf("evaluation tick missing %q\nfull: %s", want, got)
 		}
 	}
 }
 
 func TestAdjutantBufferedNoteBody(t *testing.T) {
 	got := adjutantBufferedNoteBody("xo", 2)
-	for _, want := range []string{"Buffered 2", "xo", "next seam"} {
+	for _, want := range []string{"Buffered 2", "xo", "next seam", "evaluation ticks"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("buffered note missing %q\nfull: %s", want, got)
 		}

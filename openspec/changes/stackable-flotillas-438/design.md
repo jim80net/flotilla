@@ -294,7 +294,7 @@ leader. It is the **direct consumer** of that layer's detector/recycle/heartbeat
 
 | Class | Examples | Default action |
 |-------|----------|----------------|
-| **Mechanical** | Liveness ack, busy retry, finish-edge log | Handle; leader never sees |
+| **Mechanical** | Evaluation-tick ack, busy retry, finish-edge log | Handle; leader never sees |
 | **Judgment** | PR review gate, `[awaiting-auth]`, operator decision | Buffer → inject at seam |
 | **Urgent** | Operator relay, timed trading window | Cut through to leader immediately |
 | **Escalation** | Recycle abort unrecoverable, child coordinator down | Buffer unless urgent window; leader at seam |
@@ -405,8 +405,19 @@ externalMaterial(prev,cur)
 only). Prompt carries the **adjutant contract** (triage + observe + buffer + seam
 injection), seeded as a `heartbeat-skill` or identity block.
 
-Liveness ping for layer: when adjutant enabled, ping targets **adjutant**; adjutant
-SHALL touch leader's `flotilla-<xo>-alive` (required-minimum charter — not optional).
+**Evaluation tick (operator amendment 2026-07-06 ~14:05Z, post-#440-merge):** a
+stale-leader timeout is NOT a dead-man's ack to the leader — it is a **signal** to
+the adjutant. When adjutant is enabled, the timeout routes an **evaluation tick** to
+the adjutant (not the leader). Three-step duty:
+
+1. **Ack** — touch `flotilla-<xo>-alive` (mandatory-charter clause stands);
+2. **Evaluate** — sweep unhandled edges, PRs at gates, stale lanes, unanswered operator
+   items; distinguish all-quiet from work-found;
+3. **Act by tier** — all-quiet → ack only; work-found → digest at next seam (immediate
+   if urgent-class).
+
+This subsumes the idle-hold detector: "leader idle but queue not" is caught in step 2
+mechanically, not by a separate leader nudge.
 
 ---
 
@@ -420,7 +431,7 @@ SHALL touch leader's `flotilla-<xo>-alive` (required-minimum charter — not opt
 | `alpha-xo` Working→Idle | Wake primary XO | Self-continuation on `alpha-xo`; synthesis owed to parent (B2) |
 | `backend` entered Shell (crash) | Wake primary XO | Wake layer adjutant; urgent if `urgent_windows` match |
 | Provider rate-limit on `frontend` | Wake primary XO | Wake layer adjutant; retry/switch mechanical |
-| Liveness ping | Wake primary XO | Wake layer adjutant; adjutant acks coordinator alive file |
+| Stale-leader timeout | Wake primary XO (dead-man ack) | Evaluation tick → layer adjutant (ack → evaluate → act-by-tier) |
 | External signal file | Wake primary XO | Wake **top-layer adjutant or xo** only |
 | Cold-start reassess | Wake primary XO | Wake **top-layer adjutant or xo** only |
 | Desk heartbeat cap wedge | Alert names owner | Adjutant wake + loud alert; digest to coordinator if unwedged |
@@ -570,7 +581,7 @@ Likely intent ( **hypothesis only — do not implement until operator affirms** 
 | **1b** | Buffer + seam injection + first-presentation charter | Leader sees briefs at seams, not N interrupts |
 | **1c** | Operator urgent passthrough | Relay bypasses adjutant buffer |
 | **2** | `stackable_wakes` — #438 scoping | Each adjutant sees only its subtree stream |
-| **3** | Per-layer liveness via adjutant | Adjutant acks leader alive file |
+| **3** | Per-layer evaluation tick via adjutant | Stale timeout → ack+evaluate+act-by-tier (subsumes idle-hold) |
 | **4** | #436 recycle abort → adjutant | Recovery within charter; leader at seam on failure |
 | **5** | #437 `recycle --self` | Leader + adjutant chapter-close pairs |
 | **6** (optional) | Nested daemons | Cross-host |

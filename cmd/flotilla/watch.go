@@ -430,7 +430,7 @@ func cmdWatch(args []string) error {
 			case watch.WakePing:
 				if primaryAdjutant != "" {
 					target = primaryAdjutant
-					body = adjutantPingBody(xo, leaderAckPath)
+					body = adjutantEvaluationTickBody(xo, leaderAckPath, layerBufferPath)
 				} else {
 					body = leaderPingBody(leaderAckPath)
 				}
@@ -1039,11 +1039,20 @@ func leaderPingBody(ackPath string) string {
 		"\n(To ack you are alive, run: touch " + ackPath + ")"
 }
 
-// adjutantPingBody routes liveness to the layer adjutant (#439 phase 3 mechanical tier):
-// the adjutant touches the leader's ack file; the leader is not interrupted.
-func adjutantPingBody(leader, leaderAckPath string) string {
-	return "[flotilla adjutant] Liveness check for " + leader + " — touch the leader alive file only; take no other action." +
-		"\n(To ack " + leader + ", run: touch " + leaderAckPath + ")"
+// adjutantEvaluationTickBody routes a stale-leader timeout to the adjutant as an
+// evaluation tick (#439 operator amendment): ack → evaluate → act-by-tier — not a
+// dead-man's ack to the leader.
+func adjutantEvaluationTickBody(leader, leaderAckPath, bufferPath string) string {
+	return "[flotilla adjutant] Evaluation tick for " + leader +
+		" — leader alive file is stale (timeout signal; not a dead-man ack to the leader).\n\n" +
+		"Three-step duty (required-minimum charter):\n" +
+		"1. ACK — touch the leader alive file (mechanical liveness; mandatory):\n" +
+		"   touch " + leaderAckPath + "\n" +
+		"2. EVALUATE — sweep " + leader + "'s layer: unhandled edges, PRs at gates, stale lanes, " +
+		"unanswered operator items. Distinguish all-quiet (nothing to do) from work-found (quiet but stuck).\n" +
+		"3. ACT BY TIER — all-quiet → ack only, no leader interrupt; work-found → buffer judgment items " +
+		"in " + bufferPath + " and inject a digest at " + leader + "'s next seam (immediately if urgent-class).\n\n" +
+		"This tick catches idle-holding: leader idle but queue not empty is work-found, not all-quiet."
 }
 
 // leaderMaterialBody is the legacy material-change wake to the coordinator pane.
@@ -1056,8 +1065,9 @@ func leaderMaterialBody(reasons []string, settledPath, ackInstr string) string {
 // adjutantBufferedNoteBody notifies the adjutant that items were buffered (#439 phase 1b).
 func adjutantBufferedNoteBody(leader string, n int) string {
 	return "[flotilla adjutant] Buffered " + fmt.Sprintf("%d", n) + " interrupt(s) for " + leader +
-		"'s layer. Triage mechanical items locally (liveness ack on ping). Judgment items stay buffered until " +
-		leader + "'s next seam — the leader receives a consolidated brief then, not mid-thought."
+		"'s layer. Triage mechanical items locally. Judgment items stay buffered until " +
+		leader + "'s next seam — the leader receives a consolidated brief then, not mid-thought. " +
+		"On evaluation ticks: ack → evaluate → act-by-tier."
 }
 
 // adjutantSeamBrief drains the layer buffer and formats the leader inject at a seam.
