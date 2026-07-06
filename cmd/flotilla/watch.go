@@ -553,7 +553,16 @@ func cmdWatch(args []string) error {
 		strandedTracker := stranded.NewTracker()
 
 		// #232 coordinator delegation: every XO and CoS — not only the primary clock XO.
-		delegationTracker := delegatenudge.NewTracker()
+		delegationNudgePolicy, err := roster.ResolveDelegationNudge(cfg.DelegationNudge, os.Getenv("FLOTILLA_DELEGATION_NUDGE"))
+		if err != nil {
+			return fmt.Errorf("flotilla watch: invalid delegation_nudge policy (roster delegation_nudge / FLOTILLA_DELEGATION_NUDGE): %w", err)
+		}
+		var delegationTracker *delegatenudge.Tracker
+		if delegationNudgePolicy.Enabled() {
+			delegationTracker = delegatenudge.NewTracker()
+		} else {
+			log.Printf("flotilla watch: delegation-nudge OFF (roster delegation_nudge / FLOTILLA_DELEGATION_NUDGE)")
+		}
 
 		// #349 item D: auto decision-brief trigger when operator-gated goals lack a brief.
 		decisionBriefClaimsPath := filepath.Join(rosterDir, "flotilla-decision-brief-claims.json")
