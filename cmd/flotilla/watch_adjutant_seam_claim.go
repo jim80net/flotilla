@@ -2,8 +2,10 @@ package main
 
 import (
 	"log"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jim80net/flotilla/internal/watch/adjutantbuffer"
 )
@@ -28,7 +30,8 @@ func newAdjutantSeamClaims() *adjutantSeamClaims {
 }
 
 func adjutantSeamClaimKey(owner string) string {
-	return adjutantSeamClaimPrefix + owner
+	// Unique per drain so overlapping seams do not replace in-flight claims (#488 P1).
+	return adjutantSeamClaimPrefix + owner + ":" + strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
 }
 
 func (c *adjutantSeamClaims) register(key string, claim adjutantSeamClaim) {
@@ -48,8 +51,8 @@ func (c *adjutantSeamClaims) confirm(key string) {
 	if err := adjutantbuffer.RecordDelivered(claim.deliveredPath, claim.owner, claim.recordItems); err != nil {
 		log.Printf("flotilla watch: adjutant delivered ledger record failed for %q: %v", claim.owner, err)
 	}
-	if err := adjutantbuffer.Clear(claim.bufferPath); err != nil {
-		log.Printf("flotilla watch: adjutant buffer clear after confirmed seam failed for %q: %v", claim.owner, err)
+	if err := adjutantbuffer.RemoveConfirmedItems(claim.bufferPath, claim.owner, claim.recordItems); err != nil {
+		log.Printf("flotilla watch: adjutant buffer remove-after-confirmed-seam failed for %q: %v", claim.owner, err)
 	}
 }
 

@@ -70,3 +70,16 @@ so charter amendments survive past one session turn.
 - **WHEN** the seam drain loads the ledger
 - **THEN** the file SHALL be quarantined to a `.corrupt-<timestamp>` sidecar
 - **AND** dedup SHALL proceed with an empty ledger (no permanent lane wedge)
+
+#### Scenario: Confirmed seam removes only claimed items
+
+- **GIVEN** a seam brief claim recorded N buffer items at Peek time
+- **WHEN** additional items are appended before confirm completes
+- **THEN** confirm SHALL remove only the N claimed items from the buffer
+- **AND** SHALL NOT clear items appended after Peek
+
+#### Scenario: Overlapping seam claims use unique keys
+
+- **GIVEN** two seam drains for the same coordinator overlap in flight
+- **WHEN** each enqueue carries ClaimKey `adjutant-seam:<owner>:<nonce>`
+- **THEN** confirm of one claim SHALL NOT record or remove items belonging to the other claim

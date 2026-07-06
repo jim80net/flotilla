@@ -183,6 +183,25 @@ func TestRecordDeliveredPrunesLedgerGrowth(t *testing.T) {
 	if len(got.Entries) != maxDeliveredLedgerEntries {
 		t.Fatalf("entries = %d, want cap %d", len(got.Entries), maxDeliveredLedgerEntries)
 	}
+	hasKey := func(key string) bool {
+		for _, e := range got.Entries {
+			if e.Key == key {
+				return true
+			}
+		}
+		return false
+	}
+	newest := itemKey(fmt.Sprintf("desk%d: edge", maxDeliveredLedgerEntries+9))
+	oldestPruned := itemKey("desk0: edge")
+	if !hasKey(newest) {
+		t.Fatalf("newest entry %q must survive prune, entries=%+v", newest, got.Entries)
+	}
+	if hasKey(oldestPruned) {
+		t.Fatalf("oldest entry %q must be pruned", oldestPruned)
+	}
+	if got.Entries[len(got.Entries)-1].Key != newest {
+		t.Fatalf("last entry = %q, want newest %q", got.Entries[len(got.Entries)-1].Key, newest)
+	}
 }
 
 func TestFilterUndeliveredDropsConsumedPair(t *testing.T) {

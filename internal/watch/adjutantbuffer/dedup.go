@@ -106,7 +106,7 @@ func LoadDelivered(path string) (f DeliveredFile, quarantined bool, err error) {
 		return DeliveredFile{}, false, fmt.Errorf("read delivered ledger %q: %w", path, err)
 	}
 	if err := json.Unmarshal(raw, &f); err != nil {
-		sidecar := path + ".corrupt-" + time.Now().UTC().Format("20060102T150405Z")
+		sidecar := quarantineSidecarPath(path)
 		if renameErr := os.Rename(path, sidecar); renameErr != nil {
 			log.Printf("flotilla watch: adjutant delivered ledger at %q is corrupt (%v) and rename failed: %v", path, err, renameErr)
 			return DeliveredFile{}, false, fmt.Errorf("corrupt delivered ledger %q: %w (quarantine rename failed: %v)", path, err, renameErr)

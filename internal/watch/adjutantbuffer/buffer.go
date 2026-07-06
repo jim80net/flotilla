@@ -66,6 +66,45 @@ func Peek(path string) (f File, ok bool, quarantined bool, err error) {
 	return f, len(f.Items) > 0, quarantined, nil
 }
 
+// RemoveConfirmedItems rewrites the buffer minus exactly the confirmed seam items (#488 P1).
+// Items appended after Peek but before confirm are retained.
+func RemoveConfirmedItems(path, leader string, delivered []Item) error {
+	if path == "" || len(delivered) == 0 {
+		return nil
+	}
+	f, _, err := load(path)
+	if err != nil {
+		return err
+	}
+	remove := make(map[string]bool, len(delivered))
+	for _, it := range delivered {
+		norm, ok := normalizeItem(it)
+		if !ok {
+			continue
+		}
+		remove[norm.Key+"\x00"+norm.StateHash] = true
+	}
+	remaining := make([]Item, 0, len(f.Items))
+	for _, it := range f.Items {
+		norm, ok := normalizeItem(it)
+		if !ok {
+			continue
+		}
+		if remove[norm.Key+"\x00"+norm.StateHash] {
+			continue
+		}
+		remaining = append(remaining, norm)
+	}
+	if len(remaining) == 0 {
+		return Clear(path)
+	}
+	if f.Leader == "" {
+		f.Leader = leader
+	}
+	f.Items = remaining
+	return save(path, f)
+}
+
 // Clear removes the buffer sidecar after a successful enqueue (enqueue-then-delete).
 func Clear(path string) error {
 	if path == "" {
@@ -135,7 +174,7 @@ func load(path string) (File, bool, error) {
 	}
 	var f File
 	if err := json.Unmarshal(raw, &f); err != nil {
-		sidecar := path + ".corrupt-" + time.Now().UTC().Format("20060102T150405Z")
+		sidecar := quarantineSidecarPath(path)
 		if renameErr := os.Rename(path, sidecar); renameErr != nil {
 			log.Printf("flotilla watch: adjutant buffer at %q is corrupt (%v) and rename to sidecar failed: %v", path, err, renameErr)
 			return File{}, false, fmt.Errorf("corrupt buffer %q: %w (quarantine rename failed: %v)", path, err, renameErr)
