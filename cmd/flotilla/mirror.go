@@ -168,10 +168,11 @@ func (m deskMirror) appendSessionMirror(agent, verbose string, d mirrorDecision)
 // static check-private-boundary.sh + pre-push hook instead.
 //
 // Pipeline: envelope detect → validate → tier-1 (warn-with-publish):
-//   an enveloped brief that passes tier-1 is RENDERED from its fields (modeled body);
-//   a tier-1-deficient or malformed envelope is published RAW and FLAGGED (never lost
-//   — never lose a brief); an un-enveloped ordinary turn-final is published raw
-//   (today's back-compat behavior).
+//
+//	an enveloped brief that passes tier-1 is RENDERED from its fields (modeled body);
+//	a tier-1-deficient or malformed envelope is published RAW and FLAGGED (never lost
+//	— never lose a brief); an un-enveloped ordinary turn-final is published raw
+//	(today's back-compat behavior).
 //
 // (The P3 envelope ledger is NOT a clean prepend: it needs the PARSED envelope this
 // function discards — P3 will re-thread the *readermap.Envelope through this signature.)

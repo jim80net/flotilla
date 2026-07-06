@@ -52,7 +52,7 @@ type replyDeps struct {
 	// routed to the channel the operator messaged from, with a primary-channel fallback when the origin
 	// webhook is itself unresolvable, so the operator always sees it.
 	escalate func(originChannel, msg string)
-	sleep func(time.Duration)
+	sleep    func(time.Duration)
 	logf     func(format string, args ...any)
 	softTTL  time.Duration
 	hardTTL  time.Duration

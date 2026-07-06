@@ -177,8 +177,6 @@ func TestReplyRouter_ArmSupersedes(t *testing.T) {
 	}
 }
 
-
-
 // Stop cancels in-flight watchers (daemon shutdown) — no post/alert after Stop.
 func TestReplyRouter_Stop(t *testing.T) {
 	var mu sync.Mutex

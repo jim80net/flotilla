@@ -186,8 +186,6 @@ func TestCmdNotifyMissingWebhookForAgentErrors(t *testing.T) {
 	}
 }
 
-
-
 func TestCmdNotifyRequiresFrom(t *testing.T) {
 	t.Setenv("FLOTILLA_SELF", "")
 	if err := cmdNotify([]string{"hi"}); err == nil {

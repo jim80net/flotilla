@@ -83,7 +83,3 @@ func TestReaderModelInternal_AbsentIsBackCompat(t *testing.T) {
 		t.Errorf("an ordinary turn-final carries no flag; got note %q", d.note)
 	}
 }
-
-
-
-
