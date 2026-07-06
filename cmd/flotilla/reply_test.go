@@ -6,8 +6,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/jim80net/flotilla/internal/readermap"
 )
 
 // baseDeps builds replyDeps with instant sleep + recorders; the caller overrides the fields it drives.
@@ -176,54 +174,6 @@ func TestReplyRouter_ArmSupersedes(t *testing.T) {
 		if u == "wh-chanA" {
 			t.Fatalf("a superseded watcher routed to the old channel chanA: %v", routed)
 		}
-	}
-}
-
-// The firewall gates the DAEMON reply egress: a leaking reply is SUPPRESSED (never
-// routed to the operator's channel) and ESCALATED (read-the-pane), not bounced.
-func TestRoute_FirewallRefuseSuppressesAndEscalates(t *testing.T) {
-	var posts, escalations []string
-	fw, err := readermap.NewTermSet([]string{"acme-desk"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	d := replyDeps{
-		dest:     func(string) (string, bool) { return "wh", true },
-		post:     func(url, _, content string) error { posts = append(posts, content); return nil },
-		escalate: func(_, msg string) { escalations = append(escalations, msg) },
-		logf:     func(string, ...any) {},
-		firewall: fw,
-	}
-	// A deployment denylist term in the XO's reply (a placeholder, not a real codename).
-	d.route(context.Background(), "xo", "chanA", "the acme-desk reported in")
-	if len(posts) != 0 {
-		t.Fatalf("a firewall REFUSE must SUPPRESS the route (no post); got posts=%v", posts)
-	}
-	if len(escalations) != 1 || !strings.Contains(escalations[0], "WITHHELD") {
-		t.Fatalf("a refused reply must ESCALATE (read-the-pane); got escalations=%v", escalations)
-	}
-}
-
-// A warnlist (advisory) hit routes the reply anyway, with an advisory escalation.
-func TestRoute_FirewallWarnRoutesWithAdvisory(t *testing.T) {
-	var posts, escalations []string
-	fw, err := readermap.NewTermSet(nil, []string{"flatten(ed|s|ing)?"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	d := replyDeps{
-		dest:     func(string) (string, bool) { return "wh", true },
-		post:     func(_, _, content string) error { posts = append(posts, content); return nil },
-		escalate: func(_, msg string) { escalations = append(escalations, msg) },
-		logf:     func(string, ...any) {},
-		firewall: fw,
-	}
-	d.route(context.Background(), "xo", "chanA", "we flattened the book before close")
-	if len(posts) != 1 {
-		t.Fatalf("a warn-tier reply must still ROUTE; got posts=%v", posts)
-	}
-	if len(escalations) != 1 || !strings.Contains(escalations[0], "advisory") {
-		t.Fatalf("a warn-tier reply must raise ONE advisory escalation; got escalations=%v", escalations)
 	}
 }
 

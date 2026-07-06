@@ -9,7 +9,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/jim80net/flotilla/internal/deliver"
-	"github.com/jim80net/flotilla/internal/readermap"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/transport"
@@ -53,12 +52,6 @@ type replyDeps struct {
 	// routed to the channel the operator messaged from, with a primary-channel fallback when the origin
 	// webhook is itself unresolvable, so the operator always sees it.
 	escalate func(originChannel, msg string)
-	// firewall is the partition firewall (Pillar D) for the DAEMON reply egress. nil ⇒
-	// no firewall configured. Unlike the willing-to-wait CLI (which bounces a Refuse
-	// back to the desk to fix in-context), this watcher has no interactive turn to
-	// bounce to, so a Refuse SUPPRESSES the route and ESCALATES (the reply is withheld;
-	// the operator is told to read the pane). A Warn routes anyway with an advisory.
-	firewall *readermap.TermSet
 	sleep    func(time.Duration)
 	logf     func(format string, args ...any)
 	softTTL  time.Duration
@@ -99,21 +92,8 @@ func runReplyWatch(ctx context.Context, d replyDeps, xo, originChannel, operator
 // failed chunk escalates and names the partial delivery so the operator knows to read the pane for the
 // remainder (the one place a long reply cannot be fully self-delivered).
 func (d replyDeps) route(ctx context.Context, xo, originChannel, text string) {
-	// The partition firewall (Pillar D) gates the DAEMON reply egress. A Refuse
-	// SUPPRESSES the route (the leak is never posted to the operator's channel) and
-	// ESCALATES — there is no interactive turn to bounce to, so the operator is told to
-	// read the pane. A Warn routes anyway with an advisory escalation. The
-	// one-decision-line invariant is preserved (the SUPPRESS is logged).
-	if d.firewall != nil {
-		switch r := readermap.Check(text, d.firewall); r.Decision {
-		case readermap.FirewallRefuse:
-			d.escalate(originChannel, fmt.Sprintf("hotline: %s replied but I WITHHELD it — possible private leak %q (the reply was not routed; read its pane)", xo, r.Token))
-			d.logf("flotilla watch: hotline reply SUPPRESS %s → origin channel %s: firewall refuse %q", xo, originChannel, r.Token)
-			return
-		case readermap.FirewallWarn:
-			d.escalate(originChannel, fmt.Sprintf("hotline: %s's reply (routed below) carries domain vocabulary %v — advisory, review for a deployment leak", xo, r.WarnTerms))
-		}
-	}
+	// Hotline replies route to the operator's channel — a fleet-internal surface.
+	// The partition firewall (Pillar D) does NOT run here (#465).
 	url, ok := d.dest(originChannel)
 	if !ok {
 		d.escalate(originChannel, fmt.Sprintf("hotline: %s replied to you but I can't route it (no webhook for the origin channel) — read its pane", xo))
@@ -232,7 +212,7 @@ func isHotlineToChannelXO(cfg *roster.Config, j watch.Job) bool {
 // secrets are absent (no return-leg webhooks to resolve). parent is the daemon's shutdown context (so
 // Stop cancels in-flight watchers); primaryAlert is the daemon's loud alert (the fallback when an
 // escalation's own origin-channel webhook is unresolvable, so the operator always sees it).
-func newHotlineReplyRouter(parent context.Context, cfg *roster.Config, secrets *roster.Secrets, tr transport.Transport, firewall *readermap.TermSet, primaryAlert func(string)) *replyRouter {
+func newHotlineReplyRouter(parent context.Context, cfg *roster.Config, secrets *roster.Secrets, tr transport.Transport, primaryAlert func(string)) *replyRouter {
 	if secrets == nil || tr == nil {
 		return nil
 	}
@@ -259,9 +239,8 @@ func newHotlineReplyRouter(parent context.Context, cfg *roster.Config, secrets *
 			}
 			return rr.ReplyAfter(pane, operatorMsg)
 		},
-		dest:     func(originChannel string) (string, bool) { return replyDest(cfg, secrets, originChannel) },
-		post:     post,
-		firewall: firewall,
+		dest: func(originChannel string) (string, bool) { return replyDest(cfg, secrets, originChannel) },
+		post: post,
 		escalate: func(originChannel, msg string) {
 			// Route the escalation to the channel the operator messaged from; fall back to the primary
 			// operator channel if the origin webhook is unresolvable OR the post FAILS — so the operator

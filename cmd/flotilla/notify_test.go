@@ -186,53 +186,6 @@ func TestCmdNotifyMissingWebhookForAgentErrors(t *testing.T) {
 	}
 }
 
-func TestCmdNotifyFirewallRefuseBouncesWithoutPosting(t *testing.T) {
-	var hits int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		hits++
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer srv.Close()
-
-	const agent = "xo"
-	secrets := writeSecrets(t, agent, srv.URL)
-	// A deployment denylist term (supplied via env) trips the firewall. (We use a
-	// denylist term rather than a generic home-path shape so this committed test file
-	// stays clean under the static tree-scan guard.)
-	clearFirewallEnv(t)
-	t.Setenv(denylistEnv, "acme-desk")
-	err := cmdNotify([]string{"--from", agent, "--secrets", secrets, "ping from the acme-desk"})
-	if err == nil {
-		t.Fatal("a leaking notify must be REFUSED (bounced), not posted")
-	}
-	if !strings.Contains(err.Error(), "REFUSED") {
-		t.Errorf("error %q should bounce with a REFUSED message + the abstraction", err.Error())
-	}
-	if hits != 0 {
-		t.Errorf("server received %d requests; a refused notify must post NOTHING", hits)
-	}
-}
-
-func TestCmdNotifyFirewallWarnStillPosts(t *testing.T) {
-	var hits int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		hits++
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer srv.Close()
-
-	const agent = "xo"
-	secrets := writeSecrets(t, agent, srv.URL)
-	clearFirewallEnv(t)
-	t.Setenv(warnlistEnv, "flatten(ed|s|ing)?")
-	if err := cmdNotify([]string{"--from", agent, "--secrets", secrets, "we flattened the book"}); err != nil {
-		t.Fatalf("a warnlist hit is advisory — notify must still succeed; got %v", err)
-	}
-	if hits != 1 {
-		t.Errorf("a warn-tier message must still post once; got %d requests", hits)
-	}
-}
-
 func TestCmdNotifyRequiresFrom(t *testing.T) {
 	t.Setenv("FLOTILLA_SELF", "")
 	if err := cmdNotify([]string{"hi"}); err == nil {

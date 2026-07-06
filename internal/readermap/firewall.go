@@ -6,9 +6,10 @@ import (
 	"strings"
 )
 
-// The private-egress firewall (Pillar D). It is the runtime half of flotilla's
-// public/private partition: before any outbound artifact is published, Check runs it
-// through the partition firewall and REFUSES (never rewrites) a known private leak.
+// The private-egress firewall (Pillar D) for PUBLIC surfaces only. Fleet-internal
+// egress (dash, operator-channel notify/mirror, hotline replies) does NOT call Check
+// (#465). The static guard (check-private-boundary.sh + pre-push) and this engine share
+// term-list data; Check REFUSES (never rewrites) a known private leak on public paths.
 //
 // Two tiers, mirroring scripts/check-private-boundary.sh so the runtime guard and the
 // static CI guard agree (a conformance test pins the equivalence):

@@ -9,12 +9,14 @@ import (
 	"github.com/jim80net/flotilla/internal/readermap"
 )
 
-// The I/O half of the partition firewall (Pillar D). The PURE detector
-// (readermap.Check / readermap.TermSet) lives in internal/readermap; this file reads
-// the deployment's gitignored private term sources from disk/env and compiles the
-// TermSet once. It deliberately reads the SAME sources as scripts/check-private-boundary.sh
-// — the runtime guard and the static CI guard share their DATA (not their regex code,
-// since Go is RE2 and the bash guard is PCRE), and a conformance test pins the verdicts.
+// The I/O half of the partition firewall (Pillar D) for PUBLIC egress surfaces only
+// (repo commits, issues/PRs via check-private-boundary.sh + the git pre-push hook).
+// Fleet-internal surfaces (dash, operator-channel notify/mirror, hotline replies) do NOT
+// run this guard (#465). The PURE detector (readermap.Check / readermap.TermSet) lives
+// in internal/readermap; this file reads the deployment's gitignored private term sources
+// from disk/env and compiles the TermSet once. It deliberately reads the SAME sources as
+// scripts/check-private-boundary.sh — the static CI guard and the Go conformance test
+// share their DATA (not their regex code, since Go is RE2 and the bash guard is PCRE).
 
 const (
 	denylistEnv     = "FLOTILLA_PRIVATE_DENYLIST"      // a ready alternation: "term1|term2|..."
@@ -44,10 +46,9 @@ func LoadFirewall() (*readermap.TermSet, error) {
 	return readermap.NewTermSet(deny, warn)
 }
 
-// firewallBounce formats the REFUSE bounce for a CLI egress (e.g. notify): the
-// offending token + its generic abstraction, as a suggestion the desk applies
-// in-context. It returns nil unless r is a Refuse, so a clean (OK/Warn) check leaves
-// the success path byte-identical. NEVER rewrites the message — it only suggests.
+// firewallBounce formats the REFUSE bounce for a public-egress CLI path: the offending
+// token + its generic abstraction, as a suggestion the desk applies in-context. It
+// returns nil unless r is a Refuse. NEVER rewrites the message — it only suggests.
 func firewallBounce(verb string, r readermap.FirewallResult) error {
 	if r.Decision != readermap.FirewallRefuse {
 		return nil
