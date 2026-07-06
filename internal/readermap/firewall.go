@@ -127,17 +127,6 @@ func NewTermSet(deny, warn []string) (*TermSet, error) {
 	}, nil
 }
 
-// Configured reports whether a deployment denylist / warnlist was loaded (vs only the
-// built-in generic + canonical patterns). The watch daemon logs this at startup so an
-// unconfigured runtime firewall (e.g. the daemon's cwd has no .flotilla list and no env
-// is set) is VISIBLE at boot, not discovered at the first leak.
-func (ts *TermSet) Configured() (deny, warn bool) {
-	if ts == nil {
-		return false, false
-	}
-	return ts.deny != nil, ts.warn != nil
-}
-
 // Check runs text through the firewall in precedence order: (1) the fail-closed tier
 // (denylist → built-in generic patterns → canonical pattern) REFUSES on the first hit;
 // (2) the advisory warnlist WARNS only if nothing refused. Denylist precedence means a

@@ -46,16 +46,6 @@ func LoadFirewall() (*readermap.TermSet, error) {
 	return readermap.NewTermSet(deny, warn)
 }
 
-// firewallBounce formats the REFUSE bounce for a public-egress CLI path: the offending
-// token + its generic abstraction, as a suggestion the desk applies in-context. It
-// returns nil unless r is a Refuse. NEVER rewrites the message — it only suggests.
-func firewallBounce(verb string, r readermap.FirewallResult) error {
-	if r.Decision != readermap.FirewallRefuse {
-		return nil
-	}
-	return fmt.Errorf("%s REFUSED: the message contains a possible private leak %q — rewrite it to its generic abstraction (%s). Nothing was posted", verb, r.Token, r.Abstraction)
-}
-
 // loadTermList resolves one private term list in the SAME priority order as the bash
 // guard: (1) the env alternation var (a single "a|b|c" string, used by CI from a repo
 // secret so the list is never committed); (2) an explicit FILE-path env override; (3)

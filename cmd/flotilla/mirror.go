@@ -174,8 +174,8 @@ func (m deskMirror) appendSessionMirror(agent, verbose string, d mirrorDecision)
 //	— never lose a brief); an un-enveloped ordinary turn-final is published raw
 //	(today's back-compat behavior).
 //
-// (The P3 envelope ledger is NOT a clean prepend: it needs the PARSED envelope this
-// function discards — P3 will re-thread the *readermap.Envelope through this signature.)
+// Parsed envelopes flow to the session-mirror ledger via mirrorDecision.envelope
+// (sessionmirror.NewRecord); a separate prepend ledger is not required on this path.
 //
 // NOTE (deliberate, spec'd): on the PASS path the published body is Render(env) — the
 // modeled envelope fields ONLY. Prose the desk wrote OUTSIDE the reader-map fence is

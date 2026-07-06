@@ -1,0 +1,65 @@
+{
+  "_comment": "Host-local launch recipes (copy to <roster-dir>/flotilla-launch.json or per-agent ~/.flotilla/<agent>/launch.json). Gitignored in production — this committed example shows the usage-limit downgrade SHAPE for #466. Agent keys MUST match flotilla.json. Launch commands are illustrative — pin your operator-ratified models in the real file.",
+  "_comment_failover": "primary + fallbacks[] is the per-seat usage-limit policy. Account-side throttles prefer a same-provider fallback (model downgrade). Server-side throttles cross providers (harness switch). flotilla switch <agent> --to <slot> applies a slot; watch auto-switch applies to non-XO execution desks when FLOTILLA_AUTO_SWITCH=1.",
+  "agents": {
+    "xo": {
+      "launch": "claude --model opus -w xo",
+      "cwd": "/home/operator/work/flotilla",
+      "tmux": "flotilla:xo",
+      "state": ".claude/handoffs/latest.md",
+      "primary": {
+        "surface": "claude-code",
+        "provider": "anthropic",
+        "model": "opus",
+        "subscription_id": "anthropic-coordinator",
+        "launch": "claude --model opus -w xo"
+      },
+      "fallbacks": [
+        {
+          "_comment": "In-provider model downgrade (Sonnet) — selected on account-side usage limits before crossing harnesses.",
+          "surface": "claude-code",
+          "provider": "anthropic",
+          "model": "sonnet",
+          "subscription_id": "anthropic-coordinator-degraded",
+          "launch": "claude --model sonnet -w xo"
+        },
+        {
+          "_comment": "Cross-harness escape when Anthropic is server-side throttled.",
+          "surface": "grok",
+          "provider": "xai",
+          "model": "composer-2.5-fast",
+          "subscription_id": "xai-coordinator",
+          "launch": "grok --model composer-2.5-fast -w xo"
+        }
+      ]
+    },
+    "backend": {
+      "launch": "grok --model composer-2.5-fast -w backend",
+      "cwd": "/home/operator/work/example-repo",
+      "tmux": "flotilla-backend:desk",
+      "primary": {
+        "surface": "grok",
+        "provider": "xai",
+        "model": "composer-2.5-fast",
+        "subscription_id": "xai-execution",
+        "launch": "grok --model composer-2.5-fast -w backend"
+      },
+      "fallbacks": [
+        {
+          "surface": "codex",
+          "provider": "openai",
+          "model": "gpt-5.5",
+          "subscription_id": "openai-execution",
+          "launch": "codex --model gpt-5.5 -w backend"
+        },
+        {
+          "surface": "claude-code",
+          "provider": "anthropic",
+          "model": "sonnet",
+          "subscription_id": "anthropic-execution-fallback",
+          "launch": "claude --model sonnet -w backend"
+        }
+      ]
+    }
+  }
+}
