@@ -9,7 +9,7 @@ import (
 )
 
 // DefaultWorktreePath is the conventional desk-home path: a sibling checkout of
-// the main repo named after the agent (e.g. spark-tactical beside spark).
+// the main repo named after the agent (e.g. project-a-tactical beside flotilla).
 func DefaultWorktreePath(repoAbs, agent string) string {
 	return filepath.Join(filepath.Dir(repoAbs), agent)
 }

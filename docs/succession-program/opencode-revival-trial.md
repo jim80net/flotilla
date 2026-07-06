@@ -93,7 +93,7 @@ OPENCODE_MODEL=<provider>/<model> opencode .
 
 **Shape:** `beta-xo` (grok project-XO) supervises `oc-desk` during the 48h succession trial.
 Trial XO dispatches pass-criteria exercises, gates outputs, reports to the meta-XO.
-Desk stays **fleet-command member only** (pr-rep pattern) — no dedicated Discord channel.
+Desk stays **fleet-command member only** (fleet-internal desk pattern) — no dedicated Discord channel.
 
 Pass criteria: host-local trial doc in the deployment's roster state directory (not in this repo).
 

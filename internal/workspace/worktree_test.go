@@ -23,8 +23,8 @@ func initGitRepo(t *testing.T, dir string) {
 }
 
 func TestDefaultWorktreePath(t *testing.T) {
-	got := DefaultWorktreePath("/repos/flotilla", "spark-tactical")
-	want := filepath.Join("/repos", "spark-tactical")
+	got := DefaultWorktreePath("/repos/flotilla", "project-a-tactical")
+	want := filepath.Join("/repos", "project-a-tactical")
 	if got != want {
 		t.Errorf("DefaultWorktreePath = %q, want %q", got, want)
 	}
@@ -37,15 +37,15 @@ func TestProvisionWorktreeCreatesAndIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	initGitRepo(t, repo)
-	wt := filepath.Join(root, "spark-tactical")
+	wt := filepath.Join(root, "project-a-tactical")
 
-	if err := ProvisionWorktree(repo, "spark-tactical", wt); err != nil {
+	if err := ProvisionWorktree(repo, "project-a-tactical", wt); err != nil {
 		t.Fatalf("first provision: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(wt, ".git")); err != nil {
 		t.Fatalf("worktree missing .git entry: %v", err)
 	}
-	if err := ProvisionWorktree(repo, "spark-tactical", wt); err != nil {
+	if err := ProvisionWorktree(repo, "project-a-tactical", wt); err != nil {
 		t.Fatalf("re-provision should be idempotent: %v", err)
 	}
 }
