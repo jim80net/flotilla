@@ -24,9 +24,41 @@
     return "/parade-assets/" + encodeURIComponent(date) + "/" + encodeURIComponent(String(src).replace(/^.*\//, ""));
   }
 
+  // ── GFM pipe-table helpers (pure; operate on RAW lines so the structural chars '|', '-',
+  // ':' are seen before escaping — the cell TEXT is escaped-then-inline'd at render). A table
+  // is a header row of '|'-separated cells IMMEDIATELY followed by a delimiter row, so prose
+  // that merely contains a pipe is never mistaken for a table. ──
+  function splitTableRow(raw) {
+    var s = raw.trim().replace(/^\|/, "").replace(/\|$/, "");
+    var cells = [], cur = "";
+    for (var k = 0; k < s.length; k++) {
+      if (s[k] === "\\" && s[k + 1] === "|") { cur += "|"; k++; } // \| is a literal pipe in a cell
+      else if (s[k] === "|") { cells.push(cur); cur = ""; }
+      else cur += s[k];
+    }
+    cells.push(cur);
+    return cells.map(function (c) { return c.trim(); });
+  }
+  // isTableDelimiter: every cell is dashes with an optional leading/trailing alignment colon.
+  function isTableDelimiter(raw) {
+    if (raw.indexOf("|") === -1) return false;
+    var cells = splitTableRow(raw);
+    return cells.length > 0 && cells.every(function (c) { return /^:?-+:?$/.test(c); });
+  }
+  // tableAligns maps each delimiter cell to a text-align keyword, padded/truncated to n columns.
+  function tableAligns(raw, n) {
+    var cells = splitTableRow(raw), aligns = [];
+    for (var k = 0; k < n; k++) {
+      var c = cells[k] || "", l = c.charAt(0) === ":", r = c.charAt(c.length - 1) === ":";
+      aligns.push(l && r ? "center" : r ? "right" : l ? "left" : "");
+    }
+    return aligns;
+  }
+
   // escape-then-markdown for a slide body (mirrors goals.js renderBrief). Escapes FIRST, then
   // a fixed subset: a block image line ![alt](src) renders LARGE; #.. headings; -/* bullets;
-  // blank-line paragraphs; inline **bold**, `code`, [text](http…). Images resolve via date.
+  // GFM pipe-tables; blank-line paragraphs; inline **bold**, `code`, [text](http…). Images
+  // resolve via date.
   function renderMd(date, md) {
     var lines = String(md == null ? "" : md).replace(/\r\n/g, "\n").split("\n");
     // inline() takes ALREADY-ESCAPED text and layers inline markdown on top. Its link href
@@ -36,6 +68,22 @@
         .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
         .replace(/`([^`]+)`/g, "<code>$1</code>")
         .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    }
+    // renderTable emits a <table> from a header row + body rows + per-column alignments. Each
+    // cell is escaped THEN inline-marked (the escape-first invariant), so no cell text can inject.
+    function renderTable(head, rows, aligns) {
+      function cellHtml(tag, text, k) {
+        var a = aligns[k] ? ' style="text-align:' + aligns[k] + '"' : ""; // aligns ∈ {left,center,right} — a fixed, non-injectable set
+        return "<" + tag + a + ">" + inline(esc(text)) + "</" + tag + ">";
+      }
+      function rowHtml(cells, tag) {
+        var cs = [];
+        for (var k = 0; k < head.length; k++) cs.push(cellHtml(tag, cells[k] || "", k));
+        return "<tr>" + cs.join("") + "</tr>";
+      }
+      var thead = "<thead>" + rowHtml(head, "th") + "</thead>";
+      var tbody = rows.length ? "<tbody>" + rows.map(function (r) { return rowHtml(r, "td"); }).join("") + "</tbody>" : "";
+      return '<table class="pd-table">' + thead + tbody + "</table>";
     }
     var out = [], list = null, quote = null;
     function flushList() { if (list) { out.push("<ul>" + list.join("") + "</ul>"); list = null; } }
@@ -52,6 +100,22 @@
       // (cubic #373 P5).
       var img = /^!\[([^\]]*)\]\(([^)\s]+)\)\s*$/.exec(ln);
       if (img) { flush(); out.push('<img class="pd-slide-img" loading="lazy" src="' + esc(imgURL(date, img[2])) + '" alt="' + esc(img[1]) + '" />'); continue; }
+      // GFM pipe-table: a header row with a '|' IMMEDIATELY followed by a delimiter row. The
+      // block runs until a blank or pipe-less line. Detected on RAW lines (before escaping) so
+      // the structural pipes are visible; cell text is escaped-then-inline'd in renderTable.
+      if (ln.indexOf("|") !== -1 && i + 1 < lines.length && isTableDelimiter(lines[i + 1])) {
+        flush();
+        var headCells = splitTableRow(ln);
+        var aligns = tableAligns(lines[i + 1], headCells.length);
+        var bodyRows = [];
+        var j = i + 2;
+        for (; j < lines.length && lines[j].trim() !== "" && lines[j].indexOf("|") !== -1; j++) {
+          bodyRows.push(splitTableRow(lines[j]));
+        }
+        out.push(renderTable(headCells, bodyRows, aligns));
+        i = j - 1; // the for-loop's i++ advances past the last consumed row
+        continue;
+      }
       // Detect a "> " blockquote on the RAW line: '>' would be escaped to '&gt;' before a
       // regex on the escaped text, so it must be matched pre-esc (like the image src). The
       // captured content is then escaped + inline-marked for insertion.
