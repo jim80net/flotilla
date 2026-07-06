@@ -1324,6 +1324,39 @@
   // first (no raw HTML from the brief ever reaches the DOM), then applies a small, fixed
   // markdown subset: #/##/### headings, - / * bullet lists, blank-line paragraphs, and
   // inline **bold** + `code`. Enough for a real decision brief; nothing that can inject.
+  // ── GFM pipe-table helpers (#450 — ported from the parade renderer, parade.js/#428).
+  // Pure row/delimiter parsing. renderBrief escapes the WHOLE brief before splitting,
+  // but the structural chars ('|', '-', ':') survive escapeHtml — so detection runs on
+  // the escaped lines and each cell's text is ALREADY escaped (inline() only, never a
+  // second escape). A table is a header row IMMEDIATELY followed by a delimiter row, so
+  // prose that merely contains a pipe is never mistaken for a table. ──
+  function splitTableRow(raw) {
+    var s = raw.trim().replace(/^\|/, "").replace(/\|$/, "");
+    var cells = [], cur = "";
+    for (var k = 0; k < s.length; k++) {
+      if (s[k] === "\\" && s[k + 1] === "|") { cur += "|"; k++; } // \| is a literal pipe in a cell
+      else if (s[k] === "|") { cells.push(cur); cur = ""; }
+      else cur += s[k];
+    }
+    cells.push(cur);
+    return cells.map(function (c) { return c.trim(); });
+  }
+  // isTableDelimiter: every cell is dashes with an optional leading/trailing alignment colon.
+  function isTableDelimiter(raw) {
+    if (raw.indexOf("|") === -1) return false;
+    var cells = splitTableRow(raw);
+    return cells.length > 0 && cells.every(function (c) { return /^:?-+:?$/.test(c); });
+  }
+  // tableAligns maps each delimiter cell to a text-align keyword, padded/truncated to n columns.
+  function tableAligns(raw, n) {
+    var cells = splitTableRow(raw), aligns = [];
+    for (var k = 0; k < n; k++) {
+      var c = cells[k] || "", l = c.charAt(0) === ":", r = c.charAt(c.length - 1) === ":";
+      aligns.push(l && r ? "center" : r ? "right" : l ? "left" : "");
+    }
+    return aligns;
+  }
+
   function renderBrief(md) {
     var lines = escapeHtml(String(md == null ? "" : md)).split(/\r?\n/);
     // inline: **bold**, `code`, and [text](https://…) reference links (#405 Inc 2 — "references
@@ -1335,10 +1368,44 @@
         .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
         .replace(/`([^`]+)`/g, "<code>$1</code>");
     }
+    // renderTable emits a brief's table from a header row + body rows + per-column
+    // alignments (#450 — the parade renderer's shape, #428). Cell text arrives ALREADY
+    // escaped (the whole brief was escaped upfront); inline() layers markdown on top.
+    // GFM: body rows shorter than the header pad with empty cells; excess is ignored.
+    function renderTable(head, rows, aligns) {
+      function cellHtml(tag, text, k) {
+        var a = aligns[k] ? ' style="text-align:' + aligns[k] + '"' : ""; // aligns ∈ {left,center,right} — a fixed, non-injectable set
+        return "<" + tag + a + ">" + inline(text) + "</" + tag + ">";
+      }
+      function rowHtml(cells, tag) {
+        var cs = [];
+        for (var k = 0; k < head.length; k++) cs.push(cellHtml(tag, cells[k] || "", k));
+        return "<tr>" + cs.join("") + "</tr>";
+      }
+      var thead = "<thead>" + rowHtml(head, "th") + "</thead>";
+      var tbody = rows.length ? "<tbody>" + rows.map(function (r) { return rowHtml(r, "td"); }).join("") + "</tbody>" : "";
+      return '<table class="gm-table">' + thead + tbody + "</table>";
+    }
     var out = [], list = null;
     function flush() { if (list) { out.push("<ul>" + list.join("") + "</ul>"); list = null; } }
     for (var i = 0; i < lines.length; i++) {
       var ln = lines[i];
+      // GFM pipe-table (#450): a header row with a '|' IMMEDIATELY followed by a delimiter
+      // row; the block runs until a blank or pipe-less line. Decision briefs carry cost
+      // tables and tradeoff matrices — raw pipes defeat the operator's reading surface.
+      if (ln.indexOf("|") !== -1 && i + 1 < lines.length && isTableDelimiter(lines[i + 1])) {
+        flush();
+        var headCells = splitTableRow(ln);
+        var aligns = tableAligns(lines[i + 1], headCells.length);
+        var bodyRows = [];
+        var j = i + 2;
+        for (; j < lines.length && lines[j].trim() !== "" && lines[j].indexOf("|") !== -1; j++) {
+          bodyRows.push(splitTableRow(lines[j]));
+        }
+        out.push(renderTable(headCells, bodyRows, aligns));
+        i = j - 1; // the for-loop's i++ advances past the last consumed row
+        continue;
+      }
       // ![alt](https://…) — an illustrative demo image (#405 Inc 2, "when available").
       var img = /^!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)\s*$/.exec(ln);
       var h = /^(#{1,3})\s+(.*)$/.exec(ln), li = /^\s*[-*]\s+(.*)$/.exec(ln);
