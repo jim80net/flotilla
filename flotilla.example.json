@@ -4,7 +4,7 @@
   "xo_agent": "xo",
   "_comment_alpha_xo": "Optional harness-portable trial: project-XO with explicit surface codex (see docs/coordinator-seat-swap-runbook.md). Not live by default — supervised trial gate applies.",
   "_comment_beta_xo": "Optional harness-portable trial: project-XO with explicit surface grok (see docs/coordinator-seat-swap-runbook.md). Not live by default — supervised trial gate applies.",
-  "_comment_adjutant": "Optional coordinator adjutant (#439): mechanical interrupt consumer bound via adjutant_for (legacy alias assistant_for). Fleet-internal — no owned channel. stackable_wakes defaults false until #438 scoping is enabled.",
+  "_comment_adjutant": "Optional coordinator adjutant (#439): example seats only — not live until pilot gate. Requires change_detector + liveness_ping_mode interval|consecutive (not none). stackable_wakes (phase 2) defaults false.",
   "agents": [
     { "name": "xo" },
     { "name": "xo-adj", "surface": "grok", "adjutant_for": "xo" },

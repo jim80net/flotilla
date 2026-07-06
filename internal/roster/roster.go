@@ -244,6 +244,12 @@ func Load(path string) (*Config, error) {
 		if a.Name == "" {
 			return nil, fmt.Errorf("roster %q has an agent with an empty name", path)
 		}
+		if err := validateSafeAgentName(path, a.Name, "agent name"); err != nil {
+			return nil, err
+		}
+		if err := validateSafeAgentName(path, a.adjutantTarget(), "adjutant_for target"); err != nil {
+			return nil, err
+		}
 		if seenName[a.Name] {
 			return nil, fmt.Errorf("roster %q has duplicate agent %q", path, a.Name)
 		}

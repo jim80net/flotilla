@@ -410,6 +410,15 @@ func cmdWatch(args []string) error {
 		leaderAckPath := *ackPath
 		layerBufferPath := roster.LayerBufferPath(rosterDir, xo)
 
+		drainAdjutantSeam := func() {
+			if primaryAdjutant == "" {
+				return
+			}
+			if brief, ok := adjutantSeamBrief(layerBufferPath, xo, rosterDir); ok {
+				injector.Enqueue(watch.Job{Agent: xo, Message: brief, Kind: watch.KindDetector})
+			}
+		}
+
 		wake := func(kind watch.WakeKind, reasons []string) {
 			var body string
 			target := xo
@@ -418,11 +427,6 @@ func cmdWatch(args []string) error {
 				// Judgment/continuation stays on the leader — adjutant observes, does not replace.
 				switch kind {
 				case watch.WakeContinuation:
-					if primaryAdjutant != "" {
-						if brief, ok := adjutantSeamBrief(layerBufferPath, xo, rosterDir); ok {
-							injector.Enqueue(watch.Job{Agent: xo, Message: brief, Kind: watch.KindDetector})
-						}
-					}
 					body = continuationPrompt
 				default:
 					body = backlogWakeBody(reasons, *backlogPath, ackInstr)
@@ -437,10 +441,12 @@ func cmdWatch(args []string) error {
 			default: // WakeMaterial
 				if primaryAdjutant != "" && !cfg.UrgentMaterial(reasons) {
 					if err := adjutantbuffer.Append(layerBufferPath, xo, reasons); err != nil {
-						log.Printf("flotilla watch: adjutant buffer append failed: %v", err)
+						log.Printf("flotilla watch: adjutant buffer append failed, falling back to leader wake: %v", err)
+						body = leaderMaterialBody(reasons, *settledPath, ackInstr)
+					} else {
+						target = primaryAdjutant
+						body = adjutantBufferedNoteBody(xo, len(reasons))
 					}
-					target = primaryAdjutant
-					body = adjutantBufferedNoteBody(xo, len(reasons))
 				} else {
 					body = leaderMaterialBody(reasons, *settledPath, ackInstr)
 				}
@@ -663,6 +669,7 @@ func cmdWatch(args []string) error {
 			},
 			MirrorOnFinish:            deskMirrorOnFinish(cfg, secrets, tr, firewall, alert, rosterDir),
 			CoordinatorMirrorOnFinish: coordinatorMirrorOnFinish(cfg, firewall, alert, rosterDir),
+			AdjutantSeamOnFinish:      drainAdjutantSeam,
 			IdleHoldOnFinish:          idleHoldOnFinish(cfg, idleHoldTracker, injector.Enqueue),
 			StrandedHandoffOnFinish:   strandedHandoffOnFinish(cfg, strandedTracker, injector.Enqueue),
 			IsCoordinator:             cfg.IsCoordinator,

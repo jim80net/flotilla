@@ -88,6 +88,35 @@ func TestUrgentMaterialMatch(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsUnsafeAgentNames(t *testing.T) {
+	cases := map[string]string{
+		"slash in name":  `{"agents": [{"name": "foo/bar"}]}`,
+		"dotdot in name": `{"agents": [{"name": "../xo"}]}`,
+		"slash adjutant target": `{
+			"agents": [{"name": "xo"}, {"name": "adj", "adjutant_for": "alpha/xo"}]
+		}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Load(writeTemp(t, body)); err == nil {
+				t.Fatalf("Load(%s) = nil error, want error", name)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsAdjutantWithoutPingMode(t *testing.T) {
+	body := `{
+		"change_detector": true,
+		"heartbeat_interval": "20m",
+		"liveness_ping_mode": "none",
+		"agents": [{"name": "xo"}, {"name": "xo-adj", "adjutant_for": "xo"}]
+	}`
+	if _, err := Load(writeTemp(t, body)); err == nil {
+		t.Fatal("expected error when adjutant configured with ping mode none")
+	}
+}
+
 func TestLayerAckPath(t *testing.T) {
 	got := LayerAckPath("/state", "alpha-xo")
 	want := "/state/flotilla-alpha-xo-alive"

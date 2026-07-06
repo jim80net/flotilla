@@ -39,9 +39,10 @@ func TestAdjutantBufferedNoteBody(t *testing.T) {
 	}
 }
 
-func TestLeaderPingBodyUnchangedShape(t *testing.T) {
-	got := leaderPingBody("/state/flotilla-xo-alive")
-	if !strings.Contains(got, "Liveness check") || !strings.Contains(got, "flotilla-xo-alive") {
-		t.Errorf("leader ping shape changed: %s", got)
+func TestLeaderPingBodyExactLegacyString(t *testing.T) {
+	const want = "[flotilla change-detector] Liveness check — reply with a one-line ack only; take no other action." +
+		"\n(To ack you are alive, run: touch /state/flotilla-xo-alive)"
+	if got := leaderPingBody("/state/flotilla-xo-alive"); got != want {
+		t.Errorf("leader ping changed\n got: %q\nwant: %q", got, want)
 	}
 }

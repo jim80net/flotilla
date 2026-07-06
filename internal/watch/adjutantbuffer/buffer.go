@@ -3,6 +3,7 @@ package adjutantbuffer
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,14 +76,14 @@ func FormatBrief(leader string, f File, charterMissing bool) string {
 	if charterMissing {
 		b.WriteString("Charter: not yet established — run first-presentation negotiation and write ")
 		b.WriteString(rosterCharterName(leader))
-		b.WriteString(" (liveness ack is required minimum).\n\n")
+		b.WriteString(" (evaluation-tick ack is required minimum).\n\n")
 	}
 	since := time.Since(oldest(f.Items))
-	fmt.Fprintf(&b, "Since your last seam (%s ago): %d item(s) buffered.\n\nNeeds you:\n", humanSince(since), len(f.Items))
+	fmt.Fprintf(&b, "Since your last seam (%s ago): %d buffered item(s) need your judgment.\n", humanSince(since), len(f.Items))
+	b.WriteString("(Mechanical handling by the adjutant is prompt-contract only in this increment — not yet fully automated.)\n\nNeeds you:\n")
 	for _, it := range f.Items {
 		fmt.Fprintf(&b, "  • %s\n", it.Reason)
 	}
-	b.WriteString("\nEscalation (0).")
 	return b.String()
 }
 
@@ -96,7 +97,9 @@ func load(path string) (File, error) {
 	}
 	var f File
 	if err := json.Unmarshal(raw, &f); err != nil {
-		return File{}, fmt.Errorf("parse buffer %q: %w", path, err)
+		log.Printf("flotilla watch: adjutant buffer %q corrupt, resetting: %v", path, err)
+		_ = os.Remove(path)
+		return File{}, nil
 	}
 	return f, nil
 }
@@ -109,7 +112,15 @@ func save(path string, f File) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, raw, 0o600)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		return fmt.Errorf("write buffer temp %q: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("rename buffer %q: %w", path, err)
+	}
+	return nil
 }
 
 func oldest(items []Item) time.Time {

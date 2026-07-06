@@ -62,6 +62,31 @@ func (c *Config) UrgentMaterial(reasons []string) bool {
 	return false
 }
 
+// HasAdjutant reports whether any agent declares adjutant_for (or legacy assistant_for).
+func (c *Config) HasAdjutant() bool {
+	for _, a := range c.Agents {
+		if a.adjutantTarget() != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// validateSafeAgentName rejects path separators and traversal in agent identifiers
+// used to build layer sidecar paths (LayerAckPath / LayerBufferPath / LayerCharterPath).
+func validateSafeAgentName(path, name, field string) error {
+	if name == "" {
+		return nil
+	}
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		return fmt.Errorf("roster %q: %s %q contains a path separator", path, field, name)
+	}
+	if name == "." || name == ".." || strings.Contains(name, "..") {
+		return fmt.Errorf("roster %q: %s %q contains path traversal", path, field, name)
+	}
+	return nil
+}
+
 func (c *Config) validateAdjutantBindings(path string) error {
 	seen := make(map[string]string) // coordinator → adjutant name
 	for _, a := range c.Agents {
@@ -82,6 +107,12 @@ func (c *Config) validateAdjutantBindings(path string) error {
 			return fmt.Errorf("roster %q: coordinators %q and %q both adjutant_for %q (at most one adjutant per coordinator)", path, prev, a.Name, target)
 		}
 		seen[target] = a.Name
+	}
+	if c.HasAdjutant() && c.ChangeDetector {
+		mode := c.LivenessPingMode
+		if mode == "" || mode == "none" {
+			return fmt.Errorf("roster %q: adjutant_for requires liveness_ping_mode interval or consecutive when change_detector is on (evaluation tick needs pings; none starves settled leaders)", path)
+		}
 	}
 	return nil
 }

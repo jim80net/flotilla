@@ -1,6 +1,7 @@
 package adjutantbuffer
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -24,6 +25,17 @@ func TestAppendDrainRoundTrip(t *testing.T) {
 	}
 	if Len(path) != 0 {
 		t.Fatal("buffer should be empty after drain")
+	}
+}
+
+func TestLoadResetsCorruptBuffer(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "flotilla-xo-buffer.json")
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if Len(path) != 0 {
+		t.Fatalf("corrupt buffer should reset to empty, len=%d", Len(path))
 	}
 }
 

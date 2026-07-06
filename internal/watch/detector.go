@@ -114,6 +114,10 @@ type DetectorConfig struct {
 	// XOAgent completes Working→Idle (the coordinator finish hook). Project-XOs and execution desks
 	// use MirrorOnFinish instead. Same off-mutex / best-effort discipline. Default nil ⇒ inert.
 	CoordinatorMirrorOnFinish func(agent string)
+	// AdjutantSeamOnFinish fires when XOAgent completes Working→Idle — the leader seam for
+	// adjutant buffer drain (#439). Ping-independent (unlike WakeContinuation, which stops when
+	// settled). Default nil ⇒ inert.
+	AdjutantSeamOnFinish func()
 	// IdleHoldOnFinish is the idle-hold antipattern side-effect (#216): invoked once
 	// for each NON-XO desk that completed a unit of work this tick (the same trigger
 	// as MirrorOnFinish). The caller reads the desk's turn-final, runs the mechanical
@@ -814,9 +818,9 @@ func (d *Detector) Tick() {
 	// consults only an already-computed boolean and never touches the filesystem. Inert (nil) when the
 	// feature is off (HeartbeatEnabled nil) or the warrant seam is unwired.
 	warrant := d.deskWarrantSnapshot()
-	pendingRotate, pendingWakes, pendingMirrors, pendingCoordinatorMirrors, pendingDelegation, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit, pendingAutoSwitch, pendingTurnEnds := d.tickLocked(warrant)
+	pendingRotate, pendingWakes, pendingMirrors, pendingCoordinatorMirrors, pendingDelegation, pendingAdjutantSeam, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit, pendingAutoSwitch, pendingTurnEnds := d.tickLocked(warrant)
 	d.ingestActivity(pendingTurnEnds)
-	d.runTail(pendingRotate, pendingWakes, pendingMirrors, pendingCoordinatorMirrors, pendingDelegation)
+	d.runTail(pendingRotate, pendingWakes, pendingMirrors, pendingCoordinatorMirrors, pendingDelegation, pendingAdjutantSeam)
 	d.runAutoSwitch(pendingAutoSwitch)
 	d.runRateLimitProbes(pendingRateLimit)
 	// Visibility-synthesis (B2) runs AFTER runTail and OFF d.mu: its materiality read is BLOCKING
@@ -846,7 +850,10 @@ func (d *Detector) Tick() {
 // BEFORE the continuation wake is enqueued, so the Injector — which re-acquires the same txn
 // lock for the delivery — always lands the continuation AFTER the rotate, never letting a
 // trailing /clear wipe a freshly delivered continuation.
-func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors, coordinatorMirrors []string, delegationNudges []string) {
+func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors, coordinatorMirrors []string, delegationNudges []string, pendingAdjutantSeam bool) {
+	if pendingAdjutantSeam && d.cfg.AdjutantSeamOnFinish != nil {
+		d.cfg.AdjutantSeamOnFinish()
+	}
 	if pendingRotate && d.cfg.Rotate != nil {
 		if err := d.cfg.Rotate(); err != nil && !errors.Is(err, surface.ErrRestartRequired) {
 			log.Printf("flotilla watch: XO context rotate failed: %v (continuing without rotate)", err)
@@ -1033,7 +1040,7 @@ func (d *Detector) persist() {
 // tickLocked runs the lock-free-pure state machine under d.mu and RETURNS the side effects to
 // perform after unlock (a pending rotate + the ordered wakes). It is the single per-interval
 // writer of detector state; OperatorWake is the only other writer and shares the mutex.
-func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pendingWakes []deferredWake, pendingMirrors, pendingCoordinatorMirrors []string, pendingDelegation []string, pendingSynth []synthEligible, pendingDeskBeats []string, pendingDeskEscalations []string, pendingRateLimit rateLimitWork, pendingAutoSwitch []RateLimitAutoSwitchCandidate, pendingTurnEnds []string) {
+func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pendingWakes []deferredWake, pendingMirrors, pendingCoordinatorMirrors []string, pendingDelegation []string, pendingAdjutantSeam bool, pendingSynth []synthEligible, pendingDeskBeats []string, pendingDeskEscalations []string, pendingRateLimit rateLimitWork, pendingAutoSwitch []RateLimitAutoSwitchCandidate, pendingTurnEnds []string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -1119,6 +1126,7 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 
 	// 4. External material change (every desk EXCEPT the XO — H2). It re-engages a
 	//    settled XO and resets the self-continuation cap.
+	xoSeam := xoFinishedTurn(prev, cur, d.cfg.XOAgent)
 	if ext, reasons := externalMaterial(prev, cur, d.cfg.XOAgent); ext {
 		d.selfCont = 0
 		cur.XOSettled = false
@@ -1130,7 +1138,7 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 		cur.XOSettled = false
 		wake(WakeMaterial, rateReasons)
 		pendingAutoSwitch = autoCandidates
-	} else if xoFinishedTurn(prev, cur, d.cfg.XOAgent) && !cur.XOSettled {
+	} else if xoSeam && !cur.XOSettled {
 		// 5. XO self-continuation — only when nothing external fired this tick (an
 		//    external change already covers advancing the XO and resets the cap).
 		d.continueXO(&cur, wake, requestRotate)
@@ -1170,7 +1178,8 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 	//    cubic-P1 at-least-once).
 	d.snap = cur
 	pendingRateLimit = d.rateLimitWorkLocked(cur)
-	return pendingRotate, pendingWakes, pendingMirrors, pendingCoordinatorMirrors, pendingDelegation, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit, pendingAutoSwitch, pendingTurnEnds
+	pendingAdjutantSeam = xoSeam && d.cfg.AdjutantSeamOnFinish != nil
+	return pendingRotate, pendingWakes, pendingMirrors, pendingCoordinatorMirrors, pendingDelegation, pendingAdjutantSeam, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit, pendingAutoSwitch, pendingTurnEnds
 }
 
 // deskWarrantSnapshot is the #189 PHASE-1 read, run OFF d.mu from Tick BEFORE tickLocked acquires the
