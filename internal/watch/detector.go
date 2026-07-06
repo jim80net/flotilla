@@ -99,9 +99,17 @@ type DetectorConfig struct {
 	SignalHash func() (string, bool)
 	// AckAge returns the wall-clock age of the XO's last liveness ack.
 	AckAge func() time.Duration
-	// Wake enqueues an XO wake of the given kind with human-readable reasons; the
+	// Wake enqueues a primary-layer wake of the given kind with human-readable reasons; the
 	// caller composes the prompt (and appends the ack instruction — L1).
 	Wake func(kind WakeKind, reasons []string)
+	// WakeLayer routes a wake to a specific coordinator layer (#438 stackable_wakes). Default
+	// nil ⇒ inert; when StackableWakes is false the detector never calls this seam.
+	WakeLayer func(owner string, kind WakeKind, reasons []string)
+	// StackableWakes opts into per-layer material routing (#438). Default false ⇒ Wake only.
+	StackableWakes bool
+	// OwningXO resolves the coordinator that owns a desk for stackable routing. Default nil ⇒
+	// inert even when StackableWakes is true (fails safe to primary-only Wake).
+	OwningXO func(agent string) string
 	// MirrorOnFinish is the per-desk visibility side-effect: invoked once for each NON-XO desk that
 	// completed a unit of work this tick (a confirmed Working→Idle transition). The caller mirrors
 	// that desk's turn-final output to its home Discord channel. Like the wake/rotate side-effects it
@@ -776,6 +784,7 @@ func (d *Detector) ingestActivity(pendingTurnEnds []string) {
 type deferredWake struct {
 	kind    WakeKind
 	reasons []string
+	owner   string // non-empty ⇒ WakeLayer target; empty ⇒ primary Wake
 }
 
 // synthEligible is one cadence-eligible owed synthesizing agent, decided UNDER d.mu in
@@ -862,7 +871,9 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors, co
 		d.cfg.AdjutantSeamOnFinish()
 	}
 	for _, w := range wakes {
-		if d.cfg.Wake != nil {
+		if w.owner != "" && d.cfg.WakeLayer != nil {
+			d.cfg.WakeLayer(w.owner, w.kind, w.reasons)
+		} else if d.cfg.Wake != nil {
 			d.cfg.Wake(w.kind, w.reasons)
 		}
 	}
@@ -1051,6 +1062,28 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 		woke = true
 		pendingWakes = append(pendingWakes, deferredWake{kind: kind, reasons: reasons})
 	}
+	wakeLayer := func(owner string, kind WakeKind, reasons []string) {
+		woke = true
+		pendingWakes = append(pendingWakes, deferredWake{kind: kind, reasons: reasons, owner: owner})
+	}
+	deliverMaterial := func(reasons []string) {
+		if !d.cfg.StackableWakes || d.cfg.OwningXO == nil || d.cfg.WakeLayer == nil {
+			wake(WakeMaterial, reasons)
+			return
+		}
+		primary, byOwner := groupMaterialByOwner(reasons, d.cfg.OwningXO)
+		if len(primary) > 0 {
+			wake(WakeMaterial, primary)
+		}
+		owners := make([]string, 0, len(byOwner))
+		for owner := range byOwner {
+			owners = append(owners, owner)
+		}
+		sort.Strings(owners)
+		for _, owner := range owners {
+			wakeLayer(owner, WakeMaterial, byOwner[owner])
+		}
+	}
 	requestRotate := func() { pendingRotate = true }
 
 	// 1. Gather current signals. Signal absent/unreadable carries the prior hash
@@ -1132,13 +1165,13 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 	if ext, reasons := externalMaterial(prev, cur, d.cfg.XOAgent); ext {
 		d.selfCont = 0
 		cur.XOSettled = false
-		wake(WakeMaterial, reasons)
+		deliverMaterial(reasons)
 	} else if rateReasons, autoCandidates := d.rateLimitMaterialFromPendingLocked(); len(rateReasons) > 0 {
 		// 4b. Provider rate-limit (#204/#205): wake from the PREVIOUS tick's off-mutex probes;
 		// auto-switch candidates dispatch OFF d.mu in runAutoSwitch.
 		d.selfCont = 0
 		cur.XOSettled = false
-		wake(WakeMaterial, rateReasons)
+		deliverMaterial(rateReasons)
 		pendingAutoSwitch = autoCandidates
 	} else if xoSeam && !cur.XOSettled {
 		// 5. XO self-continuation — only when nothing external fired this tick (an

@@ -454,19 +454,18 @@ func cmdWatch(args []string) error {
 					body = leaderPingBody(leaderAckPath)
 				}
 			default: // WakeMaterial
-				if primaryAdjutant != "" && !cfg.UrgentMaterial(reasons) {
-					if err := adjutantbuffer.Append(layerBufferPath, xo, reasons); err != nil {
-						log.Printf("flotilla watch: adjutant buffer append failed, falling back to leader wake: %v", err)
-						body = leaderMaterialBody(reasons, *settledPath, ackInstr)
-					} else {
-						target = primaryAdjutant
-						body = adjutantBufferedNoteBody(xo, len(reasons))
-					}
-				} else {
-					body = leaderMaterialBody(reasons, *settledPath, ackInstr)
-				}
+				enqueueLayerMaterialWake(cfg, rosterDir, xo, xo, reasons, ackInstr, *settledPath, injector.Enqueue)
+				return
 			}
 			injector.Enqueue(watch.Job{Agent: target, Message: body, Kind: watch.KindDetector})
+		}
+
+		wakeLayer := func(owner string, kind watch.WakeKind, reasons []string) {
+			if kind != watch.WakeMaterial {
+				log.Printf("flotilla watch: ignoring unexpected layer wake kind %v for %q", kind, owner)
+				return
+			}
+			enqueueLayerMaterialWake(cfg, rosterDir, xo, owner, reasons, ackInstr, *settledPath, injector.Enqueue)
 		}
 
 		// wakeAgent is the PARALLEL agent-targeted wake seam (visibility synthesis, B2). It enqueues a
@@ -721,6 +720,9 @@ func cmdWatch(args []string) error {
 			DeskHeartbeatEveryTicks: 1,
 			Activity:                activity,
 			AdaptiveInterval:        adaptivePolicy,
+			StackableWakes:          cfg.StackableWakes,
+			OwningXO:                func(agent string) string { return cfg.OwningXO(agent, xo) },
+			WakeLayer:               wakeLayer,
 		}
 		if autoSwitchOn {
 			probeMaterial := rateLimitMaterial(cfg)
@@ -1111,6 +1113,37 @@ func adjutantDualObservationContract(leader string) string {
 		"1. Desk stream — subtree desks under " + leader + ": pane Assess state, finish-edges, crash/shell.\n" +
 		"2. Leader stream — " + leader + ": Working/Idle, settle/awaiting markers, turn-final tail.\n" +
 		"Buffer when leader is Working without await marker; inject consolidated briefs at Idle/settled seams."
+}
+
+// enqueueLayerMaterialWake delivers a material wake to a coordinator layer (#438 stackable_wakes).
+// When an adjutant is configured and the material is not urgent-class, items buffer at the seam.
+func enqueueLayerMaterialWake(cfg *roster.Config, rosterDir, primaryXO, owner string, reasons []string, primaryAckInstr, primarySettledPath string, enqueue func(watch.Job)) {
+	adjutant := cfg.AdjutantFor(owner)
+	leaderAckPath := roster.ResolveLayerClockPath(rosterDir, owner, "", "flotilla-xo-alive", "alive")
+	settledPath := roster.ResolveLayerClockPath(rosterDir, owner, "", "flotilla-xo-settled", "settled")
+	if owner == primaryXO {
+		settledPath = primarySettledPath
+	}
+	bufferPath := roster.LayerBufferPath(rosterDir, owner)
+	ackInstr := primaryAckInstr
+	if owner != primaryXO {
+		ackInstr = "\n(To ack you are alive, run: touch " + leaderAckPath + ")"
+	}
+
+	target := owner
+	var body string
+	if adjutant != "" && !cfg.UrgentMaterial(reasons) {
+		if err := adjutantbuffer.Append(bufferPath, owner, reasons); err != nil {
+			log.Printf("flotilla watch: adjutant buffer append failed for %q, falling back to leader wake: %v", owner, err)
+			body = leaderMaterialBody(reasons, settledPath, ackInstr)
+		} else {
+			target = adjutant
+			body = adjutantBufferedNoteBody(owner, len(reasons))
+		}
+	} else {
+		body = leaderMaterialBody(reasons, settledPath, ackInstr)
+	}
+	enqueue(watch.Job{Agent: target, Message: body, Kind: watch.KindDetector})
 }
 
 // leaderMaterialBody is the legacy material-change wake to the coordinator pane.

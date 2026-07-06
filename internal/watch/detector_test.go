@@ -165,6 +165,80 @@ func TestDetectorColdStartWakesOnceThenQuiet(t *testing.T) {
 	}
 }
 
+func TestDetectorStackableWakesScopesSubtreeToOwner(t *testing.T) {
+	f := newFixture()
+	cfg := f.config("cos", []string{"cos", "alpha-xo", "backend"}, 3, "none")
+	cfg.StackableWakes = true
+	cfg.OwningXO = func(agent string) string {
+		if agent == "backend" {
+			return "alpha-xo"
+		}
+		return "cos"
+	}
+	var layerWakes []struct {
+		owner   string
+		kind    WakeKind
+		reasons []string
+	}
+	cfg.WakeLayer = func(owner string, kind WakeKind, reasons []string) {
+		f.mu.Lock()
+		layerWakes = append(layerWakes, struct {
+			owner   string
+			kind    WakeKind
+			reasons []string
+		}{owner, kind, reasons})
+		f.mu.Unlock()
+	}
+	d := newDet(t, f, cfg)
+	seed(d, map[string]surface.State{"cos": surface.StateIdle, "alpha-xo": surface.StateIdle, "backend": surface.StateWorking}, "h0")
+	f.set("backend", surface.StateIdle)
+	d.Tick()
+
+	if f.wakeCount() != 0 {
+		t.Fatalf("primary Wake must not fire for subtree-only material, got %+v", f.wakes)
+	}
+	if len(layerWakes) != 1 || layerWakes[0].owner != "alpha-xo" {
+		t.Fatalf("layer wake = %+v, want alpha-xo", layerWakes)
+	}
+}
+
+func TestDetectorStackableWakesFleetWideStaysPrimary(t *testing.T) {
+	f := newFixture()
+	cfg := f.config("cos", []string{"cos", "backend"}, 3, "none")
+	cfg.StackableWakes = true
+	cfg.OwningXO = func(string) string { return "cos" }
+	cfg.WakeLayer = func(string, WakeKind, []string) {
+		t.Fatal("fleet-wide material must not use WakeLayer")
+	}
+	d := newDet(t, f, cfg)
+	seed(d, map[string]surface.State{"cos": surface.StateIdle, "backend": surface.StateIdle}, "h0")
+	f.signal = "h1"
+	d.Tick()
+	if f.wakeCount() != 1 || f.lastWake().reasons[0] != "external signal changed" {
+		t.Fatalf("signal wake = %+v, want primary external signal", f.wakes)
+	}
+}
+
+func TestDetectorStackableWakesOffPreservesLegacyRouting(t *testing.T) {
+	f := newFixture()
+	cfg := f.config("cos", []string{"cos", "alpha-xo", "backend"}, 3, "none")
+	cfg.StackableWakes = false
+	cfg.OwningXO = func(agent string) string {
+		if agent == "backend" {
+			return "alpha-xo"
+		}
+		return "cos"
+	}
+	cfg.WakeLayer = func(string, WakeKind, []string) { t.Fatal("WakeLayer must be inert when flag off") }
+	d := newDet(t, f, cfg)
+	seed(d, map[string]surface.State{"cos": surface.StateIdle, "alpha-xo": surface.StateIdle, "backend": surface.StateWorking}, "h0")
+	f.set("backend", surface.StateIdle)
+	d.Tick()
+	if f.wakeCount() != 1 || f.lastWake().kind != WakeMaterial {
+		t.Fatalf("legacy routing = %+v", f.wakes)
+	}
+}
+
 func TestDetectorDeskFinishedWakesTargeted(t *testing.T) {
 	f := newFixture()
 	cfg := f.config("xo", []string{"xo", "backend"}, 3, "none")
