@@ -394,12 +394,14 @@ func TestDashOperatorUX421(t *testing.T) {
 		t.Error("goals.js must drop the wide →desk button (#421)")
 	}
 	html := doGet(t, srv, "/").Body.String()
-	if !strings.Contains(html, `id="hdr-decisions"`) || !strings.Contains(html, `id="conv-queue-scope"`) {
-		t.Error("index.html must carry header decisions + scoped queue labels — #421")
+	// #429: the decisions entry moved from a header button (id="hdr-decisions") to a
+	// first-class tab; the always-reachable entry point is now the tab itself.
+	if !strings.Contains(html, `id="tab-decisions"`) || !strings.Contains(html, `id="conv-queue-scope"`) {
+		t.Error("index.html must carry the decisions tab + scoped queue labels — #421/#429")
 	}
 	css := doGet(t, srv, "/static/dash.css").Body.String()
-	if !strings.Contains(css, ".gnode-kebab") || !strings.Contains(css, ".hdr-decisions") {
-		t.Error("dash.css must style kebab menu + header decisions — #421")
+	if !strings.Contains(css, ".gnode-kebab") || !strings.Contains(css, ".hdr-decisions-count") {
+		t.Error("dash.css must style kebab menu + the decisions awaiting-count badge — #421/#429")
 	}
 	item := ParseQueueItemDisplay("- [in-flight] Do thing @alpha")
 	if item.Scope != "alpha" {
@@ -644,20 +646,29 @@ func TestGoalsCellRenames405(t *testing.T) {
 	}
 }
 
-// TestDecisionPage405 locks #405 Inc 2 (the operator's centerpiece): the "Awaiting you" tile
-// opens a decision page — a reading room for every open decision, formatting the canonical
-// 6-element briefs with references (links) and demo images inline, each showing which goal it drives.
+// TestDecisionPage405 locks #405 Inc 2 (the operator's centerpiece) as reshaped by #429:
+// the decision reading room is a first-class TAB rendering as a full page — no modal, no
+// secondary scrollbar. It formats the canonical 6-element briefs with references (links)
+// and demo images inline, each decision showing which goal it drives.
 func TestDecisionPage405(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 	srv, _ := newTestServer(t, singleFleetRoster, now)
 	html := doGet(t, srv, "/").Body.String()
-	if !strings.Contains(html, `id="goals-decisions"`) || !strings.Contains(html, `id="gdec-list"`) {
-		t.Error("index.html must carry the decision-page surface (#goals-decisions / #gdec-list) — #405 Inc 2")
+	if !strings.Contains(html, `id="view-decisions"`) || !strings.Contains(html, `id="gdec-list"`) {
+		t.Error("index.html must carry the decision-page view (#view-decisions / #gdec-list) — #405 Inc 2 / #429")
+	}
+	// #429: the Decisions entry is a real role="tab" SPA tab, and the old modal is GONE —
+	// a leftover #goals-decisions dialog would mean the refactor shipped both surfaces.
+	if !strings.Contains(html, `id="tab-decisions" class="tab" data-view="decisions" role="tab"`) {
+		t.Error(`index.html must carry the Decisions tab as a role="tab" SPA view switch — #429`)
+	}
+	if strings.Contains(html, `id="goals-decisions"`) || strings.Contains(html, "data-gdec-close") {
+		t.Error("index.html must NOT carry the retired decisions modal (#goals-decisions) — #429")
 	}
 	js := doGet(t, srv, "/static/goals.js").Body.String()
 	for _, marker := range []string{
 		"gatherDecisions",     // collects every open decision fleet-wide
-		"openDecisions",       // opens the reading room
+		"openDecisions",       // paints the reading room page
 		"data-open-decisions", // the Awaiting-you tile trigger
 		"gdec-ctx-link",       // "Drives" — which goal the decision drives (linked)
 		"gm-brief-img",        // demo images rendered in a brief
@@ -670,8 +681,23 @@ func TestDecisionPage405(t *testing.T) {
 	if !strings.Contains(js, `rel="noopener noreferrer"`) {
 		t.Error("goals.js renderBrief must render reference links (http(s)-restricted anchors) — #405 Inc 2")
 	}
-	if css := doGet(t, srv, "/static/dash.css").Body.String(); !strings.Contains(css, ".gdec-sheet") || !strings.Contains(css, ".gdec-card") {
-		t.Error("dash.css must style the decision reading room (.gdec-sheet/.gdec-card) — #405 Inc 2")
+	// #429: dash.js owns the view switch (showView("decisions") repaints the page).
+	djs := doGet(t, srv, "/static/dash.js").Body.String()
+	if !strings.Contains(djs, `"decisions"`) || !strings.Contains(djs, "openDecisionsView") {
+		t.Error(`dash.js must route the decisions view (VIEWS + openDecisionsView) — #429`)
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	if !strings.Contains(css, ".gdec-list") || !strings.Contains(css, ".gdec-card") {
+		t.Error("dash.css must style the decision reading room (.gdec-list/.gdec-card) — #405 Inc 2")
+	}
+	// #429: no modal chrome and no inner scrollbar — the document owns the one scroll.
+	if strings.Contains(css, ".gdec-sheet") || strings.Contains(css, ".gdec-backdrop") {
+		t.Error("dash.css must NOT carry the retired decisions modal chrome (.gdec-sheet/.gdec-backdrop) — #429")
+	}
+	if gi := strings.Index(css, ".gdec-list"); gi >= 0 {
+		if line := css[gi : gi+strings.Index(css[gi:], "\n")]; strings.Contains(line, "overflow-y") {
+			t.Error("the decisions list must not own a secondary scrollbar (overflow-y) — #429")
+		}
 	}
 }
 
@@ -758,7 +784,8 @@ func TestDashInc5Shell405(t *testing.T) {
 	// showView must call markTabViewed so the dot clears when the operator opens a tab.
 	if si := strings.Index(js, "function showView"); si >= 0 {
 		// use a generous window — the function body includes several long comment lines
-		if !strings.Contains(js[si:si+900], "markTabViewed") {
+		// (widened for the #429 decisions-tab branch added to the function body)
+		if !strings.Contains(js[si:si+1600], "markTabViewed") {
 			t.Error("dash.js showView must call markTabViewed to clear the unseen dot on tab open — #405 Inc 5 item 9")
 		}
 	}

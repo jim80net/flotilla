@@ -256,8 +256,10 @@
         '<div class="gtile-d">' + escapeHtml(t.d) + "</div>" +
         "</div>";
     }).join("");
+    // #429: the awaiting-count badge lives on the Decisions TAB (the reading room is a
+    // first-class view, not a header-button modal). Same hot/badge semantics as before.
     var hdrCount = q("hdr-decisions-count");
-    var hdrBtn = q("hdr-decisions");
+    var hdrBtn = q("tab-decisions");
     var awaiting = c.awaiting || 0;
     if (hdrCount && hdrBtn) {
       if (awaiting > 0) {
@@ -1445,11 +1447,14 @@
       '<div class="gdec-brief gm-brief-full">' + body + "</div>" +
       "</article>";
   }
-  var decisionsReturn = null;
   function indexGoalsNodes(doc) {
     nodeById = {};
     (Array.isArray(doc.goals) ? doc.goals : []).forEach(function (n) { nodeById[n.id] = n; });
   }
+  // #429: the reading room is a first-class TAB, not a modal. openDecisions PAINTS the
+  // full-page list into #view-decisions — dash.js's showView("decisions") calls it on
+  // every tab open, so the list is fresh per visit. No open/close state, no focus trap,
+  // no Esc-close: the tab strip owns navigation and the document owns the one scroll.
   function openDecisions() {
     function paint() {
       var decs = gatherDecisions();
@@ -1461,13 +1466,6 @@
       }
       var titleEl = q("gdec-title");
       if (titleEl) titleEl.textContent = decs.length ? ("Decisions awaiting you · " + decs.length) : "Decisions awaiting you";
-      var m = q("goals-decisions");
-      if (!m) return;
-      decisionsReturn = document.activeElement;
-      m.classList.add("open");
-      m.setAttribute("aria-hidden", "false");
-      var close = m.querySelector(".gdec-close");
-      if (close) close.focus();
     }
     if (Object.keys(nodeById).length) { paint(); return; }
     getJSON("/api/goals").then(function (doc) {
@@ -1476,14 +1474,6 @@
       renderSituation(doc);
       paint();
     }).catch(function () { paint(); });
-  }
-  function closeDecisions() {
-    var m = q("goals-decisions");
-    if (!m || !m.classList.contains("open")) return;
-    m.classList.remove("open");
-    m.setAttribute("aria-hidden", "true");
-    if (decisionsReturn && decisionsReturn.focus && document.contains(decisionsReturn)) decisionsReturn.focus({ preventScroll: true });
-    decisionsReturn = null;
   }
 
   function closeAllGnodeMenus() {
@@ -1683,16 +1673,9 @@
         }
       });
     }
-    var decEl = q("goals-decisions");
-    if (decEl) decEl.addEventListener("click", function (e) {
-      if (e.target.closest("[data-gdec-close]") || e.target.classList.contains("goals-decisions")) { closeDecisions(); return; }
-      var goto = e.target.closest("[data-gdec-goto]");
-      if (goto) { closeDecisions(); openDrawer(goto.getAttribute("data-gdec-goto")); }
-    });
     document.addEventListener("keydown", function (e) {
       if (e.key !== "Escape" || !isVisible()) return;
       if (help) help.setAttribute("aria-expanded", "false"); // Esc dismisses the tooltip too
-      if (q("goals-decisions") && q("goals-decisions").classList.contains("open")) { closeDecisions(); return; }
       if (q("goals-modal") && q("goals-modal").classList.contains("open")) { closeModal(); return; }
       // #405 Inc 3 Item 5: Escape clears the stat-cell highlight before closing the drawer.
       if (activeCellTone) { clearFilter(); return; }
@@ -1995,7 +1978,25 @@
     }, 120);
   });
 
-  // Prime situation counts for the header decisions badge before the Goals tab opens.
+  // #429: a decision card's "Drives" link jumps into the Goals map and opens that goal's
+  // drawer. Wired ONCE at load (the list container is static chrome in index.html) — the
+  // Decisions tab can be opened before the Goals tab has ever rendered, so the drawer-open
+  // goes through restoreNode, which QUEUES the target until a render populates the map
+  // (the same deferred path Back/Forward uses — cubic #351 P2).
+  (function wireDecisionsPage() {
+    var list = q("gdec-list");
+    if (!list) return;
+    list.addEventListener("click", function (e) {
+      var goto = e.target.closest("[data-gdec-goto]");
+      if (!goto) return;
+      var id = goto.getAttribute("data-gdec-goto");
+      if (D.showView) D.showView("goals"); // renders the map if this is its first open
+      restoreNode(id);
+      if (D.pushNav) D.pushNav({ view: "goals", node: id });
+    });
+  })();
+
+  // Prime situation counts for the Decisions tab badge before the Goals tab opens.
   getJSON("/api/goals").then(function (doc) {
     cache = cache || doc;
     renderSituation(doc);

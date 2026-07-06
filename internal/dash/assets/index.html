@@ -35,7 +35,7 @@
         <span class="brand-dash">conversations</span>
       </div>
     </div>
-    <!-- The three SPA views are a real tablist (only role="tab" elements are valid
+    <!-- The four SPA views are a real tablist (only role="tab" elements are valid
          tablist children — cubic #416 P1). The Parade "tab" is a navigation-out LINK,
          not a tab-panel switch, so it sits OUTSIDE the tablist as a sibling in the nav
          while staying visually part of the tab strip. -->
@@ -44,14 +44,14 @@
         <button id="tab-conversations" class="tab active" data-view="conversations" role="tab" aria-selected="true" aria-controls="view-conversations">Conversations<span class="unseen-dot" id="dot-conversations" aria-label="New content in Conversations" aria-hidden="true"></span></button>
         <button id="tab-goals" class="tab" data-view="goals" role="tab" aria-selected="false" aria-controls="view-goals">Goals<span class="unseen-dot" id="dot-goals" aria-label="New content in Goals" aria-hidden="true"></span></button>
         <button id="tab-issues" class="tab" data-view="issues" role="tab" aria-selected="false" aria-controls="view-issues">Issues<span class="unseen-dot" id="dot-issues" aria-label="New content in Issues" aria-hidden="true"></span></button>
+        <!-- #429: Decisions is a first-class SPA tab (was a modal opened from a header
+             button — the modal wasted real estate behind a secondary scrollbar). It keeps
+             the live awaiting-count badge instead of an unseen dot: a count is the signal. -->
+        <button id="tab-decisions" class="tab" data-view="decisions" role="tab" aria-selected="false" aria-controls="view-decisions">Decisions<span id="hdr-decisions-count" class="hdr-decisions-count" hidden></span></button>
       </span>
       <!-- Parade opens the standalone parade page at /parade — a link, not an SPA
            panel toggle, so it is NOT a role="tab" child of the tablist. -->
       <a id="tab-parade" class="tab tab-parade" href="/parade">Parade<span class="unseen-dot" id="dot-parade" aria-label="New content in Parade" aria-hidden="true"></span></a>
-      <!-- #421: decisions/blockers reading room — reachable from every view, not buried in Goals. -->
-      <button id="hdr-decisions" class="tab hdr-decisions" type="button" data-open-decisions title="Open decisions and blockers awaiting you">
-        Decisions<span id="hdr-decisions-count" class="hdr-decisions-count" hidden></span>
-      </button>
     </nav>
     <div class="bar-meta">
       <span class="meta-label">bound</span>
@@ -232,19 +232,22 @@
         </div>
       </div>
     </div>
+  </main>
 
-    <!-- #405 Inc 2: the decision page — a full reading room for every open decision, opened from
-         the "Awaiting you" situation tile. Well-formatted beats feature-rich. -->
-    <div id="goals-decisions" class="goals-decisions" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="gdec-title">
-      <div class="gdec-backdrop" data-gdec-close></div>
-      <div class="gdec-sheet" role="document">
-        <header class="gdec-head">
-          <h2 id="gdec-title" class="gdec-title">Decisions awaiting you</h2>
-          <button class="gdec-close" type="button" data-gdec-close aria-label="Close decisions">&times;</button>
-        </header>
-        <div id="gdec-list" class="gdec-list"></div>
+  <!-- #429: the decision page (#405 Inc 2's reading room) is a first-class TAB rendering
+       as a FULL PAGE — no modal, no backdrop, no secondary scrollbar; the document owns
+       the one scroll. Reached from the top nav, the goals "Awaiting you" tile, and any
+       [data-open-decisions] trigger. Well-formatted beats feature-rich. -->
+  <main id="view-decisions" class="view wrap hidden" aria-label="Decisions awaiting you">
+    <section class="panel decisions-panel">
+      <div class="panel-head">
+        <div>
+          <h2 id="gdec-title">Decisions awaiting you</h2>
+          <p class="panel-desc">Every open decision and blocker, fleet-wide — each shows the goal it drives, then its full brief</p>
+        </div>
       </div>
-    </div>
+      <div id="gdec-list" class="gdec-list"></div>
+    </section>
   </main>
 
   <main id="view-issues" class="view wrap hidden">
