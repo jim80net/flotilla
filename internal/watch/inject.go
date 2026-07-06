@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/outbox"
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
@@ -62,6 +63,9 @@ const (
 	// KindDetector is a change-detector wake or a desk-heartbeat/nudge beat
 	// (audit-suppressed; a tick is dropped when busy and never escalates).
 	KindDetector JobKind = "detector"
+	// KindSend is a deferred inter-agent `flotilla send` swept from a per-sender outbox (#475).
+	// Like a relay it is deferred-not-dropped when busy, but it does not escalate to the operator.
+	KindSend JobKind = "send"
 )
 
 // Job is one delivery: a message destined for an agent's pane.
@@ -88,6 +92,8 @@ type Job struct {
 	enqueuedAt time.Time
 	// lastStaleAlert is when the last periodic stale escalation fired. Internal.
 	lastStaleAlert time.Time
+	// Sender is the originating agent for KindSend jobs (keys the per-sender outbox file).
+	Sender string
 }
 
 // SendFunc delivers a message to an agent's pane and CONFIRMS a turn started. Production
@@ -118,7 +124,10 @@ type Injector struct {
 	escalate  func(string)             // optional: a LOUD operator alert for a failed/undeliverable relay
 	reEnqueue func(Job, time.Duration) // how a deferred relay is re-enqueued after a delay; injectable for tests
 	queue     relayQueueStore          // optional: disk-backed pending queue for deferred operator relays (#286)
-	now       func() time.Time         // clock for stale escalation; nil ⇒ time.Now()
+	rosterDir string                   // roster directory for per-sender outbox persistence (#475)
+	onSend       func(sender, recipient, message string) // optional: post-confirm hook for swept sends (ledger)
+	onOutboxDone func(sender, id string)               // optional: clear in-flight sweep guard (#475)
+	now          func() time.Time                      // clock for stale escalation; nil ⇒ time.Now()
 }
 
 // SetRelaySend installs a distinct send path for RELAY-kind jobs (the operator-message kind), used to
@@ -140,6 +149,15 @@ func (in *Injector) SetEscalate(escalate func(string)) { in.escalate = escalate 
 // SetRelayQueue wires the disk-backed pending operator-relay queue (#286). Deferred busy
 // relays are upserted; confirmed deliveries remove by MessageID. Must be set before Start.
 func (in *Injector) SetRelayQueue(path string) { in.queue = newRelayQueueStore(path) }
+
+// SetRosterDir wires the roster directory for per-sender outbox persistence (#475).
+func (in *Injector) SetRosterDir(dir string) { in.rosterDir = dir }
+
+// SetSendDelivered installs a hook called after a CONFIRMED KindSend delivery (e.g. ledger append).
+func (in *Injector) SetSendDelivered(fn func(sender, recipient, message string)) { in.onSend = fn }
+
+// SetOutboxDone installs a hook called when a KindSend job finishes (success or terminal failure).
+func (in *Injector) SetOutboxDone(fn func(sender, id string)) { in.onOutboxDone = fn }
 
 // NewInjector builds an injector with the given send function and queue buffer.
 func NewInjector(send SendFunc, buffer int) *Injector {
@@ -187,20 +205,29 @@ func (in *Injector) deliver(j Job) {
 	// A RELAY (operator message) uses the self-heal-capable path when wired; a heartbeat/detector tick
 	// uses the plain send so a tick never fires an unsolicited Ctrl-C (#156 H2).
 	send := in.send
-	if in.relaySend != nil && isRelay(j.Kind) {
+	if in.relaySend != nil && usesSelfHealSend(j.Kind) {
 		send = in.relaySend
 	}
 	err := send(j.Agent, j.Message)
 	switch {
 	case err == nil:
-		// Success log: make each CONFIRMED delivery auditable from journalctl, independent of
-		// the Discord mirror. Terse and body-free — the byte count stands in for the content.
-		log.Printf("flotilla watch: %s delivered to %q (%d bytes)", deliveryKind(j.Kind), j.Agent, len(j.Message))
+		in.logDelivered(j)
 		if isRelay(j.Kind) && j.MessageID != "" {
 			in.queue.remove(j.MessageID)
 		}
-		if in.mirror != nil {
-			in.mirror(j) // audit only what actually landed (a confirmed turn)
+		if j.Kind == KindSend && j.MessageID != "" && j.Sender != "" && in.rosterDir != "" {
+			if path, err := outbox.Path(in.rosterDir, j.Sender); err == nil {
+				outbox.NewStore(path).Remove(j.MessageID)
+			}
+		}
+		if j.Kind == KindSend {
+			if in.onSend != nil && j.Sender != "" {
+				in.onSend(j.Sender, j.Agent, j.Message)
+			}
+			in.outboxDone(j)
+		}
+		if in.mirror != nil && isRelay(j.Kind) {
+			in.mirror(j) // audit only operator relays that actually landed
 		}
 	case errors.Is(err, surface.ErrBusy), errors.Is(err, surface.ErrTransient):
 		// The composer is busy (or its state is transiently uncertain) — do NOT fire into it.
@@ -217,13 +244,25 @@ func (in *Injector) deliver(j Job) {
 			in.raise("operator message to %q NOT delivered — its composer did not accept the message (input-blocked: a per-agent sub-composer/agents panel held focus, or the submit never landed). It needs attention at its pane (click/keystroke into the main composer). The machine did not re-send; verify the turn did not already start before re-sending. Undelivered payload: %q", j.Agent, previewBody(j.Message))
 		}
 		log.Printf("flotilla watch: deliver to %q INPUT-BLOCKED — composer did not accept the message (needs attention at its pane): %v", j.Agent, err)
+		if j.Kind == KindSend {
+			in.outboxDone(j)
+		}
 	default:
 		// A real delivery failure (ErrCrashed / ErrUnconfirmed / a paste-fail / a resolve or
 		// lock-contention error). Never silent for an operator message.
 		if isRelay(j.Kind) {
 			in.raise("operator message to %q NOT delivered: %v", j.Agent, err)
 		}
+		if j.Kind == KindSend {
+			in.outboxDone(j)
+		}
 		log.Printf("flotilla watch: deliver to %q failed: %v", j.Agent, err)
+	}
+}
+
+func (in *Injector) outboxDone(j Job) {
+	if in.onOutboxDone != nil && j.Sender != "" && j.MessageID != "" {
+		in.onOutboxDone(j.Sender, j.MessageID)
 	}
 }
 
@@ -241,13 +280,22 @@ func previewBody(body string) string {
 	return string(r[:maxRunes]) + "…"
 }
 
+func (in *Injector) logDelivered(j Job) {
+	if j.Kind == KindSend && !j.enqueuedAt.IsZero() {
+		age := in.clock().Sub(j.enqueuedAt).Round(time.Second)
+		log.Printf("flotilla watch: send from %q delivered to %q (queued %s, %d bytes)", j.Sender, j.Agent, age, len(j.Message))
+		return
+	}
+	log.Printf("flotilla watch: %s delivered to %q (%d bytes)", deliveryKind(j.Kind), j.Agent, len(j.Message))
+}
+
 // handleBusy applies the kind-aware not-idle policy for a busy (ErrBusy) or transiently-
 // uncertain (ErrTransient) result. A heartbeat/detector tick is time-relative and is DROPPED
 // (the next tick re-evaluates; re-delivering a stale tick would double-prompt). Operator relays
-// are never dropped: short transient re-assess, then durable disk-backed retry at the busy
-// cadence until deliverable (#286).
+// and swept inter-agent sends are never dropped: short transient re-assess, then durable
+// disk-backed retry at the busy cadence until deliverable (#286, #475).
 func (in *Injector) handleBusy(j Job, cause error) {
-	if !isRelay(j.Kind) {
+	if !isDeferredDelivery(j.Kind) {
 		log.Printf("flotilla watch: drop %s to %q (not idle): %v", deliveryKind(j.Kind), j.Agent, cause)
 		return
 	}
@@ -260,12 +308,21 @@ func (in *Injector) handleBusy(j Job, cause error) {
 	if j.enqueuedAt.IsZero() {
 		j.enqueuedAt = now
 	}
-	if errors.Is(cause, surface.ErrTransient) && j.deferrals == maxTransientReassess {
+	if isRelay(j.Kind) && errors.Is(cause, surface.ErrTransient) && j.deferrals == maxTransientReassess {
 		in.raise("operator message to %q is QUEUED — pane state stayed uncertain after %d quick checks; persisting to durable queue until deliverable", j.Agent, maxTransientReassess)
 		j.lastStaleAlert = now
 	}
-	in.maybeStaleEscalateRelay(&j, now)
-	in.queue.upsert(j)
+	if isRelay(j.Kind) {
+		in.maybeStaleEscalateRelay(&j, now)
+		in.queue.upsert(j)
+	} else if j.Kind == KindSend && j.MessageID != "" && j.Sender != "" && in.rosterDir != "" {
+		if path, err := outbox.Path(in.rosterDir, j.Sender); err == nil {
+			outbox.NewStore(path).Upsert(outbox.Entry{
+				ID: j.MessageID, Sender: j.Sender, Recipient: j.Agent, Message: j.Message,
+				Deferrals: j.deferrals, EnqueuedAt: j.enqueuedAt,
+			})
+		}
+	}
 	in.reEnqueue(j, busyDeferDelay)
 }
 
@@ -354,3 +411,10 @@ func deliveryKind(kind JobKind) string {
 // isRelay reports whether a job is an operator relay (an empty Kind is a bare relay). Relay
 // jobs are deferred-not-dropped when busy and escalated loudly on failure; ticks are not.
 func isRelay(kind JobKind) bool { return kind == KindDefault || kind == KindRelay }
+
+// isDeferredDelivery reports jobs that are deferred-not-dropped when busy (operator relays
+// and swept inter-agent sends).
+func isDeferredDelivery(kind JobKind) bool { return isRelay(kind) || kind == KindSend }
+
+// usesSelfHealSend reports jobs routed through the self-heal-capable submit path (#156).
+func usesSelfHealSend(kind JobKind) bool { return isRelay(kind) || kind == KindSend }

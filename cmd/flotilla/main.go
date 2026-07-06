@@ -4,7 +4,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -373,46 +372,10 @@ func cmdSend(args []string) error {
 	if err != nil {
 		return err
 	}
-	// Hold the per-pane TRANSACTION lock across the WHOLE confirmed delivery so this send
-	// (a separate process) cannot interleave with a concurrent `watch` /clear rotate or a
-	// flotilla-dash control action on the same pane — closing the pre-existing send-vs-watch
-	// race. Keyed by the resolved pane target (the same key Submit's per-call flock uses);
-	// bounded so a stuck holder never wedges the CLI. A timeout means another transaction held
-	// the pane too long — report it as not-delivered + retryable, never a silent partial send.
-	txn, err := deliver.AcquirePaneTxn(pane, deliver.PaneTxnTimeout)
-	if err != nil {
-		return fmt.Errorf("%s pane is busy (another delivery/rotate in progress) — NOT delivered; retry: %w", agentName, err)
+	// Inline retry-with-backoff, then durable per-sender outbox on sustained busy (#475).
+	if err := deliverOrQueueSend(cfg, *rosterPath, *from, agentName, drv, pane, message); err != nil {
+		return err
 	}
-	defer txn.Release()
-	// `flotilla send`/`notify` is an operator relay → route through the self-heal-capable submit
-	// (#156). Self-heal is inert unless FLOTILLA_SELF_HEAL is enabled (SendCtrlC unwired ⇒ == Submit).
-	confirm := surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}
-	if surface.SelfHealEnabled() {
-		confirm.SendCtrlC = deliver.SendCtrlC
-	}
-	if err := confirm.SubmitWithSelfHeal(drv, pane, message); err != nil {
-		switch {
-		case errors.Is(err, surface.ErrBusy):
-			return fmt.Errorf("%s is busy (mid-turn) — NOT delivered; retry when it is idle", agentName)
-		case errors.Is(err, surface.ErrTransient):
-			return fmt.Errorf("%s pane state is uncertain — NOT delivered; retry", agentName)
-		case errors.Is(err, surface.ErrCrashed):
-			return fmt.Errorf("%s is at a shell (crashed) — NOT delivered", agentName)
-		case errors.Is(err, surface.ErrPanelBlocked):
-			return fmt.Errorf("%s is input-blocked behind the Claude Code agents panel — NOT delivered; it needs a human keystroke or click into the composer at its pane, then retry", agentName)
-		default: // ErrUnconfirmed, or a paste/lock error
-			return fmt.Errorf("delivery to %s could not be confirmed: %w", agentName, err)
-		}
-	}
-	fmt.Printf("delivered to %s (pane %s) — turn confirmed\n", agentName, pane)
-
-	// Record the confirmed relay to the CoS who-knows-what ledger, so it appears in both the
-	// coordinator's audit AND the RECIPIENT desk's dash conversation thread (#349 E11 source:
-	// `flotilla send` never recorded to the ledger, so CoS↔desk / desk↔desk relay lines were
-	// invisible and desk threads stayed empty). Independent of the Discord mirror below (the
-	// ledger is the internal audit; the mirror is the external copy). Inert when cos_agent is
-	// unset; BEST-EFFORT — the message is already delivered, so a ledger error never fails it.
-	mirrorSendToLedger(cfg, *from, agentName, message)
 
 	// Mirror to the Discord audit channel under the sender's identity. Inter-agent
 	// mirroring is DEFAULT-OFF (it cluttered the operator's Discord); precedence is

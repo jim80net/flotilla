@@ -229,6 +229,7 @@ func TestJobKindWireValuesAndPolicy(t *testing.T) {
 		{KindRelay, "relay"},
 		{KindHeartbeat, "heartbeat"},
 		{KindDetector, "detector"},
+		{KindSend, "send"},
 	}
 	for _, c := range cases {
 		if string(c.kind) != c.wire {
@@ -240,6 +241,7 @@ func TestJobKindWireValuesAndPolicy(t *testing.T) {
 	for kind, want := range map[JobKind]bool{
 		KindDefault:   true,
 		KindRelay:     true,
+		KindSend:      false,
 		KindHeartbeat: false,
 		KindDetector:  false,
 	} {
@@ -248,10 +250,23 @@ func TestJobKindWireValuesAndPolicy(t *testing.T) {
 		}
 	}
 
+	for kind, want := range map[JobKind]bool{
+		KindDefault:   true,
+		KindRelay:     true,
+		KindSend:      true,
+		KindHeartbeat: false,
+		KindDetector:  false,
+	} {
+		if got := isDeferredDelivery(kind); got != want {
+			t.Errorf("isDeferredDelivery(%q) = %v, want %v", string(kind), got, want)
+		}
+	}
+
 	// deliveryKind: the empty Kind reads as "relay" in the audit log; others read verbatim.
 	for kind, want := range map[JobKind]string{
 		KindDefault:   "relay",
 		KindRelay:     "relay",
+		KindSend:      "send",
 		KindHeartbeat: "heartbeat",
 		KindDetector:  "detector",
 	} {
