@@ -37,10 +37,11 @@ of fluency — the bar matches Principle 8 (verify; never fabricate).
 
 **Runbook A/B.** Baseline: coordinator identity + constitutional principles only.
 Treatment: the same seat plus the [`coordinator-runbooks/`](../coordinator-runbooks/)
-package. Reported lifts: grok-4.3 **0.845→0.875 (+0.030)**; gpt-5.5
-**0.848→0.901 (+0.053)** — concentrated in communication-register and
-gate-procedure legs.
+package. Measured lifts (model, baseline, with-runbooks, Δ) live in the canonical
+table at [`coordinator-runbooks/README.md` — Why this package exists](../coordinator-runbooks/README.md#why-this-package-exists--measured-uplift);
+gains concentrated in communication-register and gate-procedure legs.
 
 Deployment-specific scenario text, calibration answers, and error-taxonomy instances
-stay in host-local private research state; this section documents the **public,
-reproducible methodology** behind the published numbers.
+stay in host-local private research state. This section documents the **public
+methodology**; the published scores were measured on that private scenario set and
+are not independently reproducible from the public tree alone.
