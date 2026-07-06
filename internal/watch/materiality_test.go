@@ -139,6 +139,46 @@ func TestExternalMaterialAiderApprovalAndErrorWakeXO(t *testing.T) {
 	}
 }
 
+func TestGroupMaterialByOwnerFederated(t *testing.T) {
+	owning := func(agent string) string {
+		switch agent {
+		case "backend":
+			return "alpha-xo"
+		case "frontend":
+			return "beta-xo"
+		default:
+			return "cos"
+		}
+	}
+	reasons := []string{
+		"backend: finished a turn (working→idle)",
+		"frontend: entered shell",
+		"external signal changed",
+	}
+	primary, byOwner := groupMaterialByOwner(reasons, owning)
+	if len(primary) != 1 || primary[0] != "external signal changed" {
+		t.Fatalf("primary = %v, want signal only", primary)
+	}
+	if len(byOwner) != 2 {
+		t.Fatalf("byOwner = %v, want two layers", byOwner)
+	}
+	if len(byOwner["alpha-xo"]) != 1 || byOwner["alpha-xo"][0][:7] != "backend" {
+		t.Fatalf("alpha-xo = %v", byOwner["alpha-xo"])
+	}
+}
+
+func TestGroupMaterialByOwnerLegacyStar(t *testing.T) {
+	owning := func(agent string) string { return "xo" }
+	reasons := []string{"backend: finished a turn (working→idle)"}
+	primary, byOwner := groupMaterialByOwner(reasons, owning)
+	if len(primary) != 0 {
+		t.Fatalf("primary = %v, want empty", primary)
+	}
+	if len(byOwner["xo"]) != 1 {
+		t.Fatalf("byOwner = %v", byOwner)
+	}
+}
+
 // A single-writer tracker's content is the XO's OWN output; it must NOT reach the
 // wake materiality set at all. The detector never feeds the tracker hash into the
 // snapshot's SignalHash (only the optional external --signal-file does), so a

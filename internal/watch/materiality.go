@@ -2,6 +2,7 @@ package watch
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/jim80net/flotilla/internal/surface"
 )
@@ -90,4 +91,42 @@ func externalMaterial(prev, cur Snapshot, xoAgent string) (bool, []string) {
 		reasons = append(reasons, "external signal changed")
 	}
 	return len(reasons) > 0, reasons
+}
+
+// fleetWideMaterialReason reports material reasons that always target the primary layer
+// (cold-start reassess, external signal) — never a subtree owner (#438).
+func fleetWideMaterialReason(reason string) bool {
+	return reason == "external signal changed" ||
+		reason == "change-detector started — reassess the fleet"
+}
+
+// materialReasonAgent extracts the desk agent from a material reason ("agent: …").
+// Returns "" when the reason has no desk prefix.
+func materialReasonAgent(reason string) string {
+	i := strings.Index(reason, ": ")
+	if i <= 0 {
+		return ""
+	}
+	return reason[:i]
+}
+
+// groupMaterialByOwner partitions desk-scoped material reasons by OwningXO. Fleet-wide
+// reasons are returned in primary for the clock layer; map iteration order is undefined —
+// callers sort owners for stable wake order.
+func groupMaterialByOwner(reasons []string, owningXO func(agent string) string) (primary []string, byOwner map[string][]string) {
+	byOwner = map[string][]string{}
+	for _, r := range reasons {
+		if fleetWideMaterialReason(r) {
+			primary = append(primary, r)
+			continue
+		}
+		agent := materialReasonAgent(r)
+		if agent == "" {
+			primary = append(primary, r)
+			continue
+		}
+		owner := owningXO(agent)
+		byOwner[owner] = append(byOwner[owner], r)
+	}
+	return primary, byOwner
 }
