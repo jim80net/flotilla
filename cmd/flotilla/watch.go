@@ -414,8 +414,15 @@ func cmdWatch(args []string) error {
 			if primaryAdjutant == "" {
 				return
 			}
-			if brief, ok := adjutantSeamBrief(layerBufferPath, xo, rosterDir); ok {
-				injector.Enqueue(watch.Job{Agent: xo, Message: brief, Kind: watch.KindDetector})
+			brief, ok, clearAfter := adjutantSeamBrief(layerBufferPath, xo, rosterDir)
+			if !ok {
+				return
+			}
+			injector.Enqueue(watch.Job{Agent: xo, Message: brief, Kind: watch.KindDetector})
+			if clearAfter {
+				if err := adjutantbuffer.Clear(layerBufferPath); err != nil {
+					log.Printf("flotilla watch: adjutant buffer clear after enqueue failed: %v", err)
+				}
 			}
 		}
 
@@ -1077,18 +1084,20 @@ func adjutantBufferedNoteBody(leader string, n int) string {
 		"On evaluation ticks: ack → evaluate → act-by-tier."
 }
 
-// adjutantSeamBrief drains the layer buffer and formats the leader inject at a seam.
-func adjutantSeamBrief(bufferPath, leader, rosterDir string) (string, bool) {
-	f, ok, err := adjutantbuffer.Drain(bufferPath)
+// adjutantSeamBrief peeks the layer buffer and formats the leader inject at a seam. The caller
+// must Clear the sidecar only AFTER enqueue (enqueue-then-delete — same at-least-once window as
+// detector persist).
+func adjutantSeamBrief(bufferPath, leader, rosterDir string) (brief string, ok bool, clearAfter bool) {
+	f, hasItems, quarantined, err := adjutantbuffer.Peek(bufferPath)
 	if err != nil {
-		log.Printf("flotilla watch: adjutant buffer drain failed: %v", err)
-		return "", false
+		log.Printf("flotilla watch: adjutant buffer peek failed: %v", err)
+		return "", false, false
 	}
-	if !ok {
-		return "", false
+	if !hasItems && !quarantined {
+		return "", false, false
 	}
 	_, charterErr := os.Stat(roster.LayerCharterPath(rosterDir, leader))
-	return adjutantbuffer.FormatBrief(leader, f, os.IsNotExist(charterErr)), true
+	return adjutantbuffer.FormatBrief(leader, f, os.IsNotExist(charterErr), quarantined), true, hasItems
 }
 
 // backlogWakeBody composes the goal-driven loop's WakeBacklog prompt: it NAMES the driven item(s)

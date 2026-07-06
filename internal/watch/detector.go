@@ -851,13 +851,15 @@ func (d *Detector) Tick() {
 // lock for the delivery — always lands the continuation AFTER the rotate, never letting a
 // trailing /clear wipe a freshly delivered continuation.
 func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors, coordinatorMirrors []string, delegationNudges []string, pendingAdjutantSeam bool) {
-	if pendingAdjutantSeam && d.cfg.AdjutantSeamOnFinish != nil {
-		d.cfg.AdjutantSeamOnFinish()
-	}
 	if pendingRotate && d.cfg.Rotate != nil {
 		if err := d.cfg.Rotate(); err != nil && !errors.Is(err, surface.ErrRestartRequired) {
 			log.Printf("flotilla watch: XO context rotate failed: %v (continuing without rotate)", err)
 		}
+	}
+	// Adjutant seam enqueue runs AFTER rotate (same invariant as continuation wakes: a trailing
+	// /clear must not wipe a freshly delivered brief) and BEFORE the other wake deliveries.
+	if pendingAdjutantSeam && d.cfg.AdjutantSeamOnFinish != nil {
+		d.cfg.AdjutantSeamOnFinish()
 	}
 	for _, w := range wakes {
 		if d.cfg.Wake != nil {
