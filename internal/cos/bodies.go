@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -91,6 +92,42 @@ func WriteBody(ledgerPath, nonce, body string) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(dir, nonce+".txt"), []byte(strings.TrimSpace(body)), 0o600)
+}
+
+// BodyRetention bounds the companion store (#423): a body older than this is pruned, and
+// the dash's lookup for that entry falls back to the clamped audit gist — the documented
+// miss path, honest by design. 30 days comfortably exceeds the operator's thread-reading
+// horizon while keeping the store from growing without bound over long operation. The
+// audit LINE itself is never touched — retention applies only to the companion bodies.
+const BodyRetention = 30 * 24 * time.Hour
+
+// PruneBodies removes companion bodies whose file mtime is older than BodyRetention.
+// Best-effort, like every store operation: an unreadable dir or a failed remove is
+// silently skipped (a stale body that survives one pass is caught by the next). Only
+// well-formed `<nonce>.txt` names are considered — anything else in the dir is not ours
+// to delete. Called by Append after it writes a companion body, so unclamped appends
+// (the common case) pay nothing and the scan is bounded by the store the pruning itself
+// keeps small.
+func PruneBodies(ledgerPath string, now time.Time) {
+	dir := BodiesDir(ledgerPath)
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	cutoff := now.Add(-BodyRetention)
+	for _, e := range ents {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".txt") || !IsNonce(strings.TrimSuffix(name, ".txt")) {
+			continue
+		}
+		fi, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if fi.ModTime().Before(cutoff) {
+			_ = os.Remove(filepath.Join(dir, name))
+		}
+	}
 }
 
 // LookupBody returns the full body for a ledger entry by its nonce — an EXACT identity match
