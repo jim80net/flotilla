@@ -59,6 +59,9 @@ const detectorContinuationBuiltin = "[flotilla change-detector] You just finishe
 //     authorizations ledger). The literal token is QUOTED on purpose — the parser recognizes ONLY
 //     `[awaiting-auth]`, so a near-miss like `[awaiting-authorization]` or `[awaiting auth]` would be
 //     flagged malformed AND drive forever, silently breaking the judgment (the §4 brittleness fix).
+//     The items must sit under a `## Backlog` heading — the judgment parses ONLY that section (#479:
+//     a marker-perfect ledger without the heading is invisible to the parser, so the desk could
+//     never prove itself settled and heartbeat-looped forever; the prompt now states the contract).
 //     Once EVERY item is `[done]`, open-questions, or `[awaiting-auth]`, there is no live actionable
 //     work: reply idle and touch the settle marker (the desk will not be heartbeated again until fresh
 //     actionable work appears or the operator re-engages it).
@@ -78,10 +81,12 @@ const deskContinuationBuiltin = "[flotilla heartbeat] You have been idle. An idl
 	"(or `[needs-attention]`) in your backlog — that is your open-questions ledger; mark a pending " +
 	"operator authorization (a go/no-go, a spend) with the EXACT marker `[awaiting-auth]` (that literal " +
 	"spelling — NOT `[awaiting-authorization]` or `[awaiting auth]`; the parser recognizes only " +
-	"`[awaiting-auth]`) — that is your authorizations ledger. A task blocked only from landing (a push " +
-	"gate, a pending review) is NOT idle — advance it locally, then record the blocker. Once EVERY item " +
-	"is `[done]`, blocked-and-tracked, or `[awaiting-auth]`, you have no live actionable work: reply " +
-	"'idle', do NOT manufacture work, and signal idle by running: touch {{settle}}."
+	"`[awaiting-auth]`) — that is your authorizations ledger. Ledger items MUST sit under a " +
+	"`## Backlog` heading in your backlog file — the settle judgment parses ONLY that section, so " +
+	"items anywhere else are invisible to it and cannot settle you. A task blocked only from landing " +
+	"(a push gate, a pending review) is NOT idle — advance it locally, then record the blocker. Once " +
+	"EVERY item is `[done]`, blocked-and-tracked, or `[awaiting-auth]`, you have no live actionable " +
+	"work: reply 'idle', do NOT manufacture work, and signal idle by running: touch {{settle}}."
 
 // cmdWatch runs the long-lived watch daemon. This is the CLOCK half: it
 // heartbeats the XO so a turn-based agent keeps advancing clear, authorized work
@@ -531,10 +536,12 @@ func cmdWatch(args []string) error {
 		// ledger self-defaults to WARRANTED (the missing-ledger fallback — NOT the shared backlog), so a
 		// deployment that keeps no per-recipient backlogs is #183-equivalent. The shared --backlog-file
 		// is deliberately NOT consulted here (it is the XO's drive queue, not a desk's work).
+		deskBacklogPath := func(agent string) string {
+			return filepath.Join(rosterDir, "flotilla-"+agent+"-backlog.md")
+		}
 		deskHeartbeatWarranted := deskWarrantedGate(cfg,
 			func(agent string) ([]byte, bool, error) {
-				p := filepath.Join(rosterDir, "flotilla-"+agent+"-backlog.md")
-				raw, err := os.ReadFile(p)
+				raw, err := os.ReadFile(deskBacklogPath(agent))
 				if err != nil {
 					if os.IsNotExist(err) {
 						return nil, false, nil // absent ⇒ missing-ledger fallback (warranted)
@@ -543,6 +550,7 @@ func cmdWatch(args []string) error {
 				}
 				return raw, true, nil
 			},
+			deskBacklogPath, // named in the #479 headingless alert so the fix is one copy-paste away
 			alert)
 
 		// #216 idle-hold antipattern: per-agent consecutive-strike tracker; the break
@@ -1050,34 +1058,51 @@ func backlogStatusGate(path string, read func() ([]byte, error), alert func(stri
 //     desk on a busy fleet — re-creating the indiscriminate poking this change exists to end).
 //   - UNREADABLE/torn present file ⇒ WARRANTED (fail-safe; a torn mid-write read self-heals next tick).
 //   - PRESENT-but-sectionless (Found=false) ⇒ WARRANTED via cfg.HeartbeatWarranted's !Found arm, AND a
-//     LOUD alert ONCE on the edge into that state (mirroring backlogStatusGate's alert-once latch), so
-//     a format slip is loud, never a silent always-beat. The latch re-arms after a clean read.
+//     LOUD alert on a CONTENT-HASH latch (#479): the first headingless read alerts — naming the file,
+//     the missing heading, and the one-line fix — and the alert REPEATS only when the file's content
+//     CHANGED and is STILL headingless. #479's discovering case showed why the old edge latch was not
+//     enough: a desk that keeps editing its ledger (reconciling markers, adding items) without ever
+//     adding the heading got exactly ONE alert and then heartbeat-looped silently forever — every
+//     failed fix attempt deserves a fresh alert; an untouched broken file does not. NO lenient parse
+//     (owner decision on #479): a guessing parser misfires silently; the strictness stays, the
+//     loudness is the fix. The latch clears on a clean (Found=true) read, so a later regression
+//     re-alerts. path resolves the agent's backlog file for the alert text.
 //
-// read + alert are injected so the latch + fallback are unit-testable. The seam is called only from
-// the detector's single Tick goroutine (in deskWarrantSnapshot, off d.mu), so the per-agent latch map
-// is single-goroutine — no concurrent Tick, and the other detector-state writers (OperatorWake/
+// read + path + alert are injected so the latch + fallback are unit-testable. The seam is called only
+// from the detector's single Tick goroutine (in deskWarrantSnapshot, off d.mu), so the per-agent latch
+// map is single-goroutine — no concurrent Tick, and the other detector-state writers (OperatorWake/
 // AgentWake) never invoke this seam.
-func deskWarrantedGate(cfg *roster.Config, read func(agent string) ([]byte, bool, error), alert func(string)) func(agent string) bool {
-	flagged := map[string]bool{}
+func deskWarrantedGate(cfg *roster.Config, read func(agent string) ([]byte, bool, error), path func(agent string) string, alert func(string)) func(agent string) bool {
+	alerted := map[string]string{} // agent → sha256 of the last-ALERTED headingless content (#479)
 	return func(agent string) bool {
 		raw, exists, err := read(agent)
-		if !exists || err != nil {
-			// Absent (missing-ledger fallback) OR unreadable/torn (fail-safe): WARRANTED. Neither is a
-			// present-but-sectionless format slip, so re-arm the latch and do NOT alert.
-			flagged[agent] = false
+		if !exists {
+			// Absent (missing-ledger fallback): WARRANTED, latch cleared — a deleted ledger resets
+			// the state, so a re-created file is a genuinely new file and may alert afresh.
+			delete(alerted, agent)
+			return true
+		}
+		if err != nil {
+			// Unreadable/torn (fail-safe): WARRANTED, latch KEPT — a transient read glitch must not
+			// make the SAME unchanged broken bytes re-alert once the read heals (cubic #480 P2);
+			// "repeat only when the file changes or after a clean read" survives the glitch.
 			return true
 		}
 		content := string(raw)
 		st := backlog.Parse(content)
 		// A present, readable file with NO "## Backlog" section (and non-empty content) is the format
-		// slip the !Found warrant arm keeps WARRANTED — alert ONCE on the edge so it is loud, not silent.
+		// slip the !Found warrant arm keeps WARRANTED — loud on first sight AND on every failed fix
+		// attempt (changed-but-still-headingless), silent while the broken file is untouched (#479).
 		sectionless := !st.Found && strings.TrimSpace(content) != ""
-		switch {
-		case sectionless && !flagged[agent]:
-			alert(fmt.Sprintf("desk-heartbeat: %s backlog present but has no '## Backlog' section — fix the format; the judgment keeps the desk warranted meanwhile", agent))
-			flagged[agent] = true
-		case !sectionless:
-			flagged[agent] = false
+		if sectionless {
+			h := fmt.Sprintf("%x", sha256.Sum256(raw))
+			if alerted[agent] != h {
+				alerted[agent] = h
+				alert(fmt.Sprintf("desk-heartbeat: %s's backlog (%s) has NO '## Backlog' section — the settle judgment parses ONLY that section, so it cannot prove the desk settled and heartbeats stay warranted. Fix: add a '## Backlog' heading above the item list. This alert repeats only if the file changes and is still missing the heading (#479).",
+					agent, path(agent)))
+			}
+		} else {
+			delete(alerted, agent)
 		}
 		return cfg.HeartbeatWarranted(agent, st)
 	}
