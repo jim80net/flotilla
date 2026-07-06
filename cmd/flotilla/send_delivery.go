@@ -16,8 +16,8 @@ import (
 // Sender-side retry policy for a bounced `flotilla send` (#475). Inline retries cover short
 // busy windows; exhausted attempts fall through to the durable per-sender outbox.
 const (
-	sendRetryInitial    = 5 * time.Second
-	sendRetryMax        = 60 * time.Second
+	sendRetryInitial     = 5 * time.Second
+	sendRetryMax         = 60 * time.Second
 	sendRetryMaxAttempts = 12
 )
 

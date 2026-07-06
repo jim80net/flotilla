@@ -100,3 +100,18 @@ func TestInvalidAgentRejected(t *testing.T) {
 		t.Fatal("path traversal agent should fail")
 	}
 }
+
+// Acceptance (#475): pending entries survive a watch-daemon restart (disk is source of truth).
+func TestOutboxSurvivesDaemonRestart(t *testing.T) {
+	dir := t.TempDir()
+	id, err := Enqueue(dir, "venture-xo", "cos", "deploy verified")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, _ := Path(dir, "venture-xo")
+	// Simulate restart: new store handle, no in-memory state.
+	restarted := NewStore(path).Load()
+	if len(restarted) != 1 || restarted[0].ID != id {
+		t.Fatalf("after restart load = %+v, want id %q", restarted, id)
+	}
+}
