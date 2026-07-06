@@ -299,6 +299,14 @@ type RenderedGoal struct {
 	Source string `json:"source,omitempty"`
 	// Brief is a NODE-level decision package (markdown) rendered in the respond modal (#347).
 	Brief string `json:"brief,omitempty"`
+	// AchievedAt is the RFC3339 stamp of this goal's latest OBSERVED transition to
+	// achieved (#418 done-history; attached post-build from goals-done.jsonl). Only set
+	// while the goal is currently achieved — a regressed goal carries no stale stamp.
+	AchievedAt string `json:"achieved_at,omitempty"`
+	// AchievedSeed marks an achieved_at recorded on the log's first-ever observation:
+	// the goal was already achieved when history began, so its true achieve time is
+	// unknown. Windowed Realized counts exclude seeds (#418).
+	AchievedSeed bool `json:"achieved_seed,omitempty"`
 }
 
 // GoalsCounts is the situation-bar summary — goal counts by scope and by visual state.

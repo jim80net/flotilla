@@ -33,6 +33,7 @@ type Config struct {
 	GoalsYAMLPath    string // goals yaml source compiled on load (default <roster-dir>/fleet-goals.yaml)
 	SessionMirrorDir string // per-agent session-mirror ledgers (default <roster-dir>/session-mirror)
 	ParadesPath      string // parade archive: <dir>/<YYYY-MM-DD>/{report.md,assets/} (default <roster-dir>/parades)
+	DoneLogPath      string // goals done-history JSONL the server appends + reads (#418; default <roster-dir>/goals-done.jsonl)
 	Bind             string // listen address (default 127.0.0.1:8787)
 	Repo             string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
 	SecretsPath      string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
@@ -89,6 +90,7 @@ type Server struct {
 	origins   map[string]bool    // Origin allowlist (scheme://host:port) for state-changing requests
 	tracker   tracker.Tracker    // GitHub-backed issue tracker; nil when no --repo is configured
 	control   control.Controller // cnc control (notify live; route/resume gated on the pane lock)
+	done      *doneRecorder      // goals done-history observer/writer (#418) — the one artifact the dash WRITES
 }
 
 // NewServer validates the bind address (LOOPBACK ONLY — see validateBind; the
@@ -131,6 +133,7 @@ func NewServer(cfg Config) (*Server, error) {
 		hub:       newHub(),
 		allowed:   buildHostAllowlist(cfg.Bind),
 		origins:   buildOriginAllowlist(cfg.Bind, cfg.AllowedOrigins),
+		done:      newDoneRecorder(cfg.DoneLogPath), // #418 — observes roll-up transitions on every goals load
 	}
 	if cfg.DisableAuthentication {
 		fmt.Fprintln(os.Stderr, "flotilla dash: WARNING — DISABLE_AUTHENTICATION is on; write-route CSRF gates are OFF (insecure mode until #208 lands)")
@@ -327,7 +330,13 @@ func (s *Server) loadGoals() GoalsDoc {
 		in.SourcePath = s.cfg.GoalsPath
 		in.GeneratedAt = s.now().UTC().Format(time.RFC3339)
 	}
-	return BuildGoals(in)
+	doc := BuildGoals(in)
+	// #418: every goals load is a done-history OBSERVATION — the recorder appends any
+	// roll-up transitions to/from achieved, then the fresh history stamps achieved_at
+	// onto the doc (so a just-achieved goal carries its stamp in the same response).
+	s.done.observe(doc, s.now())
+	AttachDoneHistory(&doc, s.done.history())
+	return doc
 }
 
 // bindTrackerIssues resolves live issue state and goal-id: trailers from the pinned
@@ -603,6 +612,9 @@ func ResolvePaths(cfg Config, rc *roster.Config) Config {
 		// Sibling of the roster file — when the roster lives in state/ (the common
 		// deploy shape), <roster-dir>/parades is state/parades, NOT state/state/parades (#376).
 		cfg.ParadesPath = filepath.Join(dir, "parades")
+	}
+	if cfg.DoneLogPath == "" {
+		cfg.DoneLogPath = filepath.Join(dir, "goals-done.jsonl") // #418 done-history, roster-adjacent
 	}
 	// The CoS ledger path is whatever the roster resolved (empty when the CoS
 	// mirror is inert — then the history view shows no ledger, honestly).
