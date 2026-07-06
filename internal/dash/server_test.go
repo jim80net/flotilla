@@ -727,10 +727,13 @@ func TestDecisionsCountUnified451(t *testing.T) {
 		}
 	}
 	// The badge/tile/announcement must not read the server node-population count anymore.
+	// Each marker is the EXACT old-code pattern (the badge read c.awaiting via a variable
+	// indirection, `awaiting = c.awaiting || 0` — cubic #458 P3: a marker string that never
+	// existed in the old code guards nothing).
 	for _, stale := range []string{
-		"hdrCount.textContent = String(c.awaiting",
-		`announce((c.awaiting`,
-		`v: c.awaiting`,
+		"awaiting = c.awaiting", // the badge's old source (var awaiting = c.awaiting || 0)
+		`announce((c.awaiting`,  // the old screen-reader clause
+		`v: c.awaiting`,         // the old Awaiting-you tile value
 	} {
 		if strings.Contains(js, stale) {
 			t.Errorf("goals.js still reads counts.awaiting for a decisions surface (%q) — #451", stale)
