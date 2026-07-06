@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/backlog"
+	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
@@ -195,6 +196,9 @@ type DetectorConfig struct {
 	SynthLoad    func() (SynthState, bool)
 	// Rotate rotates the XO context via surface.RotateContext (claude → /clear).
 	Rotate func() error
+	// RotatePolicy gates idle-edge rotation requests from continueXO (#467). Zero
+	// value (or always) preserves legacy behavior; never/handoff suppress bare /clear.
+	RotatePolicy roster.XORotatePolicy
 	// Awaiting reports whether the awaiting-operator veto marker is present (gates
 	// the rotate only).
 	Awaiting func() bool
@@ -1051,7 +1055,12 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 		woke = true
 		pendingWakes = append(pendingWakes, deferredWake{kind: kind, reasons: reasons})
 	}
-	requestRotate := func() { pendingRotate = true }
+	requestRotate := func() {
+		if !d.cfg.RotatePolicy.AllowsIdleEdgeRotate() {
+			return
+		}
+		pendingRotate = true
+	}
 
 	// 1. Gather current signals. Signal absent/unreadable carries the prior hash
 	//    forward (treat-unchanged — M4); states are shell-debounced (M2).
