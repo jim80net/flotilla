@@ -20,6 +20,28 @@ func rosterAgents() map[string]bool {
 	return map[string]bool{"xo": true, "backend": true, "frontend": true}
 }
 
+func TestCommittedLaunchExampleValidates(t *testing.T) {
+	// flotilla-launch.example.json is the committed #466 policy-shape reference;
+	// it must load cleanly for the example agents (partition-safe generic paths).
+	p := filepath.Join("..", "..", "flotilla-launch.example.json")
+	agents := map[string]bool{"xo": true, "backend": true}
+	cfg, err := Load(p, agents)
+	if err != nil {
+		t.Fatalf("Load committed example: %v", err)
+	}
+	xo, ok := cfg.Recipe("xo")
+	if !ok {
+		t.Fatal("example missing xo recipe")
+	}
+	slots := xo.Slots()
+	if len(slots) < 3 {
+		t.Fatalf("xo chain len = %d, want primary + >=2 fallbacks", len(slots))
+	}
+	if slots[0].Name != "primary" || slots[0].Model != "opus" {
+		t.Errorf("xo primary = %+v, want primary/opus", slots[0])
+	}
+}
+
 func TestLoadValid(t *testing.T) {
 	p := writeTemp(t, `{
 		"agents": {

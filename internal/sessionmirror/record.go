@@ -47,14 +47,13 @@ type Input struct {
 	Envelope     *readermap.Envelope
 	FirewallWarn []string
 	VerboseCap   int // 0 ⇒ DefaultVerboseCap
-	// Suppressed marks a record the firewall REFUSED for the public post but that is still kept
-	// in the PRIVATE, loopback-only ledger (#405/#406): the dash renders it "withheld from public"
-	// so the operator's view is honest — it reached their private dash but never Discord.
+	// Suppressed is a legacy field: pre-#465 firewall-refused turns were kept in the private
+	// ledger with Suppressed=true. New records always leave it false; the dash still renders
+	// historical withheld badges when the flag is set on older records.
 	Suppressed bool
 }
 
-// NewRecord builds a ledger Record from mirror pipeline outputs. It serves both the publish
-// path (Suppressed=false) and the firewall-refused private-ledger path (Suppressed=true).
+// NewRecord builds a ledger Record from mirror pipeline outputs.
 func NewRecord(in Input) Record {
 	capN := in.VerboseCap
 	if capN <= 0 {
