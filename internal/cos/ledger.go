@@ -104,6 +104,9 @@ func Append(path string, e Entry) error {
 		if err := WriteBody(path, e.Nonce, e.Gist); err != nil {
 			fmt.Fprintf(os.Stderr, "flotilla: cos ledger companion body write failed (dash will show the clamped gist): %v\n", err)
 		}
+		// #423: bound the store on the same (uncommon) path that grows it — bodies older
+		// than BodyRetention are pruned; their entries fall back to the audit gist.
+		PruneBodies(path, e.Time)
 	}
 	return nil
 }

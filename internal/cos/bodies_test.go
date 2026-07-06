@@ -167,3 +167,95 @@ func readFile(t *testing.T, p string) string {
 	}
 	return string(b)
 }
+
+// #423: the companion store is bounded — bodies older than BodyRetention are pruned on
+// the same (clamped-append) path that grows the store; their ledger entries fall back to
+// the audit gist, the documented miss path.
+func TestPruneBodies_RetentionAndSafety(t *testing.T) {
+	dir := t.TempDir()
+	ledger := dir + "/cos-ledger.md"
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+
+	// Three bodies: fresh, just-inside-retention, and stale; plus two ancient files the
+	// pruner must never touch (a non-nonce name and a nonce-named non-.txt).
+	mk := func(nonce, body string, age time.Duration) {
+		t.Helper()
+		if err := WriteBody(ledger, nonce, body); err != nil {
+			t.Fatal(err)
+		}
+		p := BodiesDir(ledger) + "/" + nonce + ".txt"
+		if err := os.Chtimes(p, now.Add(-age), now.Add(-age)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fresh := strings.Repeat("a", NonceHexLen)
+	edge := strings.Repeat("b", NonceHexLen)
+	stale := strings.Repeat("c", NonceHexLen)
+	mk(fresh, "fresh body", time.Hour)
+	mk(edge, "edge body", BodyRetention-time.Minute)
+	mk(stale, "stale body", BodyRetention+time.Hour)
+	old := now.Add(-2 * BodyRetention)
+	notOurs := []string{
+		BodiesDir(ledger) + "/README.txt",                                   // non-nonce name
+		BodiesDir(ledger) + "/" + strings.Repeat("e", NonceHexLen) + ".bak", // nonce-named, wrong extension
+	}
+	for _, p := range notOurs {
+		if err := os.WriteFile(p, []byte("keep"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	PruneBodies(ledger, now)
+
+	if _, ok := LookupBody(ledger, fresh); !ok {
+		t.Error("a fresh body must survive pruning")
+	}
+	if _, ok := LookupBody(ledger, edge); !ok {
+		t.Error("a body just inside retention must survive pruning")
+	}
+	if _, ok := LookupBody(ledger, stale); ok {
+		t.Error("a body past retention must be pruned (its entry falls back to the gist)")
+	}
+	for _, p := range notOurs {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("%s is not ours to delete (non-nonce name / wrong extension)", p)
+		}
+	}
+	// Pruning a store that doesn't exist is a silent no-op (best-effort discipline).
+	// The ledger sits in a NON-existent subdirectory so its BodiesDir truly doesn't
+	// exist — a sibling ledger in `dir` would resolve to the SAME bodies/ dir the
+	// writes above created and never exercise this path (cubic #452 P3).
+	PruneBodies(dir+"/nowhere/no-such-ledger.md", now)
+}
+
+// The Append path prunes as it writes: a clamped append with entry time T removes bodies
+// older than T-BodyRetention, so long-running operation stays bounded with no sweeper.
+func TestAppendPrunesStaleBodies(t *testing.T) {
+	dir := t.TempDir()
+	ledger := dir + "/cos-ledger.md"
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+	stale := strings.Repeat("d", NonceHexLen)
+	if err := WriteBody(ledger, stale, "old clamped body"); err != nil {
+		t.Fatal(err)
+	}
+	old := now.Add(-BodyRetention - 24*time.Hour)
+	if err := os.Chtimes(BodiesDir(ledger)+"/"+stale+".txt", old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := Append(ledger, Entry{Time: now, From: "operator", To: "d", Gist: longBody(400, " END")}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if _, ok := LookupBody(ledger, stale); ok {
+		t.Error("a clamped Append must prune stale bodies")
+	}
+	// The new entry's own body survived (it was written just now).
+	line := strings.Split(strings.TrimRight(readFile(t, ledger), "\n"), "\n")[0]
+	if n := nonceFromLine(line); n == "" {
+		t.Fatal("clamped append must carry a nonce")
+	} else if _, ok := LookupBody(ledger, n); !ok {
+		t.Error("the fresh append's own body must survive its prune pass")
+	}
+}
