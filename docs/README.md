@@ -60,6 +60,11 @@ fleet behavior.
   gates, merge-on-clean-gates with an independent reviewer, verify-never-fabricate,
   reader-modeling, …). **Canonical home for the principles and for the
   executive-mini-brief shape (§12).**
+- **[`coordinator-runbooks/`](./coordinator-runbooks/README.md)** — measured
+  procedural doctrine for coordinator seats (merge gate, deploy, operator comms,
+  dispatch, incidents, ceremonies). Pairs with the principles; implements them under
+  production pressure. Includes bench-verified uplift on a 16-scenario coordinator
+  evaluation.
 - **[`span-of-control.md`](./span-of-control.md)** — the Rule of Three (≤3 active
   charges, grow a layer, aggregate upward, dispatch in parallel). **Canonical
   home for the constitutional-skill set and its member list.**
