@@ -55,6 +55,45 @@
     return aligns;
   }
 
+  // ── HTML-table helpers (#427): a deck may carry a literal <table> block (exporters and
+  // authors both emit them). The block is NEVER passed through to the DOM — it is PARSED
+  // for its row/cell TEXT and re-emitted via the same escape-then-inline renderTable path
+  // as a pipe table, so the escape-first invariant holds: any markup inside a cell is
+  // stripped to text, and the text is escaped before insertion. ──
+  // decodeEntities maps the common entities an author writes in source cells back to text
+  // BEFORE the render-side escape — otherwise "&amp;" would double-escape to "&amp;amp;".
+  function decodeEntities(s) {
+    return String(s)
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&lt;/gi, "<").replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, '"').replace(/&#0?39;/g, "'").replace(/&apos;/gi, "'")
+      .replace(/&amp;/gi, "&"); // last, so a literal "&amp;lt;" decodes to "&lt;", not "<"
+  }
+  // cellAlign reads an alignment from a th/td attribute string — a fixed keyword set, so
+  // nothing attacker-shaped can reach the style attribute renderTable emits.
+  function cellAlign(attrs) {
+    var m = /text-align\s*:\s*(left|center|right)/i.exec(attrs) ||
+            /\balign\s*=\s*["']?(left|center|right)/i.exec(attrs);
+    return m ? m[1].toLowerCase() : "";
+  }
+  // parseHtmlTable extracts rows of {head, align, text} cells from a raw <table> block.
+  // Nested markup inside a cell is stripped to its text (a deck table cell is prose).
+  function parseHtmlTable(src) {
+    var rows = [], rowRe = /<tr[^>]*>([\s\S]*?)<\/tr\s*>/gi, m;
+    while ((m = rowRe.exec(src))) {
+      var cells = [], cellRe = /<t([hd])\b([^>]*)>([\s\S]*?)<\/t\1\s*>/gi, c;
+      while ((c = cellRe.exec(m[1]))) {
+        cells.push({
+          head: c[1].toLowerCase() === "h",
+          align: cellAlign(c[2]),
+          text: decodeEntities(c[3].replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ").trim(),
+        });
+      }
+      if (cells.length) rows.push(cells);
+    }
+    return rows;
+  }
+
   // escape-then-markdown for a slide body (mirrors goals.js renderBrief). Escapes FIRST, then
   // a fixed subset: a block image line ![alt](src) renders LARGE; #.. headings; -/* bullets;
   // GFM pipe-tables; blank-line paragraphs; inline **bold**, `code`, [text](http…). Images
@@ -69,19 +108,22 @@
         .replace(/`([^`]+)`/g, "<code>$1</code>")
         .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
     }
-    // renderTable emits a <table> from a header row + body rows + per-column alignments. Each
-    // cell is escaped THEN inline-marked (the escape-first invariant), so no cell text can inject.
+    // renderTable emits a <table> from a header row (null for a headerless HTML table),
+    // body rows, and per-column alignments. Each cell is escaped THEN inline-marked (the
+    // escape-first invariant), so no cell text can inject.
     function renderTable(head, rows, aligns) {
+      var nCols = head ? head.length
+        : rows.reduce(function (n, r) { return Math.max(n, r.length); }, 0);
       function cellHtml(tag, text, k) {
         var a = aligns[k] ? ' style="text-align:' + aligns[k] + '"' : ""; // aligns ∈ {left,center,right} — a fixed, non-injectable set
         return "<" + tag + a + ">" + inline(esc(text)) + "</" + tag + ">";
       }
       function rowHtml(cells, tag) {
         var cs = [];
-        for (var k = 0; k < head.length; k++) cs.push(cellHtml(tag, cells[k] || "", k));
+        for (var k = 0; k < nCols; k++) cs.push(cellHtml(tag, cells[k] || "", k));
         return "<tr>" + cs.join("") + "</tr>";
       }
-      var thead = "<thead>" + rowHtml(head, "th") + "</thead>";
+      var thead = head ? "<thead>" + rowHtml(head, "th") + "</thead>" : "";
       var tbody = rows.length ? "<tbody>" + rows.map(function (r) { return rowHtml(r, "td"); }).join("") + "</tbody>" : "";
       return '<table class="pd-table">' + thead + tbody + "</table>";
     }
@@ -100,6 +142,29 @@
       // (cubic #373 P5).
       var img = /^!\[([^\]]*)\]\(([^)\s]+)\)\s*$/.exec(ln);
       if (img) { flush(); out.push('<img class="pd-slide-img" loading="lazy" src="' + esc(imgURL(date, img[2])) + '" alt="' + esc(img[1]) + '" />'); continue; }
+      // HTML <table> block (#427): consumed only when a closing tag exists ahead — an
+      // unterminated block falls through to text rendering (honest degradation, escape-first).
+      // The parsed cell TEXT re-renders through the same renderTable path as a pipe table.
+      if (/^\s*<table\b/i.test(ln)) {
+        var end = -1, buf = [];
+        for (var t = i; t < lines.length; t++) {
+          buf.push(lines[t]);
+          if (/<\/table\s*>/i.test(lines[t])) { end = t; break; }
+        }
+        var hrows = end === -1 ? [] : parseHtmlTable(buf.join("\n"));
+        if (hrows.length) {
+          flush();
+          var headIsTh = hrows[0].every(function (c) { return c.head; });
+          var hhead = headIsTh ? hrows[0].map(function (c) { return c.text; }) : null;
+          var hbody = (headIsTh ? hrows.slice(1) : hrows).map(function (r) {
+            return r.map(function (c) { return c.text; });
+          });
+          out.push(renderTable(hhead, hbody, hrows[0].map(function (c) { return c.align; })));
+          i = end; // the for-loop's i++ advances past the closing-tag line
+          continue;
+        }
+        // no closing tag / no parsable rows: fall through — the lines render as escaped text
+      }
       // GFM pipe-table: a header row with a '|' IMMEDIATELY followed by a delimiter row. The
       // block runs until a blank or pipe-less line. Detected on RAW lines (before escaping) so
       // the structural pipes are visible; cell text is escaped-then-inline'd in renderTable.
