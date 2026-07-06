@@ -166,6 +166,52 @@ func TestDetectorColdStartWakesOnceThenQuiet(t *testing.T) {
 	}
 }
 
+// #470: subtree-only material must not reset the primary quiet clock or settled state.
+func TestDetectorStackableWakesSubtreeOnlyPreservesPrimaryClock(t *testing.T) {
+	f := newFixture()
+	cfg := f.config("cos", []string{"cos", "alpha-xo", "backend"}, 3, "interval")
+	cfg.StackableWakes = true
+	cfg.OwningXO = func(agent string) string {
+		if agent == "backend" {
+			return "alpha-xo"
+		}
+		return "cos"
+	}
+	cfg.WakeLayer = func(string, WakeKind, []string) {}
+	d := newDet(t, f, cfg)
+	seed(d, map[string]surface.State{"cos": surface.StateWorking, "alpha-xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
+	f.set("cos", surface.StateIdle)
+	f.settle = true
+	f.signal = "h0"
+	d.Tick() // primary settles
+	if !d.snap.XOSettled {
+		t.Fatal("primary should be settled")
+	}
+
+	f.reset()
+	f.set("backend", surface.StateWorking)
+	d.Tick()
+	f.set("backend", surface.StateIdle)
+	d.Tick() // subtree-only layer material
+	if !d.snap.XOSettled {
+		t.Fatal("subtree-only material must not clear primary settled")
+	}
+	// Quiet clock for primary must still advance: layer wake must not call OnWake.
+	f.advance(2 * d.cfg.ReferenceInterval)
+	d.Tick()
+	pings := 0
+	f.mu.Lock()
+	for _, w := range f.wakes {
+		if w.kind == WakePing {
+			pings++
+		}
+	}
+	f.mu.Unlock()
+	if pings != 1 {
+		t.Fatalf("primary quiet ping count = %d, want 1 after subtree-only material", pings)
+	}
+}
+
 func TestDetectorStackableWakesScopesSubtreeToOwner(t *testing.T) {
 	f := newFixture()
 	cfg := f.config("cos", []string{"cos", "alpha-xo", "backend"}, 3, "none")
