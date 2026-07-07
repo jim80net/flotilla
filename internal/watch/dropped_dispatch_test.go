@@ -2,6 +2,7 @@ package watch
 
 import (
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -46,23 +47,67 @@ func TestDetectorDroppedDispatchOnFinish_FiresOnWorkingIdle(t *testing.T) {
 	}
 }
 
-// TestDroppedDispatchEndToEnd_Sketch FAILS until cmd/flotilla/watch.go wires inbound tracker
-// on confirmed KindSend and the finish hook reads turn-finals + reinjects.
-func TestDroppedDispatchEndToEnd_Sketch(t *testing.T) {
-	tracker := inbound.NewTracker()
-	tracker.Track(inbound.Entry{
-		ID: "e1", Sender: "memex", Recipient: "codex-harness-dev",
-		Message: "Phase-2 wave: implement portable-location for hermes adapter",
-		Nonce:   "flotilla-dispatch-472sketch",
+// TestDroppedDispatchEndToEnd confirms inbound track + finish hook reinject (#472).
+func TestDroppedDispatchEndToEnd(t *testing.T) {
+	dir := t.TempDir()
+	var reinjected []Job
+	enqueue := func(j Job) { reinjected = append(reinjected, j) }
+
+	in := NewInjector(func(string, string) error { return nil }, 0)
+	in.rosterDir = dir
+	in.SetInboundTrack(InboundTrackHook(dir))
+
+	msg, nonce, err := inbound.AppendDispatchNonce("Phase-2 wave: implement portable-location for hermes adapter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.deliver(Job{
+		Agent: "codex-harness-dev", Message: msg, Kind: KindSend,
+		Sender: "memex", MessageID: "m1",
 	})
 
-	// Intervening duty turn-final — synthesis/heartbeat, no dispatch ack.
-	turnFinal := "Visibility synthesis complete. Fleet map updated."
-	actions := tracker.OnFinish("codex-harness-dev", turnFinal)
-	if len(actions) != 1 || !actions[0].Reinject {
-		t.Fatalf("inbound logic: want reinject on first miss, got %+v", actions)
+	path, err := inbound.Path(dir, "codex-harness-dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := inbound.NewStore(path).Load(); len(got) != 1 || got[0].Nonce != nonce {
+		t.Fatalf("inbound ledger = %+v, want nonce %q", got, nonce)
 	}
 
-	// Gap: production has no droppedDispatchOnFinish(cfg, tracker, enqueue) in watch.go yet.
-	t.Fatal("#472 not wired: cmd/flotilla/watch.go must connect inbound.Tracker + Injector confirm path + DroppedDispatchOnFinish")
+	hook := DroppedDispatchFinishHook(dir, func(string) (string, bool, error) {
+		return "Visibility synthesis complete. Fleet map updated.", true, nil
+	}, enqueue, nil)
+	hook("codex-harness-dev")
+
+	if len(reinjected) != 1 {
+		t.Fatalf("want one reinject, got %d", len(reinjected))
+	}
+	if reinjected[0].Agent != "codex-harness-dev" || reinjected[0].Kind != KindDetector {
+		t.Fatalf("reinject job = %+v", reinjected[0])
+	}
+	if !strings.Contains(reinjected[0].Message, "dropped-dispatch resume") {
+		t.Fatalf("reinject message missing preamble: %q", reinjected[0].Message)
+	}
+	got := inbound.NewStore(path).Load()
+	if len(got) != 1 || got[0].Deferrals != 1 {
+		t.Fatalf("deferrals must persist after first miss: %+v", got)
+	}
+}
+
+func TestInjectorInboundTrack_OnConfirmedKindSend(t *testing.T) {
+	dir := t.TempDir()
+	in := NewInjector(func(string, string) error { return nil }, 0)
+	in.rosterDir = dir
+	in.SetInboundTrack(InboundTrackHook(dir))
+
+	msg, _, err := inbound.AppendDispatchNonce("status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.deliver(Job{Agent: "backend", Message: msg, Kind: KindSend, Sender: "xo", MessageID: "id1"})
+
+	path, _ := inbound.Path(dir, "backend")
+	if len(inbound.NewStore(path).Load()) != 1 {
+		t.Fatal("confirmed KindSend must record inbound pending dispatch")
+	}
 }

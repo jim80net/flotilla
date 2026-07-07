@@ -14,6 +14,7 @@ import (
 
 	"github.com/jim80net/flotilla/internal/cos"
 	"github.com/jim80net/flotilla/internal/deliver"
+	"github.com/jim80net/flotilla/internal/inbound"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/transport"
@@ -346,6 +347,10 @@ func cmdSend(args []string) error {
 	}
 	if strings.TrimSpace(message) == "" {
 		return fmt.Errorf("message is empty")
+	}
+	message, _, err = inbound.AppendDispatchNonce(message)
+	if err != nil {
+		return fmt.Errorf("append dispatch nonce: %w", err)
 	}
 
 	cfg, err := roster.Load(*rosterPath)

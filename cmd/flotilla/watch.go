@@ -290,6 +290,7 @@ func cmdWatch(args []string) error {
 		mirrorSendToLedger(cfg, sender, recipient, message)
 	})
 	injector.SetOutboxDone(outboxSweeper.Release)
+	injector.SetInboundTrack(watch.InboundTrackHook(rosterDir))
 	// Mirror relayed instructions to the audit channel in full. Heartbeat ticks
 	// are NOT mirrored: they fire every interval and a per-tick marker is pure
 	// noise in the operator's Discord channel (XO liveness is already covered by
@@ -729,7 +730,13 @@ func cmdWatch(args []string) error {
 			AdjutantSeamOnFinish:      drainAdjutantSeamFor,
 			IdleHoldOnFinish:          idleHoldOnFinish(cfg, idleHoldTracker, injector.Enqueue),
 			StrandedHandoffOnFinish:   strandedHandoffOnFinish(cfg, strandedTracker, injector.Enqueue),
-			IsCoordinator:             cfg.IsCoordinator,
+			DroppedDispatchOnFinish: watch.DroppedDispatchFinishHook(
+				rosterDir,
+				func(agent string) (string, bool, error) { return readDeskTurnFinal(cfg, agent) },
+				injector.Enqueue,
+				alert,
+			),
+			IsCoordinator: cfg.IsCoordinator,
 			DelegationNudgeOnFinish:   delegationNudgeOnFinish(cfg, delegationTracker, injector.Enqueue),
 			DecisionBriefOnTick: decisionBriefOnTick(
 				goalsJSONPath, *backlogPath, decisionBriefClaimsPath, decisionBriefTracker, injector.Enqueue, cfg,
