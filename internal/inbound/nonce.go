@@ -24,3 +24,14 @@ func AppendDispatchNonce(message string) (string, string, error) {
 func ParseDispatchNonce(message string) string {
 	return dispatchNonceRE.FindString(message)
 }
+
+const dispatchFooterMarker = "\n\n---\nflotilla dispatch ack (#472)\n"
+
+// StripDispatchFooter returns the operator-facing body without the #472 dispatch footer.
+// Outbox dedup hashes this stripped form so per-send nonce stamps do not defeat collapse (#484).
+func StripDispatchFooter(message string) string {
+	if i := strings.Index(message, dispatchFooterMarker); i >= 0 {
+		return strings.TrimRight(message[:i], "\n")
+	}
+	return message
+}
