@@ -164,12 +164,12 @@ func TestDecisionBriefOnTickUnownedChildInheritsOwner(t *testing.T) {
 }
 
 func TestDecisionBriefUnownedSkipLatchSuppressesRepeatLog(t *testing.T) {
-	latch := map[string]string{}
+	latch := decisionbrief.NewUnownedSkipLatch()
 	g := decisionbrief.Gap{GoalID: "trading", ItemKey: "k", Class: "blocked"}
-	if !decisionbrief.ShouldLogUnownedSkip(latch, g) {
+	if !latch.ShouldLog(g) {
 		t.Fatal("first tick should log")
 	}
-	if decisionbrief.ShouldLogUnownedSkip(latch, g) {
+	if latch.ShouldLog(g) {
 		t.Fatal("second tick must not log same unowned shape")
 	}
 }

@@ -198,27 +198,57 @@ func resolveOwnerDirect(g dash.Goal) string {
 	return ""
 }
 
-// ShouldLogUnownedSkip reports whether the no-owning-desk skip line should be logged (#482).
-// The latch logs once per gap until the gap shape changes.
-func ShouldLogUnownedSkip(latch map[string]string, g Gap) bool {
-	if latch == nil {
+// UnownedSkipLatch hash-latches no-owning-desk skip logs per gap shape (#482).
+// Production invokes DecisionBriefOnTick via MirrorDispatch (go run), so overlapping
+// ticks may access the latch concurrently — the mutex matches Tracker's posture.
+type UnownedSkipLatch struct {
+	mu     sync.Mutex
+	shapes map[string]string // GapKey → shape hash
+}
+
+// NewUnownedSkipLatch builds an empty skip-log latch.
+func NewUnownedSkipLatch() *UnownedSkipLatch {
+	return &UnownedSkipLatch{shapes: make(map[string]string)}
+}
+
+// ShouldLog reports whether the no-owning-desk skip line should be logged for g.
+func (l *UnownedSkipLatch) ShouldLog(g Gap) bool {
+	if l == nil {
 		return true
 	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	key := GapKey(g)
 	h := unownedSkipShapeHash(g)
-	if latch[key] == h {
+	if l.shapes[key] == h {
 		return false
 	}
-	latch[key] = h
+	l.shapes[key] = h
 	return true
 }
 
-// ClearUnownedSkipLatch drops the latch entry when a gap clears or gains an owner.
-func ClearUnownedSkipLatch(latch map[string]string, g Gap) {
-	if latch == nil {
+// Clear drops the latch entry when a gap clears or gains an owner.
+func (l *UnownedSkipLatch) Clear(g Gap) {
+	if l == nil {
 		return
 	}
-	delete(latch, GapKey(g))
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.shapes, GapKey(g))
+}
+
+// Reconcile drops latch entries for gaps no longer active this tick.
+func (l *UnownedSkipLatch) Reconcile(active map[string]bool) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for key := range l.shapes {
+		if !active[key] {
+			delete(l.shapes, key)
+		}
+	}
 }
 
 func unownedSkipShapeHash(g Gap) string {

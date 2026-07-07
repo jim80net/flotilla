@@ -209,21 +209,37 @@ func TestFindGaps_UnownedChildInheritsParentOwner(t *testing.T) {
 	}
 }
 
-func TestShouldLogUnownedSkip_LatchesUntilShapeChanges(t *testing.T) {
-	latch := map[string]string{}
+func TestUnownedSkipLatch_ConcurrentAccessRaceSafe(t *testing.T) {
+	latch := NewUnownedSkipLatch()
+	g := Gap{GoalID: "trading", ItemKey: "k", Class: "blocked"}
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			latch.ShouldLog(g)
+			latch.Clear(g)
+			latch.Reconcile(map[string]bool{"trading:k": true})
+		}()
+	}
+	wg.Wait()
+}
+
+func TestUnownedSkipLatch_LatchesUntilShapeChanges(t *testing.T) {
+	latch := NewUnownedSkipLatch()
 	g := Gap{GoalID: "trading", ItemKey: "[blocked] x", Class: "blocked"}
-	if !ShouldLogUnownedSkip(latch, g) {
+	if !latch.ShouldLog(g) {
 		t.Fatal("first sight should log")
 	}
-	if ShouldLogUnownedSkip(latch, g) {
+	if latch.ShouldLog(g) {
 		t.Fatal("stable shape should not re-log")
 	}
 	g2 := Gap{GoalID: "trading", ItemKey: "[blocked] y", Class: "blocked"}
-	if !ShouldLogUnownedSkip(latch, g2) {
+	if !latch.ShouldLog(g2) {
 		t.Fatal("shape change should re-log")
 	}
-	ClearUnownedSkipLatch(latch, g2)
-	if !ShouldLogUnownedSkip(latch, g2) {
+	latch.Clear(g2)
+	if !latch.ShouldLog(g2) {
 		t.Fatal("after clear, should log again")
 	}
 }
