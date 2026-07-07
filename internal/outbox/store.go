@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/inbound"
 	"github.com/jim80net/flotilla/internal/sessionmirror"
 )
 
@@ -89,7 +90,7 @@ func (s Store) Load() []Entry {
 }
 
 // Insert appends a new pending send. When an identical pending entry already exists
-// (same recipient + message hash), returns the existing id without appending (#484).
+// (same recipient + nonce-stripped message hash), returns the existing id without appending (#484).
 func (s Store) Insert(e Entry) (id string, deduped bool, err error) {
 	if s.path == "" || e.Sender == "" || e.Recipient == "" || e.Message == "" {
 		return "", false, nil
@@ -205,7 +206,7 @@ func Enqueue(rosterDir, sender, recipient, message string) (id string, deduped b
 }
 
 func messageHash(message string) string {
-	sum := sha256.Sum256([]byte(message))
+	sum := sha256.Sum256([]byte(inbound.StripDispatchFooter(message)))
 	return hex.EncodeToString(sum[:8])
 }
 

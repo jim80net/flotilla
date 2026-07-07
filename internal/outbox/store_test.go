@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jim80net/flotilla/internal/inbound"
 )
 
 func TestOutboxRoundTrip(t *testing.T) {
@@ -49,23 +51,93 @@ func TestEnqueueCreatesEntry(t *testing.T) {
 	}
 }
 
-func TestEnqueueDedupIdenticalPending(t *testing.T) {
+// Regression (#484 P1): production stamps a fresh nonce before enqueue — dedup must
+// collapse on nonce-stripped body, not raw stamped bytes.
+func TestEnqueueDedupIdenticalPendingStampedSequence(t *testing.T) {
 	dir := t.TempDir()
-	msg := "deploy complete — same bytes"
-	id1, _, err := Enqueue(dir, "alpha", "cos", msg)
+	base := "deploy complete — same operator text"
+	msg1, _, err := inbound.AppendDispatchNonce(base)
 	if err != nil {
 		t.Fatal(err)
 	}
-	id2, deduped, err := Enqueue(dir, "alpha", "cos", msg)
+	id1, _, err := Enqueue(dir, "alpha", "cos", msg1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg2, _, err := inbound.AppendDispatchNonce(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg1 == msg2 {
+		t.Fatal("probe requires distinct stamped bodies with identical stripped text")
+	}
+	id2, deduped, err := Enqueue(dir, "alpha", "cos", msg2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !deduped || id2 != id1 {
-		t.Fatalf("second enqueue id=%q deduped=%v, want id=%q deduped", id2, deduped, id1)
+		t.Fatalf("second stamped enqueue id=%q deduped=%v, want id=%q deduped", id2, deduped, id1)
 	}
 	path, _ := Path(dir, "alpha")
-	if len(NewStore(path).Load()) != 1 {
+	got := NewStore(path).Load()
+	if len(got) != 1 {
 		t.Fatal("dedup must not append a second pending entry")
+	}
+	if got[0].Message != msg1 {
+		t.Fatalf("surviving entry keeps first stamp, got %q", got[0].Message)
+	}
+}
+
+func TestEnqueueDedupScopedPerRecipient(t *testing.T) {
+	dir := t.TempDir()
+	base := "fleet-wide broadcast"
+	msgCos, _, err := inbound.AppendDispatchNonce(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgBeta, _, err := inbound.AppendDispatchNonce(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Enqueue(dir, "alpha", "cos", msgCos); err != nil {
+		t.Fatal(err)
+	}
+	_, deduped, err := Enqueue(dir, "alpha", "beta", msgBeta)
+	if err != nil || deduped {
+		t.Fatalf("distinct recipient must not dedup, deduped=%v err=%v", deduped, err)
+	}
+	if len(NewStore(mustPath(t, dir, "alpha")).Load()) != 2 {
+		t.Fatal("same stripped text to two recipients must queue two entries")
+	}
+}
+
+func TestEnqueueDedupPreservesEscalationState(t *testing.T) {
+	dir := t.TempDir()
+	path := mustPath(t, dir, "alpha")
+	base := "status ping"
+	enq := time.Date(2026, 7, 7, 8, 0, 0, 0, time.UTC)
+	escalated := enq.Add(2 * time.Hour)
+	msg1, _, err := inbound.AppendDispatchNonce(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := NewStore(path).Insert(Entry{
+		ID: "keep", Sender: "alpha", Recipient: "cos", Message: msg1,
+		Deferrals: 6, EnqueuedAt: enq, LastStaleEscalation: escalated,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	msg2, _, err := inbound.AppendDispatchNonce(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id2, deduped, err := Enqueue(dir, "alpha", "cos", msg2)
+	if err != nil || !deduped || id2 != "keep" {
+		t.Fatalf("collapse id=%q deduped=%v err=%v", id2, deduped, err)
+	}
+	got := NewStore(path).Load()[0]
+	if got.Deferrals != 6 || !got.LastStaleEscalation.Equal(escalated) || !got.EnqueuedAt.Equal(enq) {
+		t.Fatalf("collapse must preserve escalation state, got %+v", got)
 	}
 }
 

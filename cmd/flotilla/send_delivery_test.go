@@ -33,26 +33,42 @@ func TestErrRetryableBusyUnwrap(t *testing.T) {
 }
 
 // Acceptance (#484): repeated bounce of the same send dedups to the existing outbox id.
+// Drives the production path: stamp → bounce → enqueue (cmdSend stamps before enqueue).
 func TestBouncedSendDedupesIdenticalPending(t *testing.T) {
 	dir := t.TempDir()
 	rosterPath := filepath.Join(dir, "flotilla.json")
 	if err := os.WriteFile(rosterPath, []byte(`{"agents":[{"name":"xo"},{"name":"alpha"}]}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	msg := "deploy complete"
+	base := "deploy complete"
 	busy := errRetryableBusy{agent: "xo"}
-	if err := enqueueOrFailSend(rosterPath, "alpha", "xo", msg, busy); err != nil {
+	msg1, _, err := inbound.AppendDispatchNonce(base)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := enqueueOrFailSend(rosterPath, "alpha", "xo", msg, busy); err != nil {
+	if err := enqueueOrFailSend(rosterPath, "alpha", "xo", msg1, busy); err != nil {
+		t.Fatal(err)
+	}
+	msg2, _, err := inbound.AppendDispatchNonce(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg1 == msg2 {
+		t.Fatal("probe requires distinct stamps")
+	}
+	if err := enqueueOrFailSend(rosterPath, "alpha", "xo", msg2, busy); err != nil {
 		t.Fatal(err)
 	}
 	path, err := outbox.Path(dir, "alpha")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(outbox.NewStore(path).Load()) != 1 {
+	got := outbox.NewStore(path).Load()
+	if len(got) != 1 {
 		t.Fatal("duplicate bounce must not append a second pending entry")
+	}
+	if got[0].Message != msg1 {
+		t.Fatalf("surviving queued send keeps first stamp, got %q", got[0].Message)
 	}
 }
 
