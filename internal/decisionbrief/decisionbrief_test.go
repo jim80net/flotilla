@@ -147,6 +147,133 @@ func TestResolveOwner_DeskFallback(t *testing.T) {
 	}
 }
 
+// unownedChildFixture is the #482 live shape: parent brief suppresses goal-level gap;
+// gated child has no conversation_agent — owner must inherit from parent.
+func unownedChildFixture() (dash.GoalsFile, string) {
+	f := dash.GoalsFile{Goals: []dash.Goal{
+		{
+			ID: "trading", Title: "Trading", Scope: "fleet",
+			ConversationAgent: "frontend",
+			WorkItems: []dash.WorkItem{{
+				Kind: dash.WorkDesk, Agent: "frontend",
+				Brief: "What: ship. Value: $1. Mechanics: deploy. Alternatives: wait. Recommendation: ship. Reversibility: easy.",
+			}},
+		},
+		{
+			ID: "gate", Title: "Gate", Scope: "project", Parent: "trading",
+			WorkItems: []dash.WorkItem{{
+				Kind: dash.WorkBacklog, Match: "[blocked] operator sign-off",
+			}},
+		},
+	}}
+	backlog := "## Backlog\n- [blocked] operator sign-off\n"
+	return f, backlog
+}
+
+func TestResolveOwnerInTree_NearestAncestorWins(t *testing.T) {
+	f := dash.GoalsFile{Goals: []dash.Goal{
+		{ID: "root", ConversationAgent: "cos"},
+		{ID: "mid", Parent: "root", ConversationAgent: "alpha-xo"},
+		{
+			ID: "leaf", Parent: "mid",
+			WorkItems: []dash.WorkItem{{Kind: dash.WorkBacklog, Match: "[blocked] x"}},
+		},
+	}}
+	byID := make(map[string]dash.Goal, len(f.Goals))
+	for _, g := range f.Goals {
+		byID[g.ID] = g
+	}
+	if got := ResolveOwnerInTree(byID["leaf"], byID); got != "alpha-xo" {
+		t.Fatalf("ResolveOwnerInTree = %q, want alpha-xo (nearest ancestor, not root cos)", got)
+	}
+}
+
+func TestResolveOwnerInTree_CycleGuardFailClosed(t *testing.T) {
+	byID := map[string]dash.Goal{
+		"a": {ID: "a", Parent: "b"},
+		"b": {ID: "b", Parent: "a"},
+	}
+	for _, start := range []string{"a", "b"} {
+		if got := ResolveOwnerInTree(byID[start], byID); got != "" {
+			t.Fatalf("cyclic byID from %s must fail closed, got %q", start, got)
+		}
+	}
+}
+
+func TestResolveOwnerInTree_InheritsFromParent(t *testing.T) {
+	f, _ := unownedChildFixture()
+	byID := map[string]dash.Goal{}
+	for _, g := range f.Goals {
+		byID[g.ID] = g
+	}
+	child := byID["gate"]
+	if got := ResolveOwnerInTree(child, byID); got != "frontend" {
+		t.Fatalf("ResolveOwnerInTree = %q, want frontend", got)
+	}
+}
+
+func TestFindGaps_UnownedChildInheritsParentOwner(t *testing.T) {
+	f, backlog := unownedChildFixture()
+	gaps := FindGaps(Inputs{
+		File: f, FileOK: true,
+		Backlog:    backlog,
+		DeskStates: map[string]string{"frontend": "working"},
+	})
+	var childGap *Gap
+	for i := range gaps {
+		if gaps[i].GoalID == "gate" {
+			childGap = &gaps[i]
+			break
+		}
+	}
+	if childGap == nil {
+		t.Fatalf("gaps = %+v, want child item-level gap", gaps)
+	}
+	if childGap.Owner != "frontend" {
+		t.Fatalf("child gap owner = %q, want frontend (inherited)", childGap.Owner)
+	}
+	for _, g := range gaps {
+		if g.GoalID == "trading" && g.ItemKey == "" {
+			t.Fatalf("parent goal-level gap must stay suppressed: %+v", gaps)
+		}
+	}
+}
+
+func TestUnownedSkipLatch_ConcurrentAccessRaceSafe(t *testing.T) {
+	latch := NewUnownedSkipLatch()
+	g := Gap{GoalID: "trading", ItemKey: "k", Class: "blocked"}
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			latch.ShouldLog(g)
+			latch.Clear(g)
+			latch.Reconcile(map[string]bool{"trading:k": true})
+		}()
+	}
+	wg.Wait()
+}
+
+func TestUnownedSkipLatch_LatchesUntilShapeChanges(t *testing.T) {
+	latch := NewUnownedSkipLatch()
+	g := Gap{GoalID: "trading", ItemKey: "[blocked] x", Class: "blocked"}
+	if !latch.ShouldLog(g) {
+		t.Fatal("first sight should log")
+	}
+	if latch.ShouldLog(g) {
+		t.Fatal("stable shape should not re-log")
+	}
+	g2 := Gap{GoalID: "trading", ItemKey: "[blocked] y", Class: "blocked"}
+	if !latch.ShouldLog(g2) {
+		t.Fatal("shape change should re-log")
+	}
+	latch.Clear(g2)
+	if !latch.ShouldLog(g2) {
+		t.Fatal("after clear, should log again")
+	}
+}
+
 func TestResolveOwner_ConversationAgentWins(t *testing.T) {
 	g := dash.Goal{
 		ConversationAgent: "xo",

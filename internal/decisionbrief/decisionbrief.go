@@ -6,6 +6,7 @@
 package decisionbrief
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"strings"
 	"sync"
@@ -56,13 +57,17 @@ func FindGaps(in Inputs) []Gap {
 	for _, g := range doc.Goals {
 		byID[g.ID] = g
 	}
+	goalByID := make(map[string]dash.Goal, len(in.File.Goals))
+	for _, goal := range in.File.Goals {
+		goalByID[goal.ID] = goal
+	}
 	var gaps []Gap
 	for _, g := range in.File.Goals {
 		rendered, ok := byID[g.ID]
 		if !ok {
 			continue
 		}
-		owner := ResolveOwner(g)
+		owner := ResolveOwnerInTree(g, goalByID)
 		var itemGaps []Gap
 		for i, wi := range g.WorkItems {
 			if i >= len(rendered.WorkItems) {
@@ -155,9 +160,39 @@ func GapKey(g Gap) string {
 	return g.GoalID + ":" + g.ItemKey
 }
 
-// ResolveOwner picks the desk that authors the brief: conversation_agent, else the
-// first kind=desk work item's agent. Empty when no owner can be determined.
+// ResolveOwner picks the desk that authors the brief on this goal only: conversation_agent,
+// else the first kind=desk work item's agent. Empty when no owner can be determined.
 func ResolveOwner(g dash.Goal) string {
+	return resolveOwnerDirect(g)
+}
+
+// ResolveOwnerInTree walks up the parent chain to the nearest ancestor with an owner (#482).
+// byID must be acyclic (as produced by dash.ParseGoalsFile); cycles return "" fail-closed.
+func ResolveOwnerInTree(g dash.Goal, byID map[string]dash.Goal) string {
+	visited := make(map[string]bool)
+	for cur := g; ; {
+		if cur.ID != "" && visited[cur.ID] {
+			return ""
+		}
+		if cur.ID != "" {
+			visited[cur.ID] = true
+		}
+		if o := resolveOwnerDirect(cur); o != "" {
+			return o
+		}
+		parentID := strings.TrimSpace(cur.Parent)
+		if parentID == "" {
+			return ""
+		}
+		parent, ok := byID[parentID]
+		if !ok {
+			return ""
+		}
+		cur = parent
+	}
+}
+
+func resolveOwnerDirect(g dash.Goal) string {
 	if ca := strings.TrimSpace(g.ConversationAgent); ca != "" {
 		return ca
 	}
@@ -169,6 +204,64 @@ func ResolveOwner(g dash.Goal) string {
 		}
 	}
 	return ""
+}
+
+// UnownedSkipLatch hash-latches no-owning-desk skip logs per gap shape (#482).
+// Production invokes DecisionBriefOnTick via MirrorDispatch (go run), so overlapping
+// ticks may access the latch concurrently — the mutex matches Tracker's posture.
+type UnownedSkipLatch struct {
+	mu     sync.Mutex
+	shapes map[string]string // GapKey → shape hash
+}
+
+// NewUnownedSkipLatch builds an empty skip-log latch.
+func NewUnownedSkipLatch() *UnownedSkipLatch {
+	return &UnownedSkipLatch{shapes: make(map[string]string)}
+}
+
+// ShouldLog reports whether the no-owning-desk skip line should be logged for g.
+func (l *UnownedSkipLatch) ShouldLog(g Gap) bool {
+	if l == nil {
+		return true
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	key := GapKey(g)
+	h := unownedSkipShapeHash(g)
+	if l.shapes[key] == h {
+		return false
+	}
+	l.shapes[key] = h
+	return true
+}
+
+// Clear drops the latch entry when a gap clears or gains an owner.
+func (l *UnownedSkipLatch) Clear(g Gap) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.shapes, GapKey(g))
+}
+
+// Reconcile drops latch entries for gaps no longer active this tick.
+func (l *UnownedSkipLatch) Reconcile(active map[string]bool) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for key := range l.shapes {
+		if !active[key] {
+			delete(l.shapes, key)
+		}
+	}
+}
+
+func unownedSkipShapeHash(g Gap) string {
+	sum := sha256.Sum256([]byte(g.GoalID + "\x00" + g.ItemKey + "\x00" + g.Class))
+	return fmt.Sprintf("%x", sum)
 }
 
 // Tracker suppresses re-dispatch for the same gap until it clears or gains a brief.
