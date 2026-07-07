@@ -21,6 +21,7 @@ import (
 	"github.com/jim80net/flotilla/internal/delegatenudge"
 	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/idlehold"
+	"github.com/jim80net/flotilla/internal/inbound"
 	"github.com/jim80net/flotilla/internal/launch"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/stranded"
@@ -290,6 +291,7 @@ func cmdWatch(args []string) error {
 		mirrorSendToLedger(cfg, sender, recipient, message)
 	})
 	injector.SetOutboxDone(outboxSweeper.Release)
+	injector.SetInboundTrack(watch.InboundTrackHook(rosterDir, cfg.IsCoordinator))
 	// Mirror relayed instructions to the audit channel in full. Heartbeat ticks
 	// are NOT mirrored: they fire every interval and a per-tick marker is pure
 	// noise in the operator's Discord channel (XO liveness is already covered by
@@ -585,6 +587,12 @@ func cmdWatch(args []string) error {
 		decisionBriefTracker := decisionbrief.LoadTracker(decisionBriefClaimsPath)
 		injector.SetDetectorClaimHooks(
 			func(key string) {
+				if recipient, entryID, ok := inbound.ParseReinjectClaimKey(key); ok {
+					if err := inbound.MarkReinjectDelivered(rosterDir, recipient, entryID); err != nil {
+						log.Printf("flotilla watch: inbound reinject confirm %s/%s failed: %v", recipient, entryID, err)
+					}
+					return
+				}
 				if isAdjutantSeamClaimKey(key) {
 					seamClaims.confirm(key)
 					return
@@ -729,8 +737,14 @@ func cmdWatch(args []string) error {
 			AdjutantSeamOnFinish:      drainAdjutantSeamFor,
 			IdleHoldOnFinish:          idleHoldOnFinish(cfg, idleHoldTracker, injector.Enqueue),
 			StrandedHandoffOnFinish:   strandedHandoffOnFinish(cfg, strandedTracker, injector.Enqueue),
-			IsCoordinator:             cfg.IsCoordinator,
-			DelegationNudgeOnFinish:   delegationNudgeOnFinish(cfg, delegationTracker, injector.Enqueue),
+			DroppedDispatchOnFinish: watch.DroppedDispatchFinishHook(
+				rosterDir,
+				func(agent string) (string, bool, error) { return readDeskTurnFinal(cfg, agent) },
+				injector.Enqueue,
+				alert,
+			),
+			IsCoordinator:           cfg.IsCoordinator,
+			DelegationNudgeOnFinish: delegationNudgeOnFinish(cfg, delegationTracker, injector.Enqueue),
 			DecisionBriefOnTick: decisionBriefOnTick(
 				goalsJSONPath, *backlogPath, decisionBriefClaimsPath, decisionBriefTracker, injector.Enqueue, cfg,
 				func() map[string]string {

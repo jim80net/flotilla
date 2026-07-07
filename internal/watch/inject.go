@@ -132,6 +132,7 @@ type Injector struct {
 	onOutboxDone      func(sender, id string)                 // optional: clear in-flight sweep guard (#475)
 	onDetectorConfirm func(claimKey string)                   // optional: durable claim after confirmed detector delivery (#365)
 	onDetectorAbort   func(claimKey string)                   // optional: release in-memory claim on busy drop / failure (#365)
+	onInboundTrack    func(Job)                               // optional: recipient inbound ledger after confirmed KindSend (#472)
 	now               func() time.Time                        // clock for stale escalation; nil ⇒ time.Now()
 }
 
@@ -175,6 +176,10 @@ func (in *Injector) SetDetectorClaimHooks(confirm, abort func(claimKey string)) 
 	in.onDetectorConfirm = confirm
 	in.onDetectorAbort = abort
 }
+
+// SetInboundTrack installs a hook called after a CONFIRMED KindSend delivery to record the
+// dispatch in the recipient's inbound ledger (#472). Must be set before Start.
+func (in *Injector) SetInboundTrack(fn func(Job)) { in.onInboundTrack = fn }
 
 // NewInjector builds an injector with the given send function and queue buffer.
 func NewInjector(send SendFunc, buffer int) *Injector {
@@ -240,6 +245,9 @@ func (in *Injector) deliver(j Job) {
 		if j.Kind == KindSend {
 			if in.onSend != nil && j.Sender != "" {
 				in.onSend(j.Sender, j.Agent, j.Message)
+			}
+			if in.onInboundTrack != nil {
+				in.onInboundTrack(j)
 			}
 			in.outboxDone(j)
 		}
