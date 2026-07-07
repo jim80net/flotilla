@@ -1587,6 +1587,38 @@ func TestGoalsCellDrillins405(t *testing.T) {
 	}
 }
 
+// TestGoalsKebabMenuNotClipped503 locks #503: the goal card's own overflow:hidden
+// (which exists to keep card content, #421) also clipped its kebab popup — an
+// absolutely-positioned descendant that intentionally extends past the card's box —
+// and let later-DOM sibling cards paint over it. The fix releases clipping/raises
+// stacking ONLY while a menu is open (goals.js toggles .gnode-menu-open on the card
+// itself), so the #421 content-clipping guard stays in force for every closed card.
+func TestGoalsKebabMenuNotClipped503(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	m := regexp.MustCompile(`\.gnode\.gnode-menu-open\s*\{([^}]*)\}`).FindStringSubmatch(css)
+	if m == nil {
+		t.Fatal("dash.css must define a .gnode.gnode-menu-open rule (#503)")
+	}
+	body := m[1]
+	if !strings.Contains(body, "overflow: visible") {
+		t.Error(".gnode.gnode-menu-open must release overflow:hidden so the kebab popup isn't clipped (#503)")
+	}
+	if !strings.Contains(body, "z-index") {
+		t.Error(".gnode.gnode-menu-open must raise stacking so the open menu isn't painted over by later sibling cards (#503)")
+	}
+
+	js := doGet(t, srv, "/static/goals.js").Body.String()
+	if !strings.Contains(js, `openCard.classList.add("gnode-menu-open")`) {
+		t.Error("goals.js must add gnode-menu-open to the card when its kebab popup opens (#503)")
+	}
+	if !strings.Contains(js, `.gnode.gnode-menu-open").forEach(function (g) { g.classList.remove("gnode-menu-open")`) {
+		t.Error("goals.js closeAllGnodeMenus must remove gnode-menu-open from every card it closes (#503)")
+	}
+}
+
 // --- helpers ---
 
 func doGet(t *testing.T, srv *Server, path string) *httptest.ResponseRecorder {

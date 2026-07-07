@@ -1697,6 +1697,8 @@
   function closeAllGnodeMenus() {
     document.querySelectorAll(".gnode-pop").forEach(function (p) { p.hidden = true; });
     document.querySelectorAll(".gnode-kebab").forEach(function (b) { b.setAttribute("aria-expanded", "false"); });
+    // #503: undo the overflow/z-index release (see dash.css) once every menu is shut.
+    document.querySelectorAll(".gnode.gnode-menu-open").forEach(function (g) { g.classList.remove("gnode-menu-open"); });
   }
 
   function wireNodes() {
@@ -1728,6 +1730,8 @@
         if (willOpen && pop) {
           pop.hidden = false;
           kebab.setAttribute("aria-expanded", "true");
+          var openCard = kebab.closest(".gnode");
+          if (openCard) openCard.classList.add("gnode-menu-open");
         }
         return;
       }
