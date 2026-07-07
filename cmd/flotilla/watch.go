@@ -1558,7 +1558,7 @@ func delegationNudgeOnFinish(cfg *roster.Config, tracker *delegatenudge.Tracker,
 		if !tracker.Record(agent, r) {
 			return
 		}
-		log.Printf("flotilla watch: delegation-nudge %s: inline-build signal", agent)
+		log.Printf("flotilla watch: delegation-nudge %s: classifier=coordinator signal=inline-build", agent)
 		enqueue(watch.Job{Agent: agent, Message: delegatenudge.NudgePrompt(agent), Kind: watch.KindDetector})
 	}
 }
