@@ -134,9 +134,10 @@ type Injector struct {
 	onOutboxDone              func(sender, id string)                 // optional: clear in-flight sweep guard (#475)
 	onDetectorConfirm         func(claimKey string)                   // optional: durable claim after confirmed detector delivery (#365)
 	onDetectorAbort           func(claimKey string)                   // optional: release in-memory claim on busy drop / failure (#365)
+	onInboundTrack            func(Job)                               // optional: recipient inbound ledger after confirmed KindSend (#472)
 	now                       func() time.Time                        // clock for stale escalation; nil ⇒ time.Now()
 	outboxOwningCoordinator   func(sender string) string              // optional: sender → coordinator for stale outbox (#477)
-	outboxCoordinatorEscalate func(coordinator, msg string)           // optional: enqueue to coordinator surface (#436/#477)
+	outboxCoordinatorEscalate func(coordinator, msg, claimKey string) // optional: enqueue to coordinator surface (#436/#477)
 }
 
 // SetRelaySend installs a distinct send path for RELAY-kind jobs (the operator-message kind), used to
@@ -180,10 +181,14 @@ func (in *Injector) SetDetectorClaimHooks(confirm, abort func(claimKey string)) 
 	in.onDetectorAbort = abort
 }
 
+// SetInboundTrack installs a hook called after a CONFIRMED KindSend delivery to record the
+// dispatch in the recipient's inbound ledger (#472). Must be set before Start.
+func (in *Injector) SetInboundTrack(fn func(Job)) { in.onInboundTrack = fn }
+
 // SetOutboxStaleEscalate wires the one-shot coordinator-surface escalation for undeliverable
 // swept sends (#477, #436). owningCoordinator resolves the sender's coordinator; escalate
-// delivers the message (typically a KindDetector enqueue). nil hooks ⇒ no escalation.
-func (in *Injector) SetOutboxStaleEscalate(owningCoordinator func(sender string) string, escalate func(coordinator, msg string)) {
+// delivers the message off-worker (typically a KindDetector enqueue with claimKey). nil hooks ⇒ no escalation.
+func (in *Injector) SetOutboxStaleEscalate(owningCoordinator func(sender string) string, escalate func(coordinator, msg, claimKey string)) {
 	in.outboxOwningCoordinator = owningCoordinator
 	in.outboxCoordinatorEscalate = escalate
 }
@@ -252,6 +257,9 @@ func (in *Injector) deliver(j Job) {
 		if j.Kind == KindSend {
 			if in.onSend != nil && j.Sender != "" {
 				in.onSend(j.Sender, j.Agent, j.Message)
+			}
+			if in.onInboundTrack != nil {
+				in.onInboundTrack(j)
 			}
 			in.outboxDone(j)
 		}
@@ -362,9 +370,17 @@ func (in *Injector) handleBusy(j Job, cause error) {
 			Deferrals: j.deferrals, EnqueuedAt: j.enqueuedAt,
 			LastStaleEscalation: j.lastStaleEscalation,
 		}
-		in.maybeStaleEscalateOutbox(&j, &entry, now)
 		if path, err := outbox.Path(in.rosterDir, j.Sender); err == nil {
-			outbox.NewStore(path).Upsert(entry)
+			st := outbox.NewStore(path)
+			for _, p := range st.Load() {
+				if p.ID == j.MessageID && !p.LastStaleEscalation.IsZero() {
+					entry.LastStaleEscalation = p.LastStaleEscalation
+					j.lastStaleEscalation = p.LastStaleEscalation
+					break
+				}
+			}
+			in.maybeStaleEscalateOutbox(&j, &entry, now)
+			st.Upsert(entry)
 		}
 	}
 	in.reEnqueue(j, busyDeferDelay)
@@ -383,9 +399,11 @@ func (in *Injector) maybeStaleEscalateOutbox(j *Job, entry *outbox.Entry, now ti
 	if coord == "" {
 		return
 	}
-	in.outboxCoordinatorEscalate(coord, outbox.StaleEscalationMessage(*entry, now))
-	entry.LastStaleEscalation = now
-	j.lastStaleEscalation = now
+	claimKey := outbox.StaleClaimKey(j.Sender, j.MessageID)
+	msg := outbox.StaleEscalationMessage(*entry, now)
+	escalate := in.outboxCoordinatorEscalate
+	// Off-worker: never Enqueue synchronously from the injector worker (#477 P1 deadlock).
+	time.AfterFunc(0, func() { escalate(coord, msg, claimKey) })
 }
 
 // maybeStaleEscalateRelay raises the initial QUEUED alert (including replayed jobs whose

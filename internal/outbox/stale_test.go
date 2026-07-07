@@ -43,3 +43,27 @@ func TestStaleEscalationMessage_NamesPartiesAndAge(t *testing.T) {
 		}
 	}
 }
+
+func TestStaleClaimKeyRoundTrip(t *testing.T) {
+	key := StaleClaimKey("backend", "abc")
+	sender, id, ok := ParseStaleClaimKey(key)
+	if !ok || sender != "backend" || id != "abc" {
+		t.Fatalf("ParseStaleClaimKey(%q) = %q %q %v", key, sender, id, ok)
+	}
+}
+
+func TestMarkStaleEscalated_OnlyOnConfirm(t *testing.T) {
+	dir := t.TempDir()
+	path, _ := Path(dir, "backend")
+	NewStore(path).Upsert(Entry{
+		ID: "e1", Sender: "backend", Recipient: "cos", Message: "hi",
+		EnqueuedAt: time.Now().UTC(),
+	})
+	if err := MarkStaleEscalated(dir, "backend", "e1"); err != nil {
+		t.Fatal(err)
+	}
+	got := NewStore(path).Load()
+	if len(got) != 1 || got[0].LastStaleEscalation.IsZero() {
+		t.Fatalf("MarkStaleEscalated must stamp, got %+v", got)
+	}
+}

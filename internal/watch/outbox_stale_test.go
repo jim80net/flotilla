@@ -2,6 +2,7 @@ package watch
 
 import (
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,7 +18,10 @@ func TestInjectorKindSendStaleEscalatesCoordinatorOnce(t *testing.T) {
 	r := newRig(surface.ErrBusy)
 	r.in.rosterDir = dir
 	r.in.now = func() time.Time { return now }
-	var escalations []struct{ coord, msg string }
+	var (
+		mu          sync.Mutex
+		escalations []struct{ coord, msg, claim string }
+	)
 	r.in.SetOutboxStaleEscalate(
 		func(sender string) string {
 			if sender != "backend" {
@@ -25,37 +29,72 @@ func TestInjectorKindSendStaleEscalatesCoordinatorOnce(t *testing.T) {
 			}
 			return "alpha-xo"
 		},
-		func(coord, msg string) { escalations = append(escalations, struct{ coord, msg string }{coord, msg}) },
+		func(coord, msg, claimKey string) {
+			mu.Lock()
+			escalations = append(escalations, struct{ coord, msg, claim string }{coord, msg, claimKey})
+			mu.Unlock()
+		},
 	)
-
 	job := Job{
 		Agent: "cos", Message: "status", Kind: KindSend,
 		MessageID: "stale1", Sender: "backend", deferrals: outbox.StaleDeferAt,
 		enqueuedAt: base,
 	}
 	r.in.deliver(job)
-	if len(escalations) != 1 {
-		t.Fatalf("coordinator escalations = %d, want 1", len(escalations))
+	time.Sleep(20 * time.Millisecond) // AfterFunc(0) escalation
+	mu.Lock()
+	nEsc := len(escalations)
+	mu.Unlock()
+	if nEsc != 1 {
+		t.Fatalf("coordinator escalations = %d, want 1", nEsc)
 	}
-	if escalations[0].coord != "alpha-xo" {
-		t.Fatalf("coordinator = %q, want alpha-xo", escalations[0].coord)
+	mu.Lock()
+	esc := escalations[0]
+	mu.Unlock()
+	if esc.coord != "alpha-xo" {
+		t.Fatalf("coordinator = %q, want alpha-xo", esc.coord)
 	}
-	if !strings.Contains(escalations[0].msg, `to "cos"`) {
-		t.Fatalf("escalation msg = %q, want recipient named", escalations[0].msg)
+	if !strings.Contains(esc.msg, `to "cos"`) {
+		t.Fatalf("escalation msg = %q, want recipient named", esc.msg)
+	}
+	wantClaim := outbox.StaleClaimKey("backend", "stale1")
+	if esc.claim != wantClaim {
+		t.Fatalf("claimKey = %q, want %q", esc.claim, wantClaim)
 	}
 	if len(r.alerts) != 0 {
 		t.Fatalf("KindSend must not use operator alert path: %v", r.alerts)
 	}
 	path, _ := outbox.Path(dir, "backend")
 	got := outbox.NewStore(path).Load()
-	if len(got) != 1 || got[0].LastStaleEscalation.IsZero() {
-		t.Fatalf("stale escalation marker must persist, got %+v", got)
+	if len(got) != 1 || !got[0].LastStaleEscalation.IsZero() {
+		t.Fatalf("marker must not stamp before confirm, got %+v", got)
 	}
 
-	// Second defer at same threshold must not re-escalate.
+	// Busy-dropped coordinator wake: no confirm ⇒ may re-escalate.
 	r.in.deliver(r.deferred[0])
-	if len(escalations) != 1 {
-		t.Fatalf("second defer escalations = %d, want still 1", len(escalations))
+	time.Sleep(20 * time.Millisecond)
+	mu.Lock()
+	nEsc = len(escalations)
+	mu.Unlock()
+	if nEsc != 2 {
+		t.Fatalf("second defer without confirm escalations = %d, want 2", nEsc)
+	}
+
+	// Confirm stamps marker; no further escalation.
+	if err := outbox.MarkStaleEscalated(dir, "backend", "stale1"); err != nil {
+		t.Fatal(err)
+	}
+	r.in.deliver(r.deferred[0])
+	time.Sleep(20 * time.Millisecond)
+	mu.Lock()
+	nEsc = len(escalations)
+	mu.Unlock()
+	if nEsc != 2 {
+		t.Fatalf("after confirm escalations = %d, want still 2", nEsc)
+	}
+	stamped := outbox.NewStore(path).Load()
+	if len(stamped) != 1 || stamped[0].LastStaleEscalation.IsZero() {
+		t.Fatalf("confirm must stamp marker, got %+v", stamped)
 	}
 }
 

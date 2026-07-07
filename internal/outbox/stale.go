@@ -2,8 +2,54 @@ package outbox
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
+
+const staleClaimPrefix = "outbox-stale:"
+
+// StaleClaimKey keys a confirmed KindDetector stale-escalation delivery (#477).
+func StaleClaimKey(sender, entryID string) string {
+	return staleClaimPrefix + sender + "/" + entryID
+}
+
+// ParseStaleClaimKey splits a stale-escalation claim key into sender and entry id.
+func ParseStaleClaimKey(key string) (sender, entryID string, ok bool) {
+	if !strings.HasPrefix(key, staleClaimPrefix) {
+		return "", "", false
+	}
+	rest := strings.TrimPrefix(key, staleClaimPrefix)
+	i := strings.Index(rest, "/")
+	if i <= 0 || i >= len(rest)-1 {
+		return "", "", false
+	}
+	return rest[:i], rest[i+1:], true
+}
+
+// MarkStaleEscalated records that the coordinator-surface alert confirmed delivery.
+// Busy-dropped escalation wakes do NOT call this — the marker stamps on confirm only (#492).
+func MarkStaleEscalated(rosterDir, sender, entryID string) error {
+	path, err := Path(rosterDir, sender)
+	if err != nil {
+		return err
+	}
+	st := NewStore(path)
+	now := time.Now().UTC()
+	return st.withLock(func() error {
+		f, err := st.readFileForUpdate()
+		if err != nil {
+			return err
+		}
+		for i, p := range f.Pending {
+			if p.ID == entryID {
+				p.LastStaleEscalation = now
+				f.Pending[i] = p
+				return st.save(f)
+			}
+		}
+		return nil
+	})
+}
 
 // StaleDeferAt is the deferral count at which an undeliverable outbox entry escalates
 // to the sender's coordinator — mirrors the relay busyEscalateAt posture (#477).
