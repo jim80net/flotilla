@@ -1715,7 +1715,9 @@
         "</section>";
     }
     list.innerHTML = html;
-    if (titleEl && g.decisions.length) titleEl.textContent = "Decisions awaiting you · " + g.decisions.length;
+    // The count is ALWAYS stated on a loaded doc — "· 0" with a preparing bucket present
+    // would otherwise read as "the header forgot", not "nothing to decide" (OCR #505).
+    if (titleEl) titleEl.textContent = "Decisions awaiting you · " + g.decisions.length;
     lastDecsSig = JSON.stringify(cache);
   }
   // lastDecsSig dedups live-tick repaints of the decisions page (the map's lastSig is
@@ -1909,24 +1911,14 @@
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
     });
     // #501: the modal's Send is the REAL reply path — the same /api/control/respond leg
-    // the decision cards use (confirmed delivery + durable-outbox fallback). The stub
-    // ("not sent — wiring is a follow-on") is gone; the outcome line is always honest.
+    // the decision cards use (ONE shared runner; confirmed delivery + durable-outbox
+    // fallback). The stub ("not sent — wiring is a follow-on") is gone.
     var send = q("goals-modal-send");
     if (send) send.onclick = function () {
       var note = q("goals-modal-note");
-      var ta = q("goals-modal-input");
-      var text = ta ? (ta.value || "").trim() : "";
       var n = modalNodeId ? nodeById[modalNodeId] : null;
-      if (!text) { if (note) note.textContent = "Type a response first."; return; }
       if (!n) { if (note) note.textContent = "No goal is open — close and reopen this dialog."; return; }
-      var target = respondTarget(n);
-      if (!target) { if (note) note.textContent = "No desk owns this goal — respond via the coordinator's conversation."; return; }
-      send.disabled = true;
-      if (note) note.textContent = "Sending…";
-      sendDecisionResponse(target, n.id, "", text)
-        .then(function (line) { if (note) note.textContent = line; if (ta) ta.value = ""; })
-        .catch(function (err) { if (note) note.textContent = "NOT sent: " + ((err && err.message) || err); })
-        .then(function () { send.disabled = false; });
+      runRespond(send, note, q("goals-modal-input"), respondTarget(n), n.id, "");
     };
     // Situation strip: "Awaiting you" opens the decision page; filter tiles highlight
     // their matching nodes. Re-clicking an active filter tile clears it (toggle).
@@ -2300,27 +2292,32 @@
       return "Response state unclear — check the desk's conversation thread.";
     });
   }
+  // runRespond drives BOTH response surfaces (the decision cards and the map's respond
+  // modal) through one path — validate, disable the button in flight, render the honest
+  // outcome, KEEP the operator's words on failure, clear only on success (OCR #505:
+  // duplicated handlers drift; one runner cannot).
+  function runRespond(btn, msgEl, input, target, goalId, itemLabel) {
+    var text = input ? (input.value || "").trim() : "";
+    if (!text) { if (msgEl) msgEl.textContent = "Type a response first."; return; }
+    if (!target) { if (msgEl) msgEl.textContent = "No desk owns this decision — respond via the coordinator's conversation."; return; }
+    btn.disabled = true;
+    if (msgEl) msgEl.textContent = "Sending…";
+    sendDecisionResponse(target, goalId, itemLabel, text)
+      .then(function (line) { if (msgEl) msgEl.textContent = line; if (input) input.value = ""; })
+      .catch(function (err) { if (msgEl) msgEl.textContent = "NOT sent: " + ((err && err.message) || err); })
+      .then(function () { btn.disabled = false; });
+  }
 
   (function wireDecisionsPage() {
     var list = q("gdec-list");
     if (!list) return;
     list.addEventListener("click", function (e) {
-      // #501: the per-card Respond button — send the operator's text to the owning desk.
+      // #501: the per-card Respond button — the shared runner sends to the owning desk.
       var sendBtn = e.target.closest(".gdec-resp-send");
       if (sendBtn) {
         var box = sendBtn.closest(".gdec-respond");
-        var input = box.querySelector(".gdec-resp-input");
-        var msgEl = box.querySelector(".gdec-resp-msg");
-        var text = input ? (input.value || "").trim() : "";
-        if (!text) { msgEl.textContent = "Type a response first."; return; }
-        var target = box.getAttribute("data-resp-target");
-        if (!target) { msgEl.textContent = "No desk owns this decision — respond via the coordinator's conversation."; return; }
-        sendBtn.disabled = true;
-        msgEl.textContent = "Sending…";
-        sendDecisionResponse(target, box.getAttribute("data-resp-goal"), box.getAttribute("data-resp-item"), text)
-          .then(function (line) { msgEl.textContent = line; if (input) input.value = ""; })
-          .catch(function (err) { msgEl.textContent = "NOT sent: " + ((err && err.message) || err); })
-          .then(function () { sendBtn.disabled = false; });
+        runRespond(sendBtn, box.querySelector(".gdec-resp-msg"), box.querySelector(".gdec-resp-input"),
+          box.getAttribute("data-resp-target"), box.getAttribute("data-resp-goal"), box.getAttribute("data-resp-item"));
         return;
       }
       var goto = e.target.closest("[data-gdec-goto]");

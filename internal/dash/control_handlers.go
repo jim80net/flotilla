@@ -87,9 +87,19 @@ func (s *Server) handleControlRespond(w http.ResponseWriter, r *http.Request) {
 		writeControlError(w, control.ErrEmptyMessage)
 		return
 	}
+	// Fast-fail an empty target with the same 404 the resolver would eventually map —
+	// no wasted resolution, and a clear error for a hand-built API request (OCR #505).
+	if strings.TrimSpace(req.Target) == "" {
+		writeControlError(w, control.ErrUnknownTarget)
+		return
+	}
 	ref := strings.TrimSpace(req.GoalID)
 	if item := strings.TrimSpace(req.Item); item != "" {
-		ref += " / " + item
+		if ref != "" {
+			ref += " / " + item
+		} else {
+			ref = item // an item-only reference never renders a dangling " / " (OCR #505)
+		}
 	}
 	msg := req.Message
 	if ref != "" {

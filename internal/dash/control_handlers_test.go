@@ -374,3 +374,25 @@ func TestControlRespond_UnknownTarget404(t *testing.T) {
 		t.Errorf("a hard route error must not enqueue; outbox has %d entries", len(got))
 	}
 }
+
+func TestControlRespond_ItemOnlyRefAndEmptyTarget(t *testing.T) {
+	// OCR #505 round: an item-only reference must not render a dangling " / ", and an
+	// empty target fast-fails 404 without reaching Route.
+	f := &fakeController{routeRes: control.RouteResult{Target: "alpha", Outcome: control.OutcomeDelivered}}
+	srv := controlServer(t, f)
+	rec := doWrite(t, srv, "POST", "/api/control/respond", `{"target":"alpha","item":"approve budget","message":"Yes."}`)
+	if rec.Code != 200 {
+		t.Fatalf("code %d; body=%s", rec.Code, rec.Body.String())
+	}
+	if want := "[operator decision response — approve budget] Yes."; f.lastRouteMsg != want {
+		t.Errorf("item-only ref composed %q, want %q", f.lastRouteMsg, want)
+	}
+	calls := f.calls
+	rec = doWrite(t, srv, "POST", "/api/control/respond", `{"target":"  ","goal_id":"g1","message":"Yes."}`)
+	if rec.Code != 404 {
+		t.Fatalf("empty target: code %d, want 404", rec.Code)
+	}
+	if f.calls != calls {
+		t.Errorf("an empty target must never reach Route")
+	}
+}
