@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/dash/control"
+	"github.com/jim80net/flotilla/internal/outbox"
 )
 
 // fakeController implements control.Controller, recording inputs and returning
@@ -259,5 +260,139 @@ func TestControlRoute_LANUnconfiguredOriginRejected(t *testing.T) {
 	srv.handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("unconfigured LAN Origin → %d, want 403 (fail-closed); body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// --- respond (#501: the decision-response loop's delivery leg) ---
+
+func respondOutbox(t *testing.T, srv *Server) []outbox.Entry {
+	t.Helper()
+	p, err := outbox.Path(filepath.Dir(srv.cfg.RosterPath), "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return outbox.NewStore(p).Load()
+}
+
+func TestControlRespond_DeliveredLive(t *testing.T) {
+	f := &fakeController{routeRes: control.RouteResult{Target: "alpha", Outcome: control.OutcomeDelivered}}
+	srv := controlServer(t, f)
+	rec := doWrite(t, srv, "POST", "/api/control/respond",
+		`{"target":"alpha","goal_id":"g1","item":"approve budget","message":"Approved — take option A."}`)
+	if rec.Code != 200 {
+		t.Fatalf("code %d; body=%s", rec.Code, rec.Body.String())
+	}
+	var res respondDoc
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome != "delivered" || res.Target != "alpha" || res.QueuedID != "" {
+		t.Errorf("delivered outcome wrong: %+v", res)
+	}
+	// The delivered body is self-describing: WHICH decision, then the operator's words.
+	if want := "[operator decision response — g1 / approve budget] Approved — take option A."; f.lastRouteMsg != want {
+		t.Errorf("composed message = %q, want %q", f.lastRouteMsg, want)
+	}
+	if got := respondOutbox(t, srv); len(got) != 0 {
+		t.Errorf("a live delivery must not enqueue; outbox has %d entries", len(got))
+	}
+}
+
+func TestControlRespond_QueuesDurablyOnBusy(t *testing.T) {
+	f := &fakeController{routeRes: control.RouteResult{Target: "alpha", Outcome: control.OutcomeBusy, Detail: "desk is busy — retry"}}
+	srv := controlServer(t, f)
+	rec := doWrite(t, srv, "POST", "/api/control/respond",
+		`{"target":"alpha","goal_id":"g1","message":"Approved."}`)
+	if rec.Code != 200 {
+		t.Fatalf("code %d; body=%s", rec.Code, rec.Body.String())
+	}
+	var res respondDoc
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome != "queued" || res.QueuedID == "" {
+		t.Fatalf("busy must queue durably, got %+v", res)
+	}
+	got := respondOutbox(t, srv)
+	if len(got) != 1 {
+		t.Fatalf("outbox entries = %d, want 1", len(got))
+	}
+	e := got[0]
+	if e.Sender != "operator" || e.Recipient != "alpha" || !strings.Contains(e.Message, "Approved.") ||
+		!strings.Contains(e.Message, "g1") || e.ID != res.QueuedID {
+		t.Errorf("outbox entry wrong: %+v (res %+v)", e, res)
+	}
+}
+
+func TestControlRespond_CrashedQueuesToo(t *testing.T) {
+	// At-least-once means EVERY not-delivered outcome queues — including a crashed desk
+	// (the sweep delivers after it is resumed), never a dead-end error.
+	f := &fakeController{routeRes: control.RouteResult{Target: "alpha", Outcome: control.OutcomeCrashed, Detail: "desk is at a shell"}}
+	srv := controlServer(t, f)
+	rec := doWrite(t, srv, "POST", "/api/control/respond", `{"target":"alpha","goal_id":"g1","message":"Go."}`)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"queued"`) {
+		t.Fatalf("crashed must queue durably; code=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestControlRespond_RepeatQueueDedupes(t *testing.T) {
+	f := &fakeController{routeRes: control.RouteResult{Target: "alpha", Outcome: control.OutcomeBusy}}
+	srv := controlServer(t, f)
+	body := `{"target":"alpha","goal_id":"g1","message":"Approved."}`
+	doWrite(t, srv, "POST", "/api/control/respond", body)
+	rec := doWrite(t, srv, "POST", "/api/control/respond", body)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "already queued") {
+		t.Fatalf("identical repeat must dedupe with an honest detail; body=%s", rec.Body.String())
+	}
+	if got := respondOutbox(t, srv); len(got) != 1 {
+		t.Errorf("outbox entries = %d, want 1 (deduped)", len(got))
+	}
+}
+
+func TestControlRespond_EmptyMessageRejected(t *testing.T) {
+	// The OPERATOR's text is the guard target — the composed wrapper must not make an
+	// empty response look non-empty.
+	f := &fakeController{}
+	srv := controlServer(t, f)
+	rec := doWrite(t, srv, "POST", "/api/control/respond", `{"target":"alpha","goal_id":"g1","message":"   "}`)
+	if rec.Code != 400 {
+		t.Fatalf("code %d, want 400", rec.Code)
+	}
+	if f.calls != 0 {
+		t.Errorf("an empty response must never reach Route (calls=%d)", f.calls)
+	}
+}
+
+func TestControlRespond_UnknownTarget404(t *testing.T) {
+	f := &fakeController{routeErr: control.ErrUnknownTarget}
+	srv := controlServer(t, f)
+	rec := doWrite(t, srv, "POST", "/api/control/respond", `{"target":"nobody","goal_id":"g1","message":"x"}`)
+	if rec.Code != 404 {
+		t.Fatalf("code %d, want 404", rec.Code)
+	}
+	if got := respondOutbox(t, srv); len(got) != 0 {
+		t.Errorf("a hard route error must not enqueue; outbox has %d entries", len(got))
+	}
+}
+
+func TestControlRespond_ItemOnlyRefAndEmptyTarget(t *testing.T) {
+	// OCR #505 round: an item-only reference must not render a dangling " / ", and an
+	// empty target fast-fails 404 without reaching Route.
+	f := &fakeController{routeRes: control.RouteResult{Target: "alpha", Outcome: control.OutcomeDelivered}}
+	srv := controlServer(t, f)
+	rec := doWrite(t, srv, "POST", "/api/control/respond", `{"target":"alpha","item":"approve budget","message":"Yes."}`)
+	if rec.Code != 200 {
+		t.Fatalf("code %d; body=%s", rec.Code, rec.Body.String())
+	}
+	if want := "[operator decision response — approve budget] Yes."; f.lastRouteMsg != want {
+		t.Errorf("item-only ref composed %q, want %q", f.lastRouteMsg, want)
+	}
+	calls := f.calls
+	rec = doWrite(t, srv, "POST", "/api/control/respond", `{"target":"  ","goal_id":"g1","message":"Yes."}`)
+	if rec.Code != 404 {
+		t.Fatalf("empty target: code %d, want 404", rec.Code)
+	}
+	if f.calls != calls {
+		t.Errorf("an empty target must never reach Route")
 	}
 }
