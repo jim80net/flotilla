@@ -32,6 +32,30 @@ func TestErrRetryableBusyUnwrap(t *testing.T) {
 	}
 }
 
+// Acceptance (#484): repeated bounce of the same send dedups to the existing outbox id.
+func TestBouncedSendDedupesIdenticalPending(t *testing.T) {
+	dir := t.TempDir()
+	rosterPath := filepath.Join(dir, "flotilla.json")
+	if err := os.WriteFile(rosterPath, []byte(`{"agents":[{"name":"xo"},{"name":"alpha"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	msg := "deploy complete"
+	busy := errRetryableBusy{agent: "xo"}
+	if err := enqueueOrFailSend(rosterPath, "alpha", "xo", msg, busy); err != nil {
+		t.Fatal(err)
+	}
+	if err := enqueueOrFailSend(rosterPath, "alpha", "xo", msg, busy); err != nil {
+		t.Fatal(err)
+	}
+	path, err := outbox.Path(dir, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outbox.NewStore(path).Load()) != 1 {
+		t.Fatal("duplicate bounce must not append a second pending entry")
+	}
+}
+
 // Acceptance (#475): a bounced send lands in the sender's durable outbox instead of failing the turn.
 func TestBouncedSendLandsInOutbox(t *testing.T) {
 	dir := t.TempDir()

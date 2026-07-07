@@ -35,6 +35,16 @@ func TestInjectorKindSendStaleEscalatesCoordinatorOnce(t *testing.T) {
 			mu.Unlock()
 		},
 	)
+	path, err := outbox.Path(dir, "backend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := outbox.NewStore(path).Insert(outbox.Entry{
+		ID: "stale1", Sender: "backend", Recipient: "cos", Message: "status",
+		Deferrals: outbox.StaleDeferAt, EnqueuedAt: base,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	job := Job{
 		Agent: "cos", Message: "status", Kind: KindSend,
 		MessageID: "stale1", Sender: "backend", deferrals: outbox.StaleDeferAt,
@@ -64,7 +74,6 @@ func TestInjectorKindSendStaleEscalatesCoordinatorOnce(t *testing.T) {
 	if len(r.alerts) != 0 {
 		t.Fatalf("KindSend must not use operator alert path: %v", r.alerts)
 	}
-	path, _ := outbox.Path(dir, "backend")
 	got := outbox.NewStore(path).Load()
 	if len(got) != 1 || !got[0].LastStaleEscalation.IsZero() {
 		t.Fatalf("marker must not stamp before confirm, got %+v", got)
@@ -106,10 +115,12 @@ func TestInjectorKindSendDeliveryClearsStaleState(t *testing.T) {
 	r := newRig(nil)
 	r.in.rosterDir = dir
 	path, _ := outbox.Path(dir, "backend")
-	outbox.NewStore(path).Upsert(outbox.Entry{
+	if _, _, err := outbox.NewStore(path).Insert(outbox.Entry{
 		ID: "done1", Sender: "backend", Recipient: "cos", Message: "ok",
 		Deferrals: 10, EnqueuedAt: base, LastStaleEscalation: escalated,
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	r.in.deliver(Job{
 		Agent: "cos", Message: "ok", Kind: KindSend,

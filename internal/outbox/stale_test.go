@@ -55,10 +55,12 @@ func TestStaleClaimKeyRoundTrip(t *testing.T) {
 func TestMarkStaleEscalated_OnlyOnConfirm(t *testing.T) {
 	dir := t.TempDir()
 	path, _ := Path(dir, "backend")
-	NewStore(path).Upsert(Entry{
+	if _, _, err := NewStore(path).Insert(Entry{
 		ID: "e1", Sender: "backend", Recipient: "cos", Message: "hi",
 		EnqueuedAt: time.Now().UTC(),
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := MarkStaleEscalated(dir, "backend", "e1"); err != nil {
 		t.Fatal(err)
 	}

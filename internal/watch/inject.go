@@ -380,7 +380,7 @@ func (in *Injector) handleBusy(j Job, cause error) {
 				}
 			}
 			in.maybeStaleEscalateOutbox(&j, &entry, now)
-			st.Upsert(entry)
+			st.Update(entry)
 		}
 	}
 	in.reEnqueue(j, busyDeferDelay)
