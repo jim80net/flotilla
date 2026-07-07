@@ -1580,12 +1580,15 @@ func decisionBriefOnTick(
 			return
 		}
 		gaps := decisionbrief.FindGaps(in)
+		seenGaps := make(map[string]bool, len(gaps))
 		active := make(map[string]bool, len(gaps))
 		for _, g := range gaps {
+			key := decisionbrief.GapKey(g)
+			seenGaps[key] = true
 			owner := strings.TrimSpace(g.Owner)
 			if owner == "" {
 				if unownedSkipLatch.ShouldLog(g) {
-					log.Printf("flotilla watch: decision-brief SKIP goal %q: no owning desk (gap %s)", g.GoalID, decisionbrief.GapKey(g))
+					log.Printf("flotilla watch: decision-brief SKIP goal %q: no owning desk (gap %s)", g.GoalID, key)
 				}
 				continue
 			}
@@ -1594,7 +1597,6 @@ func decisionBriefOnTick(
 				log.Printf("flotilla watch: decision-brief SKIP goal %q: owner %q not in roster", g.GoalID, owner)
 				continue
 			}
-			key := decisionbrief.GapKey(g)
 			active[key] = true
 			fresh, ferr := loadDecisionBriefInputs(goalsPath, backlogPath, deskStates())
 			if ferr != nil {
@@ -1614,7 +1616,7 @@ func decisionBriefOnTick(
 				Kind: watch.KindDetector, ClaimKey: key,
 			})
 		}
-		unownedSkipLatch.Reconcile(active)
+		unownedSkipLatch.Reconcile(seenGaps)
 		tracker.Reconcile(active)
 		if err := tracker.Save(claimsPath); err != nil {
 			log.Printf("flotilla watch: decision-brief claims save failed: %v", err)

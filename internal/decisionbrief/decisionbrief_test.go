@@ -170,6 +170,36 @@ func unownedChildFixture() (dash.GoalsFile, string) {
 	return f, backlog
 }
 
+func TestResolveOwnerInTree_NearestAncestorWins(t *testing.T) {
+	f := dash.GoalsFile{Goals: []dash.Goal{
+		{ID: "root", ConversationAgent: "cos"},
+		{ID: "mid", Parent: "root", ConversationAgent: "alpha-xo"},
+		{
+			ID: "leaf", Parent: "mid",
+			WorkItems: []dash.WorkItem{{Kind: dash.WorkBacklog, Match: "[blocked] x"}},
+		},
+	}}
+	byID := make(map[string]dash.Goal, len(f.Goals))
+	for _, g := range f.Goals {
+		byID[g.ID] = g
+	}
+	if got := ResolveOwnerInTree(byID["leaf"], byID); got != "alpha-xo" {
+		t.Fatalf("ResolveOwnerInTree = %q, want alpha-xo (nearest ancestor, not root cos)", got)
+	}
+}
+
+func TestResolveOwnerInTree_CycleGuardFailClosed(t *testing.T) {
+	byID := map[string]dash.Goal{
+		"a": {ID: "a", Parent: "b"},
+		"b": {ID: "b", Parent: "a"},
+	}
+	for _, start := range []string{"a", "b"} {
+		if got := ResolveOwnerInTree(byID[start], byID); got != "" {
+			t.Fatalf("cyclic byID from %s must fail closed, got %q", start, got)
+		}
+	}
+}
+
 func TestResolveOwnerInTree_InheritsFromParent(t *testing.T) {
 	f, _ := unownedChildFixture()
 	byID := map[string]dash.Goal{}

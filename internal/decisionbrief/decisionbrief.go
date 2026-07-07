@@ -167,8 +167,16 @@ func ResolveOwner(g dash.Goal) string {
 }
 
 // ResolveOwnerInTree walks up the parent chain to the nearest ancestor with an owner (#482).
+// byID must be acyclic (as produced by dash.ParseGoalsFile); cycles return "" fail-closed.
 func ResolveOwnerInTree(g dash.Goal, byID map[string]dash.Goal) string {
+	visited := make(map[string]bool)
 	for cur := g; ; {
+		if cur.ID != "" && visited[cur.ID] {
+			return ""
+		}
+		if cur.ID != "" {
+			visited[cur.ID] = true
+		}
 		if o := resolveOwnerDirect(cur); o != "" {
 			return o
 		}

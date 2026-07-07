@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -160,6 +163,43 @@ func TestDecisionBriefOnTickUnownedChildInheritsOwner(t *testing.T) {
 	}
 	if jobs[0].Agent != "frontend" || jobs[0].ClaimKey != "gate:[blocked] operator sign-off" {
 		t.Errorf("job = %+v, want frontend + child claim key", jobs[0])
+	}
+}
+
+// fullyUnownedGoalsJSON has a gated gap with no owner in the tree (#490 r2 wired latch).
+const fullyUnownedGoalsJSON = `{
+  "goals": [{
+    "id": "orphan",
+    "title": "Orphan",
+    "work_items": [{"kind": "backlog", "match": "[blocked] operator gate"}]
+  }]
+}`
+
+func TestDecisionBriefOnTickUnownedSkipLogsOnceAcrossTicks(t *testing.T) {
+	dir := t.TempDir()
+	goalsPath := filepath.Join(dir, "fleet-goals.json")
+	backlogPath := filepath.Join(dir, "backlog.md")
+	if err := os.WriteFile(goalsPath, []byte(fullyUnownedGoalsJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(backlogPath, []byte("## Backlog\n- [blocked] operator gate\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "frontend", Surface: "claude-code"}}}
+	tracker := decisionbrief.NewTracker()
+	claimsPath := filepath.Join(dir, "claims.json")
+	fn := decisionBriefOnTick(goalsPath, backlogPath, claimsPath, tracker, func(watch.Job) {}, cfg, func() map[string]string { return nil })
+
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	fn()
+	fn()
+	fn()
+	got := strings.Count(buf.String(), "no owning desk")
+	if got != 1 {
+		t.Fatalf("stable unowned gap: want 1 skip log across 3 ticks, got %d\n%s", got, buf.String())
 	}
 }
 
