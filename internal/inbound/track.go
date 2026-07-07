@@ -25,7 +25,7 @@ type Entry struct {
 
 // Action is what the detector should do when a finish edge finds an unacked dispatch.
 type Action struct {
-	Entry   Entry
+	Entry    Entry
 	Reinject bool
 	Escalate bool // notify dispatching coordinator (sender)
 }

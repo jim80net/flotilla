@@ -20,8 +20,8 @@ func TestInboundOnFinish_ReinjectsOnFirstMiss(t *testing.T) {
 	tr := NewTracker()
 	e := Entry{
 		ID: "d1", Sender: "memex", Recipient: "codex-harness-dev",
-		Message: "TRACK C PR: https://github.com/jim80net/memex-hermes/pull/27",
-		Nonce:   "flotilla-dispatch-abc12345",
+		Message:     "TRACK C PR: https://github.com/jim80net/memex-hermes/pull/27",
+		Nonce:       "flotilla-dispatch-abc12345",
 		DeliveredAt: time.Now().UTC(),
 	}
 	tr.Track(e)
@@ -39,8 +39,8 @@ func TestInboundOnFinish_EscalatesOnSecondMiss(t *testing.T) {
 	tr := NewTracker()
 	e := Entry{
 		ID: "d1", Sender: "memex", Recipient: "backend",
-		Message: "Implement feature X per spec section 3",
-		Nonce:   "flotilla-dispatch-zzzzzzzz",
+		Message:   "Implement feature X per spec section 3",
+		Nonce:     "flotilla-dispatch-zzzzzzzz",
 		Deferrals: 1,
 	}
 	tr.Track(e)

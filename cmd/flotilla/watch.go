@@ -736,8 +736,8 @@ func cmdWatch(args []string) error {
 				injector.Enqueue,
 				alert,
 			),
-			IsCoordinator: cfg.IsCoordinator,
-			DelegationNudgeOnFinish:   delegationNudgeOnFinish(cfg, delegationTracker, injector.Enqueue),
+			IsCoordinator:           cfg.IsCoordinator,
+			DelegationNudgeOnFinish: delegationNudgeOnFinish(cfg, delegationTracker, injector.Enqueue),
 			DecisionBriefOnTick: decisionBriefOnTick(
 				goalsJSONPath, *backlogPath, decisionBriefClaimsPath, decisionBriefTracker, injector.Enqueue, cfg,
 				func() map[string]string {
