@@ -41,6 +41,30 @@ const gatedChildGoalsJSON = `{
 
 const gatedChildBacklog = "## Backlog\n- [blocked] operator sign-off\n"
 
+// unownedChildGoalsJSON is #482: child has no conversation_agent; parent owner must inherit.
+const unownedChildGoalsJSON = `{
+  "goals": [
+    {
+      "id": "trading",
+      "title": "Trading",
+      "scope": "fleet",
+      "conversation_agent": "frontend",
+      "work_items": [{
+        "kind": "desk",
+        "agent": "frontend",
+        "brief": "What: ship. Value: $1. Mechanics: deploy. Alternatives: wait. Recommendation: ship. Reversibility: easy."
+      }]
+    },
+    {
+      "id": "gate",
+      "title": "Gate",
+      "scope": "project",
+      "parent": "trading",
+      "work_items": [{"kind": "backlog", "match": "[blocked] operator sign-off"}]
+    }
+  ]
+}`
+
 // Overlapping decisionBriefOnTick invocations (as the async detector hook allows)
 // must enqueue at most once per gap (#352 P2).
 func TestDecisionBriefOnTickNoDoubleDispatch(t *testing.T) {
@@ -108,6 +132,45 @@ func TestDecisionBriefOnTickSkipsWhenWorkItemBriefPresent(t *testing.T) {
 	}
 	if jobs[0].Agent != "frontend" || jobs[0].ClaimKey != "gate:[blocked] operator sign-off" {
 		t.Errorf("job = %+v, want frontend + child claim key", jobs[0])
+	}
+}
+
+// #482: unowned child inherits parent owner and dispatches instead of silent skip.
+func TestDecisionBriefOnTickUnownedChildInheritsOwner(t *testing.T) {
+	dir := t.TempDir()
+	goalsPath := filepath.Join(dir, "fleet-goals.json")
+	backlogPath := filepath.Join(dir, "backlog.md")
+	if err := os.WriteFile(goalsPath, []byte(unownedChildGoalsJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(backlogPath, []byte(gatedChildBacklog), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "frontend", Surface: "claude-code"}}}
+	tracker := decisionbrief.NewTracker()
+	var jobs []watch.Job
+	enqueue := func(j watch.Job) { jobs = append(jobs, j) }
+	claimsPath := filepath.Join(dir, "claims.json")
+	fn := decisionBriefOnTick(goalsPath, backlogPath, claimsPath, tracker, enqueue, cfg, func() map[string]string {
+		return map[string]string{"frontend": "working"}
+	})
+	fn()
+	if len(jobs) != 1 {
+		t.Fatalf("dispatches = %d, want 1 inherited-owner child gap: %+v", len(jobs), jobs)
+	}
+	if jobs[0].Agent != "frontend" || jobs[0].ClaimKey != "gate:[blocked] operator sign-off" {
+		t.Errorf("job = %+v, want frontend + child claim key", jobs[0])
+	}
+}
+
+func TestDecisionBriefUnownedSkipLatchSuppressesRepeatLog(t *testing.T) {
+	latch := map[string]string{}
+	g := decisionbrief.Gap{GoalID: "trading", ItemKey: "k", Class: "blocked"}
+	if !decisionbrief.ShouldLogUnownedSkip(latch, g) {
+		t.Fatal("first tick should log")
+	}
+	if decisionbrief.ShouldLogUnownedSkip(latch, g) {
+		t.Fatal("second tick must not log same unowned shape")
 	}
 }
 

@@ -147,6 +147,87 @@ func TestResolveOwner_DeskFallback(t *testing.T) {
 	}
 }
 
+// unownedChildFixture is the #482 live shape: parent brief suppresses goal-level gap;
+// gated child has no conversation_agent — owner must inherit from parent.
+func unownedChildFixture() (dash.GoalsFile, string) {
+	f := dash.GoalsFile{Goals: []dash.Goal{
+		{
+			ID: "trading", Title: "Trading", Scope: "fleet",
+			ConversationAgent: "frontend",
+			WorkItems: []dash.WorkItem{{
+				Kind: dash.WorkDesk, Agent: "frontend",
+				Brief: "What: ship. Value: $1. Mechanics: deploy. Alternatives: wait. Recommendation: ship. Reversibility: easy.",
+			}},
+		},
+		{
+			ID: "gate", Title: "Gate", Scope: "project", Parent: "trading",
+			WorkItems: []dash.WorkItem{{
+				Kind: dash.WorkBacklog, Match: "[blocked] operator sign-off",
+			}},
+		},
+	}}
+	backlog := "## Backlog\n- [blocked] operator sign-off\n"
+	return f, backlog
+}
+
+func TestResolveOwnerInTree_InheritsFromParent(t *testing.T) {
+	f, _ := unownedChildFixture()
+	byID := map[string]dash.Goal{}
+	for _, g := range f.Goals {
+		byID[g.ID] = g
+	}
+	child := byID["gate"]
+	if got := ResolveOwnerInTree(child, byID); got != "frontend" {
+		t.Fatalf("ResolveOwnerInTree = %q, want frontend", got)
+	}
+}
+
+func TestFindGaps_UnownedChildInheritsParentOwner(t *testing.T) {
+	f, backlog := unownedChildFixture()
+	gaps := FindGaps(Inputs{
+		File: f, FileOK: true,
+		Backlog:    backlog,
+		DeskStates: map[string]string{"frontend": "working"},
+	})
+	var childGap *Gap
+	for i := range gaps {
+		if gaps[i].GoalID == "gate" {
+			childGap = &gaps[i]
+			break
+		}
+	}
+	if childGap == nil {
+		t.Fatalf("gaps = %+v, want child item-level gap", gaps)
+	}
+	if childGap.Owner != "frontend" {
+		t.Fatalf("child gap owner = %q, want frontend (inherited)", childGap.Owner)
+	}
+	for _, g := range gaps {
+		if g.GoalID == "trading" && g.ItemKey == "" {
+			t.Fatalf("parent goal-level gap must stay suppressed: %+v", gaps)
+		}
+	}
+}
+
+func TestShouldLogUnownedSkip_LatchesUntilShapeChanges(t *testing.T) {
+	latch := map[string]string{}
+	g := Gap{GoalID: "trading", ItemKey: "[blocked] x", Class: "blocked"}
+	if !ShouldLogUnownedSkip(latch, g) {
+		t.Fatal("first sight should log")
+	}
+	if ShouldLogUnownedSkip(latch, g) {
+		t.Fatal("stable shape should not re-log")
+	}
+	g2 := Gap{GoalID: "trading", ItemKey: "[blocked] y", Class: "blocked"}
+	if !ShouldLogUnownedSkip(latch, g2) {
+		t.Fatal("shape change should re-log")
+	}
+	ClearUnownedSkipLatch(latch, g2)
+	if !ShouldLogUnownedSkip(latch, g2) {
+		t.Fatal("after clear, should log again")
+	}
+}
+
 func TestResolveOwner_ConversationAgentWins(t *testing.T) {
 	g := dash.Goal{
 		ConversationAgent: "xo",
