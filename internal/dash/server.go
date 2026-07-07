@@ -248,6 +248,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/control/route", s.requireWrite(s.handleControlRoute))
 	s.mux.HandleFunc("POST /api/control/notify", s.requireWrite(s.handleControlNotify))
 	s.mux.HandleFunc("POST /api/control/resume", s.requireWrite(s.handleControlResume))
+	// #501: the decision-response path — the same confirmed-delivery route, made
+	// AT-LEAST-ONCE: a response that cannot land live is enqueued to the durable
+	// operator outbox (the watch sweep delivers it) — never lost, never a stub.
+	s.mux.HandleFunc("POST /api/control/respond", s.requireWrite(s.handleControlRespond))
 }
 
 // --- read-model loading (the only file I/O; the builders stay pure) ---
