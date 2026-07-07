@@ -118,25 +118,25 @@ type SendFunc func(agent, message string) error
 // in-flight at shutdown could otherwise send on a closed channel and panic.
 // Stop signals the worker to drain-and-exit and makes Enqueue drop instead.
 type Injector struct {
-	jobs              chan Job
-	send              SendFunc
-	relaySend         SendFunc      // optional: the RELAY-kind send path (self-heal-capable, #156). nil ⇒ relays use send.
-	stop              chan struct{} // worker: drain then exit
-	stopped           chan struct{} // Enqueue: stop accepting (closed once)
-	done              chan struct{}
-	once              sync.Once
-	mirror            func(Job)                               // optional: called after a CONFIRMED delivery (audit trail)
-	escalate          func(string)                            // optional: a LOUD operator alert for a failed/undeliverable relay
-	reEnqueue         func(Job, time.Duration)                // how a deferred relay is re-enqueued after a delay; injectable for tests
-	queue             relayQueueStore                         // optional: disk-backed pending queue for deferred operator relays (#286)
-	rosterDir         string                                  // roster directory for per-sender outbox persistence (#475)
-	onSend            func(sender, recipient, message string) // optional: post-confirm hook for swept sends (ledger)
-	onOutboxDone      func(sender, id string)                 // optional: clear in-flight sweep guard (#475)
-	onDetectorConfirm func(claimKey string)                   // optional: durable claim after confirmed detector delivery (#365)
-	onDetectorAbort          func(claimKey string)                   // optional: release in-memory claim on busy drop / failure (#365)
-	now                      func() time.Time                        // clock for stale escalation; nil ⇒ time.Now()
-	outboxOwningCoordinator  func(sender string) string              // optional: sender → coordinator for stale outbox (#477)
-	outboxCoordinatorEscalate func(coordinator, msg string)          // optional: enqueue to coordinator surface (#436/#477)
+	jobs                      chan Job
+	send                      SendFunc
+	relaySend                 SendFunc      // optional: the RELAY-kind send path (self-heal-capable, #156). nil ⇒ relays use send.
+	stop                      chan struct{} // worker: drain then exit
+	stopped                   chan struct{} // Enqueue: stop accepting (closed once)
+	done                      chan struct{}
+	once                      sync.Once
+	mirror                    func(Job)                               // optional: called after a CONFIRMED delivery (audit trail)
+	escalate                  func(string)                            // optional: a LOUD operator alert for a failed/undeliverable relay
+	reEnqueue                 func(Job, time.Duration)                // how a deferred relay is re-enqueued after a delay; injectable for tests
+	queue                     relayQueueStore                         // optional: disk-backed pending queue for deferred operator relays (#286)
+	rosterDir                 string                                  // roster directory for per-sender outbox persistence (#475)
+	onSend                    func(sender, recipient, message string) // optional: post-confirm hook for swept sends (ledger)
+	onOutboxDone              func(sender, id string)                 // optional: clear in-flight sweep guard (#475)
+	onDetectorConfirm         func(claimKey string)                   // optional: durable claim after confirmed detector delivery (#365)
+	onDetectorAbort           func(claimKey string)                   // optional: release in-memory claim on busy drop / failure (#365)
+	now                       func() time.Time                        // clock for stale escalation; nil ⇒ time.Now()
+	outboxOwningCoordinator   func(sender string) string              // optional: sender → coordinator for stale outbox (#477)
+	outboxCoordinatorEscalate func(coordinator, msg string)           // optional: enqueue to coordinator surface (#436/#477)
 }
 
 // SetRelaySend installs a distinct send path for RELAY-kind jobs (the operator-message kind), used to
