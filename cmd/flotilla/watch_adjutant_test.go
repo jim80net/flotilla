@@ -13,7 +13,8 @@ func TestAdjutantEvaluationTickBodyThreeStepDuty(t *testing.T) {
 	const leader = "alpha-xo"
 	const ack = "/state/flotilla-alpha-xo-alive"
 	const buf = "/state/flotilla-alpha-xo-buffer.json"
-	got := adjutantEvaluationTickBody(leader, ack, buf)
+	const charter = "/state/flotilla-alpha-xo-adjutant-charter.md"
+	got := adjutantEvaluationTickBody(leader, ack, buf, charter)
 	for _, want := range []string{
 		"Evaluation tick",
 		leader,
@@ -27,6 +28,8 @@ func TestAdjutantEvaluationTickBodyThreeStepDuty(t *testing.T) {
 		"3. ACT BY TIER",
 		buf,
 		"idle-holding",
+		"Your charter at " + charter,
+		"consult it before composing any brief",
 		"Dual observation",
 	} {
 		if !strings.Contains(got, want) {
@@ -36,8 +39,14 @@ func TestAdjutantEvaluationTickBodyThreeStepDuty(t *testing.T) {
 }
 
 func TestAdjutantBufferedNoteBody(t *testing.T) {
-	got := adjutantBufferedNoteBody("xo", 2)
-	for _, want := range []string{"Buffered 2", "xo", "next seam", "evaluation ticks", "Dual observation"} {
+	const charter = "/state/flotilla-xo-adjutant-charter.md"
+	got := adjutantBufferedNoteBody("xo", 2, charter)
+	for _, want := range []string{
+		"Buffered 2", "xo", "next seam", "evaluation ticks",
+		"Your charter at " + charter,
+		"consult it before composing any brief",
+		"Dual observation",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("buffered note missing %q\nfull: %s", want, got)
 		}

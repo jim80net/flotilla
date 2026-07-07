@@ -404,22 +404,30 @@ func cmdWatch(args []string) error {
 		primaryAdjutant := cfg.AdjutantFor(xo)
 		leaderAckPath := *ackPath // resolved per-coordinator path (legacy fallback when present)
 		layerBufferPath := roster.LayerBufferPath(rosterDir, xo)
+		seamClaims := newAdjutantSeamClaims()
 
 		drainAdjutantSeamFor := func(owner string) {
 			if cfg.AdjutantFor(owner) == "" {
 				return
 			}
 			bufferPath := roster.LayerBufferPath(rosterDir, owner)
-			brief, ok, clearAfter := adjutantSeamBrief(bufferPath, owner, rosterDir)
+			deliveredPath := roster.LayerBufferDeliveredPath(rosterDir, owner)
+			brief, ok, clearAfter, recordItems := adjutantSeamBrief(bufferPath, deliveredPath, owner, rosterDir)
 			if !ok {
+				if clearAfter {
+					if err := adjutantbuffer.Clear(bufferPath); err != nil {
+						log.Printf("flotilla watch: adjutant buffer clear after all-consumed skip failed for %q: %v", owner, err)
+					}
+				}
 				return
 			}
-			injector.Enqueue(watch.Job{Agent: owner, Message: brief, Kind: watch.KindDetector})
-			if clearAfter {
-				if err := adjutantbuffer.Clear(bufferPath); err != nil {
-					log.Printf("flotilla watch: adjutant buffer clear after enqueue failed for %q: %v", owner, err)
-				}
-			}
+			claimKey := adjutantSeamClaimKey(owner)
+			seamClaims.register(claimKey, adjutantSeamClaim{
+				owner: owner, bufferPath: bufferPath, deliveredPath: deliveredPath, recordItems: recordItems,
+			})
+			injector.Enqueue(watch.Job{
+				Agent: owner, Message: brief, Kind: watch.KindDetector, ClaimKey: claimKey,
+			})
 		}
 
 		wake := func(kind watch.WakeKind, reasons []string) {
@@ -442,7 +450,7 @@ func cmdWatch(args []string) error {
 						// Evaluation ticks require an established charter (#439 spec).
 						body = adjutantCharterPairingBody(xo, primaryAdjutant, charterPath, leaderAckPath)
 					} else {
-						body = adjutantEvaluationTickBody(xo, leaderAckPath, layerBufferPath)
+						body = adjutantEvaluationTickBody(xo, leaderAckPath, layerBufferPath, charterPath)
 					}
 				} else {
 					body = leaderPingBody(leaderAckPath)
@@ -577,12 +585,22 @@ func cmdWatch(args []string) error {
 		decisionBriefTracker := decisionbrief.LoadTracker(decisionBriefClaimsPath)
 		injector.SetDetectorClaimHooks(
 			func(key string) {
+				if isAdjutantSeamClaimKey(key) {
+					seamClaims.confirm(key)
+					return
+				}
 				decisionBriefTracker.Confirm(key)
 				if err := decisionBriefTracker.Save(decisionBriefClaimsPath); err != nil {
 					log.Printf("flotilla watch: decision-brief claims save failed: %v", err)
 				}
 			},
-			decisionBriefTracker.Abort,
+			func(key string) {
+				if isAdjutantSeamClaimKey(key) {
+					seamClaims.abort(key)
+					return
+				}
+				decisionBriefTracker.Abort(key)
+			},
 		)
 		goalsJSONPath := filepath.Join(rosterDir, "fleet-goals.json")
 		if gp := strings.TrimSpace(os.Getenv("FLOTILLA_GOALS_FILE")); gp != "" {
@@ -1123,10 +1141,16 @@ func leaderPingBody(ackPath string) string {
 		"\n(To ack you are alive, run: touch " + ackPath + ")"
 }
 
+// adjutantCharterGovernanceLine reminds recurring adjutant prompts where durable classification
+// rules live (#469 addendum — charter amendments must survive past one session turn).
+func adjutantCharterGovernanceLine(charterPath string) string {
+	return "\nYour charter at " + charterPath + " governs classification — consult it before composing any brief."
+}
+
 // adjutantEvaluationTickBody routes a stale-leader timeout to the adjutant as an
 // evaluation tick (#439 operator amendment): ack → evaluate → act-by-tier — not a
 // dead-man's ack to the leader.
-func adjutantEvaluationTickBody(leader, leaderAckPath, bufferPath string) string {
+func adjutantEvaluationTickBody(leader, leaderAckPath, bufferPath, charterPath string) string {
 	return "[flotilla adjutant] Evaluation tick for " + leader +
 		" — leader alive file is stale (timeout signal; not a dead-man ack to the leader).\n\n" +
 		"Three-step duty (required-minimum charter):\n" +
@@ -1137,6 +1161,7 @@ func adjutantEvaluationTickBody(leader, leaderAckPath, bufferPath string) string
 		"3. ACT BY TIER — all-quiet → ack only, no leader interrupt; work-found → buffer judgment items " +
 		"in " + bufferPath + " and inject a digest at " + leader + "'s next seam (immediately if urgent-class).\n\n" +
 		"This tick catches idle-holding: leader idle but queue not empty is work-found, not all-quiet." +
+		adjutantCharterGovernanceLine(charterPath) +
 		adjutantDualObservationContract(leader)
 }
 
@@ -1189,6 +1214,7 @@ func enqueueLayerMaterialWake(cfg *roster.Config, rosterDir, primaryXO, owner st
 		settledPath = roster.LayerSettledPath(rosterDir, owner)
 	}
 	bufferPath := roster.LayerBufferPath(rosterDir, owner)
+	charterPath := roster.LayerCharterPath(rosterDir, owner)
 	ackInstr := primaryAckInstr
 	if owner != primaryXO {
 		ackInstr = "\n(To ack you are alive, run: touch " + leaderAckPath + ")"
@@ -1202,7 +1228,7 @@ func enqueueLayerMaterialWake(cfg *roster.Config, rosterDir, primaryXO, owner st
 			body = leaderMaterialBody(reasons, settledPath, ackInstr)
 		} else {
 			target = adjutant
-			body = adjutantBufferedNoteBody(owner, len(reasons))
+			body = adjutantBufferedNoteBody(owner, len(reasons), charterPath)
 		}
 	} else {
 		body = leaderMaterialBody(reasons, settledPath, ackInstr)
@@ -1218,11 +1244,12 @@ func leaderMaterialBody(reasons []string, settledPath, ackInstr string) string {
 }
 
 // adjutantBufferedNoteBody notifies the adjutant that items were buffered (#439 phase 1b).
-func adjutantBufferedNoteBody(leader string, n int) string {
+func adjutantBufferedNoteBody(leader string, n int, charterPath string) string {
 	return "[flotilla adjutant] Buffered " + fmt.Sprintf("%d", n) + " interrupt(s) for " + leader +
 		"'s layer. Triage mechanical items locally. Judgment items stay buffered until " +
 		leader + "'s next seam — the leader receives a consolidated brief then, not mid-thought. " +
 		"On evaluation ticks: ack → evaluate → act-by-tier." +
+		adjutantCharterGovernanceLine(charterPath) +
 		adjutantDualObservationContract(leader)
 }
 
@@ -1256,20 +1283,29 @@ func enqueueAdjutantCharterPairing(adjutant, leader, rosterDir, leaderAckPath st
 	})
 }
 
-// adjutantSeamBrief peeks the layer buffer and formats the leader inject at a seam. The caller
-// must Clear the sidecar only AFTER enqueue (enqueue-then-delete — same at-least-once window as
-// detector persist).
-func adjutantSeamBrief(bufferPath, leader, rosterDir string) (brief string, ok bool, clearAfter bool) {
+// adjutantSeamBrief peeks the layer buffer, applies consumed-item dedup (#469), and formats the
+// leader inject at a seam. recordItems is recorded and the buffer cleared only on confirmed
+// delivery via ClaimKey hooks (#488 P2) — not at enqueue.
+func adjutantSeamBrief(bufferPath, deliveredPath, leader, rosterDir string) (brief string, ok bool, clearAfter bool, recordItems []adjutantbuffer.Item) {
 	f, hasItems, quarantined, err := adjutantbuffer.Peek(bufferPath)
 	if err != nil {
 		log.Printf("flotilla watch: adjutant buffer peek failed: %v", err)
-		return "", false, false
+		return "", false, false, nil
 	}
 	if !hasItems && !quarantined {
-		return "", false, false
+		return "", false, false, nil
+	}
+	delivered, ledgerQuarantined, err := adjutantbuffer.LoadDelivered(deliveredPath)
+	if err != nil {
+		log.Printf("flotilla watch: adjutant delivered ledger load failed: %v", err)
+		return "", false, false, nil
+	}
+	if ledgerQuarantined {
+		log.Printf("flotilla watch: adjutant delivered ledger for %q quarantined — continuing with empty dedup state", leader)
 	}
 	_, charterErr := os.Stat(roster.LayerCharterPath(rosterDir, leader))
-	return adjutantbuffer.FormatBrief(leader, f, os.IsNotExist(charterErr), quarantined), true, hasItems
+	brief, recordItems, ok = adjutantbuffer.PrepareInject(leader, f, delivered, os.IsNotExist(charterErr), quarantined)
+	return brief, ok, hasItems, recordItems
 }
 
 // backlogWakeBody composes the goal-driven loop's WakeBacklog prompt: it NAMES the driven item(s)

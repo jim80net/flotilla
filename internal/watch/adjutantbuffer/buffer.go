@@ -12,8 +12,10 @@ import (
 
 // Item is one buffered interrupt for a coordinator layer.
 type Item struct {
-	At     time.Time `json:"at"`
-	Reason string    `json:"reason"`
+	At        time.Time `json:"at"`
+	Reason    string    `json:"reason"`
+	Key       string    `json:"key,omitempty"`
+	StateHash string    `json:"state_hash,omitempty"`
 }
 
 // File is the durable layer queue sidecar (flotilla-<xo>-buffer.json).
@@ -44,7 +46,12 @@ func Append(path, leader string, reasons []string) error {
 		if r == "" {
 			continue
 		}
-		f.Items = append(f.Items, Item{At: now, Reason: r})
+		f.Items = append(f.Items, Item{
+			At:        now,
+			Reason:    r,
+			Key:       itemKey(r),
+			StateHash: itemStateHash(r, now),
+		})
 	}
 	return save(path, f)
 }
@@ -57,6 +64,45 @@ func Peek(path string) (f File, ok bool, quarantined bool, err error) {
 		return File{}, false, false, err
 	}
 	return f, len(f.Items) > 0, quarantined, nil
+}
+
+// RemoveConfirmedItems rewrites the buffer minus exactly the confirmed seam items (#488 P1).
+// Items appended after Peek but before confirm are retained.
+func RemoveConfirmedItems(path, leader string, delivered []Item) error {
+	if path == "" || len(delivered) == 0 {
+		return nil
+	}
+	f, _, err := load(path)
+	if err != nil {
+		return err
+	}
+	remove := make(map[string]bool, len(delivered))
+	for _, it := range delivered {
+		norm, ok := normalizeItem(it)
+		if !ok {
+			continue
+		}
+		remove[norm.Key+"\x00"+norm.StateHash] = true
+	}
+	remaining := make([]Item, 0, len(f.Items))
+	for _, it := range f.Items {
+		norm, ok := normalizeItem(it)
+		if !ok {
+			continue
+		}
+		if remove[norm.Key+"\x00"+norm.StateHash] {
+			continue
+		}
+		remaining = append(remaining, norm)
+	}
+	if len(remaining) == 0 {
+		return Clear(path)
+	}
+	if f.Leader == "" {
+		f.Leader = leader
+	}
+	f.Items = remaining
+	return save(path, f)
 }
 
 // Clear removes the buffer sidecar after a successful enqueue (enqueue-then-delete).
@@ -107,9 +153,7 @@ func FormatBrief(leader string, f File, charterMissing, corruptQuarantined bool)
 		b.WriteString(" (evaluation-tick ack is required minimum).\n\n")
 	}
 	if len(f.Items) == 0 {
-		if corruptQuarantined {
-			return b.String()
-		}
+		return b.String()
 	}
 	since := time.Since(oldest(f.Items))
 	fmt.Fprintf(&b, "Since your last seam (%s ago): %d buffered item(s) need your judgment.\n", humanSince(since), len(f.Items))
@@ -130,7 +174,7 @@ func load(path string) (File, bool, error) {
 	}
 	var f File
 	if err := json.Unmarshal(raw, &f); err != nil {
-		sidecar := path + ".corrupt-" + time.Now().UTC().Format("20060102T150405Z")
+		sidecar := quarantineSidecarPath(path)
 		if renameErr := os.Rename(path, sidecar); renameErr != nil {
 			log.Printf("flotilla watch: adjutant buffer at %q is corrupt (%v) and rename to sidecar failed: %v", path, err, renameErr)
 			return File{}, false, fmt.Errorf("corrupt buffer %q: %w (quarantine rename failed: %v)", path, err, renameErr)
@@ -138,38 +182,12 @@ func load(path string) (File, bool, error) {
 		log.Printf("flotilla watch: adjutant buffer at %q is corrupt (%v); preserved as %q", path, err, sidecar)
 		return File{}, true, nil
 	}
+	f.Items = normalizeItems(f.Items)
 	return f, false, nil
 }
 
 func save(path string, f File) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("mkdir buffer dir: %w", err)
-	}
-	raw, err := json.MarshalIndent(f, "", "  ")
-	if err != nil {
-		return err
-	}
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return fmt.Errorf("create buffer temp in %q: %w", dir, err)
-	}
-	tmpName := tmp.Name()
-	cleanup := func() { _ = os.Remove(tmpName) }
-	if _, err := tmp.Write(raw); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return fmt.Errorf("write buffer temp %q: %w", tmpName, err)
-	}
-	if err := tmp.Close(); err != nil {
-		cleanup()
-		return fmt.Errorf("close buffer temp %q: %w", tmpName, err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		cleanup()
-		return fmt.Errorf("rename buffer %q: %w", path, err)
-	}
-	return nil
+	return atomicWriteJSON(path, f)
 }
 
 func oldest(items []Item) time.Time {

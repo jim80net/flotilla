@@ -81,6 +81,11 @@ func LayerBufferPath(rosterDir, coordinator string) string {
 	return filepath.Join(rosterDir, "flotilla-"+coordinator+"-buffer.json")
 }
 
+// LayerBufferDeliveredPath returns the consumed-item ledger for seam-brief dedup (#469).
+func LayerBufferDeliveredPath(rosterDir, coordinator string) string {
+	return filepath.Join(rosterDir, "flotilla-"+coordinator+"-buffer-delivered.json")
+}
+
 // LayerCharterPath returns the first-presentation charter file for a coordinator/adjutant pair.
 func LayerCharterPath(rosterDir, coordinator string) string {
 	return filepath.Join(rosterDir, "flotilla-"+coordinator+"-adjutant-charter.md")
