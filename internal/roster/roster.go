@@ -284,7 +284,7 @@ func Load(path string) (*Config, error) {
 		}
 		seenTitle[a.Title()] = true
 		if a.Coordinator != nil && !*a.Coordinator {
-			if a.Name == c.XOAgent || a.Name == c.CosAgent {
+			if a.Name == c.effectiveXOAgent() || a.Name == c.CosAgent {
 				return nil, fmt.Errorf("roster %q: agent %q cannot set coordinator:false (primary xo_agent or cos_agent)", path, a.Name)
 			}
 		}
@@ -429,6 +429,18 @@ func (c *Config) validateSchedules(path string) error {
 
 // HeartbeatDur returns the parsed heartbeat interval (0 when disabled).
 func (c *Config) HeartbeatDur() time.Duration { return c.heartbeatDur }
+
+// effectiveXOAgent returns the primary XO name — explicit xo_agent when set, otherwise
+// Agents[0] in legacy single-fleet rosters (the same fallback Bindings uses).
+func (c *Config) effectiveXOAgent() string {
+	if c.XOAgent != "" {
+		return c.XOAgent
+	}
+	if len(c.Agents) > 0 {
+		return c.Agents[0].Name
+	}
+	return ""
+}
 
 // Bindings returns the effective channel→XO bindings the relay routes on. With an
 // explicit Channels list it returns that; otherwise it synthesizes the single
@@ -580,7 +592,7 @@ func (c *Config) IsCoordinator(name string) bool {
 	if name == "" {
 		return false
 	}
-	if c.XOAgent != "" && name == c.XOAgent {
+	if xo := c.effectiveXOAgent(); xo != "" && name == xo {
 		return true
 	}
 	if c.CosAgent != "" && name == c.CosAgent {
@@ -592,10 +604,9 @@ func (c *Config) IsCoordinator(name string) bool {
 	return c.hasSpanOfControl(name)
 }
 
-// CoordinatorSet returns EVERY coordinator agent (each name for which IsCoordinator is true) —
-// computed in a SINGLE pass. Callers that classify MANY agents (e.g. the dash rail's Fleet
-// Command grouping) use this instead of IsCoordinator-per-agent, which re-scans the bindings
-// on each call (O(n²) over a member list). The returned map is the caller's to keep.
+// CoordinatorSet returns every agent for which IsCoordinator is true. The dash rail's Fleet
+// Command grouping and similar callers use this map instead of calling IsCoordinator on each
+// name at the call site. The returned map is the caller's to keep.
 func (c *Config) CoordinatorSet() map[string]bool {
 	set := make(map[string]bool)
 	for _, a := range c.Agents {

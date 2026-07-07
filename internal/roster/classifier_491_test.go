@@ -126,3 +126,13 @@ func TestLoad_RejectsCoordinatorFalseOnPrimaryXO(t *testing.T) {
 		t.Fatal("coordinator:false on primary xo_agent must fail load")
 	}
 }
+
+// Legacy single-fleet rosters omit xo_agent and default the primary to Agents[0].
+func TestLoad_RejectsCoordinatorFalseOnLegacyImplicitPrimary(t *testing.T) {
+	_, err := Load(writeRoster(t, `{
+	  "operator_user_id":"U","channel_id":"C1",
+	  "agents":[{"name":"meta-xo","coordinator":false},{"name":"backend"}]}`))
+	if err == nil {
+		t.Fatal("coordinator:false on legacy implicit primary (Agents[0]) must fail load")
+	}
+}
