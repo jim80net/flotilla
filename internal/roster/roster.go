@@ -436,7 +436,7 @@ func (c *Config) effectiveXOAgent() string {
 	if c.XOAgent != "" {
 		return c.XOAgent
 	}
-	if len(c.Agents) > 0 {
+	if len(c.Channels) == 0 && c.ChannelID != "" && len(c.Agents) > 0 {
 		return c.Agents[0].Name
 	}
 	return ""

@@ -30,6 +30,24 @@ const fleetShapeFixture = `{
   ]
 }`
 
+// bareNoChannelFixture is a clock-only roster: no channel_id, no channels[]. Agents[0]
+// must NOT be treated as the implicit primary XO (Bindings returns nil; effectiveXOAgent
+// must mirror that).
+const bareNoChannelFixture = `{
+  "operator_user_id":"U",
+  "agents":[{"name":"infra"},{"name":"data"}]
+}`
+
+// agents0ExecutionDeskFixture is federated with Agents[0] a plain execution desk while
+// the real primary is explicit xo_agent — the legacy Agents[0] fallback must not apply.
+const agents0ExecutionDeskFixture = `{
+  "operator_user_id":"U","xo_agent":"meta-xo",
+  "agents":[{"name":"backend"},{"name":"meta-xo"},{"name":"frontend"}],
+  "channels":[
+    {"channel_id":"C_CMD","xo_agent":"meta-xo","role":"fleet-command","members":["meta-xo","backend","frontend"]}
+  ]
+}`
+
 // xoObserverShapeFixture pins the #502 rail-regression shape: xo-observer is a genuine
 // coordinator via inferred span (sole cos+XO supervisor on trial-xo's home, both on
 // fleet-command) and must NOT be excluded by execution-desk overrides.
@@ -48,6 +66,43 @@ const xoObserverShapeFixture = `{
     {"channel_id": "Ctr", "xo_agent": "trial-xo", "members": ["cos", "xo-observer"]}
   ]
 }`
+
+func TestCoordinatorSet_BareNoChannelAgents0NotPrimary491(t *testing.T) {
+	cfg, err := Load(writeRoster(t, bareNoChannelFixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Bindings() != nil {
+		t.Fatalf("clock-only fixture must have no bindings, got %+v", cfg.Bindings())
+	}
+	if cfg.effectiveXOAgent() != "" {
+		t.Errorf("effectiveXOAgent = %q, want empty on bare no-channel roster", cfg.effectiveXOAgent())
+	}
+	for _, desk := range []string{"infra", "data"} {
+		if cfg.IsCoordinator(desk) {
+			t.Errorf("%q must NOT be coordinator on clock-only roster (no implicit Agents[0] primary)", desk)
+		}
+	}
+	if len(cfg.CoordinatorSet()) != 0 {
+		t.Errorf("CoordinatorSet = %v, want empty", cfg.CoordinatorSet())
+	}
+}
+
+func TestCoordinatorSet_Agents0ExecutionDeskNotCoordinator491(t *testing.T) {
+	cfg, err := Load(writeRoster(t, agents0ExecutionDeskFixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.effectiveXOAgent() != "meta-xo" {
+		t.Fatalf("effectiveXOAgent = %q, want meta-xo", cfg.effectiveXOAgent())
+	}
+	if cfg.IsCoordinator("backend") {
+		t.Error("Agents[0] backend must NOT be coordinator when xo_agent names meta-xo")
+	}
+	if !cfg.IsCoordinator("meta-xo") {
+		t.Error("meta-xo must remain coordinator as explicit primary")
+	}
+}
 
 func TestCoordinatorSet_FleetShape491(t *testing.T) {
 	cfg, err := Load(writeRoster(t, fleetShapeFixture))
