@@ -1317,6 +1317,11 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   padding: 10px 12px; overflow: hidden;
   transition: border-color .2s var(--ease), box-shadow .2s var(--ease), transform .15s var(--ease);
 }
+/* #503: the card's overflow:hidden clips its own kebab popup (an absolutely-positioned
+   descendant), and later-DOM sibling cards stack over it. While a menu is OPEN the card
+   releases clipping and rises above its siblings — content clipping stays in force for
+   every card whose menu is closed (the common case #421's overflow guard protects). */
+.gnode.gnode-menu-open { overflow: visible; z-index: 30; }
 .gnode:hover { transform: translateY(-2px); border-color: var(--cyan-dim); }
 /* Focus ring. Note the outline is inside the transformed world so it scales with
    zoom; the focus-recenter (keyboard) brings a focused node to centre so the ring
