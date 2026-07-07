@@ -55,7 +55,7 @@ func TestDroppedDispatchEndToEnd(t *testing.T) {
 
 	in := NewInjector(func(string, string) error { return nil }, 0)
 	in.rosterDir = dir
-	in.SetInboundTrack(InboundTrackHook(dir))
+	in.SetInboundTrack(InboundTrackHook(dir, nil))
 
 	msg, nonce, err := inbound.AppendDispatchNonce("Phase-2 wave: implement portable-location for hermes adapter")
 	if err != nil {
@@ -89,8 +89,23 @@ func TestDroppedDispatchEndToEnd(t *testing.T) {
 		t.Fatalf("reinject message missing preamble: %q", reinjected[0].Message)
 	}
 	got := inbound.NewStore(path).Load()
-	if len(got) != 1 || got[0].Deferrals != 1 {
-		t.Fatalf("deferrals must persist after first miss: %+v", got)
+	if len(got) != 1 || got[0].Deferrals != 0 {
+		t.Fatalf("deferrals before confirmed reinject: %+v, want 0", got)
+	}
+	if reinjected[0].ClaimKey != inbound.ReinjectClaimKey("codex-harness-dev", "m1") {
+		t.Fatalf("reinject claim key = %q", reinjected[0].ClaimKey)
+	}
+}
+
+func TestInboundTrackHook_SkipsCoordinators(t *testing.T) {
+	dir := t.TempDir()
+	hook := InboundTrackHook(dir, func(agent string) bool { return agent == "cos" })
+	msg, _, _ := inbound.AppendDispatchNonce("hi")
+	hook(Job{Agent: "cos", Message: msg, Kind: KindSend, Sender: "memex", MessageID: "1"})
+	hook(Job{Agent: "backend", Message: msg, Kind: KindSend, Sender: "memex", MessageID: "2"})
+	path, _ := inbound.Path(dir, "backend")
+	if len(inbound.NewStore(path).Load()) != 1 {
+		t.Fatal("coordinator inbound must not be tracked")
 	}
 }
 
@@ -98,7 +113,7 @@ func TestInjectorInboundTrack_OnConfirmedKindSend(t *testing.T) {
 	dir := t.TempDir()
 	in := NewInjector(func(string, string) error { return nil }, 0)
 	in.rosterDir = dir
-	in.SetInboundTrack(InboundTrackHook(dir))
+	in.SetInboundTrack(InboundTrackHook(dir, nil))
 
 	msg, _, err := inbound.AppendDispatchNonce("status")
 	if err != nil {

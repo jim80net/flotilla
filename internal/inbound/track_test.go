@@ -30,8 +30,9 @@ func TestInboundOnFinish_ReinjectsOnFirstMiss(t *testing.T) {
 	if len(actions) != 1 || !actions[0].Reinject || actions[0].Escalate {
 		t.Fatalf("first miss: got %+v, want reinject only", actions)
 	}
-	if len(tr.Pending("codex-harness-dev")) != 1 {
-		t.Fatal("entry must remain pending after first miss")
+	pending := tr.Pending("codex-harness-dev")
+	if len(pending) != 1 || pending[0].Deferrals != 0 {
+		t.Fatalf("entry pending with deferrals=0 before confirmed reinject: %+v", pending)
 	}
 }
 
@@ -75,7 +76,7 @@ func TestInboundOnFinish_ClearsOnAck(t *testing.T) {
 func TestReinjectPreamble_IncludesOriginalBody(t *testing.T) {
 	e := Entry{Sender: "memex", Nonce: "flotilla-dispatch-11111111", Message: "do the thing"}
 	p := ReinjectPreamble(e)
-	if !strings.Contains(p, "dropped-dispatch resume") || !strings.Contains(p, "do the thing") {
+	if !strings.Contains(p, "dropped-dispatch resume") || !strings.Contains(p, "do the thing") || !strings.Contains(p, ReinjectEchoReminder) {
 		t.Fatalf("preamble missing markers: %q", p)
 	}
 }

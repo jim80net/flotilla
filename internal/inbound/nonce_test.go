@@ -11,7 +11,7 @@ func TestAppendDispatchNonce_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(aug, n1) || ParseDispatchNonce(aug) != n1 {
+	if !strings.Contains(aug, n1) || ParseDispatchNonce(aug) != n1 || !strings.Contains(aug, "#472") {
 		t.Fatalf("augmented = %q nonce = %q", aug, n1)
 	}
 	_, n2, err := AppendDispatchNonce(aug)

@@ -20,7 +20,7 @@ type Entry struct {
 	Message     string    `json:"message"`
 	Nonce       string    `json:"nonce"` // echoed in turn-final or explicit clear
 	DeliveredAt time.Time `json:"delivered_at"`
-	Deferrals   int       `json:"deferrals"` // reinject count; escalate at 2
+	Deferrals   int       `json:"deferrals"` // 0=awaiting first confirmed reinject; 1=reinject confirmed, escalate on next miss
 }
 
 // Action is what the detector should do when a finish edge finds an unacked dispatch.
@@ -126,13 +126,13 @@ func (t *Tracker) OnFinish(recipient, turnFinal string) []Action {
 }
 
 // evaluateFinish is the shared finish-edge policy for Tracker and Store.
+// Deferrals counts confirmed reinject deliveries only (not enqueued wakes that were busy-dropped).
 func evaluateFinish(list []Entry, turnFinal string) (actions []Action, remaining []Entry) {
 	for _, e := range list {
 		if Acknowledged(turnFinal, e) {
 			continue
 		}
-		e.Deferrals++
-		if e.Deferrals >= 2 {
+		if e.Deferrals >= 1 {
 			actions = append(actions, Action{Entry: e, Escalate: true})
 			continue
 		}
@@ -152,10 +152,17 @@ func (t *Tracker) Pending(recipient string) []Entry {
 	return out
 }
 
-// ReinjectPreamble prefixes a one-shot resume message.
+// ReinjectPreamble prefixes a one-shot resume message with the #472 echo contract repeated.
 func ReinjectPreamble(e Entry) string {
-	return "[flotilla dropped-dispatch resume] A confirmed dispatch from " + e.Sender +
-		" was delivered but not addressed before you went idle" +
-		" (an intervening duty turn may have displaced it). Resume now — nonce `" + e.Nonce + "`.\n\n" +
-		e.Message
+	var b strings.Builder
+	b.WriteString("[flotilla dropped-dispatch resume] A confirmed dispatch from ")
+	b.WriteString(e.Sender)
+	b.WriteString(" was delivered but not addressed before you went idle")
+	b.WriteString(" (an intervening duty turn may have displaced it). Resume now.\n\n")
+	b.WriteString(fmt.Sprintf(EchoInstruction, e.Nonce))
+	b.WriteString("\n")
+	b.WriteString(ReinjectEchoReminder)
+	b.WriteString("\n\n")
+	b.WriteString(e.Message)
+	return b.String()
 }

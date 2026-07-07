@@ -1,7 +1,6 @@
 package inbound
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
 )
@@ -17,7 +16,7 @@ func AppendDispatchNonce(message string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	augmented := strings.TrimRight(message, "\n") + fmt.Sprintf("\n\n[dispatch nonce: `%s`]\n", nonce)
+	augmented := strings.TrimRight(message, "\n") + FormatDispatchFooter(nonce)
 	return augmented, nonce, nil
 }
 

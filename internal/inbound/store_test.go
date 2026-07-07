@@ -171,13 +171,21 @@ func TestInboundStoreOnFinish_PersistsDeferrals(t *testing.T) {
 		t.Fatalf("first miss: %+v", actions)
 	}
 	got := st.Load()
+	if len(got) != 1 || got[0].Deferrals != 0 {
+		t.Fatalf("deferrals before confirmed reinject: %+v, want 0", got)
+	}
+
+	if err := MarkReinjectDelivered(dir, "backend", "d1"); err != nil {
+		t.Fatal(err)
+	}
+	got = st.Load()
 	if len(got) != 1 || got[0].Deferrals != 1 {
-		t.Fatalf("deferrals must persist on disk: %+v", got)
+		t.Fatalf("deferrals after confirmed reinject: %+v", got)
 	}
 
 	actions = st.OnFinish("Still idle.")
 	if len(actions) != 1 || !actions[0].Escalate {
-		t.Fatalf("second miss: %+v", actions)
+		t.Fatalf("second miss after confirmed reinject: %+v", actions)
 	}
 	if len(st.Load()) != 0 {
 		t.Fatal("escalated entry must be removed from ledger")

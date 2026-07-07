@@ -7,13 +7,20 @@ import (
 	"github.com/jim80net/flotilla/internal/inbound"
 )
 
+// CoordinatorPredicate reports whether an agent is a coordinator seat (inbound finish
+// evaluation runs on execution desks only — tracking coordinators would grow unbounded).
+type CoordinatorPredicate func(agent string) bool
+
 // InboundTrackHook records a confirmed KindSend into the recipient's durable inbound ledger.
-func InboundTrackHook(rosterDir string) func(Job) {
+func InboundTrackHook(rosterDir string, isCoordinator CoordinatorPredicate) func(Job) {
 	if rosterDir == "" {
 		return nil
 	}
 	return func(j Job) {
 		if j.Kind != KindSend || j.Sender == "" || j.Agent == "" || j.Message == "" {
+			return
+		}
+		if isCoordinator != nil && isCoordinator(j.Agent) {
 			return
 		}
 		nonce := inbound.ParseDispatchNonce(j.Message)
@@ -74,11 +81,16 @@ func DroppedDispatchFinishHook(
 		for _, a := range st.OnFinish(text) {
 			if a.Reinject {
 				log.Printf("flotilla watch: dropped-dispatch reinject %s from %s (nonce=%s)", agent, a.Entry.Sender, a.Entry.Nonce)
-				enqueue(Job{Agent: agent, Message: inbound.ReinjectPreamble(a.Entry), Kind: KindDetector})
+				enqueue(Job{
+					Agent:    agent,
+					Message:  inbound.ReinjectPreamble(a.Entry),
+					Kind:     KindDetector,
+					ClaimKey: inbound.ReinjectClaimKey(agent, a.Entry.ID),
+				})
 			}
 			if a.Escalate {
 				msg := fmt.Sprintf(
-					"flotilla: dropped dispatch to %q from %q NOT addressed after reinject (nonce %s) — coordinator must re-dispatch or verify the desk",
+					"flotilla: dropped dispatch to %q from %q NOT addressed after confirmed reinject (nonce %s) — coordinator must re-dispatch or verify the desk",
 					agent, a.Entry.Sender, a.Entry.Nonce,
 				)
 				log.Print(msg)
