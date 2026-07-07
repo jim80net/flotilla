@@ -56,6 +56,9 @@
   // CSS transform on goals-world and uses screen coords directly.
   var tipEl = null;
   var modalReturn = null;   // fallback element to restore focus to when the modal closes
+  var modalNodeId = null;   // #501: the node the modal CURRENTLY shows — the respond target
+                            // (modalReturnId keeps the ORIGINAL opener across drill-ins; the
+                            // send must address the node on screen, so it tracks separately)
   var modalReturnId = null; // #354 P2: the NODE id that opened the modal — re-queried live on
                             // close so a drill-in / SSE re-render that replaced the trigger
                             // element still restores focus (survives detach).
@@ -1484,6 +1487,7 @@
   function openModal(id) {
     var n = nodeById[id];
     if (!n) return;
+    modalNodeId = id; // #501: the send targets the node ON SCREEN (updates on drill-ins)
     var gated = (n.work_items || []).filter(function (wi) { return wi.class === "awaiting" || wi.class === "blocked"; });
     var parts = ['<p class="gm-scope">' + escapeHtml(scopeNoun(n)) + "</p>"];
     if (n.description) parts.push("<p>" + escapeHtml(n.description) + "</p>");
@@ -1581,9 +1585,17 @@
   // nodeById). The optional index keeps the count PURE for callers that hold a doc the
   // module hasn't indexed yet (#451: renderSituation runs before render() rebuilds
   // nodeById, so counting the module state would count the PREVIOUS doc).
+  // #501: gatherDecisions returns TWO buckets from one walk. `decisions` are COMPLETE —
+  // a brief is present — and are the only items that render as answerable decisions
+  // ("if you have a decision for me, it comes with a brief" — mechanical, not remembered).
+  // `preparing` is the fail-closed bucket: operator-gated items whose brief is missing
+  // render as "brief being prepared" — visible (nothing the operator is owed can hide,
+  // the #451 lesson) but NEVER as a decision (the #501 lesson: a brief-less card asking
+  // the operator to chase the desk is a walk failure — the watch daemon already chases
+  // the owning desk mechanically, #349 item D).
   function gatherDecisions(index) {
     var byId = index || nodeById;
-    var out = [];
+    var out = [], preparing = [];
     Object.keys(byId).forEach(function (id) {
       var n = byId[id];
       if (!n) return;
@@ -1592,43 +1604,72 @@
       // pollute the decision room with a non-decision — the exact anti-pattern this page kills.
       var vis = visToken(n);
       var gated = vis === "awaiting" || vis === "blocked";
-      var before = out.length;
-      if (hasBrief(n.brief) && gated) out.push({ node: n, label: "", brief: n.brief });
+      var before = out.length + preparing.length;
+      if (gated && hasBrief(n.brief)) out.push({ node: n, label: "", brief: n.brief });
       (n.work_items || []).forEach(function (wi) {
         if ((wi.class === "awaiting" || wi.class === "blocked") && !sameBrief(wi.brief, n.brief)) {
-          out.push({ node: n, label: wi.label || wi.detail || wi.kind || "", brief: wi.brief });
+          if (hasBrief(wi.brief)) out.push({ node: n, label: wi.label || wi.detail || wi.kind || "", brief: wi.brief });
+          else preparing.push({ node: n, label: wi.label || wi.detail || wi.kind || "" });
         }
       });
-      // #451: a gated node with NO brief and NO gated work items is still a real decision
-      // the operator owes — it was on the map (and in the old badge count) but invisible
-      // in the reading room, which is how the badge and the page header could disagree.
-      // Include it with the honest no-brief placeholder: ONE population, ONE number.
-      if (gated && out.length === before) out.push({ node: n, label: "", brief: "" });
+      // #451: a gated node that produced NOTHING above is still real — the operator must
+      // see it. #501 refines WHERE: with no brief it is being prepared, not decidable.
+      if (gated && out.length + preparing.length === before) preparing.push({ node: n, label: "" });
     });
-    return out;
+    return { decisions: out, preparing: preparing };
   }
   // decisionsCount is THE number every decisions surface shows — the tab badge, the
   // "Awaiting you" tile, the reading-room header, and the cards themselves all count
-  // the same gatherDecisions population (#451: badge 6 vs header 3 destroyed trust in
-  // the number; two count sources may never disagree again). Pure over the doc it is
-  // handed — no module-index side effects, no stale-index ordering hazards.
+  // the same population (#451: two count sources may never disagree). #501 narrows the
+  // population to COMPLETE decisions — the preparing bucket has its own labeled count
+  // on the page (visible, but not something the operator can act on yet). Pure over
+  // the doc it is handed — no module-index side effects, no stale-index hazards.
   function decisionsCount(doc) {
     if (!doc || !Array.isArray(doc.goals)) return 0;
     var byId = {};
     doc.goals.forEach(function (n) { if (n && n.id) byId[n.id] = n; });
-    return gatherDecisions(byId).length;
+    return gatherDecisions(byId).decisions.length;
+  }
+  // respondTarget resolves the desk an operator response routes to: the node's
+  // conversation agent, else its owner, else the fleet coordinator (body data-xo).
+  function respondTarget(n) {
+    return (n.conversation_agent || n.owner || document.body.getAttribute("data-xo") || "").trim();
   }
   function renderDecisionCard(dec, idx, total) {
     var n = dec.node;
     var titleItem = dec.label ? ' <span class="gdec-item muted">— ' + escapeHtml(dec.label) + "</span>" : "";
-    var body = hasBrief(dec.brief) ? renderBrief(dec.brief) : BRIEF_EMPTY;
+    // #501: only COMPLETE briefs reach this renderer (gatherDecisions fails closed), so
+    // there is no placeholder branch — a brief-less card here would be a bug, not a state.
+    var target = respondTarget(n);
     return '<article class="gdec-card">' +
       '<div class="gdec-eyebrow">Decision ' + (idx + 1) + " of " + total + " · " + escapeHtml(scopeNoun(n)) + "</div>" +
       '<h3 class="gdec-card-title">' + escapeHtml(n.title || n.id) + titleItem + "</h3>" +
       '<div class="gdec-ctx"><span class="gdec-ctx-lab">Drives</span> ' +
         '<button type="button" class="gdec-ctx-link" data-gdec-goto="' + escapeHtml(n.id) + '" title="Open this goal in the map">' + escapeHtml(nodePath(n)) + "</button></div>" +
-      '<div class="gdec-brief gm-brief-full">' + body + "</div>" +
+      '<div class="gdec-brief gm-brief-full">' + renderBrief(dec.brief) + "</div>" +
+      // #501: the response affordance — every rendered decision is answerable INLINE.
+      // The reply posts to /api/control/respond (confirmed delivery, durable-outbox
+      // fallback); the outcome line reports delivered/queued honestly, never a stub.
+      '<div class="gdec-respond" data-resp-target="' + escapeHtml(target) + '" data-resp-goal="' + escapeHtml(n.id) + '" data-resp-item="' + escapeHtml(dec.label || "") + '">' +
+        '<textarea class="gdec-resp-input" rows="2" placeholder="Respond to ' + escapeHtml(target || "the fleet") + '&#8230; (approve / question / answer)" aria-label="Respond to this decision"></textarea>' +
+        '<div class="gdec-resp-row">' +
+          '<span class="gdec-resp-msg" role="status" aria-live="polite"></span>' +
+          '<button type="button" class="btn btn-primary gdec-resp-send">Respond</button>' +
+        "</div>" +
+      "</div>" +
       "</article>";
+  }
+  // renderPreparingRow is the fail-closed face of a brief-less gated item (#501): the
+  // operator sees WHAT is coming and WHO owes the brief — and nothing to answer yet.
+  function renderPreparingRow(p) {
+    var n = p.node;
+    var item = p.label ? ' <span class="gdec-item muted">— ' + escapeHtml(p.label) + "</span>" : "";
+    var owner = respondTarget(n);
+    return '<div class="gdec-prep-row">' +
+      '<span class="gdec-prep-spin" aria-hidden="true"></span>' +
+      '<span class="gdec-prep-title">' + escapeHtml(n.title || n.id) + item + "</span>" +
+      '<span class="gdec-prep-owner">' + escapeHtml(owner ? "brief being prepared by " + owner : "brief being prepared") + "</span>" +
+      "</div>";
   }
   function indexGoalsNodes(doc) {
     nodeById = {};
@@ -1659,11 +1700,22 @@
     // The load-time badge prime sets cache without indexing; index on demand so the
     // first paint reads the real doc instead of an empty map.
     if (!Object.keys(nodeById).length) indexGoalsNodes(cache);
-    var decs = gatherDecisions();
-    list.innerHTML = decs.length
-      ? decs.map(function (d, i) { return renderDecisionCard(d, i, decs.length); }).join("")
+    var g = gatherDecisions();
+    var html = g.decisions.length
+      ? g.decisions.map(function (d, i) { return renderDecisionCard(d, i, g.decisions.length); }).join("")
       : '<div class="gdec-empty">Nothing is awaiting your decision right now.</div>';
-    if (titleEl && decs.length) titleEl.textContent = "Decisions awaiting you · " + decs.length;
+    // #501 fail-closed bucket: brief-less gated items are VISIBLE (coming work is never
+    // hidden) but distinct — nothing to answer until the brief arrives; the watch daemon
+    // is already chasing the owning desk for it (#349 item D).
+    if (g.preparing.length) {
+      html += '<section class="gdec-prep" aria-label="Briefs being prepared">' +
+        '<h3 class="gdec-prep-h">Briefs being prepared · ' + g.preparing.length + "</h3>" +
+        '<p class="gdec-prep-d muted">These items are waiting on you but arrived without a decision brief — the fleet daemon has asked the owning desks to author them; each appears above, answerable, the moment its brief is complete.</p>' +
+        g.preparing.map(renderPreparingRow).join("") +
+        "</section>";
+    }
+    list.innerHTML = html;
+    if (titleEl && g.decisions.length) titleEl.textContent = "Decisions awaiting you · " + g.decisions.length;
     lastDecsSig = JSON.stringify(cache);
   }
   // lastDecsSig dedups live-tick repaints of the decisions page (the map's lastSig is
@@ -1856,10 +1908,25 @@
       if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
     });
+    // #501: the modal's Send is the REAL reply path — the same /api/control/respond leg
+    // the decision cards use (confirmed delivery + durable-outbox fallback). The stub
+    // ("not sent — wiring is a follow-on") is gone; the outcome line is always honest.
     var send = q("goals-modal-send");
     if (send) send.onclick = function () {
       var note = q("goals-modal-note");
-      if (note) note.textContent = "Reply path is a prototype stub — not sent (wiring to the control API is a follow-on).";
+      var ta = q("goals-modal-input");
+      var text = ta ? (ta.value || "").trim() : "";
+      var n = modalNodeId ? nodeById[modalNodeId] : null;
+      if (!text) { if (note) note.textContent = "Type a response first."; return; }
+      if (!n) { if (note) note.textContent = "No goal is open — close and reopen this dialog."; return; }
+      var target = respondTarget(n);
+      if (!target) { if (note) note.textContent = "No desk owns this goal — respond via the coordinator's conversation."; return; }
+      send.disabled = true;
+      if (note) note.textContent = "Sending…";
+      sendDecisionResponse(target, n.id, "", text)
+        .then(function (line) { if (note) note.textContent = line; if (ta) ta.value = ""; })
+        .catch(function (err) { if (note) note.textContent = "NOT sent: " + ((err && err.message) || err); })
+        .then(function () { send.disabled = false; });
     };
     // Situation strip: "Awaiting you" opens the decision page; filter tiles highlight
     // their matching nodes. Re-clicking an active filter tile clears it (toggle).
@@ -2217,10 +2284,45 @@
   // Decisions tab can be opened before the Goals tab has ever rendered, so the drawer-open
   // goes through restoreNode, which QUEUES the target until a render populates the map
   // (the same deferred path Back/Forward uses — cubic #351 P2).
+  // #501: ONE reply path for both response surfaces (the decision cards and the map's
+  // respond modal): POST /api/control/respond — the confirmed-delivery route with a
+  // durable-outbox fallback. Resolves to an honest outcome line for the UI; rejects
+  // with the server's error text (surfaced verbatim, never swallowed).
+  function sendDecisionResponse(target, goalId, itemLabel, text) {
+    return D.postJSON("/api/control/respond", {
+      target: target, goal_id: goalId, item: itemLabel || "", message: text,
+    }).then(function (res) {
+      if (res && res.outcome === "delivered") return "Delivered to " + res.target + " — turn confirmed.";
+      if (res && res.outcome === "queued") {
+        return "Queued durably for " + res.target + " (id " + res.queued_id + ") — the fleet daemon delivers it when the desk can receive." +
+          (res.detail ? " (" + res.detail + ")" : "");
+      }
+      return "Response state unclear — check the desk's conversation thread.";
+    });
+  }
+
   (function wireDecisionsPage() {
     var list = q("gdec-list");
     if (!list) return;
     list.addEventListener("click", function (e) {
+      // #501: the per-card Respond button — send the operator's text to the owning desk.
+      var sendBtn = e.target.closest(".gdec-resp-send");
+      if (sendBtn) {
+        var box = sendBtn.closest(".gdec-respond");
+        var input = box.querySelector(".gdec-resp-input");
+        var msgEl = box.querySelector(".gdec-resp-msg");
+        var text = input ? (input.value || "").trim() : "";
+        if (!text) { msgEl.textContent = "Type a response first."; return; }
+        var target = box.getAttribute("data-resp-target");
+        if (!target) { msgEl.textContent = "No desk owns this decision — respond via the coordinator's conversation."; return; }
+        sendBtn.disabled = true;
+        msgEl.textContent = "Sending…";
+        sendDecisionResponse(target, box.getAttribute("data-resp-goal"), box.getAttribute("data-resp-item"), text)
+          .then(function (line) { msgEl.textContent = line; if (input) input.value = ""; })
+          .catch(function (err) { msgEl.textContent = "NOT sent: " + ((err && err.message) || err); })
+          .then(function () { sendBtn.disabled = false; });
+        return;
+      }
       var goto = e.target.closest("[data-gdec-goto]");
       if (!goto) return;
       var id = goto.getAttribute("data-gdec-goto");

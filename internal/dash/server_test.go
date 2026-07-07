@@ -711,16 +711,18 @@ func TestDecisionPage405(t *testing.T) {
 // TestDecisionsCountUnified451 locks the one-population rule: the tab badge showed the
 // server's gated-NODE count (6) while the page header counted decision CARDS (3) —
 // same screen, two numbers (#451). Every decisions surface (badge, Awaiting-you tile,
-// page header, screen-reader announcement) now derives from ONE client-side count over
-// the same population the reading room lists — which itself gained the briefless gated
-// nodes it used to hide.
+// page header, screen-reader announcement) now derives from ONE client-side count.
+// #501 refined the population: the count is COMPLETE decisions only, with brief-less
+// gated items VISIBLE in their own labeled "preparing" bucket (fail-closed) — still
+// one derivation, never two disagreeing numbers.
 func TestDecisionsCountUnified451(t *testing.T) {
 	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
 	srv, _ := newTestServer(t, singleFleetRoster, now)
 	js := doGet(t, srv, "/static/goals.js").Body.String()
 	for _, marker := range []string{
-		"decisionsCount",             // the single derivation every surface reads
-		"ONE population, ONE number", // the briefless-gated-node inclusion in gatherDecisions
+		"decisionsCount",                       // the single derivation every surface reads
+		"two count sources may never disagree", // the #451 invariant, restated across the #501 refinement
+		"produced NOTHING above",               // gatherDecisions' catch-all — no gated item can vanish
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("goals.js must unify the decisions count (missing %q) — #451", marker)
@@ -1596,4 +1598,38 @@ func doGet(t *testing.T, srv *Server, path string) *httptest.ResponseRecorder {
 	rec := httptest.NewRecorder()
 	srv.handler().ServeHTTP(rec, req)
 	return rec
+}
+
+// TestDecisionResponseLoop501 locks the #501 decision-response loop's UI half: every
+// rendered decision carries an inline respond affordance wired to /api/control/respond;
+// brief-less gated items render in the fail-closed "preparing" bucket (never as
+// decisions); and the old prototype stub ("not sent — wiring is a follow-on") is GONE —
+// a stub the operator can click is a walk failure.
+func TestDecisionResponseLoop501(t *testing.T) {
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/goals.js").Body.String()
+	for _, marker := range []string{
+		"gdec-respond",          // the per-card response affordance
+		"sendDecisionResponse",  // the ONE reply path (cards + modal share it)
+		"/api/control/respond",  // wired to the real control endpoint
+		"renderPreparingRow",    // the fail-closed brief-less rendering
+		"gdec-prep",             // the preparing bucket
+		"Briefs being prepared", // its labeled, honest header
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must implement the decision-response loop (missing %q) — #501", marker)
+		}
+	}
+	if strings.Contains(js, "prototype stub") || strings.Contains(js, "not sent (wiring") {
+		t.Error("goals.js must NOT ship the reply-path stub — the loop is wired end-to-end (#501)")
+	}
+	html := doGet(t, srv, "/").Body.String()
+	if !strings.Contains(html, `data-xo=`) {
+		t.Error("index.html body must carry data-xo (the ownerless-goal response fallback target) — #501")
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	if !strings.Contains(css, ".gdec-respond") || !strings.Contains(css, ".gdec-prep") {
+		t.Error("dash.css must style the respond affordance + preparing bucket — #501")
+	}
 }

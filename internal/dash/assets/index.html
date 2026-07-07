@@ -10,7 +10,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/dash.css" />
 </head>
-<body data-goals-layout="{{.GoalsLayout}}">
+<!-- data-xo: the fleet coordinator — the decision-response fallback target when a goal
+     names no owning desk (#501). -->
+<body data-goals-layout="{{.GoalsLayout}}" data-xo="{{.XO}}">
   <div class="bg-grid" aria-hidden="true"></div>
   <div class="bg-grain" aria-hidden="true"></div>
 
