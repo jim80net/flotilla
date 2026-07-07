@@ -534,13 +534,84 @@ func (c *Config) hasSpanOfControl(name string) bool {
 		if !c.channelIsSupervisorObserverHome(ch) {
 			continue
 		}
-		for _, m := range ch.Members {
-			if m == name {
-				return true
-			}
+		if c.spanFromSupervisorObserverMember(name, ch) {
+			return true
 		}
 	}
 	return false
+}
+
+// spanFromSupervisorObserverMember reports whether name — an XO listed as member on a
+// supervisor-as-member desk channel (#481) — genuinely supervises that desk for span (#491).
+// Fleet-command membership disambiguates execution desks (command targets on the broadcast
+// channel who also appear on a peer dash/harness desk) from venture coordinators: a sole
+// supervisor link between two fleet-command members does not confer span unless the
+// coordinator already supervises two or more such desks; cos+XO desk channels confer span
+// only when the XO is not itself a fleet-command member (the memex-lane shape).
+func (c *Config) spanFromSupervisorObserverMember(name string, ch Channel) bool {
+	var nonSelf []string
+	for _, m := range ch.Members {
+		if m != ch.XOAgent {
+			nonSelf = append(nonSelf, m)
+		}
+	}
+	if len(nonSelf) == 0 {
+		return false
+	}
+	cos := c.CosAgent
+	if cos == "" {
+		cos = c.XOAgent
+	}
+	if cos != "" && memberOf(nonSelf, cos) && memberOf(nonSelf, name) && len(nonSelf) >= 2 {
+		return !c.fleetCommandMember(name)
+	}
+	if len(nonSelf) == 1 && nonSelf[0] == name {
+		if c.supervisorObserverSoleMemberChannels(name) >= 2 {
+			return true
+		}
+		if c.fleetCommandMember(name) && c.fleetCommandMember(ch.XOAgent) {
+			return false
+		}
+		return true
+	}
+	return false
+}
+
+// fleetCommandMember reports whether name is listed on the fleet-command broadcast channel.
+func (c *Config) fleetCommandMember(name string) bool {
+	for _, ch := range c.Bindings() {
+		if ch.IsFleetCommand() && memberOf(ch.Members, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// supervisorObserverSoleMemberChannels counts desk channels where name is the only
+// non-self XO supervision observer (#481 sole-supervisor shape).
+func (c *Config) supervisorObserverSoleMemberChannels(name string) int {
+	n := 0
+	for _, ch := range c.Bindings() {
+		if ch.XOAgent == name || ch.XOAgent == "" {
+			continue
+		}
+		if ch.XOAgent == c.XOAgent || ch.XOAgent == c.CosAgent {
+			continue
+		}
+		if !c.channelIsSupervisorObserverHome(ch) {
+			continue
+		}
+		var nonSelf []string
+		for _, m := range ch.Members {
+			if m != ch.XOAgent {
+				nonSelf = append(nonSelf, m)
+			}
+		}
+		if len(nonSelf) == 1 && nonSelf[0] == name {
+			n++
+		}
+	}
+	return n
 }
 
 // channelIsSupervisorObserverHome reports the desk-home shape (#481): every non-self member

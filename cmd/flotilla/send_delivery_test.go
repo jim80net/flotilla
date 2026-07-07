@@ -145,6 +145,43 @@ func TestCLIDirectDeliveryTracksInboundE2E(t *testing.T) {
 	}
 }
 
+// Acceptance (#491): execution desk with supervisor-as-member residue still records inbound.
+func TestCLIDirectDeliveryTracksDeclassifiedExecutionDesk491(t *testing.T) {
+	dir := t.TempDir()
+	rosterPath := filepath.Join(dir, "flotilla.json")
+	body := `{
+		"operator_user_id":"U","xo_agent":"cos","cos_agent":"cos",
+		"agents":[{"name":"cos"},{"name":"product-skill-dev"},{"name":"dash-desk"}],
+		"channels":[
+			{"channel_id":"C_CMD","xo_agent":"cos","role":"fleet-command","members":["product-skill-dev","dash-desk"]},
+			{"channel_id":"C_PSKILL","xo_agent":"product-skill-dev","members":["cos"]},
+			{"channel_id":"C_DASH","xo_agent":"dash-desk","members":["product-skill-dev"]}
+		]}`
+	if err := os.WriteFile(rosterPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := roster.Load(rosterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.IsCoordinator("product-skill-dev") {
+		t.Fatal("product-skill-dev must not classify as coordinator")
+	}
+	msg, nonce, err := inbound.AppendDispatchNonce("build the classifier fix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordDirectInboundTrack(cfg, rosterPath, "cos", "product-skill-dev", msg)
+	path, err := inbound.Path(dir, "product-skill-dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := inbound.NewStore(path).Load()
+	if len(got) != 1 || got[0].Nonce != nonce {
+		t.Fatalf("inbound ledger = %+v, want one entry with nonce %q", got, nonce)
+	}
+}
+
 func TestCLIDirectDeliverySkipsCoordinatorInbound(t *testing.T) {
 	dir := t.TempDir()
 	rosterPath := filepath.Join(dir, "flotilla.json")
