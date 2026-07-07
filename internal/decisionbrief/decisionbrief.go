@@ -6,6 +6,7 @@
 package decisionbrief
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"strings"
 	"sync"
@@ -56,13 +57,17 @@ func FindGaps(in Inputs) []Gap {
 	for _, g := range doc.Goals {
 		byID[g.ID] = g
 	}
+	goalByID := make(map[string]dash.Goal, len(in.File.Goals))
+	for _, goal := range in.File.Goals {
+		goalByID[goal.ID] = goal
+	}
 	var gaps []Gap
 	for _, g := range in.File.Goals {
 		rendered, ok := byID[g.ID]
 		if !ok {
 			continue
 		}
-		owner := ResolveOwner(g)
+		owner := ResolveOwnerInTree(g, goalByID)
 		var itemGaps []Gap
 		for i, wi := range g.WorkItems {
 			if i >= len(rendered.WorkItems) {
@@ -155,9 +160,31 @@ func GapKey(g Gap) string {
 	return g.GoalID + ":" + g.ItemKey
 }
 
-// ResolveOwner picks the desk that authors the brief: conversation_agent, else the
-// first kind=desk work item's agent. Empty when no owner can be determined.
+// ResolveOwner picks the desk that authors the brief on this goal only: conversation_agent,
+// else the first kind=desk work item's agent. Empty when no owner can be determined.
 func ResolveOwner(g dash.Goal) string {
+	return resolveOwnerDirect(g)
+}
+
+// ResolveOwnerInTree walks up the parent chain to the nearest ancestor with an owner (#482).
+func ResolveOwnerInTree(g dash.Goal, byID map[string]dash.Goal) string {
+	for cur := g; ; {
+		if o := resolveOwnerDirect(cur); o != "" {
+			return o
+		}
+		parentID := strings.TrimSpace(cur.Parent)
+		if parentID == "" {
+			return ""
+		}
+		parent, ok := byID[parentID]
+		if !ok {
+			return ""
+		}
+		cur = parent
+	}
+}
+
+func resolveOwnerDirect(g dash.Goal) string {
 	if ca := strings.TrimSpace(g.ConversationAgent); ca != "" {
 		return ca
 	}
@@ -169,6 +196,34 @@ func ResolveOwner(g dash.Goal) string {
 		}
 	}
 	return ""
+}
+
+// ShouldLogUnownedSkip reports whether the no-owning-desk skip line should be logged (#482).
+// The latch logs once per gap until the gap shape changes.
+func ShouldLogUnownedSkip(latch map[string]string, g Gap) bool {
+	if latch == nil {
+		return true
+	}
+	key := GapKey(g)
+	h := unownedSkipShapeHash(g)
+	if latch[key] == h {
+		return false
+	}
+	latch[key] = h
+	return true
+}
+
+// ClearUnownedSkipLatch drops the latch entry when a gap clears or gains an owner.
+func ClearUnownedSkipLatch(latch map[string]string, g Gap) {
+	if latch == nil {
+		return
+	}
+	delete(latch, GapKey(g))
+}
+
+func unownedSkipShapeHash(g Gap) string {
+	sum := sha256.Sum256([]byte(g.GoalID + "\x00" + g.ItemKey + "\x00" + g.Class))
+	return fmt.Sprintf("%x", sum)
 }
 
 // Tracker suppresses re-dispatch for the same gap until it clears or gains a brief.
