@@ -26,7 +26,7 @@ type Entry struct {
 	Message             string    `json:"message"`
 	Deferrals           int       `json:"deferrals"`
 	EnqueuedAt          time.Time `json:"enqueued_at"`
-	LastStaleEscalation time.Time `json:"last_stale_escalation,omitempty"` // exactly-once coordinator alert (#477)
+	LastStaleEscalation time.Time `json:"last_stale_escalation,omitzero"` // exactly-once coordinator alert (#477)
 }
 
 type file struct {
@@ -212,7 +212,7 @@ func entryMateriallyChanged(prev, next Entry) bool {
 	if prev.Deferrals != next.Deferrals {
 		return true
 	}
-	if prev.LastStaleEscalation != next.LastStaleEscalation {
+	if !prev.LastStaleEscalation.Equal(next.LastStaleEscalation) {
 		return true
 	}
 	return false
