@@ -92,6 +92,8 @@ type Job struct {
 	enqueuedAt time.Time
 	// lastStaleAlert is when the last periodic stale escalation fired. Internal.
 	lastStaleAlert time.Time
+	// lastStaleEscalation is when the one-shot coordinator escalation fired for KindSend (#477).
+	lastStaleEscalation time.Time
 	// Sender is the originating agent for KindSend jobs (keys the per-sender outbox file).
 	Sender string
 	// ClaimKey is the decision-brief gap key for KindDetector jobs; the watch daemon sets it
@@ -116,24 +118,26 @@ type SendFunc func(agent, message string) error
 // in-flight at shutdown could otherwise send on a closed channel and panic.
 // Stop signals the worker to drain-and-exit and makes Enqueue drop instead.
 type Injector struct {
-	jobs              chan Job
-	send              SendFunc
-	relaySend         SendFunc      // optional: the RELAY-kind send path (self-heal-capable, #156). nil ⇒ relays use send.
-	stop              chan struct{} // worker: drain then exit
-	stopped           chan struct{} // Enqueue: stop accepting (closed once)
-	done              chan struct{}
-	once              sync.Once
-	mirror            func(Job)                               // optional: called after a CONFIRMED delivery (audit trail)
-	escalate          func(string)                            // optional: a LOUD operator alert for a failed/undeliverable relay
-	reEnqueue         func(Job, time.Duration)                // how a deferred relay is re-enqueued after a delay; injectable for tests
-	queue             relayQueueStore                         // optional: disk-backed pending queue for deferred operator relays (#286)
-	rosterDir         string                                  // roster directory for per-sender outbox persistence (#475)
-	onSend            func(sender, recipient, message string) // optional: post-confirm hook for swept sends (ledger)
-	onOutboxDone      func(sender, id string)                 // optional: clear in-flight sweep guard (#475)
-	onDetectorConfirm func(claimKey string)                   // optional: durable claim after confirmed detector delivery (#365)
-	onDetectorAbort   func(claimKey string)                   // optional: release in-memory claim on busy drop / failure (#365)
-	onInboundTrack    func(Job)                               // optional: recipient inbound ledger after confirmed KindSend (#472)
-	now               func() time.Time                        // clock for stale escalation; nil ⇒ time.Now()
+	jobs                      chan Job
+	send                      SendFunc
+	relaySend                 SendFunc      // optional: the RELAY-kind send path (self-heal-capable, #156). nil ⇒ relays use send.
+	stop                      chan struct{} // worker: drain then exit
+	stopped                   chan struct{} // Enqueue: stop accepting (closed once)
+	done                      chan struct{}
+	once                      sync.Once
+	mirror                    func(Job)                               // optional: called after a CONFIRMED delivery (audit trail)
+	escalate                  func(string)                            // optional: a LOUD operator alert for a failed/undeliverable relay
+	reEnqueue                 func(Job, time.Duration)                // how a deferred relay is re-enqueued after a delay; injectable for tests
+	queue                     relayQueueStore                         // optional: disk-backed pending queue for deferred operator relays (#286)
+	rosterDir                 string                                  // roster directory for per-sender outbox persistence (#475)
+	onSend                    func(sender, recipient, message string) // optional: post-confirm hook for swept sends (ledger)
+	onOutboxDone              func(sender, id string)                 // optional: clear in-flight sweep guard (#475)
+	onDetectorConfirm         func(claimKey string)                   // optional: durable claim after confirmed detector delivery (#365)
+	onDetectorAbort           func(claimKey string)                   // optional: release in-memory claim on busy drop / failure (#365)
+	onInboundTrack            func(Job)                               // optional: recipient inbound ledger after confirmed KindSend (#472)
+	now                       func() time.Time                        // clock for stale escalation; nil ⇒ time.Now()
+	outboxOwningCoordinator   func(sender string) string              // optional: sender → coordinator for stale outbox (#477)
+	outboxCoordinatorEscalate func(coordinator, msg, claimKey string) // optional: enqueue to coordinator surface (#436/#477)
 }
 
 // SetRelaySend installs a distinct send path for RELAY-kind jobs (the operator-message kind), used to
@@ -180,6 +184,14 @@ func (in *Injector) SetDetectorClaimHooks(confirm, abort func(claimKey string)) 
 // SetInboundTrack installs a hook called after a CONFIRMED KindSend delivery to record the
 // dispatch in the recipient's inbound ledger (#472). Must be set before Start.
 func (in *Injector) SetInboundTrack(fn func(Job)) { in.onInboundTrack = fn }
+
+// SetOutboxStaleEscalate wires the one-shot coordinator-surface escalation for undeliverable
+// swept sends (#477, #436). owningCoordinator resolves the sender's coordinator; escalate
+// delivers the message off-worker (typically a KindDetector enqueue with claimKey). nil hooks ⇒ no escalation.
+func (in *Injector) SetOutboxStaleEscalate(owningCoordinator func(sender string) string, escalate func(coordinator, msg, claimKey string)) {
+	in.outboxOwningCoordinator = owningCoordinator
+	in.outboxCoordinatorEscalate = escalate
+}
 
 // NewInjector builds an injector with the given send function and queue buffer.
 func NewInjector(send SendFunc, buffer int) *Injector {
@@ -353,14 +365,45 @@ func (in *Injector) handleBusy(j Job, cause error) {
 		in.maybeStaleEscalateRelay(&j, now)
 		in.queue.upsert(j)
 	} else if j.Kind == KindSend && j.MessageID != "" && j.Sender != "" && in.rosterDir != "" {
+		entry := outbox.Entry{
+			ID: j.MessageID, Sender: j.Sender, Recipient: j.Agent, Message: j.Message,
+			Deferrals: j.deferrals, EnqueuedAt: j.enqueuedAt,
+			LastStaleEscalation: j.lastStaleEscalation,
+		}
 		if path, err := outbox.Path(in.rosterDir, j.Sender); err == nil {
-			outbox.NewStore(path).Upsert(outbox.Entry{
-				ID: j.MessageID, Sender: j.Sender, Recipient: j.Agent, Message: j.Message,
-				Deferrals: j.deferrals, EnqueuedAt: j.enqueuedAt,
-			})
+			st := outbox.NewStore(path)
+			for _, p := range st.Load() {
+				if p.ID == j.MessageID && !p.LastStaleEscalation.IsZero() {
+					entry.LastStaleEscalation = p.LastStaleEscalation
+					j.lastStaleEscalation = p.LastStaleEscalation
+					break
+				}
+			}
+			in.maybeStaleEscalateOutbox(&j, &entry, now)
+			st.Upsert(entry)
 		}
 	}
 	in.reEnqueue(j, busyDeferDelay)
+}
+
+// maybeStaleEscalateOutbox raises exactly one coordinator-surface alert when a swept send
+// exceeds max-age or max-deferral (#477). Delivery continues after escalation.
+func (in *Injector) maybeStaleEscalateOutbox(j *Job, entry *outbox.Entry, now time.Time) {
+	if !outbox.ShouldStaleEscalate(*entry, now) {
+		return
+	}
+	if in.outboxOwningCoordinator == nil || in.outboxCoordinatorEscalate == nil {
+		return
+	}
+	coord := in.outboxOwningCoordinator(j.Sender)
+	if coord == "" {
+		return
+	}
+	claimKey := outbox.StaleClaimKey(j.Sender, j.MessageID)
+	msg := outbox.StaleEscalationMessage(*entry, now)
+	escalate := in.outboxCoordinatorEscalate
+	// Off-worker: never Enqueue synchronously from the injector worker (#477 P1 deadlock).
+	time.AfterFunc(0, func() { escalate(coord, msg, claimKey) })
 }
 
 // maybeStaleEscalateRelay raises the initial QUEUED alert (including replayed jobs whose

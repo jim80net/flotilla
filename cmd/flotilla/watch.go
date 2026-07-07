@@ -23,6 +23,7 @@ import (
 	"github.com/jim80net/flotilla/internal/idlehold"
 	"github.com/jim80net/flotilla/internal/inbound"
 	"github.com/jim80net/flotilla/internal/launch"
+	"github.com/jim80net/flotilla/internal/outbox"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/stranded"
 	"github.com/jim80net/flotilla/internal/surface"
@@ -286,6 +287,12 @@ func cmdWatch(args []string) error {
 	injector.SetEscalate(alert)
 	injector.SetRelayQueue(*queuePath)
 	injector.SetRosterDir(rosterDir)
+	injector.SetOutboxStaleEscalate(
+		func(sender string) string { return cfg.OwningXO(sender, xo) },
+		func(coordinator, msg, claimKey string) {
+			injector.Enqueue(watch.Job{Agent: coordinator, Message: msg, Kind: watch.KindDetector, ClaimKey: claimKey})
+		},
+	)
 	outboxSweeper := watch.NewOutboxSweeper(rosterDir, injector.Enqueue)
 	injector.SetSendDelivered(func(sender, recipient, message string) {
 		mirrorSendToLedger(cfg, sender, recipient, message)
@@ -587,6 +594,12 @@ func cmdWatch(args []string) error {
 		decisionBriefTracker := decisionbrief.LoadTracker(decisionBriefClaimsPath)
 		injector.SetDetectorClaimHooks(
 			func(key string) {
+				if sender, entryID, ok := outbox.ParseStaleClaimKey(key); ok {
+					if err := outbox.MarkStaleEscalated(rosterDir, sender, entryID); err != nil {
+						log.Printf("flotilla watch: outbox stale confirm %s/%s failed: %v", sender, entryID, err)
+					}
+					return
+				}
 				if recipient, entryID, ok := inbound.ParseReinjectClaimKey(key); ok {
 					if err := inbound.MarkReinjectDelivered(rosterDir, recipient, entryID); err != nil {
 						log.Printf("flotilla watch: inbound reinject confirm %s/%s failed: %v", recipient, entryID, err)
