@@ -153,6 +153,11 @@ type DetectorConfig struct {
 	// trigger as MirrorOnFinish). Detects turn-finals that settle gate work without
 	// reporting to the gate-holder and injects a break prompt. Default nil ⇒ inert.
 	StrandedHandoffOnFinish func(agent string)
+	// DroppedDispatchOnFinish is the confirmed-but-unaddressed dispatch side-effect (#472):
+	// invoked once per desk finish (same Working→Idle trigger). Compares turn-final against
+	// recipient-side inbound pending dispatches; reinjects once then escalates to sender.
+	// Default nil ⇒ inert until wired from cmd/flotilla/watch.go.
+	DroppedDispatchOnFinish func(agent string)
 	// DecisionBriefOnTick is the auto decision-brief side-effect (#349 item D): invoked
 	// once per detector tick (off d.mu, optionally async via MirrorDispatch). The caller
 	// scans the goals file for operator-gated items missing a brief and dispatches the
@@ -894,7 +899,7 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors, co
 	// like the wakes, OUTSIDE d.mu — a slow transcript read or Discord post must never stall the tick
 	// loop or block OperatorWake. The closure is observe-only + best-effort (it absorbs its own
 	// failures); the detector only fires the trigger.
-	if len(mirrors) > 0 && (d.cfg.MirrorOnFinish != nil || d.cfg.IdleHoldOnFinish != nil || d.cfg.StrandedHandoffOnFinish != nil) {
+	if len(mirrors) > 0 && (d.cfg.MirrorOnFinish != nil || d.cfg.IdleHoldOnFinish != nil || d.cfg.StrandedHandoffOnFinish != nil || d.cfg.DroppedDispatchOnFinish != nil) {
 		run := func() {
 			for _, agent := range mirrors {
 				if d.cfg.MirrorOnFinish != nil {
@@ -905,6 +910,9 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors, co
 				}
 				if d.cfg.StrandedHandoffOnFinish != nil {
 					d.strandedHandoffOne(agent)
+				}
+				if d.cfg.DroppedDispatchOnFinish != nil {
+					d.droppedDispatchOne(agent)
 				}
 			}
 		}
@@ -1059,6 +1067,17 @@ func (d *Detector) strandedHandoffOne(agent string) {
 		}
 	}()
 	d.cfg.StrandedHandoffOnFinish(agent)
+}
+
+// droppedDispatchOne invokes the #472 dropped-dispatch side-effect with the same recover()
+// backstop as mirrorOne.
+func (d *Detector) droppedDispatchOne(agent string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("flotilla watch: dropped-dispatch break panicked for %q (recovered; tick unaffected): %v", agent, r)
+		}
+	}()
+	d.cfg.DroppedDispatchOnFinish(agent)
 }
 
 // delegationNudgeOne invokes the coordinator delegation nudge with the same recover()
