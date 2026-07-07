@@ -2,29 +2,29 @@ package roster
 
 import "testing"
 
-// fleetShapeFixture mirrors the live federation shape implicated in #491 (generic roles only).
+// fleetShapeFixture mirrors the federation topology implicated in #491 using generic roles.
 const fleetShapeFixture = `{
-  "operator_user_id":"U","xo_agent":"cos","cos_agent":"cos",
+  "operator_user_id":"U","xo_agent":"meta-xo","cos_agent":"meta-xo",
   "agents":[
-    {"name":"cos"},{"name":"family-office"},{"name":"memex"},
-    {"name":"inventrise-xo"},{"name":"inventrise-build"},
-    {"name":"flotilla-dev"},{"name":"flotilla-dash"},
-    {"name":"macro-desk-dev"},{"name":"grok-research"},{"name":"codex-harness-dev"},{"name":"codex-memex-dev"},
-    {"name":"opencode-trial-xo"}
+    {"name":"meta-xo"},{"name":"venture-a-xo"},{"name":"venture-b-xo"},
+    {"name":"venture-c-xo"},{"name":"venture-c-build"},
+    {"name":"product-skill-dev"},{"name":"dash-desk"},
+    {"name":"macro-desk"},{"name":"research-desk"},{"name":"harness-desk"},{"name":"memex-desk"},
+    {"name":"trial-xo"}
   ],
   "channels":[
-    {"channel_id":"C_CMD","xo_agent":"cos","role":"fleet-command","members":["flotilla-dev","flotilla-dash","family-office","inventrise-xo"]},
-    {"channel_id":"C_FO","xo_agent":"family-office","members":["cos"]},
-    {"channel_id":"C_FDEV","xo_agent":"flotilla-dev","members":["cos"]},
-    {"channel_id":"C_FDEV_SOLO","xo_agent":"flotilla-dev"},
-    {"channel_id":"C_FDASH","xo_agent":"flotilla-dash","members":["flotilla-dev"]},
-    {"channel_id":"C_MACRO","xo_agent":"macro-desk-dev","members":["family-office"]},
-    {"channel_id":"C_GROK","xo_agent":"grok-research","members":["family-office"]},
-    {"channel_id":"C_MEMEX","xo_agent":"memex","members":["cos"]},
-    {"channel_id":"C_HARNESS","xo_agent":"codex-harness-dev","members":["cos"]},
-    {"channel_id":"C_CMEMEX","xo_agent":"codex-memex-dev","members":["cos","memex"]},
-    {"channel_id":"C_INV","xo_agent":"inventrise-xo","members":["cos","inventrise-xo","inventrise-build"]},
-    {"channel_id":"C_OTRIAL","xo_agent":"opencode-trial-xo","members":["cos","flotilla-dev"]}
+    {"channel_id":"C_CMD","xo_agent":"meta-xo","role":"fleet-command","members":["product-skill-dev","dash-desk","venture-a-xo","venture-c-xo"]},
+    {"channel_id":"C_VA","xo_agent":"venture-a-xo","members":["meta-xo"]},
+    {"channel_id":"C_PSKILL","xo_agent":"product-skill-dev","members":["meta-xo"]},
+    {"channel_id":"C_PSKILL_SOLO","xo_agent":"product-skill-dev"},
+    {"channel_id":"C_DASH","xo_agent":"dash-desk","members":["product-skill-dev"]},
+    {"channel_id":"C_MACRO","xo_agent":"macro-desk","members":["venture-a-xo"]},
+    {"channel_id":"C_RESEARCH","xo_agent":"research-desk","members":["venture-a-xo"]},
+    {"channel_id":"C_VB","xo_agent":"venture-b-xo","members":["meta-xo"]},
+    {"channel_id":"C_HARNESS","xo_agent":"harness-desk","members":["meta-xo"]},
+    {"channel_id":"C_MEMEX","xo_agent":"memex-desk","members":["meta-xo","venture-b-xo"]},
+    {"channel_id":"C_VC","xo_agent":"venture-c-xo","members":["meta-xo","venture-c-xo","venture-c-build"]},
+    {"channel_id":"C_TRIAL","xo_agent":"trial-xo","members":["meta-xo","product-skill-dev"]}
   ]
 }`
 
@@ -34,13 +34,13 @@ func TestCoordinatorSet_FleetShape491(t *testing.T) {
 		t.Fatal(err)
 	}
 	set := cfg.CoordinatorSet()
-	want := map[string]bool{"cos": true, "family-office": true, "memex": true, "inventrise-xo": true}
+	want := map[string]bool{"meta-xo": true, "venture-a-xo": true, "venture-b-xo": true, "venture-c-xo": true}
 	for coord := range want {
 		if !set[coord] {
 			t.Errorf("CoordinatorSet missing coordinator %q (set=%v)", coord, set)
 		}
 	}
-	for _, desk := range []string{"flotilla-dev", "codex-harness-dev", "codex-memex-dev", "flotilla-dash", "macro-desk-dev"} {
+	for _, desk := range []string{"product-skill-dev", "harness-desk", "memex-desk", "dash-desk", "macro-desk"} {
 		if cfg.IsCoordinator(desk) {
 			t.Errorf("execution desk %q must NOT be coordinator (span=%v)", desk, cfg.hasSpanOfControl(desk))
 		}
