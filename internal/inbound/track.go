@@ -30,7 +30,8 @@ type Action struct {
 	Escalate bool // notify dispatching coordinator (sender)
 }
 
-// Tracker holds per-recipient pending inbound dispatches (in-memory; durable sidecar TBD).
+// Tracker holds per-recipient pending inbound dispatches in memory (tests and multi-desk
+// sketches). Production wiring uses Store per recipient (#472 step 1).
 type Tracker struct {
 	mu      sync.Mutex
 	pending map[string][]Entry // recipient → oldest-first
@@ -115,8 +116,17 @@ func (t *Tracker) OnFinish(recipient, turnFinal string) []Action {
 	if len(list) == 0 {
 		return nil
 	}
-	var actions []Action
-	remaining := list[:0]
+	actions, remaining := evaluateFinish(list, turnFinal)
+	if len(remaining) == 0 {
+		delete(t.pending, recipient)
+	} else {
+		t.pending[recipient] = remaining
+	}
+	return actions
+}
+
+// evaluateFinish is the shared finish-edge policy for Tracker and Store.
+func evaluateFinish(list []Entry, turnFinal string) (actions []Action, remaining []Entry) {
 	for _, e := range list {
 		if Acknowledged(turnFinal, e) {
 			continue
@@ -129,12 +139,7 @@ func (t *Tracker) OnFinish(recipient, turnFinal string) []Action {
 		actions = append(actions, Action{Entry: e, Reinject: true})
 		remaining = append(remaining, e)
 	}
-	if len(remaining) == 0 {
-		delete(t.pending, recipient)
-	} else {
-		t.pending[recipient] = remaining
-	}
-	return actions
+	return actions, remaining
 }
 
 // Pending returns a copy of pending entries for recipient (tests).
