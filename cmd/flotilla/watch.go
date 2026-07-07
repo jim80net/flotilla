@@ -285,6 +285,12 @@ func cmdWatch(args []string) error {
 	injector.SetEscalate(alert)
 	injector.SetRelayQueue(*queuePath)
 	injector.SetRosterDir(rosterDir)
+	injector.SetOutboxStaleEscalate(
+		func(sender string) string { return cfg.OwningXO(sender, xo) },
+		func(coordinator, msg string) {
+			injector.Enqueue(watch.Job{Agent: coordinator, Message: msg, Kind: watch.KindDetector})
+		},
+	)
 	outboxSweeper := watch.NewOutboxSweeper(rosterDir, injector.Enqueue)
 	injector.SetSendDelivered(func(sender, recipient, message string) {
 		mirrorSendToLedger(cfg, sender, recipient, message)

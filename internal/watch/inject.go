@@ -92,6 +92,8 @@ type Job struct {
 	enqueuedAt time.Time
 	// lastStaleAlert is when the last periodic stale escalation fired. Internal.
 	lastStaleAlert time.Time
+	// lastStaleEscalation is when the one-shot coordinator escalation fired for KindSend (#477).
+	lastStaleEscalation time.Time
 	// Sender is the originating agent for KindSend jobs (keys the per-sender outbox file).
 	Sender string
 	// ClaimKey is the decision-brief gap key for KindDetector jobs; the watch daemon sets it
@@ -131,8 +133,10 @@ type Injector struct {
 	onSend            func(sender, recipient, message string) // optional: post-confirm hook for swept sends (ledger)
 	onOutboxDone      func(sender, id string)                 // optional: clear in-flight sweep guard (#475)
 	onDetectorConfirm func(claimKey string)                   // optional: durable claim after confirmed detector delivery (#365)
-	onDetectorAbort   func(claimKey string)                   // optional: release in-memory claim on busy drop / failure (#365)
-	now               func() time.Time                        // clock for stale escalation; nil ⇒ time.Now()
+	onDetectorAbort          func(claimKey string)                   // optional: release in-memory claim on busy drop / failure (#365)
+	now                      func() time.Time                        // clock for stale escalation; nil ⇒ time.Now()
+	outboxOwningCoordinator  func(sender string) string              // optional: sender → coordinator for stale outbox (#477)
+	outboxCoordinatorEscalate func(coordinator, msg string)          // optional: enqueue to coordinator surface (#436/#477)
 }
 
 // SetRelaySend installs a distinct send path for RELAY-kind jobs (the operator-message kind), used to
@@ -174,6 +178,14 @@ func (in *Injector) SetOutboxDone(fn func(sender, id string)) { in.onOutboxDone 
 func (in *Injector) SetDetectorClaimHooks(confirm, abort func(claimKey string)) {
 	in.onDetectorConfirm = confirm
 	in.onDetectorAbort = abort
+}
+
+// SetOutboxStaleEscalate wires the one-shot coordinator-surface escalation for undeliverable
+// swept sends (#477, #436). owningCoordinator resolves the sender's coordinator; escalate
+// delivers the message (typically a KindDetector enqueue). nil hooks ⇒ no escalation.
+func (in *Injector) SetOutboxStaleEscalate(owningCoordinator func(sender string) string, escalate func(coordinator, msg string)) {
+	in.outboxOwningCoordinator = owningCoordinator
+	in.outboxCoordinatorEscalate = escalate
 }
 
 // NewInjector builds an injector with the given send function and queue buffer.
@@ -345,14 +357,35 @@ func (in *Injector) handleBusy(j Job, cause error) {
 		in.maybeStaleEscalateRelay(&j, now)
 		in.queue.upsert(j)
 	} else if j.Kind == KindSend && j.MessageID != "" && j.Sender != "" && in.rosterDir != "" {
+		entry := outbox.Entry{
+			ID: j.MessageID, Sender: j.Sender, Recipient: j.Agent, Message: j.Message,
+			Deferrals: j.deferrals, EnqueuedAt: j.enqueuedAt,
+			LastStaleEscalation: j.lastStaleEscalation,
+		}
+		in.maybeStaleEscalateOutbox(&j, &entry, now)
 		if path, err := outbox.Path(in.rosterDir, j.Sender); err == nil {
-			outbox.NewStore(path).Upsert(outbox.Entry{
-				ID: j.MessageID, Sender: j.Sender, Recipient: j.Agent, Message: j.Message,
-				Deferrals: j.deferrals, EnqueuedAt: j.enqueuedAt,
-			})
+			outbox.NewStore(path).Upsert(entry)
 		}
 	}
 	in.reEnqueue(j, busyDeferDelay)
+}
+
+// maybeStaleEscalateOutbox raises exactly one coordinator-surface alert when a swept send
+// exceeds max-age or max-deferral (#477). Delivery continues after escalation.
+func (in *Injector) maybeStaleEscalateOutbox(j *Job, entry *outbox.Entry, now time.Time) {
+	if !outbox.ShouldStaleEscalate(*entry, now) {
+		return
+	}
+	if in.outboxOwningCoordinator == nil || in.outboxCoordinatorEscalate == nil {
+		return
+	}
+	coord := in.outboxOwningCoordinator(j.Sender)
+	if coord == "" {
+		return
+	}
+	in.outboxCoordinatorEscalate(coord, outbox.StaleEscalationMessage(*entry, now))
+	entry.LastStaleEscalation = now
+	j.lastStaleEscalation = now
 }
 
 // maybeStaleEscalateRelay raises the initial QUEUED alert (including replayed jobs whose

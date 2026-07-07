@@ -20,12 +20,13 @@ import (
 
 // Entry is one pending inter-agent send keyed by ID within the sender's outbox file.
 type Entry struct {
-	ID         string    `json:"id"`
-	Sender     string    `json:"sender"`
-	Recipient  string    `json:"recipient"`
-	Message    string    `json:"message"`
-	Deferrals  int       `json:"deferrals"`
-	EnqueuedAt time.Time `json:"enqueued_at"`
+	ID                  string    `json:"id"`
+	Sender              string    `json:"sender"`
+	Recipient           string    `json:"recipient"`
+	Message             string    `json:"message"`
+	Deferrals           int       `json:"deferrals"`
+	EnqueuedAt          time.Time `json:"enqueued_at"`
+	LastStaleEscalation time.Time `json:"last_stale_escalation,omitempty"` // exactly-once coordinator alert (#477)
 }
 
 type file struct {
@@ -86,7 +87,8 @@ func (s Store) Load() []Entry {
 	return out
 }
 
-// Upsert persists an entry when new or materially changed (not deferrals-only bumps).
+// Upsert persists an entry when new or materially changed. Deferral bumps and stale-escalation
+// markers are persisted (#477) — the aging seam for #472 integration.
 // The read-modify-write runs under a cross-process flock so CLI Enqueue and watch Remove
 // cannot lost-update each other (#475 P1).
 func (s Store) Upsert(e Entry) {
@@ -205,6 +207,12 @@ func entryMateriallyChanged(prev, next Entry) bool {
 		return true
 	}
 	if !prev.EnqueuedAt.Equal(next.EnqueuedAt) {
+		return true
+	}
+	if prev.Deferrals != next.Deferrals {
+		return true
+	}
+	if prev.LastStaleEscalation != next.LastStaleEscalation {
 		return true
 	}
 	return false

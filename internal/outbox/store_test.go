@@ -47,19 +47,18 @@ func TestEnqueueCreatesEntry(t *testing.T) {
 	}
 }
 
-func TestUpsertSkipsDeferralsOnlyBump(t *testing.T) {
+func TestUpsertPersistsDeferralsBump(t *testing.T) {
 	dir := t.TempDir()
 	path, _ := Path(dir, "xo")
 	s := NewStore(path)
 	base := time.Date(2026, 7, 6, 5, 0, 0, 0, time.UTC)
 	e := Entry{ID: "1", Sender: "xo", Recipient: "cos", Message: "hi", Deferrals: 1, EnqueuedAt: base}
 	s.Upsert(e)
-	afterFirst, _ := os.ReadFile(path)
 	e.Deferrals = 99
 	s.Upsert(e)
-	afterSecond, _ := os.ReadFile(path)
-	if string(afterFirst) != string(afterSecond) {
-		t.Fatalf("deferrals-only bump rewrote file\nfirst:  %s\nsecond: %s", afterFirst, afterSecond)
+	got := s.Load()
+	if len(got) != 1 || got[0].Deferrals != 99 {
+		t.Fatalf("deferrals bump must persist, got %+v", got)
 	}
 }
 
