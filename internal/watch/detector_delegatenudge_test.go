@@ -85,7 +85,7 @@ func TestDetectorDelegationNudgeProjectXOOnly(t *testing.T) {
 func TestDetectorDelegationNudgeSkipsDeclassifiedDesk491(t *testing.T) {
 	rosterBody := `{
 	  "operator_user_id":"U","xo_agent":"cos","cos_agent":"cos",
-	  "agents":[{"name":"cos"},{"name":"product-skill-dev"},{"name":"dash-desk"}],
+	  "agents":[{"name":"cos"},{"name":"product-skill-dev","coordinator":false},{"name":"dash-desk"}],
 	  "channels":[
 	    {"channel_id":"C_CMD","xo_agent":"cos","role":"fleet-command","members":["product-skill-dev","dash-desk"]},
 	    {"channel_id":"C_PSKILL","xo_agent":"product-skill-dev","members":["cos"]},

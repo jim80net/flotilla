@@ -49,6 +49,12 @@ type Agent struct {
 	AdjutantFor string `json:"adjutant_for,omitempty"`
 	// AssistantFor is the legacy alias for adjutant_for (same semantics).
 	AssistantFor string `json:"assistant_for,omitempty"`
+	// Coordinator declares rank explicitly (#491): when set, IsCoordinator uses this
+	// value instead of inferring span from channel membership. Pointer-with-omitempty
+	// so absent means infer (backward compatible); false opts an execution desk OUT
+	// even when supervisor-as-member topology would confer span; true opts a seat IN.
+	// The primary xo_agent and cos_agent cannot set coordinator:false (load rejects).
+	Coordinator *bool `json:"coordinator,omitempty"`
 }
 
 // Title returns the tmux pane title to match for this agent.
@@ -277,6 +283,11 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("roster %q: agents share tmux title %q (would misroute delivery)", path, a.Title())
 		}
 		seenTitle[a.Title()] = true
+		if a.Coordinator != nil && !*a.Coordinator {
+			if a.Name == c.XOAgent || a.Name == c.CosAgent {
+				return nil, fmt.Errorf("roster %q: agent %q cannot set coordinator:false (primary xo_agent or cos_agent)", path, a.Name)
+			}
+		}
 	}
 	// watch-capability fields: validate at load so a misconfigured daemon
 	// refuses to start rather than failing silently at the first tick.
@@ -534,84 +545,13 @@ func (c *Config) hasSpanOfControl(name string) bool {
 		if !c.channelIsSupervisorObserverHome(ch) {
 			continue
 		}
-		if c.spanFromSupervisorObserverMember(name, ch) {
-			return true
-		}
-	}
-	return false
-}
-
-// spanFromSupervisorObserverMember reports whether name — an XO listed as member on a
-// supervisor-as-member desk channel (#481) — genuinely supervises that desk for span (#491).
-// Fleet-command membership disambiguates execution desks (command targets on the broadcast
-// channel who also appear on a peer dash/harness desk) from venture coordinators: a sole
-// supervisor link between two fleet-command members does not confer span unless the
-// coordinator already supervises two or more such desks; cos+XO desk channels confer span
-// only when the XO is not itself a fleet-command member (the memex-lane shape).
-func (c *Config) spanFromSupervisorObserverMember(name string, ch Channel) bool {
-	var nonSelf []string
-	for _, m := range ch.Members {
-		if m != ch.XOAgent {
-			nonSelf = append(nonSelf, m)
-		}
-	}
-	if len(nonSelf) == 0 {
-		return false
-	}
-	cos := c.CosAgent
-	if cos == "" {
-		cos = c.XOAgent
-	}
-	if cos != "" && memberOf(nonSelf, cos) && memberOf(nonSelf, name) && len(nonSelf) >= 2 {
-		return !c.fleetCommandMember(name)
-	}
-	if len(nonSelf) == 1 && nonSelf[0] == name {
-		if c.supervisorObserverSoleMemberChannels(name) >= 2 {
-			return true
-		}
-		if c.fleetCommandMember(name) && c.fleetCommandMember(ch.XOAgent) {
-			return false
-		}
-		return true
-	}
-	return false
-}
-
-// fleetCommandMember reports whether name is listed on the fleet-command broadcast channel.
-func (c *Config) fleetCommandMember(name string) bool {
-	for _, ch := range c.Bindings() {
-		if ch.IsFleetCommand() && memberOf(ch.Members, name) {
-			return true
-		}
-	}
-	return false
-}
-
-// supervisorObserverSoleMemberChannels counts desk channels where name is the only
-// non-self XO supervision observer (#481 sole-supervisor shape).
-func (c *Config) supervisorObserverSoleMemberChannels(name string) int {
-	n := 0
-	for _, ch := range c.Bindings() {
-		if ch.XOAgent == name || ch.XOAgent == "" {
-			continue
-		}
-		if ch.XOAgent == c.XOAgent || ch.XOAgent == c.CosAgent {
-			continue
-		}
-		if !c.channelIsSupervisorObserverHome(ch) {
-			continue
-		}
-		var nonSelf []string
 		for _, m := range ch.Members {
-			if m != ch.XOAgent {
-				nonSelf = append(nonSelf, m)
+			if m == name {
+				return true
 			}
 		}
-		if len(nonSelf) == 1 && nonSelf[0] == name {
-			n++
-		}
 	}
-	return n
+	return false
 }
 
 // channelIsSupervisorObserverHome reports the desk-home shape (#481): every non-self member
@@ -631,9 +571,11 @@ func (c *Config) channelIsSupervisorObserverHome(ch Channel) bool {
 }
 
 // IsCoordinator reports whether name holds a coordinator role — the primary xo_agent,
-// the chief-of-staff (cos_agent), or a binding xo_agent with span of control > 0
-// (at least one channel member besides itself; #460). IsXO is broader (any channel
-// owner); use IsCoordinator for delegation-nudge (#232) and coordinator doctrine.
+// the chief-of-staff (cos_agent), an agent with coordinator:true, or (when unset) a
+// binding xo_agent with inferred span of control (#460, #481). Explicit coordinator:false
+// opts an execution desk out even when supervisor-as-member topology would confer span
+// (#491). IsXO is broader (any channel owner); use IsCoordinator for delegation-nudge
+// (#232) and coordinator doctrine.
 func (c *Config) IsCoordinator(name string) bool {
 	if name == "" {
 		return false
@@ -644,27 +586,20 @@ func (c *Config) IsCoordinator(name string) bool {
 	if c.CosAgent != "" && name == c.CosAgent {
 		return true
 	}
+	if a, err := c.Agent(name); err == nil && a.Coordinator != nil {
+		return *a.Coordinator
+	}
 	return c.hasSpanOfControl(name)
 }
 
 // CoordinatorSet returns EVERY coordinator agent (each name for which IsCoordinator is true) —
-// the primary XO, the CoS, and every binding XO with span of control — computed in a SINGLE
-// pass. Callers that classify MANY agents (e.g. the dash rail's Fleet Command grouping) use
-// this instead of IsCoordinator-per-agent, which re-scans the bindings on each call (O(n²)
-// over a member list). The returned map is the caller's to keep.
+// computed in a SINGLE pass. Callers that classify MANY agents (e.g. the dash rail's Fleet
+// Command grouping) use this instead of IsCoordinator-per-agent, which re-scans the bindings
+// on each call (O(n²) over a member list). The returned map is the caller's to keep.
 func (c *Config) CoordinatorSet() map[string]bool {
 	set := make(map[string]bool)
-	if c.XOAgent != "" {
-		set[c.XOAgent] = true
-	}
-	if c.CosAgent != "" {
-		set[c.CosAgent] = true
-	}
 	for _, a := range c.Agents {
-		if set[a.Name] {
-			continue
-		}
-		if c.hasSpanOfControl(a.Name) {
+		if c.IsCoordinator(a.Name) {
 			set[a.Name] = true
 		}
 	}

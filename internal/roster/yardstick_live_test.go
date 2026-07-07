@@ -30,6 +30,9 @@ func TestCoordinatorYardstick_LiveRoster(t *testing.T) {
 		if desk == "" {
 			continue
 		}
+		if _, err := cfg.Agent(desk); err != nil {
+			t.Fatalf("victim %q is not in roster — fix FLOTILLA_YARDSTICK_VICTIMS typo", desk)
+		}
 		if cfg.IsCoordinator(desk) {
 			t.Errorf("execution desk %q must NOT be coordinator (span=%v set=%v)", desk, cfg.hasSpanOfControl(desk), set)
 		}
