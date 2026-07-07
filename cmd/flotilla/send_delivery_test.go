@@ -5,11 +5,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/inbound"
 	"github.com/jim80net/flotilla/internal/outbox"
+	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
+	"github.com/jim80net/flotilla/internal/watch"
 )
 
 func TestNextSendRetryWait(t *testing.T) {
@@ -49,5 +53,75 @@ func TestBouncedSendLandsInOutbox(t *testing.T) {
 	}
 	if got[0].EnqueuedAt.IsZero() {
 		t.Fatal("enqueued_at must be set")
+	}
+}
+
+// Acceptance (#494): CLI direct-delivery success writes the inbound ledger (not injector-only).
+func TestCLIDirectDeliveryTracksInboundE2E(t *testing.T) {
+	dir := t.TempDir()
+	rosterPath := filepath.Join(dir, "flotilla.json")
+	if err := os.WriteFile(rosterPath, []byte(`{
+		"xo_agent":"cos",
+		"agents":[
+			{"name":"cos"},
+			{"name":"memex"},
+			{"name":"codex-harness-dev"}
+		],
+		"channels":[{"channel_id":"1","xo_agent":"cos","members":["codex-harness-dev"]}]
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := roster.Load(rosterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	msg, nonce, err := inbound.AppendDispatchNonce("continue dispatch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordDirectInboundTrack(cfg, rosterPath, "memex", "codex-harness-dev", msg)
+
+	path, err := inbound.Path(dir, "codex-harness-dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := inbound.NewStore(path).Load()
+	if len(got) != 1 || got[0].Nonce != nonce || got[0].Sender != "memex" {
+		t.Fatalf("inbound ledger = %+v, want memex dispatch with nonce %q", got, nonce)
+	}
+
+	var reinjected []watch.Job
+	hook := watch.DroppedDispatchFinishHook(dir, func(string) (string, bool, error) {
+		return "done without nonce echo", true, nil
+	}, func(j watch.Job) { reinjected = append(reinjected, j) }, nil)
+	hook("codex-harness-dev")
+
+	if len(reinjected) != 1 {
+		t.Fatalf("miss without nonce echo: want 1 reinject, got %d", len(reinjected))
+	}
+	if !strings.Contains(reinjected[0].Message, "dropped-dispatch resume") {
+		t.Fatalf("reinject message = %q", reinjected[0].Message)
+	}
+}
+
+func TestCLIDirectDeliverySkipsCoordinatorInbound(t *testing.T) {
+	dir := t.TempDir()
+	rosterPath := filepath.Join(dir, "flotilla.json")
+	if err := os.WriteFile(rosterPath, []byte(`{"xo_agent":"cos","agents":[{"name":"cos"},{"name":"memex"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := roster.Load(rosterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, _, err := inbound.AppendDispatchNonce("nudge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordDirectInboundTrack(cfg, rosterPath, "memex", "cos", msg)
+	path, _ := inbound.Path(dir, "cos")
+	if len(inbound.NewStore(path).Load()) != 0 {
+		t.Fatal("coordinator inbound must not be tracked on CLI path")
 	}
 }

@@ -7,12 +7,8 @@ import (
 	"github.com/jim80net/flotilla/internal/inbound"
 )
 
-// CoordinatorPredicate reports whether an agent is a coordinator seat (inbound finish
-// evaluation runs on execution desks only — tracking coordinators would grow unbounded).
-type CoordinatorPredicate func(agent string) bool
-
 // InboundTrackHook records a confirmed KindSend into the recipient's durable inbound ledger.
-func InboundTrackHook(rosterDir string, isCoordinator CoordinatorPredicate) func(Job) {
+func InboundTrackHook(rosterDir string, isCoordinator inbound.CoordinatorPredicate) func(Job) {
 	if rosterDir == "" {
 		return nil
 	}
@@ -20,30 +16,7 @@ func InboundTrackHook(rosterDir string, isCoordinator CoordinatorPredicate) func
 		if j.Kind != KindSend || j.Sender == "" || j.Agent == "" || j.Message == "" {
 			return
 		}
-		if isCoordinator != nil && isCoordinator(j.Agent) {
-			return
-		}
-		nonce := inbound.ParseDispatchNonce(j.Message)
-		if nonce == "" {
-			var err error
-			nonce, err = inbound.NewNonce()
-			if err != nil {
-				log.Printf("flotilla watch: inbound track %q: generate nonce: %v", j.Agent, err)
-				return
-			}
-		}
-		id := j.MessageID
-		if id == "" {
-			var err error
-			id, err = inbound.NewID()
-			if err != nil {
-				log.Printf("flotilla watch: inbound track %q: generate id: %v", j.Agent, err)
-				return
-			}
-		}
-		if err := inbound.Record(rosterDir, inbound.Entry{
-			ID: id, Sender: j.Sender, Recipient: j.Agent, Message: j.Message, Nonce: nonce,
-		}); err != nil {
+		if err := inbound.TrackConfirmedSend(rosterDir, j.Sender, j.Agent, j.Message, j.MessageID, isCoordinator); err != nil {
 			log.Printf("flotilla watch: inbound track %q from %q failed: %v", j.Agent, j.Sender, err)
 		}
 	}

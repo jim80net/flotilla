@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/deliver"
+	"github.com/jim80net/flotilla/internal/inbound"
 	"github.com/jim80net/flotilla/internal/outbox"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
@@ -91,6 +92,15 @@ func nextSendRetryWait(cur time.Duration) time.Duration {
 	return next
 }
 
+// recordDirectInboundTrack writes the recipient inbound ledger on CLI direct-delivery success
+// (#494). Daemon-swept sends use the same primitive via InboundTrackHook on confirm.
+func recordDirectInboundTrack(cfg *roster.Config, rosterPath, sender, recipient, message string) {
+	rosterDir := filepath.Dir(rosterPath)
+	if err := inbound.TrackConfirmedSend(rosterDir, sender, recipient, message, "", cfg.IsCoordinator); err != nil {
+		fmt.Fprintf(os.Stderr, "flotilla: inbound track %q from %q failed: %v\n", recipient, sender, err)
+	}
+}
+
 func enqueueOrFailSend(rosterPath, sender, recipient, message string, deliveryErr error) error {
 	rosterDir := filepath.Dir(rosterPath)
 	id, err := outbox.Enqueue(rosterDir, sender, recipient, message)
@@ -109,6 +119,7 @@ func deliverOrQueueSend(cfg *roster.Config, rosterPath, sender, recipient string
 	if err == nil {
 		fmt.Printf("delivered to %s (pane %s) — turn confirmed\n", recipient, pane)
 		mirrorSendToLedger(cfg, sender, recipient, message)
+		recordDirectInboundTrack(cfg, rosterPath, sender, recipient, message)
 		return false, nil
 	}
 	var busy errRetryableBusy
