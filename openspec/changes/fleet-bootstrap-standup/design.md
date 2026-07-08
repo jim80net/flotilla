@@ -127,14 +127,19 @@ for bootstrap/standup.
 
 #### Protected windows — adjutant MUST NOT interject to leader
 
-| Window | Signal (implementer) | Adjutant behavior |
+**Mechanical enforcement (load-bearing):** Protected-window suppression MUST be implemented in
+watch (`OperatorProtectedWindow` gate before `drainAdjutantSeamFor`) — not prompt-contract alone.
+Full detection sources, fail-safe, tests, goal-loop composition:
+`openspec/changes/adjutant-operator-protected-window/`.
+
+| Window | Mechanical signal (v1) | Adjutant behavior |
 |---|---|---|
-| **Operator typing** | Inbound relay queue pending / operator compose active in bound Discord channel | Buffer; no leader pane injection |
-| **Operator active conversation** | Recent confirmed operator→leader relay; leader thread has unanswered operator message | Buffer; no leader interject |
-| **Leader mid-compose** | Leader surface `Working`; composer not cleared; no seam edge | Buffer non-urgent items |
+| **Operator typing** | Pending `flotilla-relay-queue.json` entry for leader; optional dash bridge compose-active | Buffer; watch suppresses seam inject |
+| **Operator active conversation** | `flotilla-<leader>-awaiting` present; active-conversation tail after confirmed relay | Buffer; no leader interject |
+| **Leader mid-compose (non-operator)** | Leader `Working` without operator signals above | Buffer non-urgent; seam at idle/settled/evaluation TTL |
 
 These are **operator-typing / active-conversation** protected windows — distinct from
-**machine-idle seams** (below).
+**machine-idle seams** (below). Leader `Working` alone is **not** an operator protected window.
 
 #### Machine-idle seams — injection allowed
 
@@ -175,6 +180,12 @@ verifies adjutant bindings have `urgent_windows` documented when `adjutant_for` 
 
 Validation **V9** (when adjutant configured): non-urgent desk finish buffers; operator relay
 reaches leader without adjutant delay; urgent-class reason bypasses buffer per table above.
+
+Validation **V9c**: pending operator relay for leader ⇒ finish-edge seam does **not** inject
+adjutant consolidated brief to leader pane (buffer retained until window clears).
+
+Doctor **B011a**: when adjutant configured, verify watch build includes `OperatorProtectedWindow`
+seam gate (not prompt-only).
 
 ## 3. Naming convention — `{identifier}-{role}`
 
