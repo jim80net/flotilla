@@ -377,7 +377,7 @@ Handoff template addendum for rename chapter:
 
 ## 12. Planning desk charter
 
-**Seat:** `rename-rollout-plan` under **`ops-xo`** supervision (transient-task-desk or ops-adjutant),
+**Seat:** `rename-rollout-plan` under **`ops-xo`** supervision (transient-task-desk or `ops-adj`),
 not a product XO desk.
 
 **Inputs:** Operator rename enqueue notice, current roster export, sibling PRs #520/#521.
