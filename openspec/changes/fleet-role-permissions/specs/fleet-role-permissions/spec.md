@@ -78,6 +78,19 @@ requirement above.
 - **WHEN** an `adjutant` runs status inspection + buffer read + charter write within policy
 - **THEN** no harness approval modal SHALL appear for authorized adjutant flows
 
+#### Scenario: Adjutant laminar flow — no interject during operator window
+
+- **WHEN** the operator is typing or in active conversation with the adjutant's leader
+- **AND** a non-urgent material item arrives
+- **THEN** the adjutant SHALL buffer the item
+- **AND** SHALL NOT inject into the leader pane until a machine-idle seam
+
+#### Scenario: Adjutant urgent bypass
+
+- **WHEN** a material reason matches urgent class (money, irreversible, divergent fork,
+  incident/safety, officer incapacitation/usage-limit) or is operator relay
+- **THEN** the leader SHALL receive the item immediately, bypassing the adjutant buffer
+
 ### Requirement: Design criteria metadata consumer
 
 `policy.design_criteria` in canonical JSON SHALL be consumed by the permissions compiler and

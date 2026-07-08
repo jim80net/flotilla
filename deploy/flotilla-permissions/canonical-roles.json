@@ -88,8 +88,20 @@
         "flotilla.status",
         "fleet.state.r",
         "buffer.rw",
-        "tmux.inspect"
+        "tmux.inspect",
+        "laminar.seam_inject",
+        "laminar.no_interject_during_operator_window"
       ],
+      "urgent_bypass_classes": [
+        "money",
+        "irreversible",
+        "divergent_fork",
+        "incident_safety",
+        "officer_incapacitation",
+        "usage_limit",
+        "operator_relay"
+      ],
+      "_comment_laminar": "Behavioral contract in bootstrap §2.4 — permissions allow buffer/charter paths; seam policy enforced by watch adjutant buffer",
       "bash_allow": [
         "flotilla status*",
         "cat *flotilla-*-buffer.json*",

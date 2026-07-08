@@ -103,11 +103,20 @@ elevated (audited). `ops-xo` extends leadership with fleet-ops capabilities in c
 
 ### 2.2 Adjutant (separate tier — not leadership)
 
+**Laminar flow contract (operator product requirement):** Adjutants buffer non-urgent layer
+interrupts and inject at **machine-idle seams** only. They MUST NOT interject into the leader
+pane during **operator typing** or **operator↔leader active conversation** protected windows.
+Urgent bypass (skip buffer, leader immediate): money, irreversible, divergent fork,
+incident/safety, officer incapacitation/usage-limit, and operator relay. MUST NOT wait
+indefinitely for perfect idle during an active goal loop — evaluation tick applies. Full policy:
+bootstrap design §2.4 (PR #520) + `stackable-flotillas-438`.
+
 | Capability | Allow | Deny |
 |---|---|---|
 | Read fleet state + buffer sidecars | yes | secrets |
-| Mechanical triage, charter read/write | yes | `gh pr merge`, `flotilla notify` (unless explicitly delegated) |
-| Buffer append paths | via watch, not direct pane spam | merge-completing git |
+| Mechanical triage, charter read/write | yes | `gh pr merge`, `flotilla notify` to leader during protected window |
+| Buffer append paths | via watch, not direct leader pane spam | merge-completing git |
+| Seam injection | consolidated brief at idle/settled/evaluation tick | mid-thought interject |
 
 ### 2.3 Desk (execution + transient)
 

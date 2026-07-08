@@ -39,6 +39,9 @@ not casually absorb a half-specified permission story.
   `design.md`) — full heartbeat cycle, dispatch, gate, merge (reviewer seats), deploy, reap.
 - **Ops-xo boundary:** `ops-xo` accountable for fleet ops (bootstrap, permissions, rename);
   product XOs own implementation lanes only — provision `ops-xo` before implementation.
+- **Adjutant laminar flow:** buffer non-urgent; no interject during operator typing/active
+  conversation; urgent bypass (money/irreversible/fork/incident/incapacitation); no infinite
+  perfect-idle wait during goal loop (bootstrap §2.4).
 - Leadership (COS/meta-xo/ops-xo/product xo/adjutant): role-tier zero-prompt flows per §0.
 - Desks: lane-scoped; no merge-completing powers unless explicitly elevated.
 - **Safety without prompting:** role boundaries + no self-merge + lane scoping + audit + operator
