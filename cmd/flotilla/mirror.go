@@ -36,10 +36,12 @@ type deskMirror struct {
 	now func() time.Time
 	// ledgerAppend overrides sessionmirror.Append for tests; nil ⇒ the real append.
 	ledgerAppend func(rosterDir, agent string, rec sessionmirror.Record) error
-	// ledgerOnly skips Discord posting after the session-mirror ledger append. The primary
-	// clock XO uses CoordinatorMirrorOnFinish with ledgerOnly=true: the XO Stop hook already
-	// posts via flotilla notify — a second post would double-publish.
+	// ledgerOnly skips Discord posting after the session-mirror ledger append. Retained for
+	// tests; production coordinator mirrors post Discord + ledger (harness-agnostic).
 	ledgerOnly bool
+	// onDiscordSuccess is invoked after all Discord chunks post successfully with the
+	// reader-modeled body. Used by CoordinatorMirrorOnFinish to append the CoS ledger.
+	onDiscordSuccess func(agent, body string)
 }
 
 // run performs the mirror for one finished desk. It is OBSERVE-ONLY and BEST-EFFORT: it never
@@ -116,6 +118,9 @@ func (m deskMirror) run(agent string) {
 		m.logf("flotilla watch: mirror POST %s %d chunks resplen=%d %s", agent, n, runes, rmNote)
 	} else {
 		m.logf("flotilla watch: mirror POST %s %d chunks resplen=%d", agent, n, runes)
+	}
+	if m.onDiscordSuccess != nil {
+		m.onDiscordSuccess(agent, body)
 	}
 }
 

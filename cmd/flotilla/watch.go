@@ -745,7 +745,7 @@ func cmdWatch(args []string) error {
 				return surface.RotateContext(xoDrv, pane)
 			},
 			MirrorOnFinish:            deskMirrorOnFinish(cfg, secrets, tr, rosterDir),
-			CoordinatorMirrorOnFinish: coordinatorMirrorOnFinish(cfg, rosterDir),
+			CoordinatorMirrorOnFinish: coordinatorMirrorOnFinish(cfg, secrets, tr, *rosterPath, rosterDir),
 			AdjutantFor:               func(owner string) string { return cfg.AdjutantFor(owner) },
 			AdjutantSeamOnFinish:      drainAdjutantSeamFor,
 			IdleHoldOnFinish:          idleHoldOnFinish(cfg, idleHoldTracker, injector.Enqueue),
@@ -1487,20 +1487,34 @@ func readDeskTurnFinal(cfg *roster.Config, agent string) (text string, ok bool, 
 	return text, true, nil
 }
 
-// coordinatorMirrorOnFinish builds the detector's CoordinatorMirrorOnFinish side-effect for the
-// primary clock XO: ledger-only session-mirror append with readerModelInternal derivation. Discord
-// posting is deliberately omitted — the XO Stop hook (deploy/flotilla-xo-discord-mirror.sh) already
-// posts the turn-final via flotilla notify, and a second deskMirror post would double-publish.
-func coordinatorMirrorOnFinish(cfg *roster.Config, rosterDir string) func(agent string) {
-	if rosterDir == "" {
+// coordinatorMirrorOnFinish builds the detector's CoordinatorMirrorOnFinish side-effect for every
+// monitored coordinator: read turn-final via ResultReader, post Discord (chunked), append
+// session-mirror ledger, and best-effort CoS ledger. Harness-agnostic — does not rely on Claude
+// Stop hooks (Codex/Grok coordinators have none).
+func coordinatorMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr transport.Transport, rosterPath, rosterDir string) func(agent string) {
+	if secrets == nil || tr == nil {
 		return nil
 	}
 	return func(agent string) {
 		m := deskMirror{
-			ledgerOnly: true,
-			rosterDir:  rosterDir,
+			rosterDir: rosterDir,
+			webhook: func(a string) (string, bool) {
+				url, err := secrets.Webhook(a)
+				if err != nil || url == "" {
+					return "", false
+				}
+				return url, true
+			},
 			turnFinal: func(a string) (string, bool, error) {
 				return readDeskTurnFinal(cfg, a)
+			},
+			post: func(url, username, content string) error {
+				return tr.Post(transport.NewWebhookDestination(url), username, content)
+			},
+			onDiscordSuccess: func(from, body string) {
+				if rosterPath != "" {
+					mirrorNotifyToLedger(rosterPath, from, body)
+				}
 			},
 			logf: log.Printf,
 		}

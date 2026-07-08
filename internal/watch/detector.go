@@ -117,11 +117,11 @@ type DetectorConfig struct {
 	// runs in runTail, OUTSIDE d.mu, so a slow transcript read or Discord post can never stall the
 	// tick loop. It is OBSERVE-ONLY and BEST-EFFORT — the closure must never let a mirror failure
 	// affect the tick or delivery. Default nil ⇒ inert (no mirror; behavior byte-identical to before
-	// this change). The primary clock XO is deliberately excluded — it uses CoordinatorMirrorOnFinish.
+	// this change). Monitored coordinators are excluded — they use CoordinatorMirrorOnFinish.
 	MirrorOnFinish func(agent string)
-	// CoordinatorMirrorOnFinish is the primary-clock-XO visibility side-effect: invoked once when
-	// XOAgent completes Working→Idle (the coordinator finish hook). Project-XOs and execution desks
-	// use MirrorOnFinish instead. Same off-mutex / best-effort discipline. Default nil ⇒ inert.
+	// CoordinatorMirrorOnFinish is the coordinator visibility side-effect: invoked once when any
+	// monitored coordinator (IsCoordinator) completes Working→Idle. Execution desks use
+	// MirrorOnFinish instead. Same off-mutex / best-effort discipline. Default nil ⇒ inert.
 	CoordinatorMirrorOnFinish func(agent string)
 	// AdjutantFor reports the adjutant agent for a coordinator layer, or "" when none.
 	// Used with AdjutantSeamOnFinish for per-owner buffer drain (#438 stackable_wakes).
@@ -138,8 +138,9 @@ type DetectorConfig struct {
 	// Like MirrorOnFinish it runs in runTail OUTSIDE d.mu; default nil ⇒ inert.
 	IdleHoldOnFinish func(agent string)
 	// IsCoordinator reports whether an agent holds a coordinator role (any XO or CoS).
-	// Used by the delegation-nudge side-effect (#232). Default nil ⇒ no agent is a
-	// coordinator (the nudge never fires).
+	// Routes finish edges to CoordinatorMirrorOnFinish (#hard-coordinator-mirror) and
+	// powers the delegation-nudge side-effect (#232). Default nil ⇒ only XOAgent is a
+	// coordinator for mirror routing; nudge never fires.
 	IsCoordinator func(name string) bool
 	// DelegationNudgeOnFinish is the coordinator IC-ing side-effect (#232): invoked
 	// once for each coordinator that completed a unit of work this tick (Working→Idle),
@@ -1038,6 +1039,13 @@ func (d *Detector) mirrorOne(agent string) {
 
 // coordinatorMirrorOne invokes the primary-clock-XO mirror with the same recover()
 // backstop as mirrorOne.
+func (d *Detector) isCoordinatorForMirror(name string) bool {
+	if d.cfg.IsCoordinator != nil {
+		return d.cfg.IsCoordinator(name)
+	}
+	return name != "" && name == d.cfg.XOAgent
+}
+
 func (d *Detector) coordinatorMirrorOne(agent string) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -1189,15 +1197,16 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 		}
 	}
 
-	// 2b. Per-desk visibility mirror trigger: each NON-XO desk that completed a unit of work this
+	// 2b. Per-desk visibility mirror trigger: each execution desk that completed a unit of work this
 	//     tick (a confirmed Working→Idle transition) is recorded for the post-unlock tail to mirror
-	//     to its home channel. Computed UNDER the lock from the same debounced states the diff uses,
-	//     but emitted OUTSIDE d.mu in runTail. This is reached only past the cold-start early-return
-	//     above, so the cold-start baseline emits NO mirrors (a desk that was already Idle when the
-	//     detector booted has not "finished a turn"). The XO is excluded — it has its own mirror.
+	//     to its home channel. Monitored coordinators use CoordinatorMirrorOnFinish instead.
+	//     Computed UNDER the lock from the same debounced states the diff uses, but emitted OUTSIDE
+	//     d.mu in runTail. This is reached only past the cold-start early-return above, so the
+	//     cold-start baseline emits NO mirrors (a desk that was already Idle when the detector
+	//     booted has not "finished a turn").
 	for _, name := range d.cfg.Desks {
 		if prev.DeskStates[name] == surface.StateWorking && cur.DeskStates[name] == surface.StateIdle {
-			if name == d.cfg.XOAgent {
+			if d.isCoordinatorForMirror(name) {
 				pendingCoordinatorMirrors = append(pendingCoordinatorMirrors, name)
 				pendingTurnEnds = append(pendingTurnEnds, name)
 				continue
