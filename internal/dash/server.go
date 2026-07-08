@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/cos"
@@ -78,19 +79,21 @@ type Config struct {
 // static assets. It holds NO live fleet state of its own — every request reads
 // the current artifacts fresh.
 type Server struct {
-	cfg       Config
-	roster    *roster.Config
-	xo        string        // resolved XO (xo_agent, else Agents[0])
-	threshold time.Duration // snapshot staleness threshold (3× heartbeat)
-	now       func() time.Time
-	tmpl      *template.Template
-	mux       *http.ServeMux
-	hub       *hub
-	allowed   map[string]bool    // Host-header allowlist (host:port forms)
-	origins   map[string]bool    // Origin allowlist (scheme://host:port) for state-changing requests
-	tracker   tracker.Tracker    // GitHub-backed issue tracker; nil when no --repo is configured
-	control   control.Controller // cnc control (notify live; route/resume gated on the pane lock)
-	done      *doneRecorder      // goals done-history observer/writer (#418) — the one artifact the dash WRITES
+	cfg         Config
+	roster      *roster.Config
+	xo          string        // resolved XO (xo_agent, else Agents[0])
+	threshold   time.Duration // snapshot staleness threshold (3× heartbeat)
+	now         func() time.Time
+	tmpl        *template.Template
+	mux         *http.ServeMux
+	hub         *hub
+	allowed     map[string]bool    // Host-header allowlist (host:port forms)
+	origins     map[string]bool    // Origin allowlist (scheme://host:port) for state-changing requests
+	tracker     tracker.Tracker    // GitHub-backed issue tracker; nil when no --repo is configured
+	control     control.Controller // cnc control (notify live; route/resume gated on the pane lock)
+	done        *doneRecorder      // goals done-history observer/writer (#418) — the one artifact the dash WRITES
+	goalsLoadWG sync.WaitGroup     // async loadGoals from the SSE poller; tests drain before TempDir teardown
+	pollWG      sync.WaitGroup     // SSE file poller; shutdown waits for exit before draining loadGoals
 }
 
 // NewServer validates the bind address (LOOPBACK ONLY — see validateBind; the
@@ -185,7 +188,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 	// The file poller drives the SSE hub; it stops when ctx is cancelled.
 	go s.hub.run(ctx)
-	go s.poll(ctx)
+	s.startPoll(ctx)
 
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
