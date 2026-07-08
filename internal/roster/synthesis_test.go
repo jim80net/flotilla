@@ -259,6 +259,112 @@ func TestLoad_RefusesMutualCycleBetweenDistinctChannels(t *testing.T) {
 	}
 }
 
+// cosFleetCommandBacklogXO is the live shape that exposed the stale-subordinate bug: a
+// coordinator (flotilla-backlog-xo) provisioned ONLY into the fleet-command broadcast
+// channel under cos — no separate home channel yet — must still appear in cos's synthesis
+// read set and mark cos owed when backlog-xo finishes.
+const cosFleetCommandBacklogXO = `{
+  "operator_user_id":"U",
+  "cos_agent":"cos",
+  "xo_agent":"cos",
+  "agents":[{"name":"cos"},{"name":"flotilla-backlog-xo","surface":"claude-code","coordinator":true},
+            {"name":"alpha-xo"},{"name":"alpha-be","coordinator":false}],
+  "channels":[
+    {"channel_id":"C_CMD","xo_agent":"cos","role":"fleet-command",
+     "members":["cos","flotilla-backlog-xo","alpha-xo","alpha-be"]},
+    {"channel_id":"C_ALPHA","xo_agent":"alpha-xo","members":["cos"]},
+    {"channel_id":"C_ABE","xo_agent":"alpha-be","members":["alpha-xo"]}]}`
+
+func TestAgentsBelow_FleetCommandCoordinatorMember(t *testing.T) {
+	cfg, err := Load(writeRoster(t, cosFleetCommandBacklogXO))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.AgentsBelow("cos")
+	want := []string{"alpha-xo", "flotilla-backlog-xo"}
+	if !sortedEqual(got, want) {
+		t.Errorf("AgentsBelow(cos) = %v; want %v (project-XO via home channel + backlog-XO via fleet-command)", got, want)
+	}
+	// Leaf desks still synthesize nobody — fleet-command membership does not invert the hierarchy.
+	if got := cfg.AgentsBelow("alpha-be"); len(got) != 0 {
+		t.Errorf("AgentsBelow(alpha-be) = %v; want []", got)
+	}
+}
+
+func TestAgentsAbove_FleetCommandCoordinatorMember(t *testing.T) {
+	cfg, err := Load(writeRoster(t, cosFleetCommandBacklogXO))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.AgentsAbove("flotilla-backlog-xo"); !sortedEqual(got, []string{"cos"}) {
+		t.Errorf("AgentsAbove(flotilla-backlog-xo) = %v; want [cos]", got)
+	}
+}
+
+func TestFleetCommandCoordinatorMember_InverseHolds(t *testing.T) {
+	cfg, err := Load(writeRoster(t, cosFleetCommandBacklogXO))
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents := []string{"cos", "flotilla-backlog-xo", "alpha-xo", "alpha-be"}
+	for _, p := range agents {
+		below := cfg.AgentsBelow(p)
+		for _, c := range agents {
+			cBelowP := slices.Contains(below, c)
+			pAboveC := slices.Contains(cfg.AgentsAbove(c), p)
+			if cBelowP != pAboveC {
+				t.Errorf("inverse violated: %q∈AgentsBelow(%q)=%v but %q∈AgentsAbove(%q)=%v",
+					c, p, cBelowP, p, c, pAboveC)
+			}
+		}
+	}
+}
+
+// cosFleetCommandBroadcastOnly is the COS gate fixture (#528): a coordinator and an
+// execution desk registered ONLY in fleet-command — coordinator:true must opt in,
+// coordinator:false must not be promoted to a synthesis subordinate.
+const cosFleetCommandBroadcastOnly = `{
+  "operator_user_id":"U",
+  "cos_agent":"cos",
+  "xo_agent":"cos",
+  "agents":[
+    {"name":"cos"},
+    {"name":"backlog-xo","coordinator":true},
+    {"name":"execution-desk","coordinator":false}
+  ],
+  "channels":[{
+    "channel_id":"C_CMD",
+    "xo_agent":"cos",
+    "role":"fleet-command",
+    "members":["cos","backlog-xo","execution-desk"]
+  }]}`
+
+func TestAgentsBelow_FleetCommandBroadcastOnlyCoordinatorNotExecutionDesk(t *testing.T) {
+	cfg, err := Load(writeRoster(t, cosFleetCommandBroadcastOnly))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.AgentsBelow("cos"); !sortedEqual(got, []string{"backlog-xo"}) {
+		t.Errorf("AgentsBelow(cos) = %v; want [backlog-xo] (execution-desk must not be promoted)", got)
+	}
+	if got := cfg.AgentsAbove("execution-desk"); len(got) != 0 {
+		t.Errorf("AgentsAbove(execution-desk) = %v; want [] (broadcast-only execution desk)", got)
+	}
+	if got := cfg.AgentsAbove("backlog-xo"); !sortedEqual(got, []string{"cos"}) {
+		t.Errorf("AgentsAbove(backlog-xo) = %v; want [cos]", got)
+	}
+}
+
+func TestOwnedChannels_FleetCommandCoordinatorUnchanged(t *testing.T) {
+	cfg, err := Load(writeRoster(t, cosFleetCommandBacklogXO))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.OwnedChannels("cos"); !sortedEqual(got, []string{"C_CMD"}) {
+		t.Errorf("OwnedChannels(cos) = %v; want [C_CMD] (post target unchanged)", got)
+	}
+}
+
 func TestLoad_FleetCommandTagBreaksAnOtherwiseCyclicBroadcast(t *testing.T) {
 	// The SAME broadcast-shaped roster: WITHOUT the fleet-command tag it cycles and
 	// refuses; WITH the tag it loads. This pins the tag's load-bearing role.

@@ -43,6 +43,12 @@ func (c *Config) OwnedChannels(agent string) []string {
 // (a broadcast channel's members are command targets, not subordinates — without this a
 // leaf desk would "synthesize" the meta-XO and the graph would cycle). De-duplicated and
 // order-stable.
+//
+// Fleet-command OWNER supplement: a seat provisioned ONLY into the broadcast channel
+// (no home channel listing the owner as parent yet) is still a synthesis read target
+// for the owner — e.g. a newly added flotilla-backlog-xo under cos. Execution desks
+// (supervisor-observer home channels) and project-XOs already reachable via the
+// standard home-channel path are excluded.
 func (c *Config) AgentsBelow(agent string) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -56,12 +62,25 @@ func (c *Config) AgentsBelow(agent string) []string {
 		seen[ch.XOAgent] = true
 		out = append(out, ch.XOAgent)
 	}
+	for _, ch := range c.Bindings() {
+		if !ch.IsFleetCommand() || ch.XOAgent != agent {
+			continue
+		}
+		for _, m := range ch.Members {
+			if m == agent || seen[m] || !c.fleetCommandSynthesisMember(agent, m) {
+				continue
+			}
+			seen[m] = true
+			out = append(out, m)
+		}
+	}
 	return out
 }
 
 // AgentsAbove returns the synthesizing PARENTS of an agent — the agents OWED a synthesis
 // when this agent finishes. It is the members (minus self) of the NON-fleet-command
-// channels the agent OWNS, and is the EXACT relational inverse of AgentsBelow
+// channels the agent OWNS, plus (for coordinator members of a fleet-command channel) the
+// broadcast channel's owner. It is the EXACT relational inverse of AgentsBelow
 // (C ∈ AgentsBelow(P) ⟺ P ∈ AgentsAbove(C)). A boat whose owned channel lists two parents
 // marks BOTH owed; the root (whose only owned channel is fleet-command, or which owns no
 // non-empty channel) has no parent. It replaces the wrong-typed BindingForChannel for the
@@ -81,7 +100,55 @@ func (c *Config) AgentsAbove(agent string) []string {
 			out = append(out, m)
 		}
 	}
+	for _, ch := range c.Bindings() {
+		if !ch.IsFleetCommand() || !memberOf(ch.Members, agent) {
+			continue
+		}
+		owner := ch.XOAgent
+		if owner == agent || seen[owner] || !c.fleetCommandSynthesisMember(owner, agent) {
+			continue
+		}
+		seen[owner] = true
+		out = append(out, owner)
+	}
 	return out
+}
+
+// fleetCommandSynthesisMember reports whether member is a fleet-command broadcast
+// direct report of owner for synthesis — an explicit coordinator seat registered only
+// in the broadcast channel (no project-home channel listing owner as parent, and not
+// an execution desk with a supervisor-observer home channel). coordinator:false opts
+// out even when the seat is broadcast-only (#491); coordinator:true or IsCoordinator
+// opts in — broadcast membership alone is never sufficient.
+func (c *Config) fleetCommandSynthesisMember(owner, member string) bool {
+	if member == owner {
+		return false
+	}
+	if a, err := c.Agent(member); err == nil && a.Coordinator != nil && !*a.Coordinator {
+		return false
+	}
+	if a, err := c.Agent(member); err == nil && a.Coordinator != nil && *a.Coordinator {
+		// explicit coordinator:true — fall through to topology checks
+	} else if !c.IsCoordinator(member) {
+		return false
+	}
+	for _, ch := range c.Bindings() {
+		if ch.IsFleetCommand() || ch.XOAgent == owner {
+			continue
+		}
+		if memberOf(ch.Members, owner) && ch.XOAgent == member {
+			return false
+		}
+	}
+	for _, ch := range c.Bindings() {
+		if ch.IsFleetCommand() || ch.XOAgent != member {
+			continue
+		}
+		if c.channelIsSupervisorObserverHome(ch) {
+			return false
+		}
+	}
+	return true
 }
 
 // assertSynthesisAcyclic returns an error if the synthesis-edge graph contains a cycle, so

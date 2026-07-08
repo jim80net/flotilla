@@ -166,3 +166,33 @@ func TestSynthesisWakeBodyPerTierReadSet(t *testing.T) {
 		t.Errorf("Tier-3 wake body must carry the same absolute-binary result command:\n%s", t3Body)
 	}
 }
+
+// REGRESSION: a coordinator provisioned only into the fleet-command broadcast channel (no home
+// channel yet) must appear in the owner's visibility-synthesis wake prompt subordinate list.
+func TestSynthesisWakeBodyIncludesFleetCommandCoordinator(t *testing.T) {
+	rosterPath := writeRosterFile(t, `{
+	  "operator_user_id":"U",
+	  "cos_agent":"cos",
+	  "xo_agent":"cos",
+	  "agents":[{"name":"cos"},{"name":"flotilla-backlog-xo","surface":"claude-code","coordinator":true},
+	            {"name":"alpha-xo"}],
+	  "channels":[
+	    {"channel_id":"C_CMD","xo_agent":"cos","role":"fleet-command",
+	     "members":["cos","flotilla-backlog-xo","alpha-xo"]},
+	    {"channel_id":"C_ALPHA","xo_agent":"alpha-xo","members":["cos"]}]}`)
+	cfg, err := roster.Load(rosterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const binPath = "/home/operator/go/bin/flotilla"
+	readSet := synthesisReadSet(cfg, "cos")
+	body := synthesisWakeBody("cos", binPath, rosterPath, readSet, cfg.OwnedChannels("cos"), "")
+	for _, sub := range []string{"flotilla-backlog-xo", "alpha-xo"} {
+		if !strings.Contains(body, sub) {
+			t.Errorf("cos synthesis wake must name subordinate %q; readSet=%v body=\n%s", sub, readSet, body)
+		}
+	}
+	if !strings.Contains(body, "C_CMD") {
+		t.Errorf("cos synthesis wake must name owned post channel C_CMD; body=\n%s", body)
+	}
+}
