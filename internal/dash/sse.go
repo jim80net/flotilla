@@ -200,11 +200,19 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// startPoll launches the SSE file poller. Callers must use this (not poll directly)
+// so pollWG accounting stays balanced on shutdown.
+func (s *Server) startPoll(ctx context.Context) {
+	s.pollWG.Add(1)
+	go s.poll(ctx)
+}
+
 // poll is the single shared file poller. It stats the snapshot, ledger, backlog,
 // goals JSON/YAML, and session-mirror ledgers every pollInterval and emits an SSE
 // update whenever any signature changes — so all connected clients refetch the
 // JSON endpoints. One poller serves every client (not one per connection).
 func (s *Server) poll(ctx context.Context) {
+	defer s.pollWG.Done()
 	paths := []string{s.cfg.SnapshotPath, s.cfg.LedgerPath, s.cfg.BacklogPath, s.cfg.GoalsPath, s.cfg.GoalsYAMLPath}
 	prev := fileSigs(paths, s.cfg.SessionMirrorDir)
 	ticker := time.NewTicker(pollInterval)
@@ -214,6 +222,9 @@ func (s *Server) poll(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if ctx.Err() != nil {
+				return
+			}
 			cur := fileSigs(paths, s.cfg.SessionMirrorDir)
 			if cur != prev {
 				// #418: a change to any goals-roll-up input (board snapshot, backlog,
@@ -226,7 +237,12 @@ func (s *Server) poll(ctx context.Context) {
 				// (cubic #449 P1). The next trigger simply observes again.
 				if cur.snap != prev.snap || cur.backlog != prev.backlog ||
 					cur.goals != prev.goals || cur.goalsYAML != prev.goalsYAML {
+					if ctx.Err() != nil {
+						return
+					}
+					s.goalsLoadWG.Add(1)
 					go func() {
+						defer s.goalsLoadWG.Done()
 						defer func() {
 							if r := recover(); r != nil {
 								fmt.Fprintf(os.Stderr, "flotilla dash: goals done-history observation panicked (recovered): %v\n", r)
