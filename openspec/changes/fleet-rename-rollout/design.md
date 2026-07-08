@@ -5,8 +5,8 @@ Coordinates with sibling designs:
 
 | Sibling | Shared contract |
 |---|---|
-| `fleet-bootstrap-standup` (PR #520) | `fleet_role`, `{identifier}-{role}` naming, topology invariant, doctor B001–B010 |
-| `fleet-role-permissions` (PR #521) | Permission class from `fleet_role` + `surface`; canonical JSON keyed by role not agent |
+| `fleet-bootstrap-standup` (PR #520) | `fleet_role`, **ops-xo vs product XO** boundary, naming, topology, doctor B001–B010 |
+| `fleet-role-permissions` (PR #521) | Permission class from `fleet_role` + `surface`; `ops-xo` fleet-ops tier; zero approval noise §0 |
 
 **Status:** Plan for COS review. **No live rename** until operator affirms cutover after merge.
 
@@ -16,14 +16,18 @@ Coordinates with sibling designs:
 
 Align with bootstrap design §3:
 
-| Pattern | Example (generic) | `fleet_role` |
-|---|---|---|
-| `{id}-xo` | `alpha-xo` | `xo` |
-| `{id}-adj` | `alpha-adj` | `adjutant` |
-| `{id}-desk` | `alpha-desk` | `desk` |
-| `{id}-desk-{scope}` | `alpha-desk-pr123` | `transient-task-desk` |
-| meta | `xo`, `xo-adj` | `xo`, `adjutant` |
-| chief | `cos` | `cos` |
+| Pattern | Example (generic) | `fleet_role` | Notes |
+|---|---|---|---|
+| fleet ops | `ops-xo`, `ops-adj` | `ops-xo`, `adjutant` | **Rename execution owner** — not product XO |
+| meta | `xo`, `xo-adj` | `meta-xo`, `adjutant` | Fleet command |
+| `{product}-xo` | `alpha-xo` | `xo` | **Product** XO — implementation lane only |
+| `{product}-adj` | `alpha-adj` | `adjutant` | Product adjutant |
+| `{product}-desk` | `alpha-desk` | `desk` | Execution desk |
+| `{product}-desk-{scope}` | `alpha-desk-pr123` | `transient-task-desk` | Transient desk |
+| chief | `cos` | `cos` | Chief-of-staff |
+
+**Authority boundary:** Rename waves are planned and executed by **`ops-xo`**, not product XOs
+(e.g. a flotilla product lane XO). Provision `ops-xo` before rename implementation (bootstrap §2.2).
 
 **Invariant:** `name` == `FLOTILLA_SELF` == tmux marker (unless documented `tmux_title` override).
 Transient desks encode scope in the suffix and recycle at chapter end.
@@ -373,7 +377,8 @@ Handoff template addendum for rename chapter:
 
 ## 12. Planning desk charter
 
-**Seat:** `rename-rollout-plan` (transient-task-desk) or adjutant to bootstrap desk.
+**Seat:** `rename-rollout-plan` under **`ops-xo`** supervision (transient-task-desk or ops-adjutant),
+not a product XO desk.
 
 **Inputs:** Operator rename enqueue notice, current roster export, sibling PRs #520/#521.
 
