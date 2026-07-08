@@ -115,11 +115,21 @@ func (c *Config) AgentsAbove(agent string) []string {
 }
 
 // fleetCommandSynthesisMember reports whether member is a fleet-command broadcast
-// direct report of owner for synthesis — a seat registered only in the broadcast
-// channel (no project-home channel listing owner as parent, and not an execution
-// desk with a supervisor-observer home channel).
+// direct report of owner for synthesis — an explicit coordinator seat registered only
+// in the broadcast channel (no project-home channel listing owner as parent, and not
+// an execution desk with a supervisor-observer home channel). coordinator:false opts
+// out even when the seat is broadcast-only (#491); coordinator:true or IsCoordinator
+// opts in — broadcast membership alone is never sufficient.
 func (c *Config) fleetCommandSynthesisMember(owner, member string) bool {
 	if member == owner {
+		return false
+	}
+	if a, err := c.Agent(member); err == nil && a.Coordinator != nil && !*a.Coordinator {
+		return false
+	}
+	if a, err := c.Agent(member); err == nil && a.Coordinator != nil && *a.Coordinator {
+		// explicit coordinator:true — fall through to topology checks
+	} else if !c.IsCoordinator(member) {
 		return false
 	}
 	for _, ch := range c.Bindings() {

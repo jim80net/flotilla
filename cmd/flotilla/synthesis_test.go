@@ -174,7 +174,7 @@ func TestSynthesisWakeBodyIncludesFleetCommandCoordinator(t *testing.T) {
 	  "operator_user_id":"U",
 	  "cos_agent":"cos",
 	  "xo_agent":"cos",
-	  "agents":[{"name":"cos"},{"name":"flotilla-backlog-xo","surface":"claude-code"},
+	  "agents":[{"name":"cos"},{"name":"flotilla-backlog-xo","surface":"claude-code","coordinator":true},
 	            {"name":"alpha-xo"}],
 	  "channels":[
 	    {"channel_id":"C_CMD","xo_agent":"cos","role":"fleet-command",

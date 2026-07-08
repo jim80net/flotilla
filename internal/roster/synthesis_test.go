@@ -267,8 +267,8 @@ const cosFleetCommandBacklogXO = `{
   "operator_user_id":"U",
   "cos_agent":"cos",
   "xo_agent":"cos",
-  "agents":[{"name":"cos"},{"name":"flotilla-backlog-xo","surface":"claude-code"},
-            {"name":"alpha-xo"},{"name":"alpha-be"}],
+  "agents":[{"name":"cos"},{"name":"flotilla-backlog-xo","surface":"claude-code","coordinator":true},
+            {"name":"alpha-xo"},{"name":"alpha-be","coordinator":false}],
   "channels":[
     {"channel_id":"C_CMD","xo_agent":"cos","role":"fleet-command",
      "members":["cos","flotilla-backlog-xo","alpha-xo","alpha-be"]},
@@ -317,6 +317,41 @@ func TestFleetCommandCoordinatorMember_InverseHolds(t *testing.T) {
 					c, p, cBelowP, p, c, pAboveC)
 			}
 		}
+	}
+}
+
+// cosFleetCommandBroadcastOnly is the COS gate fixture (#528): a coordinator and an
+// execution desk registered ONLY in fleet-command — coordinator:true must opt in,
+// coordinator:false must not be promoted to a synthesis subordinate.
+const cosFleetCommandBroadcastOnly = `{
+  "operator_user_id":"U",
+  "cos_agent":"cos",
+  "xo_agent":"cos",
+  "agents":[
+    {"name":"cos"},
+    {"name":"backlog-xo","coordinator":true},
+    {"name":"execution-desk","coordinator":false}
+  ],
+  "channels":[{
+    "channel_id":"C_CMD",
+    "xo_agent":"cos",
+    "role":"fleet-command",
+    "members":["cos","backlog-xo","execution-desk"]
+  }]}`
+
+func TestAgentsBelow_FleetCommandBroadcastOnlyCoordinatorNotExecutionDesk(t *testing.T) {
+	cfg, err := Load(writeRoster(t, cosFleetCommandBroadcastOnly))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.AgentsBelow("cos"); !sortedEqual(got, []string{"backlog-xo"}) {
+		t.Errorf("AgentsBelow(cos) = %v; want [backlog-xo] (execution-desk must not be promoted)", got)
+	}
+	if got := cfg.AgentsAbove("execution-desk"); len(got) != 0 {
+		t.Errorf("AgentsAbove(execution-desk) = %v; want [] (broadcast-only execution desk)", got)
+	}
+	if got := cfg.AgentsAbove("backlog-xo"); !sortedEqual(got, []string{"cos"}) {
+		t.Errorf("AgentsAbove(backlog-xo) = %v; want [cos]", got)
 	}
 }
 
