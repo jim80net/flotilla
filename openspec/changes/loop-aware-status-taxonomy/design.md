@@ -64,11 +64,11 @@ flowchart LR
 
 | `loop_posture` | Meaning for officers | Primary signals |
 |---|---|---|
-| **composing** | Mid-turn; harness is working | `surface.StateWorking` (or awaiting-input/approval while in-turn) |
-| **available** | Between turns; loop owns next wake | `StateIdle`, NOT settled, NOT awaiting-authority/blocked |
-| **parked** | Authorized quiescence; loop suppresses self-wake | settled marker consumed / per-desk settled / `XOSettled` |
+| **composing** | Mid-turn; harness is working | `surface.StateWorking` on substantive turn work |
+| **available** | Between turns; loop owns next wake | `StateIdle`, NOT settled, NOT awaiting-authority/blocked/drifted |
+| **parked** | Authorized quiescence; loop suppresses self-wake | settled marker consumed / per-desk settled / `XOSettled` **AND** backlog gate reports zero unblocked items |
 | **awaiting-authority** | Operator gate (spend / irreversible / fork) | awaiting marker OR backlog `[awaiting-auth]` dominates |
-| **blocked** | Tracked external dependency | backlog `[blocked]` / `[needs-attention]` with no unblocked ahead |
+| **blocked** | Tracked external dependency OR harness gate prompt | backlog `[blocked]` / `[needs-attention]` with no unblocked ahead; **or** pane `awaiting-input` / `awaiting-approval` (surface blocked states — distinct from `composing`) |
 | **maintaining** | Fleet hygiene / ops (bootstrap, permissions, doctor) | optional `[maintaining]` backlog/goal marker OR `fleet_role: ops-xo` task class |
 | **refining** | Iteration without net-new build (review, docs, polish) | optional `[refining]` marker |
 | **cleaning** | Wrap-up hygiene (handoff, stash, branch tidy) | optional `[cleaning]` marker OR recycle-pending charter |

@@ -29,8 +29,9 @@ observation share one vocabulary.
    `reaped`, `unknown`).
 3. **Mechanical derivation** — posture from snapshot + markers + backlog parse + idle-hold strikes;
    optional declared mode from backlog/goal markers.
-4. **Status contract** — extend `flotilla status --json` with `loop_posture` per agent; deprecate
-   operator-facing "idle" label where it meant loop semantics.
+4. **Status contract** — add `loop_posture` to `flotilla status --json` per agent (**additive**
+   field; existing `state` unchanged for backward compatibility). Deprecate operator-facing plain
+   "idle" copy in human/dash views where it meant loop semantics — not removal of `state: idle`.
 5. **Bootstrap cross-ref** — doctor/validation surfaces posture drift; adjutant observes leader
    posture not just Working/Idle.
 

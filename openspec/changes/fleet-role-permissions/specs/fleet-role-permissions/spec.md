@@ -9,7 +9,7 @@ Requirements for the focused permissions desk. Complements fleet-bootstrap topol
 
 The fleet SHALL maintain a versioned canonical permission policy at
 `deploy/flotilla-permissions/canonical-roles.json` covering `cos`, `meta-xo`, `ops-xo`,
-`xo` (product), `adjutant`, `desk`, and `transient-task-desk`.
+`xo` (product XO), `adjutant`, `desk`, and `transient-task-desk`.
 
 #### Scenario: Schema version bump
 
@@ -39,7 +39,7 @@ command.
 
 #### Scenario: Full coordinator heartbeat without prompts
 
-- **WHEN** a `cos`, `meta-xo`, `ops-xo`, or product `xo` seat runs a heartbeat cycle:
+- **WHEN** a `cos`, `meta-xo`, `ops-xo`, or product XO seat runs a heartbeat cycle:
   `flotilla status` → `flotilla send` → `touch` ack → `flotilla notify`
 - **THEN** no harness approval modal SHALL appear for any step in the authorized set
 
@@ -50,7 +50,7 @@ command.
 
 ### Requirement: Leadership zero-prompt baseline
 
-Roles `cos`, `meta-xo`, `ops-xo`, and product `xo` SHALL allow unprompted: `flotilla status`,
+Roles `cos`, `meta-xo`, `ops-xo`, and product XO SHALL allow unprompted: `flotilla status`,
 `flotilla send`, `flotilla notify`, `flotilla register`, `flotilla recycle`, deploy-lane
 build/test, `gh pr` read/review/merge (merge subject to no-self-merge doctrine), and `touch` on
 per-layer ack/settled paths. Role `ops-xo` SHALL additionally allow unprompted fleet-ops commands
@@ -60,7 +60,7 @@ per-layer ack/settled paths. Role `ops-xo` SHALL additionally allow unprompted f
 
 - **WHEN** `ops-xo` runs `flotilla bootstrap permissions doctor` and `permissions sync` within policy
 - **THEN** no harness approval modal SHALL appear
-- **AND** product `xo` policy SHALL NOT grant fleet-ops write paths by default
+- **AND** product XO policy SHALL NOT grant fleet-ops write paths by default
 
 #### Scenario: Coordinator ack denied
 

@@ -45,7 +45,7 @@ See `design.md` §0.
 |---|---|---|---|---|
 | `ops-xo` | **Fleet operations** (bootstrap, permissions, rename) | allow (reviewer) | allow | **allow** |
 | `xo` (product) | Product implementation lane | allow (reviewer) | allow | deny by default |
-| `meta-xo` / `cos` | Fleet command / chief-of-staff | allow | allow | delegate to ops-xo |
+| `cos` / `meta-xo` | Chief-of-staff / fleet command | allow (reviewer) | allow | delegate to ops-xo |
 | `adjutant` | Laminar triage (buffer → seam inject) | deny | deny | read + buffer; no interject during operator window |
 | `desk` | Execution | deny | deny | lane only |
 

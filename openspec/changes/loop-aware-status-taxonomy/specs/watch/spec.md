@@ -14,6 +14,7 @@ operator-facing loop indicator.
 - **WHEN** an agent's pane assesses as `idle`
 - **AND** the agent is not settled
 - **AND** no awaiting-authority or blocked dominance applies
+- **AND** idle-hold strikes are below the drifted threshold (agent is NOT `drifted`)
 - **THEN** `loop_posture` SHALL be `available`
 - **AND** `state` MAY remain `idle` for harness fidelity
 

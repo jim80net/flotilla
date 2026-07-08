@@ -43,7 +43,7 @@ not casually absorb a half-specified permission story.
   conversation; urgent bypass (money/irreversible/fork/incident/incapacitation); no infinite
   perfect-idle wait during goal loop. Protected-window rule is **mechanical in watch** (see
   `openspec/changes/adjutant-operator-protected-window/`), not prompt-contract.
-- Leadership (COS/meta-xo/ops-xo/product xo/adjutant): role-tier zero-prompt flows per §0.
+- Leadership (COS/meta-xo/ops-xo/product XO/adjutant): role-tier zero-prompt flows per §0.
 - Desks: lane-scoped; no merge-completing powers unless explicitly elevated.
 - **Safety without prompting:** role boundaries + no self-merge + lane scoping + audit + operator
   gates for spend / irreversible / fork — not per-command approval storms.

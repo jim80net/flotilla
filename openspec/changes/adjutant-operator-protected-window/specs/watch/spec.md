@@ -14,7 +14,8 @@ The predicate SHALL be true when **any** of these v1 sources is active for the l
 
 1. A pending operator relay exists in the durable relay queue for the leader.
 2. The leader's awaiting-operator marker is present.
-3. The injector holds an unconfirmed `KindRelay` job targeting the leader.
+3. The injector holds an unconfirmed operator-destined job targeting the leader (`KindRelay`
+   or bare `KindDefault` relay — the same classes the relay path enqueues).
 4. An active-conversation tail is open (confirmed operator relay within TTL without
    leader resolution via settled or awaiting clear).
 
@@ -60,8 +61,9 @@ SHALL apply only to non-urgent adjutant seam briefs.
 
 - **WHEN** the operator sends a relay to `xo`
 - **AND** `OperatorProtectedWindow(xo)` would be true for a buffered seam brief
-- **THEN** the relay SHALL follow existing relay policy (busy-defer, not buffered)
-- **AND** SHALL NOT be converted into an adjutant buffer item
+- **THEN** the relay SHALL follow existing relay policy: enqueue to leader (or busy-defer when
+  leader is `Working` per #286), never buffered as adjutant material
+- **AND** SHALL NOT be converted into an adjutant buffer item or skip busy-defer semantics
 
 #### Scenario: Urgent material still wakes leader immediately
 
