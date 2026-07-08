@@ -41,5 +41,5 @@ where noted.
 
 ## Phase 5 — Validation harness
 
-- [ ] `scripts/bootstrap-validate.sh` — runs V1–V8 from design §9
+- [ ] `scripts/bootstrap-validate.sh` — runs V1–V9 from design §9 (V9 adjutant laminar when configured)
 - [ ] Optional: CI fixture roster dry-run (doctor only, no live tmux)

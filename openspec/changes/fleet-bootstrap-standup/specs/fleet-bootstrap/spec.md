@@ -112,6 +112,32 @@ Bootstrap SHALL map (`fleet_role`, `surface`) to an existing permission template
 - **WHEN** `fleet_role: desk` and `surface: grok`
 - **THEN** bootstrap sync selects `deploy/grok-permission-allowlist.json`
 
+### Requirement: Adjutant laminar flow at bootstrap
+
+When `adjutant_for` binds an adjutant to a coordinator, bootstrap SHALL configure laminar
+flow per design §2.4 and `stackable-flotillas-438`.
+
+#### Scenario: Operator active conversation protected
+
+- **WHEN** the operator is typing or in active conversation with a coordinator (COS/XO)
+- **AND** a non-urgent desk material edge arrives
+- **THEN** the adjutant SHALL buffer the item
+- **AND** SHALL NOT interject into the leader pane until a machine-idle seam opens
+
+#### Scenario: Urgent bypass to leader
+
+- **WHEN** a material reason matches urgent class: money, irreversible, divergent fork,
+  incident/safety, or officer incapacitation/usage-limit
+- **OR** the item is an operator relay (`KindRelay`)
+- **THEN** the leader SHALL receive the item immediately, bypassing the adjutant buffer
+
+#### Scenario: Active goal loop not blocked by perfect-idle wait
+
+- **WHEN** the leader remains `Working` on an active goal loop
+- **AND** buffered items age beyond the evaluation-tick threshold
+- **THEN** the adjutant SHALL run evaluation tick (ack → evaluate → act-by-tier)
+- **AND** SHALL NOT wait indefinitely for perfect long idle before acting
+
 ### Requirement: Idempotent doctor
 
 `flotilla bootstrap doctor` SHALL be read-only and safe to run repeatedly with identical

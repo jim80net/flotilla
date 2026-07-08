@@ -57,11 +57,21 @@ Classify each `agents[]` row:
 Naming: `{identifier}-{role}` for products (`alpha-xo`, `alpha-adj`, `alpha-desk-pr123`);
 `ops-xo` / `ops-adj` for fleet operations; `xo` / `xo-adj` for meta fleet command.
 
-### 2. Topology audit
+### 2. Topology audit + adjutant laminar flow
 
 For each desk, confirm a supervising project-XO (or meta-XO) binding exists. If missing, emit
 a **generic** binding snippet for the operator to paste — do not auto-edit private roster in
 the public tree.
+
+**Adjutant laminar flow (design §2.4):** When `adjutant_for` is set:
+
+- **Do not interject** to leader during operator typing or active operator↔leader conversation
+- **Buffer** non-urgent material; inject consolidated brief at machine-idle seam only
+- **Urgent bypass** (immediate to leader): money, irreversible, divergent fork, incident/safety,
+  officer incapacitation/usage-limit — plus operator relay (always)
+- **Do not** wait indefinitely for perfect idle during active goal loop — evaluation tick applies
+
+Scaffold `flotilla-<leader>-buffer.json`, charter, and `urgent_windows[]` per stackable-flotillas-438.
 
 ### 3. State root
 
@@ -116,6 +126,7 @@ Sync via future `flotilla bootstrap permissions sync`; idempotent — skip if st
 | V6 | XO `flotilla notify` reaches channel |
 | V7 | XO touches ack file |
 | V8 | Permission smoke — coordinator `gh pr view` unprompted; desk `gh pr merge` blocked per policy |
+| V9 | Adjutant laminar — buffer non-urgent; operator relay immediate; seam inject at idle (if adjutant) |
 
 Report failures to **COS** with finding id + remediation; execute authorized fixes, do not
 idle-hold on reversible steps.

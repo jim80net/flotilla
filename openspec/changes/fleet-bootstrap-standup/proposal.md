@@ -12,6 +12,9 @@ checks. Operators (and coding agents helping them) repeat the same failure modes
 - **Approval noise** — leadership seats need **zero per-command prompts** on role-authorized
   fleet ops (see `fleet-role-permissions` PR #521 §0); execution desks need lane-scoped
   posture with gatekeeper deny for merge-to-default.
+- **Adjutant interrupting operator conversations** — without laminar-flow policy, adjutants
+  interject while the operator is typing or actively conversing with COS/XO; bootstrap must
+  configure buffer-at-seam + urgent bypass (money / irreversible / fork / incident / incapacitation).
 - **Topology debt masquerading as orphans** — an execution desk with no supervising XO in
   `channels[]` looks like a “standalone desk.” The product invariant is: **every desk has
   an XO**; apparent orphans are incomplete federation bindings, not a valid steady state.

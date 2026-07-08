@@ -117,6 +117,65 @@ Doctor checks B006/B007 apply only to agents marked **live-expected**:
 
 Absent field ⇒ derive implicit rule; emit `LIVE_EXPECTED_DERIVED` info finding when implicit.
 
+### 2.4 Adjutant laminar flow (product requirement)
+
+Bootstrap MUST configure adjutant seats for **laminar leader flow** — the adjutant triages and
+buffers non-urgent layer interrupts; the leader (COS / meta-xo / ops-xo / product `xo`) sees a
+**consolidated brief at a natural seam**, not mid-thought interjects. Builds on
+`openspec/changes/stackable-flotillas-438` (#439); this section captures operator corrections
+for bootstrap/standup.
+
+#### Protected windows — adjutant MUST NOT interject to leader
+
+| Window | Signal (implementer) | Adjutant behavior |
+|---|---|---|
+| **Operator typing** | Inbound relay queue pending / operator compose active in bound Discord channel | Buffer; no leader pane injection |
+| **Operator active conversation** | Recent confirmed operator→leader relay; leader thread has unanswered operator message | Buffer; no leader interject |
+| **Leader mid-compose** | Leader surface `Working`; composer not cleared; no seam edge | Buffer non-urgent items |
+
+These are **operator-typing / active-conversation** protected windows — distinct from
+**machine-idle seams** (below).
+
+#### Machine-idle seams — injection allowed
+
+| Seam | Signal | Adjutant behavior |
+|---|---|---|
+| Post-turn idle | Leader `Working→Idle` edge | Inject consolidated brief |
+| Settled | Leader idle + ack/settled consumed | Inject brief |
+| Evaluation tick | Stale-leader timeout (#439) during **active goal loop** | Ack → evaluate → act-by-tier; do **not** wait for perfect long idle |
+
+**Anti-pattern (forbidden):** Waiting indefinitely for “perfect idle” while the fleet is in an
+active goal loop. The adjutant evaluation tick exists precisely to avoid buffer starvation when
+the leader stays `Working` on legitimate work.
+
+#### Urgent bypass — skip buffer, deliver to leader immediately
+
+Only these classes cut through the adjutant buffer (align with operating-principles gates +
+safety):
+
+| Class | Examples |
+|---|---|
+| **Money** | New/unaffirmed metered spend, account top-up |
+| **Irreversible** | Destructive / no-clean-rollback actions |
+| **Divergent fork** | Mutually exclusive approaches requiring operator choice |
+| **Incident / safety** | Fleet safety, data-loss risk, detector liveness failure |
+| **Officer incapacitation** | Usage-limit downgrade, coordinator unresponsive, stale ack beyond policy |
+
+Configure via roster `urgent_windows[]` (substring match on material reason) plus built-in
+**operator relay** passthrough (`KindRelay` — never buffered). Bootstrap doctor check **B011**
+verifies adjutant bindings have `urgent_windows` documented when `adjutant_for` is set.
+
+#### Bootstrap artifacts for adjutant lanes
+
+| Path | Purpose |
+|---|---|
+| `flotilla-<leader>-buffer.json` | Durable non-urgent queue (watch-owned) |
+| `flotilla-<leader>-adjutant-charter.md` | Solo-authority tier + seam policy |
+| `flotilla-<leader>-buffer-delivered.json` | Consumed-item dedup ledger (#469) |
+
+Validation **V9** (when adjutant configured): non-urgent desk finish buffers; operator relay
+reaches leader without adjutant delay; urgent-class reason bypasses buffer per table above.
+
 ## 3. Naming convention — `{identifier}-{role}`
 
 Human and machine readability for federated fleets:
@@ -144,7 +203,7 @@ Bootstrap selects a **permission template** from `deploy/` by `fleet_role` + `su
 | Class | Talk to whom | Fleet state R/W | Typical unprompted allows |
 |---|---|---|---|
 | **Leadership** (`cos`, `meta-xo`, `ops-xo`, product `xo`) | Other coordinators, operator relay, adjutant | Roster dir, backlog, goals, session-mirror; **ops-xo** writes roster hygiene paths | Zero-prompt: `flotilla notify/send/status`, gate, merge (reviewer seats), deploy/reap per `fleet-role-permissions` §0 |
-| **Adjutant** | Parent coordinator layer | Buffer sidecars, charter, read roster/goals | Mechanical triage; no merge authority |
+| **Adjutant** | Parent coordinator layer | Buffer sidecars, charter, read roster/goals | Laminar flow only (§2.4); mechanical triage; no merge authority |
 | **Desk** | Parent XO only (send path) | Worktree + lane artifacts | Tests, lint, branch push to feature branches; deny merge-to-default |
 | **Transient desk** | Parent XO | Same as desk, narrower path globs | Stricter write surface; time-bounded |
 
@@ -222,6 +281,7 @@ New subcommand family: `flotilla bootstrap` with exit codes suitable for CI / ag
 | `B008` | Detector snapshot fresh (< 3× heartbeat) | warn |
 | `B009` | Permission template synced for seat surface+role | warn |
 | `B010` | `flotilla register` would succeed (dry-run pane list) | info |
+| `B011` | When `adjutant_for` set: buffer path writable; `urgent_windows` or defaults documented | warn |
 
 **Idempotence:** `bootstrap apply` (future) only writes scaffold files that are missing or
 older than repo template version; never overwrites operator-edited secrets or roster without
@@ -255,8 +315,9 @@ Run after bootstrap (manual or skill-driven). Any step failure blocks “fleet s
 | V6 | Coordinator outbound | XO `flotilla notify` → Discord (or webhook dry-run) |
 | V7 | Ack path | XO touches ack file; watch clears liveness alert |
 | V8 | Permission smoke | coordinator `gh pr view` unprompted; desk `gh pr merge` blocked or prompted per policy |
+| V9 | Adjutant laminar flow | non-urgent buffered at leader `Working`; operator relay immediate; seam inject at idle edge |
 
-Transient desks: V4–V7 optional; V1–V3 + parent XO send required.
+Transient desks: V4–V7 optional; V1–V3 + parent XO send required. V9 when any `adjutant_for` binding exists.
 
 ## 10. Implementation phases
 
@@ -277,3 +338,4 @@ See `tasks.md`. Summary:
 - `deploy/grok-coordinator-permission-allowlist.json`, `deploy/grok-permission-allowlist.json`
 - `llm.md` § register + `docs/watch-runbook.md` § prerequisites
 - `internal/roster/roster.go` — `IsCoordinator`, adjutant validation
+- `openspec/changes/stackable-flotillas-438/design.md` — adjutant laminar flow (#439)
