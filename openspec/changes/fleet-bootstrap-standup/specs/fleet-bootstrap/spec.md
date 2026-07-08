@@ -117,6 +117,20 @@ Bootstrap SHALL map (`fleet_role`, `surface`) to an existing permission template
 When `adjutant_for` binds an adjutant to a coordinator, bootstrap SHALL configure laminar
 flow per design §2.4 and `stackable-flotillas-438`.
 
+### Requirement: Mechanical operator protected window
+
+Adjutant seam injection to a leader pane MUST be gated by watch code
+(`OperatorProtectedWindow`) — prompt-contract alone is insufficient. Full design:
+`openspec/changes/adjutant-operator-protected-window/`.
+
+#### Scenario: Seam inject suppressed during operator protected window
+
+- **WHEN** `OperatorProtectedWindow(leader)` is true (operator typing, pending relay,
+  awaiting marker, in-flight relay, or active-conversation tail)
+- **AND** a non-urgent adjutant consolidated brief is ready at a finish seam
+- **THEN** watch SHALL NOT enqueue the brief to the leader pane
+- **AND** SHALL retain buffered items until the window clears
+
 #### Scenario: Operator active conversation protected
 
 - **WHEN** the operator is typing or in active conversation with a coordinator (COS/XO)

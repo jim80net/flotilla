@@ -93,6 +93,7 @@ type Server struct {
 	control     control.Controller // cnc control (notify live; route/resume gated on the pane lock)
 	done        *doneRecorder      // goals done-history observer/writer (#418) — the one artifact the dash WRITES
 	goalsLoadWG sync.WaitGroup     // async loadGoals from the SSE poller; tests drain before TempDir teardown
+	pollWG      sync.WaitGroup     // SSE file poller; shutdown waits for exit before draining loadGoals
 }
 
 // NewServer validates the bind address (LOOPBACK ONLY — see validateBind; the
@@ -187,7 +188,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 	// The file poller drives the SSE hub; it stops when ctx is cancelled.
 	go s.hub.run(ctx)
-	go s.poll(ctx)
+	s.startPoll(ctx)
 
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()

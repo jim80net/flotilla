@@ -316,6 +316,8 @@ New subcommand family: `flotilla bootstrap` with exit codes suitable for CI / ag
 | `B009` | Permission template synced for seat surface+role | warn |
 | `B010` | `flotilla register` would succeed (dry-run pane list) | info |
 | `B011` | When `adjutant_for` set: buffer path writable; `urgent_windows` or defaults documented | warn |
+| `B011a` | When `adjutant_for` set: watch build includes `OperatorProtectedWindow` seam gate (not prompt-only) | warn→fail |
+| `B012` | Every `live_expected` agent has derivable `loop_posture` when snapshot fresh (§2.5) | warn |
 
 **Idempotence:** `bootstrap apply` (future) only writes scaffold files that are missing or
 older than repo template version; never overwrites operator-edited secrets or roster without
