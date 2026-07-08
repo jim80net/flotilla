@@ -28,15 +28,40 @@ Bootstrap permissions sync SHALL materialize role policy to:
   `approval_policy=never`
 - **THEN** `gh pr merge` is blocked by gatekeeper PreToolUse deny (not merely native settings)
 
-### Requirement: Leadership low-noise baseline
+### Requirement: Autonomous fleet — zero approval noise for authorized flows
+
+Role-authorized fleet operations SHALL proceed **without per-command harness approvals**. The
+design target is an autonomous fleet — not merely reduced approval noise. Safety SHALL come from
+role boundaries, no self-merge, lane scoping, audit logs, reversible/idempotent operations, and
+operator gates for money / irreversible / divergent forks — not from prompting on every normal
+command.
+
+#### Scenario: Full coordinator heartbeat without prompts
+
+- **WHEN** a `cos` or `xo` seat runs a heartbeat cycle: `flotilla status` → `flotilla send` →
+  `touch` ack → `flotilla notify`
+- **THEN** no harness approval modal SHALL appear for any step in the authorized set
+
+#### Scenario: Autonomy gap detected at bootstrap
+
+- **WHEN** compiled policy for leadership omits any flow in design §0.1 from the allow materialization
+- **THEN** permissions doctor fails with `PERM_AUTONOMY_GAP`
+
+### Requirement: Leadership zero-prompt baseline
 
 Roles `cos` and `xo` SHALL allow unprompted: `flotilla status`, `flotilla send`, `flotilla notify`,
-`flotilla register`, and `touch` on per-layer ack/settled paths.
+`flotilla register`, `flotilla recycle`, deploy-lane build/test, `gh pr` read/review/merge (merge
+subject to no-self-merge doctrine), and `touch` on per-layer ack/settled paths.
 
 #### Scenario: Coordinator ack denied
 
 - **WHEN** compiled policy for `xo` omits touch on ack paths
 - **THEN** permissions doctor fails with `PERM_ACK_BLOCKED`
+
+#### Scenario: Adjutant triage without prompts
+
+- **WHEN** an `adjutant` runs status inspection + buffer read + charter write within policy
+- **THEN** no harness approval modal SHALL appear for authorized adjutant flows
 
 ### Requirement: Desk constraint
 

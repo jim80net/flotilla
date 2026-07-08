@@ -1,6 +1,6 @@
 ---
 name: flotilla-fleet-permissions
-description: Design and apply role-based permissions for flotilla COS/XO/adjutant/desk seats across Claude/Codex/Grok. Use when configuring harness permissions, reducing approval noise for leadership, hardening desk constraints, evaluating gatekeeper vs native config, or syncing bootstrap permissions. Focused desk — not dash UI work.
+description: Design and apply role-based permissions for flotilla COS/XO/adjutant/desk seats across Claude/Codex/Grok. Target is zero approval noise for role-authorized fleet ops (autonomous fleet) — not low noise. Use when configuring harness permissions, eliminating coordinator approval storms, hardening desk constraints, evaluating gatekeeper vs native config, or syncing bootstrap permissions. Focused desk — not dash UI work.
 ---
 
 # Fleet role permissions (focused desk)
@@ -13,9 +13,20 @@ Canonical policy prototype:
 
 `deploy/flotilla-permissions/canonical-roles.json`
 
+## Design criteria (load-bearing)
+
+**Zero approval noise** for role-authorized operations — the fleet is **autonomous**. Normal
+COS/XO/adjutant flows (communicate, state R/W, inspect, dispatch, gate, merge, deploy, reap) run
+**without per-command harness approvals** when the role permits.
+
+Safety = role boundaries + no self-merge + lane scoping + audit logs + reversible/idempotent ops
++ operator gates (money / irreversible / fork) — **not** prompting on every command.
+
+See `design.md` §0.
+
 ## When to use
 
-- Operator granted temporary Full Access — design steady-state replacement
+- Operator granted temporary Full Access — design steady-state replacement (eliminate escape hatch)
 - Codex/Claude/Grok approval storms on coordinator seats
 - Desk merge/push guardrails under `--always-approve`
 - Choosing gatekeeper vs native permission strategy
@@ -26,7 +37,7 @@ Canonical policy prototype:
 |---|---|---|
 | **A** | `claude-gatekeeper` canonical engine + harness adapters + flotilla role overlays | Hard deny, audit, codex/grok auto-approve desks |
 | **B** | Native only: Claude `settings.local.json`, Grok `--allow/--deny`, Codex hooks/rules | Claude/Grok allow friction reduction |
-| **A′ (recommended)** | Canonical JSON → gatekeeper overlays **+** native allow materialization | Fleet steady state |
+| **A′ (recommended)** | Canonical JSON → gatekeeper overlays **+** native allow materialization | Autonomous fleet steady state (§0) |
 
 ## Role authority (summary)
 
@@ -46,7 +57,7 @@ Canonical policy prototype:
    claude-gatekeeper setup --harness codex   # or claude | grok
    ```
 5. Merge native allow tier from generated materialized output (when compiler ships)
-6. Validate P1–P8 from design §9
+6. Validate P1–P11 from design §9 (P9–P11 = autonomy / zero-prompt regression)
 
 ## Detector orphan (permissions angle)
 

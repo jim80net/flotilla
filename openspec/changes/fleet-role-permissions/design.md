@@ -8,6 +8,55 @@ follow in implementation PRs.
 
 ---
 
+## 0. Design criteria — autonomous fleet (operator correction)
+
+**Target:** **Zero approval noise** for role-authorized fleet operation — not merely low noise.
+The steady-state fleet is **autonomous**: normal COS / XO / adjutant work proceeds **without
+per-command harness approvals** when the role authorizes the action.
+
+### 0.1 Role-authorized flows (zero-prompt when permitted)
+
+| Flow class | Examples (leadership) | Desk |
+|---|---|---|
+| **Communication** | `flotilla send`, `flotilla notify`, coordinator relay | `flotilla send` to parent XO only |
+| **State read/write** | roster, backlog, goals, session-mirror read; ack/settled `touch`; buffer sidecars | lane worktree + goals read |
+| **Status / inspect** | `flotilla status`, tmux list/capture, detector snapshot read | `flotilla status`, lane git read |
+| **Dispatch** | `flotilla send <desk>`, schedules, dropped-dispatch resume | receive only (no notify) |
+| **Gate / review** | `gh pr view/diff/checks/review`, CI read, independent review reads | same read tier; no merge |
+| **Merge** | `gh pr merge` on reviewer seats (hierarchy-relative; **no self-merge**) | **deny** unless `elevation.merge` |
+| **Deploy** | build/test/lint; roster-authorized service restart | build/test in lane |
+| **Reap** | `flotilla recycle`, rotate/handoff orchestration, `flotilla register` | recycle self; no fleet-state write |
+
+**Pass criterion:** A coordinator executing a full heartbeat cycle (status → send desks → touch
+ack → notify operator surface) SHALL NOT surface a harness approval modal for any step in the
+allowed set.
+
+### 0.2 Safety without per-command prompting
+
+Safety does **not** come from prompting the operator or COS on every normal command. It comes
+from:
+
+| Control | Mechanism |
+|---|---|
+| **Role boundaries** | `fleet_role` + canonical policy; desk cannot merge/notify/push-default |
+| **No self-merge** | Doctrine + deny patterns; merge authority is hierarchy-relative |
+| **Lane scoping** | desk worktree globs; transient desks narrower |
+| **Audit logs** | session-mirror, Discord mirror, gatekeeper decision log |
+| **Reversible / idempotent ops** | bootstrap sync, doctor, touch ack, send with confirm layer |
+| **Operator gates (only)** | money spend, irreversible/destructive, genuine divergent forks |
+
+Full Access and per-command approval storms are **failure modes** to eliminate — not the
+steady-state control plane.
+
+### 0.3 Materialization implication
+
+Hybrid A′ MUST materialize **both** gatekeeper allow rules **and** native auto-approve tiers so
+unmatched-call prompting cannot block authorized leadership flows. For Codex/Grok coordinators,
+native `approval_policy=never` / `--always-approve` is acceptable **only** when gatekeeper deny
+spine + role overlay fully constrain the seat — never as an unscoped escape hatch.
+
+---
+
 ## 1. Problem
 
 | Pain today | Root cause |
@@ -19,7 +68,8 @@ follow in implementation PRs.
 | Bootstrap copies wrong template | `fleet_role` + `surface` → template mapping not formalized |
 
 **Goal:** One auditable **canonical role policy** materialized idempotently per harness, with
-minimal prompts for leadership and hard constraints for desks.
+**zero approval noise** for role-authorized leadership/adjutant flows and hard constraints for
+desks (§0).
 
 ---
 
@@ -90,7 +140,7 @@ deploy/flotilla-permissions/overlays/<fleet_role>.toml
 |---|---|
 | Public-safe | One policy in flotilla repo; no host paths in rules |
 | Idempotent bootstrap | `claude-gatekeeper setup --harness <h>` + overlay copy with version stamp |
-| Minimal leadership noise | Allow rules front-load `flotilla *`, `gh pr view`, reads; deny spine catches foot-guns |
+| Zero leadership approval noise | Allow rules + native auto-approve cover full §0.1 flow set; deny spine catches foot-guns |
 | Constrained desks | Deny merge/push-to-main wins even under codex `never` / grok `bypassPermissions` (live-verified) |
 | Easy audit | Single TOML per role + gatekeeper decision logs; regex reviewable in PR |
 | Gatekeeper compat | **Native fit** — adapters already stable for all three harnesses |
@@ -100,8 +150,8 @@ deploy/flotilla-permissions/overlays/<fleet_role>.toml
 - Requires gatekeeper binary on PATH per seat (acceptable — already fleet standard).
 - Codex needs hook trust (`--dangerously-bypass-hook-trust` or interactive trust once).
 - Grok needs `/hooks-trust` on project dir.
-- Native harness "allow lists" still needed for **prompt friction reduction** on leadership —
-  gatekeeper allow auto-approves matched calls but unmatched calls still prompt in prompting mode.
+- Native harness allow lists are **required** for zero-prompt leadership — gatekeeper allow alone
+  does not suppress all harness UI friction; both layers must cover §0.1 authorized flows.
 
 ---
 
@@ -127,7 +177,7 @@ Materialize role policy **only** in harness-native stores:
 |---|---|
 | Public-safe | Possible but **three divergent schemas** to keep in sync |
 | Idempotent bootstrap | `sync-grok-readonly-permissions.sh` exists; Claude/Codex lack unified sync |
-| Minimal leadership noise | Good for Claude/Grok allows; Codex has **no** rich allow glob — rules/hooks only |
+| Zero leadership approval noise | Good for Claude/Grok allows; Codex needs hook+rules coverage for full §0.1 set |
 | Constrained desks | **Weak on grok always-approve** — CLI deny unreliable; codex needs hooks anyway for hard deny |
 | Easy audit | Three files per seat; drift between `deploy/grok-*.json` and live settings |
 | Gatekeeper compat | Duplicates deny logic already in gatekeeper.toml |
@@ -140,7 +190,7 @@ Materialize role policy **only** in harness-native stores:
 |---|---|---|---|
 | Public-safe canonical policy | Strong | Weak (3 schemas) | **Strong** — JSON in flotilla |
 | Idempotent bootstrap | Strong (setup + stamp) | Partial (grok only) | **Strong** |
-| Leadership low noise | Strong (allow rules) | Strong Claude/Grok; weak Codex | **Allow via native where effective; gatekeeper allow duplicates for codex** |
+| Leadership zero approval noise | Strong (allow rules) | Strong Claude/Grok; weak Codex | **Dual-layer allow — native + gatekeeper — until Codex parity; doctor fails on gaps** |
 | Desk hard constraints | **Strong** (hook deny) | Weak grok/codex auto | **Strong** |
 | Auditability | Strong | Fragmented | **Strong** — canonical JSON + generated artifacts |
 | Gatekeeper compat | Native | Forks deny rules | **Extends gatekeeper, does not fork** |
@@ -159,8 +209,9 @@ Materialize role policy **only** in harness-native stores:
    - copies overlay into `~/.config/gatekeeper/overlays/` or project `.gatekeeper/`
    - merges native allow fragment into worktree settings
    - writes `flotilla-permissions-sync.stamp` (role, surface, schema_version)
-4. **Route B remains** the friction-reduction layer for Claude/Grok leadership allows; **Route A**
-   is the authoritative deny + codex-hard-gate layer.
+4. **Route B** supplies native auto-approve for Claude/Grok leadership; **Route A** supplies
+   authoritative deny + codex-hard-gate + allow spine. **Both** are required for §0 zero-noise
+   steady state — not optional friction reduction.
 
 **Not recommended:** Native-only (Route B) as sole scheme — grok always-approve and codex
 `approval_policy=never` proved CLI/settings deny is not a reliable desk constraint.
@@ -177,13 +228,17 @@ Ships in this PR as the auditable contract. Fields:
 - `roles.<fleet_role>.elevation` — optional desk elevation flags
 - `policy.on_gatekeeper_error` — `abstain` (fleet default)
 
-Leadership `xo` tier includes unprompted:
+Leadership `xo` tier includes **zero-prompt** (§0.1):
 
 ```text
-flotilla status*, flotilla send*, flotilla notify*, flotilla register*
+flotilla status*, flotilla send*, flotilla notify*, flotilla register*, flotilla recycle*
 touch <roster-dir>/flotilla-*-alive, flotilla-*-settled
-gh pr merge* (allow), git push origin main* (deny)
+gh pr view/diff/checks/review/merge* (merge allow on reviewer seats)
+git push origin main* (deny)
+go test*, go build*, make test* (deploy lane)
 ```
+
+Doctor check **P009**: any §0.1 leadership flow missing from compiled allow set ⇒ `PERM_AUTONOMY_GAP`.
 
 Desk tier denies `gh pr merge*`, `flotilla notify*`, default-branch push patterns.
 
@@ -239,6 +294,12 @@ path-scoped Read/Write rules where harness supports it (Claude Read/Write tools;
 | P6 | Coordinator: `gh pr merge` allowed on trial PR |
 | P7 | `bootstrap permissions doctor` — no drift vs canonical |
 | P8 | Codex coordinator: hook deny canary under `approval_policy=never` |
+| P9 | Full heartbeat cycle (status → send → touch ack → notify): **zero** approval modals |
+| P10 | Adjutant triage path (status + buffer read + charter write): zero approval modals |
+| P11 | `bootstrap permissions doctor` reports no `PERM_AUTONOMY_GAP` for leadership roles |
+
+**Autonomy regression:** Any harness upgrade that re-introduces per-command prompts on §0.1
+flows is a **release blocker** for coordinator seats until allow materialization is patched.
 
 ---
 

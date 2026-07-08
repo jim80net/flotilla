@@ -3,7 +3,8 @@
   "schema_version": 1,
   "policy": {
     "on_gatekeeper_error": "abstain",
-    "description": "Gatekeeper errors defer to native permission system; deny spine still applies on matched rules."
+    "design_criteria": "zero_approval_noise_for_role_authorized_ops",
+    "description": "Autonomous fleet steady state: role-authorized flows (communication, state R/W, inspect, dispatch, gate, merge, deploy, reap) proceed without per-command harness approvals. Safety from role boundaries, no self-merge, lane scoping, audit logs, reversible ops, and operator gates for money/irreversible/fork — not per-command prompting. Gatekeeper errors defer to native; deny spine still applies on matched rules."
   },
   "roles": {
     "cos": {
@@ -16,10 +17,13 @@
         "flotilla.send",
         "flotilla.status",
         "flotilla.register",
+        "flotilla.recycle",
         "fleet.state.rw",
         "gh.merge",
+        "gh.review",
         "gh.read",
         "git.read",
+        "deploy.build",
         "tmux.inspect",
         "detector.ack"
       ],
@@ -28,6 +32,7 @@
         "flotilla send*",
         "flotilla notify*",
         "flotilla register*",
+        "flotilla recycle*",
         "flotilla result*",
         "touch *flotilla-*-alive*",
         "touch *flotilla-*-settled*",
@@ -35,11 +40,15 @@
         "gh pr view*",
         "gh pr diff*",
         "gh pr checks*",
+        "gh pr review*",
         "gh pr list*",
         "git status*",
         "git diff*",
         "git log*",
         "git show*",
+        "go test*",
+        "go build*",
+        "make test*",
         "tmux list-panes*",
         "tmux capture-pane*"
       ],
