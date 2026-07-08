@@ -1,7 +1,10 @@
 # Design — fleet role permissions
 
 **Focused desk** — role-based permission scheme for flotilla seats. Public-safe; generic role
-names only. Sibling to `fleet-bootstrap-standup` (topology/doctor), not a sub-task of dash work.
+names only. Sibling to **fleet bootstrap/standup** (topology/doctor) — ships in
+[PR #520](https://github.com/jim80net/flotilla/pull/520) (`design/fleet-bootstrap-standup-clean`);
+path `openspec/changes/fleet-bootstrap-standup/design.md` is valid **after #520 merges**. Until
+then, treat bootstrap §2 (ops-xo vs product XO) as the paired contract. Not a sub-task of dash work.
 
 **Status:** Design for COS review. Prototype JSON ships in this PR; compiler + bootstrap sync
 follow in implementation PRs.
@@ -75,22 +78,30 @@ desks (§0).
 
 ## 2. Role classes and authority baseline
 
-Aligns with `fleet_role` from bootstrap design (`cos` | `xo` | `adjutant` | `desk` |
-`transient-task-desk`).
+Aligns with `fleet_role` from bootstrap design (PR #520 §2): `cos` | `meta-xo` | `ops-xo` |
+`xo` (product/project XO) | `adjutant` | `desk` | `transient-task-desk`.
 
-### 2.1 Leadership baseline (COS, XO)
+**Authority boundary:** Product XOs (`fleet_role: xo`) are **not** accountable fleet-ops owners.
+`ops-xo` holds bootstrap, permissions sync, rename, and roster-hygiene authority. Provision
+`ops-xo` before implementation waves (bootstrap §2.2).
 
-| Capability | Allow unprompted | Deny / gate |
+### 2.1 Leadership baseline (COS, meta-xo, ops-xo, product xo)
+
+| Capability | Allow unprompted (§0) | Deny / gate |
 |---|---|---|
 | **Message** | `flotilla send`, `flotilla notify` (coordinator secrets) | — |
 | **Inspect fleet** | `flotilla status`, read roster/goals/backlog/detector snapshot | — |
-| **Write fleet state** | touch ack/settled; append backlog; edit goals (role-scoped paths) | secrets write |
-| **tmux / detector** | `tmux capture-pane`, read-only tmux list; `flotilla register` (bootstrap) | destructive tmux |
-| **Git/gh read** | status, log, diff, pr view, checks | — |
+| **Write fleet state** | touch ack/settled; append backlog; edit goals (role-scoped) | secrets write |
+| **Fleet ops** (`ops-xo` only) | `flotilla bootstrap*`, permissions sync, rename doctor, roster hygiene writes | product XO lacks by default |
+| **tmux / detector** | `tmux capture-pane`, read-only tmux list; `flotilla register` | destructive tmux |
+| **Git/gh read** | status, log, diff, pr view, checks, review | — |
 | **Merge authority** | `gh pr merge` (independent-review seats only) | `git push` default branch, `+refspec`, force |
-| **Deploy** | build/test/lint; restart user services **only** when roster-authorized deploy role | prod destructive |
+| **Deploy** | build/test/lint; roster-authorized service restart | prod destructive |
 
-### 2.2 Adjutant
+Product `xo` inherits leadership baseline **without** fleet-ops write paths unless explicitly
+elevated (audited). `ops-xo` extends leadership with fleet-ops capabilities in canonical JSON.
+
+### 2.2 Adjutant (separate tier — not leadership)
 
 | Capability | Allow | Deny |
 |---|---|---|
@@ -227,8 +238,19 @@ Ships in this PR as the auditable contract. Fields:
 - `roles.<fleet_role>.bash_allow[]` / `bash_deny[]` — glob patterns (materialize to harness)
 - `roles.<fleet_role>.elevation` — optional desk elevation flags
 - `policy.on_gatekeeper_error` — `abstain` (fleet default)
+- `policy.design_criteria` — machine tag consumed by compiler + doctor (not decorative metadata)
 
-Leadership `xo` tier includes **zero-prompt** (§0.1):
+**`design_criteria` consumer (Phase 1 compiler):** `scripts/compile-flotilla-permissions.sh`
+SHALL read `policy.design_criteria` and:
+
+1. Emit a comment header in every generated overlay/materialized artifact citing the criteria
+2. Fail compile if value ≠ `zero_approval_noise_for_role_authorized_ops` (schema mismatch guard)
+3. Emit `flotilla-permissions-sync.stamp` field `design_criteria` for doctor drift checks
+
+`flotilla bootstrap permissions doctor` SHALL fail `PERM_DESIGN_CRITERIA_DRIFT` when on-disk
+stamp disagrees with canonical `policy.design_criteria`.
+
+Leadership tiers (`meta-xo`, `ops-xo`, product `xo`, `cos`) include **zero-prompt** (§0.1):
 
 ```text
 flotilla status*, flotilla send*, flotilla notify*, flotilla register*, flotilla recycle*
@@ -250,7 +272,7 @@ Runs as a **subcommand of the permissions desk**, not folded into dash:
 
 ```bash
 flotilla bootstrap permissions doctor --roster $R   # stamp + hook presence + drift
-flotilla bootstrap permissions sync --agent alpha-xo --roster $R
+flotilla bootstrap permissions sync --agent ops-xo --roster $R
 ```
 
 **Idempotence:** sync no-ops when `flotilla-permissions-sync.stamp` matches `schema_version` +
@@ -308,6 +330,7 @@ flows is a **release blocker** for coordinator seats until allow materialization
 - `github.com/jim80net/claude-gatekeeper` — canonical + adapters (Route A)
 - `deploy/grok-coordinator-permission-allowlist.json`, `deploy/grok-permission-allowlist.json`
 - `scripts/sync-grok-readonly-permissions.sh`
-- `openspec/changes/fleet-bootstrap-standup/design.md` — topology, `fleet_role`, doctor
+- `openspec/changes/fleet-bootstrap-standup/design.md` (PR #520, pending merge) — topology,
+  `fleet_role`, ops-xo boundary, doctor
 - `openspec/changes/codex-coordinator-seat/design.md` — codex coordinator posture
 - `docs/coordinator-seat-swap-runbook.md` § Grok permission posture

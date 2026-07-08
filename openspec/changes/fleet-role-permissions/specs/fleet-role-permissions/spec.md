@@ -1,14 +1,15 @@
 # Spec — fleet role permissions
 
-Requirements for the focused permissions desk. Complements `fleet-bootstrap` topology spec.
+Requirements for the focused permissions desk. Complements fleet-bootstrap topology spec
+([PR #520](https://github.com/jim80net/flotilla/pull/520), path valid after merge).
 
 ## ADDED Requirements
 
 ### Requirement: Canonical role policy
 
 The fleet SHALL maintain a versioned canonical permission policy at
-`deploy/flotilla-permissions/canonical-roles.json` covering `cos`, `xo`, `adjutant`, `desk`, and
-`transient-task-desk`.
+`deploy/flotilla-permissions/canonical-roles.json` covering `cos`, `meta-xo`, `ops-xo`,
+`xo` (product), `adjutant`, `desk`, and `transient-task-desk`.
 
 #### Scenario: Schema version bump
 
@@ -38,8 +39,8 @@ command.
 
 #### Scenario: Full coordinator heartbeat without prompts
 
-- **WHEN** a `cos` or `xo` seat runs a heartbeat cycle: `flotilla status` → `flotilla send` →
-  `touch` ack → `flotilla notify`
+- **WHEN** a `cos`, `meta-xo`, `ops-xo`, or product `xo` seat runs a heartbeat cycle:
+  `flotilla status` → `flotilla send` → `touch` ack → `flotilla notify`
 - **THEN** no harness approval modal SHALL appear for any step in the authorized set
 
 #### Scenario: Autonomy gap detected at bootstrap
@@ -49,19 +50,43 @@ command.
 
 ### Requirement: Leadership zero-prompt baseline
 
-Roles `cos` and `xo` SHALL allow unprompted: `flotilla status`, `flotilla send`, `flotilla notify`,
-`flotilla register`, `flotilla recycle`, deploy-lane build/test, `gh pr` read/review/merge (merge
-subject to no-self-merge doctrine), and `touch` on per-layer ack/settled paths.
+Roles `cos`, `meta-xo`, `ops-xo`, and product `xo` SHALL allow unprompted: `flotilla status`,
+`flotilla send`, `flotilla notify`, `flotilla register`, `flotilla recycle`, deploy-lane
+build/test, `gh pr` read/review/merge (merge subject to no-self-merge doctrine), and `touch` on
+per-layer ack/settled paths. Role `ops-xo` SHALL additionally allow unprompted fleet-ops commands
+(`flotilla bootstrap*`, permissions sync) per canonical `ops-xo` tier.
+
+#### Scenario: Ops-xo fleet-ops without prompts
+
+- **WHEN** `ops-xo` runs `flotilla bootstrap permissions doctor` and `permissions sync` within policy
+- **THEN** no harness approval modal SHALL appear
+- **AND** product `xo` policy SHALL NOT grant fleet-ops write paths by default
 
 #### Scenario: Coordinator ack denied
 
-- **WHEN** compiled policy for `xo` omits touch on ack paths
+- **WHEN** compiled policy for leadership omits touch on ack paths
 - **THEN** permissions doctor fails with `PERM_ACK_BLOCKED`
+
+### Requirement: Adjutant zero-prompt baseline
+
+Role `adjutant` SHALL allow unprompted status inspection, buffer read, and charter read/write
+within policy. Adjutant is a **separate tier** from leadership — not a subset of the leadership
+requirement above.
 
 #### Scenario: Adjutant triage without prompts
 
 - **WHEN** an `adjutant` runs status inspection + buffer read + charter write within policy
 - **THEN** no harness approval modal SHALL appear for authorized adjutant flows
+
+### Requirement: Design criteria metadata consumer
+
+`policy.design_criteria` in canonical JSON SHALL be consumed by the permissions compiler and
+doctor — not treated as dead metadata.
+
+#### Scenario: Design criteria drift
+
+- **WHEN** on-disk sync stamp `design_criteria` differs from canonical `policy.design_criteria`
+- **THEN** permissions doctor fails with `PERM_DESIGN_CRITERIA_DRIFT`
 
 ### Requirement: Desk constraint
 

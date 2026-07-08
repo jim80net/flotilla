@@ -8,11 +8,14 @@ Separate lane from dash and fleet-bootstrap topology. COS gate before implementa
 - [x] `deploy/flotilla-permissions/canonical-roles.json` prototype
 - [x] Spec + skill stub
 - [x] Operator correction: zero approval noise / autonomous fleet design criteria (`design.md` §0)
+- [x] Operator correction: ops-xo vs product XO authority boundary (aligned with PR #520 §2.2)
+- [x] Cubic bounce fixes: bootstrap forward-ref, adjutant tier split, design_criteria consumer
 - [ ] COS review + merge (independent reviewer)
 
 ## Phase 1 — Compiler
 
-- [ ] `scripts/compile-flotilla-permissions.sh` — JSON → gatekeeper TOML overlays
+- [ ] `scripts/compile-flotilla-permissions.sh` — JSON → gatekeeper TOML overlays; enforce
+      `policy.design_criteria`; emit header comment in artifacts
 - [ ] Emit grok allowlist JSON (backward compatible with `deploy/grok-*-permission-allowlist.json`)
 - [ ] Emit Claude `permissions` fragment for merge into `settings.local.json`
 - [ ] Emit Codex rules snippet + documented hook install line

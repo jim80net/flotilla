@@ -17,8 +17,8 @@ forks — not from prompting on every normal command.
 This is a **separate focused desk** from:
 
 - **Dash P0** (`fix/dash-p0-*`) — UI/feed/hierarchy/decision-lineage
-- **Fleet bootstrap topology** (`openspec/changes/fleet-bootstrap-standup`, PR #520) — roster
-  roles, doctor checks, tmux markers, state-root layout
+- **Fleet bootstrap topology** ([PR #520](https://github.com/jim80net/flotilla/pull/520), pending
+  merge) — roster roles, **ops-xo vs product XO** boundary, doctor checks, tmux markers
 
 Permissions deserve their own design lane, prototype, and implementation PRs so bootstrap does
 not casually absorb a half-specified permission story.
@@ -37,8 +37,9 @@ not casually absorb a half-specified permission story.
 
 - **Autonomy:** zero harness approval modals on role-authorized leadership flows (§0.1 in
   `design.md`) — full heartbeat cycle, dispatch, gate, merge (reviewer seats), deploy, reap.
-- Leadership (COS/XO/adjutant): message, read/inspect fleet state, write state/backlog/ledger,
-  inspect tmux/detector; merge/deploy only where role-authorized.
+- **Ops-xo boundary:** `ops-xo` accountable for fleet ops (bootstrap, permissions, rename);
+  product XOs own implementation lanes only — provision `ops-xo` before implementation.
+- Leadership (COS/meta-xo/ops-xo/product xo/adjutant): role-tier zero-prompt flows per §0.
 - Desks: lane-scoped; no merge-completing powers unless explicitly elevated.
 - **Safety without prompting:** role boundaries + no self-merge + lane scoping + audit + operator
   gates for spend / irreversible / fork — not per-command approval storms.

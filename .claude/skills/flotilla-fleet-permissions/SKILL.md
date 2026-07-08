@@ -41,11 +41,15 @@ See `design.md` §0.
 
 ## Role authority (summary)
 
-| Role | Merge | Notify | Fleet state R/W | Register/touch ack |
+| Role | Accountability | Merge | Notify | Fleet ops |
 |---|---|---|---|---|
-| cos / xo | allow (reviewer seats) | allow | allow | allow |
-| adjutant | deny | deny | read + buffer | read |
-| desk | deny (unless elevated) | deny | lane only | deny |
+| `ops-xo` | **Fleet operations** (bootstrap, permissions, rename) | allow (reviewer) | allow | **allow** |
+| `xo` (product) | Product implementation lane | allow (reviewer) | allow | deny by default |
+| `meta-xo` / `cos` | Fleet command / chief-of-staff | allow | allow | delegate to ops-xo |
+| `adjutant` | Mechanical triage | deny | deny | read + buffer |
+| `desk` | Execution | deny | deny | lane only |
+
+Provision **`ops-xo`** before permissions implementation (PR #520 §2.2).
 
 ## Workflow
 
@@ -74,5 +78,5 @@ otherwise a correctly tagged Codex COS is still operationally blocked.
 
 - `github.com/jim80net/claude-gatekeeper` README (adapters + abstain posture)
 - `deploy/grok-coordinator-permission-allowlist.json`
-- `openspec/changes/fleet-bootstrap-standup/` (topology sibling)
+- `openspec/changes/fleet-bootstrap-standup/` (PR #520 — ops-xo boundary; valid after merge)
 - `openspec/changes/codex-coordinator-seat/design.md`

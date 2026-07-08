@@ -11,7 +11,30 @@
       "extends": "xo",
       "capabilities": ["flotilla.notify", "flotilla.send", "flotilla.status", "fleet.state.rw", "gh.merge", "tmux.inspect", "detector.ack"]
     },
+    "meta-xo": {
+      "extends": "xo",
+      "capabilities": ["fleet.command"],
+      "_comment": "Fleet command coordinator (xo_agent clock). Same permission tier as xo."
+    },
+    "ops-xo": {
+      "extends": "xo",
+      "capabilities": [
+        "fleet.ops",
+        "bootstrap.doctor",
+        "permissions.sync",
+        "rename.plan",
+        "roster.hygiene"
+      ],
+      "bash_allow": [
+        "flotilla bootstrap*",
+        "scripts/bootstrap-*",
+        "scripts/compile-flotilla-permissions*",
+        "scripts/check-private-boundary*"
+      ],
+      "_comment": "Fleet operations accountability — NOT product implementation. Default assignee for bootstrap/permissions/rename."
+    },
     "xo": {
+      "_comment": "Product/project XO — implementation lanes only; not fleet-ops owner",
       "capabilities": [
         "flotilla.notify",
         "flotilla.send",
@@ -129,6 +152,12 @@
     "grok_allowlist_dir": "deploy/flotilla-permissions/materialized/grok",
     "codex_rules_dir": "deploy/flotilla-permissions/materialized/codex",
     "compiler": "scripts/compile-flotilla-permissions.sh",
-    "sync": "flotilla bootstrap permissions sync"
+    "sync": "flotilla bootstrap permissions sync",
+    "design_criteria_consumer": {
+      "compile_enforces": "policy.design_criteria",
+      "doctor_check": "PERM_DESIGN_CRITERIA_DRIFT",
+      "stamp_field": "design_criteria",
+      "overlay_header_comment": true
+    }
   }
 }
