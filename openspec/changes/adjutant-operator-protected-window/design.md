@@ -168,8 +168,11 @@ Goal-driven loops keep the leader `Working` for extended periods. Rules:
 
 | State | Protected? | Seam inject? |
 |---|---|---|
-| Leader `Working`, goal active, operator idle | false | Defer to finish seam OR evaluation `bufferSeamMaxWait` |
-| Leader `Working`, operator relay pending | true | **Suppress** |
+| Leader `composing` (loop posture), goal active, operator idle | false | Defer to finish seam OR evaluation `bufferSeamMaxWait` |
+| Leader `composing`, operator relay pending | true | **Suppress** |
+
+Loop posture vocabulary: `openspec/changes/loop-aware-status-taxonomy/` — adjutant observes
+`loop_posture`, not pane `idle` alone.
 | Leader `Working`, awaiting marker set | true | **Suppress** |
 | Leader `Idle` / settled, not protected | false | Allow `drainAdjutantSeamFor` |
 | Evaluation tick, work-found, not protected | false | May inject despite `Working` after TTL |
