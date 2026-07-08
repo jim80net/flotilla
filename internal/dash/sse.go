@@ -226,7 +226,9 @@ func (s *Server) poll(ctx context.Context) {
 				// (cubic #449 P1). The next trigger simply observes again.
 				if cur.snap != prev.snap || cur.backlog != prev.backlog ||
 					cur.goals != prev.goals || cur.goalsYAML != prev.goalsYAML {
+					s.goalsLoadWG.Add(1)
 					go func() {
+						defer s.goalsLoadWG.Done()
 						defer func() {
 							if r := recover(); r != nil {
 								fmt.Fprintf(os.Stderr, "flotilla dash: goals done-history observation panicked (recovered): %v\n", r)
