@@ -187,6 +187,29 @@ adjutant consolidated brief to leader pane (buffer retained until window clears)
 Doctor **B011a**: when adjutant configured, verify watch build includes `OperatorProtectedWindow`
 seam gate (not prompt-only).
 
+### 2.5 Loop-aware status taxonomy (product requirement)
+
+Plain pane **idle** is NOT an adequate autonomous-fleet loop state — it conflates inactive /
+out-of-loop with legitimate in-loop postures (between turns, parked, maintaining, refining,
+cleaning). Bootstrap and standup MUST surface a **loop posture** distinct from `surface.State`.
+
+Full taxonomy: `openspec/changes/loop-aware-status-taxonomy/`.
+
+| Layer | Field | Officer question |
+|---|---|---|
+| Pane | `state` | What does the harness show? (`working`, `idle`, `crashed`, …) |
+| Loop | `loop_posture` | Is this seat properly in the coordination loop? |
+
+v1 in-loop postures: `composing`, `available`, `parked`, `awaiting-authority`, `blocked`,
+optional `maintaining` / `refining` / `cleaning`. Out-of-loop: `drifted`, `crashed`, `reaped`,
+`unknown`.
+
+Doctor **B012**: every `live_expected` agent has derivable `loop_posture` when snapshot fresh;
+stale/absent ⇒ `LOOP_POSTURE_UNKNOWN` on live seats.
+
+Validation **V10**: `flotilla status --json` distinguishes `available` vs `parked` vs `drifted`
+vs `awaiting-authority` on generic fixtures.
+
 ## 3. Naming convention — `{identifier}-{role}`
 
 Human and machine readability for federated fleets:
