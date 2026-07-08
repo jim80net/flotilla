@@ -84,6 +84,8 @@ requirement above.
 - **AND** a non-urgent material item arrives
 - **THEN** the adjutant SHALL buffer the item
 - **AND** SHALL NOT inject into the leader pane until a machine-idle seam
+- **AND** watch SHALL mechanically suppress seam inject while `OperatorProtectedWindow(leader)`
+  is true (relay queue pending, awaiting marker, in-flight relay, or active-conversation tail)
 
 #### Scenario: Adjutant urgent bypass
 

@@ -10,6 +10,7 @@ Separate lane from dash and fleet-bootstrap topology. COS gate before implementa
 - [x] Operator correction: zero approval noise / autonomous fleet design criteria (`design.md` §0)
 - [x] Operator correction: ops-xo vs product XO authority boundary (aligned with PR #520 §2.2)
 - [x] Cubic bounce fixes: bootstrap forward-ref, adjutant tier split, design_criteria consumer
+- [x] Mechanical adjutant protected-window design (`adjutant-operator-protected-window/`)
 - [ ] COS review + merge (independent reviewer)
 
 ## Phase 1 — Compiler

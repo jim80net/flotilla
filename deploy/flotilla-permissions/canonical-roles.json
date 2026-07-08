@@ -101,7 +101,7 @@
         "usage_limit",
         "operator_relay"
       ],
-      "_comment_laminar": "Behavioral contract in bootstrap §2.4 — permissions allow buffer/charter paths; seam policy enforced by watch adjutant buffer",
+      "_comment_laminar": "Seam policy enforced mechanically in watch (OperatorProtectedWindow gate) — openspec/changes/adjutant-operator-protected-window; permissions allow buffer/charter paths only",
       "bash_allow": [
         "flotilla status*",
         "cat *flotilla-*-buffer.json*",

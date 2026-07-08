@@ -41,7 +41,8 @@ not casually absorb a half-specified permission story.
   product XOs own implementation lanes only — provision `ops-xo` before implementation.
 - **Adjutant laminar flow:** buffer non-urgent; no interject during operator typing/active
   conversation; urgent bypass (money/irreversible/fork/incident/incapacitation); no infinite
-  perfect-idle wait during goal loop (bootstrap §2.4).
+  perfect-idle wait during goal loop. Protected-window rule is **mechanical in watch** (see
+  `openspec/changes/adjutant-operator-protected-window/`), not prompt-contract.
 - Leadership (COS/meta-xo/ops-xo/product xo/adjutant): role-tier zero-prompt flows per §0.
 - Desks: lane-scoped; no merge-completing powers unless explicitly elevated.
 - **Safety without prompting:** role boundaries + no self-merge + lane scoping + audit + operator

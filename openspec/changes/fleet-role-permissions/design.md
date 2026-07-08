@@ -108,8 +108,13 @@ interrupts and inject at **machine-idle seams** only. They MUST NOT interject in
 pane during **operator typing** or **operator↔leader active conversation** protected windows.
 Urgent bypass (skip buffer, leader immediate): money, irreversible, divergent fork,
 incident/safety, officer incapacitation/usage-limit, and operator relay. MUST NOT wait
-indefinitely for perfect idle during an active goal loop — evaluation tick applies. Full policy:
-bootstrap design §2.4 (PR #520) + `stackable-flotillas-438`.
+indefinitely for perfect idle during an active goal loop — evaluation tick applies.
+
+**Mechanical enforcement (load-bearing):** Protected-window suppression MUST be implemented in
+watch code (`OperatorProtectedWindow` gate before `drainAdjutantSeamFor`) — **not** prompt-contract
+alone (`adjutantDualObservationContract` is adjunct documentation only). Detection sources,
+fail-safe, tests, and goal-loop composition: `openspec/changes/adjutant-operator-protected-window/`.
+Bootstrap §2.4 (PR #520) + `stackable-flotillas-438` for topology; this change for the seam gate.
 
 | Capability | Allow | Deny |
 |---|---|---|
