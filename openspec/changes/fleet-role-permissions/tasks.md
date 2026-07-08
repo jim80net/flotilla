@@ -1,0 +1,42 @@
+# Tasks — fleet role permissions (focused desk)
+
+Separate lane from dash and fleet-bootstrap topology. COS gate before implementation merges.
+
+## Phase 0 — Design + prototype (this PR)
+
+- [x] Route A vs B evaluation + hybrid recommendation (`design.md` §3–5)
+- [x] `deploy/flotilla-permissions/canonical-roles.json` prototype
+- [x] Spec + skill stub
+- [ ] COS review + merge (independent reviewer)
+
+## Phase 1 — Compiler
+
+- [ ] `scripts/compile-flotilla-permissions.sh` — JSON → gatekeeper TOML overlays
+- [ ] Emit grok allowlist JSON (backward compatible with `deploy/grok-*-permission-allowlist.json`)
+- [ ] Emit Claude `permissions` fragment for merge into `settings.local.json`
+- [ ] Emit Codex rules snippet + documented hook install line
+- [ ] CI: compile + diff check committed materialized outputs
+
+## Phase 2 — Bootstrap permissions subcommand
+
+- [ ] `flotilla bootstrap permissions doctor` — stamp, hook, drift vs canonical
+- [ ] `flotilla bootstrap permissions sync --agent <name>` — idempotent materialize
+- [ ] Checks P001–P003: leadership must allow register/touch/status
+- [ ] Integration test with fake worktree + mock settings paths
+
+## Phase 3 — Gatekeeper integration
+
+- [ ] Document overlay include path in flotilla + gatekeeper README cross-link
+- [ ] Optional: `gatekeeper.toml` `include` directive for `flotilla-<role>.toml` (if needed)
+
+## Phase 4 — Deprecate hand-maintained deploy JSON
+
+- [ ] Generate `deploy/grok-coordinator-permission-allowlist.json` from canonical
+- [ ] Generate `deploy/grok-permission-allowlist.json` from canonical
+- [ ] Update `sync-grok-readonly-permissions.sh` to consume generated output
+
+## Phase 5 — Supervised validation
+
+- [ ] Run validation P1–P8 on generic trial roster (`flotilla.example.json` names)
+- [ ] Codex coordinator: confirm hook deny under auto policy (P8)
+- [ ] Operator sign-off; remove Full Access stopgap on trial seat

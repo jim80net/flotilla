@@ -1,0 +1,125 @@
+{
+  "_comment": "Canonical fleet role permission policy (public-safe prototype). Compiler emits gatekeeper TOML overlays + harness-native materializations. schema_version bump triggers bootstrap permissions sync.",
+  "schema_version": 1,
+  "policy": {
+    "on_gatekeeper_error": "abstain",
+    "description": "Gatekeeper errors defer to native permission system; deny spine still applies on matched rules."
+  },
+  "roles": {
+    "cos": {
+      "extends": "xo",
+      "capabilities": ["flotilla.notify", "flotilla.send", "flotilla.status", "fleet.state.rw", "gh.merge", "tmux.inspect", "detector.ack"]
+    },
+    "xo": {
+      "capabilities": [
+        "flotilla.notify",
+        "flotilla.send",
+        "flotilla.status",
+        "flotilla.register",
+        "fleet.state.rw",
+        "gh.merge",
+        "gh.read",
+        "git.read",
+        "tmux.inspect",
+        "detector.ack"
+      ],
+      "bash_allow": [
+        "flotilla status*",
+        "flotilla send*",
+        "flotilla notify*",
+        "flotilla register*",
+        "flotilla result*",
+        "touch *flotilla-*-alive*",
+        "touch *flotilla-*-settled*",
+        "gh pr merge*",
+        "gh pr view*",
+        "gh pr diff*",
+        "gh pr checks*",
+        "gh pr list*",
+        "git status*",
+        "git diff*",
+        "git log*",
+        "git show*",
+        "tmux list-panes*",
+        "tmux capture-pane*"
+      ],
+      "bash_deny": [
+        "git push origin main*",
+        "git push origin master*",
+        "git push *+refspec*",
+        "git push --force*",
+        "git reset --hard*"
+      ]
+    },
+    "adjutant": {
+      "capabilities": [
+        "flotilla.status",
+        "fleet.state.r",
+        "buffer.rw",
+        "tmux.inspect"
+      ],
+      "bash_allow": [
+        "flotilla status*",
+        "cat *flotilla-*-buffer.json*",
+        "cat *-adjutant-charter.md*",
+        "git status*",
+        "git diff*",
+        "git log*"
+      ],
+      "bash_deny": [
+        "flotilla notify*",
+        "gh pr merge*",
+        "git push origin main*",
+        "git push --force*"
+      ]
+    },
+    "desk": {
+      "capabilities": [
+        "flotilla.status",
+        "lane.worktree.rw",
+        "git.feature",
+        "test.run"
+      ],
+      "bash_allow": [
+        "flotilla status*",
+        "git status*",
+        "git diff*",
+        "git log*",
+        "git add*",
+        "git commit*",
+        "git push origin feat/*",
+        "git push origin fix/*",
+        "go test*",
+        "go build*",
+        "pytest*",
+        "python -m pytest*"
+      ],
+      "bash_deny": [
+        "flotilla notify*",
+        "gh pr merge*",
+        "git push origin main*",
+        "git push origin master*",
+        "git push --force*",
+        "git reset --hard*"
+      ],
+      "elevation": {}
+    },
+    "transient-task-desk": {
+      "extends": "desk",
+      "capabilities": ["transient.scope"],
+      "bash_allow": [],
+      "bash_deny": [
+        "git push*"
+      ],
+      "elevation": {}
+    }
+  },
+  "materialization": {
+    "gatekeeper_overlay_dir": "deploy/flotilla-permissions/overlays",
+    "claude_permissions_dir": "deploy/flotilla-permissions/materialized/claude",
+    "grok_allowlist_dir": "deploy/flotilla-permissions/materialized/grok",
+    "codex_rules_dir": "deploy/flotilla-permissions/materialized/codex",
+    "compiler": "scripts/compile-flotilla-permissions.sh",
+    "sync": "flotilla bootstrap permissions sync"
+  }
+}
