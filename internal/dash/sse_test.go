@@ -263,7 +263,7 @@ func shutdownPollTest(t *testing.T, srv *Server, cancel context.CancelFunc) {
 		cancel()
 		done := make(chan struct{})
 		go func() {
-			srv.waitAsyncGoalsLoads()
+			srv.waitPollAndGoalsLoads()
 			close(done)
 		}()
 		select {
@@ -274,8 +274,17 @@ func shutdownPollTest(t *testing.T, srv *Server, cancel context.CancelFunc) {
 	})
 }
 
+// waitPollStopped blocks until the SSE file poller goroutine exits.
+func (s *Server) waitPollStopped() { s.pollWG.Wait() }
+
 // waitAsyncGoalsLoads blocks until background loadGoals calls from the SSE poller finish.
 func (s *Server) waitAsyncGoalsLoads() { s.goalsLoadWG.Wait() }
+
+// waitPollAndGoalsLoads drains the poller first so no new loadGoals can start after cancel.
+func (s *Server) waitPollAndGoalsLoads() {
+	s.waitPollStopped()
+	s.waitAsyncGoalsLoads()
+}
 
 // TestPollEmitsOnGoalsYAMLChange: the poller emits when only the goals YAML
 // source changes (paths[4]), not just the compiled goals JSON.
@@ -286,7 +295,7 @@ func TestPollEmitsOnGoalsYAMLChange(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	shutdownPollTest(t, srv, cancel)
 	go srv.hub.run(ctx)
-	go srv.poll(ctx)
+	srv.startPoll(ctx)
 
 	c := &sseClient{events: make(chan string, 4)}
 	if !srv.hub.add(c) {
@@ -314,7 +323,7 @@ func TestPollEmitsOnSessionMirrorChange(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	shutdownPollTest(t, srv, cancel)
 	go srv.hub.run(ctx)
-	go srv.poll(ctx)
+	srv.startPoll(ctx)
 
 	c := &sseClient{events: make(chan string, 4)}
 	if !srv.hub.add(c) {
@@ -345,7 +354,7 @@ func TestPollEmitsOnChange(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	shutdownPollTest(t, srv, cancel)
 	go srv.hub.run(ctx)
-	go srv.poll(ctx)
+	srv.startPoll(ctx)
 
 	c := &sseClient{events: make(chan string, 4)}
 	if !srv.hub.add(c) {
