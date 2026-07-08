@@ -11,8 +11,8 @@ where noted.
 
 ## Phase 1 — Roster role metadata
 
-- [ ] Add `fleet_role` to `Agent` struct (`internal/roster/roster.go`) with validation table
-      from design §2
+- [ ] Add `fleet_role` + `live_expected` to `Agent` struct with validation from design §2–§2.3
+- [ ] Document ops-xo provisioning gate before Phase 2+ (design §2.2)
 - [ ] Extend `flotilla.example.json` with `fleet_role` on each example agent
 - [ ] Unit tests: cos/xo/adj/desk/transient + mismatch warnings
 - [ ] Doctor stub: derive vs explicit role diff (warn-only)

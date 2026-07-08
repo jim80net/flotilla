@@ -1,6 +1,6 @@
 ---
 name: flotilla-fleet-bootstrap
-description: Stand up or audit a flotilla fleet (COS, XOs, adjutants, desks) with idempotent doctor checks, role-aware permissions, tmux markers, and detector enrollment. Use when the operator asks to bootstrap flotilla, stand up the fleet, fix detector orphans, or configure Codex/Grok/Claude seat permissions without per-command noise.
+description: Stand up or audit a flotilla fleet (COS, meta-XO, ops-xo, product XOs, adjutants, desks) with idempotent doctor checks, role-aware permissions, tmux markers, and detector enrollment. Use when the operator asks to bootstrap flotilla, stand up the fleet, fix detector orphans, or configure Codex/Grok/Claude seat permissions with zero approval noise for role-authorized ops. Fleet operations accountability belongs on ops-xo, not product XOs.
 ---
 
 # Fleet bootstrap / standup
@@ -20,13 +20,17 @@ before changing roster or host files:
 
 ## Core invariants (do not violate)
 
-1. **Every desk has an XO** — execution agents must appear under a coordinator binding. Orphans
-   are incomplete `channels[]`, not a valid target state.
-2. **Public repo = generic only** — examples use `flotilla.example.json` names (`xo`, `alpha-xo`,
-   `backend`). Never commit deployment-specific roster paths, guild ids, or operator ids.
-3. **Detector visibility requires** — roster entry + `flotilla register` marker + `FLOTILLA_SELF`
+1. **Every desk has an XO** — execution agents must appear under a supervising **product** XO
+   binding. Orphans are incomplete `channels[]`, not a valid target state.
+2. **Ops vs product XO** — `fleet_role: ops-xo` owns fleet operations (bootstrap, permissions,
+   rename, roster hygiene, topology). **Product XOs** (`fleet_role: xo`, e.g. `alpha-xo`) own
+   implementation lanes only — not accountable fleet-ops owner. Provision `ops-xo` before
+   implementation waves (see design §2.2).
+3. **Public repo = generic only** — examples use `flotilla.example.json` names (`xo`, `ops-xo`,
+   `alpha-xo`, `backend`). Never commit deployment-specific roster paths, guild ids, or operator ids.
+4. **Detector visibility requires** — roster entry + `flotilla register` marker + `FLOTILLA_SELF`
    + `change_detector: true` + watch daemon with surface driver loaded.
-4. **Do not self-merge** bootstrap implementation PRs — surface to COS for gate.
+5. **Do not self-merge** bootstrap implementation PRs — surface to COS for gate.
 
 ## Workflow (idempotent)
 
@@ -40,15 +44,18 @@ flotilla status --json
 
 Classify each `agents[]` row:
 
-| `fleet_role` (explicit or derived) | Permission class |
-|---|---|
-| `cos` | leadership |
-| `xo` | leadership |
-| `adjutant` | leadership-adjutant |
-| `desk` | desk lane |
-| `transient-task-desk` | desk-transient |
+| `fleet_role` (explicit or derived) | Accountability | Permission class |
+|---|---|---|
+| `cos` | Chief-of-staff mirror | leadership |
+| `meta-xo` | Fleet command coordinator | leadership |
+| `ops-xo` | **Fleet operations** (bootstrap, permissions, rename, roster hygiene) | leadership-ops |
+| `xo` | **Product/project XO** (implementation lane only) | leadership |
+| `adjutant` | Mechanical seat for parent coordinator | leadership-adjutant |
+| `desk` | Execution | desk lane |
+| `transient-task-desk` | PR-scoped execution | desk-transient |
 
-Naming: prefer `{identifier}-{role}` (`alpha-xo`, `alpha-adj`, `alpha-desk-pr123`).
+Naming: `{identifier}-{role}` for products (`alpha-xo`, `alpha-adj`, `alpha-desk-pr123`);
+`ops-xo` / `ops-adj` for fleet operations; `xo` / `xo-adj` for meta fleet command.
 
 ### 2. Topology audit
 
@@ -63,10 +70,17 @@ backlog/goals sidecars, detector snapshot. Secrets not world/group readable.
 
 ### 4. Seat launch recipe (every live agent)
 
-Same-line pattern (adjust harness):
+**Coordinators** (cos, meta-xo, ops-xo, product xo, adjutant):
 
 ```bash
-export FLOTILLA_SELF=<agent> FLOTILLA_SECRETS=$ROSTER_DIR/flotilla-secrets.env  # coordinators only for secrets
+export FLOTILLA_SELF=<agent> FLOTILLA_SECRETS=$ROSTER_DIR/flotilla-secrets.env
+flotilla register <agent> && exec <harness>
+```
+
+**Desks** (no secrets — design §5 denies desk secrets access):
+
+```bash
+export FLOTILLA_SELF=<agent>
 flotilla register <agent> && exec <harness>
 ```
 
@@ -75,14 +89,20 @@ daemon loads the driver (see `docs/coordinator-seat-swap-runbook.md`).
 
 ### 5. Permissions (role + surface)
 
-| Role | Surface | Template |
-|---|---|---|
-| xo / cos | grok | `deploy/grok-coordinator-permission-allowlist.json` |
-| desk | grok | `deploy/grok-permission-allowlist.json` |
-| xo | codex | codex coordinator rules — `openspec/changes/codex-coordinator-seat/design.md` |
-| xo | claude-code | `docs/watch-runbook.md` § XO permission posture |
+Target: **zero approval noise** for role-authorized ops (see `fleet-role-permissions` design §0).
 
-Sync into worktree gatekeeper settings; idempotent — skip if version stamp matches.
+| `fleet_role` | Surface | Template / reference |
+|---|---|---|
+| `cos`, `meta-xo`, `ops-xo`, `xo` | grok | `deploy/grok-coordinator-permission-allowlist.json` |
+| `cos`, `meta-xo`, `ops-xo`, `xo` | codex | `openspec/changes/codex-coordinator-seat/design.md` |
+| `cos`, `meta-xo`, `ops-xo`, `xo` | claude-code | `docs/watch-runbook.md` § XO permission posture |
+| `adjutant` | grok / codex / claude-code | **TBD** — `fleet-role-permissions` canonical `adjutant` tier (PR #521) |
+| `desk` | grok | `deploy/grok-permission-allowlist.json` |
+| `desk` | codex | **TBD** — codex desk rules + gatekeeper deny spine (PR #521 compiler) |
+| `desk` | claude-code | **TBD** — desk gatekeeper overlay + `settings.local.json` (PR #521) |
+| `transient-task-desk` | any | Same as `desk` + narrower path globs in canonical policy |
+
+Sync via future `flotilla bootstrap permissions sync`; idempotent — skip if stamp matches.
 
 ### 6. Validate (minimal)
 
@@ -95,6 +115,7 @@ Sync into worktree gatekeeper settings; idempotent — skip if version stamp mat
 | V5 | `flotilla send --from xo <desk> ping` delivered |
 | V6 | XO `flotilla notify` reaches channel |
 | V7 | XO touches ack file |
+| V8 | Permission smoke — coordinator `gh pr view` unprompted; desk `gh pr merge` blocked per policy |
 
 Report failures to **COS** with finding id + remediation; execute authorized fixes, do not
 idle-hold on reversible steps.

@@ -26,17 +26,47 @@ the federation visibility model.
 ### Requirement: Explicit fleet role metadata
 
 The roster SHALL support an optional `fleet_role` field on each agent with values:
-`cos`, `xo`, `adjutant`, `desk`, `transient-task-desk`.
+`cos`, `meta-xo`, `ops-xo`, `xo` (product/project XO), `adjutant`, `desk`, `transient-task-desk`.
+
+Product XOs (`fleet_role: xo`) SHALL NOT be modeled as accountable owners for fleet operations.
+Fleet operations accountability SHALL belong to `fleet_role: ops-xo` (bootstrap, permissions,
+rename, roster hygiene, topology).
 
 #### Scenario: COS role alignment
 
-- **WHEN** an agent has `fleet_role: cos` and `cos_agent` is set
-- **THEN** roster load requires `agents[].name == cos_agent`
+- **WHEN** roster-level `cos_agent` is set to `"cos"`
+- **THEN** roster load requires exactly one agent with `fleet_role: cos` and `name: cos`
+- **AND** no other agent may claim `fleet_role: cos`
+
+#### Scenario: Ops-xo distinct from product XO
+
+- **WHEN** an agent has `fleet_role: ops-xo`
+- **THEN** that agent is the default assignee for bootstrap/permissions/rename operational tasks
+- **AND** product XOs with `fleet_role: xo` are not substituted as fleet-ops owners
 
 #### Scenario: Desk mis-tagged as coordinator
 
 - **WHEN** an agent has `fleet_role: desk` and `IsCoordinator(name)` is true
 - **THEN** roster load SHALL fail closed with a validation error
+
+### Requirement: Live-expected predicate
+
+Bootstrap doctor pane-marker checks SHALL apply only to agents marked live-expected.
+
+#### Scenario: Explicit live_expected
+
+- **WHEN** an agent row has `live_expected: true`
+- **THEN** doctor B006 requires a resolvable `@flotilla_agent=<name>` pane marker
+
+#### Scenario: Implicit live_expected legacy
+
+- **WHEN** `live_expected` is absent and the agent is `xo_agent`, `cos_agent`, or a `channels[].xo_agent`
+- **THEN** doctor treats the agent as live-expected (info finding `LIVE_EXPECTED_DERIVED`)
+
+#### Scenario: Desk not live-expected by default
+
+- **WHEN** a desk has no `live_expected` field and is not a channel hub
+- **THEN** doctor skips pane-marker enforcement for that desk
 
 ### Requirement: Detector enrollment
 
@@ -49,16 +79,17 @@ when any coordinator uses a non-Claude surface.
 - **WHEN** roster lists `alpha-xo` as live-expected and no pane carries `@flotilla_agent=alpha-xo`
 - **THEN** doctor reports `MARKER_MISSING` with warn or fail severity (configurable)
 
-#### Scenario: Fresh detector snapshot
+#### Scenario: Stale detector snapshot
 
 - **WHEN** `change_detector: true` and snapshot age exceeds 3× `heartbeat_interval`
-- **THEN** doctor reports `SNAPSHOT_STALE`
+- **THEN** doctor reports `SNAPSHOT_STALE` with warn or fail severity
 
 ### Requirement: Launch environment
 
-Coordinator and adjutant launch recipes SHALL document `FLOTILLA_SELF` and coordinators SHALL
-document `FLOTILLA_SECRETS`. Bootstrap apply SHALL emit launch one-liners that include
-`flotilla register <name>` on the same line as harness exec.
+Coordinator launch recipes (cos, meta-xo, ops-xo, product xo, adjutant) SHALL document
+`FLOTILLA_SELF` and `FLOTILLA_SECRETS`. Desk launch recipes SHALL document `FLOTILLA_SELF`
+only — desks MUST NOT export `FLOTILLA_SECRETS`. Bootstrap apply SHALL emit launch one-liners
+that include `flotilla register <name>` on the same line as harness exec.
 
 #### Scenario: Coordinator launch snippet
 
@@ -93,12 +124,20 @@ output when fleet state is unchanged.
 
 ### Requirement: State root safety
 
-Bootstrap doctor SHALL verify the roster directory is not world-writable and SHALL NOT print
-secrets contents.
+Bootstrap doctor SHALL verify:
 
-#### Scenario: Permissions leak check
+1. The roster directory is not world-writable
+2. `flotilla-secrets.env` (when present) is not group- or world-readable
+3. Secrets contents are never printed in doctor output
 
-- **WHEN** `flotilla-secrets.env` is group-readable
+#### Scenario: Roster directory permissions
+
+- **WHEN** the roster directory is world-writable
+- **THEN** doctor reports `ROSTER_DIR_PERMS_WEAK` with fail severity
+
+#### Scenario: Secrets file permissions
+
+- **WHEN** `flotilla-secrets.env` is group-readable or world-readable
 - **THEN** doctor reports `SECRETS_PERMS_WEAK` with fail severity
 
 ## MODIFIED Requirements

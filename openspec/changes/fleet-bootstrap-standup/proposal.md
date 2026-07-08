@@ -9,16 +9,17 @@ checks. Operators (and coding agents helping them) repeat the same failure modes
 - **Detector orphans** — a coordinator seat (especially a Codex/Grok harness coordinator)
   runs live but never appears in the change-detector snapshot because `flotilla register`,
   `FLOTILLA_SELF`, or roster `change_detector` wiring was skipped.
-- **Permission noise** — leadership seats need broad read + fleet-state write + outbound
-  `flotilla notify`/`send`; execution desks need lane-scoped posture. Without role-aware
-  templates, every seat either over-prompts or under-guards.
+- **Approval noise** — leadership seats need **zero per-command prompts** on role-authorized
+  fleet ops (see `fleet-role-permissions` PR #521 §0); execution desks need lane-scoped
+  posture with gatekeeper deny for merge-to-default.
 - **Topology debt masquerading as orphans** — an execution desk with no supervising XO in
   `channels[]` looks like a “standalone desk.” The product invariant is: **every desk has
   an XO**; apparent orphans are incomplete federation bindings, not a valid steady state.
 - **Implicit roles** — `IsCoordinator` is inferred from bindings (`xo_agent`, `cos_agent`,
   span-of-control). That is correct for routing but insufficient for bootstrap: permission
   templates, doctrine install targets, and validation need an explicit **fleet role**
-  (`cos` | `xo` | `adjutant` | `desk` | `transient-task-desk`).
+  (`cos` | `meta-xo` | `ops-xo` | `xo` product | `adjutant` | `desk` | `transient-task-desk`).
+  **Ops-xo** is accountable for fleet operations; **product XOs** own implementation lanes only.
 
 Operator directive (2026-07-08): deliver a **public-safe** bootstrap/standup skill and
 design in this repo — generic examples only (`flotilla.example.json` roles), no private
