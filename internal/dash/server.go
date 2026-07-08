@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/cos"
@@ -90,7 +91,8 @@ type Server struct {
 	origins   map[string]bool    // Origin allowlist (scheme://host:port) for state-changing requests
 	tracker   tracker.Tracker    // GitHub-backed issue tracker; nil when no --repo is configured
 	control   control.Controller // cnc control (notify live; route/resume gated on the pane lock)
-	done      *doneRecorder      // goals done-history observer/writer (#418) — the one artifact the dash WRITES
+	done        *doneRecorder // goals done-history observer/writer (#418) — the one artifact the dash WRITES
+	goalsLoadWG sync.WaitGroup // async loadGoals from the SSE poller; tests drain before TempDir teardown
 }
 
 // NewServer validates the bind address (LOOPBACK ONLY — see validateBind; the
