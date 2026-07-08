@@ -1338,6 +1338,8 @@ func TestThreadMerge(t *testing.T) {
 		"threadLedgerMsg",          // relay-line renderer
 		"thread-mirror",            // session-output styling hook
 		"lastThreadKey",            // re-announce / scroll-reset dedup
+		"composerComposeActive",    // #517: defer mirror/thread repaint while operator is mid-draft
+		"flushDeferredMirrorPaint",
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("dash.js must retain the §2.4 thread-merge engine (missing %q)", marker)

@@ -422,6 +422,7 @@
       '<span class="conv-map-empty">' + text + "</span>";
   }
   function renderSessionMirror() {
+    if (composerComposeActive()) { mirrorRenderDeferred = true; return; }
     if (!selectedDesk) { mirrorEmpty("Select a desk to see its latest session output.", "none"); return; }
     var doc = cache.mirror || {};
     // Identity guard: cache.mirror may still hold the PREVIOUS desk's doc (the async
@@ -569,6 +570,7 @@
       ' — earlier coordinator turns weren’t recorded (a firewall issue, since fixed). Shown from here down.</div>';
   }
   function renderThread(history) {
+    if (composerComposeActive()) { threadRenderDeferred = true; return; }
     var thread = el("conv-thread");
     if (!selectedDesk) {
       if (lastThreadKey === "@none") return;
@@ -623,6 +625,24 @@
   }
 
   // ── thread composer + latest-at-bottom scroll (F#383 criteria 4 + 5) ──────────────
+  // composerComposeActive is true while the operator is mid-draft on the thread
+  // composer — focused OR non-empty text. Live SSE/mirror ticks must NOT rewrite the
+  // thread or the session-mirror glance during compose (aria-live re-announce + scroll
+  // reset steals focus and feels like an adjutant interrupt — flotilla#517).
+  var mirrorRenderDeferred = false;
+  var threadRenderDeferred = false;
+  function composerComposeActive() {
+    var ta = el("thread-composer-input"), form = el("thread-composer");
+    if (!ta || !form || form.hidden) return false;
+    if (document.activeElement === ta) return true;
+    return ta.value.length > 0;
+  }
+  function flushDeferredMirrorPaint() {
+    if (!mirrorRenderDeferred && !threadRenderDeferred) return;
+    mirrorRenderDeferred = false;
+    threadRenderDeferred = false;
+    paintMirror();
+  }
   var threadPinned = true; // true ⇒ keep the newest message in view on each render
   function scrollThreadToBottom() {
     var t = el("conv-thread");
@@ -1315,6 +1335,7 @@
         }
       });
       ta.addEventListener("input", resizeComposer);
+      ta.addEventListener("blur", function () { setTimeout(flushDeferredMirrorPaint, 0); });
     }
   })();
 })();
