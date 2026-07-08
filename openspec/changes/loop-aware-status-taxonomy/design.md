@@ -1,222 +1,209 @@
-# Design — loop-aware status taxonomy
+# Design — loop warrant status (compact, behavior-driven)
 
-**Status:** Direction-level proposal (operator-affirmed gap, 2026-07-08). Awaits gate before
-implementation.
+**Status:** Operator-refined direction (`flotilla-dispatch-4516dd94`). Supersedes the earlier
+multi-posture vocabulary (`available` / `parked` / `maintaining` / `refining` / `cleaning` as
+peer labels). **One coherent fork** — implement warrant first; derive display badges mechanically.
 
 ## 1. Problem statement
 
-An autonomous fleet is a **loop** — detect → wake → act → settle/park → detect again. Officers
-must answer:
+An autonomous fleet is a **loop**. Officers must answer:
 
-> Is this seat **in the loop** (building, iterating, refining, maintaining, cleaning, or parked at
-> a legitimate breakpoint), or **out of the loop** (drifted, crashed, reaped, unknown)?
+> Does this seat have an active **warrant** for its current loop position — or is plain **idle**
+> hiding lack of accountability?
 
-Today's operator surfaces conflate layers:
+| Officer need | Plain `idle` suggests (wrong) |
+|---|---|
+| Executing a directive | inactive |
+| Improving an assigned charge | nothing to do |
+| Paused at a **named gate** (real blocker) | idle |
+| **No warrant** (idle-hold, permission-seeking) | also idle |
 
-```
-PANE LAYER (surface.State)          FLEET LAYER (missing)
-─────────────────────────         ─────────────────────
-working                             ??? (in loop — good)
-idle + not settled                  ??? (available — IN loop)
-idle + settled                      "settled (idle)" — sounds OUT of loop
-idle + idle-hold strikes            ??? (drifted — OUT of loop)
-shell                               "crashed"
-```
-
-`ActivityLevel.Idle` in adaptive detector cadence is a **third** overloading — fleet coordination
-tier, not agent loop posture. Documentation MUST disambiguate all three layers.
+Pane `surface.State` stays harness-faithful. Fleet layer adds **loop warrant**.
 
 ## 2. Two-layer model (load-bearing)
 
-| Layer | Owner | Question it answers | Stable API |
-|---|---|---|---|
-| **Pane posture** | `surface.State` | What does the harness show right now? | `state` (existing) |
-| **Loop posture** | watch detector + markers | Is this agent properly in the autonomous loop? | `loop_posture` (new) |
+| Layer | Field | Question |
+|---|---|---|
+| Pane | `state` | What does the harness show? (`working`, `idle`, `shell`, …) |
+| Loop | `loop_warrant` | What **justifies** this seat's participation (or lack of it)? |
 
-**Rule:** Never map loop posture 1:1 from pane state alone. Derivation MUST consult settled
-markers, awaiting marker, backlog parse, goal-loop gate, and idle-hold strike counter.
+Optional derived **`loop_display`** — compact badge for dash/status text; behavior-driven, not a
+second taxonomy to learn.
 
 ```mermaid
 flowchart LR
   subgraph inputs [Mechanical inputs]
     P[surface.State]
-    S[settled marker / XOSettled]
-    A[awaiting marker]
-    B[backlog.Status]
+    D[directive / relay in flight]
+    C[backlog charge + authorized items]
+    G[named gate markers]
+    S[settled / XOSettled]
     I[idlehold strikes]
-    G[goals / loop_mode marker]
   end
   subgraph derive [Derive]
-    D[LoopPostureDeriver]
+    W[LoopWarrantDeriver]
   end
-  subgraph out [Operator surfaces]
-    ST[flotilla status --json]
-    DS[dash fleet board]
+  subgraph out [Surfaces]
+    ST[status --json]
+    DS[dash badge]
     ADJ[adjutant observe-leader]
-    DOC[bootstrap doctor]
+    DOC[doctor B012]
   end
-  inputs --> D --> out
+  inputs --> W --> out
 ```
 
-## 3. Loop posture vocabulary (v1)
+**Disambiguate third layer:** `ActivityLevel` (adaptive detector cadence) = **fleet coordination
+tier**, not loop warrant.
 
-### 3.1 In-loop postures (proper participation)
+## 3. Loop warrant vocabulary (v1 — compact)
 
-| `loop_posture` | Meaning for officers | Primary signals |
+### 3.1 Accountability warrants (in-loop)
+
+| `loop_warrant` | Meaning | Officer one-liner |
 |---|---|---|
-| **composing** | Mid-turn; harness is working | `surface.StateWorking` on substantive turn work |
-| **available** | Between turns; loop owns next wake | `StateIdle`, NOT settled, NOT awaiting-authority/blocked/drifted |
-| **parked** | Authorized quiescence; loop suppresses self-wake | settled marker consumed / per-desk settled / `XOSettled` **AND** backlog gate reports zero unblocked items |
-| **awaiting-authority** | Operator gate (spend / irreversible / fork) | awaiting marker OR backlog `[awaiting-auth]` dominates |
-| **blocked** | Tracked external dependency OR harness gate prompt | backlog `[blocked]` / `[needs-attention]` with no unblocked ahead; **or** pane `awaiting-input` / `awaiting-approval` (surface blocked states — distinct from `composing`) |
-| **maintaining** | Fleet hygiene / ops (bootstrap, permissions, doctor) | optional `[maintaining]` backlog/goal marker OR `fleet_role: ops-xo` task class |
-| **refining** | Iteration without net-new build (review, docs, polish) | optional `[refining]` marker |
-| **cleaning** | Wrap-up hygiene (handoff, stash, branch tidy) | optional `[cleaning]` marker OR recycle-pending charter |
+| **directive** | Acting on a **current directive** — operator relay, coordinator dispatch, or explicit turn task in flight | "on a directive" |
+| **charge-improvement** | **Standing charge-improvement** — authorized work on assigned charge (backlog/goal items unblocked, not permission-seeking) | "improving its charge" |
+| **named-gate** | **Named gate** justifies non-action — real gate, not tacit idle | "gated: \<kind\>" |
 
-**Operator-readable one-liners:**
+**Named gate kinds** (`gate_kind`, drill-down only — do not split primary badge unless behavior
+differs):
 
-- **composing** — "in the loop, mid-turn"
-- **available** — "in the loop, between turns"
-- **parked** — "in the loop, parked at breakpoint" (NOT inactive)
-- **awaiting-authority** — "in the loop, waiting on you for a real gate"
-- **blocked** — "in the loop, blocked on a named dependency"
-- **maintaining / refining / cleaning** — "in the loop, doing `<mode>` work"
-
-### 3.2 Out-of-loop postures (coordination debt)
-
-| `loop_posture` | Meaning | Primary signals |
+| `gate_kind` | Justification | Mechanical signals |
 |---|---|---|
-| **drifted** | Idle-hold antipattern; permission-seeking without a real gate | `StateIdle` + unsettled + idle-hold strikes ≥ threshold + no unblocked backlog |
-| **crashed** | Process gone | `StateShell` without recent intentional recycle |
-| **reaped** | Intentional session end / recycle gap | recycle/close in flight or post-recycle window (charter sidecar) |
-| **unknown** | No detector truth | absent from snapshot / unreadable snapshot |
+| `awaiting-auth` | Operator gate (spend / irreversible / fork) | awaiting marker OR dominant `[awaiting-auth]` |
+| `blocked` | Tracked external dependency | `[blocked]` / `[needs-attention]` with no unblocked ahead |
+| `harness-prompt` | Harness approval/input (not mid-turn composing) | pane awaiting-input / awaiting-approval |
 
-### 3.3 Precedence (deterministic derive)
+**Do not conflate** `named-gate` with adjutant **operator protected window** — protected window is
+inject policy, not the leader's warrant (leader may be `directive` while protected).
 
-Evaluate top-down; first match wins:
+### 3.2 Unwarranted (coordination debt)
 
-1. `unknown` — no snapshot entry
+| `loop_warrant` | Meaning | Signals |
+|---|---|---|
+| **unwarranted** | **No active warrant** — plain idle smell | `StateIdle` + unsettled + idle-hold strikes ≥ threshold + no unblocked backlog + no named gate + no in-flight directive |
+
+Idle-hold permission-seeking without a real gate → **unwarranted**, not a separate "drifted"
+posture label. Display may still say "unwarranted" or "out of loop" — one concept.
+
+### 3.3 Technical fault (not warrant semantics)
+
+| `loop_warrant` | Meaning |
+|---|---|
+| **crashed** | `StateShell` without intentional recycle context |
+| **reaped** | Intentional recycle / close in flight |
+| **unknown** | Absent from snapshot / unreadable |
+
+## 4. Behavior-driven display (`loop_display`)
+
+Derived for operators; **not** an independent taxonomy. Rules (first match):
+
+| `loop_display` | When | Behavior that differs |
+|---|---|---|
+| **acting** | `loop_warrant` ∈ {directive, charge-improvement} AND pane `working` (or in-turn compose) | Harness mid-turn |
+| **between-turns** | Warranted, pane `idle`, **not** settled | Detector **will** self-wake / heartbeat |
+| **parked** | Warranted breakpoint: settled consumed **and** backlog gate empty | Detector **suppresses** self-wake |
+| **gated** | `loop_warrant` = named-gate | Non-action justified; drill `gate_kind` |
+| **unwarranted** | `loop_warrant` = unwarranted | Escalation / evaluation tick candidate |
+| **crashed** / **unknown** | fault states | Recovery path |
+
+**Operator refinement (4516dd94):** Do **not** expose separate badges for `available` vs `settled`
+or `parked` vs `awaiting-auth` unless behavior differs. Here:
+
+- `between-turns` vs `parked` **differs** — wake policy (row above).
+- `gated` **collapses** awaiting-auth and blocked in the primary badge; kinds on drill-down.
+
+Removed as primary labels: `maintaining`, `refining`, `cleaning` — these are **charge-improvement**
+with optional `warrant_detail` text from backlog markers (`[maintaining]`, etc.), not new postures.
+
+## 5. Derivation precedence (deterministic)
+
+1. `unknown` — no snapshot row
 2. `crashed` / `reaped` — shell + recycle context
-3. `composing` — working (or in-turn awaiting-*)
-4. `awaiting-authority` — awaiting marker OR dominant `[awaiting-auth]`
-5. `blocked` — no unblocked backlog items, blocked items present
-6. declared mode — `[maintaining]` / `[refining]` / `[cleaning]` on top unblocked item
-7. `parked` — settled
-8. `drifted` — idle-hold pattern
-9. `available` — idle, not settled, loop re-engage expected
-10. fallback `available`
+3. `directive` — in-flight operator relay, pending dispatch claim, or top backlog item marked directive/in-flight turn
+4. `named-gate` — awaiting marker OR dominant gate backlog OR harness-prompt pane state
+5. `charge-improvement` — unblocked authorized backlog/goal items
+6. `parked` display path — settled + empty unblocked backlog (warrant = charge-improvement with breakpoint consumed, OR explicit parked charter — implementation uses settled+empty as mechanical parked)
+7. `unwarranted` — idle-hold pattern
+8. `between-turns` — idle, warranted, not settled
+9. fallback: if idle with settled+empty → display `parked`; if idle with work queued → `between-turns`
 
-**Fork (operator choice at gate):** Whether `parked` requires BOTH settled marker AND empty
-unblocked backlog (strict) or settled alone (lenient). **Recommendation: strict** — parked with
-unblocked backlog is a **product defect** (goal-loop gate should prevent); surface as `available`
-+ alert `LOOP_POSTURE_DRIFT` in doctor.
+**Parked strictness:** settled **and** zero unblocked backlog required for `loop_display=parked`.
+Settled with unblocked work → `between-turns` + doctor `LOOP_WARRANT_STALE` (charge warrants action).
 
-## 4. Relationship to existing machinery
-
-| Existing concept | Layer | Loop posture interaction |
-|---|---|---|
-| `surface.StateIdle` | Pane | Maps to composing/available/parked/drifted — NOT directly "idle" |
-| `XOSettled` / desk settled | Loop signal | → `parked` when no unblocked work |
-| `AwaitingMarker` | Loop signal | → `awaiting-authority` |
-| Backlog gate (`goal-driven-loop`) | Loop signal | unblocked items veto parked; drive → `available`/`composing` |
-| `idlehold` strikes | Loop signal | → `drifted` |
-| `ActivityLevel` (adaptive cadence) | Fleet tier | Rename in docs: **coordination tier**, not loop posture |
-| Adjutant laminar flow | Observer | Leader `composing` ≠ operator protected window; `parked`/`available` = seam candidates |
-
-## 5. Status / dash contract (proposed JSON)
-
-Extend `flotilla status --json` (backward compatible — additive fields):
+## 6. Status JSON contract (additive)
 
 ```jsonc
 {
-  "generated_at": "2026-07-08T12:00:00Z",
-  "xo": "xo",
   "agents": [
     {
       "name": "xo",
-      "role": "hub",
-      "surface": "claude-code",
-      "state": "idle",              // pane layer (unchanged)
-      "loop_posture": "parked",     // NEW — fleet layer
-      "loop_detail": "settled, backlog empty"  // optional human gloss
+      "state": "idle",
+      "loop_warrant": "charge-improvement",
+      "loop_display": "parked",
+      "warrant_detail": "settled, backlog empty",
+      "gate_kind": null
     },
     {
       "name": "alpha-desk",
-      "surface": "grok",
       "state": "working",
-      "loop_posture": "composing"
+      "loop_warrant": "directive",
+      "loop_display": "acting",
+      "warrant_detail": "dispatch: rebase PR"
+    },
+    {
+      "name": "cos",
+      "state": "idle",
+      "loop_warrant": "named-gate",
+      "loop_display": "gated",
+      "gate_kind": "awaiting-auth"
     }
   ]
 }
 ```
 
-**Deprecate operator copy:** replace `settled (idle)` with `parked (in loop)` in text status;
-keep `state: idle` in JSON pane field for harness fidelity.
+Deprecate operator copy `settled (idle)` → `parked` or `gated` per derivation. Keep `state: idle`
+in JSON for harness fidelity.
 
-Dash fleet board: primary badge = `loop_posture`; pane `state` as secondary/subtitle.
+## 7. Machinery mapping
 
-## 6. Backlog / goal marker extension (optional declared modes)
-
-Extend goal-loop item convention (`goal-driven-loop` design) with optional loop-mode markers:
-
-```
-- [next] [maintaining] permissions compiler smoke
-- [in-flight] [refining] reader-modeling pass on PR #521
-- [in-flight] [cleaning] handoff + stash before rotate
-```
-
-Parser: first `[maintaining|refining|cleaning]` on the top actionable line sets declared mode;
-mechanical rules still apply (cannot be `parked` with unblocked items).
-
-## 7. Bootstrap integration (§2.5 amendment for PR #520)
-
-Add to fleet-bootstrap-standup design:
-
-- **B012** — `loop_posture` derivable for every `live_expected` agent; fail `LOOP_POSTURE_UNKNOWN`
-  when snapshot stale/absent on live seat.
-- **V10** — synthetic fixtures: available vs parked vs drifted vs awaiting-authority distinguishable
-  in `flotilla status --json`.
-- Doctor info when `loop_posture=drifted` on leadership seat.
-
-## 8. Adjutant / laminar flow integration
-
-`adjutantDualObservationContract` and mechanical `OperatorProtectedWindow` observe **loop_posture**
-on the leader stream:
-
-| Leader loop_posture | Adjutant seam policy |
+| Existing | Warrant interaction |
 |---|---|
-| `composing` | Buffer non-urgent; no leader inject if operator protected |
-| `available` | Preferred seam for consolidated brief |
+| `StateWorking` | Usually `directive` or `charge-improvement` → display `acting` |
+| `StateIdle` + unsettled + backlog | `charge-improvement` → `between-turns` |
+| `StateIdle` + settled + empty backlog | → display `parked` |
+| `AwaitingMarker` | `named-gate` / `awaiting-auth` |
+| Backlog blocked items | `named-gate` / `blocked` |
+| `idlehold` strikes | `unwarranted` |
+| Goal-loop gate | unblocked items veto `parked` |
+
+## 8. Adjutant / laminar integration
+
+Observe **`loop_warrant`** and `loop_display`, not pane idle alone:
+
+| Leader | Adjutant policy |
+|---|---|
+| `acting` | Buffer non-urgent; respect `OperatorProtectedWindow` |
+| `between-turns` | Preferred seam for consolidated brief |
 | `parked` | Seam inject allowed (non-urgent) |
-| `awaiting-authority` | Protected window (mechanical) |
-| `drifted` | Evaluation tick → act-by-tier; may escalate to parent layer |
-| `maintaining`/`refining`/`cleaning` | Buffer routine finish-edges; urgent still cuts through |
+| `gated` | Mechanical protected window when operator-facing gate |
+| `unwarranted` | Evaluation tick → act-by-tier; escalate |
 
-## 9. Implementation phases
+## 9. Bootstrap §2.5 amendment (for merged #520 follow-up)
 
-See `tasks.md`. Summary:
+Replace posture list with warrant vocabulary:
 
-1. **Spec + pure deriver** (`internal/watch/loopposture/`) with table-driven tests
-2. **Snapshot persistence** — optional `loop_postures` map in detector snapshot (or compute at read)
-3. **status --json** + dash board badge
-4. **Bootstrap doctor B012 / validation V10**
-5. **Docs disambiguation** — xo-doctrine, watch-runbook, dash design colors (`--ok` ≠ "idle")
+- Field: `loop_warrant` (+ `loop_display`, `gate_kind` optional)
+- Doctor **B012**: every `live_expected` agent has derivable warrant when snapshot fresh
+- Validation **V10**: fixtures distinguish `parked` vs `between-turns` vs `gated` vs `unwarranted`
 
-## 10. Open fork (surface at gate)
+## 10. Implementation phases
 
-**Strict vs lenient parked:** Should `parked` require empty unblocked backlog?
+See `tasks.md`. Order: pure deriver tests → status JSON → dash badge → doctor B012 → adjutant wire.
 
-| Option | Pros | Cons |
-|---|---|---|
-| **Strict (recommended)** | Aligns with goal-loop gate; parked means truly quiescent | More alerts during migration |
-| **Lenient** | Matches today's settled flag only | Hides passive-holding defect |
+## 11. Related
 
-Operator pick at gate; default **strict** in spec.
-
-## 11. Related changes
-
-- `openspec/changes/archive/2026-06-16-goal-driven-loop` — backlog gate
-- `openspec/changes/adjutant-operator-protected-window` — protected window ≠ composing
-- `openspec/changes/fleet-bootstrap-standup` — §2.5 taxonomy + doctor
-- `openspec/changes/flotilla-dash` — fleet board primary badge
-- `openspec/changes/adaptive-detector-cadence` — rename ActivityLevel docs
+- `openspec/changes/fleet-bootstrap-standup/` §2.5 (amend after this fork affirms)
+- `openspec/changes/adjutant-operator-protected-window/`
+- `openspec/changes/archive/2026-06-16-goal-driven-loop`
+- `openspec/changes/idle-hold-antipattern` → maps to `unwarranted`

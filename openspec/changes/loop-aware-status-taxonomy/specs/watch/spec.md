@@ -1,49 +1,60 @@
-# watch Specification (delta) — loop-aware posture
+# watch Specification (delta) — loop warrant
 
 ## ADDED Requirements
 
-### Requirement: Agent loop posture SHALL be derived separately from pane state
+### Requirement: Agent loop warrant SHALL be derived separately from pane state
 
-The watch/status surfaces SHALL expose a fleet **loop posture** per agent distinct from
-`surface.State`. Loop posture MUST answer whether the agent is properly participating in the
-autonomous coordination loop or has fallen out of it. Pane state alone SHALL NOT be used as the
-operator-facing loop indicator.
+The watch/status surfaces SHALL expose a fleet **loop warrant** per agent distinct from
+`surface.State`. Loop warrant MUST answer what justifies the seat's loop position: a current
+**directive**, **charge-improvement** on an assigned charge, or a **named gate** — or mark the
+seat **unwarranted** when plain idle hides lack of accountability.
 
-#### Scenario: Idle composer between turns is available not parked
+#### Scenario: Working seat on directive shows acting warrant
+
+- **WHEN** an agent's pane assesses as `working`
+- **AND** the agent has an in-flight directive or authorized turn task
+- **THEN** `loop_warrant` SHALL be `directive`
+- **AND** `loop_display` SHALL be `acting`
+
+#### Scenario: Idle between turns with authorized charge work is not unwarranted
 
 - **WHEN** an agent's pane assesses as `idle`
 - **AND** the agent is not settled
-- **AND** no awaiting-authority or blocked dominance applies
-- **AND** idle-hold strikes are below the drifted threshold (agent is NOT `drifted`)
-- **THEN** `loop_posture` SHALL be `available`
-- **AND** `state` MAY remain `idle` for harness fidelity
+- **AND** unblocked authorized backlog items exist OR the loop will self-wake
+- **AND** no named gate dominates
+- **THEN** `loop_warrant` SHALL be `charge-improvement`
+- **AND** `loop_display` SHALL be `between-turns`
 
-#### Scenario: Settled agent with empty unblocked backlog is parked
+#### Scenario: Settled empty backlog is parked display
 
-- **WHEN** an agent's settle marker is consumed or `XOSettled` is true
+- **WHEN** settle marker is consumed or `XOSettled` is true
 - **AND** the backlog gate reports zero unblocked items
-- **THEN** `loop_posture` SHALL be `parked`
+- **THEN** `loop_display` SHALL be `parked`
 - **AND** the operator text view SHALL NOT describe the agent as merely "idle"
 
-#### Scenario: Awaiting marker yields awaiting-authority posture
+#### Scenario: Named gate collapses awaiting-auth and blocked in primary warrant
 
-- **WHEN** the coordinator awaiting-operator marker is present
-- **THEN** `loop_posture` SHALL be `awaiting-authority`
+- **WHEN** the awaiting-operator marker is present OR dominant backlog is `[awaiting-auth]`
+- **OR** blocked dependency items dominate with no unblocked ahead
+- **THEN** `loop_warrant` SHALL be `named-gate`
+- **AND** `loop_display` SHALL be `gated`
+- **AND** `gate_kind` SHALL distinguish `awaiting-auth` vs `blocked` on drill-down only
 
-#### Scenario: Idle-hold pattern yields drifted posture
+#### Scenario: Idle-hold without gate is unwarranted
 
 - **WHEN** an agent is unsettled and idle at the pane
 - **AND** idle-hold strikes meet the configured threshold
-- **AND** no unblocked backlog items remain
-- **THEN** `loop_posture` SHALL be `drifted`
+- **AND** no unblocked backlog, named gate, or in-flight directive applies
+- **THEN** `loop_warrant` SHALL be `unwarranted`
 
-### Requirement: Status JSON SHALL expose loop_posture per agent
+### Requirement: Status JSON SHALL expose loop warrant per agent
 
-`flotilla status --json` SHALL include `loop_posture` on each agent entry. Existing `state`
-(pane layer) SHALL remain for backward compatibility.
+`flotilla status --json` SHALL include `loop_warrant` on each agent entry. It MAY include
+`loop_display`, `gate_kind`, and `warrant_detail`. Existing `state` SHALL remain for backward
+compatibility.
 
-#### Scenario: Status JSON carries both layers
+#### Scenario: Status JSON carries warrant layer additively
 
 - **WHEN** an operator runs `flotilla status --json` against a fresh snapshot
-- **THEN** each agent object SHALL include `name`, `state`, and `loop_posture`
-- **AND** consumers that ignore `loop_posture` SHALL continue to parse successfully
+- **THEN** each agent object SHALL include `name`, `state`, and `loop_warrant`
+- **AND** consumers that ignore `loop_warrant` SHALL continue to parse successfully

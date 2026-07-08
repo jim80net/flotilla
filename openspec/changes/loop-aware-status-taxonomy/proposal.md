@@ -1,50 +1,46 @@
-# Proposal — loop-aware officer status taxonomy
+# Proposal — loop warrant status (officer loop accountability)
 
-**Dispatch:** `flotilla-dispatch-66657142` (operator product requirement, 2026-07-08).
+**Dispatch:** `flotilla-dispatch-66657142` (initial gap), refined `flotilla-dispatch-4516dd94`
+(operator warrant model, 2026-07-08).
 
 ## Why
 
-Autonomous-fleet officers (operator, XOs, adjutants) cannot tell from today's status whether
-an agent is **properly inside the coordination loop** or has **fallen out** of it.
+Autonomous-fleet officers cannot tell whether an agent is **properly inside the coordination loop**
+or has **fallen out**. Plain pane **idle** is a **smell**: it hides seats that lack an active
+**warrant** — a reason the loop is allowed to be where it is.
 
-`surface.StateIdle` and the XO line `settled (idle)` overload **inactive / out-of-loop** with
-legitimate loop postures:
+Every COS / adjutant / XO / desk loop MUST be acting on one of:
 
-| What officers need to see | What "idle" suggests today |
-|---|---|
-| Between turns, loop will re-engage | inactive |
-| Parked at an authorized breakpoint | done / nothing happening |
-| Maintaining, refining, cleaning fleet hygiene | idle |
-| Drifted into permission-seeking idle-hold | also reads idle |
+1. A **current directive** (operator or coordinator tasking in flight),
+2. A **standing charge-improvement** loop (authorized work on an assigned charge), or
+3. A **named gate** that justifies non-action (real operator gate or tracked dependency).
 
-Plain **idle** is a pane-composer signal, not a fleet-loop signal. The product MUST expose a
-**loop-aware posture** distinct from pane state so bootstrap, watch, status, dash, and adjutant
-observation share one vocabulary.
+If none apply, the seat is **unwarranted** — coordination debt, not a benign idle.
 
 ## What Changes
 
-1. **Two-layer model** — keep `surface.State` (pane); add derived `loop_posture` (fleet).
-2. **Taxonomy** — in-loop postures (`composing`, `available`, `parked`, `awaiting-authority`,
-   `blocked`, optional `maintaining`/`refining`/`cleaning`) vs out-of-loop (`drifted`, `crashed`,
-   `reaped`, `unknown`).
-3. **Mechanical derivation** — posture from snapshot + markers + backlog parse + idle-hold strikes;
-   optional declared mode from backlog/goal markers.
-4. **Status contract** — add `loop_posture` to `flotilla status --json` per agent (**additive**
-   field; existing `state` unchanged for backward compatibility). Deprecate operator-facing plain
-   "idle" copy in human/dash views where it meant loop semantics — not removal of `state: idle`.
-5. **Bootstrap cross-ref** — doctor/validation surfaces posture drift; adjutant observes leader
-   posture not just Working/Idle.
+1. **Two-layer model** — keep `surface.State` (pane); add derived **`loop_warrant`** (fleet).
+2. **Compact warrant taxonomy** — four loop-accountability values plus technical fault states;
+   avoid posture-label proliferation (`available` vs `parked` vs `settled` only where **behavior**
+   differs for watch/dash/adjutant).
+3. **Behavior-driven display** — optional `loop_display` badge (`acting`, `between-turns`, `parked`,
+   `gated`, `unwarranted`, …) derived from warrant + pane + markers; not a second vocabulary to
+   memorize.
+4. **Status contract** — additive `loop_warrant` (+ optional `gate_kind`, `warrant_detail`) on
+   `flotilla status --json`; pane `state` unchanged.
+5. **Bootstrap / adjutant cross-ref** — doctor B012, adjutant observe-leader uses warrant not
+   pane idle alone.
 
-**Non-goals (v1):** Harness-native "maintaining" detection without markers; per-deployment posture
-names; changing `surface.State` enum.
+**Non-goals (v1):** Per-deployment warrant names; changing `surface.State`; splitting
+`awaiting-auth` vs `blocked` in the primary badge (both are `named-gate` — detail on drill-down).
 
 ## Impact
 
-- `openspec/changes/loop-aware-status-taxonomy/` (this change)
-- `openspec/changes/fleet-bootstrap-standup/` §2.5 (cross-ref)
-- `cmd/flotilla/status.go`, `internal/watch/`, `internal/dash/`
-- `openspec/changes/stackable-flotillas-438` adjutant observe-leader duty
+- `openspec/changes/loop-aware-status-taxonomy/` (this change — single coherent fork)
+- `openspec/changes/fleet-bootstrap-standup/` §2.5 amendment (warrant vocabulary; post-#520)
+- `cmd/flotilla/status.go`, `internal/watch/loopposture/`, `internal/dash/`
+- Adjutant observe-leader + protected-window composition
 
 ## Gate
 
-Direction-level design; implementation follows operator/COS gate. Builder does not self-merge.
+Direction-level design; implementation follows COS gate. Builder does not self-merge.
