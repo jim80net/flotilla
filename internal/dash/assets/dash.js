@@ -1034,6 +1034,12 @@
 
   /* ── tab nav: Conversations ⇄ Goals ⇄ Issues ⇄ Decisions · Parade (nav-out) ──────── */
   var VIEWS = ["conversations", "goals", "issues", "decisions"];
+  // #516: the brand subtitle tracks the active SPA tab. Parade is a separate page
+  // (its own HTML hardcodes "parades"); only the four SPA views land here.
+  function setBrandDash(view) {
+    var b = document.querySelector(".brand-dash");
+    if (b) b.textContent = view;
+  }
   function showView(view) {
     VIEWS.forEach(function (v) {
       var on = v === view;
@@ -1041,6 +1047,7 @@
       el("tab-" + v).classList.toggle("active", on);
       el("tab-" + v).setAttribute("aria-selected", String(on));
     });
+    setBrandDash(view);
     el("freshness").classList.toggle("hidden", view !== "conversations");
     // Conversations is the fixed single-scroll app-shell (#326): only on this tab
     // does the page itself stop scrolling. Goals/Issues/Decisions keep natural page scroll.

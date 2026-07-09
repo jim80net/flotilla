@@ -1668,6 +1668,77 @@ func TestGoalsKebabMenuNotClipped503(t *testing.T) {
 	}
 }
 
+// TestMobileDashUX514_516 locks the 2026-07-08 Seven-C mobile batch:
+//
+//	#514 goals mind-map first paint on 390px (ensureMapInView + phone chrome compact)
+//	#515 issues list titles wrap/line-clamp (not clipped mid-word at the edge)
+//	#516 brand-dash subtitle tracks the active SPA tab (not stuck on "conversations")
+func TestMobileDashUX514_516(t *testing.T) {
+	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+
+	// #516 — brand subtitle follows showView
+	djs := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{
+		"function setBrandDash",
+		"setBrandDash(view)",
+		`.brand-dash`,
+		"b.textContent = view",
+	} {
+		if !strings.Contains(djs, marker) {
+			t.Errorf("dash.js must update .brand-dash from showView (missing %q) — #516", marker)
+		}
+	}
+
+	// #515 — issue titles wrap up to 2 lines, can shrink inside the grid
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	titleRule := regexp.MustCompile(`\.issue-title\s*\{([^}]*)\}`).FindStringSubmatch(css)
+	if titleRule == nil {
+		t.Fatal("dash.css must define .issue-title (#515)")
+	}
+	titleBody := titleRule[1]
+	for _, want := range []string{
+		"min-width: 0",
+		"-webkit-line-clamp: 2",
+		"overflow-wrap: anywhere",
+	} {
+		if !strings.Contains(titleBody, want) {
+			t.Errorf(".issue-title must include %q so titles stay readable at 390px — #515", want)
+		}
+	}
+	// Phone block: labels drop under the title so the title row gets full width.
+	if !strings.Contains(css, ".issue-title { grid-column: 1 / -1") &&
+		!strings.Contains(css, ".issue-title{grid-column:1/-1") {
+		// Accept either spacing; the phone media block is the load-bearing form.
+		if !strings.Contains(css, "grid-column: 1 / -1") || !strings.Contains(css, ".issue-title") {
+			t.Error("dash.css phone block must place .issue-title on its own full-width row — #515")
+		}
+	}
+
+	// #514 — phone chrome compact + JS scroll-into-view after fit
+	gjs := doGet(t, srv, "/static/goals.js").Body.String()
+	for _, marker := range []string{
+		"function ensureMapInView",
+		"ensureMapInView()",
+		"max-width: 640px",
+		"scrollIntoView",
+	} {
+		if !strings.Contains(gjs, marker) {
+			t.Errorf("goals.js must pin the map into the phone viewport (missing %q) — #514", marker)
+		}
+	}
+	// CSS: hide the bulky goals panel-desc on phone; give the canvas scroll-margin under the sticky bar.
+	if !strings.Contains(css, ".goals-panel > .panel-head .panel-desc") {
+		t.Error("dash.css phone block must target .goals-panel panel-desc for collapse — #514")
+	}
+	if !strings.Contains(css, "scroll-margin-top") {
+		t.Error("dash.css must set scroll-margin-top on .goals-viewport for sticky-bar clearance — #514")
+	}
+	if !strings.Contains(css, ".gtile-d { display: none") && !strings.Contains(css, ".gtile-d{display:none") {
+		t.Error("dash.css phone block must hide .gtile-d to compact the situation strip — #514")
+	}
+}
+
 // --- helpers ---
 
 func doGet(t *testing.T, srv *Server, path string) *httptest.ResponseRecorder {

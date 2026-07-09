@@ -2078,6 +2078,7 @@
       // disc, so frame the whole thing centered.
       if (!view.fitted) { (isRadial() ? fitOverview : fit)(); view.fitted = true; }
       applyTransform();
+      ensureMapInView(); // #514: phone first-paint — canvas must be on-screen, not below chrome
       restoreFocus(keepFocus);
       reapplyTransient(); // re-select the drawer's node (articles were replaced) + re-light hover
       lastStructSig = ssig; // commit ONLY after a complete pass-2 render
@@ -2085,6 +2086,27 @@
       lastSig = sig;
       tryRestore(); // nodeById is now populated — apply a queued Back/Forward drawer target (#351 P2)
     });
+  }
+
+  // #514: on a 390px cold open the situation strip + panel head fill the first
+  // viewport, leaving only an empty-grid sliver of the (tall, fit-centered) map.
+  // After layout, pin the canvas under the sticky header so gnodes are in the
+  // first paint. No-op on wider viewports where the map already shares the screen.
+  // Uses scroll-margin-top on .goals-viewport (dash.css phone block) for bar clearance.
+  function ensureMapInView() {
+    if (!isVisible()) return;
+    if (!(window.matchMedia && window.matchMedia("(max-width: 640px)").matches)) return;
+    var vp = q("goals-viewport");
+    if (!vp) return;
+    var r = vp.getBoundingClientRect();
+    // If the bulk of the canvas is below the fold (top past ~35% of the viewport),
+    // scroll it to the top so the fit-centered graph is what the operator sees.
+    if (r.top > window.innerHeight * 0.35 || r.bottom > window.innerHeight) {
+      if (typeof vp.scrollIntoView === "function") {
+        try { vp.scrollIntoView({ block: "start", behavior: "instant" }); }
+        catch (e) { vp.scrollIntoView(true); } // older engines: boolean alignToTop
+      }
+    }
   }
 
   /* ── pan / zoom (ported) ───────────────────────────────────────────────── */
@@ -2259,6 +2281,9 @@
     wireNodes();
     injectRealizedSlider(); // #418: revive the look-back control (now live data)
     if (cache) { render(); } else { refresh(); }
+    // #514: if the map was already laid out (re-opening the tab), re-pin it into
+    // the phone viewport even when render() short-circuits on lastSig.
+    ensureMapInView();
   }
 
   // Re-fit on resize (keeps the map framed); the transform is otherwise the
