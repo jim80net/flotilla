@@ -328,6 +328,14 @@ func cmdWatch(args []string) error {
 		if j.Kind == watch.KindHeartbeat || j.Kind == watch.KindDetector {
 			return
 		}
+		if j.Kind == watch.KindRelay || j.Kind == watch.KindDefault {
+			if leader, ok := relayLayerLeader(cfg, j.Agent); ok {
+				path := roster.LayerLastOperatorRelayPath(rosterDir, leader)
+				if err := watch.RecordActiveConversation(path, j.MessageID, time.Now().UTC()); err != nil {
+					log.Printf("flotilla watch: active conversation record for %q failed: %v", leader, err)
+				}
+			}
+		}
 		post("flotilla-watch", "→ "+j.Agent+": "+j.Message)
 		if replyRtr != nil && isHotlineToChannelXO(cfg, j) {
 			replyRtr.arm(j.Agent, j.OriginChannel, j.Message) // watch the XO's reply to THIS message, route it back
@@ -371,6 +379,16 @@ func cmdWatch(args []string) error {
 		}
 		awaiting := watch.NewAwaitingMarker(*awaitingPath)
 		settled := watch.NewSettledMarker(*settledPath)
+		primaryActiveConvPath := roster.LayerLastOperatorRelayPath(rosterDir, xo)
+		settleConsume := func() bool {
+			consumed := settled.Consume()
+			if consumed {
+				if err := watch.ClearActiveConversation(primaryActiveConvPath); err != nil {
+					log.Printf("flotilla watch: clear active conversation for %q failed: %v", xo, err)
+				}
+			}
+			return consumed
+		}
 
 		// The tracker path is resolved ONCE (workspace state.md → --tracker-file/default)
 		// and used ONLY as the {{tracker}} the continuation prompt names — the XO's own
@@ -422,6 +440,10 @@ func cmdWatch(args []string) error {
 
 		drainAdjutantSeamFor := func(owner string) {
 			if cfg.AdjutantFor(owner) == "" {
+				return
+			}
+			if layerOperatorProtected(cfg, rosterDir, *queuePath, injector, owner, time.Now()) {
+				log.Printf("flotilla watch: adjutant seam deferred for %q (operator protected window)", owner)
 				return
 			}
 			bufferPath := roster.LayerBufferPath(rosterDir, owner)
@@ -780,7 +802,7 @@ func cmdWatch(args []string) error {
 				}),
 			MirrorDispatch:      func(run func()) { go run() }, // mirror I/O off the tick goroutine
 			Awaiting:            awaiting.Present,
-			SettleConsume:       settled.Consume,
+			SettleConsume:       settleConsume,
 			DeskSettleConsume:   deskSettled.Consume,
 			Alert:               alert,
 			MaxMissedAcks:       *maxMissed,

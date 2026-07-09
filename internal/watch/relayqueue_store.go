@@ -34,6 +34,32 @@ func newRelayQueueStore(path string) relayQueueStore {
 	return relayQueueStore{path: path}
 }
 
+// RelayQueuePendingLayer reports pending operator relays for leader or its adjutant (#523).
+func RelayQueuePendingLayer(path, leader, adjutant string) bool {
+	q := newRelayQueueStore(path)
+	if q.PendingForAgent(leader) {
+		return true
+	}
+	if adjutant != "" && q.PendingForAgent(adjutant) {
+		return true
+	}
+	return false
+}
+
+// InjectorRelayPendingLayer reports in-flight relays for leader or its adjutant (#523).
+func InjectorRelayPendingLayer(in *Injector, leader, adjutant string) bool {
+	if in == nil {
+		return false
+	}
+	if in.HasPendingRelayFor(leader) {
+		return true
+	}
+	if adjutant != "" && in.HasPendingRelayFor(adjutant) {
+		return true
+	}
+	return false
+}
+
 // PendingForAgent reports whether the durable relay queue has a pending entry for agent (#523).
 func (s relayQueueStore) PendingForAgent(agent string) bool {
 	if agent == "" || s.path == "" {

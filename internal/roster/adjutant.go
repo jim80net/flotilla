@@ -86,6 +86,24 @@ func LayerBufferDeliveredPath(rosterDir, coordinator string) string {
 	return filepath.Join(rosterDir, "flotilla-"+coordinator+"-buffer-delivered.json")
 }
 
+// LayerLastOperatorRelayPath returns the post-confirmed relay tail sidecar (#523).
+func LayerLastOperatorRelayPath(rosterDir, coordinator string) string {
+	return filepath.Join(rosterDir, "flotilla-"+coordinator+"-last-operator-relay.json")
+}
+
+// CoordinatorForAdjutant returns the leader coordinator an adjutant serves, or "".
+func (c *Config) CoordinatorForAdjutant(adjutant string) string {
+	if c == nil || adjutant == "" {
+		return ""
+	}
+	for _, a := range c.Agents {
+		if a.Name == adjutant && a.adjutantTarget() != "" {
+			return a.adjutantTarget()
+		}
+	}
+	return ""
+}
+
 // LayerFrontierPath returns the return-to-frontier sidecar for a coordinator layer (#530).
 func LayerFrontierPath(rosterDir, coordinator string) string {
 	return filepath.Join(rosterDir, "flotilla-"+coordinator+"-frontier.json")
