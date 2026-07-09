@@ -1420,14 +1420,16 @@
         postJSON("/api/control/route", { target: target, message: body }).then(function (res) {
           var outcome = (res && res.outcome) || "(no outcome reported)";
           var detail = res && res.detail ? " — " + res.detail : "";
-          // Bind the result to the desk the send TARGETED — if the operator moved on, don't
-          // clear the new desk's draft or mislabel its composer; the send still happened.
+          // #518: record optimistic outbound for the TARGET desk even if the operator
+          // switched selection mid-send — the line must appear when they return to that
+          // thread. UI mutations (clear draft / paint / status) stay sameSel-guarded.
+          if (outcome === "delivered") {
+            appendOptimisticOutbound(target, body);
+          }
           if (!sameSel(target)) return;
           if (outcome === "delivered") {
-            // #518: show the operator's own words in the thread immediately — route
-            // does not yet append a ledger line (#432 leg 2). Optimistic line is
+            // Route does not yet append a ledger line (#432 leg 2). Optimistic line is
             // pruned when a matching ledger entry appears or after TTL.
-            appendOptimisticOutbound(target, body);
             ta.value = "";
             resizeComposer();
             threadPinned = true;
