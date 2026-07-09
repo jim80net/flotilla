@@ -64,35 +64,23 @@ func cmdResume(args []string) error {
 	if launchPath == "" {
 		launchPath = launch.DefaultPath(rosterPath)
 	}
-	// The flat launch file is now a MIGRATION FALLBACK behind the per-agent workspace
-	// (~/.flotilla/<agent>/launch.json). It may be absent entirely once every desk is
-	// migrated, so load it only when present; a present-but-malformed file is still a
-	// fail-closed error (the existing safety posture).
-	var flat *launch.Config
-	if _, statErr := os.Stat(launchPath); statErr == nil {
-		rosterAgents := make(map[string]bool, len(cfg.Agents))
-		for _, a := range cfg.Agents {
-			rosterAgents[a.Name] = true
-		}
-		flat, err = launch.Load(launchPath, rosterAgents)
-		if err != nil {
-			return err
-		}
+	// Launch recipes live only in the flat flotilla-launch.json (required).
+	flat, err := loadFlatLaunch(launchPath, cfg)
+	if err != nil {
+		return err
+	}
+	if warn, werr := workspace.StaleWorkspaceLaunchWarning(agentName); werr != nil {
+		return werr
+	} else if warn != "" {
+		fmt.Fprintln(os.Stderr, "flotilla: "+warn)
 	}
 	recipe, err := workspace.ResolveRecipe(agentName, flat)
 	if err != nil {
 		return err
 	}
 
-	// Cross-recipe tmux-collision guard across workspaces ∪ flat recipes (the
-	// fleet-level invariant the flat file's single-file load gave for free). A broken
-	// UNRELATED workspace is skipped with a warning, never fail-closed.
-	if warns, ferr := workspace.FleetTmuxCheck(agentName, recipe.Tmux, flat); ferr != nil {
+	if _, ferr := workspace.FleetTmuxCheck(agentName, recipe.Tmux, flat); ferr != nil {
 		return ferr
-	} else {
-		for _, w := range warns {
-			fmt.Fprintln(os.Stderr, "flotilla: "+w)
-		}
 	}
 
 	// Resolve the agent's surface driver up front. An unregistered surface (a typo
@@ -291,4 +279,41 @@ func parseResumeArgs(args []string) (agent, rosterPath, launchPath string, force
 		return "", "", "", false, fmt.Errorf("usage: flotilla resume <agent> [--launch <path>] [--force]")
 	}
 	return agent, *rp, *lp, *fc, nil
+}
+
+// loadFlatLaunch reads and validates the fleet-wide flotilla-launch.json. The file
+// must exist — launch recipes are not stored in per-agent workspaces.
+func loadFlatLaunch(launchPath string, cfg *roster.Config) (*launch.Config, error) {
+	if _, err := os.Stat(launchPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("launch recipes file %q not found — add a flotilla-launch.json next to the roster", launchPath)
+		}
+		return nil, err
+	}
+	rosterAgents := make(map[string]bool, len(cfg.Agents))
+	for _, a := range cfg.Agents {
+		rosterAgents[a.Name] = true
+	}
+	return launch.Load(launchPath, rosterAgents)
+}
+
+// launchRecipeCwd returns the flat launch recipe cwd for an agent, or empty when the
+// launch file or agent entry is absent (legacy bare-dir identity home).
+func launchRecipeCwd(agent, rosterPath string, cfg *roster.Config) (string, error) {
+	launchPath := launch.DefaultPath(rosterPath)
+	if _, err := os.Stat(launchPath); err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	flat, err := loadFlatLaunch(launchPath, cfg)
+	if err != nil {
+		return "", err
+	}
+	r, ok := flat.Recipe(agent)
+	if !ok {
+		return "", nil
+	}
+	return r.Cwd, nil
 }

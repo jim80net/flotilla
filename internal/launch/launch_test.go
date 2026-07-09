@@ -355,6 +355,28 @@ func TestLoadAcceptsValidChain(t *testing.T) {
 	}
 }
 
+func TestUpsertAgentCreatesAndIsIdempotent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "flotilla-launch.json")
+	agents := map[string]bool{"infra": true}
+	recipe := Recipe{Launch: "grok -w infra", Cwd: "/abs/worktree", Tmux: "flotilla-infra:desk"}
+	created, err := UpsertAgent(path, agents, "infra", recipe, false)
+	if err != nil || !created {
+		t.Fatalf("UpsertAgent(create) = (%v, %v), want (true, nil)", created, err)
+	}
+	kept, err := UpsertAgent(path, agents, "infra", Recipe{Launch: "other", Cwd: "/x"}, false)
+	if err != nil || kept {
+		t.Fatalf("UpsertAgent(idempotent) = (%v, %v), want (false, nil)", kept, err)
+	}
+	cfg, err := Load(path, agents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, ok := cfg.Recipe("infra")
+	if !ok || r.Launch != "grok -w infra" {
+		t.Errorf("recipe after idempotent upsert = %+v, want original kept", r)
+	}
+}
+
 func TestValidTmuxTarget(t *testing.T) {
 	cases := map[string]bool{
 		"flotilla:xo": true,

@@ -60,13 +60,13 @@ func cmdDoctrineInstall(args []string) error {
 	if *all {
 		return cmdDoctrineInstallAll(cfg, *rp, *refresh)
 	}
-	return cmdDoctrineInstallOne(cfg, agent, *refresh)
+	return cmdDoctrineInstallOne(cfg, agent, *rp, *refresh)
 }
 
 func cmdDoctrineInstallAll(cfg *roster.Config, rosterPath string, refresh bool) error {
 	var failures int
 	for _, a := range cfg.Agents {
-		if err := cmdDoctrineInstallOne(cfg, a.Name, refresh); err != nil {
+		if err := cmdDoctrineInstallOne(cfg, a.Name, rosterPath, refresh); err != nil {
 			fmt.Fprintf(os.Stderr, "  error: %s: %v\n", a.Name, err)
 			failures++
 		}
@@ -77,13 +77,17 @@ func cmdDoctrineInstallAll(cfg *roster.Config, rosterPath string, refresh bool) 
 	return nil
 }
 
-func cmdDoctrineInstallOne(cfg *roster.Config, agent string, refresh bool) error {
+func cmdDoctrineInstallOne(cfg *roster.Config, agent, rosterPath string, refresh bool) error {
 	a, err := cfg.Agent(agent)
 	if err != nil {
 		return err
 	}
 	harnessSurface := harnessAllocationSurface(cfg, agent, a.Surface)
-	identityDir, identity, err := workspace.IdentityHome(agent, harnessSurface)
+	worktreeCwd, err := launchRecipeCwd(agent, rosterPath, cfg)
+	if err != nil {
+		return err
+	}
+	identityDir, identity, err := workspace.IdentityHome(agent, harnessSurface, worktreeCwd)
 	if err != nil {
 		return err
 	}
