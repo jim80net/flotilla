@@ -1,10 +1,12 @@
 package adjutantbuffer
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAppendDrainRoundTrip(t *testing.T) {
@@ -148,6 +150,31 @@ func TestFormatBriefListsItems(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("brief missing %q\n%s", want, got)
 		}
+	}
+}
+
+func TestOldestItemAge(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "flotilla-xo-buffer.json")
+	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	at := now.Add(-45 * time.Minute)
+	f := File{Leader: "xo", Items: []Item{{At: at, Reason: "backend: edge"}}}
+	raw, err := json.Marshal(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	age, ok := OldestItemAge(path, now)
+	if !ok {
+		t.Fatal("expected buffered item")
+	}
+	if age < 44*time.Minute || age > 46*time.Minute {
+		t.Fatalf("age = %v, want ~45m", age)
+	}
+	if _, ok := OldestItemAge(filepath.Join(dir, "missing.json"), now); ok {
+		t.Fatal("missing buffer should not report age")
 	}
 }
 
