@@ -1252,6 +1252,11 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("structuralSig must include enrichment field %q (#283 height contract)", f)
 		}
 	}
+	// #461: after is STRUCTURAL (mind-map sequenceOrder) — an after-only roadmap edit
+	// must force a full re-layout, not ride the in-place fast path with stale geometry.
+	if !strings.Contains(sig, "n.after") {
+		t.Error("structuralSig must include n.after so an after-only edit re-layouts — #461")
+	}
 	// #324 Inc 3: collaboration membership drives clusterAdjacent (it MOVES nodes), so a
 	// lane change is structural — structuralSig must fold in collaborations, or a
 	// collaborations-only change would ride the in-place fast path and never re-cluster

@@ -1053,11 +1053,12 @@
 
   /* ── keyed update: refresh live status in place, keep layout + focus ───── */
   // structuralSig captures ONLY the fields that affect layout or node identity —
-  // id/parent/depth/scope/title/description/owner and each work-item's structural
-  // fields (kind/label/ref/text). It deliberately EXCLUDES the live-changing bits
-  // (status_display, a work-item's class/detail) because those change colour + a
-  // pill word but never the card's size or position. When the structure is
-  // unchanged, an SSE refresh updates the existing cards in place — preserving
+  // id/parent/depth/scope/title/description/owner, the authored `after` sibling
+  // sequence (F12 / #461 — roadmap limb order MOVES nodes), and each work-item's
+  // structural fields (kind/label). It deliberately EXCLUDES the live-changing bits
+  // (status_display, a work-item's class/detail, brief) because those change colour /
+  // pill word / decision text but never the card's size or position. When the structure
+  // is unchanged, an SSE refresh updates the existing cards in place — preserving
   // element identity so keyboard focus and any transient UI classes (the drawer
   // selection / hover chain / pulse that later increments add to the article)
   // survive the tick, instead of being wiped by a full innerHTML teardown.
@@ -1071,6 +1072,10 @@
       nodes: goals.map(function (n) {
         return [n.id, n.parent || "", n.depth || 0, n.scope || "", n.title || "",
           n.description || "", n.owner || "",
+          // F12 / #461: after is STRUCTURAL — sequenceOrder lays mind-map siblings by it.
+          // Omitting it left after-only roadmap resequences on the in-place fast path
+          // with stale geometry until some other structural field also changed.
+          n.after || [],
           // org-graph v2 enrichment — each is rendered into the card and changes its
           // height, so a change must trigger a full rebuild (not an in-place text swap).
           n.priorities || [], n.milestones || [], (n.harness && n.harness.surface) || "",
