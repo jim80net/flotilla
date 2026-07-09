@@ -231,8 +231,12 @@ func cmdWorkspaceInit(args []string) error {
 			return err
 		}
 	}
-	if harnessSurface == "grok" && isCoordinator {
-		if err := scaffoldGrokCoordinatorPermissions(worktreeAbs); err != nil {
+	if harnessSurface == "grok" {
+		if isCoordinator {
+			if err := scaffoldGrokCoordinatorPermissions(worktreeAbs); err != nil {
+				return err
+			}
+		} else if err := scaffoldGrokDeskPermissions(worktreeAbs); err != nil {
 			return err
 		}
 	}
@@ -485,12 +489,15 @@ func workspaceLaunchCommand(worktreeAbs, agent, identity, surface string, coordi
 		return fmt.Sprintf("claude --append-system-prompt-file %s -w %s",
 			shellQuote(filepath.Join(worktreeAbs, identity)), shellQuote(agent)), nil
 	case "grok":
-		base := "grok --model composer-2.5-fast"
+		// Model: grok-4.5 for both tiers (#554; composer-2.5-fast was stale).
+		const grokModel = "grok --model grok-4.5"
 		if coordinator {
 			return fmt.Sprintf("export FLOTILLA_SELF=%s; export FLOTILLA_SECRETS=\"${FLOTILLA_SECRETS:-$HOME/.config/flotilla/flotilla-secrets.env}\"; %s",
-				shellQuote(agent), base), nil
+				shellQuote(agent), grokModel), nil
 		}
-		return base, nil
+		// Desk tier: always-approve + allow/deny from deploy desk allowlist so
+		// workspace init is not fail-open (no bare unrestricted grok).
+		return grokDeskLaunchCommand()
 	case "codex":
 		// gpt-5.5 (not gpt-5.5-codex): ChatGPT-auth desks reject the -codex slug — live-validated
 		// 2026-07-03 after operator codex login ("model is not supported when using Codex with a
