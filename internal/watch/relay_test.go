@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jim80net/flotilla/internal/looparbitration"
 	"github.com/jim80net/flotilla/internal/roster"
 )
 
@@ -74,15 +73,7 @@ func TestRelayOperatorToCoordinatorRoutesAdjutant(t *testing.T) {
 		delivered <- agent
 		return nil
 	}, 8)
-	inj.SetCoordinatorRouter(&CoordinatorRouter{
-		Config:    cfg,
-		RosterDir: t.TempDir(),
-		Arb:       &looparbitration.Arbitrator{},
-		Posture: func(string) (looparbitration.Posture, bool) {
-			return looparbitration.PostureGoalActive, true
-		},
-		GoalActive: func(string) (bool, bool) { return false, true },
-	})
+	inj.SetCoordinatorIngress(NewCoordinatorIngress(cfg))
 	inj.Start()
 	defer inj.Stop()
 	r := NewRelay(cfg, inj, nil, nil)

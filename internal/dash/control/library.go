@@ -10,7 +10,6 @@ import (
 
 	"github.com/jim80net/flotilla/internal/cos"
 	"github.com/jim80net/flotilla/internal/deliver"
-	"github.com/jim80net/flotilla/internal/looparbitration"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/transport"
@@ -67,7 +66,7 @@ type LibraryController struct {
 	acquireTxn  func(target string) (release func(), err error)
 	submit      func(drv surface.Driver, pane, text string) error
 
-	coordinatorRouter *watch.CoordinatorRouter
+	coordinatorIngress *watch.CoordinatorIngress
 }
 
 // NewLibrary builds the production controller. secretsPath may be "" (then notify
@@ -186,9 +185,9 @@ func NewLibrary(rc *roster.Config, xo, secretsPath string, notifyTr, webTr trans
 	}
 }
 
-// SetCoordinatorRouter installs #533 adjutant routing for coordinator dash delivery.
-func (c *LibraryController) SetCoordinatorRouter(r *watch.CoordinatorRouter) {
-	c.coordinatorRouter = r
+// SetCoordinatorIngress installs #533 adjutant ingress aliasing for coordinator dash delivery.
+func (c *LibraryController) SetCoordinatorIngress(g *watch.CoordinatorIngress) {
+	c.coordinatorIngress = g
 }
 
 // Notify posts an operator note to the fleet channel under the XO's webhook with
@@ -249,12 +248,8 @@ func (c *LibraryController) Route(_ context.Context, target, message string) (Ro
 	if err != nil {
 		return RouteResult{}, err
 	}
-	if c.coordinatorRouter != nil && c.roster.IsCoordinator(agentName) {
-		deliveryAgent, result, _ := c.coordinatorRouter.DeliveryTarget(agentName, message)
-		if result.Decision == looparbitration.Defer {
-			return RouteResult{Target: agentName, Outcome: OutcomeBusy, Detail: "arbitration deferred delivery — retry at seam"}, nil
-		}
-		if deliveryAgent != agentName {
+	if c.coordinatorIngress != nil && c.roster.IsCoordinator(agentName) {
+		if deliveryAgent, ok := c.coordinatorIngress.IngressTarget(agentName); ok && deliveryAgent != agentName {
 			agentName = deliveryAgent
 			if _, pane, err = c.resolveDest("", "@"+deliveryAgent); err != nil {
 				return RouteResult{}, err

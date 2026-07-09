@@ -280,9 +280,9 @@ func cmdWatch(args []string) error {
 		}
 	}
 	injector := watch.NewInjector(mkSend(confirm.Submit), 16)
-	if coordRouter := newCoordinatorRouter(cfg, rosterDir, xo, *backlogPath, *settledPath, *awaitingPath); coordRouter != nil {
-		injector.SetCoordinatorRouter(coordRouter)
-		log.Printf("flotilla watch: coordinator arbitration active (#533 adjutant routing)")
+	if ingress := newCoordinatorIngress(cfg); ingress != nil {
+		injector.SetCoordinatorIngress(ingress)
+		log.Printf("flotilla watch: coordinator ingress active (#533 adjutant alias)")
 	}
 	// RELAY-kind jobs route through the self-heal-capable submit; heartbeat/detector ticks keep the
 	// plain submit (a tick must never fire an unsolicited Ctrl-C — #156 H2). Inert when self-heal off.
