@@ -199,6 +199,98 @@ user the dash Goals view picks up changes on the next load (or via SSE when
 Human-paced walkthrough of the same cold-start flow lives in
 `docs/quickstart.md`; goal-file schema detail is in `fleet-goals.example.yaml`.
 
+## 8. Execution-desk delivery assurance (inbound + dropped-dispatch)
+
+Sections 4–5 cover **getting a turn started** (`send` confirms Idle→Working) and
+the XO clock. They do **not** prove the desk **retained and finished** the
+dispatch. Coordinators and execution desks (including Grok workhorses) need the
+assurance loop below — without it, a busy intervening duty turn can displace a
+confirmed ORG slice and the fleet has no mechanical resume.
+
+### The loop (sender → recipient → finish)
+
+```
+coordinator: flotilla send --from meta-xo backend "…"
+        │
+        ├─ AppendDispatchNonce  → body gains footer + flotilla-dispatch-<hex>
+        ├─ confirmed delivery   → turn started in backend's pane
+        │
+        └─ TrackConfirmedSend   → <roster-dir>/flotilla-backend-inbound.json
+                                  journal: inbound track backend recorded reason=ok
+                                          (or skipped reason=coordinator)
+
+backend (execution desk):
+        • does the work
+        • turn-final MUST echo the nonce verbatim (footer is fine)
+          e.g. … Nonce: flotilla-dispatch-a1b2c3d4
+
+watch (on backend Working→Idle):
+        DroppedDispatchFinishHook reads turn-final vs inbound ledger
+        • nonce present / distinctive snippet  → clear entry (handled)
+        • first miss                            → one-shot reinject wake
+        • miss after reinject confirmed         → escalate to coordinator
+```
+
+**Sender-side busy path** (complement, not replacement): if `backend` is mid-turn,
+`send` retries briefly then queues to the sender's durable **outbox**
+(`flotilla-<sender>-outbox.json`); `watch` sweeps until delivery. That is #475
+(delivery starts). **Inbound + dropped-dispatch** (#472 / #494 / #496 / #498) is
+the other half (delivery was retained and addressed).
+
+### What every execution desk must do
+
+1. **Read the dispatch footer.** Every `flotilla send` appends a `#472` ack block
+   with a nonce of the form `flotilla-dispatch-<hex>` and the instruction to echo
+   it. Do not strip the footer before reading it.
+2. **Echo the nonce in your operator-facing turn-final** before going idle
+   (a one-line footer is enough). Example shape:
+
+   ```text
+   Bottom line: harness fix landed; PR ready for review.
+   …mini-brief…
+   Nonce: flotilla-dispatch-a1b2c3d4
+   ```
+
+3. **Do not treat "turn confirmed" as "work finished."** Confirmed delivery only
+   means the pane accepted the paste. The inbound ledger stays pending until the
+   finish edge sees the nonce (or a distinctive snippet of the dispatch body).
+4. **If you receive a `[flotilla dropped-dispatch resume]` wake**, that is a
+   mechanical re-injection of a still-pending ledger entry — resume the body,
+   then echo the nonce again before idle.
+
+Coordinators are **not** written to an inbound ledger (`inbound track <xo>
+skipped reason=coordinator`) so finish evaluation stays bounded; execution desks
+**are** tracked (`recorded reason=ok`). Watch journal lines use that exact shape
+after every confirmed inter-agent send.
+
+### Where this lives in the repo
+
+| Piece | Location |
+|-------|----------|
+| Nonce footer + echo contract | `internal/inbound/contract.go`, `internal/inbound/nonce.go` |
+| Recipient ledger + finish policy | `internal/inbound/` (package doc: sender outbox vs recipient inbound) |
+| Confirm → ledger (CLI + daemon) | `TrackConfirmedSend` in `internal/inbound/track_send.go`; CLI `recordDirectInboundTrack`; watch `InboundTrackHook` |
+| Working→Idle resume / escalate | `DroppedDispatchFinishHook` in `internal/watch/dropped_dispatch.go` |
+| Coordinator dispatch habits | `docs/coordinator-runbooks/dispatch-coordination.md` |
+| Watch production ops | `docs/watch-runbook.md` |
+
+There is no separate skill file named “dropped-dispatch”; the **code packages
+above are the source of truth**. Doctrine seeds (`flotilla doctrine install` /
+`workspace init`) teach act-dont-idle-hold and executive turn-finals — the nonce
+echo is an additional mechanical obligation on every dispatched turn-final.
+
+### Smoke check (after a real send)
+
+```sh
+# After: flotilla send --from meta-xo backend "run the suite"
+ls flotilla-backend-inbound.json   # beside the roster; pending entry with nonce
+# When backend goes idle without echoing the nonce, watch reinjects once.
+# Journal (watch log): inbound track backend recorded reason=ok
+```
+
+Use generic agent names (`meta-xo`, `backend`, `frontend`, `infra`) in examples and
+fixtures — never deployment-specific desk names.
+
 ---
 
 ## Done — what you set up
@@ -207,8 +299,11 @@ You installed flotilla, registered the user's first agent, delivered a confirmed
 cross-pane message, and started the self-continuing clock. Summarize for the
 user: they can now `flotilla send` work to any desk, the XO advances authorized
 work on its own, and (if they wired Discord) they drive the whole fleet from
-chat. Point them at `docs/quickstart.md` for the same flow at human pace, and
-`docs/xo-doctrine.md` + `docs/watch-runbook.md` for running an XO in production.
-`flotilla workspace init` seeds the constitutional doctrine (including
-act-dont-idle-hold — execute authorized work, don't stall on non-decisions); run
-`flotilla doctrine install <agent>` on existing desks to pick up new members.
+chat. Execution desks must **echo the dispatch nonce** in turn-finals so
+dropped-dispatch resume can clear the inbound ledger (section 8). Point them at
+`docs/quickstart.md` for the same flow at human pace, and `docs/xo-doctrine.md` +
+`docs/watch-runbook.md` + `docs/coordinator-runbooks/dispatch-coordination.md`
+for running an XO in production. `flotilla workspace init` seeds the
+constitutional doctrine (including act-dont-idle-hold — execute authorized work,
+don't stall on non-decisions); run `flotilla doctrine install <agent>` on
+existing desks to pick up new members.
