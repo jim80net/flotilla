@@ -102,9 +102,10 @@ func (c claudeCode) Assess(pane string) State {
 	if c.parseBusy(captured) {
 		return StateWorking
 	}
-	// Claude Code's worktree-exit menu during /exit blocks unattended recycle; classify as
-	// AwaitingInput so pollClosed can answer it mechanically (keep worktree — fail-safe).
-	if deliver.ClaudeWorktreeExitPrompt(captured) {
+	// Interactive confirmation chrome (worktree-exit, numbered confirm, AskUserQuestion-
+	// style menus) must not read as plain Idle — recycle refuses idle∧cleared on the same
+	// frames, and status/loop_posture must not claim a safe seam (#557).
+	if InteractiveConfirmPrompt(captured) {
 		return StateAwaitingInput
 	}
 	return StateIdle

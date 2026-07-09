@@ -761,7 +761,10 @@ func cmdWatch(args []string) error {
 					// which alerted on the very first resolve failure).
 					return surface.StateShell
 				}
-				return drv.Assess(pane)
+				// AssessForFleet: Idle + focus-stealing composer (subagent panel /
+				// list-nav / queued) elevates so status does not claim plain idle when
+				// recycle's idle∧cleared gate would refuse (#557).
+				return surface.AssessForFleet(drv, pane)
 			},
 			RateLimitMaterial: rateLimitMaterial(cfg),
 			RateLimitReset:    rateLimitReset(cfg),

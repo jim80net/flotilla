@@ -202,3 +202,18 @@ func TestObserver_LoopObserverSeam(t *testing.T) {
 		t.Fatalf("GoalActive = %v %v", g, gok)
 	}
 }
+
+// #557: prompt-blocked pane (awaiting-input) must not collapse to available/parked idle path.
+func TestDerive_AwaitingInputBlocked557(t *testing.T) {
+	e := Evidence{
+		Pane:          surface.StateAwaitingInput,
+		InSnapshot:    true,
+		SnapshotFresh: true,
+		BacklogKnown:  true,
+		UnblockedN:    0,
+		Park:          ParkStrict,
+	}
+	if got := Derive(e); got != PostureBlocked {
+		t.Fatalf("Derive(awaiting-input) = %q, want blocked", got)
+	}
+}

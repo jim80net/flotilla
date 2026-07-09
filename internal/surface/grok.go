@@ -199,7 +199,7 @@ var grokRateLimitStatus = regexp.MustCompile(`(?i)[\x{2801}-\x{28FF}].*\brate li
 // the Working check because the streaming arrow ⇣ is CO-PRESENT on the modal's "◆ Run …" line — keying
 // Working first would mis-classify a desk blocked on approval as Working (the live #58/#158 gap, which
 // also leaves the desk invisible to the XO-only wedge timer). Order: AwaitingApproval (modal chrome) →
-// Working (arrow/spinner) → Idle (a finished turn shows an empty composer box, no arrow/spinner/modal).
+// Working (arrow/spinner) → AwaitingInput (interactive confirm / exit menu, #557) → Idle.
 func parseGrokState(captured string) State {
 	tail := strings.Join(lastNNonEmptyLines(captured, grokTail), "\n")
 	if grokApprovalSelect.MatchString(tail) || strings.Contains(tail, grokApprovalYolo) {
@@ -207,6 +207,11 @@ func parseGrokState(captured string) State {
 	}
 	if strings.Contains(tail, grokWorkingArrow) || grokInSessionProcessing(tail) {
 		return StateWorking
+	}
+	// Exit-confirmation / numbered interactive prompts with no spinner still block recycle
+	// (idle∧cleared fails). Status must not report plain idle for the same frame (#557).
+	if InteractiveConfirmPrompt(captured) {
+		return StateAwaitingInput
 	}
 	return StateIdle
 }
