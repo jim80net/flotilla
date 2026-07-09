@@ -6,6 +6,21 @@ import (
 	"time"
 )
 
+func TestEvaluateUrgentBypassNotAuditedWhenRecordFails(t *testing.T) {
+	// Path is a directory — append must fail; Audited must stay false.
+	dir := t.TempDir()
+	log := NewAuditLog(dir)
+	a := &Arbitrator{Audit: log}
+	req := InjectRequest{Target: "xo", Priority: PriorityUrgent}
+	r := a.Evaluate(req, Context{Coordinator: "xo"})
+	if r.Decision != AllowNow {
+		t.Fatalf("want ALLOW_NOW, got %+v", r)
+	}
+	if r.Audited {
+		t.Fatal("Audited must be false when audit append failed")
+	}
+}
+
 func TestAuditLogRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
 	log := NewAuditLog(path)

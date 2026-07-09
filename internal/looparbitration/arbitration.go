@@ -52,11 +52,22 @@ const (
 	PriorityMechanical = frontier.PriorityMechanical
 )
 
+// BypassClass names an explicit audited leader bypass (#533). Inject kind/source alone
+// does not confer urgency — callers must set PriorityUrgent or a Bypass class.
+type BypassClass string
+
+const (
+	// BypassOperatorDirect is manual operator-to-leader traffic that bypasses adjutant
+	// buffering (audited). Distinct from routine mechanical relay routing.
+	BypassOperatorDirect BypassClass = "operator_direct"
+)
+
 // InjectRequest is one candidate inject before pane delivery.
 type InjectRequest struct {
 	Target   string
 	Kind     InjectKind
 	Priority Priority
+	Bypass   BypassClass
 	ReturnTo string
 	Source   string
 }
@@ -126,10 +137,11 @@ func (a *Arbitrator) Evaluate(req InjectRequest, ctx Context) Result {
 	}
 
 	if isUrgent(req) {
-		r := Result{Decision: AllowNow, Reason: "urgent-bypass"}
+		r := Result{Decision: AllowNow, Reason: urgentReason(req)}
 		if a != nil && a.Audit != nil {
-			a.Audit.Record(auditEntry(a.now(), coord, req, r))
-			r.Audited = true
+			if err := a.Audit.Record(auditEntry(a.now(), coord, req, r)); err == nil {
+				r.Audited = true
+			}
 		}
 		return r
 	}
@@ -217,7 +229,14 @@ func isUrgent(req InjectRequest) bool {
 	if req.Priority == PriorityUrgent {
 		return true
 	}
-	return req.Kind == KindRelay
+	return req.Bypass != ""
+}
+
+func urgentReason(req InjectRequest) string {
+	if req.Bypass != "" {
+		return "audited-bypass-" + string(req.Bypass)
+	}
+	return "urgent-bypass"
 }
 
 func bufferWithReturn(req InjectRequest, ctx Context, reason string) Result {
@@ -236,6 +255,10 @@ func (a *Arbitrator) now() time.Time {
 }
 
 func auditEntry(at time.Time, coordinator string, req InjectRequest, r Result) AuditEntry {
+	bypass := "urgent"
+	if req.Bypass != "" {
+		bypass = string(req.Bypass)
+	}
 	return AuditEntry{
 		At:          at,
 		Coordinator: coordinator,
@@ -244,7 +267,7 @@ func auditEntry(at time.Time, coordinator string, req InjectRequest, r Result) A
 		Priority:    req.Priority,
 		Source:      req.Source,
 		Decision:    r.Decision,
-		Bypass:      "urgent",
+		Bypass:      bypass,
 		Reason:      r.Reason,
 	}
 }

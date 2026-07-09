@@ -35,7 +35,9 @@ func TestEvaluateUrgentRelayAllowNowWithAudit(t *testing.T) {
 		Audit:    log,
 		Now:      func() time.Time { return time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC) },
 	}
-	req := InjectRequest{Target: "xo", Kind: KindRelay, Source: "discord-relay"}
+	req := InjectRequest{
+		Target: "xo", Kind: KindRelay, Priority: PriorityUrgent, Source: "discord-relay",
+	}
 	ctx := Context{Coordinator: "xo", ProtectedWindow: true}
 	r := a.Evaluate(req, ctx)
 	if r.Decision != AllowNow || !r.Audited {
@@ -43,6 +45,48 @@ func TestEvaluateUrgentRelayAllowNowWithAudit(t *testing.T) {
 	}
 	entries, err := LoadAudit(log.Path())
 	if err != nil || len(entries) != 1 || entries[0].Bypass != "urgent" {
+		t.Fatalf("audit entries=%v err=%v", entries, err)
+	}
+}
+
+func TestEvaluateNonUrgentRelayBuffersDuringProtectedWindow(t *testing.T) {
+	a := arb(&FakeObserver{Postures: map[string]Posture{"xo": PostureComposing}})
+	req := InjectRequest{
+		Target: "xo", Kind: KindRelay, Priority: PriorityMechanical, Source: "discord-relay",
+	}
+	ctx := Context{
+		Coordinator: "xo", ProtectedWindow: true, FrontierReturnTo: "[in-flight] goal-loop",
+	}
+	r := a.Evaluate(req, ctx)
+	if r.Decision != Buffer || r.ReturnTo != "[in-flight] goal-loop" {
+		t.Fatalf("non-urgent relay through protected window want BUFFER+return_to, got %+v", r)
+	}
+}
+
+func TestEvaluateNonUrgentRelayBuffersDuringGoalActive(t *testing.T) {
+	a := arb(&FakeObserver{Postures: map[string]Posture{"xo": PostureGoalActive}})
+	req := InjectRequest{Target: "xo", Kind: KindRelay, Source: "discord-relay"}
+	ctx := Context{Coordinator: "xo", FrontierReturnTo: "[in-flight] #533 routing"}
+	r := a.Evaluate(req, ctx)
+	if r.Decision != Buffer || r.ReturnTo != "[in-flight] #533 routing" {
+		t.Fatalf("non-urgent relay during goal-active want BUFFER+return_to, got %+v", r)
+	}
+}
+
+func TestEvaluateOperatorDirectBypassAllowNowWithAudit(t *testing.T) {
+	dir := t.TempDir()
+	log := NewAuditLog(filepath.Join(dir, "audit.jsonl"))
+	a := &Arbitrator{Audit: log, Now: func() time.Time { return time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC) }}
+	req := InjectRequest{
+		Target: "xo", Kind: KindRelay, Bypass: BypassOperatorDirect, Source: "operator-manual",
+	}
+	ctx := Context{Coordinator: "xo", ProtectedWindow: true}
+	r := a.Evaluate(req, ctx)
+	if r.Decision != AllowNow || !r.Audited {
+		t.Fatalf("operator-direct bypass want ALLOW_NOW+audit, got %+v", r)
+	}
+	entries, err := LoadAudit(log.Path())
+	if err != nil || len(entries) != 1 || entries[0].Bypass != string(BypassOperatorDirect) {
 		t.Fatalf("audit entries=%v err=%v", entries, err)
 	}
 }
