@@ -421,8 +421,8 @@
     el("conv-map").innerHTML = '<span class="conv-map-label">session mirror</span>' +
       '<span class="conv-map-empty">' + text + "</span>";
   }
-  function renderSessionMirror() {
-    if (composerComposeActive()) { mirrorRenderDeferred = true; return; }
+  function renderSessionMirror(force) {
+    if (!force && composerComposeActive()) { mirrorRenderDeferred = true; return; }
     if (!selectedDesk) { mirrorEmpty("Select a desk to see its latest session output.", "none"); return; }
     var doc = cache.mirror || {};
     // Identity guard: cache.mirror may still hold the PREVIOUS desk's doc (the async
@@ -494,7 +494,7 @@
       btns[i].classList.toggle("active", on);
       btns[i].setAttribute("aria-pressed", String(on));
     }
-    paintMirror();
+    paintMirror(true);
   }
 
   // fetchMirror loads the selected desk's session mirror and re-renders the glance.
@@ -503,7 +503,10 @@
   // sized for the Inc 2 thread-merge, which reuses cache.mirror.entries in full.
   // paintMirror re-renders BOTH mirror-dependent views — the glance (latest entry)
   // and the thread (which now interleaves the full mirror history with the ledger).
-  function paintMirror() { renderSessionMirror(); renderThread(cache.history || {}); }
+  function paintMirror(force) {
+    renderSessionMirror(force);
+    renderThread(cache.history || {}, force);
+  }
   function fetchMirror() {
     var want = selectedDesk;
     if (!want) { cache.mirror = null; paintMirror(); return; }
@@ -569,8 +572,8 @@
     return '<div class="thread-calib">History begins' + escapeHtml(when) +
       ' — earlier coordinator turns weren’t recorded (a firewall issue, since fixed). Shown from here down.</div>';
   }
-  function renderThread(history) {
-    if (composerComposeActive()) { threadRenderDeferred = true; return; }
+  function renderThread(history, force) {
+    if (!force && composerComposeActive()) { threadRenderDeferred = true; return; }
     var thread = el("conv-thread");
     if (!selectedDesk) {
       if (lastThreadKey === "@none") return;
@@ -641,7 +644,9 @@
     if (!mirrorRenderDeferred && !threadRenderDeferred) return;
     mirrorRenderDeferred = false;
     threadRenderDeferred = false;
-    paintMirror();
+    // Force repaint even when a non-empty draft remains after blur — automatic ticks
+    // defer, but an explicit flush must not re-enter the compose guard (#517).
+    paintMirror(true);
   }
   var threadPinned = true; // true ⇒ keep the newest message in view on each render
   function scrollThreadToBottom() {
@@ -1318,7 +1323,13 @@
           // Bind the result to the desk the send TARGETED — if the operator moved on, don't
           // clear the new desk's draft or mislabel its composer; the send still happened.
           if (!sameSel(target)) return;
-          if (outcome === "delivered") { ta.value = ""; resizeComposer(); threadPinned = true; scrollThreadToBottom(); }
+          if (outcome === "delivered") {
+            ta.value = "";
+            resizeComposer();
+            threadPinned = true;
+            scrollThreadToBottom();
+            flushDeferredMirrorPaint();
+          }
           setMsg("Outcome: " + outcome + detail, outcome === "delivered" ? "ok" : "");
         }).catch(function (err) { if (sameSel(target)) setMsg(err.message, "err"); }).then(function () {
           inFlight = false;

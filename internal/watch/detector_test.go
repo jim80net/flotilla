@@ -245,6 +245,7 @@ func TestDetectorStackableWakesPrimaryOwnedDeskUsesPrimaryWake(t *testing.T) {
 		t.Fatal("primary-owned desk material must re-engage settled primary")
 	}
 }
+
 func TestDetectorStackableWakesScopesSubtreeToOwner(t *testing.T) {
 	f := newFixture()
 	cfg := f.config("cos", []string{"cos", "alpha-xo", "backend"}, 3, "none")
