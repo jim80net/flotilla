@@ -1330,11 +1330,55 @@
     }
   }
   window.addEventListener("popstate", function (e) { applyNav(e.state); });
-  // Seed the initial entry so the very first Back has a target.
-  try { history.replaceState({ view: "conversations", desk: selectedDesk || null, channel: selectedChannel || null }, "", navHash({ view: "conversations", desk: selectedDesk })); } catch (e) { /* ignore */ }
-  // Conversations is the default active tab — arm the fixed app-shell at startup
-  // so the page doesn't scroll before the first tab interaction (#326).
-  document.body.classList.add("conv-shell-active");
+
+  // parseHash maps a location.hash into a nav state for cold-open deep links (#579).
+  // Returns null when the fragment is empty or not an SPA view — so default_view can
+  // still choose the landing tab. Explicit hashes always win over default_view.
+  function parseHash(raw) {
+    var h = String(raw || "").replace(/^#/, "");
+    if (!h) return null;
+    if (h === "conv" || h.indexOf("conv/") === 0) {
+      var desk = h.indexOf("conv/") === 0 ? decodeURIComponent(h.slice(5)) : "";
+      return { view: "conversations", desk: desk || null, channel: null };
+    }
+    if (h === "goals" || h.indexOf("goals/") === 0) {
+      var node = h.indexOf("goals/") === 0 ? decodeURIComponent(h.slice(6)) : "";
+      return { view: "goals", node: node || null };
+    }
+    if (h === "issues" || h === "decisions") return { view: h };
+    return null;
+  }
+  window.flotillaDash.parseHash = parseHash; // asset-lockable / goja (#579)
+
+  // seedLanding chooses the first tab on cold open (#579):
+  //   1. Explicit hash / deep link → that view (always wins).
+  //   2. Else GET /api/goals.default_view === true → Goals.
+  //   3. Else Conversations (historical default).
+  // Must NOT replaceState to #conv before the goals peek — that would mint a
+  // synthetic "explicit" hash and steal the default_view branch.
+  function seedLanding() {
+    var fromHash = parseHash(location.hash);
+    if (fromHash) {
+      applyNav(fromHash);
+      try { history.replaceState(fromHash, "", navHash(fromHash)); } catch (e) { /* ignore */ }
+      return;
+    }
+    getJSON("/api/goals").then(function (g) {
+      // Operator (or another path) already chose a view while we waited — do not steal.
+      if (parseHash(location.hash)) return;
+      var land = (g && g.default_view)
+        ? { view: "goals" }
+        : { view: "conversations", desk: selectedDesk || null, channel: selectedChannel || null };
+      applyNav(land);
+      try { history.replaceState(land, "", navHash(land)); } catch (e) { /* ignore */ }
+    }).catch(function () {
+      if (parseHash(location.hash)) return;
+      var land = { view: "conversations", desk: selectedDesk || null, channel: selectedChannel || null };
+      applyNav(land);
+      try { history.replaceState(land, "", navHash(land)); } catch (e) { /* ignore */ }
+    });
+  }
+  seedLanding();
 
   // Session-mirror detail toggle (info ⇄ debug) — static chrome, wired once. Flipping
   // it repaints the glance + thread at the new tier (the debug payload is already in
