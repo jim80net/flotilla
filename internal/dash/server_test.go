@@ -1340,6 +1340,8 @@ func TestThreadMerge(t *testing.T) {
 		"threadLedgerMsg",          // relay-line renderer
 		"thread-mirror",            // session-output styling hook
 		"lastThreadKey",            // re-announce / scroll-reset dedup
+		"composerComposeActive",    // #517: defer mirror/thread repaint while operator is mid-draft
+		"flushDeferredMirrorPaint",
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("dash.js must retain the §2.4 thread-merge engine (missing %q)", marker)
@@ -1353,6 +1355,51 @@ func TestThreadMerge(t *testing.T) {
 	css := doGet(t, srv, "/static/dash.css").Body.String()
 	if !strings.Contains(css, ".thread-mirror") {
 		t.Error("dash.css must style the session-output turn (.thread-mirror)")
+	}
+}
+
+// TestComposeGuardExplicitFlush (#517 gate bounce): automatic SSE/tick repaints defer while
+// the operator is composing, but an explicit flush (blur with non-empty draft, post-send
+// clear, verbosity toggle) must bypass the guard — otherwise deferred mirror/thread content
+// never paints. No JS runner here; assert the control-flow contract in served dash.js.
+func TestComposeGuardExplicitFlush(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+
+	if !strings.Contains(js, "if (!force && composerComposeActive())") {
+		t.Fatal("compose guard must apply only on automatic repaints (!force), not explicit flush")
+	}
+	if !strings.Contains(js, "paintMirror(true)") {
+		t.Fatal("explicit flush paths must call paintMirror(true) to bypass compose guard")
+	}
+	flushIdx := strings.Index(js, "function flushDeferredMirrorPaint()")
+	if flushIdx < 0 {
+		t.Fatal("flushDeferredMirrorPaint missing")
+	}
+	flushBody := js[flushIdx : flushIdx+400]
+	if !strings.Contains(flushBody, "paintMirror(true)") {
+		t.Error("flushDeferredMirrorPaint must force-repaint deferred content even with non-empty draft")
+	}
+	delivered := `if (outcome === "delivered")`
+	dIdx := strings.Index(js, delivered)
+	if dIdx < 0 {
+		t.Fatal("thread composer delivered outcome handler missing")
+	}
+	sendBlock := js[dIdx : dIdx+500]
+	if !strings.Contains(sendBlock, "flushDeferredMirrorPaint") {
+		t.Error("delivered send path must flush deferred mirror/thread paint after clearing draft")
+	}
+	verbIdx := strings.Index(js, "function setMirrorVerbosity")
+	if verbIdx < 0 {
+		t.Fatal("setMirrorVerbosity missing")
+	}
+	verbEnd := strings.Index(js[verbIdx:], "function fetchMirror")
+	if verbEnd < 0 {
+		verbEnd = 600
+	}
+	if !strings.Contains(js[verbIdx:verbIdx+verbEnd], "paintMirror(true)") {
+		t.Error("user-initiated verbosity repaint must bypass compose guard (paintMirror(true))")
 	}
 }
 
