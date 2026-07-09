@@ -57,7 +57,7 @@ func fedCfg() *roster.Config {
 // selfMirrorGuardAdapter), so a self-post never reaches Handle at all and webhookID
 // is no longer a Handle argument. The webhook-drop property is pinned at the adapter
 // level (internal/transport's selfmirror tests, including the sender==operator case).
-// Operator relay routes to the adjutant when adjutant_for is configured (#533).
+// Operator relay ingress aliases to the adjutant front office when adjutant_for is configured (#533).
 func TestRelayOperatorToCoordinatorRoutesAdjutant(t *testing.T) {
 	cfg := &roster.Config{
 		OperatorUserID: "op",

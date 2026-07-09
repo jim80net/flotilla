@@ -72,7 +72,7 @@ func TestCoordinatorIngressSynthesisAliasesAdjutant(t *testing.T) {
 	}
 }
 
-func TestCoordinatorIngressAdjutantSeamDrainReachesLeader(t *testing.T) {
+func TestCoordinatorIngressFrontOfficeSeamRecallReachesLeader(t *testing.T) {
 	g := NewCoordinatorIngress(adjutantRoster())
 	job := Job{
 		Agent: "alpha-xo", Message: "seam brief", Kind: KindDetector,

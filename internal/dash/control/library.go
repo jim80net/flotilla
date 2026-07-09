@@ -185,7 +185,7 @@ func NewLibrary(rc *roster.Config, xo, secretsPath string, notifyTr, webTr trans
 	}
 }
 
-// SetCoordinatorIngress installs #533 adjutant ingress aliasing for coordinator dash delivery.
+// SetCoordinatorIngress installs #533 adjutant front-office ingress for coordinator dash delivery.
 func (c *LibraryController) SetCoordinatorIngress(g *watch.CoordinatorIngress) {
 	c.coordinatorIngress = g
 }
