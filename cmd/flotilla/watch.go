@@ -496,6 +496,14 @@ func cmdWatch(args []string) error {
 				return
 			}
 			injector.Enqueue(watch.Job{Agent: target, Message: body, Kind: watch.KindDetector})
+			if kind == watch.WakePing && primaryAdjutant != "" {
+				charterPath := roster.LayerCharterPath(rosterDir, xo)
+				if !layerCharterMissing(charterPath) {
+					evaluationTickAntiStarvationDrain(
+						layerBufferPath, xo, defaultBufferSeamMaxWait, time.Now(), drainAdjutantSeamFor,
+					)
+				}
+			}
 		}
 
 		wakeLayer := func(owner string, kind watch.WakeKind, reasons []string) {
