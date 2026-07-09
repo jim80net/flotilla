@@ -567,19 +567,29 @@ protocol specifies otherwise; urgent bypasses are explicit and audited.
 
 ### Return-to-frontier (#530 — related, distinct from #526)
 
-**#526** caps raw backlog line injection in `WakeBacklog` prompts (pointer-sized items).
-**#530** adds a durable **`return_to` / frontier frame** on adjutant/seam handoffs so a
-coordinator interrupted mid-warrant can resume the active goal-loop frontier without relying
-on conversational memory:
+**#526 is CLOSED** (shipped via #529): caps raw backlog line injection in `WakeBacklog`
+prompts. **Do not reopen.** **#530** is the coordinator-side complement — a durable
+**return-to-frontier frame** on adjutant/seam handoffs.
 
-- Every seam item that preempts an active warrant carries priority + `return_to` (durable
-  pointer to the warrant/frontier, not a raw history paste).
-- Coordinator turn-finals after a side item run a **return-to-frontier guard**: resume the
-  prior warrant, explicitly reassign it, or name the gate blocking it.
-- Urgent bypasses and operator-protected windows use the same structured model.
+Structured seam metadata (design contract; implementation follow-up):
 
-Implementation is a follow-up after adjutant seam injection lands; design here records the
-contract so #438 routing and #439 laminar flow do not omit the resume edge.
+| Field | Role |
+|-------|------|
+| `priority` | Urgent / judgment / mechanical — drives bypass vs buffer |
+| `return_to` | Durable pointer to active warrant/frontier (backlog item id, issue, goal-loop nonce — not raw history) |
+| `interrupt_source` | detector / relay / adjutant seam / recycle — for audit |
+| `frontier_guard` | Turn-final obligation after side item: resume `return_to`, reassign, or name blocking gate |
+
+Rules:
+
+- Every seam item that preempts an active warrant carries `priority` + `return_to`.
+- Coordinator turn-finals after a side item run the **return-to-frontier guard** — no
+  stopping point without an explicit resume, reassign, or named gate.
+- Urgent bypasses and operator-protected windows use the same structured model (audited,
+  not silent prompt injection).
+
+Implementation follows adjutant seam injection (#439); this section records the contract
+so #438 routing and #439 laminar flow do not omit the resume edge.
 
 ### Out of scope (until operator clarifies)
 

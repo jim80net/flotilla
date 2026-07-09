@@ -14,6 +14,7 @@
 - [ ] 1.8 Operator gate on design PR (#440)
 - [x] 1.9 Fold #438 comms-path — COS-authorized hierarchical paths (2026-07-09 ORG-ARCHITECTURE SHIFT)
 - [x] 1.10 Cross-link **#530** return-to-frontier frame in seam handoff design (distinct from #526 cap)
+- [x] 1.11 ORG-ARCHITECTURE SHIFT routing table — #438/#439/#530 folded; #526 closed (#529), do not reopen
 
 ## Implementation (post-gate — P0 adjutant first)
 

@@ -46,9 +46,17 @@ seam injection model, #438 scoping as Phase 2.
 
 **Out:** Implementation until operator gates design PR.
 
-**2026-07-09 COS fold (#438):** hierarchical comms paths authorized (child owns subtree
-edges; parent rollups/exceptions/escalations; peer via lowest common owner; urgent bypass
-audited). **#530** filed as return-to-frontier complement to **#526** prompt cap.
+## ORG-ARCHITECTURE SHIFT routing (COS goal-loop pass, 2026-07-09)
+
+Public product routing for the refinement pass — fold into this openspec change; do not
+reopen closed work.
+
+| Issue | Status | Design home | Scope |
+|-------|--------|-------------|-------|
+| **#438** | OPEN — design authorized | `design.md` § Communication paths | Hierarchical cross-layer comms; child owns subtree edges; parent rollups/exceptions/escalations; do not wait on clipped operator sentence |
+| **#439** | OPEN — research gate | `transcript-analysis.md` | **Bounded transcript mining only** — observe coordinator/adjutant sessions; recommend absent-leader defaults + urgent-bypass boundaries before policy lock |
+| **#530** | OPEN — design contract | `design.md` § Return-to-frontier | Structured `return_to` + priority metadata on seam/adjutant interrupts; return-to-frontier guard on coordinator turn-finals |
+| **#526** | **CLOSED** (#529 merged) | — | WakeBacklog prompt cap shipped; **do not reopen** |
 
 ## Success criteria
 

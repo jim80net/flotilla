@@ -1,11 +1,25 @@
 # Transcript analysis — coordinator interrupt patterns (design gate deliverable)
 
-**Status:** PLANNED — bounded execution queued; required before operator gates implementation
-policy on #439.
+**Status:** PLANNED — **bounded research question only**; required before operator gates
+implementation policy on #439.
 
-**Purpose:** Ground adjutant seam-injection policy and solo-authority charter defaults in
-**organic patterns from real sessions**, per operator directive (issue #439 comments
-2026-07-06) and COS resume directive (2026-07-09).
+**Purpose:** Observe actual coordinator/adjutant transcripts from dogfooding and **recommend
+defaults** — not invent policy a priori. Per issue #439 and COS ORG-ARCHITECTURE SHIFT
+pass (2026-07-09).
+
+## Research questions (must answer before policy lock)
+
+1. **Absent-leader behavior** — When the coordinator pane is gone (crash, recycle gap,
+   sustained Shell), what did the adjutant/coordinator pair actually do? What should the
+   **default charter** permit without first-presentation negotiation?
+2. **Urgent-bypass boundaries** — Which interrupts cut through buffering today (operator
+   relay, timed windows, finish-edges)? What must **always** bypass vs what coordinators
+   successfully deferred to a seam?
+3. **Seam signals** — What leader states did coordinators treat as safe to absorb inbox
+   traffic (idle, post-turn-final, settled)?
+4. **Return-to-frontier gap (#530 input)** — After a side-item interrupt, did coordinators
+   resume the prior warrant or lose the frontier? What structured `return_to` pointer would
+   have helped?
 
 ## Method
 
