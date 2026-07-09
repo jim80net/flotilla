@@ -27,7 +27,19 @@ func TestEvaluateNonUrgentGoalActiveBuffersWithReturnTo(t *testing.T) {
 	}
 }
 
-func TestEvaluateUrgentRelayAllowNowWithAudit(t *testing.T) {
+func TestEvaluateUrgentRelayRoutesAdjutantWhenConfigured(t *testing.T) {
+	a := arb(&FakeObserver{Postures: map[string]Posture{"xo": PostureComposing}})
+	req := InjectRequest{
+		Target: "xo", Kind: KindRelay, Priority: PriorityUrgent, Source: "discord-relay",
+	}
+	ctx := Context{Coordinator: "xo", AdjutantFor: "xo-adj", ProtectedWindow: true}
+	r := a.Evaluate(req, ctx)
+	if r.Decision != AllowNow || r.Route != RouteAdjutant {
+		t.Fatalf("urgent with adjutant want adjutant ALLOW_NOW, got %+v", r)
+	}
+}
+
+func TestEvaluateUrgentRelayNoAdjutantLeaderWithAudit(t *testing.T) {
 	dir := t.TempDir()
 	log := NewAuditLog(filepath.Join(dir, "audit.jsonl"))
 	a := &Arbitrator{
@@ -41,7 +53,7 @@ func TestEvaluateUrgentRelayAllowNowWithAudit(t *testing.T) {
 	ctx := Context{Coordinator: "xo", ProtectedWindow: true}
 	r := a.Evaluate(req, ctx)
 	if r.Decision != AllowNow || !r.Audited || r.Route != RouteLeader {
-		t.Fatalf("urgent relay want leader ALLOW_NOW+audit, got %+v", r)
+		t.Fatalf("urgent no-adjutant want leader ALLOW_NOW+audit, got %+v", r)
 	}
 	entries, err := LoadAudit(log.Path())
 	if err != nil || len(entries) != 1 || entries[0].Bypass != "urgent" {
@@ -74,21 +86,15 @@ func TestEvaluateNonUrgentRelayBuffersDuringGoalActive(t *testing.T) {
 	}
 }
 
-func TestEvaluateOperatorDirectBypassAllowNowWithAudit(t *testing.T) {
-	dir := t.TempDir()
-	log := NewAuditLog(filepath.Join(dir, "audit.jsonl"))
-	a := &Arbitrator{Audit: log, Now: func() time.Time { return time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC) }}
+func TestEvaluateOperatorDirectBypassRoutesAdjutantWhenConfigured(t *testing.T) {
+	a := arb(&FakeObserver{Postures: map[string]Posture{"xo": PostureComposing}})
 	req := InjectRequest{
 		Target: "xo", Kind: KindRelay, Bypass: BypassOperatorDirect, Source: "operator-manual",
 	}
-	ctx := Context{Coordinator: "xo", ProtectedWindow: true}
+	ctx := Context{Coordinator: "xo", AdjutantFor: "xo-adj", ProtectedWindow: true, FrontierReturnTo: "warrant"}
 	r := a.Evaluate(req, ctx)
-	if r.Decision != AllowNow || !r.Audited || r.Route != RouteLeader {
-		t.Fatalf("operator-direct bypass want leader ALLOW_NOW+audit, got %+v", r)
-	}
-	entries, err := LoadAudit(log.Path())
-	if err != nil || len(entries) != 1 || entries[0].Bypass != string(BypassOperatorDirect) {
-		t.Fatalf("audit entries=%v err=%v", entries, err)
+	if r.Route != RouteAdjutant || r.Decision != Buffer {
+		t.Fatalf("operator-direct with adjutant want adjutant BUFFER, got %+v", r)
 	}
 }
 
@@ -115,7 +121,7 @@ func TestEvaluateTimedFallbackWhenNoObserver(t *testing.T) {
 func TestEvaluateSafeSeamDrainsBufferedAdjutantSeam(t *testing.T) {
 	a := arb(&FakeObserver{Postures: map[string]Posture{"xo": PostureAvailable}})
 	req := InjectRequest{Target: "xo", Kind: KindAdjutantSeam, Source: "adjutant-buffer"}
-	ctx := Context{Coordinator: "xo", BufferedPending: true, SafeSeam: true}
+	ctx := Context{Coordinator: "xo", AdjutantFor: "xo-adj", BufferedPending: true, SafeSeam: true}
 	r := a.Evaluate(req, ctx)
 	if r.Decision != AllowNow || r.Route != RouteLeader {
 		t.Fatalf("want leader safe seam drain ALLOW_NOW, got %+v", r)
@@ -152,12 +158,12 @@ func TestEvaluateGoalActiveObserverFlag(t *testing.T) {
 	}
 }
 
-func TestEvaluateUrgentPriorityBypassesProtectedWindow(t *testing.T) {
+func TestEvaluateUrgentPriorityRoutesAdjutantNotAroundProtectedWindow(t *testing.T) {
 	a := arb(nil)
 	req := InjectRequest{Target: "xo", Kind: KindMaterialChange, Priority: PriorityUrgent}
-	ctx := Context{Coordinator: "xo", ProtectedWindow: true}
+	ctx := Context{Coordinator: "xo", AdjutantFor: "xo-adj", ProtectedWindow: true}
 	r := a.Evaluate(req, ctx)
-	if r.Decision != AllowNow {
-		t.Fatalf("urgent priority should ALLOW_NOW, got %+v", r)
+	if r.Decision != AllowNow || r.Route != RouteAdjutant {
+		t.Fatalf("urgent with adjutant should notify adjutant, got %+v", r)
 	}
 }

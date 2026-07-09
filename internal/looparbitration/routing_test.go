@@ -2,8 +2,8 @@ package looparbitration
 
 import "testing"
 
-// #533: source is not the routing key — adjutant availability + urgency decide route.
-func TestRouteNonUrgentInterruptsThroughAdjutantRegardlessOfSource(t *testing.T) {
+// #533: source/kind/priority/bypass are not routing keys — adjutant_for decides ingress.
+func TestRouteAllNotificationsThroughAdjutantRegardlessOfSource(t *testing.T) {
 	a := arb(&FakeObserver{Postures: map[string]Posture{"xo": PostureGoalActive}})
 	sources := []struct {
 		kind   InjectKind
@@ -42,16 +42,29 @@ func TestRouteNoAdjutantFallbackToLeader(t *testing.T) {
 	}
 }
 
-func TestRouteUrgentAndOperatorBypassStayOnLeader(t *testing.T) {
+func TestRouteUrgentAndBypassLabelsGoToAdjutantWhenConfigured(t *testing.T) {
 	a := arb(&FakeObserver{Postures: map[string]Posture{"xo": PostureComposing}})
-	urgent := InjectRequest{Target: "xo", Kind: KindRelay, Priority: PriorityUrgent, Source: "discord"}
 	ctx := Context{Coordinator: "xo", AdjutantFor: "xo-adj", ProtectedWindow: true}
-	if r := a.Evaluate(urgent, ctx); r.Route != RouteLeader || r.Decision != AllowNow {
-		t.Fatalf("urgent want leader ALLOW_NOW, got %+v", r)
+	cases := []InjectRequest{
+		{Target: "xo", Kind: KindRelay, Priority: PriorityUrgent, Source: "discord"},
+		{Target: "xo", Kind: KindGoalLoop, Bypass: BypassOperatorDirect, Source: "operator-manual"},
+		{Target: "xo", Kind: KindDroppedDispatch, Source: "inbound-reinject"},
 	}
-	direct := InjectRequest{Target: "xo", Kind: KindGoalLoop, Bypass: BypassOperatorDirect}
-	if r := a.Evaluate(direct, ctx); r.Route != RouteLeader || r.Decision != AllowNow {
-		t.Fatalf("operator-direct want leader ALLOW_NOW, got %+v", r)
+	for _, req := range cases {
+		r := a.Evaluate(req, ctx)
+		if r.Route != RouteAdjutant {
+			t.Fatalf("%+v: want adjutant route, got %+v", req, r)
+		}
+	}
+}
+
+func TestRouteUrgentNoAdjutantFallbackLeaderWithAudit(t *testing.T) {
+	a := arb(&FakeObserver{Postures: map[string]Posture{"xo": PostureComposing}})
+	req := InjectRequest{Target: "xo", Kind: KindRelay, Priority: PriorityUrgent}
+	ctx := Context{Coordinator: "xo", ProtectedWindow: true}
+	r := a.Evaluate(req, ctx)
+	if r.Route != RouteLeader || r.Decision != AllowNow {
+		t.Fatalf("no-adjutant urgent want leader ALLOW_NOW, got %+v", r)
 	}
 }
 
@@ -62,6 +75,16 @@ func TestRouteAdjutantSeamDrainStaysOnLeader(t *testing.T) {
 	r := a.Evaluate(req, ctx)
 	if r.Route != RouteLeader || r.Decision != AllowNow {
 		t.Fatalf("seam brief drain want leader ALLOW_NOW, got %+v", r)
+	}
+}
+
+func TestRouteDroppedDispatchToAdjutantWhenConfigured(t *testing.T) {
+	a := arb(&FakeObserver{Postures: map[string]Posture{"xo": PostureAvailable}})
+	req := InjectRequest{Target: "xo", Kind: KindDroppedDispatch, Source: "inbound-reinject"}
+	ctx := Context{Coordinator: "xo", AdjutantFor: "xo-adj", SafeSeam: true}
+	r := a.Evaluate(req, ctx)
+	if r.Route != RouteAdjutant {
+		t.Fatalf("dropped-dispatch with adjutant want adjutant route, got %+v", r)
 	}
 }
 

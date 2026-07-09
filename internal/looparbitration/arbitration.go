@@ -2,11 +2,11 @@
 // loop-conformance-mechanics design (#532). Every coordinator-targeted inject passes
 // through Evaluate before pane delivery; wiring into watch is a follow-up step.
 //
-// Routing policy (#533): when adjutant_for is set, all non-urgent interrupts route
-// through the adjutant — not only mechanical/operator traffic. Source and inject kind
-// are not routing keys; urgency, adjutant availability, and posture are. Exceptions:
-// urgent bypass, no-adjutant fallback, explicit audited operator/manual bypass, and
-// leader seam-brief drain.
+// Routing policy (#533): when adjutant_for is set, coordinator notifications route to
+// the adjutant — source, kind, priority, and bypass labels do not bypass the adjutant.
+// The adjutant may interrupt the leader via KindAdjutantSeam drain. No-adjutant
+// fallback delivers to the leader. Urgent/operator-direct leader bypass routing is
+// deferred until a concrete consumer exists.
 package looparbitration
 
 import (
@@ -58,13 +58,13 @@ const (
 	PriorityMechanical = frontier.PriorityMechanical
 )
 
-// BypassClass names an explicit audited leader bypass (#533). Kind, source, and channel
-// do not confer urgency or leader routing — callers must set PriorityUrgent or Bypass.
+// BypassClass names an explicit bypass label for future audited routing (#533).
+// Leader bypass via Bypass is deferred until a concrete consumer exists; with
+// adjutant_for set, notifications route to the adjutant regardless of Bypass.
 type BypassClass string
 
 const (
-	// BypassOperatorDirect is manual operator-to-leader traffic that bypasses adjutant
-	// routing (audited). Distinct from routine non-urgent relay/discord/dash traffic.
+	// BypassOperatorDirect reserved for future operator-direct leader bypass (audited).
 	BypassOperatorDirect BypassClass = "operator_direct"
 )
 
@@ -147,6 +147,9 @@ func (a *Arbitrator) Evaluate(req InjectRequest, ctx Context) Result {
 	}
 
 	if isUrgent(req) {
+		if ctx.AdjutantFor != "" {
+			return a.finalize(req, ctx, Result{Decision: AllowNow, Reason: "urgent-adjutant-notification"})
+		}
 		r := Result{Decision: AllowNow, Reason: urgentReason(req)}
 		if a != nil && a.Audit != nil {
 			if err := a.Audit.Record(auditEntry(a.now(), coord, req, r)); err == nil {
@@ -244,10 +247,7 @@ func goalActive(posture Posture, postureKnown bool, ctx Context) bool {
 }
 
 func isUrgent(req InjectRequest) bool {
-	if req.Priority == PriorityUrgent {
-		return true
-	}
-	return req.Bypass != ""
+	return req.Priority == PriorityUrgent
 }
 
 func urgentReason(req InjectRequest) string {

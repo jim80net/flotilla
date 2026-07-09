@@ -1,8 +1,9 @@
 package looparbitration
 
-// RouteTarget names the pane that receives an inject. #533 policy: all non-urgent
-// interrupts route through the adjutant when adjutant_for is configured — source/kind
-// alone is not the routing key. Urgency, adjutant availability, and posture are.
+// RouteTarget names the pane that receives an inject. #533 policy: when adjutant_for
+// is set, coordinator notifications go to the adjutant — source, kind, priority, and
+// bypass labels do not route around the adjutant. The adjutant may interrupt the
+// leader via KindAdjutantSeam drain (RouteLeader).
 type RouteTarget string
 
 const (
@@ -10,22 +11,15 @@ const (
 	RouteAdjutant RouteTarget = "adjutant"
 )
 
-// resolveRoute picks the delivery pane for a verdict. Exceptions to adjutant routing:
-//   - urgent bypass or explicit audited BypassClass → leader
-//   - no adjutant configured → leader (fail-safe fallback)
-//   - adjutant seam brief drain → leader consolidated brief
-//   - dropped-dispatch reinject → leader/recipient target unchanged
-func resolveRoute(req InjectRequest, ctx Context, r Result) RouteTarget {
-	if isUrgent(req) {
-		return RouteLeader
-	}
+// resolveRoute picks the delivery pane for a verdict.
+//   - no adjutant → leader (fail-safe fallback)
+//   - KindAdjutantSeam → leader (adjutant-owned interruption path)
+//   - otherwise with adjutant → adjutant (all notification ingress)
+func resolveRoute(req InjectRequest, ctx Context, _ Result) RouteTarget {
 	if ctx.AdjutantFor == "" {
 		return RouteLeader
 	}
 	if req.Kind == KindAdjutantSeam {
-		return RouteLeader
-	}
-	if req.Kind == KindDroppedDispatch {
 		return RouteLeader
 	}
 	return RouteAdjutant
