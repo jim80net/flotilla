@@ -156,6 +156,10 @@ const rosterCos = `{
 
 const secretsXO = "FLOTILLA_WEBHOOK_XO=https://discord.example/webhook/xo\n"
 
+// secretsXOAndAlpha includes the desk webhook so Route Discord parity (#432) can resolve
+// secrets.Webhook("alpha") the same way notify/send resolve per-agent hooks.
+const secretsXOAndAlpha = secretsXO + "FLOTILLA_WEBHOOK_ALPHA=https://discord.example/webhook/alpha\n"
+
 func TestNotify_HappyPath_PostsAndMirrors(t *testing.T) {
 	c, cap := newTestController(t, rosterCos, secretsXO)
 	if err := c.Notify(context.Background(), "fleet, stand by for a deploy"); err != nil {
@@ -299,12 +303,145 @@ func TestRoute_LockBracketsSubmit(t *testing.T) {
 }
 
 func TestRoute_DeliveredMirrorsToLedger(t *testing.T) {
-	c, cap := newTestController(t, rosterCos, secretsXO)
+	c, cap := newTestController(t, rosterCos, secretsXOAndAlpha)
 	if _, err := c.Route(context.Background(), "alpha", "ship it"); err != nil {
 		t.Fatal(err)
 	}
 	if len(cap.ledger) != 1 || cap.ledger[0].From != dashProvenance || cap.ledger[0].To != "alpha" || cap.ledger[0].Gist != "ship it" {
 		t.Errorf("ledger = %+v", cap.ledger)
+	}
+	// CosLedger must be non-empty when cos_agent is set — the production gate for append.
+	if c.roster.CosLedger == "" {
+		t.Fatal("CosLedger empty with cos_agent set — mirrorRouteToLedger would no-op")
+	}
+}
+
+// #432 leg 2: delivered Route posts operator(dash) to the TARGET agent's Discord webhook
+// (not only the hub XO), and still lands the CosLedger line.
+func TestRoute_DeliveredMirrorsToDiscordAndLedger432(t *testing.T) {
+	c, cap := newTestController(t, rosterCos, secretsXOAndAlpha)
+	res, err := c.Route(context.Background(), "alpha", "do the cutover")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome != OutcomeDelivered {
+		t.Fatalf("outcome = %q, want delivered", res.Outcome)
+	}
+	if cap.postCalls != 1 {
+		t.Fatalf("Discord post calls = %d, want 1", cap.postCalls)
+	}
+	if cap.postWebhook != "https://discord.example/webhook/alpha" {
+		t.Errorf("post webhook = %q, want target agent alpha's hook", cap.postWebhook)
+	}
+	if cap.postUser != dashProvenance {
+		t.Errorf("post username = %q, want %q", cap.postUser, dashProvenance)
+	}
+	if cap.postContent != "do the cutover" {
+		t.Errorf("post content = %q", cap.postContent)
+	}
+	if len(cap.ledger) != 1 || cap.ledger[0].From != dashProvenance || cap.ledger[0].To != "alpha" {
+		t.Errorf("ledger = %+v", cap.ledger)
+	}
+}
+
+// #432: Discord mirror failure must NOT flip delivered → error (pane already confirmed).
+func TestRoute_DiscordMirrorFailureStillDelivered432(t *testing.T) {
+	c, cap := newTestController(t, rosterCos, secretsXOAndAlpha)
+	cap.postErr = errors.New("webhook 500")
+	res, err := c.Route(context.Background(), "alpha", "still delivered")
+	if err != nil {
+		t.Fatalf("err = %v, Discord mirror must not fail Route", err)
+	}
+	if res.Outcome != OutcomeDelivered {
+		t.Errorf("outcome = %q, want delivered", res.Outcome)
+	}
+	if len(cap.ledger) != 1 {
+		t.Errorf("ledger must still append on Discord post failure: %+v", cap.ledger)
+	}
+}
+
+// #432: missing per-agent webhook is best-effort (no post) — ledger still records.
+func TestRoute_MissingAgentWebhookStillLedgers432(t *testing.T) {
+	// secretsXO has XO only — alpha has no FLOTILLA_WEBHOOK_ALPHA.
+	c, cap := newTestController(t, rosterCos, secretsXO)
+	res, err := c.Route(context.Background(), "alpha", "ledger only")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome != OutcomeDelivered {
+		t.Fatalf("outcome = %q", res.Outcome)
+	}
+	if cap.postCalls != 0 {
+		t.Errorf("post calls = %d, want 0 when target webhook missing", cap.postCalls)
+	}
+	if len(cap.ledger) != 1 || cap.ledger[0].To != "alpha" {
+		t.Errorf("ledger = %+v", cap.ledger)
+	}
+}
+
+// #432/#518: when CosLedger is active, append must reach a real on-disk ledger path
+// (not only the in-memory seam capture). Pins the live "0 operator(dash) lines" hole.
+func TestRoute_DeliveredAppendsCosLedgerOnDisk432(t *testing.T) {
+	dir := t.TempDir()
+	rosterPath := filepath.Join(dir, "flotilla.json")
+	if err := os.WriteFile(rosterPath, []byte(rosterCos), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rc, err := roster.Load(rosterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rc.CosLedger == "" {
+		t.Fatal("CosLedger empty after load with cos_agent — production gate broken")
+	}
+	// CosLedger resolves beside the roster file.
+	secretsPath := filepath.Join(dir, "secrets.env")
+	if err := os.WriteFile(secretsPath, []byte(secretsXOAndAlpha), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	xo := rc.XOAgent
+	c := NewLibrary(rc, xo, secretsPath, &fakeNotifyTransport{maxRunes: 2000}, &fakeNotifyTransport{maxRunes: 2000})
+	cap := &capture{paneTarget: "%5", rc: rc, xo: xo}
+	c.post = cap.post
+	// Real cos.Append — the production seam — must create durable operator(dash) lines.
+	c.appendCos = cos.Append
+	c.now = func() time.Time { return fixedTime }
+	c.resolveDest = cap.resolveDest
+	c.acquireTxn = cap.acquireTxn
+	c.submit = cap.submit
+
+	if _, err := c.Route(context.Background(), "alpha", "disk durable route"); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(rc.CosLedger)
+	if err != nil {
+		t.Fatalf("read CosLedger %s: %v (append did not create file)", rc.CosLedger, err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, dashProvenance) {
+		t.Errorf("CosLedger missing %q: %q", dashProvenance, body)
+	}
+	if !strings.Contains(body, "alpha") || !strings.Contains(body, "disk durable route") {
+		t.Errorf("CosLedger missing route fields: %q", body)
+	}
+	if cap.postCalls != 1 || cap.postWebhook != "https://discord.example/webhook/alpha" {
+		t.Errorf("Discord post = %d webhook %q", cap.postCalls, cap.postWebhook)
+	}
+}
+
+// Busy/unconfirmed outcomes must NOT post Discord or append ledger.
+func TestRoute_NonDeliveredDoesNotMirror432(t *testing.T) {
+	c, cap := newTestController(t, rosterCos, secretsXOAndAlpha)
+	cap.submitErr = surface.ErrBusy
+	res, err := c.Route(context.Background(), "alpha", "no mirror")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome != OutcomeBusy {
+		t.Fatalf("outcome = %q, want busy", res.Outcome)
+	}
+	if cap.postCalls != 0 || len(cap.ledger) != 0 {
+		t.Errorf("non-delivered must not mirror: posts=%d ledger=%+v", cap.postCalls, cap.ledger)
 	}
 }
 

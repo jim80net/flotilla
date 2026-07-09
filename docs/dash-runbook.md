@@ -242,8 +242,20 @@ Route resolves the target the same way Discord routing does (case-insensitive,
 delivery library's **typed outcome**: `delivered` / `busy` (mid-turn — retry) /
 `crashed` (desk is a shell) / `transient` (uncertain — retry) / `unconfirmed`
 (escalated). A lock-contention timeout is reported as busy/not-delivered
-(retryable) — never a silent partial send. Each delivered route is mirrored to
-the CoS ledger as `operator(dash) → <agent>`.
+(retryable) — never a silent partial send.
+
+On **`delivered`** (#432 leg 2 / #518 conversations parity), the dash also:
+
+1. **Posts** the operator message to the **target agent's Discord webhook**
+   (`FLOTILLA_WEBHOOK_<AGENT>` in `--secrets`) under the username `operator(dash)`
+   — same provenance as the Operator note action. Best-effort: a missing per-agent
+   webhook or post failure is logged to stderr and does **not** flip the outcome
+   (pane delivery already confirmed).
+2. **Appends** a CoS ledger line `operator(dash) → <agent>` when `cos_agent` is set
+   (`CosLedger` active). Append failures are logged, not silent.
+
+Together these make dash-composed messages visible in Discord and in
+`/api/history` the same way Discord-originated operator traffic is.
 
 > **Operational note (from the operator):** the transaction lock is **dormant**
 > until the dash control surface actually deploys — the running `watch`/binary
