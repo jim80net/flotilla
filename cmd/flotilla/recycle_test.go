@@ -258,6 +258,70 @@ func TestRunRecyclePhase1Abort(t *testing.T) {
 	if len(r.delivered) != 1 {
 		t.Errorf("the handoff turn is delivered once; takeover never (got %v)", r.delivered)
 	}
+	// Generic timeout must NOT claim uncooperative without a banner.
+	if strings.Contains(err.Error(), "uncooperative") {
+		t.Errorf("empty pane capture must not diagnose uncooperative: %v", err)
+	}
+}
+
+// #558: credit/quota-exhausted sessions must not look like slow-delivery timeouts.
+func TestRunRecyclePhase1UncooperativeCredits558(t *testing.T) {
+	r := happyRec()
+	r.failDurable = true
+	ops := fakeRecycleOps(r)
+	ops.capturePane = func(string) (string, error) {
+		return "You've reached your model limit for this session.\n" +
+			"You're out of usage credits. Run /usage-credits to top up.\n❯ \n", nil
+	}
+	_, _, err := runRecycle(ops, testPlan())
+	if err == nil {
+		t.Fatal("want phase-1 abort")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"phase 1:",
+		"uncooperative",
+		"usage credit",
+		"resume backend --force",
+		"do not retry recycle",
+	} {
+		if !strings.Contains(strings.ToLower(msg), strings.ToLower(want)) && !strings.Contains(msg, want) {
+			t.Errorf("error missing %q: %s", want, msg)
+		}
+	}
+	// Recovery notice for coordinators must point at resume --force.
+	notice := recycleAbortNotice("backend", "phase 1", classifyRecycleAbort(err), err, "/repo/.claude/handoffs/x.md")
+	if !strings.Contains(notice, "resume backend --force") {
+		t.Errorf("abort notice must recommend resume --force:\n%s", notice)
+	}
+	if !strings.Contains(notice, "do NOT retry recycle") {
+		t.Errorf("abort notice must forbid recycle retry:\n%s", notice)
+	}
+	if r.closed || r.respawned {
+		t.Errorf("uncooperative phase-1 must not close/relaunch (%+v)", r)
+	}
+}
+
+func TestPhase1HandoffTimeoutErr_GenericVsUncooperative(t *testing.T) {
+	p := testPlan()
+	ops := recycleOps{
+		capturePane: func(string) (string, error) { return "normal idle composer\n❯ \n", nil },
+	}
+	got := phase1HandoffTimeoutErr(ops, "sess:0.1", p)
+	if strings.Contains(got, "uncooperative") {
+		t.Fatalf("healthy pane must use generic timeout: %s", got)
+	}
+	if !strings.Contains(got, "handoff not durably confirmed") {
+		t.Fatalf("generic message missing: %s", got)
+	}
+
+	ops.capturePane = func(string) (string, error) {
+		return "Server is temporarily limiting requests\n❯ \n", nil
+	}
+	got = phase1HandoffTimeoutErr(ops, "sess:0.1", p)
+	if !strings.Contains(got, "uncooperative") || !strings.Contains(got, "resume backend --force") {
+		t.Fatalf("rate-limit pane must diagnose uncooperative + resume --force: %s", got)
+	}
 }
 
 // --- I1+I7: under-lock re-verify abort (4.4) ---
