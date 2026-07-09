@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/backlog"
+	"github.com/jim80net/flotilla/internal/dash"
 	"github.com/jim80net/flotilla/internal/loopposture"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
@@ -62,10 +63,10 @@ func cmdStatus(args []string) error {
 	snapFresh := false
 	if snapOK {
 		if age, ok := fileAge(*snapshotPath, now); ok {
-			snapFresh = age <= statusFreshnessThreshold(cfg.HeartbeatDur())
+			snapFresh = age <= dash.FreshnessThreshold(cfg.HeartbeatDur())
 		}
 	}
-	loopByAgent := buildLoopEvidence(cfg, xo, rosterDir, snap, snapOK, snapFresh)
+	loopByAgent := loopposture.LoadFleetEvidence(cfg, xo, rosterDir, snap, snapOK, snapFresh)
 	if *asJSON {
 		// generated_at is the snapshot's mtime (when watch last wrote it) — the
 		// honest "as of" for the states below. Empty when there is no snapshot.
@@ -172,44 +173,12 @@ func writeStatus(out io.Writer, cfg *roster.Config, xo, snapshotPath, ackPath st
 	_ = w.Flush()
 }
 
-// buildLoopEvidence loads per-agent backlog + settle markers (I/O) into Derive inputs.
-func buildLoopEvidence(cfg *roster.Config, xo, rosterDir string, snap watch.Snapshot, snapOK, snapFresh bool) map[string]loopposture.Evidence {
-	out := make(map[string]loopposture.Evidence, len(cfg.Agents))
-	if cfg == nil {
-		return out
-	}
-	for _, a := range cfg.Agents {
-		backlogPath := filepath.Join(rosterDir, "flotilla-"+a.Name+"-backlog.md")
-		st, backlogKnown := loopposture.ReadBacklogFile(backlogPath)
-		settled := false
-		if snapOK && a.Name == xo {
-			settled = snap.XOSettled
-		} else {
-			// Prefer layer settled path; also accept the per-agent settle marker set.
-			settled = loopposture.SettledFilePresent(roster.LayerSettledPath(rosterDir, a.Name))
-			if !settled {
-				settled = loopposture.SettledFilePresent(filepath.Join(rosterDir, "flotilla-"+a.Name+"-settled"))
-			}
-		}
-		out[a.Name] = loopposture.FromSnapshot(snap, a.Name, settled, backlogKnown, snapOK && snapFresh, st)
-	}
-	return out
-}
-
 func deriveAgentPosture(name string, snap watch.Snapshot, loopByAgent map[string]loopposture.Evidence) loopposture.Posture {
 	if ev, ok := loopByAgent[name]; ok {
 		return loopposture.Derive(ev)
 	}
 	// No evidence map: pane-only derivation (backlog unknown ⇒ cannot strict-park).
 	return loopposture.Derive(loopposture.FromSnapshot(snap, name, false, false, true, backlog.Status{}))
-}
-
-// statusFreshnessThreshold matches dash.FreshnessThreshold (3× heartbeat; 20m default).
-func statusFreshnessThreshold(heartbeat time.Duration) time.Duration {
-	if heartbeat <= 0 {
-		heartbeat = 20 * time.Minute
-	}
-	return 3 * heartbeat
 }
 
 // deskStateLabel renders a desk's snapshot state with the operator-facing

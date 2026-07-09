@@ -296,24 +296,10 @@ func (s *Server) loadBoard() BoardDoc {
 	return BuildBoard(in)
 }
 
-// loadBoardLoopEvidence mirrors cmd/flotilla status's per-agent backlog + settle
-// reads so the fleet board's loop_posture matches `flotilla status --json`.
+// loadBoardLoopEvidence delegates to loopposture.LoadFleetEvidence so the fleet
+// board's loop_posture matches `flotilla status --json` byte-for-byte on inputs.
 func loadBoardLoopEvidence(cfg *roster.Config, xo, rosterDir string, snap watch.Snapshot, snapOK, snapFresh bool) map[string]loopposture.Evidence {
-	out := make(map[string]loopposture.Evidence, len(cfg.Agents))
-	if cfg == nil {
-		return out
-	}
-	for _, a := range cfg.Agents {
-		st, backlogKnown := loopposture.ReadBacklogFile(filepath.Join(rosterDir, "flotilla-"+a.Name+"-backlog.md"))
-		settled := false
-		if snapOK && a.Name == xo {
-			settled = snap.XOSettled
-		} else {
-			settled = loopposture.SettledFilePresent(roster.LayerSettledPath(rosterDir, a.Name))
-		}
-		out[a.Name] = loopposture.FromSnapshot(snap, a.Name, settled, backlogKnown, snapOK && snapFresh, st)
-	}
-	return out
+	return loopposture.LoadFleetEvidence(cfg, xo, rosterDir, snap, snapOK, snapFresh)
 }
 
 // loadHistory reads the ledger + backlog files fresh and builds the history

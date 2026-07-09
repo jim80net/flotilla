@@ -2,8 +2,10 @@ package loopposture
 
 import (
 	"os"
+	"path/filepath"
 
 	"github.com/jim80net/flotilla/internal/backlog"
+	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/watch"
 )
@@ -37,6 +39,37 @@ func SettledFilePresent(path string) bool {
 	}
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// agentSettled reports whether the agent's settle marker is present. XO uses the
+// snapshot flag when available; otherwise layer path then legacy per-agent marker.
+func agentSettled(xo, rosterDir, agent string, snap watch.Snapshot, snapOK bool) bool {
+	if snapOK && agent == xo {
+		return snap.XOSettled
+	}
+	if rosterDir != "" {
+		if SettledFilePresent(roster.LayerSettledPath(rosterDir, agent)) {
+			return true
+		}
+		return SettledFilePresent(filepath.Join(rosterDir, "flotilla-"+agent+"-settled"))
+	}
+	return false
+}
+
+// LoadFleetEvidence builds per-agent Evidence for status and dash so loop_posture
+// matches across surfaces (#524 review gate).
+func LoadFleetEvidence(cfg *roster.Config, xo, rosterDir string, snap watch.Snapshot, snapOK, snapFresh bool) map[string]Evidence {
+	out := make(map[string]Evidence, len(cfg.Agents))
+	if cfg == nil {
+		return out
+	}
+	for _, a := range cfg.Agents {
+		backlogPath := filepath.Join(rosterDir, "flotilla-"+a.Name+"-backlog.md")
+		st, backlogKnown := ReadBacklogFile(backlogPath)
+		settled := agentSettled(xo, rosterDir, a.Name, snap, snapOK)
+		out[a.Name] = FromSnapshot(snap, a.Name, settled, backlogKnown, snapOK && snapFresh, st)
+	}
+	return out
 }
 
 // ReadBacklogFile reads path and parses the backlog. ok=false when the file is
