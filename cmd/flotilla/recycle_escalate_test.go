@@ -15,6 +15,7 @@ func TestClassifyRecycleAbort(t *testing.T) {
 		{"phase 2 re-verify: backend is no longer idle at a cleared composer — ABORT, desk untouched", abortBusyDesk},
 		{"phase 2: the graceful close of \"backend\" did not confirm the process exited within 30s — the desk MAY STILL BE LIVE", abortPhase2Close},
 		{"phase 1: handoff not durably confirmed for \"backend\" within 5m", abortHandoff},
+		{"phase 1: target session for \"backend\" appears uncooperative (pane shows \"out of usage credits\") — use `flotilla resume backend --force`", abortHandoff},
 		{"refusing to recycle \"xo\": %5 is THIS command's own pane", abortSelf},
 		{"something else", abortOther},
 	}

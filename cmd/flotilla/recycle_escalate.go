@@ -37,6 +37,11 @@ func classifyRecycleAbort(err error) recycleAbortClass {
 		return abortBusyDesk
 	case strings.Contains(s, "phase 2:") && (strings.Contains(s, "did not confirm") || strings.Contains(s, "closing")):
 		return abortPhase2Close
+	case strings.Contains(s, "uncooperative") || strings.Contains(s, "usage credit") ||
+		(strings.Contains(s, "phase 1:") && strings.Contains(s, "resume") && strings.Contains(s, "--force")):
+		// #558: credit/quota-exhausted sessions — still a handoff-class abort, but
+		// recovery must point at resume --force (handled in recycleAbortNotice).
+		return abortHandoff
 	case strings.Contains(s, "phase 1:") || strings.Contains(s, "handoff"):
 		return abortHandoff
 	case strings.Contains(s, "own pane") || strings.Contains(s, "self"):
@@ -90,6 +95,24 @@ func recycleAbortNotice(agent, phase string, class recycleAbortClass, err error,
 		b.WriteString(agent)
 		b.WriteString(" --force\n")
 		b.WriteString("  - If still live: do NOT relaunch; re-run recycle after Idle, or heal subagent/exit dialogs\n")
+	case abortHandoff:
+		// #558: uncooperative (credits/quota) must not look like a slow-delivery false-negative.
+		if err != nil && (strings.Contains(err.Error(), "uncooperative") ||
+			strings.Contains(err.Error(), "usage credit") ||
+			(strings.Contains(err.Error(), "resume") && strings.Contains(err.Error(), "--force"))) {
+			b.WriteString("  - Session cannot process prompts (credits/quota/rate-limit): do NOT retry recycle\n")
+			b.WriteString("  - Relaunch cleanly: flotilla resume ")
+			b.WriteString(agent)
+			b.WriteString(" --force\n")
+			b.WriteString("  - Or restore provider credits/quota, then recycle once the session can run a turn\n")
+		} else {
+			b.WriteString("  - Check the handoff path still absent; if the desk is wedged: flotilla resume ")
+			b.WriteString(agent)
+			b.WriteString(" --force\n")
+			b.WriteString("  - If the desk is merely slow: wait for Idle, then: flotilla recycle ")
+			b.WriteString(agent)
+			b.WriteString("\n")
+		}
 	default:
 		b.WriteString("  - Read the error; if desk closed without takeover: flotilla resume ")
 		b.WriteString(agent)

@@ -175,7 +175,7 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 		return "", worktreeCloseNote{}, fmt.Errorf("phase 1: delivering the handoff turn to %q failed (desk untouched): %w", p.agent, err)
 	}
 	if !pollHandoffGate(ops, target, p, p.timeouts.handoff) {
-		return "", worktreeCloseNote{}, fmt.Errorf("phase 1: handoff not durably confirmed for %q within %s (no present non-trivial %s on disk, or the turn never returned to an idle cleared composer) — ABORT, desk still running, nothing closed", p.agent, p.timeouts.handoff, p.designatedPath)
+		return "", worktreeCloseNote{}, fmt.Errorf("%s", phase1HandoffTimeoutErr(ops, target, p))
 	}
 
 	// ACQUIRE the pane-txn lock for the irreversible span (Phases 2→4); released on return.
@@ -351,6 +351,32 @@ func pollHandoffGate(ops recycleOps, target string, p recyclePlan, timeout time.
 		}
 	}
 	return false
+}
+
+// phase1HandoffTimeoutErr builds the phase-1 abort message. When the pane shows a
+// known non-cooperative banner (usage credits, rate limits, harness quotas — #558),
+// the diagnosis is distinct and recommends `flotilla resume --force` instead of
+// retrying the same graceful handoff path forever.
+func phase1HandoffTimeoutErr(ops recycleOps, target string, p recyclePlan) string {
+	generic := fmt.Sprintf(
+		"phase 1: handoff not durably confirmed for %q within %s (no present non-trivial %s on disk, or the turn never returned to an idle cleared composer) — ABORT, desk still running, nothing closed",
+		p.agent, p.timeouts.handoff, p.designatedPath,
+	)
+	if ops.capturePane == nil {
+		return generic
+	}
+	cap, err := ops.capturePane(target)
+	if err != nil || cap == "" {
+		return generic
+	}
+	hit, phrase := deliver.SessionUncooperative(cap)
+	if !hit {
+		return generic
+	}
+	return fmt.Sprintf(
+		"phase 1: target session for %q appears uncooperative (pane shows %q) — a graceful handoff is not possible while the session cannot process prompts; do not retry recycle on the same session — use `flotilla resume %s --force` to relaunch from the launch recipe (or restore credits/quota first). Handoff path %s was never confirmed durable within %s. ABORT, desk still running, nothing closed",
+		p.agent, phrase, p.agent, p.designatedPath, p.timeouts.handoff,
+	)
 }
 
 // pollClosed waits for the agent process to be provably GONE after the close — by the pane
