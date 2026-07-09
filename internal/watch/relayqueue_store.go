@@ -34,6 +34,19 @@ func newRelayQueueStore(path string) relayQueueStore {
 	return relayQueueStore{path: path}
 }
 
+// PendingForAgent reports whether the durable relay queue has a pending entry for agent (#523).
+func (s relayQueueStore) PendingForAgent(agent string) bool {
+	if agent == "" || s.path == "" {
+		return false
+	}
+	for _, j := range s.load() {
+		if j.Agent == agent {
+			return true
+		}
+	}
+	return false
+}
+
 func (s relayQueueStore) load() []Job {
 	if s.path == "" {
 		return nil

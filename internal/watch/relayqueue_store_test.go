@@ -8,6 +8,21 @@ import (
 	"time"
 )
 
+func TestRelayQueueStorePendingForAgent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "flotilla-relay-queue.json")
+	q := newRelayQueueStore(path)
+	if q.PendingForAgent("xo") {
+		t.Fatal("empty queue should not report pending")
+	}
+	q.upsert(Job{MessageID: "1", Agent: "xo", Message: "hi", Kind: "relay"})
+	if !q.PendingForAgent("xo") {
+		t.Fatal("want pending for xo")
+	}
+	if q.PendingForAgent("cos") {
+		t.Fatal("other agent should not match")
+	}
+}
+
 func TestRelayQueueStoreRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "flotilla-relay-queue.json")
 	q := newRelayQueueStore(path)

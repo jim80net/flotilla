@@ -139,6 +139,8 @@ type Injector struct {
 	outboxOwningCoordinator   func(sender string) string              // optional: sender → coordinator for stale outbox (#477)
 	outboxCoordinatorEscalate func(coordinator, msg, claimKey string) // optional: enqueue to coordinator surface (#436/#477)
 	coordinatorIngress        *CoordinatorIngress                     // optional: #533 adjutant front-office ingress before delivery
+	relayPendingMu            sync.Mutex
+	relayPending              map[string]int // in-flight KindRelay per agent (#523)
 }
 
 // SetRelaySend installs a distinct send path for RELAY-kind jobs (the operator-message kind), used to
@@ -249,6 +251,7 @@ func (in *Injector) deliver(j Job) {
 	err := send(j.Agent, j.Message)
 	switch {
 	case err == nil:
+		in.noteRelayDone(j)
 		in.logDelivered(j)
 		if isRelay(j.Kind) && j.MessageID != "" {
 			in.queue.remove(j.MessageID)
@@ -287,6 +290,7 @@ func (in *Injector) deliver(j Job) {
 		if isRelay(j.Kind) {
 			in.raise("operator message to %q NOT delivered — its composer did not accept the message (input-blocked: a per-agent sub-composer/agents panel held focus, or the submit never landed). It needs attention at its pane (click/keystroke into the main composer). The machine did not re-send; verify the turn did not already start before re-sending. Undelivered payload: %q", j.Agent, previewBody(j.Message))
 		}
+		in.noteRelayDone(j)
 		log.Printf("flotilla watch: deliver to %q INPUT-BLOCKED — composer did not accept the message (needs attention at its pane): %v", j.Agent, err)
 		if j.Kind == KindSend {
 			in.outboxDone(j)
@@ -298,6 +302,7 @@ func (in *Injector) deliver(j Job) {
 		if isRelay(j.Kind) {
 			in.raise("operator message to %q NOT delivered: %v", j.Agent, err)
 		}
+		in.noteRelayDone(j)
 		if j.Kind == KindSend {
 			in.outboxDone(j)
 		}
@@ -471,9 +476,47 @@ func (in *Injector) Enqueue(j Job) {
 	for _, jj := range jobs {
 		select {
 		case in.jobs <- jj:
+			in.noteRelayEnqueued(jj)
 		case <-in.stopped:
 			return
 		}
+	}
+}
+
+// HasPendingRelayFor reports whether a KindRelay for agent is queued or in-flight (#523).
+func (in *Injector) HasPendingRelayFor(agent string) bool {
+	if in == nil || agent == "" {
+		return false
+	}
+	in.relayPendingMu.Lock()
+	defer in.relayPendingMu.Unlock()
+	return in.relayPending[agent] > 0
+}
+
+func (in *Injector) noteRelayEnqueued(j Job) {
+	if !isRelay(j.Kind) {
+		return
+	}
+	in.relayPendingMu.Lock()
+	defer in.relayPendingMu.Unlock()
+	if in.relayPending == nil {
+		in.relayPending = make(map[string]int)
+	}
+	in.relayPending[j.Agent]++
+}
+
+func (in *Injector) noteRelayDone(j Job) {
+	if !isRelay(j.Kind) {
+		return
+	}
+	in.relayPendingMu.Lock()
+	defer in.relayPendingMu.Unlock()
+	if in.relayPending == nil {
+		return
+	}
+	in.relayPending[j.Agent]--
+	if in.relayPending[j.Agent] <= 0 {
+		delete(in.relayPending, j.Agent)
 	}
 }
 

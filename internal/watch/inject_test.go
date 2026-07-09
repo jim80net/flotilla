@@ -60,6 +60,22 @@ func TestInjectorSerializes(t *testing.T) {
 	}
 }
 
+func TestInjectorHasPendingRelayFor(t *testing.T) {
+	in := NewInjector(func(string, string) error { return nil }, 4)
+	if in.HasPendingRelayFor("xo") {
+		t.Fatal("fresh injector should have no pending relay")
+	}
+	in.Enqueue(Job{Agent: "xo", Message: "ping", Kind: KindRelay})
+	if !in.HasPendingRelayFor("xo") {
+		t.Fatal("queued relay should be pending before worker drains")
+	}
+	in.Start()
+	in.Stop()
+	if in.HasPendingRelayFor("xo") {
+		t.Fatal("delivered relay should clear pending count")
+	}
+}
+
 func TestInjectorSurvivesSendError(t *testing.T) {
 	var count int32
 	send := func(agent, message string) error {
