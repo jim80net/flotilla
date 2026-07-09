@@ -117,7 +117,7 @@ type ProtectedWindowFunc func(coordinator string) bool
 type Arbitrator struct {
 	Observer        LoopObserver
 	ProtectedWindow ProtectedWindowFunc
-	Audit *AuditLog
+	Audit           *AuditLog
 }
 
 // Evaluate returns the inject decision for req given ctx. Pure policy — no I/O.
