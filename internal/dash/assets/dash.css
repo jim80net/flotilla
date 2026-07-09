@@ -1121,6 +1121,21 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .detail-meta { display: flex; gap: .55rem; align-items: center; flex-wrap: wrap; margin-bottom: .75rem; }
 .issue-link { color: var(--cyan); font-size: .78rem; text-decoration: none; }
 .issue-link:hover { text-decoration: underline; }
+/* #580: goal-id trailer cross-link — same affordance language as Decisions "Drives". */
+.issue-goal {
+  display: flex; align-items: baseline; gap: .45rem; flex-wrap: wrap;
+  font-size: .78rem; color: var(--ink-3); margin: -.25rem 0 .75rem;
+}
+.issue-goal-lab {
+  font-family: var(--display); text-transform: uppercase; letter-spacing: .1em;
+  font-size: .62rem; color: var(--ink-3);
+}
+.issue-goal-link {
+  background: none; border: 0; padding: 0; font: inherit; color: var(--cyan);
+  cursor: pointer; min-height: 44px; display: inline-flex; align-items: center;
+}
+.issue-goal-link:hover { text-decoration: underline; }
+.issue-goal-link:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; border-radius: 3px; }
 .issue-body {
   white-space: pre-wrap;
   word-break: break-word;

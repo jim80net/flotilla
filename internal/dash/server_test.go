@@ -1971,3 +1971,40 @@ func TestDefaultViewLanding579(t *testing.T) {
 		t.Error("seedLanding must prefer location.hash over default_view — #579")
 	}
 }
+
+// TestGoalIDCrossLink580 locks #580: Issues detail surfaces a "Drives" chip for
+// goal_id and navigates to Goals via restoreNode + pushNav (same path as Decisions).
+func TestGoalIDCrossLink580(t *testing.T) {
+	now := time.Date(2026, 7, 9, 21, 30, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/tracker.js").Body.String()
+	for _, marker := range []string{
+		"openGoalFromIssue",
+		"data-goal-goto",
+		"issue-goal-link",
+		"it.goal_id",
+		"Drives",
+		"restoreNode",
+		`view: "goals"`,
+		"pushNav",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("tracker.js must wire goal-id → Goals cross-link (missing %q) — #580", marker)
+		}
+	}
+	// Issues without a trailer must not invent a chip (guard the conditional).
+	if !strings.Contains(js, "goalId") {
+		t.Error("tracker.js must gate the Drives chip on a non-empty goalId — #580")
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	for _, marker := range []string{".issue-goal", ".issue-goal-link", ".issue-goal-lab"} {
+		if !strings.Contains(css, marker) {
+			t.Errorf("dash.css must style the Drives chip (missing %q) — #580", marker)
+		}
+	}
+	// Goals side of the deep-link must still expose restoreNode (history + cross-link).
+	gjs := doGet(t, srv, "/static/goals.js").Body.String()
+	if !strings.Contains(gjs, "restoreNode") {
+		t.Error("goals.js must expose restoreNode for Issues → Goals jump — #580")
+	}
+}
