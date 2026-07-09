@@ -2,16 +2,13 @@
 // loop-conformance-mechanics design (#532). Every coordinator-targeted inject passes
 // through Evaluate before pane delivery; wiring into watch is a follow-up step.
 //
-// Routing policy (#533): when adjutant_for is set, coordinator notifications route to
-// the adjutant — source, kind, priority, and bypass labels do not bypass the adjutant.
-// The adjutant may interrupt the leader via KindAdjutantSeam drain. No-adjutant
-// fallback delivers to the leader. Urgent/operator-direct leader bypass routing is
-// deferred until a concrete consumer exists.
+// Routing policy (#533 YAGNI): when adjutant_for is set, all coordinator notifications
+// route to the adjutant. The adjutant may interrupt the leader only via KindAdjutantSeam
+// drain. No source/kind urgent bypass, dual-route, or bypass machinery — posture alone
+// drives allow/buffer/defer. No-adjutant fallback preserves leader delivery.
 package looparbitration
 
 import (
-	"time"
-
 	"github.com/jim80net/flotilla/internal/frontier"
 )
 
@@ -58,22 +55,11 @@ const (
 	PriorityMechanical = frontier.PriorityMechanical
 )
 
-// BypassClass names an explicit bypass label for future audited routing (#533).
-// Leader bypass via Bypass is deferred until a concrete consumer exists; with
-// adjutant_for set, notifications route to the adjutant regardless of Bypass.
-type BypassClass string
-
-const (
-	// BypassOperatorDirect reserved for future operator-direct leader bypass (audited).
-	BypassOperatorDirect BypassClass = "operator_direct"
-)
-
 // InjectRequest is one candidate inject before pane delivery.
 type InjectRequest struct {
 	Target   string
 	Kind     InjectKind
 	Priority Priority
-	Bypass   BypassClass
 	ReturnTo string
 	Source   string
 }
@@ -132,31 +118,12 @@ type Arbitrator struct {
 	Observer        LoopObserver
 	ProtectedWindow ProtectedWindowFunc
 	Audit           *AuditLog
-	Now             func() time.Time
 }
 
-// Evaluate returns the inject decision for req given ctx. Pure policy — no I/O except
-// optional audit append on urgent bypass.
+// Evaluate returns the inject decision for req given ctx. Pure policy — no I/O.
 func (a *Arbitrator) Evaluate(req InjectRequest, ctx Context) Result {
 	if req.Target == "" {
 		return a.finalize(req, ctx, Result{Decision: Defer, Reason: "empty-target"})
-	}
-	coord := ctx.Coordinator
-	if coord == "" {
-		coord = req.Target
-	}
-
-	if isUrgent(req) {
-		if ctx.AdjutantFor != "" {
-			return a.finalize(req, ctx, Result{Decision: AllowNow, Reason: "urgent-adjutant-notification"})
-		}
-		r := Result{Decision: AllowNow, Reason: urgentReason(req)}
-		if a != nil && a.Audit != nil {
-			if err := a.Audit.Record(auditEntry(a.now(), coord, req, r)); err == nil {
-				r.Audited = true
-			}
-		}
-		return a.finalize(req, ctx, r)
 	}
 
 	posture, postureKnown := a.resolvePosture(req.Target, ctx)
@@ -246,46 +213,10 @@ func goalActive(posture Posture, postureKnown bool, ctx Context) bool {
 	return false
 }
 
-func isUrgent(req InjectRequest) bool {
-	return req.Priority == PriorityUrgent
-}
-
-func urgentReason(req InjectRequest) string {
-	if req.Bypass != "" {
-		return "audited-bypass-" + string(req.Bypass)
-	}
-	return "urgent-bypass"
-}
-
 func bufferWithReturn(req InjectRequest, ctx Context, reason string) Result {
 	rt := req.ReturnTo
 	if rt == "" {
 		rt = ctx.FrontierReturnTo
 	}
 	return Result{Decision: Buffer, ReturnTo: rt, Reason: reason}
-}
-
-func (a *Arbitrator) now() time.Time {
-	if a != nil && a.Now != nil {
-		return a.Now()
-	}
-	return time.Now().UTC()
-}
-
-func auditEntry(at time.Time, coordinator string, req InjectRequest, r Result) AuditEntry {
-	bypass := "urgent"
-	if req.Bypass != "" {
-		bypass = string(req.Bypass)
-	}
-	return AuditEntry{
-		At:          at,
-		Coordinator: coordinator,
-		Target:      req.Target,
-		Kind:        req.Kind,
-		Priority:    req.Priority,
-		Source:      req.Source,
-		Decision:    r.Decision,
-		Bypass:      bypass,
-		Reason:      r.Reason,
-	}
 }

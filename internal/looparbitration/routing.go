@@ -1,9 +1,8 @@
 package looparbitration
 
-// RouteTarget names the pane that receives an inject. #533 policy: when adjutant_for
-// is set, coordinator notifications go to the adjutant — source, kind, priority, and
-// bypass labels do not route around the adjutant. The adjutant may interrupt the
-// leader via KindAdjutantSeam drain (RouteLeader).
+// RouteTarget names the pane that receives an inject. #533 YAGNI: when adjutant_for
+// is set, all coordinator notifications go to the adjutant. Leader delivery is only
+// the adjutant-owned KindAdjutantSeam drain or no-adjutant fallback.
 type RouteTarget string
 
 const (
