@@ -30,8 +30,12 @@ func TestDeskMirrorSkipsWhenNoWebhook(t *testing.T) {
 	if posted != 0 {
 		t.Errorf("posted %d chunks, want 0", posted)
 	}
-	if len(lines) != 1 || !strings.Contains(lines[0], "SKIP backend: no webhook") {
-		t.Errorf("decision lines = %v, want exactly one SKIP-no-webhook", lines)
+	// #506: missing webhook is a LOUD WARN (not a quiet SKIP).
+	if len(lines) != 1 || !strings.Contains(lines[0], "WARN backend: no webhook") {
+		t.Errorf("decision lines = %v, want exactly one WARN-no-webhook (#506)", lines)
+	}
+	if !strings.Contains(lines[0], "FLOTILLA_WEBHOOK_BACKEND") {
+		t.Errorf("WARN must name the expected secrets key, got %v", lines)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -262,24 +263,45 @@ func newHotlineReplyRouter(parent context.Context, cfg *roster.Config, secrets *
 	return newReplyRouter(parent, deps)
 }
 
+// uniqueBindingXOAgents returns each distinct channel XOAgent once, in binding order
+// first-seen (#506: multi-channel fleets must not list the same XO three times in the
+// hotline boot banner).
+func uniqueBindingXOAgents(cfg *roster.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var out []string
+	for _, ch := range cfg.Bindings() {
+		if ch.XOAgent == "" || seen[ch.XOAgent] {
+			continue
+		}
+		seen[ch.XOAgent] = true
+		out = append(out, ch.XOAgent)
+	}
+	return out
+}
+
 // logReplyLegCoverage prints, at startup, which channel XOs have a resolvable return-leg webhook — so a
-// mis-provisioned channel is visible at boot, not at the first dropped reply. Covers EVERY channel's XO
-// including the primary (#177: the watcher is the unified return leg for all XOs).
+// mis-provisioned channel is visible at boot, not at the first dropped reply. Covers EVERY distinct
+// channel XO including the primary (#177: the watcher is the unified return leg for all XOs).
+// XO names are de-duplicated across bindings (#506 hotline list duplication).
 func logReplyLegCoverage(cfg *roster.Config, secrets *roster.Secrets) {
 	if secrets == nil {
 		return
 	}
 	var withLeg, without []string
-	for _, ch := range cfg.Bindings() {
-		if ch.XOAgent == "" {
-			continue // unbound channel
-		}
-		if url, err := secrets.Webhook(ch.XOAgent); err == nil && url != "" {
-			withLeg = append(withLeg, ch.XOAgent)
+	for _, xo := range uniqueBindingXOAgents(cfg) {
+		if url, err := secrets.Webhook(xo); err == nil && url != "" {
+			withLeg = append(withLeg, xo)
 		} else {
-			without = append(without, ch.XOAgent)
+			without = append(without, xo)
 		}
 	}
 	fmt.Printf("flotilla watch: c2 hotline return leg — %d XO(s) routable %v; %d with no webhook (replies will escalate) %v\n",
 		len(withLeg), withLeg, len(without), without)
+	if len(without) > 0 {
+		fmt.Fprintf(os.Stderr, "flotilla watch: WARNING — hotline return-leg missing webhook for %d XO(s) %v — set %s in secrets (#506)\n",
+			len(without), without, roster.WebhookKey(without[0]))
+	}
 }

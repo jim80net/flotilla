@@ -1550,28 +1550,59 @@ func newDeskEscalate(cfg *roster.Config, primaryXO string, alert func(string)) f
 // never diverge. A surface without a ResultReader is a clean SKIP.
 // Everything is OBSERVE-ONLY + BEST-EFFORT inside deskMirror.run — a failure to resolve, read, chunk,
 // or post is logged on one line and dropped, NEVER propagated to the tick or delivery.
-// logMirrorCoverage emits a ONE-TIME startup line naming which non-XO desks WILL mirror (a webhook
-// resolves) and which will NOT (no webhook ⇒ a silent per-desk SKIP at runtime). Without it, a
-// newcomer who set --secrets only for the alert webhook sees empty desk channels with no clue why —
-// the visibility door looks broken when it is merely unprovisioned. With secrets nil the mirror is
-// inert and this prints nothing.
+// finishEdgeMirrorAgents returns every roster seat the finish-edge mirror machinery
+// monitors (#506): execution desks (MirrorOnFinish) AND coordinators including the
+// primary XO / cos_agent (CoordinatorMirrorOnFinish). Order follows cfg.Agents.
+func finishEdgeMirrorAgents(cfg *roster.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	out := make([]string, 0, len(cfg.Agents))
+	for _, a := range cfg.Agents {
+		if a.Name == "" {
+			continue
+		}
+		out = append(out, a.Name)
+	}
+	return out
+}
+
+// partitionWebhookCoverage splits agents into those with a resolvable webhook and those
+// without (pure; secrets may be nil → all without).
+func partitionWebhookCoverage(agents []string, secrets *roster.Secrets) (withMirror, without []string) {
+	for _, name := range agents {
+		if secrets != nil {
+			if url, err := secrets.Webhook(name); err == nil && url != "" {
+				withMirror = append(withMirror, name)
+				continue
+			}
+		}
+		without = append(without, name)
+	}
+	return withMirror, without
+}
+
+// logMirrorCoverage emits a ONE-TIME startup line naming which seats WILL finish-edge mirror
+// (webhook resolves) and which will NOT. Includes coordinator seats (primary XO, cos_agent,
+// project XOs) — the same set CoordinatorMirrorOnFinish + MirrorOnFinish monitor (#506).
+// Missing webhooks surface a LOUD stderr WARNING (not a silent skip). With secrets nil the
+// mirror is inert and this prints nothing.
 func logMirrorCoverage(cfg *roster.Config, secrets *roster.Secrets, xo string) {
 	if secrets == nil {
 		return
 	}
-	var withMirror, without []string
-	for _, a := range cfg.Agents {
-		if a.Name == xo {
-			continue // the XO has its own mirror path, not the per-desk one
-		}
-		if url, err := secrets.Webhook(a.Name); err == nil && url != "" {
-			withMirror = append(withMirror, a.Name)
-		} else {
-			without = append(without, a.Name)
-		}
-	}
-	fmt.Printf("flotilla watch: desk mirror — %d will mirror %v; %d have no webhook (will not mirror) %v\n",
+	_ = xo // retained for call-site compatibility; coverage is no longer primary-XO-exclusive
+	agents := finishEdgeMirrorAgents(cfg)
+	withMirror, without := partitionWebhookCoverage(agents, secrets)
+	fmt.Printf("flotilla watch: finish-edge mirror — %d will mirror %v; %d have no webhook (will not mirror) %v\n",
 		len(withMirror), withMirror, len(without), without)
+	if len(without) > 0 {
+		// LOUD provision gap — operator/coordinator must not discover missing Discord
+		// visibility only after a turn finishes (#506).
+		keyHint := roster.WebhookKey(without[0])
+		fmt.Fprintf(os.Stderr, "flotilla watch: WARNING — %d seat(s) lack a Discord webhook and will NOT appear on Discord %v — set %s (and peers) in secrets; mirroring invariant #506\n",
+			len(without), without, keyHint)
+	}
 }
 
 // rateLimitMaterial returns a DetectorConfig callback that probes a desk for a
