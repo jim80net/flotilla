@@ -3,6 +3,8 @@ package watch
 import (
 	"testing"
 
+	"github.com/jim80net/flotilla/internal/frontier"
+	"github.com/jim80net/flotilla/internal/looparbitration"
 	"github.com/jim80net/flotilla/internal/roster"
 )
 
@@ -100,6 +102,45 @@ func TestCoordinatorIngressDeskPassthrough(t *testing.T) {
 	got := g.Apply(job)
 	if len(got) != 1 || got[0].Agent != "backend" {
 		t.Fatalf("non-coordinator passthrough, got %+v", got)
+	}
+}
+
+func TestCoordinatorIngressExplicitUrgentDualRoutes(t *testing.T) {
+	g := NewCoordinatorIngress(adjutantRoster())
+	g.RouteEval = NewRouteEval(&looparbitration.Arbitrator{}, func(coordinator string) looparbitration.Context {
+		return looparbitration.Context{
+			Coordinator: coordinator, AdjutantFor: "alpha-adj",
+			SafeSeam: true, Posture: looparbitration.PostureAvailable, PostureOK: true,
+		}
+	})
+	job := Job{
+		Agent: "alpha-xo", Message: "operator incident", Kind: KindRelay,
+		Priority: string(frontier.PriorityUrgent),
+	}
+	got := g.Apply(job)
+	if len(got) != 2 {
+		t.Fatalf("explicit urgent want dual-route fan-out, got %+v", got)
+	}
+	if got[0].Agent != "alpha-xo" || got[1].Agent != "alpha-adj" {
+		t.Fatalf("dual-route agents want leader+adjutant, got %+v", got)
+	}
+	if got[1].Message == got[0].Message {
+		t.Fatalf("adjutant copy should be reconciliation body, got %+v", got[1])
+	}
+}
+
+func TestCoordinatorIngressKindRelayAloneNeverBypassesAdjutant(t *testing.T) {
+	g := NewCoordinatorIngress(adjutantRoster())
+	g.RouteEval = NewRouteEval(&looparbitration.Arbitrator{}, func(coordinator string) looparbitration.Context {
+		return looparbitration.Context{
+			Coordinator: coordinator, AdjutantFor: "alpha-adj",
+			SafeSeam: true, Posture: looparbitration.PostureAvailable, PostureOK: true,
+		}
+	})
+	job := Job{Agent: "alpha-xo", Message: "discord ping", Kind: KindRelay, OriginChannel: "C1"}
+	got := g.Apply(job)
+	if len(got) != 1 || got[0].Agent != "alpha-adj" {
+		t.Fatalf("KindRelay without PriorityUrgent must alias adjutant only, got %+v", got)
 	}
 }
 

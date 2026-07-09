@@ -99,6 +99,11 @@ type Job struct {
 	// ClaimKey is the decision-brief gap key for KindDetector jobs; the watch daemon sets it
 	// so the injector can confirm or abort the in-memory claim on delivery outcome (#365 P1).
 	ClaimKey string
+	// Priority and Bypass are explicit seam markers (#533). Kind/source never imply urgency.
+	Priority string
+	Bypass   string
+	// ReturnTo is the #530 frontier pointer when a buffered interrupt preempts goal-active work.
+	ReturnTo string
 }
 
 // SendFunc delivers a message to an agent's pane and CONFIRMS a turn started. Production

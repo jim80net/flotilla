@@ -248,11 +248,15 @@ func (c *LibraryController) Route(_ context.Context, target, message string) (Ro
 	if err != nil {
 		return RouteResult{}, err
 	}
+	var adjAgent, adjFollowUp string
 	if c.coordinatorIngress != nil && c.roster.IsCoordinator(agentName) {
-		if deliveryAgent, ok := c.coordinatorIngress.IngressTarget(agentName); ok && deliveryAgent != agentName {
-			agentName = deliveryAgent
-			if _, pane, err = c.resolveDest("", "@"+deliveryAgent); err != nil {
-				return RouteResult{}, err
+		if primary, adj, followUp, _, routed := c.coordinatorIngress.IngressRoute(agentName, message, ""); routed {
+			adjAgent, adjFollowUp = adj, followUp
+			if primary != agentName {
+				agentName = primary
+				if _, pane, err = c.resolveDest("", "@"+primary); err != nil {
+					return RouteResult{}, err
+				}
 			}
 		}
 	}
@@ -280,6 +284,9 @@ func (c *LibraryController) Route(_ context.Context, target, message string) (Ro
 	case serr == nil:
 		res.Outcome = OutcomeDelivered
 		c.mirrorRouteToLedger(agentName, message)
+		if adjFollowUp != "" && adjAgent != "" {
+			c.deliverAdjutantFollowUp(adjAgent, adjFollowUp)
+		}
 	case errors.Is(serr, surface.ErrBusy):
 		res.Outcome, res.Detail = OutcomeBusy, "desk is busy (mid-turn) — not delivered, retry when it is idle"
 	case errors.Is(serr, surface.ErrCrashed):
@@ -303,6 +310,30 @@ func (c *LibraryController) Route(_ context.Context, target, message string) (Ro
 // than a risky reimplementation. Tracked as a focused follow-on. Fails closed.
 func (c *LibraryController) Resume(_ context.Context, _ string) (ResumeResult, error) {
 	return ResumeResult{}, ErrResumeUnavailable
+}
+
+// deliverAdjutantFollowUp posts the RouteDual reconciliation record to the adjutant (#533).
+// Best-effort: a failed follow-up does not change the primary delivery outcome.
+func (c *LibraryController) deliverAdjutantFollowUp(adjAgent, message string) {
+	_, pane, err := c.resolveDest("", "@"+adjAgent)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "flotilla dash: adjutant follow-up resolve %q: %v\n", adjAgent, err)
+		return
+	}
+	agent, err := c.roster.Agent(adjAgent)
+	if err != nil {
+		return
+	}
+	drv, ok := c.getDriver(agent.Surface)
+	if !ok {
+		return
+	}
+	release, err := c.acquireTxn(pane)
+	if err != nil {
+		return
+	}
+	defer release()
+	_ = c.submit(drv, pane, message)
 }
 
 // mirrorRouteToLedger records a dash-routed instruction in the CoS ledger with

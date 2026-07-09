@@ -280,7 +280,10 @@ func cmdWatch(args []string) error {
 		}
 	}
 	injector := watch.NewInjector(mkSend(confirm.Submit), 16)
-	if ingress := newCoordinatorIngress(cfg); ingress != nil {
+	if ingress := newCoordinatorIngress(coordinatorIngressConfig{
+		cfg: cfg, rosterDir: rosterDir, primaryXO: xo,
+		settledPath: *settledPath, awaitingPath: *awaitingPath,
+	}); ingress != nil {
 		injector.SetCoordinatorIngress(ingress)
 		log.Printf("flotilla watch: adjutant front-office ingress active (#533)")
 	}
