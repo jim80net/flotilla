@@ -109,8 +109,10 @@ func TestCoordinatorSet_FleetShape491(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.hasSpanOfControl("product-skill-dev") {
-		t.Fatal("fixture must retain inferred span on product-skill-dev — explicit false is what opts it out")
+	// #513: fleet-command peer sole-link (product-skill-dev on dash-desk) must NOT
+	// confer inferred span — explicit coordinator:false remains belt-and-suspenders.
+	if cfg.hasSpanOfControl("product-skill-dev") {
+		t.Fatal("product-skill-dev must NOT have inferred span after fleet-command peer guard (#513)")
 	}
 	set := cfg.CoordinatorSet()
 	want := map[string]bool{"meta-xo": true, "venture-a-xo": true, "venture-b-xo": true, "venture-c-xo": true}
@@ -156,10 +158,31 @@ func TestCoordinatorSet_XoObserverShape502(t *testing.T) {
 	}
 }
 
+// multiDeskInferredSpanFixture grants path-2 span via TWO sole-supervisor desk homes
+// (above the #513 fleet-command peer sole-link threshold) so coordinator:false has
+// something real to override.
+const multiDeskInferredSpanFixture = `{
+  "operator_user_id":"U","xo_agent":"meta-xo","cos_agent":"meta-xo",
+  "agents":[
+    {"name":"meta-xo"},
+    {"name":"product-skill-dev","coordinator":false},
+    {"name":"dash-desk"},{"name":"harness-desk"}
+  ],
+  "channels":[
+    {"channel_id":"C_CMD","xo_agent":"meta-xo","role":"fleet-command","members":["product-skill-dev","dash-desk","harness-desk"]},
+    {"channel_id":"C_PSKILL","xo_agent":"product-skill-dev","members":["meta-xo"]},
+    {"channel_id":"C_DASH","xo_agent":"dash-desk","members":["product-skill-dev"]},
+    {"channel_id":"C_HARNESS","xo_agent":"harness-desk","members":["product-skill-dev"]}
+  ]
+}`
+
 func TestCoordinatorExplicitFalseOverridesInferredSpan(t *testing.T) {
-	cfg, err := Load(writeRoster(t, fleetShapeFixture))
+	cfg, err := Load(writeRoster(t, multiDeskInferredSpanFixture))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !cfg.hasSpanOfControl("product-skill-dev") {
+		t.Fatal("fixture must retain inferred span (2+ sole-supervisor desk homes) so false can override it")
 	}
 	a, err := cfg.Agent("product-skill-dev")
 	if err != nil {
