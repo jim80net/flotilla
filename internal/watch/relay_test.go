@@ -57,7 +57,8 @@ func fedCfg() *roster.Config {
 // selfMirrorGuardAdapter), so a self-post never reaches Handle at all and webhookID
 // is no longer a Handle argument. The webhook-drop property is pinned at the adapter
 // level (internal/transport's selfmirror tests, including the sender==operator case).
-// Operator relay ingress aliases to the adjutant front office when adjutant_for is configured (#533).
+// Operator relay dual-delivers: leader gets verbatim prose, adjutant gets observation
+// envelope (#549). System wakes still single-alias to adjutant (#533).
 func TestRelayOperatorToCoordinatorRoutesAdjutant(t *testing.T) {
 	cfg := &roster.Config{
 		OperatorUserID: "op",
@@ -68,23 +69,32 @@ func TestRelayOperatorToCoordinatorRoutesAdjutant(t *testing.T) {
 			{Name: "alpha-adj", AdjutantFor: "alpha-xo"},
 		},
 	}
-	delivered := make(chan string, 1)
+	type delivery struct{ agent, msg string }
+	delivered := make(chan delivery, 2)
 	inj := NewInjector(func(agent, msg string) error {
-		delivered <- agent
+		delivered <- delivery{agent, msg}
 		return nil
 	}, 8)
 	inj.SetCoordinatorIngress(NewCoordinatorIngress(cfg))
 	inj.Start()
 	defer inj.Stop()
 	r := NewRelay(cfg, inj, nil, nil)
-	r.Handle("C1", "200", "op", "status?")
-	select {
-	case gotAgent := <-delivered:
-		if gotAgent != "alpha-adj" {
-			t.Errorf("relay target = %q, want alpha-adj (#533 adjutant routing)", gotAgent)
+	src := "status?"
+	r.Handle("C1", "200", "op", src)
+	got := map[string]string{}
+	for i := 0; i < 2; i++ {
+		select {
+		case d := <-delivered:
+			got[d.agent] = d.msg
+		case <-time.After(50 * time.Millisecond):
+			t.Fatalf("relay delivery timed out after %d of 2", i)
 		}
-	case <-time.After(50 * time.Millisecond):
-		t.Fatal("relay delivery timed out")
+	}
+	if got["alpha-xo"] != src {
+		t.Errorf("leader got %q, want verbatim %q (#549)", got["alpha-xo"], src)
+	}
+	if ExtractVerbatimBody(got["alpha-adj"]) != src {
+		t.Errorf("adjutant envelope body = %q, want verbatim %q", ExtractVerbatimBody(got["alpha-adj"]), src)
 	}
 }
 
