@@ -4,8 +4,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
@@ -59,27 +57,5 @@ func scaffoldGrokCoordinatorPermissions(worktreeAbs string) error {
 			"deny":  doc.Tiers.NeverAutonomous.Deny,
 		},
 	}
-	body, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal grok coordinator settings: %w", err)
-	}
-	claudeDir := filepath.Join(worktreeAbs, ".claude")
-	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
-		return fmt.Errorf("create .claude dir: %w", err)
-	}
-	path := filepath.Join(claudeDir, "settings.local.json")
-	if info, statErr := os.Stat(path); statErr == nil {
-		if info.IsDir() {
-			return fmt.Errorf("grok coordinator settings %q exists but is a directory", path)
-		}
-		fmt.Printf("  kept    %s\n", path)
-		return nil
-	} else if !os.IsNotExist(statErr) {
-		return fmt.Errorf("stat grok coordinator settings %q: %w", path, statErr)
-	}
-	if err := os.WriteFile(path, append(body, '\n'), 0o644); err != nil {
-		return fmt.Errorf("write grok coordinator settings %q: %w", path, err)
-	}
-	fmt.Printf("  created %s\n", path)
-	return nil
+	return writeGrokSettingsLocal(worktreeAbs, settings, "coordinator")
 }

@@ -95,8 +95,11 @@ func TestCmdWorkspaceInitScaffoldsWorktreeAndIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(launch), "grok --model composer-2.5-fast") {
-		t.Errorf("execution desk launch = %q, want grok workhorse", launch)
+	if !strings.Contains(string(launch), "grok --model grok-4.5") {
+		t.Errorf("execution desk launch = %q, want grok-4.5 workhorse (#554)", launch)
+	}
+	if !strings.Contains(string(launch), "gh pr merge") {
+		t.Errorf("execution desk launch must include merge deny from desk allowlist: %s", launch)
 	}
 	var flat struct {
 		Agents map[string]struct {
@@ -258,8 +261,67 @@ func TestCmdWorkspaceInitGrokScaffoldsAgentsMdInWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(launch), "grok --model composer-2.5-fast") {
-		t.Errorf("grok launch = %q, want composer-2.5-fast workhorse recipe", launch)
+	if !strings.Contains(string(launch), "grok --model grok-4.5") {
+		t.Errorf("grok launch = %q, want grok-4.5 workhorse recipe (#554)", launch)
+	}
+}
+
+// TestCmdWorkspaceInitDeskGrokScaffoldsPermissions locks #554: desk-tier grok
+// workspace init must write settings.local.json with never-autonomous denies
+// (including merge authority) and a launch recipe that is not bare unrestricted.
+func TestCmdWorkspaceInitDeskGrokScaffoldsPermissions(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)
+	repo := initTestGitRepo(t)
+	rosterPath := writeRosterFile(t, `{"agents":[{"name":"backend","surface":"grok"}]}`)
+	if err := cmdWorkspaceInit(workspaceInitArgs("backend", rosterPath, repo)); err != nil {
+		t.Fatal(err)
+	}
+	worktree := filepath.Join(filepath.Dir(repo), "backend")
+	settingsPath := filepath.Join(worktree, ".claude", "settings.local.json")
+	body, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("desk-tier grok must scaffold settings.local.json: %v", err)
+	}
+	var settings struct {
+		Permissions struct {
+			Allow []string `json:"allow"`
+			Deny  []string `json:"deny"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal(body, &settings); err != nil {
+		t.Fatal(err)
+	}
+	if len(settings.Permissions.Deny) == 0 {
+		t.Fatal("desk deny list must not be empty")
+	}
+	var hasMergeDeny bool
+	for _, rule := range settings.Permissions.Deny {
+		if strings.Contains(rule, "gh pr merge") {
+			hasMergeDeny = true
+			break
+		}
+	}
+	if !hasMergeDeny {
+		t.Errorf("desk deny must include merge authority (gh pr merge); deny=%v", settings.Permissions.Deny)
+	}
+	if len(settings.Permissions.Allow) == 0 {
+		t.Error("desk allow list should be non-empty (read_unprompted tier)")
+	}
+	launch, err := os.ReadFile(flatLaunchPath(rosterPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	launchS := string(launch)
+	for _, want := range []string{
+		"grok --model grok-4.5",
+		"--always-approve",
+		"--deny",
+		"gh pr merge",
+	} {
+		if !strings.Contains(launchS, want) {
+			t.Errorf("desk launch missing %q in %s", want, launchS)
+		}
 	}
 }
 
@@ -384,11 +446,35 @@ func TestWorkspaceLaunchCommandGrokCoordinatorExportsSecrets(t *testing.T) {
 	for _, want := range []string{
 		"export FLOTILLA_SELF='beta-xo'",
 		`export FLOTILLA_SECRETS="${FLOTILLA_SECRETS:-$HOME/.config/flotilla/flotilla-secrets.env}"`,
-		"grok --model composer-2.5-fast",
+		"grok --model grok-4.5",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("grok coordinator launch missing %q in %q", want, got)
 		}
+	}
+}
+
+func TestWorkspaceLaunchCommandGrokDeskIncludesMergeDeny(t *testing.T) {
+	got, err := workspaceLaunchCommand("/desk", "backend", "AGENTS.md", "grok", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"grok --model grok-4.5", "--always-approve", "--deny", "gh pr merge"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("desk launch missing %q in %q", want, got)
+		}
+	}
+}
+
+func TestGrokDeskAllowlistMatchesDeploy(t *testing.T) {
+	// Embed must stay bit-equal to deploy/ so init scaffolding cannot drift.
+	// go test runs with cwd = package directory (cmd/flotilla).
+	deploy, err := os.ReadFile("../../deploy/grok-permission-allowlist.json")
+	if err != nil {
+		t.Fatalf("read deploy allowlist: %v", err)
+	}
+	if string(deploy) != string(grokDeskAllowlistJSON) {
+		t.Errorf("cmd/flotilla/grok_desk_allowlist.json drifted from deploy/grok-permission-allowlist.json — re-copy before shipping")
 	}
 }
 

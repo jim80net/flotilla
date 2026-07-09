@@ -74,8 +74,8 @@ Today's `launch.Recipe` is a single shell command + cwd (`internal/launch/launch
     {
       "surface": "grok",
       "provider": "xai",
-      "launch": "grok --model composer-2.5-fast",
-      "model": "composer-2.5-fast",
+      "launch": "grok --model grok-4.5 …",
+      "model": "grok-4.5",
       "subscription_id": "xai-personal"
     },
     {
