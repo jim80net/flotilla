@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/loopposture"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/watch"
@@ -116,7 +117,7 @@ func TestWriteStatus_WithSnapshot(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	writeStatus(&buf, cfg, "research", snapPath, ackPath, snap, true, now)
+	writeStatus(&buf, cfg, "research", snapPath, ackPath, snap, true, now, nil)
 	out := buf.String()
 
 	for _, want := range []string{
@@ -159,7 +160,7 @@ func TestBuildStatusJSON(t *testing.T) {
 		"data":     surface.StateWorking,
 	}}
 
-	doc := buildStatusJSON(cfg, "xo", "2026-06-17T17:00:00Z", snap)
+	doc := buildStatusJSON(cfg, "xo", "2026-06-17T17:00:00Z", snap, nil)
 
 	if doc.GeneratedAt != "2026-06-17T17:00:00Z" {
 		t.Errorf("generated_at = %q", doc.GeneratedAt)
@@ -186,14 +187,61 @@ func TestBuildStatusJSON(t *testing.T) {
 		t.Errorf("data item = %+v", doc.Agents[2])
 	}
 
-	// It must marshal to the widget's contract: an `agents` array + `generated_at`.
+	// It must marshal to the widget's contract: an `agents` array + `generated_at`,
+	// plus #524 loop_posture.
 	raw, err := json.Marshal(doc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"generated_at"`, `"agents"`, `"name":"xo"`, `"role":"hub"`, `"state":"awaiting-approval"`} {
+	for _, want := range []string{`"generated_at"`, `"agents"`, `"name":"xo"`, `"role":"hub"`, `"state":"awaiting-approval"`, `"loop_posture"`} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("marshaled JSON missing %s\n%s", want, raw)
+		}
+	}
+}
+
+func TestBuildStatusJSON_LoopPostureV10(t *testing.T) {
+	// V10: available vs parked vs drifted vs awaiting-authority on generic fixtures.
+	cfg := &roster.Config{Agents: []roster.Agent{
+		{Name: "xo"}, {Name: "backend"}, {Name: "frontend"}, {Name: "data"},
+	}}
+	snap := watch.Snapshot{
+		DeskStates: map[string]surface.State{
+			"xo":       surface.StateIdle,
+			"backend":  surface.StateIdle,
+			"frontend": surface.StateIdle,
+			"data":     surface.StateIdle,
+		},
+		XOSettled: true,
+	}
+	loop := map[string]loopposture.Evidence{
+		"xo": {
+			Pane: surface.StateIdle, InSnapshot: true, SnapshotFresh: true,
+			Settled: true, BacklogKnown: true, UnblockedN: 0, Park: loopposture.ParkStrict,
+		},
+		"backend": {
+			Pane: surface.StateIdle, InSnapshot: true, SnapshotFresh: true,
+			Settled: false, BacklogKnown: true, UnblockedN: 1, Park: loopposture.ParkStrict,
+		},
+		"frontend": {
+			Pane: surface.StateIdle, InSnapshot: true, SnapshotFresh: true,
+			Settled: true, BacklogKnown: true, UnblockedN: 2, Park: loopposture.ParkStrict,
+		},
+		"data": {
+			Pane: surface.StateIdle, InSnapshot: true, SnapshotFresh: true,
+			Settled: false, BacklogKnown: true, AwaitingAuthN: 1, Park: loopposture.ParkStrict,
+		},
+	}
+	doc := buildStatusJSON(cfg, "xo", "2026-07-09T00:00:00Z", snap, loop)
+	want := map[string]string{
+		"xo": "parked", "backend": "available", "frontend": "drifted", "data": "awaiting-authority",
+	}
+	for _, a := range doc.Agents {
+		if a.LoopPosture != want[a.Name] {
+			t.Errorf("%s loop_posture = %q, want %q (state=%s)", a.Name, a.LoopPosture, want[a.Name], a.State)
+		}
+		if a.State != "idle" {
+			t.Errorf("%s pane state = %q, want idle (two-layer model)", a.Name, a.State)
 		}
 	}
 }
@@ -206,7 +254,7 @@ func TestWriteStatus_NoSnapshot(t *testing.T) {
 	now := time.Now()
 
 	var buf bytes.Buffer
-	writeStatus(&buf, cfg, "infra", snapPath, ackPath, watch.Snapshot{}, false, now)
+	writeStatus(&buf, cfg, "infra", snapPath, ackPath, watch.Snapshot{}, false, now, nil)
 	out := buf.String()
 
 	for _, want := range []string{

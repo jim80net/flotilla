@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/cos"
+	"github.com/jim80net/flotilla/internal/loopposture"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/watch"
@@ -54,6 +55,40 @@ func TestAssessFreshness(t *testing.T) {
 		if got := assessFreshness(c.snapOK, c.age, threshold); got != c.want {
 			t.Errorf("%s: assessFreshness(%v, %v) = %v, want %v", c.name, c.snapOK, c.age, got, c.want)
 		}
+	}
+}
+
+// TestBuildBoard_LoopPosture locks #524: board agents carry loop_posture and V10
+// distinctions (available / parked / drifted / awaiting-authority).
+func TestBuildBoard_LoopPosture(t *testing.T) {
+	cfg := &roster.Config{Agents: []roster.Agent{
+		{Name: "xo"}, {Name: "backend"}, {Name: "frontend"}, {Name: "data"},
+	}}
+	snap := watch.Snapshot{
+		DeskStates: map[string]surface.State{
+			"xo": surface.StateIdle, "backend": surface.StateIdle,
+			"frontend": surface.StateIdle, "data": surface.StateIdle,
+		},
+		XOSettled: true,
+	}
+	doc := BuildBoard(BoardInputs{
+		Cfg: cfg, XO: "xo", Snap: snap, SnapOK: true, SnapAge: time.Second, Threshold: time.Hour,
+		LoopByAgent: map[string]loopposture.Evidence{
+			"xo":       {Pane: surface.StateIdle, InSnapshot: true, SnapshotFresh: true, Settled: true, BacklogKnown: true, UnblockedN: 0},
+			"backend":  {Pane: surface.StateIdle, InSnapshot: true, SnapshotFresh: true, Settled: false, BacklogKnown: true, UnblockedN: 1},
+			"frontend": {Pane: surface.StateIdle, InSnapshot: true, SnapshotFresh: true, Settled: true, BacklogKnown: true, UnblockedN: 2},
+			"data":     {Pane: surface.StateIdle, InSnapshot: true, SnapshotFresh: true, BacklogKnown: true, AwaitingAuthN: 1},
+		},
+	})
+	want := map[string]string{"xo": "parked", "backend": "available", "frontend": "drifted", "data": "awaiting-authority"}
+	for _, a := range doc.Agents {
+		if a.LoopPosture != want[a.Name] {
+			t.Errorf("%s loop_posture = %q, want %q", a.Name, a.LoopPosture, want[a.Name])
+		}
+	}
+	raw, _ := json.Marshal(doc)
+	if !strings.Contains(string(raw), `"loop_posture":"parked"`) {
+		t.Errorf("board JSON missing parked loop_posture\n%s", raw)
 	}
 }
 

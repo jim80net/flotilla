@@ -16,6 +16,7 @@ import (
 	"github.com/jim80net/flotilla/internal/cos"
 	"github.com/jim80net/flotilla/internal/dash/control"
 	"github.com/jim80net/flotilla/internal/dash/tracker"
+	"github.com/jim80net/flotilla/internal/loopposture"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/transport"
 	"github.com/jim80net/flotilla/internal/watch"
@@ -265,7 +266,8 @@ func (s *Server) routes() {
 
 // loadBoard reads the snapshot + ack file fresh and builds the board document.
 // It mirrors cmd/flotilla/status.go's load path EXACTLY (same LoadSnapshot, same
-// mtime-as-generated_at, same ack-age treatment).
+// mtime-as-generated_at, same ack-age treatment), plus #524 loop evidence from
+// per-agent backlog files and settle markers.
 func (s *Server) loadBoard() BoardDoc {
 	now := s.now()
 	snap, snapOK := watch.LoadSnapshot(s.cfg.SnapshotPath)
@@ -277,17 +279,27 @@ func (s *Server) loadBoard() BoardDoc {
 		SnapOK:    snapOK,
 		Threshold: s.threshold,
 	}
+	snapFresh := false
 	if snapOK {
 		if fi, err := os.Stat(s.cfg.SnapshotPath); err == nil {
 			in.GeneratedAt = fi.ModTime().UTC().Format(time.RFC3339)
 			in.SnapAge = now.Sub(fi.ModTime())
+			snapFresh = in.SnapAge <= s.threshold
 		}
 	}
 	if fi, err := os.Stat(s.cfg.AckPath); err == nil {
 		in.AckOK = true
 		in.AckAge = now.Sub(fi.ModTime())
 	}
+	rosterDir := filepath.Dir(s.cfg.RosterPath)
+	in.LoopByAgent = loadBoardLoopEvidence(s.roster, s.xo, rosterDir, snap, snapOK, snapFresh)
 	return BuildBoard(in)
+}
+
+// loadBoardLoopEvidence delegates to loopposture.LoadFleetEvidence so the fleet
+// board's loop_posture matches `flotilla status --json` byte-for-byte on inputs.
+func loadBoardLoopEvidence(cfg *roster.Config, xo, rosterDir string, snap watch.Snapshot, snapOK, snapFresh bool) map[string]loopposture.Evidence {
+	return loopposture.LoadFleetEvidence(cfg, xo, rosterDir, snap, snapOK, snapFresh)
 }
 
 // loadHistory reads the ledger + backlog files fresh and builds the history

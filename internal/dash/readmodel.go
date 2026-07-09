@@ -22,6 +22,7 @@ import (
 
 	"github.com/jim80net/flotilla/internal/backlog"
 	"github.com/jim80net/flotilla/internal/cos"
+	"github.com/jim80net/flotilla/internal/loopposture"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/watch"
@@ -94,12 +95,13 @@ func (f Freshness) String() string {
 // AgentItem is one desk in the fleet-board JSON. It is byte-shape-compatible with
 // cmd/flotilla/status.go's statusItem so the board JSON is a strict SUPERSET of
 // the `flotilla status --json` contract (the landing widget, site/app.js,
-// consumes exactly these fields).
+// consumes exactly these fields). #524 adds loop_posture beside pane state.
 type AgentItem struct {
-	Name    string `json:"name"`
-	Role    string `json:"role,omitempty"`    // "hub" for the XO, else omitted
-	Surface string `json:"surface,omitempty"` // effective surface driver
-	State   string `json:"state"`             // same label set as `flotilla status`
+	Name        string `json:"name"`
+	Role        string `json:"role,omitempty"`         // "hub" for the XO, else omitted
+	Surface     string `json:"surface,omitempty"`      // effective surface driver
+	State       string `json:"state"`                  // pane / surface.State label
+	LoopPosture string `json:"loop_posture,omitempty"` // #524 fleet loop vocabulary
 }
 
 // FreshnessInfo is the board's freshness banner (the superset's addition over the
@@ -153,11 +155,15 @@ type BoardInputs struct {
 	AckOK       bool           // an ack file exists
 	AckAge      time.Duration  // ack mtime age (valid only when AckOK)
 	Threshold   time.Duration  // freshness threshold (FreshnessThreshold(heartbeat))
+	// LoopByAgent is optional pre-built #524 evidence (from per-agent backlog + settle).
+	// When nil, BuildBoard derives posture from the snapshot alone (backlog unknown).
+	LoopByAgent map[string]loopposture.Evidence
 }
 
 // BuildBoard assembles the fleet-board document. Pure: no I/O, no real time.
 func BuildBoard(in BoardInputs) BoardDoc {
 	fresh := assessFreshness(in.SnapOK, in.SnapAge, in.Threshold)
+	snapFresh := fresh == FreshnessFresh
 
 	doc := BoardDoc{
 		GeneratedAt: in.GeneratedAt,
@@ -182,9 +188,10 @@ func BuildBoard(in BoardInputs) BoardDoc {
 	}
 	for _, a := range in.Cfg.Agents {
 		item := AgentItem{
-			Name:    a.Name,
-			Surface: effectiveSurface(a.Surface),
-			State:   deskStateLabel(in.Snap, a.Name),
+			Name:        a.Name,
+			Surface:     effectiveSurface(a.Surface),
+			State:       deskStateLabel(in.Snap, a.Name),
+			LoopPosture: string(boardLoopPosture(a.Name, in, snapFresh)),
 		}
 		if a.Name == in.XO {
 			item.Role = "hub"
@@ -192,6 +199,14 @@ func BuildBoard(in BoardInputs) BoardDoc {
 		doc.Agents = append(doc.Agents, item)
 	}
 	return doc
+}
+
+func boardLoopPosture(name string, in BoardInputs, snapFresh bool) loopposture.Posture {
+	if ev, ok := in.LoopByAgent[name]; ok {
+		return loopposture.Derive(ev)
+	}
+	settled := in.SnapOK && name == in.XO && in.Snap.XOSettled
+	return loopposture.Derive(loopposture.FromSnapshot(in.Snap, name, settled, false, in.SnapOK && snapFresh, backlog.Status{}))
 }
 
 // assessFreshness maps the snapshot presence + age onto the three-state model.

@@ -370,31 +370,35 @@ flag + file surface (`--snapshot-file`, `--awaiting-file`, `--settled-file`,
 ### Check fleet state at a glance: `flotilla status`
 
 Once the change-detector is running, `flotilla status` prints one line per desk —
-its last-known state and, for the XO, its last-ack age and whether it has settled
-— without attaching to any pane:
+its last-known **pane state**, its **loop posture** (#524), and for the XO its
+last-ack age and whether it has settled — without attaching to any pane:
 
 ```sh
 flotilla status
+flotilla status --json   # machine-readable: agents[].state + agents[].loop_posture
 ```
 
 ```
 flotilla status — states as of 12s ago (./flotilla-detector-state.json)
 XO research · last ack 7s ago · active
 
-infra     working
-research  idle        (XO)
-data      crashed
-feature   unknown
+infra     working   composing
+research  idle      available   (XO)
+data      crashed   crashed
+feature   unknown   unknown
 ```
 
 It is **read-only**: it reads the snapshot the detector already writes
-(`--snapshot-file`) plus the XO ack file (`--ack-file`) — no daemon, no pane
-probing, no new state. The states are the detector's view **as of its last tick**,
-so the header always reports the snapshot's age; a desk the detector hasn't seen
-yet (or with no snapshot at all) shows `unknown`. `crashed` means the desk dropped
-to a bare shell (its agent process is gone). Run it from the same directory as
-your roster, or point it with `--roster` / `--snapshot-file` / `--ack-file` (it
-honors the same `$FLOTILLA_*` env vars as `watch`).
+(`--snapshot-file`) plus the XO ack file (`--ack-file`) and per-agent backlog /
+settle markers for `loop_posture` — no daemon, no pane probing, no new state.
+The states are the detector's view **as of its last tick**, so the header always
+reports the snapshot's age; a desk the detector hasn't seen yet (or with no
+snapshot at all) shows `unknown`. `crashed` means the desk dropped to a bare
+shell (its agent process is gone). Pane **idle is not enough**: `loop_posture`
+distinguishes `available` / `parked` / `drifted` / `awaiting-authority` (parked
+requires a known-empty unblocked backlog — strict default). Run it from the same
+directory as your roster, or point it with `--roster` / `--snapshot-file` /
+`--ack-file` (it honors the same `$FLOTILLA_*` env vars as `watch`).
 
 ## 6. (Optional) Inbound relay
 

@@ -67,7 +67,11 @@ func TestLeaderPingBodyExactLegacyString(t *testing.T) {
 
 func TestAdjutantDualObservationContract(t *testing.T) {
 	got := adjutantDualObservationContract("alpha-xo")
-	for _, want := range []string{"Dual observation", "Desk stream", "Leader stream", "alpha-xo", "Working/Idle"} {
+	for _, want := range []string{
+		"Dual observation", "Desk stream", "Leader stream", "alpha-xo", "Working/Idle",
+		// #524: loop_posture, not pane idle alone
+		"loop_posture", "parked", "drifted", "awaiting-authority", "not pane idle alone",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("dual observation missing %q\nfull: %s", want, got)
 		}

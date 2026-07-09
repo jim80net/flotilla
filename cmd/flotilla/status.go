@@ -10,6 +10,9 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/backlog"
+	"github.com/jim80net/flotilla/internal/dash"
+	"github.com/jim80net/flotilla/internal/loopposture"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/watch"
@@ -55,6 +58,15 @@ func cmdStatus(args []string) error {
 	*ackPath = roster.ResolveLayerClockPath(rosterDir, xo, *ackPath, "flotilla-xo-alive", "alive")
 
 	snap, snapOK := watch.LoadSnapshot(*snapshotPath)
+	now := time.Now()
+	// Snapshot freshness for loop_posture: same 3× heartbeat order as dash.
+	snapFresh := false
+	if snapOK {
+		if age, ok := fileAge(*snapshotPath, now); ok {
+			snapFresh = age <= dash.FreshnessThreshold(cfg.HeartbeatDur())
+		}
+	}
+	loopByAgent := loopposture.LoadFleetEvidence(cfg, xo, rosterDir, snap, snapOK, snapFresh)
 	if *asJSON {
 		// generated_at is the snapshot's mtime (when watch last wrote it) — the
 		// honest "as of" for the states below. Empty when there is no snapshot.
@@ -62,22 +74,20 @@ func cmdStatus(args []string) error {
 		if fi, statErr := os.Stat(*snapshotPath); statErr == nil {
 			generatedAt = fi.ModTime().UTC().Format(time.RFC3339)
 		}
-		doc := buildStatusJSON(cfg, xo, generatedAt, snap)
+		doc := buildStatusJSON(cfg, xo, generatedAt, snap, loopByAgent)
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(doc)
 	}
-	writeStatus(os.Stdout, cfg, xo, *snapshotPath, *ackPath, snap, snapOK, time.Now())
+	writeStatus(os.Stdout, cfg, xo, *snapshotPath, *ackPath, snap, snapOK, now, loopByAgent)
 	return nil
 }
 
-// statusDoc is the `--json` shape. It is deliberately the SAME contract the
-// landing-page widget consumes — an `agents` array plus a `generated_at` stamp —
+// statusDoc is the `--json` shape. It is deliberately a SUPERSET of the
+// landing-page widget contract — an `agents` array plus a `generated_at` stamp —
 // so the public sample status.json can be a real `flotilla status --json` run
-// against a demo roster rather than hand-authored data. It carries only what the
-// command actually knows: each desk's name, its surface (from the roster), its
-// snapshot state, and the XO's role. There is no per-desk "task" — the detector
-// snapshot does not record one — so the JSON does not invent it.
+// against a demo roster rather than hand-authored data. #524 adds loop_posture
+// beside pane state; older consumers ignore unknown fields.
 type statusDoc struct {
 	GeneratedAt string       `json:"generated_at"`
 	XO          string       `json:"xo,omitempty"`
@@ -85,22 +95,24 @@ type statusDoc struct {
 }
 
 type statusItem struct {
-	Name    string `json:"name"`
-	Role    string `json:"role,omitempty"`    // "hub" for the XO, else omitted
-	Surface string `json:"surface,omitempty"` // effective surface driver
-	State   string `json:"state"`             // same label set as the text view
+	Name        string `json:"name"`
+	Role        string `json:"role,omitempty"`         // "hub" for the XO, else omitted
+	Surface     string `json:"surface,omitempty"`      // effective surface driver
+	State       string `json:"state"`                  // pane / surface.State label
+	LoopPosture string `json:"loop_posture,omitempty"` // #524 fleet loop vocabulary
 }
 
 // buildStatusJSON assembles the --json document. Pure (no I/O) so it is
 // unit-testable with an in-memory snapshot; cmdStatus supplies generated_at
-// (the snapshot's mtime) and the loaded snapshot.
-func buildStatusJSON(cfg *roster.Config, xo, generatedAt string, snap watch.Snapshot) statusDoc {
+// (the snapshot's mtime), the loaded snapshot, and pre-derived loop evidence.
+func buildStatusJSON(cfg *roster.Config, xo, generatedAt string, snap watch.Snapshot, loopByAgent map[string]loopposture.Evidence) statusDoc {
 	doc := statusDoc{GeneratedAt: generatedAt, XO: xo, Agents: make([]statusItem, 0, len(cfg.Agents))}
 	for _, a := range cfg.Agents {
 		item := statusItem{
-			Name:    a.Name,
-			Surface: effectiveSurface(a.Surface),
-			State:   deskStateLabel(snap, a.Name),
+			Name:        a.Name,
+			Surface:     effectiveSurface(a.Surface),
+			State:       deskStateLabel(snap, a.Name),
+			LoopPosture: string(deriveAgentPosture(a.Name, snap, loopByAgent)),
 		}
 		if a.Name == xo {
 			item.Role = "hub"
@@ -122,7 +134,7 @@ func effectiveSurface(s string) string {
 // writeStatus renders the report. It is split from cmdStatus (which does flag +
 // file I/O) so the formatting is unit-testable with an in-memory snapshot and a
 // pinned clock — no roster file, no daemon, no real time.
-func writeStatus(out io.Writer, cfg *roster.Config, xo, snapshotPath, ackPath string, snap watch.Snapshot, snapOK bool, now time.Time) {
+func writeStatus(out io.Writer, cfg *roster.Config, xo, snapshotPath, ackPath string, snap watch.Snapshot, snapOK bool, now time.Time, loopByAgent map[string]loopposture.Evidence) {
 	// Freshness header — the desk states below are as of the snapshot's mtime,
 	// not a live probe. Always surface that (or its absence).
 	if snapOK {
@@ -148,16 +160,25 @@ func writeStatus(out io.Writer, cfg *roster.Config, xo, snapshotPath, ackPath st
 		fmt.Fprintf(out, "XO %s · %s\n\n", xo, ackDesc)
 	}
 
-	// One aligned line per roster desk: name, state, and the (XO) marker.
+	// One aligned line per roster desk: name, pane state, loop_posture, (XO).
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	for _, a := range cfg.Agents {
 		marker := ""
 		if a.Name == xo {
 			marker = "(XO)"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\n", a.Name, deskStateLabel(snap, a.Name), marker)
+		posture := deriveAgentPosture(a.Name, snap, loopByAgent)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", a.Name, deskStateLabel(snap, a.Name), posture, marker)
 	}
 	_ = w.Flush()
+}
+
+func deriveAgentPosture(name string, snap watch.Snapshot, loopByAgent map[string]loopposture.Evidence) loopposture.Posture {
+	if ev, ok := loopByAgent[name]; ok {
+		return loopposture.Derive(ev)
+	}
+	// No evidence map: pane-only derivation (backlog unknown ⇒ cannot strict-park).
+	return loopposture.Derive(loopposture.FromSnapshot(snap, name, false, false, true, backlog.Status{}))
 }
 
 // deskStateLabel renders a desk's snapshot state with the operator-facing
