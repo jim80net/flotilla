@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // writeStore builds a temp grok store: active_sessions.json + a session's chat_history.jsonl.
@@ -64,8 +65,10 @@ func TestLatestResultErrors(t *testing.T) {
 	cwd := "/srv/fleet/research"
 	enc := "%2Fsrv%2Ffleet%2Fresearch"
 
-	t.Run("no active session for cwd", func(t *testing.T) {
-		home := writeStore(t, "/some/other/cwd", "s1", enc, `{"type":"assistant","content":"x"}`)
+	t.Run("no active session and no on-disk session for cwd", func(t *testing.T) {
+		// active_sessions points elsewhere AND the sessions tree for the wanted cwd is absent
+		// (distinct from #587, where active misses but disk sessions/<encoded-cwd>/ still exists).
+		home := writeStore(t, "/some/other/cwd", "s1", "%2Fsome%2Fother%2Fcwd", `{"type":"assistant","content":"x"}`)
 		if _, err := LatestResult(home, cwd); err == nil || !strings.Contains(err.Error(), "no active grok session") {
 			t.Errorf("err = %v, want a 'no active grok session for cwd' error", err)
 		}
@@ -119,6 +122,52 @@ func TestLatestResultTrailingSlashCwdMatches(t *testing.T) {
 	got, err := LatestResult(home, "/srv/fleet/research/")
 	if err != nil || got != "ok" {
 		t.Errorf("got (%q, %v), want a match despite the trailing slash", got, err)
+	}
+}
+
+// #587: after force-resume/recycle, active_sessions.json often omits the desk cwd while the
+// pane still runs grok and sessions/<url-encoded-cwd>/<id>/chat_history.jsonl exists on disk.
+func TestLatestResultFallsBackToDiskSessionWhenActiveMisses587(t *testing.T) {
+	// Generic desk path only (public fixture — no deployment identifiers).
+	cwd := "/srv/fleet/desks/frontend"
+	// active_sessions lists a DIFFERENT cwd only — the target desk entry is missing.
+	home := writeStore(t, "/srv/fleet/desks/other", "other-sess", "%2Fsrv%2Ffleet%2Fdesks%2Fother",
+		`{"type":"assistant","content":"other desk turn"}`)
+	// Plant the session tree the way grok does (PathEscape of the full cwd).
+	enc := "%2Fsrv%2Ffleet%2Fdesks%2Ffrontend"
+	oldDir := filepath.Join(home, "sessions", enc, "old-sess")
+	newDir := filepath.Join(home, "sessions", enc, "new-sess")
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(newDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldHist := filepath.Join(oldDir, "chat_history.jsonl")
+	newHist := filepath.Join(newDir, "chat_history.jsonl")
+	if err := os.WriteFile(oldHist, []byte(`{"type":"assistant","content":"stale prior session"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Ensure "new" is newer than "old" (mtime selection).
+	if err := os.WriteFile(newHist, []byte(`{"type":"assistant","content":"latest force-resume turn"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Bump newHist mtime after oldHist for deterministic ordering on fast FS.
+	oldT := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
+	newT := time.Date(2026, 7, 9, 20, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(oldHist, oldT, oldT); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(newHist, newT, newT); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := LatestResult(home, cwd)
+	if err != nil {
+		t.Fatalf("LatestResult err = %v, want disk fallback success", err)
+	}
+	if got != "latest force-resume turn" {
+		t.Errorf("got %q, want the newest on-disk session for the desk cwd", got)
 	}
 }
 

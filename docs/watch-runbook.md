@@ -444,7 +444,14 @@ the command itself is wedged.
 ### The fail-closed pipeline (and its guarantee)
 
 1. **Idle precondition** — waits for the desk to be idle at a cleared composer
-   (the XO often triggers mid-turn); never injects into a busy pane.
+   (the XO often triggers mid-turn); never injects into a busy pane. Recycle
+   assesses the **live pane harness** (`pane_current_command`), not only the
+   roster/overlay surface (#586): a cutover lag (roster still `claude-code`
+   while the pane runs `grok`) would otherwise leave the composer
+   Undetermined forever and abort as busy-desk on a parked empty composer.
+   Standing backlog `[blocked]` items only affect status `loop_posture`
+   ("idle blocked"); they do **not** block phase-0 when the pane is idle and
+   the composer is cleared.
 2. **Handoff** — injects a NON-INTERACTIVE turn telling the desk to write a
    handoff (per the `/handoff` FORMAT, not the interactive skill) to a designated
    gitignored path as an **untracked file** (never `git add`/`commit`), then stop.

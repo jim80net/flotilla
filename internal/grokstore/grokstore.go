@@ -9,6 +9,9 @@
 //	<grokHome>/active_sessions.json          [{session_id, pid, cwd, opened_at}, …]  (currently-open sessions)
 //	<grokHome>/sessions/<url-encoded-cwd>/<session-id>/chat_history.jsonl  (one JSON entry per line)
 //
+// Session selection: prefer active_sessions.json by cwd; when that index misses (force-resume /
+// recycle lag — #587), fall back to the newest chat_history.jsonl under sessions/<PathEscape(cwd)/>.
+//
 // A chat_history entry is {"type":"assistant"|…, "content":<string OR [{type,text},…]>, …}; the
 // LAST non-empty assistant entry is the latest completed turn's full text (a turn emits interleaved
 // assistant entries — tool-call carriers have empty content and are skipped).
@@ -18,6 +21,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,41 +104,104 @@ func ReplyAfter(grokHome, cwd, operatorMsg string) (text string, found bool, err
 	return t, found, err
 }
 
-// resolveHistoryPath resolves the single chat_history.jsonl for the active grok session at cwd (the
-// shared session-selection both readers use): active_sessions.json → sessionID → glob by session id.
+// resolveHistoryPath resolves the single chat_history.jsonl for the grok session at cwd (the
+// shared session-selection both readers use).
+//
+// Prefer active_sessions.json (live open sessions). When that index misses the cwd — common after
+// force-resume / recycle while the pane still runs grok (#587) — fall back to the on-disk
+// sessions/<url-encoded-cwd>/<session-id>/ layout and pick the most recently modified history.
+// cwd is compared with filepath.Clean on both sides; EvalSymlinks is applied when both sides
+// resolve so a symlinked worktree still matches.
 func resolveHistoryPath(grokHome, cwd string) (path string, sessionID string, err error) {
+	want := filepath.Clean(cwd)
+	if sessionID, err = sessionIDFromActive(grokHome, want); err != nil {
+		return "", "", err
+	}
+	if sessionID != "" {
+		// Glob by session-id under any cwd dir, so we never re-encode the cwd (the store url-encodes it).
+		matches, gerr := filepath.Glob(filepath.Join(grokHome, "sessions", "*", sessionID, "chat_history.jsonl"))
+		if gerr != nil {
+			return "", "", fmt.Errorf("grok store: glob session %s history: %w", sessionID, gerr)
+		}
+		switch len(matches) {
+		case 0:
+			return "", "", fmt.Errorf("grok store: no chat_history.jsonl for session %s", sessionID)
+		case 1:
+			return matches[0], sessionID, nil
+		default:
+			return "", "", fmt.Errorf("grok store: ambiguous — %d chat_history.jsonl files for session %s (%s)", len(matches), sessionID, strings.Join(matches, ", "))
+		}
+	}
+	// #587: active_sessions had no cwd match — recover from sessions/<encoded-cwd>/ on disk.
+	path, sessionID, err = sessionFromDiskByCwd(grokHome, want)
+	if err != nil {
+		return "", "", err
+	}
+	return path, sessionID, nil
+}
+
+// sessionIDFromActive returns the first active_sessions entry whose cwd matches want
+// (Clean + optional EvalSymlinks). Empty sessionID with nil err means "no match" (caller falls back).
+func sessionIDFromActive(grokHome, want string) (sessionID string, err error) {
 	raw, err := os.ReadFile(filepath.Join(grokHome, "active_sessions.json"))
 	if err != nil {
-		return "", "", fmt.Errorf("grok store: read active_sessions.json: %w", err)
+		return "", fmt.Errorf("grok store: read active_sessions.json: %w", err)
 	}
 	var sessions []activeSession
 	if err := json.Unmarshal(raw, &sessions); err != nil {
-		return "", "", fmt.Errorf("grok store: parse active_sessions.json: %w", err)
+		return "", fmt.Errorf("grok store: parse active_sessions.json: %w", err)
 	}
-	want := filepath.Clean(cwd)
+	wantReal := realPathOrClean(want)
 	for _, s := range sessions {
-		// First active session matching the cwd wins (the store has one open session per cwd).
-		if filepath.Clean(s.Cwd) == want {
-			sessionID = s.SessionID
-			break
+		got := filepath.Clean(s.Cwd)
+		if got == want || realPathOrClean(got) == wantReal {
+			return s.SessionID, nil
 		}
 	}
-	if sessionID == "" {
-		return "", "", fmt.Errorf("grok store: no active grok session for cwd %q (is the desk running a turn-bearing grok session?)", cwd)
-	}
-	// Glob by session-id under any cwd dir, so we never re-encode the cwd (the store url-encodes it).
-	matches, err := filepath.Glob(filepath.Join(grokHome, "sessions", "*", sessionID, "chat_history.jsonl"))
+	return "", nil
+}
+
+// sessionFromDiskByCwd finds sessions/<url.PathEscape(cwd)>/*/chat_history.jsonl and returns the
+// most recently modified history. Used when active_sessions.json is stale after resume/recycle.
+func sessionFromDiskByCwd(grokHome, want string) (path, sessionID string, err error) {
+	// Grok stores cwd dirs as a single PathEscape of the absolute path (%2Fhome%2F…).
+	enc := url.PathEscape(want)
+	root := filepath.Join(grokHome, "sessions", enc)
+	entries, err := os.ReadDir(root)
 	if err != nil {
-		return "", "", fmt.Errorf("grok store: glob session %s history: %w", sessionID, err)
+		if os.IsNotExist(err) {
+			return "", "", fmt.Errorf("grok store: no active grok session for cwd %q (is the desk running a turn-bearing grok session?)", want)
+		}
+		return "", "", fmt.Errorf("grok store: list sessions for cwd %q: %w", want, err)
 	}
-	switch len(matches) {
-	case 0:
-		return "", "", fmt.Errorf("grok store: no chat_history.jsonl for session %s", sessionID)
-	case 1:
-		return matches[0], sessionID, nil
-	default:
-		return "", "", fmt.Errorf("grok store: ambiguous — %d chat_history.jsonl files for session %s (%s)", len(matches), sessionID, strings.Join(matches, ", "))
+	var bestPath, bestID string
+	var bestMod int64
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		hist := filepath.Join(root, e.Name(), "chat_history.jsonl")
+		st, sterr := os.Stat(hist)
+		if sterr != nil {
+			continue
+		}
+		mod := st.ModTime().UnixNano()
+		if bestPath == "" || mod >= bestMod {
+			bestPath, bestID, bestMod = hist, e.Name(), mod
+		}
 	}
+	if bestPath == "" {
+		return "", "", fmt.Errorf("grok store: no active grok session for cwd %q (is the desk running a turn-bearing grok session?)", want)
+	}
+	return bestPath, bestID, nil
+}
+
+// realPathOrClean returns EvalSymlinks(path) when it succeeds, else Clean(path).
+func realPathOrClean(path string) string {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return real
+	}
+	return filepath.Clean(path)
 }
 
 // lastAssistant scans a chat_history.jsonl and returns the substantive assistant text for the

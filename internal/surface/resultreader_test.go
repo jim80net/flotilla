@@ -25,6 +25,29 @@ func TestSurfaceFromPaneCommand(t *testing.T) {
 	}
 }
 
+func TestResolveDriverPrefersLiveHarness586(t *testing.T) {
+	// #586 specimen: roster/overlay still claude-code while pane runs grok — recycle phase-0
+	// must use the grok composer probe (claude reports undetermined forever on a grok pane).
+	paneCommand := func(string) (string, error) { return "grok", nil }
+
+	drv, live, drift, err := ResolveDriver("claude-code", "p", paneCommand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !drift || live != "grok" {
+		t.Fatalf("drift=%v live=%q, want drift=true live=grok", drift, live)
+	}
+	if drv.Name() != "grok" {
+		t.Fatalf("driver = %q, want grok", drv.Name())
+	}
+	if _, ok := drv.(ComposerStateProbe); !ok {
+		t.Fatal("live grok driver must expose ComposerStateProbe for recycle idle∧cleared")
+	}
+	if _, ok := RecycleSupport(drv); !ok {
+		t.Fatal("live grok driver must expose RecycleBridge for handoff paths")
+	}
+}
+
 func TestResolveResultReaderPrefersLiveHarness(t *testing.T) {
 	paneCommand := func(string) (string, error) { return "claude", nil }
 
