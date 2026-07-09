@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jim80net/flotilla/internal/readermap"
+	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/sessionmirror"
 	"github.com/jim80net/flotilla/internal/transport"
 )
@@ -49,7 +50,7 @@ type deskMirror struct {
 // exactly one decision log line so a silent failure cannot hide — the original XO-mirror bugs
 // survived for weeks precisely because failures exited silently:
 //
-//	SKIP <agent>: <reason>        — no webhook, nothing substantive, or a read error
+//	WARN/SKIP <agent>: <reason>   — no webhook (WARN #506), nothing substantive, or a read error
 //	MIRROR-FAIL <agent>: <detail> — one or more chunk posts failed
 //	POST <agent> <n> chunks       — the turn-final was mirrored
 func (m deskMirror) run(agent string) {
@@ -59,7 +60,11 @@ func (m deskMirror) run(agent string) {
 		var ok bool
 		url, ok = m.webhook(agent)
 		if !ok {
-			m.logf("flotilla watch: mirror SKIP %s: no webhook configured", agent)
+			// LOUD finish-edge gap (#506): missing webhook is a provisioning error, not a
+			// quiet no-op — operators hunting "why didn't Discord see this turn?" need a
+			// greppable WARN line naming the seat and the expected secrets key.
+			m.logf("flotilla watch: mirror WARN %s: no webhook configured — seat will not appear on Discord (provision %s); turn-final was NOT mirrored",
+				agent, roster.WebhookKey(agent))
 			return
 		}
 	}
