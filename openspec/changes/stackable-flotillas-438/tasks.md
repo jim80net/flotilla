@@ -9,10 +9,12 @@
 - [x] 1.3 Fold #436 / #437 into escalation story
 - [x] 1.4 Reframe #439 as **laminar flow** (triage + observe desk + observe leader + buffer + seam inject)
 - [x] 1.5 First-presentation charter for without-leader bounds (negotiate, not invent)
-- [ ] 1.6 **Transcript analysis** — mine coordinator sessions (2026-07-06 recycle + prior); appendix `transcript-analysis.md`
+- [ ] 1.6 **Transcript analysis** — bounded plan in `transcript-analysis.md`; execute on host-local sessions before operator gate
 - [ ] 1.7 Ground seam/injection heuristics + charter defaults from 1.6 findings
 - [ ] 1.8 Operator gate on design PR (#440)
-- [ ] 1.9 Fold #438 comms-path remainder when forwarded
+- [x] 1.9 Fold #438 comms-path — COS-authorized hierarchical paths (2026-07-09 ORG-ARCHITECTURE SHIFT)
+- [x] 1.10 Cross-link **#530** return-to-frontier frame in seam handoff design (distinct from #526 cap)
+- [x] 1.11 ORG-ARCHITECTURE SHIFT routing table — #438/#439/#530 folded; #526 closed (#529), do not reopen
 
 ## Implementation (post-gate — P0 adjutant first)
 
