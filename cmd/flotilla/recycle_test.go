@@ -592,7 +592,135 @@ func TestRunRecycleSelfPath(t *testing.T) {
 	if !strings.Contains(msg, "self-recycled") {
 		t.Errorf("msg = %q, want self-recycled", msg)
 	}
+	if !strings.Contains(msg, "no model/surface change") {
+		t.Errorf("msg = %q, must state no model/surface change (#437 cutover honesty)", msg)
+	}
 	if len(r.delivered) != 2 {
 		t.Errorf("want handoff+takeover delivers, got %v", r.delivered)
+	}
+}
+
+// #437 reopen: own-pane --self must skip phase-0 idle (chicken-egg: session driving recycle
+// cannot register idle). Handoff gate still requires idle after the handoff turn.
+func TestRunRecycleSelfPathSkipsPhase0OnOwnPane437(t *testing.T) {
+	r := happyRec()
+	rotated := false
+	ops := fakeRecycleOps(r)
+	// Pre-handoff: always Working (would fail phase 0). After handoff deliver: Idle so
+	// phase-1 gate and re-verify can pass.
+	ops.assess = func(string) surface.State {
+		if len(r.delivered) == 0 {
+			return surface.StateWorking
+		}
+		if r.failReverify && r.locked() && !r.closed {
+			return surface.StateWorking
+		}
+		return surface.StateIdle
+	}
+	ops.rotate = func(string) error { rotated = true; return nil }
+	p := testPlan()
+	p.selfPath = true
+	p.ownPane = "%5" // samePaneAsSelf
+	// Tiny boot budget: without the skip, phase 0 would abort immediately.
+	p.timeouts.boot = recyclePollInterval
+	msg, _, err := runRecycle(ops, p)
+	if err != nil {
+		t.Fatalf("own-pane --self must not abort on phase 0 when pre-handoff is Working: %v", err)
+	}
+	if !rotated || r.closed || r.respawned {
+		t.Errorf("want rotate-only path (rotated=%v closed=%v respawned=%v)", rotated, r.closed, r.respawned)
+	}
+	if !strings.Contains(msg, "self-recycled") {
+		t.Errorf("msg = %q", msg)
+	}
+}
+
+// #437 reopen: without --self, pre-handoff Working still aborts at phase 0 (external path
+// keeps the idle precondition).
+func TestRunRecyclePhase0StillRequiredWhenNotOwnPaneSelf437(t *testing.T) {
+	r := happyRec()
+	ops := fakeRecycleOps(r)
+	ops.assess = func(string) surface.State {
+		if len(r.delivered) == 0 {
+			return surface.StateWorking
+		}
+		return surface.StateIdle
+	}
+	// External pane + --self: phase 0 still applies (only own-pane --self skips).
+	p := testPlan()
+	p.selfPath = true
+	p.ownPane = "" // watch host / adjutant
+	p.timeouts.boot = recyclePollInterval
+	_, _, err := runRecycle(ops, p)
+	if err == nil || !strings.Contains(err.Error(), "phase 0") {
+		t.Fatalf("err = %v, want phase-0 abort for external --self while Working", err)
+	}
+	if len(r.delivered) != 0 {
+		t.Errorf("phase-0 abort must not deliver handoff (got %v)", r.delivered)
+	}
+}
+
+// #437 reopen: full recycle from a non-target pane is allowed and respawns (model cutover path).
+// Generic coordinator names only — no deployment identifiers.
+func TestRunRecycleExternalPaneFullRecycleAllowed437(t *testing.T) {
+	for _, agent := range []string{"cos", "cos-adj", "alpha-xo"} {
+		t.Run(agent, func(t *testing.T) {
+			r := happyRec()
+			ops := fakeRecycleOps(r)
+			var gotLaunch string
+			ops.respawn = func(_, _, launch string) error {
+				r.respawned = true
+				gotLaunch = launch
+				return nil
+			}
+			p := testPlan()
+			p.agent = agent
+			p.ownPane = "" // external: adjutant / watch host
+			p.selfPath = false
+			p.launch = "grok --yolo" // recipe line the cutover must honor
+			msg, _, err := runRecycle(ops, p)
+			if err != nil {
+				t.Fatalf("external full recycle of %q: %v", agent, err)
+			}
+			if !r.closed || !r.respawned {
+				t.Errorf("%q full recycle must close+respawn (closed=%v respawned=%v)", agent, r.closed, r.respawned)
+			}
+			if gotLaunch != "grok --yolo" {
+				t.Errorf("respawn launch = %q, want recipe.Launch for cutover parity", gotLaunch)
+			}
+			if strings.Contains(msg, "self-recycled") {
+				t.Errorf("full recycle must not claim self-recycled: %q", msg)
+			}
+			if !strings.Contains(msg, "relaunched fresh") {
+				t.Errorf("msg = %q, want relaunched fresh", msg)
+			}
+		})
+	}
+}
+
+// #437 reopen: own-pane full recycle still refused (would kill the driver); error steers cutover.
+func TestRunRecycleOwnPaneFullRecycleRefusedCutoverHint437(t *testing.T) {
+	r := happyRec()
+	ops := fakeRecycleOps(r)
+	p := testPlan()
+	p.agent = "cos"
+	p.ownPane = "%5"
+	p.selfPath = false
+	_, _, err := runRecycle(ops, p)
+	if err == nil {
+		t.Fatal("want own-pane full recycle refusal")
+	}
+	errS := err.Error()
+	if !strings.Contains(errS, "own pane") {
+		t.Errorf("err = %v, want own pane refusal", err)
+	}
+	if !strings.Contains(errS, "model/surface cutover") && !strings.Contains(errS, "launch recipe") {
+		t.Errorf("err must steer external full recycle for cutover: %v", err)
+	}
+	if !strings.Contains(errS, "--self") {
+		t.Errorf("err must mention --self for in-place rotate: %v", err)
+	}
+	if r.closed || r.respawned || len(r.delivered) != 0 {
+		t.Errorf("refusal must not act: %+v", r)
 	}
 }

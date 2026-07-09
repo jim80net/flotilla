@@ -492,7 +492,37 @@ auto-dispatches `flotilla recycle <desk>` so sessions do not accumulate chapters
 
 **Coordinators:** chapter-end uses `flotilla recycle <coord> --self` — handoff +
 in-place rotate + takeover, never bare `/clear`, never process-kill the seat that
-issued the command (#437).
+issued the command (#437). **`--self` does not change model or surface** (no
+process respawn, no re-read of `flotilla-launch.json` for a new harness binary).
+
+#### Coordinator model/surface cutover (#437 reopen)
+
+When a coordinator must move to a new harness or model (e.g. recipe flipped to
+grok-4.5), **`--self` is the wrong tool** — it only rotates context in the live
+process. Cutover is the same full recycle desks use, run from a **non-target**
+pane so the command is not killed with the seat:
+
+```bash
+# From the adjutant pane, meta-XO, or watch host — NOT from the coordinator's own pane.
+# Launch recipe is resolved the same way as `flotilla resume` (workspace overlay +
+# flotilla-launch.json); --dry-run shows the relaunch line first.
+flotilla recycle cos --dry-run
+flotilla recycle cos
+
+# Optional: adjutant-driven pattern for a project XO
+flotilla recycle alpha-xo
+```
+
+| Invocation | Where | Effect |
+|---|---|---|
+| `flotilla recycle <coord> --self` | Own pane or external | Handoff + rotate + takeover; **same process/model** |
+| `flotilla recycle <coord>` | External only | Full close + **respawn with launch recipe** (model/surface cutover) |
+| `flotilla recycle <coord>` | Own pane | **Refused** (would kill the driver) |
+
+Own-pane `--self` skips the phase-0 idle wait (the session driving the command
+cannot register idle while the command runs); phase-1 still requires a durable
+handoff and idle∧cleared after the handoff turn. Prefer external full recycle
+for cutovers so phase-0 and recipe relaunch both apply normally.
 
 **Ceremonies:** ride the same primitive (recycle → fresh session → ceremony
 prompt). No special ephemeral runner (#435 withdrawn).
