@@ -50,23 +50,37 @@ type deskMirror struct {
 // exactly one decision log line so a silent failure cannot hide — the original XO-mirror bugs
 // survived for weeks precisely because failures exited silently:
 //
-//	WARN/SKIP <agent>: <reason>   — no webhook (WARN #506), nothing substantive, or a read error
+//	WARN <agent>: no webhook — Discord skipped; session-mirror still attempted (#506/#572)
+//	SKIP <agent>: <reason>   — nothing substantive, or a read error
 //	MIRROR-FAIL <agent>: <detail> — one or more chunk posts failed
-//	POST <agent> <n> chunks       — the turn-final was mirrored
+//	POST <agent> <n> chunks  — Discord + (when rosterDir set) session-mirror
+//	LEDGER <agent>           — session-mirror only (no Discord: ledgerOnly or missing webhook)
+//
+// #572: missing webhook must NOT suppress the session-mirror ledger — dash conversations
+// depend on it. Discord is best-effort on top; the loud WARN remains.
 func (m deskMirror) run(agent string) {
 	postDiscord := !m.ledgerOnly
 	var url string
+	haveHook := false
 	if postDiscord {
-		var ok bool
-		url, ok = m.webhook(agent)
-		if !ok {
-			// LOUD finish-edge gap (#506): missing webhook is a provisioning error, not a
-			// quiet no-op — operators hunting "why didn't Discord see this turn?" need a
-			// greppable WARN line naming the seat and the expected secrets key.
-			m.logf("flotilla watch: mirror WARN %s: no webhook configured — seat will not appear on Discord (provision %s); turn-final was NOT mirrored",
-				agent, roster.WebhookKey(agent))
-			return
+		if m.webhook != nil {
+			url, haveHook = m.webhook(agent)
 		}
+		if !haveHook {
+			// LOUD finish-edge gap (#506): missing webhook is a provisioning error — operators
+			// hunting "why didn't Discord see this turn?" need a greppable WARN naming the seat.
+			// Session-mirror still proceeds when rosterDir is set (#572 dash parity).
+			m.logf("flotilla watch: mirror WARN %s: no webhook configured — seat will not appear on Discord (provision %s); attempting session-mirror only",
+				agent, roster.WebhookKey(agent))
+		}
+	}
+	// Nothing useful to do without Discord and without a ledger target.
+	if !haveHook && m.rosterDir == "" && !m.ledgerOnly {
+		return
+	}
+	if m.turnFinal == nil {
+		m.logf("flotilla watch: mirror SKIP %s: no turn-final source", agent)
+		return
 	}
 	text, ok, err := m.turnFinal(agent)
 	if err != nil {
@@ -89,7 +103,8 @@ func (m deskMirror) run(agent string) {
 
 	ledgerOK := m.appendSessionMirror(agent, text, d)
 
-	if !postDiscord {
+	// Ledger-only modes: explicit ledgerOnly, or Discord unavailable (no webhook).
+	if !postDiscord || !haveHook {
 		if !ledgerOK {
 			return
 		}

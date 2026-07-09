@@ -389,6 +389,28 @@ the operator is in the loop) — re-engage it with an operator message, which
 clears any settled state and lands in its pane; the next material change or
 safety ping then resumes the normal cadence.
 
+## Coordinator session-mirror without pane Working→Idle (#572)
+
+Desk finish-edge mirrors fire on detector `Working→Idle`. A **pane-less or
+remote-control coordinator** (CoS / XO) often never emits that edge — Assess
+cannot see a useful pane — so `CoordinatorMirrorOnFinish` stays quiet and
+dash conversations miss the turn-final.
+
+**Trigger-independent path:** harness Stop hooks (Claude:
+`deploy/flotilla-xo-discord-mirror.sh`) call:
+
+```bash
+flotilla mirror-self --from <coord> --roster <path> --secrets <path> --file <turn-final>
+```
+
+That runs the same `deskMirror` pipeline as the detector (reader-model →
+session-mirror jsonl → Discord when webhook present → Cos ledger for
+coordinators). Missing webhooks still **WARN** loudly and still write
+session-mirror when the roster dir is known (#506/#572).
+
+Desks keep using detector `MirrorOnFinish`; the Stop hook self-gates to
+`xo_agent` / `cos_agent` / `coordinator:true` / `*-xo` so desks are not dual-posted.
+
 ## Recycle a desk's chapter — `flotilla recycle` (#157)
 
 `flotilla recycle <desk>` closes a desk's chapter and restarts it with a **fresh

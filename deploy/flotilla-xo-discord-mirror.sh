@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # flotilla-xo-discord-mirror.sh — Claude Code Stop hook.
-# MECHANICAL mirror: posts the XO pane's turn-final assistant text to Discord on
-# every Stop (fail-safe exit 0). Self-gates to the flotilla XO pane only.
+# MECHANICAL mirror: posts the coordinator turn-final to Discord + session-mirror
+# on every Stop (fail-safe exit 0). Self-gates to xo_agent / cos_agent / *-xo seats
+# (pane-less remote-control coordinators never get Working→Idle — #432/#572 use
+# `flotilla mirror-self` so dash conversations still populate).
 # Set FLOTILLA_MIRROR_DRYRUN=1 to print instead of posting (for testing).
 #
 # Decision log: ~/.claude/hooks/flotilla-xo-mirror.log (one line/invocation).
@@ -40,16 +42,38 @@ if [[ ! -f "$ROSTER" || ! -f "$SECRETS" ]]; then exit 0; fi
 
 payload="$(cat 2>/dev/null)" || exit 0
 
-# fast self-gate: only the XO tmux pane mirrors
-[ -n "${TMUX_PANE:-}" ] || exit 0
-marker="$(tmux show-options -pv -t "$TMUX_PANE" @flotilla_agent 2>/dev/null)" || exit 0
+# Self-gate: coordinator seats only (xo_agent, cos_agent, or *-xo name). Desks use
+# detector Working→Idle MirrorOnFinish — dual-firing would double-post Discord.
+# TMUX_PANE is preferred for marker; if unset (remote-control / pane-less), fall back
+# to FLOTILLA_SELF so a Stop hook without a pane still mirrors (#572).
+marker=""
+if [ -n "${TMUX_PANE:-}" ]; then
+  marker="$(tmux show-options -pv -t "$TMUX_PANE" @flotilla_agent 2>/dev/null)" || true
+fi
+if [ -z "$marker" ]; then
+  marker="${FLOTILLA_SELF:-}"
+fi
 [ -n "$marker" ] || exit 0
-xo="$(python3 -c "import json;print(json.load(open('$ROSTER')).get('xo_agent',''))" 2>/dev/null)" || exit 0
-[ "$marker" = "$xo" ] || exit 0
+coord_ok="$(python3 -c "
+import json,sys
+r=json.load(open('$ROSTER'))
+m=sys.argv[1]
+xo=r.get('xo_agent') or ''
+cos=r.get('cos_agent') or ''
+if m and m in (xo, cos):
+    print('1'); raise SystemExit
+for a in r.get('agents') or []:
+    if a.get('name')==m and a.get('coordinator') is True:
+        print('1'); raise SystemExit
+if m.endswith('-xo'):
+    print('1'); raise SystemExit
+print('0')
+" "$marker" 2>/dev/null)" || exit 0
+[ "$coord_ok" = "1" ] || exit 0
 
-python3 - "$payload" "$marker" "$SECRETS" "$FLOTILLA" <<'PY' 2>/dev/null || exit 0
+python3 - "$payload" "$marker" "$SECRETS" "$FLOTILLA" "$ROSTER" <<'PY' 2>/dev/null || exit 0
 import json, re, sys, subprocess, tempfile, os, time, datetime
-payload, agent, secrets, flotilla = sys.argv[1:5]
+payload, agent, secrets, flotilla, roster = sys.argv[1:6]
 
 _LOG = os.path.expanduser("~/.claude/hooks/flotilla-xo-mirror.log")
 def lg(decision, detail=""):
@@ -202,13 +226,25 @@ if os.environ.get("FLOTILLA_MIRROR_DRYRUN")=="1":
 with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as tf:
     tf.write(resp); tmp=tf.name
 try:
-    r = subprocess.run([flotilla, "notify", "--chunk", "--from", agent, "--secrets", secrets, "--file", tmp],
-                       check=False, timeout=60, capture_output=True, text=True)
+    # #572: mirror-self writes session-mirror (+ Discord when webhook present) without
+    # requiring detector Working→Idle — the remote-control / pane-less coordinator path.
+    # Falls back to notify --chunk if mirror-self is unavailable on an older binary.
+    r = subprocess.run(
+        [flotilla, "mirror-self", "--from", agent, "--secrets", secrets, "--roster", roster, "--file", tmp],
+        check=False, timeout=60, capture_output=True, text=True,
+    )
     if r.returncode != 0:
-        lg("POST-FAIL", f"{len(resp)}ch rc={r.returncode} err={(r.stderr or r.stdout or '')[:160]!r} waited={waited} trig={trig_note!r}")
+        # Fallback for pre-#572 binaries still on PATH.
+        r2 = subprocess.run(
+            [flotilla, "notify", "--chunk", "--from", agent, "--secrets", secrets, "--file", tmp],
+            check=False, timeout=60, capture_output=True, text=True,
+        )
+        if r2.returncode != 0:
+            lg("POST-FAIL", f"{len(resp)}ch mirror-self rc={r.returncode} notify rc={r2.returncode} err={(r.stderr or r2.stderr or '')[:160]!r} waited={waited} trig={trig_note!r}")
+        else:
+            lg("POST-NOTIFY-FALLBACK", f"{len(resp)}ch waited={waited} trig={trig_note!r}")
     else:
-        # notify --chunk posts N parts; we log aggregate (hook can't see chunk count without parsing).
-        lg("POST", f"{len(resp)}ch waited={waited} trig={trig_note!r}")
+        lg("POST", f"{len(resp)}ch mirror-self waited={waited} trig={trig_note!r}")
 except Exception as e:
     lg("POST-FAIL", f"{len(resp)}ch exc={type(e).__name__} waited={waited} trig={trig_note!r}")
 finally:
