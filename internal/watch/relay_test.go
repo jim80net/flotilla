@@ -69,9 +69,9 @@ func TestRelayOperatorToCoordinatorRoutesAdjutant(t *testing.T) {
 			{Name: "alpha-adj", AdjutantFor: "alpha-xo"},
 		},
 	}
-	var gotAgent string
+	delivered := make(chan string, 1)
 	inj := NewInjector(func(agent, msg string) error {
-		gotAgent = agent
+		delivered <- agent
 		return nil
 	}, 8)
 	inj.SetCoordinatorRouter(&CoordinatorRouter{
@@ -87,9 +87,13 @@ func TestRelayOperatorToCoordinatorRoutesAdjutant(t *testing.T) {
 	defer inj.Stop()
 	r := NewRelay(cfg, inj, nil, nil)
 	r.Handle("C1", "200", "op", "status?")
-	time.Sleep(50 * time.Millisecond)
-	if gotAgent != "alpha-adj" {
-		t.Errorf("relay target = %q, want alpha-adj (#533 adjutant routing)", gotAgent)
+	select {
+	case gotAgent := <-delivered:
+		if gotAgent != "alpha-adj" {
+			t.Errorf("relay target = %q, want alpha-adj (#533 adjutant routing)", gotAgent)
+		}
+	case <-time.After(50 * time.Millisecond):
+		t.Fatal("relay delivery timed out")
 	}
 }
 
