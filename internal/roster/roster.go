@@ -523,11 +523,13 @@ func (c *Config) IsXO(name string) bool {
 	return false
 }
 
-// hasSpanOfControl reports whether name coordinates subordinate agents (#460, #481).
+// hasSpanOfControl reports whether name coordinates subordinate agents (#460, #481, #513).
 // Two federation shapes coexist:
 //   - Coordinator home: xo_agent=name lists execution desks (non-XO members) as subordinates.
 //   - Desk home (supervisor-as-member): execution desk xo_agent lists coordinator XOs as
-//     observers; span is detected when name appears on such a desk channel as supervisor.
+//     observers; span is detected when name appears on such a desk channel as supervisor
+//     AND the membership passes spanFromSupervisorObserverMember (fleet-command peer
+//     sole-links do not confer span — #491/#513; cos+XO dual observers do — #502).
 //
 // A coordinator listed only as supervision observer on another coordinator's home channel
 // (e.g. cos on a project-XO channel) does not confer span — those members are IsXO.
@@ -553,13 +555,123 @@ func (c *Config) hasSpanOfControl(name string) bool {
 		if !c.channelIsSupervisorObserverHome(ch) {
 			continue
 		}
-		for _, m := range ch.Members {
-			if m == name {
-				return true
-			}
+		if c.spanFromSupervisorObserverMember(name, ch) {
+			return true
 		}
 	}
 	return false
+}
+
+// spanFromSupervisorObserverMember reports whether name — listed as a member on a
+// supervisor-as-member desk channel (#481) — genuinely supervises that desk for span
+// (#491, #513).
+//
+// Why a bare membership is not enough: every desk that owns a Discord home channel is
+// IsXO (channel xo_agent). Path-2 would otherwise treat any peer listed on another
+// desk's home as a coordinator — the live #513 shape (execution desk on fleet-command
+// that also appears as sole supervisor on a peer dash/harness desk, or as co-listed
+// with the CoS on a trial desk while only owning its own supervisor-as-member home).
+//
+// Disambiguation:
+//   - sole supervisor with 2+ such desk homes → span (multi-desk venture lead)
+//   - sole supervisor where BOTH observer and desk owner are fleet-command members → NO span
+//     (peer listing on the broadcast roster, not rank; #513)
+//   - sole supervisor outside that fleet-command-peer case → span
+//   - cos+XO dual observers → span for genuine co-supervision (#502 xo-observer), EXCEPT
+//     when name is a fleet-command member that only owns a desk-home channel with no
+//     non-XO subordinates (execution-desk topology; #513 product-skill-dev on trial-xo)
+func (c *Config) spanFromSupervisorObserverMember(name string, ch Channel) bool {
+	var nonSelf []string
+	for _, m := range ch.Members {
+		if m != ch.XOAgent {
+			nonSelf = append(nonSelf, m)
+		}
+	}
+	if len(nonSelf) == 0 {
+		return false
+	}
+	cos := c.CosAgent
+	if cos == "" {
+		cos = c.XOAgent
+	}
+	if cos != "" && memberOf(nonSelf, cos) && memberOf(nonSelf, name) && len(nonSelf) >= 2 {
+		// #502: xo-observer co-listed with cos is a genuine lead (owns no desk-home).
+		// #513: execution desk co-listed with cos while only owning a supervisor-as-member
+		// home must not gain span from that peer co-listing alone.
+		if c.fleetCommandMember(name) && c.deskHomeOwnerWithoutSubordinates(name) {
+			return false
+		}
+		return true
+	}
+	if len(nonSelf) == 1 && nonSelf[0] == name {
+		if c.supervisorObserverSoleMemberChannels(name) >= 2 {
+			return true
+		}
+		if c.fleetCommandMember(name) && c.fleetCommandMember(ch.XOAgent) {
+			return false
+		}
+		return true
+	}
+	return false
+}
+
+// fleetCommandMember reports whether name is listed on the fleet-command broadcast channel.
+func (c *Config) fleetCommandMember(name string) bool {
+	for _, ch := range c.Bindings() {
+		if ch.IsFleetCommand() && memberOf(ch.Members, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// deskHomeOwnerWithoutSubordinates reports the execution-desk topology: name owns at
+// least one supervisor-as-member home channel and lists no non-XO subordinates on any
+// owned channel. Used to keep path-2 from promoting fleet-command execution desks that
+// only look like IsXO because they own a Discord mirror (#513).
+func (c *Config) deskHomeOwnerWithoutSubordinates(name string) bool {
+	ownsDeskHome := false
+	for _, ch := range c.Bindings() {
+		if ch.XOAgent != name {
+			continue
+		}
+		for _, m := range ch.Members {
+			if m != name && !c.IsXO(m) {
+				return false
+			}
+		}
+		if c.channelIsSupervisorObserverHome(ch) {
+			ownsDeskHome = true
+		}
+	}
+	return ownsDeskHome
+}
+
+// supervisorObserverSoleMemberChannels counts desk channels where name is the only
+// non-self XO supervision observer (#481 sole-supervisor shape).
+func (c *Config) supervisorObserverSoleMemberChannels(name string) int {
+	n := 0
+	for _, ch := range c.Bindings() {
+		if ch.XOAgent == name || ch.XOAgent == "" {
+			continue
+		}
+		if ch.XOAgent == c.XOAgent || ch.XOAgent == c.CosAgent {
+			continue
+		}
+		if !c.channelIsSupervisorObserverHome(ch) {
+			continue
+		}
+		var nonSelf []string
+		for _, m := range ch.Members {
+			if m != ch.XOAgent {
+				nonSelf = append(nonSelf, m)
+			}
+		}
+		if len(nonSelf) == 1 && nonSelf[0] == name {
+			n++
+		}
+	}
+	return n
 }
 
 // channelIsSupervisorObserverHome reports the desk-home shape (#481): every non-self member
@@ -580,8 +692,8 @@ func (c *Config) channelIsSupervisorObserverHome(ch Channel) bool {
 
 // IsCoordinator reports whether name holds a coordinator role — the primary xo_agent,
 // the chief-of-staff (cos_agent), an agent with coordinator:true, or (when unset) a
-// binding xo_agent with inferred span of control (#460, #481). Explicit coordinator:false
-// opts an execution desk out even when supervisor-as-member topology would confer span
+// binding xo_agent with inferred span of control (#460, #481, #513). Explicit
+// coordinator:false opts an execution desk out even when topology would confer span
 // (#491). IsXO is broader (any channel owner); use IsCoordinator for delegation-nudge
 // (#232) and coordinator doctrine.
 func (c *Config) IsCoordinator(name string) bool {
