@@ -2,13 +2,18 @@
 // loop-conformance-mechanics design (#532). Every coordinator-targeted inject passes
 // through Evaluate before pane delivery; wiring into watch is a follow-up step.
 //
-// Routing policy (#533 YAGNI): when adjutant_for is set, all coordinator notifications
-// route to the adjutant. The adjutant may interrupt the leader only via KindAdjutantSeam
-// drain. No source/kind urgent bypass, dual-route, or bypass machinery — posture alone
-// drives allow/buffer/defer. No-adjutant fallback preserves leader delivery.
+// Routing policy (#533): when adjutant_for is set, all non-urgent coordinator
+// notifications route to the adjutant — source/kind labels are not routing keys.
+// Urgency (explicit PriorityUrgent), adjutant availability, and protected-window /
+// goal-active posture drive allow/buffer/defer. Exceptions: explicit urgent priority
+// notifies the adjutant immediately; audited operator/manual bypass (BypassClass)
+// may reach the leader directly; no-adjutant fallback delivers to the leader;
+// KindAdjutantSeam drain is the adjutant-owned leader interruption path.
 package looparbitration
 
 import (
+	"time"
+
 	"github.com/jim80net/flotilla/internal/frontier"
 )
 
@@ -55,11 +60,22 @@ const (
 	PriorityMechanical = frontier.PriorityMechanical
 )
 
+// BypassClass names an explicit audited leader bypass (#533). Inject kind/source alone
+// does not confer urgency — callers must set PriorityUrgent or a Bypass class.
+type BypassClass string
+
+const (
+	// BypassOperatorDirect is manual operator-to-leader traffic that bypasses adjutant
+	// buffering (audited). Distinct from routine non-urgent notification routing.
+	BypassOperatorDirect BypassClass = "operator_direct"
+)
+
 // InjectRequest is one candidate inject before pane delivery.
 type InjectRequest struct {
 	Target   string
 	Kind     InjectKind
 	Priority Priority
+	Bypass   BypassClass
 	ReturnTo string
 	Source   string
 }
@@ -118,12 +134,41 @@ type Arbitrator struct {
 	Observer        LoopObserver
 	ProtectedWindow ProtectedWindowFunc
 	Audit           *AuditLog
+	Now             func() time.Time
 }
 
-// Evaluate returns the inject decision for req given ctx. Pure policy — no I/O.
+// Evaluate returns the inject decision for req given ctx. Pure policy — no I/O except
+// optional audit append on leader bypass (urgent no-adjutant or explicit Bypass).
 func (a *Arbitrator) Evaluate(req InjectRequest, ctx Context) Result {
 	if req.Target == "" {
 		return a.finalize(req, ctx, Result{Decision: Defer, Reason: "empty-target"})
+	}
+	coord := ctx.Coordinator
+	if coord == "" {
+		coord = req.Target
+	}
+
+	if isLeaderBypass(req) {
+		r := Result{Decision: AllowNow, Reason: urgentReason(req)}
+		if a != nil && a.Audit != nil {
+			if err := a.Audit.Record(auditEntry(a.now(), coord, req, r)); err == nil {
+				r.Audited = true
+			}
+		}
+		return a.finalize(req, ctx, r)
+	}
+
+	if isUrgentPriority(req) {
+		if ctx.AdjutantFor != "" {
+			return a.finalize(req, ctx, Result{Decision: AllowNow, Reason: "urgent-adjutant-notification"})
+		}
+		r := Result{Decision: AllowNow, Reason: "urgent-bypass"}
+		if a != nil && a.Audit != nil {
+			if err := a.Audit.Record(auditEntry(a.now(), coord, req, r)); err == nil {
+				r.Audited = true
+			}
+		}
+		return a.finalize(req, ctx, r)
 	}
 
 	posture, postureKnown := a.resolvePosture(req.Target, ctx)
@@ -213,10 +258,50 @@ func goalActive(posture Posture, postureKnown bool, ctx Context) bool {
 	return false
 }
 
+func isUrgentPriority(req InjectRequest) bool {
+	return req.Priority == PriorityUrgent
+}
+
+func isLeaderBypass(req InjectRequest) bool {
+	return req.Bypass != ""
+}
+
+func urgentReason(req InjectRequest) string {
+	if req.Bypass != "" {
+		return "audited-bypass-" + string(req.Bypass)
+	}
+	return "urgent-bypass"
+}
+
 func bufferWithReturn(req InjectRequest, ctx Context, reason string) Result {
 	rt := req.ReturnTo
 	if rt == "" {
 		rt = ctx.FrontierReturnTo
 	}
 	return Result{Decision: Buffer, ReturnTo: rt, Reason: reason}
+}
+
+func (a *Arbitrator) now() time.Time {
+	if a != nil && a.Now != nil {
+		return a.Now()
+	}
+	return time.Now().UTC()
+}
+
+func auditEntry(at time.Time, coordinator string, req InjectRequest, r Result) AuditEntry {
+	bypass := "urgent"
+	if req.Bypass != "" {
+		bypass = string(req.Bypass)
+	}
+	return AuditEntry{
+		At:          at,
+		Coordinator: coordinator,
+		Target:      req.Target,
+		Kind:        req.Kind,
+		Priority:    req.Priority,
+		Source:      req.Source,
+		Decision:    r.Decision,
+		Bypass:      bypass,
+		Reason:      r.Reason,
+	}
 }
