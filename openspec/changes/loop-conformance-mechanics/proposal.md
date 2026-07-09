@@ -42,7 +42,8 @@ active ORG-ARCHITECTURE frontier (#530 return-to-frontier, #438 staging).
 | `adjutant-operator-protected-window` | Protected-window predicate v1 — folds into arbitration layer |
 | `fleet-bootstrap-standup` | Loop posture vocabulary (`composing`, `available`, …) |
 | **#521** | Lead-only merge-completing permissions for execution-desk merge-forward |
-| **#519** | Dash `composerComposeActive` — bridge signal into protected-window adapter |
+| **#519** | Dash `composerComposeActive` — bridge signal into protected-window adapter (**merged** #517) |
+| **#533** | Discord + dash mechanical interrupts → adjutant — implementation thread post-#532 |
 
 ## Scope
 

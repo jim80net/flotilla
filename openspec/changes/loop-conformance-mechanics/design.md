@@ -98,16 +98,34 @@ permissions only:
 Documented in `fleet-role-permissions` (#521); this change names it as **loop conformance
 ops** — fleet stays unblocked without violating no-self-merge.
 
-## 7. Phased delivery (post-P0/P1)
+## 7. Phased delivery (post-P0/P1, post-#532 merge)
 
 | Phase | Deliverable |
 |-------|-------------|
-| **A** | `LoopArbitration` package + fake observer tests |
-| **B** | Wire adjutant seam + protected window through arbitration |
-| **C** | #530 frontier sidecar + turn-final guard |
-| **D** | Dash bridge → protected window adapter |
-| **E** | Harness observers (pilot one surface) |
-| **F** | #521 lead merge-forward runbook slice |
+| **A** | #530 frontier sidecar + turn-final guard (`return_to`, priority) |
+| **B** | `LoopArbitration` package + fake observer tests |
+| **C** | **#533** — Discord + dashboard mechanical interrupts → adjutant when `adjutant_for` exists |
+| **D** | Wire adjutant seam + protected window through arbitration |
+| **E** | Dash bridge → protected window adapter |
+| **F** | Harness observers (pilot one surface) |
+| **G** | #438 `stackable_wakes` staging; #521 merge-forward runbook |
+
+### #533 — Discord and dashboard mechanical routing (operator refinement)
+
+When `adjutant_for:<leader>` is configured, **non-urgent mechanical interrupts** SHALL
+target the adjutant by default — not the leader pane or leader-facing dashboard surfaces:
+
+| Source | Today | Target (#533) |
+|--------|-------|---------------|
+| Discord operator-channel mechanical relay | Often leader pane | Adjutant pane; leader sees seam brief only |
+| Dashboard mechanical notices / routing surfaces | Leader-facing | Adjutant evaluation path |
+| Detector material (existing) | Partially adjutant-buffered | Consistent via LoopArbitration |
+
+Adjutant evaluates per #439 laminar-flow rules: buffer, summarize at seam, or forward
+urgent-class immediately with audit (#530 return_to frame when preempting goal-active work).
+
+**Urgent bypass / operator-direct / manual leader-addressed** messages remain leader-targeted
+and audited. **No adjutant** → current behavior unchanged (fail-safe fallback).
 
 ## 8. Non-goals (this change)
 
