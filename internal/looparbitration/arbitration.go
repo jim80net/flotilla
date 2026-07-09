@@ -1,6 +1,12 @@
 // Package looparbitration implements the unified inject decision layer from the
 // loop-conformance-mechanics design (#532). Every coordinator-targeted inject passes
 // through Evaluate before pane delivery; wiring into watch is a follow-up step.
+//
+// Routing policy (#533): when adjutant_for is set, coordinator notifications route to
+// the adjutant — source, kind, priority, and bypass labels do not bypass the adjutant.
+// The adjutant may interrupt the leader via KindAdjutantSeam drain. No-adjutant
+// fallback delivers to the leader. Urgent/operator-direct leader bypass routing is
+// deferred until a concrete consumer exists.
 package looparbitration
 
 import (
@@ -52,13 +58,13 @@ const (
 	PriorityMechanical = frontier.PriorityMechanical
 )
 
-// BypassClass names an explicit audited leader bypass (#533). Inject kind/source alone
-// does not confer urgency — callers must set PriorityUrgent or a Bypass class.
+// BypassClass names an explicit bypass label for future audited routing (#533).
+// Leader bypass via Bypass is deferred until a concrete consumer exists; with
+// adjutant_for set, notifications route to the adjutant regardless of Bypass.
 type BypassClass string
 
 const (
-	// BypassOperatorDirect is manual operator-to-leader traffic that bypasses adjutant
-	// buffering (audited). Distinct from routine mechanical relay routing.
+	// BypassOperatorDirect reserved for future operator-direct leader bypass (audited).
 	BypassOperatorDirect BypassClass = "operator_direct"
 )
 
@@ -75,6 +81,9 @@ type InjectRequest struct {
 // Context carries posture and seam inputs for one evaluation.
 type Context struct {
 	Coordinator string
+
+	// AdjutantFor is the adjutant agent bound to Coordinator, or "" when none (#533).
+	AdjutantFor string
 
 	// Observer-derived posture (primary when PostureOK).
 	Posture   Posture
@@ -103,6 +112,7 @@ type Context struct {
 // Result is Evaluate's verdict.
 type Result struct {
 	Decision Decision
+	Route    RouteTarget
 	ReturnTo string
 	Reason   string
 	Audited  bool
@@ -129,7 +139,7 @@ type Arbitrator struct {
 // optional audit append on urgent bypass.
 func (a *Arbitrator) Evaluate(req InjectRequest, ctx Context) Result {
 	if req.Target == "" {
-		return Result{Decision: Defer, Reason: "empty-target"}
+		return a.finalize(req, ctx, Result{Decision: Defer, Reason: "empty-target"})
 	}
 	coord := ctx.Coordinator
 	if coord == "" {
@@ -137,13 +147,16 @@ func (a *Arbitrator) Evaluate(req InjectRequest, ctx Context) Result {
 	}
 
 	if isUrgent(req) {
+		if ctx.AdjutantFor != "" {
+			return a.finalize(req, ctx, Result{Decision: AllowNow, Reason: "urgent-adjutant-notification"})
+		}
 		r := Result{Decision: AllowNow, Reason: urgentReason(req)}
 		if a != nil && a.Audit != nil {
 			if err := a.Audit.Record(auditEntry(a.now(), coord, req, r)); err == nil {
 				r.Audited = true
 			}
 		}
-		return r
+		return a.finalize(req, ctx, r)
 	}
 
 	posture, postureKnown := a.resolvePosture(req.Target, ctx)
@@ -154,53 +167,61 @@ func (a *Arbitrator) Evaluate(req InjectRequest, ctx Context) Result {
 
 	if req.Kind == KindAdjutantSeam && ctx.BufferedPending {
 		if protected || posture == PostureComposing || posture == PostureAwaitingAuthority {
-			return Result{Decision: Buffer, Reason: "protected-window-seam"}
+			return a.finalize(req, ctx, Result{Decision: Buffer, Reason: "protected-window-seam"})
 		}
 		if postureKnown && posture == PostureAvailable && ctx.SafeSeam && !protected {
-			return Result{Decision: AllowNow, Reason: "safe-seam-drain"}
+			return a.finalize(req, ctx, Result{Decision: AllowNow, Reason: "safe-seam-drain"})
 		}
 		if ctx.SafeSeam && !protected && (!postureKnown || posture == PostureAvailable) {
-			return Result{Decision: AllowNow, Reason: "safe-seam-drain"}
+			return a.finalize(req, ctx, Result{Decision: AllowNow, Reason: "safe-seam-drain"})
 		}
-		return Result{Decision: Defer, Reason: "seam-not-open"}
+		return a.finalize(req, ctx, Result{Decision: Defer, Reason: "seam-not-open"})
 	}
 
 	if req.Kind == KindEvaluationTick {
 		if postureKnown {
 			if posture == PostureAvailable && ctx.SafeSeam && !protected {
-				return Result{Decision: AllowNow, Reason: "observer-available-seam"}
+				return a.finalize(req, ctx, Result{Decision: AllowNow, Reason: "observer-available-seam"})
 			}
-			return Result{Decision: Defer, Reason: "observer-posture-" + string(posture)}
+			return a.finalize(req, ctx, Result{Decision: Defer, Reason: "observer-posture-" + string(posture)})
 		}
 		if ctx.TimedFallback && !protected {
-			return Result{Decision: AllowNow, Reason: "degraded-timed-fallback"}
+			return a.finalize(req, ctx, Result{Decision: AllowNow, Reason: "degraded-timed-fallback"})
 		}
-		return Result{Decision: Defer, Reason: "no-observer-timed-defer"}
+		return a.finalize(req, ctx, Result{Decision: Defer, Reason: "no-observer-timed-defer"})
 	}
 
 	if protected || posture == PostureComposing || posture == PostureAwaitingAuthority {
-		return bufferWithReturn(req, ctx, "protected-window")
+		return a.finalize(req, ctx, bufferWithReturn(req, ctx, "protected-window"))
 	}
 
 	if goalActive(posture, postureKnown, ctx) {
-		return bufferWithReturn(req, ctx, "goal-active")
+		return a.finalize(req, ctx, bufferWithReturn(req, ctx, "goal-active"))
 	}
 
 	switch posture {
 	case PostureParked, PostureBlocked:
-		return bufferWithReturn(req, ctx, string(posture))
+		return a.finalize(req, ctx, bufferWithReturn(req, ctx, string(posture)))
 	case PostureAvailable:
-		if ctx.SafeSeam || req.Kind == KindDroppedDispatch {
-			return Result{Decision: AllowNow, Reason: "available-safe-inject"}
+		if ctx.SafeSeam && req.Kind == KindDroppedDispatch {
+			return a.finalize(req, ctx, Result{Decision: AllowNow, Reason: "available-safe-inject"})
 		}
-		return bufferWithReturn(req, ctx, "available-no-seam")
+		if ctx.SafeSeam && ctx.AdjutantFor == "" {
+			return a.finalize(req, ctx, Result{Decision: AllowNow, Reason: "available-safe-inject"})
+		}
+		return a.finalize(req, ctx, bufferWithReturn(req, ctx, "available-no-seam"))
 	}
 
 	if !postureKnown && ctx.TimedFallback && ctx.SafeSeam && !protected {
-		return Result{Decision: AllowNow, Reason: "degraded-timed-fallback"}
+		return a.finalize(req, ctx, Result{Decision: AllowNow, Reason: "degraded-timed-fallback"})
 	}
 
-	return Result{Decision: Defer, Reason: "posture-unknown-defer"}
+	return a.finalize(req, ctx, Result{Decision: Defer, Reason: "posture-unknown-defer"})
+}
+
+func (a *Arbitrator) finalize(req InjectRequest, ctx Context, r Result) Result {
+	r.Route = resolveRoute(req, ctx, r)
+	return r
 }
 
 func (a *Arbitrator) resolvePosture(target string, ctx Context) (Posture, bool) {
@@ -226,10 +247,7 @@ func goalActive(posture Posture, postureKnown bool, ctx Context) bool {
 }
 
 func isUrgent(req InjectRequest) bool {
-	if req.Priority == PriorityUrgent {
-		return true
-	}
-	return req.Bypass != ""
+	return req.Priority == PriorityUrgent
 }
 
 func urgentReason(req InjectRequest) string {

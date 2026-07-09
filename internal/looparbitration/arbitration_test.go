@@ -19,15 +19,27 @@ func TestEvaluateNonUrgentGoalActiveBuffersWithReturnTo(t *testing.T) {
 		Target: "xo", Kind: KindMaterialChange, Priority: PriorityMechanical, Source: "detector",
 	}
 	ctx := Context{
-		Coordinator: "xo", FrontierReturnTo: "[in-flight] ORG goal-loop (#530)",
+		Coordinator: "xo", AdjutantFor: "xo-adj", FrontierReturnTo: "[in-flight] ORG goal-loop (#530)",
 	}
 	r := a.Evaluate(req, ctx)
-	if r.Decision != Buffer || r.ReturnTo == "" {
-		t.Fatalf("got %+v, want BUFFER with return_to", r)
+	if r.Decision != Buffer || r.ReturnTo == "" || r.Route != RouteAdjutant {
+		t.Fatalf("got %+v, want BUFFER+adjutant route with return_to", r)
 	}
 }
 
-func TestEvaluateUrgentRelayAllowNowWithAudit(t *testing.T) {
+func TestEvaluateUrgentRelayRoutesAdjutantWhenConfigured(t *testing.T) {
+	a := arb(&FakeObserver{Postures: map[string]Posture{"xo": PostureComposing}})
+	req := InjectRequest{
+		Target: "xo", Kind: KindRelay, Priority: PriorityUrgent, Source: "discord-relay",
+	}
+	ctx := Context{Coordinator: "xo", AdjutantFor: "xo-adj", ProtectedWindow: true}
+	r := a.Evaluate(req, ctx)
+	if r.Decision != AllowNow || r.Route != RouteAdjutant {
+		t.Fatalf("urgent with adjutant want adjutant ALLOW_NOW, got %+v", r)
+	}
+}
+
+func TestEvaluateUrgentRelayNoAdjutantLeaderWithAudit(t *testing.T) {
 	dir := t.TempDir()
 	log := NewAuditLog(filepath.Join(dir, "audit.jsonl"))
 	a := &Arbitrator{
@@ -40,8 +52,8 @@ func TestEvaluateUrgentRelayAllowNowWithAudit(t *testing.T) {
 	}
 	ctx := Context{Coordinator: "xo", ProtectedWindow: true}
 	r := a.Evaluate(req, ctx)
-	if r.Decision != AllowNow || !r.Audited {
-		t.Fatalf("urgent relay want ALLOW_NOW+audit, got %+v", r)
+	if r.Decision != AllowNow || !r.Audited || r.Route != RouteLeader {
+		t.Fatalf("urgent no-adjutant want leader ALLOW_NOW+audit, got %+v", r)
 	}
 	entries, err := LoadAudit(log.Path())
 	if err != nil || len(entries) != 1 || entries[0].Bypass != "urgent" {
@@ -55,39 +67,34 @@ func TestEvaluateNonUrgentRelayBuffersDuringProtectedWindow(t *testing.T) {
 		Target: "xo", Kind: KindRelay, Priority: PriorityMechanical, Source: "discord-relay",
 	}
 	ctx := Context{
-		Coordinator: "xo", ProtectedWindow: true, FrontierReturnTo: "[in-flight] goal-loop",
+		Coordinator: "xo", AdjutantFor: "xo-adj", ProtectedWindow: true,
+		FrontierReturnTo: "[in-flight] goal-loop",
 	}
 	r := a.Evaluate(req, ctx)
-	if r.Decision != Buffer || r.ReturnTo != "[in-flight] goal-loop" {
-		t.Fatalf("non-urgent relay through protected window want BUFFER+return_to, got %+v", r)
+	if r.Decision != Buffer || r.ReturnTo != "[in-flight] goal-loop" || r.Route != RouteAdjutant {
+		t.Fatalf("non-urgent relay through protected window want BUFFER+adjutant+return_to, got %+v", r)
 	}
 }
 
 func TestEvaluateNonUrgentRelayBuffersDuringGoalActive(t *testing.T) {
 	a := arb(&FakeObserver{Postures: map[string]Posture{"xo": PostureGoalActive}})
 	req := InjectRequest{Target: "xo", Kind: KindRelay, Source: "discord-relay"}
-	ctx := Context{Coordinator: "xo", FrontierReturnTo: "[in-flight] #533 routing"}
+	ctx := Context{Coordinator: "xo", AdjutantFor: "xo-adj", FrontierReturnTo: "[in-flight] #533 routing"}
 	r := a.Evaluate(req, ctx)
-	if r.Decision != Buffer || r.ReturnTo != "[in-flight] #533 routing" {
-		t.Fatalf("non-urgent relay during goal-active want BUFFER+return_to, got %+v", r)
+	if r.Decision != Buffer || r.ReturnTo != "[in-flight] #533 routing" || r.Route != RouteAdjutant {
+		t.Fatalf("non-urgent relay during goal-active want BUFFER+adjutant+return_to, got %+v", r)
 	}
 }
 
-func TestEvaluateOperatorDirectBypassAllowNowWithAudit(t *testing.T) {
-	dir := t.TempDir()
-	log := NewAuditLog(filepath.Join(dir, "audit.jsonl"))
-	a := &Arbitrator{Audit: log, Now: func() time.Time { return time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC) }}
+func TestEvaluateOperatorDirectBypassRoutesAdjutantWhenConfigured(t *testing.T) {
+	a := arb(&FakeObserver{Postures: map[string]Posture{"xo": PostureComposing}})
 	req := InjectRequest{
 		Target: "xo", Kind: KindRelay, Bypass: BypassOperatorDirect, Source: "operator-manual",
 	}
-	ctx := Context{Coordinator: "xo", ProtectedWindow: true}
+	ctx := Context{Coordinator: "xo", AdjutantFor: "xo-adj", ProtectedWindow: true, FrontierReturnTo: "warrant"}
 	r := a.Evaluate(req, ctx)
-	if r.Decision != AllowNow || !r.Audited {
-		t.Fatalf("operator-direct bypass want ALLOW_NOW+audit, got %+v", r)
-	}
-	entries, err := LoadAudit(log.Path())
-	if err != nil || len(entries) != 1 || entries[0].Bypass != string(BypassOperatorDirect) {
-		t.Fatalf("audit entries=%v err=%v", entries, err)
+	if r.Route != RouteAdjutant || r.Decision != Buffer {
+		t.Fatalf("operator-direct with adjutant want adjutant BUFFER, got %+v", r)
 	}
 }
 
@@ -114,10 +121,10 @@ func TestEvaluateTimedFallbackWhenNoObserver(t *testing.T) {
 func TestEvaluateSafeSeamDrainsBufferedAdjutantSeam(t *testing.T) {
 	a := arb(&FakeObserver{Postures: map[string]Posture{"xo": PostureAvailable}})
 	req := InjectRequest{Target: "xo", Kind: KindAdjutantSeam, Source: "adjutant-buffer"}
-	ctx := Context{Coordinator: "xo", BufferedPending: true, SafeSeam: true}
+	ctx := Context{Coordinator: "xo", AdjutantFor: "xo-adj", BufferedPending: true, SafeSeam: true}
 	r := a.Evaluate(req, ctx)
-	if r.Decision != AllowNow {
-		t.Fatalf("want safe seam drain ALLOW_NOW, got %+v", r)
+	if r.Decision != AllowNow || r.Route != RouteLeader {
+		t.Fatalf("want leader safe seam drain ALLOW_NOW, got %+v", r)
 	}
 }
 
@@ -151,12 +158,12 @@ func TestEvaluateGoalActiveObserverFlag(t *testing.T) {
 	}
 }
 
-func TestEvaluateUrgentPriorityBypassesProtectedWindow(t *testing.T) {
+func TestEvaluateUrgentPriorityRoutesAdjutantNotAroundProtectedWindow(t *testing.T) {
 	a := arb(nil)
 	req := InjectRequest{Target: "xo", Kind: KindMaterialChange, Priority: PriorityUrgent}
-	ctx := Context{Coordinator: "xo", ProtectedWindow: true}
+	ctx := Context{Coordinator: "xo", AdjutantFor: "xo-adj", ProtectedWindow: true}
 	r := a.Evaluate(req, ctx)
-	if r.Decision != AllowNow {
-		t.Fatalf("urgent priority should ALLOW_NOW, got %+v", r)
+	if r.Decision != AllowNow || r.Route != RouteAdjutant {
+		t.Fatalf("urgent with adjutant should notify adjutant, got %+v", r)
 	}
 }
