@@ -597,11 +597,10 @@
     return '<div class="thread-calib">History begins' + escapeHtml(when) +
       ' — earlier coordinator turns weren’t recorded (a firewall issue, since fixed). Shown from here down.</div>';
   }
-  // #518: web composer delivers via /api/control/route which does NOT yet append a
-  // cos-ledger line (flotilla-build #432 leg 2). Until that lands, operator outbound
-  // would be invisible on the thread. Keep an in-memory optimistic line per successful
-  // deliver so the operator sees their own words immediately; prune when a matching
-  // ledger line appears (future leg 2) or after a short TTL.
+  // #518: web composer delivers via /api/control/route. #432 now appends CosLedger on
+  // delivered, but the next /api/history tick is async — keep an in-memory optimistic
+  // line per successful deliver so the operator sees their own words immediately;
+  // prune when a matching ledger line appears or after a short TTL.
   var optimisticOut = []; // {id, target, body, ts, t}
   var OPTIMISTIC_TTL_MS = 5 * 60 * 1000;
   function appendOptimisticOutbound(target, body) {
@@ -773,8 +772,7 @@
   }
 
   // threadOptimisticMsg — #518 interim operator voice for web-composer delivers.
-  // Route does not yet write the cos ledger (#432 leg 2); this is the client-side
-  // stand-in so the thread is not silent about what the operator just sent.
+  // Fills the gap until /api/history reflects the #432 CosLedger append (or TTL).
   function threadOptimisticMsg(o) {
     var hue = speakerHue("operator");
     return (
@@ -1420,21 +1418,22 @@
         postJSON("/api/control/route", { target: target, message: body }).then(function (res) {
           var outcome = (res && res.outcome) || "(no outcome reported)";
           var detail = res && res.detail ? " — " + res.detail : "";
-          // Bind the result to the desk the send TARGETED — if the operator moved on, don't
-          // clear the new desk's draft or mislabel its composer; the send still happened.
+          // #518: record optimistic outbound for the TARGET desk even if the operator
+          // switched selection mid-send — the line must appear when they return to that
+          // thread. UI mutations (clear draft / paint / status) stay sameSel-guarded.
+          // Still useful after #432 ledger append: optimistic fills the gap until refresh.
+          if (outcome === "delivered") {
+            appendOptimisticOutbound(target, body);
+          }
           if (!sameSel(target)) return;
           if (outcome === "delivered") {
-            // #518: show the operator's own words in the thread immediately — route
-            // does not yet append a ledger line (#432 leg 2). Optimistic line is
-            // pruned when a matching ledger entry appears or after TTL.
-            appendOptimisticOutbound(target, body);
             ta.value = "";
             resizeComposer();
             threadPinned = true;
             lastThreadKey = null; // force paint even if mirror/ledger unchanged
             flushDeferredMirrorPaint(); // paintMirror(true) → renderThread with optimistic
             scrollThreadToBottom();
-            // Re-fetch streams so a desk reply (session-mirror) lands without waiting
+            // Re-fetch streams so ledger (#432) + desk reply land without waiting
             // solely on the next SSE tick; empty-focus is no longer compose-active.
             refresh();
           }
