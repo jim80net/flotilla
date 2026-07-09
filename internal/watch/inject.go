@@ -138,6 +138,7 @@ type Injector struct {
 	now                       func() time.Time                        // clock for stale escalation; nil ⇒ time.Now()
 	outboxOwningCoordinator   func(sender string) string              // optional: sender → coordinator for stale outbox (#477)
 	outboxCoordinatorEscalate func(coordinator, msg, claimKey string) // optional: enqueue to coordinator surface (#436/#477)
+	coordinatorRouter         *CoordinatorRouter                      // optional: #533 adjutant routing before delivery
 }
 
 // SetRelaySend installs a distinct send path for RELAY-kind jobs (the operator-message kind), used to
@@ -184,6 +185,9 @@ func (in *Injector) SetDetectorClaimHooks(confirm, abort func(claimKey string)) 
 // SetInboundTrack installs a hook called after a CONFIRMED KindSend delivery to record the
 // dispatch in the recipient's inbound ledger (#472). Must be set before Start.
 func (in *Injector) SetInboundTrack(fn func(Job)) { in.onInboundTrack = fn }
+
+// SetCoordinatorRouter installs #533 looparbitration routing before coordinator delivery.
+func (in *Injector) SetCoordinatorRouter(r *CoordinatorRouter) { in.coordinatorRouter = r }
 
 // SetOutboxStaleEscalate wires the one-shot coordinator-surface escalation for undeliverable
 // swept sends (#477, #436). owningCoordinator resolves the sender's coordinator; escalate
@@ -460,9 +464,16 @@ func (in *Injector) raise(format string, args ...any) {
 // late Enqueue from an in-flight relay handler (or a deferred re-enqueue timer)
 // is always safe.
 func (in *Injector) Enqueue(j Job) {
-	select {
-	case in.jobs <- j:
-	case <-in.stopped:
+	jobs := []Job{j}
+	if in.coordinatorRouter != nil {
+		jobs = in.coordinatorRouter.Apply(j)
+	}
+	for _, jj := range jobs {
+		select {
+		case in.jobs <- jj:
+		case <-in.stopped:
+			return
+		}
 	}
 }
 

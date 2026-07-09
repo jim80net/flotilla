@@ -10,9 +10,11 @@ import (
 
 	"github.com/jim80net/flotilla/internal/cos"
 	"github.com/jim80net/flotilla/internal/deliver"
+	"github.com/jim80net/flotilla/internal/looparbitration"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/transport"
+	"github.com/jim80net/flotilla/internal/watch"
 )
 
 // dashProvenance is the CoS ledger "from" marker for a dash-issued action, so a
@@ -64,6 +66,8 @@ type LibraryController struct {
 	resolveDest func(originChannel, target string) (agentName, paneTarget string, err error)
 	acquireTxn  func(target string) (release func(), err error)
 	submit      func(drv surface.Driver, pane, text string) error
+
+	coordinatorRouter *watch.CoordinatorRouter
 }
 
 // NewLibrary builds the production controller. secretsPath may be "" (then notify
@@ -182,6 +186,11 @@ func NewLibrary(rc *roster.Config, xo, secretsPath string, notifyTr, webTr trans
 	}
 }
 
+// SetCoordinatorRouter installs #533 adjutant routing for coordinator dash delivery.
+func (c *LibraryController) SetCoordinatorRouter(r *watch.CoordinatorRouter) {
+	c.coordinatorRouter = r
+}
+
 // Notify posts an operator note to the fleet channel under the XO's webhook with
 // the dash-provenance username, then mirrors it to the CoS ledger (best-effort).
 func (c *LibraryController) Notify(_ context.Context, message string) error {
@@ -239,6 +248,18 @@ func (c *LibraryController) Route(_ context.Context, target, message string) (Ro
 	agentName, pane, err := c.resolveDest("", target)
 	if err != nil {
 		return RouteResult{}, err
+	}
+	if c.coordinatorRouter != nil && c.roster.IsCoordinator(agentName) {
+		deliveryAgent, result, _ := c.coordinatorRouter.DeliveryTarget(agentName, message)
+		if result.Decision == looparbitration.Defer {
+			return RouteResult{Target: agentName, Outcome: OutcomeBusy, Detail: "arbitration deferred delivery — retry at seam"}, nil
+		}
+		if deliveryAgent != agentName {
+			agentName = deliveryAgent
+			if _, pane, err = c.resolveDest("", "@"+deliveryAgent); err != nil {
+				return RouteResult{}, err
+			}
+		}
 	}
 	agent, err := c.roster.Agent(agentName)
 	if err != nil {
