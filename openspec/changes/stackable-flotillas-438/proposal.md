@@ -57,6 +57,7 @@ reopen closed work.
 | **#439** | OPEN — research gate | `transcript-analysis.md` | **Bounded transcript mining only** — observe coordinator/adjutant sessions; recommend absent-leader defaults + urgent-bypass boundaries before policy lock |
 | **#530** | OPEN — design contract | `design.md` § Return-to-frontier | Structured `return_to` + priority metadata on seam/adjutant interrupts; return-to-frontier guard on coordinator turn-finals |
 | **#526** | **CLOSED** (#529 merged) | — | WakeBacklog prompt cap shipped; **do not reopen** |
+| **loop-conformance** | Design queued | `openspec/changes/loop-conformance-mechanics/` | Fleet-wide handoff loop arbitration — after P0/P1 (#519); native harness goal+loop first, timed inject fallback |
 
 ## Success criteria
 
