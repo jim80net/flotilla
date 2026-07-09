@@ -146,6 +146,27 @@ func TestIssueGet_HappyPath(t *testing.T) {
 	}
 }
 
+// TestIssueGet_GoalIDJSON locks #580's wire: GET /api/issues/{n} serializes goal_id
+// when the tracker issue carries a parsed trailer (EnrichIssue / Get path).
+func TestIssueGet_GoalIDJSON(t *testing.T) {
+	f := &fakeTracker{issue: tracker.Issue{
+		Number: 580, Title: "cross-link", Body: "work\n\ngoal-id: ship-platform\n",
+		GoalID: "ship-platform", State: "OPEN",
+	}}
+	srv := trackerServer(t, f)
+	rec := doGet(t, srv, "/api/issues/580")
+	if rec.Code != 200 {
+		t.Fatalf("code %d", rec.Code)
+	}
+	var issue tracker.Issue
+	if err := json.Unmarshal(rec.Body.Bytes(), &issue); err != nil {
+		t.Fatal(err)
+	}
+	if issue.GoalID != "ship-platform" {
+		t.Errorf("goal_id = %q, want ship-platform — #580", issue.GoalID)
+	}
+}
+
 func TestIssueGet_InvalidNumber(t *testing.T) {
 	f := &fakeTracker{}
 	srv := trackerServer(t, f)

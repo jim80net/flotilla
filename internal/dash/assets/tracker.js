@@ -89,6 +89,19 @@
   }
 
   /* ── detail view ─────────────────────────────────────────────────────── */
+  // openGoalFromIssue jumps to the Goals map focused on the goal-id trailer slug
+  // (#580). Reuses the same restoreNode + pushNav path the Decisions "Drives"
+  // link uses so a cold Goals tab still focuses the node once the map renders.
+  function openGoalFromIssue(goalId) {
+    var id = String(goalId || "").trim();
+    if (!id) return;
+    if (D.showView) D.showView("goals");
+    if (window.flotillaGoals && window.flotillaGoals.restoreNode) {
+      window.flotillaGoals.restoreNode(id);
+    }
+    if (D.pushNav) D.pushNav({ view: "goals", node: id });
+  }
+
   function openIssue(number) {
     showOnly("issues-detail");
     var epoch = ++viewEpoch;
@@ -107,6 +120,16 @@
     el("detail-title").textContent = "#" + number + " " + (it.title || "");
     var state = String(it.state || "").toLowerCase();
     var comments = Array.isArray(it.comments) ? it.comments : [];
+    // #580: goal-id trailer (server EnrichIssue → goal_id) surfaces as a Drives
+    // chip that opens the Goals map on that node. Absent trailer → no chip.
+    var goalId = String(it.goal_id || "").trim();
+    var goalChip = goalId
+      ? ('<div class="issue-goal">' +
+          '<span class="issue-goal-lab">Drives</span> ' +
+          '<button type="button" class="issue-goal-link" data-goal-goto="' + escapeHtml(goalId) +
+            '" title="Open goal ' + escapeHtml(goalId) + ' on the Goals map">' +
+            escapeHtml(goalId) + "</button></div>")
+      : "";
 
     var html =
       '<div class="detail-meta">' +
@@ -115,6 +138,7 @@
         '<span class="issue-labels">' + labelChips(it.labels) + "</span>" +
         (safeHref(it.url) ? ' <a class="issue-link" href="' + safeHref(it.url) + '" target="_blank" rel="noopener">view on GitHub ↗</a>' : "") +
       "</div>" +
+      goalChip +
       '<div class="issue-body">' + escapeHtml(it.body || "") + "</div>" +
       '<h3 class="sub">Comments (' + comments.length + ")</h3>" +
       '<div class="comments">' + (
@@ -149,6 +173,15 @@
 
     var body = el("detail-body");
     body.innerHTML = html;
+    // #580: Drives chip → Goals map (stopPropagation so it never bubbles as a row click).
+    var goalBtn = body.querySelector("[data-goal-goto]");
+    if (goalBtn) {
+      goalBtn.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        openGoalFromIssue(this.getAttribute("data-goal-goto"));
+      });
+    }
     wireDetailActions(number, state);
   }
 
