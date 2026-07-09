@@ -1335,11 +1335,34 @@ func adjutantSeamBrief(bufferPath, deliveredPath, leader, rosterDir string) (bri
 	return brief, ok, hasItems, recordItems
 }
 
+// backlogWakeItemMaxRunes caps each driven item line in a WakeBacklog prompt (#526). The parser
+// stores the full raw markdown line; injecting it verbatim can wall-of-text the XO. Classification
+// is unchanged — only the wake presentation is truncated; durable state is the read contract.
+const backlogWakeItemMaxRunes = 280
+
+// formatBacklogWakeItem returns a pointer-sized rendering of one unblocked backlog line.
+func formatBacklogWakeItem(raw string) string {
+	const tail = " … (read backlog file for full item)"
+	r := []rune(raw)
+	limit := backlogWakeItemMaxRunes - len([]rune(tail))
+	if limit < 40 {
+		limit = 40
+	}
+	if len(r) <= limit {
+		return raw
+	}
+	return string(r[:limit]) + tail
+}
+
 // backlogWakeBody composes the goal-driven loop's WakeBacklog prompt: it NAMES the driven item(s)
 // and MUST append ackInstr — a continuously-driven XO that is never told to ack would falsely trip
 // the AckAge wedge alert (the liveness backstop). Pure so the name + ack invariant is testable.
 func backlogWakeBody(items []string, backlogPath, ackInstr string) string {
-	return "[flotilla goal-driven loop] Advance the top unblocked backlog item:\n" + strings.Join(items, "\n") +
+	lines := make([]string, len(items))
+	for i, it := range items {
+		lines[i] = formatBacklogWakeItem(it)
+	}
+	return "[flotilla goal-driven loop] Advance the top unblocked backlog item:\n" + strings.Join(lines, "\n") +
 		"\nDispatch it to the right desk/harness if not started; check in / unblock if in flight; if it is " +
 		"genuinely operator-blocked, drive PREP and move to the next. Reply idle ONLY if every remaining " +
 		"backlog item is done or operator-blocked — the loop will NOT settle while unblocked work remains. " +
