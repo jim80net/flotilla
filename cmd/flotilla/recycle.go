@@ -138,12 +138,15 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 	// Self-recycle guard (canonical %N compare): recycling our own pane would /exit the
 	// command itself before the relaunch, stranding an unrecoverable dead desk.
 	// --self (#437) is the intentional exception: handoff + rotate + takeover, no close.
+	// Full model/surface cutover REQUIRES an external pane (adjutant / watch host) running
+	// plain `flotilla recycle <coord>` so phase 3 respawns with the launch recipe (#437 reopen).
 	tid, err := ops.paneID(target)
 	if err != nil {
 		return "", worktreeCloseNote{}, fmt.Errorf("resolve pane id for %q: %w", target, err) // surfaced, never swallowed
 	}
-	if samePaneAsSelf(tid, p.ownPane) && !p.selfPath {
-		return "", worktreeCloseNote{}, fmt.Errorf("refusing to recycle %q: %s is THIS command's own pane — closing it would kill the recycle before the relaunch; run recycle from a different pane or the watch host (or: flotilla recycle %s --self for coordinator handoff+takeover without kill)", p.agent, tid, p.agent)
+	ownPaneSelf := samePaneAsSelf(tid, p.ownPane)
+	if ownPaneSelf && !p.selfPath {
+		return "", worktreeCloseNote{}, fmt.Errorf("refusing to recycle %q: %s is THIS command's own pane — closing it would kill the recycle before the relaunch; for model/surface cutover run from a different pane or the watch host: flotilla recycle %s (full respawn + launch recipe); for in-place chapter rotate only: flotilla recycle %s --self (no process kill, same model/surface)", p.agent, tid, p.agent, p.agent)
 	}
 
 	// Copy-mode refuse (composer state unreadable → every Idle∧ComposerCleared gate would
@@ -155,8 +158,14 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 	}
 
 	// PHASE 0 — idle precondition (lockless). The XO triggers on chapter-complete, often mid-turn.
-	if !pollIdleCleared(ops, target, p.timeouts.boot) {
-		return "", worktreeCloseNote{}, fmt.Errorf("phase 0: %q did not settle to idle at a cleared composer within %s — ABORT, desk untouched", p.agent, p.timeouts.boot)
+	// #437 reopen: own-pane --self is a structural chicken-egg — the initiating session cannot
+	// register idle while it is the process driving recycle. Skip phase 0 only on that path;
+	// phase 1 still gates on handoff durability + idle∧cleared after the handoff turn lands.
+	// External --self and all full recycles keep the idle precondition.
+	if !(ownPaneSelf && p.selfPath) {
+		if !pollIdleCleared(ops, target, p.timeouts.boot) {
+			return "", worktreeCloseNote{}, fmt.Errorf("phase 0: %q did not settle to idle at a cleared composer within %s — ABORT, desk untouched", p.agent, p.timeouts.boot)
+		}
 	}
 
 	// Baseline: the designated handoff is ABSENT on disk. The Phase-1 gate then requires an
@@ -197,6 +206,8 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 
 	// --self path (#437): durable handoff is enough — rotate context in place and inject
 	// takeover. Never bare /clear without a handoff; never close/respawn the coordinator pane.
+	// Does NOT re-read or apply flotilla-launch.json — same process keeps its model/surface.
+	// Model/surface cutover: external-pane full recycle (phase 3 respawn with recipe.Launch).
 	if p.selfPath {
 		if ops.rotate != nil {
 			if err := ops.rotate(target); err != nil {
@@ -206,7 +217,7 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 		if err := ops.deliver(target, p.takeoverText); err != nil {
 			return "", worktreeCloseNote{}, fmt.Errorf("self-recycle: delivering takeover to %q failed: %w (handoff durable at %s)", p.agent, err, p.designatedPath)
 		}
-		msg := fmt.Sprintf("self-recycled %s → pane %s (handoff %s; rotated in place, took over — no process kill)\n", p.agent, target, p.designatedPath)
+		msg := fmt.Sprintf("self-recycled %s → pane %s (handoff %s; rotated in place, took over — no process kill, no model/surface change; for cutover run full recycle from another pane)\n", p.agent, target, p.designatedPath)
 		return msg, worktreeCloseNote{}, nil
 	}
 
@@ -548,7 +559,10 @@ func cmdRecycle(args []string) error {
 		}
 		printRecyclePlan(plan, recipe)
 		if selfPath {
-			fmt.Printf("  mode:       --self (handoff + rotate + takeover; no process kill)\n")
+			fmt.Printf("  mode:       --self (handoff + rotate + takeover; no process kill; no model/surface change)\n")
+			fmt.Printf("  cutover:    for model/surface change, omit --self and run from a non-target pane (adjutant/watch)\n")
+		} else {
+			fmt.Printf("  mode:       full recycle (close + respawn with launch recipe above)\n")
 		}
 		return nil
 	}

@@ -199,7 +199,30 @@ user the dash Goals view picks up changes on the next load (or via SSE when
 Human-paced walkthrough of the same cold-start flow lives in
 `docs/quickstart.md`; goal-file schema detail is in `fleet-goals.example.yaml`.
 
-## 8. Execution-desk delivery assurance (inbound + dropped-dispatch)
+## 8. Coordinator recycle vs model cutover (`flotilla recycle`)
+
+Desks and coordinators share `flotilla recycle`, but **two modes** matter for
+leadership seats (see `docs/watch-runbook.md` § Recycle):
+
+| Command | Run from | Result |
+|---|---|---|
+| `flotilla recycle <coord> --self` | Own pane or external | Handoff + in-place rotate + takeover. **Same process — does not change model/surface.** |
+| `flotilla recycle <coord>` | **Adjutant / watch host / other non-target pane only** | Full close + **respawn** using `flotilla-launch.json` / workspace recipe (same path as `resume`). **This is model/surface cutover.** |
+| `flotilla recycle <coord>` from the coordinator's own pane | — | **Refused** (would kill the driver mid-pipeline). |
+
+```sh
+# Preview recipe relaunch line (cold start, no --continue/--resume):
+flotilla recycle cos --dry-run
+
+# Cutover cos to whatever the launch recipe now says (from adjutant or watch host):
+flotilla recycle cos
+```
+
+Own-pane `--self` skips the phase-0 idle wait (the seat cannot be idle while it
+drives the command); it still does **not** apply a new launch recipe. For a grok
+(or other harness) cutover, always use external-pane full recycle.
+
+## 9. Execution-desk delivery assurance (inbound + dropped-dispatch)
 
 Sections 4–5 cover **getting a turn started** (`send` confirms Idle→Working) and
 the XO clock. They do **not** prove the desk **retained and finished** the
@@ -300,7 +323,7 @@ cross-pane message, and started the self-continuing clock. Summarize for the
 user: they can now `flotilla send` work to any desk, the XO advances authorized
 work on its own, and (if they wired Discord) they drive the whole fleet from
 chat. Execution desks must **echo the dispatch nonce** in turn-finals so
-dropped-dispatch resume can clear the inbound ledger (section 8). Point them at
+dropped-dispatch resume can clear the inbound ledger (section 9). Point them at
 `docs/quickstart.md` for the same flow at human pace, and `docs/xo-doctrine.md` +
 `docs/watch-runbook.md` + `docs/coordinator-runbooks/dispatch-coordination.md`
 for running an XO in production. `flotilla workspace init` seeds the
