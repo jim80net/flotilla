@@ -87,16 +87,50 @@ func LoadRecipe(agent string) (launch.Recipe, bool, error) {
 	return r, true, nil
 }
 
-// ResolveRecipe resolves an agent's launch recipe: the workspace launch.json first,
-// else the flat launch.Config (the migration fallback), else a clear error naming both
-// locations it looked in. flat may be nil (no flat file present).
+// overlayFlatHarness merges fleet-wide harness fields from the flat launch file onto a
+// workspace recipe. Per-desk fields (Cwd, Tmux, State) stay on the workspace copy;
+// harness commands (Launch, Primary, Fallbacks) are read live from the flat file so an
+// operator edit to flotilla-launch.json propagates on resume/recycle without touching
+// every ~/.flotilla/<agent>/launch.json snapshot.
+func overlayFlatHarness(ws, flat launch.Recipe) launch.Recipe {
+	out := ws
+	out.Launch = flat.Launch
+	out.Primary = flat.Primary
+	out.Fallbacks = flat.Fallbacks
+	return out
+}
+
+// ResolveRecipe resolves an agent's launch recipe by layering sources:
+//   - Per-desk fields (cwd, tmux, state) come from ~/.flotilla/<agent>/launch.json
+//     when that file exists.
+//   - Harness fields (launch command, primary/fallbacks chain) come live from the flat
+//     flotilla-launch.json when it has an entry for the agent — even when a workspace
+//     launch.json exists (the workspace copy is a scaffold snapshot, not the fleet-wide
+//     harness source of truth).
+//   - When no workspace recipe exists, the flat entry is the migration fallback.
+//   - When neither exists, a clear error names both locations.
+//
+// flat may be nil (no flat file present).
 func ResolveRecipe(agent string, flat *launch.Config) (launch.Recipe, error) {
-	r, ok, err := LoadRecipe(agent)
+	ws, wsOk, err := LoadRecipe(agent)
 	if err != nil {
 		return launch.Recipe{}, err
 	}
-	if ok {
-		return r, nil
+	if wsOk {
+		if flat != nil {
+			if flatR, ok := flat.Recipe(agent); ok {
+				merged := overlayFlatHarness(ws, flatR)
+				dir, _ := Dir(agent)
+				if err := launch.ValidateRecipe(
+					fmt.Sprintf("resolved recipe for %q (%s + flat launch file)", agent, filepath.Join(dir, LaunchFileName)),
+					merged,
+				); err != nil {
+					return launch.Recipe{}, err
+				}
+				return merged, nil
+			}
+		}
+		return ws, nil
 	}
 	if flat != nil {
 		if r, ok := flat.Recipe(agent); ok {
@@ -180,8 +214,8 @@ func WriteActiveOverlay(agent string, ov ActiveOverlay) error {
 }
 
 // ResolveHarness resolves the desk's LIVE harness slot: it (1) resolves the recipe
-// chain via the EXISTING ResolveRecipe precedence (workspace launch.json → flat
-// flotilla-launch.json), (2) reads the active-harness overlay's slot name, and (3)
+// chain via ResolveRecipe (workspace desk fields + live flat harness fields), (2) reads
+// the active-harness overlay's slot name, and (3)
 // returns that slot's name and recipe-for-slot. An ABSENT overlay ⇒ the primary slot.
 // A TORN/unreadable overlay is fail-SAFE: it falls back to the primary slot rather than
 // erroring the desk out (a bad overlay must never make a live desk unresolvable). An

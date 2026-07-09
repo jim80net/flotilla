@@ -17,20 +17,30 @@ command is shell-run, so anyone able to write the workspace can already write
 - **WHEN** an agent `<name>` has a workspace at `~/.flotilla/<name>/`
 - **THEN** its launch recipe, heartbeat prompt, tracker, and identity file all resolve from that one directory
 
-### Requirement: Launch recipe resolved from the workspace, then the flat file
+### Requirement: Launch recipe merges workspace desk fields with live flat harness fields
 
-`flotilla resume` SHALL resolve an agent's launch recipe from
-`~/.flotilla/<agent>/launch.json` first; when that is absent it SHALL fall back to
-the agent's entry in the flat `flotilla-launch.json` (the migration path); when
-neither exists it SHALL error clearly, naming both locations it looked in. The
-workspace `launch.json` holds a SINGLE recipe object (no `agents` map — the agent
-is the directory name) and carries no `state` field (the workspace `state.md` is
-the state pointer). The safety-critical resume core (never kill a live desk, never
-create a duplicate marker) is unchanged by the new recipe source.
+`flotilla resume` and `flotilla recycle` SHALL resolve an agent's launch recipe by
+layering two sources:
+- **Per-desk fields** (`cwd`, `tmux`, `state`) from `~/.flotilla/<agent>/launch.json`
+  when that file exists (the workspace scaffold snapshot).
+- **Harness fields** (`launch`, `primary`, `fallbacks`) live from the agent's entry in
+  the flat `flotilla-launch.json` when that entry exists — even when a workspace
+  `launch.json` is present, so fleet-wide model/harness migrations propagate without
+  editing every per-desk copy.
 
-#### Scenario: Workspace recipe is used when present
-- **WHEN** `flotilla resume <agent>` runs and `~/.flotilla/<agent>/launch.json` exists
-- **THEN** that recipe drives the resume, and the flat `flotilla-launch.json` is not consulted
+When no workspace `launch.json` exists, the flat entry is the migration fallback (the
+entire recipe comes from the flat file). When neither exists, resume/recycle SHALL
+error clearly, naming both locations it looked in. The workspace `launch.json` holds
+a SINGLE recipe object (no `agents` map — the agent is the directory name) and carries
+no `state` field (the workspace `state.md` is the state pointer). The safety-critical
+resume core (never kill a live desk, never create a duplicate marker) is unchanged by
+the recipe source.
+
+#### Scenario: Flat harness fields override a stale workspace launch snapshot
+- **WHEN** `flotilla resume <agent>` runs, `~/.flotilla/<agent>/launch.json` exists with
+  an older `launch` command, and the flat `flotilla-launch.json` has a newer harness entry
+- **THEN** resume uses the flat `launch` / `primary` / `fallbacks` and the workspace
+  `cwd` / `tmux` / `state`
 
 #### Scenario: Falls back to the flat launch file during migration
 - **WHEN** no workspace `launch.json` exists but the flat `flotilla-launch.json` has an entry for the agent

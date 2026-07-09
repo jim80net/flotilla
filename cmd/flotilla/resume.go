@@ -64,10 +64,10 @@ func cmdResume(args []string) error {
 	if launchPath == "" {
 		launchPath = launch.DefaultPath(rosterPath)
 	}
-	// The flat launch file is now a MIGRATION FALLBACK behind the per-agent workspace
-	// (~/.flotilla/<agent>/launch.json). It may be absent entirely once every desk is
-	// migrated, so load it only when present; a present-but-malformed file is still a
-	// fail-closed error (the existing safety posture).
+	// The flat launch file supplies live harness fields (launch/primary/fallbacks) even
+	// when a per-agent workspace ~/.flotilla/<agent>/launch.json exists (workspace keeps
+	// cwd/tmux). Load it only when present; a present-but-malformed file is still
+	// fail-closed.
 	var flat *launch.Config
 	if _, statErr := os.Stat(launchPath); statErr == nil {
 		rosterAgents := make(map[string]bool, len(cfg.Agents))

@@ -56,15 +56,57 @@ func TestLoadRecipeInvalidIsError(t *testing.T) {
 	}
 }
 
-func TestResolveRecipeWorkspaceWins(t *testing.T) {
-	writeWorkspaceRecipe(t, "a", `{"launch":"workspace-cmd","cwd":"/abs"}`)
-	flat := &launch.Config{Agents: map[string]launch.Recipe{"a": {Launch: "flat-cmd", Cwd: "/abs"}}}
-	r, err := ResolveRecipe("a", flat)
+func TestResolveRecipeFlatHarnessOverridesStaleWorkspaceLaunch(t *testing.T) {
+	// Regression for #550: workspace init snapshots launch.json once; fleet-wide model
+	// migrations edit the shared flotilla-launch.json — resume/recycle must read harness
+	// fields live from the flat file, not the stale per-desk copy.
+	writeWorkspaceRecipe(t, "data",
+		`{"launch":"grok --model composer-2 -w data","cwd":"/abs/worktree","tmux":"flotilla-data:desk"}`)
+	flat := &launch.Config{Agents: map[string]launch.Recipe{"data": {
+		Launch: "grok --model composer-2.5-fast -w data",
+		Cwd:    "/other/flat-cwd",
+		Tmux:   "flotilla:flat",
+		Primary: &launch.HarnessSlot{
+			Surface: "grok",
+			Launch:  "grok --model composer-2.5-fast -w data",
+			Model:   "composer-2.5-fast",
+			Provider: "xai",
+		},
+		Fallbacks: []launch.HarnessSlot{{
+			Surface: "codex",
+			Launch:  "codex -w data",
+			Provider: "openai",
+		}},
+	}}}
+	r, err := ResolveRecipe("data", flat)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Launch != "workspace-cmd" {
-		t.Errorf("ResolveRecipe used %q, want the workspace recipe", r.Launch)
+	if r.Launch != "grok --model composer-2.5-fast -w data" {
+		t.Errorf("launch = %q, want the flat harness command (stale workspace must not win)", r.Launch)
+	}
+	if r.Cwd != "/abs/worktree" {
+		t.Errorf("cwd = %q, want the workspace worktree path", r.Cwd)
+	}
+	if r.Tmux != "flotilla-data:desk" {
+		t.Errorf("tmux = %q, want the workspace tmux target", r.Tmux)
+	}
+	if r.Primary == nil || r.Primary.Model != "composer-2.5-fast" {
+		t.Errorf("primary = %+v, want the flat failover chain head", r.Primary)
+	}
+	if len(r.Fallbacks) != 1 || r.Fallbacks[0].Surface != "codex" {
+		t.Errorf("fallbacks = %+v, want the flat failover chain", r.Fallbacks)
+	}
+}
+
+func TestResolveRecipeWorkspaceOnlyWhenFlatAbsent(t *testing.T) {
+	writeWorkspaceRecipe(t, "a", `{"launch":"workspace-cmd","cwd":"/abs","tmux":"flotilla-a:desk"}`)
+	r, err := ResolveRecipe("a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Launch != "workspace-cmd" || r.Cwd != "/abs" {
+		t.Errorf("ResolveRecipe(no flat) = %+v, want the workspace recipe unchanged", r)
 	}
 }
 
