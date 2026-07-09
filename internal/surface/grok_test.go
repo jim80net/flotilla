@@ -54,6 +54,11 @@ func TestParseGrokState(t *testing.T) {
 			want:     StateIdle,
 		},
 		{
+			name:     "exit confirmation menu with background work chrome → AwaitingInput (#557)",
+			captured: "  6 background agents running\n  Exit session?\n  1. Confirm exit\n  2. Stay\n  Enter to confirm\n",
+			want:     StateAwaitingInput,
+		},
+		{
 			name:     "fresh empty composer → Idle (the default)",
 			captured: "  ╭────╮\n  │ ❯  │\n  ╰──── Grok Composer 2.5 Fast ─╯\n  Shift+Tab:mode  │  Ctrl+.:shortcuts",
 			want:     StateIdle,
