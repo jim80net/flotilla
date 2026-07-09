@@ -15,6 +15,7 @@ func TestAdjutantEvaluationTickBodyThreeStepDuty(t *testing.T) {
 	const buf = "/state/flotilla-alpha-xo-buffer.json"
 	const charter = "/state/flotilla-alpha-xo-adjutant-charter.md"
 	got := adjutantEvaluationTickBody(leader, ack, buf, charter)
+	// #510: evaluation ticks must require leader usage-limit recognition + loud escalate.
 	for _, want := range []string{
 		"Evaluation tick",
 		leader,
@@ -25,12 +26,15 @@ func TestAdjutantEvaluationTickBodyThreeStepDuty(t *testing.T) {
 		"2. EVALUATE",
 		"all-quiet",
 		"work-found",
+		"usage-limit",
+		"ESCALATE LOUDLY",
 		"3. ACT BY TIER",
 		buf,
 		"idle-holding",
 		"Your charter at " + charter,
 		"consult it before composing any brief",
 		"Dual observation",
+		"rate-limit exhaustion",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("evaluation tick missing %q\nfull: %s", want, got)

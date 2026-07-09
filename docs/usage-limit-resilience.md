@@ -1,9 +1,10 @@
-# Usage-limit resilience — per-seat downgrade policy (#466)
+# Usage-limit resilience — per-seat downgrade policy (#466 / #510)
 
-When a desk hits provider usage or rate limits, the fleet should **downgrade** to an
-operator-ratified fallback tier instead of stalling until limits reset. The policy lives
-in the **host-local launch recipe** (not the committable roster): each roster agent's
-`primary` + ordered `fallbacks[]` harness slots declare the downgrade chain.
+When a desk **or coordinator** hits provider usage or rate limits, the fleet should
+**downgrade** to an operator-ratified fallback tier instead of stalling until limits
+reset. The policy lives in the **host-local launch recipe** (not the committable
+roster): each roster agent's `primary` + ordered `fallbacks[]` harness slots declare
+the downgrade chain.
 
 See `flotilla-launch.example.json` for a committed shape. Copy and adapt it to
 `<roster-dir>/flotilla-launch.json` or `~/.flotilla/<agent>/launch.json`.
@@ -25,7 +26,7 @@ harness process changes on switch.
 
 | Seat class | Preferred tier | Typical degraded tier |
 |---|---|---|
-| Coordinator (XO) | Claude Opus (judgment) | Claude Sonnet 5, then latest Grok |
+| Coordinator (XO / CoS) | Claude Opus (judgment) | Claude Sonnet 5, then latest Grok |
 | Execution desk | Latest Grok (workhorse) | GPT 5.5 (Codex), then Sonnet |
 
 Exact model strings belong in the host-local `launch` command — flotilla does not
@@ -42,15 +43,40 @@ the chain in order:
    slot on a **different** provider (cross-harness, e.g. Claude → Grok).
 
 Manual: `flotilla switch <agent> --to fallback-0` (or `--to grok` / slot name).
-Restore preferred tier: `flotilla switch <agent> --to primary` when limits clear.
+Restore preferred tier: `flotilla switch <agent> --to primary` when limits clear
+(or let auto-revert do it — see below).
 
-## Auto-switch eligibility today
+## Auto-switch eligibility (#510)
 
 Watch auto-switch is **ON by default** (`surface.AutoSwitchEnabled` — disable explicitly
-with `FLOTILLA_AUTOSWITCH=0`, `false`, `no`, or `off`). When enabled, it applies to
-**non-XO execution desks** only (`AutoSwitchEligible` — coordinators and
-`approval_sensitive` desks are refused at enqueue). Coordinator downgrade is **manual
-switch** until a follow-up extends auto-downgrade to XO seats (#466 phase 2).
+with `FLOTILLA_AUTOSWITCH=0`, `false`, `no`, or `off`). When enabled, it applies to:
+
+- **Execution desks** and **coordinators** (primary XO, channel XOs, CoS, other
+  `IsCoordinator` seats) that are not `approval_sensitive`
+- Seats currently on the primary surface (`claude-code`) — Claude-storm relocation;
+  already-relocated seats stay sticky until restore
+
+`approval_sensitive` desks still require explicit `flotilla switch … --confirm` (GATE-4).
+
+On a coordinator exhaustion edge the watch daemon also:
+
+1. Raises a **loud operator alert** (never silent)
+2. Injects an **urgent adjutant note** when an adjutant is bound (prompt-contract:
+   recognize leader exhaustion and escalate)
+3. After a successful coordinator auto-switch, **re-notifies** `AgentsBelow` (and the
+   adjutant) that the leader is back on the new harness
+
+Detector-enqueued `switch --auto` uses a **kill+relaunch fallback** when Claude
+graceful-close hangs (#437) — the handoff is durable before that step. Manual
+(non-auto) switches still abort on unconfirmed close.
+
+## Auto-restore preferred tier (#510 / #466 phase 2)
+
+Auto-revert is **ON by default** (`surface.AutoRevertEnabled` — disable with
+`FLOTILLA_AUTOREVERT=0`). When a seat is on a non-primary `active-harness.json` slot
+and rate-limit probes report clear for two consecutive folds **and** the primary
+provider is not under active poison cooldown, watch dispatches
+`flotilla switch <agent> --to primary`.
 
 ## Ledger / turn-final provenance
 
@@ -63,3 +89,4 @@ window should note the active tier so reviewers know which model produced the wo
 - Harness switching design: `docs/harness-subscription-switching.md`
 - `flotilla switch` command: `cmd/flotilla/switch.go`
 - Launch schema: `internal/launch/launch.go`
+- Issue: coordinator/adjutant resuscitation (#510); desk shape (#466)

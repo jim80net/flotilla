@@ -23,11 +23,14 @@ func TestAutoSwitchEligible(t *testing.T) {
 		agent string
 		want  bool
 	}{
-		{"meta-xo", false},
-		{"alpha-xo", false},
-		{"cos", false},
-		{"trader", false},
+		// #510: coordinators/XO/CoS are eligible for resuscitation auto-switch.
+		{"meta-xo", true},
+		{"alpha-xo", true},
+		{"cos", true},
+		{"trader", false}, // GATE-4 approval_sensitive
 		{"backend", true},
+		{"", false},
+		{"ghost", false},
 	}
 	for _, tc := range cases {
 		if got := cfg.AutoSwitchEligible(tc.agent); got != tc.want {

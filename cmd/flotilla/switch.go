@@ -268,6 +268,14 @@ func runSwitch(ops switchOps, p switchPlan) (string, error) {
 	switch {
 	case closeErr == nil:
 		if _, closed := pollClosed(switchToRecycleOps(ops, p.cwd, false), target, p.timeouts.close_); !closed {
+			// Manual path: fail-closed — the desk MAY still be live; never kill on a guess.
+			// Auto path (#510 / #437): handoff is durable; Claude graceful-close hangs are
+			// known — fall through to RespawnPane -k (kill+relaunch) rather than aborting
+			// resuscitation of a rate-limited leader.
+			if p.autoPath {
+				log.Printf("flotilla: switch: auto-path %q (%s) graceful close did not confirm within %s — using handoff-gated kill fallback (respawn-kill) for resuscitation", p.agent, p.fromSurface, p.timeouts.close_)
+				break
+			}
 			return "", fmt.Errorf("phase 2: the graceful close of %q (%s harness) did not confirm the process exited within %s — the desk MAY STILL BE LIVE; investigate, and if confirmed dead recover with: flotilla resume %s --force (NOT relaunching on a possibly-live session)", p.agent, p.fromSurface, p.timeouts.close_, p.agent)
 		}
 	case errors.Is(closeErr, surface.ErrNoGracefulClose):
