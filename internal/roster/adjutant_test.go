@@ -135,6 +135,7 @@ func TestLayerSidecarPaths(t *testing.T) {
 		{"arbitration-audit", LayerArbitrationAuditPath("/state", "alpha-xo"), "/state/flotilla-alpha-xo-arbitration-audit.jsonl"},
 		{"delivered", LayerBufferDeliveredPath("/state", "alpha-xo"), "/state/flotilla-alpha-xo-buffer-delivered.json"},
 		{"charter", LayerCharterPath("/state", "alpha-xo"), "/state/flotilla-alpha-xo-adjutant-charter.md"},
+		{"last-operator-relay", LayerLastOperatorRelayPath("/state", "alpha-xo"), "/state/flotilla-alpha-xo-last-operator-relay.json"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -142,6 +143,21 @@ func TestLayerSidecarPaths(t *testing.T) {
 				t.Errorf("%s = %q, want %q", tc.name, tc.got, tc.want)
 			}
 		})
+	}
+}
+
+func TestCoordinatorForAdjutant(t *testing.T) {
+	cfg := &Config{
+		Agents: []Agent{
+			{Name: "xo"},
+			{Name: "xo-adj", AdjutantFor: "xo"},
+		},
+	}
+	if got := cfg.CoordinatorForAdjutant("xo-adj"); got != "xo" {
+		t.Fatalf("CoordinatorForAdjutant(xo-adj) = %q, want xo", got)
+	}
+	if got := cfg.CoordinatorForAdjutant("xo"); got != "" {
+		t.Fatalf("CoordinatorForAdjutant(xo) = %q, want empty", got)
 	}
 }
 
