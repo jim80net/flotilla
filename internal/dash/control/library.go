@@ -279,6 +279,9 @@ func (c *LibraryController) Route(_ context.Context, target, message string) (Ro
 	switch serr := c.submit(drv, pane, message); {
 	case serr == nil:
 		res.Outcome = OutcomeDelivered
+		// #432 leg 2 / #518: pane delivery is primary; Discord + CosLedger mirrors are
+		// best-effort observe-only (never flip a confirmed delivered into an error).
+		c.mirrorRouteToDiscord(agentName, message)
 		c.mirrorRouteToLedger(agentName, message)
 	case errors.Is(serr, surface.ErrBusy):
 		res.Outcome, res.Detail = OutcomeBusy, "desk is busy (mid-turn) — not delivered, retry when it is idle"
@@ -305,23 +308,65 @@ func (c *LibraryController) Resume(_ context.Context, _ string) (ResumeResult, e
 	return ResumeResult{}, ErrResumeUnavailable
 }
 
+// mirrorRouteToDiscord posts a delivered dash route to the target agent's Discord
+// channel under operator(dash) voice (#432 leg 2 / #518). Best-effort: missing
+// secrets, missing per-agent webhook, or post failure never fail the Route (pane
+// delivery already confirmed). Matches notify provenance; uses secrets.Webhook(target)
+// — the same key flotilla send/notify resolve for an agent's bound channel.
+func (c *LibraryController) mirrorRouteToDiscord(agent, message string) {
+	if c.post == nil || c.secretsPath == "" {
+		return
+	}
+	if c.loadSecrets == nil {
+		return
+	}
+	secrets, err := c.loadSecrets(c.secretsPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "flotilla dash: route Discord mirror: load secrets: %v\n", err)
+		return
+	}
+	hook, err := secrets.Webhook(agent)
+	if err != nil {
+		// Loud miss (#506 family): operator sees the gap instead of a silent no-op.
+		fmt.Fprintf(os.Stderr, "flotilla dash: route Discord mirror: no webhook for %q — operator(dash) message not posted to Discord (%v)\n", agent, err)
+		return
+	}
+	if err := c.post(hook, dashProvenance, message); err != nil {
+		fmt.Fprintf(os.Stderr, "flotilla dash: route Discord mirror to %q failed: %v\n", agent, err)
+	}
+}
+
 // mirrorRouteToLedger records a dash-routed instruction in the CoS ledger with
-// dash provenance (operator(dash) → <agent>), best-effort.
+// dash provenance (operator(dash) → <agent>), best-effort. When CosLedger is set
+// (cos_agent present), the append MUST be attempted — silent skip only when the
+// CoS capability is inert (#432/#518). Append errors are logged, never returned.
 func (c *LibraryController) mirrorRouteToLedger(agent, message string) {
 	if c.roster == nil || c.roster.CosLedger == "" {
 		return
 	}
-	channel, ok := c.roster.ChannelForXO(c.xo)
-	if !ok && len(c.roster.Channels) > 0 {
-		fmt.Fprintf(os.Stderr, "flotilla dash: XO %q has no channel binding in the federated roster — route ledger entry tagged with no channel\n", c.xo)
+	if c.appendCos == nil {
+		fmt.Fprintf(os.Stderr, "flotilla dash: route ledger: appendCos seam is nil — operator(dash)→%s not recorded\n", agent)
+		return
 	}
-	_ = c.appendCos(c.roster.CosLedger, cos.Entry{
+	// Prefer the target seat's home channel when it owns a binding; else the hub XO's
+	// channel (legacy single-channel / clock-only shapes). Conversations feed matches
+	// on from/to, so channel is audit context only.
+	channel, ok := c.roster.ChannelForXO(agent)
+	if !ok {
+		channel, ok = c.roster.ChannelForXO(c.xo)
+	}
+	if !ok && len(c.roster.Channels) > 0 {
+		fmt.Fprintf(os.Stderr, "flotilla dash: neither target %q nor XO %q has a channel binding — route ledger entry tagged with no channel\n", agent, c.xo)
+	}
+	if err := c.appendCos(c.roster.CosLedger, cos.Entry{
 		Time:    c.now(),
 		Channel: channel,
 		From:    dashProvenance,
 		To:      agent,
 		Gist:    message,
-	})
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "flotilla dash: route ledger append to %s failed (operator(dash)→%s not durable): %v\n", c.roster.CosLedger, agent, err)
+	}
 }
 
 // mirrorToLedger appends the dash note to the CoS who-knows-what ledger with dash
