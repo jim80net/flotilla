@@ -9,16 +9,27 @@ buffers them*, *when the leader sees them*, and *at what seam*.
 
 The adjutant is plausibly the **per-layer detector consumer** once #438 scoping is enabled.
 
-## Operator input — pending clause
+## Operator input — communication paths (COS-authorized, 2026-07-09)
 
-The operator's directive ended mid-sentence:
+The operator's original directive ended mid-sentence ("…communication paths betw…"). COS
+authorized the **default design-around** on #438 without waiting for the clipped remainder:
 
-> "…that means addressing communication paths betw…"
+- **Hierarchical communication paths** — edges and rollups follow the roster tree, not a
+  flat fleet-wide fan-in to the top coordinator.
+- **Child XO owns subtree edges** — detector, pane-state, and goal-loop wakes for
+  `AgentsBelow(self)` land at that layer's adjutant/coordinator pair first.
+- **Parent receives rollups, exceptions, and explicit escalations** — summaries and
+  items the child layer cannot resolve bubble one layer up; routine mechanical work stays
+  below.
+- **Peer coordination routes through the lowest common owning layer** unless a product
+  protocol (e.g. visibility synthesis cadence, `flotilla send` peer path) says otherwise.
+- **Urgent bypasses stay explicit and audited** — operator relay and configured urgent
+  windows cut through the adjutant buffer; each bypass is logged/reviewable, not silent
+  prompt injection.
 
-**The remainder has been requested** (known message-clipping family). Until it arrives, the
-**Communication paths** section below documents the paths implied by existing product seams
-and marks the cut-off clause as **PENDING** — do not implement novel cross-layer routing
-beyond what is grounded here without operator affirmation.
+Fold this into remaining #438 scoping work. Related follow-ups: **#530** (adjutant/seam
+`return_to` / return-to-frontier guard — coordinator-side complement to **#526** WakeBacklog
+cap; see Communication paths § return-to-frontier).
 
 ---
 
@@ -524,8 +535,10 @@ only a Discord alert the primary may miss.
 
 ## Communication paths
 
-> **PENDING operator clause:** "addressing communication paths betw…" — remainder not yet
-> received. Subsections marked **[PENDING]** await operator input.
+**COS-authorized default (2026-07-09, #438):** hierarchical paths; child layer owns
+detector/pane/loop edges for its subtree; parent sees rollups + exceptions + explicit
+escalations; peer work routes through the lowest common owning layer unless a product
+protocol specifies otherwise; urgent bypasses are explicit and audited.
 
 ### Grounded today (no new design required)
 
@@ -537,27 +550,40 @@ only a Discord alert the primary may miss.
 | Boat → XO channel | Tier-1 mirror | Mechanical Working→Idle |
 | Boats → XO rollup | Visibility synthesis Tier 2 | `WakeSynthesis` → project-XO |
 | XO → CoS rollup | Visibility synthesis Tier 3 | `WakeSynthesis` → meta |
-| XO → XO | `flotilla send` | Peer coordination (doctrine: prefer hierarchy) |
+| XO → XO | `flotilla send` | Peer coordination — default via lowest common owning layer |
+| XO → XO (protocol) | Visibility synthesis / product cadence | When synthesis or another protocol owns the path |
 
 ### Proposed additions (P0/P1 — stackable + adjutant)
 
 | Direction | Mechanism |
 |-----------|-----------|
-| Detector → layer adjutant | Scoped `WakeInterrupt` → `AdjutantFor(OwningXO)` |
-| Adjutant → coordinator | Batched digest (judgment items) |
-| Operator → coordinator | Relay urgent passthrough (bypass adjutant) |
+| Detector → layer adjutant | Scoped `WakeInterrupt` → `AdjutantFor(OwningXO)` for `AgentsBelow(owner)` only |
+| Adjutant → coordinator | Batched digest (judgment items) at seam |
+| Operator → coordinator | Relay urgent passthrough (bypass adjutant; audited) |
 | Recycle abort → layer adjutant | #436 inject; mechanical recovery first |
-| Child layer → parent layer | Adjutant escalation digest; coordinator if unresolvable |
+| Child layer → parent layer | Rollup digest + explicit escalation; parent does not see routine child mechanical edges |
+| Peer desks (sibling subtrees) | Route via lowest common owning XO/adjutant unless product protocol (synthesis, send) applies |
 | CoS → project-XO tasking | Existing relay + send (unchanged) |
 
-### [PENDING] Operator clause — cross-layer communication
+### Return-to-frontier (#530 — related, distinct from #526)
 
-Likely intent ( **hypothesis only — do not implement until operator affirms** ):
+**#526** caps raw backlog line injection in `WakeBacklog` prompts (pointer-sized items).
+**#530** adds a durable **`return_to` / frontier frame** on adjutant/seam handoffs so a
+coordinator interrupted mid-warrant can resume the active goal-loop frontier without relying
+on conversational memory:
 
-- Explicit **XO↔XO** paths for detector summaries (not only synthesis cadence)
-- Whether project-XOs **mirror** material edges to CoS channel vs CoS reads synthesis only
-- Inter-flotilla stacking (CoS of fleet A as desk under fleet B's meta) — **out of scope**
-  until operator clarifies
+- Every seam item that preempts an active warrant carries priority + `return_to` (durable
+  pointer to the warrant/frontier, not a raw history paste).
+- Coordinator turn-finals after a side item run a **return-to-frontier guard**: resume the
+  prior warrant, explicitly reassign it, or name the gate blocking it.
+- Urgent bypasses and operator-protected windows use the same structured model.
+
+Implementation is a follow-up after adjutant seam injection lands; design here records the
+contract so #438 routing and #439 laminar flow do not omit the resume edge.
+
+### Out of scope (until operator clarifies)
+
+- Inter-flotilla stacking (meta of fleet A as desk under fleet B's meta).
 
 ---
 
@@ -614,7 +640,7 @@ Likely intent ( **hypothesis only — do not implement until operator affirms** 
 | Coordinator starved of mechanical context | Digest includes "handled" summary + judgment queue |
 | Operator message delayed by digest | Urgent passthrough bypasses adjutant entirely |
 | Per-XO liveness false wedge | Required-minimum charter mandates liveness ack; misconfiguration rejected at pairing |
-| Operator PENDING clause changes comms | Flag section; no speculative routing beyond table above |
+| Return-to-frontier omitted on seam handoff | #530 `return_to` frame on interrupt; turn-final guard |
 
 ---
 
@@ -631,7 +657,8 @@ Likely intent ( **hypothesis only — do not implement until operator affirms** 
 
 ## References
 
-- GitHub **#438** (stackable), **#439** (adjutant), **#436** (recycle abort), **#437** (self-rotation)
+- GitHub **#438** (stackable), **#439** (adjutant), **#526** (WakeBacklog cap), **#530**
+  (return-to-frontier), **#436** (recycle abort), **#437** (self-rotation)
 - `docs/visibility.md` — federation graph / AgentsBelow
 - `docs/ARCHITECTURE.md` — single watch daemon
 - `internal/roster/synthesis.go` — `OwningXO`, `AgentsBelow`, `AgentsAbove`

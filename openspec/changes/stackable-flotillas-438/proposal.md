@@ -46,6 +46,10 @@ seam injection model, #438 scoping as Phase 2.
 
 **Out:** Implementation until operator gates design PR.
 
+**2026-07-09 COS fold (#438):** hierarchical comms paths authorized (child owns subtree
+edges; parent rollups/exceptions/escalations; peer via lowest common owner; urgent bypass
+audited). **#530** filed as return-to-frontier complement to **#526** prompt cap.
+
 ## Success criteria
 
 1. Laminar flow is the **stated P0 goal**, not mechanical offload alone.
