@@ -389,7 +389,7 @@ func (in *Injector) handleBusy(j Job, cause error) {
 					break
 				}
 			}
-			in.maybeStaleEscalateOutbox(&j, &entry, now)
+			in.maybeStaleEscalateOutbox(&j, &entry, now, cause)
 			st.Update(entry)
 		}
 	}
@@ -397,10 +397,26 @@ func (in *Injector) handleBusy(j Job, cause error) {
 	in.reEnqueue(j, busyDeferDelay)
 }
 
+// outboxRecipientClass maps a busy/transient delivery error to the outbox stale class (#500).
+func outboxRecipientClass(cause error) outbox.RecipientClass {
+	switch {
+	case errors.Is(cause, surface.ErrBusy):
+		return outbox.RecipientWorking
+	case errors.Is(cause, surface.ErrTransient):
+		return outbox.RecipientTransient
+	case errors.Is(cause, surface.ErrPanelBlocked), errors.Is(cause, surface.ErrCrashed):
+		return outbox.RecipientWedge
+	default:
+		return outbox.RecipientUnknown
+	}
+}
+
 // maybeStaleEscalateOutbox raises exactly one coordinator-surface alert when a swept send
-// exceeds max-age or max-deferral (#477). Delivery continues after escalation.
-func (in *Injector) maybeStaleEscalateOutbox(j *Job, entry *outbox.Entry, now time.Time) {
-	if !outbox.ShouldStaleEscalate(*entry, now) {
+// exceeds the class-aware stale threshold (#477, #500). Delivery continues after escalation.
+// Working recipients suppress the short deferral arm (ordinary mid-turn busyness is not a wedge).
+func (in *Injector) maybeStaleEscalateOutbox(j *Job, entry *outbox.Entry, now time.Time, cause error) {
+	class := outboxRecipientClass(cause)
+	if !outbox.ShouldStaleEscalate(*entry, now, class) {
 		return
 	}
 	if in.outboxOwningCoordinator == nil || in.outboxCoordinatorEscalate == nil {
@@ -411,7 +427,7 @@ func (in *Injector) maybeStaleEscalateOutbox(j *Job, entry *outbox.Entry, now ti
 		return
 	}
 	claimKey := outbox.StaleClaimKey(j.Sender, j.MessageID)
-	msg := outbox.StaleEscalationMessage(*entry, now)
+	msg := outbox.StaleEscalationMessage(*entry, now, class)
 	escalate := in.outboxCoordinatorEscalate
 	// Off-worker: never Enqueue synchronously from the injector worker (#477 P1 deadlock).
 	time.AfterFunc(0, func() { escalate(coord, msg, claimKey) })

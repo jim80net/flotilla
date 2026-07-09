@@ -13,6 +13,7 @@ import (
 func TestInjectorKindSendStaleEscalatesCoordinatorOnce(t *testing.T) {
 	dir := t.TempDir()
 	base := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	// Working uses age arm only (#500) — past StaleMaxAge with ErrBusy.
 	now := base.Add(outbox.StaleMaxAge + time.Minute)
 
 	r := newRig(surface.ErrBusy)
@@ -41,13 +42,13 @@ func TestInjectorKindSendStaleEscalatesCoordinatorOnce(t *testing.T) {
 	}
 	if _, _, err := outbox.NewStore(path).Insert(outbox.Entry{
 		ID: "stale1", Sender: "backend", Recipient: "cos", Message: "status",
-		Deferrals: outbox.StaleDeferAt, EnqueuedAt: base,
+		Deferrals: 6, EnqueuedAt: base,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	job := Job{
 		Agent: "cos", Message: "status", Kind: KindSend,
-		MessageID: "stale1", Sender: "backend", deferrals: outbox.StaleDeferAt,
+		MessageID: "stale1", Sender: "backend", deferrals: 6,
 		enqueuedAt: base,
 	}
 	r.in.deliver(job)
@@ -66,6 +67,13 @@ func TestInjectorKindSendStaleEscalatesCoordinatorOnce(t *testing.T) {
 	}
 	if !strings.Contains(esc.msg, `to "cos"`) {
 		t.Fatalf("escalation msg = %q, want recipient named", esc.msg)
+	}
+	// #500 honesty: Working age-arm alert must not claim wedged.
+	if strings.Contains(esc.msg, "wedged") {
+		t.Fatalf("Working escalation must not claim wedged: %q", esc.msg)
+	}
+	if !strings.Contains(esc.msg, "busy") {
+		t.Fatalf("Working escalation must say busy: %q", esc.msg)
 	}
 	wantClaim := outbox.StaleClaimKey("backend", "stale1")
 	if esc.claim != wantClaim {
@@ -104,6 +112,67 @@ func TestInjectorKindSendStaleEscalatesCoordinatorOnce(t *testing.T) {
 	stamped := outbox.NewStore(path).Load()
 	if len(stamped) != 1 || stamped[0].LastStaleEscalation.IsZero() {
 		t.Fatalf("confirm must stamp marker, got %+v", stamped)
+	}
+}
+
+// #500 live gap: ErrBusy + 6 deferrals + ~1m must NOT escalate (ordinary mid-turn).
+func TestInjectorKindSendWorkingSuppressesShortStale500(t *testing.T) {
+	dir := t.TempDir()
+	base := time.Date(2026, 7, 9, 3, 18, 26, 0, time.UTC)
+	now := base.Add(time.Minute + time.Second) // live evidence: escalated at 1m1s
+
+	r := newRig(surface.ErrBusy)
+	r.in.rosterDir = dir
+	r.in.now = func() time.Time { return now }
+	var nEsc int
+	var mu sync.Mutex
+	r.in.SetOutboxStaleEscalate(
+		func(string) string { return "alpha-xo" },
+		func(_, _, _ string) {
+			mu.Lock()
+			nEsc++
+			mu.Unlock()
+		},
+	)
+	path, _ := outbox.Path(dir, "alpha-xo")
+	if _, _, err := outbox.NewStore(path).Insert(outbox.Entry{
+		ID: "live500", Sender: "alpha-xo", Recipient: "build-desk", Message: "ORG dispatch",
+		Deferrals: 5, EnqueuedAt: base,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	r.in.deliver(Job{
+		Agent: "build-desk", Message: "ORG dispatch", Kind: KindSend,
+		MessageID: "live500", Sender: "alpha-xo", deferrals: 5, enqueuedAt: base,
+	})
+	time.Sleep(20 * time.Millisecond)
+	mu.Lock()
+	got := nEsc
+	mu.Unlock()
+	if got != 0 {
+		t.Fatalf("Working+1m+6 deferrals escalations = %d, want 0 (#500)", got)
+	}
+	// Deferrals still persist for at-least-once delivery accounting.
+	entries := outbox.NewStore(path).Load()
+	if len(entries) != 1 || entries[0].Deferrals != 6 {
+		t.Fatalf("outbox after busy defer = %+v, want Deferrals=6", entries)
+	}
+}
+
+// #500: wedge-class cause escalates on the fast arm (injected via handleBusy cause mapping
+// for ErrTransient below threshold is quiet; we unit-test the class mapper + pure Should*).
+func TestOutboxRecipientClass500(t *testing.T) {
+	if got := outboxRecipientClass(surface.ErrBusy); got != outbox.RecipientWorking {
+		t.Errorf("ErrBusy → %q, want working", got)
+	}
+	if got := outboxRecipientClass(surface.ErrTransient); got != outbox.RecipientTransient {
+		t.Errorf("ErrTransient → %q, want transient", got)
+	}
+	if got := outboxRecipientClass(surface.ErrPanelBlocked); got != outbox.RecipientWedge {
+		t.Errorf("ErrPanelBlocked → %q, want wedge", got)
+	}
+	if got := outboxRecipientClass(surface.ErrCrashed); got != outbox.RecipientWedge {
+		t.Errorf("ErrCrashed → %q, want wedge", got)
 	}
 }
 
