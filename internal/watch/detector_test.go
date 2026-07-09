@@ -1042,6 +1042,120 @@ func TestDetectorAutoSwitchConcurrentUnderRace(t *testing.T) {
 	wg.Wait() // -race: auto-switch flight map must not race with OperatorWake
 }
 
+// #510: primary XO is included in the rate-limit probe batch (Idle).
+func TestDetectorRateLimitProbesPrimaryXO(t *testing.T) {
+	f := newFixture()
+	probed := map[string]int{}
+	cfg := f.config("xo", []string{"xo", "backend"}, 3, "none")
+	cfg.RateLimitMaterial = func(agent string) (bool, surface.RateLimitScope, string, bool) {
+		probed[agent]++
+		return false, 0, "", true
+	}
+	cfg.RateLimitReset = func(string) {}
+	d := newDet(t, f, cfg)
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
+	f.set("xo", surface.StateIdle)
+	f.set("backend", surface.StateIdle)
+	f.signal = "h0"
+	f.advance(d.cfg.ReferenceInterval)
+	d.Tick() // schedules probe work
+	// runRateLimitProbes is sync when RateLimitDispatch is nil
+	d.Tick()
+	if probed["xo"] == 0 {
+		t.Fatalf("primary XO must be rate-limit probed when Idle, probed=%v", probed)
+	}
+	if probed["backend"] == 0 {
+		t.Fatalf("backend must still be probed, probed=%v", probed)
+	}
+}
+
+// #510: coordinator rate-limit edge fires leader-exhaustion callback + auto-switch.
+func TestDetectorLeaderExhaustionAndCoordinatorAutoSwitch(t *testing.T) {
+	f := newFixture()
+	var autoCalls []RateLimitAutoSwitchCandidate
+	var exhausted []string
+	var det *Detector
+	cfg := f.config("xo", []string{"xo", "backend"}, 3, "none")
+	probeN := 0
+	cfg.RateLimitMaterial = func(agent string) (bool, surface.RateLimitScope, string, bool) {
+		if agent != "xo" {
+			return false, 0, "", true
+		}
+		probeN++
+		if probeN < 2 {
+			return false, 0, "", true
+		}
+		return true, surface.RateLimitAccountSide, "usage limit", true
+	}
+	cfg.IsCoordinator = func(name string) bool { return name == "xo" }
+	cfg.RateLimitAutoSwitchEligible = func(agent string) bool { return agent == "xo" }
+	cfg.RateLimitAutoSwitch = func(candidates []RateLimitAutoSwitchCandidate) {
+		autoCalls = append(autoCalls, candidates...)
+		for _, c := range candidates {
+			det.EndAutoSwitchFlight(c.Agent)
+		}
+	}
+	cfg.RateLimitLeaderExhausted = func(agent string, scope surface.RateLimitScope) {
+		exhausted = append(exhausted, agent+":"+scope.String())
+	}
+	det = newDet(t, f, cfg)
+	d := det
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
+	f.set("xo", surface.StateIdle)
+	f.set("backend", surface.StateIdle)
+	f.signal = "h0"
+
+	// Warm probes until material episode folds.
+	for i := 0; i < 6; i++ {
+		f.advance(d.cfg.ReferenceInterval)
+		d.Tick()
+		if len(autoCalls) > 0 {
+			break
+		}
+	}
+	if len(autoCalls) != 1 || autoCalls[0].Agent != "xo" {
+		t.Fatalf("auto-switch = %+v, want xo", autoCalls)
+	}
+	if len(exhausted) != 1 || exhausted[0] != "xo:account-side" {
+		t.Fatalf("leader exhaustion = %v, want xo:account-side", exhausted)
+	}
+}
+
+// #510: two consecutive clear folds enqueue auto-revert when eligible.
+func TestDetectorAutoRevertAfterClearHysteresis(t *testing.T) {
+	f := newFixture()
+	var reverts []string
+	var det *Detector
+	cfg := f.config("xo", []string{"xo", "backend"}, 3, "none")
+	cfg.RateLimitMaterial = func(agent string) (bool, surface.RateLimitScope, string, bool) {
+		if agent != "backend" {
+			return false, 0, "", true
+		}
+		return false, 0, "", true // always clear
+	}
+	cfg.RateLimitAutoRevertEligible = func(agent string) bool { return agent == "backend" }
+	cfg.RateLimitAutoRevert = func(agents []string) {
+		reverts = append(reverts, agents...)
+		for _, a := range agents {
+			det.EndAutoSwitchFlight(a)
+		}
+	}
+	det = newDet(t, f, cfg)
+	d := det
+	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateIdle}, "h0")
+	f.set("backend", surface.StateIdle)
+	f.signal = "h0"
+
+	// Probe tick → fold clear #1 → fold clear #2 (hysteresis) → revert.
+	for i := 0; i < 8 && len(reverts) == 0; i++ {
+		f.advance(d.cfg.ReferenceInterval)
+		d.Tick()
+	}
+	if len(reverts) != 1 || reverts[0] != "backend" {
+		t.Fatalf("auto-revert = %v, want [backend] after hysteresis", reverts)
+	}
+}
+
 // xoFinishLiveTick drives one XO Working→Idle cycle and advances only the live tick
 // interval (not referenceInterval). Use when testing wall-gated sub-cadences at a
 // faster live tick than the roster ceiling.
@@ -1177,8 +1291,12 @@ func TestDetectorContinueXOSettleRotate(t *testing.T) {
 func TestDetectorRateLimitSkipsWorkingDesk(t *testing.T) {
 	f := newFixture()
 	cfg := f.config("xo", []string{"xo", "backend"}, 3, "none")
+	// Only backend reports limited when probed; Working desks must never be probed.
 	cfg.RateLimitMaterial = func(agent string) (bool, surface.RateLimitScope, string, bool) {
-		return true, surface.RateLimitServerSide, "limited", true
+		if agent == "backend" {
+			return true, surface.RateLimitServerSide, "limited", true
+		}
+		return false, 0, "", true // Idle XO may be probed (#510) but is not limited here
 	}
 	d := newDet(t, f, cfg)
 	seed(d, map[string]surface.State{"xo": surface.StateIdle, "backend": surface.StateWorking}, "h0")
@@ -1190,7 +1308,7 @@ func TestDetectorRateLimitSkipsWorkingDesk(t *testing.T) {
 	d.Tick()
 	for _, w := range f.wakes {
 		for _, r := range w.reasons {
-			if strings.Contains(r, "rate-limited") {
+			if strings.Contains(r, "backend") && strings.Contains(r, "rate-limited") {
 				t.Fatalf("mid-turn desk must not rate-limit wake, got %v", f.wakes)
 			}
 		}

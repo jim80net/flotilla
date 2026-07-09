@@ -485,9 +485,11 @@ func (c *Config) BindingForChannel(channelID string) (Channel, bool) {
 }
 
 // AutoSwitchEligible reports whether the watch detector MAY enqueue an automatic
-// harness switch for this agent. Coordination desks (every binding's xo_agent, the
-// primary xo_agent, and cos_agent) stay on their current harness; approval_sensitive
-// desks are refused at enqueue (GATE-4).
+// harness switch for this agent. approval_sensitive desks are refused at enqueue
+// (GATE-4). Coordinators (primary XO, channel XOs, CoS, IsCoordinator) ARE eligible
+// (#510 resuscitation) — a stalled leader stalls the fleet; the host-local launch
+// failover chain is the operator-ratified downgrade policy. Disable all auto-switch
+// with FLOTILLA_AUTOSWITCH=0.
 func (c *Config) AutoSwitchEligible(name string) bool {
 	if name == "" {
 		return false
@@ -497,12 +499,6 @@ func (c *Config) AutoSwitchEligible(name string) bool {
 		return false
 	}
 	if a.ApprovalSensitive {
-		return false
-	}
-	if c.IsXO(name) {
-		return false
-	}
-	if c.CosAgent != "" && name == c.CosAgent {
 		return false
 	}
 	return true

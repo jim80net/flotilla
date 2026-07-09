@@ -405,6 +405,22 @@ func TestRunSwitchCloseNeverConfirms(t *testing.T) {
 	}
 }
 
+// #510: detector-enqueued auto-path falls through to kill+relaunch when Claude
+// graceful close hangs (handoff is already durable).
+func TestRunSwitchAutoPathCloseHangFallsBackToKill(t *testing.T) {
+	r := happySwitch()
+	r.closeNeverShell = true
+	p := testSwitchPlan()
+	p.autoPath = true
+	_, err := runSwitch(fakeSwitchOps(r), p)
+	if err != nil {
+		t.Fatalf("auto-path close hang must kill+relaunch, got %v", err)
+	}
+	if !r.respawned {
+		t.Error("auto-path unconfirmed close must fall back to respawn-kill")
+	}
+}
+
 func TestRunSwitchNoGracefulCloseFallsBackToKill(t *testing.T) {
 	r := happySwitch()
 	r.closeErr = surface.ErrNoGracefulClose

@@ -8,9 +8,9 @@
 
 ## Phase 1 — coordinator auto-downgrade (follow-up)
 
-- [ ] 1.1 Extend auto-switch eligibility for XO seats on account-side usage limits only
-- [ ] 1.2 Turn-final / ledger annotation of active harness slot + model tier
+- [x] 1.1 Extend auto-switch eligibility for XO/coordinator seats (#510 — both account-side and server-side scopes via existing failover selection)
+- [ ] 1.2 Turn-final / ledger annotation of active harness slot + model tier (still open; overlay + last-switch.json exist — turn-final prose is operator/agent discipline)
 
 ## Phase 2 — restore
 
-- [ ] 2.1 Detect limit clearance + offer/auto `flotilla switch --to primary`
+- [x] 2.1 Detect limit clearance + auto `flotilla switch --to primary` (#510; FLOTILLA_AUTOREVERT default-ON)

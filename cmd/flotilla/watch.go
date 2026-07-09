@@ -685,7 +685,12 @@ func cmdWatch(args []string) error {
 		var endAutoSwitch func(string)
 		autoSwitchOn := surface.AutoSwitchEnabled()
 		if autoSwitchOn {
-			log.Printf("flotilla watch: auto-switch ON (default; disable with FLOTILLA_AUTOSWITCH=0) — non-sensitive workers may auto-relocate on sustained throttle, bounded by the safety guardrails")
+			log.Printf("flotilla watch: auto-switch ON (default; disable with FLOTILLA_AUTOSWITCH=0) — non-sensitive desks AND coordinators may auto-relocate on sustained throttle (#510), bounded by the safety guardrails")
+			if surface.AutoRevertEnabled() {
+				log.Printf("flotilla watch: auto-revert ON (default; disable with FLOTILLA_AUTOREVERT=0) — restore preferred tier when limits clear")
+			} else {
+				log.Printf("flotilla watch: auto-revert DISABLED (FLOTILLA_AUTOREVERT=0)")
+			}
 		} else {
 			log.Printf("flotilla watch: auto-switch DISABLED (FLOTILLA_AUTOSWITCH=0)")
 		}
@@ -836,14 +841,63 @@ func cmdWatch(args []string) error {
 			OwningXO:                func(agent string) string { return cfg.OwningXO(agent, xo) },
 			WakeLayer:               wakeLayer,
 		}
+		// Leader exhaustion (#510): loud operator alert + adjutant escalate on the episode edge,
+		// independent of FLOTILLA_AUTOSWITCH — silent ignorance is never acceptable for a stalled leader.
+		detCfg.RateLimitLeaderExhausted = func(agent string, scope surface.RateLimitScope) {
+			alert(leaderExhaustionAlertBody(agent, scope))
+			if adj := cfg.AdjutantFor(agent); adj != "" {
+				charter := roster.LayerCharterPath(rosterDir, agent)
+				injector.Enqueue(watch.Job{
+					Agent:   adj,
+					Message: leaderExhaustionAdjutantBody(agent, scope, charter),
+					Kind:    watch.KindDetector,
+				})
+			}
+		}
 		if autoSwitchOn {
 			probeMaterial := rateLimitMaterial(cfg)
-			detCfg.RateLimitAutoSwitchDispatch = func(run func()) { go run() }
-			detCfg.RateLimitAutoSwitch = newRateLimitAutoSwitchDispatch(cfg, *rosterPath, launchPath, flatLaunch, probeMaterial, func(agent string) {
+			endFlight := func(agent string) {
 				if endAutoSwitch != nil {
 					endAutoSwitch(agent)
 				}
+			}
+			detCfg.RateLimitAutoSwitchDispatch = func(run func()) { go run() }
+			detCfg.RateLimitAutoSwitch = newRateLimitAutoSwitchDispatch(cfg, *rosterPath, launchPath, flatLaunch, probeMaterial, endFlight, autoSwitchHooks{
+				afterSuccess: func(agent string) {
+					if !cfg.IsCoordinator(agent) {
+						return
+					}
+					toSurface := agentSurface(cfg, agent)
+					body := coordinatorResuscitationNotifyBody(agent, toSurface)
+					for _, sub := range cfg.AgentsBelow(agent) {
+						injector.Enqueue(watch.Job{Agent: sub, Message: body, Kind: watch.KindDetector})
+					}
+					if adj := cfg.AdjutantFor(agent); adj != "" {
+						injector.Enqueue(watch.Job{
+							Agent:   adj,
+							Message: body + "\n(Adjutant: confirm leader is live on the new tier; re-brief if needed.)",
+							Kind:    watch.KindDetector,
+						})
+					}
+				},
 			})
+			if surface.AutoRevertEnabled() {
+				detCfg.RateLimitAutoRevertDispatch = func(run func()) { go run() }
+				detCfg.RateLimitAutoRevertEligible = func(agent string) bool {
+					if !cfg.AutoSwitchEligible(agent) {
+						return false
+					}
+					poison, err := loadActivePoison(time.Now())
+					if err != nil {
+						return false
+					}
+					if !autoRevertEligible(agent, poison, time.Now()) {
+						return false
+					}
+					return !primaryProviderPoisoned(agent, flatLaunch, poison)
+				}
+				detCfg.RateLimitAutoRevert = newRateLimitAutoRevertDispatch(*rosterPath, launchPath, flatLaunch, endFlight)
+			}
 		}
 		if sched != nil {
 			detCfg.ScheduleOnTick = sched.Tick
@@ -1226,7 +1280,10 @@ func adjutantEvaluationTickBody(leader, leaderAckPath, bufferPath, charterPath s
 		"1. ACK — touch the leader alive file (mechanical liveness; mandatory):\n" +
 		"   touch " + leaderAckPath + "\n" +
 		"2. EVALUATE — sweep " + leader + "'s layer: unhandled edges, PRs at gates, stale lanes, " +
-		"unanswered operator items. Distinguish all-quiet (nothing to do) from work-found (quiet but stuck).\n" +
+		"unanswered operator items. Distinguish all-quiet (nothing to do) from work-found (quiet but stuck). " +
+		"ALSO check leader usage-limit / rate-limit exhaustion (pane banners, stuck Idle/Errored on " +
+		"limit text, silent refusal-to-start). Leader exhaustion is NEVER silent ignorance — if " +
+		"present, ESCALATE LOUDLY to the operator and treat as urgent-class (#510 resuscitation).\n" +
 		"3. ACT BY TIER — all-quiet → ack only, no leader interrupt; work-found → buffer judgment items " +
 		"in " + bufferPath + " and inject a digest at " + leader + "'s next seam (immediately if urgent-class).\n\n" +
 		"This tick catches idle-holding: leader idle but queue not empty is work-found, not all-quiet." +
@@ -1264,7 +1321,9 @@ func leaderCharterPairingBody(leader, adjutant, charterPath, leaderAckPath strin
 func adjutantDualObservationContract(leader string) string {
 	return "\n\nDual observation (standing duty):\n" +
 		"1. Desk stream — subtree desks under " + leader + ": pane Assess state, finish-edges, crash/shell.\n" +
-		"2. Leader stream — " + leader + ": Working/Idle, settle/awaiting markers, turn-final tail.\n" +
+		"2. Leader stream — " + leader + ": Working/Idle, settle/awaiting markers, turn-final tail, " +
+		"AND usage-limit / rate-limit exhaustion signals (never silent — escalate to operator; " +
+		"daemon may auto-resuscitate via harness switch — #510).\n" +
 		"Buffer when leader is Working without await marker; inject consolidated briefs at Idle/settled seams."
 }
 

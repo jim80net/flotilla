@@ -29,3 +29,22 @@ func TestAutoSwitchEnabled(t *testing.T) {
 		})
 	}
 }
+
+func TestAutoRevertEnabled(t *testing.T) {
+	t.Setenv("FLOTILLA_AUTOREVERT", "")
+	if !AutoRevertEnabled() {
+		t.Fatal("default (unset) must be ON")
+	}
+	for _, v := range []string{"0", "false", "no", "off"} {
+		t.Run("off/"+v, func(t *testing.T) {
+			t.Setenv("FLOTILLA_AUTOREVERT", v)
+			if AutoRevertEnabled() {
+				t.Fatalf("FLOTILLA_AUTOREVERT=%q should be OFF", v)
+			}
+		})
+	}
+	t.Setenv("FLOTILLA_AUTOREVERT", "1")
+	if !AutoRevertEnabled() {
+		t.Fatal("FLOTILLA_AUTOREVERT=1 must be ON")
+	}
+}
