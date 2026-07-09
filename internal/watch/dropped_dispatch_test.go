@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/inbound"
+	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 )
 
@@ -124,5 +126,52 @@ func TestInjectorInboundTrack_OnConfirmedKindSend(t *testing.T) {
 	path, _ := inbound.Path(dir, "backend")
 	if len(inbound.NewStore(path).Load()) != 1 {
 		t.Fatal("confirmed KindSend must record inbound pending dispatch")
+	}
+}
+
+// #498 walk: confirmed KindSend through injector + real IsCoordinator on desk-home
+// channel shape (xo_agent=backend, members=[meta-xo]) must write inbound ledger.
+func TestInjectorInboundTrack_WalkDeskHomeChannel498(t *testing.T) {
+	dir := t.TempDir()
+	rosterPath := filepath.Join(dir, "flotilla.json")
+	body := `{
+	  "operator_user_id":"U","xo_agent":"meta-xo","cos_agent":"meta-xo",
+	  "agents":[{"name":"meta-xo"},{"name":"backend"}],
+	  "channels":[
+	    {"channel_id":"C_CMD","xo_agent":"meta-xo","role":"fleet-command","members":["meta-xo","backend"]},
+	    {"channel_id":"C_BE","xo_agent":"backend","members":["meta-xo"]}
+	  ]
+	}`
+	if err := os.WriteFile(rosterPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := roster.Load(rosterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.IsCoordinator("backend") {
+		t.Fatal("backend must not be coordinator on desk-home walk shape")
+	}
+
+	in := NewInjector(func(string, string) error { return nil }, 0)
+	in.rosterDir = dir
+	in.SetInboundTrack(InboundTrackHook(dir, cfg.IsCoordinator))
+
+	msg, nonce, err := inbound.AppendDispatchNonce("ORG dispatch: harness work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.deliver(Job{
+		Agent: "backend", Message: msg, Kind: KindSend,
+		Sender: "meta-xo", MessageID: "walk-e2e-1",
+	})
+
+	path, err := inbound.Path(dir, "backend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := inbound.NewStore(path).Load()
+	if len(got) != 1 || got[0].Nonce != nonce || got[0].Sender != "meta-xo" {
+		t.Fatalf("inbound ledger = %+v, want nonce %q from meta-xo", got, nonce)
 	}
 }

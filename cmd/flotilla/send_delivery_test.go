@@ -145,6 +145,43 @@ func TestCLIDirectDeliveryTracksInboundE2E(t *testing.T) {
 	}
 }
 
+// #498 walk acceptance: desk-home channel (xo_agent=desk, members=[coordinator]) must
+// write inbound ledger after confirmed CLI track with real IsCoordinator.
+func TestCLIDirectDeliveryTracksWalkDeskHomeChannel498(t *testing.T) {
+	dir := t.TempDir()
+	rosterPath := filepath.Join(dir, "flotilla.json")
+	body := `{
+		"operator_user_id":"U","xo_agent":"meta-xo","cos_agent":"meta-xo",
+		"agents":[{"name":"meta-xo"},{"name":"backend"}],
+		"channels":[
+			{"channel_id":"C_CMD","xo_agent":"meta-xo","role":"fleet-command","members":["meta-xo","backend"]},
+			{"channel_id":"C_BE","xo_agent":"backend","members":["meta-xo"]}
+		]}`
+	if err := os.WriteFile(rosterPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := roster.Load(rosterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.IsCoordinator("backend") {
+		t.Fatal("backend must not classify as coordinator on walk desk-home shape")
+	}
+	msg, nonce, err := inbound.AppendDispatchNonce("ORG dispatch: harness work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordDirectInboundTrack(cfg, rosterPath, "meta-xo", "backend", msg)
+	path, err := inbound.Path(dir, "backend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := inbound.NewStore(path).Load()
+	if len(got) != 1 || got[0].Nonce != nonce || got[0].Sender != "meta-xo" {
+		t.Fatalf("inbound ledger = %+v, want nonce %q from meta-xo", got, nonce)
+	}
+}
+
 // Acceptance (#491): execution desk with supervisor-as-member residue still records inbound.
 func TestCLIDirectDeliveryTracksDeclassifiedExecutionDesk491(t *testing.T) {
 	dir := t.TempDir()

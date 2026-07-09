@@ -94,9 +94,10 @@ func nextSendRetryWait(cur time.Duration) time.Duration {
 
 // recordDirectInboundTrack writes the recipient inbound ledger on CLI direct-delivery success
 // (#494). Daemon-swept sends use the same primitive via InboundTrackHook on confirm.
+// TrackConfirmedSend journals skipped|recorded reason=… (#498).
 func recordDirectInboundTrack(cfg *roster.Config, rosterPath, sender, recipient, message string) {
 	rosterDir := filepath.Dir(rosterPath)
-	if err := inbound.TrackConfirmedSend(rosterDir, sender, recipient, message, "", cfg.IsCoordinator); err != nil {
+	if _, err := inbound.TrackConfirmedSend(rosterDir, sender, recipient, message, "", cfg.IsCoordinator); err != nil {
 		fmt.Fprintf(os.Stderr, "flotilla: inbound track %q from %q failed: %v\n", recipient, sender, err)
 	}
 }

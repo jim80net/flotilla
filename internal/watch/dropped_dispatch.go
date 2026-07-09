@@ -8,6 +8,7 @@ import (
 )
 
 // InboundTrackHook records a confirmed KindSend into the recipient's durable inbound ledger.
+// TrackConfirmedSend emits the #498 journal line (recorded|skipped reason=…).
 func InboundTrackHook(rosterDir string, isCoordinator inbound.CoordinatorPredicate) func(Job) {
 	if rosterDir == "" {
 		return nil
@@ -16,7 +17,7 @@ func InboundTrackHook(rosterDir string, isCoordinator inbound.CoordinatorPredica
 		if j.Kind != KindSend || j.Sender == "" || j.Agent == "" || j.Message == "" {
 			return
 		}
-		if err := inbound.TrackConfirmedSend(rosterDir, j.Sender, j.Agent, j.Message, j.MessageID, isCoordinator); err != nil {
+		if _, err := inbound.TrackConfirmedSend(rosterDir, j.Sender, j.Agent, j.Message, j.MessageID, isCoordinator); err != nil {
 			log.Printf("flotilla watch: inbound track %q from %q failed: %v", j.Agent, j.Sender, err)
 		}
 	}
