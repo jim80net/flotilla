@@ -23,7 +23,7 @@ func TestEnqueueLayerMaterialWakeNonPrimaryUsesPerLayerPaths(t *testing.T) {
 	cfg := &roster.Config{Agents: []roster.Agent{{Name: "cos"}, {Name: "alpha-xo"}}}
 	var job watch.Job
 	enqueueLayerMaterialWake(cfg, dir, "cos", "alpha-xo", []string{"backend: finished a turn (working→idle)"},
-		"\n(To ack you are alive, run: touch /legacy)", legacySettled, func(j watch.Job) { job = j })
+		"\n(To ack you are alive, run: touch /legacy)", legacySettled, "", func(j watch.Job) { job = j })
 	if job.Agent != "alpha-xo" {
 		t.Fatalf("job agent = %q, want alpha-xo", job.Agent)
 	}

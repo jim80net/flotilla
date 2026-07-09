@@ -20,6 +20,7 @@ import (
 	"github.com/jim80net/flotilla/internal/decisionbrief"
 	"github.com/jim80net/flotilla/internal/delegatenudge"
 	"github.com/jim80net/flotilla/internal/deliver"
+	"github.com/jim80net/flotilla/internal/frontier"
 	"github.com/jim80net/flotilla/internal/idlehold"
 	"github.com/jim80net/flotilla/internal/inbound"
 	"github.com/jim80net/flotilla/internal/launch"
@@ -465,7 +466,7 @@ func cmdWatch(args []string) error {
 					body = leaderPingBody(leaderAckPath)
 				}
 			default: // WakeMaterial
-				enqueueLayerMaterialWake(cfg, rosterDir, xo, xo, reasons, ackInstr, *settledPath, injector.Enqueue)
+				enqueueLayerMaterialWake(cfg, rosterDir, xo, xo, reasons, ackInstr, *settledPath, *backlogPath, injector.Enqueue)
 				return
 			}
 			injector.Enqueue(watch.Job{Agent: target, Message: body, Kind: watch.KindDetector})
@@ -476,7 +477,7 @@ func cmdWatch(args []string) error {
 				log.Printf("flotilla watch: ignoring unexpected layer wake kind %v for %q", kind, owner)
 				return
 			}
-			enqueueLayerMaterialWake(cfg, rosterDir, xo, owner, reasons, ackInstr, *settledPath, injector.Enqueue)
+			enqueueLayerMaterialWake(cfg, rosterDir, xo, owner, reasons, ackInstr, *settledPath, *backlogPath, injector.Enqueue)
 		}
 
 		// wakeAgent is the PARALLEL agent-targeted wake seam (visibility synthesis, B2). It enqueues a
@@ -576,6 +577,9 @@ func cmdWatch(args []string) error {
 
 		// #216 stranded-handoff extension: gate work settled without gate-holder report.
 		strandedTracker := stranded.NewTracker()
+
+		// #530 return-to-frontier guard after adjutant seam side items.
+		frontierTracker := frontier.NewTracker()
 
 		// #232 coordinator delegation: every XO and CoS — not only the primary clock XO.
 		delegationNudgePolicy, err := roster.ResolveDelegationNudge(cfg.DelegationNudge, os.Getenv("FLOTILLA_DELEGATION_NUDGE"))
@@ -750,6 +754,10 @@ func cmdWatch(args []string) error {
 			AdjutantSeamOnFinish:      drainAdjutantSeamFor,
 			IdleHoldOnFinish:          idleHoldOnFinish(cfg, idleHoldTracker, injector.Enqueue),
 			StrandedHandoffOnFinish:   strandedHandoffOnFinish(cfg, strandedTracker, injector.Enqueue),
+			ReturnToFrontierOnFinish: returnToFrontierOnFinish(
+				cfg, rosterDir, frontierTracker, injector.Enqueue,
+				func(agent string) (string, bool, error) { return readDeskTurnFinal(cfg, agent) },
+			),
 			DroppedDispatchOnFinish: watch.DroppedDispatchFinishHook(
 				rosterDir,
 				func(agent string) (string, bool, error) { return readDeskTurnFinal(cfg, agent) },
@@ -1228,7 +1236,7 @@ func adjutantDualObservationContract(leader string) string {
 
 // enqueueLayerMaterialWake delivers a material wake to a coordinator layer (#438 stackable_wakes).
 // When an adjutant is configured and the material is not urgent-class, items buffer at the seam.
-func enqueueLayerMaterialWake(cfg *roster.Config, rosterDir, primaryXO, owner string, reasons []string, primaryAckInstr, primarySettledPath string, enqueue func(watch.Job)) {
+func enqueueLayerMaterialWake(cfg *roster.Config, rosterDir, primaryXO, owner string, reasons []string, primaryAckInstr, primarySettledPath, backlogPath string, enqueue func(watch.Job)) {
 	adjutant := cfg.AdjutantFor(owner)
 	var leaderAckPath, settledPath string
 	if owner == primaryXO {
@@ -1254,6 +1262,7 @@ func enqueueLayerMaterialWake(cfg *roster.Config, rosterDir, primaryXO, owner st
 			log.Printf("flotilla watch: adjutant buffer append failed for %q, falling back to leader wake: %v", owner, err)
 			body = leaderMaterialBody(reasons, settledPath, ackInstr)
 		} else {
+			recordFrontierOnBuffer(rosterDir, owner, backlogPath, reasons)
 			target = adjutant
 			body = adjutantBufferedNoteBody(owner, len(reasons), charterPath)
 		}
@@ -1597,6 +1606,89 @@ func delegationNudgeOnFinish(cfg *roster.Config, tracker *delegatenudge.Tracker,
 		}
 		log.Printf("flotilla watch: delegation-nudge %s: classifier=coordinator signal=inline-build", agent)
 		enqueue(watch.Job{Agent: agent, Message: delegatenudge.NudgePrompt(agent), Kind: watch.KindDetector})
+	}
+}
+
+// recordFrontierOnBuffer persists the #530 return_to frame when a non-urgent interrupt buffers.
+func recordFrontierOnBuffer(rosterDir, owner, backlogPath string, reasons []string) {
+	returnTo, label, ok := resolveFrontierReturnTo(backlogPath)
+	if !ok {
+		return
+	}
+	sideItem := strings.Join(reasons, "; ")
+	if len(sideItem) > 120 {
+		sideItem = sideItem[:120]
+	}
+	f := frontier.Frame{
+		Coordinator:   owner,
+		ReturnTo:      returnTo,
+		ActiveWarrant: label,
+		Priority:      frontier.PriorityMechanical,
+		Source:        "adjutant-buffer",
+		SideItem:      sideItem,
+	}
+	if err := frontier.RecordPreempt(roster.LayerFrontierPath(rosterDir, owner), f); err != nil {
+		log.Printf("flotilla watch: frontier record failed for %q: %v", owner, err)
+	}
+}
+
+func resolveFrontierReturnTo(backlogPath string) (pointer, label string, ok bool) {
+	if backlogPath == "" {
+		return "", "", false
+	}
+	raw, err := os.ReadFile(backlogPath)
+	if err != nil {
+		return "", "", false
+	}
+	return frontier.ReturnToFromBacklog(string(raw))
+}
+
+// returnToFrontierOnFinish builds the #530 frontier guard: on each coordinator finish,
+// when a frontier sidecar is set, the turn-final must resume return_to, reassign, or
+// name a blocking gate. nil tracker ⇒ inert.
+func returnToFrontierOnFinish(
+	cfg *roster.Config,
+	rosterDir string,
+	tracker *frontier.Tracker,
+	enqueue func(watch.Job),
+	readTurnFinal func(agent string) (string, bool, error),
+) func(agent string) {
+	if tracker == nil {
+		return nil
+	}
+	return func(agent string) {
+		if !cfg.IsCoordinator(agent) {
+			return
+		}
+		path := roster.LayerFrontierPath(rosterDir, agent)
+		f, ok, err := frontier.Load(path)
+		if err != nil {
+			log.Printf("flotilla watch: return-to-frontier SKIP %s: load: %v", agent, err)
+			return
+		}
+		if !ok {
+			return
+		}
+		text, hasFinal, err := readTurnFinal(agent)
+		if err != nil {
+			log.Printf("flotilla watch: return-to-frontier SKIP %s: read turn-final: %v", agent, err)
+			return
+		}
+		if !hasFinal {
+			return
+		}
+		r := frontier.Check(text, f)
+		if !r.Violation {
+			if err := frontier.Clear(path); err != nil {
+				log.Printf("flotilla watch: return-to-frontier clear failed for %s: %v", agent, err)
+			}
+			return
+		}
+		if !tracker.Record(agent, r) {
+			return
+		}
+		log.Printf("flotilla watch: return-to-frontier guard %s: signal=%s return_to=%q", agent, r.Signal, f.ReturnTo)
+		enqueue(watch.Job{Agent: agent, Message: frontier.NudgePrompt(agent, f), Kind: watch.KindDetector})
 	}
 }
 
