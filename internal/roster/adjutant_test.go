@@ -132,6 +132,7 @@ func TestLayerSidecarPaths(t *testing.T) {
 		{"awaiting", LayerAwaitingPath("/state", "alpha-xo"), "/state/flotilla-alpha-xo-awaiting"},
 		{"buffer", LayerBufferPath("/state", "alpha-xo"), "/state/flotilla-alpha-xo-buffer.json"},
 		{"frontier", LayerFrontierPath("/state", "alpha-xo"), "/state/flotilla-alpha-xo-frontier.json"},
+		{"arbitration-audit", LayerArbitrationAuditPath("/state", "alpha-xo"), "/state/flotilla-alpha-xo-arbitration-audit.jsonl"},
 		{"delivered", LayerBufferDeliveredPath("/state", "alpha-xo"), "/state/flotilla-alpha-xo-buffer-delivered.json"},
 		{"charter", LayerCharterPath("/state", "alpha-xo"), "/state/flotilla-alpha-xo-adjutant-charter.md"},
 	}

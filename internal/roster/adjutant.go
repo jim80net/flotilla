@@ -91,6 +91,11 @@ func LayerFrontierPath(rosterDir, coordinator string) string {
 	return filepath.Join(rosterDir, "flotilla-"+coordinator+"-frontier.json")
 }
 
+// LayerArbitrationAuditPath returns the JSONL urgent-bypass audit trail for a coordinator (#532).
+func LayerArbitrationAuditPath(rosterDir, coordinator string) string {
+	return filepath.Join(rosterDir, "flotilla-"+coordinator+"-arbitration-audit.jsonl")
+}
+
 // LayerCharterPath returns the first-presentation charter file for a coordinator/adjutant pair.
 func LayerCharterPath(rosterDir, coordinator string) string {
 	return filepath.Join(rosterDir, "flotilla-"+coordinator+"-adjutant-charter.md")
