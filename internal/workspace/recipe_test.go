@@ -67,14 +67,14 @@ func TestResolveRecipeFlatHarnessOverridesStaleWorkspaceLaunch(t *testing.T) {
 		Cwd:    "/other/flat-cwd",
 		Tmux:   "flotilla:flat",
 		Primary: &launch.HarnessSlot{
-			Surface: "grok",
-			Launch:  "grok --model composer-2.5-fast -w data",
-			Model:   "composer-2.5-fast",
+			Surface:  "grok",
+			Launch:   "grok --model composer-2.5-fast -w data",
+			Model:    "composer-2.5-fast",
 			Provider: "xai",
 		},
 		Fallbacks: []launch.HarnessSlot{{
-			Surface: "codex",
-			Launch:  "codex -w data",
+			Surface:  "codex",
+			Launch:   "codex -w data",
 			Provider: "openai",
 		}},
 	}}}
