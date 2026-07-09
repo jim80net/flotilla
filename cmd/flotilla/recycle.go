@@ -65,6 +65,8 @@ type recycleOps struct {
 	readGen      func(target string) (string, error)                // deliver.ReadRecycleGen
 	lock         func(target string) (release func(), err error)    // AcquirePaneTxn → Release
 	sleep        func(time.Duration)
+	// rotate is optional (#437 --self): surface.RotateContext after durable handoff.
+	rotate func(target string) error
 	// Worktree-exit prompt handling during Phase-2 close (Claude Code /exit on a worktree-homed desk).
 	cwd            string
 	removeWorktree bool
@@ -102,6 +104,9 @@ type recyclePlan struct {
 	ownPane                   string // $TMUX_PANE — the command's own pane (canonical self-recycle compare)
 	minHandoffBytes           int
 	timeouts                  recycleTimeouts
+	// selfPath is true for `flotilla recycle --self` (#437): handoff + rotate + takeover
+	// without graceful-close/respawn (coordinator self-rotation; never bare /clear).
+	selfPath bool
 }
 
 // samePaneAsSelf reports whether the resolved target IS the command's own pane, comparing
@@ -132,12 +137,13 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 
 	// Self-recycle guard (canonical %N compare): recycling our own pane would /exit the
 	// command itself before the relaunch, stranding an unrecoverable dead desk.
+	// --self (#437) is the intentional exception: handoff + rotate + takeover, no close.
 	tid, err := ops.paneID(target)
 	if err != nil {
 		return "", worktreeCloseNote{}, fmt.Errorf("resolve pane id for %q: %w", target, err) // surfaced, never swallowed
 	}
-	if samePaneAsSelf(tid, p.ownPane) {
-		return "", worktreeCloseNote{}, fmt.Errorf("refusing to recycle %q: %s is THIS command's own pane — closing it would kill the recycle before the relaunch; run recycle from a different pane or the watch host", p.agent, tid)
+	if samePaneAsSelf(tid, p.ownPane) && !p.selfPath {
+		return "", worktreeCloseNote{}, fmt.Errorf("refusing to recycle %q: %s is THIS command's own pane — closing it would kill the recycle before the relaunch; run recycle from a different pane or the watch host (or: flotilla recycle %s --self for coordinator handoff+takeover without kill)", p.agent, tid, p.agent)
 	}
 
 	// Copy-mode refuse (composer state unreadable → every Idle∧ComposerCleared gate would
@@ -187,6 +193,21 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 	}
 	if dur, err := ops.durable(p.cwd, p.designatedPath, p.minHandoffBytes); err != nil || !dur {
 		return "", worktreeCloseNote{}, fmt.Errorf("phase 2 re-verify: the handoff blob is no longer durable for %q (%v) — ABORT, desk untouched", p.agent, err)
+	}
+
+	// --self path (#437): durable handoff is enough — rotate context in place and inject
+	// takeover. Never bare /clear without a handoff; never close/respawn the coordinator pane.
+	if p.selfPath {
+		if ops.rotate != nil {
+			if err := ops.rotate(target); err != nil {
+				return "", worktreeCloseNote{}, fmt.Errorf("self-recycle: rotate context for %q failed: %w — handoff is durable at %s; take over manually", p.agent, err, p.designatedPath)
+			}
+		}
+		if err := ops.deliver(target, p.takeoverText); err != nil {
+			return "", worktreeCloseNote{}, fmt.Errorf("self-recycle: delivering takeover to %q failed: %w (handoff durable at %s)", p.agent, err, p.designatedPath)
+		}
+		msg := fmt.Sprintf("self-recycled %s → pane %s (handoff %s; rotated in place, took over — no process kill)\n", p.agent, target, p.designatedPath)
+		return msg, worktreeCloseNote{}, nil
 	}
 
 	// PHASE 2 — graceful close (the one irreversible step; the handoff is durable by here).
@@ -336,20 +357,33 @@ func pollHandoffGate(ops recycleOps, target string, p recyclePlan, timeout time.
 // being DEAD (claude-direct fleet desk: /exit exits the pane's direct process, which with
 // remain-on-exit on leaves pane_dead=1) OR a Shell verdict (a shell-backed desk drops to bash).
 // When Claude Code shows the worktree-exit menu, it answers mechanically (keep by default;
-// remove only when --remove-worktree and the tree is clean). A transient pane_dead read error
-// or an Assess Unknown (the capture-glitch fail-open value) is RETRIED, not treated as
-// "closed" — only a confirmed dead-or-shell returns true, so the relaunch never fires on a
-// still-live session.
+// remove only when --remove-worktree and the tree is clean). Subagent/list-nav overlays that
+// steal focus during /exit are self-healed when available (#436 / #443 abort class).
+// A transient pane_dead read error or an Assess Unknown (the capture-glitch fail-open value)
+// is RETRIED, not treated as "closed" — only a confirmed dead-or-shell returns true, so the
+// relaunch never fires on a still-live session.
 func pollClosed(ops recycleOps, target string, timeout time.Duration) (worktreeCloseNote, bool) {
 	n := pollAttempts(timeout)
 	var note worktreeCloseNote
 	answeredWorktree := false
+	healedOverlay := false
 	for i := 0; i <= n; i++ {
 		if dead, err := ops.paneDead(target); err == nil && dead {
 			return note, true
 		}
 		if ops.assess(target) == surface.StateShell {
 			return note, true
+		}
+		// #436: subagent exit-dialog / focus-stealing overlay during close — heal once per poll.
+		if ops.selfHeal != nil && ops.composer != nil {
+			switch ops.composer(target) {
+			case surface.ComposerSubAgent, surface.ComposerListNav:
+				ops.selfHeal(target)
+				if !healedOverlay {
+					log.Printf("flotilla: recycle: healed focus-stealing overlay on %q during close poll (subagent/list-nav — #436)", target)
+					healedOverlay = true
+				}
+			}
 		}
 		if !answeredWorktree && ops.capturePane != nil && ops.answerMenu != nil {
 			if prompt, err := ops.capturePane(target); err == nil && deliver.ClaudeWorktreeExitPrompt(prompt) {
@@ -406,11 +440,16 @@ func recycleToken() (string, error) {
 	return time.Now().UTC().Format("20060102T150405.000000000") + "-" + hex.EncodeToString(b[:]), nil
 }
 
+// busyRetryDefault is how many extra attempts cmdRecycle makes when phase 0/re-verify
+// aborts because the desk is busy (#436 busy-desk retry). Each attempt re-runs the full
+// fail-closed pipeline (fresh token/handoff path).
+const busyRetryDefault = 2
+
 // cmdRecycle wires the real tmux/surface/git ops + the resolved plan and runs the fail-closed
 // core. It refuses up front when the surface is not recycle-capable (no RecycleBridge / no
 // ComposerStateProbe) — the no-silent-degrade invariant.
 func cmdRecycle(args []string) error {
-	agentName, rosterPath, launchPath, dryRun, removeWorktree, err := parseRecycleArgs(args)
+	agentName, rosterPath, launchPath, dryRun, removeWorktree, selfPath, err := parseRecycleArgs(args)
 	if err != nil {
 		return err
 	}
@@ -460,20 +499,6 @@ func cmdRecycle(args []string) error {
 		return fmt.Errorf("surface %q is not recycle-capable (no composer-state probe: the idle∧cleared gates need it) — cannot safely recycle %q", drv.Name(), agentName)
 	}
 
-	token, err := recycleToken()
-	if err != nil {
-		return err
-	}
-	designated := bridge.HandoffPath(recipe.Cwd, token)
-	plan := recyclePlan{
-		agent: agentName, key: agent.Title(), cwd: recipe.Cwd, launch: recipe.Launch,
-		token: token, designatedPath: designated,
-		handoffText: bridge.HandoffTurn(designated), takeoverText: bridge.TakeoverTurn(designated),
-		ownPane:         os.Getenv("TMUX_PANE"),
-		minHandoffBytes: defaultMinHandoff,
-		timeouts:        defaultTimeouts(),
-	}
-
 	if removeWorktree {
 		n, err := deliver.CountUncommitted(recipe.Cwd)
 		if err != nil {
@@ -484,8 +509,21 @@ func cmdRecycle(args []string) error {
 		}
 	}
 
+	// Dry-run uses a placeholder token (no crypto needed) for display only.
 	if dryRun {
+		token := "DRYRUN"
+		designated := bridge.HandoffPath(recipe.Cwd, token)
+		plan := recyclePlan{
+			agent: agentName, key: agent.Title(), cwd: recipe.Cwd, launch: recipe.Launch,
+			token: token, designatedPath: designated,
+			handoffText: bridge.HandoffTurn(designated), takeoverText: bridge.TakeoverTurn(designated),
+			ownPane: os.Getenv("TMUX_PANE"), minHandoffBytes: defaultMinHandoff,
+			timeouts: defaultTimeouts(), selfPath: selfPath,
+		}
 		printRecyclePlan(plan, recipe)
+		if selfPath {
+			fmt.Printf("  mode:       --self (handoff + rotate + takeover; no process kill)\n")
+		}
 		return nil
 	}
 
@@ -522,14 +560,52 @@ func cmdRecycle(args []string) error {
 		capturePane:    deliver.CapturePane,
 		answerMenu:     deliver.SendMenuChoice,
 		countDirty:     deliver.CountUncommitted,
+		rotate:         func(target string) error { return surface.RotateContext(drv, target) },
 	}
+	// Self-heal is DEFAULT-ON for recycle close polls when FLOTILLA_SELF_HEAL is set;
+	// also enable for close-poll overlay healing when SendCtrlC is available (#436).
 	if surface.SelfHealEnabled() {
 		ops.selfHeal = func(target string) { confirm.Heal(drv, target) } // heal-only; NEVER submits a body
 	}
 
-	msg, wtNote, runErr := runRecycle(ops, plan)
+	attempts := 1 + busyRetryDefault
+	if selfPath {
+		attempts = 1 // --self does not busy-retry-close; phase 0 still waits boot timeout once
+	}
+	var msg string
+	var wtNote worktreeCloseNote
+	var runErr error
+	var plan recyclePlan
+	for attempt := 0; attempt < attempts; attempt++ {
+		token, terr := recycleToken()
+		if terr != nil {
+			return terr
+		}
+		designated := bridge.HandoffPath(recipe.Cwd, token)
+		plan = recyclePlan{
+			agent: agentName, key: agent.Title(), cwd: recipe.Cwd, launch: recipe.Launch,
+			token: token, designatedPath: designated,
+			handoffText: bridge.HandoffTurn(designated), takeoverText: bridge.TakeoverTurn(designated),
+			ownPane:         os.Getenv("TMUX_PANE"),
+			minHandoffBytes: defaultMinHandoff,
+			timeouts:        defaultTimeouts(),
+			selfPath:        selfPath,
+		}
+		msg, wtNote, runErr = runRecycle(ops, plan)
+		if runErr == nil {
+			break
+		}
+		if attempt+1 < attempts && isRetryableBusy(runErr) {
+			log.Printf("flotilla: recycle: busy-desk abort for %q (attempt %d/%d) — retrying after settle wait (#436)", agentName, attempt+1, attempts)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		break
+	}
 	writeLastRecycle(agentName, plan, msg, runErr, wtNote)
 	if runErr != nil {
+		// #436: never silent fail-closed — escalate to owning coordinator.
+		escalateRecycleAbort(cfg, agentName, runErr, plan.designatedPath)
 		return runErr
 	}
 	fmt.Print(msg)
@@ -600,10 +676,13 @@ func writeLastRecycle(agent string, p recyclePlan, msg string, runErr error, wt 
 	}
 }
 
-// parseRecycleArgs resolves the agent, roster path, launch path, and --dry-run flag, accepting
+// parseRecycleArgs resolves the agent, roster path, launch path, and flags, accepting
 // the agent positional EITHER before or after the flags (à la parseResumeArgs). Pure (no I/O)
 // so the ordering is unit-tested. launchPath is empty when --launch was not given.
-func parseRecycleArgs(args []string) (agent, rosterPath, launchPath string, dryRun, removeWorktree bool, err error) {
+func parseRecycleArgs(args []string) (agent, rosterPath, launchPath string, dryRun, removeWorktree, selfPath bool, err error) {
+	fail := func(e error) (string, string, string, bool, bool, bool, error) {
+		return "", "", "", false, false, false, e
+	}
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		agent, args = args[0], args[1:]
 	}
@@ -612,15 +691,16 @@ func parseRecycleArgs(args []string) (agent, rosterPath, launchPath string, dryR
 	lp := fs.String("launch", os.Getenv("FLOTILLA_LAUNCH"), "launch recipes path (default <roster-dir>/flotilla-launch.json)")
 	dr := fs.Bool("dry-run", false, "print the resolved plan (pane, recipe, designated handoff, the turns) without acting")
 	rw := fs.Bool("remove-worktree", false, "on worktree-exit prompt, remove worktree (only when cwd has no uncommitted files)")
+	sf := fs.Bool("self", false, "coordinator self-rotation: handoff + rotate + takeover without process kill (#437)")
 	if err = fs.Parse(args); err != nil {
-		return "", "", "", false, false, err
+		return fail(err)
 	}
 	rest := fs.Args()
 	if agent == "" && len(rest) >= 1 {
 		agent, rest = rest[0], rest[1:]
 	}
 	if agent == "" || len(rest) != 0 {
-		return "", "", "", false, false, fmt.Errorf("usage: flotilla recycle <agent> [--launch <path>] [--dry-run] [--remove-worktree]")
+		return fail(fmt.Errorf("usage: flotilla recycle <agent> [--launch <path>] [--dry-run] [--remove-worktree] [--self]"))
 	}
-	return agent, *rp, *lp, *dr, *rw, nil
+	return agent, *rp, *lp, *dr, *rw, *sf, nil
 }

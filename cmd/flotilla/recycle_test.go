@@ -445,19 +445,21 @@ func TestParseRecycleArgs(t *testing.T) {
 		args      []string
 		wantAgent string
 		wantDry   bool
+		wantSelf  bool
 		wantErr   bool
 	}{
-		{"agent only", []string{"backend"}, "backend", false, false},
-		{"agent then dry", []string{"backend", "--dry-run"}, "backend", true, false},
-		{"dry then agent", []string{"--dry-run", "backend"}, "backend", true, false},
-		{"agent then launch", []string{"backend", "--launch", "/tmp/l.json"}, "backend", false, false},
-		{"no agent", []string{"--dry-run"}, "", false, true},
-		{"empty", []string{}, "", false, true},
-		{"extra positional", []string{"a", "b"}, "", false, true},
+		{"agent only", []string{"backend"}, "backend", false, false, false},
+		{"agent then dry", []string{"backend", "--dry-run"}, "backend", true, false, false},
+		{"dry then agent", []string{"--dry-run", "backend"}, "backend", true, false, false},
+		{"agent then launch", []string{"backend", "--launch", "/tmp/l.json"}, "backend", false, false, false},
+		{"self", []string{"xo", "--self"}, "xo", false, true, false},
+		{"no agent", []string{"--dry-run"}, "", false, false, true},
+		{"empty", []string{}, "", false, false, true},
+		{"extra positional", []string{"a", "b"}, "", false, false, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			agent, _, _, dry, _, err := parseRecycleArgs(c.args)
+			agent, _, _, dry, _, self, err := parseRecycleArgs(c.args)
 			if c.wantErr {
 				if err == nil {
 					t.Fatalf("parseRecycleArgs(%v) = nil error, want error", c.args)
@@ -467,9 +469,66 @@ func TestParseRecycleArgs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseRecycleArgs(%v): %v", c.args, err)
 			}
-			if agent != c.wantAgent || dry != c.wantDry {
-				t.Errorf("got (agent=%q dry=%v), want (%q %v)", agent, dry, c.wantAgent, c.wantDry)
+			if agent != c.wantAgent || dry != c.wantDry || self != c.wantSelf {
+				t.Errorf("got (agent=%q dry=%v self=%v), want (%q %v %v)", agent, dry, self, c.wantAgent, c.wantDry, c.wantSelf)
 			}
 		})
+	}
+}
+
+// #436: subagent overlay during close is self-healed so pollClosed can finish.
+func TestPollClosedHealsSubagentOverlay(t *testing.T) {
+	r := happyRec()
+	r.closed = true
+	r.closeNeverShell = true // paneDead stays false until we flip after heal
+	heals := 0
+	ops := fakeRecycleOps(r)
+	ops.selfHeal = func(string) {
+		heals++
+		r.closeNeverShell = false // after heal, paneDead reports dead
+	}
+	// Composer reports subagent while closed.
+	r.overlay = true
+	// After first heal, also clear overlay so assess path can progress.
+	ops.composer = func(string) surface.ComposerDisposition {
+		if heals > 0 {
+			return surface.ComposerCleared
+		}
+		return surface.ComposerSubAgent
+	}
+	note, ok := pollClosed(ops, "sess:0.1", 3*recyclePollInterval)
+	_ = note
+	if !ok {
+		t.Fatal("pollClosed must succeed after subagent heal")
+	}
+	if heals == 0 {
+		t.Fatal("expected at least one selfHeal during close poll")
+	}
+}
+
+// #437: --self path handoffs, rotates, takes over — never closes/respawns.
+func TestRunRecycleSelfPath(t *testing.T) {
+	r := happyRec()
+	rotated := false
+	ops := fakeRecycleOps(r)
+	ops.rotate = func(string) error { rotated = true; return nil }
+	p := testPlan()
+	p.selfPath = true
+	p.ownPane = "%5" // same as fake paneID — would refuse without --self
+	msg, _, err := runRecycle(ops, p)
+	if err != nil {
+		t.Fatalf("self-recycle: %v", err)
+	}
+	if !rotated {
+		t.Error("self-recycle must rotate context")
+	}
+	if r.closed || r.respawned {
+		t.Errorf("self-recycle must not close/respawn (closed=%v respawned=%v)", r.closed, r.respawned)
+	}
+	if !strings.Contains(msg, "self-recycled") {
+		t.Errorf("msg = %q, want self-recycled", msg)
+	}
+	if len(r.delivered) != 2 {
+		t.Errorf("want handoff+takeover delivers, got %v", r.delivered)
 	}
 }
