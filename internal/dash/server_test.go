@@ -1451,15 +1451,22 @@ func TestConversationsFeed518(t *testing.T) {
 	}
 
 	// Delivered path: optimistic + flush + refresh (stream re-fetch for desk reply).
-	dIdx := strings.Index(js, `if (outcome === "delivered")`)
-	if dIdx < 0 {
-		t.Fatal("delivered outcome handler missing")
+	// Optimistic must be recorded BEFORE the sameSel early-return so a mid-send desk
+	// switch still leaves the outbound line on the target thread when the operator returns.
+	routeIdx := strings.Index(js, `postJSON("/api/control/route"`)
+	if routeIdx < 0 {
+		t.Fatal("thread composer route post missing")
 	}
-	sendBlock := js[dIdx:min(dIdx+900, len(js))]
+	sendBlock := js[routeIdx:min(routeIdx+1400, len(js))]
 	for _, want := range []string{"appendOptimisticOutbound", "flushDeferredMirrorPaint", "refresh()"} {
 		if !strings.Contains(sendBlock, want) {
 			t.Errorf("delivered path must include %q (#518)", want)
 		}
+	}
+	appIdx := strings.Index(sendBlock, "appendOptimisticOutbound")
+	selIdx := strings.Index(sendBlock, "if (!sameSel(target)) return;")
+	if appIdx < 0 || selIdx < 0 || appIdx > selIdx {
+		t.Error("appendOptimisticOutbound must run before sameSel early-return (mid-send desk switch) — #518")
 	}
 
 	css := doGet(t, srv, "/static/dash.css").Body.String()
