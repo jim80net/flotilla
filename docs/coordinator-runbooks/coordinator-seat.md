@@ -32,8 +32,9 @@ for permission IS choosing to do nothing.
 - **Visibility synthesis:** post ONLY the delta since your last synthesis; `idle` is
   correct ([`visibility.md`](../visibility.md)).
 - **Ceremonies:** daemon-fired walk and parade — see [`ceremonies.md`](./ceremonies.md).
-- **Heartbeat sweeps:** scan `flotilla status` for crashed desks and the alarm
-  **idle desk + unstarted assigned work = mis-scheduling**.
+- **Heartbeat sweeps:** scan `flotilla status` for crashed desks and `loop_posture`
+  (not pane idle alone — #524). Alarm: **`drifted`** (settled while unblocked work
+  remains) or **idle desk + unstarted assigned work = mis-scheduling**.
 
 ## Fleet layout
 

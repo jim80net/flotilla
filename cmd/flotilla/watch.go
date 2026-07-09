@@ -1335,13 +1335,18 @@ func leaderCharterPairingBody(leader, adjutant, charterPath, leaderAckPath strin
 }
 
 // adjutantDualObservationContract is the prompt-contract for dual desk+leader observation (#439 2.3).
+// #524: observe loop_posture (fleet loop vocabulary), not pane idle alone.
 func adjutantDualObservationContract(leader string) string {
 	return "\n\nDual observation (standing duty):\n" +
-		"1. Desk stream — subtree desks under " + leader + ": pane Assess state, finish-edges, crash/shell.\n" +
-		"2. Leader stream — " + leader + ": Working/Idle, settle/awaiting markers, turn-final tail, " +
+		"1. Desk stream — subtree desks under " + leader + ": pane Assess state, finish-edges, crash/shell, " +
+		"and loop_posture (composing/available/parked/awaiting-authority/blocked vs drifted/crashed/reaped/unknown).\n" +
+		"2. Leader stream — " + leader + ": Working/Idle pane state AND loop_posture (not pane idle alone — #524), " +
+		"settle/awaiting markers, turn-final tail, " +
 		"AND usage-limit / rate-limit exhaustion signals (never silent — escalate to operator; " +
 		"daemon may auto-resuscitate via harness switch — #510).\n" +
-		"Buffer when leader is Working without await marker; inject consolidated briefs at Idle/settled seams."
+		"Buffer when leader is composing/goal-active or Working without await marker; " +
+		"inject consolidated briefs at available/parked (in-loop idle) seams — not while awaiting-authority.\n" +
+		"Out-of-loop postures (drifted/crashed/reaped) escalate; do not treat them as parked."
 }
 
 // enqueueLayerMaterialWake delivers a material wake to a coordinator layer (#438 stackable_wakes).

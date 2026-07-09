@@ -193,7 +193,8 @@ Plain pane **idle** is NOT an adequate autonomous-fleet loop state — it confla
 out-of-loop with legitimate in-loop postures (between turns, parked, maintaining, refining,
 cleaning). Bootstrap and standup MUST surface a **loop posture** distinct from `surface.State`.
 
-Full taxonomy: `openspec/changes/loop-aware-status-taxonomy/`.
+Full taxonomy + derivation: `openspec/changes/loop-aware-status-taxonomy/` (#524).
+Implementation: `internal/loopposture` (Derive, ParkStrict default, LoopObserver seam).
 
 | Layer | Field | Officer question |
 |---|---|---|
@@ -201,14 +202,18 @@ Full taxonomy: `openspec/changes/loop-aware-status-taxonomy/`.
 | Loop | `loop_posture` | Is this seat properly in the coordination loop? |
 
 v1 in-loop postures: `composing`, `available`, `parked`, `awaiting-authority`, `blocked`,
-optional `maintaining` / `refining` / `cleaning`. Out-of-loop: `drifted`, `crashed`, `reaped`,
-`unknown`.
+optional `maintaining` / `refining` / `cleaning` (+ `goal-active` when native observer reports).
+Out-of-loop: `drifted`, `crashed`, `reaped`, `unknown`.
+
+**Parked default: strict** — empty unblocked backlog required; settled+unblocked ⇒ `drifted`.
 
 Doctor **B012**: every `live_expected` agent has derivable `loop_posture` when snapshot fresh;
-stale/absent ⇒ `LOOP_POSTURE_UNKNOWN` on live seats.
+stale/absent ⇒ `unknown` / `LOOP_POSTURE_UNKNOWN` on live seats. Derivation is in
+`internal/loopposture`; runnable bootstrap doctor check is a follow-on.
 
 Validation **V10**: `flotilla status --json` distinguishes `available` vs `parked` vs `drifted`
-vs `awaiting-authority` on generic fixtures.
+vs `awaiting-authority` on generic fixtures (covered by `TestBuildStatusJSON_LoopPostureV10`
+and `TestDerive_V10Distinguishes`).
 
 ## 3. Naming convention — `{identifier}-{role}`
 

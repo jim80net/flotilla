@@ -283,6 +283,9 @@
         var key = String(d.name).toLowerCase();
         var a = agents[key] || {};
         var state = String(a.state || "unknown");
+        // #524: show loop_posture beside pane state so officers see parked vs drifted.
+        var posture = String(a.loop_posture || "");
+        var stateLabel = posture ? (state + " · " + posture) : state;
         // composite match: this row lights up ONLY when both the desk name AND its channel
         // match the selection — so a desk that appears in several channels highlights just the
         // picked copy, not all of them (#370).
@@ -296,7 +299,7 @@
             '<span class="conv-rail ' + deskStateClass(state) + '" aria-hidden="true"></span>' +
             '<span class="conv-item-body">' +
               '<span class="conv-item-name">' + escapeHtml(d.name) + roleTag + "</span>" +
-              '<span class="conv-item-state ' + deskStateClass(state) + '">' + escapeHtml(state) + "</span>" +
+              '<span class="conv-item-state ' + deskStateClass(state) + '" title="pane state · loop posture">' + escapeHtml(stateLabel) + "</span>" +
             "</span>" +
           "</button>"
         );
@@ -362,6 +365,8 @@
     var agents = agentMap(status);
     var a = agents[String(selectedDesk).toLowerCase()] || {};
     var state = String(a.state || "unknown");
+    // #524: loop_posture is distinct from pane state (idle ≠ parked).
+    var posture = String(a.loop_posture || "");
     var stale = fresh.state === "stale";
     card.innerHTML =
       '<article class="desk conv-desk-mini' + (stale ? " desk-stale" : "") + '">' +
@@ -370,6 +375,7 @@
           '<header class="desk-head">' +
             '<span class="desk-name">' + escapeHtml(selectedDesk) + "</span>" +
             '<span class="desk-state ' + deskStateClass(state) + '">' + escapeHtml(state) + "</span>" +
+            (posture ? ('<span class="desk-loop-posture" title="loop posture">' + escapeHtml(posture) + "</span>") : "") +
           "</header>" +
           '<span class="desk-surface">' + escapeHtml(a.surface || "—") + "</span>" +
         "</div>" +
