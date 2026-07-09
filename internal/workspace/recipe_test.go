@@ -10,125 +10,79 @@ import (
 	"github.com/jim80net/flotilla/internal/launch"
 )
 
-// writeWorkspaceRecipe sets the workspace root to a temp dir and writes a
-// launch.json for the agent, returning nothing (the root is set via t.Setenv).
-func writeWorkspaceRecipe(t *testing.T, agent, json string) {
-	t.Helper()
+func TestStaleWorkspaceLaunchWarningAbsent(t *testing.T) {
+	t.Setenv(rootEnv, t.TempDir())
+	if warn, err := StaleWorkspaceLaunchWarning("nobody"); err != nil || warn != "" {
+		t.Fatalf("StaleWorkspaceLaunchWarning(absent) = (%q, %v), want (\"\", nil)", warn, err)
+	}
+}
+
+func TestStaleWorkspaceLaunchWarningPresent(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv(rootEnv, root)
-	dir := filepath.Join(root, agent)
+	dir := filepath.Join(root, "data")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, LaunchFileName), []byte(json), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, LaunchFileName), []byte(`{"launch":"old","cwd":"/abs"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func TestLoadRecipePresentAndValid(t *testing.T) {
-	writeWorkspaceRecipe(t, "xo",
-		`{"launch":"claude -w xo","cwd":"/abs/worktree","tmux":"flotilla:xo"}`)
-	r, ok, err := LoadRecipe("xo")
-	if err != nil || !ok {
-		t.Fatalf("LoadRecipe = (%+v, %v, %v), want a valid recipe", r, ok, err)
-	}
-	if r.Launch != "claude -w xo" || r.Cwd != "/abs/worktree" {
-		t.Errorf("recipe fields not parsed: %+v", r)
+	warn, err := StaleWorkspaceLaunchWarning("data")
+	if err != nil || warn == "" || !strings.Contains(warn, "deprecated") {
+		t.Fatalf("StaleWorkspaceLaunchWarning(present) = (%q, %v), want deprecation warning", warn, err)
 	}
 }
 
-func TestLoadRecipeAbsentFallsThrough(t *testing.T) {
-	t.Setenv(rootEnv, t.TempDir()) // root exists but no agent dir
-	r, ok, err := LoadRecipe("nobody")
-	if err != nil || ok {
-		t.Fatalf("LoadRecipe(absent) = (%+v, %v, %v), want (zero, false, nil)", r, ok, err)
-	}
-}
-
-func TestLoadRecipeInvalidIsError(t *testing.T) {
-	writeWorkspaceRecipe(t, "a", `{"launch":"claude","cwd":"relative/path"}`) // non-absolute cwd
-	if _, ok, err := LoadRecipe("a"); err == nil {
-		t.Fatalf("LoadRecipe(relative cwd) = ok=%v err=nil, want a validation error", ok)
-	}
-	writeWorkspaceRecipe(t, "b", `{not json`)
-	if _, _, err := LoadRecipe("b"); err == nil {
-		t.Fatal("LoadRecipe(malformed json) = nil error, want parse error")
-	}
-}
-
-func TestResolveRecipeFlatHarnessOverridesStaleWorkspaceLaunch(t *testing.T) {
-	// Regression for #550: workspace init snapshots launch.json once; fleet-wide model
-	// migrations edit the shared flotilla-launch.json — resume/recycle must read harness
-	// fields live from the flat file, not the stale per-desk copy.
-	writeWorkspaceRecipe(t, "data",
-		`{"launch":"grok --model composer-2 -w data","cwd":"/abs/worktree","tmux":"flotilla-data:desk"}`)
+func TestResolveRecipeFlatOnly(t *testing.T) {
 	flat := &launch.Config{Agents: map[string]launch.Recipe{"data": {
 		Launch: "grok --model composer-2.5-fast -w data",
-		Cwd:    "/other/flat-cwd",
-		Tmux:   "flotilla:flat",
-		Primary: &launch.HarnessSlot{
-			Surface:  "grok",
-			Launch:   "grok --model composer-2.5-fast -w data",
-			Model:    "composer-2.5-fast",
-			Provider: "xai",
-		},
-		Fallbacks: []launch.HarnessSlot{{
-			Surface:  "codex",
-			Launch:   "codex -w data",
-			Provider: "openai",
-		}},
+		Cwd:    "/abs/worktree",
+		Tmux:   "flotilla-data:desk",
 	}}}
 	r, err := ResolveRecipe("data", flat)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if r.Launch != "grok --model composer-2.5-fast -w data" {
-		t.Errorf("launch = %q, want the flat harness command (stale workspace must not win)", r.Launch)
+		t.Errorf("launch = %q, want flat harness command", r.Launch)
 	}
-	if r.Cwd != "/abs/worktree" {
-		t.Errorf("cwd = %q, want the workspace worktree path", r.Cwd)
-	}
-	if r.Tmux != "flotilla-data:desk" {
-		t.Errorf("tmux = %q, want the workspace tmux target", r.Tmux)
-	}
-	if r.Primary == nil || r.Primary.Model != "composer-2.5-fast" {
-		t.Errorf("primary = %+v, want the flat failover chain head", r.Primary)
-	}
-	if len(r.Fallbacks) != 1 || r.Fallbacks[0].Surface != "codex" {
-		t.Errorf("fallbacks = %+v, want the flat failover chain", r.Fallbacks)
+	if r.Cwd != "/abs/worktree" || r.Tmux != "flotilla-data:desk" {
+		t.Errorf("desk fields = %+v, want flat recipe cwd/tmux", r)
 	}
 }
 
-func TestResolveRecipeWorkspaceOnlyWhenFlatAbsent(t *testing.T) {
-	writeWorkspaceRecipe(t, "a", `{"launch":"workspace-cmd","cwd":"/abs","tmux":"flotilla-a:desk"}`)
-	r, err := ResolveRecipe("a", nil)
+func TestResolveRecipeIgnoresStaleWorkspaceLaunch(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv(rootEnv, root)
+	dir := filepath.Join(root, "data")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stale := `{"launch":"grok --model composer-2 -w data","cwd":"/stale","tmux":"flotilla:stale"}`
+	if err := os.WriteFile(filepath.Join(dir, LaunchFileName), []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	flat := &launch.Config{Agents: map[string]launch.Recipe{"data": {
+		Launch: "grok --model composer-2.5-fast -w data",
+		Cwd:    "/abs/worktree",
+		Tmux:   "flotilla-data:desk",
+	}}}
+	r, err := ResolveRecipe("data", flat)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Launch != "workspace-cmd" || r.Cwd != "/abs" {
-		t.Errorf("ResolveRecipe(no flat) = %+v, want the workspace recipe unchanged", r)
+	if r.Launch != "grok --model composer-2.5-fast -w data" {
+		t.Errorf("launch = %q, want flat file (stale workspace ignored)", r.Launch)
 	}
 }
 
-func TestResolveRecipeFlatFallback(t *testing.T) {
-	t.Setenv(rootEnv, t.TempDir()) // no workspace recipe
-	flat := &launch.Config{Agents: map[string]launch.Recipe{"a": {Launch: "flat-cmd", Cwd: "/abs"}}}
-	r, err := ResolveRecipe("a", flat)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.Launch != "flat-cmd" {
-		t.Errorf("ResolveRecipe used %q, want the flat fallback", r.Launch)
-	}
-}
-
-func TestResolveRecipeNeitherIsError(t *testing.T) {
-	t.Setenv(rootEnv, t.TempDir())
-	if _, err := ResolveRecipe("ghost", &launch.Config{Agents: map[string]launch.Recipe{}}); err == nil {
-		t.Fatal("ResolveRecipe(neither) = nil error, want a clear not-found error")
+func TestResolveRecipeMissingFlatEntryIsError(t *testing.T) {
+	flat := &launch.Config{Agents: map[string]launch.Recipe{}}
+	if _, err := ResolveRecipe("ghost", flat); err == nil {
+		t.Fatal("ResolveRecipe(missing entry) = nil error, want error")
 	}
 	if _, err := ResolveRecipe("ghost", nil); err == nil {
-		t.Fatal("ResolveRecipe(neither, nil flat) = nil error, want error")
+		t.Fatal("ResolveRecipe(nil flat) = nil error, want error")
 	}
 }
 
@@ -195,7 +149,7 @@ func TestWriteActiveOverlayRoundTrips(t *testing.T) {
 }
 
 // TestResolveHarnessAbsentOverlayIsPrimary: no overlay ⇒ the primary slot, which is the
-// resolved (flat or workspace) recipe with slot name "primary".
+// resolved flat recipe with slot name "primary".
 func TestResolveHarnessAbsentOverlayIsPrimary(t *testing.T) {
 	t.Setenv(rootEnv, t.TempDir())
 	flat := &launch.Config{Agents: map[string]launch.Recipe{"data": {Launch: "claude -w data", Cwd: "/abs"}}}
@@ -277,7 +231,7 @@ func TestResolveHarnessTornOverlayFallsBackToPrimary(t *testing.T) {
 // recipe. This test is the red tripwire: a future change that wires the bundle/overlay into the
 // resume resolution path breaks it.
 func TestResolveRecipeResumeIsBundleAndOverlayIndependent(t *testing.T) {
-	t.Setenv(rootEnv, t.TempDir()) // a clean workspace: no launch.json, no active-harness.json, no bundle
+	t.Setenv(rootEnv, t.TempDir()) // a clean workspace: no active-harness.json, no bundle
 	flat := &launch.Config{Agents: map[string]launch.Recipe{"data": {
 		Launch: "claude -w data",
 		Cwd:    "/abs",
@@ -286,7 +240,7 @@ func TestResolveRecipeResumeIsBundleAndOverlayIndependent(t *testing.T) {
 		Fallbacks: []launch.HarnessSlot{{Surface: "grok", Launch: "grok -w data", Provider: "xai"}},
 	}}}
 
-	// ResolveRecipe is the resume resolution path — it consults the launch recipe ONLY.
+	// ResolveRecipe is the resume resolution path — it consults the flat launch recipe ONLY.
 	r, err := ResolveRecipe("data", flat)
 	if err != nil {
 		t.Fatalf("ResolveRecipe: %v", err)

@@ -195,28 +195,25 @@ own keeping it out of version control.
 
 ### Per-agent workspace: `flotilla workspace init`
 
-The flat `flotilla-launch.json` is superseded by a per-agent **workspace**. Each
-desk gets a git **worktree** of the repo it works on, plus a home directory
-`~/.flotilla/<agent>/` holding its launch recipe (`launch.json`), heartbeat
-prompt (`HEARTBEAT.md`), working tracker (`state.md`), and a `skills/` directory.
-Provision one — `--repo` is **required** (it names the repo to make a worktree
-of; bare-directory desk homes are deprecated):
+Launch recipes live in one fleet-wide **`flotilla-launch.json`** next to the roster
+(one `agents.<name>` entry per desk: launch command, worktree `cwd`, optional `tmux`).
+Each desk also gets a git **worktree** and a host workspace `~/.flotilla/<agent>/`
+for heartbeat prompt (`HEARTBEAT.md`), working tracker (`state.md`), and skills —
+not for launch recipes. Provision one — `--repo` is **required**:
 
 ```sh
 flotilla workspace init infra --repo /abs/path/to/your/repo
 flotilla workspace path infra        # prints ~/.flotilla/infra
 ```
 
-This creates a worktree on a new branch named after the agent, scaffolds
-`~/.flotilla/infra/launch.json` with the desk's launch command and its worktree
-`cwd`, and seeds the constitutional doctrine into the worktree's native identity
-file (`CLAUDE.md` for a Claude desk, `AGENTS.md` for a Grok or Codex desk). Edit
-`launch.json` if you need to adjust the launch command or target.
+This creates a worktree on a new branch named after the agent, upserts the desk's
+entry in `flotilla-launch.json` when absent, and seeds constitutional doctrine into
+the worktree's native identity file (`CLAUDE.md` for Claude, `AGENTS.md` for Grok or
+Codex). Edit `flotilla-launch.json` for launch commands, models, and failover chains —
+that file is what `flotilla resume` and `flotilla recycle` read.
 
-`flotilla resume` reads the workspace `launch.json` first and **falls back to the
-flat `flotilla-launch.json`** when no workspace exists, so migration is per-agent and
-nothing breaks until you move a desk over. The workspace lives under `$HOME` (the
-daemon must run as the same user — the shipped `flotilla-watch` is a `--user` service).
+The workspace lives under `$HOME` (the daemon must run as the same user — the shipped
+`flotilla-watch` is a `--user` service).
 
 ## 4. (Optional) Discord audit mirror
 

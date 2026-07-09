@@ -6,77 +6,55 @@ TBD - created by archiving change agent-workspace. Update Purpose after archive.
 ### Requirement: Per-agent workspace directory
 
 The system SHALL define a per-agent **workspace** at `~/.flotilla/<agent>/` that is
-the single home for that desk's host-local state: the launch recipe (`launch.json`),
-the heartbeat prompt (`HEARTBEAT.md`), the working tracker (`state.md`), and the
-desk's identity in a surface-native instruction file. The workspace is host-local
-(under `$HOME`, never committed) and trusted at the secrets level — its `launch.json`
-command is shell-run, so anyone able to write the workspace can already write
-`flotilla-secrets.env`.
+the single home for that desk's host-local state: the heartbeat prompt (`HEARTBEAT.md`),
+the working tracker (`state.md`), runtime harness overlays (`active-harness.json`), and
+skills. Launch recipes live in the fleet-wide flat `flotilla-launch.json` only — not in
+the workspace. The workspace is host-local (under `$HOME`, never committed) and trusted
+at the secrets level.
 
 #### Scenario: The workspace is the per-agent state home
 - **WHEN** an agent `<name>` has a workspace at `~/.flotilla/<name>/`
-- **THEN** its launch recipe, heartbeat prompt, tracker, and identity file all resolve from that one directory
+- **THEN** its heartbeat prompt, tracker, and runtime overlays resolve from that directory
 
-### Requirement: Launch recipe merges workspace desk fields with live flat harness fields
+### Requirement: Launch recipe resolved from the flat launch file only
 
-`flotilla resume` and `flotilla recycle` SHALL resolve an agent's launch recipe by
-layering two sources:
-- **Per-desk fields** (`cwd`, `tmux`, `state`) from `~/.flotilla/<agent>/launch.json`
-  when that file exists (the workspace scaffold snapshot).
-- **Harness fields** (`launch`, `primary`, `fallbacks`) live from the agent's entry in
-  the flat `flotilla-launch.json` when that entry exists — even when a workspace
-  `launch.json` is present, so fleet-wide model/harness migrations propagate without
-  editing every per-desk copy.
+`flotilla resume`, `flotilla recycle`, and `flotilla switch` SHALL resolve an agent's
+launch recipe solely from that agent's entry in the flat `flotilla-launch.json` (sibling
+of the roster). Per-agent `~/.flotilla/<agent>/launch.json` is deprecated and SHALL NOT
+be consulted. When the flat file is absent or has no entry for the agent, resume/recycle
+SHALL error clearly. A present but deprecated workspace `launch.json` MAY emit a warning
+that it is ignored.
 
-When no workspace `launch.json` exists, the flat entry is the migration fallback (the
-entire recipe comes from the flat file). When neither exists, resume/recycle SHALL
-error clearly, naming both locations it looked in. The workspace `launch.json` holds
-a SINGLE recipe object (no `agents` map — the agent is the directory name) and carries
-no `state` field (the workspace `state.md` is the state pointer). The safety-critical
-resume core (never kill a live desk, never create a duplicate marker) is unchanged by
-the recipe source.
+#### Scenario: Flat launch file drives resume
+- **WHEN** `flotilla resume <agent>` runs and `flotilla-launch.json` has an entry for the agent
+- **THEN** that recipe drives the resume
 
-#### Scenario: Flat harness fields override a stale workspace launch snapshot
-- **WHEN** `flotilla resume <agent>` runs, `~/.flotilla/<agent>/launch.json` exists with
-  an older `launch` command, and the flat `flotilla-launch.json` has a newer harness entry
-- **THEN** resume uses the flat `launch` / `primary` / `fallbacks` and the workspace
-  `cwd` / `tmux` / `state`
+#### Scenario: Missing flat entry is a clear error
+- **WHEN** the flat `flotilla-launch.json` has no entry for the agent
+- **THEN** resume errors, naming the flat launch file
 
-#### Scenario: Falls back to the flat launch file during migration
-- **WHEN** no workspace `launch.json` exists but the flat `flotilla-launch.json` has an entry for the agent
-- **THEN** the flat recipe is used, exactly as before the workspace existed
-
-#### Scenario: No recipe in either location is a clear error
-- **WHEN** neither a workspace `launch.json` nor a flat entry exists for the agent
-- **THEN** resume errors, naming both the workspace path and the flat file
+#### Scenario: Deprecated workspace launch.json is ignored
+- **WHEN** `~/.flotilla/<agent>/launch.json` still exists from an older scaffold
+- **THEN** resume uses the flat entry and warns that the workspace copy is ignored
 
 ### Requirement: Workspace recipe validation is inherited unchanged
 
-The workspace `launch.json` SHALL be held to the same validation the flat recipe
+Recipes in `flotilla-launch.json` SHALL be held to the same validation the flat recipe
 uses: `launch` required and free of `\t`/`\n`/`\r`; `cwd` required, absolute, and
-free of `\t`/`\n`/`\r` (existence checked at resume time, not load — the workspace
+free of `\t`/`\n`/`\r` (existence checked at resume time, not load — the file
 may be read on another host); `tmux` optional and, if present, a plain
 `session:window` (non-empty halves, no second `:`, no `.pane` suffix, no spaces).
 
-The cross-recipe "no two share a `tmux` target" invariant is preserved by a bounded
-fleet scan at resume: the resolving agent's `tmux` target SHALL be checked against
-the other agents' targets across BOTH sources — sibling workspaces
-(`~/.flotilla/*/launch.json`) and flat-file recipes for agents without a workspace
-(so the invariant spans both during migration). Unlike the flat file's fail-closed
-load, a malformed/unreadable OTHER workspace SHALL be skipped with a warning, NOT
-fail-closed — a broken unrelated workspace MUST NOT block recovering a healthy desk.
+The cross-recipe "no two share a `tmux` target" invariant is enforced at flat-file load
+and again at resume via a bounded fleet scan of flat-file recipes.
 
 #### Scenario: An invalid recipe is rejected
-- **WHEN** a workspace `launch.json` has a relative `cwd` or a `tmux` target with a `.pane` suffix
+- **WHEN** a flat launch entry has a relative `cwd` or a `tmux` target with a `.pane` suffix
 - **THEN** loading that recipe errors, never resuming on a half-valid recipe
 
 #### Scenario: A shared tmux target across the fleet is rejected
-- **WHEN** the resolving agent's `tmux` target collides with another workspace's (or an unmigrated agent's flat-file) target
+- **WHEN** the resolving agent's `tmux` target collides with another agent's flat-file target
 - **THEN** resume errors rather than resuming both into one window
-
-#### Scenario: A broken unrelated workspace does not block recovery
-- **WHEN** another agent's workspace `launch.json` is malformed but this agent's is valid and its `tmux` target is unique
-- **THEN** this agent resumes (the broken sibling is skipped with a warning, not fail-closed)
 
 ### Requirement: The workspace root resolves to one home shared by daemon and operator
 
@@ -114,12 +92,13 @@ for `/takeover`).
 `flotilla workspace init <agent>` SHALL scaffold `~/.flotilla/<agent>/`, creating
 only the files that are missing and NEVER overwriting one that exists (reporting
 each as created or kept). The agent MUST be present in the roster; an unknown agent
-SHALL be a clear error. `init` SHALL NOT populate the recipe with real host paths
-(that is operator-owned data, not scaffold) — it writes a commented template.
+SHALL be a clear error. `init` SHALL upsert the agent's launch recipe into the flat
+`flotilla-launch.json` when absent (never overwriting an existing entry) and SHALL NOT
+write `launch.json` into the workspace.
 
 #### Scenario: init creates only missing files
 - **WHEN** `flotilla workspace init <agent>` runs on a partial workspace
-- **THEN** the missing files are created and every existing file is kept untouched
+- **THEN** the missing workspace files are created, every existing workspace file is kept untouched, and the flat launch entry is created only when absent
 
 #### Scenario: init for an unknown agent errors
 - **WHEN** `flotilla workspace init <name>` names an agent not in the roster
@@ -141,4 +120,3 @@ operator/skill to drive `/takeover`.
 #### Scenario: An empty scaffolded state.md prints no pointer
 - **WHEN** the workspace `state.md` exists but is empty and the flat recipe has no `state`
 - **THEN** resume prints no state pointer (parity with today's empty-`state` behavior)
-

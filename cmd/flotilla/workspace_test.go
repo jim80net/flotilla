@@ -52,6 +52,10 @@ func workspaceInitArgs(agent, rosterPath, repo string) []string {
 	return []string{agent, "--repo", repo, "--roster", rosterPath}
 }
 
+func flatLaunchPath(rosterPath string) string {
+	return filepath.Join(filepath.Dir(rosterPath), "flotilla-launch.json")
+}
+
 func TestCmdWorkspaceInitRequiresRepo(t *testing.T) {
 	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
 	rosterPath := writeRosterFile(t, `{"agents":[{"name":"infra"}]}`)
@@ -72,10 +76,13 @@ func TestCmdWorkspaceInitScaffoldsWorktreeAndIsIdempotent(t *testing.T) {
 	hostDir := filepath.Join(root, "infra")
 	worktree := filepath.Join(filepath.Dir(repo), "infra")
 
-	for _, f := range []string{"launch.json", "HEARTBEAT.md", "state.md"} {
+	for _, f := range []string{"HEARTBEAT.md", "state.md"} {
 		if _, err := os.Stat(filepath.Join(hostDir, f)); err != nil {
 			t.Errorf("expected host %s: %v", f, err)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(hostDir, "launch.json")); !os.IsNotExist(err) {
+		t.Error("launch recipes must not live in the host workspace — use flotilla-launch.json")
 	}
 	if _, err := os.Stat(filepath.Join(worktree, "AGENTS.md")); err != nil {
 		t.Errorf("expected AGENTS.md in worktree: %v", err)
@@ -84,18 +91,20 @@ func TestCmdWorkspaceInitScaffoldsWorktreeAndIsIdempotent(t *testing.T) {
 		t.Error("identity should not live in host workspace for worktree desks")
 	}
 
-	launch, err := os.ReadFile(filepath.Join(hostDir, "launch.json"))
+	launch, err := os.ReadFile(flatLaunchPath(rosterPath))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(launch), "grok --model composer-2.5-fast") {
 		t.Errorf("execution desk launch = %q, want grok workhorse", launch)
 	}
-	var recipe struct {
-		Cwd string `json:"cwd"`
+	var flat struct {
+		Agents map[string]struct {
+			Cwd string `json:"cwd"`
+		} `json:"agents"`
 	}
-	if err := json.Unmarshal(launch, &recipe); err != nil || recipe.Cwd != worktree {
-		t.Errorf("launch cwd = %q, want worktree %q", recipe.Cwd, worktree)
+	if err := json.Unmarshal(launch, &flat); err != nil || flat.Agents["infra"].Cwd != worktree {
+		t.Errorf("flat launch cwd = %q, want worktree %q", flat.Agents["infra"].Cwd, worktree)
 	}
 
 	hb := filepath.Join(hostDir, "HEARTBEAT.md")
@@ -211,7 +220,7 @@ func TestCmdWorkspaceInitCodexScaffoldsAgentsAndRules(t *testing.T) {
 			t.Errorf("codex rules must not contain wholesale forbid %q", mustNot)
 		}
 	}
-	launch, err := os.ReadFile(filepath.Join(root, "c", "launch.json"))
+	launch, err := os.ReadFile(flatLaunchPath(rosterPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +254,7 @@ func TestCmdWorkspaceInitGrokScaffoldsAgentsMdInWorktree(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(worktree, "AGENTS.md")); err != nil {
 		t.Errorf("grok surface should scaffold AGENTS.md in worktree: %v", err)
 	}
-	launch, err := os.ReadFile(filepath.Join(root, "g", "launch.json"))
+	launch, err := os.ReadFile(flatLaunchPath(rosterPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +306,7 @@ func TestCmdWorkspaceInitCoordinatorScaffoldsClaudeInWorktree(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(worktree, "CLAUDE.md")); err != nil {
 		t.Errorf("coordinator should scaffold CLAUDE.md in worktree: %v", err)
 	}
-	launch, err := os.ReadFile(filepath.Join(root, "xo", "launch.json"))
+	launch, err := os.ReadFile(flatLaunchPath(rosterPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -423,7 +432,7 @@ func TestCmdWorkspaceInitCoordinatorGrokScaffoldsPermissions(t *testing.T) {
 	if !strings.Contains(text, "flotilla notify") {
 		t.Error("coordinator allow should include flotilla notify")
 	}
-	launch, err := os.ReadFile(filepath.Join(root, "beta-xo", "launch.json"))
+	launch, err := os.ReadFile(flatLaunchPath(rosterPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -454,7 +463,7 @@ func TestCmdWorkspaceInitOpenCodeScaffoldsLaunch(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(worktree, "AGENTS.md")); err != nil {
 		t.Errorf("opencode surface should scaffold AGENTS.md in worktree: %v", err)
 	}
-	launch, err := os.ReadFile(filepath.Join(root, "oc-desk", "launch.json"))
+	launch, err := os.ReadFile(flatLaunchPath(rosterPath))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -502,7 +511,7 @@ func TestCmdWorkspaceInitCodexCoordinatorScaffoldsWithProbe(t *testing.T) {
 	if strings.Contains(string(rules), `["gh", "pr", "merge"]`) {
 		t.Error("coordinator rules must not forbid gh pr merge")
 	}
-	launch, err := os.ReadFile(filepath.Join(root, "alpha-xo", "launch.json"))
+	launch, err := os.ReadFile(flatLaunchPath(rosterPath))
 	if err != nil {
 		t.Fatal(err)
 	}

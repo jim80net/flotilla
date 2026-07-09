@@ -146,6 +146,76 @@ func Load(path string, rosterAgents map[string]bool) (*Config, error) {
 	return &c, nil
 }
 
+// UpsertAgent inserts an agent's recipe into the flat launch file at path when absent.
+// When overwrite is false and the agent already has an entry, the file is unchanged
+// (idempotent scaffold). Creates the file when missing. Returns true when a new entry
+// was written, false when an existing entry was kept.
+func UpsertAgent(path string, rosterAgents map[string]bool, agent string, recipe Recipe, overwrite bool) (bool, error) {
+	if !rosterAgents[agent] {
+		return false, fmt.Errorf("launch recipes %q: agent %q is not in the roster (typo?)", path, agent)
+	}
+	if err := ValidateRecipe(fmt.Sprintf("launch recipes %q: agent %q", path, agent), recipe); err != nil {
+		return false, err
+	}
+	var c Config
+	raw, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		if err := json.Unmarshal(raw, &c); err != nil {
+			return false, fmt.Errorf("parse launch recipes %q: %w", path, err)
+		}
+	case os.IsNotExist(err):
+		c = Config{Agents: map[string]Recipe{}}
+	default:
+		return false, fmt.Errorf("read launch recipes %q: %w", path, err)
+	}
+	if c.Agents == nil {
+		c.Agents = map[string]Recipe{}
+	}
+	if _, exists := c.Agents[agent]; exists && !overwrite {
+		return false, nil
+	}
+	if recipe.Tmux != "" {
+		for name, r := range c.Agents {
+			if name == agent {
+				continue
+			}
+			if r.Tmux == recipe.Tmux {
+				return false, fmt.Errorf("launch recipes %q: agents %q and %q share tmux target %q (would resume into the same window)", path, name, agent, recipe.Tmux)
+			}
+		}
+	}
+	c.Agents[agent] = recipe
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return false, fmt.Errorf("marshal launch recipes %q: %w", path, err)
+	}
+	data = append(data, '\n')
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return false, fmt.Errorf("create launch recipes dir %q: %w", dir, err)
+	}
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+"-*.tmp")
+	if err != nil {
+		return false, fmt.Errorf("create temp for launch recipes %q: %w", path, err)
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return false, fmt.Errorf("write launch recipes %q: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return false, fmt.Errorf("close launch recipes temp %q: %w", path, err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
+		return false, fmt.Errorf("finalize launch recipes %q: %w", path, err)
+	}
+	return true, nil
+}
+
 // ValidateRecipe checks a single recipe's fields with the same rules Load applies per
 // entry: launch required and free of \t\n\r; cwd required, absolute, free of \t\n\r
 // (existence is checked at resume time, not load — the recipe may be read on another

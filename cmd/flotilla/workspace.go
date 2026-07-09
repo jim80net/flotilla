@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -171,15 +170,24 @@ func cmdWorkspaceInit(args []string) error {
 	if err != nil {
 		return err
 	}
-	recipeJSON, err := json.Marshal(recipe)
+	rosterAgents := make(map[string]bool, len(cfg.Agents))
+	for _, a := range cfg.Agents {
+		rosterAgents[a.Name] = true
+	}
+	launchPath := launch.DefaultPath(opts.rosterPath)
+	created, err := launch.UpsertAgent(launchPath, rosterAgents, opts.agent, recipe, false)
 	if err != nil {
 		return err
+	}
+	if created {
+		fmt.Printf("  created %s (agents.%s)\n", launchPath, opts.agent)
+	} else {
+		fmt.Printf("  kept    %s (agents.%s)\n", launchPath, opts.agent)
 	}
 
 	identityStub := fmt.Sprintf("# %s — desk identity\n\nYou are the %s desk. Describe this desk's standing role and task here.\n", opts.agent, opts.agent)
 
 	hostFiles := []struct{ name, content string }{
-		{workspace.LaunchFileName, string(recipeJSON) + "\n"},
 		{workspace.HeartbeatFileName, ""},
 		{workspace.StateFileName, ""},
 	}
@@ -230,6 +238,7 @@ func cmdWorkspaceInit(args []string) error {
 	}
 
 	fmt.Printf("workspace ready: %s\n", hostDir)
+	fmt.Printf("  launch:   %s (agents.%s)\n", launchPath, opts.agent)
 	fmt.Printf("  worktree: %s (branch %q)\n", worktreeAbs, opts.branch)
 	fmt.Printf("  identity: %s\n", identityPath)
 	return nil

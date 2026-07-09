@@ -705,18 +705,11 @@ func cmdSwitch(args []string) error {
 	if launchPath == "" {
 		launchPath = launch.DefaultPath(rosterPath)
 	}
-	var flat *launch.Config
-	if _, statErr := os.Stat(launchPath); statErr == nil {
-		rosterAgents := make(map[string]bool, len(cfg.Agents))
-		for _, a := range cfg.Agents {
-			rosterAgents[a.Name] = true
-		}
-		flat, err = launch.Load(launchPath, rosterAgents)
-		if err != nil {
-			return err
-		}
+	flat, err := loadFlatLaunch(launchPath, cfg)
+	if err != nil {
+		return err
 	}
-	// Resolve the desk's failover CHAIN (workspace launch.json → flat) and its CURRENTLY-ACTIVE
+	// Resolve the desk's failover CHAIN (flat flotilla-launch.json) and its CURRENTLY-ACTIVE
 	// surface (overlay-first), so a switch FROM the live harness — not the roster default — is
 	// authored. ResolveActiveRecipe carries the chain (Primary/Fallbacks) for slot resolution.
 	chain, err := workspace.ResolveActiveRecipe(agentName, flat)

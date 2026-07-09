@@ -10,7 +10,8 @@ import (
 	"github.com/jim80net/flotilla/internal/launch"
 )
 
-// LaunchFileName is the workspace's launch-recipe file.
+// LaunchFileName is the legacy per-workspace launch-recipe file (deprecated — recipes
+// live only in the flat flotilla-launch.json). Kept for stale-file detection.
 const LaunchFileName = "launch.json"
 
 // ActiveHarnessFileName is the workspace's runtime active-harness overlay. It names
@@ -56,91 +57,38 @@ type ActiveOverlay struct {
 	PoisonedProviders []string `json:"poisoned_providers,omitempty"`
 }
 
-// LoadRecipe reads ~/.flotilla/<agent>/launch.json as a SINGLE launch.Recipe (no
-// agents map — the agent is the directory name) and validates it with the same rules
-// the flat file uses (launch.ValidateRecipe). Returns:
-//   - (recipe, true, nil)  when present and valid;
-//   - (zero, false, nil)   when no workspace launch.json exists (the caller falls
-//     back to the flat flotilla-launch.json — the migration path);
-//   - (zero, false, err)   when the file is present but invalid or unreadable —
-//     fail-closed, never resume on a malformed recipe.
-func LoadRecipe(agent string) (launch.Recipe, bool, error) {
+// StaleWorkspaceLaunchWarning reports when a deprecated ~/.flotilla/<agent>/launch.json
+// is still present. Resume/recycle ignore it; the operator may delete it after cutover.
+func StaleWorkspaceLaunchWarning(agent string) (string, error) {
 	dir, err := Dir(agent)
 	if err != nil {
-		return launch.Recipe{}, false, err
+		return "", err
 	}
 	path := filepath.Join(dir, LaunchFileName)
-	raw, err := os.ReadFile(path)
-	if err != nil {
+	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
-			return launch.Recipe{}, false, nil // no workspace recipe → fall back
+			return "", nil
 		}
-		return launch.Recipe{}, false, fmt.Errorf("read workspace recipe %q: %w", path, err)
+		return "", err
 	}
-	var r launch.Recipe
-	if err := json.Unmarshal(raw, &r); err != nil {
-		return launch.Recipe{}, false, fmt.Errorf("parse workspace recipe %q: %w", path, err)
-	}
-	if err := launch.ValidateRecipe(fmt.Sprintf("workspace recipe %q", path), r); err != nil {
-		return launch.Recipe{}, false, err
-	}
-	return r, true, nil
+	return fmt.Sprintf(
+		"ignoring deprecated workspace launch recipe %s — edit the flat flotilla-launch.json entry for %q instead",
+		path, agent), nil
 }
 
-// overlayFlatHarness merges fleet-wide harness fields from the flat launch file onto a
-// workspace recipe. Per-desk fields (Cwd, Tmux, State) stay on the workspace copy;
-// harness commands (Launch, Primary, Fallbacks) are read live from the flat file so an
-// operator edit to flotilla-launch.json propagates on resume/recycle without touching
-// every ~/.flotilla/<agent>/launch.json snapshot.
-func overlayFlatHarness(ws, flat launch.Recipe) launch.Recipe {
-	out := ws
-	out.Launch = flat.Launch
-	out.Primary = flat.Primary
-	out.Fallbacks = flat.Fallbacks
-	return out
-}
-
-// ResolveRecipe resolves an agent's launch recipe by layering sources:
-//   - Per-desk fields (cwd, tmux, state) come from ~/.flotilla/<agent>/launch.json
-//     when that file exists.
-//   - Harness fields (launch command, primary/fallbacks chain) come live from the flat
-//     flotilla-launch.json when it has an entry for the agent — even when a workspace
-//     launch.json exists (the workspace copy is a scaffold snapshot, not the fleet-wide
-//     harness source of truth).
-//   - When no workspace recipe exists, the flat entry is the migration fallback.
-//   - When neither exists, a clear error names both locations.
-//
-// flat may be nil (no flat file present).
+// ResolveRecipe resolves an agent's launch recipe from the flat flotilla-launch.json
+// only. Per-agent ~/.flotilla/<agent>/launch.json is deprecated and not consulted.
+// flat must be non-nil and contain an entry for the agent.
 func ResolveRecipe(agent string, flat *launch.Config) (launch.Recipe, error) {
-	ws, wsOk, err := LoadRecipe(agent)
-	if err != nil {
-		return launch.Recipe{}, err
-	}
-	if wsOk {
-		if flat != nil {
-			if flatR, ok := flat.Recipe(agent); ok {
-				merged := overlayFlatHarness(ws, flatR)
-				dir, _ := Dir(agent)
-				if err := launch.ValidateRecipe(
-					fmt.Sprintf("resolved recipe for %q (%s + flat launch file)", agent, filepath.Join(dir, LaunchFileName)),
-					merged,
-				); err != nil {
-					return launch.Recipe{}, err
-				}
-				return merged, nil
-			}
-		}
-		return ws, nil
-	}
 	if flat != nil {
 		if r, ok := flat.Recipe(agent); ok {
 			return r, nil
 		}
 	}
-	dir, _ := Dir(agent)
+	launchPath := "flotilla-launch.json"
 	return launch.Recipe{}, fmt.Errorf(
-		"no launch recipe for %q: neither %s nor the flat launch file has one",
-		agent, filepath.Join(dir, LaunchFileName))
+		"no launch recipe for %q in the flat launch file (%s) — add an agents.%q entry",
+		agent, launchPath, agent)
 }
 
 // ReadActiveOverlay reads `~/.flotilla/<agent>/active-harness.json`. Returns:
@@ -214,7 +162,7 @@ func WriteActiveOverlay(agent string, ov ActiveOverlay) error {
 }
 
 // ResolveHarness resolves the desk's LIVE harness slot: it (1) resolves the recipe
-// chain via ResolveRecipe (workspace desk fields + live flat harness fields), (2) reads
+// chain via ResolveRecipe (flat flotilla-launch.json), (2) reads
 // the active-harness overlay's slot name, and (3)
 // returns that slot's name and recipe-for-slot. An ABSENT overlay ⇒ the primary slot.
 // A TORN/unreadable overlay is fail-SAFE: it falls back to the primary slot rather than

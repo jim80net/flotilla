@@ -1,13 +1,7 @@
 // Package workspace describes the per-agent workspace `~/.flotilla/<agent>/` — the
-// single host-local home for a desk's launch recipe (launch.json), heartbeat prompt
-// (HEARTBEAT.md), working tracker (state.md), and identity in the agent's native
-// instruction file (CLAUDE.md for claude-code, AGENTS.md for grok/cursor). It is the
-// successor to the flat `flotilla-launch.json`, which remains a read-only migration
-// fallback. See openspec/changes/agent-workspace/design.md.
-//
-// Resolution everywhere is fallback-defaulted, so a deployment with NO workspace
-// behaves exactly as before the workspace existed (the flat launch file, the roster
-// heartbeat prompt, the --tracker-file).
+// host-local home for a desk's heartbeat prompt (HEARTBEAT.md), working tracker
+// (state.md), and runtime overlays (active-harness.json). Launch recipes live in the
+// fleet-wide flat flotilla-launch.json only; per-workspace launch.json is deprecated.
 package workspace
 
 import (
