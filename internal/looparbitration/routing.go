@@ -18,8 +18,12 @@ const (
 	BypassUrgent BypassClass = "urgent" // explicit PriorityUrgent safety valve
 )
 
-// explicitBypass reports whether req carries an explicit bypass marker (never inferred
+// ExplicitBypass reports whether req carries an explicit bypass marker (never inferred
 // from kind or source alone).
+func ExplicitBypass(req InjectRequest) (BypassClass, bool) {
+	return explicitBypass(req)
+}
+
 func explicitBypass(req InjectRequest) (BypassClass, bool) {
 	if req.Priority == PriorityUrgent {
 		return BypassUrgent, true
