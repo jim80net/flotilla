@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/jim80net/flotilla/internal/deliver"
@@ -32,17 +31,15 @@ const synthDigestTicks = 3
 // reason while still treating it as a skip.
 func synthTurnFinal(cfg *roster.Config) func(agent string) (string, bool, error) {
 	return func(agent string) (string, bool, error) {
-		drv, ok := surface.Get(agentSurface(cfg, agent))
-		if !ok {
-			return "", false, fmt.Errorf("unknown surface for agent %q", agent)
-		}
-		rr, ok := drv.(surface.ResultReader)
-		if !ok {
-			// No session-store reader for this surface — nothing to read (clean skip).
-			return "", false, nil
-		}
 		pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
 		if err != nil {
+			return "", false, err
+		}
+		rr, _, _, _, err := surface.ResolveResultReader(agentSurface(cfg, agent), pane, deliver.PaneCommand)
+		if err != nil {
+			if strings.Contains(err.Error(), "has no session-store result reader") {
+				return "", false, nil
+			}
 			return "", false, err
 		}
 		text, err := rr.LatestResult(pane)
