@@ -1,25 +1,49 @@
 package looparbitration
 
-// RouteTarget names the pane that receives an inject. #533 YAGNI: when adjutant_for
-// is set, all coordinator notifications go to the adjutant. Leader delivery is only
-// the adjutant-owned KindAdjutantSeam drain or no-adjutant fallback.
+// RouteTarget names the pane(s) that receive an inject (#533).
 type RouteTarget string
 
 const (
 	RouteLeader   RouteTarget = "leader"
 	RouteAdjutant RouteTarget = "adjutant"
+	// RouteDual delivers to leader immediately and records on the adjutant for
+	// reconciliation (cleanup, dedup, seam summary, return-to-frontier).
+	RouteDual RouteTarget = "dual"
 )
 
-// resolveRoute picks the delivery pane for a verdict.
+// BypassClass names an explicit audited bypass. Kind/source labels never imply bypass.
+type BypassClass string
+
+const (
+	BypassUrgent BypassClass = "urgent" // explicit PriorityUrgent safety valve
+)
+
+// explicitBypass reports whether req carries an explicit bypass marker (never inferred
+// from kind or source alone).
+func explicitBypass(req InjectRequest) (BypassClass, bool) {
+	if req.Priority == PriorityUrgent {
+		return BypassUrgent, true
+	}
+	if req.Bypass != "" {
+		return req.Bypass, true
+	}
+	return "", false
+}
+
+// resolveRoute picks the delivery target for a verdict.
 //   - no adjutant → leader (fail-safe fallback)
 //   - KindAdjutantSeam → leader (adjutant-owned interruption path)
-//   - otherwise with adjutant → adjutant (all notification ingress)
-func resolveRoute(req InjectRequest, ctx Context, _ Result) RouteTarget {
+//   - explicit urgent bypass + AllowNow → dual (leader interrupt + adjutant record)
+//   - otherwise with adjutant → adjutant (default non-urgent ingress)
+func resolveRoute(req InjectRequest, ctx Context, r Result) RouteTarget {
 	if ctx.AdjutantFor == "" {
 		return RouteLeader
 	}
 	if req.Kind == KindAdjutantSeam {
 		return RouteLeader
+	}
+	if _, ok := explicitBypass(req); ok && r.Decision == AllowNow {
+		return RouteDual
 	}
 	return RouteAdjutant
 }
