@@ -1386,9 +1386,17 @@ func TestComposeGuardExplicitFlush(t *testing.T) {
 	if dIdx < 0 {
 		t.Fatal("thread composer delivered outcome handler missing")
 	}
-	sendBlock := js[dIdx : dIdx+500]
+	// #518 grew the delivered block (optimistic outbound + refresh); keep a wider window.
+	sendEnd := dIdx + 900
+	if sendEnd > len(js) {
+		sendEnd = len(js)
+	}
+	sendBlock := js[dIdx:sendEnd]
 	if !strings.Contains(sendBlock, "flushDeferredMirrorPaint") {
 		t.Error("delivered send path must flush deferred mirror/thread paint after clearing draft")
+	}
+	if !strings.Contains(sendBlock, "appendOptimisticOutbound") {
+		t.Error("delivered send path must append an optimistic outbound line (#518)")
 	}
 	verbIdx := strings.Index(js, "function setMirrorVerbosity")
 	if verbIdx < 0 {
@@ -1400,6 +1408,63 @@ func TestComposeGuardExplicitFlush(t *testing.T) {
 	}
 	if !strings.Contains(js[verbIdx:verbIdx+verbEnd], "paintMirror(true)") {
 		t.Error("user-initiated verbosity repaint must bypass compose guard (paintMirror(true))")
+	}
+}
+
+// TestConversationsFeed518 locks the #518 conversations render-path batch:
+//   - unparsed ledger match is token-boundary (not substring — "cos" ≠ "cos-adj")
+//   - session-mirror fetch pulls a full thread tail (limit=500, not 100)
+//   - web-composer deliver paints an optimistic operator outbound line
+//   - compose-active is draft-only (empty focus must not block post-send paint)
+func TestConversationsFeed518(t *testing.T) {
+	now := time.Date(2026, 7, 9, 18, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+
+	for _, marker := range []string{
+		"function rawHasParticipant",
+		"rawHasParticipant(entry.raw, d)",
+		"function appendOptimisticOutbound",
+		"function threadOptimisticMsg",
+		"function pruneOptimistic",
+		"thread-optimistic",
+		`limit=500`,
+		"OPTIMISTIC_TTL_MS",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js #518 conversations feed marker missing: %q", marker)
+		}
+	}
+
+	// Compose-active: protect NON-EMPTY draft only — not empty focus (#518 / #517 refinement).
+	cIdx := strings.Index(js, "function composerComposeActive()")
+	if cIdx < 0 {
+		t.Fatal("composerComposeActive missing")
+	}
+	cBody := js[cIdx : cIdx+350]
+	if !strings.Contains(cBody, "ta.value.length > 0") {
+		t.Error("composerComposeActive must key off non-empty draft text (#518)")
+	}
+	// Must NOT treat bare focus as compose-active (the pre-#518 arm blocked post-send paint).
+	if strings.Contains(cBody, "document.activeElement === ta") {
+		t.Error("composerComposeActive must not treat empty focus as compose-active (#518)")
+	}
+
+	// Delivered path: optimistic + flush + refresh (stream re-fetch for desk reply).
+	dIdx := strings.Index(js, `if (outcome === "delivered")`)
+	if dIdx < 0 {
+		t.Fatal("delivered outcome handler missing")
+	}
+	sendBlock := js[dIdx:min(dIdx+900, len(js))]
+	for _, want := range []string{"appendOptimisticOutbound", "flushDeferredMirrorPaint", "refresh()"} {
+		if !strings.Contains(sendBlock, want) {
+			t.Errorf("delivered path must include %q (#518)", want)
+		}
+	}
+
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	if !strings.Contains(css, ".thread-optimistic") {
+		t.Error("dash.css must style .thread-optimistic (#518)")
 	}
 }
 
