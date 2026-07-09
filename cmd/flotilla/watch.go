@@ -1649,17 +1649,19 @@ func rateLimitReset(cfg *roster.Config) func(agent string) {
 // readDeskTurnFinal returns a desk's substantive turn-final via the shared
 // surface.ResultReader seam (the same path `flotilla result` and the auto-mirror use).
 func readDeskTurnFinal(cfg *roster.Config, agent string) (text string, ok bool, err error) {
-	drv, ok := surface.Get(agentSurface(cfg, agent))
-	if !ok {
-		return "", false, fmt.Errorf("unknown surface for agent %q", agent)
-	}
-	rr, ok := drv.(surface.ResultReader)
-	if !ok {
-		return "", false, nil
-	}
 	pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
 	if err != nil {
 		return "", false, err
+	}
+	rr, _, liveSurface, drift, err := surface.ResolveResultReader(agentSurface(cfg, agent), pane, deliver.PaneCommand)
+	if err != nil {
+		if strings.Contains(err.Error(), "has no session-store result reader") {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	if drift {
+		log.Printf("flotilla watch: result read drift — %s roster surface differs from live pane harness %q", agent, liveSurface)
 	}
 	text, err = rr.LatestResult(pane)
 	if err != nil {

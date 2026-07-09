@@ -34,17 +34,17 @@ func cmdResult(args []string) error {
 	if err != nil {
 		return err
 	}
-	drv, ok := surface.Get(agent.Surface)
-	if !ok {
-		return fmt.Errorf("agent %q: unknown surface %q (known: see internal/surface registry)", agentName, agent.Surface)
-	}
-	rr, ok := drv.(surface.ResultReader)
-	if !ok {
-		return fmt.Errorf("surface %q has no session-store result reader — read %q with the pane capture (tmux capture-pane) instead", drv.Name(), agentName)
-	}
 	pane, err := deliver.ResolvePane(agent.Title())
 	if err != nil {
 		return err
+	}
+	rr, drv, liveSurface, drift, err := surface.ResolveResultReader(agentSurface(cfg, agentName), pane, deliver.PaneCommand)
+	if err != nil {
+		return err
+	}
+	if drift {
+		fmt.Fprintf(os.Stderr, "flotilla: warning — %s roster surface is %q but pane runs %q; reading from live harness\n",
+			agentName, effectiveSurface(agentSurface(cfg, agentName)), liveSurface)
 	}
 	// Mid-turn guard: if the desk is actively working, "latest completed turn" may instead be
 	// intermediate narration (a partial). Warn to STDERR (stdout stays the pipeable result) so the
