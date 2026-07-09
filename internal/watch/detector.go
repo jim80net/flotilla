@@ -159,6 +159,11 @@ type DetectorConfig struct {
 	// recipient-side inbound pending dispatches; reinjects once then escalates to sender.
 	// Default nil ⇒ inert until wired from cmd/flotilla/watch.go.
 	DroppedDispatchOnFinish func(agent string)
+	// ReturnToFrontierOnFinish is the #530 frontier guard: invoked once per monitored
+	// coordinator Working→Idle (same trigger as CoordinatorMirrorOnFinish). When a frontier
+	// sidecar is set, the turn-final must resume return_to, reassign, or name a blocking gate.
+	// Default nil ⇒ inert.
+	ReturnToFrontierOnFinish func(agent string)
 	// DecisionBriefOnTick is the auto decision-brief side-effect (#349 item D): invoked
 	// once per detector tick (off d.mu, optionally async via MirrorDispatch). The caller
 	// scans the goals file for operator-gated items missing a brief and dispatches the
@@ -923,10 +928,15 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors, co
 			run() // default: synchronous (deterministic for tests)
 		}
 	}
-	if len(coordinatorMirrors) > 0 && d.cfg.CoordinatorMirrorOnFinish != nil {
+	if len(coordinatorMirrors) > 0 && (d.cfg.CoordinatorMirrorOnFinish != nil || d.cfg.ReturnToFrontierOnFinish != nil) {
 		run := func() {
 			for _, agent := range coordinatorMirrors {
-				d.coordinatorMirrorOne(agent)
+				if d.cfg.CoordinatorMirrorOnFinish != nil {
+					d.coordinatorMirrorOne(agent)
+				}
+				if d.cfg.ReturnToFrontierOnFinish != nil {
+					d.returnToFrontierOne(agent)
+				}
 			}
 		}
 		if d.cfg.MirrorDispatch != nil {
@@ -1075,6 +1085,16 @@ func (d *Detector) strandedHandoffOne(agent string) {
 		}
 	}()
 	d.cfg.StrandedHandoffOnFinish(agent)
+}
+
+// returnToFrontierOne invokes the #530 frontier guard with the same recover() backstop as mirrorOne.
+func (d *Detector) returnToFrontierOne(agent string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("flotilla watch: return-to-frontier guard panicked for %q (recovered; tick unaffected): %v", agent, r)
+		}
+	}()
+	d.cfg.ReturnToFrontierOnFinish(agent)
 }
 
 // droppedDispatchOne invokes the #472 dropped-dispatch side-effect with the same recover()

@@ -86,6 +86,11 @@ func LayerBufferDeliveredPath(rosterDir, coordinator string) string {
 	return filepath.Join(rosterDir, "flotilla-"+coordinator+"-buffer-delivered.json")
 }
 
+// LayerFrontierPath returns the return-to-frontier sidecar for a coordinator layer (#530).
+func LayerFrontierPath(rosterDir, coordinator string) string {
+	return filepath.Join(rosterDir, "flotilla-"+coordinator+"-frontier.json")
+}
+
 // LayerCharterPath returns the first-presentation charter file for a coordinator/adjutant pair.
 func LayerCharterPath(rosterDir, coordinator string) string {
 	return filepath.Join(rosterDir, "flotilla-"+coordinator+"-adjutant-charter.md")
