@@ -115,6 +115,41 @@ func TestDeskMirrorChunksOversizeAndPrefixes(t *testing.T) {
 	}
 }
 
+func TestDeskMirror_OnDiscordSuccessAfterPost(t *testing.T) {
+	var lines []string
+	var successAgent, successBody string
+	m := deskMirror{
+		webhook:   func(string) (string, bool) { return "https://wh", true },
+		turnFinal: func(string) (string, bool, error) { return "operator brief", true, nil },
+		post:      func(_, _, _ string) error { return nil },
+		onDiscordSuccess: func(agent, body string) {
+			successAgent, successBody = agent, body
+		},
+		logf: recordLogf(&lines),
+	}
+	m.run("xo")
+	if successAgent != "xo" || successBody != "operator brief" {
+		t.Errorf("onDiscordSuccess got (%q, %q), want (xo, operator brief)", successAgent, successBody)
+	}
+}
+
+func TestDeskMirror_OnDiscordSuccessSkippedOnPostFailure(t *testing.T) {
+	called := false
+	m := deskMirror{
+		webhook:   func(string) (string, bool) { return "https://wh", true },
+		turnFinal: func(string) (string, bool, error) { return "brief", true, nil },
+		post:      func(_, _, _ string) error { return errors.New("discord down") },
+		onDiscordSuccess: func(_, _ string) {
+			called = true
+		},
+		logf: func(string, ...any) {},
+	}
+	m.run("xo")
+	if called {
+		t.Error("onDiscordSuccess must not run when Discord post fails")
+	}
+}
+
 func TestDeskMirrorStopsAndLogsOnPostFailure(t *testing.T) {
 	var lines []string
 	calls := 0

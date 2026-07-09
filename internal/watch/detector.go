@@ -117,11 +117,11 @@ type DetectorConfig struct {
 	// runs in runTail, OUTSIDE d.mu, so a slow transcript read or Discord post can never stall the
 	// tick loop. It is OBSERVE-ONLY and BEST-EFFORT — the closure must never let a mirror failure
 	// affect the tick or delivery. Default nil ⇒ inert (no mirror; behavior byte-identical to before
-	// this change). The primary clock XO is deliberately excluded — it uses CoordinatorMirrorOnFinish.
+	// this change). Monitored coordinators are excluded — they use CoordinatorMirrorOnFinish.
 	MirrorOnFinish func(agent string)
-	// CoordinatorMirrorOnFinish is the primary-clock-XO visibility side-effect: invoked once when
-	// XOAgent completes Working→Idle (the coordinator finish hook). Project-XOs and execution desks
-	// use MirrorOnFinish instead. Same off-mutex / best-effort discipline. Default nil ⇒ inert.
+	// CoordinatorMirrorOnFinish is the coordinator visibility side-effect: invoked once when any
+	// monitored coordinator (IsCoordinator) completes Working→Idle. Execution desks use
+	// MirrorOnFinish instead. Same off-mutex / best-effort discipline. Default nil ⇒ inert.
 	CoordinatorMirrorOnFinish func(agent string)
 	// AdjutantFor reports the adjutant agent for a coordinator layer, or "" when none.
 	// Used with AdjutantSeamOnFinish for per-owner buffer drain (#438 stackable_wakes).
@@ -138,8 +138,9 @@ type DetectorConfig struct {
 	// Like MirrorOnFinish it runs in runTail OUTSIDE d.mu; default nil ⇒ inert.
 	IdleHoldOnFinish func(agent string)
 	// IsCoordinator reports whether an agent holds a coordinator role (any XO or CoS).
-	// Used by the delegation-nudge side-effect (#232). Default nil ⇒ no agent is a
-	// coordinator (the nudge never fires).
+	// Routes finish edges to CoordinatorMirrorOnFinish (#hard-coordinator-mirror) and
+	// powers the delegation-nudge side-effect (#232). Default nil ⇒ only XOAgent is a
+	// coordinator for mirror routing; nudge never fires.
 	IsCoordinator func(name string) bool
 	// DelegationNudgeOnFinish is the coordinator IC-ing side-effect (#232): invoked
 	// once for each coordinator that completed a unit of work this tick (Working→Idle),
@@ -153,6 +154,11 @@ type DetectorConfig struct {
 	// trigger as MirrorOnFinish). Detects turn-finals that settle gate work without
 	// reporting to the gate-holder and injects a break prompt. Default nil ⇒ inert.
 	StrandedHandoffOnFinish func(agent string)
+	// DroppedDispatchOnFinish is the confirmed-but-unaddressed dispatch side-effect (#472):
+	// invoked once per desk finish (same Working→Idle trigger). Compares turn-final against
+	// recipient-side inbound pending dispatches; reinjects once then escalates to sender.
+	// Default nil ⇒ inert until wired from cmd/flotilla/watch.go.
+	DroppedDispatchOnFinish func(agent string)
 	// DecisionBriefOnTick is the auto decision-brief side-effect (#349 item D): invoked
 	// once per detector tick (off d.mu, optionally async via MirrorDispatch). The caller
 	// scans the goals file for operator-gated items missing a brief and dispatches the
@@ -894,7 +900,7 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors, co
 	// like the wakes, OUTSIDE d.mu — a slow transcript read or Discord post must never stall the tick
 	// loop or block OperatorWake. The closure is observe-only + best-effort (it absorbs its own
 	// failures); the detector only fires the trigger.
-	if len(mirrors) > 0 && (d.cfg.MirrorOnFinish != nil || d.cfg.IdleHoldOnFinish != nil || d.cfg.StrandedHandoffOnFinish != nil) {
+	if len(mirrors) > 0 && (d.cfg.MirrorOnFinish != nil || d.cfg.IdleHoldOnFinish != nil || d.cfg.StrandedHandoffOnFinish != nil || d.cfg.DroppedDispatchOnFinish != nil) {
 		run := func() {
 			for _, agent := range mirrors {
 				if d.cfg.MirrorOnFinish != nil {
@@ -905,6 +911,9 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors, co
 				}
 				if d.cfg.StrandedHandoffOnFinish != nil {
 					d.strandedHandoffOne(agent)
+				}
+				if d.cfg.DroppedDispatchOnFinish != nil {
+					d.droppedDispatchOne(agent)
 				}
 			}
 		}
@@ -1030,6 +1039,13 @@ func (d *Detector) mirrorOne(agent string) {
 
 // coordinatorMirrorOne invokes the primary-clock-XO mirror with the same recover()
 // backstop as mirrorOne.
+func (d *Detector) isCoordinatorForMirror(name string) bool {
+	if d.cfg.IsCoordinator != nil {
+		return d.cfg.IsCoordinator(name)
+	}
+	return name != "" && name == d.cfg.XOAgent
+}
+
 func (d *Detector) coordinatorMirrorOne(agent string) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -1059,6 +1075,17 @@ func (d *Detector) strandedHandoffOne(agent string) {
 		}
 	}()
 	d.cfg.StrandedHandoffOnFinish(agent)
+}
+
+// droppedDispatchOne invokes the #472 dropped-dispatch side-effect with the same recover()
+// backstop as mirrorOne.
+func (d *Detector) droppedDispatchOne(agent string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("flotilla watch: dropped-dispatch break panicked for %q (recovered; tick unaffected): %v", agent, r)
+		}
+	}()
+	d.cfg.DroppedDispatchOnFinish(agent)
 }
 
 // delegationNudgeOne invokes the coordinator delegation nudge with the same recover()
@@ -1106,6 +1133,12 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 		primary, byOwner := groupMaterialByOwner(reasons, d.cfg.OwningXO)
 		if len(primary) > 0 {
 			wake(WakeMaterial, primary)
+		}
+		// Primary-owned desk material lands in byOwner[XOAgent], not the fleet-wide
+		// primary slice — route it through wake() so the primary clock advances (#487 P1).
+		if owned := byOwner[d.cfg.XOAgent]; len(owned) > 0 {
+			wake(WakeMaterial, owned)
+			delete(byOwner, d.cfg.XOAgent)
 		}
 		owners := make([]string, 0, len(byOwner))
 		for owner := range byOwner {
@@ -1157,22 +1190,23 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 			cur.XOSettled = false
 			return
 		}
-		primary, _ := groupMaterialByOwner(reasons, d.cfg.OwningXO)
-		if len(primary) > 0 {
+		primary, byOwner := groupMaterialByOwner(reasons, d.cfg.OwningXO)
+		if len(primary) > 0 || len(byOwner[d.cfg.XOAgent]) > 0 {
 			d.selfCont = 0
 			cur.XOSettled = false
 		}
 	}
 
-	// 2b. Per-desk visibility mirror trigger: each NON-XO desk that completed a unit of work this
+	// 2b. Per-desk visibility mirror trigger: each execution desk that completed a unit of work this
 	//     tick (a confirmed Working→Idle transition) is recorded for the post-unlock tail to mirror
-	//     to its home channel. Computed UNDER the lock from the same debounced states the diff uses,
-	//     but emitted OUTSIDE d.mu in runTail. This is reached only past the cold-start early-return
-	//     above, so the cold-start baseline emits NO mirrors (a desk that was already Idle when the
-	//     detector booted has not "finished a turn"). The XO is excluded — it has its own mirror.
+	//     to its home channel. Monitored coordinators use CoordinatorMirrorOnFinish instead.
+	//     Computed UNDER the lock from the same debounced states the diff uses, but emitted OUTSIDE
+	//     d.mu in runTail. This is reached only past the cold-start early-return above, so the
+	//     cold-start baseline emits NO mirrors (a desk that was already Idle when the detector
+	//     booted has not "finished a turn").
 	for _, name := range d.cfg.Desks {
 		if prev.DeskStates[name] == surface.StateWorking && cur.DeskStates[name] == surface.StateIdle {
-			if name == d.cfg.XOAgent {
+			if d.isCoordinatorForMirror(name) {
 				pendingCoordinatorMirrors = append(pendingCoordinatorMirrors, name)
 				pendingTurnEnds = append(pendingTurnEnds, name)
 				continue

@@ -215,6 +215,29 @@ func TestBacklogWakeBodyNamesItemAndAcks(t *testing.T) {
 	}
 }
 
+// #526: a long unblocked backlog line must be capped in the wake prompt — not raw-joined verbatim.
+func TestBacklogWakeBodyCapsLongItem(t *testing.T) {
+	const ack = "\n(To ack you are alive, run: touch /x/alive)"
+	longBody := strings.Repeat("status checkpoint with historical detail ", 80)
+	item := "- [in-flight] FLOTILLA ORG-ARCHITECTURE SHIFT — " + longBody
+	body := backlogWakeBody([]string{item}, "/state/fleet-backlog.md", ack)
+	if strings.Contains(body, longBody) {
+		t.Error("WakeBacklog must not inject the full raw backlog line")
+	}
+	if !strings.Contains(body, "- [in-flight] FLOTILLA ORG-ARCHITECTURE SHIFT") {
+		t.Error("WakeBacklog must preserve the item marker and title prefix")
+	}
+	if !strings.Contains(body, "read backlog file for full item") {
+		t.Error("WakeBacklog capped item must point at durable state for details")
+	}
+	if len([]rune(body)) > 1200 {
+		t.Errorf("WakeBacklog body too large (%d runes); cap per item failed", len([]rune(body)))
+	}
+	if !strings.HasSuffix(body, ack) {
+		t.Error("WakeBacklog body MUST still append the ack instruction after cap (#526)")
+	}
+}
+
 // backlogStatusGate must alert ONCE on the edge into a present-but-unparseable backlog (never a
 // silent no-op), re-arm after a clean read, and fail SILENT (no gate, no alert) on absent/unreadable.
 func TestBacklogStatusGateAlertOnceAndReArm(t *testing.T) {

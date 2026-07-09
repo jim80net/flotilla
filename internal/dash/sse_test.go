@@ -255,6 +255,37 @@ func TestFileSigsChange(t *testing.T) {
 	}
 }
 
+// shutdownPollTest cancels the poller and waits for any async loadGoals the poller
+// spawned — otherwise t.TempDir cleanup can race a background goals compile/write.
+func shutdownPollTest(t *testing.T, srv *Server, cancel context.CancelFunc) {
+	t.Helper()
+	t.Cleanup(func() {
+		cancel()
+		done := make(chan struct{})
+		go func() {
+			srv.waitPollAndGoalsLoads()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("timed out waiting for async goals loads after poll shutdown")
+		}
+	})
+}
+
+// waitPollStopped blocks until the SSE file poller goroutine exits.
+func (s *Server) waitPollStopped() { s.pollWG.Wait() }
+
+// waitAsyncGoalsLoads blocks until background loadGoals calls from the SSE poller finish.
+func (s *Server) waitAsyncGoalsLoads() { s.goalsLoadWG.Wait() }
+
+// waitPollAndGoalsLoads drains the poller first so no new loadGoals can start after cancel.
+func (s *Server) waitPollAndGoalsLoads() {
+	s.waitPollStopped()
+	s.waitAsyncGoalsLoads()
+}
+
 // TestPollEmitsOnGoalsYAMLChange: the poller emits when only the goals YAML
 // source changes (paths[4]), not just the compiled goals JSON.
 func TestPollEmitsOnGoalsYAMLChange(t *testing.T) {
@@ -262,9 +293,9 @@ func TestPollEmitsOnGoalsYAMLChange(t *testing.T) {
 	srv, dir := newTestServer(t, singleFleetRoster, now)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	shutdownPollTest(t, srv, cancel)
 	go srv.hub.run(ctx)
-	go srv.poll(ctx)
+	srv.startPoll(ctx)
 
 	c := &sseClient{events: make(chan string, 4)}
 	if !srv.hub.add(c) {
@@ -290,9 +321,9 @@ func TestPollEmitsOnSessionMirrorChange(t *testing.T) {
 	srv, dir := newTestServer(t, singleFleetRoster, now)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	shutdownPollTest(t, srv, cancel)
 	go srv.hub.run(ctx)
-	go srv.poll(ctx)
+	srv.startPoll(ctx)
 
 	c := &sseClient{events: make(chan string, 4)}
 	if !srv.hub.add(c) {
@@ -321,9 +352,9 @@ func TestPollEmitsOnChange(t *testing.T) {
 	srv, dir := newTestServer(t, singleFleetRoster, now)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	shutdownPollTest(t, srv, cancel)
 	go srv.hub.run(ctx)
-	go srv.poll(ctx)
+	srv.startPoll(ctx)
 
 	c := &sseClient{events: make(chan string, 4)}
 	if !srv.hub.add(c) {

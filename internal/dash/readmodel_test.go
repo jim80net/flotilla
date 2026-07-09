@@ -307,6 +307,62 @@ func TestBuildTopology_Coordinators(t *testing.T) {
 	}
 }
 
+// TestBuildTopology_CoordinatorTierOnly502 pins the Fleet Command rail's source set against
+// the FULL deployment shape that produced #502 (execution desks on the rail): every desk owns
+// a solo mirror channel (the #460 trap), supervisors appear BOTH ways (#481 dual-shape: a
+// shape-1 XO whose home lists a non-XO subordinate, and shape-2 supervisors listed as the
+// sole observers on desk-home channels), and everyone is a fleet-command member. The rail
+// must show the coordinator TIER only — no execution desk qualifies through any shape.
+//
+// LOAD-BEARING SHAPE NOTE (found writing this pin): the dual-shape detection derives
+// "supervisor" from IsXO = channel OWNERSHIP, so shape-2 supervisors here own mirror
+// channels (Cxf/Cxo) exactly as every agent does in the real deployment. WITHOUT those
+// mirrors the derivation inverts — the supervised desks classify as coordinators and the
+// supervisors as nothing. That fragility is a roster-domain hole of the #464 family,
+// filed separately; this test pins the deployment invariant the derivation relies on.
+func TestBuildTopology_CoordinatorTierOnly502(t *testing.T) {
+	cfg, err := loadInlineRoster(t, `{
+		"xo_agent": "cos",
+		"agents": [{"name": "cos"}, {"name": "xo-fleet"}, {"name": "xo-proj"}, {"name": "xo-observer"},
+			{"name": "trial-xo"}, {"name": "backend"}, {"name": "frontend"}, {"name": "data"}, {"name": "builder"}],
+		"channels": [
+			{"channel_id": "Ccmd", "xo_agent": "cos", "members": ["cos", "xo-fleet", "xo-proj", "xo-observer", "trial-xo", "backend", "frontend", "data", "builder"], "role": "fleet-command"},
+			{"channel_id": "Cxf", "xo_agent": "xo-fleet", "members": []},
+			{"channel_id": "Cxo", "xo_agent": "xo-observer", "members": []},
+			{"channel_id": "Cbe", "xo_agent": "backend", "members": ["xo-fleet"]},
+			{"channel_id": "Cfe", "xo_agent": "frontend", "members": ["xo-fleet"]},
+			{"channel_id": "Cda", "xo_agent": "data", "members": []},
+			{"channel_id": "Cpr", "xo_agent": "xo-proj", "members": ["cos", "xo-proj", "builder"]},
+			{"channel_id": "Ctr", "xo_agent": "trial-xo", "members": ["cos", "xo-observer"]}
+		]
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := BuildTopology(cfg)
+	// cos = primary; xo-fleet supervises two desk-homes (shape-2); xo-proj has a non-XO
+	// subordinate (shape-1); xo-observer supervises the trial XO's home (shape-2).
+	want := []string{"cos", "xo-fleet", "xo-observer", "xo-proj"}
+	if len(doc.Coordinators) != len(want) {
+		t.Fatalf("coordinators = %v, want %v", doc.Coordinators, want)
+	}
+	for i, c := range want {
+		if doc.Coordinators[i] != c {
+			t.Errorf("coordinators[%d] = %q, want %q (full: %v)", i, doc.Coordinators[i], c, doc.Coordinators)
+		}
+	}
+	// The exclusions ARE the regression: a solo mirror owner (data), supervised desk-home
+	// owners (backend/frontend), a member-only desk (builder), and a supervised XO whose
+	// own home holds only XO observers (trial-xo) must never reach the rail's set.
+	for _, excluded := range []string{"backend", "frontend", "data", "builder", "trial-xo"} {
+		for _, c := range doc.Coordinators {
+			if c == excluded {
+				t.Errorf("%q is an execution-tier agent and must NOT be a rail coordinator (#502)", excluded)
+			}
+		}
+	}
+}
+
 func TestBuildTopology_ClockOnly(t *testing.T) {
 	// No channel_id and no channels[] ⇒ no bindings, an explanatory note.
 	cfg, err := loadInlineRoster(t, `{"xo_agent": "xo", "agents": [{"name": "xo"}]}`)

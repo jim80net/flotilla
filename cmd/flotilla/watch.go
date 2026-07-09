@@ -21,7 +21,9 @@ import (
 	"github.com/jim80net/flotilla/internal/delegatenudge"
 	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/idlehold"
+	"github.com/jim80net/flotilla/internal/inbound"
 	"github.com/jim80net/flotilla/internal/launch"
+	"github.com/jim80net/flotilla/internal/outbox"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/stranded"
 	"github.com/jim80net/flotilla/internal/surface"
@@ -285,11 +287,18 @@ func cmdWatch(args []string) error {
 	injector.SetEscalate(alert)
 	injector.SetRelayQueue(*queuePath)
 	injector.SetRosterDir(rosterDir)
+	injector.SetOutboxStaleEscalate(
+		func(sender string) string { return cfg.OwningXO(sender, xo) },
+		func(coordinator, msg, claimKey string) {
+			injector.Enqueue(watch.Job{Agent: coordinator, Message: msg, Kind: watch.KindDetector, ClaimKey: claimKey})
+		},
+	)
 	outboxSweeper := watch.NewOutboxSweeper(rosterDir, injector.Enqueue)
 	injector.SetSendDelivered(func(sender, recipient, message string) {
 		mirrorSendToLedger(cfg, sender, recipient, message)
 	})
 	injector.SetOutboxDone(outboxSweeper.Release)
+	injector.SetInboundTrack(watch.InboundTrackHook(rosterDir, cfg.IsCoordinator))
 	// Mirror relayed instructions to the audit channel in full. Heartbeat ticks
 	// are NOT mirrored: they fire every interval and a per-tick marker is pure
 	// noise in the operator's Discord channel (XO liveness is already covered by
@@ -404,22 +413,30 @@ func cmdWatch(args []string) error {
 		primaryAdjutant := cfg.AdjutantFor(xo)
 		leaderAckPath := *ackPath // resolved per-coordinator path (legacy fallback when present)
 		layerBufferPath := roster.LayerBufferPath(rosterDir, xo)
+		seamClaims := newAdjutantSeamClaims()
 
 		drainAdjutantSeamFor := func(owner string) {
 			if cfg.AdjutantFor(owner) == "" {
 				return
 			}
 			bufferPath := roster.LayerBufferPath(rosterDir, owner)
-			brief, ok, clearAfter := adjutantSeamBrief(bufferPath, owner, rosterDir)
+			deliveredPath := roster.LayerBufferDeliveredPath(rosterDir, owner)
+			brief, ok, clearAfter, recordItems := adjutantSeamBrief(bufferPath, deliveredPath, owner, rosterDir)
 			if !ok {
+				if clearAfter {
+					if err := adjutantbuffer.Clear(bufferPath); err != nil {
+						log.Printf("flotilla watch: adjutant buffer clear after all-consumed skip failed for %q: %v", owner, err)
+					}
+				}
 				return
 			}
-			injector.Enqueue(watch.Job{Agent: owner, Message: brief, Kind: watch.KindDetector})
-			if clearAfter {
-				if err := adjutantbuffer.Clear(bufferPath); err != nil {
-					log.Printf("flotilla watch: adjutant buffer clear after enqueue failed for %q: %v", owner, err)
-				}
-			}
+			claimKey := adjutantSeamClaimKey(owner)
+			seamClaims.register(claimKey, adjutantSeamClaim{
+				owner: owner, bufferPath: bufferPath, deliveredPath: deliveredPath, recordItems: recordItems,
+			})
+			injector.Enqueue(watch.Job{
+				Agent: owner, Message: brief, Kind: watch.KindDetector, ClaimKey: claimKey,
+			})
 		}
 
 		wake := func(kind watch.WakeKind, reasons []string) {
@@ -442,7 +459,7 @@ func cmdWatch(args []string) error {
 						// Evaluation ticks require an established charter (#439 spec).
 						body = adjutantCharterPairingBody(xo, primaryAdjutant, charterPath, leaderAckPath)
 					} else {
-						body = adjutantEvaluationTickBody(xo, leaderAckPath, layerBufferPath)
+						body = adjutantEvaluationTickBody(xo, leaderAckPath, layerBufferPath, charterPath)
 					}
 				} else {
 					body = leaderPingBody(leaderAckPath)
@@ -577,12 +594,34 @@ func cmdWatch(args []string) error {
 		decisionBriefTracker := decisionbrief.LoadTracker(decisionBriefClaimsPath)
 		injector.SetDetectorClaimHooks(
 			func(key string) {
+				if sender, entryID, ok := outbox.ParseStaleClaimKey(key); ok {
+					if err := outbox.MarkStaleEscalated(rosterDir, sender, entryID); err != nil {
+						log.Printf("flotilla watch: outbox stale confirm %s/%s failed: %v", sender, entryID, err)
+					}
+					return
+				}
+				if recipient, entryID, ok := inbound.ParseReinjectClaimKey(key); ok {
+					if err := inbound.MarkReinjectDelivered(rosterDir, recipient, entryID); err != nil {
+						log.Printf("flotilla watch: inbound reinject confirm %s/%s failed: %v", recipient, entryID, err)
+					}
+					return
+				}
+				if isAdjutantSeamClaimKey(key) {
+					seamClaims.confirm(key)
+					return
+				}
 				decisionBriefTracker.Confirm(key)
 				if err := decisionBriefTracker.Save(decisionBriefClaimsPath); err != nil {
 					log.Printf("flotilla watch: decision-brief claims save failed: %v", err)
 				}
 			},
-			decisionBriefTracker.Abort,
+			func(key string) {
+				if isAdjutantSeamClaimKey(key) {
+					seamClaims.abort(key)
+					return
+				}
+				decisionBriefTracker.Abort(key)
+			},
 		)
 		goalsJSONPath := filepath.Join(rosterDir, "fleet-goals.json")
 		if gp := strings.TrimSpace(os.Getenv("FLOTILLA_GOALS_FILE")); gp != "" {
@@ -706,13 +745,19 @@ func cmdWatch(args []string) error {
 				return surface.RotateContext(xoDrv, pane)
 			},
 			MirrorOnFinish:            deskMirrorOnFinish(cfg, secrets, tr, rosterDir),
-			CoordinatorMirrorOnFinish: coordinatorMirrorOnFinish(cfg, rosterDir),
+			CoordinatorMirrorOnFinish: coordinatorMirrorOnFinish(cfg, secrets, tr, *rosterPath, rosterDir),
 			AdjutantFor:               func(owner string) string { return cfg.AdjutantFor(owner) },
 			AdjutantSeamOnFinish:      drainAdjutantSeamFor,
 			IdleHoldOnFinish:          idleHoldOnFinish(cfg, idleHoldTracker, injector.Enqueue),
 			StrandedHandoffOnFinish:   strandedHandoffOnFinish(cfg, strandedTracker, injector.Enqueue),
-			IsCoordinator:             cfg.IsCoordinator,
-			DelegationNudgeOnFinish:   delegationNudgeOnFinish(cfg, delegationTracker, injector.Enqueue),
+			DroppedDispatchOnFinish: watch.DroppedDispatchFinishHook(
+				rosterDir,
+				func(agent string) (string, bool, error) { return readDeskTurnFinal(cfg, agent) },
+				injector.Enqueue,
+				alert,
+			),
+			IsCoordinator:           cfg.IsCoordinator,
+			DelegationNudgeOnFinish: delegationNudgeOnFinish(cfg, delegationTracker, injector.Enqueue),
 			DecisionBriefOnTick: decisionBriefOnTick(
 				goalsJSONPath, *backlogPath, decisionBriefClaimsPath, decisionBriefTracker, injector.Enqueue, cfg,
 				func() map[string]string {
@@ -1123,10 +1168,16 @@ func leaderPingBody(ackPath string) string {
 		"\n(To ack you are alive, run: touch " + ackPath + ")"
 }
 
+// adjutantCharterGovernanceLine reminds recurring adjutant prompts where durable classification
+// rules live (#469 addendum — charter amendments must survive past one session turn).
+func adjutantCharterGovernanceLine(charterPath string) string {
+	return "\nYour charter at " + charterPath + " governs classification — consult it before composing any brief."
+}
+
 // adjutantEvaluationTickBody routes a stale-leader timeout to the adjutant as an
 // evaluation tick (#439 operator amendment): ack → evaluate → act-by-tier — not a
 // dead-man's ack to the leader.
-func adjutantEvaluationTickBody(leader, leaderAckPath, bufferPath string) string {
+func adjutantEvaluationTickBody(leader, leaderAckPath, bufferPath, charterPath string) string {
 	return "[flotilla adjutant] Evaluation tick for " + leader +
 		" — leader alive file is stale (timeout signal; not a dead-man ack to the leader).\n\n" +
 		"Three-step duty (required-minimum charter):\n" +
@@ -1137,6 +1188,7 @@ func adjutantEvaluationTickBody(leader, leaderAckPath, bufferPath string) string
 		"3. ACT BY TIER — all-quiet → ack only, no leader interrupt; work-found → buffer judgment items " +
 		"in " + bufferPath + " and inject a digest at " + leader + "'s next seam (immediately if urgent-class).\n\n" +
 		"This tick catches idle-holding: leader idle but queue not empty is work-found, not all-quiet." +
+		adjutantCharterGovernanceLine(charterPath) +
 		adjutantDualObservationContract(leader)
 }
 
@@ -1189,6 +1241,7 @@ func enqueueLayerMaterialWake(cfg *roster.Config, rosterDir, primaryXO, owner st
 		settledPath = roster.LayerSettledPath(rosterDir, owner)
 	}
 	bufferPath := roster.LayerBufferPath(rosterDir, owner)
+	charterPath := roster.LayerCharterPath(rosterDir, owner)
 	ackInstr := primaryAckInstr
 	if owner != primaryXO {
 		ackInstr = "\n(To ack you are alive, run: touch " + leaderAckPath + ")"
@@ -1202,7 +1255,7 @@ func enqueueLayerMaterialWake(cfg *roster.Config, rosterDir, primaryXO, owner st
 			body = leaderMaterialBody(reasons, settledPath, ackInstr)
 		} else {
 			target = adjutant
-			body = adjutantBufferedNoteBody(owner, len(reasons))
+			body = adjutantBufferedNoteBody(owner, len(reasons), charterPath)
 		}
 	} else {
 		body = leaderMaterialBody(reasons, settledPath, ackInstr)
@@ -1218,11 +1271,12 @@ func leaderMaterialBody(reasons []string, settledPath, ackInstr string) string {
 }
 
 // adjutantBufferedNoteBody notifies the adjutant that items were buffered (#439 phase 1b).
-func adjutantBufferedNoteBody(leader string, n int) string {
+func adjutantBufferedNoteBody(leader string, n int, charterPath string) string {
 	return "[flotilla adjutant] Buffered " + fmt.Sprintf("%d", n) + " interrupt(s) for " + leader +
 		"'s layer. Triage mechanical items locally. Judgment items stay buffered until " +
 		leader + "'s next seam — the leader receives a consolidated brief then, not mid-thought. " +
 		"On evaluation ticks: ack → evaluate → act-by-tier." +
+		adjutantCharterGovernanceLine(charterPath) +
 		adjutantDualObservationContract(leader)
 }
 
@@ -1256,27 +1310,59 @@ func enqueueAdjutantCharterPairing(adjutant, leader, rosterDir, leaderAckPath st
 	})
 }
 
-// adjutantSeamBrief peeks the layer buffer and formats the leader inject at a seam. The caller
-// must Clear the sidecar only AFTER enqueue (enqueue-then-delete — same at-least-once window as
-// detector persist).
-func adjutantSeamBrief(bufferPath, leader, rosterDir string) (brief string, ok bool, clearAfter bool) {
+// adjutantSeamBrief peeks the layer buffer, applies consumed-item dedup (#469), and formats the
+// leader inject at a seam. recordItems is recorded and the buffer cleared only on confirmed
+// delivery via ClaimKey hooks (#488 P2) — not at enqueue.
+func adjutantSeamBrief(bufferPath, deliveredPath, leader, rosterDir string) (brief string, ok bool, clearAfter bool, recordItems []adjutantbuffer.Item) {
 	f, hasItems, quarantined, err := adjutantbuffer.Peek(bufferPath)
 	if err != nil {
 		log.Printf("flotilla watch: adjutant buffer peek failed: %v", err)
-		return "", false, false
+		return "", false, false, nil
 	}
 	if !hasItems && !quarantined {
-		return "", false, false
+		return "", false, false, nil
+	}
+	delivered, ledgerQuarantined, err := adjutantbuffer.LoadDelivered(deliveredPath)
+	if err != nil {
+		log.Printf("flotilla watch: adjutant delivered ledger load failed: %v", err)
+		return "", false, false, nil
+	}
+	if ledgerQuarantined {
+		log.Printf("flotilla watch: adjutant delivered ledger for %q quarantined — continuing with empty dedup state", leader)
 	}
 	_, charterErr := os.Stat(roster.LayerCharterPath(rosterDir, leader))
-	return adjutantbuffer.FormatBrief(leader, f, os.IsNotExist(charterErr), quarantined), true, hasItems
+	brief, recordItems, ok = adjutantbuffer.PrepareInject(leader, f, delivered, os.IsNotExist(charterErr), quarantined)
+	return brief, ok, hasItems, recordItems
+}
+
+// backlogWakeItemMaxRunes caps each driven item line in a WakeBacklog prompt (#526). The parser
+// stores the full raw markdown line; injecting it verbatim can wall-of-text the XO. Classification
+// is unchanged — only the wake presentation is truncated; durable state is the read contract.
+const backlogWakeItemMaxRunes = 280
+
+// formatBacklogWakeItem returns a pointer-sized rendering of one unblocked backlog line.
+func formatBacklogWakeItem(raw string) string {
+	const tail = " … (read backlog file for full item)"
+	r := []rune(raw)
+	limit := backlogWakeItemMaxRunes - len([]rune(tail))
+	if limit < 40 {
+		limit = 40
+	}
+	if len(r) <= limit {
+		return raw
+	}
+	return string(r[:limit]) + tail
 }
 
 // backlogWakeBody composes the goal-driven loop's WakeBacklog prompt: it NAMES the driven item(s)
 // and MUST append ackInstr — a continuously-driven XO that is never told to ack would falsely trip
 // the AckAge wedge alert (the liveness backstop). Pure so the name + ack invariant is testable.
 func backlogWakeBody(items []string, backlogPath, ackInstr string) string {
-	return "[flotilla goal-driven loop] Advance the top unblocked backlog item:\n" + strings.Join(items, "\n") +
+	lines := make([]string, len(items))
+	for i, it := range items {
+		lines[i] = formatBacklogWakeItem(it)
+	}
+	return "[flotilla goal-driven loop] Advance the top unblocked backlog item:\n" + strings.Join(lines, "\n") +
 		"\nDispatch it to the right desk/harness if not started; check in / unblock if in flight; if it is " +
 		"genuinely operator-blocked, drive PREP and move to the next. Reply idle ONLY if every remaining " +
 		"backlog item is done or operator-blocked — the loop will NOT settle while unblocked work remains. " +
@@ -1424,20 +1510,34 @@ func readDeskTurnFinal(cfg *roster.Config, agent string) (text string, ok bool, 
 	return text, true, nil
 }
 
-// coordinatorMirrorOnFinish builds the detector's CoordinatorMirrorOnFinish side-effect for the
-// primary clock XO: ledger-only session-mirror append with readerModelInternal derivation. Discord
-// posting is deliberately omitted — the XO Stop hook (deploy/flotilla-xo-discord-mirror.sh) already
-// posts the turn-final via flotilla notify, and a second deskMirror post would double-publish.
-func coordinatorMirrorOnFinish(cfg *roster.Config, rosterDir string) func(agent string) {
-	if rosterDir == "" {
+// coordinatorMirrorOnFinish builds the detector's CoordinatorMirrorOnFinish side-effect for every
+// monitored coordinator: read turn-final via ResultReader, post Discord (chunked), append
+// session-mirror ledger, and best-effort CoS ledger. Harness-agnostic — does not rely on Claude
+// Stop hooks (Codex/Grok coordinators have none).
+func coordinatorMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr transport.Transport, rosterPath, rosterDir string) func(agent string) {
+	if secrets == nil || tr == nil {
 		return nil
 	}
 	return func(agent string) {
 		m := deskMirror{
-			ledgerOnly: true,
-			rosterDir:  rosterDir,
+			rosterDir: rosterDir,
+			webhook: func(a string) (string, bool) {
+				url, err := secrets.Webhook(a)
+				if err != nil || url == "" {
+					return "", false
+				}
+				return url, true
+			},
 			turnFinal: func(a string) (string, bool, error) {
 				return readDeskTurnFinal(cfg, a)
+			},
+			post: func(url, username, content string) error {
+				return tr.Post(transport.NewWebhookDestination(url), username, content)
+			},
+			onDiscordSuccess: func(from, body string) {
+				if rosterPath != "" {
+					mirrorNotifyToLedger(rosterPath, from, body)
+				}
 			},
 			logf: log.Printf,
 		}
@@ -1495,7 +1595,7 @@ func delegationNudgeOnFinish(cfg *roster.Config, tracker *delegatenudge.Tracker,
 		if !tracker.Record(agent, r) {
 			return
 		}
-		log.Printf("flotilla watch: delegation-nudge %s: inline-build signal", agent)
+		log.Printf("flotilla watch: delegation-nudge %s: classifier=coordinator signal=inline-build", agent)
 		enqueue(watch.Job{Agent: agent, Message: delegatenudge.NudgePrompt(agent), Kind: watch.KindDetector})
 	}
 }
@@ -1537,24 +1637,30 @@ func decisionBriefOnTick(
 	if tracker == nil {
 		return nil
 	}
+	unownedSkipLatch := decisionbrief.NewUnownedSkipLatch()
 	return func() {
 		in, err := loadDecisionBriefInputs(goalsPath, backlogPath, deskStates())
 		if err != nil {
 			return
 		}
 		gaps := decisionbrief.FindGaps(in)
+		seenGaps := make(map[string]bool, len(gaps))
 		active := make(map[string]bool, len(gaps))
 		for _, g := range gaps {
+			key := decisionbrief.GapKey(g)
+			seenGaps[key] = true
 			owner := strings.TrimSpace(g.Owner)
 			if owner == "" {
-				log.Printf("flotilla watch: decision-brief SKIP goal %q: no owning desk", g.GoalID)
+				if unownedSkipLatch.ShouldLog(g) {
+					log.Printf("flotilla watch: decision-brief SKIP goal %q: no owning desk (gap %s)", g.GoalID, key)
+				}
 				continue
 			}
+			unownedSkipLatch.Clear(g)
 			if _, err := cfg.Agent(owner); err != nil {
 				log.Printf("flotilla watch: decision-brief SKIP goal %q: owner %q not in roster", g.GoalID, owner)
 				continue
 			}
-			key := decisionbrief.GapKey(g)
 			active[key] = true
 			fresh, ferr := loadDecisionBriefInputs(goalsPath, backlogPath, deskStates())
 			if ferr != nil {
@@ -1574,6 +1680,7 @@ func decisionBriefOnTick(
 				Kind: watch.KindDetector, ClaimKey: key,
 			})
 		}
+		unownedSkipLatch.Reconcile(seenGaps)
 		tracker.Reconcile(active)
 		if err := tracker.Save(claimsPath); err != nil {
 			log.Printf("flotilla watch: decision-brief claims save failed: %v", err)

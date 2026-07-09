@@ -97,9 +97,6 @@ func TestDeskMirror_FleetInternalVocabPostsAndLedgers(t *testing.T) {
 	}
 }
 
-// TestDeskMirror_PrimaryXOLedgerOnlyInvariant documents the P1 gate: CoordinatorMirrorOnFinish
-// (primary clock XO) appends session-mirror and runs readerModelInternal but never posts to Discord.
-// The XO Stop hook already publishes via flotilla notify — a second post would double-publish.
 func TestDeskMirror_LedgerFailOmitsLedgerSuccess(t *testing.T) {
 	dir := t.TempDir()
 	var lines []string
@@ -127,29 +124,34 @@ func TestDeskMirror_LedgerFailOmitsLedgerSuccess(t *testing.T) {
 	}
 }
 
-func TestDeskMirror_PrimaryXOLedgerOnlyInvariant(t *testing.T) {
+func TestDeskMirror_CoordinatorPostsDiscordAndLedger(t *testing.T) {
 	dir := t.TempDir()
 	postCalls := 0
+	var postedBody string
 	var lines []string
 	turn := "```reader-map\n" +
 		`{"audience":"operator","anchor":"xo anchor","delta":"xo delta","decision":"none"}` +
 		"\n```"
 
 	m := deskMirror{
-		ledgerOnly: true,
-		rosterDir:  dir,
-		now:        func() time.Time { return time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC) },
-		turnFinal:  func(string) (string, bool, error) { return turn, true, nil },
-		post: func(_, _, _ string) error {
+		rosterDir: dir,
+		now:       func() time.Time { return time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC) },
+		webhook:   func(string) (string, bool) { return "https://wh", true },
+		turnFinal: func(string) (string, bool, error) { return turn, true, nil },
+		post: func(_, _, body string) error {
 			postCalls++
+			postedBody = body
 			return nil
 		},
 		logf: recordLogf(&lines),
 	}
 	m.run("xo")
 
-	if postCalls != 0 {
-		t.Fatalf("primary XO ledger-only mirror posted %d times, want 0 (Stop hook owns Discord)", postCalls)
+	if postCalls != 1 {
+		t.Fatalf("coordinator mirror posted %d times, want 1 (harness-agnostic Discord path)", postCalls)
+	}
+	if !strings.HasPrefix(postedBody, "xo anchor") {
+		t.Errorf("posted body = %q, want modeled anchor body", postedBody)
 	}
 
 	path, err := sessionmirror.LedgerPath(dir, "xo")
@@ -167,8 +169,8 @@ func TestDeskMirror_PrimaryXOLedgerOnlyInvariant(t *testing.T) {
 	if !strings.HasPrefix(doc.Entries[0].Info, "xo anchor") {
 		t.Errorf("info = %q, want modeled anchor body", doc.Entries[0].Info)
 	}
-	if len(lines) != 1 || !strings.Contains(lines[0], "LEDGER xo") {
-		t.Errorf("decision lines = %v, want exactly one LEDGER line", lines)
+	if len(lines) != 1 || !strings.Contains(lines[0], "POST xo 1 chunks") {
+		t.Errorf("decision lines = %v, want exactly one POST line", lines)
 	}
 }
 

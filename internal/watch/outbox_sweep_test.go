@@ -24,7 +24,7 @@ func (b *busyThenIdleSend) send(_, _ string) error {
 
 func TestOutboxSweeperEnqueuesPending(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := outbox.Enqueue(dir, "alpha", "cos", "deploy done"); err != nil {
+	if _, _, err := outbox.Enqueue(dir, "alpha", "cos", "deploy done"); err != nil {
 		t.Fatal(err)
 	}
 	var n atomic.Int32
@@ -83,10 +83,12 @@ func TestSweepDeliversOnRecipientIdleLogsEnqueueTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	outbox.NewStore(path).Upsert(outbox.Entry{
+	if _, _, err := outbox.NewStore(path).Insert(outbox.Entry{
 		ID: "sweep1", Sender: "alpha", Recipient: "cos", Message: "deploy done",
 		EnqueuedAt: enqAt,
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	send := &busyThenIdleSend{}
 	var deferred []Job
@@ -127,13 +129,22 @@ func TestSweepDeliversOnRecipientIdleLogsEnqueueTime(t *testing.T) {
 // sender-outbox deferral counter semantics only.
 func TestSendOutboxDeferralsPersistOnBusyDefer(t *testing.T) {
 	dir := t.TempDir()
+	enqAt := time.Date(2026, 7, 6, 8, 0, 0, 0, time.UTC)
+	path, err := outbox.Path(dir, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := outbox.NewStore(path).Insert(outbox.Entry{
+		ID: "d1", Sender: "alpha", Recipient: "cos", Message: "hi", EnqueuedAt: enqAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	r := newRig(surface.ErrBusy)
 	r.in.rosterDir = dir
 	r.in.deliver(Job{
 		Agent: "cos", Message: "hi", Kind: KindSend, MessageID: "d1", Sender: "alpha",
-		enqueuedAt: time.Date(2026, 7, 6, 8, 0, 0, 0, time.UTC),
+		enqueuedAt: enqAt,
 	})
-	path, _ := outbox.Path(dir, "alpha")
 	got := outbox.NewStore(path).Load()
 	if len(got) != 1 || got[0].Deferrals != 1 {
 		t.Fatalf("outbox deferrals = %+v, want 1 after first busy defer", got)

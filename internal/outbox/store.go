@@ -6,6 +6,7 @@ package outbox
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -15,17 +16,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/inbound"
 	"github.com/jim80net/flotilla/internal/sessionmirror"
 )
 
 // Entry is one pending inter-agent send keyed by ID within the sender's outbox file.
 type Entry struct {
-	ID         string    `json:"id"`
-	Sender     string    `json:"sender"`
-	Recipient  string    `json:"recipient"`
-	Message    string    `json:"message"`
-	Deferrals  int       `json:"deferrals"`
-	EnqueuedAt time.Time `json:"enqueued_at"`
+	ID                  string    `json:"id"`
+	Sender              string    `json:"sender"`
+	Recipient           string    `json:"recipient"`
+	Message             string    `json:"message"`
+	Deferrals           int       `json:"deferrals"`
+	EnqueuedAt          time.Time `json:"enqueued_at"`
+	LastStaleEscalation time.Time `json:"last_stale_escalation,omitzero"` // exactly-once coordinator alert (#477)
 }
 
 type file struct {
@@ -86,40 +89,76 @@ func (s Store) Load() []Entry {
 	return out
 }
 
-// Upsert persists an entry when new or materially changed (not deferrals-only bumps).
-// The read-modify-write runs under a cross-process flock so CLI Enqueue and watch Remove
-// cannot lost-update each other (#475 P1).
-func (s Store) Upsert(e Entry) {
+// Insert appends a new pending send. When an identical pending entry already exists
+// (same recipient + nonce-stripped message hash), returns the existing id without appending (#484).
+func (s Store) Insert(e Entry) (id string, deduped bool, err error) {
+	if s.path == "" || e.Sender == "" || e.Recipient == "" || e.Message == "" {
+		return "", false, nil
+	}
+	if e.ID == "" {
+		e.ID, err = NewID()
+		if err != nil {
+			return "", false, err
+		}
+	}
+	hash := messageHash(e.Message)
+	err = s.withLock(func() error {
+		f, rerr := s.readFileForUpdate()
+		if rerr != nil {
+			log.Printf("flotilla outbox: read for insert failed: %v (inserting single entry)", rerr)
+			f = file{}
+		}
+		for _, p := range f.Pending {
+			if p.Recipient == e.Recipient && messageHash(p.Message) == hash {
+				id = p.ID
+				deduped = true
+				return nil
+			}
+		}
+		if e.EnqueuedAt.IsZero() {
+			e.EnqueuedAt = time.Now().UTC()
+		}
+		f.Pending = append(f.Pending, e)
+		id = e.ID
+		return s.save(f)
+	})
+	if err != nil {
+		return "", false, err
+	}
+	if deduped {
+		log.Printf("flotilla outbox: send already queued as %s (%s→%s)", id, e.Sender, e.Recipient)
+	}
+	return id, deduped, nil
+}
+
+// Update persists deferral bumps and stale-escalation markers on an existing entry by id (#484).
+// Unknown ids are ignored — new sends use Insert via Enqueue, not Update.
+func (s Store) Update(e Entry) {
 	if s.path == "" || e.ID == "" {
 		return
 	}
 	if err := s.withLock(func() error {
 		f, err := s.readFileForUpdate()
 		if err != nil {
-			log.Printf("flotilla outbox: read for upsert failed: %v (upserting single entry)", err)
-			f = file{}
+			log.Printf("flotilla outbox: read for update failed: %v", err)
+			return err
 		}
-		replaced := false
 		for i, p := range f.Pending {
 			if p.ID == e.ID {
 				if !entryMateriallyChanged(p, e) {
 					return nil
 				}
 				f.Pending[i] = e
-				replaced = true
-				break
+				return s.save(f)
 			}
 		}
-		if !replaced {
-			f.Pending = append(f.Pending, e)
-		}
-		return s.save(f)
+		return nil
 	}); err != nil {
-		log.Printf("flotilla outbox: upsert failed: %v", err)
+		log.Printf("flotilla outbox: update failed: %v", err)
 	}
 }
 
-// Remove deletes an entry by id under the same flock as Upsert.
+// Remove deletes an entry by id under the same flock as Insert/Update.
 func (s Store) Remove(id string) {
 	if s.path == "" || id == "" {
 		return
@@ -148,36 +187,27 @@ func (s Store) Remove(id string) {
 	}
 }
 
-// Enqueue appends a new pending send and returns its id.
-func Enqueue(rosterDir, sender, recipient, message string) (string, error) {
+// Enqueue inserts a new pending send and returns its id. Identical pending sends dedup
+// to the existing id (#484).
+func Enqueue(rosterDir, sender, recipient, message string) (id string, deduped bool, err error) {
 	path, err := Path(rosterDir, sender)
 	if err != nil {
-		return "", err
-	}
-	id, err := NewID()
-	if err != nil {
-		return "", err
-	}
-	now := time.Now().UTC()
-	entry := Entry{
-		ID:         id,
-		Sender:     sender,
-		Recipient:  recipient,
-		Message:    message,
-		EnqueuedAt: now,
+		return "", false, err
 	}
 	st := NewStore(path)
-	if err := st.withLock(func() error {
-		f, rerr := st.readFileForUpdate()
-		if rerr != nil {
-			f = file{}
-		}
-		f.Pending = append(f.Pending, entry)
-		return st.save(f)
-	}); err != nil {
-		return "", fmt.Errorf("outbox enqueue: %w", err)
+	id, deduped, err = st.Insert(Entry{
+		Sender: sender, Recipient: recipient, Message: message,
+		EnqueuedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		return "", false, fmt.Errorf("outbox enqueue: %w", err)
 	}
-	return id, nil
+	return id, deduped, nil
+}
+
+func messageHash(message string) string {
+	sum := sha256.Sum256([]byte(inbound.StripDispatchFooter(message)))
+	return hex.EncodeToString(sum[:8])
 }
 
 // ListAll scans rosterDir for flotilla-*-outbox.json files and returns all pending entries.
@@ -205,6 +235,12 @@ func entryMateriallyChanged(prev, next Entry) bool {
 		return true
 	}
 	if !prev.EnqueuedAt.Equal(next.EnqueuedAt) {
+		return true
+	}
+	if prev.Deferrals != next.Deferrals {
+		return true
+	}
+	if !prev.LastStaleEscalation.Equal(next.LastStaleEscalation) {
 		return true
 	}
 	return false

@@ -49,6 +49,12 @@ type Agent struct {
 	AdjutantFor string `json:"adjutant_for,omitempty"`
 	// AssistantFor is the legacy alias for adjutant_for (same semantics).
 	AssistantFor string `json:"assistant_for,omitempty"`
+	// Coordinator declares rank explicitly (#491): when set, IsCoordinator uses this
+	// value instead of inferring span from channel membership. Pointer-with-omitempty
+	// so absent means infer (backward compatible); false opts an execution desk OUT
+	// even when supervisor-as-member topology would confer span; true opts a seat IN.
+	// The primary xo_agent and cos_agent cannot set coordinator:false (load rejects).
+	Coordinator *bool `json:"coordinator,omitempty"`
 }
 
 // Title returns the tmux pane title to match for this agent.
@@ -277,6 +283,11 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("roster %q: agents share tmux title %q (would misroute delivery)", path, a.Title())
 		}
 		seenTitle[a.Title()] = true
+		if a.Coordinator != nil && !*a.Coordinator {
+			if a.Name == c.effectiveXOAgent() || a.Name == c.CosAgent {
+				return nil, fmt.Errorf("roster %q: agent %q cannot set coordinator:false (primary xo_agent or cos_agent)", path, a.Name)
+			}
+		}
 	}
 	// watch-capability fields: validate at load so a misconfigured daemon
 	// refuses to start rather than failing silently at the first tick.
@@ -419,6 +430,18 @@ func (c *Config) validateSchedules(path string) error {
 // HeartbeatDur returns the parsed heartbeat interval (0 when disabled).
 func (c *Config) HeartbeatDur() time.Duration { return c.heartbeatDur }
 
+// effectiveXOAgent returns the primary XO name — explicit xo_agent when set, otherwise
+// Agents[0] in legacy single-fleet rosters (the same fallback Bindings uses).
+func (c *Config) effectiveXOAgent() string {
+	if c.XOAgent != "" {
+		return c.XOAgent
+	}
+	if len(c.Channels) == 0 && c.ChannelID != "" && len(c.Agents) > 0 {
+		return c.Agents[0].Name
+	}
+	return ""
+}
+
 // Bindings returns the effective channel→XO bindings the relay routes on. With an
 // explicit Channels list it returns that; otherwise it synthesizes the single
 // legacy binding (channel_id + xo_agent, with EVERY agent as a member — preserving
@@ -560,40 +583,34 @@ func (c *Config) channelIsSupervisorObserverHome(ch Channel) bool {
 }
 
 // IsCoordinator reports whether name holds a coordinator role — the primary xo_agent,
-// the chief-of-staff (cos_agent), or a binding xo_agent with span of control > 0
-// (at least one channel member besides itself; #460). IsXO is broader (any channel
-// owner); use IsCoordinator for delegation-nudge (#232) and coordinator doctrine.
+// the chief-of-staff (cos_agent), an agent with coordinator:true, or (when unset) a
+// binding xo_agent with inferred span of control (#460, #481). Explicit coordinator:false
+// opts an execution desk out even when supervisor-as-member topology would confer span
+// (#491). IsXO is broader (any channel owner); use IsCoordinator for delegation-nudge
+// (#232) and coordinator doctrine.
 func (c *Config) IsCoordinator(name string) bool {
 	if name == "" {
 		return false
 	}
-	if c.XOAgent != "" && name == c.XOAgent {
+	if xo := c.effectiveXOAgent(); xo != "" && name == xo {
 		return true
 	}
 	if c.CosAgent != "" && name == c.CosAgent {
 		return true
 	}
+	if a, err := c.Agent(name); err == nil && a.Coordinator != nil {
+		return *a.Coordinator
+	}
 	return c.hasSpanOfControl(name)
 }
 
-// CoordinatorSet returns EVERY coordinator agent (each name for which IsCoordinator is true) —
-// the primary XO, the CoS, and every binding XO with span of control — computed in a SINGLE
-// pass. Callers that classify MANY agents (e.g. the dash rail's Fleet Command grouping) use
-// this instead of IsCoordinator-per-agent, which re-scans the bindings on each call (O(n²)
-// over a member list). The returned map is the caller's to keep.
+// CoordinatorSet returns every agent for which IsCoordinator is true. The dash rail's Fleet
+// Command grouping and similar callers use this map instead of calling IsCoordinator on each
+// name at the call site. The returned map is the caller's to keep.
 func (c *Config) CoordinatorSet() map[string]bool {
 	set := make(map[string]bool)
-	if c.XOAgent != "" {
-		set[c.XOAgent] = true
-	}
-	if c.CosAgent != "" {
-		set[c.CosAgent] = true
-	}
 	for _, a := range c.Agents {
-		if set[a.Name] {
-			continue
-		}
-		if c.hasSpanOfControl(a.Name) {
+		if c.IsCoordinator(a.Name) {
 			set[a.Name] = true
 		}
 	}

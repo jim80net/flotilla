@@ -35,13 +35,14 @@ func (s *OutboxSweeper) SweepAll() int {
 			continue
 		}
 		s.enqueue(Job{
-			Agent:      e.Recipient,
-			Message:    e.Message,
-			Kind:       KindSend,
-			MessageID:  e.ID,
-			Sender:     e.Sender,
-			deferrals:  e.Deferrals,
-			enqueuedAt: e.EnqueuedAt,
+			Agent:               e.Recipient,
+			Message:             e.Message,
+			Kind:                KindSend,
+			MessageID:           e.ID,
+			Sender:              e.Sender,
+			deferrals:           e.Deferrals,
+			enqueuedAt:          e.EnqueuedAt,
+			lastStaleEscalation: e.LastStaleEscalation,
 		})
 		n++
 	}
