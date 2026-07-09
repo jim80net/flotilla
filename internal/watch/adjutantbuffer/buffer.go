@@ -129,6 +129,16 @@ func Drain(path string) (File, bool, error) {
 	return f, true, nil
 }
 
+// OldestItemAge returns how long the oldest buffered item has been waiting. ok is false when the
+// buffer is absent or empty.
+func OldestItemAge(path string, now time.Time) (time.Duration, bool) {
+	f, has, _, err := Peek(path)
+	if err != nil || !has || len(f.Items) == 0 {
+		return 0, false
+	}
+	return now.Sub(oldest(f.Items)), true
+}
+
 // Len reports buffered item count (0 when absent or empty).
 func Len(path string) int {
 	f, _, err := load(path)
