@@ -2284,17 +2284,20 @@
   // respond modal): POST /api/control/respond — the confirmed-delivery route with a
   // durable-outbox fallback. Resolves to an honest outcome line for the UI; rejects
   // with the server's error text (surfaced verbatim, never swallowed).
+  // formatRespondOutcome is pure (#509): card Send and modal Send share sendDecisionResponse,
+  // so identical server payloads produce identical operator-facing strings.
+  function formatRespondOutcome(res) {
+    if (res && res.outcome === "delivered") return "Delivered to " + res.target + " — turn confirmed.";
+    if (res && res.outcome === "queued") {
+      return "Queued durably for " + res.target + " (id " + res.queued_id + ") — the fleet daemon delivers it when the desk can receive." +
+        (res.detail ? " (" + res.detail + ")" : "");
+    }
+    return "Response state unclear — check the desk's conversation thread.";
+  }
   function sendDecisionResponse(target, goalId, itemLabel, text) {
     return D.postJSON("/api/control/respond", {
       target: target, goal_id: goalId, item: itemLabel || "", message: text,
-    }).then(function (res) {
-      if (res && res.outcome === "delivered") return "Delivered to " + res.target + " — turn confirmed.";
-      if (res && res.outcome === "queued") {
-        return "Queued durably for " + res.target + " (id " + res.queued_id + ") — the fleet daemon delivers it when the desk can receive." +
-          (res.detail ? " (" + res.detail + ")" : "");
-      }
-      return "Response state unclear — check the desk's conversation thread.";
-    });
+    }).then(function (res) { return formatRespondOutcome(res); });
   }
   // runRespond drives BOTH response surfaces (the decision cards and the map's respond
   // modal) through one path — validate, disable the button in flight, render the honest
@@ -2343,5 +2346,20 @@
     show: show, refresh: refresh, restoreNode: restoreNode,
     openNode: function () { return selectedId; }, // the open drawer's node id (or null) — for history state
     openDecisions: openDecisions,
+    // #509: pure decision-room surface for executable goja/headless regression.
+    // Substring greps of goals.js cannot catch a removed hasBrief() gate; these
+    // callables are the real functions the browser runs.
+    _test: {
+      hasBrief: hasBrief,
+      gatherDecisions: gatherDecisions,
+      renderDecisionCard: renderDecisionCard,
+      renderPreparingRow: renderPreparingRow,
+      respondTarget: respondTarget,
+      decisionsCount: decisionsCount,
+      formatRespondOutcome: formatRespondOutcome,
+      runRespond: runRespond,
+      sendDecisionResponse: sendDecisionResponse,
+      indexGoalsNodes: indexGoalsNodes,
+    },
   };
 })();

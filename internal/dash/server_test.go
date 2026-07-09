@@ -1691,10 +1691,12 @@ func TestDecisionResponseLoop501(t *testing.T) {
 	for _, marker := range []string{
 		"gdec-respond",          // the per-card response affordance
 		"sendDecisionResponse",  // the ONE reply path (cards + modal share it)
+		"formatRespondOutcome",  // pure outcome strings shared by card + modal (#509)
 		"/api/control/respond",  // wired to the real control endpoint
 		"renderPreparingRow",    // the fail-closed brief-less rendering
 		"gdec-prep",             // the preparing bucket
 		"Briefs being prepared", // its labeled, honest header
+		"_test",                 // goja executable surface (#509)
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("goals.js must implement the decision-response loop (missing %q) — #501", marker)
