@@ -1908,3 +1908,66 @@ func TestDecisionResponseLoop501(t *testing.T) {
 		t.Error("dash.css must style the respond affordance + preparing bucket — #501")
 	}
 }
+
+// TestDefaultViewLanding579 locks #579: when fleet-goals.json sets default_view,
+// /api/goals exposes it and the SPA cold-open seeds Goals instead of Conversations —
+// unless an explicit hash/deep link already chose a view.
+func TestDefaultViewLanding579(t *testing.T) {
+	now := time.Date(2026, 7, 9, 21, 0, 0, 0, time.UTC)
+	srv, dir := newTestServer(t, singleFleetRoster, now)
+	goals := `{
+	  "version": 1,
+	  "default_view": true,
+	  "goals": [{"id": "ship", "title": "Ship", "scope": "fleet"}]
+	}`
+	if err := os.WriteFile(filepath.Join(dir, "fleet-goals.json"), []byte(goals), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec := doGet(t, srv, "/api/goals")
+	if rec.Code != 200 {
+		t.Fatalf("/api/goals status %d", rec.Code)
+	}
+	var doc GoalsDoc
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if !doc.Found || !doc.DefaultView {
+		t.Errorf("goals doc Found=%v DefaultView=%v, want both true — #579", doc.Found, doc.DefaultView)
+	}
+	// False when the field is absent (historical default).
+	srv2, dir2 := newTestServer(t, singleFleetRoster, now)
+	if err := os.WriteFile(filepath.Join(dir2, "fleet-goals.json"), []byte(`{"version":1,"goals":[{"id":"a","title":"A"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec2 := doGet(t, srv2, "/api/goals")
+	var none GoalsDoc
+	if err := json.Unmarshal(rec2.Body.Bytes(), &none); err != nil {
+		t.Fatal(err)
+	}
+	if none.DefaultView {
+		t.Error("default_view absent in file must yield DefaultView=false on /api/goals — #579")
+	}
+
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{
+		"function parseHash",
+		"function seedLanding",
+		"g.default_view",
+		`view: "goals"`,
+		"window.flotillaDash.parseHash",
+		// Must not hard-seed conversations before the goals peek (that mints a synthetic #conv).
+		"seedLanding()",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js must honor default_view landing (missing %q) — #579", marker)
+		}
+	}
+	// The old unconditional Conversations seed must be gone — it would steal default_view.
+	if strings.Contains(js, `history.replaceState({ view: "conversations", desk: selectedDesk || null, channel: selectedChannel || null }, "", navHash({ view: "conversations", desk: selectedDesk }))`) {
+		t.Error("dash.js must not unconditionally replaceState to conversations on boot — #579")
+	}
+	// Explicit hash still wins: seedLanding short-circuits on parseHash(location.hash).
+	if !strings.Contains(js, "parseHash(location.hash)") {
+		t.Error("seedLanding must prefer location.hash over default_view — #579")
+	}
+}
