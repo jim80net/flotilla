@@ -3,9 +3,12 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/jim80net/flotilla/internal/sessionmirror"
 )
 
 // recordLogf captures the decision lines a deskMirror emits, so each test can assert EXACTLY ONE
@@ -17,10 +20,11 @@ func recordLogf(lines *[]string) func(string, ...any) {
 func TestDeskMirrorSkipsWhenNoWebhook(t *testing.T) {
 	var lines []string
 	posted := 0
+	// No rosterDir and no webhook → nothing to do after WARN (no session-mirror target).
 	m := deskMirror{
 		webhook: func(string) (string, bool) { return "", false },
 		turnFinal: func(string) (string, bool, error) {
-			t.Fatal("turnFinal must not be read without a webhook")
+			t.Fatal("turnFinal must not be read when no webhook and no rosterDir")
 			return "", false, nil
 		},
 		post: func(string, string, string) error { posted++; return nil },
@@ -36,6 +40,51 @@ func TestDeskMirrorSkipsWhenNoWebhook(t *testing.T) {
 	}
 	if !strings.Contains(lines[0], "FLOTILLA_WEBHOOK_BACKEND") {
 		t.Errorf("WARN must name the expected secrets key, got %v", lines)
+	}
+}
+
+// #572: missing Discord webhook still writes session-mirror so dash conversations work.
+func TestDeskMirrorNoWebhookStillSessionMirrors572(t *testing.T) {
+	dir := t.TempDir()
+	var lines []string
+	posted := 0
+	m := deskMirror{
+		rosterDir: dir,
+		webhook:   func(string) (string, bool) { return "", false },
+		turnFinal: func(string) (string, bool, error) { return "coordinator turn without webhook", true, nil },
+		post:      func(string, string, string) error { posted++; return nil },
+		logf:      recordLogf(&lines),
+	}
+	m.run("cos")
+	if posted != 0 {
+		t.Errorf("posted %d, want 0 without webhook", posted)
+	}
+	warn := false
+	ledger := false
+	for _, line := range lines {
+		if strings.Contains(line, "WARN cos: no webhook") {
+			warn = true
+		}
+		if strings.Contains(line, "LEDGER cos") {
+			ledger = true
+		}
+	}
+	if !warn {
+		t.Errorf("want WARN no webhook, got %v", lines)
+	}
+	if !ledger {
+		t.Errorf("want LEDGER success after session-mirror, got %v", lines)
+	}
+	path, err := sessionmirror.LedgerPath(dir, "cos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("session-mirror must exist without webhook: %v", err)
+	}
+	if !strings.Contains(string(raw), "coordinator turn without webhook") {
+		t.Errorf("ledger body = %q", raw)
 	}
 }
 

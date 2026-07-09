@@ -78,6 +78,8 @@ func run(args []string) error {
 		return cmdGoals(args[1:])
 	case "accounts":
 		return cmdAccounts(args[1:])
+	case "mirror-self":
+		return cmdMirrorSelf(args[1:])
 	case "version", "-v", "--version":
 		fmt.Println("flotilla " + version)
 		return nil
@@ -129,6 +131,7 @@ usage:
   flotilla doctrine install [--refresh] [--all] [<agent>]  install constitutional doctrine (idempotent; --refresh updates drifted fenced blocks)
   flotilla push-snippet <desk-agent>                  print the smart-push convention to append to a non-claude desk's identity file (secret-free; reports to the XO via send)
   flotilla result <agent>                             print a desk's FULL latest result from its harness session store (grok; read-only) — for long results the pane capture truncates
+  flotilla mirror-self --from <agent> --file <path|-> session-mirror (+ Discord) without pane Working→Idle — coordinator Stop hooks (#572)
   flotilla version
   flotilla help
 

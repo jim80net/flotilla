@@ -8,6 +8,9 @@ grep -q 'has_action_status_close' "$SCRIPT"
 grep -q 'executive-mini-brief' "$SCRIPT"
 grep -q 'action-status close' "$SCRIPT"
 grep -q 'lines\[-1\]' "$SCRIPT"
+# #572: Stop hook drives mirror-self (session-mirror without Working→Idle).
+grep -q 'mirror-self' "$SCRIPT"
+grep -q 'cos_agent' "$SCRIPT"
 
 # Behavioral regression: last-line-only check (mid-body mention must not pass).
 python3 <<'PY'
