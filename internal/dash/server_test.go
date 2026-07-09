@@ -1411,7 +1411,7 @@ func TestComposeGuardExplicitFlush(t *testing.T) {
 	}
 }
 
-// TestConversationsFeed518 locks the #518 conversations render-path batch:
+// TestConversationsFeed518 locks the #518 conversations render-path batch (incl. mid-send desk-switch optimistic order):
 //   - unparsed ledger match is token-boundary (not substring — "cos" ≠ "cos-adj")
 //   - session-mirror fetch pulls a full thread tail (limit=500, not 100)
 //   - web-composer deliver paints an optimistic operator outbound line
