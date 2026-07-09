@@ -1196,12 +1196,33 @@
     // the complete list (the node card caps at 4).
     parts.push(drawerList(n.priorities, "Priorities"));
     parts.push(drawerList(n.milestones, "Current work"));
-    // Operator-gated items (awaiting / blocked) surfaced as the "waiting on you" call-out.
+    // Operator-gated items (awaiting / blocked) — #347 residual: a bare label is NOT
+    // decidable. Each gated item carries its decision package (or the honest empty /
+    // preparing state). Node-level brief is shown once when present. The respond modal
+    // remains the full reading+reply surface (button below).
     var gated = (n.work_items || []).filter(function (wi) { return wi.class === "awaiting" || wi.class === "blocked"; });
-    if (gated.length) {
-      parts.push('<div class="gd-sec"><div class="gd-ask"><div class="gd-ask-lab">Waiting on you</div>' +
-        gated.map(function (wi) { return "<p>" + escapeHtml(wi.label || wi.kind || "") + (wi.detail ? " — " + escapeHtml(wi.detail) : "") + "</p>"; }).join("") +
-        "</div></div>");
+    var nodeGated = (function () { var v = visToken(n); return v === "awaiting" || v === "blocked"; })();
+    if (gated.length || (nodeGated && hasBrief(n.brief))) {
+      var ask = ['<div class="gd-ask-lab">Waiting on you</div>'];
+      // Node-level decision package first (the decision is on the node itself).
+      if (hasBrief(n.brief)) {
+        ask.push('<div class="gm-brief-full gd-brief">' + renderBrief(n.brief) + "</div>");
+      } else if (nodeGated && !gated.length) {
+        ask.push(BRIEF_EMPTY);
+      }
+      gated.forEach(function (wi) {
+        var head = '<p class="gd-gated-head"><strong>' + escapeHtml(wi.label || wi.kind || "") + "</strong>" +
+          (wi.detail ? ' <span class="muted">— ' + escapeHtml(wi.detail) + "</span>" : "") + "</p>";
+        // Skip re-printing a brief identical to the node package already above.
+        var body = sameBrief(wi.brief, n.brief) ? ""
+          : (hasBrief(wi.brief)
+            ? '<div class="gm-brief-full gd-brief">' + renderBrief(wi.brief) + "</div>"
+            : BRIEF_EMPTY);
+        ask.push('<div class="gd-gated-item">' + head + body + "</div>");
+      });
+      ask.push('<button type="button" class="btn btn-primary gd-open-decision" data-open-decision="' +
+        escapeHtml(n.id) + '">Open decision to respond</button>');
+      parts.push('<div class="gd-sec"><div class="gd-ask">' + ask.join("") + "</div></div>");
     }
     if ((n.work_items || []).length) {
       parts.push('<div class="gd-sec"><h4>Work (' + n.work_items.length + ")</h4>" +
@@ -1867,8 +1888,16 @@
     if (close) close.onclick = closeDrawer;
     // Deep-link: the drawer's "Open …'s conversation" button jumps to that desk's
     // Conversations thread (delegated — the body is rebuilt on each fill).
+    // #347 residual: "Open decision to respond" opens the respond modal with the full
+    // brief package (drawer already shows the brief; modal is the reply surface).
     var drawer = q("goals-drawer");
     if (drawer) drawer.addEventListener("click", function (e) {
+      var decide = e.target.closest("[data-open-decision]");
+      if (decide) {
+        var did = decide.getAttribute("data-open-decision");
+        if (did) openModal(did);
+        return;
+      }
       var btn = e.target.closest(".gd-convo");
       if (!btn) return;
       var agent = btn.getAttribute("data-agent");
