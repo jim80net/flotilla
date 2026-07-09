@@ -1,7 +1,7 @@
 # Design — recycle at chapter-end (#443)
 
-**Status:** Design-only (operator redirect 2026-07-06). **Supersedes closed PR #435.**
-Implementation follows operator gate. **Sequence:** merge **#440** first; this lane opens after.
+**Status:** Implementation in progress (#443). Design merged via PR #445.
+**Supersedes closed PR #435.** #440 is merged; this lane is open.
 
 ## Operator directive (verbatim essence)
 

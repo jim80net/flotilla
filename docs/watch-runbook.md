@@ -476,3 +476,35 @@ channel message), NEVER an in-pane interactive prompt (`AskUserQuestion` / a
 menu). A remote XO over the relay cannot answer an in-pane menu — keystrokes
 navigate it, they do not select. This is a flotilla coordination invariant, not a
 per-desk preference.
+
+### Chapter-end auto-recycle (#443)
+
+When a desk **finishes a meaningful body of work** (lane-done: backlog unblocked
+empty + settled/PR-merged/coordinator-mark turn-final), the watch daemon
+auto-dispatches `flotilla recycle <desk>` so sessions do not accumulate chapters.
+
+| Env | Default | Effect |
+|---|---|---|
+| `FLOTILLA_CHAPTER_END_RECYCLE` | ON | Auto-recycle on lane-done finish edges |
+
+**Stacked-PR suppression:** a mid-stack PR merge with remaining `[in-flight]` /
+`[next]` backlog items does **not** recycle (would destroy stack context).
+
+**Coordinators:** chapter-end uses `flotilla recycle <coord> --self` — handoff +
+in-place rotate + takeover, never bare `/clear`, never process-kill the seat that
+issued the command (#437).
+
+**Ceremonies:** ride the same primitive (recycle → fresh session → ceremony
+prompt). No special ephemeral runner (#435 withdrawn).
+
+### Abort escalation (#436)
+
+Fail-closed aborts are **not log-only**. On non-zero recycle:
+
+1. Loud log with abort class + recovery command
+2. Durable `~/.flotilla/<desk>/last-recycle-abort.txt`
+3. Inject into the owning coordinator's pane when resolvable
+
+Busy-desk (phase 0 / re-verify) aborts **retry** a small bound before final
+escalation. Subagent/list-nav overlays during close are self-healed when
+`FLOTILLA_SELF_HEAL=1`.

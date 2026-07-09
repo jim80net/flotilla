@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/backlog"
+	"github.com/jim80net/flotilla/internal/chapterend"
 	"github.com/jim80net/flotilla/internal/cos"
 	"github.com/jim80net/flotilla/internal/dash"
 	"github.com/jim80net/flotilla/internal/decisionbrief"
@@ -612,6 +613,10 @@ func cmdWatch(args []string) error {
 		// #216 stranded-handoff extension: gate work settled without gate-holder report.
 		strandedTracker := stranded.NewTracker()
 
+		// #443 chapter-end recycle: lane-done → flotilla recycle (stacked-PR suppressed).
+		chapterEndTracker := chapterend.NewTracker()
+		var chapterEndFlight watch.AutoSwitchFlight
+
 		// #530 return-to-frontier guard after adjutant seam side items.
 		frontierTracker := frontier.NewTracker()
 
@@ -693,6 +698,11 @@ func cmdWatch(args []string) error {
 			}
 		} else {
 			log.Printf("flotilla watch: auto-switch DISABLED (FLOTILLA_AUTOSWITCH=0)")
+		}
+		if chapterEndRecycleEnabled() {
+			log.Printf("flotilla watch: chapter-end recycle ON (default; disable with FLOTILLA_CHAPTER_END_RECYCLE=0) — lane-done finishes auto-recycle (#443)")
+		} else {
+			log.Printf("flotilla watch: chapter-end recycle DISABLED (FLOTILLA_CHAPTER_END_RECYCLE=0) — suggest-only nudges")
 		}
 
 		referenceInterval := cfg.HeartbeatDur()
@@ -793,6 +803,10 @@ func cmdWatch(args []string) error {
 			AdjutantSeamOnFinish:      drainAdjutantSeamFor,
 			IdleHoldOnFinish:          idleHoldOnFinish(cfg, idleHoldTracker, injector.Enqueue),
 			StrandedHandoffOnFinish:   strandedHandoffOnFinish(cfg, strandedTracker, injector.Enqueue),
+			ChapterEndOnFinish: chapterEndOnFinish(cfg, rosterDir, chapterEndTracker, injector.Enqueue,
+				func(agent string) bool { return chapterEndFlight.TryBegin(agent) },
+				func(agent string) { chapterEndFlight.End(agent) },
+			),
 			ReturnToFrontierOnFinish: returnToFrontierOnFinish(
 				cfg, rosterDir, frontierTracker, injector.Enqueue,
 				func(agent string) (string, bool, error) { return readDeskTurnFinal(cfg, agent) },
@@ -1283,9 +1297,12 @@ func adjutantEvaluationTickBody(leader, leaderAckPath, bufferPath, charterPath s
 		"unanswered operator items. Distinguish all-quiet (nothing to do) from work-found (quiet but stuck). " +
 		"ALSO check leader usage-limit / rate-limit exhaustion (pane banners, stuck Idle/Errored on " +
 		"limit text, silent refusal-to-start). Leader exhaustion is NEVER silent ignorance — if " +
-		"present, ESCALATE LOUDLY to the operator and treat as urgent-class (#510 resuscitation).\n" +
+		"present, ESCALATE LOUDLY to the operator and treat as urgent-class (#510 resuscitation). " +
+		"ALSO detect chapter-end on subtree desks (lane-done / PR-merged with empty unblocked backlog) " +
+		"and ensure flotilla recycle runs — never bare /clear; never accumulate chapters (#443).\n" +
 		"3. ACT BY TIER — all-quiet → ack only, no leader interrupt; work-found → buffer judgment items " +
-		"in " + bufferPath + " and inject a digest at " + leader + "'s next seam (immediately if urgent-class).\n\n" +
+		"in " + bufferPath + " and inject a digest at " + leader + "'s next seam (immediately if urgent-class). " +
+		"Lane-done chapter-end → schedule flotilla recycle <desk> (mechanical act-by-tier).\n\n" +
 		"This tick catches idle-holding: leader idle but queue not empty is work-found, not all-quiet." +
 		adjutantCharterGovernanceLine(charterPath) +
 		adjutantDualObservationContract(leader)

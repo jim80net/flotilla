@@ -177,6 +177,11 @@ type DetectorConfig struct {
 	// sidecar is set, the turn-final must resume return_to, reassign, or name a blocking gate.
 	// Default nil ⇒ inert.
 	ReturnToFrontierOnFinish func(agent string)
+	// ChapterEndOnFinish is the #443 chapter-end recycle side-effect: invoked once per desk
+	// (including coordinators on the coordinator-mirror path) that finished a turn this tick.
+	// Detects lane-done / chapter-complete and dispatches flotilla recycle (or --self for
+	// coordinators). Default nil ⇒ inert.
+	ChapterEndOnFinish func(agent string)
 	// DecisionBriefOnTick is the auto decision-brief side-effect (#349 item D): invoked
 	// once per detector tick (off d.mu, optionally async via MirrorDispatch). The caller
 	// scans the goals file for operator-gated items missing a brief and dispatches the
@@ -932,7 +937,7 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors, co
 	// like the wakes, OUTSIDE d.mu — a slow transcript read or Discord post must never stall the tick
 	// loop or block OperatorWake. The closure is observe-only + best-effort (it absorbs its own
 	// failures); the detector only fires the trigger.
-	if len(mirrors) > 0 && (d.cfg.MirrorOnFinish != nil || d.cfg.IdleHoldOnFinish != nil || d.cfg.StrandedHandoffOnFinish != nil || d.cfg.DroppedDispatchOnFinish != nil) {
+	if len(mirrors) > 0 && (d.cfg.MirrorOnFinish != nil || d.cfg.IdleHoldOnFinish != nil || d.cfg.StrandedHandoffOnFinish != nil || d.cfg.DroppedDispatchOnFinish != nil || d.cfg.ChapterEndOnFinish != nil) {
 		run := func() {
 			for _, agent := range mirrors {
 				if d.cfg.MirrorOnFinish != nil {
@@ -947,6 +952,9 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors, co
 				if d.cfg.DroppedDispatchOnFinish != nil {
 					d.droppedDispatchOne(agent)
 				}
+				if d.cfg.ChapterEndOnFinish != nil {
+					d.chapterEndOne(agent)
+				}
 			}
 		}
 		if d.cfg.MirrorDispatch != nil {
@@ -955,7 +963,7 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors, co
 			run() // default: synchronous (deterministic for tests)
 		}
 	}
-	if len(coordinatorMirrors) > 0 && (d.cfg.CoordinatorMirrorOnFinish != nil || d.cfg.ReturnToFrontierOnFinish != nil) {
+	if len(coordinatorMirrors) > 0 && (d.cfg.CoordinatorMirrorOnFinish != nil || d.cfg.ReturnToFrontierOnFinish != nil || d.cfg.ChapterEndOnFinish != nil) {
 		run := func() {
 			for _, agent := range coordinatorMirrors {
 				if d.cfg.CoordinatorMirrorOnFinish != nil {
@@ -963,6 +971,9 @@ func (d *Detector) runTail(pendingRotate bool, wakes []deferredWake, mirrors, co
 				}
 				if d.cfg.ReturnToFrontierOnFinish != nil {
 					d.returnToFrontierOne(agent)
+				}
+				if d.cfg.ChapterEndOnFinish != nil {
+					d.chapterEndOne(agent)
 				}
 			}
 		}
@@ -1133,6 +1144,17 @@ func (d *Detector) droppedDispatchOne(agent string) {
 		}
 	}()
 	d.cfg.DroppedDispatchOnFinish(agent)
+}
+
+// chapterEndOne invokes the #443 chapter-end recycle side-effect with the same recover()
+// backstop as mirrorOne.
+func (d *Detector) chapterEndOne(agent string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("flotilla watch: chapter-end recycle panicked for %q (recovered; tick unaffected): %v", agent, r)
+		}
+	}()
+	d.cfg.ChapterEndOnFinish(agent)
 }
 
 // delegationNudgeOne invokes the coordinator delegation nudge with the same recover()
