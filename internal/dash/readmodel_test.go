@@ -349,12 +349,9 @@ func TestBuildTopology_Coordinators(t *testing.T) {
 // sole observers on desk-home channels), and everyone is a fleet-command member. The rail
 // must show the coordinator TIER only — no execution desk qualifies through any shape.
 //
-// LOAD-BEARING SHAPE NOTE (found writing this pin): the dual-shape detection derives
-// "supervisor" from IsXO = channel OWNERSHIP, so shape-2 supervisors here own mirror
-// channels (Cxf/Cxo) exactly as every agent does in the real deployment. WITHOUT those
-// mirrors the derivation inverts — the supervised desks classify as coordinators and the
-// supervisors as nothing. That fragility is a roster-domain hole of the #464 family,
-// filed separately; this test pins the deployment invariant the derivation relies on.
+// Shape-2 supervisors also own empty mirrors (Cxf/Cxo) here to match live deployments where
+// every agent owns a channel. #507 closed the hole where omitting those mirrors inverted
+// classification — see TestBuildTopology_SupervisorWithoutOwnedChannel507.
 func TestBuildTopology_CoordinatorTierOnly502(t *testing.T) {
 	cfg, err := loadInlineRoster(t, `{
 		"xo_agent": "cos",
@@ -393,6 +390,54 @@ func TestBuildTopology_CoordinatorTierOnly502(t *testing.T) {
 		for _, c := range doc.Coordinators {
 			if c == excluded {
 				t.Errorf("%q is an execution-tier agent and must NOT be a rail coordinator (#502)", excluded)
+			}
+		}
+	}
+}
+
+// TestBuildTopology_SupervisorWithoutOwnedChannel507 is the #507 pin: same coordinator tier
+// as #502 but shape-2 supervisors (xo-fleet, xo-observer) own NO mirror channels. Span must
+// still classify from membership alone — no inversion to [backend, cos, frontend, trial-xo, …].
+func TestBuildTopology_SupervisorWithoutOwnedChannel507(t *testing.T) {
+	cfg, err := loadInlineRoster(t, `{
+		"xo_agent": "cos",
+		"agents": [{"name": "cos"}, {"name": "xo-fleet"}, {"name": "xo-proj"}, {"name": "xo-observer"},
+			{"name": "trial-xo"}, {"name": "backend"}, {"name": "frontend"}, {"name": "data"}, {"name": "builder"}],
+		"channels": [
+			{"channel_id": "Ccmd", "xo_agent": "cos", "members": ["cos", "xo-fleet", "xo-proj", "xo-observer", "trial-xo", "backend", "frontend", "data", "builder"], "role": "fleet-command"},
+			{"channel_id": "Cbe", "xo_agent": "backend", "members": ["xo-fleet"]},
+			{"channel_id": "Cfe", "xo_agent": "frontend", "members": ["xo-fleet"]},
+			{"channel_id": "Cda", "xo_agent": "data", "members": []},
+			{"channel_id": "Cpr", "xo_agent": "xo-proj", "members": ["cos", "xo-proj", "builder"]},
+			{"channel_id": "Ctr", "xo_agent": "trial-xo", "members": ["cos", "xo-observer"]}
+		]
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Premise: supervisors own nothing.
+	for _, name := range []string{"xo-fleet", "xo-observer"} {
+		if cfg.IsXO(name) {
+			t.Fatalf("%q owns a channel — fixture must omit supervisor mirrors", name)
+		}
+		if !cfg.IsCoordinator(name) {
+			t.Errorf("IsCoordinator(%q)=false; membership-only supervisor must classify (#507)", name)
+		}
+	}
+	doc := BuildTopology(cfg)
+	want := []string{"cos", "xo-fleet", "xo-observer", "xo-proj"}
+	if len(doc.Coordinators) != len(want) {
+		t.Fatalf("coordinators = %v, want %v (pre-#507 inverted to desks)", doc.Coordinators, want)
+	}
+	for i, c := range want {
+		if doc.Coordinators[i] != c {
+			t.Errorf("coordinators[%d] = %q, want %q (full: %v)", i, doc.Coordinators[i], c, doc.Coordinators)
+		}
+	}
+	for _, excluded := range []string{"backend", "frontend", "data", "builder", "trial-xo"} {
+		for _, c := range doc.Coordinators {
+			if c == excluded {
+				t.Errorf("%q must NOT be a rail coordinator without supervisor mirrors (#507)", excluded)
 			}
 		}
 	}

@@ -144,7 +144,7 @@ func (c *Config) fleetCommandSynthesisMember(owner, member string) bool {
 		if ch.IsFleetCommand() || ch.XOAgent != member {
 			continue
 		}
-		if c.channelIsSupervisorObserverHome(ch) {
+		if c.channelIsSupervisorObserverHome(ch, nil) {
 			return false
 		}
 	}
