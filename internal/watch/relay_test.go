@@ -57,9 +57,8 @@ func fedCfg() *roster.Config {
 // selfMirrorGuardAdapter), so a self-post never reaches Handle at all and webhookID
 // is no longer a Handle argument. The webhook-drop property is pinned at the adapter
 // level (internal/transport's selfmirror tests, including the sender==operator case).
-// Operator relay delivers to the addressed coordinator directly — never the adjutant
-// (#439 phase 1c urgent passthrough; KindRelay bypasses the adjutant buffer by design).
-func TestRelayOperatorToCoordinatorBypassesAdjutant(t *testing.T) {
+// Operator relay ingress aliases to the adjutant front office when adjutant_for is configured (#533).
+func TestRelayOperatorToCoordinatorRoutesAdjutant(t *testing.T) {
 	cfg := &roster.Config{
 		OperatorUserID: "op",
 		ChannelID:      "C1",
@@ -69,17 +68,23 @@ func TestRelayOperatorToCoordinatorBypassesAdjutant(t *testing.T) {
 			{Name: "alpha-adj", AdjutantFor: "alpha-xo"},
 		},
 	}
-	r, c, _ := newRelayHarness(cfg)
+	delivered := make(chan string, 1)
+	inj := NewInjector(func(agent, msg string) error {
+		delivered <- agent
+		return nil
+	}, 8)
+	inj.SetCoordinatorIngress(NewCoordinatorIngress(cfg))
+	inj.Start()
+	defer inj.Stop()
+	r := NewRelay(cfg, inj, nil, nil)
 	r.Handle("C1", "200", "op", "status?")
-	waitForDelivered(t, c, 1)
-	c.mu.Lock()
-	j := c.jobs[0]
-	c.mu.Unlock()
-	if j.Agent != "alpha-xo" {
-		t.Errorf("relay target = %q, want alpha-xo (adjutant must not intercept operator relay)", j.Agent)
-	}
-	if j.Kind != KindRelay {
-		t.Errorf("kind = %v, want KindRelay", j.Kind)
+	select {
+	case gotAgent := <-delivered:
+		if gotAgent != "alpha-adj" {
+			t.Errorf("relay target = %q, want alpha-adj (#533 adjutant routing)", gotAgent)
+		}
+	case <-time.After(50 * time.Millisecond):
+		t.Fatal("relay delivery timed out")
 	}
 }
 

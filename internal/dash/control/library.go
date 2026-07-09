@@ -13,6 +13,7 @@ import (
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/transport"
+	"github.com/jim80net/flotilla/internal/watch"
 )
 
 // dashProvenance is the CoS ledger "from" marker for a dash-issued action, so a
@@ -64,6 +65,8 @@ type LibraryController struct {
 	resolveDest func(originChannel, target string) (agentName, paneTarget string, err error)
 	acquireTxn  func(target string) (release func(), err error)
 	submit      func(drv surface.Driver, pane, text string) error
+
+	coordinatorIngress *watch.CoordinatorIngress
 }
 
 // NewLibrary builds the production controller. secretsPath may be "" (then notify
@@ -182,6 +185,11 @@ func NewLibrary(rc *roster.Config, xo, secretsPath string, notifyTr, webTr trans
 	}
 }
 
+// SetCoordinatorIngress installs #533 adjutant front-office ingress for coordinator dash delivery.
+func (c *LibraryController) SetCoordinatorIngress(g *watch.CoordinatorIngress) {
+	c.coordinatorIngress = g
+}
+
 // Notify posts an operator note to the fleet channel under the XO's webhook with
 // the dash-provenance username, then mirrors it to the CoS ledger (best-effort).
 func (c *LibraryController) Notify(_ context.Context, message string) error {
@@ -239,6 +247,14 @@ func (c *LibraryController) Route(_ context.Context, target, message string) (Ro
 	agentName, pane, err := c.resolveDest("", target)
 	if err != nil {
 		return RouteResult{}, err
+	}
+	if c.coordinatorIngress != nil && c.roster.IsCoordinator(agentName) {
+		if deliveryAgent, ok := c.coordinatorIngress.IngressTarget(agentName); ok && deliveryAgent != agentName {
+			agentName = deliveryAgent
+			if _, pane, err = c.resolveDest("", "@"+deliveryAgent); err != nil {
+				return RouteResult{}, err
+			}
+		}
 	}
 	agent, err := c.roster.Agent(agentName)
 	if err != nil {

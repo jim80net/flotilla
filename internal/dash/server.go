@@ -165,7 +165,11 @@ func NewServer(cfg Config) (*Server, error) {
 	if cfg.WebTransport == nil {
 		return nil, fmt.Errorf("dash: a WebTransport is required for the route's inbound resolution (construct the web transport at the wiring boundary and pass it via Config.WebTransport)")
 	}
-	s.control = control.NewLibrary(rc, xo, cfg.SecretsPath, cfg.Transport, cfg.WebTransport)
+	lib := control.NewLibrary(rc, xo, cfg.SecretsPath, cfg.Transport, cfg.WebTransport)
+	if ingress := watch.NewCoordinatorIngress(rc); ingress != nil {
+		lib.SetCoordinatorIngress(ingress)
+	}
+	s.control = lib
 	s.routes()
 	return s, nil
 }
