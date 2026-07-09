@@ -25,17 +25,19 @@ func SurfaceFromPaneCommand(cmd string) (name string, ok bool) {
 	return name, ok
 }
 
-// ResolveResultReader picks the ResultReader for a desk pane. When the live harness on the pane
-// (pane_current_command) disagrees with the roster surface — common during model cutover before
-// launch.json and the roster converge — the LIVE harness wins so `flotilla result` reads the
-// session store that actually exists (e.g. claude-code transcript while roster still says grok).
-func ResolveResultReader(rosterSurface, pane string, paneCommand func(string) (string, error)) (rr ResultReader, drv Driver, liveSurface string, drift bool, err error) {
+// ResolveDriver picks the Driver for a desk pane. When the live harness on the pane
+// (pane_current_command) disagrees with the roster/overlay surface — common during model
+// cutover before launch.json and the roster converge — the LIVE harness wins so assess,
+// composer, recycle, and result-store paths match the process actually running (#586, #573).
+//
+// paneCommand may be nil (or return an error): then the roster surface is used unchanged.
+func ResolveDriver(rosterSurface, pane string, paneCommand func(string) (string, error)) (drv Driver, liveSurface string, drift bool, err error) {
 	want := rosterSurface
 	if want == "" {
 		want = DefaultSurface
 	}
 	liveSurface = want
-	if paneCommand != nil {
+	if paneCommand != nil && pane != "" {
 		if cmd, cmdErr := paneCommand(pane); cmdErr == nil {
 			if mapped, ok := SurfaceFromPaneCommand(cmd); ok && mapped != want {
 				liveSurface = mapped
@@ -45,9 +47,20 @@ func ResolveResultReader(rosterSurface, pane string, paneCommand func(string) (s
 	}
 	drv, ok := Get(liveSurface)
 	if !ok {
-		return nil, nil, liveSurface, drift, fmt.Errorf("unknown surface %q for agent pane %q", liveSurface, pane)
+		return nil, liveSurface, drift, fmt.Errorf("unknown surface %q for agent pane %q", liveSurface, pane)
 	}
-	rr, ok = drv.(ResultReader)
+	return drv, liveSurface, drift, nil
+}
+
+// ResolveResultReader picks the ResultReader for a desk pane. Live harness wins on drift —
+// same policy as ResolveDriver — so `flotilla result` reads the session store that actually
+// exists (e.g. grok store while roster still says claude-code).
+func ResolveResultReader(rosterSurface, pane string, paneCommand func(string) (string, error)) (rr ResultReader, drv Driver, liveSurface string, drift bool, err error) {
+	drv, liveSurface, drift, err = ResolveDriver(rosterSurface, pane, paneCommand)
+	if err != nil {
+		return nil, nil, liveSurface, drift, err
+	}
+	rr, ok := drv.(ResultReader)
 	if !ok {
 		return nil, drv, liveSurface, drift, fmt.Errorf("surface %q has no session-store result reader", liveSurface)
 	}

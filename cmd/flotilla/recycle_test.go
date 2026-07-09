@@ -243,6 +243,42 @@ func TestRunRecyclePhase0Abort(t *testing.T) {
 	}
 }
 
+// #586: parked desk — Idle + ComposerCleared passes phase-0. Standing backlog [blocked]
+// items are loop_posture only (status "idle blocked"); they must not gate recycle.
+// Mid-turn (Working) still fail-closed via TestRunRecyclePhase0Abort.
+func TestRunRecyclePhase0IdleClearedParkedDesk586(t *testing.T) {
+	r := happyRec()
+	ops := fakeRecycleOps(r)
+	// Explicit idle∧cleared (default happyRec) with a short boot budget.
+	p := testPlan()
+	p.timeouts.boot = recyclePollInterval
+	msg, _, err := runRecycle(ops, p)
+	if err != nil {
+		t.Fatalf("parked idle+cleared desk must recycle: %v", err)
+	}
+	if !r.closed || !r.respawned {
+		t.Errorf("want full recycle (closed=%v respawned=%v) msg=%q", r.closed, r.respawned, msg)
+	}
+}
+
+// #586: wrong harness probe (e.g. claude ComposerState on a grok pane) → Idle but
+// ComposerUndetermined → phase-0 busy-desk. Live-harness ResolveDriver prevents this at
+// cmdRecycle wiring; the gate itself must still fail-closed when composer is not cleared.
+func TestRunRecyclePhase0AbortWhenComposerUndetermined586(t *testing.T) {
+	r := happyRec()
+	ops := fakeRecycleOps(r)
+	ops.composer = func(string) surface.ComposerDisposition { return surface.ComposerUndetermined }
+	p := testPlan()
+	p.timeouts.boot = recyclePollInterval
+	_, _, err := runRecycle(ops, p)
+	if err == nil || !strings.Contains(err.Error(), "phase 0") {
+		t.Fatalf("err = %v, want phase-0 abort when composer is undetermined", err)
+	}
+	if len(r.delivered) != 0 {
+		t.Errorf("phase-0 abort must not deliver handoff (got %v)", r.delivered)
+	}
+}
+
 // --- I1: phase-1 handoff gate abort (4.3) ---
 
 func TestRunRecyclePhase1Abort(t *testing.T) {

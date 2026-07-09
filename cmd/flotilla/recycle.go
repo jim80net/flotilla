@@ -521,9 +521,24 @@ func cmdRecycle(args []string) error {
 		recipe.Cwd = real
 	}
 
-	drv, ok := surface.Get(agentSurface(cfg, agentName))
-	if !ok {
-		return fmt.Errorf("agent %q: unknown surface %q (not a registered driver)", agentName, agentSurface(cfg, agentName))
+	// Prefer the LIVE pane harness over roster/overlay (#586). A cutover lag (roster still
+	// claude-code while the pane runs grok) makes the wrong ComposerStateProbe report
+	// Undetermined forever → phase-0 busy-desk abort on a parked empty composer. Same policy
+	// as ResolveResultReader / flotilla result (#573).
+	rosterSurf := agentSurface(cfg, agentName)
+	var paneForSurface string
+	var paneCommand func(string) (string, error)
+	if target, outcome, rerr := deliver.Resolve(agent.Title()); rerr == nil && outcome == deliver.ResolveUnique {
+		paneForSurface = target
+		paneCommand = deliver.PaneCommand
+	}
+	drv, liveSurf, drift, derr := surface.ResolveDriver(rosterSurf, paneForSurface, paneCommand)
+	if derr != nil {
+		return fmt.Errorf("agent %q: %w", agentName, derr)
+	}
+	if drift {
+		fmt.Fprintf(os.Stderr, "flotilla: warning — %s roster/overlay surface is %q but pane runs %q; recycling with live harness\n",
+			agentName, effectiveSurface(rosterSurf), liveSurf)
 	}
 	// Recycle-capability: the bridge (handoff/takeover policy) AND a composer probe (the
 	// Idle∧ComposerCleared gates). Refuse cleanly, naming the surface — never a silent degrade.
