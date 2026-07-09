@@ -2,13 +2,16 @@
 // loop-conformance-mechanics design (#532). Every coordinator-targeted inject passes
 // through Evaluate before pane delivery; wiring into watch is a follow-up step.
 //
-// Routing policy (#533 YAGNI): when adjutant_for is set, all coordinator notifications
-// route to the adjutant. The adjutant may interrupt the leader only via KindAdjutantSeam
-// drain. No source/kind urgent bypass, dual-route, or bypass machinery — posture alone
-// drives allow/buffer/defer. No-adjutant fallback preserves leader delivery.
+// Routing policy (#533): when adjutant_for is set, non-urgent coordinator notifications
+// route to the adjutant. Kind/source labels never imply urgency. Explicit urgent bypass
+// (PriorityUrgent or BypassClass) is a bounded safety valve when AllowNow — dual-routed
+// to leader+adjutant and audited. Posture drives allow/buffer/defer. No-adjutant
+// fallback and KindAdjutantSeam drain reach the leader.
 package looparbitration
 
 import (
+	"time"
+
 	"github.com/jim80net/flotilla/internal/frontier"
 )
 
@@ -60,6 +63,7 @@ type InjectRequest struct {
 	Target   string
 	Kind     InjectKind
 	Priority Priority
+	Bypass   BypassClass // explicit audited bypass class (never inferred from kind/source)
 	ReturnTo string
 	Source   string
 }
@@ -173,8 +177,13 @@ func (a *Arbitrator) Evaluate(req InjectRequest, ctx Context) Result {
 		if ctx.SafeSeam && req.Kind == KindDroppedDispatch {
 			return a.finalize(req, ctx, Result{Decision: AllowNow, Reason: "available-safe-inject"})
 		}
-		if ctx.SafeSeam && ctx.AdjutantFor == "" {
-			return a.finalize(req, ctx, Result{Decision: AllowNow, Reason: "available-safe-inject"})
+		if ctx.SafeSeam {
+			if _, ok := explicitBypass(req); ok {
+				return a.finalize(req, ctx, Result{Decision: AllowNow, Reason: "urgent-safe-seam-bypass"})
+			}
+			if ctx.AdjutantFor == "" {
+				return a.finalize(req, ctx, Result{Decision: AllowNow, Reason: "available-safe-inject"})
+			}
 		}
 		return a.finalize(req, ctx, bufferWithReturn(req, ctx, "available-no-seam"))
 	}
@@ -188,7 +197,31 @@ func (a *Arbitrator) Evaluate(req InjectRequest, ctx Context) Result {
 
 func (a *Arbitrator) finalize(req InjectRequest, ctx Context, r Result) Result {
 	r.Route = resolveRoute(req, ctx, r)
+	if r.Route == RouteDual {
+		r.Audited = a.recordBypassAudit(req, ctx, r)
+	}
 	return r
+}
+
+func (a *Arbitrator) recordBypassAudit(req InjectRequest, ctx Context, r Result) bool {
+	if a == nil || a.Audit == nil {
+		return false
+	}
+	bypass, _ := explicitBypass(req)
+	if err := a.Audit.Record(AuditEntry{
+		At:          time.Now().UTC(),
+		Coordinator: ctx.Coordinator,
+		Target:      req.Target,
+		Kind:        req.Kind,
+		Priority:    req.Priority,
+		Source:      req.Source,
+		Decision:    r.Decision,
+		Bypass:      string(bypass),
+		Reason:      r.Reason,
+	}); err != nil {
+		return false
+	}
+	return true
 }
 
 func (a *Arbitrator) resolvePosture(target string, ctx Context) (Posture, bool) {

@@ -20,7 +20,7 @@ func TestEvaluateNonUrgentGoalActiveBuffersWithReturnTo(t *testing.T) {
 	}
 }
 
-func TestEvaluateUrgentRelayRoutesAdjutantUsesPostureNotBypass(t *testing.T) {
+func TestEvaluateUrgentRelayBuffersToAdjutantWhenNotAllowNow(t *testing.T) {
 	a := arb(&FakeObserver{Postures: map[string]Posture{"xo": PostureComposing}})
 	req := InjectRequest{
 		Target: "xo", Kind: KindRelay, Priority: PriorityUrgent, Source: "discord-relay",
@@ -30,8 +30,8 @@ func TestEvaluateUrgentRelayRoutesAdjutantUsesPostureNotBypass(t *testing.T) {
 		FrontierReturnTo: "[in-flight] goal-loop",
 	}
 	r := a.Evaluate(req, ctx)
-	if r.Route != RouteAdjutant || r.Decision != Buffer {
-		t.Fatalf("urgent with adjutant follows posture to adjutant BUFFER, got %+v", r)
+	if r.Route != RouteAdjutant || r.Decision != Buffer || r.Audited {
+		t.Fatalf("urgent buffered to adjutant, no bypass audit, got %+v", r)
 	}
 }
 

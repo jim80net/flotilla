@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// AuditEntry records one arbitration decision. Evaluate does not write audit
-// entries (#533 YAGNI) — reserved for a future consumer with concrete wiring.
+// AuditEntry records one arbitration decision. Evaluate writes audit entries only
+// on explicit urgent bypass (RouteDual) for adjutant reconciliation (#533).
 type AuditEntry struct {
 	At          time.Time  `json:"at"`
 	Coordinator string     `json:"coordinator"`
