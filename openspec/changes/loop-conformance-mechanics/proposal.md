@@ -21,6 +21,13 @@ that observes native harness goal+loop state where available.
 4. **Lead-owned merge-forward** — dirty execution-desk PRs merge-forward under lead-only
    merge-completing permissions (ties to fleet-role-permissions #521).
 
+## What Changes
+
+1. **LoopArbitration** — single evaluate API before coordinator-targeted injects.
+2. **LoopObserver seam** — native harness goal+loop posture when available; timed inject degraded.
+3. **Loop posture vocabulary** — consistent across watch, dash bridge, and prompts.
+4. **Lead merge-forward runbook** — execution-desk dirty PRs under #521 permission boundary.
+
 ## Sequencing
 
 **After current P0/P1** (#519 dash compose guard, merge-forward queue). Does not interrupt

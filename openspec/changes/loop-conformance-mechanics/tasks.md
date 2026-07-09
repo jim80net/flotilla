@@ -5,7 +5,7 @@
 ## Design
 
 - [x] 0.1 Proposal + arbitration-layer design (this change)
-- [ ] 0.2 Cross-link #530, adjutant-protected-window, fleet-bootstrap posture, #521 merge-forward
+- [x] 0.2 Cross-link #530, adjutant-protected-window, fleet-bootstrap posture, #521 merge-forward (proposal + stackable-flotillas-438 routing table)
 - [ ] 0.3 Operator gate on design PR
 
 ## Implementation (post-gate)
