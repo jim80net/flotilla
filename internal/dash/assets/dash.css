@@ -450,6 +450,16 @@ code {
   justify-self: end;
   background: color-mix(in srgb, var(--amber) 8%, transparent);
 }
+/* #518: optimistic operator→desk line after web-composer deliver (route has no
+   ledger append yet — #432 leg 2). Dashed border marks "local until durable". */
+.thread-optimistic {
+  border-style: solid solid solid dashed;
+  opacity: .95;
+}
+.thread-optimistic .thread-kind {
+  border-color: color-mix(in srgb, var(--amber) 50%, var(--line));
+  color: var(--amber);
+}
 .thread-head {
   display: flex;
   justify-content: space-between;

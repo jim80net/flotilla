@@ -346,14 +346,32 @@
   function ledgerParticipant(tok) {
     return String(tok || "").toLowerCase().replace(/^@/, "");
   }
+  // rawHasParticipant reports whether `desk` appears as a WHOLE token in an unparsed
+  // ledger line — not as a prefix of a longer agent name. Substring match ("cos" inside
+  // "cos-adj") was flooding the cos thread with unrelated unparsed bullets (#518).
+  function rawHasParticipant(raw, desk) {
+    if (!desk) return false;
+    var s = String(raw || "").toLowerCase();
+    var d = String(desk).toLowerCase();
+    var i = 0;
+    while ((i = s.indexOf(d, i)) !== -1) {
+      var before = i === 0 ? "" : s.charAt(i - 1);
+      var after = s.charAt(i + d.length);
+      // Agent tokens are [a-z0-9_-]+ — treat those as the token body so "cos" ≠ "cos-adj".
+      var beforeOk = !before || /[^a-z0-9_-]/.test(before);
+      var afterOk = !after || /[^a-z0-9_-]/.test(after);
+      if (beforeOk && afterOk) return true;
+      i += d.length;
+    }
+    return false;
+  }
   function ledgerMatchesDesk(entry, desk) {
     if (!desk) return false;
     var d = ledgerParticipant(desk);
     if (entry.parsed) {
       return ledgerParticipant(entry.from) === d || ledgerParticipant(entry.to) === d;
     }
-    var raw = String(entry.raw || "").toLowerCase();
-    return raw.indexOf(d) !== -1;
+    return rawHasParticipant(entry.raw, d);
   }
 
   function renderDeskCard(status, fresh) {
@@ -505,8 +523,9 @@
 
   // fetchMirror loads the selected desk's session mirror and re-renders the glance.
   // Guarded on selectedDesk so a slow response for a de-selected desk is dropped.
-  // limit=100 fetches the full recent tail (the glance uses only the last entry) —
-  // sized for the Inc 2 thread-merge, which reuses cache.mirror.entries in full.
+  // limit=500 is the thread-merge tail (the glance still uses only the last entry).
+  // A 100-line cap silently dropped half of a busy coordinator's mirror (#518 live
+  // probe: cos had 200 on disk; the thread only saw 100).
   // paintMirror re-renders BOTH mirror-dependent views — the glance (latest entry)
   // and the thread (which now interleaves the full mirror history with the ledger).
   function paintMirror(force) {
@@ -516,7 +535,7 @@
   function fetchMirror() {
     var want = selectedDesk;
     if (!want) { cache.mirror = null; paintMirror(); return; }
-    getJSON("/api/session-mirror?agent=" + encodeURIComponent(want) + "&limit=100").then(function (d) {
+    getJSON("/api/session-mirror?agent=" + encodeURIComponent(want) + "&limit=500").then(function (d) {
       if (selectedDesk === want) { cache.mirror = d; paintMirror(); }
     }).catch(function (err) {
       if (selectedDesk === want) { cache.mirror = { agent: want, entries: [], error: err.message }; paintMirror(); }
@@ -578,6 +597,41 @@
     return '<div class="thread-calib">History begins' + escapeHtml(when) +
       ' — earlier coordinator turns weren’t recorded (a firewall issue, since fixed). Shown from here down.</div>';
   }
+  // #518: web composer delivers via /api/control/route which does NOT yet append a
+  // cos-ledger line (flotilla-build #432 leg 2). Until that lands, operator outbound
+  // would be invisible on the thread. Keep an in-memory optimistic line per successful
+  // deliver so the operator sees their own words immediately; prune when a matching
+  // ledger line appears (future leg 2) or after a short TTL.
+  var optimisticOut = []; // {id, target, body, ts, t}
+  var OPTIMISTIC_TTL_MS = 5 * 60 * 1000;
+  function appendOptimisticOutbound(target, body) {
+    optimisticOut.push({
+      id: "opt-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8),
+      target: target,
+      body: body,
+      ts: new Date().toISOString(),
+      t: Date.now(),
+    });
+  }
+  function pruneOptimistic(ledger, desk) {
+    var now = Date.now();
+    var deskKey = ledgerParticipant(desk);
+    optimisticOut = optimisticOut.filter(function (o) {
+      if (now - o.t > OPTIMISTIC_TTL_MS) return false;
+      if (ledgerParticipant(o.target) !== deskKey) return true; // keep other desks' pending
+      // Drop when a real ledger line carries the same operator→desk body (leg 2 parity).
+      for (var i = 0; i < ledger.length; i++) {
+        var e = ledger[i];
+        if (!e || !e.parsed) continue;
+        if (ledgerParticipant(e.to) !== deskKey) continue;
+        var from = ledgerParticipant(e.from);
+        if (from !== "operator" && from.indexOf("operator") !== 0) continue;
+        var text = String(e.body || e.gist || "");
+        if (text === o.body || text.indexOf(o.body) === 0) return false;
+      }
+      return true;
+    });
+  }
   function renderThread(history, force) {
     if (!force && composerComposeActive()) { threadRenderDeferred = true; return; }
     var thread = el("conv-thread");
@@ -588,6 +642,7 @@
       return;
     }
     var ledger = (history && Array.isArray(history.ledger)) ? history.ledger : [];
+    pruneOptimistic(ledger, selectedDesk);
     var items = [];
     ledger.forEach(function (e) {
       if (!ledgerMatchesDesk(e, selectedDesk)) return;
@@ -595,6 +650,12 @@
     });
     mirrorEntriesForSelected().forEach(function (m) {
       items.push({ kind: "mirror", t: Date.parse(m.ts), m: m });
+    });
+    // Optimistic operator→desk lines for THIS desk only (#518).
+    var deskKey = ledgerParticipant(selectedDesk);
+    optimisticOut.forEach(function (o) {
+      if (ledgerParticipant(o.target) !== deskKey) return;
+      items.push({ kind: "optimistic", t: o.t, o: o });
     });
     if (!items.length) {
       var emptyKey = "@empty:" + selectedDesk;
@@ -616,14 +677,20 @@
     // key folds each item's timestamp + a content hash so a same-second new entry
     // still re-renders (mirrors the #300 glance dedup discipline).
     var sig = selectedDesk + "#" + mirrorVerbosity + "#" + items.map(function (it) {
-      return it.kind === "mirror"
-        ? "m:" + (it.m.ts || "") + ":" + cheapHash(it.m.info || "") + ":" + (it.m.suppressed ? "1" : "0")
-        : "l:" + (it.e.parsed ? it.e.time : "") + ":" + cheapHash(it.e.parsed ? (it.e.body || it.e.gist) : it.e.raw);
+      if (it.kind === "mirror") {
+        return "m:" + (it.m.ts || "") + ":" + cheapHash(it.m.info || "") + ":" + (it.m.suppressed ? "1" : "0");
+      }
+      if (it.kind === "optimistic") {
+        return "o:" + (it.o.id || "") + ":" + cheapHash(it.o.body || "");
+      }
+      return "l:" + (it.e.parsed ? it.e.time : "") + ":" + cheapHash(it.e.parsed ? (it.e.body || it.e.gist) : it.e.raw);
     }).join("|");
     if (sig === lastThreadKey) return;
     lastThreadKey = sig;
     thread.innerHTML = coordinatorHistoryNote(items) + items.map(function (it) {
-      return it.kind === "mirror" ? threadMirrorMsg(it.m) : threadLedgerMsg(it.e);
+      if (it.kind === "mirror") return threadMirrorMsg(it.m);
+      if (it.kind === "optimistic") return threadOptimisticMsg(it.o);
+      return threadLedgerMsg(it.e);
     }).join("");
     // Latest-at-bottom scroll discipline (F#383 criterion 5): if the operator is pinned to
     // the bottom (the default, and whenever they scroll back down), keep the newest message
@@ -634,16 +701,19 @@
   }
 
   // ── thread composer + latest-at-bottom scroll (F#383 criteria 4 + 5) ──────────────
-  // composerComposeActive is true while the operator is mid-draft on the thread
-  // composer — focused OR non-empty text. Live SSE/mirror ticks must NOT rewrite the
-  // thread or the session-mirror glance during compose (aria-live re-announce + scroll
-  // reset steals focus and feels like an adjutant interrupt — flotilla#517).
+  // composerComposeActive is true while the operator has a NON-EMPTY draft on the
+  // thread composer. Live SSE/mirror ticks must NOT rewrite the thread or the
+  // session-mirror glance during compose (aria-live re-announce + scroll reset
+  // steals focus and feels like an adjutant interrupt — flotilla#517).
+  // #518: empty-focus alone is NOT compose-active. After a successful send the
+  // textarea is focused+empty; ticks and refresh() must still paint the optimistic
+  // outbound line and the desk's reply. Protecting the draft (the operator's words)
+  // is the load-bearing arm; empty focus was blocking post-send flush.
   var mirrorRenderDeferred = false;
   var threadRenderDeferred = false;
   function composerComposeActive() {
     var ta = el("thread-composer-input"), form = el("thread-composer");
     if (!ta || !form || form.hidden) return false;
-    if (document.activeElement === ta) return true;
     return ta.value.length > 0;
   }
   function flushDeferredMirrorPaint() {
@@ -698,6 +768,23 @@
         // copy as if it were the whole message). Falls back to the gist for short messages
         // and pre-#407 lines.
         '<p class="thread-gist">' + escapeHtml(e.body || e.gist) + "</p>" +
+      "</div>"
+    );
+  }
+
+  // threadOptimisticMsg — #518 interim operator voice for web-composer delivers.
+  // Route does not yet write the cos ledger (#432 leg 2); this is the client-side
+  // stand-in so the thread is not silent about what the operator just sent.
+  function threadOptimisticMsg(o) {
+    var hue = speakerHue("operator");
+    return (
+      '<div class="thread-msg thread-out thread-optimistic" data-optimistic-id="' + escapeHtml(o.id || "") + '" style="--spk:hsl(' + hue + ' 55% 62%)">' +
+        '<header class="thread-head">' +
+          '<span class="thread-route"><b class="thread-from">operator</b> &rarr; ' + escapeHtml(o.target) +
+            ' <span class="thread-kind">dash</span></span>' +
+          '<time class="thread-time" datetime="' + escapeHtml(o.ts || "") + '">' + escapeHtml(relTime(o.ts)) + "</time>" +
+        "</header>" +
+        '<p class="thread-gist">' + escapeHtml(o.body) + "</p>" +
       "</div>"
     );
   }
@@ -1337,11 +1424,19 @@
           // clear the new desk's draft or mislabel its composer; the send still happened.
           if (!sameSel(target)) return;
           if (outcome === "delivered") {
+            // #518: show the operator's own words in the thread immediately — route
+            // does not yet append a ledger line (#432 leg 2). Optimistic line is
+            // pruned when a matching ledger entry appears or after TTL.
+            appendOptimisticOutbound(target, body);
             ta.value = "";
             resizeComposer();
             threadPinned = true;
+            lastThreadKey = null; // force paint even if mirror/ledger unchanged
+            flushDeferredMirrorPaint(); // paintMirror(true) → renderThread with optimistic
             scrollThreadToBottom();
-            flushDeferredMirrorPaint();
+            // Re-fetch streams so a desk reply (session-mirror) lands without waiting
+            // solely on the next SSE tick; empty-focus is no longer compose-active.
+            refresh();
           }
           setMsg("Outcome: " + outcome + detail, outcome === "delivered" ? "ok" : "");
         }).catch(function (err) { if (sameSel(target)) setMsg(err.message, "err"); }).then(function () {
