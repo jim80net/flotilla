@@ -359,6 +359,7 @@ func (in *Injector) handleBusy(j Job, cause error) {
 	}
 	j.deferrals++ // j is the worker's local copy; the incremented value rides the re-enqueue
 	if errors.Is(cause, surface.ErrTransient) && j.deferrals < maxTransientReassess {
+		in.releaseRelayBeforeDefer(j)
 		in.reEnqueue(j, transientDeferDelay)
 		return
 	}
@@ -392,6 +393,7 @@ func (in *Injector) handleBusy(j Job, cause error) {
 			st.Update(entry)
 		}
 	}
+	in.releaseRelayBeforeDefer(j)
 	in.reEnqueue(j, busyDeferDelay)
 }
 
@@ -491,6 +493,14 @@ func (in *Injector) HasPendingRelayFor(agent string) bool {
 	in.relayPendingMu.Lock()
 	defer in.relayPendingMu.Unlock()
 	return in.relayPending[agent] > 0
+}
+
+// releaseRelayBeforeDefer drops the in-flight relay count before a busy/transient re-enqueue.
+// Enqueue will increment again when the deferred copy re-enters the worker queue (#523).
+func (in *Injector) releaseRelayBeforeDefer(j Job) {
+	if isRelay(j.Kind) {
+		in.noteRelayDone(j)
+	}
 }
 
 func (in *Injector) noteRelayEnqueued(j Job) {

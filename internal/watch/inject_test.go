@@ -76,6 +76,33 @@ func TestInjectorHasPendingRelayFor(t *testing.T) {
 	}
 }
 
+func TestInjectorHasPendingRelayForClearsAfterTransientRetry(t *testing.T) {
+	var attempts atomic.Int32
+	in := NewInjector(func(string, string) error {
+		if attempts.Add(1) == 1 {
+			return surface.ErrTransient
+		}
+		return nil
+	}, 4)
+	in.reEnqueue = func(j Job, _ time.Duration) { in.Enqueue(j) }
+	in.Start()
+	in.Enqueue(Job{Agent: "xo", Message: "ping", Kind: KindRelay})
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if attempts.Load() >= 2 && !in.HasPendingRelayFor("xo") {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	in.Stop()
+	if attempts.Load() < 2 {
+		t.Fatalf("want transient retry, got %d attempts", attempts.Load())
+	}
+	if in.HasPendingRelayFor("xo") {
+		t.Fatal("pending relay count must clear after transient retry delivery (#523)")
+	}
+}
+
 func TestInjectorSurvivesSendError(t *testing.T) {
 	var count int32
 	send := func(agent, message string) error {
