@@ -247,6 +247,14 @@
 
   function ensureSelection(status, groups) {
     if (selectedDesk) return;
+    // Prefer a distinct CoS on first paint (F#383 criterion 1) — the standalone-
+    // conversations test starts with the coordinator thread, not a random desk.
+    // When cos is unset or identical to xo, BoardDoc.cos is empty and we fall through.
+    if (status && status.cos) {
+      selectedDesk = status.cos;
+      selectedChannel = channelForDesk(groups, status.cos);
+      return;
+    }
     if (status && status.xo) {
       selectedDesk = status.xo;
       selectedChannel = channelForDesk(groups, status.xo);
@@ -660,7 +668,13 @@
       var emptyKey = "@empty:" + selectedDesk;
       if (lastThreadKey === emptyKey) return;
       lastThreadKey = emptyKey;
-      thread.innerHTML = '<div class="empty">No coordination history for this desk yet.</div>';
+      // Coordinator empty state is honest about the dual feed (relay ledger + session-
+      // mirror) so a first open of the CoS thread after #575–#578 doesn't read as a
+      // broken surface — "desk" framing was wrong for the coordinator pin (F#383).
+      var emptyMsg = isCoordinatorThread()
+        ? "No coordination history for this coordinator yet. Relay ledger lines and session-mirror turn-finals appear here once recorded."
+        : "No coordination history for this desk yet.";
+      thread.innerHTML = '<div class="empty">' + emptyMsg + "</div>";
       return;
     }
     // Oldest-first (ascending) — chat convention: the latest message is at the BOTTOM,

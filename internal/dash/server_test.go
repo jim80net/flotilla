@@ -414,6 +414,8 @@ func TestDashOperatorUX421(t *testing.T) {
 // brief|respond grid on wide viewports), the decision brief no longer sits in a nested
 // 40vh scroll, the drive-queue item modal is widened, the conversations shell is not
 // capped at the old 1500px, and an identical node/work-item brief is not rendered twice.
+// Residual (#383 close-out): ≥1400px widens the work-queue column (480) and the queue
+// item modal (720) — breakpoint-only, so mobile keeps the Wave 4 base.
 func TestModalDesktopSpaceWave4(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 	srv, _ := newTestServer(t, singleFleetRoster, now)
@@ -423,6 +425,8 @@ func TestModalDesktopSpaceWave4(t *testing.T) {
 		`grid-template-areas: "title title" "brief respond"`, // desktop two-column layout
 		"min(640px, 94vw)",  // .conv-modal-card widened from 460px
 		"max-width: 1760px", // .conv-wrap uncapped from 1500px (desktop not capped for mobile)
+		"1fr) 480px",        // residual: work-queue column at ≥1400
+		"min(720px, 94vw)",  // residual: queue-item modal at ≥1400
 	} {
 		if !strings.Contains(css, marker) {
 			t.Errorf("dash.css must carry the Wave 4 desktop-space marker %q (F#383)", marker)
@@ -453,6 +457,8 @@ func TestModalDesktopSpaceWave4(t *testing.T) {
 // conversations rail pins the coordinator(s) as a first-class group even when neither is a
 // channel xo_agent/member — so the CoS thread is always followable (the "I can't even see
 // the CoS's conversation" gap). The identity half (BoardDoc.cos) is covered in readmodel_test.
+// Residual close-out: first paint prefers status.cos when distinct, and the empty
+// coordinator thread uses coordinator framing (not "desk").
 func TestConversationsCoordinatorPinWave4(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 	srv, _ := newTestServer(t, singleFleetRoster, now)
@@ -461,6 +467,8 @@ func TestConversationsCoordinatorPinWave4(t *testing.T) {
 		"coordinatorNames",       // derives the coordinators (xo + distinct cos) from /api/status
 		"conv-group-coordinator", // the pinned first-class group
 		"st.cos",                 // reads the CoS identity the board now exposes
+		"status.cos",             // ensureSelection prefers distinct CoS on first paint
+		"No coordination history for this coordinator yet", // honest empty-state for CoS thread
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("dash.js must pin the coordinator thread first-class (missing %q) — F#383 criterion 1", marker)
@@ -469,6 +477,49 @@ func TestConversationsCoordinatorPinWave4(t *testing.T) {
 	css := doGet(t, srv, "/static/dash.css").Body.String()
 	if !strings.Contains(css, ".chan-coordinator") {
 		t.Error("dash.css must style the pinned coordinator group label (.chan-coordinator) — F#383")
+	}
+}
+
+// TestHandleStatus_CosField locks the HTTP half of F#383 criterion 1: /api/status
+// exposes board.cos when the roster names a distinct cos_agent (the rail reads st.cos).
+func TestHandleStatus_CosField(t *testing.T) {
+	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	const rosterWithCos = `{
+		"channel_id": "C1",
+		"xo_agent": "alpha-xo",
+		"cos_agent": "cos",
+		"heartbeat_interval": "20m",
+		"agents": [{"name": "alpha-xo"}, {"name": "cos"}, {"name": "alpha"}]
+	}`
+	srv, dir := newTestServer(t, rosterWithCos, now)
+	writeSnapshot(t, filepath.Join(dir, "flotilla-detector-state.json"),
+		watch.Snapshot{DeskStates: map[string]surface.State{
+			"alpha-xo": surface.StateIdle, "cos": surface.StateWorking, "alpha": surface.StateIdle,
+		}, XOSettled: true},
+		now.Add(-30*time.Second))
+	rec := doGet(t, srv, "/api/status")
+	if rec.Code != 200 {
+		t.Fatalf("status code %d", rec.Code)
+	}
+	var doc BoardDoc
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Cos != "cos" {
+		t.Errorf("/api/status cos = %q, want %q (distinct cos_agent must be first-class) — F#383", doc.Cos, "cos")
+	}
+	if doc.XO != "alpha-xo" {
+		t.Errorf("/api/status xo = %q, want alpha-xo", doc.XO)
+	}
+	// Same identity as XO ⇒ cos field omitted (not double-listed).
+	srvSame, _ := newTestServer(t, singleFleetRoster, now) // no cos_agent
+	rec2 := doGet(t, srvSame, "/api/status")
+	var none BoardDoc
+	if err := json.Unmarshal(rec2.Body.Bytes(), &none); err != nil {
+		t.Fatal(err)
+	}
+	if none.Cos != "" {
+		t.Errorf("unset cos_agent must leave /api/status cos empty, got %q", none.Cos)
 	}
 }
 

@@ -256,6 +256,14 @@ code {
   .conv-thread       { flex: 1 1 auto; min-height: 0; overflow-y: auto; } /* THE one reading scroll */
   .conv-context-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; } /* actions column */
 }
+/* F#383 residual (desktop not mobile-capped): at 1440+ give the work-queue column and
+   the queue-item modal more measure. Breakpoint-gated only — phone/tablet keep the
+   Wave 4 420/640 base; desktop grows into the viewport rather than inheriting a mobile cap. */
+@media (min-width: 1400px) {
+  .conv-wrap {
+    grid-template-columns: 260px minmax(0, 1fr) 480px;
+  }
+}
 /* mid width → two columns (nav + thread); the context column drops full-width
    below and the page scrolls naturally (no fixed shell under ~1100px) */
 @media (min-width: 721px) and (max-width: 1100px) {
@@ -1559,6 +1567,11 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   position: relative; width: min(640px, 94vw); max-width: 100%; max-height: 80vh; overflow-y: auto;
   background: linear-gradient(180deg, var(--abyss-2), var(--abyss-3)); border: 1px solid var(--cyan-dim);
   border-radius: var(--r); box-shadow: var(--shadow-lg); padding: 20px 22px;
+}
+/* F#383 residual: on full desktop the queue-item modal can take more of the viewport
+   without cramping phone (94vw still caps mobile). Breakpoint-only — not a global cap. */
+@media (min-width: 1400px) {
+  .conv-modal-card { width: min(720px, 94vw); }
 }
 .conv-modal-x {
   position: absolute; top: 12px; right: 14px; width: 32px; height: 32px; border-radius: 6px;
