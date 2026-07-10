@@ -2,6 +2,8 @@ package watch
 
 import (
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,22 +33,31 @@ func countMirroredAgent(xs []Job, agent string) int {
 // #592: operator→coordinator dual-split must happen once; busy-defer re-enqueues of the
 // leader job must not re-spawn adjutant observation copies (each confirmed copy mirrored Discord).
 func TestInjectorBusyDeferDoesNotRefanoutAdjutantObs592(t *testing.T) {
-	var delivered []string
-	var mirrored []Job
-	var reEnqueues int
+	var (
+		deliveredMu sync.Mutex
+		delivered   []string
+		mirroredMu  sync.Mutex
+		mirrored    []Job
+		reEnqueues  atomic.Int32
+	)
 
 	in := NewInjector(func(agent, _ string) error {
+		deliveredMu.Lock()
 		delivered = append(delivered, agent)
+		deliveredMu.Unlock()
 		if agent == "cos" {
 			return surface.ErrBusy
 		}
 		return nil
 	}, 20)
 	in.SetCoordinatorIngress(NewCoordinatorIngress(adjutantRoster()))
-	in.SetMirror(func(j Job) { mirrored = append(mirrored, j) })
+	in.SetMirror(func(j Job) {
+		mirroredMu.Lock()
+		mirrored = append(mirrored, j)
+		mirroredMu.Unlock()
+	})
 	in.reEnqueue = func(j Job, _ time.Duration) {
-		reEnqueues++
-		if reEnqueues <= 8 {
+		if reEnqueues.Add(1) <= 8 {
 			in.Enqueue(j)
 		}
 	}
@@ -60,24 +71,47 @@ func TestInjectorBusyDeferDoesNotRefanoutAdjutantObs592(t *testing.T) {
 
 	deadline := time.After(2 * time.Second)
 	for {
-		if reEnqueues >= 8 && countAgent(delivered, "cos-adj") >= 1 {
+		deliveredMu.Lock()
+		adjCount := countAgent(delivered, "cos-adj")
+		deliveredMu.Unlock()
+		if reEnqueues.Load() >= 8 && adjCount >= 1 {
 			break
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("timeout: reEnqueues=%d delivered=%v mirrored=%d", reEnqueues, delivered, len(mirrored))
+			deliveredMu.Lock()
+			snap := append([]string(nil), delivered...)
+			deliveredMu.Unlock()
+			mirroredMu.Lock()
+			mCount := len(mirrored)
+			mirroredMu.Unlock()
+			t.Fatalf("timeout: reEnqueues=%d delivered=%v mirrored=%d", reEnqueues.Load(), snap, mCount)
 		default:
 			time.Sleep(5 * time.Millisecond)
 		}
 	}
 
-	if got := countAgent(delivered, "cos-adj"); got != 1 {
-		t.Fatalf("cos-adj delivered %d times, want 1 (busy defer must not re-fanout): %v", got, delivered)
+	deliveredMu.Lock()
+	adjDeliveries := countAgent(delivered, "cos-adj")
+	deliveredSnap := append([]string(nil), delivered...)
+	deliveredMu.Unlock()
+	if adjDeliveries != 1 {
+		t.Fatalf("cos-adj delivered %d times, want 1 (busy defer must not re-fanout): %v", adjDeliveries, deliveredSnap)
 	}
-	if got := countMirroredAgent(mirrored, "cos-adj"); got != 1 {
-		t.Fatalf("cos-adj mirrored %d times, want 1: %+v", got, mirrored)
+
+	mirroredMu.Lock()
+	adjMirrors := countMirroredAgent(mirrored, "cos-adj")
+	var adj Job
+	for _, j := range mirrored {
+		if j.Agent == "cos-adj" {
+			adj = j
+			break
+		}
 	}
-	adj := mirrored[0]
+	mirroredMu.Unlock()
+	if adjMirrors != 1 {
+		t.Fatalf("cos-adj mirrored %d times, want 1", adjMirrors)
+	}
 	if adj.MessageID != "m592.adjutant-obs" {
 		t.Fatalf("adjutant mirror MessageID = %q, want m592.adjutant-obs", adj.MessageID)
 	}
@@ -95,9 +129,15 @@ func TestReplayRelayQueueSkipsIngressApply592(t *testing.T) {
 		MessageID: "m-replay", OriginChannel: "C1",
 	})
 
-	var delivered []string
+	var cosDelivered atomic.Int32
+	var adjDelivered atomic.Int32
 	in := NewInjector(func(agent, _ string) error {
-		delivered = append(delivered, agent)
+		switch agent {
+		case "cos":
+			cosDelivered.Add(1)
+		case "cos-adj":
+			adjDelivered.Add(1)
+		}
 		return nil
 	}, 4)
 	in.SetCoordinatorIngress(NewCoordinatorIngress(adjutantRoster()))
@@ -109,10 +149,13 @@ func TestReplayRelayQueueSkipsIngressApply592(t *testing.T) {
 	}
 
 	waitUntil := time.Now().Add(time.Second)
-	for countAgent(delivered, "cos") < 1 && time.Now().Before(waitUntil) {
+	for cosDelivered.Load() < 1 && time.Now().Before(waitUntil) {
 		time.Sleep(5 * time.Millisecond)
 	}
-	if got := countAgent(delivered, "cos-adj"); got != 0 {
-		t.Fatalf("replayed leader job re-split to adjutant: delivered=%v", delivered)
+	if cosDelivered.Load() != 1 {
+		t.Fatalf("cos delivered %d times, want 1", cosDelivered.Load())
+	}
+	if got := adjDelivered.Load(); got != 0 {
+		t.Fatalf("replayed leader job re-split to adjutant: cos-adj deliveries=%d", got)
 	}
 }
