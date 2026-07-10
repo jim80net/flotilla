@@ -206,7 +206,14 @@ func isHotlineToChannelXO(cfg *roster.Config, j watch.Job) bool {
 		return false
 	}
 	binding, ok := cfg.BindingForChannel(j.OriginChannel)
-	return ok && binding.XOAgent == j.Agent
+	if !ok {
+		return false
+	}
+	target := j.Agent
+	if leader := cfg.CoordinatorForAdjutant(j.Agent); leader != "" {
+		target = leader
+	}
+	return binding.XOAgent == target
 }
 
 // newHotlineReplyRouter builds the replyRouter wired to the real surface/store/Discord, or nil when

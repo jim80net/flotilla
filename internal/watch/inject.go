@@ -99,6 +99,13 @@ type Job struct {
 	// ClaimKey is the decision-brief gap key for KindDetector jobs; the watch daemon sets it
 	// so the injector can confirm or abort the in-memory claim on delivery outcome (#365 P1).
 	ClaimKey string
+	// ingressResolved is set after CoordinatorIngress.Apply has run once for this job.
+	// Busy-defer re-enqueues must not re-Apply — that would re-spawn adjutant observation
+	// copies on every retry (#592).
+	ingressResolved bool
+	// bufferRecorded is set after an operator relay is persisted to the adjutant layer
+	// buffer — busy-defer re-enqueues must not append again (#593).
+	bufferRecorded bool
 }
 
 // SendFunc delivers a message to an agent's pane and CONFIRMS a turn started. Production
@@ -125,20 +132,21 @@ type Injector struct {
 	stopped                   chan struct{} // Enqueue: stop accepting (closed once)
 	done                      chan struct{}
 	once                      sync.Once
-	mirror                    func(Job)                               // optional: called after a CONFIRMED delivery (audit trail)
-	escalate                  func(string)                            // optional: a LOUD operator alert for a failed/undeliverable relay
-	reEnqueue                 func(Job, time.Duration)                // how a deferred relay is re-enqueued after a delay; injectable for tests
-	queue                     relayQueueStore                         // optional: disk-backed pending queue for deferred operator relays (#286)
-	rosterDir                 string                                  // roster directory for per-sender outbox persistence (#475)
-	onSend                    func(sender, recipient, message string) // optional: post-confirm hook for swept sends (ledger)
-	onOutboxDone              func(sender, id string)                 // optional: clear in-flight sweep guard (#475)
-	onDetectorConfirm         func(claimKey string)                   // optional: durable claim after confirmed detector delivery (#365)
-	onDetectorAbort           func(claimKey string)                   // optional: release in-memory claim on busy drop / failure (#365)
-	onInboundTrack            func(Job)                               // optional: recipient inbound ledger after confirmed KindSend (#472)
-	now                       func() time.Time                        // clock for stale escalation; nil ⇒ time.Now()
-	outboxOwningCoordinator   func(sender string) string              // optional: sender → coordinator for stale outbox (#477)
-	outboxCoordinatorEscalate func(coordinator, msg, claimKey string) // optional: enqueue to coordinator surface (#436/#477)
-	coordinatorIngress        *CoordinatorIngress                     // optional: #533 adjutant front-office ingress before delivery
+	mirror                    func(Job)                                  // optional: called after a CONFIRMED delivery (audit trail)
+	escalate                  func(string)                               // optional: a LOUD operator alert for a failed/undeliverable relay
+	reEnqueue                 func(Job, time.Duration)                   // how a deferred relay is re-enqueued after a delay; injectable for tests
+	queue                     relayQueueStore                            // optional: disk-backed pending queue for deferred operator relays (#286)
+	rosterDir                 string                                     // roster directory for per-sender outbox persistence (#475)
+	onSend                    func(sender, recipient, message string)    // optional: post-confirm hook for swept sends (ledger)
+	onOutboxDone              func(sender, id string)                    // optional: clear in-flight sweep guard (#475)
+	onDetectorConfirm         func(claimKey string)                      // optional: durable claim after confirmed detector delivery (#365)
+	onDetectorAbort           func(claimKey string)                      // optional: release in-memory claim on busy drop / failure (#365)
+	onInboundTrack            func(Job)                                  // optional: recipient inbound ledger after confirmed KindSend (#472)
+	now                       func() time.Time                           // clock for stale escalation; nil ⇒ time.Now()
+	outboxOwningCoordinator   func(sender string) string                 // optional: sender → coordinator for stale outbox (#477)
+	outboxCoordinatorEscalate func(coordinator, msg, claimKey string)    // optional: enqueue to coordinator surface (#436/#477)
+	coordinatorIngress        *CoordinatorIngress                        // optional: #533 adjutant front-office ingress before delivery
+	onOperatorRelayBuffer     func(leader, messageID, body string) error // optional: #593 durable operator buffer append
 	relayPendingMu            sync.Mutex
 	relayPending              map[string]int // in-flight KindRelay per agent (#523)
 }
@@ -190,6 +198,12 @@ func (in *Injector) SetInboundTrack(fn func(Job)) { in.onInboundTrack = fn }
 
 // SetCoordinatorIngress installs #533 adjutant front-office ingress aliasing before coordinator delivery.
 func (in *Injector) SetCoordinatorIngress(g *CoordinatorIngress) { in.coordinatorIngress = g }
+
+// SetOperatorRelayBuffer installs the durable adjutant buffer append hook for operator relays
+// routed through the front office (#593). Must be set before Start.
+func (in *Injector) SetOperatorRelayBuffer(fn func(leader, messageID, body string) error) {
+	in.onOperatorRelayBuffer = fn
+}
 
 // SetOutboxStaleEscalate wires the one-shot coordinator-surface escalation for undeliverable
 // swept sends (#477, #436). owningCoordinator resolves the sender's coordinator; escalate
@@ -488,10 +502,25 @@ func (in *Injector) raise(format string, args ...any) {
 // is always safe.
 func (in *Injector) Enqueue(j Job) {
 	jobs := []Job{j}
-	if in.coordinatorIngress != nil {
+	if in.coordinatorIngress != nil && !j.ingressResolved {
 		jobs = in.coordinatorIngress.Apply(j)
+		for i := range jobs {
+			jobs[i].ingressResolved = true
+		}
 	}
-	for _, jj := range jobs {
+	for i := range jobs {
+		jj := jobs[i]
+		if in.onOperatorRelayBuffer != nil && isRelay(jj.Kind) && jj.MessageID != "" && !jj.bufferRecorded {
+			if in.coordinatorIngress != nil && in.coordinatorIngress.Config != nil {
+				if leader := in.coordinatorIngress.Config.CoordinatorForAdjutant(jj.Agent); leader != "" {
+					body := ExtractVerbatimBody(jj.Message)
+					if err := in.onOperatorRelayBuffer(leader, jj.MessageID, body); err == nil {
+						jj.bufferRecorded = true
+						jobs[i] = jj
+					}
+				}
+			}
+		}
 		select {
 		case in.jobs <- jj:
 			in.noteRelayEnqueued(jj)

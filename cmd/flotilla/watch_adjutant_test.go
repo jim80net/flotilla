@@ -33,7 +33,8 @@ func TestAdjutantEvaluationTickBodyThreeStepDuty(t *testing.T) {
 		"idle-holding",
 		"Your charter at " + charter,
 		"consult it before composing any brief",
-		"Dual observation",
+		"Fleet interaction intelligence",
+		"brainstem",
 		"rate-limit exhaustion",
 	} {
 		if !strings.Contains(got, want) {
@@ -49,7 +50,7 @@ func TestAdjutantBufferedNoteBody(t *testing.T) {
 		"Buffered 2", "xo", "next seam", "evaluation ticks",
 		"Your charter at " + charter,
 		"consult it before composing any brief",
-		"Dual observation",
+		"Fleet interaction intelligence",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("buffered note missing %q\nfull: %s", want, got)
@@ -65,15 +66,16 @@ func TestLeaderPingBodyExactLegacyString(t *testing.T) {
 	}
 }
 
-func TestAdjutantDualObservationContract(t *testing.T) {
-	got := adjutantDualObservationContract("alpha-xo")
+func TestAdjutantBufferContract(t *testing.T) {
+	got := adjutantBufferContract("alpha-xo")
 	for _, want := range []string{
-		"Dual observation", "Desk stream", "Leader stream", "alpha-xo", "Working/Idle",
+		"Fleet interaction intelligence", "brainstem", "Coalesce", "Disaggregate",
+		"Desk stream", "Leader stream", "alpha-xo", "Working/Idle",
 		// #524: loop_posture, not pane idle alone
 		"loop_posture", "parked", "drifted", "awaiting-authority", "not pane idle alone",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("dual observation missing %q\nfull: %s", want, got)
+			t.Errorf("buffer contract missing %q\nfull: %s", want, got)
 		}
 	}
 }
@@ -86,7 +88,7 @@ func TestAdjutantCharterPairingBody(t *testing.T) {
 		"flotilla-alpha-xo-adjutant-charter.md",
 		"flotilla-alpha-xo-alive",
 		"Required minimum",
-		"Dual observation",
+		"Fleet interaction intelligence",
 		"gated until this charter exists",
 	} {
 		if !strings.Contains(got, want) {

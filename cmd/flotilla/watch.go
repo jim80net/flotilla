@@ -283,6 +283,15 @@ func cmdWatch(args []string) error {
 	injector := watch.NewInjector(mkSend(confirm.Submit), 16)
 	if ingress := newCoordinatorIngress(cfg); ingress != nil {
 		injector.SetCoordinatorIngress(ingress)
+		injector.SetOperatorRelayBuffer(func(leader, messageID, body string) error {
+			bufferPath := roster.LayerBufferPath(rosterDir, leader)
+			if adjutantbuffer.HasOperatorMessage(bufferPath, messageID) {
+				return nil
+			}
+			return adjutantbuffer.Append(bufferPath, leader, []string{
+				adjutantbuffer.FormatOperatorReason(messageID, body),
+			})
+		})
 		log.Printf("flotilla watch: adjutant front-office ingress active (#533)")
 	}
 	// RELAY-kind jobs route through the self-heal-capable submit; heartbeat/detector ticks keep the
@@ -337,9 +346,20 @@ func cmdWatch(args []string) error {
 				}
 			}
 		}
-		post("flotilla-watch", "→ "+j.Agent+": "+j.Message)
+		// #593: one audit line per operator message — front-office ingress mirrors the
+		// verbatim operator body once (not leader + adjutant envelope spam).
+		mirrorBody := watch.ExtractVerbatimBody(j.Message)
+		if leader, ok := relayLayerLeader(cfg, j.Agent); ok && leader != j.Agent {
+			post("flotilla-watch", "→ "+leader+" (via "+j.Agent+"): "+mirrorBody)
+		} else {
+			post("flotilla-watch", "→ "+j.Agent+": "+mirrorBody)
+		}
 		if replyRtr != nil && isHotlineToChannelXO(cfg, j) {
-			replyRtr.arm(j.Agent, j.OriginChannel, j.Message) // watch the XO's reply to THIS message, route it back
+			armAgent := j.Agent
+			if leader, ok := relayLayerLeader(cfg, j.Agent); ok {
+				armAgent = leader
+			}
+			replyRtr.arm(armAgent, j.OriginChannel, mirrorBody)
 		}
 		// CoS context-mirror (#108): append this confirmed operator→XO relay delivery
 		// to the who-knows-what ledger, tagged with the origin channel (the #105
@@ -449,6 +469,7 @@ func cmdWatch(args []string) error {
 			}
 			bufferPath := roster.LayerBufferPath(rosterDir, owner)
 			deliveredPath := roster.LayerBufferDeliveredPath(rosterDir, owner)
+			enqueueOperatorSeamForwards(owner, bufferPath, deliveredPath, seamClaims, injector.Enqueue)
 			brief, ok, clearAfter, recordItems := adjutantSeamBrief(bufferPath, deliveredPath, owner, rosterDir)
 			if !ok {
 				if clearAfter {
@@ -1308,7 +1329,7 @@ func adjutantEvaluationTickBody(leader, leaderAckPath, bufferPath, charterPath s
 		"Lane-done chapter-end → schedule flotilla recycle <desk> (mechanical act-by-tier).\n\n" +
 		"This tick catches idle-holding: leader idle but queue not empty is work-found, not all-quiet." +
 		adjutantCharterGovernanceLine(charterPath) +
-		adjutantDualObservationContract(leader)
+		adjutantBufferContract(leader)
 }
 
 // adjutantCharterPairingBody is the first-presentation charter turn for a new adjutant pair (#439 2.5).
@@ -1322,7 +1343,7 @@ func adjutantCharterPairingBody(leader, adjutant, charterPath, leaderAckPath str
 		"Required minimum (non-negotiable): on evaluation ticks you MUST ack liveness by touching:\n   " +
 		leaderAckPath + "\n\n" +
 		"Evaluation ticks are gated until this charter exists. Solo authority beyond the minimum is negotiated, not invented." +
-		adjutantDualObservationContract(leader)
+		adjutantBufferContract(leader)
 }
 
 // leaderCharterPairingBody asks the coordinator to affirm the adjutant charter (#439 2.5).
@@ -1337,18 +1358,26 @@ func leaderCharterPairingBody(leader, adjutant, charterPath, leaderAckPath strin
 		"This is a one-time pairing turn; buffered interrupts resume laminar flow after the charter lands."
 }
 
-// adjutantDualObservationContract is the prompt-contract for dual desk+leader observation (#439 2.3).
+// adjutantBufferContract is the standing prompt-contract for fleet interaction intelligence (#593).
+// The adjutant is the brainstem / CNS — not a passive sidekick. Coalesce and disaggregate
+// are judgment duties; mechanical buffer + seam policy are the substrate (Phase 1).
 // #524: observe loop_posture (fleet loop vocabulary), not pane idle alone.
-func adjutantDualObservationContract(leader string) string {
-	return "\n\nDual observation (standing duty):\n" +
+func adjutantBufferContract(leader string) string {
+	return "\n\nFleet interaction intelligence — conversation buffer (standing duty, #593):\n" +
+		"You are the front office / brainstem for " + leader + "'s layer. Faithfully reproduce " +
+		"reflexes and signals; tune how operator, CoS, XO, and desks interact for performance.\n" +
 		"1. Desk stream — subtree desks under " + leader + ": pane Assess state, finish-edges, crash/shell, " +
 		"and loop_posture (composing/available/parked/awaiting-authority/blocked vs drifted/crashed/reaped/unknown).\n" +
 		"2. Leader stream — " + leader + ": Working/Idle pane state AND loop_posture (not pane idle alone — #524), " +
 		"settle/awaiting markers, turn-final tail, " +
 		"AND usage-limit / rate-limit exhaustion signals (never silent — escalate to operator; " +
 		"daemon may auto-resuscitate via harness switch — #510).\n" +
-		"Buffer when leader is composing/goal-active or Working without await marker; " +
-		"inject consolidated briefs at available/parked (in-loop idle) seams — not while awaiting-authority.\n" +
+		"3. Coalesce — related operator messages conveying ONE idea: assemble into a coherent unit " +
+		"before interrupting the leader; do not drip partial arcs mid-turn.\n" +
+		"4. Disaggregate — multi-intent operator traffic: split into discrete dispatches (right owner / " +
+		"work item) with provenance; leader receives verbatim only what needs leader judgment.\n" +
+		"Buffer operator and system interrupts when leader is composing/goal-active; " +
+		"forward leader-judgment material verbatim at available/parked seams — not while awaiting-authority.\n" +
 		"Out-of-loop postures (drifted/crashed/reaped) escalate; do not treat them as parked."
 }
 
@@ -1404,7 +1433,7 @@ func adjutantBufferedNoteBody(leader string, n int, charterPath string) string {
 		leader + "'s next seam — the leader receives a consolidated brief then, not mid-thought. " +
 		"On evaluation ticks: ack → evaluate → act-by-tier." +
 		adjutantCharterGovernanceLine(charterPath) +
-		adjutantDualObservationContract(leader)
+		adjutantBufferContract(leader)
 }
 
 // layerCharterMissing reports whether the first-presentation charter sidecar is absent.
@@ -1457,9 +1486,40 @@ func adjutantSeamBrief(bufferPath, deliveredPath, leader, rosterDir string) (bri
 	if ledgerQuarantined {
 		log.Printf("flotilla watch: adjutant delivered ledger for %q quarantined — continuing with empty dedup state", leader)
 	}
+	_, sysItems := adjutantbuffer.PartitionItems(f.Items)
 	_, charterErr := os.Stat(roster.LayerCharterPath(rosterDir, leader))
-	brief, recordItems, ok = adjutantbuffer.PrepareInject(leader, f, delivered, os.IsNotExist(charterErr), quarantined)
+	brief, recordItems, ok = adjutantbuffer.PrepareInject(leader, adjutantbuffer.File{Leader: f.Leader, Items: sysItems}, delivered, os.IsNotExist(charterErr), quarantined)
 	return brief, ok, hasItems, recordItems
+}
+
+// enqueueOperatorSeamForwards delivers buffered operator messages verbatim to the leader at a
+// safe seam (#593). KindDetector + seam ClaimKey suppresses audit-mirror spam; confirm hooks
+// clear buffer entries on successful delivery.
+func enqueueOperatorSeamForwards(owner, bufferPath, deliveredPath string, seamClaims *adjutantSeamClaims, enqueue func(watch.Job)) {
+	f, hasItems, _, err := adjutantbuffer.Peek(bufferPath)
+	if err != nil || !hasItems {
+		return
+	}
+	delivered, _, err := adjutantbuffer.LoadDelivered(deliveredPath)
+	if err != nil {
+		log.Printf("flotilla watch: adjutant delivered ledger load for operator seam failed: %v", err)
+		return
+	}
+	opItems, _ := adjutantbuffer.PartitionItems(f.Items)
+	for _, it := range adjutantbuffer.FilterUndelivered(opItems, delivered) {
+		msgID, body, ok := adjutantbuffer.ExtractOperatorBody(it.Reason)
+		if !ok || body == "" {
+			continue
+		}
+		claimKey := adjutantSeamClaimPrefix + "operator:" + owner + ":" + msgID
+		seamClaims.register(claimKey, adjutantSeamClaim{
+			owner: owner, bufferPath: bufferPath, deliveredPath: deliveredPath,
+			recordItems: []adjutantbuffer.Item{it},
+		})
+		enqueue(watch.Job{
+			Agent: owner, Message: body, Kind: watch.KindDetector, ClaimKey: claimKey,
+		})
+	}
 }
 
 // backlogWakeItemMaxRunes caps each driven item line in a WakeBacklog prompt (#526). The parser
