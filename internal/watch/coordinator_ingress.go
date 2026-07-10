@@ -8,18 +8,17 @@ import (
 
 const adjutantSeamClaimPrefix = "adjutant-seam:"
 
-// VerbatimBodyMarker opens the operator-authored body section in an adjutant observation
-// envelope (#549). Tests assert the source text appears after this marker unmodified.
+// VerbatimBodyMarker opens the operator-authored body section in an adjutant ingress
+// envelope. Tests assert the source text appears after this marker unmodified.
 const VerbatimBodyMarker = "--- operator message (verbatim) ---\n"
 
 // CoordinatorIngress is the ingress/topology slice of the adjutant front office (#533).
 //
 // When adjutant_for:<leader> exists, the adjutant is the leader's lifecycle surface:
 // ingress, liveness observation, buffering, seam timing, return-to-frontier protection,
-// and deciding when to bring the leader back in. The leader (XO/COS) works behind
-// that front office for system wakes — but operator-authored prose (#549) is dual-
-// delivered so the leader receives the operator's words byte-for-byte (never only an
-// AI paraphrase of a front-office rewrite).
+// and deciding when to bring the leader back in. Operator-authored prose (#593) enters
+// the front office as a single ingress — the adjutant buffers and forwards verbatim at
+// a safe seam; fidelity at delivery, not dual mechanical fanout at ingress.
 //
 // This type wires mechanical ingress aliasing (watch inject + dash route). Full
 // lifecycle management (buffer, seam briefs, frontier guard) lives elsewhere.
@@ -35,11 +34,10 @@ func NewCoordinatorIngress(cfg *roster.Config) *CoordinatorIngress {
 	return &CoordinatorIngress{Config: cfg}
 }
 
-// Apply resolves coordinator-targeted jobs through the adjutant front office (#533, #549).
+// Apply resolves coordinator-targeted jobs through the adjutant front office (#533, #593).
 //
-//	Operator-authored relay (KindRelay / KindDefault): dual-enqueue —
-//	  1. leader receives job.Message EXACTLY (byte-for-byte, no wrap)
-//	  2. adjutant receives an additive observation envelope wrapping the same body
+//	Operator-authored relay (KindRelay / KindDefault): single-alias to adjutant — the
+//	  intelligent conversation buffer holds / triages / forwards verbatim at seam.
 //	System wakes (detector / heartbeat): single-alias to adjutant (existing #533).
 //	Adjutant seam drains: pass through to the leader unchanged.
 func (g *CoordinatorIngress) Apply(job Job) []Job {
@@ -56,18 +54,12 @@ func (g *CoordinatorIngress) Apply(job Job) []Job {
 	if adj == "" {
 		return []Job{job}
 	}
-	leader := job.Agent
 	if isOperatorAuthoredRelay(job) {
-		toLeader := job // Message, OriginChannel, Kind unchanged — verbatim
-		toAdj := job
-		toAdj.Agent = adj
-		toAdj.Message = AdjutantObservationEnvelope(leader, job.Message)
-		// Distinct MessageID so durable relay-queue / inbound track for the operator
-		// message stays on the leader path only (observation copy is not a second delivery).
-		if job.MessageID != "" {
-			toAdj.MessageID = job.MessageID + ".adjutant-obs"
-		}
-		return []Job{toLeader, toAdj}
+		leader := job.Agent
+		redirected := job
+		redirected.Agent = adj
+		redirected.Message = AdjutantOperatorIngressBody(leader, job.Message)
+		return []Job{redirected}
 	}
 	// System wake: adjutant front office only.
 	redirected := job
@@ -75,40 +67,33 @@ func (g *CoordinatorIngress) Apply(job Job) []Job {
 	return []Job{redirected}
 }
 
-// IngressTarget resolves the dash delivery pane via the adjutant front office (#533).
-// The second return is false when front-office ingress rewriting does not apply.
-//
-// #549: dash control is operator-authored prose — deliver to the LEADER so the
-// coordinator receives the operator's words verbatim. The adjutant is not a
-// paraphrase hop for human→coordinator dash messages. (System detector wakes still
-// use Apply's single-alias path.)
+// IngressTarget resolves the dash delivery pane via the adjutant front office (#533, #593).
+// Operator-authored dash prose enters the adjutant buffer path, not the leader mid-turn.
 func (g *CoordinatorIngress) IngressTarget(coordinator string) (string, bool) {
 	if g == nil || g.Config == nil || !g.Config.IsCoordinator(coordinator) {
 		return coordinator, false
 	}
 	if adj := g.Config.AdjutantFor(coordinator); adj != "" {
-		// Prefer leader for operator-authored dash route (verbatim #549).
-		// Callers that need the adjutant for lifecycle inject use Apply on detector jobs.
-		return coordinator, true
+		return adj, true
 	}
 	return coordinator, true
 }
 
-// AdjutantObservationEnvelope wraps operator-authored prose for the adjutant front office
-// with additive metadata only (#549). The original body appears after VerbatimBodyMarker
-// unmodified — never rewritten or paraphrased by the daemon.
-func AdjutantObservationEnvelope(leader, body string) string {
+// AdjutantOperatorIngressBody frames operator prose for the adjutant front office (#593).
+// The original body appears after VerbatimBodyMarker unmodified — never rewritten at ingress.
+func AdjutantOperatorIngressBody(leader, body string) string {
 	var b strings.Builder
 	b.WriteString("[flotilla adjutant front-office] Operator message for ")
 	b.WriteString(leader)
-	b.WriteString(" was also delivered VERBATIM to the leader pane (byte-for-byte).\n")
-	b.WriteString("Do NOT rephrase, summarize, or re-send the operator's words — dual observation / buffer / seam only.\n\n")
+	b.WriteString(" — you are the conversation buffer. Hold / batch / forward at a safe seam; ")
+	b.WriteString("interrupt the leader when the operator needs them now. ")
+	b.WriteString("When you forward, the leader receives the operator's words verbatim (byte-for-byte).\n\n")
 	b.WriteString(VerbatimBodyMarker)
 	b.WriteString(body)
 	return b.String()
 }
 
-// ExtractVerbatimBody returns the operator body from an observation envelope, or the
+// ExtractVerbatimBody returns the operator body from an ingress envelope, or the
 // input unchanged when the marker is absent (already-verbatim leader delivery).
 func ExtractVerbatimBody(message string) string {
 	if i := strings.Index(message, VerbatimBodyMarker); i >= 0 {
