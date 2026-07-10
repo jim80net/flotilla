@@ -99,6 +99,10 @@ type Job struct {
 	// ClaimKey is the decision-brief gap key for KindDetector jobs; the watch daemon sets it
 	// so the injector can confirm or abort the in-memory claim on delivery outcome (#365 P1).
 	ClaimKey string
+	// ingressResolved is set after CoordinatorIngress.Apply has run once for this job.
+	// Busy-defer re-enqueues must not re-Apply — that would re-spawn adjutant observation
+	// copies on every retry (#592).
+	ingressResolved bool
 }
 
 // SendFunc delivers a message to an agent's pane and CONFIRMS a turn started. Production
@@ -488,8 +492,11 @@ func (in *Injector) raise(format string, args ...any) {
 // is always safe.
 func (in *Injector) Enqueue(j Job) {
 	jobs := []Job{j}
-	if in.coordinatorIngress != nil {
+	if in.coordinatorIngress != nil && !j.ingressResolved {
 		jobs = in.coordinatorIngress.Apply(j)
+		for i := range jobs {
+			jobs[i].ingressResolved = true
+		}
 	}
 	for _, jj := range jobs {
 		select {

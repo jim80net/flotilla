@@ -337,7 +337,13 @@ func cmdWatch(args []string) error {
 				}
 			}
 		}
-		post("flotilla-watch", "→ "+j.Agent+": "+j.Message)
+		// #592: adjutant observation copies are internal front-office traffic — full-body
+		// mirror spammed Discord when busy-defer re-fanout re-delivered the envelope.
+		if strings.HasSuffix(j.MessageID, ".adjutant-obs") {
+			post("flotilla-watch", "→ "+j.Agent+": [adjutant front-office observation delivered]")
+		} else {
+			post("flotilla-watch", "→ "+j.Agent+": "+j.Message)
+		}
 		if replyRtr != nil && isHotlineToChannelXO(cfg, j) {
 			replyRtr.arm(j.Agent, j.OriginChannel, j.Message) // watch the XO's reply to THIS message, route it back
 		}

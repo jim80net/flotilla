@@ -95,14 +95,15 @@ func (s relayQueueStore) load() []Job {
 			continue
 		}
 		out = append(out, Job{
-			MessageID:      p.MessageID,
-			Agent:          p.Agent,
-			Message:        p.Message,
-			Kind:           KindRelay,
-			OriginChannel:  p.OriginChannel,
-			deferrals:      p.Deferrals,
-			enqueuedAt:     p.EnqueuedAt,
-			lastStaleAlert: p.LastStaleAlert,
+			MessageID:       p.MessageID,
+			Agent:           p.Agent,
+			Message:         p.Message,
+			Kind:            KindRelay,
+			OriginChannel:   p.OriginChannel,
+			deferrals:       p.Deferrals,
+			enqueuedAt:      p.EnqueuedAt,
+			lastStaleAlert:  p.LastStaleAlert,
+			ingressResolved: true, // disk holds leader-path jobs post-Apply (#592)
 		})
 	}
 	return out
