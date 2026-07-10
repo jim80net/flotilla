@@ -8,9 +8,9 @@
   "_comment_xo_rotate": "Optional idle-edge rotate policy (#467): always (default) | never | handoff. FLOTILLA_XO_ROTATE env overrides. never/handoff suppress bare /clear on continueXO; handoff-gated recycle is #443.",
   "_comment_usage_limit": "Usage-limit downgrade policy (#466) lives in the HOST-LOCAL launch recipe (primary + fallbacks[] per agent), NOT in this committable roster. See flotilla-launch.example.json + docs/usage-limit-resilience.md.",
   "_comment_coordinator": "Optional per-agent coordinator rank (#491): coordinator:true opts a seat in; coordinator:false opts an execution desk out even when supervisor-as-member topology would infer span. Absent = infer from bindings. Primary xo_agent/cos_agent cannot set false.",
-  "_comment_primary_repo": "Optional authority domain (#Track C): primary_repo is canonical owner/name git identity (NOT a filesystem path). Optional worktree_path links the desk home (absolute host path; existence not checked at load). Both optional for backward compatibility. See openspec/changes/authority-domains-org-chart/.",
+  "_comment_primary_repo": "Optional authority domain (Track C): primary_repo is canonical owner/name git identity (NOT a filesystem path). Optional secondary_repos[] are extra domains (lines 2+ in worktree/.gatekeeper/domain). Optional worktree_path links the desk home (absolute host path; existence not checked at load). workspace init/resume materialize .gatekeeper/domain for the merge-domain hook (consume contract only). All optional for backward compatibility. See openspec/changes/authority-domains-org-chart/.",
   "agents": [
-    { "name": "xo", "primary_repo": "acme/flotilla" },
+    { "name": "xo", "primary_repo": "acme/flotilla", "secondary_repos": ["acme/flotilla-docs"] },
     { "name": "xo-adj", "surface": "grok", "adjutant_for": "xo", "primary_repo": "acme/flotilla" },
     { "name": "alpha-xo", "surface": "codex", "primary_repo": "acme/alpha" },
     { "name": "alpha-adj", "surface": "grok", "adjutant_for": "alpha-xo", "primary_repo": "acme/alpha" },

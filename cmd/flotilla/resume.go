@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/jim80net/flotilla/internal/deliver"
@@ -76,6 +77,13 @@ func cmdResume(args []string) error {
 	}
 	recipe, err := workspace.ResolveRecipe(agentName, flat)
 	if err != nil {
+		return err
+	}
+	cwdAbs, err := filepath.Abs(recipe.Cwd)
+	if err != nil {
+		return fmt.Errorf("resume %q: resolve cwd %q: %w", agentName, recipe.Cwd, err)
+	}
+	if err := workspace.MaterializeGatekeeperDomain(cwdAbs, agent.PrimaryRepo, agent.SecondaryRepos); err != nil {
 		return err
 	}
 

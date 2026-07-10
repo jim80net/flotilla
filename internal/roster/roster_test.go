@@ -254,6 +254,31 @@ func TestLoadRejectsInvalidWorktreePath(t *testing.T) {
 	}
 }
 
+func TestLoadSecondaryRepos(t *testing.T) {
+	cfg, err := Load(writeTemp(t, `{
+		"agents":[{
+			"name":"xo",
+			"primary_repo":"acme/flotilla",
+			"secondary_repos":["acme/dash","acme/docs"]
+		}]
+	}`))
+	if err != nil {
+		t.Fatalf("valid secondary_repos rejected: %v", err)
+	}
+	xo, _ := cfg.Agent("xo")
+	if len(xo.SecondaryRepos) != 2 || xo.SecondaryRepos[0] != "acme/dash" {
+		t.Errorf("SecondaryRepos = %v", xo.SecondaryRepos)
+	}
+	// Duplicate of primary rejected.
+	if _, err := Load(writeTemp(t, `{"agents":[{"name":"a","primary_repo":"acme/x","secondary_repos":["acme/x"]}]}`)); err == nil {
+		t.Error("secondary duplicate of primary = nil error, want error")
+	}
+	// Malformed secondary rejected.
+	if _, err := Load(writeTemp(t, `{"agents":[{"name":"a","secondary_repos":["not-valid"]}]}`)); err == nil {
+		t.Error("malformed secondary = nil error, want error")
+	}
+}
+
 // flotilla.example.json is the committed reference for primary_repo / worktree_path.
 func TestExampleRosterLoadsPrimaryRepo(t *testing.T) {
 	p := filepath.Join("..", "..", "flotilla.example.json")
