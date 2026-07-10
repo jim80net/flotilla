@@ -158,32 +158,56 @@ func (c *Config) fleetCommandSynthesisMember(owner, member string) bool {
 // not a cycle) and (2) fleet-command channels (a broadcast channel contributes no
 // synthesis edges). A genuine cycle is a mutual membership between two distinct
 // non-fleet-command channels. Runs once at load, not on the synthesis hot path.
+//
+// Error text names both agents on the back-edge and both channel ids when recoverable
+// (org-truth v1 PR1).
 func (c *Config) assertSynthesisAcyclic() error {
-	adj := map[string][]string{}
+	type edge struct {
+		to, ch string
+	}
+	adj := map[string][]edge{}
 	for _, ch := range c.Bindings() {
 		if ch.IsFleetCommand() {
 			continue
 		}
 		for _, m := range ch.Members {
 			if m != ch.XOAgent {
-				adj[ch.XOAgent] = append(adj[ch.XOAgent], m)
+				adj[ch.XOAgent] = append(adj[ch.XOAgent], edge{to: m, ch: ch.ChannelID})
 			}
 		}
 	}
-	// Iterative-free DFS with white/gray/black coloring; gray-on-gray is a back-edge
-	// (cycle). Start nodes iterate Bindings() order for a deterministic error.
 	const white, gray, black = 0, 1, 2
 	color := map[string]int{}
-	var onCycle string
+	// tree edge into node: child → (parentAgent, channel that produced parent→child)
+	treeFrom := map[string]string{}
+	treeCh := map[string]string{}
+	var errCycle error
 	var visit func(string) bool
 	visit = func(u string) bool {
 		color[u] = gray
-		for _, v := range adj[u] {
+		for _, e := range adj[u] {
+			v := e.to
 			switch color[v] {
 			case gray:
-				onCycle = v
+				// Back-edge u→v closes a cycle. treeCh[u] is how DFS reached u (the
+				// other half of a 2-cycle when v is the DFS root).
+				chClose := e.ch
+				chTree := treeCh[u]
+				if chTree == "" {
+					chTree = treeCh[v]
+				}
+				if chTree != "" && chTree != chClose {
+					errCycle = fmt.Errorf("synthesis routing would cycle: agents %q and %q (channels %q ↔ %q)", u, v, chClose, chTree)
+				} else if chClose != "" {
+					errCycle = fmt.Errorf("synthesis routing would cycle: agents %q and %q (channel %q)", u, v, chClose)
+				} else {
+					errCycle = fmt.Errorf("synthesis routing would cycle: agent %q is reachable from itself through the channel-membership graph (a mutual membership between two distinct non-fleet-command channels)", v)
+				}
+				_ = treeFrom
 				return true
 			case white:
+				treeFrom[v] = u
+				treeCh[v] = e.ch
 				if visit(v) {
 					return true
 				}
@@ -194,7 +218,7 @@ func (c *Config) assertSynthesisAcyclic() error {
 	}
 	for _, ch := range c.Bindings() {
 		if color[ch.XOAgent] == white && visit(ch.XOAgent) {
-			return fmt.Errorf("synthesis routing would cycle: agent %q is reachable from itself through the channel-membership graph (a mutual membership between two distinct non-fleet-command channels)", onCycle)
+			return errCycle
 		}
 	}
 	return nil
