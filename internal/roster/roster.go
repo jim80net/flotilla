@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/backlog"
+	"github.com/jim80net/flotilla/internal/org"
 )
 
 // Agent is one coordinated coding agent — a long-lived session in a tmux pane.
@@ -257,6 +258,11 @@ type Config struct {
 	// heartbeatDur is HeartbeatInterval parsed once at load (0 = disabled), so
 	// consumers get a typed value instead of re-parsing the string.
 	heartbeatDur time.Duration
+
+	// orgDAG is the compiled org-truth graph (org-truth v1 PR1): always derived
+	// from channels[] / synthesis rules after a successful Load. Optional file
+	// agreement is PR2. Nil only if Load failed (callers never see a half-loaded Config).
+	orgDAG *org.DAG
 }
 
 // Load reads and validates a roster config file.
@@ -399,6 +405,8 @@ func Load(path string) (*Config, error) {
 	if err := c.assertSynthesisAcyclic(); err != nil {
 		return nil, fmt.Errorf("roster %q: %w", path, err)
 	}
+	// Org-truth v1 PR1: always attach a derived DAG so watch/dash can share one parent graph.
+	c.attachOrgDAG()
 	if err := c.validateSchedules(path); err != nil {
 		return nil, err
 	}
