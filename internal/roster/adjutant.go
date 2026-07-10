@@ -91,6 +91,11 @@ func LayerLastOperatorRelayPath(rosterDir, coordinator string) string {
 	return filepath.Join(rosterDir, "flotilla-"+coordinator+"-last-operator-relay.json")
 }
 
+// LayerLastNotifyPath returns the post-notify stamp sidecar (#595).
+func LayerLastNotifyPath(rosterDir, agent string) string {
+	return filepath.Join(rosterDir, "flotilla-"+agent+"-last-notify.json")
+}
+
 // CoordinatorForAdjutant returns the leader coordinator an adjutant serves, or "".
 func (c *Config) CoordinatorForAdjutant(adjutant string) string {
 	if c == nil || adjutant == "" {
