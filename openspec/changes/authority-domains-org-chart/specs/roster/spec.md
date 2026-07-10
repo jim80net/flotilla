@@ -50,3 +50,36 @@ or empty, Load SHALL accept the roster. `worktree_path` is independent of
 #### Scenario: worktree_path without primary_repo is valid
 - **WHEN** an agent sets only `worktree_path` to an absolute path
 - **THEN** Load succeeds
+
+### Requirement: Optional secondary_repos list extra owner/name domains
+
+Each roster agent MAY declare `secondary_repos` as a list of additional `owner/name`
+authority domains. Each entry SHALL pass the same shape rules as `primary_repo`.
+Duplicates of `primary_repo` or of earlier list entries SHALL fail Load. Empty list
+or absent field is valid.
+
+#### Scenario: Valid secondary_repos load
+- **WHEN** an agent has `"primary_repo": "acme/flotilla"` and `"secondary_repos": ["acme/docs"]`
+- **THEN** Load succeeds and both fields are retained
+
+### Requirement: workspace init and resume materialize .gatekeeper/domain
+
+`flotilla workspace init` and `flotilla resume` SHALL materialize
+`<worktree>/.gatekeeper/domain` (mode 0644) for the merge-domain hook contract:
+line 1 is `primary_repo` when set, else `owner/name` parsed from `git remote get-url origin`;
+subsequent lines are `secondary_repos[]`. Materialization is idempotent (identical
+content left untouched). When neither primary_repo nor a parseable origin is available,
+materialization is a no-op (missing file remains valid — hook reports NODOMAIN).
+flotilla SHALL NOT implement the merge-domain precondition hook itself.
+
+#### Scenario: init with primary_repo writes domain file
+- **WHEN** workspace init runs for an agent with `primary_repo` set
+- **THEN** `<worktree>/.gatekeeper/domain` contains that owner/name on line 1
+
+#### Scenario: init without primary_repo uses origin
+- **WHEN** workspace init runs for an agent without `primary_repo` and the worktree has origin `https://github.com/acme/repo.git`
+- **THEN** the domain file line 1 is `acme/repo`
+
+#### Scenario: secondary_repos become extra domain lines
+- **WHEN** an agent has primary and secondary_repos
+- **THEN** the domain file lists primary first, then each secondary on its own line

@@ -157,6 +157,9 @@ func cmdWorkspaceInit(args []string) error {
 	if err := workspace.ProvisionWorktree(repoAbs, opts.branch, worktreeAbs); err != nil {
 		return err
 	}
+	if err := workspace.MaterializeGatekeeperDomain(worktreeAbs, a.PrimaryRepo, a.SecondaryRepos); err != nil {
+		return err
+	}
 
 	hostDir, err := workspace.Dir(opts.agent)
 	if err != nil {
@@ -239,6 +242,16 @@ func cmdWorkspaceInit(args []string) error {
 		} else if err := scaffoldGrokDeskPermissions(worktreeAbs); err != nil {
 			return err
 		}
+	}
+
+	// Track C: materialize worktree/.gatekeeper/domain for the merge-domain hook
+	// (consume hook contract — do not implement the precondition). Primary from
+	// roster primary_repo, else git origin; optional secondary_repos lines.
+	if err := workspace.MaterializeGatekeeperDomain(worktreeAbs, a.PrimaryRepo, a.SecondaryRepos); err != nil {
+		return fmt.Errorf("materialize .gatekeeper/domain: %w", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(worktreeAbs, workspace.GatekeeperDomainRel)); statErr == nil {
+		fmt.Printf("  domain:   %s\n", filepath.Join(worktreeAbs, workspace.GatekeeperDomainRel))
 	}
 
 	fmt.Printf("workspace ready: %s\n", hostDir)

@@ -28,14 +28,14 @@ requiring gatekeeper hooks in this change.
 - `#426` live-checkout / deploy-clone write guard
 - `flotilla status` / dash topology printing seat→repo
 - `stackable_wakes` flag cutover (Track B)
-- `#551` gatekeeper merge-domain hooks (Track A)
-- `workspace init --repo` writing `primary_repo` (follow-on slice)
-- Secondary/extra authority domains beyond primary
+- `#551` gatekeeper merge-domain **hook implementation** (Track A — consume `.gatekeeper/domain` only)
+- Writing `primary_repo` back into the live roster JSON from `workspace init --repo`
 - Requiring every agent to set `primary_repo` (remains optional until a later gate)
 
-## Success criteria (slice 1)
+## Success criteria (slice 1 + domain materialization addendum)
 
 1. Roster Load accepts rosters without the new fields (byte-compatible for absent keys).
-2. Load rejects non-`owner/name` `primary_repo` values (paths, URLs, malformed).
+2. Load rejects non-`owner/name` `primary_repo` / `secondary_repos` values (paths, URLs, malformed).
 3. Load rejects non-absolute `worktree_path` when set.
 4. Example roster shows the fields with generic fixture values only.
+5. `workspace init` / `resume` materialize `worktree/.gatekeeper/domain` (primary_repo else origin; secondary lines; 0644; idempotent).
