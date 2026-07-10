@@ -165,3 +165,117 @@ func TestLoadChangeDetectorValidation(t *testing.T) {
 		t.Errorf("empty liveness_ping_mode should be valid: %v", err)
 	}
 }
+
+// Track C slice 1 — authority-domains-org-chart: primary_repo + worktree_path.
+func TestLoadPrimaryRepoAndWorktreePath(t *testing.T) {
+	// Absent fields remain valid (backward compatible).
+	cfg, err := Load(writeTemp(t, `{"agents":[{"name":"xo"},{"name":"backend"}]}`))
+	if err != nil {
+		t.Fatalf("absent primary_repo/worktree_path rejected: %v", err)
+	}
+	b, _ := cfg.Agent("backend")
+	if b.PrimaryRepo != "" || b.WorktreePath != "" {
+		t.Errorf("absent fields should stay empty, got primary_repo=%q worktree_path=%q", b.PrimaryRepo, b.WorktreePath)
+	}
+
+	// Valid owner/name + absolute worktree_path (generic fixture paths only).
+	cfg, err = Load(writeTemp(t, `{
+		"agents":[
+			{"name":"xo","primary_repo":"acme/flotilla"},
+			{"name":"backend","primary_repo":"acme/backend-api","worktree_path":"/srv/fleet/desks/backend"},
+			{"name":"frontend","primary_repo":"Acme-Org/web.app","worktree_path":"/srv/fleet/desks/frontend"}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("valid primary_repo/worktree_path rejected: %v", err)
+	}
+	xo, _ := cfg.Agent("xo")
+	if xo.PrimaryRepo != "acme/flotilla" {
+		t.Errorf("xo.PrimaryRepo = %q, want acme/flotilla", xo.PrimaryRepo)
+	}
+	if xo.WorktreePath != "" {
+		t.Errorf("xo.WorktreePath = %q, want empty", xo.WorktreePath)
+	}
+	be, _ := cfg.Agent("backend")
+	if be.PrimaryRepo != "acme/backend-api" || be.WorktreePath != "/srv/fleet/desks/backend" {
+		t.Errorf("backend fields = %q / %q", be.PrimaryRepo, be.WorktreePath)
+	}
+	fe, _ := cfg.Agent("frontend")
+	if fe.PrimaryRepo != "Acme-Org/web.app" {
+		t.Errorf("frontend.PrimaryRepo = %q", fe.PrimaryRepo)
+	}
+}
+
+func TestLoadRejectsInvalidPrimaryRepo(t *testing.T) {
+	cases := map[string]string{
+		"filesystem path": `{"agents":[{"name":"a","primary_repo":"/srv/fleet/repos/flotilla"}]}`,
+		"relative path":   `{"agents":[{"name":"a","primary_repo":"./local-repo"}]}`,
+		"https url":       `{"agents":[{"name":"a","primary_repo":"https://github.com/acme/flotilla"}]}`,
+		"git@ url":        `{"agents":[{"name":"a","primary_repo":"git@github.com:acme/flotilla"}]}`,
+		"extra segment":   `{"agents":[{"name":"a","primary_repo":"acme/flotilla/extra"}]}`,
+		"missing name":    `{"agents":[{"name":"a","primary_repo":"acme/"}]}`,
+		"missing owner":   `{"agents":[{"name":"a","primary_repo":"/flotilla"}]}`,
+		"no slash":        `{"agents":[{"name":"a","primary_repo":"flotilla-only"}]}`,
+		"whitespace":      `{"agents":[{"name":"a","primary_repo":"acme/flo tilla"}]}`,
+		"traversal":       `{"agents":[{"name":"a","primary_repo":"acme/../etc"}]}`,
+		"backslash":       `{"agents":[{"name":"a","primary_repo":"acme\\flotilla"}]}`,
+		"invalid char":    `{"agents":[{"name":"a","primary_repo":"acme/flo@tilla"}]}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Load(writeTemp(t, body)); err == nil {
+				t.Errorf("Load(%s) = nil error, want error", name)
+			}
+		})
+	}
+}
+
+func TestLoadRejectsInvalidWorktreePath(t *testing.T) {
+	cases := map[string]string{
+		"relative":           `{"agents":[{"name":"a","worktree_path":"desks/backend"}]}`,
+		"empty-ish relative": `{"agents":[{"name":"a","worktree_path":"./backend"}]}`,
+		"tab":                `{"agents":[{"name":"a","worktree_path":"/srv/fleet/\tdesks/backend"}]}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Load(writeTemp(t, body)); err == nil {
+				t.Errorf("Load(%s) = nil error, want error", name)
+			}
+		})
+	}
+	// worktree_path alone (no primary_repo) is accepted when absolute.
+	cfg, err := Load(writeTemp(t, `{"agents":[{"name":"a","worktree_path":"/srv/fleet/desks/backend"}]}`))
+	if err != nil {
+		t.Fatalf("absolute worktree_path alone rejected: %v", err)
+	}
+	a, _ := cfg.Agent("a")
+	if a.WorktreePath != "/srv/fleet/desks/backend" {
+		t.Errorf("WorktreePath = %q", a.WorktreePath)
+	}
+}
+
+// flotilla.example.json is the committed reference for primary_repo / worktree_path.
+func TestExampleRosterLoadsPrimaryRepo(t *testing.T) {
+	p := filepath.Join("..", "..", "flotilla.example.json")
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load(flotilla.example.json): %v", err)
+	}
+	be, err := cfg.Agent("backend")
+	if err != nil {
+		t.Fatalf("backend agent: %v", err)
+	}
+	if be.PrimaryRepo != "acme/backend-api" {
+		t.Errorf("backend.PrimaryRepo = %q, want acme/backend-api", be.PrimaryRepo)
+	}
+	if be.WorktreePath != "/srv/fleet/desks/backend" {
+		t.Errorf("backend.WorktreePath = %q, want /srv/fleet/desks/backend", be.WorktreePath)
+	}
+	xo, err := cfg.Agent("xo")
+	if err != nil {
+		t.Fatalf("xo agent: %v", err)
+	}
+	if xo.PrimaryRepo != "acme/flotilla" {
+		t.Errorf("xo.PrimaryRepo = %q, want acme/flotilla", xo.PrimaryRepo)
+	}
+}

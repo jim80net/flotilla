@@ -55,6 +55,19 @@ type Agent struct {
 	// even when supervisor-as-member topology would confer span; true opts a seat IN.
 	// The primary xo_agent and cos_agent cannot set coordinator:false (load rejects).
 	Coordinator *bool `json:"coordinator,omitempty"`
+	// PrimaryRepo is the seat's authority domain as a canonical git identity
+	// "owner/name" (e.g. "acme/flotilla") — the product repo this agent owns for
+	// merge/domain purposes (Track C / authority-domains-org-chart). Optional for
+	// backward compatibility; when set, Load validates the owner/name shape.
+	// Absolute filesystem paths and URLs are rejected — use WorktreePath for the
+	// local worktree link.
+	PrimaryRepo string `json:"primary_repo,omitempty"`
+	// WorktreePath optionally links the seat to its desk home (absolute path of the
+	// git worktree Principle 11 expects). Distinct from PrimaryRepo: repo identity
+	// is portable; the path is host-local. Existence is NOT checked at load (the
+	// roster may be read on another host). Empty is valid (backward compatible;
+	// launch cwd remains the runtime worktree source until later Track C slices).
+	WorktreePath string `json:"worktree_path,omitempty"`
 }
 
 // Title returns the tmux pane title to match for this agent.
@@ -288,6 +301,12 @@ func Load(path string) (*Config, error) {
 				return nil, fmt.Errorf("roster %q: agent %q cannot set coordinator:false (primary xo_agent or cos_agent)", path, a.Name)
 			}
 		}
+		if err := validatePrimaryRepo(path, a.Name, a.PrimaryRepo); err != nil {
+			return nil, err
+		}
+		if err := validateWorktreePath(path, a.Name, a.WorktreePath); err != nil {
+			return nil, err
+		}
 	}
 	// watch-capability fields: validate at load so a misconfigured daemon
 	// refuses to start rather than failing silently at the first tick.
@@ -394,6 +413,61 @@ func Load(path string) (*Config, error) {
 		c.CosLedger = "" // inert: cos_ledger without cos_agent is ignored (the feature is gated on cos_agent)
 	}
 	return &c, nil
+}
+
+// validatePrimaryRepo checks Agent.primary_repo when set. Empty is valid (field optional).
+// Canonical form is exactly "owner/name" — one slash, two non-empty path segments,
+// no whitespace, no absolute paths, no URLs, no ".." segments.
+func validatePrimaryRepo(rosterPath, agentName, repo string) error {
+	if repo == "" {
+		return nil
+	}
+	if strings.ContainsAny(repo, " \t\n\r") {
+		return fmt.Errorf("roster %q: agent %q primary_repo %q contains whitespace", rosterPath, agentName, repo)
+	}
+	if strings.Contains(repo, "\\") {
+		return fmt.Errorf("roster %q: agent %q primary_repo %q must use owner/name form (backslash not allowed)", rosterPath, agentName, repo)
+	}
+	if strings.HasPrefix(repo, "/") || strings.HasPrefix(repo, "./") || strings.HasPrefix(repo, "../") {
+		return fmt.Errorf("roster %q: agent %q primary_repo %q must be owner/name (not a filesystem path)", rosterPath, agentName, repo)
+	}
+	lower := strings.ToLower(repo)
+	if strings.Contains(lower, "://") || strings.HasPrefix(lower, "git@") {
+		return fmt.Errorf("roster %q: agent %q primary_repo %q must be owner/name (not a URL)", rosterPath, agentName, repo)
+	}
+	parts := strings.Split(repo, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return fmt.Errorf("roster %q: agent %q primary_repo %q must be exactly owner/name", rosterPath, agentName, repo)
+	}
+	for _, p := range parts {
+		if p == "." || p == ".." || strings.Contains(p, "..") {
+			return fmt.Errorf("roster %q: agent %q primary_repo %q contains path traversal", rosterPath, agentName, repo)
+		}
+		// GitHub-style identity: alphanumerics, dot, underscore, hyphen.
+		for _, r := range p {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-' {
+				continue
+			}
+			return fmt.Errorf("roster %q: agent %q primary_repo %q has invalid character in owner/name segment", rosterPath, agentName, repo)
+		}
+	}
+	return nil
+}
+
+// validateWorktreePath checks Agent.worktree_path when set. Empty is valid.
+// When present it MUST be an absolute path free of tab/newline (same wire-safety
+// posture as launch cwd). Existence is not checked at load.
+func validateWorktreePath(rosterPath, agentName, worktree string) error {
+	if worktree == "" {
+		return nil
+	}
+	if strings.ContainsAny(worktree, "\t\n\r") {
+		return fmt.Errorf("roster %q: agent %q worktree_path contains a tab/newline", rosterPath, agentName)
+	}
+	if !filepath.IsAbs(worktree) {
+		return fmt.Errorf("roster %q: agent %q worktree_path %q is not absolute", rosterPath, agentName, worktree)
+	}
+	return nil
 }
 
 // validateSchedules checks schedules[] at load so a misconfigured daemon refuses
