@@ -2,8 +2,9 @@
 
 ## Context
 
-Charter: `a1-fleet-ops/state/backlog-detail/authority-domains-repos-stacking-20260710.md`
-Track C — *Roster as org chart of repos*.
+Charter (operator-greenlit chapter brief, host-local): authority domains = repos +
+stackable wakes + roster-as-org-chart (2026-07-10). Track C — *Roster as org chart of
+repos*.
 
 Apex policy (chapter): singular CoS retained; N-level stacking under it. This slice
 is **schema only** — declaration surface for seat → primary repo (+ optional worktree
