@@ -1,0 +1,75 @@
+# fleet-org.example.yaml — GENERIC org-truth fixture (org-truth v1).
+#
+# The REAL org file (optional) lives host-local at <roster-dir>/fleet-org.yaml
+# (gitignored). When absent, flotilla derives the org DAG from channels[]
+# (compat). When present, load agrees channels with this tree or refuses.
+#
+# Agent names match flotilla.example.json only (xo, alpha-xo, backend, …).
+# Channel ids are placeholders — never real snowflakes in the public tree.
+
+version: 1
+root: xo
+
+nodes:
+  - id: xo
+    kind: coordinator
+
+  - id: xo-adj
+    kind: adjutant
+    reports_to: xo
+
+  - id: alpha-xo
+    kind: coordinator
+    reports_to: xo
+    home_channel_id: "YOUR_ALPHA_XO_CHANNEL_ID"
+
+  - id: alpha-adj
+    kind: adjutant
+    reports_to: alpha-xo
+
+  - id: beta-xo
+    kind: coordinator
+    reports_to: xo
+    home_channel_id: "YOUR_BETA_XO_CHANNEL_ID"
+
+  - id: backend
+    kind: desk
+    reports_to: alpha-xo
+    home_channel_id: "YOUR_BACKEND_CHANNEL_ID"
+
+  - id: frontend
+    kind: desk
+    reports_to: xo
+    home_channel_id: "YOUR_FRONTEND_CHANNEL_ID"
+
+  - id: data
+    kind: desk
+    reports_to: backend
+    home_channel_id: "YOUR_DATA_CHANNEL_ID"
+
+  - id: aider-desk
+    kind: desk
+    reports_to: backend
+    home_channel_id: "YOUR_AIDER_CHANNEL_ID"
+
+  - id: oc-desk
+    kind: desk
+    reports_to: frontend
+    home_channel_id: "YOUR_OC_CHANNEL_ID"
+
+  - id: grok-desk
+    kind: desk
+    reports_to: frontend
+    home_channel_id: "YOUR_GROK_CHANNEL_ID"
+
+  - id: codex-desk
+    kind: desk
+    reports_to: frontend
+    home_channel_id: "YOUR_CODEX_CHANNEL_ID"
+
+# Optional non-agent containers (Phase 2 — goals bridge). Commented for v1 minimum.
+# containers:
+#   - id: alpha-domain
+#     title: "Alpha product domain"
+#     owner: alpha-xo
+#     children: [backend]
