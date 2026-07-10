@@ -12,16 +12,17 @@ const adjutantSeamClaimPrefix = "adjutant-seam:"
 // envelope. Tests assert the source text appears after this marker unmodified.
 const VerbatimBodyMarker = "--- operator message (verbatim) ---\n"
 
-// CoordinatorIngress is the ingress/topology slice of the adjutant front office (#533).
+// CoordinatorIngress is the ingress/topology slice of the adjutant front office (#533, #593).
 //
-// When adjutant_for:<leader> exists, the adjutant is the leader's lifecycle surface:
-// ingress, liveness observation, buffering, seam timing, return-to-frontier protection,
-// and deciding when to bring the leader back in. Operator-authored prose (#593) enters
-// the front office as a single ingress — the adjutant buffers and forwards verbatim at
-// a safe seam; fidelity at delivery, not dual mechanical fanout at ingress.
+// When adjutant_for:<leader> exists, the adjutant is the locus of fleet interaction
+// intelligence — the brainstem / CNS to the leader brain (#593 operator framing): faithful
+// reproduction of reflexes and signals; iterative tuning of CoS↔XO↔desk interaction paths.
+// Operator-authored prose enters as single ingress; the adjutant coalesces conversation arcs,
+// disaggregates multi-intent traffic, and forwards leader-judgment material verbatim at safe
+// seams. Fidelity at delivery, not dual mechanical fanout at ingress.
 //
-// This type wires mechanical ingress aliasing (watch inject + dash route). Full
-// lifecycle management (buffer, seam briefs, frontier guard) lives elsewhere.
+// This type wires mechanical ingress aliasing (watch inject + dash route). Judgment layers
+// (arc assembly, intent segmentation, charter tuning) live in the adjutant seat + buffer substrate.
 type CoordinatorIngress struct {
 	Config *roster.Config
 }

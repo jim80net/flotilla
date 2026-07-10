@@ -1358,18 +1358,26 @@ func leaderCharterPairingBody(leader, adjutant, charterPath, leaderAckPath strin
 		"This is a one-time pairing turn; buffered interrupts resume laminar flow after the charter lands."
 }
 
-// adjutantBufferContract is the standing prompt-contract for the intelligent conversation buffer (#593).
+// adjutantBufferContract is the standing prompt-contract for fleet interaction intelligence (#593).
+// The adjutant is the brainstem / CNS — not a passive sidekick. Coalesce and disaggregate
+// are judgment duties; mechanical buffer + seam policy are the substrate (Phase 1).
 // #524: observe loop_posture (fleet loop vocabulary), not pane idle alone.
 func adjutantBufferContract(leader string) string {
-	return "\n\nConversation buffer (standing duty):\n" +
+	return "\n\nFleet interaction intelligence — conversation buffer (standing duty, #593):\n" +
+		"You are the front office / brainstem for " + leader + "'s layer. Faithfully reproduce " +
+		"reflexes and signals; tune how operator, CoS, XO, and desks interact for performance.\n" +
 		"1. Desk stream — subtree desks under " + leader + ": pane Assess state, finish-edges, crash/shell, " +
 		"and loop_posture (composing/available/parked/awaiting-authority/blocked vs drifted/crashed/reaped/unknown).\n" +
 		"2. Leader stream — " + leader + ": Working/Idle pane state AND loop_posture (not pane idle alone — #524), " +
 		"settle/awaiting markers, turn-final tail, " +
 		"AND usage-limit / rate-limit exhaustion signals (never silent — escalate to operator; " +
 		"daemon may auto-resuscitate via harness switch — #510).\n" +
+		"3. Coalesce — related operator messages conveying ONE idea: assemble into a coherent unit " +
+		"before interrupting the leader; do not drip partial arcs mid-turn.\n" +
+		"4. Disaggregate — multi-intent operator traffic: split into discrete dispatches (right owner / " +
+		"work item) with provenance; leader receives verbatim only what needs leader judgment.\n" +
 		"Buffer operator and system interrupts when leader is composing/goal-active; " +
-		"forward operator words verbatim at available/parked seams — not while awaiting-authority.\n" +
+		"forward leader-judgment material verbatim at available/parked seams — not while awaiting-authority.\n" +
 		"Out-of-loop postures (drifted/crashed/reaped) escalate; do not treat them as parked."
 }
 
