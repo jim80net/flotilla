@@ -68,6 +68,12 @@ type Agent struct {
 	// roster may be read on another host). Empty is valid (backward compatible;
 	// launch cwd remains the runtime worktree source until later Track C slices).
 	WorktreePath string `json:"worktree_path,omitempty"`
+	// SecondaryRepos lists additional owner/name authority domains for the seat
+	// (extra lines in worktree/.gatekeeper/domain after primary). Each entry is
+	// validated like primary_repo. Empty is valid. When non-empty, primary_repo
+	// SHOULD be set so line 1 is explicit (load accepts secondaries alone; origin
+	// may still fill primary at materialize time).
+	SecondaryRepos []string `json:"secondary_repos,omitempty"`
 }
 
 // Title returns the tmux pane title to match for this agent.
@@ -307,6 +313,9 @@ func Load(path string) (*Config, error) {
 		if err := validateWorktreePath(path, a.Name, a.WorktreePath); err != nil {
 			return nil, err
 		}
+		if err := validateSecondaryRepos(path, a.Name, a.PrimaryRepo, a.SecondaryRepos); err != nil {
+			return nil, err
+		}
 	}
 	// watch-capability fields: validate at load so a misconfigured daemon
 	// refuses to start rather than failing silently at the first tick.
@@ -466,6 +475,29 @@ func validateWorktreePath(rosterPath, agentName, worktree string) error {
 	}
 	if !filepath.IsAbs(worktree) {
 		return fmt.Errorf("roster %q: agent %q worktree_path %q is not absolute", rosterPath, agentName, worktree)
+	}
+	return nil
+}
+
+// validateSecondaryRepos checks each secondary_repos entry as owner/name and
+// rejects duplicates of primary or of earlier secondaries.
+func validateSecondaryRepos(rosterPath, agentName, primary string, secondaries []string) error {
+	seen := make(map[string]bool, len(secondaries)+1)
+	if primary != "" {
+		seen[primary] = true
+	}
+	for i, repo := range secondaries {
+		if repo == "" {
+			return fmt.Errorf("roster %q: agent %q secondary_repos[%d] is empty", rosterPath, agentName, i)
+		}
+		if err := validatePrimaryRepo(rosterPath, agentName, repo); err != nil {
+			// Rephrase so the field name is secondary_repos, not primary_repo.
+			return fmt.Errorf("roster %q: agent %q secondary_repos[%d] %q is not a valid owner/name", rosterPath, agentName, i, repo)
+		}
+		if seen[repo] {
+			return fmt.Errorf("roster %q: agent %q secondary_repos duplicates domain %q", rosterPath, agentName, repo)
+		}
+		seen[repo] = true
 	}
 	return nil
 }

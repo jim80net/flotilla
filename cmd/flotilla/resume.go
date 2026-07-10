@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/jim80net/flotilla/internal/deliver"
@@ -78,6 +79,13 @@ func cmdResume(args []string) error {
 	if err != nil {
 		return err
 	}
+	cwdAbs, err := filepath.Abs(recipe.Cwd)
+	if err != nil {
+		return fmt.Errorf("resume %q: resolve cwd %q: %w", agentName, recipe.Cwd, err)
+	}
+	if err := workspace.MaterializeGatekeeperDomain(cwdAbs, agent.PrimaryRepo, agent.SecondaryRepos); err != nil {
+		return err
+	}
 
 	if _, ferr := workspace.FleetTmuxCheck(agentName, recipe.Tmux, flat); ferr != nil {
 		return ferr
@@ -129,6 +137,13 @@ func cmdResume(args []string) error {
 		return err
 	}
 	fmt.Print(msg)
+	// Track C: refresh worktree/.gatekeeper/domain when the desk home already exists
+	// (init may have written it; resume keeps it current if primary_repo/origin changed).
+	if recipe.Cwd != "" {
+		if merr := workspace.MaterializeGatekeeperDomain(recipe.Cwd, agent.PrimaryRepo, agent.SecondaryRepos); merr != nil {
+			fmt.Fprintf(os.Stderr, "flotilla: resume %q: materialize .gatekeeper/domain: %v\n", agentName, merr)
+		}
+	}
 	printState(agentName, recipe)
 	return nil
 }

@@ -174,6 +174,72 @@ func TestCmdWorkspaceInitSeedsBothConstitutionalMembers(t *testing.T) {
 	}
 }
 
+// Track C addendum: workspace init writes worktree/.gatekeeper/domain from primary_repo
+// (+ secondary_repos), and from git origin when primary_repo is absent.
+func TestCmdWorkspaceInitWritesGatekeeperDomain(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", root)
+	repo := initTestGitRepo(t)
+	// Origin fallback path when primary_repo is unset on a second agent later.
+	cmd := exec.Command("git", "remote", "add", "origin", "https://github.com/acme/from-origin.git")
+	cmd.Dir = repo
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git remote add: %v: %s", err, out)
+	}
+
+	// primary_repo + secondary_repos → domain file (roster wins over origin).
+	rosterPath := writeRosterFile(t, `{
+		"agents":[{
+			"name":"backend",
+			"primary_repo":"acme/backend-api",
+			"secondary_repos":["acme/shared-lib"]
+		}]
+	}`)
+	if err := cmdWorkspaceInit(workspaceInitArgs("backend", rosterPath, repo)); err != nil {
+		t.Fatal(err)
+	}
+	worktree := filepath.Join(filepath.Dir(repo), "backend")
+	domainPath := filepath.Join(worktree, ".gatekeeper", "domain")
+	body, err := os.ReadFile(domainPath)
+	if err != nil {
+		t.Fatalf("expected .gatekeeper/domain: %v", err)
+	}
+	want := "acme/backend-api\nacme/shared-lib\n"
+	if string(body) != want {
+		t.Errorf("domain = %q, want %q", body, want)
+	}
+	info, err := os.Stat(domainPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Errorf("domain mode = %o, want 0644", info.Mode().Perm())
+	}
+
+	// Idempotent re-init leaves domain stable.
+	if err := cmdWorkspaceInit(workspaceInitArgs("backend", rosterPath, repo)); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(domainPath); string(got) != want {
+		t.Errorf("re-init changed domain: %q", got)
+	}
+
+	// Origin-only agent (no primary_repo): materialize from remote.
+	roster2 := writeRosterFile(t, `{"agents":[{"name":"frontend"}]}`)
+	// Use a distinct worktree via default sibling name frontend.
+	if err := cmdWorkspaceInit(workspaceInitArgs("frontend", roster2, repo)); err != nil {
+		t.Fatal(err)
+	}
+	feDomain := filepath.Join(filepath.Dir(repo), "frontend", ".gatekeeper", "domain")
+	feBody, err := os.ReadFile(feDomain)
+	if err != nil {
+		t.Fatalf("origin fallback domain: %v", err)
+	}
+	if string(feBody) != "acme/from-origin\n" {
+		t.Errorf("origin-derived domain = %q, want acme/from-origin\\n", feBody)
+	}
+}
+
 func TestCmdWorkspaceInitUnknownAgentErrors(t *testing.T) {
 	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
 	repo := initTestGitRepo(t)
