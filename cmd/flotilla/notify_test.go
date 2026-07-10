@@ -12,8 +12,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jim80net/flotilla/internal/discord"
+	"github.com/jim80net/flotilla/internal/roster"
+	"github.com/jim80net/flotilla/internal/watch"
 )
 
 // writeSecrets writes a one-key secrets file mapping the given agent to the
@@ -369,6 +372,26 @@ func TestCmdNotifyAttachAndChunkRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Errorf("error %q should reject --chunk with --attach", err.Error())
+	}
+}
+
+func TestCmdNotifyStampsRecentNotify595(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	const agent = "cos"
+	secrets := writeSecrets(t, agent, srv.URL)
+	rosterPath := writeRosterFile(t, `{"agents":[{"name":"cos"}]}`)
+	rosterDir := filepath.Dir(rosterPath)
+
+	if err := cmdNotify([]string{"--from", agent, "--secrets", secrets, "--roster", rosterPath, "deploy brief"}); err != nil {
+		t.Fatalf("cmdNotify: %v", err)
+	}
+	stampPath := roster.LayerLastNotifyPath(rosterDir, agent)
+	if !watch.RecentNotifyWithinTTL(stampPath, watch.DefaultRecentNotifySuppressTTL, time.Now()) {
+		t.Fatalf("recent notify stamp missing or expired at %s", stampPath)
 	}
 }
 

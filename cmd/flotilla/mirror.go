@@ -9,6 +9,7 @@ import (
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/sessionmirror"
 	"github.com/jim80net/flotilla/internal/transport"
+	"github.com/jim80net/flotilla/internal/watch"
 )
 
 // mirrorChunkLimit is the per-chunk rune budget for a mirrored turn-final. It sits below Discord's
@@ -103,17 +104,28 @@ func (m deskMirror) run(agent string) {
 
 	ledgerOK := m.appendSessionMirror(agent, text, d)
 
-	// Ledger-only modes: explicit ledgerOnly, or Discord unavailable (no webhook).
+	recentNotify := m.rosterDir != "" &&
+		watch.RecentNotifyWithinTTL(roster.LayerLastNotifyPath(m.rosterDir, agent), watch.DefaultRecentNotifySuppressTTL, m.mirrorNow())
+	// #595: notify already reached the operator on Discord — skip finish-edge mirror POST.
+	if postDiscord && haveHook && recentNotify {
+		postDiscord = false
+	}
+
+	// Ledger-only modes: explicit ledgerOnly, Discord unavailable, or recent notify (#595).
 	if !postDiscord || !haveHook {
 		if !ledgerOK {
 			return
 		}
 		body, rmNote := d.body, d.note
 		runes := utf8.RuneCountInString(body)
+		skipNote := ""
+		if recentNotify {
+			skipNote = " (Discord skipped: recent notify within 3m)"
+		}
 		if rmNote != "" {
-			m.logf("flotilla watch: mirror LEDGER %s resplen=%d %s", agent, runes, rmNote)
+			m.logf("flotilla watch: mirror LEDGER %s resplen=%d%s %s", agent, runes, skipNote, rmNote)
 		} else {
-			m.logf("flotilla watch: mirror LEDGER %s resplen=%d", agent, runes)
+			m.logf("flotilla watch: mirror LEDGER %s resplen=%d%s", agent, runes, skipNote)
 		}
 		return
 	}
