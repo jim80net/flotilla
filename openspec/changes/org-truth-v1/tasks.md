@@ -1,7 +1,7 @@
 # Tasks — org-truth v1
 
 **Branch:** `openspec/org-truth-v1`  
-**Gate:** flotilla-dev reviews design; CoS merges (no self-merge).  
+**Gate:** product XO reviews design; chief of staff merges (no self-merge).  
 **Dispatch:** `flotilla-dispatch-d81ad664`
 
 ## PR plan (phased)
@@ -12,8 +12,11 @@
 - [x] 0.2 `design.md` — loader spine, migration, dash/watch inputs, generic examples
 - [x] 0.3 Spec deltas: `specs/{roster,watch,dash,goals}/spec.md`
 - [x] 0.4 `tasks.md` — this file
-- [ ] 0.5 flotilla-dev design gate (surface; do not self-merge)
-- [ ] 0.6 CoS merge of openspec PR
+- [x] 0.4b `fleet-org.example.yaml` — generic fixture aligned with `flotilla.example.json`
+- [x] 0.4c design §9 defaults locked (multi-parent / strict goals / YAML primary)
+- [x] 0.4d private-boundary scrub (no host-local fleet-home path tokens)
+- [ ] 0.5 product-XO design gate (surface; do not self-merge)
+- [ ] 0.6 chief-of-staff merge of openspec PR
 
 ### PR1 — Loader + derive-from-channels (behavior-compatible)
 

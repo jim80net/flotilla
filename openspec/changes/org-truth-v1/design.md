@@ -1,6 +1,6 @@
 # Design — org-truth v1
 
-**Status:** draft for flotilla-dev gate (openspec only; no implementation until gated).  
+**Status:** draft for product-XO design gate (openspec only; no implementation until gated).  
 **Dispatch:** `flotilla-dispatch-d81ad664`.
 
 ## 1. Problem mechanics (verified in code)
@@ -196,18 +196,19 @@ to "place nodes from OrgDAG; decorate from goals."
   beyond `YOUR_*_CHANNEL_ID` placeholders.
 - Tests build rosters in-memory; never load host-local fleet state.
 
-## 9. Open decisions for flotilla-dev gate
+## 9. Design defaults (locked — reversible; not operator gates)
 
-1. **Multi-parent owed synthesis:** preserve multi-parent from channels during
-   compat, or collapse to single primary always once org file exists?
-   **Recommendation:** single primary `reports_to` when org present; multi-parent
-   only on derive-from-channels path.
-2. **Warn vs refuse** on goals owner chain vs org mismatch in v1?
-   **Recommendation:** warn in dash logs + `/api/goals` diagnostic field; refuse
-   only on explicit `FLOTILLA_ORG_STRICT_GOALS=1`.
-3. **File format:** YAML (matches goals) vs JSON (matches roster)?
-   **Recommendation:** YAML primary, JSON accepted if `version` present (parity
-   with goals dual where applicable).
+Low-stakes reversible choices are **decided** here so implementation PRs do not
+idle-hold. A later design amendment may override; until then implement these.
+
+1. **Multi-parent owed synthesis:** single primary `reports_to` when an org file
+   is present; multi-parent parent lists remain only on the
+   **derive-from-channels** compat path (preserves today’s owed-marking until a
+   deployment opts into the org file).
+2. **Goals vs org mismatch:** **warn** by default (dash log + `/api/goals`
+   diagnostic field). Hard refuse only when `FLOTILLA_ORG_STRICT_GOALS=1`.
+3. **File format:** **YAML primary** (`fleet-org.yaml`); accept JSON if a top-level
+   `version` field is present (parity with goals dual-read patterns where applicable).
 
 ## 10. Testing strategy
 

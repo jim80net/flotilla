@@ -1,8 +1,9 @@
 # Proposal — org-truth v1 (single loadable fleet DAG)
 
-**Dispatch:** `flotilla-dispatch-d81ad664` (COS gate on PM first engagement).  
-**Upstream brief:** flotilla-pm first engagement §3 P0 #1, §4 tension #1  
-(`a1-fleet-ops` private research; product gap is deployment-agnostic).
+**Dispatch:** `flotilla-dispatch-d81ad664` (chief-of-staff gate on product-management
+first engagement).  
+**Upstream brief:** product-management first engagement §3 P0 #1, §4 tension #1  
+(host-local private research; product gap is deployment-agnostic).
 
 ## Why
 
