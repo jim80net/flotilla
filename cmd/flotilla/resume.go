@@ -137,13 +137,6 @@ func cmdResume(args []string) error {
 		return err
 	}
 	fmt.Print(msg)
-	// Track C: refresh worktree/.gatekeeper/domain when the desk home already exists
-	// (init may have written it; resume keeps it current if primary_repo/origin changed).
-	if recipe.Cwd != "" {
-		if merr := workspace.MaterializeGatekeeperDomain(recipe.Cwd, agent.PrimaryRepo, agent.SecondaryRepos); merr != nil {
-			fmt.Fprintf(os.Stderr, "flotilla: resume %q: materialize .gatekeeper/domain: %v\n", agentName, merr)
-		}
-	}
 	printState(agentName, recipe)
 	return nil
 }

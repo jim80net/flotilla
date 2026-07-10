@@ -157,9 +157,6 @@ func cmdWorkspaceInit(args []string) error {
 	if err := workspace.ProvisionWorktree(repoAbs, opts.branch, worktreeAbs); err != nil {
 		return err
 	}
-	if err := workspace.MaterializeGatekeeperDomain(worktreeAbs, a.PrimaryRepo, a.SecondaryRepos); err != nil {
-		return err
-	}
 
 	hostDir, err := workspace.Dir(opts.agent)
 	if err != nil {
