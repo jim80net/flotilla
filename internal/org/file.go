@@ -85,7 +85,7 @@ func validateFile(f *File, path string) (*File, error) {
 
 // Compile turns a validated File into a DAG (source=file). It enforces single
 // primary reports_to (design §9), unknown-parent refusal, and acyclicity.
-// Channel agreement checks are PR2.
+// Call Agree(fileDAG, derived) separately for channel agreement (PR2).
 func Compile(f *File) (*DAG, error) {
 	if f == nil {
 		return nil, fmt.Errorf("org: compile nil file")
