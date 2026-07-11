@@ -44,10 +44,10 @@
 
 ### PR4 — Dash topology + Goals layout bridge
 
-- [ ] 4.1 `/api/topology` includes `org_source` + node parent list from DAG
-- [ ] 4.2 Goals org layout parent spokes use same DAG (coordinate with `dash-org-graph-v2`)
-- [ ] 4.3 Optional goals diagnostic field for owner/org mismatch
-- [ ] 4.4 `FLOTILLA_ORG_STRICT_GOALS` refuse path + test
+- [x] 4.1 `/api/topology` includes `org_source` + node parent list from DAG
+- [x] 4.2 Goals org layout parent spokes use same DAG (coordinate with `dash-org-graph-v2`)
+- [x] 4.3 Optional goals diagnostic field for owner/org mismatch
+- [x] 4.4 `FLOTILLA_ORG_STRICT_GOALS` refuse path + test
 
 ### PR5 — Doctor / derive UX (optional follow-on)
 
