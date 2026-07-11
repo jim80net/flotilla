@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -343,20 +344,21 @@ func TestUndeliveredDispatchSweep_AdjutantFirst_NoOperatorOnL1(t *testing.T) {
 	}
 }
 
-// #628: second-layer age after L1 adjutant fire → operator once.
-func TestUndeliveredDispatchSweep_AdjutantThenOperatorL2(t *testing.T) {
+// #628 / storm guard: already past L2 on first observation → L1 only, grandfather L2 (no operator).
+func TestUndeliveredDispatchSweep_ColdStartGrandfatherNoL2Storm(t *testing.T) {
 	dir := t.TempDir()
-	msg, nonce, err := inbound.AppendDispatchNonce("long unacked inbound for second-layer operator path pad")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Age past 3×15m = 45m for L2.
-	deliveredAt := time.Now().UTC().Add(-50 * time.Minute)
-	if err := inbound.Record(dir, inbound.Entry{
-		ID: "in2", Sender: "xo", Recipient: "backend", Message: msg, Nonce: nonce,
-		DeliveredAt: deliveredAt,
-	}); err != nil {
-		t.Fatal(err)
+	// Seed many stale inbound past L2 wall age.
+	for i := 0; i < 5; i++ {
+		msg, nonce, err := inbound.AppendDispatchNonce(fmt.Sprintf("stale inbound backlog item number %02d pad enough", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := inbound.Record(dir, inbound.Entry{
+			ID: fmt.Sprintf("stale%d", i), Sender: "xo", Recipient: "backend", Message: msg, Nonce: nonce,
+			DeliveredAt: time.Now().UTC().Add(-2 * time.Hour),
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	var alerts, adjMsgs []string
 	set := NewUndeliveredAlertSet()
@@ -366,23 +368,89 @@ func TestUndeliveredDispatchSweep_AdjutantThenOperatorL2(t *testing.T) {
 		AlertOperator:   func(s string) { alerts = append(alerts, s) },
 		Fired:           set,
 	}
-	// First tick: L1 only even though age already past L2 (no dual-fire).
+	// Tick 1 (cold start): L1 adjutant only; grandfather L2.
 	UndeliveredDispatchSweep(dir, hooks)
-	if len(adjMsgs) != 1 || len(alerts) != 0 {
-		t.Fatalf("first crossing: adj=%d alerts=%d want 1/0", len(adjMsgs), len(alerts))
+	if len(adjMsgs) != 5 {
+		t.Fatalf("L1 adj = %d want 5", len(adjMsgs))
 	}
-	// Second tick: L1 already marked; age still past L2 → operator once.
+	if len(alerts) != 0 {
+		t.Fatalf("cold-start must not operator-storm: %v", alerts)
+	}
+	// Tick 2: still no L2 (grandfathered + watched window).
 	UndeliveredDispatchSweep(dir, hooks)
-	if len(adjMsgs) != 1 {
-		t.Fatalf("adj must not re-fire: %d", len(adjMsgs))
+	if len(alerts) != 0 {
+		t.Fatalf("grandfathered L2 must stay quiet: %v", alerts)
 	}
-	if len(alerts) != 1 || !strings.Contains(alerts[0], "second-layer") {
-		t.Fatalf("L2 operator alerts = %v", alerts)
+}
+
+func TestUndeliveredDispatchSweep_L2WatchedWindowAndRateLimit(t *testing.T) {
+	dir := t.TempDir()
+	t0 := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
+	// 4 entries delivered 20m before t0 → L1 age met, L2 wall (45m) not yet.
+	for i := 0; i < 4; i++ {
+		msg, nonce, err := inbound.AppendDispatchNonce(fmt.Sprintf("watch-window inbound item number %02d pad enough chars", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := inbound.Record(dir, inbound.Entry{
+			ID: fmt.Sprintf("w%d", i), Sender: "xo", Recipient: "backend", Message: msg, Nonce: nonce,
+			DeliveredAt: t0.Add(-20 * time.Minute),
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
-	// Third tick: no re-fire.
+	var alerts, adjMsgs []string
+	set := NewUndeliveredAlertSet()
+	clock := t0
+	hooks := UndeliveredHooks{
+		Now:             func() time.Time { return clock },
+		ResolveAdjutant: func(string) string { return "xo-adj" },
+		EnqueueAdjutant: func(_, _ string) { adjMsgs = append(adjMsgs, "x") },
+		AlertOperator:   func(s string) { alerts = append(alerts, s) },
+		Fired:           set,
+		MaxL2PerTick:    2,
+	}
+	// Tick 1: L1 only.
 	UndeliveredDispatchSweep(dir, hooks)
-	if len(alerts) != 1 {
-		t.Fatalf("L2 exactly-once broken: %v", alerts)
+	if len(adjMsgs) != 4 || len(alerts) != 0 {
+		t.Fatalf("tick1 adj=%d alerts=%d", len(adjMsgs), len(alerts))
+	}
+	// Tick 2: jump 16m (past MinWatchBeforeL2=15m) and age wall to 20+16=36m still < 45m L2 wall.
+	clock = t0.Add(16 * time.Minute)
+	UndeliveredDispatchSweep(dir, hooks)
+	if len(alerts) != 0 {
+		t.Fatalf("watched but wall age not L2 yet: %v", alerts)
+	}
+	// Tick 3: jump so wall age ≥ 45m (delivered was t0-20m; need now >= t0+25m).
+	clock = t0.Add(30 * time.Minute) // age = 50m ≥ 45m; watched since L1 = 30m ≥ 15m
+	UndeliveredDispatchSweep(dir, hooks)
+	// Rate limit 2 + 1 summary for deferred.
+	l2 := 0
+	summary := 0
+	for _, a := range alerts {
+		if strings.Contains(a, "rate-limited") {
+			summary++
+		} else if strings.Contains(a, "second-layer") {
+			l2++
+		}
+	}
+	if l2 != 2 {
+		t.Fatalf("L2 per-tick want 2, got %d alerts=%v", l2, alerts)
+	}
+	if summary != 1 {
+		t.Fatalf("want one rate-limit summary, got %d alerts=%v", summary, alerts)
+	}
+	// Tick 4: drain remaining 2 L2.
+	alerts = nil
+	UndeliveredDispatchSweep(dir, hooks)
+	l2 = 0
+	for _, a := range alerts {
+		if strings.Contains(a, "second-layer") {
+			l2++
+		}
+	}
+	if l2 != 2 {
+		t.Fatalf("tick4 drain L2 want 2, got %d alerts=%v", l2, alerts)
 	}
 }
 
