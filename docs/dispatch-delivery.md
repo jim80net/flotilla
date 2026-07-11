@@ -66,10 +66,16 @@ is **not** the first surface when a layer adjutant exists:
 |-------|------|--------|
 | **Journal** | Every first L1 fire | watch log (`dispatch undelivered…`) |
 | **L1** | Age ≥ inbound 15m / outbox `StaleMaxAge` | Detector wake → `AdjutantFor(OwningXO(recipient))`, else primary `AdjutantFor(xo)` |
-| **L2** | Still undelivered after **3×** L1 age **and** L1 already fired | Operator webhook (`flotilla-watch` ⚠️) |
+| **L2** | After L1 watched ≥ inbound L1 age, wall age still ≥ 3× L1, not grandfathered | Operator webhook, **max 2/tick** + summary |
+
+**Deploy storm guards (post-#630 L2 mass alert):**
+
+- **Grandfather:** first observation already past L2 wall age → L1 adjutant/journal only; mark L2 without operator Discord.
+- **Watched window:** L2 requires min time since process-local L1 (not pure `DeliveredAt` alone).
+- **Rate limit:** at most 2 operator L2 alerts per tick; remainder deferred with one summary line.
 
 No dual-fire of operator + adjutant on the first crossing. No adjutant → operator
-remains the only Discord path (legacy single-seat fleets).
+remains the only Discord path (legacy), with the same grandfather for past-L2 cold start.
 
 ### False-positive suppress (ack already present)
 
