@@ -2,6 +2,7 @@ package dash
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -283,6 +284,70 @@ func TestBuildTopology_SingleFleet(t *testing.T) {
 	}
 	if doc.Note != "" {
 		t.Errorf("single-fleet should have no note, got %q", doc.Note)
+	}
+	// org-truth PR4: derived org DAG is always attached after Load
+	if doc.OrgSource != "derived" {
+		t.Errorf("org_source=%q want derived", doc.OrgSource)
+	}
+	if len(doc.OrgNodes) == 0 {
+		t.Error("expected org_nodes from derived DAG")
+	}
+}
+
+func TestBuildTopology_OrgNodesFromFile(t *testing.T) {
+	// Federated roster + agreeing fleet-org.yaml → org_source=file and parents match.
+	dir := t.TempDir()
+	rosterPath := dir + "/flotilla.json"
+	orgPath := dir + "/fleet-org.yaml"
+	rosterBody := `{
+		"xo_agent": "xo",
+		"agents": [{"name": "xo"}, {"name": "alpha-xo"}, {"name": "backend"}],
+		"channels": [
+			{"channel_id": "C_CMD", "xo_agent": "xo", "role": "fleet-command", "members": ["xo", "alpha-xo", "backend"]},
+			{"channel_id": "C_ALPHA", "xo_agent": "alpha-xo", "members": ["xo"]},
+			{"channel_id": "C_BE", "xo_agent": "backend", "members": ["alpha-xo"]}
+		]
+	}`
+	orgBody := `version: 1
+root: xo
+nodes:
+  - id: xo
+    kind: coordinator
+  - id: alpha-xo
+    kind: coordinator
+    reports_to: xo
+    home_channel_id: "C_ALPHA"
+  - id: backend
+    kind: desk
+    reports_to: alpha-xo
+    home_channel_id: "C_BE"
+`
+	if err := os.WriteFile(rosterPath, []byte(rosterBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(orgPath, []byte(orgBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := roster.Load(rosterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := BuildTopology(cfg)
+	if doc.OrgSource != "file" {
+		t.Fatalf("org_source=%q want file", doc.OrgSource)
+	}
+	if doc.OrgRoot != "xo" {
+		t.Errorf("org_root=%q", doc.OrgRoot)
+	}
+	byID := map[string]TopologyOrgNode{}
+	for _, n := range doc.OrgNodes {
+		byID[n.ID] = n
+	}
+	if byID["backend"].Parent != "alpha-xo" {
+		t.Errorf("backend parent=%q", byID["backend"].Parent)
+	}
+	if byID["alpha-xo"].Parent != "xo" {
+		t.Errorf("alpha-xo parent=%q", byID["alpha-xo"].Parent)
 	}
 }
 

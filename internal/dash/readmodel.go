@@ -250,10 +250,20 @@ type TopologyChannel struct {
 	Role      string   `json:"role,omitempty"`
 }
 
-// TopologyDoc is the federation org chart: the effective channel↔XO bindings.
-// For a single-fleet (legacy channel_id) roster this is the one synthesized
-// binding — still rendered, just one box. A clock-only daemon (no channel_id,
-// no channels[]) yields an empty Channels with an explanatory Note.
+// TopologyOrgNode is one agent (or container) in the compiled org-truth DAG
+// (org-truth v1 PR4 — shared with Goals org layout spokes).
+type TopologyOrgNode struct {
+	ID            string   `json:"id"`
+	Parent        string   `json:"parent,omitempty"`
+	Kind          string   `json:"kind,omitempty"`
+	HomeChannelID string   `json:"home_channel_id,omitempty"`
+	Children      []string `json:"children,omitempty"`
+}
+
+// TopologyDoc is the federation org chart: the effective channel↔XO bindings
+// plus the compiled org-truth DAG (org_source + org_nodes). For a single-fleet
+// (legacy channel_id) roster Channels is the one synthesized binding. A clock-only
+// daemon (no channel_id, no channels[]) yields empty Channels with an explanatory Note.
 type TopologyDoc struct {
 	Channels []TopologyChannel `json:"channels"`
 	// Coordinators is the roster-authoritative set of coordinator agents (XOs + the CoS,
@@ -261,10 +271,16 @@ type TopologyDoc struct {
 	// Command" group to coordinators ONLY — a channel member that is not a coordinator groups
 	// under "Desks" instead (#421 follow-up). Empty when the roster names no coordinators.
 	Coordinators []string `json:"coordinators,omitempty"`
-	Note         string   `json:"note,omitempty"`
+	// OrgSource is "file" or "derived" from the compiled org DAG (org-truth v1 PR4).
+	// Empty only when the roster has no org DAG attached (should not happen after Load).
+	OrgSource string            `json:"org_source,omitempty"`
+	OrgRoot   string            `json:"org_root,omitempty"`
+	OrgNodes  []TopologyOrgNode `json:"org_nodes,omitempty"`
+	Note      string            `json:"note,omitempty"`
 }
 
-// BuildTopology renders the roster's effective bindings + the coordinator set. Pure (reads cfg only).
+// BuildTopology renders the roster's effective bindings + coordinator set + org DAG.
+// Pure (reads cfg only). Org nodes are the single source for parent spokes (PR4).
 func BuildTopology(cfg *roster.Config) TopologyDoc {
 	bindings := cfg.Bindings()
 	doc := TopologyDoc{Channels: make([]TopologyChannel, 0, len(bindings))}
@@ -290,6 +306,33 @@ func BuildTopology(cfg *roster.Config) TopologyDoc {
 			doc.Coordinators = append(doc.Coordinators, a)
 		}
 		sort.Strings(doc.Coordinators)
+	}
+	if d := cfg.Org(); d != nil {
+		doc.OrgSource = d.Source
+		doc.OrgRoot = d.Root
+		ids := make([]string, 0, len(d.Nodes))
+		for id := range d.Nodes {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		doc.OrgNodes = make([]TopologyOrgNode, 0, len(ids))
+		for _, id := range ids {
+			n := d.Nodes[id]
+			children := d.Children[id]
+			if children != nil {
+				// copy for JSON isolation
+				cp := make([]string, len(children))
+				copy(cp, children)
+				children = cp
+			}
+			doc.OrgNodes = append(doc.OrgNodes, TopologyOrgNode{
+				ID:            id,
+				Parent:        d.PrimaryParent(id),
+				Kind:          string(n.Kind),
+				HomeChannelID: n.HomeChannelID,
+				Children:      children,
+			})
+		}
 	}
 	if len(doc.Channels) == 0 {
 		doc.Note = "no channel bindings configured (a clock-only daemon: no channel_id and no channels[]) — there is no federation topology to render"

@@ -20,6 +20,7 @@ package dash
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -350,6 +351,11 @@ type GoalsDoc struct {
 	// Collaborations groups desk NODES that jointly work one lane, drawn as a dotted
 	// container on the org map (#324 Inc 3). Empty when no lane binds ≥2 desks.
 	Collaborations []Collaboration `json:"collaborations,omitempty"`
+	// OrgDiagnostics lists owner/org-parent mismatches for org-container goals
+	// (org-truth v1 PR4). Default is advisory; FLOTILLA_ORG_STRICT_GOALS=1 fails load.
+	OrgDiagnostics []string `json:"org_diagnostics,omitempty"`
+	// OrgSource mirrors /api/topology org_source so Goals and topology share one DAG.
+	OrgSource string `json:"org_source,omitempty"`
 }
 
 // Collaboration is a set of desk nodes jointly working one lane (#324 Inc 3). GROUPING
@@ -392,6 +398,12 @@ type GoalsInputs struct {
 	// still gets a first-class card on the map. Empty ⇒ no materialization (authored
 	// goals only), so the feature degrades cleanly when the roster has no bindings.
 	Channels []DeskChannel
+	// OrgParents maps agent name (lowercased) → primary org parent agent (org-truth
+	// DAG PrimaryParent). Empty when no org DAG. Used for spoke parenting and
+	// owner/org diagnostics so Goals and /api/topology share one parent graph (PR4).
+	OrgParents map[string]string
+	// OrgSource is "file" or "derived" (surfaced on GoalsDoc).
+	OrgSource string
 }
 
 // DeskChannel is the minimal channel membership BuildGoals needs to materialize desk
@@ -466,6 +478,7 @@ func BuildGoals(in GoalsInputs) GoalsDoc {
 		GeneratedAt: in.GeneratedAt,
 		Edges:       buildDependsOnEdges(in.File.Goals),
 		Goals:       make([]RenderedGoal, 0, len(in.File.Goals)),
+		OrgSource:   in.OrgSource,
 	}
 	// Emit depth-first from roots (file order) so a parent always precedes its children.
 	var emit func(id string, depth int)
@@ -503,7 +516,55 @@ func BuildGoals(in GoalsInputs) GoalsDoc {
 	relabelPending(&doc, byID)
 	materializeRosterDesks(&doc, in)
 	doc.Collaborations = buildCollaborations(&doc)
+	doc.OrgDiagnostics = orgOwnerDiagnostics(&doc, in)
 	return doc
+}
+
+// orgOwnerDiagnostics reports org-container goals whose owner’s org parent does
+// not match the parent goal’s owner (org-truth v1 PR4). Purpose-only edges
+// (depends_on, task scope) are not checked.
+func orgOwnerDiagnostics(doc *GoalsDoc, in GoalsInputs) []string {
+	if len(in.OrgParents) == 0 || doc == nil {
+		return nil
+	}
+	byID := make(map[string]*RenderedGoal, len(doc.Goals))
+	for i := range doc.Goals {
+		byID[doc.Goals[i].ID] = &doc.Goals[i]
+	}
+	var out []string
+	for i := range doc.Goals {
+		g := &doc.Goals[i]
+		if !isOrgContainerScope(g.Scope) {
+			continue
+		}
+		if g.Parent == "" || g.Owner == "" {
+			continue
+		}
+		pg := byID[g.Parent]
+		if pg == nil || pg.Owner == "" {
+			continue
+		}
+		ownerKey := strings.ToLower(strings.TrimSpace(g.Owner))
+		parentOwner := strings.ToLower(strings.TrimSpace(pg.Owner))
+		orgParent := strings.ToLower(strings.TrimSpace(in.OrgParents[ownerKey]))
+		if orgParent == "" {
+			continue // channels/org assert no parent for this owner
+		}
+		if orgParent != parentOwner {
+			out = append(out, fmt.Sprintf("goal %q owner %q org-parent is %q but goal parent %q is owned by %q",
+				g.ID, g.Owner, orgParent, g.Parent, pg.Owner))
+		}
+	}
+	return out
+}
+
+func isOrgContainerScope(scope string) bool {
+	switch scope {
+	case "flotilla", "desk", "fleet", "project":
+		return true
+	default:
+		return false
+	}
 }
 
 // buildCollaborations derives the desk collaboration groups (#324 Inc 3). See the
@@ -653,17 +714,24 @@ func materializeRosterDesks(doc *GoalsDoc, in GoalsInputs) {
 				continue
 			}
 			seen[key] = true
+			// Org-truth PR4: prefer spoke parent from the same DAG as /api/topology.
+			deskHubID, deskHubDepth := hubID, hubDepth
+			if orgP := strings.ToLower(strings.TrimSpace(in.OrgParents[key])); orgP != "" {
+				if id, depth, ok := hubNodeForOwner(doc, orgP); ok {
+					deskHubID, deskHubDepth = id, depth
+				}
+			}
 			node := RenderedGoal{
 				ID:                uniqueID("desk:" + name),
 				Title:             name,
 				Scope:             "desk",
 				Owner:             name,
 				ConversationAgent: name,
-				Parent:            hubID,
+				Parent:            deskHubID,
 				Harness:           harnessSurface(in.AgentSurfaces, key),
 				Status:            string(StatusActive),
 				StatusDisplay:     deskDisplayStatus(in.DeskStates[key]),
-				Depth:             hubDepth + 1,
+				Depth:             deskHubDepth + 1,
 				Children:          []string{},
 				WorkItems:         []RenderedWorkItem{},
 				Source:            "roster",
@@ -697,6 +765,40 @@ func materializeRosterDesks(doc *GoalsDoc, in GoalsInputs) {
 	}
 	out = append(out, noHub...)
 	doc.Goals = out
+}
+
+// hubNodeForOwner finds a goals map node owned by agent (lowercased), preferring
+// flotilla/desk hub layout. Used to align roster desk spokes with org DAG parents.
+func hubNodeForOwner(doc *GoalsDoc, ownerKey string) (id string, depth int, ok bool) {
+	if ownerKey == "" || doc == nil {
+		return "", 0, false
+	}
+	// Prefer hub_center / flotilla scope owned by this agent.
+	for i := range doc.Goals {
+		g := &doc.Goals[i]
+		if strings.ToLower(strings.TrimSpace(g.Owner)) != ownerKey {
+			continue
+		}
+		if g.Layout != nil && g.Layout.HubCenter {
+			return g.ID, g.Depth, true
+		}
+	}
+	for i := range doc.Goals {
+		g := &doc.Goals[i]
+		if strings.ToLower(strings.TrimSpace(g.Owner)) != ownerKey {
+			continue
+		}
+		if g.Scope == "flotilla" || g.Scope == "fleet" {
+			return g.ID, g.Depth, true
+		}
+	}
+	for i := range doc.Goals {
+		g := &doc.Goals[i]
+		if strings.ToLower(strings.TrimSpace(g.Owner)) == ownerKey {
+			return g.ID, g.Depth, true
+		}
+	}
+	return "", 0, false
 }
 
 // deskHubFor picks the node a channel's materialized desks attach under: a flotilla goal
@@ -1163,4 +1265,32 @@ func deskChannelsFromRoster(cfg *roster.Config) []DeskChannel {
 		out = append(out, DeskChannel{ChannelID: ch.ChannelID, XOAgent: ch.XOAgent, Members: members})
 	}
 	return out
+}
+
+// orgParentsFromRoster maps agent → primary org parent from Config.Org() (PR4).
+func orgParentsFromRoster(cfg *roster.Config) (parents map[string]string, source string) {
+	if cfg == nil || cfg.Org() == nil {
+		return nil, ""
+	}
+	d := cfg.Org()
+	source = d.Source
+	parents = make(map[string]string, len(d.Nodes))
+	for id := range d.Nodes {
+		if p := d.PrimaryParent(id); p != "" {
+			parents[strings.ToLower(id)] = p
+		}
+	}
+	return parents, source
+}
+
+// orgStrictGoals reports whether FLOTILLA_ORG_STRICT_GOALS is enabled (fail-closed
+// on owner/org mismatch diagnostics).
+func orgStrictGoals() bool {
+	v := strings.TrimSpace(os.Getenv("FLOTILLA_ORG_STRICT_GOALS"))
+	switch strings.ToLower(v) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }

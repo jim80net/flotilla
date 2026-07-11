@@ -327,12 +327,15 @@ func (s *Server) loadHistory() HistoryDoc {
 // trailer are merged onto the referenced goal node and issue states are resolved
 // for work-item roll-up.
 func (s *Server) loadGoals() GoalsDoc {
+	orgParents, orgSource := orgParentsFromRoster(s.roster)
 	in := GoalsInputs{
 		Backlog:       readFileOrEmpty(s.cfg.BacklogPath),
 		DeskStates:    agentStates(s.loadBoard()),
 		AgentSurfaces: agentSurfacesFromRoster(s.roster),
 		MetaXO:        s.xo,
 		Channels:      deskChannelsFromRoster(s.roster),
+		OrgParents:    orgParents,
+		OrgSource:     orgSource,
 	}
 	s.bindTrackerIssues(&in)
 	if s.cfg.GoalsPath != "" {
@@ -355,6 +358,16 @@ func (s *Server) loadGoals() GoalsDoc {
 		in.GeneratedAt = s.now().UTC().Format(time.RFC3339)
 	}
 	doc := BuildGoals(in)
+	// Org-truth PR4: FLOTILLA_ORG_STRICT_GOALS=1 fails closed on owner/org mismatch.
+	if orgStrictGoals() && len(doc.OrgDiagnostics) > 0 {
+		return GoalsDoc{
+			Found:          false,
+			Error:          strings.Join(doc.OrgDiagnostics, "; "),
+			Message:        "org-truth strict goals: owner/org-parent mismatch (set FLOTILLA_ORG_STRICT_GOALS=0 to warn only)",
+			OrgDiagnostics: doc.OrgDiagnostics,
+			OrgSource:      doc.OrgSource,
+		}
+	}
 	// #418: every goals load is a done-history OBSERVATION — the recorder appends any
 	// roll-up transitions to/from achieved, then the fresh history stamps achieved_at
 	// onto the doc (so a just-achieved goal carries its stamp in the same response).
