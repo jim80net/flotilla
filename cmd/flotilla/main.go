@@ -101,6 +101,7 @@ usage:
   flotilla send --from <sender> --file <path> <agent> message body from a file ('-' = stdin)
   flotilla notify --from <agent> <message>            post to the operator under <agent>'s webhook (no tmux)
   flotilla notify --from <agent> --file <path>        notify body from a file ('-' = stdin)
+  flotilla notify --from <agent> --with-fleet-status  append compressed Status of the fleet (#625)
   flotilla brief [--all] [<desk>] [--audience <who>]  elicit a reader-modeled brief; the shipped mirror publishes it to the desk's channel (secret-free; not notify)
   flotilla parade [--all] [<agent>]                   elicit parade answers (proud of / learned / looking forward to / need / demo); mirror publishes to each channel
   flotilla parade rollup [--all] [<xo>]               wake coordinators to roll up subordinates' parade answers
@@ -161,6 +162,12 @@ flags for 'notify':
   --attach <path>   attach a file to the Discord message (repeatable; not the
                     message body — use --file for that)
   --secrets <path>  secrets env file (default $FLOTILLA_SECRETS)
+  --roster <path>   roster path (CoS mirror + --with-fleet-status snapshot)
+  --with-fleet-status  append compressed **Status of the fleet** from the
+                    detector snapshot (same source as status --json); skips
+                    --from agent + its adjutant; idempotent if body already
+                    has **Status of the fleet** or **Fleet status**; on
+                    read failure appends (unavailable) — never silent omit
   --chunk           split an over-limit body into sequential Discord messages
                     (paragraph boundaries, (i/N) prefixes; used by the XO mirror hook)
 
@@ -420,7 +427,8 @@ func cmdNotify(args []string) error {
 	from := fs.String("from", os.Getenv("FLOTILLA_SELF"), "agent whose webhook to post under")
 	file := fs.String("file", "", "read message body from this file ('-' for stdin)")
 	secretsPath := fs.String("secrets", os.Getenv("FLOTILLA_SECRETS"), "secrets env file path")
-	rosterPath := fs.String("roster", rosterDefault(), "roster config path (for the CoS context-mirror; optional)")
+	rosterPath := fs.String("roster", rosterDefault(), "roster config path (for the CoS context-mirror + --with-fleet-status)")
+	withFleet := fs.Bool("with-fleet-status", false, "append compressed fleet posture from status snapshot (#625)")
 	chunk := fs.Bool("chunk", false, "split an over-limit body into sequential Discord messages")
 	var attachPaths attachPathsFlag
 	fs.Var(&attachPaths, "attach", "attach a file to the Discord message (repeatable)")
@@ -462,6 +470,14 @@ func cmdNotify(args []string) error {
 	}
 	if strings.TrimSpace(message) == "" && len(attachPaths) == 0 {
 		return fmt.Errorf("message is empty")
+	}
+	// Coordinator fleet posture (#625): append before length check so --chunk can
+	// split a long body+status, and fail-closed unavailable never silently omits.
+	if *withFleet {
+		rp, fromName := *rosterPath, *from
+		message = withFleetStatus(message, true, func() (string, error) {
+			return loadFleetStatusBlock(rp, fromName)
+		})
 	}
 	// Without --chunk, reject an over-length body cleanly (nothing is posted).
 	// With --chunk the XO mirror hook (and any caller) delivers the WHOLE body.
