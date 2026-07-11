@@ -230,6 +230,37 @@ func TestDroppedDispatch_ChapterHoldDefersReinject(t *testing.T) {
 	}
 }
 
+// #628: sweep with turn-final ack heals inbound before scanning (no false-positive alert).
+func TestUndeliveredDispatchSweep_ReconcileTurnFinalSuppressesFalsePositive(t *testing.T) {
+	dir := t.TempDir()
+	msg, nonce, err := inbound.AppendDispatchNonce("specimen FO dispatch already acked in turn-final pad")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := inbound.Record(dir, inbound.Entry{
+		ID: "spec1", Sender: "xo", Recipient: "backend", Message: msg, Nonce: nonce,
+		DeliveredAt: time.Now().UTC().Add(-2 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var alerts []string
+	set := NewUndeliveredAlertSet()
+	n := UndeliveredDispatchSweep(dir, UndeliveredHooks{
+		AlertOperator: func(s string) { alerts = append(alerts, s) },
+		Fired:         set,
+		ReadTurnFinal: func(agent string) (string, bool, error) {
+			return "completed work; " + nonce, true, nil
+		},
+	})
+	if n != 0 || len(alerts) != 0 {
+		t.Fatalf("false-positive: journal=%d alerts=%v", n, alerts)
+	}
+	path, _ := inbound.Path(dir, "backend")
+	if len(inbound.NewStore(path).Load()) != 0 {
+		t.Fatal("inbound must be cleared after turn-final reconcile")
+	}
+}
+
 func TestUndeliveredDispatchSweep_NoAdjutant_AlertsOperatorOnce(t *testing.T) {
 	dir := t.TempDir()
 	msg, _, err := inbound.AppendDispatchNonce("completion report that sat in outbox too long pad")

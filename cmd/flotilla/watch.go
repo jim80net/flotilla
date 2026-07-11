@@ -964,6 +964,10 @@ func cmdWatch(args []string) error {
 				},
 				AlertOperator: alert,
 				Fired:         undeliveredAlerted,
+				// #628: clear inbound when latest turn-final already acks (finish-edge miss heal).
+				ReadTurnFinal: func(agent string) (string, bool, error) {
+					return readDeskTurnFinal(cfg, agent)
+				},
 			})
 		}
 		det := watch.NewDetectorWithSynthSidecar(detCfg, *snapshotPath, synthSidecarPath)

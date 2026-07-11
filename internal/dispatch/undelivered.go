@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -97,7 +98,8 @@ func ScanUndeliveredOutbox(rosterDir string, now time.Time, age time.Duration) [
 }
 
 // ScanUndeliveredInbound returns inbound pending entries older than age that
-// were never acknowledged (still on the ledger).
+// were never acknowledged (still on the ledger). Entries already in the consumed
+// registry are skipped (and should have been removed by ReconcileInboundAcks).
 func ScanUndeliveredInbound(rosterDir string, now time.Time, age time.Duration) []UndeliveredReport {
 	if rosterDir == "" {
 		return nil
@@ -132,6 +134,50 @@ func ScanUndeliveredInbound(rosterDir string, now time.Time, age time.Duration) 
 		})
 	}
 	return out
+}
+
+// TurnFinalReader loads a desk's latest turn-final for reconcile (#628).
+// ok=false means unreadable (no reader / no session) — not an error for suppress.
+type TurnFinalReader func(agent string) (text string, ok bool, err error)
+
+// ReconcileInboundAcks heals recipient inbound ledgers before undelivered scan (#628):
+//  1. Remove entries whose nonce is already in the durable consumed registry
+//  2. If readTurnFinal is set, remove entries the latest turn-final acknowledges
+//     (same matcher as #472 OnFinish) and durable-consume them
+//
+// Returns how many entries were cleared. Prefer root-cause finish-edge consume;
+// this is the sweep-time belt so false-positive undelivered-ack never reaches Discord.
+func ReconcileInboundAcks(rosterDir string, readTurnFinal TurnFinalReader) int {
+	if rosterDir == "" {
+		return 0
+	}
+	reg := NewRegistry(rosterDir)
+	n := 0
+	for _, path := range inbound.ListInboundPaths(rosterDir) {
+		recipient := inbound.RecipientFromInboundPath(path)
+		if recipient == "" {
+			continue
+		}
+		st := inbound.NewStore(path)
+		clearedCons := st.ClearConsumed(func(nonce, message string) bool {
+			return reg.IsConsumed(nonce, PayloadHash(message))
+		})
+		n += len(clearedCons)
+		if readTurnFinal == nil {
+			continue
+		}
+		text, ok, err := readTurnFinal(recipient)
+		if err != nil || !ok || text == "" {
+			continue
+		}
+		for _, e := range st.ClearAcknowledged(text) {
+			n++
+			if _, cerr := reg.Consume(ConsumeFromInbound(e.Nonce, e.Message, ReasonTurnFinalAck, e.Sender, e.Recipient)); cerr != nil {
+				log.Printf("flotilla dispatch: reconcile consume-ack failed nonce=%s: %v", e.Nonce, cerr)
+			}
+		}
+	}
+	return n
 }
 
 // ScanUndelivered returns outbox + inbound undelivered reports.

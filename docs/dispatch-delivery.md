@@ -70,3 +70,14 @@ is **not** the first surface when a layer adjutant exists:
 
 No dual-fire of operator + adjutant on the first crossing. No adjutant → operator
 remains the only Discord path (legacy single-seat fleets).
+
+### False-positive suppress (ack already present)
+
+Before the undelivered scan, the sweep **reconciles** inbound ledgers:
+
+1. Drop entries whose nonce is already in `flotilla-dispatch-consumed.json`
+2. If the recipient's latest turn-final acknowledges the nonce (#472 matcher),
+   remove the inbound entry and durable-consume
+
+So a desk that already turn-final-acked never produces `undelivered-ack` spam
+when the Working→Idle finish edge was missed.

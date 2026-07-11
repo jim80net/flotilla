@@ -56,28 +56,20 @@ func DroppedDispatchFinishHookWithMerged(
 	}
 	reg := dispatch.NewRegistry(rosterDir)
 	return func(agent string) {
-		text, ok, err := readTurnFinal(agent)
-		if err != nil {
-			log.Printf("flotilla watch: dropped-dispatch SKIP %s: read turn-final: %v", agent, err)
-			return
-		}
-		if !ok {
-			return
-		}
 		path, err := inbound.Path(rosterDir, agent)
 		if err != nil {
 			log.Printf("flotilla watch: dropped-dispatch SKIP %s: %v", agent, err)
 			return
 		}
 		st := inbound.NewStore(path)
-		// Pre-filter: consumed registry + MERGED-state (#614 / #616).
+		// Always scrub consumed entries even when turn-final is unreadable (#628).
+		for _, e := range st.ClearConsumed(func(nonce, message string) bool {
+			return reg.IsConsumed(nonce, dispatch.PayloadHash(message))
+		}) {
+			log.Printf("flotilla watch: dropped-dispatch suppress %s nonce=%s reason=consumed", agent, e.Nonce)
+		}
+		// MERGED-state pre-filter (#616) — does not require turn-final text.
 		for _, e := range st.Load() {
-			hash := dispatch.PayloadHash(e.Message)
-			if e.Nonce != "" && reg.IsConsumed(e.Nonce, hash) {
-				log.Printf("flotilla watch: dropped-dispatch suppress %s nonce=%s reason=consumed", agent, e.Nonce)
-				st.Remove(e.ID)
-				continue
-			}
 			if pr, merged := dispatch.ShouldSuppressMerged(e.Message, isMerged); merged {
 				if _, cerr := reg.Consume(dispatch.ConsumeFromInbound(e.Nonce, e.Message, dispatch.ReasonMerged, e.Sender, e.Recipient)); cerr != nil {
 					log.Printf("flotilla watch: dropped-dispatch consume-merged failed nonce=%s: %v", e.Nonce, cerr)
@@ -86,6 +78,14 @@ func DroppedDispatchFinishHookWithMerged(
 				}
 				st.Remove(e.ID)
 			}
+		}
+		text, ok, err := readTurnFinal(agent)
+		if err != nil {
+			log.Printf("flotilla watch: dropped-dispatch SKIP %s: read turn-final: %v", agent, err)
+			return
+		}
+		if !ok {
+			return
 		}
 		// Snapshot pending before finish evaluation so we can durable-consume acks.
 		pendingBefore := st.Load()
