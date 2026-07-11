@@ -13,7 +13,7 @@ matches you, follow that path, and ignore the rest until you need it.
 | **A coding agent setting it up for someone** | [`../llm.md`](../llm.md) — the machine entrypoint; run it top-to-bottom | Hand off to `quickstart.md` for the human-paced version |
 | **Running a fleet in production** | [`quickstart.md`](./quickstart.md) for the basics | The operator runbooks — see [Running a fleet](#running-a-fleet-operator) below |
 | **Adopting the agent doctrine** | [`OPERATING-PRINCIPLES.md`](./OPERATING-PRINCIPLES.md) — the twelve principles every agent runs on | The doctrine set — see [Operating doctrine](#operating-doctrine) below |
-| **Contributing / reading the internals** | [`../CLAUDE.md`](../CLAUDE.md) — the repo constitution | [Design & architecture](#design--architecture-internal) below |
+| **Contributing / reading the internals** | [`../CLAUDE.md`](../CLAUDE.md) — the repo constitution | [`pr-authoring.md`](./pr-authoring.md) for PR titles/bodies, then [Design & architecture](#design--architecture-internal) |
 
 ## The four reader paths
 
@@ -80,6 +80,9 @@ fleet behavior.
   capability-vs-deployment partition and the two guards that keep private
   specifics out of the public tree. **Canonical home for the public/private
   boundary.**
+- **[`pr-authoring.md`](./pr-authoring.md)** — PR titles and descriptions for
+  human reviewers (reader-modeling, Mermaid formatting, file-based `gh`
+  delivery). Pairs with the `flotilla-pr-authoring` agent skill.
 
 ### Design & architecture (internal)
 
@@ -123,6 +126,7 @@ link to it, not restate it.
 | The executive-mini-brief shape | `OPERATING-PRINCIPLES.md` §12 |
 | The constitutional-skill set + member list | `span-of-control.md` |
 | Public/private partition | `private-public-boundary.md` |
+| PR title/description rules | `pr-authoring.md` |
 | Design tokens + theme | `design/README.md` |
 
 **Editing rule:** if you're about to explain a fact that already has a home
