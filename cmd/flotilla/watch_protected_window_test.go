@@ -47,7 +47,7 @@ func TestDrainAdjutantSeamSuppressedWhenProtected(t *testing.T) {
 	dir := t.TempDir()
 	cfg := adjutantLayerRoster()
 	bufferPath := roster.LayerBufferPath(dir, "xo")
-	if err := adjutantbuffer.Append(bufferPath, "xo", []string{"backend: finished a turn"}); err != nil {
+	if err := adjutantbuffer.Append(bufferPath, "xo", []string{"backend PR gate needs decision"}); err != nil {
 		t.Fatal(err)
 	}
 	awaiting := roster.ResolveLayerClockPath(dir, "xo", "", "flotilla-xo-awaiting", "awaiting")
@@ -80,7 +80,7 @@ func TestDrainAdjutantSeamAllowedWhenClear(t *testing.T) {
 	}
 	cfg := adjutantLayerRoster()
 	bufferPath := roster.LayerBufferPath(dir, "xo")
-	if err := adjutantbuffer.Append(bufferPath, "xo", []string{"backend: finished a turn"}); err != nil {
+	if err := adjutantbuffer.Append(bufferPath, "xo", []string{"backend PR gate needs decision"}); err != nil {
 		t.Fatal(err)
 	}
 	var enqueued []watch.Job

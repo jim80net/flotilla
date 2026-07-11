@@ -509,6 +509,23 @@ menu). A remote XO over the relay cannot answer an in-pane menu — keystrokes
 navigate it, they do not select. This is a flotilla coordination invariant, not a
 per-desk preference.
 
+### Content-first seam briefs (Wave 0.2)
+
+Bare finish-edge buffer keys (`…finished a turn (working→idle)`) are **mechanical**.
+They are auto-consumed at the adjutant seam and **never** listed under `Needs you:`.
+Only judgment items produce a leader inject brief.
+
+### Dual-egress notify / mirror (#595 / #628 residual)
+
+`flotilla notify` stamps `flotilla-<agent>-last-notify.json` with time **and** body
+hash. Finish-edge mirror and `mirror-self` skip Discord when:
+
+1. notify was within 3m, or  
+2. the candidate body matches the stamp hash within 15m  
+
+Skip reason is logged (`mirror Discord suppress … reason=…`). Session-mirror ledger
+still writes.
+
 ### Undelivered dispatch → adjutant first (#628)
 
 `dispatch undelivered` / `dispatch undelivered-ack` journal lines always stay loud.

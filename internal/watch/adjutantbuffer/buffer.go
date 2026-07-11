@@ -155,6 +155,8 @@ func Len(path string) int {
 }
 
 // FormatBrief composes the consolidated leader inject at a seam (#439 phase 1b).
+// Only judgment items appear under "Needs you:" — bare finish-edge keys are
+// excluded here (callers must PartitionJudgment first; Wave 0.2 content-first).
 func FormatBrief(leader string, f File, charterMissing, corruptQuarantined bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[adjutant brief — %s layer]\n\n", leader)
@@ -168,13 +170,15 @@ func FormatBrief(leader string, f File, charterMissing, corruptQuarantined bool)
 		b.WriteString(rosterCharterName(leader))
 		b.WriteString(" (evaluation-tick ack is required minimum).\n\n")
 	}
-	if len(f.Items) == 0 {
+	// Defense in depth: never list mechanical finish-edges under Needs you.
+	judgment, _ := PartitionJudgment(f.Items)
+	if len(judgment) == 0 {
 		return b.String()
 	}
-	since := time.Since(oldest(f.Items))
-	fmt.Fprintf(&b, "Since your last seam (%s ago): %d buffered item(s) need your judgment.\n", humanSince(since), len(f.Items))
-	b.WriteString("(Mechanical handling by the adjutant is prompt-contract only in this increment — not yet fully automated.)\n\nNeeds you:\n")
-	for _, it := range f.Items {
+	since := time.Since(oldest(judgment))
+	fmt.Fprintf(&b, "Since your last seam (%s ago): %d buffered item(s) need your judgment.\n", humanSince(since), len(judgment))
+	b.WriteString("(Mechanical finish-edges are auto-cleared and never listed as Needs you.)\n\nNeeds you:\n")
+	for _, it := range judgment {
 		fmt.Fprintf(&b, "  • %s\n", it.Reason)
 	}
 	return b.String()

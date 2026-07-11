@@ -62,7 +62,8 @@ func TestPrepareInjectSkipsConsumedItems(t *testing.T) {
 }
 
 func TestPrepareInjectDeltaRedeliversWhenStateHashChanges(t *testing.T) {
-	reason := "backend: finished a turn (working→idle)"
+	// Judgment item: new state hash re-injects under Needs you.
+	reason := "backend PR gate needs decision"
 	at1 := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
 	at2 := at1.Add(time.Minute)
 	it1 := Item{At: at1, Reason: reason, Key: itemKey(reason), StateHash: itemStateHash(reason, at1)}
@@ -70,7 +71,7 @@ func TestPrepareInjectDeltaRedeliversWhenStateHashChanges(t *testing.T) {
 	delivered := DeliveredFile{Entries: []DeliveredEntry{{Key: it1.Key, StateHash: it1.StateHash}}}
 	brief, inject, ok := PrepareInject("xo", File{Items: []Item{it2}}, delivered, false, false)
 	if !ok || len(inject) != 1 {
-		t.Fatalf("fresh edge occurrence must inject, ok=%v inject=%+v", ok, inject)
+		t.Fatalf("fresh judgment occurrence must inject, ok=%v inject=%+v", ok, inject)
 	}
 	if !strings.Contains(brief, reason) {
 		t.Fatalf("brief missing reason:\n%s", brief)
@@ -82,7 +83,7 @@ func TestPrepareInjectDeltaRedeliversWhenStateHashChanges(t *testing.T) {
 
 func TestPrepareInjectCountFromRenderedList(t *testing.T) {
 	at := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
-	fresh := Item{At: at, Reason: "backend: finished a turn (working→idle)"}
+	fresh := Item{At: at, Reason: "backend PR gate needs decision"}
 	fresh.Key = itemKey(fresh.Reason)
 	fresh.StateHash = itemStateHash(fresh.Reason, at)
 	consumedAt := at.Add(-time.Hour)
@@ -99,6 +100,22 @@ func TestPrepareInjectCountFromRenderedList(t *testing.T) {
 	}
 	if strings.Contains(brief, consumed.Reason) {
 		t.Fatalf("consumed item must not appear in bullets:\n%s", brief)
+	}
+}
+
+func TestPrepareInjectMechanicalDeltaAutoConsumeNoBrief(t *testing.T) {
+	reason := "backend: finished a turn (working→idle)"
+	at1 := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+	at2 := at1.Add(time.Minute)
+	it1 := Item{At: at1, Reason: reason, Key: itemKey(reason), StateHash: itemStateHash(reason, at1)}
+	it2 := Item{At: at2, Reason: reason, Key: itemKey(reason), StateHash: itemStateHash(reason, at2)}
+	delivered := DeliveredFile{Entries: []DeliveredEntry{{Key: it1.Key, StateHash: it1.StateHash}}}
+	brief, inject, ok := PrepareInject("xo", File{Items: []Item{it2}}, delivered, false, false)
+	if ok {
+		t.Fatalf("mechanical delta must not inject Needs-you, brief=%q", brief)
+	}
+	if len(inject) != 1 {
+		t.Fatalf("mechanical delta must return auto-consume items, got %d", len(inject))
 	}
 }
 

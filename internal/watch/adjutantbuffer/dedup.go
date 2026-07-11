@@ -156,18 +156,32 @@ func pruneDeliveredEntries(entries []DeliveredEntry) []DeliveredEntry {
 }
 
 // PrepareInject applies consumed-item dedup and composes the leader seam brief (#469).
-// injectItems is the post-dedup list; ok is false when nothing should be injected.
-// Charter-missing banners are included only when fresh items inject — charter pairing is
+// injectItems is the post-dedup list to record on confirmed delivery (judgment + mechanical).
+// ok is false when nothing should be injected as a leader brief.
+//
+// Mechanical finish-edge keys (Working→Idle) never create a "Needs you" brief (Wave 0.2
+// content-first). When only mechanical items remain, ok=false and injectItems holds those
+// items so the caller can auto-consume (RecordDelivered + RemoveConfirmedItems) without
+// waking the leader.
+//
+// Charter-missing banners are included only when judgment items inject — charter pairing is
 // handled on evaluation ticks, not as a null seam interrupt.
 func PrepareInject(leader string, f File, delivered DeliveredFile, charterMissing, corruptQuarantined bool) (brief string, injectItems []Item, ok bool) {
 	f.Items = normalizeItems(f.Items)
-	injectItems = FilterUndelivered(f.Items, delivered)
-	if len(injectItems) == 0 {
+	fresh := FilterUndelivered(f.Items, delivered)
+	if len(fresh) == 0 {
 		if corruptQuarantined {
 			return FormatBrief(leader, File{Leader: f.Leader}, false, true), nil, true
 		}
 		return "", nil, false
 	}
-	render := File{Leader: f.Leader, Items: injectItems}
+	judgment, mechanical := PartitionJudgment(fresh)
+	if len(judgment) == 0 {
+		// Only bare finish-edges: no leader inject; return mechanical for auto-consume.
+		return "", mechanical, false
+	}
+	// Record judgment + mechanical together on confirm so edges clear with the seam.
+	injectItems = append(append([]Item{}, judgment...), mechanical...)
+	render := File{Leader: f.Leader, Items: judgment}
 	return FormatBrief(leader, render, charterMissing, corruptQuarantined), injectItems, true
 }

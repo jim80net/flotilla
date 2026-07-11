@@ -81,7 +81,7 @@ func TestEvaluationTickAckAllowedWhileProtectedLeaderDigestSuppressed(t *testing
 	cfg := adjutantLayerRoster()
 	bufferPath := roster.LayerBufferPath(dir, "xo")
 	now := time.Now()
-	writeAgedBufferItem(t, bufferPath, "xo", "backend: finished a turn", now.Add(-31*time.Minute))
+	writeAgedBufferItem(t, bufferPath, "xo", "backend PR gate needs decision", now.Add(-31*time.Minute))
 
 	awaiting := roster.ResolveLayerClockPath(dir, "xo", "", "flotilla-xo-awaiting", "awaiting")
 	if err := os.WriteFile(awaiting, []byte("1"), 0o600); err != nil {
@@ -103,7 +103,7 @@ func TestEvaluationTickBufferSeamMaxWaitInjectsWhenNotProtected(t *testing.T) {
 	cfg := adjutantLayerRoster()
 	bufferPath := roster.LayerBufferPath(dir, "xo")
 	now := time.Now()
-	writeAgedBufferItem(t, bufferPath, "xo", "backend: finished a turn", now.Add(-31*time.Minute))
+	writeAgedBufferItem(t, bufferPath, "xo", "backend PR gate needs decision", now.Add(-31*time.Minute))
 
 	inj := watch.NewInjector(func(string, string) error { return nil }, 4)
 	adj, leader := simulateEvaluationTickWake(t, cfg, dir, filepath.Join(dir, "queue.json"), inj, now)
@@ -120,7 +120,7 @@ func TestEvaluationTickBufferSeamMaxWaitBlockedWhenProtected(t *testing.T) {
 	cfg := adjutantLayerRoster()
 	bufferPath := roster.LayerBufferPath(dir, "xo")
 	now := time.Now()
-	writeAgedBufferItem(t, bufferPath, "xo", "backend: finished a turn", now.Add(-31*time.Minute))
+	writeAgedBufferItem(t, bufferPath, "xo", "backend PR gate needs decision", now.Add(-31*time.Minute))
 
 	awaiting := roster.ResolveLayerClockPath(dir, "xo", "", "flotilla-xo-awaiting", "awaiting")
 	if err := os.WriteFile(awaiting, []byte("1"), 0o600); err != nil {
