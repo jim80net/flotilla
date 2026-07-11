@@ -37,10 +37,10 @@
 
 ### PR3 — Watch consumes compiled DAG
 
-- [ ] 3.1 Synthesis routing / owed marking reads DAG when available
-- [ ] 3.2 `OwningXO` prefers `DAG.Parent`
-- [ ] 3.3 Fatal start on org compile failure (integration test or cmd-level)
-- [ ] 3.4 Watch runbook one-pager delta (`docs/watch-runbook.md`)
+- [x] 3.1 Synthesis routing / owed marking reads DAG when available
+- [x] 3.2 `OwningXO` prefers `DAG.Parent`
+- [x] 3.3 Fatal start on org compile failure (integration test or cmd-level)
+- [x] 3.4 Watch runbook one-pager delta (`docs/watch-runbook.md`)
 
 ### PR4 — Dash topology + Goals layout bridge
 

@@ -131,7 +131,12 @@ func cmdWatch(args []string) error {
 
 	cfg, err := roster.LoadWith(*rosterPath, roster.LoadOptions{OrgFile: *orgFile})
 	if err != nil {
+		// Org compile / agreement failures fail-closed here (org-truth v1 PR3):
+		// watch must not start the relay or detector with a broken org graph.
 		return err
+	}
+	if d := cfg.Org(); d != nil {
+		log.Printf("flotilla watch: org-truth DAG source=%s root=%q nodes=%d (synthesis/OwningXO consume compiled DAG)", d.Source, d.Root, len(d.Nodes))
 	}
 	// Validate every agent's surface driver up front — an unknown surface is a
 	// clear startup error, never a silent mis-drive at the first tick/delivery.
