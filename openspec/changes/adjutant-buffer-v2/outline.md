@@ -1,8 +1,8 @@
 # Outline — adjutant buffer v2 (daemon state machine)
 
-**Status:** PROMOTED — full openspec in `proposal.md` / `design.md` / `tasks.md` /
-`specs/watch/spec.md` (B0). Org-truth v1 **merged** (PR0–PR4); implementation
-unblocked after B0 openspec merge.
+**Status:** B0 openspec **merged** (#604); B1 mechanical coalesce **shipped**
+(#607 / `69ab033`). Full openspec in `proposal.md` / `design.md` / `tasks.md` /
+`specs/watch/spec.md`. B2–B5 remain open (see `tasks.md`).
 
 **Dispatch:** `flotilla-dispatch-aaf12ac5` (spine complete); lineage
 `flotilla-dispatch-d81ad664` (outline).
@@ -37,8 +37,8 @@ depends on a stable layer/parent model — **org-truth v1** (now on main).
 
 | Phase | Scope | Status |
 |-------|-------|--------|
-| **B0** | Spec promotion | **This PR** |
-| **B1** | Arc metadata + mechanical coalesce window | After B0 merge |
+| **B0** | Spec promotion | **Merged** #604 |
+| **B1** | Arc metadata + mechanical coalesce window | **Shipped** #607 |
 | **B2** | Protected-window FSM `holding` | Later |
 | **B3** | Disaggregate assist | Later |
 | **B4** | Org-scoped discrete route | Later |
