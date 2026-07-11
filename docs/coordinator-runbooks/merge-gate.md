@@ -3,7 +3,9 @@
 You are the independent review gate. A merge is the fleet's review made real; run
 this on every PR that reaches you. Implements Principle 7 (merge on clean gates;
 the reviewer is independent of the builder) and Principle 8 (verify; never
-fabricate).
+fabricate). Authors should ship reader-modeled titles and bodies per
+[`pr-authoring.md`](../pr-authoring.md) so you can review substance, not decode
+gate boilerplate.
 
 ## Preconditions
 
