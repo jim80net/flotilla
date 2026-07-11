@@ -165,6 +165,29 @@ contains `**Status of the fleet**` or `**Fleet status**`, nothing is added
 (idempotent). If the snapshot cannot be read, it appends `(unavailable)` —
 never silently omits when the flag is set (#625).
 
+### Adjutant operator-loop egress (#439 / #628)
+
+When a fleet uses `adjutant_for` seats (see `flotilla.example.json` — e.g.
+`xo-adj` adjutants for `xo`), the **adjutant is the primary operator-loop
+channel**: continuity briefs and triaged fleet mechanicals go out via
+`flotilla notify --from <adjutant>`, not restated by the leader coordinator.
+That requires the same Discord provisioning as any other notifying seat:
+
+1. **Webhook** — add `FLOTILLA_WEBHOOK_<ADJUTANT>` to the secrets file (same
+   naming rule: agent name upper-cased, `-` → `_`). Example for generic `xo-adj`:
+   `FLOTILLA_WEBHOOK_XO_ADJ=https://discord.com/api/webhooks/...`
+2. **Launch env** — the adjutant's launch recipe must export `FLOTILLA_SECRETS`
+   and `FLOTILLA_ROSTER` (and `FLOTILLA_SELF=<adjutant>`) so in-pane
+   `flotilla notify` and finish-edge `mirror-self` hooks resolve the webhook.
+   See `flotilla-launch.example.json` (`xo-adj` entry).
+3. **Watch startup** — if an adjutant lacks a webhook, `flotilla watch` lists
+   it under "no webhook (will not mirror)" at boot. That is a **misconfig** for
+   operator-loop adjutants (not intentional silence — see #598 `ledger_only`).
+
+Coordinators with both `flotilla notify` and finish-edge mirror must not post
+the same turn twice (#595): after a successful notify, the mirror path suppresses
+Discord for ~3 minutes while still writing session-mirror.
+
 ## 7. (Optional) Fleet goals — validate, compile, link
 
 When the user wants a **goals map** in `flotilla dash` (not just the flat issue

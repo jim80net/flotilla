@@ -4,7 +4,7 @@
   "xo_agent": "xo",
   "_comment_alpha_xo": "Optional harness-portable trial: project-XO with explicit surface codex (see docs/coordinator-seat-swap-runbook.md). Not live by default — supervised trial gate applies.",
   "_comment_beta_xo": "Optional harness-portable trial: project-XO with explicit surface grok (see docs/coordinator-seat-swap-runbook.md). Not live by default — supervised trial gate applies.",
-  "_comment_adjutant": "Optional coordinator adjutant (#439): example seats only — not live until pilot gate. Requires change_detector + liveness_ping_mode interval|consecutive (not none). stackable_wakes (phase 2) defaults false.",
+  "_comment_adjutant": "Optional coordinator adjutant (#439): example seats only — not live until pilot gate. Requires change_detector + liveness_ping_mode interval|consecutive (not none). stackable_wakes (phase 2) defaults false. Operator-loop adjutants need FLOTILLA_WEBHOOK_<ADJ> in secrets + FLOTILLA_SECRETS on launch (#628); see llm.md §6.",
   "_comment_xo_rotate": "Optional idle-edge rotate policy (#467): always (default) | never | handoff. FLOTILLA_XO_ROTATE env overrides. never/handoff suppress bare /clear on continueXO; handoff-gated recycle is #443.",
   "_comment_usage_limit": "Usage-limit downgrade policy (#466) lives in the HOST-LOCAL launch recipe (primary + fallbacks[] per agent), NOT in this committable roster. See flotilla-launch.example.json + docs/usage-limit-resilience.md.",
   "_comment_coordinator": "Optional per-agent coordinator rank (#491): coordinator:true opts a seat in; coordinator:false opts an execution desk out even when supervisor-as-member topology would infer span. Absent = infer from bindings. Primary xo_agent/cos_agent cannot set false.",

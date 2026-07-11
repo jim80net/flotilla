@@ -60,6 +60,12 @@
           "launch": "claude --model sonnet -w backend"
         }
       ]
+    },
+    "xo-adj": {
+      "_comment": "Adjutant launch must export FLOTILLA_SECRETS + FLOTILLA_ROSTER so notify/mirror-self resolve the adjutant webhook (#628). Host paths are illustrative.",
+      "launch": "FLOTILLA_SECRETS=/home/operator/.config/flotilla/flotilla-secrets.env FLOTILLA_ROSTER=/home/operator/.config/flotilla/flotilla.json bash -lc 'export FLOTILLA_SELF=xo-adj; grok --model composer-2.5-fast -w xo-adj'",
+      "cwd": "/home/operator/work/flotilla",
+      "tmux": "flotilla:xo-adj"
     }
   }
 }
