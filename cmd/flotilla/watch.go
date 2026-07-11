@@ -945,8 +945,30 @@ func cmdWatch(args []string) error {
 		undeliveredAlerted := watch.NewUndeliveredAlertSet()
 		detCfg.OutboxSweepOnTick = func() {
 			outboxSweeper.SweepAll()
-			// #614: loud undelivered scan (outbox age + inbound unacked age).
-			watch.UndeliveredDispatchSweep(rosterDir, nil, alert, undeliveredAlerted)
+			// #614 / #628: undelivered scan — journal always; adjutant first; operator L2.
+			watch.UndeliveredDispatchSweep(rosterDir, watch.UndeliveredHooks{
+				ResolveAdjutant: func(recipient string) string {
+					return watch.ResolveUndeliveredAdjutant(
+						cfg.AdjutantFor,
+						func(agent string) string { return cfg.OwningXO(agent, xo) },
+						xo,
+						recipient,
+					)
+				},
+				EnqueueAdjutant: func(adjutant, message string) {
+					injector.Enqueue(watch.Job{
+						Agent:   adjutant,
+						Message: message,
+						Kind:    watch.KindDetector,
+					})
+				},
+				AlertOperator: alert,
+				Fired:         undeliveredAlerted,
+				// #628: clear inbound when latest turn-final already acks (finish-edge miss heal).
+				ReadTurnFinal: func(agent string) (string, bool, error) {
+					return readDeskTurnFinal(cfg, agent)
+				},
+			})
 		}
 		det := watch.NewDetectorWithSynthSidecar(detCfg, *snapshotPath, synthSidecarPath)
 		deskStateLabels = det.DeskStateLabels
