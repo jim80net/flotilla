@@ -124,11 +124,12 @@ func cmdWatch(args []string) error {
 	maxSelfCont := fs.Int("max-self-continuations", 3, "change-detector cap on consecutive XO self-continuations with no external change")
 	backlogPath := fs.String("backlog-file", os.Getenv("FLOTILLA_BACKLOG_FILE"), "the goal-driven loop's fleet backlog (markdown; - [<status>] items). Unset ⇒ the backlog gate is OFF (XO settles as before). Read fresh each tick, NOT content-hashed (it is the XO's own output)")
 	backlogStuckCap := fs.Int("backlog-stuck-cap", 5, "goal-driven loop: drives of one unblocked item without progress before it is escalated + deprioritized")
+	orgFile := fs.String("org-file", os.Getenv("FLOTILLA_ORG_FILE"), "optional org-truth file (default <roster-dir>/fleet-org.yaml when present; env FLOTILLA_ORG_FILE). When set, load agrees channels with reports_to or refuses")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	cfg, err := roster.Load(*rosterPath)
+	cfg, err := roster.LoadWith(*rosterPath, roster.LoadOptions{OrgFile: *orgFile})
 	if err != nil {
 		return err
 	}

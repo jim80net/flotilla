@@ -28,12 +28,12 @@
 
 ### PR2 — Optional `fleet-org.yaml` + agreement refuse
 
-- [ ] 2.1 Schema parse (YAML); reject cycles, unknown parents, dup ids
-- [ ] 2.2 Agreement check vs channel-derived edges when file present
-- [ ] 2.3 One `home_channel_id` per node invariant
-- [ ] 2.4 `--org-file` / `FLOTILLA_ORG_FILE` on watch + dash
-- [ ] 2.5 `fleet-org.example.yaml` + docs blurb in `docs/ARCHITECTURE.md` / quickstart note
-- [ ] 2.6 Fixtures: agree, disagree, mutual-home, duplicate-home
+- [x] 2.1 Schema parse (YAML); reject cycles, unknown parents, dup ids
+- [x] 2.2 Agreement check vs channel-derived edges when file present
+- [x] 2.3 One `home_channel_id` per node invariant
+- [x] 2.4 `--org-file` / `FLOTILLA_ORG_FILE` on watch + dash
+- [x] 2.5 `fleet-org.example.yaml` + docs blurb in `docs/ARCHITECTURE.md` / watch-runbook note
+- [x] 2.6 Fixtures: agree, disagree, mutual-home, duplicate-home
 
 ### PR3 — Watch consumes compiled DAG
 

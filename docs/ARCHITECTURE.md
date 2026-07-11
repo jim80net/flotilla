@@ -98,9 +98,9 @@ daemon-start **construction** (`internal/transport/registry.go`).
 
 ---
 
-## 3. The roster / launch / secrets trio
+## 3. The roster / launch / secrets trio (+ optional org-truth)
 
-Three files configure a deployment:
+Three files configure a deployment (plus an optional fourth for org-truth):
 
 - **Roster** (`internal/roster`) — the fleet: each agent's name, its pane/marker,
   its `surface`, its channel bindings, the heartbeat interval, and per-agent
@@ -112,6 +112,13 @@ Three files configure a deployment:
 - **Secrets** (`roster.Secrets`) — the bot token and per-channel webhooks. Loaded
   only by the daemon; execution desks never hold secrets. Kept out of the roster
   so the roster is shareable.
+- **Org-truth** (optional, `internal/org`) — `fleet-org.yaml` beside the roster
+  (or `--org-file` / `FLOTILLA_ORG_FILE`) declares who-reports-to-whom as a single
+  primary-parent DAG. When **absent**, the org DAG is **derived** from
+  `channels[]` (synthesis rules). When **present**, load compiles the file,
+  checks multi-home `home_channel_id` invariants, and **refuses** if
+  `reports_to` disagrees with channel-derived primary parents. Template:
+  `fleet-org.example.yaml`. See `openspec/changes/org-truth-v1/`.
 
 ---
 

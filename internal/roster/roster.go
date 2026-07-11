@@ -259,14 +259,19 @@ type Config struct {
 	// consumers get a typed value instead of re-parsing the string.
 	heartbeatDur time.Duration
 
-	// orgDAG is the compiled org-truth graph (org-truth v1 PR1): always derived
-	// from channels[] / synthesis rules after a successful Load. Optional file
-	// agreement is PR2. Nil only if Load failed (callers never see a half-loaded Config).
+	// orgDAG is the compiled org-truth graph (org-truth v1): channel-derived
+	// Snapshot by default, or fleet-org.yaml after agreement (PR2). Nil only if
+	// Load failed (callers never see a half-loaded Config).
 	orgDAG *org.DAG
 }
 
-// Load reads and validates a roster config file.
+// Load reads and validates a roster config file (optional fleet-org.yaml discovery).
 func Load(path string) (*Config, error) {
+	return LoadWith(path, LoadOptions{})
+}
+
+// LoadWith is Load with explicit org-truth options (--org-file / FLOTILLA_ORG_FILE).
+func LoadWith(path string, opts LoadOptions) (*Config, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read roster %q: %w", path, err)
@@ -405,8 +410,10 @@ func Load(path string) (*Config, error) {
 	if err := c.assertSynthesisAcyclic(); err != nil {
 		return nil, fmt.Errorf("roster %q: %w", path, err)
 	}
-	// Org-truth v1 PR1: always attach a derived DAG so watch/dash can share one parent graph.
-	c.attachOrgDAG()
+	// Org-truth v1: attach derived DAG, or file DAG after homes+agreement (PR2).
+	if err := c.attachOrgDAG(path, opts); err != nil {
+		return nil, fmt.Errorf("roster %q: %w", path, err)
+	}
 	if err := c.validateSchedules(path); err != nil {
 		return nil, err
 	}

@@ -27,6 +27,7 @@ import (
 // hands them to NewServer; the server itself does the per-request file I/O.
 type Config struct {
 	RosterPath       string // path to the roster file
+	OrgFile          string // optional org-truth path (--org-file / FLOTILLA_ORG_FILE); empty = default discovery
 	SnapshotPath     string // detector snapshot (default <roster-dir>/flotilla-detector-state.json)
 	AckPath          string // XO liveness ack file (default <roster-dir>/flotilla-xo-alive)
 	LedgerPath       string // CoS ledger (cfg.CosLedger; "" when the CoS mirror is inert)
@@ -109,7 +110,7 @@ func NewServer(cfg Config) (*Server, error) {
 		return nil, err
 	}
 	cfg.GoalsLayout = normalizeGoalsLayout(cfg.GoalsLayout)
-	rc, err := roster.Load(cfg.RosterPath)
+	rc, err := roster.LoadWith(cfg.RosterPath, roster.LoadOptions{OrgFile: cfg.OrgFile})
 	if err != nil {
 		return nil, err
 	}

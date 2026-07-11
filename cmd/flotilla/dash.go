@@ -36,6 +36,7 @@ func cmdDash(args []string) error {
 	ackPath := fs.String("ack-file", os.Getenv("FLOTILLA_ACK_FILE"), "XO liveness ack file (default <roster-dir>/flotilla-xo-alive)")
 	trackerPath := fs.String("tracker-file", os.Getenv("FLOTILLA_TRACKER_FILE"), "backlog markdown the history view reads (default <roster-dir>/.flotilla-state.md)")
 	goalsPath := fs.String("goals-file", os.Getenv("FLOTILLA_GOALS_FILE"), "goals file the Goals view reads (default <roster-dir>/fleet-goals.json)")
+	orgFile := fs.String("org-file", os.Getenv("FLOTILLA_ORG_FILE"), "optional org-truth file (default <roster-dir>/fleet-org.yaml when present; env FLOTILLA_ORG_FILE)")
 	bind := fs.String("bind", dash.DefaultBind, "local listen address (loopback only in this phase)")
 	// --repo pins the issue tracker's GitHub repo (owner/name). When empty it is
 	// resolved from the working directory the way `gh` does; if that fails the
@@ -76,7 +77,7 @@ func cmdDash(args []string) error {
 	// transport is the INBOUND seam, distinct from tr, the OUTBOUND notify medium —
 	// design Decision 1's direction asymmetry.) A construction failure is surfaced
 	// (fail-closed) rather than serving a dash whose route would nil-deref.
-	rc, err := roster.Load(*rosterPath)
+	rc, err := roster.LoadWith(*rosterPath, roster.LoadOptions{OrgFile: *orgFile})
 	if err != nil {
 		return fmt.Errorf("dash: load roster for the web transport: %w", err)
 	}
@@ -91,6 +92,7 @@ func cmdDash(args []string) error {
 	// malformed repo).
 	srv, err := dash.NewServer(dash.Config{
 		RosterPath:            *rosterPath,
+		OrgFile:               *orgFile,
 		SnapshotPath:          *snapshotPath,
 		AckPath:               *ackPath,
 		BacklogPath:           *trackerPath,
