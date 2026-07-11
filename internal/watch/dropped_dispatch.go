@@ -52,7 +52,7 @@ func DroppedDispatchFinishHook(
 			return
 		}
 		st := inbound.NewStore(path)
-		for _, a := range st.OnFinish(text) {
+		for _, a := range st.OnFinishInRoster(rosterDir, text) {
 			if a.Reinject {
 				log.Printf("flotilla watch: dropped-dispatch reinject %s from %s (nonce=%s)", agent, a.Entry.Sender, a.Entry.Nonce)
 				enqueue(Job{

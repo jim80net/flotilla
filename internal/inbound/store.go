@@ -148,8 +148,17 @@ func (s Store) Remove(id string) {
 // OnFinish evaluates all pending entries against turnFinal and persists ack removals /
 // deferral bumps. Returns actions for reinject or escalate-to-sender.
 func (s Store) OnFinish(turnFinal string) []Action {
+	return s.OnFinishInRoster("", turnFinal)
+}
+
+// OnFinishInRoster is OnFinish with optional rosterDir for durable consumed registry (#614).
+func (s Store) OnFinishInRoster(rosterDir, turnFinal string) []Action {
 	if s.path == "" {
 		return nil
+	}
+	var consumed ConsumedPredicate
+	if rosterDir != "" {
+		consumed = func(nonce string) bool { return IsConsumed(rosterDir, nonce) }
 	}
 	var actions []Action
 	if err := s.withLock(func() error {
@@ -160,7 +169,7 @@ func (s Store) OnFinish(turnFinal string) []Action {
 		if len(f.Pending) == 0 {
 			return nil
 		}
-		acts, remaining := evaluateFinish(f.Pending, turnFinal)
+		acts, remaining := evaluateFinishFiltered(f.Pending, turnFinal, consumed)
 		actions = acts
 		f.Pending = remaining
 		return s.save(f)

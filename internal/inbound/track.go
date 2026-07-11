@@ -125,11 +125,21 @@ func (t *Tracker) OnFinish(recipient, turnFinal string) []Action {
 	return actions
 }
 
+// ConsumedPredicate reports whether a dispatch nonce is durably consumed (#614).
+type ConsumedPredicate func(nonce string) bool
+
 // evaluateFinish is the shared finish-edge policy for Tracker and Store.
 // Deferrals counts confirmed reinject deliveries only (not enqueued wakes that were busy-dropped).
 func evaluateFinish(list []Entry, turnFinal string) (actions []Action, remaining []Entry) {
+	return evaluateFinishFiltered(list, turnFinal, nil)
+}
+
+func evaluateFinishFiltered(list []Entry, turnFinal string, consumed ConsumedPredicate) (actions []Action, remaining []Entry) {
 	for _, e := range list {
 		if Acknowledged(turnFinal, e) {
+			continue
+		}
+		if consumed != nil && e.Nonce != "" && consumed(e.Nonce) {
 			continue
 		}
 		if e.Deferrals >= 1 {
