@@ -15,7 +15,7 @@ const (
 	minArcQuiet = 45 * time.Second
 	maxArcQuiet = 90 * time.Second
 
-	channelUnknown = "unknown"
+	channelUnknown  = "unknown"
 	operatorUnknown = "unknown"
 )
 
