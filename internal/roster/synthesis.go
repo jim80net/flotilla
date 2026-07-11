@@ -1,6 +1,10 @@
 package roster
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/jim80net/flotilla/internal/org"
+)
 
 // Synthesis routing — the visibility-synthesis (B2) read/owed/post derivations over the
 // federation membership graph, plus the load-time acyclicity assertion. These are pure
@@ -36,13 +40,19 @@ func (c *Config) OwnedChannels(agent string) []string {
 	return out
 }
 
-// AgentsBelow returns the tier BELOW an agent — its synthesis READ set. For every
-// NON-fleet-command channel whose members list the agent, that channel's XO is a
-// subordinate. Two exclusions, both load-bearing: the channel's own XO (`!= agent` — read
-// strictly below, never your own channel: the self-loop guard) and fleet-command channels
-// (a broadcast channel's members are command targets, not subordinates — without this a
-// leaf desk would "synthesize" the meta-XO and the graph would cycle). De-duplicated and
-// order-stable.
+// AgentsBelow returns the tier BELOW an agent — its synthesis READ set.
+//
+// Org-truth v1 PR3: after Load attaches orgDAG, prefer the compiled DAG's Children
+// so visibility-synthesis and channel membership cannot diverge. During attachOrgDAG
+// (orgDAG still nil) and for agents not present in a file-sourced DAG, fall back to
+// the channel-membership rules below.
+//
+// Channel path: for every NON-fleet-command channel whose members list the agent, that
+// channel's XO is a subordinate. Two exclusions, both load-bearing: the channel's own
+// XO (`!= agent` — read strictly below, never your own channel: the self-loop guard) and
+// fleet-command channels (a broadcast channel's members are command targets, not
+// subordinates — without this a leaf desk would "synthesize" the meta-XO and the graph
+// would cycle). De-duplicated and order-stable.
 //
 // Fleet-command OWNER supplement: a seat provisioned ONLY into the broadcast channel
 // (no home channel listing the owner as parent yet) is still a synthesis read target
@@ -50,6 +60,66 @@ func (c *Config) OwnedChannels(agent string) []string {
 // (supervisor-observer home channels) and project-XOs already reachable via the
 // standard home-channel path are excluded.
 func (c *Config) AgentsBelow(agent string) []string {
+	if out, ok := c.orgChildren(agent); ok {
+		return out
+	}
+	return c.agentsBelowFromChannels(agent)
+}
+
+// AgentsAbove returns the synthesizing PARENTS of an agent — the agents OWED a synthesis
+// when this agent finishes.
+//
+// Org-truth v1 PR3: after Load attaches orgDAG, prefer the compiled DAG's Parents
+// (single primary when source=file per design §9; multi-parent when source=derived).
+// During attachOrgDAG and for agents absent from a file-sourced DAG, fall back to
+// channel membership.
+//
+// Channel path: members (minus self) of the NON-fleet-command channels the agent OWNS,
+// plus (for coordinator members of a fleet-command channel) the broadcast channel's
+// owner. Exact relational inverse of AgentsBelow on the channel path
+// (C ∈ AgentsBelow(P) ⟺ P ∈ AgentsAbove(C)).
+func (c *Config) AgentsAbove(agent string) []string {
+	if out, ok := c.orgParents(agent); ok {
+		return out
+	}
+	return c.agentsAboveFromChannels(agent)
+}
+
+// orgParents returns DAG parents when orgDAG covers this agent.
+// ok=false means fall back to channel derivation (orgDAG nil, or file DAG without this node).
+func (c *Config) orgParents(agent string) ([]string, bool) {
+	d := c.orgDAG
+	if d == nil {
+		return nil, false
+	}
+	if _, in := d.Nodes[agent]; !in && d.Source == org.SourceFile {
+		return nil, false
+	}
+	return cloneAgentList(d.Parents[agent]), true
+}
+
+// orgChildren returns DAG children when orgDAG covers this agent.
+func (c *Config) orgChildren(agent string) ([]string, bool) {
+	d := c.orgDAG
+	if d == nil {
+		return nil, false
+	}
+	if _, in := d.Nodes[agent]; !in && d.Source == org.SourceFile {
+		return nil, false
+	}
+	return cloneAgentList(d.Children[agent]), true
+}
+
+func cloneAgentList(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, len(in))
+	copy(out, in)
+	return out
+}
+
+func (c *Config) agentsBelowFromChannels(agent string) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, ch := range c.Bindings() {
@@ -77,15 +147,7 @@ func (c *Config) AgentsBelow(agent string) []string {
 	return out
 }
 
-// AgentsAbove returns the synthesizing PARENTS of an agent — the agents OWED a synthesis
-// when this agent finishes. It is the members (minus self) of the NON-fleet-command
-// channels the agent OWNS, plus (for coordinator members of a fleet-command channel) the
-// broadcast channel's owner. It is the EXACT relational inverse of AgentsBelow
-// (C ∈ AgentsBelow(P) ⟺ P ∈ AgentsAbove(C)). A boat whose owned channel lists two parents
-// marks BOTH owed; the root (whose only owned channel is fleet-command, or which owns no
-// non-empty channel) has no parent. It replaces the wrong-typed BindingForChannel for the
-// detector's owed-marking: the detector holds an agent NAME, not a channel id.
-func (c *Config) AgentsAbove(agent string) []string {
+func (c *Config) agentsAboveFromChannels(agent string) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, ch := range c.Bindings() {
@@ -227,6 +289,8 @@ func (c *Config) assertSynthesisAcyclic() error {
 // OwningXO resolves the XO that OWNS a desk — the cap-escalation target for the recursive
 // desk-heartbeat (#183 §8e: a wedged desk surfaces LOUDLY to its owning XO). It is topology-robust:
 //
+//  0. Org-truth v1 PR3: when the compiled org DAG names a PrimaryParent for the agent, that
+//     parent is the owner (file DAG single reports_to, or derived primary).
 //  1. Federated home-channel shape — a desk that OWNS a (non-fleet-command) home channel naming its
 //     parent: AgentsAbove(agent) resolves the parent (a leaf → its project-XO, a project-XO → the
 //     meta-XO). The first parent is the owner.
@@ -238,6 +302,14 @@ func (c *Config) assertSynthesisAcyclic() error {
 // targets, not an ownership relation — the same load-bearing exclusion AgentsBelow/AgentsAbove make).
 // Read-only over Bindings(); never mutates a Members slice.
 func (c *Config) OwningXO(agent, primaryXO string) string {
+	// Prefer org DAG primary parent when the agent is covered (file or derived).
+	if d := c.orgDAG; d != nil {
+		if _, in := d.Nodes[agent]; in || d.Source != org.SourceFile {
+			if p := d.PrimaryParent(agent); p != "" {
+				return p
+			}
+		}
+	}
 	if parents := c.AgentsAbove(agent); len(parents) > 0 {
 		return parents[0]
 	}
