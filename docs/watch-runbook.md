@@ -508,6 +508,21 @@ menu). A remote XO over the relay cannot answer an in-pane menu — keystrokes
 navigate it, they do not select. This is a flotilla coordination invariant, not a
 per-desk preference.
 
+### Operator notify + fleet status (#625)
+
+Coordinator-class Discord reports should include fleet posture. Use:
+
+```sh
+flotilla notify --from <coordinator> --with-fleet-status --file body.md
+```
+
+This appends a compressed **Status of the fleet** block from the detector
+snapshot (same source as `flotilla status --json`): histogram + working /
+blocked / awaiting lists, skipping the `--from` agent and its adjutant. If the
+body already has `**Status of the fleet**` or `**Fleet status**`, the flag is
+a no-op (idempotent). Snapshot read failure appends `(unavailable)` — never
+silent omit when the flag is set.
+
 ### Chapter-end auto-recycle (#443)
 
 When a desk **finishes a meaningful body of work** (lane-done: backlog unblocked

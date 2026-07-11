@@ -149,6 +149,22 @@ channel on your phone, and read every reply back. It's optional — the clock an
 The XO replies to the user on Discord via `flotilla notify --from xo …` and
 stays quiet on routine traffic — see `docs/xo-doctrine.md`.
 
+Coordinator notifies that report work to the operator should include fleet
+posture. Prefer the mechanical flag (not a wrapper script):
+
+```sh
+flotilla notify --from xo --with-fleet-status --file - <<'EOF'
+Bottom line: deploy verified; no action on your side.
+EOF
+```
+
+`--with-fleet-status` appends a compressed **Status of the fleet** block from
+the same detector snapshot as `flotilla status --json` (working / blocked /
+awaiting lists; skips the `--from` agent and its adjutant). If the body already
+contains `**Status of the fleet**` or `**Fleet status**`, nothing is added
+(idempotent). If the snapshot cannot be read, it appends `(unavailable)` —
+never silently omits when the flag is set (#625).
+
 ## 7. (Optional) Fleet goals — validate, compile, link
 
 When the user wants a **goals map** in `flotilla dash` (not just the flat issue
