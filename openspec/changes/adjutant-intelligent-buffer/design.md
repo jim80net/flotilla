@@ -152,4 +152,4 @@ and buffer substrate only (`adjutant brief` footer: "prompt-contract only in thi
 | `TestInjectorBusyDeferDoesNotRefanoutAdjutantObs592` | No re-buffer / leader fanout on busy defer |
 | `TestEnqueueOperatorSeamForwardsVerbatim593` | Seam verbatim to leader |
 | Live: one Discord line per operator message to cos / flotilla-dev-adj | Audit mirror discipline |
-| Phase 2: arc + disaggregate fixtures | Coalesce / discrete dispatch judgment (TBD) |
+| Phase 2: arc + disaggregate fixtures | Mechanical coalesce shipped in `adjutant-buffer-v2` B1 (#607); disaggregate / judgment remain B3+ |

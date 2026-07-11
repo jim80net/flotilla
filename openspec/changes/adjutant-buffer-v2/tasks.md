@@ -12,34 +12,39 @@
 - [x] 0.3 `specs/watch/spec.md` — B1 requirements + scenarios
 - [x] 0.4 `tasks.md` — this file
 - [x] 0.5 Update `outline.md` status (unblocked; points at full openspec)
-- [ ] 0.6 flotilla-dev design gate
-- [ ] 0.7 CoS merge of openspec PR
+- [x] 0.6 flotilla-dev design gate
+- [x] 0.7 CoS merge of openspec PR — #604 merged (`efaefa2`)
 
 **No implementation in B0.**
 
 ## B1 — Mechanical coalesce (after B0 merge)
 
+**Shipped:** #607 squash-merged to main as `69ab033` (full B1 stack).  
+**Superseded track:** #606 B1a-only closed (CONFLICTING with main after #607).
+
 ### PR-B1a — Schema + assign
 
-- [ ] 1.1 Extend `Item` with `arc_id`, `opened_at`, `message_ids`, `channel_id`, `operator_id`
-- [ ] 1.2 `AssignArc(leader, channel, operator, now, quiet)` — open or join
-- [ ] 1.3 `AppendOperator` records channel/operator + arc metadata
-- [ ] 1.4 Legacy items without arc fields: read-compatible
-- [ ] 1.5 Unit tests: same key joins; different channel/op split; quiet=0 singleton
+- [x] 1.1 Extend `Item` with `arc_id`, `opened_at`, `message_ids`, `channel_id`, `operator_id`
+- [x] 1.2 `AssignArc(leader, channel, operator, now, quiet)` — open or join
+- [x] 1.3 `AppendOperator` records channel/operator + arc metadata
+- [x] 1.4 Legacy items without arc fields: read-compatible
+- [x] 1.5 Unit tests: same key joins; different channel/op split; quiet=0 singleton
 
 ### PR-B1b — Seam group forward
 
-- [ ] 2.1 `GroupByArc(items) []ArcGroup` ordered by first `At`
-- [ ] 2.2 Seam drain: one leader payload per closed arc (verbatim bodies + delimiter)
-- [ ] 2.3 Claim-scoped clear removes all items in forwarded arc
-- [ ] 2.4 Quiet eligibility: arc closed when `now - lastAt >= quiet`
-- [ ] 2.5 Wire `FLOTILLA_ADJUTANT_ARC_QUIET` in `cmd/flotilla/watch.go`
-- [ ] 2.6 Regression: #592 busy-defer, #593 single ingress green
+- [x] 2.1 `GroupByArc(items) []ArcGroup` ordered by first `At`
+- [x] 2.2 Seam drain: one leader payload per arc (verbatim bodies + delimiter)
+- [x] 2.3 Claim-scoped clear removes all items in forwarded arc (`recordItems: g.Items`)
+- [x] 2.4 Quiet at **assign** (join if last `At` within quiet); `ArcQuietClosed` /
+  `FilterArcReady` helpers shipped for later holding; seam **force-forwards**
+  undelivered arcs (design §3.3 force-close allowance)
+- [x] 2.5 Wire `FLOTILLA_ADJUTANT_ARC_QUIET` in `cmd/flotilla/watch.go`
+- [x] 2.6 Regression: #592 busy-defer, #593 single ingress green
 
 ### PR-B1c — Docs + runbook
 
-- [ ] 3.1 Watch-runbook blurb: arc quiet env + behavior
-- [ ] 3.2 Archive note linking Phase 2 tasks in `adjutant-intelligent-buffer` → this change
+- [x] 3.1 Watch-runbook blurb: arc quiet env + behavior (`docs/watch-runbook.md` §3c)
+- [x] 3.2 Archive note linking Phase 2 tasks in `adjutant-intelligent-buffer` → this change
 
 ## B2+ (not in first implement wave)
 

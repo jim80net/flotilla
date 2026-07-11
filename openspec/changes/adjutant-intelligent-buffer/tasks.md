@@ -14,15 +14,19 @@
 
 ## Phase 2 — coalesce / disaggregate judgment product
 
-- [ ] 2.1 Buffer schema: optional `arc_id` / grouping metadata for operator items
+Mechanical coalesce (schema + quiet window + seam group forward) **shipped** in
+`openspec/changes/adjutant-buffer-v2` B1 — PR #607 (`69ab033`). Remaining Phase 2
+items are **judgment / disaggregate / live canary**, not the mechanical buffer.
+
+- [x] 2.1 Buffer schema: optional `arc_id` / grouping metadata for operator items → **buffer-v2 B1**
 - [ ] 2.2 Adjutant prompt + charter: arc assembly window policy (documented in charter sidecar)
-- [ ] 2.3 Intent segmentation: discrete dispatch API with provenance (`flotilla send` / route)
-- [ ] 2.4 Mechanical arc coalescing helper (time window + channel + operator id) — optional automation
-- [ ] 2.5 Fixtures + tests: multi-message arc, multi-intent split
-- [ ] 2.6 Live verify on cos / flotilla-dev-adj with operator arc scenarios
+- [ ] 2.3 Intent segmentation: discrete dispatch API with provenance (`flotilla send` / route) → buffer-v2 **B3/B4**
+- [x] 2.4 Mechanical arc coalescing helper (time window + channel + operator id) → **buffer-v2 B1** (`AssignArc` / `GroupByArc` / `FLOTILLA_ADJUTANT_ARC_QUIET`)
+- [ ] 2.5 Fixtures + tests: multi-message arc **done in B1**; multi-intent split remains (B3)
+- [ ] 2.6 Live verify with operator arc scenarios → buffer-v2 **B5**
 
 ## Deploy
 
-- [ ] 3.1 Merge PR #594
-- [ ] 3.2 Rebuild watch binary + restart `flotilla-watch`
+- [x] 3.1 Merge PR #594
+- [ ] 3.2 Rebuild watch binary + restart `flotilla-watch` (host deploy after #607)
 - [ ] 3.3 Verify one Discord audit line per operator message (no dual-fork spam)
