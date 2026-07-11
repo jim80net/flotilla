@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# pre-commit — local backstop before a commit is created.
+#
+# Public/private partition: scans ADDED lines in the STAGED index through
+# scripts/check-private-boundary.sh --file (same guard CI uses).
+#
+# BACKSTOP only — `--no-verify` bypasses this; CI's private-boundary job remains
+# the enforcing gate of record. Pair with pre-push (push-range scan) for a second
+# local layer. Install via scripts/install-hooks.sh (sets core.hooksPath →
+# scripts/hooks).
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+guard="$repo_root/scripts/check-private-boundary.sh"
+if [ ! -f "$guard" ]; then
+  echo "pre-commit: missing $guard — skip partition scan" >&2
+  exit 0
+fi
+[ -x "$guard" ] || guard="bash $guard"
+
+# Nothing staged → nothing to scan (amend --only, empty commit attempts, etc.).
+if git diff --cached --quiet 2>/dev/null; then
+  exit 0
+fi
+
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+
+# Staged added lines only (drop +++ file-header lines). Leading + is harmless to
+# the leak patterns (substring match), same shape as scripts/hooks/pre-push.
+git diff --cached -- . | grep '^+' | grep -v '^+++' > "$tmp" || true
+
+if [ ! -s "$tmp" ]; then
+  exit 0 # no added lines (deletes/renames-only, mode bits, etc.)
+fi
+
+# Fail-closed: guard exits 1 on denylist/generic hit (blocks the commit) and 0 on
+# clean-or-advisory-warn-only (WARN prints but does not block).
+$guard --file "$tmp"

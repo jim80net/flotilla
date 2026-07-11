@@ -26,10 +26,12 @@ Enforcement (but the enforcement is a **net, not a substitute** for the framing
 above):
 - `docs/private-public-boundary.md` — the full doctrine (what's private, what's
   the product, the breach runbook).
-- `scripts/check-private-boundary.sh` + the `private-boundary` CI job — fails on
-  a known-private token. A denylist only catches what it already knows; it does
-  NOT catch a novel deployment term you coin. **The partition is your
-  responsibility; the guard is the backstop.**
+- `scripts/check-private-boundary.sh` + local hooks (`scripts/hooks/pre-commit`
+  on staged lines, `scripts/hooks/pre-push` on push-range lines) + the
+  `private-boundary` CI job — fails on a known-private token. Local hooks are
+  backstops (`--no-verify` bypasses); CI is the enforcing gate. A denylist only
+  catches what it already knows; it does NOT catch a novel deployment term you
+  coin. **The partition is your responsibility; the guard is the backstop.**
 
 ## 2. The private firewall — where deliberation lives
 

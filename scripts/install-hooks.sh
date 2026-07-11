@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # install-hooks.sh — point this repo's git at the version-controlled hooks in
-# scripts/hooks (currently: the pre-push partition backstop). Idempotent.
+# scripts/hooks (pre-commit + pre-push partition backstops). Idempotent.
 #
 #   scripts/install-hooks.sh
 #
@@ -11,5 +11,8 @@ set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 git -C "$repo_root" config core.hooksPath scripts/hooks
+chmod +x "$repo_root/scripts/hooks/pre-commit"
 chmod +x "$repo_root/scripts/hooks/pre-push"
-echo "installed: core.hooksPath → scripts/hooks (pre-push: gofmt + go vet + partition backstop)"
+echo "installed: core.hooksPath → scripts/hooks"
+echo "  pre-commit: private-boundary scan of staged + lines (belt-and-suspenders with CI)"
+echo "  pre-push:   gofmt + go vet + private-boundary scan of push-range + lines"
