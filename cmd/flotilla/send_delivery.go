@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/deliver"
+	"github.com/jim80net/flotilla/internal/dispatch"
 	"github.com/jim80net/flotilla/internal/inbound"
 	"github.com/jim80net/flotilla/internal/outbox"
 	"github.com/jim80net/flotilla/internal/roster"
@@ -108,6 +109,8 @@ func enqueueOrFailSend(rosterPath, sender, recipient, message string, deliveryEr
 	if err != nil {
 		return fmt.Errorf("%v; durable outbox enqueue also failed: %w", deliveryErr, err)
 	}
+	// Desk-visible machine-readable ack first (#475 / #614) so monitors can grep QUEUED.
+	fmt.Println(dispatch.FormatQueuedAck(id, sender, recipient, deduped))
 	if deduped {
 		fmt.Fprintf(os.Stderr, "flotilla: %v — send already queued as %s; no duplicate added\n", deliveryErr, id)
 		fmt.Printf("send already queued as %s — will deliver when %s is idle\n", id, recipient)
