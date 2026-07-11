@@ -230,7 +230,7 @@ func TestDroppedDispatch_ChapterHoldDefersReinject(t *testing.T) {
 	}
 }
 
-func TestUndeliveredDispatchSweep_ExactlyOnce(t *testing.T) {
+func TestUndeliveredDispatchSweep_NoAdjutant_AlertsOperatorOnce(t *testing.T) {
 	dir := t.TempDir()
 	msg, _, err := inbound.AppendDispatchNonce("completion report that sat in outbox too long pad")
 	if err != nil {
@@ -248,13 +248,154 @@ func TestUndeliveredDispatchSweep_ExactlyOnce(t *testing.T) {
 	}
 	var alerts []string
 	set := NewUndeliveredAlertSet()
-	n1 := UndeliveredDispatchSweep(dir, time.Now, func(s string) { alerts = append(alerts, s) }, set)
-	n2 := UndeliveredDispatchSweep(dir, time.Now, func(s string) { alerts = append(alerts, s) }, set)
+	hooks := UndeliveredHooks{
+		AlertOperator: func(s string) { alerts = append(alerts, s) },
+		Fired:         set,
+	}
+	n1 := UndeliveredDispatchSweep(dir, hooks)
+	n2 := UndeliveredDispatchSweep(dir, hooks)
 	if n1 != 1 || n2 != 0 {
 		t.Fatalf("sweep counts n1=%d n2=%d, want 1 then 0", n1, n2)
 	}
 	if len(alerts) != 1 || !strings.Contains(alerts[0], "dispatch undelivered") {
 		t.Fatalf("alerts = %v", alerts)
+	}
+}
+
+// #628: with AdjutantFor resolved, first age crossing enqueues adj and does NOT call alert.
+func TestUndeliveredDispatchSweep_AdjutantFirst_NoOperatorOnL1(t *testing.T) {
+	dir := t.TempDir()
+	msg, nonce, err := inbound.AppendDispatchNonce("implement portable work that was delivered but unacked pad")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := inbound.Record(dir, inbound.Entry{
+		ID: "in1", Sender: "xo", Recipient: "backend", Message: msg, Nonce: nonce,
+		DeliveredAt: time.Now().UTC().Add(-20 * time.Minute), // past UndeliveredInboundAge (15m)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var alerts, adjMsgs []string
+	var adjAgent string
+	set := NewUndeliveredAlertSet()
+	hooks := UndeliveredHooks{
+		ResolveAdjutant: func(recipient string) string {
+			if recipient == "backend" {
+				return "xo-adj"
+			}
+			return ""
+		},
+		EnqueueAdjutant: func(adj, message string) {
+			adjAgent = adj
+			adjMsgs = append(adjMsgs, message)
+		},
+		AlertOperator: func(s string) { alerts = append(alerts, s) },
+		Fired:         set,
+	}
+	n := UndeliveredDispatchSweep(dir, hooks)
+	if n != 1 {
+		t.Fatalf("journal count = %d, want 1", n)
+	}
+	if adjAgent != "xo-adj" || len(adjMsgs) != 1 {
+		t.Fatalf("adj enqueue = agent %q msgs %v", adjAgent, adjMsgs)
+	}
+	if !strings.Contains(adjMsgs[0], "undelivered-dispatch triage") || !strings.Contains(adjMsgs[0], nonce) {
+		t.Fatalf("adj message missing triage/nonce:\n%s", adjMsgs[0])
+	}
+	if len(alerts) != 0 {
+		t.Fatalf("operator must not fire on L1 when adjutant set: %v", alerts)
+	}
+	// Exactly-once L1.
+	UndeliveredDispatchSweep(dir, hooks)
+	if len(adjMsgs) != 1 || len(alerts) != 0 {
+		t.Fatalf("second L1-age tick must not re-fire: adj=%d alerts=%v", len(adjMsgs), alerts)
+	}
+}
+
+// #628: second-layer age after L1 adjutant fire → operator once.
+func TestUndeliveredDispatchSweep_AdjutantThenOperatorL2(t *testing.T) {
+	dir := t.TempDir()
+	msg, nonce, err := inbound.AppendDispatchNonce("long unacked inbound for second-layer operator path pad")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Age past 3×15m = 45m for L2.
+	deliveredAt := time.Now().UTC().Add(-50 * time.Minute)
+	if err := inbound.Record(dir, inbound.Entry{
+		ID: "in2", Sender: "xo", Recipient: "backend", Message: msg, Nonce: nonce,
+		DeliveredAt: deliveredAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var alerts, adjMsgs []string
+	set := NewUndeliveredAlertSet()
+	hooks := UndeliveredHooks{
+		ResolveAdjutant: func(string) string { return "xo-adj" },
+		EnqueueAdjutant: func(_, message string) { adjMsgs = append(adjMsgs, message) },
+		AlertOperator:   func(s string) { alerts = append(alerts, s) },
+		Fired:           set,
+	}
+	// First tick: L1 only even though age already past L2 (no dual-fire).
+	UndeliveredDispatchSweep(dir, hooks)
+	if len(adjMsgs) != 1 || len(alerts) != 0 {
+		t.Fatalf("first crossing: adj=%d alerts=%d want 1/0", len(adjMsgs), len(alerts))
+	}
+	// Second tick: L1 already marked; age still past L2 → operator once.
+	UndeliveredDispatchSweep(dir, hooks)
+	if len(adjMsgs) != 1 {
+		t.Fatalf("adj must not re-fire: %d", len(adjMsgs))
+	}
+	if len(alerts) != 1 || !strings.Contains(alerts[0], "second-layer") {
+		t.Fatalf("L2 operator alerts = %v", alerts)
+	}
+	// Third tick: no re-fire.
+	UndeliveredDispatchSweep(dir, hooks)
+	if len(alerts) != 1 {
+		t.Fatalf("L2 exactly-once broken: %v", alerts)
+	}
+}
+
+func TestResolveUndeliveredAdjutant_Order(t *testing.T) {
+	// Prefer owning-XO adjutant over primary.
+	got := ResolveUndeliveredAdjutant(
+		func(c string) string {
+			if c == "alpha-xo" {
+				return "alpha-adj"
+			}
+			if c == "meta" {
+				return "meta-adj"
+			}
+			return ""
+		},
+		func(agent string) string {
+			if agent == "backend" {
+				return "alpha-xo"
+			}
+			return "meta"
+		},
+		"meta",
+		"backend",
+	)
+	if got != "alpha-adj" {
+		t.Fatalf("got %q, want alpha-adj", got)
+	}
+	// Fall back to primary adjutant when owner has none.
+	got = ResolveUndeliveredAdjutant(
+		func(c string) string {
+			if c == "meta" {
+				return "meta-adj"
+			}
+			return ""
+		},
+		func(string) string { return "alpha-xo" },
+		"meta",
+		"backend",
+	)
+	if got != "meta-adj" {
+		t.Fatalf("fallback got %q", got)
+	}
+	if ResolveUndeliveredAdjutant(nil, nil, "xo", "desk") != "" {
+		t.Fatal("nil adjutantFor")
 	}
 }
 

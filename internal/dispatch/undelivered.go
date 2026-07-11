@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/inbound"
@@ -17,8 +18,33 @@ const UndeliveredOutboxAge = outbox.StaleMaxAge
 // UndeliveredInboundAge is how long a confirmed-delivered dispatch may remain
 // unacknowledged in the recipient inbound ledger before a loud undelivered-ack
 // surface (#614). Distinct from the #472 reinject path (first miss reinjects;
-// second escalates) — this is the age-based LOUD observability arm.
+// second escalates) — this is the age-based LOUD observability arm (layer 1:
+// adjutant triage per #628).
 const UndeliveredInboundAge = 15 * time.Minute
+
+// OperatorLayerMultiplier is how many × the layer-1 age bound must pass before
+// the operator Discord webhook is a second-layer surface (#628). Layer 1 is
+// always journal + adjutant (when configured); operator is not dual-fired on
+// the first crossing.
+const OperatorLayerMultiplier = 3
+
+// OperatorLayerOutboxAge is the second-layer age for busy-outbox undelivered.
+func OperatorLayerOutboxAge() time.Duration {
+	return OperatorLayerMultiplier * UndeliveredOutboxAge
+}
+
+// OperatorLayerInboundAge is the second-layer age for unacked inbound.
+func OperatorLayerInboundAge() time.Duration {
+	return OperatorLayerMultiplier * UndeliveredInboundAge
+}
+
+// OperatorLayerAge returns the second-layer age bound for a report kind.
+func OperatorLayerAge(kind string) time.Duration {
+	if kind == "inbound-ack" {
+		return OperatorLayerInboundAge()
+	}
+	return OperatorLayerOutboxAge()
+}
 
 // UndeliveredReport is one loud undelivered observation for journal / escalate.
 type UndeliveredReport struct {
@@ -113,6 +139,54 @@ func ScanUndelivered(rosterDir string, now time.Time) []UndeliveredReport {
 	out := ScanUndeliveredOutbox(rosterDir, now, UndeliveredOutboxAge)
 	out = append(out, ScanUndeliveredInbound(rosterDir, now, UndeliveredInboundAge)...)
 	return out
+}
+
+// FormatAdjutantTriage builds the detector-wake body for layer-1 adjutant routing (#628).
+// Actionable: nonce, path, age, recommended triage steps. No deployment-specific names.
+func FormatAdjutantTriage(r UndeliveredReport) string {
+	nonce := emptyDash(r.Nonce)
+	var b strings.Builder
+	b.WriteString("[flotilla undelivered-dispatch triage]\n")
+	b.WriteString("kind: ")
+	b.WriteString(r.Kind)
+	b.WriteString("\n")
+	b.WriteString("nonce: ")
+	b.WriteString(nonce)
+	b.WriteString("\n")
+	b.WriteString("id: ")
+	b.WriteString(emptyDash(r.ID))
+	b.WriteString("\n")
+	b.WriteString("from→to: ")
+	b.WriteString(emptyDash(r.Sender))
+	b.WriteString("→")
+	b.WriteString(emptyDash(r.Recipient))
+	b.WriteString("\n")
+	b.WriteString("age: ")
+	b.WriteString(r.Age.String())
+	b.WriteString("\n\n")
+	b.WriteString("Journal: ")
+	b.WriteString(r.Message)
+	b.WriteString("\n\n")
+	b.WriteString("Recommended triage:\n")
+	switch r.Kind {
+	case "inbound-ack":
+		b.WriteString("1. Check recipient pane (idle mid-turn without turn-final ack? crashed? busy?)\n")
+		b.WriteString("2. If work is done: ensure turn-final echoes the nonce, or durable-consume it\n")
+		b.WriteString("3. If still owed: reinject / re-send when idle (`flotilla send`)\n")
+		b.WriteString("4. Escalate to operator only if stuck after triage (second-layer age)\n")
+	default:
+		b.WriteString("1. Check recipient pane (busy mid-turn is normal; crashed/blocked is not)\n")
+		b.WriteString("2. Confirm outbox still holds the send; watch will deliver when idle\n")
+		b.WriteString("3. If stuck/wedged: clear wedge or re-queue; do not silent-drop\n")
+		b.WriteString("4. Escalate to operator only if stuck after triage (second-layer age)\n")
+	}
+	return b.String()
+}
+
+// FormatOperatorL2 appends second-layer context so the operator Discord line is
+// distinct from a raw first-fire and names that adjutant triage already ran.
+func FormatOperatorL2(r UndeliveredReport) string {
+	return r.Message + " — second-layer: still undelivered after adjutant triage window; operator action may be needed"
 }
 
 func emptyDash(s string) string {

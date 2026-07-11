@@ -509,6 +509,14 @@ menu). A remote XO over the relay cannot answer an in-pane menu — keystrokes
 navigate it, they do not select. This is a flotilla coordination invariant, not a
 per-desk preference.
 
+### Undelivered dispatch → adjutant first (#628)
+
+`dispatch undelivered` / `dispatch undelivered-ack` journal lines always stay loud.
+When the recipient's owning XO (or primary XO) has an `adjutant_for` binding, the
+first age crossing injects a triage wake to that adjutant — **not** the operator
+webhook. Operator Discord is second-layer (after ~3× the first age, if still
+undelivered). No adjutant → operator remains the only Discord surface.
+
 ### Operator notify + fleet status (#625)
 
 Coordinator-class Discord reports should include fleet posture. Use:
