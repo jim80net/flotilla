@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/dispatch"
 	"github.com/jim80net/flotilla/internal/inbound"
 	"github.com/jim80net/flotilla/internal/outbox"
 	"github.com/jim80net/flotilla/internal/roster"
@@ -93,6 +94,17 @@ func TestBouncedSendLandsInOutbox(t *testing.T) {
 	}
 	if got[0].EnqueuedAt.IsZero() {
 		t.Fatal("enqueued_at must be set")
+	}
+}
+
+// #475 desk-visible queued ack: machine-readable QUEUED line for monitors.
+func TestFormatQueuedAck_Visible(t *testing.T) {
+	line := dispatch.FormatQueuedAck("deadbeef", "alpha", "xo", false)
+	if !strings.Contains(line, "QUEUED") || !strings.Contains(line, "status=busy_outbox") {
+		t.Fatalf("queued ack not desk-visible: %q", line)
+	}
+	if !strings.Contains(dispatch.FormatQueuedAck("x", "a", "b", true), "already_queued") {
+		t.Fatal("deduped ack missing already_queued")
 	}
 }
 

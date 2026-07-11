@@ -942,7 +942,12 @@ func cmdWatch(args []string) error {
 		if sched != nil {
 			detCfg.ScheduleOnTick = sched.Tick
 		}
-		detCfg.OutboxSweepOnTick = func() { outboxSweeper.SweepAll() }
+		undeliveredAlerted := watch.NewUndeliveredAlertSet()
+		detCfg.OutboxSweepOnTick = func() {
+			outboxSweeper.SweepAll()
+			// #614: loud undelivered scan (outbox age + inbound unacked age).
+			watch.UndeliveredDispatchSweep(rosterDir, nil, alert, undeliveredAlerted)
+		}
 		det := watch.NewDetectorWithSynthSidecar(detCfg, *snapshotPath, synthSidecarPath)
 		deskStateLabels = det.DeskStateLabels
 		endAutoSwitch = det.EndAutoSwitchFlight

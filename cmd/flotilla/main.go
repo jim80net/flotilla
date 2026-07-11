@@ -40,6 +40,8 @@ func run(args []string) error {
 	switch args[0] {
 	case "send":
 		return cmdSend(args[1:])
+	case "dispatch-status":
+		return cmdDispatchStatus(args[1:])
 	case "notify":
 		return cmdNotify(args[1:])
 	case "brief":
@@ -99,6 +101,7 @@ func usage() {
 usage:
   flotilla send --from <sender> <agent> <message>     inline message
   flotilla send --from <sender> --file <path> <agent> message body from a file ('-' = stdin)
+  flotilla dispatch-status [--roster <path>] <nonce>  consumed / queued / delivered / undelivered (#614)
   flotilla notify --from <agent> <message>            post to the operator under <agent>'s webhook (no tmux)
   flotilla notify --from <agent> --file <path>        notify body from a file ('-' = stdin)
   flotilla brief [--all] [<desk>] [--audience <who>]  elicit a reader-modeled brief; the shipped mirror publishes it to the desk's channel (secret-free; not notify)
@@ -358,7 +361,11 @@ func cmdSend(args []string) error {
 		return fmt.Errorf("append dispatch nonce: %w", err)
 	}
 
-	cfg, err := roster.Load(*rosterPath)
+	resolvedRoster, err := resolveRosterPath(*rosterPath)
+	if err != nil {
+		return err
+	}
+	cfg, err := roster.Load(resolvedRoster)
 	if err != nil {
 		return err
 	}
@@ -383,7 +390,7 @@ func cmdSend(args []string) error {
 		return err
 	}
 	// Inline retry-with-backoff, then durable per-sender outbox on sustained busy (#475).
-	queued, err := deliverOrQueueSend(cfg, *rosterPath, *from, agentName, drv, pane, message)
+	queued, err := deliverOrQueueSend(cfg, resolvedRoster, *from, agentName, drv, pane, message)
 	if err != nil {
 		return err
 	}
