@@ -2026,7 +2026,7 @@ html, body { overflow-x: clip; }
   }
 }
 /* Presenter chrome — each XO presents with an avatar (assets/presenter-<slug>.png or initials).
-   Title form: "Family Office · claim" — JS splits presenter vs claim. */
+   Title form: "Alpha XO · claim" — JS splits presenter vs claim. */
 .pd-presenter {
   display: flex; align-items: center; gap: .75rem;
   margin: 0 0 .85rem;

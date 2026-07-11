@@ -235,8 +235,8 @@
 
   function curSlides() { return parseSlides((PARADES[pIdx] || {}).slides || ""); }
 
-  // Presenter chrome (operator 2026-07-11): each XO presents. Title form
-  //   "Family Office · Every monitor says the same thing"
+  // Presenter chrome: each XO presents. Title form
+  //   "Alpha XO · Every monitor says the same thing"
   // First segment before " · " is the presenter; the rest is the claim title.
   // Avatar: assets/presenter-<slug>.png (slug = lowercased presenter, non-alnum → -).
   // Missing image → circular initials fallback (no broken-img chrome).

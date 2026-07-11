@@ -25,19 +25,19 @@ source per claim.
 Present **each XO** as the speaker on their own slides. Title form:
 
 ```
-# Family Office · Every monitor says the same thing
+# Alpha XO · Every monitor says the same thing
 ```
 
 The renderer splits on ` · ` (space-middle-dot-space):
 
 | segment | becomes |
 | --- | --- |
-| left (`Family Office`) | presenter badge — name + "presenting" + avatar |
+| left (`Alpha XO`) | presenter badge — name + "presenting" + avatar |
 | right (the claim) | large slide title |
 
-**Avatar assets** live next to the deck: `state/parades/<date>/assets/presenter-<slug>.png`
+**Avatar assets** live next to the deck: `…/parades/<date>/assets/presenter-<slug>.png`
 where `slug` is the lowercased presenter with non-alnum runs collapsed to `-`
-(`Family Office` → `presenter-family-office.png`). Missing file → circular initials
+(`Alpha XO` → `presenter-alpha-xo.png`). Missing file → circular initials
 fallback (no broken-image chrome). Each XO owns a durable visual identity — regenerate
 or evolve the portrait when the seat re-introduces itself; keep the same slug so decks
 stay stable.
@@ -45,18 +45,18 @@ stay stable.
 Still valid as a multi-slide arc for one XO:
 
 ```
-# Family Office · Proud of
+# Alpha XO · Proud of
 - …claim… ([source](https://…))
 ---
-# Family Office · Next
+# Alpha XO · Next
 - …
 ---
-# Family Office · Demo
-![what shipped](fo-demo.png)
+# Alpha XO · Demo
+![what shipped](alpha-demo.png)
 ```
 
 Spine slides without a product owner (hook, fleet ask, button) may omit the prefix
-or use `Chief of Staff · …`.
+or use a fleet-coordinator presenter name.
 
 ## (c) Decisions as briefs — leverage the 6-element decision brief
 
