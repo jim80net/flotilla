@@ -1,6 +1,9 @@
 package adjutantbuffer
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // OperatorReasonPrefix tags durable buffer items that hold operator conversation (#593).
 const OperatorReasonPrefix = "operator:"
@@ -46,6 +49,46 @@ func HasOperatorMessage(path, messageID string) bool {
 		}
 	}
 	return false
+}
+
+// AppendOperator persists one operator relay with arc metadata (B1). Duplicate messageID
+// is a no-op (#592/#593 busy-defer hygiene). quiet <= 0 gives each message a unique arc.
+func AppendOperator(path, leader, messageID, body, channelID, operatorID string, now time.Time, quiet time.Duration) error {
+	if path == "" || leader == "" || messageID == "" {
+		return nil
+	}
+	if HasOperatorMessage(path, messageID) {
+		return nil
+	}
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return nil
+	}
+	f, _, err := load(path)
+	if err != nil {
+		return err
+	}
+	if f.Leader == "" {
+		f.Leader = leader
+	}
+	now = now.UTC()
+	quiet = ClampArcQuiet(quiet)
+	arcID, openedAt := AssignArc(f.Items, leader, channelID, operatorID, now, quiet)
+	reason := FormatOperatorReason(messageID, body)
+	it := Item{
+		At:         now,
+		Reason:     reason,
+		ArcID:      arcID,
+		OpenedAt:   openedAt,
+		MessageIDs: []string{messageID},
+		ChannelID:  NormalizeChannelID(channelID),
+		OperatorID: NormalizeOperatorID(operatorID),
+	}
+	if norm, ok := normalizeItem(it); ok {
+		it = norm
+	}
+	f.Items = append(f.Items, it)
+	return save(path, f)
 }
 
 // PartitionItems splits operator conversation items from system/detector buffer items.

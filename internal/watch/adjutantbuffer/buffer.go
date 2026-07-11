@@ -16,6 +16,12 @@ type Item struct {
 	Reason    string    `json:"reason"`
 	Key       string    `json:"key,omitempty"`
 	StateHash string    `json:"state_hash,omitempty"`
+	// B1 arc metadata (optional on read of legacy items):
+	ArcID      string    `json:"arc_id,omitempty"`
+	OpenedAt   time.Time `json:"opened_at,omitempty"`
+	MessageIDs []string  `json:"message_ids,omitempty"`
+	ChannelID  string    `json:"channel_id,omitempty"`
+	OperatorID string    `json:"operator_id,omitempty"`
 }
 
 // File is the durable layer queue sidecar (flotilla-<xo>-buffer.json).
