@@ -547,18 +547,20 @@ func cmdNotify(args []string) error {
 	// ledger. Strictly best-effort + observe-only — the operator-facing post already
 	// succeeded, so it must never fail notify.
 	mirrorNotifyToLedger(*rosterPath, *from, message)
-	stampRecentNotify(*rosterPath, *from)
+	// #595 / #628: stamp time + body fingerprint so finish-edge / mirror-self skip Discord.
+	stampRecentNotifyBody(*rosterPath, *from, message)
 	return nil
 }
 
-// stampRecentNotify records a successful notify so finish-edge auto-mirror skips Discord
-// within the suppression window (#595). Best-effort — never fails notify.
-func stampRecentNotify(rosterPath, agent string) {
+// stampRecentNotifyBody records a successful notify so finish-edge auto-mirror skips Discord
+// within the suppression window (#595) and same-body window (#628 dual-egress residual).
+// Best-effort — never fails notify.
+func stampRecentNotifyBody(rosterPath, agent, body string) {
 	if rosterPath == "" || agent == "" {
 		return
 	}
 	path := roster.LayerLastNotifyPath(filepath.Dir(rosterPath), agent)
-	if err := watch.RecordRecentNotify(path, time.Now().UTC()); err != nil {
+	if err := watch.RecordRecentNotify(path, time.Now().UTC(), body); err != nil {
 		fmt.Fprintf(os.Stderr, "flotilla: WARNING — recent-notify stamp failed (notify succeeded): %v\n", err)
 	}
 }

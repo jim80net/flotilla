@@ -127,7 +127,7 @@ func TestDeskMirrorSkipsDiscordRecentNotify595(t *testing.T) {
 	dir := t.TempDir()
 	stampPath := roster.LayerLastNotifyPath(dir, "cos")
 	fixed := time.Date(2026, 7, 10, 16, 0, 0, 0, time.UTC)
-	if err := watch.RecordRecentNotify(stampPath, fixed.Add(-90*time.Second)); err != nil {
+	if err := watch.RecordRecentNotify(stampPath, fixed.Add(-90*time.Second), "prior notify body"); err != nil {
 		t.Fatal(err)
 	}
 	var lines []string
@@ -147,8 +147,13 @@ func TestDeskMirrorSkipsDiscordRecentNotify595(t *testing.T) {
 	if posted != 0 {
 		t.Fatalf("posted %d chunks, want 0 after recent notify", posted)
 	}
-	if len(lines) != 1 || !strings.Contains(lines[0], "LEDGER cos") || !strings.Contains(lines[0], "recent notify within 3m") {
+	// Greppable dual-egress suppress reason (#595 / #628).
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "LEDGER cos") || !strings.Contains(joined, "recent notify within 3m") {
 		t.Fatalf("decision lines = %v, want LEDGER with recent-notify skip", lines)
+	}
+	if !strings.Contains(joined, "mirror Discord suppress") {
+		t.Fatalf("want greppable Discord suppress log, got %v", lines)
 	}
 	path, err := sessionmirror.LedgerPath(dir, "cos")
 	if err != nil {

@@ -24,7 +24,7 @@ func TestEnqueueLayerMaterialWakeNonPrimaryUsesPerLayerPaths(t *testing.T) {
 	}
 	cfg := &roster.Config{Agents: []roster.Agent{{Name: "cos"}, {Name: "alpha-xo"}}}
 	var job watch.Job
-	enqueueLayerMaterialWake(cfg, dir, "cos", "alpha-xo", []string{"backend: finished a turn (working→idle)"},
+	enqueueLayerMaterialWake(cfg, dir, "cos", "alpha-xo", []string{"backend PR gate needs decision"},
 		"\n(To ack you are alive, run: touch /legacy)", legacySettled, "", func(j watch.Job) { job = j })
 	if job.Agent != "alpha-xo" {
 		t.Fatalf("job agent = %q, want alpha-xo", job.Agent)
@@ -59,7 +59,7 @@ func TestEnqueueLayerMaterialWakeLayerAdjutantBuffers(t *testing.T) {
 	cfg := stackableLayerRoster()
 	bufferPath := roster.LayerBufferPath(dir, "alpha-xo")
 	var job watch.Job
-	enqueueLayerMaterialWake(cfg, dir, "cos", "alpha-xo", []string{"backend: finished a turn (working→idle)"},
+	enqueueLayerMaterialWake(cfg, dir, "cos", "alpha-xo", []string{"backend PR gate needs decision"},
 		"", filepath.Join(dir, "flotilla-cos-settled"), "", func(j watch.Job) { job = j })
 	if job.Agent != "alpha-adj" {
 		t.Fatalf("layer adjutant must receive buffered note, got agent %q", job.Agent)
@@ -98,7 +98,7 @@ func TestStackableLayerSeamDrainAllowedWhenClear(t *testing.T) {
 	}
 	cfg := stackableLayerRoster()
 	bufferPath := roster.LayerBufferPath(dir, "alpha-xo")
-	if err := adjutantbuffer.Append(bufferPath, "alpha-xo", []string{"backend: finished a turn"}); err != nil {
+	if err := adjutantbuffer.Append(bufferPath, "alpha-xo", []string{"backend PR gate needs decision"}); err != nil {
 		t.Fatal(err)
 	}
 	var enqueued []watch.Job

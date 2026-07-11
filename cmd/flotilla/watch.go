@@ -474,6 +474,17 @@ func cmdWatch(args []string) error {
 			enqueueOperatorSeamForwards(owner, bufferPath, deliveredPath, seamClaims, injector.Enqueue)
 			brief, ok, clearAfter, recordItems := adjutantSeamBrief(bufferPath, deliveredPath, owner, rosterDir)
 			if !ok {
+				// Wave 0.2: mechanical finish-edges only — auto-consume without Needs-you inject.
+				if len(recordItems) > 0 {
+					if err := adjutantbuffer.RecordDelivered(deliveredPath, owner, recordItems); err != nil {
+						log.Printf("flotilla watch: adjutant mechanical auto-consume record failed for %q: %v", owner, err)
+					} else if err := adjutantbuffer.RemoveConfirmedItems(bufferPath, owner, recordItems); err != nil {
+						log.Printf("flotilla watch: adjutant mechanical auto-consume remove failed for %q: %v", owner, err)
+					} else {
+						log.Printf("flotilla watch: adjutant seam auto-consumed %d mechanical finish-edge(s) for %q (no Needs-you brief)", len(recordItems), owner)
+					}
+					return
+				}
 				if clearAfter {
 					if err := adjutantbuffer.Clear(bufferPath); err != nil {
 						log.Printf("flotilla watch: adjutant buffer clear after all-consumed skip failed for %q: %v", owner, err)
@@ -1497,7 +1508,8 @@ func enqueueAdjutantCharterPairing(adjutant, leader, rosterDir, leaderAckPath st
 
 // adjutantSeamBrief peeks the layer buffer, applies consumed-item dedup (#469), and formats the
 // leader inject at a seam. recordItems is recorded and the buffer cleared only on confirmed
-// delivery via ClaimKey hooks (#488 P2) — not at enqueue.
+// delivery via ClaimKey hooks (#488 P2) — not at enqueue — except mechanical finish-edges,
+// which return ok=false with recordItems set for immediate auto-consume (no Needs-you brief).
 func adjutantSeamBrief(bufferPath, deliveredPath, leader, rosterDir string) (brief string, ok bool, clearAfter bool, recordItems []adjutantbuffer.Item) {
 	f, hasItems, quarantined, err := adjutantbuffer.Peek(bufferPath)
 	if err != nil {
@@ -1518,7 +1530,8 @@ func adjutantSeamBrief(bufferPath, deliveredPath, leader, rosterDir string) (bri
 	_, sysItems := adjutantbuffer.PartitionItems(f.Items)
 	_, charterErr := os.Stat(roster.LayerCharterPath(rosterDir, leader))
 	brief, recordItems, ok = adjutantbuffer.PrepareInject(leader, adjutantbuffer.File{Leader: f.Leader, Items: sysItems}, delivered, os.IsNotExist(charterErr), quarantined)
-	return brief, ok, hasItems, recordItems
+	// clearAfter: buffer had items (consumed-all path) OR we have mechanical auto-consume.
+	return brief, ok, hasItems || len(recordItems) > 0, recordItems
 }
 
 // enqueueOperatorSeamForwards delivers buffered operator messages verbatim to the leader at a

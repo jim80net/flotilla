@@ -104,14 +104,30 @@ func (m deskMirror) run(agent string) {
 
 	ledgerOK := m.appendSessionMirror(agent, text, d)
 
-	recentNotify := m.rosterDir != "" &&
-		watch.RecentNotifyWithinTTL(roster.LayerLastNotifyPath(m.rosterDir, agent), watch.DefaultRecentNotifySuppressTTL, m.mirrorNow())
-	// #595: notify already reached the operator on Discord — skip finish-edge mirror POST.
-	if postDiscord && haveHook && recentNotify {
-		postDiscord = false
+	// #595 / #628 dual-egress: skip Discord when recent notify (time) or same body hash.
+	// Uses modeled body + raw turn-final so stamp matches either shape. Greppable reason.
+	suppressDiscord, suppressReason := false, ""
+	if postDiscord && haveHook && m.rosterDir != "" {
+		stamp := roster.LayerLastNotifyPath(m.rosterDir, agent)
+		now := m.mirrorNow()
+		// Prefer modeled body (what would post); fall back to raw turn-final.
+		suppressDiscord, suppressReason = watch.ShouldSuppressMirrorDiscord(
+			stamp, watch.DefaultRecentNotifySuppressTTL, watch.DefaultRecentNotifySameBodyTTL,
+			now, d.body,
+		)
+		if !suppressDiscord && d.body != text {
+			suppressDiscord, suppressReason = watch.ShouldSuppressMirrorDiscord(
+				stamp, watch.DefaultRecentNotifySuppressTTL, watch.DefaultRecentNotifySameBodyTTL,
+				now, text,
+			)
+		}
+		if suppressDiscord {
+			postDiscord = false
+			m.logf("flotilla watch: mirror Discord suppress %s reason=%s", agent, suppressReason)
+		}
 	}
 
-	// Ledger-only modes: explicit ledgerOnly, Discord unavailable, or recent notify (#595).
+	// Ledger-only modes: explicit ledgerOnly, Discord unavailable, or dual-egress suppress.
 	if !postDiscord || !haveHook {
 		if !ledgerOK {
 			return
@@ -119,8 +135,8 @@ func (m deskMirror) run(agent string) {
 		body, rmNote := d.body, d.note
 		runes := utf8.RuneCountInString(body)
 		skipNote := ""
-		if recentNotify {
-			skipNote = " (Discord skipped: recent notify within 3m)"
+		if suppressReason != "" {
+			skipNote = " (Discord skipped: " + suppressReason + ")"
 		}
 		if rmNote != "" {
 			m.logf("flotilla watch: mirror LEDGER %s resplen=%d%s %s", agent, runes, skipNote, rmNote)

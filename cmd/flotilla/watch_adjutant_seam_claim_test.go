@@ -14,7 +14,7 @@ func TestAdjutantSeamClaimConfirmRecordsAndClears(t *testing.T) {
 	dir := t.TempDir()
 	bufferPath := roster.LayerBufferPath(dir, "xo")
 	deliveredPath := roster.LayerBufferDeliveredPath(dir, "xo")
-	reason := "backend: finished a turn (working→idle)"
+	reason := "backend PR gate needs decision"
 	if err := adjutantbuffer.Append(bufferPath, "xo", []string{reason}); err != nil {
 		t.Fatal(err)
 	}

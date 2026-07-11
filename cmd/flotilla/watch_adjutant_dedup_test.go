@@ -15,7 +15,8 @@ func TestAdjutantSeamBriefCorruptLedgerFailsOpen(t *testing.T) {
 	dir := t.TempDir()
 	bufferPath := roster.LayerBufferPath(dir, "alpha-xo")
 	deliveredPath := roster.LayerBufferDeliveredPath(dir, "alpha-xo")
-	reason := "backend: finished a turn (working→idle)"
+	// Judgment item so corrupt ledger fail-open still produces a Needs-you inject.
+	reason := "backend PR gate needs decision"
 	if err := adjutantbuffer.Append(bufferPath, "alpha-xo", []string{reason}); err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +70,7 @@ func TestAdjutantSeamBriefPerLayerDedupSkipsConsumed(t *testing.T) {
 	}
 }
 
-// #469: fresh edge occurrence with new state hash re-injects at per-layer seam.
+// #469: fresh judgment occurrence with new state hash re-injects at per-layer seam.
 func TestAdjutantSeamBriefPerLayerDeltaRedelivers(t *testing.T) {
 	dir := t.TempDir()
 	charter := roster.LayerCharterPath(dir, "alpha-xo")
@@ -78,7 +79,7 @@ func TestAdjutantSeamBriefPerLayerDeltaRedelivers(t *testing.T) {
 	}
 	bufferPath := roster.LayerBufferPath(dir, "alpha-xo")
 	deliveredPath := roster.LayerBufferDeliveredPath(dir, "alpha-xo")
-	reason := "backend: finished a turn (working→idle)"
+	reason := "backend PR gate needs decision"
 	if err := adjutantbuffer.Append(bufferPath, "alpha-xo", []string{reason}); err != nil {
 		t.Fatal(err)
 	}
@@ -99,9 +100,41 @@ func TestAdjutantSeamBriefPerLayerDeltaRedelivers(t *testing.T) {
 	}
 	brief, ok, _, record := adjutantSeamBrief(bufferPath, deliveredPath, "alpha-xo", dir)
 	if !ok || len(record) != 1 {
-		t.Fatalf("fresh occurrence must inject, ok=%v record=%+v brief=%q", ok, record, brief)
+		t.Fatalf("fresh judgment occurrence must inject, ok=%v record=%+v brief=%q", ok, record, brief)
 	}
 	if !strings.Contains(brief, "1 buffered item(s)") {
 		t.Fatalf("count must match post-dedup list:\n%s", brief)
+	}
+}
+
+// Wave 0.2: mechanical finish-edge delta is auto-consume, not Needs-you inject.
+func TestAdjutantSeamBriefPerLayerMechanicalDeltaNoInject(t *testing.T) {
+	dir := t.TempDir()
+	bufferPath := roster.LayerBufferPath(dir, "alpha-xo")
+	deliveredPath := roster.LayerBufferDeliveredPath(dir, "alpha-xo")
+	reason := "backend: finished a turn (working→idle)"
+	if err := adjutantbuffer.Append(bufferPath, "alpha-xo", []string{reason}); err != nil {
+		t.Fatal(err)
+	}
+	f, _, _, err := adjutantbuffer.Peek(bufferPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adjutantbuffer.RecordDelivered(deliveredPath, "alpha-xo", f.Items); err != nil {
+		t.Fatal(err)
+	}
+	if err := adjutantbuffer.Clear(bufferPath); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Millisecond)
+	if err := adjutantbuffer.Append(bufferPath, "alpha-xo", []string{reason}); err != nil {
+		t.Fatal(err)
+	}
+	brief, ok, _, record := adjutantSeamBrief(bufferPath, deliveredPath, "alpha-xo", dir)
+	if ok {
+		t.Fatalf("mechanical must not inject, brief=%q", brief)
+	}
+	if len(record) != 1 {
+		t.Fatalf("mechanical auto-consume record = %d", len(record))
 	}
 }
