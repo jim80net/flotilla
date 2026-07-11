@@ -47,9 +47,9 @@ Fixtures and examples should read as a **reference a developer learns from**
 
 `scripts/check-private-boundary.sh` greps for leaks across the tracked tree (and,
 with `--issues`, open issues + PRs; with `--file <path>`, one file's contents — the
-mode the pre-push hook and the conformance test use). It **fails on a fail-closed
-hit** and runs in CI on every push and PR (`.github/workflows/ci.yml`, the
-`private-boundary` job). It has two fail-closed layers plus an advisory third:
+mode the pre-commit / pre-push hooks and the conformance test use). It **fails on a
+fail-closed hit** and runs in CI on every push and PR (`.github/workflows/ci.yml`,
+the `private-boundary` job). It has two fail-closed layers plus an advisory third:
 
 1. **Built-in, deployment-agnostic patterns** — leaks that are private for
    *anyone*: absolute home paths revealing a username, chat webhook URLs, common
@@ -140,14 +140,21 @@ it earns a human glance, never a block — a human adjudicates each WARN. A **de
 still refuses** (denylist precedence); the WARN tier only adds an advisory class below
 the fail-closed one.
 
-### The git pre-push hook (local backstop)
+### Three layers: pre-commit, pre-push, CI
 
-`scripts/hooks/pre-push` scans the **added lines of the commits you push** through the
-static guard, so a specific that reached a commit is caught before it leaves your
-machine. Install it with `scripts/install-hooks.sh` (sets `core.hooksPath`). It is a
-**backstop, not the authority** — a local hook is `--no-verify`-bypassable, so **CI's
-`private-boundary` job remains the enforcing gate**. The fail-closed tier blocks the
-push (exit 1); the advisory WARN tier prints but does not block.
+The same static guard runs at three points (additive; none weakens another):
+
+| Layer | When | What is scanned | Authority |
+|-------|------|-----------------|-----------|
+| **pre-commit** (`scripts/hooks/pre-commit`) | Before a commit is created | **Staged** added lines (`git diff --cached`) | Local backstop (`--no-verify` bypasses) |
+| **pre-push** (`scripts/hooks/pre-push`) | Before push leaves the clone | Added lines in the **push range** (+ gofmt/vet) | Local backstop (`--no-verify` bypasses) |
+| **CI** (`private-boundary` job) | Every push and PR | Tracked tree (+ open issues/PRs with denylist secret) | **Enforcing gate of record** |
+
+Install local hooks with `scripts/install-hooks.sh` (sets `core.hooksPath` →
+`scripts/hooks` for this clone only). Pre-commit catches a leak at commit time so
+it never becomes a commit object; pre-push is a second local net; CI remains the
+authority when a contributor skips hooks. Fail-closed hits exit 1 (block);
+advisory WARN prints and exits 0.
 
 ## If a breach happens
 

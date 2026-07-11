@@ -36,8 +36,9 @@
 #   scripts/check-private-boundary.sh            # scan the tracked repo TREE (CI default)
 #   scripts/check-private-boundary.sh --issues   # ALSO scan open issues + PRs via `gh`
 #   scripts/check-private-boundary.sh --file F    # scan ONE file's contents (the git
-#                                                  # pre-push hook + the conformance test
-#                                                  # use this; no `git grep` over the tree)
+#                                                  # pre-commit + pre-push hooks and the
+#                                                  # conformance test use this; no `git
+#                                                  # grep` over the tree)
 #
 # Exit: 0 = clean OR advisory-warn-only, 1 = a fail-closed private token was found.
 
@@ -142,8 +143,8 @@ scan_tree() {
 }
 
 # scan_file scans ONE file's contents (not the tracked tree) with the same
-# fail-closed + advisory-warn tiers. The git pre-push hook and the Go conformance
-# test use this so neither depends on `git grep` over a committed tree.
+# fail-closed + advisory-warn tiers. The git pre-commit / pre-push hooks and the
+# Go conformance test use this so neither depends on `git grep` over a committed tree.
 scan_file() {
   local f="$1"
   echo "== boundary guard: scanning file $f =="
