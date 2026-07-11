@@ -20,34 +20,43 @@ report, a brief, a transcript:
 Only `http(s)://` links render (inert; open in a new tab). The operator authors one
 source per claim.
 
-## (b) Per-XO structure — one XO per slide-group along the four domains
+## (b) Per-XO structure — each XO **presents** (avatar + claim)
 
-Present **each XO** across the four domains + a demo, as a run of slides, rather than
-only cross-fleet thematic slides. The convention is a title prefix per slide:
+Present **each XO** as the speaker on their own slides. Title form:
 
 ```
-# Alpha XO · Proud of
+# Family Office · Every monitor says the same thing
+```
+
+The renderer splits on ` · ` (space-middle-dot-space):
+
+| segment | becomes |
+| --- | --- |
+| left (`Family Office`) | presenter badge — name + "presenting" + avatar |
+| right (the claim) | large slide title |
+
+**Avatar assets** live next to the deck: `state/parades/<date>/assets/presenter-<slug>.png`
+where `slug` is the lowercased presenter with non-alnum runs collapsed to `-`
+(`Family Office` → `presenter-family-office.png`). Missing file → circular initials
+fallback (no broken-image chrome). Each XO owns a durable visual identity — regenerate
+or evolve the portrait when the seat re-introduces itself; keep the same slug so decks
+stay stable.
+
+Still valid as a multi-slide arc for one XO:
+
+```
+# Family Office · Proud of
 - …claim… ([source](https://…))
 ---
-# Alpha XO · Next
+# Family Office · Next
 - …
 ---
-# Alpha XO · Learned
-- …
----
-# Alpha XO · Need
-- …
----
-# Alpha XO · Demo
-![what shipped](alpha-demo.png)
----
-# Beta XO · Proud of
-…
+# Family Office · Demo
+![what shipped](fo-demo.png)
 ```
 
-The `<XO> · <Domain>` title makes each slide's owner and domain unmistakable, and a
-reader pages through one XO's five slides before the next. No new syntax — the deck
-already renders the titles large; the structure is authored.
+Spine slides without a product owner (hook, fleet ask, button) may omit the prefix
+or use `Chief of Staff · …`.
 
 ## (c) Decisions as briefs — leverage the 6-element decision brief
 
@@ -93,6 +102,7 @@ now.)
 | v3 need | how it renders | new code |
 | --- | --- | --- |
 | dig-deeper links | `[text](https://…)` → underlined `↗` link | styling only (links already rendered) |
-| per-XO structure | `# <XO> · <Domain>` slide titles | none (authoring convention) |
+| per-XO present | `# <XO> · <claim>` → avatar badge + claim title | `parsePresenter` + `.pd-presenter` chrome |
 | decision briefs | `> …` → bordered brief callout | blockquote support added |
 | brief auto-embed | `[[brief:<id>]]` → live brief | deferred follow-on |
+| wide desktop | slide uses ~90–95vw (not a 900px column) | `.pd-slide` width/max-width |
