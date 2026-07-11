@@ -289,16 +289,12 @@ func cmdWatch(args []string) error {
 	injector := watch.NewInjector(mkSend(confirm.Submit), 16)
 	if ingress := newCoordinatorIngress(cfg); ingress != nil {
 		injector.SetCoordinatorIngress(ingress)
-		injector.SetOperatorRelayBuffer(func(leader, messageID, body string) error {
+		arcQuiet := adjutantbuffer.ParseArcQuiet(os.Getenv("FLOTILLA_ADJUTANT_ARC_QUIET"))
+		injector.SetOperatorRelayBuffer(func(leader, messageID, body, channelID, operatorID string) error {
 			bufferPath := roster.LayerBufferPath(rosterDir, leader)
-			if adjutantbuffer.HasOperatorMessage(bufferPath, messageID) {
-				return nil
-			}
-			return adjutantbuffer.Append(bufferPath, leader, []string{
-				adjutantbuffer.FormatOperatorReason(messageID, body),
-			})
+			return adjutantbuffer.AppendOperator(bufferPath, leader, messageID, body, channelID, operatorID, time.Now().UTC(), arcQuiet)
 		})
-		log.Printf("flotilla watch: adjutant front-office ingress active (#533)")
+		log.Printf("flotilla watch: adjutant front-office ingress active (#533); arc quiet=%s (buffer-v2 B1)", arcQuiet)
 	}
 	// RELAY-kind jobs route through the self-heal-capable submit; heartbeat/detector ticks keep the
 	// plain submit (a tick must never fire an unsolicited Ctrl-C — #156 H2). Inert when self-heal off.
@@ -1499,8 +1495,9 @@ func adjutantSeamBrief(bufferPath, deliveredPath, leader, rosterDir string) (bri
 }
 
 // enqueueOperatorSeamForwards delivers buffered operator messages verbatim to the leader at a
-// safe seam (#593). KindDetector + seam ClaimKey suppresses audit-mirror spam; confirm hooks
-// clear buffer entries on successful delivery.
+// safe seam (#593 / buffer-v2 B1). Closed arcs (quiet elapsed) forward as ONE payload with
+// ordered verbatim bodies. KindDetector + seam ClaimKey suppresses audit-mirror spam; confirm
+// hooks clear buffer entries on successful delivery.
 func enqueueOperatorSeamForwards(owner, bufferPath, deliveredPath string, seamClaims *adjutantSeamClaims, enqueue func(watch.Job)) {
 	f, hasItems, _, err := adjutantbuffer.Peek(bufferPath)
 	if err != nil || !hasItems {
@@ -1512,15 +1509,29 @@ func enqueueOperatorSeamForwards(owner, bufferPath, deliveredPath string, seamCl
 		return
 	}
 	opItems, _ := adjutantbuffer.PartitionItems(f.Items)
-	for _, it := range adjutantbuffer.FilterUndelivered(opItems, delivered) {
-		msgID, body, ok := adjutantbuffer.ExtractOperatorBody(it.Reason)
-		if !ok || body == "" {
+	opItems = adjutantbuffer.FilterUndelivered(opItems, delivered)
+	if len(opItems) == 0 {
+		return
+	}
+	// Quiet window only joins messages into arcs at append time; seam drain forwards
+	// every undelivered arc as it stands (one payload per arc, possibly multi-body).
+	groups := adjutantbuffer.GroupByArc(opItems)
+	for _, g := range groups {
+		body := adjutantbuffer.FormatArcBodies(g.Items)
+		if body == "" {
 			continue
 		}
-		claimKey := adjutantSeamClaimPrefix + "operator:" + owner + ":" + msgID
+		// Claim key: arc id when multi-message, else first message id.
+		claimSuffix := g.ArcID
+		if len(g.Items) == 1 {
+			if mid, _, ok := adjutantbuffer.ExtractOperatorBody(g.Items[0].Reason); ok {
+				claimSuffix = mid
+			}
+		}
+		claimKey := adjutantSeamClaimPrefix + "operator:" + owner + ":" + claimSuffix
 		seamClaims.register(claimKey, adjutantSeamClaim{
 			owner: owner, bufferPath: bufferPath, deliveredPath: deliveredPath,
-			recordItems: []adjutantbuffer.Item{it},
+			recordItems: g.Items,
 		})
 		enqueue(watch.Job{
 			Agent: owner, Message: body, Kind: watch.KindDetector, ClaimKey: claimKey,

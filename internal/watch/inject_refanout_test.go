@@ -51,7 +51,7 @@ func TestInjectorBusyDeferDoesNotRefanoutAdjutantObs592(t *testing.T) {
 		return nil
 	}, 20)
 	in.SetCoordinatorIngress(NewCoordinatorIngress(adjutantRoster()))
-	in.SetOperatorRelayBuffer(func(leader, messageID, body string) error {
+	in.SetOperatorRelayBuffer(func(leader, messageID, body, channelID, operatorID string) error {
 		bufferCalls.Add(1)
 		if leader != "cos" || messageID != "m592" || body != "operator task" {
 			t.Errorf("buffer hook leader=%q id=%q body=%q", leader, messageID, body)

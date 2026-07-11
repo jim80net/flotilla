@@ -83,6 +83,9 @@ type Job struct {
 	// MessageID is the origin message's durable id (a Discord snowflake today). Set by the
 	// relay on ingest; keys the disk-backed pending queue (#286).
 	MessageID string
+	// OperatorUserID is the Discord author id for KindRelay (adjutant-buffer-v2 arc keying).
+	// Empty for non-relay jobs or older callers.
+	OperatorUserID string
 	// deferrals counts how many times a BUSY relay job has been re-enqueued. It is internal
 	// to the Injector's busy-defer (deferJob increments it on a NEW copy before re-enqueue);
 	// senders MUST NOT set it — every Job{} literal leaves it zero, the correct start.
@@ -132,23 +135,24 @@ type Injector struct {
 	stopped                   chan struct{} // Enqueue: stop accepting (closed once)
 	done                      chan struct{}
 	once                      sync.Once
-	mirror                    func(Job)                                  // optional: called after a CONFIRMED delivery (audit trail)
-	escalate                  func(string)                               // optional: a LOUD operator alert for a failed/undeliverable relay
-	reEnqueue                 func(Job, time.Duration)                   // how a deferred relay is re-enqueued after a delay; injectable for tests
-	queue                     relayQueueStore                            // optional: disk-backed pending queue for deferred operator relays (#286)
-	rosterDir                 string                                     // roster directory for per-sender outbox persistence (#475)
-	onSend                    func(sender, recipient, message string)    // optional: post-confirm hook for swept sends (ledger)
-	onOutboxDone              func(sender, id string)                    // optional: clear in-flight sweep guard (#475)
-	onDetectorConfirm         func(claimKey string)                      // optional: durable claim after confirmed detector delivery (#365)
-	onDetectorAbort           func(claimKey string)                      // optional: release in-memory claim on busy drop / failure (#365)
-	onInboundTrack            func(Job)                                  // optional: recipient inbound ledger after confirmed KindSend (#472)
-	now                       func() time.Time                           // clock for stale escalation; nil ⇒ time.Now()
-	outboxOwningCoordinator   func(sender string) string                 // optional: sender → coordinator for stale outbox (#477)
-	outboxCoordinatorEscalate func(coordinator, msg, claimKey string)    // optional: enqueue to coordinator surface (#436/#477)
-	coordinatorIngress        *CoordinatorIngress                        // optional: #533 adjutant front-office ingress before delivery
-	onOperatorRelayBuffer     func(leader, messageID, body string) error // optional: #593 durable operator buffer append
-	relayPendingMu            sync.Mutex
-	relayPending              map[string]int // in-flight KindRelay per agent (#523)
+	mirror                    func(Job)                               // optional: called after a CONFIRMED delivery (audit trail)
+	escalate                  func(string)                            // optional: a LOUD operator alert for a failed/undeliverable relay
+	reEnqueue                 func(Job, time.Duration)                // how a deferred relay is re-enqueued after a delay; injectable for tests
+	queue                     relayQueueStore                         // optional: disk-backed pending queue for deferred operator relays (#286)
+	rosterDir                 string                                  // roster directory for per-sender outbox persistence (#475)
+	onSend                    func(sender, recipient, message string) // optional: post-confirm hook for swept sends (ledger)
+	onOutboxDone              func(sender, id string)                 // optional: clear in-flight sweep guard (#475)
+	onDetectorConfirm         func(claimKey string)                   // optional: durable claim after confirmed detector delivery (#365)
+	onDetectorAbort           func(claimKey string)                   // optional: release in-memory claim on busy drop / failure (#365)
+	onInboundTrack            func(Job)                               // optional: recipient inbound ledger after confirmed KindSend (#472)
+	now                       func() time.Time                        // clock for stale escalation; nil ⇒ time.Now()
+	outboxOwningCoordinator   func(sender string) string              // optional: sender → coordinator for stale outbox (#477)
+	outboxCoordinatorEscalate func(coordinator, msg, claimKey string) // optional: enqueue to coordinator surface (#436/#477)
+	coordinatorIngress        *CoordinatorIngress                     // optional: #533 adjutant front-office ingress before delivery
+	// optional: #593 durable operator buffer append (+ B1 channel/operator for arc keying)
+	onOperatorRelayBuffer func(leader, messageID, body, channelID, operatorID string) error
+	relayPendingMu        sync.Mutex
+	relayPending          map[string]int // in-flight KindRelay per agent (#523)
 }
 
 // SetRelaySend installs a distinct send path for RELAY-kind jobs (the operator-message kind), used to
@@ -200,8 +204,9 @@ func (in *Injector) SetInboundTrack(fn func(Job)) { in.onInboundTrack = fn }
 func (in *Injector) SetCoordinatorIngress(g *CoordinatorIngress) { in.coordinatorIngress = g }
 
 // SetOperatorRelayBuffer installs the durable adjutant buffer append hook for operator relays
-// routed through the front office (#593). Must be set before Start.
-func (in *Injector) SetOperatorRelayBuffer(fn func(leader, messageID, body string) error) {
+// routed through the front office (#593 / buffer-v2 B1). channelID and operatorID key
+// mechanical coalesce arcs. Must be set before Start.
+func (in *Injector) SetOperatorRelayBuffer(fn func(leader, messageID, body, channelID, operatorID string) error) {
 	in.onOperatorRelayBuffer = fn
 }
 
@@ -514,7 +519,7 @@ func (in *Injector) Enqueue(j Job) {
 			if in.coordinatorIngress != nil && in.coordinatorIngress.Config != nil {
 				if leader := in.coordinatorIngress.Config.CoordinatorForAdjutant(jj.Agent); leader != "" {
 					body := ExtractVerbatimBody(jj.Message)
-					if err := in.onOperatorRelayBuffer(leader, jj.MessageID, body); err == nil {
+					if err := in.onOperatorRelayBuffer(leader, jj.MessageID, body, jj.OriginChannel, jj.OperatorUserID); err == nil {
 						jj.bufferRecorded = true
 						jobs[i] = jj
 					}

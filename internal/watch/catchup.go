@@ -221,7 +221,7 @@ func (c *Catchup) disposition(b roster.Channel, toRelay []transport.Message, cap
 		return
 	}
 	for _, m := range toRelay {
-		c.relay.route(b.ChannelID, m.ID, b, m.Content)
+		c.relay.route(b.ChannelID, m.ID, m.AuthorID, b, m.Content)
 	}
 	if c.notify != nil {
 		c.notify(fmt.Sprintf("recovered %d operator message(s) on %s the live gateway missed — delivered via catch-up",
