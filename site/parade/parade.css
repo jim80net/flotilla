@@ -24,14 +24,54 @@
 }
 .pd-close:hover { border-color: var(--cyan-dim); color: var(--ink); }
 
+/* Operator 2026-07-11: use desktop width; no 900px column with huge gutters. */
 .pd-stage {
   position: relative; flex: 1 1 auto; min-height: 0;
-  display: flex; align-items: center; justify-content: center;
-  padding: 1rem; overflow: hidden;
+  display: flex; align-items: stretch; justify-content: center;
+  padding: .35rem clamp(.35rem, 1.2vw, .75rem);
+  overflow: hidden;
 }
 .pd-slide {
-  width: 100%; max-width: 900px; max-height: 100%; overflow-y: auto;
-  padding: 2.2rem clamp(1rem, 4vw, 3rem); outline: none;
+  width: min(95vw, 100%);
+  max-width: min(95vw, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 1.5rem clamp(.65rem, 2vw, 1.75rem);
+  outline: none;
+  box-sizing: border-box;
+}
+@media (min-width: 1100px) {
+  .pd-slide { width: min(94vw, 100%); max-width: min(94vw, 100%); }
+}
+@media (min-width: 1500px) {
+  .pd-slide { width: min(92vw, 100%); max-width: min(92vw, 100%); }
+}
+.pd-presenter {
+  display: flex; align-items: center; gap: .75rem; margin: 0 0 .85rem;
+}
+.pd-presenter-avatar {
+  width: 52px; height: 52px; border-radius: 50%; object-fit: cover;
+  border: 2px solid color-mix(in srgb, var(--cyan) 35%, var(--line));
+  background: var(--raised); flex: 0 0 auto;
+  box-shadow: 0 1px 6px color-mix(in srgb, var(--ink) 12%, transparent);
+}
+.pd-presenter-avatar.pd-presenter-fallback {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--display); font-weight: 700; font-size: .95rem; color: var(--cyan);
+  background: color-mix(in srgb, var(--cyan) 12%, var(--raised));
+}
+.pd-presenter-meta { min-width: 0; display: flex; flex-direction: column; gap: .05rem; }
+.pd-presenter-name {
+  font-family: var(--display); font-size: .95rem; font-weight: 600; color: var(--ink); line-height: 1.15;
+}
+.pd-presenter-role {
+  font-size: .72rem; font-weight: 400; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: .06em;
+}
+@media (max-width: 560px) {
+  .pd-stage { padding: .2rem .3rem; }
+  .pd-slide { width: 100%; max-width: 100%; padding: 1rem .7rem 1.2rem; }
+  .pd-presenter-avatar { width: 40px; height: 40px; }
 }
 .pd-slide-title {
   font-family: var(--display); font-weight: 700;

@@ -235,6 +235,60 @@
 
   function curSlides() { return parseSlides((PARADES[pIdx] || {}).slides || ""); }
 
+  // Presenter chrome: each XO presents. Title form
+  //   "Alpha XO · Every monitor says the same thing"
+  // First segment before " · " is the presenter; the rest is the claim title.
+  // Avatar: assets/presenter-<slug>.png (slug = lowercased presenter, non-alnum → -).
+  // Missing image → circular initials fallback (no broken-img chrome).
+  function parsePresenter(title) {
+    var raw = String(title == null ? "" : title).trim();
+    if (!raw) return { presenter: "", claim: "", slug: "", initials: "" };
+    var sep = raw.indexOf(" · ");
+    if (sep < 1) return { presenter: "", claim: raw, slug: "", initials: "" };
+    var presenter = raw.slice(0, sep).trim();
+    var claim = raw.slice(sep + 3).trim() || raw;
+    var slug = presenter.toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    var parts = presenter.split(/\s+/).filter(Boolean);
+    var initials = parts.length >= 2
+      ? (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase()
+      : presenter.slice(0, 2).toUpperCase();
+    return { presenter: presenter, claim: claim, slug: slug, initials: initials };
+  }
+
+  function presenterHtml(date, p) {
+    if (!p.presenter) return "";
+    var avatar = p.slug
+      ? '<img class="pd-presenter-avatar" src="' + esc(imgURL(date, "presenter-" + p.slug + ".png")) +
+        '" alt="" width="52" height="52" data-fallback="' + esc(p.initials) + '" />'
+      : '<span class="pd-presenter-avatar pd-presenter-fallback">' + esc(p.initials) + "</span>";
+    return (
+      '<div class="pd-presenter" data-presenter="' + esc(p.slug || p.presenter) + '">' +
+      avatar +
+      '<div class="pd-presenter-meta">' +
+      '<span class="pd-presenter-name">' + esc(p.presenter) + "</span>" +
+      '<span class="pd-presenter-role">presenting</span>' +
+      "</div></div>"
+    );
+  }
+
+  // Missing presenter-*.png → circular initials (no broken-image chrome).
+  function wirePresenterFallback(root) {
+    if (!root) return;
+    var imgs = root.querySelectorAll("img.pd-presenter-avatar[data-fallback]");
+    for (var i = 0; i < imgs.length; i++) {
+      (function (img) {
+        img.addEventListener("error", function () {
+          var span = document.createElement("span");
+          span.className = "pd-presenter-avatar pd-presenter-fallback";
+          span.textContent = img.getAttribute("data-fallback") || "?";
+          if (img.parentNode) img.parentNode.replaceChild(span, img);
+        });
+      })(imgs[i]);
+    }
+  }
+
   /* ── deck view ─────────────────────────────────────────────────────────── */
   function renderDeck() {
     var par = PARADES[pIdx];
@@ -244,11 +298,15 @@
     if (sIdx < 0) sIdx = 0;
     if (sIdx > slides.length - 1) sIdx = slides.length - 1;
     var s = slides[sIdx];
+    var p = parsePresenter(s.title);
+    var titleText = p.presenter ? p.claim : s.title;
     el("pd-deck-date").textContent = par.date;
     el("pd-counter").textContent = (sIdx + 1) + " / " + slides.length;
     el("pd-slide").innerHTML =
-      (s.title ? '<h1 class="pd-slide-title">' + esc(s.title) + "</h1>" : "") +
+      presenterHtml(par.date, p) +
+      (titleText ? '<h1 class="pd-slide-title">' + esc(titleText) + "</h1>" : "") +
       '<div class="pd-slide-body">' + renderMd(par.date, s.body) + "</div>";
+    wirePresenterFallback(el("pd-slide"));
     el("pd-prev").disabled = sIdx === 0;
     el("pd-next").disabled = sIdx >= slides.length - 1;
     var slideEl = el("pd-slide"); if (slideEl) slideEl.focus({ preventScroll: true });

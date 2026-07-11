@@ -1994,8 +1994,64 @@ html, body { overflow-x: clip; }
 .pd-close { min-height: 44px; padding: 0 .9rem; border: 1px solid var(--line); border-radius: var(--r-sm); background: transparent; color: var(--ink-2); font: inherit; font-size: .74rem; cursor: pointer; }
 .pd-close:hover { border-color: var(--cyan-dim, var(--cyan)); color: var(--ink); }
 
-.pd-stage { position: relative; flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 1rem; overflow: hidden; }
-.pd-slide { width: 100%; max-width: 900px; max-height: 100%; overflow-y: auto; padding: 2.2rem clamp(1rem, 4vw, 3rem); outline: none; }
+/* Stage: minimal padding so the slide can use ~90–95% of the viewport.
+   Operator 2026-07-11: HATE huge gutters — do not pin a 900px column on wide desktops. */
+.pd-stage {
+  position: relative; flex: 1 1 auto; min-height: 0;
+  display: flex; align-items: stretch; justify-content: center;
+  padding: .35rem clamp(.35rem, 1.2vw, .75rem);
+  overflow: hidden;
+}
+.pd-slide {
+  /* Desktop: use the screen. Mobile reflow is in the max-width media query below. */
+  width: min(95vw, 100%);
+  max-width: min(95vw, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 1.5rem clamp(.65rem, 2vw, 1.75rem);
+  outline: none;
+  box-sizing: border-box;
+}
+@media (min-width: 1100px) {
+  .pd-slide {
+    width: min(94vw, 100%);
+    max-width: min(94vw, 100%);
+    padding: 1.75rem clamp(.85rem, 2.2vw, 2rem);
+  }
+}
+@media (min-width: 1500px) {
+  .pd-slide {
+    width: min(92vw, 100%);
+    max-width: min(92vw, 100%);
+  }
+}
+/* Presenter chrome — each XO presents with an avatar (assets/presenter-<slug>.png or initials).
+   Title form: "Alpha XO · claim" — JS splits presenter vs claim. */
+.pd-presenter {
+  display: flex; align-items: center; gap: .75rem;
+  margin: 0 0 .85rem;
+}
+.pd-presenter-avatar {
+  width: 52px; height: 52px; border-radius: 50%;
+  object-fit: cover; border: 2px solid color-mix(in srgb, var(--cyan) 35%, var(--line));
+  background: var(--abyss-3); flex: 0 0 auto;
+  box-shadow: 0 1px 6px color-mix(in srgb, var(--ink) 12%, transparent);
+}
+.pd-presenter-avatar.pd-presenter-fallback {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--display); font-weight: 700; font-size: .95rem;
+  color: var(--cyan); letter-spacing: .02em;
+  background: color-mix(in srgb, var(--cyan) 12%, var(--abyss-3));
+}
+.pd-presenter-meta { min-width: 0; display: flex; flex-direction: column; gap: .05rem; }
+.pd-presenter-name {
+  font-family: var(--display); font-size: .95rem; font-weight: 600;
+  color: var(--ink); letter-spacing: .01em; line-height: 1.15;
+}
+.pd-presenter-role {
+  font-size: .72rem; font-weight: 400; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: .06em;
+}
 .pd-slide-title { font-family: var(--display); font-weight: 700; font-size: clamp(1.6rem, 4.5vw, 2.9rem); line-height: 1.08; color: var(--ink); margin: 0 0 1.1rem; }
 .pd-slide-body { font-size: clamp(1rem, 2.4vw, 1.45rem); line-height: 1.5; color: var(--ink-2); }
 .pd-slide-body .pd-h { font-family: var(--display); color: var(--ink); margin: 1.1rem 0 .4rem; line-height: 1.15; }
@@ -2051,9 +2107,15 @@ html, body { overflow-x: clip; }
 .pd-listcard-meta { font-size: .76rem; color: var(--ink-3); }
 
 @media (max-width: 560px) {
-  .pd-slide { padding: 1.4rem 1rem; }
+  .pd-stage { padding: .2rem .3rem; }
+  .pd-slide {
+    width: 100%; max-width: 100%;
+    padding: 1rem .7rem 1.2rem;
+  }
   .pd-nav { width: 40px; height: 56px; font-size: 1.6rem; }
-  .pd-slide-img { max-height: 52vh; }
+  .pd-prev { left: .15rem; } .pd-next { right: .15rem; }
+  .pd-slide-img { max-height: 48vh; }
+  .pd-presenter-avatar { width: 40px; height: 40px; }
 }
 /* an explicit display: on .pd-deck / .pd-list-view outranks the UA [hidden] rule, so hide
    them explicitly when toggled off — else the fixed-position deck stays over the list. */

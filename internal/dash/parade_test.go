@@ -159,9 +159,26 @@ func TestParadeDeckRenderMarkers(t *testing.T) {
 	if !strings.Contains(js, "pd-quote") {
 		t.Error("parade.js must render a \"> \" blockquote as a decision-brief callout — parade v3 (c)")
 	}
+	// Presenter chrome (operator 2026-07-11): each XO presents with avatar from title "XO · claim".
+	if !strings.Contains(js, "parsePresenter") {
+		t.Error("parade.js must parse \"XO · claim\" titles into a presenter badge — parade v3 (b)")
+	}
+	if !strings.Contains(js, "pd-presenter") {
+		t.Error("parade.js must emit .pd-presenter chrome for XO presenters — parade v3 (b)")
+	}
+	if !strings.Contains(js, "presenter-") {
+		t.Error("parade.js must load presenter-<slug>.png assets — parade v3 (b)")
+	}
 	css := doGet(t, srv, "/static/dash.css").Body.String()
 	if !strings.Contains(css, ".pd-quote") {
 		t.Error("dash.css must style the decision-brief callout (.pd-quote) — parade v3 (c)")
+	}
+	if !strings.Contains(css, ".pd-presenter") {
+		t.Error("dash.css must style the presenter badge (.pd-presenter) — parade v3 (b)")
+	}
+	// Wide desktop: use the viewport (operator 2026-07-11 — no huge gutters).
+	if !strings.Contains(css, "min(95vw, 100%)") {
+		t.Error("dash.css .pd-slide must use min(95vw, 100%) so desktop gutters stay tight (operator 2026-07-11)")
 	}
 }
 
