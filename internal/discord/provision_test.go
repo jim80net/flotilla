@@ -3,6 +3,7 @@ package discord
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -25,6 +26,24 @@ type fakeAPI struct {
 	guildErr   error
 	selfErr    error
 	deletedIDs []string
+	hooks      []Webhook
+}
+
+func (f *fakeAPI) webhooks(string) ([]Webhook, error) { return f.hooks, nil }
+func (f *fakeAPI) createWebhook(channelID, name string) (Webhook, error) {
+	h := Webhook{ID: "hookid", Name: name, ChannelID: channelID, URL: "https://discord.com/api/webhooks/hookid/token"}
+	f.hooks = append(f.hooks, h)
+	return h, nil
+}
+
+func (f *fakeAPI) editChannel(id string, in CreateSpec) (Channel, error) {
+	for i := range f.existing {
+		if f.existing[i].ID == id {
+			f.existing[i].ParentID = in.ParentID
+			return f.existing[i], nil
+		}
+	}
+	return Channel{}, &apiError{status: 404}
 }
 
 func (f *fakeAPI) selfMember(string) (string, []string, error) {
@@ -53,8 +72,15 @@ func (f *fakeAPI) createChannel(_ string, in CreateSpec) (Channel, error) {
 	if f.createRet.ID != "" {
 		return f.createRet, nil
 	}
-	// default: echo back a created channel with a synthesized id
-	return Channel{ID: "newid", Name: in.Name, Type: in.Type, ParentID: in.ParentID}, nil
+	// default: echo back a created channel with a synthesized id and retain it,
+	// like Discord, so multi-step/idempotency tests see prior creates.
+	id := "newid"
+	if len(f.created) > 1 {
+		id = fmt.Sprintf("newid%d", len(f.created))
+	}
+	ch := Channel{ID: id, Name: in.Name, Type: in.Type, ParentID: in.ParentID}
+	f.existing = append(f.existing, ch)
+	return ch, nil
 }
 func (f *fakeAPI) deleteChannel(id string) error {
 	if f.deleteErr != nil {
@@ -65,6 +91,45 @@ func (f *fakeAPI) deleteChannel(id string) error {
 }
 
 const guildID = "100"
+
+func TestProvisionOrgStackDualPlacementAndIdempotency(t *testing.T) {
+	f := &fakeAPI{botID: "bot", info: &guildInfo{rolePerms: map[string]int64{guildID: discordgo.PermissionManageChannels}}}
+	p := &Provisioner{api: f}
+	stack, err := p.ProvisionOrgStack(guildID, "Canary Fleet", "canary-xo", "canary", "canary-xo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stack.C2.ParentID != stack.COS.ID {
+		t.Fatalf("C2 parent = %q, want COS %q", stack.C2.ParentID, stack.COS.ID)
+	}
+	if stack.Product.ParentID != stack.Category.ID {
+		t.Fatalf("product parent = %q, want flotilla category %q", stack.Product.ParentID, stack.Category.ID)
+	}
+	if !stack.Created["webhook"] || stack.XO.URL == "" {
+		t.Fatalf("webhook not created: %+v", stack)
+	}
+	created := len(f.created)
+	second, err := p.ProvisionOrgStack(guildID, "Canary Fleet", "canary-xo", "canary", "canary-xo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.created) != created || second.Created["category"] || second.Created["c2"] || second.Created["product"] || second.Created["webhook"] {
+		t.Fatalf("second provision was not idempotent: created=%d→%d flags=%v", created, len(f.created), second.Created)
+	}
+}
+
+func TestMoveReparentsAndSkipsWhenAlreadyPlaced(t *testing.T) {
+	f := &fakeAPI{existing: []Channel{{ID: "10", Name: "orphan", Type: ChannelTypeText}, {ID: "20", Name: "Fleet", Type: ChannelTypeCategory}}}
+	p := &Provisioner{api: f}
+	ch, moved, err := p.Move(guildID, "10", "20")
+	if err != nil || !moved || ch.ParentID != "20" {
+		t.Fatalf("first move = (%+v,%v,%v)", ch, moved, err)
+	}
+	_, moved, err = p.Move(guildID, "10", "20")
+	if err != nil || moved {
+		t.Fatalf("second move = moved %v, err %v", moved, err)
+	}
+}
 
 func TestEffectivePermissions(t *testing.T) {
 	everyoneNone := &guildInfo{ownerID: "owner", rolePerms: map[string]int64{guildID: 0}}
@@ -135,7 +200,7 @@ func TestChannelNameKey(t *testing.T) {
 		{"text spaces to hyphens", "Fleet Command", ChannelTypeText, "fleet-command"},
 		{"text trims edge hyphens", " Fleet ", ChannelTypeText, "fleet"},
 		{"text does NOT fold underscore (no over-match)", "team_a", ChannelTypeText, "team_a"},
-		{"category case-insensitive, space-preserving", "Family Office", ChannelTypeCategory, "family office"},
+		{"category case-insensitive, space-preserving", "Alpha Group", ChannelTypeCategory, "alpha group"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -154,7 +219,7 @@ func TestFindExisting(t *testing.T) {
 	chans := []Channel{
 		{ID: "1", Name: "fleet-command", Type: ChannelTypeText, ParentID: ""},
 		{ID: "2", Name: "notes", Type: ChannelTypeText, ParentID: "catA"},
-		{ID: "3", Name: "Family Office", Type: ChannelTypeCategory, ParentID: ""},
+		{ID: "3", Name: "Alpha Group", Type: ChannelTypeCategory, ParentID: ""},
 	}
 	cases := []struct {
 		name      string
@@ -168,7 +233,7 @@ func TestFindExisting(t *testing.T) {
 		{"type mismatch (category vs text)", "fleet-command", ChannelTypeCategory, "", "", false},
 		{"parent mismatch", "notes", ChannelTypeText, "", "", false},
 		{"same name different parent", "notes", ChannelTypeText, "catA", "2", true},
-		{"category case-insensitive", "family office", ChannelTypeCategory, "", "3", true},
+		{"category case-insensitive", "alpha group", ChannelTypeCategory, "", "3", true},
 		{"absent", "nope", ChannelTypeText, "", "", false},
 	}
 	for _, tc := range cases {
@@ -242,6 +307,9 @@ type emptyIDAPI struct{ fakeAPI }
 func (e *emptyIDAPI) createChannel(string, CreateSpec) (Channel, error) {
 	return Channel{ID: ""}, nil
 }
+func (e *emptyIDAPI) editChannel(string, CreateSpec) (Channel, error) { return Channel{}, nil }
+func (e *emptyIDAPI) webhooks(string) ([]Webhook, error)              { return nil, nil }
+func (e *emptyIDAPI) createWebhook(string, string) (Webhook, error)   { return Webhook{}, nil }
 
 func TestCreate403Backstop(t *testing.T) {
 	f := &fakeAPI{createErr: &apiError{status: 403, msg: "Missing Permissions"}}
@@ -317,8 +385,8 @@ func TestChannelTypeName(t *testing.T) {
 
 func TestResolveParentCategory(t *testing.T) {
 	chans := []Channel{
-		{ID: "201", Name: "Family Office", Type: ChannelTypeCategory},
-		{ID: "202", Name: "Family Office", Type: ChannelTypeCategory}, // duplicate name
+		{ID: "201", Name: "Alpha Group", Type: ChannelTypeCategory},
+		{ID: "202", Name: "Alpha Group", Type: ChannelTypeCategory}, // duplicate name
 		{ID: "203", Name: "Flotilla", Type: ChannelTypeCategory},
 		{ID: "301", Name: "general", Type: ChannelTypeText},
 	}
@@ -338,7 +406,7 @@ func TestResolveParentCategory(t *testing.T) {
 	})
 	t.Run("ambiguous name is an error", func(t *testing.T) {
 		p := &Provisioner{api: &fakeAPI{existing: chans}}
-		_, err := p.ResolveParentCategory(guildID, "Family Office")
+		_, err := p.ResolveParentCategory(guildID, "Alpha Group")
 		if err == nil || !strings.Contains(err.Error(), "ambiguous") {
 			t.Fatalf("want ambiguous error, got %v", err)
 		}

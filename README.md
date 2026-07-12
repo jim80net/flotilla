@@ -94,27 +94,23 @@ delivered to infra (pane demo:0.0) — turn confirmed
 $ flotilla watch --roster ./flotilla.json --ack-file ./flotilla-xo-alive
 flotilla watch: clock running — XO=infra interval=20m0s ack=./flotilla-xo-alive
 
-# provision the federation channels mechanically (idempotent; emits the binding):
-$ flotilla channel create fleet-command --xo meta-xo --member alpha-xo --role fleet-command
-created #fleet-command (123456789012345678)
+# preview the full org-chart Discord stack without touching the host:
+$ flotilla provision-discord acceptance-canary --dry-run
 
-add this to flotilla.json channels[]:
-{
-  "channel_id": "123456789012345678",
-  "xo_agent": "meta-xo",
-  "members": ["alpha-xo"],
-  "role": "fleet-command"
-}
+# create COS C2 + flotilla category/product hub + webhook, and patch channels[]:
+$ flotilla provision-discord alpha --xo alpha-xo --member alpha-be --apply-roster
 ```
 
 `send` doesn't type-and-hope: it confirms a real turn started and refuses a dead
 pane, so a "delivered" line is a turn that actually began — never a silently
 dropped message. `watch` keeps an idle fleet at ~zero cost until there's work.
-`channel` provisions the Discord channels the federation bindings point at — the
-creation complement to F#105 routing: pick the structure → `channel create` (it's
-idempotent and runs a Manage-Channels preflight) → paste the emitted binding into
-`channels[]` → routing is live. The bot token comes from the secrets file and is
-never logged.
+`provision-discord` creates the [intentional dual-placement federation
+layout](./docs/federation.md#spawn-layout-discord-mirrors-the-org-chart-11): XO
+C2 under `COS`, product hub under the flotilla category, roster bindings, and an
+XO webhook. It is idempotent, has a credential-free dry run, and only patches the
+roster with `--apply-roster`; the webhook URL is emitted once for the operator to
+append to the protected secrets file. `channel create|list|move|edit|delete`
+remains the lower-level repair surface. The bot token itself is never logged.
 
 > **New here? → [docs/quickstart.md](./docs/quickstart.md)** — install to your
 > first cross-pane message and the self-continuing clock, runnable cold.
@@ -267,7 +263,8 @@ Near-term:
 - [x] **Federation** — a recursive hub-and-spoke fleet across many Discord channels:
       each channel is bound to one XO (its hub) and the inbound relay routes by origin
       channel (a fleet-command channel binds a meta-XO whose members are project-XOs).
-      Channel **provisioning** is mechanical too — `flotilla channel create|list|delete`
+      Channel **provisioning** is mechanical too — `flotilla provision-discord` plus
+      `flotilla channel create|list|move|edit|delete`
       stands up the channels via the bot token (idempotent, Manage-Channels preflight,
       emits the binding), so the layout is self-service end to end.
 - [x] **`flotilla dash` — an optional local web interface.** A self-contained web

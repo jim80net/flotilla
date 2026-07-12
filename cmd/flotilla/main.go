@@ -60,6 +60,8 @@ func run(args []string) error {
 		return cmdDash(args[1:])
 	case "channel":
 		return cmdChannel(args[1:])
+	case "provision-discord":
+		return cmdProvisionDiscord(args[1:])
 	case "register":
 		return cmdRegister(args[1:])
 	case "resume":
@@ -127,7 +129,10 @@ usage:
   flotilla channel create <name> [--type text|category] [--topic <t>] [--category <name|id>]
                                                       create a Discord channel via the bot (idempotent; emits an F#105 binding with --xo)
   flotilla channel list [--json]                      list the guild's channels (id, type, name, parent)
+  flotilla channel move <channel-id> --category <ref> reparent an orphan text channel (edit is an alias)
   flotilla channel delete <channel-id> --yes          delete a channel by snowflake id only (the one destructive verb)
+  flotilla provision-discord <flotilla-key> [--dry-run] [--apply-roster]
+                                                      provision COS C2 + flotilla product hub + bindings + XO webhook
   flotilla register <agent> [--pane <target>]         tag a pane so it resolves by a stable, drift-immune marker
   flotilla resume <agent> [--launch <path>] [--force]  (re)start a dead desk from its host-local launch recipe
   flotilla recycle <agent> [--launch <path>] [--dry-run]  close a desk's chapter (handoff→graceful close→relaunch→takeover), fail-closed

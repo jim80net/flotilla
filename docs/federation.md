@@ -53,6 +53,52 @@ creates the Discord channel via the bot token (idempotent, with a
 Manage-Channels preflight) and prints the `channels[]` binding to paste in. See
 `flotilla channel --help`.
 
+### Spawn layout: Discord mirrors the org chart 1:1
+
+When adding a flotilla group, use the dual-placement layout every existing
+flotilla in a deployment follows:
+
+```text
+COS
+└── #alpha-xo       C2 / command spine, bound to alpha-xo
+Alpha
+└── #alpha          product hub, bound to alpha-xo
+```
+
+The two channels are intentionally not siblings. The XO's C2 channel lives
+under `COS`, while the product hub lives under the flotilla's category. This
+keeps command topology and product topology visible at the same time.
+
+`provision-discord` realizes the whole shape idempotently: categories, both
+channels, both `channels[]` bindings, and the XO's outbound webhook.
+
+```console
+# credential-free acceptance canary: describes every intended object and write
+flotilla provision-discord acceptance-canary --dry-run
+
+# live create; emits bindings and the one-time webhook secret assignment
+flotilla provision-discord alpha --xo alpha-xo --member alpha-be \
+  --roster ./flotilla.json --secrets ./secrets.env
+
+# opt in to an atomic, duplicate-safe roster update
+flotilla provision-discord alpha --xo alpha-xo --member alpha-be \
+  --roster ./flotilla.json --secrets ./secrets.env --apply-roster
+```
+
+The command never writes webhook credentials automatically. Append the emitted
+`FLOTILLA_WEBHOOK_ALPHA_XO=...` line to the protected secrets file; Discord only
+reveals a new webhook token once. If a named webhook already exists, the command
+skips it and prints the key whose existing value must be retained.
+
+To repair an orphan without raw REST, reparent it by snowflake ID:
+
+```console
+flotilla channel move 123456789012345678 --category Alpha \
+  --roster ./flotilla.json --secrets ./secrets.env
+```
+
+`channel edit` is an alias for the same idempotent parent edit.
+
 > **Two channel layouts exist — pick the right one for your goal.** The example
 > above is a **command-routing** layout (an XO's channel lists its desks as
 > `members`). **Visibility synthesis** (the rolled-up fleet view, Tiers 2/3)
