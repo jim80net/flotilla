@@ -90,6 +90,58 @@ func fakeOps(rec *resumeRec, target string, outcome deliver.ResolveOutcome, st s
 	}
 }
 
+// TestRunResumePreLaunchSeam pins the pre-launch prep contract: preLaunch runs
+// BEFORE the process launch on every launch branch (in-place respawn, cold
+// new-session, cold new-window), and never on a refusal. Codex trust seeding
+// rides this seam — deleting the seam call would silently reintroduce the
+// first-run trust-menu wedge, so the ordering is pinned here.
+func TestRunResumePreLaunchSeam(t *testing.T) {
+	plan := resumePlan{agent: "backend", key: "backend", cwd: "/w", launch: "sleep 1", session: "flotilla", window: "backend"}
+
+	run := func(t *testing.T, target string, outcome deliver.ResolveOutcome, st surface.State, hasSess bool, p resumePlan) []string {
+		t.Helper()
+		var order []string
+		rec := &resumeRec{}
+		ops := fakeOps(rec, target, outcome, st, "backend", hasSess)
+		ops.preLaunch = func() { order = append(order, "preLaunch") }
+		inner := ops.respawn
+		ops.respawn = func(a, b, c string) error { order = append(order, "respawn"); return inner(a, b, c) }
+		innerSess := ops.newSession
+		ops.newSession = func(a, b, c, d string) (string, error) {
+			order = append(order, "newSession")
+			return innerSess(a, b, c, d)
+		}
+		innerWin := ops.newWindow
+		ops.newWindow = func(a, b, c, d string) (string, error) {
+			order = append(order, "newWindow")
+			return innerWin(a, b, c, d)
+		}
+		_, _ = runResume(ops, p)
+		return order
+	}
+
+	if got := run(t, "f:0.0", deliver.ResolveUnique, surface.StateShell, false, plan); len(got) < 2 || got[0] != "preLaunch" || got[1] != "respawn" {
+		t.Errorf("in-place respawn order = %v, want preLaunch before respawn", got)
+	}
+	if got := run(t, "", deliver.ResolveNone, surface.StateUnknown, false, plan); len(got) < 2 || got[0] != "preLaunch" || got[1] != "newSession" {
+		t.Errorf("cold new-session order = %v, want preLaunch before newSession", got)
+	}
+	if got := run(t, "", deliver.ResolveNone, surface.StateUnknown, true, plan); len(got) < 2 || got[0] != "preLaunch" || got[1] != "newWindow" {
+		t.Errorf("cold new-window order = %v, want preLaunch before newWindow", got)
+	}
+	// A refusal (live pane, no --force) must not run preLaunch: no trust is
+	// seeded for a launch that never happens.
+	if got := run(t, "f:0.0", deliver.ResolveUnique, surface.StateWorking, false, plan); len(got) != 0 {
+		t.Errorf("refusal ran %v, want no preLaunch and no launch", got)
+	}
+	// A nil preLaunch (drivers with no prep) must not panic on any branch.
+	rec := &resumeRec{}
+	ops := fakeOps(rec, "f:0.0", deliver.ResolveUnique, surface.StateShell, "backend", false)
+	if _, err := runResume(ops, plan); err != nil {
+		t.Errorf("nil preLaunch respawn: %v", err)
+	}
+}
+
 // TestRunResumeSafetyMatrix pins the two P1 invariants: a live (or
 // can't-confirm-dead) pane is NEVER respawned without --force, and the marker is
 // never duplicated. Without this, the safety-critical interlock was untested.

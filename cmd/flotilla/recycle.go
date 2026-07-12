@@ -582,6 +582,14 @@ func cmdRecycle(args []string) error {
 		return nil
 	}
 
+	// The phase-3 relaunch respawns with recipe.Launch — pre-seed codex directory
+	// trust for the desk cwd (idempotent; best-effort) so the fresh process never
+	// boots into the first-run trust menu (see cmdResume's identical hook). AFTER
+	// the dry-run branch above: a dry run must not mutate the codex config.
+	if recipeInvolvesCodex(rosterSurf, recipe) {
+		seedCodexTrust(recipe.Cwd)
+	}
+
 	confirm := surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}
 	if surface.SelfHealEnabled() {
 		confirm.SendCtrlC = deliver.SendCtrlC

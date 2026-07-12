@@ -125,6 +125,29 @@ const (
 	codexSignInDevice  = "Sign in with Device Code"
 )
 
+// First-run menus (SOURCE-VERIFIED openai/codex rust-v0.144.1 — the rendered
+// snapshot tests in tui/src/onboarding/trust_directory.rs and
+// tui/src/update_prompt.rs). A codex launched in a not-yet-trusted directory
+// shows the directory-trust menu; a stale install shows the update menu. Both
+// are in-pane selection menus: keystrokes NAVIGATE them (an Enter SELECTS the
+// highlighted option — trusting the directory, or running the npm update), so a
+// pane on either menu is neither composing nor a confirmable turn. Each menu is
+// matched by a conjunction of a question/banner SUBSTRING (the trust question
+// paragraph WRAPS at pane width, so only its leading words are safe to match)
+// and a LINE-ANCHORED option row (codexHasMenuRow) — anchoring keeps a pane
+// that merely DISPLAYS these strings (a desk editing this file or its test
+// fixtures in this dogfooded repo) from reading as a menu.
+const (
+	// trust menu: "Do you trust the contents of this directory? …" over
+	// "1. Yes, continue" / "2. No, quit".
+	codexTrustQuestion = "Do you trust the contents"
+	codexTrustYesRow   = "1. Yes, continue"
+	// update menu: "✨ Update available! <old> -> <new>" over "1. Update now
+	// (runs `…`)" / "2. Skip" / "3. Skip until next version".
+	codexUpdateBanner  = "Update available!"
+	codexUpdateSkipRow = "3. Skip until next version"
+)
+
 // Approval modal chrome — on-request permission prompt LIVE-CAPTURED 2026-07-03; auto-review
 // strings binary-sourced 0.142.5 (not elicited live this session).
 var codexApprovalMarkers = []string{
@@ -149,7 +172,7 @@ var codexWorkingMarkers = []string{
 
 func parseCodexState(captured string) State {
 	startup := strings.Join(lastNNonEmptyLines(captured, codexStartupTail), "\n")
-	if codexIsLoginScreen(startup) || codexIsHooksGate(startup) {
+	if codexIsLoginScreen(startup) || codexIsHooksGate(startup) || codexIsFirstRunMenu(startup) {
 		return StateAwaitingInput
 	}
 	tail := strings.Join(lastNNonEmptyLines(captured, codexTail), "\n")
@@ -175,6 +198,34 @@ func codexIsHooksGate(tail string) bool {
 		(strings.Contains(tail, codexPressEnter) || strings.Contains(tail, "Press enter to confirm"))
 }
 
+// codexIsFirstRunMenu reports whether the pane shows a first-run selection menu
+// (directory trust or update prompt). Distinct from the login/hooks gates only
+// in its markers — the operational class is the same: an interactive menu no
+// remote coordinator can answer, so the pane is AwaitingInput, never Idle.
+func codexIsFirstRunMenu(tail string) bool {
+	if strings.Contains(tail, codexTrustQuestion) && codexHasMenuRow(tail, codexTrustYesRow) {
+		return true
+	}
+	return strings.Contains(tail, codexUpdateBanner) && codexHasMenuRow(tail, codexUpdateSkipRow)
+}
+
+// codexHasMenuRow reports whether some rendered line IS the given menu option
+// row: trimmed, minus an optional selection glyph ("›" highlighted / ">"), it
+// must EQUAL row. Whole-row anchoring (vs substring-anywhere) is what keeps a
+// working desk whose visible tail merely CONTAINS these phrases — quoted in
+// source, prose, or a diff — from misreading as a first-run menu.
+func codexHasMenuRow(tail, row string) bool {
+	for _, line := range strings.Split(tail, "\n") {
+		s := strings.TrimSpace(line)
+		s = strings.TrimPrefix(s, codexComposerPrompt)
+		s = strings.TrimPrefix(s, ">")
+		if strings.TrimSpace(s) == row {
+			return true
+		}
+	}
+	return false
+}
+
 // --- ComposerStateProbe: codex cursor-indexed composer classifier ---
 
 // codexComposerPrompt is the input-line glyph on an idle codex desk (LIVE-CAPTURED 2026-07-03
@@ -193,6 +244,19 @@ func (c codex) ComposerState(pane string) ComposerDisposition {
 	}
 	captured, err := c.capturePane(pane)
 	if err != nil {
+		return ComposerUndetermined
+	}
+	// Startup-gate guard: the login/hooks/first-run-menu screens render their
+	// highlighted option row as "› 1. …" — the SAME glyph as the idle composer
+	// prompt — so a cursor parked on that row would misread as ComposerPending,
+	// and the confirm loop's Enter-only retry would SELECT the menu option
+	// (trust the directory / run the update / pick a login mode). On any of
+	// those screens the probe is Undetermined: fail-closed like the approval-
+	// modal rows, and deliberately NOT ListNav — recycle's close poll
+	// (pollClosed) fires the Ctrl-C self-heal on a ListNav read with no idle
+	// pre-gate, and a Ctrl-C on these menus quits codex outright.
+	startup := strings.Join(lastNNonEmptyLines(captured, codexStartupTail), "\n")
+	if codexIsLoginScreen(startup) || codexIsHooksGate(startup) || codexIsFirstRunMenu(startup) {
 		return ComposerUndetermined
 	}
 	return classifyCodexComposerLine(captured, cy)
