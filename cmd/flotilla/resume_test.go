@@ -107,9 +107,15 @@ func TestRunResumePreLaunchSeam(t *testing.T) {
 		inner := ops.respawn
 		ops.respawn = func(a, b, c string) error { order = append(order, "respawn"); return inner(a, b, c) }
 		innerSess := ops.newSession
-		ops.newSession = func(a, b, c, d string) (string, error) { order = append(order, "newSession"); return innerSess(a, b, c, d) }
+		ops.newSession = func(a, b, c, d string) (string, error) {
+			order = append(order, "newSession")
+			return innerSess(a, b, c, d)
+		}
 		innerWin := ops.newWindow
-		ops.newWindow = func(a, b, c, d string) (string, error) { order = append(order, "newWindow"); return innerWin(a, b, c, d) }
+		ops.newWindow = func(a, b, c, d string) (string, error) {
+			order = append(order, "newWindow")
+			return innerWin(a, b, c, d)
+		}
 		_, _ = runResume(ops, p)
 		return order
 	}
