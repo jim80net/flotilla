@@ -1798,7 +1798,9 @@ func TestGoalsKebabMenuNotClipped503(t *testing.T) {
 
 // TestMobileDashUX514_516 locks the 2026-07-08 Seven-C mobile batch:
 //
-//	#514 goals mind-map first paint on 390px (ensureMapInView + phone chrome compact)
+//	#514 goals phone chrome compact
+//	#639 live pulse precedes the map and the mobile header cannot occlude it
+//	#609 one primary goal remains readable without zoom
 //	#515 issues list titles wrap/line-clamp (not clipped mid-word at the edge)
 //	#516 brand-dash subtitle tracks the active SPA tab (not stuck on "conversations")
 func TestMobileDashUX514_516(t *testing.T) {
@@ -1843,24 +1845,39 @@ func TestMobileDashUX514_516(t *testing.T) {
 		}
 	}
 
-	// #514 — phone chrome compact + JS scroll-into-view after fit
+	// #514/#639/#609 — phone chrome stays compact, but first paint now keeps
+	// the pulse and a readable root aim above the fitted map. Never restore the
+	// old scrollIntoView behavior: it moved those rows behind the sticky header.
 	gjs := doGet(t, srv, "/static/goals.js").Body.String()
 	for _, marker := range []string{
-		"function ensureMapInView",
-		"ensureMapInView()",
-		"max-width: 640px",
-		"scrollIntoView",
+		"function renderPrimaryGoal",
+		"goals-primary-title",
+		"primary.description",
 	} {
 		if !strings.Contains(gjs, marker) {
-			t.Errorf("goals.js must pin the map into the phone viewport (missing %q) — #514", marker)
+			t.Errorf("goals.js must render a readable primary goal summary (missing %q) — #609", marker)
 		}
 	}
-	// CSS: hide the bulky goals panel-desc on phone; give the canvas scroll-margin under the sticky bar.
+	if strings.Contains(gjs, "ensureMapInView") || strings.Contains(gjs, "scrollIntoView") {
+		t.Error("goals.js must not auto-scroll the map over the phone pulse — #639")
+	}
+	html := doGet(t, srv, "/").Body.String()
+	if !strings.Contains(html, `id="goals-primary"`) {
+		t.Error("goals page must provide the mobile primary-goal summary region — #609")
+	}
+	// CSS: hide bulky detail, keep only the four live pulse cells, and release
+	// header stickiness on phone so no in-flow KPI value can be covered.
 	if !strings.Contains(css, ".goals-panel > .panel-head .panel-desc") {
 		t.Error("dash.css phone block must target .goals-panel panel-desc for collapse — #514")
 	}
-	if !strings.Contains(css, "scroll-margin-top") {
-		t.Error("dash.css must set scroll-margin-top on .goals-viewport for sticky-bar clearance — #514")
+	for _, marker := range []string{
+		".bar { position: relative",
+		".goals-situation .gtile:nth-child(n+5) { display: none",
+		".goals-primary-title",
+	} {
+		if !strings.Contains(css, marker) {
+			t.Errorf("dash.css must preserve pulse-first mobile goals without sticky overlap (missing %q) — #639/#609", marker)
+		}
 	}
 	if !strings.Contains(css, ".gtile-d { display: none") && !strings.Contains(css, ".gtile-d{display:none") {
 		t.Error("dash.css phone block must hide .gtile-d to compact the situation strip — #514")
