@@ -80,8 +80,30 @@ func TestAuthorizeSendDerivedDAGInfersRolesFromEdges(t *testing.T) {
 	}
 }
 
-func TestAuthorizeSendUnknownSenderIsOperatorDirect(t *testing.T) {
-	if d := authorizeSend(genericSendDAG(), "operator", "beta-data", false); !d.Allowed {
+func TestAuthorizeSendOperatorSentinelIsDirect(t *testing.T) {
+	if d := authorizeSend(genericSendDAG(), "me", "beta-data", false); !d.Allowed {
 		t.Fatalf("operator-direct send blocked: %+v", d)
+	}
+}
+
+func TestAuthorizeSendUnknownSenderFailsClosed(t *testing.T) {
+	d := authorizeSend(genericSendDAG(), "typo-desk", "beta-data", false)
+	if d.Allowed || !strings.Contains(d.Reason, "absent from the compiled org DAG") {
+		t.Fatalf("unknown sender decision = %+v", d)
+	}
+}
+
+func TestAuthorizeSendNilDAGFailsClosed(t *testing.T) {
+	if d := authorizeSend(nil, "alpha-backend", "beta-data", false); d.Allowed {
+		t.Fatalf("nil DAG should block: %+v", d)
+	}
+}
+
+func TestAuthorizeSendOwnerlessDeskNamesMissingEdge(t *testing.T) {
+	dag := genericSendDAG()
+	dag.Parents["beta-data"] = nil
+	d := authorizeSend(dag, "alpha-backend", "beta-data", false)
+	if d.Allowed || !strings.Contains(d.Reason, "cannot resolve owning coordinator edges") {
+		t.Fatalf("ownerless decision = %+v", d)
 	}
 }

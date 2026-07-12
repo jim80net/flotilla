@@ -14,8 +14,8 @@ type sendDecision struct {
 
 // authorizeSend enforces the cross-venture tasking boundary from the compiled
 // org DAG. Names are opaque identifiers: role and ownership come only from node
-// kinds and leader edges. Unknown senders remain valid because `send --from me`
-// is the documented operator-direct form and the operator is not a roster desk.
+// kinds and leader edges. The literal "me" is the documented operator-direct
+// sentinel; every other sender must exist in the DAG so a typo cannot bypass policy.
 func authorizeSend(dag *org.DAG, from, to string, crossVenture bool) sendDecision {
 	if dag == nil {
 		return sendDecision{Reason: "send blocked: compiled org DAG is unavailable"}
@@ -26,7 +26,10 @@ func authorizeSend(dag *org.DAG, from, to string, crossVenture bool) sendDecisio
 		return sendDecision{Reason: fmt.Sprintf("send blocked: recipient %q is absent from the compiled org DAG", to)}
 	}
 	if !fromKnown {
-		return sendDecision{Allowed: true} // operator/external caller, not a roster desk
+		if from == "me" {
+			return sendDecision{Allowed: true}
+		}
+		return sendDecision{Reason: fmt.Sprintf("send blocked: sender %q is absent from the compiled org DAG (operator-direct sends use --from me)", from)}
 	}
 	if dagCoordinator(dag, fromNode) || fromNode.Kind == org.KindAdjutant {
 		return sendDecision{Allowed: true}
@@ -36,6 +39,9 @@ func authorizeSend(dag *org.DAG, from, to string, crossVenture bool) sendDecisio
 	}
 	fromXO := owningCoordinator(dag, from)
 	toXO := owningCoordinator(dag, to)
+	if fromXO == "" || toXO == "" {
+		return sendDecision{Reason: fmt.Sprintf("send blocked: compiled org DAG cannot resolve owning coordinator edges for %q → %q (sender owner %q, recipient owner %q)", from, to, fromXO, toXO)}
+	}
 	if fromXO != "" && fromXO == toXO {
 		return sendDecision{Allowed: true}
 	}
