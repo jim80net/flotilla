@@ -13,21 +13,76 @@ import (
 
 // cmdChannel provisions Discord channels mechanically via the bot token — the
 // channel-creation complement to the F#105 routing bindings. It is a one-shot REST
-// surface (no gateway): create, list, delete.
+// surface (no gateway): create, list, move, delete.
 func cmdChannel(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: flotilla channel <create|list|delete> ...")
+		return fmt.Errorf("usage: flotilla channel <create|list|move|edit|delete> ...")
 	}
 	switch args[0] {
 	case "create":
 		return cmdChannelCreate(args[1:])
 	case "list":
 		return cmdChannelList(args[1:])
+	case "move", "edit":
+		return cmdChannelMove(args[1:])
 	case "delete":
 		return cmdChannelDelete(args[1:])
 	default:
-		return fmt.Errorf("unknown channel subcommand %q (want create|list|delete)", args[0])
+		return fmt.Errorf("unknown channel subcommand %q (want create|list|move|edit|delete)", args[0])
 	}
+}
+
+func cmdChannelMove(args []string) error {
+	id := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		id, args = args[0], args[1:]
+	}
+	fs := flag.NewFlagSet("channel move", flag.ContinueOnError)
+	category := fs.String("category", "", "new parent category (name or snowflake id)")
+	rp := fs.String("roster", rosterDefault(), "roster config path")
+	sp := fs.String("secrets", os.Getenv("FLOTILLA_SECRETS"), "secrets env file path")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	rest := fs.Args()
+	if id == "" && len(rest) > 0 {
+		id, rest = rest[0], rest[1:]
+	}
+	if len(rest) != 0 || !discord.IsSnowflake(id) || strings.TrimSpace(*category) == "" {
+		return fmt.Errorf("usage: flotilla channel move <channel-id> --category <name|id>")
+	}
+	cfg, err := roster.Load(*rp)
+	if err != nil {
+		return err
+	}
+	token, err := botToken(*sp)
+	if err != nil {
+		return err
+	}
+	if cfg.GuildID == "" {
+		return fmt.Errorf("roster has no guild_id — set it so the bot knows which guild to edit")
+	}
+	prov, err := discord.NewProvisioner(token)
+	if err != nil {
+		return err
+	}
+	parentID, err := prov.ResolveParentCategory(cfg.GuildID, *category)
+	if err != nil {
+		return err
+	}
+	if err := prov.Preflight(cfg.GuildID); err != nil {
+		return err
+	}
+	ch, moved, err := prov.Move(cfg.GuildID, id, parentID)
+	if err != nil {
+		return err
+	}
+	if moved {
+		fmt.Printf("moved #%s (%s) under category %s\n", ch.Name, ch.ID, parentID)
+	} else {
+		fmt.Printf("exists #%s (%s) under category %s — skipped\n", ch.Name, ch.ID, parentID)
+	}
+	return nil
 }
 
 // channelCreateOpts is the parsed `channel create` invocation.

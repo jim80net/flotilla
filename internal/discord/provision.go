@@ -46,6 +46,54 @@ type CreateSpec struct {
 	ParentID string
 }
 
+// Webhook is the credential-bearing result of webhook creation. URL is populated
+// only for a newly-created webhook because Discord never returns an existing token.
+type Webhook struct {
+	ID        string
+	Name      string
+	ChannelID string
+	URL       string
+}
+
+// OrgStack is the Discord half of one flotilla org unit. C2 and Product are
+// intentionally in different categories: command spine under COS, product hub
+// under the flotilla category.
+type OrgStack struct {
+	COS, Category, C2, Product Channel
+	XO                         Webhook
+	Created                    map[string]bool
+}
+
+// ProvisionOrgStack idempotently realizes the dual-placement org pattern.
+func (p *Provisioner) ProvisionOrgStack(guildID, categoryName, c2Name, productName, xoName string) (OrgStack, error) {
+	if err := p.Preflight(guildID); err != nil {
+		return OrgStack{}, err
+	}
+	out := OrgStack{Created: make(map[string]bool)}
+	var err error
+	out.COS, out.Created["cos"], err = p.Create(guildID, CreateSpec{Name: "COS", Type: ChannelTypeCategory})
+	if err != nil {
+		return OrgStack{}, err
+	}
+	out.Category, out.Created["category"], err = p.Create(guildID, CreateSpec{Name: categoryName, Type: ChannelTypeCategory})
+	if err != nil {
+		return OrgStack{}, err
+	}
+	out.C2, out.Created["c2"], err = p.Create(guildID, CreateSpec{Name: c2Name, Type: ChannelTypeText, ParentID: out.COS.ID})
+	if err != nil {
+		return OrgStack{}, err
+	}
+	out.Product, out.Created["product"], err = p.Create(guildID, CreateSpec{Name: productName, Type: ChannelTypeText, ParentID: out.Category.ID})
+	if err != nil {
+		return OrgStack{}, err
+	}
+	out.XO, out.Created["webhook"], err = p.EnsureWebhook(out.C2.ID, xoName)
+	if err != nil {
+		return OrgStack{}, err
+	}
+	return out, nil
+}
+
 // guildInfo is the slice of guild facts the permission preflight needs.
 type guildInfo struct {
 	ownerID   string
@@ -63,7 +111,40 @@ type guildAPI interface {
 	guild(guildID string) (*guildInfo, error)
 	channels(guildID string) ([]Channel, error)
 	createChannel(guildID string, in CreateSpec) (Channel, error)
+	editChannel(channelID string, in CreateSpec) (Channel, error)
+	webhooks(channelID string) ([]Webhook, error)
+	createWebhook(channelID, name string) (Webhook, error)
 	deleteChannel(channelID string) error
+}
+
+// EnsureWebhook creates a named channel webhook once. Existing webhooks are
+// reported without a URL; their tokens cannot be recovered from Discord.
+func (p *Provisioner) EnsureWebhook(channelID, name string) (Webhook, bool, error) {
+	hooks, err := p.api.webhooks(channelID)
+	if err != nil {
+		var ae *apiError
+		if errors.As(err, &ae) && ae.status == 403 {
+			return Webhook{}, false, fmt.Errorf("bot lacks Manage Webhooks in channel %s — grant it on the bot's role/category", channelID)
+		}
+		return Webhook{}, false, err
+	}
+	for _, h := range hooks {
+		if strings.EqualFold(strings.TrimSpace(h.Name), strings.TrimSpace(name)) {
+			return h, false, nil
+		}
+	}
+	h, err := p.api.createWebhook(channelID, name)
+	if err != nil {
+		var ae *apiError
+		if errors.As(err, &ae) && ae.status == 403 {
+			return Webhook{}, false, fmt.Errorf("bot lacks Manage Webhooks in channel %s — grant it on the bot's role/category", channelID)
+		}
+		return Webhook{}, false, err
+	}
+	if h.ID == "" || h.URL == "" {
+		return Webhook{}, false, errors.New("discord: created webhook returned no id/token")
+	}
+	return h, true, nil
 }
 
 // Provisioner creates/lists/deletes Discord channels for the configured guild.
@@ -154,6 +235,41 @@ func (p *Provisioner) Delete(channelID string) error {
 		return fmt.Errorf("no channel with id %s (already deleted, or wrong id)", channelID)
 	}
 	return err
+}
+
+// Move reparents a text channel. It is idempotent and deliberately accepts a
+// category ID already resolved by ResolveParentCategory, keeping name ambiguity
+// out of the mutation boundary.
+func (p *Provisioner) Move(guildID, channelID, parentID string) (Channel, bool, error) {
+	chans, err := p.api.channels(guildID)
+	if err != nil {
+		return Channel{}, false, err
+	}
+	var current *Channel
+	for i := range chans {
+		if chans[i].ID == channelID {
+			current = &chans[i]
+			break
+		}
+	}
+	if current == nil {
+		return Channel{}, false, fmt.Errorf("no channel with id %s in the guild", channelID)
+	}
+	if current.Type != ChannelTypeText {
+		return Channel{}, false, fmt.Errorf("channel %s is %s, not text; only text channels can be reparented", channelID, ChannelTypeName(current.Type))
+	}
+	if current.ParentID == parentID {
+		return *current, false, nil
+	}
+	out, err := p.api.editChannel(channelID, CreateSpec{Name: current.Name, Type: current.Type, ParentID: parentID})
+	if err != nil {
+		var ae *apiError
+		if errors.As(err, &ae) && ae.status == 403 {
+			return Channel{}, false, fmt.Errorf("%s (denied while moving channel — check both categories' permission overwrites)", manageChannelsMsg(guildID))
+		}
+		return Channel{}, false, err
+	}
+	return out, true, nil
 }
 
 // ResolveParentCategory turns a --category reference (a snowflake id, or a category
@@ -424,6 +540,41 @@ func (a *discordgoAPI) createChannel(guildID string, in CreateSpec) (Channel, er
 		return Channel{}, errors.New("discord: channel create returned no channel")
 	}
 	return Channel{ID: c.ID, Name: c.Name, Type: int(c.Type), ParentID: c.ParentID}, nil
+}
+
+func (a *discordgoAPI) editChannel(channelID string, in CreateSpec) (Channel, error) {
+	c, err := a.sess.ChannelEditComplex(channelID, &discordgo.ChannelEdit{ParentID: in.ParentID})
+	if err != nil {
+		return Channel{}, mapErr(err)
+	}
+	if c == nil {
+		return Channel{}, errors.New("discord: channel edit returned no channel")
+	}
+	return Channel{ID: c.ID, Name: c.Name, Type: int(c.Type), ParentID: c.ParentID}, nil
+}
+
+func (a *discordgoAPI) webhooks(channelID string) ([]Webhook, error) {
+	hs, err := a.sess.ChannelWebhooks(channelID)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	out := make([]Webhook, 0, len(hs))
+	for _, h := range hs {
+		out = append(out, Webhook{ID: h.ID, Name: h.Name, ChannelID: h.ChannelID})
+	}
+	return out, nil
+}
+
+func (a *discordgoAPI) createWebhook(channelID, name string) (Webhook, error) {
+	h, err := a.sess.WebhookCreate(channelID, name, "")
+	if err != nil {
+		return Webhook{}, mapErr(err)
+	}
+	if h == nil {
+		return Webhook{}, errors.New("discord: webhook create returned no webhook")
+	}
+	return Webhook{ID: h.ID, Name: h.Name, ChannelID: h.ChannelID,
+		URL: fmt.Sprintf("https://discord.com/api/webhooks/%s/%s", h.ID, h.Token)}, nil
 }
 
 func (a *discordgoAPI) deleteChannel(channelID string) error {
