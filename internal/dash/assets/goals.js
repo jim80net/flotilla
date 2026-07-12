@@ -332,6 +332,8 @@
         '<div class="gtile-d">' + escapeHtml(t.d) + "</div>" +
         "</div>";
     }).join("");
+
+    renderPrimaryGoal(doc);
     // #429: the awaiting-count badge lives on the Decisions TAB (the reading room is a
     // first-class view, not a header-button modal). #451: it shows the SAME decisions
     // count as the tile and the page header — never the node-population count again.
@@ -353,6 +355,30 @@
     // every render (incl. error/empty), so announcing the count summary here would
     // alternate with the error/empty announcement each refresh and defeat the dedup.
     // render() announces the summary only on the success path.
+  }
+
+  // A fitted fleet-wide DAG necessarily makes node copy dense on a phone. Keep one
+  // root aim readable without zoom so the operator gets purpose as well as pulse
+  // before choosing to explore the map (#609).
+  function renderPrimaryGoal(doc) {
+    var el = q("goals-primary");
+    if (!el) return;
+    var goals = (doc && (doc.goals || doc.tree)) || [];
+    var primary = null;
+    for (var i = 0; i < goals.length; i++) {
+      if (!goals[i].parent) { primary = goals[i]; break; }
+    }
+    if (!primary && goals.length) primary = goals[0];
+    if (!primary) {
+      el.hidden = true;
+      el.innerHTML = "";
+      return;
+    }
+    var summary = primary.description || primary.brief || "";
+    el.innerHTML = '<span class="goals-primary-label">Primary goal</span>' +
+      '<strong class="goals-primary-title">' + escapeHtml(primary.title || primary.id || "Goal") + '</strong>' +
+      (summary ? '<span class="goals-primary-summary">' + escapeHtml(summary) + '</span>' : "");
+    el.hidden = false;
   }
 
   // updateLive announces the fleet-goal situation to a screen reader (an aria-live
@@ -2112,7 +2138,6 @@
       // disc, so frame the whole thing centered.
       if (!view.fitted) { (isRadial() ? fitOverview : fit)(); view.fitted = true; }
       applyTransform();
-      ensureMapInView(); // #514: phone first-paint — canvas must be on-screen, not below chrome
       restoreFocus(keepFocus);
       reapplyTransient(); // re-select the drawer's node (articles were replaced) + re-light hover
       lastStructSig = ssig; // commit ONLY after a complete pass-2 render
@@ -2120,27 +2145,6 @@
       lastSig = sig;
       tryRestore(); // nodeById is now populated — apply a queued Back/Forward drawer target (#351 P2)
     });
-  }
-
-  // #514: on a 390px cold open the situation strip + panel head fill the first
-  // viewport, leaving only an empty-grid sliver of the (tall, fit-centered) map.
-  // After layout, pin the canvas under the sticky header so gnodes are in the
-  // first paint. No-op on wider viewports where the map already shares the screen.
-  // Uses scroll-margin-top on .goals-viewport (dash.css phone block) for bar clearance.
-  function ensureMapInView() {
-    if (!isVisible()) return;
-    if (!(window.matchMedia && window.matchMedia("(max-width: 640px)").matches)) return;
-    var vp = q("goals-viewport");
-    if (!vp) return;
-    var r = vp.getBoundingClientRect();
-    // If the bulk of the canvas is below the fold (top past ~35% of the viewport),
-    // scroll it to the top so the fit-centered graph is what the operator sees.
-    if (r.top > window.innerHeight * 0.35 || r.bottom > window.innerHeight) {
-      if (typeof vp.scrollIntoView === "function") {
-        try { vp.scrollIntoView({ block: "start", behavior: "instant" }); }
-        catch (e) { vp.scrollIntoView(true); } // older engines: boolean alignToTop
-      }
-    }
   }
 
   /* ── pan / zoom (ported) ───────────────────────────────────────────────── */
@@ -2315,9 +2319,6 @@
     wireNodes();
     injectRealizedSlider(); // #418: revive the look-back control (now live data)
     if (cache) { render(); } else { refresh(); }
-    // #514: if the map was already laid out (re-opening the tab), re-pin it into
-    // the phone viewport even when render() short-circuits on lastSig.
-    ensureMapInView();
   }
 
   // Re-fit on resize (keeps the map framed); the transform is otherwise the
