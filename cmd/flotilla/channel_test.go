@@ -18,11 +18,11 @@ func TestParseChannelCreateArgs(t *testing.T) {
 		}
 	})
 	t.Run("name after flags", func(t *testing.T) {
-		o, err := parseChannelCreateArgs([]string{"--type", "category", "Family Office"})
+		o, err := parseChannelCreateArgs([]string{"--type", "category", "Alpha Group"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if o.name != "Family Office" || o.ctype != "category" {
+		if o.name != "Alpha Group" || o.ctype != "category" {
 			t.Fatalf("got %+v", o)
 		}
 	})

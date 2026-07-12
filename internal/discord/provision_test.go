@@ -200,7 +200,7 @@ func TestChannelNameKey(t *testing.T) {
 		{"text spaces to hyphens", "Fleet Command", ChannelTypeText, "fleet-command"},
 		{"text trims edge hyphens", " Fleet ", ChannelTypeText, "fleet"},
 		{"text does NOT fold underscore (no over-match)", "team_a", ChannelTypeText, "team_a"},
-		{"category case-insensitive, space-preserving", "Family Office", ChannelTypeCategory, "family office"},
+		{"category case-insensitive, space-preserving", "Alpha Group", ChannelTypeCategory, "alpha group"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -219,7 +219,7 @@ func TestFindExisting(t *testing.T) {
 	chans := []Channel{
 		{ID: "1", Name: "fleet-command", Type: ChannelTypeText, ParentID: ""},
 		{ID: "2", Name: "notes", Type: ChannelTypeText, ParentID: "catA"},
-		{ID: "3", Name: "Family Office", Type: ChannelTypeCategory, ParentID: ""},
+		{ID: "3", Name: "Alpha Group", Type: ChannelTypeCategory, ParentID: ""},
 	}
 	cases := []struct {
 		name      string
@@ -233,7 +233,7 @@ func TestFindExisting(t *testing.T) {
 		{"type mismatch (category vs text)", "fleet-command", ChannelTypeCategory, "", "", false},
 		{"parent mismatch", "notes", ChannelTypeText, "", "", false},
 		{"same name different parent", "notes", ChannelTypeText, "catA", "2", true},
-		{"category case-insensitive", "family office", ChannelTypeCategory, "", "3", true},
+		{"category case-insensitive", "alpha group", ChannelTypeCategory, "", "3", true},
 		{"absent", "nope", ChannelTypeText, "", "", false},
 	}
 	for _, tc := range cases {
@@ -385,8 +385,8 @@ func TestChannelTypeName(t *testing.T) {
 
 func TestResolveParentCategory(t *testing.T) {
 	chans := []Channel{
-		{ID: "201", Name: "Family Office", Type: ChannelTypeCategory},
-		{ID: "202", Name: "Family Office", Type: ChannelTypeCategory}, // duplicate name
+		{ID: "201", Name: "Alpha Group", Type: ChannelTypeCategory},
+		{ID: "202", Name: "Alpha Group", Type: ChannelTypeCategory}, // duplicate name
 		{ID: "203", Name: "Flotilla", Type: ChannelTypeCategory},
 		{ID: "301", Name: "general", Type: ChannelTypeText},
 	}
@@ -406,7 +406,7 @@ func TestResolveParentCategory(t *testing.T) {
 	})
 	t.Run("ambiguous name is an error", func(t *testing.T) {
 		p := &Provisioner{api: &fakeAPI{existing: chans}}
-		_, err := p.ResolveParentCategory(guildID, "Family Office")
+		_, err := p.ResolveParentCategory(guildID, "Alpha Group")
 		if err == nil || !strings.Contains(err.Error(), "ambiguous") {
 			t.Fatalf("want ambiguous error, got %v", err)
 		}
