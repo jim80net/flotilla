@@ -114,6 +114,10 @@ Open the PR in the browser; confirm Mermaid blocks render (not raw text).
 - Gate vocabulary (`CLEAR`, `cubic`, dispatch nonces) in the lead paragraph
 - Commit-log or file-list structure for medium/large PRs
 - Deployment-specific names in public bodies (`docs/private-public-boundary.md`)
+- Screenshots/recordings captured from a LIVE deployment — pixels leak desk
+  names and goal text past the text-based boundary guard; committed/embedded
+  media must be rendered from the example fixture state only (and a pushed
+  image stays publicly reachable via the frozen pull ref even after deletion)
 
 ## See also
 

@@ -190,6 +190,18 @@ PR text is **public**. Use generic roles and examples from `flotilla.example.jso
 handles, guild ids, or fleet-specific desk names in titles or bodies. Redact to the
 **generic capability**; see [`private-public-boundary.md`](./private-public-boundary.md).
 
+**Screenshots and recordings are public artifacts too — and the text-based
+boundary guard cannot see inside them.** A capture of a UI serving a real
+deployment's state publishes desk names, goal titles, and descriptions as
+pixels. Any image committed to the repo or embedded in a PR must be generated
+from the **committed example fixture state** (`flotilla.example.json` + the
+example goals/org files) — never from a live deployment. If fixture-state
+capture is impractical, commit no media and state in the PR body where the walk
+evidence is staged privately; the reviewer verifies independently. Remember
+that a squash merge does not sanitize history: every commit pushed to a PR
+branch remains publicly reachable via the frozen pull ref, so a leaked image
+must never be pushed in the first place.
+
 ## Quick self-check before opening the PR
 
 1. **Title** — states the capability/outcome, not the branch or gate phase.
@@ -198,4 +210,5 @@ handles, guild ids, or fleet-specific desk names in titles or bodies. Redact to 
 4. **Diagrams** — each earns its space; blank lines around fences; verified in browser.
 5. **Delivery** — body read from `.claude/pr-bodies/*.md` via `--body-file` or REST.
 6. **Verification** — specific counts and surfaces, not "tests pass."
-7. **Boundary** — no deployment-specific identifiers.
+7. **Boundary** — no deployment-specific identifiers; any committed/embedded
+   media rendered from example fixture state only.
