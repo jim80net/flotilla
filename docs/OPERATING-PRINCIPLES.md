@@ -127,28 +127,53 @@ delegation signal trigger a dispatch nudge injected into the coordinator's pane.
 The nudge applies to **management-harness coordinators** (Claude by default; explicit
 `surface: "codex"` or `surface: "grok"` on the roster) — not execution workhorses.
 
-## 10. Harness allocation: judgment on coordinators, execution on workhorses
+## 10. Harness allocation: role-based multi-model
 
-Fleet roles split across harness tiers by design:
+Fleet harnesses are allocated by **role fit**, not by a single global favorite and
+not by a rigid "Claude judges, Grok types" split. The product default is a
+**role-based multi-model matrix** (firstmate / secondmate / crewmate role-org
+framing). Quality is still protected by the gate stack — multi-model is **role
+allocation**, not a license to skip review.
 
-| Seat | Harness | Work |
-|------|---------|------|
-| **Coordinators** (CoS + every flotilla XO) | **Claude** (default); **codex** or **grok** coordinator seats are a supervised-trial capability, not yet a production default (see the [seat-swap runbook](./coordinator-seat-swap-runbook.md)) | Dispatch, gate bars, review/verify, merge authority, operator communication, synthesis |
-| **Execution desks** | **grok workhorse** (default) | Authoring code/docs/fixes, builds, migrations, sweeps, running gated scripts |
+| Role | Fit | Default product mapping |
+|------|-----|-------------------------|
+| **Firstmate** (orchestration: CoS, adjutants, XOs in the coordination loop) | Fast interactive loop | **Grok-class** high-throughput interactive harness |
+| **Secondmate** (complex product/tech **design**, depth > latency) | Deep design | **Claude / design-class** (e.g. Fable when available) |
+| **Crewmate — bugfix** | Fast iterative fixes | **Grok-class** workhorse |
+| **Crewmate — feature development** | Implementation throughput | **Codex / gpt-class** when surface + launch recipe are real for that model; Grok-class fallback |
+| **Realtime X / live web** | Fresh external signal | **Always Grok-class** |
+| **Image generation** | Harness-native image tools | Prefer **Codex** when the image task is primary; Grok image tools OK until a codex image path is standard |
+| **/no-mistakes** (adversarial review + fix) | Consistent cheap review | Independent **gate stack** (CI, review bots, independent merge per Principle 7); optional medium-effort review pass |
 
-**Rationale:** expensive models are for judgment, not typing. Quality is protected
-by the gate stack (review, CI, independent merge authority) — not by which harness
-authored the diff. A coordinator grinding implementation on a Claude seat burns
-bandwidth and violates both Principle 9 and this allocation.
+**Rationale:** models differ in latency, depth, tool surface, and quota. Matching
+role to harness keeps orchestration snappy, design deep, and feature throughput
+high. A firstmate grinding multi-step implementation still burns coordination
+bandwidth and violates Principle 9 — role-based allocation does **not** authorize
+IC-ing builds on the coordination seat.
 
-**Defaults:** `flotilla workspace init <agent> --repo <abs-path>` provisions a **git worktree**
-desk home, scaffolds **grok** launch recipes for execution desks and **Claude** for
-coordinators, and writes identity into the worktree. Override only deliberately — e.g.
-`surface: "grok"` or `surface: "codex"` on a coordinator for harness-portable seats
-(see `docs/coordinator-seat-swap-runbook.md`).
+**Rules:**
 
-**Mechanically enforced:** the delegation-nudge detector (#232) flags inline
-build-loops on management-harness coordinators and nudges dispatch to execution desks.
+1. **Harness matters** — the same model on the wrong harness is a miss; roster
+   `surface` and the host launch recipe must agree.
+2. **Quota-aware fallbacks** for feature work (Codex primary → Claude Opus-class)
+   are allowed when product autoswitch is wired to this matrix.
+3. Do not put firstmates on slow high-depth models when the loop feels laggy.
+4. Do not put pure design secondmates on "fast fix only" if depth collapses.
+5. Gate stack remains the quality bar on every role.
+
+**Defaults / provisioning:** `flotilla workspace init <agent> --repo <abs-path>`
+provisions a **git worktree** desk home and scaffolds a launch recipe — choose the
+recipe that matches the seat's role in the matrix above. Coordinator seat-swap
+remains documented in the [seat-swap runbook](./coordinator-seat-swap-runbook.md).
+Role launch presets and a surface≠launch mismatch guard are product work (#633).
+
+**Mechanically enforced (today):** the delegation-nudge detector (#232) flags
+inline build-loops on management-harness coordinators and nudges dispatch to
+execution desks. **Not yet mechanical:** launch-preset enforcement and
+surface/launch mismatch guard (#633).
+
+**Supersedes:** the earlier product default "judgment on Claude, execution on
+grok," and any flat "every seat on one model" policy.
 
 ## 11. Desk homes are repo worktrees
 

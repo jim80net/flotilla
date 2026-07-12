@@ -2,7 +2,7 @@
 
 Move work by **dispatching** and gating results — not by building yourself.
 Implements Principles 9–10 (coordinators delegate; judgment on coordinator harnesses,
-execution on workhorses) and the Rule of Three parallel dispatch
+role-based multi-model harness allocation) and the Rule of Three parallel dispatch
 ([`span-of-control.md`](../span-of-control.md)).
 
 ## Dispatch primitive
@@ -71,10 +71,11 @@ operator provenance.)*
 
 ## Harness allocation
 
-Coordinators: dispatch, gate, review, merge, operator comms. Execution desks: code,
-docs, builds, migrations.
+Role-based multi-model (Principle 10): firstmates orchestrate (dispatch, gate,
+review, merge, operator comms); secondmates take deep design; crewmates own
+bugfix vs feature lanes by harness fit. Surface + launch must agree.
 
-**Coordinator IC-ing a multi-step build is double-billing.** At the 3rd+ inline tool
+**Firstmate IC-ing a multi-step build is double-billing.** At the 3rd+ inline tool
 call on build work, STOP and dispatch. Exception: seat runbooks/doctrine; gate
 reviews; trivial one-shots.
 
