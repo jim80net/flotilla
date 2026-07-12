@@ -81,6 +81,10 @@ func TestSeedIdempotentWhenPresent(t *testing.T) {
 			name:    "unclean path form",
 			initial: "[projects.\"/work//desk-a/\"]\ntrust_level = \"trusted\"\n",
 		},
+		{
+			name:    "trailing inline comment on the header (TOML-legal)",
+			initial: "[projects.\"/work/desk-a\"] # trusted by hand 2026-07\ntrust_level = \"trusted\"\n",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -115,6 +119,20 @@ func TestSeedDoesNotMatchDeeperDottedKeys(t *testing.T) {
 	}
 	if !strings.Contains(final, "[projects.\"/work/desk-a\"]\ntrust_level = \"trusted\"\n") {
 		t.Errorf("seeded section missing:\n%s", final)
+	}
+}
+
+func TestSeedRecognizesHashInsideQuotedPath(t *testing.T) {
+	// '#' inside the quoted path is path content, not a comment — the header
+	// scan must consume the quoted string BEFORE looking for a trailing comment,
+	// or this section would be mis-parsed and duplicated.
+	initial := "[projects.\"/work/desk#7\"]\ntrust_level = \"trusted\"\n"
+	seeded, final := seedInto(t, initial, "/work/desk#7")
+	if seeded {
+		t.Errorf("path containing '#' not recognized; final:\n%s", final)
+	}
+	if final != initial {
+		t.Errorf("file changed on a no-op seed:\n%s", final)
 	}
 }
 

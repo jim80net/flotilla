@@ -63,7 +63,9 @@ func ConfigPath() (string, error) {
 // (temp+rename), and serialized against concurrent seeders via a sibling
 // .lock flock — a duplicate [projects."…"] table would be a TOML redefinition
 // error that breaks codex config loading for EVERY desk, so the race is closed,
-// not tolerated.
+// not tolerated. Known bound: codex's OWN config writes (a human answering a
+// trust prompt elsewhere) do not take this lock, so a last-rename-wins overlap
+// can drop one side's entry — idempotent re-seed at the next launch recovers it.
 func Seed(configPath, cwd string) (bool, error) {
 	if !filepath.IsAbs(cwd) {
 		return false, fmt.Errorf("codextrust: cwd %q is not absolute", cwd)
@@ -121,26 +123,34 @@ func hasProjectSection(content, want string) bool {
 }
 
 // projectSectionPath extracts the quoted path from a `[projects."<path>"]`
-// header line. Lines that are not project headers (other tables, key/values,
+// header line, tolerating interior whitespace and a trailing `# comment` (TOML
+// allows one after a table header — and it must be handled STRUCTURALLY, after
+// the quoted string is consumed, because '#' is also legal inside a quoted
+// path). Lines that are not project headers (other tables, key/values,
 // comments, deeper dotted keys like [projects."x".y]) return ok=false.
 func projectSectionPath(line string) (string, bool) {
-	s := strings.TrimSpace(line)
-	if !strings.HasPrefix(s, "[") || !strings.HasSuffix(s, "]") {
-		return "", false
-	}
-	s = strings.TrimSpace(s[1 : len(s)-1])
-	rest, ok := strings.CutPrefix(s, "projects")
+	rest, ok := strings.CutPrefix(strings.TrimSpace(line), "[")
 	if !ok {
 		return "", false
 	}
-	rest = strings.TrimSpace(rest)
-	rest, ok = strings.CutPrefix(rest, ".")
+	rest, ok = strings.CutPrefix(strings.TrimSpace(rest), "projects")
 	if !ok {
 		return "", false
 	}
-	rest = strings.TrimSpace(rest)
-	path, remainder, ok := cutQuoted(rest)
-	if !ok || strings.TrimSpace(remainder) != "" {
+	rest, ok = strings.CutPrefix(strings.TrimSpace(rest), ".")
+	if !ok {
+		return "", false
+	}
+	path, remainder, ok := cutQuoted(strings.TrimSpace(rest))
+	if !ok {
+		return "", false
+	}
+	remainder, ok = strings.CutPrefix(strings.TrimSpace(remainder), "]")
+	if !ok {
+		return "", false
+	}
+	remainder = strings.TrimSpace(remainder)
+	if remainder != "" && !strings.HasPrefix(remainder, "#") {
 		return "", false
 	}
 	return path, true

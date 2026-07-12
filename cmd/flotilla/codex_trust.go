@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/jim80net/flotilla/internal/codextrust"
 	"github.com/jim80net/flotilla/internal/launch"
@@ -33,22 +34,37 @@ func recipeInvolvesCodex(rosterSurface string, recipe launch.Recipe) bool {
 // internal/codextrust) so a codex desk launched there does not wedge on the
 // interactive first-run trust menu, which a remote coordinator cannot answer.
 //
+// BOTH path forms are seeded when they differ: the given (logical) cwd and its
+// symlink-resolved realpath. The launched codex derives its lookup key from
+// getcwd (symlink-free), so a recipe cwd that traverses a symlink needs the
+// realpath entry; the logical form covers a codex normalization that keeps the
+// path as given. Seeding is idempotent, so the extra entry costs nothing.
+//
 // Best-effort by design: a seeding failure warns loudly on stderr but never
 // blocks the launch — a desk that does reach the menu now classifies as
-// awaiting-input (detector-escalated, submit-refused) rather than wedging
-// silently, so launching anyway is strictly better than refusing to launch.
+// awaiting-input (the detector escalates the observed transition; a send into
+// the menu refuses loudly) rather than wedging silently, so launching anyway is
+// strictly better than refusing to launch. Known bound: codextrust.ConfigPath
+// reads THIS process's CODEX_HOME — a launch recipe that exports a different
+// CODEX_HOME inline is not parsed (the classifier layer catches that desk).
 func seedCodexTrust(cwd string) {
 	configPath, err := codextrust.ConfigPath()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "flotilla: warning — codex trust pre-seed skipped: %v\n", err)
 		return
 	}
-	seeded, err := codextrust.Seed(configPath, cwd)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "flotilla: warning — codex trust pre-seed for %q failed: %v (an untrusted dir shows codex's first-run trust menu; the desk reads awaiting-input until it is answered at the pane)\n", cwd, err)
-		return
+	forms := []string{cwd}
+	if real, rerr := filepath.EvalSymlinks(cwd); rerr == nil && real != cwd {
+		forms = append(forms, real)
 	}
-	if seeded {
-		fmt.Fprintf(os.Stderr, "flotilla: seeded codex directory trust for %q in %s\n", cwd, configPath)
+	for _, form := range forms {
+		seeded, err := codextrust.Seed(configPath, form)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "flotilla: warning — codex trust pre-seed for %q failed: %v (an untrusted dir shows codex's first-run trust menu; the desk reads awaiting-input until it is answered at the pane)\n", form, err)
+			continue
+		}
+		if seeded {
+			fmt.Fprintf(os.Stderr, "flotilla: seeded codex directory trust for %q in %s\n", form, configPath)
+		}
 	}
 }

@@ -82,3 +82,41 @@ func TestSeedCodexTrustFailureDoesNotPanic(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
 	seedCodexTrust("relative/path")
 }
+
+// TestSeedCodexTrustSymlinkedCwdSeedsBothForms pins the normalization contract:
+// a desk cwd that traverses a symlink seeds BOTH the logical path and its
+// realpath — the launched codex derives its trust-lookup key from getcwd
+// (symlink-free), so seeding only the logical form would leave the trust menu
+// live on symlinked checkouts (the wedge this feature exists to prevent).
+func TestSeedCodexTrustSymlinkedCwdSeedsBothForms(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+
+	work := t.TempDir()
+	real := filepath.Join(work, "real-desk")
+	if err := os.Mkdir(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(work, "link-desk")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	// t.TempDir itself may sit behind a symlink (e.g. /tmp on some hosts) —
+	// resolve the expected realpath the same way the hook does.
+	realResolved, err := filepath.EvalSymlinks(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seedCodexTrust(link)
+	raw, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	if err != nil {
+		t.Fatalf("config.toml not written: %v", err)
+	}
+	for _, form := range []string{link, realResolved} {
+		want := "[projects.\"" + form + "\"]"
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("missing seeded section for %q:\n%s", form, raw)
+		}
+	}
+}

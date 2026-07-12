@@ -27,6 +27,11 @@ type resumeOps struct {
 	newSession func(session, name, cwd, launch string) (string, error)
 	newWindow  func(session, name, cwd, launch string) (string, error)
 	tag        func(target, key string) error
+	// preLaunch (optional) runs immediately before ANY process launch (in-place
+	// respawn or cold-create) and never on a refusal — the seam for pre-launch
+	// environment prep (codex trust seeding). Inside runResume, not cmdResume,
+	// so the "prep runs before every launch branch" invariant is unit-tested.
+	preLaunch func()
 }
 
 // resumePlan is the resolved per-agent input to runResume.
@@ -86,12 +91,6 @@ func cmdResume(args []string) error {
 	if err := workspace.MaterializeGatekeeperDomain(cwdAbs, agent.PrimaryRepo, agent.SecondaryRepos); err != nil {
 		return err
 	}
-	// Pre-seed codex directory trust for the desk cwd (worktree-aware) BEFORE the
-	// launch, so a codex harness never boots into the interactive first-run trust
-	// menu a remote coordinator cannot answer. Best-effort (warns, never blocks).
-	if recipeInvolvesCodex(agentSurface(cfg, agentName), recipe) {
-		seedCodexTrust(cwdAbs)
-	}
 
 	if _, ferr := workspace.FleetTmuxCheck(agentName, recipe.Tmux, flat); ferr != nil {
 		return ferr
@@ -131,6 +130,14 @@ func cmdResume(args []string) error {
 		newSession: deliver.NewSession,
 		newWindow:  deliver.NewWindow,
 		tag:        deliver.TagPane,
+	}
+	// Pre-seed codex directory trust for the desk cwd (worktree-aware) before
+	// any launch branch, so a codex harness never boots into the interactive
+	// first-run trust menu a remote coordinator cannot answer. Wired through the
+	// preLaunch seam (runs on respawn/cold-create only, never on a refusal);
+	// best-effort (warns, never blocks).
+	if recipeInvolvesCodex(agentSurface(cfg, agentName), recipe) {
+		ops.preLaunch = func() { seedCodexTrust(cwdAbs) }
 	}
 	plan := resumePlan{
 		agent: agentName, key: agent.Title(), cwd: recipe.Cwd, launch: recipe.Launch,
@@ -180,6 +187,9 @@ func runResume(ops resumeOps, p resumePlan) (string, error) {
 		st := ops.assess(target)
 		if !p.force && st != surface.StateShell {
 			return "", fmt.Errorf("%q at %s is %s (not a dead shell); refusing to resume — close it first, or pass --force", p.agent, target, st)
+		}
+		if ops.preLaunch != nil {
+			ops.preLaunch()
 		}
 		if err := ops.respawn(target, p.cwd, p.launch); err != nil {
 			return "", err
@@ -235,8 +245,14 @@ func coldCreateResume(ops resumeOps, p resumePlan, discardedStale string) (strin
 		// window; surface a clear recovery path (orphan session or mis-tag).
 		return "", fmt.Errorf("%q: per-agent session %q exists but no pane resolves for %q — kill the orphan session or tag the pane with: flotilla register %s --pane <target>", p.agent, p.session, p.key, p.agent)
 	case exists:
+		if ops.preLaunch != nil {
+			ops.preLaunch()
+		}
 		newTarget, err = ops.newWindow(p.session, p.window, p.cwd, p.launch)
 	default:
+		if ops.preLaunch != nil {
+			ops.preLaunch()
+		}
 		newTarget, err = ops.newSession(p.session, p.window, p.cwd, p.launch)
 	}
 	if err != nil {

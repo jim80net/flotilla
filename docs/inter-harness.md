@@ -85,13 +85,15 @@ flotilla defuses these two ways:
    and never flips a path the operator explicitly marked `untrusted`.
 2. **Any menu that still appears reads `awaiting-input`, never idle.** The codex
    driver classifies all four gate screens (login, hooks, trust, update) as
-   awaiting-input: the change-detector escalates the desk instead of reporting it
-   idle/composing, confirmed delivery refuses to paste into the menu (no false
-   "turn confirmed" — previously the menu ate the body, dismissed itself to an
-   empty composer, and the empty composer read as a confirmed submit), and the
-   composer probe reads the menu's `› 1. …` highlighted row as undetermined
-   rather than a pending composer (a pending misread would retry Enter — which
-   *selects* the menu option).
+   awaiting-input: the change-detector escalates the *transition* into the menu
+   instead of reporting the desk idle/composing (a desk already stuck there when
+   the detector starts surfaces the first time a send refuses), confirmed
+   delivery refuses to paste into the menu (no false "turn confirmed" —
+   previously the menu ate the body, dismissed itself to an empty composer, and
+   the empty composer read as a confirmed submit), and the composer probe reads
+   the menu's `› 1. …` highlighted row as undetermined rather than a pending
+   composer (a pending misread would retry Enter — which *selects* the menu
+   option).
 
 Login remains the one genuinely manual gate: it needs a browser/device-code
 round-trip, so an unauthenticated codex desk escalates to the operator.

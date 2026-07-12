@@ -3,6 +3,7 @@ package surface
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestCodexRegistered(t *testing.T) {
@@ -131,6 +132,20 @@ func TestParseCodexState(t *testing.T) {
 			name:     "trust question alone (conversation echo, no option row) → Idle",
 			captured: "  the menu asks Do you trust the contents of this directory\n  › \n  / for commands",
 			want:     StateIdle,
+		},
+		{
+			// A working desk DISPLAYING this driver's own marker strings (source
+			// code, diffs, fixtures — this repo dogfoods codex desks on itself)
+			// must not misread as a first-run menu: quoted/assigned forms are not
+			// whole rendered option rows, so the line-anchored row match rejects
+			// them and the working footer wins.
+			name: "working desk displaying marker source → Working (not menu)",
+			captured: "  codexTrustQuestion = \"Do you trust the contents\"\n" +
+				"  codexTrustYesRow   = \"1. Yes, continue\"\n" +
+				"  codexUpdateBanner  = \"Update available!\"\n" +
+				"  codexUpdateSkipRow = \"3. Skip until next version\"\n" +
+				"  ◦ Working (3s • esc to interrupt)",
+			want: StateWorking,
 		},
 	}
 	for _, tc := range cases {
@@ -264,6 +279,43 @@ func TestCodexComposerStateWiring(t *testing.T) {
 			t.Errorf("ComposerState on update menu = %v, want Undetermined", got)
 		}
 	})
+}
+
+// TestConfirmSubmitRefusesCodexFirstRunMenu proves the incident's false-confirm
+// chain is closed END-TO-END, not just layer-by-layer: confirmed delivery
+// against a codex pane showing the trust menu must refuse at the idle gate
+// (ErrTransient) with ZERO keystrokes delivered — previously the paste+Enter
+// navigated the menu, the menu dismissed to an empty composer, and the empty
+// composer read as a confirmed submit.
+func TestConfirmSubmitRefusesCodexFirstRunMenu(t *testing.T) {
+	for name, capture := range map[string]string{
+		"trust menu":  codexTrustMenuCapture,
+		"update menu": codexUpdateMenuCapture,
+	} {
+		t.Run(name, func(t *testing.T) {
+			pasted := false
+			d := codex{
+				paneCommand: func(string) (string, error) { return "codex", nil },
+				isShell:     func(string) bool { return false },
+				capturePane: func(string) (string, error) { return capture, nil },
+				classify:    parseCodexState,
+				send:        func(string, string) error { pasted = true; return nil },
+				cursorState: func(string) (int, bool, error) { return 7, false, nil },
+			}
+			enters := 0
+			c := Confirm{
+				SendEnter: func(string) error { enters++; return nil },
+				Sleep:     func(time.Duration) {},
+			}
+			err := c.Submit(d, "0:0.0", "operator message")
+			if !errors.Is(err, ErrTransient) {
+				t.Fatalf("Submit on %s = %v, want ErrTransient (refused, re-assessable)", name, err)
+			}
+			if pasted || enters != 0 {
+				t.Errorf("keystrokes reached the menu: pasted=%v enters=%d, want none", pasted, enters)
+			}
+		})
+	}
 }
 
 // First-run menu fixtures, VERBATIM from the openai/codex rust-v0.144.1 rendered
