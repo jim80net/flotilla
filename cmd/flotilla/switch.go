@@ -801,6 +801,13 @@ func cmdSwitch(args []string) error {
 	neutralPath := switchHandoffPath(projectRoot, token)
 	bundlePath := switchBundlePath(projectRoot, agentName, token)
 
+	// A switch TO codex respawns into the same cwd — pre-seed directory trust so
+	// the fresh codex never boots into the first-run trust menu (idempotent;
+	// best-effort; see cmdResume's identical hook).
+	if toSurface == codexSurfaceName {
+		seedCodexTrust(projectRoot)
+	}
+
 	// Build the FROM-endpoint metadata for the bundle from the resolved chain slot whose
 	// surface matches the active FROM surface (so provider/subscription are recorded).
 	fromProvider, fromSub := fromSlotMeta(chain, fromSurface)

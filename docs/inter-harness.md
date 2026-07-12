@@ -61,6 +61,41 @@ just runs turns in its own harness. So in a mixed fleet:
   (The `~/.claude` `fleet-session-rotation` / `flotilla-fleet-recovery` skills are being
   made harness-aware as a follow-on.)
 
+## Codex first-run menus: trust is pre-seeded; the rest reads awaiting-input
+
+Codex shows interactive first-run menus that no remote coordinator can answer —
+keystrokes sent into the pane NAVIGATE the menu (an Enter *selects* the highlighted
+option) instead of composing a message:
+
+- **Directory trust** — launching in a directory without a `[projects."<path>"]`
+  entry in codex's `config.toml` asks "Do you trust the contents of this
+  directory?". A **git worktree is its own path**: a trusted main checkout does
+  NOT cover its worktrees, which is exactly how a worktree-homed desk wedges.
+- **Update prompt** — a stale install offers "Update available!" with an
+  "Update now (runs `npm install -g …`)" default.
+- **Login / hooks review** — first-auth and changed-hooks gates (already handled).
+
+flotilla defuses these two ways:
+
+1. **Trust is pre-seeded at launch.** `flotilla resume`, `recycle`, and `switch`
+   write `[projects."<desk cwd>"] trust_level = "trusted"` into codex's
+   `config.toml` (`$CODEX_HOME`, default `~/.codex`) before any codex slot
+   launches — worktree-aware because the desk cwd itself is seeded, which is the
+   first key codex's trust lookup checks. Seeding is idempotent, append-only,
+   and never flips a path the operator explicitly marked `untrusted`.
+2. **Any menu that still appears reads `awaiting-input`, never idle.** The codex
+   driver classifies all four gate screens (login, hooks, trust, update) as
+   awaiting-input: the change-detector escalates the desk instead of reporting it
+   idle/composing, confirmed delivery refuses to paste into the menu (no false
+   "turn confirmed" — previously the menu ate the body, dismissed itself to an
+   empty composer, and the empty composer read as a confirmed submit), and the
+   composer probe reads the menu's `› 1. …` highlighted row as undetermined
+   rather than a pending composer (a pending misread would retry Enter — which
+   *selects* the menu option).
+
+Login remains the one genuinely manual gate: it needs a browser/device-code
+round-trip, so an unauthenticated codex desk escalates to the operator.
+
 ## Multi-line submission is per-harness
 
 A driver's `Submit` newline method is a per-driver choice: **bracketed paste**

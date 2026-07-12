@@ -86,6 +86,12 @@ func cmdResume(args []string) error {
 	if err := workspace.MaterializeGatekeeperDomain(cwdAbs, agent.PrimaryRepo, agent.SecondaryRepos); err != nil {
 		return err
 	}
+	// Pre-seed codex directory trust for the desk cwd (worktree-aware) BEFORE the
+	// launch, so a codex harness never boots into the interactive first-run trust
+	// menu a remote coordinator cannot answer. Best-effort (warns, never blocks).
+	if recipeInvolvesCodex(agentSurface(cfg, agentName), recipe) {
+		seedCodexTrust(cwdAbs)
+	}
 
 	if _, ferr := workspace.FleetTmuxCheck(agentName, recipe.Tmux, flat); ferr != nil {
 		return ferr

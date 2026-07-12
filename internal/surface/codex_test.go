@@ -112,6 +112,26 @@ func TestParseCodexState(t *testing.T) {
 			captured: loginCapture + manyLines(50) + "  › \n  / for commands",
 			want:     StateIdle,
 		},
+		{
+			name:     "first-run directory-trust menu (source snapshot 0.144.1) → AwaitingInput",
+			captured: codexTrustMenuCapture,
+			want:     StateAwaitingInput,
+		},
+		{
+			name:     "first-run update menu (source snapshot 0.144.1) → AwaitingInput",
+			captured: codexUpdateMenuCapture,
+			want:     StateAwaitingInput,
+		},
+		{
+			name:     "stale trust-menu scrollback + idle composer at bottom → Idle",
+			captured: codexTrustMenuCapture + "\n" + manyLines(50) + "  › \n  / for commands",
+			want:     StateIdle,
+		},
+		{
+			name:     "trust question alone (conversation echo, no option row) → Idle",
+			captured: "  the menu asks Do you trust the contents of this directory\n  › \n  / for commands",
+			want:     StateIdle,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -222,7 +242,54 @@ func TestCodexComposerStateWiring(t *testing.T) {
 			t.Errorf("ComposerState = %v, want Undetermined", got)
 		}
 	})
+	// The first-run menus render their highlighted row as "› 1. …" — the same
+	// glyph as the composer prompt. A cursor on that row must NOT read Pending
+	// (a Pending read drives the confirm loop's Enter-only retry, which would
+	// SELECT the menu option); the whole screen is Undetermined.
+	t.Run("cursor on trust-menu option row → Undetermined, not Pending", func(t *testing.T) {
+		c := codex{
+			cursorState: func(string) (int, bool, error) { return 7, false, nil }, // "› 1. Yes, continue"
+			capturePane: func(string) (string, error) { return codexTrustMenuCapture, nil },
+		}
+		if got := c.ComposerState("0:0.0"); got != ComposerUndetermined {
+			t.Errorf("ComposerState on trust menu = %v, want Undetermined", got)
+		}
+	})
+	t.Run("cursor on update-menu option row → Undetermined, not Pending", func(t *testing.T) {
+		c := codex{
+			cursorState: func(string) (int, bool, error) { return 4, false, nil }, // "› 1. Update now (…)"
+			capturePane: func(string) (string, error) { return codexUpdateMenuCapture, nil },
+		}
+		if got := c.ComposerState("0:0.0"); got != ComposerUndetermined {
+			t.Errorf("ComposerState on update menu = %v, want Undetermined", got)
+		}
+	})
 }
+
+// First-run menu fixtures, VERBATIM from the openai/codex rust-v0.144.1 rendered
+// snapshot tests (tui/src/onboarding/snapshots/…trust_directory…renders_snapshot_
+// for_git_repo.snap and tui/src/snapshots/…update_prompt…update_prompt_modal.snap).
+const codexTrustMenuCapture = "> You are in /workspace/project\n" +
+	"\n" +
+	"  Do you trust the contents of this directory? Working with untrusted\n" +
+	"  contents comes with higher risk of prompt injection. Trusting the\n" +
+	"  directory allows project-local config, hooks, and exec policies to\n" +
+	"  load.\n" +
+	"\n" +
+	"› 1. Yes, continue\n" +
+	"  2. No, quit\n" +
+	"\n" +
+	"  Press enter to continue"
+
+const codexUpdateMenuCapture = "  ✨ Update available! 0.0.0 -> 9.9.9\n" +
+	"\n" +
+	"  Release notes: https://github.com/openai/codex/releases/latest\n" +
+	"\n" +
+	"› 1. Update now (runs `npm install -g @openai/codex@latest`)\n" +
+	"  2. Skip\n" +
+	"  3. Skip until next version\n" +
+	"\n" +
+	"  Press enter to continue"
 
 func TestCodexLatestResult(t *testing.T) {
 	t.Run("resolves cwd then reads the store", func(t *testing.T) {

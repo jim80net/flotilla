@@ -551,6 +551,13 @@ func cmdRecycle(args []string) error {
 		return fmt.Errorf("surface %q is not recycle-capable (no composer-state probe: the idle∧cleared gates need it) — cannot safely recycle %q", drv.Name(), agentName)
 	}
 
+	// The phase-3 relaunch respawns with recipe.Launch — pre-seed codex directory
+	// trust for the desk cwd now (idempotent; best-effort) so the fresh process
+	// never boots into the first-run trust menu (see cmdResume's identical hook).
+	if recipeInvolvesCodex(rosterSurf, recipe) {
+		seedCodexTrust(recipe.Cwd)
+	}
+
 	if removeWorktree {
 		n, err := deliver.CountUncommitted(recipe.Cwd)
 		if err != nil {
