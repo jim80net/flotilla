@@ -82,3 +82,12 @@ htmlcov/
 
 # Desk-local scratch notes (per-desk working memory; never committed).
 .claude/desk-state/
+
+# PR-body working files (docs/pr-authoring.md composes descriptions here and delivers
+# them via --body-file / REST; local drafts, never committed).
+.claude/pr-bodies/
+
+# Authority-domain materialization (`flotilla workspace init` / `resume` writes
+# .gatekeeper/domain and related files into each worktree — runtime desk state,
+# never committed; see openspec/changes/authority-domains-org-chart/).
+/.gatekeeper/
