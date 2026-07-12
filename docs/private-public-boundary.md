@@ -27,11 +27,21 @@ only the generalizable layer ships.
 | Domain specifics | instrument tickers; account ids; a strategy's name; a high-consequence daemon's name | "a high-consequence action/system", drop tickers, "an external account" |
 | Approval-sensitive desks | the desk that places real orders | "an approval-sensitive desk", "a high-consequence desk" |
 | Host / path / channel | absolute home paths; hostnames; live chat channel ids; private-repo refs | `$HOME` / `/home/operator/...`, "the host", placeholder ids |
+| **Rendered media of a live deployment** | a screenshot / recording of the dash, a pane, or any UI **serving a real fleet's state** — desk names, goal titles, and descriptions leak as *pixels* | captures generated from the **committed example fixture state** (`flotilla.example.json` + the example goals/org files), or no committed media at all |
 
 Keep the **feature**, strip the **deployment**. A redaction is a *generalization*,
 never a deletion — a reader must still fully understand the generic capability.
 Fixtures and examples should read as a **reference a developer learns from**
 (model them on `flotilla.example.json`), not as anonymized copies of one fleet.
+
+**Rendered media deserves its own emphasis because every text gate is blind to
+it**: the guard, the hooks, and the CI job scan characters, and a PNG of a live
+dashboard sails through all three while publishing the deployment verbatim.
+Before committing or embedding ANY image/recording of a running surface, ask:
+*what state store was this rendered from?* If the answer is a live deployment,
+regenerate it from the example fixtures — never "it's just a screenshot."
+(Walk/demo captures of live state belong in the deployment's private state
+paths, and must never be copied into a public artifact.)
 
 ## What is NOT private (these are the product — keep them)
 
