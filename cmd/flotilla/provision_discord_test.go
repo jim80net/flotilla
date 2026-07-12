@@ -21,6 +21,12 @@ func TestProvisionDiscordDryRunNeedsNoHostCredentials(t *testing.T) {
 	}
 }
 
+func TestProvisionDiscordRejectsExtraPositional(t *testing.T) {
+	if err := cmdProvisionDiscord([]string{"canary", "extra", "--dry-run"}); err == nil {
+		t.Fatal("expected usage error for extra positional")
+	}
+}
+
 func TestPatchRosterChannelsAppliesAndIsIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "flotilla.json")

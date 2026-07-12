@@ -42,10 +42,11 @@ func cmdProvisionDiscord(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if key == "" && len(fs.Args()) == 1 {
-		key = fs.Args()[0]
+	rest := fs.Args()
+	if key == "" && len(rest) > 0 {
+		key, rest = rest[0], rest[1:]
 	}
-	if strings.TrimSpace(key) == "" || len(fs.Args()) > 1 {
+	if strings.TrimSpace(key) == "" || len(rest) != 0 {
 		return fmt.Errorf("usage: flotilla provision-discord <flotilla-key> [--dry-run] [--apply-roster]")
 	}
 	key = strings.TrimSpace(key)

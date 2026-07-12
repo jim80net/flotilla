@@ -55,8 +55,8 @@ Manage-Channels preflight) and prints the `channels[]` binding to paste in. See
 
 ### Spawn layout: Discord mirrors the org chart 1:1
 
-When adding a flotilla group, use the dual-placement layout used by Family
-Office, Empath, and Flotilla-Dev:
+When adding a flotilla group, use the dual-placement layout every existing
+flotilla in a deployment follows:
 
 ```text
 COS
