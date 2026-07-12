@@ -64,7 +64,9 @@ type OrgStack struct {
 	Created                    map[string]bool
 }
 
-// ProvisionOrgStack idempotently realizes the dual-placement org pattern.
+// ProvisionOrgStack idempotently realizes the dual-placement org pattern. Like
+// Create, its guarantee is sequential: a failed partial run deliberately leaves
+// successfully-created objects in place so the next run resumes from them.
 func (p *Provisioner) ProvisionOrgStack(guildID, categoryName, c2Name, productName, xoName string) (OrgStack, error) {
 	if err := p.Preflight(guildID); err != nil {
 		return OrgStack{}, err
@@ -118,7 +120,9 @@ type guildAPI interface {
 }
 
 // EnsureWebhook creates a named channel webhook once. Existing webhooks are
-// reported without a URL; their tokens cannot be recovered from Discord.
+// reported without a URL; their tokens cannot be recovered from Discord. The
+// idempotency guarantee is sequential; concurrent operators can race because
+// Discord permits multiple webhooks with the same name.
 func (p *Provisioner) EnsureWebhook(channelID, name string) (Webhook, bool, error) {
 	hooks, err := p.api.webhooks(channelID)
 	if err != nil {
@@ -543,6 +547,8 @@ func (a *discordgoAPI) createChannel(guildID string, in CreateSpec) (Channel, er
 }
 
 func (a *discordgoAPI) editChannel(channelID string, in CreateSpec) (Channel, error) {
+	// Discord's Modify Channel endpoint is PATCH: omitted fields retain their
+	// current values, so reparenting does not rewrite topic or permissions.
 	c, err := a.sess.ChannelEditComplex(channelID, &discordgo.ChannelEdit{ParentID: in.ParentID})
 	if err != nil {
 		return Channel{}, mapErr(err)

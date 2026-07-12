@@ -112,6 +112,7 @@ func cmdProvisionDiscord(args []string) error {
 		fmt.Printf("add these entries to flotilla.json channels[] (or rerun with --apply-roster):\n%s\n", out)
 	}
 	if stack.Created["webhook"] {
+		fmt.Fprintln(os.Stderr, "WARNING: the next line contains a live webhook credential; keep stdout out of logs and shell capture")
 		fmt.Printf("append this secret to %s (value shown once):\n%s=%s\n", *sp, plan.WebhookKey, stack.XO.URL)
 	} else {
 		fmt.Printf("webhook %q already exists; ensure %s is present in %s (Discord cannot reveal its token)\n", *xo, plan.WebhookKey, *sp)
@@ -154,7 +155,10 @@ func patchRosterChannels(path string, add []roster.Channel) error {
 			seen[c.ChannelID] = true
 		}
 	}
-	v, _ := json.Marshal(channels)
+	v, err := json.Marshal(channels)
+	if err != nil {
+		return fmt.Errorf("marshal roster channels: %w", err)
+	}
 	doc["channels"] = v
 	out, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
