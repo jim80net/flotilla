@@ -320,8 +320,12 @@ func TestOperatingPrinciplesContentIsEmbeddedAndMarked(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Harness allocation",
-		"judgment on Claude",
-		"execution on grok",
+		"role-based multi-model",
+		"role fit",
+		"Firstmates",
+		"secondmates",
+		"crewmate",
+		"Surface + launch",
 	} {
 		if !strings.Contains(m.Content, want) {
 			t.Errorf("operating-principles content missing harness-allocation phrase %q", want)

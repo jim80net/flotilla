@@ -24,10 +24,12 @@ harness process changes on switch.
 
 ## Operator-ratified downgrade tiers (directive 2026-07-06)
 
-| Seat class | Preferred tier | Typical degraded tier |
+| Seat class (Principle 10 role) | Preferred tier | Typical degraded tier |
 |---|---|---|
-| Coordinator (XO / CoS) | Claude Opus (judgment) | Claude Sonnet 5, then latest Grok |
-| Execution desk | Latest Grok (workhorse) | GPT 5.5 (Codex), then Sonnet |
+| Firstmate (CoS / adjutant / orchestration XO) | Grok-class interactive | Design-class Claude, then another healthy Grok-class slot |
+| Secondmate (deep design) | Claude / design-class | Grok-class interactive when design depth is unavailable |
+| Crewmate — bugfix | Grok-class workhorse | Codex / gpt-class, then Sonnet-class |
+| Crewmate — feature | Codex / gpt-class | Grok-class workhorse, then Sonnet-class |
 
 Exact model strings belong in the host-local `launch` command — flotilla does not
 hard-code vendor model IDs.
