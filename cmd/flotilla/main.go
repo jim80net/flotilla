@@ -387,7 +387,7 @@ func cmdSend(args []string) error {
 	if err != nil {
 		return err
 	}
-	decision := authorizeSend(cfg.Org(), *from, agentName, *crossVenture)
+	decision := authorizeSend(cfg, *from, agentName, *crossVenture)
 	if !decision.Allowed {
 		return fmt.Errorf("%s", decision.Reason)
 	}
