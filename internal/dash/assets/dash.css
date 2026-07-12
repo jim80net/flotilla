@@ -1217,6 +1217,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 
 /* situation strip */
 .goals-situation { display: flex; gap: 10px; flex-wrap: wrap; }
+.goals-primary { display: none; }
 .gtile {
   --tone: var(--cyan);
   flex: 1 1 150px; min-width: 130px; padding: 10px 14px;
@@ -1947,15 +1948,27 @@ html, body { overflow-x: clip; }
   .conv-head-right { flex-wrap: wrap; gap: .5rem; }
   .goals-head-right { flex-wrap: wrap; gap: 8px; }
 
-  /* ── goals map framing (#514): on a 390px cold open the situation strip +
-     panel head used to fill the first viewport, leaving only an empty grid
-     sliver. Compact the chrome so the mind-map canvas owns first paint; JS
-     also scrolls the canvas into view after fit (goals.js ensureMapInView). ── */
+  /* Goals on a phone lead with the operator pulse and one readable aim. The
+     header participates in normal flow so it can never cover KPI values while
+     the page scrolls (#639). */
+  .bar { position: relative; }
   .goals-wrap { padding: 10px 12px 24px; gap: 8px; }
   /* compact situation tiles: drop the sub-copy, shrink the numbers */
   .gtile { flex: 1 1 44%; min-width: 44%; padding: 6px 10px; }
   .gtile-v { font-size: 1.25rem; }
   .gtile-d { display: none; }
+  /* The first four cells are the live pulse; realized/planned remain available
+     at wider widths without displacing the map on a 390px first glance. */
+  .goals-situation .gtile:nth-child(n+5) { display: none; }
+  .goals-primary {
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 9px 11px; border: 1px solid var(--line); border-radius: var(--r-sm);
+    background: color-mix(in srgb, var(--cyan) 6%, var(--abyss-2));
+  }
+  .goals-primary[hidden] { display: none; }
+  .goals-primary-label { font-size: .58rem; letter-spacing: .11em; text-transform: uppercase; color: var(--cyan); }
+  .goals-primary-title { font-family: var(--display); font-size: .92rem; line-height: 1.25; color: var(--ink); }
+  .goals-primary-summary { font-size: .72rem; line-height: 1.35; color: var(--ink-2); }
   .grealized-slider { padding: 2px 4px 0; gap: 3px; flex-wrap: wrap; }
   .grealized-lab { font-size: 10px; }
   /* panel head: the long "read-only · goal structure…" line is desktop context;
@@ -1965,11 +1978,9 @@ html, body { overflow-x: clip; }
   .goals-legend { gap: 8px; }
   .glegend { font-size: .62rem; }
   .goals-graph { margin-top: 6px; }
-  /* sticky-bar clearance when JS scrollIntoView pins the canvas under the header */
   .goals-viewport {
     height: min(62vh, 520px);
     min-height: 280px;
-    scroll-margin-top: 7.5rem;
   }
   .goals-drawer { width: 100%; max-width: 100%; }
   .gm-dialog { padding: 16px 16px; }
