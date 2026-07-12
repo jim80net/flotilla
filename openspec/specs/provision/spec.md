@@ -25,12 +25,12 @@ from stdout text. A 2xx response carrying no channel id SHALL be treated as an e
 
 #### Scenario: Create a category
 
-- **WHEN** `flotilla channel create "Family Office" --type category` runs
+- **WHEN** `flotilla channel create "Alpha Group" --type category` runs
 - **THEN** a category channel is created and its id reported
 
 #### Scenario: Create under a parent category
 
-- **WHEN** `flotilla channel create trade-desk --category "Family Office"` runs and exactly one category by that name exists
+- **WHEN** `flotilla channel create alpha-desk --category "Alpha Group"` runs and exactly one category by that name exists
 - **THEN** the channel is created with its parent set to that category's id
 
 #### Scenario: An unresolvable or ambiguous parent category is a clear error

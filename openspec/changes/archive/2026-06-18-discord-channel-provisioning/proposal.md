@@ -4,7 +4,7 @@ The `federation` capability lets a fleet ROUTE across many Discord channels — 
 channel bound to one XO, the inbound relay routing by origin channel
 (`internal/roster/roster.go:48` `Channel`, `cmd/flotilla/watch.go`, F#105). But the
 channels themselves still have to be **created by hand in the Discord UI** before any
-binding can point at them. To stand up the squadron layout (a Family Office squadron +
+binding can point at them. To stand up the squadron layout (an Alpha Group squadron +
 the flotilla product squadron, with the CoS/meta-XO across both) the operator must
 click through Discord to make every `#fleet-…` and `#fleet-command` channel, then
 copy each channel's snowflake id back into `flotilla.json`. That manual step is the one
