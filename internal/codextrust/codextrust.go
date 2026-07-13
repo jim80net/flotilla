@@ -1,7 +1,5 @@
-// Package codextrust pre-seeds directory trust for OpenAI's Codex CLI so a desk
-// launched into a not-yet-trusted working directory does not wedge on the
-// interactive first-run trust menu (an in-pane menu a remote coordinator cannot
-// answer — keystrokes navigate it, they don't select).
+// Package codextrust pre-seeds launch-gate configuration for OpenAI's Codex CLI
+// so centrally managed desks do not wedge on interactive trust or update menus.
 //
 // Codex records trust per absolute path in $CODEX_HOME/config.toml (default
 // ~/.codex/config.toml):
@@ -32,8 +30,9 @@ import (
 // lock timing: mirrors internal/dispatch's file-lock posture (bounded acquire,
 // never wedge a resume on a stuck lock).
 const (
-	lockTimeout = 15 * time.Second
-	lockPoll    = 25 * time.Millisecond
+	lockTimeout    = 15 * time.Second
+	lockPoll       = 25 * time.Millisecond
+	updateCheckKey = "check_for_update_on_startup"
 )
 
 // ConfigPath returns the codex user config path: $CODEX_HOME/config.toml when
@@ -47,6 +46,121 @@ func ConfigPath() (string, error) {
 		return "", fmt.Errorf("codextrust: resolve home for ~/.codex: %w", err)
 	}
 	return filepath.Join(home, ".codex", "config.toml"), nil
+}
+
+// SuppressStartupUpdateCheck ensures Codex does not surface its interactive
+// self-update prompt. Version upgrades remain centrally managed by fleet ops.
+// The managed key is top-level TOML, so a missing key is PREPENDED before any
+// project table; appending it after [projects."..."] would silently put it in
+// that table and leave the global default enabled.
+//
+// PROVENANCE (SOURCE-VERIFIED official openai/codex rust-v0.144.1, peeled
+// commit 44918ea10c0f99151c6710411b4322c2f5c96bea):
+//   - codex-rs/config/src/config_toml.rs declares the optional top-level
+//     check_for_update_on_startup boolean and documents false for centrally
+//     managed installations.
+//   - codex-rs/core/src/config/mod.rs defaults the resolved value to true.
+//   - codex-rs/tui/src/updates.rs returns before lookup/popup construction when
+//     the resolved value is false.
+//
+// LIVE-VERIFIED 2026-07-13 against the installed codex-cli 0.144.1 binary:
+// CODEX_HOME with this seed made `codex doctor --json` report
+// "check for update on startup": "false" while a newer version was available.
+//
+// Writes share Seed's bounded flock and atomic rename. An explicit true is
+// changed to false because this key is fleet-managed policy, unlike per-project
+// trust where an explicit untrusted choice remains operator-owned. A malformed
+// managed value fails loudly and is never guessed or rewritten.
+func SuppressStartupUpdateCheck(configPath string) (bool, error) {
+	unlock, err := acquireLock(configPath + ".flotilla-lock")
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+
+	raw, err := os.ReadFile(configPath)
+	if err != nil && !os.IsNotExist(err) {
+		return false, fmt.Errorf("codextrust: read %q: %w", configPath, err)
+	}
+	updated, changed, err := suppressStartupUpdateCheck(string(raw))
+	if err != nil {
+		return false, fmt.Errorf("codextrust: %s in %q: %w", updateCheckKey, configPath, err)
+	}
+	if !changed {
+		return false, nil
+	}
+	if err := writeAtomic(configPath, []byte(updated)); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func suppressStartupUpdateCheck(content string) (string, bool, error) {
+	lines := strings.SplitAfter(content, "\n")
+	match := -1
+	value := ""
+	for i, rawLine := range lines {
+		line := strings.TrimSuffix(strings.TrimSuffix(rawLine, "\n"), "\r")
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "[") {
+			break
+		}
+		lhs, rhs, ok := strings.Cut(trimmed, "=")
+		if !ok || tomlKey(strings.TrimSpace(lhs)) != updateCheckKey {
+			continue
+		}
+		if match >= 0 {
+			return "", false, fmt.Errorf("duplicate top-level key")
+		}
+		match = i
+		value, _, _ = strings.Cut(rhs, "#")
+		value = strings.TrimSpace(value)
+		if value != "true" && value != "false" {
+			return "", false, fmt.Errorf("must be a boolean, got %q", value)
+		}
+	}
+
+	if match < 0 {
+		prefix := updateCheckKey + " = false\n"
+		if content != "" {
+			prefix += "\n"
+		}
+		return prefix + content, true, nil
+	}
+	if value == "false" {
+		return content, false, nil
+	}
+
+	original := lines[match]
+	newline := ""
+	if strings.HasSuffix(original, "\n") {
+		newline = "\n"
+		original = strings.TrimSuffix(original, "\n")
+	}
+	comment := ""
+	if pos := strings.IndexByte(original, '#'); pos >= 0 {
+		comment = strings.TrimSpace(original[pos:])
+	}
+	replacement := updateCheckKey + " = false"
+	if comment != "" {
+		replacement += " " + comment
+	}
+	lines[match] = replacement + newline
+	return strings.Join(lines, ""), true, nil
+}
+
+func tomlKey(raw string) string {
+	if raw == updateCheckKey {
+		return raw
+	}
+	key, remainder, ok := cutQuoted(raw)
+	if ok && strings.TrimSpace(remainder) == "" {
+		return key
+	}
+	return raw
 }
 
 // Seed ensures configPath carries a [projects."<cwd>"] section, appending
