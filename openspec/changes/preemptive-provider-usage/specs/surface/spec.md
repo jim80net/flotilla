@@ -14,8 +14,13 @@ percentage when no report exists.
 
 #### Scenario: Grok weekly usage is parsed opportunistically from live chrome
 
-- **WHEN** the live bottom chrome of an alpha seat reports `Weekly limit: 92%` used
+- **WHEN** the live bottom chrome of an alpha seat running the characterized official Grok CLI 0.2.93 (`f00f96316d`) reports `Weekly limit: 92%` used
 - **THEN** the Grok usage probe reports 8 percent remaining in the weekly window
+
+#### Scenario: Grok parser rejects uncharacterized wording
+
+- **WHEN** Grok chrome uses any form other than the characterized 0.2.93 `Weekly limit: N%` form, including `Weekly limit left: 8%`
+- **THEN** the probe returns no report, and support for a different shipped CLI form requires separate live and binary characterization with explicit version provenance rather than a loosened match
 
 #### Scenario: Missing Grok usage render is honest absence
 
