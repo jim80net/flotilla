@@ -3,7 +3,6 @@ package surface
 import (
 	"crypto/sha256"
 	"fmt"
-	"strconv"
 )
 
 // RecycleBridge is an OPTIONAL Driver capability: the per-harness context-preservation
@@ -107,7 +106,7 @@ func CoordinatorCleanupTakeoverTurn(designatedPath string) string {
 		"REMOTE-DRIVEN (a remote XO drives you over the relay; no human is at this pane). " +
 		"Do exactly this, then stop:\n" +
 		"1. Use your native file-read tool (NOT bash, cat, or another shell command) to read this " +
-		"handoff in full and internalize the chapter at this quoted path: " + strconv.Quote(designatedPath) + "\n" +
+		"handoff in full and internalize the chapter: " + designatedPath + "\n" +
 		"2. Reply with EXACTLY this acknowledgement and then stop: " + ack + "\n" +
 		"Do NOT delete or modify the handoff, " +
 		"do NOT inspect anything else, and do NOT begin work yet. Flotilla will delete the handoff " +

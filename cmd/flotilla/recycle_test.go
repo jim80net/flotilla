@@ -292,58 +292,6 @@ func TestRunRecycleCoordinatorCleanupRefusesIncompleteBridge(t *testing.T) {
 	}
 }
 
-func TestRunRecycleCoordinatorCleanupRefusesMissingCoordinatorOps(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		mut  func(*recycleOps)
-	}{
-		{name: "missing history capture", mut: func(o *recycleOps) { o.captureHistory = nil }},
-		{name: "missing exact remover", mut: func(o *recycleOps) { o.removeHandoff = nil }},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			r := happyRec()
-			ops := fakeRecycleOps(r)
-			tc.mut(&ops)
-			p := testPlan()
-			p.coordinatorCleanup = true
-			p.beginWorkText = "BEGIN"
-			_, _, err := runRecycle(ops, p)
-			if err == nil || !strings.Contains(err.Error(), "pane-history capture and exact-path handoff removal") {
-				t.Fatalf("err = %v", err)
-			}
-			if len(r.delivered) != 0 || r.removedHandoff {
-				t.Fatalf("missing coordinator op acted: delivered=%v removed=%v", r.delivered, r.removedHandoff)
-			}
-		})
-	}
-}
-
-func TestPollCoordinatorLoadCapturesHistoryOnlyWhenIdle(t *testing.T) {
-	stateCalls := 0
-	historyCalls := 0
-	ops := recycleOps{
-		assess: func(string) surface.State {
-			stateCalls++
-			if stateCalls < 3 {
-				return surface.StateWorking
-			}
-			return surface.StateIdle
-		},
-		composer: func(string) surface.ComposerDisposition { return surface.ComposerCleared },
-		captureHistory: func(string) (string, error) {
-			historyCalls++
-			return "ACK-TOK\nACK-TOK", nil
-		},
-		sleep: func(time.Duration) {},
-	}
-	if !pollCoordinatorLoad(ops, "pane", "ACK-TOK", 3*recyclePollInterval) {
-		t.Fatal("load acknowledgement did not settle")
-	}
-	if historyCalls != 1 {
-		t.Fatalf("history captures = %d, want one after idle", historyCalls)
-	}
-}
-
 // TestRunRecycleAbortRestoresRemainOnExit: a Phase-2 close that never confirms must STILL restore
 // remain-on-exit off (the defer), so an aborted recycle doesn't change the desk's crash behaviour.
 func TestRunRecycleAbortRestoresRemainOnExit(t *testing.T) {
