@@ -55,7 +55,7 @@ func TestSeedRefusesInvalidConfig(t *testing.T) {
 
 func TestSeedRefusesShellActiveCwd(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "opencode.json")
-	for _, cwd := range []string{`/tmp/alpha"beta`, "/tmp/alpha`beta", "/tmp/alpha$beta", `/tmp/alpha\beta`, "/tmp/alpha\nbeta"} {
+	for _, cwd := range []string{`/tmp/alpha"beta`, "/tmp/alpha`beta", "/tmp/alpha$beta", `/tmp/alpha\beta`, "/tmp/alpha\rbeta", "/tmp/alpha\nbeta"} {
 		if _, err := Seed(path, cwd); err == nil {
 			t.Fatalf("Seed must reject shell-active cwd %q", cwd)
 		}
