@@ -40,8 +40,12 @@ same source switch selection already trusts. The initial Grok parser is anchored
 to the live bottom chrome and accepts only the characterized `Weekly limit: N%`
 shape from `/usage show`; prose or scrollback does not count. Grok 0.2.93 renders
 percentage **used**, so the driver validates 0..100 and reports `100-N` remaining.
-This is a strict single-form v1 characterized against the official Grok CLI
-0.2.93 (`f00f96316d`). Any other wording, including `Weekly limit left: N%`, is
+This is a strict single-form v1 live-characterized against the official Grok CLI
+0.2.93 (`f00f96316d`) and source-reverified in the official 0.2.99 binary
+(`b1b49ccb71`). The latter retains the `Weekly limit` marker and
+`creditUsagePercent` used-value field, while the intervening changelog records no
+marker or percentage-semantics change; live 0.2.99 confirmation remains pending
+surface restoration. Any other wording, including `Weekly limit left: N%`, is
 unparseable and returns honest absence. A different form in another shipped CLI
 version requires its own live and binary characterization with explicit version
 provenance; it does not justify loosening this parser.
