@@ -198,10 +198,16 @@ var grokRateLimitStatus = regexp.MustCompile(`(?i)[\x{2801}-\x{28FF}].*\brate li
 // grokWeeklyUsage is the authoritative weekly-usage row from `/usage show`.
 // PROVENANCE: LIVE-CAPTURED 2026-07-13 from the official Grok CLI 0.2.93
 // (f00f96316d), and SOURCE-VERIFIED in that installed binary from the adjacent
-// `Weekly limit`, `:`, and percent render fragments. The CLI reports percent
-// USED (confirmed by xAI's Usage & Limits documentation), so Usage converts it
-// to remaining percent. Keep this line-anchored: prose or a fixture displayed
-// in scrollback must not become provider evidence.
+// `Weekly limit`, `:`, and percent render fragments. SOURCE-REVERIFIED in the
+// official Grok CLI 0.2.99 binary (b1b49ccb71): it retains the `Weekly limit`
+// render marker and `creditUsagePercent` used-value field. The 0.2.94--0.2.99
+// changelog records no marker or percentage-semantics change (0.2.97 changes
+// only the displayed reset timezone), establishing the source-verified
+// 0.2.93--0.2.99 range. A live 0.2.99 render remains to be confirmed after
+// surface restoration. The CLI reports percent USED (confirmed by xAI's Usage
+// & Limits documentation), so Usage converts it to remaining percent. Keep this
+// line-anchored: prose or a fixture displayed in scrollback must not become
+// provider evidence.
 var grokWeeklyUsage = regexp.MustCompile(`^\s*Weekly limit:\s*(\d{1,3})%\s*$`)
 
 // parseGrokState classifies a captured official-grok pane, claude-style (Working-positive,
