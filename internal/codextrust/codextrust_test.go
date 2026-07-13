@@ -28,6 +28,90 @@ func seedInto(t *testing.T, initial string, cwd string) (seeded bool, final stri
 	return seeded, string(raw)
 }
 
+func suppressUpdatesInto(t *testing.T, initial string) (changed bool, final string) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if initial != "" {
+		if err := os.WriteFile(path, []byte(initial), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	changed, err := SuppressStartupUpdateCheck(path)
+	if err != nil {
+		t.Fatalf("SuppressStartupUpdateCheck error: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	return changed, string(raw)
+}
+
+func TestSuppressStartupUpdateCheckCreatesMissingConfig(t *testing.T) {
+	changed, final := suppressUpdatesInto(t, "")
+	if !changed {
+		t.Fatal("want changed=true for missing config")
+	}
+	if want := "check_for_update_on_startup = false\n"; final != want {
+		t.Errorf("created config = %q, want %q", final, want)
+	}
+}
+
+func TestSuppressStartupUpdateCheckPrependsBeforeExistingTables(t *testing.T) {
+	initial := "# operator config\n[projects.\"/work/desk-a\"]\ntrust_level = \"trusted\"\n"
+	changed, final := suppressUpdatesInto(t, initial)
+	if !changed {
+		t.Fatal("want changed=true when key is absent")
+	}
+	want := "check_for_update_on_startup = false\n\n" + initial
+	if final != want {
+		t.Errorf("final config = %q, want %q", final, want)
+	}
+}
+
+func TestSuppressStartupUpdateCheckIsIdempotentWhenFalse(t *testing.T) {
+	initial := "# centrally managed updates\ncheck_for_update_on_startup = false # fleet policy\n\n[projects.\"/work/desk-a\"]\ntrust_level = \"trusted\"\n"
+	changed, final := suppressUpdatesInto(t, initial)
+	if changed {
+		t.Fatal("want changed=false for an already-disabled update check")
+	}
+	if final != initial {
+		t.Errorf("disabled config changed:\n%s", final)
+	}
+}
+
+func TestSuppressStartupUpdateCheckOverridesEnabledValue(t *testing.T) {
+	initial := "check_for_update_on_startup = true # stale local setting\nmodel = \"gpt-5\"\n"
+	changed, final := suppressUpdatesInto(t, initial)
+	if !changed {
+		t.Fatal("want changed=true for an enabled startup update check")
+	}
+	want := "check_for_update_on_startup = false # stale local setting\nmodel = \"gpt-5\"\n"
+	if final != want {
+		t.Errorf("final config = %q, want %q", final, want)
+	}
+}
+
+func TestSuppressStartupUpdateCheckRejectsMalformedTopLevelValue(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	initial := "check_for_update_on_startup = \"sometimes\"\n"
+	if err := os.WriteFile(path, []byte(initial), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SuppressStartupUpdateCheck(path); err == nil {
+		t.Fatal("want malformed managed key to fail loudly")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != initial {
+		t.Errorf("malformed config changed:\n%s", raw)
+	}
+}
+
 func TestSeedAppendsWhenAbsent(t *testing.T) {
 	initial := "[projects.\"/other/desk\"]\ntrust_level = \"trusted\"\n"
 	seeded, final := seedInto(t, initial, "/work/desk-a")

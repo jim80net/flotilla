@@ -61,7 +61,7 @@ just runs turns in its own harness. So in a mixed fleet:
   (The `~/.claude` `fleet-session-rotation` / `flotilla-fleet-recovery` skills are being
   made harness-aware as a follow-on.)
 
-## Codex first-run menus: trust is pre-seeded; the rest reads awaiting-input
+## Codex launch menus: trust and update suppression are pre-seeded
 
 Codex shows interactive first-run menus that no remote coordinator can answer —
 keystrokes sent into the pane NAVIGATE the menu (an Enter *selects* the highlighted
@@ -77,12 +77,14 @@ option) instead of composing a message:
 
 flotilla defuses these two ways:
 
-1. **Trust is pre-seeded at launch.** `flotilla resume`, `recycle`, and `switch`
-   write `[projects."<desk cwd>"] trust_level = "trusted"` into codex's
-   `config.toml` (`$CODEX_HOME`, default `~/.codex`) before any codex slot
-   launches — worktree-aware because the desk cwd itself is seeded, which is the
-   first key codex's trust lookup checks. Seeding is idempotent, append-only,
-   and never flips a path the operator explicitly marked `untrusted`.
+1. **Trust and update suppression are pre-seeded at launch.** `flotilla resume`,
+   `recycle`, and `switch` write the source-verified top-level
+   `check_for_update_on_startup = false` policy plus
+   `[projects."<desk cwd>"] trust_level = "trusted"` into codex's `config.toml`
+   (`$CODEX_HOME`, default `~/.codex`) before any codex slot launches. Codex
+   upgrades remain fleet-ops-owned. Trust seeding is worktree-aware because the
+   desk cwd itself is the first key codex checks; it is idempotent and never
+   flips a path the operator explicitly marked `untrusted`.
 2. **Any menu that still appears reads `awaiting-input`, never idle.** The codex
    driver classifies all four gate screens (login, hooks, trust, update) as
    awaiting-input: the change-detector escalates the *transition* into the menu
@@ -96,7 +98,10 @@ flotilla defuses these two ways:
    option).
 
 Login remains the one genuinely manual gate: it needs a browser/device-code
-round-trip, so an unauthenticated codex desk escalates to the operator.
+round-trip, so an unauthenticated codex desk escalates to the operator. A future
+Codex release that removes or changes the verified update-suppression key also
+fails visibly through the existing menu classification; flotilla never chooses
+"Update now" from a pane.
 
 ## Multi-line submission is per-harness
 

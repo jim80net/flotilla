@@ -64,6 +64,9 @@ func TestSeedCodexTrustWritesUnderCodexHome(t *testing.T) {
 	if !strings.Contains(string(raw), "[projects.\"/work/desk-a\"]\ntrust_level = \"trusted\"\n") {
 		t.Errorf("seeded section missing:\n%s", raw)
 	}
+	if !strings.Contains(string(raw), "check_for_update_on_startup = false\n") {
+		t.Errorf("startup update suppression missing:\n%s", raw)
+	}
 	// Idempotent second call must not duplicate the table (a duplicate is a TOML
 	// redefinition error that would break codex config loading).
 	seedCodexTrust("/work/desk-a")
