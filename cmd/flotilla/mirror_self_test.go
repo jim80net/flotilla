@@ -79,17 +79,27 @@ func TestCmdMirrorSelf_RequiresFrom(t *testing.T) {
 	}
 }
 
-// Desk finish-edge regression: deskMirror still posts when webhook present (#572).
-func TestDeskMirror_DeskFinishEdgeStillPosts572(t *testing.T) {
-	var posted string
+// Turn-final finish edges now fail quiet while remaining durable (#683).
+func TestDeskMirror_DeskFinishEdgeDefaultsQuiet683(t *testing.T) {
+	dir := t.TempDir()
+	posted := false
 	m := deskMirror{
+		rosterDir: dir,
 		webhook:   func(string) (string, bool) { return "https://wh", true },
 		turnFinal: func(string) (string, bool, error) { return "desk finish body", true, nil },
-		post:      func(_, _, body string) error { posted = body; return nil },
+		post:      func(_, _, body string) error { posted = true; return nil },
 		logf:      func(string, ...any) {},
 	}
 	m.run("backend")
-	if posted != "desk finish body" {
-		t.Errorf("desk path body = %q", posted)
+	if posted {
+		t.Error("desk turn-final must not post to operator Discord")
+	}
+	path, err := sessionmirror.LedgerPath(dir, "backend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(raw), "desk finish body") {
+		t.Fatalf("durable mirror = %q, err=%v", raw, err)
 	}
 }

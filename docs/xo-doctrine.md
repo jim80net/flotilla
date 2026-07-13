@@ -160,18 +160,17 @@ flotilla ships **A as the default.** B is deferred; if it lands later it will be
 opt-in and additive, not a replacement for the XO knowing how to address its
 operator directly.
 
-Deployments that wire the **mechanical Stop-hook mirror**
-(`deploy/flotilla-xo-discord-mirror.sh`) post the XO's turn-final assistant text to
-Discord on every Stop — verbatim, with no discretionary trigger filtering. That makes
-**every turn-final an operator communication** whether or not the XO also calls
-`notify`. The shape below applies to both egress paths.
+The **mechanical Stop-hook mirror** (`deploy/flotilla-xo-discord-mirror.sh`)
+records the XO's turn-final assistant text in the session-mirror ledger on every
+Stop. It is dash-visible but default-suppressed from Discord. The XO uses `notify`
+for curated operator communication; parade is the explicit mechanical allow.
 
 ## Operator communications — executive mini-briefs
 
 The operator is a **busy executive with many reports** — not watching your work move
 by move. Every operator-facing message (a `notify` reply, a decision request, a
-status answer, and **every turn-final** the mirror posts mechanically) must work for
-that reader in under twenty seconds without decoding internal vocabulary.
+status answer, or a parade report) must work for that reader in under twenty seconds
+without decoding internal vocabulary.
 
 **Four-part shape** (installed as the `executive-mini-brief` constitutional member via
 `workspace init` / `doctrine install`; principle 12 in the operating-principles

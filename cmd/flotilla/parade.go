@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -153,8 +154,8 @@ NEED:                     ← omit if none
 DEMO:                     ← always last
   • assets/… — or N/A with reason
 
-Do NOT run "flotilla notify" and do NOT touch secrets — answer in-pane; the fleet mirror
-publishes your turn-final to your channel automatically.`
+Do NOT run "flotilla notify" and do NOT touch secrets — answer in-pane; the explicit
+parade stream publishes your turn-final to your channel automatically.`
 }
 
 // paradeRollupWakeBody composes the roll-up wake for a coordinating seat — self-sufficient
@@ -352,6 +353,11 @@ func deliverParadeOne(cfg *roster.Config, secrets *roster.Secrets, a paradeArgs,
 		default:
 			return fmt.Errorf("parade request to %s could not be confirmed: %w", agentName, err)
 		}
+	}
+	// Mark only after confirmed delivery. A crash before delivery must fail quiet,
+	// never leave a stale allow that could publish an unrelated future turn.
+	if err := markParadePending(filepath.Dir(a.rosterPath), agentName); err != nil {
+		return fmt.Errorf("parade delivered to %q but explicit egress marker failed (turn remains dash-only): %w", agentName, err)
 	}
 	if a.from != "" {
 		fmt.Printf("parade request from %s delivered to %s (pane %s) — turn confirmed\n", a.from, agentName, pane)

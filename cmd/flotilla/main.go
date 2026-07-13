@@ -44,6 +44,8 @@ func run(args []string) error {
 		return cmdCancel(args[1:])
 	case "dispatch-status":
 		return cmdDispatchStatus(args[1:])
+	case "dispatch-ack":
+		return cmdDispatchAck(args[1:])
 	case "notify":
 		return cmdNotify(args[1:])
 	case "brief":
@@ -109,11 +111,12 @@ usage:
   flotilla send --from <sender> --file <path> <agent> message body from a file ('-' = stdin)
   flotilla cancel <outbox-id> [--roster <path>]       stand down the pending sender→recipient generation
   flotilla dispatch-status [--roster <path>] <nonce>  consumed / queued / delivered / undelivered (#614)
+  flotilla dispatch-ack [--roster <path>] <nonce>     settle this seat's dispatch in the durable ack ledger (#472)
   flotilla notify --from <agent> <message>            post to the operator under <agent>'s webhook (no tmux)
   flotilla notify --from <agent> --file <path>        notify body from a file ('-' = stdin)
   flotilla notify --from <agent> --with-fleet-status  append compressed Status of the fleet (#625)
-  flotilla brief [--all] [<desk>] [--audience <who>]  elicit a reader-modeled brief; the shipped mirror publishes it to the desk's channel (secret-free; not notify)
-  flotilla parade [--all] [<agent>]                   elicit parade answers (proud of / learned / looking forward to / need / demo); mirror publishes to each channel
+  flotilla brief [--all] [<desk>] [--audience <who>]  elicit a reader-modeled brief; the ledger publishes it to dash (secret-free; not notify)
+  flotilla parade [--all] [<agent>]                   elicit parade answers; the explicit parade stream publishes to each channel
   flotilla parade rollup [--all] [<xo>]               wake coordinators to roll up subordinates' parade answers
   flotilla parade fleet                               wake the primary XO for the operator fleet parade report
   flotilla speak <text>                               drop a short spoken reply on the voice outbound spool (non-blocking)
@@ -149,7 +152,7 @@ usage:
   flotilla doctrine install [--refresh] [--all] [<agent>]  install constitutional doctrine (idempotent; --refresh updates drifted fenced blocks)
   flotilla push-snippet <desk-agent>                  print the smart-push convention to append to a non-claude desk's identity file (secret-free; reports to the XO via send)
   flotilla result <agent>                             print a desk's FULL latest result from its harness session store (grok; read-only) — for long results the pane capture truncates
-  flotilla mirror-self --from <agent> --file <path|-> session-mirror (+ Discord) without pane Working→Idle — coordinator Stop hooks (#572)
+  flotilla mirror-self --from <agent> --file <path|-> session-mirror without pane Working→Idle — coordinator Stop hooks (#572)
   flotilla version
   flotilla help
 
@@ -499,19 +502,23 @@ func cmdNotify(args []string) error {
 	if strings.TrimSpace(message) == "" && len(attachPaths) == 0 {
 		return fmt.Errorf("message is empty")
 	}
+	// #683: the durable copy retains the fleet-side #472 protocol, but operator-facing
+	// notify prose never carries its machine nonce footer.
+	operatorMessage := inbound.StripDispatchFooter(message)
 	// Coordinator fleet posture (#625): append before length check so --chunk can
 	// split a long body+status, and fail-closed unavailable never silently omits.
 	if *withFleet {
 		rp, fromName := *rosterPath, *from
-		message = withFleetStatus(message, true, func() (string, error) {
-			return loadFleetStatusBlock(rp, fromName)
-		})
+		block, blockErr := loadFleetStatusBlock(rp, fromName)
+		loadBlock := func() (string, error) { return block, blockErr }
+		message = withFleetStatus(message, true, loadBlock)
+		operatorMessage = withFleetStatus(operatorMessage, true, loadBlock)
 	}
 	// Without --chunk, reject an over-length body cleanly (nothing is posted).
 	// With --chunk the XO mirror hook (and any caller) delivers the WHOLE body.
 	if !*chunk {
 		if runeCap := transportContentCap(); runeCap > 0 {
-			if n := len([]rune(message)); n > runeCap {
+			if n := len([]rune(operatorMessage)); n > runeCap {
 				return fmt.Errorf("message is %d chars; the transport's limit is %d — shorten it, pass --chunk, or split it (nothing was posted)", n, runeCap)
 			}
 		}
@@ -538,7 +545,7 @@ func cmdNotify(args []string) error {
 	}
 	dest := transport.NewWebhookDestination(hook)
 	if *chunk {
-		chunks := transport.Chunk(message, mirrorChunkLimit)
+		chunks := transport.Chunk(operatorMessage, mirrorChunkLimit)
 		n := len(chunks)
 		for i, part := range chunks {
 			body := part
@@ -553,11 +560,11 @@ func cmdNotify(args []string) error {
 			}
 		}
 		if n > 1 {
-			fmt.Printf("notified operator as %s (%d chunks, %d chars)\n", *from, n, utf8.RuneCountInString(message))
+			fmt.Printf("notified operator as %s (%d chunks, %d chars)\n", *from, n, utf8.RuneCountInString(operatorMessage))
 		} else {
 			fmt.Printf("notified operator as %s\n", *from)
 		}
-	} else if err := postOutbound(tr, dest, *from, message, attachPaths); err != nil {
+	} else if err := postOutbound(tr, dest, *from, operatorMessage, attachPaths); err != nil {
 		return err
 	} else if len(attachPaths) > 0 {
 		fmt.Printf("notified operator as %s (%d attachment(s))\n", *from, len(attachPaths))
@@ -569,7 +576,7 @@ func cmdNotify(args []string) error {
 	// succeeded, so it must never fail notify.
 	mirrorNotifyToLedger(*rosterPath, *from, message)
 	// #595 / #628: stamp time + body fingerprint so finish-edge / mirror-self skip Discord.
-	stampRecentNotifyBody(*rosterPath, *from, message)
+	stampRecentNotifyBody(*rosterPath, *from, operatorMessage)
 	return nil
 }
 

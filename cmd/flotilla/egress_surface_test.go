@@ -53,10 +53,11 @@ func TestDeskMirrorPassesFirewallDenylist(t *testing.T) {
 	var lines []string
 	var body string
 	m := deskMirror{
-		webhook:   func(string) (string, bool) { return "https://wh", true },
-		turnFinal: func(string) (string, bool, error) { return "the acme-desk finished its run", true, nil },
-		post:      func(_, _, b string) error { body = b; return nil },
-		logf:      recordLogf(&lines),
+		allowDiscord: true,
+		webhook:      func(string) (string, bool) { return "https://wh", true },
+		turnFinal:    func(string) (string, bool, error) { return "the acme-desk finished its run", true, nil },
+		post:         func(_, _, b string) error { body = b; return nil },
+		logf:         recordLogf(&lines),
 	}
 	m.run("backend")
 	if body != "the acme-desk finished its run" {
@@ -71,11 +72,10 @@ func TestCoordinatorLedgerPassesFirewallDenylist(t *testing.T) {
 	dir := t.TempDir()
 	var rec sessionmirror.Record
 	m := deskMirror{
-		ledgerOnly: true,
-		rosterDir:  dir,
-		turnFinal:  func(string) (string, bool, error) { return "coordinator acme-desk status", true, nil },
-		post:       func(_, _, _ string) error { t.Fatal("ledger-only must not post"); return nil },
-		logf:       func(string, ...any) {},
+		rosterDir: dir,
+		turnFinal: func(string) (string, bool, error) { return "coordinator acme-desk status", true, nil },
+		post:      func(_, _, _ string) error { t.Fatal("ledger-only must not post"); return nil },
+		logf:      func(string, ...any) {},
 		ledgerAppend: func(_, _ string, r sessionmirror.Record) error {
 			rec = r
 			return nil

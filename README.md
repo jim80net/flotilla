@@ -142,11 +142,10 @@ inspect end to end:
   a `tmux` pane. flotilla delivers an instruction by typing it into the
   target pane (the same thing you do by hand). For a turn-based agent,
   injecting the text *is* the wake — there's nothing to poll.
-- **Audit & read-back — a chat channel.** Every instruction and every reply
-  is also posted to a dedicated Discord channel, each agent under its own
-  webhook identity. That gives you a durable, timestamped, phone-readable
-  transcript of all coordination — the audit trail is a first-class feature,
-  not an afterthought.
+- **Audit & read-back — durable ledger plus curated chat.** Every finished turn
+  is appended to the session-mirror ledger and remains visible on the dash.
+  Discord stays operator-readable: parade delivery, adjutant-curated notifies,
+  and direct notify replies rise there; routine turn-final traffic does not.
 - **Coordination bus — a pluggable transport.** The medium the operator and
   agents talk over sits behind one `Transport` interface (subscribe to inbound
   messages, post outbound, resolve an address to a delivery target), selected

@@ -195,8 +195,8 @@ at rotation time; the product default is what new provisioning produces.
 
 The operator is a busy executive with many reports — not following your work move by
 move. **Every operator-facing message** must work for that reader: status replies,
-decision requests, task confirmations, and **every turn-final** (the Discord mirror posts
-coordinator turn-finals mechanically, verbatim).
+decision requests, task confirmations, curated notifies, and parade reports. Routine
+turn-finals stay on the dash and do not rise mechanically to Discord.
 
 The **four-part mini-brief shape** (installed as the `executive-mini-brief` doctrine
 member):

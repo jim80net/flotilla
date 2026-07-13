@@ -133,9 +133,9 @@ type DetectorConfig struct {
 	// inert even when StackableWakes is true (fails safe to primary-only Wake).
 	OwningXO func(agent string) string
 	// MirrorOnFinish is the per-desk visibility side-effect: invoked once for each NON-XO desk that
-	// completed a unit of work this tick (a confirmed Working→Idle transition). The caller mirrors
-	// that desk's turn-final output to its home Discord channel. Like the wake/rotate side-effects it
-	// runs in runTail, OUTSIDE d.mu, so a slow transcript read or Discord post can never stall the
+	// completed a unit of work this tick (a confirmed Working→Idle transition). The caller appends
+	// that desk's turn-final to the durable session ledger; only an explicit parade marker allows
+	// Discord. Like the wake/rotate side-effects it runs in runTail, OUTSIDE d.mu, so a slow read can never stall the
 	// tick loop. It is OBSERVE-ONLY and BEST-EFFORT — the closure must never let a mirror failure
 	// affect the tick or delivery. Default nil ⇒ inert (no mirror; behavior byte-identical to before
 	// this change). Monitored coordinators are excluded — they use CoordinatorMirrorOnFinish.

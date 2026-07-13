@@ -96,9 +96,9 @@ func parseBriefInterleavedArgs(args []string) (desk string, flagArgs []string, e
 // It instructs the desk to AUTHOR a reader-modeled brief and emit it as a fenced
 // reader-map envelope (the structured-output authoring of Pillar B), and it carries
 // the desk-secret-free invariant forward: the desk answers IN-PANE and never runs
-// notify nor touches a secret — the watch daemon's mirror publishes the turn-final
-// to the desk's channel automatically. The envelope is what the mirror detects,
-// renders, and posts; the desk's modeling judgment goes into the anchor/decision.
+// notify nor touches a secret — the watch daemon records the turn-final in the
+// session-mirror ledger for dash visibility. The envelope is what the mirror detects
+// and renders; the desk's modeling judgment goes into the anchor/decision.
 func buildBriefRequest(audience string) string {
 	if audience == "" {
 		audience = string(readermap.AudienceOperator)
@@ -123,7 +123,7 @@ Emit the brief as a fenced code block tagged %s containing this JSON (fill every
 }
 `+"```"+`
 
-Do NOT run "flotilla notify" and do NOT touch any secret or webhook — just answer in-pane; your brief is published to your channel automatically by the fleet mirror.`,
+Do NOT run "flotilla notify" and do NOT touch any secret or webhook — just answer in-pane; your brief is published to the dash automatically by the fleet ledger.`,
 		reader, readermap.FenceTag, readermap.FenceTag, audience)
 }
 
@@ -135,11 +135,9 @@ func deskIsDark(webhookURL string, webhookErr error) bool {
 }
 
 // cmdBrief elicits a reader-modeled brief from one desk or every non-primary-XO agent
-// and lets the shipped mirror publish it (Pillar A). It is orchestrator-run: when
-// --secrets is available it runs the dark-desk pre-check (reporting a desk whose channel
-// webhook does not resolve), then injects the brief-request via the SAME confirmed-
-// delivery path as `send`. It never calls notify and the DESK never touches a secret to
-// publish — the watch daemon's deskMirror publishes the desk's turn-final to its channel.
+// and lets the shipped ledger publish it to the dash (Pillar A). It injects the request
+// through the same confirmed-delivery path as send; neither orchestrator nor desk needs
+// Discord secrets for a brief.
 func cmdBrief(args []string) error {
 	a, err := parseBriefArgs(args)
 	if err != nil {
@@ -149,19 +147,10 @@ func cmdBrief(args []string) error {
 	if err != nil {
 		return err
 	}
-	var secrets *roster.Secrets
-	if a.secretsPath != "" {
-		secrets, err = roster.LoadSecrets(a.secretsPath)
-		if err != nil {
-			return err
-		}
-	} else {
-		fmt.Fprintln(os.Stderr, "flotilla brief: note — no --secrets, skipping the dark-desk webhook pre-check (the brief is still injected)")
-	}
 	if a.all {
-		return cmdBriefAll(cfg, secrets, a)
+		return cmdBriefAll(cfg, nil, a)
 	}
-	return deliverBriefOne(cfg, secrets, a, a.desk)
+	return deliverBriefOne(cfg, nil, a, a.desk)
 }
 
 // primaryXOAgent returns the hub XO name using the same rule as flotilla watch and the

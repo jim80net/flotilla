@@ -94,6 +94,9 @@ func cmdMirrorSelf(args []string) error {
 	turnBody := body
 	m := deskMirror{
 		rosterDir: rosterDir,
+		claimDiscord: func(a string) bool {
+			return claimParadePending(rosterDir, a)
+		},
 		webhook: func(a string) (string, bool) {
 			if secrets == nil {
 				return "", false

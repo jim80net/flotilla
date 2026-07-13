@@ -15,9 +15,32 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/discord"
+	"github.com/jim80net/flotilla/internal/inbound"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/watch"
 )
+
+func TestNotifyStripsDispatchFooterFromOperatorPost683(t *testing.T) {
+	var got struct {
+		Content string `json:"content"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode webhook body: %v", err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	secrets := writeSecrets(t, "xo", srv.URL)
+	message := "curated operator update" + inbound.FormatDispatchFooter("flotilla-dispatch-cafebabe")
+	if err := cmdNotify([]string{"--from", "xo", "--secrets", secrets, message}); err != nil {
+		t.Fatal(err)
+	}
+	if got.Content != "curated operator update" {
+		t.Fatalf("operator post = %q, want nonce footer stripped", got.Content)
+	}
+}
 
 // writeSecrets writes a one-key secrets file mapping the given agent to the
 // given webhook URL and returns its path. The agent key is derived the same way

@@ -8,15 +8,15 @@ resume (#472 / #475 / #614 / #616).
 | File | Role |
 |------|------|
 | `flotilla-<sender>-outbox.json` | Pending sends not yet pane-confirmed (#475) |
-| `flotilla-<recipient>-inbound.json` | Confirmed pane deliveries awaiting turn-final ack (#472) |
+| `flotilla-<recipient>-inbound.json` | Confirmed pane deliveries awaiting durable ack (#472) |
 | `flotilla-dispatch-consumed.json` | Durable consumed registry — nonce (+ payload hash) (#614) |
 | `flotilla-chapter-hold` | Optional marker: hold non-urgent reinjects during chapter (#616) |
 
 ## Dispositions
 
 - **queued** — in sender outbox; recipient busy / not yet confirmed
-- **delivered** — inbound ledger pending turn-final ack
-- **consumed** — settled (turn-final ack, MERGED suppress, or manual)
+- **delivered** — inbound ledger pending durable ack
+- **consumed** — settled (durable ack, legacy turn-final ack, MERGED suppress, or manual)
 - **undelivered** — age bound exceeded (outbox or unacked inbound)
 
 ## Desk-visible queued ack
@@ -33,9 +33,14 @@ QUEUED id=<id> sender=<s> recipient=<r> status=busy_outbox
 
 ```bash
 flotilla dispatch-status [--roster <path>] <nonce>
+flotilla dispatch-ack [--roster <path>] <nonce>
 ```
 
-Resolves disposition across consumed → inbound → outbox.
+`dispatch-status` resolves disposition across consumed → inbound → outbox.
+After handling a dispatch, its recipient runs `dispatch-ack`; the command writes
+the consumed registry first and then clears the inbound row, so a crash between
+those steps is healed by the watch sweep. `$FLOTILLA_SELF` identifies the recipient,
+and one seat cannot acknowledge another seat's pending nonce.
 
 ## Roster discovery (#615)
 
@@ -55,7 +60,8 @@ On Working→Idle finish, reinject is **suppressed** when:
 2. All cited `PR #N` are MERGED (checker; production may wire `gh` later)
 3. `flotilla-chapter-hold` is active (hold — does not consume)
 
-Turn-final ack of a nonce durable-consumes it so resume storms cannot re-task.
+Durable ack of a nonce suppresses reinjection so resume storms cannot re-task.
+Turn-final nonce/snippet matching remains a backward-compatible reconciliation path.
 
 ## Undelivered routing — adjutant first (#628)
 

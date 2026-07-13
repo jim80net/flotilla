@@ -18,7 +18,7 @@ type Entry struct {
 	Sender      string    `json:"sender"`
 	Recipient   string    `json:"recipient"`
 	Message     string    `json:"message"`
-	Nonce       string    `json:"nonce"` // echoed in turn-final or explicit clear
+	Nonce       string    `json:"nonce"` // settled in the durable consumed registry
 	DeliveredAt time.Time `json:"delivered_at"`
 	Deferrals   int       `json:"deferrals"` // 0=awaiting first confirmed reinject; 1=reinject confirmed, escalate on next miss
 }
@@ -51,7 +51,7 @@ func NewID() (string, error) {
 	return hex.EncodeToString(b[:]), nil
 }
 
-// NewNonce returns a short marker agents can echo back in turn-finals.
+// NewNonce returns a short durable dispatch identity.
 func NewNonce() (string, error) {
 	id, err := NewID()
 	if err != nil {
@@ -152,7 +152,7 @@ func (t *Tracker) Pending(recipient string) []Entry {
 	return out
 }
 
-// ReinjectPreamble prefixes a one-shot resume message with the #472 echo contract repeated.
+// ReinjectPreamble prefixes a one-shot resume message with the #472 durable-ack contract.
 func ReinjectPreamble(e Entry) string {
 	var b strings.Builder
 	b.WriteString("[flotilla dropped-dispatch resume] A confirmed dispatch from ")

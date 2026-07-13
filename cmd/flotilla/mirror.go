@@ -38,9 +38,12 @@ type deskMirror struct {
 	now func() time.Time
 	// ledgerAppend overrides sessionmirror.Append for tests; nil ⇒ the real append.
 	ledgerAppend func(rosterDir, agent string, rec sessionmirror.Record) error
-	// ledgerOnly skips Discord posting after the session-mirror ledger append. Retained for
-	// tests; production coordinator mirrors post Discord + ledger (harness-agnostic).
-	ledgerOnly bool
+	// allowDiscord explicitly enables legacy turn-final posting. The zero value is
+	// deliberately ledger-only: operator Discord fails quiet while the dash stays durable (#683).
+	allowDiscord bool
+	// claimDiscord atomically claims an explicit allowed stream after the ledger append.
+	// Production uses it for parade turns; nil means no turn-final may rise to Discord.
+	claimDiscord func(agent string) bool
 	// onDiscordSuccess is invoked after all Discord chunks post successfully with the
 	// reader-modeled body. Used by CoordinatorMirrorOnFinish to append the CoS ledger.
 	onDiscordSuccess func(agent, body string)
@@ -55,12 +58,12 @@ type deskMirror struct {
 //	SKIP <agent>: <reason>   — nothing substantive, or a read error
 //	MIRROR-FAIL <agent>: <detail> — one or more chunk posts failed
 //	POST <agent> <n> chunks  — Discord + (when rosterDir set) session-mirror
-//	LEDGER <agent>           — session-mirror only (no Discord: ledgerOnly or missing webhook)
+//	LEDGER <agent>           — session-mirror only (default; no operator Discord)
 //
 // #572: missing webhook must NOT suppress the session-mirror ledger — dash conversations
 // depend on it. Discord is best-effort on top; the loud WARN remains.
 func (m deskMirror) run(agent string) {
-	postDiscord := !m.ledgerOnly
+	postDiscord := m.allowDiscord
 	var url string
 	haveHook := false
 	if postDiscord {
@@ -76,7 +79,7 @@ func (m deskMirror) run(agent string) {
 		}
 	}
 	// Nothing useful to do without Discord and without a ledger target.
-	if !haveHook && m.rosterDir == "" && !m.ledgerOnly {
+	if !haveHook && m.rosterDir == "" && postDiscord {
 		return
 	}
 	if m.turnFinal == nil {
@@ -103,11 +106,23 @@ func (m deskMirror) run(agent string) {
 	d := readerModelInternal(text)
 
 	ledgerOK := m.appendSessionMirror(agent, text, d)
+	explicitStream := false
+	if ledgerOK && !postDiscord && m.claimDiscord != nil && m.claimDiscord(agent) {
+		postDiscord = true
+		explicitStream = true
+		if m.webhook != nil {
+			url, haveHook = m.webhook(agent)
+		}
+		if !haveHook {
+			m.logf("flotilla watch: mirror WARN %s: allowed parade has no webhook configured (provision %s); ledger retained",
+				agent, roster.WebhookKey(agent))
+		}
+	}
 
 	// #595 / #628 dual-egress: skip Discord when recent notify (time) or same body hash.
 	// Uses modeled body + raw turn-final so stamp matches either shape. Greppable reason.
 	suppressDiscord, suppressReason := false, ""
-	if postDiscord && haveHook && m.rosterDir != "" {
+	if postDiscord && !explicitStream && haveHook && m.rosterDir != "" {
 		stamp := roster.LayerLastNotifyPath(m.rosterDir, agent)
 		now := m.mirrorNow()
 		// Prefer modeled body (what would post); fall back to raw turn-final.
@@ -127,7 +142,7 @@ func (m deskMirror) run(agent string) {
 		}
 	}
 
-	// Ledger-only modes: explicit ledgerOnly, Discord unavailable, or dual-egress suppress.
+	// Ledger-only modes: fail-quiet default, Discord unavailable, or dual-egress suppress.
 	if !postDiscord || !haveHook {
 		if !ledgerOK {
 			return

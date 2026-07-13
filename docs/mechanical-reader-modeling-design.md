@@ -34,7 +34,7 @@ The design **does not over-claim** that the envelope makes writing modeled. The 
 
 Reader-facing artifacts leave a desk by **two** distinct egresses, enforced differently:
 
-1. **The Discord publish path (runtime):** turn-finals via `deskMirror`/`MirrorOnFinish`, and the explicit `flotilla notify`/`reply`/`brief` CLI calls. This is where the envelope + lint + firewall attach at runtime.
+1. **The internal publish path (runtime):** turn-finals via `deskMirror`/`MirrorOnFinish` always enter the dash ledger; only explicit parade markers continue to Discord. Curated `flotilla notify` and direct replies bypass the turn-final mirror. This is where the envelope + lint attach at runtime.
 2. **The git/GitHub path (static):** issues/PRs/commits authored by a desk via `gh`/`git` directly — these never traverse the Discord path. They are guarded by the **static** `scripts/check-private-boundary.sh` (already) + a pre-commit/pre-push lint hook (new), not the runtime path.
 
 A third surface — the **pane** the operator reads over a desk's shoulder — is inherently un-chokeable; the feature is "mechanical for the published surfaces," explicitly not the raw pane.

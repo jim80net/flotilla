@@ -25,7 +25,8 @@ shipped template beside this quote.
 | **2** | project-XO | XO channel | per-desk canon rollup + consolidated Learned |
 | **3** | meta-XO | `#c2` + parade archive | **one slide per project-XO** in `slides.md` |
 
-Tier 1: `flotilla parade` → mirror publishes turn-final (same path as `flotilla brief`).
+Tier 1: `flotilla parade` records an explicit pending marker → the finish mirror
+publishes that turn-final after its durable ledger append. Ordinary briefs remain dash-only.
 
 Tier 3: meta-XO writes `<parades-dir>/<YYYY-MM-DD>/slides.md`; operator reviews at
 **`/parade`** (togglable deck viewer — ←/→ between slides). Thematic synthesis is an
