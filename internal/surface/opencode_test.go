@@ -3,7 +3,6 @@ package surface
 import (
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -14,22 +13,8 @@ func TestOpenCodeRegistered(t *testing.T) {
 	}
 }
 
-func TestOpenCodeRecycleCapabilities(t *testing.T) {
-	var _ RecycleBridge = openCode{}
+func TestOpenCodeComposerCapability(t *testing.T) {
 	var _ ComposerStateProbe = openCode{}
-
-	o := newOpenCode()
-	path := o.HandoffPath("/home/operator/work/project", "20260713T120000.000000001-abcd1234")
-	want := "/home/operator/work/project/.flotilla/handoffs/recycle-20260713T120000.000000001-abcd1234.md"
-	if path != want {
-		t.Fatalf("HandoffPath = %q, want %q", path, want)
-	}
-	if got := o.HandoffTurn(path); got != PortableMarkdownHandoffTurn(path) {
-		t.Fatal("HandoffTurn must use the shared portable-markdown handoff")
-	}
-	if got := o.TakeoverTurn(path); got != PortableMarkdownTakeoverTurn(path) {
-		t.Fatal("TakeoverTurn must use the shared portable-markdown takeover")
-	}
 }
 
 func TestClassifyOpenCodeComposerLine(t *testing.T) {
