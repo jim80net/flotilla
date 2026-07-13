@@ -1773,7 +1773,11 @@ func usageObservation(cfg *roster.Config, launches *launch.Config) func(string) 
 }
 
 func activeUsageSlotMeta(agent string, launches *launch.Config) (provider, subscription string) {
-	if overlay, ok, err := workspace.ReadActiveOverlay(agent); err == nil && ok {
+	overlay, overlayOK, overlayErr := workspace.ReadActiveOverlay(agent)
+	if overlayErr != nil {
+		log.Printf("flotilla watch: active usage slot metadata unavailable for %q: %v (falling back to primary launch slot)", agent, overlayErr)
+	}
+	if overlayErr == nil && overlayOK {
 		if overlay.Provider != "" || overlay.SubscriptionID != "" {
 			return overlay.Provider, overlay.SubscriptionID
 		}

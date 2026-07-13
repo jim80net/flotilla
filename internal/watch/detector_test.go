@@ -226,6 +226,52 @@ func TestDetectorPrunesUsageForRemovedDesk(t *testing.T) {
 	}
 }
 
+func TestDetectorUsageAsyncDispatchAndAttemptCadence(t *testing.T) {
+	f := newFixture()
+	f.set("alpha", surface.StateWorking)
+	cfg := f.config("alpha", []string{"alpha"}, 3, "normal")
+	cfg.UsageProbePeriod = 30 * time.Minute
+	cfg.Usage = func(string) (surface.UsageReport, string, string, bool) {
+		return surface.UsageReport{RemainingPercent: 8, Window: "weekly", Scope: surface.RateLimitAccountSide}, "gateway", "", true
+	}
+	var pending func()
+	dispatches := 0
+	cfg.UsageDispatch = func(run func()) {
+		dispatches++
+		pending = run
+	}
+	d := newDet(t, f, cfg)
+	d.Tick()
+	if dispatches != 1 || pending == nil {
+		t.Fatalf("dispatches=%d pending=%v, want one deferred batch", dispatches, pending != nil)
+	}
+	if len(d.snap.Usage) != 0 {
+		t.Fatalf("async usage folded before dispatch ran: %+v", d.snap.Usage)
+	}
+	pending()
+	if got := d.snap.Usage["alpha"].RemainingPercent; got != 8 {
+		t.Fatalf("async usage remaining = %d, want 8", got)
+	}
+	d.Tick()
+	if dispatches != 1 {
+		t.Fatalf("immediate tick retried slow probe: dispatches=%d", dispatches)
+	}
+}
+
+func TestDetectorUsageRejectsInvalidReport(t *testing.T) {
+	f := newFixture()
+	f.set("alpha", surface.StateIdle)
+	cfg := f.config("alpha", []string{"alpha"}, 3, "normal")
+	cfg.Usage = func(string) (surface.UsageReport, string, string, bool) {
+		return surface.UsageReport{RemainingPercent: 101, Window: "weekly"}, "gateway", "", true
+	}
+	d := newDet(t, f, cfg)
+	d.Tick()
+	if len(d.snap.Usage) != 0 {
+		t.Fatalf("invalid usage became evidence: %+v", d.snap.Usage)
+	}
+}
+
 func TestDetectorColdStartWakesOnceThenQuiet(t *testing.T) {
 	f := newFixture()
 	cfg := f.config("xo", []string{"xo", "backend"}, 3, "none")

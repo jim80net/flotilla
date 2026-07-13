@@ -2089,6 +2089,9 @@ func (d *Detector) runUsageProbes() {
 		last, seen := d.usageLastProbeAt[name]
 		if !seen || now.Sub(last) >= d.cfg.UsageProbePeriod {
 			agents = append(agents, name)
+			// Anchor every ATTEMPT, not only successes: unavailable chrome is
+			// expected honest absence, and retrying it at the heartbeat cadence
+			// would defeat the deliberately slow provider-probe posture.
 			d.usageLastProbeAt[name] = now
 		}
 	}
