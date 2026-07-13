@@ -803,6 +803,8 @@ func cmdWatch(args []string) error {
 				return surface.AssessForFleet(drv, pane)
 			},
 			RateLimitMaterial: rateLimitMaterial(cfg),
+			Usage:             usageObservation(cfg, flatLaunch),
+			UsageDispatch:     func(run func()) { go run() },
 			RateLimitReset:    rateLimitReset(cfg),
 			RateLimitDispatch: func(run func()) { go run() },
 			RateLimitAutoSwitchEligible: func(agent string) bool {
@@ -1756,6 +1758,67 @@ func rateLimitMaterial(cfg *roster.Config) func(agent string) (bool, surface.Rat
 		limited, scope, detail := probe.RateLimited(pane)
 		return limited, scope, detail, true
 	}
+}
+
+// usageObservation wires the optional read-only UsageProbe. Provider identity
+// comes from the active launch slot, the same source auto-switch trusts; missing
+// chrome/capability/slot metadata remains honest absence where applicable.
+func usageObservation(cfg *roster.Config, launches *launch.Config) func(string) (surface.UsageReport, string, string, bool) {
+	return func(agent string) (surface.UsageReport, string, string, bool) {
+		drv, ok := surface.Get(agentSurface(cfg, agent))
+		if !ok {
+			return surface.UsageReport{}, "", "", false
+		}
+		probe, ok := surface.UsageSupport(drv)
+		if !ok {
+			return surface.UsageReport{}, "", "", false
+		}
+		pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
+		if err != nil {
+			return surface.UsageReport{}, "", "", false
+		}
+		report, ok := probe.Usage(pane)
+		if !ok {
+			return surface.UsageReport{}, "", "", false
+		}
+		provider, subscription := activeUsageSlotMeta(agent, launches)
+		return report, provider, subscription, true
+	}
+}
+
+func activeUsageSlotMeta(agent string, launches *launch.Config) (provider, subscription string) {
+	overlay, overlayOK, overlayErr := workspace.ReadActiveOverlay(agent)
+	if overlayErr != nil {
+		log.Printf("flotilla watch: active usage slot metadata unavailable for %q: %v (falling back to primary launch slot)", agent, overlayErr)
+	}
+	if overlayErr == nil && overlayOK {
+		if overlay.Provider != "" || overlay.SubscriptionID != "" {
+			return overlay.Provider, overlay.SubscriptionID
+		}
+		if launches != nil {
+			if recipe, exists := launches.Agents[agent]; exists {
+				for _, slot := range recipe.Slots() {
+					if slot.Name == overlay.Slot {
+						return slot.Provider, slot.SubscriptionID
+					}
+				}
+			}
+		}
+		// A valid legacy overlay may omit both metadata and a usable slot.
+		// Fall through to the canonical primary rather than dropping identity.
+	}
+	if launches == nil {
+		return "", ""
+	}
+	recipe, ok := launches.Agents[agent]
+	if !ok {
+		return "", ""
+	}
+	slots := recipe.Slots()
+	if len(slots) == 0 {
+		return "", ""
+	}
+	return slots[0].Provider, slots[0].SubscriptionID
 }
 
 // rateLimitReset clears a desk's consecutive-read streak when it leaves the probe

@@ -146,6 +146,132 @@ func seed(d *Detector, states map[string]surface.State, signal string) {
 	d.cold = false
 }
 
+func TestDetectorUsageObservationIsOptionalAndDurable(t *testing.T) {
+	f := newFixture()
+	f.set("alpha", surface.StateWorking)
+	cfg := f.config("alpha", []string{"alpha"}, 3, "normal")
+	cfg.UsageProbePeriod = 30 * time.Minute
+	cfg.Usage = func(agent string) (surface.UsageReport, string, string, bool) {
+		if agent != "alpha" {
+			t.Fatalf("usage agent = %q, want alpha", agent)
+		}
+		return surface.UsageReport{RemainingPercent: 8, Window: "weekly", Scope: surface.RateLimitAccountSide}, "gateway", "alpha-plan", true
+	}
+	d := newDet(t, f, cfg)
+	d.Tick()
+
+	got := f.persisted[len(f.persisted)-1].Usage["alpha"]
+	if got.RemainingPercent != 8 || got.Window != "weekly" || got.Provider != "gateway" || got.SubscriptionID != "alpha-plan" {
+		t.Fatalf("persisted usage = %+v", got)
+	}
+	if got.ObservedAt.IsZero() || got.StaleAfter.Sub(got.ObservedAt) != time.Hour {
+		t.Fatalf("usage timestamps = observed %v stale %v, want 60m horizon", got.ObservedAt, got.StaleAfter)
+	}
+}
+
+func TestDetectorUsageAbsenceNeverCreatesOrErasesEvidence(t *testing.T) {
+	f := newFixture()
+	f.set("beta", surface.StateIdle)
+	available := true
+	cfg := f.config("beta", []string{"beta"}, 3, "normal")
+	cfg.UsageProbePeriod = 30 * time.Minute
+	cfg.Usage = func(string) (surface.UsageReport, string, string, bool) {
+		if !available {
+			return surface.UsageReport{}, "", "", false
+		}
+		return surface.UsageReport{RemainingPercent: 42, Window: "weekly", Scope: surface.RateLimitAccountSide}, "gateway", "", true
+	}
+	d := newDet(t, f, cfg)
+	d.Tick()
+	first := f.persisted[len(f.persisted)-1].Usage["beta"]
+
+	available = false
+	f.advance(31 * time.Minute)
+	d.Tick()
+	retained := f.persisted[len(f.persisted)-1].Usage["beta"]
+	if retained != first {
+		t.Fatalf("missing probe changed prior evidence: first=%+v retained=%+v", first, retained)
+	}
+
+	cfg2 := f.config("beta", []string{"beta"}, 3, "normal")
+	cfg2.Usage = func(string) (surface.UsageReport, string, string, bool) {
+		return surface.UsageReport{}, "", "", false
+	}
+	d2 := newDet(t, f, cfg2)
+	d2.Tick()
+	if got := f.persisted[len(f.persisted)-1].Usage; len(got) != 0 {
+		t.Fatalf("cold absent probe created usage: %+v", got)
+	}
+}
+
+func TestDetectorPrunesUsageForRemovedDesk(t *testing.T) {
+	f := newFixture()
+	f.set("alpha", surface.StateIdle)
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := (Snapshot{
+		DeskStates: map[string]surface.State{"alpha": surface.StateIdle},
+		Usage: map[string]UsageObservation{
+			"alpha":   {RemainingPercent: 8, Window: "weekly"},
+			"removed": {RemainingPercent: 5, Window: "weekly"},
+		},
+	}).Save(path); err != nil {
+		t.Fatal(err)
+	}
+	d := NewDetector(f.config("alpha", []string{"alpha"}, 3, "normal"), path)
+	if _, ok := d.snap.Usage["removed"]; ok {
+		t.Fatalf("removed desk usage survived prune: %+v", d.snap.Usage)
+	}
+	if _, ok := d.snap.Usage["alpha"]; !ok {
+		t.Fatalf("monitored desk usage was pruned: %+v", d.snap.Usage)
+	}
+}
+
+func TestDetectorUsageAsyncDispatchAndAttemptCadence(t *testing.T) {
+	f := newFixture()
+	f.set("alpha", surface.StateWorking)
+	cfg := f.config("alpha", []string{"alpha"}, 3, "normal")
+	cfg.UsageProbePeriod = 30 * time.Minute
+	cfg.Usage = func(string) (surface.UsageReport, string, string, bool) {
+		return surface.UsageReport{RemainingPercent: 8, Window: "weekly", Scope: surface.RateLimitAccountSide}, "gateway", "", true
+	}
+	var pending func()
+	dispatches := 0
+	cfg.UsageDispatch = func(run func()) {
+		dispatches++
+		pending = run
+	}
+	d := newDet(t, f, cfg)
+	d.Tick()
+	if dispatches != 1 || pending == nil {
+		t.Fatalf("dispatches=%d pending=%v, want one deferred batch", dispatches, pending != nil)
+	}
+	if len(d.snap.Usage) != 0 {
+		t.Fatalf("async usage folded before dispatch ran: %+v", d.snap.Usage)
+	}
+	pending()
+	if got := d.snap.Usage["alpha"].RemainingPercent; got != 8 {
+		t.Fatalf("async usage remaining = %d, want 8", got)
+	}
+	d.Tick()
+	if dispatches != 1 {
+		t.Fatalf("immediate tick retried slow probe: dispatches=%d", dispatches)
+	}
+}
+
+func TestDetectorUsageRejectsInvalidReport(t *testing.T) {
+	f := newFixture()
+	f.set("alpha", surface.StateIdle)
+	cfg := f.config("alpha", []string{"alpha"}, 3, "normal")
+	cfg.Usage = func(string) (surface.UsageReport, string, string, bool) {
+		return surface.UsageReport{RemainingPercent: 101, Window: "weekly"}, "gateway", "", true
+	}
+	d := newDet(t, f, cfg)
+	d.Tick()
+	if len(d.snap.Usage) != 0 {
+		t.Fatalf("invalid usage became evidence: %+v", d.snap.Usage)
+	}
+}
+
 func TestDetectorColdStartWakesOnceThenQuiet(t *testing.T) {
 	f := newFixture()
 	cfg := f.config("xo", []string{"xo", "backend"}, 3, "none")

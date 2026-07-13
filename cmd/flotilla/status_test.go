@@ -273,3 +273,27 @@ func TestWriteStatus_NoSnapshot(t *testing.T) {
 		t.Errorf("no-snapshot output should not assert XO settled state:\n%s", out)
 	}
 }
+
+func TestStatusUsageVisibilityAndHonestAbsence(t *testing.T) {
+	now := time.Date(2026, 7, 13, 6, 0, 0, 0, time.UTC)
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "alpha"}, {Name: "beta"}}}
+	snap := watch.Snapshot{
+		DeskStates: map[string]surface.State{"alpha": surface.StateIdle, "beta": surface.StateIdle},
+		Usage: map[string]watch.UsageObservation{
+			"alpha": {RemainingPercent: 8, Window: "weekly", ObservedAt: now.Add(-time.Hour), StaleAfter: now.Add(-time.Minute)},
+		},
+	}
+	doc := buildStatusJSON(cfg, "alpha", now.Format(time.RFC3339), snap, nil)
+	if doc.Agents[0].Usage == nil || doc.Agents[0].Usage.RemainingPercent != 8 {
+		t.Fatalf("alpha JSON usage = %+v", doc.Agents[0].Usage)
+	}
+	if doc.Agents[1].Usage != nil {
+		t.Fatalf("beta JSON usage = %+v, want omitted", doc.Agents[1].Usage)
+	}
+	if got := usageLabel(snap, "alpha", now); got != "8% weekly stale" {
+		t.Fatalf("usageLabel(alpha) = %q", got)
+	}
+	if got := usageLabel(snap, "beta", now); got != "—" {
+		t.Fatalf("usageLabel(beta) = %q, want honest absence", got)
+	}
+}

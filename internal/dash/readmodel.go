@@ -97,11 +97,12 @@ func (f Freshness) String() string {
 // the `flotilla status --json` contract (the landing widget, site/app.js,
 // consumes exactly these fields). #524 adds loop_posture beside pane state.
 type AgentItem struct {
-	Name        string `json:"name"`
-	Role        string `json:"role,omitempty"`         // "hub" for the XO, else omitted
-	Surface     string `json:"surface,omitempty"`      // effective surface driver
-	State       string `json:"state"`                  // pane / surface.State label
-	LoopPosture string `json:"loop_posture,omitempty"` // #524 fleet loop vocabulary
+	Name        string                  `json:"name"`
+	Role        string                  `json:"role,omitempty"`         // "hub" for the XO, else omitted
+	Surface     string                  `json:"surface,omitempty"`      // effective surface driver
+	State       string                  `json:"state"`                  // pane / surface.State label
+	LoopPosture string                  `json:"loop_posture,omitempty"` // #524 fleet loop vocabulary
+	Usage       *watch.UsageObservation `json:"usage,omitempty"`
 }
 
 // FreshnessInfo is the board's freshness banner (the superset's addition over the
@@ -192,6 +193,9 @@ func BuildBoard(in BoardInputs) BoardDoc {
 			Surface:     effectiveSurface(a.Surface),
 			State:       deskStateLabel(in.Snap, a.Name),
 			LoopPosture: string(boardLoopPosture(a.Name, in, snapFresh)),
+		}
+		if usage, ok := in.Snap.Usage[a.Name]; ok {
+			item.Usage = &usage
 		}
 		if a.Name == in.XO {
 			item.Role = "hub"

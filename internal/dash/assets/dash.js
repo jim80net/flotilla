@@ -73,6 +73,13 @@
     return "state-" + escapeHtml(String(state || "unknown"));
   }
 
+  function usageText(usage) {
+    if (!usage || !Number.isFinite(Number(usage.remaining_percent))) return "";
+    var text = String(usage.remaining_percent) + "% " + String(usage.window || "usage");
+    if (usage.stale_after && Date.parse(usage.stale_after) < Date.now()) text += " stale";
+    return text;
+  }
+
   function renderFreshness(data) {
     var fresh = data.freshness || { state: "absent", message: "" };
     var banner = el("freshness");
@@ -294,6 +301,8 @@
         // #524: show loop_posture beside pane state so officers see parked vs drifted.
         var posture = String(a.loop_posture || "");
         var stateLabel = posture ? (state + " · " + posture) : state;
+        var usage = usageText(a.usage);
+        if (usage) stateLabel += " · " + usage;
         // composite match: this row lights up ONLY when both the desk name AND its channel
         // match the selection — so a desk that appears in several channels highlights just the
         // picked copy, not all of them (#370).
@@ -393,6 +402,10 @@
     var state = String(a.state || "unknown");
     // #524: loop_posture is distinct from pane state (idle ≠ parked).
     var posture = String(a.loop_posture || "");
+    var usageValue = usageText(a.usage);
+    var usage = usageValue
+      ? '<span class="desk-usage" title="provider usage remaining">' + escapeHtml(usageValue) + '</span>'
+      : "";
     var stale = fresh.state === "stale";
     card.innerHTML =
       '<article class="desk conv-desk-mini' + (stale ? " desk-stale" : "") + '">' +
@@ -404,6 +417,7 @@
             (posture ? ('<span class="desk-loop-posture" title="loop posture">' + escapeHtml(posture) + "</span>") : "") +
           "</header>" +
           '<span class="desk-surface">' + escapeHtml(a.surface || "—") + "</span>" +
+          usage +
         "</div>" +
       "</article>";
   }

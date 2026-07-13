@@ -81,6 +81,14 @@ type DetectorConfig struct {
 	// `go run()` (mirrors MirrorDispatch) so slow tmux reads cannot stall the tick loop.
 	// Default nil ⇒ synchronous (deterministic for tests).
 	RateLimitDispatch func(run func())
+	// Usage probes optional authoritative surface usage (#653). It runs off d.mu
+	// on a slow cadence; ok=false is honest absence and never clears prior evidence.
+	Usage func(agent string) (report surface.UsageReport, provider, subscription string, ok bool)
+	// UsageProbePeriod defaults to 30 minutes. StaleAfter is twice this period.
+	UsageProbePeriod time.Duration
+	// UsageDispatch decouples blocking acquisition from the tick loop. Nil keeps
+	// tests synchronous; production wires go run().
+	UsageDispatch func(run func())
 	// RateLimitAutoSwitchEligible gates detector-enqueued auto-switch (GATE-4). Nil ⇒ no
 	// auto-switch candidates are collected. Coordinators are eligible when the production
 	// roster gate admits them (#510).
@@ -391,6 +399,7 @@ type Detector struct {
 	deskSettled          map[string]bool      // desk signaled idle (per-agent marker consumed) → suppress until re-armed
 	deskBeatEligibleAt   map[string]time.Time // desk → last heartbeat fire (cadence anchor)
 	rateLimitLastProbeAt map[string]time.Time
+	usageLastProbeAt     map[string]time.Time
 	deskNoProgress       map[string]int  // consecutive heartbeats with no intervening progress (the cap counter)
 	deskStopped          map[string]bool // capped + escalated → stop heartbeating until re-armed
 	deskProgressed       map[string]bool // desk went Working since its last heartbeat → resets the cap
@@ -465,6 +474,9 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 	if cfg.RateLimitProbePeriod <= 0 {
 		cfg.RateLimitProbePeriod = cfg.ReferenceInterval
 	}
+	if cfg.UsageProbePeriod <= 0 {
+		cfg.UsageProbePeriod = 30 * time.Minute
+	}
 	// Recursive desk-heartbeat (#183) cadence/cap defaults. These are inert unless HeartbeatEnabled
 	// is also wired (the per-desk tickLocked block is skipped when HeartbeatEnabled is nil), so
 	// defaulting them here never changes behavior for a pre-#183 deployment.
@@ -497,6 +509,17 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 	pingPeriod, alertWindow := livenessParamsWall(cfg.LivenessPingMode, cfg.MaxMissedAcks, cfg.ReferenceInterval, cfg.MaxQuietIntervals)
 
 	snap, ok := LoadSnapshot(snapPath)
+	if len(snap.Usage) > 0 && len(cfg.Desks) > 0 {
+		monitored := make(map[string]bool, len(cfg.Desks))
+		for _, name := range cfg.Desks {
+			monitored[name] = true
+		}
+		for name := range snap.Usage {
+			if !monitored[name] {
+				delete(snap.Usage, name)
+			}
+		}
+	}
 	synthState, _ := cfg.SynthLoad() // a missing/corrupt sidecar (ok=false) fails safe to empty ⇒ all-changed
 	if synthState.LastSeen == nil {
 		synthState.LastSeen = map[string]map[string]string{}
@@ -532,6 +555,7 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 		deskSettled:          map[string]bool{},
 		deskBeatEligibleAt:   map[string]time.Time{},
 		rateLimitLastProbeAt: map[string]time.Time{},
+		usageLastProbeAt:     map[string]time.Time{},
 		deskNoProgress:       map[string]int{},
 		deskStopped:          map[string]bool{},
 		deskProgressed:       map[string]bool{},
@@ -886,6 +910,7 @@ func (d *Detector) Tick() {
 	d.runAutoSwitch(pendingAutoSwitch)
 	d.runAutoRevert(pendingAutoRevert)
 	d.runRateLimitProbes(pendingRateLimit)
+	d.runUsageProbes()
 	// Visibility-synthesis (B2) runs AFTER runTail and OFF d.mu: its materiality read is BLOCKING
 	// tmux + transcript I/O that must NEVER execute under the detector mutex (it would stall the tick
 	// loop and block OperatorWake — the relay goroutine — exactly as the mirror path is kept off-mutex).
@@ -1231,6 +1256,7 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 		DeskStates: make(map[string]surface.State, len(d.cfg.Desks)),
 		SignalHash: d.snap.SignalHash,
 		XOSettled:  d.snap.XOSettled,
+		Usage:      cloneUsage(d.snap.Usage),
 	}
 	for _, name := range d.cfg.Desks {
 		cur.DeskStates[name] = d.debounce(name, d.cfg.Assess(name))
@@ -2036,6 +2062,76 @@ func (d *Detector) runRateLimitProbes(work rateLimitWork) {
 	}
 	if d.cfg.RateLimitDispatch != nil {
 		d.cfg.RateLimitDispatch(run)
+	} else {
+		run()
+	}
+}
+
+func cloneUsage(in map[string]UsageObservation) map[string]UsageObservation {
+	out := make(map[string]UsageObservation, len(in))
+	for name, observation := range in {
+		out[name] = observation
+	}
+	return out
+}
+
+// runUsageProbes performs one slow, all-state usage batch outside d.mu. Results
+// fold under one short lock; absent/unparseable reports retain prior evidence so
+// readers can label it stale instead of confusing absence with a healthy zero.
+func (d *Detector) runUsageProbes() {
+	if d.cfg.Usage == nil {
+		return
+	}
+	d.mu.Lock()
+	now := d.now()
+	var agents []string
+	for _, name := range d.cfg.Desks {
+		last, seen := d.usageLastProbeAt[name]
+		if !seen || now.Sub(last) >= d.cfg.UsageProbePeriod {
+			agents = append(agents, name)
+			// Anchor every ATTEMPT, not only successes: unavailable chrome is
+			// expected honest absence, and retrying it at the heartbeat cadence
+			// would defeat the deliberately slow provider-probe posture.
+			d.usageLastProbeAt[name] = now
+		}
+	}
+	d.mu.Unlock()
+	if len(agents) == 0 {
+		return
+	}
+	sort.Strings(agents)
+	run := func() {
+		observedAt := d.now().UTC()
+		updates := make(map[string]UsageObservation)
+		for _, agent := range agents {
+			report, provider, subscription, ok := d.cfg.Usage(agent)
+			if !ok || report.RemainingPercent < 0 || report.RemainingPercent > 100 || strings.TrimSpace(report.Window) == "" {
+				continue
+			}
+			updates[agent] = UsageObservation{
+				Provider:         provider,
+				SubscriptionID:   subscription,
+				RemainingPercent: report.RemainingPercent,
+				Window:           report.Window,
+				Scope:            report.Scope.String(),
+				ObservedAt:       observedAt,
+				StaleAfter:       observedAt.Add(2 * d.cfg.UsageProbePeriod),
+			}
+		}
+		if len(updates) == 0 {
+			return
+		}
+		d.mu.Lock()
+		if d.snap.Usage == nil {
+			d.snap.Usage = map[string]UsageObservation{}
+		}
+		for agent, observation := range updates {
+			d.snap.Usage[agent] = observation
+		}
+		d.mu.Unlock()
+	}
+	if d.cfg.UsageDispatch != nil {
+		d.cfg.UsageDispatch(run)
 	} else {
 		run()
 	}

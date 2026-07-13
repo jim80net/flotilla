@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/jim80net/flotilla/internal/surface"
 )
@@ -39,6 +40,23 @@ type Snapshot struct {
 	// change or an operator message. Persisted so a daemon restart does not
 	// re-engage a settled XO.
 	XOSettled bool `json:"xo_settled"`
+	// Usage holds the last authoritative per-desk observation. Missing probes do
+	// not create entries and do not erase prior evidence; readers use StaleAfter
+	// to distinguish old evidence from fresh coverage.
+	Usage map[string]UsageObservation `json:"usage,omitempty"`
+}
+
+// UsageObservation is the acquisition-agnostic usage shape shared by watch,
+// status, and dash. Provider/subscription come from the active launch slot,
+// never from the surface chrome.
+type UsageObservation struct {
+	Provider         string    `json:"provider,omitempty"`
+	SubscriptionID   string    `json:"subscription_id,omitempty"`
+	RemainingPercent int       `json:"remaining_percent"`
+	Window           string    `json:"window"`
+	Scope            string    `json:"scope"`
+	ObservedAt       time.Time `json:"observed_at"`
+	StaleAfter       time.Time `json:"stale_after"`
 }
 
 // LoadSnapshot reads a persisted snapshot fail-safe. A missing or unparseable
@@ -60,6 +78,9 @@ func LoadSnapshot(path string) (Snapshot, bool) {
 	}
 	if s.DeskStates == nil {
 		s.DeskStates = map[string]surface.State{}
+	}
+	if s.Usage == nil {
+		s.Usage = map[string]UsageObservation{}
 	}
 	return s, true
 }
