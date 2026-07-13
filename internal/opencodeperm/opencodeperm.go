@@ -1,6 +1,6 @@
 // Package opencodeperm provisions the narrow OpenCode permissions needed by
-// flotilla's portable recycle bridge. It broadens only handoff-file edit
-// authority; the coordinator owns cleanup, so no shell permission is needed.
+// flotilla's portable recycle bridge. It does not broaden normal edit or shell
+// authority: only handoff blobs and their exact rm cleanup are allowed.
 package opencodeperm
 
 import (
@@ -71,6 +71,12 @@ func Seed(configPath, cwd string) (bool, error) {
 	if !filepath.IsAbs(cwd) {
 		return false, fmt.Errorf("opencode recycle permissions: cwd %q is not absolute", cwd)
 	}
+	// PortableMarkdownTakeoverTurn intentionally emits a double-quoted shell
+	// command. Reject characters that retain syntax inside double quotes rather
+	// than trying to maintain a second shell-escaping implementation here.
+	if strings.ContainsAny(cwd, "\"`$\\\r\n") {
+		return false, fmt.Errorf("opencode recycle permissions: cwd %q contains shell-expansion characters unsupported by the exact recycle cleanup", cwd)
+	}
 	unlock, err := acquireLock(lockPath(configPath))
 	if err != nil {
 		return false, err
@@ -106,9 +112,24 @@ func Seed(configPath, cwd string) (bool, error) {
 		return false, err
 	}
 	changed = editChanged || changed
-	// Retract rules written by earlier #666 iterations. Coordinator-side exact
-	// deletion makes desk-side bash authority unnecessary.
-	changed = removeCleanupRules(permission, cwd) || changed
+	cleanupGlob := filepath.ToSlash(filepath.Join(filepath.Clean(cwd), ".flotilla", "handoffs", "recycle-*.md"))
+	// Do not sweep quoted rules for other cwd values: the user config is shared
+	// by every managed OpenCode worktree, and each one needs its own exact cleanup.
+	// Remove the pre-#666 unquoted seed. The shared takeover turn has always
+	// quoted the path, so retaining this non-matching rule adds no capability.
+	if bash, ok := permission["bash"].(map[string]any); ok {
+		legacy := "rm -f " + cleanupGlob
+		if _, exists := bash[legacy]; exists {
+			delete(bash, legacy)
+			changed = true
+		}
+	}
+	cleanup := `rm -f "` + cleanupGlob + `"`
+	bashChanged, err := setSpecific(permission, "bash", cleanup, "allow")
+	if err != nil {
+		return false, err
+	}
+	changed = bashChanged || changed
 	doc["permission"] = permission
 	body, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
@@ -156,8 +177,9 @@ func writeConfig(configPath string, body []byte) (bool, error) {
 	return true, nil
 }
 
-// seedJSONC uses hujson's RFC 6902 patcher so comments survive. Only the managed
-// edit rule is added; obsolete desk-side cleanup rules are removed.
+// seedJSONC uses hujson's RFC 6902 patcher so comments outside the two managed
+// action maps survive. Replacing those maps is deliberate: it converts scalar
+// policies to an explicit "*" fallback and emits the narrow allow last.
 func seedJSONC(raw []byte, cwd string) ([]byte, error) {
 	ast, err := hujson.Parse(raw)
 	if err != nil {
@@ -173,10 +195,20 @@ func seedJSONC(raw []byte, cwd string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	// A scalar permission cannot contain a per-action rule, so replacing it is
-	// unavoidable. For an object, patch only the managed edit member.
+	cleanupGlob := filepath.ToSlash(filepath.Join(filepath.Clean(cwd), ".flotilla", "handoffs", "recycle-*.md"))
+	cleanup := `rm -f "` + cleanupGlob + `"`
+	legacy := "rm -f " + cleanupGlob
+	// A scalar permission cannot contain per-action rules, so replacing it is
+	// unavoidable. For an object, patch only the two managed members below so
+	// comments on unrelated permission actions and rules survive.
 	if _, ok := doc["permission"].(map[string]any); !ok {
+		if bash, ok := permission["bash"].(map[string]any); ok {
+			delete(bash, legacy)
+		}
 		if _, err := setSpecific(permission, "edit", handoffEditPattern, "allow"); err != nil {
+			return nil, err
+		}
+		if _, err := setSpecific(permission, "bash", cleanup, "allow"); err != nil {
 			return nil, err
 		}
 		op := "add"
@@ -188,39 +220,17 @@ func seedJSONC(raw []byte, cwd string) ([]byte, error) {
 		}
 		return ast.Pack(), nil
 	}
-	if err := patchJSONCAction(&ast, permission, "edit", handoffEditPattern, ""); err != nil {
-		return nil, err
-	}
-	if bash, ok := permission["bash"].(map[string]any); ok {
-		for _, obsolete := range cleanupPatterns(cwd) {
-			if _, exists := bash[obsolete]; exists {
-				if err := applyJSONRemove(&ast, "/permission/bash/"+jsonPointer(obsolete)); err != nil {
-					return nil, err
-				}
-			}
+	for _, rule := range []struct {
+		kind, pattern, legacy string
+	}{
+		{kind: "edit", pattern: handoffEditPattern},
+		{kind: "bash", pattern: cleanup, legacy: legacy},
+	} {
+		if err := patchJSONCAction(&ast, permission, rule.kind, rule.pattern, rule.legacy); err != nil {
+			return nil, err
 		}
 	}
 	return ast.Pack(), nil
-}
-
-func cleanupPatterns(cwd string) []string {
-	glob := filepath.ToSlash(filepath.Join(filepath.Clean(cwd), ".flotilla", "handoffs", "recycle-*.md"))
-	return []string{"rm -f " + glob, `rm -f "` + glob + `"`}
-}
-
-func removeCleanupRules(permission map[string]any, cwd string) bool {
-	bash, ok := permission["bash"].(map[string]any)
-	if !ok {
-		return false
-	}
-	changed := false
-	for _, obsolete := range cleanupPatterns(cwd) {
-		if _, exists := bash[obsolete]; exists {
-			delete(bash, obsolete)
-			changed = true
-		}
-	}
-	return changed
 }
 
 func patchJSONCAction(ast *hujson.Value, permission map[string]any, kind, pattern, legacy string) error {
