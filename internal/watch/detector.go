@@ -346,6 +346,10 @@ type DetectorConfig struct {
 	DeskHeartbeatPeriod time.Duration
 	// RateLimitProbePeriod gates rate-limit probe batches (default ReferenceInterval).
 	RateLimitProbePeriod time.Duration
+	// AwaitingSweepThreshold is the observed wall time a pane may remain continuously
+	// in awaiting-input/awaiting-approval before one steady-state material wake is
+	// routed to its owning coordinator. Defaults to 15 minutes.
+	AwaitingSweepThreshold time.Duration
 
 	// Activity ingests tick assess snapshots and turn-end/operator signals OFF d.mu
 	// for adaptive interval policy (PR 3). Nil ⇒ byte-inert.
@@ -398,6 +402,8 @@ type Detector struct {
 	// heartbeat cadence, which is conservative (one fresh re-engagement, never a missed escalation).
 	deskSettled          map[string]bool      // desk signaled idle (per-agent marker consumed) → suppress until re-armed
 	deskBeatEligibleAt   map[string]time.Time // desk → last heartbeat fire (cadence anchor)
+	awaitingSince        map[string]time.Time // desk → first observation in the continuous awaiting episode
+	awaitingEscalated    map[string]bool      // desk → this awaiting episode already emitted its one sweep wake
 	rateLimitLastProbeAt map[string]time.Time
 	usageLastProbeAt     map[string]time.Time
 	deskNoProgress       map[string]int  // consecutive heartbeats with no intervening progress (the cap counter)
@@ -477,6 +483,9 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 	if cfg.UsageProbePeriod <= 0 {
 		cfg.UsageProbePeriod = 30 * time.Minute
 	}
+	if cfg.AwaitingSweepThreshold <= 0 {
+		cfg.AwaitingSweepThreshold = 15 * time.Minute
+	}
 	// Recursive desk-heartbeat (#183) cadence/cap defaults. These are inert unless HeartbeatEnabled
 	// is also wired (the per-desk tickLocked block is skipped when HeartbeatEnabled is nil), so
 	// defaulting them here never changes behavior for a pre-#183 deployment.
@@ -554,6 +563,8 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 		synthState:           synthState,
 		deskSettled:          map[string]bool{},
 		deskBeatEligibleAt:   map[string]time.Time{},
+		awaitingSince:        map[string]time.Time{},
+		awaitingEscalated:    map[string]bool{},
 		rateLimitLastProbeAt: map[string]time.Time{},
 		usageLastProbeAt:     map[string]time.Time{},
 		deskNoProgress:       map[string]int{},
@@ -1243,6 +1254,37 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 			wakeLayer(owner, WakeMaterial, byOwner[owner])
 		}
 	}
+	// Steady-state awaiting escalation is ownership-routed even when general
+	// stackable material wakes are disabled: its contract is specifically to
+	// reach the coordinator that owns the stuck pane. It still reuses the same
+	// Wake/WakeLayer material delivery machinery and falls back to the primary
+	// clock when ownership seams are unavailable.
+	deliverAwaiting := func(reasons []string) {
+		if d.cfg.OwningXO == nil || d.cfg.WakeLayer == nil {
+			wake(WakeMaterial, reasons)
+			return
+		}
+		primary, byOwner := groupMaterialByOwner(reasons, d.cfg.OwningXO)
+		if len(primary) > 0 {
+			wake(WakeMaterial, primary)
+		}
+		if owned := byOwner[d.cfg.XOAgent]; len(owned) > 0 {
+			wake(WakeMaterial, owned)
+			delete(byOwner, d.cfg.XOAgent)
+		}
+		if unowned := byOwner[""]; len(unowned) > 0 {
+			wake(WakeMaterial, unowned)
+			delete(byOwner, "")
+		}
+		owners := make([]string, 0, len(byOwner))
+		for owner := range byOwner {
+			owners = append(owners, owner)
+		}
+		sort.Strings(owners)
+		for _, owner := range owners {
+			wakeLayer(owner, WakeMaterial, byOwner[owner])
+		}
+	}
 	requestRotate := func() {
 		if !d.cfg.RotatePolicy.AllowsIdleEdgeRotate() {
 			return
@@ -1261,6 +1303,10 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 	for _, name := range d.cfg.Desks {
 		cur.DeskStates[name] = d.debounce(name, d.cfg.Assess(name))
 	}
+	// Start timing an already-wedged pane on the cold observation itself. The
+	// cold-start early return below still suppresses an immediate per-pane wake;
+	// only continuous observed residence past the threshold escalates.
+	awaitingEscalations := d.awaitingSweepLocked(cur)
 	if h, ok := d.cfg.SignalHash(); ok {
 		cur.SignalHash = h
 	}
@@ -1287,6 +1333,20 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 		}
 		primary, byOwner := groupMaterialByOwner(reasons, d.cfg.OwningXO)
 		if len(primary) > 0 || len(byOwner[d.cfg.XOAgent]) > 0 {
+			d.selfCont = 0
+			cur.XOSettled = false
+		}
+	}
+	applyAwaitingPrimaryClock := func(reasons []string) {
+		// Awaiting sweep ownership is always active, independent of the general
+		// StackableWakes opt-in. Mirror deliverAwaiting's fallback exactly: only a
+		// wake that will reach the primary layer re-engages its settled clock.
+		primaryAffected := d.cfg.OwningXO == nil || d.cfg.WakeLayer == nil
+		if !primaryAffected {
+			primary, byOwner := groupMaterialByOwner(reasons, d.cfg.OwningXO)
+			primaryAffected = len(primary) > 0 || len(byOwner[d.cfg.XOAgent]) > 0 || len(byOwner[""]) > 0
+		}
+		if primaryAffected {
 			d.selfCont = 0
 			cur.XOSettled = false
 		}
@@ -1360,6 +1420,10 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 		//    external change already covers advancing the XO and resets the cap).
 		d.continueXO(&cur, wake, requestRotate)
 	}
+	if len(awaitingEscalations) > 0 {
+		applyAwaitingPrimaryClock(awaitingEscalations)
+		deliverAwaiting(awaitingEscalations)
+	}
 
 	// 5b. Visibility-synthesis (B2): decide UNDER d.mu which OWED synthesizing agents are cadence-
 	//     eligible this tick (PURE / cheap — NO I/O here), and return them for runSynthesis to read +
@@ -1413,6 +1477,41 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 		}
 	}
 	return pendingRotate, pendingWakes, pendingMirrors, pendingCoordinatorMirrors, pendingDelegation, pendingAdjutantSeams, pendingSynth, pendingDeskBeats, pendingDeskEscalations, pendingRateLimit, pendingAutoSwitch, pendingLeaderExhausted, pendingAutoRevert, pendingTurnEnds
+}
+
+// awaitingSweepLocked detects steady-state wedges that transition-only
+// materiality cannot see. A continuous residence in either awaiting state is
+// one episode, even if the pane changes from awaiting-input to
+// awaiting-approval. Leaving both states re-arms the pane. State is deliberately
+// in memory: after daemon restart the detector observes a pre-existing wedge for
+// a full threshold before escalating, avoiding a restart storm while closing the
+// silent-forever cold-start gap.
+func (d *Detector) awaitingSweepLocked(cur Snapshot) []string {
+	now := d.now()
+	var reasons []string
+	for _, agent := range d.cfg.Desks {
+		state := cur.DeskStates[agent]
+		if state != surface.StateAwaitingInput && state != surface.StateAwaitingApproval {
+			delete(d.awaitingSince, agent)
+			delete(d.awaitingEscalated, agent)
+			continue
+		}
+		since, tracked := d.awaitingSince[agent]
+		if !tracked {
+			d.awaitingSince[agent] = now
+			continue
+		}
+		age := now.Sub(since)
+		if d.awaitingEscalated[agent] || age < d.cfg.AwaitingSweepThreshold {
+			continue
+		}
+		d.awaitingEscalated[agent] = true
+		reasons = append(reasons, fmt.Sprintf(
+			"%s: still %s after %s (steady-state sweep; check the pane)",
+			agent, state, age.Truncate(time.Second),
+		))
+	}
+	return reasons
 }
 
 // deskWarrantSnapshot is the #189 PHASE-1 read, run OFF d.mu from Tick BEFORE tickLocked acquires the

@@ -314,6 +314,15 @@ the optional **external signal-file**'s hash (`--signal-file`). A desk merely
 tight. The XO's own `working → idle` feeds **self-continuation** (below), never a
 desk-finished wake.
 
+**Steady-state awaiting backstop:** transition detection remains the fast path,
+but a pane continuously observed in `awaiting-input` or `awaiting-approval` for
+15 minutes emits one additional material wake to its owning coordinator layer.
+This covers a pane that was already blocked when watch started. Switching between
+the two awaiting states remains one episode; leaving both states re-arms the pane.
+A daemon restart begins a fresh 15-minute observation window, avoiding an immediate
+fleet-wide restart burst while preventing a pre-existing wedge from staying silent
+forever.
+
 > **The XO's own state tracker (`.flotilla-state.md`) is NOT a wake signal.** The
 > heartbeat instructs the XO to keep the tracker current, so hashing it as a wake
 > source would self-wake the XO on its own writes (a loop until it settles). The
