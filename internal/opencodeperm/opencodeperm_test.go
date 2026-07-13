@@ -53,18 +53,6 @@ func TestSeedRefusesInvalidConfig(t *testing.T) {
 	}
 }
 
-func TestSeedRefusesShellActiveCwd(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "opencode.json")
-	for _, cwd := range []string{`/tmp/alpha"beta`, "/tmp/alpha`beta", "/tmp/alpha$beta", `/tmp/alpha\beta`, "/tmp/alpha\nbeta"} {
-		if _, err := Seed(path, cwd); err == nil {
-			t.Fatalf("Seed must reject shell-active cwd %q", cwd)
-		}
-	}
-	if _, err := Seed(path, "/tmp/alpha beta"); err != nil {
-		t.Fatalf("spaces remain supported: %v", err)
-	}
-}
-
 func TestSeedJSONCPreservesCommentsAndMode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "opencode.jsonc")
 	raw := []byte("{\n  // project policy stays documented\n  \"plugin\": [\"alpha\"],\n  \"permission\": {\n    \"edit\": {\n      // preserve edit-map documentation\n      \"*\": \"ask\",\n      \"z*\": \"ask\",\n    },\n    \"bash\": {\n      // preserve bash-map documentation\n      \"*\": \"deny\",\n      \"z*\": \"ask\",\n    },\n  },\n}\n")

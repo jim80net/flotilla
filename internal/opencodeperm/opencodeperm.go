@@ -71,12 +71,6 @@ func Seed(configPath, cwd string) (bool, error) {
 	if !filepath.IsAbs(cwd) {
 		return false, fmt.Errorf("opencode recycle permissions: cwd %q is not absolute", cwd)
 	}
-	// PortableMarkdownTakeoverTurn intentionally emits a double-quoted shell
-	// command. Reject characters that retain syntax inside double quotes rather
-	// than trying to maintain a second shell-escaping implementation here.
-	if strings.ContainsAny(cwd, "\"`$\\\r\n") {
-		return false, fmt.Errorf("opencode recycle permissions: cwd %q contains shell-expansion characters unsupported by the exact recycle cleanup", cwd)
-	}
 	unlock, err := acquireLock(lockPath(configPath))
 	if err != nil {
 		return false, err
