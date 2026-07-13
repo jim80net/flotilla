@@ -2012,8 +2012,7 @@ html, body { overflow-x: clip; }
   .goutline-scope { grid-column: 1; font-size: .58rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
   .goutline-state { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-size: .58rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
   .goals-viewport {
-    position: absolute; width: 1px; height: 1px; min-height: 0;
-    visibility: hidden; pointer-events: none; overflow: hidden;
+    display: none;
   }
   .goals-drawer { width: 100%; max-width: 100%; }
   .gm-dialog { padding: 16px 16px; }

@@ -1905,6 +1905,9 @@ func TestGoalsMobileOutline672(t *testing.T) {
 			t.Errorf("dash.css must keep mobile outline labels readable (missing %q) — #672", marker)
 		}
 	}
+	if !strings.Contains(css, ".goals-viewport {\n    display: none;") {
+		t.Error("dash.css must remove the illegible mind-map viewport at phone widths — #672")
+	}
 }
 
 // --- helpers ---
