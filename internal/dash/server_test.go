@@ -1908,6 +1908,9 @@ func TestGoalsMobileOutline672(t *testing.T) {
 	if !strings.Contains(css, ".goals-viewport {\n    display: none;") {
 		t.Error("dash.css must remove the illegible mind-map viewport at phone widths — #672")
 	}
+	if !strings.Contains(css, ".goals-world { display: none; }") {
+		t.Error("dash.css must remove the illegible mind-map canvas at phone widths — #672")
+	}
 }
 
 // --- helpers ---

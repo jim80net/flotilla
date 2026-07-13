@@ -2014,6 +2014,7 @@ html, body { overflow-x: clip; }
   .goals-viewport {
     display: none;
   }
+  .goals-world { display: none; }
   .goals-drawer { width: 100%; max-width: 100%; }
   .gm-dialog { padding: 16px 16px; }
   /* the help tooltip is left-anchored under a button near the right edge; on a
