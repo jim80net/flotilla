@@ -387,15 +387,15 @@ func (in *Injector) logDelivered(j Job) {
 	intended := intendedRecipient(j)
 	if j.Kind == KindSend && !j.enqueuedAt.IsZero() {
 		age := in.clock().Sub(j.enqueuedAt).Round(time.Second)
-		log.Printf("flotilla watch: send from %q intended for %q -> resolved target %q delivered to %q (queued %s, %d bytes)", j.Sender, intended, j.Agent, j.Agent, age, len(j.Message))
+		log.Printf("flotilla watch: send from %q intended for %q -> resolved target %q: delivered (queued %s, %d bytes)", j.Sender, intended, j.Agent, age, len(j.Message))
 		return
 	}
 	if j.Kind == KindSend {
-		log.Printf("flotilla watch: send from %q intended for %q -> resolved target %q delivered to %q (%d bytes)", j.Sender, intended, j.Agent, j.Agent, len(j.Message))
+		log.Printf("flotilla watch: send from %q intended for %q -> resolved target %q: delivered (%d bytes)", j.Sender, intended, j.Agent, len(j.Message))
 		return
 	}
 	if intended != j.Agent {
-		log.Printf("flotilla watch: %s intended for %q -> resolved target %q delivered to %q (%d bytes)", deliveryKind(j.Kind), intended, j.Agent, j.Agent, len(j.Message))
+		log.Printf("flotilla watch: %s intended for %q -> resolved target %q: delivered (%d bytes)", deliveryKind(j.Kind), intended, j.Agent, len(j.Message))
 		return
 	}
 	log.Printf("flotilla watch: %s delivered to %q (%d bytes)", deliveryKind(j.Kind), j.Agent, len(j.Message))
