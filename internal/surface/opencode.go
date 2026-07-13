@@ -1,7 +1,6 @@
 package surface
 
 import (
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -302,28 +301,6 @@ func containsExact(s string, candidates []string) bool {
 	}
 	return false
 }
-
-// --- RecycleBridge: portable-markdown context preservation ---
-
-func (openCode) HandoffPath(cwd, token string) string {
-	return filepath.Join(cwd, ".flotilla", "handoffs", "recycle-"+token+".md")
-}
-
-func (openCode) HandoffTurn(designatedPath string) string {
-	return PortableMarkdownHandoffTurn(designatedPath) + "\n\nOpenCode-specific constraint: use the context already in this session. " +
-		"Do NOT inspect the worktree or run any discovery command first (including git, ls, find, rg, or cat). " +
-		"Your only tool operation for this turn must be writing the handoff file at the exact path above."
-}
-
-func (openCode) TakeoverTurn(designatedPath string) string {
-	return CoordinatorCleanupTakeoverTurn(designatedPath)
-}
-
-func (openCode) TakeoverAck(designatedPath string) string {
-	return CoordinatorCleanupTakeoverAck(designatedPath)
-}
-
-func (openCode) BeginWorkTurn() string { return CoordinatorCleanupBeginWorkTurn() }
 
 // --- pure state classifier (the testable core) ---
 

@@ -22,22 +22,18 @@ type recRec struct {
 	stamped           bool
 	gen               string
 	// knobs for the abort cases
-	closeErr         error
-	failPhase0       bool // Assess never idle → phase-0 abort
-	failDurable      bool // durable never true → phase-1 abort
-	failReverify     bool // a turn "starts" in the unlocked window → under-lock re-verify abort
-	closeNeverShell  bool // close confirms but the pane never becomes Shell → phase-2 abort
-	overlay          bool // composer is on an overlay (not cleared)
-	markerGot        string
-	genGot           string // overrides what readGen returns at phase 4 (supersede simulation)
-	bootApproval     bool   // fresh process received unrelated work and opened a permission modal
-	loadTurnSettles  bool   // coordinator-cleanup takeover read completed and returned idle
-	takeoverApproval bool   // read-only takeover unexpectedly reached a permission modal
-	removedHandoff   bool
-	absentResult     bool
-	absentErr        error
-	lockedFlag       bool   // set when the txn lock is taken (Phase 1 → close window)
-	remainCalls      []bool // records SetRemainOnExit(on) calls (expect on then off-restore)
+	closeErr        error
+	failPhase0      bool // Assess never idle → phase-0 abort
+	failDurable     bool // durable never true → phase-1 abort
+	failReverify    bool // a turn "starts" in the unlocked window → under-lock re-verify abort
+	closeNeverShell bool // close confirms but the pane never becomes Shell → phase-2 abort
+	overlay         bool // composer is on an overlay (not cleared)
+	markerGot       string
+	genGot          string // overrides what readGen returns at phase 4 (supersede simulation)
+	absentResult    bool
+	absentErr       error
+	lockedFlag      bool   // set when the txn lock is taken (Phase 1 → close window)
+	remainCalls     []bool // records SetRemainOnExit(on) calls (expect on then off-restore)
 	// worktree-exit prompt simulation (Phase-2 close wedge)
 	worktreePrompt       bool
 	worktreePromptAnswer bool
@@ -62,14 +58,7 @@ func (r *recRec) assess(string) surface.State {
 		// early; it confirms via paneDead. Shell is only for a shell-backed desk (not modeled here).
 		return surface.StateUnknown
 	case r.respawned && len(r.delivered) < 2:
-		if r.bootApproval {
-			return surface.StateAwaitingApproval
-		}
 		return surface.StateIdle // phase 4 boot (handoff delivered, takeover not yet)
-	case r.respawned && len(r.delivered) == 2 && r.takeoverApproval:
-		return surface.StateAwaitingApproval
-	case r.respawned && len(r.delivered) == 2 && r.loadTurnSettles:
-		return surface.StateIdle
 	default:
 		return surface.StateWorking // phase 4 resumption-confidence
 	}
@@ -90,17 +79,16 @@ const worktreeExitCapture = "Exiting worktree session\n  1. Keep worktree\n  2. 
 
 func fakeRecycleOps(r *recRec) recycleOps {
 	return recycleOps{
-		resolve:       func(string) (string, deliver.ResolveOutcome, error) { return "sess:0.1", deliver.ResolveUnique, nil },
-		paneID:        func(string) (string, error) { return "%5", nil },
-		inMode:        func(string) (bool, error) { return false, nil },
-		assess:        r.assess,
-		composer:      r.composer,
-		absent:        func(string, string) (bool, error) { return r.absentResult, r.absentErr },
-		durable:       func(string, string, int) (bool, error) { return !r.failDurable, nil },
-		removeHandoff: func(string, string) error { r.removedHandoff = true; return nil },
-		deliver:       func(_, text string) error { r.delivered = append(r.delivered, text); return nil },
-		closeFn:       func(string) error { r.closed = true; return r.closeErr },
-		remainOnExit:  func(_ string, on bool) error { r.remainCalls = append(r.remainCalls, on); return nil },
+		resolve:      func(string) (string, deliver.ResolveOutcome, error) { return "sess:0.1", deliver.ResolveUnique, nil },
+		paneID:       func(string) (string, error) { return "%5", nil },
+		inMode:       func(string) (bool, error) { return false, nil },
+		assess:       r.assess,
+		composer:     r.composer,
+		absent:       func(string, string) (bool, error) { return r.absentResult, r.absentErr },
+		durable:      func(string, string, int) (bool, error) { return !r.failDurable, nil },
+		deliver:      func(_, text string) error { r.delivered = append(r.delivered, text); return nil },
+		closeFn:      func(string) error { r.closed = true; return r.closeErr },
+		remainOnExit: func(_ string, on bool) error { r.remainCalls = append(r.remainCalls, on); return nil },
 		// A claude-direct desk: after /exit the pane is DEAD (until the respawn). closeNeverShell
 		// models a close that never confirms (the process never exits / a stuck read) → pollClosed
 		// must retry then abort.
@@ -135,12 +123,6 @@ func fakeRecycleOps(r *recRec) recycleOps {
 			}
 			return "", nil
 		},
-		captureHistory: func(string) (string, error) {
-			if r.loadTurnSettles {
-				return "prompt " + testPlan().takeoverAck + "\nassistant " + testPlan().takeoverAck, nil
-			}
-			return "prompt " + testPlan().takeoverAck, nil
-		},
 		answerMenu: func(_ string, choice string) error {
 			r.menuChoices = append(r.menuChoices, choice)
 			r.worktreePromptAnswer = true
@@ -158,8 +140,7 @@ func testPlan() recyclePlan {
 		handoffText: "HANDOFF", takeoverText: "TAKEOVER",
 		ownPane: "", minHandoffBytes: 200,
 		// tiny timeouts so abort loops terminate immediately (sleep is a no-op)
-		timeouts:    recycleTimeouts{handoff: 2 * recyclePollInterval, close_: 3 * recyclePollInterval, boot: 2 * recyclePollInterval, takeover: 2 * recyclePollInterval},
-		takeoverAck: "ACK-TOK",
+		timeouts: recycleTimeouts{handoff: 2 * recyclePollInterval, close_: 3 * recyclePollInterval, boot: 2 * recyclePollInterval, takeover: 2 * recyclePollInterval},
 	}
 }
 
@@ -185,162 +166,6 @@ func TestRunRecycleHappyPath(t *testing.T) {
 	// so reaching respawn proves pane_dead is the confirm signal).
 	if len(r.remainCalls) < 2 || r.remainCalls[0] != true || r.remainCalls[len(r.remainCalls)-1] != false {
 		t.Errorf("remainCalls = %v, want first=on(true) last=off(false restore)", r.remainCalls)
-	}
-}
-
-func TestRunRecyclePhase4ApprovalIsDistinctAbort(t *testing.T) {
-	r := happyRec()
-	r.bootApproval = true
-	_, _, err := runRecycle(fakeRecycleOps(r), testPlan())
-	if err == nil || !strings.Contains(err.Error(), "phase 4") || !strings.Contains(err.Error(), "approval modal") {
-		t.Fatalf("err = %v, want distinct phase-4 approval-modal abort", err)
-	}
-	if strings.Contains(err.Error(), "Allow once") || len(r.delivered) != 1 {
-		t.Fatalf("modal abort must never approve or deliver takeover: err=%v delivered=%v", err, r.delivered)
-	}
-}
-
-func TestRunRecycleCoordinatorCleanupAfterConfirmedLoad(t *testing.T) {
-	r := happyRec()
-	r.loadTurnSettles = true
-	p := testPlan()
-	p.coordinatorCleanup = true
-	p.beginWorkText = "BEGIN"
-	msg, _, err := runRecycle(fakeRecycleOps(r), p)
-	if err != nil {
-		t.Fatalf("runRecycle: %v", err)
-	}
-	if !r.removedHandoff {
-		t.Fatal("coordinator did not remove the handoff after the load turn settled")
-	}
-	if got := r.delivered; len(got) != 3 || got[0] != "HANDOFF" || got[1] != "TAKEOVER" || got[2] != "BEGIN" {
-		t.Fatalf("delivered = %v, want handoff → read-only takeover → begin-work", got)
-	}
-	if !strings.Contains(msg, "coordinator cleaned handoff") {
-		t.Fatalf("msg = %q", msg)
-	}
-}
-
-func TestRunRecycleCoordinatorCleanupLeavesFileOnReadApproval(t *testing.T) {
-	r := happyRec()
-	r.takeoverApproval = true
-	p := testPlan()
-	p.coordinatorCleanup = true
-	p.beginWorkText = "BEGIN"
-	_, _, err := runRecycle(fakeRecycleOps(r), p)
-	if err == nil || !strings.Contains(err.Error(), "read-only takeover") || !strings.Contains(err.Error(), "approval modal") {
-		t.Fatalf("err = %v", err)
-	}
-	if r.removedHandoff || len(r.delivered) != 2 {
-		t.Fatalf("approval abort must leave handoff and skip begin-work: removed=%v delivered=%v", r.removedHandoff, r.delivered)
-	}
-}
-
-func TestRunRecycleCoordinatorCleanupDoesNotDeleteOnIdleWithoutAck(t *testing.T) {
-	r := happyRec()
-	r.loadTurnSettles = true
-	ops := fakeRecycleOps(r)
-	ops.captureHistory = func(string) (string, error) { return "prompt ACK-TOK", nil }
-	p := testPlan()
-	p.coordinatorCleanup = true
-	p.beginWorkText = "BEGIN"
-	_, _, err := runRecycle(ops, p)
-	if err == nil || !strings.Contains(err.Error(), "transaction acknowledgement") {
-		t.Fatalf("err = %v", err)
-	}
-	if r.removedHandoff || len(r.delivered) != 2 {
-		t.Fatalf("idle without ack must leave handoff and skip begin-work: removed=%v delivered=%v", r.removedHandoff, r.delivered)
-	}
-}
-
-func TestRunRecycleCoordinatorCleanupRefusesSelfPath(t *testing.T) {
-	r := happyRec()
-	p := testPlan()
-	p.selfPath = true
-	p.coordinatorCleanup = true
-	p.beginWorkText = "BEGIN"
-	_, _, err := runRecycle(fakeRecycleOps(r), p)
-	if err == nil || !strings.Contains(err.Error(), "refusing --self") || !strings.Contains(err.Error(), "two-turn takeover") {
-		t.Fatalf("err = %v", err)
-	}
-	if len(r.delivered) != 0 || r.removedHandoff {
-		t.Fatalf("self refusal acted: delivered=%v removed=%v", r.delivered, r.removedHandoff)
-	}
-}
-
-func TestRunRecycleCoordinatorCleanupRefusesIncompleteBridge(t *testing.T) {
-	for _, tc := range []struct {
-		name, ack, begin string
-	}{
-		{name: "missing acknowledgement", begin: "BEGIN"},
-		{name: "missing begin-work turn", ack: "ACK-TOK"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			r := happyRec()
-			p := testPlan()
-			p.coordinatorCleanup = true
-			p.takeoverAck = tc.ack
-			p.beginWorkText = tc.begin
-			_, _, err := runRecycle(fakeRecycleOps(r), p)
-			if err == nil || !strings.Contains(err.Error(), "empty takeover acknowledgement or begin-work turn") {
-				t.Fatalf("err = %v", err)
-			}
-			if len(r.delivered) != 0 || r.removedHandoff {
-				t.Fatalf("incomplete bridge acted: delivered=%v removed=%v", r.delivered, r.removedHandoff)
-			}
-		})
-	}
-}
-
-func TestRunRecycleCoordinatorCleanupRefusesMissingCoordinatorOps(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		mut  func(*recycleOps)
-	}{
-		{name: "missing history capture", mut: func(o *recycleOps) { o.captureHistory = nil }},
-		{name: "missing exact remover", mut: func(o *recycleOps) { o.removeHandoff = nil }},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			r := happyRec()
-			ops := fakeRecycleOps(r)
-			tc.mut(&ops)
-			p := testPlan()
-			p.coordinatorCleanup = true
-			p.beginWorkText = "BEGIN"
-			_, _, err := runRecycle(ops, p)
-			if err == nil || !strings.Contains(err.Error(), "pane-history capture and exact-path handoff removal") {
-				t.Fatalf("err = %v", err)
-			}
-			if len(r.delivered) != 0 || r.removedHandoff {
-				t.Fatalf("missing coordinator op acted: delivered=%v removed=%v", r.delivered, r.removedHandoff)
-			}
-		})
-	}
-}
-
-func TestPollCoordinatorLoadCapturesHistoryOnlyWhenIdle(t *testing.T) {
-	stateCalls := 0
-	historyCalls := 0
-	ops := recycleOps{
-		assess: func(string) surface.State {
-			stateCalls++
-			if stateCalls < 3 {
-				return surface.StateWorking
-			}
-			return surface.StateIdle
-		},
-		composer: func(string) surface.ComposerDisposition { return surface.ComposerCleared },
-		captureHistory: func(string) (string, error) {
-			historyCalls++
-			return "ACK-TOK\nACK-TOK", nil
-		},
-		sleep: func(time.Duration) {},
-	}
-	if !pollCoordinatorLoad(ops, "pane", "ACK-TOK", 3*recyclePollInterval) {
-		t.Fatal("load acknowledgement did not settle")
-	}
-	if historyCalls != 1 {
-		t.Fatalf("history captures = %d, want one after idle", historyCalls)
 	}
 }
 

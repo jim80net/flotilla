@@ -3,7 +3,6 @@ package surface
 import (
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -14,42 +13,8 @@ func TestOpenCodeRegistered(t *testing.T) {
 	}
 }
 
-func TestOpenCodeRecycleCapabilities(t *testing.T) {
-	var _ RecycleBridge = openCode{}
-	var _ CoordinatorCleanupBridge = openCode{}
+func TestOpenCodeComposerCapability(t *testing.T) {
 	var _ ComposerStateProbe = openCode{}
-
-	o := newOpenCode()
-	path := o.HandoffPath("/home/operator/work/project", "20260713T120000.000000001-abcd1234")
-	want := "/home/operator/work/project/.flotilla/handoffs/recycle-20260713T120000.000000001-abcd1234.md"
-	if path != want {
-		t.Fatalf("HandoffPath = %q, want %q", path, want)
-	}
-	handoff := o.HandoffTurn(path)
-	if !strings.HasPrefix(handoff, PortableMarkdownHandoffTurn(path)) {
-		t.Fatal("HandoffTurn must use the shared portable-markdown handoff")
-	}
-	for _, must := range []string{"use the context already in this session", "Do NOT inspect the worktree", "only tool operation", path} {
-		if !strings.Contains(handoff, must) {
-			t.Fatalf("HandoffTurn missing OpenCode no-discovery constraint %q", must)
-		}
-	}
-	takeover := o.TakeoverTurn(path)
-	if takeover != CoordinatorCleanupTakeoverTurn(path) {
-		t.Fatal("TakeoverTurn must use the coordinator-cleanup load turn")
-	}
-	for _, must := range []string{"native file-read tool", "Do NOT delete", "do NOT begin work yet", path} {
-		if !strings.Contains(takeover, must) {
-			t.Fatalf("TakeoverTurn missing OpenCode read-only constraint %q", must)
-		}
-	}
-	ack := o.TakeoverAck(path)
-	if !strings.HasPrefix(ack, "FLOTILLA_CHAPTER_LOADED_") || strings.Count(takeover, ack) != 1 {
-		t.Fatalf("takeover acknowledgement %q must appear exactly once in prompt", ack)
-	}
-	if got := o.BeginWorkTurn(); got != CoordinatorCleanupBeginWorkTurn() || !strings.Contains(got, "BEGIN WORK") {
-		t.Fatalf("BeginWorkTurn = %q", got)
-	}
 }
 
 func TestClassifyOpenCodeComposerLine(t *testing.T) {

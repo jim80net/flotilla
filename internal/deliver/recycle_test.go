@@ -72,21 +72,3 @@ func TestHandoffPathMustBeUnderCwd(t *testing.T) {
 		t.Fatal("HandoffDurable outside cwd = nil error, want refuse")
 	}
 }
-
-func TestRemoveHandoffExactPath(t *testing.T) {
-	root := t.TempDir()
-	path := writeHandoff(t, root, "recycle-tok.md", "chapter")
-	sibling := writeHandoff(t, root, "recycle-other.md", "keep")
-	if err := RemoveHandoff(root, path); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("designated handoff still exists: %v", err)
-	}
-	if _, err := os.Stat(sibling); err != nil {
-		t.Fatalf("exact deletion touched sibling: %v", err)
-	}
-	if err := RemoveHandoff(root, filepath.Join(t.TempDir(), "outside.md")); err == nil {
-		t.Fatal("RemoveHandoff outside cwd = nil error, want refusal")
-	}
-}

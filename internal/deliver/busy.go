@@ -74,19 +74,6 @@ func CapturePaneStyled(target string) (string, error) {
 	return string(out), nil
 }
 
-// CapturePaneHistory returns the pane's retained scrollback plus its visible
-// frame. Coordinator-cleanup recycle uses it to confirm the transaction-unique
-// load acknowledgement appears after the prompt's first occurrence.
-func CapturePaneHistory(target string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "tmux", "capture-pane", "-p", "-S", "-", "-t", target).Output()
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
-}
-
 // CursorState returns the tmux pane's cursor ROW (`#{cursor_y}`, 0-based from the top of the visible
 // pane — the SAME indexing as the lines `CapturePane` returns, so `capturedLines[cursorY]` is the
 // line the cursor sits on) AND whether the pane is in a tmux MODE (`#{pane_in_mode}`: copy-mode,
@@ -124,9 +111,13 @@ func CursorSnapshot(target string) (cursorX, cursorY int, visible, inMode bool, 
 	if err != nil {
 		return 0, 0, false, false, err
 	}
-	fields := strings.Fields(string(out))
+	return parseCursorSnapshotOutput(string(out))
+}
+
+func parseCursorSnapshotOutput(out string) (cursorX, cursorY int, visible, inMode bool, err error) {
+	fields := strings.Fields(out)
 	if len(fields) != 4 {
-		return 0, 0, false, false, fmt.Errorf("unexpected cursor-position output %q", strings.TrimSpace(string(out)))
+		return 0, 0, false, false, fmt.Errorf("unexpected cursor-position output %q", strings.TrimSpace(out))
 	}
 	x, err := strconv.Atoi(fields[0])
 	if err != nil {

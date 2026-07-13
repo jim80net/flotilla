@@ -87,7 +87,7 @@ func TestHandoffTurnPathWithSpaces(t *testing.T) {
 	}
 }
 
-// TestRecycleSupport: the supported drivers are recycle-capable (implement RecycleBridge); a
+// TestRecycleSupport: the claude AND grok drivers are recycle-capable (implement RecycleBridge); a
 // driver without the bridge is not (the refuse fixture stays — KEEP stubNoBridge per #158).
 func TestRecycleSupport(t *testing.T) {
 	if _, ok := RecycleSupport(newClaudeCode()); !ok {
@@ -99,36 +99,8 @@ func TestRecycleSupport(t *testing.T) {
 	if _, ok := RecycleSupport(newCodex()); !ok {
 		t.Error("codex should implement RecycleBridge (grok-tier execution desk)")
 	}
-	if _, ok := RecycleSupport(newOpenCode()); !ok {
-		t.Error("opencode should implement RecycleBridge (#666)")
-	}
 	if _, ok := RecycleSupport(stubNoBridge{}); ok {
 		t.Error("a driver without the bridge must not type-assert as RecycleBridge")
-	}
-	if _, ok := any(newOpenCode()).(CoordinatorCleanupBridge); !ok {
-		t.Error("opencode should select coordinator cleanup (#666)")
-	}
-	if _, ok := any(newCodex()).(CoordinatorCleanupBridge); ok {
-		t.Error("codex retains the portable desk-side cleanup policy")
-	}
-}
-
-func TestCoordinatorCleanupTurnsSeparateReadFromWork(t *testing.T) {
-	path := "/repo/.flotilla/handoffs/recycle-tok.md"
-	load := CoordinatorCleanupTakeoverTurn(path)
-	for _, must := range []string{path, "native file-read tool", "then stop", "Do NOT delete", "do NOT begin work yet"} {
-		if !strings.Contains(load, must) {
-			t.Fatalf("load turn missing %q:\n%s", must, load)
-		}
-	}
-	for _, forbid := range []string{"rm -f", "BEGIN WORK IMMEDIATELY"} {
-		if strings.Contains(load, forbid) {
-			t.Fatalf("load turn contains %q:\n%s", forbid, load)
-		}
-	}
-	begin := CoordinatorCleanupBeginWorkTurn()
-	if !strings.Contains(begin, "BEGIN WORK IMMEDIATELY") || strings.Contains(begin, path) {
-		t.Fatalf("begin-work turn = %q", begin)
 	}
 }
 
@@ -148,7 +120,6 @@ func TestHandoffPathIsGitignored(t *testing.T) {
 	}{
 		{"claude", newClaudeCode().HandoffPath(repo, token)},
 		{"grok", newGrok().HandoffPath(repo, token)},
-		{"opencode", newOpenCode().HandoffPath(repo, token)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
