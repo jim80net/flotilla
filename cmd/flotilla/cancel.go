@@ -48,7 +48,7 @@ func cmdCancel(args []string) error {
 	}
 	info, err := os.Stat(rosterPath)
 	if err != nil {
-		return fmt.Errorf("cancel roster: %w", err)
+		return fmt.Errorf("cancel: stat roster %q: %w", rosterPath, err)
 	}
 	if info.IsDir() {
 		return fmt.Errorf("cancel roster %q is a directory", rosterPath)

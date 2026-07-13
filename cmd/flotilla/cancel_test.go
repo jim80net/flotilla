@@ -59,7 +59,7 @@ func TestCmdCancelFailsClosedWhenRosterDoesNotResolve(t *testing.T) {
 		t.Fatal(err)
 	}
 	missing := filepath.Join(dir, "missing.json")
-	if err := cmdCancel([]string{id, "--roster", missing}); err == nil || !strings.Contains(err.Error(), "cancel roster") {
+	if err := cmdCancel([]string{id, "--roster", missing}); err == nil || !strings.Contains(err.Error(), "cancel: stat roster") {
 		t.Fatalf("missing roster error = %v", err)
 	}
 	if got := outbox.ListAll(dir); len(got) != 1 || got[0].ID != id {

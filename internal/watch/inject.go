@@ -279,6 +279,11 @@ func (in *Injector) deliver(j Job) {
 			ID: j.MessageID, Sender: j.Sender, Recipient: j.Agent, Epoch: j.Epoch,
 		}, func() error { return send(j.Agent, j.Message) })
 		if !attempted {
+			if attemptErr != nil {
+				log.Printf("flotilla watch: outbox validation failed for send %s from %q to %q: %v", j.MessageID, j.Sender, j.Agent, attemptErr)
+				in.outboxDone(j) // release the sweep guard; the durable entry remains for retry
+				return
+			}
 			log.Printf("flotilla watch: dropped canceled or superseded send %s from %q to %q (epoch %d)", j.MessageID, j.Sender, j.Agent, j.Epoch)
 			in.outboxDone(j)
 			return
