@@ -41,6 +41,7 @@ type UnackedBackstop struct {
 	wake         CoordinatorWake
 	coordinator  func(*roster.Config) string
 	store        unackedStateStore
+	ackRoot      string
 	scanCfg      unacked.Config
 	lookback     int
 	pollInterval time.Duration
@@ -50,7 +51,7 @@ type UnackedBackstop struct {
 // NewUnackedBackstop builds the standing un-acked detector. coordinator resolves
 // the wake target (cos_agent, else primary XO). wake may be nil when no injection
 // is wired (alert-only mode).
-func NewUnackedBackstop(cfg *roster.Config, reader RecentHistoryReader, statePath string, alert func(string), wake CoordinatorWake, coordinator func(*roster.Config) string) *UnackedBackstop {
+func NewUnackedBackstop(cfg *roster.Config, reader RecentHistoryReader, statePath, ackRoot string, alert func(string), wake CoordinatorWake, coordinator func(*roster.Config) string) *UnackedBackstop {
 	if coordinator == nil {
 		coordinator = defaultCoordinator
 	}
@@ -61,6 +62,7 @@ func NewUnackedBackstop(cfg *roster.Config, reader RecentHistoryReader, statePat
 		wake:         wake,
 		coordinator:  coordinator,
 		store:        newUnackedStateStore(statePath, defaultUnackedRetention),
+		ackRoot:      ackRoot,
 		scanCfg:      unacked.DefaultConfig(cfg.OperatorUserID),
 		lookback:     unacked.DefaultLookback,
 		pollInterval: unacked.DefaultScanInterval,
@@ -96,6 +98,9 @@ func (u *UnackedBackstop) Run(ctx context.Context) {
 
 func (u *UnackedBackstop) sweep() {
 	now := u.now()
+	if err := PruneOperatorAckMarkers(u.ackRoot, now.Add(-defaultUnackedRetention)); err != nil {
+		log.Printf("flotilla watch: operator ack marker prune failed: %v", err)
+	}
 	st, pruned := u.store.load(now)
 	changed := pruned
 	for _, b := range u.cfg.Bindings() {
@@ -127,6 +132,7 @@ func (u *UnackedBackstop) sweepChannel(b roster.Channel, st *unackedState, now t
 	msgs := make([]unacked.Message, len(raw))
 	for i, m := range raw {
 		msgs[i] = unacked.FromTransport(m)
+		msgs[i].MechanicallyAcked = OperatorMessageAcknowledged(u.ackRoot, b.ChannelID, m.ID)
 	}
 	findings := unacked.Scan(msgs, b.ChannelID, now, u.scanCfg)
 	if len(findings) == 0 {
@@ -172,14 +178,14 @@ func (u *UnackedBackstop) tryCoordinatorWake(b roster.Channel, f unacked.Finding
 	if agent == "" {
 		return fmt.Errorf("no coordinator agent configured")
 	}
-	body := fmt.Sprintf("[flotilla unacked-backstop] Operator message on %s (%s) has no fleet acknowledgment (%s, age %s):\n  id=%s\n  %q\nReview channel history and act — the alert above is the persistent backstop.",
+	body := fmt.Sprintf("[flotilla unacked-backstop] Operator message on %s (%s) has no fleet acknowledgment (%s, age %s; checked channel replies and exact turn-final marker):\n  id=%s\n  %q\nReview channel history and act — the alert above is the persistent backstop.",
 		channelLabel(b), b.ChannelID, f.Reason, f.Age.Round(time.Minute), f.MessageID, f.Snippet)
 	return u.wake(agent, body)
 }
 
 func formatUnackedDigest(b roster.Channel, findings []unacked.Finding) string {
 	var bldr strings.Builder
-	fmt.Fprintf(&bldr, "%d un-acked operator message(s) on %s — no fleet reply in channel:\n", len(findings), channelLabel(b))
+	fmt.Fprintf(&bldr, "%d un-acked operator message(s) on %s — no channel reply or exact turn-final marker:\n", len(findings), channelLabel(b))
 	for _, f := range findings {
 		fmt.Fprintf(&bldr, "  • [%s] id=%s age=%s — %q\n", f.Reason, f.MessageID, f.Age.Round(time.Minute), f.Snippet)
 	}

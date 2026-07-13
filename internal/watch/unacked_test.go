@@ -71,7 +71,7 @@ func TestUnackedBackstop_AlertsOnce_RetriesWakeOnBusy(t *testing.T) {
 	}
 	var alerts int
 	var wakes int
-	u := NewUnackedBackstop(cfg, &fakeRecent{byChannel: map[string][]transport.Message{"C1": {msg}}}, "",
+	u := NewUnackedBackstop(cfg, &fakeRecent{byChannel: map[string][]transport.Message{"C1": {msg}}}, "", "",
 		func(string) { alerts++ },
 		func(agent, body string) error {
 			wakes++
@@ -103,7 +103,7 @@ func TestUnackedBackstop_AlertsOnce_RetriesWakeOnBusy(t *testing.T) {
 }
 
 func TestUnackedBackstop_NoOperatorIDInert(t *testing.T) {
-	u := NewUnackedBackstop(&roster.Config{}, &fakeRecent{}, "", func(string) {}, nil, nil)
+	u := NewUnackedBackstop(&roster.Config{}, &fakeRecent{}, "", "", func(string) {}, nil, nil)
 	if u.sweepChannel(roster.Channel{ChannelID: "C1"}, &unackedState{}, time.Now()) {
 		t.Fatal("no operator id should be inert")
 	}
@@ -124,7 +124,7 @@ func TestUnackedBackstop_PrunePersistsOnQuietSweep(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &roster.Config{OperatorUserID: "op", Channels: []roster.Channel{{ChannelID: "C1"}}}
-	u := NewUnackedBackstop(cfg, &fakeRecent{byChannel: map[string][]transport.Message{"C1": {}}}, path,
+	u := NewUnackedBackstop(cfg, &fakeRecent{byChannel: map[string][]transport.Message{"C1": {}}}, path, "",
 		func(string) { t.Fatal("quiet sweep must not alert") }, nil, nil)
 	u.now = func() time.Time { return now }
 	u.sweep()
@@ -228,6 +228,7 @@ func TestUnackedBackstop_BusyChannelStillAlertsEligibleMessage(t *testing.T) {
 		&roster.Config{OperatorUserID: "op", Channels: []roster.Channel{{ChannelID: "C1"}}},
 		&fakeRecent{byChannel: map[string][]transport.Message{"C1": msgs}},
 		"",
+		"",
 		func(string) { alerts++ },
 		nil,
 		nil,
@@ -239,5 +240,35 @@ func TestUnackedBackstop_BusyChannelStillAlertsEligibleMessage(t *testing.T) {
 	}
 	if alerts != 1 {
 		t.Fatalf("alerts = %d, want 1", alerts)
+	}
+}
+
+func TestUnackedBackstop_MechanicalTurnFinalAckSuppressesFalseWake(t *testing.T) {
+	now := time.Date(2026, 7, 13, 13, 0, 0, 0, time.UTC)
+	ackRoot := t.TempDir()
+	j := Job{Agent: "alpha-xo", Kind: KindRelay, MessageID: "1001", OriginChannel: "C1"}
+	if err := TrackOperatorRelayAck(ackRoot, j, now.Add(-44*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AcknowledgeOperatorTurnFinal(ackRoot, "alpha-xo", now.Add(-40*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	msg := transport.Message{
+		ID: "1001", AuthorID: "op", Content: "Can you verify and dispatch the fix?",
+		Timestamp: now.Add(-45 * time.Minute),
+	}
+	var alerts, wakes int
+	u := NewUnackedBackstop(
+		&roster.Config{OperatorUserID: "op", Channels: []roster.Channel{{ChannelID: "C1"}}},
+		&fakeRecent{byChannel: map[string][]transport.Message{"C1": {msg}}}, "", ackRoot,
+		func(string) { alerts++ }, func(string, string) error { wakes++; return nil }, nil,
+	)
+	u.now = func() time.Time { return now }
+	st := unackedState{}
+	if u.sweepChannel(roster.Channel{ChannelID: "C1"}, &st, now) {
+		t.Fatal("mechanically acknowledged operator message must not change alert state")
+	}
+	if alerts != 0 || wakes != 0 {
+		t.Fatalf("false wake after mechanical ack: alerts=%d wakes=%d", alerts, wakes)
 	}
 }

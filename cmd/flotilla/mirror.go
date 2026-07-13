@@ -44,6 +44,9 @@ type deskMirror struct {
 	// onDiscordSuccess is invoked after all Discord chunks post successfully with the
 	// reader-modeled body. Used by CoordinatorMirrorOnFinish to append the CoS ledger.
 	onDiscordSuccess func(agent, body string)
+	// onTurnFinal records mechanical acknowledgement after a substantive result is
+	// read for the exact delivered seat. It runs independently of Discord success.
+	onTurnFinal func(agent, body string)
 }
 
 // run performs the mirror for one finished desk. It is OBSERVE-ONLY and BEST-EFFORT: it never
@@ -91,6 +94,9 @@ func (m deskMirror) run(agent string) {
 	if !ok {
 		m.logf("flotilla watch: mirror SKIP %s: no substantive turn-final to mirror", agent)
 		return
+	}
+	if m.onTurnFinal != nil {
+		m.onTurnFinal(agent, text)
 	}
 
 	// The synchronous pre-post reader-modeling pipeline (runs BEFORE the post — a

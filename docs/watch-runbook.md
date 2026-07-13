@@ -181,6 +181,23 @@ escalates (XO liveness is the watchdog's job, see Down alerts). The trade is a s
 per-tick cost — up to ~1.75 s of confirm polling on a tick that has to retry — paid off the
 delivery worker, so it never stalls other desks.
 
+### Operator channel acknowledgement contract
+
+The unacked-message backstop accepts either an explicit fleet webhook reply in the
+origin channel or a mechanical turn-final marker. On confirmed operator-relay delivery,
+watch records the exact `(origin channel, message ID, delivered seat)` tuple. The next
+substantive turn-final from that seat consumes the pending tuple and writes a durable
+marker under `<roster-dir>/flotilla-operator-acks/`; the desk does not need to remember
+or echo an acknowledgement token. The backstop checks that exact channel/message marker
+before alerting, so an older acknowledgement cannot settle a newer operator message and
+another seat's turn-final cannot settle the delivery.
+
+Outbox sends are outside this contract. A `KindSend` job, including a canceled or
+superseded sender→recipient epoch, never creates an operator marker; only a confirmed
+operator relay with origin metadata can do so. An alert therefore means watch found
+neither a channel reply nor the exact mechanical marker. Increasing the age threshold is
+not part of the acknowledgement policy.
+
 ### At-least-once ingestion — gateway-gap recovery (#161)
 
 Confirmed delivery (above) guards the **delivery** layer — after a message reaches the

@@ -47,6 +47,29 @@ func TestScan_AcksFleetWebhookReply(t *testing.T) {
 	}
 }
 
+func TestScan_AcksExactMechanicalTurnFinalMarker(t *testing.T) {
+	now := ts(0)
+	msgs := []Message{{
+		ID: "1", AuthorID: "op", Content: "Ship the fix?",
+		Timestamp: now.Add(-45 * time.Minute), MechanicallyAcked: true,
+	}}
+	if got := Scan(msgs, "C1", now, cfg()); len(got) != 0 {
+		t.Fatalf("exact turn-final marker should ack; got %v", got)
+	}
+}
+
+func TestScan_DoesNotApplyOlderMechanicalMarkerToNewMessage(t *testing.T) {
+	now := ts(0)
+	msgs := []Message{
+		{ID: "1", AuthorID: "op", Content: "First request?", Timestamp: now.Add(-50 * time.Minute), MechanicallyAcked: true},
+		{ID: "2", AuthorID: "op", Content: "Second request?", Timestamp: now.Add(-45 * time.Minute)},
+	}
+	got := Scan(msgs, "C1", now, cfg())
+	if len(got) != 1 || got[0].MessageID != "2" {
+		t.Fatalf("marker must be scoped to its exact message; got %v", got)
+	}
+}
+
 func TestScan_WorkingOnlyAfterFollowUp(t *testing.T) {
 	now := ts(0)
 	msgs := []Message{

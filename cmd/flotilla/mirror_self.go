@@ -122,7 +122,8 @@ func cmdMirrorSelf(args []string) error {
 				mirrorNotifyToLedger(*rosterPath, agent, modeled)
 			}
 		},
-		logf: log.Printf,
+		onTurnFinal: operatorTurnFinalAck(rosterDir),
+		logf:        log.Printf,
 	}
 	m.run(*from)
 	return nil
