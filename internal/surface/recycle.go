@@ -1,10 +1,5 @@
 package surface
 
-import (
-	"crypto/sha256"
-	"fmt"
-)
-
 // RecycleBridge is an OPTIONAL Driver capability: the per-harness context-preservation
 // policy a `flotilla recycle` drives. A surface that implements it can be context-
 // preservingly recycled; a surface WITHOUT it makes recycle REFUSE cleanly (never a
@@ -39,20 +34,7 @@ type RecycleBridge interface {
 	// driven — surface any clarification via a flotilla message, never an in-pane interactive
 	// prompt (a remote XO cannot answer an in-pane menu over the relay). The PATH is harness-
 	// agnostic markdown; only the wording is per-harness. read → delete → work.
-	// Approval-gating surfaces may refine this contract with CoordinatorCleanupBridge:
-	// read → acknowledge, followed by coordinator delete → a separate work turn.
 	TakeoverTurn(designatedPath string) string
-}
-
-// CoordinatorCleanupBridge is an OPTIONAL refinement for approval-gating
-// surfaces. Its TakeoverTurn must load the handoff and then stop without
-// deleting it or beginning work. Once that turn returns to idle, recycle owns
-// exact-path deletion and submits BeginWorkTurn. Presence of this capability,
-// rather than a surface-name check, selects the coordinator-cleanup policy.
-type CoordinatorCleanupBridge interface {
-	RecycleBridge
-	TakeoverAck(designatedPath string) string
-	BeginWorkTurn() string
 }
 
 // RecycleSupport type-asserts the OPTIONAL RecycleBridge capability so the recycle command
@@ -95,38 +77,4 @@ func PortableMarkdownTakeoverTurn(designatedPath string) string {
 		"wait for confirmation. If you genuinely need a clarification, surface it via a flotilla MESSAGE " +
 		"(e.g. `flotilla notify --from <your-name> \"...\"`), NEVER an in-pane interactive prompt — a " +
 		"remote XO cannot answer an in-pane menu over the relay (keystrokes navigate it, they don't select)."
-}
-
-// CoordinatorCleanupTakeoverTurn loads a portable handoff without shell or
-// edit operations. The coordinator waits for this turn to settle before it
-// deletes the exact path, closing the read/delete race.
-func CoordinatorCleanupTakeoverTurn(designatedPath string) string {
-	ack := CoordinatorCleanupTakeoverAck(designatedPath)
-	return "You are a freshly-recycled flotilla desk with a clean context window, and you are " +
-		"REMOTE-DRIVEN (a remote XO drives you over the relay; no human is at this pane). " +
-		"Do exactly this, then stop:\n" +
-		"1. Use your native file-read tool (NOT bash, cat, or another shell command) to read this " +
-		"handoff in full and internalize the chapter: " + designatedPath + "\n" +
-		"2. Reply with EXACTLY this acknowledgement and then stop: " + ack + "\n" +
-		"Do NOT delete or modify the handoff, " +
-		"do NOT inspect anything else, and do NOT begin work yet. Flotilla will delete the handoff " +
-		"after this read turn is confirmed complete, then send the begin-work turn."
-}
-
-// CoordinatorCleanupTakeoverAck is path-derived and transaction-unique. The
-// prompt contains it once; the controller confirms a second occurrence in tmux
-// history after the read turn settles, proving it did not delete on an initial
-// idle frame before the accepted turn actually ran.
-func CoordinatorCleanupTakeoverAck(designatedPath string) string {
-	sum := sha256.Sum256([]byte(designatedPath))
-	return fmt.Sprintf("FLOTILLA_CHAPTER_LOADED_%x", sum[:8])
-}
-
-// CoordinatorCleanupBeginWorkTurn resumes work only after the controller has
-// confirmed the load turn completed and deleted the handoff itself.
-func CoordinatorCleanupBeginWorkTurn() string {
-	return "The recycle chapter is loaded and flotilla has removed its handoff file. BEGIN WORK " +
-		"IMMEDIATELY on the chapter's remaining work — do NOT ask whether to start or wait for " +
-		"confirmation. If you genuinely need clarification, surface it via a flotilla message, " +
-		"never an in-pane interactive question."
 }

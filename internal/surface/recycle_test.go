@@ -105,31 +105,6 @@ func TestRecycleSupport(t *testing.T) {
 	if _, ok := RecycleSupport(stubNoBridge{}); ok {
 		t.Error("a driver without the bridge must not type-assert as RecycleBridge")
 	}
-	if _, ok := any(newOpenCode()).(CoordinatorCleanupBridge); !ok {
-		t.Error("opencode should select coordinator cleanup (#666)")
-	}
-	if _, ok := any(newCodex()).(CoordinatorCleanupBridge); ok {
-		t.Error("codex retains the portable desk-side cleanup policy")
-	}
-}
-
-func TestCoordinatorCleanupTurnsSeparateReadFromWork(t *testing.T) {
-	path := "/repo/.flotilla/handoffs/recycle-tok.md"
-	load := CoordinatorCleanupTakeoverTurn(path)
-	for _, must := range []string{path, "native file-read tool", "then stop", "Do NOT delete", "do NOT begin work yet"} {
-		if !strings.Contains(load, must) {
-			t.Fatalf("load turn missing %q:\n%s", must, load)
-		}
-	}
-	for _, forbid := range []string{"rm -f", "BEGIN WORK IMMEDIATELY"} {
-		if strings.Contains(load, forbid) {
-			t.Fatalf("load turn contains %q:\n%s", forbid, load)
-		}
-	}
-	begin := CoordinatorCleanupBeginWorkTurn()
-	if !strings.Contains(begin, "BEGIN WORK IMMEDIATELY") || strings.Contains(begin, path) {
-		t.Fatalf("begin-work turn = %q", begin)
-	}
 }
 
 // TestHandoffPathIsGitignored: recycle handoff paths must be gitignored so a routine
