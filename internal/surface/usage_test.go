@@ -8,6 +8,8 @@ import (
 // grokUsageFixture is normalized from a LIVE CAPTURE of `/usage show` on the
 // official Grok CLI 0.2.93 (f00f96316d), 2026-07-13. The numeric value is
 // deliberately synthetic; the marker spelling and row shape are verbatim.
+// The marker and percent-used field were SOURCE-REVERIFIED in the official
+// 0.2.99 binary (b1b49ccb71); this is not a claim of a live 0.2.99 capture.
 const grokUsageFixture = "     Weekly limit: 92%"
 
 func TestUsageSupportIsOptional(t *testing.T) {
@@ -54,14 +56,14 @@ func TestParseGrokWeeklyUsageRejectsNonEvidence(t *testing.T) {
 	}{
 		{
 			name: "out of range",
-			// SOURCE-VERIFIED marker shape from Grok 0.2.93, with a synthetic
-			// impossible value to prove validation rejects malformed chrome.
+			// SOURCE-VERIFIED marker shape from Grok 0.2.93 and 0.2.99, with a
+			// synthetic impossible value to prove validation rejects malformed chrome.
 			captured: "Weekly limit: 101%",
 		},
 		{
 			name: "prose is not chrome",
-			// SOURCE-VERIFIED marker words embedded in synthetic prose; the
-			// line anchor must reject this scrollback/output lookalike.
+			// SOURCE-VERIFIED 0.2.93--0.2.99 marker words embedded in synthetic
+			// prose; the line anchor must reject this scrollback/output lookalike.
 			captured: "alpha notes that Weekly limit: 92% is shown elsewhere",
 		},
 		{
@@ -73,7 +75,8 @@ func TestParseGrokWeeklyUsageRejectsNonEvidence(t *testing.T) {
 		{
 			name: "old proposed wording is not current chrome",
 			// This synthetic pre-capture proposal is intentionally unsupported;
-			// the live 0.2.93 row is `Weekly limit: N%`.
+			// the live 0.2.93 and source-verified-through-0.2.99 row is
+			// `Weekly limit: N%`.
 			captured: "Weekly limit left: 8%",
 		},
 	}

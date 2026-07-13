@@ -29,10 +29,10 @@ func recipeInvolvesCodex(rosterSurface string, recipe launch.Recipe) bool {
 	return false
 }
 
-// seedCodexTrust pre-seeds codex directory trust for the desk cwd (worktree-
-// aware: the cwd key is what codex's trust lookup checks first — see
-// internal/codextrust) so a codex desk launched there does not wedge on the
-// interactive first-run trust menu, which a remote coordinator cannot answer.
+// seedCodexTrust pre-seeds codex launch configuration: it disables the
+// interactive startup update prompt for this centrally managed fleet, then
+// seeds directory trust for the desk cwd (worktree-aware: the cwd key is what
+// codex's trust lookup checks first — see internal/codextrust).
 //
 // BOTH path forms are seeded when they differ: the given (logical) cwd and its
 // symlink-resolved realpath. The launched codex derives its lookup key from
@@ -52,6 +52,12 @@ func seedCodexTrust(cwd string) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "flotilla: warning — codex trust pre-seed skipped: %v\n", err)
 		return
+	}
+	updatesSuppressed, err := codextrust.SuppressStartupUpdateCheck(configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "flotilla: warning — codex startup update suppression failed: %v (a release may leave the desk awaiting input at the update menu)\n", err)
+	} else if updatesSuppressed {
+		fmt.Fprintf(os.Stderr, "flotilla: disabled codex startup update prompts in %s (version upgrades remain fleet-ops-owned)\n", configPath)
 	}
 	forms := []string{cwd}
 	if real, rerr := filepath.EvalSymlinks(cwd); rerr == nil && real != cwd {
