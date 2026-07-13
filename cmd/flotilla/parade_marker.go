@@ -53,29 +53,11 @@ func markParadePending(rosterDir, agent, token string, now time.Time) error {
 	if err := os.MkdirAll(rosterDir, 0o755); err != nil {
 		return err
 	}
-	cleanupExpiredParadePending(rosterDir, agent, now)
 	raw, err := json.Marshal(paradePending{Token: token, CreatedAt: now.UTC()})
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(path, raw, 0o600)
-}
-
-func cleanupExpiredParadePending(rosterDir, agent string, now time.Time) {
-	if err := sessionmirror.ValidateAgentName(agent); err != nil {
-		return
-	}
-	paths, err := filepath.Glob(filepath.Join(rosterDir, "flotilla-"+agent+"-parade-pending-*.json"))
-	if err != nil {
-		return
-	}
-	for _, path := range paths {
-		raw, err := os.ReadFile(path)
-		var pending paradePending
-		if err != nil || json.Unmarshal(raw, &pending) != nil || pending.Token == "" || pending.CreatedAt.IsZero() || now.Sub(pending.CreatedAt) > paradeMarkerTTL || now.Before(pending.CreatedAt.Add(-time.Minute)) {
-			_ = os.Remove(path)
-		}
-	}
 }
 
 // claimParadePending authorizes only the turn carrying this request's random token.
