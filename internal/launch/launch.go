@@ -70,11 +70,14 @@ type HarnessSlot struct {
 	// holding to the same shape rules as the flat Recipe.Launch (non-empty, no
 	// \t/\n/\r — validated at load by ValidateRecipe).
 	Launch string `json:"launch"`
-	// Provider is the logical provider identity (e.g. "anthropic", "xai", "zai") —
-	// LOAD-BEARING for failover target selection: a server-side throttle poisons a
-	// whole provider, so failover must cross to a slot with a DIFFERENT provider.
-	// It is DISTINCT from SubscriptionID (two subscriptions of one provider share
-	// a provider).
+	// Provider is the throttle/billing domain — the identity whose server-side
+	// limit would affect this slot. It is not necessarily the model vendor: when a
+	// gateway manages the subscription and quota, use the gateway (for example,
+	// "opencode") even if it serves another vendor's model. This is LOAD-BEARING
+	// for failover target selection: a server-side throttle poisons the whole
+	// provider, so failover must cross to a slot with a DIFFERENT provider. It is
+	// DISTINCT from SubscriptionID (two subscriptions of one provider share a
+	// provider).
 	Provider string `json:"provider,omitempty"`
 	// Model (optional) pins a model for this slot.
 	Model string `json:"model,omitempty"`

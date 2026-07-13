@@ -80,10 +80,10 @@ Today's `launch.Recipe` is a single shell command + cwd (`internal/launch/launch
     },
     {
       "surface": "opencode",
-      "provider": "zai",
+      "provider": "opencode",
       "launch": "opencode --model glm-5.2",
       "model": "glm-5.2",
-      "subscription_id": "opencode-zai"
+      "subscription_id": "opencode-main"
     }
     // Codex slot added when driver + launch command are live-verified
   ]
@@ -93,7 +93,7 @@ Today's `launch.Recipe` is a single shell command + cwd (`internal/launch/launch
 | Field | Required | Purpose |
 |---|---|---|
 | `surface` | per slot | Must match a registered driver name (`surface.Get` at command startup, same discipline as `cmd/flotilla/resume.go:96-103`) |
-| `provider` | per slot | **Load-bearing for failover.** Logical provider identity (`anthropic`, `xai`, `zai`, …). Distinct from `subscription_id` — two Claude subscriptions both use `provider: "anthropic"`. Auto-switch on a server-side throttle MUST pick the next slot with a **different** `provider`. |
+| `provider` | per slot | **Load-bearing for failover.** The throttle/billing domain, not necessarily the model vendor. Distinct from `subscription_id` — two Claude subscriptions both use `provider: "anthropic"`. A gateway-managed subscription uses the gateway as provider (for example, `provider: "opencode"` even when the selected model comes from another vendor), because the gateway owns the quota that can throttle the slot. Auto-switch on a server-side throttle MUST pick the next slot with a **different** `provider`. |
 | `launch` | per slot | Shell command for **this** harness (same trust model as today — host-local, secrets-level trust, `launch.go:24-25`) |
 | `model` | optional metadata | Operator-facing preference; embedded in `launch` string in practice |
 | `subscription_id` | optional metadata | Logical billing/account bucket within a provider (not a secret). Cooldown bookkeeping for **account-side** throttles only — see §2.1/§2.2. |
@@ -109,6 +109,13 @@ Today's `launch.Recipe` is a single shell command + cwd (`internal/launch/launch
 | Codex | TBD when driver ships |
 
 Validation (`launch.ValidateRecipe`) gains per-slot checks: non-empty `launch`, known `surface` at `flotilla switch` / `resume` time (load time may remain surface-agnostic to avoid import cycles — mirror roster's cmd-layer validation).
+
+The provider value answers one operational question: **which shared throttle or
+billing domain can make this slot unavailable?** It does not answer who trained
+the model. A directly billed model API normally uses that API provider; a
+gateway-billed slot uses the gateway because its quota is the failure domain.
+`provider` remains free-form metadata—this principle changes documentation, not
+validation.
 
 ### 1.2 Active slot pointer (runtime)
 
