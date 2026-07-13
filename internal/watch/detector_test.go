@@ -204,6 +204,28 @@ func TestDetectorUsageAbsenceNeverCreatesOrErasesEvidence(t *testing.T) {
 	}
 }
 
+func TestDetectorPrunesUsageForRemovedDesk(t *testing.T) {
+	f := newFixture()
+	f.set("alpha", surface.StateIdle)
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := (Snapshot{
+		DeskStates: map[string]surface.State{"alpha": surface.StateIdle},
+		Usage: map[string]UsageObservation{
+			"alpha":   {RemainingPercent: 8, Window: "weekly"},
+			"removed": {RemainingPercent: 5, Window: "weekly"},
+		},
+	}).Save(path); err != nil {
+		t.Fatal(err)
+	}
+	d := NewDetector(f.config("alpha", []string{"alpha"}, 3, "normal"), path)
+	if _, ok := d.snap.Usage["removed"]; ok {
+		t.Fatalf("removed desk usage survived prune: %+v", d.snap.Usage)
+	}
+	if _, ok := d.snap.Usage["alpha"]; !ok {
+		t.Fatalf("monitored desk usage was pruned: %+v", d.snap.Usage)
+	}
+}
+
 func TestDetectorColdStartWakesOnceThenQuiet(t *testing.T) {
 	f := newFixture()
 	cfg := f.config("xo", []string{"xo", "backend"}, 3, "none")

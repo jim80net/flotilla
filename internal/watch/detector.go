@@ -509,6 +509,17 @@ func NewDetector(cfg DetectorConfig, snapPath string) *Detector {
 	pingPeriod, alertWindow := livenessParamsWall(cfg.LivenessPingMode, cfg.MaxMissedAcks, cfg.ReferenceInterval, cfg.MaxQuietIntervals)
 
 	snap, ok := LoadSnapshot(snapPath)
+	if len(snap.Usage) > 0 && len(cfg.Desks) > 0 {
+		monitored := make(map[string]bool, len(cfg.Desks))
+		for _, name := range cfg.Desks {
+			monitored[name] = true
+		}
+		for name := range snap.Usage {
+			if !monitored[name] {
+				delete(snap.Usage, name)
+			}
+		}
+	}
 	synthState, _ := cfg.SynthLoad() // a missing/corrupt sidecar (ok=false) fails safe to empty ⇒ all-changed
 	if synthState.LastSeen == nil {
 		synthState.LastSeen = map[string]map[string]string{}
