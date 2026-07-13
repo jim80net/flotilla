@@ -104,6 +104,15 @@ func AcknowledgeOperatorTurnFinal(root, agent string, at time.Time) (int, error)
 		if rec.Agent != agent {
 			return 0, fmt.Errorf("pending operator ack %q belongs to %q, want %q", path, rec.Agent, agent)
 		}
+		// Crash recovery: marker commit precedes pending removal. If the process
+		// stopped between those operations, finish the old consume before choosing
+		// the pending relay associated with this new turn.
+		if OperatorMessageAcknowledged(root, rec.ChannelID, rec.MessageID) {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return 0, fmt.Errorf("recover consumed operator ack %q: %w", path, err)
+			}
+			continue
+		}
 		pending = append(pending, pendingRecord{path: path, rec: rec})
 	}
 	if len(pending) == 0 {

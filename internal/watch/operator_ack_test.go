@@ -106,6 +106,35 @@ func TestOperatorAck_CorruptMarkerDoesNotSuppressBackstop(t *testing.T) {
 	}
 }
 
+func TestOperatorAck_RecoversMarkerCommittedBeforePendingRemoval(t *testing.T) {
+	root := t.TempDir()
+	base := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
+	old := Job{Agent: "alpha-xo", Kind: KindRelay, MessageID: "old", OriginChannel: "C_ALPHA"}
+	next := Job{Agent: "alpha-xo", Kind: KindRelay, MessageID: "next", OriginChannel: "C_ALPHA"}
+	if err := TrackOperatorRelayAck(root, old, base); err != nil {
+		t.Fatal(err)
+	}
+	oldRec := operatorAckRecord{
+		Agent: "alpha-xo", ChannelID: "C_ALPHA", MessageID: "old",
+		DeliveredAt: base, AcknowledgedAt: base.Add(time.Minute),
+	}
+	// Simulate a crash after durable marker commit and before pending removal.
+	if err := writeOperatorAckRecord(operatorAckMarkerPath(root, "C_ALPHA", "old"), oldRec); err != nil {
+		t.Fatal(err)
+	}
+	if err := TrackOperatorRelayAck(root, next, base.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := AcknowledgeOperatorTurnFinal(root, "alpha-xo", base.Add(3*time.Minute)); err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatalf("recovered finish acknowledged %d pending relays, want next relay only", n)
+	}
+	if !OperatorMessageAcknowledged(root, "C_ALPHA", "next") {
+		t.Fatal("already-marked stale pending record blocked the next turn's acknowledgement")
+	}
+}
+
 func TestOperatorAck_PrunesExpiredMarkers(t *testing.T) {
 	root := t.TempDir()
 	now := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)

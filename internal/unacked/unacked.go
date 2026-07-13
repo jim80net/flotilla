@@ -22,7 +22,7 @@ const (
 	DefaultLookback        = 50
 )
 
-// Message is the scan input (transport.Message field-for-field at the seam).
+// Message is the scan input: transport.Message plus the local exact-ID marker.
 type Message struct {
 	ID                string
 	SnowID            uint64
