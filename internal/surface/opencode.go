@@ -181,9 +181,14 @@ func (openCode) HandoffTurn(designatedPath string) string {
 }
 
 func (openCode) TakeoverTurn(designatedPath string) string {
-	return PortableMarkdownTakeoverTurn(designatedPath) + "\n\nOpenCode-specific constraint: delete the handoff with exactly the standalone " +
-		"quoted `rm -f \"<exact path>\"` command shown above. Do NOT append `&&`, a pipe, verification, or any other shell operation to it."
+	return CoordinatorCleanupTakeoverTurn(designatedPath)
 }
+
+func (openCode) TakeoverAck(designatedPath string) string {
+	return CoordinatorCleanupTakeoverAck(designatedPath)
+}
+
+func (openCode) BeginWorkTurn() string { return CoordinatorCleanupBeginWorkTurn() }
 
 // --- pure state classifier (the testable core) ---
 

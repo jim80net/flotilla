@@ -47,30 +47,32 @@ func defaultTimeouts() recycleTimeouts {
 // recycleOps are the tmux + surface operations runRecycle performs, injected so the
 // fail-closed decision core is unit-testable without a live tmux server or a real agent.
 type recycleOps struct {
-	resolve      func(want string) (string, deliver.ResolveOutcome, error)
-	paneID       func(target string) (string, error)                // deliver.PaneID (canonical self-recycle compare)
-	inMode       func(target string) (bool, error)                  // deliver.PaneInMode (copy-mode refuse)
-	assess       func(target string) surface.State                  // driver.Assess
-	composer     func(target string) surface.ComposerDisposition    // driver.ComposerState (required)
-	absent       func(cwd, path string) (bool, error)               // deliver.HandoffAbsentAtHead (t0 baseline: absent on disk)
-	durable      func(cwd, path string, minBytes int) (bool, error) // deliver.HandoffDurable
-	deliver      func(target, text string) error                    // confirmed delivery bound to the driver
-	closeFn      func(target string) error                          // driver.Close
-	remainOnExit func(target string, on bool) error                 // deliver.SetRemainOnExit (keep the pane on /exit)
-	paneDead     func(target string) (bool, error)                  // deliver.PaneDead (close-confirm: claude-direct)
-	selfHeal     func(target string)                                // optional (nil unless FLOTILLA_SELF_HEAL)
-	respawn      func(target, cwd, launch string) error             // deliver.RespawnPane (-k)
-	readMarker   func(target string) (string, error)                // deliver.ReadMarker
-	stampGen     func(target, token string) error                   // deliver.StampRecycleGen
-	readGen      func(target string) (string, error)                // deliver.ReadRecycleGen
-	lock         func(target string) (release func(), err error)    // AcquirePaneTxn → Release
-	sleep        func(time.Duration)
+	resolve       func(want string) (string, deliver.ResolveOutcome, error)
+	paneID        func(target string) (string, error)                // deliver.PaneID (canonical self-recycle compare)
+	inMode        func(target string) (bool, error)                  // deliver.PaneInMode (copy-mode refuse)
+	assess        func(target string) surface.State                  // driver.Assess
+	composer      func(target string) surface.ComposerDisposition    // driver.ComposerState (required)
+	absent        func(cwd, path string) (bool, error)               // deliver.HandoffAbsentAtHead (t0 baseline: absent on disk)
+	durable       func(cwd, path string, minBytes int) (bool, error) // deliver.HandoffDurable
+	removeHandoff func(cwd, path string) error                       // deliver.RemoveHandoff (exact path)
+	deliver       func(target, text string) error                    // confirmed delivery bound to the driver
+	closeFn       func(target string) error                          // driver.Close
+	remainOnExit  func(target string, on bool) error                 // deliver.SetRemainOnExit (keep the pane on /exit)
+	paneDead      func(target string) (bool, error)                  // deliver.PaneDead (close-confirm: claude-direct)
+	selfHeal      func(target string)                                // optional (nil unless FLOTILLA_SELF_HEAL)
+	respawn       func(target, cwd, launch string) error             // deliver.RespawnPane (-k)
+	readMarker    func(target string) (string, error)                // deliver.ReadMarker
+	stampGen      func(target, token string) error                   // deliver.StampRecycleGen
+	readGen       func(target string) (string, error)                // deliver.ReadRecycleGen
+	lock          func(target string) (release func(), err error)    // AcquirePaneTxn → Release
+	sleep         func(time.Duration)
 	// rotate is optional (#437 --self): surface.RotateContext after durable handoff.
 	rotate func(target string) error
 	// Worktree-exit prompt handling during Phase-2 close (Claude Code /exit on a worktree-homed desk).
 	cwd            string
 	removeWorktree bool
 	capturePane    func(target string) (string, error)
+	captureHistory func(target string) (string, error)
 	answerMenu     func(target, choice string) error // deliver.SendMenuChoice ("1" keep, "2" remove)
 	countDirty     func(cwd string) (int, error)     // deliver.CountUncommitted
 }
@@ -104,9 +106,19 @@ type recyclePlan struct {
 	ownPane                   string // $TMUX_PANE — the command's own pane (canonical self-recycle compare)
 	minHandoffBytes           int
 	timeouts                  recycleTimeouts
+	coordinatorCleanup        bool
+	takeoverAck               string
+	beginWorkText             string
 	// selfPath is true for `flotilla recycle --self` (#437): handoff + rotate + takeover
 	// without graceful-close/respawn (coordinator self-rotation; never bare /clear).
 	selfPath bool
+}
+
+func takeoverAckOrEmpty(ack func(string) string, designatedPath string) string {
+	if ack == nil {
+		return ""
+	}
+	return ack(designatedPath)
 }
 
 // samePaneAsSelf reports whether the resolved target IS the command's own pane, comparing
@@ -147,6 +159,12 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 	ownPaneSelf := samePaneAsSelf(tid, p.ownPane)
 	if ownPaneSelf && !p.selfPath {
 		return "", worktreeCloseNote{}, fmt.Errorf("refusing to recycle %q: %s is THIS command's own pane — closing it would kill the recycle before the relaunch; for model/surface cutover run from a different pane or the watch host: flotilla recycle %s (full respawn + launch recipe); for in-place chapter rotate only: flotilla recycle %s --self (no process kill, same model/surface)", p.agent, tid, p.agent, p.agent)
+	}
+	if p.selfPath && p.coordinatorCleanup {
+		return "", worktreeCloseNote{}, fmt.Errorf("refusing --self for %q: this surface requires a two-turn takeover with coordinator-side handoff deletion, which cannot settle while the target pane is running its own recycle command — run a full recycle from another pane or the watch host", p.agent)
+	}
+	if p.coordinatorCleanup && (p.takeoverAck == "" || p.beginWorkText == "") {
+		return "", worktreeCloseNote{}, fmt.Errorf("refusing to recycle %q: coordinator-cleanup bridge returned an empty takeover acknowledgement or begin-work turn", p.agent)
 	}
 
 	// Copy-mode refuse (composer state unreadable → every Idle∧ComposerCleared gate would
@@ -292,7 +310,46 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 		return "", wtNote, fmt.Errorf("phase 4: another recycle superseded %q (generation %q != %q) — abort this takeover", p.agent, gen, p.token)
 	}
 	if err := ops.deliver(target, p.takeoverText); err != nil {
+		if p.coordinatorCleanup && ops.assess(target) == surface.StateAwaitingApproval {
+			return "", wtNote, fmt.Errorf("phase 4: the read-only takeover for %q reached an approval modal — handoff left at %s; the desk is LIVE but the chapter load is unconfirmed", p.agent, p.designatedPath)
+		}
 		return "", wtNote, fmt.Errorf("phase 4: delivering the takeover turn to %q failed: %w (the desk is LIVE but un-taken-over; hand it the chapter with: flotilla send %s 'read %s and take over')", p.agent, err, p.agent, p.designatedPath)
+	}
+	if p.coordinatorCleanup {
+		// The load turn must finish before controller-side deletion; a Working edge
+		// only proves the prompt started and would race the native read.
+		if !pollCoordinatorLoad(ops, target, p.takeoverAck, p.timeouts.takeover) {
+			if ops.assess(target) == surface.StateAwaitingApproval {
+				return "", wtNote, fmt.Errorf("phase 4: the read-only takeover for %q is blocked on an approval modal — handoff left at %s; refusing to approve it", p.agent, p.designatedPath)
+			}
+			return "", wtNote, fmt.Errorf("phase 4: the read-only takeover for %q did not return its transaction acknowledgement at an idle cleared composer within %s — handoff left at %s; the desk is LIVE and chapter load is unconfirmed", p.agent, p.timeouts.takeover, p.designatedPath)
+		}
+		if ops.removeHandoff == nil {
+			return "", wtNote, fmt.Errorf("phase 4: coordinator cleanup is required for %q but no exact-path remover is configured — handoff left at %s", p.agent, p.designatedPath)
+		}
+		if err := ops.removeHandoff(p.cwd, p.designatedPath); err != nil {
+			return "", wtNote, fmt.Errorf("phase 4: chapter loaded for %q but coordinator cleanup failed: %w — remove %s manually before continuing", p.agent, err, p.designatedPath)
+		}
+		absent, err := ops.absent(p.cwd, p.designatedPath)
+		if err != nil || !absent {
+			return "", wtNote, fmt.Errorf("phase 4: chapter loaded for %q but handoff deletion did not verify absent (%v) — inspect %s before continuing", p.agent, err, p.designatedPath)
+		}
+		if err := ops.deliver(target, p.beginWorkText); err != nil {
+			// An approval prompt now belongs to real post-takeover work. The chapter
+			// is loaded and its handoff is gone, so do not misclassify this as a
+			// handoff abort or ask the operator to repeat recycle.
+			if ops.assess(target) == surface.StateAwaitingApproval {
+				log.Printf("flotilla: recycle: %q loaded its chapter and cleanup completed; begin-work reached an ordinary approval prompt", p.agent)
+			} else {
+				return "", wtNote, fmt.Errorf("phase 4: chapter loaded and handoff cleaned for %q, but begin-work delivery was unconfirmed: %w", p.agent, err)
+			}
+		}
+		msg := fmt.Sprintf("recycled %s → pane %s (handoff %s", p.agent, target, p.designatedPath)
+		if s := wtNote.prose(); s != "" {
+			msg += "; " + s
+		}
+		msg += "; closed gracefully, relaunched fresh, loaded chapter, coordinator cleaned handoff, began work)\n"
+		return msg, wtNote, nil
 	}
 	// Best-effort resumption-confidence signal — success = the desk RESUMED, not just that the
 	// turn was typed. Its absence does NOT fail the recycle (the takeover was delivered-confirmed).
@@ -344,6 +401,25 @@ func pollIdleCleared(ops recycleOps, target string, timeout time.Duration) bool 
 	n := pollAttempts(timeout)
 	for i := 0; i <= n; i++ {
 		if idleCleared(ops, target) {
+			return true
+		}
+		if i < n {
+			ops.sleep(recyclePollInterval)
+		}
+	}
+	return false
+}
+
+func pollCoordinatorLoad(ops recycleOps, target, ack string, timeout time.Duration) bool {
+	if ops.captureHistory == nil || ack == "" {
+		return false
+	}
+	n := pollAttempts(timeout)
+	for i := 0; i <= n; i++ {
+		history, err := ops.captureHistory(target)
+		// The prompt contains ack once. A second retained occurrence is the
+		// assistant's exact response after the native read completed.
+		if err == nil && strings.Count(history, ack) >= 2 && idleCleared(ops, target) {
 			return true
 		}
 		if i < n {
@@ -553,6 +629,13 @@ func cmdRecycle(args []string) error {
 	if !ok {
 		return fmt.Errorf("surface %q is not recycle-capable (no composer-state probe: the idle∧cleared gates need it) — cannot safely recycle %q", drv.Name(), agentName)
 	}
+	cleanupBridge, coordinatorCleanup := bridge.(surface.CoordinatorCleanupBridge)
+	beginWorkText := ""
+	var takeoverAck func(string) string
+	if coordinatorCleanup {
+		beginWorkText = cleanupBridge.BeginWorkTurn()
+		takeoverAck = cleanupBridge.TakeoverAck
+	}
 
 	if removeWorktree {
 		n, err := deliver.CountUncommitted(recipe.Cwd)
@@ -574,6 +657,8 @@ func cmdRecycle(args []string) error {
 			handoffText: bridge.HandoffTurn(designated), takeoverText: bridge.TakeoverTurn(designated),
 			ownPane: os.Getenv("TMUX_PANE"), minHandoffBytes: defaultMinHandoff,
 			timeouts: defaultTimeouts(), selfPath: selfPath,
+			coordinatorCleanup: coordinatorCleanup, beginWorkText: beginWorkText,
+			takeoverAck: takeoverAckOrEmpty(takeoverAck, designated),
 		}
 		printRecyclePlan(plan, recipe)
 		if selfPath {
@@ -592,10 +677,10 @@ func cmdRecycle(args []string) error {
 	if recipeInvolvesCodex(rosterSurf, recipe) {
 		seedCodexTrust(recipe.Cwd)
 	}
-	// OpenCode's standard policy asks before edit/bash. The portable bridge must be
-	// self-contained on a managed desk, so provision ONLY its handoff write and exact
-	// cleanup before phase 1. Fail closed here (unlike best-effort resume): continuing
-	// would strand the automated handoff on an approval modal.
+	// OpenCode's standard policy asks before edit. Provision ONLY the handoff
+	// write before phase 1; coordinator-cleanup means the desk needs no bash
+	// permission. Fail closed here (unlike best-effort resume): continuing would
+	// strand the automated handoff on an approval modal.
 	if liveSurf == "opencode" {
 		// Launch validation guarantees an absolute cwd; EvalSymlinks above also
 		// canonicalizes it when the worktree path exists.
@@ -609,21 +694,22 @@ func cmdRecycle(args []string) error {
 		confirm.SendCtrlC = deliver.SendCtrlC
 	}
 	ops := recycleOps{
-		resolve:      deliver.Resolve,
-		paneID:       deliver.PaneID,
-		inMode:       deliver.PaneInMode,
-		assess:       drv.Assess,
-		composer:     probe.ComposerState,
-		absent:       deliver.HandoffAbsentAtHead,
-		durable:      deliver.HandoffDurable,
-		deliver:      func(target, text string) error { return confirm.Submit(drv, target, text) },
-		closeFn:      drv.Close,
-		remainOnExit: deliver.SetRemainOnExit,
-		paneDead:     deliver.PaneDead,
-		respawn:      deliver.RespawnPane,
-		readMarker:   deliver.ReadMarker,
-		stampGen:     deliver.StampRecycleGen,
-		readGen:      deliver.ReadRecycleGen,
+		resolve:       deliver.Resolve,
+		paneID:        deliver.PaneID,
+		inMode:        deliver.PaneInMode,
+		assess:        drv.Assess,
+		composer:      probe.ComposerState,
+		absent:        deliver.HandoffAbsentAtHead,
+		durable:       deliver.HandoffDurable,
+		removeHandoff: deliver.RemoveHandoff,
+		deliver:       func(target, text string) error { return confirm.Submit(drv, target, text) },
+		closeFn:       drv.Close,
+		remainOnExit:  deliver.SetRemainOnExit,
+		paneDead:      deliver.PaneDead,
+		respawn:       deliver.RespawnPane,
+		readMarker:    deliver.ReadMarker,
+		stampGen:      deliver.StampRecycleGen,
+		readGen:       deliver.ReadRecycleGen,
 		lock: func(target string) (func(), error) {
 			txn, err := deliver.AcquirePaneTxn(target, deliver.PaneTxnTimeout)
 			if err != nil {
@@ -635,6 +721,7 @@ func cmdRecycle(args []string) error {
 		cwd:            recipe.Cwd,
 		removeWorktree: removeWorktree,
 		capturePane:    deliver.CapturePane,
+		captureHistory: deliver.CapturePaneHistory,
 		answerMenu:     deliver.SendMenuChoice,
 		countDirty:     deliver.CountUncommitted,
 		rotate:         func(target string) error { return surface.RotateContext(drv, target) },
@@ -663,10 +750,13 @@ func cmdRecycle(args []string) error {
 			agent: agentName, key: agent.Title(), cwd: recipe.Cwd, launch: recipe.Launch,
 			token: token, designatedPath: designated,
 			handoffText: bridge.HandoffTurn(designated), takeoverText: bridge.TakeoverTurn(designated),
-			ownPane:         os.Getenv("TMUX_PANE"),
-			minHandoffBytes: defaultMinHandoff,
-			timeouts:        defaultTimeouts(),
-			selfPath:        selfPath,
+			ownPane:            os.Getenv("TMUX_PANE"),
+			minHandoffBytes:    defaultMinHandoff,
+			timeouts:           defaultTimeouts(),
+			selfPath:           selfPath,
+			coordinatorCleanup: coordinatorCleanup,
+			takeoverAck:        takeoverAckOrEmpty(takeoverAck, designated),
+			beginWorkText:      beginWorkText,
 		}
 		msg, wtNote, runErr = runRecycle(ops, plan)
 		if runErr == nil {
@@ -699,6 +789,10 @@ func printRecyclePlan(p recyclePlan, r launch.Recipe) {
 	fmt.Printf("  timeouts:   handoff=%s close=%s boot=%s takeover=%s (internal)\n", p.timeouts.handoff, p.timeouts.close_, p.timeouts.boot, p.timeouts.takeover)
 	fmt.Printf("  --- handoff turn ---\n%s\n", p.handoffText)
 	fmt.Printf("  --- takeover turn ---\n%s\n", p.takeoverText)
+	if p.coordinatorCleanup {
+		fmt.Printf("  cleanup:    coordinator removes the exact handoff after the takeover read settles\n")
+		fmt.Printf("  --- begin-work turn ---\n%s\n", p.beginWorkText)
+	}
 }
 
 // writeLastRecycle records the outcome to ~/.flotilla/<agent>/last-recycle.json ATOMICALLY

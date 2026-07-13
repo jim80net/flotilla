@@ -29,10 +29,8 @@ func TestSeedNarrowRecyclePermissions(t *testing.T) {
 	if edit["*"] != "ask" || edit[handoffEditPattern] != "allow" {
 		t.Fatalf("edit rules = %#v", edit)
 	}
-	bash := permission["bash"].(map[string]any)
-	cleanup := `rm -f "` + filepath.ToSlash(filepath.Join(cwd, ".flotilla", "handoffs", "recycle-*.md")) + `"`
-	if bash["*"] != "deny" || bash[cleanup] != "allow" {
-		t.Fatalf("bash rules = %#v", bash)
+	if permission["bash"] != "deny" {
+		t.Fatalf("bash policy changed = %#v", permission["bash"])
 	}
 	if plugin := doc["plugin"].([]any); len(plugin) != 1 || plugin[0] != "alpha" {
 		t.Fatalf("unrelated config changed: %#v", doc)
@@ -53,21 +51,9 @@ func TestSeedRefusesInvalidConfig(t *testing.T) {
 	}
 }
 
-func TestSeedRefusesShellActiveCwd(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "opencode.json")
-	for _, cwd := range []string{`/tmp/alpha"beta`, "/tmp/alpha`beta", "/tmp/alpha$beta", `/tmp/alpha\beta`, "/tmp/alpha\rbeta", "/tmp/alpha\nbeta"} {
-		if _, err := Seed(path, cwd); err == nil {
-			t.Fatalf("Seed must reject shell-active cwd %q", cwd)
-		}
-	}
-	if _, err := Seed(path, "/tmp/alpha beta"); err != nil {
-		t.Fatalf("spaces remain supported: %v", err)
-	}
-}
-
 func TestSeedJSONCPreservesCommentsAndMode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "opencode.jsonc")
-	raw := []byte("{\n  // project policy stays documented\n  \"plugin\": [\"alpha\"],\n  \"permission\": {\n    \"edit\": {\n      // preserve edit-map documentation\n      \"*\": \"ask\",\n      \"z*\": \"ask\",\n    },\n    \"bash\": {\n      // preserve bash-map documentation\n      \"*\": \"deny\",\n      \"z*\": \"ask\",\n    },\n  },\n}\n")
+	raw := []byte("{\n  // project policy stays documented\n  \"plugin\": [\"alpha\"],\n  \"permission\": {\n    \"edit\": {\n      // preserve edit-map documentation\n      \"*\": \"ask\",\n      \"z*\": \"ask\",\n    },\n    \"bash\": {\n      // preserve bash-map documentation\n      \"*\": \"deny\",\n      \"z*\": \"ask\",\n      \"rm -f /tmp/alpha/.flotilla/handoffs/recycle-*.md\": \"allow\",\n      \"rm -f \\\"/tmp/alpha/.flotilla/handoffs/recycle-*.md\\\"\": \"allow\",\n    },\n  },\n}\n")
 	if err := os.WriteFile(path, raw, 0o640); err != nil {
 		t.Fatal(err)
 	}
@@ -79,10 +65,13 @@ func TestSeedJSONCPreservesCommentsAndMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range [][]byte{[]byte("// project policy stays documented"), []byte("// preserve edit-map documentation"), []byte("// preserve bash-map documentation"), []byte(handoffEditPattern), []byte(`rm -f \"/tmp/alpha/.flotilla/handoffs/recycle-*.md\"`)} {
+	for _, want := range [][]byte{[]byte("// project policy stays documented"), []byte("// preserve edit-map documentation"), []byte("// preserve bash-map documentation"), []byte(handoffEditPattern)} {
 		if !bytes.Contains(got, want) {
 			t.Fatalf("JSONC output lost %q:\n%s", want, got)
 		}
+	}
+	if bytes.Contains(got, []byte("rm -f")) {
+		t.Fatalf("JSONC retained obsolete desk-side cleanup permission:\n%s", got)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -137,7 +126,7 @@ func TestSeedEffectiveIncludesOverridingProjectLayers(t *testing.T) {
 func TestSeedWritesManagedRuleLast(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "opencode.json")
 	cwd := "/tmp/alpha"
-	// z* sorts after the managed patterns and also matches both requests. If Go's
+	// z* sorts after the managed edit pattern and also matches it. If Go's
 	// normal map ordering leaks through, OpenCode's last-match evaluator asks.
 	input := `{"permission":{"edit":{"z*":"ask"},"bash":{"z*":"ask"}}}`
 	if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
@@ -150,16 +139,31 @@ func TestSeedWritesManagedRuleLast(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	editManaged := []byte(`".flotilla/handoffs/recycle-*.md"`)
-	bashManaged := []byte(`"rm -f \"/tmp/alpha/.flotilla/handoffs/recycle-*.md\""`)
-	for _, managed := range [][]byte{editManaged, bashManaged} {
-		managedAt := bytes.Index(raw, managed)
-		if managedAt < 0 {
-			t.Fatalf("managed rule %s missing from %s", managed, raw)
-		}
-		zAt := bytes.LastIndex(raw[:managedAt], []byte(`"z*"`))
-		if zAt < 0 {
-			t.Fatalf("managed rule was not emitted after existing z* rule: %s", raw)
-		}
+	managedAt := bytes.Index(raw, []byte(`".flotilla/handoffs/recycle-*.md"`))
+	if managedAt < 0 {
+		t.Fatalf("managed edit rule missing from %s", raw)
+	}
+	if zAt := bytes.LastIndex(raw[:managedAt], []byte(`"z*"`)); zAt < 0 {
+		t.Fatalf("managed rule was not emitted after existing z* rule: %s", raw)
+	}
+}
+
+func TestSeedRetractsDeskSideCleanupRules(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.json")
+	cwd := "/tmp/alpha"
+	glob := "/tmp/alpha/.flotilla/handoffs/recycle-*.md"
+	input := `{"permission":{"edit":"ask","bash":{"*":"ask","rm -f /tmp/alpha/.flotilla/handoffs/recycle-*.md":"allow","rm -f \"/tmp/alpha/.flotilla/handoffs/recycle-*.md\"":"allow"}}}`
+	if err := os.WriteFile(path, []byte(input), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Seed(path, cwd); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte("rm -f "+glob)) || bytes.Contains(raw, []byte(`rm -f \"`+glob)) {
+		t.Fatalf("desk-side cleanup permission survived coordinator-cleanup migration: %s", raw)
 	}
 }

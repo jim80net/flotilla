@@ -15,6 +15,7 @@ func TestOpenCodeRegistered(t *testing.T) {
 
 func TestOpenCodeRecycleCapabilities(t *testing.T) {
 	var _ RecycleBridge = openCode{}
+	var _ CoordinatorCleanupBridge = openCode{}
 	var _ ComposerStateProbe = openCode{}
 
 	o := newOpenCode()
@@ -33,13 +34,20 @@ func TestOpenCodeRecycleCapabilities(t *testing.T) {
 		}
 	}
 	takeover := o.TakeoverTurn(path)
-	if !strings.HasPrefix(takeover, PortableMarkdownTakeoverTurn(path)) {
-		t.Fatal("TakeoverTurn must use the shared portable-markdown takeover")
+	if takeover != CoordinatorCleanupTakeoverTurn(path) {
+		t.Fatal("TakeoverTurn must use the coordinator-cleanup load turn")
 	}
-	for _, must := range []string{"exactly the standalone", "Do NOT append `&&`", path} {
+	for _, must := range []string{"native file-read tool", "Do NOT delete", "do NOT begin work yet", path} {
 		if !strings.Contains(takeover, must) {
-			t.Fatalf("TakeoverTurn missing OpenCode exact-cleanup constraint %q", must)
+			t.Fatalf("TakeoverTurn missing OpenCode read-only constraint %q", must)
 		}
+	}
+	ack := o.TakeoverAck(path)
+	if !strings.HasPrefix(ack, "FLOTILLA_CHAPTER_LOADED_") || strings.Count(takeover, ack) != 1 {
+		t.Fatalf("takeover acknowledgement %q must appear exactly once in prompt", ack)
+	}
+	if got := o.BeginWorkTurn(); got != CoordinatorCleanupBeginWorkTurn() || !strings.Contains(got, "BEGIN WORK") {
+		t.Fatalf("BeginWorkTurn = %q", got)
 	}
 }
 
