@@ -84,6 +84,8 @@ func run(args []string) error {
 		return cmdGoals(args[1:])
 	case "accounts":
 		return cmdAccounts(args[1:])
+	case "launch":
+		return cmdLaunch(args[1:])
 	case "mirror-self":
 		return cmdMirrorSelf(args[1:])
 	case "version", "-v", "--version":
@@ -126,6 +128,8 @@ usage:
                                                       attach a work item to fleet-goals.yaml (preserves yaml comments) and recompile json
   flotilla accounts init <subscription-id>            scaffold Claude Code config dir + print one-time /login steps
   flotilla accounts list [--json]                     subscription credential health (mtime/expiry only; no secrets)
+  flotilla launch lint [--roster <path>] [--launch <path>]
+                                                      warn on roster seats without an explicit failover chain
   flotilla channel create <name> [--type text|category] [--topic <t>] [--category <name|id>]
                                                       create a Discord channel via the bot (idempotent; emits an F#105 binding with --xo)
   flotilla channel list [--json]                      list the guild's channels (id, type, name, parent)

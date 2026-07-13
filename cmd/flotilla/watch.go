@@ -92,6 +92,10 @@ const deskContinuationBuiltin = "[flotilla heartbeat] You have been idle. An idl
 	"EVERY item is `[done]`, blocked-and-tracked, or `[awaiting-auth]`, you have no live actionable " +
 	"work: reply 'idle', do NOT manufacture work, and signal idle by running: touch {{settle}}."
 
+// Chain warnings recur slowly: loud enough that an unprotected fleet cannot
+// look healthy indefinitely, without repeating on every heartbeat tick.
+const launchChainNoticeInterval = 6 * time.Hour
+
 // cmdWatch runs the long-lived watch daemon. This is the CLOCK half: it
 // heartbeats the XO so a turn-based agent keeps advancing clear, authorized work
 // without operator input, and watches liveness (tick→ack) so a dead or
@@ -143,6 +147,12 @@ func cmdWatch(args []string) error {
 	if err := validateAgentSurfaces(cfg); err != nil {
 		return err
 	}
+	rosterAgents := rosterAgentSet(cfg)
+	launchPath := os.Getenv("FLOTILLA_LAUNCH")
+	if launchPath == "" {
+		launchPath = launch.DefaultPath(*rosterPath)
+	}
+	logLaunchChainLint(launchPath, rosterAgents)
 	xo := cfg.XOAgent
 	if xo == "" {
 		xo = cfg.Agents[0].Name
@@ -707,16 +717,8 @@ func cmdWatch(args []string) error {
 		var deskStateLabels func() map[string]string
 
 		// #205 auto-switch: load flat launch recipes for storm-cooldown + slot metadata.
-		launchPath := os.Getenv("FLOTILLA_LAUNCH")
-		if launchPath == "" {
-			launchPath = launch.DefaultPath(*rosterPath)
-		}
 		var flatLaunch *launch.Config
 		if _, statErr := os.Stat(launchPath); statErr == nil {
-			rosterAgents := make(map[string]bool, len(cfg.Agents))
-			for _, a := range cfg.Agents {
-				rosterAgents[a.Name] = true
-			}
 			if loaded, lerr := launch.Load(launchPath, rosterAgents); lerr == nil {
 				flatLaunch = loaded
 			}
@@ -1095,6 +1097,18 @@ func cmdWatch(args []string) error {
 	// SIGTERM/SIGINT unwinds the retry cleanly, no leak).
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
+	go func() {
+		ticker := time.NewTicker(launchChainNoticeInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				logLaunchChainLint(launchPath, rosterAgents)
+			}
+		}
+	}()
 
 	if legacyClockMode {
 		go func() {
