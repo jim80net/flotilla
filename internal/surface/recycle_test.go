@@ -87,7 +87,7 @@ func TestHandoffTurnPathWithSpaces(t *testing.T) {
 	}
 }
 
-// TestRecycleSupport: the supported drivers are recycle-capable (implement RecycleBridge); a
+// TestRecycleSupport: the claude AND grok drivers are recycle-capable (implement RecycleBridge); a
 // driver without the bridge is not (the refuse fixture stays — KEEP stubNoBridge per #158).
 func TestRecycleSupport(t *testing.T) {
 	if _, ok := RecycleSupport(newClaudeCode()); !ok {
@@ -98,9 +98,6 @@ func TestRecycleSupport(t *testing.T) {
 	}
 	if _, ok := RecycleSupport(newCodex()); !ok {
 		t.Error("codex should implement RecycleBridge (grok-tier execution desk)")
-	}
-	if _, ok := RecycleSupport(newOpenCode()); !ok {
-		t.Error("opencode should implement RecycleBridge (#666)")
 	}
 	if _, ok := RecycleSupport(stubNoBridge{}); ok {
 		t.Error("a driver without the bridge must not type-assert as RecycleBridge")
@@ -123,7 +120,6 @@ func TestHandoffPathIsGitignored(t *testing.T) {
 	}{
 		{"claude", newClaudeCode().HandoffPath(repo, token)},
 		{"grok", newGrok().HandoffPath(repo, token)},
-		{"opencode", newOpenCode().HandoffPath(repo, token)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
