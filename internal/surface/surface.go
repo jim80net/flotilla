@@ -160,6 +160,8 @@ type ComposerStateProbe interface {
 
 // RateLimitProbe is declared in ratelimit.go (OPTIONAL #204).
 
+// UsageProbe is declared in usage.go (OPTIONAL #653).
+
 // DefaultSurface is used when an agent has no surface configured.
 const DefaultSurface = "claude-code"
 

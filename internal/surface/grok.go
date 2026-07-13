@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/jim80net/flotilla/internal/deliver"
@@ -194,6 +195,15 @@ var grokApprovalSelect = regexp.MustCompile(`\d+/\d+:select`)
 // Working (live-captured 2026-06-16, #58 — structural parity with "⠙ Waiting… 0.4s").
 var grokRateLimitStatus = regexp.MustCompile(`(?i)[\x{2801}-\x{28FF}].*\brate limit exceeded\b`)
 
+// grokWeeklyUsage is the authoritative weekly-usage row from `/usage show`.
+// PROVENANCE: LIVE-CAPTURED 2026-07-13 from the official Grok CLI 0.2.93
+// (f00f96316d), and SOURCE-VERIFIED in that installed binary from the adjacent
+// `Weekly limit`, `:`, and percent render fragments. The CLI reports percent
+// USED (confirmed by xAI's Usage & Limits documentation), so Usage converts it
+// to remaining percent. Keep this line-anchored: prose or a fixture displayed
+// in scrollback must not become provider evidence.
+var grokWeeklyUsage = regexp.MustCompile(`^\s*Weekly limit:\s*(\d{1,3})%\s*$`)
+
 // parseGrokState classifies a captured official-grok pane, claude-style (Working-positive,
 // Idle-default), with the tool-approval gate checked FIRST. A blocking modal must be detected before
 // the Working check because the streaming arrow ⇣ is CO-PRESENT on the modal's "◆ Run …" line — keying
@@ -330,6 +340,40 @@ func (g grok) rateLimitInstant(pane string) (bool, RateLimitScope, string) {
 	return true, RateLimitAccountSide, detail
 }
 
+// Usage implements UsageProbe by reading Grok's authoritative `/usage show`
+// chrome. No row, capture failure, or an out-of-range percentage is honest
+// absence, never a fabricated zero.
+func (g grok) Usage(pane string) (UsageReport, bool) {
+	captured, err := g.capturePane(pane)
+	if err != nil {
+		return UsageReport{}, false
+	}
+	used, ok := parseGrokWeeklyUsage(captured)
+	if !ok {
+		return UsageReport{}, false
+	}
+	return UsageReport{
+		RemainingPercent: 100 - used,
+		Window:           "weekly",
+		Scope:            RateLimitAccountSide,
+	}, true
+}
+
+func parseGrokWeeklyUsage(captured string) (int, bool) {
+	for _, line := range lastNNonEmptyLines(captured, grokTail) {
+		matches := grokWeeklyUsage.FindStringSubmatch(line)
+		if len(matches) != 2 {
+			continue
+		}
+		used, err := strconv.Atoi(matches[1])
+		if err != nil || used < 0 || used > 100 {
+			return 0, false
+		}
+		return used, true
+	}
+	return 0, false
+}
+
 // --- RecycleBridge (#158): grok's portable-markdown context-preservation policy ---
 
 // HandoffPath is grok's HARNESS-AGNOSTIC handoff convention: <cwd>/.flotilla/handoffs/recycle-<token>.md
@@ -355,4 +399,7 @@ func (grok) TakeoverTurn(designatedPath string) string {
 	return PortableMarkdownTakeoverTurn(designatedPath)
 }
 
-var _ RateLimitProbe = grok{}
+var (
+	_ RateLimitProbe = grok{}
+	_ UsageProbe     = grok{}
+)
