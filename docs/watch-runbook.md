@@ -33,7 +33,7 @@ re-evaluated on the next poll).
 3. **Secrets** `flotilla-secrets.env` (chmod 600): `FLOTILLA_BOT_TOKEN` (relay) and `FLOTILLA_WEBHOOK_<AGENT>` lines (audit mirror + alert/notice posts).
 3b. **Org-truth (optional)** `fleet-org.yaml` beside the roster (or `--org-file` / `$FLOTILLA_ORG_FILE`): primary-parent org DAG. Absent ⇒ derive from `channels[]`. Present ⇒ load refuses if `reports_to` disagrees with channel-derived parents or multi-home seats lack `home_channel_id`. See `fleet-org.example.yaml` and `openspec/changes/org-truth-v1/`. **PR3:** after a successful load, visibility-synthesis owed marking (`AgentsAbove`/`AgentsBelow`) and stackable `OwningXO` **consume the compiled org DAG** — not a second channel-only graph. Org compile/agreement failure is **fatal** to `flotilla watch` start (error returned before relay/detector). Startup logs `org-truth DAG source=file|derived`.
 3c. **Adjutant arc coalesce (buffer-v2 B1):** operator messages buffered for an adjutant layer share an `arc_id` when they share **leader + channel + operator** within a quiet window (`$FLOTILLA_ADJUTANT_ARC_QUIET`, default `60s`, clamp 45–90s; `0` disables join). Seam drain forwards **one** verbatim multi-body payload per arc (delimiter `---`). See `openspec/changes/adjutant-buffer-v2/`.
-3d. **Adjutant operator-loop webhooks (#628):** every `adjutant_for` seat that keeps the operator in the loop must have `FLOTILLA_WEBHOOK_<ADJUTANT>` in secrets **and** `FLOTILLA_SECRETS` + `FLOTILLA_ROSTER` on its launch recipe so `flotilla notify` / `mirror-self` resolve. Generic example: `FLOTILLA_WEBHOOK_XO_ADJ` for `xo-adj`. Missing webhooks appear in the finish-edge startup line (`no webhook (will not mirror)`) — that is a provisioning error for operator-loop adjutants, not policy silence (#598 `ledger_only` is for intentionally ledger-only desks). Install detail: `llm.md` §6 "Adjutant operator-loop egress".
+3d. **Adjutant operator-loop webhooks (#628):** every `adjutant_for` seat that keeps the operator in the loop must have `FLOTILLA_WEBHOOK_<ADJUTANT>` in secrets **and** `FLOTILLA_SECRETS` + `FLOTILLA_ROSTER` on its launch recipe so `flotilla notify` resolves. Generic example: `FLOTILLA_WEBHOOK_XO_ADJ` for `xo-adj`. Ordinary `mirror-self` and finish-edge turns are ledger-only; a webhook is required for curated notify and explicit parade egress. Install detail: `llm.md` §6 "Adjutant operator-loop egress".
 4. **Relay only — enable the bot's Message Content intent:** Discord Developer Portal → your bot → Privileged Gateway Intents → **Message Content** = ON. Without it the gateway connects but message bodies are empty, so the relay sees nothing.
 5. **Security — enable Discord two-factor auth on the operator account.** The channel is a command-injection surface gated only by `operator_user_id`; the operator's account is the real boundary (same posture as any privileged operator-gated agent). The bot token can READ the channel, so keep `flotilla-secrets.env` at chmod 600 and never commit it.
 6. **XO permission posture.** The XO session must be allowed to (a) `touch` the ack file (its liveness ack) and (b) act on the tick's instruction to advance work — otherwise the watchdog will (correctly) flag it as unresponsive. Run the XO with an allow-list that includes these (the project's posture-(b)).
@@ -416,9 +416,9 @@ flotilla mirror-self --from <coord> --roster <path> --secrets <path> --file <tur
 ```
 
 That runs the same `deskMirror` pipeline as the detector (reader-model →
-session-mirror jsonl → Discord when webhook present → Cos ledger for
-coordinators). Missing webhooks still **WARN** loudly and still write
-session-mirror when the roster dir is known (#506/#572).
+session-mirror jsonl → CoS ledger for coordinators). The operator-channel step is
+ledger-only by default; an explicit pending parade marker is the only turn-final
+allow. Missing webhooks never prevent the session-mirror write (#506/#572/#683).
 
 Desks keep using detector `MirrorOnFinish`; the Stop hook self-gates to
 `xo_agent` / `cos_agent` / `coordinator:true` / `*-xo` so desks are not dual-posted.
@@ -524,16 +524,18 @@ Bare finish-edge buffer keys (`…finished a turn (working→idle)`) are **mecha
 They are auto-consumed at the adjutant seam and **never** listed under `Needs you:`.
 Only judgment items produce a leader inject brief.
 
-### Dual-egress notify / mirror (#595 / #628 residual)
+### Operator-channel turn-final policy (#683)
 
-`flotilla notify` stamps `flotilla-<agent>-last-notify.json` with time **and** body
-hash. Finish-edge mirror and `mirror-self` skip Discord when:
+Finish-edge mirror and `mirror-self` always append the session-mirror ledger, but
+default to no Discord post. The explicit parade marker carries a random per-request
+token, expires fail-quiet, and is claimed only when the completing turn matches that
+token after the durable append succeeds. Curated `flotilla notify` posts directly
+and bypasses the turn-final mirror.
 
-1. notify was within 3m, or  
-2. the candidate body matches the stamp hash within 15m  
-
-Skip reason is logged (`mirror Discord suppress … reason=…`). Session-mirror ledger
-still writes.
+`flotilla notify` also strips any #472 dispatch footer from the operator-facing
+body while retaining the original in the durable context ledger. Recipients settle
+that protocol with `flotilla dispatch-ack <nonce>` instead of echoing machine text
+in operator prose.
 
 ### Undelivered dispatch → adjutant first (#628)
 

@@ -160,18 +160,17 @@ flotilla ships **A as the default.** B is deferred; if it lands later it will be
 opt-in and additive, not a replacement for the XO knowing how to address its
 operator directly.
 
-Deployments that wire the **mechanical Stop-hook mirror**
-(`deploy/flotilla-xo-discord-mirror.sh`) post the XO's turn-final assistant text to
-Discord on every Stop — verbatim, with no discretionary trigger filtering. That makes
-**every turn-final an operator communication** whether or not the XO also calls
-`notify`. The shape below applies to both egress paths.
+The **mechanical Stop-hook mirror** (`deploy/flotilla-xo-discord-mirror.sh`)
+records the XO's turn-final assistant text in the session-mirror ledger on every
+Stop. It is dash-visible but default-suppressed from Discord. The XO uses `notify`
+for curated operator communication; parade is the explicit mechanical allow.
 
 ## Operator communications — executive mini-briefs
 
 The operator is a **busy executive with many reports** — not watching your work move
 by move. Every operator-facing message (a `notify` reply, a decision request, a
-status answer, and **every turn-final** the mirror posts mechanically) must work for
-that reader in under twenty seconds without decoding internal vocabulary.
+status answer, or a parade report) must work for that reader in under twenty seconds
+without decoding internal vocabulary.
 
 **Four-part shape** (installed as the `executive-mini-brief` constitutional member via
 `workspace init` / `doctrine install`; principle 12 in the operating-principles
@@ -196,10 +195,11 @@ only to operator-facing surfaces. Principle 5 (reader-modeling) sets the posture
 the `executive-mini-brief` block is the **mechanical shape** so coordinators do not
 rely on memory when the mirror fires.
 
-**Mirror contract:** the hook posts turn-final text verbatim — it does **not** rewrite
-or reformat. When part (4) is missing it logs `MINI-BRIEF-AUDIT` to
-`~/.claude/hooks/flotilla-xo-mirror.log` and posts anyway (v1 is log-only; doctrine
-injects the shape, the hook enforces observability). See
+**Mirror contract:** the hook records turn-final text verbatim in the durable ledger —
+it does **not** rewrite or reformat, and ordinary turns do not post to operator Discord.
+When part (4) is missing it logs `MINI-BRIEF-AUDIT` to
+`~/.claude/hooks/flotilla-xo-mirror.log` (the audit is observational; doctrine injects
+the shape). See
 `internal/doctrine/assets/skills/executive-mini-brief.md` and
 [OPERATING-PRINCIPLES.md §12](./OPERATING-PRINCIPLES.md#12-operator-turn-finals-are-executive-mini-briefs)
 for the full prose.

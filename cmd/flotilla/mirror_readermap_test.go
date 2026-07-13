@@ -14,10 +14,11 @@ func TestDeskMirrorRendersEnvelopedBrief(t *testing.T) {
 		`{"audience":"operator","anchor":"the backfill you track","delta":"it finished","decision":"none"}` +
 		"\n```"
 	m := deskMirror{
-		webhook:   func(string) (string, bool) { return "https://wh", true },
-		turnFinal: func(string) (string, bool, error) { return turn, true, nil },
-		post:      func(_, _, b string) error { body = b; return nil },
-		logf:      recordLogf(&lines),
+		allowDiscord: true,
+		webhook:      func(string) (string, bool) { return "https://wh", true },
+		turnFinal:    func(string) (string, bool, error) { return turn, true, nil },
+		post:         func(_, _, b string) error { body = b; return nil },
+		logf:         recordLogf(&lines),
 	}
 	m.run("backend")
 	if strings.Contains(body, "reader-map") || strings.Contains(body, "{") {
@@ -39,10 +40,11 @@ func TestDeskMirrorWarnsAndPublishesDeficientEnvelope(t *testing.T) {
 	var body string
 	turn := "```reader-map\n" + `{"audience":"operator","anchor":"","delta":"x","decision":"none"}` + "\n```"
 	m := deskMirror{
-		webhook:   func(string) (string, bool) { return "https://wh", true },
-		turnFinal: func(string) (string, bool, error) { return turn, true, nil },
-		post:      func(_, _, b string) error { body = b; return nil },
-		logf:      recordLogf(&lines),
+		allowDiscord: true,
+		webhook:      func(string) (string, bool) { return "https://wh", true },
+		turnFinal:    func(string) (string, bool, error) { return turn, true, nil },
+		post:         func(_, _, b string) error { body = b; return nil },
+		logf:         recordLogf(&lines),
 	}
 	m.run("backend")
 	if body != turn {
@@ -59,10 +61,11 @@ func TestDeskMirrorWarnsAndPublishesMalformedEnvelope(t *testing.T) {
 	var body string
 	turn := "```reader-map\n{not json]\n```"
 	m := deskMirror{
-		webhook:   func(string) (string, bool) { return "https://wh", true },
-		turnFinal: func(string) (string, bool, error) { return turn, true, nil },
-		post:      func(_, _, b string) error { body = b; return nil },
-		logf:      recordLogf(&lines),
+		allowDiscord: true,
+		webhook:      func(string) (string, bool) { return "https://wh", true },
+		turnFinal:    func(string) (string, bool, error) { return turn, true, nil },
+		post:         func(_, _, b string) error { body = b; return nil },
+		logf:         recordLogf(&lines),
 	}
 	m.run("backend")
 	if body != turn {

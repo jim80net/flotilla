@@ -71,7 +71,7 @@ func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 				return st
 			}
 		}
-		st.Detail = "inbound pending turn-final ack"
+		st.Detail = "inbound pending durable ack"
 		return st
 	}
 	for _, e := range outbox.ListAll(rosterDir) {

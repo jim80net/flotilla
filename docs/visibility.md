@@ -22,22 +22,21 @@ republishes a compressed view one level up.
 
 | Tier | Who synthesizes | Reads | Posts to | Shape |
 |---|---|---|---|---|
-| **1** | flotilla (mechanical) | one boat's finished turn | that boat's own channel | verbatim turn-final mirror |
-| **2** | an **XO** | its boats' latest state | the XO's own channel | a curated domain rollup |
+| **1** | flotilla (mechanical) | one boat's finished turn | session-mirror ledger / dash | durable turn-final record |
+| **2** | an **XO** or adjutant | its boats' latest state | operator channel via `notify` | a curated domain rollup |
 | **3** | the **meta-XO** | the project-XOs' latest state | `#fleet-command` (`#c2`) | a fleet headline + open operator-decisions + drill-down pointers |
 
-**Tier 1 — the mechanical per-desk mirror.** When a boat (a non-XO desk) finishes a
-turn, `flotilla watch` posts that boat's turn-final output to the boat's own channel,
-verbatim. It is deterministic daemon code — no model call, no curation — fired off the
-change-detector's working→idle edge. **Tier 1 already ships** (`desk-mirror-tier1`,
-pull request #135) and is *not* re-documented here; this page covers the synthesis
-tiers that consume it.
+**Tier 1 — the mechanical per-desk ledger.** When a boat finishes a turn,
+`flotilla watch` appends its turn-final to the session-mirror ledger that feeds the
+dash. It is deterministic daemon code — no model call, no curation — fired from the
+change-detector's working→idle edge. Ordinary turn-finals are ledger-only by default;
+they do not enter the operator's Discord channel. Parade is the explicit exception.
 
 **Eliciting operator-facing briefs (not free-text asks).** When a coordinator needs a
-reader-modeled status brief published to every boat channel, run `flotilla brief --all`
+reader-modeled status brief recorded for every boat on the dash, run `flotilla brief --all`
 (or `flotilla brief <desk>` for one boat). The command injects a structured brief
-request; the desk answers in-pane with a reader-map envelope; the Tier-1 mirror
-publishes the turn-final to that boat's channel automatically. Desks must **not** run
+request; the desk answers in-pane with a reader-map envelope; the Tier-1 ledger
+publishes the turn-final to that boat's dash conversation automatically. Desks must **not** run
 `flotilla notify` (they do not hold fleet secrets). A free-text `flotilla send "post
 your brief…"` ask is unreliable by design — desks correctly reply in-pane and the
 operator never sees those answers ([#207](https://github.com/jim80net/flotilla/issues/207)).

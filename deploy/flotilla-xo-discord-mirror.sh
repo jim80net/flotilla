@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # flotilla-xo-discord-mirror.sh — Claude Code Stop hook.
-# MECHANICAL mirror: posts the coordinator turn-final to Discord + session-mirror
-# on every Stop (fail-safe exit 0). Self-gates to xo_agent / cos_agent / *-xo seats
+# MECHANICAL mirror: records the coordinator turn-final in session-mirror on every
+# Stop; current binaries keep Discord explicit-parade-only (fail-safe exit 0). Self-gates to xo_agent / cos_agent / *-xo seats
 # (pane-less remote-control coordinators never get Working→Idle — #432/#572 use
 # `flotilla mirror-self` so dash conversations still populate).
-# Set FLOTILLA_MIRROR_DRYRUN=1 to print instead of posting (for testing).
+# Set FLOTILLA_MIRROR_DRYRUN=1 to print instead of recording (for testing).
 #
 # Decision log: ~/.claude/hooks/flotilla-xo-mirror.log (one line/invocation).
 #
@@ -228,7 +228,9 @@ with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as tf:
 try:
     # #572: mirror-self writes session-mirror (+ Discord when webhook present) without
     # requiring detector Working→Idle — the remote-control / pane-less coordinator path.
-    # Falls back to notify --chunk if mirror-self is unavailable on an older binary.
+    # Legacy-binary compatibility only: falls back to notify --chunk when an older
+    # binary does not provide mirror-self. Current mirror-self is best-effort and
+    # keeps routine finals ledger-only.
     r = subprocess.run(
         [flotilla, "mirror-self", "--from", agent, "--secrets", secrets, "--roster", roster, "--file", tmp],
         check=False, timeout=60, capture_output=True, text=True,

@@ -128,7 +128,7 @@ func ScanUndeliveredInbound(rosterDir string, now time.Time, age time.Duration) 
 			Recipient: e.Recipient,
 			Age:       got.Round(time.Second),
 			Message: fmt.Sprintf(
-				"dispatch undelivered-ack: inbound id=%s nonce=%s %s→%s unacknowledged after %s (delivered to pane, no turn-final ack)",
+				"dispatch undelivered-ack: inbound id=%s nonce=%s %s→%s unacknowledged after %s (delivered to pane, no durable or legacy turn-final ack)",
 				e.ID, emptyDash(e.Nonce), e.Sender, e.Recipient, got.Round(time.Second),
 			),
 		})
@@ -216,7 +216,7 @@ func FormatAdjutantTriage(r UndeliveredReport) string {
 	b.WriteString("Recommended triage:\n")
 	switch r.Kind {
 	case "inbound-ack":
-		b.WriteString("1. Check recipient pane (idle mid-turn without turn-final ack? crashed? busy?)\n")
+		b.WriteString("1. Check recipient pane (idle without durable ack? crashed? busy?)\n")
 		b.WriteString("2. If work is done: ensure turn-final echoes the nonce, or durable-consume it\n")
 		b.WriteString("3. If still owed: reinject / re-send when idle (`flotilla send`)\n")
 		b.WriteString("4. Escalate to operator only if stuck after triage (second-layer age)\n")

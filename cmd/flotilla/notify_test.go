@@ -12,12 +12,32 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jim80net/flotilla/internal/discord"
-	"github.com/jim80net/flotilla/internal/roster"
-	"github.com/jim80net/flotilla/internal/watch"
+	"github.com/jim80net/flotilla/internal/inbound"
 )
+
+func TestNotifyStripsDispatchFooterFromOperatorPost683(t *testing.T) {
+	var got struct {
+		Content string `json:"content"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode webhook body: %v", err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	secrets := writeSecrets(t, "xo", srv.URL)
+	message := "curated operator update" + inbound.FormatDispatchFooter("flotilla-dispatch-cafebabe")
+	if err := cmdNotify([]string{"--from", "xo", "--secrets", secrets, message}); err != nil {
+		t.Fatal(err)
+	}
+	if got.Content != "curated operator update" {
+		t.Fatalf("operator post = %q, want nonce footer stripped", got.Content)
+	}
+}
 
 // writeSecrets writes a one-key secrets file mapping the given agent to the
 // given webhook URL and returns its path. The agent key is derived the same way
@@ -372,26 +392,6 @@ func TestCmdNotifyAttachAndChunkRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Errorf("error %q should reject --chunk with --attach", err.Error())
-	}
-}
-
-func TestCmdNotifyStampsRecentNotify595(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer srv.Close()
-
-	const agent = "cos"
-	secrets := writeSecrets(t, agent, srv.URL)
-	rosterPath := writeRosterFile(t, `{"agents":[{"name":"cos"}]}`)
-	rosterDir := filepath.Dir(rosterPath)
-
-	if err := cmdNotify([]string{"--from", agent, "--secrets", secrets, "--roster", rosterPath, "deploy brief"}); err != nil {
-		t.Fatalf("cmdNotify: %v", err)
-	}
-	stampPath := roster.LayerLastNotifyPath(rosterDir, agent)
-	if !watch.RecentNotifyWithinTTL(stampPath, watch.DefaultRecentNotifySuppressTTL, time.Now()) {
-		t.Fatalf("recent notify stamp missing or expired at %s", stampPath)
 	}
 }
 

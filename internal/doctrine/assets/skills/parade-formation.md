@@ -31,7 +31,7 @@ formation is the **celebratory / retro sibling** of visibility-synthesis.
   keyboard). Per-desk (Tier 1) and per-XO (Tier 3) answers map to slide groups using
   the dimension canon below.
 - **Tier 1 / Tier 2 / Tier 3** — roll-up altitudes (parallel to visibility-synthesis):
-  - **Tier 1** — each seat's four-dimensions-plus-demo answer in-pane (mirror publishes).
+  - **Tier 1** — each seat's four-dimensions-plus-demo answer in-pane (explicit parade stream publishes).
   - **Tier 2** — an XO curating boats' answers UP into the XO's channel.
   - **Tier 3** — the meta-XO assembling the fleet **`slides.md`** deck — one slide per
     project-XO with the full dimension canon, not thematic one-liners.

@@ -367,7 +367,7 @@ func TestExecutiveMiniBriefContent(t *testing.T) {
 		"action status",
 		"varied",
 		"fixed formula",
-		"Discord mirror",
+		"durable dash ledger",
 		"what they do",
 	} {
 		if !strings.Contains(m.Content, want) {
