@@ -21,10 +21,11 @@ type openCode struct {
 	paneCommand    func(string) (string, error)
 	isShell        func(string) bool
 	capturePane    func(string) (string, error)
+	captureStyled  func(string) (string, error)
 	classify       func(string) State
 	send           func(string, string) error
 	inject         func(string, string) error
-	cursorPosition func(pane string) (cursorX, cursorY int, inMode bool, err error)
+	cursorSnapshot func(pane string) (cursorX, cursorY int, visible, inMode bool, err error)
 }
 
 func newOpenCode() openCode {
@@ -32,10 +33,11 @@ func newOpenCode() openCode {
 		paneCommand:    deliver.PaneCommand,
 		isShell:        deliver.IsShell,
 		capturePane:    deliver.CapturePane,
+		captureStyled:  deliver.CapturePaneStyled,
 		classify:       parseOpenCodeState,
 		send:           deliver.Send,
 		inject:         deliver.InjectSlash,
-		cursorPosition: deliver.CursorPosition,
+		cursorSnapshot: deliver.CursorSnapshot,
 	}
 }
 
@@ -108,7 +110,7 @@ var openCodeEmptyPlaceholders = []string{
 // error chrome, tmux copy/view mode, and read failures remain Undetermined so
 // recycle and confirmed-delivery gates fail closed.
 func (c openCode) ComposerState(pane string) ComposerDisposition {
-	cx, cy, inMode, err := c.cursorPosition(pane)
+	cx, cy, visible, inMode, err := c.cursorSnapshot(pane)
 	if err != nil || inMode {
 		return ComposerUndetermined
 	}
@@ -116,7 +118,17 @@ func (c openCode) ComposerState(pane string) ComposerDisposition {
 	if err != nil || c.classify(captured) != StateIdle {
 		return ComposerUndetermined
 	}
-	return classifyOpenCodeComposerLine(captured, cx, cy)
+	if visible {
+		return classifyOpenCodeComposerLine(captured, cx, cy)
+	}
+	if c.captureStyled == nil {
+		return ComposerUndetermined
+	}
+	styled, err := c.captureStyled(pane)
+	if err != nil {
+		return ComposerUndetermined
+	}
+	return classifyHiddenOpenCodeComposer(captured, styled)
 }
 
 // classifyOpenCodeComposerLine classifies the 0-based terminal-cursor row. A
@@ -157,6 +169,122 @@ func classifyOpenCodeComposerLine(captured string, cursorX, cursorY int) Compose
 		return ComposerCleared
 	}
 	return ComposerPending
+}
+
+// classifyHiddenOpenCodeComposer handles tmux sessions with no attached client.
+// OpenCode hides the terminal cursor in that state, so tmux exposes a bottom-
+// right sentinel rather than the textarea cursor. The source-verified prompt
+// layout is a consecutive border block whose input is the row immediately
+// after the top padding row (prompt/index.tsx, OpenCode 1.3.15). Empty input is
+// either blank or a known placeholder rendered in textMuted; an identical typed
+// draft uses the normal text color and remains Pending.
+func classifyHiddenOpenCodeComposer(captured, styled string) ComposerDisposition {
+	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
+	styledLines := strings.Split(strings.TrimRight(styled, "\n"), "\n")
+	if len(lines) != len(styledLines) {
+		return ComposerUndetermined
+	}
+	start, runStart, runLen := -1, -1, 0
+	for i, line := range lines {
+		if strings.HasPrefix(trimSpace(line), openCodeComposerBorder) {
+			if runLen == 0 {
+				runStart = i
+			}
+			runLen++
+			continue
+		}
+		if runLen >= 3 {
+			start = runStart
+		}
+		runLen = 0
+	}
+	if runLen >= 3 {
+		start = runStart
+	}
+	if start < 0 || start+1 >= len(lines) {
+		return ComposerUndetermined
+	}
+	input := lines[start+1]
+	borderAt := strings.Index(input, openCodeComposerBorder)
+	if borderAt < 0 || strings.Trim(input[:borderAt], " ") != "" {
+		return ComposerUndetermined
+	}
+	after, ok := strings.CutPrefix(trimSpace(input), openCodeComposerBorder)
+	if !ok {
+		return ComposerUndetermined
+	}
+	body := trimSpace(after)
+	if body == "" {
+		return ComposerCleared
+	}
+	if !containsExact(body, openCodeEmptyPlaceholders) {
+		return ComposerPending
+	}
+	if placeholderUsesMutedStyle(styledLines[start+1], body) {
+		return ComposerCleared
+	}
+	return ComposerPending
+}
+
+// placeholderUsesMutedStyle compares the foreground at the placeholder's
+// first byte with the foreground of the body-leading space. OpenCode renders
+// placeholderColor=textMuted while actual textarea text uses theme.text. A
+// theme that does not expose distinct SGR colors fails closed.
+func placeholderUsesMutedStyle(styledLine, placeholder string) bool {
+	plain, foreground := decodeSGRForeground(styledLine)
+	idx := strings.Index(plain, placeholder)
+	if idx <= 0 || idx >= len(foreground) {
+		return false
+	}
+	return foreground[idx] != "" && foreground[idx-1] != "" && foreground[idx] != foreground[idx-1]
+}
+
+func decodeSGRForeground(line string) (string, []string) {
+	var plain strings.Builder
+	foreground := make([]string, 0, len(line))
+	fg := "default"
+	for i := 0; i < len(line); {
+		if line[i] == 0x1b && i+1 < len(line) && line[i+1] == '[' {
+			end := i + 2
+			for end < len(line) && (line[end] < 0x40 || line[end] > 0x7e) {
+				end++
+			}
+			if end < len(line) {
+				if line[end] == 'm' {
+					fg = sgrForeground(line[i+2:end], fg)
+				}
+				i = end + 1
+				continue
+			}
+		}
+		plain.WriteByte(line[i])
+		foreground = append(foreground, fg)
+		i++
+	}
+	return plain.String(), foreground
+}
+
+func sgrForeground(params, current string) string {
+	parts := strings.Split(params, ";")
+	for i := 0; i < len(parts); i++ {
+		switch parts[i] {
+		case "", "0", "39":
+			current = "default"
+		case "38":
+			if i+2 < len(parts) && parts[i+1] == "5" {
+				current = "38;5;" + parts[i+2]
+				i += 2
+			} else if i+4 < len(parts) && parts[i+1] == "2" {
+				current = strings.Join(parts[i:i+5], ";")
+				i += 4
+			}
+		default:
+			if (parts[i] >= "30" && parts[i] <= "37") || (parts[i] >= "90" && parts[i] <= "97") {
+				current = parts[i]
+			}
+		}
+	}
+	return current
 }
 
 func containsExact(s string, candidates []string) bool {

@@ -82,10 +82,51 @@ func TestClassifyOpenCodeComposerLine(t *testing.T) {
 	}
 }
 
+func TestClassifyHiddenOpenCodeComposer(t *testing.T) {
+	placeholder := `Ask anything... "Fix a TODO in the codebase"`
+	plain := "output\n  ┃\n  ┃  " + placeholder + "\n  ┃\n  ┃  Build  alpha-model\nfooter"
+	styledPlaceholder := "output\n  ┃\n\x1b[38;2;255;255;255m  ┃  \x1b[38;2;49;49;49m" + placeholder + "\n  ┃\n  ┃  Build  alpha-model\nfooter"
+	styledDraft := "output\n  ┃\n\x1b[38;2;255;255;255m  ┃  " + placeholder + "\n  ┃\n  ┃  Build  alpha-model\nfooter"
+
+	cases := []struct {
+		name, captured, styled string
+		want                   ComposerDisposition
+	}{
+		{"muted placeholder is empty", plain, styledPlaceholder, ComposerCleared},
+		{"identical typed text stays pending", plain, styledDraft, ComposerPending},
+		{"blank session input is empty", "output\n  ┃\n  ┃\n  ┃\n  ┃  Build  alpha-model\nfooter", "output\n  ┃\n  ┃\n  ┃\n  ┃  Build  alpha-model\nfooter", ComposerCleared},
+		{"ordinary draft stays pending", "output\n  ┃\n  ┃  beta-probe\n  ┃\n  ┃  Build  alpha-model\nfooter", "output\n  ┃\n  ┃  beta-probe\n  ┃\n  ┃  Build  alpha-model\nfooter", ComposerPending},
+		{"unrecognized layout fails closed", "output\nfooter", "output\nfooter", ComposerUndetermined},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyHiddenOpenCodeComposer(tc.captured, tc.styled); got != tc.want {
+				t.Fatalf("classifyHiddenOpenCodeComposer = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestOpenCodeComposerStateHiddenCursorUsesStyledBlock(t *testing.T) {
+	placeholder := `Ask anything... "Fix a TODO in the codebase"`
+	plain := "output\n  ┃\n  ┃  " + placeholder + "\n  ┃\n  ┃  Build  alpha-model\nfooter"
+	o := openCode{
+		cursorSnapshot: func(string) (int, int, bool, bool, error) { return 120, 40, false, false, nil },
+		capturePane:    func(string) (string, error) { return plain, nil },
+		captureStyled: func(string) (string, error) {
+			return "output\n  ┃\n\x1b[38;2;255;255;255m  ┃  \x1b[38;2;49;49;49m" + placeholder + "\n  ┃\n  ┃  Build  alpha-model\nfooter", nil
+		},
+		classify: parseOpenCodeState,
+	}
+	if got := o.ComposerState("alpha"); got != ComposerCleared {
+		t.Fatalf("ComposerState = %v, want Cleared for hidden cursor + styled empty placeholder", got)
+	}
+}
+
 func TestOpenCodeComposerStateWiring(t *testing.T) {
 	t.Run("idle empty composer is cleared", func(t *testing.T) {
 		o := openCode{
-			cursorPosition: func(string) (int, int, bool, error) { return 4, 1, false, nil },
+			cursorSnapshot: func(string) (int, int, bool, bool, error) { return 4, 1, true, false, nil },
 			capturePane:    func(string) (string, error) { return "output\n  ┃\nfooter", nil },
 			classify:       parseOpenCodeState,
 		}
@@ -96,7 +137,7 @@ func TestOpenCodeComposerStateWiring(t *testing.T) {
 
 	t.Run("approval frame is undetermined", func(t *testing.T) {
 		o := openCode{
-			cursorPosition: func(string) (int, int, bool, error) { return 4, 1, false, nil },
+			cursorSnapshot: func(string) (int, int, bool, bool, error) { return 4, 1, true, false, nil },
 			capturePane: func(string) (string, error) {
 				return "Permission required\n  ┃\nAllow once", nil
 			},
@@ -110,10 +151,10 @@ func TestOpenCodeComposerStateWiring(t *testing.T) {
 	t.Run("copy mode and read failures are undetermined", func(t *testing.T) {
 		boom := errors.New("tmux boom")
 		cases := []openCode{
-			{cursorPosition: func(string) (int, int, bool, error) { return 0, 0, true, nil }},
-			{cursorPosition: func(string) (int, int, bool, error) { return 0, 0, false, boom }},
+			{cursorSnapshot: func(string) (int, int, bool, bool, error) { return 0, 0, true, true, nil }},
+			{cursorSnapshot: func(string) (int, int, bool, bool, error) { return 0, 0, false, false, boom }},
 			{
-				cursorPosition: func(string) (int, int, bool, error) { return 0, 0, false, nil },
+				cursorSnapshot: func(string) (int, int, bool, bool, error) { return 0, 0, true, false, nil },
 				capturePane:    func(string) (string, error) { return "", boom },
 			},
 		}
