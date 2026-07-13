@@ -3,7 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/jim80net/flotilla/internal/outbox"
 )
@@ -16,20 +18,21 @@ type cancelOpts struct {
 // parseCancelArgs accepts the outbox id on either side of --roster, matching the
 // positional/flag ordering supported by other flotilla read-and-recovery verbs.
 func parseCancelArgs(args []string) (cancelOpts, error) {
+	var id string
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		id, args = args[0], args[1:]
+	}
 	fs := flag.NewFlagSet("cancel", flag.ContinueOnError)
 	rosterPath := fs.String("roster", rosterDefault(), "roster config path")
 	if err := fs.Parse(args); err != nil {
 		return cancelOpts{}, err
 	}
-	if fs.NArg() == 0 {
+	rest := fs.Args()
+	if id == "" && len(rest) > 0 {
+		id, rest = rest[0], rest[1:]
+	}
+	if id == "" || len(rest) != 0 {
 		return cancelOpts{}, fmt.Errorf("usage: flotilla cancel <outbox-id> [--roster <path>]")
-	}
-	id := fs.Arg(0)
-	if err := fs.Parse(fs.Args()[1:]); err != nil {
-		return cancelOpts{}, err
-	}
-	if fs.NArg() != 0 {
-		return cancelOpts{}, fmt.Errorf("unexpected extra argument(s) %v — usage: flotilla cancel <outbox-id> [--roster <path>]", fs.Args())
 	}
 	return cancelOpts{id: id, rosterPath: *rosterPath}, nil
 }
@@ -42,6 +45,13 @@ func cmdCancel(args []string) error {
 	rosterPath, err := resolveRosterPath(opts.rosterPath)
 	if err != nil {
 		return err
+	}
+	info, err := os.Stat(rosterPath)
+	if err != nil {
+		return fmt.Errorf("cancel roster: %w", err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("cancel roster %q is a directory", rosterPath)
 	}
 	result, err := outbox.Cancel(filepath.Dir(rosterPath), opts.id)
 	if err != nil {

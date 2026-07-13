@@ -30,7 +30,7 @@ func TestOutboxSweeperEnqueuesPending(t *testing.T) {
 	var n atomic.Int32
 	s := NewOutboxSweeper(dir, func(j Job) {
 		n.Add(1)
-		if j.Kind != KindSend || j.Sender != "alpha" || j.Agent != "cos" || j.Epoch != 1 {
+		if j.Kind != KindSend || j.Sender != "alpha" || j.Agent != "cos" || j.Epoch != 1 || !j.OutboxBound {
 			t.Errorf("job = %+v", j)
 		}
 	})

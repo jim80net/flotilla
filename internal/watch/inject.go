@@ -99,9 +99,12 @@ type Job struct {
 	lastStaleEscalation time.Time
 	// Sender is the originating agent for KindSend jobs (keys the per-sender outbox file).
 	Sender string
-	// Epoch is the durable sender→recipient outbox generation. A non-zero epoch is
+	// Epoch is the durable sender→recipient outbox generation. OutboxBound jobs are
 	// revalidated immediately before delivery so a canceled queued task cannot re-fire.
 	Epoch uint64
+	// OutboxBound marks jobs loaded from the durable sender outbox. It distinguishes
+	// swept legacy epoch-zero jobs from synthetic KindSend jobs used by direct hooks.
+	OutboxBound bool
 	// ClaimKey is the decision-brief gap key for KindDetector jobs; the watch daemon sets it
 	// so the injector can confirm or abort the in-memory claim on delivery outcome (#365 P1).
 	ClaimKey string
@@ -271,7 +274,7 @@ func (in *Injector) deliver(j Job) {
 		send = in.relaySend
 	}
 	var err error
-	if j.Kind == KindSend && j.Epoch != 0 && in.rosterDir != "" {
+	if j.Kind == KindSend && j.OutboxBound && in.rosterDir != "" {
 		attempted, attemptErr := outbox.AttemptCurrent(in.rosterDir, outbox.Entry{
 			ID: j.MessageID, Sender: j.Sender, Recipient: j.Agent, Epoch: j.Epoch,
 		}, func() error { return send(j.Agent, j.Message) })
@@ -291,7 +294,7 @@ func (in *Injector) deliver(j Job) {
 		if isRelay(j.Kind) && j.MessageID != "" {
 			in.queue.remove(j.MessageID)
 		}
-		if j.Kind == KindSend && j.Epoch == 0 && j.MessageID != "" && j.Sender != "" && in.rosterDir != "" {
+		if j.Kind == KindSend && !j.OutboxBound && j.MessageID != "" && j.Sender != "" && in.rosterDir != "" {
 			if path, err := outbox.Path(in.rosterDir, j.Sender); err == nil {
 				outbox.NewStore(path).Remove(j.MessageID)
 			}

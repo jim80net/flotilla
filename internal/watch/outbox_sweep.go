@@ -45,6 +45,7 @@ func (s *OutboxSweeper) SweepAll() int {
 			MessageID:           e.ID,
 			Sender:              e.Sender,
 			Epoch:               e.Epoch,
+			OutboxBound:         true,
 			deferrals:           e.Deferrals,
 			enqueuedAt:          e.EnqueuedAt,
 			lastStaleEscalation: e.LastStaleEscalation,
