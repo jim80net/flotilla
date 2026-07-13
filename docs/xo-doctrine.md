@@ -195,10 +195,11 @@ only to operator-facing surfaces. Principle 5 (reader-modeling) sets the posture
 the `executive-mini-brief` block is the **mechanical shape** so coordinators do not
 rely on memory when the mirror fires.
 
-**Mirror contract:** the hook posts turn-final text verbatim — it does **not** rewrite
-or reformat. When part (4) is missing it logs `MINI-BRIEF-AUDIT` to
-`~/.claude/hooks/flotilla-xo-mirror.log` and posts anyway (v1 is log-only; doctrine
-injects the shape, the hook enforces observability). See
+**Mirror contract:** the hook records turn-final text verbatim in the durable ledger —
+it does **not** rewrite or reformat, and ordinary turns do not post to operator Discord.
+When part (4) is missing it logs `MINI-BRIEF-AUDIT` to
+`~/.claude/hooks/flotilla-xo-mirror.log` (the audit is observational; doctrine injects
+the shape). See
 `internal/doctrine/assets/skills/executive-mini-brief.md` and
 [OPERATING-PRINCIPLES.md §12](./OPERATING-PRINCIPLES.md#12-operator-turn-finals-are-executive-mini-briefs)
 for the full prose.
