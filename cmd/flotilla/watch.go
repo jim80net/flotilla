@@ -1790,7 +1790,8 @@ func activeUsageSlotMeta(agent string, launches *launch.Config) (provider, subsc
 				}
 			}
 		}
-		return "", ""
+		// A valid legacy overlay may omit both metadata and a usable slot.
+		// Fall through to the canonical primary rather than dropping identity.
 	}
 	if launches == nil {
 		return "", ""

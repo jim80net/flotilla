@@ -42,6 +42,10 @@ func TestActiveUsageSlotMetaUsesOverlayOrResolvedSlot(t *testing.T) {
 	if provider, subscription := activeUsageSlotMeta("alpha", launches); provider != "proxy" || subscription != "alpha-live" {
 		t.Fatalf("explicit overlay metadata = (%q, %q)", provider, subscription)
 	}
+	writeAgentOverlay(t, root, "alpha", `{"slot":"unknown","surface":"grok"}`)
+	if provider, subscription := activeUsageSlotMeta("alpha", launches); provider != "gateway" || subscription != "alpha-primary" {
+		t.Fatalf("unresolved legacy overlay fallback = (%q, %q)", provider, subscription)
+	}
 }
 
 // TestAgentSurfaceOverlayFirst: when an overlay names a surface, agentSurface returns it
