@@ -222,6 +222,14 @@ sends to a Discord channel under per-agent webhook identities. **Inter-agent
 mirroring is default-off** — it clutters the operator's channel with intra-fleet
 chatter that already lives in the tmux panes — so you opt in per-roster or per-call.
 
+If you're standing up a whole flotilla's Discord presence, there's a mechanical
+alternative to the manual steps below: `flotilla provision-discord
+<flotilla-key>` creates the category, the XO command channel, the product hub,
+both roster bindings, and the XO webhook in one idempotent command (preview it
+credential-free with `--dry-run`) — see the "Spawn layout" section of
+`docs/federation.md`. The manual per-agent webhook steps below remain valid and
+are all the audit mirror itself needs.
+
 1. Create one **webhook per agent** in your channel (Channel → Edit → Integrations
    → Webhooks). Name each after the agent.
 2. Put the urls in a secrets file — **never commit this** (`chmod 600`):

@@ -148,6 +148,8 @@ cmd/flotilla ──────────────> (everything; the compos
    internal/watch ─────────> backlog, relay, roster, surface, transport, unacked
    internal/transport ─────> deliver, discord, roster
    internal/surface ───────> claudestore, codexstore, grokstore, deliver
+   internal/codextrust ────> (leaf: codex directory-trust pre-seeding,
+                             called directly by resume/recycle/switch)
    internal/workspace ─────> accounts, launch
    internal/deliver ───────> (leaf: raw tmux primitives)
 ```
@@ -163,9 +165,11 @@ in the right `internal/` package.
 | You want to… | Start at |
 | --- | --- |
 | Add a new harness (surface) | `internal/surface/surface.go`, copy `grok.go` |
+| Pre-seed codex trust / debug a codex first-run wedge | `internal/codextrust` (+ the classification in `internal/surface/codex.go`) |
 | Change when the XO is woken | `internal/watch/detector.go` (`tickLocked`) |
 | Add a delivery policy | `internal/watch/inject.go` (`JobKind`, the injector) |
 | Add a chat medium | `internal/transport/transport.go` + `registry.go` |
+| Stand up a flotilla's Discord org-chart stack | `internal/discord/provision.go` + `cmd/flotilla/provision_discord.go` |
 | Touch the web UI | `internal/dash/server.go` + the embedded `assets/` |
 | Wire a new daemon flag | `cmd/flotilla/watch.go` (`cmdWatch`) |
 

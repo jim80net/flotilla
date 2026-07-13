@@ -146,6 +146,13 @@ channel on your phone, and read every reply back. It's optional — the clock an
    **Message Content** intent, and run `watch --secrets`. Because the channel
    becomes a command surface, tell the user to enable 2FA on their Discord.
 
+For a whole flotilla's org-chart stack, prefer the mechanical route:
+`flotilla provision-discord <flotilla-key>` creates the category, the XO
+command channel, the product hub, both roster bindings, and the XO webhook in
+one idempotent command (`--dry-run` previews the full plan, credential-free) —
+see the "Spawn layout" section of `docs/federation.md`. The manual steps above
+stay valid for per-agent webhooks.
+
 The XO replies to the user on Discord via `flotilla notify --from xo …` and
 stays quiet on routine traffic — see `docs/xo-doctrine.md`.
 
