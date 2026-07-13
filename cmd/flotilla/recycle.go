@@ -279,9 +279,6 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 
 	// PHASE 4 — takeover (point the fresh, clean-context session at the bridge, imperatively).
 	if !pollIdleCleared(ops, target, p.timeouts.boot) {
-		if ops.assess(target) == surface.StateAwaitingApproval {
-			return "", wtNote, fmt.Errorf("phase 4: relaunched %q is blocked on an approval modal, not idle at a cleared composer — refusing to approve arbitrary boot-time work; the desk is LIVE but un-taken-over. Resolve or reject the modal, then hand it the chapter with: flotilla send %s 'read %s and take over'", p.agent, p.agent, p.designatedPath)
-		}
 		return "", wtNote, fmt.Errorf("phase 4: the relaunched %q did not reach idle at a cleared composer within %s — the desk is LIVE but un-taken-over; hand it the chapter with: flotilla send %s 'read %s and take over'", p.agent, p.timeouts.boot, p.agent, p.designatedPath)
 	}
 	gen, err := ops.readGen(target)
@@ -591,17 +588,6 @@ func cmdRecycle(args []string) error {
 	// the dry-run branch above: a dry run must not mutate the codex config.
 	if recipeInvolvesCodex(rosterSurf, recipe) {
 		seedCodexTrust(recipe.Cwd)
-	}
-	// OpenCode's standard policy asks before edit/bash. The portable bridge must be
-	// self-contained on a managed desk, so provision ONLY its handoff write and exact
-	// cleanup before phase 1. Fail closed here (unlike best-effort resume): continuing
-	// would strand the automated handoff on an approval modal.
-	if liveSurf == "opencode" {
-		// Launch validation guarantees an absolute cwd; EvalSymlinks above also
-		// canonicalizes it when the worktree path exists.
-		if err := seedOpenCodeRecyclePermissions(recipe.Cwd); err != nil {
-			return fmt.Errorf("recycle %q: cannot guarantee OpenCode handoff permissions: %w", agentName, err)
-		}
 	}
 
 	confirm := surface.Confirm{SendEnter: deliver.SendEnter, Sleep: time.Sleep}

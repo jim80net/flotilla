@@ -24,23 +24,11 @@ func TestOpenCodeRecycleCapabilities(t *testing.T) {
 	if path != want {
 		t.Fatalf("HandoffPath = %q, want %q", path, want)
 	}
-	handoff := o.HandoffTurn(path)
-	if !strings.HasPrefix(handoff, PortableMarkdownHandoffTurn(path)) {
+	if got := o.HandoffTurn(path); got != PortableMarkdownHandoffTurn(path) {
 		t.Fatal("HandoffTurn must use the shared portable-markdown handoff")
 	}
-	for _, must := range []string{"use the context already in this session", "Do NOT inspect the worktree", "only tool operation", path} {
-		if !strings.Contains(handoff, must) {
-			t.Fatalf("HandoffTurn missing OpenCode no-discovery constraint %q", must)
-		}
-	}
-	takeover := o.TakeoverTurn(path)
-	if !strings.HasPrefix(takeover, PortableMarkdownTakeoverTurn(path)) {
+	if got := o.TakeoverTurn(path); got != PortableMarkdownTakeoverTurn(path) {
 		t.Fatal("TakeoverTurn must use the shared portable-markdown takeover")
-	}
-	for _, must := range []string{"exactly the standalone", "Do NOT append `&&`", path} {
-		if !strings.Contains(takeover, must) {
-			t.Fatalf("TakeoverTurn missing OpenCode exact-cleanup constraint %q", must)
-		}
 	}
 }
 
