@@ -2,11 +2,13 @@ package watch
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/sessionmirror"
@@ -15,6 +17,12 @@ import (
 const operatorAckDir = "flotilla-operator-acks"
 
 var operatorAckComponent = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
+
+// The detector dispatches mirrors asynchronously. Serialize the read-sort-commit
+// transaction per roster/seat so overlapping finish callbacks cannot consume the
+// same oldest relay. A deployment has a finite roster, so retaining these locks is
+// bounded by configured seat count.
+var operatorAckLocks sync.Map
 
 // OperatorAckRoot returns the durable marker root shared by confirmed relay,
 // finish-edge mirror, and unacked-backstop paths.
@@ -70,6 +78,12 @@ func AcknowledgeOperatorTurnFinal(root, agent string, at time.Time) (int, error)
 	if err := sessionmirror.ValidateAgentName(agent); err != nil {
 		return 0, fmt.Errorf("operator ack agent: %w", err)
 	}
+	lockKey := root + "\x00" + agent
+	lockValue, _ := operatorAckLocks.LoadOrStore(lockKey, &sync.Mutex{})
+	mu := lockValue.(*sync.Mutex)
+	mu.Lock()
+	defer mu.Unlock()
+
 	pendingRoot := filepath.Join(root, "pending", agent)
 	var paths []string
 	err := filepath.WalkDir(pendingRoot, func(path string, d os.DirEntry, walkErr error) error {
@@ -92,6 +106,7 @@ func AcknowledgeOperatorTurnFinal(root, agent string, at time.Time) (int, error)
 		rec  operatorAckRecord
 	}
 	pending := make([]pendingRecord, 0, len(paths))
+	var cleanupErr error
 	for _, path := range paths {
 		raw, err := os.ReadFile(path)
 		if err != nil {
@@ -109,14 +124,14 @@ func AcknowledgeOperatorTurnFinal(root, agent string, at time.Time) (int, error)
 		// the pending relay associated with this new turn.
 		if OperatorMessageAcknowledged(root, rec.ChannelID, rec.MessageID) {
 			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-				return 0, fmt.Errorf("recover consumed operator ack %q: %w", path, err)
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("recover consumed operator ack %q: %w", path, err))
 			}
 			continue
 		}
 		pending = append(pending, pendingRecord{path: path, rec: rec})
 	}
 	if len(pending) == 0 {
-		return 0, nil
+		return 0, cleanupErr
 	}
 	sort.Slice(pending, func(i, j int) bool {
 		if pending[i].rec.DeliveredAt.Equal(pending[j].rec.DeliveredAt) {
@@ -130,9 +145,9 @@ func AcknowledgeOperatorTurnFinal(root, agent string, at time.Time) (int, error)
 		return 0, err
 	}
 	if err := os.Remove(oldest.path); err != nil && !os.IsNotExist(err) {
-		return 0, fmt.Errorf("consume pending operator ack %q: %w", oldest.path, err)
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("consume pending operator ack %q: %w", oldest.path, err))
 	}
-	return 1, nil
+	return 1, cleanupErr
 }
 
 // OperatorMessageAcknowledged reports whether the mirror path recorded a

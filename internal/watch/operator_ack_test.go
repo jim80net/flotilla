@@ -1,8 +1,10 @@
 package watch
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -158,5 +160,79 @@ func TestOperatorAck_PrunesExpiredMarkers(t *testing.T) {
 	}
 	if !OperatorMessageAcknowledged(root, "C_ALPHA", "new") {
 		t.Fatal("recent marker must survive pruning")
+	}
+}
+
+func TestOperatorAck_ConcurrentFinishesConsumeDistinctRelays(t *testing.T) {
+	root := t.TempDir()
+	base := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
+	const total = 20
+	for i := 0; i < total; i++ {
+		id := fmt.Sprintf("message-%02d", i)
+		j := Job{Agent: "alpha-xo", Kind: KindRelay, MessageID: id, OriginChannel: "C_ALPHA"}
+		if err := TrackOperatorRelayAck(root, j, base.Add(time.Duration(i)*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var wg sync.WaitGroup
+	errCh := make(chan error, total)
+	for i := 0; i < total; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			n, err := AcknowledgeOperatorTurnFinal(root, "alpha-xo", base.Add(time.Hour+time.Duration(i)*time.Second))
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if n != 1 {
+				errCh <- fmt.Errorf("acknowledged %d relays, want 1", n)
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Error(err)
+	}
+	for i := 0; i < total; i++ {
+		id := fmt.Sprintf("message-%02d", i)
+		if !OperatorMessageAcknowledged(root, "C_ALPHA", id) {
+			t.Errorf("concurrent finishes did not acknowledge %s", id)
+		}
+	}
+}
+
+func TestOperatorAck_CleanupFailureDoesNotBlockCurrentPendingRelay(t *testing.T) {
+	root := t.TempDir()
+	base := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
+	old := Job{Agent: "alpha-xo", Kind: KindRelay, MessageID: "old", OriginChannel: "C_ALPHA"}
+	next := Job{Agent: "alpha-xo", Kind: KindRelay, MessageID: "next", OriginChannel: "C_ALPHA"}
+	for i, j := range []Job{old, next} {
+		if err := TrackOperatorRelayAck(root, j, base.Add(time.Duration(i)*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldRec := operatorAckRecord{
+		Agent: "alpha-xo", ChannelID: "C_ALPHA", MessageID: "old",
+		DeliveredAt: base, AcknowledgedAt: base.Add(time.Minute),
+	}
+	if err := writeOperatorAckRecord(operatorAckMarkerPath(root, "C_ALPHA", "old"), oldRec); err != nil {
+		t.Fatal(err)
+	}
+	pendingDir := filepath.Dir(operatorAckPendingPath(root, oldRec))
+	if err := os.Chmod(pendingDir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(pendingDir, 0o700) })
+	n, err := AcknowledgeOperatorTurnFinal(root, "alpha-xo", base.Add(2*time.Minute))
+	if err == nil {
+		t.Fatal("read-only pending directory should report cleanup failures")
+	}
+	if n != 1 {
+		t.Fatalf("acknowledged = %d, want 1 despite stale cleanup failure", n)
+	}
+	if !OperatorMessageAcknowledged(root, "C_ALPHA", "next") {
+		t.Fatal("stale cleanup failure blocked the current relay marker")
 	}
 }
