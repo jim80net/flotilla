@@ -84,21 +84,21 @@ func (openCode) RotateStrategy() Strategy { return SlashCommand }
 // because the caller has already preserved context. Mirrors grok's honest refusal.
 func (openCode) Close(pane string) error { return ErrNoGracefulClose }
 
-// --- ComposerStateProbe: OpenCode cursor-indexed composer classifier ---
+// --- ComposerStateProbe: OpenCode composer-row classifier ---
 
 // openCodeComposerBorder is the left border on every row of OpenCode's composer.
 // PROVENANCE: LIVE-CAPTURED 2026-07-13 from official OpenCode 1.3.15. With the
-// terminal cursor on the middle composer row, an empty draft renders `  ┃` and a
-// typed synthetic draft renders `  ┃  beta-probe`.
+// terminal cursor parked elsewhere in the pane, the idle composer row still
+// renders `  ┃` and a typed synthetic draft renders `  ┃  beta-probe`.
 const openCodeComposerBorder = "┃" // U+2503
 
 // openCodeEmptyPlaceholders are OpenCode's randomized fresh-session empty hints.
 // PROVENANCE: SOURCE-VERIFIED in the official OpenCode 1.3.15 binary, whose TUI
 // `normal` placeholder list contains exactly these three suffixes. The first two
 // forms were also LIVE-CAPTURED 2026-07-13. Keep this exact and version-scoped:
-// unknown wording is Pending, never guessed empty. In every live empty render,
-// cursorX stayed parked at the body start; typing replaced the hint and advanced
-// cursorX.
+// unknown wording is Pending, never guessed empty. The live idle desk may park
+// the cursor elsewhere, so the classifier finds the composer row by chrome, not
+// by cursor row.
 var openCodeEmptyPlaceholders = []string{
 	`Ask anything... "Fix a TODO in the codebase"`,
 	`Ask anything... "What is the tech stack of this project?"`,
@@ -106,7 +106,7 @@ var openCodeEmptyPlaceholders = []string{
 }
 
 // ComposerState implements ComposerStateProbe. Only an idle OpenCode frame and
-// the terminal-cursor row can prove a cleared composer. Working, approval, and
+// the visible composer row can prove a cleared composer. Working, approval, and
 // error chrome, tmux copy/view mode, and read failures remain Undetermined so
 // recycle and confirmed-delivery gates fail closed.
 func (c openCode) ComposerState(pane string) ComposerDisposition {
@@ -131,17 +131,27 @@ func (c openCode) ComposerState(pane string) ComposerDisposition {
 	return classifyHiddenOpenCodeComposer(captured, styled)
 }
 
-// classifyOpenCodeComposerLine classifies the 0-based terminal-cursor row. A
-// valid row must start with the live-characterized composer border. Text after
-// that border is a pending draft except for the exact fresh-session placeholder
-// while the cursor remains at the body start. An out-of-range or non-composer
-// row is Undetermined rather than a false Cleared result.
+// classifyOpenCodeComposerLine classifies the visible composer row. If the
+// cursor is actually on the composer row, we preserve the cursor-sensitive
+// distinction between an untouched placeholder and identical typed text. If
+// the cursor is parked elsewhere, we scan the pane for the composer row and
+// classify it from the rendered chrome instead of returning Undetermined.
 func classifyOpenCodeComposerLine(captured string, cursorX, cursorY int) ComposerDisposition {
 	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
-	if cursorY < 0 || cursorY >= len(lines) {
-		return ComposerUndetermined
+	if cursorY >= 0 && cursorY < len(lines) {
+		if disp := classifyOpenCodeComposerLineAt(lines[cursorY], cursorX); disp != ComposerUndetermined {
+			return disp
+		}
 	}
-	line := lines[cursorY]
+	for _, line := range lines {
+		if disp := classifyOpenCodeComposerLineAt(line, -1); disp != ComposerUndetermined {
+			return disp
+		}
+	}
+	return ComposerUndetermined
+}
+
+func classifyOpenCodeComposerLineAt(line string, cursorX int) ComposerDisposition {
 	borderAt := strings.Index(line, openCodeComposerBorder)
 	if borderAt < 0 {
 		return ComposerUndetermined
@@ -161,11 +171,13 @@ func classifyOpenCodeComposerLine(captured string, cursorX, cursorY int) Compose
 	if body == "" {
 		return ComposerCleared
 	}
-	// A fresh session paints placeholder text in the empty input. It is evidence
-	// of Cleared only while the cursor remains at the body start; an identical
-	// typed draft leaves the cursor after the text and therefore stays Pending.
-	bodyStartX := borderAt + 3 // ASCII-space prefix + border + two body spaces
-	if containsExact(body, openCodeEmptyPlaceholders) && cursorX == bodyStartX {
+	// A fresh session paints placeholder text in the empty input. It is
+	// evidence of Cleared only while the cursor remains at the body start; an
+	// identical typed draft leaves the cursor after the text and therefore stays
+	// Pending. When the cursor is not on the composer row, the fallback scan
+	// below still treats a live placeholder render as Cleared, which matches the
+	// observed idle desk.
+	if containsExact(body, openCodeEmptyPlaceholders) && (cursorX < 0 || cursorX == borderAt+3) {
 		return ComposerCleared
 	}
 	return ComposerPending
