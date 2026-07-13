@@ -2,6 +2,7 @@ package surface
 
 import (
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/jim80net/flotilla/internal/deliver"
@@ -184,6 +185,10 @@ func classifyHiddenOpenCodeComposer(captured, styled string) ComposerDisposition
 	if len(lines) != len(styledLines) {
 		return ComposerUndetermined
 	}
+	// The composer is the last consecutive border block in OpenCode 1.3.15:
+	// conversation content renders above it, while footer/status chrome below it
+	// is unbordered. Requiring at least the padding, input, and metadata rows
+	// prevents a quoted single border line from being mistaken for the composer.
 	start, runStart, runLen := -1, -1, 0
 	for i, line := range lines {
 		if strings.HasPrefix(trimSpace(line), openCodeComposerBorder) {
@@ -279,8 +284,10 @@ func sgrForeground(params, current string) string {
 				i += 4
 			}
 		default:
-			if (parts[i] >= "30" && parts[i] <= "37") || (parts[i] >= "90" && parts[i] <= "97") {
-				current = parts[i]
+			if n, err := strconv.Atoi(parts[i]); err == nil {
+				if (n >= 30 && n <= 37) || (n >= 90 && n <= 97) {
+					current = parts[i]
+				}
 			}
 		}
 	}

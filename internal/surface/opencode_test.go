@@ -2,6 +2,7 @@ package surface
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -120,6 +121,29 @@ func TestOpenCodeComposerStateHiddenCursorUsesStyledBlock(t *testing.T) {
 	}
 	if got := o.ComposerState("alpha"); got != ComposerCleared {
 		t.Fatalf("ComposerState = %v, want Cleared for hidden cursor + styled empty placeholder", got)
+	}
+}
+
+func TestDecodeSGRForeground(t *testing.T) {
+	cases := []struct {
+		name, input, wantText string
+		wantFG                []string
+	}{
+		{"standard", "\x1b[31mred", "red", []string{"31", "31", "31"}},
+		{"256 color", "\x1b[38;5;200mx", "x", []string{"38;5;200"}},
+		{"true color", "\x1b[38;2;255;128;64mx", "x", []string{"38;2;255;128;64"}},
+		{"combined reset and color", "\x1b[0;31mx", "x", []string{"31"}},
+		{"bold then color", "\x1b[1;31mx", "x", []string{"31"}},
+		{"non SGR ignored", "a\x1b[2Kb", "ab", []string{"default", "default"}},
+		{"malformed escape retained", "a\x1b[", "a\x1b[", []string{"default", "default", "default"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			text, fg := decodeSGRForeground(tc.input)
+			if text != tc.wantText || !reflect.DeepEqual(fg, tc.wantFG) {
+				t.Fatalf("decodeSGRForeground = (%q, %v), want (%q, %v)", text, fg, tc.wantText, tc.wantFG)
+			}
+		})
 	}
 }
 
