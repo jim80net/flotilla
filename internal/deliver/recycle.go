@@ -70,6 +70,20 @@ func HandoffAbsentAtHead(cwd, designatedPath string) (bool, error) {
 	return false, nil
 }
 
+// RemoveHandoff removes exactly the recycle-designated file after a
+// coordinator-cleanup takeover has confirmed its read turn completed. Path
+// validation is identical to the durability gates; os.Remove never follows a
+// final symlink, so a replaced handoff cannot redirect deletion elsewhere.
+func RemoveHandoff(cwd, designatedPath string) error {
+	if err := validateHandoffPath(cwd, designatedPath); err != nil {
+		return err
+	}
+	if err := os.Remove(designatedPath); err != nil {
+		return fmt.Errorf("remove handoff %q: %w", designatedPath, err)
+	}
+	return nil
+}
+
 // StampRecycleGen records the @flotilla_recycle_gen marker (this recycle's unique token) on a
 // pane, read-back-verified à la TagPane so a dropped set-option surfaces rather than silently
 // leaving the gen unstamped (which would weaken the at-most-once-takeover guard).

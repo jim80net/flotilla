@@ -60,6 +60,33 @@ func CapturePane(target string) (string, error) {
 	return string(out), nil
 }
 
+// CapturePaneStyled returns the visible pane with SGR style escapes retained.
+// OpenCode uses this only when tmux reports its application cursor hidden: the
+// placeholder color then distinguishes rendered empty hint text from an
+// identical user-authored draft without focusing or writing to the pane.
+func CapturePaneStyled(target string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "tmux", "capture-pane", "-p", "-e", "-t", target).Output()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+// CapturePaneHistory returns the pane's retained scrollback plus its visible
+// frame. Coordinator-cleanup recycle uses it to confirm the transaction-unique
+// load acknowledgement appears after the prompt's first occurrence.
+func CapturePaneHistory(target string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "tmux", "capture-pane", "-p", "-S", "-", "-t", target).Output()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
 // CursorState returns the tmux pane's cursor ROW (`#{cursor_y}`, 0-based from the top of the visible
 // pane — the SAME indexing as the lines `CapturePane` returns, so `capturedLines[cursorY]` is the
 // line the cursor sits on) AND whether the pane is in a tmux MODE (`#{pane_in_mode}`: copy-mode,
@@ -74,21 +101,42 @@ func CapturePane(target string) (string, error) {
 // So the caller MUST treat inMode=true as undetermined (fall back to the spinner — fail-safe). A
 // read error propagates for the same fallback.
 func CursorState(target string) (cursorY int, inMode bool, err error) {
+	_, cursorY, inMode, err = CursorPosition(target)
+	return cursorY, inMode, err
+}
+
+// CursorPosition reports the terminal cursor coordinates and whether tmux is in
+// copy/view mode. CursorState remains the row-only compatibility wrapper used by
+// most surfaces; OpenCode also needs cursorX to distinguish its rendered empty
+// placeholder from a user-authored draft with the same visible line shape.
+func CursorPosition(target string) (cursorX, cursorY int, inMode bool, err error) {
+	cursorX, cursorY, _, inMode, err = CursorSnapshot(target)
+	return
+}
+
+// CursorSnapshot adds tmux's cursor visibility bit to CursorPosition. An
+// unattached OpenCode session hides the terminal cursor and leaves its
+// coordinates at the bottom-right sentinel even while the composer is focused.
+func CursorSnapshot(target string) (cursorX, cursorY int, visible, inMode bool, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "tmux", "display-message", "-p", "-t", target, "#{cursor_y} #{pane_in_mode}").Output()
+	out, err := exec.CommandContext(ctx, "tmux", "display-message", "-p", "-t", target, "#{cursor_x} #{cursor_y} #{cursor_flag} #{pane_in_mode}").Output()
 	if err != nil {
-		return 0, false, err
+		return 0, 0, false, false, err
 	}
 	fields := strings.Fields(string(out))
-	if len(fields) != 2 {
-		return 0, false, fmt.Errorf("unexpected cursor-state output %q", strings.TrimSpace(string(out)))
+	if len(fields) != 4 {
+		return 0, 0, false, false, fmt.Errorf("unexpected cursor-position output %q", strings.TrimSpace(string(out)))
 	}
-	n, err := strconv.Atoi(fields[0])
+	x, err := strconv.Atoi(fields[0])
 	if err != nil {
-		return 0, false, fmt.Errorf("parse cursor_y %q: %w", fields[0], err)
+		return 0, 0, false, false, fmt.Errorf("parse cursor_x %q: %w", fields[0], err)
 	}
-	return n, fields[1] == "1", nil
+	y, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return 0, 0, false, false, fmt.Errorf("parse cursor_y %q: %w", fields[1], err)
+	}
+	return x, y, fields[2] == "1", fields[3] == "1", nil
 }
 
 // ParseBusy is the testable core: true when the captured pane shows an active

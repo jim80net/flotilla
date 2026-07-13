@@ -2,6 +2,8 @@ package surface
 
 import (
 	"errors"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -10,6 +12,182 @@ func TestOpenCodeRegistered(t *testing.T) {
 	if !ok || d.Name() != "opencode" {
 		t.Errorf(`Get("opencode") = (%v, %v), want the opencode driver`, d, ok)
 	}
+}
+
+func TestOpenCodeRecycleCapabilities(t *testing.T) {
+	var _ RecycleBridge = openCode{}
+	var _ CoordinatorCleanupBridge = openCode{}
+	var _ ComposerStateProbe = openCode{}
+
+	o := newOpenCode()
+	path := o.HandoffPath("/home/operator/work/project", "20260713T120000.000000001-abcd1234")
+	want := "/home/operator/work/project/.flotilla/handoffs/recycle-20260713T120000.000000001-abcd1234.md"
+	if path != want {
+		t.Fatalf("HandoffPath = %q, want %q", path, want)
+	}
+	handoff := o.HandoffTurn(path)
+	if !strings.HasPrefix(handoff, PortableMarkdownHandoffTurn(path)) {
+		t.Fatal("HandoffTurn must use the shared portable-markdown handoff")
+	}
+	for _, must := range []string{"use the context already in this session", "Do NOT inspect the worktree", "only tool operation", path} {
+		if !strings.Contains(handoff, must) {
+			t.Fatalf("HandoffTurn missing OpenCode no-discovery constraint %q", must)
+		}
+	}
+	takeover := o.TakeoverTurn(path)
+	if takeover != CoordinatorCleanupTakeoverTurn(path) {
+		t.Fatal("TakeoverTurn must use the coordinator-cleanup load turn")
+	}
+	for _, must := range []string{"native file-read tool", "Do NOT delete", "do NOT begin work yet", path} {
+		if !strings.Contains(takeover, must) {
+			t.Fatalf("TakeoverTurn missing OpenCode read-only constraint %q", must)
+		}
+	}
+	ack := o.TakeoverAck(path)
+	if !strings.HasPrefix(ack, "FLOTILLA_CHAPTER_LOADED_") || strings.Count(takeover, ack) != 1 {
+		t.Fatalf("takeover acknowledgement %q must appear exactly once in prompt", ack)
+	}
+	if got := o.BeginWorkTurn(); got != CoordinatorCleanupBeginWorkTurn() || !strings.Contains(got, "BEGIN WORK") {
+		t.Fatalf("BeginWorkTurn = %q", got)
+	}
+}
+
+func TestClassifyOpenCodeComposerLine(t *testing.T) {
+	// Generic normalized fixtures from the LIVE-CAPTURED OpenCode 1.3.15
+	// composer marker. The draft text is synthetic.
+	cases := []struct {
+		name     string
+		captured string
+		cursorX  int
+		cursorY  int
+		want     ComposerDisposition
+	}{
+		{"empty composer", "output\n  ┃\nfooter", 4, 1, ComposerCleared},
+		{"fresh placeholder at body start", "output\n  ┃  Ask anything... \"Fix a TODO in the codebase\"\nfooter", 5, 1, ComposerCleared},
+		{"randomized placeholder at body start", "output\n  ┃  Ask anything... \"What is the tech stack of this project?\"\nfooter", 5, 1, ComposerCleared},
+		{"source-verified third placeholder", "output\n  ┃  Ask anything... \"Fix broken tests\"\nfooter", 5, 1, ComposerCleared},
+		{"unknown placeholder wording fails closed", "output\n  ┃  Ask anything... \"Uncharacterized example\"\nfooter", 5, 1, ComposerPending},
+		{"same text typed with cursor advanced", "output\n  ┃  Ask anything... \"Fix a TODO in the codebase\"\nfooter", 48, 1, ComposerPending},
+		{"pending draft", "output\n  ┃  beta-probe\nfooter", 14, 1, ComposerPending},
+		{"wide prefix fails closed", "output\n界  ┃  Ask anything... \"Fix a TODO in the codebase\"\nfooter", 7, 1, ComposerUndetermined},
+		{"non-composer row", "output\nAllow once\nfooter", 0, 1, ComposerUndetermined},
+		{"cursor above capture", "  ┃", 4, -1, ComposerUndetermined},
+		{"cursor below capture", "  ┃", 4, 1, ComposerUndetermined},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyOpenCodeComposerLine(tc.captured, tc.cursorX, tc.cursorY); got != tc.want {
+				t.Fatalf("classifyOpenCodeComposerLine = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestClassifyHiddenOpenCodeComposer(t *testing.T) {
+	placeholder := `Ask anything... "Fix a TODO in the codebase"`
+	plain := "output\n  ┃\n  ┃  " + placeholder + "\n  ┃\n  ┃  Build  alpha-model\nfooter"
+	styledPlaceholder := "output\n  ┃\n\x1b[38;2;255;255;255m  ┃  \x1b[38;2;49;49;49m" + placeholder + "\n  ┃\n  ┃  Build  alpha-model\nfooter"
+	styledDraft := "output\n  ┃\n\x1b[38;2;255;255;255m  ┃  " + placeholder + "\n  ┃\n  ┃  Build  alpha-model\nfooter"
+
+	cases := []struct {
+		name, captured, styled string
+		want                   ComposerDisposition
+	}{
+		{"muted placeholder is empty", plain, styledPlaceholder, ComposerCleared},
+		{"identical typed text stays pending", plain, styledDraft, ComposerPending},
+		{"blank session input is empty", "output\n  ┃\n  ┃\n  ┃\n  ┃  Build  alpha-model\nfooter", "output\n  ┃\n  ┃\n  ┃\n  ┃  Build  alpha-model\nfooter", ComposerCleared},
+		{"ordinary draft stays pending", "output\n  ┃\n  ┃  beta-probe\n  ┃\n  ┃  Build  alpha-model\nfooter", "output\n  ┃\n  ┃  beta-probe\n  ┃\n  ┃  Build  alpha-model\nfooter", ComposerPending},
+		{"unrecognized layout fails closed", "output\nfooter", "output\nfooter", ComposerUndetermined},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyHiddenOpenCodeComposer(tc.captured, tc.styled); got != tc.want {
+				t.Fatalf("classifyHiddenOpenCodeComposer = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestOpenCodeComposerStateHiddenCursorUsesStyledBlock(t *testing.T) {
+	placeholder := `Ask anything... "Fix a TODO in the codebase"`
+	plain := "output\n  ┃\n  ┃  " + placeholder + "\n  ┃\n  ┃  Build  alpha-model\nfooter"
+	o := openCode{
+		cursorSnapshot: func(string) (int, int, bool, bool, error) { return 120, 40, false, false, nil },
+		capturePane:    func(string) (string, error) { return plain, nil },
+		captureStyled: func(string) (string, error) {
+			return "output\n  ┃\n\x1b[38;2;255;255;255m  ┃  \x1b[38;2;49;49;49m" + placeholder + "\n  ┃\n  ┃  Build  alpha-model\nfooter", nil
+		},
+		classify: parseOpenCodeState,
+	}
+	if got := o.ComposerState("alpha"); got != ComposerCleared {
+		t.Fatalf("ComposerState = %v, want Cleared for hidden cursor + styled empty placeholder", got)
+	}
+}
+
+func TestDecodeSGRForeground(t *testing.T) {
+	cases := []struct {
+		name, input, wantText string
+		wantFG                []string
+	}{
+		{"standard", "\x1b[31mred", "red", []string{"31", "31", "31"}},
+		{"256 color", "\x1b[38;5;200mx", "x", []string{"38;5;200"}},
+		{"true color", "\x1b[38;2;255;128;64mx", "x", []string{"38;2;255;128;64"}},
+		{"combined reset and color", "\x1b[0;31mx", "x", []string{"31"}},
+		{"bold then color", "\x1b[1;31mx", "x", []string{"31"}},
+		{"non SGR ignored", "a\x1b[2Kb", "ab", []string{"default", "default"}},
+		{"malformed escape retained", "a\x1b[", "a\x1b[", []string{"default", "default", "default"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			text, fg := decodeSGRForeground(tc.input)
+			if text != tc.wantText || !reflect.DeepEqual(fg, tc.wantFG) {
+				t.Fatalf("decodeSGRForeground = (%q, %v), want (%q, %v)", text, fg, tc.wantText, tc.wantFG)
+			}
+		})
+	}
+}
+
+func TestOpenCodeComposerStateWiring(t *testing.T) {
+	t.Run("idle empty composer is cleared", func(t *testing.T) {
+		o := openCode{
+			cursorSnapshot: func(string) (int, int, bool, bool, error) { return 4, 1, true, false, nil },
+			capturePane:    func(string) (string, error) { return "output\n  ┃\nfooter", nil },
+			classify:       parseOpenCodeState,
+		}
+		if got := o.ComposerState("alpha"); got != ComposerCleared {
+			t.Fatalf("ComposerState = %v, want Cleared", got)
+		}
+	})
+
+	t.Run("approval frame is undetermined", func(t *testing.T) {
+		o := openCode{
+			cursorSnapshot: func(string) (int, int, bool, bool, error) { return 4, 1, true, false, nil },
+			capturePane: func(string) (string, error) {
+				return "Permission required\n  ┃\nAllow once", nil
+			},
+			classify: parseOpenCodeState,
+		}
+		if got := o.ComposerState("alpha"); got != ComposerUndetermined {
+			t.Fatalf("ComposerState = %v, want Undetermined", got)
+		}
+	})
+
+	t.Run("copy mode and read failures are undetermined", func(t *testing.T) {
+		boom := errors.New("tmux boom")
+		cases := []openCode{
+			{cursorSnapshot: func(string) (int, int, bool, bool, error) { return 0, 0, true, true, nil }},
+			{cursorSnapshot: func(string) (int, int, bool, bool, error) { return 0, 0, false, false, boom }},
+			{
+				cursorSnapshot: func(string) (int, int, bool, bool, error) { return 0, 0, true, false, nil },
+				capturePane:    func(string) (string, error) { return "", boom },
+			},
+		}
+		for i, o := range cases {
+			if got := o.ComposerState("alpha"); got != ComposerUndetermined {
+				t.Fatalf("case %d ComposerState = %v, want Undetermined", i, got)
+			}
+		}
+	})
 }
 
 func TestParseOpenCodeState(t *testing.T) {
