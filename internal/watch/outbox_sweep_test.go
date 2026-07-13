@@ -30,7 +30,7 @@ func TestOutboxSweeperEnqueuesPending(t *testing.T) {
 	var n atomic.Int32
 	s := NewOutboxSweeper(dir, func(j Job) {
 		n.Add(1)
-		if j.Kind != KindSend || j.Sender != "alpha" || j.Agent != "cos" {
+		if j.Kind != KindSend || j.Sender != "alpha" || j.Agent != "cos" || j.Epoch != 1 || !j.OutboxBound {
 			t.Errorf("job = %+v", j)
 		}
 	})
@@ -47,6 +47,57 @@ func TestOutboxSweeperEnqueuesPending(t *testing.T) {
 	s.Release("alpha", outbox.ListAll(dir)[0].ID)
 	if s.SweepAll() != 1 {
 		t.Fatal("after release, entry should be swept again")
+	}
+}
+
+func TestCanceledJobAlreadyQueuedInInjectorNeverDelivers(t *testing.T) {
+	dir := t.TempDir()
+	id, _, err := outbox.Enqueue(dir, "alpha-desk", "alpha-xo", "stand down this task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var swept Job
+	s := NewOutboxSweeper(dir, func(j Job) { swept = j })
+	if s.SweepAll() != 1 {
+		t.Fatal("expected one swept job")
+	}
+	if _, err := outbox.Cancel(dir, id); err != nil {
+		t.Fatal(err)
+	}
+
+	var sends atomic.Int32
+	in := NewInjector(func(_, _ string) error {
+		sends.Add(1)
+		return nil
+	}, 1)
+	in.SetRosterDir(dir)
+	in.SetOutboxDone(s.Release)
+	in.deliver(swept)
+	if sends.Load() != 0 {
+		t.Fatalf("canceled queued job sent %d time(s)", sends.Load())
+	}
+	if s.SweepAll() != 0 {
+		t.Fatal("canceled job must not reappear on a later sweep")
+	}
+}
+
+func TestSweepPreservesQueueOrderWithinCurrentEpoch(t *testing.T) {
+	dir := t.TempDir()
+	first, _, err := outbox.Enqueue(dir, "alpha-desk", "alpha-xo", "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := outbox.Enqueue(dir, "alpha-desk", "alpha-xo", "second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	s := NewOutboxSweeper(dir, func(j Job) { ids = append(ids, j.MessageID) })
+	if s.SweepAll() != 2 {
+		t.Fatal("expected two current jobs")
+	}
+	if len(ids) != 2 || ids[0] != first || ids[1] != second {
+		t.Fatalf("sweep order = %v, want [%s %s]", ids, first, second)
 	}
 }
 

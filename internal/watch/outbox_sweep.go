@@ -30,6 +30,10 @@ func (s *OutboxSweeper) SweepAll() int {
 	pending := outbox.ListAll(s.rosterDir)
 	n := 0
 	for _, e := range pending {
+		if !outbox.Current(s.rosterDir, e) {
+			log.Printf("flotilla watch: skipped canceled or superseded send %s from %q to %q (epoch %d)", e.ID, e.Sender, e.Recipient, e.Epoch)
+			continue
+		}
 		key := entryKey(e.Sender, e.ID)
 		if _, loaded := s.inFlight.LoadOrStore(key, struct{}{}); loaded {
 			continue
@@ -40,6 +44,8 @@ func (s *OutboxSweeper) SweepAll() int {
 			Kind:                KindSend,
 			MessageID:           e.ID,
 			Sender:              e.Sender,
+			Epoch:               e.Epoch,
+			OutboxBound:         true,
 			deferrals:           e.Deferrals,
 			enqueuedAt:          e.EnqueuedAt,
 			lastStaleEscalation: e.LastStaleEscalation,

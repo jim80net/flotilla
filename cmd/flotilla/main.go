@@ -40,6 +40,8 @@ func run(args []string) error {
 	switch args[0] {
 	case "send":
 		return cmdSend(args[1:])
+	case "cancel":
+		return cmdCancel(args[1:])
 	case "dispatch-status":
 		return cmdDispatchStatus(args[1:])
 	case "notify":
@@ -105,6 +107,7 @@ func usage() {
 usage:
   flotilla send --from <sender> <agent> <message>     inline message
   flotilla send --from <sender> --file <path> <agent> message body from a file ('-' = stdin)
+  flotilla cancel <outbox-id> [--roster <path>]       stand down the pending sender→recipient generation
   flotilla dispatch-status [--roster <path>] <nonce>  consumed / queued / delivered / undelivered (#614)
   flotilla notify --from <agent> <message>            post to the operator under <agent>'s webhook (no tmux)
   flotilla notify --from <agent> --file <path>        notify body from a file ('-' = stdin)

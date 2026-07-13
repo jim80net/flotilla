@@ -26,13 +26,23 @@ type Entry struct {
 	Sender              string    `json:"sender"`
 	Recipient           string    `json:"recipient"`
 	Message             string    `json:"message"`
+	Epoch               uint64    `json:"epoch,omitempty"`
 	Deferrals           int       `json:"deferrals"`
 	EnqueuedAt          time.Time `json:"enqueued_at"`
 	LastStaleEscalation time.Time `json:"last_stale_escalation,omitzero"` // exactly-once coordinator alert (#477)
 }
 
 type file struct {
-	Pending []Entry `json:"pending"`
+	Pending []Entry           `json:"pending"`
+	Epochs  map[string]uint64 `json:"epochs,omitempty"`
+}
+
+// CancelResult describes the sender→recipient generation stood down by Cancel.
+type CancelResult struct {
+	Sender    string
+	Recipient string
+	Canceled  int
+	Epoch     uint64
 }
 
 // Store is a disk-backed outbox at a single sender's path.
@@ -84,6 +94,7 @@ func (s Store) Load() []Entry {
 		if e.ID == "" || e.Sender == "" || e.Recipient == "" || e.Message == "" {
 			continue
 		}
+		e.Epoch = effectiveEpoch(e.Epoch)
 		out = append(out, e)
 	}
 	return out
@@ -108,8 +119,9 @@ func (s Store) Insert(e Entry) (id string, deduped bool, err error) {
 			log.Printf("flotilla outbox: read for insert failed: %v (inserting single entry)", rerr)
 			f = file{}
 		}
+		e.Epoch = currentEpoch(f, e.Recipient)
 		for _, p := range f.Pending {
-			if p.Recipient == e.Recipient && messageHash(p.Message) == hash {
+			if p.Recipient == e.Recipient && effectiveEpoch(p.Epoch) == e.Epoch && messageHash(p.Message) == hash {
 				id = p.ID
 				deduped = true
 				return nil
@@ -129,6 +141,152 @@ func (s Store) Insert(e Entry) (id string, deduped bool, err error) {
 		log.Printf("flotilla outbox: send already queued as %s (%s→%s)", id, e.Sender, e.Recipient)
 	}
 	return id, deduped, nil
+}
+
+// Cancel advances the durable epoch for the sender→recipient pair containing id and
+// removes every queued entry in that generation. A later send to the same recipient is
+// stamped with the new epoch; already-swept jobs from the old epoch therefore fail Current.
+func Cancel(rosterDir, id string) (CancelResult, error) {
+	if rosterDir == "" || id == "" {
+		return CancelResult{}, fmt.Errorf("outbox cancel: id not found")
+	}
+	matches, err := filepath.Glob(filepath.Join(rosterDir, "flotilla-*-outbox.json"))
+	if err != nil {
+		return CancelResult{}, fmt.Errorf("outbox cancel: scan: %w", err)
+	}
+	var paths []string
+	for _, path := range matches {
+		for _, e := range NewStore(path).Load() {
+			if e.ID == id {
+				paths = append(paths, path)
+				break
+			}
+		}
+	}
+	if len(paths) == 0 {
+		return CancelResult{}, fmt.Errorf("outbox cancel: id %q not found", id)
+	}
+	if len(paths) > 1 {
+		return CancelResult{}, fmt.Errorf("outbox cancel: id %q is ambiguous across %d sender outboxes", id, len(paths))
+	}
+
+	st := NewStore(paths[0])
+	var result CancelResult
+	err = st.withLock(func() error {
+		f, err := st.readFileForUpdate()
+		if err != nil {
+			return err
+		}
+		var target *Entry
+		for i := range f.Pending {
+			if f.Pending[i].ID == id {
+				target = &f.Pending[i]
+				break
+			}
+		}
+		if target == nil {
+			return fmt.Errorf("id %q no longer pending", id)
+		}
+		result.Sender = target.Sender
+		result.Recipient = target.Recipient
+		current := currentEpoch(f, target.Recipient)
+		result.Epoch = current + 1
+		if f.Epochs == nil {
+			f.Epochs = make(map[string]uint64)
+		}
+		f.Epochs[target.Recipient] = result.Epoch
+		next := f.Pending[:0]
+		for _, p := range f.Pending {
+			if p.Recipient == target.Recipient && effectiveEpoch(p.Epoch) <= current {
+				result.Canceled++
+				continue
+			}
+			next = append(next, p)
+		}
+		f.Pending = next
+		return st.save(f)
+	})
+	if err != nil {
+		return CancelResult{}, fmt.Errorf("outbox cancel: %w", err)
+	}
+	return result, nil
+}
+
+// Current reports whether e is still pending in the active sender→recipient epoch.
+// It is used both by the watch sweep and immediately before injector delivery.
+func Current(rosterDir string, e Entry) bool {
+	path, err := Path(rosterDir, e.Sender)
+	if err != nil {
+		return false
+	}
+	st := NewStore(path)
+	current := false
+	if err := st.withLock(func() error {
+		f, err := st.readFileForUpdate()
+		if err != nil {
+			return err
+		}
+		wantEpoch := effectiveEpoch(e.Epoch)
+		if currentEpoch(f, e.Recipient) != wantEpoch {
+			return nil
+		}
+		for _, pending := range f.Pending {
+			if pending.ID == e.ID && pending.Recipient == e.Recipient && effectiveEpoch(pending.Epoch) == wantEpoch {
+				current = true
+				break
+			}
+		}
+		return nil
+	}); err != nil {
+		log.Printf("flotilla outbox: current check failed for %s/%s: %v", e.Sender, e.ID, err)
+		return false
+	}
+	return current
+}
+
+// AttemptCurrent linearizes a delivery attempt with Cancel under the sender outbox
+// lock. If the entry is no longer current, attempt is not called. A confirmed attempt
+// (nil error) removes the entry before releasing the lock; a failed/busy attempt leaves
+// it pending. Thus a successful Cancel cannot race between an epoch check and send.
+func AttemptCurrent(rosterDir string, e Entry, attempt func() error) (bool, error) {
+	path, err := Path(rosterDir, e.Sender)
+	if err != nil {
+		return false, err
+	}
+	st := NewStore(path)
+	attempted := false
+	var attemptErr error
+	err = st.withLock(func() error {
+		f, err := st.readFileForUpdate()
+		if err != nil {
+			return err
+		}
+		wantEpoch := effectiveEpoch(e.Epoch)
+		if currentEpoch(f, e.Recipient) != wantEpoch {
+			return nil
+		}
+		index := -1
+		for i, pending := range f.Pending {
+			if pending.ID == e.ID && pending.Recipient == e.Recipient && effectiveEpoch(pending.Epoch) == wantEpoch {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			return nil
+		}
+		attempted = true
+		attemptErr = attempt()
+		if attemptErr != nil {
+			return nil
+		}
+		f.Pending = append(f.Pending[:index], f.Pending[index+1:]...)
+		return st.save(f)
+	})
+	if err != nil {
+		return attempted, fmt.Errorf("outbox delivery transaction: %w", err)
+	}
+	return attempted, attemptErr
 }
 
 // Update persists deferral bumps and stale-escalation markers on an existing entry by id (#484).
@@ -240,10 +398,33 @@ func entryMateriallyChanged(prev, next Entry) bool {
 	if prev.Deferrals != next.Deferrals {
 		return true
 	}
+	if effectiveEpoch(prev.Epoch) != effectiveEpoch(next.Epoch) {
+		return true
+	}
 	if !prev.LastStaleEscalation.Equal(next.LastStaleEscalation) {
 		return true
 	}
 	return false
+}
+
+func effectiveEpoch(epoch uint64) uint64 {
+	if epoch == 0 {
+		return 1
+	}
+	return epoch
+}
+
+func currentEpoch(f file, recipient string) uint64 {
+	current := uint64(1)
+	if epoch := f.Epochs[recipient]; epoch > current {
+		current = epoch
+	}
+	for _, e := range f.Pending {
+		if e.Recipient == recipient && effectiveEpoch(e.Epoch) > current {
+			current = effectiveEpoch(e.Epoch)
+		}
+	}
+	return current
 }
 
 func (s Store) readFileForUpdate() (file, error) {
