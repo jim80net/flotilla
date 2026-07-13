@@ -576,20 +576,29 @@
   function renderMobileOutline(goals) {
     var outline = q("goals-mobile-outline");
     if (!outline) return;
-    var byId = {}, depthMemo = {};
-    goals.forEach(function (n) { byId[n.id] = n; });
-    function outlineDepth(n, seen) {
-      if (depthMemo[n.id] !== undefined) return depthMemo[n.id];
-      if (!n.parent || !byId[n.parent] || seen[n.id]) return 0;
-      var next = Object.assign({}, seen); next[n.id] = true;
-      return (depthMemo[n.id] = outlineDepth(byId[n.parent], next) + 1);
+    var byId = {}, kids = {}, roots = [], ordered = [], seen = {};
+    goals.forEach(function (n) { byId[n.id] = n; kids[n.id] = []; });
+    goals.forEach(function (n) {
+      if (n.parent && byId[n.parent] && n.parent !== n.id) kids[n.parent].push(n);
+      else roots.push(n);
+    });
+    function append(n, depth) {
+      if (seen[n.id]) return;
+      seen[n.id] = true;
+      ordered.push({ node: n, depth: depth });
+      sequenceOrder(kids[n.id] || []).forEach(function (child) { append(child, depth + 1); });
     }
-    outline.innerHTML = goals.map(function (n) {
+    sequenceOrder(roots).forEach(function (n) { append(n, 0); });
+    // A parent cycle has no root. The server rejects those, but append every remaining
+    // node defensively so a partial response never makes a goal silently disappear.
+    goals.forEach(function (n) { append(n, 0); });
+    outline.innerHTML = ordered.map(function (entry) {
+      var n = entry.node;
       var vis = visToken(n), hue = limbStroke(n.id);
       var tone = hue ? "--outline-tone:" + hue + ";" : "";
       return '<button type="button" class="goutline-row" data-outline-id="' + escapeHtml(n.id) +
-        '" role="treeitem" aria-level="' + (outlineDepth(n, {}) + 1) + '" style="--outline-depth:' +
-        outlineDepth(n, {}) + ";" + tone + '">' +
+        '" role="treeitem" aria-level="' + (entry.depth + 1) + '" style="--outline-depth:' +
+        entry.depth + ";" + tone + '">' +
         '<span class="goutline-title">' + escapeHtml(n.title || n.id) + "</span>" +
         '<span class="goutline-scope">' + escapeHtml(scopeNoun(n)) + "</span>" +
         '<span class="goutline-state">' + escapeHtml(STATE_LABEL[vis] || vis) + "</span>" +

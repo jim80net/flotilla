@@ -1895,7 +1895,7 @@ func TestGoalsMobileOutline672(t *testing.T) {
 	if !strings.Contains(html, `id="goals-mobile-outline"`) {
 		t.Fatal("goals page must host the #672 mobile hierarchy outline")
 	}
-	for _, marker := range []string{"function renderMobileOutline", "data-outline-id", "outlineDepth", "nodeActivate(row.getAttribute"} {
+	for _, marker := range []string{"function renderMobileOutline", "data-outline-id", "sequenceOrder(roots)", "nodeActivate(row.getAttribute"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("goals.js must render and activate the mobile hierarchy outline (missing %q) — #672", marker)
 		}
