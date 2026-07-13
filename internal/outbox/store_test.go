@@ -187,6 +187,33 @@ func TestUpdatePersistsDeferralsBump(t *testing.T) {
 	}
 }
 
+func TestUpdatePreservesImmutableDeliveryIdentity674(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(mustPath(t, dir, "alpha-xo"))
+	original := Entry{
+		ID: "immutable", Sender: "alpha-xo", Recipient: "cos", Message: "original",
+		Epoch: 1, Deferrals: 1, EnqueuedAt: time.Now().UTC(),
+	}
+	if _, _, err := s.Insert(original); err != nil {
+		t.Fatal(err)
+	}
+	mutated := original
+	mutated.Sender = "cos-adj"
+	mutated.Recipient = "cos-adj"
+	mutated.Message = "rewritten"
+	mutated.Epoch = 99
+	mutated.Deferrals = 2
+	s.Update(mutated)
+
+	got := s.Load()[0]
+	if got.Sender != original.Sender || got.Recipient != original.Recipient || got.Message != original.Message || got.Epoch != original.Epoch {
+		t.Fatalf("Update changed immutable delivery identity: %+v", got)
+	}
+	if got.Deferrals != 2 {
+		t.Fatalf("Update did not persist mutable bookkeeping: %+v", got)
+	}
+}
+
 func TestUpdateDoesNotAppendUnknownID(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStore(mustPath(t, dir, "xo"))

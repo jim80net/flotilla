@@ -17,13 +17,14 @@ type relayQueueFile struct {
 }
 
 type pendingRelay struct {
-	MessageID      string    `json:"message_id"`
-	Agent          string    `json:"agent"`
-	Message        string    `json:"message"`
-	OriginChannel  string    `json:"origin_channel,omitempty"`
-	Deferrals      int       `json:"deferrals"`
-	EnqueuedAt     time.Time `json:"enqueued_at"`
-	LastStaleAlert time.Time `json:"last_stale_alert_at,omitempty"`
+	MessageID         string    `json:"message_id"`
+	Agent             string    `json:"agent"`
+	IntendedRecipient string    `json:"intended_recipient,omitempty"`
+	Message           string    `json:"message"`
+	OriginChannel     string    `json:"origin_channel,omitempty"`
+	Deferrals         int       `json:"deferrals"`
+	EnqueuedAt        time.Time `json:"enqueued_at"`
+	LastStaleAlert    time.Time `json:"last_stale_alert_at,omitempty"`
 }
 
 type relayQueueStore struct {
@@ -95,15 +96,16 @@ func (s relayQueueStore) load() []Job {
 			continue
 		}
 		out = append(out, Job{
-			MessageID:       p.MessageID,
-			Agent:           p.Agent,
-			Message:         p.Message,
-			Kind:            KindRelay,
-			OriginChannel:   p.OriginChannel,
-			deferrals:       p.Deferrals,
-			enqueuedAt:      p.EnqueuedAt,
-			lastStaleAlert:  p.LastStaleAlert,
-			ingressResolved: true, // disk holds leader-path jobs post-Apply (#592)
+			MessageID:         p.MessageID,
+			Agent:             p.Agent,
+			IntendedRecipient: p.IntendedRecipient,
+			Message:           p.Message,
+			Kind:              KindRelay,
+			OriginChannel:     p.OriginChannel,
+			deferrals:         p.Deferrals,
+			enqueuedAt:        p.EnqueuedAt,
+			lastStaleAlert:    p.LastStaleAlert,
+			ingressResolved:   true, // disk holds leader-path jobs post-Apply (#592)
 		})
 	}
 	return out
@@ -122,13 +124,14 @@ func (s relayQueueStore) upsert(j Job) {
 		f = relayQueueFile{}
 	}
 	entry := pendingRelay{
-		MessageID:      j.MessageID,
-		Agent:          j.Agent,
-		Message:        j.Message,
-		OriginChannel:  j.OriginChannel,
-		Deferrals:      j.deferrals,
-		EnqueuedAt:     j.enqueuedAt,
-		LastStaleAlert: j.lastStaleAlert,
+		MessageID:         j.MessageID,
+		Agent:             j.Agent,
+		IntendedRecipient: j.IntendedRecipient,
+		Message:           j.Message,
+		OriginChannel:     j.OriginChannel,
+		Deferrals:         j.deferrals,
+		EnqueuedAt:        j.enqueuedAt,
+		LastStaleAlert:    j.lastStaleAlert,
 	}
 	replaced := false
 	for i, p := range f.Pending {
@@ -150,7 +153,7 @@ func (s relayQueueStore) upsert(j Job) {
 }
 
 func queueEntryMateriallyChanged(prev, next pendingRelay) bool {
-	if prev.Agent != next.Agent || prev.Message != next.Message || prev.OriginChannel != next.OriginChannel {
+	if prev.Agent != next.Agent || prev.IntendedRecipient != next.IntendedRecipient || prev.Message != next.Message || prev.OriginChannel != next.OriginChannel {
 		return true
 	}
 	if prev.EnqueuedAt.IsZero() != next.EnqueuedAt.IsZero() {

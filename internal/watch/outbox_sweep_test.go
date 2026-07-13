@@ -201,3 +201,44 @@ func TestSendOutboxDeferralsPersistOnBusyDefer(t *testing.T) {
 		t.Fatalf("outbox deferrals = %+v, want 1 after first busy defer", got)
 	}
 }
+
+func TestBusyRepersistCannotOverwriteOriginalRecipient674(t *testing.T) {
+	dir := t.TempDir()
+	path, err := outbox.Path(dir, "alpha-xo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := outbox.NewStore(path)
+	if _, _, err := st.Insert(outbox.Entry{
+		ID: "immutable-674", Sender: "alpha-xo", Recipient: "cos", Message: "gate report",
+		Epoch: 1, EnqueuedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRig(surface.ErrBusy)
+	r.in.rosterDir = dir
+	r.in.handleBusy(Job{
+		Agent: "cos-adj", Message: "gate report", Kind: KindSend,
+		MessageID: "immutable-674", Sender: "alpha-xo", Epoch: 1, OutboxBound: true,
+	}, surface.ErrBusy)
+	got := st.Load()
+	if len(got) != 1 || got[0].Recipient != "cos" {
+		t.Fatalf("busy re-persist changed recipient: %+v", got)
+	}
+	if got[0].Deferrals != 1 {
+		t.Fatalf("busy re-persist did not update deferrals: %+v", got)
+	}
+}
+
+func TestKindSendDeliveryLogNamesIntendedAndResolvedTargets674(t *testing.T) {
+	r := newRig(nil)
+	buf := captureLog(t)
+	r.in.deliver(Job{
+		Agent: "cos-adj", IntendedRecipient: "cos", Message: "gate report", Kind: KindSend,
+		MessageID: "log-674", Sender: "alpha-xo",
+	})
+	if !strings.Contains(buf.String(), `intended for "cos" -> resolved target "cos-adj"`) {
+		t.Fatalf("delivery log must expose alias, got %q", buf.String())
+	}
+}

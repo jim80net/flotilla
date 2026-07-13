@@ -40,6 +40,7 @@ func (s *OutboxSweeper) SweepAll() int {
 		}
 		s.enqueue(Job{
 			Agent:               e.Recipient,
+			IntendedRecipient:   e.Recipient,
 			Message:             e.Message,
 			Kind:                KindSend,
 			MessageID:           e.ID,
