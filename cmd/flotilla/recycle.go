@@ -166,9 +166,6 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 	if p.coordinatorCleanup && (p.takeoverAck == "" || p.beginWorkText == "") {
 		return "", worktreeCloseNote{}, fmt.Errorf("refusing to recycle %q: coordinator-cleanup bridge returned an empty takeover acknowledgement or begin-work turn", p.agent)
 	}
-	if p.coordinatorCleanup && (ops.captureHistory == nil || ops.removeHandoff == nil) {
-		return "", worktreeCloseNote{}, fmt.Errorf("refusing to recycle %q: coordinator-cleanup bridge requires pane-history capture and exact-path handoff removal", p.agent)
-	}
 
 	// Copy-mode refuse (composer state unreadable → every Idle∧ComposerCleared gate would
 	// degrade to a confusing timeout; a named refusal is clearer).
@@ -327,6 +324,9 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 			}
 			return "", wtNote, fmt.Errorf("phase 4: the read-only takeover for %q did not return its transaction acknowledgement at an idle cleared composer within %s — handoff left at %s; the desk is LIVE and chapter load is unconfirmed", p.agent, p.timeouts.takeover, p.designatedPath)
 		}
+		if ops.removeHandoff == nil {
+			return "", wtNote, fmt.Errorf("phase 4: coordinator cleanup is required for %q but no exact-path remover is configured — handoff left at %s", p.agent, p.designatedPath)
+		}
 		if err := ops.removeHandoff(p.cwd, p.designatedPath); err != nil {
 			return "", wtNote, fmt.Errorf("phase 4: chapter loaded for %q but coordinator cleanup failed: %w — remove %s manually before continuing", p.agent, err, p.designatedPath)
 		}
@@ -341,7 +341,7 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 			if ops.assess(target) == surface.StateAwaitingApproval {
 				log.Printf("flotilla: recycle: %q loaded its chapter and cleanup completed; begin-work reached an ordinary approval prompt", p.agent)
 			} else {
-				return "", wtNote, fmt.Errorf("phase 4: chapter loaded and handoff cleaned for %q, but begin-work delivery was unconfirmed: %w — the chapter remains in context; resume it with: flotilla send %s 'begin work immediately on the loaded recycle chapter'", p.agent, err, p.agent)
+				return "", wtNote, fmt.Errorf("phase 4: chapter loaded and handoff cleaned for %q, but begin-work delivery was unconfirmed: %w", p.agent, err)
 			}
 		}
 		msg := fmt.Sprintf("recycled %s → pane %s (handoff %s", p.agent, target, p.designatedPath)
@@ -416,16 +416,11 @@ func pollCoordinatorLoad(ops recycleOps, target, ack string, timeout time.Durati
 	}
 	n := pollAttempts(timeout)
 	for i := 0; i <= n; i++ {
-		// Full scrollback capture is deliberately deferred until the desk is
-		// idle+cleared. While the native read is working, cheap state probes are
-		// sufficient and avoid repeatedly copying a large tmux history buffer.
-		if idleCleared(ops, target) {
-			history, err := ops.captureHistory(target)
-			// The prompt contains ack once. A second retained occurrence is the
-			// assistant's exact response after the native read completed.
-			if err == nil && strings.Count(history, ack) >= 2 {
-				return true
-			}
+		history, err := ops.captureHistory(target)
+		// The prompt contains ack once. A second retained occurrence is the
+		// assistant's exact response after the native read completed.
+		if err == nil && strings.Count(history, ack) >= 2 && idleCleared(ops, target) {
+			return true
 		}
 		if i < n {
 			ops.sleep(recyclePollInterval)
