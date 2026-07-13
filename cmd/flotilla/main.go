@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -20,7 +19,6 @@ import (
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/transport"
 	"github.com/jim80net/flotilla/internal/voice"
-	"github.com/jim80net/flotilla/internal/watch"
 )
 
 const version = "0.0.1"
@@ -575,22 +573,7 @@ func cmdNotify(args []string) error {
 	// ledger. Strictly best-effort + observe-only — the operator-facing post already
 	// succeeded, so it must never fail notify.
 	mirrorNotifyToLedger(*rosterPath, *from, message)
-	// #595 / #628: stamp time + body fingerprint so finish-edge / mirror-self skip Discord.
-	stampRecentNotifyBody(*rosterPath, *from, operatorMessage)
 	return nil
-}
-
-// stampRecentNotifyBody records a successful notify so finish-edge auto-mirror skips Discord
-// within the suppression window (#595) and same-body window (#628 dual-egress residual).
-// Best-effort — never fails notify.
-func stampRecentNotifyBody(rosterPath, agent, body string) {
-	if rosterPath == "" || agent == "" {
-		return
-	}
-	path := roster.LayerLastNotifyPath(filepath.Dir(rosterPath), agent)
-	if err := watch.RecordRecentNotify(path, time.Now().UTC(), body); err != nil {
-		fmt.Fprintf(os.Stderr, "flotilla: WARNING — recent-notify stamp failed (notify succeeded): %v\n", err)
-	}
 }
 
 // mirrorNotifyToLedger appends a <sender>→operator notify to the CoS who-knows-what ledger

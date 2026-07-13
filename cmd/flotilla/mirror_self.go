@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/transport"
@@ -94,8 +95,8 @@ func cmdMirrorSelf(args []string) error {
 	turnBody := body
 	m := deskMirror{
 		rosterDir: rosterDir,
-		claimDiscord: func(a string) bool {
-			return claimParadePending(rosterDir, a)
+		claimDiscord: func(a, turnFinal string) bool {
+			return claimParadePending(rosterDir, a, turnFinal, time.Now())
 		},
 		webhook: func(a string) (string, bool) {
 			if secrets == nil {

@@ -9,7 +9,6 @@ import (
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/sessionmirror"
 	"github.com/jim80net/flotilla/internal/transport"
-	"github.com/jim80net/flotilla/internal/watch"
 )
 
 // mirrorChunkLimit is the per-chunk rune budget for a mirrored turn-final. It sits below Discord's
@@ -43,7 +42,7 @@ type deskMirror struct {
 	allowDiscord bool
 	// claimDiscord atomically claims an explicit allowed stream after the ledger append.
 	// Production uses it for parade turns; nil means no turn-final may rise to Discord.
-	claimDiscord func(agent string) bool
+	claimDiscord func(agent, turnFinal string) bool
 	// onDiscordSuccess is invoked after all Discord chunks post successfully with the
 	// reader-modeled body. Used by CoordinatorMirrorOnFinish to append the CoS ledger.
 	onDiscordSuccess func(agent, body string)
@@ -104,12 +103,13 @@ func (m deskMirror) run(agent string) {
 	// fields (modeled body). Public-repo egress is guarded by the static
 	// check-private-boundary.sh + pre-push hook instead.
 	d := readerModelInternal(text)
+	// Keep the request-correlation token in Verbose (durable protocol evidence),
+	// but never render it in dash Info or operator Discord.
+	d.body = stripParadeEgressFooter(d.body)
 
 	ledgerOK := m.appendSessionMirror(agent, text, d)
-	explicitStream := false
-	if ledgerOK && !postDiscord && m.claimDiscord != nil && m.claimDiscord(agent) {
+	if ledgerOK && !postDiscord && m.claimDiscord != nil && m.claimDiscord(agent, text) {
 		postDiscord = true
-		explicitStream = true
 		if m.webhook != nil {
 			url, haveHook = m.webhook(agent)
 		}
@@ -119,44 +119,17 @@ func (m deskMirror) run(agent string) {
 		}
 	}
 
-	// #595 / #628 dual-egress: skip Discord when recent notify (time) or same body hash.
-	// Uses modeled body + raw turn-final so stamp matches either shape. Greppable reason.
-	suppressDiscord, suppressReason := false, ""
-	if postDiscord && !explicitStream && haveHook && m.rosterDir != "" {
-		stamp := roster.LayerLastNotifyPath(m.rosterDir, agent)
-		now := m.mirrorNow()
-		// Prefer modeled body (what would post); fall back to raw turn-final.
-		suppressDiscord, suppressReason = watch.ShouldSuppressMirrorDiscord(
-			stamp, watch.DefaultRecentNotifySuppressTTL, watch.DefaultRecentNotifySameBodyTTL,
-			now, d.body,
-		)
-		if !suppressDiscord && d.body != text {
-			suppressDiscord, suppressReason = watch.ShouldSuppressMirrorDiscord(
-				stamp, watch.DefaultRecentNotifySuppressTTL, watch.DefaultRecentNotifySameBodyTTL,
-				now, text,
-			)
-		}
-		if suppressDiscord {
-			postDiscord = false
-			m.logf("flotilla watch: mirror Discord suppress %s reason=%s", agent, suppressReason)
-		}
-	}
-
-	// Ledger-only modes: fail-quiet default, Discord unavailable, or dual-egress suppress.
+	// Ledger-only modes: fail-quiet default or Discord unavailable.
 	if !postDiscord || !haveHook {
 		if !ledgerOK {
 			return
 		}
 		body, rmNote := d.body, d.note
 		runes := utf8.RuneCountInString(body)
-		skipNote := ""
-		if suppressReason != "" {
-			skipNote = " (Discord skipped: " + suppressReason + ")"
-		}
 		if rmNote != "" {
-			m.logf("flotilla watch: mirror LEDGER %s resplen=%d%s %s", agent, runes, skipNote, rmNote)
+			m.logf("flotilla watch: mirror LEDGER %s resplen=%d %s", agent, runes, rmNote)
 		} else {
-			m.logf("flotilla watch: mirror LEDGER %s resplen=%d%s", agent, runes, skipNote)
+			m.logf("flotilla watch: mirror LEDGER %s resplen=%d", agent, runes)
 		}
 		return
 	}

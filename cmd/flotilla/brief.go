@@ -19,15 +19,14 @@ import (
 // the delivery confirmation line for audit symmetry with send; the desk still publishes
 // under its OWN webhook identity, not from); audience is the reader the brief is modeled for.
 type briefArgs struct {
-	desk        string
-	all         bool
-	from        string
-	rosterPath  string
-	secretsPath string
-	audience    string
+	desk       string
+	all        bool
+	from       string
+	rosterPath string
+	audience   string
 }
 
-// parseBriefArgs parses `flotilla brief [--all] [<desk>] [--from] [--roster] [--secrets] [--audience]`.
+// parseBriefArgs parses `flotilla brief [--all] [<desk>] [--from] [--roster] [--audience]`.
 // The desk positional may appear anywhere among the args (like doctrine install/register).
 func parseBriefArgs(args []string) (briefArgs, error) {
 	desk, flagArgs, err := parseBriefInterleavedArgs(args)
@@ -37,28 +36,26 @@ func parseBriefArgs(args []string) (briefArgs, error) {
 	fs := flag.NewFlagSet("brief", flag.ContinueOnError)
 	from := fs.String("from", os.Getenv("FLOTILLA_SELF"), "orchestrator identity issuing the brief request")
 	rosterPath := fs.String("roster", rosterDefault(), "roster config path")
-	secretsPath := fs.String("secrets", os.Getenv("FLOTILLA_SECRETS"), "secrets env file path (for the dark-desk pre-check)")
 	audience := fs.String("audience", string(readermap.AudienceOperator), "the reader the brief is modeled for (operator|newcomer|maintainer|desk:<name>)")
 	all := fs.Bool("all", false, "brief every non-primary-XO agent in the roster")
 	if err := fs.Parse(flagArgs); err != nil {
 		return briefArgs{}, err
 	}
 	if len(fs.Args()) != 0 {
-		return briefArgs{}, fmt.Errorf("usage: flotilla brief [--all] [<desk>] [--audience <who>] [--roster <path>] [--secrets <path>]")
+		return briefArgs{}, fmt.Errorf("usage: flotilla brief [--all] [<desk>] [--audience <who>] [--roster <path>]")
 	}
 	if *all && desk != "" {
 		return briefArgs{}, fmt.Errorf("usage: flotilla brief [--all] [<desk>] … (not both --all and <desk>)")
 	}
 	if !*all && desk == "" {
-		return briefArgs{}, fmt.Errorf("usage: flotilla brief [--all] [<desk>] [--audience <who>] [--roster <path>] [--secrets <path>]")
+		return briefArgs{}, fmt.Errorf("usage: flotilla brief [--all] [<desk>] [--audience <who>] [--roster <path>]")
 	}
 	return briefArgs{
-		desk:        desk,
-		all:         *all,
-		from:        *from,
-		rosterPath:  *rosterPath,
-		secretsPath: *secretsPath,
-		audience:    strings.TrimSpace(*audience),
+		desk:       desk,
+		all:        *all,
+		from:       *from,
+		rosterPath: *rosterPath,
+		audience:   strings.TrimSpace(*audience),
 	}, nil
 }
 
@@ -70,9 +67,6 @@ func parseBriefInterleavedArgs(args []string) (desk string, flagArgs []string, e
 		a := args[i]
 		switch {
 		case a == "--roster" && i+1 < len(args):
-			flagArgs = append(flagArgs, a, args[i+1])
-			i++
-		case a == "--secrets" && i+1 < len(args):
 			flagArgs = append(flagArgs, a, args[i+1])
 			i++
 		case a == "--audience" && i+1 < len(args):
@@ -148,13 +142,13 @@ func cmdBrief(args []string) error {
 		return err
 	}
 	if a.all {
-		return cmdBriefAll(cfg, nil, a)
+		return cmdBriefAll(cfg, a)
 	}
-	return deliverBriefOne(cfg, nil, a, a.desk)
+	return deliverBriefOne(cfg, a, a.desk)
 }
 
 // primaryXOAgent returns the hub XO name using the same rule as flotilla watch and the
-// per-desk mirror: explicit xo_agent, else the first roster agent (legacy single-fleet).
+// turn-final ledger: explicit xo_agent, else the first roster agent (legacy single-fleet).
 func primaryXOAgent(cfg *roster.Config) string {
 	xo := cfg.XOAgent
 	if xo == "" && len(cfg.Agents) > 0 {
@@ -164,7 +158,7 @@ func primaryXOAgent(cfg *roster.Config) string {
 }
 
 // briefTargets returns every roster agent except the primary XO — the same set the
-// per-desk mirror covers (logMirrorCoverage / detector pendingMirrors).
+// per-desk ledger covers (logMirrorCoverage / detector pendingMirrors).
 func briefTargets(cfg *roster.Config) []string {
 	xo := primaryXOAgent(cfg)
 	out := make([]string, 0, len(cfg.Agents))
@@ -177,10 +171,10 @@ func briefTargets(cfg *roster.Config) []string {
 	return out
 }
 
-func cmdBriefAll(cfg *roster.Config, secrets *roster.Secrets, a briefArgs) error {
+func cmdBriefAll(cfg *roster.Config, a briefArgs) error {
 	var failures int
 	for _, desk := range briefTargets(cfg) {
-		if err := deliverBriefOne(cfg, secrets, a, desk); err != nil {
+		if err := deliverBriefOne(cfg, a, desk); err != nil {
 			fmt.Fprintf(os.Stderr, "  error: %s: %v\n", desk, err)
 			failures++
 		}
@@ -191,22 +185,11 @@ func cmdBriefAll(cfg *roster.Config, secrets *roster.Secrets, a briefArgs) error
 	return nil
 }
 
-// deliverBriefOne injects a brief request into one desk after the dark-desk pre-check.
-func deliverBriefOne(cfg *roster.Config, secrets *roster.Secrets, a briefArgs, desk string) error {
+// deliverBriefOne injects a ledger-bound brief request into one desk.
+func deliverBriefOne(cfg *roster.Config, a briefArgs, desk string) error {
 	agent, err := cfg.Agent(desk)
 	if err != nil {
 		return err
-	}
-
-	// Dark-desk pre-check (orchestrator capability; does NOT make the desk hold a
-	// secret). When secrets are available, verify the desk's channel webhook resolves
-	// — a brief to a dark desk would be authored in-pane and then silently never
-	// reach the channel (the unconfigured-webhook re-skin of #207).
-	if secrets != nil {
-		url, werr := secrets.Webhook(desk)
-		if deskIsDark(url, werr) {
-			return fmt.Errorf("desk %q is DARK: its channel webhook does not resolve — its brief cannot be published (configure the webhook in secrets, then retry)", desk)
-		}
 	}
 
 	// Resolve the desk's surface driver (how it submits a turn). Unknown surface is a
@@ -251,9 +234,9 @@ func deliverBriefOne(cfg *roster.Config, secrets *roster.Secrets, a briefArgs, d
 		}
 	}
 	if a.from != "" {
-		fmt.Printf("brief request from %s delivered to %s (pane %s) — turn confirmed; its turn-final publishes to its channel via the mirror\n", a.from, desk, pane)
+		fmt.Printf("brief request from %s delivered to %s (pane %s) — turn confirmed; its turn-final publishes to the dash ledger\n", a.from, desk, pane)
 	} else {
-		fmt.Printf("brief request delivered to %s (pane %s) — turn confirmed; its turn-final publishes to its channel via the mirror\n", desk, pane)
+		fmt.Printf("brief request delivered to %s (pane %s) — turn confirmed; its turn-final publishes to the dash ledger\n", desk, pane)
 	}
 	return nil
 }

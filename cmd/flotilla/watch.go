@@ -1867,8 +1867,8 @@ func coordinatorMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr t
 	return func(agent string) {
 		m := deskMirror{
 			rosterDir: rosterDir,
-			claimDiscord: func(a string) bool {
-				return claimParadePending(rosterDir, a)
+			claimDiscord: func(a, turnFinal string) bool {
+				return claimParadePending(rosterDir, a, turnFinal, time.Now())
 			},
 			webhook: func(a string) (string, bool) {
 				if secrets == nil {
@@ -1904,8 +1904,8 @@ func deskMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr transpor
 	return func(agent string) {
 		m := deskMirror{
 			rosterDir: rosterDir,
-			claimDiscord: func(a string) bool {
-				return claimParadePending(rosterDir, a)
+			claimDiscord: func(a, turnFinal string) bool {
+				return claimParadePending(rosterDir, a, turnFinal, time.Now())
 			},
 			webhook: func(a string) (string, bool) {
 				if secrets == nil {

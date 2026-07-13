@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/deliver"
+	"github.com/jim80net/flotilla/internal/inbound"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 )
@@ -342,6 +343,11 @@ func deliverParadeOne(cfg *roster.Config, secrets *roster.Secrets, a paradeArgs,
 	if surface.SelfHealEnabled() {
 		confirm.SendCtrlC = deliver.SendCtrlC
 	}
+	token, err := inbound.NewID()
+	if err != nil {
+		return fmt.Errorf("parade request identity: %w", err)
+	}
+	message = appendParadeEgressFooter(message, token)
 	if err := confirm.SubmitWithSelfHeal(drv, pane, message); err != nil {
 		switch {
 		case errors.Is(err, surface.ErrBusy):
@@ -356,7 +362,7 @@ func deliverParadeOne(cfg *roster.Config, secrets *roster.Secrets, a paradeArgs,
 	}
 	// Mark only after confirmed delivery. A crash before delivery must fail quiet,
 	// never leave a stale allow that could publish an unrelated future turn.
-	if err := markParadePending(filepath.Dir(a.rosterPath), agentName); err != nil {
+	if err := markParadePending(filepath.Dir(a.rosterPath), agentName, token, time.Now()); err != nil {
 		return fmt.Errorf("parade delivered to %q but explicit egress marker failed (turn remains dash-only): %w", agentName, err)
 	}
 	if a.from != "" {

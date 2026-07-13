@@ -527,9 +527,10 @@ Only judgment items produce a leader inject brief.
 ### Operator-channel turn-final policy (#683)
 
 Finish-edge mirror and `mirror-self` always append the session-mirror ledger, but
-default to no Discord post. The explicit parade marker is single-consumer and is
-claimed only after the durable append succeeds. Curated `flotilla notify` posts
-directly and bypasses the turn-final mirror.
+default to no Discord post. The explicit parade marker carries a random per-request
+token, expires fail-quiet, and is claimed only when the completing turn matches that
+token after the durable append succeeds. Curated `flotilla notify` posts directly
+and bypasses the turn-final mirror.
 
 `flotilla notify` also strips any #472 dispatch footer from the operator-facing
 body while retaining the original in the durable context ledger. Recipients settle

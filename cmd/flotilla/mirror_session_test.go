@@ -177,17 +177,26 @@ func TestDeskMirror_CoordinatorDefaultsToLedgerWithoutDiscord683(t *testing.T) {
 
 func TestDeskMirror_ExplicitParadeStillPostsAndLedgers683(t *testing.T) {
 	dir := t.TempDir()
-	if err := markParadePending(dir, "backend"); err != nil {
+	const token = "0123456789abcdef"
+	fixed := time.Date(2026, 7, 13, 18, 0, 0, 0, time.UTC)
+	if err := markParadePending(dir, "backend", token, fixed); err != nil {
 		t.Fatal(err)
 	}
 	posted := 0
+	turn := appendParadeEgressFooter("parade answer", token)
 	m := deskMirror{
 		rosterDir:    dir,
-		claimDiscord: func(agent string) bool { return claimParadePending(dir, agent) },
+		claimDiscord: func(agent, text string) bool { return claimParadePending(dir, agent, text, fixed) },
 		webhook:      func(string) (string, bool) { return "https://wh", true },
-		turnFinal:    func(string) (string, bool, error) { return "parade answer", true, nil },
-		post:         func(_, _, _ string) error { posted++; return nil },
-		logf:         func(string, ...any) {},
+		turnFinal:    func(string) (string, bool, error) { return turn, true, nil },
+		post: func(_, _, body string) error {
+			posted++
+			if strings.Contains(body, token) {
+				t.Fatal("parade correlation token must not reach operator prose")
+			}
+			return nil
+		},
+		logf: func(string, ...any) {},
 	}
 	m.run("backend")
 	if posted != 1 {
@@ -199,6 +208,32 @@ func TestDeskMirror_ExplicitParadeStillPostsAndLedgers683(t *testing.T) {
 	}
 	if raw, err := os.ReadFile(path); err != nil || !strings.Contains(string(raw), "parade answer") {
 		t.Fatalf("parade ledger = %q, err=%v", raw, err)
+	}
+}
+
+func TestDeskMirror_ParadeMarkerCannotAuthorizeUnrelatedTurn683(t *testing.T) {
+	dir := t.TempDir()
+	const token = "fedcba9876543210"
+	fixed := time.Date(2026, 7, 13, 18, 0, 0, 0, time.UTC)
+	if err := markParadePending(dir, "backend", token, fixed); err != nil {
+		t.Fatal(err)
+	}
+	posted := 0
+	m := deskMirror{
+		rosterDir:    dir,
+		claimDiscord: func(agent, text string) bool { return claimParadePending(dir, agent, text, fixed) },
+		webhook:      func(string) (string, bool) { return "https://wh", true },
+		turnFinal:    func(string) (string, bool, error) { return "unrelated working final", true, nil },
+		post:         func(_, _, _ string) error { posted++; return nil },
+		logf:         func(string, ...any) {},
+	}
+	m.run("backend")
+	if posted != 0 {
+		t.Fatalf("unrelated turn posted %d times, want fail-quiet", posted)
+	}
+	path, _ := paradePendingPath(dir, "backend")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("correlated marker should remain for its matching parade: %v", err)
 	}
 }
 

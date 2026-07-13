@@ -6,12 +6,9 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 	"unicode/utf8"
 
-	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/sessionmirror"
-	"github.com/jim80net/flotilla/internal/watch"
 )
 
 // recordLogf captures the decision lines a deskMirror emits, so each test can assert EXACTLY ONE
@@ -124,48 +121,6 @@ func TestDeskMirrorSkipsOnReadError(t *testing.T) {
 	m.run("backend")
 	if len(lines) != 1 || !strings.Contains(lines[0], "SKIP backend: read turn-final: tmux boom") {
 		t.Errorf("decision lines = %v, want exactly one SKIP-read-error naming the cause", lines)
-	}
-}
-
-func TestDeskMirrorSkipsDiscordRecentNotify595(t *testing.T) {
-	dir := t.TempDir()
-	stampPath := roster.LayerLastNotifyPath(dir, "cos")
-	fixed := time.Date(2026, 7, 10, 16, 0, 0, 0, time.UTC)
-	if err := watch.RecordRecentNotify(stampPath, fixed.Add(-90*time.Second), "prior notify body"); err != nil {
-		t.Fatal(err)
-	}
-	var lines []string
-	posted := 0
-	m := deskMirror{
-		allowDiscord: true,
-		rosterDir:    dir,
-		now:          func() time.Time { return fixed },
-		webhook:      func(string) (string, bool) { return "https://wh", true },
-		turnFinal:    func(string) (string, bool, error) { return "rewrite of notify body", true, nil },
-		post:         func(string, string, string) error { posted++; return nil },
-		onDiscordSuccess: func(string, string) {
-			t.Fatal("onDiscordSuccess must not run when Discord is skipped")
-		},
-		logf: recordLogf(&lines),
-	}
-	m.run("cos")
-	if posted != 0 {
-		t.Fatalf("posted %d chunks, want 0 after recent notify", posted)
-	}
-	// Greppable dual-egress suppress reason (#595 / #628).
-	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "LEDGER cos") || !strings.Contains(joined, "recent notify within 3m") {
-		t.Fatalf("decision lines = %v, want LEDGER with recent-notify skip", lines)
-	}
-	if !strings.Contains(joined, "mirror Discord suppress") {
-		t.Fatalf("want greppable Discord suppress log, got %v", lines)
-	}
-	path, err := sessionmirror.LedgerPath(dir, "cos")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.ReadFile(path); err != nil {
-		t.Fatalf("session-mirror ledger must still be written: %v", err)
 	}
 }
 

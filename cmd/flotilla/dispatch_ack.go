@@ -37,18 +37,25 @@ func cmdDispatchAck(args []string) error {
 	}
 	rosterDir := filepath.Dir(rp)
 	reg := dispatch.NewRegistry(rosterDir)
-	if settled, ok := reg.LookupNonce(nonce); ok {
-		if settled.Recipient != "" && settled.Recipient != from {
-			return fmt.Errorf("dispatch-ack: nonce belongs to recipient %q, not %q", settled.Recipient, from)
-		}
-		fmt.Printf("dispatch ack already durable nonce=%s recipient=%s\n", nonce, from)
-		return nil
-	}
 	path, err := inbound.Path(rosterDir, from)
 	if err != nil {
 		return err
 	}
 	st := inbound.NewStore(path)
+	if settled, ok := reg.LookupNonce(nonce); ok {
+		if settled.Recipient != "" && settled.Recipient != from {
+			return fmt.Errorf("dispatch-ack: nonce belongs to recipient %q, not %q", settled.Recipient, from)
+		}
+		// Converge after a prior registry-first partial success: the durable record is
+		// authoritative, but a rerun should also clear any surviving inbound row.
+		for _, entry := range st.Load() {
+			if entry.Nonce == nonce && entry.Recipient == from {
+				st.Remove(entry.ID)
+			}
+		}
+		fmt.Printf("dispatch ack already durable nonce=%s recipient=%s\n", nonce, from)
+		return nil
+	}
 	var match *inbound.Entry
 	for _, entry := range st.Load() {
 		if entry.Nonce == nonce {

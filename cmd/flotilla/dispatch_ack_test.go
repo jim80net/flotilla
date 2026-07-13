@@ -58,3 +58,27 @@ func TestDispatchAckRefusesAnotherSeatsNonce683(t *testing.T) {
 		t.Fatal("a desk must not acknowledge another seat's dispatch")
 	}
 }
+
+func TestDispatchAckRerunClearsRegistryFirstPartialSuccess683(t *testing.T) {
+	t.Setenv("FLOTILLA_ROSTER", "")
+	dir := t.TempDir()
+	rosterPath := filepath.Join(dir, "flotilla.json")
+	if err := os.WriteFile(rosterPath, []byte(`{"agents":[{"name":"backend"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e := inbound.Entry{ID: "in-3", Sender: "xo", Recipient: "backend", Message: "generic dispatch", Nonce: "flotilla-dispatch-acde1234"}
+	if err := inbound.Record(dir, e); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dispatch.NewRegistry(dir).Consume(dispatch.ConsumeFromInbound(e.Nonce, e.Message, dispatch.ReasonDurableAck, e.Sender, e.Recipient)); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FLOTILLA_SELF", "backend")
+	if err := cmdDispatchAck([]string{"--roster", rosterPath, e.Nonce}); err != nil {
+		t.Fatal(err)
+	}
+	path, _ := inbound.Path(dir, "backend")
+	if pending := inbound.NewStore(path).Load(); len(pending) != 0 {
+		t.Fatalf("idempotent rerun left inbound rows: %+v", pending)
+	}
+}
