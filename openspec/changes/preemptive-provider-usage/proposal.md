@@ -31,7 +31,10 @@ seats before reactive detection gets a usable pane state.
 ## Impact
 
 - Deployments with no `UsageProbe` implementation remain behaviorally unchanged.
-- Covered providers can relocate before exhaustion and expose fresh/stale usage
-  observations to operators.
-- The first implementation targets the generic Grok weekly-percentage chrome;
-  other drivers join only after their authoritative signal is characterized.
+- Surfaces with a ratified continuous acquisition path can relocate before
+  exhaustion; any authoritative observation can expose honest fresh/stale usage
+  visibility to operators.
+- The first implementation strictly parses generic Grok weekly-percentage chrome
+  opportunistically. Continuous Grok coverage follows only after a read-only
+  out-of-pane acquisition path is characterized and ratified; no pane injection is
+  implied by this change. Other drivers join on the same evidence standard.

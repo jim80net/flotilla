@@ -37,13 +37,26 @@ type UsageProbe interface {
 switch signal. Percentages outside 0..100 are rejected. The probe does not name a
 provider: watch resolves provider/subscription from the active launch slot, the
 same source switch selection already trusts. The initial Grok parser is anchored
-to the live bottom chrome and accepts only the characterized `Weekly limit left:
-N%` shape; prose or scrollback does not count.
+to the live bottom chrome and accepts only the characterized `Weekly limit: N%`
+shape from `/usage show`; prose or scrollback does not count. Grok 0.2.93 renders
+percentage **used**, so the driver validates 0..100 and reports `100-N` remaining.
+
+Acquisition is per-surface and remains read-only. A capability may read pane
+chrome, a harness-owned local state file, or a standalone non-interactive CLI
+subprocess that reuses the harness's existing stored authentication; it must not
+invent data or require new credentials. Live characterization found that Grok's
+weekly row is not persistent default footer chrome, so the initial parser provides
+opportunistic visibility only when a usage render already exists. Continuous Grok
+acquisition is a follow-up design delta after out-of-pane file and subprocess paths
+are characterized. Injecting `/usage show` into a desk pane is explicitly excluded:
+that writes into desk input and requires a separate, Owning-XO-gated design round.
 
 ### 2. Slow, off-mutex collection
 
-Usage collection is independent of desk Idle/Errored state because it is
-read-only visibility and needs to see exhaustion coming while work continues. A
+Usage collection is independent of desk Idle/Errored state because each ratified
+acquisition path is read-only and needs to see exhaustion coming while work
+continues. A surface whose current acquisition path has no authoritative report
+returns absence; watch does not claim coverage. A
 default 30-minute wall-clock period is configurable by watch flag/environment;
 `0` disables proactive probing. Probe I/O runs through the existing async
 rate-limit dispatch seam or an equivalent shared off-mutex batch—never under
