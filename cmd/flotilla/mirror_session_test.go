@@ -223,9 +223,11 @@ func TestDeskMirror_ParadeMarkerCannotAuthorizeUnrelatedTurn683(t *testing.T) {
 		rosterDir:    dir,
 		claimDiscord: func(agent, text string) bool { return claimParadePending(dir, agent, text, fixed) },
 		webhook:      func(string) (string, bool) { return "https://wh", true },
-		turnFinal:    func(string) (string, bool, error) { return "unrelated working final", true, nil },
-		post:         func(_, _, _ string) error { posted++; return nil },
-		logf:         func(string, ...any) {},
+		turnFinal: func(string) (string, bool, error) {
+			return appendParadeEgressFooter("quoted request", token) + "unrelated working final", true, nil
+		},
+		post: func(_, _, _ string) error { posted++; return nil },
+		logf: func(string, ...any) {},
 	}
 	m.run("backend")
 	if posted != 0 {

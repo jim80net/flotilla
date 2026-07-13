@@ -348,7 +348,15 @@ func deliverParadeOne(cfg *roster.Config, secrets *roster.Secrets, a paradeArgs,
 		return fmt.Errorf("parade request identity: %w", err)
 	}
 	message = appendParadeEgressFooter(message, token)
+	rosterDir := filepath.Dir(a.rosterPath)
+	// Arm before submit so even a very fast completion has correlation state.
+	// A crash leaves only a random-token marker that no unrelated turn can satisfy;
+	// it expires fail-quiet. A confirmed submit failure clears it below.
+	if err := markParadePending(rosterDir, agentName, token, time.Now()); err != nil {
+		return fmt.Errorf("agent %q: record explicit parade egress: %w", agentName, err)
+	}
 	if err := confirm.SubmitWithSelfHeal(drv, pane, message); err != nil {
+		clearParadePending(rosterDir, agentName, token)
 		switch {
 		case errors.Is(err, surface.ErrBusy):
 			return fmt.Errorf("%s is busy (mid-turn) — parade NOT delivered; retry when it is idle", agentName)
@@ -359,11 +367,6 @@ func deliverParadeOne(cfg *roster.Config, secrets *roster.Secrets, a paradeArgs,
 		default:
 			return fmt.Errorf("parade request to %s could not be confirmed: %w", agentName, err)
 		}
-	}
-	// Mark only after confirmed delivery. A crash before delivery must fail quiet,
-	// never leave a stale allow that could publish an unrelated future turn.
-	if err := markParadePending(filepath.Dir(a.rosterPath), agentName, token, time.Now()); err != nil {
-		return fmt.Errorf("parade delivered to %q but explicit egress marker failed (turn remains dash-only): %w", agentName, err)
 	}
 	if a.from != "" {
 		fmt.Printf("parade request from %s delivered to %s (pane %s) — turn confirmed\n", a.from, agentName, pane)

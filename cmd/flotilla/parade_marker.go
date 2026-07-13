@@ -17,7 +17,7 @@ const paradeMarkerTTL = 2 * time.Hour
 
 var (
 	paradeTokenRE  = regexp.MustCompile(`^[0-9a-f]{16}$`)
-	paradeFooterRE = regexp.MustCompile(`(?m)\n*(?:Parade egress contract: include this exact marker in your turn-final footer:\n)?\[flotilla parade egress: ` + "`" + `([0-9a-f]{16})` + "`" + `\]\s*$`)
+	paradeFooterRE = regexp.MustCompile(`\n*(?:Parade egress contract: include this exact marker in your turn-final footer:\n)?\[flotilla parade egress: ` + "`" + `([0-9a-f]{16})` + "`" + `\]\s*$`)
 )
 
 type paradePending struct {
@@ -76,7 +76,8 @@ func claimParadePending(rosterDir, agent, turnFinal string, now time.Time) bool 
 		_ = os.Remove(path)
 		return false
 	}
-	if !strings.Contains(turnFinal, "[flotilla parade egress: `"+pending.Token+"`]") {
+	match := paradeFooterRE.FindStringSubmatch(turnFinal)
+	if len(match) != 2 || match[1] != pending.Token {
 		return false
 	}
 	claimed := path + ".claimed"
@@ -87,4 +88,19 @@ func claimParadePending(rosterDir, agent, turnFinal string, now time.Time) bool 
 		log.Printf("flotilla parade: remove claimed marker %q: %v", claimed, err)
 	}
 	return true
+}
+
+func clearParadePending(rosterDir, agent, token string) {
+	path, err := paradePendingPath(rosterDir, agent)
+	if err != nil {
+		return
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var pending paradePending
+	if json.Unmarshal(raw, &pending) == nil && pending.Token == token {
+		_ = os.Remove(path)
+	}
 }
