@@ -100,10 +100,9 @@ func cmdResume(args []string) error {
 	// in the roster's surface field, or a driver not yet built) MUST error cleanly
 	// — never nil-deref past the liveness interlock (that would skip the safety
 	// check entirely). Mirrors cmdWatch's surface-validation discipline.
-	rosterSurf := agentSurface(cfg, agentName)
-	drv, ok := surface.Get(rosterSurf)
+	drv, ok := surface.Get(agentSurface(cfg, agentName))
 	if !ok {
-		return fmt.Errorf("agent %q: unknown surface %q (not a registered driver)", agentName, rosterSurf)
+		return fmt.Errorf("agent %q: unknown surface %q (not a registered driver)", agentName, agentSurface(cfg, agentName))
 	}
 
 	// Serialize the in-place respawn against a concurrent recycle (or another resume) on the
@@ -137,21 +136,8 @@ func cmdResume(args []string) error {
 	// first-run trust menu a remote coordinator cannot answer. Wired through the
 	// preLaunch seam (runs on respawn/cold-create only, never on a refusal);
 	// best-effort (warns, never blocks).
-	if recipeInvolvesCodex(rosterSurf, recipe) {
+	if recipeInvolvesCodex(agentSurface(cfg, agentName), recipe) {
 		ops.preLaunch = func() { seedCodexTrust(cwdAbs) }
-	}
-	if rosterSurf == "opencode" {
-		// Resume remains useful even if local config is temporarily unwritable;
-		// recycle itself performs the same seed fail-closed before a handoff.
-		prior := ops.preLaunch
-		ops.preLaunch = func() {
-			if prior != nil {
-				prior()
-			}
-			if err := seedOpenCodeRecyclePermissions(cwdAbs); err != nil {
-				fmt.Fprintf(os.Stderr, "flotilla: warning — OpenCode recycle permission seed failed: %v\n", err)
-			}
-		}
 	}
 	plan := resumePlan{
 		agent: agentName, key: agent.Title(), cwd: recipe.Cwd, launch: recipe.Launch,
