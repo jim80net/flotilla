@@ -87,7 +87,9 @@ The **Goals** tab (alongside Conversations and Issues) renders the fleet's goal
 hierarchy — a validated goal tree whose desk/backlog/issue/inline **work items**
 bind to live status. It answers "what is the fleet working toward, is it moving,
 and what needs me?" at a glance. It is **read-only** (the goal structure is
-coordinator-maintained; the edit surface is a separate lane).
+coordinator-maintained; the edit surface is a separate lane). On narrow
+(phone-width) viewports the tab leads with the fleet-pulse tiles and a readable
+primary-goal summary above the graph; the graph follows below.
 
 - **Structure** comes from `fleet-goals.json` (the `--goals-file` above). Each goal
   node has an `id` (unique slug), `title`, optional `description`, `scope`
