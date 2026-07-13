@@ -146,6 +146,64 @@ func seed(d *Detector, states map[string]surface.State, signal string) {
 	d.cold = false
 }
 
+func TestDetectorUsageObservationIsOptionalAndDurable(t *testing.T) {
+	f := newFixture()
+	f.set("alpha", surface.StateWorking)
+	cfg := f.config("alpha", []string{"alpha"}, 3, "normal")
+	cfg.UsageProbePeriod = 30 * time.Minute
+	cfg.Usage = func(agent string) (surface.UsageReport, string, string, bool) {
+		if agent != "alpha" {
+			t.Fatalf("usage agent = %q, want alpha", agent)
+		}
+		return surface.UsageReport{RemainingPercent: 8, Window: "weekly", Scope: surface.RateLimitAccountSide}, "gateway", "alpha-plan", true
+	}
+	d := newDet(t, f, cfg)
+	d.Tick()
+
+	got := f.persisted[len(f.persisted)-1].Usage["alpha"]
+	if got.RemainingPercent != 8 || got.Window != "weekly" || got.Provider != "gateway" || got.SubscriptionID != "alpha-plan" {
+		t.Fatalf("persisted usage = %+v", got)
+	}
+	if got.ObservedAt.IsZero() || got.StaleAfter.Sub(got.ObservedAt) != time.Hour {
+		t.Fatalf("usage timestamps = observed %v stale %v, want 60m horizon", got.ObservedAt, got.StaleAfter)
+	}
+}
+
+func TestDetectorUsageAbsenceNeverCreatesOrErasesEvidence(t *testing.T) {
+	f := newFixture()
+	f.set("beta", surface.StateIdle)
+	available := true
+	cfg := f.config("beta", []string{"beta"}, 3, "normal")
+	cfg.UsageProbePeriod = 30 * time.Minute
+	cfg.Usage = func(string) (surface.UsageReport, string, string, bool) {
+		if !available {
+			return surface.UsageReport{}, "", "", false
+		}
+		return surface.UsageReport{RemainingPercent: 42, Window: "weekly", Scope: surface.RateLimitAccountSide}, "gateway", "", true
+	}
+	d := newDet(t, f, cfg)
+	d.Tick()
+	first := f.persisted[len(f.persisted)-1].Usage["beta"]
+
+	available = false
+	f.advance(31 * time.Minute)
+	d.Tick()
+	retained := f.persisted[len(f.persisted)-1].Usage["beta"]
+	if retained != first {
+		t.Fatalf("missing probe changed prior evidence: first=%+v retained=%+v", first, retained)
+	}
+
+	cfg2 := f.config("beta", []string{"beta"}, 3, "normal")
+	cfg2.Usage = func(string) (surface.UsageReport, string, string, bool) {
+		return surface.UsageReport{}, "", "", false
+	}
+	d2 := newDet(t, f, cfg2)
+	d2.Tick()
+	if got := f.persisted[len(f.persisted)-1].Usage; len(got) != 0 {
+		t.Fatalf("cold absent probe created usage: %+v", got)
+	}
+}
+
 func TestDetectorColdStartWakesOnceThenQuiet(t *testing.T) {
 	f := newFixture()
 	cfg := f.config("xo", []string{"xo", "backend"}, 3, "none")

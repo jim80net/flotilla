@@ -740,6 +740,14 @@ code {
   font-size: .72rem;
   color: var(--ink-3);
 }
+.desk-usage {
+  display: block;
+  margin-top: .15rem;
+  font-family: var(--display);
+  font-size: .66rem;
+  letter-spacing: .03em;
+  color: var(--amber);
+}
 .role {
   font-family: var(--display);
   font-size: .58rem;

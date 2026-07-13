@@ -261,6 +261,28 @@ func TestBuildBoard_Stale(t *testing.T) {
 	}
 }
 
+func TestBuildBoard_UsageObservationIsOptional(t *testing.T) {
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "alpha"}, {Name: "beta"}}}
+	doc := BuildBoard(BoardInputs{
+		Cfg:    cfg,
+		XO:     "alpha",
+		SnapOK: true,
+		Snap: watch.Snapshot{
+			DeskStates: map[string]surface.State{"alpha": surface.StateIdle, "beta": surface.StateIdle},
+			Usage: map[string]watch.UsageObservation{
+				"alpha": {RemainingPercent: 8, Window: "weekly"},
+			},
+		},
+		Threshold: time.Minute,
+	})
+	if doc.Agents[0].Usage == nil || doc.Agents[0].Usage.RemainingPercent != 8 {
+		t.Fatalf("alpha dash usage = %+v", doc.Agents[0].Usage)
+	}
+	if doc.Agents[1].Usage != nil {
+		t.Fatalf("beta dash usage = %+v, want omitted", doc.Agents[1].Usage)
+	}
+}
+
 func TestBuildTopology_SingleFleet(t *testing.T) {
 	// Legacy single channel_id + xo_agent ⇒ one synthesized binding, every agent a member.
 	cfg, err := loadInlineRoster(t, `{

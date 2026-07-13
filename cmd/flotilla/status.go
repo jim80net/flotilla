@@ -95,11 +95,12 @@ type statusDoc struct {
 }
 
 type statusItem struct {
-	Name        string `json:"name"`
-	Role        string `json:"role,omitempty"`         // "hub" for the XO, else omitted
-	Surface     string `json:"surface,omitempty"`      // effective surface driver
-	State       string `json:"state"`                  // pane / surface.State label
-	LoopPosture string `json:"loop_posture,omitempty"` // #524 fleet loop vocabulary
+	Name        string                  `json:"name"`
+	Role        string                  `json:"role,omitempty"`         // "hub" for the XO, else omitted
+	Surface     string                  `json:"surface,omitempty"`      // effective surface driver
+	State       string                  `json:"state"`                  // pane / surface.State label
+	LoopPosture string                  `json:"loop_posture,omitempty"` // #524 fleet loop vocabulary
+	Usage       *watch.UsageObservation `json:"usage,omitempty"`
 }
 
 // buildStatusJSON assembles the --json document. Pure (no I/O) so it is
@@ -113,6 +114,9 @@ func buildStatusJSON(cfg *roster.Config, xo, generatedAt string, snap watch.Snap
 			Surface:     effectiveSurface(a.Surface),
 			State:       deskStateLabel(snap, a.Name),
 			LoopPosture: string(deriveAgentPosture(a.Name, snap, loopByAgent)),
+		}
+		if usage, ok := snap.Usage[a.Name]; ok {
+			item.Usage = &usage
 		}
 		if a.Name == xo {
 			item.Role = "hub"
@@ -160,7 +164,7 @@ func writeStatus(out io.Writer, cfg *roster.Config, xo, snapshotPath, ackPath st
 		fmt.Fprintf(out, "XO %s · %s\n\n", xo, ackDesc)
 	}
 
-	// One aligned line per roster desk: name, pane state, loop_posture, (XO).
+	// One aligned line per roster desk: name, pane state, loop_posture, usage, (XO).
 	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	for _, a := range cfg.Agents {
 		marker := ""
@@ -168,9 +172,21 @@ func writeStatus(out io.Writer, cfg *roster.Config, xo, snapshotPath, ackPath st
 			marker = "(XO)"
 		}
 		posture := deriveAgentPosture(a.Name, snap, loopByAgent)
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", a.Name, deskStateLabel(snap, a.Name), posture, marker)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", a.Name, deskStateLabel(snap, a.Name), posture, usageLabel(snap, a.Name, now), marker)
 	}
 	_ = w.Flush()
+}
+
+func usageLabel(snap watch.Snapshot, name string, now time.Time) string {
+	observation, ok := snap.Usage[name]
+	if !ok {
+		return "—"
+	}
+	label := fmt.Sprintf("%d%% %s", observation.RemainingPercent, observation.Window)
+	if !observation.StaleAfter.IsZero() && now.After(observation.StaleAfter) {
+		label += " stale"
+	}
+	return label
 }
 
 func deriveAgentPosture(name string, snap watch.Snapshot, loopByAgent map[string]loopposture.Evidence) loopposture.Posture {

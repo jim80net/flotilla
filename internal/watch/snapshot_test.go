@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jim80net/flotilla/internal/surface"
 )
@@ -18,6 +19,9 @@ func TestSnapshotRoundTrip(t *testing.T) {
 		},
 		SignalHash: "abc123",
 		XOSettled:  true,
+		Usage: map[string]UsageObservation{
+			"backend": {RemainingPercent: 8, Window: "weekly", Scope: "account-side", ObservedAt: time.Date(2026, 7, 13, 6, 0, 0, 0, time.UTC)},
+		},
 	}
 	if err := want.Save(p); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -31,6 +35,9 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	}
 	if got.DeskStates["xo"] != surface.StateIdle || got.DeskStates["backend"] != surface.StateWorking {
 		t.Errorf("round-trip desk states mismatch: %+v", got.DeskStates)
+	}
+	if got.Usage["backend"].RemainingPercent != 8 || got.Usage["backend"].Window != "weekly" {
+		t.Errorf("round-trip usage mismatch: %+v", got.Usage)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/jim80net/flotilla/internal/launch"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/workspace"
 )
@@ -22,6 +23,24 @@ func writeAgentOverlay(t *testing.T, root, agent, json string) {
 	}
 	if err := os.WriteFile(filepath.Join(dir, workspace.ActiveHarnessFileName), []byte(json), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestActiveUsageSlotMetaUsesOverlayOrResolvedSlot(t *testing.T) {
+	launches := &launch.Config{Agents: map[string]launch.Recipe{
+		"alpha": {
+			Primary:   &launch.HarnessSlot{Launch: "alpha", Provider: "gateway", SubscriptionID: "alpha-primary"},
+			Fallbacks: []launch.HarnessSlot{{Launch: "beta", Provider: "gateway", SubscriptionID: "alpha-fallback"}},
+		},
+	}}
+	root := t.TempDir()
+	writeAgentOverlay(t, root, "alpha", `{"slot":"fallback-0","surface":"grok"}`)
+	if provider, subscription := activeUsageSlotMeta("alpha", launches); provider != "gateway" || subscription != "alpha-fallback" {
+		t.Fatalf("legacy overlay metadata = (%q, %q)", provider, subscription)
+	}
+	writeAgentOverlay(t, root, "alpha", `{"slot":"fallback-0","surface":"grok","provider":"proxy","subscription_id":"alpha-live"}`)
+	if provider, subscription := activeUsageSlotMeta("alpha", launches); provider != "proxy" || subscription != "alpha-live" {
+		t.Fatalf("explicit overlay metadata = (%q, %q)", provider, subscription)
 	}
 }
 
