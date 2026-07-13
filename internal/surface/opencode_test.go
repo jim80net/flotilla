@@ -43,6 +43,8 @@ func TestClassifyOpenCodeComposerLine(t *testing.T) {
 		{"empty composer", "output\n  ┃\nfooter", 4, 1, ComposerCleared},
 		{"fresh placeholder at body start", "output\n  ┃  Ask anything... \"Fix a TODO in the codebase\"\nfooter", 5, 1, ComposerCleared},
 		{"randomized placeholder at body start", "output\n  ┃  Ask anything... \"What is the tech stack of this project?\"\nfooter", 5, 1, ComposerCleared},
+		{"source-verified third placeholder", "output\n  ┃  Ask anything... \"Fix broken tests\"\nfooter", 5, 1, ComposerCleared},
+		{"unknown placeholder wording fails closed", "output\n  ┃  Ask anything... \"Uncharacterized example\"\nfooter", 5, 1, ComposerPending},
 		{"same text typed with cursor advanced", "output\n  ┃  Ask anything... \"Fix a TODO in the codebase\"\nfooter", 48, 1, ComposerPending},
 		{"pending draft", "output\n  ┃  beta-probe\nfooter", 14, 1, ComposerPending},
 		{"wide prefix fails closed", "output\n界  ┃  Ask anything... \"Fix a TODO in the codebase\"\nfooter", 7, 1, ComposerUndetermined},

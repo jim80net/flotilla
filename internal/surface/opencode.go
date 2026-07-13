@@ -90,14 +90,18 @@ func (openCode) Close(pane string) error { return ErrNoGracefulClose }
 // typed synthetic draft renders `  ┃  beta-probe`.
 const openCodeComposerBorder = "┃" // U+2503
 
-// openCodeEmptyPlaceholderPrefix starts OpenCode's randomized fresh-session
-// empty-composer hint. PROVENANCE: LIVE-CAPTURED 2026-07-13 from official
-// OpenCode 1.3.15 as both `Ask anything... "Fix a TODO in the codebase"` and
-// `Ask anything... "What is the tech stack of this project?"`; the installed
-// binary also contains the `Ask anything...` render fragment. The suffix varies,
-// but cursorX stays parked at the body start. Typing replaces the hint and
-// advances cursorX.
-const openCodeEmptyPlaceholderPrefix = "Ask anything..."
+// openCodeEmptyPlaceholders are OpenCode's randomized fresh-session empty hints.
+// PROVENANCE: SOURCE-VERIFIED in the official OpenCode 1.3.15 binary, whose TUI
+// `normal` placeholder list contains exactly these three suffixes. The first two
+// forms were also LIVE-CAPTURED 2026-07-13. Keep this exact and version-scoped:
+// unknown wording is Pending, never guessed empty. In every live empty render,
+// cursorX stayed parked at the body start; typing replaced the hint and advanced
+// cursorX.
+var openCodeEmptyPlaceholders = []string{
+	`Ask anything... "Fix a TODO in the codebase"`,
+	`Ask anything... "What is the tech stack of this project?"`,
+	`Ask anything... "Fix broken tests"`,
+}
 
 // ComposerState implements ComposerStateProbe. Only an idle OpenCode frame and
 // the terminal-cursor row can prove a cleared composer. Working, approval, and
@@ -149,10 +153,19 @@ func classifyOpenCodeComposerLine(captured string, cursorX, cursorY int) Compose
 	// of Cleared only while the cursor remains at the body start; an identical
 	// typed draft leaves the cursor after the text and therefore stays Pending.
 	bodyStartX := borderAt + 3 // ASCII-space prefix + border + two body spaces
-	if strings.HasPrefix(body, openCodeEmptyPlaceholderPrefix) && cursorX == bodyStartX {
+	if containsExact(body, openCodeEmptyPlaceholders) && cursorX == bodyStartX {
 		return ComposerCleared
 	}
 	return ComposerPending
+}
+
+func containsExact(s string, candidates []string) bool {
+	for _, candidate := range candidates {
+		if s == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 // --- RecycleBridge: portable-markdown context preservation ---
