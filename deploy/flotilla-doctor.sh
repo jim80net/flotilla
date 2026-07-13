@@ -97,6 +97,18 @@ log() {
   printf '%s\n' "$msg" >&2
 }
 
+# Chain lint is informational and deliberately independent of gateway health:
+# a timer tick reports unprotected seats even while Discord is healthy. The Go
+# binary owns JSON/schema parsing so doctor and watch consume identical truth.
+chain_lint_rc=0
+chain_lint_out="$("$BIN" launch lint --roster "$WORKDIR/flotilla.json" 2>&1)" || chain_lint_rc=$?
+if [[ -n "$chain_lint_out" ]]; then
+  while IFS= read -r line; do log "$line"; done <<<"$chain_lint_out"
+fi
+if [[ "$chain_lint_rc" -ne 0 ]]; then
+  log "WARNING: launch chain lint could not inspect recipes (exit ${chain_lint_rc})"
+fi
+
 # ---- single-flight: never overlap doctor runs -------------------------------
 # Open fd 9 on the lock file, then flock it; if another run holds it, exit 0.
 # NB: keep the 2>/dev/null SCOPED to this single redirect (a subshell) — a bare

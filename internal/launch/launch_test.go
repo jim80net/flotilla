@@ -3,6 +3,8 @@ package launch
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -352,6 +354,30 @@ func TestLoadAcceptsValidChain(t *testing.T) {
 	}`)
 	if _, err := Load(p, rosterAgents()); err != nil {
 		t.Errorf("Load(valid chain) = %v, want nil", err)
+	}
+}
+
+func TestUnprotectedAgents(t *testing.T) {
+	cfg := &Config{Agents: map[string]Recipe{
+		"alpha": {Launch: "alpha", Cwd: "/srv/alpha"},
+		"beta": {
+			Launch: "beta", Cwd: "/srv/beta",
+			Fallbacks: []HarnessSlot{{Surface: "grok", Launch: "grok"}},
+		},
+		"gamma": {Launch: "gamma", Cwd: "/srv/gamma", SingleHarness: true},
+	}}
+	roster := map[string]bool{"alpha": true, "beta": true, "gamma": true, "delta": true}
+	got := cfg.UnprotectedAgents(roster)
+	want := []string{"alpha", "delta"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("UnprotectedAgents() = %v, want %v", got, want)
+	}
+}
+
+func TestLoadRejectsSingleHarnessWithFallback(t *testing.T) {
+	p := writeTemp(t, `{"agents":{"alpha":{"launch":"alpha","cwd":"/srv/alpha","single_harness":true,"fallbacks":[{"surface":"grok","launch":"grok"}]}}}`)
+	if _, err := Load(p, map[string]bool{"alpha": true}); err == nil || !strings.Contains(err.Error(), "single_harness=true") {
+		t.Fatalf("Load(conflicting posture) error = %v, want single_harness conflict", err)
 	}
 }
 

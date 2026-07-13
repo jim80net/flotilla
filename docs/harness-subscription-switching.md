@@ -55,6 +55,13 @@ Today's `launch.Recipe` is a single shell command + cwd (`internal/launch/launch
 
 **Backward compatibility rule:** If `primary` and `fallbacks` are absent, the existing top-level `launch` field **is** the primary slot, and `roster.Agent.surface` (or default `claude-code`, `internal/surface/surface.go:161-162`) is the implied `surface`.
 
+That shorthand remains runnable but has no failover target. `flotilla launch lint`,
+the periodic doctor, and watch startup/recurring checks warn for every roster seat
+without at least one `fallbacks` entry. A deliberately single-harness seat can
+acknowledge and silence the warning with `"single_harness": true` on its recipe;
+that flag is an operator acknowledgement, not protection, and cannot be combined
+with fallback slots.
+
 ```jsonc
 // ~/.flotilla/<agent>/launch.json  (preferred) or flotilla-launch.json entry
 {

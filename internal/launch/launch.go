@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/jim80net/flotilla/internal/accounts"
@@ -54,6 +55,11 @@ type Recipe struct {
 	// then in declared order when a harness/subscription must be swapped out (e.g.
 	// a provider-wide throttle). Empty when no chain is declared.
 	Fallbacks []HarnessSlot `json:"fallbacks,omitempty"`
+	// SingleHarness explicitly acknowledges that this seat intentionally has no
+	// failover target. It silences the doctor/watch chain warning; it does not
+	// synthesize protection or alter slot selection. A recipe cannot declare this
+	// acknowledgement and fallbacks at the same time.
+	SingleHarness bool `json:"single_harness,omitempty"`
 }
 
 // HarnessSlot is one harness in a desk's failover chain: a specific surface +
@@ -266,6 +272,9 @@ func ValidateRecipe(where string, r Recipe) error {
 			return err
 		}
 	}
+	if r.SingleHarness && len(r.Fallbacks) > 0 {
+		return fmt.Errorf("%s declares single_harness=true and fallback slots (choose one posture)", where)
+	}
 	return nil
 }
 
@@ -275,6 +284,22 @@ func ValidateRecipe(where string, r Recipe) error {
 func (c *Config) Recipe(agent string) (Recipe, bool) {
 	r, ok := c.Agents[agent]
 	return r, ok
+}
+
+// UnprotectedAgents returns roster seats that have neither a usable failover
+// target nor an explicit single-harness acknowledgement. Missing recipes,
+// flat recipes, and primary-only recipes are all unprotected: auto-switch needs
+// at least one fallback to select. Results are sorted for stable diagnostics.
+func (c *Config) UnprotectedAgents(rosterAgents map[string]bool) []string {
+	var names []string
+	for name := range rosterAgents {
+		r, ok := c.Recipe(name)
+		if !ok || (!r.SingleHarness && len(r.Fallbacks) == 0) {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 // Slots enumerates the recipe's harness chain in failover order: the primary
@@ -287,6 +312,8 @@ func (c *Config) Recipe(agent string) (Recipe, bool) {
 // "fallback-0", "fallback-1", …. The returned slots are addressed by these
 // canonical names by the active-harness overlay and routing.
 func (r Recipe) Slots() []ResolvedSlot {
+	// SingleHarness does not change runtime slot enumeration; it only silences
+	// the chain-lint diagnostic for an intentionally unprotected seat.
 	slots := make([]ResolvedSlot, 0, 1+len(r.Fallbacks))
 	if r.Primary != nil {
 		slots = append(slots, ResolvedSlot{Name: "primary", HarnessSlot: *r.Primary})
