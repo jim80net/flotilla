@@ -3,6 +3,7 @@ package watch
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jim80net/flotilla/internal/roster"
 )
@@ -76,6 +77,44 @@ func TestCoordinatorIngressDetectorGoalLoopAliasesAdjutant(t *testing.T) {
 	}
 	if got[0].Message != job.Message {
 		t.Fatalf("detector body must pass through unchanged, got %q", got[0].Message)
+	}
+}
+
+func TestCoordinatorIngressKindSendToCoordinatorBypassesAdjutant674(t *testing.T) {
+	g := NewCoordinatorIngress(adjutantRoster())
+	job := Job{
+		Agent: "cos", Message: "inter-agent gate report", Kind: KindSend,
+		Sender: "alpha-xo", MessageID: "send-674",
+	}
+	got := g.Apply(job)
+	if len(got) != 1 || got[0].Agent != "cos" {
+		t.Fatalf("KindSend must reach named coordinator, got %+v", got)
+	}
+	if got[0].Message != job.Message || got[0].MessageID != job.MessageID {
+		t.Fatalf("KindSend passthrough mutated job: %+v", got[0])
+	}
+}
+
+func TestInjectorKindSendToCoordinatorDeliversNamedRecipient674(t *testing.T) {
+	delivered := make(chan string, 1)
+	in := NewInjector(func(agent, _ string) error {
+		delivered <- agent
+		return nil
+	}, 1)
+	in.SetCoordinatorIngress(NewCoordinatorIngress(adjutantRoster()))
+	in.Start()
+	defer in.Stop()
+	in.Enqueue(Job{
+		Agent: "cos", Message: "inter-agent gate report", Kind: KindSend,
+		Sender: "alpha-xo", MessageID: "send-e2e-674",
+	})
+	select {
+	case got := <-delivered:
+		if got != "cos" {
+			t.Fatalf("KindSend delivered to %q, want named coordinator cos", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for KindSend delivery")
 	}
 }
 

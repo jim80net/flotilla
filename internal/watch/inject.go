@@ -73,6 +73,9 @@ type Job struct {
 	Agent   string
 	Message string
 	Kind    JobKind // KindRelay | KindHeartbeat | KindDetector | KindDefault — labels the audit mirror
+	// IntendedRecipient is the original named recipient before any delivery-time
+	// ingress alias. Empty means Agent for callers that bypass Enqueue.
+	IntendedRecipient string
 	// OriginChannel is the Discord channel a relayed operator message arrived on
 	// (set by the relay when routing; empty for heartbeat/detector ticks). It is the
 	// CoS-mirror seam (companion change #108): the post-confirmed-delivery mirror hook
@@ -276,7 +279,7 @@ func (in *Injector) deliver(j Job) {
 	var err error
 	if j.Kind == KindSend && j.OutboxBound && in.rosterDir != "" {
 		attempted, attemptErr := outbox.AttemptCurrent(in.rosterDir, outbox.Entry{
-			ID: j.MessageID, Sender: j.Sender, Recipient: j.Agent, Epoch: j.Epoch,
+			ID: j.MessageID, Sender: j.Sender, Recipient: intendedRecipient(j), Epoch: j.Epoch,
 		}, func() error { return send(j.Agent, j.Message) })
 		if !attempted {
 			if attemptErr != nil {
@@ -306,7 +309,7 @@ func (in *Injector) deliver(j Job) {
 		}
 		if j.Kind == KindSend {
 			if in.onSend != nil && j.Sender != "" {
-				in.onSend(j.Sender, j.Agent, j.Message)
+				in.onSend(j.Sender, intendedRecipient(j), j.Message)
 			}
 			if in.onInboundTrack != nil {
 				in.onInboundTrack(j)
@@ -381,12 +384,28 @@ func previewBody(body string) string {
 }
 
 func (in *Injector) logDelivered(j Job) {
+	intended := intendedRecipient(j)
 	if j.Kind == KindSend && !j.enqueuedAt.IsZero() {
 		age := in.clock().Sub(j.enqueuedAt).Round(time.Second)
-		log.Printf("flotilla watch: send from %q delivered to %q (queued %s, %d bytes)", j.Sender, j.Agent, age, len(j.Message))
+		log.Printf("flotilla watch: send from %q intended for %q -> resolved target %q delivered to %q (queued %s, %d bytes)", j.Sender, intended, j.Agent, j.Agent, age, len(j.Message))
+		return
+	}
+	if j.Kind == KindSend {
+		log.Printf("flotilla watch: send from %q intended for %q -> resolved target %q delivered to %q (%d bytes)", j.Sender, intended, j.Agent, j.Agent, len(j.Message))
+		return
+	}
+	if intended != j.Agent {
+		log.Printf("flotilla watch: %s intended for %q -> resolved target %q delivered to %q (%d bytes)", deliveryKind(j.Kind), intended, j.Agent, j.Agent, len(j.Message))
 		return
 	}
 	log.Printf("flotilla watch: %s delivered to %q (%d bytes)", deliveryKind(j.Kind), j.Agent, len(j.Message))
+}
+
+func intendedRecipient(j Job) string {
+	if j.IntendedRecipient != "" {
+		return j.IntendedRecipient
+	}
+	return j.Agent
 }
 
 // handleBusy applies the kind-aware not-idle policy for a busy (ErrBusy) or transiently-
@@ -419,7 +438,7 @@ func (in *Injector) handleBusy(j Job, cause error) {
 		in.queue.upsert(j)
 	} else if j.Kind == KindSend && j.MessageID != "" && j.Sender != "" && in.rosterDir != "" {
 		entry := outbox.Entry{
-			ID: j.MessageID, Sender: j.Sender, Recipient: j.Agent, Message: j.Message,
+			ID: j.MessageID, Sender: j.Sender, Recipient: intendedRecipient(j), Message: j.Message,
 			Epoch:     j.Epoch,
 			Deferrals: j.deferrals, EnqueuedAt: j.enqueuedAt,
 			LastStaleEscalation: j.lastStaleEscalation,
@@ -531,6 +550,9 @@ func (in *Injector) raise(format string, args ...any) {
 // late Enqueue from an in-flight relay handler (or a deferred re-enqueue timer)
 // is always safe.
 func (in *Injector) Enqueue(j Job) {
+	if j.IntendedRecipient == "" {
+		j.IntendedRecipient = j.Agent
+	}
 	jobs := []Job{j}
 	if in.coordinatorIngress != nil && !j.ingressResolved {
 		jobs = in.coordinatorIngress.Apply(j)

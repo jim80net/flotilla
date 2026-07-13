@@ -303,10 +303,19 @@ func (s Store) Update(e Entry) {
 		}
 		for i, p := range f.Pending {
 			if p.ID == e.ID {
-				if !entryMateriallyChanged(p, e) {
+				// Delivery identity is immutable after Insert. Busy re-persist may carry
+				// a delivery-time alias in its Job.Agent; only retry bookkeeping belongs
+				// in Update (#674).
+				if p.Sender != e.Sender || p.Recipient != e.Recipient || p.Message != e.Message || effectiveEpoch(p.Epoch) != effectiveEpoch(e.Epoch) {
+					log.Printf("flotilla outbox: refused immutable identity change for %s: stored %s→%s epoch=%d, update %s→%s epoch=%d", p.ID, p.Sender, p.Recipient, effectiveEpoch(p.Epoch), e.Sender, e.Recipient, effectiveEpoch(e.Epoch))
+				}
+				next := p
+				next.Deferrals = e.Deferrals
+				next.LastStaleEscalation = e.LastStaleEscalation
+				if !entryMateriallyChanged(p, next) {
 					return nil
 				}
-				f.Pending[i] = e
+				f.Pending[i] = next
 				return s.save(f)
 			}
 		}
