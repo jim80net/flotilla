@@ -30,6 +30,7 @@ type recRec struct {
 	overlay         bool // composer is on an overlay (not cleared)
 	markerGot       string
 	genGot          string // overrides what readGen returns at phase 4 (supersede simulation)
+	bootApproval    bool   // fresh process received unrelated work and opened a permission modal
 	absentResult    bool
 	absentErr       error
 	lockedFlag      bool   // set when the txn lock is taken (Phase 1 → close window)
@@ -58,6 +59,9 @@ func (r *recRec) assess(string) surface.State {
 		// early; it confirms via paneDead. Shell is only for a shell-backed desk (not modeled here).
 		return surface.StateUnknown
 	case r.respawned && len(r.delivered) < 2:
+		if r.bootApproval {
+			return surface.StateAwaitingApproval
+		}
 		return surface.StateIdle // phase 4 boot (handoff delivered, takeover not yet)
 	default:
 		return surface.StateWorking // phase 4 resumption-confidence
@@ -166,6 +170,18 @@ func TestRunRecycleHappyPath(t *testing.T) {
 	// so reaching respawn proves pane_dead is the confirm signal).
 	if len(r.remainCalls) < 2 || r.remainCalls[0] != true || r.remainCalls[len(r.remainCalls)-1] != false {
 		t.Errorf("remainCalls = %v, want first=on(true) last=off(false restore)", r.remainCalls)
+	}
+}
+
+func TestRunRecyclePhase4ApprovalIsDistinctAbort(t *testing.T) {
+	r := happyRec()
+	r.bootApproval = true
+	_, _, err := runRecycle(fakeRecycleOps(r), testPlan())
+	if err == nil || !strings.Contains(err.Error(), "phase 4") || !strings.Contains(err.Error(), "approval modal") {
+		t.Fatalf("err = %v, want distinct phase-4 approval-modal abort", err)
+	}
+	if strings.Contains(err.Error(), "Allow once") || len(r.delivered) != 1 {
+		t.Fatalf("modal abort must never approve or deliver takeover: err=%v delivered=%v", err, r.delivered)
 	}
 }
 
