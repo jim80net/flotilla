@@ -74,21 +74,34 @@ func CapturePane(target string) (string, error) {
 // So the caller MUST treat inMode=true as undetermined (fall back to the spinner — fail-safe). A
 // read error propagates for the same fallback.
 func CursorState(target string) (cursorY int, inMode bool, err error) {
+	_, cursorY, inMode, err = CursorPosition(target)
+	return cursorY, inMode, err
+}
+
+// CursorPosition reports the terminal cursor coordinates and whether tmux is in
+// copy/view mode. CursorState remains the row-only compatibility wrapper used by
+// most surfaces; OpenCode also needs cursorX to distinguish its rendered empty
+// placeholder from a user-authored draft with the same visible line shape.
+func CursorPosition(target string) (cursorX, cursorY int, inMode bool, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "tmux", "display-message", "-p", "-t", target, "#{cursor_y} #{pane_in_mode}").Output()
+	out, err := exec.CommandContext(ctx, "tmux", "display-message", "-p", "-t", target, "#{cursor_x} #{cursor_y} #{pane_in_mode}").Output()
 	if err != nil {
-		return 0, false, err
+		return 0, 0, false, err
 	}
 	fields := strings.Fields(string(out))
-	if len(fields) != 2 {
-		return 0, false, fmt.Errorf("unexpected cursor-state output %q", strings.TrimSpace(string(out)))
+	if len(fields) != 3 {
+		return 0, 0, false, fmt.Errorf("unexpected cursor-position output %q", strings.TrimSpace(string(out)))
 	}
-	n, err := strconv.Atoi(fields[0])
+	x, err := strconv.Atoi(fields[0])
 	if err != nil {
-		return 0, false, fmt.Errorf("parse cursor_y %q: %w", fields[0], err)
+		return 0, 0, false, fmt.Errorf("parse cursor_x %q: %w", fields[0], err)
 	}
-	return n, fields[1] == "1", nil
+	y, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("parse cursor_y %q: %w", fields[1], err)
+	}
+	return x, y, fields[2] == "1", nil
 }
 
 // ParseBusy is the testable core: true when the captured pane shows an active

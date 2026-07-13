@@ -12,6 +12,96 @@ func TestOpenCodeRegistered(t *testing.T) {
 	}
 }
 
+func TestOpenCodeRecycleCapabilities(t *testing.T) {
+	var _ RecycleBridge = openCode{}
+	var _ ComposerStateProbe = openCode{}
+
+	o := newOpenCode()
+	path := o.HandoffPath("/home/operator/work/project", "20260713T120000.000000001-abcd1234")
+	want := "/home/operator/work/project/.flotilla/handoffs/recycle-20260713T120000.000000001-abcd1234.md"
+	if path != want {
+		t.Fatalf("HandoffPath = %q, want %q", path, want)
+	}
+	if got := o.HandoffTurn(path); got != PortableMarkdownHandoffTurn(path) {
+		t.Fatal("HandoffTurn must use the shared portable-markdown handoff")
+	}
+	if got := o.TakeoverTurn(path); got != PortableMarkdownTakeoverTurn(path) {
+		t.Fatal("TakeoverTurn must use the shared portable-markdown takeover")
+	}
+}
+
+func TestClassifyOpenCodeComposerLine(t *testing.T) {
+	// Generic normalized fixtures from the LIVE-CAPTURED OpenCode 1.3.15
+	// composer marker. The draft text is synthetic.
+	cases := []struct {
+		name     string
+		captured string
+		cursorX  int
+		cursorY  int
+		want     ComposerDisposition
+	}{
+		{"empty composer", "output\n  ┃\nfooter", 4, 1, ComposerCleared},
+		{"fresh placeholder at body start", "output\n  ┃  Ask anything... \"Fix a TODO in the codebase\"\nfooter", 5, 1, ComposerCleared},
+		{"randomized placeholder at body start", "output\n  ┃  Ask anything... \"What is the tech stack of this project?\"\nfooter", 5, 1, ComposerCleared},
+		{"same text typed with cursor advanced", "output\n  ┃  Ask anything... \"Fix a TODO in the codebase\"\nfooter", 48, 1, ComposerPending},
+		{"pending draft", "output\n  ┃  beta-probe\nfooter", 14, 1, ComposerPending},
+		{"wide prefix fails closed", "output\n界  ┃  Ask anything... \"Fix a TODO in the codebase\"\nfooter", 7, 1, ComposerUndetermined},
+		{"non-composer row", "output\nAllow once\nfooter", 0, 1, ComposerUndetermined},
+		{"cursor above capture", "  ┃", 4, -1, ComposerUndetermined},
+		{"cursor below capture", "  ┃", 4, 1, ComposerUndetermined},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyOpenCodeComposerLine(tc.captured, tc.cursorX, tc.cursorY); got != tc.want {
+				t.Fatalf("classifyOpenCodeComposerLine = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestOpenCodeComposerStateWiring(t *testing.T) {
+	t.Run("idle empty composer is cleared", func(t *testing.T) {
+		o := openCode{
+			cursorPosition: func(string) (int, int, bool, error) { return 4, 1, false, nil },
+			capturePane:    func(string) (string, error) { return "output\n  ┃\nfooter", nil },
+			classify:       parseOpenCodeState,
+		}
+		if got := o.ComposerState("alpha"); got != ComposerCleared {
+			t.Fatalf("ComposerState = %v, want Cleared", got)
+		}
+	})
+
+	t.Run("approval frame is undetermined", func(t *testing.T) {
+		o := openCode{
+			cursorPosition: func(string) (int, int, bool, error) { return 4, 1, false, nil },
+			capturePane: func(string) (string, error) {
+				return "Permission required\n  ┃\nAllow once", nil
+			},
+			classify: parseOpenCodeState,
+		}
+		if got := o.ComposerState("alpha"); got != ComposerUndetermined {
+			t.Fatalf("ComposerState = %v, want Undetermined", got)
+		}
+	})
+
+	t.Run("copy mode and read failures are undetermined", func(t *testing.T) {
+		boom := errors.New("tmux boom")
+		cases := []openCode{
+			{cursorPosition: func(string) (int, int, bool, error) { return 0, 0, true, nil }},
+			{cursorPosition: func(string) (int, int, bool, error) { return 0, 0, false, boom }},
+			{
+				cursorPosition: func(string) (int, int, bool, error) { return 0, 0, false, nil },
+				capturePane:    func(string) (string, error) { return "", boom },
+			},
+		}
+		for i, o := range cases {
+			if got := o.ComposerState("alpha"); got != ComposerUndetermined {
+				t.Fatalf("case %d ComposerState = %v, want Undetermined", i, got)
+			}
+		}
+	})
+}
+
 func TestParseOpenCodeState(t *testing.T) {
 	// EXHAUSTIVE over the claude-style ladder (Working-positive, Idle-default).
 	// Fixtures use OpenCode's real rendered markers (source-verified, sst/opencode):

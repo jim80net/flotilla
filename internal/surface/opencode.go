@@ -1,6 +1,7 @@
 package surface
 
 import (
+	"path/filepath"
 	"strings"
 
 	"github.com/jim80net/flotilla/internal/deliver"
@@ -17,22 +18,24 @@ func init() { Register(newOpenCode()) }
 // means idle and there is no mid-stream false-idle gap. Like the other drivers it
 // wraps deliver primitives behind injectable fields for unit-testability.
 type openCode struct {
-	paneCommand func(string) (string, error)
-	isShell     func(string) bool
-	capturePane func(string) (string, error)
-	classify    func(string) State
-	send        func(string, string) error
-	inject      func(string, string) error
+	paneCommand    func(string) (string, error)
+	isShell        func(string) bool
+	capturePane    func(string) (string, error)
+	classify       func(string) State
+	send           func(string, string) error
+	inject         func(string, string) error
+	cursorPosition func(pane string) (cursorX, cursorY int, inMode bool, err error)
 }
 
 func newOpenCode() openCode {
 	return openCode{
-		paneCommand: deliver.PaneCommand,
-		isShell:     deliver.IsShell,
-		capturePane: deliver.CapturePane,
-		classify:    parseOpenCodeState,
-		send:        deliver.Send,
-		inject:      deliver.InjectSlash,
+		paneCommand:    deliver.PaneCommand,
+		isShell:        deliver.IsShell,
+		capturePane:    deliver.CapturePane,
+		classify:       parseOpenCodeState,
+		send:           deliver.Send,
+		inject:         deliver.InjectSlash,
+		cursorPosition: deliver.CursorPosition,
 	}
 }
 
@@ -78,6 +81,93 @@ func (openCode) RotateStrategy() Strategy { return SlashCommand }
 // literal text), it signals the caller to use the handoff-gated kill fallback — safe
 // because the caller has already preserved context. Mirrors grok's honest refusal.
 func (openCode) Close(pane string) error { return ErrNoGracefulClose }
+
+// --- ComposerStateProbe: OpenCode cursor-indexed composer classifier ---
+
+// openCodeComposerBorder is the left border on every row of OpenCode's composer.
+// PROVENANCE: LIVE-CAPTURED 2026-07-13 from official OpenCode 1.3.15. With the
+// terminal cursor on the middle composer row, an empty draft renders `  ┃` and a
+// typed synthetic draft renders `  ┃  beta-probe`.
+const openCodeComposerBorder = "┃" // U+2503
+
+// openCodeEmptyPlaceholderPrefix starts OpenCode's randomized fresh-session
+// empty-composer hint. PROVENANCE: LIVE-CAPTURED 2026-07-13 from official
+// OpenCode 1.3.15 as both `Ask anything... "Fix a TODO in the codebase"` and
+// `Ask anything... "What is the tech stack of this project?"`; the installed
+// binary also contains the `Ask anything...` render fragment. The suffix varies,
+// but cursorX stays parked at the body start. Typing replaces the hint and
+// advances cursorX.
+const openCodeEmptyPlaceholderPrefix = "Ask anything..."
+
+// ComposerState implements ComposerStateProbe. Only an idle OpenCode frame and
+// the terminal-cursor row can prove a cleared composer. Working, approval, and
+// error chrome, tmux copy/view mode, and read failures remain Undetermined so
+// recycle and confirmed-delivery gates fail closed.
+func (c openCode) ComposerState(pane string) ComposerDisposition {
+	cx, cy, inMode, err := c.cursorPosition(pane)
+	if err != nil || inMode {
+		return ComposerUndetermined
+	}
+	captured, err := c.capturePane(pane)
+	if err != nil || c.classify(captured) != StateIdle {
+		return ComposerUndetermined
+	}
+	return classifyOpenCodeComposerLine(captured, cx, cy)
+}
+
+// classifyOpenCodeComposerLine classifies the 0-based terminal-cursor row. A
+// valid row must start with the live-characterized composer border. Text after
+// that border is a pending draft except for the exact fresh-session placeholder
+// while the cursor remains at the body start. An out-of-range or non-composer
+// row is Undetermined rather than a false Cleared result.
+func classifyOpenCodeComposerLine(captured string, cursorX, cursorY int) ComposerDisposition {
+	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
+	if cursorY < 0 || cursorY >= len(lines) {
+		return ComposerUndetermined
+	}
+	line := lines[cursorY]
+	borderAt := strings.Index(line, openCodeComposerBorder)
+	if borderAt < 0 {
+		return ComposerUndetermined
+	}
+	// The live TUI centers the composer with ASCII spaces. Requiring that exact
+	// prefix means the byte offset below is also the terminal-cell offset; a
+	// decorated/wide-character prefix fails closed instead of mixing rune counts
+	// with tmux's display-cell cursorX.
+	if strings.Trim(line[:borderAt], " ") != "" {
+		return ComposerUndetermined
+	}
+	after, isComposer := strings.CutPrefix(trimSpace(line), openCodeComposerBorder)
+	if !isComposer {
+		return ComposerUndetermined
+	}
+	body := trimSpace(after)
+	if body == "" {
+		return ComposerCleared
+	}
+	// A fresh session paints placeholder text in the empty input. It is evidence
+	// of Cleared only while the cursor remains at the body start; an identical
+	// typed draft leaves the cursor after the text and therefore stays Pending.
+	bodyStartX := borderAt + 3 // ASCII-space prefix + border + two body spaces
+	if strings.HasPrefix(body, openCodeEmptyPlaceholderPrefix) && cursorX == bodyStartX {
+		return ComposerCleared
+	}
+	return ComposerPending
+}
+
+// --- RecycleBridge: portable-markdown context preservation ---
+
+func (openCode) HandoffPath(cwd, token string) string {
+	return filepath.Join(cwd, ".flotilla", "handoffs", "recycle-"+token+".md")
+}
+
+func (openCode) HandoffTurn(designatedPath string) string {
+	return PortableMarkdownHandoffTurn(designatedPath)
+}
+
+func (openCode) TakeoverTurn(designatedPath string) string {
+	return PortableMarkdownTakeoverTurn(designatedPath)
+}
 
 // --- pure state classifier (the testable core) ---
 
