@@ -27,20 +27,21 @@ func TestRelayQueueStoreRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "flotilla-relay-queue.json")
 	q := newRelayQueueStore(path)
 	j := Job{
-		MessageID:     "1000001",
-		Agent:         "cos",
-		Message:       "status?",
-		Kind:          "relay",
-		OriginChannel: "C1",
-		deferrals:     3,
-		enqueuedAt:    time.Date(2026, 7, 3, 5, 0, 0, 0, time.UTC),
+		MessageID:         "1000001",
+		Agent:             "cos-adj",
+		IntendedRecipient: "cos",
+		Message:           "status?",
+		Kind:              "relay",
+		OriginChannel:     "C1",
+		deferrals:         3,
+		enqueuedAt:        time.Date(2026, 7, 3, 5, 0, 0, 0, time.UTC),
 	}
 	q.upsert(j)
 	got := q.load()
 	if len(got) != 1 {
 		t.Fatalf("load len = %d, want 1", len(got))
 	}
-	if got[0].MessageID != j.MessageID || got[0].deferrals != 3 || got[0].Agent != "cos" {
+	if got[0].MessageID != j.MessageID || got[0].deferrals != 3 || got[0].Agent != "cos-adj" || got[0].IntendedRecipient != "cos" {
 		t.Fatalf("loaded = %+v, want round-trip of %+v", got[0], j)
 	}
 	q.remove("1000001")
