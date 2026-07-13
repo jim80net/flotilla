@@ -25,11 +25,14 @@ type paradePending struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-func paradePendingPath(rosterDir, agent string) (string, error) {
+func paradePendingPath(rosterDir, agent, token string) (string, error) {
 	if err := sessionmirror.ValidateAgentName(agent); err != nil {
 		return "", fmt.Errorf("parade marker: %w", err)
 	}
-	return filepath.Join(rosterDir, "flotilla-"+agent+"-parade-pending.json"), nil
+	if !paradeTokenRE.MatchString(token) {
+		return "", fmt.Errorf("parade marker: invalid token")
+	}
+	return filepath.Join(rosterDir, "flotilla-"+agent+"-parade-pending-"+token+".json"), nil
 }
 
 func appendParadeEgressFooter(message, token string) string {
@@ -43,16 +46,14 @@ func stripParadeEgressFooter(message string) string {
 }
 
 func markParadePending(rosterDir, agent, token string, now time.Time) error {
-	path, err := paradePendingPath(rosterDir, agent)
+	path, err := paradePendingPath(rosterDir, agent, token)
 	if err != nil {
 		return err
-	}
-	if !paradeTokenRE.MatchString(token) {
-		return fmt.Errorf("parade marker: invalid token")
 	}
 	if err := os.MkdirAll(rosterDir, 0o755); err != nil {
 		return err
 	}
+	cleanupExpiredParadePending(rosterDir, agent, now)
 	raw, err := json.Marshal(paradePending{Token: token, CreatedAt: now.UTC()})
 	if err != nil {
 		return err
@@ -60,10 +61,31 @@ func markParadePending(rosterDir, agent, token string, now time.Time) error {
 	return os.WriteFile(path, raw, 0o600)
 }
 
+func cleanupExpiredParadePending(rosterDir, agent string, now time.Time) {
+	if err := sessionmirror.ValidateAgentName(agent); err != nil {
+		return
+	}
+	paths, err := filepath.Glob(filepath.Join(rosterDir, "flotilla-"+agent+"-parade-pending-*.json"))
+	if err != nil {
+		return
+	}
+	for _, path := range paths {
+		raw, err := os.ReadFile(path)
+		var pending paradePending
+		if err != nil || json.Unmarshal(raw, &pending) != nil || pending.Token == "" || pending.CreatedAt.IsZero() || now.Sub(pending.CreatedAt) > paradeMarkerTTL || now.Before(pending.CreatedAt.Add(-time.Minute)) {
+			_ = os.Remove(path)
+		}
+	}
+}
+
 // claimParadePending authorizes only the turn carrying this request's random token.
 // An unrelated completion leaves the marker untouched; stale markers expire fail-quiet.
 func claimParadePending(rosterDir, agent, turnFinal string, now time.Time) bool {
-	path, err := paradePendingPath(rosterDir, agent)
+	match := paradeFooterRE.FindStringSubmatch(turnFinal)
+	if len(match) != 2 {
+		return false
+	}
+	path, err := paradePendingPath(rosterDir, agent, match[1])
 	if err != nil {
 		return false
 	}
@@ -76,8 +98,7 @@ func claimParadePending(rosterDir, agent, turnFinal string, now time.Time) bool 
 		_ = os.Remove(path)
 		return false
 	}
-	match := paradeFooterRE.FindStringSubmatch(turnFinal)
-	if len(match) != 2 || match[1] != pending.Token {
+	if match[1] != pending.Token {
 		return false
 	}
 	claimed := path + ".claimed"
@@ -91,16 +112,11 @@ func claimParadePending(rosterDir, agent, turnFinal string, now time.Time) bool 
 }
 
 func clearParadePending(rosterDir, agent, token string) {
-	path, err := paradePendingPath(rosterDir, agent)
+	path, err := paradePendingPath(rosterDir, agent, token)
 	if err != nil {
 		return
 	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return
-	}
-	var pending paradePending
-	if json.Unmarshal(raw, &pending) == nil && pending.Token == token {
-		_ = os.Remove(path)
-	}
+	// Token-specific filenames make cleanup atomic with respect to a later parade:
+	// removing this request can never remove another request's marker.
+	_ = os.Remove(path)
 }

@@ -233,7 +233,7 @@ func TestDeskMirror_ParadeMarkerCannotAuthorizeUnrelatedTurn683(t *testing.T) {
 	if posted != 0 {
 		t.Fatalf("unrelated turn posted %d times, want fail-quiet", posted)
 	}
-	path, _ := paradePendingPath(dir, "backend")
+	path, _ := paradePendingPath(dir, "backend", token)
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("correlated marker should remain for its matching parade: %v", err)
 	}
