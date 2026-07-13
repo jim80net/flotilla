@@ -249,6 +249,8 @@ func TestClassifyGrokComposerLine(t *testing.T) {
 	const multiline = "  ╭────────╮\n  │ ❯ line ONE                                     │\n  │   line TWO                                     │\n  │   line THREE                                   │\n  ╰──── Composer 2.5 Fast ─╯"
 	// The approval modal: the cursor sits on the ◆ Run line (no ❯), with the ┃ block below.
 	const modalCap = "    ◆ Run Edit `/x/hello.txt` 10s          11s ⇣19.0k [✗]\n\n  ┃\n  ┃  Allow Edit `/x/hello.txt`?\n  ┃\n  ┃  1 (●) Yes\n\n  1/4:select  │  Ctrl+o:yolo  │  Ctrl+c:cancel"
+	// The composer is visible on a different row than the cursor (the live idle desk case).
+	const offCursor = "  idle status line\n  │ ❯                                              │\n  Shift+Tab:mode"
 
 	cases := []struct {
 		name     string
@@ -258,13 +260,14 @@ func TestClassifyGrokComposerLine(t *testing.T) {
 	}{
 		{"empty composer at cursor → Cleared", cleared, 1, ComposerCleared},
 		{"composer with a pending body → Pending", pending, 1, ComposerPending},
+		{"composer visible off-cursor → Cleared", offCursor, 0, ComposerCleared},
 		// A lone user-typed box-drawing │ must NOT false-read Cleared (the recycle gate would discard
 		// the draft) — only the trailing RIGHT border is stripped, not a typed │ in the body.
 		{"body is a lone typed │ → Pending (not a false Cleared)", "  │ ❯ │                       │", 0, ComposerPending},
-		{"multi-line continuation row (no ❯) → Undetermined (non-Cleared, fail-closed)", multiline, 3, ComposerUndetermined},
+		{"multi-line body visible off-cursor → Pending", multiline, 3, ComposerPending},
 		{"approval modal: cursor on ◆ Run line (no ❯) → Undetermined (NOT Cleared — gate-safety)", modalCap, 0, ComposerUndetermined},
-		{"cursor past the captured range → Undetermined", cleared, 9999, ComposerUndetermined},
-		{"negative cursor → Undetermined", cleared, -1, ComposerUndetermined},
+		{"cursor past the captured range but composer visible → Cleared", cleared, 9999, ComposerCleared},
+		{"negative cursor but composer visible → Cleared", cleared, -1, ComposerCleared},
 		{"cursor on a plain (non-prompt) line → Undetermined", "  plain conversation line\n  more", 0, ComposerUndetermined},
 	}
 	for _, tc := range cases {
