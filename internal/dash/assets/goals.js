@@ -568,6 +568,35 @@
       "</article>";
   }
 
+  // #672: a whole radial DAG cannot keep readable labels when fitted into a 390px
+  // viewport. Render a flat, indented outline from the same parent links for narrow
+  // screens; CSS swaps it for the visual canvas. Rows retain the map's primary action
+  // by opening the existing detail drawer, so this is an exploration surface rather
+  // than a second summary. The local depth walk is cycle-safe for partial/bad data.
+  function renderMobileOutline(goals) {
+    var outline = q("goals-mobile-outline");
+    if (!outline) return;
+    var byId = {}, depthMemo = {};
+    goals.forEach(function (n) { byId[n.id] = n; });
+    function outlineDepth(n, seen) {
+      if (depthMemo[n.id] !== undefined) return depthMemo[n.id];
+      if (!n.parent || !byId[n.parent] || seen[n.id]) return 0;
+      var next = Object.assign({}, seen); next[n.id] = true;
+      return (depthMemo[n.id] = outlineDepth(byId[n.parent], next) + 1);
+    }
+    outline.innerHTML = goals.map(function (n) {
+      var vis = visToken(n), hue = limbStroke(n.id);
+      var tone = hue ? "--outline-tone:" + hue + ";" : "";
+      return '<button type="button" class="goutline-row" data-outline-id="' + escapeHtml(n.id) +
+        '" role="treeitem" aria-level="' + (outlineDepth(n, {}) + 1) + '" style="--outline-depth:' +
+        outlineDepth(n, {}) + ";" + tone + '">' +
+        '<span class="goutline-title">' + escapeHtml(n.title || n.id) + "</span>" +
+        '<span class="goutline-scope">' + escapeHtml(scopeNoun(n)) + "</span>" +
+        '<span class="goutline-state">' + escapeHtml(STATE_LABEL[vis] || vis) + "</span>" +
+        "</button>";
+    }).join("");
+  }
+
   /* ── layout: absolute tiered, bottom-up y-centering (ported) ───────────── */
   // Two-pass: pass 1 inserts cards at their column x with a provisional y so the
   // browser can measure real heights (titles wrap, work-item lists vary); pass 2
@@ -1316,9 +1345,11 @@
     selectedId = null;
   }
   var restoringNode = false; // true while the history controller restores a drawer (no re-push)
-  function openDrawer(id) {
+  var drawerReturnEl = null; // mobile outline opener; map cards remain the default return target
+  function openDrawer(id, returnEl) {
     var n = nodeById[id];
     if (!n) return;
+    drawerReturnEl = returnEl || null;
     selectNode(id);
     fillDrawer(n);
     var d = q("goals-drawer");
@@ -1353,7 +1384,8 @@
   function closeDrawer() {
     var d = q("goals-drawer");
     if (d) { d.classList.remove("open"); d.setAttribute("aria-hidden", "true"); }
-    var card = selectedId ? cardEl(selectedId) : null;
+    var card = drawerReturnEl || (selectedId ? cardEl(selectedId) : null);
+    drawerReturnEl = null;
     lastDrawerHtml = null;
     deselect();
     if (card) card.focus({ preventScroll: true }); // return focus to the node that opened it
@@ -1365,8 +1397,8 @@
   // nodeActivate is the primary node action (#349 A2): open the detail drawer — "the
   // point is I need to see the thing". (Was: deep-link to Conversations; that jump is now
   // the explicit → desk button / goToDesk.)
-  function nodeActivate(id) {
-    if (nodeById[id]) openDrawer(id);
+  function nodeActivate(id, returnEl) {
+    if (nodeById[id]) openDrawer(id, returnEl);
   }
 
   // goToDesk jumps to a node's Conversations thread — the → desk button, and the drawer's
@@ -1812,6 +1844,11 @@
     var nodesEl = q("goals-nodes");
     if (!nodesEl) return;
     nodesWired = true;
+    var outline = q("goals-mobile-outline");
+    if (outline) outline.addEventListener("click", function (e) {
+      var row = e.target.closest("[data-outline-id]");
+      if (row) nodeActivate(row.getAttribute("data-outline-id"), row);
+    });
     nodesEl.addEventListener("click", function (e) {
       var popItem = e.target.closest("[data-gnode-action]");
       if (popItem) {
@@ -2082,6 +2119,7 @@
         // until the next full re-index (#458 gate-review P3).
         if (prev) { prev.status_display = n.status_display; prev.work_items = n.work_items; prev.brief = n.brief; }
       });
+      renderMobileOutline(goals);
       updateInPlace(goals, nodesEl);
       drawEdges(); // child state may have changed → recolour (the SVG is stateless)
       reapplyTransient(); // re-light hover chain + refresh the open drawer's live status
@@ -2097,6 +2135,7 @@
     buildNodeIndex(goals);
     var roots = goals.filter(function (n) { return !n.parent || !nodeById[n.parent]; });
     computeLimbHues(goals, roots); // per-limb hue for the mind map (no-op for tree/org)
+    renderMobileOutline(goals);
     var maxDepth = 0;
     goals.forEach(function (n) { maxDepth = Math.max(maxDepth, depthOf(n)); });
 

@@ -1326,6 +1326,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
    transform-driven world (ported from the operator-approved prototype). */
 .goals-graph { position: relative; margin-top: 12px; }
 .goals-graph.hidden { display: none; }
+.goals-mobile-outline { display: none; }
 .goals-viewport {
   /* touch-action: pan-y lets a vertical touch-drag scroll the PAGE THROUGH the map by
      default (no nested-scroll trap) — deliberate pan mode (.pan-active) reclaims the
@@ -1986,9 +1987,33 @@ html, body { overflow-x: clip; }
   .goals-legend { gap: 8px; }
   .glegend { font-size: .62rem; }
   .goals-graph { margin-top: 6px; }
+  /* #672: fitting a whole radial DAG into 390px makes every node label too small.
+     Phones get the same hierarchy as a readable outline; tapping a row opens the
+     existing goal drawer. Keep the map mounted but visually removed so its two-pass
+     measurement remains valid if the viewport later widens without a data refresh. */
+  .goals-mobile-outline {
+    display: grid; gap: 6px; padding: 8px;
+    border: 1px solid var(--line); border-radius: var(--r);
+    background: var(--surface);
+  }
+  .goutline-row {
+    --outline-depth: 0;
+    width: calc(100% - min(calc(var(--outline-depth) * 14px), 56px));
+    margin-left: min(calc(var(--outline-depth) * 14px), 56px);
+    min-height: 48px; padding: 8px 10px;
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 8px;
+    text-align: left; font: inherit; color: var(--ink);
+    border: 1px solid var(--line); border-left: 3px solid var(--outline-tone, var(--cyan));
+    border-radius: var(--r-sm); background: var(--abyss-2); cursor: pointer;
+  }
+  .goutline-row:hover { border-color: var(--cyan-dim); }
+  .goutline-row:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+  .goutline-title { min-width: 0; font-family: var(--display); font-size: .9rem; line-height: 1.3; overflow-wrap: anywhere; }
+  .goutline-scope { grid-column: 1; font-size: .58rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+  .goutline-state { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-size: .58rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
   .goals-viewport {
-    height: min(62vh, 520px);
-    min-height: 280px;
+    position: absolute; width: 1px; height: 1px; min-height: 0;
+    visibility: hidden; pointer-events: none; overflow: hidden;
   }
   .goals-drawer { width: 100%; max-width: 100%; }
   .gm-dialog { padding: 16px 16px; }

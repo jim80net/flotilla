@@ -1884,6 +1884,29 @@ func TestMobileDashUX514_516(t *testing.T) {
 	}
 }
 
+// TestGoalsMobileOutline672 locks the readable hierarchy fallback for the radial
+// map at phone widths. The full mind-map remains the desktop rendering.
+func TestGoalsMobileOutline672(t *testing.T) {
+	srv, _ := newTestServer(t, singleFleetRoster, time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC))
+	html := doGet(t, srv, "/").Body.String()
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	js := doGet(t, srv, "/static/goals.js").Body.String()
+
+	if !strings.Contains(html, `id="goals-mobile-outline"`) {
+		t.Fatal("goals page must host the #672 mobile hierarchy outline")
+	}
+	for _, marker := range []string{"function renderMobileOutline", "data-outline-id", "outlineDepth", "nodeActivate(row.getAttribute"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must render and activate the mobile hierarchy outline (missing %q) — #672", marker)
+		}
+	}
+	for _, marker := range []string{".goals-mobile-outline", ".goutline-row", ".goutline-title", "--outline-depth"} {
+		if !strings.Contains(css, marker) {
+			t.Errorf("dash.css must keep mobile outline labels readable (missing %q) — #672", marker)
+		}
+	}
+}
+
 // --- helpers ---
 
 func doGet(t *testing.T, srv *Server, path string) *httptest.ResponseRecorder {
