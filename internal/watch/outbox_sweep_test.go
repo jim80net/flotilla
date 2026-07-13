@@ -30,7 +30,7 @@ func TestOutboxSweeperEnqueuesPending(t *testing.T) {
 	var n atomic.Int32
 	s := NewOutboxSweeper(dir, func(j Job) {
 		n.Add(1)
-		if j.Kind != KindSend || j.Sender != "alpha" || j.Agent != "cos" {
+		if j.Kind != KindSend || j.Sender != "alpha" || j.Agent != "cos" || j.Epoch != 1 || !j.OutboxBound {
 			t.Errorf("job = %+v", j)
 		}
 	})
@@ -47,6 +47,57 @@ func TestOutboxSweeperEnqueuesPending(t *testing.T) {
 	s.Release("alpha", outbox.ListAll(dir)[0].ID)
 	if s.SweepAll() != 1 {
 		t.Fatal("after release, entry should be swept again")
+	}
+}
+
+func TestCanceledJobAlreadyQueuedInInjectorNeverDelivers(t *testing.T) {
+	dir := t.TempDir()
+	id, _, err := outbox.Enqueue(dir, "alpha-desk", "alpha-xo", "stand down this task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var swept Job
+	s := NewOutboxSweeper(dir, func(j Job) { swept = j })
+	if s.SweepAll() != 1 {
+		t.Fatal("expected one swept job")
+	}
+	if _, err := outbox.Cancel(dir, id); err != nil {
+		t.Fatal(err)
+	}
+
+	var sends atomic.Int32
+	in := NewInjector(func(_, _ string) error {
+		sends.Add(1)
+		return nil
+	}, 1)
+	in.SetRosterDir(dir)
+	in.SetOutboxDone(s.Release)
+	in.deliver(swept)
+	if sends.Load() != 0 {
+		t.Fatalf("canceled queued job sent %d time(s)", sends.Load())
+	}
+	if s.SweepAll() != 0 {
+		t.Fatal("canceled job must not reappear on a later sweep")
+	}
+}
+
+func TestSweepPreservesQueueOrderWithinCurrentEpoch(t *testing.T) {
+	dir := t.TempDir()
+	first, _, err := outbox.Enqueue(dir, "alpha-desk", "alpha-xo", "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := outbox.Enqueue(dir, "alpha-desk", "alpha-xo", "second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	s := NewOutboxSweeper(dir, func(j Job) { ids = append(ids, j.MessageID) })
+	if s.SweepAll() != 2 {
+		t.Fatal("expected two current jobs")
+	}
+	if len(ids) != 2 || ids[0] != first || ids[1] != second {
+		t.Fatalf("sweep order = %v, want [%s %s]", ids, first, second)
 	}
 }
 
@@ -148,5 +199,46 @@ func TestSendOutboxDeferralsPersistOnBusyDefer(t *testing.T) {
 	got := outbox.NewStore(path).Load()
 	if len(got) != 1 || got[0].Deferrals != 1 {
 		t.Fatalf("outbox deferrals = %+v, want 1 after first busy defer", got)
+	}
+}
+
+func TestBusyRepersistCannotOverwriteOriginalRecipient674(t *testing.T) {
+	dir := t.TempDir()
+	path, err := outbox.Path(dir, "alpha-xo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := outbox.NewStore(path)
+	if _, _, err := st.Insert(outbox.Entry{
+		ID: "immutable-674", Sender: "alpha-xo", Recipient: "cos", Message: "gate report",
+		Epoch: 1, EnqueuedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRig(surface.ErrBusy)
+	r.in.rosterDir = dir
+	r.in.handleBusy(Job{
+		Agent: "cos-adj", Message: "gate report", Kind: KindSend,
+		MessageID: "immutable-674", Sender: "alpha-xo", Epoch: 1, OutboxBound: true,
+	}, surface.ErrBusy)
+	got := st.Load()
+	if len(got) != 1 || got[0].Recipient != "cos" {
+		t.Fatalf("busy re-persist changed recipient: %+v", got)
+	}
+	if got[0].Deferrals != 1 {
+		t.Fatalf("busy re-persist did not update deferrals: %+v", got)
+	}
+}
+
+func TestKindSendDeliveryLogNamesIntendedAndResolvedTargets674(t *testing.T) {
+	r := newRig(nil)
+	buf := captureLog(t)
+	r.in.deliver(Job{
+		Agent: "cos-adj", IntendedRecipient: "cos", Message: "gate report", Kind: KindSend,
+		MessageID: "log-674", Sender: "alpha-xo",
+	})
+	if !strings.Contains(buf.String(), `intended for "cos" -> resolved target "cos-adj"`) {
+		t.Fatalf("delivery log must expose alias, got %q", buf.String())
 	}
 }

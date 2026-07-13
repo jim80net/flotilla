@@ -1,6 +1,7 @@
 package outbox
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -186,6 +187,33 @@ func TestUpdatePersistsDeferralsBump(t *testing.T) {
 	}
 }
 
+func TestUpdatePreservesImmutableDeliveryIdentity674(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(mustPath(t, dir, "alpha-xo"))
+	original := Entry{
+		ID: "immutable", Sender: "alpha-xo", Recipient: "cos", Message: "original",
+		Epoch: 1, Deferrals: 1, EnqueuedAt: time.Now().UTC(),
+	}
+	if _, _, err := s.Insert(original); err != nil {
+		t.Fatal(err)
+	}
+	mutated := original
+	mutated.Sender = "cos-adj"
+	mutated.Recipient = "cos-adj"
+	mutated.Message = "rewritten"
+	mutated.Epoch = 99
+	mutated.Deferrals = 2
+	s.Update(mutated)
+
+	got := s.Load()[0]
+	if got.Sender != original.Sender || got.Recipient != original.Recipient || got.Message != original.Message || got.Epoch != original.Epoch {
+		t.Fatalf("Update changed immutable delivery identity: %+v", got)
+	}
+	if got.Deferrals != 2 {
+		t.Fatalf("Update did not persist mutable bookkeeping: %+v", got)
+	}
+}
+
 func TestUpdateDoesNotAppendUnknownID(t *testing.T) {
 	dir := t.TempDir()
 	s := NewStore(mustPath(t, dir, "xo"))
@@ -205,6 +233,135 @@ func TestListAllMultipleSenders(t *testing.T) {
 	}
 	if len(ListAll(dir)) != 2 {
 		t.Fatalf("ListAll = %d, want 2", len(ListAll(dir)))
+	}
+}
+
+func TestCancelAdvancesPairEpochAndStandsDownWholeGeneration(t *testing.T) {
+	dir := t.TempDir()
+	first, _, err := Enqueue(dir, "alpha-desk", "alpha-xo", "first queued task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := Enqueue(dir, "alpha-desk", "alpha-xo", "second queued task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _, err := Enqueue(dir, "alpha-desk", "beta-xo", "unrelated task")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Cancel(dir, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Sender != "alpha-desk" || result.Recipient != "alpha-xo" || result.Canceled != 2 || result.Epoch != 2 {
+		t.Fatalf("cancel result = %+v", result)
+	}
+	remaining := NewStore(mustPath(t, dir, "alpha-desk")).Load()
+	if len(remaining) != 1 || remaining[0].ID != other {
+		t.Fatalf("remaining = %+v, want unrelated recipient only (canceled %s and %s)", remaining, first, second)
+	}
+
+	third, _, err := Enqueue(dir, "alpha-desk", "alpha-xo", "replacement task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := NewStore(mustPath(t, dir, "alpha-desk")).Load()
+	var replacement Entry
+	for _, e := range entries {
+		if e.ID == third {
+			replacement = e
+		}
+	}
+	if replacement.Epoch != 2 {
+		t.Fatalf("replacement epoch = %d, want 2", replacement.Epoch)
+	}
+	if Current(dir, Entry{ID: first, Sender: "alpha-desk", Recipient: "alpha-xo", Epoch: 1}) {
+		t.Fatal("canceled generation must not remain current")
+	}
+	if !Current(dir, replacement) {
+		t.Fatal("replacement generation should be current")
+	}
+}
+
+func TestCancelUnknownIDDoesNotAdvanceEpoch(t *testing.T) {
+	dir := t.TempDir()
+	id, _, err := Enqueue(dir, "alpha-desk", "alpha-xo", "queued task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Cancel(dir, "missing"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("cancel missing error = %v", err)
+	}
+	entry := NewStore(mustPath(t, dir, "alpha-desk")).Load()[0]
+	if entry.ID != id || entry.Epoch != 1 || !Current(dir, entry) {
+		t.Fatalf("unknown cancel changed current entry: %+v", entry)
+	}
+}
+
+func TestLegacyEntryWithoutEpochIsCurrentGenerationOne(t *testing.T) {
+	dir := t.TempDir()
+	path := mustPath(t, dir, "alpha-desk")
+	legacy := `{"pending":[{"id":"legacy","sender":"alpha-desk","recipient":"alpha-xo","message":"queued before upgrade","deferrals":0,"enqueued_at":"2026-07-13T00:00:00Z"}]}`
+	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entry := NewStore(path).Load()[0]
+	if !Current(dir, entry) {
+		t.Fatal("epoch-zero legacy entry should map to generation one")
+	}
+	if _, err := Cancel(dir, "legacy"); err != nil {
+		t.Fatal(err)
+	}
+	id, _, err := Enqueue(dir, "alpha-desk", "alpha-xo", "queued after cancel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := NewStore(path).Load()
+	if len(got) != 1 || got[0].ID != id || got[0].Epoch != 2 {
+		t.Fatalf("post-cancel legacy replacement = %+v", got)
+	}
+}
+
+func TestCancelAndDeliveryAttemptHaveOneDurableWinner(t *testing.T) {
+	dir := t.TempDir()
+	id, _, err := Enqueue(dir, "alpha-desk", "alpha-xo", "queued task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := NewStore(mustPath(t, dir, "alpha-desk")).Load()[0]
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	delivered := make(chan error, 1)
+	go func() {
+		attempted, err := AttemptCurrent(dir, entry, func() error {
+			close(entered)
+			<-release
+			return nil
+		})
+		if !attempted && err == nil {
+			err = fmt.Errorf("delivery was not attempted")
+		}
+		delivered <- err
+	}()
+	<-entered // delivery owns the sender outbox lock
+	canceled := make(chan error, 1)
+	go func() {
+		_, err := Cancel(dir, id)
+		canceled <- err
+	}()
+	select {
+	case err := <-canceled:
+		t.Fatalf("cancel completed while delivery transaction was active: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	if err := <-delivered; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-canceled; err == nil || !strings.Contains(err.Error(), "no longer pending") {
+		t.Fatalf("cancel after confirmed delivery error = %v", err)
 	}
 }
 
