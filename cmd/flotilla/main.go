@@ -155,6 +155,7 @@ flags for 'send':
   --attach <path>   attach files to the audit mirror post when mirroring (repeatable)
   --mirror          force-enable the Discord audit mirror for this send
   --no-mirror       force-disable it (--mirror and --no-mirror are mutually exclusive)
+  --cross-venture   allow a desk→foreign-desk send and emit an audit line
 
 Inter-agent send mirroring is DEFAULT-OFF — intra-fleet coordination stays in the
 tmux panes and does not clutter Discord; only the operator-facing 'flotilla notify'
@@ -330,6 +331,7 @@ func cmdSend(args []string) error {
 	secretsPath := fs.String("secrets", os.Getenv("FLOTILLA_SECRETS"), "secrets env file path")
 	noMirror := fs.Bool("no-mirror", false, "force-skip the Discord audit mirror")
 	doMirror := fs.Bool("mirror", false, "force-enable the Discord audit mirror (overrides a default-off roster)")
+	crossVenture := fs.Bool("cross-venture", false, "allow and audit a desk-to-foreign-desk send")
 	var attachPaths attachPathsFlag
 	fs.Var(&attachPaths, "attach", "attach a file to the audit mirror Discord post (repeatable)")
 	if err := fs.Parse(args); err != nil {
@@ -384,6 +386,13 @@ func cmdSend(args []string) error {
 	agent, err := cfg.Agent(agentName)
 	if err != nil {
 		return err
+	}
+	decision := authorizeSend(cfg, *from, agentName, *crossVenture)
+	if !decision.Allowed {
+		return fmt.Errorf("%s", decision.Reason)
+	}
+	if decision.Audit {
+		fmt.Fprintf(os.Stderr, "flotilla send: AUDIT --cross-venture override: %s → %s (%s)\n", *from, agentName, decision.Reason)
 	}
 	// Resolve the agent's surface driver (how this surface submits a turn).
 	// Unknown surface is a clear error, never a silent mis-drive.
