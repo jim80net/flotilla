@@ -42,6 +42,7 @@ can get their world's state and what they must do — without decoding a codenam
 rewrite before sending.
 
 **Coordinators (every XO and the Chief of Staff):** this format is your default register
-for operator communication — including turn-finals the mirror posts verbatim. Principle 5
-(reader-modeling) sets the posture; this block is the **shape**.
+for curated operator communication — `notify` replies, decisions, and parade reports.
+Routine turn-finals remain in the durable dash ledger. Principle 5 (reader-modeling)
+sets the posture; this block is the **shape**.
 <!-- /flotilla:executive-mini-brief -->

@@ -37,7 +37,7 @@ The title is the **one-line answer** to "what does this PR introduce?"
 
 | Avoid | Prefer |
 |---|---|
-| `fix stuff` / `updates` / `WIP` | `Skip Discord mirror when notify posted within 3 minutes` |
+| `fix stuff` / `updates` / `WIP` | `Keep routine turn-finals in the dash ledger` |
 | `feat/org-truth-pr4` (branch name as title) | `Expose org DAG on dash topology API and goals spokes` |
 | `Address review feedback` | `Reject cyclic fleet-org.yaml at load time with path in error` |
 | Internal codenames without gloss | Generic capability names from `flotilla.example.json` roles |
