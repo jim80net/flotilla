@@ -100,3 +100,48 @@ nodes:
 		t.Fatalf("unassigned = %+v", unassigned)
 	}
 }
+
+func TestOrderedWorkLedgerFlotillasRanksMovingWorkFirst(t *testing.T) {
+	groups := map[string][]WorkLedgerDesk{
+		"alpha": {
+			{Name: "alpha-desk", Shipped: []WorkLedgerItem{{Issue: tracker.Issue{Number: 1}}}},
+		},
+		"zeta": {
+			{Name: "a-shipped", Shipped: []WorkLedgerItem{{Issue: tracker.Issue{Number: 2}}}},
+			{Name: "z-moving", InFlight: []WorkLedgerItem{{Issue: tracker.Issue{Number: 3}}}},
+		},
+	}
+
+	got := orderedWorkLedgerFlotillas(groups, nil)
+	if len(got) != 2 || got[0].Name != "zeta" {
+		t.Fatalf("flotillas = %+v, want moving zeta first", got)
+	}
+	if len(got[0].Desks) != 2 || got[0].Desks[0].Name != "z-moving" {
+		t.Fatalf("zeta desks = %+v, want moving desk first", got[0].Desks)
+	}
+}
+
+func TestOrderedWorkLedgerFlotillasPreservesRosterRankWithinMovingWork(t *testing.T) {
+	groups := map[string][]WorkLedgerDesk{
+		"alpha": {{Name: "alpha-desk", InFlight: []WorkLedgerItem{{Issue: tracker.Issue{Number: 1}}}}},
+		"beta": {
+			{Name: "late-desk", InFlight: []WorkLedgerItem{{Issue: tracker.Issue{Number: 2}}}},
+			{Name: "early-desk", InFlight: []WorkLedgerItem{{Issue: tracker.Issue{Number: 3}}}},
+		},
+	}
+	cfg := &roster.Config{
+		Agents: []roster.Agent{{Name: "early-desk"}, {Name: "late-desk"}, {Name: "alpha-desk"}},
+		Channels: []roster.Channel{
+			{ChannelID: "C_BETA", XOAgent: "beta", Role: "project"},
+			{ChannelID: "C_ALPHA", XOAgent: "alpha", Role: "project"},
+		},
+	}
+
+	got := orderedWorkLedgerFlotillas(groups, cfg)
+	if len(got) != 2 || got[0].Name != "beta" {
+		t.Fatalf("flotillas = %+v, want roster-ranked beta first", got)
+	}
+	if got[0].Desks[0].Name != "early-desk" {
+		t.Fatalf("beta desks = %+v, want roster-ranked early-desk first", got[0].Desks)
+	}
+}
