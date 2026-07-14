@@ -51,6 +51,7 @@ func TestIdentityFileName(t *testing.T) {
 		{"grok", "AGENTS.md", false},
 		{"cursor", "AGENTS.md", false},
 		{"codex", "AGENTS.md", false},
+		{"pi", "AGENTS.md", false}, // Pi discovers AGENTS.md natively from cwd and parents
 		{"made-up", "", true},
 	}
 	for _, c := range cases {

@@ -46,7 +46,8 @@ func Dir(agent string) (string, error) {
 // CONVENTIONS.md`); opencode/grok/cursor/codex → AGENTS.md. An unknown surface is an error
 // rather than a guessed name — the per-surface load mechanism is verified per driver
 // (aider --read is documented; OpenCode loads AGENTS.md natively, packages/opencode/
-// src/session/instruction.ts; Grok → AGENTS.md (ASSUMED for xAI's official grok CLI — the
+// src/session/instruction.ts; Pi loads AGENTS.md natively (Pi coding-agent Context
+// Files documentation); Grok → AGENTS.md (ASSUMED for xAI's official grok CLI — the
 // deployed product; the prior provenance was superagent grok-dev, which the operator does not
 // run, so re-verify AGENTS.md against the official grok and adjust if needed). Cursor is dropped).
 func IdentityFileName(surface string) (string, error) {
@@ -55,7 +56,7 @@ func IdentityFileName(surface string) (string, error) {
 		return "CLAUDE.md", nil
 	case "aider":
 		return "CONVENTIONS.md", nil
-	case "opencode", "grok", "cursor", "codex":
+	case "opencode", "grok", "cursor", "codex", "pi":
 		return "AGENTS.md", nil
 	default:
 		return "", fmt.Errorf("unknown surface %q: no identity-file convention", surface)

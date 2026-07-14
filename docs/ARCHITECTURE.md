@@ -74,10 +74,14 @@ interfaces the caller type-asserts, and a name-keyed registry.
 
 A `Driver` is the per-agent policy for driving a terminal TUI: `Submit` a turn,
 `Assess` the rendered state, `Rotate` (reset) the context, `Close` the session.
-Claude Code, Grok, Aider, OpenCode, and Codex each register a driver
+Claude Code, Grok, Aider, OpenCode, Codex, and Pi each register a driver
 (`internal/surface/claude.go`, `grok.go`, …); the roster's `surface` field selects
 one (default `"claude-code"`). Low-level tmux keystrokes live in
 `internal/deliver`; a driver DECIDES, `deliver` EXECUTES.
+
+Pi's minimum launch shape is `pi --provider … --model … --thinking xhigh`.
+Provider and model IDs are operator-selected from `pi --list-models`; no seat
+mapping or provider credential is part of the surface driver.
 
 Optional capabilities (a surface implements them only if it can) are separate
 interfaces resolved by type assertion: `ResultReader`, `ReplyReader`,
