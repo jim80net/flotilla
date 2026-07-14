@@ -248,7 +248,8 @@ const (
 // (the focused input line) and classifies it. Reading at the cursor — not a fixed bottom-of-pane
 // window — is what lets it SEE a per-agent message sub-composer or a queued-message prompt rendered
 // ABOVE a docked agents panel (the earlier window-based composer probe was blind to these). A cursor or
-// capture read error reads as Undetermined so confirmed delivery falls back to the Working spinner.
+// capture read error reads as Undetermined: pre-paste delivery refuses it, while post-paste confirmation
+// may still use the Working spinner and recycle remains fail-closed.
 func (c claudeCode) ComposerState(pane string) ComposerDisposition {
 	cy, inMode, err := c.cursorState(pane)
 	if err != nil {
@@ -257,9 +258,9 @@ func (c claudeCode) ComposerState(pane string) ComposerDisposition {
 	}
 	if inMode {
 		// Copy/view-mode: the cursor and capture coordinate spaces diverge, so a cursor-indexed line
-		// read would mis-classify (a scrollback composer render could false-confirm). Fail-safe to
-		// the spinner.
-		log.Printf("flotilla: surface(claude-code): pane %q is in a tmux mode (copy/view) — composer-state undetermined (spinner fallback)", pane)
+		// read would mis-classify (a scrollback composer render could false-confirm). Pre-paste
+		// delivery and recycle fail closed on this Undetermined result.
+		log.Printf("flotilla: surface(claude-code): pane %q is in a tmux mode (copy/view) — composer-state undetermined (pre-paste fail-closed)", pane)
 		return ComposerUndetermined
 	}
 	captured, err := c.capturePane(pane)
@@ -274,7 +275,8 @@ func (c claudeCode) ComposerState(pane string) ComposerDisposition {
 // 1:1) into a ComposerDisposition. IMPORTANT: Claude Code separates the "❯" prompt from the body
 // with a NON-BREAKING space (U+00A0), not ASCII — every whitespace trim uses unicode.IsSpace (which
 // covers U+00A0); an ASCII-only trim silently misclassified the live render. A cursor outside the
-// captured range, or not on a "❯" prompt line, is Undetermined (the caller falls back to the spinner).
+// captured range, or not on a "❯" prompt line, is Undetermined (pre-paste fail-closed;
+// post-paste confirmation may still use the spinner).
 func classifyComposerLine(captured string, cursorY int) ComposerDisposition {
 	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
 	if cursorY < 0 || cursorY >= len(lines) {

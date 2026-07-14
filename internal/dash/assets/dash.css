@@ -1055,18 +1055,32 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   cursor: pointer;
 }
 #filter-state {
-  font-family: var(--mono);
-  font-size: .78rem;
-  color: var(--ink-2);
-  background: var(--abyss-3);
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  padding: .4rem .55rem;
-  transition: border-color .18s var(--ease);
+  font-family: var(--mono); font-size: .78rem; color: var(--ink-2);
+  background: var(--abyss-3); border: 1px solid var(--line); border-radius: var(--r-sm);
+  padding: .4rem .55rem; transition: border-color .18s var(--ease);
 }
 #filter-state:hover { border-color: var(--cyan-dim); }
-
-.issues-list { display: grid; gap: 1px; background: var(--line-soft); min-width: 0; }
+.issues-list { display: grid; gap: 14px; padding: 14px; min-width: 0; }
+.issue-ledger-section { border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; }
+.issue-ledger-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: .75rem 1rem; background: var(--abyss-3); border-bottom: 1px solid var(--line);
+}
+.issue-ledger-head h3 { margin: 0; font-family: var(--display); font-size: 1rem; color: var(--ink); }
+.issue-ledger-kicker { font-size: .58rem; letter-spacing: .12em; text-transform: uppercase; color: var(--cyan); }
+.issue-ledger-head p { margin: .18rem 0 0; font-size: .72rem; color: var(--ink-3); }
+.issue-ledger-count {
+  min-width: 2rem; height: 2rem; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line); border-radius: 999px; color: var(--ink-2); font-family: var(--display);
+}
+.issue-ledger-empty { padding: 1rem; color: var(--ink-3); background: var(--abyss-2); font-size: .82rem; }
+.issue-desk + .issue-desk { border-top: 1px solid var(--line); }
+.issue-desk-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: .55rem 1rem; background: color-mix(in srgb, var(--cyan) 4%, var(--abyss-2));
+}
+.issue-desk-head h4 { margin: 0; font-family: var(--display); font-size: .82rem; color: var(--ink); }
+.issue-desk-head span { font-size: .68rem; color: var(--ink-3); }
 .issue-row {
   display: grid;
   grid-template-columns: auto auto 1fr auto;
@@ -1087,6 +1101,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   border-left-color: var(--cyan-dim);
 }
 .issue-num { color: var(--ink-3); font-size: .78rem; }
+.issue-copy { display: grid; gap: .18rem; min-width: 0; }
+.issue-context { color: var(--ink-3); font-size: .7rem; overflow-wrap: anywhere; }
 /* #515: titles must stay readable on a 390px fleet scan — wrap up to two lines,
    break long tokens, never single-line clip at the container edge. */
 .issue-title {
@@ -1112,6 +1128,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 }
 .issue-state.open { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
 .issue-state.closed { color: var(--ink-3); }
+.issue-state.in-flight { color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 45%, transparent); }
+.issue-state.shipped { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
 .issue-labels { display: inline-flex; gap: .3rem; flex-wrap: wrap; }
 /* GitHub label chip: JS passes the raw label hue as --label; the text stays dark
    ink and the hue lives in a faint tint + accent border, so any GitHub color
@@ -1326,6 +1344,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
    transform-driven world (ported from the operator-approved prototype). */
 .goals-graph { position: relative; margin-top: 12px; }
 .goals-graph.hidden { display: none; }
+.goals-mobile-outline { display: none; }
 .goals-viewport {
   /* touch-action: pan-y lets a vertical touch-drag scroll the PAGE THROUGH the map by
      default (no nested-scroll trap) — deliberate pan mode (.pan-active) reclaims the
@@ -1373,7 +1392,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   position: absolute; border: 1px solid var(--line); border-radius: var(--r);
   background: linear-gradient(180deg, var(--card), var(--raised));
   box-shadow: var(--shadow-sm);
-  padding: 10px 12px; overflow: hidden;
+  padding: 4px 84px 4px 8px; overflow: visible;
   transition: border-color .2s var(--ease), box-shadow .2s var(--ease), transform .15s var(--ease);
 }
 /* #503: the card's overflow:hidden clips its own kebab popup (an absolutely-positioned
@@ -1386,27 +1405,18 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
    zoom; the focus-recenter (keyboard) brings a focused node to centre so the ring
    is on-screen, and !important keeps it winning over the state-* box-shadows. */
 .gnode:focus-visible { outline: 2px solid var(--cyan) !important; outline-offset: 2px; }
-.gnode-eyebrow { font-size: .6rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); display: flex; gap: 8px; }
+.gnode-eyebrow { display: none; }
 .gnode-owner { color: var(--cyan-dim); }
-.gnode-title { font-family: var(--display); font-weight: 600; color: var(--ink); line-height: 1.12; font-size: 1.02rem; margin-top: 2px; text-wrap: balance; }
-.gnode-desc { font-size: .74rem; color: var(--ink-2); line-height: 1.32; margin: 5px 0 0; }
-.gnode-foot { margin-top: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.gnode-title { font-family: var(--display); font-weight: 600; color: var(--ink); font-size: .82rem; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 0; }
+.gnode-desc { display: none; }
+.gnode-foot { position: absolute; top: 50%; right: 34px; max-width: 48px; transform: translateY(-50%); margin: 0; transition: opacity .15s var(--ease); }
 /* flotilla (v2) — dual-read the legacy .gnode-fleet class during migration */
 .gnode-flotilla .gnode-title,
-.gnode-fleet .gnode-title { font-size: 1.2rem; }
+.gnode-fleet .gnode-title { font-size: .95rem; }
 /* harness badge (org-graph v2 §3): subdued, right-aligned in the foot */
-.gnode-harness {
-  font-size: .58rem;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  border: 1px solid var(--line-soft, var(--line));
-  border-radius: var(--r-xs, 3px);
-  padding: 1px 5px;
-  white-space: nowrap;
-}
+.gnode-harness { display: none; }
 /* priorities / milestones — short labeled lists in the node card */
-.gnode-list { margin-top: 7px; }
+.gnode-list { display: none; }
 .gnode-list-lab {
   display: block;
   font-size: .55rem;
@@ -1447,6 +1457,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 
 /* state pill */
 .gpill { font-size: .6rem; letter-spacing: .07em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); }
+.gnode .gpill { display: block; max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .52rem; letter-spacing: .04em; padding: 1px 5px; }
 .gpill-realized { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); background: color-mix(in srgb, var(--ok) 10%, transparent); }
 .gpill-in-flight { color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 45%, transparent); background: color-mix(in srgb, var(--cyan) 10%, transparent); }
 .gpill-awaiting { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 48%, transparent); background: color-mix(in srgb, var(--amber) 12%, transparent); }
@@ -1455,7 +1466,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gpill-aspirational, .gpill-active, .gpill-paused, .gpill-cancelled { color: var(--ink-3); }
 
 /* work-item chips */
-.gnode-items { display: flex; flex-direction: column; gap: 6px; margin-top: 9px; }
+.gnode-items { display: none; }
 .gwi { display: flex; align-items: center; gap: 7px; font-size: .72rem; color: var(--ink-2); background: var(--abyss-2); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 4px 8px; }
 .gwi-kind { font-size: .56rem; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
 .gwi-label { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
@@ -1531,21 +1542,23 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
    1/scale), set on goals-world in applyTransform) so they stay SCREEN-CONSTANT — under a
    0.3 phone fit-scale a 26px button would render ~8px (untappable, mobile-QA #330). The
    inverse scale pins them to their 26px screen size (clears the WCAG 2.5.8 24px minimum);
-   transform-origin keeps them anchored at the card's top-right corner. */
+   transform-origin keeps them centered at the card's right edge. The status foot
+   sits to their left; while actions are visible it yields the row so counter-scaling
+   at a small fit cannot make the two controls overlap. */
 .gnode-ctl {
-  position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; z-index: 2;
+  position: absolute; top: calc(50% - 11px); right: 6px; display: flex; gap: 4px; z-index: 2;
   transform: scale(var(--ctl-scale, 1));
-  transform-origin: top right;
+  transform-origin: center right;
 }
+.gnode:hover .gnode-foot, .gnode:focus-within .gnode-foot { opacity: 0; visibility: hidden; pointer-events: none; }
 /* #421: compact kebab menu — fixed screen size at any zoom; popout carries actions. */
 .gnode-kebab {
   width: 22px; height: 22px; padding: 0; border-radius: 6px; border: 1px solid var(--line);
   background: var(--abyss-2); color: var(--ink-3); cursor: pointer; line-height: 1;
   display: inline-flex; align-items: center; justify-content: center; font-size: 1rem;
-  opacity: 0; transition: opacity .15s var(--ease);
+  opacity: 0; pointer-events: none; transition: opacity .15s var(--ease);
 }
-.gnode:hover .gnode-kebab, .gnode:focus-within .gnode-kebab, .gnode:focus-visible .gnode-kebab { opacity: 1; }
-@media (hover: none) { .gnode-kebab { opacity: 1; } }
+.gnode:hover .gnode-kebab, .gnode:focus-within .gnode-kebab, .gnode:focus-visible .gnode-kebab { opacity: 1; pointer-events: auto; }
 .gnode-kebab:hover { border-color: var(--cyan-dim); color: var(--cyan); }
 .gnode-pop {
   position: absolute; top: 100%; right: 0; margin-top: 4px; min-width: 9.5rem;
@@ -1949,7 +1962,8 @@ html, body { overflow-x: clip; }
     min-height: 44px;
     align-items: start;
   }
-  .issue-title { grid-column: 1 / -1; -webkit-line-clamp: 2; }
+  .issue-copy { grid-column: 1 / -1; }
+  .issue-title { -webkit-line-clamp: 2; }
   .issue-labels { grid-column: 1 / -1; }
 
   /* the info|debug and tree|org segmented groups: give them room to breathe */
@@ -1986,10 +2000,34 @@ html, body { overflow-x: clip; }
   .goals-legend { gap: 8px; }
   .glegend { font-size: .62rem; }
   .goals-graph { margin-top: 6px; }
-  .goals-viewport {
-    height: min(62vh, 520px);
-    min-height: 280px;
+  /* #672: fitting a whole radial DAG into 390px makes every node label too small.
+     Phones get the same hierarchy as a readable outline; tapping a row opens the
+     existing goal drawer. Keep the map mounted but visually removed so its two-pass
+     measurement remains valid if the viewport later widens without a data refresh. */
+  .goals-mobile-outline {
+    display: grid; gap: 6px; padding: 8px;
+    border: 1px solid var(--line); border-radius: var(--r);
+    background: var(--surface);
   }
+  .goutline-row {
+    --outline-depth: 0;
+    width: calc(100% - min(calc(var(--outline-depth) * 14px), 56px));
+    margin-left: min(calc(var(--outline-depth) * 14px), 56px);
+    min-height: 48px; padding: 8px 10px;
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 8px;
+    text-align: left; font: inherit; color: var(--ink);
+    border: 1px solid var(--line); border-left: 3px solid var(--outline-tone, var(--cyan));
+    border-radius: var(--r-sm); background: var(--abyss-2); cursor: pointer;
+  }
+  .goutline-row:hover { border-color: var(--cyan-dim); }
+  .goutline-row:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+  .goutline-title { min-width: 0; font-family: var(--display); font-size: .9rem; line-height: 1.3; overflow-wrap: anywhere; }
+  .goutline-scope { grid-column: 1; font-size: .58rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+  .goutline-state { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-size: .58rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
+  .goals-viewport {
+    display: none;
+  }
+  .goals-world { display: none; }
   .goals-drawer { width: 100%; max-width: 100%; }
   .gm-dialog { padding: 16px 16px; }
   /* the help tooltip is left-anchored under a button near the right edge; on a

@@ -66,6 +66,19 @@
       "launch": "FLOTILLA_SECRETS=/home/operator/.config/flotilla/flotilla-secrets.env FLOTILLA_ROSTER=/home/operator/.config/flotilla/flotilla.json bash -lc 'export FLOTILLA_SELF=xo-adj; grok --model composer-2.5-fast -w xo-adj'",
       "cwd": "/home/operator/work/flotilla",
       "tmux": "flotilla:xo-adj"
+    },
+    "pi-desk": {
+      "_comment": "Pi (@mariozechner/pi-coding-agent) via OpenCode Go subscription. Provider id is opencode-go; models are Pi's built-in OpenCode Go catalog (e.g. kimi-k2.6) — NOT OpenCode CLI's opencode/gpt-5.6-sol id. Auth: ~/.pi/agent/auth.json key opencode-go (or OPENCODE_API_KEY). Host paths illustrative.",
+      "launch": "FLOTILLA_SECRETS=/home/operator/.config/flotilla/flotilla-secrets.env FLOTILLA_ROSTER=/home/operator/.config/flotilla/flotilla.json bash -lc 'export FLOTILLA_SELF=pi-desk; pi --provider opencode-go --model kimi-k2.6 --thinking xhigh'",
+      "cwd": "/home/operator/work/example-repo",
+      "tmux": "flotilla-pi:desk",
+      "primary": {
+        "surface": "pi",
+        "provider": "opencode-go",
+        "model": "kimi-k2.6",
+        "subscription_id": "opencode-go-execution",
+        "launch": "pi --provider opencode-go --model kimi-k2.6 --thinking xhigh"
+      }
     }
   }
 }

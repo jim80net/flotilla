@@ -405,6 +405,15 @@ func TestConfirmSubmitGateRefusesListNav(t *testing.T) {
 	}
 }
 
+func TestConfirmSubmitGateRefusesUndeterminedBeforePaste692(t *testing.T) {
+	enter := 0
+	d := &stateStub{assessSeq: []State{StateIdle}, stateSeq: []ComposerDisposition{ComposerUndetermined}}
+	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
+	if !errors.Is(err, ErrTransient) || d.submitCalls != 0 || enter != 0 {
+		t.Errorf("err=%v Submit=%d Enter=%d, want ErrTransient + zero keystrokes", err, d.submitCalls, enter)
+	}
+}
+
 func TestConfirmSubmitSubComposerMidConfirmIsBlocked(t *testing.T) {
 	// A sub-composer/list-nav that appears AFTER the gate (the gate read it cleared, so we pasted) →
 	// readPanelBlocked → ErrPanelBlocked, never a false-confirm. Submit ×1 (the gate passed).

@@ -61,6 +61,28 @@ func (s *Server) handleIssuesList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, issuesListDoc{Repo: s.repoName(), Issues: issues})
 }
 
+// handleWorkLedger serves the derived fleet-context view over the current tracker.
+// Bodies are fetched only so flotilla attribution trailers can be parsed; the
+// builder strips them from its list response.
+func (s *Server) handleWorkLedger(w http.ResponseWriter, r *http.Request) {
+	if s.tracker == nil {
+		writeTrackerError(w, tracker.ErrNoRepo)
+		return
+	}
+	state := r.URL.Query().Get("state")
+	if state == "" {
+		state = "all"
+	}
+	issues, err := s.tracker.List(r.Context(), tracker.ListFilter{
+		State: state, Label: r.URL.Query().Get("label"), Limit: 200, IncludeBody: true,
+	})
+	if err != nil {
+		writeTrackerError(w, err)
+		return
+	}
+	writeJSON(w, BuildWorkLedger(s.cfg.Repo, issues, s.loadGoals(), s.roster, s.now()))
+}
+
 // handleIssueGet serves GET /api/issues/{number} (body + comments).
 func (s *Server) handleIssueGet(w http.ResponseWriter, r *http.Request) {
 	if s.tracker == nil {

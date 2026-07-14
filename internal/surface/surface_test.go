@@ -34,6 +34,7 @@ func TestMixedHarnessFleetRoutesPerDriver(t *testing.T) {
 		"opencode":    "opencode",
 		"grok":        "grok",
 		"codex":       "codex",
+		"pi":          "pi",
 	}
 	seen := map[string]bool{}
 	for surface, wantName := range want {
@@ -48,7 +49,7 @@ func TestMixedHarnessFleetRoutesPerDriver(t *testing.T) {
 		seen[d.Name()] = true
 	}
 	// Distinct harnesses resolve to distinct drivers (no collapse to a single driver).
-	for _, name := range []string{"claude-code", "aider", "opencode", "grok", "codex"} {
+	for _, name := range []string{"claude-code", "aider", "opencode", "grok", "codex", "pi"} {
 		if !seen[name] {
 			t.Errorf("driver %q was never resolved — the mixed fleet is missing a harness", name)
 		}

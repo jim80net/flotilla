@@ -69,9 +69,9 @@
   // this is a view-picker simplification, not a rebuild of the map. Any config/env that used
   // to seed "tree" is redirected to mindmap server-side (normalizeGoalsLayout).
   var goalsLayout = "mindmap";
-  // Radial modes (org pinwheel + the mind map) share card sizing, radial fit, no tier
-  // labels, and center-anchored geometry — only their placement + edge shape differ. The
-  // tree is the odd one out (altitude columns).
+  // Centered map modes (the dormant org pinwheel + the two-sided mind map) share
+  // compact card sizing, centered fit, and no tier labels. isRadial is retained as
+  // the internal compatibility name for that shared rendering contract.
   function isRadial() { return goalsLayout === "org" || goalsLayout === "mindmap"; }
 
   /* ── tier geometry (ported from the prototype: TIER_X=[40,470,900]) ─────── */
@@ -85,7 +85,7 @@
   // Card width per layout. The tree uses wide altitude columns; the org (hub-spoke)
   // graph uses narrower cards so the radial map packs tightly and reads as a node
   // graph rather than a sprawl of columns (#324 — tighter, content-aware geometry).
-  function nodeW(depth) { return isRadial() ? (depth === 0 ? 216 : 176) : colW(depth); }
+  function nodeW(depth) { return isRadial() ? (depth === 0 ? 210 : 190) : colW(depth); }
   function depthOf(n) { return n.depth || 0; }
   function heightOf(n) { return n._h || DEFAULT_H; }
 
@@ -115,6 +115,11 @@
     // the legend) to match the renamed "Planned" tile — sweep the rename, not just the tiles.
     aspirational: "planned", paused: "paused", cancelled: "cancelled",
   };
+
+  // The overview card pill is intentionally width-bounded. Keep its dependency state
+  // aligned with the legend's vocabulary while leaving the full explanatory label on
+  // the legend, drawer, and other detail surfaces (#698).
+  var OVERVIEW_STATE_LABEL = { pending: "waiting" };
 
   // ── #405 Inc 3 Item 5: stat-cell click-to-highlight helpers ────────────────
   // TONE_TO_SEL maps a tile tone to the CSS selector for its matching nodes.
@@ -508,7 +513,8 @@
     var desc = n.description ? '<p class="gnode-desc">' + escapeHtml(n.description) + "</p>" : "";
     var items = (n.work_items || []).map(function (wi) { return workItem(wi, n); }).join("");
     var itemsBlock = items ? '<div class="gnode-items">' + items + "</div>" : "";
-    var pill = '<span class="gpill gpill-' + escapeHtml(vis) + '">' + escapeHtml(STATE_LABEL[vis] || vis) + "</span>";
+    var pillLabel = OVERVIEW_STATE_LABEL[vis] || STATE_LABEL[vis] || vis;
+    var pill = '<span class="gpill gpill-' + escapeHtml(vis) + '">' + escapeHtml(pillLabel) + "</span>";
     // Per-node controls. #349 A2 SWAP: the node BODY now opens the detail drawer (the
     // primary "see the thing" action); the conversation jump is a distinct labelled
     // "→ desk" button (only on a routable node), synchronized with the drawer's own
@@ -532,7 +538,8 @@
     // org-graph v2 enrichment: priorities (flotilla-level, operator-facing) and
     // milestones (desk-level current work) render as short ordered lists; the harness
     // surface (grok / claude-code / …) renders as a subdued right-aligned badge in the
-    // foot (design §3). All are height-affecting → mirrored in structuralSig.
+    // foot (design §3). The compact overview hides these details, but they remain
+    // in nodeInner for the existing detail surfaces and structural refresh contract.
     var prios = nodeList(n.priorities, "gnode-prios", "priorities");
     var miles = nodeList(n.milestones, "gnode-miles", "current work");
     var harness = (n.harness && n.harness.surface)
@@ -566,6 +573,44 @@
       'role="treeitem" aria-level="' + (depthOf(n) + 1) + '" tabindex="0">' +
       nodeInner(n) +
       "</article>";
+  }
+
+  // #672: a whole radial DAG cannot keep readable labels when fitted into a 390px
+  // viewport. Render a flat, indented outline from the same parent links for narrow
+  // screens; CSS swaps it for the visual canvas. Rows retain the map's primary action
+  // by opening the existing detail drawer, so this is an exploration surface rather
+  // than a second summary. The local depth walk is cycle-safe for partial/bad data.
+  function renderMobileOutline(goals) {
+    var outline = q("goals-mobile-outline");
+    if (!outline) return;
+    var byId = {}, kids = {}, roots = [], ordered = [], seen = {};
+    goals.forEach(function (n) { byId[n.id] = n; kids[n.id] = []; });
+    goals.forEach(function (n) {
+      if (n.parent && byId[n.parent] && n.parent !== n.id) kids[n.parent].push(n);
+      else roots.push(n);
+    });
+    function append(n, depth) {
+      if (seen[n.id]) return;
+      seen[n.id] = true;
+      ordered.push({ node: n, depth: depth });
+      sequenceOrder(kids[n.id] || []).forEach(function (child) { append(child, depth + 1); });
+    }
+    sequenceOrder(roots).forEach(function (n) { append(n, 0); });
+    // A parent cycle has no root. The server rejects those, but append every remaining
+    // node defensively so a partial response never makes a goal silently disappear.
+    goals.forEach(function (n) { append(n, 0); });
+    outline.innerHTML = ordered.map(function (entry) {
+      var n = entry.node;
+      var vis = visToken(n), hue = limbStroke(n.id);
+      var tone = hue ? "--outline-tone:" + hue + ";" : "";
+      return '<button type="button" class="goutline-row" data-outline-id="' + escapeHtml(n.id) +
+        '" role="treeitem" aria-level="' + (entry.depth + 1) + '" style="--outline-depth:' +
+        entry.depth + ";" + tone + '">' +
+        '<span class="goutline-title">' + escapeHtml(n.title || n.id) + "</span>" +
+        '<span class="goutline-scope">' + escapeHtml(scopeNoun(n)) + "</span>" +
+        '<span class="goutline-state">' + escapeHtml(STATE_LABEL[vis] || vis) + "</span>" +
+        "</button>";
+    }).join("");
   }
 
   /* ── layout: absolute tiered, bottom-up y-centering (ported) ───────────── */
@@ -796,15 +841,11 @@
     });
   }
 
-  // layoutMindmap (org v3 — the mind map): unlike layoutOrg's concentric rings anchored at
-  // ONE center (which crams depth into a cramped pinwheel), each node's children fan out
-  // LOCALLY from that node, in the node's own outward direction — so depth reads as branches
-  // with sub-branches (limbs), not one ring. Ring-1 (the flotillas/roots) still splits the
-  // full circle by leaf-weight; every deeper node fans its children within a CAPPED wedge
-  // around the parent's outward heading, so a subtree stays a cohesive limb. Positions are the
-  // same absolute _x/_y the tree/org layouts use, so nodeCard/pan-zoom/keyed-update are
-  // unchanged; edges draw as organic curves (drawEdges mindmap branch). _dir carries a node's
-  // outward heading so its own children continue the limb outward.
+  // layoutMindmap (org v4): a compact two-sided tree anchored on the hub. Top-level
+  // limbs balance left/right by leaf weight, subtree-bearing children stay in tidy
+  // columns, and wide leaf fans wrap into bounded grids. Positions use the same
+  // absolute _x/_y contract as the dormant tree/org layouts, so nodeCard, pan/zoom,
+  // keyed updates, and the organic edge renderer remain unchanged.
   // ── per-limb hue (mind-map only) ──────────────────────────────────────────────
   // Each top-level limb (a hub child / root and its whole subtree) gets a distinct hue so
   // the branches are visually traceable out from the hub — the canonical mind-map look. The
@@ -845,6 +886,9 @@
   }
 
   function layoutMindmap(goals, roots) {
+    // Two-sided compact mind map: balance top-level limbs around the hub, then
+    // keep subtrees tidy in columns. Wide runs of leaf children wrap into short
+    // columns instead of forcing the whole map onto an enormous radial arc.
     var center = null;
     for (var i = 0; i < goals.length; i++) {
       if (goals[i].layout && goals[i].layout.hub_center) { center = goals[i]; break; }
@@ -853,103 +897,104 @@
     if (center) {
       ring1 = childrenOf(center);
       roots.forEach(function (r) { if (r !== center) ring1.push(r); });
-    } else {
-      ring1 = roots.slice();
-    }
-    // leaf-weight = angular demand (memoized, cycle-safe; shared helper — same as org).
+    } else { ring1 = roots.slice(); }
     var leaves = leafWeights(goals);
-    // per-node depth (for per-level segment length). Cycle-safe: a `seen` guard stops the
-    // traversal from looping on a cyclic graph (the server validates acyclic, but this path
-    // must not hang on bad/partial data — matching the other passes; cubic #364 P2).
-    var nodeDepth = {}, seenDepth = {};
-    (function setDepth(list, d) {
-      list.forEach(function (n) {
-        if (seenDepth[n.id]) return;
-        seenDepth[n.id] = true;
-        nodeDepth[n.id] = d;
-        setDepth(childrenOf(n), d + 1);
-      });
-    })(ring1, 1);
-    if (center) nodeDepth[center.id] = 0;
-
-    function segLen(d) { return 116 + 20 * Math.min(d, 4); } // base branch length per level
-    var GAP = 30; // tangential breathing room between adjacent sibling cards
+    var H_STEP = 46, V_GAP = 8, LIMB_GAP = 22, GRID_COL_GAP = 10, GRID_MAX_ROWS = 11;
     var placed = {};
-
-    // place a node's children within the node's DISJOINT angular sector [a0,a1]: each child
-    // gets a sub-sector proportional to its leaf-weight and is positioned PARENT-RELATIVE at
-    // a segment length in the child's sub-sector midpoint. Disjoint sectors guarantee sibling
-    // AND cousin subtrees never angularly overlap (each subtree stays inside its wedge); the
-    // segment honours a circumference-minimum so a node's own children always arc-clear their
-    // card widths at that radius (the org circMin, applied locally). This is what tunes the
-    // limb geometry to hold at real fleet depth (19+ nodes, deep chains) without collisions.
-    function place(n, a0, a1) {
-      var kids = sequenceOrder(childrenOf(n)); // siblings in authored `after` order (F12)
-      if (!kids.length) return;
-      var pc = nodeCenter(n), sector = a1 - a0, d = (nodeDepth[n.id] || 0) + 1;
-      var total = 0, need = 0;
-      kids.forEach(function (k) { total += leaves[k.id]; need += k._w + GAP; });
-      // radius: the larger of the base per-level length and the arc-fit radius (need/sector),
-      // plus clearance from the parent card — so narrow sectors push their children outward.
-      var seg = Math.max(segLen(d), sector > 0.02 ? need / sector : 0) + Math.max(n._w, heightOf(n)) / 2;
-      var cursor = a0;
-      kids.forEach(function (k) {
-        var w = sector * (leaves[k.id] / (total || 1));
-        var mid = kids.length === 1 ? (a0 + a1) / 2 : cursor + w / 2; // a lone child continues straight out
-        k._x = pc.x + seg * Math.cos(mid) - k._w / 2;
-        k._y = pc.y + seg * Math.sin(mid) - heightOf(k) / 2;
-        placed[k.id] = true;
-        place(k, cursor, cursor + w); // the child fans its own children within ITS sector
-        cursor += w;
-      });
-    }
-
-    // hub at the origin; ring-1 (flotillas/roots) splits the full circle by leaf-weight into
-    // disjoint sectors — each becomes a limb; place() then grows each limb outward.
-    if (center) { center._x = -center._w / 2; center._y = -heightOf(center) / 2; placed[center.id] = true; }
-    var ordered1 = sequenceOrder(ring1), total1 = 0, need1 = 0; // top-level limbs in authored order (F12)
-    ordered1.forEach(function (n) { total1 += leaves[n.id]; need1 += n._w + GAP; });
-    var seg1 = Math.max(segLen(1), need1 / (2 * Math.PI)) + 40;
-    var cur = -Math.PI / 2;
-    ordered1.forEach(function (n) {
-      var w = 2 * Math.PI * (leaves[n.id] / (total1 || 1)), mid = cur + w / 2;
-      n._x = seg1 * Math.cos(mid) - n._w / 2;
-      n._y = seg1 * Math.sin(mid) - heightOf(n) / 2;
-      placed[n.id] = true;
-      place(n, cur, cur + w);
-      cur += w;
+    var ordered = sequenceOrder(ring1);
+    var totalLv = 0;
+    ordered.forEach(function (n) { totalLv += leaves[n.id]; });
+    var right = [], left = [], acc = 0;
+    ordered.forEach(function (n) {
+      (acc < totalLv / 2 ? right : left).push(n);
+      acc += leaves[n.id];
     });
+    if (!left.length && right.length > 1) left.push(right.pop());
 
-    // Collision relaxation: disjoint sectors bound the ANGLE, but parent-relative placement
-    // lets cousins in adjacent sectors drift close near the congested center. A few passes of
-    // gentle axis-aligned separation nudge any residual overlapping pair apart along their
-    // smaller-overlap axis — n is small (tens of nodes), so O(n²)×passes is cheap. The hub is
-    // pinned (it anchors the map); everything else may shift a little to clear.
-    var relaxIds = Object.keys(nodeById).filter(function (id) { return placed[id]; });
-    for (var pass = 0; pass < 40; pass++) {
-      var moved = false;
-      for (var ri = 0; ri < relaxIds.length; ri++) {
-        for (var rj = ri + 1; rj < relaxIds.length; rj++) {
-          var A = nodeById[relaxIds[ri]], B = nodeById[relaxIds[rj]];
-          var aw = A._w, ah = heightOf(A), bw = B._w, bh = heightOf(B);
-          var dx = (B._x + bw / 2) - (A._x + aw / 2), dy = (B._y + bh / 2) - (A._y + ah / 2);
-          var ox = (aw + bw) / 2 + 16 - Math.abs(dx), oy = (ah + bh) / 2 + 12 - Math.abs(dy);
-          if (ox <= 0 || oy <= 0) continue; // no overlap (with margin)
-          moved = true;
-          var aPin = center && A === center, bPin = center && B === center;
-          if (ox < oy) { // separate on x (the smaller penetration axis)
-            var px = (dx < 0 ? -1 : 1) * ox;
-            if (aPin) B._x += px; else if (bPin) A._x -= px; else { A._x -= px / 2; B._x += px / 2; }
-          } else { // separate on y
-            var py = (dy < 0 ? -1 : 1) * oy;
-            if (aPin) B._y += py; else if (bPin) A._y -= py; else { A._y -= py / 2; B._y += py / 2; }
-          }
-        }
-      }
-      if (!moved) break;
+    function splitKids(n) {
+      var kids = sequenceOrder(childrenOf(n));
+      var subs = kids.filter(function (k) { return childrenOf(k).length; });
+      var flat = kids.filter(function (k) { return !childrenOf(k).length; });
+      return { subs: subs, flat: flat };
     }
+    function gridDims(count) {
+      var rows = Math.min(GRID_MAX_ROWS, count);
+      var cols = Math.ceil(count / rows);
+      rows = Math.ceil(count / cols);
+      return { rows: rows, cols: cols };
+    }
+    function subH(n, seen) {
+      if (seen[n.id]) return heightOf(n);
+      seen[n.id] = true;
+      var sk = splitKids(n);
+      if (!sk.subs.length && !sk.flat.length) return heightOf(n);
+      var s = 0;
+      sk.subs.forEach(function (k, idx) { s += subH(k, seen) + (idx ? V_GAP : 0); });
+      if (sk.flat.length) {
+        var g = gridDims(sk.flat.length);
+        var rowH = 0;
+        sk.flat.forEach(function (k) { rowH = Math.max(rowH, heightOf(k)); });
+        s += (s ? V_GAP : 0) + g.rows * (rowH + V_GAP) - V_GAP;
+      }
+      return Math.max(heightOf(n), s);
+    }
+    function placeSide(n, x, yTop, dir, seen) {
+      if (seen[n.id]) return heightOf(n);
+      seen[n.id] = true;
+      var sk = splitKids(n);
+      var hSelf = heightOf(n);
+      n._x = dir > 0 ? x : x - n._w;
+      if (!sk.subs.length && !sk.flat.length) {
+        n._y = yTop;
+        placed[n.id] = true;
+        return hSelf;
+      }
+      var totalSeen = {};
+      var total = 0;
+      sk.subs.forEach(function (k, idx) { total += subH(k, totalSeen) + (idx ? V_GAP : 0); });
+      var rowH = 0, g = null;
+      if (sk.flat.length) {
+        g = gridDims(sk.flat.length);
+        sk.flat.forEach(function (k) { rowH = Math.max(rowH, heightOf(k)); });
+        total += (total ? V_GAP : 0) + g.rows * (rowH + V_GAP) - V_GAP;
+      }
+      var extent = Math.max(hSelf, total);
+      var childX = dir > 0 ? x + n._w + H_STEP : x - n._w - H_STEP;
+      var cy = yTop + (extent > total ? (extent - total) / 2 : 0);
+      sk.subs.forEach(function (k) { cy += placeSide(k, childX, cy, dir, seen) + V_GAP; });
+      if (sk.flat.length) {
+        var flatW = 0;
+        sk.flat.forEach(function (k) { flatW = Math.max(flatW, k._w); });
+        sk.flat.forEach(function (k, idx) {
+          var col = Math.floor(idx / g.rows), row = idx % g.rows;
+          var kx = childX + dir * col * (flatW + GRID_COL_GAP);
+          k._x = dir > 0 ? kx : kx - k._w;
+          k._y = cy + row * (rowH + V_GAP);
+          placed[k.id] = true;
+          seen[k.id] = true;
+        });
+      }
+      n._y = yTop + extent / 2 - hSelf / 2;
+      placed[n.id] = true;
+      return extent;
+    }
+    if (center) {
+      center._x = -center._w / 2;
+      center._y = -heightOf(center) / 2;
+      placed[center.id] = true;
+    }
+    function sideH(list) {
+      var s = 0;
+      list.forEach(function (n, idx) { s += subH(n, {}) + (idx ? LIMB_GAP : 0); });
+      return s;
+    }
+    var hubW = center ? center._w : 0;
+    var xR = hubW / 2 + H_STEP, xL = -hubW / 2 - H_STEP;
+    var y = -sideH(right) / 2;
+    right.forEach(function (n) { y += placeSide(n, xR, y, 1, {}) + LIMB_GAP; });
+    y = -sideH(left) / 2;
+    left.forEach(function (n) { y += placeSide(n, xL, y, -1, {}) + LIMB_GAP; });
 
-    // shift the placed cloud into positive world coords + size the world to its extent.
     var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     Object.keys(nodeById).forEach(function (id) {
       if (!placed[id]) return;
@@ -958,7 +1003,7 @@
       maxX = Math.max(maxX, n._x + n._w); maxY = Math.max(maxY, n._y + heightOf(n));
     });
     if (!isFinite(minX)) { minX = minY = 0; maxX = maxY = 100; }
-    var worldPad = 90, shx = worldPad - minX, shy = worldPad - minY;
+    var worldPad = 30, shx = worldPad - minX, shy = worldPad - minY;
     Object.keys(nodeById).forEach(function (id) { if (!placed[id]) return; var n = nodeById[id]; n._x += shx; n._y += shy; });
     view.worldW = (maxX - minX) + 2 * worldPad;
     view.worldH = (maxY - minY) + 2 * worldPad;
@@ -1005,7 +1050,7 @@
         // branch reads as a curved connector rather than a straight spoke.
         var mpc = nodeCenter(parent), mcc = nodeCenter(child);
         var vx = mcc.x - mpc.x, vy = mcc.y - mpc.y, len = Math.hypot(vx, vy) || 1;
-        var nx = -vy / len, ny = vx / len, bow = Math.min(38, len * 0.16);
+        var nx = -vy / len, ny = vx / len, bow = Math.min(14, len * 0.10);
         var mc1x = mpc.x + vx * 0.35 + nx * bow, mc1y = mpc.y + vy * 0.35 + ny * bow;
         var mc2x = mpc.x + vx * 0.65 + nx * bow, mc2y = mpc.y + vy * 0.65 + ny * bow;
         d = "M " + mpc.x + " " + mpc.y + " C " + mc1x + " " + mc1y + ", " + mc2x + " " + mc2y + ", " + mcc.x + " " + mcc.y;
@@ -1102,8 +1147,8 @@
           // Omitting it left after-only roadmap resequences on the in-place fast path
           // with stale geometry until some other structural field also changed.
           n.after || [],
-          // org-graph v2 enrichment — each is rendered into the card and changes its
-          // height, so a change must trigger a full rebuild (not an in-place text swap).
+          // Org-graph enrichment remains structural so changing detailed node content
+          // rebuilds every derived surface, even though compact overview rows hide it.
           n.priorities || [], n.milestones || [], (n.harness && n.harness.surface) || "",
           (n.work_items || []).map(function (wi) { return [wi.kind || "", wi.label || ""]; })];
       }),
@@ -1316,9 +1361,11 @@
     selectedId = null;
   }
   var restoringNode = false; // true while the history controller restores a drawer (no re-push)
-  function openDrawer(id) {
+  var drawerReturnEl = null; // mobile outline opener; map cards remain the default return target
+  function openDrawer(id, returnEl) {
     var n = nodeById[id];
     if (!n) return;
+    drawerReturnEl = returnEl || null;
     selectNode(id);
     fillDrawer(n);
     var d = q("goals-drawer");
@@ -1353,7 +1400,8 @@
   function closeDrawer() {
     var d = q("goals-drawer");
     if (d) { d.classList.remove("open"); d.setAttribute("aria-hidden", "true"); }
-    var card = selectedId ? cardEl(selectedId) : null;
+    var card = drawerReturnEl || (selectedId ? cardEl(selectedId) : null);
+    drawerReturnEl = null;
     lastDrawerHtml = null;
     deselect();
     if (card) card.focus({ preventScroll: true }); // return focus to the node that opened it
@@ -1365,8 +1413,8 @@
   // nodeActivate is the primary node action (#349 A2): open the detail drawer — "the
   // point is I need to see the thing". (Was: deep-link to Conversations; that jump is now
   // the explicit → desk button / goToDesk.)
-  function nodeActivate(id) {
-    if (nodeById[id]) openDrawer(id);
+  function nodeActivate(id, returnEl) {
+    if (nodeById[id]) openDrawer(id, returnEl);
   }
 
   // goToDesk jumps to a node's Conversations thread — the → desk button, and the drawer's
@@ -1812,6 +1860,11 @@
     var nodesEl = q("goals-nodes");
     if (!nodesEl) return;
     nodesWired = true;
+    var outline = q("goals-mobile-outline");
+    if (outline) outline.addEventListener("click", function (e) {
+      var row = e.target.closest("[data-outline-id]");
+      if (row) nodeActivate(row.getAttribute("data-outline-id"), row);
+    });
     nodesEl.addEventListener("click", function (e) {
       var popItem = e.target.closest("[data-gnode-action]");
       if (popItem) {
@@ -2082,6 +2135,7 @@
         // until the next full re-index (#458 gate-review P3).
         if (prev) { prev.status_display = n.status_display; prev.work_items = n.work_items; prev.brief = n.brief; }
       });
+      renderMobileOutline(goals);
       updateInPlace(goals, nodesEl);
       drawEdges(); // child state may have changed → recolour (the SVG is stateless)
       reapplyTransient(); // re-light hover chain + refresh the open drawer's live status
@@ -2097,6 +2151,7 @@
     buildNodeIndex(goals);
     var roots = goals.filter(function (n) { return !n.parent || !nodeById[n.parent]; });
     computeLimbHues(goals, roots); // per-limb hue for the mind map (no-op for tree/org)
+    renderMobileOutline(goals);
     var maxDepth = 0;
     goals.forEach(function (n) { maxDepth = Math.max(maxDepth, depthOf(n)); });
 
@@ -2152,10 +2207,9 @@
     var world = q("goals-world");
     if (!world) return;
     world.style.transform = "translate(" + view.tx + "px," + view.ty + "px) scale(" + view.scale + ")";
-    // Counter-scale the node controls so they stay screen-constant (tappable) as the map
-    // zooms out — inherited by every .gnode-ctl (mobile-QA #330). Only enlarge (never
-    // shrink below base) when zoomed out; base size when zoomed in.
-    world.style.setProperty("--ctl-scale", Math.max(1, 1 / (view.scale || 1)));
+    // Counter-scale node controls as the map zooms out (mobile-QA #330), capped at 3×
+    // so a deeply fitted map cannot push a control into the title or neighboring row.
+    world.style.setProperty("--ctl-scale", Math.min(3, Math.max(1, 1 / (view.scale || 1))));
   }
 
   // fit: scale to width (never upscale past 1), anchor top so the task-column

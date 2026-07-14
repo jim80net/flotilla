@@ -1162,6 +1162,12 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("goals.js must carry the #349 pending taxonomy token (missing %q)", marker)
 		}
 	}
+	// #698: the overview pill is clamped to 64px, so use the legend's short word there
+	// while preserving the explanatory STATE_LABEL for the drawer and legend.
+	if !strings.Contains(js, `OVERVIEW_STATE_LABEL = { pending: "waiting" }`) ||
+		!strings.Contains(js, `OVERVIEW_STATE_LABEL[vis] || STATE_LABEL[vis] || vis`) {
+		t.Error("goals.js must shorten only the pending overview pill to 'waiting' — #698")
+	}
 	// #349 Inc 5 F13 — history of done: realized goals gathered into a dedicated list
 	// (a row opens the goal's drawer). The client renders it; the CSS + HTML host it.
 	for _, marker := range []string{"renderDoneHistory", "gdone-row", "goals-done-list"} {
@@ -1222,21 +1228,28 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	if strings.Contains(js, "RING_STEP") {
 		t.Error("goals.js must drop the fixed RING_STEP — org radii are content-aware (#324)")
 	}
-	// mind-map: the SOLE radial rendering (children fan LOCALLY from each parent — limbs +
-	// sub-branches — with curved edges). The layout functions stay; the picker is gone.
+	// mind-map: the sole reachable centered-map rendering (two-sided limbs with curved
+	// edges). The dormant layout functions stay; the picker is gone.
 	for _, marker := range []string{"layoutMindmap", "isRadial"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("goals.js must carry the mind-map layout (missing %q)", marker)
 		}
 	}
-	// mind-map geometry must hold at real fleet depth: disjoint angular sectors + a
-	// collision-relaxation pass (the hub pinned) so 19+ nodes / deep chains don't overlap.
-	if !strings.Contains(js, "Collision relaxation") {
-		t.Error("layoutMindmap must run a collision-relaxation pass so real-depth fleets don't overlap")
+	// The compact mind map balances top-level limbs across two sides and wraps wide
+	// leaf fans into bounded columns instead of spending a radial arc on every leaf.
+	for _, marker := range []string{"placeSide", "gridDims", "GRID_MAX_ROWS", "var right = [], left = []"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("layoutMindmap must carry the two-sided compact geometry (missing %q)", marker)
+		}
 	}
-	// structuralSig must include the enrichment (priorities/milestones/harness) so an
-	// add/remove of a height-affecting field triggers a full rebuild, not a stale
-	// in-place text swap. Guard the index BEFORE slicing (a missing function must
+	for _, marker := range []string{`Math.min(3, Math.max(1, 1 / (view.scale || 1)))`, "opacity: 0; pointer-events: none", "visibility: hidden; pointer-events: none"} {
+		if !strings.Contains(js+css, marker) {
+			t.Errorf("compact mind-map controls must stay bounded and non-interactive while hidden (missing %q)", marker)
+		}
+	}
+	// structuralSig must include the enrichment (priorities/milestones/harness) so a
+	// detail change rebuilds every derived surface rather than leaving stale node markup.
+	// Guard the index BEFORE slicing (a missing function must
 	// fail the test, not panic on js[-1:]) — cubic #315 P3.
 	sigStart := strings.Index(js, "function structuralSig")
 	if sigStart < 0 {
@@ -1884,6 +1897,35 @@ func TestMobileDashUX514_516(t *testing.T) {
 	}
 }
 
+// TestGoalsMobileOutline672 locks the readable hierarchy fallback for the radial
+// map at phone widths. The full mind-map remains the desktop rendering.
+func TestGoalsMobileOutline672(t *testing.T) {
+	srv, _ := newTestServer(t, singleFleetRoster, time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC))
+	html := doGet(t, srv, "/").Body.String()
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	js := doGet(t, srv, "/static/goals.js").Body.String()
+
+	if !strings.Contains(html, `id="goals-mobile-outline"`) {
+		t.Fatal("goals page must host the #672 mobile hierarchy outline")
+	}
+	for _, marker := range []string{"function renderMobileOutline", "data-outline-id", "sequenceOrder(roots)", "nodeActivate(row.getAttribute"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("goals.js must render and activate the mobile hierarchy outline (missing %q) — #672", marker)
+		}
+	}
+	for _, marker := range []string{".goals-mobile-outline", ".goutline-row", ".goutline-title", "--outline-depth"} {
+		if !strings.Contains(css, marker) {
+			t.Errorf("dash.css must keep mobile outline labels readable (missing %q) — #672", marker)
+		}
+	}
+	if !strings.Contains(css, ".goals-viewport {\n    display: none;") {
+		t.Error("dash.css must remove the illegible mind-map viewport at phone widths — #672")
+	}
+	if !strings.Contains(css, ".goals-world { display: none; }") {
+		t.Error("dash.css must remove the illegible mind-map canvas at phone widths — #672")
+	}
+}
+
 // --- helpers ---
 
 func doGet(t *testing.T, srv *Server, path string) *httptest.ResponseRecorder {
@@ -2081,5 +2123,39 @@ func TestGoalIDCrossLink580(t *testing.T) {
 	gjs := doGet(t, srv, "/static/goals.js").Body.String()
 	if !strings.Contains(gjs, "restoreNode") {
 		t.Error("goals.js must expose restoreNode for Issues → Goals jump — #580")
+	}
+}
+
+// TestIssuesWorkLedger405 locks the operator-morning-review shift from GitHub list
+// parity to the server-derived fleet context, rendered flotilla → desk → work.
+func TestIssuesWorkLedger405(t *testing.T) {
+	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/tracker.js").Body.String()
+	for _, marker := range []string{
+		"workLedgerURL", `/api/work-ledger`, "renderDesk", "doc.flotillas",
+		"flotilla.desks", "issue-desk-head", "issue-ledger-kicker",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("tracker.js must render the #405 fleet work ledger (missing %q)", marker)
+		}
+	}
+	if !strings.Contains(js, `el("filter-state")`) {
+		t.Error("tracker.js must preserve the state filter over the grouped ledger — approved design §4")
+	}
+	html := doGet(t, srv, "/").Body.String()
+	for _, marker := range []string{"Fleet work ledger", "What is moving now · what shipped recently"} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("index.html must frame Issues as operator context (missing %q) — #405 item 7", marker)
+		}
+	}
+	if !strings.Contains(html, `id="filter-state"`) {
+		t.Error("index.html must preserve the work-state filter — approved design §4")
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	for _, marker := range []string{".issue-ledger-section", ".issue-ledger-head", ".issue-desk-head", ".issue-context", ".issue-state.shipped"} {
+		if !strings.Contains(css, marker) {
+			t.Errorf("dash.css must style the #405 work ledger (missing %q)", marker)
+		}
 	}
 }

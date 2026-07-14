@@ -351,6 +351,9 @@ func cmdWatch(args []string) error {
 			return
 		}
 		if j.Kind == watch.KindRelay || j.Kind == watch.KindDefault {
+			if err := watch.TrackOperatorRelayAck(watch.OperatorAckRoot(rosterDir), j, time.Now().UTC()); err != nil {
+				log.Printf("flotilla watch: operator ack pending record for %q failed: %v", j.Agent, err)
+			}
 			if leader, ok := relayLayerLeader(cfg, j.Agent); ok {
 				path := roster.LayerLastOperatorRelayPath(rosterDir, leader)
 				if err := watch.RecordActiveConversation(path, j.MessageID, time.Now().UTC()); err != nil {
@@ -1222,7 +1225,7 @@ func cmdWatch(args []string) error {
 		if hist, ok := tr.(transport.RecentHistory); ok {
 			dests := transportDestinations(tr, channelIDs)
 			reader := &transportRecentReader{cap: hist, dest: destByChannel(dests, channelIDs)}
-			backstop := watch.NewUnackedBackstop(cfg, reader, *unackedPath, alert, mkSend(confirm.Submit), nil)
+			backstop := watch.NewUnackedBackstop(cfg, reader, *unackedPath, watch.OperatorAckRoot(rosterDir), alert, mkSend(confirm.Submit), nil)
 			go backstop.Run(ctx)
 			fmt.Printf("flotilla watch: un-acked backstop active (state=%s scan=%s min-age=%s)\n",
 				*unackedPath, unacked.DefaultScanInterval, unacked.DefaultMinAge)
@@ -1894,7 +1897,8 @@ func coordinatorMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr t
 					mirrorNotifyToLedger(rosterPath, from, body)
 				}
 			},
-			logf: log.Printf,
+			onTurnFinal: operatorTurnFinalAck(rosterDir),
+			logf:        log.Printf,
 		}
 		m.run(agent)
 	}
@@ -1926,9 +1930,24 @@ func deskMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr transpor
 				}
 				return tr.Post(transport.NewWebhookDestination(url), username, content)
 			},
-			logf: log.Printf,
+			onTurnFinal: operatorTurnFinalAck(rosterDir),
+			logf:        log.Printf,
 		}
 		m.run(agent)
+	}
+}
+
+func operatorTurnFinalAck(rosterDir string) func(agent, body string) {
+	root := watch.OperatorAckRoot(rosterDir)
+	return func(agent, _ string) {
+		n, err := watch.AcknowledgeOperatorTurnFinal(root, agent, time.Now().UTC())
+		if err != nil {
+			log.Printf("flotilla watch: operator turn-final ack for %q failed: %v", agent, err)
+			return
+		}
+		if n > 0 {
+			log.Printf("flotilla watch: operator turn-final ack %s count=%d", agent, n)
+		}
 	}
 }
 
@@ -2031,7 +2050,7 @@ func returnToFrontierOnFinish(
 		}
 		r := frontier.Check(text, f)
 		if !r.Violation {
-			if err := frontier.Clear(path); err != nil {
+			if _, err := frontier.ClearIfUnchanged(path, f); err != nil {
 				log.Printf("flotilla watch: return-to-frontier clear failed for %s: %v", agent, err)
 			}
 			return

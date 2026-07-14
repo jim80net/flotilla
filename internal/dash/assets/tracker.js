@@ -45,42 +45,75 @@
   }
 
   /* ── list view ───────────────────────────────────────────────────────── */
-  function currentFilter() {
+  function workLedgerURL() {
     var q = "?state=" + encodeURIComponent(el("filter-state").value);
     if (el("filter-idea").checked) q += "&label=operator-idea";
-    return "/api/issues" + q;
+    return "/api/work-ledger" + q;
   }
 
   function loadIssues() {
     showOnly("issues-listpanel");
     var epoch = ++viewEpoch;
     var list = el("issues-list");
-    list.innerHTML = '<div class="empty">Loading issues…</div>';
-    getJSON(currentFilter()).then(function (doc) {
+    list.innerHTML = '<div class="empty">Loading fleet work ledger…</div>';
+    getJSON(workLedgerURL()).then(function (doc) {
       if (epoch === viewEpoch) renderIssueList(doc);
     }).catch(function (err) {
-      if (epoch === viewEpoch) list.innerHTML = '<div class="error">Could not load issues: ' + escapeHtml(err.message) + "</div>";
+      if (epoch === viewEpoch) list.innerHTML = '<div class="error">Could not load the work ledger: ' + escapeHtml(err.message) + "</div>";
     });
+  }
+
+  function relativeWhen(stamp, verb) {
+    var at = Date.parse(stamp || "");
+    if (!Number.isFinite(at)) return verb + " recently";
+    var mins = Math.max(0, Math.floor((Date.now() - at) / 60000));
+    if (mins < 60) return verb + " " + mins + "m ago";
+    var hours = Math.floor(mins / 60);
+    if (hours < 48) return verb + " " + hours + "h ago";
+    return verb + " " + Math.floor(hours / 24) + "d ago";
+  }
+
+  function workRow(item, posture) {
+    var it = item.issue || {};
+    var number = Number(it.number);
+    var contextLine = item.goal_title
+      ? '<span class="issue-context">Drives ' + escapeHtml(item.goal_title) + " · " + escapeHtml(item.goal_detail || "in flight") + "</span>"
+      : '<span class="issue-context">' + escapeHtml(relativeWhen(it.closedAt, "closed")) + "</span>";
+    return (
+      '<div class="issue-row issue-row-' + posture + '" data-number="' + number + '">' +
+        '<span class="issue-state ' + posture + '">' + (posture === "in-flight" ? "in flight" : "shipped") + "</span>" +
+        '<span class="issue-num">#' + number + "</span>" +
+        '<span class="issue-copy"><span class="issue-title">' + escapeHtml(it.title) + "</span>" + contextLine + "</span>" +
+        '<span class="issue-labels">' + labelChips(it.labels) + "</span>" +
+      "</div>"
+    );
+  }
+
+  function renderDesk(desk) {
+    var moving = Array.isArray(desk.in_flight) ? desk.in_flight : [];
+    var shipped = Array.isArray(desk.shipped) ? desk.shipped : [];
+    return '<section class="issue-desk">' +
+      '<div class="issue-desk-head"><h4>' + escapeHtml(desk.name || "Unassigned") + '</h4><span>' +
+        moving.length + " moving · " + shipped.length + " shipped</span></div>" +
+      moving.map(function (it) { return workRow(it, "in-flight"); }).join("") +
+      shipped.map(function (it) { return workRow(it, "shipped"); }).join("") +
+      "</section>";
   }
 
   function renderIssueList(doc) {
     el("issues-repo").textContent = doc.repo ? doc.repo : "";
-    var issues = Array.isArray(doc.issues) ? doc.issues : [];
+    var flotillas = Array.isArray(doc.flotillas) ? doc.flotillas : [];
     var list = el("issues-list");
-    if (!issues.length) {
-      list.innerHTML = '<div class="empty">No issues match this filter.</div>';
+    if (!flotillas.length) {
+      list.innerHTML = '<div class="empty">No fleet work matches this view.</div>';
       return;
     }
-    list.innerHTML = issues.map(function (it) {
-      var state = String(it.state || "").toLowerCase();
-      return (
-        '<div class="issue-row" data-number="' + Number(it.number) + '">' +
-          '<span class="issue-state ' + escapeHtml(state) + '">' + escapeHtml(state || "?") + "</span>" +
-          '<span class="issue-num">#' + Number(it.number) + "</span>" +
-          '<span class="issue-title">' + escapeHtml(it.title) + "</span>" +
-          '<span class="issue-labels">' + labelChips(it.labels) + "</span>" +
-        "</div>"
-      );
+    list.innerHTML = flotillas.map(function (flotilla) {
+      var desks = Array.isArray(flotilla.desks) ? flotilla.desks : [];
+      return '<section class="issue-ledger-section"><div class="issue-ledger-head"><div><span class="issue-ledger-kicker">Flotilla</span>' +
+        '<h3>' + escapeHtml(flotilla.name || "Unassigned") + '</h3></div><span class="issue-ledger-count">' +
+        desks.length + " desk" + (desks.length === 1 ? "" : "s") + "</span></div>" +
+        desks.map(renderDesk).join("") + "</section>";
     }).join("");
     var rows = list.querySelectorAll(".issue-row");
     for (var i = 0; i < rows.length; i++) {

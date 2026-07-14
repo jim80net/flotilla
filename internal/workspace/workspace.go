@@ -43,19 +43,22 @@ func Dir(agent string) (string, error) {
 // IdentityFileName returns the desk identity file name for a surface, by the agent's
 // native convention: claude-code (and the empty default) → CLAUDE.md; aider →
 // CONVENTIONS.md (its documented conventions file, loaded via `aider --read
-// CONVENTIONS.md`); opencode/grok/cursor/codex → AGENTS.md. An unknown surface is an error
+// CONVENTIONS.md`); opencode/grok/cursor/codex/pi → AGENTS.md. An unknown surface is an error
 // rather than a guessed name — the per-surface load mechanism is verified per driver
 // (aider --read is documented; OpenCode loads AGENTS.md natively, packages/opencode/
 // src/session/instruction.ts; Grok → AGENTS.md (ASSUMED for xAI's official grok CLI — the
 // deployed product; the prior provenance was superagent grok-dev, which the operator does not
-// run, so re-verify AGENTS.md against the official grok and adjust if needed). Cursor is dropped).
+// run, so re-verify AGENTS.md against the official grok and adjust if needed). Cursor is dropped;
+// Pi loads AGENTS.md + CLAUDE.md natively — `pi --help` documents `--no-context-files` to
+// disable "AGENTS.md and CLAUDE.md discovery"; flotilla identity scaffolding uses AGENTS.md
+// as the portable desk identity, matching opencode/grok/codex).
 func IdentityFileName(surface string) (string, error) {
 	switch surface {
 	case "", "claude-code":
 		return "CLAUDE.md", nil
 	case "aider":
 		return "CONVENTIONS.md", nil
-	case "opencode", "grok", "cursor", "codex":
+	case "opencode", "grok", "cursor", "codex", "pi":
 		return "AGENTS.md", nil
 	default:
 		return "", fmt.Errorf("unknown surface %q: no identity-file convention", surface)

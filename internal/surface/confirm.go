@@ -173,6 +173,10 @@ func (c Confirm) Submit(d Driver, pane, text string) error {
 	case StateIdle:
 		// proceed
 	default: // Unknown, AwaitingInput, AwaitingApproval, Errored
+		if reason := composerBlockReason(d, pane); reason != "" {
+			logPanelBlocked(pane, "gate:"+reason)
+			return fmt.Errorf("%w: %s", ErrPanelBlocked, reason)
+		}
 		return ErrTransient
 	}
 
@@ -180,8 +184,11 @@ func (c Confirm) Submit(d Driver, pane, text string) error {
 	//     if the cursor is on a per-agent message SUB-COMPOSER ("Message @<agent>") or an agent-list
 	//     row, REFUSE before pasting. A paste there would MIS-DELIVER the body to a background agent
 	//     AND the post-submit check would FALSE-CONFIRM it (the composer clears) — a silent wrong-
-	//     recipient send, the one class we never ship. Fail-safe to NOT-deliver. Every OTHER composer
-	//     state proceeds to submit; the post-submit composer state is the delivery authority.
+	//     recipient send, the one class we never ship. Fail-safe to NOT-deliver. An
+	//     Undetermined probe also fails closed because a
+	//     highlighted selector row can share the composer's prompt glyph. The
+	//     post-submit composer state remains the delivery authority after a
+	//     positively identified composer passes this gate.
 	var sp ComposerStateProbe
 	if p, ok := d.(ComposerStateProbe); ok {
 		sp = p
@@ -194,6 +201,12 @@ func (c Confirm) Submit(d Driver, pane, text string) error {
 		case ComposerListNav:
 			logPanelBlocked(pane, "gate:list-nav")
 			return ErrPanelBlocked
+		case ComposerUndetermined:
+			if reason := composerBlockReason(d, pane); reason != "" {
+				logPanelBlocked(pane, "gate:"+reason)
+				return fmt.Errorf("%w: %s", ErrPanelBlocked, reason)
+			}
+			return ErrTransient
 		}
 	}
 
@@ -298,6 +311,13 @@ func (c Confirm) Submit(d Driver, pane, text string) error {
 	}
 	logUnconfirmed(d, pane, sp, polls)
 	return ErrUnconfirmed
+}
+
+func composerBlockReason(d Driver, pane string) string {
+	if probe, ok := d.(ComposerBlockReasonProbe); ok {
+		return probe.ComposerBlockReason(pane)
+	}
+	return ""
 }
 
 // SubmitWithSelfHeal is the RELAY-kind entrypoint (#156): it heals a pre-paste agents-panel overlay

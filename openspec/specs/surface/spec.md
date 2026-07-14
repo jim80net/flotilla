@@ -719,3 +719,52 @@ overlay steal **after** a completed confirming signal → confirmed (body alread
   composer reads Cleared at window expiry (the body left the composer)
 - **THEN** the delivery is reported confirmed, not `ErrUnconfirmed`
 
+
+### Requirement: The pi driver drives the Pi coding-agent harness
+
+The system SHALL provide a concrete surface driver named `pi` that drives the
+Pi coding agent (`@mariozechner/pi-coding-agent`, bin `pi`) when an agent has
+`roster.Agent.surface: "pi"`. The `pi` driver SHALL submit a turn by the same
+bracketed-paste-then-Enter mechanism as the other drivers, and SHALL declare its
+context-rotate strategy as `SlashCommand` (its reset is the in-session `/new`,
+injected into the composer). Adding this driver SHALL NOT change any existing
+driver's behavior.
+
+#### Scenario: A pi agent is driven through the pi driver
+- **WHEN** an agent with `surface: "pi"` is sent a turn, assessed, or rotated
+- **THEN** submission, assessment, and rotation route through the `pi` driver, and the command starts successfully (the surface resolves at startup)
+
+#### Scenario: The pi reset is an injected slash command
+- **WHEN** the pi driver's context is rotated
+- **THEN** its strategy is `SlashCommand` and `/new` is injected into the pane (no process restart)
+
+#### Scenario: The pi identity file is AGENTS.md
+- **WHEN** a workspace identity file is resolved for the `pi` surface
+- **THEN** it is `AGENTS.md` (Pi discovers AGENTS.md natively; `pi --help` documents `--no-context-files` to disable AGENTS.md and CLAUDE.md discovery)
+
+### Requirement: The pi driver emits Working-positive assessed state from live markers
+
+The `pi` driver's `Assess` SHALL classify the pane into at least `Shell`,
+`Working`, `Idle`, and `Errored`, scoped to the live bottom region of the
+captured pane. Because Pi's `Working...` loading indicator persists for the
+entire non-idle duration (bound to the session's streaming state), the driver
+SHALL use Working-POSITIVE polarity: `Errored` and `Working` are positively
+detected and `Idle` is the default. State precedence SHALL be: a transient
+pane-command read error → `Unknown`; a shell foreground command → `Shell`;
+then, over the tail, a non-retryable error phrase → `Errored`; else a
+persistent working marker (`Working...` or `Retrying (`) → `Working`; else
+`Idle`. The static idle-banner help text containing `escape interrupt` SHALL
+NOT be treated as a working marker. A pane capture error SHALL return
+`Unknown` (non-material), never `Idle`.
+
+#### Scenario: A non-idle turn is Working
+- **WHEN** the tail shows `Working...` (with or without a spinner glyph)
+- **THEN** `Assess` returns `Working`
+
+#### Scenario: An idle frame with banner help is Idle
+- **WHEN** the pane shows Pi's startup banner help (`escape interrupt`) but no `Working...`
+- **THEN** `Assess` returns `Idle`
+
+#### Scenario: A capture glitch is Unknown
+- **WHEN** the pane capture fails transiently
+- **THEN** `Assess` returns `Unknown`, not `Idle`

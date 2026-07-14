@@ -53,10 +53,24 @@ func TestParseGoalIDTrailer_CaseSensitiveSlug(t *testing.T) {
 }
 
 func TestEnrichIssue_PopulatesGoalID(t *testing.T) {
-	issue := Issue{Body: "details\n\ngoal-id: ship-platform\n"}
+	issue := Issue{Body: "details\n\ngoal-id: ship-platform\ndesk: backend\n"}
 	EnrichIssue(&issue)
 	if issue.GoalID != "ship-platform" {
 		t.Fatalf("GoalID = %q, want ship-platform", issue.GoalID)
+	}
+	if issue.Desk != "backend" {
+		t.Fatalf("Desk = %q, want backend", issue.Desk)
+	}
+}
+
+func TestParseDeskTrailer(t *testing.T) {
+	if got := ParseDeskTrailer("work\n\ndesk: api-build\n"); got != "api-build" {
+		t.Fatalf("ParseDeskTrailer() = %q, want api-build", got)
+	}
+	for _, body := range []string{"desk:", "Desk: backend", "prefix desk: backend", "desk: bad name"} {
+		if got := ParseDeskTrailer(body); got != "" {
+			t.Errorf("ParseDeskTrailer(%q) = %q, want empty", body, got)
+		}
 	}
 }
 

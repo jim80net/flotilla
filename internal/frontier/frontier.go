@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/backlog"
@@ -25,6 +26,16 @@ const (
 	PriorityMechanical Priority = "mechanical"
 )
 
+// Origin records who owns the return-to pointer's authority. Authored frames
+// are written deliberately by a coordinator/operator; derived frames are a
+// backlog fallback recorded by the seam interrupt guard.
+type Origin string
+
+const (
+	OriginAuthored Origin = "authored"
+	OriginDerived  Origin = "derived"
+)
+
 // Frame is the durable frontier sidecar (flotilla-<coordinator>-frontier.json).
 type Frame struct {
 	Coordinator   string    `json:"coordinator"`
@@ -33,6 +44,7 @@ type Frame struct {
 	ActiveWarrant string    `json:"active_warrant,omitempty"`
 	Source        string    `json:"interrupt_source"`
 	SideItem      string    `json:"side_item,omitempty"`
+	Origin        Origin    `json:"origin,omitempty"`
 	At            time.Time `json:"at"`
 }
 
@@ -66,6 +78,8 @@ var (
 		regexp.MustCompile(`(?i)\[awaiting-auth\]`),
 		regexp.MustCompile(`(?i)\bWaiting on you:\b`),
 	}
+
+	delegatedPrefix = regexp.MustCompile(`(?i)^(?:[-*+]\s*|\d+\.\s*)?\[(?:in-flight|next|pending)\]\s*delegated(?:\s|[—–:;-]|$)`)
 )
 
 // Load reads the frontier sidecar. ok is false when absent.
@@ -95,9 +109,13 @@ func Save(path string, f Frame) error {
 	if path == "" || strings.TrimSpace(f.ReturnTo) == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("mkdir %q: %w", filepath.Dir(path), err)
+	if f.Origin == "" {
+		f.Origin = OriginAuthored
 	}
+	return withSidecarLock(path, func() error { return saveUnlocked(path, f) })
+}
+
+func saveUnlocked(path string, f Frame) error {
 	raw, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return err
@@ -130,21 +148,82 @@ func Save(path string, f Frame) error {
 	return nil
 }
 
+func withSidecarLock(path string, fn func() error) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("mkdir %q: %w", filepath.Dir(path), err)
+	}
+	// Keep one stable lock inode for the sidecar's lifetime. Removing it after
+	// unlock would let a waiter hold the unlinked inode while a newcomer creates
+	// and locks a different file, defeating cross-process mutual exclusion.
+	lockPath := path + ".lock"
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return fmt.Errorf("open frontier lock %q: %w", lockPath, err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("flock frontier lock %q: %w", lockPath, err)
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) //nolint:errcheck -- best-effort unlock on return
+	return fn()
+}
+
 // Clear removes the frontier sidecar after a satisfied guard or explicit resume.
 func Clear(path string) error {
 	if path == "" {
 		return nil
 	}
+	return withSidecarLock(path, func() error { return clearUnlocked(path) })
+}
+
+// ClearIfUnchanged removes path only when its current frame is the same snapshot
+// the caller evaluated. A newly authored/replaced frontier survives an older
+// finish guard's clear decision and will be evaluated on the next finish.
+func ClearIfUnchanged(path string, expected Frame) (bool, error) {
+	if path == "" {
+		return false, nil
+	}
+	cleared := false
+	err := withSidecarLock(path, func() error {
+		current, ok, err := Load(path)
+		if err != nil || !ok {
+			return err
+		}
+		if !sameFrame(current, expected) {
+			return nil
+		}
+		if err := clearUnlocked(path); err != nil {
+			return err
+		}
+		cleared = true
+		return nil
+	})
+	return cleared, err
+}
+
+func clearUnlocked(path string) error {
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove frontier %q: %w", path, err)
 	}
 	return nil
 }
 
-// RecordPreempt writes a frontier frame when a non-urgent interrupt buffers at the seam.
-// returnTo must be a durable pointer (backlog line, issue id, goal-loop nonce) — not raw history.
+func sameFrame(a, b Frame) bool {
+	return a.Coordinator == b.Coordinator &&
+		a.ReturnTo == b.ReturnTo &&
+		a.Priority == b.Priority &&
+		a.ActiveWarrant == b.ActiveWarrant &&
+		a.Source == b.Source &&
+		a.SideItem == b.SideItem &&
+		a.Origin == b.Origin &&
+		a.At.Equal(b.At)
+}
+
+// RecordPreempt writes a derived frontier fallback when a non-urgent interrupt
+// buffers at the seam. An existing non-empty frame is authoritative and survives;
+// returnTo must be a durable pointer (backlog line, issue id, goal-loop nonce), not raw history.
 func RecordPreempt(path string, f Frame) error {
-	if strings.TrimSpace(f.ReturnTo) == "" {
+	if path == "" || strings.TrimSpace(f.ReturnTo) == "" {
 		return nil
 	}
 	if f.At.IsZero() {
@@ -153,16 +232,29 @@ func RecordPreempt(path string, f Frame) error {
 	if f.Priority == "" {
 		f.Priority = PriorityMechanical
 	}
-	return Save(path, f)
+	f.Origin = OriginDerived
+	return withSidecarLock(path, func() error {
+		if _, ok, err := Load(path); err != nil {
+			return err
+		} else if ok {
+			return nil
+		}
+		return saveUnlocked(path, f)
+	})
 }
 
 // ReturnToFromBacklog returns the first actionable backlog item line as a durable pointer.
 func ReturnToFromBacklog(md string) (pointer, label string, ok bool) {
 	st := backlog.Parse(md)
-	if len(st.Unblocked) == 0 {
-		return "", "", false
+	var line string
+	for _, candidate := range st.Unblocked {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" || delegatedBacklogLine(candidate) {
+			continue
+		}
+		line = candidate
+		break
 	}
-	line := strings.TrimSpace(st.Unblocked[0])
 	if line == "" {
 		return "", "", false
 	}
@@ -172,6 +264,10 @@ func ReturnToFromBacklog(md string) (pointer, label string, ok bool) {
 	}
 	label = pointer
 	return pointer, label, true
+}
+
+func delegatedBacklogLine(line string) bool {
+	return strings.Contains(strings.ToLower(line), "[delegated]") || delegatedPrefix.MatchString(strings.TrimSpace(line))
 }
 
 // Check evaluates a coordinator turn-final against an active frontier frame.

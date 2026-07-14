@@ -6,6 +6,7 @@ import (
 
 	"github.com/jim80net/flotilla/internal/dispatch"
 	"github.com/jim80net/flotilla/internal/inbound"
+	"github.com/jim80net/flotilla/internal/outbox"
 )
 
 // InboundTrackHook records a confirmed KindSend into the recipient's durable inbound ledger.
@@ -79,6 +80,27 @@ func DroppedDispatchFinishHookWithMerged(
 				st.Remove(e.ID)
 			}
 		}
+		// #676: the recipient may have authored its acknowledgement already, but
+		// delivery back to the coordinator can be waiting in the durable outbox.
+		// That is durable addressing evidence: consume the inbound dispatch before
+		// finish evaluation so neither reinject nor second-miss escalation fires.
+		var queuedOutbox []outbox.Entry
+		if outboxPath, pathErr := outbox.Path(rosterDir, agent); pathErr != nil {
+			log.Printf("flotilla watch: dropped-dispatch queued-ack scan %s failed: %v", agent, pathErr)
+		} else {
+			queuedOutbox = outbox.NewStore(outboxPath).Load()
+		}
+		for _, e := range st.Load() {
+			if !hasQueuedDispatchAck(queuedOutbox, agent, e.Sender, e.Nonce) {
+				continue
+			}
+			if _, cerr := reg.Consume(dispatch.ConsumeFromInbound(e.Nonce, e.Message, dispatch.ReasonQueuedAck, e.Sender, e.Recipient)); cerr != nil {
+				log.Printf("flotilla watch: dropped-dispatch consume queued-ack failed nonce=%s: %v", e.Nonce, cerr)
+				continue
+			}
+			log.Printf("flotilla watch: dropped-dispatch suppress %s nonce=%s reason=queued-ack", agent, e.Nonce)
+			st.Remove(e.ID)
+		}
 		text, ok, err := readTurnFinal(agent)
 		if err != nil {
 			log.Printf("flotilla watch: dropped-dispatch SKIP %s: read turn-final: %v", agent, err)
@@ -141,4 +163,20 @@ func DroppedDispatchFinishHookWithMerged(
 			}
 		}
 	}
+}
+
+// hasQueuedDispatchAck requires the full acknowledgement edge: the original
+// dispatch recipient authored the queued message, it is addressed back to the
+// original sender, and it carries the exact nonce. A delegation or help request
+// that quotes the dispatch to a third party is not acknowledgement evidence.
+func hasQueuedDispatchAck(entries []outbox.Entry, dispatchRecipient, dispatchSender, nonce string) bool {
+	if dispatchRecipient == "" || dispatchSender == "" || nonce == "" {
+		return false
+	}
+	for _, e := range entries {
+		if e.Sender == dispatchRecipient && e.Recipient == dispatchSender && inbound.ParseDispatchNonce(e.Message) == nonce {
+			return true
+		}
+	}
+	return false
 }
