@@ -2,6 +2,7 @@ package surface
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -332,18 +333,22 @@ func TestCodexRateLimitOverlayDiagnosticNamePendingLiveCapture692(t *testing.T) 
 // navigated the menu, the menu dismissed to an empty composer, and the empty
 // composer read as a confirmed submit.
 func TestConfirmSubmitRefusesCodexSelectorMenus(t *testing.T) {
-	for name, capture := range map[string]string{
-		"trust menu":         codexTrustMenuCapture,
-		"update menu":        codexUpdateMenuCapture,
-		"model selector":     codexModelSelectorCapture,
-		"rate-limit overlay": codexRateLimitOverlayCapture,
+	for name, tc := range map[string]struct {
+		capture string
+		wantErr error
+		wantMsg string
+	}{
+		"trust menu":         {codexTrustMenuCapture, ErrTransient, ""},
+		"update menu":        {codexUpdateMenuCapture, ErrTransient, ""},
+		"model selector":     {codexModelSelectorCapture, ErrTransient, ""},
+		"rate-limit overlay": {codexRateLimitOverlayCapture, ErrPanelBlocked, "rate-limit overlay"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			pasted := false
 			d := codex{
 				paneCommand: func(string) (string, error) { return "codex", nil },
 				isShell:     func(string) bool { return false },
-				capturePane: func(string) (string, error) { return capture, nil },
+				capturePane: func(string) (string, error) { return tc.capture, nil },
 				classify:    parseCodexState,
 				send:        func(string, string) error { pasted = true; return nil },
 				cursorState: func(string) (int, bool, error) { return 7, false, nil },
@@ -354,8 +359,8 @@ func TestConfirmSubmitRefusesCodexSelectorMenus(t *testing.T) {
 				Sleep:     func(time.Duration) {},
 			}
 			err := c.Submit(d, "0:0.0", "operator message")
-			if !errors.Is(err, ErrTransient) {
-				t.Fatalf("Submit on %s = %v, want ErrTransient (refused, re-assessable)", name, err)
+			if !errors.Is(err, tc.wantErr) || (tc.wantMsg != "" && !strings.Contains(err.Error(), tc.wantMsg)) {
+				t.Fatalf("Submit on %s = %v, want %v containing %q", name, err, tc.wantErr, tc.wantMsg)
 			}
 			if pasted || enters != 0 {
 				t.Errorf("keystrokes reached the menu: pasted=%v enters=%d, want none", pasted, enters)

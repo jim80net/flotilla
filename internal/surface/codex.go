@@ -2,7 +2,6 @@ package surface
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -71,9 +70,6 @@ func (c codex) Assess(pane string) State {
 	captured, err := c.capturePane(pane)
 	if err != nil {
 		return StateUnknown
-	}
-	if name := codexOverlayName(captured); name != "" {
-		log.Printf("flotilla: surface: codex %s visible on %s — input remains fail-closed", name, pane)
 	}
 	return c.classify(captured)
 }
@@ -208,6 +204,17 @@ func codexOverlayName(captured string) string {
 		return "rate-limit overlay"
 	}
 	return ""
+}
+
+// ComposerBlockReason names recognized blocking chrome for a submit refusal.
+// It is queried only on a non-idle/undetermined gate, not by the polling Assess
+// path, so a persistent overlay produces one useful diagnostic rather than log spam.
+func (c codex) ComposerBlockReason(pane string) string {
+	captured, err := c.capturePane(pane)
+	if err != nil {
+		return ""
+	}
+	return codexOverlayName(captured)
 }
 
 func codexIsLoginScreen(tail string) bool {

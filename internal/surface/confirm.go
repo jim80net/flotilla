@@ -173,6 +173,10 @@ func (c Confirm) Submit(d Driver, pane, text string) error {
 	case StateIdle:
 		// proceed
 	default: // Unknown, AwaitingInput, AwaitingApproval, Errored
+		if reason := composerBlockReason(d, pane); reason != "" {
+			logPanelBlocked(pane, "gate:"+reason)
+			return fmt.Errorf("%w: %s", ErrPanelBlocked, reason)
+		}
 		return ErrTransient
 	}
 
@@ -198,6 +202,10 @@ func (c Confirm) Submit(d Driver, pane, text string) error {
 			logPanelBlocked(pane, "gate:list-nav")
 			return ErrPanelBlocked
 		case ComposerUndetermined:
+			if reason := composerBlockReason(d, pane); reason != "" {
+				logPanelBlocked(pane, "gate:"+reason)
+				return fmt.Errorf("%w: %s", ErrPanelBlocked, reason)
+			}
 			return ErrTransient
 		}
 	}
@@ -303,6 +311,13 @@ func (c Confirm) Submit(d Driver, pane, text string) error {
 	}
 	logUnconfirmed(d, pane, sp, polls)
 	return ErrUnconfirmed
+}
+
+func composerBlockReason(d Driver, pane string) string {
+	if probe, ok := d.(ComposerBlockReasonProbe); ok {
+		return probe.ComposerBlockReason(pane)
+	}
+	return ""
 }
 
 // SubmitWithSelfHeal is the RELAY-kind entrypoint (#156): it heals a pre-paste agents-panel overlay

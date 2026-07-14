@@ -158,6 +158,13 @@ type ComposerStateProbe interface {
 	ComposerState(pane string) ComposerDisposition
 }
 
+// ComposerBlockReasonProbe is an optional diagnostic companion to
+// ComposerStateProbe. A driver may name recognized blocking chrome after a
+// fail-closed gate; callers must never use the reason to weaken the gate.
+type ComposerBlockReasonProbe interface {
+	ComposerBlockReason(pane string) string
+}
+
 // RateLimitProbe is declared in ratelimit.go (OPTIONAL #204).
 
 // UsageProbe is declared in usage.go (OPTIONAL #653).
