@@ -2125,3 +2125,37 @@ func TestGoalIDCrossLink580(t *testing.T) {
 		t.Error("goals.js must expose restoreNode for Issues → Goals jump — #580")
 	}
 }
+
+// TestIssuesWorkLedger405 locks the operator-morning-review shift from GitHub list
+// parity to the server-derived fleet context, rendered flotilla → desk → work.
+func TestIssuesWorkLedger405(t *testing.T) {
+	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/tracker.js").Body.String()
+	for _, marker := range []string{
+		"workLedgerURL", `/api/work-ledger`, "renderDesk", "doc.flotillas",
+		"flotilla.desks", "issue-desk-head", "issue-ledger-kicker",
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("tracker.js must render the #405 fleet work ledger (missing %q)", marker)
+		}
+	}
+	if !strings.Contains(js, `el("filter-state")`) {
+		t.Error("tracker.js must preserve the state filter over the grouped ledger — approved design §4")
+	}
+	html := doGet(t, srv, "/").Body.String()
+	for _, marker := range []string{"Fleet work ledger", "What is moving now · what shipped recently"} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("index.html must frame Issues as operator context (missing %q) — #405 item 7", marker)
+		}
+	}
+	if !strings.Contains(html, `id="filter-state"`) {
+		t.Error("index.html must preserve the work-state filter — approved design §4")
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	for _, marker := range []string{".issue-ledger-section", ".issue-ledger-head", ".issue-desk-head", ".issue-context", ".issue-state.shipped"} {
+		if !strings.Contains(css, marker) {
+			t.Errorf("dash.css must style the #405 work ledger (missing %q)", marker)
+		}
+	}
+}

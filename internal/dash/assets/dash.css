@@ -1055,18 +1055,32 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   cursor: pointer;
 }
 #filter-state {
-  font-family: var(--mono);
-  font-size: .78rem;
-  color: var(--ink-2);
-  background: var(--abyss-3);
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  padding: .4rem .55rem;
-  transition: border-color .18s var(--ease);
+  font-family: var(--mono); font-size: .78rem; color: var(--ink-2);
+  background: var(--abyss-3); border: 1px solid var(--line); border-radius: var(--r-sm);
+  padding: .4rem .55rem; transition: border-color .18s var(--ease);
 }
 #filter-state:hover { border-color: var(--cyan-dim); }
-
-.issues-list { display: grid; gap: 1px; background: var(--line-soft); min-width: 0; }
+.issues-list { display: grid; gap: 14px; padding: 14px; min-width: 0; }
+.issue-ledger-section { border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; }
+.issue-ledger-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: .75rem 1rem; background: var(--abyss-3); border-bottom: 1px solid var(--line);
+}
+.issue-ledger-head h3 { margin: 0; font-family: var(--display); font-size: 1rem; color: var(--ink); }
+.issue-ledger-kicker { font-size: .58rem; letter-spacing: .12em; text-transform: uppercase; color: var(--cyan); }
+.issue-ledger-head p { margin: .18rem 0 0; font-size: .72rem; color: var(--ink-3); }
+.issue-ledger-count {
+  min-width: 2rem; height: 2rem; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line); border-radius: 999px; color: var(--ink-2); font-family: var(--display);
+}
+.issue-ledger-empty { padding: 1rem; color: var(--ink-3); background: var(--abyss-2); font-size: .82rem; }
+.issue-desk + .issue-desk { border-top: 1px solid var(--line); }
+.issue-desk-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: .55rem 1rem; background: color-mix(in srgb, var(--cyan) 4%, var(--abyss-2));
+}
+.issue-desk-head h4 { margin: 0; font-family: var(--display); font-size: .82rem; color: var(--ink); }
+.issue-desk-head span { font-size: .68rem; color: var(--ink-3); }
 .issue-row {
   display: grid;
   grid-template-columns: auto auto 1fr auto;
@@ -1087,6 +1101,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   border-left-color: var(--cyan-dim);
 }
 .issue-num { color: var(--ink-3); font-size: .78rem; }
+.issue-copy { display: grid; gap: .18rem; min-width: 0; }
+.issue-context { color: var(--ink-3); font-size: .7rem; overflow-wrap: anywhere; }
 /* #515: titles must stay readable on a 390px fleet scan — wrap up to two lines,
    break long tokens, never single-line clip at the container edge. */
 .issue-title {
@@ -1112,6 +1128,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 }
 .issue-state.open { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
 .issue-state.closed { color: var(--ink-3); }
+.issue-state.in-flight { color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 45%, transparent); }
+.issue-state.shipped { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
 .issue-labels { display: inline-flex; gap: .3rem; flex-wrap: wrap; }
 /* GitHub label chip: JS passes the raw label hue as --label; the text stays dark
    ink and the hue lives in a faint tint + accent border, so any GitHub color
@@ -1944,7 +1962,8 @@ html, body { overflow-x: clip; }
     min-height: 44px;
     align-items: start;
   }
-  .issue-title { grid-column: 1 / -1; -webkit-line-clamp: 2; }
+  .issue-copy { grid-column: 1 / -1; }
+  .issue-title { -webkit-line-clamp: 2; }
   .issue-labels { grid-column: 1 / -1; }
 
   /* the info|debug and tree|org segmented groups: give them room to breathe */
