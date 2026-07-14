@@ -182,9 +182,13 @@ func (r *Registry) Consume(e ConsumedEntry) (inserted bool, err error) {
 		for _, p := range f.Entries {
 			if e.Nonce != "" && p.Nonce == e.Nonce {
 				// A send-time coordinator-recipient entry settles only its own hop
-				// (#707): it must not block the true recipient's later real
-				// settlement of the same nonce on a different edge.
-				if p.Reason == ReasonCoordinatorRecipient && p.Recipient != e.Recipient {
+				// (#707): per-edge settlements of the same nonce coexist, in either
+				// insertion order — the hop entry must not block the true
+				// recipient's real settlement, and an already-landed real
+				// settlement must not block a later hop entry (whose absence would
+				// re-break the coordinator's footer ack).
+				if (p.Reason == ReasonCoordinatorRecipient || e.Reason == ReasonCoordinatorRecipient) &&
+					p.Recipient != e.Recipient {
 					continue
 				}
 				return nil // already consumed

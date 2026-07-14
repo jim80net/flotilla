@@ -198,3 +198,103 @@ func TestSettlesInboundRow_CoordinatorEntryScopedToItsOwnHop707(t *testing.T) {
 		t.Fatalf("lookup preference = %+v, want the desk's durable ack", e)
 	}
 }
+
+// #707 N1: a coordinator-hop settlement must not mask a LIVE desk copy of the
+// same nonce from the manual status probe.
+func TestStatusPrefersLiveInboundOverCoordinatorHop707(t *testing.T) {
+	dir := t.TempDir()
+	msg, nonce, err := inbound.AppendDispatchNonce("forwarded work still pending on a desk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ConsumeCoordinatorRecipient(dir, "cos", "xo", msg); err != nil {
+		t.Fatal(err)
+	}
+	// Hop entry alone → consumed with the hop reason.
+	if st := LookupNonce(dir, nonce, time.Now()); st.Disposition != DispositionConsumed || st.Reason != ReasonCoordinatorRecipient {
+		t.Fatalf("hop-only status = %+v", st)
+	}
+	// A live desk row for the same nonce takes precedence over the hop entry…
+	if err := inbound.Record(dir, inbound.Entry{
+		ID: "fwd-1", Sender: "xo", Recipient: "backend", Message: msg, Nonce: nonce,
+		DeliveredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if st := LookupNonce(dir, nonce, time.Now()); st.Disposition != DispositionDelivered || st.Recipient != "backend" {
+		t.Fatalf("status with live desk row = %+v, want delivered to backend", st)
+	}
+	// …and a stale desk row surfaces as undelivered, not masked as consumed.
+	stale := LookupNonce(dir, nonce, time.Now().Add(UndeliveredInboundAge+time.Minute))
+	if stale.Disposition != DispositionUndelivered {
+		t.Fatalf("stale-row status = %+v, want undelivered", stale)
+	}
+	// A REAL settlement still wins over everything.
+	if _, err := NewRegistry(dir).Consume(ConsumeFromInbound(nonce, msg, ReasonDurableAck, "xo", "backend")); err != nil {
+		t.Fatal(err)
+	}
+	if st := LookupNonce(dir, nonce, time.Now()); st.Disposition != DispositionConsumed || st.Reason != ReasonDurableAck {
+		t.Fatalf("status after real settle = %+v, want consumed durable-ack", st)
+	}
+}
+
+// #707 nit: the undelivered sweeps stay recipient-scoped end-to-end — a hop
+// entry neither hides a stale desk row from the scan nor lets the reconcile
+// sweep scrub it.
+func TestUndeliveredSweepsIgnoreCoordinatorHopEntry707(t *testing.T) {
+	dir := t.TempDir()
+	msg, nonce, err := inbound.AppendDispatchNonce("stale forwarded work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ConsumeCoordinatorRecipient(dir, "cos", "xo", msg); err != nil {
+		t.Fatal(err)
+	}
+	if err := inbound.Record(dir, inbound.Entry{
+		ID: "stale-1", Sender: "xo", Recipient: "backend", Message: msg, Nonce: nonce,
+		DeliveredAt: time.Now().UTC().Add(-2 * UndeliveredInboundAge),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if n := ReconcileInboundAcks(dir, nil); n != 0 {
+		t.Fatalf("reconcile scrubbed %d rows on a hop entry, want 0", n)
+	}
+	reports := ScanUndeliveredInbound(dir, time.Now().UTC(), 0)
+	if len(reports) != 1 || reports[0].Nonce != nonce || reports[0].Recipient != "backend" {
+		t.Fatalf("undelivered reports = %+v, want the stale backend row", reports)
+	}
+}
+
+// #707 N2b: per-edge settlements coexist in EITHER insertion order — a desk's
+// real ack landing first must not block the coordinator hop entry (whose
+// absence would re-break the coordinator's own footer ack).
+func TestConsume_HopEntryInsertsAfterRealSettlement707(t *testing.T) {
+	dir := t.TempDir()
+	msg, nonce, err := inbound.AppendDispatchNonce("desk settled first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := NewRegistry(dir)
+	if _, err := reg.Consume(ConsumeFromInbound(nonce, msg, ReasonDurableAck, "xo", "backend")); err != nil {
+		t.Fatal(err)
+	}
+	inserted, err := ConsumeCoordinatorRecipient(dir, "cos", "xo", msg)
+	if err != nil || !inserted {
+		t.Fatalf("hop insert after real settlement = (%v, %v), want inserted", inserted, err)
+	}
+	// The coordinator's hop is settled without disturbing the desk's settlement…
+	if !reg.SettlesInboundRow(nonce, PayloadHash(msg), "xo") || !reg.SettlesInboundRow(nonce, PayloadHash(msg), "backend") {
+		t.Fatal("both edges must read settled")
+	}
+	// …and lookup still prefers the real settlement.
+	if e, ok := reg.LookupNonce(nonce); !ok || e.Reason != ReasonDurableAck {
+		t.Fatalf("lookup = %+v, want durable-ack preference", e)
+	}
+	// Same-edge idempotency is preserved for both reasons.
+	if again, _ := ConsumeCoordinatorRecipient(dir, "cos", "xo", msg); again {
+		t.Fatal("hop rerun must be a no-op")
+	}
+	if again, _ := reg.Consume(ConsumeFromInbound(nonce, msg, ReasonDurableAck, "xo", "backend")); again {
+		t.Fatal("real-ack rerun must be a no-op")
+	}
+}
