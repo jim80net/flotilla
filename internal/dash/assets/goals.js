@@ -1279,116 +1279,9 @@
     for (var i = 0; i < els.length; i++) els[i].classList.toggle("lit", on);
   }
 
-  // drawerBody renders the node's detail from the SAME cached /api/goals data the
-  // map draws — no extra endpoint. Every interpolated value is escaped.
-  // drawerList renders a full ordered list section (priorities / milestones) in the
-  // drawer, or "" when absent — parts.push("") is harmless (join ignores it).
-  function drawerList(arr, heading) {
-    var xs = Array.isArray(arr) ? arr : [];
-    if (!xs.length) return "";
-    return '<div class="gd-sec"><h4>' + heading + "</h4><ol class=\"gd-list\">" +
-      xs.map(function (x) { return "<li>" + escapeHtml(x) + "</li>"; }).join("") + "</ol></div>";
-  }
-
-  function drawerBody(n) {
-    var parts = [];
-    // Deep-link to this cell's conversation (feedback #3): prefer the explicit
-    // conversation_agent, then an actual desk work-item's agent (a routable
-    // thread), and only then the owner label (a lead role may have no thread).
-    var agent = convAgent(n);
-    if (agent) {
-      parts.push('<div class="gd-sec"><button class="gd-convo" type="button" data-agent="' + escapeHtml(agent) +
-        '">Open ' + escapeHtml(agent) + "&rsquo;s conversation &rarr;</button></div>");
-    }
-    if (n.description) parts.push('<div class="gd-sec"><h4>What this is</h4><p>' + escapeHtml(n.description) + "</p></div>");
-    if (n.harness && n.harness.surface) {
-      parts.push('<div class="gd-sec gd-harness"><h4>Harness</h4><p>' + escapeHtml(n.harness.surface) + "</p></div>");
-    }
-    // org-graph v2: full priorities (flotilla) / milestones (desk) — the drawer shows
-    // the complete list (the node card caps at 4).
-    parts.push(drawerList(n.priorities, "Priorities"));
-    parts.push(drawerList(n.milestones, "Current work"));
-    // Operator-gated items (awaiting / blocked) — #347 residual: a bare label is NOT
-    // decidable. Each gated item carries its decision package (or the honest empty /
-    // preparing state). Node-level brief is shown once when present. The respond modal
-    // remains the full reading+reply surface (button below).
-    var gated = (n.work_items || []).filter(function (wi) { return wi.class === "awaiting" || wi.class === "blocked"; });
-    var nodeGated = (function () { var v = visToken(n); return v === "awaiting" || v === "blocked"; })();
-    if (gated.length || (nodeGated && hasBrief(n.brief))) {
-      var ask = ['<div class="gd-ask-lab">Waiting on you</div>'];
-      // Node-level decision package first (the decision is on the node itself).
-      if (hasBrief(n.brief)) {
-        ask.push('<div class="gm-brief-full gd-brief">' + renderBrief(n.brief) + "</div>");
-      } else if (nodeGated && !gated.length) {
-        ask.push(BRIEF_EMPTY);
-      }
-      gated.forEach(function (wi) {
-        var head = '<p class="gd-gated-head"><strong>' + escapeHtml(wi.label || wi.kind || "") + "</strong>" +
-          (wi.detail ? ' <span class="muted">— ' + escapeHtml(wi.detail) + "</span>" : "") + "</p>";
-        // Skip re-printing a brief identical to the node package already above.
-        var body = sameBrief(wi.brief, n.brief) ? ""
-          : (hasBrief(wi.brief)
-            ? '<div class="gm-brief-full gd-brief">' + renderBrief(wi.brief) + "</div>"
-            : BRIEF_EMPTY);
-        ask.push('<div class="gd-gated-item">' + head + body + "</div>");
-      });
-      ask.push('<button type="button" class="btn btn-primary gd-open-decision" data-open-decision="' +
-        escapeHtml(n.id) + '">Open decision to respond</button>');
-      parts.push('<div class="gd-sec"><div class="gd-ask">' + ask.join("") + "</div></div>");
-    }
-    if ((n.work_items || []).length) {
-      parts.push('<div class="gd-sec"><h4>Work (' + n.work_items.length + ")</h4>" +
-        n.work_items.map(function (wi) {
-          return '<div class="gd-row"><span class="gd-row-l">' + escapeHtml(wi.label || wi.kind || "") + "</span>" +
-            '<span class="gwi-detail gwi-' + escapeHtml(wi.class || "unknown") + '">' + escapeHtml(wi.detail || wi.class || "") + "</span></div>";
-        }).join("") + "</div>");
-    }
-    var kids = (n.children || []).map(function (id) { return nodeById[id]; }).filter(Boolean);
-    if (kids.length) {
-      parts.push('<div class="gd-sec"><h4>' + (isFlotilla(n) ? "Desks" : "Tasks") + " (" + kids.length + ")</h4>" +
-        kids.map(function (k) {
-          var kv = visToken(k);
-          return '<div class="gd-row"><span class="gd-row-l">' + escapeHtml(k.title || k.id) + "</span>" +
-            '<span class="gpill gpill-' + escapeHtml(kv) + '">' + escapeHtml(STATE_LABEL[kv] || kv) + "</span></div>";
-        }).join("") + "</div>");
-    }
-    // Cross-dependencies — the gantt-style ID labels for feedback #2, shown cleanly
-    // in the drawer alongside the faint canvas arcs. Derived from GoalsDoc.edges
-    // (the API exposes dependencies there, not as a per-node field).
-    var deps = depEdges.filter(function (e) { return e.kind === "depends_on" && e.from === n.id; })
-      .map(function (e) { return nodeById[e.to]; }).filter(Boolean);
-    if (deps.length) {
-      parts.push('<div class="gd-sec"><h4>Depends on</h4>' +
-        deps.map(function (d) {
-          var dv = visToken(d);
-          return '<div class="gd-row"><span class="gd-row-l">' + escapeHtml(d.title || d.id) + "</span>" +
-            '<span class="gpill gpill-' + escapeHtml(dv) + '">' + escapeHtml(STATE_LABEL[dv] || dv) + "</span></div>";
-        }).join("") + "</div>");
-    }
-    return parts.join("");
-  }
-
-  var lastDrawerHtml = null; // dirty-check: don't rewrite the drawer body (and reset its scroll) on a no-op tick
-  function fillDrawer(n) {
-    var vis = visToken(n);
-    q("goals-drawer-eyebrow").textContent = scopeNoun(n);
-    q("goals-drawer-title").textContent = n.title || n.id;
-    var pills = '<span class="gpill gpill-' + escapeHtml(vis) + '">' + escapeHtml(STATE_LABEL[vis] || vis) + "</span>";
-    if (n.owner) pills += '<span class="gd-owner">led by ' + escapeHtml(n.owner) + "</span>";
-    // parent-goal pill — which fleet goal / workstream this rolls up to (prototype fidelity).
-    var parent = n.parent ? nodeById[n.parent] : null;
-    if (parent) pills += '<span class="gd-parent">&#8627; ' + escapeHtml(parent.title || parent.id) + "</span>";
-    q("goals-drawer-pills").innerHTML = pills;
-    // Rewrite the body only when it changed, so a background SSE tick never resets
-    // the operator's scroll position or text selection in the open drawer.
-    var html = drawerBody(n);
-    if (lastDrawerHtml !== html) { q("goals-drawer-body").innerHTML = html; lastDrawerHtml = html; }
-  }
-
   function selectNode(id) {
     deselect();
     selectedId = id;
-    lastDrawerHtml = null; // a new selection always fills fresh
     var card = cardEl(id);
     if (card) card.classList.add("gnode-selected"); // transient state lives on the ARTICLE (#283 contract)
   }
@@ -1397,11 +1290,9 @@
     selectedId = null;
   }
   var restoringNode = false; // true while the history controller restores a drawer (no re-push)
-  var drawerReturnEl = null; // mobile outline opener; map cards remain the default return target
   function openDrawer(id, returnEl) {
     var n = nodeById[id];
     if (!n) return;
-    drawerReturnEl = returnEl || null;
     selectNode(id);
     if (!window.flotillaWorkContext) return;
     window.flotillaWorkContext.open(goalContext(n), returnEl || cardEl(id));
@@ -1433,8 +1324,6 @@
     else contextClosed();
   }
   function contextClosed() {
-    drawerReturnEl = null;
-    lastDrawerHtml = null;
     deselect();
   }
 
@@ -1443,20 +1332,9 @@
   // aim) falls back to the detail drawer.
   // nodeActivate is the primary node action (#349 A2): open the detail drawer — "the
   // point is I need to see the thing". (Was: deep-link to Conversations; that jump is now
-  // the explicit → desk button / goToDesk.)
+  // the explicit → desk action.)
   function nodeActivate(id, returnEl) {
     if (nodeById[id]) openDrawer(id, returnEl);
-  }
-
-  // goToDesk jumps to a node's Conversations thread — the → desk button, and the drawer's
-  // own open-conversation button, both route here (synchronized, #349 A2).
-  function goToDesk(id) {
-    var n = nodeById[id];
-    if (!n) return;
-    var agent = convAgent(n);
-    if (agent && window.flotillaDash && window.flotillaDash.openConversation) {
-      window.flotillaDash.openConversation(agent);
-    }
   }
 
   // openModal — the "waiting on you" intervention modal (#302): a situation brief
@@ -1997,28 +1875,6 @@
       lightDeps(id, false);
       if (hoveredId === id) hoveredId = null;
       hideTip(); // #405 Inc 3 Item 6b
-    });
-    var close = q("goals-drawer-close");
-    if (close) close.onclick = closeDrawer;
-    // Deep-link: the drawer's "Open …'s conversation" button jumps to that desk's
-    // Conversations thread (delegated — the body is rebuilt on each fill).
-    // #347 residual: "Open decision to respond" opens the respond modal with the full
-    // brief package (drawer already shows the brief; modal is the reply surface).
-    var drawer = q("goals-drawer");
-    if (drawer) drawer.addEventListener("click", function (e) {
-      var decide = e.target.closest("[data-open-decision]");
-      if (decide) {
-        var did = decide.getAttribute("data-open-decision");
-        if (did) openModal(did);
-        return;
-      }
-      var btn = e.target.closest(".gd-convo");
-      if (!btn) return;
-      var agent = btn.getAttribute("data-agent");
-      if (agent && window.flotillaDash && window.flotillaDash.openConversation) {
-        closeDrawer();
-        window.flotillaDash.openConversation(agent);
-      }
     });
     // Help tooltip: also toggle on click (touch has no hover) — CSS shows it on
     // hover/focus AND when aria-expanded is true.

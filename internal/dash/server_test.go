@@ -568,7 +568,7 @@ func TestMobileTouchTargets397(t *testing.T) {
 	srv, _ := newTestServer(t, singleFleetRoster, now)
 	css := doGet(t, srv, "/static/dash.css").Body.String()
 	// The conv-modal close joins its already-covered siblings at a 44x44 hit box.
-	if !strings.Contains(css, ".gd-close, .gm-close, .conv-modal-x { width: 44px; height: 44px; }") {
+	if !strings.Contains(css, ".gm-close, .conv-modal-x { width: 44px; height: 44px; }") {
 		t.Error("dash.css must give the drive-queue modal close (.conv-modal-x) a 44x44 touch target — #397")
 	}
 	// The jump-to-latest chip is in the ≤900px 44px min-height set.
@@ -1048,8 +1048,8 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("goals.js must retain the detail-drawer / hover engine (missing %q) — Inc 2", marker)
 		}
 	}
-	// Inc 4: dependency-line rendering + the conversation deep-link.
-	for _, marker := range []string{"depEdges", "lightDeps", "gd-convo"} {
+	// Inc 4: dependency-line rendering + the live node-menu conversation deep-link.
+	for _, marker := range []string{"depEdges", "lightDeps", `data-gnode-action="desk"`, "D.openConversation(agent)"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("goals.js must retain the dependency-line / deep-link engine (missing %q) — Inc 4", marker)
 		}
@@ -1119,7 +1119,7 @@ func TestGoalsCanvasAssets(t *testing.T) {
 		}
 	}
 	// #349 A2: cell-click SWAP — the node body opens the drawer (nodeActivate → openDrawer),
-	// the conversation jump is a distinct → desk button (goToDesk / gnode-godesk); and the
+	// the conversation jump is a distinct → desk action; and the
 	// drawer participates in browser history (restoreNode for the popstate restore).
 	for _, marker := range []string{"gnode-kebab", "gnode-pop", "restoreNode"} {
 		if !strings.Contains(js, marker) {
@@ -2084,52 +2084,46 @@ func TestDefaultViewLanding579(t *testing.T) {
 	}
 }
 
-// TestDecisionBriefDrawer347 locks #347 residual: the Goals drawer "Waiting on you"
-// call-out must render the decision package (renderBrief / BRIEF_EMPTY), not bare
-// work-item labels alone — the operator's "not enough information to decide" bar.
-func TestDecisionBriefDrawer347(t *testing.T) {
+// TestDecisionBriefModal347 locks the live Goals decision modal: node-menu and
+// status-pill actions open the modal, which renders full decision packages or an
+// honest no-brief state rather than bare work-item labels.
+func TestDecisionBriefModal347(t *testing.T) {
 	now := time.Date(2026, 7, 9, 22, 0, 0, 0, time.UTC)
 	srv, _ := newTestServer(t, singleFleetRoster, now)
 	js := doGet(t, srv, "/static/goals.js").Body.String()
-	// Locate the drawerBody function and require brief wiring inside it (not only in the modal).
-	di := strings.Index(js, "function drawerBody")
-	if di < 0 {
-		t.Fatal("goals.js must define drawerBody — #347")
+	if strings.Contains(js, "function drawerBody") {
+		t.Fatal("goals.js must not retain the unreachable legacy drawer renderer")
 	}
-	// Cap the slice at the next top-level function so we don't match openModal's briefs.
-	chunk := js[di:]
-	if end := strings.Index(chunk[20:], "\n  function "); end > 0 {
-		chunk = chunk[:20+end]
+	mi := strings.Index(js, "function gatedRow")
+	end := strings.Index(js, "function closeModal")
+	if mi < 0 || end <= mi {
+		t.Fatal("goals.js must retain the live gatedRow → openModal decision flow")
 	}
+	chunk := js[mi:end]
 	for _, marker := range []string{
 		"Waiting on you",
 		"renderBrief",
 		"BRIEF_EMPTY",
 		"hasBrief",
 		"sameBrief",
-		"gd-open-decision",
-		"data-open-decision",
 		"gm-brief-full",
 	} {
 		if !strings.Contains(chunk, marker) {
-			t.Errorf("drawerBody must carry decision brief (missing %q) — #347 residual", marker)
+			t.Errorf("live decision modal must carry the decision brief (missing %q) — #347", marker)
 		}
 	}
-	// Bare-label-only pattern must be gone from drawerBody (label-only <p> map).
-	if strings.Contains(chunk, `gated.map(function (wi) { return "<p>" + escapeHtml(wi.label`) {
-		t.Error("drawerBody must not render gated items as bare labels only — #347 residual")
-	}
-	// Click handler opens the respond modal from the drawer.
-	if !strings.Contains(js, `closest("[data-open-decision]")`) || !strings.Contains(js, "openModal(did)") {
-		t.Error("goals.js must open the respond modal from the drawer decision button — #347")
+	for _, caller := range []string{
+		`openModal(popItem.getAttribute("data-gnode-id"))`,
+		`openModal(pn.getAttribute("data-id"))`,
+	} {
+		if !strings.Contains(js, caller) {
+			t.Errorf("live Goals decision affordance must open the modal (missing %q) — #347", caller)
+		}
 	}
 	css := doGet(t, srv, "/static/dash.css").Body.String()
-	for _, marker := range []string{".gd-gated-item", ".gd-open-decision", ".gd-brief"} {
-		if !strings.Contains(css, marker) {
-			t.Errorf("dash.css must style drawer decision package (missing %q) — #347", marker)
-		}
+	if strings.Contains(css, ".gd-") || strings.Contains(css, ".goals-drawer") {
+		t.Error("dash.css must not retain styles for the removed legacy Goals drawer")
 	}
-	// Prior #347 modal path remains (do not regress).
 	for _, marker := range []string{"renderBrief", "gm-brief-full", "No decision brief yet", "gatherDecisions"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("goals.js must retain respond-modal / decisions-room brief path (missing %q) — #347", marker)
