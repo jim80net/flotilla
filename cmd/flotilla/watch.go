@@ -2050,7 +2050,7 @@ func returnToFrontierOnFinish(
 		}
 		r := frontier.Check(text, f)
 		if !r.Violation {
-			if err := frontier.Clear(path); err != nil {
+			if _, err := frontier.ClearIfUnchanged(path, f); err != nil {
 				log.Printf("flotilla watch: return-to-frontier clear failed for %s: %v", agent, err)
 			}
 			return

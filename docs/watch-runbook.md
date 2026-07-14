@@ -364,6 +364,20 @@ lifecycle the XO must follow is in [`xo-doctrine.md`](./xo-doctrine.md#the-chang
 — wire it into the XO's standing instructions, and permit the marker `touch`/`rm`
 plus `tmux send-keys` (the rotate path) in the XO's allow-list.
 
+### Return-to-frontier authority and delegation
+
+The frontier sidecar distinguishes `origin: authored` from `origin: derived`.
+Directly saved coordinator/operator frames are authored. A seam interrupt may derive
+a return-to pointer from the backlog only when no non-empty frontier exists; derived
+state is a fallback and never overwrites an existing authored or legacy frame.
+
+Delegated work is not the coordinator's return-to. Mark an `[in-flight]`, `[pending]`, or `[next]`
+backlog line either with `[delegated]` or with `DELEGATED —` immediately after its
+status marker (for example, `- [in-flight] DELEGATED — implementation owned by a
+desk; do NOT re-dispatch`). Frontier derivation skips those lines and chooses the
+first non-delegated unblocked item. Detection runs before the 120-character pointer
+truncation; when every unblocked item is delegated, no derived frontier is written.
+
 **Liveness ping mode** (`liveness_ping_mode`, the C1b tradeoff) — switchable
 without a rebuild:
 
