@@ -1096,6 +1096,13 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .issue-shipped-more[open] .when-closed { display: none; }
 .issue-shipped-more[open] .when-open { display: inline; }
 .issue-shipped-more:not([open]) > .issue-row { display: none; }
+.issue-scope-note {
+  display: flex; gap: .35rem 1rem; align-items: baseline; flex-wrap: wrap;
+  margin-bottom: .75rem; padding: .75rem 1rem; border: 1px solid color-mix(in srgb, var(--amber) 38%, transparent);
+  border-radius: var(--r-sm); background: color-mix(in srgb, var(--amber) 7%, var(--abyss-2));
+  color: var(--ink-2); font-size: .76rem; line-height: 1.45;
+}
+.issue-scope-note strong { color: var(--amber); font-family: var(--display); font-size: .8rem; }
 .issue-row {
   display: grid;
   grid-template-columns: auto auto 1fr auto;
