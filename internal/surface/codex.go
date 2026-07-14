@@ -22,17 +22,17 @@ func init() { Register(newCodex()) }
 // --ask-for-approval on-request). Binary-sourced markers retained where live did not elicit them
 // ([ ! ] Action Required / Approve for me — auto-review path; still in binary 0.142.5).
 type codex struct {
-	paneCommand  func(string) (string, error)
-	isShell      func(string) bool
-	capturePane  func(string) (string, error)
-	classify     func(string) State
-	send         func(string, string) error
-	inject       func(string, string) error
-	paneCWD      func(string) (string, error)
-	codexHome    string
-	latestResult func(codexHome, cwd string) (string, error)
-	replyAfter   func(codexHome, cwd, operatorMsg string) (string, bool, error)
-	cursorState  func(pane string) (cursorY int, inMode bool, err error)
+	paneCommand    func(string) (string, error)
+	isShell        func(string) bool
+	capturePane    func(string) (string, error)
+	classify       func(string) State
+	send           func(string, string) error
+	inject         func(string, string) error
+	paneCWD        func(string) (string, error)
+	codexHome      string
+	latestResult   func(codexHome, cwd string) (string, error)
+	replyAfter     func(codexHome, cwd, operatorMsg string) (string, bool, error)
+	cursorPosition func(pane string) (cursorX, cursorY int, inMode bool, err error)
 }
 
 func newCodex() codex {
@@ -41,17 +41,17 @@ func newCodex() codex {
 		codexHome = filepath.Join(home, ".codex")
 	}
 	return codex{
-		paneCommand:  deliver.PaneCommand,
-		isShell:      deliver.IsShell,
-		capturePane:  deliver.CapturePane,
-		classify:     parseCodexState,
-		send:         deliver.Send,
-		inject:       deliver.InjectSlash,
-		paneCWD:      deliver.PaneCWD,
-		codexHome:    codexHome,
-		latestResult: codexstore.LatestResult,
-		replyAfter:   codexstore.ReplyAfter,
-		cursorState:  deliver.CursorState,
+		paneCommand:    deliver.PaneCommand,
+		isShell:        deliver.IsShell,
+		capturePane:    deliver.CapturePane,
+		classify:       parseCodexState,
+		send:           deliver.Send,
+		inject:         deliver.InjectSlash,
+		paneCWD:        deliver.PaneCWD,
+		codexHome:      codexHome,
+		latestResult:   codexstore.LatestResult,
+		replyAfter:     codexstore.ReplyAfter,
+		cursorPosition: deliver.CursorPosition,
 	}
 }
 
@@ -261,14 +261,44 @@ func codexHasMenuRow(tail, row string) bool {
 // --- ComposerStateProbe: codex cursor-indexed composer classifier ---
 
 // codexComposerPrompt is the input-line glyph on an idle codex desk (LIVE-CAPTURED 2026-07-03
-// post-auth; placeholder hint "› Find and fix a bug in @filename" reads Pending, empty "› " Cleared).
+// post-auth; empty "› " reads Cleared, and a known placeholder hint with the cursor parked at
+// the body-start cell also reads Cleared — see codexEmptyPlaceholders / #709).
 const codexComposerPrompt = "›" // U+203A
+
+// codexEmptyPlaceholders are Codex's randomized empty-composer hints. The TUI picks one
+// per session from PLACEHOLDERS (normal composer) or SIDE_PLACEHOLDERS (side conversation)
+// and paints it dim over the EMPTY textarea, so a human-idle desk can read "› Summarize
+// recent commits" while holding no draft at all — which blocked recycle/switch reclaim as
+// a busy-desk false positive (#709).
+//
+// PROVENANCE: SOURCE-VERIFIED in openai/codex codex-rs/tui/src/chatwidget.rs — both lists
+// byte-identical at rust-v0.142.5, rust-v0.144.1, and main as of 2026-07-14; the render
+// path (bottom_pane/chat_composer.rs) draws the hint only while the textarea is empty.
+// LIVE-CAPTURED 2026-07-14 on three idle codex-cli desks: the hint renders after "› " with
+// the terminal cursor parked at the body-start cell; typing replaces the hint and moves the
+// cursor. Keep this list exact and version-scoped: unknown wording stays Pending, never
+// guessed empty.
+var codexEmptyPlaceholders = []string{
+	// PLACEHOLDERS (normal composer)
+	"Explain this codebase",
+	"Summarize recent commits",
+	"Implement {feature}",
+	"Find and fix a bug in @filename",
+	"Write tests for @filename",
+	"Improve documentation in @filename",
+	"Run /review on my current changes",
+	"Use /skills to list available skills",
+	// SIDE_PLACEHOLDERS (side-conversation composer)
+	"Check recently modified functions for compatibility",
+	"How many files have been modified?",
+	"Will this algorithm scale well?",
+}
 
 // ComposerState implements surface.ComposerStateProbe: reads the composer at the terminal cursor.
 // A cursor/capture read error, or tmux copy/view mode, reads Undetermined: pre-paste delivery
 // and switch/recycle fail closed, while post-paste confirmation may still use the spinner.
 func (c codex) ComposerState(pane string) ComposerDisposition {
-	cy, inMode, err := c.cursorState(pane)
+	cx, cy, inMode, err := c.cursorPosition(pane)
 	if err != nil {
 		return ComposerUndetermined
 	}
@@ -292,15 +322,17 @@ func (c codex) ComposerState(pane string) ComposerDisposition {
 	if codexIsLoginScreen(startup) || codexIsHooksGate(startup) || codexIsFirstRunMenu(startup) {
 		return ComposerUndetermined
 	}
-	return classifyCodexComposerLine(captured, cy)
+	return classifyCodexComposerLine(captured, cx, cy)
 }
 
 // classifyCodexComposerLine positively identifies the idle composer: the cursor
 // row must carry the prompt glyph AND be followed by known idle-composer chrome.
 // A selector's highlighted row also begins with ›, but lacks that footer and is
 // therefore Undetermined (never Pending/ListNav). Empty body after a positively
-// identified prompt is Cleared; non-empty body is Pending.
-func classifyCodexComposerLine(captured string, cursorY int) ComposerDisposition {
+// identified prompt is Cleared; a known empty-composer placeholder hint with the
+// cursor still parked at the body-start cell is also Cleared (#709); any other
+// non-empty body is Pending.
+func classifyCodexComposerLine(captured string, cursorX, cursorY int) ComposerDisposition {
 	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
 	if cursorY < 0 || cursorY >= len(lines) {
 		return ComposerUndetermined
@@ -315,7 +347,31 @@ func classifyCodexComposerLine(captured string, cursorY int) ComposerDisposition
 	if trimSpace(after) == "" {
 		return ComposerCleared
 	}
+	if codexPlaceholderAtCursor(lines[cursorY], cursorX) {
+		return ComposerCleared
+	}
 	return ComposerPending
+}
+
+// codexPlaceholderAtCursor reports whether the composer row shows one of the
+// known empty-composer placeholder hints with the terminal cursor parked at the
+// body-start cell. The hint is evidence of an EMPTY textarea only while the
+// cursor has not moved: an identical typed draft leaves the cursor after the
+// text and therefore stays Pending. Requiring an ASCII-space-only prefix before
+// the glyph keeps the byte offset equal to tmux's display-cell cursorX (the
+// glyph itself is one cell); a decorated prefix fails closed to Pending.
+func codexPlaceholderAtCursor(line string, cursorX int) bool {
+	promptAt := strings.Index(line, codexComposerPrompt)
+	if promptAt < 0 || strings.Trim(line[:promptAt], " ") != "" {
+		return false
+	}
+	rest := line[promptAt+len(codexComposerPrompt):]
+	body := strings.TrimLeft(rest, " ")
+	if !containsExact(strings.TrimRight(body, " "), codexEmptyPlaceholders) {
+		return false
+	}
+	bodyStartX := promptAt + 1 + (len(rest) - len(body))
+	return cursorX == bodyStartX
 }
 
 func codexHasIdleComposerFooter(lines []string, promptRow int) bool {

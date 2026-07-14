@@ -238,20 +238,28 @@ func TestClassifyCodexComposerLine(t *testing.T) {
 	cases := []struct {
 		name     string
 		captured string
+		cursorX  int
 		cursorY  int
 		want     ComposerDisposition
 	}{
-		{"empty › prompt → Cleared", "  Turn done.\n  › \n  / for commands", 1, ComposerCleared},
-		{"pending body after › → Pending", "  › draft in composer\n  / for commands", 0, ComposerPending},
-		{"placeholder hint LIVE 2026-07-03 → Pending", "  › Find and fix a bug in @filename\n  gpt-5.5 default", 0, ComposerPending},
-		{"model selector highlighted row → Undetermined, never Pending", codexModelSelectorCapture, 2, ComposerUndetermined},
-		{"rate-limit selector highlighted row → Undetermined, never Pending", codexRateLimitOverlayCapture, 3, ComposerUndetermined},
-		{"approval row without › → Undetermined", "  [ ! ] Action Required\n  Approve for me", 0, ComposerUndetermined},
-		{"cursor out of range → Undetermined", "  › \n", 99, ComposerUndetermined},
+		{"empty › prompt → Cleared", "  Turn done.\n  › \n  / for commands", 4, 1, ComposerCleared},
+		{"pending body after › → Pending", "  › draft in composer\n  / for commands", 22, 0, ComposerPending},
+		// LIVE-CAPTURED 2026-07-14 (#709): a human-idle desk renders the randomized
+		// placeholder hint after "› " at column 0 with the cursor parked at the
+		// body-start cell — an empty textarea, so idle∧cleared must hold.
+		{"placeholder hint, cursor at body start → Cleared", "› Explain this codebase\ngpt-5.6-sol medium · ~/workspace", 2, 0, ComposerCleared},
+		{"side placeholder, cursor at body start → Cleared", "› Will this algorithm scale well?\ngpt-5.6-sol medium · ~/workspace", 2, 0, ComposerCleared},
+		{"indented placeholder LIVE 2026-07-03 render → Cleared", "  › Find and fix a bug in @filename\n  gpt-5.5 default", 4, 0, ComposerCleared},
+		{"placeholder wording but cursor after text → Pending (typed draft)", "› Explain this codebase\ngpt-5.6-sol medium · ~/workspace", 23, 0, ComposerPending},
+		{"unknown hint wording fails closed → Pending", "› Uncharacterized example\ngpt-5.6-sol medium · ~/workspace", 2, 0, ComposerPending},
+		{"model selector highlighted row → Undetermined, never Pending", codexModelSelectorCapture, 0, 2, ComposerUndetermined},
+		{"rate-limit selector highlighted row → Undetermined, never Pending", codexRateLimitOverlayCapture, 0, 3, ComposerUndetermined},
+		{"approval row without › → Undetermined", "  [ ! ] Action Required\n  Approve for me", 0, 0, ComposerUndetermined},
+		{"cursor out of range → Undetermined", "  › \n", 0, 99, ComposerUndetermined},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := classifyCodexComposerLine(tc.captured, tc.cursorY); got != tc.want {
+			if got := classifyCodexComposerLine(tc.captured, tc.cursorX, tc.cursorY); got != tc.want {
 				t.Errorf("classifyCodexComposerLine = %v, want %v", got, tc.want)
 			}
 		})
@@ -262,8 +270,8 @@ func TestCodexComposerStateWiring(t *testing.T) {
 	const cleared = "  › \n  / for commands"
 	t.Run("idle cleared composer → Cleared", func(t *testing.T) {
 		c := codex{
-			cursorState: func(string) (int, bool, error) { return 0, false, nil },
-			capturePane: func(string) (string, error) { return cleared, nil },
+			cursorPosition: func(string) (int, int, bool, error) { return 4, 0, false, nil },
+			capturePane:    func(string) (string, error) { return cleared, nil },
 		}
 		if got := c.ComposerState("0:0.0"); got != ComposerCleared {
 			t.Errorf("ComposerState = %v, want Cleared", got)
@@ -271,15 +279,15 @@ func TestCodexComposerStateWiring(t *testing.T) {
 	})
 	t.Run("passive limit banner preserves cleared composer", func(t *testing.T) {
 		c := codex{
-			cursorState: func(string) (int, bool, error) { return 2, false, nil },
-			capturePane: func(string) (string, error) { return codexLimitBannerCapture, nil },
+			cursorPosition: func(string) (int, int, bool, error) { return 4, 2, false, nil },
+			capturePane:    func(string) (string, error) { return codexLimitBannerCapture, nil },
 		}
 		if got := c.ComposerState("0:0.0"); got != ComposerCleared {
 			t.Errorf("ComposerState behind passive banner = %v, want Cleared", got)
 		}
 	})
 	t.Run("cursor read error → Undetermined", func(t *testing.T) {
-		c := codex{cursorState: func(string) (int, bool, error) { return 0, false, errors.New("no server") }}
+		c := codex{cursorPosition: func(string) (int, int, bool, error) { return 0, 0, false, errors.New("no server") }}
 		if got := c.ComposerState("0:0.0"); got != ComposerUndetermined {
 			t.Errorf("ComposerState = %v, want Undetermined", got)
 		}
@@ -290,8 +298,8 @@ func TestCodexComposerStateWiring(t *testing.T) {
 	// SELECT the menu option); the whole screen is Undetermined.
 	t.Run("cursor on trust-menu option row → Undetermined, not Pending", func(t *testing.T) {
 		c := codex{
-			cursorState: func(string) (int, bool, error) { return 7, false, nil }, // "› 1. Yes, continue"
-			capturePane: func(string) (string, error) { return codexTrustMenuCapture, nil },
+			cursorPosition: func(string) (int, int, bool, error) { return 0, 7, false, nil }, // "› 1. Yes, continue"
+			capturePane:    func(string) (string, error) { return codexTrustMenuCapture, nil },
 		}
 		if got := c.ComposerState("0:0.0"); got != ComposerUndetermined {
 			t.Errorf("ComposerState on trust menu = %v, want Undetermined", got)
@@ -299,8 +307,8 @@ func TestCodexComposerStateWiring(t *testing.T) {
 	})
 	t.Run("cursor on update-menu option row → Undetermined, not Pending", func(t *testing.T) {
 		c := codex{
-			cursorState: func(string) (int, bool, error) { return 4, false, nil }, // "› 1. Update now (…)"
-			capturePane: func(string) (string, error) { return codexUpdateMenuCapture, nil },
+			cursorPosition: func(string) (int, int, bool, error) { return 0, 4, false, nil }, // "› 1. Update now (…)"
+			capturePane:    func(string) (string, error) { return codexUpdateMenuCapture, nil },
 		}
 		if got := c.ComposerState("0:0.0"); got != ComposerUndetermined {
 			t.Errorf("ComposerState on update menu = %v, want Undetermined", got)
@@ -308,8 +316,8 @@ func TestCodexComposerStateWiring(t *testing.T) {
 	})
 	t.Run("cursor on generic selector row → Undetermined, not ListNav", func(t *testing.T) {
 		c := codex{
-			cursorState: func(string) (int, bool, error) { return 2, false, nil },
-			capturePane: func(string) (string, error) { return codexModelSelectorCapture, nil },
+			cursorPosition: func(string) (int, int, bool, error) { return 0, 2, false, nil },
+			capturePane:    func(string) (string, error) { return codexModelSelectorCapture, nil },
 		}
 		if got := c.ComposerState("0:0.0"); got != ComposerUndetermined {
 			t.Errorf("ComposerState on selector = %v, want Undetermined", got)
@@ -346,12 +354,12 @@ func TestConfirmSubmitRefusesCodexSelectorMenus(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			pasted := false
 			d := codex{
-				paneCommand: func(string) (string, error) { return "codex", nil },
-				isShell:     func(string) bool { return false },
-				capturePane: func(string) (string, error) { return tc.capture, nil },
-				classify:    parseCodexState,
-				send:        func(string, string) error { pasted = true; return nil },
-				cursorState: func(string) (int, bool, error) { return 7, false, nil },
+				paneCommand:    func(string) (string, error) { return "codex", nil },
+				isShell:        func(string) bool { return false },
+				capturePane:    func(string) (string, error) { return tc.capture, nil },
+				classify:       parseCodexState,
+				send:           func(string, string) error { pasted = true; return nil },
+				cursorPosition: func(string) (int, int, bool, error) { return 0, 7, false, nil },
 			}
 			enters := 0
 			c := Confirm{
