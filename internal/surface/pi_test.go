@@ -41,7 +41,14 @@ func TestParsePiStateLiveFixtures(t *testing.T) {
 }
 
 func TestParsePiStateFailsClosed(t *testing.T) {
-	cases := []string{"", "ordinary model output", "────────\n\n────────"}
+	rule := "────────────────────────────────────────"
+	cases := []string{
+		"",
+		"ordinary model output",
+		"────────\n\n────────",
+		// A rule pair quoted in conversation is not the bottom-anchored composer.
+		rule + "\n\n" + rule + "\nfiller\noutput\n/path\nmodel • high",
+	}
 	for _, captured := range cases {
 		if got := parsePiState(captured); got != StateUnknown {
 			t.Errorf("parsePiState(%q) = %v, want unknown", captured, got)

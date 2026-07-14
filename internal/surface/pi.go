@@ -124,11 +124,24 @@ func classifyPiComposerLine(captured string, cursorX, cursorY int) ComposerDispo
 func findPiComposer(captured string) (line, body int, ok bool) {
 	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
 	for i := len(lines) - 3; i >= 0; i-- {
-		if piRule(lines[i]) && piRule(lines[i+2]) {
+		if piRule(lines[i]) && piRule(lines[i+2]) && piFooterBelow(lines[i+3:]) {
 			return i, i + 1, true
 		}
 	}
 	return 0, 0, false
+}
+
+// piFooterBelow anchors the composer to the bottom chrome instead of accepting
+// a pair of rule-looking lines quoted in conversation output. Pi 0.73.1 renders
+// exactly two non-empty footer rows below the editor: cwd and model/token status.
+func piFooterBelow(lines []string) bool {
+	nonEmpty := 0
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			nonEmpty++
+		}
+	}
+	return nonEmpty == 2
 }
 
 func piRule(line string) bool {
