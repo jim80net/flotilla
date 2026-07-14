@@ -82,3 +82,27 @@ func TestDispatchAckRerunClearsRegistryFirstPartialSuccess683(t *testing.T) {
 		t.Fatalf("idempotent rerun left inbound rows: %+v", pending)
 	}
 }
+
+func TestDispatchAckConvergesOnCoordinatorSendTimeConsume707(t *testing.T) {
+	t.Setenv("FLOTILLA_ROSTER", "")
+	dir := t.TempDir()
+	rosterPath := filepath.Join(dir, "flotilla.json")
+	if err := os.WriteFile(rosterPath, []byte(`{"xo_agent":"xo","agents":[{"name":"xo","coordinator":true},{"name":"backend"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	msg, nonce, err := inbound.AppendDispatchNonce("coordinate the thing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Send time: coordinator recipient is track-skipped and settles straight into
+	// the consumed registry (#707) — no inbound pending row exists.
+	if _, err := dispatch.ConsumeCoordinatorRecipient(dir, "backend", "xo", msg); err != nil {
+		t.Fatal(err)
+	}
+	// The footer still instructs `flotilla dispatch-ack <nonce>`; on a coordinator
+	// seat that must converge on the already-durable path, not error "not pending".
+	t.Setenv("FLOTILLA_SELF", "xo")
+	if err := cmdDispatchAck([]string{"--roster", rosterPath, nonce}); err != nil {
+		t.Fatalf("coordinator dispatch-ack = %v, want already-durable success", err)
+	}
+}

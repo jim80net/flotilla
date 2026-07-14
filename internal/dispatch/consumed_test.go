@@ -119,3 +119,38 @@ func TestConsume_CapsGrowth(t *testing.T) {
 		t.Fatalf("load = %d", n)
 	}
 }
+
+func TestConsumeCoordinatorRecipient_SettlesNonceAtSendTime707(t *testing.T) {
+	dir := t.TempDir()
+	msg, nonce, err := inbound.AppendDispatchNonce("coordinate the thing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inserted, err := ConsumeCoordinatorRecipient(dir, "desk", "xo", msg)
+	if err != nil || !inserted {
+		t.Fatalf("ConsumeCoordinatorRecipient = (%v, %v), want inserted", inserted, err)
+	}
+	e, ok := NewRegistry(dir).LookupNonce(nonce)
+	if !ok || e.Reason != ReasonCoordinatorRecipient || e.Sender != "desk" || e.Recipient != "xo" {
+		t.Fatalf("consumed entry = %+v, ok=%v", e, ok)
+	}
+	// dispatch-status must resolve the nonce (previously: unknown).
+	st := LookupNonce(dir, nonce, time.Now())
+	if st.Disposition != DispositionConsumed || st.Reason != ReasonCoordinatorRecipient {
+		t.Fatalf("status = %+v, want consumed reason=coordinator-recipient", st)
+	}
+	// Idempotent on the daemon-sweep + CLI double-track path.
+	if again, err := ConsumeCoordinatorRecipient(dir, "desk", "xo", msg); err != nil || again {
+		t.Fatalf("second consume = (%v, %v), want no-op", again, err)
+	}
+}
+
+func TestConsumeCoordinatorRecipient_NoNonceRecordsNothing707(t *testing.T) {
+	dir := t.TempDir()
+	if inserted, err := ConsumeCoordinatorRecipient(dir, "desk", "xo", "plain message, no footer"); err != nil || inserted {
+		t.Fatalf("no-nonce consume = (%v, %v), want nothing recorded", inserted, err)
+	}
+	if entries := NewRegistry(dir).Load(); len(entries) != 0 {
+		t.Fatalf("registry after no-nonce send = %+v, want empty", entries)
+	}
+}

@@ -591,12 +591,18 @@ func TestResolveUndeliveredAdjutant_Order(t *testing.T) {
 func TestInboundTrackHook_SkipsCoordinators(t *testing.T) {
 	dir := t.TempDir()
 	hook := InboundTrackHook(dir, func(agent string) bool { return agent == "cos" })
-	msg, _, _ := inbound.AppendDispatchNonce("hi")
+	msg, nonce, _ := inbound.AppendDispatchNonce("hi")
 	hook(Job{Agent: "cos", Message: msg, Kind: KindSend, Sender: "memex", MessageID: "1"})
 	hook(Job{Agent: "backend", Message: msg, Kind: KindSend, Sender: "memex", MessageID: "2"})
 	path, _ := inbound.Path(dir, "backend")
 	if len(inbound.NewStore(path).Load()) != 1 {
 		t.Fatal("coordinator inbound must not be tracked")
+	}
+	// #707: the skipped coordinator dispatch settles into the consumed registry at
+	// send time, so dispatch-ack / dispatch-status stay answerable for the nonce.
+	e, ok := dispatch.NewRegistry(dir).LookupNonce(nonce)
+	if !ok || e.Reason != dispatch.ReasonCoordinatorRecipient || e.Recipient != "cos" {
+		t.Fatalf("coordinator consumed entry = %+v, ok=%v", e, ok)
 	}
 }
 

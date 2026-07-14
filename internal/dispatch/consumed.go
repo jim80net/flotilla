@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/jim80net/flotilla/internal/inbound"
 )
 
 // Consume reasons recorded on the durable registry.
@@ -21,6 +23,10 @@ const (
 	ReasonMerged       = "merged"
 	ReasonManual       = "manual"
 	ReasonSuppressed   = "suppressed"
+	// ReasonCoordinatorRecipient: settled at send time because the recipient is a
+	// coordinator seat, whose finish is deliberately not ack-gated (#472). Asserts
+	// confirmed delivery only — NOT that the recipient addressed the work.
+	ReasonCoordinatorRecipient = "coordinator-recipient"
 )
 
 // maxConsumedEntries caps fleet-wide registry growth.
@@ -177,6 +183,30 @@ func Consume(rosterDir string, e ConsumedEntry) (inserted bool, err error) {
 // IsConsumed is a convenience wrapper around Registry.IsConsumed.
 func IsConsumed(rosterDir, nonce, payloadHash string) bool {
 	return NewRegistry(rosterDir).IsConsumed(nonce, payloadHash)
+}
+
+// ConsumeCoordinatorRecipient durably settles a confirmed delivery to a
+// coordinator seat at send time (#707). Coordinator recipients keep no inbound
+// pending row (#472 — finish evaluation must not grow unbounded), which
+// previously left their dispatches with NO durable trace anywhere: the send
+// footer's `flotilla dispatch-ack` could never succeed ("not pending") and
+// `dispatch-status` read unknown minutes after a confirmed delivery. Recording
+// the nonce in the consumed registry closes both loops — dispatch-ack converges
+// on the already-durable path and status resolves with this reason — without
+// growing any per-seat pending ledger. A message without a nonce stamp records
+// nothing (only the #472 footer contract is being settled).
+func ConsumeCoordinatorRecipient(rosterDir, sender, recipient, message string) (inserted bool, err error) {
+	nonce := inbound.ParseDispatchNonce(message)
+	if nonce == "" {
+		return false, nil
+	}
+	return Consume(rosterDir, ConsumedEntry{
+		Nonce:       nonce,
+		PayloadHash: PayloadHash(message),
+		Reason:      ReasonCoordinatorRecipient,
+		Sender:      sender,
+		Recipient:   recipient,
+	})
 }
 
 // ConsumeFromInbound builds a ConsumedEntry from an inbound pending dispatch.

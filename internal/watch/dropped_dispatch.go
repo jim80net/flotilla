@@ -10,7 +10,9 @@ import (
 )
 
 // InboundTrackHook records a confirmed KindSend into the recipient's durable inbound ledger.
-// TrackConfirmedSend emits the #498 journal line (recorded|skipped reason=…).
+// TrackConfirmedSend emits the #498 journal line (recorded|skipped reason=…). A coordinator
+// recipient keeps no pending row; its dispatch settles straight into the consumed registry
+// instead (#707), so the footer's dispatch-ack and dispatch-status stay answerable.
 func InboundTrackHook(rosterDir string, isCoordinator inbound.CoordinatorPredicate) func(Job) {
 	if rosterDir == "" {
 		return nil
@@ -19,8 +21,14 @@ func InboundTrackHook(rosterDir string, isCoordinator inbound.CoordinatorPredica
 		if j.Kind != KindSend || j.Sender == "" || j.Agent == "" || j.Message == "" {
 			return
 		}
-		if _, err := inbound.TrackConfirmedSend(rosterDir, j.Sender, j.Agent, j.Message, j.MessageID, isCoordinator); err != nil {
+		decision, err := inbound.TrackConfirmedSend(rosterDir, j.Sender, j.Agent, j.Message, j.MessageID, isCoordinator)
+		if err != nil {
 			log.Printf("flotilla watch: inbound track %q from %q failed: %v", j.Agent, j.Sender, err)
+		}
+		if decision == inbound.TrackSkipped {
+			if _, err := dispatch.ConsumeCoordinatorRecipient(rosterDir, j.Sender, j.Agent, j.Message); err != nil {
+				log.Printf("flotilla watch: consume coordinator dispatch for %q failed: %v", j.Agent, err)
+			}
 		}
 	}
 }
