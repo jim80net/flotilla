@@ -6,6 +6,7 @@ import (
 
 	"github.com/jim80net/flotilla/internal/dispatch"
 	"github.com/jim80net/flotilla/internal/inbound"
+	"github.com/jim80net/flotilla/internal/outbox"
 )
 
 // InboundTrackHook records a confirmed KindSend into the recipient's durable inbound ledger.
@@ -79,6 +80,21 @@ func DroppedDispatchFinishHookWithMerged(
 				st.Remove(e.ID)
 			}
 		}
+		// #676: the recipient may have authored its acknowledgement already, but
+		// delivery back to the coordinator can be waiting in the durable outbox.
+		// That is durable addressing evidence: consume the inbound dispatch before
+		// finish evaluation so neither reinject nor second-miss escalation fires.
+		for _, e := range st.Load() {
+			if !hasQueuedDispatchAck(rosterDir, agent, e.Nonce) {
+				continue
+			}
+			if _, cerr := reg.Consume(dispatch.ConsumeFromInbound(e.Nonce, e.Message, dispatch.ReasonQueuedAck, e.Sender, e.Recipient)); cerr != nil {
+				log.Printf("flotilla watch: dropped-dispatch consume queued-ack failed nonce=%s: %v", e.Nonce, cerr)
+				continue
+			}
+			log.Printf("flotilla watch: dropped-dispatch suppress %s nonce=%s reason=queued-ack", agent, e.Nonce)
+			st.Remove(e.ID)
+		}
 		text, ok, err := readTurnFinal(agent)
 		if err != nil {
 			log.Printf("flotilla watch: dropped-dispatch SKIP %s: read turn-final: %v", agent, err)
@@ -141,4 +157,19 @@ func DroppedDispatchFinishHookWithMerged(
 			}
 		}
 	}
+}
+
+// hasQueuedDispatchAck requires both the exact nonce and the dispatch recipient
+// as outbox sender. A forwarded/quoted nonce from another seat is not evidence
+// that this recipient addressed its work.
+func hasQueuedDispatchAck(rosterDir, recipient, nonce string) bool {
+	if rosterDir == "" || recipient == "" || nonce == "" {
+		return false
+	}
+	for _, e := range outbox.ListAll(rosterDir) {
+		if e.Sender == recipient && inbound.ParseDispatchNonce(e.Message) == nonce {
+			return true
+		}
+	}
+	return false
 }

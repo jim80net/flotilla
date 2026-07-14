@@ -17,6 +17,7 @@ import (
 const (
 	ReasonTurnFinalAck = "turn-final-ack"
 	ReasonDurableAck   = "durable-ack"
+	ReasonQueuedAck    = "queued-ack"
 	ReasonMerged       = "merged"
 	ReasonManual       = "manual"
 	ReasonSuppressed   = "suppressed"
