@@ -9,6 +9,7 @@
 
   var POLL_FALLBACK_MS = 5000;
   var queueItems = []; // structured /api/history backlog projection (#419)
+  var liveUpdateListeners = [];
 
   function el(id) { return document.getElementById(id); }
 
@@ -44,7 +45,30 @@
     });
   }
 
-  window.flotillaDash = { el: el, escapeHtml: escapeHtml, getJSON: getJSON, postJSON: postJSON };
+  function onLiveUpdate(listener) {
+    if (typeof listener !== "function") return function () {};
+    liveUpdateListeners.push(listener);
+    return function () {
+      liveUpdateListeners = liveUpdateListeners.filter(function (fn) { return fn !== listener; });
+    };
+  }
+  function notifyLiveUpdate() {
+    liveUpdateListeners.slice().forEach(function (listener) {
+      try { listener(); } catch (e) { /* one consumer must not break the shared SSE link */ }
+    });
+  }
+  function routeMessage(target, message) {
+    return postJSON(["/api/control", "route"].join("/"), { target: target, message: message });
+  }
+  function routeOutcomeCopy(res) {
+    var outcome = (res && res.outcome) || "(no outcome reported)";
+    var detail = res && res.detail ? " — " + res.detail : "";
+    return { outcome: outcome, text: "Outcome: " + outcome + detail, ok: outcome === "delivered" };
+  }
+  window.flotillaDash = {
+    el: el, escapeHtml: escapeHtml, getJSON: getJSON, postJSON: postJSON,
+    onLiveUpdate: onLiveUpdate, routeMessage: routeMessage, routeOutcomeCopy: routeOutcomeCopy,
+  };
 
   /* ── cached read model (combined on refresh) ───────────────────────────── */
   var cache = { status: null, topology: null, history: null, mirror: null };
@@ -818,8 +842,8 @@
   // threadMirrorMsg renders a session-mirror entry (the desk's own turn-final at
   // info level) as a distinct "session" turn, hue-matched to the desk's speaker
   // colour so it reads as the same participant's output alongside its relay lines.
-  function threadMirrorMsg(m) {
-    var hue = speakerHue(selectedDesk);
+  function threadMirrorMsgFor(agent, m) {
+    var hue = speakerHue(agent);
     var body = escapeHtml(m.info || "").replace(/\r?\n/g, "<br>");
     // #406 fix-forward: a firewall-refused turn is kept in the PRIVATE dash but was never posted
     // to the public channel — render that honestly so a withheld turn is not mistaken for published.
@@ -829,7 +853,7 @@
     return (
       '<div class="thread-msg thread-mirror' + (m.suppressed ? " is-withheld" : "") + '" style="--spk:hsl(' + hue + ' 55% 62%)">' +
         '<header class="thread-head">' +
-          '<span class="thread-route"><b class="thread-from">' + escapeHtml(selectedDesk) + "</b> " +
+          '<span class="thread-route"><b class="thread-from">' + escapeHtml(agent) + "</b> " +
             '<span class="thread-kind">session</span>' + withheld + "</span>" +
           '<time class="thread-time" datetime="' + escapeHtml(m.ts || "") + '" title="' + escapeHtml(m.ts || "") + '">' + escapeHtml(relTime(m.ts)) + "</time>" +
         "</header>" +
@@ -838,6 +862,16 @@
       "</div>"
     );
   }
+  function threadMirrorMsg(m) { return threadMirrorMsgFor(selectedDesk, m); }
+  function renderMirrorEntries(agent, entries) {
+    return (Array.isArray(entries) ? entries : []).map(function (m) { return threadMirrorMsgFor(agent, m); }).join("");
+  }
+  function renderOperatorInject(target, body, ts) {
+    return threadOptimisticMsg({ id: "wc-local", target: target, body: body, ts: ts || new Date().toISOString() });
+  }
+  window.flotillaDash.renderMirrorEntries = renderMirrorEntries;
+  window.flotillaDash.renderOperatorInject = renderOperatorInject;
+  window.flotillaDash.relativeTime = relTime;
 
   // queueVisibleForDesk filters the fleet backlog to the selected desk/coordinator (#421).
   // Items with an explicit @desk / →desk scope show only on that desk; unscoped items are
@@ -1008,6 +1042,7 @@
       setConn("live");
       stopPolling();
       refresh();
+      notifyLiveUpdate();
     });
     es.onopen = function () { setConn("live"); stopPolling(); };
     es.onerror = function () {
@@ -1165,6 +1200,7 @@
     // Conversations is the fixed single-scroll app-shell (#326): only on this tab
     // does the page itself stop scrolling. Goals/Issues/Decisions keep natural page scroll.
     document.body.classList.toggle("conv-shell-active", view === "conversations");
+    if (window.flotillaWorkContext) window.flotillaWorkContext.onViewChange(view);
     if (view === "goals" && window.flotillaGoals) window.flotillaGoals.show();
     if (view === "issues" && window.flotillaTracker) window.flotillaTracker.show();
     // #429: Decisions is a first-class tab — repaint the reading room on every open so
@@ -1487,9 +1523,11 @@
         inFlight = true;
         setMsg("Sending…", "");
         if (btn) btn.disabled = true;
-        postJSON("/api/control/route", { target: target, message: body }).then(function (res) {
-          var outcome = (res && res.outcome) || "(no outcome reported)";
-          var detail = res && res.detail ? " — " + res.detail : "";
+        // postJSON("/api/control/route" is centralized by routeMessage so Work Context
+        // consumes this exact confirmed-delivery path and outcome contract too.
+        routeMessage(target, body).then(function (res) {
+          var copy = routeOutcomeCopy(res);
+          var outcome = copy.outcome;
           // #518: record optimistic outbound for the TARGET desk even if the operator
           // switched selection mid-send — the line must appear when they return to that
           // thread. UI mutations (clear draft / paint / status) stay sameSel-guarded.
@@ -1509,7 +1547,7 @@
             // solely on the next SSE tick; empty-focus is no longer compose-active.
             refresh();
           }
-          setMsg("Outcome: " + outcome + detail, outcome === "delivered" ? "ok" : "");
+          setMsg(copy.text, copy.ok ? "ok" : "");
         }).catch(function (err) { if (sameSel(target)) setMsg(err.message, "err"); }).then(function () {
           inFlight = false;
           if (btn) btn.disabled = false;

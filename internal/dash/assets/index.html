@@ -257,6 +257,7 @@
   </main>
 
   <main id="view-issues" class="view wrap hidden" role="tabpanel" aria-labelledby="tab-issues">
+    <div id="issues-workspace" class="issues-workspace">
     <section id="issues-listpanel" class="panel">
       <div class="panel-head">
         <div>
@@ -276,6 +277,29 @@
       </div>
       <div id="issues-list" class="issues-list"></div>
     </section>
+
+    <aside id="work-context" class="work-context panel" hidden role="dialog" aria-label="Work context">
+      <button id="wc-close" class="wc-close" type="button" aria-label="Close work context">&#215;</button>
+      <header id="wc-header" class="wc-header"></header>
+      <details id="wc-github" class="wc-github" hidden>
+        <summary id="wc-github-summary"></summary>
+        <div id="wc-github-body" class="wc-github-body"></div>
+      </details>
+      <section class="wc-stream-region" aria-label="Live conversation stream">
+        <div id="wc-live-contract" class="wc-live-contract"></div>
+        <button id="wc-load-earlier" class="wc-load-earlier" type="button">&#8593; load earlier</button>
+        <div id="wc-stream" class="wc-stream conv-thread" role="log" aria-live="polite"></div>
+      </section>
+      <form id="wc-composer" class="thread-composer wc-composer" hidden>
+        <textarea id="wc-composer-input" class="thread-composer-input" rows="1"
+          placeholder="Message the active seat…" aria-label="Message the active seat"></textarea>
+        <div class="thread-composer-row">
+          <span id="wc-composer-msg" class="form-msg"></span>
+          <button type="submit" class="btn btn-primary thread-composer-send">Send</button>
+        </div>
+      </form>
+    </aside>
+    </div>
 
     <section id="issues-create" class="panel hidden">
       <div class="panel-head"><h2>New issue</h2></div>
@@ -306,6 +330,7 @@
 
   <script src="/static/dash.js"></script>
   <script src="/static/goals.js"></script>
+  <script src="/static/work-context.js"></script>
   <script src="/static/tracker.js"></script>
   <script src="/static/control.js"></script>
 </body>

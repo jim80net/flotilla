@@ -2161,3 +2161,45 @@ func TestIssuesWorkLedger405(t *testing.T) {
 		}
 	}
 }
+
+func TestIssuesWorkContext716(t *testing.T) {
+	now := time.Date(2026, 7, 14, 18, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	html := doGet(t, srv, "/").Body.String()
+	for _, marker := range []string{
+		`id="work-context"`, `id="wc-stream"`, `id="wc-composer"`,
+		`id="wc-github"`, `/static/work-context.js`,
+	} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("index.html must host the #716 Work Context panel (missing %q)", marker)
+		}
+	}
+	js := doGet(t, srv, "/static/work-context.js").Body.String()
+	for _, marker := range []string{
+		`/api/session-mirror?agent=`, `limit=500`, `SSE push, 15s poll fallback`,
+		`D.onLiveUpdate`, `D.routeMessage`, `D.routeOutcomeCopy`,
+		`no live seat mapped`, `composer.hidden = true`, `requestAnimationFrame`,
+		`/api/issues/`, `fetchIssueOnce(); // GitHub is external`, `fetchMirror(loadedAll`,
+		`streamPinned`, `onViewChange`,
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("work-context.js must preserve the #716 contract (missing %q)", marker)
+		}
+	}
+	trackerJS := doGet(t, srv, "/static/tracker.js").Body.String()
+	if !strings.Contains(trackerJS, "openIssue: openIssue") {
+		t.Error("Work Context must retain an entry point to the full GitHub write surface")
+	}
+	dashJS := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{"renderMirrorEntries", "routeMessage", "routeOutcomeCopy", "onLiveUpdate"} {
+		if !strings.Contains(dashJS, marker) {
+			t.Errorf("dash.js must expose shared Conversations primitives for #716 (missing %q)", marker)
+		}
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	for _, marker := range []string{".issues-workspace.has-context", ".work-context", ".wc-stream", "100dvh", "font-size: 16px"} {
+		if !strings.Contains(css, marker) {
+			t.Errorf("dash.css must style the #716 desktop panel and mobile sheet (missing %q)", marker)
+		}
+	}
+}
