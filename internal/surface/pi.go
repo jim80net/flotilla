@@ -149,6 +149,10 @@ func piRule(line string) bool {
 	if len([]rune(line)) < 20 {
 		return false
 	}
+	// U+2500 is the exact rule glyph LIVE-CAPTURED from Pi 0.73.1. Do not
+	// broaden this to look-alike box characters without a new capture: a theme
+	// or Pi render change should fail closed, not make an unrelated divider
+	// eligible to prove idle/cleared state.
 	for _, r := range line {
 		if r != '─' {
 			return false
