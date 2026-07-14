@@ -77,6 +77,7 @@ type Issue struct {
 	Author    User      `json:"author"`
 	CreatedAt string    `json:"createdAt,omitempty"`
 	UpdatedAt string    `json:"updatedAt,omitempty"`
+	ClosedAt  string    `json:"closedAt,omitempty"`
 	URL       string    `json:"url,omitempty"`
 	Body      string    `json:"body,omitempty"`     // detail (Get) only
 	Comments  []Comment `json:"comments,omitempty"` // detail (Get) only
