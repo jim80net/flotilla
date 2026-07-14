@@ -41,7 +41,7 @@ const ghTimeout = 30 * time.Second
 // (encoding/json ignores unknown keys), which the env-gated live test (gh_live_test.go)
 // is the canary for. Keep these in sync with the Issue struct's json tags.
 const (
-	listFields   = "number,title,labels,state,author,updatedAt,closedAt"
+	listFields   = "number,title,labels,state,author,createdAt,updatedAt,closedAt"
 	detailFields = "number,title,body,labels,state,author,createdAt,updatedAt,closedAt,comments,url"
 )
 

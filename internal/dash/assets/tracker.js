@@ -17,6 +17,7 @@
   var el = D.el, escapeHtml = D.escapeHtml, getJSON = D.getJSON, postJSON = D.postJSON;
 
   var loaded = false; // lazy first-load when the Issues tab is first shown
+  var workRowContexts = {};
 
   // A monotonic epoch guards against out-of-order renders: rapid filter toggles
   // or list⇄detail navigation launch overlapping fetches, and an older response
@@ -73,14 +74,18 @@
     return verb + " " + Math.floor(hours / 24) + "d ago";
   }
 
-  function workRow(item, posture) {
+  function workRow(item, posture, flotilla, desk) {
     var it = item.issue || {};
     var number = Number(it.number);
+    workRowContexts[number] = {
+      item: item, posture: posture, flotilla: flotilla, desk: desk,
+      seats: [desk, it.desk].filter(Boolean),
+    };
     var contextLine = item.goal_title
       ? '<span class="issue-context">Drives ' + escapeHtml(item.goal_title) + " · " + escapeHtml(item.goal_detail || "in flight") + "</span>"
       : '<span class="issue-context">' + escapeHtml(relativeWhen(it.closedAt, "closed")) + "</span>";
     return (
-      '<div class="issue-row issue-row-' + posture + '" data-number="' + number + '">' +
+      '<div class="issue-row issue-row-' + posture + '" data-number="' + number + '" role="button" tabindex="0" aria-label="Open work context for issue ' + number + '">' +
         '<span class="issue-state ' + posture + '">' + (posture === "in-flight" ? "in flight" : "shipped") + "</span>" +
         '<span class="issue-num">#' + number + "</span>" +
         '<span class="issue-copy"><span class="issue-title">' + escapeHtml(it.title) + "</span>" + contextLine + "</span>" +
@@ -89,7 +94,7 @@
     );
   }
 
-  function renderDesk(desk) {
+  function renderDesk(desk, flotilla) {
     var moving = Array.isArray(desk.in_flight) ? desk.in_flight : [];
     var shipped = Array.isArray(desk.shipped) ? desk.shipped : [];
     var shippedPreview = shipped.slice(0, 10);
@@ -97,18 +102,19 @@
     var shippedMore = shippedRest.length
       ? '<details class="issue-shipped-more"><summary><span class="when-closed">show all ' + shipped.length +
           ' shipped</span><span class="when-open">hide ' + shippedRest.length + " older shipped</span></summary>" +
-          shippedRest.map(function (it) { return workRow(it, "shipped"); }).join("") + "</details>"
+          shippedRest.map(function (it) { return workRow(it, "shipped", flotilla, desk.name); }).join("") + "</details>"
       : "";
     return '<section class="issue-desk">' +
       '<div class="issue-desk-head"><h4>' + escapeHtml(desk.name || "Unassigned") + '</h4><span>' +
         moving.length + " moving · " + shipped.length + " shipped</span></div>" +
-      moving.map(function (it) { return workRow(it, "in-flight"); }).join("") +
-      shippedPreview.map(function (it) { return workRow(it, "shipped"); }).join("") +
+      moving.map(function (it) { return workRow(it, "in-flight", flotilla, desk.name); }).join("") +
+      shippedPreview.map(function (it) { return workRow(it, "shipped", flotilla, desk.name); }).join("") +
       shippedMore +
       "</section>";
   }
 
   function renderIssueList(doc) {
+    workRowContexts = {};
     el("issues-repo").textContent = doc.repo ? doc.repo : "";
     var flotillas = Array.isArray(doc.flotillas) ? doc.flotillas : [];
     var list = el("issues-list");
@@ -123,12 +129,20 @@
       return '<section class="issue-ledger-section"><div class="issue-ledger-head"><div><span class="issue-ledger-kicker">Flotilla</span>' +
         '<h3>' + escapeHtml(flotilla.name || "Unassigned") + '</h3></div><span class="issue-ledger-count">' +
         desks.length + " desk" + (desks.length === 1 ? "" : "s") + "</span></div>" +
-        desks.map(renderDesk).join("") + "</section>";
+        desks.map(function (desk) { return renderDesk(desk, flotilla.name || "Unassigned"); }).join("") + "</section>";
     }).join("");
     var rows = list.querySelectorAll(".issue-row");
     for (var i = 0; i < rows.length; i++) {
-      rows[i].addEventListener("click", function () { openIssue(Number(this.getAttribute("data-number"))); });
+      rows[i].addEventListener("click", function () { openWorkContext(this); });
+      rows[i].addEventListener("keydown", function (event) {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openWorkContext(this); }
+      });
     }
+  }
+
+  function openWorkContext(row) {
+    var context = workRowContexts[Number(row.getAttribute("data-number"))];
+    if (context && window.flotillaWorkContext) window.flotillaWorkContext.open(context, row);
   }
 
   /* ── detail view ─────────────────────────────────────────────────────── */
@@ -299,6 +313,7 @@
   /* ── view toggles within the tracker ─────────────────────────────────── */
   // Exactly one of the three tracker panels (list / create / detail) is visible.
   function showOnly(id) {
+    if (id !== "issues-listpanel" && window.flotillaWorkContext) window.flotillaWorkContext.close();
     ["issues-listpanel", "issues-create", "issues-detail"].forEach(function (s) {
       el(s).classList.toggle("hidden", s !== id);
     });
@@ -320,5 +335,6 @@
   // Exposed to dash.js: load issues the first time the Issues tab is shown.
   window.flotillaTracker = {
     show: function () { if (!loaded) { loaded = true; loadIssues(); } },
+    openIssue: openIssue,
   };
 })();
