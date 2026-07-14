@@ -22,14 +22,15 @@ const (
 	DefaultLookback        = 50
 )
 
-// Message is the scan input (transport.Message field-for-field at the seam).
+// Message is the scan input: transport.Message plus the local exact-ID marker.
 type Message struct {
-	ID        string
-	SnowID    uint64
-	AuthorID  string
-	WebhookID string
-	Content   string
-	Timestamp time.Time
+	ID                string
+	SnowID            uint64
+	AuthorID          string
+	WebhookID         string
+	Content           string
+	Timestamp         time.Time
+	MechanicallyAcked bool
 }
 
 // FromTransport projects a bus message into the scan type.
@@ -95,6 +96,9 @@ func Scan(msgs []Message, channelID string, now time.Time, cfg Config) []Finding
 			continue
 		}
 		if cfg.AckWindow > 0 && age > cfg.AckWindow {
+			continue
+		}
+		if m.MechanicallyAcked {
 			continue
 		}
 		reason, unacked := lacksFleetAck(msgs, i, now, cfg)

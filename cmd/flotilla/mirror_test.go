@@ -92,20 +92,42 @@ func TestDeskMirrorNoWebhookStillSessionMirrors572(t *testing.T) {
 
 func TestDeskMirrorSkipsWhenNotSubstantive(t *testing.T) {
 	var lines []string
-	posted := 0
+	posted, acked := 0, 0
 	m := deskMirror{
 		allowDiscord: true,
 		webhook:      func(string) (string, bool) { return "https://wh", true },
 		turnFinal:    func(string) (string, bool, error) { return "", false, nil },
 		post:         func(string, string, string) error { posted++; return nil },
+		onTurnFinal:  func(string, string) { acked++ },
 		logf:         recordLogf(&lines),
 	}
 	m.run("backend")
 	if posted != 0 {
 		t.Errorf("posted %d, want 0 (nothing substantive)", posted)
 	}
+	if acked != 0 {
+		t.Errorf("mechanical ack hook called %d times, want 0 without a substantive turn-final", acked)
+	}
 	if len(lines) != 1 || !strings.Contains(lines[0], "SKIP backend: no substantive") {
 		t.Errorf("decision lines = %v, want exactly one SKIP-not-substantive", lines)
+	}
+}
+
+func TestDeskMirrorSubstantiveTurnFinalInvokesMechanicalAckHook(t *testing.T) {
+	var ackedAgent, ackedBody string
+	// Default allowDiscord=false is ledger-only (#684): mechanical ack must still
+	// fire after a substantive turn-final and before any Discord path.
+	m := deskMirror{
+		rosterDir: t.TempDir(),
+		turnFinal: func(string) (string, bool, error) { return "verified and dispatched", true, nil },
+		onTurnFinal: func(agent, body string) {
+			ackedAgent, ackedBody = agent, body
+		},
+		logf: func(string, ...any) {},
+	}
+	m.run("alpha-xo")
+	if ackedAgent != "alpha-xo" || ackedBody != "verified and dispatched" {
+		t.Fatalf("mechanical ack hook = (%q, %q)", ackedAgent, ackedBody)
 	}
 }
 
