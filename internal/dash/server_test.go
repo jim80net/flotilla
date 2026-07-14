@@ -1522,9 +1522,9 @@ func TestConversationsFeed518(t *testing.T) {
 	// Delivered path: optimistic + flush + refresh (stream re-fetch for desk reply).
 	// Optimistic must be recorded BEFORE the sameSel early-return so a mid-send desk
 	// switch still leaves the outbound line on the target thread when the operator returns.
-	routeIdx := strings.Index(js, `postJSON("/api/control/route"`)
+	routeIdx := strings.Index(js, `routeMessage(target, body)`)
 	if routeIdx < 0 {
-		t.Fatal("thread composer route post missing")
+		t.Fatal("thread composer route call missing")
 	}
 	sendBlock := js[routeIdx:min(routeIdx+1400, len(js))]
 	for _, want := range []string{"appendOptimisticOutbound", "flushDeferredMirrorPaint", "refresh()"} {
@@ -2180,7 +2180,7 @@ func TestIssuesWorkContext716(t *testing.T) {
 		`D.onLiveUpdate`, `D.routeMessage`, `D.routeOutcomeCopy`,
 		`no live seat mapped`, `composer.hidden = true`, `requestAnimationFrame`,
 		`/api/issues/`, `fetchIssueOnce(); // GitHub is external`, `fetchMirror(loadedAll`,
-		`streamPinned`, `onViewChange`,
+		`streamPinned`, `onViewChange`, `"opened "`,
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("work-context.js must preserve the #716 contract (missing %q)", marker)

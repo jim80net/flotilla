@@ -62,8 +62,9 @@
 
   function workAge() {
     var issue = selected && selected.item && selected.item.issue ? selected.item.issue : {};
-    var stamp = String(issue.state || "").toLowerCase() === "closed" ? issue.closedAt : issue.createdAt;
-    return stamp ? D.relativeTime(stamp) : "age unavailable";
+    var closed = String(issue.state || "").toLowerCase() === "closed";
+    var stamp = closed ? issue.closedAt : issue.createdAt;
+    return stamp ? (closed ? "closed " : "opened ") + D.relativeTime(stamp) : "age unavailable";
   }
 
   function renderOwnership() {

@@ -58,8 +58,9 @@ nodes:
 		t.Fatalf("flotillaForDesk(backend) = %q, want alpha-xo", got)
 	}
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	openedAt := now.Add(-6 * time.Hour).Format(time.RFC3339)
 	issues := []tracker.Issue{
-		{Number: 10, Title: "active build", State: "OPEN", Desk: "backend"},
+		{Number: 10, Title: "active build", State: "OPEN", Desk: "backend", CreatedAt: openedAt},
 		{Number: 11, Title: "recent ship", State: "CLOSED", Desk: "backend", ClosedAt: now.Add(-48 * time.Hour).Format(time.RFC3339)},
 		{Number: 12, Title: "old close", State: "CLOSED", Desk: "backend", ClosedAt: now.Add(-30 * 24 * time.Hour).Format(time.RFC3339)},
 		// No desk trailer: repo attribution remains honest-unassigned within alpha.
@@ -95,6 +96,9 @@ nodes:
 	}
 	if backend.InFlight[0].GoalTitle != "Ship the product" {
 		t.Errorf("goal context = %+v", backend.InFlight[0])
+	}
+	if backend.InFlight[0].Issue.CreatedAt != openedAt {
+		t.Errorf("open timestamp = %q, want %q", backend.InFlight[0].Issue.CreatedAt, openedAt)
 	}
 	if unassigned == nil || len(unassigned.Shipped) != 1 {
 		t.Fatalf("unassigned = %+v", unassigned)

@@ -58,7 +58,7 @@
     });
   }
   function routeMessage(target, message) {
-    return postJSON(["/api/control", "route"].join("/"), { target: target, message: message });
+    return postJSON("/api/control/route", { target: target, message: message });
   }
   function routeOutcomeCopy(res) {
     var outcome = (res && res.outcome) || "(no outcome reported)";
@@ -1523,8 +1523,6 @@
         inFlight = true;
         setMsg("Sending…", "");
         if (btn) btn.disabled = true;
-        // postJSON("/api/control/route" is centralized by routeMessage so Work Context
-        // consumes this exact confirmed-delivery path and outcome contract too.
         routeMessage(target, body).then(function (res) {
           var copy = routeOutcomeCopy(res);
           var outcome = copy.outcome;
