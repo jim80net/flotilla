@@ -116,9 +116,6 @@ func Save(path string, f Frame) error {
 }
 
 func saveUnlocked(path string, f Frame) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("mkdir %q: %w", filepath.Dir(path), err)
-	}
 	raw, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return err
@@ -155,6 +152,9 @@ func withSidecarLock(path string, fn func() error) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("mkdir %q: %w", filepath.Dir(path), err)
 	}
+	// Keep one stable lock inode for the sidecar's lifetime. Removing it after
+	// unlock would let a waiter hold the unlinked inode while a newcomer creates
+	// and locks a different file, defeating cross-process mutual exclusion.
 	lockPath := path + ".lock"
 	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
