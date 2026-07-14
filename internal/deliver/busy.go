@@ -94,8 +94,9 @@ func CursorState(target string) (cursorY int, inMode bool, err error) {
 
 // CursorPosition reports the terminal cursor coordinates and whether tmux is in
 // copy/view mode. CursorState remains the row-only compatibility wrapper used by
-// most surfaces; OpenCode also needs cursorX to distinguish its rendered empty
-// placeholder from a user-authored draft with the same visible line shape.
+// surfaces that only index the cursor line; OpenCode and Codex also need cursorX
+// to distinguish their rendered empty-composer placeholder from a user-authored
+// draft with the same visible line shape.
 func CursorPosition(target string) (cursorX, cursorY int, inMode bool, err error) {
 	cursorX, cursorY, _, inMode, err = CursorSnapshot(target)
 	return
