@@ -173,12 +173,50 @@ func Clear(path string) error {
 	if path == "" {
 		return nil
 	}
-	return withSidecarLock(path, func() error {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove frontier %q: %w", path, err)
+	return withSidecarLock(path, func() error { return clearUnlocked(path) })
+}
+
+// ClearIfUnchanged removes path only when its current frame is the same snapshot
+// the caller evaluated. A newly authored/replaced frontier survives an older
+// finish guard's clear decision and will be evaluated on the next finish.
+func ClearIfUnchanged(path string, expected Frame) (bool, error) {
+	if path == "" {
+		return false, nil
+	}
+	cleared := false
+	err := withSidecarLock(path, func() error {
+		current, ok, err := Load(path)
+		if err != nil || !ok {
+			return err
 		}
+		if !sameFrame(current, expected) {
+			return nil
+		}
+		if err := clearUnlocked(path); err != nil {
+			return err
+		}
+		cleared = true
 		return nil
 	})
+	return cleared, err
+}
+
+func clearUnlocked(path string) error {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove frontier %q: %w", path, err)
+	}
+	return nil
+}
+
+func sameFrame(a, b Frame) bool {
+	return a.Coordinator == b.Coordinator &&
+		a.ReturnTo == b.ReturnTo &&
+		a.Priority == b.Priority &&
+		a.ActiveWarrant == b.ActiveWarrant &&
+		a.Source == b.Source &&
+		a.SideItem == b.SideItem &&
+		a.Origin == b.Origin &&
+		a.At.Equal(b.At)
 }
 
 // RecordPreempt writes a derived frontier fallback when a non-urgent interrupt

@@ -171,6 +171,46 @@ func TestLoadMissingInert(t *testing.T) {
 	}
 }
 
+func TestClearIfUnchangedPreservesNewAuthoredFrame695(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "frontier.json")
+	old := Frame{ReturnTo: "old derived pointer", Origin: OriginDerived, At: time.Now().UTC()}
+	if err := Save(path, old); err != nil {
+		t.Fatal(err)
+	}
+	evaluated, ok, err := Load(path)
+	if err != nil || !ok {
+		t.Fatalf("Load old: ok=%v err=%v", ok, err)
+	}
+	authored := Frame{ReturnTo: "new authored pointer", Origin: OriginAuthored, At: old.At.Add(time.Second)}
+	if err := Save(path, authored); err != nil {
+		t.Fatal(err)
+	}
+	cleared, err := ClearIfUnchanged(path, evaluated)
+	if err != nil || cleared {
+		t.Fatalf("ClearIfUnchanged = %v err=%v, want preserved replacement", cleared, err)
+	}
+	got, ok, err := Load(path)
+	if err != nil || !ok || got.ReturnTo != authored.ReturnTo || got.Origin != OriginAuthored {
+		t.Fatalf("replacement after conditional clear = %+v ok=%v err=%v", got, ok, err)
+	}
+}
+
+func TestClearIfUnchangedClearsEvaluatedFrame695(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "frontier.json")
+	want := Frame{ReturnTo: "completed pointer", Origin: OriginAuthored, At: time.Now().UTC()}
+	if err := Save(path, want); err != nil {
+		t.Fatal(err)
+	}
+	evaluated, _, _ := Load(path)
+	cleared, err := ClearIfUnchanged(path, evaluated)
+	if err != nil || !cleared {
+		t.Fatalf("ClearIfUnchanged = %v err=%v, want cleared", cleared, err)
+	}
+	if _, ok, err := Load(path); err != nil || ok {
+		t.Fatalf("frame remains after conditional clear: ok=%v err=%v", ok, err)
+	}
+}
+
 func TestNudgePromptIncludesReturnTo(t *testing.T) {
 	p := NudgePrompt("xo", Frame{ReturnTo: "[in-flight] #530"})
 	if !strings.Contains(p, "[in-flight] #530") || !strings.Contains(p, "return-to-frontier") {
