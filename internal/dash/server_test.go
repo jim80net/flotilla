@@ -1162,6 +1162,12 @@ func TestGoalsCanvasAssets(t *testing.T) {
 			t.Errorf("goals.js must carry the #349 pending taxonomy token (missing %q)", marker)
 		}
 	}
+	// #698: the overview pill is clamped to 64px, so use the legend's short word there
+	// while preserving the explanatory STATE_LABEL for the drawer and legend.
+	if !strings.Contains(js, `OVERVIEW_STATE_LABEL = { pending: "waiting" }`) ||
+		!strings.Contains(js, `OVERVIEW_STATE_LABEL[vis] || STATE_LABEL[vis] || vis`) {
+		t.Error("goals.js must shorten only the pending overview pill to 'waiting' — #698")
+	}
 	// #349 Inc 5 F13 — history of done: realized goals gathered into a dedicated list
 	// (a row opens the goal's drawer). The client renders it; the CSS + HTML host it.
 	for _, marker := range []string{"renderDoneHistory", "gdone-row", "goals-done-list"} {
