@@ -256,10 +256,11 @@ const (
 	grokBoxBorder      = "│" // U+2502 (the composer box vertical border)
 )
 
-// ComposerState implements surface.ComposerStateProbe: it reads the composer AT THE TERMINAL CURSOR and
-// classifies it. A cursor/capture read error, or a tmux copy/view mode (where the cursor and capture
-// coordinate spaces diverge), reads as Undetermined: pre-paste delivery and recycle fail closed, while
-// post-paste confirmation may still use the Working spinner. grok has no docked-agents sub-composer, so only Cleared/Pending/Undetermined
+// ComposerState implements surface.ComposerStateProbe: it reads the captured pane and classifies the
+// composer input row, using cursor position as a hint but not a hard requirement. A cursor/capture read
+// error, or a tmux copy/view mode (where the cursor and capture coordinate spaces diverge), reads as
+// Undetermined: pre-paste delivery and recycle fail closed, while post-paste confirmation may still use
+// the Working spinner. grok has no docked-agents sub-composer, so only Cleared/Pending/Undetermined
 // apply (never Queued/SubAgent/ListNav).
 func (g grok) ComposerState(pane string) ComposerDisposition {
 	cy, inMode, err := g.cursorState(pane)
@@ -276,18 +277,31 @@ func (g grok) ComposerState(pane string) ComposerDisposition {
 	return classifyGrokComposerLine(captured, cy)
 }
 
-// classifyGrokComposerLine classifies the line at cursorY (0-based) into a ComposerDisposition. It
-// strips grok's LEFT box border (│) before the ❯ prompt — claude's CutPrefix("❯") alone fails on grok's
-// "│ ❯". A cursor outside the captured range, or not on a "│ ❯" prompt line (the tool-approval modal,
-// where the cursor sits on the "◆ Run …" line; or a multi-line continuation row, which carries no ❯),
-// is Undetermined (pre-paste fail-closed; post-paste may use the spinner). The trailing right
-// border + spaces are stripped so an EMPTY composer reads Cleared (the load-bearing gate-safety case).
+// classifyGrokComposerLine scans the captured pane for the composer input row and classifies it.
+// It strips grok's LEFT box border (│) before the ❯ prompt — claude's CutPrefix("❯") alone fails on
+// grok's "│ ❯". Cursor position is only a hint in live tmux output: the cursor can sit on a different
+// line while the composer remains visible, so we search for the prompt row instead of assuming cursorY
+// indexes it. A pane with no "│ ❯" prompt row anywhere (the tool-approval modal; multi-line
+// continuation rows carry no ❯) is Undetermined (pre-paste fail-closed; post-paste may use the
+// spinner). The trailing right border + spaces are stripped so an EMPTY composer reads Cleared
+// (the load-bearing gate-safety case).
 func classifyGrokComposerLine(captured string, cursorY int) ComposerDisposition {
 	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
-	if cursorY < 0 || cursorY >= len(lines) {
-		return ComposerUndetermined
+	if cursorY >= 0 && cursorY < len(lines) {
+		if disp := classifyGrokComposerLineAt(lines[cursorY]); disp != ComposerUndetermined {
+			return disp
+		}
 	}
-	line := trimSpace(lines[cursorY])                         // strip leading ws → "│ ❯ … │"
+	for _, line := range lines {
+		if disp := classifyGrokComposerLineAt(line); disp != ComposerUndetermined {
+			return disp
+		}
+	}
+	return ComposerUndetermined
+}
+
+func classifyGrokComposerLineAt(line string) ComposerDisposition {
+	line = trimSpace(line)                                    // strip leading ws → "│ ❯ … │"
 	line = trimSpace(strings.TrimPrefix(line, grokBoxBorder)) // strip the left │ + ws → "❯ … │"
 	after, isPrompt := strings.CutPrefix(line, grokComposerPrompt)
 	if !isPrompt {
