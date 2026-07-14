@@ -64,8 +64,11 @@ func (pi) RotateStrategy() Strategy { return SlashCommand }
 // to guess and let the handoff-gated caller use its kill fallback.
 func (pi) Close(string) error { return ErrNoGracefulClose }
 
-// ComposerState positively identifies Pi's focused, one-row editor between the
-// two live-captured horizontal rules. Pi hides the terminal cursor while still
+// ComposerState positively identifies Pi 0.73.1's focused, one-row editor between
+// the two live-captured horizontal rules. The strict adjacency is intentional:
+// if a later Pi grows a multi-line editor, this version-scoped probe fails closed
+// until that layout is characterized instead of guessing which row owns the draft.
+// Pi hides the terminal cursor while still
 // reporting its editor coordinates through tmux, so cursor visibility is not an
 // input; copy/view mode and any unrecognized layout fail closed.
 func (p pi) ComposerState(pane string) ComposerDisposition {

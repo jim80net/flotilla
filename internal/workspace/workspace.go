@@ -43,7 +43,7 @@ func Dir(agent string) (string, error) {
 // IdentityFileName returns the desk identity file name for a surface, by the agent's
 // native convention: claude-code (and the empty default) → CLAUDE.md; aider →
 // CONVENTIONS.md (its documented conventions file, loaded via `aider --read
-// CONVENTIONS.md`); opencode/grok/cursor/codex → AGENTS.md. An unknown surface is an error
+// CONVENTIONS.md`); opencode/grok/cursor/codex/pi → AGENTS.md. An unknown surface is an error
 // rather than a guessed name — the per-surface load mechanism is verified per driver
 // (aider --read is documented; OpenCode loads AGENTS.md natively, packages/opencode/
 // src/session/instruction.ts; Pi loads AGENTS.md natively (Pi coding-agent Context
