@@ -112,11 +112,13 @@
     el("issues-repo").textContent = doc.repo ? doc.repo : "";
     var flotillas = Array.isArray(doc.flotillas) ? doc.flotillas : [];
     var list = el("issues-list");
+    var scopeNote = '<div class="issue-scope-note" role="note"><strong>Moving shows goal-linked work only</strong>' +
+      "<span>Open issues not marked in flight under a goal are not shown.</span></div>";
     if (!flotillas.length) {
-      list.innerHTML = '<div class="empty">No fleet work matches this view.</div>';
+      list.innerHTML = scopeNote + '<div class="empty">No fleet work matches this view.</div>';
       return;
     }
-    list.innerHTML = flotillas.map(function (flotilla) {
+    list.innerHTML = scopeNote + flotillas.map(function (flotilla) {
       var desks = Array.isArray(flotilla.desks) ? flotilla.desks : [];
       return '<section class="issue-ledger-section"><div class="issue-ledger-head"><div><span class="issue-ledger-kicker">Flotilla</span>' +
         '<h3>' + escapeHtml(flotilla.name || "Unassigned") + '</h3></div><span class="issue-ledger-count">' +
