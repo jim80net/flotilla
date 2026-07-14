@@ -45,14 +45,10 @@
   }
 
   /* ── list view ───────────────────────────────────────────────────────── */
-  var RECENT_SHIPPED_DAYS = 14;
-
   function workLedgerURL() {
-    // One bounded read supplies both sides of the operator ledger. "In flight" is
-    // derived from /api/goals below — never equated with every open GitHub issue.
-    var q = "?state=all&limit=200";
+    var q = "?state=" + encodeURIComponent(el("filter-state").value);
     if (el("filter-idea").checked) q += "&label=operator-idea";
-    return "/api/issues" + q;
+    return "/api/work-ledger" + q;
   }
 
   function loadIssues() {
@@ -60,21 +56,11 @@
     var epoch = ++viewEpoch;
     var list = el("issues-list");
     list.innerHTML = '<div class="empty">Loading fleet work ledger…</div>';
-    Promise.all([
-      getJSON(workLedgerURL()),
-      getJSON("/api/goals").catch(function (err) {
-        return { found: false, error: err.message || "goals context unavailable" };
-      }),
-    ]).then(function (docs) {
-      if (epoch === viewEpoch) renderIssueList(docs[0], docs[1]);
+    getJSON(workLedgerURL()).then(function (doc) {
+      if (epoch === viewEpoch) renderIssueList(doc);
     }).catch(function (err) {
       if (epoch === viewEpoch) list.innerHTML = '<div class="error">Could not load the work ledger: ' + escapeHtml(err.message) + "</div>";
     });
-  }
-
-  function issueNumberFromRef(ref) {
-    var m = String(ref || "").match(/#([1-9][0-9]*)$/);
-    return m ? Number(m[1]) : 0;
   }
 
   function relativeWhen(stamp, verb) {
@@ -87,28 +73,11 @@
     return verb + " " + Math.floor(hours / 24) + "d ago";
   }
 
-  function inFlightContext(goalsDoc) {
-    var byIssue = {};
-    var goals = goalsDoc && Array.isArray(goalsDoc.goals) ? goalsDoc.goals : [];
-    goals.forEach(function (goal) {
-      (goal.work_items || []).forEach(function (wi) {
-        if (String(wi.kind || "").toLowerCase() !== "issue" || wi.class !== "in-flight") return;
-        var number = issueNumberFromRef(wi.ref);
-        if (!number || byIssue[number]) return;
-        byIssue[number] = {
-          goal: goal.title || goal.id || "fleet goal",
-          goalId: goal.id || "",
-          detail: wi.detail || "in flight",
-        };
-      });
-    });
-    return byIssue;
-  }
-
-  function workRow(it, posture, context) {
+  function workRow(item, posture) {
+    var it = item.issue || {};
     var number = Number(it.number);
-    var contextLine = context
-      ? '<span class="issue-context">Drives ' + escapeHtml(context.goal) + " · " + escapeHtml(context.detail) + "</span>"
+    var contextLine = item.goal_title
+      ? '<span class="issue-context">Drives ' + escapeHtml(item.goal_title) + " · " + escapeHtml(item.goal_detail || "in flight") + "</span>"
       : '<span class="issue-context">' + escapeHtml(relativeWhen(it.closedAt, "closed")) + "</span>";
     return (
       '<div class="issue-row issue-row-' + posture + '" data-number="' + number + '">' +
@@ -120,38 +89,32 @@
     );
   }
 
-  function ledgerSection(title, description, issues, posture, contexts, empty) {
-    var rows = issues.length
-      ? issues.map(function (it) { return workRow(it, posture, contexts && contexts[it.number]); }).join("")
-      : '<div class="issue-ledger-empty">' + escapeHtml(empty) + "</div>";
-    return '<section class="issue-ledger-section issue-ledger-' + posture + '">' +
-      '<div class="issue-ledger-head"><div><h3>' + escapeHtml(title) + '</h3><p>' + escapeHtml(description) +
-      '</p></div><span class="issue-ledger-count">' + issues.length + "</span></div>" + rows + "</section>";
+  function renderDesk(desk) {
+    var moving = Array.isArray(desk.in_flight) ? desk.in_flight : [];
+    var shipped = Array.isArray(desk.shipped) ? desk.shipped : [];
+    return '<section class="issue-desk">' +
+      '<div class="issue-desk-head"><h4>' + escapeHtml(desk.name || "Unassigned") + '</h4><span>' +
+        moving.length + " moving · " + shipped.length + " shipped</span></div>" +
+      moving.map(function (it) { return workRow(it, "in-flight"); }).join("") +
+      shipped.map(function (it) { return workRow(it, "shipped"); }).join("") +
+      "</section>";
   }
 
-  function renderIssueList(doc, goalsDoc) {
+  function renderIssueList(doc) {
     el("issues-repo").textContent = doc.repo ? doc.repo : "";
-    var issues = Array.isArray(doc.issues) ? doc.issues.slice() : [];
-    issues.sort(function (a, b) { return Date.parse(b.updatedAt || "") - Date.parse(a.updatedAt || ""); });
+    var flotillas = Array.isArray(doc.flotillas) ? doc.flotillas : [];
     var list = el("issues-list");
-    if (!issues.length) {
+    if (!flotillas.length) {
       list.innerHTML = '<div class="empty">No fleet work matches this view.</div>';
       return;
     }
-    var contexts = inFlightContext(goalsDoc);
-    var inFlight = issues.filter(function (it) {
-      return String(it.state || "").toLowerCase() === "open" && !!contexts[Number(it.number)];
-    });
-    var cutoff = Date.now() - RECENT_SHIPPED_DAYS * 24 * 60 * 60 * 1000;
-    var shipped = issues.filter(function (it) {
-      return String(it.state || "").toLowerCase() === "closed" && Date.parse(it.closedAt || "") >= cutoff;
-    }).slice(0, 12);
-    var inFlightEmpty = goalsDoc && goalsDoc.found !== false
-      ? "No issue-linked work is currently in flight."
-      : "Goals context is unavailable, so in-flight work cannot be classified safely.";
-    list.innerHTML =
-      ledgerSection("In flight", "Issue-linked work the goals graph says is moving now.", inFlight, "in-flight", contexts, inFlightEmpty) +
-      ledgerSection("Recently shipped", "Issues closed in the last 14 days.", shipped, "shipped", null, "Nothing closed in this window.");
+    list.innerHTML = flotillas.map(function (flotilla) {
+      var desks = Array.isArray(flotilla.desks) ? flotilla.desks : [];
+      return '<section class="issue-ledger-section"><div class="issue-ledger-head"><div><span class="issue-ledger-kicker">Flotilla</span>' +
+        '<h3>' + escapeHtml(flotilla.name || "Unassigned") + '</h3></div><span class="issue-ledger-count">' +
+        desks.length + " desk" + (desks.length === 1 ? "" : "s") + "</span></div>" +
+        desks.map(renderDesk).join("") + "</section>";
+    }).join("");
     var rows = list.querySelectorAll(".issue-row");
     for (var i = 0; i < rows.length; i++) {
       rows[i].addEventListener("click", function () { openIssue(Number(this.getAttribute("data-number"))); });
@@ -338,6 +301,7 @@
   /* ── wiring ──────────────────────────────────────────────────────────── */
   el("issues-refresh").addEventListener("click", loadIssues);
   el("filter-idea").addEventListener("change", loadIssues);
+  el("filter-state").addEventListener("change", loadIssues);
   el("issues-new").addEventListener("click", showCreate);
   el("create-cancel").addEventListener("click", loadIssues);
   el("create-form").addEventListener("submit", submitCreate);

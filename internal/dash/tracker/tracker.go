@@ -82,6 +82,7 @@ type Issue struct {
 	Body      string    `json:"body,omitempty"`     // detail (Get) only
 	Comments  []Comment `json:"comments,omitempty"` // detail (Get) only
 	GoalID    string    `json:"goal_id,omitempty"`  // parsed from body `goal-id:` trailer (read path)
+	Desk      string    `json:"desk,omitempty"`     // parsed from body `desk:` trailer (flotilla attribution)
 }
 
 // Label is a GitHub label (name + color for the UI chip; description optional).

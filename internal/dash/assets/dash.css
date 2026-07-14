@@ -1054,6 +1054,12 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   gap: .35rem;
   cursor: pointer;
 }
+#filter-state {
+  font-family: var(--mono); font-size: .78rem; color: var(--ink-2);
+  background: var(--abyss-3); border: 1px solid var(--line); border-radius: var(--r-sm);
+  padding: .4rem .55rem; transition: border-color .18s var(--ease);
+}
+#filter-state:hover { border-color: var(--cyan-dim); }
 .issues-list { display: grid; gap: 14px; padding: 14px; min-width: 0; }
 .issue-ledger-section { border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; }
 .issue-ledger-head {
@@ -1061,12 +1067,20 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   padding: .75rem 1rem; background: var(--abyss-3); border-bottom: 1px solid var(--line);
 }
 .issue-ledger-head h3 { margin: 0; font-family: var(--display); font-size: 1rem; color: var(--ink); }
+.issue-ledger-kicker { font-size: .58rem; letter-spacing: .12em; text-transform: uppercase; color: var(--cyan); }
 .issue-ledger-head p { margin: .18rem 0 0; font-size: .72rem; color: var(--ink-3); }
 .issue-ledger-count {
   min-width: 2rem; height: 2rem; display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid var(--line); border-radius: 999px; color: var(--ink-2); font-family: var(--display);
 }
 .issue-ledger-empty { padding: 1rem; color: var(--ink-3); background: var(--abyss-2); font-size: .82rem; }
+.issue-desk + .issue-desk { border-top: 1px solid var(--line); }
+.issue-desk-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: .55rem 1rem; background: color-mix(in srgb, var(--cyan) 4%, var(--abyss-2));
+}
+.issue-desk-head h4 { margin: 0; font-family: var(--display); font-size: .82rem; color: var(--ink); }
+.issue-desk-head span { font-size: .68rem; color: var(--ink-3); }
 .issue-row {
   display: grid;
   grid-template-columns: auto auto 1fr auto;
@@ -1869,6 +1883,7 @@ html, body { overflow-x: clip; }
   .tab,
   .btn,
   .mv-btn,
+  #filter-state,
   .ghelp,
   .gd-convo,
   .gd-close,
@@ -1934,6 +1949,7 @@ html, body { overflow-x: clip; }
      must NOT be un-clamped. */
 
   .tracker-controls { width: 100%; }
+  .tracker-controls #filter-state,
   .tracker-controls .btn { flex: 1 1 auto; }
 
   /* #515: issues list on a phone — keep a 44px row target; title already

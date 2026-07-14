@@ -10,6 +10,7 @@ import (
 // anywhere in an issue body. The prefix is case-sensitive; the slug is captured
 // case-sensitively. Malformed lines (missing slug, invalid characters) do not match.
 var goalIDTrailerLine = regexp.MustCompile(`(?m)^[ \t]*goal-id:[ \t]+([A-Za-z0-9][A-Za-z0-9_.-]*)[ \t]*\r?$`)
+var deskTrailerLine = regexp.MustCompile(`(?m)^[ \t]*desk:[ \t]+([A-Za-z0-9][A-Za-z0-9_.-]*)[ \t]*\r?$`)
 
 // ParseGoalIDTrailer extracts the goal slug from a `goal-id: <slug>` trailer line in
 // an issue body. It returns "" when the trailer is absent or malformed. The first valid
@@ -22,12 +23,23 @@ func ParseGoalIDTrailer(body string) string {
 	return m[1]
 }
 
+// ParseDeskTrailer extracts the exact owning desk stamped by flotilla's issue
+// attribution convention. It deliberately shares the goal-id slug grammar.
+func ParseDeskTrailer(body string) string {
+	m := deskTrailerLine.FindStringSubmatch(body)
+	if len(m) < 2 {
+		return ""
+	}
+	return m[1]
+}
+
 // EnrichIssue populates derived read-model fields from the issue body (goal-id trailer).
 func EnrichIssue(issue *Issue) {
 	if issue == nil {
 		return
 	}
 	issue.GoalID = ParseGoalIDTrailer(issue.Body)
+	issue.Desk = ParseDeskTrailer(issue.Body)
 }
 
 // IssueRef formats a pinned-repo issue reference (owner/repo#N) for goals work items.

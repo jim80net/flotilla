@@ -265,6 +265,11 @@
         </div>
         <div class="tracker-controls">
           <label class="filter-idea"><input type="checkbox" id="filter-idea" /> operator-idea only</label>
+          <select id="filter-state" aria-label="Work state">
+            <option value="all">moving + shipped</option>
+            <option value="open">moving only</option>
+            <option value="closed">shipped only</option>
+          </select>
           <button id="issues-refresh" type="button" class="btn">Refresh</button>
           <button id="issues-new" type="button" class="btn btn-primary">New issue</button>
         </div>
