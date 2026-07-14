@@ -26,7 +26,8 @@ func TestCommittedLaunchExampleValidates(t *testing.T) {
 	// flotilla-launch.example.json is the committed #466 policy-shape reference;
 	// it must load cleanly for the example agents (partition-safe generic paths).
 	p := filepath.Join("..", "..", "flotilla-launch.example.json")
-	agents := map[string]bool{"xo": true, "xo-adj": true, "backend": true}
+	// pi-desk is the committed surface:pi launch recipe example (OpenCode Go).
+	agents := map[string]bool{"xo": true, "xo-adj": true, "backend": true, "pi-desk": true}
 	cfg, err := Load(p, agents)
 	if err != nil {
 		t.Fatalf("Load committed example: %v", err)

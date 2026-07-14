@@ -49,7 +49,10 @@ func Dir(agent string) (string, error) {
 // src/session/instruction.ts; Pi loads AGENTS.md natively (Pi coding-agent Context
 // Files documentation); Grok → AGENTS.md (ASSUMED for xAI's official grok CLI — the
 // deployed product; the prior provenance was superagent grok-dev, which the operator does not
-// run, so re-verify AGENTS.md against the official grok and adjust if needed). Cursor is dropped).
+// run, so re-verify AGENTS.md against the official grok and adjust if needed). Cursor is dropped;
+// Pi loads AGENTS.md + CLAUDE.md natively — `pi --help` documents `--no-context-files` to
+// disable "AGENTS.md and CLAUDE.md discovery"; flotilla identity scaffolding uses AGENTS.md
+// as the portable desk identity, matching opencode/grok/codex).
 func IdentityFileName(surface string) (string, error) {
 	switch surface {
 	case "", "claude-code":
