@@ -43,18 +43,27 @@ func cmdDispatchAck(args []string) error {
 	}
 	st := inbound.NewStore(path)
 	if settled, ok := reg.LookupNonce(nonce); ok {
-		if settled.Recipient != "" && settled.Recipient != from {
-			return fmt.Errorf("dispatch-ack: nonce belongs to recipient %q, not %q", settled.Recipient, from)
+		// A send-time coordinator-recipient entry settles only the coordinator's
+		// hop (#707): the same dispatch text can also sit pending on THIS seat's
+		// inbound ledger (forwarded verbatim), and this seat's real ack must
+		// still land — fall through to the pending-row path.
+		if settled.Reason == dispatch.ReasonCoordinatorRecipient && settled.Recipient != from {
+			settled, ok = dispatch.ConsumedEntry{}, false
 		}
-		// Converge after a prior registry-first partial success: the durable record is
-		// authoritative, but a rerun should also clear any surviving inbound row.
-		for _, entry := range st.Load() {
-			if entry.Nonce == nonce && entry.Recipient == from {
-				st.Remove(entry.ID)
+		if ok {
+			if settled.Recipient != "" && settled.Recipient != from {
+				return fmt.Errorf("dispatch-ack: nonce belongs to recipient %q, not %q", settled.Recipient, from)
 			}
+			// Converge after a prior registry-first partial success: the durable record is
+			// authoritative, but a rerun should also clear any surviving inbound row.
+			for _, entry := range st.Load() {
+				if entry.Nonce == nonce && entry.Recipient == from {
+					st.Remove(entry.ID)
+				}
+			}
+			fmt.Printf("dispatch ack already durable nonce=%s recipient=%s\n", nonce, from)
+			return nil
 		}
-		fmt.Printf("dispatch ack already durable nonce=%s recipient=%s\n", nonce, from)
-		return nil
 	}
 	var match *inbound.Entry
 	for _, entry := range st.Load() {

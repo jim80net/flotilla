@@ -31,6 +31,19 @@ resolves the nonce (never `unknown` after a confirmed delivery), and a
 coordinator running the footer's `dispatch-ack` converges on the already-durable
 path instead of erroring `not pending`.
 
+Two guards keep this settlement from leaking onto other seats' dispatches:
+
+- **Own-footer attribution.** Only the message's own trailing #472 footer nonce
+  settles. A coordinator-directed report that merely *quotes* another
+  dispatch's nonce in prose settles nothing (nonces are reused across hops for
+  outbox dedup, so a quoted nonce is usually another seat's live dispatch).
+- **Hop-scoped matching.** A `coordinator-recipient` entry settles only its own
+  recipient's hop. The same dispatch text forwarded verbatim to a desk keeps
+  that desk's reinject / escalation / undelivered supervision alive, the desk's
+  own `dispatch-ack` still records its real settlement (which then takes
+  lookup preference over the hop entry), and the row-scrub sweeps ignore hop
+  entries for other seats.
+
 ## Desk-visible queued ack
 
 When a send lands in the busy outbox, stdout includes a machine-readable line:

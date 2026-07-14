@@ -107,6 +107,7 @@ func ScanUndeliveredInbound(rosterDir string, now time.Time, age time.Duration) 
 	if age <= 0 {
 		age = UndeliveredInboundAge
 	}
+	reg := NewRegistry(rosterDir)
 	var out []UndeliveredReport
 	for _, e := range inbound.ListAll(rosterDir) {
 		if e.DeliveredAt.IsZero() {
@@ -116,8 +117,9 @@ func ScanUndeliveredInbound(rosterDir string, now time.Time, age time.Duration) 
 		if got < age {
 			continue
 		}
-		// Skip if already consumed (finish path lag / race).
-		if IsConsumed(rosterDir, e.Nonce, PayloadHash(e.Message)) {
+		// Skip if already consumed (finish path lag / race). Recipient-scoped
+		// (#707): a coordinator hop's settlement never hides this row's staleness.
+		if reg.SettlesInboundRow(e.Nonce, PayloadHash(e.Message), e.Recipient) {
 			continue
 		}
 		out = append(out, UndeliveredReport{
@@ -160,7 +162,7 @@ func ReconcileInboundAcks(rosterDir string, readTurnFinal TurnFinalReader) int {
 		}
 		st := inbound.NewStore(path)
 		clearedCons := st.ClearConsumed(func(nonce, message string) bool {
-			return reg.IsConsumed(nonce, PayloadHash(message))
+			return reg.SettlesInboundRow(nonce, PayloadHash(message), recipient)
 		})
 		n += len(clearedCons)
 		if readTurnFinal == nil {

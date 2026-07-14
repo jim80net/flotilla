@@ -72,8 +72,10 @@ func DroppedDispatchFinishHookWithMerged(
 		}
 		st := inbound.NewStore(path)
 		// Always scrub consumed entries even when turn-final is unreadable (#628).
+		// Recipient-scoped (#707): a coordinator hop's send-time settlement of the
+		// same nonce must not scrub this desk's still-live dispatch.
 		for _, e := range st.ClearConsumed(func(nonce, message string) bool {
-			return reg.IsConsumed(nonce, dispatch.PayloadHash(message))
+			return reg.SettlesInboundRow(nonce, dispatch.PayloadHash(message), agent)
 		}) {
 			log.Printf("flotilla watch: dropped-dispatch suppress %s nonce=%s reason=consumed", agent, e.Nonce)
 		}
@@ -123,7 +125,7 @@ func DroppedDispatchFinishHookWithMerged(
 		for _, a := range st.OnFinish(text) {
 			if a.Reinject {
 				hash := dispatch.PayloadHash(a.Entry.Message)
-				if a.Entry.Nonce != "" && reg.IsConsumed(a.Entry.Nonce, hash) {
+				if a.Entry.Nonce != "" && reg.SettlesInboundRow(a.Entry.Nonce, hash, agent) {
 					log.Printf("flotilla watch: dropped-dispatch suppress reinject %s nonce=%s reason=consumed", agent, a.Entry.Nonce)
 					st.Remove(a.Entry.ID)
 					continue

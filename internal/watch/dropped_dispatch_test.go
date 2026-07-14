@@ -670,3 +670,33 @@ func TestInjectorInboundTrack_WalkDeskHomeChannel498(t *testing.T) {
 		t.Fatalf("inbound ledger = %+v, want nonce %q from meta-xo", got, nonce)
 	}
 }
+
+// #707: a coordinator hop's send-time settlement of a nonce must not scrub or
+// suppress a desk still holding the same forwarded dispatch text — the desk's
+// reinject stays live until the DESK acts.
+func TestDroppedDispatch_CoordinatorSettleDoesNotSuppressDeskReinject707(t *testing.T) {
+	dir := t.TempDir()
+	msg, nonce, err := inbound.AppendDispatchNonce("forwarded work the desk has not addressed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Send time: the same dispatch text was first delivered to coordinator xo.
+	if _, err := dispatch.ConsumeCoordinatorRecipient(dir, "cos", "xo", msg); err != nil {
+		t.Fatal(err)
+	}
+	// The desk's forwarded copy is pending.
+	if err := inbound.Record(dir, inbound.Entry{
+		ID: "fwd-1", Sender: "xo", Recipient: "desk", Message: msg, Nonce: nonce,
+		DeliveredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var reinjected []Job
+	hook := DroppedDispatchFinishHook(dir, func(string) (string, bool, error) {
+		return "unrelated turn final without the nonce", true, nil
+	}, func(j Job) { reinjected = append(reinjected, j) }, nil)
+	hook("desk")
+	if len(reinjected) != 1 {
+		t.Fatalf("desk reinject = %d jobs, want 1 (coordinator settle must not suppress)", len(reinjected))
+	}
+}

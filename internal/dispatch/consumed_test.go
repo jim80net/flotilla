@@ -154,3 +154,47 @@ func TestConsumeCoordinatorRecipient_NoNonceRecordsNothing707(t *testing.T) {
 		t.Fatalf("registry after no-nonce send = %+v, want empty", entries)
 	}
 }
+
+func TestConsumeCoordinatorRecipient_QuotedNonceSettlesNothing707(t *testing.T) {
+	dir := t.TempDir()
+	// An upward report QUOTING a live dispatch's nonce in prose carries no #472
+	// footer of its own (AppendDispatchNonce reuses the quoted nonce without
+	// stamping). Settling it would disable the target desk's supervision.
+	report := "status: dispatched flotilla-dispatch-aaaa1111 to the desk; awaiting its ack"
+	if inserted, err := ConsumeCoordinatorRecipient(dir, "xo", "cos", report); err != nil || inserted {
+		t.Fatalf("quoted-nonce consume = (%v, %v), want nothing recorded", inserted, err)
+	}
+	if entries := NewRegistry(dir).Load(); len(entries) != 0 {
+		t.Fatalf("registry after quoted-nonce report = %+v, want empty", entries)
+	}
+}
+
+func TestSettlesInboundRow_CoordinatorEntryScopedToItsOwnHop707(t *testing.T) {
+	dir := t.TempDir()
+	msg, nonce, err := inbound.AppendDispatchNonce("do the thing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ConsumeCoordinatorRecipient(dir, "cos", "xo", msg); err != nil {
+		t.Fatal(err)
+	}
+	reg := NewRegistry(dir)
+	// The coordinator hop is settled…
+	if !reg.SettlesInboundRow(nonce, PayloadHash(msg), "xo") {
+		t.Fatal("coordinator's own hop must read settled")
+	}
+	// …but a desk holding the SAME forwarded dispatch text stays supervised.
+	if reg.SettlesInboundRow(nonce, PayloadHash(msg), "backend") {
+		t.Fatal("coordinator settlement must not settle the desk's row")
+	}
+	// A real settlement for the desk still works and takes lookup preference.
+	if _, err := reg.Consume(ConsumeFromInbound(nonce, msg, ReasonDurableAck, "xo", "backend")); err != nil {
+		t.Fatal(err)
+	}
+	if !reg.SettlesInboundRow(nonce, PayloadHash(msg), "backend") {
+		t.Fatal("desk durable ack must settle the desk's row")
+	}
+	if e, ok := reg.LookupNonce(nonce); !ok || e.Reason != ReasonDurableAck {
+		t.Fatalf("lookup preference = %+v, want the desk's durable ack", e)
+	}
+}
