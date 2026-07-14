@@ -1110,6 +1110,12 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   display: flex; flex-direction: column; min-width: 0; isolation: isolate;
 }
 .work-context[hidden] { display: none; }
+.goals-graph.has-context > .work-context {
+  position: absolute; top: 0; right: 0; bottom: 0; z-index: 20;
+  width: min(620px, 46vw); min-width: 360px; height: 100%; min-height: 0;
+  border-radius: 0; border-top: 0; border-right: 0; border-bottom: 0;
+  box-shadow: -24px 0 48px -24px color-mix(in srgb, var(--ink) 24%, transparent);
+}
 .wc-close {
   position: absolute; top: .7rem; right: .75rem; z-index: 2; width: 38px; height: 38px;
   border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface);
@@ -1944,11 +1950,13 @@ html, body { overflow-x: clip; }
 
 @media (max-width: 740px) {
   body.work-context-open { overflow: hidden; }
-  body.work-context-open #view-issues { z-index: 100; }
+  body.work-context-open #view-issues,
+  body.work-context-open #view-goals { z-index: 100; }
   .issues-workspace.has-context { grid-template-columns: minmax(0, 1fr); }
-  .work-context {
+  .work-context,
+  .goals-graph.has-context > .work-context {
     position: fixed; inset: 0; z-index: 100; width: 100%; max-width: none;
-    height: 100dvh; min-height: 0; border: 0; border-radius: 0; box-shadow: none;
+    min-width: 0; height: 100dvh; min-height: 0; border: 0; border-radius: 0; box-shadow: none;
   }
   .wc-header { padding: .7rem 3.7rem .65rem 1rem; }
   .wc-header h2 { font-size: 1.16rem; }
