@@ -1368,27 +1368,9 @@
     return parts.join("");
   }
 
-  var lastDrawerHtml = null; // dirty-check: don't rewrite the drawer body (and reset its scroll) on a no-op tick
-  function fillDrawer(n) {
-    var vis = visToken(n);
-    q("goals-drawer-eyebrow").textContent = scopeNoun(n);
-    q("goals-drawer-title").textContent = n.title || n.id;
-    var pills = '<span class="gpill gpill-' + escapeHtml(vis) + '">' + escapeHtml(STATE_LABEL[vis] || vis) + "</span>";
-    if (n.owner) pills += '<span class="gd-owner">led by ' + escapeHtml(n.owner) + "</span>";
-    // parent-goal pill — which fleet goal / workstream this rolls up to (prototype fidelity).
-    var parent = n.parent ? nodeById[n.parent] : null;
-    if (parent) pills += '<span class="gd-parent">&#8627; ' + escapeHtml(parent.title || parent.id) + "</span>";
-    q("goals-drawer-pills").innerHTML = pills;
-    // Rewrite the body only when it changed, so a background SSE tick never resets
-    // the operator's scroll position or text selection in the open drawer.
-    var html = drawerBody(n);
-    if (lastDrawerHtml !== html) { q("goals-drawer-body").innerHTML = html; lastDrawerHtml = html; }
-  }
-
   function selectNode(id) {
     deselect();
     selectedId = id;
-    lastDrawerHtml = null; // a new selection always fills fresh
     var card = cardEl(id);
     if (card) card.classList.add("gnode-selected"); // transient state lives on the ARTICLE (#283 contract)
   }
@@ -1434,7 +1416,6 @@
   }
   function contextClosed() {
     drawerReturnEl = null;
-    lastDrawerHtml = null;
     deselect();
   }
 
@@ -1997,28 +1978,6 @@
       lightDeps(id, false);
       if (hoveredId === id) hoveredId = null;
       hideTip(); // #405 Inc 3 Item 6b
-    });
-    var close = q("goals-drawer-close");
-    if (close) close.onclick = closeDrawer;
-    // Deep-link: the drawer's "Open …'s conversation" button jumps to that desk's
-    // Conversations thread (delegated — the body is rebuilt on each fill).
-    // #347 residual: "Open decision to respond" opens the respond modal with the full
-    // brief package (drawer already shows the brief; modal is the reply surface).
-    var drawer = q("goals-drawer");
-    if (drawer) drawer.addEventListener("click", function (e) {
-      var decide = e.target.closest("[data-open-decision]");
-      if (decide) {
-        var did = decide.getAttribute("data-open-decision");
-        if (did) openModal(did);
-        return;
-      }
-      var btn = e.target.closest(".gd-convo");
-      if (!btn) return;
-      var agent = btn.getAttribute("data-agent");
-      if (agent && window.flotillaDash && window.flotillaDash.openConversation) {
-        closeDrawer();
-        window.flotillaDash.openConversation(agent);
-      }
     });
     // Help tooltip: also toggle on click (touch has no hover) — CSS shows it on
     // hover/focus AND when aria-expanded is true.

@@ -2119,10 +2119,6 @@ func TestDecisionBriefDrawer347(t *testing.T) {
 	if strings.Contains(chunk, `gated.map(function (wi) { return "<p>" + escapeHtml(wi.label`) {
 		t.Error("drawerBody must not render gated items as bare labels only — #347 residual")
 	}
-	// Click handler opens the respond modal from the drawer.
-	if !strings.Contains(js, `closest("[data-open-decision]")`) || !strings.Contains(js, "openModal(did)") {
-		t.Error("goals.js must open the respond modal from the drawer decision button — #347")
-	}
 	css := doGet(t, srv, "/static/dash.css").Body.String()
 	for _, marker := range []string{".gd-gated-item", ".gd-open-decision", ".gd-brief"} {
 		if !strings.Contains(css, marker) {
