@@ -2,6 +2,7 @@ package surface
 
 import (
 	"errors"
+	"os"
 	"testing"
 )
 
@@ -9,6 +10,63 @@ func TestPiRegistered(t *testing.T) {
 	d, ok := Get("pi")
 	if !ok || d.Name() != "pi" {
 		t.Errorf(`Get("pi") = (%v, %v), want the pi driver`, d, ok)
+	}
+	var _ ComposerStateProbe = pi{}
+}
+
+func piFixture(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile("testdata/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func TestPiLiveMarkerFixtures(t *testing.T) {
+	if got := parsePiState(piFixture(t, "pi-0.73.1-idle.txt")); got != StateIdle {
+		t.Fatalf("idle fixture = %v, want Idle", got)
+	}
+	if got := parsePiState(piFixture(t, "pi-0.73.1-working.txt")); got != StateWorking {
+		t.Fatalf("working fixture = %v, want Working", got)
+	}
+}
+
+func TestClassifyPiComposerLine(t *testing.T) {
+	rule := "────────────────────────────────────────"
+	cases := []struct {
+		name, captured string
+		x, y           int
+		want           ComposerDisposition
+	}{
+		{"cleared", "output\n" + rule + "\n\n" + rule + "\n/path\nmodel • high", 0, 2, ComposerCleared},
+		{"pending", "output\n" + rule + "\nbeta-probe\n" + rule + "\n/path\nmodel • high", 10, 2, ComposerPending},
+		{"displaced cursor", "output\n" + rule + "\n\n" + rule + "\n/path\nmodel • high", 3, 2, ComposerUndetermined},
+		{"quoted rules above output", rule + "\n\n" + rule + "\nfiller\noutput\n/path\nmodel • high", 0, 1, ComposerUndetermined},
+		{"changed glyph fails closed", "output\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n/path\nmodel • high", 0, 2, ComposerUndetermined},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyPiComposerLine(tc.captured, tc.x, tc.y); got != tc.want {
+				t.Fatalf("classifyPiComposerLine = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPiComposerState(t *testing.T) {
+	idle := piFixture(t, "pi-0.73.1-idle.txt")
+	p := pi{
+		cursorSnapshot: func(string) (int, int, bool, bool, error) { return 0, 6, false, false, nil },
+		capturePane:    func(string) (string, error) { return idle, nil },
+		classify:       parsePiState,
+	}
+	if got := p.ComposerState("pane"); got != ComposerCleared {
+		t.Fatalf("ComposerState = %v, want Cleared", got)
+	}
+	p.cursorSnapshot = func(string) (int, int, bool, bool, error) { return 0, 0, false, true, nil }
+	if got := p.ComposerState("pane"); got != ComposerUndetermined {
+		t.Fatalf("copy-mode ComposerState = %v, want Undetermined", got)
 	}
 }
 

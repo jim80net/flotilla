@@ -26,22 +26,24 @@ func init() { Register(newPi()) }
 // Like the other drivers it wraps deliver primitives behind injectable fields for
 // unit-testability.
 type pi struct {
-	paneCommand func(string) (string, error)
-	isShell     func(string) bool
-	capturePane func(string) (string, error)
-	classify    func(string) State
-	send        func(string, string) error
-	inject      func(string, string) error
+	paneCommand    func(string) (string, error)
+	isShell        func(string) bool
+	capturePane    func(string) (string, error)
+	classify       func(string) State
+	send           func(string, string) error
+	inject         func(string, string) error
+	cursorSnapshot func(string) (cursorX, cursorY int, visible, inMode bool, err error)
 }
 
 func newPi() pi {
 	return pi{
-		paneCommand: deliver.PaneCommand,
-		isShell:     deliver.IsShell,
-		capturePane: deliver.CapturePane,
-		classify:    parsePiState,
-		send:        deliver.Send,
-		inject:      deliver.InjectSlash,
+		paneCommand:    deliver.PaneCommand,
+		isShell:        deliver.IsShell,
+		capturePane:    deliver.CapturePane,
+		classify:       parsePiState,
+		send:           deliver.Send,
+		inject:         deliver.InjectSlash,
+		cursorSnapshot: deliver.CursorSnapshot,
 	}
 }
 
@@ -80,6 +82,69 @@ func (pi) RotateStrategy() Strategy { return SlashCommand }
 // live-verified under recycle's remain-on-exit gate. Honest refusal → handoff-
 // gated kill fallback (same posture as opencode/grok until verified).
 func (pi) Close(pane string) error { return ErrNoGracefulClose }
+
+// ComposerState positively identifies Pi 0.73.1's focused, one-row editor
+// between the two live-captured U+2500 horizontal rules. The strict adjacency
+// is intentional: a future multi-line editor or changed rule glyph fails closed
+// until that layout is characterized. Pi hides the terminal cursor while tmux
+// still reports its editor coordinates, so cursor visibility is not an input.
+func (p pi) ComposerState(pane string) ComposerDisposition {
+	cx, cy, _, inMode, err := p.cursorSnapshot(pane)
+	if err != nil || inMode {
+		return ComposerUndetermined
+	}
+	captured, err := p.capturePane(pane)
+	if err != nil || p.classify(captured) != StateIdle {
+		return ComposerUndetermined
+	}
+	return classifyPiComposerLine(captured, cx, cy)
+}
+
+func classifyPiComposerLine(captured string, cursorX, cursorY int) ComposerDisposition {
+	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
+	if cursorY <= 0 || cursorY+1 >= len(lines) || cursorX < 0 {
+		return ComposerUndetermined
+	}
+	if !piRule(lines[cursorY-1]) || !piRule(lines[cursorY+1]) || !piFooterBelow(lines[cursorY+2:]) {
+		return ComposerUndetermined
+	}
+	body := strings.TrimSpace(lines[cursorY])
+	if body == "" && cursorX == 0 {
+		return ComposerCleared
+	}
+	if body != "" {
+		return ComposerPending
+	}
+	return ComposerUndetermined
+}
+
+// piFooterBelow anchors the composer to bottom chrome so rule-looking model
+// output cannot prove a cleared draft. Pi 0.73.1 renders exactly two non-empty
+// footer rows below the editor: cwd and model/token status.
+func piFooterBelow(lines []string) bool {
+	nonEmpty := 0
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			nonEmpty++
+		}
+	}
+	return nonEmpty == 2
+}
+
+func piRule(line string) bool {
+	line = strings.TrimSpace(line)
+	if len([]rune(line)) < 20 {
+		return false
+	}
+	// U+2500 is the exact rule glyph LIVE-CAPTURED from Pi 0.73.1. Do not
+	// accept look-alike box characters without a new capture.
+	for _, r := range line {
+		if r != '─' {
+			return false
+		}
+	}
+	return true
+}
 
 // --- pure state classifier (the testable core) ---
 
