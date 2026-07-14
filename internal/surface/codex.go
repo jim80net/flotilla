@@ -2,8 +2,10 @@ package surface
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/jim80net/flotilla/internal/codexstore"
@@ -69,6 +71,9 @@ func (c codex) Assess(pane string) State {
 	captured, err := c.capturePane(pane)
 	if err != nil {
 		return StateUnknown
+	}
+	if name := codexOverlayName(captured); name != "" {
+		log.Printf("flotilla: surface: codex %s visible on %s — input remains fail-closed", name, pane)
 	}
 	return c.classify(captured)
 }
@@ -170,6 +175,15 @@ var codexWorkingMarkers = []string{
 	"a turn is running",               // mode-switch guard
 }
 
+// Rate-limit overlay markers are INFERRED from the event report and the shared
+// selector rendering, pending an exact live capture under #690. Safety does not
+// depend on these strings: the structural non-composer selector guard below
+// fails closed first. These markers exist so diagnostics can name the overlay.
+var (
+	codexRateLimitHeadingRE = regexp.MustCompile(`(?i)\bapproaching rate limits\b`)
+	codexRateLimitChoiceRE  = regexp.MustCompile(`(?im)^\s*(?:›\s*)?\d+\.\s+switch to gpt-[^\s]*mini\b`)
+)
+
 func parseCodexState(captured string) State {
 	startup := strings.Join(lastNNonEmptyLines(captured, codexStartupTail), "\n")
 	if codexIsLoginScreen(startup) || codexIsHooksGate(startup) || codexIsFirstRunMenu(startup) {
@@ -182,7 +196,18 @@ func parseCodexState(captured string) State {
 	if containsAny(tail, codexWorkingMarkers) {
 		return StateWorking
 	}
+	if codexHasNonComposerSelector(tail) {
+		return StateAwaitingInput
+	}
 	return StateIdle
+}
+
+func codexOverlayName(captured string) string {
+	tail := strings.Join(lastNNonEmptyLines(captured, codexTail), "\n")
+	if codexRateLimitHeadingRE.MatchString(tail) && codexRateLimitChoiceRE.MatchString(tail) {
+		return "rate-limit overlay"
+	}
+	return ""
 }
 
 func codexIsLoginScreen(tail string) bool {
@@ -262,9 +287,11 @@ func (c codex) ComposerState(pane string) ComposerDisposition {
 	return classifyCodexComposerLine(captured, cy)
 }
 
-// classifyCodexComposerLine classifies the line at cursorY. Only a line whose trimmed body begins
-// with codexComposerPrompt is read; empty body after the prompt is Cleared (load-bearing for recycle
-// and confirmed delivery). Approval-modal rows (no › prompt) are Undetermined — fail-closed.
+// classifyCodexComposerLine positively identifies the idle composer: the cursor
+// row must carry the prompt glyph AND be followed by known idle-composer chrome.
+// A selector's highlighted row also begins with ›, but lacks that footer and is
+// therefore Undetermined (never Pending/ListNav). Empty body after a positively
+// identified prompt is Cleared; non-empty body is Pending.
 func classifyCodexComposerLine(captured string, cursorY int) ComposerDisposition {
 	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
 	if cursorY < 0 || cursorY >= len(lines) {
@@ -274,10 +301,39 @@ func classifyCodexComposerLine(captured string, cursorY int) ComposerDisposition
 	if !isPrompt {
 		return ComposerUndetermined
 	}
+	if !codexHasIdleComposerFooter(lines, cursorY) {
+		return ComposerUndetermined
+	}
 	if trimSpace(after) == "" {
 		return ComposerCleared
 	}
 	return ComposerPending
+}
+
+func codexHasIdleComposerFooter(lines []string, promptRow int) bool {
+	for i := promptRow + 1; i < len(lines) && i <= promptRow+3; i++ {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		return strings.HasPrefix(line, "/ for commands") || line == "/status" || strings.HasPrefix(line, "gpt-")
+	}
+	return false
+}
+
+func codexHasNonComposerSelector(captured string) bool {
+	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
+	highlighted := false
+	for i, line := range lines {
+		if !strings.HasPrefix(trimSpace(line), codexComposerPrompt) {
+			continue
+		}
+		highlighted = true
+		if codexHasIdleComposerFooter(lines, i) {
+			return false
+		}
+	}
+	return highlighted
 }
 
 // --- RecycleBridge: portable-markdown context preservation (parity with grok, #158) ---
