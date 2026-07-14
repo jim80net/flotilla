@@ -84,8 +84,9 @@ func DroppedDispatchFinishHookWithMerged(
 		// delivery back to the coordinator can be waiting in the durable outbox.
 		// That is durable addressing evidence: consume the inbound dispatch before
 		// finish evaluation so neither reinject nor second-miss escalation fires.
+		queuedOutbox := outbox.ListAll(rosterDir)
 		for _, e := range st.Load() {
-			if !hasQueuedDispatchAck(rosterDir, agent, e.Nonce) {
+			if !hasQueuedDispatchAck(queuedOutbox, agent, e.Nonce) {
 				continue
 			}
 			if _, cerr := reg.Consume(dispatch.ConsumeFromInbound(e.Nonce, e.Message, dispatch.ReasonQueuedAck, e.Sender, e.Recipient)); cerr != nil {
@@ -162,11 +163,11 @@ func DroppedDispatchFinishHookWithMerged(
 // hasQueuedDispatchAck requires both the exact nonce and the dispatch recipient
 // as outbox sender. A forwarded/quoted nonce from another seat is not evidence
 // that this recipient addressed its work.
-func hasQueuedDispatchAck(rosterDir, recipient, nonce string) bool {
-	if rosterDir == "" || recipient == "" || nonce == "" {
+func hasQueuedDispatchAck(entries []outbox.Entry, recipient, nonce string) bool {
+	if recipient == "" || nonce == "" {
 		return false
 	}
-	for _, e := range outbox.ListAll(rosterDir) {
+	for _, e := range entries {
 		if e.Sender == recipient && inbound.ParseDispatchNonce(e.Message) == nonce {
 			return true
 		}
