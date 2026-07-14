@@ -1286,7 +1286,7 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	// (edges, tier labels, nodes) + zoom controls.
 	for _, id := range []string{
 		"goals-viewport", "goals-world", "goals-nodes", "goals-edges", "goals-tierlabels", "goals-zin", "goals-zout", "goals-zfit",
-		"goals-drawer", "goals-drawer-body", "goals-drawer-close", "goals-help", // Inc 2: drawer + help tooltip
+		"work-context", "wc-stream", "wc-close", "goals-help", // #717: shared Work Context drawer + help tooltip
 		"goals-live",                                           // #284: aria-live status region
 		"goals-modal", "goals-modal-input", "goals-modal-send", // #302: intervention modal
 	} {
@@ -1298,6 +1298,54 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	// chrome of any layout (tree/mindmap/org) may remain in the markup.
 	if strings.Contains(body, "glayout-btn") || strings.Contains(body, "goals-layout-toggle") || strings.Contains(body, "data-layout=") {
 		t.Error("index must NOT carry the removed goals layout toggle (mind-map-only)")
+	}
+}
+
+func TestGoalsWorkContext717(t *testing.T) {
+	now := time.Date(2026, 7, 14, 18, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	html := doGet(t, srv, "/").Body.String()
+	if got := strings.Count(html, `id="work-context"`); got != 1 {
+		t.Fatalf("Goals and Issues must share one Work Context panel, found %d", got)
+	}
+	for _, removed := range []string{`id="goals-drawer"`, `id="goals-drawer-body"`, `id="goals-drawer-close"`} {
+		if strings.Contains(html, removed) {
+			t.Errorf("legacy Goals drawer must be replaced by the shared panel (found %q)", removed)
+		}
+	}
+
+	goalsJS := doGet(t, srv, "/static/goals.js").Body.String()
+	openAt := strings.Index(goalsJS, "function openDrawer")
+	if openAt < 0 {
+		t.Fatal("goals.js must retain the node activation entry point")
+	}
+	openBlock := goalsJS[openAt:min(openAt+700, len(goalsJS))]
+	for _, marker := range []string{
+		`window.flotillaWorkContext.open(goalContext(n), returnEl || cardEl(id))`,
+		`item: { goal: n }`, `posture: STATE_LABEL[visToken(n)]`, `wi.kind === "desk"`,
+	} {
+		if !strings.Contains(goalsJS, marker) {
+			t.Errorf("Goals must adapt nodes into the shared Work Context shape (missing %q)", marker)
+		}
+	}
+	if !strings.Contains(openBlock, `window.flotillaWorkContext.open(goalContext(n), returnEl || cardEl(id))`) {
+		t.Error("node activation must call the shared Work Context panel in executable openDrawer code")
+	}
+
+	wcJS := doGet(t, srv, "/static/work-context.js").Body.String()
+	for _, marker := range []string{
+		`selected.item.goal`, `goalContext() ? "goals" : "issues"`,
+		`el("goals-graph").classList.toggle("has-context", goalContext())`, `scope = goalContext() ? "GOAL" : "ISSUE"`,
+	} {
+		if !strings.Contains(wcJS, marker) {
+			t.Errorf("shared Work Context must support its Goals host (missing %q)", marker)
+		}
+	}
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	for _, marker := range []string{`.goals-graph.has-context > .work-context`, `width: min(620px, 46vw)`, `min-width: 360px`, `height: 100dvh`} {
+		if !strings.Contains(css, marker) {
+			t.Errorf("Goals Work Context must use the frozen desktop/mobile geometry (missing %q)", marker)
+		}
 	}
 }
 

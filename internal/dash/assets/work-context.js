@@ -24,6 +24,11 @@
   function el(id) { return document.getElementById(id); }
   function esc(value) { return D.escapeHtml(value); }
   function panelOpen() { return selected && !el("work-context").hidden; }
+  function subject() {
+    return selected && selected.item ? (selected.item.goal || selected.item.issue || {}) : {};
+  }
+  function goalContext() { return !!(selected && selected.item && selected.item.goal); }
+  function contextView() { return goalContext() ? "goals" : "issues"; }
 
   function statusAgent(name) {
     var agents = statusDoc && Array.isArray(statusDoc.agents) ? statusDoc.agents : [];
@@ -56,21 +61,26 @@
       node = byID[parent.toLowerCase()];
     }
     var flotilla = String((selected && selected.flotilla) || "");
-    return flotilla && flotilla.toLowerCase() !== "unassigned" && flotilla.toLowerCase() !== String(seat).toLowerCase()
+    return !goalContext() && flotilla && flotilla.toLowerCase() !== "unassigned" && flotilla.toLowerCase() !== String(seat).toLowerCase()
       ? flotilla : "";
   }
 
   function workAge() {
-    var issue = selected && selected.item && selected.item.issue ? selected.item.issue : {};
-    var closed = String(issue.state || "").toLowerCase() === "closed";
-    var stamp = closed ? issue.closedAt : issue.createdAt;
+    var item = subject();
+    if (goalContext()) {
+      return item.achieved_at && !item.achieved_seed
+        ? "realized " + D.relativeTime(item.achieved_at) : "age unavailable";
+    }
+    var closed = String(item.state || "").toLowerCase() === "closed";
+    var stamp = closed ? item.closedAt : item.createdAt;
     return stamp ? (closed ? "closed " : "opened ") + D.relativeTime(stamp) : "age unavailable";
   }
 
   function renderOwnership() {
     if (!selected) return;
-    var issue = selected.item.issue || {};
-    var posture = selected.posture === "in-flight" ? "in flight" : "shipped";
+    var item = subject();
+    var scope = goalContext() ? "GOAL" : "ISSUE";
+    var posture = String(selected.posture || "unknown").replace(/-/g, " ");
     var seats = seatsForSelection();
     if (activeSeat && seats.indexOf(activeSeat) < 0) activeSeat = "";
     if (!activeSeat && seats.length) activeSeat = seats[0];
@@ -91,8 +101,8 @@
       switcher = '<span class="wc-seat-static">' + esc(seats[0]) + " · " + esc(one.state || "unknown") + "</span>";
     }
     el("wc-header").innerHTML =
-      '<div class="wc-eyebrow">ISSUE · <span>' + esc(posture) + "</span> · " + esc(workAge()) + "</div>" +
-      '<h2 id="wc-title">' + esc(issue.title || "Work context") + "</h2>" +
+      '<div class="wc-eyebrow">' + scope + ' · <span>' + esc(posture) + "</span> · " + esc(workAge()) + "</div>" +
+      '<h2 id="wc-title">' + esc(item.title || "Work context") + "</h2>" +
       '<div class="wc-ownership">' + chips + switcher + "</div>";
     var buttons = el("wc-header").querySelectorAll("[data-wc-seat]");
     for (var i = 0; i < buttons.length; i++) {
@@ -245,6 +255,14 @@
     });
   }
 
+  function mountPanel() {
+    var panel = el("work-context");
+    var host = goalContext() ? el("goals-graph") : el("issues-workspace");
+    if (host && panel.parentNode !== host) host.appendChild(panel);
+    el("issues-workspace").classList.toggle("has-context", !goalContext());
+    el("goals-graph").classList.toggle("has-context", goalContext());
+  }
+
   function startRefresh() {
     stopRefresh();
     scheduleFallback();
@@ -276,12 +294,13 @@
     resetComposer();
     returnFocus = source || document.activeElement;
     var panel = el("work-context");
+    mountPanel();
     panel.hidden = false;
-    el("issues-workspace").classList.add("has-context");
     document.body.classList.add("work-context-open");
-    el("wc-header").innerHTML = '<div class="wc-eyebrow">ISSUE · loading live context</div><h2 id="wc-title">' +
-      esc(context.item.issue.title || "Work context") + "</h2>";
-    el("wc-github").hidden = !context.item.issue.number;
+    el("wc-header").innerHTML = '<div class="wc-eyebrow">' + (goalContext() ? "GOAL" : "ISSUE") +
+      ' · loading live context</div><h2 id="wc-title">' +
+      esc(subject().title || "Work context") + "</h2>";
+    el("wc-github").hidden = !context.item.issue || !context.item.issue.number;
     el("wc-live-contract").textContent = "Loading live seat…";
     el("wc-stream").innerHTML = '<div class="empty">Loading session mirror…</div>';
     el("wc-composer").hidden = true;
@@ -291,18 +310,29 @@
     el("wc-close").focus();
   }
 
+  function update(context) {
+    if (!panelOpen() || !context || goalContext() !== !!(context.item && context.item.goal)) return;
+    selected = context;
+    renderOwnership();
+  }
+
   function close() {
     if (!panelOpen()) return;
     contextEpoch++;
     mirrorEpoch++;
     issueEpoch++;
     stopRefresh();
+    var closingGoal = goalContext();
     selected = null;
     activeSeat = "";
     el("work-context").hidden = true;
     el("issues-workspace").classList.remove("has-context");
+    el("goals-graph").classList.remove("has-context");
     document.body.classList.remove("work-context-open");
     if (returnFocus && returnFocus.focus) returnFocus.focus();
+    if (closingGoal && window.flotillaGoals && window.flotillaGoals.contextClosed) {
+      window.flotillaGoals.contextClosed();
+    }
   }
 
   el("wc-close").addEventListener("click", close);
@@ -319,7 +349,7 @@
     scheduleFallback();
   });
 
-  function onViewChange(view) { if (view !== "issues" && panelOpen()) close(); }
+  function onViewChange(view) { if (view !== contextView() && panelOpen()) close(); }
 
   (function wireComposer() {
     var form = el("wc-composer");
@@ -371,5 +401,7 @@
     input.addEventListener("input", resize);
   })();
 
-  window.flotillaWorkContext = { open: open, close: close, refresh: fetchLiveContext, onViewChange: onViewChange };
+  window.flotillaWorkContext = {
+    open: open, update: update, close: close, refresh: fetchLiveContext, onViewChange: onViewChange,
+  };
 })();

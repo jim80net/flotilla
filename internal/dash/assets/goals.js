@@ -1223,6 +1223,42 @@
     return n.owner || null;
   }
 
+  // #717: Goals is a second HOST for the shared Work Context panel. This adapter
+  // only translates the rendered goal into the same attribution shape the Issues
+  // ledger supplies; stream, seat selection, compose, and empty states stay in
+  // work-context.js.
+  function goalSeats(n) {
+    var seats = [], seen = {};
+    function add(name) {
+      var value = String(name || "").trim(), key = value.toLowerCase();
+      if (value && !seen[key]) { seen[key] = true; seats.push(value); }
+    }
+    add(n.conversation_agent);
+    add(n.owner);
+    (n.work_items || []).forEach(function (wi) {
+      if (wi.kind === "desk") add(wi.agent);
+    });
+    return seats;
+  }
+  function goalFlotilla(n) {
+    var node = n, guard = 0;
+    while (node && guard++ < 64) {
+      if (isFlotilla(node)) return node.owner || node.title || "Unassigned";
+      node = node.parent ? nodeById[node.parent] : null;
+    }
+    return "Unassigned";
+  }
+  function goalContext(n) {
+    var seats = goalSeats(n);
+    return {
+      item: { goal: n },
+      posture: STATE_LABEL[visToken(n)] || visToken(n),
+      flotilla: goalFlotilla(n),
+      desk: n.owner || n.conversation_agent || seats[0] || "Unassigned",
+      seats: seats,
+    };
+  }
+
   // highlightChain lights the edges from a node up its parent chain to the root, so
   // hovering a task shows which workstream + fleet goal it rolls up to. Bounded
   // against a cycle the server should never emit.
@@ -1367,13 +1403,8 @@
     if (!n) return;
     drawerReturnEl = returnEl || null;
     selectNode(id);
-    fillDrawer(n);
-    var d = q("goals-drawer");
-    if (!d) return;
-    d.classList.add("open");
-    d.setAttribute("aria-hidden", "false");
-    var close = q("goals-drawer-close");
-    if (close) close.focus({ preventScroll: true }); // move focus into the dialog for keyboard users
+    if (!window.flotillaWorkContext) return;
+    window.flotillaWorkContext.open(goalContext(n), returnEl || cardEl(id));
     // Opening a drawer is a reversible nav step (#349 A1) — Back closes it.
     if (!restoringNode && window.flotillaDash && window.flotillaDash.pushNav) {
       window.flotillaDash.pushNav({ view: "goals", node: id });
@@ -1398,13 +1429,13 @@
     restoringNode = false;
   }
   function closeDrawer() {
-    var d = q("goals-drawer");
-    if (d) { d.classList.remove("open"); d.setAttribute("aria-hidden", "true"); }
-    var card = drawerReturnEl || (selectedId ? cardEl(selectedId) : null);
+    if (window.flotillaWorkContext) window.flotillaWorkContext.close();
+    else contextClosed();
+  }
+  function contextClosed() {
     drawerReturnEl = null;
     lastDrawerHtml = null;
     deselect();
-    if (card) card.focus({ preventScroll: true }); // return focus to the node that opened it
   }
 
   // nodeActivate is the primary node action (#302): deep-link to the node's
@@ -1662,8 +1693,7 @@
       else {
         var card = cardEl(selectedId);
         if (card) card.classList.add("gnode-selected");
-        var d = q("goals-drawer");
-        if (d && d.classList.contains("open")) fillDrawer(n);
+        if (window.flotillaWorkContext) window.flotillaWorkContext.update(goalContext(n));
       }
     }
     if (hoveredId) {
@@ -2457,7 +2487,7 @@
   }).catch(function () {});
 
   window.flotillaGoals = {
-    show: show, refresh: refresh, restoreNode: restoreNode,
+    show: show, refresh: refresh, restoreNode: restoreNode, contextClosed: contextClosed,
     openNode: function () { return selectedId; }, // the open drawer's node id (or null) — for history state
     openDecisions: openDecisions,
     // #509: pure decision-room surface for executable goja/headless regression.
