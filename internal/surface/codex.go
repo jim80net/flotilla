@@ -265,7 +265,8 @@ func codexHasMenuRow(tail, row string) bool {
 const codexComposerPrompt = "›" // U+203A
 
 // ComposerState implements surface.ComposerStateProbe: reads the composer at the terminal cursor.
-// A cursor/capture read error, or tmux copy/view mode, reads Undetermined (spinner fallback).
+// A cursor/capture read error, or tmux copy/view mode, reads Undetermined: pre-paste delivery
+// and switch/recycle fail closed, while post-paste confirmation may still use the spinner.
 func (c codex) ComposerState(pane string) ComposerDisposition {
 	cy, inMode, err := c.cursorState(pane)
 	if err != nil {
@@ -318,12 +319,16 @@ func classifyCodexComposerLine(captured string, cursorY int) ComposerDisposition
 }
 
 func codexHasIdleComposerFooter(lines []string, promptRow int) bool {
+	// LIVE-CAPTURED 2026-07-03: idle composers render either the `/ for
+	// commands` hint or a model-status row beginning `gpt-` below the prompt.
+	// The prefix is line-anchored; observed selector options are numbered, so
+	// `6. gpt-…` cannot satisfy it. Revalidate both anchors on a Codex TUI upgrade.
 	for i := promptRow + 1; i < len(lines) && i <= promptRow+3; i++ {
 		line := strings.TrimSpace(lines[i])
 		if line == "" {
 			continue
 		}
-		return strings.HasPrefix(line, "/ for commands") || line == "/status" || strings.HasPrefix(line, "gpt-")
+		return strings.HasPrefix(line, "/ for commands") || strings.HasPrefix(line, "gpt-")
 	}
 	return false
 }

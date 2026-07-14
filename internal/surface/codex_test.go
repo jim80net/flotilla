@@ -189,7 +189,7 @@ func TestCodexAssess(t *testing.T) {
 		{"capture error → unknown", "codex", nil, false, "", boom, StateUnknown},
 		{"classifier routes: login", "codex", nil, false, "Welcome to Codex\nSign in with ChatGPT", nil, StateAwaitingInput},
 		{"classifier routes: working", "codex", nil, false, "esc to interrupt", nil, StateWorking},
-		{"classifier routes: idle", "codex", nil, false, "› \n/status", nil, StateIdle},
+		{"classifier routes: idle", "codex", nil, false, "› \n/ for commands", nil, StateIdle},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -317,7 +317,7 @@ func TestCodexComposerStateWiring(t *testing.T) {
 	})
 }
 
-func TestCodexRateLimitOverlayDiagnosticNamePendingLiveCapture692(t *testing.T) {
+func TestCodexRateLimitOverlayDiagnosticNamePendingLiveCapture690(t *testing.T) {
 	if got := codexOverlayName(codexRateLimitOverlayCapture); got != "rate-limit overlay" {
 		t.Fatalf("codexOverlayName = %q, want rate-limit overlay", got)
 	}
