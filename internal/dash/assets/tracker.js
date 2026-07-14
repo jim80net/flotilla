@@ -92,11 +92,19 @@
   function renderDesk(desk) {
     var moving = Array.isArray(desk.in_flight) ? desk.in_flight : [];
     var shipped = Array.isArray(desk.shipped) ? desk.shipped : [];
+    var shippedPreview = shipped.slice(0, 10);
+    var shippedRest = shipped.slice(10);
+    var shippedMore = shippedRest.length
+      ? '<details class="issue-shipped-more"><summary><span class="when-closed">show all ' + shipped.length +
+          ' shipped</span><span class="when-open">hide ' + shippedRest.length + " older shipped</span></summary>" +
+          shippedRest.map(function (it) { return workRow(it, "shipped"); }).join("") + "</details>"
+      : "";
     return '<section class="issue-desk">' +
       '<div class="issue-desk-head"><h4>' + escapeHtml(desk.name || "Unassigned") + '</h4><span>' +
         moving.length + " moving · " + shipped.length + " shipped</span></div>" +
       moving.map(function (it) { return workRow(it, "in-flight"); }).join("") +
-      shipped.map(function (it) { return workRow(it, "shipped"); }).join("") +
+      shippedPreview.map(function (it) { return workRow(it, "shipped"); }).join("") +
+      shippedMore +
       "</section>";
   }
 

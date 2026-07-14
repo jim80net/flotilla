@@ -107,20 +107,52 @@ func BuildWorkLedger(repo string, issues []tracker.Issue, goals GoalsDoc, cfg *r
 		}
 		groups[b.flotilla] = append(groups[b.flotilla], b.desk)
 	}
+	doc.Flotillas = orderedWorkLedgerFlotillas(groups, cfg)
+	return doc
+}
+
+// orderedWorkLedgerFlotillas makes the default ledger answer "what is moving?"
+// before presenting recent history. Roster order remains the deterministic tie-break
+// within the moving and shipped-only partitions.
+func orderedWorkLedgerFlotillas(groups map[string][]WorkLedgerDesk, cfg *roster.Config) []WorkLedgerFlotilla {
 	flotillaRank, deskRank := workLedgerRanks(cfg)
 	flotillaNames := make([]string, 0, len(groups))
+	flotillaMoving := make(map[string]bool, len(groups))
 	for name := range groups {
 		flotillaNames = append(flotillaNames, name)
+		flotillaMoving[name] = desksHaveMovingWork(groups[name])
 	}
 	sort.SliceStable(flotillaNames, func(i, j int) bool {
+		movingI := flotillaMoving[flotillaNames[i]]
+		movingJ := flotillaMoving[flotillaNames[j]]
+		if movingI != movingJ {
+			return movingI
+		}
 		return rankLess(flotillaNames[i], flotillaNames[j], flotillaRank)
 	})
+	ordered := make([]WorkLedgerFlotilla, 0, len(flotillaNames))
 	for _, name := range flotillaNames {
 		desks := groups[name]
-		sort.SliceStable(desks, func(i, j int) bool { return rankLess(desks[i].Name, desks[j].Name, deskRank) })
-		doc.Flotillas = append(doc.Flotillas, WorkLedgerFlotilla{Name: name, Desks: desks})
+		sort.SliceStable(desks, func(i, j int) bool {
+			movingI := len(desks[i].InFlight) > 0
+			movingJ := len(desks[j].InFlight) > 0
+			if movingI != movingJ {
+				return movingI
+			}
+			return rankLess(desks[i].Name, desks[j].Name, deskRank)
+		})
+		ordered = append(ordered, WorkLedgerFlotilla{Name: name, Desks: desks})
 	}
-	return doc
+	return ordered
+}
+
+func desksHaveMovingWork(desks []WorkLedgerDesk) bool {
+	for _, desk := range desks {
+		if len(desk.InFlight) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func workLedgerContexts(repo string, goals GoalsDoc) map[int]workLedgerContext {

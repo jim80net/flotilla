@@ -1081,6 +1081,21 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 }
 .issue-desk-head h4 { margin: 0; font-family: var(--display); font-size: .82rem; color: var(--ink); }
 .issue-desk-head span { font-size: .68rem; color: var(--ink-3); }
+.issue-shipped-more { background: var(--abyss-2); border-top: 1px solid var(--line); }
+.issue-shipped-more summary {
+  min-height: 44px; display: flex; align-items: center; justify-content: center;
+  padding: 0 1rem; cursor: pointer; color: var(--cyan); font-size: .72rem;
+  letter-spacing: .04em; text-transform: uppercase;
+}
+.issue-shipped-more summary:hover { background: color-mix(in srgb, var(--cyan) 7%, transparent); }
+.issue-shipped-more summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
+.issue-shipped-more summary::before { content: "▸"; }
+.issue-shipped-more[open] summary::before { content: "▾"; }
+.issue-shipped-more[open] summary { border-bottom: 1px solid var(--line); }
+.issue-shipped-more .when-open { display: none; }
+.issue-shipped-more[open] .when-closed { display: none; }
+.issue-shipped-more[open] .when-open { display: inline; }
+.issue-shipped-more:not([open]) > .issue-row { display: none; }
 .issue-row {
   display: grid;
   grid-template-columns: auto auto 1fr auto;

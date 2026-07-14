@@ -2135,6 +2135,7 @@ func TestIssuesWorkLedger405(t *testing.T) {
 	for _, marker := range []string{
 		"workLedgerURL", `/api/work-ledger`, "renderDesk", "doc.flotillas",
 		"flotilla.desks", "issue-desk-head", "issue-ledger-kicker",
+		"shipped.slice(0, 10)", "issue-shipped-more", "show all ", "when-open", "older shipped",
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("tracker.js must render the #405 fleet work ledger (missing %q)", marker)
@@ -2153,7 +2154,7 @@ func TestIssuesWorkLedger405(t *testing.T) {
 		t.Error("index.html must preserve the work-state filter — approved design §4")
 	}
 	css := doGet(t, srv, "/static/dash.css").Body.String()
-	for _, marker := range []string{".issue-ledger-section", ".issue-ledger-head", ".issue-desk-head", ".issue-context", ".issue-state.shipped"} {
+	for _, marker := range []string{".issue-ledger-section", ".issue-ledger-head", ".issue-desk-head", ".issue-context", ".issue-state.shipped", ".issue-shipped-more", ".issue-shipped-more:not([open]) > .issue-row"} {
 		if !strings.Contains(css, marker) {
 			t.Errorf("dash.css must style the #405 work ledger (missing %q)", marker)
 		}
