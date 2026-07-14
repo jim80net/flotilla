@@ -252,6 +252,9 @@ func TestClassifyCodexComposerLine(t *testing.T) {
 		{"indented placeholder LIVE 2026-07-03 render → Cleared", "  › Find and fix a bug in @filename\n  gpt-5.5 default", 4, 0, ComposerCleared},
 		{"placeholder wording but cursor after text → Pending (typed draft)", "› Explain this codebase\ngpt-5.6-sol medium · ~/workspace", 23, 0, ComposerPending},
 		{"unknown hint wording fails closed → Pending", "› Uncharacterized example\ngpt-5.6-sol medium · ~/workspace", 2, 0, ComposerPending},
+		// A tab passes trimSpace's prompt cut but defeats the byte==cell equivalence
+		// the placeholder arithmetic needs, so the hint check fails closed.
+		{"tab-decorated prefix before › breaks cell math → Pending", "\t› Explain this codebase\ngpt-5.6-sol medium · ~/workspace", 3, 0, ComposerPending},
 		{"model selector highlighted row → Undetermined, never Pending", codexModelSelectorCapture, 0, 2, ComposerUndetermined},
 		{"rate-limit selector highlighted row → Undetermined, never Pending", codexRateLimitOverlayCapture, 0, 3, ComposerUndetermined},
 		{"approval row without › → Undetermined", "  [ ! ] Action Required\n  Approve for me", 0, 0, ComposerUndetermined},

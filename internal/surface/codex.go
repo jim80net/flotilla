@@ -356,10 +356,13 @@ func classifyCodexComposerLine(captured string, cursorX, cursorY int) ComposerDi
 // codexPlaceholderAtCursor reports whether the composer row shows one of the
 // known empty-composer placeholder hints with the terminal cursor parked at the
 // body-start cell. The hint is evidence of an EMPTY textarea only while the
-// cursor has not moved: an identical typed draft leaves the cursor after the
-// text and therefore stays Pending. Requiring an ASCII-space-only prefix before
-// the glyph keeps the byte offset equal to tmux's display-cell cursorX (the
-// glyph itself is one cell); a decorated prefix fails closed to Pending.
+// cursor sits at the body start: typing or pasting leaves the cursor after the
+// text, so an identical draft stays Pending. Accepted residual (shared with the
+// OpenCode precedent): a draft byte-identical to a hint whose author then moved
+// the cursor back to the start (Home) would read Cleared. Requiring an
+// ASCII-space-only prefix before the glyph keeps the byte offset equal to
+// tmux's display-cell cursorX (the glyph itself is one cell); a decorated
+// prefix fails closed to Pending.
 func codexPlaceholderAtCursor(line string, cursorX int) bool {
 	promptAt := strings.Index(line, codexComposerPrompt)
 	if promptAt < 0 || strings.Trim(line[:promptAt], " ") != "" {
