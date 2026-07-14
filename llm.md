@@ -185,15 +185,16 @@ That requires the same Discord provisioning as any other notifying seat:
    `FLOTILLA_WEBHOOK_XO_ADJ=https://discord.com/api/webhooks/...`
 2. **Launch env** — the adjutant's launch recipe must export `FLOTILLA_SECRETS`
    and `FLOTILLA_ROSTER` (and `FLOTILLA_SELF=<adjutant>`) so in-pane
-   `flotilla notify` and finish-edge `mirror-self` hooks resolve the webhook.
+   `flotilla notify` resolves the webhook and `mirror-self` writes the dash ledger.
    See `flotilla-launch.example.json` (`xo-adj` entry).
 3. **Watch startup** — if an adjutant lacks a webhook, `flotilla watch` lists
-   it under "no webhook (will not mirror)" at boot. That is a **misconfig** for
-   operator-loop adjutants (not intentional silence — see #598 `ledger_only`).
+   it as unable to publish explicit parade egress. That is also a **misconfig**
+   for an operator-loop adjutant expected to call `notify`; ordinary turn-finals
+   remain ledger-only regardless.
 
-Coordinators with both `flotilla notify` and finish-edge mirror must not post
-the same turn twice (#595): after a successful notify, the mirror path suppresses
-Discord for ~3 minutes while still writing session-mirror.
+Coordinator finish-edge and `mirror-self` turns are ledger-only by default (#683).
+Only curated `flotilla notify`, direct notify replies, and explicit parade egress
+rise to operator Discord.
 
 ## 7. (Optional) Fleet goals — validate, compile, link
 

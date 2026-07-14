@@ -195,8 +195,8 @@ at rotation time; the product default is what new provisioning produces.
 
 The operator is a busy executive with many reports — not following your work move by
 move. **Every operator-facing message** must work for that reader: status replies,
-decision requests, task confirmations, and **every turn-final** (the Discord mirror posts
-coordinator turn-finals mechanically, verbatim).
+decision requests, task confirmations, curated notifies, and parade reports. Routine
+turn-finals stay on the dash and do not rise mechanically to Discord.
 
 The **four-part mini-brief shape** (installed as the `executive-mini-brief` doctrine
 member):
@@ -215,11 +215,11 @@ member):
 Desk-to-desk traffic stays dense and precise; this register applies only to
 operator-facing surfaces. Principle 5 (reader-modeling) sets the posture; this principle
 and the `executive-mini-brief` block supply the mechanical shape so coordinators do not
-rely on memory when the mirror fires.
+rely on memory when a curated operator message is sent.
 
-**Mechanically supported:** the XO Discord mirror hook audits for the needs-you line and
-logs `MINI-BRIEF-AUDIT` when absent (posts anyway — doctrine injects the shape, the hook
-does not rewrite text).
+**Mechanically supported:** the coordinator session-mirror hook audits for the needs-you
+line and logs `MINI-BRIEF-AUDIT` when absent. It records the turn-final in the ledger
+without rewriting it; ordinary turns do not post to operator Discord.
 
 ---
 

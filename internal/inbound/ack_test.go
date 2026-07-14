@@ -69,10 +69,13 @@ func TestEvaluateFinish_EscalatesOnlyAfterConfirmedReinject(t *testing.T) {
 	}
 }
 
-func TestFormatDispatchFooter_IncludesEchoInstruction(t *testing.T) {
+func TestFormatDispatchFooter_InstructsDurableAck683(t *testing.T) {
 	footer := FormatDispatchFooter("flotilla-dispatch-cafebabe")
-	if !strings.Contains(footer, "#472") || !strings.Contains(footer, "flotilla-dispatch-cafebabe") {
+	if !strings.Contains(footer, "flotilla dispatch-ack flotilla-dispatch-cafebabe") {
 		t.Fatalf("footer missing contract: %q", footer)
+	}
+	if strings.Contains(footer, "operator-facing turn-final") {
+		t.Fatalf("footer still asks for operator-visible nonce prose: %q", footer)
 	}
 }
 

@@ -19,12 +19,13 @@ func TestDeskMirror_AppendsSessionLedgerOnPost(t *testing.T) {
 		"\n```"
 
 	m := deskMirror{
-		rosterDir: dir,
-		now:       func() time.Time { return time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC) },
-		webhook:   func(string) (string, bool) { return "https://wh", true },
-		turnFinal: func(string) (string, bool, error) { return turn, true, nil },
-		post:      func(_, _, body string) error { posted = body; return nil },
-		logf:      recordLogf(&lines),
+		allowDiscord: true,
+		rosterDir:    dir,
+		now:          func() time.Time { return time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC) },
+		webhook:      func(string) (string, bool) { return "https://wh", true },
+		turnFinal:    func(string) (string, bool, error) { return turn, true, nil },
+		post:         func(_, _, body string) error { posted = body; return nil },
+		logf:         recordLogf(&lines),
 	}
 	m.run("backend")
 
@@ -71,11 +72,12 @@ func TestDeskMirror_FleetInternalVocabPostsAndLedgers(t *testing.T) {
 	var rec sessionmirror.Record
 	var posted string
 	m := deskMirror{
-		rosterDir: dir,
-		webhook:   func(string) (string, bool) { return "https://wh", true },
-		turnFinal: func(string) (string, bool, error) { return "leak acme-desk token", true, nil },
-		post:      func(_, _, body string) error { posted = body; return nil },
-		logf:      func(string, ...any) {},
+		allowDiscord: true,
+		rosterDir:    dir,
+		webhook:      func(string) (string, bool) { return "https://wh", true },
+		turnFinal:    func(string) (string, bool, error) { return "leak acme-desk token", true, nil },
+		post:         func(_, _, body string) error { posted = body; return nil },
+		logf:         func(string, ...any) {},
 		ledgerAppend: func(_, _ string, r sessionmirror.Record) error {
 			appended = true
 			rec = r
@@ -103,11 +105,10 @@ func TestDeskMirror_LedgerFailOmitsLedgerSuccess(t *testing.T) {
 	turn := "coordinator turn-final body"
 
 	m := deskMirror{
-		ledgerOnly: true,
-		rosterDir:  dir,
-		turnFinal:  func(string) (string, bool, error) { return turn, true, nil },
-		post:       func(_, _, _ string) error { t.Fatal("must not post"); return nil },
-		logf:       recordLogf(&lines),
+		rosterDir: dir,
+		turnFinal: func(string) (string, bool, error) { return turn, true, nil },
+		post:      func(_, _, _ string) error { t.Fatal("must not post"); return nil },
+		logf:      recordLogf(&lines),
 		ledgerAppend: func(string, string, sessionmirror.Record) error {
 			return fmt.Errorf("disk full")
 		},
@@ -124,7 +125,7 @@ func TestDeskMirror_LedgerFailOmitsLedgerSuccess(t *testing.T) {
 	}
 }
 
-func TestDeskMirror_CoordinatorPostsDiscordAndLedger(t *testing.T) {
+func TestDeskMirror_CoordinatorDefaultsToLedgerWithoutDiscord683(t *testing.T) {
 	dir := t.TempDir()
 	postCalls := 0
 	var postedBody string
@@ -147,11 +148,11 @@ func TestDeskMirror_CoordinatorPostsDiscordAndLedger(t *testing.T) {
 	}
 	m.run("xo")
 
-	if postCalls != 1 {
-		t.Fatalf("coordinator mirror posted %d times, want 1 (harness-agnostic Discord path)", postCalls)
+	if postCalls != 0 {
+		t.Fatalf("coordinator turn-final posted %d times, want 0 (operator channel is fail-quiet)", postCalls)
 	}
-	if !strings.HasPrefix(postedBody, "xo anchor") {
-		t.Errorf("posted body = %q, want modeled anchor body", postedBody)
+	if postedBody != "" {
+		t.Errorf("posted body = %q, want no operator-channel turn-final", postedBody)
 	}
 
 	path, err := sessionmirror.LedgerPath(dir, "xo")
@@ -169,8 +170,72 @@ func TestDeskMirror_CoordinatorPostsDiscordAndLedger(t *testing.T) {
 	if !strings.HasPrefix(doc.Entries[0].Info, "xo anchor") {
 		t.Errorf("info = %q, want modeled anchor body", doc.Entries[0].Info)
 	}
-	if len(lines) != 1 || !strings.Contains(lines[0], "POST xo 1 chunks") {
-		t.Errorf("decision lines = %v, want exactly one POST line", lines)
+	if len(lines) != 1 || !strings.Contains(lines[0], "LEDGER xo") {
+		t.Errorf("decision lines = %v, want exactly one LEDGER line", lines)
+	}
+}
+
+func TestDeskMirror_ExplicitParadeStillPostsAndLedgers683(t *testing.T) {
+	dir := t.TempDir()
+	const token = "0123456789abcdef"
+	fixed := time.Date(2026, 7, 13, 18, 0, 0, 0, time.UTC)
+	if err := markParadePending(dir, "backend", token, fixed); err != nil {
+		t.Fatal(err)
+	}
+	posted := 0
+	turn := appendParadeEgressFooter("parade answer", token)
+	m := deskMirror{
+		rosterDir:    dir,
+		claimDiscord: func(agent, text string) bool { return claimParadePending(dir, agent, text, fixed) },
+		webhook:      func(string) (string, bool) { return "https://wh", true },
+		turnFinal:    func(string) (string, bool, error) { return turn, true, nil },
+		post: func(_, _, body string) error {
+			posted++
+			if strings.Contains(body, token) {
+				t.Fatal("parade correlation token must not reach operator prose")
+			}
+			return nil
+		},
+		logf: func(string, ...any) {},
+	}
+	m.run("backend")
+	if posted != 1 {
+		t.Fatalf("explicit parade posts = %d, want 1", posted)
+	}
+	path, err := sessionmirror.LedgerPath(dir, "backend")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw, err := os.ReadFile(path); err != nil || !strings.Contains(string(raw), "parade answer") {
+		t.Fatalf("parade ledger = %q, err=%v", raw, err)
+	}
+}
+
+func TestDeskMirror_ParadeMarkerCannotAuthorizeUnrelatedTurn683(t *testing.T) {
+	dir := t.TempDir()
+	const token = "fedcba9876543210"
+	fixed := time.Date(2026, 7, 13, 18, 0, 0, 0, time.UTC)
+	if err := markParadePending(dir, "backend", token, fixed); err != nil {
+		t.Fatal(err)
+	}
+	posted := 0
+	m := deskMirror{
+		rosterDir:    dir,
+		claimDiscord: func(agent, text string) bool { return claimParadePending(dir, agent, text, fixed) },
+		webhook:      func(string) (string, bool) { return "https://wh", true },
+		turnFinal: func(string) (string, bool, error) {
+			return appendParadeEgressFooter("quoted request", token) + "unrelated working final", true, nil
+		},
+		post: func(_, _, _ string) error { posted++; return nil },
+		logf: func(string, ...any) {},
+	}
+	m.run("backend")
+	if posted != 0 {
+		t.Fatalf("unrelated turn posted %d times, want fail-quiet", posted)
+	}
+	path, _ := paradePendingPath(dir, "backend", token)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("correlated marker should remain for its matching parade: %v", err)
 	}
 }
 
@@ -178,9 +243,8 @@ func TestDeskMirror_LedgerOnlySkipsWithoutWebhook(t *testing.T) {
 	dir := t.TempDir()
 	postCalls := 0
 	m := deskMirror{
-		ledgerOnly: true,
-		rosterDir:  dir,
-		turnFinal:  func(string) (string, bool, error) { return "coordinator turn", true, nil },
+		rosterDir: dir,
+		turnFinal: func(string) (string, bool, error) { return "coordinator turn", true, nil },
 		post: func(_, _, _ string) error {
 			postCalls++
 			return nil
@@ -209,10 +273,11 @@ func TestDeskMirror_LedgerOnlySkipsWithoutWebhook(t *testing.T) {
 func TestDeskMirror_DeskPathStillPosts(t *testing.T) {
 	var posted string
 	m := deskMirror{
-		webhook:   func(string) (string, bool) { return "https://wh", true },
-		turnFinal: func(string) (string, bool, error) { return "desk report", true, nil },
-		post:      func(_, _, body string) error { posted = body; return nil },
-		logf:      func(string, ...any) {},
+		allowDiscord: true,
+		webhook:      func(string) (string, bool) { return "https://wh", true },
+		turnFinal:    func(string) (string, bool, error) { return "desk report", true, nil },
+		post:         func(_, _, body string) error { posted = body; return nil },
+		logf:         func(string, ...any) {},
 	}
 	m.run("backend")
 	if posted != "desk report" {

@@ -122,7 +122,7 @@ func TestFinishEdgeMirrorAgents_IncludesCoordinators506(t *testing.T) {
 	}
 }
 
-func TestLogMirrorCoverage_IncludesCoordinatorsAndLoudMissing506(t *testing.T) {
+func TestLogMirrorCoverage_ReportsParadeReadinessWithoutWeakeningLedger683(t *testing.T) {
 	cfg := &roster.Config{
 		XOAgent:  "meta-xo",
 		CosAgent: "cos",
@@ -141,8 +141,8 @@ func TestLogMirrorCoverage_IncludesCoordinatorsAndLoudMissing506(t *testing.T) {
 	if !strings.Contains(out, "meta-xo") {
 		t.Fatalf("finish-edge banner must include primary XO meta-xo: %q", out)
 	}
-	if !strings.Contains(out, "finish-edge mirror") {
-		t.Fatalf("banner must say finish-edge mirror (not desk-only): %q", out)
+	if !strings.Contains(out, "turn-final ledger enabled") || !strings.Contains(out, "parade egress") {
+		t.Fatalf("banner must distinguish durable ledger from explicit parade egress: %q", out)
 	}
 	if !strings.Contains(out, "cos") || !strings.Contains(out, "backend") {
 		t.Fatalf("banner must list cos + backend: %q", out)
@@ -151,7 +151,7 @@ func TestLogMirrorCoverage_IncludesCoordinatorsAndLoudMissing506(t *testing.T) {
 	if !strings.Contains(out, "1 have no webhook") && !strings.Contains(out, "have no webhook") {
 		t.Fatalf("want missing-webhook count in stdout: %q", out)
 	}
-	if !strings.Contains(errOut, "WARNING") || !strings.Contains(errOut, "meta-xo") {
+	if !strings.Contains(errOut, "WARNING") || !strings.Contains(errOut, "meta-xo") || !strings.Contains(errOut, "parade") {
 		t.Fatalf("stderr must LOUD-warn missing coordinator webhook: %q", errOut)
 	}
 	if !strings.Contains(errOut, "FLOTILLA_WEBHOOK") {
@@ -167,5 +167,15 @@ func TestPartitionWebhookCoverage506(t *testing.T) {
 	}
 	if len(without) != 2 {
 		t.Fatalf("without = %v, want cos + alpha-xo", without)
+	}
+}
+
+func TestFinishMirrorWiringRemainsActiveWithoutDiscordSecrets683(t *testing.T) {
+	cfg := &roster.Config{XOAgent: "xo", Agents: []roster.Agent{{Name: "xo"}, {Name: "backend"}}}
+	if hook := deskMirrorOnFinish(cfg, nil, nil, t.TempDir()); hook == nil {
+		t.Fatal("desk finish mirror must remain active for ledger durability without Discord")
+	}
+	if hook := coordinatorMirrorOnFinish(cfg, nil, nil, "", t.TempDir()); hook == nil {
+		t.Fatal("coordinator finish mirror must remain active for ledger durability without Discord")
 	}
 }

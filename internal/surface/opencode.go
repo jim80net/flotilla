@@ -1,6 +1,7 @@
 package surface
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/jim80net/flotilla/internal/deliver"
@@ -17,22 +18,26 @@ func init() { Register(newOpenCode()) }
 // means idle and there is no mid-stream false-idle gap. Like the other drivers it
 // wraps deliver primitives behind injectable fields for unit-testability.
 type openCode struct {
-	paneCommand func(string) (string, error)
-	isShell     func(string) bool
-	capturePane func(string) (string, error)
-	classify    func(string) State
-	send        func(string, string) error
-	inject      func(string, string) error
+	paneCommand    func(string) (string, error)
+	isShell        func(string) bool
+	capturePane    func(string) (string, error)
+	captureStyled  func(string) (string, error)
+	classify       func(string) State
+	send           func(string, string) error
+	inject         func(string, string) error
+	cursorSnapshot func(pane string) (cursorX, cursorY int, visible, inMode bool, err error)
 }
 
 func newOpenCode() openCode {
 	return openCode{
-		paneCommand: deliver.PaneCommand,
-		isShell:     deliver.IsShell,
-		capturePane: deliver.CapturePane,
-		classify:    parseOpenCodeState,
-		send:        deliver.Send,
-		inject:      deliver.InjectSlash,
+		paneCommand:    deliver.PaneCommand,
+		isShell:        deliver.IsShell,
+		capturePane:    deliver.CapturePane,
+		captureStyled:  deliver.CapturePaneStyled,
+		classify:       parseOpenCodeState,
+		send:           deliver.Send,
+		inject:         deliver.InjectSlash,
+		cursorSnapshot: deliver.CursorSnapshot,
 	}
 }
 
@@ -78,6 +83,224 @@ func (openCode) RotateStrategy() Strategy { return SlashCommand }
 // literal text), it signals the caller to use the handoff-gated kill fallback — safe
 // because the caller has already preserved context. Mirrors grok's honest refusal.
 func (openCode) Close(pane string) error { return ErrNoGracefulClose }
+
+// --- ComposerStateProbe: OpenCode cursor-indexed composer classifier ---
+
+// openCodeComposerBorder is the left border on every row of OpenCode's composer.
+// PROVENANCE: LIVE-CAPTURED 2026-07-13 from official OpenCode 1.3.15. With the
+// terminal cursor on the middle composer row, an empty draft renders `  ┃` and a
+// typed synthetic draft renders `  ┃  beta-probe`.
+const openCodeComposerBorder = "┃" // U+2503
+
+// openCodeEmptyPlaceholders are OpenCode's randomized fresh-session empty hints.
+// PROVENANCE: SOURCE-VERIFIED in the official OpenCode 1.3.15 binary, whose TUI
+// `normal` placeholder list contains exactly these three suffixes. The first two
+// forms were also LIVE-CAPTURED 2026-07-13. Keep this exact and version-scoped:
+// unknown wording is Pending, never guessed empty. In every live empty render,
+// cursorX stayed parked at the body start; typing replaced the hint and advanced
+// cursorX.
+var openCodeEmptyPlaceholders = []string{
+	`Ask anything... "Fix a TODO in the codebase"`,
+	`Ask anything... "What is the tech stack of this project?"`,
+	`Ask anything... "Fix broken tests"`,
+}
+
+// ComposerState implements ComposerStateProbe. Only an idle OpenCode frame and
+// the terminal-cursor row can prove a cleared composer. Working, approval, and
+// error chrome, tmux copy/view mode, and read failures remain Undetermined so
+// recycle and confirmed-delivery gates fail closed.
+func (c openCode) ComposerState(pane string) ComposerDisposition {
+	cx, cy, visible, inMode, err := c.cursorSnapshot(pane)
+	if err != nil || inMode {
+		return ComposerUndetermined
+	}
+	captured, err := c.capturePane(pane)
+	if err != nil || c.classify(captured) != StateIdle {
+		return ComposerUndetermined
+	}
+	if visible {
+		return classifyOpenCodeComposerLine(captured, cx, cy)
+	}
+	if c.captureStyled == nil {
+		return ComposerUndetermined
+	}
+	styled, err := c.captureStyled(pane)
+	if err != nil {
+		return ComposerUndetermined
+	}
+	return classifyHiddenOpenCodeComposer(captured, styled)
+}
+
+// classifyOpenCodeComposerLine classifies the 0-based terminal-cursor row. A
+// valid row must start with the live-characterized composer border. Text after
+// that border is a pending draft except for the exact fresh-session placeholder
+// while the cursor remains at the body start. An out-of-range or non-composer
+// row is Undetermined rather than a false Cleared result.
+func classifyOpenCodeComposerLine(captured string, cursorX, cursorY int) ComposerDisposition {
+	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
+	if cursorY < 0 || cursorY >= len(lines) {
+		return ComposerUndetermined
+	}
+	line := lines[cursorY]
+	borderAt := strings.Index(line, openCodeComposerBorder)
+	if borderAt < 0 {
+		return ComposerUndetermined
+	}
+	// The live TUI centers the composer with ASCII spaces. Requiring that exact
+	// prefix means the byte offset below is also the terminal-cell offset; a
+	// decorated/wide-character prefix fails closed instead of mixing rune counts
+	// with tmux's display-cell cursorX.
+	if strings.Trim(line[:borderAt], " ") != "" {
+		return ComposerUndetermined
+	}
+	after, isComposer := strings.CutPrefix(trimSpace(line), openCodeComposerBorder)
+	if !isComposer {
+		return ComposerUndetermined
+	}
+	body := trimSpace(after)
+	if body == "" {
+		return ComposerCleared
+	}
+	// A fresh session paints placeholder text in the empty input. It is evidence
+	// of Cleared only while the cursor remains at the body start; an identical
+	// typed draft leaves the cursor after the text and therefore stays Pending.
+	bodyStartX := borderAt + 3 // ASCII-space prefix + border + two body spaces
+	if containsExact(body, openCodeEmptyPlaceholders) && cursorX == bodyStartX {
+		return ComposerCleared
+	}
+	return ComposerPending
+}
+
+// classifyHiddenOpenCodeComposer handles tmux sessions with no attached client.
+// OpenCode hides the terminal cursor in that state, so tmux exposes a bottom-
+// right sentinel rather than the textarea cursor. The source-verified prompt
+// layout is a consecutive border block whose input is the row immediately
+// after the top padding row (prompt/index.tsx, OpenCode 1.3.15). Empty input is
+// either blank or a known placeholder rendered in textMuted; an identical typed
+// draft uses the normal text color and remains Pending.
+func classifyHiddenOpenCodeComposer(captured, styled string) ComposerDisposition {
+	lines := strings.Split(strings.TrimRight(captured, "\n"), "\n")
+	styledLines := strings.Split(strings.TrimRight(styled, "\n"), "\n")
+	if len(lines) != len(styledLines) {
+		return ComposerUndetermined
+	}
+	// The composer is the last consecutive border block in OpenCode 1.3.15:
+	// conversation content renders above it, while footer/status chrome below it
+	// is unbordered. Requiring at least the padding, input, and metadata rows
+	// prevents a quoted single border line from being mistaken for the composer.
+	start, runStart, runLen := -1, -1, 0
+	for i, line := range lines {
+		if strings.HasPrefix(trimSpace(line), openCodeComposerBorder) {
+			if runLen == 0 {
+				runStart = i
+			}
+			runLen++
+			continue
+		}
+		if runLen >= 3 {
+			start = runStart
+		}
+		runLen = 0
+	}
+	if runLen >= 3 {
+		start = runStart
+	}
+	if start < 0 || start+1 >= len(lines) {
+		return ComposerUndetermined
+	}
+	input := lines[start+1]
+	borderAt := strings.Index(input, openCodeComposerBorder)
+	if borderAt < 0 || strings.Trim(input[:borderAt], " ") != "" {
+		return ComposerUndetermined
+	}
+	after, ok := strings.CutPrefix(trimSpace(input), openCodeComposerBorder)
+	if !ok {
+		return ComposerUndetermined
+	}
+	body := trimSpace(after)
+	if body == "" {
+		return ComposerCleared
+	}
+	if !containsExact(body, openCodeEmptyPlaceholders) {
+		return ComposerPending
+	}
+	if placeholderUsesMutedStyle(styledLines[start+1], body) {
+		return ComposerCleared
+	}
+	return ComposerPending
+}
+
+// placeholderUsesMutedStyle compares the foreground at the placeholder's
+// first byte with the foreground of the body-leading space. OpenCode renders
+// placeholderColor=textMuted while actual textarea text uses theme.text. A
+// theme that does not expose distinct SGR colors fails closed.
+func placeholderUsesMutedStyle(styledLine, placeholder string) bool {
+	plain, foreground := decodeSGRForeground(styledLine)
+	idx := strings.Index(plain, placeholder)
+	if idx <= 0 || idx >= len(foreground) {
+		return false
+	}
+	return foreground[idx] != "" && foreground[idx-1] != "" && foreground[idx] != foreground[idx-1]
+}
+
+func decodeSGRForeground(line string) (string, []string) {
+	var plain strings.Builder
+	foreground := make([]string, 0, len(line))
+	fg := "default"
+	for i := 0; i < len(line); {
+		if line[i] == 0x1b && i+1 < len(line) && line[i+1] == '[' {
+			end := i + 2
+			for end < len(line) && (line[end] < 0x40 || line[end] > 0x7e) {
+				end++
+			}
+			if end < len(line) {
+				if line[end] == 'm' {
+					fg = sgrForeground(line[i+2:end], fg)
+				}
+				i = end + 1
+				continue
+			}
+		}
+		plain.WriteByte(line[i])
+		foreground = append(foreground, fg)
+		i++
+	}
+	return plain.String(), foreground
+}
+
+func sgrForeground(params, current string) string {
+	parts := strings.Split(params, ";")
+	for i := 0; i < len(parts); i++ {
+		switch parts[i] {
+		case "", "0", "39":
+			current = "default"
+		case "38":
+			if i+2 < len(parts) && parts[i+1] == "5" {
+				current = "38;5;" + parts[i+2]
+				i += 2
+			} else if i+4 < len(parts) && parts[i+1] == "2" {
+				current = strings.Join(parts[i:i+5], ";")
+				i += 4
+			}
+		default:
+			if n, err := strconv.Atoi(parts[i]); err == nil {
+				if (n >= 30 && n <= 37) || (n >= 90 && n <= 97) {
+					current = parts[i]
+				}
+			}
+		}
+	}
+	return current
+}
+
+func containsExact(s string, candidates []string) bool {
+	for _, candidate := range candidates {
+		if s == candidate {
+			return true
+		}
+	}
+	return false
+}
 
 // --- pure state classifier (the testable core) ---
 

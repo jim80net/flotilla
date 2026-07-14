@@ -1677,9 +1677,8 @@ func newDeskEscalate(cfg *roster.Config, primaryXO string, alert func(string)) f
 }
 
 // deskMirrorOnFinish builds the detector's MirrorOnFinish side-effect: when a non-XO desk finishes a
-// turn, mirror its turn-final output to its home Discord channel. It returns nil — the detector's
-// inert default — when no secrets file is configured (no per-desk webhooks to post to), so a
-// deployment without --secrets keeps today's behavior byte-identically.
+// turn, append its turn-final to the session ledger. Discord is default-off; an explicit parade
+// marker is the only turn-final allow, and missing secrets never disables ledger durability.
 //
 // The closure resolves each desk's surface driver and reads the turn-final through the SHARED
 // surface.ResultReader seam (the same path `flotilla result` uses), so the CLI and the auto-mirror
@@ -1718,11 +1717,8 @@ func partitionWebhookCoverage(agents []string, secrets *roster.Secrets) (withMir
 	return withMirror, without
 }
 
-// logMirrorCoverage emits a ONE-TIME startup line naming which seats WILL finish-edge mirror
-// (webhook resolves) and which will NOT. Includes coordinator seats (primary XO, cos_agent,
-// project XOs) — the same set CoordinatorMirrorOnFinish + MirrorOnFinish monitor (#506).
-// Missing webhooks surface a LOUD stderr WARNING (not a silent skip). With secrets nil the
-// mirror is inert and this prints nothing.
+// logMirrorCoverage emits a one-time parade-egress readiness line. Every finish edge
+// remains ledger-capable without secrets; webhooks only govern the explicit parade allow.
 func logMirrorCoverage(cfg *roster.Config, secrets *roster.Secrets, xo string) {
 	if secrets == nil {
 		return
@@ -1730,13 +1726,12 @@ func logMirrorCoverage(cfg *roster.Config, secrets *roster.Secrets, xo string) {
 	_ = xo // retained for call-site compatibility; coverage is no longer primary-XO-exclusive
 	agents := finishEdgeMirrorAgents(cfg)
 	withMirror, without := partitionWebhookCoverage(agents, secrets)
-	fmt.Printf("flotilla watch: finish-edge mirror — %d will mirror %v; %d have no webhook (will not mirror) %v\n",
+	fmt.Printf("flotilla watch: turn-final ledger enabled; parade egress — %d routable %v; %d have no webhook %v\n",
 		len(withMirror), withMirror, len(without), without)
 	if len(without) > 0 {
-		// LOUD provision gap — operator/coordinator must not discover missing Discord
-		// visibility only after a turn finishes (#506).
+		// LOUD parade provision gap — ordinary turn-finals remain durably ledgered.
 		keyHint := roster.WebhookKey(without[0])
-		fmt.Fprintf(os.Stderr, "flotilla watch: WARNING — %d seat(s) lack a Discord webhook and will NOT appear on Discord %v — set %s (and peers) in secrets; mirroring invariant #506\n",
+		fmt.Fprintf(os.Stderr, "flotilla watch: WARNING — %d seat(s) lack a Discord webhook and cannot publish an explicit parade %v — set %s (and peers) in secrets; ordinary turn-finals remain ledger-only\n",
 			len(without), without, keyHint)
 	}
 }
@@ -1868,17 +1863,20 @@ func readDeskTurnFinal(cfg *roster.Config, agent string) (text string, ok bool, 
 }
 
 // coordinatorMirrorOnFinish builds the detector's CoordinatorMirrorOnFinish side-effect for every
-// monitored coordinator: read turn-final via ResultReader, post Discord (chunked), append
-// session-mirror ledger, and best-effort CoS ledger. Harness-agnostic — does not rely on Claude
+// monitored coordinator: read turn-final via ResultReader and append the session-mirror ledger.
+// An explicit parade marker may additionally post Discord and append the CoS ledger. Harness-agnostic — does not rely on Claude
 // Stop hooks (Codex/Grok coordinators have none).
 func coordinatorMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr transport.Transport, rosterPath, rosterDir string) func(agent string) {
-	if secrets == nil || tr == nil {
-		return nil
-	}
 	return func(agent string) {
 		m := deskMirror{
 			rosterDir: rosterDir,
+			claimDiscord: func(a, turnFinal string) bool {
+				return claimParadePending(rosterDir, a, turnFinal, time.Now())
+			},
 			webhook: func(a string) (string, bool) {
+				if secrets == nil {
+					return "", false
+				}
 				url, err := secrets.Webhook(a)
 				if err != nil || url == "" {
 					return "", false
@@ -1889,6 +1887,9 @@ func coordinatorMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr t
 				return readDeskTurnFinal(cfg, a)
 			},
 			post: func(url, username, content string) error {
+				if tr == nil {
+					return fmt.Errorf("no outbound transport")
+				}
 				return tr.Post(transport.NewWebhookDestination(url), username, content)
 			},
 			onDiscordSuccess: func(from, body string) {
@@ -1904,13 +1905,16 @@ func coordinatorMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr t
 }
 
 func deskMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr transport.Transport, rosterDir string) func(agent string) {
-	if secrets == nil || tr == nil {
-		return nil
-	}
 	return func(agent string) {
 		m := deskMirror{
 			rosterDir: rosterDir,
+			claimDiscord: func(a, turnFinal string) bool {
+				return claimParadePending(rosterDir, a, turnFinal, time.Now())
+			},
 			webhook: func(a string) (string, bool) {
+				if secrets == nil {
+					return "", false
+				}
 				url, err := secrets.Webhook(a)
 				if err != nil || url == "" {
 					return "", false
@@ -1921,6 +1925,9 @@ func deskMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr transpor
 				return readDeskTurnFinal(cfg, a)
 			},
 			post: func(url, username, content string) error {
+				if tr == nil {
+					return fmt.Errorf("no outbound transport")
+				}
 				return tr.Post(transport.NewWebhookDestination(url), username, content)
 			},
 			onTurnFinal: operatorTurnFinalAck(rosterDir),

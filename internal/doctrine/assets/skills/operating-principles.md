@@ -53,8 +53,8 @@ standing principles:
    they work on (`flotilla workspace init --repo …`) — not bare directories. Identity
    (`AGENTS.md` / `CLAUDE.md`) lives in the worktree; legacy bare-dir desks migrate
    at their next organic rotation, not by forced mass migration.
-12. **Operator turn-finals are executive mini-briefs.** Every operator-facing message
-   (including turn-finals the Discord mirror posts mechanically) leads with a plain-
+12. **Operator messages are executive mini-briefs.** Every operator-facing message
+   (curated notify, direct reply, or parade report) leads with a plain-
    language bottom line, names work streams by what they do, puts IDs in a detail footer,
    and closes with an explicit action-status line (one concrete ask or a varied all-clear) —
    see the `executive-mini-brief` doctrine block for the mechanical shape.

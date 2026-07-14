@@ -17,9 +17,9 @@
 //     agent one level above reviews and merges (the merge IS the independent review).
 //   - act-dont-idle-hold — an IDENTITY-APPEND rule: execute authorized reversible work;
 //     never stall on a non-decision by holding or waiting.
-//   - executive-mini-brief — an IDENTITY-APPEND rule: operator-facing turn-finals use
+//   - executive-mini-brief — an IDENTITY-APPEND rule: curated operator messages use
 //     the four-part mini-brief format (bottom line, plain-language streams, detail
-//     footer, explicit needs-you line); coordinators especially, mirror-posted verbatim.
+//     footer, explicit needs-you line); routine turn-finals remain dash-only.
 //   - xo-outbound — an IDENTITY-APPEND rule (coordinator-only): post operator-facing
 //     replies via `flotilla notify`; do not notify on heartbeat ticks or routine plumbing.
 //   - operator-direct-tasking — an IDENTITY-APPEND rule: operator-direct tasking is
@@ -195,8 +195,8 @@ var members = []Member{
 		CloseMarker: actDontIdleHoldCloseMarker,
 	},
 	{
-		// executive-mini-brief: operator-facing communications (including turn-finals
-		// the Discord mirror posts mechanically) use the four-part mini-brief shape.
+		// executive-mini-brief: curated operator-facing communications use the
+		// four-part mini-brief shape; routine turn-finals remain dash-only.
 		Name:        "executive-mini-brief",
 		Mechanism:   MechanismIdentityAppend,
 		Content:     mustRead("assets/skills/executive-mini-brief.md"),

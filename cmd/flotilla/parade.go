@@ -5,10 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/deliver"
+	"github.com/jim80net/flotilla/internal/inbound"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 )
@@ -153,8 +155,8 @@ NEED:                     ← omit if none
 DEMO:                     ← always last
   • assets/… — or N/A with reason
 
-Do NOT run "flotilla notify" and do NOT touch secrets — answer in-pane; the fleet mirror
-publishes your turn-final to your channel automatically.`
+Do NOT run "flotilla notify" and do NOT touch secrets — answer in-pane; the explicit
+parade stream publishes your turn-final to your channel automatically.`
 }
 
 // paradeRollupWakeBody composes the roll-up wake for a coordinating seat — self-sufficient
@@ -341,7 +343,20 @@ func deliverParadeOne(cfg *roster.Config, secrets *roster.Secrets, a paradeArgs,
 	if surface.SelfHealEnabled() {
 		confirm.SendCtrlC = deliver.SendCtrlC
 	}
+	token, err := inbound.NewID()
+	if err != nil {
+		return fmt.Errorf("parade request identity: %w", err)
+	}
+	message = appendParadeEgressFooter(message, token)
+	rosterDir := filepath.Dir(a.rosterPath)
+	// Arm before submit so even a very fast completion has correlation state.
+	// A crash leaves only a random-token marker that no unrelated turn can satisfy;
+	// it expires fail-quiet. A confirmed submit failure clears it below.
+	if err := markParadePending(rosterDir, agentName, token, time.Now()); err != nil {
+		return fmt.Errorf("agent %q: record explicit parade egress: %w", agentName, err)
+	}
 	if err := confirm.SubmitWithSelfHeal(drv, pane, message); err != nil {
+		clearParadePending(rosterDir, agentName, token)
 		switch {
 		case errors.Is(err, surface.ErrBusy):
 			return fmt.Errorf("%s is busy (mid-turn) — parade NOT delivered; retry when it is idle", agentName)

@@ -16,6 +16,7 @@ import (
 // Consume reasons recorded on the durable registry.
 const (
 	ReasonTurnFinalAck = "turn-final-ack"
+	ReasonDurableAck   = "durable-ack"
 	ReasonMerged       = "merged"
 	ReasonManual       = "manual"
 	ReasonSuppressed   = "suppressed"

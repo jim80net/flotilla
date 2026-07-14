@@ -6,12 +6,9 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 	"unicode/utf8"
 
-	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/sessionmirror"
-	"github.com/jim80net/flotilla/internal/watch"
 )
 
 // recordLogf captures the decision lines a deskMirror emits, so each test can assert EXACTLY ONE
@@ -25,7 +22,8 @@ func TestDeskMirrorSkipsWhenNoWebhook(t *testing.T) {
 	posted := 0
 	// No rosterDir and no webhook → nothing to do after WARN (no session-mirror target).
 	m := deskMirror{
-		webhook: func(string) (string, bool) { return "", false },
+		allowDiscord: true,
+		webhook:      func(string) (string, bool) { return "", false },
 		turnFinal: func(string) (string, bool, error) {
 			t.Fatal("turnFinal must not be read when no webhook and no rosterDir")
 			return "", false, nil
@@ -52,11 +50,12 @@ func TestDeskMirrorNoWebhookStillSessionMirrors572(t *testing.T) {
 	var lines []string
 	posted := 0
 	m := deskMirror{
-		rosterDir: dir,
-		webhook:   func(string) (string, bool) { return "", false },
-		turnFinal: func(string) (string, bool, error) { return "coordinator turn without webhook", true, nil },
-		post:      func(string, string, string) error { posted++; return nil },
-		logf:      recordLogf(&lines),
+		allowDiscord: true,
+		rosterDir:    dir,
+		webhook:      func(string) (string, bool) { return "", false },
+		turnFinal:    func(string) (string, bool, error) { return "coordinator turn without webhook", true, nil },
+		post:         func(string, string, string) error { posted++; return nil },
+		logf:         recordLogf(&lines),
 	}
 	m.run("cos")
 	if posted != 0 {
@@ -95,11 +94,12 @@ func TestDeskMirrorSkipsWhenNotSubstantive(t *testing.T) {
 	var lines []string
 	posted, acked := 0, 0
 	m := deskMirror{
-		webhook:     func(string) (string, bool) { return "https://wh", true },
-		turnFinal:   func(string) (string, bool, error) { return "", false, nil },
-		post:        func(string, string, string) error { posted++; return nil },
-		onTurnFinal: func(string, string) { acked++ },
-		logf:        recordLogf(&lines),
+		allowDiscord: true,
+		webhook:      func(string) (string, bool) { return "https://wh", true },
+		turnFinal:    func(string) (string, bool, error) { return "", false, nil },
+		post:         func(string, string, string) error { posted++; return nil },
+		onTurnFinal:  func(string, string) { acked++ },
+		logf:         recordLogf(&lines),
 	}
 	m.run("backend")
 	if posted != 0 {
@@ -115,10 +115,11 @@ func TestDeskMirrorSkipsWhenNotSubstantive(t *testing.T) {
 
 func TestDeskMirrorSubstantiveTurnFinalInvokesMechanicalAckHook(t *testing.T) {
 	var ackedAgent, ackedBody string
+	// Default allowDiscord=false is ledger-only (#684): mechanical ack must still
+	// fire after a substantive turn-final and before any Discord path.
 	m := deskMirror{
-		rosterDir:  t.TempDir(),
-		ledgerOnly: true,
-		turnFinal:  func(string) (string, bool, error) { return "verified and dispatched", true, nil },
+		rosterDir: t.TempDir(),
+		turnFinal: func(string) (string, bool, error) { return "verified and dispatched", true, nil },
 		onTurnFinal: func(agent, body string) {
 			ackedAgent, ackedBody = agent, body
 		},
@@ -133,10 +134,11 @@ func TestDeskMirrorSubstantiveTurnFinalInvokesMechanicalAckHook(t *testing.T) {
 func TestDeskMirrorSkipsOnReadError(t *testing.T) {
 	var lines []string
 	m := deskMirror{
-		webhook:   func(string) (string, bool) { return "https://wh", true },
-		turnFinal: func(string) (string, bool, error) { return "", false, errors.New("tmux boom") },
-		post:      func(string, string, string) error { t.Fatal("must not post on a read error"); return nil },
-		logf:      recordLogf(&lines),
+		allowDiscord: true,
+		webhook:      func(string) (string, bool) { return "https://wh", true },
+		turnFinal:    func(string) (string, bool, error) { return "", false, errors.New("tmux boom") },
+		post:         func(string, string, string) error { t.Fatal("must not post on a read error"); return nil },
+		logf:         recordLogf(&lines),
 	}
 	m.run("backend")
 	if len(lines) != 1 || !strings.Contains(lines[0], "SKIP backend: read turn-final: tmux boom") {
@@ -144,53 +146,13 @@ func TestDeskMirrorSkipsOnReadError(t *testing.T) {
 	}
 }
 
-func TestDeskMirrorSkipsDiscordRecentNotify595(t *testing.T) {
-	dir := t.TempDir()
-	stampPath := roster.LayerLastNotifyPath(dir, "cos")
-	fixed := time.Date(2026, 7, 10, 16, 0, 0, 0, time.UTC)
-	if err := watch.RecordRecentNotify(stampPath, fixed.Add(-90*time.Second), "prior notify body"); err != nil {
-		t.Fatal(err)
-	}
-	var lines []string
-	posted := 0
-	m := deskMirror{
-		rosterDir: dir,
-		now:       func() time.Time { return fixed },
-		webhook:   func(string) (string, bool) { return "https://wh", true },
-		turnFinal: func(string) (string, bool, error) { return "rewrite of notify body", true, nil },
-		post:      func(string, string, string) error { posted++; return nil },
-		onDiscordSuccess: func(string, string) {
-			t.Fatal("onDiscordSuccess must not run when Discord is skipped")
-		},
-		logf: recordLogf(&lines),
-	}
-	m.run("cos")
-	if posted != 0 {
-		t.Fatalf("posted %d chunks, want 0 after recent notify", posted)
-	}
-	// Greppable dual-egress suppress reason (#595 / #628).
-	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "LEDGER cos") || !strings.Contains(joined, "recent notify within 3m") {
-		t.Fatalf("decision lines = %v, want LEDGER with recent-notify skip", lines)
-	}
-	if !strings.Contains(joined, "mirror Discord suppress") {
-		t.Fatalf("want greppable Discord suppress log, got %v", lines)
-	}
-	path, err := sessionmirror.LedgerPath(dir, "cos")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.ReadFile(path); err != nil {
-		t.Fatalf("session-mirror ledger must still be written: %v", err)
-	}
-}
-
 func TestDeskMirrorPostsSingleChunk(t *testing.T) {
 	var lines []string
 	var gotURL, gotUser, gotBody string
 	m := deskMirror{
-		webhook:   func(string) (string, bool) { return "https://wh", true },
-		turnFinal: func(string) (string, bool, error) { return "a short report", true, nil },
+		allowDiscord: true,
+		webhook:      func(string) (string, bool) { return "https://wh", true },
+		turnFinal:    func(string) (string, bool, error) { return "a short report", true, nil },
 		post: func(url, user, body string) error {
 			gotURL, gotUser, gotBody = url, user, body
 			return nil
@@ -214,10 +176,11 @@ func TestDeskMirrorChunksOversizeAndPrefixes(t *testing.T) {
 	var bodies []string
 	big := strings.Repeat("z", mirrorChunkLimit*2+10) // forces 3 chunks
 	m := deskMirror{
-		webhook:   func(string) (string, bool) { return "https://wh", true },
-		turnFinal: func(string) (string, bool, error) { return big, true, nil },
-		post:      func(_, _, body string) error { bodies = append(bodies, body); return nil },
-		logf:      recordLogf(&lines),
+		allowDiscord: true,
+		webhook:      func(string) (string, bool) { return "https://wh", true },
+		turnFinal:    func(string) (string, bool, error) { return big, true, nil },
+		post:         func(_, _, body string) error { bodies = append(bodies, body); return nil },
+		logf:         recordLogf(&lines),
 	}
 	m.run("backend")
 	if len(bodies) != 3 {
@@ -237,9 +200,10 @@ func TestDeskMirror_OnDiscordSuccessAfterPost(t *testing.T) {
 	var lines []string
 	var successAgent, successBody string
 	m := deskMirror{
-		webhook:   func(string) (string, bool) { return "https://wh", true },
-		turnFinal: func(string) (string, bool, error) { return "operator brief", true, nil },
-		post:      func(_, _, _ string) error { return nil },
+		allowDiscord: true,
+		webhook:      func(string) (string, bool) { return "https://wh", true },
+		turnFinal:    func(string) (string, bool, error) { return "operator brief", true, nil },
+		post:         func(_, _, _ string) error { return nil },
 		onDiscordSuccess: func(agent, body string) {
 			successAgent, successBody = agent, body
 		},
@@ -254,9 +218,10 @@ func TestDeskMirror_OnDiscordSuccessAfterPost(t *testing.T) {
 func TestDeskMirror_OnDiscordSuccessSkippedOnPostFailure(t *testing.T) {
 	called := false
 	m := deskMirror{
-		webhook:   func(string) (string, bool) { return "https://wh", true },
-		turnFinal: func(string) (string, bool, error) { return "brief", true, nil },
-		post:      func(_, _, _ string) error { return errors.New("discord down") },
+		allowDiscord: true,
+		webhook:      func(string) (string, bool) { return "https://wh", true },
+		turnFinal:    func(string) (string, bool, error) { return "brief", true, nil },
+		post:         func(_, _, _ string) error { return errors.New("discord down") },
 		onDiscordSuccess: func(_, _ string) {
 			called = true
 		},
@@ -273,8 +238,9 @@ func TestDeskMirrorStopsAndLogsOnPostFailure(t *testing.T) {
 	calls := 0
 	big := strings.Repeat("z", mirrorChunkLimit*2+10) // 3 chunks; fail on the 2nd
 	m := deskMirror{
-		webhook:   func(string) (string, bool) { return "https://wh", true },
-		turnFinal: func(string) (string, bool, error) { return big, true, nil },
+		allowDiscord: true,
+		webhook:      func(string) (string, bool) { return "https://wh", true },
+		turnFinal:    func(string) (string, bool, error) { return big, true, nil },
 		post: func(_, _, _ string) error {
 			calls++
 			if calls == 2 {
@@ -297,10 +263,11 @@ func TestDeskMirrorNeverExceedsChunkLimit(t *testing.T) {
 	var bodies []string
 	big := strings.Repeat("世", mirrorChunkLimit+500) // multi-byte, over the limit
 	m := deskMirror{
-		webhook:   func(string) (string, bool) { return "https://wh", true },
-		turnFinal: func(string) (string, bool, error) { return big, true, nil },
-		post:      func(_, _, body string) error { bodies = append(bodies, body); return nil },
-		logf:      func(string, ...any) {},
+		allowDiscord: true,
+		webhook:      func(string) (string, bool) { return "https://wh", true },
+		turnFinal:    func(string) (string, bool, error) { return big, true, nil },
+		post:         func(_, _, body string) error { bodies = append(bodies, body); return nil },
+		logf:         func(string, ...any) {},
 	}
 	m.run("backend")
 	for i, b := range bodies {

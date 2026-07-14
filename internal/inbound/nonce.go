@@ -7,7 +7,7 @@ import (
 
 var dispatchNonceRE = regexp.MustCompile(`flotilla-dispatch-[0-9a-f]{8,16}`)
 
-// AppendDispatchNonce appends a machine-readable nonce footer for turn-final ack (#472).
+// AppendDispatchNonce appends a machine-readable nonce footer for durable ack (#472).
 func AppendDispatchNonce(message string) (string, string, error) {
 	if existing := ParseDispatchNonce(message); existing != "" {
 		return message, existing, nil

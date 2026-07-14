@@ -2,6 +2,35 @@ package deliver
 
 import "testing"
 
+func TestParseCursorSnapshotOutput(t *testing.T) {
+	cases := []struct {
+		name, out                  string
+		x, y                       int
+		visible, inMode, wantError bool
+	}{
+		{"visible", "24 32 1 0\n", 24, 32, true, false, false},
+		{"hidden unattached", "316 76 0 0\n", 316, 76, false, false, false},
+		{"copy mode", "4 8 1 1\n", 4, 8, true, true, false},
+		{"bad x", "x 8 1 0\n", 0, 0, false, false, true},
+		{"bad y", "4 y 1 0\n", 0, 0, false, false, true},
+		{"missing field", "4 8 0\n", 0, 0, false, false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			x, y, visible, inMode, err := parseCursorSnapshotOutput(tc.out)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("error = %v, wantError %v", err, tc.wantError)
+			}
+			if tc.wantError {
+				return
+			}
+			if x != tc.x || y != tc.y || visible != tc.visible || inMode != tc.inMode {
+				t.Fatalf("got (%d,%d,%v,%v), want (%d,%d,%v,%v)", x, y, visible, inMode, tc.x, tc.y, tc.visible, tc.inMode)
+			}
+		})
+	}
+}
+
 func TestParseBusy(t *testing.T) {
 	cases := []struct {
 		name     string

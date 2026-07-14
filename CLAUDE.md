@@ -133,8 +133,8 @@ standing principles:
    they work on (`flotilla workspace init --repo …`) — not bare directories. Identity
    (`AGENTS.md` / `CLAUDE.md`) lives in the worktree; legacy bare-dir desks migrate
    at their next organic rotation, not by forced mass migration.
-12. **Operator turn-finals are executive mini-briefs.** Every operator-facing message
-   (including turn-finals the Discord mirror posts mechanically) leads with a plain-
+12. **Operator messages are executive mini-briefs.** Every operator-facing message
+   (curated notify, direct reply, or parade report) leads with a plain-
    language bottom line, names work streams by what they do, puts IDs in a detail footer,
    and closes with an explicit action-status line (one concrete ask or a varied all-clear) —
    see the `executive-mini-brief` doctrine block for the mechanical shape.
@@ -276,10 +276,10 @@ and escalate a **concrete** blocker naming which decision-type applies — never
 ## Operator turn-finals are executive mini-briefs
 
 The operator is a **busy executive with many reports** — not watching your work move by
-move. **Every message to the operator** (status, answers, decisions, task confirmations,
-and **every turn-final** — the Discord mirror posts yours mechanically) must work for
-that reader. Desk-to-desk and XO-internal traffic stays dense; **operator-facing text
-does not.**
+move. **Every message to the operator** (curated notify, direct answer, decision, task
+confirmation, or parade report) must work for that reader. Routine turn-finals stay in
+the durable dash ledger. Desk-to-desk and XO-internal traffic stays dense;
+**operator-facing text does not.**
 
 **Format — mechanical, no exceptions:**
 
@@ -310,8 +310,9 @@ can get their world's state and what they must do — without decoding a codenam
 rewrite before sending.
 
 **Coordinators (every XO and the Chief of Staff):** this format is your default register
-for operator communication — including turn-finals the mirror posts verbatim. Principle 5
-(reader-modeling) sets the posture; this block is the **shape**.
+for curated operator communication — `notify` replies, decisions, and parade reports.
+Routine turn-finals remain in the durable dash ledger. Principle 5 (reader-modeling)
+sets the posture; this block is the **shape**.
 <!-- /flotilla:executive-mini-brief -->
 
 <!-- flotilla:operator-direct-tasking -->
