@@ -116,6 +116,11 @@
     aspirational: "planned", paused: "paused", cancelled: "cancelled",
   };
 
+  // The overview card pill is intentionally width-bounded. Keep its dependency state
+  // aligned with the legend's vocabulary while leaving the full explanatory label on
+  // the legend, drawer, and other detail surfaces (#698).
+  var OVERVIEW_STATE_LABEL = { pending: "waiting" };
+
   // ── #405 Inc 3 Item 5: stat-cell click-to-highlight helpers ────────────────
   // TONE_TO_SEL maps a tile tone to the CSS selector for its matching nodes.
   var TONE_TO_SEL = {
@@ -508,7 +513,8 @@
     var desc = n.description ? '<p class="gnode-desc">' + escapeHtml(n.description) + "</p>" : "";
     var items = (n.work_items || []).map(function (wi) { return workItem(wi, n); }).join("");
     var itemsBlock = items ? '<div class="gnode-items">' + items + "</div>" : "";
-    var pill = '<span class="gpill gpill-' + escapeHtml(vis) + '">' + escapeHtml(STATE_LABEL[vis] || vis) + "</span>";
+    var pillLabel = OVERVIEW_STATE_LABEL[vis] || STATE_LABEL[vis] || vis;
+    var pill = '<span class="gpill gpill-' + escapeHtml(vis) + '">' + escapeHtml(pillLabel) + "</span>";
     // Per-node controls. #349 A2 SWAP: the node BODY now opens the detail drawer (the
     // primary "see the thing" action); the conversation jump is a distinct labelled
     // "→ desk" button (only on a routable node), synchronized with the drawer's own
