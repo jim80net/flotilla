@@ -124,6 +124,7 @@ func TestRecordPreemptWritesDerivedFallbackIntoEmptyFrontier695(t *testing.T) {
 func TestReturnToFromBacklogSkipsDelegatedItems695(t *testing.T) {
 	md := "## Backlog\n" +
 		"- [in-flight] DELEGATED — implement API; do NOT re-dispatch\n" +
+		"- [pending] DELEGATED — ratified in-flight synonym owned by a desk\n" +
 		"- [next] [delegated] write migration docs\n" +
 		"- [next] coordinator reviews the release gate\n"
 	pointer, _, ok := ReturnToFromBacklog(md)

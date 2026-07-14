@@ -79,7 +79,7 @@ var (
 		regexp.MustCompile(`(?i)\bWaiting on you:\b`),
 	}
 
-	delegatedPrefix = regexp.MustCompile(`(?i)^(?:[-*+]\s*|\d+\.\s*)?\[(?:in-flight|next)\]\s*delegated(?:\s|[—–:;-]|$)`)
+	delegatedPrefix = regexp.MustCompile(`(?i)^(?:[-*+]\s*|\d+\.\s*)?\[(?:in-flight|next|pending)\]\s*delegated(?:\s|[—–:;-]|$)`)
 )
 
 // Load reads the frontier sidecar. ok is false when absent.
