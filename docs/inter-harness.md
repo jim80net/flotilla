@@ -20,7 +20,7 @@ driver — there is no hard-coded Claude assumption in the path:
   (`cmd/flotilla/watch.go`), and the materiality gate routes the resulting
   `surface.State` generically.
 - **rotate** — `surface.RotateContext` injects each driver's reset (Claude `/clear`,
-  Codex `/clear`, Grok `/new`, Cursor `/new-chat`).
+  Codex `/clear`, Grok `/new`, Pi `/new`, Cursor `/new-chat`).
 
 The routing is **surface-agnostic by construction** and locked by a regression test
 (`internal/surface`: `TestMixedHarnessFleetRoutesPerDriver`), which asserts that a

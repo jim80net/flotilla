@@ -21,12 +21,13 @@
     { "name": "aider-desk", "surface": "aider", "primary_repo": "acme/backend-api", "worktree_path": "/srv/fleet/desks/aider-desk" },
     { "name": "oc-desk", "surface": "opencode", "primary_repo": "acme/frontend-web", "worktree_path": "/srv/fleet/desks/oc-desk" },
     { "name": "grok-desk", "surface": "grok", "primary_repo": "acme/frontend-web", "worktree_path": "/srv/fleet/desks/grok-desk" },
-    { "name": "codex-desk", "surface": "codex", "primary_repo": "acme/frontend-web", "worktree_path": "/srv/fleet/desks/codex-desk" }
+    { "name": "codex-desk", "surface": "codex", "primary_repo": "acme/frontend-web", "worktree_path": "/srv/fleet/desks/codex-desk" },
+    { "name": "pi-desk", "surface": "pi", "primary_repo": "acme/frontend-web", "worktree_path": "/srv/fleet/desks/pi-desk" }
   ],
   "_comment_channels": "Federation bindings (the real product topology). EACH agent OWNS its home channel and lists its PARENT in members[] — so awareness rolls UP the graph. The ONE exception is the fleet-command BROADCAST channel (role=fleet-command), whose members are the meta-XO's command targets, NOT synthesis parents; it is EXCLUDED from visibility-synthesis routing + the load-time acyclicity check. An untagged broadcast channel forms a synthesis cycle and Load fail-closed refuses it. A single-XO fleet can drop channels[] entirely and use the legacy channel_id form.",
   "channels": [
     { "channel_id": "YOUR_FLEET_COMMAND_CHANNEL_ID", "xo_agent": "xo", "role": "fleet-command",
-      "members": ["xo", "backend", "frontend", "data", "aider-desk", "oc-desk", "grok-desk", "codex-desk"] },
+      "members": ["xo", "backend", "frontend", "data", "aider-desk", "oc-desk", "grok-desk", "codex-desk", "pi-desk"] },
     { "channel_id": "YOUR_ALPHA_XO_CHANNEL_ID", "xo_agent": "alpha-xo", "role": "project", "members": ["xo"] },
     { "channel_id": "YOUR_BETA_XO_CHANNEL_ID", "xo_agent": "beta-xo", "role": "project", "members": ["xo"] },
     { "channel_id": "YOUR_BACKEND_CHANNEL_ID", "xo_agent": "backend", "role": "project", "members": ["xo", "alpha-xo"] },
@@ -35,7 +36,8 @@
     { "channel_id": "YOUR_AIDER_CHANNEL_ID", "xo_agent": "aider-desk", "members": ["backend"] },
     { "channel_id": "YOUR_OC_CHANNEL_ID", "xo_agent": "oc-desk", "members": ["frontend"] },
     { "channel_id": "YOUR_GROK_CHANNEL_ID", "xo_agent": "grok-desk", "members": ["frontend"] },
-    { "channel_id": "YOUR_CODEX_CHANNEL_ID", "xo_agent": "codex-desk", "members": ["frontend"] }
+    { "channel_id": "YOUR_CODEX_CHANNEL_ID", "xo_agent": "codex-desk", "members": ["frontend"] },
+    { "channel_id": "YOUR_PI_CHANNEL_ID", "xo_agent": "pi-desk", "members": ["frontend"] }
   ],
   "_comment_schedules": "Daemon-native daily wall-clock dispatch (flotilla#413). Each at MUST include an explicit timezone (e.g. 12:07Z). Prompt may be inline or a host-local file path (preferred for long prompts). Durable last-fired state: <roster-dir>/flotilla-schedule-state.json.",
   "schedules": [
