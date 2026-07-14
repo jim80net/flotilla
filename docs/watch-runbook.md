@@ -174,6 +174,14 @@ XO is idle (or recover it). `flotilla send` from the shell behaves the same: it 
 `delivered … — turn confirmed` on success, or exits non-zero with `… is busy … NOT
 delivered` / `… is input-blocked behind the Claude Code agents panel …` so you know to retry.
 
+**Codex selector safety (#692).** A highlighted selector or modal overlay is not a
+composer even though its selected row uses the same `›` glyph. Delivery and `flotilla
+switch` fail closed without sending keys until the selector is dismissed in the target
+pane. Clear the overlay manually, confirm the normal composer footer is visible, and
+retry. A passive limit banner above that normal footer is only a notice: delivery and
+switch phase 0 may proceed. Exact rate-limit overlay prose remains pending a live
+capture under #690; safety depends on the selector/composer structure, not those words.
+
 Heartbeat / change-detector ticks flow through the same confirmed delivery (so they too
 recover a dropped Enter), but they are **time-relative**: a tick that arrives while the XO
 is busy is dropped, not deferred (the next tick re-evaluates), and a failed tick never

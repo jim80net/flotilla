@@ -2,6 +2,7 @@ package surface
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -86,6 +87,21 @@ func TestParseCodexState(t *testing.T) {
 			name:     "idle empty composer → Idle (default)",
 			captured: "  Turn done.\n  › \n  / for commands",
 			want:     StateIdle,
+		},
+		{
+			name:     "passive limit banner above ready composer → Idle",
+			captured: codexLimitBannerCapture,
+			want:     StateIdle,
+		},
+		{
+			name:     "model selector overlay → AwaitingInput",
+			captured: codexModelSelectorCapture,
+			want:     StateAwaitingInput,
+		},
+		{
+			name:     "rate-limit selector overlay → AwaitingInput",
+			captured: codexRateLimitOverlayCapture,
+			want:     StateAwaitingInput,
 		},
 		{
 			name: "post-turn idle LIVE 2026-07-03 → Idle",
@@ -173,7 +189,7 @@ func TestCodexAssess(t *testing.T) {
 		{"capture error → unknown", "codex", nil, false, "", boom, StateUnknown},
 		{"classifier routes: login", "codex", nil, false, "Welcome to Codex\nSign in with ChatGPT", nil, StateAwaitingInput},
 		{"classifier routes: working", "codex", nil, false, "esc to interrupt", nil, StateWorking},
-		{"classifier routes: idle", "codex", nil, false, "› \n/status", nil, StateIdle},
+		{"classifier routes: idle", "codex", nil, false, "› \n/ for commands", nil, StateIdle},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -228,6 +244,8 @@ func TestClassifyCodexComposerLine(t *testing.T) {
 		{"empty › prompt → Cleared", "  Turn done.\n  › \n  / for commands", 1, ComposerCleared},
 		{"pending body after › → Pending", "  › draft in composer\n  / for commands", 0, ComposerPending},
 		{"placeholder hint LIVE 2026-07-03 → Pending", "  › Find and fix a bug in @filename\n  gpt-5.5 default", 0, ComposerPending},
+		{"model selector highlighted row → Undetermined, never Pending", codexModelSelectorCapture, 2, ComposerUndetermined},
+		{"rate-limit selector highlighted row → Undetermined, never Pending", codexRateLimitOverlayCapture, 3, ComposerUndetermined},
 		{"approval row without › → Undetermined", "  [ ! ] Action Required\n  Approve for me", 0, ComposerUndetermined},
 		{"cursor out of range → Undetermined", "  › \n", 99, ComposerUndetermined},
 	}
@@ -249,6 +267,15 @@ func TestCodexComposerStateWiring(t *testing.T) {
 		}
 		if got := c.ComposerState("0:0.0"); got != ComposerCleared {
 			t.Errorf("ComposerState = %v, want Cleared", got)
+		}
+	})
+	t.Run("passive limit banner preserves cleared composer", func(t *testing.T) {
+		c := codex{
+			cursorState: func(string) (int, bool, error) { return 2, false, nil },
+			capturePane: func(string) (string, error) { return codexLimitBannerCapture, nil },
+		}
+		if got := c.ComposerState("0:0.0"); got != ComposerCleared {
+			t.Errorf("ComposerState behind passive banner = %v, want Cleared", got)
 		}
 	})
 	t.Run("cursor read error → Undetermined", func(t *testing.T) {
@@ -279,6 +306,24 @@ func TestCodexComposerStateWiring(t *testing.T) {
 			t.Errorf("ComposerState on update menu = %v, want Undetermined", got)
 		}
 	})
+	t.Run("cursor on generic selector row → Undetermined, not ListNav", func(t *testing.T) {
+		c := codex{
+			cursorState: func(string) (int, bool, error) { return 2, false, nil },
+			capturePane: func(string) (string, error) { return codexModelSelectorCapture, nil },
+		}
+		if got := c.ComposerState("0:0.0"); got != ComposerUndetermined {
+			t.Errorf("ComposerState on selector = %v, want Undetermined", got)
+		}
+	})
+}
+
+func TestCodexRateLimitOverlayDiagnosticNamePendingLiveCapture690(t *testing.T) {
+	if got := codexOverlayName(codexRateLimitOverlayCapture); got != "rate-limit overlay" {
+		t.Fatalf("codexOverlayName = %q, want rate-limit overlay", got)
+	}
+	if got := codexOverlayName(codexModelSelectorCapture); got != "" {
+		t.Fatalf("ordinary model selector diagnostic = %q, want unnamed structural overlay", got)
+	}
 }
 
 // TestConfirmSubmitRefusesCodexFirstRunMenu proves the incident's false-confirm
@@ -287,17 +332,23 @@ func TestCodexComposerStateWiring(t *testing.T) {
 // (ErrTransient) with ZERO keystrokes delivered — previously the paste+Enter
 // navigated the menu, the menu dismissed to an empty composer, and the empty
 // composer read as a confirmed submit.
-func TestConfirmSubmitRefusesCodexFirstRunMenu(t *testing.T) {
-	for name, capture := range map[string]string{
-		"trust menu":  codexTrustMenuCapture,
-		"update menu": codexUpdateMenuCapture,
+func TestConfirmSubmitRefusesCodexSelectorMenus(t *testing.T) {
+	for name, tc := range map[string]struct {
+		capture string
+		wantErr error
+		wantMsg string
+	}{
+		"trust menu":         {codexTrustMenuCapture, ErrTransient, ""},
+		"update menu":        {codexUpdateMenuCapture, ErrTransient, ""},
+		"model selector":     {codexModelSelectorCapture, ErrTransient, ""},
+		"rate-limit overlay": {codexRateLimitOverlayCapture, ErrPanelBlocked, "rate-limit overlay"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			pasted := false
 			d := codex{
 				paneCommand: func(string) (string, error) { return "codex", nil },
 				isShell:     func(string) bool { return false },
-				capturePane: func(string) (string, error) { return capture, nil },
+				capturePane: func(string) (string, error) { return tc.capture, nil },
 				classify:    parseCodexState,
 				send:        func(string, string) error { pasted = true; return nil },
 				cursorState: func(string) (int, bool, error) { return 7, false, nil },
@@ -308,8 +359,8 @@ func TestConfirmSubmitRefusesCodexFirstRunMenu(t *testing.T) {
 				Sleep:     func(time.Duration) {},
 			}
 			err := c.Submit(d, "0:0.0", "operator message")
-			if !errors.Is(err, ErrTransient) {
-				t.Fatalf("Submit on %s = %v, want ErrTransient (refused, re-assessable)", name, err)
+			if !errors.Is(err, tc.wantErr) || (tc.wantMsg != "" && !strings.Contains(err.Error(), tc.wantMsg)) {
+				t.Fatalf("Submit on %s = %v, want %v containing %q", name, err, tc.wantErr, tc.wantMsg)
 			}
 			if pasted || enters != 0 {
 				t.Errorf("keystrokes reached the menu: pasted=%v enters=%d, want none", pasted, enters)
@@ -317,6 +368,25 @@ func TestConfirmSubmitRefusesCodexFirstRunMenu(t *testing.T) {
 		})
 	}
 }
+
+// Synthetic frames use the same selector rows as the /model rendering captured
+// during the restore sweep. Rate-limit prose remains pending live capture (#690);
+// the structural selector guard does not depend on those inferred strings.
+const codexModelSelectorCapture = "  5. gpt-5.4  Strong model for broad knowledge and reasoning\n" +
+	"  Choose a model\n" +
+	"› 6. gpt-5.4-mini (current)  Small, fast, and efficient\n" +
+	"  Enter to select · Esc to cancel"
+
+const codexRateLimitOverlayCapture = "  Approaching rate limits\n" +
+	"  Switch to gpt-5.4-mini to keep working\n" +
+	"  1. Keep current model\n" +
+	"› 2. Switch to gpt-5.4-mini\n" +
+	"  Enter to select · Esc to cancel"
+
+const codexLimitBannerCapture = "  ⚠ Heads up, you have less than 10% of your weekly limit left.\n" +
+	"  Run /status for a breakdown\n" +
+	"  › \n" +
+	"  / for commands"
 
 // First-run menu fixtures, VERBATIM from the openai/codex rust-v0.144.1 rendered
 // snapshot tests (tui/src/onboarding/snapshots/…trust_directory…renders_snapshot_
