@@ -16,8 +16,33 @@ resume (#472 / #475 / #614 / #616).
 
 - **queued** — in sender outbox; recipient busy / not yet confirmed
 - **delivered** — inbound ledger pending durable ack
-- **consumed** — settled (durable ack, legacy turn-final ack, MERGED suppress, or manual)
+- **consumed** — settled (durable ack, legacy turn-final ack, MERGED suppress,
+  coordinator-recipient send-time settle, or manual)
 - **undelivered** — age bound exceeded (outbox or unacked inbound)
+
+## Coordinator recipients (#707)
+
+Coordinator seats keep **no inbound pending row** — their finish is deliberately
+not ack-gated, so tracking would grow finish evaluation unbounded (#472). A
+confirmed send to a coordinator instead settles **straight into the consumed
+registry** with reason `coordinator-recipient`. That reason asserts confirmed
+delivery only, not that the work was addressed. `dispatch-status` therefore
+resolves the nonce (never `unknown` after a confirmed delivery), and a
+coordinator running the footer's `dispatch-ack` converges on the already-durable
+path instead of erroring `not pending`.
+
+Two guards keep this settlement from leaking onto other seats' dispatches:
+
+- **Own-footer attribution.** Only the message's own trailing #472 footer nonce
+  settles. A coordinator-directed report that merely *quotes* another
+  dispatch's nonce in prose settles nothing (nonces are reused across hops for
+  outbox dedup, so a quoted nonce is usually another seat's live dispatch).
+- **Hop-scoped matching.** A `coordinator-recipient` entry settles only its own
+  recipient's hop. The same dispatch text forwarded verbatim to a desk keeps
+  that desk's reinject / escalation / undelivered supervision alive, the desk's
+  own `dispatch-ack` still records its real settlement (which then takes
+  lookup preference over the hop entry), and the row-scrub sweeps ignore hop
+  entries for other seats.
 
 ## Desk-visible queued ack
 

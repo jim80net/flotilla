@@ -42,19 +42,31 @@ func cmdDispatchAck(args []string) error {
 		return err
 	}
 	st := inbound.NewStore(path)
-	if settled, ok := reg.LookupNonce(nonce); ok {
-		if settled.Recipient != "" && settled.Recipient != from {
-			return fmt.Errorf("dispatch-ack: nonce belongs to recipient %q, not %q", settled.Recipient, from)
+	// Registry scan is recipient-first (#707): the same dispatch text can settle
+	// on more than one edge (a send-time coordinator hop, another seat's real
+	// ack), so "is THIS seat settled?" must not depend on which entry happens to
+	// come back from a single-entry lookup. An entry for another seat blocks
+	// nothing here — this seat's own pending row (checked next) still decides.
+	var foreign *dispatch.ConsumedEntry
+	for _, entry := range reg.Load() {
+		if entry.Nonce != nonce {
+			continue
 		}
-		// Converge after a prior registry-first partial success: the durable record is
-		// authoritative, but a rerun should also clear any surviving inbound row.
-		for _, entry := range st.Load() {
-			if entry.Nonce == nonce && entry.Recipient == from {
-				st.Remove(entry.ID)
+		if entry.Recipient == "" || entry.Recipient == from {
+			// Converge after a prior registry-first partial success: the durable record is
+			// authoritative, but a rerun should also clear any surviving inbound row.
+			for _, pending := range st.Load() {
+				if pending.Nonce == nonce && pending.Recipient == from {
+					st.Remove(pending.ID)
+				}
 			}
+			fmt.Printf("dispatch ack already durable nonce=%s recipient=%s\n", nonce, from)
+			return nil
 		}
-		fmt.Printf("dispatch ack already durable nonce=%s recipient=%s\n", nonce, from)
-		return nil
+		if entry.Reason != dispatch.ReasonCoordinatorRecipient && foreign == nil {
+			e := entry
+			foreign = &e
+		}
 	}
 	var match *inbound.Entry
 	for _, entry := range st.Load() {
@@ -65,6 +77,9 @@ func cmdDispatchAck(args []string) error {
 		}
 	}
 	if match == nil {
+		if foreign != nil {
+			return fmt.Errorf("dispatch-ack: nonce belongs to recipient %q, not %q", foreign.Recipient, from)
+		}
 		return fmt.Errorf("dispatch-ack: nonce %q is not pending for recipient %q", nonce, from)
 	}
 	if match.Recipient != from {

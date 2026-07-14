@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/jim80net/flotilla/internal/inbound"
 )
 
 // Consume reasons recorded on the durable registry.
@@ -21,6 +23,10 @@ const (
 	ReasonMerged       = "merged"
 	ReasonManual       = "manual"
 	ReasonSuppressed   = "suppressed"
+	// ReasonCoordinatorRecipient: settled at send time because the recipient is a
+	// coordinator seat, whose finish is deliberately not ack-gated (#472). Asserts
+	// confirmed delivery only — NOT that the recipient addressed the work.
+	ReasonCoordinatorRecipient = "coordinator-recipient"
 )
 
 // maxConsumedEntries caps fleet-wide registry growth.
@@ -87,18 +93,67 @@ func (r *Registry) IsConsumed(nonce, payloadHash string) bool {
 	return false
 }
 
-// LookupNonce returns the first consumed entry for nonce, if any.
+// LookupNonce returns the consumed entry for nonce, if any. When both a real
+// settlement (durable ack, turn-final ack, …) and a send-time
+// coordinator-recipient entry exist for the same nonce (#707 — the same
+// dispatch text can traverse more than one edge), the real settlement wins:
+// it is the stronger claim.
 func (r *Registry) LookupNonce(nonce string) (ConsumedEntry, bool) {
 	nonce = strings.TrimSpace(nonce)
 	if r == nil || nonce == "" {
 		return ConsumedEntry{}, false
 	}
+	var coordinator *ConsumedEntry
 	for _, e := range r.Load() {
-		if e.Nonce == nonce {
+		if e.Nonce != nonce {
+			continue
+		}
+		if e.Reason != ReasonCoordinatorRecipient {
 			return e, true
 		}
+		if coordinator == nil {
+			c := e
+			coordinator = &c
+		}
+	}
+	if coordinator != nil {
+		return *coordinator, true
 	}
 	return ConsumedEntry{}, false
+}
+
+// SettlesInboundRow reports whether a consumed entry settles the given
+// recipient's inbound pending row. Like IsConsumed, except a send-time
+// coordinator-recipient entry (#707) settles ONLY its own recipient's hop:
+// the same dispatch text (same nonce) forwarded to a desk must keep that
+// desk's reinject / escalation / undelivered supervision alive, because the
+// coordinator hop's settlement says nothing about the desk having acted.
+func (r *Registry) SettlesInboundRow(nonce, payloadHash, recipient string) bool {
+	if r == nil || r.path == "" {
+		return false
+	}
+	nonce = strings.TrimSpace(nonce)
+	payloadHash = strings.TrimSpace(payloadHash)
+	if nonce == "" && payloadHash == "" {
+		return false
+	}
+	for _, e := range r.Load() {
+		matched := false
+		switch {
+		case nonce != "" && e.Nonce == nonce:
+			matched = true
+		case nonce == "" && payloadHash != "" && e.PayloadHash == payloadHash:
+			matched = true
+		}
+		if !matched {
+			continue
+		}
+		if e.Reason == ReasonCoordinatorRecipient && e.Recipient != recipient {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // Consume records a settled dispatch. Idempotent: a second call with the same
@@ -126,6 +181,16 @@ func (r *Registry) Consume(e ConsumedEntry) (inserted bool, err error) {
 		}
 		for _, p := range f.Entries {
 			if e.Nonce != "" && p.Nonce == e.Nonce {
+				// A send-time coordinator-recipient entry settles only its own hop
+				// (#707): per-edge settlements of the same nonce coexist, in either
+				// insertion order — the hop entry must not block the true
+				// recipient's real settlement, and an already-landed real
+				// settlement must not block a later hop entry (whose absence would
+				// re-break the coordinator's footer ack).
+				if (p.Reason == ReasonCoordinatorRecipient || e.Reason == ReasonCoordinatorRecipient) &&
+					p.Recipient != e.Recipient {
+					continue
+				}
 				return nil // already consumed
 			}
 			if e.Nonce == "" && e.PayloadHash != "" && p.PayloadHash == e.PayloadHash && p.Nonce == "" {
@@ -177,6 +242,34 @@ func Consume(rosterDir string, e ConsumedEntry) (inserted bool, err error) {
 // IsConsumed is a convenience wrapper around Registry.IsConsumed.
 func IsConsumed(rosterDir, nonce, payloadHash string) bool {
 	return NewRegistry(rosterDir).IsConsumed(nonce, payloadHash)
+}
+
+// ConsumeCoordinatorRecipient durably settles a confirmed delivery to a
+// coordinator seat at send time (#707). Coordinator recipients keep no inbound
+// pending row (#472 — finish evaluation must not grow unbounded), which
+// previously left their dispatches with NO durable trace anywhere: the send
+// footer's `flotilla dispatch-ack` could never succeed ("not pending") and
+// `dispatch-status` read unknown minutes after a confirmed delivery. Recording
+// the nonce in the consumed registry closes both loops — dispatch-ack converges
+// on the already-durable path and status resolves with this reason — without
+// growing any per-seat pending ledger.
+//
+// Only the message's OWN footer nonce settles (ParseOwnDispatchNonce): a
+// coordinator-directed report that merely QUOTES another dispatch's nonce in
+// prose settles nothing — consuming a quoted nonce would silently disable the
+// reinject / escalation supervision of the desk that dispatch actually targets.
+func ConsumeCoordinatorRecipient(rosterDir, sender, recipient, message string) (inserted bool, err error) {
+	nonce := inbound.ParseOwnDispatchNonce(message)
+	if nonce == "" {
+		return false, nil
+	}
+	return Consume(rosterDir, ConsumedEntry{
+		Nonce:       nonce,
+		PayloadHash: PayloadHash(message),
+		Reason:      ReasonCoordinatorRecipient,
+		Sender:      sender,
+		Recipient:   recipient,
+	})
 }
 
 // ConsumeFromInbound builds a ConsumedEntry from an inbound pending dispatch.

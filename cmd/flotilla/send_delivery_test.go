@@ -192,6 +192,11 @@ func TestCLIDirectDeliveryTracksWalkDeskHomeChannel498(t *testing.T) {
 	if len(got) != 1 || got[0].Nonce != nonce || got[0].Sender != "meta-xo" {
 		t.Fatalf("inbound ledger = %+v, want nonce %q from meta-xo", got, nonce)
 	}
+	// #707 negative: a DESK recipient records the pending row only — a send-time
+	// consumed entry here would instantly suppress the desk's reinject supervision.
+	if entries := dispatch.NewRegistry(dir).Load(); len(entries) != 0 {
+		t.Fatalf("desk-recipient send wrote consumed entries = %+v, want none", entries)
+	}
 }
 
 // Acceptance (#491): execution desk with supervisor-as-member residue still records inbound.
@@ -249,5 +254,12 @@ func TestCLIDirectDeliverySkipsCoordinatorInbound(t *testing.T) {
 	path, _ := inbound.Path(dir, "cos")
 	if len(inbound.NewStore(path).Load()) != 0 {
 		t.Fatal("coordinator inbound must not be tracked on CLI path")
+	}
+	// #707: the skipped coordinator dispatch settles into the consumed registry
+	// through THIS wiring, so its footer's dispatch-ack / dispatch-status work.
+	nonce := inbound.ParseOwnDispatchNonce(msg)
+	e, ok := dispatch.NewRegistry(dir).LookupNonce(nonce)
+	if !ok || e.Reason != dispatch.ReasonCoordinatorRecipient || e.Recipient != "cos" || e.Sender != "memex" {
+		t.Fatalf("coordinator consumed entry via CLI track = %+v, ok=%v", e, ok)
 	}
 }
