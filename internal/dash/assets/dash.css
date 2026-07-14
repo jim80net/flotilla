@@ -1374,7 +1374,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   position: absolute; border: 1px solid var(--line); border-radius: var(--r);
   background: linear-gradient(180deg, var(--card), var(--raised));
   box-shadow: var(--shadow-sm);
-  padding: 10px 12px; overflow: hidden;
+  padding: 4px 84px 4px 8px; overflow: visible;
   transition: border-color .2s var(--ease), box-shadow .2s var(--ease), transform .15s var(--ease);
 }
 /* #503: the card's overflow:hidden clips its own kebab popup (an absolutely-positioned
@@ -1387,27 +1387,18 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
    zoom; the focus-recenter (keyboard) brings a focused node to centre so the ring
    is on-screen, and !important keeps it winning over the state-* box-shadows. */
 .gnode:focus-visible { outline: 2px solid var(--cyan) !important; outline-offset: 2px; }
-.gnode-eyebrow { font-size: .6rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); display: flex; gap: 8px; }
+.gnode-eyebrow { display: none; }
 .gnode-owner { color: var(--cyan-dim); }
-.gnode-title { font-family: var(--display); font-weight: 600; color: var(--ink); line-height: 1.12; font-size: 1.02rem; margin-top: 2px; text-wrap: balance; }
-.gnode-desc { font-size: .74rem; color: var(--ink-2); line-height: 1.32; margin: 5px 0 0; }
-.gnode-foot { margin-top: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.gnode-title { font-family: var(--display); font-weight: 600; color: var(--ink); font-size: .82rem; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 0; }
+.gnode-desc { display: none; }
+.gnode-foot { position: absolute; top: 50%; right: 34px; max-width: 48px; transform: translateY(-50%); margin: 0; transition: opacity .15s var(--ease); }
 /* flotilla (v2) — dual-read the legacy .gnode-fleet class during migration */
 .gnode-flotilla .gnode-title,
-.gnode-fleet .gnode-title { font-size: 1.2rem; }
+.gnode-fleet .gnode-title { font-size: .95rem; }
 /* harness badge (org-graph v2 §3): subdued, right-aligned in the foot */
-.gnode-harness {
-  font-size: .58rem;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  border: 1px solid var(--line-soft, var(--line));
-  border-radius: var(--r-xs, 3px);
-  padding: 1px 5px;
-  white-space: nowrap;
-}
+.gnode-harness { display: none; }
 /* priorities / milestones — short labeled lists in the node card */
-.gnode-list { margin-top: 7px; }
+.gnode-list { display: none; }
 .gnode-list-lab {
   display: block;
   font-size: .55rem;
@@ -1448,6 +1439,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 
 /* state pill */
 .gpill { font-size: .6rem; letter-spacing: .07em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); }
+.gnode .gpill { display: block; max-width: 48px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .52rem; letter-spacing: .04em; padding: 1px 5px; }
 .gpill-realized { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); background: color-mix(in srgb, var(--ok) 10%, transparent); }
 .gpill-in-flight { color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 45%, transparent); background: color-mix(in srgb, var(--cyan) 10%, transparent); }
 .gpill-awaiting { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 48%, transparent); background: color-mix(in srgb, var(--amber) 12%, transparent); }
@@ -1456,7 +1448,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gpill-aspirational, .gpill-active, .gpill-paused, .gpill-cancelled { color: var(--ink-3); }
 
 /* work-item chips */
-.gnode-items { display: flex; flex-direction: column; gap: 6px; margin-top: 9px; }
+.gnode-items { display: none; }
 .gwi { display: flex; align-items: center; gap: 7px; font-size: .72rem; color: var(--ink-2); background: var(--abyss-2); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 4px 8px; }
 .gwi-kind { font-size: .56rem; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
 .gwi-label { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
@@ -1532,21 +1524,23 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
    1/scale), set on goals-world in applyTransform) so they stay SCREEN-CONSTANT — under a
    0.3 phone fit-scale a 26px button would render ~8px (untappable, mobile-QA #330). The
    inverse scale pins them to their 26px screen size (clears the WCAG 2.5.8 24px minimum);
-   transform-origin keeps them anchored at the card's top-right corner. */
+   transform-origin keeps them centered at the card's right edge. The status foot
+   sits to their left; while actions are visible it yields the row so counter-scaling
+   at a small fit cannot make the two controls overlap. */
 .gnode-ctl {
-  position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; z-index: 2;
+  position: absolute; top: calc(50% - 11px); right: 6px; display: flex; gap: 4px; z-index: 2;
   transform: scale(var(--ctl-scale, 1));
-  transform-origin: top right;
+  transform-origin: center right;
 }
+.gnode:hover .gnode-foot, .gnode:focus-within .gnode-foot { opacity: 0; visibility: hidden; pointer-events: none; }
 /* #421: compact kebab menu — fixed screen size at any zoom; popout carries actions. */
 .gnode-kebab {
   width: 22px; height: 22px; padding: 0; border-radius: 6px; border: 1px solid var(--line);
   background: var(--abyss-2); color: var(--ink-3); cursor: pointer; line-height: 1;
   display: inline-flex; align-items: center; justify-content: center; font-size: 1rem;
-  opacity: 0; transition: opacity .15s var(--ease);
+  opacity: 0; pointer-events: none; transition: opacity .15s var(--ease);
 }
-.gnode:hover .gnode-kebab, .gnode:focus-within .gnode-kebab, .gnode:focus-visible .gnode-kebab { opacity: 1; }
-@media (hover: none) { .gnode-kebab { opacity: 1; } }
+.gnode:hover .gnode-kebab, .gnode:focus-within .gnode-kebab, .gnode:focus-visible .gnode-kebab { opacity: 1; pointer-events: auto; }
 .gnode-kebab:hover { border-color: var(--cyan-dim); color: var(--cyan); }
 .gnode-pop {
   position: absolute; top: 100%; right: 0; margin-top: 4px; min-width: 9.5rem;

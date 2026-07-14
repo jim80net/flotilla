@@ -1222,21 +1222,28 @@ func TestGoalsCanvasAssets(t *testing.T) {
 	if strings.Contains(js, "RING_STEP") {
 		t.Error("goals.js must drop the fixed RING_STEP — org radii are content-aware (#324)")
 	}
-	// mind-map: the SOLE radial rendering (children fan LOCALLY from each parent — limbs +
-	// sub-branches — with curved edges). The layout functions stay; the picker is gone.
+	// mind-map: the sole reachable centered-map rendering (two-sided limbs with curved
+	// edges). The dormant layout functions stay; the picker is gone.
 	for _, marker := range []string{"layoutMindmap", "isRadial"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("goals.js must carry the mind-map layout (missing %q)", marker)
 		}
 	}
-	// mind-map geometry must hold at real fleet depth: disjoint angular sectors + a
-	// collision-relaxation pass (the hub pinned) so 19+ nodes / deep chains don't overlap.
-	if !strings.Contains(js, "Collision relaxation") {
-		t.Error("layoutMindmap must run a collision-relaxation pass so real-depth fleets don't overlap")
+	// The compact mind map balances top-level limbs across two sides and wraps wide
+	// leaf fans into bounded columns instead of spending a radial arc on every leaf.
+	for _, marker := range []string{"placeSide", "gridDims", "GRID_MAX_ROWS", "var right = [], left = []"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("layoutMindmap must carry the two-sided compact geometry (missing %q)", marker)
+		}
 	}
-	// structuralSig must include the enrichment (priorities/milestones/harness) so an
-	// add/remove of a height-affecting field triggers a full rebuild, not a stale
-	// in-place text swap. Guard the index BEFORE slicing (a missing function must
+	for _, marker := range []string{`Math.min(3, Math.max(1, 1 / (view.scale || 1)))`, "opacity: 0; pointer-events: none", "visibility: hidden; pointer-events: none"} {
+		if !strings.Contains(js+css, marker) {
+			t.Errorf("compact mind-map controls must stay bounded and non-interactive while hidden (missing %q)", marker)
+		}
+	}
+	// structuralSig must include the enrichment (priorities/milestones/harness) so a
+	// detail change rebuilds every derived surface rather than leaving stale node markup.
+	// Guard the index BEFORE slicing (a missing function must
 	// fail the test, not panic on js[-1:]) — cubic #315 P3.
 	sigStart := strings.Index(js, "function structuralSig")
 	if sigStart < 0 {
