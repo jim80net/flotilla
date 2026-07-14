@@ -84,9 +84,14 @@ func DroppedDispatchFinishHookWithMerged(
 		// delivery back to the coordinator can be waiting in the durable outbox.
 		// That is durable addressing evidence: consume the inbound dispatch before
 		// finish evaluation so neither reinject nor second-miss escalation fires.
-		queuedOutbox := outbox.ListAll(rosterDir)
+		var queuedOutbox []outbox.Entry
+		if outboxPath, pathErr := outbox.Path(rosterDir, agent); pathErr != nil {
+			log.Printf("flotilla watch: dropped-dispatch queued-ack scan %s failed: %v", agent, pathErr)
+		} else {
+			queuedOutbox = outbox.NewStore(outboxPath).Load()
+		}
 		for _, e := range st.Load() {
-			if !hasQueuedDispatchAck(queuedOutbox, agent, e.Nonce) {
+			if !hasQueuedDispatchAck(queuedOutbox, agent, e.Sender, e.Nonce) {
 				continue
 			}
 			if _, cerr := reg.Consume(dispatch.ConsumeFromInbound(e.Nonce, e.Message, dispatch.ReasonQueuedAck, e.Sender, e.Recipient)); cerr != nil {
@@ -160,15 +165,16 @@ func DroppedDispatchFinishHookWithMerged(
 	}
 }
 
-// hasQueuedDispatchAck requires both the exact nonce and the dispatch recipient
-// as outbox sender. A forwarded/quoted nonce from another seat is not evidence
-// that this recipient addressed its work.
-func hasQueuedDispatchAck(entries []outbox.Entry, recipient, nonce string) bool {
-	if recipient == "" || nonce == "" {
+// hasQueuedDispatchAck requires the full acknowledgement edge: the original
+// dispatch recipient authored the queued message, it is addressed back to the
+// original sender, and it carries the exact nonce. A delegation or help request
+// that quotes the dispatch to a third party is not acknowledgement evidence.
+func hasQueuedDispatchAck(entries []outbox.Entry, dispatchRecipient, dispatchSender, nonce string) bool {
+	if dispatchRecipient == "" || dispatchSender == "" || nonce == "" {
 		return false
 	}
 	for _, e := range entries {
-		if e.Sender == recipient && inbound.ParseDispatchNonce(e.Message) == nonce {
+		if e.Sender == dispatchRecipient && e.Recipient == dispatchSender && inbound.ParseDispatchNonce(e.Message) == nonce {
 			return true
 		}
 	}

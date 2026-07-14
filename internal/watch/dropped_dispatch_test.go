@@ -234,6 +234,34 @@ func TestDroppedDispatch_ForeignQueuedNonceDoesNotSuppress(t *testing.T) {
 	}
 }
 
+func TestDroppedDispatch_RecipientDelegationDoesNotSuppress(t *testing.T) {
+	dir := t.TempDir()
+	msg, nonce, err := inbound.AppendDispatchNonce("implement work that remains owned after asking a peer for help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := inbound.Record(dir, inbound.Entry{
+		ID: "pending-3", Sender: "xo", Recipient: "desk", Message: msg, Nonce: nonce,
+		DeliveredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := outbox.Enqueue(dir, "desk", "peer-desk", "Can you help with this dispatch? "+nonce); err != nil {
+		t.Fatal(err)
+	}
+	var reinjected []Job
+	hook := DroppedDispatchFinishHook(dir, func(string) (string, bool, error) {
+		return "unrelated finish", true, nil
+	}, func(j Job) { reinjected = append(reinjected, j) }, nil)
+	hook("desk")
+	if len(reinjected) != 1 {
+		t.Fatalf("recipient delegation to a third party must not count as ack: %+v", reinjected)
+	}
+	if dispatch.IsConsumed(dir, nonce, dispatch.PayloadHash(msg)) {
+		t.Fatal("third-party delegation must not consume the dispatch nonce")
+	}
+}
+
 // #616: MERGED-state suppress auto-consumes and skips reinject.
 func TestDroppedDispatch_MergedSuppressesReinject(t *testing.T) {
 	dir := t.TempDir()
