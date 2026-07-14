@@ -58,6 +58,17 @@ operator's mental map of fleet WORK — the adjutant layer made visible.
 - **Visual direction is being reconciled with the fleet's UX design work and lands
   IN this change (design.md + view spec deltas) before implementation** — one
   agreed design, no forked halves.
+- **Cross-view agreements already settled (2026-07-14, both sides confirmed):**
+  - The work-ledger read model is a SHARED generation layer — this view's per-issue
+    context and the goals view's per-goal activity timeline draw from the same join
+    (ledger scan + dispatch registry + provenance): one tested source, two surfaces.
+  - **Freshness semantics adopted verbatim on both views:** fresh = plain text;
+    stale = the fact renders with its age chip; absent = an explicit
+    "no activity recorded" slot — honestly absent, never a smoothed-over blank or a
+    fabricated line. An empty timeline/section says so rather than hiding itself.
+  - **Shared row grammar:** status dot + one-line title + right-aligned count chip,
+    flotilla-hue accent, hover = summary / click = context; freshness/absent states
+    render as explicit chips.
 - Implementation is sequenced BEHIND the current delivery-reliability batch; the
   first implementation increment must be demonstrable (a rendered by-flotilla
   grouping on real data, not a schema-only PR).
