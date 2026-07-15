@@ -257,6 +257,60 @@ func TestSynthesisMaterialityReadRunsOutsideMutex(t *testing.T) {
 	<-tickDone
 }
 
+func TestSynthesisOperationPinsOneTopologyGenerationAcrossMidSwap(t *testing.T) {
+	f := newSynthFixture(t)
+	cfg := f.config("xo", []string{"xo", "xo-2", "root", "gamma"})
+	type generation struct {
+		parents map[string][]string
+		text    map[string]string
+	}
+	a := &generation{
+		parents: map[string][]string{"root": {"xo-2"}},
+		text:    map[string]string{"root": "A-root", "gamma": "A-gamma"},
+	}
+	b := &generation{
+		parents: map[string][]string{"gamma": {"xo-2"}},
+		text:    map[string]string{"root": "B-root", "gamma": "B-gamma"},
+	}
+	current := a
+	var swapped bool
+	cfg.SynthOperation = func() SynthOperation {
+		pinned := current
+		return SynthOperation{
+			Parents: func(agent string) []string {
+				parents := pinned.parents[agent]
+				if !swapped {
+					swapped = true
+					current = b // force A→B between per-desk parent calls
+				}
+				return parents
+			},
+			Read: func(agent string) (string, bool) {
+				text, ok := pinned.text[agent]
+				return text, ok
+			},
+		}
+	}
+	d := f.newDet(t, cfg)
+	d.synthOwed["xo-2"] = true
+
+	d.mu.Lock()
+	eligible := d.synthEligibleLocked()
+	d.mu.Unlock()
+	if len(eligible) != 1 {
+		t.Fatalf("eligible = %+v, want one xo-2 operation", eligible)
+	}
+	if got := eligible[0].readSet; len(got) != 1 || got[0] != "root" {
+		t.Fatalf("mid-swap read set = %v, want wholly generation A [root] (never [root gamma])", got)
+	}
+	if text, ok := eligible[0].read("root"); !ok || text != "A-root" {
+		t.Fatalf("pinned result reader = (%q, %v), want generation A", text, ok)
+	}
+	if current != b {
+		t.Fatal("test did not force the A→B adoption")
+	}
+}
+
 // §5.4 — the synthesis wake DELIVERY runs OUTSIDE d.mu (in runSynthesis), and targets the
 // SYNTHESIZING agent which differs from d.cfg.XOAgent.
 func TestSynthesisWakeTargetsArbitraryAgentOutsideMutex(t *testing.T) {

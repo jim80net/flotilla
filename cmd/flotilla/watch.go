@@ -612,6 +612,7 @@ func cmdWatch(args []string) error {
 		var synthWakeAgent func(string, watch.WakeKind, []string)
 		var synthParents func(string) []string
 		var synthRead func(string) (string, bool)
+		var synthOperation func() watch.SynthOperation
 		synthEveryTicks := 0
 		synthSidecarPath := filepath.Join(rosterDir, "flotilla-synthesis-state.json")
 		if cfg.VisibilitySynthesis {
@@ -621,6 +622,13 @@ func cmdWatch(args []string) error {
 			}
 			synthRead = func(agent string) (string, bool) {
 				return synthReadOneFromTurnFinal(synthTurnFinal(currentRoster()))(agent)
+			}
+			synthOperation = func() watch.SynthOperation {
+				pinned := currentRoster()
+				return watch.SynthOperation{
+					Parents: synthParentsResolver(pinned),
+					Read:    synthReadOneFromTurnFinal(synthTurnFinal(pinned)),
+				}
 			}
 			synthEveryTicks = synthDigestTicks // a small multiple of the interval (Q-B)
 		}
@@ -895,6 +903,7 @@ func cmdWatch(args []string) error {
 			WakeAgent:           synthWakeAgent,
 			SynthParents:        synthParents,
 			SynthRead:           synthRead,
+			SynthOperation:      synthOperation,
 			SynthEveryTicks:     synthEveryTicks,
 			// Recursive desk-heartbeat (#183): default-ON, roster opt-OUT. Cadence = the heartbeat
 			// interval (the tick IS the interval ⇒ 1 tick); cap = 3 (NewDetector defaults 0 to 3).
