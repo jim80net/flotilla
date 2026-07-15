@@ -127,6 +127,29 @@ func TestPerfRingHasCountAndSerializedByteCaps(t *testing.T) {
 	}
 }
 
+func TestPerfDownloadDefersObjectURLRevocation(t *testing.T) {
+	vm, pure := loadPerfPure(t)
+	_ = vm.Set("deferRevoke", pure.Get("deferObjectURLRevoke"))
+	got, err := vm.RunString(`
+		var scheduled = null;
+		var delay = null;
+		var revoked = [];
+		deferRevoke("blob:diagnostics", function (callback, ms) {
+			scheduled = callback;
+			delay = ms;
+		}, function (url) { revoked.push(url); });
+		var beforeTask = revoked.length;
+		scheduled();
+		JSON.stringify({beforeTask: beforeTask, delay: delay, revoked: revoked});
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"beforeTask":0,"delay":0,"revoked":["blob:diagnostics"]}`; got.String() != want {
+		t.Fatalf("deferred revoke ordering = %s, want %s", got.String(), want)
+	}
+}
+
 func TestPerfAssetsAndBuildRevisionSeam(t *testing.T) {
 	srv, _ := newTestServer(t, singleFleetRoster, time.Now())
 	page := doGet(t, srv, "/").Body.String()
@@ -140,6 +163,14 @@ func TestPerfAssetsAndBuildRevisionSeam(t *testing.T) {
 		if strings.Contains(js, forbidden) {
 			t.Errorf("perf collection must not create a request (found %q)", forbidden)
 		}
+	}
+	for _, marker := range []string{"document.body.appendChild(link)", "link.click()", "link.remove()", "deferObjectURLRevoke(blobURL, setTimeout"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("local download fallback missing %q", marker)
+		}
+	}
+	if strings.Contains(js, "URL.revokeObjectURL(link.href)") {
+		t.Error("local download fallback must not revoke the blob URL in the click task")
 	}
 	if got := normalizeBuildRevision("508af35"); got != "508af35" {
 		t.Fatalf("normalizeBuildRevision(valid) = %q", got)

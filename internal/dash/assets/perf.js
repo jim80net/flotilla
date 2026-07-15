@@ -91,12 +91,20 @@
     return ring;
   }
 
+  // Firefox historically needed the blob URL to survive through the click task
+  // before revocation (Mozilla bug 1282407). Keep scheduling injectable so the
+  // deferred ordering is behavior-tested without creating a real download.
+  function deferObjectURLRevoke(url, schedule, revoke) {
+    schedule(function () { revoke(url); }, 0);
+  }
+
   var pure = {
     endpointClass: endpointClass,
     shapeServerTiming: shapeServerTiming,
     shapeResource: shapeResource,
     utf8Bytes: utf8Bytes,
     boundSamples: boundSamples,
+    deferObjectURLRevoke: deferObjectURLRevoke,
   };
 
   // The pure helpers are intentionally exposed for the goja behavior suite. They
@@ -361,10 +369,13 @@
       try {
         var blob = new Blob([exportEnvelope()], { type: "application/json" });
         var link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
+        var blobURL = URL.createObjectURL(blob);
+        link.href = blobURL;
         link.download = "flotilla-dash-startup-diagnostics.json";
+        document.body.appendChild(link);
         link.click();
-        URL.revokeObjectURL(link.href);
+        link.remove();
+        deferObjectURLRevoke(blobURL, setTimeout, function (url) { URL.revokeObjectURL(url); });
         updateDisclosure("Startup diagnostics saved locally.");
       } catch (_) {
         updateDisclosure("Local file export failed; JSON remains available through Copy JSON when clipboard access is restored.");
