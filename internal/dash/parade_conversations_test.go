@@ -106,7 +106,7 @@ func TestParadeConversationHandlersPersistAndRouteToCos(t *testing.T) {
 		t.Fatalf("empty GET = %d %s", empty.Code, empty.Body.String())
 	}
 
-	body := `{"kind":"invest","text":"Please fund <script>alert(1)</script> & validate."}`
+	body := `{"kind":"invest","text":"Please fund <script>alert(1)</script> & validate.\nSecond line."}`
 	rec := doWrite(t, srv, "POST", "/api/parades/"+date+"/slides/1/messages", body)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("POST = %d %s", rec.Code, rec.Body.String())
@@ -114,7 +114,7 @@ func TestParadeConversationHandlersPersistAndRouteToCos(t *testing.T) {
 	if f.lastRouteTarget != "cos" {
 		t.Fatalf("route target = %q, want cos", f.lastRouteTarget)
 	}
-	wantRoute := "[parade 2026-07-15 · slide 2/2 · Beta · Second claim]\nkind=invest\ntext: Please fund <script>alert(1)</script> & validate."
+	wantRoute := "[parade 2026-07-15 · slide 2/2 · Beta · Second claim]\nkind=invest\ntext: Please fund <script>alert(1)</script> & validate. Second line."
 	if f.lastRouteMsg != wantRoute {
 		t.Errorf("route message = %q, want %q", f.lastRouteMsg, wantRoute)
 	}
@@ -128,7 +128,7 @@ func TestParadeConversationHandlersPersistAndRouteToCos(t *testing.T) {
 	if thread.Title != "Beta · Second claim" || len(thread.Messages) != 1 {
 		t.Fatalf("thread = %+v", thread)
 	}
-	if got := thread.Messages[0]; got.Kind != "invest" || got.Author != "operator" || got.ID == "" || got.TS != "2026-07-15T05:40:00Z" || !strings.Contains(got.Text, "<script>") {
+	if got := thread.Messages[0]; got.Kind != "invest" || got.Author != "operator" || got.ID == "" || got.TS != "2026-07-15T05:40:00Z" || !strings.Contains(got.Text, "<script>") || !strings.Contains(got.Text, "\nSecond line.") {
 		t.Fatalf("stored message = %+v", got)
 	}
 

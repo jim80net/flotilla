@@ -389,9 +389,10 @@
       });
     }).then(function (body) {
       var doc = conversationDoc(date);
-      doc.slides = doc.slides || {};
-      doc.slides[String(slideIndex)] = body.slide;
-      CONVERSATIONS[date] = doc;
+      var nextSlides = {};
+      Object.keys(doc.slides || {}).forEach(function (key) { nextSlides[key] = doc.slides[key]; });
+      nextSlides[String(slideIndex)] = body.slide;
+      CONVERSATIONS[date] = { schema: doc.schema || 1, slides: nextSlides };
       if ((PARADES[pIdx] || {}).date !== date || sIdx !== slideIndex) return;
       renderConversationPane(true);
       var nextOutcome = el("pd-convo-outcome");

@@ -286,7 +286,11 @@ func (s *Server) handleParadeMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "the parade message could not be saved")
 		return
 	}
-	routed := fmt.Sprintf("[parade %s · slide %d/%d · %s]\nkind=%s\ntext: %s", date, index+1, len(titles), titles[index], req.Kind, req.Text)
+	// The persisted message keeps the operator's exact multiline text. The routed
+	// envelope is deliberately one structural text line so authored newlines cannot
+	// masquerade as another kind=/text: field in the CoS instruction.
+	routeText := strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(req.Text)
+	routed := fmt.Sprintf("[parade %s · slide %d/%d · %s]\nkind=%s\ntext: %s", date, index+1, len(titles), titles[index], req.Kind, routeText)
 	res, routeErr := s.control.Route(r.Context(), cosTarget, routed)
 	if routeErr == nil && res.Outcome == control.OutcomeDelivered {
 		writeJSONStatus(w, http.StatusCreated, paradeMessageResponse{Slide: thread, Delivery: "delivered"})
