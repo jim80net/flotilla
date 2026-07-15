@@ -220,6 +220,33 @@
     }
   }
 
+  function canonicalJSON(value) {
+    if (value === null || typeof value !== "object") return JSON.stringify(value);
+    if (Array.isArray(value)) return "[" + value.map(canonicalJSON).join(",") + "]";
+    return "{" + Object.keys(value).sort().map(function (key) {
+      return JSON.stringify(key) + ":" + canonicalJSON(value[key]);
+    }).join(",") + "}";
+  }
+
+  function mirrorEntryKeys(entries) {
+    var duplicateOrdinals = Object.create(null);
+    var keys = new Array(entries.length);
+    for (var i = entries.length - 1; i >= 0; i--) {
+      if (entries[i] && entries[i].id) {
+        keys[i] = JSON.stringify([activeSeat, "mirror", String(entries[i].id)]);
+        continue;
+      }
+      // The API supplies persisted IDs. This full canonical-record fallback keeps
+      // older fixtures collision-safe; newest-relative ordinals survive load-earlier
+      // repaints and retention dropping the oldest duplicate.
+      var canonical = canonicalJSON(entries[i]);
+      var ordinal = duplicateOrdinals[canonical] || 0;
+      duplicateOrdinals[canonical] = ordinal + 1;
+      keys[i] = JSON.stringify([activeSeat, "legacy-mirror", canonical, ordinal]);
+    }
+    return keys;
+  }
+
   function updateLoadEarlier(entries, mirrorLimit) {
     var button = el("wc-load-earlier");
     var hidden = Math.max(0, entries.length - mirrorLimit);
@@ -243,9 +270,7 @@
     var mirrorLimit = Math.max(0, streamVisible - activeInjects.length);
     var start = Math.max(0, entries.length - mirrorLimit);
     var visible = entries.slice(start);
-    var bodyKeys = visible.map(function (entry) {
-      return activeSeat + "|mirror|" + String(entry.ts || "") + "|" + String(entry.info || "").slice(0, 80);
-    });
+    var bodyKeys = mirrorEntryKeys(entries).slice(start);
     var html = visible.length
       ? visible.map(function (entry, index) {
           return '<div class="wc-keyed-entry" data-wc-render-key="' + esc(bodyKeys[index]) + '">' +

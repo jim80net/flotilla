@@ -29,6 +29,7 @@ type FirewallDiag struct {
 
 // Record is one append-only session-mirror ledger entry.
 type Record struct {
+	ID         string      `json:"id,omitempty"`
 	TS         string      `json:"ts"`
 	Agent      string      `json:"agent"`
 	Verbose    string      `json:"verbose"`

@@ -2,6 +2,7 @@ package sessionmirror
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 )
@@ -17,6 +18,7 @@ type HistoryDoc struct {
 // Malformed lines are skipped. limit <= 0 means no limit.
 func BuildHistory(agent string, data []byte, limit int) HistoryDoc {
 	entries := ParseLines(data)
+	ensureRecordIDs(entries)
 	if limit > 0 && len(entries) > limit {
 		entries = entries[len(entries)-limit:]
 	}
@@ -24,6 +26,30 @@ func BuildHistory(agent string, data []byte, limit int) HistoryDoc {
 		Agent:   agent,
 		Entries: entries,
 		Limit:   limit,
+	}
+}
+
+// ensureRecordIDs gives pre-ID ledger records a stable read identity. New entries
+// persist a random ID at append time. For legacy entries, a full SHA-256 digest of
+// the canonical JSON plus a newest-relative duplicate ordinal is collision-safe
+// within the ledger and remains stable when retention drops the oldest lines.
+func ensureRecordIDs(entries []Record) {
+	seen := make(map[[32]byte]int)
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].ID != "" {
+			continue
+		}
+		encoded, err := json.Marshal(entries[i])
+		if err != nil {
+			// Record is deliberately composed only of concrete JSON-native fields.
+			// If that schema invariant changes, fail loudly rather than returning an
+			// entry without the stable identity promised by HistoryDoc.
+			panic(fmt.Sprintf("sessionmirror: marshal legacy record identity: %v", err))
+		}
+		digest := sha256.Sum256(encoded)
+		ordinal := seen[digest]
+		seen[digest] = ordinal + 1
+		entries[i].ID = fmt.Sprintf("legacy-sm-%x-%d", digest, ordinal)
 	}
 }
 
