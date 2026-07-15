@@ -1937,7 +1937,8 @@ html, body { overflow-x: clip; }
     display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
   }
   .wc-ownership { gap: .3rem; }
-  .wc-chip, .wc-seat-static, .wc-seat { white-space: nowrap; max-width: 44%; overflow: hidden; text-overflow: ellipsis; }
+  .wc-chip, .wc-seat { white-space: nowrap; max-width: 44%; overflow: hidden; text-overflow: ellipsis; }
+  .wc-seat-static { white-space: nowrap; max-width: 100%; flex: 0 0 auto; overflow: visible; }
   .wc-seat-static, .wc-seat-switcher { margin-left: 0; }
   .wc-github > summary { min-height: 38px; max-height: 44px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .wc-github-body { max-height: 40vh; overflow-y: auto; }
