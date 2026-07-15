@@ -73,10 +73,14 @@ func TestAdjutantBufferContract(t *testing.T) {
 		"Desk stream", "Leader stream", "alpha-xo", "Working/Idle",
 		// #524: loop_posture, not pane idle alone
 		"loop_posture", "parked", "drifted", "awaiting-authority", "not pane idle alone",
+		"may contain the missing decision", "keep system interrupts buffered",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("buffer contract missing %q\nfull: %s", want, got)
 		}
+	}
+	if strings.Contains(got, "not while awaiting-authority") {
+		t.Fatalf("buffer contract retains stale authority-wait suppression: %s", got)
 	}
 }
 

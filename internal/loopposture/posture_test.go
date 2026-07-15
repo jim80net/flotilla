@@ -76,6 +76,15 @@ func TestDerive_AwaitingAuthorityAndBlocked(t *testing.T) {
 	}
 }
 
+func TestOperatorDisplay_AwaitingAuthorityIsAvailable(t *testing.T) {
+	if got := OperatorDisplay(PostureAwaitingAuthority); got != PostureAvailable {
+		t.Fatalf("OperatorDisplay(awaiting-authority) = %q, want available", got)
+	}
+	if got := OperatorDisplay(PostureBlocked); got != PostureBlocked {
+		t.Fatalf("OperatorDisplay(blocked) = %q, want blocked", got)
+	}
+}
+
 func TestDerive_ParkedStrict(t *testing.T) {
 	// Strict default: parked only when settled + known empty unblocked.
 	e := baseIdle()

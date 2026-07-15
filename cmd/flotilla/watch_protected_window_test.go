@@ -34,6 +34,19 @@ func TestLayerOperatorProtectedAwaitingSuppresses(t *testing.T) {
 	}
 }
 
+func TestLayerOperatorReplyProtectedAwaitingAllows(t *testing.T) {
+	dir := t.TempDir()
+	cfg := adjutantLayerRoster()
+	awaiting := roster.ResolveLayerClockPath(dir, "xo", "", "flotilla-xo-awaiting", "awaiting")
+	if err := os.WriteFile(awaiting, []byte("1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inj := watch.NewInjector(func(string, string) error { return nil }, 4)
+	if layerOperatorReplyProtected(cfg, dir, filepath.Join(dir, "queue.json"), inj, "xo", time.Now()) {
+		t.Fatal("awaiting marker alone must not protect against the operator reply that may resolve it")
+	}
+}
+
 func TestLayerOperatorProtectedAllClearAllows(t *testing.T) {
 	dir := t.TempDir()
 	cfg := adjutantLayerRoster()

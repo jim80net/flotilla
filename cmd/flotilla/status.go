@@ -95,12 +95,13 @@ type statusDoc struct {
 }
 
 type statusItem struct {
-	Name        string                  `json:"name"`
-	Role        string                  `json:"role,omitempty"`         // "hub" for the XO, else omitted
-	Surface     string                  `json:"surface,omitempty"`      // effective surface driver
-	State       string                  `json:"state"`                  // pane / surface.State label
-	LoopPosture string                  `json:"loop_posture,omitempty"` // #524 fleet loop vocabulary
-	Usage       *watch.UsageObservation `json:"usage,omitempty"`
+	Name           string                  `json:"name"`
+	Role           string                  `json:"role,omitempty"`             // "hub" for the XO, else omitted
+	Surface        string                  `json:"surface,omitempty"`          // effective surface driver
+	State          string                  `json:"state"`                      // pane / surface.State label
+	LoopPosture    string                  `json:"loop_posture,omitempty"`     // operator-facing #524 vocabulary
+	RawLoopPosture string                  `json:"raw_loop_posture,omitempty"` // retained when display normalization differs
+	Usage          *watch.UsageObservation `json:"usage,omitempty"`
 }
 
 // buildStatusJSON assembles the --json document. Pure (no I/O) so it is
@@ -109,11 +110,16 @@ type statusItem struct {
 func buildStatusJSON(cfg *roster.Config, xo, generatedAt string, snap watch.Snapshot, loopByAgent map[string]loopposture.Evidence) statusDoc {
 	doc := statusDoc{GeneratedAt: generatedAt, XO: xo, Agents: make([]statusItem, 0, len(cfg.Agents))}
 	for _, a := range cfg.Agents {
+		rawPosture := deriveAgentPosture(a.Name, snap, loopByAgent)
+		displayPosture := loopposture.OperatorDisplay(rawPosture)
 		item := statusItem{
 			Name:        a.Name,
 			Surface:     effectiveSurface(a.Surface),
 			State:       deskStateLabel(snap, a.Name),
-			LoopPosture: string(deriveAgentPosture(a.Name, snap, loopByAgent)),
+			LoopPosture: string(displayPosture),
+		}
+		if rawPosture != displayPosture {
+			item.RawLoopPosture = string(rawPosture)
 		}
 		if usage, ok := snap.Usage[a.Name]; ok {
 			item.Usage = &usage
@@ -171,7 +177,7 @@ func writeStatus(out io.Writer, cfg *roster.Config, xo, snapshotPath, ackPath st
 		if a.Name == xo {
 			marker = "(XO)"
 		}
-		posture := deriveAgentPosture(a.Name, snap, loopByAgent)
+		posture := loopposture.OperatorDisplay(deriveAgentPosture(a.Name, snap, loopByAgent))
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", a.Name, deskStateLabel(snap, a.Name), posture, usageLabel(snap, a.Name, now), marker)
 	}
 	_ = w.Flush()

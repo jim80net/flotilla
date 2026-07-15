@@ -15,15 +15,31 @@ type LayerProtectedWindowDeps struct {
 
 // OperatorProtectedForLayer evaluates the mechanical protected-window predicate for leader.
 func OperatorProtectedForLayer(d LayerProtectedWindowDeps) bool {
+	return operatorProtectedForLayer(d, true)
+}
+
+// OperatorReplyProtectedForLayer evaluates the protected-window predicate for a
+// buffered operator reply headed to the leader. The awaiting marker is excluded:
+// the reply may contain the authority decision that clears it. Every concrete
+// conversation/compose signal remains protective.
+func OperatorReplyProtectedForLayer(d LayerProtectedWindowDeps) bool {
+	return operatorProtectedForLayer(d, false)
+}
+
+func operatorProtectedForLayer(d LayerProtectedWindowDeps, includeAwaiting bool) bool {
 	now := time.Now
 	if d.Now != nil {
 		now = d.Now
 	}
-	return OperatorProtectedWindow(ProtectedWindowInput{
-		Leader: d.Leader,
-		Awaiting: func(string) bool {
+	var awaiting func(string) bool
+	if includeAwaiting {
+		awaiting = func(string) bool {
 			return NewAwaitingMarker(d.AwaitingPath).Present()
-		},
+		}
+	}
+	return OperatorProtectedWindow(ProtectedWindowInput{
+		Leader:   d.Leader,
+		Awaiting: awaiting,
 		RelayQueuePending: func(string) bool {
 			return RelayQueuePendingLayer(d.RelayQueuePath, d.Leader, d.Adjutant)
 		},

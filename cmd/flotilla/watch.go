@@ -480,43 +480,7 @@ func cmdWatch(args []string) error {
 		seamClaims := newAdjutantSeamClaims()
 
 		drainAdjutantSeamFor := func(owner string) {
-			if cfg.AdjutantFor(owner) == "" {
-				return
-			}
-			if layerOperatorProtected(cfg, rosterDir, *queuePath, injector, owner, time.Now()) {
-				log.Printf("flotilla watch: adjutant seam deferred for %q (operator protected window)", owner)
-				return
-			}
-			bufferPath := roster.LayerBufferPath(rosterDir, owner)
-			deliveredPath := roster.LayerBufferDeliveredPath(rosterDir, owner)
-			enqueueOperatorSeamForwards(owner, bufferPath, deliveredPath, seamClaims, injector.Enqueue)
-			brief, ok, clearAfter, recordItems := adjutantSeamBrief(bufferPath, deliveredPath, owner, rosterDir)
-			if !ok {
-				// Wave 0.2: mechanical finish-edges only — auto-consume without Needs-you inject.
-				if len(recordItems) > 0 {
-					if err := adjutantbuffer.RecordDelivered(deliveredPath, owner, recordItems); err != nil {
-						log.Printf("flotilla watch: adjutant mechanical auto-consume record failed for %q: %v", owner, err)
-					} else if err := adjutantbuffer.RemoveConfirmedItems(bufferPath, owner, recordItems); err != nil {
-						log.Printf("flotilla watch: adjutant mechanical auto-consume remove failed for %q: %v", owner, err)
-					} else {
-						log.Printf("flotilla watch: adjutant seam auto-consumed %d mechanical finish-edge(s) for %q (no Needs-you brief)", len(recordItems), owner)
-					}
-					return
-				}
-				if clearAfter {
-					if err := adjutantbuffer.Clear(bufferPath); err != nil {
-						log.Printf("flotilla watch: adjutant buffer clear after all-consumed skip failed for %q: %v", owner, err)
-					}
-				}
-				return
-			}
-			claimKey := adjutantSeamClaimKey(owner)
-			seamClaims.register(claimKey, adjutantSeamClaim{
-				owner: owner, bufferPath: bufferPath, deliveredPath: deliveredPath, recordItems: recordItems,
-			})
-			injector.Enqueue(watch.Job{
-				Agent: owner, Message: brief, Kind: watch.KindDetector, ClaimKey: claimKey,
-			})
+			drainAdjutantSeam(cfg, rosterDir, *queuePath, injector, owner, time.Now(), seamClaims, injector.Enqueue)
 		}
 
 		wake := func(kind watch.WakeKind, reasons []string) {
@@ -1478,8 +1442,9 @@ func adjutantBufferContract(leader string) string {
 		"before interrupting the leader; do not drip partial arcs mid-turn.\n" +
 		"4. Disaggregate — multi-intent operator traffic: split into discrete dispatches (right owner / " +
 		"work item) with provenance; leader receives verbatim only what needs leader judgment.\n" +
-		"Buffer operator and system interrupts when leader is composing/goal-active; " +
-		"forward leader-judgment material verbatim at available/parked seams — not while awaiting-authority.\n" +
+		"Buffer operator and system interrupts when leader is composing/goal-active or a real protected window is active. " +
+		"At awaiting-authority, forward buffered operator words verbatim at the next safe seam because they may contain " +
+		"the missing decision; keep system interrupts buffered.\n" +
 		"Out-of-loop postures (drifted/crashed/reaped) escalate; do not treat them as parked."
 }
 
@@ -1639,6 +1604,62 @@ func enqueueOperatorSeamForwards(owner, bufferPath, deliveredPath string, seamCl
 			Agent: owner, Message: body, Kind: watch.KindDetector, ClaimKey: claimKey,
 		})
 	}
+}
+
+// drainAdjutantSeam is the production coordinator seam. Buffered operator words
+// get a narrower protection check because they may resolve awaiting-authority;
+// system/mechanical work retains the full awaiting-marker protection.
+func drainAdjutantSeam(
+	cfg *roster.Config,
+	rosterDir, relayQueuePath string,
+	injector *watch.Injector,
+	owner string,
+	now time.Time,
+	seamClaims *adjutantSeamClaims,
+	enqueue func(watch.Job),
+) {
+	if cfg.AdjutantFor(owner) == "" {
+		return
+	}
+	if layerOperatorReplyProtected(cfg, rosterDir, relayQueuePath, injector, owner, now) {
+		log.Printf("flotilla watch: adjutant operator seam deferred for %q (active protected window)", owner)
+		return
+	}
+	bufferPath := roster.LayerBufferPath(rosterDir, owner)
+	deliveredPath := roster.LayerBufferDeliveredPath(rosterDir, owner)
+	enqueueOperatorSeamForwards(owner, bufferPath, deliveredPath, seamClaims, enqueue)
+
+	if layerOperatorProtected(cfg, rosterDir, relayQueuePath, injector, owner, now) {
+		log.Printf("flotilla watch: adjutant system seam deferred for %q (operator protected window)", owner)
+		return
+	}
+	brief, ok, clearAfter, recordItems := adjutantSeamBrief(bufferPath, deliveredPath, owner, rosterDir)
+	if !ok {
+		// Wave 0.2: mechanical finish-edges only — auto-consume without Needs-you inject.
+		if len(recordItems) > 0 {
+			if err := adjutantbuffer.RecordDelivered(deliveredPath, owner, recordItems); err != nil {
+				log.Printf("flotilla watch: adjutant mechanical auto-consume record failed for %q: %v", owner, err)
+			} else if err := adjutantbuffer.RemoveConfirmedItems(bufferPath, owner, recordItems); err != nil {
+				log.Printf("flotilla watch: adjutant mechanical auto-consume remove failed for %q: %v", owner, err)
+			} else {
+				log.Printf("flotilla watch: adjutant seam auto-consumed %d mechanical finish-edge(s) for %q (no Needs-you brief)", len(recordItems), owner)
+			}
+			return
+		}
+		if clearAfter {
+			if err := adjutantbuffer.Clear(bufferPath); err != nil {
+				log.Printf("flotilla watch: adjutant buffer clear after all-consumed skip failed for %q: %v", owner, err)
+			}
+		}
+		return
+	}
+	claimKey := adjutantSeamClaimKey(owner)
+	seamClaims.register(claimKey, adjutantSeamClaim{
+		owner: owner, bufferPath: bufferPath, deliveredPath: deliveredPath, recordItems: recordItems,
+	})
+	enqueue(watch.Job{
+		Agent: owner, Message: brief, Kind: watch.KindDetector, ClaimKey: claimKey,
+	})
 }
 
 // backlogWakeItemMaxRunes caps each driven item line in a WakeBacklog prompt (#526). The parser

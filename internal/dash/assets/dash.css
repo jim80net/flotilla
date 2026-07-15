@@ -313,6 +313,7 @@ code {
 .conv-rail.state-idle { background: var(--ok); }
 .conv-rail.state-awaiting-input,
 .conv-rail.state-awaiting-approval { background: var(--amber); }
+.conv-rail.state-blocked { background: var(--err); }
 .conv-rail.state-errored,
 .conv-rail.state-crashed { background: var(--err); }
 .conv-item-body {
@@ -339,6 +340,7 @@ code {
 }
 .conv-item-state.state-working { color: var(--cyan); }
 .conv-item-state.state-idle { color: var(--ok); }
+.conv-item-state.state-blocked { color: var(--err); font-weight: 700; }
 .conv-role {
   font-family: var(--display);
   font-size: .54rem;
@@ -708,6 +710,7 @@ code {
 .desk-rail.state-idle { background: var(--ok); }
 .desk-rail.state-awaiting-input,
 .desk-rail.state-awaiting-approval { background: var(--amber); }
+.desk-rail.state-blocked { background: var(--err); }
 .desk-rail.state-errored,
 .desk-rail.state-crashed { background: var(--err); }
 .desk-body { padding: .55rem .65rem .6rem; min-width: 0; }
@@ -733,6 +736,7 @@ code {
 .desk-state.state-idle { color: var(--ok); }
 .desk-state.state-awaiting-input,
 .desk-state.state-awaiting-approval { color: var(--amber); }
+.desk-state.state-blocked { color: var(--err); font-weight: 700; }
 .desk-state.state-errored,
 .desk-state.state-crashed { color: var(--err); }
 .desk-surface {
