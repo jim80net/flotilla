@@ -681,7 +681,8 @@
       return '<details class="goutline-flotilla goutline-secondary" data-outline-root="' + escapeHtml(root.id) +
         '" data-outline-flotilla="' + escapeHtml(root.id) + '"' +
         (mobileFlotillaOpen[root.id] ? " open" : "") + "><summary>" +
-          '<span>' + escapeHtml(root.title || root.id) + '</span><span>' + desks.length + " desks · " + taskCount + " tasks · " + escapeHtml(rootState) + " — expand</span></summary>" +
+          '<span>' + escapeHtml(root.title || root.id) + '</span><span>' + desks.length + " desks · " + taskCount + " tasks · " + escapeHtml(rootState) +
+            (mobileFlotillaOpen[root.id] ? " — collapse" : " — expand") + "</span></summary>" +
         (mobileFlotillaOpen[root.id] ? '<div class="goutline-secondary-body">' + row(root, "goutline-root-row") + body + "</div>" : "") +
         "</details>";
     }
