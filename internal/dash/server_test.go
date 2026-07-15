@@ -464,11 +464,11 @@ func TestConversationsCoordinatorPinWave4(t *testing.T) {
 	srv, _ := newTestServer(t, singleFleetRoster, now)
 	js := doGet(t, srv, "/static/dash.js").Body.String()
 	for _, marker := range []string{
-		"coordinatorNames",       // derives the coordinators (xo + distinct cos) from /api/status
-		"coordList.push(name)",   // status coordinators augment topology before Fleet Command renders
-		"Fleet Command",          // the first-class coordinator tier
-		"st.cos",                 // reads the CoS identity the board now exposes
-		"status.cos",             // ensureSelection prefers distinct CoS on first paint
+		"coordinatorNames",     // derives the coordinators (xo + distinct cos) from /api/status
+		"coordList.push(name)", // status coordinators augment topology before Fleet Command renders
+		"Fleet Command",        // the first-class coordinator tier
+		"st.cos",               // reads the CoS identity the board now exposes
+		"status.cos",           // ensureSelection prefers distinct CoS on first paint
 		"No coordination history for this coordinator yet", // honest empty-state for CoS thread
 	} {
 		if !strings.Contains(js, marker) {
