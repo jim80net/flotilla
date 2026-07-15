@@ -457,3 +457,21 @@ func TestCodexLatestResult(t *testing.T) {
 		}
 	})
 }
+
+func TestCodexReplyAfterBindsPaneProcess(t *testing.T) {
+	c := codex{
+		paneCWD:   func(string) (string, error) { return "/srv/fleet/shared", nil },
+		panePID:   func(string) (int, error) { return 5150, nil },
+		codexHome: "/home/you/.codex",
+		replyAfter: func(home, cwd string, pid int, operatorMsg string) (string, bool, error) {
+			if home != "/home/you/.codex" || cwd != "/srv/fleet/shared" || pid != 5150 || operatorMsg != "dispatch-42" {
+				t.Errorf("replyAfter got (home=%q, cwd=%q, pid=%d, msg=%q)", home, cwd, pid, operatorMsg)
+			}
+			return "seat-bound reply", true, nil
+		},
+	}
+	got, found, err := c.ReplyAfter("flotilla:5.0", "dispatch-42")
+	if err != nil || !found || got != "seat-bound reply" {
+		t.Fatalf("ReplyAfter = (%q, %v, %v)", got, found, err)
+	}
+}
