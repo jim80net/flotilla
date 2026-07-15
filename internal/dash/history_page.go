@@ -135,10 +135,13 @@ func historyEntryMatches(entry LedgerEntry, desk, channel string) bool {
 	if desk == "" {
 		return true
 	}
-	if !entry.Parsed {
-		return historyRawHasParticipant(entry.Raw, normalizeLedgerParticipant(desk))
-	}
 	want := normalizeLedgerParticipant(desk)
+	if want == "" {
+		return false
+	}
+	if !entry.Parsed {
+		return historyRawHasParticipant(entry.Raw, want)
+	}
 	return normalizeLedgerParticipant(entry.From) == want || normalizeLedgerParticipant(entry.To) == want
 }
 
@@ -147,6 +150,9 @@ func historyEntryMatches(entry LedgerEntry, desk, channel string) bool {
 // must not match "cos-adj"). Channel-scoped malformed rows remain excluded above
 // because their channel cannot be established safely.
 func historyRawHasParticipant(raw, desk string) bool {
+	if desk == "" {
+		return false
+	}
 	raw = strings.ToLower(raw)
 	for offset := 0; offset < len(raw); {
 		found := strings.Index(raw[offset:], desk)

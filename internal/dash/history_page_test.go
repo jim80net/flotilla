@@ -115,6 +115,20 @@ func TestBuildHistoryPageScopedRawFallbackUsesWholeAgentToken(t *testing.T) {
 	}
 }
 
+func TestBuildHistoryPageNormalizedEmptyDeskCompletesWithoutMatch(t *testing.T) {
+	raw := "future record operator -> @alpha payload\n"
+	page, err := BuildHistoryPage(raw, "", HistoryQuery{Desk: "@", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Ledger) != 0 || page.HasMore {
+		t.Fatalf("normalized-empty desk must fail closed: %+v", page)
+	}
+	if historyRawHasParticipant(raw, "") {
+		t.Fatal("empty participant must never enter the raw-token search")
+	}
+}
+
 func TestHandleHistoryBoundedMetaAndValidation(t *testing.T) {
 	now := time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC)
 	srv, dir := newTestServer(t, singleFleetRoster, now)
@@ -206,6 +220,7 @@ func TestHistoryAssetsUseSelectedWindowMetadataAndExplicitPaging(t *testing.T) {
 		`var lastGood = reset && historyMatchesSelected(prior) && !prior.error ? prior : null`,
 		`if (hadFocus && btn.hidden)`,
 		`title.focus()`,
+		`"#error:" + cheapHash(loadError)`,
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("bounded history UI missing %q", marker)

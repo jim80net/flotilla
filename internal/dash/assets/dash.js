@@ -823,7 +823,7 @@
     // AND resets the operator's scroll) when the merged timeline is unchanged. The
     // key folds each item's timestamp + a content hash so a same-second new entry
     // still re-renders (mirrors the #300 glance dedup discipline).
-    var sig = selectedDesk + "#" + mirrorVerbosity + "#" + items.map(function (it) {
+    var sig = selectedDesk + "#" + mirrorVerbosity + "#error:" + cheapHash(loadError) + "#" + items.map(function (it) {
       if (it.kind === "mirror") {
         return "m:" + (it.m.ts || "") + ":" + cheapHash(it.m.info || "") + ":" + (it.m.suppressed ? "1" : "0");
       }
