@@ -812,6 +812,9 @@ code {
    section label, visually distinct from the cyan Fleet Command header (#421 follow-up). */
 .chan-desks { color: var(--ink-3); font-family: var(--display); letter-spacing: .1em; text-transform: uppercase; font-size: .62rem; font-weight: 600; }
 .conv-group-fleet-command .conv-group-head { border-bottom: 1px solid color-mix(in srgb, var(--cyan) 30%, transparent); background: color-mix(in srgb, var(--cyan) 4%, transparent); border-radius: var(--r-xs) var(--r-xs) 0 0; }
+.conv-group-depth-1 .conv-group-head { padding-left: .75rem; }
+.conv-group-depth-2 .conv-group-head { padding-left: 1.5rem; }
+.conv-group-depth-3 .conv-group-head { padding-left: 2.25rem; }
 .chan-role {
   font-family: var(--display);
   font-size: .58rem;

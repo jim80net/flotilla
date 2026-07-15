@@ -295,7 +295,7 @@ func TestConversationsWave2(t *testing.T) {
 	if !strings.Contains(js, "selectedChannel") || !strings.Contains(js, "data-channel") {
 		t.Error("dash.js rail selection must be channel-scoped (selectedChannel + data-channel) — #370")
 	}
-	if !strings.Contains(js, "grp.channel_id === selectedChannel") {
+	if !strings.Contains(js, "rowChannel === selectedChannel") {
 		t.Error("dash.js rail highlight must require the channel to match (composite key), not the desk name alone — #370")
 	}
 	html := doGet(t, srv, "/").Body.String()
@@ -1398,12 +1398,13 @@ func TestRailRegroupAndQueueFormat405(t *testing.T) {
 
 	// Part B — org-first rail regroup (fleet-command + deduped per-flotilla groups).
 	for _, marker := range []string{
-		"orgNodes",           // consumes server-compiled org truth
-		"nearestCoordinator", // assigns a seat to its nearest flotilla owner
-		"seatSeen",           // global identity dedupe, not per-channel dedupe
-		"flotillaLabel",      // human group label, never a snowflake header
-		"Fleet Command",      // label string for the Fleet Command group
-		"fleet-command",      // role string used in the regroup + CSS class
+		"orgNodes",      // consumes server-compiled org truth
+		"groupAnchor",   // assigns a seat through canonical container/coordinator ancestry
+		"orgDepth",      // preserves canonical nesting in the compact rail
+		"seatSeen",      // global identity dedupe, not per-channel dedupe
+		"flotillaLabel", // human group label, never a snowflake header
+		"Fleet Command", // label string for the Fleet Command group
+		"fleet-command", // role string used in the regroup + CSS class
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("dash.js buildRailGroups must implement the deduped org map (missing %q) — #405/#745", marker)
@@ -1448,6 +1449,9 @@ func TestRailRegroupAndQueueFormat405(t *testing.T) {
 	}
 	if !strings.Contains(css, ".conv-group-fleet-command") {
 		t.Error("dash.css must style the Fleet Command group container (.conv-group-fleet-command) — #405 Inc 4b item 4")
+	}
+	if !strings.Contains(css, ".conv-group-depth-1") {
+		t.Error("dash.css must expose nested org hierarchy in the fleet map — #745")
 	}
 }
 

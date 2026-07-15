@@ -124,11 +124,10 @@
 
   // coordinatorNames returns the coordinator agents the rail must always surface — the
   // primary XO and, when distinct, the CoS (from /api/status). The coordinator's session
-  // IS mirrored to a ledger like any desk, but the rail is built from channel bindings, so
-  // a coordinator that isn't a channel xo_agent/member would be unreachable — the operator
-  // "can't even see the CoS's conversation" (F#383 criterion 1). Pinning them fixes that.
-  function coordinatorNames() {
-    var st = cache.status || {};
+  // IS mirrored to a ledger like any desk, but an older/incomplete org document may omit that
+  // identity. Status pinning keeps the coordinator conversation reachable (F#383 criterion 1).
+  function coordinatorNames(status) {
+    var st = status || cache.status || {};
     var out = [];
     if (st.xo) out.push(st.xo);
     if (st.cos && String(st.cos).toLowerCase() !== String(st.xo || "").toLowerCase()) out.push(st.cos);
@@ -147,20 +146,31 @@
     return clean.replace(/[-_]+/g, " ").replace(/\b[a-z]/g, function (c) { return c.toUpperCase(); });
   }
 
-  // buildRailGroups projects channel topology through org truth into an operator map:
+  function railRoleTag(name, role) {
+    var key = agentKey(name);
+    var roleKey = String(role || "").toLowerCase();
+    var roleInName = roleKey && (key === roleKey || /-(?:xo|adj|cos)$/.test(key));
+    return roleKey && roleKey !== "member" && !roleInName
+      ? '<span class="conv-role' + (roleKey === "xo" ? " xo" : "") + '">· ' + escapeHtml(roleKey) + "</span>"
+      : "";
+  }
+
+  // buildRailGroups projects canonical org truth into an operator map:
   //   • coordinators appear exactly once in Fleet Command;
-  //   • every other seat appears exactly once under its nearest coordinator/flotilla;
+  //   • every container/flotilla appears once in org order;
+  //   • every other seat appears exactly once under its nearest container/coordinator;
   //   • seats without a usable org parent remain visible in one honest Desks group.
   // Historical/mirror channels remain available as routing metadata but never become groups.
-  function buildRailGroups(topology) {
+  function buildRailGroups(topology, status) {
     var channels = (topology && Array.isArray(topology.channels)) ? topology.channels : [];
     var orgNodes = (topology && Array.isArray(topology.org_nodes)) ? topology.org_nodes : [];
+    var board = status || cache.status || {};
     // Roster-authoritative on current servers. The fallback preserves compatibility with older
     // topology documents that predate the coordinator set.
     var coordList = (topology && Array.isArray(topology.coordinators) && topology.coordinators.length)
       ? topology.coordinators.slice()
-      : coordinatorNames().concat(channels.map(function (ch) { return ch.xo_agent; }));
-    coordinatorNames().forEach(function (name) { coordList.push(name); });
+      : coordinatorNames(board).concat(channels.map(function (ch) { return ch.xo_agent; }));
+    coordinatorNames(board).forEach(function (name) { coordList.push(name); });
     var coordSet = {};
     var coordinators = [];
     coordList.forEach(function (name) {
@@ -173,6 +183,18 @@
 
     var nodeByID = {};
     orgNodes.forEach(function (node) { if (node && node.id) nodeByID[agentKey(node.id)] = node; });
+    var rootKey = agentKey(topology && topology.org_root);
+    var orgOrder = [], orgSeen = {};
+    function walkOrg(key) {
+      key = agentKey(key);
+      if (!key || orgSeen[key]) return;
+      orgSeen[key] = true;
+      orgOrder.push(key);
+      var node = nodeByID[key];
+      (node && node.children || []).forEach(walkOrg);
+    }
+    walkOrg(rootKey);
+    orgNodes.forEach(function (node) { if (node && node.id) walkOrg(node.id); });
     var seats = [], seatSeen = {};
     function addSeat(name) {
       var key = agentKey(name);
@@ -186,19 +208,25 @@
       addSeat(ch.xo_agent);
       (ch.members || []).forEach(addSeat);
     });
-    ((cache.status && cache.status.agents) || []).forEach(function (agent) { addSeat(agent.name); });
+    ((board && board.agents) || []).forEach(function (agent) { addSeat(agent.name); });
 
-    function nearestCoordinator(name) {
+    // groupAnchor prefers an explicit container anywhere above the seat. Without one, the
+    // nearest coordinator supplies the backward-compatible flotilla group.
+    function groupAnchor(name) {
       var key = agentKey(name);
       var visited = {};
+      var nearestCoord = "";
       for (var steps = 0; key && steps <= orgNodes.length; steps++) {
         var node = nodeByID[key];
         var parent = node ? agentKey(node.parent) : "";
         if (!parent || visited[parent]) break;
-        if (coordSet[parent]) return parent;
         visited[parent] = true;
+        var parentNode = nodeByID[parent];
+        if (parentNode && parentNode.kind === "container") return { key: parent, kind: "container" };
+        if (!nearestCoord && coordSet[parent]) nearestCoord = parent;
         key = parent;
       }
+      if (nearestCoord) return { key: nearestCoord, kind: "coordinator" };
       // Compatibility fallback for a topology without org_nodes: prefer an explicit project
       // binding and only then an unannotated binding. Never use fleet-command membership.
       var preferred = channels.filter(function (ch) { return ch.role === "project"; })
@@ -206,10 +234,12 @@
       for (var i = 0; i < preferred.length; i++) {
         var ch = preferred[i];
         if (!isCoord(ch.xo_agent)) continue;
-        if (agentKey(ch.xo_agent) === agentKey(name)) return agentKey(ch.xo_agent);
-        if ((ch.members || []).some(function (m) { return agentKey(m) === agentKey(name); })) return agentKey(ch.xo_agent);
+        if (agentKey(ch.xo_agent) === agentKey(name)) return { key: agentKey(ch.xo_agent), kind: "coordinator" };
+        if ((ch.members || []).some(function (m) { return agentKey(m) === agentKey(name); })) {
+          return { key: agentKey(ch.xo_agent), kind: "coordinator" };
+        }
       }
-      return "";
+      return null;
     }
 
     function homeChannel(owner) {
@@ -222,11 +252,17 @@
       return "";
     }
 
+    function seatChannel(name, fallback) {
+      var node = nodeByID[agentKey(name)];
+      if (node && node.home_channel_id) return node.home_channel_id;
+      return homeChannel(agentKey(name)) || fallback || "";
+    }
+
     var fleetChannel = "";
     for (var f = 0; f < channels.length; f++) {
       if (channels[f].role === "fleet-command") { fleetChannel = channels[f].channel_id || ""; break; }
     }
-    var cosKey = agentKey(cache.status && cache.status.cos);
+    var cosKey = agentKey(board && board.cos);
     var groups = [];
     if (coordinators.length) {
       groups.push({
@@ -234,42 +270,73 @@
         role: "fleet-command",
         label: "Fleet Command",
         desks: coordinators.map(function (name) {
-          return { name: name, role: agentKey(name) === cosKey ? "cos" : "xo" };
+          return {
+            name: name,
+            role: agentKey(name) === cosKey ? "cos" : "xo",
+            channel_id: seatChannel(name, fleetChannel),
+          };
         }),
       });
     }
 
-    var byOwner = {}, ownerOrder = [], unassigned = [];
+    var groupByKey = {}, groupOrder = [];
+    function orgDepth(key) {
+      var depth = 0, seen = {};
+      key = agentKey(key);
+      while (key && key !== rootKey && !seen[key] && depth <= orgNodes.length) {
+        seen[key] = true;
+        var node = nodeByID[key];
+        key = node ? agentKey(node.parent) : "";
+        depth++;
+      }
+      return Math.max(0, depth - 1);
+    }
+    function ensureGroup(key, kind) {
+      var mapKey = kind === "desks" ? "__desks__" : agentKey(key);
+      if (groupByKey[mapKey]) return groupByKey[mapKey];
+      var node = nodeByID[mapKey];
+      var group = {
+        channel_id: node && node.home_channel_id ? node.home_channel_id : homeChannel(mapKey),
+        role: kind === "desks" ? "desks" : (kind === "container" ? "flotilla" : "project"),
+        label: kind === "desks" ? "Desks" : flotillaLabel((node && node.id) || key),
+        depth: kind === "desks" ? 0 : orgDepth(mapKey),
+        desks: [],
+      };
+      groupByKey[mapKey] = group;
+      groupOrder.push(mapKey);
+      return group;
+    }
+    function hasContainerAncestor(key) {
+      var seen = {};
+      for (var steps = 0; key && steps <= orgNodes.length; steps++) {
+        var node = nodeByID[key];
+        var parent = node ? agentKey(node.parent) : "";
+        if (!parent || seen[parent]) return false;
+        seen[parent] = true;
+        if (nodeByID[parent] && nodeByID[parent].kind === "container") return true;
+        key = parent;
+      }
+      return false;
+    }
+    // Pre-create canonical org groups in tree order. A coordinator nested inside a container
+    // belongs to that container; a coordinator without one remains a flotilla anchor.
+    orgOrder.forEach(function (key) {
+      var node = nodeByID[key];
+      if (!node) return;
+      if (node.kind === "container") ensureGroup(key, "container");
+      else if (key !== rootKey && coordSet[key] && !hasContainerAncestor(key)) ensureGroup(key, "coordinator");
+    });
+
     seats.forEach(function (name) {
       if (isCoord(name)) return;
-      var owner = nearestCoordinator(name);
-      if (!owner) {
-        unassigned.push({ name: name, role: "member" });
-        return;
-      }
-      if (!byOwner[owner]) {
-        byOwner[owner] = [];
-        ownerOrder.push(owner);
-      }
-      byOwner[owner].push({ name: name, role: "member" });
+      var anchor = groupAnchor(name);
+      var isRootDesks = anchor && anchor.kind === "coordinator" && anchor.key === rootKey;
+      var group = anchor && !isRootDesks
+        ? ensureGroup(anchor.key, anchor.kind)
+        : ensureGroup("", "desks");
+      group.desks.push({ name: name, role: "member", channel_id: seatChannel(name, group.channel_id) });
     });
-    var rootKey = agentKey(topology && topology.org_root);
-    // Root-owned and genuinely unassigned desks share one honest catch-all instead of
-    // producing two visually identical Desks groups.
-    if (unassigned.length && rootKey && byOwner[rootKey]) {
-      byOwner[rootKey] = byOwner[rootKey].concat(unassigned);
-      unassigned = [];
-    }
-    ownerOrder.forEach(function (owner) {
-      var isRootDesks = owner === rootKey;
-      groups.push({
-        channel_id: homeChannel(owner),
-        role: isRootDesks ? "desks" : "project",
-        label: isRootDesks ? "Desks" : flotillaLabel(owner),
-        desks: byOwner[owner],
-      });
-    });
-    if (unassigned.length) groups.push({ channel_id: "", role: "desks", label: "Desks", desks: unassigned });
+    groupOrder.forEach(function (key) { groups.push(groupByKey[key]); });
     return groups;
   }
 
@@ -285,8 +352,14 @@
 
   // channelForDesk returns the hidden routing/backlog context of a seat's one map group.
   function channelForDesk(groups, name) {
-    var group = groupForDesk(groups, name);
-    return group ? group.channel_id : "";
+    var want = agentKey(name);
+    for (var i = 0; i < groups.length; i++) {
+      for (var j = 0; j < groups[i].desks.length; j++) {
+        var desk = groups[i].desks[j];
+        if (agentKey(desk.name) === want) return desk.channel_id || groups[i].channel_id || "";
+      }
+    }
+    return "";
   }
 
   function ensureSelection(status, groups) {
@@ -307,7 +380,7 @@
     for (var i = 0; i < groups.length; i++) {
       if (groups[i].desks.length) {
         selectedDesk = groups[i].desks[0].name;
-        selectedChannel = groups[i].channel_id;
+        selectedChannel = channelForDesk(groups, selectedDesk);
         return;
       }
     }
@@ -332,6 +405,7 @@
       var role = grp.role ? '<span class="chan-role">' + escapeHtml(grp.role) + "</span>" : "";
       var items = grp.desks.map(function (d) {
         var key = String(d.name).toLowerCase();
+        var rowChannel = d.channel_id || grp.channel_id || "";
         var a = agents[key] || {};
         var state = String(a.state || "unknown");
         // #524: show loop_posture beside pane state so officers see parked vs drifted.
@@ -341,18 +415,14 @@
         if (usage) stateLabel += " · " + usage;
         // Keep the channel in selection state for backlog scoping, even though #745 guarantees
         // the map itself contains only one row for this seat.
-        var on = selectedDesk && String(selectedDesk).toLowerCase() === key && grp.channel_id === selectedChannel;
+        var on = selectedDesk && String(selectedDesk).toLowerCase() === key && rowChannel === selectedChannel;
         // Ordinary member chips add no information in a hierarchy. Coordinator chips remain,
         // separated by a visible dot, unless the identity already carries that role suffix —
         // avoiding glued labels such as "alpha-xoxo" in text/screen-reader output (#745).
-        var roleKey = String(d.role || "").toLowerCase();
-        var roleInName = roleKey && (key === roleKey || /-(?:xo|adj|cos)$/.test(key));
-        var roleTag = roleKey && roleKey !== "member" && !roleInName
-          ? '<span class="conv-role' + (roleKey === "xo" ? " xo" : "") + '">· ' + escapeHtml(roleKey) + "</span>"
-          : "";
+        var roleTag = railRoleTag(d.name, d.role);
         return (
           '<button type="button" class="conv-item' + (on ? " selected" : "") + (stale ? " desk-stale" : "") + '" ' +
-            'data-desk="' + escapeHtml(d.name) + '" data-channel="' + escapeHtml(grp.channel_id) + '" role="listitem" aria-pressed="' + String(on) + '">' +
+            'data-desk="' + escapeHtml(d.name) + '" data-channel="' + escapeHtml(rowChannel) + '" role="listitem" aria-pressed="' + String(on) + '">' +
             '<span class="conv-rail ' + deskStateClass(state) + '" aria-hidden="true"></span>' +
             '<span class="conv-item-body">' +
               '<span class="conv-item-name">' + escapeHtml(d.name) + roleTag + "</span>" +
@@ -365,7 +435,8 @@
       // data-channel for routing/backlog context and never becomes a snowflake header.
       var head = '<span class="chan-id ' + (grp.role === "desks" ? "chan-desks" : "chan-fleet-command") + '">' +
         escapeHtml(grp.label || "Desks") + "</span>" + role;
-      var extraCls = grp.role === "fleet-command" ? " conv-group-fleet-command" : "";
+      var depthCls = grp.depth ? " conv-group-depth-" + Math.min(3, grp.depth) : "";
+      var extraCls = (grp.role === "fleet-command" ? " conv-group-fleet-command" : "") + depthCls;
       return (
         '<div class="conv-group' + extraCls + '">' +
           '<div class="conv-group-head">' + head + "</div>" +
@@ -891,9 +962,10 @@
     var groups = buildRailGroups(topology || {});
     for (var i = 0; i < groups.length; i++) {
       var g = groups[i];
-      if (selectedChannel && g.channel_id !== selectedChannel) continue;
       var desks = g.desks || [];
       for (var j = 0; j < desks.length; j++) {
+        var channel = desks[j].channel_id || g.channel_id || "";
+        if (selectedChannel && channel !== selectedChannel) continue;
         if (desks[j].role === "xo" && String(desks[j].name || "").toLowerCase() === deskL) return true;
       }
     }
