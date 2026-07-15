@@ -1961,7 +1961,7 @@ func TestGoalsMobileOutline672(t *testing.T) {
 			t.Errorf("goals.js must render and activate the mobile hierarchy outline (missing %q) — #672", marker)
 		}
 	}
-	for _, marker := range []string{".goals-mobile-outline", ".goutline-row", ".goutline-title", ".goutline-state", ".goutline-desk-toggle"} {
+	for _, marker := range []string{".goals-mobile-outline", ".goutline-row", ".goutline-title", "--outline-depth"} {
 		if !strings.Contains(css, marker) {
 			t.Errorf("dash.css must keep mobile outline labels readable (missing %q) — #672", marker)
 		}
@@ -2178,7 +2178,7 @@ func TestIssuesWorkLedger405(t *testing.T) {
 		"workLedgerURL", `/api/work-ledger`, "renderDesk", "doc.flotillas",
 		"flotilla.desks", "issue-desk-head", "issue-ledger-kicker",
 		"shipped.slice(0, 10)", "issue-shipped-more", "show all ", "when-open", "older shipped",
-		"issue-scope-note", "Other open issues are omitted.", "renderMobileDesk", "data-issue-more",
+		"issue-scope-note", "not shown", "marked in flight under a goal",
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("tracker.js must render the #405 fleet work ledger (missing %q)", marker)
