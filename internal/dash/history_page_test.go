@@ -93,6 +93,28 @@ func TestBuildHistoryPageFiltersDeskAndChannel(t *testing.T) {
 	}
 }
 
+func TestBuildHistoryPageScopedRawFallbackUsesWholeAgentToken(t *testing.T) {
+	raw := strings.Join([]string{
+		"future record operator -> @alpha payload",
+		"future record operator -> @alpha-adj payload",
+		"future record operator -> @beta payload",
+	}, "\n") + "\n"
+	page, err := BuildHistoryPage(raw, "", HistoryQuery{Desk: "alpha", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Ledger) != 1 || page.Ledger[0].Parsed || page.Ledger[0].Raw != "future record operator -> @alpha payload" {
+		t.Fatalf("scoped raw fallback = %+v", page.Ledger)
+	}
+	channelPage, err := BuildHistoryPage(raw, "", HistoryQuery{Desk: "alpha", Channel: "C1", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(channelPage.Ledger) != 0 {
+		t.Fatalf("channel-scoped malformed rows cannot be proven: %+v", channelPage.Ledger)
+	}
+}
+
 func TestHandleHistoryBoundedMetaAndValidation(t *testing.T) {
 	now := time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC)
 	srv, dir := newTestServer(t, singleFleetRoster, now)
@@ -179,6 +201,11 @@ func TestHistoryAssetsUseSelectedWindowMetadataAndExplicitPaging(t *testing.T) {
 		`meta.ledger_signature !== known.ledger_signature`,
 		`fetchSelectedHistory(false)`,
 		`thread.scrollTop = beforeTop + Math.max(0, thread.scrollHeight - beforeHeight)`,
+		`Could not load coordination history`,
+		`Showing the last loaded messages`,
+		`var lastGood = reset && historyMatchesSelected(prior) && !prior.error ? prior : null`,
+		`if (hadFocus && btn.hidden)`,
+		`title.focus()`,
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("bounded history UI missing %q", marker)

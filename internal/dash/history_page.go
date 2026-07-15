@@ -136,10 +136,37 @@ func historyEntryMatches(entry LedgerEntry, desk, channel string) bool {
 		return true
 	}
 	if !entry.Parsed {
-		return false
+		return historyRawHasParticipant(entry.Raw, normalizeLedgerParticipant(desk))
 	}
 	want := normalizeLedgerParticipant(desk)
 	return normalizeLedgerParticipant(entry.From) == want || normalizeLedgerParticipant(entry.To) == want
+}
+
+// historyRawHasParticipant retains the standing malformed/future-format fallback
+// for desk-scoped reads without allowing prefix collisions (for example, "cos"
+// must not match "cos-adj"). Channel-scoped malformed rows remain excluded above
+// because their channel cannot be established safely.
+func historyRawHasParticipant(raw, desk string) bool {
+	raw = strings.ToLower(raw)
+	for offset := 0; offset < len(raw); {
+		found := strings.Index(raw[offset:], desk)
+		if found < 0 {
+			return false
+		}
+		found += offset
+		beforeOK := found == 0 || !historyParticipantByte(raw[found-1])
+		after := found + len(desk)
+		afterOK := after == len(raw) || !historyParticipantByte(raw[after])
+		if beforeOK && afterOK {
+			return true
+		}
+		offset = found + len(desk)
+	}
+	return false
+}
+
+func historyParticipantByte(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= '0' && b <= '9' || b == '_' || b == '-'
 }
 
 func normalizeLedgerParticipant(value string) string {

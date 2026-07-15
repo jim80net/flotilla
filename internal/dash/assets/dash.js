@@ -778,6 +778,7 @@
       return;
     }
     var ledger = (history && Array.isArray(history.ledger)) ? history.ledger : [];
+    var loadError = history && history.error ? String(history.error) : "";
     pruneOptimistic(ledger, selectedDesk);
     var items = [];
     ledger.forEach(function (e) {
@@ -794,9 +795,13 @@
       items.push({ kind: "optimistic", t: o.t, o: o });
     });
     if (!items.length) {
-      var emptyKey = "@empty:" + selectedDesk;
+      var emptyKey = "@empty:" + selectedDesk + ":" + loadError;
       if (lastThreadKey === emptyKey) return;
       lastThreadKey = emptyKey;
+      if (loadError) {
+        thread.innerHTML = '<div class="empty thread-load-error" role="alert">Could not load coordination history (' + escapeHtml(loadError) + ").</div>";
+        return;
+      }
       // Coordinator empty state is honest about the dual feed (relay ledger + session-
       // mirror) so a first open of the CoS thread after #575–#578 doesn't read as a
       // broken surface — "desk" framing was wrong for the coordinator pin (F#383).
@@ -829,7 +834,10 @@
     }).join("|");
     if (sig === lastThreadKey) return;
     lastThreadKey = sig;
-    thread.innerHTML = coordinatorHistoryNote(items) + items.map(function (it) {
+    var errorNotice = loadError
+      ? '<div class="thread-load-error" role="alert">Could not refresh coordination history (' + escapeHtml(loadError) + "). Showing the last loaded messages.</div>"
+      : "";
+    thread.innerHTML = errorNotice + coordinatorHistoryNote(items) + items.map(function (it) {
       if (it.kind === "mirror") return threadMirrorMsg(it.m);
       if (it.kind === "optimistic") return threadOptimisticMsg(it.o);
       return threadLedgerMsg(it.e);
@@ -1099,6 +1107,7 @@
     var desk = selectedDesk;
     if (!desk) return Promise.resolve();
     var prior = cache.history;
+    var lastGood = reset && historyMatchesSelected(prior) && !prior.error ? prior : null;
     var cursor = reset ? "" : (historyMatchesSelected(prior) ? prior.next_cursor : "");
     if (!reset && (!prior || !prior.has_more || !cursor)) return Promise.resolve();
     var epoch = ++historyEpoch;
@@ -1116,7 +1125,8 @@
     }).catch(function (err) {
       if (epoch !== historyEpoch || agentKey(selectedDesk) !== agentKey(desk)) return;
       if (reset) {
-        cache.history = { desk: desk, ledger: [], backlog: { found: false, unblocked: [] }, error: err.message };
+        cache.history = lastGood || { desk: desk, ledger: [], backlog: { found: false, unblocked: [] } };
+        cache.history.error = err.message;
         lastThreadKey = "";
         renderConversations();
       }
@@ -1131,6 +1141,7 @@
       if (meta.ledger_signature !== known.ledger_signature) return fetchSelectedHistory(true);
       known.backlog = meta.backlog;
       known.backlog_signature = meta.backlog_signature;
+      delete known.error;
       cache.history = known;
     }).catch(function () {
       // Metadata is an optimization. Retain the last honest selected-desk page
@@ -1652,6 +1663,7 @@
       if (btn.disabled || !historyMatchesSelected(cache.history)) return;
       var beforeHeight = thread.scrollHeight;
       var beforeTop = thread.scrollTop;
+      var hadFocus = document.activeElement === btn;
       btn.disabled = true;
       btn.textContent = "Loading…";
       threadPinned = false;
@@ -1662,6 +1674,10 @@
       }).finally(function () {
         btn.disabled = false;
         renderHistoryPager(cache.history);
+        if (hadFocus && btn.hidden) {
+          var title = el("conv-title");
+          if (title) { title.setAttribute("tabindex", "-1"); title.focus(); }
+        }
       });
     });
   })();

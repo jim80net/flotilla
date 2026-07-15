@@ -425,6 +425,13 @@ code {
 }
 .thread-load-earlier:hover { border-color: var(--cyan); }
 .thread-load-earlier:disabled { cursor: wait; opacity: .65; }
+.thread-load-error {
+  padding: .45rem .65rem;
+  border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent);
+  border-radius: var(--r-sm);
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 7%, transparent);
+}
 /* F#383 criteria 4+5: the composer is pinned at the bottom of the thread column, directly
    beneath the newest message (the thread scrolls above it), and the jump-to-latest chip
    floats just over it when the operator has scrolled up into history. */
