@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -58,6 +59,16 @@ func LatestResult(codexHome, cwd string) (string, error) {
 	return lastAgentText(path)
 }
 
+// LatestResultForProcess binds the result to the rollout file held open by the
+// pane's Codex process tree. Cwd is validation only; it never selects among seats.
+func LatestResultForProcess(codexHome, cwd string, panePID int) (string, error) {
+	path, err := resolveRolloutForProcess(codexHome, cwd, panePID, "/proc")
+	if err != nil {
+		return "", err
+	}
+	return lastAgentText(path)
+}
+
 // ReplyAfter returns the agent reply following the latest user entry carrying operatorMsg.
 func ReplyAfter(codexHome, cwd, operatorMsg string) (text string, found bool, err error) {
 	path, err := resolveRolloutPath(codexHome, cwd)
@@ -65,6 +76,71 @@ func ReplyAfter(codexHome, cwd, operatorMsg string) (text string, found bool, er
 		return "", false, err
 	}
 	return replyAfterUserMsg(path, operatorMsg)
+}
+
+// ReplyAfterForProcess is ReplyAfter scoped to the rollout held by one pane.
+func ReplyAfterForProcess(codexHome, cwd string, panePID int, operatorMsg string) (text string, found bool, err error) {
+	path, err := resolveRolloutForProcess(codexHome, cwd, panePID, "/proc")
+	if err != nil {
+		return "", false, err
+	}
+	return replyAfterUserMsg(path, operatorMsg)
+}
+
+func resolveRolloutForProcess(codexHome, cwd string, panePID int, procRoot string) (string, error) {
+	if panePID <= 0 {
+		return "", fmt.Errorf("codex store: invalid pane pid %d", panePID)
+	}
+	sessionsRoot := filepath.Join(filepath.Clean(codexHome), "sessions")
+	queue := []int{panePID}
+	seen := map[int]bool{}
+	paths := map[string]bool{}
+	for len(queue) > 0 {
+		pid := queue[0]
+		queue = queue[1:]
+		if seen[pid] {
+			continue
+		}
+		seen[pid] = true
+		fdDir := filepath.Join(procRoot, strconv.Itoa(pid), "fd")
+		fds, _ := os.ReadDir(fdDir)
+		for _, fd := range fds {
+			target, err := os.Readlink(filepath.Join(fdDir, fd.Name()))
+			if err != nil || !strings.HasSuffix(target, ".jsonl") || !strings.Contains(filepath.Base(target), "rollout-") {
+				continue
+			}
+			target = filepath.Clean(target)
+			rel, err := filepath.Rel(sessionsRoot, target)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				continue
+			}
+			paths[target] = true
+		}
+		childrenRaw, _ := os.ReadFile(filepath.Join(procRoot, strconv.Itoa(pid), "task", strconv.Itoa(pid), "children"))
+		for _, field := range strings.Fields(string(childrenRaw)) {
+			child, err := strconv.Atoi(field)
+			if err == nil && child > 0 {
+				queue = append(queue, child)
+			}
+		}
+	}
+	if len(paths) == 0 {
+		return "", fmt.Errorf("codex store: pane pid %d has no open rollout (session not ready or no longer running)", panePID)
+	}
+	if len(paths) > 1 {
+		return "", fmt.Errorf("codex store: pane pid %d has %d open rollouts; refusing ambiguous result", panePID, len(paths))
+	}
+	var path string
+	for path = range paths {
+	}
+	metaCwd, err := rolloutMetaCWD(path)
+	if err != nil {
+		return "", fmt.Errorf("codex store: validate pane rollout: %w", err)
+	}
+	if filepath.Clean(metaCwd) != filepath.Clean(cwd) {
+		return "", fmt.Errorf("codex store: pane rollout cwd %q does not match pane cwd %q", metaCwd, cwd)
+	}
+	return path, nil
 }
 
 func resolveRolloutPath(codexHome, cwd string) (string, error) {

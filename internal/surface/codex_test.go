@@ -428,10 +428,11 @@ func TestCodexLatestResult(t *testing.T) {
 	t.Run("resolves cwd then reads the store", func(t *testing.T) {
 		c := codex{
 			paneCWD:   func(string) (string, error) { return "/srv/fleet/backend", nil },
+			panePID:   func(string) (int, error) { return 4242, nil },
 			codexHome: "/home/you/.codex",
-			latestResult: func(home, cwd string) (string, error) {
-				if home != "/home/you/.codex" || cwd != "/srv/fleet/backend" {
-					t.Errorf("latestResult got (home=%q, cwd=%q)", home, cwd)
+			latestResult: func(home, cwd string, pid int) (string, error) {
+				if home != "/home/you/.codex" || cwd != "/srv/fleet/backend" || pid != 4242 {
+					t.Errorf("latestResult got (home=%q, cwd=%q, pid=%d)", home, cwd, pid)
 				}
 				return "the full latest codex result", nil
 			},
@@ -446,7 +447,7 @@ func TestCodexLatestResult(t *testing.T) {
 		c := codex{
 			paneCWD:      func(string) (string, error) { return "/cwd", nil },
 			codexHome:    "",
-			latestResult: func(string, string) (string, error) { called = true; return "", nil },
+			latestResult: func(string, string, int) (string, error) { called = true; return "", nil },
 		}
 		if _, err := c.LatestResult("p"); err == nil {
 			t.Error("want error when codexHome is empty")

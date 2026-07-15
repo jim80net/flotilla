@@ -1,6 +1,7 @@
 package codexstore
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -102,5 +103,76 @@ func TestLatestResultNoSession(t *testing.T) {
 	home := t.TempDir()
 	if _, err := LatestResult(home, "/missing"); err == nil {
 		t.Fatal("want error when no rollout matches cwd")
+	}
+}
+
+func TestResolveRolloutForProcessBindsPaneNotNewestCWD(t *testing.T) {
+	home := t.TempDir()
+	proc := t.TempDir()
+	cwd := "/srv/fleet/shared"
+	dir := filepath.Join(home, "sessions", "2026", "07", "15")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	meta := `{"type":"session_meta","payload":{"cwd":"` + cwd + `"}}`
+	older := filepath.Join(dir, "rollout-2026-07-15T10-00-00-seat-a.jsonl")
+	newer := filepath.Join(dir, "rollout-2026-07-15T11-00-00-seat-b.jsonl")
+	if err := os.WriteFile(older, []byte(meta+"\n"+`{"type":"event_msg","payload":{"type":"agent_message","message":"seat A result"}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newer, []byte(meta+"\n"+`{"type":"event_msg","payload":{"type":"agent_message","message":"seat B newer result"}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	makeProcNode(t, proc, 100, "101")
+	makeProcNode(t, proc, 101, "")
+	if err := os.Symlink(older, filepath.Join(proc, "101", "fd", "19")); err != nil {
+		t.Fatal(err)
+	}
+
+	path, err := resolveRolloutForProcess(home, cwd, 100, proc)
+	if err != nil || path != older {
+		t.Fatalf("resolveRolloutForProcess = (%q, %v), want seat A rollout %q", path, err, older)
+	}
+	got, err := lastAgentText(path)
+	if err != nil || got != "seat A result" {
+		t.Fatalf("pane-bound result = (%q, %v), want seat A result", got, err)
+	}
+}
+
+func TestResolveRolloutForProcessFailsClosed(t *testing.T) {
+	home := t.TempDir()
+	proc := t.TempDir()
+	dir := filepath.Join(home, "sessions", "2026", "07", "15")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rollout := filepath.Join(dir, "rollout-2026-07-15T10-00-00-seat.jsonl")
+	if err := os.WriteFile(rollout, []byte(`{"type":"session_meta","payload":{"cwd":"/different"}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	makeProcNode(t, proc, 200, "")
+	if err := os.Symlink(rollout, filepath.Join(proc, "200", "fd", "7")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolveRolloutForProcess(home, "/wanted", 200, proc); err == nil {
+		t.Fatal("cwd mismatch must fail closed")
+	}
+	if _, err := resolveRolloutForProcess(home, "/wanted", 999, proc); err == nil {
+		t.Fatal("missing process rollout must fail closed")
+	}
+}
+
+func makeProcNode(t *testing.T, proc string, pid int, children string) {
+	t.Helper()
+	base := filepath.Join(proc, fmt.Sprint(pid))
+	if err := os.MkdirAll(filepath.Join(base, "fd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	task := filepath.Join(base, "task", fmt.Sprint(pid))
+	if err := os.MkdirAll(task, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(task, "children"), []byte(children), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
