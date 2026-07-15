@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -323,6 +324,35 @@ func (s *Server) loadHistory() HistoryDoc {
 	return doc
 }
 
+const (
+	historyDefaultLimit      = 100
+	historyMaxLimit          = 500
+	historyResponseTargetMax = 400 * 1024
+)
+
+// loadHistoryPage builds one selected-desk window and hydrates companion bodies
+// only for rows that will be returned. It then keeps ordinary responses below a
+// conservative 400 KiB target by moving oldest rows to the next stable page.
+func (s *Server) loadHistoryPage(opts HistoryPageOptions) HistoryDoc {
+	doc := BuildHistoryPage(readFileOrEmpty(s.cfg.LedgerPath), readFileOrEmpty(s.cfg.BacklogPath), opts)
+	if !opts.MetadataOnly && s.cfg.LedgerPath != "" {
+		HydrateLedgerBodies(doc.Ledger, func(nonce string) (string, bool) {
+			return cos.LookupBody(s.cfg.LedgerPath, nonce)
+		})
+	}
+	for len(doc.Ledger) > 1 {
+		encoded, err := json.Marshal(doc)
+		if err != nil || len(encoded) <= historyResponseTargetMax {
+			break
+		}
+		doc.Ledger = doc.Ledger[:len(doc.Ledger)-1]
+		doc.HasMore = true
+		doc.Remaining++
+		doc.NextCursor = doc.Ledger[len(doc.Ledger)-1].ID
+	}
+	return doc
+}
+
 // loadGoals reads the goals file fresh and builds the goals document, binding
 // live work-item status from the SAME board (desk states) and backlog the other
 // views read — so the Goals view can never diverge from the fleet board. A
@@ -475,7 +505,62 @@ func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.loadHistory())
+	// No query retains the legacy full document for non-page compatibility. The
+	// dashboard itself always supplies a selected desk and a bounded limit.
+	if r.URL.RawQuery == "" {
+		writeJSON(w, s.loadHistory())
+		return
+	}
+	opts, err := parseHistoryPageOptions(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, s.loadHistoryPage(opts))
+}
+
+func parseHistoryPageOptions(r *http.Request) (HistoryPageOptions, error) {
+	q := r.URL.Query()
+	desk := strings.TrimSpace(q.Get("desk"))
+	if !validHistoryDesk(desk) {
+		return HistoryPageOptions{}, fmt.Errorf("desk must be a roster-style agent name")
+	}
+	opts := HistoryPageOptions{Desk: desk, Limit: historyDefaultLimit}
+	if raw := q.Get("limit"); raw != "" {
+		limit, err := strconv.Atoi(raw)
+		if err != nil || limit < 1 || limit > historyMaxLimit {
+			return HistoryPageOptions{}, fmt.Errorf("limit must be between 1 and %d", historyMaxLimit)
+		}
+		opts.Limit = limit
+	}
+	if raw := q.Get("before"); raw != "" {
+		before, err := strconv.Atoi(raw)
+		if err != nil || before < 1 {
+			return HistoryPageOptions{}, fmt.Errorf("before must be a positive history cursor")
+		}
+		opts.Before = before
+	}
+	switch q.Get("meta") {
+	case "", "0", "false":
+	case "1", "true":
+		opts.MetadataOnly = true
+	default:
+		return HistoryPageOptions{}, fmt.Errorf("meta must be true or false")
+	}
+	return opts, nil
+}
+
+func validHistoryDesk(desk string) bool {
+	if desk == "" || len(desk) > 128 {
+		return false
+	}
+	for i := 0; i < len(desk); i++ {
+		b := desk[i]
+		if !(b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '_' || b == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) handleGoals(w http.ResponseWriter, r *http.Request) {

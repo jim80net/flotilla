@@ -669,6 +669,45 @@ func TestBuildHistory_Empty(t *testing.T) {
 	}
 }
 
+func TestBuildHistoryPageStableIdentityAndDeskSignature(t *testing.T) {
+	base := strings.Join([]string{
+		`- 2026-07-15T00:01:00Z · alpha-room · operator → @alpha · "one"`,
+		`- 2026-07-15T00:02:00Z · beta-room · operator → @beta · "two"`,
+		`- 2026-07-15T00:03:00Z · alpha-room · @alpha → operator · "three"`,
+	}, "\n")
+	alpha := BuildHistoryPage(base, "", HistoryPageOptions{Desk: "alpha", Limit: 10})
+	if len(alpha.Ledger) != 2 || alpha.Ledger[0].ID != "3" || alpha.Ledger[1].ID != "1" {
+		t.Fatalf("alpha page = %+v", alpha.Ledger)
+	}
+
+	// An unrelated append changes neither the selected thread signature nor its
+	// existing source identities, so a metadata tick can remain metadata-only.
+	withBetaAppend := base + `
+- 2026-07-15T00:04:00Z · beta-room · @beta → operator · "four"`
+	alphaAfter := BuildHistoryPage(withBetaAppend, "", HistoryPageOptions{Desk: "alpha", Limit: 10})
+	if alphaAfter.Signature != alpha.Signature || alphaAfter.Ledger[0].ID != "3" || alphaAfter.Ledger[1].ID != "1" {
+		t.Fatalf("unrelated append moved alpha history: before=%+v after=%+v", alpha, alphaAfter)
+	}
+
+	withAlphaAppend := withBetaAppend + `
+- 2026-07-15T00:05:00Z · alpha-room · operator → @alpha · "five"`
+	changed := BuildHistoryPage(withAlphaAppend, "", HistoryPageOptions{Desk: "alpha", Limit: 10})
+	if changed.Signature == alpha.Signature || changed.Ledger[0].ID != "5" {
+		t.Fatalf("selected-desk append not reflected: %+v", changed)
+	}
+}
+
+func TestBuildHistoryPageRawParticipantBoundary(t *testing.T) {
+	raw := strings.Join([]string{
+		"malformed note for alpha-xo only",
+		"malformed note for @alpha only",
+	}, "\n")
+	page := BuildHistoryPage(raw, "", HistoryPageOptions{Desk: "alpha", Limit: 10})
+	if len(page.Ledger) != 1 || page.Ledger[0].ID != "2" {
+		t.Fatalf("raw participant boundary page = %+v", page.Ledger)
+	}
+}
+
 // TestStatusVocabularyParity pins the reimplemented label helpers to the same
 // vocabulary cmd/flotilla/status.go defines (the contract of record).
 func TestStatusVocabularyParity(t *testing.T) {

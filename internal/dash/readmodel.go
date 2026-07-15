@@ -14,6 +14,8 @@
 package dash
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"sort"
 	"strconv"
@@ -354,6 +356,10 @@ func BuildTopology(cfg *roster.Config) TopologyDoc {
 // rendered line (provenance + the fallback when structured parsing fails); the
 // parsed fields are populated only when the line matches the cos.Line format.
 type LedgerEntry struct {
+	// ID is a stable source-line ordinal for bounded history pages. The ledger is
+	// append-only, so existing IDs do not move when newer lines arrive. Legacy
+	// unbounded reads omit it for wire compatibility.
+	ID      string `json:"id,omitempty"`
 	Time    string `json:"time,omitempty"`
 	Channel string `json:"channel,omitempty"`
 	From    string `json:"from,omitempty"`
@@ -388,8 +394,24 @@ type BacklogInfo struct {
 // HistoryDoc is the coordination-history JSON: the CoS ledger entries
 // (reverse-chronological — most recent first) and the backlog classification.
 type HistoryDoc struct {
-	Ledger  []LedgerEntry `json:"ledger"`
-	Backlog BacklogInfo   `json:"backlog"`
+	Ledger       []LedgerEntry `json:"ledger"`
+	Backlog      BacklogInfo   `json:"backlog"`
+	Signature    string        `json:"signature,omitempty"`
+	Total        int           `json:"total,omitempty"`
+	HasMore      bool          `json:"has_more,omitempty"`
+	NextCursor   string        `json:"next_cursor,omitempty"`
+	Remaining    int           `json:"remaining,omitempty"`
+	MetadataOnly bool          `json:"metadata_only,omitempty"`
+}
+
+// HistoryPageOptions describes one selected-desk history window. Before is the
+// stable source-line ordinal returned as NextCursor; only older entries are
+// eligible for the next page. A zero Before starts at the newest matching line.
+type HistoryPageOptions struct {
+	Desk         string
+	Limit        int
+	Before       int
+	MetadataOnly bool
 }
 
 // HydrateLedgerBodies fills each parsed entry's Body from the full-message companion store
@@ -416,9 +438,15 @@ func HydrateLedgerBodies(entries []LedgerEntry, resolve func(nonce string) (stri
 // BuildHistory assembles the coordination history. Pure: the HTTP layer reads
 // the two files and passes their contents (each "" when the file is absent).
 func BuildHistory(ledgerRaw, backlogRaw string) HistoryDoc {
-	doc := HistoryDoc{Ledger: parseLedger(ledgerRaw)}
+	doc := HistoryDoc{Ledger: parseLedger(ledgerRaw), Backlog: BuildBacklogInfo(backlogRaw)}
+	return doc
+}
+
+// BuildBacklogInfo projects the shared work ledger independently of coordination
+// history. Bounded and metadata-only reads still carry this small navigator model.
+func BuildBacklogInfo(backlogRaw string) BacklogInfo {
 	st := backlog.Parse(backlogRaw)
-	doc.Backlog = BacklogInfo{
+	info := BacklogInfo{
 		Found:        st.Found,
 		Unblocked:    BuildQueueItems(st.Unblocked),
 		Blocked:      st.Blocked,
@@ -427,8 +455,61 @@ func BuildHistory(ledgerRaw, backlogRaw string) HistoryDoc {
 		Malformed:    st.Malformed,
 		Items:        st.Items,
 	}
-	if doc.Backlog.Unblocked == nil {
-		doc.Backlog.Unblocked = []QueueItem{}
+	if info.Unblocked == nil {
+		info.Unblocked = []QueueItem{}
+	}
+	return info
+}
+
+// BuildHistoryPage returns a bounded, selected-desk window. It parses the
+// append-only ledger once, assigns stable source ordinals, and computes a
+// content signature over only the matching thread. Metadata-only reads return
+// no ledger rows, allowing SSE/no-op refreshes to remain small.
+func BuildHistoryPage(ledgerRaw, backlogRaw string, opts HistoryPageOptions) HistoryDoc {
+	if opts.Limit <= 0 {
+		opts.Limit = 100
+	}
+	entries := parseLedgerIndexed(ledgerRaw)
+	matched := make([]LedgerEntry, 0, len(entries))
+	h := sha256.New()
+	for _, entry := range entries {
+		if !ledgerEntryMatchesDesk(entry, opts.Desk) {
+			continue
+		}
+		matched = append(matched, entry)
+		_, _ = h.Write([]byte(entry.ID))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(entry.Raw))
+		_, _ = h.Write([]byte{0})
+	}
+	doc := HistoryDoc{
+		Ledger:       []LedgerEntry{},
+		Backlog:      BuildBacklogInfo(backlogRaw),
+		Signature:    fmt.Sprintf("%x", h.Sum(nil)),
+		Total:        len(matched),
+		MetadataOnly: opts.MetadataOnly,
+	}
+	if opts.MetadataOnly {
+		return doc
+	}
+
+	eligible := matched[:0]
+	for _, entry := range matched {
+		ordinal, _ := strconv.Atoi(entry.ID)
+		if opts.Before > 0 && ordinal >= opts.Before {
+			continue
+		}
+		eligible = append(eligible, entry)
+	}
+	if len(eligible) > opts.Limit {
+		doc.Ledger = append(doc.Ledger, eligible[:opts.Limit]...)
+		doc.HasMore = true
+		doc.Remaining = len(eligible) - opts.Limit
+	} else {
+		doc.Ledger = append(doc.Ledger, eligible...)
+	}
+	if doc.HasMore && len(doc.Ledger) > 0 {
+		doc.NextCursor = doc.Ledger[len(doc.Ledger)-1].ID
 	}
 	return doc
 }
@@ -451,6 +532,65 @@ func parseLedger(raw string) []LedgerEntry {
 		out[i], out[j] = out[j], out[i]
 	}
 	return out
+}
+
+// parseLedgerIndexed is parseLedger with a stable append-order identity. The
+// ordinal advances only for non-blank ledger lines, matching parseLedger's
+// preservation rule for malformed entries.
+func parseLedgerIndexed(raw string) []LedgerEntry {
+	out := []LedgerEntry{}
+	ordinal := 0
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		ordinal++
+		entry := ParseLedgerLine(line)
+		entry.ID = strconv.Itoa(ordinal)
+		out = append(out, entry)
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out
+}
+
+func ledgerEntryMatchesDesk(entry LedgerEntry, desk string) bool {
+	desk = ledgerParticipant(desk)
+	if desk == "" {
+		return false
+	}
+	if entry.Parsed {
+		return ledgerParticipant(entry.From) == desk || ledgerParticipant(entry.To) == desk
+	}
+	return rawHasLedgerParticipant(entry.Raw, desk)
+}
+
+func ledgerParticipant(value string) string {
+	return strings.TrimPrefix(strings.ToLower(strings.TrimSpace(value)), "@")
+}
+
+func rawHasLedgerParticipant(raw, desk string) bool {
+	raw = strings.ToLower(raw)
+	for at := 0; ; {
+		i := strings.Index(raw[at:], desk)
+		if i < 0 {
+			return false
+		}
+		i += at
+		beforeOK := i == 0 || !isLedgerParticipantByte(raw[i-1])
+		after := i + len(desk)
+		afterOK := after == len(raw) || !isLedgerParticipantByte(raw[after])
+		if beforeOK && afterOK {
+			return true
+		}
+		at = i + len(desk)
+	}
+}
+
+func isLedgerParticipantByte(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= '0' && b <= '9' || b == '_' || b == '-'
 }
 
 // ParseLedgerLine parses one rendered cos.Line:

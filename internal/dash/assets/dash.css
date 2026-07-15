@@ -1160,6 +1160,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .wc-live-contract.is-awaiting { color: var(--ink-3); }
 .wc-load-earlier { align-self: center; border: 0; background: transparent; color: var(--ink-3); padding: .35rem .7rem; font: .64rem var(--mono); cursor: pointer; }
 .wc-load-earlier:disabled { cursor: default; opacity: .7; }
+.thread-load-earlier { display: block; margin: .25rem auto .5rem; }
 .wc-stream { flex: 1 1 auto; min-height: 0; overflow-y: auto; align-content: start; }
 .wc-seatless { margin: 1rem; padding: 1rem; border: 1px dashed var(--line); border-radius: var(--r-sm); color: var(--ink-3); font-size: .78rem; }
 .wc-composer { background: var(--raised); padding-bottom: calc(.75rem + env(safe-area-inset-bottom)); }

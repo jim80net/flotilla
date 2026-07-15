@@ -2,11 +2,13 @@ package dash
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -146,6 +148,133 @@ func TestHandleHistory(t *testing.T) {
 	}
 	if !doc.Backlog.Found || len(doc.Backlog.Unblocked) != 1 || doc.Backlog.Done != 1 {
 		t.Errorf("history backlog = %+v", doc.Backlog)
+	}
+}
+
+func TestHandleHistoryBoundedDeskPagesAndMetadata(t *testing.T) {
+	now := time.Date(2026, 7, 15, 6, 0, 0, 0, time.UTC)
+	srv, dir := newTestServer(t, singleFleetRoster, now)
+	srv.cfg.LedgerPath = filepath.Join(dir, "coordination-ledger.md")
+	lines := []string{
+		`- 2026-07-15T00:01:00Z · alpha-room · operator → @alpha · "alpha-1"`,
+		`- 2026-07-15T00:02:00Z · beta-room · operator → @beta · "beta-2"`,
+		`- 2026-07-15T00:03:00Z · alpha-room · @alpha → operator · "alpha-3"`,
+		`- 2026-07-15T00:04:00Z · beta-room · @beta → operator · "beta-4"`,
+		`- 2026-07-15T00:05:00Z · alpha-room · operator → @alpha · "alpha-5"`,
+		`- 2026-07-15T00:06:00Z · beta-room · operator → @beta · "beta-6"`,
+		`- 2026-07-15T00:07:00Z · alpha-room · @alpha → operator · "alpha-7"`,
+	}
+	if err := os.WriteFile(srv.cfg.LedgerPath, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	first := doGet(t, srv, "/api/history?desk=alpha&limit=2")
+	if first.Code != http.StatusOK {
+		t.Fatalf("first page status = %d: %s", first.Code, first.Body.String())
+	}
+	var page HistoryDoc
+	if err := json.Unmarshal(first.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Ledger) != 2 || page.Ledger[0].ID != "7" || page.Ledger[1].ID != "5" {
+		t.Fatalf("first page IDs = %+v, want [7 5]", page.Ledger)
+	}
+	if page.Total != 4 || !page.HasMore || page.Remaining != 2 || page.NextCursor != "5" || page.Signature == "" {
+		t.Fatalf("first page contract = %+v", page)
+	}
+
+	second := doGet(t, srv, "/api/history?desk=alpha&limit=2&before="+page.NextCursor)
+	var older HistoryDoc
+	if err := json.Unmarshal(second.Body.Bytes(), &older); err != nil {
+		t.Fatal(err)
+	}
+	if len(older.Ledger) != 2 || older.Ledger[0].ID != "3" || older.Ledger[1].ID != "1" || older.HasMore || older.Remaining != 0 {
+		t.Fatalf("older page = %+v, want IDs [3 1] with no remainder", older)
+	}
+	if older.Signature != page.Signature {
+		t.Error("stable pages from one ledger snapshot must share a signature")
+	}
+
+	meta := doGet(t, srv, "/api/history?desk=alpha&meta=1")
+	var metadata HistoryDoc
+	if err := json.Unmarshal(meta.Body.Bytes(), &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if !metadata.MetadataOnly || len(metadata.Ledger) != 0 || metadata.Total != 4 || metadata.Signature != page.Signature {
+		t.Fatalf("metadata response = %+v", metadata)
+	}
+
+	legacy := doGet(t, srv, "/api/history")
+	var full HistoryDoc
+	if err := json.Unmarshal(legacy.Body.Bytes(), &full); err != nil {
+		t.Fatal(err)
+	}
+	if len(full.Ledger) != len(lines) || full.Ledger[0].ID != "" {
+		t.Fatalf("legacy response changed shape: %+v", full.Ledger)
+	}
+}
+
+func TestHandleHistoryRejectsInvalidBounds(t *testing.T) {
+	srv, dir := newTestServer(t, singleFleetRoster, time.Now())
+	srv.cfg.LedgerPath = filepath.Join(dir, "coordination-ledger.md")
+	for _, path := range []string{
+		"/api/history?limit=20",
+		"/api/history?desk=alpha%2F..",
+		"/api/history?desk=alpha&limit=0",
+		"/api/history?desk=alpha&limit=501",
+		"/api/history?desk=alpha&before=-1",
+		"/api/history?desk=alpha&meta=maybe",
+	} {
+		if rec := doGet(t, srv, path); rec.Code != http.StatusBadRequest {
+			t.Errorf("GET %s status = %d, want 400", path, rec.Code)
+		}
+	}
+}
+
+func TestHandleHistoryInitialWindowStaysBelow500KiB(t *testing.T) {
+	srv, dir := newTestServer(t, singleFleetRoster, time.Now())
+	srv.cfg.LedgerPath = filepath.Join(dir, "coordination-ledger.md")
+	var ledger strings.Builder
+	for i := 0; i < 150; i++ {
+		body := fmt.Sprintf("message-%03d-%s", i, strings.Repeat("x", 4000))
+		fmt.Fprintf(&ledger, "- 2026-07-15T00:%02d:00Z · alpha-room · operator → @alpha · %s\n", i%60, strconv.Quote(body))
+	}
+	if err := os.WriteFile(srv.cfg.LedgerPath, []byte(ledger.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec := doGet(t, srv, "/api/history?desk=alpha&limit=100")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Body.Len(); got >= 500*1024 {
+		t.Fatalf("initial history transfer = %d bytes, want < 500 KiB", got)
+	}
+	var page HistoryDoc
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if !page.HasMore || page.Remaining == 0 || len(page.Ledger) == 0 {
+		t.Fatalf("bounded response lost pagination contract: %+v", page)
+	}
+}
+
+func TestDashUsesBoundedHistoryWindows(t *testing.T) {
+	srv, _ := newTestServer(t, singleFleetRoster, time.Now())
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	for _, marker := range []string{
+		`"/api/history?desk=" + encodeURIComponent(desk)`,
+		`meta: !!sameWindow`,
+		`data-history-more`,
+		`before: history.next_cursor`,
+		`thread.scrollHeight - beforeHeight`,
+		`cache.history.signature === doc.signature`,
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js missing bounded history behavior %q", marker)
+		}
+	}
+	if strings.Contains(js, `getJSON("/api/history")`) {
+		t.Error("dash startup must not fetch the legacy unbounded history document")
 	}
 }
 

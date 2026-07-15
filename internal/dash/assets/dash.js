@@ -72,9 +72,83 @@
 
   /* ── cached read model (combined on refresh) ───────────────────────────── */
   var cache = { status: null, topology: null, history: null, mirror: null };
+  var HISTORY_PAGE_LIMIT = 100;
+  var historyDesk = null;
+  var historyLoadingOlder = false;
   // Selection retains both desk and home-channel context: #745 makes the map one-row-per-seat,
   // while the channel still scopes the selected thread header and backlog projection.
   var selectedDesk = null, selectedChannel = null;
+
+  function historyURL(desk, options) {
+    options = options || {};
+    var path = "/api/history?desk=" + encodeURIComponent(desk) + "&limit=" + HISTORY_PAGE_LIMIT;
+    if (options.meta) path += "&meta=1";
+    if (options.before) path += "&before=" + encodeURIComponent(options.before);
+    return path;
+  }
+
+  function mergeLatestHistory(fresh, existing) {
+    if (!existing || !Array.isArray(existing.ledger)) return fresh;
+    var seen = {}, merged = [];
+    (Array.isArray(fresh.ledger) ? fresh.ledger : []).concat(existing.ledger).forEach(function (entry) {
+      var id = String((entry && entry.id) || "");
+      if (!id || seen[id]) return;
+      seen[id] = true;
+      merged.push(entry);
+    });
+    merged.sort(function (a, b) { return Number(b.id) - Number(a.id); });
+    fresh.ledger = merged;
+    fresh.remaining = Math.max(0, Number(fresh.total || 0) - merged.length);
+    fresh.has_more = fresh.remaining > 0;
+    fresh.next_cursor = fresh.has_more && merged.length ? String(merged[merged.length - 1].id || "") : "";
+    return fresh;
+  }
+
+  function storeHistoryWindow(doc, desk, merge) {
+    if (selectedDesk !== desk) return;
+    cache.history = merge ? mergeLatestHistory(doc, cache.history) : doc;
+    historyDesk = desk;
+    lastThreadKey = null;
+  }
+
+  function fetchSelectedHistory(desk) {
+    if (!desk) return Promise.resolve();
+    return getJSON(historyURL(desk)).then(function (doc) {
+      if (selectedDesk !== desk) return;
+      storeHistoryWindow(doc, desk, false);
+      renderConversations();
+    }).catch(function (err) {
+      if (selectedDesk !== desk) return;
+      cache.history = { ledger: [], backlog: { found: false, unblocked: [] }, error: err.message };
+      historyDesk = desk;
+      lastThreadKey = null;
+      renderConversations();
+    });
+  }
+
+  function refreshSelectedHistory(current) {
+    var want = selectedDesk;
+    if (!want) return Promise.resolve();
+    var sameWindow = historyDesk === want && cache.history;
+    return getJSON(historyURL(want, { meta: !!sameWindow })).then(function (doc) {
+      if (!current() || selectedDesk !== want) return;
+      if (sameWindow && doc.metadata_only && cache.history.signature === doc.signature) {
+        cache.history.backlog = doc.backlog;
+        cache.history.total = doc.total;
+        return;
+      }
+      if (doc.metadata_only) {
+        return getJSON(historyURL(want)).then(function (fresh) {
+          if (current() && selectedDesk === want) storeHistoryWindow(fresh, want, true);
+        });
+      }
+      storeHistoryWindow(doc, want, false);
+    }).catch(function (err) {
+      if (!current() || selectedDesk !== want) return;
+      cache.history = { ledger: [], backlog: { found: false, unblocked: [] }, error: err.message };
+      historyDesk = want;
+    });
+  }
   // Session-mirror detail level (design §2.3 UI half). "info" = the readermap body
   // only (clean default); "debug" additionally reveals each entry's collapsible
   // debug tier (reader-map envelope, mirror note, firewall warn-terms). The full
@@ -455,8 +529,11 @@
       buttons[i].addEventListener("click", function () {
         selectedDesk = this.getAttribute("data-desk");
         selectedChannel = this.getAttribute("data-channel"); // scope the selection to THIS channel copy (#370)
+        cache.history = null;
+        historyDesk = null;
         resetThreadScroll(); // a freshly selected thread opens at its latest message
         renderConversations();
+        fetchSelectedHistory(selectedDesk);
         fetchMirror();            // load the newly-selected desk's session mirror
         pushNav({ view: "conversations", desk: selectedDesk, channel: selectedChannel }); // reversible (#349 A1)
       });
@@ -820,7 +897,12 @@
     }).join("|");
     if (sig === lastThreadKey) return;
     lastThreadKey = sig;
-    thread.innerHTML = coordinatorHistoryNote(items) + items.map(function (it) {
+    var more = history && history.has_more
+      ? '<button class="wc-load-earlier thread-load-earlier" type="button" data-history-more>' +
+          '&#8593; load earlier' + (history.remaining ? ' (' + Number(history.remaining) + ' remaining)' : '') +
+        '</button>'
+      : "";
+    thread.innerHTML = more + coordinatorHistoryNote(items) + items.map(function (it) {
       if (it.kind === "mirror") return threadMirrorMsg(it.m);
       if (it.kind === "optimistic") return threadOptimisticMsg(it.o);
       return threadLedgerMsg(it.e);
@@ -1081,13 +1163,17 @@
       if (current()) cache.topology = { channels: [], note: err.message };
     });
 
-    var pHist = getJSON("/api/history").then(function (d) {
-      if (current()) cache.history = d;
-    }).catch(function (err) {
-      if (current()) cache.history = { ledger: [], backlog: { found: false, unblocked: [] } };
+    // The default desk depends on status + topology. Resolve those first, then ask
+    // for only that desk's recent history window. Later SSE/poll ticks fetch the
+    // metadata signature first and transfer rows only when the thread changed.
+    var pCore = Promise.all([pStatus, pTopo]);
+    var pHist = pCore.then(function () {
+      if (!current()) return;
+      ensureSelection(cache.status || {}, buildRailGroups(cache.topology || {}));
+      return refreshSelectedHistory(current);
     });
 
-    return Promise.all([pStatus, pTopo, pHist]).then(function () {
+    return Promise.all([pCore, pHist]).then(function () {
       if (current()) {
         renderConversations();
         var mirrorSettled = fetchMirror(); // keep the selected desk's session-mirror glance current on each tick
@@ -1222,14 +1308,13 @@
   }
 
   // computeConvSig derives the conversations signature from the loaded cache — the
-  // latest ledger entry's ts + total ledger count. Both are available after each refresh.
+  // selected-thread signature + total and the structured backlog projection. All
+  // are available from the small metadata response on no-op refreshes.
   function computeConvSig() {
     var hist = cache.history || {};
-    var ledger = Array.isArray(hist.ledger) ? hist.ledger : [];
     var bl = hist.backlog || {};
     var unblocked = Array.isArray(bl.unblocked) ? bl.unblocked : [];
-    var latestTs = ledger.length ? (ledger[ledger.length - 1].ts || "") : "";
-    return latestTs + "|" + String(ledger.length) + "|" + String(unblocked.length);
+    return String(hist.signature || "") + "|" + String(hist.total || 0) + "|" + cheapHash(JSON.stringify(unblocked));
   }
 
   // peekGoalsSig fetches /api/goals to derive the goals tab signature. Errors are
@@ -1460,9 +1545,14 @@
       // Set the selection to the state's desk — including CLEARING it on a desk:null state
       // (Back to the seed must not leave the thread/header/mirror on the old desk; a null
       // selection lets renderConversations re-pick the default) — cubic #351 P2.
-      if (view === "conversations") { selectedDesk = s.desk || null; selectedChannel = s.channel || null; }
+      if (view === "conversations") {
+        selectedDesk = s.desk || null;
+        selectedChannel = s.channel || null;
+        cache.history = null;
+        historyDesk = null;
+      }
       showView(view);
-      if (view === "conversations") { renderConversations(); fetchMirror(); }
+      if (view === "conversations") { renderConversations(); fetchSelectedHistory(selectedDesk); fetchMirror(); }
       if (view === "goals" && window.flotillaGoals && window.flotillaGoals.restoreNode) {
         if (window.flotillaGoals.show) window.flotillaGoals.show(); // ensure the map is rendered first
         window.flotillaGoals.restoreNode(s.node || null);
@@ -1536,9 +1626,12 @@
   function openConversation(desk) {
     if (!desk) return;
     selectedDesk = desk;
+    cache.history = null;
+    historyDesk = null;
     resetThreadScroll(); // open the deep-linked thread at its latest message
     showView("conversations");
     renderConversations();
+    fetchSelectedHistory(desk);
     fetchMirror(); // load the deep-linked desk's session mirror (the identity guard hides the prior desk's until it lands)
     pushNav({ view: "conversations", desk: desk }); // reversible: Back returns to the goals map (#349 A1)
     // Move focus into the now-visible Conversations view — the deep-link hid the
@@ -1547,6 +1640,44 @@
     if (title) { title.setAttribute("tabindex", "-1"); title.focus(); }
   }
   window.flotillaDash.openConversation = openConversation;
+
+  function loadOlderHistory() {
+    var history = cache.history;
+    var want = selectedDesk;
+    if (!want || historyDesk !== want || !history || !history.has_more || !history.next_cursor || historyLoadingOlder) return;
+    var thread = el("conv-thread");
+    var beforeHeight = thread ? thread.scrollHeight : 0;
+    var beforeTop = thread ? thread.scrollTop : 0;
+    var signature = history.signature;
+    historyLoadingOlder = true;
+    var button = thread && thread.querySelector ? thread.querySelector("[data-history-more]") : null;
+    if (button) { button.disabled = true; button.textContent = "Loading earlier…"; }
+    getJSON(historyURL(want, { before: history.next_cursor })).then(function (page) {
+      if (selectedDesk !== want || historyDesk !== want || cache.history !== history) return;
+      var seen = {};
+      history.ledger.forEach(function (entry) { if (entry && entry.id) seen[String(entry.id)] = true; });
+      (Array.isArray(page.ledger) ? page.ledger : []).forEach(function (entry) {
+        var id = String((entry && entry.id) || "");
+        if (id && !seen[id]) { seen[id] = true; history.ledger.push(entry); }
+      });
+      history.total = page.total;
+      history.has_more = !!page.has_more;
+      history.next_cursor = page.next_cursor || "";
+      history.remaining = Number(page.remaining || 0);
+      // If rows arrived while this older page was loading, retain the prior
+      // signature so the next metadata tick still fetches and merges the new tail.
+      history.signature = signature;
+      lastThreadKey = null;
+      threadPinned = false;
+      renderThread(history, true);
+      if (thread) thread.scrollTop = beforeTop + (thread.scrollHeight - beforeHeight);
+      threadPinned = false;
+      showThreadJump(true);
+    }).catch(function (err) {
+      var currentButton = thread && thread.querySelector ? thread.querySelector("[data-history-more]") : null;
+      if (currentButton) { currentButton.disabled = false; currentButton.textContent = "Could not load earlier — retry"; }
+    }).then(function () { historyLoadingOlder = false; });
+  }
 
   // #421/#429: any [data-open-decisions] trigger (the goals "Awaiting you" tile) routes
   // to the Decisions TAB — a reversible nav entry, same as clicking the tab itself.
@@ -1581,6 +1712,10 @@
   (function wireThreadComposer() {
     var thread = el("conv-thread");
     if (thread) {
+      thread.addEventListener("click", function (e) {
+        var more = e.target.closest ? e.target.closest("[data-history-more]") : null;
+        if (more) loadOlderHistory();
+      });
       thread.addEventListener("scroll", function () {
         var nearBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 48;
         threadPinned = nearBottom;
