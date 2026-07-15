@@ -1046,6 +1046,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 
 /* ── issues ─────────────────────────────────────────────────────────────── */
 .tracker-controls { display: flex; gap: .55rem; align-items: center; flex-wrap: wrap; }
+.tracker-overflow { display: none; }
 .filter-idea {
   font-size: .78rem;
   color: var(--amber);
@@ -2022,9 +2023,79 @@ html, body { overflow-x: clip; }
      here; the pinned glance peek + collapsible drive queue are intentional and
      must NOT be un-clamped. */
 
-  .tracker-controls { width: 100%; }
-  .tracker-controls #filter-state,
-  .tracker-controls .btn { flex: 1 1 auto; }
+  #issues-listpanel { overflow: visible; }
+  #issues-listpanel > .panel-head {
+    position: sticky; top: 0; z-index: 20; height: 64px; min-height: 64px;
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px;
+    padding: 8px 10px; background: var(--surface); border-bottom: 1px solid var(--line);
+  }
+  #issues-listpanel > .panel-head > div:first-child { min-width: 0; }
+  #issues-listpanel > .panel-head h2 { font-size: .9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #issues-listpanel > .panel-head .panel-desc, #issues-repo { display: none; }
+  .tracker-controls { width: auto; flex-wrap: nowrap; gap: 6px; }
+  .tracker-controls #filter-state { width: 126px; min-width: 0; height: 44px; padding: .35rem 1.6rem .35rem .45rem; }
+  .tracker-overflow { display: block; position: relative; }
+  .tracker-overflow > summary {
+    display: flex; align-items: center; justify-content: center; width: 44px; height: 44px;
+    list-style: none; border: 1px solid var(--line); border-radius: var(--r-sm); cursor: pointer;
+    font: 1.15rem var(--display); color: var(--ink);
+  }
+  .tracker-overflow > summary::-webkit-details-marker { display: none; }
+  .tracker-overflow-menu {
+    position: absolute; right: 0; top: calc(100% + 5px); z-index: 30; width: min(280px, calc(100vw - 20px));
+    display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: var(--r-sm);
+    background: var(--surface); box-shadow: var(--shadow);
+  }
+  .tracker-overflow:not([open]) .tracker-overflow-menu { display: none; }
+  .tracker-overflow-menu .btn, .tracker-overflow-menu .filter-idea { width: 100%; justify-content: center; }
+  .issues-list { gap: 8px; padding: 8px; }
+  .issue-scope-note {
+    min-height: 28px; margin: 0; padding: 4px 7px; gap: 3px 7px; flex-wrap: nowrap;
+    white-space: nowrap; font-size: .58rem; line-height: 1.15; overflow: hidden;
+  }
+  .issue-scope-note strong { flex: 0 0 auto; font-size: .6rem; }
+  .issue-scope-note span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .issue-ledger-head { min-height: 34px; padding: 4px 8px; }
+  .issue-ledger-kicker { display: none; }
+  .issue-ledger-head h3 { font-size: .78rem; }
+  .issue-ledger-count { min-width: 1.7rem; height: 1.7rem; font-size: .66rem; }
+  .issue-desk-head { min-height: 34px; padding: 4px 8px; }
+  .issue-desk-head h4 { font-size: .72rem; }
+  .issue-desk-head span { font-size: .58rem; white-space: nowrap; }
+  .issue-desk-mobile:empty { display: none; }
+  .issue-shipped-group { border-top: 1px solid var(--line-soft); background: var(--abyss-2); }
+  .issue-shipped-group > summary {
+    min-height: 36px; max-height: 36px; padding: 4px 8px; cursor: pointer;
+    display: grid; grid-template-columns: minmax(72px, auto) minmax(0, 1fr); align-items: center; gap: 7px;
+    position: relative; color: var(--ink-2); font-size: .62rem; list-style: none;
+  }
+  .issue-shipped-group > summary::-webkit-details-marker { display: none; }
+  .issue-shipped-group > summary::before { content: "▸"; color: var(--cyan); grid-column: 1; position: absolute; }
+  .issue-shipped-group[open] > summary::before { content: "▾"; }
+  .issue-shipped-identity { padding-left: 12px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .issue-shipped-group > summary span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .issue-row.issue-row-in-flight {
+    grid-template-columns: auto auto minmax(0, 1fr); gap: 5px 7px; min-height: 52px; max-height: 52px;
+    padding: 5px 8px; align-items: center;
+  }
+  .issue-row-in-flight .issue-copy { grid-column: 3; gap: 1px; }
+  .issue-row-in-flight .issue-title, .issue-row-in-flight .issue-context {
+    display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; word-break: normal;
+  }
+  .issue-row-in-flight .issue-title { font-size: .76rem; }
+  .issue-row-in-flight .issue-context { font-size: .62rem; }
+  .issue-row-in-flight .issue-labels { display: none; }
+  .issue-row.issue-row-compact {
+    grid-template-columns: 8px auto minmax(0, 1fr); gap: 6px; min-height: 30px; max-height: 34px;
+    padding: 4px 8px; align-items: center;
+  }
+  .issue-row-compact .issue-copy { grid-column: 3; }
+  .issue-row-compact .issue-title { display: block; white-space: nowrap; text-overflow: ellipsis; font-size: .7rem; }
+  .issue-state-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+  .issue-window-more, .goutline-more {
+    width: 100%; min-height: 36px; border: 0; border-top: 1px dashed var(--line); background: transparent;
+    color: var(--cyan); font: .64rem var(--mono); cursor: pointer;
+  }
 
   /* #515: issues list on a phone — keep a 44px row target; title already
      line-clamps to 2 lines at all widths. Put labels on their own row so the

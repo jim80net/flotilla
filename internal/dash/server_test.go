@@ -2266,3 +2266,28 @@ func TestMobileWorkContextDensity725(t *testing.T) {
 		}
 	}
 }
+
+// TestMobileIssuesDensity725 pins the counted, lazy mobile ledger disclosures
+// and stable shipped-work windows without changing the desktop renderer.
+func TestMobileIssuesDensity725(t *testing.T) {
+	srv, _ := newTestServer(t, singleFleetRoster, time.Date(2026, 7, 15, 3, 0, 0, 0, time.UTC))
+	html := doGet(t, srv, "/").Body.String()
+	if !strings.Contains(html, `id="tracker-overflow"`) {
+		t.Error("index.html must host the #725 mobile tracker overflow")
+	}
+
+	trackerJS := doGet(t, srv, "/static/tracker.js").Body.String()
+	for _, marker := range []string{"shippedOpen", "shippedWindows", "renderMobileDesk", `slice(0, limit)`,
+		`data-issue-more`, `Math.min(20, remaining)`, `window.scrollBy`} {
+		if !strings.Contains(trackerJS, marker) {
+			t.Errorf("tracker.js must execute counted stable mobile ledger windows (missing %q)", marker)
+		}
+	}
+
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	for _, marker := range []string{".issue-shipped-group", ".issue-row.issue-row-in-flight", ".issue-window-more"} {
+		if !strings.Contains(css, marker) {
+			t.Errorf("dash.css must enforce the #725 mobile ledger budgets (missing %q)", marker)
+		}
+	}
+}

@@ -18,6 +18,11 @@
 
   var loaded = false; // lazy first-load when the Issues tab is first shown
   var workRowContexts = {};
+  var lastLedgerDoc = null;
+  function isMobileLedger() { return !!(window.matchMedia && window.matchMedia("(max-width: 640px)").matches); }
+  var mobileLedger = isMobileLedger();
+  var shippedOpen = {};
+  var shippedWindows = {};
 
   // A monotonic epoch guards against out-of-order renders: rapid filter toggles
   // or list⇄detail navigation launch overlapping fetches, and an older response
@@ -74,7 +79,7 @@
     return verb + " " + Math.floor(hours / 24) + "d ago";
   }
 
-  function workRow(item, posture, flotilla, desk) {
+  function workRow(item, posture, flotilla, desk, compact) {
     var it = item.issue || {};
     var number = Number(it.number);
     workRowContexts[number] = {
@@ -85,11 +90,13 @@
       ? '<span class="issue-context">Drives ' + escapeHtml(item.goal_title) + " · " + escapeHtml(item.goal_detail || "in flight") + "</span>"
       : '<span class="issue-context">' + escapeHtml(relativeWhen(it.closedAt, "closed")) + "</span>";
     return (
-      '<div class="issue-row issue-row-' + posture + '" data-number="' + number + '" role="button" tabindex="0" aria-label="Open work context for issue ' + number + '">' +
-        '<span class="issue-state ' + posture + '">' + (posture === "in-flight" ? "in flight" : "shipped") + "</span>" +
+      '<div class="issue-row issue-row-' + posture + (compact ? " issue-row-compact" : "") + '" data-number="' + number + '" role="button" tabindex="0" aria-label="Open work context for issue ' + number + '">' +
+        (compact
+          ? '<span class="issue-state-dot ' + posture + '" aria-hidden="true"></span><span class="sr-only">shipped</span>'
+          : '<span class="issue-state ' + posture + '">' + (posture === "in-flight" ? "in flight" : "shipped") + "</span>") +
         '<span class="issue-num">#' + number + "</span>" +
-        '<span class="issue-copy"><span class="issue-title">' + escapeHtml(it.title) + "</span>" + contextLine + "</span>" +
-        '<span class="issue-labels">' + labelChips(it.labels) + "</span>" +
+        '<span class="issue-copy"><span class="issue-title">' + escapeHtml(it.title) + "</span>" + (compact ? "" : contextLine) + "</span>" +
+        (compact ? "" : '<span class="issue-labels">' + labelChips(it.labels) + "</span>") +
       "</div>"
     );
   }
@@ -113,13 +120,44 @@
       "</section>";
   }
 
+  function groupKey(flotilla, desk) {
+    return String(flotilla || "Unassigned") + "\u001f" + String(desk || "Unassigned");
+  }
+
+  function renderMobileDesk(desk, flotilla) {
+    var moving = Array.isArray(desk.in_flight) ? desk.in_flight : [];
+    var shipped = Array.isArray(desk.shipped) ? desk.shipped : [];
+    var key = groupKey(flotilla, desk.name);
+    var limit = Math.max(10, shippedWindows[key] || 10);
+    var shown = shipped.slice(0, limit);
+    var remaining = Math.max(0, shipped.length - shown.length);
+    var next = Math.min(20, remaining);
+    var movingBlock = moving.length
+      ? '<div class="issue-desk-head"><h4>' + escapeHtml(desk.name || "Unassigned") + '</h4><span>' +
+          moving.length + " moving · " + shipped.length + " shipped</span></div>" +
+        moving.map(function (it) { return workRow(it, "in-flight", flotilla, desk.name); }).join("")
+      : "";
+    var shippedBlock = shipped.length
+      ? '<details class="issue-shipped-group" data-shipped-key="' + escapeHtml(key) + '"' + (shippedOpen[key] ? " open" : "") + ">" +
+          '<summary><span class="issue-shipped-identity">' + escapeHtml(desk.name || "Unassigned") + '</span><span>' +
+            shipped.length + " shipped in the last 14 days — tap to expand</span></summary>" +
+          (shippedOpen[key] ? '<div class="issue-shipped-window">' + shown.map(function (it) {
+              return workRow(it, "shipped", flotilla, desk.name, true);
+            }).join("") +
+            (remaining ? '<button type="button" class="issue-window-more" data-issue-more="' + escapeHtml(key) + '">show ' +
+              next + " more of " + remaining + " ▸</button>" : "") + "</div>" : "") + "</details>"
+      : "";
+    return '<section class="issue-desk issue-desk-mobile">' + movingBlock + shippedBlock + "</section>";
+  }
+
   function renderIssueList(doc) {
+    lastLedgerDoc = doc;
     workRowContexts = {};
     el("issues-repo").textContent = doc.repo ? doc.repo : "";
     var flotillas = Array.isArray(doc.flotillas) ? doc.flotillas : [];
     var list = el("issues-list");
-    var scopeNote = '<div class="issue-scope-note" role="note"><strong>Moving shows goal-linked work only</strong>' +
-      "<span>Open issues not marked in flight under a goal are not shown.</span></div>";
+    var scopeNote = '<div class="issue-scope-note" role="note"><strong>Moving is goal-linked only</strong>' +
+      "<span>Other open issues are omitted.</span></div>";
     if (!flotillas.length) {
       list.innerHTML = scopeNote + '<div class="empty">No fleet work matches this view.</div>';
       return;
@@ -129,7 +167,11 @@
       return '<section class="issue-ledger-section"><div class="issue-ledger-head"><div><span class="issue-ledger-kicker">Flotilla</span>' +
         '<h3>' + escapeHtml(flotilla.name || "Unassigned") + '</h3></div><span class="issue-ledger-count">' +
         desks.length + " desk" + (desks.length === 1 ? "" : "s") + "</span></div>" +
-        desks.map(function (desk) { return renderDesk(desk, flotilla.name || "Unassigned"); }).join("") + "</section>";
+        desks.map(function (desk) {
+          return mobileLedger
+            ? renderMobileDesk(desk, flotilla.name || "Unassigned")
+            : renderDesk(desk, flotilla.name || "Unassigned");
+        }).join("") + "</section>";
     }).join("");
     var rows = list.querySelectorAll(".issue-row");
     for (var i = 0; i < rows.length; i++) {
@@ -138,6 +180,71 @@
         if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openWorkContext(this); }
       });
     }
+    var groups = list.querySelectorAll("[data-shipped-key]");
+    for (var j = 0; j < groups.length; j++) {
+      groups[j].addEventListener("toggle", function () {
+        var key = this.getAttribute("data-shipped-key"), open = this.open;
+        if (!!shippedOpen[key] === open) return;
+        var top = this.querySelector("summary").getBoundingClientRect().top;
+        shippedOpen[key] = open;
+        renderIssueList(lastLedgerDoc);
+        requestAnimationFrame(function () {
+          var nextGroups = list.querySelectorAll("[data-shipped-key]"), summary = null;
+          for (var i = 0; i < nextGroups.length; i++) {
+            if (nextGroups[i].getAttribute("data-shipped-key") === key) { summary = nextGroups[i].querySelector("summary"); break; }
+          }
+          if (!summary) return;
+          window.scrollBy(0, summary.getBoundingClientRect().top - top);
+          summary.focus();
+        });
+      });
+    }
+    var more = list.querySelectorAll("[data-issue-more]");
+    for (var k = 0; k < more.length; k++) {
+      more[k].addEventListener("click", function () {
+        var key = this.getAttribute("data-issue-more");
+        var top = this.getBoundingClientRect().top;
+        var previous = shippedWindows[key] || 10;
+        shippedWindows[key] = previous + 20;
+        renderIssueList(lastLedgerDoc);
+        requestAnimationFrame(function () {
+          var groups = list.querySelectorAll("[data-shipped-key]"), group = null;
+          for (var i = 0; i < groups.length; i++) {
+            if (groups[i].getAttribute("data-shipped-key") === key) { group = groups[i]; break; }
+          }
+          if (!group) return;
+          var rows = group.querySelectorAll(".issue-row");
+          var anchor = rows[Math.min(previous, rows.length - 1)] || group.querySelector("summary");
+          if (!anchor) return;
+          window.scrollBy(0, anchor.getBoundingClientRect().top - top);
+          anchor.focus();
+        });
+      });
+    }
+  }
+
+  function syncMobileLedger() {
+    var next = isMobileLedger();
+    var overflow = el("tracker-overflow");
+    var menu = el("tracker-overflow-menu");
+    var controls = overflow && overflow.parentNode;
+    var idea = el("filter-idea").closest(".filter-idea");
+    var state = el("filter-state"), refresh = el("issues-refresh"), create = el("issues-new");
+    if (overflow && menu && controls) {
+      overflow.open = false;
+      if (next) {
+        menu.appendChild(idea);
+        menu.appendChild(refresh);
+        menu.appendChild(create);
+      } else {
+        controls.insertBefore(idea, state);
+        controls.insertBefore(refresh, overflow);
+        controls.insertBefore(create, overflow);
+      }
+    }
+    if (next === mobileLedger) return;
+    mobileLedger = next;
+    if (lastLedgerDoc) renderIssueList(lastLedgerDoc);
   }
 
   function openWorkContext(row) {
@@ -331,6 +438,12 @@
   el("create-cancel").addEventListener("click", loadIssues);
   el("create-form").addEventListener("submit", submitCreate);
   el("detail-back").addEventListener("click", loadIssues);
+  var mobileResizeTimer = null;
+  window.addEventListener("resize", function () {
+    clearTimeout(mobileResizeTimer);
+    mobileResizeTimer = setTimeout(syncMobileLedger, 120);
+  });
+  syncMobileLedger();
 
   // Exposed to dash.js: load issues the first time the Issues tab is shown.
   window.flotillaTracker = {
