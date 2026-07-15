@@ -302,13 +302,13 @@ func cmdWatch(args []string) error {
 		}
 	}
 	injector := watch.NewInjector(mkSend(confirm.Submit), 16)
-	if ingress := newCoordinatorIngress(cfg); ingress != nil {
-		injector.SetCoordinatorIngress(ingress)
-		arcQuiet := adjutantbuffer.ParseArcQuiet(os.Getenv("FLOTILLA_ADJUTANT_ARC_QUIET"))
-		injector.SetOperatorRelayBuffer(func(leader, messageID, body, channelID, operatorID string) error {
-			bufferPath := roster.LayerBufferPath(rosterDir, leader)
-			return adjutantbuffer.AppendOperator(bufferPath, leader, messageID, body, channelID, operatorID, time.Now().UTC(), arcQuiet)
-		})
+	injector.SetCoordinatorIngress(watch.NewCoordinatorIngressDynamic(currentRoster))
+	arcQuiet := adjutantbuffer.ParseArcQuiet(os.Getenv("FLOTILLA_ADJUTANT_ARC_QUIET"))
+	injector.SetOperatorRelayBuffer(func(leader, messageID, body, channelID, operatorID string) error {
+		bufferPath := roster.LayerBufferPath(rosterDir, leader)
+		return adjutantbuffer.AppendOperator(bufferPath, leader, messageID, body, channelID, operatorID, time.Now().UTC(), arcQuiet)
+	})
+	if cfg.HasAdjutant() {
 		log.Printf("flotilla watch: adjutant front-office ingress active (#533); arc quiet=%s (buffer-v2 B1)", arcQuiet)
 	}
 	// RELAY-kind jobs route through the self-heal-capable submit; heartbeat/detector ticks keep the
