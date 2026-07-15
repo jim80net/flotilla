@@ -308,19 +308,26 @@ func loadBoardLoopEvidence(cfg *roster.Config, xo, rosterDir string, snap watch.
 	return loopposture.LoadFleetEvidence(cfg, xo, rosterDir, snap, snapOK, snapFresh)
 }
 
-// loadHistory reads the ledger + backlog files fresh and builds the history
-// document. A missing/unreadable file reads as empty (the dash never fabricates).
-// Ledger entries whose audit gist was clamped (#407) are hydrated with their full
-// message from the loopback-only companion store so the thread renders the operator's
-// complete words, never a clamped copy shown as if whole.
-func (s *Server) loadHistory() HistoryDoc {
-	doc := BuildHistory(readFileOrEmpty(s.cfg.LedgerPath), readFileOrEmpty(s.cfg.BacklogPath))
+// loadHistoryPage reads a bounded, optionally desk-scoped ledger window. Only
+// returned entries are hydrated from the companion store; the former all-ledger
+// response is no longer reachable through the HTTP startup path.
+func (s *Server) loadHistoryPage(q HistoryQuery) (HistoryPage, error) {
+	ledgerRaw := ""
+	if !q.Meta {
+		ledgerRaw = readFileOrEmpty(s.cfg.LedgerPath)
+	}
+	doc, err := BuildHistoryPage(ledgerRaw, readFileOrEmpty(s.cfg.BacklogPath), q)
+	if err != nil {
+		return HistoryPage{}, err
+	}
+	doc.LedgerSignature = fileSignature(s.cfg.LedgerPath)
+	doc.BacklogSignature = fileSignature(s.cfg.BacklogPath)
 	if s.cfg.LedgerPath != "" {
 		HydrateLedgerBodies(doc.Ledger, func(nonce string) (string, bool) {
 			return cos.LookupBody(s.cfg.LedgerPath, nonce)
 		})
 	}
-	return doc
+	return doc, nil
 }
 
 // loadGoals reads the goals file fresh and builds the goals document, binding
@@ -475,7 +482,17 @@ func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.loadHistory())
+	q, err := parseHistoryQuery(r.URL.Query())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	doc, err := s.loadHistoryPage(q)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, doc)
 }
 
 func (s *Server) handleGoals(w http.ResponseWriter, r *http.Request) {

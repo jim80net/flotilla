@@ -457,6 +457,7 @@
         selectedChannel = this.getAttribute("data-channel"); // scope the selection to THIS channel copy (#370)
         resetThreadScroll(); // a freshly selected thread opens at its latest message
         renderConversations();
+        fetchSelectedHistory(true);
         fetchMirror();            // load the newly-selected desk's session mirror
         pushNav({ view: "conversations", desk: selectedDesk, channel: selectedChannel }); // reversible (#349 A1)
       });
@@ -768,7 +769,16 @@
       thread.innerHTML = '<div class="empty">Pick a desk to read its coordination thread.</div>';
       return;
     }
+    if (!historyMatchesSelected(history)) {
+      var loadingKey = "@loading:" + selectedDesk;
+      if (lastThreadKey !== loadingKey) {
+        lastThreadKey = loadingKey;
+        thread.innerHTML = '<div class="empty">Loading recent coordination history…</div>';
+      }
+      return;
+    }
     var ledger = (history && Array.isArray(history.ledger)) ? history.ledger : [];
+    var loadError = history && history.error ? String(history.error) : "";
     pruneOptimistic(ledger, selectedDesk);
     var items = [];
     ledger.forEach(function (e) {
@@ -785,9 +795,13 @@
       items.push({ kind: "optimistic", t: o.t, o: o });
     });
     if (!items.length) {
-      var emptyKey = "@empty:" + selectedDesk;
+      var emptyKey = "@empty:" + selectedDesk + ":" + loadError;
       if (lastThreadKey === emptyKey) return;
       lastThreadKey = emptyKey;
+      if (loadError) {
+        thread.innerHTML = '<div class="empty thread-load-error" role="alert">Could not load coordination history (' + escapeHtml(loadError) + ").</div>";
+        return;
+      }
       // Coordinator empty state is honest about the dual feed (relay ledger + session-
       // mirror) so a first open of the CoS thread after #575–#578 doesn't read as a
       // broken surface — "desk" framing was wrong for the coordinator pin (F#383).
@@ -809,7 +823,7 @@
     // AND resets the operator's scroll) when the merged timeline is unchanged. The
     // key folds each item's timestamp + a content hash so a same-second new entry
     // still re-renders (mirrors the #300 glance dedup discipline).
-    var sig = selectedDesk + "#" + mirrorVerbosity + "#" + items.map(function (it) {
+    var sig = selectedDesk + "#" + mirrorVerbosity + "#error:" + cheapHash(loadError) + "#" + items.map(function (it) {
       if (it.kind === "mirror") {
         return "m:" + (it.m.ts || "") + ":" + cheapHash(it.m.info || "") + ":" + (it.m.suppressed ? "1" : "0");
       }
@@ -820,7 +834,10 @@
     }).join("|");
     if (sig === lastThreadKey) return;
     lastThreadKey = sig;
-    thread.innerHTML = coordinatorHistoryNote(items) + items.map(function (it) {
+    var errorNotice = loadError
+      ? '<div class="thread-load-error" role="alert">Could not refresh coordination history (' + escapeHtml(loadError) + "). Showing the last loaded messages.</div>"
+      : "";
+    thread.innerHTML = errorNotice + coordinatorHistoryNote(items) + items.map(function (it) {
       if (it.kind === "mirror") return threadMirrorMsg(it.m);
       if (it.kind === "optimistic") return threadOptimisticMsg(it.o);
       return threadLedgerMsg(it.e);
@@ -1036,6 +1053,7 @@
     renderDeskCard(status, fresh);
     renderSessionMirror();
     renderThread(history);
+    renderHistoryPager(history);
     renderBacklogStrip(history, status, topology);
     syncComposer();
   }
@@ -1062,7 +1080,75 @@
 
   /* ── refresh orchestration ───────────────────────────────────────────── */
   var refreshEpoch = 0;
+  var historyEpoch = 0;
   var startupWaterfallSignaled = false;
+
+  function historyMatchesSelected(history) {
+    return !!(selectedDesk && history && agentKey(history.desk) === agentKey(selectedDesk));
+  }
+
+  function historyURL(desk, cursor, meta) {
+    var q = meta ? "meta=1" : "desk=" + encodeURIComponent(desk || "") + "&limit=50";
+    if (cursor) q += "&cursor=" + encodeURIComponent(cursor);
+    return "/api/history?" + q;
+  }
+
+  function renderHistoryPager(history) {
+    var btn = el("thread-load-earlier");
+    if (!btn) return;
+    btn.hidden = !(historyMatchesSelected(history) && history.has_more);
+    if (!btn.disabled) btn.textContent = "↑ Load earlier";
+  }
+
+  // Fetch exactly one selected-desk page. Reset replaces the recent window; a
+  // cursor fetch extends it toward older entries without ever requesting the
+  // fleet-wide ledger. A selection/refresh epoch prevents late pages crossing desks.
+  function fetchSelectedHistory(reset) {
+    var desk = selectedDesk;
+    if (!desk) return Promise.resolve();
+    var prior = cache.history;
+    var lastGood = reset && historyMatchesSelected(prior) && !prior.error ? prior : null;
+    var cursor = reset ? "" : (historyMatchesSelected(prior) ? prior.next_cursor : "");
+    if (!reset && (!prior || !prior.has_more || !cursor)) return Promise.resolve();
+    var epoch = ++historyEpoch;
+    return getJSON(historyURL(desk, cursor, false)).then(function (doc) {
+      if (epoch !== historyEpoch || agentKey(selectedDesk) !== agentKey(desk)) return;
+      if (!reset && historyMatchesSelected(prior)) {
+        doc.ledger = (prior.ledger || []).concat(doc.ledger || []);
+      }
+      cache.history = doc;
+      lastThreadKey = "";
+      renderConversations();
+      unseenSigs.conversations = computeConvSig();
+      resolvePending("conversations");
+      refreshDots();
+    }).catch(function (err) {
+      if (epoch !== historyEpoch || agentKey(selectedDesk) !== agentKey(desk)) return;
+      if (reset) {
+        cache.history = lastGood || { desk: desk, ledger: [], backlog: { found: false, unblocked: [] } };
+        cache.history.error = err.message;
+        lastThreadKey = "";
+        renderConversations();
+      }
+    });
+  }
+
+  function refreshSelectedHistory() {
+    if (!historyMatchesSelected(cache.history)) return fetchSelectedHistory(true);
+    var known = cache.history;
+    return getJSON(historyURL("", "", true)).then(function (meta) {
+      if (!historyMatchesSelected(known)) return fetchSelectedHistory(true);
+      if (meta.ledger_signature !== known.ledger_signature) return fetchSelectedHistory(true);
+      known.backlog = meta.backlog;
+      known.backlog_signature = meta.backlog_signature;
+      delete known.error;
+      cache.history = known;
+    }).catch(function () {
+      // Metadata is an optimization. Retain the last honest selected-desk page
+      // when it is temporarily unavailable; the next live tick retries it.
+    });
+  }
+
   function refresh() {
     var epoch = ++refreshEpoch;
     function current() { return epoch === refreshEpoch; }
@@ -1081,13 +1167,11 @@
       if (current()) cache.topology = { channels: [], note: err.message };
     });
 
-    var pHist = getJSON("/api/history").then(function (d) {
-      if (current()) cache.history = d;
-    }).catch(function (err) {
-      if (current()) cache.history = { ledger: [], backlog: { found: false, unblocked: [] } };
-    });
-
-    return Promise.all([pStatus, pTopo, pHist]).then(function () {
+    return Promise.all([pStatus, pTopo]).then(function () {
+      if (!current()) return;
+      ensureSelection(cache.status || {}, buildRailGroups(cache.topology || {}));
+      return refreshSelectedHistory();
+    }).then(function () {
       if (current()) {
         renderConversations();
         var mirrorSettled = fetchMirror(); // keep the selected desk's session-mirror glance current on each tick
@@ -1221,15 +1305,11 @@
     if (pendingView[tab] && unseenSigs[tab]) markTabViewed(tab);
   }
 
-  // computeConvSig derives the conversations signature from the loaded cache — the
-  // latest ledger entry's ts + total ledger count. Both are available after each refresh.
+  // Server file signatures cover the full bounded source without loading it into the
+  // browser. They also keep backlog-only changes distinct from conversation changes.
   function computeConvSig() {
     var hist = cache.history || {};
-    var ledger = Array.isArray(hist.ledger) ? hist.ledger : [];
-    var bl = hist.backlog || {};
-    var unblocked = Array.isArray(bl.unblocked) ? bl.unblocked : [];
-    var latestTs = ledger.length ? (ledger[ledger.length - 1].ts || "") : "";
-    return latestTs + "|" + String(ledger.length) + "|" + String(unblocked.length);
+    return String(hist.ledger_signature || "") + "|" + String(hist.backlog_signature || "");
   }
 
   // peekGoalsSig fetches /api/goals to derive the goals tab signature. Errors are
@@ -1462,7 +1542,7 @@
       // selection lets renderConversations re-pick the default) — cubic #351 P2.
       if (view === "conversations") { selectedDesk = s.desk || null; selectedChannel = s.channel || null; }
       showView(view);
-      if (view === "conversations") { renderConversations(); fetchMirror(); }
+      if (view === "conversations") { renderConversations(); fetchSelectedHistory(true); fetchMirror(); }
       if (view === "goals" && window.flotillaGoals && window.flotillaGoals.restoreNode) {
         if (window.flotillaGoals.show) window.flotillaGoals.show(); // ensure the map is rendered first
         window.flotillaGoals.restoreNode(s.node || null);
@@ -1539,6 +1619,7 @@
     resetThreadScroll(); // open the deep-linked thread at its latest message
     showView("conversations");
     renderConversations();
+    fetchSelectedHistory(true);
     fetchMirror(); // load the deep-linked desk's session mirror (the identity guard hides the prior desk's until it lands)
     pushNav({ view: "conversations", desk: desk }); // reversible: Back returns to the goals map (#349 A1)
     // Move focus into the now-visible Conversations view — the deep-link hid the
@@ -1573,6 +1654,33 @@
     e.preventDefault();
     openDecisionsView();
   });
+
+  (function wireHistoryPager() {
+    var btn = el("thread-load-earlier");
+    var thread = el("conv-thread");
+    if (!btn || !thread) return;
+    btn.addEventListener("click", function () {
+      if (btn.disabled || !historyMatchesSelected(cache.history)) return;
+      var beforeHeight = thread.scrollHeight;
+      var beforeTop = thread.scrollTop;
+      var hadFocus = document.activeElement === btn;
+      btn.disabled = true;
+      btn.textContent = "Loading…";
+      threadPinned = false;
+      fetchSelectedHistory(false).then(function () {
+        // Older rows are prepended visually after the ascending timeline sort.
+        // Offset their height so the line the operator was reading stays put.
+        thread.scrollTop = beforeTop + Math.max(0, thread.scrollHeight - beforeHeight);
+      }).finally(function () {
+        btn.disabled = false;
+        renderHistoryPager(cache.history);
+        if (hadFocus && btn.hidden) {
+          var title = el("conv-title");
+          if (title) { title.setAttribute("tabindex", "-1"); title.focus(); }
+        }
+      });
+    });
+  })();
 
   // Thread composer + latest-at-bottom scroll wiring (F#383 criteria 4 + 5). The composer
   // sends to the SELECTED desk/coordinator via the same route-to-pane relay the control

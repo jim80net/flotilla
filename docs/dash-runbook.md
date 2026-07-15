@@ -15,12 +15,22 @@ The fleet view presents three read surfaces, all live-updating:
   **snapshot freshness** prominently (see *Three-state freshness* below).
 - **Federation topology** — the channel↔XO bindings as an org chart (each channel
   → its XO → its members). A single-fleet roster renders its one binding.
-- **Coordination history** — the CoS who-knows-what ledger (most recent first) and
-  the backlog drive-queue (unblocked / blocked / done).
+- **Coordination history** — a recent, desk-scoped window of the CoS
+  who-knows-what ledger and the backlog drive-queue (unblocked / blocked / done).
+  Conversations renders oldest-to-newest and lets the operator explicitly load
+  earlier windows without putting the full fleet ledger on the startup path.
 
 The page pushes updates over Server-Sent Events when the snapshot, ledger, or
 backlog file changes on disk; if the SSE link drops it falls back to polling the
 JSON endpoints, so the board never goes silently stale.
+
+History reads are deterministic and bounded: `/api/history?desk=<desk>&limit=50`
+returns at most 50 matching entries plus `has_more` and an opaque `next_cursor`.
+The cursor is an append-stable byte position, so loading earlier after a new line
+arrives produces neither gaps nor duplicates. A live refresh first requests
+`/api/history?meta=1`; it reloads the selected desk window only when the ledger
+signature changed, while a backlog-only change updates the small queue metadata.
+The server hydrates companion-store bodies only for entries in the returned page.
 
 ## Prerequisites
 
