@@ -909,6 +909,12 @@ code {
   font-size: .72rem;
 }
 
+.perf-diagnostics { margin-left: auto; text-align: left; }
+.perf-diagnostics summary { cursor: pointer; color: var(--ink-2); }
+.perf-diagnostics[open] { display: grid; gap: 8px; min-width: min(360px, 100%); }
+.perf-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.perf-actions .btn { min-height: 32px; padding: 5px 10px; }
+
 .hidden { display: none !important; }
 
 /* ── tabs ───────────────────────────────────────────────────────────────── */

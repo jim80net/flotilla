@@ -585,8 +585,8 @@
   }
   function fetchMirror() {
     var want = selectedDesk;
-    if (!want) { cache.mirror = null; paintMirror(); return; }
-    getJSON("/api/session-mirror?agent=" + encodeURIComponent(want) + "&limit=500").then(function (d) {
+    if (!want) { cache.mirror = null; paintMirror(); return Promise.resolve(); }
+    return getJSON("/api/session-mirror?agent=" + encodeURIComponent(want) + "&limit=500").then(function (d) {
       if (selectedDesk === want) { cache.mirror = d; paintMirror(); }
     }).catch(function (err) {
       if (selectedDesk === want) { cache.mirror = { agent: want, entries: [], error: err.message }; paintMirror(); }
@@ -975,10 +975,16 @@
     } else {
       form.hidden = true;
     }
+    // #747: Conversations is minimally usable only after its three startup read
+    // models have settled (success or honest error) and this paint completed.
+    if (cache.status && cache.topology && cache.history && window.flotillaPerf) {
+      window.flotillaPerf.viewRendered("conversations");
+    }
   }
 
   /* ── refresh orchestration ───────────────────────────────────────────── */
   var refreshEpoch = 0;
+  var startupWaterfallSignaled = false;
   function refresh() {
     var epoch = ++refreshEpoch;
     function current() { return epoch === refreshEpoch; }
@@ -1006,7 +1012,7 @@
     return Promise.all([pStatus, pTopo, pHist]).then(function () {
       if (current()) {
         renderConversations();
-        fetchMirror(); // keep the selected desk's session-mirror glance current on each tick
+        var mirrorSettled = fetchMirror(); // keep the selected desk's session-mirror glance current on each tick
         // Update the conversations unseen dot from the freshly-loaded ledger.
         unseenSigs.conversations = computeConvSig();
         resolvePending("conversations");
@@ -1014,9 +1020,11 @@
         // Peek the other tabs' data sources to keep their unseen dots current.
         // Fire-and-forget: errors are swallowed inside each peek so a failing
         // endpoint never blocks the conversations render.
-        peekGoalsSig();
-        peekIssuesSig();
-        peekParadeSig();
+        var startupPeeks = [peekGoalsSig(), peekIssuesSig(), peekParadeSig(), mirrorSettled];
+        if (!startupWaterfallSignaled && window.flotillaPerf) {
+          startupWaterfallSignaled = true;
+          Promise.all(startupPeeks).then(function () { window.flotillaPerf.startupSettled(); });
+        }
       }
       // Keep the Goals view live off the same refresh cadence (SSE-triggered). It
       // fetches /api/goals itself and no-ops until the operator has opened the tab.
@@ -1194,6 +1202,7 @@
     if (b) b.textContent = view;
   }
   function showView(view) {
+    if (window.flotillaPerf) window.flotillaPerf.selectView(view);
     VIEWS.forEach(function (v) {
       var on = v === view;
       el("view-" + v).classList.toggle("hidden", !on);

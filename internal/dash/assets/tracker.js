@@ -65,7 +65,10 @@
     getJSON(workLedgerURL()).then(function (doc) {
       if (epoch === viewEpoch) renderIssueList(doc);
     }).catch(function (err) {
-      if (epoch === viewEpoch) list.innerHTML = '<div class="error">Could not load the work ledger: ' + escapeHtml(err.message) + "</div>";
+      if (epoch === viewEpoch) {
+        list.innerHTML = '<div class="error">Could not load the work ledger: ' + escapeHtml(err.message) + "</div>";
+        if (window.flotillaPerf) window.flotillaPerf.viewRendered("issues");
+      }
     });
   }
 
@@ -161,6 +164,7 @@
       "<span>Other open issues are omitted.</span></div>";
     if (!flotillas.length) {
       list.innerHTML = scopeNote + '<div class="empty">No fleet work matches this view.</div>';
+      if (window.flotillaPerf) window.flotillaPerf.viewRendered("issues");
       return;
     }
     list.innerHTML = scopeNote + flotillas.map(function (flotilla) {
@@ -223,6 +227,7 @@
         });
       });
     }
+    if (window.flotillaPerf) window.flotillaPerf.viewRendered("issues");
   }
 
   function syncMobileLedger() {

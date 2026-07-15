@@ -1801,6 +1801,7 @@
     if (!cache) { list.innerHTML = '<div class="gdec-empty">Loading decisions…</div>'; return; }
     if (cache.found === false) {
       list.innerHTML = '<div class="gdec-empty">The fleet goals data is unavailable right now, so decisions can&#8217;t be listed. This page reloads on the next visit or live update.</div>';
+      if (window.flotillaPerf) window.flotillaPerf.viewRendered("decisions");
       return;
     }
     // The load-time badge prime sets cache without indexing; index on demand so the
@@ -1825,6 +1826,7 @@
     // would otherwise read as "the header forgot", not "nothing to decide" (OCR #505).
     if (titleEl) titleEl.textContent = "Decisions awaiting you · " + g.decisions.length;
     lastDecsSig = JSON.stringify(cache);
+    if (window.flotillaPerf) window.flotillaPerf.viewRendered("decisions");
   }
   // lastDecsSig dedups live-tick repaints of the decisions page (the map's lastSig is
   // reset by every flat re-index, so it can't serve): an unchanged doc must not churn
@@ -2132,6 +2134,7 @@
         : (doc.message || "No goals file configured.");
       announce(empty.textContent); // mirror the state to the screen reader, not "0 of 0"
       lastSig = sig; // a complete (synchronous) render
+      if (window.flotillaPerf) window.flotillaPerf.viewRendered("goals");
       return;
     }
     var goals = Array.isArray(doc.goals) ? doc.goals : [];
@@ -2142,6 +2145,7 @@
       empty.textContent = "No goals defined yet.";
       announce(empty.textContent);
       lastSig = sig; // a complete (synchronous) render
+      if (window.flotillaPerf) window.flotillaPerf.viewRendered("goals");
       return;
     }
     graph.classList.remove("hidden");
@@ -2174,6 +2178,7 @@
       reapplyTransient(); // re-light hover chain + refresh the open drawer's live status
       tryRestore(); // a queued Back/Forward drawer target may now be renderable (#351 P2)
       lastSig = sig;
+      if (window.flotillaPerf) window.flotillaPerf.viewRendered("goals");
       return;
     }
 
@@ -2232,6 +2237,7 @@
       laidOut = true;
       lastSig = sig;
       tryRestore(); // nodeById is now populated — apply a queued Back/Forward drawer target (#351 P2)
+      if (window.flotillaPerf) window.flotillaPerf.viewRendered("goals");
     });
   }
 

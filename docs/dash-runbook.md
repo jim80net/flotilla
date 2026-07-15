@@ -295,3 +295,28 @@ the loopback + SSH-tunnel deployment, which is fully supported today.
 See [docs/watch-runbook.md](./watch-runbook.md) for the daemon that produces the
 snapshot the dash reads, and [docs/quickstart.md](./quickstart.md) to stand a fleet
 up cold.
+
+## Local startup diagnostics
+
+The page records a local-only startup waterfall for the selected landing view.
+Open **Startup diagnostics** in the footer, then choose **Copy JSON** or **Save
+JSON file**. Both are explicit operator gestures; saving creates a browser-local
+file and sends no request. If clipboard permission is unavailable or copying
+fails, the disclosure says so and points to the file fallback.
+
+Each sample contains Navigation Timing, fixed-class same-origin `/api/*`
+Resource Timing and `Server-Timing` stages, startup marks, and buffered LCP and
+long-task observations when the browser supports them. Unsupported APIs are
+recorded as unsupported. Endpoint paths are collapsed to a fixed class before
+storage; hosts, IPs, full URLs, queries, content, headers, cookies, tokens, and
+fleet/deployment identities are never retained. The local ring holds at most 20
+samples and at most 128 KiB serialized; newest samples win.
+
+Cold/warm labels use a deterministic run-order heuristic: the first stored
+sample for a build revision and access class is `cold-candidate`; later samples
+for that pair are `warm-candidate`. These labels distinguish first and repeat
+observations only. They do not claim browser-cache warmth. Raw navigation and
+transfer sizes remain in the export, but `transferSize` alone is not treated as
+proof of a browser cache hit. Likewise, `Server-Timing` cache stages describe
+server work (including GitHub-read coalescing) and are not browser-cache
+evidence.
