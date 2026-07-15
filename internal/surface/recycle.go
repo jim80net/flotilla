@@ -48,8 +48,8 @@ func RecycleSupport(d Driver) (RecycleBridge, bool) {
 }
 
 // PortableMarkdownHandoffTurn is the shared non-interactive handoff instruction for
-// harness-agnostic recycle bridges (grok, codex — #158). The driver owns the path
-// convention; the turn wording is identical across those surfaces.
+// harness-agnostic recycle bridges (grok, codex — #158; pi — #728). The driver owns
+// the path convention; the turn wording is identical across those surfaces.
 func PortableMarkdownHandoffTurn(designatedPath string) string {
 	return "You are being RECYCLED by flotilla (an automated, REMOTE-DRIVEN chapter close — " +
 		"no human is at this pane to answer prompts). Do exactly this, then stop:\n" +
@@ -63,7 +63,7 @@ func PortableMarkdownHandoffTurn(designatedPath string) string {
 }
 
 // PortableMarkdownTakeoverTurn is the shared imperative takeover instruction for
-// harness-agnostic recycle bridges (grok, codex — #158/#218).
+// harness-agnostic recycle bridges (grok, codex — #158/#218; pi — #728).
 func PortableMarkdownTakeoverTurn(designatedPath string) string {
 	return "You are a freshly-recycled flotilla desk with a clean context window, and you are " +
 		"REMOTE-DRIVEN (a remote XO drives you over the relay; no human is at this pane). " +

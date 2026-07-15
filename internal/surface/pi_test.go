@@ -6,12 +6,22 @@ import (
 	"testing"
 )
 
+var (
+	_ ComposerStateProbe = pi{} // retained #702
+	_ RecycleBridge      = pi{} // #728 — switch FROM/TO capable
+)
+
 func TestPiRegistered(t *testing.T) {
 	d, ok := Get("pi")
 	if !ok || d.Name() != "pi" {
 		t.Errorf(`Get("pi") = (%v, %v), want the pi driver`, d, ok)
 	}
-	var _ ComposerStateProbe = pi{}
+	if _, ok := RecycleSupport(d); !ok {
+		t.Error("registered pi must implement RecycleBridge (#728)")
+	}
+	if _, ok := d.(ComposerStateProbe); !ok {
+		t.Error("registered pi must retain ComposerStateProbe")
+	}
 }
 
 func piFixture(t *testing.T, name string) string {

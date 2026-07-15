@@ -1,6 +1,7 @@
 package surface
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -87,8 +88,8 @@ func TestHandoffTurnPathWithSpaces(t *testing.T) {
 	}
 }
 
-// TestRecycleSupport: the claude AND grok drivers are recycle-capable (implement RecycleBridge); a
-// driver without the bridge is not (the refuse fixture stays — KEEP stubNoBridge per #158).
+// TestRecycleSupport: claude, grok, codex, and pi are recycle-capable (implement
+// RecycleBridge); a driver without the bridge is not (KEEP stubNoBridge per #158).
 func TestRecycleSupport(t *testing.T) {
 	if _, ok := RecycleSupport(newClaudeCode()); !ok {
 		t.Error("claude-code should implement RecycleBridge")
@@ -98,6 +99,9 @@ func TestRecycleSupport(t *testing.T) {
 	}
 	if _, ok := RecycleSupport(newCodex()); !ok {
 		t.Error("codex should implement RecycleBridge (grok-tier execution desk)")
+	}
+	if _, ok := RecycleSupport(newPi()); !ok {
+		t.Error("pi should implement RecycleBridge (#728 — cross-harness switch FROM/TO)")
 	}
 	if _, ok := RecycleSupport(stubNoBridge{}); ok {
 		t.Error("a driver without the bridge must not type-assert as RecycleBridge")
@@ -120,6 +124,8 @@ func TestHandoffPathIsGitignored(t *testing.T) {
 	}{
 		{"claude", newClaudeCode().HandoffPath(repo, token)},
 		{"grok", newGrok().HandoffPath(repo, token)},
+		{"codex", newCodex().HandoffPath(repo, token)},
+		{"pi", newPi().HandoffPath(repo, token)}, // #728
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -202,6 +208,106 @@ func TestGrokTurnsPathWithSpaces(t *testing.T) {
 	}
 	if !strings.Contains(g.TakeoverTurn(path), path) {
 		t.Errorf("grok TakeoverTurn dropped a spaced path")
+	}
+}
+
+// TestPiHandoffPath: pi's designated path embeds the token under the harness-agnostic
+// .flotilla/handoffs/ (parity with grok/codex — #728), never the claude-branded path.
+func TestPiHandoffPath(t *testing.T) {
+	p := newPi()
+	got := p.HandoffPath("/home/operator/work/project", "20260715T030000.000000001-pi728tok")
+	want := "/home/operator/work/project/.flotilla/handoffs/recycle-20260715T030000.000000001-pi728tok.md"
+	if got != want {
+		t.Errorf("pi HandoffPath = %q, want %q", got, want)
+	}
+	if strings.Contains(got, ".claude/handoffs") {
+		t.Errorf("pi HandoffPath must NOT use the claude-branded .claude/handoffs/: %q", got)
+	}
+}
+
+// TestPiHandoffTurn: portable-markdown handoff names the path, forbids git commit, is
+// remote-driven / non-interactive, and does not invent a Pi /handoff skill.
+func TestPiHandoffTurn(t *testing.T) {
+	p := newPi()
+	path := "/repo/.flotilla/handoffs/recycle-pi-tok.md"
+	turn := p.HandoffTurn(path)
+	for _, must := range []string{path, "untracked", "Do NOT commit", "REMOTE-DRIVEN", "stop"} {
+		if !strings.Contains(turn, must) {
+			t.Errorf("pi HandoffTurn missing %q\n--- turn ---\n%s", must, turn)
+		}
+	}
+	for _, forbid := range []string{"git add -f", "&& git commit", "git commit -m"} {
+		if strings.Contains(turn, forbid) {
+			t.Errorf("pi HandoffTurn must not instruct %q (#218)\n--- turn ---\n%s", forbid, turn)
+		}
+	}
+	if strings.Contains(turn, "skill") {
+		t.Errorf("pi HandoffTurn must not reference a skill (pi has no /handoff skill)\n%s", turn)
+	}
+}
+
+// TestPiTakeoverTurn: portable-markdown takeover — read → rm -f → BEGIN WORK IMMEDIATELY.
+func TestPiTakeoverTurn(t *testing.T) {
+	p := newPi()
+	path := "/repo/.flotilla/handoffs/recycle-pi-tok.md"
+	turn := p.TakeoverTurn(path)
+	for _, must := range []string{path, "BEGIN WORK IMMEDIATELY", "REMOTE-DRIVEN", "flotilla", "shall I start", "rm -f"} {
+		if !strings.Contains(turn, must) {
+			t.Errorf("pi TakeoverTurn missing %q\n--- turn ---\n%s", must, turn)
+		}
+	}
+	if strings.Contains(turn, "git rm") {
+		t.Errorf("pi TakeoverTurn must not instruct git rm (#218)\n%s", turn)
+	}
+	if strings.Index(turn, "Read this handoff") > strings.Index(turn, "rm -f") {
+		t.Errorf("pi TakeoverTurn must instruct READ before rm (read → delete → work)\n%s", turn)
+	}
+	if strings.Contains(turn, "skill") {
+		t.Errorf("pi TakeoverTurn must not reference a skill\n%s", turn)
+	}
+}
+
+// TestPiTurnsPathWithSpaces: spaced paths embed verbatim in both turns.
+func TestPiTurnsPathWithSpaces(t *testing.T) {
+	p := newPi()
+	path := "/home/operator/my work/.flotilla/handoffs/recycle-tok.md"
+	if !strings.Contains(p.HandoffTurn(path), path) {
+		t.Errorf("pi HandoffTurn dropped a spaced path")
+	}
+	if !strings.Contains(p.TakeoverTurn(path), path) {
+		t.Errorf("pi TakeoverTurn dropped a spaced path")
+	}
+}
+
+// TestPiNewIsTakeoverContextBoundary: in-session reset remains /new (Rotate); recycle
+// takeover is a separate portable-markdown turn after relaunch, not a /new injection.
+func TestPiNewIsTakeoverContextBoundary(t *testing.T) {
+	var injected string
+	p := pi{inject: func(_ string, cmd string) error { injected = cmd; return nil }}
+	if p.RotateStrategy() != SlashCommand {
+		t.Fatalf("RotateStrategy = %v, want SlashCommand", p.RotateStrategy())
+	}
+	if err := p.Rotate("pane"); err != nil {
+		t.Fatalf("Rotate = %v", err)
+	}
+	if injected != "/new" {
+		t.Fatalf("Rotate injected %q, want /new (Pi in-session context boundary)", injected)
+	}
+	// TakeoverTurn must NOT be the /new slash — recycle delivers prose after relaunch.
+	to := newPi().TakeoverTurn("/repo/.flotilla/handoffs/recycle-tok.md")
+	if strings.HasPrefix(strings.TrimSpace(to), "/new") {
+		t.Errorf("TakeoverTurn must not be a bare /new injection; got %q", to)
+	}
+	if !strings.Contains(to, "BEGIN WORK IMMEDIATELY") {
+		t.Errorf("TakeoverTurn missing begin-immediately contract")
+	}
+}
+
+// TestPiCloseStaysHonest: Close remains ErrNoGracefulClose until /quit is live-
+// characterized under recycle's remain-on-exit gate (#728 acceptance).
+func TestPiCloseStaysHonest(t *testing.T) {
+	if err := newPi().Close("pane"); !errors.Is(err, ErrNoGracefulClose) {
+		t.Fatalf("Close = %v, want ErrNoGracefulClose (do not invent /quit)", err)
 	}
 }
 

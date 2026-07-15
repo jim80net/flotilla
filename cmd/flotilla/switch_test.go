@@ -264,6 +264,15 @@ func (noBridge) Close(string) error               { return nil }
 
 func TestSwitchCapabilityRefusal(t *testing.T) {
 	capable := capableStub{name: "claude-code"}
+	// Live drivers: pi must pass as both FROM and TO (#728 acceptance).
+	piDrv, ok := surface.Get("pi")
+	if !ok {
+		t.Fatal(`surface.Get("pi") missing — pi driver must register`)
+	}
+	grokDrv, ok := surface.Get("grok")
+	if !ok {
+		t.Fatal(`surface.Get("grok") missing`)
+	}
 	cases := []struct {
 		name     string
 		from, to surface.Driver
@@ -275,6 +284,10 @@ func TestSwitchCapabilityRefusal(t *testing.T) {
 		{"TO no bridge", capable, noBridge{}, true, "TO surface \"no-bridge\""},
 		{"FROM no probe", bridgeNoProbe{}, capable, true, "FROM surface \"bridge-no-probe\""},
 		{"TO no probe", capable, bridgeNoProbe{}, true, "TO surface \"bridge-no-probe\""},
+		// #728: pi participates in the supported switch path both directions.
+		{"pi FROM → grok TO", piDrv, grokDrv, false, ""},
+		{"grok FROM → pi TO", grokDrv, piDrv, false, ""},
+		{"pi FROM → pi TO", piDrv, piDrv, false, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -292,6 +305,44 @@ func TestSwitchCapabilityRefusal(t *testing.T) {
 				t.Fatalf("both bridges must be returned for a capable pair, got from=%v to=%v", fb, tb)
 			}
 		})
+	}
+}
+
+// TestSwitchPiHandoffPathsNeutral: pi authors portable-markdown turns under
+// .flotilla/handoffs/ (not claude-branded) when used as FROM or TO (#728).
+func TestSwitchPiHandoffPathsNeutral(t *testing.T) {
+	piDrv, ok := surface.Get("pi")
+	if !ok {
+		t.Fatal(`surface.Get("pi") missing`)
+	}
+	bridge, err := recycleCapability("desk", "FROM", piDrv)
+	if err != nil {
+		t.Fatalf("pi FROM capability: %v", err)
+	}
+	path := bridge.HandoffPath("/proj", "TOK")
+	want := "/proj/.flotilla/handoffs/recycle-TOK.md"
+	if path != want {
+		t.Fatalf("pi HandoffPath = %q, want %q", path, want)
+	}
+	if strings.Contains(path, ".claude/") {
+		t.Fatalf("pi path must not be claude-branded: %q", path)
+	}
+	ho := bridge.HandoffTurn(path)
+	to := bridge.TakeoverTurn(path)
+	for _, turn := range []string{ho, to} {
+		if !strings.Contains(turn, path) {
+			t.Errorf("turn missing path %q: %s", path, turn)
+		}
+	}
+	// Durable-handoff contract: filesystem durability (#218) — turn FORBIDS commit,
+	// never instructs git add/commit as the durability mechanism.
+	if !strings.Contains(ho, "Do NOT commit") {
+		t.Error("handoff turn must forbid committing the handoff (filesystem durability #218)")
+	}
+	for _, bad := range []string{"git add -f", "&& git commit", "git commit -m"} {
+		if strings.Contains(ho, bad) {
+			t.Errorf("handoff turn must not instruct %q", bad)
+		}
 	}
 }
 
