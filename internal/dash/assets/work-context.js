@@ -173,22 +173,36 @@
 
   function decorateMessageBodies(keys) {
     var stream = el("wc-stream");
-    var bodies = stream.querySelectorAll(".thread-mirror-body, .thread-gist");
-    for (var i = 0; i < bodies.length; i++) {
-      var body = bodies[i];
+    var keyedEntries = stream.querySelectorAll("[data-wc-render-key]");
+    var measurements = [];
+    for (var i = 0; i < keyedEntries.length; i++) {
+      var body = keyedEntries[i].querySelector(".thread-mirror-body, .thread-gist");
+      if (!body) continue;
       // Two live refreshes can queue decoration frames against the same rendered
       // DOM. The first frame owns the control; later frames must be idempotent.
       if (body.classList.contains("wc-message-clamped")) continue;
-      var key = keys[i] || (activeSeat + "|body|" + i);
       var style = window.getComputedStyle(body);
       var lineHeight = parseFloat(style.lineHeight) || (parseFloat(style.fontSize) || 12) * 1.4;
       var lines = Math.max(1, Math.ceil(body.scrollHeight / lineHeight));
       if (lines <= 8) continue;
-      var more = lines - 8;
+      measurements.push({
+        body: body,
+        key: keyedEntries[i].getAttribute("data-wc-render-key") || keys[i] || (activeSeat + "|body|" + i),
+        index: i,
+        more: lines - 8
+      });
+    }
+    // All layout reads above happen before this mutation pass, so a long mirror
+    // does not alternate measurement and style invalidation for every message.
+    for (var j = 0; j < measurements.length; j++) {
+      var measurement = measurements[j];
+      var body = measurement.body;
+      var key = measurement.key;
+      var more = measurement.more;
       body.classList.add("wc-message-clamped");
       body.classList.toggle("is-expanded", !!expandedBodies[key]);
       body.setAttribute("data-wc-body-key", key);
-      body.id = "wc-message-body-" + i;
+      body.id = "wc-message-body-" + measurement.index;
       var button = document.createElement("button");
       button.type = "button";
       button.className = "wc-message-toggle";
@@ -230,11 +244,16 @@
       return activeSeat + "|mirror|" + String(entry.ts || "") + "|" + String(entry.info || "").slice(0, 80);
     });
     var html = visible.length
-      ? D.renderMirrorEntries(activeSeat, visible)
+      ? visible.map(function (entry, index) {
+          return '<div class="wc-keyed-entry" data-wc-render-key="' + esc(bodyKeys[index]) + '">' +
+            D.renderMirrorEntries(activeSeat, [entry]) + "</div>";
+        }).join("")
       : '<div class="empty">' + (mirrorDoc && mirrorDoc.error ? "Session mirror unavailable." : "No session mirror yet for this seat.") + "</div>";
     activeInjects.forEach(function (item, index) {
-      html += D.renderOperatorInject(item.target, item.body, item.ts);
-      bodyKeys.push(activeSeat + "|local|" + String(item.ts || "") + "|" + index);
+      var key = activeSeat + "|local|" + String(item.ts || "") + "|" + index;
+      bodyKeys.push(key);
+      html += '<div class="wc-keyed-entry" data-wc-render-key="' + esc(key) + '">' +
+        D.renderOperatorInject(item.target, item.body, item.ts) + "</div>";
     });
     stream.innerHTML = html;
     updateLoadEarlier(entries, mirrorLimit);
@@ -461,7 +480,11 @@
       requestAnimationFrame(function () { viewport.scrollTop += message.getBoundingClientRect().top - top; });
     }
   });
-  window.addEventListener("resize", function () { if (panelOpen()) renderSeatState(); });
+  window.addEventListener("resize", function () {
+    if (!panelOpen()) return;
+    renderSeatState();
+    requestAnimationFrame(trackStreamPin);
+  });
   document.addEventListener("keydown", function (event) { if (event.key === "Escape" && panelOpen()) close(); });
   D.onLiveUpdate(function () {
     if (!panelOpen()) return;

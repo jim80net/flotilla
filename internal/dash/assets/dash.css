@@ -1164,6 +1164,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   font: 600 .64rem var(--mono); cursor: pointer;
 }
 .wc-message-toggle:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.wc-keyed-entry { display: contents; }
 .issue-row {
   display: grid;
   grid-template-columns: auto auto 1fr auto;
