@@ -2252,7 +2252,7 @@ func TestMobileWorkContextDensity725(t *testing.T) {
 	srv, _ := newTestServer(t, singleFleetRoster, time.Date(2026, 7, 15, 3, 0, 0, 0, time.UTC))
 	workJS := doGet(t, srv, "/static/work-context.js").Body.String()
 	for _, marker := range []string{"streamVisible = 20", "expandedBodies", "decorateMessageBodies", "lines <= 8",
-		`seconds >= 300`, `◐ stream idle`, `humanAge`, `streamViewport()`} {
+		`seconds >= 300`, `◐ stream idle`, `mirror awaiting first update`, `is-awaiting`, `humanAge`, `streamViewport()`} {
 		if !strings.Contains(workJS, marker) {
 			t.Errorf("work-context.js must execute the shared #725 sheet contract (missing %q)", marker)
 		}
