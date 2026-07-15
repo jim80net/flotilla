@@ -236,17 +236,15 @@
     if (!overflow || !menu || !controls || !ideaInput || !state || !refresh || !create) return;
     var idea = ideaInput.closest(".filter-idea");
     if (!idea) return;
-    if (overflow && menu && controls) {
-      overflow.open = false;
-      if (next) {
-        menu.appendChild(idea);
-        menu.appendChild(refresh);
-        menu.appendChild(create);
-      } else {
-        controls.insertBefore(idea, state);
-        controls.insertBefore(refresh, overflow);
-        controls.insertBefore(create, overflow);
-      }
+    overflow.open = false;
+    if (next) {
+      menu.appendChild(idea);
+      menu.appendChild(refresh);
+      menu.appendChild(create);
+    } else {
+      controls.insertBefore(idea, state);
+      controls.insertBefore(refresh, overflow);
+      controls.insertBefore(create, overflow);
     }
     mobileLedger = next;
     if (lastLedgerDoc) renderIssueList(lastLedgerDoc);
