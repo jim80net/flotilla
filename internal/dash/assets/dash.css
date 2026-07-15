@@ -1148,6 +1148,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .wc-stream-region { display: flex; flex: 1 1 auto; min-height: 0; flex-direction: column; background: var(--abyss-2); }
 .wc-live-contract { flex: 0 0 auto; padding: .55rem 1rem .25rem; color: var(--ok); font-size: .68rem; }
 .wc-live-contract.is-idle { color: var(--amber); }
+.wc-live-contract.is-awaiting { color: var(--ink-3); }
 .wc-load-earlier { align-self: center; border: 0; background: transparent; color: var(--ink-3); padding: .35rem .7rem; font: .64rem var(--mono); cursor: pointer; }
 .wc-load-earlier:disabled { cursor: default; opacity: .7; }
 .wc-stream { flex: 1 1 auto; min-height: 0; overflow-y: auto; align-content: start; }

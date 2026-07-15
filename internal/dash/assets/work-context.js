@@ -123,6 +123,7 @@
     var input = el("wc-composer-input");
     var loadEarlier = el("wc-load-earlier");
     if (!activeSeat) {
+      el("wc-live-contract").classList.remove("is-idle", "is-awaiting");
       composer.hidden = true;
       loadEarlier.hidden = true;
       var unavailable = statusDoc && statusDoc.error;
@@ -163,10 +164,12 @@
     if (!activeSeat) return;
     var seconds = mirrorAgeSeconds();
     var contract = el("wc-live-contract");
+    var awaiting = seconds === null;
     var idle = seconds !== null && seconds >= 300;
     contract.classList.toggle("is-idle", idle);
-    contract.textContent = seconds === null
-      ? "● live — mirror awaiting first update · SSE push, 15s poll fallback"
+    contract.classList.toggle("is-awaiting", awaiting);
+    contract.textContent = awaiting
+      ? "mirror awaiting first update · SSE push, 15s poll fallback"
       : (idle ? "◐ stream idle" : "● live") + " — mirror updated " + humanAge(seconds) +
         " ago · SSE push, 15s poll fallback";
   }
@@ -428,6 +431,7 @@
     var closingGoal = goalContext();
     selected = null;
     activeSeat = "";
+    expandedBodies = {};
     el("work-context").hidden = true;
     el("issues-workspace").classList.remove("has-context");
     el("goals-graph").classList.remove("has-context");
