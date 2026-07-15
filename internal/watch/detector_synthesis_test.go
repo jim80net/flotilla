@@ -306,6 +306,11 @@ func TestSynthesisOperationPinsOneTopologyGenerationAcrossMidSwap(t *testing.T) 
 	if text, ok := eligible[0].read("root"); !ok || text != "A-root" {
 		t.Fatalf("pinned result reader = (%q, %v), want generation A", text, ok)
 	}
+	d.runSynthesis(eligible)
+	wakes := f.synthWakes()
+	if len(wakes) != 1 || len(wakes[0].reasons) != 1 || wakes[0].reasons[0] != "root" {
+		t.Fatalf("completed synthesis = %+v, want wholly generation A reason [root]", wakes)
+	}
 	if current != b {
 		t.Fatal("test did not force the A→B adoption")
 	}
