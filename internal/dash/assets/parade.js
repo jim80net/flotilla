@@ -16,6 +16,7 @@
   }
 
   var PARADES = [], pIdx = 0, sIdx = 0, view = "list";
+  var CONVERSATIONS = {}, conversationLoading = {};
 
   // resolve a slide image ref to a served URL: an http(s) ref passes through; anything else
   // is treated as an asset basename under the parade's assets/ dir.
@@ -289,6 +290,122 @@
     }
   }
 
+  /* ── per-slide conversation ───────────────────────────────────────────── */
+  function conversationDoc(date) {
+    return CONVERSATIONS[date] || { schema: 1, slides: {} };
+  }
+
+  function slideConversation(date, index) {
+    var doc = conversationDoc(date);
+    return doc.slides && doc.slides[String(index)]
+      ? doc.slides[String(index)] : { title: "", messages: [] };
+  }
+
+  function messageTextHtml(text) {
+    return esc(text).replace(/\r?\n/g, "<br>");
+  }
+
+  function renderConversationPane(forceOpen) {
+    var host = el("pd-conversation-host");
+    var par = PARADES[pIdx];
+    if (!host || !par) return;
+    var existing = el("pd-conversation");
+    var open = !!forceOpen || !!(existing && existing.open);
+    el("pd-stage").classList.toggle("has-open-conversation", open);
+    var thread = slideConversation(par.date, sIdx);
+    var messages = Array.isArray(thread.messages) ? thread.messages : [];
+    var loading = conversationLoading[par.date] === true;
+    var loadError = conversationLoading[par.date] instanceof Error;
+    var messageHTML = messages.length ? messages.map(function (message) {
+      return '<article class="pd-convo-message">' +
+        '<div class="pd-convo-meta"><span class="pd-convo-kind">' + esc(message.kind || "note") + "</span>" +
+        '<span>' + esc(message.author || "operator") + "</span><time>" + esc(message.ts || "") + "</time></div>" +
+        '<div class="pd-convo-text">' + messageTextHtml(message.text || "") + "</div></article>";
+    }).join("") : '<p class="pd-convo-empty">No reactions on this slide yet.</p>';
+    if (loading) messageHTML = '<p class="pd-convo-empty">Loading conversation…</p>';
+    if (loadError) messageHTML = '<p class="pd-convo-error">Conversation unavailable. Reload to retry.</p>';
+    host.innerHTML = '<details id="pd-conversation" class="pd-conversation"' + (open ? " open" : "") + ">" +
+      '<summary>Conversation <span class="pd-convo-count" aria-label="' + messages.length + ' messages">' + messages.length + "</span></summary>" +
+      '<div class="pd-convo-panel"><div class="pd-convo-thread" aria-live="polite">' + messageHTML + "</div>" +
+      '<form id="pd-convo-form" class="pd-convo-form">' +
+      '<fieldset><legend>Reaction kind</legend>' + ["note", "kudos", "invest", "feedback"].map(function (kind) {
+        return '<label class="pd-kind"><input type="radio" name="kind" value="' + kind + '"' + (kind === "note" ? " checked" : "") + "><span>" + kind + "</span></label>";
+      }).join("") + "</fieldset>" +
+      '<label class="pd-convo-compose"><span class="sr-only">Message about this slide</span>' +
+      '<textarea name="text" maxlength="4000" rows="3" placeholder="Kudos, further investment, feedback, or a note…" required></textarea></label>' +
+      '<div class="pd-convo-actions"><span id="pd-convo-outcome" role="status" aria-live="polite"></span>' +
+      '<button type="submit">Send to CoS</button></div></form></div></details>';
+    var details = el("pd-conversation");
+    details.querySelector("summary").addEventListener("click", function () {
+      // The native toggle event is queued after the click default action. Reflect the
+      // imminent state now so mobile navigation arrows never flash over the open pane.
+      el("pd-stage").classList.toggle("has-open-conversation", !details.open);
+    });
+    details.addEventListener("toggle", function () {
+      el("pd-stage").classList.toggle("has-open-conversation", this.open);
+    });
+  }
+
+  function loadConversations(date) {
+    if (CONVERSATIONS[date] || conversationLoading[date] === true) return;
+    conversationLoading[date] = true;
+    renderConversationPane(false);
+    fetch("/api/parades/" + encodeURIComponent(date) + "/conversations", { cache: "no-store" })
+      .then(function (response) {
+        if (!response.ok) throw new Error("conversation GET → " + response.status);
+        return response.json();
+      })
+      .then(function (doc) {
+        CONVERSATIONS[date] = doc && doc.slides ? doc : { schema: 1, slides: {} };
+        delete conversationLoading[date];
+        if ((PARADES[pIdx] || {}).date === date) renderConversationPane(false);
+      })
+      .catch(function (error) {
+        conversationLoading[date] = error;
+        if ((PARADES[pIdx] || {}).date === date) renderConversationPane(false);
+      });
+  }
+
+  function postConversation(form) {
+    var par = PARADES[pIdx];
+    var slides = curSlides();
+    if (!par || !slides[sIdx]) return;
+    var date = par.date;
+    var slideIndex = sIdx;
+    var text = form.elements.text.value;
+    var kindInput = form.querySelector('input[name="kind"]:checked');
+    var submit = form.querySelector('button[type="submit"]');
+    var outcome = el("pd-convo-outcome");
+    submit.disabled = true;
+    outcome.textContent = "Sending…";
+    fetch("/api/parades/" + encodeURIComponent(date) + "/slides/" + slideIndex + "/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Flotilla-Dash": "1" },
+      body: JSON.stringify({ text: text, kind: kindInput ? kindInput.value : "note" }),
+    }).then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (body) {
+        if (!response.ok) throw new Error(body.error || ("message POST → " + response.status));
+        return body;
+      });
+    }).then(function (body) {
+      var doc = conversationDoc(date);
+      var nextSlides = {};
+      Object.keys(doc.slides || {}).forEach(function (key) { nextSlides[key] = doc.slides[key]; });
+      nextSlides[String(slideIndex)] = body.slide;
+      CONVERSATIONS[date] = { schema: doc.schema || 1, slides: nextSlides };
+      if ((PARADES[pIdx] || {}).date !== date || sIdx !== slideIndex) return;
+      renderConversationPane(true);
+      var nextOutcome = el("pd-convo-outcome");
+      nextOutcome.textContent = body.delivery === "queued" ? "Saved · queued for CoS" : "Saved · delivered to CoS";
+      var nextText = el("pd-convo-form").elements.text;
+      nextText.value = "";
+      nextText.focus();
+    }).catch(function (error) {
+      submit.disabled = false;
+      outcome.textContent = error.message;
+    });
+  }
+
   /* ── deck view ─────────────────────────────────────────────────────────── */
   function renderDeck() {
     var par = PARADES[pIdx];
@@ -305,8 +422,11 @@
     el("pd-slide").innerHTML =
       presenterHtml(par.date, p) +
       (titleText ? '<h1 class="pd-slide-title">' + esc(titleText) + "</h1>" : "") +
-      '<div class="pd-slide-body">' + renderMd(par.date, s.body) + "</div>";
+      '<div class="pd-slide-body">' + renderMd(par.date, s.body) + "</div>" +
+      '<div id="pd-conversation-host"></div>';
     wirePresenterFallback(el("pd-slide"));
+    renderConversationPane(false);
+    loadConversations(par.date);
     el("pd-prev").disabled = sIdx === 0;
     el("pd-next").disabled = sIdx >= slides.length - 1;
     var slideEl = el("pd-slide"); if (slideEl) slideEl.focus({ preventScroll: true });
@@ -343,15 +463,17 @@
     el("pd-prev").addEventListener("click", function (e) { e.stopPropagation(); prev(); });
     el("pd-next").addEventListener("click", function (e) { e.stopPropagation(); next(); });
     el("pd-close").addEventListener("click", showList);
-    // tap the left/right half of the slide to page (ignore taps on links/images).
+    // tap the left/right half of the slide to page (interactive conversation controls never page).
     el("pd-stage").addEventListener("click", function (e) {
-      if (e.target.closest("a") || e.target.closest("button")) return;
+      if (e.target.closest("a, button, input, textarea, select, label, form, details, summary, .pd-conversation")) return;
       var r = el("pd-stage").getBoundingClientRect();
       if (e.clientX - r.left < r.width / 2) prev(); else next();
     });
     // swipe.
     var x0 = null;
-    el("pd-stage").addEventListener("touchstart", function (e) { x0 = e.touches[0].clientX; }, { passive: true });
+    el("pd-stage").addEventListener("touchstart", function (e) {
+      x0 = e.target.closest(".pd-conversation") ? null : e.touches[0].clientX;
+    }, { passive: true });
     el("pd-stage").addEventListener("touchend", function (e) {
       if (x0 == null) return;
       var dx = e.changedTouches[0].clientX - x0; x0 = null;
@@ -359,6 +481,7 @@
     }, { passive: true });
     // keyboard: arrows page, Escape drops to the list.
     document.addEventListener("keydown", function (e) {
+      if (e.target && e.target.closest("input, textarea, select, button, summary, [contenteditable=true]")) return;
       if (view === "deck") {
         if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") { e.preventDefault(); next(); }
         else if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); prev(); }
@@ -369,6 +492,12 @@
     el("pd-list").addEventListener("click", function (e) {
       var card = e.target.closest("[data-i]");
       if (card) openDeck(parseInt(card.getAttribute("data-i"), 10) || 0);
+    });
+    el("pd-slide").addEventListener("submit", function (e) {
+      if (e.target && e.target.id === "pd-convo-form") {
+        e.preventDefault();
+        postConversation(e.target);
+      }
     });
   }
 

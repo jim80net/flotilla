@@ -2307,6 +2307,51 @@ html, body { overflow-x: clip; }
 .pd-slide-body li { margin: .3rem 0; }
 .pd-slide-body strong { color: var(--ink); }
 .pd-slide-body code { font-family: var(--mono, "IBM Plex Mono", monospace); font-size: .9em; background: var(--abyss-3); padding: .06em .4em; border-radius: 4px; }
+/* Per-slide operator conversation (#741). The pane lives in the slide's existing scroll
+   region: collapsed by default, then a bounded thread + compose surface when expanded. */
+.pd-conversation {
+  margin: 1.5rem 0 .25rem; border: 1px solid var(--line); border-radius: var(--r);
+  background: color-mix(in srgb, var(--abyss-3) 88%, transparent); color: var(--ink-2);
+}
+.pd-conversation > summary {
+  display: flex; align-items: center; gap: .55rem; min-height: 44px; padding: .55rem .75rem;
+  font: 600 .82rem var(--display); color: var(--ink); cursor: pointer; list-style: none;
+}
+.pd-conversation > summary::-webkit-details-marker { display: none; }
+.pd-conversation > summary::before { content: "▸"; color: var(--cyan); }
+.pd-conversation[open] > summary::before { content: "▾"; }
+.pd-conversation > summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.pd-convo-count {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 1.45rem; height: 1.45rem;
+  margin-left: auto; padding: 0 .35rem; border-radius: 999px; background: var(--cyan); color: var(--abyss-1);
+  font: 600 .65rem var(--mono);
+}
+.pd-convo-panel { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, .72fr); border-top: 1px solid var(--line); }
+.pd-convo-thread { max-height: 300px; overflow-y: auto; padding: .65rem; display: grid; align-content: start; gap: .55rem; }
+.pd-convo-message { padding: .6rem .7rem; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--abyss-2); }
+.pd-convo-meta { display: flex; flex-wrap: wrap; gap: .45rem; margin-bottom: .35rem; color: var(--ink-3); font-size: .62rem; }
+.pd-convo-meta time { margin-left: auto; }
+.pd-convo-kind { color: var(--cyan); font-weight: 600; text-transform: uppercase; }
+.pd-convo-text { color: var(--ink-2); font-size: .76rem; line-height: 1.48; overflow-wrap: anywhere; }
+.pd-convo-empty, .pd-convo-error { margin: 0; padding: .65rem; color: var(--ink-3); font-size: .72rem; }
+.pd-convo-error { color: var(--amber); }
+.pd-convo-form { display: flex; flex-direction: column; gap: .55rem; padding: .65rem; border-left: 1px solid var(--line); }
+.pd-convo-form fieldset { display: flex; flex-wrap: wrap; gap: .35rem; margin: 0; padding: 0; border: 0; }
+.pd-convo-form legend { width: 100%; margin-bottom: .2rem; color: var(--ink-3); font-size: .62rem; }
+.pd-kind input { position: absolute; opacity: 0; pointer-events: none; }
+.pd-kind span { display: inline-flex; min-height: 30px; align-items: center; padding: 0 .55rem; border: 1px solid var(--line); border-radius: 999px; font-size: .66rem; cursor: pointer; }
+.pd-kind input:checked + span { border-color: var(--cyan); background: color-mix(in srgb, var(--cyan) 12%, transparent); color: var(--cyan); }
+.pd-kind input:focus-visible + span { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.pd-convo-compose textarea {
+  box-sizing: border-box; width: 100%; min-height: 76px; resize: vertical; padding: .6rem .65rem;
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--abyss-2); color: var(--ink);
+  font: 16px/1.4 var(--mono);
+}
+.pd-convo-compose textarea:focus { border-color: var(--cyan); outline: none; }
+.pd-convo-actions { display: flex; align-items: center; gap: .55rem; min-height: 36px; }
+.pd-convo-actions [role="status"] { flex: 1 1 auto; color: var(--ink-3); font-size: .64rem; }
+.pd-convo-actions button { min-height: 36px; padding: 0 .75rem; border: 1px solid var(--cyan); border-radius: var(--r-sm); background: var(--cyan); color: var(--abyss-1); font: 600 .7rem var(--display); cursor: pointer; }
+.pd-convo-actions button:disabled { opacity: .55; cursor: wait; }
 /* dig-deeper links (parade v3): every claim can link to its source (PR, walk, brief,
    transcript) — make them obvious so the slide reads as "click to expand". */
 .pd-slide-body a { color: var(--cyan); text-decoration: underline; text-underline-offset: 2px; }
@@ -2362,6 +2407,11 @@ html, body { overflow-x: clip; }
   .pd-prev { left: .15rem; } .pd-next { right: .15rem; }
   .pd-slide-img { max-height: 48vh; }
   .pd-presenter-avatar { width: 40px; height: 40px; }
+  .pd-stage.has-open-conversation .pd-nav { display: none; }
+  .pd-conversation { margin-top: 1rem; }
+  .pd-convo-panel { grid-template-columns: 1fr; }
+  .pd-convo-thread { max-height: 240px; }
+  .pd-convo-form { border-left: 0; border-top: 1px solid var(--line); }
 }
 /* an explicit display: on .pd-deck / .pd-list-view outranks the UA [hidden] rule, so hide
    them explicitly when toggled off — else the fixed-position deck stays over the list. */

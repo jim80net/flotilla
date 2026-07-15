@@ -4,10 +4,10 @@ package dash
 // (accomplished / next / learned / need / demo). Convention: a parade directory holds
 // one dated subdir per parade — <ParadesPath>/<YYYY-MM-DD>/{report.md, assets/…} — and
 // the page lists them NEWEST-FIRST so the progression over time reads top-to-bottom.
-// The dash is a PURE READER here too: it lists the directory + serves report.md and the
-// asset images; nothing is written. Reports render client-side via the same escape-then-
-// markdown pipeline the decision brief uses (assets/parade.js), so no raw HTML from a
-// report ever reaches the DOM.
+// The dash reads the authored deck + images without modifying them. The only parade write
+// is the separate conversations.json sidecar owned by parade_conversations.go. Reports
+// render client-side via the same escape-then-markdown pipeline the decision brief uses
+// (assets/parade.js), so no raw HTML from a report ever reaches the DOM.
 
 import (
 	"net/http"
