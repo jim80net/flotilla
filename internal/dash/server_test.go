@@ -2245,3 +2245,24 @@ func TestIssuesWorkContext716(t *testing.T) {
 		}
 	}
 }
+
+// TestMobileWorkContextDensity725 pins the frozen 390px sheet contract: the
+// shared Work Context owns freshness, message clamping, and its sole scroll region.
+func TestMobileWorkContextDensity725(t *testing.T) {
+	srv, _ := newTestServer(t, singleFleetRoster, time.Date(2026, 7, 15, 3, 0, 0, 0, time.UTC))
+	workJS := doGet(t, srv, "/static/work-context.js").Body.String()
+	for _, marker := range []string{"streamVisible = 20", "expandedBodies", "decorateMessageBodies", "lines <= 8",
+		`seconds >= 300`, `◐ stream idle`, `mirror awaiting first update`, `is-awaiting`, `humanAge`, `streamViewport()`} {
+		if !strings.Contains(workJS, marker) {
+			t.Errorf("work-context.js must execute the shared #725 sheet contract (missing %q)", marker)
+		}
+	}
+
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	for _, marker := range []string{".wc-message-clamped:not(.is-expanded)", "-webkit-line-clamp: 8", ".wc-live-contract.is-idle",
+		"max-height: 132px", "max-height: 40vh", "max-height: 104px", ".wc-seat-static { white-space: nowrap; max-width: 100%"} {
+		if !strings.Contains(css, marker) {
+			t.Errorf("dash.css must enforce the #725 viewport budgets (missing %q)", marker)
+		}
+	}
+}

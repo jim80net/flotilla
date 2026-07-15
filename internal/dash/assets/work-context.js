@@ -20,10 +20,17 @@
   var composeInFlight = false;
   var loadedAll = false;
   var streamPinned = true;
+  var streamVisible = 20;
+  var expandedBodies = {};
+  var savedMobileScrollY = null;
 
   function el(id) { return document.getElementById(id); }
   function esc(value) { return D.escapeHtml(value); }
   function panelOpen() { return selected && !el("work-context").hidden; }
+  function streamViewport() {
+    return window.matchMedia && window.matchMedia("(max-width: 740px)").matches
+      ? el("wc-stream").parentNode : el("wc-stream");
+  }
   function subject() {
     return selected && selected.item ? (selected.item.goal || selected.item.issue || {}) : {};
   }
@@ -116,6 +123,7 @@
     var input = el("wc-composer-input");
     var loadEarlier = el("wc-load-earlier");
     if (!activeSeat) {
+      el("wc-live-contract").classList.remove("is-idle", "is-awaiting");
       composer.hidden = true;
       loadEarlier.hidden = true;
       var unavailable = statusDoc && statusDoc.error;
@@ -142,29 +150,122 @@
     return isNaN(time) ? null : Math.max(0, Math.floor((Date.now() - time) / 1000));
   }
 
+  function humanAge(seconds) {
+    if (seconds < 60) return seconds + "s";
+    var minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return minutes + "m";
+    var hours = Math.floor(minutes / 60), remMinutes = minutes % 60;
+    if (hours < 24) return hours + "h" + (remMinutes ? " " + remMinutes + "m" : "");
+    var days = Math.floor(hours / 24), remHours = hours % 24;
+    return days + "d" + (remHours ? " " + remHours + "h" : "");
+  }
+
   function updateContract() {
     if (!activeSeat) return;
     var seconds = mirrorAgeSeconds();
-    el("wc-live-contract").textContent = seconds === null
-      ? "● live — mirror awaiting first update · SSE push, 15s poll fallback"
-      : "● live — mirror updated " + seconds + "s ago · SSE push, 15s poll fallback";
+    var contract = el("wc-live-contract");
+    var awaiting = seconds === null;
+    var idle = seconds !== null && seconds >= 300;
+    contract.classList.toggle("is-idle", idle);
+    contract.classList.toggle("is-awaiting", awaiting);
+    contract.textContent = awaiting
+      ? "mirror awaiting first update · SSE push, 15s poll fallback"
+      : (idle ? "◐ stream idle" : "● live") + " — mirror updated " + humanAge(seconds) +
+        " ago · SSE push, 15s poll fallback";
+  }
+
+  function decorateMessageBodies(keys) {
+    var stream = el("wc-stream");
+    var keyedEntries = stream.querySelectorAll("[data-wc-render-key]");
+    var measurements = [];
+    for (var i = 0; i < keyedEntries.length; i++) {
+      var body = keyedEntries[i].querySelector(".thread-mirror-body, .thread-gist");
+      if (!body) continue;
+      // Two live refreshes can queue decoration frames against the same rendered
+      // DOM. The first frame owns the control; later frames must be idempotent.
+      if (body.classList.contains("wc-message-clamped")) continue;
+      var style = window.getComputedStyle(body);
+      var lineHeight = parseFloat(style.lineHeight) || (parseFloat(style.fontSize) || 12) * 1.4;
+      var lines = Math.max(1, Math.ceil(body.scrollHeight / lineHeight));
+      if (lines <= 8) continue;
+      measurements.push({
+        body: body,
+        key: keyedEntries[i].getAttribute("data-wc-render-key") || keys[i] || (activeSeat + "|body|" + i),
+        index: i,
+        more: lines - 8
+      });
+    }
+    // All layout reads above happen before this mutation pass, so a long mirror
+    // does not alternate measurement and style invalidation for every message.
+    for (var j = 0; j < measurements.length; j++) {
+      var measurement = measurements[j];
+      var body = measurement.body;
+      var key = measurement.key;
+      var more = measurement.more;
+      body.classList.add("wc-message-clamped");
+      body.classList.toggle("is-expanded", !!expandedBodies[key]);
+      body.setAttribute("data-wc-body-key", key);
+      body.id = "wc-message-body-" + measurement.index;
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "wc-message-toggle";
+      button.setAttribute("data-wc-body-toggle", key);
+      button.setAttribute("data-wc-more-lines", String(more));
+      button.setAttribute("aria-controls", body.id);
+      button.setAttribute("aria-expanded", String(!!expandedBodies[key]));
+      button.textContent = expandedBodies[key]
+        ? "collapse turn-final ▴"
+        : "show full turn-final ▾ (" + more + " more lines)";
+      body.parentNode.insertBefore(button, body.nextSibling);
+    }
+  }
+
+  function updateLoadEarlier(entries, mirrorLimit) {
+    var button = el("wc-load-earlier");
+    var hidden = Math.max(0, entries.length - mirrorLimit);
+    if (hidden) {
+      button.disabled = false;
+      button.textContent = "↑ show " + Math.min(20, hidden) + " more of " + hidden;
+    } else if (!loadedAll) {
+      button.disabled = false;
+      button.textContent = "↑ load earlier";
+    } else {
+      button.disabled = true;
+      button.textContent = "full session scrollback loaded";
+    }
   }
 
   function renderMirror(preserve) {
     if (!activeSeat) return;
     var entries = mirrorDoc && Array.isArray(mirrorDoc.entries) ? mirrorDoc.entries : [];
     var stream = el("wc-stream");
-    var html = entries.length
-      ? D.renderMirrorEntries(activeSeat, entries)
+    var activeInjects = localInjects.filter(function (item) { return item.target === activeSeat; });
+    var mirrorLimit = Math.max(0, streamVisible - activeInjects.length);
+    var start = Math.max(0, entries.length - mirrorLimit);
+    var visible = entries.slice(start);
+    var bodyKeys = visible.map(function (entry) {
+      return activeSeat + "|mirror|" + String(entry.ts || "") + "|" + String(entry.info || "").slice(0, 80);
+    });
+    var html = visible.length
+      ? visible.map(function (entry, index) {
+          return '<div class="wc-keyed-entry" data-wc-render-key="' + esc(bodyKeys[index]) + '">' +
+            D.renderMirrorEntries(activeSeat, [entry]) + "</div>";
+        }).join("")
       : '<div class="empty">' + (mirrorDoc && mirrorDoc.error ? "Session mirror unavailable." : "No session mirror yet for this seat.") + "</div>";
-    localInjects.filter(function (item) { return item.target === activeSeat; }).forEach(function (item) {
-      html += D.renderOperatorInject(item.target, item.body, item.ts);
+    activeInjects.forEach(function (item, index) {
+      var key = activeSeat + "|local|" + String(item.ts || "") + "|" + index;
+      bodyKeys.push(key);
+      html += '<div class="wc-keyed-entry" data-wc-render-key="' + esc(key) + '">' +
+        D.renderOperatorInject(item.target, item.body, item.ts) + "</div>";
     });
     stream.innerHTML = html;
+    updateLoadEarlier(entries, mirrorLimit);
     updateContract();
     requestAnimationFrame(function () {
-      if (preserve) stream.scrollTop = preserve.top + (stream.scrollHeight - preserve.height);
-      else if (streamPinned) stream.scrollTop = stream.scrollHeight;
+      decorateMessageBodies(bodyKeys);
+      var viewport = streamViewport();
+      if (preserve) viewport.scrollTop = preserve.top + (viewport.scrollHeight - preserve.height);
+      else if (streamPinned) viewport.scrollTop = viewport.scrollHeight;
     });
   }
 
@@ -172,15 +273,13 @@
     if (!panelOpen() || !activeSeat) return Promise.resolve();
     var seat = activeSeat;
     var epoch = ++mirrorEpoch;
-    var stream = el("wc-stream");
-    var preserve = preserveOlder ? { top: stream.scrollTop, height: stream.scrollHeight } : null;
+    var viewport = streamViewport();
+    var preserve = preserveOlder ? { top: viewport.scrollTop, height: viewport.scrollHeight } : null;
     var path = "/api/session-mirror?agent=" + encodeURIComponent(seat) + (all ? "&limit=0" : "&limit=500");
     return D.getJSON(path).then(function (doc) {
       if (!panelOpen() || activeSeat !== seat || epoch !== mirrorEpoch) return;
       mirrorDoc = doc;
       loadedAll = !!all;
-      el("wc-load-earlier").disabled = loadedAll;
-      el("wc-load-earlier").textContent = loadedAll ? "full session scrollback loaded" : "↑ load earlier";
       renderMirror(preserve);
     }).catch(function (err) {
       if (!panelOpen() || activeSeat !== seat || epoch !== mirrorEpoch) return;
@@ -195,6 +294,8 @@
     mirrorDoc = null;
     loadedAll = false;
     streamPinned = true;
+    streamVisible = 20;
+    expandedBodies = {};
     resetComposer();
     renderOwnership();
     fetchMirror(false);
@@ -291,12 +392,17 @@
     localInjects = [];
     loadedAll = false;
     streamPinned = true;
+    streamVisible = 20;
+    expandedBodies = {};
     resetComposer();
     returnFocus = source || document.activeElement;
     var panel = el("work-context");
     mountPanel();
     panel.hidden = false;
+    savedMobileScrollY = window.matchMedia && window.matchMedia("(max-width: 740px)").matches
+      ? window.scrollY : null;
     document.body.classList.add("work-context-open");
+    document.documentElement.classList.add("work-context-open");
     el("wc-header").innerHTML = '<div class="wc-eyebrow">' + (goalContext() ? "GOAL" : "ISSUE") +
       ' · loading live context</div><h2 id="wc-title">' +
       esc(subject().title || "Work context") + "</h2>";
@@ -325,23 +431,64 @@
     var closingGoal = goalContext();
     selected = null;
     activeSeat = "";
+    expandedBodies = {};
     el("work-context").hidden = true;
     el("issues-workspace").classList.remove("has-context");
     el("goals-graph").classList.remove("has-context");
     document.body.classList.remove("work-context-open");
+    document.documentElement.classList.remove("work-context-open");
     if (returnFocus && returnFocus.focus) returnFocus.focus();
+    if (savedMobileScrollY !== null) {
+      var restoreY = savedMobileScrollY;
+      savedMobileScrollY = null;
+      requestAnimationFrame(function () { window.scrollTo(0, restoreY); });
+    }
     if (closingGoal && window.flotillaGoals && window.flotillaGoals.contextClosed) {
       window.flotillaGoals.contextClosed();
     }
   }
 
   el("wc-close").addEventListener("click", close);
-  el("wc-load-earlier").addEventListener("click", function () { streamPinned = false; fetchMirror(true, true); });
-  el("wc-stream").addEventListener("scroll", function () {
-    var stream = el("wc-stream");
-    streamPinned = stream.scrollHeight - stream.scrollTop - stream.clientHeight < 48;
+  el("wc-load-earlier").addEventListener("click", function () {
+    var entries = mirrorDoc && Array.isArray(mirrorDoc.entries) ? mirrorDoc.entries : [];
+    streamPinned = false;
+    streamVisible += 20;
+    var mirrorLimit = Math.max(0, streamVisible - localInjects.filter(function (item) { return item.target === activeSeat; }).length);
+    if (mirrorLimit <= entries.length || loadedAll) {
+      var viewport = streamViewport();
+      renderMirror({ top: viewport.scrollTop, height: viewport.scrollHeight });
+    } else fetchMirror(true, true);
   });
-  window.addEventListener("resize", function () { if (panelOpen()) renderSeatState(); });
+  function trackStreamPin(event) {
+    var viewport = streamViewport();
+    if (event instanceof Event && event.currentTarget !== viewport) return;
+    streamPinned = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 48;
+  }
+  el("wc-stream").addEventListener("scroll", trackStreamPin);
+  el("wc-stream").parentNode.addEventListener("scroll", trackStreamPin);
+  el("wc-stream").addEventListener("click", function (event) {
+    var button = event.target.closest("[data-wc-body-toggle]");
+    if (!button) return;
+    var key = button.getAttribute("data-wc-body-toggle");
+    var body = button.previousElementSibling;
+    var viewport = streamViewport();
+    var message = button.closest(".thread-msg");
+    var top = message ? message.getBoundingClientRect().top : 0;
+    expandedBodies[key] = !expandedBodies[key];
+    body.classList.toggle("is-expanded", expandedBodies[key]);
+    button.setAttribute("aria-expanded", String(expandedBodies[key]));
+    button.textContent = expandedBodies[key]
+      ? "collapse turn-final ▴"
+      : "show full turn-final ▾ (" + button.getAttribute("data-wc-more-lines") + " more lines)";
+    if (!expandedBodies[key] && message) {
+      requestAnimationFrame(function () { viewport.scrollTop += message.getBoundingClientRect().top - top; });
+    }
+  });
+  window.addEventListener("resize", function () {
+    if (!panelOpen()) return;
+    renderSeatState();
+    requestAnimationFrame(trackStreamPin);
+  });
   document.addEventListener("keydown", function (event) { if (event.key === "Escape" && panelOpen()) close(); });
   D.onLiveUpdate(function () {
     if (!panelOpen()) return;
