@@ -2178,7 +2178,7 @@ func TestIssuesWorkLedger405(t *testing.T) {
 		"workLedgerURL", `/api/work-ledger`, "renderDesk", "doc.flotillas",
 		"flotilla.desks", "issue-desk-head", "issue-ledger-kicker",
 		"shipped.slice(0, 10)", "issue-shipped-more", "show all ", "when-open", "older shipped",
-		"issue-scope-note", "not shown", "marked in flight under a goal",
+		"issue-scope-note", "Other open issues are omitted.", "renderMobileDesk", "data-issue-more",
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("tracker.js must render the #405 fleet work ledger (missing %q)", marker)
