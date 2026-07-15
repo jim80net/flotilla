@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -34,6 +35,12 @@ const (
 // budget so every verb inherits it; a caller WITH a shorter deadline (e.g. the
 // startup repo-resolve) keeps its own.
 const ghTimeout = 30 * time.Second
+
+// listCacheTTL matches the dashboard's 15-second fallback refresh cadence. A
+// successful list may be reused for one cadence window; writes invalidate it
+// immediately. The short bound removes cold-load/SSE subprocess fan-out without
+// turning the tracker into a long-lived source of stale GitHub state.
+const listCacheTTL = 15 * time.Second
 
 // listFields / detailFields PIN the exact `gh --json` field set we parse. Pinning
 // the set catches a gh output SHAPE change (a removed/retyped field → an
@@ -64,6 +71,29 @@ type ghRunner func(ctx context.Context, args []string, stdin []byte) (stdout, st
 type GHTracker struct {
 	repo string   // pinned owner/name, passed as --repo=<repo> on every call
 	run  ghRunner // injected runner (real = execRunner)
+	now  func() time.Time
+
+	listMu      sync.Mutex
+	listCache   map[listCacheKey]listCacheEntry
+	listFlights map[listCacheKey]*listFlight
+}
+
+type listCacheKey struct {
+	state       string
+	label       string
+	limit       int
+	includeBody bool
+}
+
+type listCacheEntry struct {
+	issues  []Issue
+	expires time.Time
+}
+
+type listFlight struct {
+	done   chan struct{}
+	issues []Issue
+	err    error
 }
 
 // NewGH builds a gh-backed tracker for the pinned repo, validating the repo
@@ -80,7 +110,13 @@ func newGH(repo string, run ghRunner) (*GHTracker, error) {
 	if !repoPattern.MatchString(repo) {
 		return nil, fmt.Errorf("%w: %q", ErrInvalidRepo, repo)
 	}
-	return &GHTracker{repo: repo, run: run}, nil
+	return &GHTracker{
+		repo:        repo,
+		run:         run,
+		now:         time.Now,
+		listCache:   make(map[listCacheKey]listCacheEntry),
+		listFlights: make(map[listCacheKey]*listFlight),
+	}, nil
 }
 
 // Repo returns the pinned target repo (owner/name).
@@ -89,30 +125,66 @@ func (g *GHTracker) Repo() string { return g.repo }
 // List lists issues matching filter. An empty (exit 0) result is an empty slice,
 // never an error; a gh failure is a typed error.
 func (g *GHTracker) List(ctx context.Context, filter ListFilter) ([]Issue, error) {
+	key, err := normalizeListFilter(filter)
+	if err != nil {
+		return nil, err
+	}
+
+	g.listMu.Lock()
+	now := g.now()
+	for cachedKey, cached := range g.listCache {
+		if !now.Before(cached.expires) {
+			delete(g.listCache, cachedKey)
+		}
+	}
+	if cached, ok := g.listCache[key]; ok {
+		issues := cloneIssues(cached.issues)
+		g.listMu.Unlock()
+		return issues, nil
+	}
+	if flight := g.listFlights[key]; flight != nil {
+		g.listMu.Unlock()
+		select {
+		case <-flight.done:
+			return cloneIssues(flight.issues), flight.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	flight := &listFlight{done: make(chan struct{})}
+	g.listFlights[key] = flight
+	g.listMu.Unlock()
+
+	issues, err := g.listUncached(ctx, key)
+
+	g.listMu.Lock()
+	flight.issues, flight.err = cloneIssues(issues), err
+	// A successful write replaces listFlights, detaching pre-write work. Only
+	// the still-current flight may repopulate the cache or delete this key.
+	if g.listFlights[key] == flight {
+		if err == nil {
+			g.listCache[key] = listCacheEntry{
+				issues: cloneIssues(issues), expires: g.now().Add(listCacheTTL),
+			}
+		}
+		delete(g.listFlights, key)
+	}
+	close(flight.done)
+	g.listMu.Unlock()
+	return cloneIssues(issues), err
+}
+
+func (g *GHTracker) listUncached(ctx context.Context, key listCacheKey) ([]Issue, error) {
 	fields := listFields
-	if filter.IncludeBody {
+	if key.includeBody {
 		fields = listFields + ",body"
 	}
 	args := []string{"issue", "list", "--repo=" + g.repo, "--json=" + fields}
-	state := strings.ToLower(strings.TrimSpace(filter.State))
-	if state == "" {
-		state = "open"
+	args = append(args, "--state="+key.state)
+	if key.label != "" {
+		args = append(args, "--label="+key.label)
 	}
-	if state != "open" && state != "closed" && state != "all" {
-		return nil, fmt.Errorf("%w: state %q (want open|closed|all)", ErrInvalidState, state)
-	}
-	args = append(args, "--state="+state)
-	if filter.Label != "" {
-		args = append(args, "--label="+filter.Label)
-	}
-	limit := filter.Limit
-	if limit <= 0 {
-		limit = DefaultLimit
-	}
-	if limit > maxLimit {
-		limit = maxLimit
-	}
-	args = append(args, "--limit="+strconv.Itoa(limit))
+	args = append(args, "--limit="+strconv.Itoa(key.limit))
 
 	out, errb, err := g.run(ctx, args, nil)
 	if err != nil {
@@ -125,12 +197,55 @@ func (g *GHTracker) List(ctx context.Context, filter ListFilter) ([]Issue, error
 	if issues == nil {
 		issues = []Issue{}
 	}
-	if filter.IncludeBody {
+	if key.includeBody {
 		for i := range issues {
 			EnrichIssue(&issues[i])
 		}
 	}
 	return issues, nil
+}
+
+func normalizeListFilter(filter ListFilter) (listCacheKey, error) {
+	state := strings.ToLower(strings.TrimSpace(filter.State))
+	if state == "" {
+		state = "open"
+	}
+	if state != "open" && state != "closed" && state != "all" {
+		return listCacheKey{}, fmt.Errorf("%w: state %q (want open|closed|all)", ErrInvalidState, state)
+	}
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = DefaultLimit
+	}
+	if limit > maxLimit {
+		limit = maxLimit
+	}
+	return listCacheKey{
+		state: state, label: filter.Label, limit: limit, includeBody: filter.IncludeBody,
+	}, nil
+}
+
+func cloneIssues(src []Issue) []Issue {
+	if src == nil {
+		return nil
+	}
+	out := make([]Issue, len(src))
+	copy(out, src)
+	for i := range out {
+		out[i].Labels = append([]Label(nil), src[i].Labels...)
+		out[i].Comments = append([]Comment(nil), src[i].Comments...)
+	}
+	return out
+}
+
+func (g *GHTracker) invalidateListCache() {
+	g.listMu.Lock()
+	g.listCache = make(map[listCacheKey]listCacheEntry)
+	// Detach in-flight pre-write reads. Their existing waiters still receive the
+	// result, but post-write callers start a fresh flight and stale completions
+	// cannot repopulate the new cache generation.
+	g.listFlights = make(map[listCacheKey]*listFlight)
+	g.listMu.Unlock()
 }
 
 // Get returns one issue with body + comments.
@@ -183,6 +298,7 @@ func (g *GHTracker) Create(ctx context.Context, in CreateInput) (Issue, error) {
 	if rerr != nil {
 		return Issue{}, classify(errb, rerr)
 	}
+	g.invalidateListCache()
 	// `gh issue create` prints the new issue URL (it has no --json). Parse the
 	// number from the URL's last path segment; the frontend refetches the list.
 	url := strings.TrimSpace(string(out))
@@ -206,6 +322,7 @@ func (g *GHTracker) Comment(ctx context.Context, number int, body string) error 
 	if err != nil {
 		return classify(errb, err)
 	}
+	g.invalidateListCache()
 	return nil
 }
 
@@ -238,6 +355,7 @@ func (g *GHTracker) Label(ctx context.Context, number int, add, remove []string)
 	if err != nil {
 		return classify(errb, err)
 	}
+	g.invalidateListCache()
 	return nil
 }
 
@@ -251,6 +369,7 @@ func (g *GHTracker) Close(ctx context.Context, number int) error {
 	if err != nil {
 		return classify(errb, err)
 	}
+	g.invalidateListCache()
 	return nil
 }
 

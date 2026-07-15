@@ -110,6 +110,9 @@ func TestIssuesList_HappyPath(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("code %d", rec.Code)
 	}
+	if got := rec.Header().Get("Server-Timing"); !strings.Contains(got, "github-list;dur=") {
+		t.Fatalf("Server-Timing = %q, want github-list duration", got)
+	}
 	var doc issuesListDoc
 	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
 		t.Fatal(err)
