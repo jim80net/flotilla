@@ -209,6 +209,74 @@ func ResolveActiveRecipe(agent string, flat *launch.Config) (launch.Recipe, erro
 	return r, err
 }
 
+// ResumeSelection is the launch slot selected for an explicit recovery. Resume
+// is stricter than passive routing: a present overlay is runtime authority and
+// must either resolve exactly or stop the launch visibly.
+type ResumeSelection struct {
+	Slot    string
+	Surface string
+	Source  string
+	Recipe  launch.Recipe
+}
+
+// ResolveResumeSelection resolves the recipe and surface that resume must
+// launch. With no overlay it selects primary. A malformed overlay, absent named
+// slot, or surface disagreement is an error: recovery must never claim one
+// active harness while silently launching another.
+func ResolveResumeSelection(agent string, flat *launch.Config, defaultSurface string) (ResumeSelection, error) {
+	chain, err := ResolveRecipe(agent, flat)
+	if err != nil {
+		return ResumeSelection{}, err
+	}
+	ov, ok, err := ReadActiveOverlay(agent)
+	if err != nil {
+		return ResumeSelection{}, fmt.Errorf("resume %q: active-harness overlay is invalid: %w", agent, err)
+	}
+	if !ok {
+		return resumeSelectionForSlot(chain, SlotPrimary, defaultSurface, "launch primary")
+	}
+	if ov.Slot == "" || ov.Surface == "" {
+		return ResumeSelection{}, fmt.Errorf("resume %q: active-harness overlay must name both slot and surface", agent)
+	}
+	selection, err := resumeSelectionForSlot(chain, ov.Slot, defaultSurface, "active-harness overlay")
+	if err != nil {
+		return ResumeSelection{}, fmt.Errorf("resume %q: %w", agent, err)
+	}
+	if selection.Surface != ov.Surface {
+		return ResumeSelection{}, fmt.Errorf("resume %q: active-harness overlay surface %q disagrees with slot %q surface %q", agent, ov.Surface, ov.Slot, selection.Surface)
+	}
+	return selection, nil
+}
+
+func resumeSelectionForSlot(chain launch.Recipe, slotName, defaultSurface, source string) (ResumeSelection, error) {
+	var selected launch.ResolvedSlot
+	found := false
+	for _, slot := range chain.Slots() {
+		if slot.Name == slotName {
+			selected, found = slot, true
+			break
+		}
+	}
+	if !found {
+		return ResumeSelection{}, fmt.Errorf("active-harness slot %q is absent from the launch chain", slotName)
+	}
+	recipe, found, err := slotRecipeByName(chain, slotName)
+	if err != nil {
+		return ResumeSelection{}, err
+	}
+	if !found {
+		return ResumeSelection{}, fmt.Errorf("active-harness slot %q is absent from the launch chain", slotName)
+	}
+	surface := selected.Surface
+	if surface == "" {
+		surface = defaultSurface
+	}
+	if surface == "" {
+		return ResumeSelection{}, fmt.Errorf("slot %q has no surface", slotName)
+	}
+	return ResumeSelection{Slot: slotName, Surface: surface, Source: source, Recipe: recipe}, nil
+}
+
 // slotRecipe returns the recipe for a named slot of a resolved chain, panicking-free:
 // a name absent from the chain falls back to the resolved recipe unchanged (the primary
 // path's launch). Callers that must DISTINGUISH "slot not in chain" use slotRecipeByName.

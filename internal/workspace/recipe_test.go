@@ -224,47 +224,66 @@ func TestResolveHarnessTornOverlayFallsBackToPrimary(t *testing.T) {
 	}
 }
 
-// TestResolveRecipeResumeIsBundleAndOverlayIndependent pins the GATE-1 RUNTIME half: a cold
-// resume on the TO harness needs NO continuity bundle / active-harness overlay / corpus. resume
-// resolves its recipe via ResolveRecipe (NOT ResolveActiveRecipe / the overlay), so with NO
-// active-harness.json present it yields a LAUNCHABLE primary recipe consulting only the launch
-// recipe. This test is the red tripwire: a future change that wires the bundle/overlay into the
-// resume resolution path breaks it.
-func TestResolveRecipeResumeIsBundleAndOverlayIndependent(t *testing.T) {
+func TestResolveResumeSelectionAbsentOverlayUsesPrimary(t *testing.T) {
 	t.Setenv(rootEnv, t.TempDir()) // a clean workspace: no active-harness.json, no bundle
 	flat := &launch.Config{Agents: map[string]launch.Recipe{"data": {
-		Launch: "claude -w data",
-		Cwd:    "/abs",
-		// A failover chain EXISTS (a switch could route to grok), but resume must ignore it +
-		// the overlay and resolve the PRIMARY — the bundle/overlay are not its inputs.
+		Launch:    "claude -w data",
+		Cwd:       "/abs",
 		Fallbacks: []launch.HarnessSlot{{Surface: "grok", Launch: "grok -w data", Provider: "xai"}},
 	}}}
-
-	// ResolveRecipe is the resume resolution path — it consults the flat launch recipe ONLY.
-	r, err := ResolveRecipe("data", flat)
+	selection, err := ResolveResumeSelection("data", flat, "claude-code")
 	if err != nil {
-		t.Fatalf("ResolveRecipe: %v", err)
+		t.Fatal(err)
 	}
-	if r.Launch == "" || r.Cwd != "/abs" {
-		t.Errorf("ResolveRecipe yielded a non-launchable recipe %+v (resume needs launch+cwd)", r)
+	if selection.Slot != SlotPrimary || selection.Surface != "claude-code" || selection.Source != "launch primary" {
+		t.Fatalf("selection = %+v, want primary claude-code from launch primary", selection)
 	}
+	if selection.Recipe.Launch != "claude -w data" || selection.Recipe.Cwd != "/abs" {
+		t.Errorf("recipe = %+v, want launchable primary", selection.Recipe)
+	}
+	if _, ok, readErr := ReadActiveOverlay("data"); ok || readErr != nil {
+		t.Errorf("ReadActiveOverlay = (ok=%v, err=%v), want absent", ok, readErr)
+	}
+}
 
-	// ResolveHarness with NO overlay present ⇒ the PRIMARY slot's launchable recipe — proving a
-	// cold resume routes to the primary harness with no overlay/bundle consulted.
-	slot, hr, err := ResolveHarness("data", flat)
+func TestResolveResumeSelectionValidOverlayUsesFallback(t *testing.T) {
+	t.Setenv(rootEnv, t.TempDir())
+	writeOverlay(t, "data", `{"slot":"fallback-0","surface":"grok","provider":"xai"}`)
+	flat := &launch.Config{Agents: map[string]launch.Recipe{"data": {
+		Launch: "pi --model primary", Cwd: "/abs",
+		Fallbacks: []launch.HarnessSlot{{Surface: "grok", Launch: "grok --model fallback", Provider: "xai"}},
+	}}}
+	selection, err := ResolveResumeSelection("data", flat, "pi")
 	if err != nil {
-		t.Fatalf("ResolveHarness (no overlay): %v", err)
+		t.Fatal(err)
 	}
-	if slot != SlotPrimary {
-		t.Errorf("slot = %q, want %q (no overlay ⇒ primary; resume is overlay-independent)", slot, SlotPrimary)
+	if selection.Slot != "fallback-0" || selection.Surface != "grok" || selection.Source != "active-harness overlay" {
+		t.Fatalf("selection = %+v, want fallback-0 grok from overlay", selection)
 	}
-	if hr.Launch != "claude -w data" {
-		t.Errorf("resume launch = %q, want the PRIMARY launch (not the fallback / an overlay slot)", hr.Launch)
+	if selection.Recipe.Launch != "grok --model fallback" {
+		t.Fatalf("launch = %q, want fallback launch", selection.Recipe.Launch)
 	}
+}
 
-	// And the overlay file genuinely does NOT exist — the resolution above consulted no overlay.
-	if _, ok, oerr := ReadActiveOverlay("data"); ok || oerr != nil {
-		t.Errorf("ReadActiveOverlay = (ok=%v, err=%v), want absent — the bundle-independence premise", ok, oerr)
+func TestResolveResumeSelectionInvalidOverlayStopsLaunch(t *testing.T) {
+	flat := &launch.Config{Agents: map[string]launch.Recipe{"data": {
+		Launch: "pi --model primary", Cwd: "/abs",
+		Fallbacks: []launch.HarnessSlot{{Surface: "grok", Launch: "grok --model fallback"}},
+	}}}
+	for _, tc := range []struct {
+		name, overlay string
+	}{
+		{name: "torn", overlay: `{not-json`},
+		{name: "missing slot", overlay: `{"slot":"fallback-7","surface":"grok"}`},
+		{name: "surface mismatch", overlay: `{"slot":"fallback-0","surface":"pi"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(rootEnv, t.TempDir())
+			writeOverlay(t, "data", tc.overlay)
+			if _, err := ResolveResumeSelection("data", flat, "pi"); err == nil {
+				t.Fatal("invalid active-harness overlay must stop resume")
+			}
+		})
 	}
 }
 
