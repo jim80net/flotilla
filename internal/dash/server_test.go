@@ -1961,7 +1961,7 @@ func TestGoalsMobileOutline672(t *testing.T) {
 			t.Errorf("goals.js must render and activate the mobile hierarchy outline (missing %q) — #672", marker)
 		}
 	}
-	for _, marker := range []string{".goals-mobile-outline", ".goutline-row", ".goutline-title", "--outline-depth"} {
+	for _, marker := range []string{".goals-mobile-outline", ".goutline-row", ".goutline-title", ".goutline-state", ".goutline-desk-toggle"} {
 		if !strings.Contains(css, marker) {
 			t.Errorf("dash.css must keep mobile outline labels readable (missing %q) — #672", marker)
 		}
