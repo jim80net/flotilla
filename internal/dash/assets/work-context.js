@@ -457,7 +457,7 @@
   });
   function trackStreamPin(event) {
     var viewport = streamViewport();
-    if (event && event.currentTarget !== viewport) return;
+    if (event instanceof Event && event.currentTarget !== viewport) return;
     streamPinned = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 48;
   }
   el("wc-stream").addEventListener("scroll", trackStreamPin);
