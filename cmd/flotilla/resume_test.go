@@ -105,7 +105,7 @@ func TestRunResumeUsesSelectedFallbackForInPlaceColdAndForce(t *testing.T) {
 	base := resumePlan{
 		agent: "alpha-build", key: "alpha-build", cwd: "/work/alpha", launch: "grok --resume",
 		session: "flotilla", window: "alpha-build", slot: "fallback-0",
-		selectedSurface: "grok", launchSource: "active-harness overlay",
+		selectedSurface: "grok", launchSource: "/etc/flotilla-launch.json", selectionSource: "active-harness overlay",
 	}
 	cases := []struct {
 		name    string
@@ -131,7 +131,7 @@ func TestRunResumeUsesSelectedFallbackForInPlaceColdAndForce(t *testing.T) {
 			if rec.launch != "grok --resume" {
 				t.Fatalf("launched %q, want selected fallback launch", rec.launch)
 			}
-			for _, want := range []string{"source=active-harness overlay", "slot=fallback-0", "surface=grok"} {
+			for _, want := range []string{"launch-source=/etc/flotilla-launch.json", "selection-source=active-harness overlay", "slot=fallback-0", "surface=grok"} {
 				if !strings.Contains(msg, want) {
 					t.Errorf("message %q missing %q", msg, want)
 				}

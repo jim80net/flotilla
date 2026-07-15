@@ -36,10 +36,10 @@ type resumeOps struct {
 
 // resumePlan is the resolved per-agent input to runResume.
 type resumePlan struct {
-	agent, key, cwd, launch, session, window string
-	slot, selectedSurface, launchSource      string
-	perAgentSession                          bool
-	force                                    bool
+	agent, key, cwd, launch, session, window             string
+	slot, selectedSurface, launchSource, selectionSource string
+	perAgentSession                                      bool
+	force                                                bool
 }
 
 // cmdResume deterministically (re)starts a desk from its host-local launch
@@ -144,7 +144,8 @@ func cmdResume(args []string) error {
 	plan := resumePlan{
 		agent: agentName, key: agent.Title(), cwd: recipe.Cwd, launch: recipe.Launch,
 		session: session, window: window,
-		slot: selection.Slot, selectedSurface: selection.Surface, launchSource: selection.Source,
+		slot: selection.Slot, selectedSurface: selection.Surface,
+		launchSource: launchPath, selectionSource: selection.Source,
 		perAgentSession: launch.IsPerAgentSession(session),
 		force:           force,
 	}
@@ -275,7 +276,7 @@ func coldCreateResume(ops resumeOps, p resumePlan, discardedStale string) (strin
 }
 
 func resumeSuccess(p resumePlan, message string) string {
-	return fmt.Sprintf("%s [source=%s slot=%s surface=%s]\n", message, p.launchSource, p.slot, p.selectedSurface)
+	return fmt.Sprintf("%s [launch-source=%s selection-source=%s slot=%s surface=%s]\n", message, p.launchSource, p.selectionSource, p.slot, p.selectedSurface)
 }
 
 // printState surfaces the state pointer (if any) so the operator/skill can drive
