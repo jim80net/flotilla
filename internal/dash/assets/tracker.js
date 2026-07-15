@@ -20,7 +20,7 @@
   var workRowContexts = {};
   var lastLedgerDoc = null;
   function isMobileLedger() { return !!(window.matchMedia && window.matchMedia("(max-width: 640px)").matches); }
-  var mobileLedger = isMobileLedger();
+  var mobileLedger = null;
   var shippedOpen = {};
   var shippedWindows = {};
 
@@ -144,7 +144,8 @@
           (shippedOpen[key] ? '<div class="issue-shipped-window">' + shown.map(function (it) {
               return workRow(it, "shipped", flotilla, desk.name, true);
             }).join("") +
-            (remaining ? '<button type="button" class="issue-window-more" data-issue-more="' + escapeHtml(key) + '">show ' +
+            (remaining ? '<button type="button" class="issue-window-more" data-issue-more="' + escapeHtml(key) +
+              '" data-issue-next="' + next + '">show ' +
               next + " more of " + remaining + " ▸</button>" : "") + "</div>" : "") + "</details>"
       : "";
     return '<section class="issue-desk issue-desk-mobile">' + movingBlock + shippedBlock + "</section>";
@@ -205,7 +206,8 @@
         var key = this.getAttribute("data-issue-more");
         var top = this.getBoundingClientRect().top;
         var previous = shippedWindows[key] || 10;
-        shippedWindows[key] = previous + 20;
+        var increment = parseInt(this.getAttribute("data-issue-next"), 10) || 20;
+        shippedWindows[key] = previous + increment;
         renderIssueList(lastLedgerDoc);
         requestAnimationFrame(function () {
           var groups = list.querySelectorAll("[data-shipped-key]"), group = null;
@@ -225,11 +227,15 @@
 
   function syncMobileLedger() {
     var next = isMobileLedger();
+    if (next === mobileLedger) return;
     var overflow = el("tracker-overflow");
     var menu = el("tracker-overflow-menu");
     var controls = overflow && overflow.parentNode;
-    var idea = el("filter-idea").closest(".filter-idea");
+    var ideaInput = el("filter-idea");
     var state = el("filter-state"), refresh = el("issues-refresh"), create = el("issues-new");
+    if (!overflow || !menu || !controls || !ideaInput || !state || !refresh || !create) return;
+    var idea = ideaInput.closest(".filter-idea");
+    if (!idea) return;
     if (overflow && menu && controls) {
       overflow.open = false;
       if (next) {
@@ -242,7 +248,6 @@
         controls.insertBefore(create, overflow);
       }
     }
-    if (next === mobileLedger) return;
     mobileLedger = next;
     if (lastLedgerDoc) renderIssueList(lastLedgerDoc);
   }
