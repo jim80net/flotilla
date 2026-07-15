@@ -2044,6 +2044,8 @@ html, body { overflow-x: clip; }
     font: 1.15rem var(--display); color: var(--ink);
   }
   .tracker-overflow > summary::-webkit-details-marker { display: none; }
+  .tracker-overflow > summary:focus-visible,
+  .issue-shipped-group > summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
   .tracker-overflow-menu {
     position: absolute; right: 0; top: calc(100% + 5px); z-index: 30; width: min(280px, calc(100vw - 20px));
     display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: var(--r-sm);
