@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -320,6 +321,8 @@ func (s *Server) loadHistory() HistoryDoc {
 			return cos.LookupBody(s.cfg.LedgerPath, nonce)
 		})
 	}
+	doc.Total = len(doc.Ledger)
+	doc.Signature = historyFileSignature(s.cfg.LedgerPath)
 	return doc
 }
 
@@ -475,6 +478,45 @@ func (s *Server) handleTopology(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
+	q := r.URL.Query()
+	if q.Get("meta") == "1" {
+		doc := BuildHistory("", readFileOrEmpty(s.cfg.BacklogPath))
+		doc.Signature = historyFileSignature(s.cfg.LedgerPath)
+		w.Header().Set("Server-Timing", serverTiming("history-meta", time.Since(started)))
+		writeJSON(w, doc)
+		return
+	}
+	if q.Has("desk") || q.Has("limit") || q.Has("cursor") {
+		desk := strings.TrimSpace(q.Get("desk"))
+		if desk == "" {
+			writeJSONStatus(w, http.StatusBadRequest, map[string]string{"error": "history desk is required for bounded reads"})
+			return
+		}
+		limit := defaultHistoryPageLimit
+		if raw := strings.TrimSpace(q.Get("limit")); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil || parsed < 1 || parsed > maxHistoryPageLimit {
+				writeJSONStatus(w, http.StatusBadRequest, map[string]string{"error": "history limit must be between 1 and 200"})
+				return
+			}
+			limit = parsed
+		}
+		var before *int
+		if raw := strings.TrimSpace(q.Get("cursor")); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil || parsed < 0 {
+				writeJSONStatus(w, http.StatusBadRequest, map[string]string{"error": "history cursor is invalid"})
+				return
+			}
+			before = &parsed
+		}
+		doc := s.loadHistoryPage(desk, limit, before)
+		w.Header().Set("Server-Timing", serverTiming("history-page", time.Since(started)))
+		writeJSON(w, doc)
+		return
+	}
+	w.Header().Set("Server-Timing", serverTiming("history-legacy", time.Since(started)))
 	writeJSON(w, s.loadHistory())
 }
 

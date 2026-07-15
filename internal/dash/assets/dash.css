@@ -416,6 +416,20 @@ code {
    beneath the newest message (the thread scrolls above it), and the jump-to-latest chip
    floats just over it when the operator has scrolled up into history. */
 .conv-thread-col { position: relative; }
+.thread-more {
+  align-self: center;
+  flex: 0 0 auto;
+  margin: 6px 10px 0;
+  min-height: 32px;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.thread-more:hover, .thread-more:focus-visible { color: var(--ink); border-color: var(--cyan); }
+.thread-more[disabled] { cursor: progress; opacity: .65; }
 .thread-composer {
   position: relative; /* anchor for the jump-to-latest chip so it clears a grown composer */
   flex: 0 0 auto;

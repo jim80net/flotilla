@@ -149,6 +149,30 @@ func TestHandleHistory(t *testing.T) {
 	}
 }
 
+func TestHistoryAssetsUseBoundedLazyPath749(t *testing.T) {
+	srv, _ := newTestServer(t, singleFleetRoster, time.Now())
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	html := doGet(t, srv, "/").Body.String()
+	for _, marker := range []string{
+		"historyPageURL",             // desk-scoped bounded request
+		"/api/history?meta=1",        // no-op SSE metadata path
+		"loadSelectedHistory(false)", // stable show-more path
+		"current.concat(older)",      // older pages extend, never replace, the window
+		"history.signature",          // unseen-dot freshness without a full ledger
+		"HISTORY_PAGE_LIMIT = 80",    // explicit initial bound
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js missing bounded-history marker %q — #749", marker)
+		}
+	}
+	if strings.Contains(js, `getJSON("/api/history")`) {
+		t.Error("dash startup must not fetch the legacy unbounded history endpoint — #749")
+	}
+	if !strings.Contains(html, `id="thread-more"`) || !strings.Contains(html, "Show older messages") {
+		t.Error("Conversations must expose the stable older-history affordance — #749")
+	}
+}
+
 func TestHandleIndex(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 	srv, _ := newTestServer(t, singleFleetRoster, now)

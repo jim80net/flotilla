@@ -86,6 +86,8 @@ func TestPerfMetricShapingRedactsToFixedClasses(t *testing.T) {
 		"headers": map[string]string{"Authorization": "secret"},
 		"serverTiming": []map[string]any{
 			{"name": "github-list", "duration": 7.25, "description": "private deployment"},
+			{"name": "history-meta", "duration": 0.4},
+			{"name": "history-page", "duration": 4.2},
 			{"name": "desk-secret", "duration": 1.5},
 		},
 	}
@@ -95,7 +97,7 @@ func TestPerfMetricShapingRedactsToFixedClasses(t *testing.T) {
 			t.Fatalf("shaped resource leaked %q: %s", leak, got)
 		}
 	}
-	for _, want := range []string{`"endpoint_class":"/api/issues/:item"`, `"stage":"github-list"`, `"stage":"other"`, `"duration_ms":12.3`} {
+	for _, want := range []string{`"endpoint_class":"/api/issues/:item"`, `"stage":"github-list"`, `"stage":"history-meta"`, `"stage":"history-page"`, `"stage":"other"`, `"duration_ms":12.3`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("shaped resource missing %s: %s", want, got)
 		}

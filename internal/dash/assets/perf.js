@@ -22,7 +22,10 @@
     "/api/issues": true,
     "/api/work-ledger": true,
   };
-  var SERVER_STAGES = { "github-list": true, "derive": true, "total": true, "goals-load": true };
+  var SERVER_STAGES = {
+    "github-list": true, "derive": true, "total": true, "goals-load": true,
+    "history-meta": true, "history-page": true,
+  };
   var VIEWS = { conversations: true, goals: true, issues: true, decisions: true };
   var NAV_TYPES = { navigate: true, reload: true, back_forward: true, prerender: true };
   var INITIATORS = { fetch: true, xmlhttprequest: true };

@@ -388,8 +388,13 @@ type BacklogInfo struct {
 // HistoryDoc is the coordination-history JSON: the CoS ledger entries
 // (reverse-chronological — most recent first) and the backlog classification.
 type HistoryDoc struct {
-	Ledger  []LedgerEntry `json:"ledger"`
-	Backlog BacklogInfo   `json:"backlog"`
+	Ledger     []LedgerEntry `json:"ledger"`
+	Backlog    BacklogInfo   `json:"backlog"`
+	Limit      int           `json:"limit,omitempty"`
+	HasMore    bool          `json:"has_more"`
+	NextCursor string        `json:"next_cursor,omitempty"`
+	Total      int           `json:"total"`
+	Signature  string        `json:"signature,omitempty"`
 }
 
 // HydrateLedgerBodies fills each parsed entry's Body from the full-message companion store

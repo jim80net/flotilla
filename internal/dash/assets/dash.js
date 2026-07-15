@@ -72,6 +72,9 @@
 
   /* ── cached read model (combined on refresh) ───────────────────────────── */
   var cache = { status: null, topology: null, history: null, mirror: null };
+  var historyDesk = null;
+  var historyRequestEpoch = 0;
+  var HISTORY_PAGE_LIMIT = 80;
   // Selection retains both desk and home-channel context: #745 makes the map one-row-per-seat,
   // while the channel still scopes the selected thread header and backlog projection.
   var selectedDesk = null, selectedChannel = null;
@@ -456,7 +459,11 @@
         selectedDesk = this.getAttribute("data-desk");
         selectedChannel = this.getAttribute("data-channel"); // scope the selection to THIS channel copy (#370)
         resetThreadScroll(); // a freshly selected thread opens at its latest message
+        historyDesk = null;
+        cache.history = { ledger: [], backlog: cache.history && cache.history.backlog ? cache.history.backlog : { found: false, unblocked: [] } };
+        cache.history.loading = true;
         renderConversations();
+        loadSelectedHistory(true).then(function () { renderConversations(); });
         fetchMirror();            // load the newly-selected desk's session mirror
         pushNav({ view: "conversations", desk: selectedDesk, channel: selectedChannel }); // reversible (#349 A1)
       });
@@ -760,12 +767,23 @@
     });
   }
   function renderThread(history, force) {
+    syncHistoryMore(history);
     if (!force && composerComposeActive()) { threadRenderDeferred = true; return; }
     var thread = el("conv-thread");
     if (!selectedDesk) {
       if (lastThreadKey === "@none") return;
       lastThreadKey = "@none";
       thread.innerHTML = '<div class="empty">Pick a desk to read its coordination thread.</div>';
+      return;
+    }
+    if (history && history.loading) {
+      lastThreadKey = "@loading:" + selectedDesk;
+      thread.innerHTML = '<div class="empty">Loading recent history…</div>';
+      return;
+    }
+    if (history && history.error) {
+      lastThreadKey = "@error:" + selectedDesk + ":" + history.error;
+      thread.innerHTML = '<div class="empty">Could not load coordination history (' + escapeHtml(history.error) + ").</div>";
       return;
     }
     var ledger = (history && Array.isArray(history.ledger)) ? history.ledger : [];
@@ -1055,9 +1073,83 @@
     }
     // #747: Conversations is minimally usable only after its three startup read
     // models have settled (success or honest error) and this paint completed.
-    if (cache.status && cache.topology && cache.history && window.flotillaPerf) {
+    if (cache.status && cache.topology && cache.history && !cache.history.loading && window.flotillaPerf) {
       window.flotillaPerf.viewRendered("conversations");
     }
+  }
+
+  function historyPageURL(desk, cursor) {
+    var path = "/api/history?desk=" + encodeURIComponent(desk) + "&limit=" + String(HISTORY_PAGE_LIMIT);
+    if (cursor) path += "&cursor=" + encodeURIComponent(cursor);
+    return path;
+  }
+
+  function emptyHistory(backlog) {
+    return { ledger: [], backlog: backlog || { found: false, unblocked: [] }, has_more: false, next_cursor: "" };
+  }
+
+  // Load only the selected desk's recent relay window. The server cursor is an
+  // append-stable chronological boundary; older pages can therefore be appended
+  // without scanning or transferring the fleet-wide ledger in the browser.
+  function loadSelectedHistory(reset) {
+    var want = selectedDesk;
+    if (!want) {
+      historyDesk = null;
+      cache.history = emptyHistory(cache.history && cache.history.backlog);
+      return Promise.resolve();
+    }
+    var cursor = reset ? "" : String((cache.history && cache.history.next_cursor) || "");
+    if (!reset && !cursor) return Promise.resolve();
+    var request = ++historyRequestEpoch;
+    return getJSON(historyPageURL(want, cursor)).then(function (page) {
+      if (request !== historyRequestEpoch || selectedDesk !== want) return;
+      if (reset || historyDesk !== want || !cache.history) {
+        cache.history = page;
+      } else {
+        var current = Array.isArray(cache.history.ledger) ? cache.history.ledger : [];
+        var older = Array.isArray(page.ledger) ? page.ledger : [];
+        cache.history.ledger = current.concat(older);
+        cache.history.backlog = page.backlog;
+        cache.history.has_more = page.has_more;
+        cache.history.next_cursor = page.next_cursor || "";
+        cache.history.total = page.total;
+        cache.history.signature = page.signature;
+      }
+      historyDesk = want;
+    }).catch(function (err) {
+      if (request === historyRequestEpoch && selectedDesk === want && reset) {
+        cache.history = emptyHistory(cache.history && cache.history.backlog);
+        cache.history.error = err.message;
+        historyDesk = want;
+      }
+    });
+  }
+
+  // SSE/no-op refreshes pay only for tiny metadata. The bounded recent window is
+  // fetched again only when the ledger signature changes.
+  function refreshSelectedHistory() {
+    if (!selectedDesk || !cache.history || historyDesk !== selectedDesk) {
+      return loadSelectedHistory(true);
+    }
+    var want = selectedDesk;
+    var request = ++historyRequestEpoch;
+    return getJSON("/api/history?meta=1").then(function (meta) {
+      if (request !== historyRequestEpoch || selectedDesk !== want) return;
+      if (meta.signature !== cache.history.signature) {
+        return loadSelectedHistory(true);
+      }
+      cache.history.backlog = meta.backlog;
+    }).catch(function () {
+      // Preserve the last-good bounded page on a transient metadata failure.
+    });
+  }
+
+  function syncHistoryMore(history) {
+    var button = el("thread-more");
+    if (!button) return;
+    var show = !!(selectedDesk && historyDesk === selectedDesk && history && history.has_more && history.next_cursor);
+    button.hidden = !show;
+    if (show) button.textContent = "Show older messages";
   }
 
   /* ── refresh orchestration ───────────────────────────────────────────── */
@@ -1081,13 +1173,10 @@
       if (current()) cache.topology = { channels: [], note: err.message };
     });
 
-    var pHist = getJSON("/api/history").then(function (d) {
-      if (current()) cache.history = d;
-    }).catch(function (err) {
-      if (current()) cache.history = { ledger: [], backlog: { found: false, unblocked: [] } };
-    });
-
-    return Promise.all([pStatus, pTopo, pHist]).then(function () {
+    return Promise.all([pStatus, pTopo]).then(function () {
+      if (current()) ensureSelection(cache.status || {}, buildRailGroups(cache.topology || {}));
+      return current() ? refreshSelectedHistory() : Promise.resolve();
+    }).then(function () {
       if (current()) {
         renderConversations();
         var mirrorSettled = fetchMirror(); // keep the selected desk's session-mirror glance current on each tick
@@ -1225,11 +1314,9 @@
   // latest ledger entry's ts + total ledger count. Both are available after each refresh.
   function computeConvSig() {
     var hist = cache.history || {};
-    var ledger = Array.isArray(hist.ledger) ? hist.ledger : [];
     var bl = hist.backlog || {};
     var unblocked = Array.isArray(bl.unblocked) ? bl.unblocked : [];
-    var latestTs = ledger.length ? (ledger[ledger.length - 1].ts || "") : "";
-    return latestTs + "|" + String(ledger.length) + "|" + String(unblocked.length);
+    return String(hist.signature || "") + "|" + String(hist.total || 0) + "|" + String(unblocked.length);
   }
 
   // peekGoalsSig fetches /api/goals to derive the goals tab signature. Errors are
@@ -1460,9 +1547,19 @@
       // Set the selection to the state's desk — including CLEARING it on a desk:null state
       // (Back to the seed must not leave the thread/header/mirror on the old desk; a null
       // selection lets renderConversations re-pick the default) — cubic #351 P2.
-      if (view === "conversations") { selectedDesk = s.desk || null; selectedChannel = s.channel || null; }
+      if (view === "conversations") {
+        selectedDesk = s.desk || null;
+        selectedChannel = s.channel || null;
+        historyDesk = null;
+      }
       showView(view);
-      if (view === "conversations") { renderConversations(); fetchMirror(); }
+      if (view === "conversations") {
+        cache.history = emptyHistory(cache.history && cache.history.backlog);
+        cache.history.loading = true;
+        renderConversations();
+        loadSelectedHistory(true).then(function () { renderConversations(); });
+        fetchMirror();
+      }
       if (view === "goals" && window.flotillaGoals && window.flotillaGoals.restoreNode) {
         if (window.flotillaGoals.show) window.flotillaGoals.show(); // ensure the map is rendered first
         window.flotillaGoals.restoreNode(s.node || null);
@@ -1536,9 +1633,13 @@
   function openConversation(desk) {
     if (!desk) return;
     selectedDesk = desk;
+    historyDesk = null;
+    cache.history = emptyHistory(cache.history && cache.history.backlog);
+    cache.history.loading = true;
     resetThreadScroll(); // open the deep-linked thread at its latest message
     showView("conversations");
     renderConversations();
+    loadSelectedHistory(true).then(function () { renderConversations(); });
     fetchMirror(); // load the deep-linked desk's session mirror (the identity guard hides the prior desk's until it lands)
     pushNav({ view: "conversations", desk: desk }); // reversible: Back returns to the goals map (#349 A1)
     // Move focus into the now-visible Conversations view — the deep-link hid the
@@ -1655,5 +1756,28 @@
       ta.addEventListener("input", resizeComposer);
       ta.addEventListener("blur", function () { setTimeout(flushDeferredMirrorPaint, 0); });
     }
+  })();
+
+  (function wireHistoryMore() {
+    var button = el("thread-more");
+    if (!button) return;
+    button.addEventListener("click", function () {
+      if (button.disabled || !cache.history || !cache.history.next_cursor) return;
+      var thread = el("conv-thread");
+      var oldHeight = thread ? thread.scrollHeight : 0;
+      var oldTop = thread ? thread.scrollTop : 0;
+      button.disabled = true;
+      threadPinned = false;
+      loadSelectedHistory(false).then(function () {
+        renderConversations();
+        if (thread) thread.scrollTop = oldTop + Math.max(0, thread.scrollHeight - oldHeight);
+        button.disabled = false;
+        if (!button.hidden) button.focus();
+        else {
+          var title = el("conv-title");
+          if (title) { title.setAttribute("tabindex", "-1"); title.focus(); }
+        }
+      });
+    });
   })();
 })();
