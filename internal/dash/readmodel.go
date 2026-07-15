@@ -350,9 +350,9 @@ func BuildTopology(cfg *roster.Config) TopologyDoc {
 	return doc
 }
 
-// LedgerEntry is one CoS who-knows-what exchange. Raw is ALWAYS the original
-// rendered line (provenance + the fallback when structured parsing fails); the
-// parsed fields are populated only when the line matches the cos.Line format.
+// LedgerEntry is one CoS who-knows-what exchange. Raw carries only an
+// unparseable line; structured entries omit the duplicate rendered source from
+// JSON so bounded history pages do not pay twice for every message body.
 type LedgerEntry struct {
 	Time    string `json:"time,omitempty"`
 	Channel string `json:"channel,omitempty"`
@@ -369,7 +369,7 @@ type LedgerEntry struct {
 	// ` #<nonce>` token; it resolves Body by EXACT identity (never a content scan). Empty
 	// for an unclamped entry or a pre-#407 line. Not serialized — an internal resolve key.
 	Nonce  string `json:"-"`
-	Raw    string `json:"raw"`
+	Raw    string `json:"raw,omitempty"`
 	Parsed bool   `json:"parsed"`
 }
 
@@ -497,6 +497,7 @@ func ParseLedgerLine(line string) LedgerEntry {
 	entry.To = fromTo[1]
 	entry.Gist = gist
 	entry.Parsed = true
+	entry.Raw = "" // structured fields are the canonical bounded API representation
 	return entry
 }
 
