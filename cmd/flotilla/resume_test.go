@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/jim80net/flotilla/internal/deliver"
@@ -71,6 +72,7 @@ func TestParseResumeArgsEnvDefault(t *testing.T) {
 type resumeRec struct {
 	respawned, killed, tagged, newSession, newWindow bool
 	tagTarget                                        string
+	launch                                           string
 }
 
 // fakeOps builds resumeOps from a fixed resolution + assessment + marker
@@ -78,15 +80,63 @@ type resumeRec struct {
 // without a live tmux server or a real agent.
 func fakeOps(rec *resumeRec, target string, outcome deliver.ResolveOutcome, st surface.State, marker string, hasSess bool) resumeOps {
 	return resumeOps{
-		resolve:    func(string) (string, deliver.ResolveOutcome, error) { return target, outcome, nil },
-		assess:     func(string) surface.State { return st },
-		respawn:    func(string, string, string) error { rec.respawned = true; return nil },
+		resolve: func(string) (string, deliver.ResolveOutcome, error) { return target, outcome, nil },
+		assess:  func(string) surface.State { return st },
+		respawn: func(_, _, launch string) error {
+			rec.respawned, rec.launch = true, launch
+			return nil
+		},
 		readMarker: func(string) (string, error) { return marker, nil },
 		killPane:   func(string) error { rec.killed = true; return nil },
 		hasSession: func(string) (bool, error) { return hasSess, nil },
-		newSession: func(_, _, _, _ string) (string, error) { rec.newSession = true; return "flotilla:0.0", nil },
-		newWindow:  func(_, _, _, _ string) (string, error) { rec.newWindow = true; return "flotilla:1.0", nil },
-		tag:        func(target, _ string) error { rec.tagged = true; rec.tagTarget = target; return nil },
+		newSession: func(_, _, _, launch string) (string, error) {
+			rec.newSession, rec.launch = true, launch
+			return "flotilla:0.0", nil
+		},
+		newWindow: func(_, _, _, launch string) (string, error) {
+			rec.newWindow, rec.launch = true, launch
+			return "flotilla:1.0", nil
+		},
+		tag: func(target, _ string) error { rec.tagged = true; rec.tagTarget = target; return nil },
+	}
+}
+
+func TestRunResumeUsesSelectedFallbackForInPlaceColdAndForce(t *testing.T) {
+	base := resumePlan{
+		agent: "alpha-build", key: "alpha-build", cwd: "/work/alpha", launch: "grok --resume",
+		session: "flotilla", window: "alpha-build", slot: "fallback-0",
+		selectedSurface: "grok", launchSource: "/etc/flotilla-launch.json", selectionSource: "active-harness overlay",
+	}
+	cases := []struct {
+		name    string
+		target  string
+		outcome deliver.ResolveOutcome
+		state   surface.State
+		force   bool
+	}{
+		{name: "in-place dead pane", target: "flotilla:1.0", outcome: deliver.ResolveUnique, state: surface.StateShell},
+		{name: "cold pane", outcome: deliver.ResolveNone, state: surface.StateUnknown},
+		{name: "forced live pane", target: "flotilla:1.0", outcome: deliver.ResolveUnique, state: surface.StateWorking, force: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := base
+			plan.force = tc.force
+			rec := &resumeRec{}
+			ops := fakeOps(rec, tc.target, tc.outcome, tc.state, plan.key, false)
+			msg, err := runResume(ops, plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rec.launch != "grok --resume" {
+				t.Fatalf("launched %q, want selected fallback launch", rec.launch)
+			}
+			for _, want := range []string{"launch-source=/etc/flotilla-launch.json", "selection-source=active-harness overlay", "slot=fallback-0", "surface=grok"} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("message %q missing %q", msg, want)
+				}
+			}
+		})
 	}
 }
 

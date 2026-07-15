@@ -36,9 +36,10 @@ type resumeOps struct {
 
 // resumePlan is the resolved per-agent input to runResume.
 type resumePlan struct {
-	agent, key, cwd, launch, session, window string
-	perAgentSession                          bool
-	force                                    bool
+	agent, key, cwd, launch, session, window             string
+	slot, selectedSurface, launchSource, selectionSource string
+	perAgentSession                                      bool
+	force                                                bool
 }
 
 // cmdResume deterministically (re)starts a desk from its host-local launch
@@ -80,10 +81,11 @@ func cmdResume(args []string) error {
 	} else if warn != "" {
 		fmt.Fprintln(os.Stderr, "flotilla: "+warn)
 	}
-	recipe, err := workspace.ResolveRecipe(agentName, flat)
+	selection, err := workspace.ResolveResumeSelection(agentName, flat, agent.Surface)
 	if err != nil {
 		return err
 	}
+	recipe := selection.Recipe
 	cwdAbs, err := filepath.Abs(recipe.Cwd)
 	if err != nil {
 		return fmt.Errorf("resume %q: resolve cwd %q: %w", agentName, recipe.Cwd, err)
@@ -100,9 +102,9 @@ func cmdResume(args []string) error {
 	// in the roster's surface field, or a driver not yet built) MUST error cleanly
 	// — never nil-deref past the liveness interlock (that would skip the safety
 	// check entirely). Mirrors cmdWatch's surface-validation discipline.
-	drv, ok := surface.Get(agentSurface(cfg, agentName))
+	drv, ok := surface.Get(selection.Surface)
 	if !ok {
-		return fmt.Errorf("agent %q: unknown surface %q (not a registered driver)", agentName, agentSurface(cfg, agentName))
+		return fmt.Errorf("agent %q: resume slot %q selects unknown surface %q (not a registered driver)", agentName, selection.Slot, selection.Surface)
 	}
 
 	// Serialize the in-place respawn against a concurrent recycle (or another resume) on the
@@ -136,12 +138,14 @@ func cmdResume(args []string) error {
 	// first-run trust menu a remote coordinator cannot answer. Wired through the
 	// preLaunch seam (runs on respawn/cold-create only, never on a refusal);
 	// best-effort (warns, never blocks).
-	if recipeInvolvesCodex(agentSurface(cfg, agentName), recipe) {
+	if selection.Surface == codexSurfaceName {
 		ops.preLaunch = func() { seedCodexTrust(cwdAbs) }
 	}
 	plan := resumePlan{
 		agent: agentName, key: agent.Title(), cwd: recipe.Cwd, launch: recipe.Launch,
 		session: session, window: window,
+		slot: selection.Slot, selectedSurface: selection.Surface,
+		launchSource: launchPath, selectionSource: selection.Source,
 		perAgentSession: launch.IsPerAgentSession(session),
 		force:           force,
 	}
@@ -201,14 +205,14 @@ func runResume(ops resumeOps, p resumePlan) (string, error) {
 		}
 		switch {
 		case got == p.key:
-			return fmt.Sprintf("resumed %s in place → pane %s (was %s, marker confirmed)\n", p.agent, target, st), nil
+			return resumeSuccess(p, fmt.Sprintf("resumed %s in place → pane %s (was %s, marker confirmed)", p.agent, target, st)), nil
 		case got == "":
 			// The pane resolved by TITLE (an untagged desk — the migration case): the
 			// respawned pane has no marker, so ADOPT it by tagging rather than failing.
 			if err := ops.tag(target, p.key); err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("resumed %s in place → pane %s (was %s, adopted: tagged @flotilla_agent=%s)\n", p.agent, target, st, p.key), nil
+			return resumeSuccess(p, fmt.Sprintf("resumed %s in place → pane %s (was %s, adopted: tagged @flotilla_agent=%s)", p.agent, target, st, p.key)), nil
 		default:
 			return "", fmt.Errorf("respawned %q at %s but its @flotilla_agent marker reads %q (expected %q) — re-tag it with: flotilla register %s --pane %s", p.agent, target, got, p.key, p.agent, target)
 		}
@@ -266,9 +270,13 @@ func coldCreateResume(ops resumeOps, p resumePlan, discardedStale string) (strin
 		return "", fmt.Errorf("launched %s at %s but tagging failed: %w — the desk IS running; tag it with: flotilla register %s --pane %s", p.agent, newTarget, err, p.agent, newTarget)
 	}
 	if discardedStale != "" {
-		return fmt.Sprintf("resumed %s (migrated, discarded stale %s) → pane %s (tagged @flotilla_agent=%s)\n", p.agent, discardedStale, newTarget, p.key), nil
+		return resumeSuccess(p, fmt.Sprintf("resumed %s (migrated, discarded stale %s) → pane %s (tagged @flotilla_agent=%s)", p.agent, discardedStale, newTarget, p.key)), nil
 	}
-	return fmt.Sprintf("resumed %s (cold) → pane %s (tagged @flotilla_agent=%s)\n", p.agent, newTarget, p.key), nil
+	return resumeSuccess(p, fmt.Sprintf("resumed %s (cold) → pane %s (tagged @flotilla_agent=%s)", p.agent, newTarget, p.key)), nil
+}
+
+func resumeSuccess(p resumePlan, message string) string {
+	return fmt.Sprintf("%s [launch-source=%s selection-source=%s slot=%s surface=%s]\n", message, p.launchSource, p.selectionSource, p.slot, p.selectedSurface)
 }
 
 // printState surfaces the state pointer (if any) so the operator/skill can drive
