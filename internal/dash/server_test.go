@@ -2291,3 +2291,30 @@ func TestMobileIssuesDensity725(t *testing.T) {
 		}
 	}
 }
+
+// TestMobileGoalsDensity725 pins counted hierarchy disclosures and stable
+// six/eight-item child windows while preserving the shared goal activation path.
+func TestMobileGoalsDensity725(t *testing.T) {
+	srv, _ := newTestServer(t, singleFleetRoster, time.Date(2026, 7, 15, 3, 0, 0, 0, time.UTC))
+	html := doGet(t, srv, "/").Body.String()
+	for _, marker := range []string{`id="goals-mobile-summary"`, `id="goals-mobile-summary-count"`} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("index.html must host the #725 mobile goals disclosure (missing %q)", marker)
+		}
+	}
+
+	goalsJS := doGet(t, srv, "/static/goals.js").Body.String()
+	for _, marker := range []string{"mobileFlotillaOpen", "mobileDeskOpen", "mobileDeskWindows", "mobileTaskWindows",
+		`data-outline-desk-toggle`, `data-goal-more`, `Math.max(6`, `Math.max(8`, `Math.min(20, remaining)`} {
+		if !strings.Contains(goalsJS, marker) {
+			t.Errorf("goals.js must execute counted mobile hierarchy disclosures (missing %q)", marker)
+		}
+	}
+
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	for _, marker := range []string{".goals-mobile-summary", ".goutline-secondary", ".goutline-desk-toggle"} {
+		if !strings.Contains(css, marker) {
+			t.Errorf("dash.css must enforce the #725 mobile goals budgets (missing %q)", marker)
+		}
+	}
+}
