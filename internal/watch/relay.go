@@ -18,7 +18,7 @@ import (
 // activity IS a tick) and is routed. Kept free of discordgo so it is testable with
 // plain fields.
 type Relay struct {
-	cfg        *roster.Config
+	cfg        func() *roster.Config
 	injector   *Injector
 	onAccepted func(target string) // clock hook, called with the routed target; may be nil
 	notify     func(string)        // post a one-line channel notice (unknown @agent); may be nil
@@ -40,6 +40,12 @@ func (r *Relay) SetGate(g *dedup) { r.gate = g }
 // delivery target (the XO or a desk); it may be nil. Legacy wiring passes a heartbeat
 // reset; v2 wiring clears the detector's settled flag when the target is the XO.
 func NewRelay(cfg *roster.Config, injector *Injector, onAccepted func(string), notify func(string)) *Relay {
+	return NewRelayDynamic(func() *roster.Config { return cfg }, injector, onAccepted, notify)
+}
+
+// NewRelayDynamic resolves one immutable roster snapshot per message. It is the
+// hot-reload path; NewRelay remains the static compatibility constructor.
+func NewRelayDynamic(cfg func() *roster.Config, injector *Injector, onAccepted func(string), notify func(string)) *Relay {
 	return &Relay{cfg: cfg, injector: injector, onAccepted: onAccepted, notify: notify}
 }
 
@@ -53,11 +59,12 @@ func NewRelay(cfg *roster.Config, injector *Injector, onAccepted func(string), n
 // origin channel for the CoS-mirror seam (#108). The security-critical operator-only
 // Accept runs unchanged, PER channel.
 func (r *Relay) Handle(channelID, messageID, authorID, content string) {
-	binding, ok := r.cfg.BindingForChannel(channelID)
+	cfg := r.cfg()
+	binding, ok := cfg.BindingForChannel(channelID)
 	if !ok {
 		return // a message on a channel no binding owns — ignore (defense in depth)
 	}
-	if !relay.Accept(authorID, r.cfg.OperatorUserID) {
+	if !relay.Accept(authorID, cfg.OperatorUserID) {
 		return
 	}
 	// Drop an empty/whitespace-only operator message: there is nothing to deliver,

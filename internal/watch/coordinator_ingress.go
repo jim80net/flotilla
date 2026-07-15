@@ -24,7 +24,22 @@ const VerbatimBodyMarker = "--- operator message (verbatim) ---\n"
 // This type wires mechanical ingress aliasing (watch inject + dash route). Judgment layers
 // (arc assembly, intent segmentation, charter tuning) live in the adjutant seat + buffer substrate.
 type CoordinatorIngress struct {
-	Config *roster.Config
+	Config  *roster.Config
+	Current func() *roster.Config
+}
+
+func NewCoordinatorIngressDynamic(current func() *roster.Config) *CoordinatorIngress {
+	return &CoordinatorIngress{Current: current}
+}
+
+func (g *CoordinatorIngress) config() *roster.Config {
+	if g != nil && g.Current != nil {
+		return g.Current()
+	}
+	if g == nil {
+		return nil
+	}
+	return g.Config
 }
 
 // NewCoordinatorIngress builds the front-office ingress resolver when adjutant_for exists.
@@ -43,16 +58,17 @@ func NewCoordinatorIngress(cfg *roster.Config) *CoordinatorIngress {
 //	Durable inter-agent sends (KindSend): pass through to the named recipient.
 //	Adjutant seam drains: pass through to the leader unchanged.
 func (g *CoordinatorIngress) Apply(job Job) []Job {
-	if g == nil || g.Config == nil {
+	cfg := g.config()
+	if cfg == nil {
 		return []Job{job}
 	}
-	if job.Kind == KindHeartbeat || !g.Config.IsCoordinator(job.Agent) {
+	if job.Kind == KindHeartbeat || !cfg.IsCoordinator(job.Agent) {
 		return []Job{job}
 	}
 	if isAdjutantSeamDrain(job) {
 		return []Job{job}
 	}
-	adj := g.Config.AdjutantFor(job.Agent)
+	adj := cfg.AdjutantFor(job.Agent)
 	if adj == "" {
 		return []Job{job}
 	}
@@ -75,10 +91,11 @@ func (g *CoordinatorIngress) Apply(job Job) []Job {
 // IngressTarget resolves the dash delivery pane via the adjutant front office (#533, #593).
 // Operator-authored dash prose enters the adjutant buffer path, not the leader mid-turn.
 func (g *CoordinatorIngress) IngressTarget(coordinator string) (string, bool) {
-	if g == nil || g.Config == nil || !g.Config.IsCoordinator(coordinator) {
+	cfg := g.config()
+	if cfg == nil || !cfg.IsCoordinator(coordinator) {
 		return coordinator, false
 	}
-	if adj := g.Config.AdjutantFor(coordinator); adj != "" {
+	if adj := cfg.AdjutantFor(coordinator); adj != "" {
 		return adj, true
 	}
 	return coordinator, true

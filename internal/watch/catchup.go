@@ -42,7 +42,7 @@ type MessageReader interface {
 // missed. It is independent of the gateway websocket — REST works precisely when the
 // websocket is unhealthy, which is when messages are lost.
 type Catchup struct {
-	cfg    *roster.Config
+	cfg    func() *roster.Config
 	gate   *dedup
 	reader MessageReader
 	relay  *Relay       // reuse route() — the same delivery seam as the live path
@@ -71,6 +71,10 @@ type Catchup struct {
 // channel is buffered (size 1) so a reconnect during an in-flight sweep coalesces to
 // exactly one follow-up sweep.
 func NewCatchup(cfg *roster.Config, rel *Relay, reader MessageReader, cursorPath string, notify, alert func(string)) *Catchup {
+	return NewCatchupDynamic(func() *roster.Config { return cfg }, rel, reader, cursorPath, notify, alert)
+}
+
+func NewCatchupDynamic(cfg func() *roster.Config, rel *Relay, reader MessageReader, cursorPath string, notify, alert func(string)) *Catchup {
 	gate := newDedup(cursorStore{path: cursorPath}, defaultSeenCap)
 	rel.SetGate(gate)
 	return &Catchup{
@@ -123,10 +127,11 @@ func (c *Catchup) Run(ctx context.Context) {
 
 // sweep reconciles every bound channel once and records backstop liveness.
 func (c *Catchup) sweep() {
-	bindings := c.cfg.Bindings()
+	cfg := c.cfg()
+	bindings := cfg.Bindings()
 	failures := 0
 	for _, b := range bindings {
-		if err := c.sweepChannel(b); err != nil {
+		if err := c.sweepChannel(cfg, b); err != nil {
 			failures++
 			log.Printf("flotilla watch: relay catch-up sweep failed for channel %q: %v", channelLabel(b), err)
 		}
@@ -140,7 +145,7 @@ func (c *Catchup) sweep() {
 // sweepChannel reconciles one channel: tail-init on first boot, else fetch the
 // contiguous run above the cursor, relay/alert the recovered operator messages, and
 // commit the cursor AFTER (enqueue-then-commit — Invariant 2 / F7).
-func (c *Catchup) sweepChannel(b roster.Channel) error {
+func (c *Catchup) sweepChannel(cfg *roster.Config, b roster.Channel) error {
 	cur, ok := c.gate.cursorOf(b.ChannelID)
 	if !ok {
 		// First boot: tail-init the cursor to the channel's latest id WITHOUT relaying
@@ -167,7 +172,7 @@ func (c *Catchup) sweepChannel(b roster.Channel) error {
 	// Accept + empty-guard FIRST (so the gate's seen-set holds only relayed ids — F4),
 	// then classify (dedup vs the live path). The cursor advances over the FULL batch
 	// (incl. non-operator messages) so the non-operator tail is not re-fetched forever.
-	candidates := c.accepted(batch)
+	candidates := c.accepted(cfg, batch)
 	toRelay := c.gate.classify(b.ChannelID, candidates)
 	c.disposition(b, toRelay, capped) // enqueue or alert — BEFORE commit
 	return c.gate.commit(b.ChannelID, MaxSnowflake(batch))
@@ -180,13 +185,13 @@ func (c *Catchup) sweepChannel(b roster.Channel) error {
 // webhook posts, so it must drop them the same way the live Subscribe adapter does.
 // (relay.Accept no longer carries the webhookID arm — it moved to the transport
 // adapter for the live path; the catch-up path applies the identical guard here.)
-func (c *Catchup) accepted(batch []transport.Message) []transport.Message {
+func (c *Catchup) accepted(cfg *roster.Config, batch []transport.Message) []transport.Message {
 	out := make([]transport.Message, 0, len(batch))
 	for _, m := range batch {
 		if m.WebhookID != "" {
 			continue // the transport's own webhook post (audit mirror) — never re-relay
 		}
-		if !relay.Accept(m.AuthorID, c.cfg.OperatorUserID) {
+		if !relay.Accept(m.AuthorID, cfg.OperatorUserID) {
 			continue
 		}
 		if strings.TrimSpace(m.Content) == "" {

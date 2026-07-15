@@ -233,6 +233,11 @@ type DetectorConfig struct {
 	// EXCLUDED from the materiality hash for that wake (never recorded as empty — no flap). Default
 	// nil ⇒ inert (the materiality gate sees no readable subordinates, so it never fires a wake).
 	SynthRead func(agent string) (string, bool)
+	// SynthOperation pins routing and result reading to one immutable roster
+	// generation for a complete synthesis operation. When set, one call returns
+	// the Parents and Read functions used together for read-set construction and
+	// materiality reads. Nil preserves the legacy SynthParents/SynthRead seams.
+	SynthOperation func() SynthOperation
 	// SynthEveryTicks is the digest sub-cadence (debounce-up): WakeSynthesis fires for an owed agent
 	// AT MOST once per this many ticks. It derives at the call site from heartbeat_interval (a small
 	// multiple). A burst of finishes coalesces to one wake; an idle fleet (nothing owed) fires
@@ -358,6 +363,11 @@ type DetectorConfig struct {
 	// AdaptiveInterval varies the live tick period from Activity output (PR 3).
 	// Nil ⇒ fixed cfg.Interval (byte-inert). Ticker mutations occur only in loop().
 	AdaptiveInterval AdaptiveInterval
+}
+
+type SynthOperation struct {
+	Parents func(agent string) []string
+	Read    func(agent string) (string, bool)
 }
 
 // Detector is the v2 heartbeat: a deterministic, no-LLM tick that wakes the XO
@@ -872,6 +882,7 @@ type deferredWake struct {
 type synthEligible struct {
 	agent    string
 	readSet  []string
+	read     func(string) (string, bool)
 	lastSeen map[string]string // a snapshot, compared off-mutex; the live state is committed in runSynthesis
 }
 
@@ -1677,9 +1688,11 @@ func (d *Detector) synthEligibleLocked() []synthEligible {
 		if ts, known := d.synthSinceFireAt[agent]; known && now.Sub(ts) < d.cfg.SynthEveryPeriod {
 			continue
 		}
+		op := d.synthesisOperation()
 		out = append(out, synthEligible{
 			agent:    agent,
-			readSet:  d.synthReadSet(agent),
+			readSet:  d.synthReadSetWithParents(agent, op.Parents),
+			read:     op.Read,
 			lastSeen: cloneHashes(d.synthState.LastSeen[agent]),
 		})
 	}
@@ -1700,7 +1713,7 @@ func (d *Detector) synthEligibleLocked() []synthEligible {
 // delay of the NEXT tick (which the ticker coalesces), bounded by the cadence gate.
 func (d *Detector) runSynthesis(eligible []synthEligible) {
 	for _, e := range eligible {
-		changed, fresh := materialSubordinates(e.lastSeen, e.readSet, d.synthReadOne)
+		changed, fresh := materialSubordinates(e.lastSeen, e.readSet, e.read)
 		if d.commitSynthesisLocked(e.agent, changed, fresh) && d.cfg.WakeAgent != nil {
 			d.cfg.WakeAgent(e.agent, WakeSynthesis, changed)
 		}
@@ -1767,13 +1780,17 @@ func cloneHashes(m map[string]string) map[string]string {
 // detector discovers it from the desks that name `agent` as a parent (SynthParents), so the
 // materiality read set and the owed-marking stay derived from one source. Order-stable (desk order).
 func (d *Detector) synthReadSet(agent string) []string {
+	return d.synthReadSetWithParents(agent, d.cfg.SynthParents)
+}
+
+func (d *Detector) synthReadSetWithParents(agent string, parents func(string) []string) []string {
 	var out []string
 	seen := map[string]bool{}
 	for _, name := range d.cfg.Desks {
 		if name == agent || seen[name] {
 			continue
 		}
-		for _, parent := range d.cfg.SynthParents(name) {
+		for _, parent := range parents(name) {
 			if parent == agent {
 				out = append(out, name)
 				seen[name] = true
@@ -1782,6 +1799,16 @@ func (d *Detector) synthReadSet(agent string) []string {
 		}
 	}
 	return out
+}
+
+func (d *Detector) synthesisOperation() SynthOperation {
+	if d.cfg.SynthOperation != nil {
+		op := d.cfg.SynthOperation()
+		if op.Parents != nil && op.Read != nil {
+			return op
+		}
+	}
+	return SynthOperation{Parents: d.cfg.SynthParents, Read: d.synthReadOne}
 }
 
 // synthReadOne reads a subordinate's latest turn-final text via the injected SynthRead seam
