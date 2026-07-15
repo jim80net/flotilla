@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/jim80net/flotilla/internal/dash/tracker"
 )
@@ -53,7 +54,9 @@ func (s *Server) handleIssuesList(w http.ResponseWriter, r *http.Request) {
 			filter.Limit = n
 		}
 	}
+	started := time.Now()
 	issues, err := s.tracker.List(r.Context(), filter)
+	w.Header().Set("Server-Timing", serverTiming("github-list", time.Since(started)))
 	if err != nil {
 		writeTrackerError(w, err)
 		return
@@ -73,14 +76,24 @@ func (s *Server) handleWorkLedger(w http.ResponseWriter, r *http.Request) {
 	if state == "" {
 		state = "all"
 	}
+	started := time.Now()
+	listStarted := time.Now()
 	issues, err := s.tracker.List(r.Context(), tracker.ListFilter{
 		State: state, Label: r.URL.Query().Get("label"), Limit: 200, IncludeBody: true,
 	})
+	listElapsed := time.Since(listStarted)
 	if err != nil {
+		w.Header().Set("Server-Timing", serverTiming("github-list", listElapsed))
 		writeTrackerError(w, err)
 		return
 	}
-	writeJSON(w, BuildWorkLedger(s.cfg.Repo, issues, s.loadGoals(), s.roster, s.now()))
+	deriveStarted := time.Now()
+	doc := BuildWorkLedger(s.cfg.Repo, issues, s.loadGoalsFromIssues(issues), s.roster, s.now())
+	w.Header().Set("Server-Timing", fmt.Sprintf("%s, %s, %s",
+		serverTiming("github-list", listElapsed),
+		serverTiming("derive", time.Since(deriveStarted)),
+		serverTiming("total", time.Since(started))))
+	writeJSON(w, doc)
 }
 
 // handleIssueGet serves GET /api/issues/{number} (body + comments).

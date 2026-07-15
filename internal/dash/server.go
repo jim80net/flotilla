@@ -328,6 +328,17 @@ func (s *Server) loadHistory() HistoryDoc {
 // trailer are merged onto the referenced goal node and issue states are resolved
 // for work-item roll-up.
 func (s *Server) loadGoals() GoalsDoc {
+	return s.loadGoalsWithIssues(nil, false)
+}
+
+// loadGoalsFromIssues builds the Goals document from an issue snapshot the
+// caller already fetched. Work-ledger uses this path so one request never pays
+// for two serial, identical all/200/body GitHub reads.
+func (s *Server) loadGoalsFromIssues(issues []tracker.Issue) GoalsDoc {
+	return s.loadGoalsWithIssues(issues, true)
+}
+
+func (s *Server) loadGoalsWithIssues(issues []tracker.Issue, supplied bool) GoalsDoc {
 	orgParents, orgSource := orgParentsFromRoster(s.roster)
 	in := GoalsInputs{
 		Backlog:       readFileOrEmpty(s.cfg.BacklogPath),
@@ -338,7 +349,11 @@ func (s *Server) loadGoals() GoalsDoc {
 		OrgParents:    orgParents,
 		OrgSource:     orgSource,
 	}
-	s.bindTrackerIssues(&in)
+	if supplied {
+		bindTrackerIssueSnapshot(&in, s.cfg.Repo, issues)
+	} else {
+		s.bindTrackerIssues(&in)
+	}
 	if s.cfg.GoalsPath != "" {
 		if err := maybeCompileGoalsFromYAML(s.cfg.GoalsYAMLPath, s.cfg.GoalsPath); err != nil {
 			in.LoadErr = err.Error()
@@ -392,9 +407,13 @@ func (s *Server) bindTrackerIssues(in *GoalsInputs) {
 	if err != nil {
 		return
 	}
+	bindTrackerIssueSnapshot(in, s.cfg.Repo, issues)
+}
+
+func bindTrackerIssueSnapshot(in *GoalsInputs, repo string, issues []tracker.Issue) {
 	in.IssueStates = make(map[string]string, len(issues))
 	for _, iss := range issues {
-		ref := tracker.IssueRef(s.cfg.Repo, iss.Number)
+		ref := tracker.IssueRef(repo, iss.Number)
 		state := strings.ToLower(strings.TrimSpace(iss.State))
 		switch state {
 		case "open", "closed":
@@ -456,7 +475,10 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGoals(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.loadGoals())
+	started := time.Now()
+	goals := s.loadGoals()
+	w.Header().Set("Server-Timing", serverTiming("goals-load", time.Since(started)))
+	writeJSON(w, goals)
 }
 
 // pageData is the (static) data the index template needs — no fleet data, just
@@ -495,6 +517,10 @@ func (s *Server) hostAllow(next http.Handler) http.Handler {
 
 func writeJSON(w http.ResponseWriter, v any) {
 	writeJSONStatus(w, http.StatusOK, v)
+}
+
+func serverTiming(name string, elapsed time.Duration) string {
+	return fmt.Sprintf("%s;dur=%.1f", name, float64(elapsed)/float64(time.Millisecond))
 }
 
 // writeJSONStatus writes v as JSON with an explicit status. The Content-Type is
