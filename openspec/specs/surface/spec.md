@@ -768,3 +768,41 @@ NOT be treated as a working marker. A pane capture error SHALL return
 #### Scenario: A capture glitch is Unknown
 - **WHEN** the pane capture fails transiently
 - **THEN** `Assess` returns `Unknown`, not `Idle`
+
+### Requirement: The pi driver implements RecycleBridge (portable-markdown)
+
+The `pi` driver SHALL implement the OPTIONAL `RecycleBridge` capability with the
+same harness-agnostic handoff convention as grok/codex:
+`<cwd>/.flotilla/handoffs/recycle-<token>.md` (NOT the claude-branded
+`.claude/handoffs/`). Handoff and takeover turns SHALL use the shared
+portable-markdown wording (`PortableMarkdownHandoffTurn` /
+`PortableMarkdownTakeoverTurn`) so durability is filesystem-based (#218), never
+git commit. The driver's existing `ComposerStateProbe` SHALL be retained so
+switch/recycle idle∧cleared gates work. `Close` SHALL continue to return
+`ErrNoGracefulClose` until `/quit` is independently live-characterized under
+recycle's remain-on-exit gate — recycle/switch tolerate this via the
+handoff-gated respawn-kill. In-session context reset remains `/new` via
+`Rotate` (SlashCommand); recycle takeover is a post-relaunch portable-markdown
+turn, not a bare `/new` injection.
+
+An upstream that rejects every cooperative turn (e.g. OpenCode Go Console HTTP
+400 on all turns) can still prevent handoff delivery even with RecycleBridge
+present; recovery for that uncooperative case is tracked separately as #729
+(resume must honor active-harness slot). RecycleBridge removes the capability
+refusal only — it is not a substitute for #729.
+
+#### Scenario: pi is recycle-capable as FROM and TO
+- **WHEN** a switch evaluates capability for `surface: "pi"` as the FROM side or the TO side (paired with another recycle-capable surface, or both sides pi)
+- **THEN** the command does NOT refuse for lack of RecycleBridge or ComposerStateProbe
+
+#### Scenario: The pi recycle bridge uses a harness-agnostic handoff path
+- **WHEN** the pi `RecycleBridge` computes a handoff path for a desk's cwd and a recycle token
+- **THEN** the path is `<cwd>/.flotilla/handoffs/recycle-<token>.md`, both turns name that exact path, forbid git commit of the handoff, and neither turn references a harness-specific `/handoff` or `/takeover` skill
+
+#### Scenario: Pi in-session rotate stays /new
+- **WHEN** the pi driver's context is rotated (not a full recycle)
+- **THEN** its strategy is `SlashCommand` and `/new` is injected; the recycle `TakeoverTurn` remains portable-markdown prose for a relaunched session
+
+#### Scenario: Pi Close stays honest without live /quit characterization
+- **WHEN** `Close` is invoked on the pi driver without a live-verified remain-on-exit `/quit` path
+- **THEN** it returns `ErrNoGracefulClose` (handoff-gated kill fallback), and does not invent a graceful close from documentation alone

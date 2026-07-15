@@ -1,6 +1,7 @@
 package surface
 
 import (
+	"path/filepath"
 	"strings"
 
 	"github.com/jim80net/flotilla/internal/deliver"
@@ -77,11 +78,44 @@ func (p pi) Rotate(pane string) error { return p.inject(pane, "/new") }
 
 func (pi) RotateStrategy() Strategy { return SlashCommand }
 
-// Close returns ErrNoGracefulClose for this minimal slice. Pi documents /quit
+// Close returns ErrNoGracefulClose for this slice. Pi documents /quit
 // (interactive-mode.js text === "/quit"), but the clean exit path is not yet
 // live-verified under recycle's remain-on-exit gate. Honest refusal → handoff-
-// gated kill fallback (same posture as opencode/grok until verified).
+// gated kill fallback (same posture as grok/codex until independently
+// live-characterized). Do NOT invent a /quit Close from docs alone.
 func (pi) Close(pane string) error { return ErrNoGracefulClose }
+
+// --- RecycleBridge (#728): portable-markdown context preservation (parity with grok/codex) ---
+//
+// HandoffPath is the harness-agnostic convention under .flotilla/handoffs/ (NOT
+// the claude-branded .claude/handoffs/). Shared PortableMarkdown turns keep
+// wording identical across grok/codex/pi so recycle/switch fail closed on the
+// same durability contract (#218).
+//
+// Upstream all-turn rejection (e.g. OpenCode Go Console HTTP 400 on every turn)
+// still prevents cooperative handoff delivery — RecycleBridge makes capability
+// refusal go away, but an uncooperative FROM session needs #729
+// (resume-honors-active-harness) as the recovery path. Do not treat this bridge
+// as a substitute for that defect.
+
+// HandoffPath embeds the recycle token under <cwd>/.flotilla/handoffs/.
+func (pi) HandoffPath(cwd, token string) string {
+	return filepath.Join(cwd, ".flotilla", "handoffs", "recycle-"+token+".md")
+}
+
+// HandoffTurn is the NON-INTERACTIVE portable-markdown handoff instruction.
+// Pi has no /handoff skill; the turn writes an untracked gitignored file.
+func (pi) HandoffTurn(designatedPath string) string {
+	return PortableMarkdownHandoffTurn(designatedPath)
+}
+
+// TakeoverTurn is the IMPERATIVE portable-markdown takeover for a freshly
+// relaunched Pi session (read → delete → begin work). In-session context reset
+// remains /new via Rotate — that is the takeover context boundary for Pi, not
+// a skill invocation.
+func (pi) TakeoverTurn(designatedPath string) string {
+	return PortableMarkdownTakeoverTurn(designatedPath)
+}
 
 // ComposerState positively identifies Pi 0.73.1's focused, one-row editor
 // between the two live-captured U+2500 horizontal rules. The strict adjacency
