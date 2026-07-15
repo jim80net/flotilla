@@ -2178,7 +2178,7 @@ func TestIssuesWorkLedger405(t *testing.T) {
 		"workLedgerURL", `/api/work-ledger`, "renderDesk", "doc.flotillas",
 		"flotilla.desks", "issue-desk-head", "issue-ledger-kicker",
 		"shipped.slice(0, 10)", "issue-shipped-more", "show all ", "when-open", "older shipped",
-		"issue-scope-note", "not shown", "marked in flight under a goal",
+		"issue-scope-note", "Other open issues are omitted.", "renderMobileDesk", "data-issue-more",
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("tracker.js must render the #405 fleet work ledger (missing %q)", marker)
@@ -2263,6 +2263,31 @@ func TestMobileWorkContextDensity725(t *testing.T) {
 		"max-height: 132px", "max-height: 40vh", "max-height: 104px", ".wc-seat-static { white-space: nowrap; max-width: 100%"} {
 		if !strings.Contains(css, marker) {
 			t.Errorf("dash.css must enforce the #725 viewport budgets (missing %q)", marker)
+		}
+	}
+}
+
+// TestMobileIssuesDensity725 pins the counted, lazy mobile ledger disclosures
+// and stable shipped-work windows without changing the desktop renderer.
+func TestMobileIssuesDensity725(t *testing.T) {
+	srv, _ := newTestServer(t, singleFleetRoster, time.Date(2026, 7, 15, 3, 0, 0, 0, time.UTC))
+	html := doGet(t, srv, "/").Body.String()
+	if !strings.Contains(html, `id="tracker-overflow"`) {
+		t.Error("index.html must host the #725 mobile tracker overflow")
+	}
+
+	trackerJS := doGet(t, srv, "/static/tracker.js").Body.String()
+	for _, marker := range []string{"shippedOpen", "shippedWindows", "renderMobileDesk", `slice(0, limit)`,
+		`data-issue-more`, `Math.min(20, remaining)`, `window.scrollBy`} {
+		if !strings.Contains(trackerJS, marker) {
+			t.Errorf("tracker.js must execute counted stable mobile ledger windows (missing %q)", marker)
+		}
+	}
+
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	for _, marker := range []string{".issue-shipped-group", ".issue-row.issue-row-in-flight", ".issue-window-more"} {
+		if !strings.Contains(css, marker) {
+			t.Errorf("dash.css must enforce the #725 mobile ledger budgets (missing %q)", marker)
 		}
 	}
 }
