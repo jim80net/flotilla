@@ -3,6 +3,7 @@ package dash
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -102,6 +103,31 @@ nodes:
 	}
 	if unassigned == nil || len(unassigned.Shipped) != 1 {
 		t.Fatalf("unassigned = %+v", unassigned)
+	}
+}
+
+func TestHandleWorkLedgerReusesOneTrackerSnapshotForGoals(t *testing.T) {
+	srv, _ := newTestServer(t, singleFleetRoster, time.Date(2026, 7, 15, 5, 0, 0, 0, time.UTC))
+	fake := &fakeTracker{issues: []tracker.Issue{{
+		Number: 1, Title: "moving", State: "OPEN", Body: "goal-id: ship",
+	}}}
+	srv.tracker = fake
+
+	rec := doGet(t, srv, "/api/work-ledger?state=all")
+	if rec.Code != 200 {
+		t.Fatalf("work-ledger status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	timing := rec.Header().Get("Server-Timing")
+	for _, stage := range []string{"github-list;dur=", "derive;dur=", "total;dur="} {
+		if !strings.Contains(timing, stage) {
+			t.Fatalf("Server-Timing = %q, want %q", timing, stage)
+		}
+	}
+	if fake.calls != 1 {
+		t.Fatalf("tracker List calls = %d, want one shared issue snapshot", fake.calls)
+	}
+	if fake.lastFilter.State != "all" || fake.lastFilter.Limit != 200 || !fake.lastFilter.IncludeBody {
+		t.Fatalf("work-ledger filter = %+v", fake.lastFilter)
 	}
 }
 
