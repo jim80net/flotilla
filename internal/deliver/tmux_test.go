@@ -349,3 +349,16 @@ func TestPaneCWDArgs(t *testing.T) {
 		}
 	}
 }
+
+func TestPanePIDArgs(t *testing.T) {
+	got := panePIDArgs("%42")
+	want := []string{"display-message", "-p", "-t", "%42", "#{pane_pid}"}
+	if len(got) != len(want) {
+		t.Fatalf("panePIDArgs = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("panePIDArgs = %v, want %v (differ at %d)", got, want, i)
+		}
+	}
+}

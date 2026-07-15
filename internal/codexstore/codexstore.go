@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -62,6 +63,9 @@ func LatestResult(codexHome, cwd string) (string, error) {
 // LatestResultForProcess binds the result to the rollout file held open by the
 // pane's Codex process tree. Cwd is validation only; it never selects among seats.
 func LatestResultForProcess(codexHome, cwd string, panePID int) (string, error) {
+	if runtime.GOOS != "linux" {
+		return "", fmt.Errorf("codex store: pane-bound rollout resolution requires Linux procfs")
+	}
 	path, err := resolveRolloutForProcess(codexHome, cwd, panePID, "/proc")
 	if err != nil {
 		return "", err
@@ -80,6 +84,9 @@ func ReplyAfter(codexHome, cwd, operatorMsg string) (text string, found bool, er
 
 // ReplyAfterForProcess is ReplyAfter scoped to the rollout held by one pane.
 func ReplyAfterForProcess(codexHome, cwd string, panePID int, operatorMsg string) (text string, found bool, err error) {
+	if runtime.GOOS != "linux" {
+		return "", false, fmt.Errorf("codex store: pane-bound rollout resolution requires Linux procfs")
+	}
 	path, err := resolveRolloutForProcess(codexHome, cwd, panePID, "/proc")
 	if err != nil {
 		return "", false, err
@@ -91,7 +98,10 @@ func resolveRolloutForProcess(codexHome, cwd string, panePID int, procRoot strin
 	if panePID <= 0 {
 		return "", fmt.Errorf("codex store: invalid pane pid %d", panePID)
 	}
-	sessionsRoot := filepath.Join(filepath.Clean(codexHome), "sessions")
+	sessionsRoot, err := filepath.EvalSymlinks(filepath.Join(filepath.Clean(codexHome), "sessions"))
+	if err != nil {
+		return "", fmt.Errorf("codex store: resolve sessions root: %w", err)
+	}
 	queue := []int{panePID}
 	seen := map[int]bool{}
 	paths := map[string]bool{}
@@ -103,10 +113,20 @@ func resolveRolloutForProcess(codexHome, cwd string, panePID int, procRoot strin
 		}
 		seen[pid] = true
 		fdDir := filepath.Join(procRoot, strconv.Itoa(pid), "fd")
-		fds, _ := os.ReadDir(fdDir)
+		fds, err := os.ReadDir(fdDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue // descendant exited during the snapshot
+			}
+			return "", fmt.Errorf("codex store: read process %d file descriptors: %w", pid, err)
+		}
 		for _, fd := range fds {
 			target, err := os.Readlink(filepath.Join(fdDir, fd.Name()))
-			if err != nil || !strings.HasSuffix(target, ".jsonl") || !strings.Contains(filepath.Base(target), "rollout-") {
+			if err != nil {
+				continue // descriptor closed during the snapshot
+			}
+			target, err = filepath.EvalSymlinks(target)
+			if err != nil || !strings.HasSuffix(target, ".jsonl") || !strings.HasPrefix(filepath.Base(target), "rollout-") {
 				continue
 			}
 			target = filepath.Clean(target)
@@ -116,13 +136,11 @@ func resolveRolloutForProcess(codexHome, cwd string, panePID int, procRoot strin
 			}
 			paths[target] = true
 		}
-		childrenRaw, _ := os.ReadFile(filepath.Join(procRoot, strconv.Itoa(pid), "task", strconv.Itoa(pid), "children"))
-		for _, field := range strings.Fields(string(childrenRaw)) {
-			child, err := strconv.Atoi(field)
-			if err == nil && child > 0 {
-				queue = append(queue, child)
-			}
+		children, err := processChildren(procRoot, pid)
+		if err != nil && !os.IsNotExist(err) {
+			return "", err
 		}
+		queue = append(queue, children...)
 	}
 	if len(paths) == 0 {
 		return "", fmt.Errorf("codex store: pane pid %d has no open rollout (session not ready or no longer running)", panePID)
@@ -141,6 +159,39 @@ func resolveRolloutForProcess(codexHome, cwd string, panePID int, procRoot strin
 		return "", fmt.Errorf("codex store: pane rollout cwd %q does not match pane cwd %q", metaCwd, cwd)
 	}
 	return path, nil
+}
+
+// processChildren unions task/*/children because Linux records children on the
+// thread that created them; reading only the main thread can miss a child forked
+// by another thread in a multi-threaded wrapper process.
+func processChildren(procRoot string, pid int) ([]int, error) {
+	taskRoot := filepath.Join(procRoot, strconv.Itoa(pid), "task")
+	tasks, err := os.ReadDir(taskRoot)
+	if err != nil {
+		return nil, fmt.Errorf("codex store: read process %d tasks: %w", pid, err)
+	}
+	seen := map[int]bool{}
+	var children []int
+	for _, task := range tasks {
+		if !task.IsDir() {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(taskRoot, task.Name(), "children"))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("codex store: read process %d task %s children: %w", pid, task.Name(), err)
+		}
+		for _, field := range strings.Fields(string(raw)) {
+			child, err := strconv.Atoi(field)
+			if err == nil && child > 0 && !seen[child] {
+				seen[child] = true
+				children = append(children, child)
+			}
+		}
+	}
+	return children, nil
 }
 
 func resolveRolloutPath(codexHome, cwd string) (string, error) {
