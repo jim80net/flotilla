@@ -628,7 +628,7 @@
       var vis = visToken(n), hue = limbStroke(n.id);
       var tone = hue ? "--outline-tone:" + hue + ";" : "";
       return '<button type="button" class="goutline-row ' + (cls || "") + '" data-outline-id="' + escapeHtml(n.id) +
-        '" role="treeitem" aria-level="' + (depthOf(n) + 1) + '" style="' + tone + '">' +
+        '" style="' + tone + '">' +
         '<span class="goutline-title">' + escapeHtml(n.title || n.id) + "</span>" +
         '<span class="goutline-scope">' + escapeHtml(scopeNoun(n)) + "</span>" +
         '<span class="goutline-state">' + escapeHtml(STATE_LABEL[vis] || vis) + "</span>" +
@@ -646,7 +646,7 @@
       return '<section class="goutline-desk" data-outline-desk="' + escapeHtml(desk.id) + '">' +
         '<div class="goutline-desk-row">' +
           '<button type="button" class="goutline-desk-open" data-outline-id="' + escapeHtml(desk.id) +
-            '" role="treeitem" aria-level="' + (depthOf(desk) + 1) + '">' +
+            '">' +
             '<span class="goutline-title">' + escapeHtml(desk.title || desk.id) + '</span><span class="goutline-state">' +
               escapeHtml(STATE_LABEL[vis] || vis) + "</span></button>" +
           (tasks.length ? '<button type="button" class="goutline-desk-toggle" data-outline-desk-toggle="' + escapeHtml(desk.id) +
@@ -674,7 +674,7 @@
       if (index === 0) {
         return '<section class="goutline-flotilla goutline-primary" data-outline-root="' + escapeHtml(root.id) + '">' +
           '<button type="button" class="goutline-flotilla-head" data-outline-id="' + escapeHtml(root.id) +
-            '" role="treeitem" aria-level="1">' +
+            '">' +
             '<span>' + escapeHtml(root.title || root.id) + '</span><span>' + desks.length + " desks · " + taskCount + " tasks · " + escapeHtml(rootState) + "</span></button>" +
           body + "</section>";
       }
@@ -695,15 +695,17 @@
         if (!!mobileFlotillaOpen[rootId] === open) return;
         var top = this.querySelector("summary").getBoundingClientRect().top;
         mobileFlotillaOpen[rootId] = open;
-        renderMobileOutline((cache && (cache.goals || cache.tree)) || []);
         requestAnimationFrame(function () {
-          var nextGroups = outline.querySelectorAll("[data-outline-flotilla]"), summary = null;
-          for (var j = 0; j < nextGroups.length; j++) {
-            if (nextGroups[j].getAttribute("data-outline-flotilla") === rootId) { summary = nextGroups[j].querySelector("summary"); break; }
-          }
-          if (!summary) return;
-          window.scrollBy(0, summary.getBoundingClientRect().top - top);
-          summary.focus();
+          renderMobileOutline((cache && (cache.goals || cache.tree)) || []);
+          requestAnimationFrame(function () {
+            var nextGroups = outline.querySelectorAll("[data-outline-flotilla]"), summary = null;
+            for (var j = 0; j < nextGroups.length; j++) {
+              if (nextGroups[j].getAttribute("data-outline-flotilla") === rootId) { summary = nextGroups[j].querySelector("summary"); break; }
+            }
+            if (!summary) return;
+            window.scrollBy(0, summary.getBoundingClientRect().top - top);
+            summary.focus();
+          });
         });
       });
     }
@@ -1872,15 +1874,17 @@
         var top = toggle.getBoundingClientRect().top;
         var open = !mobileDeskOpen[deskId];
         mobileDeskOpen[deskId] = open;
-        renderMobileOutline((cache && (cache.goals || cache.tree)) || []);
         requestAnimationFrame(function () {
-          var toggles = outline.querySelectorAll("[data-outline-desk-toggle]"), nextToggle = null;
-          for (var i = 0; i < toggles.length; i++) {
-            if (toggles[i].getAttribute("data-outline-desk-toggle") === deskId) { nextToggle = toggles[i]; break; }
-          }
-          if (!nextToggle) return;
-          window.scrollBy(0, nextToggle.getBoundingClientRect().top - top);
-          nextToggle.focus();
+          renderMobileOutline((cache && (cache.goals || cache.tree)) || []);
+          requestAnimationFrame(function () {
+            var toggles = outline.querySelectorAll("[data-outline-desk-toggle]"), nextToggle = null;
+            for (var i = 0; i < toggles.length; i++) {
+              if (toggles[i].getAttribute("data-outline-desk-toggle") === deskId) { nextToggle = toggles[i]; break; }
+            }
+            if (!nextToggle) return;
+            window.scrollBy(0, nextToggle.getBoundingClientRect().top - top);
+            nextToggle.focus();
+          });
         });
         return;
       }
@@ -1892,22 +1896,24 @@
         var previous = kind === "desks" ? (mobileDeskWindows[owner] || 6) : (mobileTaskWindows[owner] || 8);
         if (kind === "desks") mobileDeskWindows[owner] = previous + 20;
         else mobileTaskWindows[owner] = previous + 20;
-        renderMobileOutline((cache && (cache.goals || cache.tree)) || []);
         requestAnimationFrame(function () {
-          var containers = outline.querySelectorAll(kind === "desks" ? "[data-outline-root]" : "[data-outline-desk]");
-          var container = null;
-          for (var i = 0; i < containers.length; i++) {
-            var id = containers[i].getAttribute(kind === "desks" ? "data-outline-root" : "data-outline-desk");
-            if (id === owner) { container = containers[i]; break; }
-          }
-          if (!container) return;
-          var rows = container.querySelectorAll(kind === "desks" ? ".goutline-desk" : ".goutline-task");
-          var nextRow = rows[Math.min(previous, rows.length - 1)];
-          var anchor = (nextRow && (nextRow.querySelector("[data-outline-id]") || nextRow)) ||
-            container.querySelector("summary, [data-outline-id]");
-          if (!anchor) return;
-          window.scrollBy(0, anchor.getBoundingClientRect().top - top);
-          anchor.focus();
+          renderMobileOutline((cache && (cache.goals || cache.tree)) || []);
+          requestAnimationFrame(function () {
+            var containers = outline.querySelectorAll(kind === "desks" ? "[data-outline-root]" : "[data-outline-desk]");
+            var container = null;
+            for (var i = 0; i < containers.length; i++) {
+              var id = containers[i].getAttribute(kind === "desks" ? "data-outline-root" : "data-outline-desk");
+              if (id === owner) { container = containers[i]; break; }
+            }
+            if (!container) return;
+            var rows = container.querySelectorAll(kind === "desks" ? ".goutline-desk" : ".goutline-task");
+            var nextRow = rows[Math.min(previous, rows.length - 1)];
+            var anchor = (nextRow && (nextRow.querySelector("[data-outline-id]") || nextRow)) ||
+              container.querySelector("summary, [data-outline-id]");
+            if (!anchor) return;
+            window.scrollBy(0, anchor.getBoundingClientRect().top - top);
+            anchor.focus();
+          });
         });
         return;
       }
