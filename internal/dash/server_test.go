@@ -2260,7 +2260,7 @@ func TestMobileWorkContextDensity725(t *testing.T) {
 
 	css := doGet(t, srv, "/static/dash.css").Body.String()
 	for _, marker := range []string{".wc-message-clamped:not(.is-expanded)", "-webkit-line-clamp: 8", ".wc-live-contract.is-idle",
-		"max-height: 132px", "max-height: 40vh", "max-height: 104px"} {
+		"max-height: 132px", "max-height: 40vh", "max-height: 104px", ".wc-seat-static { white-space: nowrap; max-width: 100%"} {
 		if !strings.Contains(css, marker) {
 			t.Errorf("dash.css must enforce the #725 viewport budgets (missing %q)", marker)
 		}
