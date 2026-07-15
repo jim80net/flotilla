@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex,nofollow" />
+  <script>try{performance.mark("dash-start")}catch(e){}</script>
   <title>flotilla dash — {{.XO}}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -12,7 +13,7 @@
 </head>
 <!-- data-xo: the fleet coordinator — the decision-response fallback target when a goal
      names no owning desk (#501). -->
-<body data-goals-layout="{{.GoalsLayout}}" data-xo="{{.XO}}">
+<body data-goals-layout="{{.GoalsLayout}}" data-xo="{{.XO}}" data-build-revision="{{.BuildRevision}}">
   <div class="bg-grid" aria-hidden="true"></div>
   <div class="bg-grain" aria-hidden="true"></div>
 
@@ -324,8 +325,17 @@
 
   <footer class="foot">
     <span class="muted">Conversations &amp; Goals are read-only · Issues write to GitHub · Control uses confirmed delivery</span>
+    <details class="perf-diagnostics">
+      <summary>Startup diagnostics</summary>
+      <span id="perf-status" class="muted">No local startup sample yet</span>
+      <span class="perf-actions">
+        <button id="perf-copy" type="button" class="btn">Copy JSON</button>
+        <button id="perf-save" type="button" class="btn">Save JSON file</button>
+      </span>
+    </details>
   </footer>
 
+  <script src="/static/perf.js"></script>
   <script src="/static/dash.js"></script>
   <script src="/static/goals.js"></script>
   <script src="/static/work-context.js"></script>

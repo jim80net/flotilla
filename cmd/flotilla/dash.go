@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -103,6 +104,7 @@ func cmdDash(args []string) error {
 		Repo:                  pinnedRepo,
 		SecretsPath:           *secretsPath,
 		GoalsLayout:           *goalsLayout,
+		BuildRevision:         dashBuildRevision(),
 		DisableAuthentication: dashEnvTruthy("DISABLE_AUTHENTICATION"),
 		AllowedOrigins:        dashEnvList("FLOTILLA_DASH_ALLOWED_ORIGINS"),
 		Transport:             tr,
@@ -116,6 +118,29 @@ func cmdDash(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return srv.Run(ctx)
+}
+
+// dashBuildRevision reads Go's stamped VCS metadata. A dirty or unstamped build
+// cannot truthfully identify the source that produced it, so the page receives
+// the explicit unavailable sentinel rather than an inferred revision.
+func dashBuildRevision() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unavailable"
+	}
+	revision, modified := "", false
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			revision = setting.Value
+		case "vcs.modified":
+			modified = setting.Value == "true"
+		}
+	}
+	if revision == "" || modified {
+		return "unavailable"
+	}
+	return revision
 }
 
 // resolveTrackerRepo returns the pinned tracker repo. An explicit --repo is used

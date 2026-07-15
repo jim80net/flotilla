@@ -41,6 +41,7 @@ type Config struct {
 	Repo             string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
 	SecretsPath      string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
 	GoalsLayout      string // always normalized to "mindmap" — the Goals map is mind-map-only (tree/org retired; toggle removed 2026-07-06)
+	BuildRevision    string // real VCS build revision injected by cmd/flotilla; invalid or absent = "unavailable"
 
 	// DisableAuthentication turns off the browser write gates (X-Flotilla-Dash header +
 	// Origin allowlist) on state-changing routes. Operator-only insecure mode until the
@@ -106,6 +107,7 @@ func NewServer(cfg Config) (*Server, error) {
 	if cfg.Bind == "" {
 		cfg.Bind = DefaultBind
 	}
+	cfg.BuildRevision = normalizeBuildRevision(cfg.BuildRevision)
 	if err := validateBind(cfg.Bind); err != nil {
 		return nil, err
 	}
@@ -458,7 +460,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	// report reproduced to NO code fault; the assets carried no Cache-Control).
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	data := pageData{Bind: s.cfg.Bind, XO: s.xo, GoalsLayout: s.cfg.GoalsLayout}
+	data := pageData{Bind: s.cfg.Bind, XO: s.xo, GoalsLayout: s.cfg.GoalsLayout, BuildRevision: s.cfg.BuildRevision}
 	if err := s.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
 		http.Error(w, "template error", http.StatusInternalServerError)
 	}
@@ -486,9 +488,22 @@ func (s *Server) handleGoals(w http.ResponseWriter, r *http.Request) {
 // pageData is the (static) data the index template needs — no fleet data, just
 // chrome the page shows before its JS fetches the live JSON.
 type pageData struct {
-	Bind        string
-	XO          string
-	GoalsLayout string // always "mindmap" — the Goals map is mind-map-only (see normalizeGoalsLayout)
+	Bind          string
+	XO            string
+	GoalsLayout   string // always "mindmap" — the Goals map is mind-map-only (see normalizeGoalsLayout)
+	BuildRevision string // validated VCS revision or the honest "unavailable" sentinel
+}
+
+func normalizeBuildRevision(value string) string {
+	if len(value) < 7 || len(value) > 64 {
+		return "unavailable"
+	}
+	for _, r := range value {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return "unavailable"
+		}
+	}
+	return value
 }
 
 // normalizeGoalsLayout resolves the Goals-map layout. The operator directed (2026-07-06) that
