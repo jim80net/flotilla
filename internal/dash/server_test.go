@@ -1961,7 +1961,7 @@ func TestGoalsMobileOutline672(t *testing.T) {
 			t.Errorf("goals.js must render and activate the mobile hierarchy outline (missing %q) — #672", marker)
 		}
 	}
-	for _, marker := range []string{".goals-mobile-outline", ".goutline-row", ".goutline-title", "--outline-depth"} {
+	for _, marker := range []string{".goals-mobile-outline", ".goutline-row", ".goutline-title", ".goutline-state", ".goutline-desk-toggle"} {
 		if !strings.Contains(css, marker) {
 			t.Errorf("dash.css must keep mobile outline labels readable (missing %q) — #672", marker)
 		}
@@ -2178,7 +2178,7 @@ func TestIssuesWorkLedger405(t *testing.T) {
 		"workLedgerURL", `/api/work-ledger`, "renderDesk", "doc.flotillas",
 		"flotilla.desks", "issue-desk-head", "issue-ledger-kicker",
 		"shipped.slice(0, 10)", "issue-shipped-more", "show all ", "when-open", "older shipped",
-		"issue-scope-note", "not shown", "marked in flight under a goal",
+		"issue-scope-note", "Other open issues are omitted.", "renderMobileDesk", "data-issue-more",
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("tracker.js must render the #405 fleet work ledger (missing %q)", marker)
@@ -2242,6 +2242,27 @@ func TestIssuesWorkContext716(t *testing.T) {
 	for _, marker := range []string{".issues-workspace.has-context", ".work-context", ".wc-stream", "100dvh", "font-size: 16px"} {
 		if !strings.Contains(css, marker) {
 			t.Errorf("dash.css must style the #716 desktop panel and mobile sheet (missing %q)", marker)
+		}
+	}
+}
+
+// TestMobileWorkContextDensity725 pins the frozen 390px sheet contract: the
+// shared Work Context owns freshness, message clamping, and its sole scroll region.
+func TestMobileWorkContextDensity725(t *testing.T) {
+	srv, _ := newTestServer(t, singleFleetRoster, time.Date(2026, 7, 15, 3, 0, 0, 0, time.UTC))
+	workJS := doGet(t, srv, "/static/work-context.js").Body.String()
+	for _, marker := range []string{"streamVisible = 20", "expandedBodies", "decorateMessageBodies", "lines <= 8",
+		`seconds >= 300`, `◐ stream idle`, `humanAge`, `streamViewport()`} {
+		if !strings.Contains(workJS, marker) {
+			t.Errorf("work-context.js must execute the shared #725 sheet contract (missing %q)", marker)
+		}
+	}
+
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	for _, marker := range []string{".wc-message-clamped:not(.is-expanded)", "-webkit-line-clamp: 8", ".wc-live-contract.is-idle",
+		"max-height: 132px", "max-height: 40vh", "max-height: 104px"} {
+		if !strings.Contains(css, marker) {
+			t.Errorf("dash.css must enforce the #725 viewport budgets (missing %q)", marker)
 		}
 	}
 }
