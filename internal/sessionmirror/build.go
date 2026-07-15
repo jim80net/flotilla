@@ -41,7 +41,10 @@ func ensureRecordIDs(entries []Record) {
 		}
 		encoded, err := json.Marshal(entries[i])
 		if err != nil {
-			continue
+			// Record is deliberately composed only of concrete JSON-native fields.
+			// If that schema invariant changes, fail loudly rather than returning an
+			// entry without the stable identity promised by HistoryDoc.
+			panic(fmt.Sprintf("sessionmirror: marshal legacy record identity: %v", err))
 		}
 		digest := sha256.Sum256(encoded)
 		ordinal := seen[digest]
