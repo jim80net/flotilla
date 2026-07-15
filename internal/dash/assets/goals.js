@@ -39,6 +39,11 @@
   var hoveredId = null;  // node currently hovered (re-applied after a render)
   var nodesWired = false;
   var kbdNav = false;    // true when focus is moving by keyboard (Tab) — gates focus-recenter
+  var mobileFlotillaOpen = {};
+  var mobileDeskOpen = {};
+  var mobileDeskWindows = {};
+  var mobileTaskWindows = {};
+  var mobileSummaryNarrow = null;
   // #405 Inc 3 Items 5+6 ────────────────────────────────────────────────────────
   // Item 5: stat-cell click-to-highlight. activeCellTone is the tone of the
   // currently-active filter ("goal" | "inflight" | "pending" | "aspirational" |
@@ -91,6 +96,7 @@
 
   function q(id) { return document.getElementById(id); }
   function isVisible() { var v = q("view-goals"); return v && !v.classList.contains("hidden"); }
+  function isNarrowGoals() { return !!(window.matchMedia && window.matchMedia("(max-width: 640px)").matches); }
 
   // visToken maps the ratified status_display onto a CSS state token (identical
   // to the merged view's mapping so the card styling is unchanged).
@@ -338,6 +344,10 @@
         "</div>";
     }).join("");
 
+    var compact = q("goals-mobile-summary-count");
+    if (compact) compact.textContent = (c.total || 0) + " goals · " + (c.in_flight || 0) +
+      " in flight · " + decisions + " awaiting";
+
     renderPrimaryGoal(doc);
     // #429: the awaiting-count badge lives on the Decisions TAB (the reading room is a
     // first-class view, not a header-button modal). #451: it shows the SAME decisions
@@ -575,42 +585,130 @@
       "</article>";
   }
 
-  // #672: a whole radial DAG cannot keep readable labels when fitted into a 390px
-  // viewport. Render a flat, indented outline from the same parent links for narrow
-  // screens; CSS swaps it for the visual canvas. Rows retain the map's primary action
-  // by opening the existing detail drawer, so this is an exploration surface rather
-  // than a second summary. The local depth walk is cycle-safe for partial/bad data.
+  // #725: phones keep the same hierarchy and Work Context action, but disclose it in
+  // counted windows. The first/root flotilla stays open; secondary flotillas and a
+  // desk's task descendants are local one-tap disclosures. Nothing is discarded and
+  // desktop keeps the two-sided map.
   function renderMobileOutline(goals) {
     var outline = q("goals-mobile-outline");
     if (!outline) return;
-    var byId = {}, kids = {}, roots = [], ordered = [], seen = {};
+    var byId = {}, kids = {}, roots = [];
     goals.forEach(function (n) { byId[n.id] = n; kids[n.id] = []; });
     goals.forEach(function (n) {
       if (n.parent && byId[n.parent] && n.parent !== n.id) kids[n.parent].push(n);
       else roots.push(n);
     });
-    function append(n, depth) {
-      if (seen[n.id]) return;
-      seen[n.id] = true;
-      ordered.push({ node: n, depth: depth });
-      sequenceOrder(kids[n.id] || []).forEach(function (child) { append(child, depth + 1); });
+    var reachable = {};
+    function markReachable(n) {
+      if (reachable[n.id]) return;
+      reachable[n.id] = true;
+      (kids[n.id] || []).forEach(markReachable);
     }
-    sequenceOrder(roots).forEach(function (n) { append(n, 0); });
-    // A parent cycle has no root. The server rejects those, but append every remaining
-    // node defensively so a partial response never makes a goal silently disappear.
-    goals.forEach(function (n) { append(n, 0); });
-    outline.innerHTML = ordered.map(function (entry) {
-      var n = entry.node;
+    roots.forEach(markReachable);
+    // Defensive parity with the former flat outline: malformed parent cycles are
+    // server-rejected, but a partial response must still not make a goal vanish.
+    goals.forEach(function (n) { if (!reachable[n.id]) { roots.push(n); markReachable(n); } });
+    roots = sequenceOrder(roots);
+
+    function descendants(n) {
+      var out = [], seen = {};
+      function append(parent) {
+        sequenceOrder(kids[parent.id] || []).forEach(function (child) {
+          if (seen[child.id]) return;
+          seen[child.id] = true;
+          out.push(child);
+          append(child);
+        });
+      }
+      append(n);
+      return out;
+    }
+
+    function row(n, cls) {
       var vis = visToken(n), hue = limbStroke(n.id);
       var tone = hue ? "--outline-tone:" + hue + ";" : "";
-      return '<button type="button" class="goutline-row" data-outline-id="' + escapeHtml(n.id) +
-        '" role="treeitem" aria-level="' + (entry.depth + 1) + '" style="--outline-depth:' +
-        entry.depth + ";" + tone + '">' +
+      return '<button type="button" class="goutline-row ' + (cls || "") + '" data-outline-id="' + escapeHtml(n.id) +
+        '" style="' + tone + '">' +
         '<span class="goutline-title">' + escapeHtml(n.title || n.id) + "</span>" +
         '<span class="goutline-scope">' + escapeHtml(scopeNoun(n)) + "</span>" +
         '<span class="goutline-state">' + escapeHtml(STATE_LABEL[vis] || vis) + "</span>" +
         "</button>";
-    }).join("");
+    }
+
+    function deskBlock(desk) {
+      var tasks = descendants(desk);
+      var open = !!mobileDeskOpen[desk.id];
+      var limit = Math.max(8, mobileTaskWindows[desk.id] || 8);
+      var shown = tasks.slice(0, limit);
+      var remaining = Math.max(0, tasks.length - shown.length);
+      var next = Math.min(20, remaining);
+      var vis = visToken(desk);
+      return '<section class="goutline-desk" data-outline-desk="' + escapeHtml(desk.id) + '">' +
+        '<div class="goutline-desk-row">' +
+          '<button type="button" class="goutline-desk-open" data-outline-id="' + escapeHtml(desk.id) +
+            '">' +
+            '<span class="goutline-title">' + escapeHtml(desk.title || desk.id) + '</span><span class="goutline-state">' +
+              escapeHtml(STATE_LABEL[vis] || vis) + "</span></button>" +
+          (tasks.length ? '<button type="button" class="goutline-desk-toggle" data-outline-desk-toggle="' + escapeHtml(desk.id) +
+            '" data-task-count="' + tasks.length + '" aria-expanded="' + open + '" aria-label="' + (open ? "Collapse " : "Expand ") + escapeHtml(desk.title || desk.id) +
+            ' tasks">' + tasks.length + " tasks " + (open ? "▾" : "▸") + "</button>" : "") +
+        "</div>" +
+        (tasks.length && open ? '<div class="goutline-tasks">' +
+          shown.map(function (task) { return row(task, "goutline-task"); }).join("") +
+          (remaining ? '<button type="button" class="goutline-more" data-goal-more="tasks" data-goal-more-id="' + escapeHtml(desk.id) +
+            '">show ' + next + " more of " + remaining + " ▸</button>" : "") + "</div>" : "") +
+        "</section>";
+    }
+
+    function flotillaBlock(root, index) {
+      var desks = sequenceOrder(kids[root.id] || []);
+      var limit = Math.max(6, mobileDeskWindows[root.id] || 6);
+      var shown = desks.slice(0, limit);
+      var remaining = Math.max(0, desks.length - shown.length);
+      var next = Math.min(20, remaining);
+      var taskCount = desks.reduce(function (sum, desk) { return sum + descendants(desk).length; }, 0);
+      var rootVis = visToken(root), rootState = STATE_LABEL[rootVis] || rootVis;
+      var body = shown.map(deskBlock).join("") +
+        (remaining ? '<button type="button" class="goutline-more" data-goal-more="desks" data-goal-more-id="' + escapeHtml(root.id) +
+          '">show ' + next + " more of " + remaining + " desks ▸</button>" : "");
+      if (index === 0) {
+        return '<section class="goutline-flotilla goutline-primary" data-outline-root="' + escapeHtml(root.id) + '">' +
+          '<button type="button" class="goutline-flotilla-head" data-outline-id="' + escapeHtml(root.id) +
+            '">' +
+            '<span>' + escapeHtml(root.title || root.id) + '</span><span>' + desks.length + " desks · " + taskCount + " tasks · " + escapeHtml(rootState) + "</span></button>" +
+          body + "</section>";
+      }
+      return '<details class="goutline-flotilla goutline-secondary" data-outline-root="' + escapeHtml(root.id) +
+        '" data-outline-flotilla="' + escapeHtml(root.id) + '"' +
+        (mobileFlotillaOpen[root.id] ? " open" : "") + "><summary>" +
+          '<span>' + escapeHtml(root.title || root.id) + '</span><span>' + desks.length + " desks · " + taskCount + " tasks · " + escapeHtml(rootState) +
+            (mobileFlotillaOpen[root.id] ? " — collapse" : " — expand") + "</span></summary>" +
+        (mobileFlotillaOpen[root.id] ? '<div class="goutline-secondary-body">' + row(root, "goutline-root-row") + body + "</div>" : "") +
+        "</details>";
+    }
+
+    outline.innerHTML = roots.map(flotillaBlock).join("");
+    var groups = outline.querySelectorAll("[data-outline-flotilla]");
+    for (var i = 0; i < groups.length; i++) {
+      groups[i].addEventListener("toggle", function () {
+        var rootId = this.getAttribute("data-outline-flotilla"), open = this.open;
+        if (!!mobileFlotillaOpen[rootId] === open) return;
+        var top = this.querySelector("summary").getBoundingClientRect().top;
+        mobileFlotillaOpen[rootId] = open;
+        requestAnimationFrame(function () {
+          renderMobileOutline((cache && (cache.goals || cache.tree)) || []);
+          requestAnimationFrame(function () {
+            var nextGroups = outline.querySelectorAll("[data-outline-flotilla]"), summary = null;
+            for (var j = 0; j < nextGroups.length; j++) {
+              if (nextGroups[j].getAttribute("data-outline-flotilla") === rootId) { summary = nextGroups[j].querySelector("summary"); break; }
+            }
+            if (!summary) return;
+            window.scrollBy(0, summary.getBoundingClientRect().top - top);
+            summary.focus();
+          });
+        });
+      });
+    }
   }
 
   /* ── layout: absolute tiered, bottom-up y-centering (ported) ───────────── */
@@ -1770,6 +1868,55 @@
     nodesWired = true;
     var outline = q("goals-mobile-outline");
     if (outline) outline.addEventListener("click", function (e) {
+      var toggle = e.target.closest("[data-outline-desk-toggle]");
+      if (toggle) {
+        var deskId = toggle.getAttribute("data-outline-desk-toggle");
+        var top = toggle.getBoundingClientRect().top;
+        var open = !mobileDeskOpen[deskId];
+        mobileDeskOpen[deskId] = open;
+        requestAnimationFrame(function () {
+          renderMobileOutline((cache && (cache.goals || cache.tree)) || []);
+          requestAnimationFrame(function () {
+            var toggles = outline.querySelectorAll("[data-outline-desk-toggle]"), nextToggle = null;
+            for (var i = 0; i < toggles.length; i++) {
+              if (toggles[i].getAttribute("data-outline-desk-toggle") === deskId) { nextToggle = toggles[i]; break; }
+            }
+            if (!nextToggle) return;
+            window.scrollBy(0, nextToggle.getBoundingClientRect().top - top);
+            nextToggle.focus();
+          });
+        });
+        return;
+      }
+      var more = e.target.closest("[data-goal-more]");
+      if (more) {
+        var kind = more.getAttribute("data-goal-more");
+        var owner = more.getAttribute("data-goal-more-id");
+        var top = more.getBoundingClientRect().top;
+        var previous = kind === "desks" ? (mobileDeskWindows[owner] || 6) : (mobileTaskWindows[owner] || 8);
+        if (kind === "desks") mobileDeskWindows[owner] = previous + 20;
+        else mobileTaskWindows[owner] = previous + 20;
+        requestAnimationFrame(function () {
+          renderMobileOutline((cache && (cache.goals || cache.tree)) || []);
+          requestAnimationFrame(function () {
+            var containers = outline.querySelectorAll(kind === "desks" ? "[data-outline-root]" : "[data-outline-desk]");
+            var container = null;
+            for (var i = 0; i < containers.length; i++) {
+              var id = containers[i].getAttribute(kind === "desks" ? "data-outline-root" : "data-outline-desk");
+              if (id === owner) { container = containers[i]; break; }
+            }
+            if (!container) return;
+            var rows = container.querySelectorAll(kind === "desks" ? ".goutline-desk" : ".goutline-task");
+            var nextRow = rows[Math.min(previous, rows.length - 1)];
+            var anchor = (nextRow && (nextRow.querySelector("[data-outline-id]") || nextRow)) ||
+              container.querySelector("summary, [data-outline-id]");
+            if (!anchor) return;
+            window.scrollBy(0, anchor.getBoundingClientRect().top - top);
+            anchor.focus();
+          });
+        });
+        return;
+      }
       var row = e.target.closest("[data-outline-id]");
       if (row) nodeActivate(row.getAttribute("data-outline-id"), row);
     });
@@ -2261,12 +2408,21 @@
     if (cache) { render(); } else { refresh(); }
   }
 
+  function syncGoalsMobileSummary() {
+    var narrow = isNarrowGoals();
+    if (narrow === mobileSummaryNarrow) return;
+    mobileSummaryNarrow = narrow;
+    var summary = q("goals-mobile-summary");
+    if (summary) summary.open = !narrow;
+  }
+
   // Re-fit on resize (keeps the map framed); the transform is otherwise the
   // operator's to drive via pan/zoom. Mode-aware, matching the first-layout branch:
   // the tree top-anchors (fit), the org graph frames centered (fitOverview) — a
   // resize on the default org view must NOT jump it to tree framing (cubic #327 P2).
   var resizeTimer = null;
   window.addEventListener("resize", function () {
+    syncGoalsMobileSummary();
     if (!isVisible()) return;
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(function () {
@@ -2274,6 +2430,7 @@
       applyTransform();
     }, 120);
   });
+  syncGoalsMobileSummary();
 
   // #429: a decision card's "Drives" link jumps into the Goals map and opens that goal's
   // drawer. Wired ONCE at load (the list container is static chrome in index.html) — the

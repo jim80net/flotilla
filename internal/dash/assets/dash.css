@@ -1330,6 +1330,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 /* situation strip */
 .goals-situation { display: flex; gap: 10px; flex-wrap: wrap; }
 .goals-primary { display: none; }
+.goals-mobile-summary { display: contents; }
+.goals-mobile-summary > summary { display: none; }
 .gtile {
   --tone: var(--cyan);
   flex: 1 1 150px; min-width: 130px; padding: 10px 14px;
@@ -2124,7 +2126,7 @@ html, body { overflow-x: clip; }
      header participates in normal flow so it can never cover KPI values while
      the page scrolls (#639). */
   .bar { position: relative; }
-  .goals-wrap { padding: 10px 12px 24px; gap: 8px; }
+  .goals-wrap { padding: 8px 10px 20px; gap: 6px; }
   /* compact situation tiles: drop the sub-copy, shrink the numbers */
   .gtile { flex: 1 1 44%; min-width: 44%; padding: 6px 10px; }
   .gtile-v { font-size: 1.25rem; }
@@ -2146,34 +2148,71 @@ html, body { overflow-x: clip; }
   /* panel head: the long "read-only · goal structure…" line is desktop context;
      hide it on a phone so the map climbs into the first viewport. */
   .goals-panel > .panel-head .panel-desc { display: none; }
-  .goals-panel > .panel-head { padding: .55rem .75rem; gap: .5rem; }
+  .goals-panel { display: contents; }
+  .goals-panel > .panel-head {
+    order: 1;
+    position: sticky; top: 0; z-index: 18; min-height: 48px; max-height: 48px;
+    padding: 7px 9px; gap: .35rem; background: var(--surface); border-bottom: 1px solid var(--line);
+  }
+  .goals-panel > .panel-head h2 { font-size: .88rem; white-space: nowrap; }
+  .goals-panel > .panel-head .goals-sub { display: none; }
+  .goals-head-right, .ghelp-wrap { display: none; }
   .goals-legend { gap: 8px; }
   .glegend { font-size: .62rem; }
-  .goals-graph { margin-top: 6px; }
+  .goals-mobile-summary { order: 2; display: block; border: 1px solid var(--line); border-radius: var(--r-sm); }
+  .goals-mobile-summary > summary {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    min-height: 38px; max-height: 38px; padding: 5px 9px; list-style: none; cursor: pointer;
+    color: var(--ink); font: .7rem var(--display);
+  }
+  .goals-mobile-summary > summary::-webkit-details-marker { display: none; }
+  .goals-mobile-summary > summary::before { content: "▸"; color: var(--cyan); }
+  .goals-mobile-summary[open] > summary::before { content: "▾"; }
+  .goals-mobile-summary-count { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font: .58rem var(--mono); }
+  .goals-mobile-summary .goals-situation, .goals-mobile-summary .goals-primary, .goals-mobile-summary .grealized-slider { margin: 6px 8px; }
+  .goals-graph { order: 3; margin-top: 0; }
+  .goals-done { order: 4; }
   /* #672: fitting a whole radial DAG into 390px makes every node label too small.
      Phones get the same hierarchy as a readable outline; tapping a row opens the
      existing goal drawer. Keep the map mounted but visually removed so its two-pass
      measurement remains valid if the viewport later widens without a data refresh. */
   .goals-mobile-outline {
-    display: grid; gap: 6px; padding: 8px;
-    border: 1px solid var(--line); border-radius: var(--r);
-    background: var(--surface);
+    display: grid; gap: 6px; padding: 6px; background: var(--surface);
   }
   .goutline-row {
-    --outline-depth: 0;
-    width: calc(100% - min(calc(var(--outline-depth) * 14px), 56px));
-    margin-left: min(calc(var(--outline-depth) * 14px), 56px);
-    min-height: 48px; padding: 8px 10px;
-    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 8px;
+    width: 100%; min-height: 34px; max-height: 34px; padding: 4px 7px;
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 8px; align-items: center;
     text-align: left; font: inherit; color: var(--ink);
     border: 1px solid var(--line); border-left: 3px solid var(--outline-tone, var(--cyan));
     border-radius: var(--r-sm); background: var(--abyss-2); cursor: pointer;
   }
   .goutline-row:hover { border-color: var(--cyan-dim); }
   .goutline-row:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
-  .goutline-title { min-width: 0; font-family: var(--display); font-size: .9rem; line-height: 1.3; overflow-wrap: anywhere; }
-  .goutline-scope { grid-column: 1; font-size: .58rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
-  .goutline-state { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-size: .58rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
+  .goutline-title { min-width: 0; font-family: var(--display); font-size: .72rem; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .goutline-scope { display: none; }
+  .goutline-state { grid-column: 2; align-self: center; font-size: .54rem; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-2); white-space: nowrap; }
+  .goutline-flotilla { border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; }
+  .goutline-flotilla-head, .goutline-secondary > summary {
+    width: 100%; min-height: 34px; max-height: 38px; padding: 4px 7px; border: 0; background: var(--abyss-3);
+    display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--ink); font: .68rem var(--display); cursor: pointer;
+  }
+  .goutline-flotilla-head span:last-child, .goutline-secondary > summary span:last-child { color: var(--ink-3); font: .56rem var(--mono); white-space: nowrap; }
+  .goutline-secondary > summary { min-height: 38px; list-style: none; }
+  .goutline-secondary > summary::-webkit-details-marker { display: none; }
+  .goutline-secondary > summary::before { content: "▸"; color: var(--cyan); }
+  .goutline-secondary[open] > summary::before { content: "▾"; }
+  .goutline-secondary-body, .goutline-primary { display: grid; gap: 4px; }
+  .goutline-secondary-body { padding: 4px; }
+  .goutline-desk { border-top: 1px solid var(--line-soft); }
+  .goutline-desk-row { min-height: 34px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; }
+  .goutline-desk-open, .goutline-desk-toggle {
+    min-width: 0; border: 0; background: var(--abyss-2); color: var(--ink); font: .68rem var(--mono); cursor: pointer;
+  }
+  .goutline-desk-open { padding: 4px 7px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; text-align: left; align-items: center; }
+  .goutline-desk-toggle { padding: 4px 7px; border-left: 1px solid var(--line); color: var(--cyan); white-space: nowrap; font-size: .58rem; }
+  .goutline-tasks { display: grid; gap: 3px; padding: 3px 3px 3px 14px; background: var(--abyss-2); }
+  .goutline-tasks[hidden] { display: none; }
+  .goutline-task { border-left-width: 2px; }
   .goals-viewport {
     display: none;
   }
