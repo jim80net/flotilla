@@ -37,6 +37,16 @@ func layerOperatorProtected(
 	return watch.OperatorProtectedForLayer(layerProtectedWindowDeps(cfg, rosterDir, relayQueuePath, inj, leader, now))
 }
 
+func layerOperatorReplyProtected(
+	cfg *roster.Config,
+	rosterDir, relayQueuePath string,
+	inj *watch.Injector,
+	leader string,
+	now time.Time,
+) bool {
+	return watch.OperatorReplyProtectedForLayer(layerProtectedWindowDeps(cfg, rosterDir, relayQueuePath, inj, leader, now))
+}
+
 func relayLayerLeader(cfg *roster.Config, deliveredAgent string) (leader string, ok bool) {
 	if cfg.IsCoordinator(deliveredAgent) {
 		return deliveredAgent, true
