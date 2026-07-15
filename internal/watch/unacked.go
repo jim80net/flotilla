@@ -36,6 +36,7 @@ type CoordinatorWake = SendFunc
 // no fleet acknowledgment and surfaces a digest (issue #234).
 type UnackedBackstop struct {
 	cfg          *roster.Config
+	current      func() *roster.Config
 	reader       RecentHistoryReader
 	alert        func(string)
 	wake         CoordinatorWake
@@ -52,18 +53,24 @@ type UnackedBackstop struct {
 // the wake target (cos_agent, else primary XO). wake may be nil when no injection
 // is wired (alert-only mode).
 func NewUnackedBackstop(cfg *roster.Config, reader RecentHistoryReader, statePath, ackRoot string, alert func(string), wake CoordinatorWake, coordinator func(*roster.Config) string) *UnackedBackstop {
+	return NewUnackedBackstopDynamic(func() *roster.Config { return cfg }, reader, statePath, ackRoot, alert, wake, coordinator)
+}
+
+func NewUnackedBackstopDynamic(cfg func() *roster.Config, reader RecentHistoryReader, statePath, ackRoot string, alert func(string), wake CoordinatorWake, coordinator func(*roster.Config) string) *UnackedBackstop {
 	if coordinator == nil {
 		coordinator = defaultCoordinator
 	}
+	initial := cfg()
 	return &UnackedBackstop{
-		cfg:          cfg,
+		cfg:          initial,
+		current:      cfg,
 		reader:       reader,
 		alert:        alert,
 		wake:         wake,
 		coordinator:  coordinator,
 		store:        newUnackedStateStore(statePath, defaultUnackedRetention),
 		ackRoot:      ackRoot,
-		scanCfg:      unacked.DefaultConfig(cfg.OperatorUserID),
+		scanCfg:      unacked.DefaultConfig(initial.OperatorUserID),
 		lookback:     unacked.DefaultLookback,
 		pollInterval: unacked.DefaultScanInterval,
 		now:          time.Now,
@@ -97,14 +104,15 @@ func (u *UnackedBackstop) Run(ctx context.Context) {
 }
 
 func (u *UnackedBackstop) sweep() {
+	cfg := u.config()
 	now := u.now()
 	if err := PruneOperatorAckMarkers(u.ackRoot, now.Add(-defaultUnackedRetention)); err != nil {
 		log.Printf("flotilla watch: operator ack marker prune failed: %v", err)
 	}
 	st, pruned := u.store.load(now)
 	changed := pruned
-	for _, b := range u.cfg.Bindings() {
-		if c := u.sweepChannel(b, &st, now); c {
+	for _, b := range cfg.Bindings() {
+		if c := u.sweepChannelWithConfig(cfg, b, &st, now); c {
 			changed = true
 		}
 	}
@@ -116,7 +124,18 @@ func (u *UnackedBackstop) sweep() {
 }
 
 func (u *UnackedBackstop) sweepChannel(b roster.Channel, st *unackedState, now time.Time) bool {
-	if u.reader == nil || u.cfg.OperatorUserID == "" {
+	return u.sweepChannelWithConfig(u.config(), b, st, now)
+}
+
+func (u *UnackedBackstop) config() *roster.Config {
+	if u.current != nil {
+		return u.current()
+	}
+	return u.cfg
+}
+
+func (u *UnackedBackstop) sweepChannelWithConfig(cfg *roster.Config, b roster.Channel, st *unackedState, now time.Time) bool {
+	if u.reader == nil || cfg.OperatorUserID == "" {
 		return false
 	}
 	ack := u.scanCfg.AckWindow
@@ -134,7 +153,9 @@ func (u *UnackedBackstop) sweepChannel(b roster.Channel, st *unackedState, now t
 		msgs[i] = unacked.FromTransport(m)
 		msgs[i].MechanicallyAcked = OperatorMessageAcknowledged(u.ackRoot, b.ChannelID, m.ID)
 	}
-	findings := unacked.Scan(msgs, b.ChannelID, now, u.scanCfg)
+	scanCfg := u.scanCfg
+	scanCfg.OperatorUserID = cfg.OperatorUserID
+	findings := unacked.Scan(msgs, b.ChannelID, now, scanCfg)
 	if len(findings) == 0 {
 		return false
 	}
@@ -154,16 +175,16 @@ func (u *UnackedBackstop) sweepChannel(b roster.Channel, st *unackedState, now t
 			idx = len(st.Records) - 1
 		}
 		if u.wake != nil && !st.Records[idx].WakeDone {
-			if err := u.tryCoordinatorWake(b, f); err != nil {
+			if err := u.tryCoordinatorWake(cfg, b, f); err != nil {
 				if errors.Is(err, surface.ErrBusy) {
-					log.Printf("flotilla watch: unacked coordinator wake skipped for %s (busy mid-turn) — will retry next sweep; channel alert is the backstop", u.coordinator(u.cfg))
+					log.Printf("flotilla watch: unacked coordinator wake skipped for %s (busy mid-turn) — will retry next sweep; channel alert is the backstop", u.coordinator(cfg))
 				} else {
-					log.Printf("flotilla watch: unacked coordinator wake failed for %s: %v", u.coordinator(u.cfg), err)
+					log.Printf("flotilla watch: unacked coordinator wake failed for %s: %v", u.coordinator(cfg), err)
 				}
 			} else {
 				st.Records[idx].WakeDone = true
 				changed = true
-				log.Printf("flotilla watch: unacked coordinator wake delivered to %q", u.coordinator(u.cfg))
+				log.Printf("flotilla watch: unacked coordinator wake delivered to %q", u.coordinator(cfg))
 			}
 		}
 	}
@@ -173,8 +194,8 @@ func (u *UnackedBackstop) sweepChannel(b roster.Channel, st *unackedState, now t
 	return changed
 }
 
-func (u *UnackedBackstop) tryCoordinatorWake(b roster.Channel, f unacked.Finding) error {
-	agent := u.coordinator(u.cfg)
+func (u *UnackedBackstop) tryCoordinatorWake(cfg *roster.Config, b roster.Channel, f unacked.Finding) error {
+	agent := u.coordinator(cfg)
 	if agent == "" {
 		return fmt.Errorf("no coordinator agent configured")
 	}
