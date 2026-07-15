@@ -127,6 +127,12 @@ func (a *Arbitrator) Evaluate(req InjectRequest, ctx Context) Result {
 	}
 
 	posture, postureKnown := a.resolvePosture(req.Target, ctx)
+	// An inbound operator relay may itself contain the authority answer. Treat an
+	// authority wait as available for this kind only; real compose/protected-window
+	// evidence below still buffers, and every non-operator inject keeps raw policy.
+	if req.Kind == KindRelay && posture == PostureAwaitingAuthority {
+		posture = PostureAvailable
+	}
 	protected := ctx.ProtectedWindow
 	if a != nil && a.ProtectedWindow != nil && !protected {
 		protected = a.ProtectedWindow(req.Target)

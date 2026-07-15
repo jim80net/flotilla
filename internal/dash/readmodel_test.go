@@ -81,10 +81,13 @@ func TestBuildBoard_LoopPosture(t *testing.T) {
 			"data":     {Pane: surface.StateIdle, InSnapshot: true, SnapshotFresh: true, BacklogKnown: true, AwaitingAuthN: 1},
 		},
 	})
-	want := map[string]string{"xo": "parked", "backend": "available", "frontend": "drifted", "data": "awaiting-authority"}
+	want := map[string]string{"xo": "parked", "backend": "available", "frontend": "drifted", "data": "available"}
 	for _, a := range doc.Agents {
 		if a.LoopPosture != want[a.Name] {
 			t.Errorf("%s loop_posture = %q, want %q", a.Name, a.LoopPosture, want[a.Name])
+		}
+		if a.Name == "data" && a.RawLoopPosture != "awaiting-authority" {
+			t.Errorf("data raw_loop_posture = %q, want awaiting-authority evidence", a.RawLoopPosture)
 		}
 	}
 	raw, _ := json.Marshal(doc)

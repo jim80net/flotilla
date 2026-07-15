@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/jim80net/flotilla/internal/loopposture"
 )
 
 // Headers that mean the body already carries a fleet-status block (idempotent skip).
@@ -24,10 +26,11 @@ type Doc struct {
 
 // Agent is one seat row from status --json.
 type Agent struct {
-	Name        string `json:"name"`
-	Role        string `json:"role,omitempty"`
-	State       string `json:"state"`
-	LoopPosture string `json:"loop_posture,omitempty"`
+	Name           string `json:"name"`
+	Role           string `json:"role,omitempty"`
+	State          string `json:"state"`
+	LoopPosture    string `json:"loop_posture,omitempty"`
+	RawLoopPosture string `json:"raw_loop_posture,omitempty"`
 }
 
 // ParseDoc unmarshals status --json bytes into Doc.
@@ -92,7 +95,7 @@ func CompressBlock(doc Doc, opt CompressOptions) string {
 			continue
 		}
 		n++
-		cat := classifyState(a.State, a.LoopPosture)
+		cat := classifyState(a.State, a.LoopPosture, a.RawLoopPosture)
 		hist[cat]++
 		switch cat {
 		case "working":
@@ -141,14 +144,25 @@ func CompressBlock(doc Doc, opt CompressOptions) string {
 }
 
 // histOrder is stable histogram key order for the summary line.
-var histOrder = []string{"working", "blocked", "awaiting", "idle", "crashed", "errored", "unknown", "other"}
+var histOrder = []string{"working", "available", "blocked", "awaiting", "idle", "crashed", "errored", "unknown", "other"}
 
 // classifyState maps pane state + loop_posture to a coarse operator bucket.
-func classifyState(state, loopPosture string) string {
+func classifyState(state, loopPosture, rawLoopPosture string) string {
 	s := strings.ToLower(strings.TrimSpace(state))
-	lp := strings.ToLower(strings.TrimSpace(loopPosture))
-	// Loop posture can reclassify idle/working seats into blocked-ish authority waits.
-	if lp == "awaiting-authority" || lp == "awaiting_authority" {
+	raw := strings.ToLower(strings.TrimSpace(rawLoopPosture))
+	if raw == "" {
+		raw = strings.ToLower(strings.TrimSpace(loopPosture))
+	}
+	if raw == "awaiting_authority" {
+		raw = string(loopposture.PostureAwaitingAuthority)
+	}
+	lp := loopposture.OperatorDisplay(loopposture.Posture(raw))
+	if raw == string(loopposture.PostureAwaitingAuthority) && lp == loopposture.PostureAvailable {
+		return "available"
+	}
+	// A real blocked posture stays strong even when the pane happens to be idle.
+	// Awaiting-authority normalizes to available and therefore does not enter here.
+	if lp == loopposture.PostureBlocked {
 		return "blocked"
 	}
 	switch s {

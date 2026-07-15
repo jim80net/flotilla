@@ -234,7 +234,7 @@ func TestBuildStatusJSON_LoopPostureV10(t *testing.T) {
 	}
 	doc := buildStatusJSON(cfg, "xo", "2026-07-09T00:00:00Z", snap, loop)
 	want := map[string]string{
-		"xo": "parked", "backend": "available", "frontend": "drifted", "data": "awaiting-authority",
+		"xo": "parked", "backend": "available", "frontend": "drifted", "data": "available",
 	}
 	for _, a := range doc.Agents {
 		if a.LoopPosture != want[a.Name] {
@@ -243,6 +243,24 @@ func TestBuildStatusJSON_LoopPostureV10(t *testing.T) {
 		if a.State != "idle" {
 			t.Errorf("%s pane state = %q, want idle (two-layer model)", a.Name, a.State)
 		}
+		if a.Name == "data" && a.RawLoopPosture != "awaiting-authority" {
+			t.Errorf("data raw_loop_posture = %q, want awaiting-authority evidence", a.RawLoopPosture)
+		}
+	}
+	var text bytes.Buffer
+	writeStatus(&text, cfg, "xo", "missing-snapshot", "missing-ack", snap, false, time.Now(), loop)
+	foundData := false
+	for _, line := range strings.Split(text.String(), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && fields[0] == "data" {
+			foundData = true
+			if len(fields) < 3 || fields[2] != "available" || strings.Contains(line, "awaiting-authority") {
+				t.Fatalf("CLI data row must show authority wait as available, got %q", line)
+			}
+		}
+	}
+	if !foundData {
+		t.Fatalf("CLI status missing data row:\n%s", text.String())
 	}
 }
 

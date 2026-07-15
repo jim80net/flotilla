@@ -97,12 +97,13 @@ func (f Freshness) String() string {
 // the `flotilla status --json` contract (the landing widget, site/app.js,
 // consumes exactly these fields). #524 adds loop_posture beside pane state.
 type AgentItem struct {
-	Name        string                  `json:"name"`
-	Role        string                  `json:"role,omitempty"`         // "hub" for the XO, else omitted
-	Surface     string                  `json:"surface,omitempty"`      // effective surface driver
-	State       string                  `json:"state"`                  // pane / surface.State label
-	LoopPosture string                  `json:"loop_posture,omitempty"` // #524 fleet loop vocabulary
-	Usage       *watch.UsageObservation `json:"usage,omitempty"`
+	Name           string                  `json:"name"`
+	Role           string                  `json:"role,omitempty"`             // "hub" for the XO, else omitted
+	Surface        string                  `json:"surface,omitempty"`          // effective surface driver
+	State          string                  `json:"state"`                      // pane / surface.State label
+	LoopPosture    string                  `json:"loop_posture,omitempty"`     // operator-facing #524 vocabulary
+	RawLoopPosture string                  `json:"raw_loop_posture,omitempty"` // retained when display normalization differs
+	Usage          *watch.UsageObservation `json:"usage,omitempty"`
 }
 
 // FreshnessInfo is the board's freshness banner (the superset's addition over the
@@ -188,11 +189,16 @@ func BuildBoard(in BoardInputs) BoardDoc {
 		doc.Cos = in.Cfg.CosAgent
 	}
 	for _, a := range in.Cfg.Agents {
+		rawPosture := boardLoopPosture(a.Name, in, snapFresh)
+		displayPosture := loopposture.OperatorDisplay(rawPosture)
 		item := AgentItem{
 			Name:        a.Name,
 			Surface:     effectiveSurface(a.Surface),
 			State:       deskStateLabel(in.Snap, a.Name),
-			LoopPosture: string(boardLoopPosture(a.Name, in, snapFresh)),
+			LoopPosture: string(displayPosture),
+		}
+		if rawPosture != displayPosture {
+			item.RawLoopPosture = string(rawPosture)
 		}
 		if usage, ok := in.Snap.Usage[a.Name]; ok {
 			item.Usage = &usage

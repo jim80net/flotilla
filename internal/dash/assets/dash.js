@@ -94,6 +94,10 @@
     return "state-" + escapeHtml(String(state || "unknown"));
   }
 
+  function operatorVisualState(state, posture) {
+    return posture === "blocked" ? "blocked" : state;
+  }
+
   function usageText(usage) {
     if (!usage || !Number.isFinite(Number(usage.remaining_percent))) return "";
     var text = String(usage.remaining_percent) + "% " + String(usage.window || "usage");
@@ -410,6 +414,7 @@
         var state = String(a.state || "unknown");
         // #524: show loop_posture beside pane state so officers see parked vs drifted.
         var posture = String(a.loop_posture || "");
+        var visualState = operatorVisualState(state, posture);
         var stateLabel = posture ? (state + " · " + posture) : state;
         var usage = usageText(a.usage);
         if (usage) stateLabel += " · " + usage;
@@ -423,10 +428,10 @@
         return (
           '<button type="button" class="conv-item' + (on ? " selected" : "") + (stale ? " desk-stale" : "") + '" ' +
             'data-desk="' + escapeHtml(d.name) + '" data-channel="' + escapeHtml(rowChannel) + '" role="listitem" aria-pressed="' + String(on) + '">' +
-            '<span class="conv-rail ' + deskStateClass(state) + '" aria-hidden="true"></span>' +
+            '<span class="conv-rail ' + deskStateClass(visualState) + '" aria-hidden="true"></span>' +
             '<span class="conv-item-body">' +
               '<span class="conv-item-name">' + escapeHtml(d.name) + roleTag + "</span>" +
-              '<span class="conv-item-state ' + deskStateClass(state) + '" title="pane state · loop posture">' + escapeHtml(stateLabel) + "</span>" +
+              '<span class="conv-item-state ' + deskStateClass(visualState) + '" title="pane state · loop posture">' + escapeHtml(stateLabel) + "</span>" +
             "</span>" +
           "</button>"
         );
@@ -506,6 +511,7 @@
     var state = String(a.state || "unknown");
     // #524: loop_posture is distinct from pane state (idle ≠ parked).
     var posture = String(a.loop_posture || "");
+    var visualState = operatorVisualState(state, posture);
     var usageValue = usageText(a.usage);
     var usage = usageValue
       ? '<span class="desk-usage" title="provider usage remaining">' + escapeHtml(usageValue) + '</span>'
@@ -513,11 +519,11 @@
     var stale = fresh.state === "stale";
     card.innerHTML =
       '<article class="desk conv-desk-mini' + (stale ? " desk-stale" : "") + '">' +
-        '<div class="desk-rail ' + deskStateClass(state) + '" aria-hidden="true"></div>' +
+        '<div class="desk-rail ' + deskStateClass(visualState) + '" aria-hidden="true"></div>' +
         '<div class="desk-body">' +
           '<header class="desk-head">' +
             '<span class="desk-name">' + escapeHtml(selectedDesk) + "</span>" +
-            '<span class="desk-state ' + deskStateClass(state) + '">' + escapeHtml(state) + "</span>" +
+            '<span class="desk-state ' + deskStateClass(visualState) + '">' + escapeHtml(state) + "</span>" +
             (posture ? ('<span class="desk-loop-posture" title="loop posture">' + escapeHtml(posture) + "</span>") : "") +
           "</header>" +
           '<span class="desk-surface">' + escapeHtml(a.surface || "—") + "</span>" +

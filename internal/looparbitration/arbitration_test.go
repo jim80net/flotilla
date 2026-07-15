@@ -72,6 +72,25 @@ func TestEvaluateNonUrgentRelayBuffersDuringGoalActive(t *testing.T) {
 	}
 }
 
+func TestEvaluateOperatorRelayInjectibleWhileAwaitingAuthority(t *testing.T) {
+	a := arb(&FakeObserver{Postures: map[string]Posture{"xo": PostureAwaitingAuthority}})
+	req := InjectRequest{Target: "xo", Kind: KindRelay, Source: "operator-relay"}
+	ctx := Context{Coordinator: "xo", SafeSeam: true}
+	r := a.Evaluate(req, ctx)
+	if r.Decision != AllowNow || r.Route != RouteLeader {
+		t.Fatalf("operator answer at awaiting-authority should inject at safe seam, got %+v", r)
+	}
+}
+
+func TestEvaluateAwaitingAuthorityStillProtectsNonOperatorInject(t *testing.T) {
+	a := arb(&FakeObserver{Postures: map[string]Posture{"xo": PostureAwaitingAuthority}})
+	req := InjectRequest{Target: "xo", Kind: KindMaterialChange, Source: "detector"}
+	r := a.Evaluate(req, Context{Coordinator: "xo", SafeSeam: true})
+	if r.Decision != Buffer {
+		t.Fatalf("non-operator inject should retain raw awaiting-authority policy, got %+v", r)
+	}
+}
+
 func TestEvaluateObserverSupersedesTimedTick(t *testing.T) {
 	a := arb(&FakeObserver{Postures: map[string]Posture{"xo": PostureGoalActive}})
 	req := InjectRequest{Target: "xo", Kind: KindEvaluationTick, Source: "detector"}

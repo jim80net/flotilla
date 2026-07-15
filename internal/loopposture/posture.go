@@ -29,6 +29,17 @@ const (
 	PostureGoalActive Posture = "goal-active"
 )
 
+// OperatorDisplay maps internal coordination evidence onto the posture label an
+// operator should act on. An authority wait is available to the operator: their
+// next message may be the missing decision. Keep the raw posture separately when
+// evidence/audit consumers need to distinguish that case.
+func OperatorDisplay(p Posture) Posture {
+	if p == PostureAwaitingAuthority {
+		return PostureAvailable
+	}
+	return p
+}
+
 // Out-of-loop postures.
 const (
 	PostureDrifted Posture = "drifted"

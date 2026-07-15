@@ -14,7 +14,8 @@ const fixtureJSON = `{
     {"name": "backend", "state": "working", "loop_posture": "available"},
     {"name": "frontend", "state": "awaiting-approval", "loop_posture": "available"},
     {"name": "data", "state": "working", "loop_posture": "available"},
-    {"name": "infra", "state": "idle", "loop_posture": "awaiting-authority"},
+    {"name": "infra", "state": "idle", "loop_posture": "available", "raw_loop_posture": "awaiting-authority"},
+    {"name": "ops", "state": "idle", "loop_posture": "blocked"},
     {"name": "research", "state": "crashed", "loop_posture": "available"}
   ]
 }`
@@ -31,13 +32,14 @@ func TestCompressBlock_FromFixtureJSON(t *testing.T) {
 	}
 	for _, want := range []string{
 		"as of 2026-06-17T17:26:31Z",
-		"5 seats", // 7 agents minus xo + xo-adj
+		"6 seats", // 8 agents minus xo + xo-adj
 		"working:2",
 		"awaiting:1",
-		"blocked:1", // infra via loop_posture awaiting-authority
+		"available:1", // awaiting-authority is operator-facing available, not blocked
+		"blocked:1",   // real blocked posture remains strong
 		"crashed:1",
 		"working: backend, data",
-		"blocked: infra",
+		"blocked: ops",
 		"awaiting: frontend",
 	} {
 		if !strings.Contains(got, want) {
@@ -103,7 +105,8 @@ func TestAppendFleetStatus_IdempotentAndFailClosed(t *testing.T) {
 func TestClassifyState(t *testing.T) {
 	cases := []struct{ state, lp, want string }{
 		{"working", "available", "working"},
-		{"idle", "awaiting-authority", "blocked"},
+		{"idle", "awaiting-authority", "available"},
+		{"idle", "blocked", "blocked"},
 		{"awaiting-input", "", "awaiting"},
 		{"awaiting-approval", "available", "awaiting"},
 		{"crashed", "", "crashed"},
@@ -111,7 +114,7 @@ func TestClassifyState(t *testing.T) {
 		{"", "", "unknown"},
 	}
 	for _, c := range cases {
-		if got := classifyState(c.state, c.lp); got != c.want {
+		if got := classifyState(c.state, c.lp, ""); got != c.want {
 			t.Errorf("classify(%q,%q)=%q want %q", c.state, c.lp, got, c.want)
 		}
 	}
