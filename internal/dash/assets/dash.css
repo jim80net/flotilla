@@ -804,11 +804,7 @@ code {
 .chan-head { display: flex; gap: .45rem; align-items: baseline; flex-wrap: wrap; }
 .chan-xo { color: var(--cyan); font-weight: 500; font-size: .82rem; }
 .chan-id { color: var(--ink-3); font-size: .72rem; }
-/* F#383: the pinned coordinator group reads first-class — a labelled header (not a bare
-   "#") in the coordinator accent, so the CoS thread is unmistakable at the top of the rail. */
-.chan-coordinator { color: var(--cyan); font-family: var(--display); letter-spacing: .08em; text-transform: uppercase; font-size: .62rem; }
-.conv-group-coordinator .conv-group-head { border-bottom: 1px solid color-mix(in srgb, var(--cyan) 25%, transparent); }
-/* #405 Inc 4b: Fleet Command group header — labels the XO layer first-class so the rail
+/* #405 Inc 4b + #745: Fleet Command labels the deduped coordinator tier first-class so the rail
    reads as Command / per-flotilla structure, not a flat channel list. Symmetric with
    the coordinator accent but uses a distinct teal tint so it stands apart. */
 .chan-fleet-command { color: var(--cyan); font-family: var(--display); letter-spacing: .1em; text-transform: uppercase; font-size: .62rem; font-weight: 600; }

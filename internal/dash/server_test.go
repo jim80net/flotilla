@@ -454,9 +454,9 @@ func TestModalDesktopSpaceWave4(t *testing.T) {
 }
 
 // TestConversationsCoordinatorPinWave4 locks F#383 criterion 1's rail half: the
-// conversations rail pins the coordinator(s) as a first-class group even when neither is a
-// channel xo_agent/member — so the CoS thread is always followable (the "I can't even see
-// the CoS's conversation" gap). The identity half (BoardDoc.cos) is covered in readmodel_test.
+// conversations rail includes coordinator(s) in Fleet Command even when neither is a channel
+// xo_agent/member — so the CoS thread is always followable (the "I can't even see the CoS's
+// conversation" gap). The identity half (BoardDoc.cos) is covered in readmodel_test.
 // Residual close-out: first paint prefers status.cos when distinct, and the empty
 // coordinator thread uses coordinator framing (not "desk").
 func TestConversationsCoordinatorPinWave4(t *testing.T) {
@@ -464,10 +464,11 @@ func TestConversationsCoordinatorPinWave4(t *testing.T) {
 	srv, _ := newTestServer(t, singleFleetRoster, now)
 	js := doGet(t, srv, "/static/dash.js").Body.String()
 	for _, marker := range []string{
-		"coordinatorNames",       // derives the coordinators (xo + distinct cos) from /api/status
-		"conv-group-coordinator", // the pinned first-class group
-		"st.cos",                 // reads the CoS identity the board now exposes
-		"status.cos",             // ensureSelection prefers distinct CoS on first paint
+		"coordinatorNames",     // derives the coordinators (xo + distinct cos) from /api/status
+		"coordList.push(name)", // status coordinators augment topology before Fleet Command renders
+		"Fleet Command",        // the first-class coordinator tier
+		"st.cos",               // reads the CoS identity the board now exposes
+		"status.cos",           // ensureSelection prefers distinct CoS on first paint
 		"No coordination history for this coordinator yet", // honest empty-state for CoS thread
 	} {
 		if !strings.Contains(js, marker) {
@@ -475,8 +476,8 @@ func TestConversationsCoordinatorPinWave4(t *testing.T) {
 		}
 	}
 	css := doGet(t, srv, "/static/dash.css").Body.String()
-	if !strings.Contains(css, ".chan-coordinator") {
-		t.Error("dash.css must style the pinned coordinator group label (.chan-coordinator) — F#383")
+	if !strings.Contains(css, ".chan-fleet-command") {
+		t.Error("dash.css must style the Fleet Command group label (.chan-fleet-command) — F#383/#745")
 	}
 }
 
@@ -1372,9 +1373,8 @@ func TestConversationsFormatting(t *testing.T) {
 //   - Part A (item 2a): the work queue renders each item as a structured row
 //     (bq-row grid: state-chip column + text column), not a text blob. Timestamps
 //     are NOT rendered (the backlog data carries none).
-//   - Part B (item 4): buildRailGroups regroups the rail into Fleet Command (XOs)
-//   - per-flotilla groups with the CoS filtered from every project channel. The
-//     coordinator-pin logic is preserved so the CoS thread stays reachable.
+//   - Part B (item 4, extended by #745): buildRailGroups renders one Fleet Command
+//     coordinator tier and one human-labelled group per flotilla, with each seat once.
 func TestRailRegroupAndQueueFormat405(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 	srv, _ := newTestServer(t, singleFleetRoster, now)
@@ -1396,22 +1396,33 @@ func TestRailRegroupAndQueueFormat405(t *testing.T) {
 		t.Error("backlogItem must not render timestamps — backlog items carry no per-item timestamp (#405 Inc 4b item 2a)")
 	}
 
-	// Part B — rail regroup (fleet-command + per-flotilla, CoS filtered).
+	// Part B — org-first rail regroup (fleet-command + deduped per-flotilla groups).
 	for _, marker := range []string{
-		"cosKeys",          // filters coordinator names from per-flotilla member lists
-		"fleetCmdChannels", // fleet-command channel separation
-		"projectChannels",  // project/flotilla channel separation
-		"Fleet Command",    // label string for the Fleet Command group
-		"fleet-command",    // role string used in the regroup + CSS class
+		"orgNodes",           // consumes server-compiled org truth
+		"nearestCoordinator", // assigns a seat to its nearest flotilla owner
+		"seatSeen",           // global identity dedupe, not per-channel dedupe
+		"flotillaLabel",      // human group label, never a snowflake header
+		"Fleet Command",      // label string for the Fleet Command group
+		"fleet-command",      // role string used in the regroup + CSS class
 	} {
 		if !strings.Contains(js, marker) {
-			t.Errorf("dash.js buildRailGroups must implement the fleet-command regroup (missing %q) — #405 Inc 4b item 4", marker)
+			t.Errorf("dash.js buildRailGroups must implement the deduped org map (missing %q) — #405/#745", marker)
 		}
 	}
-	// The coordinator-pin logic must remain (CoS must still be reachable even if not
-	// in any channel — the "coordinator" group is the fallback).
-	if !strings.Contains(js, "conv-group-coordinator") {
-		t.Error("buildRailGroups must retain the coordinator-pin group (conv-group-coordinator) — F#383 criterion 1")
+	for _, marker := range []string{`roleInName`, `roleKey !== "member"`, `· `} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js must separate or suppress redundant role badges (missing %q) — #745", marker)
+		}
+	}
+	if strings.Contains(js, `'<span class="chan-id">#' + escapeHtml(grp.channel_id)`) {
+		t.Error("fleet map must not expose channel snowflakes as group headers — #745")
+	}
+	if !strings.Contains(js, `"Coordination in " + context`) {
+		t.Error("selected conversation header must retain the map's human org context — #745")
+	}
+	html := doGet(t, srv, "/").Body.String()
+	if !strings.Contains(html, "organization → desk threads") {
+		t.Error("fleet map description must describe the org map, not a channel dump — #745")
 	}
 	// Fleet Command group must get a distinct CSS class separate from coordinator.
 	if !strings.Contains(js, "conv-group-fleet-command") {
