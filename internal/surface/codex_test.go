@@ -428,10 +428,11 @@ func TestCodexLatestResult(t *testing.T) {
 	t.Run("resolves cwd then reads the store", func(t *testing.T) {
 		c := codex{
 			paneCWD:   func(string) (string, error) { return "/srv/fleet/backend", nil },
+			panePID:   func(string) (int, error) { return 4242, nil },
 			codexHome: "/home/you/.codex",
-			latestResult: func(home, cwd string) (string, error) {
-				if home != "/home/you/.codex" || cwd != "/srv/fleet/backend" {
-					t.Errorf("latestResult got (home=%q, cwd=%q)", home, cwd)
+			latestResult: func(home, cwd string, pid int) (string, error) {
+				if home != "/home/you/.codex" || cwd != "/srv/fleet/backend" || pid != 4242 {
+					t.Errorf("latestResult got (home=%q, cwd=%q, pid=%d)", home, cwd, pid)
 				}
 				return "the full latest codex result", nil
 			},
@@ -446,7 +447,7 @@ func TestCodexLatestResult(t *testing.T) {
 		c := codex{
 			paneCWD:      func(string) (string, error) { return "/cwd", nil },
 			codexHome:    "",
-			latestResult: func(string, string) (string, error) { called = true; return "", nil },
+			latestResult: func(string, string, int) (string, error) { called = true; return "", nil },
 		}
 		if _, err := c.LatestResult("p"); err == nil {
 			t.Error("want error when codexHome is empty")
@@ -455,4 +456,22 @@ func TestCodexLatestResult(t *testing.T) {
 			t.Error("store must not be consulted when codexHome is empty")
 		}
 	})
+}
+
+func TestCodexReplyAfterBindsPaneProcess(t *testing.T) {
+	c := codex{
+		paneCWD:   func(string) (string, error) { return "/srv/fleet/shared", nil },
+		panePID:   func(string) (int, error) { return 5150, nil },
+		codexHome: "/home/you/.codex",
+		replyAfter: func(home, cwd string, pid int, operatorMsg string) (string, bool, error) {
+			if home != "/home/you/.codex" || cwd != "/srv/fleet/shared" || pid != 5150 || operatorMsg != "dispatch-42" {
+				t.Errorf("replyAfter got (home=%q, cwd=%q, pid=%d, msg=%q)", home, cwd, pid, operatorMsg)
+			}
+			return "seat-bound reply", true, nil
+		},
+	}
+	got, found, err := c.ReplyAfter("flotilla:5.0", "dispatch-42")
+	if err != nil || !found || got != "seat-bound reply" {
+		t.Fatalf("ReplyAfter = (%q, %v, %v)", got, found, err)
+	}
 }

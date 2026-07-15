@@ -1,6 +1,7 @@
 package codexstore
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -102,5 +103,132 @@ func TestLatestResultNoSession(t *testing.T) {
 	home := t.TempDir()
 	if _, err := LatestResult(home, "/missing"); err == nil {
 		t.Fatal("want error when no rollout matches cwd")
+	}
+}
+
+func TestResolveRolloutForProcessBindsPaneNotNewestCWD(t *testing.T) {
+	home := t.TempDir()
+	proc := t.TempDir()
+	cwd := "/srv/fleet/shared"
+	dir := filepath.Join(home, "sessions", "2026", "07", "15")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	meta := `{"type":"session_meta","payload":{"cwd":"` + cwd + `"}}`
+	older := filepath.Join(dir, "rollout-2026-07-15T10-00-00-seat-a.jsonl")
+	newer := filepath.Join(dir, "rollout-2026-07-15T11-00-00-seat-b.jsonl")
+	if err := os.WriteFile(older, []byte(meta+"\n"+`{"type":"event_msg","payload":{"type":"agent_message","message":"seat A result"}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newer, []byte(meta+"\n"+`{"type":"event_msg","payload":{"type":"agent_message","message":"seat B newer result"}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	makeProcNode(t, proc, 100, "101")
+	makeProcNode(t, proc, 101, "")
+	if err := os.Symlink(older, filepath.Join(proc, "101", "fd", "19")); err != nil {
+		t.Fatal(err)
+	}
+
+	path, err := resolveRolloutForProcess(home, cwd, 100, proc)
+	if err != nil || path != older {
+		t.Fatalf("resolveRolloutForProcess = (%q, %v), want seat A rollout %q", path, err, older)
+	}
+	got, err := lastAgentText(path)
+	if err != nil || got != "seat A result" {
+		t.Fatalf("pane-bound result = (%q, %v), want seat A result", got, err)
+	}
+}
+
+func TestResolveRolloutForProcessFailsClosed(t *testing.T) {
+	home := t.TempDir()
+	proc := t.TempDir()
+	dir := filepath.Join(home, "sessions", "2026", "07", "15")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rollout := filepath.Join(dir, "rollout-2026-07-15T10-00-00-seat.jsonl")
+	if err := os.WriteFile(rollout, []byte(`{"type":"session_meta","payload":{"cwd":"/different"}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	makeProcNode(t, proc, 200, "")
+	if err := os.Symlink(rollout, filepath.Join(proc, "200", "fd", "7")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolveRolloutForProcess(home, "/wanted", 200, proc); err == nil {
+		t.Fatal("cwd mismatch must fail closed")
+	}
+	if _, err := resolveRolloutForProcess(home, "/wanted", 999, proc); err == nil {
+		t.Fatal("missing process rollout must fail closed")
+	}
+}
+
+func TestResolveRolloutForProcessRejectsAmbiguousAndOutsideFiles(t *testing.T) {
+	home := t.TempDir()
+	proc := t.TempDir()
+	cwd := "/srv/fleet/shared"
+	dir := filepath.Join(home, "sessions", "2026", "07", "15")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	meta := []byte(`{"type":"session_meta","payload":{"cwd":"` + cwd + `"}}` + "\n")
+	one := filepath.Join(dir, "rollout-one.jsonl")
+	two := filepath.Join(dir, "rollout-two.jsonl")
+	outside := filepath.Join(t.TempDir(), "rollout-outside.jsonl")
+	for _, path := range []string{one, two, outside} {
+		if err := os.WriteFile(path, meta, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	makeProcNode(t, proc, 300, "")
+	for fd, path := range map[string]string{"3": one, "4": two, "5": outside} {
+		if err := os.Symlink(path, filepath.Join(proc, "300", "fd", fd)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := resolveRolloutForProcess(home, cwd, 300, proc); err == nil {
+		t.Fatal("two in-store rollouts must fail ambiguous; outside rollout must not count")
+	}
+}
+
+func TestProcessChildrenUnionsAllThreads(t *testing.T) {
+	proc := t.TempDir()
+	makeProcNode(t, proc, 400, "401")
+	task := filepath.Join(proc, "400", "task", "499")
+	if err := os.MkdirAll(task, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(task, "children"), []byte("402 401"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := processChildren(proc, 400)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || !containsPID(got, 401) || !containsPID(got, 402) {
+		t.Fatalf("processChildren = %v, want unique 401 and 402", got)
+	}
+}
+
+func containsPID(pids []int, want int) bool {
+	for _, pid := range pids {
+		if pid == want {
+			return true
+		}
+	}
+	return false
+}
+
+func makeProcNode(t *testing.T, proc string, pid int, children string) {
+	t.Helper()
+	base := filepath.Join(proc, fmt.Sprint(pid))
+	if err := os.MkdirAll(filepath.Join(base, "fd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	task := filepath.Join(base, "task", fmt.Sprint(pid))
+	if err := os.MkdirAll(task, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(task, "children"), []byte(children), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

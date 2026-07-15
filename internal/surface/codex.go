@@ -29,9 +29,10 @@ type codex struct {
 	send           func(string, string) error
 	inject         func(string, string) error
 	paneCWD        func(string) (string, error)
+	panePID        func(string) (int, error)
 	codexHome      string
-	latestResult   func(codexHome, cwd string) (string, error)
-	replyAfter     func(codexHome, cwd, operatorMsg string) (string, bool, error)
+	latestResult   func(codexHome, cwd string, panePID int) (string, error)
+	replyAfter     func(codexHome, cwd string, panePID int, operatorMsg string) (string, bool, error)
 	cursorPosition func(pane string) (cursorX, cursorY int, inMode bool, err error)
 }
 
@@ -48,9 +49,10 @@ func newCodex() codex {
 		send:           deliver.Send,
 		inject:         deliver.InjectSlash,
 		paneCWD:        deliver.PaneCWD,
+		panePID:        deliver.PanePID,
 		codexHome:      codexHome,
-		latestResult:   codexstore.LatestResult,
-		replyAfter:     codexstore.ReplyAfter,
+		latestResult:   codexstore.LatestResultForProcess,
+		replyAfter:     codexstore.ReplyAfterForProcess,
 		cursorPosition: deliver.CursorPosition,
 	}
 }
@@ -89,7 +91,11 @@ func (c codex) LatestResult(pane string) (string, error) {
 	if c.codexHome == "" {
 		return "", fmt.Errorf("codex: cannot resolve the ~/.codex session store (no home directory)")
 	}
-	return c.latestResult(c.codexHome, cwd)
+	pid, err := c.panePID(pane)
+	if err != nil {
+		return "", err
+	}
+	return c.latestResult(c.codexHome, cwd, pid)
 }
 
 func (c codex) ReplyAfter(pane, operatorMsg string) (text string, found bool, err error) {
@@ -100,7 +106,11 @@ func (c codex) ReplyAfter(pane, operatorMsg string) (text string, found bool, er
 	if c.codexHome == "" {
 		return "", false, fmt.Errorf("codex: cannot resolve the ~/.codex session store (no home directory)")
 	}
-	return c.replyAfter(c.codexHome, cwd, operatorMsg)
+	pid, err := c.panePID(pane)
+	if err != nil {
+		return "", false, err
+	}
+	return c.replyAfter(c.codexHome, cwd, pid, operatorMsg)
 }
 
 // --- pure state classifier (the testable core) ---

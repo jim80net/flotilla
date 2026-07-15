@@ -17,7 +17,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -58,6 +60,19 @@ func LatestResult(codexHome, cwd string) (string, error) {
 	return lastAgentText(path)
 }
 
+// LatestResultForProcess binds the result to the rollout file held open by the
+// pane's Codex process tree. Cwd is validation only; it never selects among seats.
+func LatestResultForProcess(codexHome, cwd string, panePID int) (string, error) {
+	if runtime.GOOS != "linux" {
+		return "", fmt.Errorf("codex store: pane-bound rollout resolution requires Linux procfs")
+	}
+	path, err := resolveRolloutForProcess(codexHome, cwd, panePID, "/proc")
+	if err != nil {
+		return "", err
+	}
+	return lastAgentText(path)
+}
+
 // ReplyAfter returns the agent reply following the latest user entry carrying operatorMsg.
 func ReplyAfter(codexHome, cwd, operatorMsg string) (text string, found bool, err error) {
 	path, err := resolveRolloutPath(codexHome, cwd)
@@ -65,6 +80,118 @@ func ReplyAfter(codexHome, cwd, operatorMsg string) (text string, found bool, er
 		return "", false, err
 	}
 	return replyAfterUserMsg(path, operatorMsg)
+}
+
+// ReplyAfterForProcess is ReplyAfter scoped to the rollout held by one pane.
+func ReplyAfterForProcess(codexHome, cwd string, panePID int, operatorMsg string) (text string, found bool, err error) {
+	if runtime.GOOS != "linux" {
+		return "", false, fmt.Errorf("codex store: pane-bound rollout resolution requires Linux procfs")
+	}
+	path, err := resolveRolloutForProcess(codexHome, cwd, panePID, "/proc")
+	if err != nil {
+		return "", false, err
+	}
+	return replyAfterUserMsg(path, operatorMsg)
+}
+
+func resolveRolloutForProcess(codexHome, cwd string, panePID int, procRoot string) (string, error) {
+	if panePID <= 0 {
+		return "", fmt.Errorf("codex store: invalid pane pid %d", panePID)
+	}
+	sessionsRoot, err := filepath.EvalSymlinks(filepath.Join(filepath.Clean(codexHome), "sessions"))
+	if err != nil {
+		return "", fmt.Errorf("codex store: resolve sessions root: %w", err)
+	}
+	queue := []int{panePID}
+	seen := map[int]bool{}
+	paths := map[string]bool{}
+	for len(queue) > 0 {
+		pid := queue[0]
+		queue = queue[1:]
+		if seen[pid] {
+			continue
+		}
+		seen[pid] = true
+		fdDir := filepath.Join(procRoot, strconv.Itoa(pid), "fd")
+		fds, err := os.ReadDir(fdDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue // descendant exited during the snapshot
+			}
+			return "", fmt.Errorf("codex store: read process %d file descriptors: %w", pid, err)
+		}
+		for _, fd := range fds {
+			target, err := os.Readlink(filepath.Join(fdDir, fd.Name()))
+			if err != nil {
+				continue // descriptor closed during the snapshot
+			}
+			target, err = filepath.EvalSymlinks(target)
+			if err != nil || !strings.HasSuffix(target, ".jsonl") || !strings.HasPrefix(filepath.Base(target), "rollout-") {
+				continue
+			}
+			target = filepath.Clean(target)
+			rel, err := filepath.Rel(sessionsRoot, target)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				continue
+			}
+			paths[target] = true
+		}
+		children, err := processChildren(procRoot, pid)
+		if err != nil && !os.IsNotExist(err) {
+			return "", err
+		}
+		queue = append(queue, children...)
+	}
+	if len(paths) == 0 {
+		return "", fmt.Errorf("codex store: pane pid %d has no open rollout (session not ready or no longer running)", panePID)
+	}
+	if len(paths) > 1 {
+		return "", fmt.Errorf("codex store: pane pid %d has %d open rollouts; refusing ambiguous result", panePID, len(paths))
+	}
+	var path string
+	for path = range paths {
+	}
+	metaCwd, err := rolloutMetaCWD(path)
+	if err != nil {
+		return "", fmt.Errorf("codex store: validate pane rollout: %w", err)
+	}
+	if filepath.Clean(metaCwd) != filepath.Clean(cwd) {
+		return "", fmt.Errorf("codex store: pane rollout cwd %q does not match pane cwd %q", metaCwd, cwd)
+	}
+	return path, nil
+}
+
+// processChildren unions task/*/children because Linux records children on the
+// thread that created them; reading only the main thread can miss a child forked
+// by another thread in a multi-threaded wrapper process.
+func processChildren(procRoot string, pid int) ([]int, error) {
+	taskRoot := filepath.Join(procRoot, strconv.Itoa(pid), "task")
+	tasks, err := os.ReadDir(taskRoot)
+	if err != nil {
+		return nil, fmt.Errorf("codex store: read process %d tasks: %w", pid, err)
+	}
+	seen := map[int]bool{}
+	var children []int
+	for _, task := range tasks {
+		if !task.IsDir() {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(taskRoot, task.Name(), "children"))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("codex store: read process %d task %s children: %w", pid, task.Name(), err)
+		}
+		for _, field := range strings.Fields(string(raw)) {
+			child, err := strconv.Atoi(field)
+			if err == nil && child > 0 && !seen[child] {
+				seen[child] = true
+				children = append(children, child)
+			}
+		}
+	}
+	return children, nil
 }
 
 func resolveRolloutPath(codexHome, cwd string) (string, error) {
