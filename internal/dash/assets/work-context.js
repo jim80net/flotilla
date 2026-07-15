@@ -188,11 +188,14 @@
       body.classList.add("wc-message-clamped");
       body.classList.toggle("is-expanded", !!expandedBodies[key]);
       body.setAttribute("data-wc-body-key", key);
+      body.id = "wc-message-body-" + i;
       var button = document.createElement("button");
       button.type = "button";
       button.className = "wc-message-toggle";
       button.setAttribute("data-wc-body-toggle", key);
       button.setAttribute("data-wc-more-lines", String(more));
+      button.setAttribute("aria-controls", body.id);
+      button.setAttribute("aria-expanded", String(!!expandedBodies[key]));
       button.textContent = expandedBodies[key]
         ? "collapse turn-final ▴"
         : "show full turn-final ▾ (" + more + " more lines)";
@@ -433,8 +436,9 @@
       renderMirror({ top: viewport.scrollTop, height: viewport.scrollHeight });
     } else fetchMirror(true, true);
   });
-  function trackStreamPin() {
+  function trackStreamPin(event) {
     var viewport = streamViewport();
+    if (event && event.currentTarget !== viewport) return;
     streamPinned = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 48;
   }
   el("wc-stream").addEventListener("scroll", trackStreamPin);
@@ -449,6 +453,7 @@
     var top = message ? message.getBoundingClientRect().top : 0;
     expandedBodies[key] = !expandedBodies[key];
     body.classList.toggle("is-expanded", expandedBodies[key]);
+    button.setAttribute("aria-expanded", String(expandedBodies[key]));
     button.textContent = expandedBodies[key]
       ? "collapse turn-final ▴"
       : "show full turn-final ▾ (" + button.getAttribute("data-wc-more-lines") + " more lines)";
