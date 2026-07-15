@@ -51,6 +51,9 @@ func TestHandleSessionMirror_ReturnsLedgerEntries(t *testing.T) {
 	if doc.Entries[0].Info != "second brief" {
 		t.Errorf("entry info = %q, want second brief (newest last)", doc.Entries[0].Info)
 	}
+	if doc.Entries[0].ID == "" {
+		t.Error("session mirror API must expose the entry's stable id")
+	}
 }
 
 func TestHandleSessionMirror_MissingAgent(t *testing.T) {

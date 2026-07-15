@@ -1,6 +1,8 @@
 package sessionmirror
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,6 +39,12 @@ func Append(rosterDir, agent string, rec Record, opts AppendOptions) error {
 	if max <= 0 {
 		max = DefaultMaxEntries
 	}
+	if rec.ID == "" {
+		rec.ID, err = newRecordID()
+		if err != nil {
+			return err
+		}
+	}
 
 	line, err := marshalLedgerLine(rec)
 	if err != nil {
@@ -71,6 +79,14 @@ func Append(rosterDir, agent string, rec Record, opts AppendOptions) error {
 		}
 		return nil
 	})
+}
+
+func newRecordID() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("sessionmirror: generate record id: %w", err)
+	}
+	return "sm-" + hex.EncodeToString(raw[:]), nil
 }
 
 func readLines(path string) ([][]byte, error) {

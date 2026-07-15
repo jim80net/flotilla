@@ -35,6 +35,12 @@ func TestAppendCreatesLedgerAndBuildHistory(t *testing.T) {
 	if doc.Entries[0].Info != "info body" {
 		t.Errorf("entry info = %q", doc.Entries[0].Info)
 	}
+	if doc.Entries[0].ID == "" {
+		t.Error("appended entry must persist a stable id")
+	}
+	if again := BuildHistory("backend", raw, 0); again.Entries[0].ID != doc.Entries[0].ID {
+		t.Errorf("persisted id changed across reads: %q != %q", again.Entries[0].ID, doc.Entries[0].ID)
+	}
 }
 
 func TestAppendRetentionCapDropsOldest(t *testing.T) {

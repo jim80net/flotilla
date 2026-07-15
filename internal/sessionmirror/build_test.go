@@ -34,3 +34,21 @@ func TestParseLinesSkipsMalformed(t *testing.T) {
 		t.Fatalf("entries = %+v", entries)
 	}
 }
+
+func TestBuildHistoryLegacyIDsAreUniqueAndStableAcrossLimitAndRetention(t *testing.T) {
+	rec := NewRecord(Input{Agent: "backend", At: time.Unix(1, 0).UTC(), Info: "same"})
+	lines := append(append(append([]byte{}, MustLine(rec)...), MustLine(rec)...), MustLine(rec)...)
+
+	all := BuildHistory("backend", lines, 0)
+	limited := BuildHistory("backend", lines, 2)
+	if all.Entries[0].ID == "" || all.Entries[1].ID == all.Entries[2].ID {
+		t.Fatalf("legacy ids must be non-empty and unique: %+v", all.Entries)
+	}
+	if limited.Entries[0].ID != all.Entries[1].ID || limited.Entries[1].ID != all.Entries[2].ID {
+		t.Fatalf("limit changed legacy ids: all=%v limited=%v", all.Entries, limited.Entries)
+	}
+	afterRetention := BuildHistory("backend", lines[len(MustLine(rec)):], 0)
+	if afterRetention.Entries[0].ID != all.Entries[1].ID || afterRetention.Entries[1].ID != all.Entries[2].ID {
+		t.Fatalf("dropping oldest changed retained legacy ids: all=%v retained=%v", all.Entries, afterRetention.Entries)
+	}
+}
