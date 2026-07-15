@@ -147,6 +147,11 @@ func cmdWatch(args []string) error {
 	if err := validateAgentSurfaces(cfg); err != nil {
 		return err
 	}
+	rosterReload, err := newWatchRosterReloader(*rosterPath, *orgFile, cfg)
+	if err != nil {
+		return fmt.Errorf("initialize roster hot-reload: %w", err)
+	}
+	currentRoster := func() *roster.Config { return rosterReload.Snapshot().Config }
 	rosterAgents := rosterAgentSet(cfg)
 	launchPath := os.Getenv("FLOTILLA_LAUNCH")
 	if launchPath == "" {
@@ -315,17 +320,17 @@ func cmdWatch(args []string) error {
 	injector.SetRelayQueue(*queuePath)
 	injector.SetRosterDir(rosterDir)
 	injector.SetOutboxStaleEscalate(
-		func(sender string) string { return cfg.OwningXO(sender, xo) },
+		func(sender string) string { return currentRoster().OwningXO(sender, xo) },
 		func(coordinator, msg, claimKey string) {
 			injector.Enqueue(watch.Job{Agent: coordinator, Message: msg, Kind: watch.KindDetector, ClaimKey: claimKey})
 		},
 	)
 	outboxSweeper := watch.NewOutboxSweeper(rosterDir, injector.Enqueue)
 	injector.SetSendDelivered(func(sender, recipient, message string) {
-		mirrorSendToLedger(cfg, sender, recipient, message)
+		mirrorSendToLedger(currentRoster(), sender, recipient, message)
 	})
 	injector.SetOutboxDone(outboxSweeper.Release)
-	injector.SetInboundTrack(watch.InboundTrackHook(rosterDir, cfg.IsCoordinator))
+	injector.SetInboundTrack(watch.InboundTrackHook(rosterDir, func(agent string) bool { return currentRoster().IsCoordinator(agent) }))
 	// Mirror relayed instructions to the audit channel in full. Heartbeat ticks
 	// are NOT mirrored: they fire every interval and a per-tick marker is pure
 	// noise in the operator's Discord channel (XO liveness is already covered by
@@ -594,7 +599,8 @@ func cmdWatch(args []string) error {
 			if agent == xo {
 				ack = ackInstr // liveness ack follows the TARGET, not the wake kind (#190)
 			}
-			body := synthesisWakeBody(agent, synthBin, synthRosterPath, synthesisReadSet(cfg, agent), cfg.OwnedChannels(agent), ack)
+			current := currentRoster()
+			body := synthesisWakeBody(agent, synthBin, synthRosterPath, synthesisReadSet(current, agent), current.OwnedChannels(agent), ack)
 			injector.Enqueue(watch.Job{Agent: agent, Message: body, Kind: watch.KindDetector})
 		}
 
@@ -610,8 +616,12 @@ func cmdWatch(args []string) error {
 		synthSidecarPath := filepath.Join(rosterDir, "flotilla-synthesis-state.json")
 		if cfg.VisibilitySynthesis {
 			synthWakeAgent = wakeAgent
-			synthParents = synthParentsResolver(cfg)
-			synthRead = synthReadOneFromTurnFinal(synthTurnFinal(cfg))
+			synthParents = func(agent string) []string {
+				return synthParentsResolver(currentRoster())(agent)
+			}
+			synthRead = func(agent string) (string, bool) {
+				return synthReadOneFromTurnFinal(synthTurnFinal(currentRoster()))(agent)
+			}
 			synthEveryTicks = synthDigestTicks // a small multiple of the interval (Q-B)
 		}
 
@@ -626,9 +636,9 @@ func cmdWatch(args []string) error {
 		// interval). WakeDeskHeartbeat enqueues the non-authorizing desk-continuation beat (audit-
 		// suppressed); DeskEscalate raises the loud cap-alert to the desk's owning XO.
 		deskSettled := watch.NewSettledMarkerSet(rosterDir)
-		deskHeartbeatEnabled := func(agent string) bool { return cfg.HeartbeatEnabled(agent) }
+		deskHeartbeatEnabled := func(agent string) bool { return currentRoster().HeartbeatEnabled(agent) }
 		wakeDeskHeartbeat := newDeskHeartbeatDispatch(injector.Enqueue, deskSettled.Path)
-		deskEscalate := newDeskEscalate(cfg, xo, alert)
+		deskEscalate := func(agent string) { newDeskEscalate(currentRoster(), xo, alert)(agent) }
 		// #189 per-recipient heartbeat JUDGMENT — the warrant seam, ALWAYS wired (the judgment is
 		// universal, like the #183 default-ON). The backlog read is performed HERE, OFF the detector
 		// lock: deskWarrantedGate reads each agent's OWN backlog (<rosterDir>/flotilla-<agent>-backlog.md)
@@ -639,7 +649,7 @@ func cmdWatch(args []string) error {
 		deskBacklogPath := func(agent string) string {
 			return filepath.Join(rosterDir, "flotilla-"+agent+"-backlog.md")
 		}
-		deskHeartbeatWarranted := deskWarrantedGate(cfg,
+		deskHeartbeatWarranted := deskWarrantedGateDynamic(currentRoster,
 			func(agent string) ([]byte, bool, error) {
 				raw, err := os.ReadFile(deskBacklogPath(agent))
 				if err != nil {
@@ -843,7 +853,7 @@ func cmdWatch(args []string) error {
 			},
 			MirrorOnFinish:            deskMirrorOnFinish(cfg, secrets, tr, rosterDir),
 			CoordinatorMirrorOnFinish: coordinatorMirrorOnFinish(cfg, secrets, tr, *rosterPath, rosterDir),
-			AdjutantFor:               func(owner string) string { return cfg.AdjutantFor(owner) },
+			AdjutantFor:               func(owner string) string { return currentRoster().AdjutantFor(owner) },
 			AdjutantSeamOnFinish:      drainAdjutantSeamFor,
 			IdleHoldOnFinish:          idleHoldOnFinish(cfg, idleHoldTracker, injector.Enqueue),
 			StrandedHandoffOnFinish:   strandedHandoffOnFinish(cfg, strandedTracker, injector.Enqueue),
@@ -861,7 +871,7 @@ func cmdWatch(args []string) error {
 				injector.Enqueue,
 				alert,
 			),
-			IsCoordinator:           cfg.IsCoordinator,
+			IsCoordinator:           func(agent string) bool { return currentRoster().IsCoordinator(agent) },
 			DelegationNudgeOnFinish: delegationNudgeOnFinish(cfg, delegationTracker, injector.Enqueue),
 			DecisionBriefOnTick: decisionBriefOnTick(
 				goalsJSONPath, *backlogPath, decisionBriefClaimsPath, decisionBriefTracker, injector.Enqueue, cfg,
@@ -896,7 +906,7 @@ func cmdWatch(args []string) error {
 			Activity:                activity,
 			AdaptiveInterval:        adaptivePolicy,
 			StackableWakes:          cfg.StackableWakes,
-			OwningXO:                func(agent string) string { return cfg.OwningXO(agent, xo) },
+			OwningXO:                func(agent string) string { return currentRoster().OwningXO(agent, xo) },
 			WakeLayer:               wakeLayer,
 		}
 		// Leader exhaustion (#510): loud operator alert + adjutant escalate on the episode edge,
@@ -1103,6 +1113,26 @@ func cmdWatch(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				adopted, reloadErr := rosterReload.Check()
+				if reloadErr != nil {
+					log.Printf("flotilla watch: ROSTER RELOAD REJECTED — retaining complete generation %d: %v; fix the roster/org edit and save again", rosterReload.Snapshot().Generation, reloadErr)
+					continue
+				}
+				if adopted {
+					snap := rosterReload.Snapshot()
+					log.Printf("flotilla watch: roster reload adopted generation %d (org=%s, agents=%d)", snap.Generation, snap.Config.Org().Source, len(snap.Config.Agents))
+				}
+			}
+		}
+	}()
+	go func() {
 		ticker := time.NewTicker(launchChainNoticeInterval)
 		defer ticker.Stop()
 		for {
@@ -1158,7 +1188,7 @@ func cmdWatch(args []string) error {
 	}
 	switch {
 	case len(channelIDs) > 0 && botToken != "" && cfg.OperatorUserID != "" && tr != nil:
-		rel := watch.NewRelay(cfg, injector, onAccepted, func(msg string) { post("flotilla-watch", msg) })
+		rel := watch.NewRelayDynamic(currentRoster, injector, onAccepted, func(msg string) { post("flotilla-watch", msg) })
 		// The destinations the bus subscribes to + reconciles: one per bound channel,
 		// resolved from the transport (the channel-id set stays inside the transport's
 		// Destination rather than leaking as bare strings to the gateway open).
@@ -1181,7 +1211,7 @@ func cmdWatch(args []string) error {
 		var catchupKick func()
 		if cap, ok := tr.(transport.CatchUp); ok {
 			reader := &transportCatchUpReader{cap: cap, dest: destByChannel(dests, channelIDs)}
-			cu := watch.NewCatchup(cfg, rel, reader, *cursorPath,
+			cu := watch.NewCatchupDynamic(currentRoster, rel, reader, *cursorPath,
 				func(msg string) { post("flotilla-watch", msg) },
 				alert)
 			catchupKick = cu.Kick
@@ -1225,7 +1255,7 @@ func cmdWatch(args []string) error {
 		if hist, ok := tr.(transport.RecentHistory); ok {
 			dests := transportDestinations(tr, channelIDs)
 			reader := &transportRecentReader{cap: hist, dest: destByChannel(dests, channelIDs)}
-			backstop := watch.NewUnackedBackstop(cfg, reader, *unackedPath, watch.OperatorAckRoot(rosterDir), alert, mkSend(confirm.Submit), nil)
+			backstop := watch.NewUnackedBackstopDynamic(currentRoster, reader, *unackedPath, watch.OperatorAckRoot(rosterDir), alert, mkSend(confirm.Submit), nil)
 			go backstop.Run(ctx)
 			fmt.Printf("flotilla watch: un-acked backstop active (state=%s scan=%s min-age=%s)\n",
 				*unackedPath, unacked.DefaultScanInterval, unacked.DefaultMinAge)
@@ -1320,6 +1350,10 @@ func backlogStatusGate(path string, read func() ([]byte, error), alert func(stri
 // map is single-goroutine — no concurrent Tick, and the other detector-state writers (OperatorWake/
 // AgentWake) never invoke this seam.
 func deskWarrantedGate(cfg *roster.Config, read func(agent string) ([]byte, bool, error), path func(agent string) string, alert func(string)) func(agent string) bool {
+	return deskWarrantedGateDynamic(func() *roster.Config { return cfg }, read, path, alert)
+}
+
+func deskWarrantedGateDynamic(current func() *roster.Config, read func(agent string) ([]byte, bool, error), path func(agent string) string, alert func(string)) func(agent string) bool {
 	alerted := map[string]string{} // agent → sha256 of the last-ALERTED headingless content (#479)
 	return func(agent string) bool {
 		raw, exists, err := read(agent)
@@ -1351,7 +1385,7 @@ func deskWarrantedGate(cfg *roster.Config, read func(agent string) ([]byte, bool
 		} else {
 			delete(alerted, agent)
 		}
-		return cfg.HeartbeatWarranted(agent, st)
+		return current().HeartbeatWarranted(agent, st)
 	}
 }
 
