@@ -698,8 +698,22 @@
         "</section>";
     }
 
+    // The root's direct children mix product-owner containers with true command
+    // staff desks. On a phone the first six-row window must establish the command
+    // structure before listing staff; otherwise every product owner is hidden
+    // behind Show more and the hierarchy reads as a flat desk dump. Preserve the
+    // authored/sequence order inside each class.
+    function mobileDeskOrder(nodes) {
+      return nodes.map(function (n, i) {
+        return { n: n, i: i, container: (kids[n.id] || []).length > 0 };
+      }).sort(function (a, b) {
+        if (a.container !== b.container) return a.container ? -1 : 1;
+        return a.i - b.i;
+      }).map(function (x) { return x.n; });
+    }
+
     function flotillaBlock(root, index) {
-      var desks = sequenceOrder(kids[root.id] || []);
+      var desks = mobileDeskOrder(sequenceOrder(kids[root.id] || []));
       var limit = Math.max(6, mobileDeskWindows[root.id] || 6);
       var shown = desks.slice(0, limit);
       var remaining = Math.max(0, desks.length - shown.length);

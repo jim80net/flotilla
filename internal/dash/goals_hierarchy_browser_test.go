@@ -24,17 +24,19 @@ func goalsHierarchyFixture766() GoalsDoc {
 		}},
 		MetaXO: "coord",
 		Channels: []DeskChannel{
+			{ChannelID: "C_COMMAND", XOAgent: "coord", Members: []string{"coord", "command-staff", "finance-xo", "alpha-xo", "beta-xo"}},
 			{ChannelID: "C_FIN", XOAgent: "finance-xo", Members: []string{"coord", "finance-desk", "alpha-desk", "beta-desk"}},
 			{ChannelID: "C_ALPHA", XOAgent: "alpha-xo", Members: []string{"coord", "alpha-desk"}},
 			{ChannelID: "C_BETA", XOAgent: "beta-xo", Members: []string{"coord", "beta-desk"}},
 		},
 		OrgParents: map[string]string{
-			"finance-xo":   "coord",
-			"alpha-xo":     "coord",
-			"beta-xo":      "coord",
-			"finance-desk": "finance-xo",
-			"alpha-desk":   "alpha-xo",
-			"beta-desk":    "beta-xo",
+			"command-staff": "coord",
+			"finance-xo":    "coord",
+			"alpha-xo":      "coord",
+			"beta-xo":       "coord",
+			"finance-desk":  "finance-xo",
+			"alpha-desk":    "alpha-xo",
+			"beta-desk":     "beta-xo",
 		},
 		OrgSource: "derived",
 	}
@@ -42,7 +44,7 @@ func goalsHierarchyFixture766() GoalsDoc {
 	// readability contract, not just parent attributes on a toy graph.
 	for i := 1; i <= 12; i++ {
 		name := fmt.Sprintf("alpha-desk-%02d", i)
-		in.Channels[1].Members = append(in.Channels[1].Members, name)
+		in.Channels[2].Members = append(in.Channels[2].Members, name)
 		in.OrgParents[name] = "alpha-xo"
 	}
 	return BuildGoals(in)
@@ -127,6 +129,9 @@ with sync_playwright() as p:
         expect(root.locator('[data-outline-desk="finance"]')).to_be_visible()
         expect(root.locator('[data-outline-desk="alpha"]')).to_be_visible()
         expect(root.locator('[data-outline-desk="hub:beta-xo"]')).to_be_visible()
+        first_window = root.locator('.goutline-desk-open').evaluate_all("els => els.map(e => e.getAttribute('data-outline-id'))")
+        assert first_window[:3] == ["finance", "alpha", "hub:beta-xo"], "product owners must lead the initial phone window: %r" % first_window
+        assert first_window.index("desk:command-staff") > first_window.index("hub:beta-xo"), "command staff must follow product owners: %r" % first_window
         root.locator('[data-outline-desk-toggle="finance"]').click()
         expect(root.locator('[data-outline-id="desk:finance-desk"]')).to_be_visible()
         expect(root.locator('[data-outline-id="desk:alpha-desk"]')).to_have_count(0)
