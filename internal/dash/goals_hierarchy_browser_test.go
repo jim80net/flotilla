@@ -2,6 +2,7 @@ package dash
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -11,7 +12,7 @@ import (
 )
 
 func goalsHierarchyFixture766() GoalsDoc {
-	return BuildGoals(GoalsInputs{
+	in := GoalsInputs{
 		FileOK: true,
 		File: GoalsFile{Version: 1, Goals: []Goal{
 			// Finance is an authored owner root whose declared task scope reproduces
@@ -36,7 +37,15 @@ func goalsHierarchyFixture766() GoalsDoc {
 			"beta-desk":    "beta-xo",
 		},
 		OrgSource: "derived",
-	})
+	}
+	// Keep the rendered regression dense enough to exercise the default FIT
+	// readability contract, not just parent attributes on a toy graph.
+	for i := 1; i <= 12; i++ {
+		name := fmt.Sprintf("alpha-desk-%02d", i)
+		in.Channels[1].Members = append(in.Channels[1].Members, name)
+		in.OrgParents[name] = "alpha-xo"
+	}
+	return BuildGoals(in)
 }
 
 // TestGoalsHierarchyRendered766 proves that both Goals renderers consume the
@@ -88,6 +97,21 @@ with sync_playwright() as p:
         expect(desktop.locator('.gnode[data-id="trading"]')).to_have_attribute("data-parent", "finance")
         expect(desktop.locator('.gnode[data-id="desk:alpha-desk"]')).to_have_attribute("data-parent", "alpha")
         expect(desktop.locator('.gnode[data-id="desk:beta-desk"]')).to_have_attribute("data-parent", "hub:beta-xo")
+        fit = desktop.locator("#goals-world").evaluate("""world => {
+            const nodes = [...world.querySelectorAll('.gnode')];
+            const scale = new DOMMatrixReadOnly(getComputedStyle(world).transform).a;
+            const minTitle = Math.min(...nodes.map(n => parseFloat(getComputedStyle(n.querySelector('.gnode-title')).fontSize) * scale));
+            let overlaps = 0;
+            const rects = nodes.map(n => n.getBoundingClientRect());
+            for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) {
+                const x = Math.min(rects[i].right, rects[j].right) - Math.max(rects[i].left, rects[j].left);
+                const y = Math.min(rects[i].bottom, rects[j].bottom) - Math.max(rects[i].top, rects[j].top);
+                if (x > 0.5 && y > 0.5) overlaps++;
+            }
+            return {scale, minTitle, overlaps};
+        }""")
+        assert fit["minTitle"] >= 10, "default FIT title %.2fpx is below 10px: %r" % (fit["minTitle"], fit)
+        assert fit["overlaps"] == 0, "default FIT overlaps nodes: %r" % fit
         if evidence_dir:
             desktop.screenshot(path=os.path.join(evidence_dir, "desktop-1440.png"), full_page=True)
         desktop.close()

@@ -1035,7 +1035,7 @@
       roots.forEach(function (r) { if (r !== center) ring1.push(r); });
     } else { ring1 = roots.slice(); }
     var leaves = leafWeights(goals);
-    var H_STEP = 46, V_GAP = 8, LIMB_GAP = 22, GRID_COL_GAP = 10, GRID_MAX_ROWS = 11;
+    var H_STEP = 46, V_GAP = 8, LIMB_GAP = 22, GRID_COL_GAP = 10, GRID_MAX_ROWS = 3;
     var placed = {};
     var ordered = sequenceOrder(ring1);
     var totalLv = 0;
