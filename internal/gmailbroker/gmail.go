@@ -29,15 +29,24 @@ const (
 )
 
 type fileSystem interface {
-	Lstat(string) (fs.FileInfo, error)
-	ReadFile(string) ([]byte, error)
+	OpenNoFollow(string) (credentialFile, error)
 	EUID() int
+}
+type credentialFile interface {
+	io.Reader
+	Stat() (fs.FileInfo, error)
+	Close() error
 }
 type osFS struct{}
 
-func (osFS) Lstat(p string) (fs.FileInfo, error) { return os.Lstat(p) }
-func (osFS) ReadFile(p string) ([]byte, error)   { return os.ReadFile(p) }
-func (osFS) EUID() int                           { return os.Geteuid() }
+func (osFS) OpenNoFollow(p string) (credentialFile, error) {
+	fd, e := syscall.Open(p, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
+	if e != nil {
+		return nil, e
+	}
+	return os.NewFile(uintptr(fd), p), nil
+}
+func (osFS) EUID() int { return os.Geteuid() }
 
 type AuditEvent struct {
 	At                                                   time.Time
@@ -53,6 +62,7 @@ type Config struct {
 	HTTP                                        *http.Client
 	Now                                         func() time.Time
 	LookupEnv                                   func(string) (string, bool)
+	LabelIDs                                    map[string]string
 	fs                                          fileSystem
 }
 type Connector struct {
@@ -85,11 +95,20 @@ func New(cfg Config) (*Connector, error) {
 func (c *Connector) ListLabels(ctx context.Context, label string) (json.RawMessage, error) {
 	return c.get(ctx, "gmail.labels.list", "/labels", "labels", label)
 }
+func (c *Connector) Smoke(ctx context.Context) error { _, err := c.ListLabels(ctx, ""); return err }
 func (c *Connector) GetLabel(ctx context.Context, id, label string) (json.RawMessage, error) {
 	if label != "" && id != label {
 		return nil, errors.New("gmail broker: resource selector mismatch")
 	}
-	return c.getID(ctx, "gmail.labels.get", "/labels/", id, "label", label)
+	provider := id
+	if label != "" {
+		var ok bool
+		provider, ok = c.cfg.LabelIDs[label]
+		if !ok || !safeID(provider) {
+			return nil, errors.New("gmail broker: resource selector binding unavailable")
+		}
+	}
+	return c.getID(ctx, "gmail.labels.get", "/labels/", provider, "label", label)
 }
 func (c *Connector) ListMessages(ctx context.Context, label string) (json.RawMessage, error) {
 	p := "/messages"
@@ -137,8 +156,21 @@ func (c *Connector) get(ctx context.Context, action, path, resource, label strin
 	if err := c.audit(now, d, action, resource, "authorized", ""); err != nil {
 		return nil, errors.New("gmail broker: audit unavailable")
 	}
+	providerLabel := label
+	if label != "" {
+		var ok bool
+		providerLabel, ok = c.cfg.LabelIDs[label]
+		if !ok || !safeID(providerLabel) {
+			c.audit(now, d, action, resource, "denied", "selector")
+			return nil, errors.New("gmail broker: resource selector binding unavailable")
+		}
+		if action == "gmail.messages.list" || action == "gmail.threads.list" {
+			path = strings.Split(path, "?")[0] + "?labelIds=" + url.QueryEscape(providerLabel)
+		}
+	}
 	b := &binding{c: c}
 	if err = auth.BindSecret(b); err != nil {
+		c.audit(now, d, action, resource, "denied", "credential")
 		return nil, errors.New("gmail broker: credential binding unavailable")
 	}
 	tok, err := c.token(ctx, b.user, now)
@@ -161,18 +193,22 @@ func (c *Connector) get(ctx context.Context, action, path, resource, label strin
 	}
 	body, e := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if e != nil || !json.Valid(body) {
+		c.audit(now, d, action, resource, "failed", "parse")
 		return nil, errors.New("gmail broker: invalid provider response")
 	}
-	body, e = enforceLabel(action, label, body)
+	body, e = enforceLabel(action, providerLabel, body)
 	if e != nil {
+		c.audit(now, d, action, resource, "denied", "selector")
 		return nil, e
 	}
-	c.audit(now, d, action, resource, "allowed", "")
+	if err := c.audit(now, d, action, resource, "allowed", ""); err != nil {
+		return nil, errors.New("gmail broker: audit unavailable")
+	}
 	return body, nil
 }
 
 func enforceLabel(action, label string, body []byte) ([]byte, error) {
-	if label == "" || action == "gmail.messages.list" || action == "gmail.threads.list" || action == "gmail.labels.get" {
+	if label == "" || action == "gmail.messages.list" || action == "gmail.labels.get" {
 		return body, nil
 	}
 	switch action {
@@ -223,6 +259,16 @@ func enforceLabel(action, label string, body []byte) ([]byte, error) {
 		}
 		v.Messages = out
 		return json.Marshal(v)
+	case "gmail.threads.list":
+		var v struct {
+			Threads            []struct{ ID, HistoryID string } `json:"threads"`
+			NextPageToken      string                           `json:"nextPageToken,omitempty"`
+			ResultSizeEstimate int                              `json:"resultSizeEstimate,omitempty"`
+		}
+		if json.Unmarshal(body, &v) != nil {
+			return nil, errors.New("gmail broker: invalid provider response")
+		}
+		return json.Marshal(v)
 	}
 	return nil, errors.New("gmail broker: operation not allowed")
 }
@@ -263,7 +309,12 @@ func (b *binding) LookupSecretRef(ref string) error {
 	if !ok || p == "" {
 		return errors.New("gmail broker: credential binding unavailable")
 	}
-	i, e := b.c.cfg.fs.Lstat(p)
+	f, e := b.c.cfg.fs.OpenNoFollow(p)
+	if e != nil {
+		return errors.New("gmail broker: credential file unavailable")
+	}
+	defer f.Close()
+	i, e := f.Stat()
 	if e != nil {
 		return errors.New("gmail broker: credential file unavailable")
 	}
@@ -271,7 +322,7 @@ func (b *binding) LookupSecretRef(ref string) error {
 	if !i.Mode().IsRegular() || i.Mode().Perm() != 0600 || !ok || int(st.Uid) != b.c.cfg.fs.EUID() {
 		return errors.New("gmail broker: credential file security check failed")
 	}
-	raw, e := b.c.cfg.fs.ReadFile(p)
+	raw, e := io.ReadAll(io.LimitReader(f, 1<<20))
 	if e != nil {
 		return errors.New("gmail broker: credential file unreadable")
 	}
@@ -347,8 +398,16 @@ func (c *Connector) profileAndLabels(ctx context.Context) error {
 				return errors.New("gmail broker: approved account mismatch")
 			}
 		} else {
-			io.Copy(io.Discard, io.LimitReader(r.Body, 1<<20))
+			var v struct {
+				Labels []struct {
+					ID string `json:"id"`
+				} `json:"labels"`
+			}
+			e = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&v)
 			r.Body.Close()
+			if e != nil || v.Labels == nil {
+				return errors.New("gmail broker: invalid labels smoke response")
+			}
 		}
 	}
 	return nil

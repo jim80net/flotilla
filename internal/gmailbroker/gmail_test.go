@@ -18,12 +18,19 @@ import (
 )
 
 type audit struct {
-	grants []authdomain.AuditEvent
-	gmail  []AuditEvent
+	grants     []authdomain.AuditEvent
+	gmail      []AuditEvent
+	gmailErrAt int
 }
 
 func (a *audit) Record(e authdomain.AuditEvent) error { a.grants = append(a.grants, e); return nil }
-func (a *audit) RecordGmail(e AuditEvent) error       { a.gmail = append(a.gmail, e); return nil }
+func (a *audit) RecordGmail(e AuditEvent) error {
+	a.gmail = append(a.gmail, e)
+	if a.gmailErrAt > 0 && len(a.gmail) == a.gmailErrAt {
+		return errors.New("audit failed")
+	}
+	return nil
+}
 
 type info struct {
 	mode fs.FileMode
@@ -43,9 +50,17 @@ type fakeFS struct {
 	uid, owner  int
 	lstat, read int
 	err         error
+	afterOpen   func()
+}
+type fakeFile struct {
+	*strings.Reader
+	i     fs.FileInfo
+	owner *fakeFS
 }
 
-func (f *fakeFS) Lstat(string) (fs.FileInfo, error) {
+func (f *fakeFile) Stat() (fs.FileInfo, error) { return f.i, nil }
+func (f *fakeFile) Close() error               { return nil }
+func (f *fakeFS) OpenNoFollow(string) (credentialFile, error) {
 	f.lstat++
 	if f.err != nil {
 		return nil, f.err
@@ -54,10 +69,14 @@ func (f *fakeFS) Lstat(string) (fs.FileInfo, error) {
 	if owner == 0 {
 		owner = f.uid
 	}
-	return info{f.mode, uint32(owner)}, nil
+	f.read++
+	opened := &fakeFile{Reader: strings.NewReader(string(f.data)), i: info{f.mode, uint32(owner)}, owner: f}
+	if f.afterOpen != nil {
+		f.afterOpen()
+	}
+	return opened, nil
 }
-func (f *fakeFS) ReadFile(string) ([]byte, error) { f.read++; return f.data, nil }
-func (f *fakeFS) EUID() int                       { return f.uid }
+func (f *fakeFS) EUID() int { return f.uid }
 
 type roundTrip func(*http.Request) (*http.Response, error)
 
@@ -107,6 +126,8 @@ func connector(t *testing.T, principal string, f *fakeFS, a *audit, calls *[]str
 			return response(200, `{"access_token":"access-secret","expires_in":3600,"scope":"https://www.googleapis.com/auth/gmail.readonly"}`), nil
 		case "/gmail/v1/users/me/profile":
 			return response(200, `{"emailAddress":"approved@example.invalid"}`), nil
+		case "/gmail/v1/users/me/labels":
+			return response(200, `{"labels":[]}`), nil
 		default:
 			return response(200, `{"ok":true}`), nil
 		}
@@ -240,6 +261,49 @@ func TestEnforceLabelSelectors(t *testing.T) {
 	}
 	if strings.Contains(string(got), `"two"`) || !strings.Contains(string(got), `"one"`) {
 		t.Fatalf("filtered thread=%s", got)
+	}
+	got, e = enforceLabel("gmail.threads.list", "Label_1", []byte(`{"threads":[{"id":"t1","historyId":"h1","snippet":"private content"}]}`))
+	if e != nil {
+		t.Fatal(e)
+	}
+	if strings.Contains(string(got), "private content") || !strings.Contains(string(got), "t1") {
+		t.Fatalf("sanitized list=%s", got)
+	}
+}
+
+func TestFinalAuditFailureReleasesNoBody(t *testing.T) {
+	f := &fakeFS{data: credential(), mode: 0600, uid: 1}
+	a := &audit{gmailErrAt: 2}
+	var calls []string
+	c := connector(t, "pa", f, a, &calls)
+	body, e := c.ListLabels(context.Background(), "")
+	if e == nil || body != nil {
+		t.Fatalf("body=%s err=%v", body, e)
+	}
+}
+
+func TestCredentialReadUsesValidatedOpenHandle(t *testing.T) {
+	f := &fakeFS{data: credential(), mode: 0600, uid: 1}
+	f.afterOpen = func() { f.data = []byte(`{"type":"authorized_user","scopes":["https://mail.google.com/"]}`) }
+	a := &audit{}
+	var calls []string
+	c := connector(t, "pa", f, a, &calls)
+	if _, e := c.ListLabels(context.Background(), ""); e != nil {
+		t.Fatalf("validated descriptor was replaced: %v", e)
+	}
+}
+
+func TestLogicalLabelBindingUsesProviderID(t *testing.T) {
+	f := &fakeFS{data: credential(), mode: 0600, uid: 1}
+	a := &audit{}
+	var calls []string
+	c := connector(t, "pa", f, a, &calls)
+	c.cfg.LabelIDs = map[string]string{"inbox-label": "INBOX"}
+	if _, e := c.ListMessages(context.Background(), "inbox-label"); e != nil {
+		t.Fatal(e)
+	}
+	if !strings.Contains(calls[len(calls)-1], "labelIds=INBOX") {
+		t.Fatalf("calls=%v", calls)
 	}
 }
 

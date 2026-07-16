@@ -161,3 +161,18 @@ and threads. It rejects send, modify, delete, unknown operations, and resource
 IDs that could alter the provider path. Audit events contain policy and method
 metadata only—not token material, response bodies, account addresses, or host
 paths. Provider and refresh failures are returned as sanitized error classes.
+
+The production entry point is `flotilla gmail --grant <grant.yaml> <operation>`.
+It derives the effective seat from `FLOTILLA_AGENT` and refuses any value other
+than the roster principal `pa`; it does not accept a caller-principal flag.
+Approved account, logical account resource, audit path, and logical-label to
+Gmail-ID bindings are host-private configuration in
+`FLOTILLA_PA_GMAIL_APPROVED_ACCOUNT`, `FLOTILLA_PA_GMAIL_ACCOUNT_RESOURCE`,
+`FLOTILLA_PA_GMAIL_AUDIT_FILE`, and `FLOTILLA_PA_GMAIL_LABEL_BINDINGS`. The last
+is a JSON object such as `{"inbox-label":"INBOX"}`; grant files continue to use
+portable logical labels while provider IDs remain host-local.
+
+Credential loading opens the OAuth file once with no-follow semantics, validates
+type, owner, and mode from that descriptor, and reads the same descriptor. A
+restricted thread listing is reduced to thread IDs/history IDs; provider
+snippets are never released as proof of a message-scoped label.
