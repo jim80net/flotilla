@@ -35,6 +35,7 @@ actions:
   - gmail.threads.list
   - gmail.threads.get
   - gmail.labels.list
+  - gmail.labels.get
 resources:
   accounts:
     - operator-primary
@@ -144,3 +145,19 @@ attestation can only narrow an otherwise-valid desk/flotilla grant.
 
 Any move beyond `gmail.readonly` is a new grant decision. Draft, send, modify,
 delete, delegation, and domain-wide access never inherit from the read grant.
+
+### Read-only Gmail broker
+
+The first provider broker is bound to effective principal `pa` and grant
+`pa-gmail-readonly`. Every operation completes grant authorization and its
+metadata-only decision audit before consulting `FLOTILLA_PA_GMAIL_OAUTH_FILE`.
+The file must be a regular, non-symlink file owned by the broker's OS identity
+with mode `0600`, and must contain a strict Google `authorized_user` document.
+
+The broker refreshes only an exact `gmail.readonly` token, then verifies the
+approved account with `users.getProfile` and performs a `users.labels.list`
+smoke check. Its callable surface is limited to list/get for labels, messages,
+and threads. It rejects send, modify, delete, unknown operations, and resource
+IDs that could alter the provider path. Audit events contain policy and method
+metadata only—not token material, response bodies, account addresses, or host
+paths. Provider and refresh failures are returned as sanitized error classes.
