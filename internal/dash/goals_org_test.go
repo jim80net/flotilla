@@ -112,6 +112,40 @@ func TestMaterializeDesk_UsesOrgParentHub(t *testing.T) {
 	}
 }
 
+func TestMaterializeDesks_ReusesLegacyAuthoredOwnerRoot(t *testing.T) {
+	in := GoalsInputs{FileOK: true, File: GoalsFile{Version: 1, Goals: []Goal{
+		{ID: "office-root", Title: "Office", Scope: ScopeProject, Owner: "office-xo"},
+		{ID: "venture", Title: "Venture", Scope: ScopeProject, Parent: "office-root", Owner: "office-xo"},
+		{ID: "trading", Title: "Trading", Scope: ScopeProject, Parent: "office-root", Owner: "office-xo"},
+	}}, MetaXO: "cos", Channels: []DeskChannel{{ChannelID: "office", XOAgent: "office-xo", Members: []string{"cos", "office-desk", "foreign-desk"}}},
+		OrgParents: map[string]string{"office-xo": "cos", "office-desk": "office-xo", "foreign-desk": "cos"}, OrgSource: "derived"}
+	doc := BuildGoals(in)
+	byOwner := map[string][]RenderedGoal{}
+	byID := map[string]RenderedGoal{}
+	for _, g := range doc.Goals {
+		byOwner[g.Owner] = append(byOwner[g.Owner], g)
+		byID[g.ID] = g
+	}
+	if _, ok := byID["hub:office-xo"]; ok {
+		t.Fatal("duplicate synthetic office hub created")
+	}
+	if got := byID["office-root"].Parent; got != "hub:cos" {
+		t.Fatalf("authored office parent=%q", got)
+	}
+	if got := byOwner["office-desk"][0].Parent; got != "office-root" {
+		t.Fatalf("office desk parent=%q", got)
+	}
+	if got := byOwner["foreign-desk"][0].Parent; got != "hub:cos" {
+		t.Fatalf("foreign desk parent=%q", got)
+	}
+	if byID["venture"].Parent != "office-root" || byID["trading"].Parent != "office-root" {
+		t.Fatalf("same-owner subtree split venture=%q trading=%q", byID["venture"].Parent, byID["trading"].Parent)
+	}
+	if len(doc.OrgDiagnostics) != 0 {
+		t.Fatalf("diagnostics=%v", doc.OrgDiagnostics)
+	}
+}
+
 func TestMaterializeDesks_FollowsOrgHierarchyWithoutFirstRootFallback(t *testing.T) {
 	in := GoalsInputs{
 		FileOK: true,

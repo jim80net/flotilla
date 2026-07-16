@@ -546,6 +546,12 @@ func orgOwnerDiagnostics(doc *GoalsDoc, in GoalsInputs) []string {
 		}
 		ownerKey := strings.ToLower(strings.TrimSpace(g.Owner))
 		parentOwner := strings.ToLower(strings.TrimSpace(pg.Owner))
+		// Authored purpose/subtree nodes may intentionally retain the same owner as
+		// their containing product hub. This is not a reporting edge and therefore
+		// cannot disagree with org truth.
+		if ownerKey == parentOwner {
+			continue
+		}
 		orgParent := strings.ToLower(strings.TrimSpace(in.OrgParents[ownerKey]))
 		if orgParent == "" {
 			continue // channels/org assert no parent for this owner
@@ -750,15 +756,15 @@ func materializeRosterDesks(doc *GoalsDoc, in GoalsInputs) {
 			}
 		}
 	}
-	// Authored flotilla hubs participate in the same org truth. A product-XO goal
-	// authored as a root becomes a child of its org-parent hub rather than remaining
-	// a peer root whose desks can be swallowed by whichever root was listed first.
+	// Every suitable authored owner hub participates in org truth, even when its
+	// rendered legacy scope is project/desk. Reuse and reparent it rather than
+	// creating a parallel synthetic hub for the same owner.
 	for i := range doc.Goals {
 		g := &doc.Goals[i]
-		if g.Scope != "flotilla" && g.Scope != "fleet" {
+		owner := strings.ToLower(strings.TrimSpace(g.Owner))
+		if id, _, ok := hubNodeForOwner(doc, owner); !ok || id != g.ID {
 			continue
 		}
-		owner := strings.ToLower(strings.TrimSpace(g.Owner))
 		parentOwner := strings.ToLower(strings.TrimSpace(in.OrgParents[owner]))
 		if owner == "" || parentOwner == "" {
 			continue
@@ -903,6 +909,15 @@ func hubNodeForOwner(doc *GoalsDoc, ownerKey string) (id string, depth int, ok b
 			continue
 		}
 		if g.Scope == "flotilla" || g.Scope == "fleet" {
+			return g.ID, g.Depth, true
+		}
+	}
+	// Legacy goals files may render a product root as project/desk scope. A root
+	// owned by the coordinator is a safe hierarchy container; nested leaf tasks
+	// are deliberately excluded.
+	for i := range doc.Goals {
+		g := &doc.Goals[i]
+		if strings.ToLower(strings.TrimSpace(g.Owner)) == ownerKey && g.Source != "roster" && isOrgContainerScope(g.Scope) && (g.Parent == "" || len(g.Children) > 0) {
 			return g.ID, g.Depth, true
 		}
 	}
