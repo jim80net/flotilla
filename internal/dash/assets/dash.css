@@ -434,6 +434,7 @@ code {
 }
 .thread-window-more { justify-self: center; padding: .38rem .8rem; }
 .thread-message-toggle { justify-self: start; margin: -.3rem .7rem .15rem; padding: .24rem .65rem; }
+.thread-message-toggle[hidden] { display: none; }
 .thread-window-more:hover,
 .thread-message-toggle:hover { border-color: var(--cyan); }
 .thread-load-error {

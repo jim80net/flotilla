@@ -22,10 +22,13 @@ func TestMobileConversationsWindowContract689(t *testing.T) {
 			t.Errorf("mobile Conversations HTML missing %q", marker)
 		}
 	}
-	for _, marker := range []string{"MOBILE_THREAD_INITIAL", "data-thread-window-more", "mobileThreadHidden > 0"} {
+	for _, marker := range []string{"MOBILE_THREAD_INITIAL", "data-thread-window-more", "mobileThreadHidden > 0", "syncThreadMessageToggles", "body.scrollHeight <= body.clientHeight + 1"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("mobile Conversations renderer missing %q", marker)
 		}
+	}
+	if strings.Contains(js, "threadItemText(it).length > 240") {
+		t.Error("mobile Conversations must not use a character-count proxy for rendered overflow")
 	}
 	for _, marker := range []string{".thread-window-item:not(.is-expanded) .thread-gist", ".conv-nav:not(.mobile-expanded) .conv-rail-list"} {
 		if !strings.Contains(css, marker) {
@@ -69,9 +72,18 @@ from playwright.sync_api import sync_playwright, expect
 url, evidence_dir = sys.argv[1], sys.argv[2]
 base = datetime(2026, 7, 15, 9, 0, tzinfo=timezone.utc)
 long_text = "Generic coordination update with enough detail to exercise the mobile clamp. " * 12
+boundary_text = "\n".join([
+    "Alpha boundary line one wraps safely.",
+    "Beta boundary line two stays generic.",
+    "Gamma boundary line three is readable.",
+    "Delta boundary line four is visible.",
+    "Epsilon boundary line five must expand.",
+    "Zeta boundary line six closes the fixture.",
+])
+assert len(boundary_text) < 240
 mirror = {"agent": "xo", "entries": [
     {"ts": (base + timedelta(minutes=i)).isoformat().replace("+00:00", "Z"),
-     "agent": "xo", "info": (long_text if i >= 195 else "Alpha synthetic session update %03d." % i),
+     "agent": "xo", "info": (boundary_text if i == 199 else (long_text if i >= 195 else "Alpha synthetic session update %03d." % i)),
      "debug": {}, "suppressed": False}
     for i in range(200)
 ]}
@@ -100,6 +112,16 @@ with sync_playwright() as p:
         expect(more).to_be_visible()
         expect(page.locator("#thread-load-earlier")).to_be_hidden()
         expect(page.locator("#conv-thread > .thread-window-item")).to_have_count(3)
+        boundary = page.locator("#conv-thread > .thread-window-item").last
+        boundary_body = boundary.locator(".thread-mirror-body")
+        boundary_toggle = boundary.locator("[data-thread-expand]")
+        expect(boundary_toggle).to_be_visible()
+        boundary_metrics = boundary_body.evaluate("el => ({length: el.innerText.length, scroll: el.scrollHeight, client: el.clientHeight})")
+        if boundary_metrics["length"] >= 240 or boundary_metrics["scroll"] <= boundary_metrics["client"]:
+            raise AssertionError("390px boundary fixture must be sub-240 and visibly clamped: %r" % boundary_metrics)
+        page.evaluate("() => { window.flotillaDash.showView('goals'); window.dispatchEvent(new Event('resize')); }")
+        page.evaluate("() => window.flotillaDash.showView('conversations')")
+        expect(page.locator("#conv-thread > .thread-window-item").last.locator("[data-thread-expand]")).to_be_visible()
         metrics = page.evaluate("""() => ({
           height: document.documentElement.scrollHeight,
           innerHeight: innerHeight,
@@ -133,6 +155,26 @@ with sync_playwright() as p:
             page.locator("[data-thread-window-more]").click()
         expect(page.locator("#thread-load-earlier")).to_be_visible()
 
+        narrow = browser.new_page(viewport={"width": 360, "height": 800})
+        narrow.set_default_timeout(8000)
+        narrow.add_init_script("window.EventSource = undefined")
+        narrow.route("**/api/history?*", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps(history)))
+        narrow.route("**/api/session-mirror?*", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps(mirror)))
+        narrow.goto(url, wait_until="domcontentloaded")
+        narrow_boundary = narrow.locator("#conv-thread > .thread-window-item").last
+        narrow_body = narrow_boundary.locator(".thread-mirror-body")
+        expect(narrow_boundary.locator("[data-thread-expand]")).to_be_visible()
+        narrow_metrics = narrow_body.evaluate("el => ({length: el.innerText.length, scroll: el.scrollHeight, client: el.clientHeight})")
+        if narrow_metrics["length"] >= 240 or narrow_metrics["scroll"] <= narrow_metrics["client"]:
+            raise AssertionError("360px boundary fixture must be sub-240 and visibly clamped: %r" % narrow_metrics)
+        narrow_doc = narrow.evaluate("() => ({height: document.documentElement.scrollHeight, innerHeight, width: document.documentElement.scrollWidth, innerWidth})")
+        if narrow_doc["height"] > narrow_doc["innerHeight"] * 2 or narrow_doc["width"] > narrow_doc["innerWidth"]:
+            raise AssertionError("360px initial document exceeds mobile bounds: %r" % narrow_doc)
+        print("MOBILE_360_METRICS=" + json.dumps({"body": narrow_metrics, "document": narrow_doc}, sort_keys=True))
+        if evidence_dir:
+            narrow.screenshot(path=os.path.join(evidence_dir, "boundary-360.png"), full_page=True)
+        narrow.close()
+
         # Desktop retains the complete bounded client timeline and its existing
         # fixed-shell thread scroll; the DOM window is intentionally phone-only.
         desktop = browser.new_page(viewport={"width": 1440, "height": 900})
@@ -157,7 +199,7 @@ with sync_playwright() as p:
 		t.Log(fmt.Sprintf("%s", out))
 	}
 	if evidenceDir != "" {
-		for _, name := range []string{"initial-390.png", "expanded-390.png"} {
+		for _, name := range []string{"initial-390.png", "expanded-390.png", "boundary-360.png"} {
 			path := filepath.Join(evidenceDir, name)
 			if info, err := os.Stat(path); err != nil || info.Size() == 0 {
 				t.Fatalf("rendered evidence missing at %q: %v", path, err)

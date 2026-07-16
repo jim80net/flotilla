@@ -747,20 +747,27 @@
     if (it.kind === "optimistic") return "o:" + (it.o.id || "") + ":" + cheapHash(it.o.body || "");
     return "l:" + (it.e.parsed ? it.e.time : "") + ":" + cheapHash(it.e.parsed ? (it.e.body || it.e.gist) : it.e.raw);
   }
-  function threadItemText(it) {
-    if (it.kind === "mirror") return String(it.m.info || "");
-    if (it.kind === "optimistic") return String(it.o.body || "");
-    return String(it.e.parsed ? (it.e.body || it.e.gist || "") : (it.e.raw || ""));
-  }
   function threadItemHTML(it) {
     var key = threadItemKey(it);
     var expanded = !!expandedThreadMessages[key];
     var message = it.kind === "mirror" ? threadMirrorMsg(it.m) :
       (it.kind === "optimistic" ? threadOptimisticMsg(it.o) : threadLedgerMsg(it.e));
-    var toggle = mobileThreadWindowActive() && threadItemText(it).length > 240
-      ? '<button type="button" class="thread-message-toggle" data-thread-expand="' + escapeHtml(key) + '" aria-expanded="' + String(expanded) + '">' + (expanded ? "Show less" : "Show full") + "</button>"
+    // Every clamp candidate gets a control in the DOM. syncThreadMessageToggles
+    // reveals it from measured overflow, never a character-count proxy (#689).
+    var toggle = mobileThreadWindowActive()
+      ? '<button type="button" class="thread-message-toggle" data-thread-expand="' + escapeHtml(key) + '" aria-expanded="' + String(expanded) + '"' + (expanded ? "" : " hidden") + '>' + (expanded ? "Show less" : "Show full") + "</button>"
       : "";
     return '<div class="thread-window-item' + (expanded ? " is-expanded" : "") + '" data-thread-item-key="' + escapeHtml(key) + '">' + message + toggle + "</div>";
+  }
+  function syncThreadMessageToggles(thread) {
+    if (!thread || !mobileThreadWindowActive()) return;
+    thread.querySelectorAll(".thread-window-item").forEach(function (item) {
+      var body = item.querySelector(".thread-gist, .thread-mirror-body");
+      var toggle = item.querySelector("[data-thread-expand]");
+      if (!body || !toggle) return;
+      var expanded = item.classList.contains("is-expanded");
+      toggle.hidden = !expanded && body.scrollHeight <= body.clientHeight + 1;
+    });
   }
   function appendOptimisticOutbound(target, body) {
     optimisticOut.push({
@@ -867,6 +874,8 @@
       ? '<button type="button" class="thread-window-more" data-thread-window-more>↑ Show ' + Math.min(MOBILE_THREAD_BATCH, mobileThreadHidden) + " earlier · " + mobileThreadHidden + " cached</button>"
       : "";
     thread.innerHTML = errorNotice + coordinatorHistoryNote(items) + windowControl + visibleItems.map(threadItemHTML).join("");
+    syncThreadMessageToggles(thread);
+    requestAnimationFrame(function () { syncThreadMessageToggles(thread); });
     // Latest-at-bottom scroll discipline (F#383 criterion 5): if the operator is pinned to
     // the bottom (the default, and whenever they scroll back down), keep the newest message
     // in view; if they've scrolled UP into history, don't yank them — surface a jump-to-latest
@@ -1400,6 +1409,9 @@
     // Conversations is the fixed single-scroll app-shell (#326): only on this tab
     // does the page itself stop scrolling. Goals/Issues/Decisions keep natural page scroll.
     document.body.classList.toggle("conv-shell-active", view === "conversations");
+    if (view === "conversations") {
+      requestAnimationFrame(function () { syncThreadMessageToggles(el("conv-thread")); });
+    }
     if (window.flotillaWorkContext) window.flotillaWorkContext.onViewChange(view);
     if (view === "goals" && window.flotillaGoals) window.flotillaGoals.show();
     if (view === "issues" && window.flotillaTracker) window.flotillaTracker.show();
@@ -1751,6 +1763,7 @@
         renderHistoryPager(cache.history);
       });
     }
+    window.addEventListener("resize", function () { syncThreadMessageToggles(thread); });
   })();
 
   (function wireHistoryPager() {
