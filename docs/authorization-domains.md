@@ -1,8 +1,9 @@
 # Authorization Domains
 
-> **Design record — proposed.** This document defines the product boundary and
-> first grant. The generic grant resolver and broker are not shipped yet. The
-> PA-only Gmail runbook documents the narrower interim deployment.
+> **Design record.** The schema-v1 grant loader and deny-by-default resolver are
+> shipped as a secret-free internal broker seam. Provider brokers and operator
+> surfaces remain later delivery slices. The PA-only Gmail runbook documents
+> the narrower interim deployment.
 
 An Authorization Domain is a named trust boundary that receives capabilities
 without receiving the fleet's whole secret environment. Domains answer two
@@ -51,6 +52,15 @@ The committed grant contains a logical `secret_ref`, never a filesystem path,
 client secret, refresh token, account address, node address, or deployment
 identifier. A host-local resolver binds that reference to secret material.
 
+Schema v1 is strict: each file contains exactly one grant, unknown fields and
+additional YAML documents are errors, and a set of files is adopted only when
+every grant validates and every grant ID is unique. Principals must name a
+roster desk or flotilla coordinator. Capabilities, actions, OAuth scopes, and
+resource selectors use exact identifiers—wildcards and implicit expansion are
+not accepted. Optional `expires_at` and `revoked_at` values are RFC 3339
+timestamps; either becomes a denial once reached. `revoked: true` denies
+immediately.
+
 `oauth_scopes` and `actions` are deliberately separate. OAuth is the provider's
 outer ceiling; the broker's action allowlist is the product boundary. Google
 classifies `gmail.readonly` as a **restricted** scope and describes it as access
@@ -73,8 +83,17 @@ Resolution is deny-by-default:
    operation.
 6. Emit a metadata-only audit result without message bodies, tokens, or secrets.
 
+An allow is released to a provider broker only after the metadata audit sink
+accepts its decision event; an audit failure therefore fails closed. The opaque
+authorization can pass the grant's logical `secret_ref` to a broker-internal
+lookup, but denied requests cannot invoke that lookup. Decision events contain
+only time, principal, capability, action, grant ID, result, and reason.
+
 Grants are additive; absence is denial. A child desk does not weaken an
 ancestor's constraint. A node may narrow authority but never broaden it.
+When a grant lists labels, the request must name one of those labels; an empty
+label is not evidence of an allowed selector. An empty grant label list means
+the grant has no narrower label selector yet.
 
 ## Secret boundary
 
@@ -109,6 +128,9 @@ binds the device identity to:
 
 Effective authority is `(desk + flotilla grants) ∩ node capabilities`. Secrets
 remain on the node and operations cross the authenticated broker interface.
+Node resolution requires an explicit attestation containing the requested
+capability, action, scope, and resource. Missing attestation is denial, and an
+attestation can only narrow an otherwise-valid desk/flotilla grant.
 
 ## Delivery sequence
 
