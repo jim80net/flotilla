@@ -1450,6 +1450,15 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .goals-done-lab { font-family: var(--display); font-size: .84rem; color: var(--ink); letter-spacing: .02em; }
 .goals-done-count { font-size: .62rem; color: var(--ok); border: 1px solid color-mix(in srgb, var(--ok) 40%, transparent); border-radius: 999px; padding: 1px 7px; font-variant-numeric: tabular-nums; }
 .goals-done-count:empty { display: none; }
+.goals-done.is-unavailable > summary { cursor: default; pointer-events: none; }
+.goals-done.is-unavailable > summary::before { content: "—"; transform: none; }
+.goals-done.is-unavailable .goals-done-count {
+  display: inline-block; color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, transparent);
+}
+.goals-mobile-summary.is-unavailable .goals-situation,
+.goals-mobile-summary.is-unavailable .goals-primary,
+.goals-mobile-summary.is-unavailable .grealized-slider { display: none; }
+.goals-data-unavailable .goals-head-right { display: none; }
 .goals-done-list { padding: 0 .6rem .7rem; display: grid; gap: 4px; }
 .gdone-row { display: flex; align-items: baseline; gap: .55rem; width: 100%; text-align: left; background: none; border: 0; border-radius: var(--r-sm); padding: .4rem .5rem; cursor: pointer; font: inherit; color: var(--ink-2); }
 .gdone-row:hover { background: color-mix(in srgb, var(--ok) 8%, transparent); }
@@ -1684,7 +1693,10 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   width: 22px; height: 22px; padding: 0; border-radius: 6px; border: 1px solid var(--line);
   background: var(--abyss-2); color: var(--ink-3); cursor: pointer; line-height: 1;
   display: inline-flex; align-items: center; justify-content: center; font-size: 1rem;
-  opacity: 0; pointer-events: none; transition: opacity .15s var(--ease);
+  /* Keep the real desktop hit target present before hover. A fully transparent,
+     pointer-disabled target lets the counter-scaled wrapper/card win Chromium's
+     actionability check, so a normal click never reaches the advertised menu. */
+  opacity: .42; pointer-events: auto; transition: opacity .15s var(--ease);
 }
 .gnode:hover .gnode-kebab, .gnode:focus-within .gnode-kebab, .gnode:focus-visible .gnode-kebab { opacity: 1; pointer-events: auto; }
 .gnode-kebab:hover { border-color: var(--cyan-dim); color: var(--cyan); }
@@ -1692,6 +1704,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   position: absolute; top: 100%; right: 0; margin-top: 4px; min-width: 9.5rem;
   background: var(--abyss-2); border: 1px solid var(--line); border-radius: var(--r-sm);
   box-shadow: var(--shadow-lg); z-index: 4; padding: 4px; display: flex; flex-direction: column; gap: 2px;
+  pointer-events: auto;
 }
 /* The menu is CLOSED by default and opens only when the kebab clears its `hidden` attribute
    (goals.js). An author `display:flex` OVERRIDES the UA `[hidden]{display:none}`, which made
