@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -517,7 +516,7 @@ func BuildGoals(in GoalsInputs) GoalsDoc {
 	relabelPending(&doc, byID)
 	materializeRosterDesks(&doc, in)
 	doc.Collaborations = buildCollaborations(&doc)
-	doc.OrgDiagnostics = orgOwnerDiagnostics(&doc, in)
+	doc.OrgDiagnostics = append(doc.OrgDiagnostics, orgOwnerDiagnostics(&doc, in)...)
 	return doc
 }
 
@@ -655,7 +654,6 @@ func materializeRosterDesks(doc *GoalsDoc, in GoalsInputs) {
 	if len(in.Channels) == 0 {
 		return
 	}
-	materializeMissingOrgHubs(doc, in)
 	// Agents already on the map (authored as a goal's owner or conversation_agent) must
 	// NOT get a duplicate card. The XO is the hub, not a desk card.
 	represented := make(map[string]bool)
@@ -700,14 +698,83 @@ func materializeRosterDesks(doc *GoalsDoc, in GoalsInputs) {
 		}
 	}
 
-	// Collect the desks to add, grouped by their hub, so they can be INSERTED right after
-	// their hub node in doc.Goals — keeping the documented DFS ordering (a parent always
-	// immediately precedes its children) rather than appended at the end.
-	byHub := make(map[string][]RenderedGoal)
-	var noHub []RenderedGoal
+	// Materialize only the org-parent hubs required by real leaf desks. This closes
+	// the gap where the DAG knows "desk → product XO → coordinator" but the goals
+	// file has no authored node for one of those parents. Missing hierarchy becomes
+	// explicit instead of silently borrowing the first unrelated root (#766).
+	ensuring := make(map[string]bool)
+	var ensureOrgHub func(string) (string, int, bool)
+	ensureOrgHub = func(owner string) (string, int, bool) {
+		owner = strings.ToLower(strings.TrimSpace(owner))
+		if owner == "" {
+			return "", -1, false
+		}
+		if id, depth, ok := hubNodeForOwner(doc, owner); ok {
+			return id, depth, true
+		}
+		if ensuring[owner] { // the org loader validates cycles; remain fail-closed here too
+			return "", -1, false
+		}
+		ensuring[owner] = true
+		parentID, parentDepth := "", -1
+		if parentOwner := strings.ToLower(strings.TrimSpace(in.OrgParents[owner])); parentOwner != "" {
+			if id, depth, ok := ensureOrgHub(parentOwner); ok {
+				parentID, parentDepth = id, depth
+			}
+		}
+		node := RenderedGoal{
+			ID: uniqueID("hub:" + owner), Title: owner, Scope: "flotilla",
+			Owner: owner, ConversationAgent: owner, Parent: parentID,
+			Layout: &GoalLayout{HubCenter: true}, Status: string(StatusActive),
+			StatusDisplay: "active", Depth: parentDepth + 1,
+			Children: []string{}, WorkItems: []RenderedWorkItem{}, Source: "roster",
+		}
+		doc.Goals = append(doc.Goals, node)
+		countNode(&doc.Counts, node)
+		represented[owner] = true
+		ensuring[owner] = false
+		return node.ID, node.Depth, true
+	}
+	for _, ch := range in.Channels {
+		xo := strings.ToLower(strings.TrimSpace(ch.XOAgent))
+		for _, member := range ch.Members {
+			key := strings.ToLower(strings.TrimSpace(member))
+			if key == "" || key == xo || coordinators[key] || represented[key] {
+				continue
+			}
+			// The channel owner is itself an explicit hub. Materialize it when
+			// authored goals omitted it, even if this desk has no org edge yet.
+			ensureOrgHub(xo)
+			if orgP := strings.ToLower(strings.TrimSpace(in.OrgParents[key])); orgP != "" {
+				ensureOrgHub(orgP)
+			}
+		}
+	}
+	// Authored flotilla hubs participate in the same org truth. A product-XO goal
+	// authored as a root becomes a child of its org-parent hub rather than remaining
+	// a peer root whose desks can be swallowed by whichever root was listed first.
+	for i := range doc.Goals {
+		g := &doc.Goals[i]
+		if g.Scope != "flotilla" && g.Scope != "fleet" {
+			continue
+		}
+		owner := strings.ToLower(strings.TrimSpace(g.Owner))
+		parentOwner := strings.ToLower(strings.TrimSpace(in.OrgParents[owner]))
+		if owner == "" || parentOwner == "" {
+			continue
+		}
+		if id, _, ok := hubNodeForOwner(doc, parentOwner); ok && id != g.ID {
+			g.Parent = id
+		}
+	}
+
+	// Collect desks, then rebuild one parent-consistent DFS stream. Grouping by the
+	// resolved deskHubID (not the original channel fallback) is load-bearing: using
+	// hubID here previously wrote Parent=product-XO while physically nesting under FO.
+	var desks []RenderedGoal
 	seen := make(map[string]bool) // a desk in multiple channels is materialized once
 	for _, ch := range in.Channels {
-		hubID, hubDepth := deskHubFor(doc, ch, in.MetaXO)
+		hubID, hubDepth := deskHubFor(doc, ch)
 		xo := strings.ToLower(strings.TrimSpace(ch.XOAgent))
 		for _, m := range ch.Members {
 			name := strings.TrimSpace(m)
@@ -740,94 +807,82 @@ func materializeRosterDesks(doc *GoalsDoc, in GoalsInputs) {
 			}
 			countNode(&doc.Counts, node)
 			if deskHubID == "" {
-				noHub = append(noHub, node) // no hub → a root, emitted at the end
-			} else {
-				byHub[deskHubID] = append(byHub[deskHubID], node)
+				doc.OrgDiagnostics = append(doc.OrgDiagnostics,
+					fmt.Sprintf("roster desk %q has no explicit channel or org-parent goals hub; rendered as a root", name))
 			}
+			desks = append(desks, node)
 		}
 	}
-	if len(byHub) == 0 && len(noHub) == 0 {
+	if len(desks) == 0 {
+		reorderRenderedGoals(doc)
 		return
 	}
+	doc.Goals = append(doc.Goals, desks...)
+	reorderRenderedGoals(doc)
+}
 
-	// Rebuild the stream: each hub node, then its materialized desks immediately after it
-	// (and recorded as its children); hub-less desks become trailing roots.
-	out := make([]RenderedGoal, 0, len(doc.Goals)+len(noHub))
+// reorderRenderedGoals makes Parent authoritative, reconstructing Children and
+// depth before emitting a stable DFS in the prior sibling order.
+func reorderRenderedGoals(doc *GoalsDoc) {
+	if doc == nil || len(doc.Goals) == 0 {
+		return
+	}
+	byID := make(map[string]*RenderedGoal, len(doc.Goals))
+	order := make([]string, 0, len(doc.Goals))
 	for i := range doc.Goals {
-		g := doc.Goals[i]
-		if desks := byHub[g.ID]; len(desks) > 0 {
-			for _, d := range desks {
-				g.Children = append(g.Children, d.ID)
-			}
-			out = append(out, g)
-			out = append(out, desks...)
+		g := &doc.Goals[i]
+		g.Children = []string{}
+		byID[g.ID] = g
+		order = append(order, g.ID)
+	}
+	roots := make([]string, 0)
+	for _, id := range order {
+		g := byID[id]
+		if g.Parent == "" || byID[g.Parent] == nil {
+			g.Parent = ""
+			roots = append(roots, id)
 			continue
 		}
-		out = append(out, g)
+		byID[g.Parent].Children = append(byID[g.Parent].Children, id)
 	}
-	out = append(out, noHub...)
+	// Preserve the established stream contract: live roster desks sit directly
+	// after their hub, before authored purpose/task descendants. Stable partition
+	// keeps every other sibling in authored/materialization order.
+	for _, g := range byID {
+		if len(g.Children) < 2 {
+			continue
+		}
+		front := make([]string, 0, len(g.Children))
+		back := make([]string, 0, len(g.Children))
+		for _, child := range g.Children {
+			c := byID[child]
+			if c != nil && c.Source == "roster" && c.Scope == "desk" {
+				front = append(front, child)
+			} else {
+				back = append(back, child)
+			}
+		}
+		g.Children = append(front, back...)
+	}
+	out := make([]RenderedGoal, 0, len(doc.Goals))
+	var emit func(string, int)
+	emit = func(id string, depth int) {
+		g := byID[id]
+		g.Depth = depth
+		out = append(out, *g)
+		for _, child := range g.Children {
+			emit(child, depth+1)
+		}
+	}
+	for _, root := range roots {
+		emit(root, 0)
+	}
 	doc.Goals = out
 }
 
-// materializeMissingOrgHubs ensures an org parent can own its desk spokes even
-// when fleet-goals.yaml has not authored a corresponding coordinator node. It
-// builds the chain parent-first and never guesses an unrelated depth-0 root.
-func materializeMissingOrgHubs(doc *GoalsDoc, in GoalsInputs) {
-	if doc == nil || len(in.OrgParents) == 0 {
-		return
-	}
-	needed := map[string]bool{}
-	for desk, parent := range in.OrgParents {
-		if strings.TrimSpace(desk) != "" && strings.TrimSpace(parent) != "" {
-			needed[strings.ToLower(strings.TrimSpace(parent))] = true
-		}
-	}
-	visiting := map[string]bool{}
-	var ensure func(string) (string, int)
-	ensure = func(owner string) (string, int) {
-		if id, depth, ok := hubNodeForOwner(doc, owner); ok {
-			return id, depth
-		}
-		if visiting[owner] {
-			return "", -1
-		}
-		visiting[owner] = true
-		defer delete(visiting, owner)
-		parentID, parentDepth := "", -1
-		if p := strings.ToLower(strings.TrimSpace(in.OrgParents[owner])); p != "" {
-			parentID, parentDepth = ensure(p)
-		}
-		id := "hub:" + owner
-		for i := range doc.Goals {
-			if doc.Goals[i].ID == id {
-				return id, doc.Goals[i].Depth
-			}
-		}
-		n := RenderedGoal{ID: id, Title: owner, Scope: "flotilla", Owner: owner, ConversationAgent: owner, Parent: parentID, Depth: parentDepth + 1, Status: string(StatusActive), StatusDisplay: "active", Children: []string{}, WorkItems: []RenderedWorkItem{}, Source: "roster"}
-		if parentID != "" {
-			for i := range doc.Goals {
-				if doc.Goals[i].ID == parentID {
-					doc.Goals[i].Children = append(doc.Goals[i].Children, id)
-					break
-				}
-			}
-		}
-		doc.Goals = append(doc.Goals, n)
-		countNode(&doc.Counts, n)
-		return id, n.Depth
-	}
-	owners := make([]string, 0, len(needed))
-	for o := range needed {
-		owners = append(owners, o)
-	}
-	sort.Strings(owners)
-	for _, o := range owners {
-		ensure(o)
-	}
-}
-
-// hubNodeForOwner finds a goals map node owned by agent (lowercased), preferring
-// flotilla/desk hub layout. Used to align roster desk spokes with org DAG parents.
+// hubNodeForOwner finds a real goals hub owned by agent (lowercased). A task or
+// arbitrary leaf owned by an XO is not a hierarchy container; callers materialize
+// a dedicated org hub instead of hanging desks from that leaf.
 func hubNodeForOwner(doc *GoalsDoc, ownerKey string) (id string, depth int, ok bool) {
 	if ownerKey == "" || doc == nil {
 		return "", 0, false
@@ -851,20 +906,12 @@ func hubNodeForOwner(doc *GoalsDoc, ownerKey string) (id string, depth int, ok b
 			return g.ID, g.Depth, true
 		}
 	}
-	for i := range doc.Goals {
-		g := &doc.Goals[i]
-		if strings.ToLower(strings.TrimSpace(g.Owner)) == ownerKey {
-			return g.ID, g.Depth, true
-		}
-	}
 	return "", 0, false
 }
 
-// deskHubFor picks the node a channel's materialized desks attach under: a flotilla goal
-// bound to the channel via topology_channel_id, else a node owned by the channel XO.
-// Returns ("", -1) rather than guessing an unrelated depth-0 root.
-// (parent "", depth 0) so they still appear rather than vanish.
-func deskHubFor(doc *GoalsDoc, ch DeskChannel, metaXO string) (string, int) {
+// deskHubFor picks only an explicit channel hub: topology_channel_id first, then
+// a hub owned by that channel's XO. It never borrows a global hub or first root.
+func deskHubFor(doc *GoalsDoc, ch DeskChannel) (string, int) {
 	for i := range doc.Goals {
 		if g := &doc.Goals[i]; g.TopologyChannelID != "" && g.TopologyChannelID == ch.ChannelID {
 			return g.ID, g.Depth

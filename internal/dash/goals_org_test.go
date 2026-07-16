@@ -1,7 +1,6 @@
 package dash
 
 import (
-	"slices"
 	"strings"
 	"testing"
 )
@@ -113,45 +112,81 @@ func TestMaterializeDesk_UsesOrgParentHub(t *testing.T) {
 	}
 }
 
-func TestMaterializeDesks_NeverFallsBackToForeignRoot(t *testing.T) {
-	in := GoalsInputs{FileOK: true, File: GoalsFile{Version: 1, Goals: []Goal{
-		{ID: "office", Title: "Office", Scope: ScopeFlotilla, Owner: "office-xo"},
-		{ID: "product", Title: "Product", Scope: ScopeFlotilla, Owner: "product-xo"},
-	}}, MetaXO: "cos", Channels: []DeskChannel{
-		{ChannelID: "office-rollup", XOAgent: "office-xo", Members: []string{"cos", "foreign-desk"}},
-		{ChannelID: "product-home", XOAgent: "product-xo", Members: []string{"cos", "product-desk"}},
-	}, OrgParents: map[string]string{
-		"office-xo": "cos", "product-xo": "cos", "foreign-desk": "cos", "product-desk": "product-xo",
-	}, OrgSource: "derived"}
+func TestMaterializeDesks_FollowsOrgHierarchyWithoutFirstRootFallback(t *testing.T) {
+	in := GoalsInputs{
+		FileOK: true,
+		File: GoalsFile{Version: 1, Goals: []Goal{
+			// Deliberately list the finance hub first: historical deskHubFor used
+			// this first root as the fallback for every unrelated desk.
+			{ID: "finance", Title: "Finance", Scope: ScopeFlotilla, Owner: "finance-xo"},
+			{ID: "alpha", Title: "Alpha Product", Scope: ScopeFlotilla, Owner: "alpha-xo"},
+		}},
+		MetaXO: "coord",
+		Channels: []DeskChannel{
+			{ChannelID: "C_FIN", XOAgent: "finance-xo", Members: []string{"coord", "finance-desk", "alpha-desk", "beta-desk"}},
+			{ChannelID: "C_ALPHA", XOAgent: "alpha-xo", Members: []string{"coord", "alpha-desk"}},
+			{ChannelID: "C_BETA", XOAgent: "beta-xo", Members: []string{"coord", "beta-desk"}},
+		},
+		OrgParents: map[string]string{
+			"finance-xo":   "coord",
+			"alpha-xo":     "coord",
+			"beta-xo":      "coord",
+			"finance-desk": "finance-xo",
+			"alpha-desk":   "alpha-xo",
+			"beta-desk":    "beta-xo",
+		},
+		OrgSource: "derived",
+	}
 	doc := BuildGoals(in)
-	byOwner := map[string]RenderedGoal{}
+	byOwner := make(map[string]RenderedGoal)
 	for _, g := range doc.Goals {
 		byOwner[g.Owner] = g
 	}
-	if got := byOwner["foreign-desk"].Parent; got != "hub:cos" {
-		t.Fatalf("foreign desk parent=%q want synthetic CoS hub", got)
+
+	if got := byOwner["coord"]; got.Parent != "" || got.Scope != "flotilla" || got.Source != "roster" {
+		t.Fatalf("materialized coordinator hub = %+v, want roster root hub", got)
 	}
-	if got := byOwner["product-desk"].Parent; got != "product" {
-		t.Fatalf("product desk parent=%q want product", got)
+	for owner, wantParent := range map[string]string{
+		"finance-xo": "hub:coord", "alpha-xo": "hub:coord", "beta-xo": "hub:coord",
+		"finance-desk": "finance", "alpha-desk": "alpha", "beta-desk": "hub:beta-xo",
+	} {
+		got, ok := byOwner[owner]
+		if !ok {
+			t.Errorf("missing owner %q", owner)
+			continue
+		}
+		if got.Parent != wantParent {
+			t.Errorf("%s parent=%q want %q", owner, got.Parent, wantParent)
+		}
 	}
-	if slices.Contains(byOwner["office-xo"].Children, byOwner["foreign-desk"].ID) {
-		t.Fatalf("office swallowed foreign desk: %#v", byOwner["office-xo"].Children)
+	finance := byOwner["finance-xo"]
+	for _, child := range finance.Children {
+		if child == byOwner["alpha-desk"].ID || child == byOwner["beta-desk"].ID {
+			t.Errorf("finance hub swallowed foreign desk %q; children=%v", child, finance.Children)
+		}
 	}
 	if len(doc.OrgDiagnostics) != 0 {
-		t.Fatalf("org diagnostics=%v", doc.OrgDiagnostics)
+		t.Errorf("aligned generic hierarchy produced diagnostics: %v", doc.OrgDiagnostics)
+	}
+	// Parent-first stream is the shared contract used by both the desktop map and
+	// phone outline; every non-root must follow its parent.
+	position := make(map[string]int)
+	for i, g := range doc.Goals {
+		position[g.ID] = i
+	}
+	for _, g := range doc.Goals {
+		if g.Parent != "" && position[g.Parent] >= position[g.ID] {
+			t.Errorf("parent %q must precede child %q; order=%v", g.Parent, g.ID, position)
+		}
 	}
 }
 
-func TestMaterializeDesks_MissingProductHubBuildsOrgChain(t *testing.T) {
-	in := GoalsInputs{FileOK: true, File: GoalsFile{Version: 1, Goals: []Goal{{ID: "office", Title: "Office", Scope: ScopeFlotilla, Owner: "office-xo"}}}, MetaXO: "cos",
-		Channels:   []DeskChannel{{ChannelID: "rollup", XOAgent: "office-xo", Members: []string{"alpha-desk"}}},
-		OrgParents: map[string]string{"alpha-desk": "alpha-xo", "alpha-xo": "cos"}, OrgSource: "derived"}
-	doc := BuildGoals(in)
-	byOwner := map[string]RenderedGoal{}
-	for _, g := range doc.Goals {
-		byOwner[g.Owner] = g
-	}
-	if byOwner["alpha-desk"].Parent != "hub:alpha-xo" || byOwner["alpha-xo"].Parent != "hub:cos" {
-		t.Fatalf("chain desk=%#v xo=%#v cos=%#v", byOwner["alpha-desk"], byOwner["alpha-xo"], byOwner["cos"])
+func TestDeskHubFor_DoesNotBorrowFirstRoot(t *testing.T) {
+	doc := GoalsDoc{Goals: []RenderedGoal{
+		{ID: "finance", Owner: "finance-xo", Scope: "flotilla", Depth: 0},
+		{ID: "alpha-task", Owner: "alpha-xo", Scope: "task", Depth: 1},
+	}}
+	if id, depth := deskHubFor(&doc, DeskChannel{ChannelID: "C_ALPHA", XOAgent: "alpha-xo"}); id != "" || depth != -1 {
+		t.Fatalf("unrelated channel borrowed first root or owner task: id=%q depth=%d", id, depth)
 	}
 }
