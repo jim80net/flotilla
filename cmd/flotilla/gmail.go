@@ -6,7 +6,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
+	"syscall"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/authdomain"
@@ -17,16 +19,27 @@ import (
 type gmailAuditFile struct{ path string }
 
 func (a gmailAuditFile) write(v any) error {
-	f, e := os.OpenFile(a.path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0600)
+	fd, e := syscall.Open(a.path, syscall.O_WRONLY|syscall.O_APPEND|syscall.O_CREAT|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0600)
 	if e != nil {
 		return e
 	}
+	f := os.NewFile(uintptr(fd), a.path)
 	defer f.Close()
 	i, e := f.Stat()
-	if e != nil || i.Mode().Perm() != 0600 {
-		return errors.New("gmail audit file must be mode 0600")
+	if e != nil {
+		return e
+	}
+	if e = validateGmailAuditFile(i, os.Geteuid()); e != nil {
+		return e
 	}
 	return json.NewEncoder(f).Encode(v)
+}
+func validateGmailAuditFile(i fs.FileInfo, euid int) error {
+	st, ok := i.Sys().(*syscall.Stat_t)
+	if !i.Mode().IsRegular() || i.Mode().Perm() != 0600 || !ok || int(st.Uid) != euid {
+		return errors.New("gmail audit file must be regular, expected-owner, mode 0600")
+	}
+	return nil
 }
 func (a gmailAuditFile) Record(e authdomain.AuditEvent) error       { return a.write(e) }
 func (a gmailAuditFile) RecordGmail(e gmailbroker.AuditEvent) error { return a.write(e) }
@@ -43,7 +56,7 @@ func cmdGmail(args []string) error {
 	if f.NArg() != 1 {
 		return errors.New("usage: flotilla gmail [flags] smoke|labels-list|label-get|messages-list|message-get|threads-list|thread-get")
 	}
-	principal := os.Getenv("FLOTILLA_AGENT")
+	principal := os.Getenv("FLOTILLA_SELF")
 	if principal != "pa" {
 		return errors.New("gmail: effective roster principal is not pa")
 	}

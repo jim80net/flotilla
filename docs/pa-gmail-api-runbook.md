@@ -99,11 +99,27 @@ account.
 
 ## 4. Wire only the PA launch
 
-The host-local launch recipe for `pa` may receive a path reference:
+Create a private schema-v1 grant file and an empty audit file outside the
+worktree. The grant follows the exact `pa-gmail-readonly` example in
+`authorization-domains.md`. Both files are host configuration; the OAuth and
+audit files must be owned by the PA process identity and mode `0600`.
+
+The host-local launch recipe for `pa` receives only these references and
+non-secret selectors:
 
 ```sh
 FLOTILLA_PA_GMAIL_OAUTH_FILE="$HOME/.flotilla/pa/gmail-oauth.json"
+FLOTILLA_PA_GMAIL_APPROVED_ACCOUNT="<operator-approved Gmail address>"
+FLOTILLA_PA_GMAIL_ACCOUNT_RESOURCE="operator-primary"
+FLOTILLA_PA_GMAIL_AUDIT_FILE="$HOME/.flotilla/pa/gmail-audit.jsonl"
+FLOTILLA_PA_GMAIL_LABEL_BINDINGS='{"inbox-label":"INBOX"}'
+FLOTILLA_SELF="pa"
 ```
+
+`FLOTILLA_PA_GMAIL_LABEL_BINDINGS` maps portable logical labels in the grant to
+Gmail provider IDs. Omit it when the grant has no label restriction. Do not put
+these values in the shared secrets file or another seat's recipe. The approved
+address is private host configuration and must never appear in audit output.
 
 The PA connector must require all of the following before enabling Gmail:
 
@@ -125,7 +141,27 @@ accidental launch/env fan-out, not a malicious same-UID process.
 
 ## 5. Gate and verify
 
-Cos gates placement without reading secret values into a message or review:
+Cos gates placement without reading secret values into a message or review.
+From the PA launch environment, run the harmless executable smoke:
+
+```sh
+flotilla gmail --roster /path/to/flotilla.json \
+  --grant "$HOME/.flotilla/pa/pa-gmail-readonly.yaml" smoke
+flotilla gmail --roster /path/to/flotilla.json \
+  --grant "$HOME/.flotilla/pa/pa-gmail-readonly.yaml" labels-list
+```
+
+Success prints nothing for `smoke`; `labels-list` prints only the provider JSON
+allowed by the grant. Never redirect debug HTTP/token data to the terminal.
+Then prove denial from a non-PA seat before secret access:
+
+```sh
+FLOTILLA_SELF=other flotilla gmail --roster /path/to/flotilla.json \
+  --grant "$HOME/.flotilla/pa/pa-gmail-readonly.yaml" smoke
+```
+
+This must return `effective roster principal is not pa` without consulting the
+OAuth path. Finally:
 
 1. Verify directory/file ownership and modes locally.
 2. Verify only the PA launch contains `FLOTILLA_PA_GMAIL_OAUTH_FILE`.

@@ -261,9 +261,12 @@ func enforceLabel(action, label string, body []byte) ([]byte, error) {
 		return json.Marshal(v)
 	case "gmail.threads.list":
 		var v struct {
-			Threads            []struct{ ID, HistoryID string } `json:"threads"`
-			NextPageToken      string                           `json:"nextPageToken,omitempty"`
-			ResultSizeEstimate int                              `json:"resultSizeEstimate,omitempty"`
+			Threads []struct {
+				ID        string `json:"id"`
+				HistoryID string `json:"historyId"`
+			} `json:"threads"`
+			NextPageToken      string `json:"nextPageToken,omitempty"`
+			ResultSizeEstimate int    `json:"resultSizeEstimate,omitempty"`
 		}
 		if json.Unmarshal(body, &v) != nil {
 			return nil, errors.New("gmail broker: invalid provider response")

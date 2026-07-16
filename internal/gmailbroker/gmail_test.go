@@ -269,6 +269,9 @@ func TestEnforceLabelSelectors(t *testing.T) {
 	if strings.Contains(string(got), "private content") || !strings.Contains(string(got), "t1") {
 		t.Fatalf("sanitized list=%s", got)
 	}
+	if !strings.Contains(string(got), `"id"`) || !strings.Contains(string(got), `"historyId"`) || strings.Contains(string(got), `"ID"`) || strings.Contains(string(got), `"HistoryID"`) {
+		t.Fatalf("incompatible keys=%s", got)
+	}
 }
 
 func TestFinalAuditFailureReleasesNoBody(t *testing.T) {
