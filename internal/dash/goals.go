@@ -298,6 +298,10 @@ type RenderedGoal struct {
 	// materialized from the roster/topology (a first-class desk not written as a goal —
 	// #324 Inc 2). Lets the UI distinguish live-roster desks and group them (Inc 3).
 	Source string `json:"source,omitempty"`
+	// OrgHub is an internal build marker. It lets an authored root whose declared
+	// scope renders as task remain the selected owner hub after reparenting. It is
+	// never serialized; the public hierarchy is expressed by Parent/Children.
+	OrgHub bool `json:"-"`
 	// Brief is a NODE-level decision package (markdown) rendered in the respond modal (#347).
 	Brief string `json:"brief,omitempty"`
 	// AchievedAt is the RFC3339 stamp of this goal's latest OBSERVED transition to
@@ -546,6 +550,9 @@ func orgOwnerDiagnostics(doc *GoalsDoc, in GoalsInputs) []string {
 		}
 		ownerKey := strings.ToLower(strings.TrimSpace(g.Owner))
 		parentOwner := strings.ToLower(strings.TrimSpace(pg.Owner))
+		if ownerKey == parentOwner {
+			continue // same-owner purpose/subtree edge is internal, not an org mismatch
+		}
 		orgParent := strings.ToLower(strings.TrimSpace(in.OrgParents[ownerKey]))
 		if orgParent == "" {
 			continue // channels/org assert no parent for this owner
@@ -712,6 +719,9 @@ func materializeRosterDesks(doc *GoalsDoc, in GoalsInputs) {
 		if id, depth, ok := hubNodeForOwner(doc, owner); ok {
 			return id, depth, true
 		}
+		if id, depth, ok := adoptAuthoredOwnerRoot(doc, owner); ok {
+			return id, depth, true
+		}
 		if ensuring[owner] { // the org loader validates cycles; remain fail-closed here too
 			return "", -1, false
 		}
@@ -727,7 +737,7 @@ func materializeRosterDesks(doc *GoalsDoc, in GoalsInputs) {
 			Owner: owner, ConversationAgent: owner, Parent: parentID,
 			Layout: &GoalLayout{HubCenter: true}, Status: string(StatusActive),
 			StatusDisplay: "active", Depth: parentDepth + 1,
-			Children: []string{}, WorkItems: []RenderedWorkItem{}, Source: "roster",
+			Children: []string{}, WorkItems: []RenderedWorkItem{}, Source: "roster", OrgHub: true,
 		}
 		doc.Goals = append(doc.Goals, node)
 		countNode(&doc.Counts, node)
@@ -755,7 +765,7 @@ func materializeRosterDesks(doc *GoalsDoc, in GoalsInputs) {
 	// a peer root whose desks can be swallowed by whichever root was listed first.
 	for i := range doc.Goals {
 		g := &doc.Goals[i]
-		if g.Scope != "flotilla" && g.Scope != "fleet" {
+		if g.Scope != "flotilla" && g.Scope != "fleet" && !g.OrgHub {
 			continue
 		}
 		owner := strings.ToLower(strings.TrimSpace(g.Owner))
@@ -881,8 +891,8 @@ func reorderRenderedGoals(doc *GoalsDoc) {
 }
 
 // hubNodeForOwner finds a real goals hub owned by agent (lowercased). A task or
-// arbitrary leaf owned by an XO is not a hierarchy container; callers materialize
-// a dedicated org hub instead of hanging desks from that leaf.
+// arbitrary nested leaf owned by an XO is not a hierarchy container; only an
+// explicitly adopted authored root may carry OrgHub outside flotilla scope.
 func hubNodeForOwner(doc *GoalsDoc, ownerKey string) (id string, depth int, ok bool) {
 	if ownerKey == "" || doc == nil {
 		return "", 0, false
@@ -893,7 +903,7 @@ func hubNodeForOwner(doc *GoalsDoc, ownerKey string) (id string, depth int, ok b
 		if strings.ToLower(strings.TrimSpace(g.Owner)) != ownerKey {
 			continue
 		}
-		if g.Layout != nil && g.Layout.HubCenter {
+		if g.OrgHub || (g.Layout != nil && g.Layout.HubCenter) {
 			return g.ID, g.Depth, true
 		}
 	}
@@ -907,6 +917,31 @@ func hubNodeForOwner(doc *GoalsDoc, ownerKey string) (id string, depth int, ok b
 		}
 	}
 	return "", 0, false
+}
+
+// adoptAuthoredOwnerRoot reuses an authored owner root even when its declared
+// scope renders as task. Root-ness and authored source are the safety boundary:
+// an arbitrary nested owner task remains ineligible. Prefer a root that already
+// has authored children, then preserve file order.
+func adoptAuthoredOwnerRoot(doc *GoalsDoc, ownerKey string) (id string, depth int, ok bool) {
+	if ownerKey == "" || doc == nil {
+		return "", 0, false
+	}
+	best := -1
+	for i := range doc.Goals {
+		g := &doc.Goals[i]
+		if g.Source != "" || g.Parent != "" || strings.ToLower(strings.TrimSpace(g.Owner)) != ownerKey {
+			continue
+		}
+		if best < 0 || (len(g.Children) > 0 && len(doc.Goals[best].Children) == 0) {
+			best = i
+		}
+	}
+	if best < 0 {
+		return "", 0, false
+	}
+	doc.Goals[best].OrgHub = true
+	return doc.Goals[best].ID, doc.Goals[best].Depth, true
 }
 
 // deskHubFor picks only an explicit channel hub: topology_channel_id first, then

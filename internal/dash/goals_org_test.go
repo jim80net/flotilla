@@ -190,3 +190,72 @@ func TestDeskHubFor_DoesNotBorrowFirstRoot(t *testing.T) {
 		t.Fatalf("unrelated channel borrowed first root or owner task: id=%q depth=%d", id, depth)
 	}
 }
+
+func TestMaterializeDesks_ReusesAuthoredOwnerRootAndInternalSubtree(t *testing.T) {
+	in := GoalsInputs{
+		FileOK: true,
+		File: GoalsFile{Version: 1, Goals: []Goal{
+			// Explicit task scope reproduces a production-shaped authored owner root
+			// whose semantic role is a container despite rendering as task.
+			{ID: "office-root", Title: "Alpha Office", Scope: ScopeTask, Owner: "office-xo"},
+			{ID: "venture", Title: "Venture", Scope: ScopeProject, Parent: "office-root", Owner: "office-xo"},
+			{ID: "trading", Title: "Trading", Scope: ScopeProject, Parent: "office-root", Owner: "office-xo"},
+			// Nested task with the same owner is deliberately not a candidate hub.
+			{ID: "nested-task", Title: "Internal task", Scope: ScopeTask, Parent: "venture", Owner: "office-xo"},
+		}},
+		MetaXO: "coord",
+		Channels: []DeskChannel{
+			{ChannelID: "C_CMD", XOAgent: "coord", Members: []string{"coord", "office-xo", "office-desk"}},
+			{ChannelID: "C_OFFICE", XOAgent: "office-xo", Members: []string{"coord", "office-desk"}},
+		},
+		OrgParents: map[string]string{
+			"office-xo":   "coord",
+			"office-desk": "office-xo",
+		},
+		OrgSource: "derived",
+	}
+	doc := BuildGoals(in)
+	byID := make(map[string]RenderedGoal)
+	ownerNodes := 0
+	for _, g := range doc.Goals {
+		byID[g.ID] = g
+		if g.Owner == "office-xo" && (g.OrgHub || g.Scope == "flotilla" || (g.Layout != nil && g.Layout.HubCenter)) {
+			ownerNodes++
+		}
+		if g.ID == "hub:office-xo" {
+			t.Error("must not synthesize a parallel owner hub")
+		}
+	}
+	if ownerNodes != 1 {
+		t.Errorf("owner hub count=%d want 1; goals=%+v", ownerNodes, doc.Goals)
+	}
+	root := byID["office-root"]
+	if !root.OrgHub || root.Parent != "hub:coord" {
+		t.Errorf("authored root not adopted/reparented: %+v", root)
+	}
+	for _, id := range []string{"venture", "trading"} {
+		if byID[id].Parent != "office-root" {
+			t.Errorf("%s parent=%q want office-root", id, byID[id].Parent)
+		}
+	}
+	if byID["nested-task"].Parent != "venture" {
+		t.Errorf("nested task moved: %+v", byID["nested-task"])
+	}
+	if byID["desk:office-desk"].Parent != "office-root" {
+		t.Errorf("office desk parent=%q want office-root", byID["desk:office-desk"].Parent)
+	}
+	if len(doc.OrgDiagnostics) != 0 {
+		t.Errorf("same-owner subtree or aligned desk produced diagnostics: %v", doc.OrgDiagnostics)
+	}
+}
+
+func TestOrgOwnerDiagnostics_PreservesRealCrossOwnerMismatch(t *testing.T) {
+	doc := GoalsDoc{Goals: []RenderedGoal{
+		{ID: "parent", Owner: "wrong-xo", Scope: "flotilla"},
+		{ID: "child", Owner: "desk", Scope: "desk", Parent: "parent"},
+	}}
+	got := orgOwnerDiagnostics(&doc, GoalsInputs{OrgParents: map[string]string{"desk": "right-xo"}})
+	if len(got) != 1 || !strings.Contains(got[0], "right-xo") || !strings.Contains(got[0], "wrong-xo") {
+		t.Fatalf("real mismatch must remain diagnostic, got %v", got)
+	}
+}

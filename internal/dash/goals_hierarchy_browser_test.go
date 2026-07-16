@@ -14,7 +14,11 @@ func goalsHierarchyFixture766() GoalsDoc {
 	return BuildGoals(GoalsInputs{
 		FileOK: true,
 		File: GoalsFile{Version: 1, Goals: []Goal{
-			{ID: "finance", Title: "Finance", Description: "Finance example hub", Scope: ScopeFlotilla, Owner: "finance-xo"},
+			// Finance is an authored owner root whose declared task scope reproduces
+			// the collision that previously created a parallel synthetic owner hub.
+			{ID: "finance", Title: "Finance", Description: "Finance example hub", Scope: ScopeTask, Owner: "finance-xo"},
+			{ID: "venture", Title: "Venture", Scope: ScopeProject, Parent: "finance", Owner: "finance-xo"},
+			{ID: "trading", Title: "Trading", Scope: ScopeProject, Parent: "finance", Owner: "finance-xo"},
 			{ID: "alpha", Title: "Alpha Product", Description: "Alpha example hub", Scope: ScopeFlotilla, Owner: "alpha-xo"},
 		}},
 		MetaXO: "coord",
@@ -76,9 +80,12 @@ with sync_playwright() as p:
         desktop.goto(url, wait_until="domcontentloaded")
         desktop.locator("#tab-goals").click()
         expect(desktop.locator('.gnode[data-id="hub:coord"]')).to_be_visible()
+        expect(desktop.locator('.gnode[data-id="hub:finance-xo"]')).to_have_count(0)
         for child in ["finance", "alpha", "hub:beta-xo"]:
             expect(desktop.locator('.gnode[data-id="%s"]' % child)).to_have_attribute("data-parent", "hub:coord")
         expect(desktop.locator('.gnode[data-id="desk:finance-desk"]')).to_have_attribute("data-parent", "finance")
+        expect(desktop.locator('.gnode[data-id="venture"]')).to_have_attribute("data-parent", "finance")
+        expect(desktop.locator('.gnode[data-id="trading"]')).to_have_attribute("data-parent", "finance")
         expect(desktop.locator('.gnode[data-id="desk:alpha-desk"]')).to_have_attribute("data-parent", "alpha")
         expect(desktop.locator('.gnode[data-id="desk:beta-desk"]')).to_have_attribute("data-parent", "hub:beta-xo")
         if evidence_dir:
