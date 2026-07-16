@@ -732,6 +732,36 @@
   // prune when a matching ledger line appears or after a short TTL.
   var optimisticOut = []; // {id, target, body, ts, t}
   var OPTIMISTIC_TTL_MS = 5 * 60 * 1000;
+  var MOBILE_THREAD_INITIAL = 3;
+  var MOBILE_THREAD_BATCH = 8;
+  var mobileThreadVisible = MOBILE_THREAD_INITIAL;
+  var mobileThreadHidden = 0;
+  var expandedThreadMessages = Object.create(null);
+  function mobileThreadWindowActive() {
+    return window.matchMedia && window.matchMedia("(max-width: 640px)").matches;
+  }
+  function threadItemKey(it) {
+    if (it.kind === "mirror") {
+      return "m:" + (it.m.ts || "") + ":" + cheapHash(it.m.info || "") + ":" + (it.m.suppressed ? "1" : "0");
+    }
+    if (it.kind === "optimistic") return "o:" + (it.o.id || "") + ":" + cheapHash(it.o.body || "");
+    return "l:" + (it.e.parsed ? it.e.time : "") + ":" + cheapHash(it.e.parsed ? (it.e.body || it.e.gist) : it.e.raw);
+  }
+  function threadItemText(it) {
+    if (it.kind === "mirror") return String(it.m.info || "");
+    if (it.kind === "optimistic") return String(it.o.body || "");
+    return String(it.e.parsed ? (it.e.body || it.e.gist || "") : (it.e.raw || ""));
+  }
+  function threadItemHTML(it) {
+    var key = threadItemKey(it);
+    var expanded = !!expandedThreadMessages[key];
+    var message = it.kind === "mirror" ? threadMirrorMsg(it.m) :
+      (it.kind === "optimistic" ? threadOptimisticMsg(it.o) : threadLedgerMsg(it.e));
+    var toggle = mobileThreadWindowActive() && threadItemText(it).length > 240
+      ? '<button type="button" class="thread-message-toggle" data-thread-expand="' + escapeHtml(key) + '" aria-expanded="' + String(expanded) + '">' + (expanded ? "Show less" : "Show full") + "</button>"
+      : "";
+    return '<div class="thread-window-item' + (expanded ? " is-expanded" : "") + '" data-thread-item-key="' + escapeHtml(key) + '">' + message + toggle + "</div>";
+  }
   function appendOptimisticOutbound(target, body) {
     optimisticOut.push({
       id: "opt-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8),
@@ -823,25 +853,20 @@
     // AND resets the operator's scroll) when the merged timeline is unchanged. The
     // key folds each item's timestamp + a content hash so a same-second new entry
     // still re-renders (mirrors the #300 glance dedup discipline).
-    var sig = selectedDesk + "#" + mirrorVerbosity + "#error:" + cheapHash(loadError) + "#" + items.map(function (it) {
-      if (it.kind === "mirror") {
-        return "m:" + (it.m.ts || "") + ":" + cheapHash(it.m.info || "") + ":" + (it.m.suppressed ? "1" : "0");
-      }
-      if (it.kind === "optimistic") {
-        return "o:" + (it.o.id || "") + ":" + cheapHash(it.o.body || "");
-      }
-      return "l:" + (it.e.parsed ? it.e.time : "") + ":" + cheapHash(it.e.parsed ? (it.e.body || it.e.gist) : it.e.raw);
-    }).join("|");
+    var mobileWindow = mobileThreadWindowActive();
+    mobileThreadHidden = mobileWindow ? Math.max(0, items.length - mobileThreadVisible) : 0;
+    var visibleItems = mobileThreadHidden ? items.slice(items.length - mobileThreadVisible) : items;
+    var sig = selectedDesk + "#" + mirrorVerbosity + "#error:" + cheapHash(loadError) +
+      "#window:" + (mobileWindow ? mobileThreadVisible : "all") + "#" + items.map(threadItemKey).join("|");
     if (sig === lastThreadKey) return;
     lastThreadKey = sig;
     var errorNotice = loadError
       ? '<div class="thread-load-error" role="alert">Could not refresh coordination history (' + escapeHtml(loadError) + "). Showing the last loaded messages.</div>"
       : "";
-    thread.innerHTML = errorNotice + coordinatorHistoryNote(items) + items.map(function (it) {
-      if (it.kind === "mirror") return threadMirrorMsg(it.m);
-      if (it.kind === "optimistic") return threadOptimisticMsg(it.o);
-      return threadLedgerMsg(it.e);
-    }).join("");
+    var windowControl = mobileThreadHidden
+      ? '<button type="button" class="thread-window-more" data-thread-window-more>↑ Show ' + Math.min(MOBILE_THREAD_BATCH, mobileThreadHidden) + " earlier · " + mobileThreadHidden + " cached</button>"
+      : "";
+    thread.innerHTML = errorNotice + coordinatorHistoryNote(items) + windowControl + visibleItems.map(threadItemHTML).join("");
     // Latest-at-bottom scroll discipline (F#383 criterion 5): if the operator is pinned to
     // the bottom (the default, and whenever they scroll back down), keep the newest message
     // in view; if they've scrolled UP into history, don't yank them — surface a jump-to-latest
@@ -886,6 +911,9 @@
   // A render for a NEWLY selected desk should always open at the bottom (freshest first-read).
   function resetThreadScroll() {
     threadPinned = true;
+    mobileThreadVisible = MOBILE_THREAD_INITIAL;
+    mobileThreadHidden = 0;
+    expandedThreadMessages = Object.create(null);
     showThreadJump(false);
     // A new selection gives a FRESH composer for that desk — the prior desk's draft, status
     // line, and grown height must not bleed into the newly-selected desk's composer (cubic P3).
@@ -1096,7 +1124,7 @@
   function renderHistoryPager(history) {
     var btn = el("thread-load-earlier");
     if (!btn) return;
-    btn.hidden = !(historyMatchesSelected(history) && history.has_more);
+    btn.hidden = mobileThreadHidden > 0 || !(historyMatchesSelected(history) && history.has_more);
     if (!btn.disabled) btn.textContent = "↑ Load earlier";
   }
 
@@ -1654,6 +1682,76 @@
     e.preventDefault();
     openDecisionsView();
   });
+
+  // #689: phone Conversations keeps the full bounded data model in memory while
+  // mounting only a small recent window. Each disclosure extends that DOM window;
+  // once it is exhausted, the existing cursor-backed history control takes over.
+  (function wireMobileConversationDensity() {
+    var thread = el("conv-thread");
+    if (thread) {
+      thread.addEventListener("click", function (e) {
+        var more = e.target.closest ? e.target.closest("[data-thread-window-more]") : null;
+        if (more) {
+          var beforeTop = more.getBoundingClientRect().top;
+          mobileThreadVisible += MOBILE_THREAD_BATCH;
+          lastThreadKey = "";
+          renderThread(cache.history, true);
+          renderHistoryPager(cache.history);
+          var next = thread.querySelector("[data-thread-window-more]");
+          if (next) {
+            window.scrollBy(0, next.getBoundingClientRect().top - beforeTop);
+            next.focus();
+          } else {
+            var first = thread.querySelector(".thread-window-item");
+            if (first) {
+              first.setAttribute("tabindex", "-1");
+              first.focus({ preventScroll: true });
+            }
+          }
+          return;
+        }
+        var toggle = e.target.closest ? e.target.closest("[data-thread-expand]") : null;
+        if (!toggle) return;
+        var key = toggle.getAttribute("data-thread-expand") || "";
+        var item = toggle.closest(".thread-window-item");
+        var expanded = toggle.getAttribute("aria-expanded") !== "true";
+        if (expanded) expandedThreadMessages[key] = true;
+        else delete expandedThreadMessages[key];
+        toggle.setAttribute("aria-expanded", String(expanded));
+        toggle.textContent = expanded ? "Show less" : "Show full";
+        if (item) item.classList.toggle("is-expanded", expanded);
+      });
+    }
+    document.querySelectorAll("[data-conv-disclosure]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        var panel = button.closest(".conv-nav, .conv-context");
+        var expanded = button.getAttribute("aria-expanded") !== "true";
+        button.setAttribute("aria-expanded", String(expanded));
+        if (panel) panel.classList.toggle("mobile-expanded", expanded);
+        button.textContent = button.getAttribute("data-conv-disclosure") === "nav"
+          ? (expanded ? "Hide desks" : "Choose desk")
+          : (expanded ? "Hide context" : "Show context");
+      });
+    });
+    document.addEventListener("click", function (e) {
+      var desk = e.target.closest ? e.target.closest(".conv-item") : null;
+      if (!desk || !mobileThreadWindowActive()) return;
+      var nav = desk.closest(".conv-nav");
+      var button = nav ? nav.querySelector('[data-conv-disclosure="nav"]') : null;
+      if (nav) nav.classList.remove("mobile-expanded");
+      if (button) { button.setAttribute("aria-expanded", "false"); button.textContent = "Choose desk"; }
+    });
+    var media = window.matchMedia ? window.matchMedia("(max-width: 640px)") : null;
+    if (media && media.addEventListener) {
+      media.addEventListener("change", function () {
+        mobileThreadVisible = MOBILE_THREAD_INITIAL;
+        mobileThreadHidden = 0;
+        lastThreadKey = "";
+        renderThread(cache.history, true);
+        renderHistoryPager(cache.history);
+      });
+    }
+  })();
 
   (function wireHistoryPager() {
     var btn = el("thread-load-earlier");

@@ -89,6 +89,8 @@
           <p class="panel-desc">organization → desk threads</p>
         </div>
         <span id="rail-meta" class="xo-strip muted"></span>
+        <button type="button" class="conv-mobile-disclosure" data-conv-disclosure="nav"
+          aria-expanded="false" aria-controls="conv-rail">Choose desk</button>
       </div>
       <div id="conv-rail" class="conv-rail-list" role="list"></div>
     </aside>
@@ -129,8 +131,10 @@
           <h2>Desk</h2>
           <p class="panel-desc">state · work queue</p>
         </div>
+        <button type="button" class="conv-mobile-disclosure" data-conv-disclosure="context"
+          aria-expanded="false" aria-controls="conv-context-body">Show context</button>
       </div>
-      <div class="conv-context-body">
+      <div id="conv-context-body" class="conv-context-body">
         <div id="conv-desk-card" class="conv-desk-card" aria-live="polite"></div>
 
         <!-- #405 Inc 4: the drive queue → "Work queue" (plain language, no jargon). The

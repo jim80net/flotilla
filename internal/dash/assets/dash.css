@@ -425,6 +425,17 @@ code {
 }
 .thread-load-earlier:hover { border-color: var(--cyan); }
 .thread-load-earlier:disabled { cursor: wait; opacity: .65; }
+.conv-mobile-disclosure { display: none; }
+.thread-window-item { display: contents; }
+.thread-window-more,
+.thread-message-toggle {
+  border: 1px solid var(--line-soft); border-radius: 999px; background: transparent;
+  color: var(--cyan); cursor: pointer; font: .68rem var(--display); letter-spacing: .03em;
+}
+.thread-window-more { justify-self: center; padding: .38rem .8rem; }
+.thread-message-toggle { justify-self: start; margin: -.3rem .7rem .15rem; padding: .24rem .65rem; }
+.thread-window-more:hover,
+.thread-message-toggle:hover { border-color: var(--cyan); }
 .thread-load-error {
   padding: .45rem .65rem;
   border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent);
@@ -2051,12 +2062,33 @@ html, body { overflow-x: clip; }
   .tab-parade { flex: 1 1 auto; }
   .tab { flex: 1 1 0; padding: .5rem .5rem; white-space: nowrap; }
 
-  /* The "one primary scroll" discipline for the Conversations view is owned by
-     the #326 app-shell (dash.css §Conversations): its BASE is mobile-first —
-     the three zones stack, the page provides one natural scroll, and the inner
-     scroll boxes only appear as the fixed shell at ≥1101px. Nothing to release
-     here; the pinned glance peek + collapsible drive queue are intentional and
-     must NOT be un-clamped. */
+  /* #689: the phone document is the one Conversations scroll. Peripheral rail
+     and context panels default to compact disclosures, while the latest five
+     messages are mounted and older cached rows remain one explicit tap away. */
+  .conv-wrap { padding: .5rem .55rem 1rem; gap: .5rem; }
+  .conv-nav .panel-head,
+  .conv-context > .panel-head { min-height: 58px; padding: .55rem .7rem; }
+  .conv-mobile-disclosure {
+    display: inline-flex; align-items: center; justify-content: center; min-height: 44px;
+    margin-left: auto; border: 1px solid var(--line-soft); border-radius: var(--r-sm);
+    padding: .35rem .65rem; background: transparent; color: var(--cyan); font: .68rem var(--display);
+  }
+  .conv-nav:not(.mobile-expanded) .conv-rail-list,
+  .conv-context:not(.mobile-expanded) .conv-context-body { display: none; }
+  .conv-rail-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  .conv-rail-head #rail-meta { display: none; }
+  .conv-thread-head { padding: .6rem .75rem; }
+  .conv-map { padding: .4rem .75rem; }
+  .conv-thread { padding: .55rem .65rem .7rem; gap: .45rem; }
+  .thread-window-item { display: grid; gap: .35rem; }
+  .thread-window-more,
+  .thread-message-toggle { min-height: 44px; }
+  .thread-window-item:not(.is-expanded) .thread-gist,
+  .thread-window-item:not(.is-expanded) .thread-mirror-body {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4;
+    max-height: 5.8em; overflow: hidden;
+  }
+  .thread-composer { padding: .5rem .7rem .65rem; }
 
   #issues-listpanel { overflow: visible; }
   #issues-listpanel > .panel-head {
