@@ -249,6 +249,79 @@ func TestMaterializeDesks_ReusesAuthoredOwnerRootAndInternalSubtree(t *testing.T
 	}
 }
 
+func TestMaterializeDesks_LiveShapeUsesSpecificProductHub(t *testing.T) {
+	in := GoalsInputs{
+		FileOK: true,
+		File: GoalsFile{Version: 1, Goals: []Goal{
+			// Production goals can carry a semantic product root whose canonical
+			// agent is expressed by the id, with no redundant owner field.
+			{ID: "alpha-xo", Title: "Alpha", Scope: ScopeFlotilla},
+			{ID: "alpha-purpose", Title: "Alpha purpose", Parent: "alpha-xo"},
+		}},
+		MetaXO: "coord",
+		Channels: []DeskChannel{
+			// The broad command channel is deliberately first, matching the live
+			// roster shape that used to win the first-channel/seen race.
+			{ChannelID: "C_COMMAND", XOAgent: "coord", Members: []string{"coord", "alpha-xo", "alpha-one", "alpha-two", "beta-xo", "beta-one"}},
+			{ChannelID: "C_ALPHA", XOAgent: "alpha-xo", Members: []string{"coord", "alpha-one", "alpha-two"}},
+			{ChannelID: "C_BETA", XOAgent: "beta-xo", Members: []string{"beta-one"}},
+		},
+		// A derived/legacy org graph may flatten product desks to command even
+		// though the product-specific channel names their actual owner.
+		OrgParents: map[string]string{
+			"alpha-xo":  "coord",
+			"alpha-one": "coord",
+			"alpha-two": "coord",
+			"beta-one":  "coord",
+		},
+		OrgSource: "derived",
+	}
+	doc := BuildGoals(in)
+	byID := make(map[string]RenderedGoal, len(doc.Goals))
+	for _, g := range doc.Goals {
+		byID[g.ID] = g
+	}
+
+	alpha := byID["alpha-xo"]
+	if !alpha.OrgHub || alpha.Owner != "alpha-xo" || alpha.Parent != "hub:coord" {
+		t.Fatalf("ownerless authored product root was not adopted beneath command: %+v", alpha)
+	}
+	if _, ok := byID["hub:alpha-xo"]; ok {
+		t.Fatal("authored alpha root must not coexist with a synthetic alpha hub")
+	}
+	for _, desk := range []string{"desk:alpha-one", "desk:alpha-two"} {
+		if got := byID[desk].Parent; got != "alpha-xo" {
+			t.Errorf("%s parent=%q want alpha-xo", desk, got)
+		}
+	}
+	beta := byID["hub:beta-xo"]
+	if beta.Parent != "hub:coord" {
+		t.Errorf("product hub inferred from command membership parent=%q want hub:coord", beta.Parent)
+	}
+	if got := byID["desk:beta-one"].Parent; got != "hub:beta-xo" {
+		t.Errorf("beta desk parent=%q want hub:beta-xo", got)
+	}
+	if len(doc.OrgDiagnostics) != 0 {
+		t.Errorf("live-shaped hierarchy produced diagnostics: %v", doc.OrgDiagnostics)
+	}
+}
+
+func TestDeskOwnerFor_PreservesExplicitFileParent(t *testing.T) {
+	in := GoalsInputs{
+		MetaXO:    "coord",
+		OrgSource: "file",
+		OrgParents: map[string]string{
+			"alpha-one": "coord",
+		},
+		Channels: []DeskChannel{
+			{XOAgent: "alpha-xo", Members: []string{"alpha-one"}},
+		},
+	}
+	if got := deskOwnerFor("alpha-one", in); got != "coord" {
+		t.Fatalf("file-backed parent overridden by channel inference: got %q want coord", got)
+	}
+}
+
 func TestOrgOwnerDiagnostics_PreservesRealCrossOwnerMismatch(t *testing.T) {
 	doc := GoalsDoc{Goals: []RenderedGoal{
 		{ID: "parent", Owner: "wrong-xo", Scope: "flotilla"},

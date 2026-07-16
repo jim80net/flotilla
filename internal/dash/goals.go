@@ -554,6 +554,9 @@ func orgOwnerDiagnostics(doc *GoalsDoc, in GoalsInputs) []string {
 			continue // same-owner purpose/subtree edge is internal, not an org mismatch
 		}
 		orgParent := strings.ToLower(strings.TrimSpace(in.OrgParents[ownerKey]))
+		if g.Source == "roster" && g.Scope == "desk" {
+			orgParent = deskOwnerFor(ownerKey, in)
+		}
 		if orgParent == "" {
 			continue // channels/org assert no parent for this owner
 		}
@@ -727,7 +730,7 @@ func materializeRosterDesks(doc *GoalsDoc, in GoalsInputs) {
 		}
 		ensuring[owner] = true
 		parentID, parentDepth := "", -1
-		if parentOwner := strings.ToLower(strings.TrimSpace(in.OrgParents[owner])); parentOwner != "" {
+		if parentOwner := orgParentForOwner(owner, in); parentOwner != "" {
 			if id, depth, ok := ensureOrgHub(parentOwner); ok {
 				parentID, parentDepth = id, depth
 			}
@@ -769,7 +772,7 @@ func materializeRosterDesks(doc *GoalsDoc, in GoalsInputs) {
 			continue
 		}
 		owner := strings.ToLower(strings.TrimSpace(g.Owner))
-		parentOwner := strings.ToLower(strings.TrimSpace(in.OrgParents[owner]))
+		parentOwner := orgParentForOwner(owner, in)
 		if owner == "" || parentOwner == "" {
 			continue
 		}
@@ -784,7 +787,6 @@ func materializeRosterDesks(doc *GoalsDoc, in GoalsInputs) {
 	var desks []RenderedGoal
 	seen := make(map[string]bool) // a desk in multiple channels is materialized once
 	for _, ch := range in.Channels {
-		hubID, hubDepth := deskHubFor(doc, ch)
 		xo := strings.ToLower(strings.TrimSpace(ch.XOAgent))
 		for _, m := range ch.Members {
 			name := strings.TrimSpace(m)
@@ -793,10 +795,13 @@ func materializeRosterDesks(doc *GoalsDoc, in GoalsInputs) {
 				continue
 			}
 			seen[key] = true
-			// Org-truth PR4: prefer spoke parent from the same DAG as /api/topology.
-			deskHubID, deskHubDepth := hubID, hubDepth
-			if orgP := strings.ToLower(strings.TrimSpace(in.OrgParents[key])); orgP != "" {
-				if id, depth, ok := hubNodeForOwner(doc, orgP); ok {
+			// A broad command channel is an awareness/routing edge, not necessarily
+			// the desk's product owner. Prefer a non-command channel owner when the
+			// derived org graph merely flattens the desk to MetaXO; an explicit
+			// non-command org parent remains authoritative.
+			deskHubID, deskHubDepth := "", -1
+			if deskOwner := deskOwnerFor(key, in); deskOwner != "" {
+				if id, depth, ok := ensureOrgHub(deskOwner); ok {
 					deskHubID, deskHubDepth = id, depth
 				}
 			}
@@ -930,7 +935,9 @@ func adoptAuthoredOwnerRoot(doc *GoalsDoc, ownerKey string) (id string, depth in
 	best := -1
 	for i := range doc.Goals {
 		g := &doc.Goals[i]
-		if g.Source != "" || g.Parent != "" || strings.ToLower(strings.TrimSpace(g.Owner)) != ownerKey {
+		owner := strings.ToLower(strings.TrimSpace(g.Owner))
+		identityMatch := owner == ownerKey || (owner == "" && strings.EqualFold(strings.TrimSpace(g.ID), ownerKey))
+		if g.Source != "" || g.Parent != "" || !identityMatch {
 			continue
 		}
 		if best < 0 || (len(g.Children) > 0 && len(doc.Goals[best].Children) == 0) {
@@ -940,8 +947,80 @@ func adoptAuthoredOwnerRoot(doc *GoalsDoc, ownerKey string) (id string, depth in
 	if best < 0 {
 		return "", 0, false
 	}
+	if strings.TrimSpace(doc.Goals[best].Owner) == "" {
+		doc.Goals[best].Owner = ownerKey
+	}
+	if strings.TrimSpace(doc.Goals[best].ConversationAgent) == "" {
+		doc.Goals[best].ConversationAgent = ownerKey
+	}
 	doc.Goals[best].OrgHub = true
 	return doc.Goals[best].ID, doc.Goals[best].Depth, true
+}
+
+// orgParentForOwner returns the org-truth parent when one exists. A coordinator
+// missing from an incomplete derived graph still inherits the fleet coordinator
+// when the command channel explicitly contains it; this is a container edge, not
+// a reason to attach every command-channel desk directly to MetaXO.
+func orgParentForOwner(owner string, in GoalsInputs) string {
+	owner = strings.ToLower(strings.TrimSpace(owner))
+	if parent := strings.ToLower(strings.TrimSpace(in.OrgParents[owner])); parent != "" {
+		return parent
+	}
+	meta := strings.ToLower(strings.TrimSpace(in.MetaXO))
+	if owner == "" || meta == "" || owner == meta {
+		return ""
+	}
+	for _, ch := range in.Channels {
+		if strings.ToLower(strings.TrimSpace(ch.XOAgent)) != meta {
+			continue
+		}
+		for _, member := range ch.Members {
+			if strings.EqualFold(strings.TrimSpace(member), owner) {
+				return meta
+			}
+		}
+	}
+	return ""
+}
+
+// deskOwnerFor resolves a leaf desk's display container. Explicit non-command
+// org truth wins. When a derived graph flattened the desk to MetaXO, a specific
+// product channel supplies the missing product-owner edge. This deliberately
+// does not treat the broad command channel as an ownership edge.
+func deskOwnerFor(desk string, in GoalsInputs) string {
+	desk = strings.ToLower(strings.TrimSpace(desk))
+	meta := strings.ToLower(strings.TrimSpace(in.MetaXO))
+	orgParent := strings.ToLower(strings.TrimSpace(in.OrgParents[desk]))
+	// A file-backed org edge is an explicit operator assertion, including a
+	// deliberate direct-to-command parent. Only the derived graph's broad
+	// command flattening is eligible for the product-channel refinement below.
+	if orgParent != "" && (orgParent != meta || in.OrgSource != "derived") {
+		return orgParent
+	}
+	commandMember := false
+	for _, ch := range in.Channels {
+		xo := strings.ToLower(strings.TrimSpace(ch.XOAgent))
+		if xo == "" || xo == desk {
+			continue
+		}
+		for _, member := range ch.Members {
+			if !strings.EqualFold(strings.TrimSpace(member), desk) {
+				continue
+			}
+			if xo == meta {
+				commandMember = true
+			} else {
+				return xo
+			}
+		}
+	}
+	if orgParent != "" {
+		return orgParent
+	}
+	if commandMember {
+		return meta
+	}
+	return orgParent
 }
 
 // deskHubFor picks only an explicit channel hub: topology_channel_id first, then

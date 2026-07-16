@@ -1545,12 +1545,12 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gnode:focus-visible { outline: 2px solid var(--cyan) !important; outline-offset: 2px; }
 .gnode-eyebrow { display: none; }
 .gnode-owner { color: var(--cyan-dim); }
-.gnode-title { font-family: var(--display); font-weight: 600; color: var(--ink); font-size: .82rem; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 0; }
+.gnode-title { font-family: var(--display); font-weight: 600; color: var(--ink); font-size: .98rem; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 0; }
 .gnode-desc { display: none; }
 .gnode-foot { position: absolute; top: 50%; right: 34px; max-width: 48px; transform: translateY(-50%); margin: 0; transition: opacity .15s var(--ease); }
 /* flotilla (v2) — dual-read the legacy .gnode-fleet class during migration */
 .gnode-flotilla .gnode-title,
-.gnode-fleet .gnode-title { font-size: .95rem; }
+.gnode-fleet .gnode-title { font-size: 1rem; }
 /* harness badge (org-graph v2 §3): subdued, right-aligned in the foot */
 .gnode-harness { display: none; }
 /* priorities / milestones — short labeled lists in the node card */
