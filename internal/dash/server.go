@@ -229,6 +229,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/topology", s.handleTopology)
 	s.mux.HandleFunc("/api/history", s.handleHistory)
 	s.mux.HandleFunc("/api/goals", s.handleGoals)
+	s.mux.HandleFunc("/api/goals/meta", s.handleGoalsMeta)
 	s.mux.HandleFunc("/api/session-mirror", s.handleSessionMirror)
 	s.mux.HandleFunc("/api/parades", s.handleParades)
 	s.mux.HandleFunc("GET /api/parades/{date}/conversations", s.handleParadeConversations)
@@ -500,6 +501,34 @@ func (s *Server) handleGoals(w http.ResponseWriter, r *http.Request) {
 	goals := s.loadGoals()
 	w.Header().Set("Server-Timing", serverTiming("goals-load", time.Since(started)))
 	writeJSON(w, goals)
+}
+
+// goalsMeta is the tiny cold-landing read model. It intentionally avoids board,
+// tracker, backlog, done-history, and org materialization work: choosing the first
+// tab must not wait for the full Goals document.
+type goalsMeta struct {
+	Found       bool   `json:"found"`
+	DefaultView bool   `json:"default_view"`
+	Error       string `json:"error,omitempty"`
+}
+
+func (s *Server) handleGoalsMeta(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
+	meta := goalsMeta{}
+	if s.cfg.GoalsPath != "" {
+		if err := maybeCompileGoalsFromYAML(s.cfg.GoalsYAMLPath, s.cfg.GoalsPath); err != nil {
+			meta.Error = err.Error()
+		} else if b, err := os.ReadFile(s.cfg.GoalsPath); err == nil {
+			if gf, err := ParseGoalsFile(b); err != nil {
+				meta.Error = err.Error()
+			} else {
+				meta.Found = true
+				meta.DefaultView = gf.DefaultView
+			}
+		}
+	}
+	w.Header().Set("Server-Timing", serverTiming("goals-meta", time.Since(started)))
+	writeJSON(w, meta)
 }
 
 // pageData is the (static) data the index template needs — no fleet data, just

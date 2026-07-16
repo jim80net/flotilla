@@ -78,8 +78,12 @@ func TestParseHash579Goja(t *testing.T) {
 			t.Errorf("parseHash(#%s).view = %q", tab, v.Get("view"))
 		}
 	}
-	// Guard: the extracted source must still document the default_view contract.
+	// Guard: the extracted source must still document the default_view contract,
+	// using metadata rather than blocking landing on the full Goals document.
 	if !strings.Contains(string(m), "default_view") && !strings.Contains(string(raw), "g.default_view") {
 		t.Error("dash.js must still reference g.default_view for landing — #579")
+	}
+	if !strings.Contains(string(raw), `getJSON("/api/goals/meta")`) {
+		t.Error("seedLanding must use the lightweight Goals metadata endpoint")
 	}
 }
