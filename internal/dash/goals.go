@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -654,6 +655,7 @@ func materializeRosterDesks(doc *GoalsDoc, in GoalsInputs) {
 	if len(in.Channels) == 0 {
 		return
 	}
+	materializeMissingOrgHubs(doc, in)
 	// Agents already on the map (authored as a goal's owner or conversation_agent) must
 	// NOT get a duplicate card. The XO is the hub, not a desk card.
 	represented := make(map[string]bool)
@@ -737,10 +739,10 @@ func materializeRosterDesks(doc *GoalsDoc, in GoalsInputs) {
 				Source:            "roster",
 			}
 			countNode(&doc.Counts, node)
-			if hubID == "" {
+			if deskHubID == "" {
 				noHub = append(noHub, node) // no hub → a root, emitted at the end
 			} else {
-				byHub[hubID] = append(byHub[hubID], node)
+				byHub[deskHubID] = append(byHub[deskHubID], node)
 			}
 		}
 	}
@@ -765,6 +767,63 @@ func materializeRosterDesks(doc *GoalsDoc, in GoalsInputs) {
 	}
 	out = append(out, noHub...)
 	doc.Goals = out
+}
+
+// materializeMissingOrgHubs ensures an org parent can own its desk spokes even
+// when fleet-goals.yaml has not authored a corresponding coordinator node. It
+// builds the chain parent-first and never guesses an unrelated depth-0 root.
+func materializeMissingOrgHubs(doc *GoalsDoc, in GoalsInputs) {
+	if doc == nil || len(in.OrgParents) == 0 {
+		return
+	}
+	needed := map[string]bool{}
+	for desk, parent := range in.OrgParents {
+		if strings.TrimSpace(desk) != "" && strings.TrimSpace(parent) != "" {
+			needed[strings.ToLower(strings.TrimSpace(parent))] = true
+		}
+	}
+	visiting := map[string]bool{}
+	var ensure func(string) (string, int)
+	ensure = func(owner string) (string, int) {
+		if id, depth, ok := hubNodeForOwner(doc, owner); ok {
+			return id, depth
+		}
+		if visiting[owner] {
+			return "", -1
+		}
+		visiting[owner] = true
+		defer delete(visiting, owner)
+		parentID, parentDepth := "", -1
+		if p := strings.ToLower(strings.TrimSpace(in.OrgParents[owner])); p != "" {
+			parentID, parentDepth = ensure(p)
+		}
+		id := "hub:" + owner
+		for i := range doc.Goals {
+			if doc.Goals[i].ID == id {
+				return id, doc.Goals[i].Depth
+			}
+		}
+		n := RenderedGoal{ID: id, Title: owner, Scope: "flotilla", Owner: owner, ConversationAgent: owner, Parent: parentID, Depth: parentDepth + 1, Status: string(StatusActive), StatusDisplay: "active", Children: []string{}, WorkItems: []RenderedWorkItem{}, Source: "roster"}
+		if parentID != "" {
+			for i := range doc.Goals {
+				if doc.Goals[i].ID == parentID {
+					doc.Goals[i].Children = append(doc.Goals[i].Children, id)
+					break
+				}
+			}
+		}
+		doc.Goals = append(doc.Goals, n)
+		countNode(&doc.Counts, n)
+		return id, n.Depth
+	}
+	owners := make([]string, 0, len(needed))
+	for o := range needed {
+		owners = append(owners, o)
+	}
+	sort.Strings(owners)
+	for _, o := range owners {
+		ensure(o)
+	}
 }
 
 // hubNodeForOwner finds a goals map node owned by agent (lowercased), preferring
@@ -802,8 +861,8 @@ func hubNodeForOwner(doc *GoalsDoc, ownerKey string) (id string, depth int, ok b
 }
 
 // deskHubFor picks the node a channel's materialized desks attach under: a flotilla goal
-// bound to the channel via topology_channel_id, else the layout hub-center, else the first
-// depth-0 root. Returns ("", -1) when the map has no hub — the desks then become roots
+// bound to the channel via topology_channel_id, else a node owned by the channel XO.
+// Returns ("", -1) rather than guessing an unrelated depth-0 root.
 // (parent "", depth 0) so they still appear rather than vanish.
 func deskHubFor(doc *GoalsDoc, ch DeskChannel, metaXO string) (string, int) {
 	for i := range doc.Goals {
@@ -811,15 +870,8 @@ func deskHubFor(doc *GoalsDoc, ch DeskChannel, metaXO string) (string, int) {
 			return g.ID, g.Depth
 		}
 	}
-	for i := range doc.Goals {
-		if g := &doc.Goals[i]; g.Layout != nil && g.Layout.HubCenter {
-			return g.ID, g.Depth
-		}
-	}
-	for i := range doc.Goals {
-		if doc.Goals[i].Depth == 0 {
-			return doc.Goals[i].ID, 0
-		}
+	if id, depth, ok := hubNodeForOwner(doc, strings.ToLower(strings.TrimSpace(ch.XOAgent))); ok {
+		return id, depth
 	}
 	return "", -1
 }

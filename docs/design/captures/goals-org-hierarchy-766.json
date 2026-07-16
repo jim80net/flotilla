@@ -1,0 +1,22 @@
+{
+  "capture": "generic Goals hierarchy acceptance fixture",
+  "desktop_outline": [
+    "CoS",
+    "  Office → office-desk",
+    "  Product → product-desk",
+    "  foreign-desk"
+  ],
+  "phone_outline": [
+    "CoS",
+    "Office (1)",
+    "Product (1)",
+    "foreign-desk"
+  ],
+  "assertions": {
+    "foreign_desk_parent": "CoS",
+    "product_desk_parent": "Product",
+    "office_contains_foreign_desk": false,
+    "org_diagnostics": []
+  },
+  "provenance": "generic test fixture only; no deployment data"
+}
