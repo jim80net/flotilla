@@ -86,6 +86,9 @@ func (c *Connector) ListLabels(ctx context.Context, label string) (json.RawMessa
 	return c.get(ctx, "gmail.labels.list", "/labels", "labels", label)
 }
 func (c *Connector) GetLabel(ctx context.Context, id, label string) (json.RawMessage, error) {
+	if label != "" && id != label {
+		return nil, errors.New("gmail broker: resource selector mismatch")
+	}
 	return c.getID(ctx, "gmail.labels.get", "/labels/", id, "label", label)
 }
 func (c *Connector) ListMessages(ctx context.Context, label string) (json.RawMessage, error) {
@@ -160,8 +163,76 @@ func (c *Connector) get(ctx context.Context, action, path, resource, label strin
 	if e != nil || !json.Valid(body) {
 		return nil, errors.New("gmail broker: invalid provider response")
 	}
+	body, e = enforceLabel(action, label, body)
+	if e != nil {
+		return nil, e
+	}
 	c.audit(now, d, action, resource, "allowed", "")
 	return body, nil
+}
+
+func enforceLabel(action, label string, body []byte) ([]byte, error) {
+	if label == "" || action == "gmail.messages.list" || action == "gmail.threads.list" || action == "gmail.labels.get" {
+		return body, nil
+	}
+	switch action {
+	case "gmail.labels.list":
+		var v struct {
+			Labels []json.RawMessage `json:"labels"`
+		}
+		if json.Unmarshal(body, &v) != nil {
+			return nil, errors.New("gmail broker: invalid provider response")
+		}
+		out := v.Labels[:0]
+		for _, raw := range v.Labels {
+			var x struct {
+				ID string `json:"id"`
+			}
+			if json.Unmarshal(raw, &x) == nil && x.ID == label {
+				out = append(out, raw)
+			}
+		}
+		v.Labels = out
+		return json.Marshal(v)
+	case "gmail.messages.get":
+		var v struct {
+			LabelIDs []string `json:"labelIds"`
+		}
+		if json.Unmarshal(body, &v) != nil || !has(v.LabelIDs, label) {
+			return nil, errors.New("gmail broker: resource selector mismatch")
+		}
+		return body, nil
+	case "gmail.threads.get":
+		var v struct {
+			Messages []json.RawMessage `json:"messages"`
+		}
+		if json.Unmarshal(body, &v) != nil {
+			return nil, errors.New("gmail broker: invalid provider response")
+		}
+		out := v.Messages[:0]
+		for _, raw := range v.Messages {
+			var m struct {
+				LabelIDs []string `json:"labelIds"`
+			}
+			if json.Unmarshal(raw, &m) == nil && has(m.LabelIDs, label) {
+				out = append(out, raw)
+			}
+		}
+		if len(out) == 0 {
+			return nil, errors.New("gmail broker: resource selector mismatch")
+		}
+		v.Messages = out
+		return json.Marshal(v)
+	}
+	return nil, errors.New("gmail broker: operation not allowed")
+}
+func has(xs []string, x string) bool {
+	for _, v := range xs {
+		if v == x {
+			return true
+		}
+	}
+	return false
 }
 func (c *Connector) audit(at time.Time, d authdomain.Decision, action, resource, result, reason string) error {
 	return c.cfg.Audit.RecordGmail(AuditEvent{At: at, Principal: c.cfg.Principal, GrantID: d.GrantID, Action: action, Resource: resource, Result: result, Reason: reason})

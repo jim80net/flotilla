@@ -223,6 +223,26 @@ func TestWrongOwnerRefused(t *testing.T) {
 	}
 }
 
+func TestEnforceLabelSelectors(t *testing.T) {
+	if _, e := enforceLabel("gmail.messages.get", "allowed", []byte(`{"labelIds":["other"]}`)); e == nil {
+		t.Fatal("wrong message label allowed")
+	}
+	got, e := enforceLabel("gmail.labels.list", "allowed", []byte(`{"labels":[{"id":"other","name":"private"},{"id":"allowed","name":"safe"}]}`))
+	if e != nil {
+		t.Fatal(e)
+	}
+	if strings.Contains(string(got), "private") || !strings.Contains(string(got), "safe") {
+		t.Fatalf("filtered labels=%s", got)
+	}
+	got, e = enforceLabel("gmail.threads.get", "allowed", []byte(`{"messages":[{"id":"one","labelIds":["allowed"]},{"id":"two","labelIds":["other"]}]}`))
+	if e != nil {
+		t.Fatal(e)
+	}
+	if strings.Contains(string(got), `"two"`) || !strings.Contains(string(got), `"one"`) {
+		t.Fatalf("filtered thread=%s", got)
+	}
+}
+
 func TestRefreshErrorsAreSanitized(t *testing.T) {
 	f := &fakeFS{data: credential(), mode: 0600, uid: 1}
 	a := &audit{}
