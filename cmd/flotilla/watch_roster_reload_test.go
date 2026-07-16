@@ -30,6 +30,16 @@ const reloadRosterCycle = `{
   "agents":[{"name":"root"},{"name":"alpha"}]
 }`
 
+const reloadRosterDerivedCycle = `{
+  "xo_agent":"root","heartbeat_interval":"20m",
+  "agents":[{"name":"root"},{"name":"group"},{"name":"coord","coordinator":true}],
+  "channels":[
+    {"channel_id":"C_GROUP","xo_agent":"group","members":["coord"]},
+    {"channel_id":"C_COORD","xo_agent":"coord","members":[]},
+    {"channel_id":"C_CMD","xo_agent":"group","role":"fleet-command","members":["coord"]}
+  ]
+}`
+
 func TestWatchRosterReloadAdoptsCompleteValidatedSnapshot(t *testing.T) {
 	path, initial := reloadFixture(t, reloadRosterA)
 	r, err := newWatchRosterReloader(path, "", initial)
@@ -81,6 +91,22 @@ func TestWatchRosterReloadRejectsInvalidDerivedTopology(t *testing.T) {
 	}
 	if s := r.Snapshot(); s.Generation != 1 || firstReloadMember(s.Config) != "alpha" {
 		t.Fatalf("cyclic edit changed last-good snapshot: generation=%d member=%q", s.Generation, firstReloadMember(s.Config))
+	}
+}
+
+func TestWatchRosterReloadRetainsLastGoodOnCompletedDerivedCycle(t *testing.T) {
+	path, initial := reloadFixture(t, reloadRosterA)
+	r, err := newWatchRosterReloader(path, "", initial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeReloadRoster(t, path, reloadRosterDerivedCycle)
+	if adopted, err := r.Check(); err == nil || adopted {
+		t.Fatalf("completed derived cycle Check = (%v, %v), want rejection", adopted, err)
+	}
+	if s := r.Snapshot(); s.Generation != 1 || firstReloadMember(s.Config) != "alpha" || firstReloadBelow(s.Config) != "alpha" {
+		t.Fatalf("derived cycle changed last-good snapshot: generation=%d member=%q below=%q",
+			s.Generation, firstReloadMember(s.Config), firstReloadBelow(s.Config))
 	}
 }
 
@@ -142,7 +168,7 @@ func firstReloadMember(cfg *roster.Config) string {
 }
 
 func firstReloadBelow(cfg *roster.Config) string {
-	below := cfg.Org().Parents["root"]
+	below := cfg.Org().Children["root"]
 	if len(below) == 0 {
 		return ""
 	}

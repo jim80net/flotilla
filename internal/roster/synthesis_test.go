@@ -164,10 +164,8 @@ func TestSynthesisAccessors_LegacyAndUnknownAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// In the legacy star the only binding's XO is "xo" and every agent is a member;
-	// AgentsBelow(xo) excludes that binding (its XO == xo, self), so xo reads nobody.
-	if got := legacy.AgentsBelow("xo"); len(got) != 0 {
-		t.Errorf("legacy AgentsBelow(xo) = %v; want [] (the single binding is xo's own)", got)
+	if got := legacy.AgentsBelow("xo"); !sortedEqual(got, []string{"a", "b"}) {
+		t.Errorf("legacy AgentsBelow(xo) = %v; want [a b]", got)
 	}
 	// An unknown agent resolves to empty sets, never a panic.
 	if got := legacy.AgentsBelow("ghost"); len(got) != 0 {
@@ -189,9 +187,8 @@ func TestLoad_AcceptsLiveFleetCommandShape(t *testing.T) {
 
 // OwningXO resolves the XO that owns a desk — the cap-escalation target for the recursive
 // desk-heartbeat (#183 §8e). It must work in BOTH topologies: the federated home-channel shape
-// (where a leaf owns its home channel and AgentsAbove names its parent) AND the legacy star (where a
-// leaf owns no channel — AgentsAbove is EMPTY — and the owner is the XO of the channel it is a member
-// of). It falls back to the primary XO when neither resolves.
+// (where a leaf owns its home channel) AND the legacy star. Both compile to the
+// same canonical parent edge. It falls back to the primary XO when neither resolves.
 func TestOwningXO_FederatedHomeChannel(t *testing.T) {
 	cfg := loadLiveShape(t)
 	// A leaf's owner is its project-XO (its home channel lists alpha-xo).
@@ -209,16 +206,15 @@ func TestOwningXO_FederatedHomeChannel(t *testing.T) {
 }
 
 func TestOwningXO_LegacyStarFallsBackToChannelXO(t *testing.T) {
-	// In the legacy star a leaf owns NO channel (AgentsAbove is empty); the owner is the XO of the
-	// single channel it is a member of — proving the §8e fallback, not the AgentsAbove path.
+	// In the legacy star a leaf owns no channel, but compilation materializes its canonical parent.
 	legacy, err := Load(writeRoster(t, `{
 	  "operator_user_id":"U","channel_id":"C1","xo_agent":"xo",
 	  "agents":[{"name":"xo"},{"name":"backend"},{"name":"frontend"}]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := legacy.AgentsAbove("backend"); len(got) != 0 {
-		t.Fatalf("precondition: a legacy-star leaf must have an EMPTY AgentsAbove, got %v", got)
+	if got := legacy.AgentsAbove("backend"); !sortedEqual(got, []string{"xo"}) {
+		t.Fatalf("legacy-star parent = %v, want [xo]", got)
 	}
 	if got := legacy.OwningXO("backend", "xo"); got != "xo" {
 		t.Errorf("OwningXO(backend) = %q; want xo (the channel it is a member of)", got)

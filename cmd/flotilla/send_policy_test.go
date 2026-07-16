@@ -35,10 +35,12 @@ func loadSendPolicyRoster(t *testing.T) *roster.Config {
 
 func TestAuthorizeSendDerivedRosterQuadrants(t *testing.T) {
 	cfg := loadSendPolicyRoster(t)
-	// Regression precondition: prove this is the real synthesis orientation, not
-	// a conventional reporting tree fixture.
-	if got := cfg.Org().Children["alpha-backend"]; len(got) != 1 || got[0] != "alpha-xo" {
-		t.Fatalf("fixture no longer exercises derived inversion: Children[alpha-backend]=%v", got)
+	// Regression precondition: the derived DAG now stores canonical reporting edges.
+	if got := cfg.Org().Parents["alpha-backend"]; len(got) != 1 || got[0] != "alpha-xo" {
+		t.Fatalf("canonical parent alpha-backend=%v", got)
+	}
+	if got := cfg.Org().Children["alpha-xo"]; len(got) != 2 {
+		t.Fatalf("canonical children alpha-xo=%v", got)
 	}
 	tests := []struct {
 		name, from, to string

@@ -69,8 +69,8 @@ func (c *Config) AgentsBelow(agent string) []string {
 // AgentsAbove returns the synthesizing PARENTS of an agent — the agents OWED a synthesis
 // when this agent finishes.
 //
-// Org-truth v1 PR3: after Load attaches orgDAG, prefer the compiled DAG's Parents
-// (single primary when source=file per design §9; multi-parent when source=derived).
+// After Load, the compiled DAG is canonical for both file and channel sources:
+// Parents are reporting parents (single primary for file, possibly many derived).
 // During attachOrgDAG and for agents absent from a file-sourced DAG, fall back to
 // channel membership.
 //
