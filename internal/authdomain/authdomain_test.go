@@ -1,6 +1,7 @@
 package authdomain
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -87,16 +88,32 @@ func request(desk string) Request {
 	return Request{Desk: desk, Capability: "gmail.api", Action: "gmail.messages.list", Scope: gmailReadonlyScope, Account: "operator-primary"}
 }
 
+type auditRecorder struct {
+	events []AuditEvent
+	err    error
+}
+
+func (a *auditRecorder) Record(e AuditEvent) error { a.events = append(a.events, e); return a.err }
+func decision(t *testing.T, s *Set, r Request) Decision {
+	t.Helper()
+	a := &auditRecorder{}
+	auth, err := s.Authorize(r, testNow, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return auth.Decision()
+}
+
 func TestPAReadOnlyAllowAndSiblingDenied(t *testing.T) {
 	s, err := Load(testRoster(t), []byte(grant("desk", "pa")))
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := s.Resolve(request("pa"), testNow)
+	got := decision(t, s, request("pa"))
 	if !got.Allowed || got.GrantID != "alpha-gmail-readonly" || got.PrincipalName != "pa" {
 		t.Fatalf("PA decision = %#v", got)
 	}
-	denied := s.Resolve(request("sibling-desk"), testNow)
+	denied := decision(t, s, request("sibling-desk"))
 	if denied.Allowed || denied.GrantID != "" {
 		t.Fatalf("sibling decision = %#v", denied)
 	}
@@ -107,15 +124,92 @@ func TestPAReadOnlyAllowAndSiblingDenied(t *testing.T) {
 	}
 }
 
+type lookupRecorder struct{ refs []string }
+
+func (l *lookupRecorder) LookupSecretRef(ref string) error { l.refs = append(l.refs, ref); return nil }
+
+func TestBrokerBindingOccursOnlyAfterAllow(t *testing.T) {
+	s, err := Load(testRoster(t), []byte(grant("desk", "pa")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	audit := &auditRecorder{}
+	denied, err := s.Authorize(request("sibling-desk"), testNow, audit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookup := &lookupRecorder{}
+	if err := denied.BindSecret(lookup); err == nil {
+		t.Fatal("denied authorization bound a secret")
+	}
+	if len(lookup.refs) != 0 {
+		t.Fatalf("denied lookup calls = %v", lookup.refs)
+	}
+	allowed, err := s.Authorize(request("pa"), testNow, audit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := allowed.BindSecret(lookup); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(lookup.refs) != "[pa-gmail-oauth]" {
+		t.Fatalf("allowed refs = %v", lookup.refs)
+	}
+	if len(audit.events) != 2 || audit.events[0].Allowed || !audit.events[1].Allowed {
+		t.Fatalf("audit events = %#v", audit.events)
+	}
+	if strings.Contains(fmt.Sprintf("%#v", audit.events), "pa-gmail-oauth") {
+		t.Fatal("audit leaked logical secret ref")
+	}
+}
+
+func TestLabelSelectorRequiresProof(t *testing.T) {
+	raw := strings.Replace(grant("desk", "pa"), "labels: []", "labels: [inbox-label]", 1)
+	s, err := Load(testRoster(t), []byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, label string
+		allowed     bool
+	}{
+		{"empty", "", false}, {"wrong", "other-label", false}, {"allowed", "inbox-label", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := request("pa")
+			r.Label = tc.label
+			if got := decision(t, s, r); got.Allowed != tc.allowed {
+				t.Fatalf("decision = %#v", got)
+			}
+		})
+	}
+}
+
+func TestAuditFailureFailsClosed(t *testing.T) {
+	s, err := Load(testRoster(t), []byte(grant("desk", "pa")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &auditRecorder{err: errors.New("disk full")}
+	auth, err := s.Authorize(request("pa"), testNow, a)
+	if err == nil || auth.Decision().Allowed {
+		t.Fatalf("Authorize = %#v, %v", auth.Decision(), err)
+	}
+	lookup := &lookupRecorder{}
+	if err := auth.BindSecret(lookup); err == nil || len(lookup.refs) != 0 {
+		t.Fatalf("BindSecret err=%v calls=%v", err, lookup.refs)
+	}
+}
+
 func TestFlotillaInheritanceWithoutSiblingLeakage(t *testing.T) {
 	s, err := Load(testRoster(t), []byte(grant("flotilla", "alpha-xo")))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := s.Resolve(request("pa"), testNow); !got.Allowed || got.PrincipalName != "alpha-xo" {
+	if got := decision(t, s, request("pa")); !got.Allowed || got.PrincipalName != "alpha-xo" {
 		t.Fatalf("descendant = %#v", got)
 	}
-	if got := s.Resolve(request("foreign-desk"), testNow); got.Allowed {
+	if got := decision(t, s, request("foreign-desk")); got.Allowed {
 		t.Fatalf("foreign sibling inherited: %#v", got)
 	}
 }
@@ -127,20 +221,20 @@ func TestNodeAttestationCanOnlyNarrow(t *testing.T) {
 	}
 	r := request("pa")
 	r.Node = &NodeAttestation{ID: "node-one"}
-	if got := s.Resolve(r, testNow); got.Allowed {
+	if got := decision(t, s, r); got.Allowed {
 		t.Fatalf("empty attestation allowed: %#v", got)
 	}
 	r.Node.Capabilities = []AttestedCapability{{Name: "gmail.api", Actions: []string{"gmail.messages.get"}, Scopes: []string{gmailReadonlyScope}, Accounts: []string{"operator-primary"}}}
-	if got := s.Resolve(r, testNow); got.Allowed {
+	if got := decision(t, s, r); got.Allowed {
 		t.Fatalf("narrow action allowed: %#v", got)
 	}
 	r.Node.Capabilities[0].Actions = []string{"gmail.messages.list"}
-	if got := s.Resolve(r, testNow); !got.Allowed {
+	if got := decision(t, s, r); !got.Allowed {
 		t.Fatalf("intersection denied: %#v", got)
 	}
 	// Attestation cannot manufacture a workload grant.
 	r.Desk = "sibling-desk"
-	if got := s.Resolve(r, testNow); got.Allowed {
+	if got := decision(t, s, r); got.Allowed {
 		t.Fatalf("node broadened desk authority: %#v", got)
 	}
 }
@@ -157,7 +251,7 @@ func TestExpiredAndRevoked(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := s.Resolve(request("pa"), testNow); got.Allowed {
+			if got := decision(t, s, request("pa")); got.Allowed {
 				t.Fatalf("decision = %#v", got)
 			}
 		})

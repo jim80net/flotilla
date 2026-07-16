@@ -160,8 +160,6 @@ func validateGrant(cfg *roster.Config, g Grant) error {
 	if g.Audit.Mode != "metadata-only" || g.Audit.Retain != "P30D" {
 		return fmt.Errorf("grant %q: audit must be metadata-only with P30D retention", g.ID)
 	}
-	if g.ExpiresAt != nil && g.RevokedAt != nil && g.RevokedAt.After(*g.ExpiresAt) { /* valid: both independently deny */
-	}
 	return nil
 }
 
@@ -226,18 +224,77 @@ type Decision struct {
 	Reason        string
 }
 
-// Resolve is the broker authorization seam. Its result contains policy identity
-// only: never secret references, credentials, or host paths.
-func (s *Set) Resolve(req Request, now time.Time) Decision {
+// AuditEvent is the complete metadata emitted for an authorization decision.
+// Resource selectors and secret bindings are deliberately absent.
+type AuditEvent struct {
+	At         time.Time
+	Principal  string
+	Capability string
+	Action     string
+	GrantID    string
+	Allowed    bool
+	Reason     string
+}
+
+type AuditSink interface {
+	Record(AuditEvent) error
+}
+
+// SecretRefLookup is implemented inside a provider broker. It receives only a
+// logical reference, and only after authorization and its audit record succeed.
+type SecretRefLookup interface {
+	LookupSecretRef(string) error
+}
+
+// Authorization is an opaque broker capability. Callers can inspect its
+// secret-free decision; only a broker lookup can consume its logical binding.
+type Authorization struct {
+	decision  Decision
+	secretRef string
+}
+
+func (a Authorization) Decision() Decision { return a.decision }
+
+func (a Authorization) BindSecret(lookup SecretRefLookup) error {
+	if !a.decision.Allowed || a.secretRef == "" {
+		return errors.New("authorization domains: grant not authorized")
+	}
+	if lookup == nil {
+		return errors.New("authorization domains: secret lookup is required")
+	}
+	return lookup.LookupSecretRef(a.secretRef)
+}
+
+// Authorize is the broker authorization seam. An allowing result is not
+// released unless its metadata-only audit record succeeds.
+func (s *Set) Authorize(req Request, now time.Time, audit AuditSink) (Authorization, error) {
+	d, ref := s.resolve(req, now)
+	event := AuditEvent{At: now, Principal: req.Desk, Capability: req.Capability, Action: req.Action, GrantID: d.GrantID, Allowed: d.Allowed, Reason: d.Reason}
+	if audit == nil {
+		if d.Allowed {
+			return Authorization{decision: deny("audit unavailable")}, errors.New("authorization domains: audit sink is required")
+		}
+		return Authorization{decision: d}, errors.New("authorization domains: audit sink is required")
+	}
+	if err := audit.Record(event); err != nil {
+		if d.Allowed {
+			return Authorization{decision: deny("audit failed")}, fmt.Errorf("authorization domains: audit decision: %w", err)
+		}
+		return Authorization{decision: d}, fmt.Errorf("authorization domains: audit decision: %w", err)
+	}
+	return Authorization{decision: d, secretRef: ref}, nil
+}
+
+func (s *Set) resolve(req Request, now time.Time) (Decision, string) {
 	if s == nil || s.roster == nil {
-		return deny("resolver unavailable")
+		return deny("resolver unavailable"), ""
 	}
 	if _, err := s.roster.Agent(req.Desk); err != nil {
-		return deny("unknown desk")
+		return deny("unknown desk"), ""
 	}
 	ancestors := s.ancestors(req.Desk)
 	for _, g := range s.grants {
-		if !principalMatches(g.Principal, req.Desk, ancestors) || g.Capability != req.Capability || !contains(g.Actions, req.Action) || !contains(g.OAuthScopes, req.Scope) || !contains(g.Resources.Accounts, req.Account) || (req.Label != "" && len(g.Resources.Labels) > 0 && !contains(g.Resources.Labels, req.Label)) {
+		if !principalMatches(g.Principal, req.Desk, ancestors) || g.Capability != req.Capability || !contains(g.Actions, req.Action) || !contains(g.OAuthScopes, req.Scope) || !contains(g.Resources.Accounts, req.Account) || (len(g.Resources.Labels) > 0 && !contains(g.Resources.Labels, req.Label)) {
 			continue
 		}
 		if g.ExpiresAt != nil && !now.Before(*g.ExpiresAt) {
@@ -249,9 +306,9 @@ func (s *Set) Resolve(req Request, now time.Time) Decision {
 		if req.Node != nil && !nodeAllows(*req.Node, req) {
 			continue
 		}
-		return Decision{Allowed: true, GrantID: g.ID, PrincipalKind: g.Principal.Kind, PrincipalName: g.Principal.Name, Reason: "allowed"}
+		return Decision{Allowed: true, GrantID: g.ID, PrincipalKind: g.Principal.Kind, PrincipalName: g.Principal.Name, Reason: "allowed"}, g.SecretRef
 	}
-	return deny("grant not found")
+	return deny("grant not found"), ""
 }
 
 func (s *Set) ancestors(desk string) map[string]bool {

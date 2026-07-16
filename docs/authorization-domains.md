@@ -83,8 +83,17 @@ Resolution is deny-by-default:
    operation.
 6. Emit a metadata-only audit result without message bodies, tokens, or secrets.
 
+An allow is released to a provider broker only after the metadata audit sink
+accepts its decision event; an audit failure therefore fails closed. The opaque
+authorization can pass the grant's logical `secret_ref` to a broker-internal
+lookup, but denied requests cannot invoke that lookup. Decision events contain
+only time, principal, capability, action, grant ID, result, and reason.
+
 Grants are additive; absence is denial. A child desk does not weaken an
 ancestor's constraint. A node may narrow authority but never broaden it.
+When a grant lists labels, the request must name one of those labels; an empty
+label is not evidence of an allowed selector. An empty grant label list means
+the grant has no narrower label selector yet.
 
 ## Secret boundary
 
