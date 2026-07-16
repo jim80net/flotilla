@@ -39,6 +39,9 @@ func (c *Config) attachOrgDAG(rosterPath string, opts LoadOptions) error {
 			}
 		}
 	}
+	if err := derived.ValidateStructural(); err != nil {
+		return fmt.Errorf("derived org DAG: %w", err)
+	}
 
 	orgPath, required, err := org.ResolvePath(rosterPath, opts.OrgFile)
 	if err != nil {

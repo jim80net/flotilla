@@ -96,6 +96,25 @@ func TestCompile_RejectsCycle(t *testing.T) {
 	}
 }
 
+func TestValidateStructural_RejectsCycleThroughSecondaryParent(t *testing.T) {
+	d := Snapshot("root", SourceDerived, []string{"root", "a", "b"},
+		func(a string) []string {
+			switch a {
+			case "a":
+				return []string{"root", "b"}
+			case "b":
+				return []string{"a"}
+			default:
+				return nil
+			}
+		},
+		func(string) []string { return nil },
+	)
+	if err := d.ValidateStructural(); err == nil {
+		t.Fatal("a cycle hidden outside PrimaryParent must be rejected")
+	}
+}
+
 func TestCompile_RejectsUnknownParent(t *testing.T) {
 	f := &File{
 		Version: 1,
@@ -145,5 +164,15 @@ func TestDeriveFromChannels_RepeatedManyToManyEdgesAreCanonical(t *testing.T) {
 	}
 	if !slices.Equal(d.Parents["leaf"], []string{"p1"}) || !slices.Contains(d.Children["p1"], "leaf") {
 		t.Fatalf("legacy edge parents=%v children=%v", d.Parents["leaf"], d.Children["p1"])
+	}
+}
+
+func TestDeriveFromChannels_RootRemainsParentlessOnOwnedGroupOverlap(t *testing.T) {
+	d := DeriveFromChannels("root", []string{"root", "coord"}, []Channel{
+		{ChannelID: "group", XOAgent: "root", Members: []string{"coord"}},
+		{ChannelID: "coord-home", XOAgent: "coord"},
+	})
+	if got := d.Parents["root"]; len(got) != 0 {
+		t.Fatalf("root parents=%v, want none", got)
 	}
 }

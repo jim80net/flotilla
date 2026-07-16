@@ -51,9 +51,15 @@ func DeriveFromChannels(root string, agentNames []string, channels []Channel) *D
 			if m == ch.XOAgent {
 				continue
 			}
-			if ownsAny[m] {
+			if ownsAny[m] && ch.XOAgent != root {
 				parents[ch.XOAgent] = appendUnique(parents[ch.XOAgent], m)
 			} else {
+				// The configured fleet root is parentless. A root-owned group that
+				// lists another channel owner is an observation/down-list overlap,
+				// not evidence that the root reports to that owner.
+				if ch.XOAgent == root && ownsAny[m] {
+					continue
+				}
 				parents[m] = appendUnique(parents[m], ch.XOAgent)
 			}
 		}

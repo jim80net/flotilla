@@ -91,6 +91,40 @@ func TestOrgDAG_LegacyStar(t *testing.T) {
 	}
 }
 
+func TestOrgDAG_MixedGroupHomeFleetCommandPreservesRoot(t *testing.T) {
+	cfg, err := Load(writeRoster(t, `{
+	  "operator_user_id":"U","xo_agent":"root",
+	  "agents":[{"name":"root"},{"name":"coord","coordinator":true}],
+	  "channels":[
+	    {"channel_id":"C_GROUP","xo_agent":"root","members":["coord"]},
+	    {"channel_id":"C_COORD","xo_agent":"coord","members":[]},
+	    {"channel_id":"C_CMD","xo_agent":"root","role":"fleet-command","members":["coord"]}
+	  ]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Org().Parents["root"]; len(got) != 0 {
+		t.Fatalf("root parents=%v, want none", got)
+	}
+	if got := cfg.Org().Parents["coord"]; !slices.Equal(got, []string{"root"}) {
+		t.Fatalf("coord parents=%v, want [root]", got)
+	}
+}
+
+func TestOrgDAG_RejectsCycleAddedByFleetCommandSupplement(t *testing.T) {
+	_, err := Load(writeRoster(t, `{
+	  "operator_user_id":"U","xo_agent":"root",
+	  "agents":[{"name":"root"},{"name":"group"},{"name":"coord","coordinator":true}],
+	  "channels":[
+	    {"channel_id":"C_GROUP","xo_agent":"group","members":["coord"]},
+	    {"channel_id":"C_COORD","xo_agent":"coord","members":[]},
+	    {"channel_id":"C_CMD","xo_agent":"group","role":"fleet-command","members":["coord"]}
+	  ]}`))
+	if err == nil || !strings.Contains(err.Error(), "cycle") {
+		t.Fatalf("completed derived cycle must be rejected, got %v", err)
+	}
+}
+
 func sorted(ss []string) []string {
 	out := slices.Clone(ss)
 	slices.Sort(out)

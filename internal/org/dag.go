@@ -121,26 +121,34 @@ func cloneStrings(in []string) []string {
 	return out
 }
 
-// ValidateStructural checks for empty ids and cycles on primary-parent edges.
+// ValidateStructural checks root and node invariants and rejects cycles across
+// every parent edge. Derived DAGs may have multiple parents, so following only
+// PrimaryParent would allow a cycle hidden in Parents[1:].
 func (d *DAG) ValidateStructural() error {
 	if d == nil {
 		return fmt.Errorf("org: nil DAG")
+	}
+	if d.Root != "" && len(d.Parents[d.Root]) != 0 {
+		return fmt.Errorf("org: root %q must not report to a parent", d.Root)
 	}
 	const white, gray, black = 0, 1, 2
 	color := map[string]int{}
 	var visit func(string) error
 	visit = func(u string) error {
 		color[u] = gray
-		p := d.PrimaryParent(u)
-		if p != "" {
-			if _, ok := d.Nodes[p]; ok {
-				switch color[p] {
-				case gray:
-					return fmt.Errorf("org: cycle involving %q and %q", u, p)
-				case white:
-					if err := visit(p); err != nil {
-						return err
-					}
+		for _, p := range d.Parents[u] {
+			if p == "" {
+				return fmt.Errorf("org: node %q has an empty parent", u)
+			}
+			if _, ok := d.Nodes[p]; !ok {
+				return fmt.Errorf("org: node %q reports to unknown parent %q", u, p)
+			}
+			switch color[p] {
+			case gray:
+				return fmt.Errorf("org: cycle involving %q and %q", u, p)
+			case white:
+				if err := visit(p); err != nil {
+					return err
 				}
 			}
 		}
