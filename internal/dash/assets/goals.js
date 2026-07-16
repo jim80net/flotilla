@@ -300,6 +300,8 @@
 
   /* ── situation strip + legend ──────────────────────────────────────────── */
   function renderSituation(doc) {
+    if (!doc || !doc.found) { setGoalsAvailability(false); return; }
+    setGoalsAvailability(true);
     var c = doc.counts || {};
     // Realized: the "all" window is the live point-in-time snapshot count; a bounded
     // window counts real recorded achievements inside it (#418 done-history).
@@ -370,6 +372,42 @@
     // every render (incl. error/empty), so announcing the count summary here would
     // alternate with the error/empty announcement each refresh and defeat the dedup.
     // render() announces the summary only on the success path.
+  }
+
+  // A failed goals read is not an empty goals document. Clear every derived
+  // count and stale affordance before presenting the single retryable error so
+  // zero never masquerades as current fleet state (#761).
+  function setGoalsAvailability(available) {
+    var viewEl = q("view-goals"), summary = q("goals-mobile-summary");
+    if (viewEl) viewEl.classList.toggle("goals-data-unavailable", !available);
+    if (summary) summary.classList.toggle("is-unavailable", !available);
+    var done = q("goals-done"), doneCount = q("goals-done-count");
+    var hdrCount = q("hdr-decisions-count"), hdrBtn = q("tab-decisions");
+    if (available) {
+      if (done) { done.classList.remove("is-unavailable"); done.removeAttribute("aria-disabled"); }
+      if (doneCount) doneCount.textContent = "";
+      if (hdrBtn) { hdrBtn.removeAttribute("aria-label"); hdrBtn.removeAttribute("title"); }
+      return;
+    }
+    q("goals-situation").innerHTML = "";
+    var compact = q("goals-mobile-summary-count");
+    if (compact) compact.textContent = "unavailable";
+    var primary = q("goals-primary");
+    if (primary) { primary.innerHTML = ""; primary.hidden = true; }
+    if (done) {
+      done.open = false;
+      done.classList.add("is-unavailable");
+      done.setAttribute("aria-disabled", "true");
+    }
+    if (doneCount) doneCount.textContent = "unavailable";
+    var doneList = q("goals-done-list");
+    if (doneList) doneList.innerHTML = "";
+    if (hdrCount) { hdrCount.textContent = ""; hdrCount.hidden = true; }
+    if (hdrBtn) {
+      hdrBtn.classList.remove("hdr-decisions-hot");
+      hdrBtn.setAttribute("aria-label", "Decisions unavailable until goals data reloads");
+      hdrBtn.setAttribute("title", "Goals data unavailable — open for retry guidance");
+    }
   }
 
   // A fitted fleet-wide DAG necessarily makes node copy dense on a phone. Keep one
@@ -2121,22 +2159,23 @@
     var doc = cache || {};
     if (sig === undefined) sig = JSON.stringify(doc);
     var graph = q("goals-graph"), empty = q("goals-empty");
-    renderSituation(doc);
     renderLegend();
-    renderDoneHistory(doc); // #349 Inc 5 F13 — realized goals, on every path (empty-safe)
 
     if (!doc.found) {
+      setGoalsAvailability(false);
       closeDrawer(); // a drawer open over the now-hidden graph would be stale
       graph.classList.add("hidden");
       empty.classList.remove("hidden");
       empty.textContent = doc.error
-        ? ("Goals file could not be loaded: " + doc.error)
+        ? "Goals are unavailable right now. Refresh this page or wait for the next live update to retry."
         : (doc.message || "No goals file configured.");
       announce(empty.textContent); // mirror the state to the screen reader, not "0 of 0"
       lastSig = sig; // a complete (synchronous) render
       if (window.flotillaPerf) window.flotillaPerf.viewRendered("goals");
       return;
     }
+    renderSituation(doc);
+    renderDoneHistory(doc); // #349 Inc 5 F13 — realized goals, including honest empty
     var goals = Array.isArray(doc.goals) ? doc.goals : [];
     if (!goals.length) {
       closeDrawer();
