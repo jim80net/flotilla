@@ -22,11 +22,22 @@
       .replace(/'/g, "&#39;");
   }
 
+  // Coalesce identical reads while they are in flight. Startup and one SSE tick
+  // have several independent consumers (landing, tab dots, Goals badge/view),
+  // but the browser should put only one request for an API key on the wire.
+  var inFlightJSON = {};
   function getJSON(path) {
-    return fetch(path, { cache: "no-store" }).then(function (res) {
+    if (inFlightJSON[path]) return inFlightJSON[path];
+    var request = fetch(path, { cache: "no-store" }).then(function (res) {
       if (!res.ok) throw new Error(path + " → " + res.status);
       return res.json();
     });
+    inFlightJSON[path] = request;
+    var clear = function () {
+      if (inFlightJSON[path] === request) delete inFlightJSON[path];
+    };
+    request.then(clear, clear);
+    return request;
   }
 
   function postJSON(path, body) {
@@ -1614,7 +1625,7 @@
 
   // seedLanding chooses the first tab on cold open (#579):
   //   1. Explicit hash / deep link → that view (always wins).
-  //   2. Else GET /api/goals.default_view === true → Goals.
+  //   2. Else GET /api/goals/meta.default_view === true → Goals.
   //   3. Else Conversations (historical default).
   // Must NOT replaceState to #conv before the goals peek — that would mint a
   // synthetic "explicit" hash and steal the default_view branch.
@@ -1625,7 +1636,7 @@
       try { history.replaceState(fromHash, "", navHash(fromHash)); } catch (e) { /* ignore */ }
       return;
     }
-    getJSON("/api/goals").then(function (g) {
+    getJSON("/api/goals/meta").then(function (g) {
       // Operator (or another path) already chose a view while we waited — do not steal.
       if (parseHash(location.hash)) return;
       var land = (g && g.default_view)

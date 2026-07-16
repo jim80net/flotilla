@@ -116,3 +116,26 @@ func TestHandleGoals_InvalidFileSurfacesError(t *testing.T) {
 		t.Fatalf("cyclic goals file should surface an error, got %+v", doc)
 	}
 }
+
+func TestHandleGoalsMeta_DefaultViewWithoutRenderedDocument(t *testing.T) {
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	srv, dir := newTestServer(t, singleFleetRoster, now)
+	body := `{"version":1,"default_view":true,"goals":[{"id":"root","title":"Root"}]}`
+	if err := os.WriteFile(filepath.Join(dir, "fleet-goals.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec := doGet(t, srv, "/api/goals/meta")
+	if rec.Code != 200 {
+		t.Fatalf("status code %d", rec.Code)
+	}
+	var meta goalsMeta
+	if err := json.Unmarshal(rec.Body.Bytes(), &meta); err != nil {
+		t.Fatal(err)
+	}
+	if !meta.Found || !meta.DefaultView || meta.Error != "" {
+		t.Fatalf("meta=%+v, want found/default without error", meta)
+	}
+	if got := rec.Header().Get("Server-Timing"); got == "" {
+		t.Error("metadata endpoint must expose Server-Timing")
+	}
+}
