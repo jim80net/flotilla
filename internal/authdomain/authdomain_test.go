@@ -188,4 +188,8 @@ func TestMalformedWholeFileFails(t *testing.T) {
 	if s, err := Load(cfg, []byte(grant("desk", "pa")), []byte(grant("desk", "pa"))); err == nil || s != nil {
 		t.Fatalf("duplicate Load = %#v, %v", s, err)
 	}
+	bad := []byte(strings.Replace(grant("desk", "pa"), "gmail.messages.get", "gmail.messages.delete", 1))
+	if s, err := Load(cfg, []byte(grant("desk", "pa")), bad); err == nil || s != nil {
+		t.Fatalf("partial set adopted = %#v, %v", s, err)
+	}
 }
