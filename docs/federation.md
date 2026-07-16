@@ -104,9 +104,11 @@ flotilla channel move 123456789012345678 --category Alpha \
 > `members`). **Visibility synthesis** (the rolled-up fleet view, Tiers 2/3)
 > needs a **different** member shape — each agent owns its own home channel and
 > lists its *parent* in `members[]`, with the broadcast channel tagged
-> `role="fleet-command"`. Synthesis derives the hierarchy from `members[]`, so it
-> only routes correctly over the home-channel shape; the two layouts are not yet
-> unified ([#139](https://github.com/jim80net/flotilla/issues/139)). See
+> `role="fleet-command"`. At load, both layouts normalize into one compiled org
+> DAG: `Parents[x]` are who `x` reports to and `Children[x]` are its direct
+> reports. Repeated bindings are deduplicated and distinct multi-parent edges
+> are retained. Synthesis, ownership, authorization, and dash consumers all read
+> that canonical snapshot, including across atomic roster hot reloads. See
 > [visibility.md → The worked example](./visibility.md#the-worked-example).
 
 > **The bot needs the Message Content intent in EVERY bound channel — not just

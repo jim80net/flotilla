@@ -40,8 +40,30 @@ type DAG struct {
 	Source string
 
 	Nodes    map[string]Node
-	Parents  map[string][]string // agent → AgentsAbove equivalent
-	Children map[string][]string // agent → AgentsBelow equivalent
+	Parents  map[string][]string // child → canonical reports-to parents
+	Children map[string][]string // parent → canonical direct reports
+}
+
+// AddParent adds the canonical child→parent edge and its inverse idempotently.
+func (d *DAG) AddParent(child, parent string) {
+	if d == nil || child == "" || parent == "" || child == parent {
+		return
+	}
+	d.Parents[child] = appendUniqueDAG(d.Parents[child], parent)
+	d.Children[parent] = appendUniqueDAG(d.Children[parent], child)
+	n := d.Nodes[child]
+	if n.ReportsTo == "" {
+		n.ReportsTo = parent
+		d.Nodes[child] = n
+	}
+}
+func appendUniqueDAG(in []string, v string) []string {
+	for _, x := range in {
+		if x == v {
+			return in
+		}
+	}
+	return append(in, v)
 }
 
 // PrimaryParent returns the first parent of agent, or "" if none.
@@ -56,8 +78,8 @@ func (d *DAG) PrimaryParent(agent string) string {
 	return ps[0]
 }
 
-// Snapshot builds a derived DAG by calling parent/child resolvers for each agent.
-// Used by roster.Load so the stored DAG is byte-parity with AgentsAbove/AgentsBelow.
+// Snapshot builds a DAG from resolvers that already use canonical reporting
+// semantics: Parents are who the agent reports to; Children are direct reports.
 func Snapshot(root, source string, agentNames []string, parents, children func(string) []string) *DAG {
 	if source == "" {
 		source = SourceDerived

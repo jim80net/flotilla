@@ -16,7 +16,7 @@ type LoadOptions struct {
 
 // attachOrgDAG builds the org-truth DAG after synthesis validation.
 //
-//   - No org file (or default path missing) → Snapshot of AgentsAbove/AgentsBelow.
+//   - No org file (or default path missing) → canonical reports-to derivation.
 //   - Org file present → Compile + CheckHomes + Agree; store the file DAG
 //     (single primary reports_to per design §9).
 func (c *Config) attachOrgDAG(rosterPath string, opts LoadOptions) error {
@@ -24,7 +24,21 @@ func (c *Config) attachOrgDAG(rosterPath string, opts LoadOptions) error {
 	for _, a := range c.Agents {
 		names = append(names, a.Name)
 	}
-	derived := org.Snapshot(c.effectiveXOAgent(), org.SourceDerived, names, c.AgentsAbove, c.AgentsBelow)
+	channels := make([]org.Channel, 0, len(c.Bindings()))
+	for _, ch := range c.Bindings() {
+		channels = append(channels, org.Channel{ChannelID: ch.ChannelID, XOAgent: ch.XOAgent, Members: ch.Members, Role: ch.Role})
+	}
+	derived := org.DeriveFromChannels(c.effectiveXOAgent(), names, channels)
+	for _, ch := range c.Bindings() {
+		if !ch.IsFleetCommand() {
+			continue
+		}
+		for _, m := range ch.Members {
+			if m != ch.XOAgent && c.fleetCommandSynthesisMember(ch.XOAgent, m) {
+				derived.AddParent(m, ch.XOAgent)
+			}
+		}
+	}
 
 	orgPath, required, err := org.ResolvePath(rosterPath, opts.OrgFile)
 	if err != nil {

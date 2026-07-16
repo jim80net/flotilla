@@ -142,7 +142,7 @@ func firstReloadMember(cfg *roster.Config) string {
 }
 
 func firstReloadBelow(cfg *roster.Config) string {
-	below := cfg.Org().Parents["root"]
+	below := cfg.Org().Children["root"]
 	if len(below) == 0 {
 		return ""
 	}

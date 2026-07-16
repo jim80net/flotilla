@@ -31,8 +31,6 @@ func DeriveFromChannels(root string, agentNames []string, channels []Channel) *D
 	for _, name := range agentNames {
 		parents[name] = nil
 	}
-	// ownsHome: agent is xo_agent of at least one non-fleet-command channel.
-	ownsHome := map[string]bool{}
 	// ownsAny: agent is xo_agent of any channel (including fleet-command) — not a pure leaf.
 	ownsAny := map[string]bool{}
 	for _, ch := range channels {
@@ -40,17 +38,11 @@ func DeriveFromChannels(root string, agentNames []string, channels []Channel) *D
 		if ch.IsFleetCommand() {
 			continue
 		}
-		ownsHome[ch.XOAgent] = true
-		for _, m := range ch.Members {
-			if m == ch.XOAgent {
-				continue // self-edge
-			}
-			// Home-channel shape: members are parents of the channel XO.
-			parents[ch.XOAgent] = appendUnique(parents[ch.XOAgent], m)
-		}
 	}
-	// Legacy star: leaf owns no channel at all; parent is XO of the non-fleet-command
-	// channel that lists the leaf as a member.
+	// One canonical reports-to interpretation. A member that owns a channel is a
+	// parent observing its child's home channel; a member-only leaf reports to the
+	// channel XO (legacy star). This distinction prevents the two shapes from
+	// producing opposite edges or a synthetic two-node cycle.
 	for _, ch := range channels {
 		if ch.IsFleetCommand() {
 			continue
@@ -60,15 +52,12 @@ func DeriveFromChannels(root string, agentNames []string, channels []Channel) *D
 				continue
 			}
 			if ownsAny[m] {
-				continue
-			}
-			// m is a member-only leaf: parent is channel XO
-			if len(parents[m]) == 0 {
-				parents[m] = []string{ch.XOAgent}
+				parents[ch.XOAgent] = appendUnique(parents[ch.XOAgent], m)
+			} else {
+				parents[m] = appendUnique(parents[m], ch.XOAgent)
 			}
 		}
 	}
-	_ = ownsHome
 	children := map[string][]string{}
 	for child, ps := range parents {
 		for _, p := range ps {

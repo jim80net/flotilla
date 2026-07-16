@@ -130,3 +130,20 @@ func TestDeriveFromChannels_HomeChannelStar(t *testing.T) {
 		t.Errorf("root should have no parent, got %q", d.PrimaryParent("xo"))
 	}
 }
+
+func TestDeriveFromChannels_RepeatedManyToManyEdgesAreCanonical(t *testing.T) {
+	d := DeriveFromChannels("root", []string{"root", "p1", "p2", "shared", "leaf"}, []Channel{
+		{ChannelID: "p1", XOAgent: "p1", Members: []string{"root"}}, {ChannelID: "p2", XOAgent: "p2", Members: []string{"root"}},
+		{ChannelID: "shared-a", XOAgent: "shared", Members: []string{"p1", "p2"}}, {ChannelID: "shared-b", XOAgent: "shared", Members: []string{"p1", "p2"}},
+		{ChannelID: "legacy", XOAgent: "p1", Members: []string{"leaf"}},
+	})
+	if !slices.Equal(d.Parents["shared"], []string{"p1", "p2"}) {
+		t.Fatalf("shared parents=%v", d.Parents["shared"])
+	}
+	if !slices.Contains(d.Children["p1"], "shared") || !slices.Contains(d.Children["p2"], "shared") {
+		t.Fatalf("inverse children p1=%v p2=%v", d.Children["p1"], d.Children["p2"])
+	}
+	if !slices.Equal(d.Parents["leaf"], []string{"p1"}) || !slices.Contains(d.Children["p1"], "leaf") {
+		t.Fatalf("legacy edge parents=%v children=%v", d.Parents["leaf"], d.Children["p1"])
+	}
+}
