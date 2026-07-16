@@ -23,7 +23,7 @@ var logicalName = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`)
 var gmailReadonlyActions = map[string]bool{
 	"gmail.messages.list": true, "gmail.messages.get": true,
 	"gmail.threads.list": true, "gmail.threads.get": true,
-	"gmail.labels.list": true,
+	"gmail.labels.list": true, "gmail.labels.get": true,
 }
 
 const gmailReadonlyScope = "https://www.googleapis.com/auth/gmail.readonly"

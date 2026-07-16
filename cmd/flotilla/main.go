@@ -86,6 +86,8 @@ func run(args []string) error {
 		return cmdGoals(args[1:])
 	case "accounts":
 		return cmdAccounts(args[1:])
+	case "gmail":
+		return cmdGmail(args[1:])
 	case "launch":
 		return cmdLaunch(args[1:])
 	case "mirror-self":
@@ -132,6 +134,8 @@ usage:
                                                       attach a work item to fleet-goals.yaml (preserves yaml comments) and recompile json
   flotilla accounts init <subscription-id>            scaffold Claude Code config dir + print one-time /login steps
   flotilla accounts list [--json]                     subscription credential health (mtime/expiry only; no secrets)
+  flotilla gmail [--grant <path>] smoke|labels-list|label-get|messages-list|message-get|threads-list|thread-get
+                                                      PA-only authorized Gmail read broker (host-private binding; no writes)
   flotilla launch lint [--roster <path>] [--launch <path>]
                                                       warn on roster seats without an explicit failover chain
   flotilla channel create <name> [--type text|category] [--topic <t>] [--category <name|id>]
