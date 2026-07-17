@@ -2375,6 +2375,19 @@ html, body { overflow-x: clip; }
 }
 .pd-slide-title { font-family: var(--display); font-weight: 700; font-size: clamp(1.6rem, 4.5vw, 2.9rem); line-height: 1.08; color: var(--ink); margin: 0 0 1.1rem; }
 .pd-slide-body { font-size: clamp(1rem, 2.4vw, 1.45rem); line-height: 1.5; color: var(--ink-2); }
+.pd-slide.is-empty { display: grid; place-items: center; }
+.pd-empty-state {
+  width: min(34rem, 100%); padding: clamp(1.25rem, 5vw, 2.25rem); text-align: center;
+  border: 1px solid var(--line); border-radius: var(--r); background: var(--abyss-2);
+  box-shadow: var(--shadow, 0 2px 10px rgba(0,0,0,.08));
+}
+.pd-empty-state h1 { margin: .2rem 0 .65rem; font: 700 clamp(1.8rem, 5vw, 2.6rem)/1.08 var(--display); color: var(--ink); }
+.pd-empty-state p { margin: 0 auto 1.25rem; max-width: 28rem; color: var(--ink-2); line-height: 1.55; }
+.pd-empty-state .pd-empty-eyebrow { margin-bottom: .35rem; color: var(--cyan); font: 600 .72rem var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.pd-empty-state button { min-height: 44px; padding: 0 .9rem; border: 1px solid var(--cyan); border-radius: var(--r-sm); background: transparent; color: var(--cyan); font: 600 .78rem var(--display); cursor: pointer; }
+.pd-empty-state button:hover { background: color-mix(in srgb, var(--cyan) 10%, transparent); }
+.pd-empty-state button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.pd-stage.is-empty .pd-nav { display: none; }
 .pd-slide-body .pd-h { font-family: var(--display); color: var(--ink); margin: 1.1rem 0 .4rem; line-height: 1.15; }
 .pd-slide-body .pd-h1 { font-size: 1.4em; } .pd-slide-body .pd-h2 { font-size: 1.2em; } .pd-slide-body .pd-h3, .pd-slide-body .pd-h4 { font-size: 1.05em; color: var(--ink-2); }
 .pd-slide-body p { margin: .55rem 0; }

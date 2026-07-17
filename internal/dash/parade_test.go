@@ -206,3 +206,30 @@ func TestParadeTableRenderMarkers(t *testing.T) {
 		t.Error("dash.css must style the deck table (.pd-table) — #428")
 	}
 }
+
+func TestParadeEmptyCollectionRenderMarkers(t *testing.T) {
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/parade.js").Body.String()
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+
+	for _, marker := range []string{
+		`function renderEmptyDeck(par)`,
+		`No slides in this parade`,
+		`data-pd-empty-back`,
+		`el("pd-counter").hidden = true`,
+		`if (!slides.length) { renderEmptyDeck(par); return; }`,
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("parade.js missing empty-collection marker %q", marker)
+		}
+	}
+	if strings.Contains(js, `slides = [{ title: par.date`) {
+		t.Error("parade.js must not invent a synthetic slide for an empty collection")
+	}
+	for _, marker := range []string{".pd-empty-state", ".pd-stage.is-empty .pd-nav"} {
+		if !strings.Contains(css, marker) {
+			t.Errorf("dash.css missing empty-collection style %q", marker)
+		}
+	}
+}
