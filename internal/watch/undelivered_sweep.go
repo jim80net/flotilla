@@ -112,6 +112,12 @@ type UndeliveredHooks struct {
 	// ReadTurnFinal, when set, heals inbound ledgers before scan: clear entries
 	// whose latest turn-final already acks the nonce (#628 false-positive fix).
 	ReadTurnFinal dispatch.TurnFinalReader
+	// IsMerged resolves cited PR state in the recipient's authority domain. When
+	// all cited PRs are merged, reconcile durable-consumes the completed cargo
+	// before it can fire an undelivered-ack alert.
+	IsMerged dispatch.RecipientMergedChecker
+	// IsCommitOnMain confirms explicitly terminal SHA citations locally.
+	IsCommitOnMain dispatch.RecipientCommitChecker
 	// MaxL2PerTick overrides MaxOperatorL2PerTick when > 0 (tests).
 	MaxL2PerTick int
 }
@@ -135,7 +141,7 @@ func UndeliveredDispatchSweep(rosterDir string, h UndeliveredHooks) int {
 	}
 	now := nowFn()
 	// Heal false-positive inbound-ack: consume registry + live turn-final ack (#628).
-	if cleared := dispatch.ReconcileInboundAcks(rosterDir, h.ReadTurnFinal); cleared > 0 {
+	if cleared := dispatch.ReconcileInboundAcksWithTerminal(rosterDir, h.ReadTurnFinal, h.IsMerged, h.IsCommitOnMain); cleared > 0 {
 		log.Printf("flotilla watch: undelivered reconcile cleared %d inbound entr(y/ies) (acked or consumed)", cleared)
 	}
 	fired := h.Fired
