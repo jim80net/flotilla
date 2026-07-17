@@ -50,6 +50,8 @@ func run(args []string) error {
 		return cmdBrief(args[1:])
 	case "parade":
 		return cmdParade(args[1:])
+	case "pr":
+		return cmdPR(args[1:])
 	case "speak":
 		return cmdSpeak(args[1:])
 	case "voice":
@@ -119,6 +121,9 @@ usage:
   flotilla parade [--all] [<agent>]                   elicit parade answers; the explicit parade stream publishes to each channel
   flotilla parade rollup [--all] [<xo>]               wake coordinators to roll up subordinates' parade answers
   flotilla parade fleet                               wake the primary XO for the operator fleet parade report
+  flotilla parade lint <slides.md|->                  fail-closed audience lint for the main parade spine
+  flotilla pr body lint --audience operator <body.md|->
+                                                      validate before/change/after operator PR summary
   flotilla speak <text>                               drop a short spoken reply on the voice outbound spool (non-blocking)
   flotilla speak --file <path>                         speak body from a file ('-' = stdin)
   flotilla voice [--config <voice.env>]               operator↔XO Discord voice (needs a -tags voiceopus build)
