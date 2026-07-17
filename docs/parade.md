@@ -112,6 +112,19 @@ The parade **ceremony** is one doctrine; the **archive** splits by audience:
 
 Authoring: fleet decks follow [parade-slides v3](./design/parade-slides-v3.md) (`<XO> · Proud of` / `Learned` / `Need` / `Demo` per slide). Marketing decks may use era-by-era narrative instead.
 
+Before delivery, fail closed on the operator-facing spine:
+
+```sh
+flotilla parade lint <parades-dir>/<YYYY-MM-DD>/slides.md
+```
+
+The gate rejects score-only framing, issue identifiers on the spine, and configured
+fleet jargon without a first-use gloss. Technical identifiers may remain inside
+`<details>` blocks or a fleet `+++` dig-deeper block. A `+++` block extends through
+the next `---` slide separator; spine lint resumes on the following slide. Use
+`--jargon comma,separated,terms` to extend the shared default lexicon for a fleet
+without weakening the built-in contract by accident.
+
 ## Orthogonal to visibility-synthesis
 
 | | Visibility synthesis | Parade formation |

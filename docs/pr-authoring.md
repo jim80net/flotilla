@@ -12,6 +12,28 @@ companion skill [`.claude/skills/flotilla-pr-authoring/SKILL.md`](../.claude/ski
 for the mechanical workflow (file-based delivery, `gh` invocation, Mermaid checks).
 
 **Principle:** [OPERATING-PRINCIPLES.md §5](./OPERATING-PRINCIPLES.md) (reader-modeling).
+
+## Operator-facing summary
+
+When a PR, ship note, parade link, or dashboard card will be shown to the operator,
+the engineering description is not the opening. Complete the `## Operator summary`
+template in this order:
+
+1. **Before** — what the operator or product user could not do, see, or trust.
+2. **Change** — the behavior that changed, with fleet terms glossed on first use.
+3. **After** — what is now possible or trustworthy.
+4. **Identifiers** — issue, PR, exact head, and merge SHA in the footer only.
+
+Validate it before publishing:
+
+```sh
+flotilla pr body lint --audience operator /path/to/pr-body.md
+```
+
+Engineering detail remains below the operator summary and may retain its technical
+register. The lint shares its audience lexicon with `flotilla parade lint`, so the
+two operator surfaces cannot drift into separate definitions of readable prose.
+
 **Large diffs:** escalate to the `comprehensive-pr-description` skill (installed in the
 agent's skill path) for the full chunk/Mermaid/template treatment.
 **Review gate:** coordinators follow [`coordinator-runbooks/merge-gate.md`](./coordinator-runbooks/merge-gate.md).

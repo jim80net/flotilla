@@ -244,6 +244,9 @@ func paradeSecrets(a paradeArgs) (*roster.Secrets, error) {
 
 // cmdParade elicits parade answers or coordinator roll-ups. Operator-triggered v1 — no daemon cadence.
 func cmdParade(args []string) error {
+	if len(args) > 0 && args[0] == "lint" {
+		return cmdParadeLint(args[1:])
+	}
 	a, err := parseParadeArgs(args)
 	if err != nil {
 		return err
