@@ -30,12 +30,14 @@ var defaultJargon = []string{"dogfood", "harness", "nonce", "outbox", "worktree"
 // DefaultJargon returns a copy of the built-in operator-spine lexicon.
 func DefaultJargon() []string { return append([]string(nil), defaultJargon...) }
 
-// LintParade checks the main spine of a slides.md deck. Content inside details
-// blocks is technical depth and intentionally receives the softer rule.
+// LintParade checks the main spine of a slides.md deck. Content inside HTML
+// details blocks or fleet +++ dig-deeper blocks is technical depth and
+// intentionally receives the softer rule.
 func LintParade(src string, jargon []string) []Finding {
 	lines := splitLines(src)
 	var findings []Finding
 	inDetails := false
+	inDigDeeper := false
 	slideStart := 1
 	var spine []numberedLine
 	seenJargon := map[string]bool{}
@@ -51,8 +53,16 @@ func LintParade(src string, jargon []string) []Finding {
 		lineNo := i + 1
 		trimmed := strings.TrimSpace(raw)
 		lower := strings.ToLower(trimmed)
-		if !inDetails && trimmed == "---" {
+		if trimmed == "---" && !inDetails {
+			inDigDeeper = false
 			flush(lineNo - 1)
+			continue
+		}
+		if inDigDeeper {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "+++") {
+			inDigDeeper = true
 			continue
 		}
 		if strings.Contains(lower, "<details") {

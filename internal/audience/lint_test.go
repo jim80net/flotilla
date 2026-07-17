@@ -13,6 +13,7 @@ func TestCommittedAudienceFixtures(t *testing.T) {
 		pass bool
 	}{
 		{"testdata/parade-pass.md", LintParade, true},
+		{"testdata/parade-dig-deeper-pass.md", LintParade, true},
 		{"testdata/parade-fail.md", LintParade, false},
 		{"testdata/operator-pr-pass.md", LintOperatorPR, true},
 		{"testdata/operator-pr-fail.md", LintOperatorPR, false},
@@ -31,6 +32,30 @@ func TestCommittedAudienceFixtures(t *testing.T) {
 				t.Fatal("expected fail fixture to produce findings")
 			}
 		})
+	}
+}
+
+func TestLintParadeIgnoresDigDeeperUntilNextSlide(t *testing.T) {
+	src := `# Requests now arrive once
+
+After, delivery remains visible.
+
++++ Engineering identifiers
+PR #1234 changed internal delivery behavior.
+
+---
+
+# PR #5678
+
+After, loading remains visible.`
+	got := LintParade(src, DefaultJargon())
+	if !hasCode(got, "identifier-on-spine") {
+		t.Fatalf("expected next-slide identifier finding, got %+v", got)
+	}
+	for _, finding := range got {
+		if finding.Line == 6 && finding.Code == "identifier-on-spine" {
+			t.Fatalf("dig-deeper identifier was linted as spine: %+v", got)
+		}
 	}
 }
 

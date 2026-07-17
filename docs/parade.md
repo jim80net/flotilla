@@ -120,8 +120,10 @@ flotilla parade lint <parades-dir>/<YYYY-MM-DD>/slides.md
 
 The gate rejects score-only framing, issue identifiers on the spine, and configured
 fleet jargon without a first-use gloss. Technical identifiers may remain inside
-`<details>` blocks. Use `--jargon comma,separated,terms` to extend the shared default
-lexicon for a fleet without weakening the built-in contract by accident.
+`<details>` blocks or a fleet `+++` dig-deeper block. A `+++` block extends through
+the next `---` slide separator; spine lint resumes on the following slide. Use
+`--jargon comma,separated,terms` to extend the shared default lexicon for a fleet
+without weakening the built-in contract by accident.
 
 ## Orthogonal to visibility-synthesis
 
