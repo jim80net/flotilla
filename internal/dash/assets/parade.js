@@ -407,18 +407,41 @@
   }
 
   /* ── deck view ─────────────────────────────────────────────────────────── */
+  function renderEmptyDeck(par) {
+    el("pd-deck-date").textContent = par.date;
+    el("pd-counter").textContent = "";
+    el("pd-counter").hidden = true;
+    el("pd-stage").classList.add("is-empty");
+    el("pd-slide").classList.add("is-empty");
+    el("pd-slide").innerHTML =
+      '<div class="pd-empty-state" aria-labelledby="pd-empty-title">' +
+      '<p class="pd-empty-eyebrow">Parade collection</p>' +
+      '<h1 id="pd-empty-title">No slides in this parade</h1>' +
+      '<p>This parade date exists in the archive, but it has no authored slides yet.</p>' +
+      '<button type="button" data-pd-empty-back>← Back to all parades</button></div>';
+    el("pd-prev").disabled = true;
+    el("pd-next").disabled = true;
+    el("pd-deck").hidden = false;
+    el("pd-list-view").hidden = true;
+    view = "deck";
+    el("pd-slide").focus({ preventScroll: true });
+  }
+
   function renderDeck() {
     var par = PARADES[pIdx];
     if (!par) { showList(); return; }
     var slides = curSlides();
-    if (!slides.length) slides = [{ title: par.date, body: "*No slides yet for this parade.*" }];
+    if (!slides.length) { renderEmptyDeck(par); return; }
     if (sIdx < 0) sIdx = 0;
     if (sIdx > slides.length - 1) sIdx = slides.length - 1;
     var s = slides[sIdx];
     var p = parsePresenter(s.title);
     var titleText = p.presenter ? p.claim : s.title;
     el("pd-deck-date").textContent = par.date;
+    el("pd-counter").hidden = false;
     el("pd-counter").textContent = (sIdx + 1) + " / " + slides.length;
+    el("pd-stage").classList.remove("is-empty");
+    el("pd-slide").classList.remove("is-empty");
     el("pd-slide").innerHTML =
       presenterHtml(par.date, p) +
       (titleText ? '<h1 class="pd-slide-title">' + esc(titleText) + "</h1>" : "") +
@@ -498,6 +521,9 @@
         e.preventDefault();
         postConversation(e.target);
       }
+    });
+    el("pd-slide").addEventListener("click", function (e) {
+      if (e.target && e.target.closest("[data-pd-empty-back]")) showList();
     });
   }
 
