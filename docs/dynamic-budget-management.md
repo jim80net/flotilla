@@ -19,11 +19,17 @@ only after separate policy review.
    not itself a remaining-capacity percentage.
 4. `CAPACITY_OK/WARN/CRIT` describes pool health. It is orthogonal to budget
    allocation and must not be presented as fullness.
-5. Product ingestion is read-only toward providers. It never invokes `/usage`,
+5. Budget allocation is a user-managed vector of `0..1` shares for strategic,
+   maintenance, and KTLO work. Shares sum to `1.0` within each enabled unit;
+   budget is never reduced to a health Boolean.
+6. Subscription residual and token dollars are separate units with separate
+   vectors. A multi-user harness organization can assign them differently
+   without a product fork.
+7. Product ingestion is read-only toward providers. It never invokes `/usage`,
    spends a model turn, refreshes OAuth, or selects a paid fallback.
-6. No automatic path may select metered capacity. Operator money approval is a
+8. No automatic path may select metered capacity. Operator money approval is a
    separate, mandatory gate.
-7. Budget management never parks or hides seats. Later phases may shape the
+9. Budget management never parks or hides seats. Later phases may shape the
    cadence of self-sufficiency work while preserving the full roster and its
    authority hierarchy.
 
@@ -40,7 +46,9 @@ Fleet operations already produces the canonical host-local artifacts:
 The current feed represents provider pools, OAuth/window walls, hard-limit
 evidence, deliberate holds, health classes, and optional allocation metadata.
 Every pool includes `residual_percent`, which is JSON null until an
-authoritative probe supplies a real value.
+authoritative probe supplies a real value. Schema revision
+`1.1-allocation-scalars` also carries target allocation vectors and optional
+dollar-unit accounting hooks; Phase 1 records them but does not enforce them.
 
 The product does not create a parallel filename or overwrite this artifact.
 Fleet operations owns acquisition and regeneration. Flotilla owns strict
@@ -56,6 +64,7 @@ The v1 reader requires:
 {
   "schema_name": "flotilla.budget_ledger/v1",
   "schema_version": 1,
+  "schema_revision": "1.1-allocation-scalars",
   "generated_at": "2026-07-18T17:00:00Z",
   "phase": 1,
   "overall_capacity_class": "CAPACITY_WARN",
@@ -74,7 +83,64 @@ The v1 reader requires:
     }
   ],
   "deliberate_holds": [],
-  "deliberate_hold_count": 0
+  "deliberate_hold_count": 0,
+  "allocation": {
+    "profile_id": "operator-primary",
+    "work_classes": ["strategic", "maintenance", "ktlo"],
+    "targets": {
+      "subscription_residual": {
+        "enabled": true,
+        "scalars": {
+          "strategic": 0.45,
+          "maintenance": 0.35,
+          "ktlo": 0.20
+        },
+        "sum": 1.0,
+        "sum_valid": true
+      },
+      "token_dollars": {
+        "enabled": false,
+        "scalars": {
+          "strategic": 0.50,
+          "maintenance": 0.30,
+          "ktlo": 0.20
+        },
+        "sum": 1.0,
+        "sum_valid": true,
+        "daily_ceiling_usd": null
+      }
+    },
+    "actual_class_fraction": {
+      "subscription_residual": {
+        "strategic": null,
+        "maintenance": null,
+        "ktlo": null,
+        "window": null
+      },
+      "token_dollars": {
+        "strategic": null,
+        "maintenance": null,
+        "ktlo": null,
+        "window": null
+      }
+    },
+    "epsilon": 0.05,
+    "control": {"phase": 1, "enforced": false}
+  },
+  "units": {
+    "subscription_residual": {
+      "enabled": true,
+      "kind": "share_of_known_residual"
+    },
+    "token_dollars": {
+      "enabled": false,
+      "kind": "usd",
+      "daily_ceiling_usd": null,
+      "spend_today_usd": null,
+      "currency": "USD",
+      "money_authority_ref": null
+    }
+  }
 }
 ```
 
@@ -99,6 +165,17 @@ browser surface.
   with another anonymous pool or used for later control.
 - count fields cannot be negative and must agree with parsed collections when
   both are present.
+- each enabled allocation target contains finite `strategic`, `maintenance`,
+  and `ktlo` scalars in `[0,1]` whose sum is `1.0` within numeric tolerance;
+  the serialized `sum` and `sum_valid` must agree with recomputation;
+- actual class fractions are either all null (not measured) or finite shares
+  with a valid window; null must never be replaced by the target vector;
+- an enabled token-dollar unit requires a positive finite daily ceiling, `USD`
+  currency in v1, and a non-empty `money_authority_ref`. A ceiling limits
+  already-authorized spend; it does not grant money authority or enable a
+  provider;
+- `allocation.control.enforced` must remain false during Phase 1. A true value
+  is rejected until the separately reviewed Phase 3 controller exists.
 
 Invalid known fields make the budget document unavailable. They do not crash
 status/dash and do not degrade to healthy capacity.
@@ -117,6 +194,29 @@ The browser and JSON status receive an allowlisted projection only:
   "measured_pool_count": 0,
   "unknown_residual_count": 1,
   "deliberate_hold_count": 0,
+  "allocation": {
+    "profile_id": "operator-primary",
+    "targets": {
+      "subscription_residual": {
+        "enabled": true,
+        "strategic": 0.45,
+        "maintenance": 0.35,
+        "ktlo": 0.20
+      },
+      "token_dollars": {
+        "enabled": false,
+        "strategic": 0.50,
+        "maintenance": 0.30,
+        "ktlo": 0.20,
+        "daily_ceiling_usd": null
+      }
+    },
+    "actual": {
+      "subscription_residual": null,
+      "token_dollars": null
+    },
+    "control_enforced": false
+  },
   "pools": [
     {
       "pool_id": "anthropic/example-plan",
@@ -143,12 +243,43 @@ Provider-specific paths, credential mtimes, evidence-seat names, failover seat
 lists, annotations, and probe implementation strings stay host-side and are
 not included in the dash read model.
 
+## Allocation vectors and units
+
+Health, residual, and allocation answer different questions:
+
+- **health**: can the pool currently serve work (`CAPACITY_*`)?
+- **residual**: how much authoritative capacity remains (number or unknown)?
+- **target allocation**: what share of an enabled unit should each work class
+  receive (three scalars summing to 1.0)?
+- **actual allocation**: what share each class consumed in a measured window
+  (null until work tags and accounting exist)?
+
+The initial `operator-primary` profile is strategic `0.45`, maintenance `0.35`,
+and KTLO `0.20` for subscription residual. It is a shipped default, not a
+hard-coded policy. Deployments may select or author another validated profile.
+For example, one organization may reserve subscription capacity for KTLO/R&D
+and use an already-authorized token-dollar envelope for strategic experiments;
+another may do the reverse.
+
+The token-dollar unit is optional and disabled by default. Its scalar vector is
+valid even while disabled so enabling a separately approved accounting envelope
+does not require a schema migration. `daily_ceiling_usd` and
+`spend_today_usd` remain null until real dollar metering exists. Neither the
+presence of the unit nor a non-null ceiling authorizes spend; an actuator must
+also prove explicit operator money authority through `money_authority_ref` and
+its independently validated record.
+
+Phase 1 validates and exposes target vectors. It does not fabricate actual
+fractions from seat state, message counts, wall clocks, or utilization. Phase 3
+must add work-class tags and unit-specific consumption evidence before comparing
+actual versus target.
+
 ## Status and dash semantics
 
 The compact status summary leads with facts, for example:
 
 ```text
-Budget — CAPACITY_WARN · pools:5 · residual measured:1 · unknown:4 · next wall:2h14m
+Budget — allocation S45/M35/K20 · CAPACITY_WARN · pools:5 · residual measured:1 · unknown:4 · next wall:2h14m
 ```
 
 Pool rows show:
@@ -159,6 +290,11 @@ Pool rows show:
 - otherwise `residual unknown`;
 - `window_end` as an absolute timestamp plus a derived relative clock;
 - explicit `stale` or `unavailable` state.
+
+Allocation is shown as a target mix, never as observed spend unless the actual
+window is present. Token dollars render `disabled`, `unconfigured`, or a real
+ceiling/spend pair; null is not `$0`. Multi-user profiles show their profile ID
+and their own mix instead of inheriting the operator-primary values silently.
 
 The dash uses the same read model. A green health class with null residual must
 read “health OK · residual unknown,” never a green fullness meter. Health,
@@ -218,17 +354,23 @@ observations update health diagnostics while the exact residual stays null.
   by status and dash;
 - overlay fresh exact watch probe observations by provider/subscription;
 - add `budget` to `flotilla status --json` and one compact human summary;
+- validate allocation vectors per enabled unit, preserve null actuals, and
+  expose health/residual/allocation as separate fields;
 - keep status operational with explicit stale/unavailable budget state.
 
 Tests cover null residuals, window clocks, corrupt/partial input, schema drift,
 duplicate pools, anonymous pools, stale generation, shared subscriptions,
-conflicting windows, privacy projection, and no-file behavior.
+conflicting windows, privacy projection, no-file behavior, scalar range/sum
+errors, per-unit mixes, null actuals, disabled dollars, and unauthorized enabled
+dollar configuration.
 
 ### PR 2 — dash budget strip
 
 - consume the status/read-model projection without another filesystem read;
 - render health, measured/unknown residual counts, next wall, and deliberate
   hold count as separate facts;
+- render the selected profile and target strategic/maintenance/KTLO mix for
+  each enabled unit; never label targets as actual spend;
 - add populated, all-null, stale, unavailable, long-label, and phone fixtures;
 - verify no horizontal overflow and no regression to approved mobile density.
 
@@ -249,6 +391,11 @@ and require separate review against the money boundary.
 ## Acceptance gate
 
 - The dogfood `flotilla.budget_ledger/v1` artifact parses without translation.
+- Valid subscription and token-dollar vectors remain distinct and each sum to
+  `1.0`; invalid vectors fail visibly.
+- The operator-primary mix is a default profile, not a hard-coded global mix;
+  alternate multi-user profiles project unchanged.
+- Null actual class fractions and dollar spend remain null.
 - `window_end` and nullable `residual_percent` reach CLI JSON and dash unchanged.
 - Null residual never becomes zero, 100, or a progress-bar percentage.
 - Shared-subscription probes cannot multiply or average capacity.
@@ -256,6 +403,8 @@ and require separate review against the money boundary.
 - Corrupt, stale, missing, and conflicting evidence fail visibly but do not
   break fleet status.
 - Private acquisition fields do not cross the browser read-model boundary.
+- `CAPACITY_*` is never used as a Boolean budget or allocation substitute.
+- Token-dollar metadata cannot authorize or initiate metered spend.
 - No provider command, model turn, metered fallback, seat parking, throttling,
   switching, or dispatch mutation occurs.
 
@@ -263,11 +412,11 @@ and require separate review against the money boundary.
 
 The following remain outside this accounting/visibility work:
 
-- strategic, maintenance, and keep-the-lights-on allocation scalars;
 - provider-specific probe cadence;
 - work-class assignment;
+- actual class-consumption measurement;
 - throttle and preemptive-switch thresholds;
-- any token-dollar ceiling or metered-provider actuator.
+- token-dollar enforcement and every metered-provider actuator.
 
 Phase 3 may consume the same read model only after real dogfood establishes
 coverage and reset behavior. The current work supplies facts, not spending
