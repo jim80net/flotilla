@@ -124,10 +124,25 @@
     return fresh;
   }
 
+  function utilizationText(status) {
+    var u = (status && status.utilization) || {};
+    if (!Number.isFinite(Number(u.total))) return "Fleet utilization unavailable";
+    var queue = "empty-queue:" + Number(u.idle_empty_queue || 0) + " · has-queue:" + Number(u.idle_has_queue || 0);
+    if (Number(u.idle_queue_unknown || 0) > 0) queue += " · queue-unknown:" + Number(u.idle_queue_unknown);
+    return "working:" + Number(u.working || 0) + " / idle:" + Number(u.idle || 0) + " (" + queue + ") / blocked:" +
+      Number(u.blocked || 0) + " · total:" + Number(u.total || 0) + " · accepts-work:" + Number(u.accepts_work || 0);
+  }
+
+  function renderUtilization(status) {
+    var target = el("fleet-utilization");
+    if (target) target.textContent = utilizationText(status);
+  }
+
   function renderRailMeta(status, fresh) {
     var meta = el("rail-meta");
     var xl = status.xo_liveness || {};
     var bits = [];
+    bits.push(escapeHtml(utilizationText(status)));
     if (status.xo) {
       var ack = xl.acked ? ("ack " + escapeHtml(xl.ack_age) + " ago") : "never acked";
       var settled = xl.settled_known ? (xl.settled ? "settled" : "active") : "settled unknown";
@@ -1095,6 +1110,7 @@
     var topology = cache.topology || {};
     var history = cache.history || {};
     var fresh = renderFreshness(status);
+    renderUtilization(status);
     renderRailMeta(status, fresh);
     renderConversationRail(status, topology, fresh);
     renderConversationHeader(topology);

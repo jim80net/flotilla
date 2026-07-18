@@ -63,6 +63,12 @@ Stop it with Ctrl-C (it shuts down gracefully).
 The dash mirrors `flotilla status`'s default-path resolution exactly — same env
 vars, same `<roster-dir>/…` fallbacks:
 
+The Conversations footer and fleet-map metadata lead with the same utilization
+summary as `flotilla status`: working seats; idle seats split into empty queue,
+has unblocked queue, or honestly unknown; blocked as a posture overlay; total;
+then the secondary number that can accept work. This makes an idle fleet visible
+as an autonomy signal instead of presenting roster size as active capacity.
+
 | Artifact            | Flag               | Default                                          |
 |---------------------|--------------------|--------------------------------------------------|
 | roster              | `--roster`         | `./flotilla.json` or `$FLOTILLA_ROSTER`          |

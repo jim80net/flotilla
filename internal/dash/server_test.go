@@ -169,6 +169,23 @@ func TestHandleIndex(t *testing.T) {
 	}
 }
 
+func TestDashboardUtilizationFirstContract797(t *testing.T) {
+	srv, _ := newTestServer(t, singleFleetRoster, time.Now())
+	html := doGet(t, srv, "/").Body.String()
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	for label, body := range map[string]string{"html": html, "js": js, "css": css} {
+		if !strings.Contains(body, "fleet-utilization") {
+			t.Errorf("%s missing fleet utilization surface", label)
+		}
+	}
+	for _, marker := range []string{"empty-queue:", "has-queue:", "accepts-work:"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js missing utilization marker %q", marker)
+		}
+	}
+}
+
 // TestGoalsLayoutMindmapOnly locks the mind-map-only Goals rendering (operator 2026-07-06):
 // the tree/mind-map toggle was removed, so normalizeGoalsLayout REDIRECTS every seed (incl. a
 // legacy "tree"/"org") to the mind map, the body always renders data-goals-layout="mindmap",

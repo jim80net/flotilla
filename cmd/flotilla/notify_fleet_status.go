@@ -64,6 +64,7 @@ func loadFleetStatusBlock(rosterPath, skipFrom string) (string, error) {
 		sdoc.Agents = append(sdoc.Agents, status.Agent{
 			Name: a.Name, Role: a.Role, State: a.State,
 			LoopPosture: a.LoopPosture, RawLoopPosture: a.RawLoopPosture,
+			QueueState: a.QueueState,
 		})
 	}
 	adj := ""

@@ -81,6 +81,9 @@ func TestBuildBoard_LoopPosture(t *testing.T) {
 			"data":     {Pane: surface.StateIdle, InSnapshot: true, SnapshotFresh: true, BacklogKnown: true, AwaitingAuthN: 1},
 		},
 	})
+	if doc.Utilization.Idle != 4 || doc.Utilization.IdleEmptyQueue != 2 || doc.Utilization.IdleHasQueue != 2 || doc.Utilization.AcceptsWork != 2 {
+		t.Fatalf("utilization queue split = %+v", doc.Utilization)
+	}
 	want := map[string]string{"xo": "parked", "backend": "available", "frontend": "drifted", "data": "available"}
 	for _, a := range doc.Agents {
 		if a.LoopPosture != want[a.Name] {
@@ -93,6 +96,9 @@ func TestBuildBoard_LoopPosture(t *testing.T) {
 	raw, _ := json.Marshal(doc)
 	if !strings.Contains(string(raw), `"loop_posture":"parked"`) {
 		t.Errorf("board JSON missing parked loop_posture\n%s", raw)
+	}
+	if !strings.Contains(string(raw), `"utilization":{"working":0,"idle":4`) || !strings.Contains(string(raw), `"queue_state":"has-work"`) {
+		t.Errorf("board JSON missing utilization contract\n%s", raw)
 	}
 }
 
