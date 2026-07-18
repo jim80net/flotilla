@@ -238,6 +238,10 @@ type Config struct {
 	// generalizable role, not a deployment desk name. Empty ⇒ the CoS mirror is inert
 	// (no mirror, no ledger — fully backward compatible).
 	CosAgent string `json:"cos_agent,omitempty"`
+	// ParadeAgent optionally names the fleet seat that receives operator parade
+	// messages first. A busy/unavailable parade seat falls back to CosAgent, which
+	// retains the response SLA. Empty preserves the CoS-only path.
+	ParadeAgent string `json:"parade_agent,omitempty"`
 	// Schedules are daemon-native daily wall-clock dispatches (#413): each entry
 	// names a slot (at, with explicit timezone), a target agent (to), and a prompt
 	// (inline or a host-local file path — file preferred for long prompts). Durable
@@ -435,6 +439,14 @@ func LoadWith(path string, opts LoadOptions) (*Config, error) {
 		}
 	} else {
 		c.CosLedger = "" // inert: cos_ledger without cos_agent is ignored (the feature is gated on cos_agent)
+	}
+	if c.ParadeAgent != "" {
+		if c.CosAgent == "" {
+			return nil, fmt.Errorf("roster %q: parade_agent requires cos_agent for fallback ownership", path)
+		}
+		if _, err := c.Agent(c.ParadeAgent); err != nil {
+			return nil, fmt.Errorf("roster %q: parade_agent %q is not in agents", path, c.ParadeAgent)
+		}
 	}
 	return &c, nil
 }

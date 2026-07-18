@@ -247,6 +247,9 @@ func cmdParade(args []string) error {
 	if len(args) > 0 && args[0] == "lint" {
 		return cmdParadeLint(args[1:])
 	}
+	if len(args) > 0 && args[0] == "reply" {
+		return cmdParadeReply(args[1:])
+	}
 	a, err := parseParadeArgs(args)
 	if err != nil {
 		return err

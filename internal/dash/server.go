@@ -232,6 +232,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/goals/meta", s.handleGoalsMeta)
 	s.mux.HandleFunc("/api/session-mirror", s.handleSessionMirror)
 	s.mux.HandleFunc("/api/parades", s.handleParades)
+	s.mux.HandleFunc("GET /api/parades/conversations/meta", s.handleParadeConversationMeta)
 	s.mux.HandleFunc("GET /api/parades/{date}/conversations", s.handleParadeConversations)
 	s.mux.HandleFunc("POST /api/parades/{date}/slides/{index}/messages", s.requireWrite(s.handleParadeMessage))
 	s.mux.HandleFunc("/parade", s.handleParadePage)

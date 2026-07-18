@@ -125,6 +125,23 @@ the next `---` slide separator; spine lint resumes on the following slide. Use
 `--jargon comma,separated,terms` to extend the shared default lexicon for a fleet
 without weakening the built-in contract by accident.
 
+## Replying to an operator message
+
+The operator's slide message is saved before delivery and its routed instruction includes
+the exact reply command. When the optional roster `parade_agent` is configured, that desk
+gets the first live delivery attempt; busy or unavailable falls back to `cos_agent`, which
+retains the response SLA. A roster seat answers into the same page thread with its canonical
+`FLOTILLA_SELF` identity:
+
+```sh
+flotilla parade reply --date YYYY-MM-DD --slide N --text "plain-language reply"
+```
+
+The reply command and dash share one cross-process locked, atomically replaced
+`conversations.json` sidecar. The parade page polls lightweight reply metadata; a new
+fleet-authored reply glows on the thread, all-parades control, and archive row until the
+operator opens that thread. Read state is browser-local and contains only message IDs.
+
 ## Orthogonal to visibility-synthesis
 
 | | Visibility synthesis | Parade formation |

@@ -2314,6 +2314,15 @@ html, body { overflow-x: clip; }
 .pd-counter { font-size: .78rem; color: var(--ink-3); font-variant-numeric: tabular-nums; margin-left: auto; }
 .pd-close { min-height: 44px; padding: 0 .9rem; border: 1px solid var(--line); border-radius: var(--r-sm); background: transparent; color: var(--ink-2); font: inherit; font-size: .74rem; cursor: pointer; }
 .pd-close:hover { border-color: var(--cyan-dim, var(--cyan)); color: var(--ink); }
+.pd-unread-dot {
+  display: inline-block; width: .58rem; height: .58rem; margin-left: .35rem;
+  border-radius: 50%; background: var(--cyan); vertical-align: middle;
+  box-shadow: 0 0 0 .18rem color-mix(in srgb, var(--cyan) 18%, transparent), 0 0 .8rem var(--cyan);
+  animation: pd-unread-glow 1.8s ease-in-out infinite;
+}
+.pd-unread-dot[hidden] { display: none; }
+@keyframes pd-unread-glow { 50% { opacity: .58; box-shadow: 0 0 0 .08rem color-mix(in srgb, var(--cyan) 12%, transparent), 0 0 .35rem var(--cyan); } }
+@media (prefers-reduced-motion: reduce) { .pd-unread-dot { animation: none; } }
 
 /* Stage: minimal padding so the slide can use ~90–95% of the viewport.
    Operator 2026-07-11: HATE huge gutters — do not pin a 900px column on wide desktops. */
@@ -2482,7 +2491,7 @@ html, body { overflow-x: clip; }
 .pd-listcard { display: flex; flex-direction: column; gap: .2rem; width: 100%; text-align: left; min-height: 56px; padding: .7rem .9rem; background: var(--abyss-2); border: 1px solid var(--line); border-radius: var(--r); color: var(--ink-2); font: inherit; cursor: pointer; }
 .pd-listcard:hover { border-color: var(--cyan-dim, var(--cyan)); }
 .pd-listcard:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
-.pd-listcard-date { font-family: var(--display); font-size: 1.05rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+.pd-listcard-date { display: flex; align-items: center; font-family: var(--display); font-size: 1.05rem; color: var(--ink); font-variant-numeric: tabular-nums; }
 .pd-listcard-meta { font-size: .76rem; color: var(--ink-3); }
 
 @media (max-width: 560px) {
