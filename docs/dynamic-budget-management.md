@@ -1,264 +1,274 @@
 # Dynamic budget management
 
-Status: Phase 1 design for [#801](https://github.com/jim80net/flotilla/issues/801).
+Status: Phase 1 product design for
+[#801](https://github.com/jim80net/flotilla/issues/801), reconciled with the
+fleet-operations dogfood ledger.
 
 Flotilla must preserve subscription capacity for strategic work without hiding
-idle seats or silently buying more capacity. Phase 1 accounts for capacity. It
-does not throttle work, switch harnesses, or authorize metered spend.
+idle seats or silently buying more capacity. Phase 1 accounts for capacity.
+Phase 2 makes those facts visible. Phase 3 may manage cadence and dispatches
+only after separate policy review.
 
 ## Product contract
 
 1. Subscription capacity is grouped by provider, subscription, and provider
    window—not by seat. Ten seats sharing one subscription are one budget pool.
-2. Missing, unreadable, or stale evidence is `unknown`, never 100% healthy.
-3. Provider window boundaries are first-class. A calendar-day view is derived;
-   it does not replace rolling or time-of-day reset windows.
-4. Phase 1 is read-only toward providers. It consumes existing surface probes
-   and validated fleet-operations observations; it does not invoke usage
-   commands or make model turns.
-5. No automatic path may select metered capacity. A missing funding mode is
-   `unknown`, not subscription-backed.
-6. Budget management never parks or hides seats. Later phases may shape the
+2. Missing, unreadable, stale, or bounded-only evidence has an unknown exact
+   residual. It is never rendered as 100%, zero, or a guessed midpoint.
+3. Provider window boundaries are first-class. A time-of-day or weekly wall is
+   not itself a remaining-capacity percentage.
+4. `CAPACITY_OK/WARN/CRIT` describes pool health. It is orthogonal to budget
+   allocation and must not be presented as fullness.
+5. Product ingestion is read-only toward providers. It never invokes `/usage`,
+   spends a model turn, refreshes OAuth, or selects a paid fallback.
+6. No automatic path may select metered capacity. Operator money approval is a
+   separate, mandatory gate.
+7. Budget management never parks or hides seats. Later phases may shape the
    cadence of self-sufficiency work while preserving the full roster and its
    authority hierarchy.
 
-## Current seam
+## Phase 1 dogfood source
 
-`surface.UsageProbe` returns an authoritative `UsageReport` when live surface
-chrome exposes one. Watch persists successful per-seat `UsageObservation`
-records in its detector snapshot, and status/dash can show them. This is useful
-evidence, but it is not yet a fleet budget:
+Fleet operations already produces the canonical host-local artifacts:
 
-- the same subscription appears once per seat;
-- `Window` is a free-form label with no reset timestamp;
-- absent probes produce no discoverable pool;
-- fleet-operations capacity observations have no validated ingestion seam;
-- the detector snapshot is diff state, not an accounting ledger.
-
-Phase 1 keeps that acquisition path and adds a durable aggregation layer.
-
-## Durable artifacts
-
-The roster directory owns two host-local files:
-
-| File | Purpose |
+| Artifact | Contract |
 |---|---|
-| `flotilla-budget-ledger.json` | Last-good normalized observations and derived pools |
-| `flotilla-budget-ledger.lock` | Cross-process advisory lock for watch and CLI updates |
+| `<roster-dir>/budget-ledger.json` | Machine input, `schema_name=flotilla.budget_ledger/v1` |
+| `<roster-dir>/budget-ledger.md` | Human briefing only; product never parses it |
+| `bin/harvest-budget-ledger.py` | Deployment-side regeneration, roster-dir aware |
 
-The ledger is mode `0600`. It contains provider and subscription aliases, never
-OAuth material, API keys, model transcripts, prompt bodies, or billing secrets.
-Every update takes the lock, validates the existing document, applies one
-transaction, derives pools, writes a same-directory temporary file, `fsync`s,
-and atomically renames it. Invalid existing state or invalid input fails closed:
-the last-good file remains untouched and the caller emits a loud diagnostic.
+The current feed represents provider pools, OAuth/window walls, hard-limit
+evidence, deliberate holds, health classes, and optional allocation metadata.
+Every pool includes `residual_percent`, which is JSON null until an
+authoritative probe supplies a real value.
 
-## Schema v1
+The product does not create a parallel filename or overwrite this artifact.
+Fleet operations owns acquisition and regeneration. Flotilla owns strict
+parsing, safe projection into status/dash, and aggregation of authoritative
+surface probes. A future product-owned writer requires a separate migration
+plan after dogfood, not a competing Phase 1 store.
 
-The committed implementation fixtures use generic aliases. A representative
-document is:
+## Accepted machine shape
+
+The v1 reader requires:
 
 ```json
 {
-  "schema": 1,
+  "schema_name": "flotilla.budget_ledger/v1",
+  "schema_version": 1,
   "generated_at": "2026-07-18T17:00:00Z",
-  "accounting_day": {"date": "2026-07-18", "timezone": "UTC"},
-  "observations": [
-    {
-      "id": "surface:alpha-xo:anthropic/example-plan/rolling-5h",
-      "source": "surface",
-      "source_ref": "alpha-xo",
-      "provider": "anthropic",
-      "subscription_id": "example-plan",
-      "funding": "subscription",
-      "scope": "account-side",
-      "window": {
-        "kind": "rolling",
-        "label": "5h",
-        "starts_at": null,
-        "ends_at": "2026-07-18T20:00:00Z"
-      },
-      "state": "observed",
-      "remaining_percent": 27,
-      "retry_at": null,
-      "observed_at": "2026-07-18T16:58:00Z",
-      "stale_after": "2026-07-18T17:58:00Z"
-    }
-  ],
+  "phase": 1,
+  "overall_capacity_class": "CAPACITY_WARN",
   "pools": [
     {
-      "id": "anthropic/example-plan/account-side/rolling",
+      "pool_id": "anthropic/example-plan",
       "provider": "anthropic",
       "subscription_id": "example-plan",
-      "funding": "subscription",
-      "scope": "account-side",
-      "window": {
-        "kind": "rolling",
-        "label": "5h",
-        "starts_at": null,
-        "ends_at": "2026-07-18T20:00:00Z"
-      },
-      "state": "observed",
-      "remaining_percent": 27,
-      "last_known_percent": 27,
-      "observed_at": "2026-07-18T16:58:00Z",
-      "stale_after": "2026-07-18T17:58:00Z",
-      "retry_at": null,
-      "evidence_ids": [
-        "surface:alpha-xo:anthropic/example-plan/rolling-5h"
-      ]
+      "window_kind": "oauth_access_token_ttl",
+      "window_end": "2026-07-18T23:00:00Z",
+      "capacity_class": "CAPACITY_OK",
+      "wall_status": "ok",
+      "residual_percent": null,
+      "last_probe_at": "2026-07-18T16:59:00Z",
+      "spend_risk": "none"
     }
   ],
-  "diagnostics": []
+  "deliberate_holds": [],
+  "deliberate_hold_count": 0
 }
 ```
 
-Nullable timestamps and percentages are encoded as JSON `null`, not omitted or
-replaced with zero. `last_known_percent` may remain populated when
-`remaining_percent` becomes null due to staleness; consumers must use `state`
-and `remaining_percent` for current decisions.
+`schema_revision`, allocation fields, clocks, signals, sources, notes, and
+provider-specific evidence may be present. The reader tolerates unknown fields
+for forward compatibility but never forwards the whole document to a public or
+browser surface.
 
-### Enumerations
+### Strict known-field rules
 
-- `funding`: `subscription | metered | unknown`
-- observation `state`: `observed | unknown | hard-limit`
-- pool `state`: `observed | unknown | stale | hard-limit | conflict`
-- window `kind`: `rolling | daily | weekly | provider-window | unknown`
+- `schema_name` must equal `flotilla.budget_ledger/v1` and `schema_version` must
+  equal `1`.
+- `generated_at`, `window_end`, and `last_probe_at` are RFC3339 strings or null
+  where the schema permits null.
+- `pool_id` and `provider` are non-empty; pool IDs are unique.
+- `capacity_class` is `CAPACITY_OK`, `CAPACITY_WARN`, `CAPACITY_CRIT`, or
+  `CAPACITY_UNKNOWN`.
+- `residual_percent` is null or a finite number in `[0,100]`.
+- `window_end=null` means no known wall. Serialized seconds-to-wall values are
+  advisory only; consumers recompute time remaining from `window_end`.
+- a null subscription ID remains explicit. It cannot be automatically merged
+  with another anonymous pool or used for later control.
+- count fields cannot be negative and must agree with parsed collections when
+  both are present.
 
-`hard-limit` may set `remaining_percent` to zero only when an authoritative
-provider marker proves exhaustion. `retry_at` remains null unless the provider
-exposes a reset time. A warning such as “less than 10%” must retain its bound
-semantics; it must not be converted to an exact invented value.
+Invalid known fields make the budget document unavailable. They do not crash
+status/dash and do not degrade to healthy capacity.
 
-## Pool discovery and aggregation
+## Product read model
 
-The aggregator receives three inputs:
+The browser and JSON status receive an allowlisted projection only:
 
-1. launch-slot metadata, which discovers provider/subscription pools even when
-   no probe can read a percentage;
-2. watch `UsageObservation` records from optional surface probes;
-3. normalized observations submitted by fleet operations through the same
-   ledger package.
-
-It applies these deterministic rules:
-
-1. Normalize provider, subscription, funding, scope, and window kind. Empty
-   provider or invalid percentages/timestamps reject the observation.
-2. Group by provider + subscription + scope + window kind. A missing
-   subscription remains an explicit unknown pool and is ineligible for future
-   automatic budget actuation.
-3. Prefer fresh authoritative evidence. Multiple seats on one pool do not add
-   capacity and percentages are never averaged or summed.
-4. Among compatible fresh samples, select the lowest remaining bound. This is
-   conservative when shared-subscription chrome is sampled at slightly
-   different times. Retain every evidence ID for diagnosis.
-5. Conflicting window ends or funding modes produce `conflict` with current
-   residual null. Do not guess which reset or funding source is real.
-6. If no fresh sample remains, emit `stale` with current residual null and keep
-   the prior value only as `last_known_percent`.
-7. An `unknown` import never erases a fresh observation. It does prove that a
-   pool exists and adds coverage diagnostics.
-8. A newly observed window replaces the prior active window for that pool only
-   after its timestamps validate. Prior-window evidence remains auditable until
-   normal retention pruning.
-
-Observation IDs make ingestion idempotent. A source replaces only its own
-record, so a watch tick cannot erase a fleet-operations observation and an
-external harvest cannot overwrite surface evidence.
-
-## Probe contract delta
-
-Phase 1 extends the acquisition-neutral observation shape with optional,
-provider-supplied fields:
-
-```text
-WindowKind    rolling | daily | weekly | provider-window | unknown
-WindowStart   nullable RFC3339
-WindowEnd     nullable RFC3339
-RetryAt       nullable RFC3339
-Bound         exact | less-than | greater-than
+```json
+{
+  "state": "fresh",
+  "generated_at": "2026-07-18T17:00:00Z",
+  "age_seconds": 45,
+  "overall_capacity_class": "CAPACITY_WARN",
+  "pool_count": 1,
+  "measured_pool_count": 0,
+  "unknown_residual_count": 1,
+  "deliberate_hold_count": 0,
+  "pools": [
+    {
+      "pool_id": "anthropic/example-plan",
+      "provider": "anthropic",
+      "subscription_id": "example-plan",
+      "capacity_class": "CAPACITY_OK",
+      "window_kind": "oauth_access_token_ttl",
+      "window_end": "2026-07-18T23:00:00Z",
+      "residual_percent": null,
+      "last_probe_at": "2026-07-18T16:59:00Z"
+    }
+  ]
+}
 ```
 
-Existing drivers remain source-compatible: their label-only `Window` maps to a
-kind when recognized and otherwise to `unknown`. Lack of these fields is honest
-partial coverage, not a probe failure. #690 can add Codex markers to this same
-contract; #653 can later consume derived pools instead of re-probing; #782
-remains the independent fail-closed guard against credit-spending actions.
+Allowed top-level states are `fresh`, `stale`, and `unavailable`. Staleness is
+computed from `generated_at` and an explicit configured horizon; it is not
+inferred from health class. Missing/corrupt input produces `unavailable` with a
+generic diagnostic code. An old input produces `stale` while preserving its
+last-known values as historical evidence. Neither is eligible for Phase 3
+control.
 
-## Fleet-operations ingestion
+Provider-specific paths, credential mtimes, evidence-seat names, failover seat
+lists, annotations, and probe implementation strings stay host-side and are
+not included in the dash read model.
 
-The public product owns validation and storage; deployment tooling only emits a
-normalized observation. The planned command is:
+## Status and dash semantics
+
+The compact status summary leads with facts, for example:
 
 ```text
-flotilla budget observe --source fleet-ops --file observation.json
+Budget — CAPACITY_WARN · pools:5 · residual measured:1 · unknown:4 · next wall:2h14m
 ```
 
-It accepts metadata and capacity evidence only, validates source and pool
-fields, updates through the locked store, and prints the affected pool as JSON.
-It never accepts credentials or executes a provider command. A provisional or
-null harvest records `state=unknown` with `remaining_percent=null`.
+Pool rows show:
 
-`flotilla budget status --json` reads the last-good ledger without probing. A
-corrupt, missing, or stale ledger returns an explicit unavailable/stale state
-and a non-zero error for machine callers; it never reports healthy capacity.
+- provider/subscription alias;
+- health class;
+- exact residual only when non-null;
+- otherwise `residual unknown`;
+- `window_end` as an absolute timestamp plus a derived relative clock;
+- explicit `stale` or `unavailable` state.
+
+The dash uses the same read model. A green health class with null residual must
+read “health OK · residual unknown,” never a green fullness meter. Health,
+residual, wall, and deliberate-hold count are separate visual facts. Phase 2
+adds visibility only; it does not add a throttle button or paid recovery path.
+
+## Surface-probe aggregation
+
+Watch already stores successful optional `surface.UsageProbe` observations with
+provider and subscription metadata from the active launch slot. The budget
+projector overlays fresh probe evidence onto matching dogfood pools at read
+time; it does not mutate the fleet-operations file.
+
+Deterministic rules:
+
+1. Match by normalized provider + non-empty subscription ID. Anonymous pools
+   remain unmerged unless a future schema supplies a stable pool key.
+2. Reject percentages outside `[0,100]`, invalid timestamps, or empty window
+   labels.
+3. Use fresh authoritative samples only. Stale samples remain visible as
+   last-known seat evidence but do not fill a current pool residual.
+4. Multiple seats sharing a pool do not add capacity. Select the lowest exact
+   remaining percentage and retain a diagnostic count of contributing probes.
+5. Never average or sum percentages.
+6. A probe window that conflicts with the ledger window leaves the ledger
+   residual unchanged and emits a conflict diagnostic.
+7. Probe absence never clears a measured fleet-operations residual; its own
+   evidence simply ages stale.
+
+This overlay gives status/dash the freshest real evidence without creating a
+second concurrent ledger writer. Fleet operations may later consume the same
+projection in its harvester to persist a refreshed machine artifact.
+
+## #690 bounded evidence
+
+#690 adds Codex surface markers to the optional probe framework. Its warnings
+must retain their evidence strength:
+
+- an exact provider percentage may populate `residual_percent`;
+- “less than 10%” is an upper bound, not the exact value 9 or 10;
+- a hard-limit banner proves a health/wall state but does not prove an exact
+  percentage or retry time unless those values are displayed;
+- `/usage` remains forbidden while the operator reserve/freeze applies.
+
+The probe contract therefore needs an evidence kind (`exact`, `upper-bound`,
+`lower-bound`, or `hard-limit`) before #690 can share the pool projector. Only
+`exact` populates `residual_percent` in schema v1. Bounded and hard-limit
+observations update health diagnostics while the exact residual stays null.
 
 ## Implementation PR sequence
 
-### PR 1 — schema, store, and pure aggregator
+### PR 1 — v1 parser, projector, and status
 
-- add `internal/budgetledger` schema-v1 parsing, validation, pool derivation,
-  locked update, atomic persistence, and retention;
-- add generic fixtures for observed, unknown, stale, hard-limit, and conflict;
-- add tests for shared-subscription deduplication, conservative bounds,
-  idempotent sources, corrupt last-good retention, concurrent writers, modes,
-  and null encoding;
-- add read-only `flotilla budget status --json`.
+- add an `internal/budgetledger` v1 reader with strict known-field validation,
+  size/count limits, generic fixtures, and privacy-allowlisted projection;
+- locate `<roster-dir>/budget-ledger.json` from the same roster resolution used
+  by status and dash;
+- overlay fresh exact watch probe observations by provider/subscription;
+- add `budget` to `flotilla status --json` and one compact human summary;
+- keep status operational with explicit stale/unavailable budget state.
 
-No daemon integration, provider calls, or control action ships in this slice.
+Tests cover null residuals, window clocks, corrupt/partial input, schema drift,
+duplicate pools, anonymous pools, stale generation, shared subscriptions,
+conflicting windows, privacy projection, and no-file behavior.
 
-### PR 2 — watch probe aggregation
+### PR 2 — dash budget strip
 
-- discover pools from active launch-slot metadata;
-- project successful watch usage observations through `budgetledger.Update`;
-- add optional window/reset fields without breaking existing drivers;
-- persist missing coverage as unknown discovered pools while retaining stale
-  last-known evidence;
-- expose detector/ledger disagreement as a loud diagnostic.
+- consume the status/read-model projection without another filesystem read;
+- render health, measured/unknown residual counts, next wall, and deliberate
+  hold count as separate facts;
+- add populated, all-null, stale, unavailable, long-label, and phone fixtures;
+- verify no horizontal overflow and no regression to approved mobile density.
 
-Tests pin two seats sharing one subscription, partial probe coverage, a reset
-boundary, async probe races, and restart recovery.
+No control action ships in this slice.
 
-### PR 3 — validated fleet-operations import
+### PR 3 — #690 evidence-strength probe delta
 
-- add `flotilla budget observe --source fleet-ops --file ...`;
-- accept observed, unknown, and authoritative hard-limit evidence;
-- reject secrets, invalid windows, exact values for bounded-only signals, and
-  metered funding without changing last-good state;
-- publish a generic integration fixture for the deployment-side harvester.
+- extend the optional usage report with evidence kind and optional window end;
+- characterize Codex markers from captured provider chrome;
+- populate an exact residual only from exact evidence;
+- surface bounded/hard-limit evidence without `/usage` or fabricated percent;
+- prove active launch-slot provider/subscription mapping and stale recovery.
 
-This completes Phase 1 accounting. Daily briefs and dash presentation are Phase
-2. Work-class throttles, dispatch deferral, and preemptive switching are Phase 3
+This completes the product side of Phase 1 ACCOUNT plus Phase 2 visibility.
+Work-class throttles, dispatch deferral, and preemptive switching remain Phase 3
 and require separate review against the money boundary.
 
-## Phase 1 acceptance gate
+## Acceptance gate
 
-- One shared subscription is one pool regardless of seat count.
-- Known residual and provider wall time survive daemon restart.
-- Unknown, stale, bounded, and conflicting evidence remain visibly distinct.
-- Surface and fleet-operations producers cannot erase each other.
-- Corrupt or partial writes retain last-good and fail loudly.
+- The dogfood `flotilla.budget_ledger/v1` artifact parses without translation.
+- `window_end` and nullable `residual_percent` reach CLI JSON and dash unchanged.
+- Null residual never becomes zero, 100, or a progress-bar percentage.
+- Shared-subscription probes cannot multiply or average capacity.
+- Bounded Codex warnings cannot become exact residuals.
+- Corrupt, stale, missing, and conflicting evidence fail visibly but do not
+  break fleet status.
+- Private acquisition fields do not cross the browser read-model boundary.
 - No provider command, model turn, metered fallback, seat parking, throttling,
-  or dispatch mutation occurs.
-- Fixtures contain only generic providers, subscriptions, seats, and times.
+  switching, or dispatch mutation occurs.
 
-## Open calibration kept out of Phase 1
+## Deferred policy calibration
 
-- strategic/product/maintain reserve percentages;
+The following remain outside this accounting/visibility work:
+
+- strategic, maintenance, and keep-the-lights-on allocation scalars;
 - provider-specific probe cadence;
-- calendar-day timezone for the operator brief;
-- automatic work-class assignment;
-- throttle and preemptive-switch thresholds.
+- work-class assignment;
+- throttle and preemptive-switch thresholds;
+- any token-dollar ceiling or metered-provider actuator.
 
-Those choices affect allocation and belong to Phases 2–3 after the ledger has
-real dogfood evidence. Phase 1 supplies facts, not a spending policy.
+Phase 3 may consume the same read model only after real dogfood establishes
+coverage and reset behavior. The current work supplies facts, not spending
+authority.
