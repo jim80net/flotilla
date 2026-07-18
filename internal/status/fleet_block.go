@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jim80net/flotilla/internal/loopposture"
+	"github.com/jim80net/flotilla/internal/utilization"
 )
 
 // Headers that mean the body already carries a fleet-status block (idempotent skip).
@@ -31,6 +32,7 @@ type Agent struct {
 	State          string `json:"state"`
 	LoopPosture    string `json:"loop_posture,omitempty"`
 	RawLoopPosture string `json:"raw_loop_posture,omitempty"`
+	QueueState     string `json:"queue_state"`
 }
 
 // ParseDoc unmarshals status --json bytes into Doc.
@@ -82,9 +84,8 @@ func CompressBlock(doc Doc, opt CompressOptions) string {
 	}
 	// Notable lists (operator-facing).
 	var working, blocked, awaiting []string
-	// Histogram over all non-skipped seats.
-	hist := map[string]int{}
-	n := 0
+	// Shared utilization input over all non-skipped seats.
+	utilAgents := make([]utilization.Agent, 0, len(doc.Agents))
 
 	for _, a := range doc.Agents {
 		name := strings.TrimSpace(a.Name)
@@ -94,9 +95,11 @@ func CompressBlock(doc Doc, opt CompressOptions) string {
 		if _, omit := skip[name]; omit {
 			continue
 		}
-		n++
 		cat := classifyState(a.State, a.LoopPosture, a.RawLoopPosture)
-		hist[cat]++
+		utilAgents = append(utilAgents, utilization.Agent{
+			State: a.State, LoopPosture: a.LoopPosture,
+			RawLoopPosture: a.RawLoopPosture, QueueState: a.QueueState,
+		})
 		switch cat {
 		case "working":
 			working = append(working, name)
@@ -113,19 +116,21 @@ func CompressBlock(doc Doc, opt CompressOptions) string {
 
 	var b strings.Builder
 	b.WriteString("**Status of the fleet**\n")
-	// Summary line: as-of + seat count + compact histogram.
+	// Summary line: utilization first. "Accepts work" remains a secondary
+	// capacity signal; it never substitutes for working/idle truth (#797).
 	if doc.GeneratedAt != "" {
 		b.WriteString("as of ")
 		b.WriteString(doc.GeneratedAt)
 		b.WriteString(" · ")
 	}
-	b.WriteString(fmt.Sprintf("%d seats", n))
-	for _, key := range histOrder {
-		if c := hist[key]; c > 0 {
-			b.WriteString(fmt.Sprintf(" · %s:%d", key, c))
-		}
-	}
+	summary := utilization.Build(utilAgents)
+	b.WriteString(utilization.Line(summary))
 	b.WriteByte('\n')
+	if read := utilization.WallRead(summary); read != "" {
+		b.WriteString("read: ")
+		b.WriteString(read)
+		b.WriteByte('\n')
+	}
 
 	writeList := func(label string, names []string) {
 		if len(names) == 0 {
@@ -142,9 +147,6 @@ func CompressBlock(doc Doc, opt CompressOptions) string {
 
 	return strings.TrimRight(b.String(), "\n")
 }
-
-// histOrder is stable histogram key order for the summary line.
-var histOrder = []string{"working", "available", "blocked", "awaiting", "idle", "crashed", "errored", "unknown", "other"}
 
 // classifyState maps pane state + loop_posture to a coarse operator bucket.
 func classifyState(state, loopPosture, rawLoopPosture string) string {

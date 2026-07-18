@@ -122,6 +122,8 @@ func TestWriteStatus_WithSnapshot(t *testing.T) {
 
 	for _, want := range []string{
 		"states as of 20s ago",
+		"Utilization — utilization:1/3 (33.3%) / idle:1 (empty-queue:0 · has-queue:0 · queue-unknown:1) / blocked:0 · accepts-dispatch:1 · awaiting-authority:0",
+		"Read — utilization wall",
 		"XO research · last ack 5s ago · settled (idle)",
 		"infra", "working",
 		"research", "idle", "(XO)",
@@ -171,6 +173,9 @@ func TestBuildStatusJSON(t *testing.T) {
 	if len(doc.Agents) != 3 {
 		t.Fatalf("got %d agents, want 3", len(doc.Agents))
 	}
+	if doc.Utilization.Working != 1 || doc.Utilization.Idle != 1 || doc.Utilization.IdleQueueUnknown != 1 || doc.Utilization.Total != 3 {
+		t.Fatalf("utilization = %+v", doc.Utilization)
+	}
 	// XO: role hub, default surface claude-code, idle.
 	xo := doc.Agents[0]
 	if xo.Name != "xo" || xo.Role != "hub" || xo.Surface != "claude-code" || xo.State != "idle" {
@@ -193,7 +198,7 @@ func TestBuildStatusJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"generated_at"`, `"agents"`, `"name":"xo"`, `"role":"hub"`, `"state":"awaiting-approval"`, `"loop_posture"`} {
+	for _, want := range []string{`"generated_at"`, `"utilization"`, `"idle_queue_unknown":1`, `"agents"`, `"name":"xo"`, `"role":"hub"`, `"state":"awaiting-approval"`, `"loop_posture"`, `"queue_state":"unknown"`} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("marshaled JSON missing %s\n%s", want, raw)
 		}
@@ -233,6 +238,9 @@ func TestBuildStatusJSON_LoopPostureV10(t *testing.T) {
 		},
 	}
 	doc := buildStatusJSON(cfg, "xo", "2026-07-09T00:00:00Z", snap, loop)
+	if doc.Utilization.Idle != 4 || doc.Utilization.IdleEmptyQueue != 2 || doc.Utilization.IdleHasQueue != 2 || doc.Utilization.AcceptsDispatch != 2 || doc.Utilization.AwaitingAuthority != 1 {
+		t.Fatalf("utilization queue split = %+v", doc.Utilization)
+	}
 	want := map[string]string{
 		"xo": "parked", "backend": "available", "frontend": "drifted", "data": "available",
 	}

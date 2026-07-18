@@ -593,8 +593,13 @@ flotilla notify --from <coordinator> --with-fleet-status --file body.md
 ```
 
 This appends a compressed **Status of the fleet** block from the detector
-snapshot (same source as `flotilla status --json`): histogram + working /
-blocked / awaiting lists, skipping the `--from` agent and its adjutant. If the
+snapshot (same source as `flotilla status --json`). The first line is the
+utilization contract: `working/total (%) / idle (empty-queue · has-queue) /
+blocked`, followed by the secondary `accepts-dispatch` and raw
+`awaiting-authority` counts. Blocked is an overlay
+and can overlap idle; an unreadable backlog is counted as `queue-unknown`, never
+as empty capacity. Notable working / blocked / awaiting lists follow, skipping
+the `--from` agent and its adjutant. If the
 body already has `**Status of the fleet**` or `**Fleet status**`, the flag is
 a no-op (idempotent). Snapshot read failure appends `(unavailable)` — never
 silent omit when the flag is set.

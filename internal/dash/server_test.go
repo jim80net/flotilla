@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/sessionmirror"
 	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/watch"
 )
@@ -55,6 +56,11 @@ func TestHandleStatus_Fresh(t *testing.T) {
 	writeSnapshot(t, filepath.Join(dir, "flotilla-detector-state.json"),
 		watch.Snapshot{DeskStates: map[string]surface.State{"xo": surface.StateIdle, "alpha": surface.StateWorking}, XOSettled: true},
 		now.Add(-30*time.Second))
+	if err := sessionmirror.Append(dir, "alpha", sessionmirror.NewRecord(sessionmirror.Input{
+		Agent: "alpha", At: now.Add(-time.Minute), Info: "Validating the utilization footer",
+	}), sessionmirror.AppendOptions{}); err != nil {
+		t.Fatal(err)
+	}
 	// ack file 5s old
 	ackPath := filepath.Join(dir, "flotilla-xo-alive")
 	if err := os.WriteFile(ackPath, []byte("x"), 0o600); err != nil {
@@ -78,6 +84,9 @@ func TestHandleStatus_Fresh(t *testing.T) {
 	}
 	if len(doc.Agents) != 2 || doc.Agents[0].Role != "hub" {
 		t.Errorf("agents = %+v", doc.Agents)
+	}
+	if doc.Agents[0].LastAction != nil || doc.Agents[1].LastAction == nil || doc.Agents[1].LastAction.Summary != "Validating the utilization footer" {
+		t.Errorf("working-only last actions = %+v", doc.Agents)
 	}
 	if !doc.XOLiveness.Acked || !doc.XOLiveness.Settled {
 		t.Errorf("xo liveness = %+v", doc.XOLiveness)
@@ -166,6 +175,23 @@ func TestHandleIndex(t *testing.T) {
 	// The index is static chrome — it must NOT embed fleet data in a <script>.
 	if strings.Contains(body, "agents") {
 		t.Error("index page must not server-render fleet data (XSS surface)")
+	}
+}
+
+func TestDashboardUtilizationFirstContract797(t *testing.T) {
+	srv, _ := newTestServer(t, singleFleetRoster, time.Now())
+	html := doGet(t, srv, "/").Body.String()
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	css := doGet(t, srv, "/static/dash.css").Body.String()
+	for label, body := range map[string]string{"html": html, "js": js, "css": css} {
+		if !strings.Contains(body, "fleet-utilization") {
+			t.Errorf("%s missing fleet utilization surface", label)
+		}
+	}
+	for _, marker := range []string{"empty-queue:", "has-queue:", "accepts-dispatch:", "renderLiveSwarm", "last_action", "data-swarm-desk"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js missing utilization marker %q", marker)
+		}
 	}
 }
 

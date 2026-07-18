@@ -25,6 +25,7 @@ import (
 	"github.com/jim80net/flotilla/internal/loopposture"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
+	"github.com/jim80net/flotilla/internal/utilization"
 	"github.com/jim80net/flotilla/internal/watch"
 )
 
@@ -103,7 +104,16 @@ type AgentItem struct {
 	State          string                  `json:"state"`                      // pane / surface.State label
 	LoopPosture    string                  `json:"loop_posture,omitempty"`     // operator-facing #524 vocabulary
 	RawLoopPosture string                  `json:"raw_loop_posture,omitempty"` // retained when display normalization differs
+	QueueState     string                  `json:"queue_state"`                // empty | has-work | unknown
+	LastAction     *AgentAction            `json:"last_action,omitempty"`      // latest safe session-mirror glance
 	Usage          *watch.UsageObservation `json:"usage,omitempty"`
+}
+
+// AgentAction is the latest reader-modeled activity shown in the live swarm
+// strip. It is optional: missing mirror evidence renders awaiting-first-update.
+type AgentAction struct {
+	At      string `json:"at"`
+	Summary string `json:"summary"`
 }
 
 // FreshnessInfo is the board's freshness banner (the superset's addition over the
@@ -138,10 +148,11 @@ type BoardDoc struct {
 	// first-class threads even when neither is bound as a channel xo_agent, so the operator
 	// can always follow the coordinator's session (F#383 criterion 1). Empty when unset or
 	// identical to XO (the single-fleet dogfood case, where XO already IS the coordinator).
-	Cos        string        `json:"cos,omitempty"`
-	Agents     []AgentItem   `json:"agents"`
-	Freshness  FreshnessInfo `json:"freshness"`
-	XOLiveness XOLiveness    `json:"xo_liveness"`
+	Cos         string              `json:"cos,omitempty"`
+	Utilization utilization.Summary `json:"utilization"`
+	Agents      []AgentItem         `json:"agents"`
+	Freshness   FreshnessInfo       `json:"freshness"`
+	XOLiveness  XOLiveness          `json:"xo_liveness"`
 }
 
 // BoardInputs are the already-loaded, already-stat'd values the HTTP layer
@@ -160,6 +171,8 @@ type BoardInputs struct {
 	// LoopByAgent is optional pre-built #524 evidence (from per-agent backlog + settle).
 	// When nil, BuildBoard derives posture from the snapshot alone (backlog unknown).
 	LoopByAgent map[string]loopposture.Evidence
+	// LastActions is loaded only for currently-working seats by the HTTP layer.
+	LastActions map[string]AgentAction
 }
 
 // BuildBoard assembles the fleet-board document. Pure: no I/O, no real time.
@@ -189,6 +202,7 @@ func BuildBoard(in BoardInputs) BoardDoc {
 		doc.Cos = in.Cfg.CosAgent
 	}
 	for _, a := range in.Cfg.Agents {
+		evidence, evidenceOK := in.LoopByAgent[a.Name]
 		rawPosture := boardLoopPosture(a.Name, in, snapFresh)
 		displayPosture := loopposture.OperatorDisplay(rawPosture)
 		item := AgentItem{
@@ -196,6 +210,7 @@ func BuildBoard(in BoardInputs) BoardDoc {
 			Surface:     effectiveSurface(a.Surface),
 			State:       deskStateLabel(in.Snap, a.Name),
 			LoopPosture: string(displayPosture),
+			QueueState:  utilization.QueueState(evidenceOK && evidence.BacklogKnown, evidence.UnblockedN),
 		}
 		if rawPosture != displayPosture {
 			item.RawLoopPosture = string(rawPosture)
@@ -203,12 +218,28 @@ func BuildBoard(in BoardInputs) BoardDoc {
 		if usage, ok := in.Snap.Usage[a.Name]; ok {
 			item.Usage = &usage
 		}
+		if action, ok := in.LastActions[a.Name]; ok {
+			copy := action
+			item.LastAction = &copy
+		}
 		if a.Name == in.XO {
 			item.Role = "hub"
 		}
 		doc.Agents = append(doc.Agents, item)
 	}
+	doc.Utilization = summarizeBoardAgents(doc.Agents)
 	return doc
+}
+
+func summarizeBoardAgents(items []AgentItem) utilization.Summary {
+	agents := make([]utilization.Agent, 0, len(items))
+	for _, item := range items {
+		agents = append(agents, utilization.Agent{
+			State: item.State, LoopPosture: item.LoopPosture,
+			RawLoopPosture: item.RawLoopPosture, QueueState: item.QueueState,
+		})
+	}
+	return utilization.Build(agents)
 }
 
 func boardLoopPosture(name string, in BoardInputs, snapFresh bool) loopposture.Posture {

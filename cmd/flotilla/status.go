@@ -15,6 +15,7 @@ import (
 	"github.com/jim80net/flotilla/internal/loopposture"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
+	"github.com/jim80net/flotilla/internal/utilization"
 	"github.com/jim80net/flotilla/internal/watch"
 )
 
@@ -89,9 +90,10 @@ func cmdStatus(args []string) error {
 // against a demo roster rather than hand-authored data. #524 adds loop_posture
 // beside pane state; older consumers ignore unknown fields.
 type statusDoc struct {
-	GeneratedAt string       `json:"generated_at"`
-	XO          string       `json:"xo,omitempty"`
-	Agents      []statusItem `json:"agents"`
+	GeneratedAt string              `json:"generated_at"`
+	XO          string              `json:"xo,omitempty"`
+	Utilization utilization.Summary `json:"utilization"`
+	Agents      []statusItem        `json:"agents"`
 }
 
 type statusItem struct {
@@ -101,6 +103,7 @@ type statusItem struct {
 	State          string                  `json:"state"`                      // pane / surface.State label
 	LoopPosture    string                  `json:"loop_posture,omitempty"`     // operator-facing #524 vocabulary
 	RawLoopPosture string                  `json:"raw_loop_posture,omitempty"` // retained when display normalization differs
+	QueueState     string                  `json:"queue_state"`                // empty | has-work | unknown
 	Usage          *watch.UsageObservation `json:"usage,omitempty"`
 }
 
@@ -110,6 +113,7 @@ type statusItem struct {
 func buildStatusJSON(cfg *roster.Config, xo, generatedAt string, snap watch.Snapshot, loopByAgent map[string]loopposture.Evidence) statusDoc {
 	doc := statusDoc{GeneratedAt: generatedAt, XO: xo, Agents: make([]statusItem, 0, len(cfg.Agents))}
 	for _, a := range cfg.Agents {
+		evidence, evidenceOK := loopByAgent[a.Name]
 		rawPosture := deriveAgentPosture(a.Name, snap, loopByAgent)
 		displayPosture := loopposture.OperatorDisplay(rawPosture)
 		item := statusItem{
@@ -117,6 +121,7 @@ func buildStatusJSON(cfg *roster.Config, xo, generatedAt string, snap watch.Snap
 			Surface:     effectiveSurface(a.Surface),
 			State:       deskStateLabel(snap, a.Name),
 			LoopPosture: string(displayPosture),
+			QueueState:  utilization.QueueState(evidenceOK && evidence.BacklogKnown, evidence.UnblockedN),
 		}
 		if rawPosture != displayPosture {
 			item.RawLoopPosture = string(rawPosture)
@@ -129,7 +134,19 @@ func buildStatusJSON(cfg *roster.Config, xo, generatedAt string, snap watch.Snap
 		}
 		doc.Agents = append(doc.Agents, item)
 	}
+	doc.Utilization = summarizeStatusItems(doc.Agents)
 	return doc
+}
+
+func summarizeStatusItems(items []statusItem) utilization.Summary {
+	agents := make([]utilization.Agent, 0, len(items))
+	for _, item := range items {
+		agents = append(agents, utilization.Agent{
+			State: item.State, LoopPosture: item.LoopPosture,
+			RawLoopPosture: item.RawLoopPosture, QueueState: item.QueueState,
+		})
+	}
+	return utilization.Build(agents)
 }
 
 // effectiveSurface resolves an agent's surface name for display: an empty roster
@@ -157,6 +174,12 @@ func writeStatus(out io.Writer, cfg *roster.Config, xo, snapshotPath, ackPath st
 		fmt.Fprintf(out, "flotilla status — no readable detector snapshot at %s\n", snapshotPath)
 		fmt.Fprintln(out, "  (run `flotilla watch` with change_detector: true to populate it; desks shown as unknown)")
 	}
+	utilSummary := buildStatusJSON(cfg, xo, "", snap, loopByAgent).Utilization
+	fmt.Fprintf(out, "Utilization — %s\n", utilization.Line(utilSummary))
+	if read := utilization.WallRead(utilSummary); read != "" {
+		fmt.Fprintf(out, "Read — %s\n", read)
+	}
+	fmt.Fprintln(out)
 
 	// XO liveness line: who, last-ack age, and settled/active (settled only when
 	// the snapshot is readable — without it we can't assert the flag).

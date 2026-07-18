@@ -124,10 +124,63 @@
     return fresh;
   }
 
+  function utilizationText(status) {
+    var u = (status && status.utilization) || {};
+    if (!Number.isFinite(Number(u.total))) return "Fleet utilization unavailable";
+    var queue = "empty-queue:" + Number(u.idle_empty_queue || 0) + " · has-queue:" + Number(u.idle_has_queue || 0);
+    if (Number(u.idle_queue_unknown || 0) > 0) queue += " · queue-unknown:" + Number(u.idle_queue_unknown);
+    var pct = Number(u.utilization_percent || 0).toFixed(1);
+    return "utilization:" + Number(u.working || 0) + "/" + Number(u.total || 0) + " (" + pct + "%) / idle:" +
+      Number(u.idle || 0) + " (" + queue + ") / blocked:" + Number(u.blocked || 0) + " · accepts-dispatch:" +
+      Number(u.accepts_dispatch || 0) + " · awaiting-authority:" + Number(u.awaiting_authority || 0);
+  }
+
+  function renderUtilization(status) {
+    var target = el("fleet-utilization");
+    if (target) {
+      var text = utilizationText(status);
+      if (status && status.utilization && status.utilization.utilization_wall) {
+        text += " · utilization wall: dispatch, pull, or park";
+      }
+      target.textContent = text;
+    }
+  }
+
+  var lastSwarmKey = "";
+  function renderLiveSwarm(status) {
+    var agents = ((status || {}).agents || []).filter(function (a) { return a.state === "working"; });
+    var key = JSON.stringify(agents.map(function (a) { return [a.name, a.last_action || null]; }));
+    if (key === lastSwarmKey) return;
+    lastSwarmKey = key;
+    var rate = el("live-swarm-rate"), items = el("live-swarm-items");
+    var u = (status && status.utilization) || {};
+    if (rate) rate.textContent = Number(u.working || 0) + "/" + Number(u.total || 0) + " active · " +
+      Number(u.utilization_percent || 0).toFixed(1) + "%";
+    if (!items) return;
+    if (!agents.length) {
+      items.innerHTML = '<span class="live-swarm-empty">No seats working — utilization wall</span>';
+      return;
+    }
+    items.innerHTML = agents.map(function (a) {
+      var action = a.last_action || {};
+      var when = action.at ? relTime(action.at) : "awaiting first update";
+      var summary = action.summary || "action awaiting first update";
+      return '<button type="button" class="live-swarm-card" data-swarm-desk="' + escapeHtml(a.name) + '">' +
+        '<span class="live-swarm-name">' + escapeHtml(a.name) + '</span>' +
+        '<span class="live-swarm-action">' + escapeHtml(summary) + '</span>' +
+        '<span class="live-swarm-when">' + escapeHtml(when) + '</span></button>';
+    }).join("");
+    var cards = items.querySelectorAll("[data-swarm-desk]");
+    for (var i = 0; i < cards.length; i++) {
+      cards[i].addEventListener("click", function () { openConversation(this.getAttribute("data-swarm-desk"), ""); });
+    }
+  }
+
   function renderRailMeta(status, fresh) {
     var meta = el("rail-meta");
     var xl = status.xo_liveness || {};
     var bits = [];
+    bits.push(escapeHtml(utilizationText(status)));
     if (status.xo) {
       var ack = xl.acked ? ("ack " + escapeHtml(xl.ack_age) + " ago") : "never acked";
       var settled = xl.settled_known ? (xl.settled ? "settled" : "active") : "settled unknown";
@@ -1095,6 +1148,8 @@
     var topology = cache.topology || {};
     var history = cache.history || {};
     var fresh = renderFreshness(status);
+    renderUtilization(status);
+    renderLiveSwarm(status);
     renderRailMeta(status, fresh);
     renderConversationRail(status, topology, fresh);
     renderConversationHeader(topology);

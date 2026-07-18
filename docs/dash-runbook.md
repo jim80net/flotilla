@@ -63,6 +63,19 @@ Stop it with Ctrl-C (it shuts down gracefully).
 The dash mirrors `flotilla status`'s default-path resolution exactly — same env
 vars, same `<roster-dir>/…` fallbacks:
 
+The Conversations footer and fleet-map metadata lead with the same utilization
+summary as `flotilla status`: working/total and percentage first; idle seats
+split into empty queue, has unblocked queue, or honestly unknown; blocked as a
+posture overlay; then secondary accepts-dispatch and raw authority-wait counts.
+When almost the whole roster is idle, the footer calls it a utilization wall and
+directs the response toward dispatch, pull, or park.
+
+The global **Working now** strip makes the active swarm visible across dashboard
+views. Each working seat shows its latest reader-modeled session action and age;
+missing mirror evidence says awaiting first update instead of fabricating an
+activity. Selecting a card opens that seat's conversation. This keeps the
+standing multi-role fleet while borrowing the useful glanceability of swarm TUIs.
+
 | Artifact            | Flag               | Default                                          |
 |---------------------|--------------------|--------------------------------------------------|
 | roster              | `--roster`         | `./flotilla.json` or `$FLOTILLA_ROSTER`          |
