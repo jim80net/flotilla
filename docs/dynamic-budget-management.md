@@ -32,6 +32,10 @@ only after separate policy review.
 9. Budget management never parks or hides seats. Later phases may shape the
    cadence of self-sufficiency work while preserving the full roster and its
    authority hierarchy.
+10. Surface conservation is a user-managed routing constraint, separate from
+    health and allocation. Compatible harnesses may do implementation work
+    while a scarce live surface is reserved for e2e/canary work; this does not
+    change the seat's identity or launch recipe.
 
 ## Phase 1 dogfood source
 
@@ -46,7 +50,8 @@ Fleet operations already produces the canonical host-local artifacts:
 | `<roster-dir>/flotilla-budget-ledger.json` | Product-owned validated last-good import |
 
 The current feed represents provider pools, OAuth/window walls, hard-limit
-evidence, deliberate holds, health classes, and optional allocation metadata.
+evidence, deliberate holds, health classes, allocation metadata, and optional
+surface-conservation policy.
 Every pool includes `residual_percent`, which is JSON null until an
 authoritative probe supplies a real value. Schema revision
 `1.1-allocation-scalars` also carries target allocation vectors and optional
@@ -156,6 +161,13 @@ The v1 reader requires:
       "currency": "USD",
       "money_authority_ref": null
     }
+  },
+  "surface_conservation": {
+    "codex": {
+      "policy_id": "codex-e2e-only",
+      "use_live_surface_for": ["e2e", "live_canary", "hard_limit_banner_probe"],
+      "prefer_implement_on": ["grok", "claude-code", "pi"]
+    }
   }
 }
 ```
@@ -192,6 +204,11 @@ public or browser surface.
   provider;
 - `allocation.control.enforced` must remain false during Phase 1. A true value
   is rejected until the separately reviewed Phase 3 controller exists.
+- surface-conservation keys are normalized surface names; each policy has a
+  non-empty `policy_id`, a non-empty unique `use_live_surface_for` list, and a
+  unique `prefer_implement_on` list that cannot name the conserved surface;
+- operator prose, provenance, and notes in the source policy are never copied
+  into the product last-good or browser projection.
 
 Invalid known fields make the budget document unavailable. They do not crash
 status/dash, do not degrade to healthy capacity, and never replace the product
@@ -249,6 +266,13 @@ projection only:
     },
     "control_enforced": false
   },
+  "surface_conservation": {
+    "codex": {
+      "policy_id": "codex-e2e-only",
+      "use_live_surface_for": ["e2e", "live_canary", "hard_limit_banner_probe"],
+      "prefer_implement_on": ["grok", "claude-code", "pi"]
+    }
+  },
   "pools": [
     {
       "pool_id": "anthropic/example-plan",
@@ -305,6 +329,47 @@ Phase 1 validates and exposes target vectors. It does not fabricate actual
 fractions from seat state, message counts, wall clocks, or utilization. Phase 3
 must add work-class tags and unit-specific consumption evidence before comparing
 actual versus target.
+
+## Surface conservation and switch policy
+
+Surface conservation answers a fourth question: **which live harness should
+consume a scarce pool for this kind of work?** It is not a health Boolean, an
+allocation scalar, or a seat-parking mechanism. Under the operator-primary
+profile, Codex-adjacent design, implementation, fixtures, unit tests, and docs
+prefer compatible non-Codex surfaces. Live Codex is reserved for allowlisted
+e2e, canary, and minimal hard-limit probe intents.
+
+Phase 1 imports and exposes only the sanitized policy above. It does not change
+launch recipes, switch a pane, or infer intent from a seat name. A Codex-named
+seat may retain `primary=codex` for identity while deliberately implementing on
+Grok, Claude, or Pi; that is explained conservation, not unexplained drift.
+
+A separately reviewed Phase 3 controller must apply these gates in order:
+
+1. **Hard hold first.** The host-local `capacity-hold.json` guard from #803 is
+   absolute. An ACTIVE hold or hard-limit wall refuses the target before any
+   handoff, close, respawn, trust, or overlay mutation, regardless of work
+   purpose or remaining allocation.
+2. **Fresh policy and pool evidence.** Automatic return to a conserved surface
+   requires a fresh matching policy and a pool that is not hard-limited. Unknown
+   residual stays unknown and cannot be promoted to sufficient capacity.
+3. **Explicit purpose.** A conserved target requires a structured work-purpose
+   value from `use_live_surface_for`. Seat names, issue labels, and prose are not
+   sufficient evidence. A normal implement task selects a preferred compatible
+   surface instead.
+4. **No eager restore.** Clearing a capacity wall makes Codex eligible, not
+   mandatory. Auto-revert remains suppressed until an allowlisted live task is
+   actually scheduled. `resume` without an allowlisted purpose must preserve a
+   valid fallback overlay or fail visibly with the preferred alternatives.
+5. **No spend expansion.** Surface selection cannot enable metered fallback or
+   override money authority. Same-model overflow is not recovery for a
+   multi-seat or hard-limit class.
+
+The future command seam is an explicit `--work-purpose` (or equivalent signed
+dispatch field) consumed by `switch`/`resume`; it is not an operator-free escape
+hatch. Tests must cover held+e2e refusal, clear+implement conservation,
+clear+e2e eligibility, absent/stale policy, fallback preservation, and no
+mutation on every refusal.
 
 ## Status and dash semantics
 
@@ -400,8 +465,10 @@ Tests cover null residuals, window clocks, corrupt/partial input, schema drift,
 duplicate pools, anonymous pools, stale generation, shared subscriptions,
 conflicting windows, privacy projection, no-file behavior, scalar range/sum
 errors, per-unit mixes, null actuals, disabled dollars, and unauthorized enabled
-dollar configuration. Store tests also cover idempotent import, older-source
-refusal, concurrent import/probe updates, mode `0600`, atomic replacement, and
+dollar configuration. They also cover conserved-surface normalization,
+duplicate/empty purposes, self-referential preferred surfaces, and removal of
+operator prose from the product projection. Store tests cover idempotent import,
+older-source refusal, concurrent import/probe updates, mode `0600`, atomic replacement, and
 last-good retention.
 
 ### PR 2 — dash budget strip
@@ -428,11 +495,25 @@ This completes the product side of Phase 1 ACCOUNT plus Phase 2 visibility.
 Work-class throttles, dispatch deferral, and preemptive switching remain Phase 3
 and require separate review against the money boundary.
 
+### PR 4 — surface-conservation controller (separately gated Phase 3)
+
+- add structured work-purpose metadata to dispatch and recovery requests;
+- make `switch`, `resume`, and auto-revert consult the validated conservation
+  policy after the #803 hard hold and before mutation;
+- prefer compatible non-conserved implementation surfaces;
+- reserve the conserved live surface for allowlisted e2e/canary purposes;
+- emit metadata-only decisions so deliberate non-primary work is explainable.
+
+This PR cannot land until Phase 1 import and status visibility establish the
+policy source and the #803 hard guard is independently accepted.
+
 ## Acceptance gate
 
 - The dogfood `flotilla.budget_ledger/v1` artifact parses without translation.
 - `budget-policy.json` remains user-managed while the imported ledger carries
   one internally consistent effective profile.
+- The dogfood `surface_conservation.codex` policy imports without its operator
+  quote/notes and reaches status JSON as an allowlisted routing constraint.
 - `flotilla budget observe` validates dogfood into the atomic product last-good
   without modifying the source or losing a newer product generation.
 - Valid subscription and token-dollar vectors remain distinct and each sum to
@@ -460,6 +541,7 @@ The following remain outside this accounting/visibility work:
 - work-class assignment;
 - actual class-consumption measurement;
 - throttle and preemptive-switch thresholds;
+- structured work-purpose provenance and surface-conservation enforcement;
 - token-dollar enforcement and every metered-provider actuator.
 
 Phase 3 may consume the same read model only after real dogfood establishes
