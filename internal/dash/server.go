@@ -18,6 +18,7 @@ import (
 	"github.com/jim80net/flotilla/internal/dash/tracker"
 	"github.com/jim80net/flotilla/internal/loopposture"
 	"github.com/jim80net/flotilla/internal/roster"
+	"github.com/jim80net/flotilla/internal/surface"
 	"github.com/jim80net/flotilla/internal/transport"
 	"github.com/jim80net/flotilla/internal/watch"
 )
@@ -300,7 +301,35 @@ func (s *Server) loadBoard() BoardDoc {
 	}
 	rosterDir := filepath.Dir(s.cfg.RosterPath)
 	in.LoopByAgent = loadBoardLoopEvidence(s.roster, s.xo, rosterDir, snap, snapOK, snapFresh)
+	in.LastActions = s.loadWorkingActions(snap)
 	return BuildBoard(in)
+}
+
+// loadWorkingActions gives the visible swarm strip one latest-action glance per
+// active seat without turning status into an all-ledger read. Idle seats trigger
+// no mirror reads; each working seat reads only the latest built record.
+func (s *Server) loadWorkingActions(snap watch.Snapshot) map[string]AgentAction {
+	out := make(map[string]AgentAction)
+	for name, state := range snap.DeskStates {
+		if state != surface.StateWorking {
+			continue
+		}
+		doc := s.loadSessionMirror(name, 1)
+		if len(doc.Entries) == 0 {
+			continue
+		}
+		latest := doc.Entries[len(doc.Entries)-1]
+		summary := strings.TrimSpace(latest.Info)
+		if summary == "" {
+			summary = "session update"
+		}
+		runes := []rune(summary)
+		if len(runes) > 120 {
+			summary = string(runes[:120]) + "…"
+		}
+		out[name] = AgentAction{At: latest.TS, Summary: summary}
+	}
+	return out
 }
 
 // loadBoardLoopEvidence delegates to loopposture.LoadFleetEvidence so the fleet

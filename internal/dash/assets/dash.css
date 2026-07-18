@@ -213,6 +213,23 @@ code {
 .freshness.stale  { color: #fff; background: var(--err); font-weight: 600; }
 .freshness.absent { color: var(--ink-2); background: color-mix(in srgb, var(--err) 10%, transparent); border-bottom-color: var(--err); }
 
+.live-swarm {
+  display: flex; align-items: center; gap: .55rem; min-width: 0;
+  padding: .45rem 1.25rem; border-bottom: 1px solid var(--line-soft); background: var(--abyss-2);
+}
+.live-swarm-title { flex: 0 0 auto; font: 600 .72rem var(--display); letter-spacing: .08em; text-transform: uppercase; color: var(--cyan); }
+.live-swarm-rate { flex: 0 0 auto; font-size: .72rem; }
+.live-swarm-items { display: flex; gap: .4rem; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
+.live-swarm-card {
+  display: grid; grid-template-columns: auto minmax(10ch, 28ch) auto; align-items: baseline; gap: .4rem;
+  flex: 0 0 auto; max-width: 520px; padding: .32rem .5rem; border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm); background: var(--hull); color: var(--ink-2); text-align: left; cursor: pointer;
+}
+.live-swarm-card:hover, .live-swarm-card:focus-visible { border-color: var(--cyan); }
+.live-swarm-name { color: var(--ink); font-weight: 600; }
+.live-swarm-action { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.live-swarm-when, .live-swarm-empty { color: var(--ink-3); font-size: .68rem; white-space: nowrap; }
+
 /* ── layout ─────────────────────────────────────────────────────────────── */
 .wrap { max-width: 1180px; margin: 0 auto; padding: 1.1rem 1.25rem 1.5rem; display: grid; gap: 1rem; }
 
@@ -1972,6 +1989,11 @@ html, body { overflow-x: clip; }
 .view, .conv-wrap, .wrap, .goals-wrap { max-width: 100%; }
 
 @media (max-width: 740px) {
+  .live-swarm { padding: .35rem .65rem; }
+  .live-swarm-rate { display: none; }
+  .live-swarm-items { flex: 1 1 auto; }
+  .live-swarm-card { grid-template-columns: auto minmax(8ch, 1fr); min-height: 44px; max-width: min(70vw, 360px); }
+  .live-swarm-when { display: none; }
   html.work-context-open, body.work-context-open {
     height: 100dvh; min-height: 100dvh; max-height: 100dvh; overflow: hidden;
   }

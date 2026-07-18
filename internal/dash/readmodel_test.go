@@ -81,7 +81,7 @@ func TestBuildBoard_LoopPosture(t *testing.T) {
 			"data":     {Pane: surface.StateIdle, InSnapshot: true, SnapshotFresh: true, BacklogKnown: true, AwaitingAuthN: 1},
 		},
 	})
-	if doc.Utilization.Idle != 4 || doc.Utilization.IdleEmptyQueue != 2 || doc.Utilization.IdleHasQueue != 2 || doc.Utilization.AcceptsWork != 2 {
+	if doc.Utilization.Idle != 4 || doc.Utilization.IdleEmptyQueue != 2 || doc.Utilization.IdleHasQueue != 2 || doc.Utilization.AcceptsDispatch != 2 || doc.Utilization.AwaitingAuthority != 1 {
 		t.Fatalf("utilization queue split = %+v", doc.Utilization)
 	}
 	want := map[string]string{"xo": "parked", "backend": "available", "frontend": "drifted", "data": "available"}

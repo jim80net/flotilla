@@ -105,7 +105,15 @@ type AgentItem struct {
 	LoopPosture    string                  `json:"loop_posture,omitempty"`     // operator-facing #524 vocabulary
 	RawLoopPosture string                  `json:"raw_loop_posture,omitempty"` // retained when display normalization differs
 	QueueState     string                  `json:"queue_state"`                // empty | has-work | unknown
+	LastAction     *AgentAction            `json:"last_action,omitempty"`      // latest safe session-mirror glance
 	Usage          *watch.UsageObservation `json:"usage,omitempty"`
+}
+
+// AgentAction is the latest reader-modeled activity shown in the live swarm
+// strip. It is optional: missing mirror evidence renders awaiting-first-update.
+type AgentAction struct {
+	At      string `json:"at"`
+	Summary string `json:"summary"`
 }
 
 // FreshnessInfo is the board's freshness banner (the superset's addition over the
@@ -163,6 +171,8 @@ type BoardInputs struct {
 	// LoopByAgent is optional pre-built #524 evidence (from per-agent backlog + settle).
 	// When nil, BuildBoard derives posture from the snapshot alone (backlog unknown).
 	LoopByAgent map[string]loopposture.Evidence
+	// LastActions is loaded only for currently-working seats by the HTTP layer.
+	LastActions map[string]AgentAction
 }
 
 // BuildBoard assembles the fleet-board document. Pure: no I/O, no real time.
@@ -207,6 +217,10 @@ func BuildBoard(in BoardInputs) BoardDoc {
 		}
 		if usage, ok := in.Snap.Usage[a.Name]; ok {
 			item.Usage = &usage
+		}
+		if action, ok := in.LastActions[a.Name]; ok {
+			copy := action
+			item.LastAction = &copy
 		}
 		if a.Name == in.XO {
 			item.Role = "hub"

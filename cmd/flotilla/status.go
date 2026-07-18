@@ -174,7 +174,12 @@ func writeStatus(out io.Writer, cfg *roster.Config, xo, snapshotPath, ackPath st
 		fmt.Fprintf(out, "flotilla status — no readable detector snapshot at %s\n", snapshotPath)
 		fmt.Fprintln(out, "  (run `flotilla watch` with change_detector: true to populate it; desks shown as unknown)")
 	}
-	fmt.Fprintf(out, "Utilization — %s\n\n", utilization.Line(buildStatusJSON(cfg, xo, "", snap, loopByAgent).Utilization))
+	utilSummary := buildStatusJSON(cfg, xo, "", snap, loopByAgent).Utilization
+	fmt.Fprintf(out, "Utilization — %s\n", utilization.Line(utilSummary))
+	if read := utilization.WallRead(utilSummary); read != "" {
+		fmt.Fprintf(out, "Read — %s\n", read)
+	}
+	fmt.Fprintln(out)
 
 	// XO liveness line: who, last-ack age, and settled/active (settled only when
 	// the snapshot is readable — without it we can't assert the flag).

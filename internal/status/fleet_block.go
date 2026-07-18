@@ -126,6 +126,11 @@ func CompressBlock(doc Doc, opt CompressOptions) string {
 	summary := utilization.Build(utilAgents)
 	b.WriteString(utilization.Line(summary))
 	b.WriteByte('\n')
+	if read := utilization.WallRead(summary); read != "" {
+		b.WriteString("read: ")
+		b.WriteString(read)
+		b.WriteByte('\n')
+	}
 
 	writeList := func(label string, names []string) {
 		if len(names) == 0 {

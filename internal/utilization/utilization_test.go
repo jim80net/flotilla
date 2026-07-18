@@ -15,12 +15,18 @@ func TestBuildUtilizationFirstSummary797(t *testing.T) {
 	if got.Working != 1 || got.Idle != 5 || got.IdleEmptyQueue != 3 || got.IdleHasQueue != 1 || got.IdleQueueUnknown != 1 {
 		t.Fatalf("queue/activity summary = %+v", got)
 	}
-	if got.Blocked != 1 || got.AcceptsWork != 2 || got.Total != 6 {
+	if got.Blocked != 1 || got.AcceptsDispatch != 2 || got.AwaitingAuthority != 1 || got.Total != 6 {
 		t.Fatalf("blocked/capacity summary = %+v", got)
 	}
-	want := "working:1 / idle:5 (empty-queue:3 · has-queue:1 · queue-unknown:1) / blocked:1 · total:6 · accepts-work:2"
+	if got.UtilizationPercent != 100.0/6.0 || !got.UtilizationWall {
+		t.Fatalf("utilization rate/wall = %+v", got)
+	}
+	want := "utilization:1/6 (16.7%) / idle:5 (empty-queue:3 · has-queue:1 · queue-unknown:1) / blocked:1 · accepts-dispatch:2 · awaiting-authority:1"
 	if line := Line(got); line != want {
 		t.Fatalf("Line = %q, want %q", line, want)
+	}
+	if WallRead(got) == "" {
+		t.Fatal("one working of six should surface the utilization-wall read")
 	}
 }
 

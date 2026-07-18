@@ -122,7 +122,8 @@ func TestWriteStatus_WithSnapshot(t *testing.T) {
 
 	for _, want := range []string{
 		"states as of 20s ago",
-		"Utilization — working:1 / idle:1 (empty-queue:0 · has-queue:0 · queue-unknown:1) / blocked:0 · total:3 · accepts-work:0",
+		"Utilization — utilization:1/3 (33.3%) / idle:1 (empty-queue:0 · has-queue:0 · queue-unknown:1) / blocked:0 · accepts-dispatch:1 · awaiting-authority:0",
+		"Read — utilization wall",
 		"XO research · last ack 5s ago · settled (idle)",
 		"infra", "working",
 		"research", "idle", "(XO)",
@@ -237,7 +238,7 @@ func TestBuildStatusJSON_LoopPostureV10(t *testing.T) {
 		},
 	}
 	doc := buildStatusJSON(cfg, "xo", "2026-07-09T00:00:00Z", snap, loop)
-	if doc.Utilization.Idle != 4 || doc.Utilization.IdleEmptyQueue != 2 || doc.Utilization.IdleHasQueue != 2 || doc.Utilization.AcceptsWork != 2 {
+	if doc.Utilization.Idle != 4 || doc.Utilization.IdleEmptyQueue != 2 || doc.Utilization.IdleHasQueue != 2 || doc.Utilization.AcceptsDispatch != 2 || doc.Utilization.AwaitingAuthority != 1 {
 		t.Fatalf("utilization queue split = %+v", doc.Utilization)
 	}
 	want := map[string]string{
