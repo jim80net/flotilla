@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/launch"
@@ -83,6 +84,9 @@ func cmdResume(args []string) error {
 	}
 	selection, err := workspace.ResolveResumeSelection(agentName, flat, agent.Surface)
 	if err != nil {
+		return err
+	}
+	if err := workspace.EnforceCapacityHold(agentName, "resume", selection.Slot, selection.Surface, time.Now()); err != nil {
 		return err
 	}
 	recipe := selection.Recipe
