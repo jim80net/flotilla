@@ -1,60 +1,34 @@
 package dash
 
 import (
-	"crypto/rand"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 	"unicode/utf8"
 
 	"github.com/jim80net/flotilla/internal/dash/control"
 	"github.com/jim80net/flotilla/internal/outbox"
+	"github.com/jim80net/flotilla/internal/paradeconversation"
 )
 
 const (
-	paradeConversationSchema = 1
-	paradeMessageTextCap     = 4_000
+	paradeConversationSchema = paradeconversation.Schema
+	paradeMessageTextCap     = paradeconversation.MaxTextRunes
 )
 
 var (
-	errParadeDate      = errors.New("invalid parade date")
-	errParadeNotFound  = errors.New("parade not found")
-	errParadeSlide     = errors.New("invalid parade slide")
-	paradeConvoLocks   sync.Map // conversations.json path → *sync.Mutex
-	paradeMessageKinds = map[string]bool{"kudos": true, "invest": true, "feedback": true, "note": true}
+	errParadeDate     = errors.New("invalid parade date")
+	errParadeNotFound = errors.New("parade not found")
+	errParadeSlide    = errors.New("invalid parade slide")
 )
 
-// ParadeConversationMessage is one operator-authored reaction to a parade slide.
-type ParadeConversationMessage struct {
-	ID     string `json:"id"`
-	TS     string `json:"ts"`
-	Author string `json:"author"`
-	Kind   string `json:"kind"`
-	Text   string `json:"text"`
-}
-
-// ParadeSlideConversation stores the latest title snapshot alongside the messages
-// keyed to a slide index. Reordering slides may orphan a thread in MVP; the snapshot
-// preserves the human context.
-type ParadeSlideConversation struct {
-	Title    string                      `json:"title"`
-	Messages []ParadeConversationMessage `json:"messages"`
-}
-
-// ParadeConversations is the archive-local conversations.json document.
-type ParadeConversations struct {
-	Schema int                                `json:"schema"`
-	Slides map[string]ParadeSlideConversation `json:"slides"`
-}
+type ParadeConversationMessage = paradeconversation.Message
+type ParadeSlideConversation = paradeconversation.Thread
+type ParadeConversations = paradeconversation.Document
 
 type paradeMessageRequest struct {
 	Text string `json:"text"`
@@ -64,93 +38,26 @@ type paradeMessageRequest struct {
 type paradeMessageResponse struct {
 	Slide    ParadeSlideConversation `json:"slide"`
 	Delivery string                  `json:"delivery"` // delivered | queued
+	Target   string                  `json:"target"`
 	QueuedID string                  `json:"queued_id,omitempty"`
 }
 
+type paradeConversationMeta struct {
+	Schema     int                          `json:"schema"`
+	Parades    map[string]map[string]string `json:"parades"`
+	Unanswered map[string]int               `json:"unanswered_operator"`
+}
+
 func emptyParadeConversations() ParadeConversations {
-	return ParadeConversations{Schema: paradeConversationSchema, Slides: map[string]ParadeSlideConversation{}}
+	return paradeconversation.Empty()
 }
 
 func loadParadeConversations(path string) (ParadeConversations, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return emptyParadeConversations(), nil
-		}
-		return ParadeConversations{}, fmt.Errorf("read parade conversations: %w", err)
-	}
-	var doc ParadeConversations
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return ParadeConversations{}, fmt.Errorf("decode parade conversations: %w", err)
-	}
-	if doc.Schema != paradeConversationSchema {
-		return ParadeConversations{}, fmt.Errorf("parade conversations: unsupported schema %d", doc.Schema)
-	}
-	if doc.Slides == nil {
-		doc.Slides = map[string]ParadeSlideConversation{}
-	}
-	return doc, nil
+	return paradeconversation.Load(path)
 }
 
 func appendParadeConversation(path string, index int, title string, message ParadeConversationMessage) (ParadeSlideConversation, error) {
-	v, _ := paradeConvoLocks.LoadOrStore(path, &sync.Mutex{})
-	mu := v.(*sync.Mutex)
-	mu.Lock()
-	defer mu.Unlock()
-
-	doc, err := loadParadeConversations(path)
-	if err != nil {
-		return ParadeSlideConversation{}, err
-	}
-	key := strconv.Itoa(index)
-	thread := doc.Slides[key]
-	thread.Title = title
-	thread.Messages = append(thread.Messages, message)
-	doc.Slides[key] = thread
-	if err := writeParadeConversationsAtomic(path, doc); err != nil {
-		return ParadeSlideConversation{}, err
-	}
-	return thread, nil
-}
-
-func writeParadeConversationsAtomic(path string, doc ParadeConversations) error {
-	raw, err := json.MarshalIndent(doc, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode parade conversations: %w", err)
-	}
-	raw = append(raw, '\n')
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".conversations-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create parade conversations temp file: %w", err)
-	}
-	tmpPath := tmp.Name()
-	ok := false
-	defer func() {
-		if !ok {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-	if err := tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("chmod parade conversations temp file: %w", err)
-	}
-	if _, err := tmp.Write(raw); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("write parade conversations temp file: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("sync parade conversations temp file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close parade conversations temp file: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("replace parade conversations: %w", err)
-	}
-	ok = true
-	return nil
+	return paradeconversation.Append(path, index, title, message)
 }
 
 func paradeArchiveDir(root, date string) (string, error) {
@@ -172,44 +79,7 @@ func paradeArchiveDir(root, date string) (string, error) {
 }
 
 func paradeSlideTitles(dir, fallbackTitle string) ([]string, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, "slides.md"))
-	if err != nil && !os.IsNotExist(err) {
-		return nil, err
-	}
-	if os.IsNotExist(err) {
-		raw, err = os.ReadFile(filepath.Join(dir, "report.md"))
-	}
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []string{fallbackTitle}, nil
-		}
-		return nil, err
-	}
-	normalized := strings.ReplaceAll(string(raw), "\r\n", "\n")
-	chunks := regexpSlideSeparator.Split(normalized, -1)
-	titles := make([]string, 0, len(chunks))
-	for _, chunk := range chunks {
-		chunk = strings.TrimSpace(chunk)
-		if chunk == "" {
-			continue
-		}
-		line := strings.SplitN(chunk, "\n", 2)[0]
-		titles = append(titles, strings.TrimSpace(strings.TrimLeft(line, "#")))
-	}
-	if len(titles) == 0 {
-		return []string{fallbackTitle}, nil
-	}
-	return titles, nil
-}
-
-var regexpSlideSeparator = regexp.MustCompile(`(?m)^---\s*$`)
-
-func newParadeMessageID() (string, error) {
-	var raw [16]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return "", fmt.Errorf("generate parade message id: %w", err)
-	}
-	return "pm-" + hex.EncodeToString(raw[:]), nil
+	return paradeconversation.SlideTitles(dir, fallbackTitle)
 }
 
 func (s *Server) handleParadeConversations(w http.ResponseWriter, r *http.Request) {
@@ -224,6 +94,42 @@ func (s *Server) handleParadeConversations(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, doc)
+}
+
+func readParadeConversationMeta(root string) (paradeConversationMeta, error) {
+	meta := paradeConversationMeta{
+		Schema: paradeConversationSchema, Parades: map[string]map[string]string{}, Unanswered: map[string]int{},
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return meta, nil
+		}
+		return paradeConversationMeta{}, err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !paradeDateRe.MatchString(entry.Name()) {
+			continue
+		}
+		doc, err := paradeconversation.Load(filepath.Join(root, entry.Name(), "conversations.json"))
+		if err != nil {
+			return paradeConversationMeta{}, err
+		}
+		meta.Parades[entry.Name()] = paradeconversation.LatestAgentReplies(doc)
+		if pending := paradeconversation.UnansweredOperatorMessages(doc); len(pending) > 0 {
+			meta.Unanswered[entry.Name()] = len(pending)
+		}
+	}
+	return meta, nil
+}
+
+func (s *Server) handleParadeConversationMeta(w http.ResponseWriter, _ *http.Request) {
+	meta, err := readParadeConversationMeta(s.cfg.ParadesPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "the parade conversation metadata could not be read")
+		return
+	}
+	writeJSON(w, meta)
 }
 
 func (s *Server) handleParadeMessage(w http.ResponseWriter, r *http.Request) {
@@ -269,17 +175,14 @@ func (s *Server) handleParadeMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("message text exceeds %d characters", paradeMessageTextCap))
 		return
 	}
-	if !paradeMessageKinds[req.Kind] {
+	if !paradeconversation.ValidKind(req.Kind) {
 		writeError(w, http.StatusBadRequest, "message kind must be kudos, invest, feedback, or note")
 		return
 	}
-	id, err := newParadeMessageID()
+	message, err := paradeconversation.NewMessage("operator", req.Kind, req.Text, s.now())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "the parade message could not be created")
 		return
-	}
-	message := ParadeConversationMessage{
-		ID: id, TS: s.now().UTC().Format(time.RFC3339), Author: "operator", Kind: req.Kind, Text: req.Text,
 	}
 	thread, err := appendParadeConversation(filepath.Join(dir, "conversations.json"), index, titles[index], message)
 	if err != nil {
@@ -290,18 +193,25 @@ func (s *Server) handleParadeMessage(w http.ResponseWriter, r *http.Request) {
 	// envelope is deliberately one structural text line so authored newlines cannot
 	// masquerade as another kind=/text: field in the CoS instruction.
 	routeText := strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(req.Text)
-	routed := fmt.Sprintf("[parade %s · slide %d/%d · %s]\nkind=%s\ntext: %s", date, index+1, len(titles), titles[index], req.Kind, routeText)
-	res, routeErr := s.control.Route(r.Context(), cosTarget, routed)
-	if routeErr == nil && res.Outcome == control.OutcomeDelivered {
-		writeJSONStatus(w, http.StatusCreated, paradeMessageResponse{Slide: thread, Delivery: "delivered"})
-		return
+	routed := fmt.Sprintf("[parade reply requested · %s · slide %d/%d · %s]\nkind=%s\ntext: %s\nreply on the parade page with: flotilla parade reply --date %s --slide %d --text \"your reply\"", date, index+1, len(titles), titles[index], req.Kind, routeText, date, index+1)
+	targets := []string{}
+	if preferred := strings.TrimSpace(s.roster.ParadeAgent); preferred != "" && preferred != cosTarget {
+		targets = append(targets, preferred)
+	}
+	targets = append(targets, cosTarget)
+	for _, target := range targets {
+		res, routeErr := s.control.Route(r.Context(), target, routed)
+		if routeErr == nil && res.Outcome == control.OutcomeDelivered {
+			writeJSONStatus(w, http.StatusCreated, paradeMessageResponse{Slide: thread, Delivery: "delivered", Target: target})
+			return
+		}
 	}
 	queuedID, _, queueErr := outbox.Enqueue(filepath.Dir(s.cfg.RosterPath), respondSender, cosTarget, routed)
 	if queueErr != nil {
 		writeError(w, http.StatusBadGateway, "message was saved, but CoS delivery could not be queued")
 		return
 	}
-	writeJSONStatus(w, http.StatusAccepted, paradeMessageResponse{Slide: thread, Delivery: "queued", QueuedID: queuedID})
+	writeJSONStatus(w, http.StatusAccepted, paradeMessageResponse{Slide: thread, Delivery: "queued", Target: cosTarget, QueuedID: queuedID})
 }
 
 func writeParadePathError(w http.ResponseWriter, err error) {

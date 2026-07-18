@@ -2,6 +2,7 @@
   "guild_id": "YOUR_DISCORD_SERVER_ID",
   "operator_user_id": "YOUR_DISCORD_USER_ID",
   "xo_agent": "xo",
+  "_comment_parade_agent": "Optional first responder for operator messages on parade slides. Busy/unavailable falls back to cos_agent; empty routes directly to cos_agent.",
   "_comment_alpha_xo": "Optional harness-portable trial: project-XO with explicit surface codex (see docs/coordinator-seat-swap-runbook.md). Not live by default — supervised trial gate applies.",
   "_comment_beta_xo": "Optional harness-portable trial: project-XO with explicit surface grok (see docs/coordinator-seat-swap-runbook.md). Not live by default — supervised trial gate applies.",
   "_comment_adjutant": "Optional coordinator adjutant (#439): example seats only — not live until pilot gate. Requires change_detector + liveness_ping_mode interval|consecutive (not none). stackable_wakes (phase 2) defaults false. Operator-loop adjutants need FLOTILLA_WEBHOOK_<ADJ> in secrets + FLOTILLA_SECRETS on launch (#628); see llm.md §6.",

@@ -17,6 +17,21 @@
 
   var PARADES = [], pIdx = 0, sIdx = 0, view = "list";
   var CONVERSATIONS = {}, conversationLoading = {};
+  var CONVERSATION_META = { schema: 1, parades: {}, unanswered_operator: {} }, metaLoading = false;
+  var PARADE_POLL_MS = Number(window.__FLOTILLA_PARADE_POLL_MS) || 15000;
+  var PARADE_READ_KEY = "flotilla.parade.read.v1";
+  var PARADE_READ = loadParadeReadState();
+
+  function loadParadeReadState() {
+    try {
+      var parsed = JSON.parse(localStorage.getItem(PARADE_READ_KEY) || "{}");
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (_) { return {}; }
+  }
+
+  function saveParadeReadState() {
+    try { localStorage.setItem(PARADE_READ_KEY, JSON.stringify(PARADE_READ)); } catch (_) { /* in-memory cursor still clears this view */ }
+  }
 
   // resolve a slide image ref to a served URL: an http(s) ref passes through; anything else
   // is treated as an asset basename under the parade's assets/ dir.
@@ -301,6 +316,58 @@
       ? doc.slides[String(index)] : { title: "", messages: [] };
   }
 
+  function latestAgentReply(messages) {
+    for (var i = messages.length - 1; i >= 0; i--) {
+      if (String(messages[i].author || "operator").toLowerCase() !== "operator") return messages[i].id || "";
+    }
+    return "";
+  }
+
+  function reconcileConversationMeta(date, doc) {
+    var latest = {};
+    Object.keys((doc && doc.slides) || {}).forEach(function (slide) {
+      var thread = doc.slides[slide] || {};
+      var id = latestAgentReply(Array.isArray(thread.messages) ? thread.messages : []);
+      if (id) latest[slide] = id;
+    });
+    if (!CONVERSATION_META.parades) CONVERSATION_META.parades = {};
+    CONVERSATION_META.parades[date] = latest;
+  }
+
+  function replyMarker(date, index) {
+    return (((CONVERSATION_META.parades || {})[date] || {})[String(index)]) || "";
+  }
+
+  function threadUnread(date, index) {
+    var marker = replyMarker(date, index);
+    return !!marker && ((((PARADE_READ || {})[date] || {})[String(index)]) || "") !== marker;
+  }
+
+  function paradeUnread(date) {
+    var replies = (CONVERSATION_META.parades || {})[date] || {};
+    return Object.keys(replies).some(function (slide) { return threadUnread(date, slide); });
+  }
+
+  function markThreadRead(date, index) {
+    var marker = replyMarker(date, index);
+    if (!marker) return;
+    if (!PARADE_READ[date]) PARADE_READ[date] = {};
+    PARADE_READ[date][String(index)] = marker;
+    saveParadeReadState();
+    renderList();
+    updateGlobalUnread();
+  }
+
+  function unreadDot(label) {
+    return '<span class="pd-unread-dot" role="status" aria-label="' + esc(label) + '"></span>';
+  }
+
+  function updateGlobalUnread() {
+    var dot = el("pd-global-unread");
+    if (!dot) return;
+    dot.hidden = !PARADES.some(function (parade) { return paradeUnread(parade.date); });
+  }
+
   function messageTextHtml(text) {
     return esc(text).replace(/\r?\n/g, "<br>");
   }
@@ -314,6 +381,9 @@
     el("pd-stage").classList.toggle("has-open-conversation", open);
     var thread = slideConversation(par.date, sIdx);
     var messages = Array.isArray(thread.messages) ? thread.messages : [];
+    if (CONVERSATIONS[par.date]) reconcileConversationMeta(par.date, CONVERSATIONS[par.date]);
+    if (open) markThreadRead(par.date, sIdx);
+    var unread = threadUnread(par.date, sIdx);
     var loading = conversationLoading[par.date] === true;
     var loadError = conversationLoading[par.date] instanceof Error;
     var messageHTML = messages.length ? messages.map(function (message) {
@@ -325,7 +395,8 @@
     if (loading) messageHTML = '<p class="pd-convo-empty">Loading conversation…</p>';
     if (loadError) messageHTML = '<p class="pd-convo-error">Conversation unavailable. Reload to retry.</p>';
     host.innerHTML = '<details id="pd-conversation" class="pd-conversation"' + (open ? " open" : "") + ">" +
-      '<summary>Conversation <span class="pd-convo-count" aria-label="' + messages.length + ' messages">' + messages.length + "</span></summary>" +
+      '<summary>Conversation <span class="pd-convo-count" aria-label="' + messages.length + ' messages">' + messages.length + "</span>" +
+      (unread ? unreadDot("Unread agent reply") : "") + "</summary>" +
       '<div class="pd-convo-panel"><div class="pd-convo-thread" aria-live="polite">' + messageHTML + "</div>" +
       '<form id="pd-convo-form" class="pd-convo-form">' +
       '<fieldset><legend>Reaction kind</legend>' + ["note", "kudos", "invest", "feedback"].map(function (kind) {
@@ -343,6 +414,11 @@
     });
     details.addEventListener("toggle", function () {
       el("pd-stage").classList.toggle("has-open-conversation", this.open);
+      if (this.open) {
+        markThreadRead(par.date, sIdx);
+        var dot = this.querySelector(".pd-unread-dot");
+        if (dot) dot.remove();
+      }
     });
   }
 
@@ -357,13 +433,41 @@
       })
       .then(function (doc) {
         CONVERSATIONS[date] = doc && doc.slides ? doc : { schema: 1, slides: {} };
+        reconcileConversationMeta(date, CONVERSATIONS[date]);
         delete conversationLoading[date];
+        updateGlobalUnread();
+        renderList();
         if ((PARADES[pIdx] || {}).date === date) renderConversationPane(false);
       })
       .catch(function (error) {
         conversationLoading[date] = error;
         if ((PARADES[pIdx] || {}).date === date) renderConversationPane(false);
       });
+  }
+
+  function refreshConversationMeta() {
+    if (metaLoading) return;
+    metaLoading = true;
+    fetch("/api/parades/conversations/meta", { cache: "no-store" })
+      .then(function (response) {
+        if (!response.ok) throw new Error("conversation metadata GET → " + response.status);
+        return response.json();
+      })
+      .then(function (meta) {
+        CONVERSATION_META = meta && meta.parades ? meta : { schema: 1, parades: {}, unanswered_operator: {} };
+        metaLoading = false;
+        updateGlobalUnread();
+        renderList();
+        var par = PARADES[pIdx];
+        if (!par || !CONVERSATIONS[par.date]) return;
+        var latest = replyMarker(par.date, sIdx);
+        var loaded = latestAgentReply((slideConversation(par.date, sIdx).messages || []));
+        if (latest && latest !== loaded) {
+          delete CONVERSATIONS[par.date];
+          loadConversations(par.date);
+        }
+      })
+      .catch(function () { metaLoading = false; });
   }
 
   function postConversation(form) {
@@ -396,7 +500,7 @@
       if ((PARADES[pIdx] || {}).date !== date || sIdx !== slideIndex) return;
       renderConversationPane(true);
       var nextOutcome = el("pd-convo-outcome");
-      nextOutcome.textContent = body.delivery === "queued" ? "Saved · queued for CoS" : "Saved · delivered to CoS";
+      nextOutcome.textContent = body.delivery === "queued" ? "Saved · queued for " + (body.target || "CoS") : "Saved · delivered to " + (body.target || "CoS");
       var nextText = el("pd-convo-form").elements.text;
       nextText.value = "";
       nextText.focus();
@@ -475,7 +579,7 @@
       var slides = parseSlides(p.slides || "");
       var first = slides.length ? slides[0].title : "(empty)";
       return '<button class="pd-listcard" type="button" data-i="' + i + '">' +
-        '<span class="pd-listcard-date">' + esc(p.date) + "</span>" +
+        '<span class="pd-listcard-date">' + esc(p.date) + (paradeUnread(p.date) ? unreadDot("Unread agent reply") : "") + "</span>" +
         '<span class="pd-listcard-meta">' + slides.length + " slide" + (slides.length === 1 ? "" : "s") +
         " · " + esc(first) + "</span></button>";
     }).join("");
@@ -540,6 +644,8 @@
       PARADES = (d && d.parades) || [];
       renderList();
       if (PARADES.length) openDeck(0); else showList(); // open the newest deck; else the (empty) list
+      refreshConversationMeta();
+      window.setInterval(refreshConversationMeta, PARADE_POLL_MS);
     })
     .catch(function (e) {
       showList();

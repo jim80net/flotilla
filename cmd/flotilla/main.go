@@ -122,6 +122,8 @@ usage:
   flotilla parade rollup [--all] [<xo>]               wake coordinators to roll up subordinates' parade answers
   flotilla parade fleet                               wake the primary XO for the operator fleet parade report
   flotilla parade lint <slides.md|->                  fail-closed audience lint for the main parade spine
+  flotilla parade reply --date YYYY-MM-DD --slide N --text <reply>
+                                                      append a fleet-authored reply to the operator's slide thread
   flotilla pr body lint --audience operator <body.md|->
                                                       validate before/change/after operator PR summary
   flotilla speak <text>                               drop a short spoken reply on the voice outbound spool (non-blocking)

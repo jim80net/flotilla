@@ -80,9 +80,13 @@ func fileMode(t *testing.T, path string) os.FileMode {
 }
 
 func paradeConversationServer(t *testing.T, f *fakeController) (*Server, string, string) {
+	return paradeConversationServerWithRoster(t, f, paradeConversationRoster)
+}
+
+func paradeConversationServerWithRoster(t *testing.T, f *fakeController, rosterBody string) (*Server, string, string) {
 	t.Helper()
 	now := time.Date(2026, 7, 15, 5, 40, 0, 0, time.UTC)
-	srv, dir := newTestServer(t, paradeConversationRoster, now)
+	srv, dir := newTestServer(t, rosterBody, now)
 	srv.control = f
 	date := "2026-07-15"
 	paradeDir := filepath.Join(dir, "parades", date)
@@ -94,6 +98,42 @@ func paradeConversationServer(t *testing.T, f *fakeController) (*Server, string,
 		t.Fatal(err)
 	}
 	return srv, dir, date
+}
+
+func TestParadeConversationPrefersConfiguredResponder(t *testing.T) {
+	f := &fakeController{routeRes: control.RouteResult{Outcome: control.OutcomeDelivered}}
+	rosterBody := `{
+	  "channel_id":"C1", "xo_agent":"xo", "cos_agent":"cos", "parade_agent":"parade-desk", "heartbeat_interval":"20m",
+	  "agents":[{"name":"xo"},{"name":"cos"},{"name":"parade-desk"}]}`
+	srv, _, date := paradeConversationServerWithRoster(t, f, rosterBody)
+	rec := doWrite(t, srv, "POST", "/api/parades/"+date+"/slides/0/messages", `{"text":"Please respond","kind":"note"}`)
+	var response paradeMessageResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil || rec.Code != http.StatusCreated {
+		t.Fatalf("POST = %d %s err=%v", rec.Code, rec.Body.String(), err)
+	}
+	if f.lastRouteTarget != "parade-desk" || response.Target != "parade-desk" || response.Delivery != "delivered" {
+		t.Fatalf("route target=%q response=%+v", f.lastRouteTarget, response)
+	}
+}
+
+func TestParadeConversationFallsBackToCosAndQueues(t *testing.T) {
+	f := &fakeController{routeRes: control.RouteResult{Outcome: control.OutcomeBusy}}
+	rosterBody := `{
+	  "channel_id":"C1", "xo_agent":"xo", "cos_agent":"cos", "parade_agent":"parade-desk", "heartbeat_interval":"20m",
+	  "agents":[{"name":"xo"},{"name":"cos"},{"name":"parade-desk"}]}`
+	srv, dir, date := paradeConversationServerWithRoster(t, f, rosterBody)
+	rec := doWrite(t, srv, "POST", "/api/parades/"+date+"/slides/0/messages", `{"text":"Please respond","kind":"note"}`)
+	var response paradeMessageResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil || rec.Code != http.StatusAccepted {
+		t.Fatalf("POST = %d %s err=%v", rec.Code, rec.Body.String(), err)
+	}
+	if f.calls != 2 || f.lastRouteTarget != "cos" || response.Target != "cos" || response.Delivery != "queued" {
+		t.Fatalf("calls=%d last=%q response=%+v", f.calls, f.lastRouteTarget, response)
+	}
+	pending := outbox.ListAll(dir)
+	if len(pending) != 1 || pending[0].Recipient != "cos" {
+		t.Fatalf("pending = %+v", pending)
+	}
 }
 
 func TestParadeConversationHandlersPersistAndRouteToCos(t *testing.T) {
@@ -114,7 +154,7 @@ func TestParadeConversationHandlersPersistAndRouteToCos(t *testing.T) {
 	if f.lastRouteTarget != "cos" {
 		t.Fatalf("route target = %q, want cos", f.lastRouteTarget)
 	}
-	wantRoute := "[parade 2026-07-15 · slide 2/2 · Beta · Second claim]\nkind=invest\ntext: Please fund <script>alert(1)</script> & validate. Second line."
+	wantRoute := "[parade reply requested · 2026-07-15 · slide 2/2 · Beta · Second claim]\nkind=invest\ntext: Please fund <script>alert(1)</script> & validate. Second line.\nreply on the parade page with: flotilla parade reply --date 2026-07-15 --slide 2 --text \"your reply\""
 	if f.lastRouteMsg != wantRoute {
 		t.Errorf("route message = %q, want %q", f.lastRouteMsg, wantRoute)
 	}
@@ -136,6 +176,30 @@ func TestParadeConversationHandlersPersistAndRouteToCos(t *testing.T) {
 	var roundTrip ParadeConversations
 	if err := json.Unmarshal(get.Body.Bytes(), &roundTrip); err != nil || len(roundTrip.Slides["1"].Messages) != 1 {
 		t.Fatalf("GET round trip = %+v, err=%v", roundTrip, err)
+	}
+}
+
+func TestParadeConversationMetaReportsRepliesAndUnanswered(t *testing.T) {
+	srv, dir, date := paradeConversationServer(t, &fakeController{})
+	path := filepath.Join(dir, "parades", date, "conversations.json")
+	for _, message := range []ParadeConversationMessage{
+		{ID: "op-1", Author: "operator", Kind: "note", Text: "Question"},
+		{ID: "agent-1", Author: "alpha", Kind: "note", Text: "Answer"},
+	} {
+		if _, err := appendParadeConversation(path, 0, "Alpha · First claim", message); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := appendParadeConversation(path, 1, "Beta · Second claim", ParadeConversationMessage{ID: "op-2", Author: "operator", Kind: "feedback", Text: "Pending"}); err != nil {
+		t.Fatal(err)
+	}
+	rec := doGet(t, srv, "/api/parades/conversations/meta")
+	var meta paradeConversationMeta
+	if err := json.Unmarshal(rec.Body.Bytes(), &meta); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("meta GET = %d %s err=%v", rec.Code, rec.Body.String(), err)
+	}
+	if meta.Parades[date]["0"] != "agent-1" || meta.Unanswered[date] != 1 {
+		t.Fatalf("meta = %+v", meta)
 	}
 }
 
@@ -196,6 +260,7 @@ func TestParadeConversationDeckMarkers741(t *testing.T) {
 	for _, marker := range []string{
 		`messageTextHtml`, `esc(text).replace`, `pd-convo-count`, `maxlength="4000"`,
 		`"kudos", "invest", "feedback"`, `"X-Flotilla-Dash": "1"`,
+		`flotilla.parade.read.v1`, `/api/parades/conversations/meta`, `pd-unread-dot`,
 		`e.target.closest("input, textarea, select, button, summary, [contenteditable=true]")`,
 		`e.target.closest(".pd-conversation")`,
 	} {
