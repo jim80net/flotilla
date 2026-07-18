@@ -823,8 +823,8 @@ func cmdWatch(args []string) error {
 				defer txn.Release()
 				return surface.RotateContext(xoDrv, pane)
 			},
-			MirrorOnFinish:            deskMirrorOnFinish(cfg, secrets, tr, rosterDir),
-			CoordinatorMirrorOnFinish: coordinatorMirrorOnFinish(cfg, secrets, tr, *rosterPath, rosterDir),
+			MirrorOnFinish:            deskMirrorOnFinish(cfg, secrets, tr, rosterDir, flatLaunch),
+			CoordinatorMirrorOnFinish: coordinatorMirrorOnFinish(cfg, secrets, tr, *rosterPath, rosterDir, flatLaunch),
 			AdjutantFor:               func(owner string) string { return currentRoster().AdjutantFor(owner) },
 			AdjutantSeamOnFinish:      drainAdjutantSeamFor,
 			IdleHoldOnFinish:          idleHoldOnFinish(cfg, idleHoldTracker, injector.Enqueue),
@@ -1930,10 +1930,11 @@ func readDeskTurnFinal(cfg *roster.Config, agent string) (text string, ok bool, 
 // monitored coordinator: read turn-final via ResultReader and append the session-mirror ledger.
 // An explicit parade marker may additionally post Discord and append the CoS ledger. Harness-agnostic — does not rely on Claude
 // Stop hooks (Codex/Grok coordinators have none).
-func coordinatorMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr transport.Transport, rosterPath, rosterDir string) func(agent string) {
+func coordinatorMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr transport.Transport, rosterPath, rosterDir string, flatLaunch *launch.Config) func(agent string) {
 	return func(agent string) {
 		m := deskMirror{
-			rosterDir: rosterDir,
+			rosterDir:     rosterDir,
+			qualityAppend: finishQualityAppend(cfg, flatLaunch, rosterDir),
 			claimDiscord: func(a, turnFinal string) bool {
 				return claimParadePending(rosterDir, a, turnFinal, time.Now())
 			},
@@ -1968,10 +1969,11 @@ func coordinatorMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr t
 	}
 }
 
-func deskMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr transport.Transport, rosterDir string) func(agent string) {
+func deskMirrorOnFinish(cfg *roster.Config, secrets *roster.Secrets, tr transport.Transport, rosterDir string, flatLaunch *launch.Config) func(agent string) {
 	return func(agent string) {
 		m := deskMirror{
-			rosterDir: rosterDir,
+			rosterDir:     rosterDir,
+			qualityAppend: finishQualityAppend(cfg, flatLaunch, rosterDir),
 			claimDiscord: func(a, turnFinal string) bool {
 				return claimParadePending(rosterDir, a, turnFinal, time.Now())
 			},

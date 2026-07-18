@@ -146,6 +146,20 @@
     }
   }
 
+  function renderHarnessQuality(status) {
+    var target = el("harness-quality");
+    if (!target) return;
+    var q = (status && status.harness_quality) || {};
+    if (q.state === "unavailable") {
+      target.textContent = "Harness quality unavailable";
+      return;
+    }
+    var coverage = Number(q.tagging_coverage_percent || 0).toFixed(1);
+    var bounce = Number(q.bounce_rate_percent || 0).toFixed(1);
+    var rework = Number(q.rework_rate_percent || 0).toFixed(1);
+    target.textContent = "quality events:" + Number(q.total_events || 0) + " · tagged:" + coverage + "% · bounce:" + bounce + "% · rework:" + rework + "%";
+  }
+
   var lastSwarmKey = "";
   function renderLiveSwarm(status) {
     var agents = ((status || {}).agents || []).filter(function (a) { return a.state === "working"; });
@@ -1149,6 +1163,7 @@
     var history = cache.history || {};
     var fresh = renderFreshness(status);
     renderUtilization(status);
+    renderHarnessQuality(status);
     renderLiveSwarm(status);
     renderRailMeta(status, fresh);
     renderConversationRail(status, topology, fresh);
