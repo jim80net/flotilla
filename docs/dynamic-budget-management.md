@@ -39,9 +39,11 @@ Fleet operations already produces the canonical host-local artifacts:
 
 | Artifact | Contract |
 |---|---|
-| `<roster-dir>/budget-ledger.json` | Machine input, `schema_name=flotilla.budget_ledger/v1` |
+| `<roster-dir>/budget-policy.json` | User-managed allocation profile and per-unit vectors |
+| `<roster-dir>/budget-ledger.json` | Fleet-operations machine snapshot, `schema_name=flotilla.budget_ledger/v1` |
 | `<roster-dir>/budget-ledger.md` | Human briefing only; product never parses it |
 | `bin/harvest-budget-ledger.py` | Deployment-side regeneration, roster-dir aware |
+| `<roster-dir>/flotilla-budget-ledger.json` | Product-owned validated last-good import |
 
 The current feed represents provider pools, OAuth/window walls, hard-limit
 evidence, deliberate holds, health classes, and optional allocation metadata.
@@ -50,11 +52,25 @@ authoritative probe supplies a real value. Schema revision
 `1.1-allocation-scalars` also carries target allocation vectors and optional
 dollar-unit accounting hooks; Phase 1 records them but does not enforce them.
 
-The product does not create a parallel filename or overwrite this artifact.
-Fleet operations owns acquisition and regeneration. Flotilla owns strict
-parsing, safe projection into status/dash, and aggregation of authoritative
-surface probes. A future product-owned writer requires a separate migration
-plan after dogfood, not a competing Phase 1 store.
+Fleet operations owns acquisition and regeneration. Flotilla imports the
+machine snapshot through:
+
+```text
+flotilla budget observe --source fleet-ops --file <roster-dir>/budget-ledger.json
+```
+
+The command strictly validates schema, allocation vectors, units, timestamps,
+and null semantics before atomically replacing
+`<roster-dir>/flotilla-budget-ledger.json`. The source remains untouched. The
+product file is not a competing harvest; it is the validated last-good boundary
+that status, dash, and later probe writers share. A missing, corrupt, older, or
+partially written source cannot displace last-good.
+
+The import also verifies that the effective allocation embedded in ledger
+revision `1.1-allocation-scalars` agrees with its sums and enabled units. The
+user-managed `budget-policy.json` remains the fleet-operations policy source;
+status/dash consume only the validated effective policy embedded in the ledger,
+so they cannot race a policy edit against a harvest.
 
 ## Accepted machine shape
 
@@ -145,9 +161,9 @@ The v1 reader requires:
 ```
 
 `schema_revision`, allocation fields, clocks, signals, sources, notes, and
-provider-specific evidence may be present. The reader tolerates unknown fields
-for forward compatibility but never forwards the whole document to a public or
-browser surface.
+provider-specific evidence may be present. The importer tolerates unknown
+fields for forward compatibility but never forwards the whole document to a
+public or browser surface.
 
 ### Strict known-field rules
 
@@ -178,11 +194,27 @@ browser surface.
   is rejected until the separately reviewed Phase 3 controller exists.
 
 Invalid known fields make the budget document unavailable. They do not crash
-status/dash and do not degrade to healthy capacity.
+status/dash, do not degrade to healthy capacity, and never replace the product
+last-good file.
+
+### Import transaction
+
+`flotilla budget observe` takes an advisory lock next to the product ledger,
+reads and validates the complete source with size/count limits, and compares
+`generated_at` against last-good. An identical source is an idempotent no-op; an
+older source is rejected. A valid newer source is written mode `0600` through a
+same-directory temporary file, synced, and atomically renamed. Failure emits a
+metadata-only diagnostic and preserves last-good byte-for-byte.
+
+No credential path, annotation, evidence-seat identity, or provider-specific
+probe body is copied into the product file. The importer stores only the
+allowlisted status/dash projection plus the validated allocation and unit
+hooks. It never executes the harvester or a provider command.
 
 ## Product read model
 
-The browser and JSON status receive an allowlisted projection only:
+The product last-good file, browser, and JSON status use an allowlisted
+projection only:
 
 ```json
 {
@@ -305,8 +337,10 @@ adds visibility only; it does not add a throttle button or paid recovery path.
 
 Watch already stores successful optional `surface.UsageProbe` observations with
 provider and subscription metadata from the active launch slot. The budget
-projector overlays fresh probe evidence onto matching dogfood pools at read
-time; it does not mutate the fleet-operations file.
+projector overlays fresh probe evidence onto matching imported pools at read
+time; it never mutates the fleet-operations source file. Once probe persistence
+ships, it updates the same locked product last-good store and preserves the
+fleet-operations import as a distinct evidence source.
 
 Deterministic rules:
 
@@ -346,12 +380,16 @@ observations update health diagnostics while the exact residual stays null.
 
 ## Implementation PR sequence
 
-### PR 1 — v1 parser, projector, and status
+### PR 1 — v1 importer, last-good store, projector, and status
 
 - add an `internal/budgetledger` v1 reader with strict known-field validation,
-  size/count limits, generic fixtures, and privacy-allowlisted projection;
-- locate `<roster-dir>/budget-ledger.json` from the same roster resolution used
-  by status and dash;
+  size/count limits, locked atomic store, generic fixtures, and
+  privacy-allowlisted projection;
+- add `flotilla budget observe --source fleet-ops --file ...` to import
+  `<roster-dir>/budget-ledger.json` into the product last-good
+  `<roster-dir>/flotilla-budget-ledger.json`;
+- locate the product last-good file from the same roster resolution used by
+  status and dash;
 - overlay fresh exact watch probe observations by provider/subscription;
 - add `budget` to `flotilla status --json` and one compact human summary;
 - validate allocation vectors per enabled unit, preserve null actuals, and
@@ -362,7 +400,9 @@ Tests cover null residuals, window clocks, corrupt/partial input, schema drift,
 duplicate pools, anonymous pools, stale generation, shared subscriptions,
 conflicting windows, privacy projection, no-file behavior, scalar range/sum
 errors, per-unit mixes, null actuals, disabled dollars, and unauthorized enabled
-dollar configuration.
+dollar configuration. Store tests also cover idempotent import, older-source
+refusal, concurrent import/probe updates, mode `0600`, atomic replacement, and
+last-good retention.
 
 ### PR 2 — dash budget strip
 
@@ -391,6 +431,10 @@ and require separate review against the money boundary.
 ## Acceptance gate
 
 - The dogfood `flotilla.budget_ledger/v1` artifact parses without translation.
+- `budget-policy.json` remains user-managed while the imported ledger carries
+  one internally consistent effective profile.
+- `flotilla budget observe` validates dogfood into the atomic product last-good
+  without modifying the source or losing a newer product generation.
 - Valid subscription and token-dollar vectors remain distinct and each sum to
   `1.0`; invalid vectors fail visibly.
 - The operator-primary mix is a default profile, not a hard-coded global mix;
