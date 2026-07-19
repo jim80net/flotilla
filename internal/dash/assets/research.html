@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>flotilla — research</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/dash.css" />
+</head>
+<body class="research-body">
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-grain" aria-hidden="true"></div>
+  <header class="bar research-bar">
+    <div class="brand">
+      <svg class="brand-mark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <circle cx="12" cy="12" r="3"/><line x1="12" y1="9" x2="12" y2="3" stroke-linecap="round"/>
+        <line x1="15" y1="12" x2="21" y2="12" stroke-linecap="round"/><line x1="12" y1="15" x2="12" y2="21" stroke-linecap="round"/>
+        <line x1="9" y1="12" x2="3" y2="12" stroke-linecap="round"/><circle cx="12" cy="2" r="2"/>
+        <circle cx="22" cy="12" r="2"/><circle cx="12" cy="22" r="2"/><circle cx="2" cy="12" r="2"/>
+      </svg>
+      <div class="brand-text"><span class="brand-name">flotilla</span><span class="brand-dash">research library</span></div>
+    </div>
+    <nav class="parade-topnav" aria-label="Site"><a class="pd-topback" href="/">← Dashboard</a></nav>
+  </header>
+  <main class="research-shell">
+    <aside class="research-index" aria-labelledby="research-index-title">
+      <div class="research-index-head">
+        <div><p class="research-eyebrow">Private library</p><h1 id="research-index-title">Research</h1></div>
+        <span id="research-count" class="research-count" aria-live="polite"></span>
+      </div>
+      <label class="research-search"><span class="sr-only">Filter research</span><input id="research-filter" type="search" placeholder="Filter titles and paths" autocomplete="off" /></label>
+      <p class="research-order-note">Design decisions and held authority work appear first.</p>
+      <div id="research-list" class="research-list" aria-live="polite"><p class="muted">Loading research…</p></div>
+    </aside>
+    <article id="research-reader" class="research-reader" aria-live="polite" tabindex="-1">
+      <div class="research-reader-empty"><p class="research-eyebrow">Reading room</p><h2>Select a document</h2><p>Choose a research note from the library.</p></div>
+    </article>
+  </main>
+  <script src="/static/research.js"></script>
+</body>
+</html>

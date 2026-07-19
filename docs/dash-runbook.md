@@ -104,6 +104,20 @@ The board distinguishes *which* no-fresh-data case you are in:
 The dash never silently substitutes its own pane probe for a missing snapshot — it
 tells you honestly whether the fleet view is live, stale, or absent.
 
+## Research library
+
+The standalone **Research** page (`/research`) reads Markdown beneath
+`<roster-dir>/research` by default. Override the root with
+`--research-dir` or `FLOTILLA_DASH_RESEARCH_DIR`. It lists only regular `.md`
+files, rejects path-shaped document IDs, and does not follow symlink entries.
+Documents marked `DESIGN ONLY` or `awaiting authority` are ordered before
+general references. Markdown is escaped before the reader applies its safe
+formatting subset; source files remain read-only.
+
+The JSON endpoints are `GET /api/research` for the index and
+`GET /api/research/{id}` for one body. Copy the reader URL after opening a
+document to preserve its stable ID in `?id=` for an operator deep link.
+
 ## Goals view (the purpose hierarchy)
 
 The **Goals** tab (alongside Conversations and Issues) renders the fleet's goal

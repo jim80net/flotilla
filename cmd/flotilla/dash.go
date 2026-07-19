@@ -46,6 +46,7 @@ func cmdDash(args []string) error {
 	secretsPath := fs.String("secrets", os.Getenv("FLOTILLA_SECRETS"), "secrets env file for the notify webhook (optional; notify is disabled without it)")
 	goalsLayout := fs.String("goals-layout", os.Getenv("FLOTILLA_DASH_GOALS_LAYOUT"), "DEPRECATED — the Goals map is mind-map-only; any value is redirected to the mind map")
 	paradesDir := fs.String("parades-dir", os.Getenv("FLOTILLA_DASH_PARADES_DIR"), "parade archive dir the /parade page reads (default <roster-dir>/parades)")
+	researchDir := fs.String("research-dir", os.Getenv("FLOTILLA_DASH_RESEARCH_DIR"), "research library dir the /research page reads (default <roster-dir>/research)")
 	doneLogPath := fs.String("done-log", os.Getenv("FLOTILLA_DASH_DONE_LOG"), "goals done-history JSONL the server appends + the Realized window reads (default <roster-dir>/goals-done.jsonl)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -99,6 +100,7 @@ func cmdDash(args []string) error {
 		BacklogPath:           *trackerPath,
 		GoalsPath:             *goalsPath,
 		ParadesPath:           *paradesDir,
+		ResearchPath:          *researchDir,
 		DoneLogPath:           *doneLogPath,
 		Bind:                  *bind,
 		Repo:                  pinnedRepo,

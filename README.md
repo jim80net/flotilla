@@ -269,7 +269,7 @@ Near-term:
 - [x] **`flotilla dash` — an optional local web interface.** A self-contained web
       UI served by the `flotilla` binary, reading the artifacts `flotilla watch`
       already writes (no daemon, no pane probing) with live Server-Sent-Events
-      updates and a warm-light default theme. Three tabs:
+      updates and a warm-light default theme. Its primary surfaces include:
       - **Conversations** (default) — per-desk cards, each with that desk's
         turn-by-turn session history mirrored inline (at an *info* or *debug*
         detail level), plus a context column of live control actions: post a fleet
@@ -282,6 +282,9 @@ Near-term:
         to the control API.
       - **Issues** — a native, GitHub-backed issue tracker (via `gh`): list / view /
         create / comment / label / close, with a one-click `operator-idea` filter.
+      - **Research** — a read-only library rooted at `<roster-dir>/research`, with
+        safe rendered markdown, deep links, filtering, and decision-review notes
+        ordered before general reference material.
       Loopback by default; the token-gated non-loopback bind is a tracked follow-on:
       [docs/dash-runbook.md](./docs/dash-runbook.md).
 - [x] **`flotilla parade` — fleet retro roll-up.** Elicits a four-domain retro from
