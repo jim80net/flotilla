@@ -60,21 +60,25 @@ func EnforceCapacityHold(agent, operation, targetSlot, targetSurface string, now
 	if err != nil {
 		return capacityHoldMalformedError(agent, operation, targetSlot, targetSurface, path, err)
 	}
-	if !active {
-		return nil
-	}
 
 	primary := strings.EqualFold(strings.TrimSpace(targetSlot), SlotPrimary)
+	forbiddenPrimary := primary && hold.ForbidPrimary
 	forbiddenSurface := containsFold(hold.ForbidSurfaces, targetSurface)
-	if !primary && !forbiddenSurface {
+	if !forbiddenPrimary && !forbiddenSurface && !(active && primary) {
 		return nil
 	}
 
-	reason := "capacity hold is ACTIVE"
+	reason := "capacity hold explicitly forbids the target"
+	if active {
+		reason = "capacity hold is ACTIVE"
+	}
 	if until != "" {
 		reason += " until " + until
 	}
-	if forbiddenSurface && !primary {
+	if forbiddenPrimary && !active {
+		reason += " and forbids primary"
+	}
+	if forbiddenSurface {
 		reason += fmt.Sprintf(" and forbids surface %q", targetSurface)
 	}
 	return fmt.Errorf("refusing %s for %q to slot %q (surface %q): %s in %s; desk untouched", operation, agent, targetSlot, targetSurface, reason, path)

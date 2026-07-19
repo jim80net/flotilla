@@ -25,6 +25,8 @@ func TestEnforceCapacityHold(t *testing.T) {
 		{name: "future restore blocks primary", body: `{"schema":"flotilla.capacity_hold/v1","restore_after":"2026-07-18T13:00:00Z"}`, slot: SlotPrimary, surface: "codex", wantErr: true},
 		{name: "active remains sticky after deadline", body: `{"schema":"flotilla.capacity_hold/v1","status":"ACTIVE","restore_after":"2026-07-18T11:00:00Z"}`, slot: SlotPrimary, surface: "codex", wantErr: true},
 		{name: "inactive past deadline allows primary", body: `{"schema":"flotilla.capacity_hold/v1","status":"INACTIVE","hard_limit_until":"2026-07-18T11:00:00Z"}`, slot: SlotPrimary, surface: "codex"},
+		{name: "explicit primary forbid survives past deadline", body: `{"schema":"flotilla.capacity_hold/v1","status":"INACTIVE","forbid_primary":true,"hard_limit_until":"2026-07-18T11:00:00Z"}`, slot: SlotPrimary, surface: "codex", wantErr: true},
+		{name: "explicit surface forbid survives past deadline", body: `{"schema":"flotilla.capacity_hold/v1","status":"INACTIVE","forbid_surfaces":["codex"],"hard_limit_until":"2026-07-18T11:00:00Z"}`, slot: "fallback-1", surface: "codex", wantErr: true},
 		{name: "malformed blocks primary", body: `{`, slot: SlotPrimary, surface: "codex", wantErr: true},
 		{name: "malformed allows fallback recovery", body: `{`, slot: "fallback-1", surface: "grok"},
 		{name: "unknown schema blocks primary", body: `{"schema":"flotilla.capacity_hold/v2"}`, slot: SlotPrimary, surface: "codex", wantErr: true},
