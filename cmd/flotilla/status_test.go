@@ -122,8 +122,8 @@ func TestWriteStatus_WithSnapshot(t *testing.T) {
 
 	for _, want := range []string{
 		"states as of 20s ago",
-		"Utilization — utilization:1/3 (33.3%) / idle:1 (empty-queue:0 · has-queue:0 · queue-unknown:1) / blocked:0 · accepts-dispatch:1 · awaiting-authority:0",
-		"Read — utilization wall",
+		"Utilization — 1 of 3 seats working",
+		"Read — Almost no one is working — send work or pull the next queue item",
 		"XO research · last ack 5s ago · settled (idle)",
 		"infra", "working",
 		"research", "idle", "(XO)",

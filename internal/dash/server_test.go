@@ -188,7 +188,7 @@ func TestDashboardUtilizationFirstContract797(t *testing.T) {
 			t.Errorf("%s missing fleet utilization surface", label)
 		}
 	}
-	for _, marker := range []string{"empty-queue:", "has-queue:", "accepts-dispatch:", "renderLiveSwarm", "last_action", "data-swarm-desk"} {
+	for _, marker := range []string{"seats working", "blocked", "held for a decision", "renderLiveSwarm", "last_action", "data-swarm-desk"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("dash.js missing utilization marker %q", marker)
 		}

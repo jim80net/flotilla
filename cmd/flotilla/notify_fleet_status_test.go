@@ -92,10 +92,10 @@ func TestLoadFleetStatusBlock_FromSnapshot(t *testing.T) {
 	if !strings.Contains(block, "working: backend") {
 		t.Fatalf("want backend working:\n%s", block)
 	}
-	if !strings.Contains(block, "utilization:1/2 (50.0%) / idle:0 (empty-queue:0 · has-queue:0) / blocked:1 · accepts-dispatch:0 · awaiting-authority:0") {
+	if !strings.Contains(block, "1 of 2 seats working · 1 blocked") {
 		t.Fatalf("want utilization-first summary:\n%s", block)
 	}
-	if !strings.Contains(block, "read: utilization wall") {
+	if !strings.Contains(block, "read: Almost no one is working — send work or pull the next queue item") {
 		t.Fatalf("want explicit utilization-wall diagnosis:\n%s", block)
 	}
 	if !strings.Contains(block, "blocked: frontend") {

@@ -96,23 +96,33 @@ func Build(agents []Agent) Summary {
 	return out
 }
 
-// Line renders the operator-first metric line. It leads with utilization and
-// demotes accepts-dispatch capacity to the final, secondary clause.
+// Line renders the operator-first metric line. Fraction only, no jargon:
+// "3 of 12 seats working · 1 blocked · 2 held for a decision".
 func Line(s Summary) string {
-	queue := fmt.Sprintf("empty-queue:%d · has-queue:%d", s.IdleEmptyQueue, s.IdleHasQueue)
-	if s.IdleQueueUnknown > 0 {
-		queue += fmt.Sprintf(" · queue-unknown:%d", s.IdleQueueUnknown)
+	var parts []string
+	switch s.Working {
+	case 0:
+		parts = append(parts, "No seats working")
+	case s.Total:
+		parts = append(parts, fmt.Sprintf("All %d seats working", s.Total))
+	default:
+		parts = append(parts, fmt.Sprintf("%d of %d seats working", s.Working, s.Total))
 	}
-	return fmt.Sprintf("utilization:%d/%d (%.1f%%) / idle:%d (%s) / blocked:%d · accepts-dispatch:%d · awaiting-authority:%d",
-		s.Working, s.Total, s.UtilizationPercent, s.Idle, queue, s.Blocked, s.AcceptsDispatch, s.AwaitingAuthority)
+	if s.Blocked > 0 {
+		parts = append(parts, fmt.Sprintf("%d blocked", s.Blocked))
+	}
+	if s.AwaitingAuthority > 0 {
+		parts = append(parts, fmt.Sprintf("%d held for a decision", s.AwaitingAuthority))
+	}
+	return strings.Join(parts, " · ")
 }
 
 // WallRead is the explicit diagnosis shown when almost the entire roster is
-// idle. It directs the product response toward pull/dispatch/park rather than
-// celebrating nominal availability.
+// idle. It directs the product response toward action rather than celebrating
+// nominal availability.
 func WallRead(s Summary) string {
 	if !s.UtilizationWall {
 		return ""
 	}
-	return "utilization wall — most seats idle; empty queues or weak pull require dispatch, pull, or park"
+	return "Almost no one is working — send work or pull the next queue item"
 }

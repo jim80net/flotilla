@@ -32,7 +32,7 @@ func TestCompressBlock_FromFixtureJSON(t *testing.T) {
 	}
 	for _, want := range []string{
 		"as of 2026-06-17T17:26:31Z",
-		"utilization:2/6 (33.3%) / idle:2 (empty-queue:2 · has-queue:0) / blocked:1 · accepts-dispatch:5 · awaiting-authority:1",
+		"2 of 6 seats working · 1 blocked · 1 held for a decision",
 		"working: backend, data",
 		"blocked: ops",
 		"awaiting: frontend",
