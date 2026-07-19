@@ -17,6 +17,7 @@
   var el = D.el, escapeHtml = D.escapeHtml, getJSON = D.getJSON, postJSON = D.postJSON;
 
   var loaded = false; // lazy first-load when the Issues tab is first shown
+  var primaryRepo = "";
   var workRowContexts = {};
   var lastLedgerDoc = null;
   function isMobileLedger() { return !!(window.matchMedia && window.matchMedia("(max-width: 640px)").matches); }
@@ -85,15 +86,19 @@
   function workRow(item, posture, flotilla, desk, compact) {
     var it = item.issue || {};
     var number = Number(it.number);
-    workRowContexts[number] = {
+    var repo = String(item.repo || "");
+    var ref = repo + "#" + number;
+    workRowContexts[ref] = {
       item: item, posture: posture, flotilla: flotilla, desk: desk,
       seats: [desk, it.desk].filter(Boolean),
     };
     var contextLine = item.goal_title
       ? '<span class="issue-context">Drives ' + escapeHtml(item.goal_title) + " · " + escapeHtml(item.goal_detail || "in flight") + "</span>"
-      : '<span class="issue-context">' + escapeHtml(relativeWhen(it.closedAt, "closed")) + "</span>";
+      : '<span class="issue-context">' + escapeHtml(posture === "in-flight"
+          ? relativeWhen(it.updatedAt || it.createdAt, "updated")
+          : relativeWhen(it.closedAt, "closed")) + "</span>";
     return (
-      '<div class="issue-row issue-row-' + posture + (compact ? " issue-row-compact" : "") + '" data-number="' + number + '" role="button" tabindex="0" aria-label="Open work context for issue ' + number + '">' +
+      '<div class="issue-row issue-row-' + posture + (compact ? " issue-row-compact" : "") + '" data-ref="' + escapeHtml(ref) + '" role="button" tabindex="0" aria-label="Open work context for ' + escapeHtml(ref) + '">' +
         (compact
           ? '<span class="issue-state-dot ' + posture + '" aria-hidden="true"></span><span class="sr-only">shipped</span>'
           : '<span class="issue-state ' + posture + '">' + (posture === "in-flight" ? "in flight" : "shipped") + "</span>") +
@@ -156,12 +161,26 @@
 
   function renderIssueList(doc) {
     lastLedgerDoc = doc;
+    primaryRepo = String(doc.repo || "");
     workRowContexts = {};
-    el("issues-repo").textContent = doc.repo ? doc.repo : "";
+    var repos = Array.isArray(doc.repos) ? doc.repos : [];
+    el("issues-repo").textContent = repos.length ? repos.length + " repositories" : (doc.repo || "");
     var flotillas = Array.isArray(doc.flotillas) ? doc.flotillas : [];
     var list = el("issues-list");
-    var scopeNote = '<div class="issue-scope-note" role="note"><strong>Moving is goal-linked only</strong>' +
-      "<span>Other open issues are omitted.</span></div>";
+    var coverage = doc.coverage || {};
+    var failed = Array.isArray(coverage.failed_repos) ? coverage.failed_repos : [];
+    var omitted = Array.isArray(coverage.omitted_repos) ? coverage.omitted_repos : [];
+    var unmapped = Array.isArray(coverage.unmapped_domains) ? coverage.unmapped_domains : [];
+    var indexed = Array.isArray(coverage.indexed_repos) ? coverage.indexed_repos.length : repos.length;
+    var expected = Number(coverage.expected_repos) || indexed;
+    var incomplete = coverage.complete === false;
+    var scopeNote = '<div class="issue-scope-note' + (incomplete ? ' issue-scope-incomplete' : '') + '" role="note"><strong>' +
+      (incomplete ? "Partial fleet coverage" : "Fleet repository coverage") + "</strong><span>" +
+      "Showing " + indexed + " of " + expected + " mapped repositories" +
+      (failed.length ? "; " + failed.length + " failed" : "") +
+      (omitted.length ? "; " + omitted.length + " over the safety bound" : "") +
+      (unmapped.length ? "; " + unmapped.length + " roster domains need repository mapping" : "") +
+      ". Every indexed open issue is shown as moving.</span></div>";
     if (!flotillas.length) {
       list.innerHTML = scopeNote + '<div class="empty">No fleet work matches this view.</div>';
       if (window.flotillaPerf) window.flotillaPerf.viewRendered("issues");
@@ -256,7 +275,7 @@
   }
 
   function openWorkContext(row) {
-    var context = workRowContexts[Number(row.getAttribute("data-number"))];
+    var context = workRowContexts[row.getAttribute("data-ref")];
     if (context && window.flotillaWorkContext) window.flotillaWorkContext.open(context, row);
   }
 
@@ -457,5 +476,6 @@
   window.flotillaTracker = {
     show: function () { if (!loaded) { loaded = true; loadIssues(); } },
     openIssue: openIssue,
+    isPrimaryRepo: function (repo) { return !repo || String(repo).toLowerCase() === primaryRepo.toLowerCase(); },
   };
 })();

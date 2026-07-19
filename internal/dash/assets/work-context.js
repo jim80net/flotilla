@@ -342,6 +342,16 @@
     }
     details.hidden = false;
     var number = selected.item.issue.number;
+    var repo = String(selected.item.repo || "");
+    var foreign = window.flotillaTracker && window.flotillaTracker.isPrimaryRepo && !window.flotillaTracker.isPrimaryRepo(repo);
+    if (foreign) {
+      var href = String(selected.item.issue.url || "");
+      el("wc-github-summary").textContent = "GitHub " + repo + "#" + number + " (source repository)";
+      el("wc-github-body").innerHTML = /^https?:\/\//i.test(href)
+        ? '<a class="btn wc-open-full-issue" href="' + esc(href) + '" target="_blank" rel="noopener">Open full issue ↗</a>'
+        : '<div class="empty">Issue detail is available from its source repository.</div>';
+      return;
+    }
     var comments = issue && Array.isArray(issue.comments) ? issue.comments : [];
     el("wc-github-summary").textContent = "GitHub #" + number + " — issue body · " + comments.length +
       " comment" + (comments.length === 1 ? "" : "s") + " (read-only mirror)";
@@ -373,6 +383,11 @@
   function fetchIssueOnce() {
     var issue = selected && selected.item ? selected.item.issue || {} : {};
     if (!issue.number) { renderGitHub(null); return Promise.resolve(); }
+    var repo = String(selected.item.repo || "");
+    if (window.flotillaTracker && window.flotillaTracker.isPrimaryRepo && !window.flotillaTracker.isPrimaryRepo(repo)) {
+      renderGitHub(null);
+      return Promise.resolve();
+    }
     var epoch = issueEpoch;
     return D.getJSON("/api/issues/" + issue.number).then(function (doc) {
       if (panelOpen() && epoch === issueEpoch) renderGitHub(doc);

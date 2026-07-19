@@ -83,21 +83,25 @@ type Config struct {
 // static assets. It holds NO live fleet state of its own — every request reads
 // the current artifacts fresh.
 type Server struct {
-	cfg         Config
-	roster      *roster.Config
-	xo          string        // resolved XO (xo_agent, else Agents[0])
-	threshold   time.Duration // snapshot staleness threshold (3× heartbeat)
-	now         func() time.Time
-	tmpl        *template.Template
-	mux         *http.ServeMux
-	hub         *hub
-	allowed     map[string]bool    // Host-header allowlist (host:port forms)
-	origins     map[string]bool    // Origin allowlist (scheme://host:port) for state-changing requests
-	tracker     tracker.Tracker    // GitHub-backed issue tracker; nil when no --repo is configured
-	control     control.Controller // cnc control (notify live; route/resume gated on the pane lock)
-	done        *doneRecorder      // goals done-history observer/writer (#418) — the one artifact the dash WRITES
-	goalsLoadWG sync.WaitGroup     // async loadGoals from the SSE poller; tests drain before TempDir teardown
-	pollWG      sync.WaitGroup     // SSE file poller; shutdown waits for exit before draining loadGoals
+	cfg       Config
+	roster    *roster.Config
+	xo        string        // resolved XO (xo_agent, else Agents[0])
+	threshold time.Duration // snapshot staleness threshold (3× heartbeat)
+	now       func() time.Time
+	tmpl      *template.Template
+	mux       *http.ServeMux
+	hub       *hub
+	allowed   map[string]bool // Host-header allowlist (host:port forms)
+	origins   map[string]bool // Origin allowlist (scheme://host:port) for state-changing requests
+	tracker   tracker.Tracker // GitHub-backed issue tracker; nil when no --repo is configured
+	trackerMu sync.Mutex
+	// ledgerTrackers holds one persistent, cache-owning GitHub reader per roster/goal
+	// repository. Issue writes remain pinned to tracker/cfg.Repo.
+	ledgerTrackers map[string]tracker.Tracker
+	control        control.Controller // cnc control (notify live; route/resume gated on the pane lock)
+	done           *doneRecorder      // goals done-history observer/writer (#418) — the one artifact the dash WRITES
+	goalsLoadWG    sync.WaitGroup     // async loadGoals from the SSE poller; tests drain before TempDir teardown
+	pollWG         sync.WaitGroup     // SSE file poller; shutdown waits for exit before draining loadGoals
 }
 
 // NewServer validates the bind address (LOOPBACK ONLY — see validateBind; the
@@ -131,17 +135,18 @@ func NewServer(cfg Config) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{
-		cfg:       cfg,
-		roster:    rc,
-		xo:        xo,
-		threshold: FreshnessThreshold(rc.HeartbeatDur()), // ceiling via ReferenceIntervalCeiling (K9)
-		now:       time.Now,
-		tmpl:      tmpl,
-		mux:       http.NewServeMux(),
-		hub:       newHub(),
-		allowed:   buildHostAllowlist(cfg.Bind),
-		origins:   buildOriginAllowlist(cfg.Bind, cfg.AllowedOrigins),
-		done:      newDoneRecorder(cfg.DoneLogPath), // #418 — observes roll-up transitions on every goals load
+		cfg:            cfg,
+		roster:         rc,
+		xo:             xo,
+		threshold:      FreshnessThreshold(rc.HeartbeatDur()), // ceiling via ReferenceIntervalCeiling (K9)
+		now:            time.Now,
+		tmpl:           tmpl,
+		mux:            http.NewServeMux(),
+		hub:            newHub(),
+		allowed:        buildHostAllowlist(cfg.Bind),
+		origins:        buildOriginAllowlist(cfg.Bind, cfg.AllowedOrigins),
+		done:           newDoneRecorder(cfg.DoneLogPath), // #418 — observes roll-up transitions on every goals load
+		ledgerTrackers: make(map[string]tracker.Tracker),
 	}
 	if cfg.DisableAuthentication {
 		fmt.Fprintln(os.Stderr, "flotilla dash: WARNING — DISABLE_AUTHENTICATION is on; write-route CSRF gates are OFF (insecure mode until #208 lands)")
@@ -156,6 +161,7 @@ func NewServer(cfg Config) (*Server, error) {
 			return nil, terr
 		}
 		s.tracker = gh
+		s.ledgerTrackers[strings.ToLower(cfg.Repo)] = gh
 	}
 	// The control surface is always wired: notify posts through the injected
 	// (discord-backed) Transport when a secrets webhook is configured; route resolves
@@ -370,17 +376,21 @@ func (s *Server) loadHistoryPage(q HistoryQuery) (HistoryPage, error) {
 // trailer are merged onto the referenced goal node and issue states are resolved
 // for work-item roll-up.
 func (s *Server) loadGoals() GoalsDoc {
-	return s.loadGoalsWithIssues(nil, false)
+	return s.loadGoalsWithIssueSources(nil, false)
 }
 
 // loadGoalsFromIssues builds the Goals document from an issue snapshot the
 // caller already fetched. Work-ledger uses this path so one request never pays
 // for two serial, identical all/200/body GitHub reads.
 func (s *Server) loadGoalsFromIssues(issues []tracker.Issue) GoalsDoc {
-	return s.loadGoalsWithIssues(issues, true)
+	return s.loadGoalsWithIssueSources([]WorkLedgerRepoIssues{{Repo: s.cfg.Repo, Issues: issues}}, true)
 }
 
-func (s *Server) loadGoalsWithIssues(issues []tracker.Issue, supplied bool) GoalsDoc {
+func (s *Server) loadGoalsFromRepoIssues(sources []WorkLedgerRepoIssues) GoalsDoc {
+	return s.loadGoalsWithIssueSources(sources, true)
+}
+
+func (s *Server) loadGoalsWithIssueSources(sources []WorkLedgerRepoIssues, supplied bool) GoalsDoc {
 	orgParents, orgSource := orgParentsFromRoster(s.roster)
 	in := GoalsInputs{
 		Backlog:       readFileOrEmpty(s.cfg.BacklogPath),
@@ -392,7 +402,9 @@ func (s *Server) loadGoalsWithIssues(issues []tracker.Issue, supplied bool) Goal
 		OrgSource:     orgSource,
 	}
 	if supplied {
-		bindTrackerIssueSnapshot(&in, s.cfg.Repo, issues)
+		for _, source := range sources {
+			bindTrackerIssueSnapshot(&in, source.Repo, source.Issues)
+		}
 	} else {
 		s.bindTrackerIssues(&in)
 	}
@@ -453,7 +465,9 @@ func (s *Server) bindTrackerIssues(in *GoalsInputs) {
 }
 
 func bindTrackerIssueSnapshot(in *GoalsInputs, repo string, issues []tracker.Issue) {
-	in.IssueStates = make(map[string]string, len(issues))
+	if in.IssueStates == nil {
+		in.IssueStates = make(map[string]string, len(issues))
+	}
 	for _, iss := range issues {
 		ref := tracker.IssueRef(repo, iss.Number)
 		state := strings.ToLower(strings.TrimSpace(iss.State))
