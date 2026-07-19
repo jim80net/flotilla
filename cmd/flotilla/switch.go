@@ -771,6 +771,9 @@ func cmdSwitch(args []string) error {
 		return err
 	}
 	toSurface := toSlot.Surface
+	if err := workspace.EnforceCapacityHold(agentName, "switch", toSlot.Name, toSurface, time.Now()); err != nil {
+		return err
+	}
 
 	// Resolve BOTH drivers and assert the recycle-capable bar for each (fail-closed, naming the
 	// incapable side). switchCapabilityRefusal returns the FROM + TO bridges to author the turns.
