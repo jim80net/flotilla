@@ -46,7 +46,7 @@ func TestSynthesisReadFailureIsCleanSkip(t *testing.T) {
 func TestSynthesisWakeBodyContents(t *testing.T) {
 	body := synthesisWakeBody("xo", "/home/operator/go/bin/flotilla", "/r/flotilla.json", []string{"backend", "data"}, []string{"xo-2"}, "")
 
-	for _, want := range []string{"backend", "data", "xo-2", "visibility-synthesis", "idle", "result --roster", "SKIP an unreadable"} {
+	for _, want := range []string{"backend", "data", "xo-2", "visibility-synthesis", "idle", "result --roster", "synthesis publish --from xo", "SKIP an unreadable"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("synthesis wake body missing %q:\n%s", want, body)
 		}
@@ -86,6 +86,10 @@ func TestSynthesisWakeBodyInjectsDaemonRosterPath(t *testing.T) {
 	want := binPath + " result --roster " + rosterPath + " <name>"
 	if !strings.Contains(body, want) {
 		t.Errorf("wake body must inject the daemon's roster path in the read command\nwant substring: %q\ngot:\n%s", want, body)
+	}
+	publishWant := binPath + " synthesis publish --from xo --roster " + rosterPath
+	if !strings.Contains(body, publishWant) {
+		t.Errorf("wake body must inject the daemon's roster path in the publish command\nwant substring: %q\ngot:\n%s", publishWant, body)
 	}
 }
 

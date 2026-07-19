@@ -104,11 +104,17 @@ func synthesisWakeBody(agent, binPath, rosterPath string, readSet, postChannels 
 	}
 
 	if len(postChannels) > 0 {
-		b.WriteString("POST your synthesis into the channel you own: ")
+		b.WriteString("PUBLISH the completed synthesis ONCE with `")
+		b.WriteString(binPath)
+		b.WriteString(" synthesis publish --from ")
+		b.WriteString(agent)
+		b.WriteString(" --roster ")
+		b.WriteString(rosterPath)
+		b.WriteString(" --file <path>`; the command fans out exactly once to every unique channel you own: ")
 		b.WriteString(strings.Join(postChannels, ", "))
-		b.WriteString(" (via its webhook).\n")
+		b.WriteString(". Use --file - with piped stdin if you do not write a temporary file. Do not call `flotilla notify` once per channel.\n")
 	} else {
-		b.WriteString("POST: (no owned channel resolved — surface this, do not drop the synthesis)\n")
+		b.WriteString("PUBLISH: (no owned channel resolved — surface this, do not drop the synthesis)\n")
 	}
 
 	b.WriteString("CONTRACT: Tier 2 (an XO) = a curated DOMAIN rollup grouped by subordinate — the material " +
