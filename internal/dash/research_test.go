@@ -155,13 +155,13 @@ func TestResearchPageAndDashboardNavMarkers(t *testing.T) {
 		t.Error("dashboard must expose a Research navigation link")
 	}
 	page := doGet(t, srv, "/research").Body.String()
-	for _, marker := range []string{"Private-LAN library", "Waiting on you", `id="research-reader"`, `/static/research.js`} {
+	for _, marker := range []string{"Private-LAN library", "Waiting on you", `id="research-reader"`, `id="research-decision-more"`, `id="research-library-more"`, `id="research-toc-count"`, `/static/research.js`} {
 		if !strings.Contains(page, marker) {
 			t.Errorf("research page missing %q", marker)
 		}
 	}
 	js := doGet(t, srv, "/static/research.js").Body.String()
-	for _, marker := range []string{"function esc(value)", "renderMarkdown", "documentWithoutDuplicateTitle", "research-decision-strip"} {
+	for _, marker := range []string{"function esc(value)", "renderMarkdown", "documentWithoutDuplicateTitle", "research-decision-strip", "collectionWindow = 6", "tocRestoreY"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("research renderer missing %q", marker)
 		}

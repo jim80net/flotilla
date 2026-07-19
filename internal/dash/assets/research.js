@@ -138,7 +138,7 @@
     return lines.join("\n");
   }
 
-  var entries = [];
+  var entries = [], collectionWindow = 6, decisionVisible = collectionWindow, libraryVisible = collectionWindow;
   function card(entry) {
     var link = document.createElement("a");
     link.className = "research-card" + (entry.decision ? " is-decision" : "");
@@ -154,17 +154,24 @@
     link.addEventListener("click", function (event) { event.preventDefault(); openDocument(entry.id, true); });
     return link;
   }
+  function renderCollection(listID, moreID, collection, visible) {
+    var mounted = collection.slice(0, visible), remaining = Math.max(0, collection.length - mounted.length);
+    el(listID).replaceChildren.apply(el(listID), mounted.map(card));
+    var more = el(moreID);
+    more.hidden = remaining === 0;
+    more.textContent = remaining ? "Show " + Math.min(collectionWindow, remaining) + " more · " + remaining + " remaining" : "";
+  }
   function renderIndex() {
     var decisions = entries.filter(function (entry) { return entry.decision; });
     var library = entries.filter(function (entry) { return !entry.decision; });
     el("research-status").hidden = true;
     el("research-all").hidden = library.length === 0;
     el("research-count").textContent = library.length + (library.length === 1 ? " document" : " documents");
-    el("research-list").replaceChildren.apply(el("research-list"), library.map(card));
+    renderCollection("research-list", "research-library-more", library, libraryVisible);
     if (decisions.length) {
       el("research-decisions").hidden = false;
       el("research-decision-count").textContent = decisions.length + " waiting";
-      el("research-decision-list").replaceChildren.apply(el("research-decision-list"), decisions.map(card));
+      renderCollection("research-decision-list", "research-decision-more", decisions, decisionVisible);
     }
     if (!entries.length) {
       el("research-status").hidden = false;
@@ -178,7 +185,10 @@
       var link = document.createElement("a"); link.href = "#" + item.id; link.textContent = item.text;
       li.appendChild(link); list.appendChild(li);
     });
-    el("research-toc").hidden = items.length < 2;
+    var toc = el("research-toc");
+    el("research-toc-count").textContent = items.length + (items.length === 1 ? " section" : " sections");
+    toc.hidden = items.length < 2;
+    toc.open = items.length >= 2 && window.matchMedia("(min-width: 761px)").matches;
   }
   function renderDocument(doc) {
     var rendered = renderMarkdown(documentWithoutDuplicateTitle(doc.markdown, doc.title));
@@ -219,6 +229,14 @@
   }
 
   el("research-back").addEventListener("click", function () { showLibrary(true); });
+  el("research-decision-more").addEventListener("click", function () { decisionVisible += collectionWindow; renderIndex(); });
+  el("research-library-more").addEventListener("click", function () { libraryVisible += collectionWindow; renderIndex(); });
+  var tocRestoreY = 0;
+  el("research-toc").querySelector("summary").addEventListener("click", function () {
+    var toc = el("research-toc");
+    if (!toc.open) tocRestoreY = window.scrollY;
+    else window.setTimeout(function () { window.scrollTo(0, tocRestoreY); }, 0);
+  });
   window.addEventListener("popstate", function () { var id = pathID(); if (id) openDocument(id, false); else showLibrary(false); });
   fetchJSON("/api/research").then(function (body) {
     entries = Array.isArray(body.research) ? body.research : [];

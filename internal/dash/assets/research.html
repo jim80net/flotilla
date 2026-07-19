@@ -39,11 +39,13 @@
           <span id="research-decision-count" class="research-count"></span>
         </div>
         <div id="research-decision-list" class="research-card-list"></div>
+        <button id="research-decision-more" class="research-show-more" type="button" hidden></button>
       </section>
 
       <section id="research-all" class="research-shelf" aria-labelledby="research-all-title" hidden>
         <div class="research-shelf-heading"><h2 id="research-all-title">Library</h2><span id="research-count" class="research-count"></span></div>
         <div id="research-list" class="research-card-list"></div>
+        <button id="research-library-more" class="research-show-more" type="button" hidden></button>
       </section>
     </aside>
 
@@ -65,9 +67,10 @@
           <h1 id="research-title"></h1>
           <code id="research-path"></code>
         </header>
-        <nav id="research-toc" class="research-toc" aria-label="On this page" hidden>
-          <p>On this page</p><ol id="research-toc-list"></ol>
-        </nav>
+        <details id="research-toc" class="research-toc" hidden>
+          <summary><span>On this page</span><span id="research-toc-count" class="research-toc-count"></span></summary>
+          <ol id="research-toc-list"></ol>
+        </details>
         <div id="research-body" class="research-markdown"></div>
       </div>
     </article>
