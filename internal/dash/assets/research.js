@@ -1,0 +1,231 @@
+/* Private-LAN Research library. Markdown is escaped before a deliberately small,
+ * fixed render layer is applied; authored HTML never enters the DOM as markup. */
+(function () {
+  "use strict";
+
+  function el(id) { return document.getElementById(id); }
+  function esc(value) {
+    return String(value == null ? "" : value)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  function inline(raw) {
+    var safe = esc(raw);
+    return safe
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+      .replace(/\[([^\]]+)\]\((#[a-zA-Z0-9_-]+)\)/g, '<a href="$2">$1</a>');
+  }
+  function slug(text, used) {
+    var base = String(text).toLowerCase().replace(/<[^>]*>/g, "")
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "section";
+    var candidate = base, n = 2;
+    while (used[candidate]) { candidate = base + "-" + n; n++; }
+    used[candidate] = true;
+    return candidate;
+  }
+  function splitTableRow(line) {
+    return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(function (cell) { return cell.trim(); });
+  }
+  function isTableDelimiter(line) {
+    var cells = splitTableRow(line);
+    return line.indexOf("|") >= 0 && cells.length > 0 && cells.every(function (cell) { return /^:?-{3,}:?$/.test(cell); });
+  }
+  function renderTable(header, rows) {
+    function row(cells, tag) {
+      return "<tr>" + cells.map(function (cell) { return "<" + tag + ">" + inline(cell) + "</" + tag + ">"; }).join("") + "</tr>";
+    }
+    return '<div class="research-table-wrap"><table><thead>' + row(header, "th") + "</thead><tbody>" +
+      rows.map(function (cells) { return row(cells, "td"); }).join("") + "</tbody></table></div>";
+  }
+
+  function renderMarkdown(markdown) {
+    var lines = String(markdown || "").replace(/\r\n/g, "\n").split("\n");
+    var html = [], toc = [], used = {}, paragraph = [], list = null, quote = [], code = null;
+    function flushParagraph() {
+      if (paragraph.length) { html.push("<p>" + inline(paragraph.join(" ")) + "</p>"); paragraph = []; }
+    }
+    function flushList() {
+      if (list) { html.push("<" + list.tag + ">" + list.items.map(function (item) { return "<li>" + inline(item) + "</li>"; }).join("") + "</" + list.tag + ">"); list = null; }
+    }
+    function flushQuote() {
+      if (quote.length) { html.push("<blockquote>" + quote.map(function (line) { return "<p>" + inline(line) + "</p>"; }).join("") + "</blockquote>"); quote = []; }
+    }
+    function flushFlow() { flushParagraph(); flushList(); flushQuote(); }
+
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i], trimmed = line.trim();
+      var fence = /^```\s*([a-zA-Z0-9_-]*)/.exec(trimmed);
+      if (fence) {
+        if (code) {
+          html.push('<pre><code' + (code.lang ? ' data-language="' + esc(code.lang) + '"' : "") + ">" + esc(code.lines.join("\n")) + "</code></pre>");
+          code = null;
+        } else {
+          flushFlow(); code = { lang: fence[1] || "", lines: [] };
+        }
+        continue;
+      }
+      if (code) { code.lines.push(line); continue; }
+      if (trimmed.indexOf("|") >= 0 && i + 1 < lines.length && isTableDelimiter(lines[i + 1])) {
+        flushFlow();
+        var header = splitTableRow(line), rows = [];
+        i += 2;
+        while (i < lines.length && lines[i].trim() && lines[i].indexOf("|") >= 0) { rows.push(splitTableRow(lines[i])); i++; }
+        i--;
+        html.push(renderTable(header, rows));
+        continue;
+      }
+      var heading = /^(#{1,4})\s+(.+)$/.exec(trimmed);
+      if (heading) {
+        flushFlow();
+        var level = heading[1].length, text = heading[2].trim(), id = slug(text, used);
+        html.push("<h" + level + ' id="' + id + '">' + inline(text) + "</h" + level + ">");
+        if (level >= 2) toc.push({ level: level, text: text.replace(/[*_`]/g, ""), id: id });
+        continue;
+      }
+      if (/^(-{3,}|\*{3,})$/.test(trimmed)) { flushFlow(); html.push("<hr>"); continue; }
+      var unordered = /^[-*]\s+(.+)$/.exec(trimmed), ordered = /^\d+[.)]\s+(.+)$/.exec(trimmed);
+      if (unordered || ordered) {
+        flushParagraph(); flushQuote();
+        var tag = unordered ? "ul" : "ol";
+        if (!list || list.tag !== tag) { flushList(); list = { tag: tag, items: [] }; }
+        list.items.push((unordered || ordered)[1]);
+        continue;
+      }
+      var quoted = /^>\s?(.*)$/.exec(trimmed);
+      if (quoted) { flushParagraph(); flushList(); quote.push(quoted[1]); continue; }
+      if (!trimmed) { flushFlow(); continue; }
+      flushList(); flushQuote(); paragraph.push(trimmed);
+    }
+    if (code) html.push("<pre><code>" + esc(code.lines.join("\n")) + "</code></pre>");
+    flushFlow();
+    return { html: html.join(""), toc: toc };
+  }
+
+  function apiPath(id) {
+    return "/api/research/" + id.split("/").map(encodeURIComponent).join("/");
+  }
+  function pagePath(id) {
+    return "/research/" + id.split("/").map(encodeURIComponent).join("/");
+  }
+  function pathID() {
+    var prefix = "/research/";
+    if (location.pathname.indexOf(prefix) !== 0) return "";
+    try { return location.pathname.slice(prefix.length).split("/").map(decodeURIComponent).join("/"); }
+    catch (_) { return ""; }
+  }
+  function fetchJSON(url) {
+    return fetch(url, { cache: "no-store" }).then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (body) {
+        if (!response.ok) throw new Error(body.error || (url + " → " + response.status));
+        return body;
+      });
+    });
+  }
+  function statusLabel(status) {
+    return ({ "design-only": "Design only", "awaiting-auth": "Awaiting authorization", "operator-review": "Operator review", research: "Research" })[status] || status;
+  }
+  function formatDate(value) {
+    var date = new Date(value);
+    return isNaN(date.getTime()) ? "" : date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  }
+  function documentWithoutDuplicateTitle(markdown, title) {
+    var lines = String(markdown || "").split("\n"), first = -1;
+    for (var i = 0; i < lines.length; i++) { if (lines[i].trim()) { first = i; break; } }
+    if (first >= 0 && lines[first].replace(/^#\s+/, "").trim() === title) lines.splice(first, 1);
+    return lines.join("\n");
+  }
+
+  var entries = [];
+  function card(entry) {
+    var link = document.createElement("a");
+    link.className = "research-card" + (entry.decision ? " is-decision" : "");
+    link.href = pagePath(entry.id);
+    link.dataset.researchId = entry.id;
+    var top = document.createElement("span"); top.className = "research-card-top";
+    var badge = document.createElement("span"); badge.className = "research-badge"; badge.textContent = statusLabel(entry.status);
+    var date = document.createElement("time"); date.textContent = formatDate(entry.updated_at);
+    top.appendChild(badge); top.appendChild(date);
+    var title = document.createElement("strong"); title.textContent = entry.title;
+    link.appendChild(top); link.appendChild(title);
+    if (entry.summary) { var summary = document.createElement("span"); summary.className = "research-card-summary"; summary.textContent = entry.summary; link.appendChild(summary); }
+    link.addEventListener("click", function (event) { event.preventDefault(); openDocument(entry.id, true); });
+    return link;
+  }
+  function renderIndex() {
+    var decisions = entries.filter(function (entry) { return entry.decision; });
+    var library = entries.filter(function (entry) { return !entry.decision; });
+    el("research-status").hidden = true;
+    el("research-all").hidden = library.length === 0;
+    el("research-count").textContent = library.length + (library.length === 1 ? " document" : " documents");
+    el("research-list").replaceChildren.apply(el("research-list"), library.map(card));
+    if (decisions.length) {
+      el("research-decisions").hidden = false;
+      el("research-decision-count").textContent = decisions.length + " waiting";
+      el("research-decision-list").replaceChildren.apply(el("research-decision-list"), decisions.map(card));
+    }
+    if (!entries.length) {
+      el("research-status").hidden = false;
+      el("research-status").textContent = "No research documents are available yet.";
+    }
+  }
+  function renderTOC(items) {
+    var list = el("research-toc-list"); list.replaceChildren();
+    items.forEach(function (item) {
+      var li = document.createElement("li"); li.className = "toc-level-" + item.level;
+      var link = document.createElement("a"); link.href = "#" + item.id; link.textContent = item.text;
+      li.appendChild(link); list.appendChild(li);
+    });
+    el("research-toc").hidden = items.length < 2;
+  }
+  function renderDocument(doc) {
+    var rendered = renderMarkdown(documentWithoutDuplicateTitle(doc.markdown, doc.title));
+    el("research-reader-empty").hidden = true;
+    el("research-document").hidden = false;
+    el("research-title").textContent = doc.title;
+    el("research-path").textContent = doc.id;
+    el("research-document-status").textContent = statusLabel(doc.status);
+    el("research-updated").textContent = formatDate(doc.updated_at);
+    el("research-updated").dateTime = doc.updated_at;
+    el("research-body").innerHTML = rendered.html;
+    renderTOC(rendered.toc);
+    el("research-decision-strip").hidden = !doc.decision;
+    var target = rendered.toc.find(function (item) { return /checklist|operator go|decision|recommendation/i.test(item.text); });
+    el("research-decision-jump").hidden = !target;
+    if (target) el("research-decision-jump").href = "#" + target.id;
+    document.body.classList.add("research-has-document");
+    document.title = doc.title + " — flotilla research";
+    window.scrollTo(0, 0);
+  }
+  function showLibrary(push) {
+    document.body.classList.remove("research-has-document");
+    if (push) history.pushState({}, "", "/research");
+    document.title = "flotilla — research";
+  }
+  function openDocument(id, push) {
+    el("research-reader").classList.add("is-loading");
+    fetchJSON(apiPath(id)).then(function (doc) {
+      renderDocument(doc);
+      if (push) history.pushState({ research: id }, "", pagePath(id));
+    }).catch(function (error) {
+      el("research-reader-empty").hidden = false;
+      el("research-document").hidden = true;
+      el("research-reader-empty").querySelector("h2").textContent = "Document unavailable";
+      el("research-reader-empty").querySelector("p:last-child").textContent = error.message;
+      document.body.classList.add("research-has-document");
+    }).finally(function () { el("research-reader").classList.remove("is-loading"); });
+  }
+
+  el("research-back").addEventListener("click", function () { showLibrary(true); });
+  window.addEventListener("popstate", function () { var id = pathID(); if (id) openDocument(id, false); else showLibrary(false); });
+  fetchJSON("/api/research").then(function (body) {
+    entries = Array.isArray(body.research) ? body.research : [];
+    renderIndex();
+    var id = pathID(); if (id) openDocument(id, false);
+  }).catch(function (error) {
+    el("research-status").textContent = error.message;
+    el("research-status").classList.add("error");
+  });
+}());
