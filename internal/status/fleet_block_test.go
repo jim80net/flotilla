@@ -32,7 +32,7 @@ func TestCompressBlock_FromFixtureJSON(t *testing.T) {
 	}
 	for _, want := range []string{
 		"as of 2026-06-17T17:26:31Z",
-		"utilization:2/6 (33.3%) / idle:2 (empty-queue:2 · has-queue:0) / blocked:1 · accepts-dispatch:5 · awaiting-authority:1",
+		"2 of 6 seats working · 1 blocked · 1 held for a decision",
 		"working: backend, data",
 		"blocked: ops",
 		"awaiting: frontend",
@@ -45,9 +45,14 @@ func TestCompressBlock_FromFixtureJSON(t *testing.T) {
 	if strings.Contains(got, "xo-adj") || strings.Contains(got, "working: xo") {
 		t.Errorf("self/adj noise leaked:\n%s", got)
 	}
-	// Idle seats are summary-only (no idle: list line).
+	// Idle seats are omitted from the operator summary.
 	if strings.Contains(got, "\nidle:") {
 		t.Errorf("idle list should be omitted (histogram only):\n%s", got)
+	}
+	for _, jargon := range []string{"utilization:", "empty-queue:", "accepts-dispatch:", "awaiting-authority:", "utilization wall"} {
+		if strings.Contains(strings.ToLower(got), jargon) {
+			t.Errorf("compressed block contains operator jargon %q:\n%s", jargon, got)
+		}
 	}
 }
 

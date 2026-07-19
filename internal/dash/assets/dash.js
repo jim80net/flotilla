@@ -127,21 +127,25 @@
   function utilizationText(status) {
     var u = (status && status.utilization) || {};
     if (!Number.isFinite(Number(u.total))) return "Fleet utilization unavailable";
-    var queue = "empty-queue:" + Number(u.idle_empty_queue || 0) + " · has-queue:" + Number(u.idle_has_queue || 0);
-    if (Number(u.idle_queue_unknown || 0) > 0) queue += " · queue-unknown:" + Number(u.idle_queue_unknown);
-    var pct = Number(u.utilization_percent || 0).toFixed(1);
-    return "utilization:" + Number(u.working || 0) + "/" + Number(u.total || 0) + " (" + pct + "%) / idle:" +
-      Number(u.idle || 0) + " (" + queue + ") / blocked:" + Number(u.blocked || 0) + " · accepts-dispatch:" +
-      Number(u.accepts_dispatch || 0) + " · awaiting-authority:" + Number(u.awaiting_authority || 0);
+    var total = Number(u.total || 0);
+    var text = Number(u.working || 0) + " of " + total + " " + (total === 1 ? "seat" : "seats") + " working";
+    if (Number(u.blocked || 0) > 0) text += " · " + Number(u.blocked) + " blocked";
+    if (Number(u.awaiting_authority || 0) > 0) text += " · " + Number(u.awaiting_authority) + " held for a decision";
+    return text;
+  }
+
+  function utilizationRead(status) {
+    return status && status.utilization && status.utilization.utilization_wall
+      ? "Almost no one is working — send work or pull the next queue item."
+      : "";
   }
 
   function renderUtilization(status) {
     var target = el("fleet-utilization");
     if (target) {
       var text = utilizationText(status);
-      if (status && status.utilization && status.utilization.utilization_wall) {
-        text += " · utilization wall: dispatch, pull, or park";
-      }
+      var read = utilizationRead(status);
+      if (read) text += " · " + read;
       target.textContent = text;
     }
   }
@@ -154,11 +158,13 @@
     lastSwarmKey = key;
     var rate = el("live-swarm-rate"), items = el("live-swarm-items");
     var u = (status && status.utilization) || {};
-    if (rate) rate.textContent = Number(u.working || 0) + "/" + Number(u.total || 0) + " active · " +
-      Number(u.utilization_percent || 0).toFixed(1) + "%";
+    if (rate) {
+      var total = Number(u.total || 0);
+      rate.textContent = Number(u.working || 0) + " of " + total + " " + (total === 1 ? "seat" : "seats") + " working";
+    }
     if (!items) return;
     if (!agents.length) {
-      items.innerHTML = '<span class="live-swarm-empty">No seats working — utilization wall</span>';
+      items.innerHTML = '<span class="live-swarm-empty">No seats working — send work or pull the next queue item.</span>';
       return;
     }
     items.innerHTML = agents.map(function (a) {
