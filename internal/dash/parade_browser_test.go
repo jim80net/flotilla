@@ -121,10 +121,11 @@ with sync_playwright() as p:
 	}
 }
 
-// TestParadeUnreadReplyRendered793 proves the operator-visible lifecycle: an
-// agent reply arriving after page load glows without a hard refresh, and opening
-// the thread clears both thread and navigation indicators.
-func TestParadeUnreadReplyRendered793(t *testing.T) {
+// TestParadeUnreadNavigationRendered812 proves the operator-visible lifecycle:
+// an agent reply arriving after page load glows without a hard refresh, either
+// nav bar jumps to the deterministic unread thread, and only a successfully
+// opened thread clears its indicators.
+func TestParadeUnreadNavigationRendered812(t *testing.T) {
 	python := os.Getenv("FLOTILLA_PLAYWRIGHT_PYTHON")
 	if python == "" {
 		t.Skip("set FLOTILLA_PLAYWRIGHT_PYTHON to run rendered Parade regression")
@@ -138,7 +139,7 @@ func TestParadeUnreadReplyRendered793(t *testing.T) {
 	if err := os.MkdirAll(paradeDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(paradeDir, "slides.md"), []byte("Alpha · A visible outcome\n\nThe result is now clear."), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(paradeDir, "slides.md"), []byte("Alpha · A visible outcome\n\nThe result is now clear.\n\n---\n\nBeta · A second outcome\n\nThe follow-up is also clear."), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	conversationPath := filepath.Join(paradeDir, "conversations.json")
@@ -178,8 +179,15 @@ with sync_playwright() as p:
             doc = json.load(handle)
         doc["slides"]["0"]["messages"].append({
             "id": "agent-1", "ts": "2026-07-18T14:01:00Z", "author": "alpha-desk",
-            "kind": "note", "text": "The reply is visible on this page."
+            "kind": "note", "text": "The first unread reply is visible on this page."
         })
+        doc["slides"]["1"] = {
+            "title": "Beta · A second outcome",
+            "messages": [{
+                "id": "agent-2", "ts": "2026-07-18T14:02:00Z", "author": "beta-desk",
+                "kind": "note", "text": "The second unread reply is visible on this page."
+            }]
+        }
         tmp = conversation_path + ".browser.tmp"
         with open(tmp, "w", encoding="utf-8") as handle:
             json.dump(doc, handle)
@@ -188,15 +196,63 @@ with sync_playwright() as p:
         expect(conversation.locator(".pd-unread-dot")).to_be_visible(timeout=5000)
         expect(page.locator("#pd-global-unread")).to_be_visible()
         expect(conversation.locator(".pd-convo-count")).to_have_text("2")
+        deck_jump = page.locator("#pd-unread-jump")
+        expect(deck_jump).to_be_visible()
+        expect(deck_jump).to_have_attribute("aria-label", "Open unread parade reply from 2026-07-18, slide 1")
+
+        # Move away from the deterministic first target, then enter the archive
+        # chrome. Both unread threads must remain reachable from either nav bar.
+        page.locator("#pd-next").click()
+        expect(page.locator("#pd-counter")).to_have_text("2 / 2")
+        expect(page.locator("#pd-conversation .pd-unread-dot")).to_be_visible()
+        page.locator("#pd-close").click()
+        list_jump = page.locator("#pd-list-unread-jump")
+        expect(list_jump).to_be_visible()
+        expect(list_jump).to_have_attribute("aria-label", "Open unread parade reply from 2026-07-18, slide 1")
+        expect(page.locator(".pd-listcard .pd-unread-dot")).to_be_visible()
         if evidence_dir:
             page.screenshot(path=os.path.join(evidence_dir, "parade-unread-390.png"), full_page=True)
 
-        conversation.locator("summary").click()
-        expect(conversation.locator(".pd-convo-thread")).to_be_visible()
+        # Newest parade + lowest slide index wins. The jump opens the actual
+        # conversation before clearing that thread's read marker.
+        list_jump.click()
+        expect(page.locator("#pd-counter")).to_have_text("1 / 2")
+        conversation = page.locator("#pd-conversation")
+        expect(conversation).to_have_attribute("open", "")
+        expect(conversation.locator(".pd-convo-thread")).to_contain_text("first unread reply")
         expect(conversation.locator(".pd-unread-dot")).to_have_count(0)
+        expect(deck_jump).to_be_visible()
+        expect(deck_jump).to_have_attribute("aria-label", "Open unread parade reply from 2026-07-18, slide 2")
+
+        # The second activation advances to the remaining thread. Only after it
+        # is open do all global/list/deck glows clear.
+        deck_jump.click()
+        expect(page.locator("#pd-counter")).to_have_text("2 / 2")
+        conversation = page.locator("#pd-conversation")
+        expect(conversation).to_have_attribute("open", "")
+        expect(conversation.locator(".pd-convo-thread")).to_contain_text("second unread reply")
+        expect(deck_jump).to_be_hidden()
         expect(page.locator("#pd-global-unread")).to_be_hidden()
         page.locator("#pd-close").click()
+        expect(page.locator("#pd-list-unread-jump")).to_be_hidden()
         expect(page.locator(".pd-listcard .pd-unread-dot")).to_have_count(0)
+
+        # A thread-body failure may open honest error chrome, but it must not
+        # advance the local read cursor or clear either navigation glow.
+        failed = browser.new_page(viewport={"width": 390, "height": 844})
+        failed.set_default_timeout(8000)
+        failed.add_init_script("window.__FLOTILLA_PARADE_POLL_MS = 100")
+        failed.route("**/api/parades/2026-07-18/conversations", lambda route: route.fulfill(
+            status=503, content_type="application/json", body='{"error":"synthetic unavailable"}'))
+        failed.goto(url + "/parade", wait_until="domcontentloaded")
+        failed_jump = failed.locator("#pd-unread-jump")
+        expect(failed_jump).to_be_visible(timeout=5000)
+        failed_jump.click()
+        expect(failed.locator("#pd-conversation")).to_have_attribute("open", "")
+        expect(failed.locator(".pd-convo-error")).to_contain_text("unavailable")
+        expect(failed_jump).to_be_visible()
+        expect(failed.locator("#pd-global-unread")).to_be_visible()
+        failed.close()
     finally:
         browser.close()
 `

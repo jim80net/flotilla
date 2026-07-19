@@ -19,6 +19,7 @@
     <div class="pd-deck-bar">
       <span id="pd-deck-date" class="pd-deck-date"></span>
       <span id="pd-counter" class="pd-counter" aria-live="polite"></span>
+      <button id="pd-unread-jump" class="pd-unread-jump" type="button" aria-label="Open next unread parade conversation" hidden><span aria-hidden="true">↪</span> unread <span class="pd-unread-dot" aria-hidden="true"></span></button>
       <button id="pd-close" class="pd-close" type="button" aria-label="All parades (Escape)">▦ all parades <span id="pd-global-unread" class="pd-unread-dot" aria-label="Unread parade replies" hidden></span></button>
     </div>
     <div id="pd-stage" class="pd-stage">
@@ -45,7 +46,7 @@
         </svg>
         <div class="brand-text"><span class="brand-name">flotilla</span><span class="brand-dash">parades</span></div>
       </div>
-      <nav class="parade-topnav" aria-label="Site"><a class="pd-topback" href="/">← Dashboard</a></nav>
+      <nav class="parade-topnav" aria-label="Site"><a class="pd-topback" href="/">← Dashboard</a><button id="pd-list-unread-jump" class="pd-unread-jump" type="button" aria-label="Open next unread parade conversation" hidden><span aria-hidden="true">↪</span> unread <span class="pd-unread-dot" aria-hidden="true"></span></button></nav>
     </header>
     <main class="parade-wrap">
       <p class="parade-intro muted">Every parade, newest first — the fleet's progress over time. Tap one to open its deck.</p>
