@@ -1772,6 +1772,9 @@ func TestResolvePaths(t *testing.T) {
 	if cfg.ParadesPath != filepath.Join(dir, "parades") {
 		t.Errorf("parades path = %q (should default to <roster-dir>/parades)", cfg.ParadesPath)
 	}
+	if cfg.ResearchPath != filepath.Join(dir, "research") {
+		t.Errorf("research path = %q (should default to <roster-dir>/research)", cfg.ResearchPath)
+	}
 	if cfg.LedgerPath != filepath.Join(dir, "context-ledger.md") {
 		t.Errorf("ledger path = %q (should inherit roster CosLedger)", cfg.LedgerPath)
 	}
@@ -1796,6 +1799,9 @@ func TestResolvePaths(t *testing.T) {
 	}
 	if strings.Contains(cfg2.ParadesPath, filepath.Join("state", "state")) {
 		t.Errorf("parades path must not double state/: %q", cfg2.ParadesPath)
+	}
+	if cfg2.ResearchPath != filepath.Join(stateDir, "research") {
+		t.Errorf("state roster research path = %q, want %q", cfg2.ResearchPath, filepath.Join(stateDir, "research"))
 	}
 }
 

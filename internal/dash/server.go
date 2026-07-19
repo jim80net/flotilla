@@ -37,6 +37,7 @@ type Config struct {
 	GoalsYAMLPath    string // goals yaml source compiled on load (default <roster-dir>/fleet-goals.yaml)
 	SessionMirrorDir string // per-agent session-mirror ledgers (default <roster-dir>/session-mirror)
 	ParadesPath      string // parade archive: <dir>/<YYYY-MM-DD>/{report.md,assets/} (default <roster-dir>/parades)
+	ResearchPath     string // operator research markdown library (default <roster-dir>/research)
 	DoneLogPath      string // goals done-history JSONL the server appends + reads (#418; default <roster-dir>/goals-done.jsonl)
 	Bind             string // listen address (default 127.0.0.1:8787)
 	Repo             string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
@@ -208,8 +209,8 @@ func (s *Server) Run(ctx context.Context) error {
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 
-	fmt.Fprintf(os.Stderr, "flotilla dash: serving on http://%s (reading %s; parades %s)\n",
-		s.cfg.Bind, s.cfg.SnapshotPath, s.cfg.ParadesPath)
+	fmt.Fprintf(os.Stderr, "flotilla dash: serving on http://%s (reading %s; parades %s; research %s)\n",
+		s.cfg.Bind, s.cfg.SnapshotPath, s.cfg.ParadesPath, s.cfg.ResearchPath)
 	select {
 	case <-ctx.Done():
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -244,6 +245,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/parades/{date}/slides/{index}/messages", s.requireWrite(s.handleParadeMessage))
 	s.mux.HandleFunc("/parade", s.handleParadePage)
 	s.mux.HandleFunc("/parade-assets/{date}/{file}", s.handleParadeAsset)
+	s.mux.HandleFunc("GET /api/research", s.handleResearchIndex)
+	s.mux.HandleFunc("GET /api/research/{id...}", s.handleResearchDocument)
+	s.mux.HandleFunc("GET /research", s.handleResearchPage)
+	s.mux.HandleFunc("GET /research/{id...}", s.handleResearchPage)
 	s.mux.HandleFunc("/events", s.handleEvents)
 	// Static assets are served no-cache so a deploy's new goals.js / dash.css / dash.js is
 	// picked up on the next load — without this the browser holds stale JS/CSS and the
@@ -787,6 +792,9 @@ func ResolvePaths(cfg Config, rc *roster.Config) Config {
 		// Sibling of the roster file — when the roster lives in state/ (the common
 		// deploy shape), <roster-dir>/parades is state/parades, NOT state/state/parades (#376).
 		cfg.ParadesPath = filepath.Join(dir, "parades")
+	}
+	if cfg.ResearchPath == "" {
+		cfg.ResearchPath = filepath.Join(dir, "research")
 	}
 	if cfg.DoneLogPath == "" {
 		cfg.DoneLogPath = filepath.Join(dir, "goals-done.jsonl") // #418 done-history, roster-adjacent
