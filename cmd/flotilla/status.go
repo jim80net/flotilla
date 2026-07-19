@@ -175,9 +175,9 @@ func writeStatus(out io.Writer, cfg *roster.Config, xo, snapshotPath, ackPath st
 		fmt.Fprintln(out, "  (run `flotilla watch` with change_detector: true to populate it; desks shown as unknown)")
 	}
 	utilSummary := buildStatusJSON(cfg, xo, "", snap, loopByAgent).Utilization
-	fmt.Fprintf(out, "Utilization — %s\n", utilization.Line(utilSummary))
+	fmt.Fprintf(out, "Fleet — %s\n", utilization.Line(utilSummary))
 	if read := utilization.WallRead(utilSummary); read != "" {
-		fmt.Fprintf(out, "Read — %s\n", read)
+		fmt.Fprintf(out, "Next — %s\n", read)
 	}
 	fmt.Fprintln(out)
 

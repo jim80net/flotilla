@@ -50,9 +50,8 @@ func QueueState(known bool, unblocked int) string {
 	return QueueEmpty
 }
 
-// Build derives the shared summary. AcceptsDispatch preserves the existing
-// operator-facing available signal under a more honest name; it is deliberately
-// independent from working/idle utilization and queue evidence.
+// Build derives the shared summary. The detailed queue and posture counters are
+// diagnostic wire data; Line deliberately does not expose their internal names.
 func Build(agents []Agent) Summary {
 	var out Summary
 	for _, a := range agents {
@@ -77,8 +76,8 @@ func Build(agents []Agent) Summary {
 				out.IdleQueueUnknown++
 			}
 		}
-		// Preserve the existing operator-facing availability signal, but name it
-		// honestly: it accepts a dispatch; it is not proof of utilization.
+		// Preserve availability as diagnostic capacity evidence. It is not proof
+		// of utilization and is not rendered by Line.
 		if posture == "available" {
 			out.AcceptsDispatch++
 		}
@@ -96,23 +95,28 @@ func Build(agents []Agent) Summary {
 	return out
 }
 
-// Line renders the operator-first metric line. It leads with utilization and
-// demotes accepts-dispatch capacity to the final, secondary clause.
+// Line renders one human-readable operator metric. Structured queue and posture
+// counters remain available in Summary for diagnostics, but the default prose
+// does not make the operator decode internal state-machine vocabulary.
 func Line(s Summary) string {
-	queue := fmt.Sprintf("empty-queue:%d · has-queue:%d", s.IdleEmptyQueue, s.IdleHasQueue)
-	if s.IdleQueueUnknown > 0 {
-		queue += fmt.Sprintf(" · queue-unknown:%d", s.IdleQueueUnknown)
+	seatWord := "seats"
+	if s.Total == 1 {
+		seatWord = "seat"
 	}
-	return fmt.Sprintf("utilization:%d/%d (%.1f%%) / idle:%d (%s) / blocked:%d · accepts-dispatch:%d · awaiting-authority:%d",
-		s.Working, s.Total, s.UtilizationPercent, s.Idle, queue, s.Blocked, s.AcceptsDispatch, s.AwaitingAuthority)
+	line := fmt.Sprintf("%d of %d %s working", s.Working, s.Total, seatWord)
+	if s.Blocked > 0 {
+		line += fmt.Sprintf(" · %d blocked", s.Blocked)
+	}
+	if s.AwaitingAuthority > 0 {
+		line += fmt.Sprintf(" · %d held for a decision", s.AwaitingAuthority)
+	}
+	return line
 }
 
-// WallRead is the explicit diagnosis shown when almost the entire roster is
-// idle. It directs the product response toward pull/dispatch/park rather than
-// celebrating nominal availability.
+// WallRead gives a plain next action when almost the entire roster is idle.
 func WallRead(s Summary) string {
 	if !s.UtilizationWall {
 		return ""
 	}
-	return "utilization wall — most seats idle; empty queues or weak pull require dispatch, pull, or park"
+	return "Almost no one is working — send work or pull the next queue item."
 }
