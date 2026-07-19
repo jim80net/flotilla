@@ -81,6 +81,7 @@ func trackerServer(t *testing.T, f *fakeTracker) *Server {
 	srv, _ := newTestServer(t, singleFleetRoster, time.Now())
 	srv.tracker = f
 	srv.cfg.Repo = "jim80net/flotilla"
+	srv.ledgerTrackers = map[string]tracker.Tracker{"jim80net/flotilla": f}
 	return srv
 }
 

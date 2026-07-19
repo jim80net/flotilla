@@ -8,7 +8,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/dash/tracker"
@@ -68,32 +71,105 @@ func (s *Server) handleIssuesList(w http.ResponseWriter, r *http.Request) {
 // Bodies are fetched only so flotilla attribution trailers can be parsed; the
 // builder strips them from its list response.
 func (s *Server) handleWorkLedger(w http.ResponseWriter, r *http.Request) {
-	if s.tracker == nil {
-		writeTrackerError(w, tracker.ErrNoRepo)
-		return
-	}
 	state := r.URL.Query().Get("state")
 	if state == "" {
 		state = "all"
 	}
 	started := time.Now()
-	listStarted := time.Now()
-	issues, err := s.tracker.List(r.Context(), tracker.ListFilter{
-		State: state, Label: r.URL.Query().Get("label"), Limit: 200, IncludeBody: true,
-	})
-	listElapsed := time.Since(listStarted)
-	if err != nil {
-		w.Header().Set("Server-Timing", serverTiming("github-list", listElapsed))
-		writeTrackerError(w, err)
+	// The repository boundary is roster-authored (primary + secondary repos). The
+	// resulting multi-repo snapshot is then reused to resolve goal state, so this
+	// endpoint never pays a second GitHub read or observes mixed generations.
+	repos, omitted, unmapped := workLedgerRepos(s.cfg.Repo, GoalsDoc{}, s.roster)
+	if len(repos) == 0 {
+		writeTrackerError(w, tracker.ErrNoRepo)
 		return
 	}
+	listStarted := time.Now()
+	type result struct {
+		repo   string
+		issues []tracker.Issue
+		err    error
+	}
+	jobs := make(chan string)
+	results := make(chan result, len(repos))
+	workers := workLedgerFanoutParallel
+	if workers > len(repos) {
+		workers = len(repos)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for repo := range jobs {
+				reader, err := s.workLedgerTracker(repo)
+				if err != nil {
+					results <- result{repo: repo, err: err}
+					continue
+				}
+				issues, err := reader.List(r.Context(), tracker.ListFilter{
+					State: state, Label: r.URL.Query().Get("label"), Limit: 200, IncludeBody: true,
+				})
+				results <- result{repo: repo, issues: issues, err: err}
+			}
+		}()
+	}
+	go func() {
+		for _, repo := range repos {
+			jobs <- repo
+		}
+		close(jobs)
+		wg.Wait()
+		close(results)
+	}()
+	var sources []WorkLedgerRepoIssues
+	coverage := WorkLedgerCoverage{
+		ExpectedRepos:   len(repos) + len(omitted),
+		IndexedRepos:    []string{},
+		FailedRepos:     []WorkLedgerRepoFailure{},
+		OmittedRepos:    append([]string{}, omitted...),
+		UnmappedDomains: append([]string{}, unmapped...),
+	}
+	for got := range results {
+		if got.err != nil {
+			coverage.FailedRepos = append(coverage.FailedRepos, WorkLedgerRepoFailure{Repo: got.repo, Error: got.err.Error()})
+			continue
+		}
+		coverage.IndexedRepos = append(coverage.IndexedRepos, got.repo)
+		sources = append(sources, WorkLedgerRepoIssues{Repo: got.repo, Issues: got.issues})
+	}
+	sort.Slice(coverage.IndexedRepos, func(i, j int) bool {
+		return strings.ToLower(coverage.IndexedRepos[i]) < strings.ToLower(coverage.IndexedRepos[j])
+	})
+	sort.Slice(coverage.FailedRepos, func(i, j int) bool {
+		return strings.ToLower(coverage.FailedRepos[i].Repo) < strings.ToLower(coverage.FailedRepos[j].Repo)
+	})
+	sort.Slice(sources, func(i, j int) bool { return strings.ToLower(sources[i].Repo) < strings.ToLower(sources[j].Repo) })
+	coverage.Complete = len(coverage.FailedRepos) == 0 && len(coverage.OmittedRepos) == 0 && len(coverage.UnmappedDomains) == 0
+	listElapsed := time.Since(listStarted)
 	deriveStarted := time.Now()
-	doc := BuildWorkLedger(s.cfg.Repo, issues, s.loadGoalsFromIssues(issues), s.roster, s.now())
+	goals := s.loadGoalsFromRepoIssues(sources)
+	doc := BuildMultiRepoWorkLedger(s.cfg.Repo, sources, goals, s.roster, coverage, s.now())
 	w.Header().Set("Server-Timing", fmt.Sprintf("%s, %s, %s",
 		serverTiming("github-list", listElapsed),
 		serverTiming("derive", time.Since(deriveStarted)),
 		serverTiming("total", time.Since(started))))
 	writeJSON(w, doc)
+}
+
+func (s *Server) workLedgerTracker(repo string) (tracker.Tracker, error) {
+	key := strings.ToLower(strings.TrimSpace(repo))
+	s.trackerMu.Lock()
+	defer s.trackerMu.Unlock()
+	if reader := s.ledgerTrackers[key]; reader != nil {
+		return reader, nil
+	}
+	reader, err := tracker.NewGH(repo)
+	if err != nil {
+		return nil, err
+	}
+	s.ledgerTrackers[key] = reader
+	return reader, nil
 }
 
 // handleIssueGet serves GET /api/issues/{number} (body + comments).

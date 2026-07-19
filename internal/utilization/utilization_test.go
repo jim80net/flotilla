@@ -1,6 +1,9 @@
 package utilization
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestBuildUtilizationFirstSummary797(t *testing.T) {
 	agents := []Agent{
@@ -21,12 +24,24 @@ func TestBuildUtilizationFirstSummary797(t *testing.T) {
 	if got.UtilizationPercent != 100.0/6.0 || !got.UtilizationWall {
 		t.Fatalf("utilization rate/wall = %+v", got)
 	}
-	want := "utilization:1/6 (16.7%) / idle:5 (empty-queue:3 · has-queue:1 · queue-unknown:1) / blocked:1 · accepts-dispatch:2 · awaiting-authority:1"
+	want := "1 of 6 seats working · 1 blocked · 1 held for a decision"
 	if line := Line(got); line != want {
 		t.Fatalf("Line = %q, want %q", line, want)
 	}
-	if WallRead(got) == "" {
-		t.Fatal("one working of six should surface the utilization-wall read")
+	if read := WallRead(got); read != "Almost no one is working — send work or pull the next queue item." {
+		t.Fatalf("WallRead = %q", read)
+	}
+}
+
+func TestHumanLineOmitsInternalUtilizationJargon814(t *testing.T) {
+	line := Line(Summary{Working: 4, Total: 52, Blocked: 7, AcceptsDispatch: 44, AwaitingAuthority: 13})
+	if line != "4 of 52 seats working · 7 blocked · 13 held for a decision" {
+		t.Fatalf("Line = %q", line)
+	}
+	for _, forbidden := range []string{"%", "idle", "empty-queue", "accepts-dispatch", "awaiting-authority", "utilization wall"} {
+		if strings.Contains(strings.ToLower(line), forbidden) {
+			t.Fatalf("Line contains internal jargon %q: %q", forbidden, line)
+		}
 	}
 }
 

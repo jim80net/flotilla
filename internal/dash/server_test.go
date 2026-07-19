@@ -188,9 +188,14 @@ func TestDashboardUtilizationFirstContract797(t *testing.T) {
 			t.Errorf("%s missing fleet utilization surface", label)
 		}
 	}
-	for _, marker := range []string{"empty-queue:", "has-queue:", "accepts-dispatch:", "renderLiveSwarm", "last_action", "data-swarm-desk"} {
+	for _, marker := range []string{"seats working", "held for a decision", "Almost no one is working", "renderLiveSwarm", "last_action", "data-swarm-desk"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("dash.js missing utilization marker %q", marker)
+		}
+	}
+	for _, jargon := range []string{"empty-queue:", "has-queue:", "accepts-dispatch:", "awaiting-authority:", "utilization wall"} {
+		if strings.Contains(js, jargon) {
+			t.Errorf("dash.js still exposes operator jargon %q", jargon)
 		}
 	}
 }
@@ -2219,7 +2224,7 @@ func TestIssuesWorkLedger405(t *testing.T) {
 		"workLedgerURL", `/api/work-ledger`, "renderDesk", "doc.flotillas",
 		"flotilla.desks", "issue-desk-head", "issue-ledger-kicker",
 		"shipped.slice(0, 10)", "issue-shipped-more", "show all ", "when-open", "older shipped",
-		"issue-scope-note", "Other open issues are omitted.", "renderMobileDesk", "data-issue-more",
+		"issue-scope-note", "Every indexed open issue is shown as moving.", "renderMobileDesk", "data-issue-more",
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("tracker.js must render the #405 fleet work ledger (missing %q)", marker)

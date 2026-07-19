@@ -116,8 +116,8 @@ func CompressBlock(doc Doc, opt CompressOptions) string {
 
 	var b strings.Builder
 	b.WriteString("**Status of the fleet**\n")
-	// Summary line: utilization first. "Accepts work" remains a secondary
-	// capacity signal; it never substitutes for working/idle truth (#797).
+	// Summary line: plain working count plus the operator-relevant blocked and
+	// decision-held overlays. Internal queue/capacity names stay in JSON.
 	if doc.GeneratedAt != "" {
 		b.WriteString("as of ")
 		b.WriteString(doc.GeneratedAt)
@@ -127,7 +127,7 @@ func CompressBlock(doc Doc, opt CompressOptions) string {
 	b.WriteString(utilization.Line(summary))
 	b.WriteByte('\n')
 	if read := utilization.WallRead(summary); read != "" {
-		b.WriteString("read: ")
+		b.WriteString("Next: ")
 		b.WriteString(read)
 		b.WriteByte('\n')
 	}

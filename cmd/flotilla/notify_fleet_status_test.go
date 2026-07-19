@@ -92,14 +92,19 @@ func TestLoadFleetStatusBlock_FromSnapshot(t *testing.T) {
 	if !strings.Contains(block, "working: backend") {
 		t.Fatalf("want backend working:\n%s", block)
 	}
-	if !strings.Contains(block, "utilization:1/2 (50.0%) / idle:0 (empty-queue:0 · has-queue:0) / blocked:1 · accepts-dispatch:0 · awaiting-authority:0") {
-		t.Fatalf("want utilization-first summary:\n%s", block)
+	if !strings.Contains(block, "1 of 2 seats working · 1 blocked") {
+		t.Fatalf("want human fleet summary:\n%s", block)
 	}
-	if !strings.Contains(block, "read: utilization wall") {
-		t.Fatalf("want explicit utilization-wall diagnosis:\n%s", block)
+	if !strings.Contains(block, "Next: Almost no one is working — send work or pull the next queue item.") {
+		t.Fatalf("want plain next action:\n%s", block)
 	}
 	if !strings.Contains(block, "blocked: frontend") {
 		t.Fatalf("want frontend strongly blocked:\n%s", block)
+	}
+	for _, jargon := range []string{"utilization:", "idle:", "empty-queue:", "accepts-dispatch:", "awaiting-authority:", "utilization wall"} {
+		if strings.Contains(strings.ToLower(block), jargon) {
+			t.Fatalf("notify block contains operator jargon %q:\n%s", jargon, block)
+		}
 	}
 	// Self + adj skipped.
 	if strings.Contains(block, "xo-adj") {
