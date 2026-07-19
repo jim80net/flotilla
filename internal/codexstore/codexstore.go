@@ -98,6 +98,9 @@ func resolveRolloutForProcess(codexHome, cwd string, panePID int, procRoot strin
 	if panePID <= 0 {
 		return "", fmt.Errorf("codex store: invalid pane pid %d", panePID)
 	}
+	if strings.TrimSpace(cwd) == "" {
+		return "", fmt.Errorf("codex store: pane cwd is empty; refusing unverifiable result")
+	}
 	sessionsRoot, err := filepath.EvalSymlinks(filepath.Join(filepath.Clean(codexHome), "sessions"))
 	if err != nil {
 		return "", fmt.Errorf("codex store: resolve sessions root: %w", err)
@@ -155,7 +158,13 @@ func resolveRolloutForProcess(codexHome, cwd string, panePID int, procRoot strin
 	if err != nil {
 		return "", fmt.Errorf("codex store: validate pane rollout: %w", err)
 	}
-	if filepath.Clean(metaCwd) != filepath.Clean(cwd) {
+	// The open file descriptor is the seat selector: exactly one rollout in this
+	// pane's process tree has already been proven above. Some Codex sessions emit
+	// an empty cwd, and live rollouts can lack a readable session_meta record. In
+	// either case the non-empty pane cwd cannot validate the rollout, but it must
+	// not override the stronger process binding. A populated metadata cwd remains
+	// a fail-closed collision guard and is never used to select among seats.
+	if strings.TrimSpace(metaCwd) != "" && filepath.Clean(metaCwd) != filepath.Clean(cwd) {
 		return "", fmt.Errorf("codex store: pane rollout cwd %q does not match pane cwd %q", metaCwd, cwd)
 	}
 	return path, nil

@@ -139,6 +139,55 @@ func TestResolveRolloutForProcessBindsPaneNotNewestCWD(t *testing.T) {
 	}
 }
 
+func TestResolveRolloutForProcessAcceptsEmptyMetaCWDWhenPaneBound(t *testing.T) {
+	home := t.TempDir()
+	proc := t.TempDir()
+	dir := filepath.Join(home, "sessions", "2026", "07", "19")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rollout := filepath.Join(dir, "rollout-2026-07-19T10-00-00-seat.jsonl")
+	body := `{"type":"session_meta","payload":{"cwd":""}}` + "\n" +
+		`{"type":"event_msg","payload":{"type":"agent_message","message":"latest pane-bound final"}}` + "\n"
+	if err := os.WriteFile(rollout, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	makeProcNode(t, proc, 150, "")
+	if err := os.Symlink(rollout, filepath.Join(proc, "150", "fd", "8")); err != nil {
+		t.Fatal(err)
+	}
+
+	path, err := resolveRolloutForProcess(home, "/srv/fleet/seat", 150, proc)
+	if err != nil || path != rollout {
+		t.Fatalf("resolveRolloutForProcess = (%q, %v), want uniquely pane-bound rollout %q", path, err, rollout)
+	}
+	got, err := lastAgentText(path)
+	if err != nil || got != "latest pane-bound final" {
+		t.Fatalf("pane-bound result = (%q, %v), want latest final", got, err)
+	}
+}
+
+func TestResolveRolloutForProcessEmptyMetaCWDFailsWithoutPaneCWD(t *testing.T) {
+	home := t.TempDir()
+	proc := t.TempDir()
+	dir := filepath.Join(home, "sessions", "2026", "07", "19")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rollout := filepath.Join(dir, "rollout-2026-07-19T10-00-00-seat.jsonl")
+	if err := os.WriteFile(rollout, []byte(`{"type":"session_meta","payload":{"cwd":""}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	makeProcNode(t, proc, 175, "")
+	if err := os.Symlink(rollout, filepath.Join(proc, "175", "fd", "8")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := resolveRolloutForProcess(home, "", 175, proc); err == nil {
+		t.Fatal("empty pane cwd must fail closed")
+	}
+}
+
 func TestResolveRolloutForProcessFailsClosed(t *testing.T) {
 	home := t.TempDir()
 	proc := t.TempDir()
@@ -159,6 +208,32 @@ func TestResolveRolloutForProcessFailsClosed(t *testing.T) {
 	}
 	if _, err := resolveRolloutForProcess(home, "/wanted", 999, proc); err == nil {
 		t.Fatal("missing process rollout must fail closed")
+	}
+}
+
+func TestResolveRolloutForProcessAcceptsMissingMetaWhenPaneBound(t *testing.T) {
+	home := t.TempDir()
+	proc := t.TempDir()
+	dir := filepath.Join(home, "sessions", "2026", "07", "19")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rollout := filepath.Join(dir, "rollout-2026-07-19T11-00-00-no-meta.jsonl")
+	if err := os.WriteFile(rollout, []byte(`{"type":"event_msg","payload":{"type":"agent_message","message":"latest final without metadata"}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	makeProcNode(t, proc, 225, "")
+	if err := os.Symlink(rollout, filepath.Join(proc, "225", "fd", "9")); err != nil {
+		t.Fatal(err)
+	}
+
+	path, err := resolveRolloutForProcess(home, "/srv/fleet/seat", 225, proc)
+	if err != nil || path != rollout {
+		t.Fatalf("resolveRolloutForProcess = (%q, %v), want uniquely pane-bound rollout %q", path, err, rollout)
+	}
+	got, err := lastAgentText(path)
+	if err != nil || got != "latest final without metadata" {
+		t.Fatalf("pane-bound result = (%q, %v), want latest final", got, err)
 	}
 }
 
