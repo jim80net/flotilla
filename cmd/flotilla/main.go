@@ -153,9 +153,9 @@ usage:
   flotilla provision-discord <flotilla-key> [--dry-run] [--apply-roster]
                                                       provision COS C2 + flotilla product hub + bindings + XO webhook
   flotilla register <agent> [--pane <target>]         tag a pane so it resolves by a stable, drift-immune marker
-  flotilla resume <agent> [--launch <path>] [--force]  (re)start a dead desk from its host-local launch recipe
+  flotilla resume <agent> [--launch <path>] [--force] [--scheduled-e2e]  (re)start a dead desk from its host-local launch recipe
   flotilla recycle <agent> [--launch <path>] [--dry-run]  close a desk's chapter (handoff→graceful close→relaunch→takeover), fail-closed
-  flotilla switch <agent> (--to <slot|surface> | --auto | --repair) [--confirm] [--force]  hand a desk across harnesses (FROM handoff→relaunch on TO→TO takeover), fail-closed
+  flotilla switch <agent> (--to <slot|surface> | --auto | --repair) [--confirm] [--force] [--scheduled-e2e]  hand a desk across harnesses (FROM handoff→relaunch on TO→TO takeover), fail-closed
   flotilla workspace init <agent> --repo <abs-path>   provision a desk git worktree + ~/.flotilla/<agent>/ host (seeds doctrine into the worktree)
   flotilla workspace path <agent>                     print an agent's workspace directory
   flotilla doctrine install [--refresh] [--all] [<agent>]  install constitutional doctrine (idempotent; --refresh updates drifted fenced blocks)

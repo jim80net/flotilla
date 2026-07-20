@@ -20,12 +20,27 @@ const (
 // fields are intentionally tolerated so operations can add evidence without
 // coupling the recovery CLI to the producer's full document.
 type CapacityHold struct {
-	Schema         string   `json:"schema"`
-	Status         string   `json:"status"`
-	ForbidPrimary  bool     `json:"forbid_primary"`
-	ForbidSurfaces []string `json:"forbid_surfaces"`
-	HardLimitUntil string   `json:"hard_limit_until"`
-	RestoreAfter   string   `json:"restore_after"`
+	Schema          string   `json:"schema"`
+	Class           string   `json:"class"`
+	PolicyID        string   `json:"policy_id"`
+	Status          string   `json:"status"`
+	ForbidPrimary   bool     `json:"forbid_primary"`
+	ForbidSurfaces  []string `json:"forbid_surfaces"`
+	HardLimitUntil  string   `json:"hard_limit_until"`
+	RestoreAfter    string   `json:"restore_after"`
+	RestoreRequires string   `json:"restore_requires"`
+	Conservation    struct {
+		PolicyID string `json:"policy_id"`
+	} `json:"conservation"`
+	SurfaceConservation struct {
+		PolicyID string `json:"policy_id"`
+	} `json:"surface_conservation"`
+}
+
+// TargetAuthorization is an explicit authorization for a conservation-only
+// primary launch. Its zero value is intentionally unauthorised.
+type TargetAuthorization struct {
+	ScheduledE2E bool
 }
 
 // EnforceCapacityHold refuses a primary or explicitly forbidden target while
@@ -35,6 +50,15 @@ type CapacityHold struct {
 // A malformed hold fails closed for primary recovery but never prevents a
 // fallback recovery: operators must retain a path off the exhausted surface.
 func EnforceCapacityHold(agent, operation, targetSlot, targetSurface string, now time.Time) error {
+	return EnforceHarnessTarget(agent, operation, targetSlot, targetSurface, now, TargetAuthorization{})
+}
+
+// EnforceHarnessTarget is the shared pre-mutation boundary for every path that
+// can launch or select a harness. Capacity availability and e2e-only
+// conservation are independent: clearing a hard-limit window does not clear a
+// conservation policy. Scheduled e2e/canary authorization only waives the
+// latter; it never overrides an active or explicit capacity hold.
+func EnforceHarnessTarget(agent, operation, targetSlot, targetSurface string, now time.Time, auth TargetAuthorization) error {
 	dir, err := Dir(agent)
 	if err != nil {
 		return capacityHoldMalformedError(agent, operation, targetSlot, targetSurface, "resolve workspace", err)
@@ -64,7 +88,11 @@ func EnforceCapacityHold(agent, operation, targetSlot, targetSurface string, now
 	primary := strings.EqualFold(strings.TrimSpace(targetSlot), SlotPrimary)
 	forbiddenPrimary := primary && hold.ForbidPrimary
 	forbiddenSurface := containsFold(hold.ForbidSurfaces, targetSurface)
-	if !forbiddenPrimary && !forbiddenSurface && !(active && primary) {
+	capacityBlocked := forbiddenPrimary || forbiddenSurface || (active && primary)
+	if !capacityBlocked {
+		if policy := hold.e2eOnlyPolicy(); policy != "" && targetsPrimaryCodex(targetSlot, targetSurface) && !auth.ScheduledE2E {
+			return fmt.Errorf("refusing %s for %q to slot %q (surface %q): e2e-only conservation policy %q in %s requires an explicit scheduled e2e/canary authorization; current fallback retained, desk untouched", operation, agent, targetSlot, targetSurface, policy, path)
+		}
 		return nil
 	}
 
@@ -84,6 +112,26 @@ func EnforceCapacityHold(agent, operation, targetSlot, targetSurface string, now
 	return fmt.Errorf("refusing %s for %q to slot %q (surface %q): %s in %s; desk untouched", operation, agent, targetSlot, targetSurface, reason, path)
 }
 
+func (h CapacityHold) e2eOnlyPolicy() string {
+	for _, candidate := range []string{h.PolicyID, h.Conservation.PolicyID, h.SurfaceConservation.PolicyID, h.Class} {
+		candidate = strings.TrimSpace(candidate)
+		if strings.Contains(strings.ToLower(candidate), "e2e-only") {
+			return candidate
+		}
+	}
+	// Older fleet-ops documents carried the contract only in restore_requires.
+	// Honor that explicit source instead of silently allowing a primary launch.
+	requires := strings.ToLower(h.RestoreRequires)
+	if strings.Contains(requires, "scheduled e2e") || strings.Contains(requires, "scheduled canary") {
+		return "e2e-only (restore_requires)"
+	}
+	return ""
+}
+
+func targetsPrimaryCodex(slot, surface string) bool {
+	return strings.EqualFold(strings.TrimSpace(slot), SlotPrimary) || strings.EqualFold(strings.TrimSpace(surface), "codex")
+}
+
 func (h CapacityHold) active(now time.Time) (bool, string, error) {
 	sticky := strings.EqualFold(strings.TrimSpace(h.Status), "ACTIVE")
 	deadline := strings.TrimSpace(h.HardLimitUntil)
@@ -101,7 +149,7 @@ func (h CapacityHold) active(now time.Time) (bool, string, error) {
 }
 
 func capacityHoldMalformedError(agent, operation, targetSlot, targetSurface, path string, cause error) error {
-	if !strings.EqualFold(strings.TrimSpace(targetSlot), SlotPrimary) {
+	if !targetsPrimaryCodex(targetSlot, targetSurface) {
 		return nil
 	}
 	return fmt.Errorf("refusing %s for %q to primary (surface %q): capacity hold %s is unreadable or invalid: %v; desk untouched", operation, agent, targetSurface, path, cause)

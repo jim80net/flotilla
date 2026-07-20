@@ -566,9 +566,9 @@ func isSwitchAlreadyComplete(rec switchRecord, token string) bool {
 // --to <slot-or-surface>, --auto (self-select the target), or --repair (reconcile only).
 // --to and --auto are mutually exclusive (auto self-selects; --to names the target). The
 // caller defaults launchPath to a roster-relative path after loading the roster when empty.
-func parseSwitchArgs(args []string) (agent, to, rosterPath, launchPath, rateLimitScope string, confirm, repair, force, auto bool, err error) {
-	fail := func(e error) (string, string, string, string, string, bool, bool, bool, bool, error) {
-		return "", "", "", "", "", false, false, false, false, e
+func parseSwitchArgs(args []string) (agent, to, rosterPath, launchPath, rateLimitScope string, confirm, repair, force, auto, scheduledE2E bool, err error) {
+	fail := func(e error) (string, string, string, string, string, bool, bool, bool, bool, bool, error) {
+		return "", "", "", "", "", false, false, false, false, false, e
 	}
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		agent, args = args[0], args[1:]
@@ -580,6 +580,7 @@ func parseSwitchArgs(args []string) (agent, to, rosterPath, launchPath, rateLimi
 	cf := fs.Bool("confirm", false, "confirm a switch of an approval_sensitive desk (required for those — GATE-4)")
 	rep := fs.Bool("repair", false, "reconcile active-harness.json from the LIVE pane after a half-switch")
 	fc := fs.Bool("force", false, "switch even if the desk is a live session (the resume --force semantics)")
+	e2e := fs.Bool("scheduled-e2e", false, "authorize a scheduled e2e/canary switch onto an e2e-only surface")
 	au := fs.Bool("auto", false, "self-select the TO target from the failover chain (poison-aware)")
 	rls := fs.String("rate-limit-scope", "", "rate-limit scope for --auto: server-side or account-side")
 	if err = fs.Parse(args); err != nil {
@@ -590,7 +591,7 @@ func parseSwitchArgs(args []string) (agent, to, rosterPath, launchPath, rateLimi
 		agent, rest = rest[0], rest[1:]
 	}
 	if agent == "" || len(rest) != 0 {
-		return fail(fmt.Errorf("usage: flotilla switch <agent> (--to <slot|surface> | --auto | --repair) [--confirm] [--force]"))
+		return fail(fmt.Errorf("usage: flotilla switch <agent> (--to <slot|surface> | --auto | --repair) [--confirm] [--force] [--scheduled-e2e]"))
 	}
 	if *toF != "" && *au {
 		return fail(fmt.Errorf("--to and --auto are mutually exclusive: --auto self-selects the target, --to names it"))
@@ -605,7 +606,7 @@ func parseSwitchArgs(args []string) (agent, to, rosterPath, launchPath, rateLimi
 	if *au && scope != "" && scope != "server-side" && scope != "account-side" {
 		return fail(fmt.Errorf("--rate-limit-scope must be server-side or account-side, got %q", scope))
 	}
-	return agent, *toF, *rp, *lp, scope, *cf, *rep, *fc, *au, nil
+	return agent, *toF, *rp, *lp, scope, *cf, *rep, *fc, *au, *e2e, nil
 }
 
 // switchGate4 enforces GATE-4 for every switch invocation, manual and auto: an
@@ -696,7 +697,7 @@ func slotNames(slots []launch.ResolvedSlot) string {
 // the auto path enqueues `flotilla switch --auto` from the detector at P2 and is unreachable
 // here). --repair is a distinct, non-acting reconcile mode handled first.
 func cmdSwitch(args []string) error {
-	agentName, to, rosterPath, launchPath, rateLimitScope, confirm, repair, force, auto, err := parseSwitchArgs(args)
+	agentName, to, rosterPath, launchPath, rateLimitScope, confirm, repair, force, auto, scheduledE2E, err := parseSwitchArgs(args)
 	if err != nil {
 		return err
 	}
@@ -739,6 +740,9 @@ func cmdSwitch(args []string) error {
 			readGen:      deliver.ReadSwitchGen,
 			readRecord:   readSwitchRecord,
 			writeOverlay: workspace.WriteActiveOverlay,
+			authorizeTarget: func(slot, surface string) error {
+				return workspace.EnforceHarnessTarget(agentName, "operator-manual harness selection", slot, surface, time.Now(), workspace.TargetAuthorization{ScheduledE2E: scheduledE2E})
+			},
 		}
 		msg, rerr := runRepair(ops, agentName, chain, fromSurface)
 		if rerr != nil {
@@ -771,7 +775,7 @@ func cmdSwitch(args []string) error {
 		return err
 	}
 	toSurface := toSlot.Surface
-	if err := workspace.EnforceCapacityHold(agentName, "switch", toSlot.Name, toSurface, time.Now()); err != nil {
+	if err := workspace.EnforceHarnessTarget(agentName, "switch", toSlot.Name, toSurface, time.Now(), workspace.TargetAuthorization{ScheduledE2E: scheduledE2E}); err != nil {
 		return err
 	}
 
@@ -1097,6 +1101,9 @@ type repairOps struct {
 	readGen      func(target string) (string, error)            // deliver.ReadSwitchGen (the stamped switch gen)
 	readRecord   func(agent string) (switchRecord, bool, error) // readSwitchRecord
 	writeOverlay func(agent string, ov workspace.ActiveOverlay) error
+	// authorizeTarget runs immediately before the only overlay mutation. Tests
+	// may leave it nil when exercising unrelated repair mechanics.
+	authorizeTarget func(slot, surface string) error
 }
 
 // runRepair reconciles active-harness.json from the LIVE pane after a half-switch (P1-B). It
@@ -1160,6 +1167,11 @@ func runRepair(ops repairOps, agent string, chain launch.Recipe, fromSurface str
 	toSlot, serr := resolveSwitchSlot(chain, fromSurface, rec.To, false, PoisonState{}, RateLimitServerSide)
 	if serr != nil {
 		return "", fmt.Errorf("repair %s: the recorded TO surface %q is not in the desk's chain (%w) — reconcile manually", agent, rec.To, serr)
+	}
+	if ops.authorizeTarget != nil {
+		if err := ops.authorizeTarget(toSlot.Name, toSlot.Surface); err != nil {
+			return "", err
+		}
 	}
 	if err := ops.writeOverlay(agent, workspace.ActiveOverlay{
 		Slot:           toSlot.Name,

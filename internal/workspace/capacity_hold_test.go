@@ -11,11 +11,13 @@ import (
 func TestEnforceCapacityHold(t *testing.T) {
 	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
-		name    string
-		body    string
-		slot    string
-		surface string
-		wantErr bool
+		name         string
+		body         string
+		operation    string
+		slot         string
+		surface      string
+		scheduledE2E bool
+		wantErr      bool
 	}{
 		{name: "missing allows primary", slot: SlotPrimary, surface: "codex"},
 		{name: "active blocks primary", body: `{"schema":"flotilla.capacity_hold/v1","status":"ACTIVE"}`, slot: SlotPrimary, surface: "codex", wantErr: true},
@@ -31,6 +33,13 @@ func TestEnforceCapacityHold(t *testing.T) {
 		{name: "malformed allows fallback recovery", body: `{`, slot: "fallback-1", surface: "grok"},
 		{name: "unknown schema blocks primary", body: `{"schema":"flotilla.capacity_hold/v2"}`, slot: SlotPrimary, surface: "codex", wantErr: true},
 		{name: "invalid deadline blocks primary", body: `{"schema":"flotilla.capacity_hold/v1","hard_limit_until":"tomorrow"}`, slot: SlotPrimary, surface: "codex", wantErr: true},
+		{name: "cleared e2e policy blocks resume", body: `{"schema":"flotilla.capacity_hold/v1","status":"CLEARED","class":"codex-e2e-only-dev"}`, operation: "resume", slot: SlotPrimary, surface: "codex", wantErr: true},
+		{name: "cleared e2e policy blocks forced resume", body: `{"schema":"flotilla.capacity_hold/v1","status":"CLEARED","policy_id":"codex-e2e-only"}`, operation: "resume --force", slot: SlotPrimary, surface: "codex", wantErr: true},
+		{name: "nested conservation blocks primary switch", body: `{"schema":"flotilla.capacity_hold/v1","status":"CLEARED","conservation":{"policy_id":"codex-e2e-only"}}`, operation: "switch --to primary", slot: SlotPrimary, surface: "codex", wantErr: true},
+		{name: "legacy restore contract blocks operator manual selection", body: `{"schema":"flotilla.capacity_hold/v1","status":"CLEARED","restore_requires":"window clear AND scheduled e2e/canary"}`, operation: "operator-manual harness selection", slot: SlotPrimary, surface: "codex", wantErr: true},
+		{name: "e2e policy retains fallback path", body: `{"schema":"flotilla.capacity_hold/v1","status":"CLEARED","class":"codex-e2e-only-dev"}`, operation: "resume", slot: "fallback-1", surface: "grok"},
+		{name: "scheduled e2e authorization allows conserved primary", body: `{"schema":"flotilla.capacity_hold/v1","status":"CLEARED","policy_id":"codex-e2e-only"}`, operation: "switch --to primary", slot: SlotPrimary, surface: "codex", scheduledE2E: true},
+		{name: "scheduled e2e does not waive active capacity", body: `{"schema":"flotilla.capacity_hold/v1","status":"ACTIVE","policy_id":"codex-e2e-only"}`, operation: "switch --to primary", slot: SlotPrimary, surface: "codex", scheduledE2E: true, wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -46,12 +55,23 @@ func TestEnforceCapacityHold(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			err := EnforceCapacityHold("seat", "resume", tt.slot, tt.surface, now)
+			operation := tt.operation
+			if operation == "" {
+				operation = "resume"
+			}
+			err := EnforceHarnessTarget("seat", operation, tt.slot, tt.surface, now, TargetAuthorization{ScheduledE2E: tt.scheduledE2E})
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("EnforceCapacityHold() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if err != nil && (!strings.Contains(err.Error(), "desk untouched") || !strings.Contains(err.Error(), CapacityHoldFileName)) {
 				t.Fatalf("error is not operator-actionable: %v", err)
+			}
+			if err != nil && strings.Contains(tt.name, "e2e policy blocks") {
+				for _, want := range []string{"codex-e2e-only", "current fallback retained"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("conservation refusal %q does not name %q", err, want)
+					}
+				}
 			}
 		})
 	}
