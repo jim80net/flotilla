@@ -139,6 +139,21 @@
   }
 
   var entries = [], collectionWindow = 6, decisionVisible = collectionWindow, libraryVisible = collectionWindow;
+  var lastDocumentID = "", lastDocumentPush = false;
+  function setIndexState(title, detail, retry) {
+    var status = el("research-status");
+    status.hidden = false;
+    status.classList.toggle("error", retry);
+    el("research-status-title").textContent = title;
+    el("research-status-detail").textContent = detail;
+    el("research-index-retry").hidden = !retry;
+  }
+  function setReaderState(title, detail, retry) {
+    el("research-reader-empty").hidden = false;
+    el("research-reader-state-title").textContent = title;
+    el("research-reader-state-detail").textContent = detail;
+    el("research-document-retry").hidden = !retry;
+  }
   function card(entry) {
     var link = document.createElement("a");
     link.className = "research-card" + (entry.decision ? " is-decision" : "");
@@ -174,8 +189,7 @@
       renderCollection("research-decision-list", "research-decision-more", decisions, decisionVisible);
     }
     if (!entries.length) {
-      el("research-status").hidden = false;
-      el("research-status").textContent = "No research documents are available yet.";
+      setIndexState("No research documents", "The configured research collection is empty.", false);
     }
   }
   function renderTOC(items) {
@@ -189,6 +203,8 @@
     el("research-toc-count").textContent = items.length + (items.length === 1 ? " section" : " sections");
     toc.hidden = items.length < 2;
     toc.open = items.length >= 2 && window.matchMedia("(min-width: 761px)").matches;
+    document.documentElement.classList.remove("research-toc-open");
+    document.body.classList.remove("research-toc-open");
   }
   function renderDocument(doc) {
     var rendered = renderMarkdown(documentWithoutDuplicateTitle(doc.markdown, doc.title));
@@ -215,35 +231,74 @@
     document.title = "flotilla — research";
   }
   function openDocument(id, push) {
+    lastDocumentID = id;
+    lastDocumentPush = !!push;
     el("research-reader").classList.add("is-loading");
+    el("research-document").hidden = true;
+    setReaderState("Loading document…", "Fetching the latest private-LAN copy.", false);
+    document.body.classList.add("research-has-document");
     fetchJSON(apiPath(id)).then(function (doc) {
       renderDocument(doc);
       if (push) history.pushState({ research: id }, "", pagePath(id));
+      lastDocumentPush = false;
     }).catch(function (error) {
-      el("research-reader-empty").hidden = false;
-      el("research-document").hidden = true;
-      el("research-reader-empty").querySelector("h2").textContent = "Document unavailable";
-      el("research-reader-empty").querySelector("p:last-child").textContent = error.message;
-      document.body.classList.add("research-has-document");
+      setReaderState("Document unavailable", "The document could not be loaded: " + error.message, true);
     }).finally(function () { el("research-reader").classList.remove("is-loading"); });
+  }
+
+  function loadIndex() {
+    setIndexState("Loading research…", "Reading the private-LAN collection.", false);
+    fetchJSON("/api/research").then(function (body) {
+      entries = Array.isArray(body.research) ? body.research : [];
+      renderIndex();
+      var id = pathID(); if (id) openDocument(id, false);
+    }).catch(function (error) {
+      setIndexState("Research library unavailable", "The collection could not be loaded: " + error.message, true);
+    });
   }
 
   el("research-back").addEventListener("click", function () { showLibrary(true); });
   el("research-decision-more").addEventListener("click", function () { decisionVisible += collectionWindow; renderIndex(); });
   el("research-library-more").addEventListener("click", function () { libraryVisible += collectionWindow; renderIndex(); });
+  el("research-index-retry").addEventListener("click", loadIndex);
+  el("research-document-retry").addEventListener("click", function () { if (lastDocumentID) openDocument(lastDocumentID, lastDocumentPush); });
   var tocRestoreY = 0;
-  el("research-toc").querySelector("summary").addEventListener("click", function () {
-    var toc = el("research-toc");
-    if (!toc.open) tocRestoreY = window.scrollY;
-    else window.setTimeout(function () { window.scrollTo(0, tocRestoreY); }, 0);
+  var tocLinkClosing = false;
+  var toc = el("research-toc"), tocSummary = toc.querySelector("summary");
+  toc.addEventListener("toggle", function () {
+    if (!window.matchMedia("(max-width: 760px)").matches) return;
+    if (toc.open) {
+      tocRestoreY = window.scrollY;
+      document.documentElement.classList.add("research-toc-open");
+      document.body.classList.add("research-toc-open");
+      return;
+    }
+    document.documentElement.classList.remove("research-toc-open");
+    document.body.classList.remove("research-toc-open");
+    if (!tocLinkClosing) window.scrollTo(0, tocRestoreY);
+    tocLinkClosing = false;
+  });
+  el("research-toc-list").addEventListener("click", function (event) {
+    var link = event.target.closest("a");
+    if (!link || !toc.open) return;
+    var target = document.getElementById(link.getAttribute("href").slice(1));
+    if (!target) return;
+    event.preventDefault();
+    tocLinkClosing = true;
+    toc.open = false;
+    requestAnimationFrame(function () {
+      target.scrollIntoView({ block: "start" });
+      target.setAttribute("tabindex", "-1");
+      target.focus({ preventScroll: true });
+      history.replaceState(history.state, "", "#" + target.id);
+    });
+  });
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape" || !toc.open || !window.matchMedia("(max-width: 760px)").matches) return;
+    event.preventDefault();
+    toc.open = false;
+    tocSummary.focus();
   });
   window.addEventListener("popstate", function () { var id = pathID(); if (id) openDocument(id, false); else showLibrary(false); });
-  fetchJSON("/api/research").then(function (body) {
-    entries = Array.isArray(body.research) ? body.research : [];
-    renderIndex();
-    var id = pathID(); if (id) openDocument(id, false);
-  }).catch(function (error) {
-    el("research-status").textContent = error.message;
-    el("research-status").classList.add("error");
-  });
+  loadIndex();
 }());
