@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex,nofollow" />
   <script>try{performance.mark("dash-start")}catch(e){}</script>
+  <script src="/static/theme.js"></script>
   <title>flotilla dash — {{.XO}}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -58,6 +59,7 @@
       <a id="tab-research" class="tab tab-nav" href="/research">Research</a>
     </nav>
     <div class="bar-meta">
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Toggle color theme"><span data-theme-label>Theme</span></button>
       <span class="meta-label">bound</span>
       <code class="meta-bind">{{.Bind}}</code>
       <span id="conn" class="conn" role="status" aria-live="polite" aria-label="Live update link idle">
