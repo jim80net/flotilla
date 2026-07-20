@@ -90,6 +90,8 @@ func run(args []string) error {
 		return cmdAccounts(args[1:])
 	case "gmail":
 		return cmdGmail(args[1:])
+	case "mcp":
+		return cmdMCP(args[1:])
 	case "launch":
 		return cmdLaunch(args[1:])
 	case "mirror-self":
@@ -143,6 +145,9 @@ usage:
   flotilla accounts list [--json]                     subscription credential health (mtime/expiry only; no secrets)
   flotilla gmail [--grant <path>] smoke|labels-list|label-get|messages-list|message-get|threads-list|thread-get
                                                       PA-only authorized Gmail read broker (host-private binding; no writes)
+  flotilla mcp add [--harness claude|codex] [--transport http] [--scope user] <name> <url>
+                                                      register an HTTP MCP in the selected harness user config
+  flotilla mcp login [--harness claude|codex] <name>  start the harness-owned human OAuth login
   flotilla launch lint [--roster <path>] [--launch <path>]
                                                       warn on roster seats without an explicit failover chain
   flotilla channel create <name> [--type text|category] [--topic <t>] [--category <name|id>]

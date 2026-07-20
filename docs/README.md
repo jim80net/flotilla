@@ -51,6 +51,8 @@ Once the basics work, these are the production runbooks — each owns one job.
 - **[`pa-gmail-api-runbook.md`](./pa-gmail-api-runbook.md)** — provision the
   interim PA-only Gmail read grant without placing OAuth material in the shared
   fleet environment.
+- **[`mcp.md`](./mcp.md)** — register HTTP MCP servers through `flotilla`, then
+  hand browser OAuth to the human without placing tokens in fleet secrets.
 
 ### Operating doctrine
 
@@ -136,6 +138,7 @@ link to it, not restate it.
 | Design tokens + theme | `design/README.md` |
 | Authorization-domain grant model | `authorization-domains.md` |
 | PA Gmail OAuth setup | `pa-gmail-api-runbook.md` |
+| HTTP MCP registration and OAuth handoff | `mcp.md` |
 
 **Editing rule:** if you're about to explain a fact that already has a home
 above, link to the home instead. If you're adding a genuinely new fact, give it
