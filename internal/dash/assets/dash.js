@@ -124,14 +124,21 @@
     return fresh;
   }
 
-  function utilizationText(status) {
+  function utilizationUnits(status) {
     var u = (status && status.utilization) || {};
-    if (!Number.isFinite(Number(u.total))) return "Fleet utilization unavailable";
+    if (!Number.isFinite(Number(u.total))) return [{ kind: "unavailable", text: "Fleet utilization unavailable" }];
     var total = Number(u.total || 0);
-    var text = Number(u.working || 0) + " of " + total + " " + (total === 1 ? "seat" : "seats") + " working";
-    if (Number(u.blocked || 0) > 0) text += " · " + Number(u.blocked) + " blocked";
-    if (Number(u.awaiting_authority || 0) > 0) text += " · " + Number(u.awaiting_authority) + " held for a decision";
-    return text;
+    var units = [{
+      kind: "working",
+      text: Number(u.working || 0) + " of " + total + " " + (total === 1 ? "seat" : "seats") + " working"
+    }];
+    if (Number(u.blocked || 0) > 0) units.push({ kind: "blocked", text: Number(u.blocked) + " blocked" });
+    if (Number(u.awaiting_authority || 0) > 0) units.push({ kind: "held", text: Number(u.awaiting_authority) + " held for a decision" });
+    return units;
+  }
+
+  function utilizationText(status) {
+    return utilizationUnits(status).map(function (unit) { return unit.text; }).join(" · ");
   }
 
   function utilizationRead(status) {
@@ -143,10 +150,12 @@
   function renderUtilization(status) {
     var target = el("fleet-utilization");
     if (target) {
-      var text = utilizationText(status);
+      var units = utilizationUnits(status);
       var read = utilizationRead(status);
-      if (read) text += " · " + read;
-      target.textContent = text;
+      if (read) units.push({ kind: "read", text: read });
+      target.innerHTML = units.map(function (unit) {
+        return '<span class="fleet-utilization-unit">' + escapeHtml(unit.text) + "</span>";
+      }).join(" ");
     }
   }
 
@@ -185,15 +194,16 @@
   function renderRailMeta(status, fresh) {
     var meta = el("rail-meta");
     var xl = status.xo_liveness || {};
-    var bits = [];
-    bits.push(escapeHtml(utilizationText(status)));
+    var units = utilizationUnits(status);
     if (status.xo) {
-      var ack = xl.acked ? ("ack " + escapeHtml(xl.ack_age) + " ago") : "never acked";
+      var ack = xl.acked ? ("ack " + String(xl.ack_age || "unknown") + " ago") : "never acked";
       var settled = xl.settled_known ? (xl.settled ? "settled" : "active") : "settled unknown";
-      bits.push(escapeHtml(status.xo) + " · " + ack + " · " + settled);
+      units.push({ kind: "liveness", text: String(status.xo) + " · " + ack + " · " + settled });
     }
-    if (fresh.state === "stale") bits.push("snapshot stale");
-    meta.innerHTML = bits.join(" · ");
+    if (fresh.state === "stale") units.push({ kind: "stale", text: "snapshot stale" });
+    meta.innerHTML = units.map(function (unit) {
+      return '<span class="fleet-status-unit ' + unit.kind + '">' + escapeHtml(unit.text) + "</span>";
+    }).join(" ");
   }
 
   // coordinatorNames returns the coordinator agents the rail must always surface — the
