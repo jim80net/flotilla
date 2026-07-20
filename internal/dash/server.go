@@ -16,6 +16,7 @@ import (
 	"github.com/jim80net/flotilla/internal/cos"
 	"github.com/jim80net/flotilla/internal/dash/control"
 	"github.com/jim80net/flotilla/internal/dash/tracker"
+	"github.com/jim80net/flotilla/internal/harnessquality"
 	"github.com/jim80net/flotilla/internal/loopposture"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
@@ -36,6 +37,7 @@ type Config struct {
 	GoalsPath        string // goals file the Goals view reads (default <roster-dir>/fleet-goals.json)
 	GoalsYAMLPath    string // goals yaml source compiled on load (default <roster-dir>/fleet-goals.yaml)
 	SessionMirrorDir string // per-agent session-mirror ledgers (default <roster-dir>/session-mirror)
+	QualityPath      string // harness quality event ledger (default <roster-dir>/harness-quality.jsonl)
 	ParadesPath      string // parade archive: <dir>/<YYYY-MM-DD>/{report.md,assets/} (default <roster-dir>/parades)
 	ResearchPath     string // operator research markdown library (default <roster-dir>/research)
 	DoneLogPath      string // goals done-history JSONL the server appends + reads (#418; default <roster-dir>/goals-done.jsonl)
@@ -314,7 +316,9 @@ func (s *Server) loadBoard() BoardDoc {
 	rosterDir := filepath.Dir(s.cfg.RosterPath)
 	in.LoopByAgent = loadBoardLoopEvidence(s.roster, s.xo, rosterDir, snap, snapOK, snapFresh)
 	in.LastActions = s.loadWorkingActions(snap)
-	return BuildBoard(in)
+	doc := BuildBoard(in)
+	doc.Quality = harnessquality.LoadSummary(rosterDir, now)
+	return doc
 }
 
 // loadWorkingActions gives the visible swarm strip one latest-action glance per
@@ -787,6 +791,9 @@ func ResolvePaths(cfg Config, rc *roster.Config) Config {
 	}
 	if cfg.SessionMirrorDir == "" {
 		cfg.SessionMirrorDir = filepath.Join(dir, "session-mirror")
+	}
+	if cfg.QualityPath == "" {
+		cfg.QualityPath = filepath.Join(dir, harnessquality.LedgerName)
 	}
 	if cfg.ParadesPath == "" {
 		// Sibling of the roster file — when the roster lives in state/ (the common

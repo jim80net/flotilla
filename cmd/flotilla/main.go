@@ -60,6 +60,8 @@ func run(args []string) error {
 		return cmdWatch(args[1:])
 	case "status":
 		return cmdStatus(args[1:])
+	case "quality":
+		return cmdQuality(args[1:])
 	case "dash":
 		return cmdDash(args[1:])
 	case "channel":
@@ -131,6 +133,11 @@ usage:
   flotilla voice [--config <voice.env>]               operator↔XO Discord voice (needs a -tags voiceopus build)
   flotilla watch                                      relay + XO heartbeat clock daemon
   flotilla status                                     one line per desk: last-known state + XO ack age (reads the watch snapshot; no daemon)
+  flotilla quality context <seat> --work-class <class> [--work-ref <ref>]
+                                                      tag the seat's active task for finish-edge quality events
+  flotilla quality record <seat> --event <completion|gate> --outcome <outcome>
+                                                      append a versioned completion/gate quality fact
+  flotilla quality show [--json]                     aggregate bounce/rework by harness × work class
   flotilla inbox <channel> [--limit N]                read recent messages of a bound channel over REST (role or channel id; recover a dropped operator message; read-only)
   flotilla dash [--bind 127.0.0.1:8787]               optional local web UI: fleet board + federation topology + coordination history (read-only; reads the watch artifacts; loopback only)
   flotilla goals validate [--roster <path>] [--yaml <path>] [--json <path>]

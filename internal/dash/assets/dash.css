@@ -966,6 +966,7 @@ code {
   display: flex; align-items: baseline; gap: .65rem 1rem; flex-wrap: wrap;
 }
 .fleet-utilization { color: var(--ink-2); font-family: var(--display); letter-spacing: .015em; }
+.harness-quality { color: var(--ink-2); font-family: var(--display); letter-spacing: .015em; }
 
 .perf-diagnostics { margin-left: auto; text-align: left; }
 .perf-diagnostics summary { cursor: pointer; color: var(--ink-2); }

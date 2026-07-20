@@ -22,6 +22,7 @@ import (
 
 	"github.com/jim80net/flotilla/internal/backlog"
 	"github.com/jim80net/flotilla/internal/cos"
+	"github.com/jim80net/flotilla/internal/harnessquality"
 	"github.com/jim80net/flotilla/internal/loopposture"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
@@ -148,11 +149,12 @@ type BoardDoc struct {
 	// first-class threads even when neither is bound as a channel xo_agent, so the operator
 	// can always follow the coordinator's session (F#383 criterion 1). Empty when unset or
 	// identical to XO (the single-fleet dogfood case, where XO already IS the coordinator).
-	Cos         string              `json:"cos,omitempty"`
-	Utilization utilization.Summary `json:"utilization"`
-	Agents      []AgentItem         `json:"agents"`
-	Freshness   FreshnessInfo       `json:"freshness"`
-	XOLiveness  XOLiveness          `json:"xo_liveness"`
+	Cos         string                 `json:"cos,omitempty"`
+	Utilization utilization.Summary    `json:"utilization"`
+	Quality     harnessquality.Summary `json:"harness_quality"`
+	Agents      []AgentItem            `json:"agents"`
+	Freshness   FreshnessInfo          `json:"freshness"`
+	XOLiveness  XOLiveness             `json:"xo_liveness"`
 }
 
 // BoardInputs are the already-loaded, already-stat'd values the HTTP layer

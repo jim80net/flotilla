@@ -200,6 +200,24 @@ func TestDashboardUtilizationFirstContract797(t *testing.T) {
 	}
 }
 
+func TestDashboardHarnessQualityScoreboard805(t *testing.T) {
+	srv, _ := newTestServer(t, singleFleetRoster, time.Now())
+	html := doGet(t, srv, "/").Body.String()
+	js := doGet(t, srv, "/static/dash.js").Body.String()
+	if !strings.Contains(html, `id="harness-quality"`) {
+		t.Fatal("dashboard footer missing harness quality scoreboard")
+	}
+	for _, marker := range []string{"renderHarnessQuality", "tagging_coverage_percent", "bounce_rate_percent", "rework_rate_percent"} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("dash.js missing quality marker %q", marker)
+		}
+	}
+	status := doGet(t, srv, "/api/status").Body.String()
+	if !strings.Contains(status, `"harness_quality"`) || !strings.Contains(status, `"total_events": 0`) {
+		t.Fatalf("status missing honest empty quality summary: %s", status)
+	}
+}
+
 // TestGoalsLayoutMindmapOnly locks the mind-map-only Goals rendering (operator 2026-07-06):
 // the tree/mind-map toggle was removed, so normalizeGoalsLayout REDIRECTS every seed (incl. a
 // legacy "tree"/"org") to the mind map, the body always renders data-goals-layout="mindmap",
