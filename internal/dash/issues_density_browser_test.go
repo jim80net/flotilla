@@ -102,14 +102,19 @@ with sync_playwright() as p:
             expect(page.locator("#wc-github-body .wc-open-full-issue")).to_be_visible()
             page.locator("#wc-close").click()
 
-            while page.locator("[data-ledger-more]").count():
-                page.locator("[data-ledger-more]").click()
+            activations = 0
+            jump = page.locator(".issue-ledger-jump")
+            expect(jump.locator("[data-ledger-jump]")).to_have_count(24)
+            jump.locator("summary").click()
+            activations += 1
+            expect(jump).to_have_attribute("open", "")
+            jump.locator("[data-ledger-jump]").last.click()
+            activations += 1
+            assert activations <= 2
             expect(page.locator('[data-ref="example/research-24#1143"]')).to_be_visible()
-            last_group = page.locator("[data-shipped-key]").last
-            expect(last_group).to_be_visible()
-            last_group.locator("summary").click()
             expect(page.locator('[data-ref="example/research-24#1144"]')).to_be_visible()
-            assert "all work reachable" in page.locator(".issue-mobile-window").inner_text()
+            expect(page.locator(".issue-mobile-focused")).to_contain_text("all 6 desk items visible")
+            expect(page.locator("[data-ledger-overview]")).to_be_visible()
             print(json.dumps({"viewport": "%dx%d" % (width, height), "initial_rows": initial_rows, **metrics}))
             page.close()
     finally:

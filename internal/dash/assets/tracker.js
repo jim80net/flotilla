@@ -23,6 +23,7 @@
   function isMobileLedger() { return !!(window.matchMedia && window.matchMedia("(max-width: 640px)").matches); }
   var mobileLedger = null;
   var mobileLedgerWindow = 10;
+  var mobileFocusedDesk = "";
   var shippedOpen = {};
   var shippedWindows = {};
 
@@ -158,7 +159,7 @@
               '" data-issue-next="' + next + '">show ' +
               next + " more of " + remaining + " ▸</button>" : "") + "</div>" : "") + "</details>"
       : "";
-    return '<section class="issue-desk issue-desk-mobile">' + movingBlock + shippedBlock + "</section>";
+    return '<section class="issue-desk issue-desk-mobile" data-mobile-desk-key="' + escapeHtml(key) + '">' + movingBlock + shippedBlock + "</section>";
   }
 
   // The mobile budget is global, not per desk. Multi-repo fanout commonly
@@ -167,12 +168,23 @@
   // desk's shipped rows reachable through the established nested window.
   function mobileLedgerPlan(flotillas) {
     var budget = mobileLedgerWindow, plan = {}, total = 0, reachable = 0, visible = 0;
+    var focused = null;
     flotillas.forEach(function (flotilla) {
       (Array.isArray(flotilla.desks) ? flotilla.desks : []).forEach(function (desk) {
         var moving = Array.isArray(desk.in_flight) ? desk.in_flight : [];
         var shipped = Array.isArray(desk.shipped) ? desk.shipped : [];
         var key = groupKey(flotilla.name, desk.name);
         total += moving.length + shipped.length;
+        if (mobileFocusedDesk) {
+          if (key === mobileFocusedDesk) {
+            plan[key] = { moving: moving.length, shipped: shipped.length > 0 };
+            var first = moving[0] || shipped[0] || {};
+            focused = { key: key, label: String(first.repo || flotilla.name || "Unassigned") + " / " + String(desk.name || "Unassigned"), count: moving.length + shipped.length };
+            visible = moving.length + shipped.length;
+            reachable = visible;
+          }
+          return;
+        }
         var movingShown = Math.min(moving.length, budget);
         budget -= movingShown;
         visible += movingShown;
@@ -185,7 +197,28 @@
         if (movingShown || shippedShown) plan[key] = { moving: movingShown, shipped: shippedShown };
       });
     });
-    return { desks: plan, total: total, visible: visible, reachable: reachable, remaining: Math.max(0, total - reachable) };
+    return { desks: plan, total: total, visible: visible, reachable: reachable, remaining: Math.max(0, total - reachable), focused: focused };
+  }
+
+  function mobileLedgerJump(flotillas) {
+    var buttons = [], count = 0;
+    flotillas.forEach(function (flotilla) {
+      (Array.isArray(flotilla.desks) ? flotilla.desks : []).forEach(function (desk) {
+        var movingItems = Array.isArray(desk.in_flight) ? desk.in_flight : [];
+        var shippedItems = Array.isArray(desk.shipped) ? desk.shipped : [];
+        var moving = movingItems.length, shipped = shippedItems.length;
+        if (!moving && !shipped) return;
+        var key = groupKey(flotilla.name, desk.name);
+        var first = movingItems[0] || shippedItems[0] || {};
+        var repo = String(first.repo || flotilla.name || "Unassigned");
+        count++;
+        buttons.push('<button type="button" data-ledger-jump="' + escapeHtml(key) + '" data-ledger-jump-shipped="' + shipped + '"><strong>' +
+          escapeHtml(repo) + " / " + escapeHtml(desk.name || "Unassigned") + '</strong><span>' + escapeHtml(flotilla.name || "Unassigned") + " · " +
+          moving + " moving · " + shipped + " shipped</span></button>");
+      });
+    });
+    return '<details class="issue-ledger-jump"><summary><span>Jump to repository / desk</span><span>' + count +
+      ' desks</span></summary><div class="issue-ledger-jump-list">' + buttons.join("") + "</div></details>";
   }
 
   function renderIssueList(doc) {
@@ -196,6 +229,10 @@
     el("issues-repo").textContent = repos.length ? repos.length + " repositories" : (doc.repo || "");
     var flotillas = Array.isArray(doc.flotillas) ? doc.flotillas : [];
     var mobilePlan = mobileLedger ? mobileLedgerPlan(flotillas) : null;
+    if (mobilePlan && mobileFocusedDesk && !mobilePlan.focused) {
+      mobileFocusedDesk = "";
+      mobilePlan = mobileLedgerPlan(flotillas);
+    }
     var list = el("issues-list");
     var coverage = doc.coverage || {};
     var failed = Array.isArray(coverage.failed_repos) ? coverage.failed_repos : [];
@@ -216,6 +253,7 @@
       if (window.flotillaPerf) window.flotillaPerf.viewRendered("issues");
       return;
     }
+    var ledgerJump = mobilePlan ? mobileLedgerJump(flotillas) : "";
     var ledgerHTML = flotillas.map(function (flotilla) {
       var desks = Array.isArray(flotilla.desks) ? flotilla.desks : [];
       if (mobilePlan) desks = desks.filter(function (desk) { return mobilePlan.desks[groupKey(flotilla.name, desk.name)]; });
@@ -229,14 +267,17 @@
             : renderDesk(desk, flotilla.name || "Unassigned");
         }).join("") + "</section>";
     }).join("");
-    var mobileWindow = mobilePlan
-      ? '<div class="issue-mobile-window" role="status"><span><strong>' + mobilePlan.visible +
+    var mobileWindow = mobilePlan && mobilePlan.focused
+      ? '<div class="issue-mobile-window issue-mobile-focused" role="status"><strong>Focused · ' + escapeHtml(mobilePlan.focused.label) +
+          '</strong><span>all ' + mobilePlan.focused.count + ' desk items visible · ' + mobilePlan.remaining +
+          ' elsewhere</span><button type="button" class="issue-ledger-more" data-ledger-overview>← all repositories</button></div>'
+      : mobilePlan ? '<div class="issue-mobile-window" role="status"><span><strong>' + mobilePlan.visible +
           '</strong> moving visible · <strong>' + mobilePlan.reachable + '</strong> of <strong>' + mobilePlan.total +
           '</strong> work items reachable</span>' +
           (mobilePlan.remaining ? '<button type="button" class="issue-ledger-more" data-ledger-more>show more · ' +
             mobilePlan.remaining + ' remaining ▸</button>' : '<span class="issue-ledger-complete">all work reachable</span>') + '</div>'
       : "";
-    list.innerHTML = scopeNote + ledgerHTML + mobileWindow;
+    list.innerHTML = scopeNote + ledgerJump + ledgerHTML + mobileWindow;
     var rows = list.querySelectorAll(".issue-row");
     for (var i = 0; i < rows.length; i++) {
       rows[i].addEventListener("click", function () { openWorkContext(this); });
@@ -297,6 +338,33 @@
         if (!anchor) return;
         window.scrollBy(0, anchor.getBoundingClientRect().top - top);
         if (anchor.focus) anchor.focus();
+      });
+    });
+    var jumps = list.querySelectorAll("[data-ledger-jump]");
+    for (var m = 0; m < jumps.length; m++) jumps[m].addEventListener("click", function () {
+      var key = this.getAttribute("data-ledger-jump");
+      mobileFocusedDesk = key;
+      shippedOpen[key] = true;
+      shippedWindows[key] = parseInt(this.getAttribute("data-ledger-jump-shipped"), 10) || 0;
+      renderIssueList(lastLedgerDoc);
+      requestAnimationFrame(function () {
+        var desks = list.querySelectorAll("[data-mobile-desk-key]"), desk = null;
+        for (var i = 0; i < desks.length; i++) {
+          if (desks[i].getAttribute("data-mobile-desk-key") === key) { desk = desks[i]; break; }
+        }
+        if (!desk) return;
+        desk.scrollIntoView({ block: "start" });
+        var first = desk.querySelector(".issue-row") || desk.querySelector("summary");
+        if (first) first.focus();
+      });
+    });
+    var overview = list.querySelector("[data-ledger-overview]");
+    if (overview) overview.addEventListener("click", function () {
+      mobileFocusedDesk = "";
+      renderIssueList(lastLedgerDoc);
+      requestAnimationFrame(function () {
+        var summary = list.querySelector(".issue-ledger-jump > summary");
+        if (summary) { summary.scrollIntoView({ block: "start" }); summary.focus(); }
       });
     });
     if (window.flotillaPerf) window.flotillaPerf.viewRendered("issues");
