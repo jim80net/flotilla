@@ -31,7 +31,11 @@
       <p class="research-eyebrow">Private-LAN library</p>
       <h1 id="research-library-title">Research</h1>
       <p class="research-lede">Operator-facing findings and designs, rendered for reading instead of SSH.</p>
-      <p id="research-status" class="research-status" role="status" aria-live="polite">Loading research…</p>
+      <div id="research-status" class="research-status" role="status" aria-live="polite">
+        <strong id="research-status-title">Loading research…</strong>
+        <span id="research-status-detail">Reading the private-LAN collection.</span>
+        <button id="research-index-retry" class="research-retry" type="button" hidden>Retry library</button>
+      </div>
 
       <section id="research-decisions" class="research-shelf research-decision-shelf" aria-labelledby="research-decisions-title" hidden>
         <div class="research-shelf-heading">
@@ -53,8 +57,9 @@
       <button id="research-back" class="research-mobile-back" type="button">← Research library</button>
       <div id="research-reader-empty" class="research-reader-empty">
         <p class="research-eyebrow">Reading room</p>
-        <h2>Choose a document</h2>
-        <p>Decision-ready designs are kept at the top; the rest of the library follows by most recently updated.</p>
+        <h2 id="research-reader-state-title">Choose a document</h2>
+        <p id="research-reader-state-detail">Decision-ready designs are kept at the top; the rest of the library follows by most recently updated.</p>
+        <button id="research-document-retry" class="research-retry" type="button" hidden>Retry document</button>
       </div>
       <div id="research-document" hidden>
         <aside id="research-decision-strip" class="research-decision-strip" hidden>

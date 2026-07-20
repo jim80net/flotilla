@@ -111,6 +111,7 @@ with sync_playwright() as p:
         expect(phone.locator("#research-toc-count")).to_have_text("33 sections")
         closed_height = phone.locator("#research-toc").evaluate("node => node.getBoundingClientRect().height")
         assert closed_height <= 48, closed_height
+        closed_page_height = phone.evaluate("document.documentElement.scrollHeight")
         expect(phone.locator(".research-table-wrap table")).to_be_visible()
         expect(phone.locator(".research-markdown script")).to_have_count(0)
         assert phone.evaluate("window.RESEARCH_INJECTED") is None
@@ -126,13 +127,25 @@ with sync_playwright() as p:
         phone.locator("#research-toc > summary").click()
         expect(phone.locator("#research-toc")).to_have_attribute("open", "")
         expect(phone.locator("#research-toc-list li")).to_have_count(33)
-        open_height = phone.locator("#research-toc").evaluate("node => node.getBoundingClientRect().height")
-        assert open_height > 48
+        open_metrics = phone.locator("#research-toc").evaluate("node => { const box=node.getBoundingClientRect(), summary=node.querySelector('summary').getBoundingClientRect(); return {top:box.top,bottom:box.bottom,height:box.height,summaryTop:summary.top,listClient:node.querySelector('ol').clientHeight,listScroll:node.querySelector('ol').scrollHeight} }")
+        assert open_metrics["top"] >= 0 and open_metrics["bottom"] <= 844 and open_metrics["height"] > 48, open_metrics
+        assert open_metrics["summaryTop"] >= open_metrics["top"], open_metrics
+        assert open_metrics["listScroll"] > open_metrics["listClient"], open_metrics
+        assert phone.evaluate("document.documentElement.scrollHeight") <= closed_page_height + 2
+        assert phone.locator("body").evaluate("node => node.classList.contains('research-toc-open')")
         if evidence_dir:
             phone.screenshot(path=os.path.join(evidence_dir, "research-toc-expanded-390.png"), full_page=False)
-        phone.locator("#research-toc > summary").click()
+        phone.keyboard.press("Escape")
         phone.wait_for_timeout(50)
+        assert phone.locator("#research-toc").get_attribute("open") is None
+        assert phone.locator("#research-toc > summary").evaluate("node => document.activeElement === node")
         assert phone.evaluate("window.scrollY") < 20
+        phone.locator("#research-toc > summary").click()
+        target_link = phone.locator("#research-toc-list a").nth(9)
+        target_id = target_link.get_attribute("href")[1:]
+        target_link.click()
+        expect(phone.locator("#research-toc")).not_to_have_attribute("open", "")
+        phone.wait_for_function("id => document.activeElement && document.activeElement.id === id", arg=target_id)
         phone.evaluate("window.scrollTo(0, 900)")
         phone.wait_for_timeout(50)
         sticky = phone.locator("#research-decision-strip").evaluate("node => ({position:getComputedStyle(node).position, top:node.getBoundingClientRect().top, bottom:node.getBoundingClientRect().bottom})")
@@ -144,12 +157,57 @@ with sync_playwright() as p:
         print(json.dumps({
             "initial": initial_metrics,
             "collections": {"decision_visible": 6, "decision_total": 8, "library_visible": 6, "library_total": 8},
-            "toc": {"closed_height": closed_height, "open_height": open_height, "sections": 33},
+            "toc": {"closed_height": closed_height, "open": open_metrics, "sections": 33},
             "sticky_after_900": sticky,
             "table": table_metrics,
             "code": code_metrics
         }, sort_keys=True))
         phone.close()
+
+        compact = browser.new_page(viewport={"width": 360, "height": 800})
+        compact.goto(url + "/research/authorization-domains-design.md", wait_until="domcontentloaded")
+        expect(compact.locator("#research-document")).to_be_visible()
+        compact.locator("#research-toc > summary").click()
+        compact_toc = compact.locator("#research-toc").evaluate("node => { const box=node.getBoundingClientRect(); return {top:box.top,bottom:box.bottom,height:box.height,listClient:node.querySelector('ol').clientHeight,listScroll:node.querySelector('ol').scrollHeight} }")
+        assert compact_toc["top"] >= 0 and compact_toc["bottom"] <= 800 and compact_toc["listScroll"] > compact_toc["listClient"], compact_toc
+        assert compact.evaluate("document.documentElement.scrollWidth === document.documentElement.clientWidth")
+        compact.keyboard.press("Escape")
+        assert compact.locator("#research-toc > summary").evaluate("node => document.activeElement === node")
+        compact.close()
+
+        collection_attempts = {"count": 0}
+        unavailable = browser.new_page(viewport={"width": 390, "height": 844})
+        def collection_route(route):
+            collection_attempts["count"] += 1
+            if collection_attempts["count"] == 1:
+                route.fulfill(status=503, content_type="application/json", body='{"error":"temporarily unavailable"}')
+            else:
+                route.continue_()
+        unavailable.route("**/api/research", collection_route)
+        unavailable.goto(url + "/research", wait_until="domcontentloaded")
+        expect(unavailable.locator("#research-status-title")).to_have_text("Research library unavailable")
+        expect(unavailable.locator("#research-index-retry")).to_be_visible()
+        unavailable.locator("#research-index-retry").click()
+        expect(unavailable.locator("#research-decisions")).to_be_visible()
+        assert collection_attempts["count"] == 2
+        unavailable.close()
+
+        document_attempts = {"count": 0}
+        document_error = browser.new_page(viewport={"width": 390, "height": 844})
+        def document_route(route):
+            document_attempts["count"] += 1
+            if document_attempts["count"] == 1:
+                route.fulfill(status=503, content_type="application/json", body='{"error":"temporarily unavailable"}')
+            else:
+                route.continue_()
+        document_error.route("**/api/research/authorization-domains-design.md", document_route)
+        document_error.goto(url + "/research/authorization-domains-design.md", wait_until="domcontentloaded")
+        expect(document_error.locator("#research-reader-state-title")).to_have_text("Document unavailable")
+        expect(document_error.locator("#research-document-retry")).to_be_visible()
+        document_error.locator("#research-document-retry").click()
+        expect(document_error.locator("#research-document")).to_be_visible()
+        assert document_attempts["count"] == 2
+        document_error.close()
 
         desktop = browser.new_page(viewport={"width": 1440, "height": 900})
         desktop.goto(url + "/research/notes/field-note.md", wait_until="domcontentloaded")
