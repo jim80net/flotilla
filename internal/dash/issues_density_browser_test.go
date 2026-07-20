@@ -114,7 +114,18 @@ with sync_playwright() as p:
             expect(page.locator('[data-ref="example/research-24#1143"]')).to_be_visible()
             expect(page.locator('[data-ref="example/research-24#1144"]')).to_be_visible()
             expect(page.locator(".issue-mobile-focused")).to_contain_text("all 6 desk items visible")
-            expect(page.locator("[data-ledger-overview]")).to_be_visible()
+            overview = page.locator("[data-ledger-overview]")
+            expect(overview).to_be_visible()
+            return_box = overview.evaluate("node => { const r=node.getBoundingClientRect(); return {top:r.top,bottom:r.bottom,height:r.height} }")
+            assert return_box["top"] >= 0 and return_box["bottom"] <= height and return_box["height"] >= 44, return_box
+            page.wait_for_function("() => document.activeElement && document.activeElement.classList.contains('issue-row')")
+            overview.click()
+            expect(page.locator('[data-ref="example/research-24#1143"]')).to_have_count(0)
+            expect(page.locator(".issue-mobile-focused")).to_have_count(0)
+            summary = page.locator(".issue-ledger-jump > summary")
+            page.wait_for_function("() => document.activeElement === document.querySelector('.issue-ledger-jump > summary')")
+            return_focus = summary.evaluate("node => { const r=node.getBoundingClientRect(), h=document.querySelector('#issues-listpanel > .panel-head').getBoundingClientRect(); return {top:r.top,bottom:r.bottom,height:r.height,headerBottom:h.bottom} }")
+            assert return_focus["height"] >= 44 and return_focus["top"] >= return_focus["headerBottom"] + 7, return_focus
             print(json.dumps({"viewport": "%dx%d" % (width, height), "initial_rows": initial_rows, **metrics}))
             page.close()
     finally:

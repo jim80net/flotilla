@@ -221,6 +221,14 @@
       ' desks</span></summary><div class="issue-ledger-jump-list">' + buttons.join("") + "</div></details>";
   }
 
+  function placeBelowIssuesHeader(node) {
+    if (!node) return;
+    node.scrollIntoView({ block: "start" });
+    var head = el("issues-listpanel").querySelector(":scope > .panel-head");
+    var targetTop = (head ? head.getBoundingClientRect().bottom : 0) + 8;
+    window.scrollBy(0, node.getBoundingClientRect().top - targetTop);
+  }
+
   function renderIssueList(doc) {
     lastLedgerDoc = doc;
     primaryRepo = String(doc.repo || "");
@@ -277,7 +285,7 @@
           (mobilePlan.remaining ? '<button type="button" class="issue-ledger-more" data-ledger-more>show more · ' +
             mobilePlan.remaining + ' remaining ▸</button>' : '<span class="issue-ledger-complete">all work reachable</span>') + '</div>'
       : "";
-    list.innerHTML = scopeNote + ledgerJump + ledgerHTML + mobileWindow;
+    list.innerHTML = scopeNote + ledgerJump + (mobilePlan && mobilePlan.focused ? mobileWindow + ledgerHTML : ledgerHTML + mobileWindow);
     var rows = list.querySelectorAll(".issue-row");
     for (var i = 0; i < rows.length; i++) {
       rows[i].addEventListener("click", function () { openWorkContext(this); });
@@ -353,9 +361,9 @@
           if (desks[i].getAttribute("data-mobile-desk-key") === key) { desk = desks[i]; break; }
         }
         if (!desk) return;
-        desk.scrollIntoView({ block: "start" });
+        placeBelowIssuesHeader(list.querySelector(".issue-mobile-focused"));
         var first = desk.querySelector(".issue-row") || desk.querySelector("summary");
-        if (first) first.focus();
+        if (first) first.focus({ preventScroll: true });
       });
     });
     var overview = list.querySelector("[data-ledger-overview]");
@@ -364,7 +372,7 @@
       renderIssueList(lastLedgerDoc);
       requestAnimationFrame(function () {
         var summary = list.querySelector(".issue-ledger-jump > summary");
-        if (summary) { summary.scrollIntoView({ block: "start" }); summary.focus(); }
+        if (summary) { placeBelowIssuesHeader(summary); summary.focus({ preventScroll: true }); }
       });
     });
     if (window.flotillaPerf) window.flotillaPerf.viewRendered("issues");
