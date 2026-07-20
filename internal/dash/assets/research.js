@@ -139,7 +139,7 @@
   }
 
   var entries = [], collectionWindow = 6, decisionVisible = collectionWindow, libraryVisible = collectionWindow;
-  var lastDocumentID = "";
+  var lastDocumentID = "", lastDocumentPush = false;
   function setIndexState(title, detail, retry) {
     var status = el("research-status");
     status.hidden = false;
@@ -232,6 +232,7 @@
   }
   function openDocument(id, push) {
     lastDocumentID = id;
+    lastDocumentPush = !!push;
     el("research-reader").classList.add("is-loading");
     el("research-document").hidden = true;
     setReaderState("Loading document…", "Fetching the latest private-LAN copy.", false);
@@ -239,6 +240,7 @@
     fetchJSON(apiPath(id)).then(function (doc) {
       renderDocument(doc);
       if (push) history.pushState({ research: id }, "", pagePath(id));
+      lastDocumentPush = false;
     }).catch(function (error) {
       setReaderState("Document unavailable", "The document could not be loaded: " + error.message, true);
     }).finally(function () { el("research-reader").classList.remove("is-loading"); });
@@ -259,7 +261,7 @@
   el("research-decision-more").addEventListener("click", function () { decisionVisible += collectionWindow; renderIndex(); });
   el("research-library-more").addEventListener("click", function () { libraryVisible += collectionWindow; renderIndex(); });
   el("research-index-retry").addEventListener("click", loadIndex);
-  el("research-document-retry").addEventListener("click", function () { if (lastDocumentID) openDocument(lastDocumentID, false); });
+  el("research-document-retry").addEventListener("click", function () { if (lastDocumentID) openDocument(lastDocumentID, lastDocumentPush); });
   var tocRestoreY = 0;
   var tocLinkClosing = false;
   var toc = el("research-toc"), tocSummary = toc.querySelector("summary");

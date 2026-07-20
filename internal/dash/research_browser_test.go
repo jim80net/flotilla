@@ -209,6 +209,29 @@ with sync_playwright() as p:
         assert document_attempts["count"] == 2
         document_error.close()
 
+        card_attempts = {"count": 0}
+        card_error = browser.new_page(viewport={"width": 390, "height": 844})
+        def card_route(route):
+            card_attempts["count"] += 1
+            if card_attempts["count"] == 1:
+                route.fulfill(status=503, content_type="application/json", body='{"error":"temporarily unavailable"}')
+            else:
+                route.continue_()
+        card_error.route("**/api/research/authorization-domains-design.md", card_route)
+        card_error.goto(url + "/research", wait_until="domcontentloaded")
+        card_error.locator("#research-decision-list .research-card").filter(has_text="Authorization Domains").click()
+        expect(card_error.locator("#research-reader-state-title")).to_have_text("Document unavailable")
+        assert card_error.url.endswith("/research"), card_error.url
+        card_error.locator("#research-document-retry").click()
+        expect(card_error.locator("#research-document")).to_be_visible()
+        expect(card_error).to_have_url(url + "/research/authorization-domains-design.md")
+        assert card_attempts["count"] == 2
+        card_error.go_back()
+        expect(card_error).to_have_url(url + "/research")
+        expect(card_error.locator("#research-library")).to_be_visible()
+        expect(card_error.locator("#research-reader")).to_be_hidden()
+        card_error.close()
+
         desktop = browser.new_page(viewport={"width": 1440, "height": 900})
         desktop.goto(url + "/research/notes/field-note.md", wait_until="domcontentloaded")
         expect(desktop.locator("#research-title")).to_have_text("Field note")
