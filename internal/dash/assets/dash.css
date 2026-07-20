@@ -2170,6 +2170,10 @@ html, body { overflow-x: clip; }
   }
   .issue-scope-note strong { flex: 0 0 auto; font-size: .6rem; }
   .issue-scope-note span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .issue-scope-note.issue-scope-incomplete {
+    align-items: flex-start; white-space: normal; line-height: 1.3;
+  }
+  .issue-scope-note.issue-scope-incomplete span { overflow: visible; text-overflow: clip; }
   .issue-ledger-head { min-height: 34px; padding: 4px 8px; }
   .issue-ledger-kicker { display: none; }
   .issue-ledger-head h3 { font-size: .78rem; }
@@ -2211,6 +2215,35 @@ html, body { overflow-x: clip; }
     width: 100%; min-height: 36px; border: 0; border-top: 1px dashed var(--line); background: transparent;
     color: var(--cyan); font: .64rem var(--mono); cursor: pointer;
   }
+  .issue-mobile-window {
+    display: grid; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: var(--r-sm);
+    background: var(--abyss-2); color: var(--ink-3); font: .62rem/1.35 var(--mono);
+  }
+  .issue-ledger-jump { border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--abyss-2); }
+  .issue-ledger-jump > summary {
+    display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding: 0 8px;
+    color: var(--cyan); font: .66rem var(--mono); cursor: pointer; list-style: none;
+  }
+  .issue-ledger-jump > summary::-webkit-details-marker { display: none; }
+  .issue-ledger-jump > summary::before { content: "▸"; margin-right: 6px; }
+  .issue-ledger-jump[open] > summary::before { transform: rotate(90deg); }
+  .issue-ledger-jump > summary span:last-child { margin-left: auto; color: var(--ink-3); }
+  .issue-ledger-jump-list { max-height: min(58dvh, 460px); overflow-y: auto; border-top: 1px solid var(--line); }
+  .issue-ledger-jump-list button {
+    display: grid; gap: 2px; width: 100%; min-height: 48px; padding: 6px 8px; border: 0;
+    border-bottom: 1px solid var(--line-soft); background: transparent; color: var(--ink-2); text-align: left; cursor: pointer;
+  }
+  .issue-ledger-jump-list button:hover { background: color-mix(in srgb, var(--cyan) 6%, transparent); }
+  .issue-ledger-jump-list button:focus-visible, .issue-ledger-jump > summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
+  .issue-ledger-jump-list strong { color: var(--ink); font: .7rem var(--mono); }
+  .issue-ledger-jump-list span { color: var(--ink-3); font: .58rem var(--mono); }
+  .issue-ledger-more {
+    width: 100%; min-height: 44px; border: 1px solid var(--cyan-dim); border-radius: var(--r-sm);
+    background: color-mix(in srgb, var(--cyan) 7%, var(--abyss-2)); color: var(--cyan);
+    font: .68rem var(--mono); cursor: pointer;
+  }
+  .issue-ledger-more:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+  .issue-ledger-complete { color: var(--ok); }
 
   /* #515: issues list on a phone — keep a 44px row target; title already
      line-clamps to 2 lines at all widths. Put labels on their own row so the
