@@ -142,6 +142,15 @@ func ScanUndeliveredInbound(rosterDir string, now time.Time, age time.Duration) 
 // ok=false means unreadable (no reader / no session) — not an error for suppress.
 type TurnFinalReader func(agent string) (text string, ok bool, err error)
 
+// RecipientMergedChecker reports whether a PR cited by one inbound row is
+// merged in that recipient's authority-domain repository. The recipient scope
+// prevents a same-number PR in another product repository from settling cargo.
+type RecipientMergedChecker func(recipient string, pr int) bool
+
+// RecipientCommitChecker confirms an explicitly terminal SHA against the
+// recipient's authority-domain mainline.
+type RecipientCommitChecker func(recipient, sha string) bool
+
 // ReconcileInboundAcks heals recipient inbound ledgers before undelivered scan (#628):
 //  1. Remove entries whose nonce is already in the durable consumed registry
 //  2. If readTurnFinal is set, remove entries the latest turn-final acknowledges
@@ -150,6 +159,20 @@ type TurnFinalReader func(agent string) (text string, ok bool, err error)
 // Returns how many entries were cleared. Prefer root-cause finish-edge consume;
 // this is the sweep-time belt so false-positive undelivered-ack never reaches Discord.
 func ReconcileInboundAcks(rosterDir string, readTurnFinal TurnFinalReader) int {
+	return ReconcileInboundAcksWithMerged(rosterDir, readTurnFinal, nil)
+}
+
+// ReconcileInboundAcksWithMerged also durable-consumes stale cargo when every
+// PR cited by the dispatch is merged. This runs before undelivered reporting,
+// so a completed chapter does not produce a false 15-minute ack incident merely
+// because the recipient's final acknowledgement was lost.
+func ReconcileInboundAcksWithMerged(rosterDir string, readTurnFinal TurnFinalReader, isMerged RecipientMergedChecker) int {
+	return ReconcileInboundAcksWithTerminal(rosterDir, readTurnFinal, isMerged, nil)
+}
+
+// ReconcileInboundAcksWithTerminal extends merged-PR reconciliation with
+// explicitly cited main/merge SHAs that are confirmed reachable from main.
+func ReconcileInboundAcksWithTerminal(rosterDir string, readTurnFinal TurnFinalReader, isMerged RecipientMergedChecker, isCommitOnMain RecipientCommitChecker) int {
 	if rosterDir == "" {
 		return 0
 	}
@@ -165,6 +188,27 @@ func ReconcileInboundAcks(rosterDir string, readTurnFinal TurnFinalReader) int {
 			return reg.SettlesInboundRow(nonce, PayloadHash(message), recipient)
 		})
 		n += len(clearedCons)
+		if isMerged != nil || isCommitOnMain != nil {
+			for _, e := range st.Load() {
+				var prChecker MergedChecker
+				if isMerged != nil {
+					prChecker = func(pr int) bool { return isMerged(recipient, pr) }
+				}
+				var commitChecker CommitOnMainChecker
+				if isCommitOnMain != nil {
+					commitChecker = func(sha string) bool { return isCommitOnMain(recipient, sha) }
+				}
+				if evidence, terminal := ShouldSuppressTerminal(e.Message, prChecker, commitChecker); terminal {
+					if _, cerr := reg.Consume(ConsumeFromInbound(e.Nonce, e.Message, ReasonMerged, e.Sender, e.Recipient)); cerr != nil {
+						log.Printf("flotilla dispatch: reconcile consume-merged failed nonce=%s: %v", e.Nonce, cerr)
+						continue
+					}
+					st.Remove(e.ID)
+					n++
+					log.Printf("flotilla dispatch: reconcile suppress recipient=%s nonce=%s reason=merged evidence=%s", recipient, e.Nonce, evidence)
+				}
+			}
+		}
 		if readTurnFinal == nil {
 			continue
 		}
