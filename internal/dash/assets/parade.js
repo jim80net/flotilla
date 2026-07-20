@@ -18,6 +18,7 @@
   var PARADES = [], pIdx = 0, sIdx = 0, view = "list";
   var CONVERSATIONS = {}, conversationLoading = {};
   var CONVERSATION_META = { schema: 1, parades: {}, unanswered_operator: {} }, metaLoading = false;
+  var pendingUnreadOpen = null;
   var PARADE_POLL_MS = Number(window.__FLOTILLA_PARADE_POLL_MS) || 15000;
   var PARADE_READ_KEY = "flotilla.parade.read.v1";
   var PARADE_READ = loadParadeReadState();
@@ -348,6 +349,30 @@
     return Object.keys(replies).some(function (slide) { return threadUnread(date, slide); });
   }
 
+  // PARADES is served newest-first. Within that parade, the lowest authored
+  // slide index wins. This stable order makes repeated activation walk the
+  // operator through unread conversations without timestamps racing the UI.
+  function nextUnreadThread() {
+    for (var paradeIndex = 0; paradeIndex < PARADES.length; paradeIndex++) {
+      var parade = PARADES[paradeIndex];
+      var slideCount = parseSlides(parade.slides || "").length;
+      var replies = (CONVERSATION_META.parades || {})[parade.date] || {};
+      var slides = Object.keys(replies).sort(function (a, b) {
+        var an = Number(a), bn = Number(b);
+        if (Number.isFinite(an) && Number.isFinite(bn) && an !== bn) return an - bn;
+        return String(a).localeCompare(String(b));
+      });
+      for (var i = 0; i < slides.length; i++) {
+        var slideIndex = Number(slides[i]);
+        if (!Number.isInteger(slideIndex) || slideIndex < 0 || slideIndex >= slideCount) continue;
+        if (threadUnread(parade.date, slideIndex)) {
+          return { paradeIndex: paradeIndex, date: parade.date, slideIndex: slideIndex };
+        }
+      }
+    }
+    return null;
+  }
+
   function markThreadRead(date, index) {
     var marker = replyMarker(date, index);
     if (!marker) return;
@@ -364,8 +389,42 @@
 
   function updateGlobalUnread() {
     var dot = el("pd-global-unread");
-    if (!dot) return;
-    dot.hidden = !PARADES.some(function (parade) { return paradeUnread(parade.date); });
+    var target = nextUnreadThread();
+    if (dot) dot.hidden = !target;
+    [el("pd-unread-jump"), el("pd-list-unread-jump")].forEach(function (button) {
+      if (!button) return;
+      button.hidden = !target;
+      if (target) {
+        var label = "Open unread parade reply from " + target.date + ", slide " + (target.slideIndex + 1);
+        button.setAttribute("aria-label", label);
+        button.setAttribute("title", label + " (newest parade, then lowest slide)");
+      } else {
+        button.setAttribute("aria-label", "Open next unread parade conversation");
+        button.removeAttribute("title");
+      }
+    });
+  }
+
+  function finishUnreadJump(date) {
+    var target = pendingUnreadOpen;
+    if (!target || target.date !== date || (PARADES[pIdx] || {}).date !== date || sIdx !== target.slideIndex) return;
+    pendingUnreadOpen = null;
+    renderConversationPane(true);
+    var summary = el("pd-conversation") && el("pd-conversation").querySelector("summary");
+    if (summary) {
+      summary.scrollIntoView({ block: "nearest" });
+      summary.focus({ preventScroll: true });
+    }
+  }
+
+  function jumpToUnread() {
+    var target = nextUnreadThread();
+    if (!target) return;
+    pIdx = target.paradeIndex;
+    sIdx = target.slideIndex;
+    pendingUnreadOpen = target;
+    renderDeck();
+    if (CONVERSATIONS[target.date]) finishUnreadJump(target.date);
   }
 
   function messageTextHtml(text) {
@@ -382,7 +441,10 @@
     var thread = slideConversation(par.date, sIdx);
     var messages = Array.isArray(thread.messages) ? thread.messages : [];
     if (CONVERSATIONS[par.date]) reconcileConversationMeta(par.date, CONVERSATIONS[par.date]);
-    if (open) markThreadRead(par.date, sIdx);
+    // Metadata can arrive before the thread body. Only opening a successfully
+    // loaded conversation advances the read cursor; loading/error chrome never
+    // clears an unread reply the operator has not actually seen.
+    if (open && CONVERSATIONS[par.date]) markThreadRead(par.date, sIdx);
     var unread = threadUnread(par.date, sIdx);
     var loading = conversationLoading[par.date] === true;
     var loadError = conversationLoading[par.date] instanceof Error;
@@ -414,7 +476,7 @@
     });
     details.addEventListener("toggle", function () {
       el("pd-stage").classList.toggle("has-open-conversation", this.open);
-      if (this.open) {
+      if (this.open && CONVERSATIONS[par.date]) {
         markThreadRead(par.date, sIdx);
         var dot = this.querySelector(".pd-unread-dot");
         if (dot) dot.remove();
@@ -437,11 +499,17 @@
         delete conversationLoading[date];
         updateGlobalUnread();
         renderList();
-        if ((PARADES[pIdx] || {}).date === date) renderConversationPane(false);
+        if ((PARADES[pIdx] || {}).date === date) {
+          renderConversationPane(false);
+          finishUnreadJump(date);
+        }
       })
       .catch(function (error) {
         conversationLoading[date] = error;
-        if ((PARADES[pIdx] || {}).date === date) renderConversationPane(false);
+        if ((PARADES[pIdx] || {}).date === date) {
+          renderConversationPane(false);
+          finishUnreadJump(date);
+        }
       });
   }
 
@@ -590,6 +658,8 @@
     el("pd-prev").addEventListener("click", function (e) { e.stopPropagation(); prev(); });
     el("pd-next").addEventListener("click", function (e) { e.stopPropagation(); next(); });
     el("pd-close").addEventListener("click", showList);
+    el("pd-unread-jump").addEventListener("click", jumpToUnread);
+    el("pd-list-unread-jump").addEventListener("click", jumpToUnread);
     // tap the left/right half of the slide to page (interactive conversation controls never page).
     el("pd-stage").addEventListener("click", function (e) {
       if (e.target.closest("a, button, input, textarea, select, label, form, details, summary, .pd-conversation")) return;
