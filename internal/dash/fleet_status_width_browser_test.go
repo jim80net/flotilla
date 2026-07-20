@@ -15,7 +15,7 @@ func TestFleetStatusSemanticWidthContract839(t *testing.T) {
 	srv, _ := newTestServer(t, singleFleetRoster, time.Now())
 	js := doGet(t, srv, "/static/dash.js").Body.String()
 	css := doGet(t, srv, "/static/dash.css").Body.String()
-	for _, marker := range []string{`function utilizationUnits(status)`, `fleet-status-unit`, `fleet-utilization-unit`, `unit.kind`, `unit.text`} {
+	for _, marker := range []string{`function utilizationUnits(status)`, `function utilizationReadUnits(status)`, `Almost no one is working`, `Send work or pull the next queue item`, `fleet-status-unit`, `fleet-utilization-unit`, `unit.kind`, `unit.text`} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("fleet status renderer missing %q", marker)
 		}
@@ -65,9 +65,10 @@ status = {
     "agents": [],
     "freshness": {"state": "fresh", "message": ""},
     "xo_liveness": {"acked": True, "ack_age": "11m23s", "settled_known": True, "settled": False},
-    "utilization": {"working": 1, "total": 52, "blocked": 8, "awaiting_authority": 12}
+    "utilization": {"working": 1, "total": 52, "blocked": 8, "awaiting_authority": 12, "utilization_wall": True}
 }
 expected = ["1 of 52 seats working", "8 blocked", "12 held for a decision", "cos · ack 11m23s ago · active"]
+footer_expected = expected[:3] + ["Almost no one is working", "Send work or pull the next queue item"]
 
 def verify(page, width, height):
     page.set_viewport_size({"width": width, "height": height})
@@ -95,23 +96,32 @@ def verify(page, width, height):
         if metric["left"] < metric["parentLeft"] - .5 or metric["right"] > metric["parentRight"] + .5:
             raise AssertionError("semantic unit escaped its column at %dpx: %r" % (width, metric))
     footer_units = page.locator("#fleet-utilization .fleet-utilization-unit")
-    expect(footer_units).to_have_count(3)
-    if footer_units.all_inner_texts() != expected[:3]:
+    expect(footer_units).to_have_count(5)
+    if footer_units.all_inner_texts() != footer_expected:
         raise AssertionError("footer semantic units changed at %dpx" % width)
-    if " ".join(page.locator("#fleet-utilization").inner_text().split()) != " ".join(expected[:3]):
+    if " ".join(page.locator("#fleet-utilization").inner_text().split()) != " ".join(footer_expected):
         raise AssertionError("footer units lost readable text boundaries at %dpx" % width)
-    footer_lines = footer_units.evaluate_all("""els => els.map(el => {
-      const range = document.createRange(); range.selectNodeContents(el);
-      return [...new Set([...range.getClientRects()].map(rect => Math.round(rect.top)))].length;
+    footer_metrics = footer_units.evaluate_all("""els => els.map(el => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const lines = [...range.getClientRects()].map(rect => Math.round(rect.top));
+      const box = el.getBoundingClientRect();
+      const parent = el.parentElement.getBoundingClientRect();
+      return {text: el.innerText, lines: [...new Set(lines)].length,
+              left: box.left, right: box.right, parentLeft: parent.left, parentRight: parent.right,
+              whiteSpace: getComputedStyle(el).whiteSpace};
     })""")
-    if footer_lines != [1, 1, 1]:
-        raise AssertionError("footer semantic unit wrapped internally at %dpx: %r" % (width, footer_lines))
+    for metric in footer_metrics:
+        if metric["lines"] != 1 or metric["whiteSpace"] != "nowrap":
+            raise AssertionError("footer semantic unit wrapped internally at %dpx: %r" % (width, metric))
+        if metric["left"] < metric["parentLeft"] - .5 or metric["right"] > metric["parentRight"] + .5:
+            raise AssertionError("footer semantic unit escaped its parent at %dpx: %r" % (width, metric))
     doc = page.evaluate("() => ({scrollWidth: document.documentElement.scrollWidth, innerWidth})")
     if doc["scrollWidth"] > doc["innerWidth"]:
         raise AssertionError("fleet status causes horizontal overflow at %dpx: %r" % (width, doc))
     if evidence_dir:
         page.screenshot(path=os.path.join(evidence_dir, "fleet-status-%d.png" % width), full_page=True)
-    print("FLEET_STATUS_%d=" % width + json.dumps(metrics, sort_keys=True))
+    print("FLEET_STATUS_%d=" % width + json.dumps({"header": metrics, "footer": footer_metrics}, sort_keys=True))
 
 with sync_playwright() as p:
     browser = p.chromium.launch()

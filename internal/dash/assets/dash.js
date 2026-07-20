@@ -141,18 +141,19 @@
     return utilizationUnits(status).map(function (unit) { return unit.text; }).join(" · ");
   }
 
-  function utilizationRead(status) {
+  function utilizationReadUnits(status) {
     return status && status.utilization && status.utilization.utilization_wall
-      ? "Almost no one is working — send work or pull the next queue item."
-      : "";
+      ? [
+        { kind: "read", text: "Almost no one is working" },
+        { kind: "action", text: "Send work or pull the next queue item" }
+      ]
+      : [];
   }
 
   function renderUtilization(status) {
     var target = el("fleet-utilization");
     if (target) {
-      var units = utilizationUnits(status);
-      var read = utilizationRead(status);
-      if (read) units.push({ kind: "read", text: read });
+      var units = utilizationUnits(status).concat(utilizationReadUnits(status));
       target.innerHTML = units.map(function (unit) {
         return '<span class="fleet-utilization-unit">' + escapeHtml(unit.text) + "</span>";
       }).join(" ");
