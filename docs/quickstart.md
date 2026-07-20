@@ -183,6 +183,12 @@ flotilla resume infra            # default launch file: <roster-dir>/flotilla-la
 flotilla resume infra --force    # resume even if the pane is a LIVE session (kills it first)
 ```
 
+Seats carrying an e2e-only conservation policy in their fleet-ops-owned
+`capacity-hold.json` remain on their current fallback even after capacity is
+marked `CLEARED`. A primary/Codex resume or switch fails before pane or overlay
+mutation. Only a scheduled e2e or canary run should use the explicit
+`--scheduled-e2e` authorization; it does not override an active capacity hold.
+
 `resume` resolves the desk by its stable marker first: an existing pane is
 **respawned in place** (and **refuses a live session** unless `--force` —
 restart is not resume-and-act); a mis-tagged (ambiguous) fleet is **refused**;

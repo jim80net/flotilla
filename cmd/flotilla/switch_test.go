@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -852,7 +853,7 @@ func TestParseSwitchArgs(t *testing.T) {
 		{"trailing junk", []string{"research", "--to", "primary", "extra"}, "", "", false, false, false, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			agent, to, _, _, _, confirm, repair, force, auto, err := parseSwitchArgs(tc.args)
+			agent, to, _, _, _, confirm, repair, force, auto, _, err := parseSwitchArgs(tc.args)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("expected an error, got agent=%q to=%q", agent, to)
@@ -867,6 +868,16 @@ func TestParseSwitchArgs(t *testing.T) {
 					agent, to, confirm, repair, force, auto, tc.wantAgent, tc.wantTo, tc.confirm, tc.repair, tc.force, tc.auto)
 			}
 		})
+	}
+}
+
+func TestParseSwitchArgsScheduledE2EAuthorization(t *testing.T) {
+	agent, to, _, _, _, _, _, _, _, scheduled, err := parseSwitchArgs([]string{"alpha-desk", "--to", "primary", "--scheduled-e2e"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent != "alpha-desk" || to != "primary" || !scheduled {
+		t.Fatalf("parseSwitchArgs() = agent %q to=%q scheduled=%v", agent, to, scheduled)
 	}
 }
 
@@ -1066,6 +1077,25 @@ func TestRunRepairReconcilesFromLivePane(t *testing.T) {
 	}
 	if !strings.Contains(msg, "reconciled") || !strings.Contains(msg, "grok") {
 		t.Errorf("msg = %q, want a reconcile line naming the live TO harness", msg)
+	}
+}
+
+func TestRunRepairConservationRefusesBeforeOverlayWrite(t *testing.T) {
+	chain := switchChainFixture()
+	r := &repairRec{
+		paneCmd: "codex", gen: "TOK", resolveOut: deliver.ResolveUnique, hasRecord: true,
+		record: switchRecord{Token: "TOK", Phase: switchPhaseOverlayPending, From: "grok", To: "primary"},
+	}
+	ops := fakeRepairOps(r)
+	ops.authorizeTarget = func(slot, surface string) error {
+		return fmt.Errorf("policy source refuses %s/%s", slot, surface)
+	}
+	_, err := runRepair(ops, "alpha-desk", chain, "grok")
+	if err == nil || !strings.Contains(err.Error(), "policy source") {
+		t.Fatalf("runRepair() error = %v, want conservation refusal", err)
+	}
+	if r.wroteOverlay != nil {
+		t.Fatal("operator-manual repair must not write a primary overlay after conservation refusal")
 	}
 }
 

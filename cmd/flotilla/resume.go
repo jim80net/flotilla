@@ -52,7 +52,7 @@ type resumePlan struct {
 // "does this desk's pane already exist", consistent with ResolvePane's two-tier
 // precedence.
 func cmdResume(args []string) error {
-	agentName, rosterPath, launchPath, force, err := parseResumeArgs(args)
+	agentName, rosterPath, launchPath, force, scheduledE2E, err := parseResumeArgs(args)
 	if err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func cmdResume(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := workspace.EnforceCapacityHold(agentName, "resume", selection.Slot, selection.Surface, time.Now()); err != nil {
+	if err := workspace.EnforceHarnessTarget(agentName, "resume", selection.Slot, selection.Surface, time.Now(), workspace.TargetAuthorization{ScheduledE2E: scheduledE2E}); err != nil {
 		return err
 	}
 	recipe := selection.Recipe
@@ -302,7 +302,7 @@ func printState(agent string, r launch.Recipe) {
 // Pure (no roster/launch/tmux I/O) so the ordering is unit tested. launchPath is
 // returned empty when --launch was not given, so the caller can default it to a
 // roster-relative path after loading the roster.
-func parseResumeArgs(args []string) (agent, rosterPath, launchPath string, force bool, err error) {
+func parseResumeArgs(args []string) (agent, rosterPath, launchPath string, force, scheduledE2E bool, err error) {
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		agent, args = args[0], args[1:]
 	}
@@ -310,17 +310,18 @@ func parseResumeArgs(args []string) (agent, rosterPath, launchPath string, force
 	rp := fs.String("roster", rosterDefault(), "roster config path")
 	lp := fs.String("launch", os.Getenv("FLOTILLA_LAUNCH"), "launch recipes path (default <roster-dir>/flotilla-launch.json)")
 	fc := fs.Bool("force", false, "resume even if the desk is a live session (kills it)")
+	e2e := fs.Bool("scheduled-e2e", false, "authorize a scheduled e2e/canary launch on an e2e-only surface")
 	if err = fs.Parse(args); err != nil {
-		return "", "", "", false, err
+		return "", "", "", false, false, err
 	}
 	rest := fs.Args()
 	if agent == "" && len(rest) >= 1 { // agent supplied after the flags
 		agent, rest = rest[0], rest[1:]
 	}
 	if agent == "" || len(rest) != 0 {
-		return "", "", "", false, fmt.Errorf("usage: flotilla resume <agent> [--launch <path>] [--force]")
+		return "", "", "", false, false, fmt.Errorf("usage: flotilla resume <agent> [--launch <path>] [--force] [--scheduled-e2e]")
 	}
-	return agent, *rp, *lp, *fc, nil
+	return agent, *rp, *lp, *fc, *e2e, nil
 }
 
 // loadFlatLaunch reads and validates the fleet-wide flotilla-launch.json. The file
