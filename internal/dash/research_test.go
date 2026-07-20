@@ -126,6 +126,9 @@ func TestResearchAPIIndexBodyDeepLinkAndTraversal(t *testing.T) {
 	if doc.ID != "nested/note.md" || doc.Markdown != "# Nested note\n\nNested body.\n" {
 		t.Errorf("research document = %+v", doc)
 	}
+	if doc.Digest != researchDigest(doc.Markdown) || !strings.HasPrefix(doc.Digest, "sha256:") {
+		t.Errorf("research digest = %q", doc.Digest)
+	}
 	if got := bodyRec.Header().Get("Cache-Control"); got != "no-store" {
 		t.Errorf("research body cache control = %q", got)
 	}
