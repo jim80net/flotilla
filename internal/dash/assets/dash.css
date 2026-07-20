@@ -1,5 +1,5 @@
 /* flotilla dash — fleet command console (operator instrument panel).
-   WARM LIGHT theme (the flotilla default). A warm-paper ground, near-white raised
+   WARM LIGHT is the fallback theme. A warm-paper ground, near-white raised
    panels lifted by soft warm shadows + crisp warm borders so every section reads
    as its own card; a deep-teal signal, an ochre bus accent, warm-ink telemetry.
    Barlow Condensed chrome, IBM Plex Mono body, desk gauge cards. No build.
@@ -19,6 +19,7 @@
    from the token rather than hard-coding a dead hue. */
 
 :root {
+  color-scheme: light;
   /* ── surfaces (warm light) — page is the deepest warm tone so panels pop ── */
   --ground:     #efe7d8;   /* the page — warm parchment */
   --surface:    #faf5ec;   /* panels, threads, log panes — raised warm ivory */
@@ -34,6 +35,7 @@
   --ink:        #2b2318;   /* headings / high-emphasis */
   --ink-2:      #544632;   /* body text */
   --ink-3:      #6d5f42;   /* muted / meta / labels (AA on the page) */
+  --solid-ink:  #ffffff;   /* text on saturated state/accent fills */
 
   /* ── accents + state (deep, AA-as-text on the warm surfaces) ── */
   --cyan:       #017468;   /* primary signal — links, active, in-flight */
@@ -63,9 +65,42 @@
 
   /* ── legacy aliases (dark-theme names → semantic light tokens) ── */
   --abyss:      var(--ground);
+  --abyss-1:    var(--ground);
   --abyss-2:    var(--surface);
   --abyss-3:    var(--raised);
   --hull:       var(--card);
+}
+
+/* First-class dark palette (#834). The legacy --abyss* names remain aliases;
+   changing semantic tokens here carries the palette through every dash surface. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground:     #0b1115;
+  --surface:    #121b21;
+  --raised:     #19252c;
+  --card:       #202e36;
+  --line:       #40515a;
+  --line-soft:  #293941;
+  --ink-1:      #fff8ec;
+  --ink:        #f3ecdf;
+  --ink-2:      #d2c9bb;
+  --ink-3:      #a9b4b4;
+  --solid-ink:  #071013;
+  --cyan:       #65dbcf;
+  --cyan-dim:   #52bdb3;
+  --cyan-strong:#92ece3;
+  --amber:      #efb55d;
+  --violet:     #bda7f0;
+  --ok:         #74d696;
+  --ok-dim:     #55ba78;
+  --warn:       var(--amber);
+  --err:        #ff7c85;
+  --chrome:     rgba(16, 24, 29, .88);
+  --scrim:      rgba(0, 0, 0, .68);
+  --grid-line:  rgba(114, 193, 190, .11);
+  --shadow-sm:  0 1px 2px rgba(0, 0, 0, .28);
+  --shadow:     0 1px 2px rgba(0, 0, 0, .28), 0 7px 20px -8px rgba(0, 0, 0, .72);
+  --shadow-lg:  0 20px 48px -14px rgba(0, 0, 0, .78);
 }
 
 * { box-sizing: border-box; }
@@ -99,6 +134,7 @@ body {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   mix-blend-mode: multiply;
 }
+:root[data-theme="dark"] .bg-grain { opacity: .018; mix-blend-mode: screen; }
 
 h1, h2, h3 {
   font-family: var(--display);
@@ -162,6 +198,18 @@ code {
 .bar-meta {
   font-size: .78rem; display: flex; align-items: center; gap: .55rem;
 }
+.theme-toggle {
+  display: inline-flex; align-items: center; gap: .42rem; min-height: 36px; padding: 0 .7rem;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--raised); color: var(--ink-2);
+  font: 600 .68rem var(--display); letter-spacing: .06em; text-transform: uppercase; cursor: pointer;
+}
+.theme-toggle::before {
+  content: ""; width: .72rem; height: .72rem; border: 1.5px solid currentColor; border-radius: 50%;
+  background: linear-gradient(90deg, currentColor 50%, transparent 50%); box-shadow: inset 0 0 0 2px var(--raised);
+}
+.theme-toggle:hover { border-color: var(--cyan); color: var(--ink); }
+.theme-toggle:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.theme-toggle[aria-pressed="true"] { border-color: var(--cyan-dim); color: var(--cyan); }
 .meta-label {
   font-family: var(--display);
   font-size: .68rem; letter-spacing: .12em; text-transform: uppercase;
@@ -210,7 +258,7 @@ code {
 }
 .freshness.show { display: block; }
 .freshness.fresh  { color: var(--ink-3); background: color-mix(in srgb, var(--ok) 10%, transparent); }
-.freshness.stale  { color: #fff; background: var(--err); font-weight: 600; }
+.freshness.stale  { color: var(--solid-ink); background: var(--err); font-weight: 600; }
 .freshness.absent { color: var(--ink-2); background: color-mix(in srgb, var(--err) 10%, transparent); border-bottom-color: var(--err); }
 
 .live-swarm {
@@ -1106,7 +1154,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 }
 .btn-danger { color: var(--err); border-color: color-mix(in srgb, var(--err) 55%, transparent); }
 .btn-danger:hover {
-  color: #fff;
+  color: var(--solid-ink);
   background: var(--err);
   border-color: var(--err);
   box-shadow: 0 4px 14px -4px color-mix(in srgb, var(--err) 40%, transparent);
@@ -1444,7 +1492,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   transition: background .1s, color .1s, border-color .1s;
 }
 .grealized-btn:hover { background: color-mix(in srgb, var(--cyan) 12%, var(--raised)); color: var(--ink); }
-.grealized-btn.active { background: var(--cyan); color: #fff; border-color: var(--cyan); }
+.grealized-btn.active { background: var(--cyan); color: var(--solid-ink); border-color: var(--cyan); }
 .grealized-btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
 
 /* #405 Inc 3 Item 6b: graph-node hover tooltip ─────────────────────────── */
@@ -2097,6 +2145,14 @@ html, body { overflow-x: clip; }
      owns the wrap). The dev-only bind address is hidden on a phone (low value,
      high width); the live-link dot stays (it carries meaning). */
   .bar { padding: .6rem .9rem; }
+  .theme-toggle { min-height: 44px; }
+  body:not(.parade-body):not(.research-page) > .bar .brand-dash { display: none; }
+  /* Keep the dashboard's effective 44px target inside the header's existing
+     padding instead of making the already-dense first row taller. */
+  .bar-meta .theme-toggle {
+    width: 44px; min-height: 44px; margin-block: -11px; padding: 0; justify-content: center;
+  }
+  .bar-meta .theme-toggle [data-theme-label] { display: none; }
   .bar-meta .meta-label, .bar-meta .meta-bind { display: none; }
   /* #429: five tabs no longer fit one 390px row — WRAP the strip and the tablist
      group itself, keeping .tab-group a real box (cubic #446 P2: display:contents can
@@ -2560,6 +2616,8 @@ html, body { overflow-x: clip; }
 .pd-listcard-meta { font-size: .76rem; color: var(--ink-3); }
 
 @media (max-width: 560px) {
+  .pd-deck-bar .theme-toggle { width: 44px; padding: 0; justify-content: center; }
+  .pd-deck-bar .theme-toggle [data-theme-label] { display: none; }
   .pd-stage { padding: .2rem .3rem; }
   .pd-slide {
     width: 100%; max-width: 100%;
@@ -2581,7 +2639,7 @@ html, body { overflow-x: clip; }
 /* parade LIST-view container + back link (plain nav — not a tablist, cubic #373) */
 .parade-wrap { max-width: 820px; margin: 0 auto; padding: 1rem 1rem 3rem; }
 .parade-intro { font-size: .82rem; margin: .3rem 0 1.1rem; line-height: 1.5; }
-.parade-topnav { display: flex; }
+.parade-topnav { display: flex; align-items: center; gap: .25rem; }
 .pd-topback { display: inline-flex; align-items: center; min-height: 44px; padding: 0 .8rem; border-radius: var(--r-sm); color: var(--ink-2); font-size: .82rem; text-decoration: none; }
 .pd-topback:hover { color: var(--ink); }
 

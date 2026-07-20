@@ -269,7 +269,8 @@ Near-term:
 - [x] **`flotilla dash` — an optional local web interface.** A self-contained web
       UI served by the `flotilla` binary, reading the artifacts `flotilla watch`
       already writes (no daemon, no pane probing) with live Server-Sent-Events
-      updates and a warm-light default theme. Three tabs:
+      updates and persisted light/dark themes (following system preference until
+      the operator chooses explicitly). Three tabs:
       - **Conversations** (default) — per-desk cards, each with that desk's
         turn-by-turn session history mirrored inline (at an *info* or *debug*
         detail level), plus a context column of live control actions: post a fleet
