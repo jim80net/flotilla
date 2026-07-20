@@ -2144,7 +2144,9 @@ html, body { overflow-x: clip; }
   /* ── header: row 1 = brand + live-dot; row 2 = the tabs (the ≤1100 block above
      owns the wrap). The dev-only bind address is hidden on a phone (low value,
      high width); the live-link dot stays (it carries meaning). */
-  .bar { padding: .6rem .9rem; }
+  /* Shift the dense first row down without growing the header: the full 44px
+     target stays inside y=0 while total block padding remains unchanged. */
+  .bar { padding: calc(.6rem + 2px) .9rem calc(.6rem - 2px); }
   .theme-toggle { min-height: 44px; }
   body:not(.parade-body):not(.research-page) > .bar .brand-dash { display: none; }
   /* Keep the dashboard's effective 44px target inside the header's existing
@@ -2154,6 +2156,12 @@ html, body { overflow-x: clip; }
   }
   .bar-meta .theme-toggle [data-theme-label] { display: none; }
   .bar-meta .meta-label, .bar-meta .meta-bind { display: none; }
+  /* Standalone readers carry both a labeled theme control and Dashboard link.
+     Give the full product brand its own row so neither 390 nor 360 clips it. */
+  .parade-body .bar > .brand,
+  .research-page .bar > .brand { flex: 1 1 100%; width: 100%; }
+  .parade-body .bar > .parade-topnav,
+  .research-page .bar > .parade-topnav { flex: 1 1 100%; justify-content: flex-end; }
   /* #429: five tabs no longer fit one 390px row — WRAP the strip and the tablist
      group itself, keeping .tab-group a real box (cubic #446 P2: display:contents can
      drop the role="tablist" container from some engines' accessibility trees). Every

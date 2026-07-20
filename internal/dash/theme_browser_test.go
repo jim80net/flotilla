@@ -70,6 +70,7 @@ func TestThemeRendered834(t *testing.T) {
 	}
 
 	script := `
+import json
 import os
 import sys
 from playwright.sync_api import sync_playwright, expect
@@ -99,6 +100,8 @@ with sync_playwright() as p:
         page.goto(url, wait_until="domcontentloaded")
         expect(page.locator("html")).to_have_attribute("data-theme", "dark")
         expect(page.locator(".theme-toggle")).to_have_attribute("aria-pressed", "true")
+        desktop_toggle = page.locator(".theme-toggle").bounding_box()
+        assert desktop_toggle and desktop_toggle["y"] >= 0 and desktop_toggle["height"] >= 36, desktop_toggle
         colors = page.evaluate("""() => ({
             ground: getComputedStyle(document.body).backgroundColor,
             ink: getComputedStyle(document.querySelector('.brand-name')).color,
@@ -126,33 +129,56 @@ with sync_playwright() as p:
         mobile.add_init_script("window.EventSource = undefined")
         mobile.goto(url, wait_until="domcontentloaded")
         mobile.evaluate("localStorage.setItem('flotilla-theme-v1', 'dark')")
-        for path in ["/", "/research", "/parade"]:
-            mobile.goto(url + path, wait_until="domcontentloaded")
-            expect(mobile.locator("html")).to_have_attribute("data-theme", "dark")
-            toggle = mobile.locator(".theme-toggle:visible").first
-            expect(toggle).to_be_visible()
-            if path in ["/research", "/parade"]:
-                expect(mobile.locator(".pd-topback")).to_be_visible()
-                expect(mobile.locator(".brand-name")).to_have_text("flotilla")
-            box = toggle.bounding_box()
-            assert box and box["height"] >= 44, (path, box)
-            metrics = mobile.evaluate("({scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth})")
-            assert metrics["scroll"] == metrics["client"], (path, metrics)
-            if evidence_dir:
-                name = "dashboard" if path == "/" else path[1:]
-                mobile.screenshot(path=os.path.join(evidence_dir, "theme-dark-%s-390.png" % name), full_page=False)
+        phone_metrics = []
+        for width, height in [(390, 844), (360, 800)]:
+            mobile.set_viewport_size({"width": width, "height": height})
+            for path in ["/", "/research", "/parade"]:
+                mobile.goto(url + path, wait_until="domcontentloaded")
+                expect(mobile.locator("html")).to_have_attribute("data-theme", "dark")
+                toggle = mobile.locator(".theme-toggle:visible").first
+                expect(toggle).to_be_visible()
+                box = toggle.bounding_box()
+                assert box and box["height"] >= 44 and box["width"] >= 44, (width, path, box)
+                assert box["y"] >= 0 and box["y"] + box["height"] <= height, (width, path, box)
+                route_metrics = {"viewport": "%dx%d" % (width, height), "path": path, "toggle": box}
+                if path in ["/research", "/parade"]:
+                    expect(mobile.locator(".pd-topback")).to_be_visible()
+                    expect(mobile.locator(".brand-name")).to_have_text("flotilla")
+                    brand = mobile.locator(".bar .brand")
+                    nav = mobile.locator(".bar .parade-topnav")
+                    brand_box = brand.bounding_box()
+                    nav_box = nav.bounding_box()
+                    brand_metrics = brand.evaluate("node => ({scroll: node.scrollWidth, client: node.clientWidth})")
+                    name_box = mobile.locator(".bar .brand-name").bounding_box()
+                    assert brand_box and nav_box and name_box, (width, path)
+                    assert brand_metrics["scroll"] <= brand_metrics["client"], (width, path, brand_metrics)
+                    assert name_box["x"] >= 0 and name_box["x"] + name_box["width"] <= width, (width, path, name_box)
+                    assert brand_box["y"] + brand_box["height"] <= nav_box["y"], (width, path, brand_box, nav_box)
+                    route_metrics["brand"] = brand_box
+                    route_metrics["nav"] = nav_box
+                metrics = mobile.evaluate("({scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth})")
+                assert metrics["scroll"] == metrics["client"], (width, path, metrics)
+                phone_metrics.append(route_metrics)
+                if evidence_dir:
+                    name = "dashboard" if path == "/" else path[1:]
+                    mobile.screenshot(path=os.path.join(evidence_dir, "theme-dark-%s-%d.png" % (name, width)), full_page=False)
 
         mobile.locator(".theme-toggle:visible").first.click()
         expect(mobile.locator("html")).to_have_attribute("data-theme", "light")
         mobile.goto(url, wait_until="domcontentloaded")
         expect(mobile.locator("html")).to_have_attribute("data-theme", "light")
+        print("THEME_PHONE_METRICS=" + json.dumps(phone_metrics, sort_keys=True))
         phone.close()
     finally:
         browser.close()
 `
 
 	cmd := exec.Command(python, "-c", script, httpServer.URL, evidenceDir)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		t.Fatalf("rendered theme regression: %v\n%s", err, out)
+	}
+	if len(out) > 0 {
+		t.Logf("rendered theme metrics:\n%s", out)
 	}
 }
