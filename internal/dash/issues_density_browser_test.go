@@ -50,7 +50,7 @@ func TestIssuesLargeFanoutRendered827(t *testing.T) {
 		"repo": "example/research-01", "repos": repos, "flotillas": flotillas,
 		"coverage": map[string]any{
 			"complete": false, "indexed_repos": repos, "expected_repos": 27,
-			"failed_repos": []map[string]any{{"repo": "example/unavailable-a"}, {"repo": "example/unavailable-b"}},
+			"failed_repos":     []map[string]any{{"repo": "example/unavailable-a"}, {"repo": "example/unavailable-b"}},
 			"unmapped_domains": []string{"Missing Product"},
 			"domains": []map[string]any{
 				{"name": "Mapped Product", "state": "mapped", "repos": []string{"example/research-01"}},
