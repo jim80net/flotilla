@@ -48,7 +48,17 @@ func TestIssuesLargeFanoutRendered827(t *testing.T) {
 	}
 	fixture, err := json.Marshal(map[string]any{
 		"repo": "example/research-01", "repos": repos, "flotillas": flotillas,
-		"coverage": map[string]any{"complete": false, "indexed_repos": repos, "expected_repos": 27, "failed_repos": []string{"example/unavailable-a", "example/unavailable-b"}, "unmapped_domains": []string{"example-unmapped"}},
+		"coverage": map[string]any{
+			"complete": false, "indexed_repos": repos, "expected_repos": 27,
+			"failed_repos": []map[string]any{{"repo": "example/unavailable-a"}, {"repo": "example/unavailable-b"}},
+			"unmapped_domains": []string{"Missing Product"},
+			"domains": []map[string]any{
+				{"name": "Mapped Product", "state": "mapped", "repos": []string{"example/research-01"}},
+				{"name": "Advisory Product", "state": "repository-less", "repos": []string{}},
+				{"name": "Missing Product", "state": "missing", "repos": []string{}},
+				{"name": "Unavailable Product", "state": "failed", "repos": []string{"example/unavailable-a"}},
+			},
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -92,6 +102,7 @@ with sync_playwright() as p:
             assert "remaining" in metrics["windowText"] and "of 144 work items reachable" in metrics["windowText"], metrics
             coverage = page.locator(".issue-scope-incomplete")
             expect(coverage).to_contain_text("Showing 24 of 27 mapped repositories")
+            expect(coverage).to_contain_text("1 mapped, 1 repository-less, 1 missing, 1 failed")
             assert coverage.evaluate("e => e.scrollHeight <= e.clientHeight + 1"), "partial coverage truth is clipped"
 
             first = rows.first

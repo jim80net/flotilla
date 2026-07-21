@@ -79,7 +79,7 @@ func (s *Server) handleWorkLedger(w http.ResponseWriter, r *http.Request) {
 	// The repository boundary is roster-authored (primary + secondary repos). The
 	// resulting multi-repo snapshot is then reused to resolve goal state, so this
 	// endpoint never pays a second GitHub read or observes mixed generations.
-	repos, omitted, unmapped := workLedgerRepos(s.cfg.Repo, GoalsDoc{}, s.roster)
+	repos, omitted, domains := workLedgerRepos(s.cfg.Repo, GoalsDoc{}, s.roster)
 	if len(repos) == 0 {
 		writeTrackerError(w, tracker.ErrNoRepo)
 		return
@@ -124,11 +124,11 @@ func (s *Server) handleWorkLedger(w http.ResponseWriter, r *http.Request) {
 	}()
 	var sources []WorkLedgerRepoIssues
 	coverage := WorkLedgerCoverage{
-		ExpectedRepos:   len(repos) + len(omitted),
-		IndexedRepos:    []string{},
-		FailedRepos:     []WorkLedgerRepoFailure{},
-		OmittedRepos:    append([]string{}, omitted...),
-		UnmappedDomains: append([]string{}, unmapped...),
+		ExpectedRepos: len(repos) + len(omitted),
+		IndexedRepos:  []string{},
+		FailedRepos:   []WorkLedgerRepoFailure{},
+		OmittedRepos:  append([]string{}, omitted...),
+		Domains:       domains,
 	}
 	for got := range results {
 		if got.err != nil {
@@ -144,6 +144,8 @@ func (s *Server) handleWorkLedger(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(coverage.FailedRepos, func(i, j int) bool {
 		return strings.ToLower(coverage.FailedRepos[i].Repo) < strings.ToLower(coverage.FailedRepos[j].Repo)
 	})
+	markFailedWorkLedgerDomains(coverage.Domains, coverage.FailedRepos)
+	coverage.UnmappedDomains = missingWorkLedgerDomains(coverage.Domains)
 	sort.Slice(sources, func(i, j int) bool { return strings.ToLower(sources[i].Repo) < strings.ToLower(sources[j].Repo) })
 	coverage.Complete = len(coverage.FailedRepos) == 0 && len(coverage.OmittedRepos) == 0 && len(coverage.UnmappedDomains) == 0
 	listElapsed := time.Since(listStarted)

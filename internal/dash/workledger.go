@@ -34,12 +34,23 @@ type WorkLedgerDoc struct {
 // WorkLedgerCoverage makes the collection boundary operator-visible. A partial
 // GitHub fanout is still useful, but it must never masquerade as a complete fleet.
 type WorkLedgerCoverage struct {
-	Complete        bool                    `json:"complete"`
-	ExpectedRepos   int                     `json:"expected_repos"`
-	IndexedRepos    []string                `json:"indexed_repos"`
-	FailedRepos     []WorkLedgerRepoFailure `json:"failed_repos"`
-	OmittedRepos    []string                `json:"omitted_repos"`
-	UnmappedDomains []string                `json:"unmapped_domains"`
+	Complete        bool                       `json:"complete"`
+	ExpectedRepos   int                        `json:"expected_repos"`
+	IndexedRepos    []string                   `json:"indexed_repos"`
+	FailedRepos     []WorkLedgerRepoFailure    `json:"failed_repos"`
+	OmittedRepos    []string                   `json:"omitted_repos"`
+	UnmappedDomains []string                   `json:"unmapped_domains"`
+	Domains         []WorkLedgerDomainCoverage `json:"domains"`
+}
+
+// WorkLedgerDomainCoverage keeps roster intent distinct from repository read
+// health. State is one of mapped, repository-less, missing, or failed. Omitted
+// repositories remain listed on WorkLedgerCoverage so the safety bound stays
+// independently visible and fail-closed.
+type WorkLedgerDomainCoverage struct {
+	Name  string   `json:"name"`
+	State string   `json:"state"`
+	Repos []string `json:"repos"`
 }
 
 type WorkLedgerRepoFailure struct {
@@ -236,7 +247,7 @@ func workLedgerRef(repo string, number int) string {
 	return strings.ToLower(strings.TrimSpace(repo)) + "#" + strconv.Itoa(number)
 }
 
-func workLedgerRepos(primary string, goals GoalsDoc, cfg *roster.Config) (selected, omitted, unmapped []string) {
+func workLedgerRepos(primary string, goals GoalsDoc, cfg *roster.Config) (selected, omitted []string, domains []WorkLedgerDomainCoverage) {
 	seen := map[string]string{}
 	add := func(repo string) {
 		repo = strings.TrimSpace(repo)
@@ -281,33 +292,79 @@ func workLedgerRepos(primary string, goals GoalsDoc, cfg *roster.Config) (select
 		omitted = append(omitted, selected[maxWorkLedgerRepos:]...)
 		selected = selected[:maxWorkLedgerRepos]
 	}
-	return selected, omitted, workLedgerUnmappedDomains(cfg)
+	return selected, omitted, workLedgerDomains(cfg)
 }
 
-func workLedgerUnmappedDomains(cfg *roster.Config) []string {
+func workLedgerDomains(cfg *roster.Config) []WorkLedgerDomainCoverage {
 	if cfg == nil {
 		return nil
 	}
-	hasAgent := map[string]bool{}
-	hasRepo := map[string]bool{}
+	type domainIntent struct {
+		name           string
+		repos          map[string]string
+		repositoryless bool
+	}
+	intents := map[string]*domainIntent{}
+	var domains []WorkLedgerDomainCoverage
 	for _, a := range cfg.Agents {
 		domain := flotillaForDesk(cfg, a.Name)
 		if domain == "" || domain == cfg.XOAgent || domain == cfg.CosAgent {
 			continue
 		}
-		hasAgent[domain] = true
-		if strings.TrimSpace(a.PrimaryRepo) != "" || len(a.SecondaryRepos) > 0 {
-			hasRepo[domain] = true
+		key := strings.ToLower(domain)
+		intent := intents[key]
+		if intent == nil {
+			intent = &domainIntent{name: domain, repos: map[string]string{}}
+			intents[key] = intent
+		}
+		for _, repo := range append([]string{a.PrimaryRepo}, a.SecondaryRepos...) {
+			repo = strings.TrimSpace(repo)
+			if repo != "" {
+				intent.repos[strings.ToLower(repo)] = repo
+			}
+		}
+		intent.repositoryless = intent.repositoryless || a.WorkLedgerRepositoryless
+	}
+	for _, intent := range intents {
+		domain := WorkLedgerDomainCoverage{Name: intent.name, State: "missing", Repos: []string{}}
+		for _, repo := range intent.repos {
+			domain.Repos = append(domain.Repos, repo)
+		}
+		sort.Slice(domain.Repos, func(i, j int) bool { return strings.ToLower(domain.Repos[i]) < strings.ToLower(domain.Repos[j]) })
+		if len(domain.Repos) > 0 {
+			domain.State = "mapped"
+		} else if intent.repositoryless {
+			domain.State = "repository-less"
+		}
+		domains = append(domains, domain)
+	}
+	sort.Slice(domains, func(i, j int) bool { return strings.ToLower(domains[i].Name) < strings.ToLower(domains[j].Name) })
+	return domains
+}
+
+func markFailedWorkLedgerDomains(domains []WorkLedgerDomainCoverage, failures []WorkLedgerRepoFailure) {
+	failed := make(map[string]bool, len(failures))
+	for _, failure := range failures {
+		failed[strings.ToLower(failure.Repo)] = true
+	}
+	for i := range domains {
+		for _, repo := range domains[i].Repos {
+			if failed[strings.ToLower(repo)] {
+				domains[i].State = "failed"
+				break
+			}
 		}
 	}
-	var out []string
-	for domain := range hasAgent {
-		if !hasRepo[domain] {
-			out = append(out, domain)
+}
+
+func missingWorkLedgerDomains(domains []WorkLedgerDomainCoverage) []string {
+	var missing []string
+	for _, domain := range domains {
+		if domain.State == "missing" {
+			missing = append(missing, domain.Name)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i]) < strings.ToLower(out[j]) })
-	return out
+	return missing
 }
 
 // deskForRepo attributes a trailer-less issue to a single explicit roster seat

@@ -1,16 +1,43 @@
 package dash
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/jim80net/flotilla/internal/dash/tracker"
 	"github.com/jim80net/flotilla/internal/roster"
 )
+
+type observedLedgerTracker struct {
+	*fakeTracker
+	started      chan<- struct{}
+	release      <-chan struct{}
+	active, peak *atomic.Int32
+	total        *atomic.Int32
+}
+
+func (t *observedLedgerTracker) List(_ context.Context, _ tracker.ListFilter) ([]tracker.Issue, error) {
+	t.total.Add(1)
+	active := t.active.Add(1)
+	defer t.active.Add(-1)
+	for {
+		peak := t.peak.Load()
+		if active <= peak || t.peak.CompareAndSwap(peak, active) {
+			break
+		}
+	}
+	t.started <- struct{}{}
+	<-t.release
+	return nil, nil
+}
 
 const multiRepoLedgerRoster = `{
   "operator_user_id":"U", "xo_agent":"root",
@@ -20,14 +47,16 @@ const multiRepoLedgerRoster = `{
     {"name":"alpha-desk","primary_repo":"acme/alpha"},
     {"name":"beta-xo","coordinator":true,"primary_repo":"acme/beta"},
     {"name":"beta-desk","primary_repo":"acme/beta"},
+    {"name":"delta-xo","coordinator":true,"work_ledger_repositoryless":true},
     {"name":"gamma-xo","coordinator":true}
   ],
   "channels":[
-    {"channel_id":"C_CMD","xo_agent":"root","role":"fleet-command","members":["root","alpha-xo","beta-xo","gamma-xo"]},
+    {"channel_id":"C_CMD","xo_agent":"root","role":"fleet-command","members":["root","alpha-xo","beta-xo","delta-xo","gamma-xo"]},
     {"channel_id":"C_ALPHA","xo_agent":"alpha-xo","members":["root"]},
     {"channel_id":"C_ALPHA_DESK","xo_agent":"alpha-desk","members":["alpha-xo"]},
     {"channel_id":"C_BETA","xo_agent":"beta-xo","members":["root"]},
     {"channel_id":"C_BETA_DESK","xo_agent":"beta-desk","members":["beta-xo"]},
+    {"channel_id":"C_DELTA","xo_agent":"delta-xo","members":["root"]},
     {"channel_id":"C_GAMMA","xo_agent":"gamma-xo","members":["root"]}
   ]
 }`
@@ -205,6 +234,87 @@ func TestHandleWorkLedgerReturnsPartialCoverageWithoutDroppingCleanRepos(t *test
 	}
 	if len(doc.Coverage.UnmappedDomains) != 1 || doc.Coverage.UnmappedDomains[0] != "gamma-xo" {
 		t.Fatalf("unmapped domains = %+v", doc.Coverage.UnmappedDomains)
+	}
+	states := map[string]string{}
+	for _, domain := range doc.Coverage.Domains {
+		states[domain.Name] = domain.State
+	}
+	wantStates := map[string]string{
+		"alpha-xo": "mapped", "beta-xo": "failed", "delta-xo": "repository-less", "gamma-xo": "missing",
+	}
+	for name, want := range wantStates {
+		if states[name] != want {
+			t.Fatalf("domain states = %+v, want %s=%s", states, name, want)
+		}
+	}
+}
+
+func TestWorkLedgerReposCoalescesMappingsAndKeepsSafetyBound(t *testing.T) {
+	cfg := &roster.Config{Agents: []roster.Agent{
+		{Name: "alpha", PrimaryRepo: "example/shared", SecondaryRepos: []string{"example/extra"}},
+		{Name: "beta", PrimaryRepo: "EXAMPLE/shared"},
+	}}
+	for i := 0; i < maxWorkLedgerRepos+4; i++ {
+		cfg.Agents = append(cfg.Agents, roster.Agent{Name: "desk-" + strconv.Itoa(i), PrimaryRepo: fmt.Sprintf("example/repo-%02d", i)})
+	}
+
+	selected, omitted, _ := workLedgerRepos("example/shared", GoalsDoc{}, cfg)
+	if len(selected) != maxWorkLedgerRepos || len(omitted) != 6 {
+		t.Fatalf("selected=%d omitted=%d, want %d/6", len(selected), len(omitted), maxWorkLedgerRepos)
+	}
+	shared := 0
+	for _, repo := range append(append([]string{}, selected...), omitted...) {
+		if strings.EqualFold(repo, "example/shared") {
+			shared++
+		}
+	}
+	if shared != 1 {
+		t.Fatalf("coalesced shared repo count = %d, repos=%v omitted=%v", shared, selected, omitted)
+	}
+}
+
+func TestHandleWorkLedgerBoundsParallelRepositoryReads(t *testing.T) {
+	srv, _ := newTestServer(t, singleFleetRoster, time.Date(2026, 7, 21, 12, 0, 0, 0, time.UTC))
+	coordinator := true
+	srv.roster = &roster.Config{}
+	srv.ledgerTrackers = map[string]tracker.Tracker{}
+	started := make(chan struct{}, 12)
+	release := make(chan struct{})
+	var active, peak, total atomic.Int32
+	for i := 0; i < 12; i++ {
+		repo := fmt.Sprintf("example/product-%02d", i)
+		srv.roster.Agents = append(srv.roster.Agents, roster.Agent{Name: fmt.Sprintf("product-%02d", i), Coordinator: &coordinator, PrimaryRepo: repo})
+		srv.ledgerTrackers[repo] = &observedLedgerTracker{
+			fakeTracker: &fakeTracker{}, started: started, release: release,
+			active: &active, peak: &peak, total: &total,
+		}
+	}
+	srv.cfg.Repo = "example/product-00"
+	srv.tracker = srv.ledgerTrackers[srv.cfg.Repo]
+
+	done := make(chan int, 1)
+	go func() { done <- doGet(t, srv, "/api/work-ledger?state=all").Code }()
+	for i := 0; i < workLedgerFanoutParallel; i++ {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatalf("only %d repository reads started before timeout", i)
+		}
+	}
+	if got := peak.Load(); got != workLedgerFanoutParallel {
+		t.Fatalf("peak parallel reads = %d, want %d", got, workLedgerFanoutParallel)
+	}
+	select {
+	case <-started:
+		t.Fatal("a fifth repository read started while all four workers were blocked")
+	default:
+	}
+	close(release)
+	if status := <-done; status != 200 {
+		t.Fatalf("work-ledger status = %d", status)
+	}
+	if got := total.Load(); got != 12 {
+		t.Fatalf("repository reads = %d, want 12", got)
 	}
 }
 
