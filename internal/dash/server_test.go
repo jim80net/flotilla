@@ -1775,6 +1775,9 @@ func TestResolvePaths(t *testing.T) {
 	if cfg.ResearchPath != filepath.Join(dir, "research") {
 		t.Errorf("research path = %q (should default to <roster-dir>/research)", cfg.ResearchPath)
 	}
+	if cfg.ResearchAnnotationsPath != filepath.Join(dir, "research-annotations") {
+		t.Errorf("research annotations path = %q (should default to <roster-dir>/research-annotations)", cfg.ResearchAnnotationsPath)
+	}
 	if cfg.LedgerPath != filepath.Join(dir, "context-ledger.md") {
 		t.Errorf("ledger path = %q (should inherit roster CosLedger)", cfg.LedgerPath)
 	}
@@ -1802,6 +1805,9 @@ func TestResolvePaths(t *testing.T) {
 	}
 	if cfg2.ResearchPath != filepath.Join(stateDir, "research") {
 		t.Errorf("state roster research path = %q, want %q", cfg2.ResearchPath, filepath.Join(stateDir, "research"))
+	}
+	if cfg2.ResearchAnnotationsPath != filepath.Join(stateDir, "research-annotations") {
+		t.Errorf("state roster research annotations path = %q, want %q", cfg2.ResearchAnnotationsPath, filepath.Join(stateDir, "research-annotations"))
 	}
 }
 

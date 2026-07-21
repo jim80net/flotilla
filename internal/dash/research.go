@@ -7,6 +7,8 @@ package dash
 // request-derived paths never become readable host files.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -34,6 +36,12 @@ type ResearchEntry struct {
 type ResearchDocument struct {
 	ResearchEntry
 	Markdown string `json:"markdown"`
+	Digest   string `json:"digest"`
+}
+
+func researchDigest(markdown string) string {
+	sum := sha256.Sum256([]byte(markdown))
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 func validResearchID(id string) bool {
@@ -259,7 +267,8 @@ func readResearchDocument(root, id string) (ResearchDocument, bool, error) {
 		return ResearchDocument{}, false, err
 	}
 	entry := researchEntry(id, string(body), info.ModTime())
-	return ResearchDocument{ResearchEntry: entry, Markdown: string(body)}, true, nil
+	markdown := string(body)
+	return ResearchDocument{ResearchEntry: entry, Markdown: markdown, Digest: researchDigest(markdown)}, true, nil
 }
 
 func (s *Server) handleResearchIndex(w http.ResponseWriter, _ *http.Request) {
