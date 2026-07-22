@@ -246,6 +246,12 @@
     var failed = Array.isArray(coverage.failed_repos) ? coverage.failed_repos : [];
     var omitted = Array.isArray(coverage.omitted_repos) ? coverage.omitted_repos : [];
     var unmapped = Array.isArray(coverage.unmapped_domains) ? coverage.unmapped_domains : [];
+    var domains = Array.isArray(coverage.domains) ? coverage.domains : [];
+    var domainCounts = { mapped: 0, "repository-less": 0, missing: 0, failed: 0 };
+    domains.forEach(function (domain) {
+      var state = String(domain && domain.state || "");
+      if (Object.prototype.hasOwnProperty.call(domainCounts, state)) domainCounts[state]++;
+    });
     var indexed = Array.isArray(coverage.indexed_repos) ? coverage.indexed_repos.length : repos.length;
     var expected = Number(coverage.expected_repos) || indexed;
     var incomplete = coverage.complete === false;
@@ -254,7 +260,9 @@
       "Showing " + indexed + " of " + expected + " mapped repositories" +
       (failed.length ? "; " + failed.length + " failed" : "") +
       (omitted.length ? "; " + omitted.length + " over the safety bound" : "") +
-      (unmapped.length ? "; " + unmapped.length + " roster domains need repository mapping" : "") +
+      (domains.length ? "; roster domains: " + domainCounts.mapped + " mapped, " + domainCounts["repository-less"] +
+        " repository-less, " + domainCounts.missing + " missing, " + domainCounts.failed + " failed" :
+        (unmapped.length ? "; " + unmapped.length + " roster domains need repository mapping" : "")) +
       ". Every indexed open issue is shown as moving.</span></div>";
     if (!flotillas.length) {
       list.innerHTML = scopeNote + '<div class="empty">No fleet work matches this view.</div>';
