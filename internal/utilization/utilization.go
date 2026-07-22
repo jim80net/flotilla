@@ -108,7 +108,11 @@ func Line(s Summary) string {
 		line += fmt.Sprintf(" · %d blocked", s.Blocked)
 	}
 	if s.AwaitingAuthority > 0 {
-		line += fmt.Sprintf(" · %d held for a decision", s.AwaitingAuthority)
+		seat := "seats"
+		if s.AwaitingAuthority == 1 {
+			seat = "seat"
+		}
+		line += fmt.Sprintf(" · %d %s waiting for authority", s.AwaitingAuthority, seat)
 	}
 	return line
 }

@@ -133,7 +133,10 @@
       text: Number(u.working || 0) + " of " + total + " " + (total === 1 ? "seat" : "seats") + " working"
     }];
     if (Number(u.blocked || 0) > 0) units.push({ kind: "blocked", text: Number(u.blocked) + " blocked" });
-    if (Number(u.awaiting_authority || 0) > 0) units.push({ kind: "held", text: Number(u.awaiting_authority) + " held for a decision" });
+    if (Number(u.awaiting_authority || 0) > 0) {
+      var held = Number(u.awaiting_authority);
+      units.push({ kind: "held", text: held + " " + (held === 1 ? "seat" : "seats") + " waiting for authority" });
+    }
     return units;
   }
 

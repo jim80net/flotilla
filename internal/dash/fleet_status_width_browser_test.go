@@ -67,7 +67,7 @@ status = {
     "xo_liveness": {"acked": True, "ack_age": "11m23s", "settled_known": True, "settled": False},
     "utilization": {"working": 1, "total": 52, "blocked": 8, "awaiting_authority": 12, "utilization_wall": True}
 }
-expected = ["1 of 52 seats working", "8 blocked", "12 held for a decision", "cos · ack 11m23s ago · active"]
+expected = ["1 of 52 seats working", "8 blocked", "12 seats waiting for authority", "cos · ack 11m23s ago · active"]
 footer_expected = expected[:3] + ["Almost no one is working", "Send work or pull the next queue item"]
 
 def verify(page, width, height):

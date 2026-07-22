@@ -188,7 +188,7 @@ func TestDashboardUtilizationFirstContract797(t *testing.T) {
 			t.Errorf("%s missing fleet utilization surface", label)
 		}
 	}
-	for _, marker := range []string{"seats working", "held for a decision", "Almost no one is working", "renderLiveSwarm", "last_action", "data-swarm-desk"} {
+	for _, marker := range []string{"seats working", "waiting for authority", "Almost no one is working", "renderLiveSwarm", "last_action", "data-swarm-desk"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("dash.js missing utilization marker %q", marker)
 		}
@@ -1760,6 +1760,9 @@ func TestResolvePaths(t *testing.T) {
 	if cfg.BacklogPath != filepath.Join(dir, ".flotilla-state.md") {
 		t.Errorf("backlog path = %q", cfg.BacklogPath)
 	}
+	if cfg.DriveBacklogPath != cfg.BacklogPath {
+		t.Errorf("drive backlog path = %q, want backward-compatible tracker fallback %q", cfg.DriveBacklogPath, cfg.BacklogPath)
+	}
 	if cfg.GoalsPath != filepath.Join(dir, "fleet-goals.json") {
 		t.Errorf("goals path = %q (should default to <roster-dir>/fleet-goals.json)", cfg.GoalsPath)
 	}
@@ -1808,6 +1811,69 @@ func TestResolvePaths(t *testing.T) {
 	}
 	if cfg2.ResearchAnnotationsPath != filepath.Join(stateDir, "research-annotations") {
 		t.Errorf("state roster research annotations path = %q, want %q", cfg2.ResearchAnnotationsPath, filepath.Join(stateDir, "research-annotations"))
+	}
+}
+
+func TestLoadGoalsUsesDriveBacklogNotHistoryTracker(t *testing.T) {
+	srv, dir := newTestServer(t, singleFleetRoster, time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC))
+	trackerPath := filepath.Join(dir, ".flotilla-state.md")
+	drivePath := filepath.Join(dir, "fleet-backlog.md")
+	if err := os.WriteFile(trackerPath, []byte("# Session history\n\nNo active backlog is mirrored here.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(drivePath, []byte("## Backlog\n- [awaiting-auth] DECISION-ALPHA operator chooses the path\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv.cfg.BacklogPath = trackerPath
+	srv.cfg.DriveBacklogPath = drivePath
+
+	goals := GoalsFile{Goals: []Goal{{
+		ID: "decision", Title: "Operator decision", WorkItems: []WorkItem{{Kind: WorkBacklog, Match: "DECISION-ALPHA"}},
+	}}}
+	raw, err := json.Marshal(goals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(srv.cfg.GoalsPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	doc := srv.loadGoals()
+	var decision *RenderedGoal
+	for i := range doc.Goals {
+		if doc.Goals[i].ID == "decision" {
+			decision = &doc.Goals[i]
+			break
+		}
+	}
+	if decision == nil || len(decision.WorkItems) != 1 {
+		t.Fatalf("decision goal missing from %+v", doc.Goals)
+	}
+	if got := decision.WorkItems[0].Class; got != "awaiting" {
+		t.Fatalf("drive backlog decision class = %q, want awaiting (history tracker must not drain it)", got)
+	}
+	if doc.Counts.Awaiting != 1 {
+		t.Fatalf("decision count awaiting = %d, want 1", doc.Counts.Awaiting)
+	}
+}
+
+func TestLoadGoalsFailsClosedWhenConfiguredDriveBacklogIsMissing(t *testing.T) {
+	srv, dir := newTestServer(t, singleFleetRoster, time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC))
+	srv.cfg.DriveBacklogPath = filepath.Join(dir, "missing-drive-backlog.md")
+	goals := GoalsFile{Goals: []Goal{{
+		ID: "decision", Title: "Operator decision", WorkItems: []WorkItem{{Kind: WorkBacklog, Match: "DECISION-ALPHA"}},
+	}}}
+	raw, err := json.Marshal(goals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(srv.cfg.GoalsPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	doc := srv.loadGoals()
+	if !strings.Contains(doc.Error, "drive backlog") {
+		t.Fatalf("missing configured drive backlog must fail closed, error = %q", doc.Error)
 	}
 }
 

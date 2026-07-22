@@ -24,7 +24,7 @@ func TestBuildUtilizationFirstSummary797(t *testing.T) {
 	if got.UtilizationPercent != 100.0/6.0 || !got.UtilizationWall {
 		t.Fatalf("utilization rate/wall = %+v", got)
 	}
-	want := "1 of 6 seats working · 1 blocked · 1 held for a decision"
+	want := "1 of 6 seats working · 1 blocked · 1 seat waiting for authority"
 	if line := Line(got); line != want {
 		t.Fatalf("Line = %q, want %q", line, want)
 	}
@@ -35,7 +35,7 @@ func TestBuildUtilizationFirstSummary797(t *testing.T) {
 
 func TestHumanLineOmitsInternalUtilizationJargon814(t *testing.T) {
 	line := Line(Summary{Working: 4, Total: 52, Blocked: 7, AcceptsDispatch: 44, AwaitingAuthority: 13})
-	if line != "4 of 52 seats working · 7 blocked · 13 held for a decision" {
+	if line != "4 of 52 seats working · 7 blocked · 13 seats waiting for authority" {
 		t.Fatalf("Line = %q", line)
 	}
 	for _, forbidden := range []string{"%", "idle", "empty-queue", "accepts-dispatch", "awaiting-authority", "utilization wall"} {
