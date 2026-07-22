@@ -41,7 +41,31 @@
       rows.map(function (cells) { return row(cells, "td"); }).join("") + "</tbody></table></div>";
   }
 
-  function renderMarkdown(markdown) {
+  function researchVideoURL(documentID, source) {
+    var src = String(source || "");
+    if (!/\.(mp4|webm|ogv)$/i.test(src) || src.indexOf("\\") >= 0 || src.charAt(0) === "/") return "";
+    var parts = String(documentID || "").split("/"); parts.pop();
+    src.split("/").forEach(function (part) { parts.push(part); });
+    if (parts.some(function (part) { return !part || part === "." || part === ".." || part.charAt(0) === "."; })) return "";
+    return "/research-assets/" + parts.map(encodeURIComponent).join("/");
+  }
+  function researchVideoType(source) {
+    if (/\.webm$/i.test(source)) return "video/webm";
+    if (/\.ogv$/i.test(source)) return "video/ogg";
+    return "video/mp4";
+  }
+  function renderVideo(match, documentID) {
+    var source = researchVideoURL(documentID, match[2]);
+    if (!source) return "";
+    var caption = (match[1] || match[3] || "Research briefing video").trim();
+    var safeCaption = esc(caption);
+    return '<figure class="research-video"><video controls playsinline preload="metadata" aria-label="' + safeCaption + '">' +
+      '<source src="' + esc(source) + '" type="' + researchVideoType(match[2]) + '">' +
+      '<a href="' + esc(source) + '">Open the video</a></video>' +
+      '<figcaption><span>' + safeCaption + '</span><button type="button" data-research-video-fullscreen aria-label="Full screen: ' + safeCaption + '">Full screen</button></figcaption></figure>';
+  }
+
+  function renderMarkdown(markdown, documentID) {
     var lines = String(markdown || "").replace(/\r\n/g, "\n").split("\n");
     var html = [], toc = [], used = {}, paragraph = [], list = null, quote = [], code = null;
     function flushParagraph() {
@@ -68,6 +92,11 @@
         continue;
       }
       if (code) { code.lines.push(line); continue; }
+      var video = /^!\[Video(?::\s*([^\]]+))?\]\(([^)\s]+)(?:\s+"([^"]+)")?\)$/i.exec(trimmed);
+      if (video) {
+        var videoHTML = renderVideo(video, documentID);
+        if (videoHTML) { flushFlow(); html.push(videoHTML); continue; }
+      }
       if (trimmed.indexOf("|") >= 0 && i + 1 < lines.length && isTableDelimiter(lines[i + 1])) {
         flushFlow();
         var header = splitTableRow(line), rows = [];
@@ -207,7 +236,7 @@
     document.body.classList.remove("research-toc-open");
   }
   function renderDocument(doc) {
-    var rendered = renderMarkdown(documentWithoutDuplicateTitle(doc.markdown, doc.title));
+    var rendered = renderMarkdown(documentWithoutDuplicateTitle(doc.markdown, doc.title), doc.id);
     el("research-reader-empty").hidden = true;
     el("research-document").hidden = false;
     el("research-title").textContent = doc.title;
@@ -262,6 +291,17 @@
   el("research-library-more").addEventListener("click", function () { libraryVisible += collectionWindow; renderIndex(); });
   el("research-index-retry").addEventListener("click", loadIndex);
   el("research-document-retry").addEventListener("click", function () { if (lastDocumentID) openDocument(lastDocumentID, lastDocumentPush); });
+  el("research-body").addEventListener("click", function (event) {
+    var button = event.target.closest("[data-research-video-fullscreen]");
+    if (!button) return;
+    var video = button.closest(".research-video").querySelector("video");
+    if (video.requestFullscreen) {
+      var request = video.requestFullscreen();
+      if (request && request.catch) request.catch(function () {});
+    } else if (video.webkitEnterFullscreen) {
+      video.webkitEnterFullscreen();
+    }
+  });
   var tocRestoreY = 0;
   var tocLinkClosing = false;
   var toc = el("research-toc"), tocSummary = toc.querySelector("summary");

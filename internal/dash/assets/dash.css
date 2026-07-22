@@ -2801,6 +2801,12 @@ html, body { overflow-x: clip; }
 .research-markdown blockquote { margin: 1rem 0; padding: .65rem 1rem; border-left: 3px solid var(--amber); background: color-mix(in srgb, var(--amber) 7%, transparent); }
 .research-markdown blockquote p { margin: .25rem 0; }
 .research-markdown hr { margin: 2rem 0; border: 0; border-top: 1px solid var(--line); }
+.research-video { max-width: 64rem; margin: 1.25rem 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--abyss-1); }
+.research-video video { display: block; width: 100%; max-height: min(72dvh, 48rem); aspect-ratio: 16 / 9; background: #000; object-fit: contain; }
+.research-video figcaption { display: flex; align-items: center; justify-content: space-between; gap: .75rem; min-height: 52px; padding: .35rem .5rem .35rem .8rem; color: var(--ink-2); font: 600 .72rem var(--display); }
+.research-video [data-research-video-fullscreen] { min-width: 44px; min-height: 44px; padding: 0 .8rem; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--abyss-2); color: var(--cyan); font: 600 .7rem var(--display); cursor: pointer; }
+.research-video [data-research-video-fullscreen]:hover { border-color: var(--cyan); color: var(--ink); }
+.research-video [data-research-video-fullscreen]:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .research-table-wrap { max-width: 100%; overflow-x: auto; margin: 1rem 0; }
 .research-table-wrap table { width: 100%; border-collapse: collapse; font-size: .82em; }
 .research-table-wrap th, .research-table-wrap td { padding: .5rem .65rem; border: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
@@ -2840,4 +2846,6 @@ html, body { overflow-x: clip; }
   .research-toc[open] a { display: flex; align-items: center; min-height: 42px; padding: 0 .25rem; }
   .research-markdown { font-size: .86rem; line-height: 1.68; }
   .research-markdown h2 { font-size: 1.55rem; }
+  .research-video figcaption { align-items: flex-start; flex-direction: column; padding: .6rem; }
+  .research-video [data-research-video-fullscreen] { align-self: stretch; }
 }

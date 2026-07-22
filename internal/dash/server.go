@@ -250,6 +250,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/parade-assets/{date}/{file}", s.handleParadeAsset)
 	s.mux.HandleFunc("GET /api/research", s.handleResearchIndex)
 	s.mux.HandleFunc("GET /api/research/{id...}", s.handleResearchDocument)
+	s.mux.HandleFunc("GET /research-assets/{id...}", s.handleResearchVideo)
 	s.mux.HandleFunc("GET /api/research-annotations/{id...}", s.handleResearchAnnotations)
 	s.mux.HandleFunc("POST /api/research-annotations/{id...}", s.requireWrite(s.handleResearchAnnotationCreate))
 	s.mux.HandleFunc("GET /research", s.handleResearchPage)

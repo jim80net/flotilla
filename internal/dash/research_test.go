@@ -3,6 +3,7 @@ package dash
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +22,59 @@ func writeResearchFixture(t *testing.T, root, rel, body string, mod time.Time) {
 	}
 	if err := os.Chtimes(file, mod, mod); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestResearchVideoAssetRangeAndBoundary(t *testing.T) {
+	srv, _ := newTestServer(t, singleFleetRoster, time.Now())
+	root := t.TempDir()
+	srv.cfg.ResearchPath = root
+	videoPath := filepath.Join(root, "papers", "media", "briefing.mp4")
+	if err := os.MkdirAll(filepath.Dir(videoPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte("0123456789-video-bytes")
+	if err := os.WriteFile(videoPath, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	full := doGet(t, srv, "/research-assets/papers/media/briefing.mp4")
+	if full.Code != http.StatusOK || full.Body.String() != string(payload) {
+		t.Fatalf("research video = %d %q", full.Code, full.Body.String())
+	}
+	if got := full.Header().Get("Content-Type"); got != "video/mp4" {
+		t.Errorf("content type = %q, want video/mp4", got)
+	}
+	if got := full.Header().Get("Content-Disposition"); got != "inline" {
+		t.Errorf("content disposition = %q, want inline", got)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/research-assets/papers/media/briefing.mp4", nil)
+	req.Header.Set("Range", "bytes=2-5")
+	rangeRec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rangeRec, req)
+	if rangeRec.Code != http.StatusPartialContent || rangeRec.Body.String() != "2345" {
+		t.Fatalf("research video range = %d %q", rangeRec.Code, rangeRec.Body.String())
+	}
+
+	outside := filepath.Join(t.TempDir(), "outside.mp4")
+	if err := os.WriteFile(outside, []byte("PRIVATE_VIDEO_SENTINEL"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "leak.mp4")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	for _, bad := range []string{
+		"/research-assets/leak.mp4",
+		"/research-assets/.hidden.mp4",
+		"/research-assets/papers/notes.txt",
+		"/research-assets/%2e%2e%2foutside.mp4",
+		"/research-assets/papers%5cmedia%5cbriefing.mp4",
+	} {
+		rec := doGet(t, srv, bad)
+		if rec.Code == http.StatusOK || strings.Contains(rec.Body.String(), "PRIVATE_VIDEO_SENTINEL") {
+			t.Errorf("unsafe research video path %q served status=%d body=%q", bad, rec.Code, rec.Body.String())
+		}
 	}
 }
 
@@ -164,7 +218,7 @@ func TestResearchPageAndDashboardNavMarkers(t *testing.T) {
 		}
 	}
 	js := doGet(t, srv, "/static/research.js").Body.String()
-	for _, marker := range []string{"function esc(value)", "renderMarkdown", "documentWithoutDuplicateTitle", "research-decision-strip", "collectionWindow = 6", "tocRestoreY"} {
+	for _, marker := range []string{"function esc(value)", "renderMarkdown", "documentWithoutDuplicateTitle", "research-decision-strip", "collectionWindow = 6", "tocRestoreY", "researchVideoURL", "data-research-video-fullscreen"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("research renderer missing %q", marker)
 		}
