@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -210,5 +211,67 @@ with sync_playwright() as p:
 			t.Fatalf("rendered evidence missing at %q: %v", path, err)
 		}
 		t.Logf("generic rendered evidence: %s", path)
+	}
+}
+
+// TestParadeDragScrollDoesNotAdvanceRendered locks the operator's reading
+// contract: mouse drag-release and document scrolling stay on the current
+// slide; only the visible navigation controls page the deck.
+func TestParadeDragScrollDoesNotAdvanceRendered(t *testing.T) {
+	python := os.Getenv("FLOTILLA_PLAYWRIGHT_PYTHON")
+	if python == "" {
+		t.Skip("set FLOTILLA_PLAYWRIGHT_PYTHON to run rendered Parade regression")
+	}
+	if _, err := exec.LookPath(python); err != nil {
+		t.Fatalf("playwright python: %v", err)
+	}
+
+	srv, dir := newTestServer(t, singleFleetRoster, time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC))
+	paradeDir := filepath.Join(dir, "parades", "2026-07-22")
+	if err := os.MkdirAll(paradeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	longBody := "First readable slide\n\n" + strings.Repeat("A paragraph that should scroll without changing slides.\n\n", 36) + "---\n\nSecond slide\n\nOnly explicit navigation reaches this slide."
+	if err := os.WriteFile(filepath.Join(paradeDir, "slides.md"), []byte(longBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	httpServer := httptest.NewServer(srv.mux)
+	t.Cleanup(func() { httpServer.CloseClientConnections(); httpServer.Close() })
+	script := `
+import sys
+from playwright.sync_api import sync_playwright, expect
+
+url = sys.argv[1]
+with sync_playwright() as p:
+    browser = p.chromium.launch()
+    try:
+        page = browser.new_page(viewport={"width": 390, "height": 844})
+        page.set_default_timeout(8000)
+        page.goto(url + "/parade", wait_until="domcontentloaded")
+        counter = page.locator("#pd-counter")
+        expect(counter).to_have_text("1 / 2")
+
+        stage = page.locator("#pd-stage")
+        box = stage.bounding_box()
+        page.mouse.move(box["x"] + box["width"] - 30, box["y"] + 250)
+        page.mouse.down()
+        page.mouse.move(box["x"] + 30, box["y"] + 120, steps=8)
+        page.mouse.up()
+        expect(counter).to_have_text("1 / 2")
+
+        stage.click(position={"x": box["width"] - 24, "y": 180})
+        expect(counter).to_have_text("1 / 2")
+        page.mouse.wheel(0, 500)
+        expect(counter).to_have_text("1 / 2")
+
+        page.locator("#pd-next").click()
+        expect(counter).to_have_text("2 / 2")
+    finally:
+        browser.close()
+`
+	cmd := exec.Command(python, "-c", script, httpServer.URL)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("rendered Parade drag-scroll regression: %v\n%s", err, out)
 	}
 }

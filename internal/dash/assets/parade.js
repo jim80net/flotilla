@@ -585,26 +585,27 @@
     }).join("");
   }
 
-  /* ── wiring: arrows, tap-halves, swipe, keyboard, list clicks ──────────── */
+  /* ── wiring: arrows, intentional swipe, keyboard, list clicks ─────────── */
   function wire() {
     el("pd-prev").addEventListener("click", function (e) { e.stopPropagation(); prev(); });
     el("pd-next").addEventListener("click", function (e) { e.stopPropagation(); next(); });
     el("pd-close").addEventListener("click", showList);
-    // tap the left/right half of the slide to page (interactive conversation controls never page).
-    el("pd-stage").addEventListener("click", function (e) {
-      if (e.target.closest("a, button, input, textarea, select, label, form, details, summary, .pd-conversation")) return;
-      var r = el("pd-stage").getBoundingClientRect();
-      if (e.clientX - r.left < r.width / 2) prev(); else next();
-    });
-    // swipe.
-    var x0 = null;
+    // Pointer clicks and drag-release belong to the document. Only the explicit
+    // Previous/Next controls page with a mouse. A touch swipe must be clearly
+    // horizontal so ordinary vertical reading never advances the deck.
+    var touch0 = null;
     el("pd-stage").addEventListener("touchstart", function (e) {
-      x0 = e.target.closest(".pd-conversation") ? null : e.touches[0].clientX;
+      var interactive = e.target.closest("a, button, input, textarea, select, label, form, details, summary, .pd-conversation");
+      touch0 = interactive ? null : { x: e.touches[0].clientX, y: e.touches[0].clientY };
     }, { passive: true });
     el("pd-stage").addEventListener("touchend", function (e) {
-      if (x0 == null) return;
-      var dx = e.changedTouches[0].clientX - x0; x0 = null;
-      if (Math.abs(dx) > 40) { if (dx < 0) next(); else prev(); }
+      if (touch0 == null) return;
+      var dx = e.changedTouches[0].clientX - touch0.x;
+      var dy = e.changedTouches[0].clientY - touch0.y;
+      touch0 = null;
+      if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.25) {
+        if (dx < 0) next(); else prev();
+      }
     }, { passive: true });
     // keyboard: arrows page, Escape drops to the list.
     document.addEventListener("keydown", function (e) {
