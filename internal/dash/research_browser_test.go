@@ -32,6 +32,8 @@ func TestResearchLibraryRendered822(t *testing.T) {
 
 Make the review readable on the private dash.
 
+![Video: Five-minute briefing](media/briefing.mp4)
+
 ## Decision checklist
 
 - Confirm the boundary.
@@ -54,6 +56,12 @@ Make the review readable on the private dash.
 	}
 	now := time.Now()
 	writeResearchFixture(t, root, "authorization-domains-design.md", design.String(), now)
+	if err := os.MkdirAll(filepath.Join(root, "media"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "media", "briefing.mp4"), []byte("generic-video-fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	writeResearchFixture(t, root, "notes/field-note.md", "# Field note\n\n## Finding\n\nAn ordinary research note.\n", time.Now().Add(-time.Hour))
 	for i := 1; i <= 7; i++ {
 		writeResearchFixture(t, root, fmt.Sprintf("decisions/design-%02d.md", i), fmt.Sprintf("# Design %02d\n\n**Status:** operator-review\n\n## Checklist\n\nReview this design.\n", i), now.Add(-time.Duration(i)*time.Minute))
@@ -113,6 +121,18 @@ with sync_playwright() as p:
         assert closed_height <= 48, closed_height
         closed_page_height = phone.evaluate("document.documentElement.scrollHeight")
         expect(phone.locator(".research-table-wrap table")).to_be_visible()
+        video = phone.locator(".research-video video")
+        expect(video).to_be_visible()
+        assert video.get_attribute("controls") is not None
+        assert video.locator("source").get_attribute("src") == "/research-assets/media/briefing.mp4"
+        full_screen = phone.locator("[data-research-video-fullscreen]")
+        expect(full_screen).to_have_text("Full screen")
+        full_metrics = full_screen.evaluate("node => ({width:node.getBoundingClientRect().width,height:node.getBoundingClientRect().height,right:node.getBoundingClientRect().right,viewport:document.documentElement.clientWidth})")
+        assert full_metrics["width"] >= 44 and full_metrics["height"] >= 44 and full_metrics["right"] <= full_metrics["viewport"], full_metrics
+        video.evaluate("node => { node.requestFullscreen = function () { window.RESEARCH_FULLSCREEN_REQUESTED = true; return Promise.resolve(); }; }")
+        full_screen.click()
+        assert phone.evaluate("window.RESEARCH_FULLSCREEN_REQUESTED === true")
+        phone.evaluate("window.scrollTo(0, 0)")
         expect(phone.locator(".research-markdown script")).to_have_count(0)
         assert phone.evaluate("window.RESEARCH_INJECTED") is None
         assert "<script>" in phone.locator("#research-body").inner_text()

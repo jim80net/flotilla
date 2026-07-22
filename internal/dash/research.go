@@ -57,6 +57,87 @@ func validResearchID(id string) bool {
 	return true
 }
 
+func validResearchVideoID(id string) bool {
+	if id == "" || strings.ContainsRune(id, '\x00') || strings.Contains(id, `\`) ||
+		strings.HasPrefix(id, "/") || path.Clean(id) != id {
+		return false
+	}
+	switch strings.ToLower(path.Ext(id)) {
+	case ".mp4", ".webm", ".ogv":
+	default:
+		return false
+	}
+	for _, part := range strings.Split(id, "/") {
+		if part == "" || part == "." || part == ".." || strings.HasPrefix(part, ".") {
+			return false
+		}
+	}
+	return true
+}
+
+func openResearchVideo(root, id string) (*os.File, os.FileInfo, bool, error) {
+	if !validResearchVideoID(id) {
+		return nil, nil, false, nil
+	}
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil, false, nil
+		}
+		return nil, nil, false, err
+	}
+	if !rootInfo.IsDir() {
+		return nil, nil, false, fmt.Errorf("research root is not a directory")
+	}
+	full := root
+	parts := strings.Split(id, "/")
+	for i, part := range parts {
+		full = filepath.Join(full, part)
+		info, statErr := os.Lstat(full)
+		if statErr != nil {
+			if errors.Is(statErr, os.ErrNotExist) {
+				return nil, nil, false, nil
+			}
+			return nil, nil, false, statErr
+		}
+		if info.Mode()&os.ModeSymlink != 0 || (i < len(parts)-1 && !info.IsDir()) {
+			return nil, nil, false, nil
+		}
+	}
+	rootReal, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	fullReal, err := filepath.EvalSymlinks(full)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil, false, nil
+		}
+		return nil, nil, false, err
+	}
+	rel, err := filepath.Rel(rootReal, fullReal)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return nil, nil, false, nil
+	}
+	file, err := os.Open(fullReal)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil, false, nil
+		}
+		return nil, nil, false, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, false, err
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, nil, false, nil
+	}
+	return file, info, true, nil
+}
+
 func researchTitle(id, markdown string) string {
 	for _, line := range strings.Split(markdown, "\n") {
 		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
@@ -293,6 +374,31 @@ func (s *Server) handleResearchDocument(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, doc)
+}
+
+func (s *Server) handleResearchVideo(w http.ResponseWriter, r *http.Request) {
+	file, info, found, err := openResearchVideo(s.cfg.ResearchPath, r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "the research video could not be read")
+		return
+	}
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+	defer file.Close()
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("Content-Disposition", "inline")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	switch strings.ToLower(filepath.Ext(info.Name())) {
+	case ".mp4":
+		w.Header().Set("Content-Type", "video/mp4")
+	case ".webm":
+		w.Header().Set("Content-Type", "video/webm")
+	case ".ogv":
+		w.Header().Set("Content-Type", "video/ogg")
+	}
+	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
 }
 
 func (s *Server) handleResearchPage(w http.ResponseWriter, _ *http.Request) {
