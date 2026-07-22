@@ -26,7 +26,8 @@ Environment=HOME=%h
 # PATH must include gh's dir (the tracker shells out to `gh`); the standard system
 # dirs cover the usual /usr/bin install, and %h/go/bin is appended for a go-installed gh.
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:%h/go/bin
-# The dash binary reads $FLOTILLA_SECRETS and $FLOTILLA_DASH_REPO as fallback defaults
+# The dash binary reads $FLOTILLA_SECRETS, $FLOTILLA_DASH_REPO, and
+# $FLOTILLA_BACKLOG_FILE as fallback defaults
 # when the corresponding flag is absent (cmd/flotilla/dash.go). Strip them from this
 # service's environment so the dash's config is EXACTLY what this unit declares — an
 # ambient export (e.g. one imported into the --user manager for interactive use) can
@@ -35,15 +36,15 @@ Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:%h
 # true at RUNTIME, not just at generate time (the installer's pre-clear handles the
 # generate-time path). When the .env DID set them, the explicit --secrets/--repo flags
 # below win regardless, so this is safe in every case.
-UnsetEnvironment=FLOTILLA_SECRETS FLOTILLA_DASH_REPO
-# The two trailing fragments after --bind are COMPUTED by the installer: each becomes
-# " --repo <owner/name>" / " --secrets <path>" (leading space included) when the
+UnsetEnvironment=FLOTILLA_SECRETS FLOTILLA_DASH_REPO FLOTILLA_BACKLOG_FILE
+# The three trailing fragments after --bind are COMPUTED by the installer: each becomes
+# " --repo <owner/name>" / " --secrets <path>" / " --backlog-file <path>" (leading space included) when the
 # OPTIONAL key is set, or "" when unset — so an omitted option leaves this line
-# byte-identical to a no-option install (no flag, no trailing space). Both are ALWAYS
+# byte-identical to a no-option install (no flag, no trailing space). All are ALWAYS
 # substituted (to the fragment or to empty), so the "no placeholder survives" guard
 # still holds. (The token names are spelled in the installer, not here, so this comment
 # is not itself rewritten by the substitution.)
-ExecStart=@FLOTILLA_DASH_BIN@ dash --roster @FLOTILLA_DASH_ROSTER@ --bind @FLOTILLA_DASH_BIND@@FLOTILLA_DASH_REPO_ARG@@FLOTILLA_DASH_SECRETS_ARG@
+ExecStart=@FLOTILLA_DASH_BIN@ dash --roster @FLOTILLA_DASH_ROSTER@ --bind @FLOTILLA_DASH_BIND@@FLOTILLA_DASH_REPO_ARG@@FLOTILLA_DASH_SECRETS_ARG@@FLOTILLA_DASH_BACKLOG_ARG@
 Restart=on-failure
 RestartSec=5
 KillSignal=SIGTERM

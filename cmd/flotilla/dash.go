@@ -36,6 +36,7 @@ func cmdDash(args []string) error {
 	snapshotPath := fs.String("snapshot-file", os.Getenv("FLOTILLA_SNAPSHOT_FILE"), "change-detector snapshot file (default <roster-dir>/flotilla-detector-state.json)")
 	ackPath := fs.String("ack-file", os.Getenv("FLOTILLA_ACK_FILE"), "XO liveness ack file (default <roster-dir>/flotilla-xo-alive)")
 	trackerPath := fs.String("tracker-file", os.Getenv("FLOTILLA_TRACKER_FILE"), "backlog markdown the history view reads (default <roster-dir>/.flotilla-state.md)")
+	backlogPath := fs.String("backlog-file", os.Getenv("FLOTILLA_BACKLOG_FILE"), "drive backlog Goals uses to resolve work items (default --tracker-file; set to the same file watch uses)")
 	goalsPath := fs.String("goals-file", os.Getenv("FLOTILLA_GOALS_FILE"), "goals file the Goals view reads (default <roster-dir>/fleet-goals.json)")
 	orgFile := fs.String("org-file", os.Getenv("FLOTILLA_ORG_FILE"), "optional org-truth file (default <roster-dir>/fleet-org.yaml when present; env FLOTILLA_ORG_FILE)")
 	bind := fs.String("bind", dash.DefaultBind, "local listen address (loopback only in this phase)")
@@ -98,6 +99,7 @@ func cmdDash(args []string) error {
 		SnapshotPath:          *snapshotPath,
 		AckPath:               *ackPath,
 		BacklogPath:           *trackerPath,
+		DriveBacklogPath:      *backlogPath,
 		GoalsPath:             *goalsPath,
 		ParadesPath:           *paradesDir,
 		ResearchPath:          *researchDir,

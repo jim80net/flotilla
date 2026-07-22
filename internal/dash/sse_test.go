@@ -186,10 +186,11 @@ func TestFileSigsChange(t *testing.T) {
 	snap := filepath.Join(dir, "snap.json")
 	ledger := filepath.Join(dir, "ledger.md")
 	backlog := filepath.Join(dir, "backlog.md")
+	driveBacklog := filepath.Join(dir, "fleet-backlog.md")
 	goals := filepath.Join(dir, "fleet-goals.json")
 	goalsYAML := filepath.Join(dir, "fleet-goals.yaml")
 	mirrorDir := filepath.Join(dir, "session-mirror")
-	paths := []string{snap, ledger, backlog, goals, goalsYAML}
+	paths := []string{snap, ledger, backlog, driveBacklog, goals, goalsYAML}
 
 	// All absent initially.
 	s0 := fileSigs(paths, mirrorDir)
@@ -223,6 +224,17 @@ func TestFileSigsChange(t *testing.T) {
 	if s3 == s2 {
 		t.Error("ledger change must change the combined signature")
 	}
+
+	// Touching the drive backlog changes the Goals input independently of the
+	// history tracker backlog.
+	if err := os.WriteFile(driveBacklog, []byte("## Backlog\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sDrive := fileSigs(paths, mirrorDir)
+	if sDrive == s3 {
+		t.Error("drive backlog change must change the combined signature")
+	}
+	s3 = sDrive
 
 	// Touching the goals file changes the combined signature too (so a structural
 	// goals edit pushes an SSE update the same way a snapshot/backlog change does).

@@ -33,6 +33,7 @@ type Config struct {
 	AckPath                 string // XO liveness ack file (default <roster-dir>/flotilla-xo-alive)
 	LedgerPath              string // CoS ledger (cfg.CosLedger; "" when the CoS mirror is inert)
 	BacklogPath             string // backlog markdown (--tracker-file; default <roster-dir>/.flotilla-state.md)
+	DriveBacklogPath        string // active drive backlog for Goals work-item resolution (--backlog-file / FLOTILLA_BACKLOG_FILE; default BacklogPath)
 	GoalsPath               string // goals file the Goals view reads (default <roster-dir>/fleet-goals.json)
 	GoalsYAMLPath           string // goals yaml source compiled on load (default <roster-dir>/fleet-goals.yaml)
 	SessionMirrorDir        string // per-agent session-mirror ledgers (default <roster-dir>/session-mirror)
@@ -378,8 +379,8 @@ func (s *Server) loadHistoryPage(q HistoryQuery) (HistoryPage, error) {
 }
 
 // loadGoals reads the goals file fresh and builds the goals document, binding
-// live work-item status from the SAME board (desk states) and backlog the other
-// views read — so the Goals view can never diverge from the fleet board. A
+// live work-item status from the SAME board (desk states) and drive backlog
+// watch reads — so Goals and the goal loop cannot disagree about active work. A
 // missing goals file yields an honest Found=false document; a present-but-invalid
 // file surfaces the load error (structure is validated fail-closed) rather than a
 // partial tree. When the tracker is configured, open issues with a goal-id:
@@ -402,14 +403,24 @@ func (s *Server) loadGoalsFromRepoIssues(sources []WorkLedgerRepoIssues) GoalsDo
 
 func (s *Server) loadGoalsWithIssueSources(sources []WorkLedgerRepoIssues, supplied bool) GoalsDoc {
 	orgParents, orgSource := orgParentsFromRoster(s.roster)
+	backlog := readFileOrEmpty(s.cfg.DriveBacklogPath)
+	backlogErr := ""
+	if s.cfg.DriveBacklogPath != s.cfg.BacklogPath {
+		if raw, err := os.ReadFile(s.cfg.DriveBacklogPath); err != nil {
+			backlogErr = fmt.Sprintf("drive backlog %q: %v", s.cfg.DriveBacklogPath, err)
+		} else {
+			backlog = string(raw)
+		}
+	}
 	in := GoalsInputs{
-		Backlog:       readFileOrEmpty(s.cfg.BacklogPath),
+		Backlog:       backlog,
 		DeskStates:    agentStates(s.loadBoard()),
 		AgentSurfaces: agentSurfacesFromRoster(s.roster),
 		MetaXO:        s.xo,
 		Channels:      deskChannelsFromRoster(s.roster),
 		OrgParents:    orgParents,
 		OrgSource:     orgSource,
+		LoadErr:       backlogErr,
 	}
 	if supplied {
 		for _, source := range sources {
@@ -779,6 +790,9 @@ func ResolvePaths(cfg Config, rc *roster.Config) Config {
 	}
 	if cfg.BacklogPath == "" {
 		cfg.BacklogPath = filepath.Join(dir, ".flotilla-state.md")
+	}
+	if cfg.DriveBacklogPath == "" {
+		cfg.DriveBacklogPath = cfg.BacklogPath
 	}
 	if cfg.GoalsPath == "" {
 		cfg.GoalsPath = filepath.Join(dir, "fleet-goals.json")

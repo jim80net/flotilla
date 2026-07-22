@@ -53,7 +53,7 @@ fi
 # FLOTILLA_DASH_SECRETS guards the symmetric case). The RUNTIME path (the binary
 # inheriting an ambient FLOTILLA_SECRETS/FLOTILLA_DASH_REPO when the flag is absent) is
 # closed separately by the unit's UnsetEnvironment= (see flotilla-dash.service.in).
-FLOTILLA_DASH_WORKDIR='' FLOTILLA_DASH_BIN='' FLOTILLA_DASH_ROSTER='' FLOTILLA_DASH_BIND='' FLOTILLA_DASH_REPO='' FLOTILLA_DASH_SECRETS=''
+FLOTILLA_DASH_WORKDIR='' FLOTILLA_DASH_BIN='' FLOTILLA_DASH_ROSTER='' FLOTILLA_DASH_BIND='' FLOTILLA_DASH_REPO='' FLOTILLA_DASH_SECRETS='' FLOTILLA_DASH_BACKLOG_FILE=''
 while IFS= read -r line || [[ -n "$line" ]]; do
   line="${line%$'\r'}"
   [[ -z "$line" || "$line" == \#* ]] && continue
@@ -65,7 +65,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   val="${val#"${val%%[![:space:]]*}"}"
   val="${val%"${val##*[![:space:]]}"}"
   case "$key" in
-    FLOTILLA_DASH_WORKDIR|FLOTILLA_DASH_BIN|FLOTILLA_DASH_ROSTER|FLOTILLA_DASH_BIND|FLOTILLA_DASH_REPO|FLOTILLA_DASH_SECRETS)
+    FLOTILLA_DASH_WORKDIR|FLOTILLA_DASH_BIN|FLOTILLA_DASH_ROSTER|FLOTILLA_DASH_BIND|FLOTILLA_DASH_REPO|FLOTILLA_DASH_SECRETS|FLOTILLA_DASH_BACKLOG_FILE)
       printf -v "$key" '%s' "$val" ;;
     *) echo "warning: ignoring unknown key in $ENV_FILE: $key" >&2 ;;
   esac
@@ -83,7 +83,7 @@ fi
 # A value must never itself contain a template token, or a later substitution pass
 # would rewrite it (substitution is sequential). Implausible for a real path, but
 # cheap to make the substitution provably safe.
-for v in FLOTILLA_DASH_WORKDIR FLOTILLA_DASH_BIN FLOTILLA_DASH_ROSTER FLOTILLA_DASH_BIND FLOTILLA_DASH_REPO FLOTILLA_DASH_SECRETS; do
+for v in FLOTILLA_DASH_WORKDIR FLOTILLA_DASH_BIN FLOTILLA_DASH_ROSTER FLOTILLA_DASH_BIND FLOTILLA_DASH_REPO FLOTILLA_DASH_SECRETS FLOTILLA_DASH_BACKLOG_FILE; do
   if [[ "${!v}" == *@FLOTILLA_*@* ]]; then
     echo "error: $v contains a template placeholder token (@FLOTILLA_...@); refusing" >&2
     exit 1
@@ -104,15 +104,17 @@ content="${content//@FLOTILLA_DASH_BIN@/$FLOTILLA_DASH_BIN}"
 content="${content//@FLOTILLA_DASH_ROSTER@/$FLOTILLA_DASH_ROSTER}"
 content="${content//@FLOTILLA_DASH_BIND@/$FLOTILLA_DASH_BIND}"
 
-# OPTIONAL --repo / --secrets: compute each ExecStart fragment. SET ⇒ " --flag <val>"
+# OPTIONAL --repo / --secrets / --backlog-file: compute each ExecStart fragment. SET ⇒ " --flag <val>"
 # (the leading space is part of the fragment, since the template appends with no
 # separator); UNSET ⇒ "" (byte-identical to an omitted option). Both placeholders are
 # ALWAYS substituted — to the fragment or to empty — so the fail-loud guard below still
 # holds and an unset option leaves no trailing space.
 if [[ -n "$FLOTILLA_DASH_REPO" ]]; then repo_arg=" --repo $FLOTILLA_DASH_REPO"; else repo_arg=""; fi
 if [[ -n "$FLOTILLA_DASH_SECRETS" ]]; then secrets_arg=" --secrets $FLOTILLA_DASH_SECRETS"; else secrets_arg=""; fi
+if [[ -n "$FLOTILLA_DASH_BACKLOG_FILE" ]]; then backlog_arg=" --backlog-file $FLOTILLA_DASH_BACKLOG_FILE"; else backlog_arg=""; fi
 content="${content//@FLOTILLA_DASH_REPO_ARG@/$repo_arg}"
 content="${content//@FLOTILLA_DASH_SECRETS_ARG@/$secrets_arg}"
+content="${content//@FLOTILLA_DASH_BACKLOG_ARG@/$backlog_arg}"
 
 # Fail loudly if any placeholder survived (a typo'd or newly-added template token).
 if [[ "$content" == *@FLOTILLA_*@* ]]; then
@@ -142,6 +144,8 @@ check_path "$FLOTILLA_DASH_BIN"    || echo "warning: binary not found yet: $FLOT
 # warning, not a hard prerequisite like the roster.
 [[ -z "$FLOTILLA_DASH_SECRETS" ]] || check_path "$FLOTILLA_DASH_SECRETS" || \
   echo "warning: secrets file not found yet: $FLOTILLA_DASH_SECRETS (the operator-note action is inert until it exists)" >&2
+[[ -z "$FLOTILLA_DASH_BACKLOG_FILE" ]] || check_path "$FLOTILLA_DASH_BACKLOG_FILE" || \
+  echo "warning: drive backlog not found yet: $FLOTILLA_DASH_BACKLOG_FILE (Goals decisions remain empty until it exists)" >&2
 
 new_tmp="$(mktemp)"; trap 'rm -f "$new_tmp"' EXIT
 printf '%s\n' "$content" > "$new_tmp"
