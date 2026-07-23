@@ -26,7 +26,10 @@
       button.setAttribute("aria-label", dark ? "Dark theme active. Switch to light theme" : "Light theme active. Switch to dark theme");
       button.setAttribute("title", dark ? "Switch to light theme" : "Switch to dark theme");
       var label = button.querySelector("[data-theme-label]");
-      if (label) label.textContent = dark ? "Dark" : "Light";
+      if (label) {
+        label.textContent = dark ? "Dark → Light" : "Light → Dark";
+        label.setAttribute("data-theme-compact", dark ? "D→L" : "L→D");
+      }
     });
   }
 

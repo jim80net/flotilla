@@ -210,6 +210,7 @@ code {
 .theme-toggle:hover { border-color: var(--cyan); color: var(--ink); }
 .theme-toggle:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .theme-toggle[aria-pressed="true"] { border-color: var(--cyan-dim); color: var(--cyan); }
+.theme-toggle [data-theme-label] { white-space: nowrap; }
 .meta-label {
   font-family: var(--display);
   font-size: .68rem; letter-spacing: .12em; text-transform: uppercase;
@@ -2197,10 +2198,15 @@ html, body { overflow-x: clip; }
   body:not(.parade-body):not(.research-page) > .bar .brand-dash { display: none; }
   /* Keep the dashboard's effective 44px target inside the header's existing
      padding instead of making the already-dense first row taller. */
-  .bar-meta .theme-toggle {
-    width: 44px; min-height: 44px; margin-block: -11px; padding: 0; justify-content: center;
+  .theme-toggle {
+    width: 52px; min-width: 52px; min-height: 44px; padding: 0; justify-content: center;
   }
-  .bar-meta .theme-toggle [data-theme-label] { display: none; }
+  .theme-toggle::before { display: none; }
+  .theme-toggle [data-theme-label] { font-size: 0; }
+  .theme-toggle [data-theme-label]::after {
+    content: attr(data-theme-compact); font: 600 .66rem var(--display); letter-spacing: .04em;
+  }
+  .bar-meta .theme-toggle { margin-block: -11px; }
   .bar-meta .meta-label, .bar-meta .meta-bind { display: none; }
   /* Standalone readers carry both a labeled theme control and Dashboard link.
      Give the full product brand its own row so neither 390 nor 360 clips it. */
@@ -2671,8 +2677,7 @@ html, body { overflow-x: clip; }
 .pd-listcard-meta { font-size: .76rem; color: var(--ink-3); }
 
 @media (max-width: 560px) {
-  .pd-deck-bar .theme-toggle { width: 44px; padding: 0; justify-content: center; }
-  .pd-deck-bar .theme-toggle [data-theme-label] { display: none; }
+  .pd-deck-bar .theme-toggle { width: 52px; padding: 0; justify-content: center; }
   .pd-stage { padding: .2rem .3rem; }
   .pd-slide {
     width: 100%; max-width: 100%;

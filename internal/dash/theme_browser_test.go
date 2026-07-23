@@ -4,6 +4,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -55,8 +56,16 @@ func TestThemeRendered834(t *testing.T) {
 		t.Fatalf("playwright python: %v", err)
 	}
 
-	srv, _ := newTestServer(t, singleFleetRoster, time.Now())
+	srv, dir := newTestServer(t, singleFleetRoster, time.Now())
 	srv.cfg.ResearchPath = t.TempDir()
+	srv.cfg.ParadesPath = filepath.Join(dir, "parades")
+	paradeDir := filepath.Join(srv.cfg.ParadesPath, "2026-07-23")
+	if err := os.MkdirAll(paradeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(paradeDir, "slides.md"), []byte("Generic theme fixture\n\nNo private content."), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	httpServer := httptest.NewServer(srv.mux)
 	t.Cleanup(func() {
 		httpServer.CloseClientConnections()
@@ -100,6 +109,8 @@ with sync_playwright() as p:
         page.goto(url, wait_until="domcontentloaded")
         expect(page.locator("html")).to_have_attribute("data-theme", "dark")
         expect(page.locator(".theme-toggle")).to_have_attribute("aria-pressed", "true")
+        expect(page.locator(".theme-toggle [data-theme-label]")).to_have_text("Dark → Light")
+        expect(page.locator(".theme-toggle [data-theme-label]")).to_have_attribute("data-theme-compact", "D→L")
         desktop_toggle = page.locator(".theme-toggle").bounding_box()
         assert desktop_toggle and desktop_toggle["y"] >= 0 and desktop_toggle["height"] >= 36, desktop_toggle
         colors = page.evaluate("""() => ({
@@ -135,8 +146,18 @@ with sync_playwright() as p:
             for path in ["/", "/research", "/parade"]:
                 mobile.goto(url + path, wait_until="domcontentloaded")
                 expect(mobile.locator("html")).to_have_attribute("data-theme", "dark")
+                if path == "/parade" and mobile.locator("#pd-deck").is_visible():
+                    mobile.locator("#pd-close").click()
+                    expect(mobile.locator("#pd-list-view")).to_be_visible()
                 toggle = mobile.locator(".theme-toggle:visible").first
                 expect(toggle).to_be_visible()
+                expect(toggle).to_have_attribute("aria-pressed", "true")
+                expect(toggle).to_have_attribute("aria-label", "Dark theme active. Switch to light theme")
+                label = toggle.locator("[data-theme-label]")
+                expect(label).to_have_text("Dark → Light")
+                expect(label).to_have_attribute("data-theme-compact", "D→L")
+                compact = label.evaluate("node => getComputedStyle(node, '::after').content")
+                assert "D→L" in compact, (width, path, compact)
                 box = toggle.bounding_box()
                 assert box and box["height"] >= 44 and box["width"] >= 44, (width, path, box)
                 assert box["y"] >= 0 and box["y"] + box["height"] <= height, (width, path, box)
@@ -158,6 +179,16 @@ with sync_playwright() as p:
                     route_metrics["nav"] = nav_box
                 metrics = mobile.evaluate("({scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth})")
                 assert metrics["scroll"] == metrics["client"], (width, path, metrics)
+                if path == "/parade":
+                    mobile.locator(".pd-listcard").click()
+                    deck_toggle = mobile.locator("#pd-deck .theme-toggle")
+                    expect(deck_toggle).to_be_visible()
+                    expect(deck_toggle).to_have_attribute("aria-label", "Dark theme active. Switch to light theme")
+                    expect(deck_toggle.locator("[data-theme-label]")).to_have_text("Dark → Light")
+                    deck_box = deck_toggle.bounding_box()
+                    assert deck_box and deck_box["width"] >= 44 and deck_box["height"] >= 44, (width, deck_box)
+                    assert deck_box["x"] >= 0 and deck_box["x"] + deck_box["width"] <= width, (width, deck_box)
+                    assert deck_box["y"] >= 0 and deck_box["y"] + deck_box["height"] <= height, (width, deck_box)
                 phone_metrics.append(route_metrics)
                 if evidence_dir:
                     name = "dashboard" if path == "/" else path[1:]
@@ -165,6 +196,8 @@ with sync_playwright() as p:
 
         mobile.locator(".theme-toggle:visible").first.click()
         expect(mobile.locator("html")).to_have_attribute("data-theme", "light")
+        expect(mobile.locator(".theme-toggle:visible").first).to_have_attribute("aria-pressed", "false")
+        expect(mobile.locator(".theme-toggle:visible").first.locator("[data-theme-label]")).to_have_text("Light → Dark")
         mobile.goto(url, wait_until="domcontentloaded")
         expect(mobile.locator("html")).to_have_attribute("data-theme", "light")
         print("THEME_PHONE_METRICS=" + json.dumps(phone_metrics, sort_keys=True))
