@@ -2015,6 +2015,21 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gdec-eyebrow { font-family: var(--display); font-size: .62rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); margin-bottom: .35rem; }
 .gdec-card-title { font-family: var(--display); font-size: 1.12rem; color: var(--ink); margin: 0 0 .3rem; line-height: 1.25; }
 .gdec-item { font-weight: 400; font-size: .9rem; }
+.gdec-window { display: grid; gap: .8rem; }
+.gdec-summary { display: grid; gap: .65rem; padding: .85rem 1rem; }
+.gdec-summary .gdec-card-title { margin: 0; }
+.gdec-summary-facts { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem 1rem; }
+.gdec-summary-facts div { min-width: 0; }
+.gdec-summary-facts dt { font: 600 .6rem var(--display); letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3); }
+.gdec-summary-facts dd { margin: .12rem 0 0; color: var(--ink-2); font-size: .78rem; line-height: 1.35; overflow-wrap: anywhere; }
+.gdec-open { min-height: 44px; justify-self: start; }
+.gdec-more { display: flex; align-items: center; justify-content: space-between; gap: .8rem; color: var(--ink-3); font-size: .76rem; }
+.gdec-more .btn { min-height: 44px; }
+.gdec-jump-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .45rem; padding: .7rem; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--abyss-2); }
+.gdec-jump-panel[hidden] { display: none; }
+.gdec-jump { min-height: 44px; justify-content: flex-start; gap: .55rem; text-align: left; }
+.gdec-jump span { color: var(--ink-3); font-size: .68rem; white-space: nowrap; }
+.gdec-retry { min-height: 44px; margin-top: .8rem; }
 .gdec-ctx { font-size: .78rem; color: var(--ink-3); margin-bottom: .7rem; }
 .gdec-ctx-lab { text-transform: uppercase; letter-spacing: .1em; font-size: .62rem; }
 .gdec-ctx-link { background: none; border: 0; padding: 0; font: inherit; color: var(--cyan); cursor: pointer; }
@@ -2044,6 +2059,17 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 @media (prefers-reduced-motion: reduce) { .gdec-prep-spin { animation: none; border-top-color: var(--amber); } }
 .gdec-prep-title { color: var(--ink); min-width: 0; }
 .gdec-prep-owner { font-size: .72rem; color: var(--ink-3); flex: none; margin-left: auto; }
+.gdec-detail {
+  width: min(760px, calc(100vw - 2rem)); max-height: min(780px, calc(100dvh - 2rem));
+  padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--r);
+  color: var(--ink); background: var(--card); box-shadow: var(--shadow);
+}
+.gdec-detail::backdrop { background: color-mix(in srgb, var(--abyss) 76%, transparent); backdrop-filter: blur(3px); }
+.gdec-detail-head { min-height: 60px; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .7rem 1rem; border-bottom: 1px solid var(--line); }
+.gdec-detail-head h2 { margin: .1rem 0 0; font: 600 1rem var(--display); }
+.gdec-detail-close { min-width: 44px; min-height: 44px; }
+.gdec-detail-body { max-height: calc(100dvh - 7rem); overflow-y: auto; overscroll-behavior: contain; padding: 1rem; }
+.gdec-detail-body .gdec-card { border: 0; padding: 0; background: transparent; }
 .gm-input-lab { display: block; font-size: .64rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 5px; }
 .gm-input { width: 100%; background: var(--abyss); border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--ink); font-family: var(--mono); font-size: .84rem; padding: 8px 10px; resize: vertical; }
 .gm-input:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
@@ -2188,6 +2214,18 @@ html, body { overflow-x: clip; }
    full-bleed the overlays. (Touch-target sizing is handled by the ≤900 block
    above; this block is structure only.) */
 @media (max-width: 640px) {
+  .decisions-panel > .panel-head { padding: .65rem .75rem; }
+  .decisions-panel > .panel-head .panel-desc { display: none; }
+  .gdec-list { padding: .65rem; gap: .7rem; }
+  .gdec-summary { gap: .45rem; padding: .68rem .75rem; }
+  .gdec-summary-facts { grid-template-columns: 1fr 1fr; gap: .35rem .7rem; }
+  .gdec-summary-facts dd { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .gdec-more { align-items: stretch; flex-direction: column; }
+  .gdec-jump-panel { grid-template-columns: 1fr; }
+  .gdec-detail { width: calc(100vw - .75rem); max-height: calc(100dvh - .75rem); }
+  .gdec-detail-body { max-height: calc(100dvh - 5.5rem); padding: .75rem; }
+  .gdec-prep-row { align-items: flex-start; flex-wrap: wrap; }
+  .gdec-prep-owner { width: 100%; margin-left: 1.25rem; }
   /* ── header: row 1 = brand + live-dot; row 2 = the tabs (the ≤1100 block above
      owns the wrap). The dev-only bind address is hidden on a phone (low value,
      high width); the live-link dot stays (it carries meaning). */
@@ -2665,6 +2703,7 @@ html, body { overflow-x: clip; }
 /* edge nav — big, screen-constant, ≥44px; disabled at the ends. */
 .pd-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 48px; height: 64px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: var(--r-sm); background: color-mix(in srgb, var(--abyss-3) 82%, transparent); color: var(--ink-2); font-size: 2rem; line-height: 1; cursor: pointer; z-index: 2; }
 .pd-prev { left: .5rem; } .pd-next { right: .5rem; }
+.pd-nav-label { display: none; font: 600 .72rem var(--display); }
 .pd-nav:hover:not(:disabled) { border-color: var(--cyan-dim, var(--cyan)); color: var(--ink); }
 .pd-nav:disabled { opacity: .28; cursor: default; }
 
@@ -2678,16 +2717,22 @@ html, body { overflow-x: clip; }
 
 @media (max-width: 560px) {
   .pd-deck-bar .theme-toggle { width: 52px; padding: 0; justify-content: center; }
-  .pd-stage { padding: .2rem .3rem; }
+  .pd-stage {
+    display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr) 48px;
+    gap: .35rem; padding: .2rem .3rem .35rem;
+  }
   .pd-slide {
-    width: 100%; max-width: 100%;
+    grid-column: 1 / -1; grid-row: 1; width: 100%; max-width: 100%; min-height: 0;
     padding: 1rem .7rem 1.2rem;
   }
-  .pd-nav { width: 40px; height: 56px; font-size: 1.6rem; }
-  .pd-prev { left: .15rem; } .pd-next { right: .15rem; }
+  .pd-nav {
+    position: static; grid-row: 2; width: auto; height: 48px; transform: none;
+    gap: .35rem; font-size: 1.35rem; background: var(--abyss-3);
+  }
+  .pd-prev { grid-column: 1; } .pd-next { grid-column: 2; }
+  .pd-nav-label { display: inline; }
   .pd-slide-img { max-height: 48vh; }
   .pd-presenter-avatar { width: 40px; height: 40px; }
-  .pd-stage.has-open-conversation .pd-nav { display: none; }
   .pd-conversation { margin-top: 1rem; }
   .pd-convo-panel { grid-template-columns: 1fr; }
   .pd-convo-thread { max-height: 240px; }

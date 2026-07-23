@@ -275,3 +275,105 @@ with sync_playwright() as p:
 		t.Fatalf("rendered Parade drag-scroll regression: %v\n%s", err, out)
 	}
 }
+
+// TestParadeMobileControlsClearContent849 proves the phone control row is a
+// reserved layout region, not an overlay over the scrollable slide.
+func TestParadeMobileControlsClearContent849(t *testing.T) {
+	python := os.Getenv("FLOTILLA_PLAYWRIGHT_PYTHON")
+	if python == "" {
+		t.Skip("set FLOTILLA_PLAYWRIGHT_PYTHON to run rendered Parade regression")
+	}
+	if _, err := exec.LookPath(python); err != nil {
+		t.Fatalf("playwright python: %v", err)
+	}
+
+	srv, dir := newTestServer(t, singleFleetRoster, time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC))
+	paradeDir := filepath.Join(dir, "parades", "2026-07-23")
+	if err := os.MkdirAll(filepath.Join(paradeDir, "assets"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	longBody := "# Alpha XO · Read every line\n\n" +
+		"[Open the generic source](https://example.invalid/source)\n\n" +
+		strings.Repeat("Long generic narrative remains clear of explicit navigation controls.\n\n", 30) +
+		"![Generic diagram](diagram.png)\n\nFinal readable line before the conversation.\n\n---\n\n# Second slide\n\nExplicit navigation arrives here."
+	if err := os.WriteFile(filepath.Join(paradeDir, "slides.md"), []byte(longBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A tiny generic PNG; rendered evidence never uses production parade media.
+	png := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xde}
+	if err := os.WriteFile(filepath.Join(paradeDir, "assets", "diagram.png"), png, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	httpServer := httptest.NewServer(srv.mux)
+	t.Cleanup(func() { httpServer.CloseClientConnections(); httpServer.Close() })
+	script := `
+import json
+import sys
+from playwright.sync_api import sync_playwright, expect
+
+url = sys.argv[1]
+def metrics(page):
+    return page.evaluate("""() => {
+      const slide=document.querySelector('#pd-slide').getBoundingClientRect();
+      const controls=[...document.querySelectorAll('.pd-nav')].map(node => {
+        const r=node.getBoundingClientRect();
+        return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height,disabled:node.disabled};
+      });
+      const readable=[...document.querySelectorAll('.pd-slide-title,.pd-slide-body p,.pd-slide-body a,.pd-slide-img,.pd-conversation')].map(node => {
+        const r=node.getBoundingClientRect();
+        return {left:Math.max(r.left,slide.left),right:Math.min(r.right,slide.right),top:Math.max(r.top,slide.top),bottom:Math.min(r.bottom,slide.bottom)};
+      }).filter(r => r.right > r.left && r.bottom > r.top);
+      return {slide:{left:slide.left,right:slide.right,top:slide.top,bottom:slide.bottom},controls,readable,
+        width:document.documentElement.scrollWidth,client:document.documentElement.clientWidth};
+    }""")
+
+def assert_clear(result, width, height):
+    assert result["width"] == result["client"] == width, result
+    for control in result["controls"]:
+        assert control["left"] >= 0 and control["right"] <= width and control["top"] >= 0 and control["bottom"] <= height, result
+        assert control["width"] >= 44 and control["height"] >= 44, result
+        assert control["top"] >= result["slide"]["bottom"], result
+        for content in result["readable"]:
+            intersects = control["left"] < content["right"] and control["right"] > content["left"] and control["top"] < content["bottom"] and control["bottom"] > content["top"]
+            assert not intersects, {"control":control,"content":content,"all":result}
+
+with sync_playwright() as p:
+    browser = p.chromium.launch()
+    seen = []
+    try:
+        for width, height in [(390,844),(360,800)]:
+            for theme in ["light","dark"]:
+                page = browser.new_page(viewport={"width":width,"height":height})
+                page.add_init_script("localStorage.setItem('flotilla-theme-v1', %s)" % json.dumps(theme))
+                page.goto(url + "/parade", wait_until="domcontentloaded")
+                expect(page.locator("html")).to_have_attribute("data-theme", theme)
+                expect(page.locator("#pd-counter")).to_have_text("1 / 2")
+                expect(page.locator("#pd-prev")).to_be_disabled()
+                expect(page.locator("#pd-next")).to_be_enabled()
+                expect(page.locator(".pd-nav-label")).to_have_count(2)
+                before = metrics(page); assert_clear(before, width, height)
+                slide = page.locator("#pd-slide")
+                slide.evaluate("node => node.scrollTop = Math.floor(node.scrollHeight / 2)")
+                middle = metrics(page); assert_clear(middle, width, height)
+                slide.evaluate("node => node.scrollTop = node.scrollHeight")
+                expect(page.locator("#pd-conversation")).to_be_visible()
+                page.locator("#pd-conversation > summary").click()
+                expect(page.locator("#pd-conversation")).to_have_attribute("open", "")
+                after = metrics(page); assert_clear(after, width, height)
+                expect(page.locator("#pd-next")).to_be_visible()
+                page.locator("#pd-next").click()
+                expect(page.locator("#pd-counter")).to_have_text("2 / 2")
+                seen.append({"viewport":"%dx%d"%(width,height),"theme":theme,"before":before["controls"],"after":after["controls"]})
+                page.close()
+        print(json.dumps(seen))
+    finally:
+        browser.close()
+`
+	cmd := exec.Command(python, "-c", script, httpServer.URL)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("rendered Parade mobile-control regression: %v\n%s", err, out)
+	} else {
+		t.Logf("generic mobile-control metrics:\n%s", out)
+	}
+}

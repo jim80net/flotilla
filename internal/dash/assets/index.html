@@ -257,12 +257,23 @@
       <div class="panel-head">
         <div>
           <h2 id="gdec-title">Decisions awaiting you</h2>
-          <p class="panel-desc">Every open decision and blocker, fleet-wide — each shows the goal it drives, then its full brief</p>
+          <p class="panel-desc">Every open decision and blocker, fleet-wide — scan the recommendation, then open the full brief</p>
         </div>
       </div>
       <div id="gdec-list" class="gdec-list"></div>
     </section>
   </main>
+
+  <dialog id="gdec-detail" class="gdec-detail" aria-labelledby="gdec-detail-title">
+    <div class="gdec-detail-head">
+      <div>
+        <div id="gdec-detail-count" class="gdec-eyebrow"></div>
+        <h2 id="gdec-detail-title">Decision brief</h2>
+      </div>
+      <button type="button" class="btn gdec-detail-close" data-gdec-detail-close aria-label="Close decision brief">Close</button>
+    </div>
+    <div id="gdec-detail-body" class="gdec-detail-body"></div>
+  </dialog>
 
   <main id="view-issues" class="view wrap hidden" role="tabpanel" aria-labelledby="tab-issues">
     <div id="issues-workspace" class="issues-workspace">

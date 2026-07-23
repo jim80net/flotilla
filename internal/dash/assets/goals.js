@@ -1793,6 +1793,42 @@
   function respondTarget(n) {
     return (n.conversation_agent || n.owner || document.body.getAttribute("data-xo") || "").trim();
   }
+  function briefField(brief, names) {
+    var wanted = names.map(function (name) { return name.toLowerCase(); });
+    var lines = String(brief || "").split(/\r?\n/);
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].trim();
+      var heading = line.match(/^#{1,6}\s+(.+?)\s*$/);
+      var labeled = line.match(/^(?:[-*]\s*)?(?:\*\*)?([^:*—]+)(?:\*\*)?\s*[:—-]\s*(.+)$/);
+      if (heading && wanted.indexOf(heading[1].replace(/\*+/g, "").trim().toLowerCase()) !== -1) {
+        for (var j = i + 1; j < lines.length; j++) {
+          var value = lines[j].replace(/^[-*]\s+/, "").trim();
+          if (!value) continue;
+          if (/^#{1,6}\s+/.test(value)) break;
+          return value;
+        }
+      }
+      if (labeled && wanted.indexOf(labeled[1].trim().toLowerCase()) !== -1) return labeled[2].trim();
+    }
+    return "";
+  }
+  function renderDecisionSummary(dec, idx, total) {
+    var n = dec.node;
+    var titleItem = dec.label ? ' <span class="gdec-item muted">— ' + escapeHtml(dec.label) + "</span>" : "";
+    var recommendation = briefField(dec.brief, ["recommendation", "recommended"]);
+    var safeDefault = briefField(dec.brief, ["safe default", "default"]);
+    return '<article class="gdec-card gdec-summary" data-gdec-index="' + idx + '">' +
+      '<div class="gdec-eyebrow">Decision ' + (idx + 1) + " of " + total + " · " + escapeHtml(scopeNoun(n)) + "</div>" +
+      '<h3 class="gdec-card-title">' + escapeHtml(n.title || n.id) + titleItem + "</h3>" +
+      '<dl class="gdec-summary-facts">' +
+        '<div><dt>Drives</dt><dd>' + escapeHtml(nodePath(n)) + "</dd></div>" +
+        '<div><dt>State</dt><dd>' + escapeHtml(n.state || "awaiting decision") + "</dd></div>" +
+        '<div><dt>Recommendation</dt><dd>' + escapeHtml(recommendation || "Not stated in the brief") + "</dd></div>" +
+        '<div><dt>Safe default</dt><dd>' + escapeHtml(safeDefault || "Not stated in the brief") + "</dd></div>" +
+      "</dl>" +
+      '<button type="button" class="btn gdec-open" data-gdec-open="' + idx + '">Open full brief</button>' +
+      "</article>";
+  }
   function renderDecisionCard(dec, idx, total) {
     var n = dec.node;
     var titleItem = dec.label ? ' <span class="gdec-item muted">— ' + escapeHtml(dec.label) + "</span>" : "";
@@ -1852,7 +1888,7 @@
     if (titleEl) titleEl.textContent = "Decisions awaiting you";
     if (!cache) { list.innerHTML = '<div class="gdec-empty">Loading decisions…</div>'; return; }
     if (cache.found === false) {
-      list.innerHTML = '<div class="gdec-empty">The fleet goals data is unavailable right now, so decisions can&#8217;t be listed. This page reloads on the next visit or live update.</div>';
+      list.innerHTML = '<div class="gdec-empty">The fleet goals data is unavailable right now, so decisions can&#8217;t be listed.<br><button type="button" class="btn gdec-retry" data-gdec-retry>Retry</button></div>';
       if (window.flotillaPerf) window.flotillaPerf.viewRendered("decisions");
       return;
     }
@@ -1860,8 +1896,19 @@
     // first paint reads the real doc instead of an empty map.
     if (!Object.keys(nodeById).length) indexGoalsNodes(cache);
     var g = gatherDecisions();
+    decisionPageData = g.decisions;
+    var visible = g.decisions.slice(0, DECISION_WINDOW);
     var html = g.decisions.length
-      ? g.decisions.map(function (d, i) { return renderDecisionCard(d, i, g.decisions.length); }).join("")
+      ? '<div class="gdec-window">' + visible.map(function (d, i) { return renderDecisionSummary(d, i, g.decisions.length); }).join("") + "</div>" +
+        (g.decisions.length > visible.length
+          ? '<div class="gdec-more"><span>' + visible.length + " shown · " + (g.decisions.length - visible.length) + ' more</span>' +
+            '<button type="button" class="btn" data-gdec-jump aria-expanded="false" aria-controls="gdec-jump-panel">Jump to decision</button></div>' +
+            '<div id="gdec-jump-panel" class="gdec-jump-panel" hidden>' +
+              g.decisions.map(function (d, i) {
+                return '<button type="button" class="btn gdec-jump" data-gdec-open="' + i + '"><span>' + (i + 1) + " of " + g.decisions.length + "</span>" + escapeHtml(d.node.title || d.node.id) + "</button>";
+              }).join("") +
+            "</div>"
+          : "")
       : '<div class="gdec-empty">Nothing is awaiting your decision right now.</div>';
     // #501 fail-closed bucket: brief-less gated items are VISIBLE (coming work is never
     // hidden) but distinct — nothing to answer until the brief arrives; the watch daemon
@@ -1879,6 +1926,29 @@
     if (titleEl) titleEl.textContent = "Decisions awaiting you · " + g.decisions.length;
     lastDecsSig = JSON.stringify(cache);
     if (window.flotillaPerf) window.flotillaPerf.viewRendered("decisions");
+  }
+  var DECISION_WINDOW = 3;
+  var decisionPageData = [];
+  var decisionReturnFocus = null;
+  var decisionReturnY = 0;
+  function openDecisionDetail(idx, opener) {
+    var detail = q("gdec-detail");
+    var body = q("gdec-detail-body");
+    var dec = decisionPageData[idx];
+    if (!detail || !body || !dec) return;
+    decisionReturnFocus = opener || document.activeElement;
+    decisionReturnY = window.scrollY || 0;
+    q("gdec-detail-count").textContent = "Decision " + (idx + 1) + " of " + decisionPageData.length;
+    q("gdec-detail-title").textContent = dec.node.title || dec.node.id || "Decision brief";
+    body.innerHTML = renderDecisionCard(dec, idx, decisionPageData.length);
+    if (detail.showModal) detail.showModal();
+    else detail.setAttribute("open", "");
+  }
+  function closeDecisionDetail() {
+    var detail = q("gdec-detail");
+    if (!detail) return;
+    if (detail.close) detail.close();
+    else detail.removeAttribute("open");
   }
   // lastDecsSig dedups live-tick repaints of the decisions page (the map's lastSig is
   // reset by every flat re-index, so it can't serve): an unchanged doc must not churn
@@ -2535,6 +2605,25 @@
     var list = q("gdec-list");
     if (!list) return;
     list.addEventListener("click", function (e) {
+      var retry = e.target.closest("[data-gdec-retry]");
+      if (retry) { openDecisions(); return; }
+      var jumpToggle = e.target.closest("[data-gdec-jump]");
+      if (jumpToggle) {
+        var jumpPanel = q("gdec-jump-panel");
+        var opening = jumpPanel && jumpPanel.hidden;
+        if (jumpPanel) jumpPanel.hidden = !opening;
+        jumpToggle.setAttribute("aria-expanded", opening ? "true" : "false");
+        if (opening) {
+          var firstJump = jumpPanel.querySelector("[data-gdec-open]");
+          if (firstJump) firstJump.focus();
+        }
+        return;
+      }
+      var openBtn = e.target.closest("[data-gdec-open]");
+      if (openBtn) {
+        openDecisionDetail(Number(openBtn.getAttribute("data-gdec-open")), openBtn);
+        return;
+      }
       // #501: the per-card Respond button — the shared runner sends to the owning desk.
       var sendBtn = e.target.closest(".gdec-resp-send");
       if (sendBtn) {
@@ -2550,6 +2639,23 @@
       restoreNode(id);
       if (D.pushNav) D.pushNav({ view: "goals", node: id });
     });
+    var detail = q("gdec-detail");
+    if (detail) {
+      detail.addEventListener("click", function (e) {
+        if (e.target.closest("[data-gdec-detail-close]")) { closeDecisionDetail(); return; }
+        var sendBtn = e.target.closest(".gdec-resp-send");
+        if (!sendBtn) return;
+        var box = sendBtn.closest(".gdec-respond");
+        runRespond(sendBtn, box.querySelector(".gdec-resp-msg"), box.querySelector(".gdec-resp-input"),
+          box.getAttribute("data-resp-target"), box.getAttribute("data-resp-goal"), box.getAttribute("data-resp-item"));
+      });
+      detail.addEventListener("close", function () {
+        if (decisionReturnFocus && document.contains(decisionReturnFocus)) decisionReturnFocus.focus({ preventScroll: true });
+        // Chromium restores dialog focus after the close event; restore the reading
+        // position on the next frame so that UA step cannot pull the jump index upward.
+        window.requestAnimationFrame(function () { window.scrollTo(0, decisionReturnY); });
+      });
+    }
   })();
 
   // Prime situation counts for the Decisions tab badge before the Goals tab opens.
@@ -2568,6 +2674,7 @@
     _test: {
       hasBrief: hasBrief,
       gatherDecisions: gatherDecisions,
+      renderDecisionSummary: renderDecisionSummary,
       renderDecisionCard: renderDecisionCard,
       renderPreparingRow: renderPreparingRow,
       respondTarget: respondTarget,

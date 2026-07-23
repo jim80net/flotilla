@@ -15,7 +15,7 @@
   <div class="bg-grid" aria-hidden="true"></div>
   <div class="bg-grain" aria-hidden="true"></div>
 
-  <!-- DECK view: one slide at a time (arrows / tap / swipe / counter; Esc → the list) -->
+  <!-- DECK view: one slide at a time (explicit controls / swipe / counter; Esc → the list) -->
   <section id="pd-deck" class="pd-deck" aria-label="Parade slides" hidden>
     <div class="pd-deck-bar">
       <span id="pd-deck-date" class="pd-deck-date"></span>
@@ -24,9 +24,9 @@
       <button id="pd-close" class="pd-close" type="button" aria-label="All parades (Escape)">▦ all parades <span id="pd-global-unread" class="pd-unread-dot" aria-label="Unread parade replies" hidden></span></button>
     </div>
     <div id="pd-stage" class="pd-stage">
-      <button id="pd-prev" class="pd-nav pd-prev" type="button" aria-label="Previous slide">‹</button>
+      <button id="pd-prev" class="pd-nav pd-prev" type="button" aria-label="Previous slide"><span class="pd-nav-glyph" aria-hidden="true">‹</span><span class="pd-nav-label">Previous</span></button>
       <article id="pd-slide" class="pd-slide" tabindex="0"></article>
-      <button id="pd-next" class="pd-nav pd-next" type="button" aria-label="Next slide">›</button>
+      <button id="pd-next" class="pd-nav pd-next" type="button" aria-label="Next slide"><span class="pd-nav-label">Next</span><span class="pd-nav-glyph" aria-hidden="true">›</span></button>
     </div>
   </section>
 
