@@ -139,6 +139,9 @@
   function pagePath(id) {
     return "/research/" + id.split("/").map(encodeURIComponent).join("/");
   }
+  function annotationPath(id) {
+    return "/api/research-annotations/" + id.split("/").map(encodeURIComponent).join("/");
+  }
   function pathID() {
     var prefix = "/research/";
     if (location.pathname.indexOf(prefix) !== 0) return "";
@@ -148,8 +151,28 @@
   function fetchJSON(url) {
     return fetch(url, { cache: "no-store" }).then(function (response) {
       return response.json().catch(function () { return {}; }).then(function (body) {
-        if (!response.ok) throw new Error(body.error || (url + " → " + response.status));
+        if (!response.ok) {
+          var error = new Error(body.error || (url + " → " + response.status));
+          error.status = response.status; error.body = body;
+          throw error;
+        }
         return body;
+      });
+    });
+  }
+  function postJSON(url, body) {
+    return fetch(url, {
+      method: "POST", cache: "no-store",
+      headers: { "Content-Type": "application/json", "X-Flotilla-Dash": "1" },
+      body: JSON.stringify(body)
+    }).then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (payload) {
+        if (!response.ok) {
+          var error = new Error(payload.error || ("save failed → " + response.status));
+          error.status = response.status; error.body = payload;
+          throw error;
+        }
+        return payload;
       });
     });
   }
@@ -168,7 +191,8 @@
   }
 
   var entries = [], collectionWindow = 6, decisionVisible = collectionWindow, libraryVisible = collectionWindow;
-  var lastDocumentID = "", lastDocumentPush = false;
+  var lastDocumentID = "", lastDocumentPush = false, currentDocument = null, currentRendered = null;
+  var annotationState = null, pendingAnchor = null, selectionDraft = null, annotationReturnFocus = null;
   function setIndexState(title, detail, retry) {
     var status = el("research-status");
     status.hidden = false;
@@ -235,8 +259,186 @@
     document.documentElement.classList.remove("research-toc-open");
     document.body.classList.remove("research-toc-open");
   }
+
+  function runeCount(value) { return Array.from(String(value || "")).length; }
+  function boundedRunes(value, fromEnd) {
+    var chars = Array.from(String(value || ""));
+    return (fromEnd ? chars.slice(-64) : chars.slice(0, 64)).join("");
+  }
+  function anchorForQuote(quote) {
+    var markdown = currentDocument ? String(currentDocument.markdown || "") : "";
+    if (!quote || runeCount(quote) > 2000) return { error: "Select between 1 and 2,000 characters." };
+    var first = markdown.indexOf(quote);
+    if (first < 0) return { error: "That selection crosses rendered formatting. Select a plain-text passage." };
+    if (markdown.indexOf(quote, first + quote.length) >= 0) return { error: "That passage appears more than once. Select a longer, unique passage." };
+    return { anchor: {
+      quote: quote,
+      prefix: boundedRunes(markdown.slice(0, first), true),
+      suffix: boundedRunes(markdown.slice(first + quote.length), false),
+      start: runeCount(markdown.slice(0, first)),
+      end: runeCount(markdown.slice(0, first)) + runeCount(quote)
+    } };
+  }
+  function hideSelectionAction() {
+    el("research-selection-action").hidden = true;
+    el("research-selection-status").textContent = "";
+    selectionDraft = null;
+  }
+  function updateSelectionAction() {
+    if (!currentDocument || el("research-annotation-panel").hidden === false) return;
+    var selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) { hideSelectionAction(); return; }
+    var range = selection.getRangeAt(0), body = el("research-body");
+    if (!body.contains(range.commonAncestorContainer)) { hideSelectionAction(); return; }
+    var quote = selection.toString();
+    if (!quote.trim()) { hideSelectionAction(); return; }
+    selectionDraft = { quote: quote, result: anchorForQuote(quote) };
+    var action = el("research-selection-action"), rect = range.getBoundingClientRect();
+    action.hidden = false;
+    el("research-selection-status").textContent = "";
+    var box = action.getBoundingClientRect();
+    var left = Math.max(8, Math.min(window.innerWidth - box.width - 8, rect.left));
+    var top = rect.bottom + 8;
+    if (top + box.height > window.innerHeight - 8) top = Math.max(8, rect.top - box.height - 8);
+    top = Math.max(8, Math.min(window.innerHeight - box.height - 8, top));
+    action.style.left = left + "px"; action.style.top = top + "px";
+  }
+  function closeAnnotationPanel() {
+    el("research-annotation-panel").hidden = true;
+    document.body.classList.remove("research-annotations-open");
+    if (annotationReturnFocus && annotationReturnFocus.isConnected) annotationReturnFocus.focus();
+    annotationReturnFocus = null;
+  }
+  function openAnnotationPanel(trigger) {
+    hideSelectionAction();
+    annotationReturnFocus = trigger || document.activeElement;
+    el("research-annotation-panel").hidden = false;
+    document.body.classList.add("research-annotations-open");
+  }
+  function annotationLabel(annotation) {
+    return annotation.anchor ? annotation.anchor.quote : "Document comment";
+  }
+  function annotationStateLabel(annotation) {
+    var resolution = annotation.anchor_resolution;
+    if (resolution && resolution.state === "needs_review") return "Needs review";
+    return annotation.resolved ? "Resolved" : "Open";
+  }
+  function annotationByID(id) {
+    var annotations = annotationState && Array.isArray(annotationState.annotations) ? annotationState.annotations : [];
+    return annotations.find(function (annotation) { return annotation.id === id; });
+  }
+  function showAnnotationThread(annotation, trigger) {
+    if (!annotation) return;
+    openAnnotationPanel(trigger);
+    el("research-annotation-form").hidden = true;
+    el("research-annotation-thread").hidden = false;
+    el("research-annotation-thread-title").textContent = annotation.anchor ? "Passage thread" : "Document comment";
+    el("research-annotation-thread-state").textContent = annotationStateLabel(annotation);
+    var quote = el("research-annotation-quote");
+    quote.hidden = !annotation.anchor;
+    quote.textContent = annotation.anchor ? annotation.anchor.quote : "";
+    var comments = Array.isArray(annotation.comments) ? annotation.comments : [];
+    el("research-annotation-comments").replaceChildren.apply(el("research-annotation-comments"), comments.map(function (comment) {
+      var card = document.createElement("article"); card.className = "research-annotation-comment";
+      var text = document.createElement("p"); text.textContent = comment.text || "";
+      var footer = document.createElement("footer"); footer.textContent = (comment.author || "operator") + " · " + formatDate(comment.created_at);
+      card.appendChild(text); card.appendChild(footer); return card;
+    }));
+    el("research-annotation-close").focus();
+  }
+  function openAnnotationComposer(anchor, trigger) {
+    pendingAnchor = anchor || null;
+    openAnnotationPanel(trigger);
+    el("research-annotation-thread").hidden = true;
+    el("research-annotation-form").hidden = false;
+    el("research-annotation-form-title").textContent = anchor ? "Comment on passage" : "Comment on this document";
+    var quote = el("research-annotation-draft-quote");
+    quote.hidden = !anchor; quote.textContent = anchor ? anchor.quote : "";
+    var status = el("research-annotation-save-status");
+    status.textContent = ""; status.classList.remove("error");
+    el("research-annotation-draft").focus();
+  }
+  function renderAnnotationList() {
+    var annotations = annotationState && Array.isArray(annotationState.annotations) ? annotationState.annotations : [];
+    var list = el("research-annotation-list");
+    list.replaceChildren.apply(list, annotations.map(function (annotation) {
+      var button = document.createElement("button"); button.type = "button"; button.className = "research-annotation-card";
+      if (annotationStateLabel(annotation) === "Needs review") button.classList.add("is-stale");
+      button.dataset.annotationOpen = annotation.id;
+      var title = document.createElement("strong"); title.textContent = annotationStateLabel(annotation) + " · " + (annotation.anchor ? "Passage" : "Document");
+      var summary = document.createElement("span"); summary.textContent = annotationLabel(annotation);
+      button.appendChild(title); button.appendChild(summary); return button;
+    }));
+    el("research-annotation-empty").hidden = !annotationState || annotations.length !== 0;
+  }
+  function visibleTextSegments(root) {
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), segments = [], text = "", node;
+    while ((node = walker.nextNode())) {
+      var start = text.length; text += node.nodeValue;
+      segments.push({ node: node, start: start, end: text.length });
+    }
+    return { text: text, segments: segments };
+  }
+  function highlightVisibleQuote(annotation) {
+    if (!annotation.anchor || !annotation.anchor_resolution || annotation.anchor_resolution.state !== "attached") return;
+    var model = visibleTextSegments(el("research-body")), quote = String(annotation.anchor.quote || "");
+    var start = model.text.indexOf(quote);
+    if (start < 0 || model.text.indexOf(quote, start + quote.length) >= 0) return;
+    var end = start + quote.length;
+    model.segments.filter(function (segment) { return segment.end > start && segment.start < end; }).reverse().forEach(function (segment) {
+      var localStart = Math.max(0, start - segment.start), localEnd = Math.min(segment.node.nodeValue.length, end - segment.start);
+      if (localStart >= localEnd) return;
+      segment.node.splitText(localEnd);
+      var selected = segment.node.splitText(localStart);
+      var mark = document.createElement("mark");
+      mark.className = "research-highlight"; mark.dataset.annotationId = annotation.id;
+      mark.tabIndex = 0; mark.setAttribute("role", "button");
+      mark.setAttribute("aria-label", "Open passage annotation: " + quote.slice(0, 100));
+      selected.parentNode.insertBefore(mark, selected); mark.appendChild(selected);
+    });
+  }
+  function applyAnnotationHighlights() {
+    if (!currentRendered) return;
+    el("research-body").innerHTML = currentRendered.html;
+    var annotations = annotationState && Array.isArray(annotationState.annotations) ? annotationState.annotations : [];
+    annotations.forEach(highlightVisibleQuote);
+  }
+  function renderAnnotations() {
+    var annotations = annotationState && Array.isArray(annotationState.annotations) ? annotationState.annotations : [];
+    var stale = annotations.filter(function (annotation) {
+      return annotation.anchor_resolution && annotation.anchor_resolution.state === "needs_review";
+    }).length;
+    el("research-annotation-count").textContent = annotations.length + (annotations.length === 1 ? " annotation" : " annotations");
+    el("research-annotation-summary").textContent = stale
+      ? stale + (stale === 1 ? " passage needs review; no uncertain highlight is shown." : " passages need review; no uncertain highlights are shown.")
+      : "Passage highlights and document comments stay private to this host.";
+    el("research-annotations-retry").hidden = true;
+    renderAnnotationList();
+    applyAnnotationHighlights();
+  }
+  function loadAnnotations() {
+    if (!currentDocument) return;
+    el("research-annotation-count").textContent = "Loading annotations…";
+    el("research-annotation-summary").textContent = "Reading the private host store.";
+    el("research-annotations-retry").hidden = true;
+    annotationState = null; renderAnnotationList();
+    fetchJSON(annotationPath(currentDocument.id)).then(function (state) {
+      if (!currentDocument || state.document_id !== currentDocument.id) return;
+      annotationState = state; renderAnnotations();
+    }).catch(function (error) {
+      annotationState = null;
+      el("research-annotation-count").textContent = "Annotations unavailable";
+      el("research-annotation-summary").textContent = "Could not read annotations: " + error.message;
+      el("research-annotations-retry").hidden = false;
+      renderAnnotationList();
+    });
+  }
   function renderDocument(doc) {
     var rendered = renderMarkdown(documentWithoutDuplicateTitle(doc.markdown, doc.title), doc.id);
+    currentDocument = doc; currentRendered = rendered; annotationState = null; pendingAnchor = null;
+    el("research-annotation-panel").hidden = true;
+    document.body.classList.remove("research-annotations-open");
+    hideSelectionAction();
     el("research-reader-empty").hidden = true;
     el("research-document").hidden = false;
     el("research-title").textContent = doc.title;
@@ -255,6 +457,10 @@
     window.scrollTo(0, 0);
   }
   function showLibrary(push) {
+    currentDocument = null; currentRendered = null; annotationState = null;
+    el("research-annotation-panel").hidden = true;
+    document.body.classList.remove("research-annotations-open");
+    hideSelectionAction();
     document.body.classList.remove("research-has-document");
     if (push) history.pushState({}, "", "/research");
     document.title = "flotilla — research";
@@ -268,6 +474,7 @@
     document.body.classList.add("research-has-document");
     fetchJSON(apiPath(id)).then(function (doc) {
       renderDocument(doc);
+      loadAnnotations();
       if (push) history.pushState({ research: id }, "", pagePath(id));
       lastDocumentPush = false;
     }).catch(function (error) {
@@ -292,6 +499,11 @@
   el("research-index-retry").addEventListener("click", loadIndex);
   el("research-document-retry").addEventListener("click", function () { if (lastDocumentID) openDocument(lastDocumentID, lastDocumentPush); });
   el("research-body").addEventListener("click", function (event) {
+    var highlight = event.target.closest("[data-annotation-id]");
+    if (highlight) {
+      showAnnotationThread(annotationByID(highlight.dataset.annotationId), highlight);
+      return;
+    }
     var button = event.target.closest("[data-research-video-fullscreen]");
     if (!button) return;
     var video = button.closest(".research-video").querySelector("video");
@@ -301,6 +513,66 @@
     } else if (video.webkitEnterFullscreen) {
       video.webkitEnterFullscreen();
     }
+  });
+  el("research-body").addEventListener("keydown", function (event) {
+    var highlight = event.target.closest("[data-annotation-id]");
+    if (!highlight || (event.key !== "Enter" && event.key !== " ")) return;
+    event.preventDefault();
+    showAnnotationThread(annotationByID(highlight.dataset.annotationId), highlight);
+  });
+  el("research-selection-action").querySelector("button").addEventListener("click", function () {
+    if (!selectionDraft) return;
+    if (selectionDraft.result.error) {
+      el("research-selection-status").textContent = selectionDraft.result.error;
+      return;
+    }
+    openAnnotationComposer(selectionDraft.result.anchor, this);
+    window.getSelection().removeAllRanges();
+  });
+  el("research-document-comment").addEventListener("click", function () { openAnnotationComposer(null, this); });
+  el("research-annotations-retry").addEventListener("click", loadAnnotations);
+  el("research-annotation-close").addEventListener("click", closeAnnotationPanel);
+  el("research-annotation-list").addEventListener("click", function (event) {
+    var button = event.target.closest("[data-annotation-open]");
+    if (button) showAnnotationThread(annotationByID(button.dataset.annotationOpen), button);
+  });
+  el("research-annotation-form").addEventListener("submit", function (event) {
+    event.preventDefault();
+    var draft = el("research-annotation-draft"), comment = draft.value;
+    var status = el("research-annotation-save-status"), save = el("research-annotation-save");
+    status.classList.remove("error");
+    if (!comment.trim()) { status.textContent = "Write a comment before saving."; status.classList.add("error"); draft.focus(); return; }
+    if (!annotationState || !currentDocument) {
+      status.textContent = "Not saved — annotation state is unavailable. Your draft is still here.";
+      status.classList.add("error"); return;
+    }
+    save.disabled = true; status.textContent = "Saving…";
+    postJSON(annotationPath(currentDocument.id), {
+      generation: annotationState.generation,
+      document_digest: currentDocument.digest,
+      anchor: pendingAnchor,
+      comment: comment
+    }).then(function (state) {
+      annotationState = state;
+      draft.value = ""; pendingAnchor = null;
+      status.textContent = "Saved.";
+      renderAnnotations();
+      var created = state.created || (state.annotations || [])[state.annotations.length - 1];
+      showAnnotationThread(created, save);
+    }).catch(function (error) {
+      status.textContent = "Not saved — " + error.message + ". Your draft is still here.";
+      status.classList.add("error");
+    }).finally(function () { save.disabled = false; });
+  });
+  ["mouseup", "keyup"].forEach(function (name) {
+    el("research-body").addEventListener(name, function () { setTimeout(updateSelectionAction, 0); });
+  });
+  var selectionTimer = 0;
+  document.addEventListener("selectionchange", function () {
+    clearTimeout(selectionTimer);
+    selectionTimer = setTimeout(function () {
+      if (!el("research-selection-action").contains(document.activeElement)) updateSelectionAction();
+    }, 50);
   });
   var tocRestoreY = 0;
   var tocLinkClosing = false;
@@ -334,6 +606,18 @@
     });
   });
   document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && !el("research-annotation-panel").hidden) {
+      event.preventDefault(); closeAnnotationPanel(); return;
+    }
+    if (event.key === "Tab" && !el("research-annotation-panel").hidden) {
+      var focusable = Array.from(el("research-annotation-panel").querySelectorAll('button:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'))
+        .filter(function (node) { return node.getClientRects().length > 0; });
+      if (focusable.length) {
+        var first = focusable[0], last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      }
+    }
     if (event.key !== "Escape" || !toc.open || !window.matchMedia("(max-width: 760px)").matches) return;
     event.preventDefault();
     toc.open = false;

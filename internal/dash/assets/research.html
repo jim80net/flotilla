@@ -73,6 +73,14 @@
           <h1 id="research-title"></h1>
           <code id="research-path"></code>
         </header>
+        <section id="research-annotation-bar" class="research-annotation-bar" aria-label="Document annotations">
+          <div>
+            <strong id="research-annotation-count">Loading annotations…</strong>
+            <span id="research-annotation-summary">Passage highlights and document comments stay private to this host.</span>
+          </div>
+          <button id="research-document-comment" type="button">Comment on document</button>
+          <button id="research-annotations-retry" type="button" hidden>Retry annotations</button>
+        </section>
         <details id="research-toc" class="research-toc" hidden>
           <summary><span>On this page</span><span id="research-toc-count" class="research-toc-count"></span></summary>
           <ol id="research-toc-list"></ol>
@@ -81,6 +89,41 @@
       </div>
     </article>
   </main>
+  <div id="research-selection-action" class="research-selection-action" hidden>
+    <button type="button">Highlight / Comment</button>
+    <span id="research-selection-status" role="status" aria-live="polite"></span>
+  </div>
+  <aside id="research-annotation-panel" class="research-annotation-panel" role="dialog" aria-modal="true" aria-labelledby="research-annotation-panel-title" hidden>
+    <header>
+      <div><p class="research-eyebrow">Private annotation</p><h2 id="research-annotation-panel-title">Annotations</h2></div>
+      <button id="research-annotation-close" type="button" aria-label="Close annotations">Close</button>
+    </header>
+    <div class="research-annotation-panel-body">
+      <div id="research-annotation-list" class="research-annotation-list"></div>
+      <div id="research-annotation-empty" class="research-annotation-empty">
+        <strong>No annotations yet</strong>
+        <span>Select a passage or comment on the whole document.</span>
+      </div>
+      <section id="research-annotation-thread" class="research-annotation-thread" aria-labelledby="research-annotation-thread-title" hidden>
+        <div class="research-annotation-thread-heading">
+          <h3 id="research-annotation-thread-title">Annotation</h3>
+          <span id="research-annotation-thread-state"></span>
+        </div>
+        <blockquote id="research-annotation-quote" hidden></blockquote>
+        <div id="research-annotation-comments" class="research-annotation-comments"></div>
+      </section>
+      <form id="research-annotation-form" class="research-annotation-form" hidden>
+        <h3 id="research-annotation-form-title">Comment on passage</h3>
+        <blockquote id="research-annotation-draft-quote" hidden></blockquote>
+        <label for="research-annotation-draft">Comment</label>
+        <textarea id="research-annotation-draft" maxlength="4000" required></textarea>
+        <div class="research-annotation-form-actions">
+          <span id="research-annotation-save-status" role="status" aria-live="assertive"></span>
+          <button id="research-annotation-save" type="submit">Save comment</button>
+        </div>
+      </form>
+    </div>
+  </aside>
   <script src="/static/research.js"></script>
 </body>
 </html>
