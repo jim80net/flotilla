@@ -46,6 +46,8 @@ func run(args []string) error {
 		return cmdDispatchAck(args[1:])
 	case "notify":
 		return cmdNotify(args[1:])
+	case "synthesis":
+		return cmdSynthesis(args[1:])
 	case "brief":
 		return cmdBrief(args[1:])
 	case "parade":
@@ -117,6 +119,8 @@ usage:
   flotilla notify --from <agent> <message>            post to the operator under <agent>'s webhook (no tmux)
   flotilla notify --from <agent> --file <path>        notify body from a file ('-' = stdin)
   flotilla notify --from <agent> --with-fleet-status  append compressed Status of the fleet (#625)
+  flotilla synthesis publish --from <agent> --file <path>
+                                                      publish once to every unique channel the XO owns
   flotilla brief [--all] [<desk>] [--audience <who>]  elicit a reader-modeled brief; the ledger publishes it to dash (secret-free; not notify)
   flotilla parade [--all] [<agent>]                   elicit parade answers; the explicit parade stream publishes to each channel
   flotilla parade rollup [--all] [<xo>]               wake coordinators to roll up subordinates' parade answers
@@ -208,6 +212,19 @@ characters (Discord's hard limit); a longer body is rejected (nothing is posted)
 With --chunk the full body is delivered across multiple messages. --attach delivers
 files as Discord attachments (multipart webhook POST); oversize or unreadable paths
 fail closed (nothing is posted).
+
+flags for 'synthesis publish':
+  --from <name>     publishing XO (default $FLOTILLA_SELF)
+  --file <path>     synthesis body ('-' = piped stdin)
+  --roster <path>   canonical owned-channel source
+  --secrets <path>  seat webhook + relay bot credentials
+  --chunk           split an over-limit synthesis across every destination
+  --dry-run         inspect the webhook binding and relay access without posting
+
+synthesis publish is the visibility-rollup path. It inspects the seat webhook's
+actual channel, then posts once to that channel and once to every other unique
+channel the XO owns via the relay bot. It fails before posting if the roster,
+webhook binding, or relay access cannot cover the complete destination set.
 
 flags for 'speak':
   --file <path>     read the spoken text from a file ('-' for stdin)

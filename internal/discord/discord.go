@@ -18,6 +18,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -93,6 +94,41 @@ func Post(webhookURL, username, content string) error {
 		return fmt.Errorf("webhook returned %s: %s", resp.Status, snippet)
 	}
 	return nil
+}
+
+// WebhookChannel resolves the Discord channel a credential-bearing webhook URL
+// is actually bound to. Synthesis fan-out uses this read-only preflight rather
+// than assuming a seat's webhook points at the first roster binding: a wrong
+// assumption would duplicate one channel and leave another dark. Returned errors
+// never include the credential-bearing URL.
+func WebhookChannel(webhookURL string) (string, error) {
+	parsed, err := url.Parse(webhookURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return "", errors.New("invalid webhook URL")
+	}
+	req, err := http.NewRequest(http.MethodGet, webhookURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("build webhook inspection request for host %s: %w", parsed.Host, urlFreeCause(err))
+	}
+	req.Header.Set("User-Agent", UserAgent)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("inspect webhook host %s: %w", parsed.Host, urlFreeCause(err))
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("webhook inspection returned %s", resp.Status)
+	}
+	var payload struct {
+		ChannelID string `json:"channel_id"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&payload); err != nil {
+		return "", fmt.Errorf("decode webhook inspection response: %w", err)
+	}
+	if strings.TrimSpace(payload.ChannelID) == "" {
+		return "", errors.New("webhook inspection response has no channel id")
+	}
+	return payload.ChannelID, nil
 }
 
 // clampContent trims content to Discord's 2000-character limit on a rune
