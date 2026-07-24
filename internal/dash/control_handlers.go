@@ -46,10 +46,18 @@ type resumeReq struct {
 	Agent string `json:"agent"`
 }
 
+// respondSender is the durable-outbox sender identity for operator-authored dash
+// messages. It is the OPERATOR's message (typed in Conversations, Work Context,
+// or Decisions), not the XO's — the outbox file, inbound tracking, and any stale
+// escalation all carry that provenance.
+const respondSender = "operator"
+
 // handleControlRoute serves POST /api/control/route (deliver an instruction to a
 // desk via the confirmed-delivery library, serialized by the cross-process pane
-// transaction lock). Returns the typed outcome (delivered/busy/crashed/…) at 200;
-// a hard failure (unknown target/surface, pane-resolution) is an error status.
+// transaction lock). Live-confirmed delivery returns delivered. Every typed
+// not-delivered outcome is durably queued so a busy desk never forces the operator
+// to retry manually. A hard failure (unknown target/surface, pane-resolution) is
+// still an error and never creates an unresolvable queue entry.
 func (s *Server) handleControlRoute(w http.ResponseWriter, r *http.Request) {
 	var req routeReq
 	if !decodeJSON(w, r, &req) {
@@ -60,13 +68,28 @@ func (s *Server) handleControlRoute(w http.ResponseWriter, r *http.Request) {
 		writeControlError(w, err)
 		return
 	}
-	writeJSON(w, res)
+	s.writeRoutedOrQueued(w, res, req.Message)
 }
 
-// respondSender is the durable-outbox sender identity for operator decision responses.
-// It is the OPERATOR's message (typed in the dash), not the XO's — the outbox file,
-// the sweep's inbound tracking, and any stale escalation all carry that provenance.
-const respondSender = "operator"
+// writeRoutedOrQueued is the one live→durable handoff for operator-authored desk
+// messages. The typed result is intentionally the same for Conversations and
+// Decisions, so every dash composer can state delivered versus queued honestly.
+func (s *Server) writeRoutedOrQueued(w http.ResponseWriter, res control.RouteResult, message string) {
+	if res.Outcome == control.OutcomeDelivered {
+		writeJSON(w, respondDoc{Outcome: "delivered", Target: res.Target})
+		return
+	}
+	id, deduped, err := outbox.Enqueue(filepath.Dir(s.cfg.RosterPath), respondSender, res.Target, message)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("%s; durable outbox enqueue also failed: %v", res.Detail, err))
+		return
+	}
+	detail := res.Detail
+	if deduped {
+		detail = "an identical operator message is already queued — no duplicate added"
+	}
+	writeJSON(w, respondDoc{Outcome: "queued", Target: res.Target, Detail: detail, QueuedID: id})
+}
 
 // handleControlRespond serves POST /api/control/respond — the #501 decision-response
 // loop's delivery leg. It composes a self-describing body (which decision, whose
@@ -110,24 +133,7 @@ func (s *Server) handleControlRespond(w http.ResponseWriter, r *http.Request) {
 		writeControlError(w, err)
 		return
 	}
-	if res.Outcome == control.OutcomeDelivered {
-		writeJSON(w, respondDoc{Outcome: "delivered", Target: res.Target})
-		return
-	}
-	// Not delivered live — make it durable. Recipient is the CANONICAL agent name the
-	// route resolved (res.Target), so the sweep and the UI name the same desk.
-	id, deduped, qerr := outbox.Enqueue(filepath.Dir(s.cfg.RosterPath), respondSender, res.Target, msg)
-	if qerr != nil {
-		// Both legs failed: the live outcome AND the durable enqueue. Surface both —
-		// the operator must know the response did NOT take.
-		writeError(w, http.StatusBadGateway, fmt.Sprintf("%s; durable outbox enqueue also failed: %v", res.Detail, qerr))
-		return
-	}
-	detail := res.Detail
-	if deduped {
-		detail = "an identical response is already queued — no duplicate added"
-	}
-	writeJSON(w, respondDoc{Outcome: "queued", Target: res.Target, Detail: detail, QueuedID: id})
+	s.writeRoutedOrQueued(w, res, msg)
 }
 
 // handleControlNotify serves POST /api/control/notify (post an operator note to

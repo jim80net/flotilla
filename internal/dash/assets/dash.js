@@ -74,7 +74,18 @@
   function routeOutcomeCopy(res) {
     var outcome = (res && res.outcome) || "(no outcome reported)";
     var detail = res && res.detail ? " — " + res.detail : "";
-    return { outcome: outcome, text: "Outcome: " + outcome + detail, ok: outcome === "delivered" };
+    if (outcome === "delivered") {
+      return { outcome: outcome, text: "Delivered to " + (res.target || "the desk") + ".", ok: true };
+    }
+    if (outcome === "queued") {
+      var id = res.queued_id ? " (id " + res.queued_id + ")" : "";
+      return {
+        outcome: outcome,
+        text: "Queued durably for " + (res.target || "the desk") + id + " — it will deliver when the desk can receive." + detail,
+        ok: true,
+      };
+    }
+    return { outcome: outcome, text: "NOT accepted: " + outcome + detail, ok: false };
   }
   window.flotillaDash = {
     el: el, escapeHtml: escapeHtml, getJSON: getJSON, postJSON: postJSON,
@@ -1931,9 +1942,11 @@
             appendOptimisticOutbound(target, body);
           }
           if (!sameSel(target)) return;
-          if (outcome === "delivered") {
+          if (copy.ok) {
             ta.value = "";
             resizeComposer();
+          }
+          if (outcome === "delivered") {
             threadPinned = true;
             lastThreadKey = null; // force paint even if mirror/ledger unchanged
             flushDeferredMirrorPaint(); // paintMirror(true) → renderThread with optimistic
