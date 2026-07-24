@@ -189,9 +189,71 @@
     if (first >= 0 && lines[first].replace(/^#\s+/, "").trim() === title) lines.splice(first, 1);
     return lines.join("\n");
   }
+  function decisionState(node) {
+    return String(node.status_display || node.state || "").toLowerCase().replace(/_/g, "-");
+  }
+  function hasDecisionBrief(value) { return String(value || "").trim().length > 0; }
+  function sameDecisionBrief(a, b) { return String(a || "").trim() === String(b || "").trim(); }
+  function paperIDFromBrief(brief) {
+    var match = String(brief || "").match(/\[[^\]]+\]\(\/(?:api\/)?research\/([^\s)#]+)(?:#[^)\s]+)?\)/i);
+    if (!match) return "";
+    try { return match[1].split("/").map(decodeURIComponent).join("/"); }
+    catch (_) { return ""; }
+  }
+  function decisionBriefField(brief, names) {
+    var wanted = names.map(function (name) { return name.toLowerCase(); });
+    var lines = String(brief || "").split(/\r?\n/);
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].trim();
+      var heading = line.match(/^#{1,6}\s+(.+?)\s*$/);
+      var labeled = line.match(/^(?:[-*]\s*)?(?:\*\*)?([^:*—]+)(?:\*\*)?\s*[:—-]\s*(.+)$/);
+      if (heading && wanted.indexOf(heading[1].replace(/\*+/g, "").trim().toLowerCase()) !== -1) {
+        for (var j = i + 1; j < lines.length; j++) {
+          var value = lines[j].replace(/^[-*]\s+/, "").trim();
+          if (!value) continue;
+          if (/^#{1,6}\s+/.test(value)) break;
+          return value;
+        }
+      }
+      if (labeled && wanted.indexOf(labeled[1].trim().toLowerCase()) !== -1) return labeled[2].trim();
+    }
+    return "";
+  }
+  function gatherRDDecisions(doc) {
+    if (!doc || !Array.isArray(doc.goals)) return [];
+    var out = [];
+    doc.goals.forEach(function (node) {
+      if (!node) return;
+      var state = decisionState(node);
+      var gated = state === "awaiting" || state === "awaiting-authority" || state === "blocked";
+      if (gated && hasDecisionBrief(node.brief)) {
+        out.push({ node: node, label: "", brief: node.brief, paperID: paperIDFromBrief(node.brief) });
+      }
+      (node.work_items || []).forEach(function (item) {
+        if ((item.class === "awaiting" || item.class === "blocked") && hasDecisionBrief(item.brief) && !sameDecisionBrief(item.brief, node.brief)) {
+          out.push({
+            node: node,
+            label: item.label || item.detail || item.kind || "",
+            brief: item.brief,
+            paperID: paperIDFromBrief(item.brief)
+          });
+        }
+      });
+    });
+    return out;
+  }
 
-  var entries = [], collectionWindow = 6, decisionVisible = collectionWindow, libraryVisible = collectionWindow;
-  var lastDocumentID = "", lastDocumentPush = false, currentDocument = null, currentRendered = null;
+  function focusFromURL() {
+    var value = new URLSearchParams(location.search).get("focus") || "decisions";
+    return value === "library" || value === "all" ? value : "decisions";
+  }
+  function indexPath() {
+    return "/research?focus=" + encodeURIComponent(currentFocus);
+  }
+  var entries = [], goalDecisions = [], decisionsAvailable = true, collectionWindow = 6, decisionWindow = 3;
+  var decisionVisible = decisionWindow, libraryVisible = collectionWindow;
+  var currentFocus = focusFromURL(), searchQuery = "";
+  var lastDocumentID = "", lastDocumentPush = false, currentDocument = null, currentRendered = null, currentDecision = null;
   var documentRequestEpoch = 0, annotationSession = 0;
   var annotationState = null, pendingAnchor = null, selectionDraft = null, annotationReturnFocus = null;
   function setIndexState(title, detail, retry) {
@@ -223,28 +285,96 @@
     link.addEventListener("click", function (event) { event.preventDefault(); openDocument(entry.id, true); });
     return link;
   }
-  function renderCollection(listID, moreID, collection, visible) {
+  function decisionCard(decision) {
+    var node = decision.node;
+    var paper = decision.paperID && entries.some(function (entry) { return entry.id === decision.paperID; });
+    var item = document.createElement(paper ? "a" : "article");
+    item.className = "research-card is-decision" + (paper ? "" : " is-unlinked");
+    if (paper) {
+      item.href = pagePath(decision.paperID);
+      item.dataset.researchId = decision.paperID;
+      item.addEventListener("click", function (event) {
+        event.preventDefault();
+        openDocument(decision.paperID, true);
+      });
+    }
+    var top = document.createElement("span"); top.className = "research-card-top";
+    var badge = document.createElement("span"); badge.className = "research-badge"; badge.textContent = "Decision";
+    var state = document.createElement("span"); state.className = "research-decision-state"; state.textContent = node.state || node.status_display || "awaiting";
+    top.appendChild(badge); top.appendChild(state);
+    var title = document.createElement("strong");
+    title.textContent = (node.title || node.id) + (decision.label ? " — " + decision.label : "");
+    var recommendation = document.createElement("span"); recommendation.className = "research-card-summary";
+    recommendation.textContent = decisionBriefField(decision.brief, ["recommendation", "recommended"]) || "Recommendation not stated";
+    var next = document.createElement("span"); next.className = "research-card-next";
+    next.textContent = paper ? "Open paper →" : "Paper link missing — brief owner must connect evidence";
+    item.appendChild(top); item.appendChild(title); item.appendChild(recommendation); item.appendChild(next);
+    return item;
+  }
+  function renderCollection(listID, moreID, collection, visible, renderer) {
     var mounted = collection.slice(0, visible), remaining = Math.max(0, collection.length - mounted.length);
-    el(listID).replaceChildren.apply(el(listID), mounted.map(card));
+    el(listID).replaceChildren.apply(el(listID), mounted.map(renderer || card));
     var more = el(moreID);
     more.hidden = remaining === 0;
     more.textContent = remaining ? "Show " + Math.min(collectionWindow, remaining) + " more · " + remaining + " remaining" : "";
   }
+  function searchable(entry) {
+    return [entry.title, entry.summary, entry.id, statusLabel(entry.status)]
+      .join(" ").toLowerCase();
+  }
+  function searchableDecision(decision) {
+    return [
+      decision.node.title, decision.node.id, decision.node.state, decision.node.status_display,
+      decision.label, decision.brief, decision.paperID
+    ].join(" ").toLowerCase();
+  }
+  function filteredEntries() {
+    var needle = searchQuery.trim().toLowerCase();
+    return needle ? entries.filter(function (entry) { return searchable(entry).indexOf(needle) !== -1; }) : entries.slice();
+  }
+  function syncFocusControls() {
+    document.querySelectorAll("[data-research-focus]").forEach(function (button) {
+      button.setAttribute("aria-pressed", String(button.dataset.researchFocus === currentFocus));
+    });
+  }
   function renderIndex() {
-    var decisions = entries.filter(function (entry) { return entry.decision; });
-    var library = entries.filter(function (entry) { return !entry.decision; });
+    var matching = filteredEntries();
+    var needle = searchQuery.trim().toLowerCase();
+    var decisions = needle
+      ? goalDecisions.filter(function (decision) { return searchableDecision(decision).indexOf(needle) !== -1; })
+      : goalDecisions.slice();
+    var library = matching;
+    var showDecisions = currentFocus === "decisions" || currentFocus === "all";
+    var showLibrary = currentFocus === "library" || currentFocus === "all";
+    syncFocusControls();
     el("research-status").hidden = true;
-    el("research-all").hidden = library.length === 0;
+    el("research-decisions").hidden = !showDecisions || decisions.length === 0;
+    el("research-all").hidden = !showLibrary || library.length === 0;
     el("research-count").textContent = library.length + (library.length === 1 ? " document" : " documents");
-    renderCollection("research-list", "research-library-more", library, libraryVisible);
-    if (decisions.length) {
-      el("research-decisions").hidden = false;
+    renderCollection("research-list", "research-library-more", library, libraryVisible, card);
+    if (showDecisions && decisions.length) {
       el("research-decision-count").textContent = decisions.length + " waiting";
-      renderCollection("research-decision-list", "research-decision-more", decisions, decisionVisible);
+      renderCollection("research-decision-list", "research-decision-more", decisions, decisionVisible, decisionCard);
     }
+    var visibleCount = (showDecisions ? decisions.length : 0) + (showLibrary ? library.length : 0);
+    var kind = currentFocus === "decisions" ? "waiting decisions" : currentFocus === "library" ? "library documents" : "R&D items";
+    el("research-filter-status").textContent = visibleCount + " " + kind + (searchQuery ? " match “" + searchQuery + "”" : "");
     if (!entries.length) {
       setIndexState("No research documents", "The configured research collection is empty.", false);
+    } else if (showDecisions && !decisionsAvailable) {
+      setIndexState("Decisions unavailable", "The Goals decision queue could not be loaded. Library evidence remains available.", true);
+    } else if (!visibleCount) {
+      setIndexState("No matching material", searchQuery
+        ? "No " + kind + " match “" + searchQuery + "”. Clear the search or choose another focus."
+        : "There are no " + kind + " right now. Choose another focus.", false);
     }
+  }
+  function setFocus(focus, push) {
+    currentFocus = focus === "library" || focus === "all" ? focus : "decisions";
+    decisionVisible = decisionWindow;
+    libraryVisible = collectionWindow;
+    renderIndex();
+    if (push) history.pushState({ focus: currentFocus }, "", indexPath());
   }
   function renderTOC(items) {
     var list = el("research-toc-list"); list.replaceChildren();
@@ -440,6 +570,7 @@
     var rendered = renderMarkdown(documentWithoutDuplicateTitle(doc.markdown, doc.title), doc.id);
     annotationSession++;
     currentDocument = doc; currentRendered = rendered; annotationState = null; pendingAnchor = null;
+    currentDecision = goalDecisions.find(function (decision) { return decision.paperID === doc.id; }) || null;
     el("research-annotation-draft").value = "";
     el("research-annotation-save").disabled = false;
     el("research-annotation-save-status").textContent = "";
@@ -456,24 +587,36 @@
     el("research-updated").dateTime = doc.updated_at;
     el("research-body").innerHTML = rendered.html;
     renderTOC(rendered.toc);
-    el("research-decision-strip").hidden = !doc.decision;
+    var decisionStrip = el("research-decision-strip");
+    decisionStrip.hidden = !doc.decision && !currentDecision;
+    el("research-decision-title").textContent = currentDecision
+      ? (currentDecision.node.title || currentDecision.node.id) + (currentDecision.label ? " — " + currentDecision.label : "")
+      : "Waiting on you";
+    el("research-decision-summary").textContent = currentDecision
+      ? (decisionBriefField(currentDecision.brief, ["recommendation", "recommended"]) || "Read the paper, then respond with a decision or question.")
+      : "This document is marked for operator review.";
+    el("research-decision-respond").hidden = !currentDecision;
+    el("research-decision-response").hidden = true;
+    el("research-decision-response-input").value = "";
+    el("research-decision-response-status").textContent = "";
+    el("research-decision-response-close").hidden = true;
     var target = rendered.toc.find(function (item) { return /checklist|operator go|decision|recommendation/i.test(item.text); });
     el("research-decision-jump").hidden = !target;
     if (target) el("research-decision-jump").href = "#" + target.id;
     document.body.classList.add("research-has-document");
-    document.title = doc.title + " — flotilla research";
+    document.title = doc.title + " — flotilla R&D";
     window.scrollTo(0, 0);
   }
   function showLibrary(push) {
     documentRequestEpoch++;
     annotationSession++;
-    currentDocument = null; currentRendered = null; annotationState = null;
+    currentDocument = null; currentRendered = null; currentDecision = null; annotationState = null;
     el("research-annotation-panel").hidden = true;
     document.body.classList.remove("research-annotations-open");
     hideSelectionAction();
     document.body.classList.remove("research-has-document");
-    if (push) history.pushState({}, "", "/research");
-    document.title = "flotilla — research";
+    if (push) history.pushState({ focus: currentFocus }, "", indexPath());
+    document.title = "flotilla — R&D";
   }
   function openDocument(id, push) {
     var requestEpoch = ++documentRequestEpoch;
@@ -498,19 +641,86 @@
   }
 
   function loadIndex() {
-    setIndexState("Loading research…", "Reading the private-LAN collection.", false);
-    fetchJSON("/api/research").then(function (body) {
-      entries = Array.isArray(body.research) ? body.research : [];
+    setIndexState("Loading R&D…", "Reading the decision queue and private-LAN evidence collection.", false);
+    var research = fetchJSON("/api/research");
+    var decisions = fetchJSON("/api/goals").then(function (body) {
+      decisionsAvailable = body && body.found !== false;
+      return decisionsAvailable ? gatherRDDecisions(body) : [];
+    }).catch(function () {
+      decisionsAvailable = false;
+      return [];
+    });
+    Promise.all([research, decisions]).then(function (values) {
+      entries = Array.isArray(values[0].research) ? values[0].research : [];
+      goalDecisions = values[1];
       renderIndex();
       var id = pathID(); if (id) openDocument(id, false);
     }).catch(function (error) {
-      setIndexState("Research library unavailable", "The collection could not be loaded: " + error.message, true);
+      setIndexState("R&D library unavailable", "The evidence collection could not be loaded: " + error.message, true);
     });
   }
 
   el("research-back").addEventListener("click", function () { showLibrary(true); });
-  el("research-decision-more").addEventListener("click", function () { decisionVisible += collectionWindow; renderIndex(); });
+  el("research-decision-more").addEventListener("click", function () { decisionVisible += decisionWindow; renderIndex(); });
   el("research-library-more").addEventListener("click", function () { libraryVisible += collectionWindow; renderIndex(); });
+  document.querySelector(".research-focus-tabs").addEventListener("click", function (event) {
+    var button = event.target.closest("[data-research-focus]");
+    if (button) setFocus(button.dataset.researchFocus, true);
+  });
+  el("research-search").addEventListener("input", function () {
+    searchQuery = this.value;
+    decisionVisible = decisionWindow;
+    libraryVisible = collectionWindow;
+    renderIndex();
+  });
+  el("research-decision-respond").addEventListener("click", function () {
+    var form = el("research-decision-response");
+    form.hidden = false;
+    el("research-decision-response-close").hidden = true;
+    el("research-decision-response-input").focus();
+  });
+  el("research-decision-response-close").addEventListener("click", function () {
+    el("research-decision-response").hidden = true;
+    el("research-decision-respond").focus();
+  });
+  el("research-decision-response").addEventListener("submit", function (event) {
+    event.preventDefault();
+    var input = el("research-decision-response-input");
+    var status = el("research-decision-response-status");
+    var send = el("research-decision-response-send");
+    var text = input.value.trim();
+    if (!text) { status.textContent = "Type a response first."; input.focus(); return; }
+    if (!currentDecision || !currentDocument) { status.textContent = "Decision context is unavailable. Your draft is still here."; return; }
+    var decision = currentDecision;
+    var documentID = currentDocument.id;
+    var target = String(decision.node.conversation_agent || decision.node.owner || "").trim();
+    if (!target) { status.textContent = "No desk owns this decision. Your draft is still here."; return; }
+    send.disabled = true;
+    status.textContent = "Sending…";
+    postJSON("/api/control/respond", {
+      target: target,
+      goal_id: decision.node.id || "",
+      item: decision.label || "",
+      message: text
+    }).then(function (result) {
+      if (!currentDocument || currentDocument.id !== documentID || currentDecision !== decision) return;
+      if (result.outcome === "delivered") {
+        status.textContent = "Delivered to " + result.target + " — turn confirmed.";
+      } else if (result.outcome === "queued") {
+        status.textContent = "Queued durably for " + result.target + " — delivery waits until the desk can receive.";
+      } else {
+        status.textContent = "Response state unclear — check the desk conversation.";
+      }
+      input.value = "";
+      el("research-decision-response-close").hidden = false;
+      el("research-decision-response-close").focus();
+    }).catch(function (error) {
+      if (!currentDocument || currentDocument.id !== documentID || currentDecision !== decision) return;
+      status.textContent = "NOT sent: " + error.message + ". Your draft is still here.";
+    }).finally(function () {
+      if (currentDocument && currentDocument.id === documentID && currentDecision === decision) send.disabled = false;
+    });
+  });
   el("research-index-retry").addEventListener("click", loadIndex);
   el("research-document-retry").addEventListener("click", function () { if (lastDocumentID) openDocument(lastDocumentID, lastDocumentPush); });
   el("research-body").addEventListener("click", function (event) {
@@ -643,6 +853,14 @@
     toc.open = false;
     tocSummary.focus();
   });
-  window.addEventListener("popstate", function () { var id = pathID(); if (id) openDocument(id, false); else showLibrary(false); });
+  window.addEventListener("popstate", function () {
+    var id = pathID();
+    if (id) { openDocument(id, false); return; }
+    currentFocus = focusFromURL();
+    decisionVisible = decisionWindow;
+    libraryVisible = collectionWindow;
+    showLibrary(false);
+    renderIndex();
+  });
   loadIndex();
 }());

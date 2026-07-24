@@ -71,12 +71,15 @@ func TestParseHash579Goja(t *testing.T) {
 	if node != "ship-platform" {
 		t.Errorf("parseHash(#goals/ship-platform).node = %q", node)
 	}
-	// Other SPA tabs.
-	for _, tab := range []string{"issues", "decisions"} {
-		v := call("#" + tab).ToObject(vm)
-		if v.Get("view").String() != tab {
-			t.Errorf("parseHash(#%s).view = %q", tab, v.Get("view"))
-		}
+	// Other SPA tab.
+	v := call("#issues").ToObject(vm)
+	if v.Get("view").String() != "issues" {
+		t.Errorf("parseHash(#issues).view = %q", v.Get("view"))
+	}
+	// #863: preserve the retired Decisions hash as an R&D redirect sentinel.
+	rd := call("#decisions").ToObject(vm)
+	if rd.Get("view").String() != "rd" {
+		t.Errorf("parseHash(#decisions).view = %q, want rd", rd.Get("view"))
 	}
 	// Guard: the extracted source must still document the default_view contract,
 	// using metadata rather than blocking landing on the full Goals document.

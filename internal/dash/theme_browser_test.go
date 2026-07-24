@@ -121,7 +121,7 @@ with sync_playwright() as p:
         assert luminance(colors["ground"]) < .02, colors
         assert contrast(colors["ink"], colors["ground"]) >= 7, colors
 
-        for tab in ["#tab-goals", "#tab-issues", "#tab-decisions"]:
+        for tab in ["#tab-goals", "#tab-issues"]:
             page.locator(tab).click()
             expect(page.locator("html")).to_have_attribute("data-theme", "dark")
         if evidence_dir:

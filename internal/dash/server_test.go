@@ -729,65 +729,34 @@ func TestGoalsCellRenames405(t *testing.T) {
 	}
 }
 
-// TestDecisionPage405 locks #405 Inc 2 (the operator's centerpiece) as reshaped by #429:
-// the decision reading room is a first-class TAB rendering as a full page — no modal, no
-// secondary scrollbar. It formats the canonical 6-element briefs with references (links)
-// and demo images inline, each decision showing which goal it drives.
+// TestDecisionPage405 locks the #863 R&D combination: Decisions are no longer a
+// dashboard panel or dialog. One navigation-out link carries the live count into
+// the focused paper reading room.
 func TestDecisionPage405(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 	srv, _ := newTestServer(t, singleFleetRoster, now)
 	html := doGet(t, srv, "/").Body.String()
-	if !strings.Contains(html, `id="view-decisions"`) || !strings.Contains(html, `id="gdec-list"`) {
-		t.Error("index.html must carry the decision-page view (#view-decisions / #gdec-list) — #405 Inc 2 / #429")
+	if strings.Contains(html, `id="view-decisions"`) || strings.Contains(html, `id="gdec-detail"`) || strings.Contains(html, `id="gdec-list"`) {
+		t.Error("dashboard must not retain a separate Decisions panel or detail dialog — #863")
 	}
-	// #429: the Decisions entry is a real role="tab" SPA tab, and the old modal is GONE —
-	// a leftover #goals-decisions dialog would mean the refactor shipped both surfaces.
-	if !strings.Contains(html, `id="tab-decisions" class="tab" data-view="decisions" role="tab"`) {
-		t.Error(`index.html must carry the Decisions tab as a role="tab" SPA view switch — #429`)
+	if !strings.Contains(html, `id="tab-decisions" class="tab tab-nav" href="/research?focus=decisions"`) || !strings.Contains(html, `>R&amp;D<span id="hdr-decisions-count"`) {
+		t.Error("dashboard must carry one R&D navigation link with the live Decisions count — #863")
 	}
 	if strings.Contains(html, `id="goals-decisions"`) || strings.Contains(html, "data-gdec-close") {
-		t.Error("index.html must NOT carry the retired decisions modal (#goals-decisions) — #429")
+		t.Error("index.html must not restore the retired decisions modal")
 	}
 	js := doGet(t, srv, "/static/goals.js").Body.String()
 	for _, marker := range []string{
 		"gatherDecisions",     // collects every open decision fleet-wide
-		"openDecisions",       // per-open entry: instant paint + always refetch (#429)
-		"paintDecisions",      // the pure painter, also driven by live ticks (#429)
-		"decisionsVisible",    // live ticks reach the open tab (#429)
 		"data-open-decisions", // the Awaiting-you tile trigger
-		"gdec-ctx-link",       // "Drives" — which goal the decision drives (linked)
-		"gm-brief-img",        // demo images rendered in a brief
 	} {
 		if !strings.Contains(js, marker) {
-			t.Errorf("goals.js must implement the decision page (missing %q) — #405 Inc 2 / #429", marker)
+			t.Errorf("goals.js must retain the decision count/trigger contract (missing %q) — #863", marker)
 		}
 	}
-	// #429 + the cubic #363 discipline: a failed goals load must surface an honest
-	// unavailable state, never a clean-looking "nothing awaiting you".
-	if !strings.Contains(js, "unavailable right now") {
-		t.Error("goals.js paintDecisions must render an honest unavailable state on a failed goals load — #429")
-	}
-	// renderBrief must render reference links (the "references littered throughout" requirement).
-	if !strings.Contains(js, `rel="noopener noreferrer"`) {
-		t.Error("goals.js renderBrief must render reference links (http(s)-restricted anchors) — #405 Inc 2")
-	}
-	// #429: dash.js owns the view switch (showView("decisions") repaints the page).
 	djs := doGet(t, srv, "/static/dash.js").Body.String()
-	if !strings.Contains(djs, `"decisions"`) || !strings.Contains(djs, "openDecisionsView") {
-		t.Error(`dash.js must route the decisions view (VIEWS + openDecisionsView) — #429`)
-	}
-	css := doGet(t, srv, "/static/dash.css").Body.String()
-	if !strings.Contains(css, ".gdec-list") || !strings.Contains(css, ".gdec-card") {
-		t.Error("dash.css must style the decision reading room (.gdec-list/.gdec-card) — #405 Inc 2")
-	}
-	// #429: no modal chrome and no inner scrollbar — the document owns the one scroll.
-	if strings.Contains(css, ".gdec-sheet") || strings.Contains(css, ".gdec-backdrop") {
-		t.Error("dash.css must NOT carry the retired decisions modal chrome (.gdec-sheet/.gdec-backdrop) — #429")
-	}
-	if gi := strings.Index(css, ".gdec-list"); gi >= 0 {
-		if line := css[gi : gi+strings.Index(css[gi:], "\n")]; strings.Contains(line, "overflow-y") {
-			t.Error("the decisions list must not own a secondary scrollbar (overflow-y) — #429")
-		}
+	if !strings.Contains(djs, `window.location.href = "/research?focus=decisions"`) || !strings.Contains(djs, `return { view: "rd" }`) {
+		t.Error("dash.js must route Goals and legacy #decisions entries into R&D — #863")
 	}
 }
 

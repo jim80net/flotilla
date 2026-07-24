@@ -87,30 +87,50 @@ import sys
 from playwright.sync_api import sync_playwright, expect
 
 url, evidence_dir = sys.argv[1], sys.argv[2]
+goals = []
+for i in range(8):
+    paper = "authorization-domains-design.md" if i == 0 else "decisions/design-%02d.md" % i
+    goals.append({
+        "id": "design-%02d" % (i + 1), "title": "Design %02d" % (i + 1),
+        "owner": "example-desk", "conversation_agent": "example-desk",
+        "status_display": "awaiting", "state": "awaiting",
+        "brief": "## Recommendation\nReview this design.\n\n[Read paper](/research/%s)" % paper,
+        "work_items": []
+    })
+def install_goals(page):
+    page.route("**/api/goals", lambda route: route.fulfill(
+        status=200, content_type="application/json",
+        body=json.dumps({"found": True, "goals": goals, "counts": {"total": 8, "awaiting": 8}})))
 with sync_playwright() as p:
     browser = p.chromium.launch()
     try:
         phone = browser.new_page(viewport={"width": 390, "height": 844})
+        install_goals(phone)
         phone.goto(url + "/research", wait_until="domcontentloaded")
         expect(phone.locator("#research-decisions")).to_be_visible()
         decision = phone.locator("#research-decision-list .research-card")
-        expect(decision).to_have_count(6)
+        expect(decision).to_have_count(3)
         expect(phone.locator("#research-decision-count")).to_have_text("8 waiting")
+        expect(phone.locator("#research-all")).to_be_hidden()
+        phone.locator('[data-research-focus="all"]').click()
+        expect(decision).to_have_count(3)
         expect(phone.locator("#research-list .research-card")).to_have_count(6)
-        expect(phone.locator("#research-count")).to_have_text("8 documents")
-        expect(phone.locator("#research-list")).not_to_contain_text("Authorization Domains")
-        expect(phone.locator("#research-decision-more")).to_contain_text("2 remaining")
-        expect(phone.locator("#research-library-more")).to_contain_text("2 remaining")
+        expect(phone.locator("#research-count")).to_have_text("16 documents")
+        expect(phone.locator("#research-decision-more")).to_contain_text("5 remaining")
+        expect(phone.locator("#research-library-more")).to_contain_text("10 remaining")
         initial_metrics = phone.evaluate("({height:document.documentElement.scrollHeight,width:document.documentElement.scrollWidth,clientWidth:document.documentElement.clientWidth})")
         if evidence_dir:
             phone.screenshot(path=os.path.join(evidence_dir, "research-library-initial-390.png"), full_page=True)
         phone.locator("#research-decision-more").click()
+        expect(phone.locator("#research-decision-list .research-card")).to_have_count(6)
+        phone.locator("#research-decision-more").click()
+        phone.locator("#research-library-more").click()
         phone.locator("#research-library-more").click()
         expect(phone.locator("#research-decision-list .research-card")).to_have_count(8)
-        expect(phone.locator("#research-list .research-card")).to_have_count(8)
+        expect(phone.locator("#research-list .research-card")).to_have_count(16)
         expect(phone.locator("#research-decision-more")).to_be_hidden()
         expect(phone.locator("#research-library-more")).to_be_hidden()
-        phone.locator("#research-decision-list .research-card").filter(has_text="Authorization Domains").click()
+        phone.locator("#research-decision-list .research-card").filter(has_text="Design 01").click()
         expect(phone.locator("#research-document")).to_be_visible()
         expect(phone.locator("#research-title")).to_contain_text("Authorization Domains")
         expect(phone.locator("#research-decision-strip")).to_be_visible()
@@ -176,7 +196,7 @@ with sync_playwright() as p:
             phone.screenshot(path=os.path.join(evidence_dir, "research-document-scrolled-390.png"), full_page=False)
         print(json.dumps({
             "initial": initial_metrics,
-            "collections": {"decision_visible": 6, "decision_total": 8, "library_visible": 6, "library_total": 8},
+            "collections": {"decision_initial": 3, "decision_total": 8, "library_initial": 6, "library_total": 16},
             "toc": {"closed_height": closed_height, "open": open_metrics, "sections": 33},
             "sticky_after_900": sticky,
             "table": table_metrics,
@@ -185,6 +205,7 @@ with sync_playwright() as p:
         phone.close()
 
         compact = browser.new_page(viewport={"width": 360, "height": 800})
+        install_goals(compact)
         compact.goto(url + "/research/authorization-domains-design.md", wait_until="domcontentloaded")
         expect(compact.locator("#research-document")).to_be_visible()
         compact.locator("#research-toc > summary").click()
@@ -197,6 +218,7 @@ with sync_playwright() as p:
 
         collection_attempts = {"count": 0}
         unavailable = browser.new_page(viewport={"width": 390, "height": 844})
+        install_goals(unavailable)
         def collection_route(route):
             collection_attempts["count"] += 1
             if collection_attempts["count"] == 1:
@@ -205,7 +227,7 @@ with sync_playwright() as p:
                 route.continue_()
         unavailable.route("**/api/research", collection_route)
         unavailable.goto(url + "/research", wait_until="domcontentloaded")
-        expect(unavailable.locator("#research-status-title")).to_have_text("Research library unavailable")
+        expect(unavailable.locator("#research-status-title")).to_have_text("R&D library unavailable")
         expect(unavailable.locator("#research-index-retry")).to_be_visible()
         unavailable.locator("#research-index-retry").click()
         expect(unavailable.locator("#research-decisions")).to_be_visible()
@@ -214,6 +236,7 @@ with sync_playwright() as p:
 
         document_attempts = {"count": 0}
         document_error = browser.new_page(viewport={"width": 390, "height": 844})
+        install_goals(document_error)
         def document_route(route):
             document_attempts["count"] += 1
             if document_attempts["count"] == 1:
@@ -231,6 +254,7 @@ with sync_playwright() as p:
 
         card_attempts = {"count": 0}
         card_error = browser.new_page(viewport={"width": 390, "height": 844})
+        install_goals(card_error)
         def card_route(route):
             card_attempts["count"] += 1
             if card_attempts["count"] == 1:
@@ -239,7 +263,7 @@ with sync_playwright() as p:
                 route.continue_()
         card_error.route("**/api/research/authorization-domains-design.md", card_route)
         card_error.goto(url + "/research", wait_until="domcontentloaded")
-        card_error.locator("#research-decision-list .research-card").filter(has_text="Authorization Domains").click()
+        card_error.locator("#research-decision-list .research-card").filter(has_text="Design 01").click()
         expect(card_error.locator("#research-reader-state-title")).to_have_text("Document unavailable")
         assert card_error.url.endswith("/research"), card_error.url
         card_error.locator("#research-document-retry").click()
@@ -253,6 +277,7 @@ with sync_playwright() as p:
         card_error.close()
 
         desktop = browser.new_page(viewport={"width": 1440, "height": 900})
+        install_goals(desktop)
         desktop.goto(url + "/research/notes/field-note.md", wait_until="domcontentloaded")
         expect(desktop.locator("#research-title")).to_have_text("Field note")
         expect(desktop.locator("#research-decision-strip")).to_be_hidden()

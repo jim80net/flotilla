@@ -208,17 +208,17 @@ func TestResearchAPIIndexBodyDeepLinkAndTraversal(t *testing.T) {
 func TestResearchPageAndDashboardNavMarkers(t *testing.T) {
 	srv, _ := newTestServer(t, singleFleetRoster, time.Now())
 	index := doGet(t, srv, "/").Body.String()
-	if !strings.Contains(index, `id="tab-research"`) || !strings.Contains(index, `href="/research"`) {
-		t.Error("dashboard must expose a Research navigation link")
+	if !strings.Contains(index, `id="tab-decisions"`) || !strings.Contains(index, `href="/research?focus=decisions"`) || !strings.Contains(index, `R&amp;D`) {
+		t.Error("dashboard must expose the combined R&D navigation link with decision focus")
 	}
 	page := doGet(t, srv, "/research").Body.String()
-	for _, marker := range []string{"Private-LAN library", "Waiting on you", `id="research-reader"`, `id="research-decision-more"`, `id="research-library-more"`, `id="research-toc-count"`, `id="research-document-comment"`, `id="research-annotation-panel"`, `/static/research.js`} {
+	for _, marker := range []string{"Decide · investigate · learn", "R&amp;D", "Waiting on you", `id="research-reader"`, `id="research-search"`, `data-research-focus="decisions"`, `data-research-focus="library"`, `data-research-focus="all"`, `id="research-decision-more"`, `id="research-library-more"`, `id="research-toc-count"`, `id="research-document-comment"`, `id="research-annotation-panel"`, `/static/research.js`} {
 		if !strings.Contains(page, marker) {
 			t.Errorf("research page missing %q", marker)
 		}
 	}
 	js := doGet(t, srv, "/static/research.js").Body.String()
-	for _, marker := range []string{"function esc(value)", "renderMarkdown", "documentWithoutDuplicateTitle", "research-decision-strip", "collectionWindow = 6", "tocRestoreY", "researchVideoURL", "data-research-video-fullscreen", "anchorForQuote", "X-Flotilla-Dash", "draft is still here"} {
+	for _, marker := range []string{"function esc(value)", "renderMarkdown", "documentWithoutDuplicateTitle", "research-decision-strip", "collectionWindow = 6", "decisionWindow = 3", "filteredEntries", "setFocus", "tocRestoreY", "researchVideoURL", "data-research-video-fullscreen", "anchorForQuote", "X-Flotilla-Dash", "draft is still here"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("research renderer missing %q", marker)
 		}

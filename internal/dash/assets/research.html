@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex,nofollow" />
   <script src="/static/theme.js"></script>
-  <title>flotilla — research</title>
+  <title>flotilla — R&amp;D</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -15,23 +15,35 @@
   <div class="bg-grid" aria-hidden="true"></div>
   <div class="bg-grain" aria-hidden="true"></div>
   <header class="bar">
-    <a class="brand research-brand" href="/research" aria-label="Research library home">
+    <a class="brand research-brand" href="/research" aria-label="R and D reading room home">
       <svg class="brand-mark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
         <circle cx="12" cy="12" r="3"/><line x1="12" y1="9" x2="12" y2="3" stroke-linecap="round"/>
         <line x1="15" y1="12" x2="21" y2="12" stroke-linecap="round"/><line x1="12" y1="15" x2="12" y2="21" stroke-linecap="round"/>
         <line x1="9" y1="12" x2="3" y2="12" stroke-linecap="round"/><circle cx="12" cy="2" r="2"/>
         <circle cx="22" cy="12" r="2"/><circle cx="12" cy="22" r="2"/><circle cx="2" cy="12" r="2"/>
       </svg>
-      <span class="brand-text"><span class="brand-name">flotilla</span><span class="brand-dash">research</span></span>
+      <span class="brand-text"><span class="brand-name">flotilla</span><span class="brand-dash">R&amp;D</span></span>
     </a>
     <nav class="parade-topnav" aria-label="Site"><button class="theme-toggle" type="button" data-theme-toggle aria-label="Toggle color theme"><span data-theme-label>Theme</span></button><a class="pd-topback" href="/">← Dashboard</a></nav>
   </header>
 
   <main class="research-shell">
     <aside id="research-library" class="research-library" aria-labelledby="research-library-title">
-      <p class="research-eyebrow">Private-LAN library</p>
-      <h1 id="research-library-title">Research</h1>
-      <p class="research-lede">Operator-facing findings and designs, rendered for reading instead of SSH.</p>
+      <p class="research-eyebrow">Decide · investigate · learn</p>
+      <h1 id="research-library-title">R&amp;D</h1>
+      <p class="research-lede">The decisions that need you and the evidence behind them, in one focused reading room.</p>
+      <div class="research-focus" aria-label="R and D focus">
+        <div class="research-focus-tabs" role="group" aria-label="Choose material">
+          <button type="button" data-research-focus="decisions" aria-pressed="true">Decisions</button>
+          <button type="button" data-research-focus="library" aria-pressed="false">Library</button>
+          <button type="button" data-research-focus="all" aria-pressed="false">All</button>
+        </div>
+        <label class="research-search" for="research-search">
+          <span>Find in R&amp;D</span>
+          <input id="research-search" type="search" autocomplete="off" placeholder="Title, summary, or path" />
+        </label>
+        <p id="research-filter-status" class="research-filter-status" role="status" aria-live="polite"></p>
+      </div>
       <div id="research-status" class="research-status" role="status" aria-live="polite">
         <strong id="research-status-title">Loading research…</strong>
         <span id="research-status-detail">Reading the private-LAN collection.</span>
@@ -40,7 +52,7 @@
 
       <section id="research-decisions" class="research-shelf research-decision-shelf" aria-labelledby="research-decisions-title" hidden>
         <div class="research-shelf-heading">
-          <div><p class="research-eyebrow">Decision shelf</p><h2 id="research-decisions-title">Waiting on you</h2></div>
+          <div><p class="research-eyebrow">Decisions</p><h2 id="research-decisions-title">Waiting on you</h2></div>
           <span id="research-decision-count" class="research-count"></span>
         </div>
         <div id="research-decision-list" class="research-card-list"></div>
@@ -48,25 +60,37 @@
       </section>
 
       <section id="research-all" class="research-shelf" aria-labelledby="research-all-title" hidden>
-        <div class="research-shelf-heading"><h2 id="research-all-title">Library</h2><span id="research-count" class="research-count"></span></div>
+        <div class="research-shelf-heading"><div><p class="research-eyebrow">Evidence</p><h2 id="research-all-title">Library</h2></div><span id="research-count" class="research-count"></span></div>
         <div id="research-list" class="research-card-list"></div>
         <button id="research-library-more" class="research-show-more" type="button" hidden></button>
       </section>
     </aside>
 
     <article id="research-reader" class="research-reader" aria-labelledby="research-title">
-      <button id="research-back" class="research-mobile-back" type="button">← Research library</button>
+      <button id="research-back" class="research-mobile-back" type="button">← R&amp;D index</button>
       <div id="research-reader-empty" class="research-reader-empty">
         <p class="research-eyebrow">Reading room</p>
         <h2 id="research-reader-state-title">Choose a document</h2>
-        <p id="research-reader-state-detail">Decision-ready designs are kept at the top; the rest of the library follows by most recently updated.</p>
+        <p id="research-reader-state-detail">Choose a waiting decision or find supporting evidence without leaving the reading room.</p>
         <button id="research-document-retry" class="research-retry" type="button" hidden>Retry document</button>
       </div>
       <div id="research-document" hidden>
         <aside id="research-decision-strip" class="research-decision-strip" hidden>
-          <strong>Waiting on you · Design GO</strong>
-          <span>This document is marked for operator review.</span>
+          <div class="research-decision-copy">
+            <strong id="research-decision-title">Waiting on you</strong>
+            <span id="research-decision-summary">This paper supports an operator decision.</span>
+          </div>
           <a id="research-decision-jump" href="#">Jump to the checklist ↓</a>
+          <button id="research-decision-respond" type="button" hidden>Respond</button>
+          <form id="research-decision-response" class="research-decision-response" hidden>
+            <label for="research-decision-response-input">Your response</label>
+            <textarea id="research-decision-response-input" rows="3" placeholder="Approve, question, or request a revision"></textarea>
+            <div>
+              <span id="research-decision-response-status" role="status" aria-live="polite"></span>
+              <button id="research-decision-response-close" type="button">Close</button>
+              <button id="research-decision-response-send" type="submit">Send</button>
+            </div>
+          </form>
         </aside>
         <header class="research-document-header">
           <div class="research-document-meta"><span id="research-document-status" class="research-badge"></span><time id="research-updated"></time></div>

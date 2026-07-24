@@ -4,13 +4,15 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 )
 
-// TestDecisionsBoundedRendered848 exercises the real dashboard at both phone contracts.
-// Fixtures are deliberately generic; screenshots are never written by this test.
-func TestDecisionsBoundedRendered848(t *testing.T) {
+// TestRDReadingRoomRendered863 exercises the combined Decisions + Research
+// surface at both phone contracts and desktop. Fixtures are generic; captures,
+// when requested, remain local evidence.
+func TestRDReadingRoomRendered863(t *testing.T) {
 	python := os.Getenv("FLOTILLA_PLAYWRIGHT_PYTHON")
 	if python == "" {
 		t.Skip("set FLOTILLA_PLAYWRIGHT_PYTHON to run rendered Chromium regression")
@@ -25,115 +27,152 @@ func TestDecisionsBoundedRendered848(t *testing.T) {
 		httpServer.CloseClientConnections()
 		httpServer.Close()
 	})
+	evidenceDir := os.Getenv("FLOTILLA_BROWSER_EVIDENCE_DIR")
+	if evidenceDir != "" {
+		if err := os.MkdirAll(evidenceDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	script := `
 import json
+import os
 import sys
+from urllib.parse import unquote, urlparse
 from playwright.sync_api import sync_playwright, expect
 
-url = sys.argv[1]
-long_tail = "\n\n## Mechanics\n" + ("Reversible generic detail with no production identifiers. " * 32)
+url, evidence_dir = sys.argv[1], sys.argv[2]
+entries = []
 goals = []
 for i in range(7):
-    goals.append({
-        "id": "generic-%d" % (i + 1),
+    entries.append({
+        "id": "decisions/generic-%d.md" % (i + 1),
         "title": "Generic decision %d" % (i + 1),
-        "owner": "example-desk",
-        "conversation_agent": "example-desk",
-        "status_display": "awaiting",
-        "brief": "## What it is\nA generic choice.\n\n## Recommendation\nChoose reversible option %d.\n\n## Safe default\nHold the current state.%s" % (i + 1, long_tail),
-        "work_items": [], "children": [], "parent": None
+        "status": "operator-review", "decision": True,
+        "summary": "Recommendation %d with a reversible safe default." % (i + 1),
+        "updated_at": "2026-07-%02dT12:00:00Z" % (i + 1)
     })
-doc = {"found": True, "goals": goals, "counts": {
-    "fleet": 7, "total": 7, "in_flight": 0, "awaiting": 7,
-    "pending": 0, "realized": 0, "aspirational": 0
-}}
+    goals.append({
+        "id": "generic-%d" % (i + 1), "title": "Generic decision %d" % (i + 1),
+        "owner": "example-desk", "conversation_agent": "example-desk",
+        "status_display": "awaiting", "state": "awaiting",
+        "brief": "## Recommendation\nKeep option %d reversible.\n\n## Safe default\nHold the current state.\n\n[Read paper](/research/decisions/generic-%d.md)" % (i + 1, i + 1),
+        "work_items": []
+    })
+for i in range(12):
+    entries.append({
+        "id": "library/evidence-%d.md" % (i + 1),
+        "title": "Evidence note %d" % (i + 1),
+        "status": "research", "decision": False,
+        "summary": "Focused evidence %d for a generic investigation." % (i + 1),
+        "updated_at": "2026-06-%02dT12:00:00Z" % (i + 1)
+    })
 
-def open_decisions(browser, width, height, body, status=200, respond_status=200):
-    page = browser.new_page(viewport={"width": width, "height": height})
+def document_for(route):
+    path = unquote(urlparse(route.request.url).path)
+    doc_id = path.split("/api/research/", 1)[1]
+    match = next(item for item in entries if item["id"] == doc_id)
+    body = dict(match)
+    body.update({
+        "markdown": "# %s\n\n## Recommendation\n\nKeep the change reversible.\n\n## Evidence\n\nThe paper canvas owns this decision." % match["title"],
+        "digest": "sha256:generic"
+    })
+    route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+def prepare(page):
     page.set_default_timeout(8000)
     page.add_init_script("window.EventSource = undefined")
+    page.route("**/api/research", lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps({"research": entries})))
     page.route("**/api/goals", lambda route: route.fulfill(
-        status=status, content_type="application/json", body=json.dumps(body)))
+        status=200, content_type="application/json",
+        body=json.dumps({"found": True, "goals": goals, "counts": {"total": 7, "awaiting": 7}})))
+    page.route("**/api/research/**", document_for)
+    page.route("**/api/research-annotations/**", lambda route: route.fulfill(
+        status=200, content_type="application/json",
+        body=json.dumps({"document_id": "", "generation": 0, "annotations": []})))
     page.route("**/api/control/respond", lambda route: route.fulfill(
-        status=respond_status, content_type="application/json",
-        body=json.dumps({"outcome": "delivered", "target": "example-desk"} if respond_status == 200 else {"error": "generic unavailable"})))
-    page.goto(url, wait_until="domcontentloaded")
-    page.locator("#tab-decisions").click()
-    return page
+        status=200, content_type="application/json",
+        body=json.dumps({"outcome": "queued", "target": "example-desk", "queued_id": "generic-queue"})))
 
 with sync_playwright() as p:
     browser = p.chromium.launch()
     try:
         for width, height in [(390, 844), (360, 800)]:
-            page = open_decisions(browser, width, height, doc)
-            expect(page.locator("#gdec-title")).to_have_text("Decisions awaiting you · 7")
-            expect(page.locator(".gdec-summary")).to_have_count(3)
-            expect(page.locator(".gdec-brief")).to_have_count(0)
-            expect(page.locator(".gdec-summary").first.locator("dt")).to_have_count(4)
-            expect(page.locator(".gdec-summary").first).to_contain_text("Choose reversible option 1")
-            expect(page.locator(".gdec-summary").first).to_contain_text("Hold the current state")
-            page_bottom = page.locator("#gdec-list").bounding_box()["y"] + page.locator("#gdec-list").bounding_box()["height"]
-            assert page_bottom <= height * 2, (width, height, page_bottom)
+            page = browser.new_page(viewport={"width": width, "height": height})
+            prepare(page)
+            page.goto(url + "/research?focus=decisions", wait_until="domcontentloaded")
+            expect(page.locator("#research-library-title")).to_have_text("R&D")
+            expect(page.locator('[data-research-focus="decisions"]')).to_have_attribute("aria-pressed", "true")
+            expect(page.locator("#research-decision-list .research-card")).to_have_count(3)
+            expect(page.locator("#research-all")).to_be_hidden()
+            expect(page.locator("#research-filter-status")).to_have_text("7 waiting decisions")
+            expect(page.locator("#gdec-detail")).to_have_count(0)
+            assert page.evaluate("document.documentElement.scrollWidth === innerWidth")
 
-            # Activation 1 opens the complete index; activation 2 reaches the terminal brief.
-            page.locator("[data-gdec-jump]").click()
-            final_jump = page.locator(".gdec-jump").last
-            expect(final_jump).to_be_visible()
-            final_jump.click()
-            expect(page.locator("#gdec-detail")).to_be_visible()
-            expect(page.locator("#gdec-detail-count")).to_have_text("Decision 7 of 7")
-            expect(page.locator("#gdec-detail-body .gdec-brief")).to_contain_text("Reversible generic detail")
-            expect(page.locator("#gdec-detail-body .gdec-resp-input")).to_be_visible()
-            box = page.locator("#gdec-detail").bounding_box()
-            assert box["x"] >= 0 and box["x"] + box["width"] <= width, ("dialog x", width, box)
-            assert box["y"] >= 0 and box["y"] + box["height"] <= height, ("dialog y", height, box)
-            close_after_send = page.locator("[data-gdec-response-close]")
-            expect(close_after_send).to_be_hidden()
-            page.locator("#gdec-detail-body .gdec-resp-input").fill("Approve the reversible option.")
-            page.locator("#gdec-detail-body .gdec-resp-send").click()
-            expect(page.locator("#gdec-detail-body .gdec-resp-msg")).to_contain_text("Delivered to example-desk")
-            expect(close_after_send).to_be_visible()
-            expect(close_after_send).to_be_focused()
-            close_after_send.click()
-            expect(page.locator("#gdec-detail")).not_to_be_visible()
-            expect(final_jump).to_be_focused()
-            page.wait_for_timeout(50)
-            return_box = final_jump.bounding_box()
-            assert return_box["y"] < height and return_box["y"] + return_box["height"] > 0, ("return focus visible", return_box)
+            # A decision opens its paper in the one R&D canvas, never a dialog stack.
+            page.locator("#research-decision-list .research-card").first.click()
+            expect(page.locator("#research-title")).to_have_text("Generic decision 1")
+            expect(page.locator("#research-body")).to_contain_text("The paper canvas owns this decision.")
+            expect(page).to_have_url(url + "/research/decisions/generic-1.md")
+            expect(page.locator("#research-annotation-bar")).to_be_visible()
+            page.locator("#research-decision-respond").click()
+            page.locator("#research-decision-response-input").fill("Approve the reversible option.")
+            page.locator("#research-decision-response-send").click()
+            expect(page.locator("#research-decision-response-status")).to_contain_text("Queued durably")
+            expect(page.locator("#research-decision-response-close")).to_be_focused()
+            if evidence_dir:
+                page.screenshot(path=os.path.join(evidence_dir, "rd-decision-phone-%d.png" % width), full_page=False)
+            page.locator("#research-decision-response-close").click()
+            expect(page.locator("#research-decision-response")).to_be_hidden()
+            expect(page.locator("#research-decision-respond")).to_be_focused()
+            page.locator("#research-back").click()
+            expect(page).to_have_url(url + "/research?focus=decisions")
+
+            # Focus and search bound the archive instead of producing one long scroll.
+            page.locator('[data-research-focus="library"]').click()
+            expect(page.locator("#research-decisions")).to_be_hidden()
+            expect(page.locator("#research-list .research-card")).to_have_count(6)
+            expect(page.locator("#research-filter-status")).to_have_text("19 library documents")
+            page.locator("#research-search").fill("evidence 11")
+            expect(page.locator("#research-list .research-card")).to_have_count(1)
+            expect(page.locator("#research-list")).to_contain_text("Evidence note 11")
+            page.locator('[data-research-focus="all"]').click()
+            expect(page.locator("#research-filter-status")).to_contain_text("1 R&D items")
+            page.locator("#research-search").fill("")
+            expect(page.locator("#research-decision-list .research-card")).to_have_count(3)
+            expect(page.locator("#research-list .research-card")).to_have_count(6)
+            assert page.evaluate("document.documentElement.scrollWidth === innerWidth")
+            if evidence_dir:
+                page.screenshot(path=os.path.join(evidence_dir, "rd-phone-%d.png" % width), full_page=False)
             page.close()
 
-        unavailable = open_decisions(browser, 390, 844, {"error": "generic unavailable"}, 503)
-        expect(unavailable.locator("[data-gdec-retry]")).to_be_visible()
-        unavailable.unroute("**/api/goals")
-        unavailable.route("**/api/goals", lambda route: route.fulfill(
-            status=200, content_type="application/json", body=json.dumps(doc)))
-        unavailable.locator("[data-gdec-retry]").click()
-        expect(unavailable.locator(".gdec-summary")).to_have_count(3)
-        unavailable.close()
-
-        empty = open_decisions(browser, 390, 844, {
-            "found": True, "goals": [], "counts": {
-                "fleet": 0, "total": 0, "in_flight": 0, "awaiting": 0,
-                "pending": 0, "realized": 0, "aspirational": 0
-            }})
-        expect(empty.locator("#gdec-list")).to_contain_text("Nothing is awaiting your decision")
-        empty.close()
-
-        failed = open_decisions(browser, 390, 844, doc, respond_status=503)
-        failed.locator(".gdec-summary").first.locator("[data-gdec-open]").click()
-        failed_input = failed.locator("#gdec-detail-body .gdec-resp-input")
-        failed_input.fill("Keep this draft after a failed send.")
-        failed.locator("#gdec-detail-body .gdec-resp-send").click()
-        expect(failed.locator("#gdec-detail-body .gdec-resp-msg")).to_contain_text("NOT sent")
-        expect(failed_input).to_have_value("Keep this draft after a failed send.")
-        expect(failed.locator("[data-gdec-response-close]")).to_be_hidden()
-        failed.close()
+        desktop = browser.new_page(viewport={"width": 1440, "height": 900})
+        prepare(desktop)
+        desktop.goto(url, wait_until="domcontentloaded")
+        expect(desktop.locator("#view-decisions")).to_have_count(0)
+        expect(desktop.locator("#tab-decisions")).to_contain_text("R&D")
+        expect(desktop.locator("#hdr-decisions-count")).to_have_text("7")
+        desktop.locator("#tab-decisions").click()
+        expect(desktop).to_have_url(url + "/research?focus=decisions")
+        expect(desktop.locator("#research-decision-list .research-card")).to_have_count(3)
+        if evidence_dir:
+            desktop.screenshot(path=os.path.join(evidence_dir, "rd-desktop-1440.png"), full_page=False)
+        desktop.close()
     finally:
         browser.close()
 `
-	cmd := exec.Command(python, "-c", script, httpServer.URL)
+	cmd := exec.Command(python, "-c", script, httpServer.URL, evidenceDir)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("rendered bounded Decisions regression: %v\n%s", err, out)
+		t.Fatalf("rendered R&D reading-room regression: %v\n%s", err, out)
+	}
+	if evidenceDir != "" {
+		for _, name := range []string{"rd-phone-390.png", "rd-phone-360.png", "rd-decision-phone-390.png", "rd-decision-phone-360.png", "rd-desktop-1440.png"} {
+			path := filepath.Join(evidenceDir, name)
+			if info, err := os.Stat(path); err != nil || info.Size() == 0 {
+				t.Fatalf("rendered evidence missing at %q: %v", path, err)
+			}
+			t.Logf("generic rendered evidence: %s", path)
+		}
 	}
 }
