@@ -2,6 +2,7 @@ package goals
 
 import (
 	"fmt"
+	"path"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -30,6 +31,7 @@ type yamlGoal struct {
 	DependsOn         []string       `yaml:"depends_on"`
 	WorkItems         []yamlWorkItem `yaml:"work_items"`
 	Brief             string         `yaml:"brief"`
+	PaperID           string         `yaml:"paper_id"`
 	Children          []*yamlGoal    `yaml:"children"`
 }
 
@@ -59,15 +61,16 @@ func (p *yamlParent) UnmarshalYAML(value *yaml.Node) error {
 }
 
 type yamlWorkItem struct {
-	Kind   string `yaml:"kind"`
-	Agent  string `yaml:"agent"`
-	Ref    string `yaml:"ref"`
-	Match  string `yaml:"match"`
-	Marker string `yaml:"marker"` // authoring alias → compiled to Match
-	Text   string `yaml:"text"`
-	Done   bool   `yaml:"done"`
-	Label  string `yaml:"label"`
-	Brief  string `yaml:"brief"`
+	Kind    string `yaml:"kind"`
+	Agent   string `yaml:"agent"`
+	Ref     string `yaml:"ref"`
+	Match   string `yaml:"match"`
+	Marker  string `yaml:"marker"` // authoring alias → compiled to Match
+	Text    string `yaml:"text"`
+	Done    bool   `yaml:"done"`
+	Label   string `yaml:"label"`
+	Brief   string `yaml:"brief"`
+	PaperID string `yaml:"paper_id"`
 }
 
 // ParseYAML decodes and validates fleet-goals.yaml bytes into a flat File. Malformed YAML,
@@ -128,6 +131,7 @@ func flattenGoals(nodes []*yamlGoal, structuralParent string, out *[]Goal) error
 			DependsOn:         append([]string(nil), n.DependsOn...),
 			WorkItems:         items,
 			Brief:             strings.TrimSpace(n.Brief),
+			PaperID:           strings.TrimSpace(n.PaperID),
 		})
 		if err := flattenGoals(n.Children, id, out); err != nil {
 			return err
@@ -138,14 +142,15 @@ func flattenGoals(nodes []*yamlGoal, structuralParent string, out *[]Goal) error
 
 func normalizeWorkItem(wi yamlWorkItem) WorkItem {
 	out := WorkItem{
-		Kind:  strings.TrimSpace(wi.Kind),
-		Agent: strings.TrimSpace(wi.Agent),
-		Match: strings.TrimSpace(wi.Match),
-		Ref:   strings.TrimSpace(wi.Ref),
-		Text:  wi.Text,
-		Done:  wi.Done,
-		Label: strings.TrimSpace(wi.Label),
-		Brief: strings.TrimSpace(wi.Brief),
+		Kind:    strings.TrimSpace(wi.Kind),
+		Agent:   strings.TrimSpace(wi.Agent),
+		Match:   strings.TrimSpace(wi.Match),
+		Ref:     strings.TrimSpace(wi.Ref),
+		Text:    wi.Text,
+		Done:    wi.Done,
+		Label:   strings.TrimSpace(wi.Label),
+		Brief:   strings.TrimSpace(wi.Brief),
+		PaperID: strings.TrimSpace(wi.PaperID),
 	}
 	switch out.Kind {
 	case "desk":
@@ -188,6 +193,14 @@ func (f File) validate() error {
 		}
 	}
 	for _, g := range f.Goals {
+		if g.PaperID != "" && !validPaperID(g.PaperID) {
+			return fmt.Errorf("goals: goal %q has invalid paper_id %q", g.ID, g.PaperID)
+		}
+		for _, wi := range g.WorkItems {
+			if wi.PaperID != "" && !validPaperID(wi.PaperID) {
+				return fmt.Errorf("goals: goal %q work item has invalid paper_id %q", g.ID, wi.PaperID)
+			}
+		}
 		seenDep := make(map[string]bool, len(g.DependsOn))
 		for _, dep := range g.DependsOn {
 			if strings.TrimSpace(dep) == "" {
@@ -206,4 +219,17 @@ func (f File) validate() error {
 		}
 	}
 	return nil
+}
+
+func validPaperID(id string) bool {
+	if id == "" || strings.ContainsRune(id, '\x00') || strings.Contains(id, `\`) ||
+		strings.HasPrefix(id, "/") || path.Clean(id) != id || !strings.EqualFold(path.Ext(id), ".md") {
+		return false
+	}
+	for _, part := range strings.Split(id, "/") {
+		if part == "" || part == "." || part == ".." || strings.HasPrefix(part, ".") {
+			return false
+		}
+	}
+	return true
 }

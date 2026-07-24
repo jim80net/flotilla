@@ -227,7 +227,7 @@
       var state = decisionState(node);
       var gated = state === "awaiting" || state === "awaiting-authority" || state === "blocked";
       if (gated && hasDecisionBrief(node.brief)) {
-        out.push({ node: node, label: "", brief: node.brief, paperID: paperIDFromBrief(node.brief) });
+        out.push({ node: node, label: "", brief: node.brief, paperID: node.paper_id || paperIDFromBrief(node.brief) });
       }
       (node.work_items || []).forEach(function (item) {
         if ((item.class === "awaiting" || item.class === "blocked") && hasDecisionBrief(item.brief) && !sameDecisionBrief(item.brief, node.brief)) {
@@ -235,7 +235,7 @@
             node: node,
             label: item.label || item.detail || item.kind || "",
             brief: item.brief,
-            paperID: paperIDFromBrief(item.brief)
+            paperID: item.paper_id || paperIDFromBrief(item.brief)
           });
         }
       });

@@ -123,6 +123,59 @@ func TestReadResearchIndexDecisionShelfAndBoundary(t *testing.T) {
 	}
 }
 
+func TestResearchStatusUsesExactAwaitingAuthMarkers(t *testing.T) {
+	tests := []struct {
+		name     string
+		title    string
+		markdown string
+		status   string
+		decision bool
+	}{
+		{"frontmatter", "Design", "---\nstatus: awaiting-auth\n---\nBody", "awaiting-auth", true},
+		{"bold metadata", "Design", "**Status:** awaiting-auth — operator GO\n", "awaiting-auth", true},
+		{"exact ledger token", "Design", "## Gate\n\n- [awaiting-auth] operator GO\n", "awaiting-auth", true},
+		{"loop posture is not authorization", "Fleet posture", "status: research\n\nRaw loop posture: awaiting-authority\n", "research", false},
+		{"near miss is not authorization", "Fleet posture", "# Fleet posture awaiting-authorization\n", "research", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			status, _, decision := researchStatus(tc.title, tc.markdown)
+			if status != tc.status || decision != tc.decision {
+				t.Fatalf("researchStatus = (%q, %v), want (%q, %v)", status, decision, tc.status, tc.decision)
+			}
+		})
+	}
+}
+
+func TestResearchPublicationExcludesOperationalArtifacts(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	writeResearchFixture(t, root, "papers/real-paper.md", "# Real paper\n\nSubstantive research.\n", now)
+	for _, id := range []string{
+		"walk-20260724/captures.md",
+		"packages/product-walk-20260724/manifest.md",
+		"scorecards/fleet-seven-c-scorecard.md",
+		"demo/findings.md",
+		"dumps/process-dump-20260724.md",
+		"state/session-mirror/transcript.md",
+	} {
+		writeResearchFixture(t, root, id, "# Operational artifact\n\nNot a publication.\n", now)
+	}
+
+	entries, err := readResearchIndex(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].ID != "papers/real-paper.md" {
+		t.Fatalf("publication index = %+v, want only the real paper", entries)
+	}
+	for _, id := range []string{"demo/findings.md", "dumps/process-dump-20260724.md"} {
+		if _, found, err := readResearchDocument(root, id); err != nil || found {
+			t.Fatalf("excluded document %q = found %v, err %v; want unavailable", id, found, err)
+		}
+	}
+}
+
 func TestResearchMissingRootIsEmptyAndBadRootErrors(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing")
 	got, err := readResearchIndex(missing)
@@ -218,7 +271,7 @@ func TestResearchPageAndDashboardNavMarkers(t *testing.T) {
 		}
 	}
 	js := doGet(t, srv, "/static/research.js").Body.String()
-	for _, marker := range []string{"function esc(value)", "renderMarkdown", "documentWithoutDuplicateTitle", "research-decision-strip", "collectionWindow = 6", "decisionWindow = 3", "filteredEntries", "setFocus", "tocRestoreY", "researchVideoURL", "data-research-video-fullscreen", "anchorForQuote", "X-Flotilla-Dash", "draft is still here"} {
+	for _, marker := range []string{"function esc(value)", "renderMarkdown", "documentWithoutDuplicateTitle", "research-decision-strip", "collectionWindow = 6", "decisionWindow = 3", "filteredEntries", "setFocus", "tocRestoreY", "researchVideoURL", "data-research-video-fullscreen", "anchorForQuote", "X-Flotilla-Dash", "draft is still here", "node.paper_id || paperIDFromBrief", "item.paper_id || paperIDFromBrief"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("research renderer missing %q", marker)
 		}
