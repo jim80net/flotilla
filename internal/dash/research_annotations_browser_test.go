@@ -237,6 +237,7 @@ with sync_playwright() as p:
             race.wait_for_timeout(10)
         assert len(race_state["pending_get"]) == 1
         race.locator("#research-back").click()
+        race.locator('[data-research-focus="library"]').click()
         race.locator("#research-list .research-card").filter(has_text="Second note").click()
         expect(race.locator("#research-title")).to_have_text("Second note")
         expect(race.locator("#research-annotation-count")).to_have_text("0 annotations")
@@ -249,6 +250,7 @@ with sync_playwright() as p:
 
         race_state["hold_get"] = False
         race.locator("#research-back").click()
+        race.locator('[data-research-focus="library"]').click()
         race.locator("#research-list .research-card").filter(has_text="Field note").click()
         expect(race.locator("#research-annotation-count")).to_have_text("3 annotations")
         race.locator("#research-document-comment").click()
@@ -261,6 +263,7 @@ with sync_playwright() as p:
         assert len(race_state["pending_post"]) == 1
         race.locator("#research-annotation-close").click()
         race.locator("#research-back").click()
+        race.locator('[data-research-focus="library"]').click()
         race.locator("#research-list .research-card").filter(has_text="Second note").click()
         expect(race.locator("#research-annotation-count")).to_have_text("0 annotations")
         race.locator("#research-document-comment").click()

@@ -405,8 +405,8 @@
     if (hdrCount) { hdrCount.textContent = ""; hdrCount.hidden = true; }
     if (hdrBtn) {
       hdrBtn.classList.remove("hdr-decisions-hot");
-      hdrBtn.setAttribute("aria-label", "Decisions unavailable until goals data reloads");
-      hdrBtn.setAttribute("title", "Goals data unavailable — open for retry guidance");
+      hdrBtn.setAttribute("aria-label", "R and D decisions unavailable until goals data reloads");
+      hdrBtn.setAttribute("title", "Goals data unavailable — R&D decision count cannot be refreshed");
     }
   }
 

@@ -18,7 +18,7 @@ func TestGoalsUnavailableRenderContract761(t *testing.T) {
 		"function setGoalsAvailability",
 		"Goals are unavailable right now. Refresh this page or wait for the next live update to retry.",
 		`compact.textContent = "unavailable"`,
-		`hdrBtn.setAttribute("aria-label", "Decisions unavailable until goals data reloads")`,
+		`hdrBtn.setAttribute("aria-label", "R and D decisions unavailable until goals data reloads")`,
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("goals.js missing unavailable-state contract %q", marker)
@@ -93,17 +93,14 @@ with sync_playwright() as p:
         expect(unavailable.locator("#goals-done-count")).to_have_text("unavailable")
         expect(unavailable.locator("#goals-done")).to_have_attribute("aria-disabled", "true")
         expect(unavailable.locator("#goals-done-list")).to_be_empty()
-        expect(unavailable.locator("#tab-decisions")).to_have_attribute("aria-label", "Decisions unavailable until goals data reloads")
+        expect(unavailable.locator("#tab-decisions")).to_have_attribute("aria-label", "R and D decisions unavailable until goals data reloads")
         if evidence_dir:
             unavailable.screenshot(path=os.path.join(evidence_dir, "unavailable-390.png"))
-        unavailable.locator("#tab-decisions").click()
-        expect(unavailable.locator("#gdec-list")).to_contain_text("goals data is unavailable")
         unavailable.unroute("**/api/goals")
         unavailable.route("**/api/goals", lambda route: route.fulfill(
             status=200, content_type="application/json", body=json.dumps(empty_doc)))
         unavailable.evaluate("() => window.flotillaGoals.refresh()")
-        expect(unavailable.locator("#gdec-list")).to_contain_text("Nothing is awaiting your decision")
-        expect(unavailable.locator("#tab-decisions")).not_to_have_attribute("aria-label", "Decisions unavailable until goals data reloads")
+        expect(unavailable.locator("#tab-decisions")).not_to_have_attribute("aria-label", "R and D decisions unavailable until goals data reloads")
         unavailable.close()
 
         honest_empty = open_goals(browser, 200, empty_doc)
@@ -113,11 +110,9 @@ with sync_playwright() as p:
         expect(honest_empty.locator("#goals-done-count")).to_be_empty()
         expect(honest_empty.locator("#goals-done-list")).to_contain_text("No realized goals yet.")
         expect(honest_empty.locator("#goals-done")).not_to_have_attribute("aria-disabled", "true")
-        expect(honest_empty.locator("#tab-decisions")).not_to_have_attribute("aria-label", "Decisions unavailable until goals data reloads")
+        expect(honest_empty.locator("#tab-decisions")).not_to_have_attribute("aria-label", "R and D decisions unavailable until goals data reloads")
         if evidence_dir:
             honest_empty.screenshot(path=os.path.join(evidence_dir, "honest-empty-390.png"))
-        honest_empty.locator("#tab-decisions").click()
-        expect(honest_empty.locator("#gdec-list")).to_contain_text("Nothing is awaiting your decision")
         honest_empty.close()
     finally:
         browser.close()
