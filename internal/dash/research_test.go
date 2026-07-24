@@ -123,6 +123,116 @@ func TestReadResearchIndexDecisionShelfAndBoundary(t *testing.T) {
 	}
 }
 
+func TestResearchPublicationDirectiveAndDiagnostics858(t *testing.T) {
+	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	root := t.TempDir()
+	valid := `<!-- flotilla-publication
+classification: research
+reader-action: Compare the evidence and choose the next experiment.
+support: material
+-->
+# Evidence review
+
+This substantive report compares the generic options and explains the measured outcome.
+
+[Supporting dataset](evidence.csv)
+`
+	archival := `<!-- flotilla-publication
+classification: archival
+reader-action: Retain this rationale as historical context.
+support: text-only
+support-rationale: The contemporaneous rationale is the complete historical record.
+-->
+# Historical rationale
+
+This note records why the reversible example was retained after the review.
+`
+	decision := `<!-- flotilla-publication
+classification: decision
+reader-action: Decide whether to run the reversible trial.
+support: text-only
+support-rationale: The bounded choice and rollback are fully stated here.
+-->
+# Reversible trial
+
+**Status:** DESIGN ONLY — awaiting operator GO
+
+The trial stays frozen until the operator makes an explicit decision.
+`
+	writeResearchFixture(t, root, "valid.md", valid, now)
+	writeResearchFixture(t, root, "archival.md", archival, now.Add(-time.Minute))
+	writeResearchFixture(t, root, "decision.md", decision, now.Add(-2*time.Minute))
+	writeResearchFixture(t, root, "empty.md", "", now.Add(-3*time.Minute))
+	writeResearchFixture(t, root, "title.md", "# Title only\n", now.Add(-4*time.Minute))
+	writeResearchFixture(t, root, "boilerplate.md", "# Placeholder\n\nTODO: coming soon.\n", now.Add(-5*time.Minute))
+
+	entries, err := readResearchIndex(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 6 {
+		t.Fatalf("entries = %d, want all 6 retained for measurement", len(entries))
+	}
+	byID := map[string]ResearchEntry{}
+	for _, entry := range entries {
+		byID[entry.ID] = entry
+	}
+	if !byID["valid.md"].PublicationValid || len(byID["valid.md"].Diagnostics) != 0 {
+		t.Errorf("valid publication = %+v", byID["valid.md"])
+	}
+	if !byID["archival.md"].Archival || byID["archival.md"].Decision || byID["archival.md"].Status != "archival" || !byID["archival.md"].PublicationValid {
+		t.Errorf("archival publication = %+v", byID["archival.md"])
+	}
+	if !byID["decision.md"].Decision || byID["decision.md"].Status != "design-only" || !byID["decision.md"].PublicationValid {
+		t.Errorf("decision publication = %+v", byID["decision.md"])
+	}
+	for id, contentCode := range map[string]string{
+		"empty.md": "content.empty", "title.md": "content.title_only", "boilerplate.md": "content.boilerplate",
+	} {
+		codes := map[string]bool{}
+		for _, diagnostic := range byID[id].Diagnostics {
+			codes[diagnostic.Code] = true
+		}
+		for _, want := range []string{contentCode, "action.missing", "support.missing"} {
+			if !codes[want] {
+				t.Errorf("%s diagnostics missing %q: %+v", id, want, byID[id].Diagnostics)
+			}
+		}
+	}
+	summary := summarizeResearchDiagnostics(entries)
+	if summary.Documents != 6 || summary.Valid != 3 || summary.NeedsAttention != 3 {
+		t.Errorf("diagnostics summary = %+v", summary)
+	}
+	if summary.ByCode["action.missing"] != 3 || summary.ByCode["support.missing"] != 3 {
+		t.Errorf("diagnostics counts = %+v", summary.ByCode)
+	}
+}
+
+func TestResearchPublicationMetadataCannotInferAuthorizationGO858(t *testing.T) {
+	body := `<!-- flotilla-publication
+classification: decision
+reader-action: Review the design; explicit authorization remains separate.
+support: text-only
+support-rationale: This is a design argument for operator review.
+-->
+# Authorization Domains
+
+**Status:** DESIGN ONLY — awaiting operator design-review GO
+
+No authorization is granted by this publication metadata.
+`
+	entry := researchEntry("authorization-domains.md", body, time.Now())
+	if entry.Status != "design-only" || !entry.Decision {
+		t.Fatalf("explicit decision publication = %+v", entry)
+	}
+	if strings.Contains(strings.ToLower(entry.Status), "go") || entry.Publication.ReaderAction == "" {
+		t.Errorf("publication metadata inferred GO or lost explicit action: %+v", entry)
+	}
+	if !strings.Contains(body, "DESIGN ONLY") {
+		t.Fatal("fixture must retain the frozen design marker")
+	}
+}
+
 func TestResearchMissingRootIsEmptyAndBadRootErrors(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing")
 	got, err := readResearchIndex(missing)
@@ -157,13 +267,17 @@ func TestResearchAPIIndexBodyDeepLinkAndTraversal(t *testing.T) {
 		t.Fatalf("research index status = %d: %s", indexRec.Code, indexRec.Body.String())
 	}
 	var index struct {
-		Research []ResearchEntry `json:"research"`
+		Research    []ResearchEntry            `json:"research"`
+		Diagnostics ResearchDiagnosticsSummary `json:"diagnostics"`
 	}
 	if err := json.Unmarshal(indexRec.Body.Bytes(), &index); err != nil {
 		t.Fatal(err)
 	}
 	if len(index.Research) != 2 || index.Research[0].ID != "design.md" {
 		t.Errorf("research API index = %+v", index.Research)
+	}
+	if index.Diagnostics.Documents != 2 || index.Diagnostics.NeedsAttention != 2 {
+		t.Errorf("research API diagnostics = %+v", index.Diagnostics)
 	}
 	if strings.Contains(indexRec.Body.String(), "HOST_SECRET_SENTINEL") || strings.Contains(indexRec.Body.String(), "leak.md") {
 		t.Error("research index exposed a symlinked host file")
@@ -212,13 +326,13 @@ func TestResearchPageAndDashboardNavMarkers(t *testing.T) {
 		t.Error("dashboard must expose a Research navigation link")
 	}
 	page := doGet(t, srv, "/research").Body.String()
-	for _, marker := range []string{"Private-LAN library", "Waiting on you", `id="research-reader"`, `id="research-decision-more"`, `id="research-library-more"`, `id="research-toc-count"`, `id="research-document-comment"`, `id="research-annotation-panel"`, `/static/research.js`} {
+	for _, marker := range []string{"Private-LAN library", "Waiting on you", "Publication diagnostics", `id="research-reader"`, `id="research-decision-more"`, `id="research-library-more"`, `id="research-toc-count"`, `id="research-publication-state"`, `id="research-document-comment"`, `id="research-annotation-panel"`, `/static/research.js`} {
 		if !strings.Contains(page, marker) {
 			t.Errorf("research page missing %q", marker)
 		}
 	}
 	js := doGet(t, srv, "/static/research.js").Body.String()
-	for _, marker := range []string{"function esc(value)", "renderMarkdown", "documentWithoutDuplicateTitle", "research-decision-strip", "collectionWindow = 6", "tocRestoreY", "researchVideoURL", "data-research-video-fullscreen", "anchorForQuote", "X-Flotilla-Dash", "draft is still here"} {
+	for _, marker := range []string{"function esc(value)", "renderMarkdown", "documentWithoutDuplicateTitle", "documentWithoutPublicationDirective", "research-diagnostics", "research-publication-state", "research-decision-strip", "collectionWindow = 6", "tocRestoreY", "researchVideoURL", "data-research-video-fullscreen", "anchorForQuote", "X-Flotilla-Dash", "draft is still here"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("research renderer missing %q", marker)
 		}

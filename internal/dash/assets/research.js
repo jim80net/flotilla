@@ -177,7 +177,7 @@
     });
   }
   function statusLabel(status) {
-    return ({ "design-only": "Design only", "awaiting-auth": "Awaiting authorization", "operator-review": "Operator review", research: "Research" })[status] || status;
+    return ({ "design-only": "Design only", "awaiting-auth": "Awaiting authorization", "operator-review": "Operator review", decision: "Decision", archival: "Archival", research: "Research" })[status] || status;
   }
   function formatDate(value) {
     var date = new Date(value);
@@ -189,8 +189,29 @@
     if (first >= 0 && lines[first].replace(/^#\s+/, "").trim() === title) lines.splice(first, 1);
     return lines.join("\n");
   }
+  function documentWithoutPublicationDirective(markdown) {
+    var value = String(markdown || ""), opener = "<!-- flotilla-publication";
+    var trimmed = value.replace(/^[\s\uFEFF]+/, "");
+    if (trimmed.indexOf(opener) !== 0) return value;
+    var start = value.length - trimmed.length;
+    var end = value.indexOf("-->", start + opener.length);
+    return end < 0 ? value.slice(0, start) : value.slice(0, start) + value.slice(end + 3);
+  }
+  function diagnosticLabel(code) {
+    return ({
+      "content.empty": "Empty",
+      "content.title_only": "Title only",
+      "content.boilerplate": "Boilerplate",
+      "action.missing": "Missing reader action",
+      "support.missing": "Missing support or text-only rationale",
+      "metadata.malformed": "Malformed metadata",
+      "metadata.unknown": "Unknown directive",
+      "metadata.classification": "Invalid classification",
+      "metadata.support": "Invalid support value"
+    })[code] || code;
+  }
 
-  var entries = [], collectionWindow = 6, decisionVisible = collectionWindow, libraryVisible = collectionWindow;
+  var entries = [], indexDiagnostics = null, collectionWindow = 6, decisionVisible = collectionWindow, libraryVisible = collectionWindow;
   var lastDocumentID = "", lastDocumentPush = false, currentDocument = null, currentRendered = null;
   var documentRequestEpoch = 0, annotationSession = 0;
   var annotationState = null, pendingAnchor = null, selectionDraft = null, annotationReturnFocus = null;
@@ -210,7 +231,8 @@
   }
   function card(entry) {
     var link = document.createElement("a");
-    link.className = "research-card" + (entry.decision ? " is-decision" : "");
+    var diagnostics = Array.isArray(entry.diagnostics) ? entry.diagnostics : [];
+    link.className = "research-card" + (entry.decision ? " is-decision" : "") + (entry.archival ? " is-archival" : "") + (diagnostics.length ? " has-diagnostics" : "");
     link.href = pagePath(entry.id);
     link.dataset.researchId = entry.id;
     var top = document.createElement("span"); top.className = "research-card-top";
@@ -220,6 +242,12 @@
     var title = document.createElement("strong"); title.textContent = entry.title;
     link.appendChild(top); link.appendChild(title);
     if (entry.summary) { var summary = document.createElement("span"); summary.className = "research-card-summary"; summary.textContent = entry.summary; link.appendChild(summary); }
+    if (diagnostics.length) {
+      var warning = document.createElement("span");
+      warning.className = "research-card-diagnostics";
+      warning.textContent = diagnostics.length + (diagnostics.length === 1 ? " publication check" : " publication checks");
+      link.appendChild(warning);
+    }
     link.addEventListener("click", function (event) { event.preventDefault(); openDocument(entry.id, true); });
     return link;
   }
@@ -234,6 +262,20 @@
     var decisions = entries.filter(function (entry) { return entry.decision; });
     var library = entries.filter(function (entry) { return !entry.decision; });
     el("research-status").hidden = true;
+    var diagnostics = indexDiagnostics || { documents: entries.length, needs_attention: 0, valid: entries.length, by_code: {} };
+    var diagnosticPanel = el("research-diagnostics");
+    diagnosticPanel.hidden = diagnostics.needs_attention === 0;
+    el("research-diagnostics-count").textContent = diagnostics.needs_attention + " of " + diagnostics.documents;
+    el("research-diagnostics-summary").textContent = diagnostics.needs_attention
+      ? diagnostics.needs_attention + " publications need metadata or substance checks. Measurement only — all " + diagnostics.documents + " remain visible."
+      : "All " + diagnostics.documents + " publications pass the current checks.";
+    var breakdown = el("research-diagnostics-breakdown");
+    breakdown.replaceChildren();
+    Object.keys(diagnostics.by_code || {}).sort().forEach(function (code) {
+      var row = document.createElement("div"), label = document.createElement("dt"), count = document.createElement("dd");
+      label.textContent = diagnosticLabel(code); count.textContent = diagnostics.by_code[code];
+      row.appendChild(label); row.appendChild(count); breakdown.appendChild(row);
+    });
     el("research-all").hidden = library.length === 0;
     el("research-count").textContent = library.length + (library.length === 1 ? " document" : " documents");
     renderCollection("research-list", "research-library-more", library, libraryVisible);
@@ -437,7 +479,8 @@
     });
   }
   function renderDocument(doc) {
-    var rendered = renderMarkdown(documentWithoutDuplicateTitle(doc.markdown, doc.title), doc.id);
+    var markdown = documentWithoutPublicationDirective(doc.markdown);
+    var rendered = renderMarkdown(documentWithoutDuplicateTitle(markdown, doc.title), doc.id);
     annotationSession++;
     currentDocument = doc; currentRendered = rendered; annotationState = null; pendingAnchor = null;
     el("research-annotation-draft").value = "";
@@ -454,6 +497,28 @@
     el("research-document-status").textContent = statusLabel(doc.status);
     el("research-updated").textContent = formatDate(doc.updated_at);
     el("research-updated").dateTime = doc.updated_at;
+    var publication = doc.publication || {}, diagnostics = Array.isArray(doc.diagnostics) ? doc.diagnostics : [];
+    var publicationState = el("research-publication-state");
+    publicationState.classList.toggle("is-valid", diagnostics.length === 0);
+    publicationState.classList.toggle("has-diagnostics", diagnostics.length > 0);
+    el("research-publication-result").textContent = diagnostics.length ? diagnostics.length + (diagnostics.length === 1 ? " check" : " checks") : "Valid";
+    el("research-reader-action").textContent = publication.reader_action
+      ? "Reader action · " + publication.reader_action
+      : "Reader action not declared.";
+    var diagnosticList = el("research-document-diagnostics");
+    diagnosticList.replaceChildren();
+    if (diagnostics.length) {
+      diagnostics.forEach(function (diagnostic) {
+        var item = document.createElement("li"), label = document.createElement("strong"), message = document.createElement("span");
+        label.textContent = diagnosticLabel(diagnostic.code); message.textContent = diagnostic.message;
+        item.appendChild(label); item.appendChild(message); diagnosticList.appendChild(item);
+      });
+    } else {
+      var validItem = document.createElement("li"); validItem.textContent = doc.archival
+        ? "Archival reason and publication support are declared."
+        : "Reader action and publication support are declared.";
+      diagnosticList.appendChild(validItem);
+    }
     el("research-body").innerHTML = rendered.html;
     renderTOC(rendered.toc);
     el("research-decision-strip").hidden = !doc.decision;
@@ -501,6 +566,7 @@
     setIndexState("Loading research…", "Reading the private-LAN collection.", false);
     fetchJSON("/api/research").then(function (body) {
       entries = Array.isArray(body.research) ? body.research : [];
+      indexDiagnostics = body.diagnostics || null;
       renderIndex();
       var id = pathID(); if (id) openDocument(id, false);
     }).catch(function (error) {
