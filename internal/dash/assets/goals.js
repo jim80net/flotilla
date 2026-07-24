@@ -1529,11 +1529,14 @@
 
   function renderBrief(md) {
     var lines = escapeHtml(String(md == null ? "" : md)).split(/\r?\n/);
-    // inline: **bold**, `code`, and [text](https://…) reference links (#405 Inc 2 — "references
-    // littered throughout"). The URL is restricted to http(s) so nothing script-like reaches href;
-    // the text was escaped upfront, and entity-encoded URLs decode correctly inside the attribute.
+    // inline: **bold**, `code`, and reference links (#405 Inc 2 — "references littered
+    // throughout"). External references are restricted to http(s). Same-origin references
+    // are restricted to the research reader/body routes; no other relative or script-like
+    // URL reaches href. The text was escaped upfront, and entity-encoded URLs decode
+    // correctly inside the attribute.
     function inline(s) {
       return s
+        .replace(/\[([^\]]+)\]\((\/(?:api\/)?research\/[^\s)]+)\)/g, '<a href="$2">$1</a>')
         .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
         .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
         .replace(/`([^`]+)`/g, "<code>$1</code>");
@@ -1848,6 +1851,7 @@
         '<textarea class="gdec-resp-input" rows="2" placeholder="Respond to ' + escapeHtml(target || "the fleet") + '&#8230; (approve / question / answer)" aria-label="Respond to this decision"></textarea>' +
         '<div class="gdec-resp-row">' +
           '<span class="gdec-resp-msg" role="status" aria-live="polite"></span>' +
+          '<button type="button" class="btn gdec-resp-close" data-gdec-response-close hidden>Close</button>' +
           '<button type="button" class="btn btn-primary gdec-resp-send">Respond</button>' +
         "</div>" +
       "</div>" +
@@ -2596,7 +2600,16 @@
     btn.disabled = true;
     if (msgEl) msgEl.textContent = "Sending…";
     sendDecisionResponse(target, goalId, itemLabel, text)
-      .then(function (line) { if (msgEl) msgEl.textContent = line; if (input) input.value = ""; })
+      .then(function (line) {
+        if (msgEl) msgEl.textContent = line;
+        if (input) input.value = "";
+        var box = btn.closest && btn.closest(".gdec-respond");
+        var closeBtn = box && box.querySelector("[data-gdec-response-close]");
+        if (closeBtn) {
+          closeBtn.hidden = false;
+          closeBtn.focus();
+        }
+      })
       .catch(function (err) { if (msgEl) msgEl.textContent = "NOT sent: " + ((err && err.message) || err); })
       .then(function () { btn.disabled = false; });
   }
@@ -2642,7 +2655,7 @@
     var detail = q("gdec-detail");
     if (detail) {
       detail.addEventListener("click", function (e) {
-        if (e.target.closest("[data-gdec-detail-close]")) { closeDecisionDetail(); return; }
+        if (e.target.closest("[data-gdec-detail-close], [data-gdec-response-close]")) { closeDecisionDetail(); return; }
         var sendBtn = e.target.closest(".gdec-resp-send");
         if (!sendBtn) return;
         var box = sendBtn.closest(".gdec-respond");
@@ -2676,6 +2689,7 @@
       gatherDecisions: gatherDecisions,
       renderDecisionSummary: renderDecisionSummary,
       renderDecisionCard: renderDecisionCard,
+      renderBrief: renderBrief,
       renderPreparingRow: renderPreparingRow,
       respondTarget: respondTarget,
       decisionsCount: decisionsCount,
