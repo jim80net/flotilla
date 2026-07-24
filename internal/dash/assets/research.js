@@ -192,6 +192,7 @@
 
   var entries = [], collectionWindow = 6, decisionVisible = collectionWindow, libraryVisible = collectionWindow;
   var lastDocumentID = "", lastDocumentPush = false, currentDocument = null, currentRendered = null;
+  var documentRequestEpoch = 0, annotationSession = 0;
   var annotationState = null, pendingAnchor = null, selectionDraft = null, annotationReturnFocus = null;
   function setIndexState(title, detail, retry) {
     var status = el("research-status");
@@ -418,14 +419,16 @@
   }
   function loadAnnotations() {
     if (!currentDocument) return;
+    var session = annotationSession, documentID = currentDocument.id;
     el("research-annotation-count").textContent = "Loading annotations…";
     el("research-annotation-summary").textContent = "Reading the private host store.";
     el("research-annotations-retry").hidden = true;
     annotationState = null; renderAnnotationList();
-    fetchJSON(annotationPath(currentDocument.id)).then(function (state) {
-      if (!currentDocument || state.document_id !== currentDocument.id) return;
+    fetchJSON(annotationPath(documentID)).then(function (state) {
+      if (session !== annotationSession || !currentDocument || currentDocument.id !== documentID || state.document_id !== documentID) return;
       annotationState = state; renderAnnotations();
     }).catch(function (error) {
+      if (session !== annotationSession || !currentDocument || currentDocument.id !== documentID) return;
       annotationState = null;
       el("research-annotation-count").textContent = "Annotations unavailable";
       el("research-annotation-summary").textContent = "Could not read annotations: " + error.message;
@@ -435,7 +438,12 @@
   }
   function renderDocument(doc) {
     var rendered = renderMarkdown(documentWithoutDuplicateTitle(doc.markdown, doc.title), doc.id);
+    annotationSession++;
     currentDocument = doc; currentRendered = rendered; annotationState = null; pendingAnchor = null;
+    el("research-annotation-draft").value = "";
+    el("research-annotation-save").disabled = false;
+    el("research-annotation-save-status").textContent = "";
+    el("research-annotation-save-status").classList.remove("error");
     el("research-annotation-panel").hidden = true;
     document.body.classList.remove("research-annotations-open");
     hideSelectionAction();
@@ -457,6 +465,8 @@
     window.scrollTo(0, 0);
   }
   function showLibrary(push) {
+    documentRequestEpoch++;
+    annotationSession++;
     currentDocument = null; currentRendered = null; annotationState = null;
     el("research-annotation-panel").hidden = true;
     document.body.classList.remove("research-annotations-open");
@@ -466,6 +476,7 @@
     document.title = "flotilla — research";
   }
   function openDocument(id, push) {
+    var requestEpoch = ++documentRequestEpoch;
     lastDocumentID = id;
     lastDocumentPush = !!push;
     el("research-reader").classList.add("is-loading");
@@ -473,13 +484,17 @@
     setReaderState("Loading document…", "Fetching the latest private-LAN copy.", false);
     document.body.classList.add("research-has-document");
     fetchJSON(apiPath(id)).then(function (doc) {
+      if (requestEpoch !== documentRequestEpoch) return;
       renderDocument(doc);
       loadAnnotations();
       if (push) history.pushState({ research: id }, "", pagePath(id));
       lastDocumentPush = false;
     }).catch(function (error) {
+      if (requestEpoch !== documentRequestEpoch) return;
       setReaderState("Document unavailable", "The document could not be loaded: " + error.message, true);
-    }).finally(function () { el("research-reader").classList.remove("is-loading"); });
+    }).finally(function () {
+      if (requestEpoch === documentRequestEpoch) el("research-reader").classList.remove("is-loading");
+    });
   }
 
   function loadIndex() {
@@ -546,13 +561,15 @@
       status.textContent = "Not saved — annotation state is unavailable. Your draft is still here.";
       status.classList.add("error"); return;
     }
+    var session = annotationSession, documentID = currentDocument.id, documentDigest = currentDocument.digest;
     save.disabled = true; status.textContent = "Saving…";
-    postJSON(annotationPath(currentDocument.id), {
+    postJSON(annotationPath(documentID), {
       generation: annotationState.generation,
-      document_digest: currentDocument.digest,
+      document_digest: documentDigest,
       anchor: pendingAnchor,
       comment: comment
     }).then(function (state) {
+      if (session !== annotationSession || !currentDocument || currentDocument.id !== documentID || state.document_id !== documentID) return;
       annotationState = state;
       draft.value = ""; pendingAnchor = null;
       status.textContent = "Saved.";
@@ -560,9 +577,12 @@
       var created = state.created || (state.annotations || [])[state.annotations.length - 1];
       showAnnotationThread(created, save);
     }).catch(function (error) {
+      if (session !== annotationSession || !currentDocument || currentDocument.id !== documentID) return;
       status.textContent = "Not saved — " + error.message + ". Your draft is still here.";
       status.classList.add("error");
-    }).finally(function () { save.disabled = false; });
+    }).finally(function () {
+      if (session === annotationSession && currentDocument && currentDocument.id === documentID) save.disabled = false;
+    });
   });
   ["mouseup", "keyup"].forEach(function (name) {
     el("research-body").addEventListener(name, function () { setTimeout(updateSelectionAction, 0); });

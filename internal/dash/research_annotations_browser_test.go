@@ -77,14 +77,32 @@ from playwright.sync_api import sync_playwright, expect
 url, document_body, annotation_body = sys.argv[1], sys.argv[2], sys.argv[3]
 document = json.loads(document_body)
 initial = json.loads(annotation_body)
+second = dict(document)
+second["id"] = "notes/second-note.md"
+second["title"] = "Second note"
+second["digest"] = "sha256:" + ("c" * 64)
+second["markdown"] = "# Second note\n\n## Finding\n\nBeta document remains isolated from Alpha annotation requests.\n"
 
-def install(page, empty=False):
+def install(page, empty=False, race=None):
     writes = [0]
     page.add_init_script("window.EventSource = undefined")
-    page.route("**/api/research", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps({"research": [{"id": document["id"], "title": document["title"], "status": "research", "updated_at": document["updated_at"]}]})))
+    page.route("**/api/research", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps({"research": [
+        {"id": document["id"], "title": document["title"], "status": "research", "updated_at": document["updated_at"]},
+        {"id": second["id"], "title": second["title"], "status": "research", "updated_at": second["updated_at"]}
+    ]})))
     page.route("**/api/research/notes/field-note.md", lambda route: route.fulfill(status=200, content_type="application/json", body=document_body))
+    page.route("**/api/research/notes/second-note.md", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps(second)))
     def annotations(route):
         if route.request.method == "GET":
+            if race is not None and race["hold_get"] and route.request.url.endswith("/notes/field-note.md"):
+                race["pending_get"].append(route)
+                return
+            if route.request.url.endswith("/notes/second-note.md"):
+                route.fulfill(status=200, content_type="application/json", body=json.dumps({
+                    "schema": 1, "document_id": second["id"], "document_digest": second["digest"],
+                    "generation": 1, "annotations": []
+                }))
+                return
             state = dict(initial)
             if empty:
                 state["generation"] = 0
@@ -92,6 +110,9 @@ def install(page, empty=False):
             route.fulfill(status=200, content_type="application/json", body=json.dumps(state))
             return
         assert route.request.headers.get("x-flotilla-dash") == "1"
+        if race is not None and race["hold_post"]:
+            race["pending_post"].append(route)
+            return
         writes[0] += 1
         payload = route.request.post_data_json
         if writes[0] == 1:
@@ -202,6 +223,60 @@ with sync_playwright() as p:
         assert geometry["panelLeft"] >= geometry["bodyRight"] - 1, geometry
         assert geometry["panelRight"] <= 1440 and geometry["width"] == geometry["client"], geometry
         print(json.dumps({"phone_sheet": sheet, "selection_action": action_box, "phone": phone_metrics, "desktop": geometry}))
+
+        # A stale annotation GET failure from document A cannot replace document B's
+        # loaded annotation state. A late successful A save likewise cannot clear B's
+        # draft, repaint A annotations, or reopen A's thread.
+        race_state = {"hold_get": True, "pending_get": [], "hold_post": False, "pending_post": []}
+        race = browser.new_page(viewport={"width": 390, "height": 844})
+        install(race, race=race_state)
+        race.goto(url + "/research/notes/field-note.md", wait_until="domcontentloaded")
+        expect(race.locator("#research-title")).to_have_text("Field note")
+        for _ in range(50):
+            if race_state["pending_get"]: break
+            race.wait_for_timeout(10)
+        assert len(race_state["pending_get"]) == 1
+        race.locator("#research-back").click()
+        race.locator("#research-list .research-card").filter(has_text="Second note").click()
+        expect(race.locator("#research-title")).to_have_text("Second note")
+        expect(race.locator("#research-annotation-count")).to_have_text("0 annotations")
+        race_state["pending_get"].pop().fulfill(
+            status=503, content_type="application/json", body=json.dumps({"error": "late Alpha failure"}))
+        race.wait_for_timeout(50)
+        expect(race.locator("#research-title")).to_have_text("Second note")
+        expect(race.locator("#research-annotation-count")).to_have_text("0 annotations")
+        expect(race.locator("#research-annotations-retry")).to_be_hidden()
+
+        race_state["hold_get"] = False
+        race.locator("#research-back").click()
+        race.locator("#research-list .research-card").filter(has_text="Field note").click()
+        expect(race.locator("#research-annotation-count")).to_have_text("3 annotations")
+        race.locator("#research-document-comment").click()
+        race.locator("#research-annotation-draft").fill("Alpha save remains in flight.")
+        race_state["hold_post"] = True
+        race.locator("#research-annotation-save").click()
+        for _ in range(50):
+            if race_state["pending_post"]: break
+            race.wait_for_timeout(10)
+        assert len(race_state["pending_post"]) == 1
+        race.locator("#research-annotation-close").click()
+        race.locator("#research-back").click()
+        race.locator("#research-list .research-card").filter(has_text="Second note").click()
+        expect(race.locator("#research-annotation-count")).to_have_text("0 annotations")
+        race.locator("#research-document-comment").click()
+        beta_draft = "Beta draft must survive Alpha completion."
+        race.locator("#research-annotation-draft").fill(beta_draft)
+        alpha_success = dict(initial)
+        alpha_success["generation"] = 4
+        alpha_success["created"] = initial["annotations"][0]
+        race_state["pending_post"].pop().fulfill(
+            status=201, content_type="application/json", body=json.dumps(alpha_success))
+        race.wait_for_timeout(50)
+        expect(race.locator("#research-title")).to_have_text("Second note")
+        expect(race.locator("#research-annotation-count")).to_have_text("0 annotations")
+        expect(race.locator("#research-annotation-draft")).to_have_value(beta_draft)
+        expect(race.locator("#research-annotation-form")).to_be_visible()
+        race.close()
     finally:
         browser.close()
 `
