@@ -1545,8 +1545,13 @@ func TestComposeGuardExplicitFlush(t *testing.T) {
 		t.Error("flushDeferredMirrorPaint must force-repaint deferred content even with non-empty draft")
 	}
 	delivered := `if (outcome === "delivered")`
-	dIdx := strings.Index(js, delivered)
-	if dIdx < 0 {
+	composerIdx := strings.Index(js, `var form = el("thread-composer"), ta = el("thread-composer-input")`)
+	if composerIdx < 0 {
+		t.Fatal("thread composer wiring missing")
+	}
+	dRel := strings.Index(js[composerIdx:], delivered)
+	dIdx := composerIdx + dRel
+	if dRel < 0 {
 		t.Fatal("thread composer delivered outcome handler missing")
 	}
 	// #518 grew the delivered block (optimistic outbound + refresh); keep a wider window.

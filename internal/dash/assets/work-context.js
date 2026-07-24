@@ -565,11 +565,13 @@
         var copy = D.routeOutcomeCopy(res);
         if (!panelOpen() || target !== activeSeat) return;
         if (copy.ok) {
-          localInjects.push({ target: target, body: body, ts: new Date().toISOString() });
           input.value = "";
           resize();
-          renderMirror();
-          fetchMirror(loadedAll, false);
+          if (copy.outcome === "delivered") {
+            localInjects.push({ target: target, body: body, ts: new Date().toISOString() });
+            renderMirror();
+            fetchMirror(loadedAll, false);
+          }
         }
         setMessage(copy.text, copy.ok ? "ok" : "");
       }).catch(function (err) {

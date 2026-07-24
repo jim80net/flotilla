@@ -118,17 +118,38 @@ func TestControlRoute_HappyOutcome(t *testing.T) {
 	}
 }
 
-func TestControlRoute_BusyOutcomeIs200NotError(t *testing.T) {
-	// busy/crashed/unconfirmed are informational outcomes (the operator must see
-	// them), surfaced as 200 with the outcome — never a bare failure.
+func TestControlRoute_BusyQueuesDurably(t *testing.T) {
 	f := &fakeController{routeRes: control.RouteResult{Target: "alpha", Outcome: control.OutcomeBusy, Detail: "desk is busy — retry"}}
 	srv := controlServer(t, f)
 	rec := doWrite(t, srv, "POST", "/api/control/route", `{"target":"alpha","message":"do X"}`)
 	if rec.Code != 200 {
-		t.Fatalf("code %d, want 200 (busy is an outcome, not an error)", rec.Code)
+		t.Fatalf("code %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "busy") {
-		t.Errorf("busy outcome not surfaced: %s", rec.Body.String())
+	var res respondDoc
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Outcome != "queued" || res.Target != "alpha" || res.QueuedID == "" || !strings.Contains(res.Detail, "busy") {
+		t.Fatalf("busy route must return honest durable queue outcome: %+v", res)
+	}
+	got := respondOutbox(t, srv)
+	if len(got) != 1 || got[0].Sender != "operator" || got[0].Recipient != "alpha" ||
+		got[0].Message != "do X" || got[0].ID != res.QueuedID {
+		t.Fatalf("busy route outbox mismatch: %+v (response %+v)", got, res)
+	}
+}
+
+func TestControlRoute_RepeatQueueDedupes(t *testing.T) {
+	f := &fakeController{routeRes: control.RouteResult{Target: "alpha", Outcome: control.OutcomeBusy}}
+	srv := controlServer(t, f)
+	body := `{"target":"alpha","message":"do X"}`
+	doWrite(t, srv, "POST", "/api/control/route", body)
+	rec := doWrite(t, srv, "POST", "/api/control/route", body)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "already queued") {
+		t.Fatalf("identical repeat must dedupe honestly; code=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := respondOutbox(t, srv); len(got) != 1 {
+		t.Fatalf("outbox entries = %d, want 1", len(got))
 	}
 }
 
