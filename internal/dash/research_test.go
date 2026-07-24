@@ -127,6 +127,7 @@ func TestResearchIndexPrefersCanonicalHTML5Showpiece(t *testing.T) {
 	root := t.TempDir()
 	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
 	writeResearchFixture(t, root, "buzz/SOURCE.md", "# Buzz research\n\nA complete source paper.\n", now)
+	writeResearchFixture(t, root, "buzz.md", "# Legacy Buzz research\n\nSuperseded flat source.\n", now.Add(2*time.Hour))
 	writeResearchFixture(t, root, "source-only/SOURCE.md", "# Source only\n\nStill awaiting its presentation.\n", now.Add(time.Hour))
 	presentation := filepath.Join(root, "buzz", "presentation", "index.html")
 	if err := os.MkdirAll(filepath.Dir(presentation), 0o700); err != nil {
@@ -141,7 +142,7 @@ func TestResearchIndexPrefersCanonicalHTML5Showpiece(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(entries) != 2 {
-		t.Fatalf("research index = %+v, want one entry per source package", entries)
+		t.Fatalf("research index = %+v, want ready package to suppress same-stem legacy Markdown", entries)
 	}
 	if got := entries[0]; got.ID != "buzz/SOURCE.md" || !got.PresentationReady ||
 		got.PublicationState != "showpiece" || got.PresentationURL != "/research-presentations/buzz/presentation/index.html" {
@@ -188,6 +189,9 @@ func TestResearchPresentationServesOnlyCanonicalPackageAssets(t *testing.T) {
 	}
 	if media := doGet(t, srv, "/research-presentations/buzz/presentation/media/demo.mp4"); media.Code != http.StatusOK || media.Body.String() != "video-bytes" {
 		t.Fatalf("presentation media = %d %q", media.Code, media.Body.String())
+	}
+	if source := doGet(t, srv, "/research-presentations/buzz/SOURCE.md"); source.Code != http.StatusOK || !strings.Contains(source.Body.String(), "Source evidence") {
+		t.Fatalf("presentation-relative source = %d %q", source.Code, source.Body.String())
 	}
 
 	outside := filepath.Join(t.TempDir(), "outside.js")

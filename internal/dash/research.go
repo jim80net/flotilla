@@ -125,6 +125,9 @@ func validResearchPresentationID(id string) bool {
 			presentationAt = i
 		}
 	}
+	if path.Base(id) == "SOURCE.md" && path.Dir(id) != "." {
+		return true
+	}
 	if presentationAt < 1 || presentationAt == len(parts)-1 {
 		return false
 	}
@@ -141,11 +144,14 @@ func openResearchPresentation(root, id string) (*os.File, os.FileInfo, bool, err
 	if !validResearchPresentationID(id) {
 		return nil, nil, false, nil
 	}
-	presentationAt := strings.Index(id, "/presentation/")
-	if presentationAt < 1 {
-		return nil, nil, false, nil
+	sourceID := id
+	if path.Base(id) != "SOURCE.md" {
+		presentationAt := strings.Index(id, "/presentation/")
+		if presentationAt < 1 {
+			return nil, nil, false, nil
+		}
+		sourceID = id[:presentationAt] + "/SOURCE.md"
 	}
-	sourceID := id[:presentationAt] + "/SOURCE.md"
 	if !publishableResearchID(sourceID) {
 		return nil, nil, false, nil
 	}
@@ -460,6 +466,21 @@ func readResearchIndex(root string) ([]ResearchEntry, error) {
 		}
 		return nil, err
 	}
+	showpiecePackages := map[string]bool{}
+	for _, entry := range entries {
+		if entry.PresentationReady && path.Base(entry.ID) == "SOURCE.md" {
+			showpiecePackages[path.Dir(entry.ID)] = true
+		}
+	}
+	filtered := entries[:0]
+	for _, entry := range entries {
+		legacyStem := strings.TrimSuffix(entry.ID, path.Ext(entry.ID))
+		if path.Base(entry.ID) != "SOURCE.md" && showpiecePackages[legacyStem] {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	entries = filtered
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].Decision != entries[j].Decision {
 			return entries[i].Decision

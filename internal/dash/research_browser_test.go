@@ -322,10 +322,11 @@ func TestResearchShowpieceRendered873(t *testing.T) {
 	writeResearchFixture(t, root, "buzz/SOURCE.md", "# Buzz market research\n\nA fully evidenced pilot source.\n", time.Now())
 	writeResearchFixture(t, root, "draft/SOURCE.md", "# Draft evidence\n\nSource awaiting its presentation.\n", time.Now().Add(time.Hour))
 	for name, body := range map[string]string{
-		"buzz/presentation/index.html":         `<!doctype html><html><head><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="assets/show.css"></head><body><main><p>HTML5 showpiece</p><h1>Buzz market map</h1><img src="assets/map.svg" alt="Generic market map"><video controls src="media/briefing.mp4"></video></main></body></html>`,
-		"buzz/presentation/assets/show.css":    `html,body{margin:0;background:#08111f;color:#f3f7fb;font:16px system-ui}main{padding:24px}img,video{display:block;max-width:100%;margin:16px 0}`,
-		"buzz/presentation/assets/map.svg":     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 120"><rect width="300" height="120" fill="#17324d"/><circle cx="80" cy="60" r="30" fill="#4fd1c5"/></svg>`,
-		"buzz/presentation/media/briefing.mp4": "generic-video",
+		"buzz/presentation/index.html":                   `<!doctype html><html><head><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="assets/showpiece.css"></head><body><main><p>HTML5 showpiece</p><h1>Market event flow</h1><img src="assets/event-flow-poster.png" alt="Generic event flow"><video controls poster="assets/event-flow-poster.png" src="media/event-flow.mp4"></video><a href="../SOURCE.md">Read source</a></main><script src="assets/showpiece.js"></script></body></html>`,
+		"buzz/presentation/assets/showpiece.css":         `html,body{margin:0;background:#08111f;color:#f3f7fb;font:16px system-ui}main{padding:24px}img,video{display:block;max-width:100%;margin:16px 0}`,
+		"buzz/presentation/assets/showpiece.js":          `document.body.dataset.showpieceReady = "true";`,
+		"buzz/presentation/assets/event-flow-poster.png": "generic-poster",
+		"buzz/presentation/media/event-flow.mp4":         "generic-video",
 	} {
 		full := filepath.Join(root, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
@@ -356,9 +357,11 @@ with sync_playwright() as p:
     expect(frame).to_be_visible()
     assert frame.get_attribute("sandbox") == "allow-scripts"
     expect(page.locator("#research-body")).to_be_hidden()
-    expect(page.frame_locator("#research-presentation").locator("h1")).to_have_text("Buzz market map")
+    expect(page.frame_locator("#research-presentation").locator("h1")).to_have_text("Market event flow")
     expect(page.frame_locator("#research-presentation").locator("img")).to_be_visible()
     expect(page.frame_locator("#research-presentation").locator("video")).to_be_visible()
+    expect(page.frame_locator("#research-presentation").locator('a[href="../SOURCE.md"]')).to_be_visible()
+    assert page.frame_locator("#research-presentation").locator("body").get_attribute("data-showpiece-ready") == "true"
     expect(page.locator("#research-document-comment")).to_be_visible()
     assert page.evaluate("document.documentElement.scrollWidth === document.documentElement.clientWidth")
     page.locator("#research-back").click()

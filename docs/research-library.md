@@ -32,6 +32,11 @@ without a sibling `SOURCE.md` fail closed. Presentation HTML runs in a sandboxed
 frame with no forms or network connections. Build self-contained work: do not
 depend on a CDN, remote script, analytics endpoint, or token.
 
+Normal relative package URLs are preserved. From `presentation/index.html`,
+`assets/showpiece.css`, `assets/showpiece.js`, `media/briefing.mp4`, and the
+provenance link `../SOURCE.md` all resolve through the same guarded package
+route. `SOURCE.md` is the only file served from the package root.
+
 The presentation is the primary body, while document-level comments remain
 available in R&D. Passage highlighting remains attached to `SOURCE.md`.
 
