@@ -453,6 +453,12 @@ flotilla goals compile --roster ./flotilla.json     # yaml → json for the dash
 flotilla goals link --goal <id> --issue owner/repo#N   # attach work to a goal
 ```
 
+An operator-gated goal or work item may set `paper_id` to a publication-relative
+research document ID such as `authorization/design.md`. The compiler rejects
+absolute, hidden, traversal, backslash, and non-Markdown IDs. R&D uses this field
+as the canonical paper deep-link; a safe `/research/...` link in `brief` remains
+a compatibility fallback.
+
 A coding agent walking a user through setup should follow **`llm.md` §7** for the
 full validate / compile / link flow with examples.
 

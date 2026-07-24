@@ -57,6 +57,35 @@ func validResearchID(id string) bool {
 	return true
 }
 
+// publishableResearchID is the product boundary between operator-facing research
+// and operational artifacts that happen to be Markdown. Content quality is
+// handled by readiness diagnostics; these known artifact classes never enter the
+// library or its body route.
+func publishableResearchID(id string) bool {
+	if !validResearchID(id) {
+		return false
+	}
+	parts := strings.Split(strings.ToLower(id), "/")
+	base := parts[len(parts)-1]
+	stem := strings.TrimSuffix(base, path.Ext(base))
+	if base == "findings.md" || strings.Contains(stem, "scorecard") ||
+		strings.Contains(stem, "process-dump") || strings.Contains(stem, "process_dump") ||
+		strings.Contains(stem, "process-snapshot") || strings.Contains(stem, "process_snapshot") ||
+		strings.Contains(stem, "session-dump") || strings.Contains(stem, "session_dump") ||
+		strings.Contains(stem, "pane-dump") || strings.Contains(stem, "pane_dump") {
+		return false
+	}
+	for _, part := range parts[:len(parts)-1] {
+		if part == "walk" || part == "walks" || strings.HasPrefix(part, "walk-") ||
+			strings.HasSuffix(part, "-walk") || strings.Contains(part, "-walk-") ||
+			strings.Contains(part, "walk-package") || strings.Contains(part, "session-mirror") ||
+			strings.Contains(part, "process-dump") || strings.Contains(part, "process_snapshot") {
+			return false
+		}
+	}
+	return true
+}
+
 func validResearchVideoID(id string) bool {
 	if id == "" || strings.ContainsRune(id, '\x00') || strings.Contains(id, `\`) ||
 		strings.HasPrefix(id, "/") || path.Clean(id) != id {
@@ -189,14 +218,20 @@ func researchStatus(title, markdown string) (string, []string, bool) {
 	}
 	for _, line := range lines {
 		line = strings.ToLower(strings.TrimSpace(line))
-		if strings.Contains(line, "status:") || strings.Contains(line, "state:") ||
-			strings.Contains(line, "awaiting-auth") || strings.HasPrefix(line, "# ") {
+		plain := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(line, "**", ""), "`", ""))
+		if key, value, ok := strings.Cut(plain, ":"); ok {
+			key = strings.TrimSpace(strings.TrimLeft(key, "-* "))
+			if key == "status" || key == "state" {
+				markers = append(markers, strings.TrimSpace(value))
+			}
+		}
+		if strings.Contains(line, "[awaiting-auth]") || strings.HasPrefix(line, "# ") {
 			markers = append(markers, line)
 		}
 	}
 	sample := strings.Join(markers, "\n")
 	switch {
-	case strings.Contains(sample, "awaiting-auth") || strings.Contains(sample, "awaiting auth"):
+	case containsResearchToken(sample, "awaiting-auth") || containsResearchToken(sample, "awaiting auth"):
 		return "awaiting-auth", []string{"decision", "awaiting-auth"}, true
 	case strings.Contains(sample, "design only") || strings.Contains(sample, "awaiting go") || strings.Contains(sample, "awaiting-go"):
 		return "design-only", []string{"decision", "design-only"}, true
@@ -205,6 +240,28 @@ func researchStatus(title, markdown string) (string, []string, bool) {
 	default:
 		return "research", []string{"research"}, false
 	}
+}
+
+func containsResearchToken(value, token string) bool {
+	for offset := 0; offset <= len(value)-len(token); {
+		i := strings.Index(value[offset:], token)
+		if i < 0 {
+			return false
+		}
+		i += offset
+		beforeOK := i == 0 || !researchTokenChar(value[i-1])
+		after := i + len(token)
+		afterOK := after == len(value) || !researchTokenChar(value[after])
+		if beforeOK && afterOK {
+			return true
+		}
+		offset = i + 1
+	}
+	return false
+}
+
+func researchTokenChar(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= '0' && b <= '9' || b == '_'
 }
 
 func researchEntry(id, markdown string, modTime time.Time) ResearchEntry {
@@ -264,7 +321,7 @@ func readResearchIndex(root string) ([]ResearchEntry, error) {
 			return err
 		}
 		id := filepath.ToSlash(rel)
-		if !validResearchID(id) {
+		if !publishableResearchID(id) {
 			return nil
 		}
 		body, err := os.ReadFile(file)
@@ -293,7 +350,7 @@ func readResearchIndex(root string) ([]ResearchEntry, error) {
 }
 
 func readResearchDocument(root, id string) (ResearchDocument, bool, error) {
-	if !validResearchID(id) {
+	if !publishableResearchID(id) {
 		return ResearchDocument{}, false, nil
 	}
 	rootInfo, err := os.Stat(root)
