@@ -2812,6 +2812,7 @@ html, body { overflow-x: clip; }
 .research-card.is-decision { border-left: 3px solid var(--amber); }
 .research-card-top { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
 .research-card-top time { color: var(--ink-3); font-size: .58rem; }
+.research-publication-state { margin-right: auto; color: var(--ink-3); font: 600 .56rem/1.2 var(--display); text-transform: uppercase; letter-spacing: .06em; }
 .research-card strong { color: var(--ink); font: 600 .9rem/1.18 var(--display); }
 .research-card-summary { color: var(--ink-3); font-size: .66rem; line-height: 1.4; }
 .research-show-more {
@@ -2960,6 +2961,8 @@ html, body { overflow-x: clip; }
 .research-toc a { color: var(--ink-2); text-decoration: none; }
 .research-toc a:hover { color: var(--cyan); }
 .research-markdown { max-width: 70rem; color: var(--ink-2); font: 400 clamp(.88rem, 1.35vw, 1.02rem)/1.72 var(--mono); }
+.research-presentation { display: block; width: 100%; min-height: max(42rem, calc(100dvh - 15rem)); border: 1px solid var(--line); border-radius: var(--r-sm); background: #0b1020; }
+.research-presentation[hidden] { display: none; }
 .research-markdown h1, .research-markdown h2, .research-markdown h3, .research-markdown h4 { scroll-margin-top: 5.5rem; color: var(--ink); font-family: var(--display); line-height: 1.12; }
 .research-markdown h1 { margin: 2rem 0 .75rem; font-size: 2.2rem; }
 .research-markdown h2 { margin: 2.2rem 0 .7rem; padding-bottom: .35rem; border-bottom: 1px solid var(--line); font-size: 1.75rem; }

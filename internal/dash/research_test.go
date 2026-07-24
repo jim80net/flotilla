@@ -123,6 +123,94 @@ func TestReadResearchIndexDecisionShelfAndBoundary(t *testing.T) {
 	}
 }
 
+func TestResearchIndexPrefersCanonicalHTML5Showpiece(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	writeResearchFixture(t, root, "buzz/SOURCE.md", "# Buzz research\n\nA complete source paper.\n", now)
+	writeResearchFixture(t, root, "source-only/SOURCE.md", "# Source only\n\nStill awaiting its presentation.\n", now.Add(time.Hour))
+	presentation := filepath.Join(root, "buzz", "presentation", "index.html")
+	if err := os.MkdirAll(filepath.Dir(presentation), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(presentation, []byte("<!doctype html><title>Buzz showpiece</title>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := readResearchIndex(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("research index = %+v, want one entry per source package", entries)
+	}
+	if got := entries[0]; got.ID != "buzz/SOURCE.md" || !got.PresentationReady ||
+		got.PublicationState != "showpiece" || got.PresentationURL != "/research-presentations/buzz/presentation/index.html" {
+		t.Fatalf("showpiece entry = %+v", got)
+	}
+	if got := entries[1]; got.ID != "source-only/SOURCE.md" || got.PresentationReady ||
+		got.PublicationState != "source-only" || got.PresentationURL != "" {
+		t.Fatalf("source-only entry = %+v", got)
+	}
+}
+
+func TestResearchPresentationServesOnlyCanonicalPackageAssets(t *testing.T) {
+	srv, _ := newTestServer(t, singleFleetRoster, time.Now())
+	root := t.TempDir()
+	srv.cfg.ResearchPath = root
+	writeResearchFixture(t, root, "buzz/SOURCE.md", "# Buzz\n\nSource evidence.\n", time.Now())
+	for name, body := range map[string]string{
+		"buzz/presentation/index.html":     `<!doctype html><script src="assets/app.js"></script>`,
+		"buzz/presentation/assets/app.js":  `document.body.dataset.ready = "true";`,
+		"buzz/presentation/assets/art.svg": `<svg xmlns="http://www.w3.org/2000/svg"></svg>`,
+		"buzz/presentation/media/demo.mp4": "video-bytes",
+	} {
+		full := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	html := doGet(t, srv, "/research-presentations/buzz/presentation/index.html")
+	if html.Code != http.StatusOK || !strings.Contains(html.Body.String(), "assets/app.js") {
+		t.Fatalf("presentation HTML = %d %q", html.Code, html.Body.String())
+	}
+	if got := html.Header().Get("Content-Security-Policy"); !strings.Contains(got, "connect-src 'none'") || !strings.Contains(got, "frame-ancestors 'self'") {
+		t.Errorf("presentation CSP = %q", got)
+	}
+	if got := html.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("presentation nosniff = %q", got)
+	}
+	if js := doGet(t, srv, "/research-presentations/buzz/presentation/assets/app.js"); js.Code != http.StatusOK || !strings.Contains(js.Body.String(), "dataset.ready") {
+		t.Fatalf("presentation JS = %d %q", js.Code, js.Body.String())
+	}
+	if media := doGet(t, srv, "/research-presentations/buzz/presentation/media/demo.mp4"); media.Code != http.StatusOK || media.Body.String() != "video-bytes" {
+		t.Fatalf("presentation media = %d %q", media.Code, media.Body.String())
+	}
+
+	outside := filepath.Join(t.TempDir(), "outside.js")
+	if err := os.WriteFile(outside, []byte("HOST_SECRET_SENTINEL"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "buzz", "presentation", "assets", "leak.js")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	for _, bad := range []string{
+		"/research-presentations/buzz/presentation/assets/leak.js",
+		"/research-presentations/buzz/presentation/.hidden.js",
+		"/research-presentations/buzz/presentation/notes.md",
+		"/research-presentations/%2e%2e%2foutside.js",
+		"/research-presentations/orphan/presentation/index.html",
+	} {
+		rec := doGet(t, srv, bad)
+		if rec.Code == http.StatusOK || strings.Contains(rec.Body.String(), "HOST_SECRET_SENTINEL") {
+			t.Errorf("unsafe presentation path %q served status=%d body=%q", bad, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 func TestResearchStatusUsesExactAwaitingAuthMarkers(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -265,13 +353,13 @@ func TestResearchPageAndDashboardNavMarkers(t *testing.T) {
 		t.Error("dashboard must expose the combined R&D navigation link with decision focus")
 	}
 	page := doGet(t, srv, "/research").Body.String()
-	for _, marker := range []string{"Decide · investigate · learn", "R&amp;D", "Waiting on you", `id="research-reader"`, `id="research-search"`, `data-research-focus="decisions"`, `data-research-focus="library"`, `data-research-focus="all"`, `id="research-decision-more"`, `id="research-library-more"`, `id="research-toc-count"`, `id="research-document-comment"`, `id="research-annotation-panel"`, `/static/research.js`} {
+	for _, marker := range []string{"Decide · investigate · learn", "R&amp;D", "Waiting on you", `id="research-reader"`, `id="research-search"`, `data-research-focus="decisions"`, `data-research-focus="library"`, `data-research-focus="all"`, `id="research-decision-more"`, `id="research-library-more"`, `id="research-toc-count"`, `id="research-document-comment"`, `id="research-annotation-panel"`, `id="research-presentation"`, `sandbox="allow-scripts"`, `/static/research.js`} {
 		if !strings.Contains(page, marker) {
 			t.Errorf("research page missing %q", marker)
 		}
 	}
 	js := doGet(t, srv, "/static/research.js").Body.String()
-	for _, marker := range []string{"function esc(value)", "renderMarkdown", "documentWithoutDuplicateTitle", "research-decision-strip", "collectionWindow = 6", "decisionWindow = 3", "filteredEntries", "setFocus", "tocRestoreY", "researchVideoURL", "data-research-video-fullscreen", "anchorForQuote", "X-Flotilla-Dash", "draft is still here", "node.paper_id || paperIDFromBrief", "item.paper_id || paperIDFromBrief"} {
+	for _, marker := range []string{"function esc(value)", "renderMarkdown", "documentWithoutDuplicateTitle", "research-decision-strip", "collectionWindow = 6", "decisionWindow = 3", "filteredEntries", "setFocus", "tocRestoreY", "researchVideoURL", "data-research-video-fullscreen", "anchorForQuote", "X-Flotilla-Dash", "draft is still here", "node.paper_id || paperIDFromBrief", "item.paper_id || paperIDFromBrief", "HTML5 showpiece", "renderPresentation"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("research renderer missing %q", marker)
 		}

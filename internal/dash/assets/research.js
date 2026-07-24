@@ -278,16 +278,20 @@
     var top = document.createElement("span"); top.className = "research-card-top";
     var badge = document.createElement("span"); badge.className = "research-badge"; badge.textContent = statusLabel(entry.status);
     var date = document.createElement("time"); date.textContent = formatDate(entry.updated_at);
-    top.appendChild(badge); top.appendChild(date);
+    var publication = document.createElement("span");
+    publication.className = "research-publication-state";
+    publication.textContent = entry.presentation_ready ? "HTML5 showpiece" : "Source only · not ready";
+    top.appendChild(badge); top.appendChild(publication); top.appendChild(date);
     var title = document.createElement("strong"); title.textContent = entry.title;
     link.appendChild(top); link.appendChild(title);
     if (entry.summary) { var summary = document.createElement("span"); summary.className = "research-card-summary"; summary.textContent = entry.summary; link.appendChild(summary); }
-    link.addEventListener("click", function (event) { event.preventDefault(); openDocument(entry.id, true); });
+    link.addEventListener("click", function (event) { event.preventDefault(); openDocument(entry.id, true, entry); });
     return link;
   }
   function decisionCard(decision) {
     var node = decision.node;
-    var paper = decision.paperID && entries.some(function (entry) { return entry.id === decision.paperID; });
+    var paperEntry = decision.paperID && entries.find(function (entry) { return entry.id === decision.paperID; });
+    var paper = !!paperEntry;
     var item = document.createElement(paper ? "a" : "article");
     item.className = "research-card is-decision" + (paper ? "" : " is-unlinked");
     if (paper) {
@@ -295,7 +299,7 @@
       item.dataset.researchId = decision.paperID;
       item.addEventListener("click", function (event) {
         event.preventDefault();
-        openDocument(decision.paperID, true);
+        openDocument(decision.paperID, true, paperEntry);
       });
     }
     var top = document.createElement("span"); top.className = "research-card-top";
@@ -580,9 +584,12 @@
     hideSelectionAction();
     el("research-reader-empty").hidden = true;
     el("research-document").hidden = false;
+    el("research-presentation").hidden = true;
+    el("research-presentation").removeAttribute("src");
+    el("research-body").hidden = false;
     el("research-title").textContent = doc.title;
     el("research-path").textContent = doc.id;
-    el("research-document-status").textContent = statusLabel(doc.status);
+    el("research-document-status").textContent = statusLabel(doc.status) + (doc.presentation_ready ? " · HTML5 showpiece" : " · Source only");
     el("research-updated").textContent = formatDate(doc.updated_at);
     el("research-updated").dateTime = doc.updated_at;
     el("research-body").innerHTML = rendered.html;
@@ -607,10 +614,23 @@
     document.title = doc.title + " — flotilla R&D";
     window.scrollTo(0, 0);
   }
+  function renderPresentation(doc, entry) {
+    renderDocument(doc);
+    currentRendered = null;
+    el("research-body").hidden = true;
+    el("research-toc").hidden = true;
+    var frame = el("research-presentation");
+    frame.title = doc.title + " presentation";
+    frame.src = entry.presentation_url;
+    frame.hidden = false;
+    el("research-annotation-summary").textContent = "Document comments stay private to this host; passage highlights remain on the source.";
+  }
   function showLibrary(push) {
     documentRequestEpoch++;
     annotationSession++;
     currentDocument = null; currentRendered = null; currentDecision = null; annotationState = null;
+    el("research-presentation").removeAttribute("src");
+    el("research-presentation").hidden = true;
     el("research-annotation-panel").hidden = true;
     document.body.classList.remove("research-annotations-open");
     hideSelectionAction();
@@ -618,7 +638,7 @@
     if (push) history.pushState({ focus: currentFocus }, "", indexPath());
     document.title = "flotilla — R&D";
   }
-  function openDocument(id, push) {
+  function openDocument(id, push, entry) {
     var requestEpoch = ++documentRequestEpoch;
     lastDocumentID = id;
     lastDocumentPush = !!push;
@@ -628,7 +648,9 @@
     document.body.classList.add("research-has-document");
     fetchJSON(apiPath(id)).then(function (doc) {
       if (requestEpoch !== documentRequestEpoch) return;
-      renderDocument(doc);
+      var indexed = entry || entries.find(function (candidate) { return candidate.id === id; });
+      if (indexed && indexed.presentation_ready && indexed.presentation_url) renderPresentation(doc, indexed);
+      else renderDocument(doc);
       loadAnnotations();
       if (push) history.pushState({ research: id }, "", pagePath(id));
       lastDocumentPush = false;
@@ -654,7 +676,7 @@
       entries = Array.isArray(values[0].research) ? values[0].research : [];
       goalDecisions = values[1];
       renderIndex();
-      var id = pathID(); if (id) openDocument(id, false);
+      var id = pathID(); if (id) openDocument(id, false, entries.find(function (entry) { return entry.id === id; }));
     }).catch(function (error) {
       setIndexState("R&D library unavailable", "The evidence collection could not be loaded: " + error.message, true);
     });
