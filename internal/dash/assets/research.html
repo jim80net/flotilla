@@ -38,6 +38,15 @@
         <button id="research-index-retry" class="research-retry" type="button" hidden>Retry library</button>
       </div>
 
+      <section id="research-diagnostics" class="research-diagnostics" aria-labelledby="research-diagnostics-title" hidden>
+        <div class="research-shelf-heading">
+          <div><p class="research-eyebrow">Publication diagnostics</p><h2 id="research-diagnostics-title">Needs attention</h2></div>
+          <span id="research-diagnostics-count" class="research-count"></span>
+        </div>
+        <p id="research-diagnostics-summary">Measurement only — every current document remains visible.</p>
+        <dl id="research-diagnostics-breakdown"></dl>
+      </section>
+
       <section id="research-decisions" class="research-shelf research-decision-shelf" aria-labelledby="research-decisions-title" hidden>
         <div class="research-shelf-heading">
           <div><p class="research-eyebrow">Decision shelf</p><h2 id="research-decisions-title">Waiting on you</h2></div>
@@ -85,6 +94,14 @@
           <summary><span>On this page</span><span id="research-toc-count" class="research-toc-count"></span></summary>
           <ol id="research-toc-list"></ol>
         </details>
+        <aside id="research-publication-state" class="research-publication-state" aria-labelledby="research-publication-title">
+          <div class="research-publication-heading">
+            <div><p class="research-eyebrow">Publication check</p><h2 id="research-publication-title">Publication metadata</h2></div>
+            <span id="research-publication-result" class="research-publication-result"></span>
+          </div>
+          <p id="research-reader-action"></p>
+          <ul id="research-document-diagnostics"></ul>
+        </aside>
         <div id="research-body" class="research-markdown"></div>
       </div>
     </article>

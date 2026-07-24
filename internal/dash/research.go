@@ -24,13 +24,49 @@ import (
 const maxResearchDocumentBytes = 4 << 20
 
 type ResearchEntry struct {
-	ID        string   `json:"id"`
-	Title     string   `json:"title"`
-	Summary   string   `json:"summary,omitempty"`
-	UpdatedAt string   `json:"updated_at"`
-	Status    string   `json:"status"`
-	Tags      []string `json:"tags"`
-	Decision  bool     `json:"decision"`
+	ID               string               `json:"id"`
+	Title            string               `json:"title"`
+	Summary          string               `json:"summary,omitempty"`
+	UpdatedAt        string               `json:"updated_at"`
+	Status           string               `json:"status"`
+	Tags             []string             `json:"tags"`
+	Decision         bool                 `json:"decision"`
+	Archival         bool                 `json:"archival"`
+	Publication      ResearchPublication  `json:"publication"`
+	PublicationValid bool                 `json:"publication_valid"`
+	Diagnostics      []ResearchDiagnostic `json:"diagnostics"`
+}
+
+// ResearchPublication is explicit author-owned publication metadata. It is read
+// from a leading HTML comment so the Markdown remains portable:
+//
+//	<!-- flotilla-publication
+//	classification: research|decision|archival
+//	reader-action: What the operator should decide, do, or retain.
+//	support: material|text-only
+//	support-rationale: Why a text-only publication is sufficient.
+//	-->
+//
+// A decision classification places a paper on the existing decision shelf; it
+// never means GO and never changes Authorization Domains state.
+type ResearchPublication struct {
+	Classification   string `json:"classification,omitempty"`
+	ReaderAction     string `json:"reader_action,omitempty"`
+	Support          string `json:"support,omitempty"`
+	SupportRationale string `json:"support_rationale,omitempty"`
+	Explicit         bool   `json:"explicit"`
+}
+
+type ResearchDiagnostic struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type ResearchDiagnosticsSummary struct {
+	Documents      int            `json:"documents"`
+	NeedsAttention int            `json:"needs_attention"`
+	Valid          int            `json:"valid"`
+	ByCode         map[string]int `json:"by_code"`
 }
 
 type ResearchDocument struct {
@@ -177,7 +213,146 @@ func researchSummary(markdown string) string {
 	return ""
 }
 
-func researchStatus(title, markdown string) (string, []string, bool) {
+func parseResearchPublication(markdown string) (ResearchPublication, []ResearchDiagnostic) {
+	const opener = "<!-- flotilla-publication"
+	trimmed := strings.TrimLeft(markdown, "\ufeff \t\r\n")
+	if !strings.HasPrefix(trimmed, opener) {
+		return ResearchPublication{}, nil
+	}
+	start := len(markdown) - len(trimmed)
+	endOffset := strings.Index(markdown[start+len(opener):], "-->")
+	if endOffset < 0 {
+		return ResearchPublication{Explicit: true}, []ResearchDiagnostic{{
+			Code: "metadata.malformed", Message: "Publication directive is not closed with -->.",
+		}}
+	}
+	body := markdown[start+len(opener) : start+len(opener)+endOffset]
+	publication := ResearchPublication{Explicit: true}
+	diagnostics := []ResearchDiagnostic{}
+	for _, raw := range strings.Split(body, "\n") {
+		line := strings.TrimSpace(strings.TrimSuffix(raw, "\r"))
+		if line == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
+			diagnostics = append(diagnostics, ResearchDiagnostic{Code: "metadata.malformed", Message: "Publication directive lines must use key: value."})
+			continue
+		}
+		key, value = strings.ToLower(strings.TrimSpace(key)), strings.TrimSpace(value)
+		switch key {
+		case "classification":
+			publication.Classification = strings.ToLower(value)
+		case "reader-action":
+			publication.ReaderAction = value
+		case "support":
+			publication.Support = strings.ToLower(value)
+		case "support-rationale":
+			publication.SupportRationale = value
+		default:
+			diagnostics = append(diagnostics, ResearchDiagnostic{Code: "metadata.unknown", Message: "Unknown publication directive: " + key + "."})
+		}
+	}
+	if publication.Classification != "" && publication.Classification != "research" &&
+		publication.Classification != "decision" && publication.Classification != "archival" {
+		diagnostics = append(diagnostics, ResearchDiagnostic{Code: "metadata.classification", Message: "Classification must be research, decision, or archival."})
+	}
+	if publication.Support != "" && publication.Support != "material" && publication.Support != "text-only" {
+		diagnostics = append(diagnostics, ResearchDiagnostic{Code: "metadata.support", Message: "Support must be material or text-only."})
+	}
+	return publication, diagnostics
+}
+
+func withoutResearchPublicationDirective(markdown string) string {
+	const opener = "<!-- flotilla-publication"
+	trimmed := strings.TrimLeft(markdown, "\ufeff \t\r\n")
+	if !strings.HasPrefix(trimmed, opener) {
+		return markdown
+	}
+	start := len(markdown) - len(trimmed)
+	endOffset := strings.Index(markdown[start+len(opener):], "-->")
+	if endOffset < 0 {
+		return markdown[:start]
+	}
+	end := start + len(opener) + endOffset + len("-->")
+	return markdown[:start] + markdown[end:]
+}
+
+func researchContentDiagnostic(markdown string) *ResearchDiagnostic {
+	body := strings.TrimSpace(withoutResearchPublicationDirective(markdown))
+	if body == "" {
+		return &ResearchDiagnostic{Code: "content.empty", Message: "Document is empty."}
+	}
+	lines := strings.Split(body, "\n")
+	content := []string{}
+	titleRemoved := false
+	for _, raw := range lines {
+		line := strings.TrimSpace(strings.TrimSuffix(raw, "\r"))
+		if !titleRemoved && strings.HasPrefix(line, "# ") {
+			titleRemoved = true
+			continue
+		}
+		lower := strings.ToLower(line)
+		if line == "" || line == "---" || strings.HasPrefix(lower, "status:") || strings.HasPrefix(lower, "state:") {
+			continue
+		}
+		line = strings.Trim(line, "#>*_`- |0123456789.\t")
+		if line != "" {
+			content = append(content, line)
+		}
+	}
+	if len(content) == 0 {
+		return &ResearchDiagnostic{Code: "content.title_only", Message: "Document contains a title or metadata but no substantive body."}
+	}
+	normalized := strings.ToLower(strings.Join(content, " "))
+	words := strings.Fields(normalized)
+	boilerplate := strings.Contains(normalized, "lorem ipsum") || strings.Contains(normalized, "coming soon") ||
+		strings.Contains(normalized, "placeholder") || strings.Contains(normalized, "todo") || strings.Contains(normalized, "tbd")
+	if boilerplate && len(words) <= 24 {
+		return &ResearchDiagnostic{Code: "content.boilerplate", Message: "Document body appears to contain only boilerplate or placeholder text."}
+	}
+	return nil
+}
+
+func researchHasSupportingMaterial(markdown string) bool {
+	body := withoutResearchPublicationDirective(markdown)
+	lines := strings.Split(body, "\n")
+	for i, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if strings.Contains(line, "](") || strings.HasPrefix(line, "![") {
+			return true
+		}
+		if strings.Contains(line, "|") && i+1 < len(lines) {
+			delimiter := strings.TrimSpace(lines[i+1])
+			if strings.Contains(delimiter, "|") && strings.Contains(delimiter, "---") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func researchPublicationDiagnostics(markdown string, publication ResearchPublication, metadataDiagnostics []ResearchDiagnostic) []ResearchDiagnostic {
+	diagnostics := append([]ResearchDiagnostic{}, metadataDiagnostics...)
+	if content := researchContentDiagnostic(markdown); content != nil {
+		diagnostics = append(diagnostics, *content)
+	}
+	if strings.TrimSpace(publication.ReaderAction) == "" {
+		diagnostics = append(diagnostics, ResearchDiagnostic{
+			Code: "action.missing", Message: "Add one explicit reader action: a decision, next step, or archival reason.",
+		})
+	}
+	hasMaterial := researchHasSupportingMaterial(markdown)
+	textOnly := publication.Support == "text-only" && strings.TrimSpace(publication.SupportRationale) != ""
+	if !hasMaterial && !textOnly {
+		diagnostics = append(diagnostics, ResearchDiagnostic{
+			Code: "support.missing", Message: "Add supporting material or declare text-only with a rationale.",
+		})
+	}
+	return diagnostics
+}
+
+func researchStatus(title, markdown string, publication ResearchPublication) (string, []string, bool, bool) {
 	// Decision classification is metadata-shaped, not a full-text search. A paper
 	// that merely discusses "operator review" later in its body must not land on
 	// the waiting shelf. Accept the title plus explicit status/state markers near
@@ -195,30 +370,67 @@ func researchStatus(title, markdown string) (string, []string, bool) {
 		}
 	}
 	sample := strings.Join(markers, "\n")
+	status, tags, decision := "research", []string{"research"}, false
 	switch {
 	case strings.Contains(sample, "awaiting-auth") || strings.Contains(sample, "awaiting auth"):
-		return "awaiting-auth", []string{"decision", "awaiting-auth"}, true
+		status, tags, decision = "awaiting-auth", []string{"decision", "awaiting-auth"}, true
 	case strings.Contains(sample, "design only") || strings.Contains(sample, "awaiting go") || strings.Contains(sample, "awaiting-go"):
-		return "design-only", []string{"decision", "design-only"}, true
+		status, tags, decision = "design-only", []string{"decision", "design-only"}, true
 	case strings.Contains(sample, "operator review") || strings.Contains(sample, "operator-review"):
-		return "operator-review", []string{"decision", "operator-review"}, true
-	default:
-		return "research", []string{"research"}, false
+		status, tags, decision = "operator-review", []string{"decision", "operator-review"}, true
 	}
+	switch publication.Classification {
+	case "archival":
+		return "archival", []string{"research", "archival"}, false, true
+	case "decision":
+		if decision {
+			// Preserve the existing awaiting/design-only/operator-review state.
+			// The publication directive classifies; it never upgrades to GO.
+			return status, tags, true, false
+		}
+		return "decision", []string{"decision"}, true, false
+	case "research":
+		if decision {
+			return status, tags, true, false
+		}
+		return "research", []string{"research"}, false, false
+	}
+	return status, tags, decision, false
 }
 
 func researchEntry(id, markdown string, modTime time.Time) ResearchEntry {
 	title := researchTitle(id, markdown)
-	status, tags, decision := researchStatus(title, markdown)
+	publication, metadataDiagnostics := parseResearchPublication(markdown)
+	status, tags, decision, archival := researchStatus(title, markdown, publication)
+	diagnostics := researchPublicationDiagnostics(markdown, publication, metadataDiagnostics)
 	return ResearchEntry{
-		ID:        id,
-		Title:     title,
-		Summary:   researchSummary(markdown),
-		UpdatedAt: modTime.UTC().Format(time.RFC3339),
-		Status:    status,
-		Tags:      tags,
-		Decision:  decision,
+		ID:               id,
+		Title:            title,
+		Summary:          researchSummary(withoutResearchPublicationDirective(markdown)),
+		UpdatedAt:        modTime.UTC().Format(time.RFC3339),
+		Status:           status,
+		Tags:             tags,
+		Decision:         decision,
+		Archival:         archival,
+		Publication:      publication,
+		PublicationValid: len(diagnostics) == 0,
+		Diagnostics:      diagnostics,
 	}
+}
+
+func summarizeResearchDiagnostics(entries []ResearchEntry) ResearchDiagnosticsSummary {
+	summary := ResearchDiagnosticsSummary{Documents: len(entries), ByCode: map[string]int{}}
+	for _, entry := range entries {
+		if len(entry.Diagnostics) == 0 {
+			summary.Valid++
+			continue
+		}
+		summary.NeedsAttention++
+		for _, diagnostic := range entry.Diagnostics {
+			summary.ByCode[diagnostic.Code]++
+		}
+	}
+	return summary
 }
 
 func readResearchIndex(root string) ([]ResearchEntry, error) {
@@ -359,7 +571,7 @@ func (s *Server) handleResearchIndex(w http.ResponseWriter, _ *http.Request) {
 		writeJSONStatus(w, http.StatusInternalServerError, map[string]any{"research": []ResearchEntry{}, "error": "the research library could not be read"})
 		return
 	}
-	writeJSON(w, map[string]any{"research": entries})
+	writeJSON(w, map[string]any{"research": entries, "diagnostics": summarizeResearchDiagnostics(entries)})
 }
 
 func (s *Server) handleResearchDocument(w http.ResponseWriter, r *http.Request) {
