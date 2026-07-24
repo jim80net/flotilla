@@ -78,7 +78,7 @@ func TestReconcileInboundAcksWithMergedClearsCompletedCargoBeforeAlert(t *testin
 		t.Fatal(err)
 	}
 	if err := inbound.Record(dir, inbound.Entry{
-		ID: "merged", Sender: "cos", Recipient: "flotilla-dev-adj", Message: msg, Nonce: nonce,
+		ID: "merged", Sender: "coordinator", Recipient: "product-adj", Message: msg, Nonce: nonce,
 		DeliveredAt: time.Now().UTC().Add(-time.Hour),
 	}); err != nil {
 		t.Fatal(err)
@@ -91,14 +91,14 @@ func TestReconcileInboundAcksWithMergedClearsCompletedCargoBeforeAlert(t *testin
 	if n != 1 {
 		t.Fatalf("cleared = %d, want 1", n)
 	}
-	if gotRecipient != "flotilla-dev-adj" {
+	if gotRecipient != "product-adj" {
 		t.Fatalf("merged checker recipient = %q", gotRecipient)
 	}
 	if reports := ScanUndeliveredInbound(dir, time.Now().UTC(), 15*time.Minute); len(reports) != 0 {
 		t.Fatalf("merged cargo still produced undelivered alert: %+v", reports)
 	}
 	entry, ok := NewRegistry(dir).LookupNonce(nonce)
-	if !ok || entry.Reason != ReasonMerged || entry.Recipient != "flotilla-dev-adj" {
+	if !ok || entry.Reason != ReasonMerged || entry.Recipient != "product-adj" {
 		t.Fatalf("durable disposition = %+v, %v", entry, ok)
 	}
 }
@@ -110,7 +110,7 @@ func TestReconcileInboundAcksWithMergedRequiresAllCitedPRs(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := inbound.Record(dir, inbound.Entry{
-		ID: "partial", Sender: "cos", Recipient: "desk", Message: msg, Nonce: nonce,
+		ID: "partial", Sender: "coordinator", Recipient: "desk", Message: msg, Nonce: nonce,
 		DeliveredAt: time.Now().UTC().Add(-time.Hour),
 	}); err != nil {
 		t.Fatal(err)
@@ -130,7 +130,7 @@ func TestReconcileInboundAcksWithTerminalClearsMainSHACargo(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := inbound.Record(dir, inbound.Entry{
-		ID: "sha", Sender: "cos", Recipient: "dash", Message: msg, Nonce: nonce,
+		ID: "sha", Sender: "coordinator", Recipient: "dash", Message: msg, Nonce: nonce,
 		DeliveredAt: time.Now().UTC().Add(-time.Hour),
 	}); err != nil {
 		t.Fatal(err)
