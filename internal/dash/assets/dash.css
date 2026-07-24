@@ -2045,6 +2045,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .gdec-resp-input:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
 .gdec-resp-row { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 8px; }
 .gdec-resp-msg { font-size: .74rem; color: var(--ink-2); text-align: right; flex: 1; }
+.gdec-resp-close[hidden] { display: none; }
 /* #501: the fail-closed "briefs being prepared" bucket — visible, distinct, not answerable. */
 .gdec-prep { border: 1px dashed var(--line); border-radius: var(--r); padding: 1rem 1.2rem; }
 .gdec-prep-h { font-family: var(--display); font-size: .84rem; color: var(--ink-2); margin: 0 0 .3rem; letter-spacing: .04em; text-transform: uppercase; }

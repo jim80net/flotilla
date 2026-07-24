@@ -49,12 +49,15 @@ doc = {"found": True, "goals": goals, "counts": {
     "pending": 0, "realized": 0, "aspirational": 0
 }}
 
-def open_decisions(browser, width, height, body, status=200):
+def open_decisions(browser, width, height, body, status=200, respond_status=200):
     page = browser.new_page(viewport={"width": width, "height": height})
     page.set_default_timeout(8000)
     page.add_init_script("window.EventSource = undefined")
     page.route("**/api/goals", lambda route: route.fulfill(
         status=status, content_type="application/json", body=json.dumps(body)))
+    page.route("**/api/control/respond", lambda route: route.fulfill(
+        status=respond_status, content_type="application/json",
+        body=json.dumps({"outcome": "delivered", "target": "example-desk"} if respond_status == 200 else {"error": "generic unavailable"})))
     page.goto(url, wait_until="domcontentloaded")
     page.locator("#tab-decisions").click()
     return page
@@ -78,7 +81,6 @@ with sync_playwright() as p:
             final_jump = page.locator(".gdec-jump").last
             expect(final_jump).to_be_visible()
             final_jump.click()
-            before_y = page.evaluate("window.scrollY")
             expect(page.locator("#gdec-detail")).to_be_visible()
             expect(page.locator("#gdec-detail-count")).to_have_text("Decision 7 of 7")
             expect(page.locator("#gdec-detail-body .gdec-brief")).to_contain_text("Reversible generic detail")
@@ -86,11 +88,19 @@ with sync_playwright() as p:
             box = page.locator("#gdec-detail").bounding_box()
             assert box["x"] >= 0 and box["x"] + box["width"] <= width, ("dialog x", width, box)
             assert box["y"] >= 0 and box["y"] + box["height"] <= height, ("dialog y", height, box)
-            page.locator("[data-gdec-detail-close]").click()
+            close_after_send = page.locator("[data-gdec-response-close]")
+            expect(close_after_send).to_be_hidden()
+            page.locator("#gdec-detail-body .gdec-resp-input").fill("Approve the reversible option.")
+            page.locator("#gdec-detail-body .gdec-resp-send").click()
+            expect(page.locator("#gdec-detail-body .gdec-resp-msg")).to_contain_text("Delivered to example-desk")
+            expect(close_after_send).to_be_visible()
+            expect(close_after_send).to_be_focused()
+            close_after_send.click()
             expect(page.locator("#gdec-detail")).not_to_be_visible()
             expect(final_jump).to_be_focused()
             page.wait_for_timeout(50)
-            assert page.evaluate("window.scrollY") == before_y, ("return scroll", before_y, page.evaluate("window.scrollY"))
+            return_box = final_jump.bounding_box()
+            assert return_box["y"] < height and return_box["y"] + return_box["height"] > 0, ("return focus visible", return_box)
             page.close()
 
         unavailable = open_decisions(browser, 390, 844, {"error": "generic unavailable"}, 503)
@@ -109,6 +119,16 @@ with sync_playwright() as p:
             }})
         expect(empty.locator("#gdec-list")).to_contain_text("Nothing is awaiting your decision")
         empty.close()
+
+        failed = open_decisions(browser, 390, 844, doc, respond_status=503)
+        failed.locator(".gdec-summary").first.locator("[data-gdec-open]").click()
+        failed_input = failed.locator("#gdec-detail-body .gdec-resp-input")
+        failed_input.fill("Keep this draft after a failed send.")
+        failed.locator("#gdec-detail-body .gdec-resp-send").click()
+        expect(failed.locator("#gdec-detail-body .gdec-resp-msg")).to_contain_text("NOT sent")
+        expect(failed_input).to_have_value("Keep this draft after a failed send.")
+        expect(failed.locator("[data-gdec-response-close]")).to_be_hidden()
+        failed.close()
     finally:
         browser.close()
 `
