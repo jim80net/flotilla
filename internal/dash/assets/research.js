@@ -142,6 +142,9 @@
   function annotationPath(id) {
     return "/api/research-annotations/" + id.split("/").map(encodeURIComponent).join("/");
   }
+  function annotationRoutePath(id) {
+    return "/api/research-annotation-routes/" + id.split("/").map(encodeURIComponent).join("/");
+  }
   function pathID() {
     var prefix = "/research/";
     if (location.pathname.indexOf(prefix) !== 0) return "";
@@ -255,7 +258,7 @@
   var currentFocus = focusFromURL(), searchQuery = "";
   var lastDocumentID = "", lastDocumentPush = false, currentDocument = null, currentRendered = null, currentDecision = null;
   var documentRequestEpoch = 0, annotationSession = 0;
-  var annotationState = null, pendingAnchor = null, selectionDraft = null, annotationReturnFocus = null;
+  var annotationState = null, pendingAnchor = null, pendingRoute = null, selectionDraft = null, annotationReturnFocus = null;
   function setIndexState(title, detail, retry) {
     var status = el("research-status");
     status.hidden = false;
@@ -458,9 +461,18 @@
     if (resolution && resolution.state === "needs_review") return "Needs review";
     return annotation.resolved ? "Resolved" : "Open";
   }
+  function annotationRoutingLabel(annotation) {
+    var state = annotation && annotation.routing && annotation.routing.state;
+    if (state === "delivered") return "Delivered for review";
+    if (state === "queued") return "Queued for review";
+    return "Saved locally · not routed";
+  }
   function annotationByID(id) {
     var annotations = annotationState && Array.isArray(annotationState.annotations) ? annotationState.annotations : [];
     return annotations.find(function (annotation) { return annotation.id === id; });
+  }
+  function annotationReturnTarget(id) {
+    return el("research-body").querySelector('[data-annotation-id="' + id + '"]') || el("research-document-comment");
   }
   function showAnnotationThread(annotation, trigger) {
     if (!annotation) return;
@@ -468,7 +480,7 @@
     el("research-annotation-form").hidden = true;
     el("research-annotation-thread").hidden = false;
     el("research-annotation-thread-title").textContent = annotation.anchor ? "Passage thread" : "Document comment";
-    el("research-annotation-thread-state").textContent = annotationStateLabel(annotation);
+    el("research-annotation-thread-state").textContent = annotationStateLabel(annotation) + " · " + annotationRoutingLabel(annotation);
     var quote = el("research-annotation-quote");
     quote.hidden = !annotation.anchor;
     quote.textContent = annotation.anchor ? annotation.anchor.quote : "";
@@ -491,6 +503,8 @@
     quote.hidden = !anchor; quote.textContent = anchor ? anchor.quote : "";
     var status = el("research-annotation-save-status");
     status.textContent = ""; status.classList.remove("error");
+    pendingRoute = null;
+    el("research-annotation-route-retry").hidden = true;
     el("research-annotation-draft").focus();
   }
   function renderAnnotationList() {
@@ -500,7 +514,7 @@
       var button = document.createElement("button"); button.type = "button"; button.className = "research-annotation-card";
       if (annotationStateLabel(annotation) === "Needs review") button.classList.add("is-stale");
       button.dataset.annotationOpen = annotation.id;
-      var title = document.createElement("strong"); title.textContent = annotationStateLabel(annotation) + " · " + (annotation.anchor ? "Passage" : "Document");
+      var title = document.createElement("strong"); title.textContent = annotationStateLabel(annotation) + " · " + annotationRoutingLabel(annotation) + " · " + (annotation.anchor ? "Passage" : "Document");
       var summary = document.createElement("span"); summary.textContent = annotationLabel(annotation);
       button.appendChild(title); button.appendChild(summary); return button;
     }));
@@ -573,10 +587,11 @@
   function renderDocument(doc) {
     var rendered = renderMarkdown(documentWithoutDuplicateTitle(doc.markdown, doc.title), doc.id);
     annotationSession++;
-    currentDocument = doc; currentRendered = rendered; annotationState = null; pendingAnchor = null;
+    currentDocument = doc; currentRendered = rendered; annotationState = null; pendingAnchor = null; pendingRoute = null;
     currentDecision = goalDecisions.find(function (decision) { return decision.paperID === doc.id; }) || null;
     el("research-annotation-draft").value = "";
     el("research-annotation-save").disabled = false;
+    el("research-annotation-route-retry").hidden = true;
     el("research-annotation-save-status").textContent = "";
     el("research-annotation-save-status").classList.remove("error");
     el("research-annotation-panel").hidden = true;
@@ -803,17 +818,62 @@
     }).then(function (state) {
       if (session !== annotationSession || !currentDocument || currentDocument.id !== documentID || state.document_id !== documentID) return;
       annotationState = state;
-      draft.value = ""; pendingAnchor = null;
-      status.textContent = "Saved.";
       renderAnnotations();
       var created = state.created || (state.annotations || [])[state.annotations.length - 1];
-      showAnnotationThread(created, save);
+      if (!created || !created.routing || created.routing.state === "saved") {
+        pendingRoute = created || null;
+        status.textContent = "Saved locally — not routed. Your draft is still here.";
+        status.classList.add("error");
+        el("research-annotation-route-retry").hidden = !pendingRoute;
+        return;
+      }
+      draft.value = ""; pendingAnchor = null; pendingRoute = null;
+      el("research-annotation-route-retry").hidden = true;
+      status.textContent = created.routing.state === "delivered"
+        ? "Saved and delivered for review."
+        : "Saved and queued for review.";
+      showAnnotationThread(created, annotationReturnTarget(created.id));
     }).catch(function (error) {
       if (session !== annotationSession || !currentDocument || currentDocument.id !== documentID) return;
       status.textContent = "Not saved — " + error.message + ". Your draft is still here.";
       status.classList.add("error");
     }).finally(function () {
       if (session === annotationSession && currentDocument && currentDocument.id === documentID) save.disabled = false;
+    });
+  });
+  el("research-annotation-route-retry").addEventListener("click", function () {
+    if (!pendingRoute || !currentDocument) return;
+    var session = annotationSession, documentID = currentDocument.id;
+    var retry = this, status = el("research-annotation-save-status");
+    retry.disabled = true;
+    status.classList.remove("error");
+    status.textContent = "Retrying routing…";
+    postJSON(annotationRoutePath(documentID), {
+      annotation_id: pendingRoute.id,
+      generation: pendingRoute.routing.generation
+    }).then(function (state) {
+      if (session !== annotationSession || !currentDocument || currentDocument.id !== documentID || state.document_id !== documentID) return;
+      annotationState = state;
+      var routed = state.created || annotationByID(pendingRoute.id);
+      renderAnnotations();
+      if (!routed || !routed.routing || routed.routing.state === "saved") {
+        status.textContent = "Saved locally — not routed. Retry when coordination is available.";
+        status.classList.add("error");
+        return;
+      }
+      el("research-annotation-draft").value = "";
+      pendingAnchor = null; pendingRoute = null;
+      retry.hidden = true;
+      status.textContent = routed.routing.state === "delivered"
+        ? "Delivered for review."
+        : "Queued durably for review.";
+      showAnnotationThread(routed, annotationReturnTarget(routed.id));
+    }).catch(function (error) {
+      if (session !== annotationSession || !currentDocument || currentDocument.id !== documentID) return;
+      status.textContent = "Saved locally — routing retry failed: " + error.message + ". Your draft is still here.";
+      status.classList.add("error");
+    }).finally(function () {
+      if (session === annotationSession && currentDocument && currentDocument.id === documentID) retry.disabled = false;
     });
   });
   ["mouseup", "keyup"].forEach(function (name) {
