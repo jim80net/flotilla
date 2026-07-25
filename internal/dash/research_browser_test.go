@@ -321,10 +321,14 @@ func TestResearchShowpieceRendered873(t *testing.T) {
 	srv.cfg.ResearchPath = root
 	writeResearchFixture(t, root, "buzz/SOURCE.md", "# Buzz market research\n\nA fully evidenced pilot source.\n", time.Now())
 	writeResearchFixture(t, root, "draft/SOURCE.md", "# Draft evidence\n\nSource awaiting its presentation.\n", time.Now().Add(time.Hour))
+	navigation, err := os.ReadFile(filepath.Join("..", "..", "docs", "examples", "research-showpiece-navigation.js"))
+	if err != nil {
+		t.Fatalf("read showpiece navigation reference: %v", err)
+	}
 	for name, body := range map[string]string{
-		"buzz/presentation/index.html":                   `<!doctype html><html><head><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="assets/showpiece.css"></head><body><main><p>HTML5 showpiece</p><h1>Market event flow</h1><img src="assets/event-flow-poster.png" alt="Generic event flow"><video controls poster="assets/event-flow-poster.png" src="media/event-flow.mp4"></video><a href="../SOURCE.md">Read source</a></main><script src="assets/showpiece.js"></script></body></html>`,
-		"buzz/presentation/assets/showpiece.css":         `html,body{margin:0;background:#08111f;color:#f3f7fb;font:16px system-ui}main{padding:24px}img,video{display:block;max-width:100%;margin:16px 0}`,
-		"buzz/presentation/assets/showpiece.js":          `document.body.dataset.showpieceReady = "true";`,
+		"buzz/presentation/index.html":                   `<!doctype html><html data-showpiece-title="Generic showpiece"><head><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="assets/showpiece.css"></head><body><main data-showpiece-deck><section class="slide" id="slide-1" data-label="Section one"><p>HTML5 showpiece</p><h1>Market event flow</h1><img src="assets/event-flow-poster.png" alt="Generic event flow"><video controls poster="assets/event-flow-poster.png" src="media/event-flow.mp4"></video><a href="../SOURCE.md">Read source</a></section><section class="slide tall" id="slide-2" data-label="Section two"><h2>Two</h2></section><section class="slide" id="slide-3" data-label="Section three"><h2>Three</h2></section><section class="slide tall" id="slide-4" data-label="Section four"><h2>Four</h2></section><section class="slide" id="slide-5" data-label="Section five"><h2>Five</h2></section><section class="slide tall" id="slide-6" data-label="Section six"><h2>Six</h2></section><section class="slide" id="slide-7" data-label="Section seven"><h2>Seven</h2></section><section class="slide tall" id="slide-8" data-label="Section eight"><h2>Eight</h2></section><section class="slide" id="slide-9" data-label="Section nine"><h2>Nine</h2></section></main><div><span data-current></span> / <span data-total></span><span data-progress></span><button data-prev aria-label="Previous slide">Previous</button><button data-next aria-label="Next slide">Next</button></div><script src="assets/showpiece.js"></script></body></html>`,
+		"buzz/presentation/assets/showpiece.css":         `html,body{margin:0;background:#08111f;color:#f3f7fb;font:16px system-ui;overflow:hidden}main{height:620px;overflow-y:auto;scroll-snap-type:none}.slide{box-sizing:border-box;min-height:620px;padding:24px}.slide.tall{min-height:940px}img,video{display:block;max-width:100%;margin:16px 0}`,
+		"buzz/presentation/assets/showpiece.js":          string(navigation),
 		"buzz/presentation/assets/event-flow-poster.png": "generic-poster",
 		"buzz/presentation/media/event-flow.mp4":         "generic-video",
 	} {
@@ -346,7 +350,7 @@ from playwright.sync_api import sync_playwright, expect
 url = sys.argv[1]
 with sync_playwright() as p:
     browser = p.chromium.launch()
-    page = browser.new_page(viewport={"width": 390, "height": 844})
+    page = browser.new_page(viewport={"width": 390, "height": 844}, reduced_motion="reduce")
     page.goto(url + "/research?focus=library", wait_until="domcontentloaded")
     cards = page.locator("#research-list .research-card")
     expect(cards).to_have_count(2)
@@ -361,7 +365,32 @@ with sync_playwright() as p:
     expect(page.frame_locator("#research-presentation").locator("img")).to_be_visible()
     expect(page.frame_locator("#research-presentation").locator("video")).to_be_visible()
     expect(page.frame_locator("#research-presentation").locator('a[href="../SOURCE.md"]')).to_be_visible()
-    assert page.frame_locator("#research-presentation").locator("body").get_attribute("data-showpiece-ready") == "true"
+    frame = page.frame_locator("#research-presentation")
+    expect(frame.locator("body")).to_have_attribute("data-showpiece-navigation-ready", "true")
+    current = frame.locator("[data-current]")
+    previous = frame.locator("[data-prev]")
+    next_button = frame.locator("[data-next]")
+    expect(current).to_have_text("01")
+    for section in range(2, 10):
+        next_button.evaluate("node => node.click()")
+        expect(current).to_have_text(f"{section:02d}")
+        expect(frame.locator(f"#slide-{section}")).to_be_visible()
+        assert frame.locator("main").evaluate(
+            f"node => node.scrollTop === node.querySelector('#slide-{section}').offsetTop"
+        )
+        assert frame.locator("html").evaluate(
+            "node => document.title",
+        ).startswith(f"Section {['zero','one','two','three','four','five','six','seven','eight','nine'][section]}")
+    for section in range(8, 0, -1):
+        previous.evaluate("node => node.click()")
+        expect(current).to_have_text(f"{section:02d}")
+    frame.locator("main").evaluate(
+        "node => node.scrollTo({top: node.querySelector('#slide-5').offsetTop, behavior: 'auto'})"
+    )
+    expect(current).to_have_text("05")
+    assert frame.locator("main").evaluate(
+        "node => getComputedStyle(node).scrollSnapType"
+    ) == "none"
     expect(page.locator("#research-document-comment")).to_be_visible()
     assert page.evaluate("document.documentElement.scrollWidth === document.documentElement.clientWidth")
     page.locator("#research-back").click()

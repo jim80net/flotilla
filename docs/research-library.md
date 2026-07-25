@@ -40,6 +40,28 @@ route. `SOURCE.md` is the only file served from the package root.
 The presentation is the primary body, while document-level comments remain
 available in R&D. Passage highlighting remains attached to `SOURCE.md`.
 
+## Navigation contract
+
+Free wheel scrolling and explicit presentation controls are separate inputs to
+one section state. A showpiece must keep its visible section, counter, document
+title, progress, Previous/Next controls, and keyboard controls synchronized.
+Do not make an `IntersectionObserver` threshold the only source of the current
+section: a long mobile section may never cross that threshold, leaving explicit
+Next stuck on the same target.
+
+`docs/examples/research-showpiece-navigation.js` is the tested reference
+implementation. Copy it into the package as a local asset (or implement the same
+contract). It:
+
+- updates the requested section immediately for explicit controls;
+- scrolls the presentation's own deck, not the outer R&D reader;
+- derives wheel-scroll state from the section nearest the deck's top edge; and
+- preserves free scrolling with `scroll-snap-type: none`.
+
+Rendered acceptance must traverse every section forward and backward at 390px,
+then wheel-scroll to a middle section and assert the visible label, counter, and
+document title agree. Long sections must remain fully reachable.
+
 ## Legacy Markdown video
 
 A source-only paper can embed a video stored beneath the same research directory
