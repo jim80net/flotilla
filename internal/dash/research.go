@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"mime"
 	"net/http"
@@ -629,8 +630,33 @@ func (s *Server) handleResearchPresentation(w http.ResponseWriter, r *http.Reque
 	}
 	if strings.EqualFold(filepath.Ext(info.Name()), ".html") {
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'none'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'")
+		if info.Size() > maxResearchDocumentBytes {
+			writeError(w, http.StatusRequestEntityTooLarge, "the research presentation is too large")
+			return
+		}
+		body, readErr := io.ReadAll(io.LimitReader(file, maxResearchDocumentBytes+1))
+		if readErr != nil {
+			writeError(w, http.StatusInternalServerError, "the research presentation could not be read")
+			return
+		}
+		body = injectResearchPresentationController(body)
+		_, _ = w.Write(body)
+		return
 	}
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
+}
+
+func injectResearchPresentationController(body []byte) []byte {
+	const controller = `<script src="/static/research-presentation.js" data-flotilla-presentation-controller></script>`
+	html := string(body)
+	if strings.Contains(html, "data-flotilla-presentation-controller") {
+		return body
+	}
+	lower := strings.ToLower(html)
+	if at := strings.LastIndex(lower, "</body>"); at >= 0 {
+		return []byte(html[:at] + controller + html[at:])
+	}
+	return []byte(html + controller)
 }
 
 func (s *Server) handleResearchPage(w http.ResponseWriter, _ *http.Request) {

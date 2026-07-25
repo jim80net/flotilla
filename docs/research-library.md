@@ -37,6 +37,22 @@ Normal relative package URLs are preserved. From `presentation/index.html`,
 provenance link `../SOURCE.md` all resolve through the same guarded package
 route. `SOURCE.md` is the only file served from the package root.
 
+## Shared section navigation
+
+The dash injects a shared controller when a presentation exposes this optional
+HTML contract:
+
+- sections use `.slide` and a stable `data-label`;
+- controls use `data-prev` and `data-next`;
+- the counter uses `data-current` and optionally `data-total`;
+- an optional visible label uses `data-visible-label`.
+
+The controller keeps buttons, navigation keys, the counter, document title, and
+the greatest-visible section synchronized. It computes visibility from actual
+viewport overlap, so sections may be taller than the phone viewport. Wheel and
+touch scrolling remain free; the controller does not enable scroll snapping.
+Presentations without this contract are left alone.
+
 The presentation is the primary body, while document-level comments remain
 available in R&D. Passage highlighting remains attached to `SOURCE.md`.
 

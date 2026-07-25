@@ -178,6 +178,10 @@ func TestResearchPresentationServesOnlyCanonicalPackageAssets(t *testing.T) {
 	if html.Code != http.StatusOK || !strings.Contains(html.Body.String(), "assets/app.js") {
 		t.Fatalf("presentation HTML = %d %q", html.Code, html.Body.String())
 	}
+	if strings.Count(html.Body.String(), `data-flotilla-presentation-controller`) != 1 ||
+		!strings.Contains(html.Body.String(), `/static/research-presentation.js`) {
+		t.Errorf("presentation HTML missing one shared controller: %q", html.Body.String())
+	}
 	if got := html.Header().Get("Content-Security-Policy"); !strings.Contains(got, "connect-src 'none'") || !strings.Contains(got, "frame-ancestors 'self'") {
 		t.Errorf("presentation CSP = %q", got)
 	}
@@ -212,6 +216,29 @@ func TestResearchPresentationServesOnlyCanonicalPackageAssets(t *testing.T) {
 		if rec.Code == http.StatusOK || strings.Contains(rec.Body.String(), "HOST_SECRET_SENTINEL") {
 			t.Errorf("unsafe presentation path %q served status=%d body=%q", bad, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+func TestInjectResearchPresentationController875(t *testing.T) {
+	const marker = `data-flotilla-presentation-controller`
+	for _, test := range []struct {
+		name string
+		body string
+	}{
+		{name: "body", body: "<!doctype html><body><main></main></body>"},
+		{name: "mixed closing tag", body: "<BODY><main></main></BODY>"},
+		{name: "fragment", body: "<main></main>"},
+		{name: "already injected", body: `<body><main></main><script data-flotilla-presentation-controller></script></body>`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := string(injectResearchPresentationController([]byte(test.body)))
+			if strings.Count(got, marker) != 1 {
+				t.Fatalf("controller count = %d in %q", strings.Count(got, marker), got)
+			}
+			if !strings.Contains(got, "<main></main>") {
+				t.Fatalf("presentation body changed: %q", got)
+			}
+		})
 	}
 }
 
