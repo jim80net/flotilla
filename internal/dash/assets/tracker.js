@@ -553,12 +553,28 @@
   }
 
   /* ── create view ─────────────────────────────────────────────────────── */
+  function clearCreateTitleError() {
+    var title = el("create-title");
+    var error = el("create-title-error");
+    title.removeAttribute("aria-invalid");
+    error.hidden = true;
+  }
+
+  function showCreateTitleError() {
+    var title = el("create-title");
+    var error = el("create-title-error");
+    title.setAttribute("aria-invalid", "true");
+    error.hidden = false;
+    title.focus();
+  }
+
   function showCreate() {
     showOnly("issues-create");
     el("create-title").value = "";
     el("create-body").value = "";
     el("create-labels").value = "";
     el("create-msg").textContent = "";
+    clearCreateTitleError();
     el("create-title").focus();
   }
 
@@ -566,7 +582,8 @@
     ev.preventDefault();
     var title = el("create-title").value.trim();
     var msg = el("create-msg");
-    if (!title) { msg.className = "form-msg err"; msg.textContent = "title is required"; return; }
+    if (!title) { showCreateTitleError(); return; }
+    clearCreateTitleError();
     msg.className = "form-msg"; msg.textContent = "Creating…";
     var payload = {
       title: title,
@@ -599,6 +616,9 @@
   el("filter-idea").addEventListener("change", loadIssues);
   el("filter-state").addEventListener("change", loadIssues);
   el("issues-new").addEventListener("click", showCreate);
+  el("create-title").addEventListener("input", function () {
+    if (this.value.trim()) clearCreateTitleError();
+  });
   el("create-cancel").addEventListener("click", loadIssues);
   el("create-form").addEventListener("submit", submitCreate);
   el("detail-back").addEventListener("click", loadIssues);

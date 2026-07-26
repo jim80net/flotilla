@@ -297,8 +297,13 @@
 
     <section id="issues-create" class="panel hidden">
       <div class="panel-head"><h2>New issue</h2></div>
-      <form id="create-form" class="issue-form">
-        <input type="text" id="create-title" placeholder="Title (required)" maxlength="256" required />
+      <form id="create-form" class="issue-form" novalidate>
+        <label class="form-field" for="create-title">
+          <span class="form-label">Title <span class="form-required">Required</span></span>
+          <input type="text" id="create-title" placeholder="Describe the work" maxlength="256" required
+            aria-describedby="create-title-error" />
+          <span id="create-title-error" class="field-error" role="alert" hidden>Enter a title before creating the issue.</span>
+        </label>
         <textarea id="create-body" placeholder="Body (markdown)" rows="6"></textarea>
         <input type="text" id="create-labels" placeholder="Labels (comma-separated, e.g. operator-idea)" />
         <div class="form-actions">
