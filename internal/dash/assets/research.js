@@ -180,7 +180,7 @@
     });
   }
   function statusLabel(status) {
-    return ({ "design-only": "Design only", "awaiting-auth": "Awaiting authorization", "operator-review": "Operator review", research: "Research" })[status] || status;
+    return ({ "design-only": "Design only", "awaiting-auth": "Awaiting authorization", "operator-review": "Operator review", decision: "Decision", archival: "Archival", research: "Research" })[status] || status;
   }
   function formatDate(value) {
     var date = new Date(value);
@@ -192,6 +192,29 @@
     if (first >= 0 && lines[first].replace(/^#\s+/, "").trim() === title) lines.splice(first, 1);
     return lines.join("\n");
   }
+  function documentWithoutPublicationDirective(markdown) {
+    var value = String(markdown || ""), opener = "<!-- flotilla-publication";
+    var trimmed = value.replace(/^[\s\uFEFF]+/, "");
+    if (trimmed.indexOf(opener) !== 0) return value;
+    var start = value.length - trimmed.length;
+    var end = value.indexOf("-->", start + opener.length);
+    return end < 0 ? value.slice(0, start) : value.slice(0, start) + value.slice(end + 3);
+  }
+  function diagnosticLabel(code) {
+    return ({
+      "content.empty": "Empty",
+      "content.title_only": "Title only",
+      "content.boilerplate": "Boilerplate",
+      "action.missing": "Missing reader action",
+      "support.missing": "Missing support or text-only rationale",
+      "presentation.missing": "Missing HTML5 showpiece",
+      "metadata.malformed": "Malformed metadata",
+      "metadata.unknown": "Unknown directive",
+      "metadata.classification": "Invalid classification",
+      "metadata.support": "Invalid support value"
+    })[code] || code;
+  }
+
   function decisionState(node) {
     return String(node.status_display || node.state || "").toLowerCase().replace(/_/g, "-");
   }
@@ -269,7 +292,7 @@
   function indexPath() {
     return "/research?focus=" + encodeURIComponent(currentFocus);
   }
-  var entries = [], goalDecisions = [], decisionsAvailable = true, collectionWindow = 6, decisionWindow = 3;
+  var entries = [], indexDiagnostics = null, goalDecisions = [], decisionsAvailable = true, collectionWindow = 6, decisionWindow = 3;
   var decisionVisible = decisionWindow, libraryVisible = collectionWindow;
   var currentFocus = focusFromURL(), searchQuery = "";
   var lastDocumentID = "", lastDocumentPush = false, currentDocument = null, currentRendered = null, currentDecision = null;
@@ -291,7 +314,8 @@
   }
   function card(entry) {
     var link = document.createElement("a");
-    link.className = "research-card" + (entry.decision ? " is-decision" : "");
+    var diagnostics = Array.isArray(entry.diagnostics) ? entry.diagnostics : [];
+    link.className = "research-card" + (entry.decision ? " is-decision" : "") + (entry.archival ? " is-archival" : "") + (diagnostics.length ? " has-diagnostics" : "");
     link.href = pagePath(entry.id);
     link.dataset.researchId = entry.id;
     var top = document.createElement("span"); top.className = "research-card-top";
@@ -304,6 +328,12 @@
     var title = document.createElement("strong"); title.textContent = entry.title;
     link.appendChild(top); link.appendChild(title);
     if (entry.summary) { var summary = document.createElement("span"); summary.className = "research-card-summary"; summary.textContent = entry.summary; link.appendChild(summary); }
+    if (diagnostics.length) {
+      var warning = document.createElement("span");
+      warning.className = "research-card-diagnostics";
+      warning.textContent = diagnostics.length + (diagnostics.length === 1 ? " publication check" : " publication checks");
+      link.appendChild(warning);
+    }
     link.addEventListener("click", function (event) { event.preventDefault(); openDocument(entry.id, true, entry); });
     return link;
   }
@@ -373,6 +403,29 @@
     var showLibrary = currentFocus === "library" || currentFocus === "all";
     syncFocusControls();
     el("research-status").hidden = true;
+    var diagnostics = indexDiagnostics || {
+      documents: entries.length,
+      needs_attention: 0,
+      valid: entries.length,
+      showpieces: entries.filter(function (entry) { return entry.presentation_ready; }).length,
+      source_only: entries.filter(function (entry) { return !entry.presentation_ready; }).length,
+      by_code: {}
+    };
+    var diagnosticPanel = el("research-diagnostics");
+    diagnosticPanel.hidden = diagnostics.documents === 0;
+    el("research-diagnostics-count").textContent =
+      diagnostics.showpieces + (diagnostics.showpieces === 1 ? " showpiece" : " showpieces") +
+      " · " + diagnostics.source_only + " source-only";
+    el("research-diagnostics-summary").textContent = diagnostics.needs_attention
+      ? diagnostics.needs_attention + " of " + diagnostics.documents + " publications need metadata, substance, or presentation checks. Measurement only — all " + diagnostics.documents + " remain visible."
+      : "All " + diagnostics.documents + " publications pass the current metadata, substance, and presentation checks.";
+    var breakdown = el("research-diagnostics-breakdown");
+    breakdown.replaceChildren();
+    Object.keys(diagnostics.by_code || {}).sort().forEach(function (code) {
+      var row = document.createElement("div"), label = document.createElement("dt"), count = document.createElement("dd");
+      label.textContent = diagnosticLabel(code); count.textContent = diagnostics.by_code[code];
+      row.appendChild(label); row.appendChild(count); breakdown.appendChild(row);
+    });
     el("research-decisions").hidden = !showDecisions || decisions.length === 0;
     el("research-all").hidden = !showLibrary || library.length === 0;
     el("research-count").textContent = library.length + (library.length === 1 ? " document" : " documents");
@@ -603,7 +656,8 @@
     });
   }
   function renderDocument(doc) {
-    var rendered = renderMarkdown(documentWithoutDuplicateTitle(doc.markdown, doc.title), doc.id);
+    var markdown = documentWithoutPublicationDirective(doc.markdown);
+    var rendered = renderMarkdown(documentWithoutDuplicateTitle(markdown, doc.title), doc.id);
     annotationSession++;
     currentDocument = doc; currentRendered = rendered; annotationState = null; pendingAnchor = null; pendingRoute = null;
     currentDecision = goalDecisions.find(function (decision) { return decision.paperID === doc.id; }) || null;
@@ -625,6 +679,28 @@
     el("research-document-status").textContent = statusLabel(doc.status) + (doc.presentation_ready ? " · HTML5 showpiece" : " · Source only");
     el("research-updated").textContent = formatDate(doc.updated_at);
     el("research-updated").dateTime = doc.updated_at;
+    var publication = doc.publication || {}, diagnostics = Array.isArray(doc.diagnostics) ? doc.diagnostics : [];
+    var publicationState = el("research-publication-state");
+    publicationState.classList.toggle("is-valid", diagnostics.length === 0);
+    publicationState.classList.toggle("has-diagnostics", diagnostics.length > 0);
+    el("research-publication-result").textContent = diagnostics.length ? diagnostics.length + (diagnostics.length === 1 ? " check" : " checks") : "Valid";
+    el("research-reader-action").textContent = publication.reader_action
+      ? "Reader action · " + publication.reader_action
+      : "Reader action not declared.";
+    var diagnosticList = el("research-document-diagnostics");
+    diagnosticList.replaceChildren();
+    if (diagnostics.length) {
+      diagnostics.forEach(function (diagnostic) {
+        var item = document.createElement("li"), label = document.createElement("strong"), message = document.createElement("span");
+        label.textContent = diagnosticLabel(diagnostic.code); message.textContent = diagnostic.message;
+        item.appendChild(label); item.appendChild(message); diagnosticList.appendChild(item);
+      });
+    } else {
+      var validItem = document.createElement("li"); validItem.textContent = doc.archival
+        ? "Archival reason and publication support are declared."
+        : "Reader action and publication support are declared.";
+      diagnosticList.appendChild(validItem);
+    }
     el("research-body").innerHTML = rendered.html;
     renderTOC(rendered.toc);
     var decisionStrip = el("research-decision-strip");
@@ -707,6 +783,7 @@
     });
     Promise.all([research, decisions]).then(function (values) {
       entries = Array.isArray(values[0].research) ? values[0].research : [];
+      indexDiagnostics = values[0].diagnostics || null;
       goalDecisions = values[1];
       renderIndex();
       var id = pathID(); if (id) openDocument(id, false, entries.find(function (entry) { return entry.id === id; }));

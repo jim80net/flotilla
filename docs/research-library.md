@@ -62,6 +62,39 @@ Rendered acceptance must traverse every section forward and backward at 390px,
 then wheel-scroll to a middle section and assert the visible label, counter, and
 document title agree. Long sections must remain fully reachable.
 
+## Publication directive
+
+Readiness measurement does not hide any existing file. Authors can add one
+leading metadata block to `SOURCE.md` or a legacy source-only paper:
+
+```markdown
+<!-- flotilla-publication
+classification: research
+reader-action: Compare the evidence and choose the next experiment.
+support: text-only
+support-rationale: The argument is fully contained and does not depend on external evidence.
+-->
+```
+
+The schema is intentionally small:
+
+- `classification` is `research`, `decision`, or `archival`.
+- `reader-action` states the decision, next step, or archival reason.
+- `support` is `material` or `text-only`.
+- `support-rationale` is required when `support` is `text-only`.
+
+Links, Markdown tables, images, and private-LAN videos count as supporting
+material. A `decision` classification means the paper belongs on the existing
+waiting shelf; it never means GO. In particular, this metadata cannot authorize
+Authorization Domains.
+
+The index and reader report empty, title-only, or boilerplate bodies; a missing
+reader action; missing supporting material or text-only rationale; and a missing
+HTML5 presentation for non-archival operator-facing papers. Readiness counts
+show showpiece and source-only totals. Diagnostics remain measurement-only:
+documents stay visible, source Markdown is not rewritten, and no reader action
+or presentation content is invented automatically.
+
 ## Legacy Markdown video
 
 A source-only paper can embed a video stored beneath the same research directory
