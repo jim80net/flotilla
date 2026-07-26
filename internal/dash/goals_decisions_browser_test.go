@@ -52,11 +52,23 @@ for i in range(7):
         "summary": "Recommendation %d with a reversible safe default." % (i + 1),
         "updated_at": "2026-07-%02dT12:00:00Z" % (i + 1)
     })
+    if i == 0:
+        brief = (
+            "## Recommendation\n**Keep option 1 reversible** while the generic operating team "
+            "reviews a deliberately long sequence of reversible checks, bounded observations, "
+            "and routine follow-up steps without exposing raw formatting markers or turning "
+            "the card into the full operational brief.\n\n## Safe default\nHold the current state."
+            "\n\n[Read paper](/research/decisions/generic-1.md)"
+        )
+    else:
+        brief = "## Recommendation\nUse \x60option %d\x60 with **bounded evidence**.\n\n## Safe default\nHold the current state." % (i + 1)
+        if i > 1:
+            brief += "\n\n[Read paper](/research/decisions/generic-%d.md)" % (i + 1)
     goals.append({
         "id": "generic-%d" % (i + 1), "title": "Generic decision %d" % (i + 1),
         "owner": "example-desk", "conversation_agent": "example-desk",
         "status_display": "awaiting", "state": "awaiting",
-        "brief": "## Recommendation\nKeep option %d reversible.\n\n## Safe default\nHold the current state.\n\n[Read paper](/research/decisions/generic-%d.md)" % (i + 1, i + 1),
+        "brief": brief,
         "work_items": []
     })
 for i in range(12):
@@ -109,9 +121,25 @@ with sync_playwright() as p:
             expect(page.locator("#research-filter-status")).to_have_text("7 waiting decisions")
             expect(page.locator("#gdec-detail")).to_have_count(0)
             assert page.evaluate("document.documentElement.scrollWidth === innerWidth")
+            cards = page.locator("#research-decision-list .research-card")
+            formatted = cards.filter(has_text="Generic decision 1")
+            summary = formatted.locator(".research-card-summary")
+            assert "**" not in summary.inner_text()
+            assert len(summary.inner_text()) <= 181
+            assert summary.inner_text().endswith("…")
+            expect(formatted.locator(".research-card-next")).to_have_text("Open paper →")
+            missing = cards.filter(has_text="Generic decision 2")
+            expect(missing.locator(".research-card-next")).to_have_text(
+                "Paper missing — brief owner must attach evidence")
+            assert missing.get_attribute("href") is None
+            for card in cards.all():
+                assert card.locator(".research-card-next").count() == 1
+            assert cards.locator("img, script").count() == 0
 
             # A decision opens its paper in the one R&D canvas, never a dialog stack.
-            page.locator("#research-decision-list .research-card").first.click()
+            formatted.focus()
+            expect(formatted).to_be_focused()
+            formatted.press("Enter")
             expect(page.locator("#research-title")).to_have_text("Generic decision 1")
             expect(page.locator("#research-body")).to_contain_text("The paper canvas owns this decision.")
             expect(page).to_have_url(url + "/research/decisions/generic-1.md")

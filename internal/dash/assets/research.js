@@ -219,6 +219,22 @@
     }
     return "";
   }
+  function decisionCardProse(value) {
+    var text = String(value || "")
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+      .replace(/`+([^`]+)`+/g, "$1")
+      .replace(/<\/?[a-z][^>]*>/gi, " ")
+      .replace(/[*_~]+/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    var limit = 180;
+    if (text.length <= limit) return text;
+    var cut = text.slice(0, limit + 1);
+    var lastSpace = cut.lastIndexOf(" ");
+    if (lastSpace >= Math.floor(limit * 0.65)) cut = cut.slice(0, lastSpace);
+    return cut.trim() + "…";
+  }
   function gatherRDDecisions(doc) {
     if (!doc || !Array.isArray(doc.goals)) return [];
     var out = [];
@@ -309,9 +325,11 @@
     var title = document.createElement("strong");
     title.textContent = (node.title || node.id) + (decision.label ? " — " + decision.label : "");
     var recommendation = document.createElement("span"); recommendation.className = "research-card-summary";
-    recommendation.textContent = decisionBriefField(decision.brief, ["recommendation", "recommended"]) || "Recommendation not stated";
+    recommendation.textContent = decisionCardProse(
+      decisionBriefField(decision.brief, ["recommendation", "recommended"])
+    ) || "Recommendation not stated";
     var next = document.createElement("span"); next.className = "research-card-next";
-    next.textContent = paper ? "Open paper →" : "Paper link missing — brief owner must connect evidence";
+    next.textContent = paper ? "Open paper →" : "Paper missing — brief owner must attach evidence";
     item.appendChild(top); item.appendChild(title); item.appendChild(recommendation); item.appendChild(next);
     return item;
   }
