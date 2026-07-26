@@ -1436,6 +1436,24 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   display: grid;
   gap: .65rem;
 }
+.form-field { display: grid; gap: .35rem; min-width: 0; }
+.form-label {
+  color: var(--ink-2);
+  font-family: var(--display);
+  font-size: .72rem;
+  letter-spacing: .04em;
+}
+.form-required { color: var(--ink-3); font: .62rem var(--mono); letter-spacing: 0; }
+.field-error {
+  color: var(--err);
+  font-size: .72rem;
+  line-height: 1.4;
+}
+.field-error[hidden] { display: none; }
+.issue-form input[aria-invalid="true"] {
+  border-color: var(--err);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--err) 18%, transparent);
+}
 .detail-actions { border-top: 1px solid var(--line); margin-top: 1rem; }
 .issue-form input, .issue-form textarea,
 .detail-actions input, .detail-actions textarea,
@@ -2828,6 +2846,9 @@ html, body { overflow-x: clip; }
 .research-publication-state { margin-right: auto; color: var(--ink-3); font: 600 .56rem/1.2 var(--display); text-transform: uppercase; letter-spacing: .06em; }
 .research-card strong { color: var(--ink); font: 600 .9rem/1.18 var(--display); }
 .research-card-summary { color: var(--ink-3); font-size: .66rem; line-height: 1.4; }
+.research-card.is-decision .research-card-summary {
+  display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+}
 .research-card-diagnostics { color: var(--amber); font: 600 .6rem var(--display); letter-spacing: .03em; }
 .research-show-more {
   width: 100%; min-height: 44px; margin-top: .55rem; border: 1px solid var(--line); border-radius: var(--r-sm);

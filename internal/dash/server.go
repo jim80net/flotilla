@@ -255,6 +255,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /research-presentations/{id...}", s.handleResearchPresentation)
 	s.mux.HandleFunc("GET /api/research-annotations/{id...}", s.handleResearchAnnotations)
 	s.mux.HandleFunc("POST /api/research-annotations/{id...}", s.requireWrite(s.handleResearchAnnotationCreate))
+	s.mux.HandleFunc("POST /api/research-annotation-routes/{id...}", s.requireWrite(s.handleResearchAnnotationRoute))
 	s.mux.HandleFunc("GET /research", s.handleResearchPage)
 	s.mux.HandleFunc("GET /research/{id...}", s.handleResearchPage)
 	s.mux.HandleFunc("/events", s.handleEvents)

@@ -1,11 +1,18 @@
 package dash
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
+	"github.com/jim80net/flotilla/internal/dash/control"
+	"github.com/jim80net/flotilla/internal/outbox"
 	"github.com/jim80net/flotilla/internal/researchannotation"
 )
 
@@ -16,6 +23,11 @@ type researchAnnotationCreateRequest struct {
 	DocumentDigest string                     `json:"document_digest"`
 	Anchor         *researchannotation.Anchor `json:"anchor,omitempty"`
 	Comment        string                     `json:"comment"`
+}
+
+type researchAnnotationRouteRequest struct {
+	AnnotationID string `json:"annotation_id"`
+	Generation   uint64 `json:"generation"`
 }
 
 type researchAnnotationView struct {
@@ -142,9 +154,117 @@ func (s *Server) handleResearchAnnotationCreate(w http.ResponseWriter, r *http.R
 		s.auditResearchAnnotation(researchAnnotationAuditEvent{DocumentID: document.ID, Author: researchAnnotationAuthor, Action: "create", Result: "storage_error", Digest: document.Digest})
 		return
 	}
+	stored, created = s.routeResearchAnnotation(r.Context(), document, stored, created)
 	response := annotationResponse(document, stored, &created)
 	writeJSONStatus(w, http.StatusCreated, response)
-	s.auditResearchAnnotation(researchAnnotationAuditEvent{DocumentID: document.ID, AnnotationID: created.ID, Author: researchAnnotationAuthor, Action: "create", Result: "created", Digest: document.Digest})
+	s.auditResearchAnnotation(researchAnnotationAuditEvent{DocumentID: document.ID, AnnotationID: created.ID, Author: researchAnnotationAuthor, Action: "create", Result: "created_" + created.Routing.State, Digest: document.Digest})
+}
+
+func (s *Server) handleResearchAnnotationRoute(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	document, found, err := readResearchDocument(s.cfg.ResearchPath, r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "the research document could not be read")
+		return
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "research document not found")
+		return
+	}
+	var req researchAnnotationRouteRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	stored, err := researchannotation.LoadDocument(s.cfg.ResearchAnnotationsPath, document.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "the research annotations could not be read")
+		return
+	}
+	var annotation *researchannotation.Annotation
+	for i := range stored.Annotations {
+		if stored.Annotations[i].ID == req.AnnotationID {
+			annotation = &stored.Annotations[i]
+			break
+		}
+	}
+	if annotation == nil {
+		writeError(w, http.StatusNotFound, "research annotation not found")
+		return
+	}
+	if req.Generation == 0 || annotation.Routing.Generation != req.Generation ||
+		annotation.Routing.Key != researchannotation.RouteKey(annotation.ID, req.Generation) {
+		writeError(w, http.StatusConflict, "the research annotation route changed; reload before retrying")
+		return
+	}
+	stored, routed := s.routeResearchAnnotation(r.Context(), document, stored, *annotation)
+	writeJSON(w, annotationResponse(document, stored, &routed))
+	s.auditResearchAnnotation(researchAnnotationAuditEvent{
+		DocumentID: document.ID, AnnotationID: routed.ID, Author: researchAnnotationAuthor,
+		Action: "route_retry", Result: routed.Routing.State, Digest: document.Digest,
+	})
+}
+
+func (s *Server) routeResearchAnnotation(ctx context.Context, document ResearchDocument, stored researchannotation.Document, annotation researchannotation.Annotation) (researchannotation.Document, researchannotation.Annotation) {
+	if annotation.Routing.State == researchannotation.RouteQueued || annotation.Routing.State == researchannotation.RouteDelivered {
+		return stored, annotation
+	}
+	target := strings.TrimSpace(s.roster.CosAgent)
+	if target == "" {
+		target = strings.TrimSpace(s.xo)
+	}
+	if target == "" {
+		return stored, annotation
+	}
+	message := researchAnnotationRouteMessage(document, annotation)
+	result, err := s.control.Route(ctx, target, message)
+	if err != nil || strings.TrimSpace(result.Target) == "" {
+		return stored, annotation
+	}
+	next := annotation.Routing
+	next.UpdatedAt = s.now().UTC().Format(time.RFC3339Nano)
+	switch result.Outcome {
+	case control.OutcomeDelivered:
+		next.State = researchannotation.RouteDelivered
+		next.Target = result.Target
+		next.QueuedID = ""
+	default:
+		queuedID, _, queueErr := outbox.Enqueue(filepath.Dir(s.cfg.RosterPath), respondSender, result.Target, message)
+		if queueErr != nil {
+			return stored, annotation
+		}
+		next.State = researchannotation.RouteQueued
+		next.Target = result.Target
+		next.QueuedID = queuedID
+	}
+	updated, routed, updateErr := researchannotation.UpdateRouting(
+		s.cfg.ResearchAnnotationsPath, document.ID, annotation.ID, annotation.Routing.Generation, next,
+	)
+	if updateErr != nil {
+		return stored, annotation
+	}
+	return updated, routed
+}
+
+func researchAnnotationRouteMessage(document ResearchDocument, annotation researchannotation.Annotation) string {
+	comment := ""
+	if len(annotation.Comments) > 0 {
+		comment = annotation.Comments[0].Text
+	}
+	anchor := map[string]string{"scope": "whole_document"}
+	if annotation.Anchor != nil {
+		anchor = map[string]string{
+			"scope": "passage", "quote": annotation.Anchor.Quote,
+			"prefix": annotation.Anchor.Prefix, "suffix": annotation.Anchor.Suffix,
+		}
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"schema": "flotilla.research_annotation_route/v1", "route_key": annotation.Routing.Key,
+		"document_id": document.ID, "document_title": document.Title, "paper": "/research/" + document.ID,
+		"annotation_id": annotation.ID, "anchor": anchor, "author": annotation.Author,
+		"created_at": annotation.CreatedAt, "comment": comment,
+	})
+	return "[research annotation queued for review]\n" + string(payload) +
+		"\nReview and explicitly assign or respond; delivery alone does not assign ownership."
 }
 
 func annotationResponse(document ResearchDocument, stored researchannotation.Document, created *researchannotation.Annotation) researchAnnotationsResponse {

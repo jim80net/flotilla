@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jim80net/flotilla/internal/dash/control"
+	"github.com/jim80net/flotilla/internal/outbox"
 	"github.com/jim80net/flotilla/internal/researchannotation"
 )
 
@@ -205,6 +207,68 @@ func TestResearchAnnotationGenerationCASOverHTTP(t *testing.T) {
 	}
 	if seen[http.StatusCreated] != 1 || seen[http.StatusConflict] != 1 {
 		t.Fatalf("codes = %v", seen)
+	}
+}
+
+func TestResearchAnnotationRoutingSavedQueuedDeliveredAndIdempotent(t *testing.T) {
+	srv, _, _ := annotationServer(t)
+	f := &fakeController{routeErr: control.ErrUnknownTarget}
+	srv.control = f
+	initial := decodeAnnotationResponse(t, doGet(t, srv, "/api/research-annotations/notes/field.md"))
+
+	create := doWrite(t, srv, http.MethodPost, "/api/research-annotations/notes/field.md",
+		createAnnotationBody(t, initial.Generation, initial.DocumentDigest, "Route this finding once.", nil))
+	if create.Code != http.StatusCreated {
+		t.Fatalf("saved-only create status=%d body=%s", create.Code, create.Body.String())
+	}
+	saved := decodeAnnotationResponse(t, create)
+	if saved.Created == nil || saved.Created.Routing.State != researchannotation.RouteSaved ||
+		saved.Created.Routing.Key != researchannotation.RouteKey(saved.Created.ID, saved.Generation) {
+		t.Fatalf("saved-only routing = %+v", saved.Created)
+	}
+	if got := outbox.ListAll(filepath.Dir(srv.cfg.RosterPath)); len(got) != 0 {
+		t.Fatalf("hard recipient failure queued unresolvable cargo: %+v", got)
+	}
+
+	f.routeErr = nil
+	f.routeRes = control.RouteResult{Target: "xo", Outcome: control.OutcomeBusy, Detail: "busy"}
+	retryBody := fmt.Sprintf(`{"annotation_id":%q,"generation":%d}`, saved.Created.ID, saved.Created.Routing.Generation)
+	retry := doWrite(t, srv, http.MethodPost, "/api/research-annotation-routes/notes/field.md", retryBody)
+	if retry.Code != http.StatusOK {
+		t.Fatalf("route retry status=%d body=%s", retry.Code, retry.Body.String())
+	}
+	queued := decodeAnnotationResponse(t, retry)
+	if queued.Created == nil || queued.Created.Routing.State != researchannotation.RouteQueued ||
+		queued.Created.Routing.Target != "xo" || queued.Created.Routing.QueuedID == "" {
+		t.Fatalf("queued routing = %+v", queued.Created)
+	}
+	entries := outbox.ListAll(filepath.Dir(srv.cfg.RosterPath))
+	if len(entries) != 1 || entries[0].ID != queued.Created.Routing.QueuedID ||
+		!strings.Contains(entries[0].Message, queued.Created.Routing.Key) ||
+		!strings.Contains(entries[0].Message, `"comment":"Route this finding once."`) ||
+		!strings.Contains(entries[0].Message, `"paper":"/research/notes/field.md"`) {
+		t.Fatalf("durable annotation envelope = %+v", entries)
+	}
+
+	calls := f.calls
+	duplicate := doWrite(t, srv, http.MethodPost, "/api/research-annotation-routes/notes/field.md", retryBody)
+	if duplicate.Code != http.StatusOK {
+		t.Fatalf("duplicate retry status=%d body=%s", duplicate.Code, duplicate.Body.String())
+	}
+	if f.calls != calls || len(outbox.ListAll(filepath.Dir(srv.cfg.RosterPath))) != 1 {
+		t.Fatalf("duplicate retry rerouted: calls %d→%d entries=%+v", calls, f.calls, outbox.ListAll(filepath.Dir(srv.cfg.RosterPath)))
+	}
+
+	f.routeRes = control.RouteResult{Target: "xo", Outcome: control.OutcomeDelivered}
+	delivered := doWrite(t, srv, http.MethodPost, "/api/research-annotations/notes/field.md",
+		createAnnotationBody(t, queued.Generation, initial.DocumentDigest, "Deliver this finding now.", nil))
+	if delivered.Code != http.StatusCreated {
+		t.Fatalf("delivered create status=%d body=%s", delivered.Code, delivered.Body.String())
+	}
+	deliveredState := decodeAnnotationResponse(t, delivered)
+	if deliveredState.Created == nil || deliveredState.Created.Routing.State != researchannotation.RouteDelivered ||
+		deliveredState.Created.Routing.Target != "xo" || deliveredState.Created.Routing.QueuedID != "" {
+		t.Fatalf("delivered routing = %+v", deliveredState.Created)
 	}
 }
 

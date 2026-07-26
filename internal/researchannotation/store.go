@@ -67,6 +67,26 @@ type Annotation struct {
 	Comments       []Comment `json:"comments"`
 	Resolved       bool      `json:"resolved"`
 	ResolvedAt     string    `json:"resolved_at,omitempty"`
+	Routing        Routing   `json:"routing"`
+}
+
+const (
+	RouteSaved     = "saved"
+	RouteQueued    = "queued"
+	RouteDelivered = "delivered"
+)
+
+// Routing records what is proven about the annotation's product-coordination
+// handoff. "Saved" means only the private annotation sidecar is durable;
+// "queued" means an outbox entry is durable; "delivered" means pane submission
+// was confirmed. Assignment is deliberately absent: routing is not ownership.
+type Routing struct {
+	State      string `json:"state"`
+	Key        string `json:"key"`
+	Generation uint64 `json:"generation"`
+	Target     string `json:"target,omitempty"`
+	QueuedID   string `json:"queued_id,omitempty"`
+	UpdatedAt  string `json:"updated_at"`
 }
 
 type Document struct {
@@ -207,11 +227,75 @@ func Create(root string, in CreateInput) (Document, Annotation, error) {
 	}
 	doc.Annotations = append(doc.Annotations, annotation)
 	doc.Generation++
+	annotation.Routing = Routing{
+		State: RouteSaved, Key: RouteKey(annotation.ID, doc.Generation),
+		Generation: doc.Generation, UpdatedAt: now,
+	}
+	doc.Annotations[len(doc.Annotations)-1] = annotation
 	store.Documents[in.DocumentID] = doc
 	if err := writeAtomic(root, store); err != nil {
 		return Document{}, Annotation{}, err
 	}
 	return doc, annotation, nil
+}
+
+// RouteKey is the stable idempotency identity for the first annotation
+// revision. It is included in the routed envelope, so retrying a pending handoff
+// collapses onto the existing durable outbox entry.
+func RouteKey(annotationID string, generation uint64) string {
+	return fmt.Sprintf("%s:%d", annotationID, generation)
+}
+
+// UpdateRouting advances one annotation from saved to queued or delivered
+// without changing the document generation used by annotation-create CAS. A
+// terminal route is idempotent: retries return the already-proven state.
+func UpdateRouting(root, documentID, annotationID string, generation uint64, next Routing) (Document, Annotation, error) {
+	if !ValidDocumentID(documentID) || annotationID == "" || generation == 0 {
+		return Document{}, Annotation{}, fmt.Errorf("%w: invalid route identity", ErrInvalid)
+	}
+	if err := validateRouting(next, annotationID, generation); err != nil {
+		return Document{}, Annotation{}, err
+	}
+	if err := validateRoot(root, false); err != nil {
+		return Document{}, Annotation{}, err
+	}
+	lock, err := openRegularNoFollow(filepath.Join(root, lockFileName), syscall.O_RDWR, 0o600)
+	if err != nil {
+		return Document{}, Annotation{}, fmt.Errorf("%w: open lock: %v", ErrUnsafeStorage, err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return Document{}, Annotation{}, fmt.Errorf("lock research annotations: %w", err)
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) //nolint:errcheck -- close also releases
+
+	store, err := Load(root)
+	if err != nil {
+		return Document{}, Annotation{}, err
+	}
+	doc, ok := store.Documents[documentID]
+	if !ok {
+		return Document{}, Annotation{}, fmt.Errorf("%w: annotation document not found", ErrInvalid)
+	}
+	for i := range doc.Annotations {
+		annotation := &doc.Annotations[i]
+		if annotation.ID != annotationID {
+			continue
+		}
+		if annotation.Routing.Key != RouteKey(annotationID, generation) || annotation.Routing.Generation != generation {
+			return Document{}, Annotation{}, fmt.Errorf("%w: route generation changed", ErrConflict)
+		}
+		if annotation.Routing.State == RouteQueued || annotation.Routing.State == RouteDelivered {
+			return doc, *annotation, nil
+		}
+		annotation.Routing = next
+		store.Documents[documentID] = doc
+		if err := writeAtomic(root, store); err != nil {
+			return Document{}, Annotation{}, err
+		}
+		return doc, *annotation, nil
+	}
+	return Document{}, Annotation{}, fmt.Errorf("%w: annotation not found", ErrInvalid)
 }
 
 func validateCreate(in CreateInput) error {
@@ -264,6 +348,20 @@ func decodeStore(raw []byte) (Store, error) {
 	if err := dec.Decode(&struct{}{}); err != io.EOF {
 		return Store{}, fmt.Errorf("%w: trailing content", ErrMalformedStore)
 	}
+	// Schema v1 stores written before routed annotations had no routing member.
+	// Treat those records honestly as saved-only; the next successful route write
+	// persists the explicit state without changing the public schema.
+	for id, doc := range store.Documents {
+		for i := range doc.Annotations {
+			if doc.Annotations[i].Routing.State == "" {
+				doc.Annotations[i].Routing = Routing{
+					State: RouteSaved, Key: RouteKey(doc.Annotations[i].ID, doc.Generation),
+					Generation: doc.Generation, UpdatedAt: doc.Annotations[i].UpdatedAt,
+				}
+			}
+		}
+		store.Documents[id] = doc
+	}
 	if err := validateStore(store); err != nil {
 		return Store{}, err
 	}
@@ -299,6 +397,9 @@ func validateStore(store Store) error {
 					return fmt.Errorf("%w: invalid resolution timestamp", ErrMalformedStore)
 				}
 			}
+			if err := validateRouting(annotation.Routing, annotation.ID, annotation.Routing.Generation); err != nil {
+				return fmt.Errorf("%w: invalid annotation routing", ErrMalformedStore)
+			}
 			seenAnnotations[annotation.ID] = true
 			if annotation.Anchor != nil {
 				if err := ValidateAnchor(*annotation.Anchor); err != nil {
@@ -316,6 +417,31 @@ func validateStore(store Store) error {
 				seenComments[comment.ID] = true
 			}
 		}
+	}
+	return nil
+}
+
+func validateRouting(route Routing, annotationID string, generation uint64) error {
+	if generation == 0 || route.Generation != generation || route.Key != RouteKey(annotationID, generation) {
+		return fmt.Errorf("%w: invalid route identity", ErrInvalid)
+	}
+	if route.State != RouteSaved && route.State != RouteQueued && route.State != RouteDelivered {
+		return fmt.Errorf("%w: invalid route state", ErrInvalid)
+	}
+	if route.UpdatedAt == "" {
+		return fmt.Errorf("%w: route timestamp is required", ErrInvalid)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, route.UpdatedAt); err != nil {
+		return fmt.Errorf("%w: invalid route timestamp", ErrInvalid)
+	}
+	if route.State == RouteSaved && (route.Target != "" || route.QueuedID != "") {
+		return fmt.Errorf("%w: saved-only route has delivery metadata", ErrInvalid)
+	}
+	if route.State == RouteQueued && (route.Target == "" || route.QueuedID == "") {
+		return fmt.Errorf("%w: queued route is incomplete", ErrInvalid)
+	}
+	if route.State == RouteDelivered && (route.Target == "" || route.QueuedID != "") {
+		return fmt.Errorf("%w: delivered route is incomplete", ErrInvalid)
 	}
 	return nil
 }
