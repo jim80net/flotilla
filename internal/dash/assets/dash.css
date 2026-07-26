@@ -1436,6 +1436,24 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
   display: grid;
   gap: .65rem;
 }
+.form-field { display: grid; gap: .35rem; min-width: 0; }
+.form-label {
+  color: var(--ink-2);
+  font-family: var(--display);
+  font-size: .72rem;
+  letter-spacing: .04em;
+}
+.form-required { color: var(--ink-3); font: .62rem var(--mono); letter-spacing: 0; }
+.field-error {
+  color: var(--err);
+  font-size: .72rem;
+  line-height: 1.4;
+}
+.field-error[hidden] { display: none; }
+.issue-form input[aria-invalid="true"] {
+  border-color: var(--err);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--err) 18%, transparent);
+}
 .detail-actions { border-top: 1px solid var(--line); margin-top: 1rem; }
 .issue-form input, .issue-form textarea,
 .detail-actions input, .detail-actions textarea,
