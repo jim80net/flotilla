@@ -81,6 +81,34 @@ goals:
 	}
 }
 
+func TestParseYAML_PaperIDCompilesAndFailsClosed(t *testing.T) {
+	f, err := ParseYAML([]byte(`version: 1
+goals:
+  - id: gate
+    title: Operator gate
+    paper_id: papers/operator-gate.md
+    work_items:
+      - kind: inline
+        text: Choose
+        paper_id: papers/work-item.md
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.Goals[0].PaperID; got != "papers/operator-gate.md" {
+		t.Errorf("goal paper_id = %q", got)
+	}
+	if got := f.Goals[0].WorkItems[0].PaperID; got != "papers/work-item.md" {
+		t.Errorf("work item paper_id = %q", got)
+	}
+	for _, bad := range []string{"/absolute.md", "../escape.md", ".hidden.md", `papers\windows.md`, "papers/not-markdown.txt"} {
+		raw := "version: 1\ngoals:\n  - id: gate\n    title: Gate\n    paper_id: " + bad + "\n"
+		if _, err := ParseYAML([]byte(raw)); err == nil || !strings.Contains(err.Error(), "paper_id") {
+			t.Errorf("invalid paper_id %q error = %v", bad, err)
+		}
+	}
+}
+
 func TestParseYAML_RejectsDuplicateEmptyCycleDependsOn(t *testing.T) {
 	cases := []struct {
 		name, y, want string

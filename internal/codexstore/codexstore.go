@@ -35,8 +35,9 @@ type sessionMetaPayload struct {
 }
 
 type eventMsgPayload struct {
-	Type    string `json:"type"`
-	Message string `json:"message"`
+	Type             string `json:"type"`
+	Message          string `json:"message"`
+	LastAgentMessage string `json:"last_agent_message"`
 }
 
 type responseItemPayload struct {
@@ -66,11 +67,11 @@ func LatestResultForProcess(codexHome, cwd string, panePID int) (string, error) 
 	if runtime.GOOS != "linux" {
 		return "", fmt.Errorf("codex store: pane-bound rollout resolution requires Linux procfs")
 	}
-	path, err := resolveRolloutForProcess(codexHome, cwd, panePID, "/proc")
+	path, err := resolveLatestCompleteRolloutForProcess(codexHome, cwd, panePID, "/proc")
 	if err != nil {
 		return "", err
 	}
-	return lastAgentText(path)
+	return lastCompletedTurnFinal(path)
 }
 
 // ReplyAfter returns the agent reply following the latest user entry carrying operatorMsg.
@@ -95,15 +96,46 @@ func ReplyAfterForProcess(codexHome, cwd string, panePID int, operatorMsg string
 }
 
 func resolveRolloutForProcess(codexHome, cwd string, panePID int, procRoot string) (string, error) {
+	paths, err := rolloutPathsForProcess(codexHome, cwd, panePID, procRoot)
+	if err != nil {
+		return "", err
+	}
+	if len(paths) > 1 {
+		return "", fmt.Errorf("codex store: pane pid %d has %d open rollouts; refusing ambiguous result", panePID, len(paths))
+	}
+	return paths[0], nil
+}
+
+// resolveLatestCompleteRolloutForProcess supports Codex multi-rollout panes.
+// A rollout still being sampled may be newer but have no completed assistant
+// turn yet, so `flotilla result` selects the newest open rollout that contains
+// a complete turn-final. ReplyAfterForProcess intentionally keeps the strict
+// single-rollout resolver because operator-message correlation must not cross
+// rollout boundaries.
+func resolveLatestCompleteRolloutForProcess(codexHome, cwd string, panePID int, procRoot string) (string, error) {
+	paths, err := rolloutPathsForProcess(codexHome, cwd, panePID, procRoot)
+	if err != nil {
+		return "", err
+	}
+	sort.Slice(paths, func(i, j int) bool { return filepath.Base(paths[i]) > filepath.Base(paths[j]) })
+	for _, path := range paths {
+		if _, err := lastCompletedTurnFinal(path); err == nil {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("codex store: pane pid %d has %d open rollout(s), none with a completed turn-final", panePID, len(paths))
+}
+
+func rolloutPathsForProcess(codexHome, cwd string, panePID int, procRoot string) ([]string, error) {
 	if panePID <= 0 {
-		return "", fmt.Errorf("codex store: invalid pane pid %d", panePID)
+		return nil, fmt.Errorf("codex store: invalid pane pid %d", panePID)
 	}
 	if strings.TrimSpace(cwd) == "" {
-		return "", fmt.Errorf("codex store: pane cwd is empty; refusing unverifiable result")
+		return nil, fmt.Errorf("codex store: pane cwd is empty; refusing unverifiable result")
 	}
 	sessionsRoot, err := filepath.EvalSymlinks(filepath.Join(filepath.Clean(codexHome), "sessions"))
 	if err != nil {
-		return "", fmt.Errorf("codex store: resolve sessions root: %w", err)
+		return nil, fmt.Errorf("codex store: resolve sessions root: %w", err)
 	}
 	queue := []int{panePID}
 	seen := map[int]bool{}
@@ -121,7 +153,7 @@ func resolveRolloutForProcess(codexHome, cwd string, panePID int, procRoot strin
 			if os.IsNotExist(err) {
 				continue // descendant exited during the snapshot
 			}
-			return "", fmt.Errorf("codex store: read process %d file descriptors: %w", pid, err)
+			return nil, fmt.Errorf("codex store: read process %d file descriptors: %w", pid, err)
 		}
 		for _, fd := range fds {
 			target, err := os.Readlink(filepath.Join(fdDir, fd.Name()))
@@ -141,33 +173,28 @@ func resolveRolloutForProcess(codexHome, cwd string, panePID int, procRoot strin
 		}
 		children, err := processChildren(procRoot, pid)
 		if err != nil && !os.IsNotExist(err) {
-			return "", err
+			return nil, err
 		}
 		queue = append(queue, children...)
 	}
 	if len(paths) == 0 {
-		return "", fmt.Errorf("codex store: pane pid %d has no open rollout (session not ready or no longer running)", panePID)
+		return nil, fmt.Errorf("codex store: pane pid %d has no open rollout (session not ready or no longer running)", panePID)
 	}
-	if len(paths) > 1 {
-		return "", fmt.Errorf("codex store: pane pid %d has %d open rollouts; refusing ambiguous result", panePID, len(paths))
+	out := make([]string, 0, len(paths))
+	for path := range paths {
+		metaCwd, err := rolloutMetaCWD(path)
+		if err != nil {
+			return nil, fmt.Errorf("codex store: validate pane rollout: %w", err)
+		}
+		// The process-bound open descriptor selects candidate rollouts. Some Codex
+		// sessions emit an empty cwd (or no session_meta), so only populated metadata
+		// can act as the fail-closed collision guard introduced by #826.
+		if strings.TrimSpace(metaCwd) != "" && filepath.Clean(metaCwd) != filepath.Clean(cwd) {
+			return nil, fmt.Errorf("codex store: pane rollout cwd %q does not match pane cwd %q", metaCwd, cwd)
+		}
+		out = append(out, path)
 	}
-	var path string
-	for path = range paths {
-	}
-	metaCwd, err := rolloutMetaCWD(path)
-	if err != nil {
-		return "", fmt.Errorf("codex store: validate pane rollout: %w", err)
-	}
-	// The open file descriptor is the seat selector: exactly one rollout in this
-	// pane's process tree has already been proven above. Some Codex sessions emit
-	// an empty cwd, and live rollouts can lack a readable session_meta record. In
-	// either case the non-empty pane cwd cannot validate the rollout, but it must
-	// not override the stronger process binding. A populated metadata cwd remains
-	// a fail-closed collision guard and is never used to select among seats.
-	if strings.TrimSpace(metaCwd) != "" && filepath.Clean(metaCwd) != filepath.Clean(cwd) {
-		return "", fmt.Errorf("codex store: pane rollout cwd %q does not match pane cwd %q", metaCwd, cwd)
-	}
-	return path, nil
+	return out, nil
 }
 
 // processChildren unions task/*/children because Linux records children on the
@@ -280,6 +307,38 @@ func lastAgentText(path string) (string, error) {
 	}
 	if !found {
 		return "", fmt.Errorf("codex store: no agent turn yet in %s", path)
+	}
+	return last, nil
+}
+
+// lastCompletedTurnFinal reads Codex task_complete markers rather than treating
+// intermediate commentary as a finished result. This distinction matters when
+// two rollouts are held open and one is still sampling.
+func lastCompletedTurnFinal(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("codex store: open rollout: %w", err)
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64<<10), maxLine)
+	var last string
+	for sc.Scan() {
+		var line rolloutLine
+		if json.Unmarshal(sc.Bytes(), &line) != nil || line.Type != "event_msg" {
+			continue
+		}
+		var p eventMsgPayload
+		if json.Unmarshal(line.Payload, &p) == nil && p.Type == "task_complete" && p.LastAgentMessage != "" {
+			last = p.LastAgentMessage
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return "", fmt.Errorf("codex store: scan rollout: %w", err)
+	}
+	if last == "" {
+		return "", fmt.Errorf("codex store: no completed turn-final in %s", path)
 	}
 	return last, nil
 }

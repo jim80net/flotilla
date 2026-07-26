@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"mime"
 	"net/http"
 	"os"
 	"path"
@@ -19,22 +20,27 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 const maxResearchDocumentBytes = 4 << 20
 
 type ResearchEntry struct {
-	ID               string               `json:"id"`
-	Title            string               `json:"title"`
-	Summary          string               `json:"summary,omitempty"`
-	UpdatedAt        string               `json:"updated_at"`
-	Status           string               `json:"status"`
-	Tags             []string             `json:"tags"`
-	Decision         bool                 `json:"decision"`
-	Archival         bool                 `json:"archival"`
-	Publication      ResearchPublication  `json:"publication"`
-	PublicationValid bool                 `json:"publication_valid"`
-	Diagnostics      []ResearchDiagnostic `json:"diagnostics"`
+	ID                string               `json:"id"`
+	Title             string               `json:"title"`
+	Summary           string               `json:"summary,omitempty"`
+	UpdatedAt         string               `json:"updated_at"`
+	Status            string               `json:"status"`
+	Tags              []string             `json:"tags"`
+	Decision          bool                 `json:"decision"`
+	Archival          bool                 `json:"archival"`
+	Publication       ResearchPublication  `json:"publication"`
+	PublicationValid  bool                 `json:"publication_valid"`
+	Diagnostics       []ResearchDiagnostic `json:"diagnostics"`
+	PublicationState  string               `json:"publication_state"`
+	PresentationReady bool                 `json:"presentation_ready"`
+	PresentationURL   string               `json:"presentation_url,omitempty"`
 }
 
 // ResearchPublication is explicit author-owned publication metadata. It is read
@@ -66,6 +72,8 @@ type ResearchDiagnosticsSummary struct {
 	Documents      int            `json:"documents"`
 	NeedsAttention int            `json:"needs_attention"`
 	Valid          int            `json:"valid"`
+	Showpieces     int            `json:"showpieces"`
+	SourceOnly     int            `json:"source_only"`
 	ByCode         map[string]int `json:"by_code"`
 }
 
@@ -93,6 +101,35 @@ func validResearchID(id string) bool {
 	return true
 }
 
+// publishableResearchID is the product boundary between operator-facing research
+// and operational artifacts that happen to be Markdown. Content quality is
+// handled by readiness diagnostics; these known artifact classes never enter the
+// library or its body route.
+func publishableResearchID(id string) bool {
+	if !validResearchID(id) {
+		return false
+	}
+	parts := strings.Split(strings.ToLower(id), "/")
+	base := parts[len(parts)-1]
+	stem := strings.TrimSuffix(base, path.Ext(base))
+	if base == "findings.md" || strings.Contains(stem, "scorecard") ||
+		strings.Contains(stem, "process-dump") || strings.Contains(stem, "process_dump") ||
+		strings.Contains(stem, "process-snapshot") || strings.Contains(stem, "process_snapshot") ||
+		strings.Contains(stem, "session-dump") || strings.Contains(stem, "session_dump") ||
+		strings.Contains(stem, "pane-dump") || strings.Contains(stem, "pane_dump") {
+		return false
+	}
+	for _, part := range parts[:len(parts)-1] {
+		if part == "walk" || part == "walks" || strings.HasPrefix(part, "walk-") ||
+			strings.HasSuffix(part, "-walk") || strings.Contains(part, "-walk-") ||
+			strings.Contains(part, "walk-package") || strings.Contains(part, "session-mirror") ||
+			strings.Contains(part, "process-dump") || strings.Contains(part, "process_snapshot") {
+			return false
+		}
+	}
+	return true
+}
+
 func validResearchVideoID(id string) bool {
 	if id == "" || strings.ContainsRune(id, '\x00') || strings.Contains(id, `\`) ||
 		strings.HasPrefix(id, "/") || path.Clean(id) != id {
@@ -109,6 +146,122 @@ func validResearchVideoID(id string) bool {
 		}
 	}
 	return true
+}
+
+func validResearchPresentationID(id string) bool {
+	if id == "" || strings.ContainsRune(id, '\x00') || strings.Contains(id, `\`) ||
+		strings.HasPrefix(id, "/") || path.Clean(id) != id {
+		return false
+	}
+	parts := strings.Split(id, "/")
+	presentationAt := -1
+	for i, part := range parts {
+		if part == "" || part == "." || part == ".." || strings.HasPrefix(part, ".") {
+			return false
+		}
+		if part == "presentation" {
+			presentationAt = i
+		}
+	}
+	if path.Base(id) == "SOURCE.md" && path.Dir(id) != "." {
+		return true
+	}
+	if presentationAt < 1 || presentationAt == len(parts)-1 {
+		return false
+	}
+	switch strings.ToLower(path.Ext(id)) {
+	case ".html", ".css", ".js", ".json", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif",
+		".mp4", ".webm", ".ogv", ".woff", ".woff2":
+		return true
+	default:
+		return false
+	}
+}
+
+func openResearchPresentation(root, id string) (*os.File, os.FileInfo, bool, error) {
+	if !validResearchPresentationID(id) {
+		return nil, nil, false, nil
+	}
+	sourceID := id
+	if path.Base(id) != "SOURCE.md" {
+		presentationAt := strings.Index(id, "/presentation/")
+		if presentationAt < 1 {
+			return nil, nil, false, nil
+		}
+		sourceID = id[:presentationAt] + "/SOURCE.md"
+	}
+	if !publishableResearchID(sourceID) {
+		return nil, nil, false, nil
+	}
+	source, _, found, err := openResearchRegularNoFollow(root, sourceID)
+	if source != nil {
+		_ = source.Close()
+	}
+	if err != nil || !found {
+		return nil, nil, false, err
+	}
+	return openResearchRegularNoFollow(root, id)
+}
+
+func openResearchRegularNoFollow(root, id string) (*os.File, os.FileInfo, bool, error) {
+	rootFD, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) || err == unix.ELOOP || err == unix.ENOTDIR {
+			return nil, nil, false, nil
+		}
+		return nil, nil, false, err
+	}
+	currentFD := rootFD
+	parts := strings.Split(id, "/")
+	for i, part := range parts {
+		flags := unix.O_RDONLY | unix.O_NOFOLLOW | unix.O_CLOEXEC
+		if i < len(parts)-1 {
+			flags |= unix.O_DIRECTORY
+		}
+		nextFD, openErr := unix.Openat(currentFD, part, flags, 0)
+		if currentFD != rootFD {
+			_ = unix.Close(currentFD)
+		}
+		if openErr != nil {
+			_ = unix.Close(rootFD)
+			if errors.Is(openErr, os.ErrNotExist) || openErr == unix.ELOOP || openErr == unix.ENOTDIR {
+				return nil, nil, false, nil
+			}
+			return nil, nil, false, openErr
+		}
+		currentFD = nextFD
+	}
+	_ = unix.Close(rootFD)
+	file := os.NewFile(uintptr(currentFD), filepath.Base(id))
+	if file == nil {
+		_ = unix.Close(currentFD)
+		return nil, nil, false, fmt.Errorf("open research presentation")
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, false, err
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, nil, false, nil
+	}
+	return file, info, true, nil
+}
+
+func researchPresentation(root, sourceID string) (string, bool) {
+	if path.Base(sourceID) != "SOURCE.md" || path.Dir(sourceID) == "." {
+		return "", false
+	}
+	presentationID := path.Join(path.Dir(sourceID), "presentation", "index.html")
+	file, _, found, err := openResearchPresentation(root, presentationID)
+	if file != nil {
+		_ = file.Close()
+	}
+	if err != nil || !found {
+		return "", false
+	}
+	return "/research-presentations/" + presentationID, true
 }
 
 func openResearchVideo(root, id string) (*os.File, os.FileInfo, bool, error) {
@@ -364,15 +517,21 @@ func researchStatus(title, markdown string, publication ResearchPublication) (st
 	}
 	for _, line := range lines {
 		line = strings.ToLower(strings.TrimSpace(line))
-		if strings.Contains(line, "status:") || strings.Contains(line, "state:") ||
-			strings.Contains(line, "awaiting-auth") || strings.HasPrefix(line, "# ") {
+		plain := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(line, "**", ""), "`", ""))
+		if key, value, ok := strings.Cut(plain, ":"); ok {
+			key = strings.TrimSpace(strings.TrimLeft(key, "-* "))
+			if key == "status" || key == "state" {
+				markers = append(markers, strings.TrimSpace(value))
+			}
+		}
+		if strings.Contains(line, "[awaiting-auth]") || strings.HasPrefix(line, "# ") {
 			markers = append(markers, line)
 		}
 	}
 	sample := strings.Join(markers, "\n")
 	status, tags, decision := "research", []string{"research"}, false
 	switch {
-	case strings.Contains(sample, "awaiting-auth") || strings.Contains(sample, "awaiting auth"):
+	case containsResearchToken(sample, "awaiting-auth") || containsResearchToken(sample, "awaiting auth"):
 		status, tags, decision = "awaiting-auth", []string{"decision", "awaiting-auth"}, true
 	case strings.Contains(sample, "design only") || strings.Contains(sample, "awaiting go") || strings.Contains(sample, "awaiting-go"):
 		status, tags, decision = "design-only", []string{"decision", "design-only"}, true
@@ -398,6 +557,28 @@ func researchStatus(title, markdown string, publication ResearchPublication) (st
 	return status, tags, decision, false
 }
 
+func containsResearchToken(value, token string) bool {
+	for offset := 0; offset <= len(value)-len(token); {
+		i := strings.Index(value[offset:], token)
+		if i < 0 {
+			return false
+		}
+		i += offset
+		beforeOK := i == 0 || !researchTokenChar(value[i-1])
+		after := i + len(token)
+		afterOK := after == len(value) || !researchTokenChar(value[after])
+		if beforeOK && afterOK {
+			return true
+		}
+		offset = i + 1
+	}
+	return false
+}
+
+func researchTokenChar(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= '0' && b <= '9' || b == '_'
+}
+
 func researchEntry(id, markdown string, modTime time.Time) ResearchEntry {
 	title := researchTitle(id, markdown)
 	publication, metadataDiagnostics := parseResearchPublication(markdown)
@@ -415,12 +596,35 @@ func researchEntry(id, markdown string, modTime time.Time) ResearchEntry {
 		Publication:      publication,
 		PublicationValid: len(diagnostics) == 0,
 		Diagnostics:      diagnostics,
+		PublicationState: "source-only",
 	}
+}
+
+func applyResearchPresentationReadiness(root string, entry *ResearchEntry) {
+	if presentationURL, ready := researchPresentation(root, entry.ID); ready {
+		entry.PublicationState = "showpiece"
+		entry.PresentationReady = true
+		entry.PresentationURL = presentationURL
+		entry.PublicationValid = len(entry.Diagnostics) == 0
+		return
+	}
+	if !entry.Archival {
+		entry.Diagnostics = append(entry.Diagnostics, ResearchDiagnostic{
+			Code:    "presentation.missing",
+			Message: "Add a self-contained HTML5 presentation package; the source remains visible but is not showpiece-ready.",
+		})
+	}
+	entry.PublicationValid = len(entry.Diagnostics) == 0
 }
 
 func summarizeResearchDiagnostics(entries []ResearchEntry) ResearchDiagnosticsSummary {
 	summary := ResearchDiagnosticsSummary{Documents: len(entries), ByCode: map[string]int{}}
 	for _, entry := range entries {
+		if entry.PresentationReady {
+			summary.Showpieces++
+		} else {
+			summary.SourceOnly++
+		}
 		if len(entry.Diagnostics) == 0 {
 			summary.Valid++
 			continue
@@ -476,14 +680,16 @@ func readResearchIndex(root string) ([]ResearchEntry, error) {
 			return err
 		}
 		id := filepath.ToSlash(rel)
-		if !validResearchID(id) {
+		if !publishableResearchID(id) {
 			return nil
 		}
 		body, err := os.ReadFile(file)
 		if err != nil {
 			return err
 		}
-		entries = append(entries, researchEntry(id, string(body), info.ModTime()))
+		entry := researchEntry(id, string(body), info.ModTime())
+		applyResearchPresentationReadiness(root, &entry)
+		entries = append(entries, entry)
 		return nil
 	})
 	if err != nil {
@@ -492,9 +698,27 @@ func readResearchIndex(root string) ([]ResearchEntry, error) {
 		}
 		return nil, err
 	}
+	showpiecePackages := map[string]bool{}
+	for _, entry := range entries {
+		if entry.PresentationReady && path.Base(entry.ID) == "SOURCE.md" {
+			showpiecePackages[path.Dir(entry.ID)] = true
+		}
+	}
+	filtered := entries[:0]
+	for _, entry := range entries {
+		legacyStem := strings.TrimSuffix(entry.ID, path.Ext(entry.ID))
+		if path.Base(entry.ID) != "SOURCE.md" && showpiecePackages[legacyStem] {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	entries = filtered
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].Decision != entries[j].Decision {
 			return entries[i].Decision
+		}
+		if entries[i].PresentationReady != entries[j].PresentationReady {
+			return entries[i].PresentationReady
 		}
 		if entries[i].UpdatedAt != entries[j].UpdatedAt {
 			return entries[i].UpdatedAt > entries[j].UpdatedAt
@@ -505,7 +729,7 @@ func readResearchIndex(root string) ([]ResearchEntry, error) {
 }
 
 func readResearchDocument(root, id string) (ResearchDocument, bool, error) {
-	if !validResearchID(id) {
+	if !publishableResearchID(id) {
 		return ResearchDocument{}, false, nil
 	}
 	rootInfo, err := os.Stat(root)
@@ -560,6 +784,7 @@ func readResearchDocument(root, id string) (ResearchDocument, bool, error) {
 		return ResearchDocument{}, false, err
 	}
 	entry := researchEntry(id, string(body), info.ModTime())
+	applyResearchPresentationReadiness(root, &entry)
 	markdown := string(body)
 	return ResearchDocument{ResearchEntry: entry, Markdown: markdown, Digest: researchDigest(markdown)}, true, nil
 }
@@ -609,6 +834,29 @@ func (s *Server) handleResearchVideo(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "video/webm")
 	case ".ogv":
 		w.Header().Set("Content-Type", "video/ogg")
+	}
+	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
+}
+
+func (s *Server) handleResearchPresentation(w http.ResponseWriter, r *http.Request) {
+	file, info, found, err := openResearchPresentation(s.cfg.ResearchPath, r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "the research presentation could not be read")
+		return
+	}
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+	defer file.Close()
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("Content-Disposition", "inline")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if contentType := mime.TypeByExtension(strings.ToLower(filepath.Ext(info.Name()))); contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
+	if strings.EqualFold(filepath.Ext(info.Name()), ".html") {
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'none'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'")
 	}
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
 }

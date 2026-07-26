@@ -159,7 +159,14 @@ support-rationale: The bounded choice and rollback are fully stated here.
 
 The trial stays frozen until the operator makes an explicit decision.
 `
-	writeResearchFixture(t, root, "valid.md", valid, now)
+	writeResearchFixture(t, root, "valid/SOURCE.md", valid, now)
+	presentation := filepath.Join(root, "valid", "presentation", "index.html")
+	if err := os.MkdirAll(filepath.Dir(presentation), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(presentation, []byte("<!doctype html><title>Valid evidence showpiece</title>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	writeResearchFixture(t, root, "archival.md", archival, now.Add(-time.Minute))
 	writeResearchFixture(t, root, "decision.md", decision, now.Add(-2*time.Minute))
 	writeResearchFixture(t, root, "empty.md", "", now.Add(-3*time.Minute))
@@ -177,13 +184,13 @@ The trial stays frozen until the operator makes an explicit decision.
 	for _, entry := range entries {
 		byID[entry.ID] = entry
 	}
-	if !byID["valid.md"].PublicationValid || len(byID["valid.md"].Diagnostics) != 0 {
-		t.Errorf("valid publication = %+v", byID["valid.md"])
+	if !byID["valid/SOURCE.md"].PublicationValid || len(byID["valid/SOURCE.md"].Diagnostics) != 0 || !byID["valid/SOURCE.md"].PresentationReady {
+		t.Errorf("valid publication = %+v", byID["valid/SOURCE.md"])
 	}
 	if !byID["archival.md"].Archival || byID["archival.md"].Decision || byID["archival.md"].Status != "archival" || !byID["archival.md"].PublicationValid {
 		t.Errorf("archival publication = %+v", byID["archival.md"])
 	}
-	if !byID["decision.md"].Decision || byID["decision.md"].Status != "design-only" || !byID["decision.md"].PublicationValid {
+	if !byID["decision.md"].Decision || byID["decision.md"].Status != "design-only" || byID["decision.md"].PublicationValid {
 		t.Errorf("decision publication = %+v", byID["decision.md"])
 	}
 	for id, contentCode := range map[string]string{
@@ -193,18 +200,21 @@ The trial stays frozen until the operator makes an explicit decision.
 		for _, diagnostic := range byID[id].Diagnostics {
 			codes[diagnostic.Code] = true
 		}
-		for _, want := range []string{contentCode, "action.missing", "support.missing"} {
+		for _, want := range []string{contentCode, "action.missing", "support.missing", "presentation.missing"} {
 			if !codes[want] {
 				t.Errorf("%s diagnostics missing %q: %+v", id, want, byID[id].Diagnostics)
 			}
 		}
 	}
 	summary := summarizeResearchDiagnostics(entries)
-	if summary.Documents != 6 || summary.Valid != 3 || summary.NeedsAttention != 3 {
+	if summary.Documents != 6 || summary.Valid != 2 || summary.NeedsAttention != 4 || summary.Showpieces != 1 || summary.SourceOnly != 5 {
 		t.Errorf("diagnostics summary = %+v", summary)
 	}
 	if summary.ByCode["action.missing"] != 3 || summary.ByCode["support.missing"] != 3 {
 		t.Errorf("diagnostics counts = %+v", summary.ByCode)
+	}
+	if summary.ByCode["presentation.missing"] != 4 {
+		t.Errorf("presentation readiness count = %+v", summary.ByCode)
 	}
 }
 
@@ -230,6 +240,151 @@ No authorization is granted by this publication metadata.
 	}
 	if !strings.Contains(body, "DESIGN ONLY") {
 		t.Fatal("fixture must retain the frozen design marker")
+	}
+}
+
+func TestResearchIndexPrefersCanonicalHTML5Showpiece(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	writeResearchFixture(t, root, "buzz/SOURCE.md", "# Buzz research\n\nA complete source paper.\n", now)
+	writeResearchFixture(t, root, "buzz.md", "# Legacy Buzz research\n\nSuperseded flat source.\n", now.Add(2*time.Hour))
+	writeResearchFixture(t, root, "source-only/SOURCE.md", "# Source only\n\nStill awaiting its presentation.\n", now.Add(time.Hour))
+	presentation := filepath.Join(root, "buzz", "presentation", "index.html")
+	if err := os.MkdirAll(filepath.Dir(presentation), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(presentation, []byte("<!doctype html><title>Buzz showpiece</title>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := readResearchIndex(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("research index = %+v, want ready package to suppress same-stem legacy Markdown", entries)
+	}
+	if got := entries[0]; got.ID != "buzz/SOURCE.md" || !got.PresentationReady ||
+		got.PublicationState != "showpiece" || got.PresentationURL != "/research-presentations/buzz/presentation/index.html" {
+		t.Fatalf("showpiece entry = %+v", got)
+	}
+	if got := entries[1]; got.ID != "source-only/SOURCE.md" || got.PresentationReady ||
+		got.PublicationState != "source-only" || got.PresentationURL != "" {
+		t.Fatalf("source-only entry = %+v", got)
+	}
+}
+
+func TestResearchPresentationServesOnlyCanonicalPackageAssets(t *testing.T) {
+	srv, _ := newTestServer(t, singleFleetRoster, time.Now())
+	root := t.TempDir()
+	srv.cfg.ResearchPath = root
+	writeResearchFixture(t, root, "buzz/SOURCE.md", "# Buzz\n\nSource evidence.\n", time.Now())
+	for name, body := range map[string]string{
+		"buzz/presentation/index.html":     `<!doctype html><script src="assets/app.js"></script>`,
+		"buzz/presentation/assets/app.js":  `document.body.dataset.ready = "true";`,
+		"buzz/presentation/assets/art.svg": `<svg xmlns="http://www.w3.org/2000/svg"></svg>`,
+		"buzz/presentation/media/demo.mp4": "video-bytes",
+	} {
+		full := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	html := doGet(t, srv, "/research-presentations/buzz/presentation/index.html")
+	if html.Code != http.StatusOK || !strings.Contains(html.Body.String(), "assets/app.js") {
+		t.Fatalf("presentation HTML = %d %q", html.Code, html.Body.String())
+	}
+	if got := html.Header().Get("Content-Security-Policy"); !strings.Contains(got, "connect-src 'none'") || !strings.Contains(got, "frame-ancestors 'self'") {
+		t.Errorf("presentation CSP = %q", got)
+	}
+	if got := html.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("presentation nosniff = %q", got)
+	}
+	if js := doGet(t, srv, "/research-presentations/buzz/presentation/assets/app.js"); js.Code != http.StatusOK || !strings.Contains(js.Body.String(), "dataset.ready") {
+		t.Fatalf("presentation JS = %d %q", js.Code, js.Body.String())
+	}
+	if media := doGet(t, srv, "/research-presentations/buzz/presentation/media/demo.mp4"); media.Code != http.StatusOK || media.Body.String() != "video-bytes" {
+		t.Fatalf("presentation media = %d %q", media.Code, media.Body.String())
+	}
+	if source := doGet(t, srv, "/research-presentations/buzz/SOURCE.md"); source.Code != http.StatusOK || !strings.Contains(source.Body.String(), "Source evidence") {
+		t.Fatalf("presentation-relative source = %d %q", source.Code, source.Body.String())
+	}
+
+	outside := filepath.Join(t.TempDir(), "outside.js")
+	if err := os.WriteFile(outside, []byte("HOST_SECRET_SENTINEL"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "buzz", "presentation", "assets", "leak.js")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	for _, bad := range []string{
+		"/research-presentations/buzz/presentation/assets/leak.js",
+		"/research-presentations/buzz/presentation/.hidden.js",
+		"/research-presentations/buzz/presentation/notes.md",
+		"/research-presentations/%2e%2e%2foutside.js",
+		"/research-presentations/orphan/presentation/index.html",
+	} {
+		rec := doGet(t, srv, bad)
+		if rec.Code == http.StatusOK || strings.Contains(rec.Body.String(), "HOST_SECRET_SENTINEL") {
+			t.Errorf("unsafe presentation path %q served status=%d body=%q", bad, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestResearchStatusUsesExactAwaitingAuthMarkers(t *testing.T) {
+	tests := []struct {
+		name     string
+		title    string
+		markdown string
+		status   string
+		decision bool
+	}{
+		{"frontmatter", "Design", "---\nstatus: awaiting-auth\n---\nBody", "awaiting-auth", true},
+		{"bold metadata", "Design", "**Status:** awaiting-auth — operator GO\n", "awaiting-auth", true},
+		{"exact ledger token", "Design", "## Gate\n\n- [awaiting-auth] operator GO\n", "awaiting-auth", true},
+		{"loop posture is not authorization", "Fleet posture", "status: research\n\nRaw loop posture: awaiting-authority\n", "research", false},
+		{"near miss is not authorization", "Fleet posture", "# Fleet posture awaiting-authorization\n", "research", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			status, _, decision, _ := researchStatus(tc.title, tc.markdown, ResearchPublication{})
+			if status != tc.status || decision != tc.decision {
+				t.Fatalf("researchStatus = (%q, %v), want (%q, %v)", status, decision, tc.status, tc.decision)
+			}
+		})
+	}
+}
+
+func TestResearchPublicationExcludesOperationalArtifacts(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	writeResearchFixture(t, root, "papers/real-paper.md", "# Real paper\n\nSubstantive research.\n", now)
+	for _, id := range []string{
+		"walk-20260724/captures.md",
+		"packages/product-walk-20260724/manifest.md",
+		"scorecards/fleet-seven-c-scorecard.md",
+		"demo/findings.md",
+		"dumps/process-dump-20260724.md",
+		"state/session-mirror/transcript.md",
+	} {
+		writeResearchFixture(t, root, id, "# Operational artifact\n\nNot a publication.\n", now)
+	}
+
+	entries, err := readResearchIndex(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].ID != "papers/real-paper.md" {
+		t.Fatalf("publication index = %+v, want only the real paper", entries)
+	}
+	for _, id := range []string{"demo/findings.md", "dumps/process-dump-20260724.md"} {
+		if _, found, err := readResearchDocument(root, id); err != nil || found {
+			t.Fatalf("excluded document %q = found %v, err %v; want unavailable", id, found, err)
+		}
 	}
 }
 
@@ -322,17 +477,17 @@ func TestResearchAPIIndexBodyDeepLinkAndTraversal(t *testing.T) {
 func TestResearchPageAndDashboardNavMarkers(t *testing.T) {
 	srv, _ := newTestServer(t, singleFleetRoster, time.Now())
 	index := doGet(t, srv, "/").Body.String()
-	if !strings.Contains(index, `id="tab-research"`) || !strings.Contains(index, `href="/research"`) {
-		t.Error("dashboard must expose a Research navigation link")
+	if !strings.Contains(index, `id="tab-decisions"`) || !strings.Contains(index, `href="/research?focus=decisions"`) || !strings.Contains(index, `R&amp;D`) {
+		t.Error("dashboard must expose the combined R&D navigation link with decision focus")
 	}
 	page := doGet(t, srv, "/research").Body.String()
-	for _, marker := range []string{"Private-LAN library", "Waiting on you", "Publication diagnostics", `id="research-reader"`, `id="research-decision-more"`, `id="research-library-more"`, `id="research-toc-count"`, `id="research-publication-state"`, `id="research-document-comment"`, `id="research-annotation-panel"`, `/static/research.js`} {
+	for _, marker := range []string{"Decide · investigate · learn", "R&amp;D", "Waiting on you", "Publication diagnostics", `id="research-reader"`, `id="research-search"`, `data-research-focus="decisions"`, `data-research-focus="library"`, `data-research-focus="all"`, `id="research-decision-more"`, `id="research-library-more"`, `id="research-toc-count"`, `id="research-publication-state"`, `id="research-document-comment"`, `id="research-annotation-panel"`, `id="research-presentation"`, `sandbox="allow-scripts"`, `/static/research.js`} {
 		if !strings.Contains(page, marker) {
 			t.Errorf("research page missing %q", marker)
 		}
 	}
 	js := doGet(t, srv, "/static/research.js").Body.String()
-	for _, marker := range []string{"function esc(value)", "renderMarkdown", "documentWithoutDuplicateTitle", "documentWithoutPublicationDirective", "research-diagnostics", "research-publication-state", "research-decision-strip", "collectionWindow = 6", "tocRestoreY", "researchVideoURL", "data-research-video-fullscreen", "anchorForQuote", "X-Flotilla-Dash", "draft is still here"} {
+	for _, marker := range []string{"function esc(value)", "renderMarkdown", "documentWithoutDuplicateTitle", "documentWithoutPublicationDirective", "research-diagnostics", "research-publication-state", "research-decision-strip", "collectionWindow = 6", "decisionWindow = 3", "filteredEntries", "setFocus", "tocRestoreY", "researchVideoURL", "data-research-video-fullscreen", "anchorForQuote", "X-Flotilla-Dash", "draft is still here", "node.paper_id || paperIDFromBrief", "item.paper_id || paperIDFromBrief", "HTML5 showpiece", "renderPresentation"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("research renderer missing %q", marker)
 		}

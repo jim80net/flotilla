@@ -265,6 +265,87 @@ func TestResolveRolloutForProcessRejectsAmbiguousAndOutsideFiles(t *testing.T) {
 	}
 }
 
+func TestResolveLatestCompleteRolloutForProcessSelectsNewestCompleteTurnFinal(t *testing.T) {
+	home := t.TempDir()
+	proc := t.TempDir()
+	cwd := "/srv/fleet/shared"
+	dir := filepath.Join(home, "sessions", "2026", "07", "17")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	meta := `{"type":"session_meta","payload":{"cwd":"` + cwd + `"}}`
+	older := filepath.Join(dir, "rollout-2026-07-17T10-00-00-old.jsonl")
+	newer := filepath.Join(dir, "rollout-2026-07-17T11-00-00-new.jsonl")
+	if err := os.WriteFile(older, []byte(meta+"\n"+`{"type":"event_msg","payload":{"type":"agent_message","message":"older commentary"}}`+"\n"+`{"type":"event_msg","payload":{"type":"task_complete","last_agent_message":"completed older turn-final"}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newer, []byte(meta+"\n"+`{"type":"event_msg","payload":{"type":"user_message","message":"new rollout still sampling"}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	makeProcNode(t, proc, 500, "")
+	for fd, path := range map[string]string{"3": older, "4": newer} {
+		if err := os.Symlink(path, filepath.Join(proc, "500", "fd", fd)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	path, err := resolveLatestCompleteRolloutForProcess(home, cwd, 500, proc)
+	if err != nil || path != older {
+		t.Fatalf("resolveLatestCompleteRolloutForProcess = (%q, %v), want %q", path, err, older)
+	}
+	if _, err := resolveRolloutForProcess(home, cwd, 500, proc); err == nil {
+		t.Fatal("strict operator-message resolver must still reject multiple open rollouts")
+	}
+
+	if err := os.WriteFile(newer, []byte(meta+"\n"+`{"type":"event_msg","payload":{"type":"agent_message","message":"newer commentary is not final"}}`+"\n"+`{"type":"event_msg","payload":{"type":"task_complete","last_agent_message":"newest complete turn-final"}}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path, err = resolveLatestCompleteRolloutForProcess(home, cwd, 500, proc)
+	if err != nil || path != newer {
+		t.Fatalf("newest complete rollout = (%q, %v), want %q", path, err, newer)
+	}
+}
+
+func TestResolveLatestCompleteRolloutForProcessKeepsPaneBindingWithUnattributedRollouts(t *testing.T) {
+	home := t.TempDir()
+	proc := t.TempDir()
+	cwd := "/srv/fleet/shared"
+	dir := filepath.Join(home, "sessions", "2026", "07", "24")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	older := filepath.Join(dir, "rollout-2026-07-24T10-00-00-empty-cwd.jsonl")
+	newer := filepath.Join(dir, "rollout-2026-07-24T11-00-00-no-meta.jsonl")
+	if err := os.WriteFile(older, []byte(
+		`{"type":"session_meta","payload":{"cwd":""}}`+"\n"+
+			`{"type":"event_msg","payload":{"type":"task_complete","last_agent_message":"completed pane-bound final"}}`+"\n",
+	), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newer, []byte(
+		`{"type":"event_msg","payload":{"type":"agent_message","message":"new rollout still sampling"}}`+"\n",
+	), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	makeProcNode(t, proc, 550, "")
+	for fd, path := range map[string]string{"3": older, "4": newer} {
+		if err := os.Symlink(path, filepath.Join(proc, "550", "fd", fd)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	path, err := resolveLatestCompleteRolloutForProcess(home, cwd, 550, proc)
+	if err != nil || path != older {
+		t.Fatalf("unattributed pane-bound rollout = (%q, %v), want %q", path, err, older)
+	}
+	if got, err := lastCompletedTurnFinal(path); err != nil || got != "completed pane-bound final" {
+		t.Fatalf("completed unattributed result = (%q, %v)", got, err)
+	}
+	if _, err := resolveLatestCompleteRolloutForProcess(home, "", 550, proc); err == nil {
+		t.Fatal("empty pane cwd must still fail closed with multiple unattributed rollouts")
+	}
+}
+
 func TestProcessChildrenUnionsAllThreads(t *testing.T) {
 	proc := t.TempDir()
 	makeProcNode(t, proc, 400, "401")
