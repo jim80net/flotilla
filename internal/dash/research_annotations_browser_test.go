@@ -85,6 +85,7 @@ second["markdown"] = "# Second note\n\n## Finding\n\nBeta document remains isola
 
 def install(page, empty=False, race=None):
     writes = [0]
+    last_created = [None]
     page.add_init_script("window.EventSource = undefined")
     page.route("**/api/research", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps({"research": [
         {"id": document["id"], "title": document["title"], "status": "research", "updated_at": document["updated_at"]},
@@ -115,26 +116,45 @@ def install(page, empty=False, race=None):
             return
         writes[0] += 1
         payload = route.request.post_data_json
-        if writes[0] == 1:
-            route.fulfill(status=503, content_type="application/json", body=json.dumps({"error": "generic write service unavailable"}))
-            return
         created = {
             "id": "ra_created", "document_id": document["id"], "document_digest": document["digest"],
             "author": "operator", "created_at": "2026-07-23T12:00:00Z", "updated_at": "2026-07-23T12:00:00Z",
             "comments": [{"id": "rc_created", "author": "operator", "text": payload["comment"], "created_at": "2026-07-23T12:00:00Z"}],
-            "resolved": False,
+            "resolved": False, "routing": {
+                "state": "saved" if writes[0] == 1 else "delivered",
+                "key": "ra_created:" + str(3 + writes[0]), "generation": 3 + writes[0],
+                "target": "" if writes[0] == 1 else "cos", "updated_at": "2026-07-23T12:00:00Z"
+            }
         }
         if payload.get("anchor"):
             created["anchor"] = payload["anchor"]
             created["anchor_resolution"] = {"state": "attached", "start": payload["anchor"]["start"], "end": payload["anchor"]["end"]}
         else:
             created["id"] = "ra_document_created"
+            created["routing"]["key"] = "ra_document_created:" + str(3 + writes[0])
         state = dict(initial)
-        state["generation"] = 4
+        state["generation"] = 3 + writes[0]
         state["annotations"] = initial["annotations"] + [created]
         state["created"] = created
+        last_created[0] = created
         route.fulfill(status=201, content_type="application/json", body=json.dumps(state))
     page.route("**/api/research-annotations/**", annotations)
+    def annotation_routes(route):
+        assert route.request.method == "POST"
+        assert route.request.headers.get("x-flotilla-dash") == "1"
+        payload = route.request.post_data_json
+        created = dict(last_created[0])
+        created["routing"] = dict(created["routing"])
+        assert payload["annotation_id"] == created["id"]
+        assert payload["generation"] == created["routing"]["generation"]
+        created["routing"].update({"state": "queued", "target": "cos", "queued_id": "queued-once"})
+        state = dict(initial)
+        state["generation"] = created["routing"]["generation"]
+        state["annotations"] = initial["annotations"] + [created]
+        state["created"] = created
+        last_created[0] = created
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(state))
+    page.route("**/api/research-annotation-routes/**", annotation_routes)
 
 def select_text(page, quote):
     page.locator("#research-body").evaluate("""(root, quote) => {
@@ -189,14 +209,22 @@ with sync_playwright() as p:
         draft = "Long retained draft — " + ("generic context " * 28)
         phone.locator("#research-annotation-draft").fill(draft)
         phone.locator("#research-annotation-save").click()
-        expect(phone.locator("#research-annotation-save-status")).to_contain_text("Not saved")
+        expect(phone.locator("#research-annotation-save-status")).to_contain_text("Saved locally")
+        expect(phone.locator("#research-annotation-save-status")).to_contain_text("not routed")
         expect(phone.locator("#research-annotation-save-status")).to_contain_text("draft is still here")
         assert phone.locator("#research-annotation-draft").input_value() == draft
-        phone.locator("#research-annotation-save").click()
+        retry = phone.locator("#research-annotation-route-retry")
+        expect(retry).to_be_visible()
+        retry_box = retry.evaluate("node => { const r=node.getBoundingClientRect(); return {top:r.top,bottom:r.bottom,left:r.left,right:r.right,height:r.height} }")
+        assert retry_box["left"] >= 0 and retry_box["right"] <= 390 and retry_box["height"] >= 44, retry_box
+        retry.click()
         expect(phone.locator("#research-annotation-thread-title")).to_have_text("Passage thread")
+        expect(phone.locator("#research-annotation-thread-state")).to_contain_text("Queued for review")
         expect(phone.locator("#research-annotation-count")).to_have_text("4 annotations")
         expect(phone.locator(".research-highlight")).to_have_count(2)
+        routed_highlight = phone.locator('[data-annotation-id="ra_created"]')
         phone.keyboard.press("Escape")
+        assert routed_highlight.evaluate("node => document.activeElement === node")
         phone.locator("#research-document-comment").click()
         expect(phone.locator("#research-annotation-form-title")).to_have_text("Comment on this document")
         expect(phone.locator("#research-annotation-draft-quote")).to_be_hidden()
@@ -222,7 +250,7 @@ with sync_playwright() as p:
         }""")
         assert geometry["panelLeft"] >= geometry["bodyRight"] - 1, geometry
         assert geometry["panelRight"] <= 1440 and geometry["width"] == geometry["client"], geometry
-        print(json.dumps({"phone_sheet": sheet, "selection_action": action_box, "phone": phone_metrics, "desktop": geometry}))
+        print(json.dumps({"phone_sheet": sheet, "selection_action": action_box, "route_retry": retry_box, "phone": phone_metrics, "desktop": geometry}))
 
         # A stale annotation GET failure from document A cannot replace document B's
         # loaded annotation state. A late successful A save likewise cannot clear B's
