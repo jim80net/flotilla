@@ -49,6 +49,7 @@ for i in range(7):
         "id": "decisions/generic-%d.md" % (i + 1),
         "title": "Generic decision %d" % (i + 1),
         "status": "operator-review", "decision": True,
+        "publication": {"classification": "decision", "explicit": True},
         "summary": "Recommendation %d with a reversible safe default." % (i + 1),
         "updated_at": "2026-07-%02dT12:00:00Z" % (i + 1)
     })
@@ -76,8 +77,17 @@ entries.append({
     "id": "library/awaiting-auth-token-not-a-gate.md",
     "title": "Awaiting-auth token regression",
     "status": "awaiting-auth", "decision": True,
+    "publication": {"classification": "research", "explicit": True},
     "summary": "This source discusses the token but is not backed by an operator-gated goal.",
     "updated_at": "2026-06-20T12:00:00Z"
+})
+entries.append({
+    "id": "library/trading-domain-posture.md",
+    "title": "Trading domain posture",
+    "status": "research", "decision": False,
+    "publication": {"classification": "research", "explicit": True},
+    "summary": "A product dependency brief, not a decision for the operator.",
+    "updated_at": "2026-06-21T12:00:00Z"
 })
 goals.append({
     "id": "not-gated", "title": "Active token research",
@@ -90,6 +100,12 @@ goals.append({
 # blocked roll-up whose bound work is done and a seat-loop posture must never
 # enter the Waiting on you shelf, even when they carry valid paper links.
 goals.extend([
+    {
+        "id": "trading-domain", "title": "Trading domain",
+        "status_display": "blocked", "state": "blocked",
+        "brief": "## Why blocked\nA product dependency is incomplete.\n\n## Recommendation\nKeep working inside the existing authority.\n\n[Read paper](/research/library/trading-domain-posture.md)",
+        "work_items": []
+    },
     {
         "id": "stale-blocked", "title": "Stale blocked roll-up",
         "status_display": "blocked", "state": "blocked",
@@ -166,6 +182,7 @@ with sync_playwright() as p:
             expect(page.locator("#research-diagnostics")).to_be_hidden()
             expect(page.locator("#research-decision-list")).not_to_contain_text("Awaiting-auth token regression")
             expect(page.locator("#research-decision-list")).not_to_contain_text("Active token research")
+            expect(page.locator("#research-decision-list")).not_to_contain_text("Trading domain")
             expect(page.locator("#research-decision-list")).not_to_contain_text("Stale blocked roll-up")
             expect(page.locator("#research-decision-list")).not_to_contain_text("Seat awaiting authority")
             expect(page.locator("#research-decision-list")).not_to_contain_text("This parent decision is closed")
@@ -224,7 +241,7 @@ with sync_playwright() as p:
             expect(page.locator("#research-decisions")).to_be_hidden()
             expect(page.locator("#research-diagnostics")).to_be_visible()
             expect(page.locator("#research-list .research-card")).to_have_count(6)
-            expect(page.locator("#research-filter-status")).to_have_text("20 library documents")
+            expect(page.locator("#research-filter-status")).to_have_text("21 library documents")
             page.locator("#research-search").fill("evidence 11")
             expect(page.locator("#research-list .research-card")).to_have_count(1)
             expect(page.locator("#research-list")).to_contain_text("Evidence note 11")
@@ -244,8 +261,8 @@ with sync_playwright() as p:
         expect(desktop.locator("#view-decisions")).to_have_count(0)
         expect(desktop.locator("#tab-decisions")).to_contain_text("R&D")
         # The dashboard badge is a broader Goals posture count; the R&D shelf
-        # independently admits only six actionable, paper-linked decisions.
-        expect(desktop.locator("#hdr-decisions-count")).to_have_text("10")
+        # independently admits only seven actionable, decision-class papers.
+        expect(desktop.locator("#hdr-decisions-count")).to_have_text("11")
         desktop.locator("#tab-decisions").click()
         expect(desktop).to_have_url(url + "/research?focus=decisions")
         expect(desktop.locator("#research-decision-list .research-card")).to_have_count(3)

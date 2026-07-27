@@ -416,7 +416,17 @@
   }
   function actionableDecisions() {
     return goalDecisions.filter(function (decision) {
-      return !!decision.paperID && entries.some(function (entry) { return entry.id === decision.paperID; });
+      return !!decision.paperID && entries.some(function (entry) {
+        // A generic blocked Goals roll-up is not an operator decision. Require
+        // the linked paper's author-owned publication metadata to classify the
+        // work as a decision before it can enter Waiting on you. The Goals
+        // state still supplies the live awaiting/blocked truth; this second
+        // boundary keeps dependency and product blocks on the Library surface.
+        return entry.id === decision.paperID &&
+          entry.publication &&
+          entry.publication.explicit === true &&
+          entry.publication.classification === "decision";
+      });
     });
   }
   function syncFocusControls() {
