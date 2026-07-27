@@ -1,0 +1,12 @@
+{
+  "routes": {
+    "/": {
+      "#issues-list .issue-scope-note": true,
+      ".issue-shipped-group": false,
+      ".gdec-summary": false
+    },
+    "/research?focus=decisions": {
+      "#research-decision-list .research-card": true
+    }
+  }
+}
