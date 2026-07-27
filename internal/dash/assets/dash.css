@@ -2850,7 +2850,8 @@ html, body { overflow-x: clip; }
   display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
 }
 .research-card.is-decision .research-card-blocker {
-  display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  display: block; overflow: hidden; color: var(--amber); font: 600 .62rem/1.35 var(--display);
+  text-overflow: ellipsis; white-space: nowrap;
 }
 .research-card-diagnostics { color: var(--amber); font: 600 .6rem var(--display); letter-spacing: .03em; }
 .research-show-more {

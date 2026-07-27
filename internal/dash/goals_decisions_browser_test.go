@@ -86,6 +86,35 @@ goals.append({
     "brief": "## Decision needed\nDocument how awaiting-auth token matching works.",
     "work_items": []
 })
+# These look superficially gated but are not real operator decisions. A stale
+# blocked roll-up whose bound work is done and a seat-loop posture must never
+# enter the Waiting on you shelf, even when they carry valid paper links.
+goals.extend([
+    {
+        "id": "stale-blocked", "title": "Stale blocked roll-up",
+        "status_display": "blocked", "state": "blocked",
+        "brief": "## Recommendation\nDo not revive completed work.\n\n[Read paper](/research/decisions/generic-3.md)",
+        "work_items": [{"class": "done", "label": "already complete"}]
+    },
+    {
+        "id": "seat-posture", "title": "Seat awaiting authority",
+        "status_display": "awaiting-authority", "state": "awaiting-authority",
+        "brief": "## Recommendation\nAssign ordinary work.\n\n[Read paper](/research/decisions/generic-4.md)",
+        "work_items": []
+    },
+    {
+        "id": "resolved-parent-live-child", "title": "Resolved parent with a live child",
+        "status_display": "blocked", "state": "blocked",
+        "brief": "**RESOLVED:** This parent decision is closed and must not recur.\n\n[Read paper](/research/decisions/generic-4.md)",
+        "work_items": [
+            {"class": "done", "label": "parent decision complete"},
+            {
+                "class": "awaiting", "label": "Choose the child boundary",
+                "brief": "## Decision needed\nChoose the child boundary.\n\n## Recommendation\nKeep the child reversible.\n\n[Read paper](/research/decisions/generic-5.md)"
+            }
+        ]
+    }
+])
 for i in range(12):
     entries.append({
         "id": "library/evidence-%d.md" % (i + 1),
@@ -137,23 +166,36 @@ with sync_playwright() as p:
             expect(page.locator("#research-diagnostics")).to_be_hidden()
             expect(page.locator("#research-decision-list")).not_to_contain_text("Awaiting-auth token regression")
             expect(page.locator("#research-decision-list")).not_to_contain_text("Active token research")
+            expect(page.locator("#research-decision-list")).not_to_contain_text("Stale blocked roll-up")
+            expect(page.locator("#research-decision-list")).not_to_contain_text("Seat awaiting authority")
+            expect(page.locator("#research-decision-list")).not_to_contain_text("This parent decision is closed")
             expect(page.locator("#gdec-detail")).to_have_count(0)
             assert page.evaluate("document.documentElement.scrollWidth === innerWidth")
+            page.locator("#research-decision-more").click()
+            page.locator("#research-decision-more").click()
+            expect(page.locator("#research-decision-list .research-card")).to_have_count(7)
+            live_child = page.locator("#research-decision-list .research-card").filter(
+                has_text="Resolved parent with a live child")
+            expect(live_child).to_have_count(1)
+            expect(live_child).to_contain_text("Choose the child boundary")
+            expect(live_child).not_to_contain_text("closed and must not recur")
             cards = page.locator("#research-decision-list .research-card")
             formatted = cards.filter(has_text="Generic decision 1")
-            summary = formatted.locator(".research-card-summary")
+            summary = formatted.locator(".research-card-blocker")
             assert "**" not in summary.inner_text()
-            assert summary.inner_text().startswith("Why it needs you · ")
+            assert summary.inner_text().startswith("Why you care · ")
             assert len(summary.inner_text()) <= 200
             assert summary.inner_text().endswith("…")
             line = summary.evaluate("node => ({height:node.getBoundingClientRect().height,line:parseFloat(getComputedStyle(node).lineHeight)})")
             assert line["height"] <= line["line"] * 1.25, line
             expect(formatted.locator(".research-card-next")).to_have_text("Open paper →")
-            missing = cards.filter(has_text="Generic decision 2")
-            expect(missing.locator(".research-card-next")).to_have_text("Open decision →")
-            assert missing.get_attribute("href") == "/#goals/generic-2"
+            expect(formatted.locator(".research-card-blocker")).to_contain_text(
+                "Why you care · Choose the reversible release boundary")
+            expect(cards.filter(has_text="Generic decision 2")).to_have_count(0)
+            expect(cards.filter(has_text="Choose the child boundary")).to_have_count(1)
             for card in cards.all():
                 assert card.locator(".research-card-next").count() == 1
+                assert card.get_attribute("href").startswith("/research/")
             assert cards.locator("img, script").count() == 0
 
             # A decision opens its paper in the one R&D canvas, never a dialog stack.
@@ -201,7 +243,9 @@ with sync_playwright() as p:
         desktop.goto(url, wait_until="domcontentloaded")
         expect(desktop.locator("#view-decisions")).to_have_count(0)
         expect(desktop.locator("#tab-decisions")).to_contain_text("R&D")
-        expect(desktop.locator("#hdr-decisions-count")).to_have_text("7")
+        # The dashboard badge is a broader Goals posture count; the R&D shelf
+        # independently admits only six actionable, paper-linked decisions.
+        expect(desktop.locator("#hdr-decisions-count")).to_have_text("10")
         desktop.locator("#tab-decisions").click()
         expect(desktop).to_have_url(url + "/research?focus=decisions")
         expect(desktop.locator("#research-decision-list .research-card")).to_have_count(3)

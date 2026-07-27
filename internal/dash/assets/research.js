@@ -276,17 +276,37 @@
     doc.goals.forEach(function (node) {
       if (!node) return;
       var state = decisionState(node);
-      var gated = state === "awaiting" || state === "awaiting-authority" || state === "blocked";
-      if (gated && hasDecisionBrief(node.brief)) {
-        out.push({ node: node, label: "", brief: node.brief, paperID: node.paper_id || paperIDFromBrief(node.brief) });
+      // Goals maps an exact [awaiting-auth] backlog marker to "awaiting".
+      // "awaiting-authority" is a seat-loop posture, not an operator decision.
+      var gated = state === "awaiting" || state === "blocked";
+      var workItems = node.work_items || [];
+      var gatedItems = workItems.filter(function (item) {
+        return item && (item.class === "awaiting" || item.class === "blocked");
+      });
+      // Work-item truth wins whenever a node has bound work. A roll-up can stay
+      // blocked after its node brief is resolved while a distinct child gate is
+      // still awaiting Jim; surfacing both would revive a closed decision.
+      if (gated && hasDecisionBrief(node.brief) && workItems.length === 0) {
+        out.push({
+          node: node,
+          label: "",
+          brief: node.brief,
+          paperID: node.paper_id || paperIDFromBrief(node.brief),
+          reason: decisionBriefField(node.brief, ["decision", "question", "why blocked", "blocker"]) ||
+            (gatedItems[0] && (gatedItems[0].label || gatedItems[0].detail)) ||
+            "Operator approval is required"
+        });
       }
-      (node.work_items || []).forEach(function (item) {
-        if ((item.class === "awaiting" || item.class === "blocked") && hasDecisionBrief(item.brief) && !sameDecisionBrief(item.brief, node.brief)) {
+      gatedItems.forEach(function (item) {
+        if (hasDecisionBrief(item.brief)) {
           out.push({
             node: node,
             label: item.label || item.detail || item.kind || "",
             brief: item.brief,
-            paperID: item.paper_id || paperIDFromBrief(item.brief)
+            paperID: item.paper_id || paperIDFromBrief(item.brief),
+            reason: item.label || item.detail ||
+              decisionBriefField(item.brief, ["decision", "question", "why blocked", "blocker"]) ||
+              "Operator approval is required"
           });
         }
       });
@@ -349,17 +369,14 @@
   function decisionCard(decision) {
     var node = decision.node;
     var paperEntry = decision.paperID && entries.find(function (entry) { return entry.id === decision.paperID; });
-    var paper = !!paperEntry;
     var item = document.createElement("a");
-    item.className = "research-card is-decision" + (paper ? "" : " is-unlinked");
-    item.href = paper ? pagePath(decision.paperID) : "/#goals/" + encodeURIComponent(node.id);
-    if (paper) {
-      item.dataset.researchId = decision.paperID;
-      item.addEventListener("click", function (event) {
-        event.preventDefault();
-        openDocument(decision.paperID, true, paperEntry);
-      });
-    }
+    item.className = "research-card is-decision";
+    item.href = pagePath(decision.paperID);
+    item.dataset.researchId = decision.paperID;
+    item.addEventListener("click", function (event) {
+      event.preventDefault();
+      openDocument(decision.paperID, true, paperEntry);
+    });
     var top = document.createElement("span"); top.className = "research-card-top";
     var badge = document.createElement("span"); badge.className = "research-badge"; badge.textContent = "Decision";
     var state = document.createElement("span"); state.className = "research-decision-state"; state.textContent = node.state || node.status_display || "awaiting";
@@ -367,10 +384,14 @@
     var title = document.createElement("strong");
     title.textContent = (node.title || node.id) + (decision.label ? " — " + decision.label : "");
     var reason = document.createElement("span"); reason.className = "research-card-summary research-card-blocker";
-    reason.textContent = "Why it needs you · " + decisionReason(decision);
+    reason.textContent = "Why you care · " + decisionReason(decision);
+    var action = document.createElement("span"); action.className = "research-card-summary";
+    action.textContent = decisionCardProse(
+      decisionBriefField(decision.brief, ["recommendation", "recommended"])
+    ) || "Review the paper and choose the safe next step";
     var next = document.createElement("span"); next.className = "research-card-next";
-    next.textContent = paper ? "Open paper →" : "Open decision →";
-    item.appendChild(top); item.appendChild(title); item.appendChild(reason); item.appendChild(next);
+    next.textContent = "Open paper →";
+    item.appendChild(top); item.appendChild(title); item.appendChild(reason); item.appendChild(action); item.appendChild(next);
     return item;
   }
   function renderCollection(listID, moreID, collection, visible, renderer) {
@@ -394,6 +415,11 @@
     var needle = searchQuery.trim().toLowerCase();
     return needle ? entries.filter(function (entry) { return searchable(entry).indexOf(needle) !== -1; }) : entries.slice();
   }
+  function actionableDecisions() {
+    return goalDecisions.filter(function (decision) {
+      return !!decision.paperID && entries.some(function (entry) { return entry.id === decision.paperID; });
+    });
+  }
   function syncFocusControls() {
     document.querySelectorAll("[data-research-focus]").forEach(function (button) {
       button.setAttribute("aria-pressed", String(button.dataset.researchFocus === currentFocus));
@@ -402,9 +428,10 @@
   function renderIndex() {
     var matching = filteredEntries();
     var needle = searchQuery.trim().toLowerCase();
+    var actionable = actionableDecisions();
     var decisions = needle
-      ? goalDecisions.filter(function (decision) { return searchableDecision(decision).indexOf(needle) !== -1; })
-      : goalDecisions.slice();
+      ? actionable.filter(function (decision) { return searchableDecision(decision).indexOf(needle) !== -1; })
+      : actionable;
     var library = matching;
     var showDecisions = currentFocus === "decisions" || currentFocus === "all";
     var showLibrary = currentFocus === "library" || currentFocus === "all";
