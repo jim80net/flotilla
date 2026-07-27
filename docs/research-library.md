@@ -93,25 +93,36 @@ shelf is deliberately narrower than a Goals posture count: it admits only an
 exact unresolved `awaiting` or `blocked` goal/work item with a decision brief
 from current work-item truth. When a node has work items, a rolled-up node brief
 cannot override them or revive a resolved parent request. The seat-loop posture
+R&amp;D is one reading room with two deliberately separate operator jobs:
+
+- **Decide** opens by default and contains only explicit authority-gated work
+  with a decision-class paper.
+- **Learn** contains only explicit `classification: research` publications that
+  pass every publication check and have a complete local HTML5 presentation.
+
+Raw Markdown, plausible titles, source-only notes, status summaries, diagnostics,
+and archival material never enter Learn. They remain addressable by exact deep
+link as provenance. This keeps the operator index focused without deleting
+source evidence. Legacy `focus=library` and `focus=all` links resolve to Learn.
+
 `awaiting-authority` is not a decision. Neither is a generic `blocked` roll-up:
 exact `awaiting-auth` work items carry operator authority, while a blocked safety
 fork must resolve to an explicitly `decision`-class publication. Every admitted
 card requires that indexed decision paper and exposes one single-line reason,
 one next move, and one paper jump; missing and ordinary-research papers fail
-closed. Publication diagnostics stay on Library and All so the cold-open
-decision lane begins with what Jim can unblock.
+closed.
 
 Visible decision and annotation copy is written for one anticipated reader:
 `you`, `your fleet`, and `what you decide`. A routed annotation tells the
 receiving desk that Jim wrote it while preserving the assignment boundary:
 saved feedback and delivery are not proof of assigned ownership.
 
-The index and reader report empty, title-only, or boilerplate bodies; a missing
+The API reports empty, title-only, or boilerplate bodies; a missing
 reader action; missing supporting material or text-only rationale; and a missing
 HTML5 presentation for non-archival operator-facing papers. Readiness counts
-show showpiece and source-only totals. Diagnostics remain measurement-only:
-documents stay visible, source Markdown is not rewritten, and no reader action
-or presentation content is invented automatically.
+show showpiece and source-only totals. Diagnostics remain author tooling rather
+than an operator collection: source Markdown is not rewritten, and no reader
+action or presentation content is invented automatically.
 
 ## Legacy Markdown video
 

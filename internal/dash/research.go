@@ -41,6 +41,7 @@ type ResearchEntry struct {
 	PublicationState  string               `json:"publication_state"`
 	PresentationReady bool                 `json:"presentation_ready"`
 	PresentationURL   string               `json:"presentation_url,omitempty"`
+	LearnReady        bool                 `json:"learn_ready"`
 }
 
 // ResearchPublication is explicit author-owned publication metadata. It is read
@@ -606,6 +607,7 @@ func applyResearchPresentationReadiness(root string, entry *ResearchEntry) {
 		entry.PresentationReady = true
 		entry.PresentationURL = presentationURL
 		entry.PublicationValid = len(entry.Diagnostics) == 0
+		entry.LearnReady = educationalResearchReady(*entry)
 		return
 	}
 	if !entry.Archival {
@@ -615,6 +617,20 @@ func applyResearchPresentationReadiness(root string, entry *ResearchEntry) {
 		})
 	}
 	entry.PublicationValid = len(entry.Diagnostics) == 0
+	entry.LearnReady = educationalResearchReady(*entry)
+}
+
+// educationalResearchReady is the operator-facing Learn admission boundary.
+// A plausible title, a Markdown file, or presentation assets alone are never
+// enough: the author must explicitly publish teaching-quality research and the
+// complete HTML5 showpiece must pass every publication check.
+func educationalResearchReady(entry ResearchEntry) bool {
+	return entry.Publication.Explicit &&
+		entry.Publication.Classification == "research" &&
+		entry.PublicationValid &&
+		entry.PresentationReady &&
+		!entry.Decision &&
+		!entry.Archival
 }
 
 func summarizeResearchDiagnostics(entries []ResearchEntry) ResearchDiagnosticsSummary {

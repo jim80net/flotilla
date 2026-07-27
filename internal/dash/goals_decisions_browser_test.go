@@ -114,6 +114,7 @@ for i in range(12):
         "id": "library/evidence-%d.md" % (i + 1),
         "title": "Evidence note %d" % (i + 1),
         "status": "research", "decision": False,
+        "learn_ready": True, "presentation_ready": True,
         "summary": "Focused evidence %d for a generic investigation." % (i + 1),
         "updated_at": "2026-06-%02dT12:00:00Z" % (i + 1)
     })
@@ -155,8 +156,7 @@ with sync_playwright() as p:
             expect(page.locator("#research-library-title")).to_have_text("R&D")
             expect(page.locator('[data-research-focus="decisions"]')).to_have_attribute("aria-pressed", "true")
             expect(page.locator("#research-decision-list .research-card")).to_have_count(3)
-            expect(page.locator("#research-all")).to_be_hidden()
-            expect(page.locator("#research-diagnostics")).to_be_hidden()
+            expect(page.locator("#research-learn")).to_be_hidden()
             expect(page.locator("#research-filter-status")).to_have_text("7 waiting decisions")
             expect(page.locator("#gdec-detail")).to_have_count(0)
             assert page.evaluate("document.documentElement.scrollWidth === innerWidth")
@@ -211,20 +211,17 @@ with sync_playwright() as p:
             page.locator("#research-back").click()
             expect(page).to_have_url(url + "/research?focus=decisions")
 
-            # Focus and search bound the archive instead of producing one long scroll.
-            page.locator('[data-research-focus="library"]').click()
+            # Learn is a separate, bounded teaching lane; it never mixes raw
+            # archive material into the operator's decision queue.
+            page.locator('[data-research-focus="learn"]').click()
             expect(page.locator("#research-decisions")).to_be_hidden()
-            expect(page.locator("#research-diagnostics")).to_be_visible()
-            expect(page.locator("#research-list .research-card")).to_have_count(6)
-            expect(page.locator("#research-filter-status")).to_have_text("19 library documents")
+            expect(page.locator("#research-learn-list .research-card")).to_have_count(6)
+            expect(page.locator("#research-filter-status")).to_have_text("12 educational showpieces")
             page.locator("#research-search").fill("evidence 11")
-            expect(page.locator("#research-list .research-card")).to_have_count(1)
-            expect(page.locator("#research-list")).to_contain_text("Evidence note 11")
-            page.locator('[data-research-focus="all"]').click()
-            expect(page.locator("#research-filter-status")).to_contain_text("1 R&D items")
+            expect(page.locator("#research-learn-list .research-card")).to_have_count(1)
+            expect(page.locator("#research-learn-list")).to_contain_text("Evidence note 11")
             page.locator("#research-search").fill("")
-            expect(page.locator("#research-decision-list .research-card")).to_have_count(3)
-            expect(page.locator("#research-list .research-card")).to_have_count(6)
+            expect(page.locator("#research-learn-list .research-card")).to_have_count(6)
             assert page.evaluate("document.documentElement.scrollWidth === innerWidth")
             if evidence_dir:
                 page.screenshot(path=os.path.join(evidence_dir, "rd-phone-%d.png" % width), full_page=False)
