@@ -216,7 +216,6 @@
   }
 
   function hasDecisionBrief(value) { return String(value || "").trim().length > 0; }
-  function sameDecisionBrief(a, b) { return String(a || "").trim() === String(b || "").trim(); }
   function paperIDFromBrief(brief) {
     var match = String(brief || "").match(/\[[^\]]+\]\(\/(?:api\/)?research\/([^\s)#]+)(?:#[^)\s]+)?\)/i);
     if (!match) return "";
@@ -294,7 +293,7 @@
         return (item.class === "awaiting" && detail === "awaiting-auth") || item.class === "blocked";
       });
       gatedItems.forEach(function (item) {
-        if (hasDecisionBrief(item.brief) && !sameDecisionBrief(item.brief, node.brief)) {
+        if (hasDecisionBrief(item.brief)) {
           out.push({
             node: node,
             label: item.label || item.detail || item.kind || "",

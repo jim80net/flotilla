@@ -70,7 +70,7 @@ for i in range(7):
         "id": "generic-%d" % (i + 1), "title": "Generic decision %d" % (i + 1),
         "owner": "example-desk", "conversation_agent": "example-desk",
         "status_display": "awaiting", "state": "awaiting",
-        "brief": "",
+        "brief": brief if i == 2 else "",
         "work_items": [{
             "class": "awaiting", "detail": "awaiting-auth",
             "label": "authorize the bounded choice",
