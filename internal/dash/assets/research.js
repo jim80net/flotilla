@@ -261,6 +261,15 @@
     if (lastSpace >= Math.floor(limit * 0.65)) cut = cut.slice(0, lastSpace);
     return cut.trim() + "…";
   }
+  function decisionReason(decision) {
+    return decisionCardProse(
+      decisionBriefField(decision.brief, [
+        "why blocked", "why waiting", "decision needed", "operator ask", "ask", "question"
+      ]) ||
+      decision.label ||
+      decisionBriefField(decision.brief, ["recommendation", "recommended"])
+    ) || "The decision brief does not state why operator input is needed.";
+  }
   function gatherRDDecisions(doc) {
     if (!doc || !Array.isArray(doc.goals)) return [];
     var out = [];
@@ -341,10 +350,10 @@
     var node = decision.node;
     var paperEntry = decision.paperID && entries.find(function (entry) { return entry.id === decision.paperID; });
     var paper = !!paperEntry;
-    var item = document.createElement(paper ? "a" : "article");
+    var item = document.createElement("a");
     item.className = "research-card is-decision" + (paper ? "" : " is-unlinked");
+    item.href = paper ? pagePath(decision.paperID) : "/#goals/" + encodeURIComponent(node.id);
     if (paper) {
-      item.href = pagePath(decision.paperID);
       item.dataset.researchId = decision.paperID;
       item.addEventListener("click", function (event) {
         event.preventDefault();
@@ -357,13 +366,11 @@
     top.appendChild(badge); top.appendChild(state);
     var title = document.createElement("strong");
     title.textContent = (node.title || node.id) + (decision.label ? " — " + decision.label : "");
-    var recommendation = document.createElement("span"); recommendation.className = "research-card-summary";
-    recommendation.textContent = decisionCardProse(
-      decisionBriefField(decision.brief, ["recommendation", "recommended"])
-    ) || "Recommendation not stated";
+    var reason = document.createElement("span"); reason.className = "research-card-summary research-card-blocker";
+    reason.textContent = "Why it needs you · " + decisionReason(decision);
     var next = document.createElement("span"); next.className = "research-card-next";
-    next.textContent = paper ? "Open paper →" : "Paper missing — brief owner must attach evidence";
-    item.appendChild(top); item.appendChild(title); item.appendChild(recommendation); item.appendChild(next);
+    next.textContent = paper ? "Open paper →" : "Open decision →";
+    item.appendChild(top); item.appendChild(title); item.appendChild(reason); item.appendChild(next);
     return item;
   }
   function renderCollection(listID, moreID, collection, visible, renderer) {
@@ -412,7 +419,10 @@
       by_code: {}
     };
     var diagnosticPanel = el("research-diagnostics");
-    diagnosticPanel.hidden = diagnostics.documents === 0;
+    // Decisions is the operator's unblock entry, not a publication-maintenance
+    // dashboard. Keep collection-wide lint on Library/All so 70 source-only notes
+    // cannot push real waiting decisions below the first viewport.
+    diagnosticPanel.hidden = diagnostics.documents === 0 || currentFocus === "decisions";
     el("research-diagnostics-count").textContent =
       diagnostics.showpieces + (diagnostics.showpieces === 1 ? " showpiece" : " showpieces") +
       " · " + diagnostics.source_only + " source-only";

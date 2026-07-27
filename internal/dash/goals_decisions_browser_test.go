@@ -54,14 +54,15 @@ for i in range(7):
     })
     if i == 0:
         brief = (
-            "## Recommendation\n**Keep option 1 reversible** while the generic operating team "
+            "## Decision needed\n**Choose the reversible release boundary** while the generic operating team "
             "reviews a deliberately long sequence of reversible checks, bounded observations, "
             "and routine follow-up steps without exposing raw formatting markers or turning "
-            "the card into the full operational brief.\n\n## Safe default\nHold the current state."
+            "the card into the full operational brief.\n\n## Recommendation\nKeep option 1 reversible."
+            "\n\n## Safe default\nHold the current state."
             "\n\n[Read paper](/research/decisions/generic-1.md)"
         )
     else:
-        brief = "## Recommendation\nUse \x60option %d\x60 with **bounded evidence**.\n\n## Safe default\nHold the current state." % (i + 1)
+        brief = "## Decision needed\nChoose \x60option %d\x60 with **bounded evidence**.\n\n## Recommendation\nUse the reversible option.\n\n## Safe default\nHold the current state." % (i + 1)
         if i > 1:
             brief += "\n\n[Read paper](/research/decisions/generic-%d.md)" % (i + 1)
     goals.append({
@@ -71,6 +72,20 @@ for i in range(7):
         "brief": brief,
         "work_items": []
     })
+entries.append({
+    "id": "library/awaiting-auth-token-not-a-gate.md",
+    "title": "Awaiting-auth token regression",
+    "status": "awaiting-auth", "decision": True,
+    "summary": "This source discusses the token but is not backed by an operator-gated goal.",
+    "updated_at": "2026-06-20T12:00:00Z"
+})
+goals.append({
+    "id": "not-gated", "title": "Active token research",
+    "owner": "example-desk", "conversation_agent": "example-desk",
+    "status_display": "active", "state": "active",
+    "brief": "## Decision needed\nDocument how awaiting-auth token matching works.",
+    "work_items": []
+})
 for i in range(12):
     entries.append({
         "id": "library/evidence-%d.md" % (i + 1),
@@ -113,25 +128,30 @@ with sync_playwright() as p:
         for width, height in [(390, 844), (360, 800)]:
             page = browser.new_page(viewport={"width": width, "height": height})
             prepare(page)
-            page.goto(url + "/research?focus=decisions", wait_until="domcontentloaded")
+            page.goto(url + "/research", wait_until="domcontentloaded")
             expect(page.locator("#research-library-title")).to_have_text("R&D")
             expect(page.locator('[data-research-focus="decisions"]')).to_have_attribute("aria-pressed", "true")
             expect(page.locator("#research-decision-list .research-card")).to_have_count(3)
             expect(page.locator("#research-all")).to_be_hidden()
             expect(page.locator("#research-filter-status")).to_have_text("7 waiting decisions")
+            expect(page.locator("#research-diagnostics")).to_be_hidden()
+            expect(page.locator("#research-decision-list")).not_to_contain_text("Awaiting-auth token regression")
+            expect(page.locator("#research-decision-list")).not_to_contain_text("Active token research")
             expect(page.locator("#gdec-detail")).to_have_count(0)
             assert page.evaluate("document.documentElement.scrollWidth === innerWidth")
             cards = page.locator("#research-decision-list .research-card")
             formatted = cards.filter(has_text="Generic decision 1")
             summary = formatted.locator(".research-card-summary")
             assert "**" not in summary.inner_text()
-            assert len(summary.inner_text()) <= 181
+            assert summary.inner_text().startswith("Why it needs you · ")
+            assert len(summary.inner_text()) <= 200
             assert summary.inner_text().endswith("…")
+            line = summary.evaluate("node => ({height:node.getBoundingClientRect().height,line:parseFloat(getComputedStyle(node).lineHeight)})")
+            assert line["height"] <= line["line"] * 1.25, line
             expect(formatted.locator(".research-card-next")).to_have_text("Open paper →")
             missing = cards.filter(has_text="Generic decision 2")
-            expect(missing.locator(".research-card-next")).to_have_text(
-                "Paper missing — brief owner must attach evidence")
-            assert missing.get_attribute("href") is None
+            expect(missing.locator(".research-card-next")).to_have_text("Open decision →")
+            assert missing.get_attribute("href") == "/#goals/generic-2"
             for card in cards.all():
                 assert card.locator(".research-card-next").count() == 1
             assert cards.locator("img, script").count() == 0
@@ -160,8 +180,9 @@ with sync_playwright() as p:
             # Focus and search bound the archive instead of producing one long scroll.
             page.locator('[data-research-focus="library"]').click()
             expect(page.locator("#research-decisions")).to_be_hidden()
+            expect(page.locator("#research-diagnostics")).to_be_visible()
             expect(page.locator("#research-list .research-card")).to_have_count(6)
-            expect(page.locator("#research-filter-status")).to_have_text("19 library documents")
+            expect(page.locator("#research-filter-status")).to_have_text("20 library documents")
             page.locator("#research-search").fill("evidence 11")
             expect(page.locator("#research-list .research-card")).to_have_count(1)
             expect(page.locator("#research-list")).to_contain_text("Evidence note 11")
