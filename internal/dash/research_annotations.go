@@ -263,8 +263,8 @@ func researchAnnotationRouteMessage(document ResearchDocument, annotation resear
 		"annotation_id": annotation.ID, "anchor": anchor, "author": annotation.Author,
 		"created_at": annotation.CreatedAt, "comment": comment,
 	})
-	return "[research annotation queued for review]\n" + string(payload) +
-		"\nReview and explicitly assign or respond; delivery alone does not assign ownership."
+	return "[Jim left an R&D annotation for your fleet]\n" + string(payload) +
+		"\nThis is saved feedback, not assigned work. Review what Jim wrote, then explicitly assign or respond; delivery alone does not assign ownership."
 }
 
 func annotationResponse(document ResearchDocument, stored researchannotation.Document, created *researchannotation.Annotation) researchAnnotationsResponse {

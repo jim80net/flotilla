@@ -91,10 +91,18 @@ Authorization Domains.
 The bare `/research` route opens the `Decisions / Waiting on you` focus. That
 shelf is deliberately narrower than a Goals posture count: it admits only an
 exact unresolved `awaiting` or `blocked` goal/work item with a decision brief
-and a paper ID that resolves in the current research index. A stale blocked
-roll-up, the seat-loop posture `awaiting-authority`, or a missing paper is not
-operator work and stays off the shelf. Each admitted card exposes one blocker,
-one recommended next action, and one paper jump.
+from current work-item truth. When a node has work items, a rolled-up node brief
+cannot override them or revive a resolved parent request. The seat-loop posture
+`awaiting-authority` is not a decision. Each admitted card exposes one
+single-line reason, one next move, and one working jump: its paper when the paper
+is indexed, otherwise the exact Goals / Work Context decision. Publication
+diagnostics stay on Library and All so the cold-open decision lane begins with
+what Jim can unblock.
+
+Visible decision and annotation copy is written for one anticipated reader:
+`you`, `your fleet`, and `what you decide`. A routed annotation tells the
+receiving desk that Jim wrote it while preserving the assignment boundary:
+saved feedback and delivery are not proof of assigned ownership.
 
 The index and reader report empty, title-only, or boilerplate bodies; a missing
 reader action; missing supporting material or text-only rationale; and a missing
