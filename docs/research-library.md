@@ -88,6 +88,14 @@ material. A `decision` classification means the paper belongs on the existing
 waiting shelf; it never means GO. In particular, this metadata cannot authorize
 Authorization Domains.
 
+The bare `/research` route opens the `Decisions / Waiting on you` focus. That
+shelf is deliberately narrower than a Goals posture count: it admits only an
+exact unresolved `awaiting` or `blocked` goal/work item with a decision brief
+and a paper ID that resolves in the current research index. A stale blocked
+roll-up, the seat-loop posture `awaiting-authority`, or a missing paper is not
+operator work and stays off the shelf. Each admitted card exposes one blocker,
+one recommended next action, and one paper jump.
+
 The index and reader report empty, title-only, or boilerplate bodies; a missing
 reader action; missing supporting material or text-only rationale; and a missing
 HTML5 presentation for non-archival operator-facing papers. Readiness counts
