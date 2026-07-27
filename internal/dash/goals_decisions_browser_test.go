@@ -71,6 +71,23 @@ for i in range(7):
         "brief": brief,
         "work_items": []
     })
+# These look superficially gated but are not real operator decisions. A stale
+# blocked roll-up whose bound work is done and a seat-loop posture must never
+# enter the Waiting on you shelf, even when they carry valid paper links.
+goals.extend([
+    {
+        "id": "stale-blocked", "title": "Stale blocked roll-up",
+        "status_display": "blocked", "state": "blocked",
+        "brief": "## Recommendation\nDo not revive completed work.\n\n[Read paper](/research/decisions/generic-3.md)",
+        "work_items": [{"class": "done", "label": "already complete"}]
+    },
+    {
+        "id": "seat-posture", "title": "Seat awaiting authority",
+        "status_display": "awaiting-authority", "state": "awaiting-authority",
+        "brief": "## Recommendation\nAssign ordinary work.\n\n[Read paper](/research/decisions/generic-4.md)",
+        "work_items": []
+    }
+])
 for i in range(12):
     entries.append({
         "id": "library/evidence-%d.md" % (i + 1),
@@ -118,7 +135,7 @@ with sync_playwright() as p:
             expect(page.locator('[data-research-focus="decisions"]')).to_have_attribute("aria-pressed", "true")
             expect(page.locator("#research-decision-list .research-card")).to_have_count(3)
             expect(page.locator("#research-all")).to_be_hidden()
-            expect(page.locator("#research-filter-status")).to_have_text("7 waiting decisions")
+            expect(page.locator("#research-filter-status")).to_have_text("6 waiting decisions")
             expect(page.locator("#gdec-detail")).to_have_count(0)
             assert page.evaluate("document.documentElement.scrollWidth === innerWidth")
             cards = page.locator("#research-decision-list .research-card")
@@ -128,12 +145,12 @@ with sync_playwright() as p:
             assert len(summary.inner_text()) <= 181
             assert summary.inner_text().endswith("…")
             expect(formatted.locator(".research-card-next")).to_have_text("Open paper →")
-            missing = cards.filter(has_text="Generic decision 2")
-            expect(missing.locator(".research-card-next")).to_have_text(
-                "Paper missing — brief owner must attach evidence")
-            assert missing.get_attribute("href") is None
+            expect(formatted.locator(".research-card-blocker")).to_have_text(
+                "Waiting on you · Operator approval is required")
+            expect(cards.filter(has_text="Generic decision 2")).to_have_count(0)
             for card in cards.all():
                 assert card.locator(".research-card-next").count() == 1
+                assert card.get_attribute("href").startswith("/research/")
             assert cards.locator("img, script").count() == 0
 
             # A decision opens its paper in the one R&D canvas, never a dialog stack.
@@ -180,7 +197,9 @@ with sync_playwright() as p:
         desktop.goto(url, wait_until="domcontentloaded")
         expect(desktop.locator("#view-decisions")).to_have_count(0)
         expect(desktop.locator("#tab-decisions")).to_contain_text("R&D")
-        expect(desktop.locator("#hdr-decisions-count")).to_have_text("7")
+        # The dashboard badge is a broader Goals posture count; the R&D shelf
+        # independently admits only six actionable, paper-linked decisions.
+        expect(desktop.locator("#hdr-decisions-count")).to_have_text("8")
         desktop.locator("#tab-decisions").click()
         expect(desktop).to_have_url(url + "/research?focus=decisions")
         expect(desktop.locator("#research-decision-list .research-card")).to_have_count(3)
