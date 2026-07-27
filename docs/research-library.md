@@ -93,11 +93,13 @@ shelf is deliberately narrower than a Goals posture count: it admits only an
 exact unresolved `awaiting` or `blocked` goal/work item with a decision brief
 from current work-item truth. When a node has work items, a rolled-up node brief
 cannot override them or revive a resolved parent request. The seat-loop posture
-`awaiting-authority` is not a decision. Each admitted card exposes one
-single-line reason, one next move, and one working jump: its paper when the paper
-is indexed, otherwise the exact Goals / Work Context decision. Publication
-diagnostics stay on Library and All so the cold-open decision lane begins with
-what Jim can unblock.
+`awaiting-authority` is not a decision. Neither is a generic `blocked` roll-up:
+exact `awaiting-auth` work items carry operator authority, while a blocked safety
+fork must resolve to an explicitly `decision`-class publication. Every admitted
+card requires that indexed decision paper and exposes one single-line reason,
+one next move, and one paper jump; missing and ordinary-research papers fail
+closed. Publication diagnostics stay on Library and All so the cold-open
+decision lane begins with what Jim can unblock.
 
 Visible decision and annotation copy is written for one anticipated reader:
 `you`, `your fleet`, and `what you decide`. A routed annotation tells the

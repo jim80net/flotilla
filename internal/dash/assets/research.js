@@ -215,9 +215,6 @@
     })[code] || code;
   }
 
-  function decisionState(node) {
-    return String(node.status_display || node.state || "").toLowerCase().replace(/_/g, "-");
-  }
   function hasDecisionBrief(value) { return String(value || "").trim().length > 0; }
   function sameDecisionBrief(a, b) { return String(a || "").trim() === String(b || "").trim(); }
   function paperIDFromBrief(brief) {
@@ -287,34 +284,23 @@
     var out = [];
     doc.goals.forEach(function (node) {
       if (!node) return;
-      var state = decisionState(node);
-      // Goals maps an exact [awaiting-auth] backlog marker to "awaiting".
-      // "awaiting-authority" is a seat-loop posture, not an operator decision.
-      var gated = state === "awaiting" || state === "blocked";
       var workItems = node.work_items || [];
       var gatedItems = workItems.filter(function (item) {
-        return item && (item.class === "awaiting" || item.class === "blocked");
+        if (!item) return false;
+        var detail = String(item.detail || "").toLowerCase().replace(/_/g, "-");
+        // Exact awaiting-auth is operator authority. A blocked item is only a
+        // provisional candidate: actionableDecisions additionally requires its
+        // resolved paper to be explicitly decision-class.
+        return (item.class === "awaiting" && detail === "awaiting-auth") || item.class === "blocked";
       });
-      // Work items are the current authority when they exist. A node roll-up can
-      // inherit a live child's gate while its own brief is explicitly resolved;
-      // never revive that stale parent request.
-      if (gated && hasDecisionBrief(node.brief) && workItems.length === 0) {
-        out.push({
-          node: node,
-          label: "",
-          brief: node.brief,
-          paperID: node.paper_id || paperIDFromBrief(node.brief),
-          reason: decisionBriefField(node.brief, ["why you care", "why blocked", "decision", "question", "what it is", "blocker"]) ||
-            "Your fleet is waiting for your decision"
-        });
-      }
       gatedItems.forEach(function (item) {
-        if ((item.class === "awaiting" || item.class === "blocked") && hasDecisionBrief(item.brief) && !sameDecisionBrief(item.brief, node.brief)) {
+        if (hasDecisionBrief(item.brief) && !sameDecisionBrief(item.brief, node.brief)) {
           out.push({
             node: node,
             label: item.label || item.detail || item.kind || "",
             brief: item.brief,
             paperID: item.paper_id || paperIDFromBrief(item.brief),
+            authority: item.class === "awaiting" ? "awaiting-auth" : "decision-paper",
             reason: decisionBriefField(item.brief, ["why you care", "why blocked", "decision", "question", "what it is", "blocker"]) ||
               item.label || item.detail || "Your fleet is waiting for your decision"
           });
@@ -381,16 +367,12 @@
     var paperEntry = decision.paperID && entries.find(function (entry) { return entry.id === decision.paperID; });
     var item = document.createElement("a");
     item.className = "research-card is-decision";
-    if (paperEntry) {
-      item.href = pagePath(decision.paperID);
-      item.dataset.researchId = decision.paperID;
-      item.addEventListener("click", function (event) {
-        event.preventDefault();
-        openDocument(decision.paperID, true, paperEntry);
-      });
-    } else {
-      item.href = "/#goals/" + encodeURIComponent(node.id || "");
-    }
+    item.href = pagePath(decision.paperID);
+    item.dataset.researchId = decision.paperID;
+    item.addEventListener("click", function (event) {
+      event.preventDefault();
+      openDocument(decision.paperID, true, paperEntry);
+    });
     var top = document.createElement("span"); top.className = "research-card-top";
     var badge = document.createElement("span"); badge.className = "research-badge"; badge.textContent = "Decision";
     var state = document.createElement("span"); state.className = "research-decision-state"; state.textContent = node.state || node.status_display || "awaiting";
@@ -404,7 +386,7 @@
       decisionBriefField(decision.brief, ["recommendation", "recommended"])
     ) || "Open the decision and tell your fleet what you decide.");
     var next = document.createElement("span"); next.className = "research-card-next";
-    next.textContent = paperEntry ? "Open working paper →" : "Open decision →";
+    next.textContent = "Open working paper →";
     item.appendChild(top); item.appendChild(title); item.appendChild(reason); item.appendChild(action); item.appendChild(next);
     return item;
   }
@@ -430,7 +412,15 @@
     return needle ? entries.filter(function (entry) { return searchable(entry).indexOf(needle) !== -1; }) : entries.slice();
   }
   function actionableDecisions() {
-    return goalDecisions;
+    return goalDecisions.filter(function (decision) {
+      var paper = decision.paperID && entries.find(function (entry) { return entry.id === decision.paperID; });
+      // The shelf is authority plus publication truth, never a generic blocked
+      // roll-up. Both exact awaiting-auth and blocked safety forks need a real,
+      // explicitly decision-class paper before they reach Jim.
+      return !!paper && paper.decision === true &&
+        paper.publication && paper.publication.explicit === true &&
+        paper.publication.classification === "decision";
+    });
   }
   function syncFocusControls() {
     document.querySelectorAll("[data-research-focus]").forEach(function (button) {
