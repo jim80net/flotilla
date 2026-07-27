@@ -272,6 +272,31 @@ func TestResearchAnnotationRoutingSavedQueuedDeliveredAndIdempotent(t *testing.T
 	}
 }
 
+func TestResearchAnnotationRouteMessageIsForJimAndFailClosed(t *testing.T) {
+	message := researchAnnotationRouteMessage(
+		ResearchDocument{ResearchEntry: ResearchEntry{ID: "decision.md", Title: "Bounded decision"}},
+		researchannotation.Annotation{
+			ID: "ra_generic", Author: "operator",
+			Routing:  researchannotation.Routing{Key: "ra_generic:1"},
+			Comments: []researchannotation.Comment{{Text: "Choose the bounded option."}},
+		},
+	)
+	for _, want := range []string{
+		"Jim left an R&D annotation for your fleet",
+		"This is saved feedback, not assigned work.",
+		"delivery alone does not assign ownership",
+	} {
+		if !strings.Contains(message, want) {
+			t.Errorf("route notification missing reader/fail-closed copy %q:\n%s", want, message)
+		}
+	}
+	for _, forbidden := range []string{"tenant", "administrator", "admin"} {
+		if strings.Contains(strings.ToLower(message), forbidden) {
+			t.Errorf("route notification contains multi-user admin voice %q:\n%s", forbidden, message)
+		}
+	}
+}
+
 func TestResearchAnnotationTraversalAndUnsafeStorageFailClosed(t *testing.T) {
 	srv, _, root := annotationServer(t)
 	for _, path := range []string{"/api/research-annotations/../flotilla.json", "/api/research-annotations/%2e%2e%2fflotilla.json", "/api/research-annotations/.hidden.md"} {
