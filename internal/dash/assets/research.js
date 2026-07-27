@@ -219,7 +219,6 @@
     return String(node.status_display || node.state || "").toLowerCase().replace(/_/g, "-");
   }
   function hasDecisionBrief(value) { return String(value || "").trim().length > 0; }
-  function sameDecisionBrief(a, b) { return String(a || "").trim() === String(b || "").trim(); }
   function paperIDFromBrief(brief) {
     var match = String(brief || "").match(/\[[^\]]+\]\(\/(?:api\/)?research\/([^\s)#]+)(?:#[^)\s]+)?\)/i);
     if (!match) return "";
