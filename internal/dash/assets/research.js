@@ -180,7 +180,7 @@
     });
   }
   function statusLabel(status) {
-    return ({ "design-only": "Design only", "awaiting-auth": "Awaiting authorization", "operator-review": "Operator review", decision: "Decision", archival: "Archival", research: "Research" })[status] || status;
+    return ({ "design-only": "Design only", "awaiting-auth": "Waiting on you", "operator-review": "Your review", decision: "Decision", archival: "Archival", research: "Research" })[status] || status;
   }
   function formatDate(value) {
     var date = new Date(value);
@@ -215,11 +215,7 @@
     })[code] || code;
   }
 
-  function decisionState(node) {
-    return String(node.status_display || node.state || "").toLowerCase().replace(/_/g, "-");
-  }
   function hasDecisionBrief(value) { return String(value || "").trim().length > 0; }
-  function sameDecisionBrief(a, b) { return String(a || "").trim() === String(b || "").trim(); }
   function paperIDFromBrief(brief) {
     var match = String(brief || "").match(/\[[^\]]+\]\(\/(?:api\/)?research\/([^\s)#]+)(?:#[^)\s]+)?\)/i);
     if (!match) return "";
@@ -228,20 +224,28 @@
   }
   function decisionBriefField(brief, names) {
     var wanted = names.map(function (name) { return name.toLowerCase(); });
+    function fieldName(value) {
+      return String(value || "").replace(/\*+/g, "").replace(/^\d+[.)]\s*/, "").trim().toLowerCase();
+    }
     var lines = String(brief || "").split(/\r?\n/);
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i].trim();
       var heading = line.match(/^#{1,6}\s+(.+?)\s*$/);
       var labeled = line.match(/^(?:[-*]\s*)?(?:\*\*)?([^:*—]+)(?:\*\*)?\s*[:—-]\s*(.+)$/);
-      if (heading && wanted.indexOf(heading[1].replace(/\*+/g, "").trim().toLowerCase()) !== -1) {
+      if (heading && wanted.indexOf(fieldName(heading[1])) !== -1) {
+        var paragraph = [];
         for (var j = i + 1; j < lines.length; j++) {
           var value = lines[j].replace(/^[-*]\s+/, "").trim();
-          if (!value) continue;
+          if (!value) {
+            if (paragraph.length) break;
+            continue;
+          }
           if (/^#{1,6}\s+/.test(value)) break;
-          return value;
+          paragraph.push(value);
         }
+        return paragraph.join(" ");
       }
-      if (labeled && wanted.indexOf(labeled[1].trim().toLowerCase()) !== -1) return labeled[2].trim();
+      if (labeled && wanted.indexOf(fieldName(labeled[1])) !== -1) return labeled[2].trim();
     }
     return "";
   }
@@ -261,43 +265,43 @@
     if (lastSpace >= Math.floor(limit * 0.65)) cut = cut.slice(0, lastSpace);
     return cut.trim() + "…";
   }
+  function decisionTitle(decision) {
+    var base = String(decision.node.title || decision.node.id || decision.label || "Decision")
+      .replace(/\s+public release and installed marketplace rollout$/i, " marketplace release")
+      .replace(/\s+public release and installed rollout$/i, " release")
+      .replace(/\s+ledger$/i, "")
+      .trim();
+    var label = decisionCardProse(decision.label).replace(/\s*\([^)]*\)\s*$/, "").trim();
+    var firstLabelWord = (label.toLowerCase().match(/[a-z0-9]+/) || [""])[0];
+    if (label && label.length <= 48 && firstLabelWord && base.toLowerCase().indexOf(firstLabelWord) === -1) {
+      return base + " · " + label;
+    }
+    return base;
+  }
   function gatherRDDecisions(doc) {
     if (!doc || !Array.isArray(doc.goals)) return [];
     var out = [];
     doc.goals.forEach(function (node) {
       if (!node) return;
-      var state = decisionState(node);
-      // Goals maps an exact [awaiting-auth] backlog marker to "awaiting".
-      // "awaiting-authority" is a seat-loop posture, not an operator decision.
-      var gated = state === "awaiting" || state === "blocked";
       var workItems = node.work_items || [];
       var gatedItems = workItems.filter(function (item) {
-        return item && (item.class === "awaiting" || item.class === "blocked");
+        if (!item) return false;
+        var detail = String(item.detail || "").toLowerCase().replace(/_/g, "-");
+        // Exact awaiting-auth is operator authority. A blocked item is only a
+        // provisional candidate: actionableDecisions additionally requires its
+        // resolved paper to be explicitly decision-class.
+        return (item.class === "awaiting" && detail === "awaiting-auth") || item.class === "blocked";
       });
-      // A stale node roll-up may remain "blocked" after every bound work item is
-      // done. Admit a node-level decision only when it has no item-level truth,
-      // or when at least one current item remains gated.
-      if (gated && hasDecisionBrief(node.brief) && (workItems.length === 0 || gatedItems.length > 0)) {
-        out.push({
-          node: node,
-          label: "",
-          brief: node.brief,
-          paperID: node.paper_id || paperIDFromBrief(node.brief),
-          reason: decisionBriefField(node.brief, ["decision", "question", "why blocked", "blocker"]) ||
-            (gatedItems[0] && (gatedItems[0].label || gatedItems[0].detail)) ||
-            "Operator approval is required"
-        });
-      }
       gatedItems.forEach(function (item) {
-        if ((item.class === "awaiting" || item.class === "blocked") && hasDecisionBrief(item.brief) && !sameDecisionBrief(item.brief, node.brief)) {
+        if (hasDecisionBrief(item.brief)) {
           out.push({
             node: node,
             label: item.label || item.detail || item.kind || "",
             brief: item.brief,
             paperID: item.paper_id || paperIDFromBrief(item.brief),
-            reason: item.label || item.detail ||
-              decisionBriefField(item.brief, ["decision", "question", "why blocked", "blocker"]) ||
-              "Operator approval is required"
+            authority: item.class === "awaiting" ? "awaiting-auth" : "decision-paper",
+            reason: decisionBriefField(item.brief, ["why you care", "why blocked", "decision", "question", "what it is", "blocker"]) ||
+              item.label || item.detail || "Your fleet is waiting for your decision"
           });
         }
       });
@@ -373,15 +377,15 @@
     var state = document.createElement("span"); state.className = "research-decision-state"; state.textContent = node.state || node.status_display || "awaiting";
     top.appendChild(badge); top.appendChild(state);
     var title = document.createElement("strong");
-    title.textContent = (node.title || node.id) + (decision.label ? " — " + decision.label : "");
+    title.textContent = decisionTitle(decision);
     var reason = document.createElement("span"); reason.className = "research-card-blocker";
-    reason.textContent = "Waiting on you · " + decisionCardProse(decision.reason);
+    reason.textContent = "Why you care · " + decisionCardProse(decision.reason);
     var action = document.createElement("span"); action.className = "research-card-summary";
-    action.textContent = decisionCardProse(
+    action.textContent = "Your next move · " + (decisionCardProse(
       decisionBriefField(decision.brief, ["recommendation", "recommended"])
-    ) || "Review the paper and choose the safe next step";
+    ) || "Open the decision and tell your fleet what you decide.");
     var next = document.createElement("span"); next.className = "research-card-next";
-    next.textContent = "Open paper →";
+    next.textContent = "Open working paper →";
     item.appendChild(top); item.appendChild(title); item.appendChild(reason); item.appendChild(action); item.appendChild(next);
     return item;
   }
@@ -408,7 +412,13 @@
   }
   function actionableDecisions() {
     return goalDecisions.filter(function (decision) {
-      return !!decision.paperID && entries.some(function (entry) { return entry.id === decision.paperID; });
+      var paper = decision.paperID && entries.find(function (entry) { return entry.id === decision.paperID; });
+      // The shelf is authority plus publication truth, never a generic blocked
+      // roll-up. Both exact awaiting-auth and blocked safety forks need a real,
+      // explicitly decision-class paper before they reach Jim.
+      return !!paper && paper.decision === true &&
+        paper.publication && paper.publication.explicit === true &&
+        paper.publication.classification === "decision";
     });
   }
   function syncFocusControls() {
@@ -437,7 +447,9 @@
       by_code: {}
     };
     var diagnosticPanel = el("research-diagnostics");
-    diagnosticPanel.hidden = diagnostics.documents === 0;
+    // Jim's cold-open lane starts with decisions, not the 71-document lint
+    // queue. Publication health remains one tap away on Library and All.
+    diagnosticPanel.hidden = currentFocus === "decisions" || diagnostics.documents === 0;
     el("research-diagnostics-count").textContent =
       diagnostics.showpieces + (diagnostics.showpieces === 1 ? " showpiece" : " showpieces") +
       " · " + diagnostics.source_only + " source-only";
@@ -584,7 +596,8 @@
     el("research-annotation-comments").replaceChildren.apply(el("research-annotation-comments"), comments.map(function (comment) {
       var card = document.createElement("article"); card.className = "research-annotation-comment";
       var text = document.createElement("p"); text.textContent = comment.text || "";
-      var footer = document.createElement("footer"); footer.textContent = (comment.author || "operator") + " · " + formatDate(comment.created_at);
+      var footer = document.createElement("footer");
+      footer.textContent = (comment.author === "operator" || !comment.author ? "You" : comment.author) + " · " + formatDate(comment.created_at);
       card.appendChild(text); card.appendChild(footer); return card;
     }));
     el("research-annotation-close").focus();
@@ -731,11 +744,12 @@
     var decisionStrip = el("research-decision-strip");
     decisionStrip.hidden = !doc.decision && !currentDecision;
     el("research-decision-title").textContent = currentDecision
-      ? (currentDecision.node.title || currentDecision.node.id) + (currentDecision.label ? " — " + currentDecision.label : "")
+      ? decisionTitle(currentDecision)
       : "Waiting on you";
     el("research-decision-summary").textContent = currentDecision
-      ? (decisionBriefField(currentDecision.brief, ["recommendation", "recommended"]) || "Read the paper, then respond with a decision or question.")
-      : "This document is marked for operator review.";
+      ? ("What you decide · " + (decisionBriefField(currentDecision.brief, ["decision", "question", "recommendation", "recommended"]) ||
+          "Read the paper, then tell your fleet what you decide."))
+      : "This paper is waiting for what you decide.";
     el("research-decision-respond").hidden = !currentDecision;
     el("research-decision-response").hidden = true;
     el("research-decision-response-input").value = "";
@@ -862,11 +876,11 @@
     }).then(function (result) {
       if (!currentDocument || currentDocument.id !== documentID || currentDecision !== decision) return;
       if (result.outcome === "delivered") {
-        status.textContent = "Delivered to " + result.target + " — turn confirmed.";
+        status.textContent = "Delivered to your fleet at " + result.target + " — receipt confirmed.";
       } else if (result.outcome === "queued") {
-        status.textContent = "Queued durably for " + result.target + " — delivery waits until the desk can receive.";
+        status.textContent = "Queued for your fleet at " + result.target + " — not delivered yet.";
       } else {
-        status.textContent = "Response state unclear — check the desk conversation.";
+        status.textContent = "Delivery state is unclear — check your fleet's Work Context.";
       }
       input.value = "";
       el("research-decision-response-close").hidden = false;

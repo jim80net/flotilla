@@ -186,6 +186,7 @@ with sync_playwright() as p:
         panel = phone.locator("#research-annotation-panel")
         expect(panel).to_be_visible()
         expect(phone.locator("#research-annotation-comments")).to_contain_text("<img src=x onerror=alert(1)> stays text")
+        expect(phone.locator("#research-annotation-comments footer")).to_contain_text("You ·")
         expect(phone.locator("#research-annotation-comments img")).to_have_count(0)
         expect(phone.locator(".research-annotation-card.is-stale")).to_contain_text("Needs review")
         phone.keyboard.press("Shift+Tab")

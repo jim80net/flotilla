@@ -432,7 +432,8 @@ func TestBuildGoals_DeskLiveBinding(t *testing.T) {
 // --- BuildGoals: backlog binding (ratified marker mapping) ---
 
 func TestBuildGoals_BacklogBinding(t *testing.T) {
-	md := "## Backlog\n- [in-flight] wire the goals view\n- [blocked] operator sign-off\n- [awaiting-auth] go/no-go\n"
+	md := "# Chronological absorb log\n- [done] go/no-go release prep recorded; this is not the live gate\n\n" +
+		"## Backlog\n- [in-flight] wire the goals view\n- [blocked] operator sign-off\n- [awaiting-auth] go/no-go\n"
 	file := GoalsFile{Goals: []Goal{
 		{ID: "flight", Title: "Flight", WorkItems: []WorkItem{{Kind: WorkBacklog, Match: "goals view"}}},
 		{ID: "blk", Title: "Blocked", WorkItems: []WorkItem{{Kind: WorkBacklog, Match: "sign-off"}}},
@@ -448,7 +449,7 @@ func TestBuildGoals_BacklogBinding(t *testing.T) {
 		t.Errorf("[blocked] backlog → blocked (red, NOT awaiting), got %q", byID["blk"].StatusDisplay)
 	}
 	if byID["gate"].StatusDisplay != "awaiting" {
-		t.Errorf("[awaiting-auth] backlog → awaiting (amber), got %q", byID["gate"].StatusDisplay)
+		t.Errorf("[awaiting-auth] under ## Backlog must beat same-match done-log prose → awaiting (amber), got %q", byID["gate"].StatusDisplay)
 	}
 	// Ratified spec: a linked backlog item ABSENT from the active backlog is done (drained).
 	if byID["absent"].WorkItems[0].Class != "done" || byID["absent"].StatusDisplay != "achieved" {

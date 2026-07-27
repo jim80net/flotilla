@@ -49,6 +49,7 @@ for i in range(7):
         "id": "decisions/generic-%d.md" % (i + 1),
         "title": "Generic decision %d" % (i + 1),
         "status": "operator-review", "decision": True,
+        "publication": {"explicit": True, "classification": "decision"},
         "summary": "Recommendation %d with a reversible safe default." % (i + 1),
         "updated_at": "2026-07-%02dT12:00:00Z" % (i + 1)
     })
@@ -64,12 +65,17 @@ for i in range(7):
         brief = "## Recommendation\nUse \x60option %d\x60 with **bounded evidence**.\n\n## Safe default\nHold the current state." % (i + 1)
         if i > 1:
             brief += "\n\n[Read paper](/research/decisions/generic-%d.md)" % (i + 1)
+    paper_id = "decisions/missing.md" if i == 1 else "decisions/generic-%d.md" % (i + 1)
     goals.append({
         "id": "generic-%d" % (i + 1), "title": "Generic decision %d" % (i + 1),
         "owner": "example-desk", "conversation_agent": "example-desk",
         "status_display": "awaiting", "state": "awaiting",
-        "brief": brief,
-        "work_items": []
+        "brief": brief if i == 2 else "",
+        "work_items": [{
+            "class": "awaiting", "detail": "awaiting-auth",
+            "label": "authorize the bounded choice",
+            "brief": brief, "paper_id": paper_id
+        }]
     })
 # These look superficially gated but are not real operator decisions. A stale
 # blocked roll-up whose bound work is done and a seat-loop posture must never
@@ -77,9 +83,24 @@ for i in range(7):
 goals.extend([
     {
         "id": "stale-blocked", "title": "Stale blocked roll-up",
+        "owner": "example-desk", "conversation_agent": "example-desk",
         "status_display": "blocked", "state": "blocked",
         "brief": "## Recommendation\nDo not revive completed work.\n\n[Read paper](/research/decisions/generic-3.md)",
-        "work_items": [{"class": "done", "label": "already complete"}]
+        "work_items": [
+            {"class": "done", "label": "already complete"},
+            {
+                "class": "awaiting", "label": "current child decision",
+                "detail": "awaiting-auth",
+                "brief": "## 1. What it is\nYour fleet needs one current child choice.\n\n## Recommendation\nChoose the bounded child option.",
+                "paper_id": "decisions/generic-2.md"
+            },
+            {
+                "class": "blocked", "label": "ordinary product dependency",
+                "detail": "blocked",
+                "brief": "## 1. What it is\nA dependency is blocked, but it is not your authority gate.\n\n## Recommendation\nKeep diagnosing inside the fleet.",
+                "paper_id": "library/evidence-1.md"
+            }
+        ]
     },
     {
         "id": "seat-posture", "title": "Seat awaiting authority",
@@ -135,19 +156,30 @@ with sync_playwright() as p:
             expect(page.locator('[data-research-focus="decisions"]')).to_have_attribute("aria-pressed", "true")
             expect(page.locator("#research-decision-list .research-card")).to_have_count(3)
             expect(page.locator("#research-all")).to_be_hidden()
-            expect(page.locator("#research-filter-status")).to_have_text("6 waiting decisions")
+            expect(page.locator("#research-diagnostics")).to_be_hidden()
+            expect(page.locator("#research-filter-status")).to_have_text("7 waiting decisions")
             expect(page.locator("#gdec-detail")).to_have_count(0)
             assert page.evaluate("document.documentElement.scrollWidth === innerWidth")
             cards = page.locator("#research-decision-list .research-card")
             formatted = cards.filter(has_text="Generic decision 1")
             summary = formatted.locator(".research-card-summary")
             assert "**" not in summary.inner_text()
-            assert len(summary.inner_text()) <= 181
+            assert summary.inner_text().startswith("Your next move · ")
+            assert len(summary.inner_text()) <= 205
             assert summary.inner_text().endswith("…")
-            expect(formatted.locator(".research-card-next")).to_have_text("Open paper →")
+            expect(formatted.locator(".research-card-next")).to_have_text("Open working paper →")
             expect(formatted.locator(".research-card-blocker")).to_have_text(
-                "Waiting on you · Operator approval is required")
-            expect(cards.filter(has_text="Generic decision 2")).to_have_count(0)
+                "Why you care · authorize the bounded choice")
+            missing_paper = cards.filter(has_text="Generic decision 2")
+            expect(missing_paper).to_have_count(0)
+            page.locator("#research-decision-more").click()
+            page.locator("#research-decision-more").click()
+            expect(cards).to_have_count(7)
+            current_child = cards.filter(has_text="Stale blocked roll-up")
+            expect(current_child).to_have_count(1)
+            expect(current_child).to_contain_text("Your fleet needs one current child choice.")
+            expect(current_child).not_to_contain_text("Do not revive completed work")
+            expect(current_child).not_to_contain_text("dependency is blocked")
             for card in cards.all():
                 assert card.locator(".research-card-next").count() == 1
                 assert card.get_attribute("href").startswith("/research/")
@@ -161,10 +193,15 @@ with sync_playwright() as p:
             expect(page.locator("#research-body")).to_contain_text("The paper canvas owns this decision.")
             expect(page).to_have_url(url + "/research/decisions/generic-1.md")
             expect(page.locator("#research-annotation-bar")).to_be_visible()
+            expect(page.locator("#research-decision-summary")).to_contain_text("What you decide ·")
+            expect(page.locator("#research-decision-respond")).to_have_text("Tell your fleet")
             page.locator("#research-decision-respond").click()
+            expect(page.locator('label[for="research-decision-response-input"]')).to_have_text("What you decide")
+            expect(page.locator("#research-decision-response-send")).to_have_text("Send to your fleet")
             page.locator("#research-decision-response-input").fill("Approve the reversible option.")
             page.locator("#research-decision-response-send").click()
-            expect(page.locator("#research-decision-response-status")).to_contain_text("Queued durably")
+            expect(page.locator("#research-decision-response-status")).to_have_text(
+                "Queued for your fleet at example-desk — not delivered yet.")
             expect(page.locator("#research-decision-response-close")).to_be_focused()
             if evidence_dir:
                 page.screenshot(path=os.path.join(evidence_dir, "rd-decision-phone-%d.png" % width), full_page=False)
@@ -177,6 +214,7 @@ with sync_playwright() as p:
             # Focus and search bound the archive instead of producing one long scroll.
             page.locator('[data-research-focus="library"]').click()
             expect(page.locator("#research-decisions")).to_be_hidden()
+            expect(page.locator("#research-diagnostics")).to_be_visible()
             expect(page.locator("#research-list .research-card")).to_have_count(6)
             expect(page.locator("#research-filter-status")).to_have_text("19 library documents")
             page.locator("#research-search").fill("evidence 11")
@@ -198,8 +236,9 @@ with sync_playwright() as p:
         expect(desktop.locator("#view-decisions")).to_have_count(0)
         expect(desktop.locator("#tab-decisions")).to_contain_text("R&D")
         # The dashboard badge is a broader Goals posture count; the R&D shelf
-        # independently admits only six actionable, paper-linked decisions.
-        expect(desktop.locator("#hdr-decisions-count")).to_have_text("8")
+        # independently admits seven exact authority gates with explicit
+        # decision-class papers; an unbound paper fails closed.
+        expect(desktop.locator("#hdr-decisions-count")).to_have_text("10")
         desktop.locator("#tab-decisions").click()
         expect(desktop).to_have_url(url + "/research?focus=decisions")
         expect(desktop.locator("#research-decision-list .research-card")).to_have_count(3)
