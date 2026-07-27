@@ -24,7 +24,13 @@ func TestResearchLibraryRendered822(t *testing.T) {
 	root := t.TempDir()
 	srv.cfg.ResearchPath = root
 	var design strings.Builder
-	design.WriteString(`# Authorization Domains — design for operator review
+	design.WriteString(`<!-- flotilla-publication
+classification: decision
+reader-action: Decide whether to approve this design.
+support: text-only
+support-rationale: The full decision brief and evidence are contained in the source.
+-->
+# Authorization Domains — design for operator review
 
 **Status:** DESIGN ONLY — no implementation without operator GO
 
@@ -64,7 +70,7 @@ Make the review readable on the private dash.
 	}
 	writeResearchFixture(t, root, "notes/field-note.md", "# Field note\n\n## Finding\n\nAn ordinary research note.\n", time.Now().Add(-time.Hour))
 	for i := 1; i <= 7; i++ {
-		writeResearchFixture(t, root, fmt.Sprintf("decisions/design-%02d.md", i), fmt.Sprintf("# Design %02d\n\n**Status:** operator-review\n\n## Checklist\n\nReview this design.\n", i), now.Add(-time.Duration(i)*time.Minute))
+		writeResearchFixture(t, root, fmt.Sprintf("decisions/design-%02d.md", i), fmt.Sprintf("<!-- flotilla-publication\nclassification: decision\nreader-action: Decide whether to approve design %02d.\nsupport: text-only\nsupport-rationale: The bounded decision is complete in this source.\n-->\n# Design %02d\n\n**Status:** operator-review\n\n## Checklist\n\nReview this design.\n", i, i), now.Add(-time.Duration(i)*time.Minute))
 		writeResearchFixture(t, root, fmt.Sprintf("notes/field-note-%02d.md", i), fmt.Sprintf("# Field note %02d\n\n## Finding\n\nReference material.\n", i), now.Add(-time.Duration(i+60)*time.Minute))
 	}
 
@@ -95,7 +101,12 @@ for i in range(8):
         "owner": "example-desk", "conversation_agent": "example-desk",
         "status_display": "awaiting", "state": "awaiting",
         "brief": "## Recommendation\nReview this design.\n\n[Read paper](/research/%s)" % paper,
-        "work_items": []
+        "work_items": [{
+            "class": "awaiting", "detail": "awaiting-auth",
+            "label": "Approve design %02d" % (i + 1),
+            "paper_id": paper,
+            "brief": "## Why you care\nYour fleet needs this bounded design decision.\n\n## Recommendation\nReview this design.\n\n[Read paper](/research/%s)" % paper
+        }]
     })
 def install_goals(page):
     page.route("**/api/goals", lambda route: route.fulfill(
@@ -111,25 +122,15 @@ with sync_playwright() as p:
         decision = phone.locator("#research-decision-list .research-card")
         expect(decision).to_have_count(3)
         expect(phone.locator("#research-decision-count")).to_have_text("8 waiting")
-        expect(phone.locator("#research-all")).to_be_hidden()
-        phone.locator('[data-research-focus="all"]').click()
-        expect(decision).to_have_count(3)
-        expect(phone.locator("#research-list .research-card")).to_have_count(6)
-        expect(phone.locator("#research-count")).to_have_text("16 documents")
         expect(phone.locator("#research-decision-more")).to_contain_text("5 remaining")
-        expect(phone.locator("#research-library-more")).to_contain_text("10 remaining")
         initial_metrics = phone.evaluate("({height:document.documentElement.scrollHeight,width:document.documentElement.scrollWidth,clientWidth:document.documentElement.clientWidth})")
         if evidence_dir:
             phone.screenshot(path=os.path.join(evidence_dir, "research-library-initial-390.png"), full_page=True)
         phone.locator("#research-decision-more").click()
         expect(phone.locator("#research-decision-list .research-card")).to_have_count(6)
         phone.locator("#research-decision-more").click()
-        phone.locator("#research-library-more").click()
-        phone.locator("#research-library-more").click()
         expect(phone.locator("#research-decision-list .research-card")).to_have_count(8)
-        expect(phone.locator("#research-list .research-card")).to_have_count(16)
         expect(phone.locator("#research-decision-more")).to_be_hidden()
-        expect(phone.locator("#research-library-more")).to_be_hidden()
         phone.locator("#research-decision-list .research-card").filter(has_text="Design 01").click()
         expect(phone.locator("#research-document")).to_be_visible()
         expect(phone.locator("#research-title")).to_contain_text("Authorization Domains")
@@ -196,7 +197,7 @@ with sync_playwright() as p:
             phone.screenshot(path=os.path.join(evidence_dir, "research-document-scrolled-390.png"), full_page=False)
         print(json.dumps({
             "initial": initial_metrics,
-            "collections": {"decision_initial": 3, "decision_total": 8, "library_initial": 6, "library_total": 16},
+            "collections": {"decision_initial": 3, "decision_total": 8},
             "toc": {"closed_height": closed_height, "open": open_metrics, "sections": 33},
             "sticky_after_900": sticky,
             "table": table_metrics,
@@ -319,7 +320,7 @@ func TestResearchShowpieceRendered873(t *testing.T) {
 	srv, _ := newTestServer(t, singleFleetRoster, time.Now())
 	root := t.TempDir()
 	srv.cfg.ResearchPath = root
-	writeResearchFixture(t, root, "buzz/SOURCE.md", "# Buzz market research\n\nA fully evidenced pilot source.\n", time.Now())
+	writeResearchFixture(t, root, "buzz/SOURCE.md", "<!-- flotilla-publication\nclassification: research\nreader-action: Learn how the generic market event flows.\nsupport: material\n-->\n# Buzz market research\n\nA fully evidenced pilot source.\n\n[Event flow](presentation/assets/event-flow-poster.png)\n", time.Now())
 	writeResearchFixture(t, root, "draft/SOURCE.md", "# Draft evidence\n\nSource awaiting its presentation.\n", time.Now().Add(time.Hour))
 	navigation, err := os.ReadFile(filepath.Join("..", "..", "docs", "examples", "research-showpiece-navigation.js"))
 	if err != nil {
@@ -351,11 +352,10 @@ url = sys.argv[1]
 with sync_playwright() as p:
     browser = p.chromium.launch()
     page = browser.new_page(viewport={"width": 390, "height": 844}, reduced_motion="reduce")
-    page.goto(url + "/research?focus=library", wait_until="domcontentloaded")
-    cards = page.locator("#research-list .research-card")
-    expect(cards).to_have_count(2)
+    page.goto(url + "/research?focus=learn", wait_until="domcontentloaded")
+    cards = page.locator("#research-learn-list .research-card")
+    expect(cards).to_have_count(1)
     expect(cards.nth(0)).to_contain_text("HTML5 showpiece")
-    expect(cards.nth(1)).to_contain_text("Source only · not ready")
     cards.nth(0).click()
     frame = page.locator("#research-presentation")
     expect(frame).to_be_visible()
@@ -394,8 +394,7 @@ with sync_playwright() as p:
     expect(page.locator("#research-document-comment")).to_be_visible()
     assert page.evaluate("document.documentElement.scrollWidth === document.documentElement.clientWidth")
     page.locator("#research-back").click()
-    cards = page.locator("#research-list .research-card")
-    cards.nth(1).click()
+    page.goto(url + "/research/draft/SOURCE.md", wait_until="domcontentloaded")
     expect(page.locator("#research-body")).to_be_visible()
     expect(page.locator("#research-presentation")).to_be_hidden()
     browser.close()

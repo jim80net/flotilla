@@ -187,8 +187,15 @@ The trial stays frozen until the operator makes an explicit decision.
 	if !byID["valid/SOURCE.md"].PublicationValid || len(byID["valid/SOURCE.md"].Diagnostics) != 0 || !byID["valid/SOURCE.md"].PresentationReady {
 		t.Errorf("valid publication = %+v", byID["valid/SOURCE.md"])
 	}
+	if !byID["valid/SOURCE.md"].LearnReady {
+		t.Errorf("complete explicit research showpiece must be Learn-ready: %+v", byID["valid/SOURCE.md"])
+	}
 	if !byID["archival.md"].Archival || byID["archival.md"].Decision || byID["archival.md"].Status != "archival" || !byID["archival.md"].PublicationValid {
 		t.Errorf("archival publication = %+v", byID["archival.md"])
+	}
+	if byID["archival.md"].LearnReady || byID["decision.md"].LearnReady || byID["empty.md"].LearnReady {
+		t.Errorf("Learn admitted archival, decision, or raw note: archival=%+v decision=%+v empty=%+v",
+			byID["archival.md"], byID["decision.md"], byID["empty.md"])
 	}
 	if !byID["decision.md"].Decision || byID["decision.md"].Status != "design-only" || byID["decision.md"].PublicationValid {
 		t.Errorf("decision publication = %+v", byID["decision.md"])
@@ -215,6 +222,41 @@ The trial stays frozen until the operator makes an explicit decision.
 	}
 	if summary.ByCode["presentation.missing"] != 4 {
 		t.Errorf("presentation readiness count = %+v", summary.ByCode)
+	}
+}
+
+func TestEducationalResearchReadyFailsClosed(t *testing.T) {
+	base := ResearchEntry{
+		Publication:       ResearchPublication{Explicit: true, Classification: "research"},
+		PublicationValid:  true,
+		PresentationReady: true,
+	}
+	if !educationalResearchReady(base) {
+		t.Fatal("complete explicit research showpiece should enter Learn")
+	}
+	tests := map[string]ResearchEntry{
+		"missing explicit publication": {
+			Publication: ResearchPublication{Classification: "research"}, PublicationValid: true, PresentationReady: true,
+		},
+		"status note with no classification": {
+			Publication: ResearchPublication{Explicit: true}, PublicationValid: true, PresentationReady: true,
+		},
+		"source only": {
+			Publication: ResearchPublication{Explicit: true, Classification: "research"}, PublicationValid: false,
+		},
+		"decision showpiece": {
+			Publication: ResearchPublication{Explicit: true, Classification: "decision"}, PublicationValid: true, PresentationReady: true, Decision: true,
+		},
+		"archival showpiece": {
+			Publication: ResearchPublication{Explicit: true, Classification: "archival"}, PublicationValid: true, PresentationReady: true, Archival: true,
+		},
+	}
+	for name, entry := range tests {
+		t.Run(name, func(t *testing.T) {
+			if educationalResearchReady(entry) {
+				t.Fatalf("non-educational entry admitted to Learn: %+v", entry)
+			}
+		})
 	}
 }
 
@@ -481,13 +523,13 @@ func TestResearchPageAndDashboardNavMarkers(t *testing.T) {
 		t.Error("dashboard must expose the combined R&D navigation link with decision focus")
 	}
 	page := doGet(t, srv, "/research").Body.String()
-	for _, marker := range []string{"Decide · investigate · learn", "R&amp;D", "Waiting on you", "Publication diagnostics", `id="research-reader"`, `id="research-search"`, `data-research-focus="decisions"`, `data-research-focus="library"`, `data-research-focus="all"`, `id="research-decision-more"`, `id="research-library-more"`, `id="research-toc-count"`, `id="research-publication-state"`, `id="research-document-comment"`, `id="research-annotation-panel"`, `id="research-presentation"`, `sandbox="allow-scripts"`, `/static/research.js`} {
+	for _, marker := range []string{"Depth · decisions", "R&amp;D", "Waiting on you", "What we learned", "not status notes", `id="research-reader"`, `id="research-search"`, `data-research-focus="decisions"`, `data-research-focus="learn"`, `id="research-decision-more"`, `id="research-learn-more"`, `id="research-toc-count"`, `id="research-publication-state"`, `id="research-document-comment"`, `id="research-annotation-panel"`, `id="research-presentation"`, `sandbox="allow-scripts"`, `/static/research.js`} {
 		if !strings.Contains(page, marker) {
 			t.Errorf("research page missing %q", marker)
 		}
 	}
 	js := doGet(t, srv, "/static/research.js").Body.String()
-	for _, marker := range []string{"function esc(value)", "renderMarkdown", "documentWithoutDuplicateTitle", "documentWithoutPublicationDirective", "research-diagnostics", "research-publication-state", "research-decision-strip", "collectionWindow = 6", "decisionWindow = 3", "filteredEntries", "setFocus", "tocRestoreY", "researchVideoURL", "data-research-video-fullscreen", "anchorForQuote", "X-Flotilla-Dash", "draft is still here", `detail === "awaiting-auth"`, "item.paper_id || paperIDFromBrief", "HTML5 showpiece", "renderPresentation"} {
+	for _, marker := range []string{"function esc(value)", "renderMarkdown", "documentWithoutDuplicateTitle", "documentWithoutPublicationDirective", "educationalResearch", "learn_ready", "research-publication-state", "research-decision-strip", "collectionWindow = 6", "decisionWindow = 3", "filteredEntries", "setFocus", "tocRestoreY", "researchVideoURL", "data-research-video-fullscreen", "anchorForQuote", "X-Flotilla-Dash", "draft is still here", `detail === "awaiting-auth"`, "item.paper_id || paperIDFromBrief", "HTML5 showpiece", "renderPresentation"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("research renderer missing %q", marker)
 		}

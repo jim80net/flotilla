@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-// TestResearchPublicationDiagnosticsRendered858 keeps Phase 1 honest in the
-// rendered UI: invalid files remain reachable while diagnostics, explicit
-// archival intent, and decision classification are visible at phone and desktop.
+// TestResearchPublicationDiagnosticsRendered858 keeps the R&D split honest:
+// Learn admits only complete educational showpieces, raw sources remain
+// reachable by exact deep link, and Decisions remains brief-first.
 func TestResearchPublicationDiagnosticsRendered858(t *testing.T) {
 	python := os.Getenv("FLOTILLA_PLAYWRIGHT_PYTHON")
 	if python == "" {
@@ -92,18 +92,20 @@ def open_library(browser, width, height):
             "status_display": "awaiting", "state": "awaiting",
             "paper_id": "decision.md",
             "brief": "## Recommendation\nKeep the trial frozen.\n\n[Read paper](/research/decision.md)",
-            "work_items": []
+            "work_items": [{
+                "class": "awaiting", "detail": "awaiting-auth",
+                "label": "Approve the reversible trial",
+                "paper_id": "decision.md",
+                "brief": "## Why you care\nYour fleet needs this bounded choice.\n\n## Recommendation\nKeep the trial frozen.\n\n[Read paper](/research/decision.md)"
+            }]
         }]})))
-    page.goto(url + "/research?focus=library", wait_until="domcontentloaded")
-    expect(page.locator("#research-diagnostics")).to_be_visible()
-    expect(page.locator("#research-diagnostics-count")).to_have_text("1 showpiece · 3 source-only")
-    expect(page.locator("#research-diagnostics-summary")).to_contain_text("2 of 4 publications")
-    expect(page.locator("#research-diagnostics-summary")).to_contain_text("all 4 remain visible")
-    expect(page.locator("#research-diagnostics-breakdown")).to_contain_text("Title only")
-    expect(page.locator("#research-diagnostics-breakdown")).to_contain_text("Missing reader action")
-    expect(page.locator("#research-diagnostics-breakdown")).to_contain_text("Missing support")
-    expect(page.locator("#research-diagnostics-breakdown")).to_contain_text("Missing HTML5 showpiece")
-    expect(page.locator(".research-card")).to_have_count(4)
+    page.goto(url + "/research?focus=learn", wait_until="domcontentloaded")
+    expect(page.locator("#research-learn")).to_be_visible()
+    expect(page.locator("#research-learn-count")).to_have_text("1 showpiece")
+    expect(page.locator("#research-learn-list .research-card")).to_have_count(1)
+    expect(page.locator("#research-learn-list")).to_contain_text("Valid evidence")
+    expect(page.locator("#research-learn-list")).not_to_contain_text("Title-only publication")
+    expect(page.locator("#research-learn-list")).not_to_contain_text("Archival rationale")
     return page
 
 def open_card(page, title):
@@ -119,10 +121,7 @@ with sync_playwright() as p:
     try:
         for width, height in [(390, 844), (1440, 900)]:
             page = open_library(browser, width, height)
-            invalid = page.locator(".research-card").filter(has_text="Title-only publication")
-            assert "has-diagnostics" in invalid.get_attribute("class")
-            expect(invalid).to_contain_text("4 publication checks")
-            invalid.click()
+            page.goto(url + "/research/invalid.md", wait_until="domcontentloaded")
             expect(page.locator("#research-publication-result")).to_have_text("4 checks")
             expect(page.locator("#research-reader-action")).to_have_text("Reader action not declared.")
             expect(page.locator("#research-document-diagnostics")).to_contain_text("Title only")
@@ -131,19 +130,19 @@ with sync_playwright() as p:
             expect(page.locator("#research-document-diagnostics")).to_contain_text("Missing HTML5 showpiece")
             # Phase 1 measures; the invalid file still has a canonical reader URL.
             assert page.url.endswith("/research/invalid.md"), page.url
-            page.locator("#research-back").click() if width == 390 else page.goto(url + "/research?focus=library", wait_until="domcontentloaded")
+            page.goto(url + "/research?focus=learn", wait_until="domcontentloaded")
 
             open_card(page, "Valid evidence")
             expect(page.locator("#research-publication-result")).to_have_text("Valid")
             expect(page.locator("#research-reader-action")).to_contain_text("Compare the evidence")
             expect(page.locator("#research-body")).not_to_contain_text("flotilla-publication")
-            page.locator("#research-back").click() if width == 390 else page.goto(url + "/research?focus=library", wait_until="domcontentloaded")
+            page.goto(url + "/research/archival.md", wait_until="domcontentloaded")
 
-            open_card(page, "Archival rationale")
+            expect(page.locator("#research-title")).to_have_text("Archival rationale")
             expect(page.locator("#research-document-status")).to_have_text("Archival · Source only")
             expect(page.locator("#research-publication-result")).to_have_text("Valid")
             expect(page.locator("#research-reader-action")).to_contain_text("historical context")
-            page.locator("#research-back").click() if width == 390 else page.goto(url + "/research?focus=library", wait_until="domcontentloaded")
+            page.goto(url + "/research?focus=decisions", wait_until="domcontentloaded")
 
             page.locator('[data-research-focus="decisions"]').click()
             expect(page.locator("#research-decision-count")).to_have_text("1 waiting")

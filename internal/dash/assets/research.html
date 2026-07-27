@@ -29,14 +29,13 @@
 
   <main class="research-shell">
     <aside id="research-library" class="research-library" aria-labelledby="research-library-title">
-      <p class="research-eyebrow">Decide · investigate · learn</p>
+      <p class="research-eyebrow">Depth · decisions</p>
       <h1 id="research-library-title">R&amp;D</h1>
-      <p class="research-lede">The decisions that need you and the evidence behind them, in one focused reading room.</p>
+      <p class="research-lede">Decide what unblocks your fleet, or learn what the research actually discovered.</p>
       <div class="research-focus" aria-label="R and D focus">
         <div class="research-focus-tabs" role="group" aria-label="Choose material">
-          <button type="button" data-research-focus="decisions" aria-pressed="true">Decisions</button>
-          <button type="button" data-research-focus="library" aria-pressed="false">Library</button>
-          <button type="button" data-research-focus="all" aria-pressed="false">All</button>
+          <button type="button" data-research-focus="decisions" aria-pressed="true"><strong>Decide</strong><span>Unblock your fleet</span></button>
+          <button type="button" data-research-focus="learn" aria-pressed="false"><strong>Learn</strong><span>Discoveries &amp; developments</span></button>
         </div>
         <label class="research-search" for="research-search">
           <span>Find in R&amp;D</span>
@@ -50,15 +49,6 @@
         <button id="research-index-retry" class="research-retry" type="button" hidden>Retry library</button>
       </div>
 
-      <section id="research-diagnostics" class="research-diagnostics" aria-labelledby="research-diagnostics-title" hidden>
-        <div class="research-shelf-heading">
-          <div><p class="research-eyebrow">Publication diagnostics</p><h2 id="research-diagnostics-title">Needs attention</h2></div>
-          <span id="research-diagnostics-count" class="research-count"></span>
-        </div>
-        <p id="research-diagnostics-summary">Measurement only — every current document remains visible.</p>
-        <dl id="research-diagnostics-breakdown"></dl>
-      </section>
-
       <section id="research-decisions" class="research-shelf research-decision-shelf" aria-labelledby="research-decisions-title" hidden>
         <div class="research-shelf-heading">
           <div><p class="research-eyebrow">Decisions</p><h2 id="research-decisions-title">Waiting on you</h2></div>
@@ -68,10 +58,11 @@
         <button id="research-decision-more" class="research-show-more" type="button" hidden></button>
       </section>
 
-      <section id="research-all" class="research-shelf" aria-labelledby="research-all-title" hidden>
-        <div class="research-shelf-heading"><div><p class="research-eyebrow">Evidence</p><h2 id="research-all-title">Library</h2></div><span id="research-count" class="research-count"></span></div>
-        <div id="research-list" class="research-card-list"></div>
-        <button id="research-library-more" class="research-show-more" type="button" hidden></button>
+      <section id="research-learn" class="research-shelf research-learn-shelf" aria-labelledby="research-learn-title" hidden>
+        <div class="research-shelf-heading"><div><p class="research-eyebrow">Educational research</p><h2 id="research-learn-title">What we learned</h2></div><span id="research-learn-count" class="research-count"></span></div>
+        <p class="research-shelf-intro">Teaching-quality HTML5 presentations about meaningful discoveries and developments—not status notes.</p>
+        <div id="research-learn-list" class="research-card-list"></div>
+        <button id="research-learn-more" class="research-show-more" type="button" hidden></button>
       </section>
     </aside>
 
