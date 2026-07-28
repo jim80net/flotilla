@@ -135,6 +135,8 @@ class PlaywrightProbe:
                 "state": anchor["state"],
                 "screenshot": capture_path.name,
             }
+        if self.page_errors:
+            raise RuntimeError(f"page errors: {len(self.page_errors)}")
         return None
 
     def close(self) -> None:
@@ -160,6 +162,10 @@ def run(
                     # Do not include page content, URLs with hosts, or exception reprs in
                     # the durable manifest. Route + error class are enough to diagnose.
                     attempt_errors.append(f"{attempt['route']}: {type(error).__name__}")
+                    # Selector absence is the only fail-soft condition. A route,
+                    # action, browser, or page error must not be hidden by a
+                    # successful fallback attempt.
+                    break
                 if result is not None:
                     break
             if result is None:

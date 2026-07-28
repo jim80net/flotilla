@@ -7,6 +7,8 @@ import sys
 import tempfile
 import unittest
 
+from walk_run import run
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 RUNNER = SCRIPT_DIR / "walk_run.py"
@@ -73,6 +75,69 @@ class WalkRunTests(unittest.TestCase):
             )
             self.assertNotEqual(completed.returncode, 0)
             self.assertFalse((output / "walk-run.json").exists())
+
+    def test_optional_page_error_fails_loud_and_does_not_hide_behind_fallback(self) -> None:
+        class Probe:
+            def __init__(self) -> None:
+                self.routes: list[str] = []
+
+            def attempt(self, spec: dict, _capture_path: Path) -> dict | None:
+                self.routes.append(spec["route"])
+                if spec["route"] == "/broken":
+                    raise RuntimeError("generic page error")
+                return {
+                    "route": spec["route"],
+                    "selector": spec["anchors"][0]["selector"],
+                    "state": spec["anchors"][0]["state"],
+                    "screenshot": None,
+                }
+
+            def close(self) -> None:
+                return
+
+        manifest = {
+            "schema": 1,
+            "captures": [
+                {
+                    "id": "optional-error",
+                    "required": False,
+                    "attempts": [
+                        {
+                            "route": "/broken",
+                            "anchors": [{"selector": "#optional", "state": "populated"}],
+                        },
+                        {
+                            "route": "/fallback",
+                            "anchors": [{"selector": "#fallback", "state": "legacy"}],
+                        },
+                    ],
+                },
+                {
+                    "id": "later-required",
+                    "required": True,
+                    "attempts": [
+                        {
+                            "route": "/later",
+                            "anchors": [{"selector": "#later", "state": "loaded"}],
+                        }
+                    ],
+                },
+            ],
+        }
+        with tempfile.TemporaryDirectory() as root:
+            output = Path(root) / "state" / "flotilla-dev-walk-generic" / "assets"
+            probe = Probe()
+            result, status = run(manifest, probe, output)
+            self.assertEqual(status, 1)
+            self.assertEqual(
+                result["summary"],
+                {"captured": 1, "failed": 1, "failures": 1, "unavailable": 0},
+            )
+            by_id = {capture["id"]: capture for capture in result["captures"]}
+            self.assertEqual(by_id["optional-error"]["outcome"], "failed")
+            self.assertEqual(by_id["later-required"]["outcome"], "captured")
+            self.assertEqual(probe.routes, ["/broken", "/later"])
+            self.assertTrue((output / "walk-run.json").exists())
 
 
 if __name__ == "__main__":
