@@ -11,14 +11,18 @@ import (
 )
 
 type recordingSynthesisBot struct {
-	verified []string
-	channels []string
-	bodies   []string
-	err      error
+	verified           []string
+	channels           []string
+	bodies             []string
+	err                error
+	verifyErrByChannel map[string]error
 }
 
 func (b *recordingSynthesisBot) Verify(channelID string) error {
 	b.verified = append(b.verified, channelID)
+	if err := b.verifyErrByChannel[channelID]; err != nil {
+		return err
+	}
 	return b.err
 }
 
@@ -145,6 +149,46 @@ func TestSynthesisPublishRelayPreflightFailsBeforeHomePost(t *testing.T) {
 	}
 	if homePosts != 0 {
 		t.Fatalf("home posts = %d, want 0", homePosts)
+	}
+}
+
+func TestSynthesisPublishViewOnlyLaterRouteCausesZeroPosts(t *testing.T) {
+	rosterPath, secretsPath := writeSynthesisFixture(t, true)
+	rosterBody := `{
+  "agents":[{"name":"cos"},{"name":"memex"}],
+  "channels":[
+    {"channel_id":"C_HOME","xo_agent":"memex","members":["cos"]},
+    {"channel_id":"C_SENDABLE","xo_agent":"memex","members":["cos"]},
+    {"channel_id":"C_VIEW_ONLY","xo_agent":"memex","members":["cos"]}
+  ]
+}`
+	if err := os.WriteFile(rosterPath, []byte(rosterBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bot := &recordingSynthesisBot{
+		verifyErrByChannel: map[string]error{
+			"C_VIEW_ONLY": errors.New("lacks effective message-send permission"),
+		},
+	}
+	var homePosts int
+	deps := synthesisPublishDeps{
+		webhookChannel: func(string) (string, error) { return "C_HOME", nil },
+		webhookPost:    func(string, string, string) error { homePosts++; return nil },
+		newBot:         func(string) (synthesisChannelPoster, error) { return bot, nil },
+		stdout:         &bytes.Buffer{},
+	}
+	err := cmdSynthesisPublish([]string{
+		"--from", "memex", "--roster", rosterPath, "--secrets", secretsPath,
+		"curated rollup",
+	}, deps)
+	if err == nil || !strings.Contains(err.Error(), "nothing was posted") {
+		t.Fatalf("error = %v, want fail-before-first-write permission denial", err)
+	}
+	if homePosts != 0 || len(bot.channels) != 0 {
+		t.Fatalf("posts = home %d relay %v, want zero writes", homePosts, bot.channels)
+	}
+	if !reflect.DeepEqual(bot.verified, []string{"C_SENDABLE", "C_VIEW_ONLY"}) {
+		t.Fatalf("verified = %v, want every route checked before writes", bot.verified)
 	}
 }
 
