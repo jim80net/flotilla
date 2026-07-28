@@ -18,6 +18,7 @@
   var timelineEvents = [];
   var timelineNext = "";
   var timelineSources = [];
+  var timelineEarlierError = "";
   var pollTimer = null;
   var ageTimer = null;
   var returnFocus = null;
@@ -100,7 +101,7 @@
     var earlier = el("wc-timeline-earlier");
     earlier.hidden = !timelineNext;
     earlier.disabled = false;
-    earlier.textContent = "Show earlier history";
+    earlier.textContent = timelineEarlierError ? "Retry earlier history" : "Show earlier history";
   }
 
   function fetchTimeline(reset) {
@@ -115,6 +116,7 @@
       timelineEvents = [];
       timelineNext = "";
       timelineSources = [];
+      timelineEarlierError = "";
       el("wc-timeline-summary").textContent = "Loading source coverage…";
       el("wc-timeline-sources").innerHTML = "";
       el("wc-timeline-events").innerHTML = '<li class="wc-timeline-empty">Loading timeline…</li>';
@@ -134,17 +136,29 @@
         timelineEvents.forEach(function (event) { seen[event.id] = true; });
         timelineEvents = incoming.filter(function (event) { return !seen[event.id]; }).concat(timelineEvents);
       }
+      timelineEarlierError = "";
       timelineSources = Array.isArray(doc.sources) ? doc.sources : [];
       timelineNext = doc.next_cursor || "";
       renderTimeline();
     }).catch(function (err) {
       if (!panelOpen() || epoch !== timelineEpoch) return;
-      timelineEvents = [];
-      timelineNext = "";
-      timelineSources = [{
-        id: "composer", label: "Timeline composer", status: "unavailable",
-        detail: err.message
-      }];
+      if (reset) {
+        timelineEvents = [];
+        timelineNext = "";
+        timelineEarlierError = "";
+        timelineSources = [{
+          id: "composer", label: "Timeline composer", status: "unavailable",
+          detail: err.message
+        }];
+      } else {
+        timelineEarlierError = err.message || "Earlier history is temporarily unavailable.";
+        timelineSources = timelineSources.filter(function (source) {
+          return source.id !== "composer";
+        }).concat([{
+          id: "composer", label: "Earlier history", status: "unavailable",
+          detail: timelineEarlierError
+        }]);
+      }
       renderTimeline();
     });
   }
@@ -550,6 +564,7 @@
     timelineEvents = [];
     timelineNext = "";
     timelineSources = [];
+    timelineEarlierError = "";
     resetComposer();
     returnFocus = source || document.activeElement;
     var panel = el("work-context");

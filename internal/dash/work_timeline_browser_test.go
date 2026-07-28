@@ -58,11 +58,19 @@ def event(i):
     }
 
 long_events = [event(i) for i in range(28)]
+earlier_attempts = {"count": 0}
 
 def timeline(route):
     query = parse_qs(urlparse(route.request.url).query)
     if query.get("goal") == ["goal-long"]:
         before = query.get("before", [""])[0]
+        if before and earlier_attempts["count"] == 0:
+            earlier_attempts["count"] += 1
+            route.fulfill(
+                status=503, content_type="application/json",
+                body=json.dumps({"error":"earlier history source temporarily unavailable"})
+            )
+            return
         body = {
             "subject": {"kind":"goal","id":"goal-long","title":"Long generic goal","state":"in-flight","source_id":"goal-long"},
             "events": long_events[:8] if before else long_events[8:],
@@ -123,7 +131,10 @@ def prepare(page):
         body=json.dumps({"number":44,"title":"Generic issue","state":"OPEN","comments":[]})))
 
 def open_goal(page):
-    page.evaluate("() => window.flotillaDash.showView('goals')")
+    page.evaluate("""() => {
+      history.replaceState({view:'goals'}, '', '#goals');
+      window.flotillaDash.showView('goals');
+    }""")
     page.evaluate("""() => window.flotillaWorkContext.open({
       item:{goal:{id:'goal-long',title:'Long generic goal',owner:'alpha',status_display:'in-flight'}},
       posture:'in-flight',flotilla:'Example',desk:'alpha',seats:['alpha']
@@ -131,7 +142,10 @@ def open_goal(page):
 
 def open_issue(page, number):
     page.evaluate("() => window.flotillaWorkContext.close()")
-    page.evaluate("() => window.flotillaDash.showView('issues')")
+    page.evaluate("""() => {
+      history.replaceState({view:'issues'}, '', '#issues');
+      window.flotillaDash.showView('issues');
+    }""")
     page.evaluate("""number => window.flotillaWorkContext.open({
       item:{repo:'example/product',issue:{number:number,title:number===44?'Partial generic issue':'Empty generic issue',state:'OPEN'}},
       posture:'in-flight',flotilla:'Example',desk:'alpha',seats:['alpha']
@@ -141,6 +155,7 @@ with sync_playwright() as p:
     browser = p.chromium.launch()
     try:
         for width, height in [(390, 844), (1440, 900)]:
+            earlier_attempts["count"] = 0
             page = browser.new_page(viewport={"width":width,"height":height})
             prepare(page)
             page.goto(url, wait_until="domcontentloaded")
@@ -159,6 +174,12 @@ with sync_playwright() as p:
             }""")
             for state in ["queued", "delivered", "acknowledged", "gated", "merged", "superseded"]:
                 expect(page.locator("#wc-timeline-events")).to_contain_text(state)
+            page.locator("#wc-timeline-earlier").click()
+            expect(page.locator("#wc-timeline-events .wc-event")).to_have_count(20)
+            expect(page.locator(".wc-source-unavailable")).to_contain_text("Earlier history")
+            expect(page.locator("#wc-timeline-summary")).to_contain_text("partial coverage")
+            expect(page.locator("#wc-timeline-earlier")).to_have_text("Retry earlier history")
+            expect(page.locator("#wc-timeline-earlier")).to_be_enabled()
             page.locator("#wc-timeline-earlier").click()
             expect(page.locator("#wc-timeline-events .wc-event")).to_have_count(28)
             expect(page.locator("#wc-timeline-earlier")).to_be_hidden()
