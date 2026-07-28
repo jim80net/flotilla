@@ -189,8 +189,9 @@ func TestFileSigsChange(t *testing.T) {
 	driveBacklog := filepath.Join(dir, "fleet-backlog.md")
 	goals := filepath.Join(dir, "fleet-goals.json")
 	goalsYAML := filepath.Join(dir, "fleet-goals.yaml")
+	quality := filepath.Join(dir, "harness-quality.jsonl")
 	mirrorDir := filepath.Join(dir, "session-mirror")
-	paths := []string{snap, ledger, backlog, driveBacklog, goals, goalsYAML}
+	paths := []string{snap, ledger, backlog, driveBacklog, goals, goalsYAML, quality}
 
 	// All absent initially.
 	s0 := fileSigs(paths, mirrorDir)
@@ -254,6 +255,16 @@ func TestFileSigsChange(t *testing.T) {
 	if s5 == s4 {
 		t.Error("goals yaml change must change the combined signature")
 	}
+
+	// Appending a harness-quality event must independently trigger a refresh.
+	if err := os.WriteFile(quality, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sQuality := fileSigs(paths, mirrorDir)
+	if sQuality == s5 {
+		t.Error("quality ledger change must change the combined signature")
+	}
+	s5 = sQuality
 
 	// Appending a session-mirror ledger must change the combined signature.
 	if err := os.MkdirAll(mirrorDir, 0o700); err != nil {

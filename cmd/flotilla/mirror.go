@@ -37,6 +37,9 @@ type deskMirror struct {
 	now func() time.Time
 	// ledgerAppend overrides sessionmirror.Append for tests; nil ⇒ the real append.
 	ledgerAppend func(rosterDir, agent string, rec sessionmirror.Record) error
+	// qualityAppend records the harness/model/version/work-class completion fact
+	// after the corresponding session-mirror record is durable.
+	qualityAppend func(agent string, rec sessionmirror.Record) error
 	// allowDiscord explicitly enables legacy turn-final posting. The zero value is
 	// deliberately ledger-only: operator Discord fails quiet while the dash stays durable (#683).
 	allowDiscord bool
@@ -204,6 +207,11 @@ func (m deskMirror) appendSessionMirror(agent, verbose string, d mirrorDecision)
 	if err := appendFn(m.rosterDir, agent, rec); err != nil {
 		m.logf("flotilla watch: mirror LEDGER-FAIL %s: %v", agent, err)
 		return false
+	}
+	if m.qualityAppend != nil {
+		if err := m.qualityAppend(agent, rec); err != nil {
+			m.logf("flotilla watch: mirror QUALITY-FAIL %s: %v", agent, err)
+		}
 	}
 	return true
 }

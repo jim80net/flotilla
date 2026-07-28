@@ -213,7 +213,7 @@ func (s *Server) startPoll(ctx context.Context) {
 // JSON endpoints. One poller serves every client (not one per connection).
 func (s *Server) poll(ctx context.Context) {
 	defer s.pollWG.Done()
-	paths := []string{s.cfg.SnapshotPath, s.cfg.LedgerPath, s.cfg.BacklogPath, s.cfg.DriveBacklogPath, s.cfg.GoalsPath, s.cfg.GoalsYAMLPath}
+	paths := []string{s.cfg.SnapshotPath, s.cfg.LedgerPath, s.cfg.BacklogPath, s.cfg.DriveBacklogPath, s.cfg.GoalsPath, s.cfg.GoalsYAMLPath, s.cfg.QualityPath}
 	prev := fileSigs(paths, s.cfg.SessionMirrorDir)
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
@@ -272,6 +272,7 @@ type fileSig struct {
 // so the poller can detect "any change" with a single ==).
 type sigBundle struct {
 	snap, ledger, backlog, driveBacklog, goals, goalsYAML fileSig
+	quality                                               fileSig
 	sessionMirror                                         fileSig
 }
 
@@ -296,9 +297,10 @@ func statSig(path string) fileSig {
 }
 
 // fileSigs computes the combined signature for [snapshot, ledger, history backlog,
-// drive backlog, goals, goalsYAML] plus the aggregated session-mirror/ ledger mtimes.
+// drive backlog, goals, goalsYAML, quality] plus the aggregated session-mirror/
+// ledger mtimes.
 func fileSigs(paths []string, sessionMirrorDir string) sigBundle {
-	return sigBundle{
+	bundle := sigBundle{
 		snap:          statSig(paths[0]),
 		ledger:        statSig(paths[1]),
 		backlog:       statSig(paths[2]),
@@ -307,6 +309,10 @@ func fileSigs(paths []string, sessionMirrorDir string) sigBundle {
 		goalsYAML:     statSig(paths[5]),
 		sessionMirror: sessionMirrorDirSig(sessionMirrorDir),
 	}
+	if len(paths) > 6 {
+		bundle.quality = statSig(paths[6])
+	}
+	return bundle
 }
 
 // sessionMirrorDirSig aggregates max(mtime) and sum(size) across *.jsonl ledgers

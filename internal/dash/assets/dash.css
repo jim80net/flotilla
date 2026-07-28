@@ -1061,6 +1061,7 @@ code {
   letter-spacing: .015em;
 }
 .fleet-utilization-unit { flex: 0 0 auto; white-space: nowrap; }
+.harness-quality { color: var(--ink-2); font-family: var(--display); letter-spacing: .015em; }
 
 .perf-diagnostics { margin-left: auto; text-align: left; }
 .perf-diagnostics summary { cursor: pointer; color: var(--ink-2); }

@@ -172,10 +172,10 @@ func TestPartitionWebhookCoverage506(t *testing.T) {
 
 func TestFinishMirrorWiringRemainsActiveWithoutDiscordSecrets683(t *testing.T) {
 	cfg := &roster.Config{XOAgent: "xo", Agents: []roster.Agent{{Name: "xo"}, {Name: "backend"}}}
-	if hook := deskMirrorOnFinish(cfg, nil, nil, t.TempDir()); hook == nil {
+	if hook := deskMirrorOnFinish(cfg, nil, nil, t.TempDir(), nil); hook == nil {
 		t.Fatal("desk finish mirror must remain active for ledger durability without Discord")
 	}
-	if hook := coordinatorMirrorOnFinish(cfg, nil, nil, "", t.TempDir()); hook == nil {
+	if hook := coordinatorMirrorOnFinish(cfg, nil, nil, "", t.TempDir(), nil); hook == nil {
 		t.Fatal("coordinator finish mirror must remain active for ledger durability without Discord")
 	}
 }

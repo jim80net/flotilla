@@ -12,6 +12,7 @@ import (
 
 	"github.com/jim80net/flotilla/internal/backlog"
 	"github.com/jim80net/flotilla/internal/dash"
+	"github.com/jim80net/flotilla/internal/harnessquality"
 	"github.com/jim80net/flotilla/internal/loopposture"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
@@ -76,11 +77,13 @@ func cmdStatus(args []string) error {
 			generatedAt = fi.ModTime().UTC().Format(time.RFC3339)
 		}
 		doc := buildStatusJSON(cfg, xo, generatedAt, snap, loopByAgent)
+		doc.Quality = harnessquality.LoadSummary(filepath.Dir(*rosterPath), now)
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(doc)
 	}
 	writeStatus(os.Stdout, cfg, xo, *snapshotPath, *ackPath, snap, snapOK, now, loopByAgent)
+	writeQualitySummary(os.Stdout, harnessquality.LoadSummary(filepath.Dir(*rosterPath), now))
 	return nil
 }
 
@@ -90,10 +93,21 @@ func cmdStatus(args []string) error {
 // against a demo roster rather than hand-authored data. #524 adds loop_posture
 // beside pane state; older consumers ignore unknown fields.
 type statusDoc struct {
-	GeneratedAt string              `json:"generated_at"`
-	XO          string              `json:"xo,omitempty"`
-	Utilization utilization.Summary `json:"utilization"`
-	Agents      []statusItem        `json:"agents"`
+	GeneratedAt string                 `json:"generated_at"`
+	XO          string                 `json:"xo,omitempty"`
+	Utilization utilization.Summary    `json:"utilization"`
+	Quality     harnessquality.Summary `json:"harness_quality"`
+	Agents      []statusItem           `json:"agents"`
+}
+
+func writeQualitySummary(out io.Writer, summary harnessquality.Summary) {
+	if summary.State != "available" {
+		fmt.Fprintf(out, "harness quality — unavailable (%s)\n", summary.Diagnostic)
+		return
+	}
+	fmt.Fprintf(out, "harness quality — events:%d classified:%.1f%% gates:%d bounce:%.1f%% completions:%d rework:%.1f%%\n",
+		summary.TotalEvents, summary.TaggingCoveragePercent, summary.GateEvents, summary.BounceRatePercent,
+		summary.CompletionEvents, summary.ReworkRatePercent)
 }
 
 type statusItem struct {
