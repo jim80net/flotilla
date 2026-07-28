@@ -4,27 +4,30 @@ The visual language flotilla uses across its surfaces — the local **dash**
 (`internal/dash/assets/`) and the public **landing site** (`site/`). One system,
 so the product and its marketing read as the same thing.
 
-Flotilla is **warm-light-first.** The dash ships a warm-paper theme as its
-default: a calm parchment ground, near-white panels lifted by soft warm shadows
-and crisp warm borders, a deep-teal signal, an ochre bus accent, and warm-ink
-telemetry. The goal is an instrument you can read at a glance where **every
+Flotilla ships coordinated **warm-light and dark instrument themes**. A first
+visit follows the operating-system preference; the header control stores an
+explicit light/dark override in the browser for later visits. Warm light uses a
+calm parchment ground; dark uses deep blue-charcoal surfaces with brighter
+signals and readable muted telemetry. In both, the goal is an instrument you can
+read at a glance where **every
 section is clearly its own card** — separation comes from surface contrast +
 shadow + border, not from cramming color.
 
-The source of truth for the tokens is the `:root` block in
+The source of truth for the tokens is the `:root` fallback plus the
+`:root[data-theme="dark"]` override in
 `internal/dash/assets/dash.css`. When a token changes there, update this book;
-every CSS snippet below is copied from that file verbatim.
+components consume only the shared semantic vocabulary.
 
 ---
 
 ## 1. Voice of the surface
 
-A **fleet command console**, rendered on warm paper: a parchment ground, ivory
-instrument panels, a phosphor-deep teal signal, an ochre accent for the
-chat/audit bus, restrained condensed display type over a monospace body. Calm,
-instrument-like, legible at a glance — not loud, not "techno", and deliberately
-**not dark**. The dash is a working instrument; the landing page borrows its calm
-so the product you install matches the page that sold it.
+A **fleet command console** rendered either on warm paper or deep blue-charcoal:
+layered instrument panels, a teal signal, an ochre accent for the chat/audit bus,
+restrained condensed display type over a monospace body. Both palettes are calm,
+instrument-like, and legible at a glance. The dash is a working instrument; the
+landing page borrows its calm so the product you install matches the page that
+sold it.
 
 ---
 
@@ -42,13 +45,19 @@ The palette is expressed in two layers:
 
 Every dark-toned wash, border, or glow that used to be a hard-coded `rgba()` of a
 hue is now written as `color-mix(in srgb, var(--token) N%, transparent)`, so it
-**re-derives from the token** instead of pinning a dead color. That is why a
-single `:root` edit re-themes the whole instrument.
+**re-derives from the token** instead of pinning a dead color. That is why each
+palette can re-theme the whole instrument from one token block.
+
+`theme.js` resolves the stored `flotilla-theme-v1` choice before the stylesheet
+loads. With no stored override it follows `prefers-color-scheme`; the header
+control writes an explicit `light` or `dark` choice. The same script and storage
+key are shared by the dashboard, Research, and Parade pages.
 
 The `:root` block, verbatim:
 
 ```css
 :root {
+  color-scheme: light;
   /* ── surfaces (warm light) — page is the deepest warm tone so panels pop ── */
   --ground:     #efe7d8;   /* the page — warm parchment */
   --surface:    #faf5ec;   /* panels, threads, log panes — raised warm ivory */
@@ -64,6 +73,7 @@ The `:root` block, verbatim:
   --ink:        #2b2318;   /* headings / high-emphasis */
   --ink-2:      #544632;   /* body text */
   --ink-3:      #6d5f42;   /* muted / meta / labels (AA on the page) */
+  --solid-ink:  #ffffff;   /* text on saturated state/accent fills */
 
   /* ── accents + state (deep, AA-as-text on the warm surfaces) ── */
   --cyan:       #017468;   /* primary signal — links, active, in-flight */
@@ -93,6 +103,7 @@ The `:root` block, verbatim:
 
   /* ── legacy aliases (dark-theme names → semantic light tokens) ── */
   --abyss:      var(--ground);
+  --abyss-1:    var(--ground);
   --abyss-2:    var(--surface);
   --abyss-3:    var(--raised);
   --hull:       var(--card);
@@ -399,12 +410,13 @@ Keep it honest to the shipped `dash.css`: the `:root` block above is the contrac
 
 ---
 
-## 9. Gallery — the theme in place
+## 9. Gallery — the warm-light palette
 
-The move from the previous dark theme to the warm-light default. Sections that
-blended into the dark ground now read as distinct cards on parchment.
+These historical captures document the warm-light palette. The current dark
+theme uses the same separation model and semantic component rules rather than
+restoring the older hard-coded dark CSS.
 
-**Before** — dark theme (sections hard to distinguish):
+**Before** — legacy dark CSS (sections hard to distinguish):
 
 ![Dash Conversations, previous dark theme](assets/before-dark-conversations-1440.png)
 

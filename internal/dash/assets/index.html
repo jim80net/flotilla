@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex,nofollow" />
   <script>try{performance.mark("dash-start")}catch(e){}</script>
+  <script src="/static/theme.js"></script>
   <title>flotilla dash — {{.XO}}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -38,7 +39,7 @@
         <span class="brand-dash">conversations</span>
       </div>
     </div>
-    <!-- The four SPA views are a real tablist (only role="tab" elements are valid
+    <!-- The three SPA views are a real tablist (only role="tab" elements are valid
          tablist children — cubic #416 P1). The Parade "tab" is a navigation-out LINK,
          not a tab-panel switch, so it sits OUTSIDE the tablist as a sibling in the nav
          while staying visually part of the tab strip. -->
@@ -47,16 +48,16 @@
         <button id="tab-conversations" class="tab active" data-view="conversations" role="tab" aria-selected="true" aria-controls="view-conversations">Conversations<span class="unseen-dot" id="dot-conversations" aria-label="New content in Conversations" aria-hidden="true"></span></button>
         <button id="tab-goals" class="tab" data-view="goals" role="tab" aria-selected="false" aria-controls="view-goals">Goals<span class="unseen-dot" id="dot-goals" aria-label="New content in Goals" aria-hidden="true"></span></button>
         <button id="tab-issues" class="tab" data-view="issues" role="tab" aria-selected="false" aria-controls="view-issues">Issues<span class="unseen-dot" id="dot-issues" aria-label="New content in Issues" aria-hidden="true"></span></button>
-        <!-- #429: Decisions is a first-class SPA tab (was a modal opened from a header
-             button — the modal wasted real estate behind a secondary scrollbar). It keeps
-             the live awaiting-count badge instead of an unseen dot: a count is the signal. -->
-        <button id="tab-decisions" class="tab" data-view="decisions" role="tab" aria-selected="false" aria-controls="view-decisions">Decisions<span id="hdr-decisions-count" class="hdr-decisions-count" hidden></span></button>
       </span>
       <!-- Parade opens the standalone parade page at /parade — a link, not an SPA
            panel toggle, so it is NOT a role="tab" child of the tablist. -->
       <a id="tab-parade" class="tab tab-parade" href="/parade">Parade<span class="unseen-dot" id="dot-parade" aria-label="New content in Parade" aria-hidden="true"></span></a>
+      <!-- #863: Decisions and Research share one reading room. This remains a
+           navigation-out link, not a tab, and carries the same live decision count. -->
+      <a id="tab-decisions" class="tab tab-nav" href="/research?focus=decisions">R&amp;D<span id="hdr-decisions-count" class="hdr-decisions-count" hidden></span></a>
     </nav>
     <div class="bar-meta">
+      <button class="theme-toggle" type="button" data-theme-toggle aria-label="Toggle color theme"><span data-theme-label>Theme</span></button>
       <span class="meta-label">bound</span>
       <code class="meta-bind">{{.Bind}}</code>
       <span id="conn" class="conn" role="status" aria-live="polite" aria-label="Live update link idle">
@@ -245,22 +246,6 @@
     </div>
   </main>
 
-  <!-- #429: the decision page (#405 Inc 2's reading room) is a first-class TAB rendering
-       as a FULL PAGE — no modal, no backdrop, no secondary scrollbar; the document owns
-       the one scroll. Reached from the top nav, the goals "Awaiting you" tile, and any
-       [data-open-decisions] trigger. Well-formatted beats feature-rich. -->
-  <main id="view-decisions" class="view wrap hidden" role="tabpanel" aria-labelledby="tab-decisions" aria-label="Decisions awaiting you">
-    <section class="panel decisions-panel">
-      <div class="panel-head">
-        <div>
-          <h2 id="gdec-title">Decisions awaiting you</h2>
-          <p class="panel-desc">Every open decision and blocker, fleet-wide — each shows the goal it drives, then its full brief</p>
-        </div>
-      </div>
-      <div id="gdec-list" class="gdec-list"></div>
-    </section>
-  </main>
-
   <main id="view-issues" class="view wrap hidden" role="tabpanel" aria-labelledby="tab-issues">
     <div id="issues-workspace" class="issues-workspace">
     <section id="issues-listpanel" class="panel">
@@ -290,6 +275,18 @@
     <aside id="work-context" class="work-context panel" hidden role="dialog" aria-label="Work context">
       <button id="wc-close" class="wc-close" type="button" aria-label="Close work context">&#215;</button>
       <header id="wc-header" class="wc-header"></header>
+      <section id="wc-timeline" class="wc-timeline" aria-labelledby="wc-timeline-title">
+        <div class="wc-timeline-head">
+          <div>
+            <span class="wc-timeline-kicker">Work history</span>
+            <h3 id="wc-timeline-title">Timeline</h3>
+          </div>
+          <span id="wc-timeline-summary" class="wc-timeline-summary">Loading source coverage…</span>
+        </div>
+        <div id="wc-timeline-sources" class="wc-timeline-sources" aria-label="Timeline source coverage"></div>
+        <ol id="wc-timeline-events" class="wc-timeline-events" aria-live="polite"></ol>
+        <button id="wc-timeline-earlier" class="wc-timeline-earlier" type="button" hidden>Show earlier history</button>
+      </section>
       <details id="wc-github" class="wc-github" hidden>
         <summary id="wc-github-summary"></summary>
         <div id="wc-github-body" class="wc-github-body"></div>
@@ -312,8 +309,13 @@
 
     <section id="issues-create" class="panel hidden">
       <div class="panel-head"><h2>New issue</h2></div>
-      <form id="create-form" class="issue-form">
-        <input type="text" id="create-title" placeholder="Title (required)" maxlength="256" required />
+      <form id="create-form" class="issue-form" novalidate>
+        <label class="form-field" for="create-title">
+          <span class="form-label">Title <span class="form-required">Required</span></span>
+          <input type="text" id="create-title" placeholder="Describe the work" maxlength="256" required
+            aria-describedby="create-title-error" />
+          <span id="create-title-error" class="field-error" role="alert" hidden>Enter a title before creating the issue.</span>
+        </label>
         <textarea id="create-body" placeholder="Body (markdown)" rows="6"></textarea>
         <input type="text" id="create-labels" placeholder="Labels (comma-separated, e.g. operator-idea)" />
         <div class="form-actions">

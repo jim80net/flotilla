@@ -12,9 +12,9 @@ func TestParseGoalsFile_Valid(t *testing.T) {
 	  "version": 1,
 	  "default_view": true,
 	  "goals": [
-	    {"id": "trading", "title": "Trading", "scope": "fleet"},
+	    {"id": "trading", "title": "Trading", "scope": "fleet", "paper_id": "papers/trading.md"},
 	    {"id": "eqo", "title": "Equities", "scope": "project", "parent": "trading",
-	     "work_items": [{"kind": "desk", "agent": "trade-desk"}]}
+	     "work_items": [{"kind": "desk", "agent": "trade-desk", "paper_id": "papers/equities.md"}]}
 	  ]
 	}`)
 	gf, err := ParseGoalsFile(data)
@@ -26,6 +26,20 @@ func TestParseGoalsFile_Valid(t *testing.T) {
 	}
 	if gf.Goals[1].WorkItems[0].Agent != "trade-desk" {
 		t.Fatalf("work item not parsed: %+v", gf.Goals[1].WorkItems)
+	}
+	if gf.Goals[0].PaperID != "papers/trading.md" || gf.Goals[1].WorkItems[0].PaperID != "papers/equities.md" {
+		t.Fatalf("paper ids not parsed: %+v", gf.Goals)
+	}
+}
+
+func TestParseGoalsFile_RejectsInvalidPaperID(t *testing.T) {
+	for _, data := range []string{
+		`{"goals":[{"id":"a","title":"A","paper_id":"../escape.md"}]}`,
+		`{"goals":[{"id":"a","title":"A","work_items":[{"kind":"inline","paper_id":"/absolute.md"}]}]}`,
+	} {
+		if _, err := ParseGoalsFile([]byte(data)); err == nil || !strings.Contains(err.Error(), "paper_id") {
+			t.Errorf("invalid paper_id error = %v", err)
+		}
 	}
 }
 
@@ -300,8 +314,8 @@ func TestBuildGoals_Collaborations(t *testing.T) {
 // it; an item without a brief stays empty (the modal shows the honest empty state).
 func TestBuildGoals_DecisionBrief(t *testing.T) {
 	file := GoalsFile{Goals: []Goal{
-		{ID: "g", Title: "G", Brief: "node-level decision package", WorkItems: []WorkItem{
-			{Kind: WorkInline, Text: "Kelly loss-cap — value sign-off", Brief: "## Recommendation\ncap at 0.25\n\n- value: capital protected\n- tradeoff: fewer entries"},
+		{ID: "g", Title: "G", Brief: "node-level decision package", PaperID: "papers/node.md", WorkItems: []WorkItem{
+			{Kind: WorkInline, Text: "Kelly loss-cap — value sign-off", Brief: "## Recommendation\ncap at 0.25\n\n- value: capital protected\n- tradeoff: fewer entries", PaperID: "papers/item.md"},
 			{Kind: WorkInline, Text: "no-brief item"},
 		}},
 	}}
@@ -313,11 +327,17 @@ func TestBuildGoals_DecisionBrief(t *testing.T) {
 	if node.Brief != "node-level decision package" {
 		t.Errorf("node-level brief passthrough = %q", node.Brief)
 	}
+	if node.PaperID != "papers/node.md" {
+		t.Errorf("node-level paper_id passthrough = %q", node.PaperID)
+	}
 	if len(node.WorkItems) != 2 {
 		t.Fatalf("work items = %d", len(node.WorkItems))
 	}
 	if !strings.Contains(node.WorkItems[0].Brief, "Recommendation") {
 		t.Errorf("work-item brief must pass through, got %q", node.WorkItems[0].Brief)
+	}
+	if node.WorkItems[0].PaperID != "papers/item.md" {
+		t.Errorf("work-item paper_id passthrough = %q", node.WorkItems[0].PaperID)
 	}
 	if node.WorkItems[1].Brief != "" {
 		t.Errorf("an item without a brief must stay empty, got %q", node.WorkItems[1].Brief)
@@ -412,7 +432,8 @@ func TestBuildGoals_DeskLiveBinding(t *testing.T) {
 // --- BuildGoals: backlog binding (ratified marker mapping) ---
 
 func TestBuildGoals_BacklogBinding(t *testing.T) {
-	md := "## Backlog\n- [in-flight] wire the goals view\n- [blocked] operator sign-off\n- [awaiting-auth] go/no-go\n"
+	md := "# Chronological absorb log\n- [done] go/no-go release prep recorded; this is not the live gate\n\n" +
+		"## Backlog\n- [in-flight] wire the goals view\n- [blocked] operator sign-off\n- [awaiting-auth] go/no-go\n"
 	file := GoalsFile{Goals: []Goal{
 		{ID: "flight", Title: "Flight", WorkItems: []WorkItem{{Kind: WorkBacklog, Match: "goals view"}}},
 		{ID: "blk", Title: "Blocked", WorkItems: []WorkItem{{Kind: WorkBacklog, Match: "sign-off"}}},
@@ -428,7 +449,7 @@ func TestBuildGoals_BacklogBinding(t *testing.T) {
 		t.Errorf("[blocked] backlog → blocked (red, NOT awaiting), got %q", byID["blk"].StatusDisplay)
 	}
 	if byID["gate"].StatusDisplay != "awaiting" {
-		t.Errorf("[awaiting-auth] backlog → awaiting (amber), got %q", byID["gate"].StatusDisplay)
+		t.Errorf("[awaiting-auth] under ## Backlog must beat same-match done-log prose → awaiting (amber), got %q", byID["gate"].StatusDisplay)
 	}
 	// Ratified spec: a linked backlog item ABSENT from the active backlog is done (drained).
 	if byID["absent"].WorkItems[0].Class != "done" || byID["absent"].StatusDisplay != "achieved" {

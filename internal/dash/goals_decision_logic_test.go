@@ -278,6 +278,9 @@ func TestRenderDecisionCardRespondAffordance509(t *testing.T) {
 	if !strings.Contains(html, `data-resp-goal="proj-b"`) {
 		t.Fatalf("respond goal id missing:\n%s", html)
 	}
+	if !strings.Contains(html, `data-gdec-response-close hidden`) {
+		t.Fatalf("decision card must include a success-only Close affordance:\n%s", html)
+	}
 	// Preparing rows must never include respond affordance
 	prepScript := `
 (function() {
@@ -299,6 +302,40 @@ func TestRenderDecisionCardRespondAffordance509(t *testing.T) {
 	}
 	if !strings.Contains(prepHTML, "gdec-prep-row") {
 		t.Fatalf("preparing rows missing:\n%s", prepHTML)
+	}
+}
+
+func TestRenderBriefResearchLinksFailClosed(t *testing.T) {
+	vm, api := loadGoalsDecisionVM(t)
+	renderBrief, ok := goja.AssertFunction(api.Get("renderBrief"))
+	if !ok {
+		t.Fatal("renderBrief not a function")
+	}
+	md := strings.Join([]string{
+		"[reader](/research/design.md)",
+		"[body](/api/research/design.md)",
+		"[external](https://example.com/paper)",
+		"[script](javascript:alert(1))",
+		"[other](/control/write)",
+	}, "\n")
+	value, err := renderBrief(goja.Undefined(), vm.ToValue(md))
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := value.String()
+	for _, want := range []string{
+		`<a href="/research/design.md">reader</a>`,
+		`<a href="/api/research/design.md">body</a>`,
+		`<a href="https://example.com/paper" target="_blank" rel="noopener noreferrer">external</a>`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("renderBrief missing safe link %q:\n%s", want, html)
+		}
+	}
+	for _, forbidden := range []string{`href="javascript:`, `href="/control/write"`} {
+		if strings.Contains(html, forbidden) {
+			t.Errorf("renderBrief admitted forbidden link %q:\n%s", forbidden, html)
+		}
 	}
 }
 

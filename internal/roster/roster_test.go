@@ -279,6 +279,35 @@ func TestLoadSecondaryRepos(t *testing.T) {
 	}
 }
 
+func TestLoadWorkLedgerRepositorylessIsExplicitAndNonContradictory(t *testing.T) {
+	cfg, err := Load(writeTemp(t, `{"xo_agent":"advisory","agents":[{"name":"advisory","work_ledger_repositoryless":true}]}`))
+	if err != nil {
+		t.Fatalf("explicit repository-less domain rejected: %v", err)
+	}
+	if !cfg.Agents[0].WorkLedgerRepositoryless {
+		t.Fatal("work_ledger_repositoryless declaration was not retained")
+	}
+	if _, err := Load(writeTemp(t, `{"agents":[{"name":"contradictory","primary_repo":"example/product","work_ledger_repositoryless":true}]}`)); err == nil {
+		t.Fatal("repository mapping plus work_ledger_repositoryless must be rejected")
+	}
+	crossDomain := `{
+  "xo_agent":"root",
+  "agents":[
+    {"name":"root"},
+    {"name":"advisory-xo","coordinator":true,"work_ledger_repositoryless":true},
+    {"name":"advisory-desk","primary_repo":"example/advisory"}
+  ],
+  "channels":[
+    {"channel_id":"command","xo_agent":"root","role":"fleet-command","members":["advisory-xo"]},
+    {"channel_id":"advisory","xo_agent":"advisory-xo","members":["root"]},
+    {"channel_id":"advisory-desk","xo_agent":"advisory-desk","members":["advisory-xo"]}
+  ]
+}`
+	if _, err := Load(writeTemp(t, crossDomain)); err == nil {
+		t.Fatal("repository-less domain plus a mapped domain seat must be rejected")
+	}
+}
+
 // flotilla.example.json is the committed reference for primary_repo / worktree_path.
 func TestExampleRosterLoadsPrimaryRepo(t *testing.T) {
 	p := filepath.Join("..", "..", "flotilla.example.json")

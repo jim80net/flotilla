@@ -42,6 +42,15 @@ type Tracker interface {
 	Close(ctx context.Context, number int) error
 }
 
+// PullRequestReader is an optional read-only extension used by Work Context.
+// Goals historically call both issues and pull requests "issue" work items, so
+// the timeline first tries Tracker.Get and then uses this seam when the number
+// resolves only as a pull request. Keeping it optional avoids widening the
+// tracker write contract or forcing non-GitHub test doubles to invent PR state.
+type PullRequestReader interface {
+	GetPullRequest(ctx context.Context, number int) (PullRequest, error)
+}
+
 // ListFilter narrows a List call. The zero value lists OPEN issues with the
 // backend default limit. State is "open" (default), "closed", or "all"; Label
 // optionally filters to one label (e.g. the XO's "operator-idea"); Limit caps
@@ -83,6 +92,23 @@ type Issue struct {
 	Comments  []Comment `json:"comments,omitempty"` // detail (Get) only
 	GoalID    string    `json:"goal_id,omitempty"`  // parsed from body `goal-id:` trailer (read path)
 	Desk      string    `json:"desk,omitempty"`     // parsed from body `desk:` trailer (flotilla attribution)
+}
+
+// PullRequest is the bounded GitHub state Work Context needs. It deliberately
+// excludes reviews, commits, and bodies: the timeline is a read-only state
+// composer, not a second GitHub detail surface.
+type PullRequest struct {
+	Number      int    `json:"number"`
+	Title       string `json:"title"`
+	State       string `json:"state"` // "OPEN" | "CLOSED" | "MERGED"
+	IsDraft     bool   `json:"isDraft,omitempty"`
+	CreatedAt   string `json:"createdAt,omitempty"`
+	UpdatedAt   string `json:"updatedAt,omitempty"`
+	ClosedAt    string `json:"closedAt,omitempty"`
+	MergedAt    string `json:"mergedAt,omitempty"`
+	URL         string `json:"url,omitempty"`
+	HeadRefName string `json:"headRefName,omitempty"`
+	BaseRefName string `json:"baseRefName,omitempty"`
 }
 
 // Label is a GitHub label (name + color for the UI chip; description optional).

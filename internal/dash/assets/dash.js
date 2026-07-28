@@ -74,7 +74,18 @@
   function routeOutcomeCopy(res) {
     var outcome = (res && res.outcome) || "(no outcome reported)";
     var detail = res && res.detail ? " — " + res.detail : "";
-    return { outcome: outcome, text: "Outcome: " + outcome + detail, ok: outcome === "delivered" };
+    if (outcome === "delivered") {
+      return { outcome: outcome, text: "Delivered to " + (res.target || "the desk") + ".", ok: true };
+    }
+    if (outcome === "queued") {
+      var id = res.queued_id ? " (id " + res.queued_id + ")" : "";
+      return {
+        outcome: outcome,
+        text: "Queued durably for " + (res.target || "the desk") + id + " — it will deliver when the desk can receive." + detail,
+        ok: true,
+      };
+    }
+    return { outcome: outcome, text: "NOT accepted: " + outcome + detail, ok: false };
   }
   window.flotillaDash = {
     el: el, escapeHtml: escapeHtml, getJSON: getJSON, postJSON: postJSON,
@@ -124,25 +135,42 @@
     return fresh;
   }
 
-  function utilizationText(status) {
+  function utilizationUnits(status) {
     var u = (status && status.utilization) || {};
-    if (!Number.isFinite(Number(u.total))) return "Fleet utilization unavailable";
-    var queue = "empty-queue:" + Number(u.idle_empty_queue || 0) + " · has-queue:" + Number(u.idle_has_queue || 0);
-    if (Number(u.idle_queue_unknown || 0) > 0) queue += " · queue-unknown:" + Number(u.idle_queue_unknown);
-    var pct = Number(u.utilization_percent || 0).toFixed(1);
-    return "utilization:" + Number(u.working || 0) + "/" + Number(u.total || 0) + " (" + pct + "%) / idle:" +
-      Number(u.idle || 0) + " (" + queue + ") / blocked:" + Number(u.blocked || 0) + " · accepts-dispatch:" +
-      Number(u.accepts_dispatch || 0) + " · awaiting-authority:" + Number(u.awaiting_authority || 0);
+    if (!Number.isFinite(Number(u.total))) return [{ kind: "unavailable", text: "Fleet utilization unavailable" }];
+    var total = Number(u.total || 0);
+    var units = [{
+      kind: "working",
+      text: Number(u.working || 0) + " of " + total + " " + (total === 1 ? "seat" : "seats") + " working"
+    }];
+    if (Number(u.blocked || 0) > 0) units.push({ kind: "blocked", text: Number(u.blocked) + " blocked" });
+    if (Number(u.awaiting_authority || 0) > 0) {
+      var held = Number(u.awaiting_authority);
+      units.push({ kind: "held", text: held + " " + (held === 1 ? "seat" : "seats") + " waiting for authority" });
+    }
+    return units;
+  }
+
+  function utilizationText(status) {
+    return utilizationUnits(status).map(function (unit) { return unit.text; }).join(" · ");
+  }
+
+  function utilizationReadUnits(status) {
+    return status && status.utilization && status.utilization.utilization_wall
+      ? [
+        { kind: "read", text: "Almost no one is working" },
+        { kind: "action", text: "Send work or pull the next queue item" }
+      ]
+      : [];
   }
 
   function renderUtilization(status) {
     var target = el("fleet-utilization");
     if (target) {
-      var text = utilizationText(status);
-      if (status && status.utilization && status.utilization.utilization_wall) {
-        text += " · utilization wall: dispatch, pull, or park";
-      }
-      target.textContent = text;
+      var units = utilizationUnits(status).concat(utilizationReadUnits(status));
+      target.innerHTML = units.map(function (unit) {
+        return '<span class="fleet-utilization-unit">' + escapeHtml(unit.text) + "</span>";
+      }).join(" ");
     }
   }
 
@@ -154,11 +182,13 @@
     lastSwarmKey = key;
     var rate = el("live-swarm-rate"), items = el("live-swarm-items");
     var u = (status && status.utilization) || {};
-    if (rate) rate.textContent = Number(u.working || 0) + "/" + Number(u.total || 0) + " active · " +
-      Number(u.utilization_percent || 0).toFixed(1) + "%";
+    if (rate) {
+      var total = Number(u.total || 0);
+      rate.textContent = Number(u.working || 0) + " of " + total + " " + (total === 1 ? "seat" : "seats") + " working";
+    }
     if (!items) return;
     if (!agents.length) {
-      items.innerHTML = '<span class="live-swarm-empty">No seats working — utilization wall</span>';
+      items.innerHTML = '<span class="live-swarm-empty">No seats working — send work or pull the next queue item.</span>';
       return;
     }
     items.innerHTML = agents.map(function (a) {
@@ -179,15 +209,16 @@
   function renderRailMeta(status, fresh) {
     var meta = el("rail-meta");
     var xl = status.xo_liveness || {};
-    var bits = [];
-    bits.push(escapeHtml(utilizationText(status)));
+    var units = utilizationUnits(status);
     if (status.xo) {
-      var ack = xl.acked ? ("ack " + escapeHtml(xl.ack_age) + " ago") : "never acked";
+      var ack = xl.acked ? ("ack " + String(xl.ack_age || "unknown") + " ago") : "never acked";
       var settled = xl.settled_known ? (xl.settled ? "settled" : "active") : "settled unknown";
-      bits.push(escapeHtml(status.xo) + " · " + ack + " · " + settled);
+      units.push({ kind: "liveness", text: String(status.xo) + " · " + ack + " · " + settled });
     }
-    if (fresh.state === "stale") bits.push("snapshot stale");
-    meta.innerHTML = bits.join(" · ");
+    if (fresh.state === "stale") units.push({ kind: "stale", text: "snapshot stale" });
+    meta.innerHTML = units.map(function (unit) {
+      return '<span class="fleet-status-unit ' + unit.kind + '">' + escapeHtml(unit.text) + "</span>";
+    }).join(" ");
   }
 
   // coordinatorNames returns the coordinator agents the rail must always surface — the
@@ -1454,10 +1485,10 @@
     }).catch(function () {});
   }
 
-  /* ── tab nav: Conversations ⇄ Goals ⇄ Issues ⇄ Decisions · Parade (nav-out) ──────── */
-  var VIEWS = ["conversations", "goals", "issues", "decisions"];
-  // #516: the brand subtitle tracks the active SPA tab. Parade is a separate page
-  // (its own HTML hardcodes "parades"); only the four SPA views land here.
+  /* ── tab nav: Conversations ⇄ Goals ⇄ Issues · Parade/R&D (nav-out) ─────────────── */
+  var VIEWS = ["conversations", "goals", "issues"];
+  // #516: the brand subtitle tracks the active SPA tab. Parade and R&D are separate
+  // pages; only the three SPA views land here.
   function setBrandDash(view) {
     var b = document.querySelector(".brand-dash");
     if (b) b.textContent = view;
@@ -1473,7 +1504,7 @@
     setBrandDash(view);
     el("freshness").classList.toggle("hidden", view !== "conversations");
     // Conversations is the fixed single-scroll app-shell (#326): only on this tab
-    // does the page itself stop scrolling. Goals/Issues/Decisions keep natural page scroll.
+    // does the page itself stop scrolling. Goals/Issues keep natural page scroll.
     document.body.classList.toggle("conv-shell-active", view === "conversations");
     if (view === "conversations") {
       requestAnimationFrame(function () { syncThreadMessageToggles(el("conv-thread")); });
@@ -1481,12 +1512,7 @@
     if (window.flotillaWorkContext) window.flotillaWorkContext.onViewChange(view);
     if (view === "goals" && window.flotillaGoals) window.flotillaGoals.show();
     if (view === "issues" && window.flotillaTracker) window.flotillaTracker.show();
-    // #429: Decisions is a first-class tab — repaint the reading room on every open so
-    // the list is fresh per visit (same lazy-fetch semantics the modal had).
-    if (view === "decisions" && window.flotillaGoals && window.flotillaGoals.openDecisions) window.flotillaGoals.openDecisions();
-    // Decisions carries a live awaiting-COUNT badge (goals.js renderSituation), not an
-    // unseen dot — a count is the stronger signal, so it is not in the dot system.
-    if (view !== "decisions") markTabViewed(view); // clear unseen dot when operator opens this tab
+    markTabViewed(view); // clear unseen dot when operator opens this tab
   }
   // #429: goals.js routes a decision card's "Drives" link back into the Goals map.
   window.flotillaDash.showView = showView;
@@ -1673,7 +1699,10 @@
       var node = h.indexOf("goals/") === 0 ? decodeURIComponent(h.slice(6)) : "";
       return { view: "goals", node: node || null };
     }
-    if (h === "issues" || h === "decisions") return { view: h };
+    if (h === "issues") return { view: h };
+    // #863: preserve the old dashboard deep link by routing it into the combined
+    // R&D reading room instead of trying to reveal a removed Decisions panel.
+    if (h === "decisions") return { view: "rd" };
     return null;
   }
   window.flotillaDash.parseHash = parseHash; // asset-lockable / goja (#579)
@@ -1687,6 +1716,10 @@
   function seedLanding() {
     var fromHash = parseHash(location.hash);
     if (fromHash) {
+      if (fromHash.view === "rd") {
+        window.location.replace("/research?focus=decisions");
+        return;
+      }
       applyNav(fromHash);
       try { history.replaceState(fromHash, "", navHash(fromHash)); } catch (e) { /* ignore */ }
       return;
@@ -1735,17 +1768,11 @@
   }
   window.flotillaDash.openConversation = openConversation;
 
-  // #421/#429: any [data-open-decisions] trigger (the goals "Awaiting you" tile) routes
-  // to the Decisions TAB — a reversible nav entry, same as clicking the tab itself.
-  // Single owner: goals.js deliberately does not handle this attribute (cubic #421 P2).
+  // #421/#863: any [data-open-decisions] trigger (the Goals "Awaiting you" tile)
+  // routes to the combined R&D reading room, already focused on waiting decisions.
+  // Single owner: goals.js deliberately does not handle this attribute.
   function openDecisionsView() {
-    showView("decisions");
-    pushNav({ view: "decisions" });
-    // The trigger (the goals tile) is hidden with its view — move focus into the
-    // now-visible page so keyboard users aren't stranded on <body> (mirrors the
-    // openConversation deep-link's focus handoff).
-    var title = el("gdec-title");
-    if (title) { title.setAttribute("tabindex", "-1"); title.focus(); }
+    window.location.href = "/research?focus=decisions";
   }
   document.addEventListener("click", function (e) {
     var trig = e.target.closest ? e.target.closest("[data-open-decisions]") : null;
@@ -1911,9 +1938,11 @@
             appendOptimisticOutbound(target, body);
           }
           if (!sameSel(target)) return;
-          if (outcome === "delivered") {
+          if (copy.ok) {
             ta.value = "";
             resizeComposer();
+          }
+          if (outcome === "delivered") {
             threadPinned = true;
             lastThreadKey = null; // force paint even if mirror/ledger unchanged
             flushDeferredMirrorPaint(); // paintMirror(true) → renderThread with optimistic
