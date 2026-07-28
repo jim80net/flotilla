@@ -2,7 +2,8 @@
 
 Status: Phase 1 product design for
 [#801](https://github.com/jim80net/flotilla/issues/801), reconciled with the
-fleet-operations dogfood ledger.
+fleet-operations dogfood ledger and the shipped #804/#838 capacity and
+e2e-only conservation guards.
 
 Flotilla must preserve subscription capacity for strategic work without hiding
 idle seats or silently buying more capacity. Phase 1 accounts for capacity.
@@ -344,12 +345,19 @@ launch recipes, switch a pane, or infer intent from a seat name. A Codex-named
 seat may retain `primary=codex` for identity while deliberately implementing on
 Grok, Claude, or Pi; that is explained conservation, not unexplained drift.
 
-A separately reviewed Phase 3 controller must apply these gates in order:
+A separately reviewed Phase 3 controller must extend—not replace—the shared
+pre-mutation boundary already shipped by #804 and #838. Today that boundary
+reads the host-local `capacity-hold.json`, refuses active/explicit holds, keeps
+e2e-only seats on fallback after a wall clears, and accepts only the narrow
+`--scheduled-e2e` authorization for a scheduled e2e/canary. Phase 1 does not
+change those semantics.
 
-1. **Hard hold first.** The host-local `capacity-hold.json` guard from #803 is
-   absolute. An ACTIVE hold or hard-limit wall refuses the target before any
-   handoff, close, respawn, trust, or overlay mutation, regardless of work
-   purpose or remaining allocation.
+The later controller must apply these gates in order:
+
+1. **Hard hold first.** The shipped host-local `capacity-hold.json` guard from
+   #804/#838 is absolute. An ACTIVE hold or hard-limit wall refuses the target
+   before any handoff, close, respawn, trust, or overlay mutation, regardless
+   of work purpose or remaining allocation.
 2. **Fresh policy and pool evidence.** Automatic return to a conserved surface
    requires a fresh matching policy and a pool that is not hard-limited. Unknown
    residual stays unknown and cannot be promoted to sufficient capacity.
@@ -365,11 +373,13 @@ A separately reviewed Phase 3 controller must apply these gates in order:
    override money authority. Same-model overflow is not recovery for a
    multi-seat or hard-limit class.
 
-The future command seam is an explicit `--work-purpose` (or equivalent signed
-dispatch field) consumed by `switch`/`resume`; it is not an operator-free escape
-hatch. Tests must cover held+e2e refusal, clear+implement conservation,
-clear+e2e eligibility, absent/stale policy, fallback preservation, and no
-mutation on every refusal.
+The future command seam is structured work-purpose metadata (or an equivalent
+signed dispatch field) consumed by `switch`/`resume`; it is not an
+operator-free escape hatch and must not broaden the existing
+`--scheduled-e2e` bypass. Tests must retain the shipped held+scheduled-e2e
+refusal and clear+unscheduled conservation cases, then add clear+eligible
+purpose, absent/stale ledger policy, fallback preservation, and no mutation on
+every refusal.
 
 ## Status and dash semantics
 
@@ -505,7 +515,9 @@ and require separate review against the money boundary.
 - emit metadata-only decisions so deliberate non-primary work is explainable.
 
 This PR cannot land until Phase 1 import and status visibility establish the
-policy source and the #803 hard guard is independently accepted.
+policy source. It must call the existing #804/#838 shared pre-mutation guard
+first and preserve its fail-closed behavior; budget policy may narrow an
+eligible target but can never waive an active hold or authorize spend.
 
 ## Acceptance gate
 
