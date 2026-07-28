@@ -58,6 +58,38 @@ flotilla dash --roster ./flotilla.json
 
 Stop it with Ctrl-C (it shuts down gracefully).
 
+## Prove a deploy candidate before replacing the service
+
+`flotilla dash deploy` is stage-only unless the caller passes `--apply`. It
+refuses a dirty checkout, fetches `origin/main`, requires the checkout HEAD to
+equal that tip, then builds from a fresh standalone clone into a stage directory
+outside the source tree. Before any optional swap it requires:
+
+- candidate Go metadata `vcs.revision=<origin/main>` and `vcs.modified=false`;
+- explicit, distinct `--tracker-file` and `--backlog-file` values in the
+  installed unit;
+- a rollback snapshot of the installed binary and unit plus hashes/revisions;
+- loopback HTTP smoke of the staged binary, including the R&D page and synthetic
+  Decide/Learn publications.
+
+```bash
+# Safe default: build, verify, and retain evidence; no service mutation.
+flotilla dash deploy \
+  --repo /path/to/clean/flotilla \
+  --stage-dir /path/to/new/stage \
+  --unit-file ~/.config/systemd/user/flotilla-dash.service \
+  --install-bin ~/go/bin/flotilla
+
+# After independent deployment clearance, the same preflight may atomically
+# swap/restart and verify the installed revision plus HTTP/R&D routes.
+flotilla dash deploy ... --apply
+```
+
+The manifest is `<stage-dir>/manifest.json`; rollback artifacts are under
+`<stage-dir>/rollback/`. If `origin/main`, the unit, or candidate metadata
+changes between staging and swap, `--apply` refuses. A failed restart or live
+smoke restores the captured binary and restarts the prior service.
+
 ## What it reads (and the defaults)
 
 The dash mirrors `flotilla status`'s default-path resolution exactly — same env
@@ -82,6 +114,7 @@ standing multi-role fleet while borrowing the useful glanceability of swarm TUIs
 | detector snapshot   | `--snapshot-file`  | `$FLOTILLA_SNAPSHOT_FILE`, else `<roster-dir>/flotilla-detector-state.json` |
 | XO liveness ack     | `--ack-file`       | `$FLOTILLA_ACK_FILE`, else `<roster-dir>/flotilla-xo-alive` |
 | backlog markdown    | `--tracker-file`   | `$FLOTILLA_TRACKER_FILE`, else `<roster-dir>/.flotilla-state.md` |
+| drive backlog       | `--backlog-file`   | `$FLOTILLA_BACKLOG_FILE`, else `--tracker-file` |
 | goals file          | `--goals-file`     | `$FLOTILLA_GOALS_FILE`, else `<roster-dir>/fleet-goals.json` |
 | CoS ledger          | *(roster-derived)* | the roster's `cos_ledger` (inert when `cos_agent` is unset) |
 
