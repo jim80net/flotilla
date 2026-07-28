@@ -122,11 +122,19 @@ DRILL-DOWN:
   • #ops-xo      — idle, last activity 41m ago.
 ```
 
-## Step 3 — post to the channel you own
+## Step 3 — publish once to every channel you own
 
-Post your synthesis to YOUR channel (the channel you, the XO, own) — never to a
-subordinate's channel and never back down to a boat. The daemon's wake prompt names
-your post target.
+Write the synthesis to a temporary file, then run the exact `flotilla synthesis
+publish` command named by the daemon's wake prompt. Run it **once**: the command
+derives every unique channel you own from the live roster, verifies the channel
+bound to your seat webhook, and uses the authenticated relay path for every other owned
+channels. Never loop over channel ids yourself and never substitute repeated
+`flotilla notify` calls; a webhook is bound to one channel, so doing that can
+duplicate the home/operator channel while leaving a secondary channel dark.
+
+The command fails closed before its first post if the live roster, seat webhook, or
+required relay credential cannot cover every destination. Surface that failure; do
+not fall back to a hand-written partial delivery.
 
 ## The narrow-answer discipline (read this every time)
 
