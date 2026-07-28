@@ -31,6 +31,9 @@ type dashDeployOptions struct {
 	LiveURL    string
 	Apply      bool
 	Timeout    time.Duration
+	// UnitState is test-only input for exercising staging without a user
+	// systemd manager. Production callers always resolve the effective unit.
+	UnitState *dashEffectiveUnit
 }
 
 type dashDeployBinary struct {
@@ -40,12 +43,24 @@ type dashDeployBinary struct {
 	Modified *bool  `json:"modified"`
 }
 
+type dashDeployUnitFile struct {
+	Path     string `json:"path"`
+	Snapshot string `json:"snapshot"`
+	SHA256   string `json:"sha256"`
+}
+
 type dashDeployUnit struct {
-	Path        string `json:"path"`
-	Snapshot    string `json:"snapshot"`
-	SHA256      string `json:"sha256"`
-	TrackerFile string `json:"tracker_file"`
-	BacklogFile string `json:"backlog_file"`
+	SHA256             string               `json:"sha256"`
+	EffectiveExecStart string               `json:"effective_exec_start"`
+	TrackerFile        string               `json:"tracker_file"`
+	BacklogFile        string               `json:"backlog_file"`
+	Files              []dashDeployUnitFile `json:"files"`
+}
+
+type dashEffectiveUnit struct {
+	FragmentPath string
+	DropInPaths  []string
+	ExecStart    string
 }
 
 type dashDeployManifest struct {
@@ -74,7 +89,7 @@ func cmdDashDeploy(args []string) error {
 	fs := flag.NewFlagSet("dash deploy", flag.ContinueOnError)
 	repo := fs.String("repo", ".", "clean checkout whose HEAD must equal freshly fetched origin/main")
 	stageDir := fs.String("stage-dir", "", "new directory outside the repository for candidate and rollback evidence (required)")
-	unitFile := fs.String("unit-file", "", "installed flotilla-dash.service file to validate and snapshot (required)")
+	unitFile := fs.String("unit-file", "", "loaded base flotilla-dash.service fragment; effective base+drop-ins are validated and snapshotted (required)")
 	installBin := fs.String("install-bin", "", "installed flotilla binary to snapshot and optionally replace (required)")
 	service := fs.String("service", "flotilla-dash.service", "systemd user service restarted only with --apply")
 	liveURL := fs.String("live-url", "http://127.0.0.1:8787", "installed dash URL verified only with --apply")
@@ -185,7 +200,15 @@ func runDashDeploy(opts dashDeployOptions) (dashDeployManifest, error) {
 		return dashDeployManifest{}, fmt.Errorf("dash deploy: %w", err)
 	}
 
-	unit, err := snapshotDashUnit(opts.UnitFile, stageDir)
+	unitState := opts.UnitState
+	if unitState == nil {
+		resolved, resolveErr := effectiveDashUnit(ctx, opts.Service, opts.UnitFile)
+		if resolveErr != nil {
+			return dashDeployManifest{}, resolveErr
+		}
+		unitState = &resolved
+	}
+	unit, err := snapshotDashUnit(*unitState, stageDir)
 	if err != nil {
 		return dashDeployManifest{}, err
 	}
@@ -278,31 +301,93 @@ func validateCandidateProvenance(candidate dashDeployBinary, tip string) error {
 	return nil
 }
 
-func snapshotDashUnit(unitPath, stageDir string) (dashDeployUnit, error) {
-	body, err := os.ReadFile(unitPath)
-	if err != nil {
-		return dashDeployUnit{}, fmt.Errorf("dash deploy: read unit file: %w", err)
+func validateApprovedCandidate(candidate, approved dashDeployBinary, tip string) error {
+	if err := validateCandidateProvenance(candidate, tip); err != nil {
+		return err
 	}
-	tracker, backlog, err := dashUnitDataPaths(string(body))
+	if candidate.SHA256 == "" || candidate.SHA256 != approved.SHA256 {
+		return fmt.Errorf("staged candidate changed after approval: sha256=%s want=%s", candidate.SHA256, approved.SHA256)
+	}
+	return nil
+}
+
+func effectiveDashUnit(ctx context.Context, service, wantFragment string) (dashEffectiveUnit, error) {
+	fragment, err := commandOutput(ctx, "", "systemctl", "--user", "show", service, "--property=FragmentPath", "--value")
+	if err != nil {
+		return dashEffectiveUnit{}, fmt.Errorf("dash deploy: resolve effective unit fragment: %w", err)
+	}
+	fragment = strings.TrimSpace(fragment)
+	wantFragment, err = filepath.Abs(wantFragment)
+	if err != nil {
+		return dashEffectiveUnit{}, fmt.Errorf("dash deploy: resolve --unit-file: %w", err)
+	}
+	if fragment == "" {
+		return dashEffectiveUnit{}, fmt.Errorf("dash deploy: service %s has no loaded FragmentPath", service)
+	}
+	fragment, err = filepath.Abs(fragment)
+	if err != nil {
+		return dashEffectiveUnit{}, fmt.Errorf("dash deploy: resolve loaded unit fragment: %w", err)
+	}
+	if fragment != wantFragment {
+		return dashEffectiveUnit{}, fmt.Errorf("dash deploy: --unit-file %s is not the loaded fragment for %s (%s)", wantFragment, service, fragment)
+	}
+	dropIns, err := commandOutput(ctx, "", "systemctl", "--user", "show", service, "--property=DropInPaths", "--value")
+	if err != nil {
+		return dashEffectiveUnit{}, fmt.Errorf("dash deploy: resolve effective unit drop-ins: %w", err)
+	}
+	execStart, err := commandOutput(ctx, "", "systemctl", "--user", "show", service, "--property=ExecStart", "--value")
+	if err != nil {
+		return dashEffectiveUnit{}, fmt.Errorf("dash deploy: resolve effective unit ExecStart: %w", err)
+	}
+	execStart = strings.TrimSpace(execStart)
+	if execStart == "" {
+		return dashEffectiveUnit{}, fmt.Errorf("dash deploy: service %s has no effective ExecStart", service)
+	}
+	return dashEffectiveUnit{
+		FragmentPath: fragment,
+		DropInPaths:  strings.Fields(strings.TrimSpace(dropIns)),
+		ExecStart:    execStart,
+	}, nil
+}
+
+func snapshotDashUnit(state dashEffectiveUnit, stageDir string) (dashDeployUnit, error) {
+	tracker, backlog, err := dashUnitDataPaths(state.ExecStart)
 	if err != nil {
 		return dashDeployUnit{}, fmt.Errorf("dash deploy: validate unit flags: %w", err)
 	}
-	rollbackDir := filepath.Join(stageDir, "rollback")
+	paths := append([]string{state.FragmentPath}, state.DropInPaths...)
+	if len(paths) == 0 || strings.TrimSpace(state.FragmentPath) == "" {
+		return dashDeployUnit{}, errors.New("dash deploy: effective unit has no base fragment")
+	}
+	rollbackDir := filepath.Join(stageDir, "rollback", "unit")
 	if err := os.MkdirAll(rollbackDir, 0o700); err != nil {
 		return dashDeployUnit{}, fmt.Errorf("dash deploy: create rollback directory: %w", err)
 	}
-	snapshot := filepath.Join(rollbackDir, "flotilla-dash.service")
-	if err := os.WriteFile(snapshot, body, 0o600); err != nil {
-		return dashDeployUnit{}, fmt.Errorf("dash deploy: snapshot unit: %w", err)
+	files := make([]dashDeployUnitFile, 0, len(paths))
+	for i, path := range paths {
+		body, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return dashDeployUnit{}, fmt.Errorf("dash deploy: read effective unit file %s: %w", path, readErr)
+		}
+		snapshot := filepath.Join(rollbackDir, fmt.Sprintf("%02d-%s", i, filepath.Base(path)))
+		if writeErr := os.WriteFile(snapshot, body, 0o600); writeErr != nil {
+			return dashDeployUnit{}, fmt.Errorf("dash deploy: snapshot unit file %s: %w", path, writeErr)
+		}
+		sum := sha256.Sum256(body)
+		files = append(files, dashDeployUnitFile{
+			Path:     path,
+			Snapshot: snapshot,
+			SHA256:   hex.EncodeToString(sum[:]),
+		})
 	}
-	sum := sha256.Sum256(body)
-	return dashDeployUnit{
-		Path:        unitPath,
-		Snapshot:    snapshot,
-		SHA256:      hex.EncodeToString(sum[:]),
-		TrackerFile: tracker,
-		BacklogFile: backlog,
-	}, nil
+	unit := dashDeployUnit{
+		EffectiveExecStart: state.ExecStart,
+		TrackerFile:        tracker,
+		BacklogFile:        backlog,
+		Files:              files,
+	}
+	unit.SHA256 = effectiveUnitSHA256(unit)
+	return unit, nil
 }
 
 func snapshotInstalledBinary(installPath, stageDir string) (dashDeployBinary, error) {
@@ -331,6 +416,11 @@ func dashUnitDataPaths(unit string) (string, string, error) {
 		if strings.HasPrefix(line, "ExecStart=") {
 			execStart = strings.TrimPrefix(line, "ExecStart=")
 		}
+	}
+	if execStart == "" && strings.Contains(unit, "--") {
+		// systemctl show --property=ExecStart --value returns the effective
+		// command structure rather than an ExecStart= line.
+		execStart = strings.TrimSpace(unit)
 	}
 	if execStart == "" {
 		return "", "", errors.New("missing ExecStart")
@@ -483,19 +573,19 @@ func applyDashCandidate(ctx context.Context, opts dashDeployOptions, manifest *d
 	if err != nil {
 		return fmt.Errorf("dash deploy: pre-swap candidate inspection failed: %w", err)
 	}
-	if err := validateCandidateProvenance(candidate, tip); err != nil {
+	if err := validateApprovedCandidate(candidate, manifest.Candidate, tip); err != nil {
 		return fmt.Errorf("dash deploy: pre-swap %w", err)
 	}
-	unitNow, err := os.ReadFile(opts.UnitFile)
+	unitState, err := effectiveDashUnit(ctx, opts.Service, opts.UnitFile)
 	if err != nil {
-		return fmt.Errorf("dash deploy: pre-swap unit read: %w", err)
+		return fmt.Errorf("dash deploy: pre-swap effective unit: %w", err)
 	}
-	unitSum := sha256.Sum256(unitNow)
-	if hex.EncodeToString(unitSum[:]) != manifest.Unit.SHA256 {
-		return errors.New("dash deploy: unit changed after staging; refusing swap")
+	unitNow, err := inspectDashUnit(unitState)
+	if err != nil {
+		return fmt.Errorf("dash deploy: pre-swap unit inspection: %w", err)
 	}
-	if tracker, backlog, flagErr := dashUnitDataPaths(string(unitNow)); flagErr != nil || tracker != manifest.Unit.TrackerFile || backlog != manifest.Unit.BacklogFile {
-		return fmt.Errorf("dash deploy: tracker/backlog flags changed after staging: %v", flagErr)
+	if unitNow.SHA256 != manifest.Unit.SHA256 {
+		return errors.New("dash deploy: effective unit changed after staging; refusing swap")
 	}
 
 	tmpInstall := opts.InstallBin + ".flotilla-deploy-new"
@@ -524,8 +614,11 @@ func applyDashCandidate(ctx context.Context, opts dashDeployOptions, manifest *d
 		return fmt.Errorf("%w (previous binary restored from %s)", cause, manifest.Previous.Path)
 	}
 	installed, err := inspectDeployBinary(opts.InstallBin)
-	if err != nil || installed.Revision != tip || installed.Modified == nil || *installed.Modified {
+	if err != nil {
 		return rollback(fmt.Errorf("dash deploy: installed provenance check failed: %v", err))
+	}
+	if err := validateApprovedCandidate(installed, manifest.Candidate, tip); err != nil {
+		return rollback(fmt.Errorf("dash deploy: installed candidate check failed: %w", err))
 	}
 	if _, err := commandOutput(ctx, "", "systemctl", "--user", "restart", opts.Service); err != nil {
 		return rollback(fmt.Errorf("dash deploy: restart %s: %w", opts.Service, err))
@@ -536,8 +629,12 @@ func applyDashCandidate(ctx context.Context, opts dashDeployOptions, manifest *d
 	if err := smokeDashHTTP(ctx, strings.TrimRight(opts.LiveURL, "/"), tip, false); err != nil {
 		return rollback(fmt.Errorf("dash deploy: installed HTTP/R&D smoke: %w", err))
 	}
-	unitAfter, err := os.ReadFile(opts.UnitFile)
-	if err != nil || !equalSHA256(unitAfter, manifest.Unit.SHA256) {
+	unitStateAfter, err := effectiveDashUnit(ctx, opts.Service, opts.UnitFile)
+	if err != nil {
+		return rollback(fmt.Errorf("dash deploy: inspect effective unit after deploy: %w", err))
+	}
+	unitAfter, err := inspectDashUnit(unitStateAfter)
+	if err != nil || unitAfter.SHA256 != manifest.Unit.SHA256 {
 		return rollback(errors.New("dash deploy: unit flags changed during deploy"))
 	}
 	manifest.Status = "deployed"
@@ -670,9 +767,38 @@ func fileSHA256(path string) (string, error) {
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-func equalSHA256(body []byte, want string) bool {
-	sum := sha256.Sum256(body)
-	return hex.EncodeToString(sum[:]) == want
+func inspectDashUnit(state dashEffectiveUnit) (dashDeployUnit, error) {
+	tracker, backlog, err := dashUnitDataPaths(state.ExecStart)
+	if err != nil {
+		return dashDeployUnit{}, err
+	}
+	paths := append([]string{state.FragmentPath}, state.DropInPaths...)
+	files := make([]dashDeployUnitFile, 0, len(paths))
+	for _, path := range paths {
+		sum, sumErr := fileSHA256(path)
+		if sumErr != nil {
+			return dashDeployUnit{}, sumErr
+		}
+		files = append(files, dashDeployUnitFile{Path: path, SHA256: sum})
+	}
+	unit := dashDeployUnit{
+		EffectiveExecStart: state.ExecStart,
+		TrackerFile:        tracker,
+		BacklogFile:        backlog,
+		Files:              files,
+	}
+	unit.SHA256 = effectiveUnitSHA256(unit)
+	return unit, nil
+}
+
+func effectiveUnitSHA256(unit dashDeployUnit) string {
+	hash := sha256.New()
+	_, _ = io.WriteString(hash, unit.EffectiveExecStart)
+	_, _ = io.WriteString(hash, "\x00"+unit.TrackerFile+"\x00"+unit.BacklogFile)
+	for _, file := range unit.Files {
+		_, _ = io.WriteString(hash, "\x00"+file.Path+"\x00"+file.SHA256)
+	}
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 func pathWithin(path, parent string) bool {

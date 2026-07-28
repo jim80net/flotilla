@@ -61,6 +61,71 @@ func TestValidateCandidateProvenanceRefusesDirtyOrWrongRevision(t *testing.T) {
 	}
 }
 
+func TestValidateApprovedCandidateRefusesSameRevisionDifferentBytes(t *testing.T) {
+	const tip = "0123456789abcdef0123456789abcdef01234567"
+	clean := false
+	approved := dashDeployBinary{Revision: tip, Modified: &clean, SHA256: "approved"}
+	for name, candidate := range map[string]dashDeployBinary{
+		"same bytes":              {Revision: tip, Modified: &clean, SHA256: "approved"},
+		"same revision new bytes": {Revision: tip, Modified: &clean, SHA256: "mutated"},
+		"missing hash":            {Revision: tip, Modified: &clean},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := validateApprovedCandidate(candidate, approved, tip)
+			if (err != nil) != (name != "same bytes") {
+				t.Fatalf("validateApprovedCandidate() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestEffectiveUnitCASIncludesBaseDropInsAndExecStart(t *testing.T) {
+	root := t.TempDir()
+	base := filepath.Join(root, "flotilla-dash.service")
+	dropIn := filepath.Join(root, "flotilla-dash.service.d", "70-tracker-file.conf")
+	writeTestFile(t, base, "[Service]\nExecStart=/opt/flotilla dash --bind 127.0.0.1:8787\n")
+	writeTestFile(t, dropIn, "[Service]\nExecStart=\nExecStart=/opt/flotilla dash --tracker-file /state/history.md --backlog-file /state/drive.md\n")
+	state := dashEffectiveUnit{
+		FragmentPath: base,
+		DropInPaths:  []string{dropIn},
+		ExecStart:    `{ path=/opt/flotilla ; argv[]=/opt/flotilla dash --tracker-file /state/history.md --backlog-file /state/drive.md ; }`,
+	}
+	stage := t.TempDir()
+	snapshot, err := snapshotDashUnit(state, stage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.TrackerFile != "/state/history.md" || snapshot.BacklogFile != "/state/drive.md" {
+		t.Fatalf("effective flags = %q %q", snapshot.TrackerFile, snapshot.BacklogFile)
+	}
+	if len(snapshot.Files) != 2 {
+		t.Fatalf("snapshotted files = %d, want base + drop-in", len(snapshot.Files))
+	}
+	for _, file := range snapshot.Files {
+		if file.Snapshot == "" {
+			t.Fatalf("missing rollback snapshot: %+v", file)
+		}
+		if _, err := os.Stat(file.Snapshot); err != nil {
+			t.Fatalf("rollback snapshot %s: %v", file.Snapshot, err)
+		}
+	}
+	inspected, err := inspectDashUnit(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspected.SHA256 != snapshot.SHA256 {
+		t.Fatalf("effective unit CAS = %s, snapshot = %s", inspected.SHA256, snapshot.SHA256)
+	}
+	writeTestFile(t, dropIn, "[Service]\nExecStart=\nExecStart=/opt/flotilla dash --tracker-file /state/history.md --backlog-file /state/other-drive.md\n")
+	changed, err := inspectDashUnit(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed.SHA256 == snapshot.SHA256 {
+		t.Fatal("drop-in change did not invalidate effective unit CAS")
+	}
+}
+
 func TestDashDeployHTTPRnDSmoke(t *testing.T) {
 	const revision = "0123456789abcdef0123456789abcdef01234567"
 	index := `{"research":[{"id":"decisions/design.md","decision":true,"learn_ready":false,"publication":{"classification":"decision"}},{"id":"learn/SOURCE.md","decision":false,"learn_ready":true,"publication":{"classification":"research"}}]}`
@@ -141,8 +206,16 @@ func TestDashDeployStagesOnlyCleanOriginMainWithProvenanceAndRollback(t *testing
 	tip := strings.TrimSpace(runTestCommand(t, repo, "git", "rev-parse", "HEAD"))
 
 	unitPath := filepath.Join(root, "flotilla-dash.service")
-	unitBody := "[Service]\nExecStart=/opt/flotilla dash --tracker-file /var/lib/flotilla/history.md --backlog-file /var/lib/flotilla/drive.md\n"
+	unitBody := "[Service]\nExecStart=/opt/flotilla dash --bind 127.0.0.1:8787\n"
 	writeTestFile(t, unitPath, unitBody)
+	dropInPath := filepath.Join(root, "flotilla-dash.service.d", "70-tracker-file.conf")
+	dropInBody := "[Service]\nExecStart=\nExecStart=/opt/flotilla dash --tracker-file /var/lib/flotilla/history.md --backlog-file /var/lib/flotilla/drive.md\n"
+	writeTestFile(t, dropInPath, dropInBody)
+	unitState := &dashEffectiveUnit{
+		FragmentPath: unitPath,
+		DropInPaths:  []string{dropInPath},
+		ExecStart:    `{ path=/opt/flotilla ; argv[]=/opt/flotilla dash --tracker-file /var/lib/flotilla/history.md --backlog-file /var/lib/flotilla/drive.md ; }`,
+	}
 	installBin := filepath.Join(root, "installed-flotilla")
 	writeTestFile(t, installBin, "previous-binary")
 	if err := os.Chmod(installBin, 0o755); err != nil {
@@ -157,6 +230,7 @@ func TestDashDeployStagesOnlyCleanOriginMainWithProvenanceAndRollback(t *testing
 		Service:    "must-not-run.service",
 		Apply:      false,
 		Timeout:    time.Minute,
+		UnitState:  unitState,
 	})
 	if err != nil {
 		if out, inspectErr := exec.Command("go", "version", "-m", filepath.Join(stageDir, "flotilla-candidate")).CombinedOutput(); inspectErr == nil {
@@ -178,9 +252,14 @@ func TestDashDeployStagesOnlyCleanOriginMainWithProvenanceAndRollback(t *testing
 		manifest.Unit.BacklogFile != "/var/lib/flotilla/drive.md" {
 		t.Fatalf("unit flags = %+v", manifest.Unit)
 	}
-	unitSnapshot, err := os.ReadFile(manifest.Unit.Snapshot)
-	if err != nil || string(unitSnapshot) != unitBody {
-		t.Fatalf("unit rollback snapshot = %q err=%v", unitSnapshot, err)
+	if len(manifest.Unit.Files) != 2 {
+		t.Fatalf("unit rollback files = %+v", manifest.Unit.Files)
+	}
+	for i, want := range []string{unitBody, dropInBody} {
+		unitSnapshot, err := os.ReadFile(manifest.Unit.Files[i].Snapshot)
+		if err != nil || string(unitSnapshot) != want {
+			t.Fatalf("unit rollback snapshot %d = %q err=%v", i, unitSnapshot, err)
+		}
 	}
 	onDisk, err := os.ReadFile(filepath.Join(stageDir, "manifest.json"))
 	if err != nil {
@@ -205,6 +284,7 @@ func TestDashDeployStagesOnlyCleanOriginMainWithProvenanceAndRollback(t *testing
 		InstallBin: installBin,
 		Apply:      false,
 		Timeout:    time.Minute,
+		UnitState:  unitState,
 	})
 	if err == nil || !strings.Contains(err.Error(), "source checkout is dirty") {
 		t.Fatalf("dirty checkout must fail before build, got %v", err)
