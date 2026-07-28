@@ -1301,6 +1301,68 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .wc-seat { border: 0; border-left: 1px solid var(--line); padding: .22rem .55rem; background: transparent; color: var(--ink-2); font: .62rem var(--mono); cursor: pointer; }
 .wc-seat:first-child { border-left: 0; }
 .wc-seat.active { background: color-mix(in srgb, var(--cyan) 10%, var(--surface)); color: var(--cyan); }
+.wc-timeline {
+  flex: 0 1 42%; min-height: 150px; display: flex; flex-direction: column;
+  border-bottom: 1px solid var(--line); background: var(--surface); overflow: hidden;
+}
+.wc-timeline-head {
+  flex: 0 0 auto; display: flex; align-items: end; justify-content: space-between; gap: .75rem;
+  padding: .65rem 1rem .45rem;
+}
+.wc-timeline-kicker {
+  display: block; color: var(--ink-3); font: .58rem var(--mono);
+  letter-spacing: .1em; text-transform: uppercase;
+}
+.wc-timeline h3 { margin: .1rem 0 0; color: var(--ink); font: .88rem var(--display); }
+.wc-timeline-summary { color: var(--ink-3); font-size: .62rem; text-align: right; }
+.wc-timeline-sources {
+  flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: .3rem; padding: 0 1rem .5rem;
+}
+.wc-source {
+  display: inline-flex; align-items: center; gap: .3rem; flex: 0 0 auto;
+  border: 1px solid var(--line); border-radius: 999px; padding: .16rem .5rem;
+  color: var(--ink-2); font-size: .58rem; white-space: nowrap;
+}
+.wc-source > span { width: .42rem; height: .42rem; border-radius: 50%; background: var(--ok); }
+.wc-source-partial > span, .wc-source-stale > span { background: var(--amber); }
+.wc-source-unavailable > span { background: var(--err); }
+.wc-timeline-events {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; list-style: none; margin: 0;
+  padding: .15rem 1rem .65rem;
+}
+.wc-event {
+  position: relative; display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: .45rem;
+  padding: .38rem 0;
+}
+.wc-event:not(:last-child)::after {
+  content: ""; position: absolute; left: 5px; top: 1rem; bottom: -.15rem;
+  width: 1px; background: var(--line);
+}
+.wc-event-mark {
+  position: relative; z-index: 1; width: 11px; height: 11px; margin-top: .2rem;
+  border: 2px solid var(--surface); border-radius: 50%; background: var(--cyan);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.wc-event-outcome .wc-event-mark { background: var(--ok); }
+.wc-event-gate .wc-event-mark { background: var(--amber); }
+.wc-event-copy { min-width: 0; }
+.wc-event-copy strong { display: block; color: var(--ink); font: .72rem/1.3 var(--display); overflow-wrap: anywhere; }
+.wc-event-copy p { margin: .12rem 0 0; color: var(--ink-2); font-size: .64rem; line-height: 1.35; overflow-wrap: anywhere; }
+.wc-event-top { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; }
+.wc-event-state { color: var(--cyan); font: .56rem var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+.wc-event-top time { color: var(--ink-3); font-size: .56rem; white-space: nowrap; }
+.wc-event-source { margin-top: .12rem; color: var(--ink-3); font-size: .56rem; overflow-wrap: anywhere; }
+.wc-event-source a { color: var(--cyan); text-decoration: none; }
+.wc-event-source a:hover { text-decoration: underline; }
+.wc-timeline-empty {
+  margin: .45rem 0; padding: .65rem; border: 1px dashed var(--line); border-radius: var(--r-sm);
+  color: var(--ink-3); font-size: .68rem; line-height: 1.4;
+}
+.wc-timeline-earlier {
+  flex: 0 0 auto; align-self: center; border: 0; background: transparent; color: var(--cyan);
+  padding: .4rem .7rem; font: 600 .6rem var(--mono); cursor: pointer;
+}
+.wc-timeline-earlier:disabled { color: var(--ink-3); cursor: default; }
 .wc-github { flex: 0 0 auto; border-bottom: 1px solid var(--line); background: var(--abyss-3); }
 .wc-github[hidden] { display: none; }
 .wc-github > summary { min-height: 38px; padding: .55rem 1rem; cursor: pointer; color: var(--ink-2); font-size: .68rem; }
@@ -2169,6 +2231,11 @@ html, body { overflow-x: clip; }
   .wc-seat { white-space: nowrap; max-width: none; overflow: visible; }
   .wc-seat-static { white-space: nowrap; max-width: 100%; flex: 0 0 auto; overflow: visible; }
   .wc-seat-static, .wc-seat-switcher { margin-left: 0; }
+  .wc-timeline { flex-basis: 43%; min-height: 190px; }
+  .wc-timeline-head { padding: .55rem .85rem .4rem; }
+  .wc-timeline-sources { padding: 0 .85rem .45rem; }
+  .wc-timeline-events { padding: .1rem .85rem .55rem; }
+  .wc-timeline-summary { max-width: 48%; }
   .wc-github > summary { min-height: 38px; max-height: 44px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .wc-github-body { max-height: 40vh; overflow-y: auto; }
   .wc-stream-region { overflow-y: auto; }
