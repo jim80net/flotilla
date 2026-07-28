@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "captures": [
+    {
+      "id": "issues-window",
+      "required": true,
+      "attempts": [
+        {
+          "route": "/",
+          "actions": ["#tab-issues"],
+          "anchors": [
+            {"selector": "#issues-list .issue-scope-note", "state": "loaded"},
+            {"selector": "#issues-list > .error", "state": "error"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "issues-shipped",
+      "required": false,
+      "attempts": [
+        {
+          "route": "/",
+          "actions": ["#tab-issues"],
+          "anchors": [
+            {"selector": ".issue-shipped-group", "state": "populated"}
+          ]
+        }
+      ]
+    },
+    {
+      "id": "decisions-summary",
+      "required": true,
+      "attempts": [
+        {
+          "route": "/research?focus=decisions",
+          "anchors": [
+            {"selector": "#research-decision-list .research-card", "state": "populated"},
+            {"selector": "#research-filter-status:not(:empty)", "state": "empty"}
+          ]
+        },
+        {
+          "route": "/",
+          "actions": ["#tab-goals"],
+          "anchors": [
+            {"selector": ".gdec-summary", "state": "legacy-populated"}
+          ]
+        }
+      ]
+    }
+  ]
+}

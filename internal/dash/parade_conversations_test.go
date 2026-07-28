@@ -262,7 +262,7 @@ func TestParadeConversationDeckMarkers741(t *testing.T) {
 		`"kudos", "invest", "feedback"`, `"X-Flotilla-Dash": "1"`,
 		`flotilla.parade.read.v1`, `/api/parades/conversations/meta`, `pd-unread-dot`,
 		`e.target.closest("input, textarea, select, button, summary, [contenteditable=true]")`,
-		`e.target.closest(".pd-conversation")`,
+		`summary, .pd-conversation")`,
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("parade.js missing #741 executable marker %q", marker)

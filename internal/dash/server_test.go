@@ -188,9 +188,14 @@ func TestDashboardUtilizationFirstContract797(t *testing.T) {
 			t.Errorf("%s missing fleet utilization surface", label)
 		}
 	}
-	for _, marker := range []string{"empty-queue:", "has-queue:", "accepts-dispatch:", "renderLiveSwarm", "last_action", "data-swarm-desk"} {
+	for _, marker := range []string{"seats working", "waiting for authority", "Almost no one is working", "renderLiveSwarm", "last_action", "data-swarm-desk"} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("dash.js missing utilization marker %q", marker)
+		}
+	}
+	for _, jargon := range []string{"empty-queue:", "has-queue:", "accepts-dispatch:", "awaiting-authority:", "utilization wall"} {
+		if strings.Contains(js, jargon) {
+			t.Errorf("dash.js still exposes operator jargon %q", jargon)
 		}
 	}
 }
@@ -724,65 +729,34 @@ func TestGoalsCellRenames405(t *testing.T) {
 	}
 }
 
-// TestDecisionPage405 locks #405 Inc 2 (the operator's centerpiece) as reshaped by #429:
-// the decision reading room is a first-class TAB rendering as a full page — no modal, no
-// secondary scrollbar. It formats the canonical 6-element briefs with references (links)
-// and demo images inline, each decision showing which goal it drives.
+// TestDecisionPage405 locks the #863 R&D combination: Decisions are no longer a
+// dashboard panel or dialog. One navigation-out link carries the live count into
+// the focused paper reading room.
 func TestDecisionPage405(t *testing.T) {
 	now := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
 	srv, _ := newTestServer(t, singleFleetRoster, now)
 	html := doGet(t, srv, "/").Body.String()
-	if !strings.Contains(html, `id="view-decisions"`) || !strings.Contains(html, `id="gdec-list"`) {
-		t.Error("index.html must carry the decision-page view (#view-decisions / #gdec-list) — #405 Inc 2 / #429")
+	if strings.Contains(html, `id="view-decisions"`) || strings.Contains(html, `id="gdec-detail"`) || strings.Contains(html, `id="gdec-list"`) {
+		t.Error("dashboard must not retain a separate Decisions panel or detail dialog — #863")
 	}
-	// #429: the Decisions entry is a real role="tab" SPA tab, and the old modal is GONE —
-	// a leftover #goals-decisions dialog would mean the refactor shipped both surfaces.
-	if !strings.Contains(html, `id="tab-decisions" class="tab" data-view="decisions" role="tab"`) {
-		t.Error(`index.html must carry the Decisions tab as a role="tab" SPA view switch — #429`)
+	if !strings.Contains(html, `id="tab-decisions" class="tab tab-nav" href="/research?focus=decisions"`) || !strings.Contains(html, `>R&amp;D<span id="hdr-decisions-count"`) {
+		t.Error("dashboard must carry one R&D navigation link with the live Decisions count — #863")
 	}
 	if strings.Contains(html, `id="goals-decisions"`) || strings.Contains(html, "data-gdec-close") {
-		t.Error("index.html must NOT carry the retired decisions modal (#goals-decisions) — #429")
+		t.Error("index.html must not restore the retired decisions modal")
 	}
 	js := doGet(t, srv, "/static/goals.js").Body.String()
 	for _, marker := range []string{
 		"gatherDecisions",     // collects every open decision fleet-wide
-		"openDecisions",       // per-open entry: instant paint + always refetch (#429)
-		"paintDecisions",      // the pure painter, also driven by live ticks (#429)
-		"decisionsVisible",    // live ticks reach the open tab (#429)
 		"data-open-decisions", // the Awaiting-you tile trigger
-		"gdec-ctx-link",       // "Drives" — which goal the decision drives (linked)
-		"gm-brief-img",        // demo images rendered in a brief
 	} {
 		if !strings.Contains(js, marker) {
-			t.Errorf("goals.js must implement the decision page (missing %q) — #405 Inc 2 / #429", marker)
+			t.Errorf("goals.js must retain the decision count/trigger contract (missing %q) — #863", marker)
 		}
 	}
-	// #429 + the cubic #363 discipline: a failed goals load must surface an honest
-	// unavailable state, never a clean-looking "nothing awaiting you".
-	if !strings.Contains(js, "unavailable right now") {
-		t.Error("goals.js paintDecisions must render an honest unavailable state on a failed goals load — #429")
-	}
-	// renderBrief must render reference links (the "references littered throughout" requirement).
-	if !strings.Contains(js, `rel="noopener noreferrer"`) {
-		t.Error("goals.js renderBrief must render reference links (http(s)-restricted anchors) — #405 Inc 2")
-	}
-	// #429: dash.js owns the view switch (showView("decisions") repaints the page).
 	djs := doGet(t, srv, "/static/dash.js").Body.String()
-	if !strings.Contains(djs, `"decisions"`) || !strings.Contains(djs, "openDecisionsView") {
-		t.Error(`dash.js must route the decisions view (VIEWS + openDecisionsView) — #429`)
-	}
-	css := doGet(t, srv, "/static/dash.css").Body.String()
-	if !strings.Contains(css, ".gdec-list") || !strings.Contains(css, ".gdec-card") {
-		t.Error("dash.css must style the decision reading room (.gdec-list/.gdec-card) — #405 Inc 2")
-	}
-	// #429: no modal chrome and no inner scrollbar — the document owns the one scroll.
-	if strings.Contains(css, ".gdec-sheet") || strings.Contains(css, ".gdec-backdrop") {
-		t.Error("dash.css must NOT carry the retired decisions modal chrome (.gdec-sheet/.gdec-backdrop) — #429")
-	}
-	if gi := strings.Index(css, ".gdec-list"); gi >= 0 {
-		if line := css[gi : gi+strings.Index(css[gi:], "\n")]; strings.Contains(line, "overflow-y") {
-			t.Error("the decisions list must not own a secondary scrollbar (overflow-y) — #429")
-		}
+	if !strings.Contains(djs, `window.location.href = "/research?focus=decisions"`) || !strings.Contains(djs, `return { view: "rd" }`) {
+		t.Error("dash.js must route Goals and legacy #decisions entries into R&D — #863")
 	}
 }
 
@@ -1540,8 +1514,13 @@ func TestComposeGuardExplicitFlush(t *testing.T) {
 		t.Error("flushDeferredMirrorPaint must force-repaint deferred content even with non-empty draft")
 	}
 	delivered := `if (outcome === "delivered")`
-	dIdx := strings.Index(js, delivered)
-	if dIdx < 0 {
+	composerIdx := strings.Index(js, `var form = el("thread-composer"), ta = el("thread-composer-input")`)
+	if composerIdx < 0 {
+		t.Fatal("thread composer wiring missing")
+	}
+	dRel := strings.Index(js[composerIdx:], delivered)
+	dIdx := composerIdx + dRel
+	if dRel < 0 {
 		t.Fatal("thread composer delivered outcome handler missing")
 	}
 	// #518 grew the delivered block (optimistic outbound + refresh); keep a wider window.
@@ -1755,6 +1734,9 @@ func TestResolvePaths(t *testing.T) {
 	if cfg.BacklogPath != filepath.Join(dir, ".flotilla-state.md") {
 		t.Errorf("backlog path = %q", cfg.BacklogPath)
 	}
+	if cfg.DriveBacklogPath != cfg.BacklogPath {
+		t.Errorf("drive backlog path = %q, want backward-compatible tracker fallback %q", cfg.DriveBacklogPath, cfg.BacklogPath)
+	}
 	if cfg.GoalsPath != filepath.Join(dir, "fleet-goals.json") {
 		t.Errorf("goals path = %q (should default to <roster-dir>/fleet-goals.json)", cfg.GoalsPath)
 	}
@@ -1766,6 +1748,12 @@ func TestResolvePaths(t *testing.T) {
 	}
 	if cfg.ParadesPath != filepath.Join(dir, "parades") {
 		t.Errorf("parades path = %q (should default to <roster-dir>/parades)", cfg.ParadesPath)
+	}
+	if cfg.ResearchPath != filepath.Join(dir, "research") {
+		t.Errorf("research path = %q (should default to <roster-dir>/research)", cfg.ResearchPath)
+	}
+	if cfg.ResearchAnnotationsPath != filepath.Join(dir, "research-annotations") {
+		t.Errorf("research annotations path = %q (should default to <roster-dir>/research-annotations)", cfg.ResearchAnnotationsPath)
 	}
 	if cfg.LedgerPath != filepath.Join(dir, "context-ledger.md") {
 		t.Errorf("ledger path = %q (should inherit roster CosLedger)", cfg.LedgerPath)
@@ -1791,6 +1779,75 @@ func TestResolvePaths(t *testing.T) {
 	}
 	if strings.Contains(cfg2.ParadesPath, filepath.Join("state", "state")) {
 		t.Errorf("parades path must not double state/: %q", cfg2.ParadesPath)
+	}
+	if cfg2.ResearchPath != filepath.Join(stateDir, "research") {
+		t.Errorf("state roster research path = %q, want %q", cfg2.ResearchPath, filepath.Join(stateDir, "research"))
+	}
+	if cfg2.ResearchAnnotationsPath != filepath.Join(stateDir, "research-annotations") {
+		t.Errorf("state roster research annotations path = %q, want %q", cfg2.ResearchAnnotationsPath, filepath.Join(stateDir, "research-annotations"))
+	}
+}
+
+func TestLoadGoalsUsesDriveBacklogNotHistoryTracker(t *testing.T) {
+	srv, dir := newTestServer(t, singleFleetRoster, time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC))
+	trackerPath := filepath.Join(dir, ".flotilla-state.md")
+	drivePath := filepath.Join(dir, "fleet-backlog.md")
+	if err := os.WriteFile(trackerPath, []byte("# Session history\n\nNo active backlog is mirrored here.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(drivePath, []byte("## Backlog\n- [awaiting-auth] DECISION-ALPHA operator chooses the path\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv.cfg.BacklogPath = trackerPath
+	srv.cfg.DriveBacklogPath = drivePath
+
+	goals := GoalsFile{Goals: []Goal{{
+		ID: "decision", Title: "Operator decision", WorkItems: []WorkItem{{Kind: WorkBacklog, Match: "DECISION-ALPHA"}},
+	}}}
+	raw, err := json.Marshal(goals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(srv.cfg.GoalsPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	doc := srv.loadGoals()
+	var decision *RenderedGoal
+	for i := range doc.Goals {
+		if doc.Goals[i].ID == "decision" {
+			decision = &doc.Goals[i]
+			break
+		}
+	}
+	if decision == nil || len(decision.WorkItems) != 1 {
+		t.Fatalf("decision goal missing from %+v", doc.Goals)
+	}
+	if got := decision.WorkItems[0].Class; got != "awaiting" {
+		t.Fatalf("drive backlog decision class = %q, want awaiting (history tracker must not drain it)", got)
+	}
+	if doc.Counts.Awaiting != 1 {
+		t.Fatalf("decision count awaiting = %d, want 1", doc.Counts.Awaiting)
+	}
+}
+
+func TestLoadGoalsFailsClosedWhenConfiguredDriveBacklogIsMissing(t *testing.T) {
+	srv, dir := newTestServer(t, singleFleetRoster, time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC))
+	srv.cfg.DriveBacklogPath = filepath.Join(dir, "missing-drive-backlog.md")
+	goals := GoalsFile{Goals: []Goal{{
+		ID: "decision", Title: "Operator decision", WorkItems: []WorkItem{{Kind: WorkBacklog, Match: "DECISION-ALPHA"}},
+	}}}
+	raw, err := json.Marshal(goals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(srv.cfg.GoalsPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	doc := srv.loadGoals()
+	if !strings.Contains(doc.Error, "drive backlog") {
+		t.Fatalf("missing configured drive backlog must fail closed, error = %q", doc.Error)
 	}
 }
 
@@ -2219,7 +2276,7 @@ func TestIssuesWorkLedger405(t *testing.T) {
 		"workLedgerURL", `/api/work-ledger`, "renderDesk", "doc.flotillas",
 		"flotilla.desks", "issue-desk-head", "issue-ledger-kicker",
 		"shipped.slice(0, 10)", "issue-shipped-more", "show all ", "when-open", "older shipped",
-		"issue-scope-note", "Other open issues are omitted.", "renderMobileDesk", "data-issue-more",
+		"issue-scope-note", "Every indexed open issue is shown as moving.", "renderMobileDesk", "data-issue-more",
 	} {
 		if !strings.Contains(js, marker) {
 			t.Errorf("tracker.js must render the #405 fleet work ledger (missing %q)", marker)

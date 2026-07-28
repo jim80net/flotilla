@@ -11,6 +11,11 @@ import (
 // PR number citations in dispatch bodies (e.g. "PR #614", "pull request 475").
 var prCiteRE = regexp.MustCompile(`(?i)\b(?:PR|pull\s+request)\s*#?\s*(\d+)\b`)
 
+// commit citations are deliberately contextual: a bare hexadecimal token may
+// be a branch head that is not shipped. Only hashes described as main or as a
+// completed merge/squash are eligible for terminal-cargo disposition.
+var mergedCommitRE = regexp.MustCompile(`(?i)\b(?:main(?:\s+sha)?|merged(?:\s+(?:main|at))?|squash(?:ed)?)\b[\s:@=-]{0,16}([0-9a-f]{7,40})\b`)
+
 // ExtractPRNumbers returns unique PR numbers cited in message, ascending.
 func ExtractPRNumbers(message string) []int {
 	matches := prCiteRE.FindAllStringSubmatch(message, -1)
@@ -38,6 +43,26 @@ func ExtractPRNumbers(message string) []int {
 // Empty/nil checker never suppresses.
 type MergedChecker func(pr int) bool
 
+// CommitOnMainChecker reports whether an explicitly merged/main commit citation
+// is reachable from the repository's mainline reference.
+type CommitOnMainChecker func(sha string) bool
+
+// ExtractMergedCommitSHAs returns unique, explicitly terminal commit citations.
+func ExtractMergedCommitSHAs(message string) []string {
+	matches := mergedCommitRE.FindAllStringSubmatch(message, -1)
+	seen := map[string]struct{}{}
+	var out []string
+	for _, m := range matches {
+		sha := strings.ToLower(m[1])
+		if _, ok := seen[sha]; ok {
+			continue
+		}
+		seen[sha] = struct{}{}
+		out = append(out, sha)
+	}
+	return out
+}
+
 // ShouldSuppressMerged reports whether message cites at least one PR and every
 // cited PR is known-merged (or the checker affirms any single cited PR when
 // policy is any-merged — we require ALL cited PRs merged to auto-consume, so a
@@ -57,6 +82,24 @@ func ShouldSuppressMerged(message string, isMerged MergedChecker) (pr int, ok bo
 	}
 	// All merged — return the first for logging.
 	return prs[0], true
+}
+
+// ShouldSuppressTerminal accepts either the conservative all-cited-PRs merged
+// proof or an explicitly terminal SHA that is confirmed on main. It never
+// infers completion from prose such as "chapter closed" alone.
+func ShouldSuppressTerminal(message string, isMerged MergedChecker, isCommitOnMain CommitOnMainChecker) (evidence string, ok bool) {
+	if pr, merged := ShouldSuppressMerged(message, isMerged); merged {
+		return "pr:" + strconv.Itoa(pr), true
+	}
+	if isCommitOnMain == nil {
+		return "", false
+	}
+	for _, sha := range ExtractMergedCommitSHAs(message) {
+		if isCommitOnMain(sha) {
+			return "sha:" + sha, true
+		}
+	}
+	return "", false
 }
 
 // ChapterHoldActive reports whether a marker string requests chapter HOLD

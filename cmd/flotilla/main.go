@@ -137,6 +137,9 @@ usage:
   flotilla status                                     one line per desk: last-known state + XO ack age (reads the watch snapshot; no daemon)
   flotilla inbox <channel> [--limit N]                read recent messages of a bound channel over REST (role or channel id; recover a dropped operator message; read-only)
   flotilla dash [--bind 127.0.0.1:8787]               optional local web UI: fleet board + federation topology + coordination history (read-only; reads the watch artifacts; loopback only)
+  flotilla dash deploy --repo <clean-tip-checkout> --stage-dir <dir>
+                       --unit-file <service> --install-bin <binary> [--apply]
+                                                      build and prove a clean origin/main dash candidate; stage-only unless --apply
   flotilla goals validate [--roster <path>] [--yaml <path>] [--json <path>]
                                                       fail-closed validate fleet-goals.yaml (and json if present)
   flotilla goals compile [--roster <path>] [--yaml <path>] [--json <path>]
@@ -157,9 +160,9 @@ usage:
   flotilla provision-discord <flotilla-key> [--dry-run] [--apply-roster]
                                                       provision COS C2 + flotilla product hub + bindings + XO webhook
   flotilla register <agent> [--pane <target>]         tag a pane so it resolves by a stable, drift-immune marker
-  flotilla resume <agent> [--launch <path>] [--force]  (re)start a dead desk from its host-local launch recipe
+  flotilla resume <agent> [--launch <path>] [--force] [--scheduled-e2e]  (re)start a dead desk from its host-local launch recipe
   flotilla recycle <agent> [--launch <path>] [--dry-run]  close a desk's chapter (handoff→graceful close→relaunch→takeover), fail-closed
-  flotilla switch <agent> (--to <slot|surface> | --auto | --repair) [--confirm] [--force]  hand a desk across harnesses (FROM handoff→relaunch on TO→TO takeover), fail-closed
+  flotilla switch <agent> (--to <slot|surface> | --auto | --repair) [--confirm] [--force] [--scheduled-e2e]  hand a desk across harnesses (FROM handoff→relaunch on TO→TO takeover), fail-closed
   flotilla workspace init <agent> --repo <abs-path>   provision a desk git worktree + ~/.flotilla/<agent>/ host (seeds doctrine into the worktree)
   flotilla workspace path <agent>                     print an agent's workspace directory
   flotilla doctrine install [--refresh] [--all] [<agent>]  install constitutional doctrine (idempotent; --refresh updates drifted fenced blocks)
@@ -286,6 +289,7 @@ flags for 'dash':
   --snapshot-file <path>  the watch change-detector snapshot to read (default $FLOTILLA_SNAPSHOT_FILE, else <roster-dir>/flotilla-detector-state.json)
   --ack-file <path>       XO liveness ack file to age (default $FLOTILLA_ACK_FILE, else <roster-dir>/flotilla-xo-alive)
   --tracker-file <path>   backlog markdown the history view reads (default $FLOTILLA_TRACKER_FILE, else <roster-dir>/.flotilla-state.md)
+  --backlog-file <path>   drive backlog Goals uses (default $FLOTILLA_BACKLOG_FILE, else --tracker-file)
   --bind <addr>           local listen address (default 127.0.0.1:8787; loopback only in this phase)
   --repo <owner/name>     GitHub repo for the issue tracker (reserved for the tracker phase; unused here)
 
