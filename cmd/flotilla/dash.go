@@ -31,6 +31,9 @@ import (
 // bind, which needs the bearer-token + SSE-cookie auth gate, is a tracked
 // follow-on — the server fails closed on one until then).
 func cmdDash(args []string) error {
+	if len(args) > 0 && args[0] == "deploy" {
+		return cmdDashDeploy(args[1:])
+	}
 	fs := flag.NewFlagSet("dash", flag.ContinueOnError)
 	rosterPath := fs.String("roster", rosterDefault(), "roster config path")
 	snapshotPath := fs.String("snapshot-file", os.Getenv("FLOTILLA_SNAPSHOT_FILE"), "change-detector snapshot file (default <roster-dir>/flotilla-detector-state.json)")

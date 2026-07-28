@@ -133,6 +133,9 @@ usage:
   flotilla status                                     one line per desk: last-known state + XO ack age (reads the watch snapshot; no daemon)
   flotilla inbox <channel> [--limit N]                read recent messages of a bound channel over REST (role or channel id; recover a dropped operator message; read-only)
   flotilla dash [--bind 127.0.0.1:8787]               optional local web UI: fleet board + federation topology + coordination history (read-only; reads the watch artifacts; loopback only)
+  flotilla dash deploy --repo <clean-tip-checkout> --stage-dir <dir>
+                       --unit-file <service> --install-bin <binary> [--apply]
+                                                      build and prove a clean origin/main dash candidate; stage-only unless --apply
   flotilla goals validate [--roster <path>] [--yaml <path>] [--json <path>]
                                                       fail-closed validate fleet-goals.yaml (and json if present)
   flotilla goals compile [--roster <path>] [--yaml <path>] [--json <path>]
