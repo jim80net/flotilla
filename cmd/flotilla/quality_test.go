@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -73,5 +75,32 @@ func TestWriteQualitySummary(t *testing.T) {
 	writeQualitySummary(&out, harnessquality.BuildSummary(nil, time.Now()))
 	if !strings.Contains(out.String(), "events:0") || !strings.Contains(out.String(), "bounce:0.0%") {
 		t.Fatalf("summary = %q", out.String())
+	}
+}
+
+func TestQualityDocumentedSeatFirstCommands(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FLOTILLA_WORKSPACE_ROOT", t.TempDir())
+	rosterPath := filepath.Join(dir, "flotilla.json")
+	if err := os.WriteFile(rosterPath, []byte(`{"agents":[{"name":"builder","surface":"grok"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmdQualityContext([]string{
+		"builder", "--roster", rosterPath, "--work-class", "strategic", "--work-ref", "owner/repo#1",
+	}); err != nil {
+		t.Fatalf("seat-first quality context: %v", err)
+	}
+	context, ok, err := harnessquality.ReadContext(dir, "builder")
+	if err != nil || !ok || context.WorkClass != harnessquality.WorkStrategic || context.WorkRef != "owner/repo#1" {
+		t.Fatalf("context = %+v, %v, %v", context, ok, err)
+	}
+	if err := cmdQualityRecord([]string{
+		"builder", "--roster", rosterPath, "--event", "gate", "--outcome", "bounced", "--bounce-count", "1",
+	}); err != nil {
+		t.Fatalf("seat-first quality record: %v", err)
+	}
+	events, err := harnessquality.Load(dir)
+	if err != nil || len(events) != 1 || events[0].Outcome != harnessquality.OutcomeBounced {
+		t.Fatalf("events = %+v, %v", events, err)
 	}
 }

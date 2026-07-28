@@ -126,6 +126,20 @@ func TestMergedSuppress_AllCitedMustBeMerged(t *testing.T) {
 	}
 }
 
+func TestShouldSuppressTerminalRequiresContextualSHAOnMain(t *testing.T) {
+	msg := "PR head deadbee is obsolete; squash merged @ 4987bfa and chapter closed"
+	evidence, ok := ShouldSuppressTerminal(msg, nil, func(sha string) bool { return sha == "4987bfa" })
+	if !ok || evidence != "sha:4987bfa" {
+		t.Fatalf("ShouldSuppressTerminal = (%q, %v)", evidence, ok)
+	}
+	if _, ok := ShouldSuppressTerminal("candidate head 4987bfa awaiting gate", nil, func(string) bool { return true }); ok {
+		t.Fatal("bare candidate SHA must not terminally suppress cargo")
+	}
+	if _, ok := ShouldSuppressTerminal("main 4987bfa", nil, func(string) bool { return false }); ok {
+		t.Fatal("unreachable main citation must not suppress cargo")
+	}
+}
+
 func TestFormatQueuedAck_MachineReadable(t *testing.T) {
 	// Desk-visible queued ack shape used by cmd send (#475 extension).
 	line := FormatQueuedAck("abc123", "memex", "xo", false)

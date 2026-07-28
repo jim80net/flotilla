@@ -63,6 +63,23 @@ with sync_playwright() as p:
 assert not errors
 ```
 
+For broad submatrices, use the checked-in fail-soft runner instead of waiting on
+one hard-coded populated-state selector:
+
+```bash
+python3 .claude/skills/flotilla-seven-c-walk/scripts/walk_run.py \
+  --base-url http://127.0.0.1:8787 \
+  --output-dir <roster-dir>/state/<xo>-walk-<YYYYMMDD>/assets
+```
+
+Routes, actions, and state anchors live in `walk-manifest.v1.json`. The runner
+tries current routes before legacy fallbacks, records an absent optional state
+as `unavailable`, continues the remaining captures, and atomically finalizes
+`walk-run.json`. A missing required surface or a page error still makes the run
+non-zero, but only after the rest of the matrix and its evidence manifest have
+completed. Update the versioned manifest when product routes or state grammar
+move; do not copy selectors into an evening-specific script.
+
 ## Grade grid (0–2 each; cite evidence)
 
 | C | Question |

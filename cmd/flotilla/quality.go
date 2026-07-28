@@ -39,7 +39,7 @@ func cmdQualityContext(args []string) error {
 	workClass := fs.String("work-class", "", "strategic, maintenance, or ktlo")
 	workRef := fs.String("work-ref", "", "stable issue/PR/task reference")
 	harnessVersion := fs.String("harness-version", "", "live harness version when known")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(qualitySeatLast(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -72,7 +72,7 @@ func cmdQualityRecord(args []string) error {
 	bounceCount := fs.Int("bounce-count", 0, "event-local bounce count")
 	reworkCount := fs.Int("rework-count", 0, "rework count carried by this completion")
 	sessionPtr := fs.String("session-mirror-ptr", "", "optional transcript record pointer")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(qualitySeatLast(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -254,4 +254,16 @@ func valueOrUnknown(value string) string {
 		return "unknown"
 	}
 	return value
+}
+
+// qualitySeatLast preserves the documented command grammar
+// (`quality <verb> <seat> --flags`) while still using flag.FlagSet, which stops
+// parsing at the first positional argument. A flags-first invocation remains
+// valid too.
+func qualitySeatLast(args []string) []string {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return args
+	}
+	out := append([]string(nil), args[1:]...)
+	return append(out, args[0])
 }

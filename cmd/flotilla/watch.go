@@ -944,6 +944,8 @@ func cmdWatch(args []string) error {
 			detCfg.ScheduleOnTick = sched.Tick
 		}
 		undeliveredAlerted := watch.NewUndeliveredAlertSet()
+		mergedPR := newMergedPRChecker(currentRoster)
+		commitOnMain := newCommitOnMainChecker(currentRoster)
 		detCfg.OutboxSweepOnTick = func() {
 			outboxSweeper.SweepAll()
 			// #614 / #628: undelivered scan — journal always; adjutant first; operator L2.
@@ -969,6 +971,8 @@ func cmdWatch(args []string) error {
 				ReadTurnFinal: func(agent string) (string, bool, error) {
 					return readDeskTurnFinal(cfg, agent)
 				},
+				IsMerged:       mergedPR,
+				IsCommitOnMain: commitOnMain,
 			})
 		}
 		det := watch.NewDetectorWithSynthSidecar(detCfg, *snapshotPath, synthSidecarPath)

@@ -28,23 +28,26 @@ import (
 // (cmd/flotilla/dash.go) resolves these (default paths mirroring `status`) and
 // hands them to NewServer; the server itself does the per-request file I/O.
 type Config struct {
-	RosterPath       string // path to the roster file
-	OrgFile          string // optional org-truth path (--org-file / FLOTILLA_ORG_FILE); empty = default discovery
-	SnapshotPath     string // detector snapshot (default <roster-dir>/flotilla-detector-state.json)
-	AckPath          string // XO liveness ack file (default <roster-dir>/flotilla-xo-alive)
-	LedgerPath       string // CoS ledger (cfg.CosLedger; "" when the CoS mirror is inert)
-	BacklogPath      string // backlog markdown (--tracker-file; default <roster-dir>/.flotilla-state.md)
-	GoalsPath        string // goals file the Goals view reads (default <roster-dir>/fleet-goals.json)
-	GoalsYAMLPath    string // goals yaml source compiled on load (default <roster-dir>/fleet-goals.yaml)
-	SessionMirrorDir string // per-agent session-mirror ledgers (default <roster-dir>/session-mirror)
-	QualityPath      string // harness quality event ledger (default <roster-dir>/harness-quality.jsonl)
-	ParadesPath      string // parade archive: <dir>/<YYYY-MM-DD>/{report.md,assets/} (default <roster-dir>/parades)
-	DoneLogPath      string // goals done-history JSONL the server appends + reads (#418; default <roster-dir>/goals-done.jsonl)
-	Bind             string // listen address (default 127.0.0.1:8787)
-	Repo             string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
-	SecretsPath      string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
-	GoalsLayout      string // always normalized to "mindmap" — the Goals map is mind-map-only (tree/org retired; toggle removed 2026-07-06)
-	BuildRevision    string // real VCS build revision injected by cmd/flotilla; invalid or absent = "unavailable"
+	RosterPath              string // path to the roster file
+	OrgFile                 string // optional org-truth path (--org-file / FLOTILLA_ORG_FILE); empty = default discovery
+	SnapshotPath            string // detector snapshot (default <roster-dir>/flotilla-detector-state.json)
+	AckPath                 string // XO liveness ack file (default <roster-dir>/flotilla-xo-alive)
+	LedgerPath              string // CoS ledger (cfg.CosLedger; "" when the CoS mirror is inert)
+	BacklogPath             string // backlog markdown (--tracker-file; default <roster-dir>/.flotilla-state.md)
+	DriveBacklogPath        string // active drive backlog for Goals work-item resolution (--backlog-file / FLOTILLA_BACKLOG_FILE; default BacklogPath)
+	GoalsPath               string // goals file the Goals view reads (default <roster-dir>/fleet-goals.json)
+	GoalsYAMLPath           string // goals yaml source compiled on load (default <roster-dir>/fleet-goals.yaml)
+	SessionMirrorDir        string // per-agent session-mirror ledgers (default <roster-dir>/session-mirror)
+	QualityPath             string // harness quality event ledger (default <roster-dir>/harness-quality.jsonl)
+	ParadesPath             string // parade archive: <dir>/<YYYY-MM-DD>/{report.md,assets/} (default <roster-dir>/parades)
+	ResearchPath            string // operator research markdown library (default <roster-dir>/research)
+	ResearchAnnotationsPath string // host-private research annotation store (default <roster-dir>/research-annotations)
+	DoneLogPath             string // goals done-history JSONL the server appends + reads (#418; default <roster-dir>/goals-done.jsonl)
+	Bind                    string // listen address (default 127.0.0.1:8787)
+	Repo                    string // pinned GitHub repo for the tracker (owner/name); "" disables the tracker
+	SecretsPath             string // secrets env file for the notify webhook ("" ⇒ notify unavailable)
+	GoalsLayout             string // always normalized to "mindmap" — the Goals map is mind-map-only (tree/org retired; toggle removed 2026-07-06)
+	BuildRevision           string // real VCS build revision injected by cmd/flotilla; invalid or absent = "unavailable"
 
 	// DisableAuthentication turns off the browser write gates (X-Flotilla-Dash header +
 	// Origin allowlist) on state-changing routes. Operator-only insecure mode until the
@@ -85,21 +88,26 @@ type Config struct {
 // static assets. It holds NO live fleet state of its own — every request reads
 // the current artifacts fresh.
 type Server struct {
-	cfg         Config
-	roster      *roster.Config
-	xo          string        // resolved XO (xo_agent, else Agents[0])
-	threshold   time.Duration // snapshot staleness threshold (3× heartbeat)
-	now         func() time.Time
-	tmpl        *template.Template
-	mux         *http.ServeMux
-	hub         *hub
-	allowed     map[string]bool    // Host-header allowlist (host:port forms)
-	origins     map[string]bool    // Origin allowlist (scheme://host:port) for state-changing requests
-	tracker     tracker.Tracker    // GitHub-backed issue tracker; nil when no --repo is configured
-	control     control.Controller // cnc control (notify live; route/resume gated on the pane lock)
-	done        *doneRecorder      // goals done-history observer/writer (#418) — the one artifact the dash WRITES
-	goalsLoadWG sync.WaitGroup     // async loadGoals from the SSE poller; tests drain before TempDir teardown
-	pollWG      sync.WaitGroup     // SSE file poller; shutdown waits for exit before draining loadGoals
+	cfg       Config
+	roster    *roster.Config
+	xo        string        // resolved XO (xo_agent, else Agents[0])
+	threshold time.Duration // snapshot staleness threshold (3× heartbeat)
+	now       func() time.Time
+	tmpl      *template.Template
+	mux       *http.ServeMux
+	hub       *hub
+	allowed   map[string]bool // Host-header allowlist (host:port forms)
+	origins   map[string]bool // Origin allowlist (scheme://host:port) for state-changing requests
+	tracker   tracker.Tracker // GitHub-backed issue tracker; nil when no --repo is configured
+	trackerMu sync.Mutex
+	// ledgerTrackers holds one persistent, cache-owning GitHub reader per roster/goal
+	// repository. Issue writes remain pinned to tracker/cfg.Repo.
+	ledgerTrackers          map[string]tracker.Tracker
+	control                 control.Controller // cnc control (notify live; route/resume gated on the pane lock)
+	done                    *doneRecorder      // goals done-history observer/writer (#418) — the one artifact the dash WRITES
+	researchAnnotationAudit func(researchAnnotationAuditEvent)
+	goalsLoadWG             sync.WaitGroup // async loadGoals from the SSE poller; tests drain before TempDir teardown
+	pollWG                  sync.WaitGroup // SSE file poller; shutdown waits for exit before draining loadGoals
 }
 
 // NewServer validates the bind address (LOOPBACK ONLY — see validateBind; the
@@ -133,17 +141,19 @@ func NewServer(cfg Config) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{
-		cfg:       cfg,
-		roster:    rc,
-		xo:        xo,
-		threshold: FreshnessThreshold(rc.HeartbeatDur()), // ceiling via ReferenceIntervalCeiling (K9)
-		now:       time.Now,
-		tmpl:      tmpl,
-		mux:       http.NewServeMux(),
-		hub:       newHub(),
-		allowed:   buildHostAllowlist(cfg.Bind),
-		origins:   buildOriginAllowlist(cfg.Bind, cfg.AllowedOrigins),
-		done:      newDoneRecorder(cfg.DoneLogPath), // #418 — observes roll-up transitions on every goals load
+		cfg:                     cfg,
+		roster:                  rc,
+		xo:                      xo,
+		threshold:               FreshnessThreshold(rc.HeartbeatDur()), // ceiling via ReferenceIntervalCeiling (K9)
+		now:                     time.Now,
+		tmpl:                    tmpl,
+		mux:                     http.NewServeMux(),
+		hub:                     newHub(),
+		allowed:                 buildHostAllowlist(cfg.Bind),
+		researchAnnotationAudit: defaultResearchAnnotationAudit,
+		origins:                 buildOriginAllowlist(cfg.Bind, cfg.AllowedOrigins),
+		done:                    newDoneRecorder(cfg.DoneLogPath), // #418 — observes roll-up transitions on every goals load
+		ledgerTrackers:          make(map[string]tracker.Tracker),
 	}
 	if cfg.DisableAuthentication {
 		fmt.Fprintln(os.Stderr, "flotilla dash: WARNING — DISABLE_AUTHENTICATION is on; write-route CSRF gates are OFF (insecure mode until #208 lands)")
@@ -158,6 +168,7 @@ func NewServer(cfg Config) (*Server, error) {
 			return nil, terr
 		}
 		s.tracker = gh
+		s.ledgerTrackers[strings.ToLower(cfg.Repo)] = gh
 	}
 	// The control surface is always wired: notify posts through the injected
 	// (discord-backed) Transport when a secrets webhook is configured; route resolves
@@ -204,8 +215,8 @@ func (s *Server) Run(ctx context.Context) error {
 	errc := make(chan error, 1)
 	go func() { errc <- srv.Serve(ln) }()
 
-	fmt.Fprintf(os.Stderr, "flotilla dash: serving on http://%s (reading %s; parades %s)\n",
-		s.cfg.Bind, s.cfg.SnapshotPath, s.cfg.ParadesPath)
+	fmt.Fprintf(os.Stderr, "flotilla dash: serving on http://%s (reading %s; parades %s; research %s)\n",
+		s.cfg.Bind, s.cfg.SnapshotPath, s.cfg.ParadesPath, s.cfg.ResearchPath)
 	select {
 	case <-ctx.Done():
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -240,6 +251,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/parades/{date}/slides/{index}/messages", s.requireWrite(s.handleParadeMessage))
 	s.mux.HandleFunc("/parade", s.handleParadePage)
 	s.mux.HandleFunc("/parade-assets/{date}/{file}", s.handleParadeAsset)
+	s.mux.HandleFunc("GET /api/research", s.handleResearchIndex)
+	s.mux.HandleFunc("GET /api/research/{id...}", s.handleResearchDocument)
+	s.mux.HandleFunc("GET /research-assets/{id...}", s.handleResearchVideo)
+	s.mux.HandleFunc("GET /research-presentations/{id...}", s.handleResearchPresentation)
+	s.mux.HandleFunc("GET /api/research-annotations/{id...}", s.handleResearchAnnotations)
+	s.mux.HandleFunc("POST /api/research-annotations/{id...}", s.requireWrite(s.handleResearchAnnotationCreate))
+	s.mux.HandleFunc("POST /api/research-annotation-routes/{id...}", s.requireWrite(s.handleResearchAnnotationRoute))
+	s.mux.HandleFunc("GET /research", s.handleResearchPage)
+	s.mux.HandleFunc("GET /research/{id...}", s.handleResearchPage)
 	s.mux.HandleFunc("/events", s.handleEvents)
 	// Static assets are served no-cache so a deploy's new goals.js / dash.css / dash.js is
 	// picked up on the next load — without this the browser holds stale JS/CSS and the
@@ -255,6 +275,7 @@ func (s *Server) routes() {
 	// write handler because the write patterns are POST-only.
 	s.mux.HandleFunc("GET /api/issues", s.handleIssuesList)
 	s.mux.HandleFunc("GET /api/work-ledger", s.handleWorkLedger)
+	s.mux.HandleFunc("GET /api/work-timeline", s.handleWorkTimeline)
 	s.mux.HandleFunc("GET /api/issues/{number}", s.handleIssueGet)
 	s.mux.HandleFunc("POST /api/issues", s.requireWrite(s.handleIssueCreate))
 	s.mux.HandleFunc("POST /api/issues/{number}/comments", s.requireWrite(s.handleIssueComment))
@@ -366,37 +387,53 @@ func (s *Server) loadHistoryPage(q HistoryQuery) (HistoryPage, error) {
 }
 
 // loadGoals reads the goals file fresh and builds the goals document, binding
-// live work-item status from the SAME board (desk states) and backlog the other
-// views read — so the Goals view can never diverge from the fleet board. A
+// live work-item status from the SAME board (desk states) and drive backlog
+// watch reads — so Goals and the goal loop cannot disagree about active work. A
 // missing goals file yields an honest Found=false document; a present-but-invalid
 // file surfaces the load error (structure is validated fail-closed) rather than a
 // partial tree. When the tracker is configured, open issues with a goal-id:
 // trailer are merged onto the referenced goal node and issue states are resolved
 // for work-item roll-up.
 func (s *Server) loadGoals() GoalsDoc {
-	return s.loadGoalsWithIssues(nil, false)
+	return s.loadGoalsWithIssueSources(nil, false)
 }
 
 // loadGoalsFromIssues builds the Goals document from an issue snapshot the
 // caller already fetched. Work-ledger uses this path so one request never pays
 // for two serial, identical all/200/body GitHub reads.
 func (s *Server) loadGoalsFromIssues(issues []tracker.Issue) GoalsDoc {
-	return s.loadGoalsWithIssues(issues, true)
+	return s.loadGoalsWithIssueSources([]WorkLedgerRepoIssues{{Repo: s.cfg.Repo, Issues: issues}}, true)
 }
 
-func (s *Server) loadGoalsWithIssues(issues []tracker.Issue, supplied bool) GoalsDoc {
+func (s *Server) loadGoalsFromRepoIssues(sources []WorkLedgerRepoIssues) GoalsDoc {
+	return s.loadGoalsWithIssueSources(sources, true)
+}
+
+func (s *Server) loadGoalsWithIssueSources(sources []WorkLedgerRepoIssues, supplied bool) GoalsDoc {
 	orgParents, orgSource := orgParentsFromRoster(s.roster)
+	backlog := readFileOrEmpty(s.cfg.DriveBacklogPath)
+	backlogErr := ""
+	if s.cfg.DriveBacklogPath != s.cfg.BacklogPath {
+		if raw, err := os.ReadFile(s.cfg.DriveBacklogPath); err != nil {
+			backlogErr = fmt.Sprintf("drive backlog %q: %v", s.cfg.DriveBacklogPath, err)
+		} else {
+			backlog = string(raw)
+		}
+	}
 	in := GoalsInputs{
-		Backlog:       readFileOrEmpty(s.cfg.BacklogPath),
+		Backlog:       backlog,
 		DeskStates:    agentStates(s.loadBoard()),
 		AgentSurfaces: agentSurfacesFromRoster(s.roster),
 		MetaXO:        s.xo,
 		Channels:      deskChannelsFromRoster(s.roster),
 		OrgParents:    orgParents,
 		OrgSource:     orgSource,
+		LoadErr:       backlogErr,
 	}
 	if supplied {
-		bindTrackerIssueSnapshot(&in, s.cfg.Repo, issues)
+		for _, source := range sources {
+			bindTrackerIssueSnapshot(&in, source.Repo, source.Issues)
+		}
 	} else {
 		s.bindTrackerIssues(&in)
 	}
@@ -457,7 +494,9 @@ func (s *Server) bindTrackerIssues(in *GoalsInputs) {
 }
 
 func bindTrackerIssueSnapshot(in *GoalsInputs, repo string, issues []tracker.Issue) {
-	in.IssueStates = make(map[string]string, len(issues))
+	if in.IssueStates == nil {
+		in.IssueStates = make(map[string]string, len(issues))
+	}
 	for _, iss := range issues {
 		ref := tracker.IssueRef(repo, iss.Number)
 		state := strings.ToLower(strings.TrimSpace(iss.State))
@@ -760,6 +799,9 @@ func ResolvePaths(cfg Config, rc *roster.Config) Config {
 	if cfg.BacklogPath == "" {
 		cfg.BacklogPath = filepath.Join(dir, ".flotilla-state.md")
 	}
+	if cfg.DriveBacklogPath == "" {
+		cfg.DriveBacklogPath = cfg.BacklogPath
+	}
 	if cfg.GoalsPath == "" {
 		cfg.GoalsPath = filepath.Join(dir, "fleet-goals.json")
 	}
@@ -780,6 +822,12 @@ func ResolvePaths(cfg Config, rc *roster.Config) Config {
 		// Sibling of the roster file — when the roster lives in state/ (the common
 		// deploy shape), <roster-dir>/parades is state/parades, NOT state/state/parades (#376).
 		cfg.ParadesPath = filepath.Join(dir, "parades")
+	}
+	if cfg.ResearchPath == "" {
+		cfg.ResearchPath = filepath.Join(dir, "research")
+	}
+	if cfg.ResearchAnnotationsPath == "" {
+		cfg.ResearchAnnotationsPath = filepath.Join(dir, "research-annotations")
 	}
 	if cfg.DoneLogPath == "" {
 		cfg.DoneLogPath = filepath.Join(dir, "goals-done.jsonl") // #418 done-history, roster-adjacent

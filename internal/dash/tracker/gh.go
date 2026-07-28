@@ -50,6 +50,7 @@ const listCacheTTL = 15 * time.Second
 const (
 	listFields   = "number,title,labels,state,author,createdAt,updatedAt,closedAt"
 	detailFields = "number,title,body,labels,state,author,createdAt,updatedAt,closedAt,comments,url"
+	pullFields   = "number,title,state,isDraft,createdAt,updatedAt,closedAt,mergedAt,url,headRefName,baseRefName"
 )
 
 // repoPattern validates a --repo value as a safe owner/name: each segment starts
@@ -266,6 +267,25 @@ func (g *GHTracker) Get(ctx context.Context, number int) (Issue, error) {
 	}
 	EnrichIssue(&issue)
 	return issue, nil
+}
+
+// GetPullRequest returns the bounded state needed by the Work Context timeline.
+// It is intentionally separate from Tracker.Get: issue-backed callers keep the
+// existing contract while a goal work-item reference can fall back to PR truth.
+func (g *GHTracker) GetPullRequest(ctx context.Context, number int) (PullRequest, error) {
+	if number <= 0 {
+		return PullRequest{}, ErrInvalidNumber
+	}
+	args := []string{"pr", "view", "--repo=" + g.repo, "--json=" + pullFields, "--", strconv.Itoa(number)}
+	out, errb, err := g.run(ctx, args, nil)
+	if err != nil {
+		return PullRequest{}, classify(errb, err)
+	}
+	var pull PullRequest
+	if uerr := json.Unmarshal(out, &pull); uerr != nil {
+		return PullRequest{}, fmt.Errorf("%w: gh pr view: %v", ErrParse, uerr)
+	}
+	return pull, nil
 }
 
 // Create opens a new issue. Title/Labels go via the `--flag=value` form and the

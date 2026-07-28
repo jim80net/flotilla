@@ -43,6 +43,23 @@ func TestAutoRevertEligible_FallbackSlot(t *testing.T) {
 	}
 }
 
+func TestAutoRevertEligible_ActiveCapacityHold(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := workspace.WriteActiveOverlay("xo", workspace.ActiveOverlay{
+		Slot: "fallback-0", Surface: "grok", Provider: "xai",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	holdPath := filepath.Join(home, ".flotilla", "xo", workspace.CapacityHoldFileName)
+	if err := os.WriteFile(holdPath, []byte(`{"schema":"flotilla.capacity_hold/v1","status":"ACTIVE","forbid_primary":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if autoRevertEligible("xo", PoisonState{}, time.Now()) {
+		t.Fatal("active capacity hold must suppress automatic return to primary")
+	}
+}
+
 func TestPrimaryProviderPoisoned(t *testing.T) {
 	dir := t.TempDir()
 	launchPath := filepath.Join(dir, "flotilla-launch.json")

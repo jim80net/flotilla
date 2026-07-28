@@ -233,3 +233,23 @@ func TestParadeEmptyCollectionRenderMarkers(t *testing.T) {
 		}
 	}
 }
+
+func TestParadeNavigationDoesNotBindStageClick(t *testing.T) {
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	srv, _ := newTestServer(t, singleFleetRoster, now)
+	js := doGet(t, srv, "/static/parade.js").Body.String()
+
+	if strings.Contains(js, `el("pd-stage").addEventListener("click"`) {
+		t.Fatal("parade stage must not page on click or drag-release; navigation is explicit-control only")
+	}
+	for _, marker := range []string{
+		`Math.abs(dx) > 40`,
+		`Math.abs(dx) > Math.abs(dy) * 1.25`,
+		`el("pd-prev").addEventListener("click"`,
+		`el("pd-next").addEventListener("click"`,
+	} {
+		if !strings.Contains(js, marker) {
+			t.Errorf("parade navigation missing gesture-safety marker %q", marker)
+		}
+	}
+}
