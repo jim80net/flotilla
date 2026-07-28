@@ -75,6 +75,12 @@ type Agent struct {
 	// SHOULD be set so line 1 is explicit (load accepts secondaries alone; origin
 	// may still fill primary at materialize time).
 	SecondaryRepos []string `json:"secondary_repos,omitempty"`
+	// WorkLedgerRepositoryless explicitly declares that this seat's roster domain
+	// has no repository-backed work to index. Absence is not equivalent: a domain
+	// with neither a repository mapping nor this declaration is reported as a
+	// missing mapping by the dash work ledger. A repository-owning seat cannot set
+	// this flag; Load rejects that contradictory configuration.
+	WorkLedgerRepositoryless bool `json:"work_ledger_repositoryless,omitempty"`
 }
 
 // Title returns the tmux pane title to match for this agent.
@@ -331,6 +337,9 @@ func LoadWith(path string, opts LoadOptions) (*Config, error) {
 		if err := validateSecondaryRepos(path, a.Name, a.PrimaryRepo, a.SecondaryRepos); err != nil {
 			return nil, err
 		}
+		if a.WorkLedgerRepositoryless && (strings.TrimSpace(a.PrimaryRepo) != "" || len(a.SecondaryRepos) > 0) {
+			return nil, fmt.Errorf("roster %q: agent %q cannot combine work_ledger_repositoryless with repository mappings", path, a.Name)
+		}
 	}
 	// watch-capability fields: validate at load so a misconfigured daemon
 	// refuses to start rather than failing silently at the first tick.
@@ -418,6 +427,9 @@ func LoadWith(path string, opts LoadOptions) (*Config, error) {
 	if err := c.attachOrgDAG(path, opts); err != nil {
 		return nil, fmt.Errorf("roster %q: %w", path, err)
 	}
+	if err := c.validateWorkLedgerRepositorylessDomains(path); err != nil {
+		return nil, err
+	}
 	if err := c.validateSchedules(path); err != nil {
 		return nil, err
 	}
@@ -449,6 +461,37 @@ func LoadWith(path string, opts LoadOptions) (*Config, error) {
 		}
 	}
 	return &c, nil
+}
+
+// validateWorkLedgerRepositorylessDomains rejects ambiguous domain intent. The
+// declaration belongs on the domain coordinator and means the whole domain has
+// no repository-backed work; a mapped seat in that domain therefore conflicts.
+func (c *Config) validateWorkLedgerRepositorylessDomains(path string) error {
+	type domainIntent struct{ repositoryless, mapped bool }
+	intents := map[string]domainIntent{}
+	root := c.effectiveXOAgent()
+	for _, agent := range c.Agents {
+		if agent.WorkLedgerRepositoryless && !c.IsCoordinator(agent.Name) {
+			return fmt.Errorf("roster %q: agent %q sets work_ledger_repositoryless but is not a domain coordinator", path, agent.Name)
+		}
+		domain := agent.Name
+		if !c.IsCoordinator(agent.Name) {
+			domain = c.OwningXO(agent.Name, root)
+		}
+		if domain == "" {
+			continue
+		}
+		intent := intents[domain]
+		intent.repositoryless = intent.repositoryless || agent.WorkLedgerRepositoryless
+		intent.mapped = intent.mapped || strings.TrimSpace(agent.PrimaryRepo) != "" || len(agent.SecondaryRepos) > 0
+		intents[domain] = intent
+	}
+	for domain, intent := range intents {
+		if intent.repositoryless && intent.mapped {
+			return fmt.Errorf("roster %q: domain %q cannot combine work_ledger_repositoryless with repository mappings", path, domain)
+		}
+	}
+	return nil
 }
 
 // validatePrimaryRepo checks Agent.primary_repo when set. Empty is valid (field optional).

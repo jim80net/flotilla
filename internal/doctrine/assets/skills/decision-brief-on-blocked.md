@@ -25,8 +25,11 @@ dollar value is not yet measurable):
 6. **Reversibility** — how hard to undo
 
 Write the brief into the `brief` field on the work item (or the goal node when the
-whole node is operator-gated), then run `flotilla goals compile`. The dash decision
-modal renders this field.
+whole node is operator-gated). When a published paper carries the evidence, also
+set its publication-relative Markdown ID in `paper_id` (for example,
+`authorization/design.md`). Then run `flotilla goals compile`. R&D links the
+decision directly to that paper; a missing paper remains explicit rather than
+being guessed from prose.
 
 The watch daemon dispatches you automatically if a gap is detected — treat that
 injection as first-class work and close the brief on the same turn.

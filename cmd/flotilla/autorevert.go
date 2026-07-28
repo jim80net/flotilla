@@ -20,13 +20,18 @@ import (
 // Hysteresis (N consecutive clear probes) is owned by the detector; this helper only
 // answers "is this seat on a degraded slot that may restore?"
 func autoRevertEligible(agent string, poison PoisonState, now time.Time) bool {
-	_ = now // reserved for future CooldownUntil-on-overlay checks
 	ov, ok, err := workspace.ReadActiveOverlay(agent)
 	if err != nil || !ok {
 		return false
 	}
 	slot := ov.Slot
 	if slot == "" || slot == workspace.SlotPrimary {
+		return false
+	}
+	// Do not repeatedly enqueue a return-to-primary switch while fleet operations
+	// has pinned the seat to known-good fallback capacity. The switch command also
+	// enforces this guard before mutation as the final fail-closed boundary.
+	if err := workspace.EnforceCapacityHold(agent, "auto-revert", workspace.SlotPrimary, "", now); err != nil {
 		return false
 	}
 	// Overlay names the CURRENT (fallback) slot. Primary-provider poison is checked

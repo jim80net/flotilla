@@ -31,11 +31,15 @@ import (
 // bind, which needs the bearer-token + SSE-cookie auth gate, is a tracked
 // follow-on — the server fails closed on one until then).
 func cmdDash(args []string) error {
+	if len(args) > 0 && args[0] == "deploy" {
+		return cmdDashDeploy(args[1:])
+	}
 	fs := flag.NewFlagSet("dash", flag.ContinueOnError)
 	rosterPath := fs.String("roster", rosterDefault(), "roster config path")
 	snapshotPath := fs.String("snapshot-file", os.Getenv("FLOTILLA_SNAPSHOT_FILE"), "change-detector snapshot file (default <roster-dir>/flotilla-detector-state.json)")
 	ackPath := fs.String("ack-file", os.Getenv("FLOTILLA_ACK_FILE"), "XO liveness ack file (default <roster-dir>/flotilla-xo-alive)")
 	trackerPath := fs.String("tracker-file", os.Getenv("FLOTILLA_TRACKER_FILE"), "backlog markdown the history view reads (default <roster-dir>/.flotilla-state.md)")
+	backlogPath := fs.String("backlog-file", os.Getenv("FLOTILLA_BACKLOG_FILE"), "drive backlog Goals uses to resolve work items (default --tracker-file; set to the same file watch uses)")
 	goalsPath := fs.String("goals-file", os.Getenv("FLOTILLA_GOALS_FILE"), "goals file the Goals view reads (default <roster-dir>/fleet-goals.json)")
 	orgFile := fs.String("org-file", os.Getenv("FLOTILLA_ORG_FILE"), "optional org-truth file (default <roster-dir>/fleet-org.yaml when present; env FLOTILLA_ORG_FILE)")
 	bind := fs.String("bind", dash.DefaultBind, "local listen address (loopback only in this phase)")
@@ -46,6 +50,7 @@ func cmdDash(args []string) error {
 	secretsPath := fs.String("secrets", os.Getenv("FLOTILLA_SECRETS"), "secrets env file for the notify webhook (optional; notify is disabled without it)")
 	goalsLayout := fs.String("goals-layout", os.Getenv("FLOTILLA_DASH_GOALS_LAYOUT"), "DEPRECATED — the Goals map is mind-map-only; any value is redirected to the mind map")
 	paradesDir := fs.String("parades-dir", os.Getenv("FLOTILLA_DASH_PARADES_DIR"), "parade archive dir the /parade page reads (default <roster-dir>/parades)")
+	researchDir := fs.String("research-dir", os.Getenv("FLOTILLA_DASH_RESEARCH_DIR"), "research markdown dir the /research page reads (default <roster-dir>/research)")
 	doneLogPath := fs.String("done-log", os.Getenv("FLOTILLA_DASH_DONE_LOG"), "goals done-history JSONL the server appends + the Realized window reads (default <roster-dir>/goals-done.jsonl)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -97,8 +102,10 @@ func cmdDash(args []string) error {
 		SnapshotPath:          *snapshotPath,
 		AckPath:               *ackPath,
 		BacklogPath:           *trackerPath,
+		DriveBacklogPath:      *backlogPath,
 		GoalsPath:             *goalsPath,
 		ParadesPath:           *paradesDir,
+		ResearchPath:          *researchDir,
 		DoneLogPath:           *doneLogPath,
 		Bind:                  *bind,
 		Repo:                  pinnedRepo,

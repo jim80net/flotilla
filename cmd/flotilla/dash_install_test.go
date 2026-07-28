@@ -67,8 +67,8 @@ func TestDashInstallerGeneratesExpectedFunctionalUnit(t *testing.T) {
 		"WorkingDirectory=/srv/fleet",
 		"Environment=HOME=%h",
 		"Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:%h/go/bin",
-		"UnsetEnvironment=FLOTILLA_SECRETS FLOTILLA_DASH_REPO",
-		"ExecStart=%h/go/bin/flotilla dash --roster /srv/fleet/flotilla.json --bind 127.0.0.1:8787 --repo owner/name --secrets /srv/fleet/secrets.env",
+		"UnsetEnvironment=FLOTILLA_SECRETS FLOTILLA_DASH_REPO FLOTILLA_TRACKER_FILE FLOTILLA_BACKLOG_FILE",
+		"ExecStart=%h/go/bin/flotilla dash --roster /srv/fleet/flotilla.json --bind 127.0.0.1:8787 --repo owner/name --secrets /srv/fleet/secrets.env --tracker-file /srv/fleet/history.md --backlog-file /srv/fleet/fleet-backlog.md",
 		"Restart=on-failure",
 		"RestartSec=5",
 		"KillSignal=SIGTERM",
@@ -114,15 +114,15 @@ func TestDashInstallerRejectsIncompleteEnv(t *testing.T) {
 	}
 }
 
-// The OPTIONAL --repo/--secrets append exactly when set.
+// The OPTIONAL --repo/--secrets/--tracker-file/--backlog-file append exactly when set.
 func TestDashInstallerOptionalArgsSetAppended(t *testing.T) {
 	gotExec := dashExecLine(t, renderDashUnit(t, dashFixtureEnv))
-	if !strings.HasSuffix(gotExec, " --repo owner/name --secrets /srv/fleet/secrets.env") {
+	if !strings.HasSuffix(gotExec, " --repo owner/name --secrets /srv/fleet/secrets.env --tracker-file /srv/fleet/history.md --backlog-file /srv/fleet/fleet-backlog.md") {
 		t.Errorf("ExecStart missing optional args:\n%s", gotExec)
 	}
 }
 
-// With --repo/--secrets UNSET, ExecStart is byte-identical to a no-option install
+// With optional flags UNSET, ExecStart is byte-identical to a no-option install
 // (no trailing space, no flags).
 func TestDashInstallerOptionalArgsUnsetOmitted(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "minimal.env")
@@ -137,32 +137,39 @@ func TestDashInstallerOptionalArgsUnsetOmitted(t *testing.T) {
 	}
 }
 
-// GENERATE-TIME no-leak: FLOTILLA_DASH_REPO is the one key whose name the binary also
-// reads as a fallback, so the live host may EXPORT it; the installer pre-clears it and
-// takes the value from the .env ONLY, so an inherited export must NOT inject --repo
-// when the .env omits it (the watch-backlog lesson). (FLOTILLA_SECRETS is NOT a
-// generate-time vector — the installer never reads that name; its runtime path is
-// covered by TestDashInstallerUnsetEnvironmentClosesRuntimeLeak below.)
-func TestDashInstallerInheritedRepoNoLeak(t *testing.T) {
+// GENERATE-TIME no-leak: keys the binary also reads as fallbacks may be exported
+// by the host. The installer pre-clears them and takes values from the .env ONLY,
+// so inherited exports must not inject repo/tracker/backlog flags when omitted.
+// (FLOTILLA_SECRETS is NOT a generate-time vector — the installer key is
+// FLOTILLA_DASH_SECRETS; runtime is covered below.)
+func TestDashInstallerInheritedFallbacksNoLeak(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "minimal.env")
 	body := "FLOTILLA_DASH_WORKDIR=%h\nFLOTILLA_DASH_BIN=%h/go/bin/flotilla\nFLOTILLA_DASH_ROSTER=/srv/fleet/flotilla.json\nFLOTILLA_DASH_BIND=127.0.0.1:8787\n"
 	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gotExec := dashExecLine(t, renderDashUnit(t, p, "FLOTILLA_DASH_REPO=attacker/leak"))
-	if strings.Contains(gotExec, "attacker/leak") || strings.Contains(gotExec, "--repo") {
-		t.Errorf("inherited exported FLOTILLA_DASH_REPO LEAKED into ExecStart (must come from .env only):\n%s", gotExec)
+	gotExec := dashExecLine(t, renderDashUnit(t, p,
+		"FLOTILLA_DASH_REPO=attacker/leak",
+		"FLOTILLA_DASH_TRACKER_FILE=/attacker/history",
+		"FLOTILLA_DASH_BACKLOG_FILE=/attacker/backlog",
+	))
+	if strings.Contains(gotExec, "attacker/") ||
+		strings.Contains(gotExec, "--repo") ||
+		strings.Contains(gotExec, "--tracker-file") ||
+		strings.Contains(gotExec, "--backlog-file") {
+		t.Errorf("inherited exported dash fallbacks leaked into ExecStart (must come from .env only):\n%s", gotExec)
 	}
 }
 
-// RUNTIME no-leak: the binary reads $FLOTILLA_SECRETS / $FLOTILLA_DASH_REPO as fallbacks
+// RUNTIME no-leak: the binary reads $FLOTILLA_SECRETS / $FLOTILLA_DASH_REPO /
+// $FLOTILLA_TRACKER_FILE / $FLOTILLA_BACKLOG_FILE as fallbacks
 // when the flag is absent, so an ambient value in the --user manager env could silently
 // enable notify / retarget the tracker at runtime even when the .env omitted it. The
-// unit's UnsetEnvironment= strips both from the service environment, so the dash's
+// unit's UnsetEnvironment= strips all three from the service environment, so the dash's
 // config is EXACTLY what the unit declares. Lock that directive's presence.
 func TestDashInstallerUnsetEnvironmentClosesRuntimeLeak(t *testing.T) {
 	unit := renderDashUnit(t, dashFixtureEnv)
-	if !strings.Contains(unit, "UnsetEnvironment=FLOTILLA_SECRETS FLOTILLA_DASH_REPO") {
+	if !strings.Contains(unit, "UnsetEnvironment=FLOTILLA_SECRETS FLOTILLA_DASH_REPO FLOTILLA_TRACKER_FILE FLOTILLA_BACKLOG_FILE") {
 		t.Errorf("unit must UnsetEnvironment the binary's env fallbacks (runtime no-leak):\n%s", unit)
 	}
 }

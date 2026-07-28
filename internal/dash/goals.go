@@ -81,7 +81,8 @@ type WorkItem struct {
 	// decide WITHOUT leaving the respond modal (#347). Optional; empty ⇒ the modal shows an
 	// honest "no brief yet — ask the desk" state. The desk attaches it when marking the item
 	// operator-blocked (that doctrine is the fleet layer's, not the dash's).
-	Brief string `json:"brief,omitempty"`
+	Brief   string `json:"brief,omitempty"`
+	PaperID string `json:"paper_id,omitempty"`
 }
 
 // Goal is one goal node (the on-disk shape).
@@ -106,7 +107,8 @@ type Goal struct {
 	WorkItems []WorkItem `json:"work_items,omitempty"`
 	// Brief is a NODE-level decision package (markdown) — for a decision gated on the node
 	// itself rather than a single work item (#347). Same modal render + empty-state rules.
-	Brief string `json:"brief,omitempty"`
+	Brief   string `json:"brief,omitempty"`
+	PaperID string `json:"paper_id,omitempty"`
 }
 
 // GoalsFile is the roster-adjacent goals file (`fleet-goals.json`, the compiled cache the dash
@@ -163,6 +165,14 @@ func (gf GoalsFile) validate() error {
 		}
 	}
 	for _, g := range gf.Goals {
+		if g.PaperID != "" && !validResearchID(g.PaperID) {
+			return fmt.Errorf("goals: goal %q has invalid paper_id %q", g.ID, g.PaperID)
+		}
+		for _, wi := range g.WorkItems {
+			if wi.PaperID != "" && !validResearchID(wi.PaperID) {
+				return fmt.Errorf("goals: goal %q work item has invalid paper_id %q", g.ID, wi.PaperID)
+			}
+		}
 		seenDep := make(map[string]bool, len(g.DependsOn))
 		for _, dep := range g.DependsOn {
 			if strings.TrimSpace(dep) == "" {
@@ -251,13 +261,14 @@ func checkAfterAcyclic(goals []Goal) error {
 // RenderedWorkItem is a work item with its live status resolved. Class is the settle-relevant
 // bucket driving roll-up + the item chip's color; Detail is the operator-facing status word.
 type RenderedWorkItem struct {
-	Kind   string `json:"kind"`
-	Label  string `json:"label"`
-	Ref    string `json:"ref,omitempty"`
-	Agent  string `json:"agent,omitempty"`
-	Class  string `json:"class"`           // done | in-flight | awaiting | blocked | active | unknown
-	Detail string `json:"detail"`          // live state word (desk state, backlog marker, issue state, …)
-	Brief  string `json:"brief,omitempty"` // decision package (markdown) for a gated item — rendered in the respond modal (#347)
+	Kind    string `json:"kind"`
+	Label   string `json:"label"`
+	Ref     string `json:"ref,omitempty"`
+	Agent   string `json:"agent,omitempty"`
+	Class   string `json:"class"`              // done | in-flight | awaiting | blocked | active | unknown
+	Detail  string `json:"detail"`             // live state word (desk state, backlog marker, issue state, …)
+	Brief   string `json:"brief,omitempty"`    // decision package (markdown) for a gated item — rendered in the respond modal (#347)
+	PaperID string `json:"paper_id,omitempty"` // research document id for this decision
 }
 
 // GoalHarness is the read-time harness badge (from roster surface, not stored in YAML).
@@ -303,7 +314,8 @@ type RenderedGoal struct {
 	// never serialized; the public hierarchy is expressed by Parent/Children.
 	OrgHub bool `json:"-"`
 	// Brief is a NODE-level decision package (markdown) rendered in the respond modal (#347).
-	Brief string `json:"brief,omitempty"`
+	Brief   string `json:"brief,omitempty"`
+	PaperID string `json:"paper_id,omitempty"`
 	// AchievedAt is the RFC3339 stamp of this goal's latest OBSERVED transition to
 	// achieved (#418 done-history; attached post-build from goals-done.jsonl). Only set
 	// while the goal is currently achieved — a regressed goal carries no stale stamp.
@@ -507,6 +519,7 @@ func BuildGoals(in GoalsInputs) GoalsDoc {
 			After:             append([]string(nil), g.After...),
 			WorkItems:         items,
 			Brief:             g.Brief,
+			PaperID:           g.PaperID,
 		}
 		doc.Goals = append(doc.Goals, node)
 		countNode(&doc.Counts, node)
@@ -1061,7 +1074,7 @@ func deskDisplayStatus(state string) string {
 // backlog markdown; an issue item reads the (optional) resolved issue state; an inline item carries
 // its coordinator-set done flag.
 func resolveItem(wi WorkItem, in GoalsInputs) RenderedWorkItem {
-	r := RenderedWorkItem{Kind: string(wi.Kind), Label: itemLabel(wi), Brief: wi.Brief}
+	r := RenderedWorkItem{Kind: string(wi.Kind), Label: itemLabel(wi), Brief: wi.Brief, PaperID: wi.PaperID}
 	switch wi.Kind {
 	case WorkDesk:
 		r.Agent = wi.Agent

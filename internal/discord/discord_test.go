@@ -55,6 +55,24 @@ func TestPostSetsExplicitUserAgent(t *testing.T) {
 	}
 }
 
+func TestWebhookChannelResolvesBoundChannelWithoutPosting(t *testing.T) {
+	var gotMethod, gotUA string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotUA = r.Method, r.Header.Get("User-Agent")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"channel_id":"C_HOME"}`))
+	}))
+	defer srv.Close()
+
+	got, err := WebhookChannel(srv.URL + "/api/webhooks/id/credential")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "C_HOME" || gotMethod != http.MethodGet || gotUA != UserAgent {
+		t.Fatalf("inspect = channel %q method %q UA %q", got, gotMethod, gotUA)
+	}
+}
+
 func TestPostContentTypeIsJSON(t *testing.T) {
 	var gotCT string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

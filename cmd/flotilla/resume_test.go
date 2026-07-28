@@ -31,7 +31,7 @@ func TestParseResumeArgs(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			agent, _, launchPath, force, err := parseResumeArgs(c.args)
+			agent, _, launchPath, force, _, err := parseResumeArgs(c.args)
 			if c.wantErr {
 				if err == nil {
 					t.Fatalf("parseResumeArgs(%v) = nil error, want error", c.args)
@@ -54,11 +54,21 @@ func TestParseResumeArgs(t *testing.T) {
 	}
 }
 
+func TestParseResumeArgsScheduledE2EAuthorization(t *testing.T) {
+	agent, _, _, force, scheduled, err := parseResumeArgs([]string{"--force", "--scheduled-e2e", "alpha-desk"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent != "alpha-desk" || !force || !scheduled {
+		t.Fatalf("parseResumeArgs() = agent %q force=%v scheduled=%v", agent, force, scheduled)
+	}
+}
+
 func TestParseResumeArgsEnvDefault(t *testing.T) {
 	// $FLOTILLA_LAUNCH pre-fills the --launch default (mirrors watch's env-var
 	// defaults), overriding the roster-relative fallback.
 	t.Setenv("FLOTILLA_LAUNCH", "/env/launch.json")
-	_, _, launchPath, _, err := parseResumeArgs([]string{"xo"})
+	_, _, launchPath, _, _, err := parseResumeArgs([]string{"xo"})
 	if err != nil {
 		t.Fatalf("parseResumeArgs: %v", err)
 	}
