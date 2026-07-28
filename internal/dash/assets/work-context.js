@@ -14,6 +14,10 @@
   var contextEpoch = 0;
   var mirrorEpoch = 0;
   var issueEpoch = 0;
+  var timelineEpoch = 0;
+  var timelineEvents = [];
+  var timelineNext = "";
+  var timelineSources = [];
   var pollTimer = null;
   var ageTimer = null;
   var returnFocus = null;
@@ -36,6 +40,114 @@
   }
   function goalContext() { return !!(selected && selected.item && selected.item.goal); }
   function contextView() { return goalContext() ? "goals" : "issues"; }
+
+  function timelinePath(before) {
+    if (!selected || !selected.item) return "";
+    var query = new URLSearchParams();
+    if (goalContext()) {
+      query.set("goal", String(subject().id || ""));
+    } else {
+      query.set("repo", String(selected.item.repo || ""));
+      query.set("issue", String(subject().number || ""));
+    }
+    query.set("limit", "20");
+    if (before) query.set("before", before);
+    return "/api/work-timeline?" + query.toString();
+  }
+
+  function safeSourceURL(value) {
+    return /^https?:\/\//i.test(String(value || "")) ? String(value) : "";
+  }
+
+  function timelineWhen(value) {
+    if (!value || isNaN(Date.parse(value))) return "time unavailable";
+    return D.relativeTime(value);
+  }
+
+  function renderTimeline() {
+    var summary = el("wc-timeline-summary");
+    var sources = el("wc-timeline-sources");
+    var list = el("wc-timeline-events");
+    var partial = timelineSources.some(function (source) { return source.status !== "available"; });
+    summary.textContent = timelineEvents.length
+      ? timelineEvents.length + " fact" + (timelineEvents.length === 1 ? "" : "s") +
+        (partial ? " · partial coverage" : " · available sources")
+      : (partial ? "No matched facts · partial coverage" : "No recorded facts");
+    sources.innerHTML = timelineSources.map(function (source) {
+      var status = String(source.status || "unavailable");
+      return '<span class="wc-source wc-source-' + esc(status) + '" title="' + esc(source.detail || "") + '">' +
+        '<span aria-hidden="true"></span>' + esc(source.label || source.id || "Source") +
+        " · " + esc(status) + (source.truncated ? " · bounded" : "") + "</span>";
+    }).join("");
+    if (!timelineEvents.length) {
+      list.innerHTML = '<li class="wc-timeline-empty">No timeline facts match this work in the available source windows.</li>';
+    } else {
+      list.innerHTML = timelineEvents.map(function (event) {
+        var href = safeSourceURL(event.source_url);
+        var source = href
+          ? '<a href="' + esc(href) + '" target="_blank" rel="noopener">' + esc(event.source_id || event.source) + " ↗</a>"
+          : '<span>' + esc(event.source_id || event.source) + "</span>";
+        return '<li class="wc-event wc-event-' + esc(event.kind || "fact") + '" data-wc-event-id="' + esc(event.id || "") + '">' +
+          '<span class="wc-event-mark" aria-hidden="true"></span>' +
+          '<div class="wc-event-copy"><div class="wc-event-top">' +
+            '<span class="wc-event-state">' + esc(String(event.state || "recorded").replace(/-/g, " ")) + "</span>" +
+            '<time datetime="' + esc(event.at || "") + '">' + esc(timelineWhen(event.at)) + "</time>" +
+          '</div><strong>' + esc(event.title || event.kind || "Timeline fact") + "</strong>" +
+          (event.detail ? '<p>' + esc(event.detail) + "</p>" : "") +
+          '<div class="wc-event-source">' + esc(event.actor ? event.actor + " · " : "") + source + "</div></div></li>";
+      }).join("");
+    }
+    var earlier = el("wc-timeline-earlier");
+    earlier.hidden = !timelineNext;
+    earlier.disabled = false;
+    earlier.textContent = "Show earlier history";
+  }
+
+  function fetchTimeline(reset) {
+    if (!panelOpen()) return Promise.resolve();
+    var before = reset ? "" : timelineNext;
+    if (!reset && !before) return Promise.resolve();
+    var path = timelinePath(before);
+    if (!path) return Promise.resolve();
+    var epoch = ++timelineEpoch;
+    var subjectID = String(subject().id || subject().number || "");
+    if (reset) {
+      timelineEvents = [];
+      timelineNext = "";
+      timelineSources = [];
+      el("wc-timeline-summary").textContent = "Loading source coverage…";
+      el("wc-timeline-sources").innerHTML = "";
+      el("wc-timeline-events").innerHTML = '<li class="wc-timeline-empty">Loading timeline…</li>';
+      el("wc-timeline-earlier").hidden = true;
+    } else {
+      el("wc-timeline-earlier").disabled = true;
+      el("wc-timeline-earlier").textContent = "Loading earlier history…";
+    }
+    return D.getJSON(path).then(function (doc) {
+      if (!panelOpen() || epoch !== timelineEpoch ||
+          subjectID !== String(subject().id || subject().number || "")) return;
+      var incoming = Array.isArray(doc.events) ? doc.events : [];
+      if (reset) {
+        timelineEvents = incoming;
+      } else {
+        var seen = {};
+        timelineEvents.forEach(function (event) { seen[event.id] = true; });
+        timelineEvents = incoming.filter(function (event) { return !seen[event.id]; }).concat(timelineEvents);
+      }
+      timelineSources = Array.isArray(doc.sources) ? doc.sources : [];
+      timelineNext = doc.next_cursor || "";
+      renderTimeline();
+    }).catch(function (err) {
+      if (!panelOpen() || epoch !== timelineEpoch) return;
+      timelineEvents = [];
+      timelineNext = "";
+      timelineSources = [{
+        id: "composer", label: "Timeline composer", status: "unavailable",
+        detail: err.message
+      }];
+      renderTimeline();
+    });
+  }
 
   function statusAgent(name) {
     var agents = statusDoc && Array.isArray(statusDoc.agents) ? statusDoc.agents : [];
@@ -426,6 +538,7 @@
     contextEpoch++;
     mirrorEpoch++;
     issueEpoch++;
+    timelineEpoch++;
     selected = context;
     activeSeat = "";
     mirrorDoc = null;
@@ -434,6 +547,9 @@
     streamPinned = true;
     streamVisible = 20;
     expandedBodies = {};
+    timelineEvents = [];
+    timelineNext = "";
+    timelineSources = [];
     resetComposer();
     returnFocus = source || document.activeElement;
     var panel = el("work-context");
@@ -451,6 +567,7 @@
     el("wc-stream").innerHTML = '<div class="empty">Loading session mirror…</div>';
     el("wc-composer").hidden = true;
     startRefresh();
+    fetchTimeline(true);
     fetchLiveContext();
     fetchIssueOnce(); // GitHub is external/subprocess-backed: once per explicit panel open.
     el("wc-close").focus();
@@ -467,6 +584,7 @@
     contextEpoch++;
     mirrorEpoch++;
     issueEpoch++;
+    timelineEpoch++;
     stopRefresh();
     var closingGoal = goalContext();
     selected = null;
@@ -489,6 +607,7 @@
   }
 
   el("wc-close").addEventListener("click", close);
+  el("wc-timeline-earlier").addEventListener("click", function () { fetchTimeline(false); });
   el("wc-load-earlier").addEventListener("click", function () {
     var entries = mirrorDoc && Array.isArray(mirrorDoc.entries) ? mirrorDoc.entries : [];
     streamPinned = false;
@@ -591,6 +710,8 @@
   })();
 
   window.flotillaWorkContext = {
-    open: open, update: update, close: close, refresh: fetchLiveContext, onViewChange: onViewChange,
+    open: open, update: update, close: close,
+    refresh: function () { fetchTimeline(true); return fetchLiveContext(); },
+    onViewChange: onViewChange,
   };
 })();

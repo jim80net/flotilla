@@ -252,6 +252,24 @@ func TestGet_HappyPath(t *testing.T) {
 	}
 }
 
+func TestGetPullRequest_HappyPath(t *testing.T) {
+	f := &fakeRunner{stdout: []byte(`{"number":891,"title":"timeline","state":"MERGED","isDraft":false,"createdAt":"2026-07-28T01:00:00Z","mergedAt":"2026-07-28T02:00:00Z","url":"https://github.com/jim80net/flotilla/pull/891","headRefName":"agent/timeline","baseRefName":"main"}`)}
+	g := newFakeTracker(t, f)
+	pull, err := g.GetPullRequest(ctx(), 891)
+	if err != nil {
+		t.Fatalf("GetPullRequest: %v", err)
+	}
+	if pull.State != "MERGED" || pull.MergedAt == "" || pull.HeadRefName != "agent/timeline" {
+		t.Fatalf("pull = %+v", pull)
+	}
+	if len(f.gotArgs) < 2 || f.gotArgs[0] != "pr" || f.gotArgs[1] != "view" {
+		t.Fatalf("argv = %v, want gh pr view", f.gotArgs)
+	}
+	if v, _ := f.arg("--json"); v != pullFields {
+		t.Errorf("--json = %q, want %q", v, pullFields)
+	}
+}
+
 func TestGet_RejectsNonPositiveNumber(t *testing.T) {
 	f := &fakeRunner{}
 	g := newFakeTracker(t, f)

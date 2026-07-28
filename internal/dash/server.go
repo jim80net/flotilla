@@ -273,6 +273,7 @@ func (s *Server) routes() {
 	// write handler because the write patterns are POST-only.
 	s.mux.HandleFunc("GET /api/issues", s.handleIssuesList)
 	s.mux.HandleFunc("GET /api/work-ledger", s.handleWorkLedger)
+	s.mux.HandleFunc("GET /api/work-timeline", s.handleWorkTimeline)
 	s.mux.HandleFunc("GET /api/issues/{number}", s.handleIssueGet)
 	s.mux.HandleFunc("POST /api/issues", s.requireWrite(s.handleIssueCreate))
 	s.mux.HandleFunc("POST /api/issues/{number}/comments", s.requireWrite(s.handleIssueComment))
