@@ -545,15 +545,27 @@
   function annotationLabel(annotation) {
     return annotation.anchor ? annotation.anchor.quote : "Document comment";
   }
+  function annotationResponseAuthor(annotation) {
+    var comments = annotation && Array.isArray(annotation.comments) ? annotation.comments : [];
+    for (var i = comments.length - 1; i >= 0; i--) {
+      var author = String(comments[i].author || "").trim();
+      if (author && author.toLowerCase() !== "operator") return author;
+    }
+    return "";
+  }
   function annotationStateLabel(annotation) {
+    var responder = annotationResponseAuthor(annotation);
+    if (annotation.resolved) return responder ? "Addressed by " + responder : "Resolved";
+    if (responder) return "Answered by " + responder;
     var resolution = annotation.anchor_resolution;
     if (resolution && resolution.state === "needs_review") return "Needs review";
-    return annotation.resolved ? "Resolved" : "Open";
+    return "Awaiting owner response";
   }
   function annotationRoutingLabel(annotation) {
-    var state = annotation && annotation.routing && annotation.routing.state;
-    if (state === "delivered") return "Delivered for review";
-    if (state === "queued") return "Queued for review";
+    var routing = annotation && annotation.routing ? annotation.routing : {};
+    var state = routing.state, target = String(routing.target || "").trim();
+    if (state === "delivered") return target ? "Delivered to " + target : "Delivered for review";
+    if (state === "queued") return target ? "Queued to " + target : "Queued for review";
     return "Saved locally · not routed";
   }
   function annotationByID(id) {
@@ -647,10 +659,18 @@
     var stale = annotations.filter(function (annotation) {
       return annotation.anchor_resolution && annotation.anchor_resolution.state === "needs_review";
     }).length;
+    var awaiting = annotations.filter(function (annotation) {
+      return !annotation.resolved && !annotationResponseAuthor(annotation);
+    }).length;
     el("research-annotation-count").textContent = annotations.length + (annotations.length === 1 ? " annotation" : " annotations");
-    el("research-annotation-summary").textContent = stale
-      ? stale + (stale === 1 ? " passage needs review; no uncertain highlight is shown." : " passages need review; no uncertain highlights are shown.")
-      : "Passage highlights and document comments stay private to this host.";
+    var summary = "";
+    if (awaiting) summary = awaiting + (awaiting === 1 ? " annotation awaits an owner response." : " annotations await owner responses.");
+    else if (annotations.length) summary = "Every annotation has an owner response.";
+    else summary = "Passage highlights and document comments stay private to this host.";
+    if (stale) summary += " " + stale + (stale === 1
+      ? " passage needs review; no uncertain highlight is shown."
+      : " passages need review; no uncertain highlights are shown.");
+    el("research-annotation-summary").textContent = summary;
     el("research-annotations-retry").hidden = true;
     renderAnnotationList();
     applyAnnotationHighlights();

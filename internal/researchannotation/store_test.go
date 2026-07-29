@@ -79,6 +79,46 @@ func TestCreateIsAtomicPrivateAndCASProtected(t *testing.T) {
 	}
 }
 
+func TestReplyIsCASProtectedIdempotentAndVisible(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "private")
+	doc, created, err := Create(root, validInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	replyAt := time.Date(2026, 7, 29, 5, 0, 0, 0, time.UTC)
+	reply := ReplyInput{
+		DocumentID: created.DocumentID, AnnotationID: created.ID, ExpectedGeneration: doc.Generation,
+		Author: "flotilla-dev", Comment: "Accepted. Work is tracked in #900.", Resolve: true, Now: replyAt,
+	}
+	updated, annotation, comment, added, err := Reply(root, reply)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !added || updated.Generation != 2 || len(annotation.Comments) != 2 ||
+		comment.Author != "flotilla-dev" || !annotation.Resolved || annotation.ResolvedAt != replyAt.Format(time.RFC3339Nano) {
+		t.Fatalf("reply result = doc=%+v annotation=%+v comment=%+v added=%t", updated, annotation, comment, added)
+	}
+	loaded, err := LoadDocument(root, created.DocumentID)
+	if err != nil || loaded.Generation != 2 || loaded.Annotations[0].Comments[1].Text != reply.Comment {
+		t.Fatalf("loaded reply = %+v err=%v", loaded, err)
+	}
+
+	reply.ExpectedGeneration = loaded.Generation
+	duplicate, annotation, duplicateComment, added, err := Reply(root, reply)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added || duplicate.Generation != loaded.Generation || duplicateComment.ID != comment.ID || len(annotation.Comments) != 2 {
+		t.Fatalf("duplicate reply was not idempotent: doc=%+v annotation=%+v comment=%+v added=%t", duplicate, annotation, duplicateComment, added)
+	}
+
+	reply.ExpectedGeneration = 1
+	reply.Comment = "A stale writer must not append this."
+	if current, _, _, _, err := Reply(root, reply); !errors.Is(err, ErrConflict) || current.Generation != 2 {
+		t.Fatalf("stale reply CAS = generation %d, err %v", current.Generation, err)
+	}
+}
+
 func TestConcurrentCreateHasOneWinner(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "private")
 	start := make(chan struct{})

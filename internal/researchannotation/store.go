@@ -26,6 +26,7 @@ const (
 	MaxContextRunes   = 256
 	MaxCommentRunes   = 4000
 	MaxAnnotationsDoc = 5000
+	MaxCommentsThread = 500
 	storeFileName     = "annotations.json"
 	lockFileName      = ".annotations.lock"
 )
@@ -107,6 +108,19 @@ type CreateInput struct {
 	Anchor             *Anchor
 	Author             string
 	Comment            string
+	Now                time.Time
+}
+
+// ReplyInput records an explicit owner response on an existing annotation.
+// ExpectedGeneration protects annotation creation and replies with the same
+// document-local compare-and-swap used by Create.
+type ReplyInput struct {
+	DocumentID         string
+	AnnotationID       string
+	ExpectedGeneration uint64
+	Author             string
+	Comment            string
+	Resolve            bool
 	Now                time.Time
 }
 
@@ -298,6 +312,88 @@ func UpdateRouting(root, documentID, annotationID string, generation uint64, nex
 	return Document{}, Annotation{}, fmt.Errorf("%w: annotation not found", ErrInvalid)
 }
 
+// Reply appends an owner response under the same lock and atomic replacement as
+// annotation creation. Repeating an identical author+comment is idempotent.
+// Resolving is monotonic: a reply may close a thread, but this command never
+// silently reopens one.
+func Reply(root string, in ReplyInput) (Document, Annotation, Comment, bool, error) {
+	if err := validateReply(in); err != nil {
+		return Document{}, Annotation{}, Comment{}, false, err
+	}
+	if err := validateRoot(root, false); err != nil {
+		return Document{}, Annotation{}, Comment{}, false, err
+	}
+	lock, err := openRegularNoFollow(filepath.Join(root, lockFileName), syscall.O_RDWR, 0o600)
+	if err != nil {
+		return Document{}, Annotation{}, Comment{}, false, fmt.Errorf("%w: open lock: %v", ErrUnsafeStorage, err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return Document{}, Annotation{}, Comment{}, false, fmt.Errorf("lock research annotations: %w", err)
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) //nolint:errcheck -- close also releases
+
+	store, err := Load(root)
+	if err != nil {
+		return Document{}, Annotation{}, Comment{}, false, err
+	}
+	doc, ok := store.Documents[in.DocumentID]
+	if !ok {
+		return Document{}, Annotation{}, Comment{}, false, fmt.Errorf("%w: annotation document not found", ErrInvalid)
+	}
+	if doc.Generation != in.ExpectedGeneration {
+		return doc, Annotation{}, Comment{}, false, ErrConflict
+	}
+	if doc.Generation == ^uint64(0) {
+		return Document{}, Annotation{}, Comment{}, false, fmt.Errorf("%w: document generation exhausted", ErrMalformedStore)
+	}
+	for i := range doc.Annotations {
+		annotation := &doc.Annotations[i]
+		if annotation.ID != in.AnnotationID {
+			continue
+		}
+		for _, existing := range annotation.Comments {
+			if existing.Author == in.Author && existing.Text == in.Comment {
+				if !in.Resolve || annotation.Resolved {
+					return doc, *annotation, existing, false, nil
+				}
+				now := in.Now.UTC().Format(time.RFC3339Nano)
+				annotation.Resolved = true
+				annotation.ResolvedAt = now
+				annotation.UpdatedAt = now
+				doc.Generation++
+				store.Documents[in.DocumentID] = doc
+				if err := writeAtomic(root, store); err != nil {
+					return Document{}, Annotation{}, Comment{}, false, err
+				}
+				return doc, *annotation, existing, false, nil
+			}
+		}
+		if len(annotation.Comments) >= MaxCommentsThread {
+			return Document{}, Annotation{}, Comment{}, false, fmt.Errorf("%w: annotation comment limit reached", ErrInvalid)
+		}
+		commentID, err := newID("rc_")
+		if err != nil {
+			return Document{}, Annotation{}, Comment{}, false, err
+		}
+		now := in.Now.UTC().Format(time.RFC3339Nano)
+		comment := Comment{ID: commentID, Author: in.Author, Text: in.Comment, CreatedAt: now}
+		annotation.Comments = append(annotation.Comments, comment)
+		annotation.UpdatedAt = now
+		if in.Resolve && !annotation.Resolved {
+			annotation.Resolved = true
+			annotation.ResolvedAt = now
+		}
+		doc.Generation++
+		store.Documents[in.DocumentID] = doc
+		if err := writeAtomic(root, store); err != nil {
+			return Document{}, Annotation{}, Comment{}, false, err
+		}
+		return doc, *annotation, comment, true, nil
+	}
+	return Document{}, Annotation{}, Comment{}, false, fmt.Errorf("%w: annotation not found", ErrInvalid)
+}
+
 func validateCreate(in CreateInput) error {
 	if !ValidDocumentID(in.DocumentID) {
 		return fmt.Errorf("%w: invalid document id", ErrInvalid)
@@ -321,6 +417,25 @@ func validateCreate(in CreateInput) error {
 		if err := ValidateAnchor(*in.Anchor); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateReply(in ReplyInput) error {
+	if !ValidDocumentID(in.DocumentID) || strings.TrimSpace(in.AnnotationID) == "" {
+		return fmt.Errorf("%w: invalid reply identity", ErrInvalid)
+	}
+	if strings.TrimSpace(in.Author) == "" || strings.EqualFold(strings.TrimSpace(in.Author), "operator") {
+		return fmt.Errorf("%w: an owner author is required", ErrInvalid)
+	}
+	if strings.TrimSpace(in.Comment) == "" {
+		return fmt.Errorf("%w: comment is required", ErrInvalid)
+	}
+	if utf8.RuneCountInString(in.Comment) > MaxCommentRunes {
+		return fmt.Errorf("%w: comment exceeds %d characters", ErrInvalid, MaxCommentRunes)
+	}
+	if in.Now.IsZero() {
+		return fmt.Errorf("%w: timestamp is required", ErrInvalid)
 	}
 	return nil
 }
@@ -415,6 +530,9 @@ func validateStore(store Store) error {
 					return fmt.Errorf("%w: invalid comment timestamp", ErrMalformedStore)
 				}
 				seenComments[comment.ID] = true
+			}
+			if len(annotation.Comments) > MaxCommentsThread {
+				return fmt.Errorf("%w: annotation comment limit exceeded", ErrMalformedStore)
 			}
 		}
 	}
