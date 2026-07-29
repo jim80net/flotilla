@@ -130,6 +130,7 @@ func TestResearchPublicationDirectiveAndDiagnostics858(t *testing.T) {
 classification: research
 reader-action: Compare the evidence and choose the next experiment.
 support: material
+owner: grok-research
 -->
 # Evidence review
 
@@ -187,6 +188,9 @@ The trial stays frozen until the operator makes an explicit decision.
 	if !byID["valid/SOURCE.md"].PublicationValid || len(byID["valid/SOURCE.md"].Diagnostics) != 0 || !byID["valid/SOURCE.md"].PresentationReady {
 		t.Errorf("valid publication = %+v", byID["valid/SOURCE.md"])
 	}
+	if byID["valid/SOURCE.md"].Publication.Owner != "grok-research" {
+		t.Errorf("publication owner = %q, want grok-research", byID["valid/SOURCE.md"].Publication.Owner)
+	}
 	if !byID["valid/SOURCE.md"].LearnReady {
 		t.Errorf("complete explicit research showpiece must be Learn-ready: %+v", byID["valid/SOURCE.md"])
 	}
@@ -222,6 +226,31 @@ The trial stays frozen until the operator makes an explicit decision.
 	}
 	if summary.ByCode["presentation.missing"] != 4 {
 		t.Errorf("presentation readiness count = %+v", summary.ByCode)
+	}
+}
+
+func TestResearchPublicationOwnerFailsClosed(t *testing.T) {
+	publication, diagnostics := parseResearchPublication(`<!-- flotilla-publication
+classification: research
+reader-action: Read the evidence.
+support: material
+owner: ../../cos
+-->
+# Unsafe owner
+
+[Evidence](evidence.csv)
+`)
+	if publication.Owner != "../../cos" {
+		t.Fatalf("owner = %q", publication.Owner)
+	}
+	found := false
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == "metadata.owner" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("diagnostics = %+v, want metadata.owner", diagnostics)
 	}
 }
 

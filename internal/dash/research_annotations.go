@@ -208,10 +208,7 @@ func (s *Server) routeResearchAnnotation(ctx context.Context, document ResearchD
 	if annotation.Routing.State == researchannotation.RouteQueued || annotation.Routing.State == researchannotation.RouteDelivered {
 		return stored, annotation
 	}
-	target := strings.TrimSpace(s.roster.CosAgent)
-	if target == "" {
-		target = strings.TrimSpace(s.xo)
-	}
+	target := s.researchAnnotationRouteTarget(document)
 	if target == "" {
 		return stored, annotation
 	}
@@ -243,6 +240,18 @@ func (s *Server) routeResearchAnnotation(ctx context.Context, document ResearchD
 		return stored, annotation
 	}
 	return updated, routed
+}
+
+func (s *Server) researchAnnotationRouteTarget(document ResearchDocument) string {
+	if owner := strings.TrimSpace(document.Publication.Owner); owner != "" {
+		if _, err := s.roster.Agent(owner); err == nil {
+			return owner
+		}
+	}
+	if target := strings.TrimSpace(s.roster.CosAgent); target != "" {
+		return target
+	}
+	return strings.TrimSpace(s.xo)
 }
 
 func researchAnnotationRouteMessage(document ResearchDocument, annotation researchannotation.Annotation) string {

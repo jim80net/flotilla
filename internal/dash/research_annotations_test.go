@@ -272,6 +272,46 @@ func TestResearchAnnotationRoutingSavedQueuedDeliveredAndIdempotent(t *testing.T
 	}
 }
 
+func TestResearchAnnotationRoutingPrefersConfiguredOwnerAndFallsBack(t *testing.T) {
+	tests := []struct {
+		name       string
+		owner      string
+		wantTarget string
+	}{
+		{name: "configured roster owner", owner: "alpha", wantTarget: "alpha"},
+		{name: "missing owner", wantTarget: "xo"},
+		{name: "unknown owner", owner: "ghost", wantTarget: "xo"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, docPath, _ := annotationServer(t)
+			srv.roster.CosAgent = "xo"
+			directive := "<!-- flotilla-publication\nclassification: research\nreader-action: Review the result.\nsupport: material\n"
+			if tc.owner != "" {
+				directive += "owner: " + tc.owner + "\n"
+			}
+			directive += "-->\n"
+			if err := os.WriteFile(docPath, []byte(directive+annotationMarkdown+"\n[Evidence](evidence.csv)\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			f := &fakeController{routeRes: control.RouteResult{Target: tc.wantTarget, Outcome: control.OutcomeDelivered}}
+			srv.control = f
+			initial := decodeAnnotationResponse(t, doGet(t, srv, "/api/research-annotations/notes/field.md"))
+			rec := doWrite(t, srv, http.MethodPost, "/api/research-annotations/notes/field.md",
+				createAnnotationBody(t, initial.Generation, initial.DocumentDigest, "Route to the accountable reader.", nil))
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("create status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			response := decodeAnnotationResponse(t, rec)
+			if f.lastRouteTarget != tc.wantTarget || response.Created == nil ||
+				response.Created.Routing.State != researchannotation.RouteDelivered ||
+				response.Created.Routing.Target != tc.wantTarget {
+				t.Fatalf("route target=%q response=%+v, want %q delivered", f.lastRouteTarget, response.Created, tc.wantTarget)
+			}
+		})
+	}
+}
+
 func TestResearchAnnotationRouteMessageIsForJimAndFailClosed(t *testing.T) {
 	message := researchAnnotationRouteMessage(
 		ResearchDocument{ResearchEntry: ResearchEntry{ID: "decision.md", Title: "Bounded decision"}},
