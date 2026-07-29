@@ -59,9 +59,13 @@ func TestResearchAnnotationsRendered833(t *testing.T) {
 			},
 			{
 				"id": "ra_document", "document_id": "notes/field-note.md", "document_digest": digest,
-				"author": "operator", "created_at": "2026-07-21T10:00:00Z", "updated_at": "2026-07-21T10:00:00Z",
-				"comments": []map[string]any{{"id": "rc_3", "author": "operator", "text": "Whole-document context.", "created_at": "2026-07-21T10:00:00Z"}},
-				"resolved": false,
+				"author": "operator", "created_at": "2026-07-21T10:00:00Z", "updated_at": "2026-07-21T11:00:00Z",
+				"comments": []map[string]any{
+					{"id": "rc_3", "author": "operator", "text": "Whole-document context.", "created_at": "2026-07-21T10:00:00Z"},
+					{"id": "rc_4", "author": "flotilla-dev", "text": "Accepted. Work is tracked in #900.", "created_at": "2026-07-21T11:00:00Z"},
+				},
+				"resolved": true, "resolved_at": "2026-07-21T11:00:00Z",
+				"routing": map[string]any{"state": "delivered", "key": "ra_document:3", "generation": 3, "target": "flotilla-dev", "updated_at": "2026-07-21T10:05:00Z"},
 			},
 		},
 	})
@@ -180,8 +184,18 @@ with sync_playwright() as p:
         install(phone)
         phone.goto(url + "/research/notes/field-note.md", wait_until="domcontentloaded")
         expect(phone.locator("#research-annotation-count")).to_have_text("3 annotations")
+        expect(phone.locator("#research-annotation-summary")).to_contain_text("2 annotations await owner responses")
         expect(phone.locator("#research-annotation-summary")).to_contain_text("1 passage needs review")
         expect(phone.locator(".research-highlight")).to_have_count(1)
+        phone.locator("#research-document-comment").click()
+        response_card = phone.locator('[data-annotation-open="ra_document"]')
+        expect(response_card).to_contain_text("Addressed by flotilla-dev")
+        expect(response_card).to_contain_text("Delivered to flotilla-dev")
+        response_card.click()
+        expect(phone.locator("#research-annotation-thread-state")).to_contain_text("Addressed by flotilla-dev")
+        expect(phone.locator("#research-annotation-comments")).to_contain_text("Accepted. Work is tracked in #900.")
+        expect(phone.locator("#research-annotation-comments footer").last).to_contain_text("flotilla-dev ·")
+        phone.keyboard.press("Escape")
         phone.locator(".research-highlight").click()
         panel = phone.locator("#research-annotation-panel")
         expect(panel).to_be_visible()
@@ -220,7 +234,7 @@ with sync_playwright() as p:
         assert retry_box["left"] >= 0 and retry_box["right"] <= 390 and retry_box["height"] >= 44, retry_box
         retry.click()
         expect(phone.locator("#research-annotation-thread-title")).to_have_text("Passage thread")
-        expect(phone.locator("#research-annotation-thread-state")).to_contain_text("Queued for review")
+        expect(phone.locator("#research-annotation-thread-state")).to_contain_text("Queued to cos")
         expect(phone.locator("#research-annotation-count")).to_have_text("4 annotations")
         expect(phone.locator(".research-highlight")).to_have_count(2)
         routed_highlight = phone.locator('[data-annotation-id="ra_created"]')

@@ -90,6 +90,8 @@ func run(args []string) error {
 		return cmdInbox(args[1:])
 	case "goals":
 		return cmdGoals(args[1:])
+	case "research":
+		return cmdResearch(args[1:])
 	case "accounts":
 		return cmdAccounts(args[1:])
 	case "gmail":
@@ -153,6 +155,8 @@ usage:
                                                       compile fleet-goals.yaml → fleet-goals.json (roster-adjacent)
   flotilla goals link --goal <id> (--issue <ref> | --backlog <match> | --inline <text> | --desk <agent>)
                                                       attach a work item to fleet-goals.yaml (preserves yaml comments) and recompile json
+  flotilla research reply --document <id> --annotation <id> --from <owner> [--resolve] [--file <path|-> | <message>]
+                                                      append a durable owner response to a private R&D annotation thread
   flotilla accounts init <subscription-id>            scaffold Claude Code config dir + print one-time /login steps
   flotilla accounts list [--json]                     subscription credential health (mtime/expiry only; no secrets)
   flotilla gmail [--grant <path>] smoke|labels-list|label-get|messages-list|message-get|threads-list|thread-get
