@@ -85,10 +85,11 @@ func TestEffectiveUnitCASIncludesBaseDropInsAndExecStart(t *testing.T) {
 	dropIn := filepath.Join(root, "flotilla-dash.service.d", "70-tracker-file.conf")
 	writeTestFile(t, base, "[Service]\nExecStart=/opt/flotilla dash --bind 127.0.0.1:8787\n")
 	writeTestFile(t, dropIn, "[Service]\nExecStart=\nExecStart=/opt/flotilla dash --tracker-file /state/history.md --backlog-file /state/drive.md\n")
+	const configured = `path=/opt/flotilla ; argv[]=/opt/flotilla dash --tracker-file /state/history.md --backlog-file /state/drive.md`
 	state := dashEffectiveUnit{
 		FragmentPath: base,
 		DropInPaths:  []string{dropIn},
-		ExecStart:    `{ path=/opt/flotilla ; argv[]=/opt/flotilla dash --tracker-file /state/history.md --backlog-file /state/drive.md ; }`,
+		ExecStart:    `{ ` + configured + ` ; ignore_errors=no ; start_time=[Wed 2026-07-29 03:27:22 UTC] ; stop_time=[n/a] ; pid=1705733 ; code=(null) ; status=0/0 }`,
 	}
 	stage := t.TempDir()
 	snapshot, err := snapshotDashUnit(state, stage)
@@ -100,6 +101,9 @@ func TestEffectiveUnitCASIncludesBaseDropInsAndExecStart(t *testing.T) {
 	}
 	if len(snapshot.Files) != 2 {
 		t.Fatalf("snapshotted files = %d, want base + drop-in", len(snapshot.Files))
+	}
+	if snapshot.EffectiveExecStart != configured {
+		t.Fatalf("stable effective ExecStart = %q, want %q", snapshot.EffectiveExecStart, configured)
 	}
 	for _, file := range snapshot.Files {
 		if file.Snapshot == "" {
@@ -116,6 +120,26 @@ func TestEffectiveUnitCASIncludesBaseDropInsAndExecStart(t *testing.T) {
 	if inspected.SHA256 != snapshot.SHA256 {
 		t.Fatalf("effective unit CAS = %s, snapshot = %s", inspected.SHA256, snapshot.SHA256)
 	}
+	restarted := state
+	restarted.ExecStart = `{ ` + configured + ` ; ignore_errors=no ; start_time=[Wed 2026-07-29 04:01:03 UTC] ; stop_time=[n/a] ; pid=1800123 ; code=(null) ; status=0/0 }`
+	afterRestart, err := inspectDashUnit(restarted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterRestart.SHA256 != snapshot.SHA256 {
+		t.Fatalf("restart-only runtime fields changed unit CAS: after=%s before=%s", afterRestart.SHA256, snapshot.SHA256)
+	}
+
+	flagDrift := restarted
+	flagDrift.ExecStart = strings.Replace(flagDrift.ExecStart, "/state/drive.md", "/state/other-drive.md", 1)
+	changedFlags, err := inspectDashUnit(flagDrift)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changedFlags.SHA256 == snapshot.SHA256 {
+		t.Fatal("effective argv flag change did not invalidate unit CAS")
+	}
+
 	writeTestFile(t, dropIn, "[Service]\nExecStart=\nExecStart=/opt/flotilla dash --tracker-file /state/history.md --backlog-file /state/other-drive.md\n")
 	changed, err := inspectDashUnit(state)
 	if err != nil {

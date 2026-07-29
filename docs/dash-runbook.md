@@ -69,7 +69,7 @@ outside the source tree. Before any optional swap it requires:
 - explicit, distinct `--tracker-file` and `--backlog-file` values in systemd's
   effective ExecStart after base-fragment + drop-in composition;
 - rollback snapshots and a single CAS digest for the installed binary, base
-  unit, every active drop-in, and effective ExecStart;
+  unit, every active drop-in, and effective ExecStart command;
 - loopback HTTP smoke of the staged binary, including the R&D page and synthetic
   Decide/Learn publications.
 
@@ -89,7 +89,10 @@ flotilla dash deploy ... --apply
 The manifest is `<stage-dir>/manifest.json`; rollback artifacts are under
 `<stage-dir>/rollback/`. `--unit-file` names the loaded base fragment; the
 command asks systemd for the effective ExecStart and active drop-ins, snapshots
-all of them, and refuses if any file or composed command changes. If
+all of them, and refuses if any file or composed command changes. The command
+CAS includes stable `path` and `argv[]` configuration but excludes systemd's
+runtime `pid`, timestamps, and exit fields, which necessarily change on a
+successful restart. If
 `origin/main`, the effective unit, candidate SHA-256, or candidate metadata
 changes between staging and swap, `--apply` refuses. The installed bytes must
 match the approved candidate SHA-256. A failed restart or live smoke restores
