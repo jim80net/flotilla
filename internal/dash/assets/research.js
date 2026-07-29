@@ -338,6 +338,25 @@
     el("research-reader-state-detail").textContent = detail;
     el("research-document-retry").hidden = !retry;
   }
+  function syncEmptyReaderState(showLearning) {
+    if (currentDocument || document.body.classList.contains("research-has-document")) return;
+    var hasEducationalShowpiece = entries.some(function (entry) { return entry.learn_ready === true; });
+    if (showLearning && !hasEducationalShowpiece) {
+      setReaderState(
+        "No educational showpieces yet",
+        "Raw and source-only notes stay off your Learn shelf until they meet the teaching and HTML5 showpiece contract.",
+        false
+      );
+      return;
+    }
+    setReaderState(
+      "Choose a document",
+      showLearning
+        ? "Choose an educational showpiece to go deeper without leaving the reading room."
+        : "Choose a waiting decision or find supporting evidence without leaving the reading room.",
+      false
+    );
+  }
   function card(entry) {
     var link = document.createElement("a");
     var diagnostics = Array.isArray(entry.diagnostics) ? entry.diagnostics : [];
@@ -441,6 +460,7 @@
     var showDecisions = currentFocus === "decisions";
     var showLearning = currentFocus === "learn";
     syncFocusControls();
+    syncEmptyReaderState(showLearning);
     el("research-status").hidden = true;
     el("research-decisions").hidden = !showDecisions || decisions.length === 0;
     el("research-learn").hidden = !showLearning || learning.length === 0;
@@ -458,10 +478,10 @@
     } else if (showDecisions && !decisionsAvailable) {
       setIndexState("Decisions unavailable", "Your decision queue could not be loaded. Learn remains available.", true);
     } else if (!visibleCount) {
-      setIndexState("No matching material", searchQuery
+      setIndexState(!searchQuery && currentFocus === "learn" ? "No educational showpieces yet" : "No matching material", searchQuery
         ? "No " + kind + " match “" + searchQuery + "”. Clear the search or choose another focus."
         : currentFocus === "learn"
-          ? "No educational showpieces are publication-ready yet. Raw notes stay off your R&D shelf until they teach something clearly."
+          ? "No educational showpieces are publication-ready yet. Raw and source-only notes stay off your Learn shelf until they meet the teaching and HTML5 showpiece contract."
           : "There are no " + kind + " right now. Choose Learn to go deeper.", false);
     }
   }
