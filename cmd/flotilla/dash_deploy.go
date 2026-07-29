@@ -381,7 +381,7 @@ func snapshotDashUnit(state dashEffectiveUnit, stageDir string) (dashDeployUnit,
 		})
 	}
 	unit := dashDeployUnit{
-		EffectiveExecStart: state.ExecStart,
+		EffectiveExecStart: stableEffectiveExecStart(state.ExecStart),
 		TrackerFile:        tracker,
 		BacklogFile:        backlog,
 		Files:              files,
@@ -782,13 +782,36 @@ func inspectDashUnit(state dashEffectiveUnit) (dashDeployUnit, error) {
 		files = append(files, dashDeployUnitFile{Path: path, SHA256: sum})
 	}
 	unit := dashDeployUnit{
-		EffectiveExecStart: state.ExecStart,
+		EffectiveExecStart: stableEffectiveExecStart(state.ExecStart),
 		TrackerFile:        tracker,
 		BacklogFile:        backlog,
 		Files:              files,
 	}
 	unit.SHA256 = effectiveUnitSHA256(unit)
 	return unit, nil
+}
+
+func stableEffectiveExecStart(execStart string) string {
+	execStart = strings.TrimSpace(execStart)
+	if !strings.Contains(execStart, "argv[]=") {
+		return execStart
+	}
+
+	// systemctl show serializes runtime process state into ExecStart alongside
+	// the configured command. Fields such as pid and start_time necessarily
+	// change after the deploy restarts the service, so they are not unit
+	// configuration and must not participate in the configuration CAS.
+	var stable []string
+	for _, part := range strings.Split(execStart, ";") {
+		field := strings.Trim(strings.TrimSpace(part), "{} \t\r\n")
+		if strings.HasPrefix(field, "path=") || strings.HasPrefix(field, "argv[]=") {
+			stable = append(stable, field)
+		}
+	}
+	if len(stable) == 0 {
+		return execStart
+	}
+	return strings.Join(stable, " ; ")
 }
 
 func effectiveUnitSHA256(unit dashDeployUnit) string {
