@@ -94,7 +94,7 @@ classification: research
 reader-action: Compare the evidence and choose the next experiment.
 support: text-only
 support-rationale: The argument is fully contained and does not depend on external evidence.
-owner: grok-research
+owner: alpha-research
 -->
 ```
 

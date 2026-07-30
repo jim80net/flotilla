@@ -44,6 +44,78 @@ func decodeAnnotationResponse(t *testing.T, rec *httptest.ResponseRecorder) rese
 	return response
 }
 
+func TestResearchEntryAnnotationSummaryKeepsTransportDistinctFromResponse(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "annotations")
+	documentID := "notes/alpha.md"
+	digest := "sha256:" + strings.Repeat("a", 64)
+	base := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+	var generation uint64
+	create := func(label string, offset time.Duration) researchannotation.Annotation {
+		t.Helper()
+		document, annotation, err := researchannotation.Create(root, researchannotation.CreateInput{
+			DocumentID: documentID, DocumentDigest: digest, ExpectedGeneration: generation,
+			Author: researchAnnotationAuthor, Comment: label, Now: base.Add(offset),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		generation = document.Generation
+		return annotation
+	}
+	route := func(annotation researchannotation.Annotation, state string) {
+		t.Helper()
+		next := annotation.Routing
+		next.State = state
+		next.Target = "alpha"
+		next.UpdatedAt = base.Add(30 * time.Minute).Format(time.RFC3339Nano)
+		if state == researchannotation.RouteQueued {
+			next.QueuedID = "queue-" + annotation.ID
+		}
+		if _, _, err := researchannotation.UpdateRouting(root, documentID, annotation.ID, annotation.Routing.Generation, next); err != nil {
+			t.Fatal(err)
+		}
+	}
+	saved := create("saved", 0)
+	queued := create("queued", time.Hour)
+	route(queued, researchannotation.RouteQueued)
+	delivered := create("delivered", 2*time.Hour)
+	route(delivered, researchannotation.RouteDelivered)
+	answered := create("answered", 3*time.Hour)
+	document, _, _, _, err := researchannotation.Reply(root, researchannotation.ReplyInput{
+		DocumentID: documentID, AnnotationID: answered.ID, ExpectedGeneration: generation,
+		Author: "alpha", Comment: "Reviewed.", Now: base.Add(4 * time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	generation = document.Generation
+	addressed := create("addressed", 5*time.Hour)
+	if _, _, _, _, err := researchannotation.Reply(root, researchannotation.ReplyInput{
+		DocumentID: documentID, AnnotationID: addressed.ID, ExpectedGeneration: generation,
+		Author: "alpha", Comment: "Resolved.", Resolve: true, Now: base.Add(6 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []ResearchEntry{{ID: documentID}}
+	if err := addResearchAnnotationSummaries(entries, root); err != nil {
+		t.Fatal(err)
+	}
+	summary := entries[0].AnnotationSummary
+	if summary.Unanswered != 3 || summary.OldestAt != saved.CreatedAt || len(summary.Threads) != 5 {
+		t.Fatalf("summary = %+v", summary)
+	}
+	wantStates := []string{"saved", "queued", "delivered", "answered", "addressed"}
+	for i, want := range wantStates {
+		if summary.Threads[i].State != want {
+			t.Errorf("thread %d state = %q, want %q", i, summary.Threads[i].State, want)
+		}
+	}
+	if summary.Threads[3].Responder != "alpha" || summary.Threads[4].Responder != "alpha" {
+		t.Fatalf("response attribution = %+v", summary.Threads)
+	}
+}
+
 func createAnnotationBody(t *testing.T, generation uint64, digest, comment string, anchor *researchannotation.Anchor) string {
 	t.Helper()
 	raw, err := json.Marshal(researchAnnotationCreateRequest{

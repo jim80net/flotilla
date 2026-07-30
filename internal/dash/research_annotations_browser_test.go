@@ -91,8 +91,19 @@ def install(page, empty=False, race=None):
     writes = [0]
     last_created = [None]
     page.add_init_script("window.EventSource = undefined")
+    entry_summary = {
+        "unanswered": 3, "oldest_unanswered_at": "2026-07-20T10:00:00Z",
+        "threads": [
+            {"id": "ra_saved", "state": "saved", "created_at": "2026-07-20T10:00:00Z"},
+            {"id": "ra_queued", "state": "queued", "created_at": "2026-07-21T10:00:00Z", "target": "alpha"},
+            {"id": "ra_attached", "state": "delivered", "created_at": "2026-07-23T10:00:00Z", "target": "alpha"},
+            {"id": "ra_answered", "state": "answered", "created_at": "2026-07-22T10:00:00Z", "responder": "alpha"},
+            {"id": "ra_document", "state": "addressed", "created_at": "2026-07-21T10:00:00Z", "responder": "flotilla-dev"}
+        ]
+    }
     page.route("**/api/research", lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps({"research": [
-        {"id": document["id"], "title": document["title"], "status": "research", "updated_at": document["updated_at"]},
+        {"id": document["id"], "title": document["title"], "status": "research", "updated_at": document["updated_at"],
+         "learn_ready": True, "annotation_summary": entry_summary},
         {"id": second["id"], "title": second["title"], "status": "research", "updated_at": second["updated_at"]}
     ]})))
     page.route("**/api/research/notes/field-note.md", lambda route: route.fulfill(status=200, content_type="application/json", body=document_body))
@@ -182,6 +193,21 @@ with sync_playwright() as p:
     try:
         phone = browser.new_page(viewport={"width": 390, "height": 844})
         install(phone)
+        phone.goto(url + "/research?focus=learn", wait_until="domcontentloaded")
+        entry = phone.locator("#research-learn-list .research-card-entry")
+        expect(entry.locator(".research-card-annotation-summary")).to_contain_text("3 unanswered · oldest")
+        states = entry.locator(".research-card-annotation-links")
+        expect(states).to_contain_text("Saved · routing failed")
+        expect(states).to_contain_text("Queued · unanswered")
+        expect(states).to_contain_text("Delivered · unanswered")
+        expect(states).to_contain_text("Answered by alpha")
+        expect(states).to_contain_text("Addressed by flotilla-dev")
+        entry.locator('[data-annotation-jump="ra_attached"]').click()
+        expect(phone.locator("#research-annotation-panel")).to_be_visible()
+        expect(phone.locator("#research-annotation-thread-state")).to_contain_text("Awaiting owner response")
+        expect(phone).to_have_url(url + "/research/notes/field-note.md?annotation=ra_attached")
+        phone.keyboard.press("Escape")
+
         phone.goto(url + "/research/notes/field-note.md", wait_until="domcontentloaded")
         expect(phone.locator("#research-annotation-count")).to_have_text("3 annotations")
         expect(phone.locator("#research-annotation-summary")).to_contain_text("2 annotations await owner responses")
@@ -253,6 +279,12 @@ with sync_playwright() as p:
 
         desktop = browser.new_page(viewport={"width": 1440, "height": 900})
         install(desktop, empty=True)
+        desktop.goto(url + "/research?focus=learn", wait_until="domcontentloaded")
+        desktop_entry = desktop.locator("#research-learn-list .research-card-entry")
+        expect(desktop_entry.locator(".research-card-annotation-summary")).to_contain_text("3 unanswered · oldest")
+        expect(desktop_entry.locator(".research-card-annotation-links")).to_contain_text("Saved · routing failed")
+        desktop_bounds = desktop_entry.evaluate("node => { const r=node.getBoundingClientRect(); return {left:r.left,right:r.right,width:r.width}; }")
+        assert desktop_bounds["left"] >= 0 and desktop_bounds["right"] <= 1440, desktop_bounds
         desktop.goto(url + "/research/notes/field-note.md", wait_until="domcontentloaded")
         expect(desktop.locator("#research-annotation-count")).to_have_text("0 annotations")
         desktop.locator("#research-document-comment").click()
@@ -265,7 +297,7 @@ with sync_playwright() as p:
         }""")
         assert geometry["panelLeft"] >= geometry["bodyRight"] - 1, geometry
         assert geometry["panelRight"] <= 1440 and geometry["width"] == geometry["client"], geometry
-        print(json.dumps({"phone_sheet": sheet, "selection_action": action_box, "route_retry": retry_box, "phone": phone_metrics, "desktop": geometry}))
+        print(json.dumps({"phone_sheet": sheet, "selection_action": action_box, "route_retry": retry_box, "phone": phone_metrics, "desktop_entry": desktop_bounds, "desktop": geometry}))
 
         # A stale annotation GET failure from document A cannot replace document B's
         # loaded annotation state. A late successful A save likewise cannot clear B's

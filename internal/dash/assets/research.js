@@ -318,12 +318,15 @@
   function indexPath() {
     return "/research?focus=" + encodeURIComponent(currentFocus);
   }
+  function annotationFromURL() {
+    return new URLSearchParams(location.search).get("annotation") || "";
+  }
   var entries = [], goalDecisions = [], decisionsAvailable = true, collectionWindow = 6, decisionWindow = 3;
   var decisionVisible = decisionWindow, learnVisible = collectionWindow;
   var currentFocus = focusFromURL(), searchQuery = "";
   var lastDocumentID = "", lastDocumentPush = false, currentDocument = null, currentRendered = null, currentDecision = null;
   var documentRequestEpoch = 0, annotationSession = 0;
-  var annotationState = null, pendingAnchor = null, pendingRoute = null, selectionDraft = null, annotationReturnFocus = null;
+  var annotationState = null, pendingAnchor = null, pendingRoute = null, pendingAnnotationID = "", selectionDraft = null, annotationReturnFocus = null;
   function setIndexState(title, detail, retry) {
     var status = el("research-status");
     status.hidden = false;
@@ -337,6 +340,49 @@
     el("research-reader-state-title").textContent = title;
     el("research-reader-state-detail").textContent = detail;
     el("research-document-retry").hidden = !retry;
+  }
+  function formatAnnotationAge(value) {
+    var timestamp = Date.parse(value || "");
+    if (!Number.isFinite(timestamp)) return "";
+    var seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+    if (seconds < 3600) return Math.max(1, Math.floor(seconds / 60)) + "m";
+    if (seconds < 86400) return Math.floor(seconds / 3600) + "h";
+    return Math.floor(seconds / 86400) + "d";
+  }
+  function annotationThreadState(thread) {
+    var responder = String(thread.responder || "").trim();
+    if (thread.state === "addressed") return responder ? "Addressed by " + responder : "Addressed";
+    if (thread.state === "answered") return responder ? "Answered by " + responder : "Answered";
+    if (thread.state === "delivered") return "Delivered · unanswered";
+    if (thread.state === "queued") return "Queued · unanswered";
+    return "Saved · routing failed";
+  }
+  function annotationEntrySurface(entry, primary) {
+    var summary = entry && entry.annotation_summary ? entry.annotation_summary : {};
+    var threads = Array.isArray(summary.threads) ? summary.threads : [];
+    if (!threads.length) return primary;
+    var wrapper = document.createElement("article"); wrapper.className = "research-card-entry";
+    wrapper.appendChild(primary);
+    var heading = document.createElement("div"); heading.className = "research-card-annotation-summary";
+    var unanswered = Number(summary.unanswered || 0);
+    heading.textContent = unanswered
+      ? unanswered + " unanswered" + (summary.oldest_unanswered_at ? " · oldest " + formatAnnotationAge(summary.oldest_unanswered_at) : "")
+      : "No unanswered annotations";
+    wrapper.appendChild(heading);
+    var links = document.createElement("div"); links.className = "research-card-annotation-links";
+    threads.forEach(function (thread) {
+      var link = document.createElement("a");
+      link.href = pagePath(entry.id) + "?annotation=" + encodeURIComponent(thread.id);
+      link.dataset.annotationJump = thread.id;
+      link.textContent = annotationThreadState(thread) + " →";
+      link.addEventListener("click", function (event) {
+        event.preventDefault();
+        openDocument(entry.id, true, entry, thread.id);
+      });
+      links.appendChild(link);
+    });
+    wrapper.appendChild(links);
+    return wrapper;
   }
   function card(entry) {
     var link = document.createElement("a");
@@ -361,7 +407,7 @@
       link.appendChild(warning);
     }
     link.addEventListener("click", function (event) { event.preventDefault(); openDocument(entry.id, true, entry); });
-    return link;
+    return annotationEntrySurface(entry, link);
   }
   function decisionCard(decision) {
     var node = decision.node;
@@ -389,7 +435,7 @@
     var next = document.createElement("span"); next.className = "research-card-next";
     next.textContent = "Open working paper →";
     item.appendChild(top); item.appendChild(title); item.appendChild(reason); item.appendChild(action); item.appendChild(next);
-    return item;
+    return annotationEntrySurface(paperEntry || { id: decision.paperID }, item);
   }
   function renderCollection(listID, moreID, collection, visible, renderer) {
     var mounted = collection.slice(0, visible), remaining = Math.max(0, collection.length - mounted.length);
@@ -685,6 +731,11 @@
     fetchJSON(annotationPath(documentID)).then(function (state) {
       if (session !== annotationSession || !currentDocument || currentDocument.id !== documentID || state.document_id !== documentID) return;
       annotationState = state; renderAnnotations();
+      if (pendingAnnotationID) {
+        var requested = annotationByID(pendingAnnotationID);
+        pendingAnnotationID = "";
+        if (requested) showAnnotationThread(requested, annotationReturnTarget(requested.id));
+      }
     }).catch(function (error) {
       if (session !== annotationSession || !currentDocument || currentDocument.id !== documentID) return;
       annotationState = null;
@@ -777,6 +828,7 @@
   function showLibrary(push) {
     documentRequestEpoch++;
     annotationSession++;
+    pendingAnnotationID = "";
     currentDocument = null; currentRendered = null; currentDecision = null; annotationState = null;
     el("research-presentation").removeAttribute("src");
     el("research-presentation").hidden = true;
@@ -787,8 +839,9 @@
     if (push) history.pushState({ focus: currentFocus }, "", indexPath());
     document.title = "flotilla — R&D";
   }
-  function openDocument(id, push, entry) {
+  function openDocument(id, push, entry, annotationID) {
     var requestEpoch = ++documentRequestEpoch;
+    pendingAnnotationID = annotationID || "";
     lastDocumentID = id;
     lastDocumentPush = !!push;
     el("research-reader").classList.add("is-loading");
@@ -801,7 +854,7 @@
       if (indexed && indexed.presentation_ready && indexed.presentation_url) renderPresentation(doc, indexed);
       else renderDocument(doc);
       loadAnnotations();
-      if (push) history.pushState({ research: id }, "", pagePath(id));
+      if (push) history.pushState({ research: id }, "", pagePath(id) + (annotationID ? "?annotation=" + encodeURIComponent(annotationID) : ""));
       lastDocumentPush = false;
     }).catch(function (error) {
       if (requestEpoch !== documentRequestEpoch) return;
@@ -825,7 +878,7 @@
       entries = Array.isArray(values[0].research) ? values[0].research : [];
       goalDecisions = values[1];
       renderIndex();
-      var id = pathID(); if (id) openDocument(id, false, entries.find(function (entry) { return entry.id === id; }));
+      var id = pathID(); if (id) openDocument(id, false, entries.find(function (entry) { return entry.id === id; }), annotationFromURL());
     }).catch(function (error) {
       setIndexState("R&D library unavailable", "The evidence collection could not be loaded: " + error.message, true);
     });
@@ -1071,7 +1124,7 @@
   });
   window.addEventListener("popstate", function () {
     var id = pathID();
-    if (id) { openDocument(id, false); return; }
+    if (id) { openDocument(id, false, null, annotationFromURL()); return; }
     currentFocus = focusFromURL();
     decisionVisible = decisionWindow;
     learnVisible = collectionWindow;
