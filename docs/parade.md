@@ -65,6 +65,39 @@ Canonical order (list, template, CLI agree): **Proud of → Learned → Looking 
 
 Dash is reader-only — coordinators author decks; operator toggles through slides.
 
+### Presentation depth
+
+Each slide can separate the operator's three reading depths:
+
+1. the slide body is the skimmable **outline**;
+2. a closed `:::notes` block is the presenter's **narrative**; and
+3. Markdown links in either layer lead to **evidence, details, and raw data**.
+
+Place the notes block after the outline:
+
+```markdown
+# flotilla-dev · The release path is now bounded
+
+- clean candidate
+- exact revision
+- rollback manifest
+
+:::notes
+The deploy guard now compares the candidate before swap and the installed
+binary after swap. [Open the implementation evidence](/research/deploy-safety/SOURCE.md).
+:::
+```
+
+The opening and closing fences must each occupy their own line. `---` inside a
+notes block is narrative, not a slide break. A malformed or nested fence fails
+closed: notes stay out of the title and outline, and the viewer reports that the
+narrative is unavailable. Decks without notes remain valid.
+
+On desktop, authored notes open in a warm-light sidebar. On phone, **Speaker
+notes** opens a full-width secondary pane with one Close action; it never nests
+another scrollport inside the slide. Links use the same safe HTTP(S) or
+same-origin path rules as slide evidence.
+
 ## Learned propagation
 
 Fleet-wide **Learned** items → `<roster-dir>/fleet-learnings.md` → reflect /

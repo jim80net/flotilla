@@ -2621,6 +2621,13 @@ html, body { overflow-x: clip; }
 .pd-counter { font-size: .78rem; color: var(--ink-3); font-variant-numeric: tabular-nums; margin-left: auto; }
 .pd-close { min-height: 44px; padding: 0 .9rem; border: 1px solid var(--line); border-radius: var(--r-sm); background: transparent; color: var(--ink-2); font: inherit; font-size: .74rem; cursor: pointer; }
 .pd-close:hover { border-color: var(--cyan-dim, var(--cyan)); color: var(--ink); }
+.pd-notes-toggle {
+  min-height: 44px; padding: 0 .8rem; border: 1px solid color-mix(in srgb, #9a682f 45%, var(--line));
+  border-radius: var(--r-sm); background: #fff8ec; color: #5d3e1e;
+  font: 600 .74rem var(--display); cursor: pointer; white-space: nowrap;
+}
+.pd-notes-toggle:hover, .pd-notes-toggle:focus-visible { border-color: #9a682f; color: #2b2118; }
+.pd-notes-toggle[hidden] { display: none; }
 .pd-unread-jump { min-height: 44px; padding: 0 .75rem; display: inline-flex; align-items: center; justify-content: center; gap: .2rem; border: 1px solid color-mix(in srgb, var(--cyan) 45%, var(--line)); border-radius: var(--r-sm); background: color-mix(in srgb, var(--cyan) 8%, transparent); color: var(--ink); font: 600 .74rem var(--display); cursor: pointer; white-space: nowrap; }
 .pd-unread-jump:hover, .pd-unread-jump:focus-visible { border-color: var(--cyan); background: color-mix(in srgb, var(--cyan) 14%, transparent); }
 .pd-unread-jump[hidden] { display: none; }
@@ -2638,10 +2645,15 @@ html, body { overflow-x: clip; }
 /* Stage: minimal padding so the slide can use ~90–95% of the viewport.
    Operator 2026-07-11: HATE huge gutters — do not pin a 900px column on wide desktops. */
 .pd-stage {
+  --pd-notes-width: clamp(18rem, 32vw, 28rem);
   position: relative; flex: 1 1 auto; min-height: 0;
   display: flex; align-items: stretch; justify-content: center;
   padding: .35rem clamp(.35rem, 1.2vw, .75rem);
   overflow: hidden;
+}
+.pd-stage.has-open-notes {
+  display: grid; grid-template-columns: minmax(0, 1fr) var(--pd-notes-width);
+  align-items: stretch; justify-content: stretch;
 }
 .pd-slide {
   /* Desktop: use the screen. Mobile reflow is in the max-width media query below. */
@@ -2653,6 +2665,46 @@ html, body { overflow-x: clip; }
   outline: none;
   box-sizing: border-box;
 }
+.pd-stage.has-open-notes .pd-slide { width: 100%; max-width: 100%; }
+.pd-stage.has-open-notes .pd-next { right: calc(var(--pd-notes-width) + .75rem); }
+.pd-notes {
+  min-width: 0; max-height: 100%; overflow-y: auto; box-sizing: border-box;
+  border: 1px solid #d8c6aa; border-radius: var(--r-sm); background: #fff8ec; color: #2b2118;
+  box-shadow: -8px 0 24px color-mix(in srgb, #5d3e1e 12%, transparent);
+}
+.pd-notes[hidden] { display: none; }
+.pd-notes-header {
+  position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: .75rem;
+  min-height: 60px; padding: .65rem .8rem; box-sizing: border-box; border-bottom: 1px solid #d8c6aa;
+  background: #fff8ec;
+}
+.pd-notes-header h2 { margin: .1rem 0 0; color: #2b2118; font: 700 1rem/1.1 var(--display); }
+.pd-notes-eyebrow { color: #8a5b28; font: 600 .6rem var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.pd-notes-close {
+  min-width: 52px; min-height: 44px; padding: 0 .7rem; border: 1px solid #c7a979;
+  border-radius: var(--r-sm); background: #fffdf8; color: #5d3e1e; font: 600 .68rem var(--display); cursor: pointer;
+}
+.pd-notes-close:hover, .pd-notes-close:focus-visible { border-color: #8a5b28; color: #2b2118; }
+.pd-notes-body { padding: .75rem .9rem 1.25rem; font: 400 .82rem/1.58 var(--mono); overflow-wrap: anywhere; }
+.pd-notes-body p { margin: .55rem 0; }
+.pd-notes-body ul { margin: .5rem 0 .8rem; padding-left: 1.2rem; }
+.pd-notes-body li { margin: .3rem 0; }
+.pd-notes-body .pd-h { margin: 1rem 0 .35rem; color: #2b2118; font-family: var(--display); line-height: 1.2; }
+.pd-notes-body .pd-h1 { font-size: 1.3rem; }
+.pd-notes-body .pd-h2 { font-size: 1.12rem; }
+.pd-notes-body .pd-h3, .pd-notes-body .pd-h4 { font-size: 1rem; }
+.pd-notes-body strong { color: #2b2118; }
+.pd-notes-body code { padding: .08em .32em; border-radius: 4px; background: #efe2cf; color: #3d2a18; }
+.pd-notes-body a { color: #6f461e; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.pd-notes-body a::after { content: " ↗"; font-size: .8em; }
+.pd-notes-body .pd-quote { margin: .8rem 0; padding: .65rem .75rem; border-left: 3px solid #b47b39; background: #f5e7d3; }
+.pd-notes-body .pd-rule { margin: .9rem 0; border: 0; border-top: 1px solid #d8c6aa; }
+.pd-notes-body .pd-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: .78rem; }
+.pd-notes-body .pd-table th, .pd-notes-body .pd-table td { padding: .35rem; border: 1px solid #d8c6aa; overflow-wrap: anywhere; }
+.pd-notes-empty { display: grid; gap: .4rem; padding: 1rem .25rem; color: #6c5841; }
+.pd-notes-empty strong { color: #2b2118; font: 700 1rem var(--display); }
+.pd-notes-empty p { margin: 0; }
+.pd-notes.has-error { border-color: #b36a45; }
 @media (min-width: 1100px) {
   .pd-slide {
     width: min(94vw, 100%);
@@ -2715,6 +2767,7 @@ html, body { overflow-x: clip; }
 .pd-slide-body li { margin: .3rem 0; }
 .pd-slide-body strong { color: var(--ink); }
 .pd-slide-body code { font-family: var(--mono, "IBM Plex Mono", monospace); font-size: .9em; background: var(--abyss-3); padding: .06em .4em; border-radius: 4px; }
+.pd-slide-body .pd-rule { margin: 1rem 0; border: 0; border-top: 1px solid var(--line); }
 /* Per-slide operator conversation (#741). The pane lives in the slide's existing scroll
    region: collapsed by default, then a bounded thread + compose surface when expanded. */
 .pd-conversation {
@@ -2807,15 +2860,31 @@ html, body { overflow-x: clip; }
 .pd-listcard-meta { font-size: .76rem; color: var(--ink-3); }
 
 @media (max-width: 560px) {
+  .pd-deck-bar { gap: .25rem; padding: .35rem; }
+  .pd-deck-date, .pd-counter { white-space: nowrap; }
+  .pd-deck-date { font-size: .72rem; }
+  .pd-counter { font-size: .66rem; }
+  .pd-notes-toggle { width: 52px; padding: 0; font-size: 0; }
+  .pd-notes-toggle::before { content: "Notes"; font: 600 .64rem var(--display); }
+  .pd-close { padding-inline: .5rem; }
   .pd-deck-bar .theme-toggle { width: 52px; padding: 0; justify-content: center; }
   .pd-stage {
     display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr) 48px;
     gap: .35rem; padding: .2rem .3rem .35rem;
   }
+  .pd-stage.has-open-notes {
+    display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: minmax(0, 1fr) 48px;
+  }
   .pd-slide {
     grid-column: 1 / -1; grid-row: 1; width: 100%; max-width: 100%; min-height: 0;
     padding: 1rem .7rem 1.2rem;
   }
+  .pd-stage.has-open-notes .pd-slide { display: none; }
+  .pd-stage.has-open-notes .pd-notes {
+    display: block; grid-column: 1 / -1; grid-row: 1; width: 100%; max-height: 100%;
+    border-radius: var(--r-sm); box-shadow: none;
+  }
+  .pd-stage.has-open-notes .pd-next { right: auto; }
   .pd-nav {
     position: static; grid-row: 2; width: auto; height: 48px; transform: none;
     gap: .35rem; font-size: 1.35rem; background: var(--abyss-3);
