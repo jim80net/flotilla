@@ -25,6 +25,51 @@ func writeResearchFixture(t *testing.T, root, rel, body string, mod time.Time) {
 	}
 }
 
+func TestResearchDisplayProjectionNormalizesMarkdownWithoutMutatingSource(t *testing.T) {
+	root := t.TempDir()
+	markdown := `# **Readable** *research* with ` + "`inline code`" + ` and [one action](javascript:alert(1))
+
+Your **fleet** can compare ` + "`the evidence`" + ` in [the working paper](https://private.example/paper) <script>window.privateToken = "nope"</script> before deciding.
+`
+	writeResearchFixture(t, root, "display-safe.md", markdown, time.Now())
+
+	doc, found, err := readResearchDocument(root, "display-safe.md")
+	if err != nil || !found {
+		t.Fatalf("read display-safe document = found %v, err %v", found, err)
+	}
+	if got, want := doc.Title, "Readable research with inline code and one action"; got != want {
+		t.Errorf("title = %q, want %q", got, want)
+	}
+	if got, want := doc.Summary, "Your fleet can compare the evidence in the working paper before deciding."; got != want {
+		t.Errorf("summary = %q, want %q", got, want)
+	}
+	for _, unsafe := range []string{"**", "`", "](", "javascript:", "<script", "privateToken"} {
+		if strings.Contains(doc.Title, unsafe) || strings.Contains(doc.Summary, unsafe) {
+			t.Errorf("display projection leaked %q: title=%q summary=%q", unsafe, doc.Title, doc.Summary)
+		}
+	}
+	if doc.Markdown != markdown {
+		t.Errorf("source Markdown changed:\n got %q\nwant %q", doc.Markdown, markdown)
+	}
+	if got, want := doc.Digest, researchDigest(markdown); got != want {
+		t.Errorf("digest = %q, want %q", got, want)
+	}
+}
+
+func TestResearchDisplayProjectionFailsClosedAndClampsUnicodeByRune(t *testing.T) {
+	if got, want := researchDisplayText(`[Safe label](javascript:alert(1)) <script>private()</script> **plain**`), "Safe label plain"; got != want {
+		t.Errorf("safe malformed projection = %q, want %q", got, want)
+	}
+	if got, want := researchDisplayText(`[Keep this label](javascript:alert(1)`), "Keep this label"; got != want {
+		t.Errorf("unclosed link projection = %q, want %q", got, want)
+	}
+	long := strings.Repeat("界", 230)
+	got := clampResearchDisplayText(long, 220)
+	if !strings.HasSuffix(got, "…") || len([]rune(got)) != 220 {
+		t.Errorf("Unicode clamp = %q (%d runes), want 220 runes ending in ellipsis", got, len([]rune(got)))
+	}
+}
+
 func TestResearchVideoAssetRangeAndBoundary(t *testing.T) {
 	srv, _ := newTestServer(t, singleFleetRoster, time.Now())
 	root := t.TempDir()
