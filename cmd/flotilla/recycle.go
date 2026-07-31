@@ -668,7 +668,7 @@ func cmdRecycle(args []string) error {
 	writeLastRecycle(agentName, plan, msg, runErr, wtNote)
 	if runErr != nil {
 		// #436: never silent fail-closed — escalate to owning coordinator.
-		escalateRecycleAbort(cfg, agentName, runErr, plan.designatedPath)
+		escalateRecycleAbort(cfg, rosterPath, agentName, runErr, plan.designatedPath)
 		return runErr
 	}
 	fmt.Print(msg)
