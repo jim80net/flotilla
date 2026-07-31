@@ -20,10 +20,12 @@ import (
 type Signal string
 
 const (
-	SignalNone            Signal = ""
-	SignalLaneDone        Signal = "lane-done"         // backlog drained + settled turn-final
-	SignalCoordinatorMark Signal = "coordinator-mark"  // explicit "lane closed" / chapter complete
-	SignalPRMergedSettled Signal = "pr-merged-settled" // turn-final names merged PR + settlement (only with empty unblocked)
+	SignalNone                   Signal = ""
+	SignalLaneDone               Signal = "lane-done"         // backlog drained + settled turn-final
+	SignalCoordinatorMark        Signal = "coordinator-mark"  // explicit "lane closed" / chapter complete
+	SignalPRMergedSettled        Signal = "pr-merged-settled" // turn-final names merged PR + settlement (only with empty unblocked)
+	SignalCoordinatorTenure      Signal = "coordinator-tenure"
+	SignalCoordinatorSelfHandoff Signal = "coordinator-self-handoff"
 )
 
 // Result is the pure verdict for one finish edge.
@@ -51,6 +53,15 @@ var coordinatorMarkPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\blane\s+(?:is\s+)?(?:closed|done|complete)\b`),
 	regexp.MustCompile(`(?i)\bchapter[- ]end\b`),
 	regexp.MustCompile(`(?i)\brecycle\s+(?:me|this\s+desk|after\s+this)\b`),
+}
+
+// coordinatorSelfHandoffPatterns are deliberately narrow. They let a standing
+// meta-XO explicitly report a context-budget handoff without pretending its
+// continuously replenished backlog is lane-done.
+var coordinatorSelfHandoffPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\brecycle\s+me\b`),
+	regexp.MustCompile(`(?i)\bcontext[- ]budget\s+(?:reached|exhausted)\b`),
+	regexp.MustCompile(`(?i)\bself[- ]handoff\s+(?:ready|complete)\b`),
 }
 
 // prMergedPatterns — strong PR-merge evidence in the turn-final.
@@ -113,6 +124,24 @@ func Check(turnFinal, backlogMD string) Result {
 	return Result{}
 }
 
+// CheckCoordinator applies the ordinary chapter-end rules plus two
+// coordinator-only rotation signals. A coordinator is a standing lane, so an
+// explicit self-handoff or an externally measured tenure edge may rotate it
+// even while its backlog is non-empty or intentionally absent.
+func CheckCoordinator(turnFinal, backlogMD string, tenureDue bool) Result {
+	text := strings.TrimSpace(turnFinal)
+	if text == "" {
+		return Result{}
+	}
+	if matchAny(text, coordinatorSelfHandoffPatterns) {
+		return Result{ChapterEnd: true, Signal: SignalCoordinatorSelfHandoff}
+	}
+	if tenureDue {
+		return Result{ChapterEnd: true, Signal: SignalCoordinatorTenure}
+	}
+	return Check(text, backlogMD)
+}
+
 func matchAny(text string, pats []*regexp.Regexp) bool {
 	for _, re := range pats {
 		if re.MatchString(text) {
@@ -159,6 +188,19 @@ func (t *Tracker) Record(agent string, r Result) bool {
 	t.fired[agent] = r.Signal
 	delete(t.suppressed, agent)
 	return true
+}
+
+// Reset clears one agent's chapter latch. Coordinator tenure uses a durable
+// attempt marker for retry suppression, so it resets the in-memory signal when
+// that backoff expires rather than permanently inheriting a failed attempt.
+func (t *Tracker) Reset(agent string) {
+	if t == nil || agent == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.fired, agent)
+	delete(t.suppressed, agent)
 }
 
 // NudgePrompt is the suggest-mode message when auto-recycle is off.

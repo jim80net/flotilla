@@ -129,7 +129,16 @@ func cmdWatch(args []string) error {
 	backlogPath := fs.String("backlog-file", os.Getenv("FLOTILLA_BACKLOG_FILE"), "the goal-driven loop's fleet backlog (markdown; - [<status>] items). Unset ⇒ the backlog gate is OFF (XO settles as before). Read fresh each tick, NOT content-hashed (it is the XO's own output)")
 	backlogStuckCap := fs.Int("backlog-stuck-cap", 5, "goal-driven loop: drives of one unblocked item without progress before it is escalated + deprioritized")
 	orgFile := fs.String("org-file", os.Getenv("FLOTILLA_ORG_FILE"), "optional org-truth file (default <roster-dir>/fleet-org.yaml when present; env FLOTILLA_ORG_FILE). When set, load agrees channels with reports_to or refuses")
+	coordinatorRecycleTenureFlag := fs.String(
+		"coordinator-recycle-tenure",
+		os.Getenv("FLOTILLA_COORDINATOR_RECYCLE_TENURE"),
+		"standing coordinator context tenure before finish-edge self-recycle (default 168h; 0 disables)",
+	)
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	coordinatorRecycleTenure, err := parseCoordinatorRecycleTenure(*coordinatorRecycleTenureFlag)
+	if err != nil {
 		return err
 	}
 
@@ -829,7 +838,7 @@ func cmdWatch(args []string) error {
 			AdjutantSeamOnFinish:      drainAdjutantSeamFor,
 			IdleHoldOnFinish:          idleHoldOnFinish(cfg, idleHoldTracker, injector.Enqueue),
 			StrandedHandoffOnFinish:   strandedHandoffOnFinish(cfg, strandedTracker, injector.Enqueue),
-			ChapterEndOnFinish: chapterEndOnFinish(cfg, rosterDir, chapterEndTracker, injector.Enqueue,
+			ChapterEndOnFinish: chapterEndOnFinish(cfg, *rosterPath, coordinatorRecycleTenure, chapterEndTracker, injector.Enqueue,
 				func(agent string) bool { return chapterEndFlight.TryBegin(agent) },
 				func(agent string) { chapterEndFlight.End(agent) },
 			),
