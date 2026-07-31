@@ -1302,6 +1302,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 .wc-seat { border: 0; border-left: 1px solid var(--line); padding: .22rem .55rem; background: transparent; color: var(--ink-2); font: .62rem var(--mono); cursor: pointer; }
 .wc-seat:first-child { border-left: 0; }
 .wc-seat.active { background: color-mix(in srgb, var(--cyan) 10%, var(--surface)); color: var(--cyan); }
+.wc-body-scroll { display: contents; }
 .wc-timeline {
   flex: 0 1 42%; min-height: 150px; display: flex; flex-direction: column;
   border-bottom: 1px solid var(--line); background: var(--surface); overflow: hidden;
@@ -2232,14 +2233,18 @@ html, body { overflow-x: clip; }
   .wc-seat { white-space: nowrap; max-width: none; overflow: visible; }
   .wc-seat-static { white-space: nowrap; max-width: 100%; flex: 0 0 auto; overflow: visible; }
   .wc-seat-static, .wc-seat-switcher { margin-left: 0; }
-  .wc-timeline { flex-basis: 43%; min-height: 190px; }
+  .wc-body-scroll {
+    display: block; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+    scroll-padding-block: .5rem 1rem;
+  }
+  .wc-timeline { min-height: 0; overflow: visible; }
   .wc-timeline-head { padding: .55rem .85rem .4rem; }
   .wc-timeline-sources { padding: 0 .85rem .45rem; }
-  .wc-timeline-events { padding: .1rem .85rem .55rem; }
+  .wc-timeline-events { overflow: visible; padding: .1rem .85rem .8rem; }
   .wc-timeline-summary { max-width: 48%; }
   .wc-github > summary { min-height: 38px; max-height: 44px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .wc-github-body { max-height: 40vh; overflow-y: auto; }
-  .wc-stream-region { overflow-y: auto; }
+  .wc-stream-region { min-height: max(42dvh, 280px); overflow: visible; }
   .wc-live-contract {
     position: sticky; top: 0; z-index: 2; min-height: 32px; max-height: 38px;
     padding: .45rem .85rem .2rem; line-height: 1.25; background: var(--abyss-2);
