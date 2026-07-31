@@ -702,6 +702,7 @@ func writeLastRecycle(agent string, p recyclePlan, msg string, runErr error, wt 
 	}
 	rec := map[string]any{
 		"agent":        agent,
+		"at":           time.Now().UTC().Format(time.RFC3339Nano),
 		"handoff_path": p.designatedPath,
 		"token":        p.token,
 		"ok":           runErr == nil,

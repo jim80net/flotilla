@@ -45,6 +45,42 @@ func TestCheck_EmptyTurn(t *testing.T) {
 	}
 }
 
+func TestCheckCoordinator_TenureBypassesStandingBacklog(t *testing.T) {
+	backlog := "## Backlog\n- [in-flight] continuous coordinator work\n"
+	r := CheckCoordinator("Finished this turn; durable handoff is current.", backlog, true)
+	if !r.ChapterEnd || r.Signal != SignalCoordinatorTenure {
+		t.Fatalf("want coordinator tenure rotation, got %+v", r)
+	}
+	if ordinary := Check("Finished this turn; durable handoff is current.", backlog); ordinary.ChapterEnd {
+		t.Fatalf("ordinary desk must retain backlog suppression, got %+v", ordinary)
+	}
+}
+
+func TestCheckCoordinator_ExplicitContextHandoffBypassesBacklog(t *testing.T) {
+	backlog := "## Backlog\n- [in-flight] continuous coordinator work\n"
+	for _, turn := range []string{
+		"Context budget reached. Durable self-handoff is ready.",
+		"Please recycle me after this finish edge.",
+		"Self-handoff complete; continue from the durable state.",
+	} {
+		r := CheckCoordinator(turn, backlog, false)
+		if !r.ChapterEnd || r.Signal != SignalCoordinatorSelfHandoff {
+			t.Fatalf("turn %q: want explicit coordinator handoff, got %+v", turn, r)
+		}
+	}
+}
+
+func TestCheckCoordinator_VagueBudgetMentionDoesNotRotate(t *testing.T) {
+	r := CheckCoordinator(
+		"We should consider a context budget eventually.",
+		"## Backlog\n- [in-flight] continuous coordinator work\n",
+		false,
+	)
+	if r.ChapterEnd {
+		t.Fatalf("vague mention must fail closed, got %+v", r)
+	}
+}
+
 func TestTracker_EdgeOnce(t *testing.T) {
 	tr := NewTracker()
 	r := Result{ChapterEnd: true, Signal: SignalLaneDone}
@@ -67,5 +103,17 @@ func TestTracker_SuppressNoFire(t *testing.T) {
 	tr := NewTracker()
 	if tr.Record("backend", Result{SuppressReason: "unblocked-items-remain"}) {
 		t.Fatal("suppress must not dispatch")
+	}
+}
+
+func TestTracker_ResetRearmsSignal(t *testing.T) {
+	tr := NewTracker()
+	r := Result{ChapterEnd: true, Signal: SignalCoordinatorTenure}
+	if !tr.Record("cos", r) {
+		t.Fatal("first tenure must fire")
+	}
+	tr.Reset("cos")
+	if !tr.Record("cos", r) {
+		t.Fatal("reset must rearm tenure")
 	}
 }

@@ -3,8 +3,10 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jim80net/flotilla/internal/chapterend"
 	"github.com/jim80net/flotilla/internal/roster"
@@ -59,7 +61,7 @@ func TestChapterEndOnFinish_DispatchesRecycleFlight(t *testing.T) {
 	if !r.ChapterEnd {
 		t.Fatalf("expected chapter-end fixture, got %+v", r)
 	}
-	hook := chapterEndOnFinish(cfg, dir, tr, func(j watch.Job) { jobs = append(jobs, j) },
+	hook := chapterEndOnFinish(cfg, rosterPath, defaultCoordinatorRecycleTenure, tr, func(j watch.Job) { jobs = append(jobs, j) },
 		func(string) bool { return true },
 		func(a string) { flightEnded = append(flightEnded, a) },
 	)
@@ -76,6 +78,116 @@ func TestChapterEndOnFinish_DispatchesRecycleFlight(t *testing.T) {
 		t.Fatalf("nudge = %s", nudge)
 	}
 	_ = flightEnded
+}
+
+func TestChapterEndRecycleArgsForwardsCanonicalRoster(t *testing.T) {
+	dir := t.TempDir()
+	rosterPath := filepath.Join(dir, "custom-roster.json")
+	got := chapterEndRecycleArgs("cos-adj", false, rosterPath)
+	want := []string{"recycle", "cos-adj", "--roster", rosterPath}
+	if !slices.Equal(got, want) {
+		t.Fatalf("args = %#v, want %#v", got, want)
+	}
+	got = chapterEndRecycleArgs("cos", true, rosterPath)
+	want = append(want[:0], "recycle", "cos", "--roster", rosterPath, "--self")
+	if !slices.Equal(got, want) {
+		t.Fatalf("coordinator args = %#v, want %#v", got, want)
+	}
+}
+
+func TestParseCoordinatorRecycleTenure(t *testing.T) {
+	if got, err := parseCoordinatorRecycleTenure(""); err != nil || got != 7*24*time.Hour {
+		t.Fatalf("default = %s, %v", got, err)
+	}
+	if got, err := parseCoordinatorRecycleTenure("0"); err != nil || got != 0 {
+		t.Fatalf("disabled = %s, %v", got, err)
+	}
+	if got, err := parseCoordinatorRecycleTenure("36h"); err != nil || got != 36*time.Hour {
+		t.Fatalf("override = %s, %v", got, err)
+	}
+	if _, err := parseCoordinatorRecycleTenure("-1h"); err == nil {
+		t.Fatal("negative tenure must fail")
+	}
+}
+
+func TestCoordinatorTenureDueSeedsAndUsesSuccessfulRotation(t *testing.T) {
+	rosterDir := t.TempDir()
+	homeDir := t.TempDir()
+	agent := "cos"
+	start := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+
+	due, _, err := coordinatorTenureDue(rosterDir, homeDir, agent, 7*24*time.Hour, start)
+	if err != nil || due {
+		t.Fatalf("first observation must seed, due=%v err=%v", due, err)
+	}
+	due, age, err := coordinatorTenureDue(rosterDir, homeDir, agent, 7*24*time.Hour, start.Add(8*24*time.Hour))
+	if err != nil || !due || age != 8*24*time.Hour {
+		t.Fatalf("aged context due=%v age=%s err=%v", due, age, err)
+	}
+
+	statusDir := filepath.Join(homeDir, ".flotilla", agent)
+	if err := os.MkdirAll(statusDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(statusDir, "last-recycle.json"),
+		[]byte(`{"ok":true,"at":"2026-07-09T11:00:00Z"}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	due, age, err = coordinatorTenureDue(rosterDir, homeDir, agent, 7*24*time.Hour, start.Add(8*24*time.Hour))
+	if err != nil || due || age != time.Hour {
+		t.Fatalf("successful recycle must reset baseline: due=%v age=%s err=%v", due, age, err)
+	}
+}
+
+func TestCoordinatorTenureAttemptBacksOffWithoutResettingContext(t *testing.T) {
+	rosterDir := t.TempDir()
+	homeDir := t.TempDir()
+	agent := "cos-adj"
+	start := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC)
+	if _, _, err := coordinatorTenureDue(rosterDir, homeDir, agent, 24*time.Hour, start); err != nil {
+		t.Fatal(err)
+	}
+	now := start.Add(48 * time.Hour)
+	if err := recordCoordinatorRecycleAttempt(rosterDir, agent, now); err != nil {
+		t.Fatal(err)
+	}
+	due, age, err := coordinatorTenureDue(rosterDir, homeDir, agent, 24*time.Hour, now.Add(30*time.Minute))
+	if err != nil || due || age != 48*time.Hour+30*time.Minute {
+		t.Fatalf("recent failed attempt must back off only: due=%v age=%s err=%v", due, age, err)
+	}
+	due, _, err = coordinatorTenureDue(rosterDir, homeDir, agent, 24*time.Hour, now.Add(61*time.Minute))
+	if err != nil || !due {
+		t.Fatalf("retry must reopen after backoff: due=%v err=%v", due, err)
+	}
+}
+
+func TestCoordinatorTenureUsesLegacyStatusBeforeSeedingMarker(t *testing.T) {
+	rosterDir := t.TempDir()
+	homeDir := t.TempDir()
+	statusDir := filepath.Join(homeDir, ".flotilla", "cos")
+	if err := os.MkdirAll(statusDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(statusDir, "last-recycle.json"),
+		[]byte(`{"ok":true,"at":"2026-07-01T12:00:00Z"}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	due, age, err := coordinatorTenureDue(
+		rosterDir,
+		homeDir,
+		"cos",
+		7*24*time.Hour,
+		time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC),
+	)
+	if err != nil || !due || age != 8*24*time.Hour {
+		t.Fatalf("legacy successful status must establish age: due=%v age=%s err=%v", due, age, err)
+	}
 }
 
 func TestAdjutantEvaluationMentionsChapterEnd(t *testing.T) {

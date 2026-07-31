@@ -613,14 +613,33 @@ auto-dispatches `flotilla recycle <desk>` so sessions do not accumulate chapters
 | Env | Default | Effect |
 |---|---|---|
 | `FLOTILLA_CHAPTER_END_RECYCLE` | ON | Auto-recycle on lane-done finish edges |
+| `FLOTILLA_COORDINATOR_RECYCLE_TENURE` | `168h` | Standing coordinator context tenure; `0` disables |
 
 **Stacked-PR suppression:** a mid-stack PR merge with remaining `[in-flight]` /
 `[next]` backlog items does **not** recycle (would destroy stack context).
 
 **Coordinators:** chapter-end uses `flotilla recycle <coord> --self` — handoff +
 in-place rotate + takeover, never bare `/clear`, never process-kill the seat that
-issued the command (#437). **`--self` does not change model or surface** (no
-process respawn, no re-read of `flotilla-launch.json` for a new harness binary).
+issued the command (#437). The watch child receives the daemon's exact
+`--roster` path; it does not depend on the watch process's working directory or
+a default `flotilla.json`.
+
+Standing meta-XOs do not need to pretend their continuous backlog is empty.
+They rotate on the first finish edge after either:
+
+- the coordinator tenure expires (default seven days, measured from the newest
+  successful recycle/switch or the first-seen context marker); or
+- the coordinator's turn-final explicitly says `recycle me`, `context budget
+  reached` / `context budget exhausted`, or `self-handoff ready` /
+  `self-handoff complete`.
+
+Those signals are coordinator-only and may bypass a missing/non-empty backlog.
+Ordinary desks retain lane-done and stacked-PR suppression. A tenure attempt is
+durably rate-limited for one hour after failure, while a successful
+`~/.flotilla/<coordinator>/last-{recycle,switch}.json` resets the context age.
+Override with `--coordinator-recycle-tenure <duration>` or the environment
+variable above. **`--self` does not change model or surface** (no process
+respawn, no re-read of `flotilla-launch.json` for a new harness binary).
 
 #### Coordinator model/surface cutover (#437 reopen)
 
