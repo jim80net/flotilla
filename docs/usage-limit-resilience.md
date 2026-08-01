@@ -26,7 +26,9 @@ harness process changes on switch.
 
 | Seat class (Principle 10 role) | Preferred tier | Typical degraded tier |
 |---|---|---|
-| Firstmate (CoS / adjutant / orchestration XO) | Grok-class interactive | Design-class Claude, then another healthy Grok-class slot |
+| Chief of Staff (Cos) | Fable 5 | Opus 5 while early quota is available, then Grok 4.5, then Codex |
+| Technical Writer | Opus 5 | Role-fit multi-model fallback; preserve the human-facing interface, including Cos communications |
+| Firstmate (adjutant / orchestration XO) | Role-fit interactive harness | Next healthy role-fit slot |
 | Secondmate (deep design) | Claude / design-class | Grok-class interactive when design depth is unavailable |
 | Crewmate — bugfix | Grok-class workhorse | Codex / gpt-class, then Sonnet-class |
 | Crewmate — feature | Codex / gpt-class | Grok-class workhorse, then Sonnet-class |

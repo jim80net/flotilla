@@ -43,11 +43,12 @@ for permission IS choosing to do nothing.
   `scripts/check-private-boundary.sh` before publish).
 - **Private ops state:** host-local roster directory (backlog, roster, secrets,
   parades, mirrors) — see [`coordinator-transition.md`](./coordinator-transition.md).
-- **Harness allocation** (Principle 10): role-based multi-model — firstmates
-  (orchestration) on a fast interactive harness, secondmates (deep design) on a
-  depth harness, crewmates on bugfix vs feature harnesses as fit, realtime X
-  always Grok-class. A firstmate authoring a multi-step build is double-billing —
-  dispatch it. Exception: authoring the seat's own runbooks and doctrine.
+- **Harness allocation** (Principle 10): role-based multi-model. Cos follows the
+  explicit Fable 5 → Opus 5 (early quota) → Grok 4.5 → Codex chain; Technical
+  Writer seats use Opus 5 primary and remain human-facing, including with Cos.
+  Other firstmates, secondmates, and crewmates use their role-fit matrix. A
+  coordinator authoring a multi-step build is double-billing — dispatch it.
+  Exception: authoring the seat's own runbooks and doctrine.
 - **Secrets stay with coordinators.** Execution desks never hold fleet secrets.
 
 ## Hierarchy and merge authority
