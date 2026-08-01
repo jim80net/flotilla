@@ -1,0 +1,98 @@
+:root {
+  --presentation-panel-light: #f4f0e6;
+  --presentation-panel-dark: #0f2922;
+  --presentation-body-on-light: #29463a;
+  --presentation-body-on-dark: #f6f1e4;
+  --presentation-heading-on-light: #132922;
+  --presentation-heading-on-dark: #ffffff;
+  --presentation-accent: #d9ff72;
+  --presentation-line-dark: rgba(246, 241, 228, 0.24);
+}
+
+* { box-sizing: border-box; }
+html, body { min-height: 100%; margin: 0; }
+body {
+  color: var(--presentation-heading-on-light);
+  background: var(--presentation-panel-light);
+  font: 16px/1.55 Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+.presentation-depth {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(290px, 0.75fr);
+}
+
+.presentation-outline,
+.presentation-notes {
+  padding: clamp(28px, 6vw, 78px);
+}
+
+.presentation-outline {
+  display: grid;
+  align-content: center;
+  color: var(--presentation-body-on-light);
+  background: var(--presentation-panel-light);
+}
+
+.presentation-outline h1 {
+  max-width: 13ch;
+  margin: 0 0 28px;
+  color: var(--presentation-heading-on-light);
+  font: 700 clamp(2.7rem, 6vw, 5.6rem)/0.98 Georgia, serif;
+  letter-spacing: -0.04em;
+}
+
+.presentation-outline p {
+  max-width: 42rem;
+  margin: 0;
+  color: var(--presentation-body-on-light);
+  font-size: clamp(1rem, 2vw, 1.35rem);
+}
+
+.presentation-notes {
+  color: var(--presentation-body-on-dark);
+  background: var(--presentation-panel-dark);
+  border-left: 1px solid var(--presentation-line-dark);
+}
+
+.presentation-notes h2 {
+  margin: 0 0 18px;
+  padding-bottom: 14px;
+  color: var(--presentation-heading-on-dark);
+  border-bottom: 1px solid var(--presentation-line-dark);
+  font-size: 1rem;
+}
+
+.presentation-notes h2 span {
+  display: inline-block;
+  margin-right: 9px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: var(--presentation-heading-on-light);
+  background: var(--presentation-accent);
+  font-size: 0.65rem;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.presentation-notes p,
+.presentation-notes li {
+  color: var(--presentation-body-on-dark);
+}
+
+.presentation-notes a {
+  color: var(--presentation-body-on-dark);
+  text-underline-offset: 3px;
+}
+
+@media (max-width: 900px) {
+  .presentation-depth { grid-template-columns: 1fr; }
+  .presentation-outline,
+  .presentation-notes { padding: 28px 20px; }
+  .presentation-notes {
+    min-height: 42vh;
+    border-left: 0;
+    border-top: 1px solid var(--presentation-line-dark);
+  }
+}
