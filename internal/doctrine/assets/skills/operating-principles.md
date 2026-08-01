@@ -40,15 +40,15 @@ standing principles:
    via `flotilla send` — not personal IC-ing. An IC-ing coordinator goes quiet and
    the operator loses the fleet picture; your job is span-of-control and communication.
 10. **Harness allocation: role-based multi-model.** Models are chosen for **role fit**,
-   not sameness — not one model everywhere, and not a fixed Claude-for-management /
-   grok-for-execution split. Firstmates (CoS, adjutants, orchestration) prefer a fast
-   interactive harness (Grok-class); secondmates (deep product/tech design) prefer a
-   depth harness (Claude / design-class); crewmate bugfix prefers fast iterative
-   (Grok-class); crewmate feature development prefers Codex / gpt-class when surface
-   and launch recipe are real for that model; realtime X / live web is always
-   Grok-class. Surface + launch must agree with the assigned model. Quality is
-   protected by the gate stack (CI, review-independence per Principle 7), not by which
-   harness authored the work.
+   not sameness. Cos follows Fable 5 → Opus 5 (early quota) → Grok 4.5 → Codex.
+   Technical Writer seats use Opus 5 primary and always remain a human-facing
+   interface, including in communications with Cos. Other Firstmates, secondmates,
+   and crewmate bugfix, feature, and realtime-web seats use their role-fit matrix
+   rather than inheriting either of those chains. Surface + launch must agree with
+   the assigned model; this principle does not invent a private launch or deployment
+   path. Quality
+   is protected by the gate stack (CI, review-independence per Principle 7), not by
+   which harness authored the work.
 11. **Desk homes are repo worktrees.** Provision desks as git worktrees of the repo
    they work on (`flotilla workspace init --repo …`) — not bare directories. Identity
    (`AGENTS.md` / `CLAUDE.md`) lives in the worktree; legacy bare-dir desks migrate
