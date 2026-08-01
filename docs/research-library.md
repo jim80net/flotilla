@@ -62,6 +62,27 @@ Rendered acceptance must traverse every section forward and backward at 390px,
 then wheel-scroll to a middle section and assert the visible label, counter, and
 document title agree. Long sections must remain fully reachable.
 
+## Presentation depth and body contrast
+
+Decision and Learn presentations use three deliberate layers: the stage is the
+outline, speaker notes carry the narrative, and links carry evidence or raw
+detail. When notes render beside or beneath the stage, body colors belong to the
+surface they sit on. Do not reuse one brand hue as body copy across light and
+dark panels, and do not tune a single paragraph with a local color override.
+
+`docs/examples/research-showpiece-depth.css` is the semantic token reference.
+Copy its four body/surface tokens into a self-contained presentation package (or
+implement an equivalent palette) and consume them on both outline and notes
+body selectors. Normal body text must clear at least WCAG AA; the reference sets
+an enhanced 7:1 floor and intentionally uses neutral warm text on the dark panel
+so a numerically passing blue-green pair cannot become a chromatic clash. The
+companion HTML is a generic desktop/mobile fixture for rendered review.
+
+Rendered acceptance must inspect both the light outline and dark narrative at
+desktop and 390px, assert the computed foreground/background pairs, and include
+a seeing review. A green contrast calculation alone is not a visual-quality
+gate.
+
 ## Publication directive
 
 Readiness measurement does not hide any existing file. Authors can add one
