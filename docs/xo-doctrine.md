@@ -329,6 +329,21 @@ misclassifies), so a format slip is loud, not silent. **Drain** by marking items
 **dispatching** unblocked items across desks/harnesses (not doing everything
 yourself).
 
+Preflight authored backlogs with the same parser the wake loop uses:
+
+```sh
+flotilla backlog lint fleet-backlog.md
+flotilla backlog lint --json fleet-backlog.md desk-backlog.md
+```
+
+The command exits `0` when clean, `1` for warnings only, and `2` for any
+failure, unreadable input, invalid flag, malformed item, or missing required
+section. Defaults warn above 2,000 characters, five checkpoint/date markers,
+or twenty issue/PR references; items above 2,000 characters require a
+`[detail: path/to/context.md]` pointer and items above 10,000 characters fail.
+Threshold flags are available in `flotilla backlog lint --help`. Lint never
+rewrites or compacts the backlog.
+
 **The per-recipient heartbeat judgment (`#189`).** When a desk keeps its OWN
 backlog at `<roster-dir>/flotilla-<desk>-backlog.md`, the recursive desk heartbeat
 becomes a *judgment*: that desk is heartbeated only while its backlog has live
