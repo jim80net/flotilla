@@ -83,6 +83,33 @@ desktop and 390px, assert the computed foreground/background pairs, and include
 a seeing review. A green contrast calculation alone is not a visual-quality
 gate.
 
+## Presentation layer contract
+
+Parade and Learn presentations share one three-layer reader model:
+
+- **outline stage** — the concise highlights visible while skimming;
+- **speaker notes** — the narrative that teaches or explains those highlights;
+- **evidence links** — source material, details, and raw data.
+
+HTML5 showpieces express these layers with stable semantic hooks:
+
+```html
+<main data-presentation-outline><!-- section highlights --></main>
+<aside data-presentation-notes aria-label="Speaker notes"><!-- narrative --></aside>
+<nav data-presentation-evidence aria-label="Evidence"><!-- source links --></nav>
+```
+
+The showpiece may implement its own visual composition, but notes must remain a
+distinct sidebar/sheet rather than padding the outline with prose. Phone layouts
+use a full-width notes pane or drawer with one obvious Close action and no
+nested scrolling. Evidence links must stay within the guarded package or use
+explicit HTTP(S) sources. The outer R&D viewer remains sandboxed and does not
+infer or invent notes from `SOURCE.md`.
+
+Existing showpieces remain readable while craft adopts these hooks. A later
+publication-lint increment may make them mechanical only after the format is
+proven across more than one package.
+
 ## Publication directive
 
 Readiness measurement does not hide any existing file. Authors can add one

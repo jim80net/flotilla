@@ -31,13 +31,17 @@ var defaultJargon = []string{"dogfood", "harness", "nonce", "outbox", "worktree"
 func DefaultJargon() []string { return append([]string(nil), defaultJargon...) }
 
 // LintParade checks the main spine of a slides.md deck. Content inside HTML
-// details blocks or fleet +++ dig-deeper blocks is technical depth and
-// intentionally receives the softer rule.
+// details blocks, fleet +++ dig-deeper blocks, or a closed :::notes block is
+// technical/narrative depth and intentionally stays off the outline spine.
 func LintParade(src string, jargon []string) []Finding {
 	lines := splitLines(src)
 	var findings []Finding
 	inDetails := false
 	inDigDeeper := false
+	inNotes := false
+	notesSeen := false
+	notesStart := 0
+	hasOutline := false
 	slideStart := 1
 	var spine []numberedLine
 	seenJargon := map[string]bool{}
@@ -53,9 +57,36 @@ func LintParade(src string, jargon []string) []Finding {
 		lineNo := i + 1
 		trimmed := strings.TrimSpace(raw)
 		lower := strings.ToLower(trimmed)
+		if inNotes {
+			switch trimmed {
+			case ":::notes":
+				findings = append(findings, Finding{lineNo, "notes-nested", "speaker notes cannot contain another :::notes fence"})
+			case ":::":
+				inNotes = false
+			}
+			continue
+		}
+		if trimmed == ":::notes" {
+			if !hasOutline {
+				findings = append(findings, Finding{lineNo, "notes-before-outline", "speaker notes require an outline title and body first"})
+			}
+			if notesSeen {
+				findings = append(findings, Finding{lineNo, "notes-duplicate", "use one closed :::notes block per slide"})
+			}
+			notesSeen = true
+			inNotes = true
+			notesStart = lineNo
+			continue
+		}
+		if trimmed == ":::" {
+			findings = append(findings, Finding{lineNo, "notes-orphan-close", "speaker-notes close fence has no matching :::notes opener"})
+			continue
+		}
 		if trimmed == "---" && !inDetails {
 			inDigDeeper = false
 			flush(lineNo - 1)
+			notesSeen = false
+			hasOutline = false
 			continue
 		}
 		if inDigDeeper {
@@ -76,6 +107,10 @@ func LintParade(src string, jargon []string) []Finding {
 			continue
 		}
 		spine = append(spine, numberedLine{lineNo, raw})
+		hasOutline = hasOutline || visibleMarkdown(raw) != ""
+	}
+	if inNotes {
+		findings = append(findings, Finding{notesStart, "notes-unclosed", "close the :::notes block with ::: before the slide ends"})
 	}
 	flush(len(lines))
 	return sorted(findings)
