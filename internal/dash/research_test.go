@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jim80net/flotilla/internal/researchannotation"
 )
 
 func writeResearchFixture(t *testing.T, root, rel, body string, mod time.Time) {
@@ -130,6 +132,7 @@ func TestResearchPublicationDirectiveAndDiagnostics858(t *testing.T) {
 classification: research
 reader-action: Compare the evidence and choose the next experiment.
 support: material
+owner: alpha-research
 -->
 # Evidence review
 
@@ -187,6 +190,9 @@ The trial stays frozen until the operator makes an explicit decision.
 	if !byID["valid/SOURCE.md"].PublicationValid || len(byID["valid/SOURCE.md"].Diagnostics) != 0 || !byID["valid/SOURCE.md"].PresentationReady {
 		t.Errorf("valid publication = %+v", byID["valid/SOURCE.md"])
 	}
+	if byID["valid/SOURCE.md"].Publication.Owner != "alpha-research" {
+		t.Errorf("publication owner = %q, want alpha-research", byID["valid/SOURCE.md"].Publication.Owner)
+	}
 	if !byID["valid/SOURCE.md"].LearnReady {
 		t.Errorf("complete explicit research showpiece must be Learn-ready: %+v", byID["valid/SOURCE.md"])
 	}
@@ -222,6 +228,31 @@ The trial stays frozen until the operator makes an explicit decision.
 	}
 	if summary.ByCode["presentation.missing"] != 4 {
 		t.Errorf("presentation readiness count = %+v", summary.ByCode)
+	}
+}
+
+func TestResearchPublicationOwnerFailsClosed(t *testing.T) {
+	publication, diagnostics := parseResearchPublication(`<!-- flotilla-publication
+classification: research
+reader-action: Read the evidence.
+support: material
+owner: ../../cos
+-->
+# Unsafe owner
+
+[Evidence](evidence.csv)
+`)
+	if publication.Owner != "../../cos" {
+		t.Fatalf("owner = %q", publication.Owner)
+	}
+	found := false
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == "metadata.owner" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("diagnostics = %+v, want metadata.owner", diagnostics)
 	}
 }
 
@@ -449,8 +480,16 @@ func TestResearchAPIIndexBodyDeepLinkAndTraversal(t *testing.T) {
 	srv, _ := newTestServer(t, singleFleetRoster, time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC))
 	root := t.TempDir()
 	srv.cfg.ResearchPath = root
+	srv.cfg.ResearchAnnotationsPath = filepath.Join(t.TempDir(), "annotations")
 	writeResearchFixture(t, root, "design.md", "# Safe design\n\n**Status:** awaiting-auth\n\nBody text.\n", time.Now())
 	writeResearchFixture(t, root, "nested/note.md", "# Nested note\n\nNested body.\n", time.Now())
+	createdAt := time.Date(2026, 7, 18, 9, 0, 0, 0, time.UTC)
+	if _, _, err := researchannotation.Create(srv.cfg.ResearchAnnotationsPath, researchannotation.CreateInput{
+		DocumentID: "design.md", DocumentDigest: "sha256:" + strings.Repeat("d", 64),
+		ExpectedGeneration: 0, Author: researchAnnotationAuthor, Comment: "Please review.", Now: createdAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	outside := filepath.Join(t.TempDir(), "host-secret.md")
 	if err := os.WriteFile(outside, []byte("HOST_SECRET_SENTINEL"), 0o600); err != nil {
 		t.Fatal(err)
@@ -472,6 +511,11 @@ func TestResearchAPIIndexBodyDeepLinkAndTraversal(t *testing.T) {
 	}
 	if len(index.Research) != 2 || index.Research[0].ID != "design.md" {
 		t.Errorf("research API index = %+v", index.Research)
+	}
+	if got := index.Research[0].AnnotationSummary; got.Unanswered != 1 ||
+		got.OldestAt != createdAt.Format(time.RFC3339Nano) || len(got.Threads) != 1 ||
+		got.Threads[0].State != researchannotation.RouteSaved {
+		t.Errorf("research API annotation summary = %+v", got)
 	}
 	if index.Diagnostics.Documents != 2 || index.Diagnostics.NeedsAttention != 2 {
 		t.Errorf("research API diagnostics = %+v", index.Diagnostics)

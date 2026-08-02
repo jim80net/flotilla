@@ -18,6 +18,60 @@ import (
 
 const researchAnnotationAuthor = "operator"
 
+func addResearchAnnotationSummaries(entries []ResearchEntry, root string) error {
+	store, err := researchannotation.Load(root)
+	if err != nil {
+		return err
+	}
+	for i := range entries {
+		summary := ResearchAnnotationSummary{Threads: []ResearchAnnotationThread{}}
+		var oldest time.Time
+		document, ok := store.Documents[entries[i].ID]
+		if !ok {
+			entries[i].AnnotationSummary = summary
+			continue
+		}
+		for _, annotation := range document.Annotations {
+			responder := researchAnnotationResponder(annotation)
+			state := annotation.Routing.State
+			switch {
+			case annotation.Resolved:
+				state = "addressed"
+			case responder != "":
+				state = "answered"
+			}
+			summary.Threads = append(summary.Threads, ResearchAnnotationThread{
+				ID: annotation.ID, State: state, CreatedAt: annotation.CreatedAt,
+				Responder: responder, Target: annotation.Routing.Target,
+			})
+			if annotation.Resolved || responder != "" {
+				continue
+			}
+			summary.Unanswered++
+			createdAt, parseErr := time.Parse(time.RFC3339Nano, annotation.CreatedAt)
+			if parseErr != nil {
+				return parseErr
+			}
+			if oldest.IsZero() || createdAt.Before(oldest) {
+				oldest = createdAt
+				summary.OldestAt = annotation.CreatedAt
+			}
+		}
+		entries[i].AnnotationSummary = summary
+	}
+	return nil
+}
+
+func researchAnnotationResponder(annotation researchannotation.Annotation) string {
+	for i := len(annotation.Comments) - 1; i >= 0; i-- {
+		author := strings.TrimSpace(annotation.Comments[i].Author)
+		if author != "" && !strings.EqualFold(author, researchAnnotationAuthor) {
+			return author
+		}
+	}
+	return ""
+}
+
 type researchAnnotationCreateRequest struct {
 	Generation     *uint64                    `json:"generation"`
 	DocumentDigest string                     `json:"document_digest"`
@@ -208,10 +262,7 @@ func (s *Server) routeResearchAnnotation(ctx context.Context, document ResearchD
 	if annotation.Routing.State == researchannotation.RouteQueued || annotation.Routing.State == researchannotation.RouteDelivered {
 		return stored, annotation
 	}
-	target := strings.TrimSpace(s.roster.CosAgent)
-	if target == "" {
-		target = strings.TrimSpace(s.xo)
-	}
+	target := s.researchAnnotationRouteTarget(document)
 	if target == "" {
 		return stored, annotation
 	}
@@ -243,6 +294,18 @@ func (s *Server) routeResearchAnnotation(ctx context.Context, document ResearchD
 		return stored, annotation
 	}
 	return updated, routed
+}
+
+func (s *Server) researchAnnotationRouteTarget(document ResearchDocument) string {
+	if owner := strings.TrimSpace(document.Publication.Owner); owner != "" {
+		if _, err := s.roster.Agent(owner); err == nil {
+			return owner
+		}
+	}
+	if target := strings.TrimSpace(s.roster.CosAgent); target != "" {
+		return target
+	}
+	return strings.TrimSpace(s.xo)
 }
 
 func researchAnnotationRouteMessage(document ResearchDocument, annotation researchannotation.Annotation) string {

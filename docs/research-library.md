@@ -94,6 +94,7 @@ classification: research
 reader-action: Compare the evidence and choose the next experiment.
 support: text-only
 support-rationale: The argument is fully contained and does not depend on external evidence.
+owner: alpha-research
 -->
 ```
 
@@ -103,6 +104,9 @@ The schema is intentionally small:
 - `reader-action` states the decision, next step, or archival reason.
 - `support` is `material` or `text-only`.
 - `support-rationale` is required when `support` is `text-only`.
+- `owner` optionally names the exact roster agent that receives new operator
+  annotations. Missing or unknown owners fail closed to the configured fleet
+  coordinator; delivery still does not prove assignment or an owner response.
 
 Links, Markdown tables, images, and private-LAN videos count as supporting
 material. A `decision` classification means the paper belongs on the existing
