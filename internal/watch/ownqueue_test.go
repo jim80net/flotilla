@@ -193,6 +193,22 @@ func TestOwnQueueInjectorOutcomeHooks(t *testing.T) {
 	}
 }
 
+func TestOwnQueueInjectorBusyReleasesLease(t *testing.T) {
+	r, c := newOwnQueueRig(t, "## Backlog\n- [next] retry after busy\n")
+	job, _ := c.Claim("alpha", r.path, 1)
+	in := NewInjector(func(string, string) error { return surface.ErrBusy }, 1)
+	in.SetDetectorClaimHooks(c.Confirm, c.Abort)
+	in.Start()
+	in.Enqueue(job)
+	in.Stop()
+	if _, ok := loadOwnQueueLease(c.leasePath("alpha")); ok {
+		t.Fatal("busy detector delivery retained own-queue lease")
+	}
+	if got := r.events[len(r.events)-1].Result; got != "delivery-failed" {
+		t.Fatalf("busy outcome = %q", got)
+	}
+}
+
 func TestDetectorOwnQueuePrecedesGenericHeartbeat(t *testing.T) {
 	var mu sync.Mutex
 	calls := []string{}
