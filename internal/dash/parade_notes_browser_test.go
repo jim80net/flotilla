@@ -37,6 +37,7 @@ The narrative explains why the outline matters.
 
 [Open the evidence](/research/evidence.md)
 :::
+:::
 
 ---
 
@@ -88,6 +89,10 @@ with sync_playwright() as p:
         expect(desktop.locator("#pd-notes-body")).to_contain_text("narrative explains")
         expect(desktop.locator("#pd-notes-body a")).to_have_attribute("href", "/research/evidence.md")
         expect(desktop.locator("#pd-notes-toggle")).to_have_attribute("aria-expanded", "true")
+        desktop.locator("#pd-conversation").evaluate("node => node.open = true")
+        expect(desktop.locator("#pd-conversation")).to_be_visible()
+        rendered_copy = desktop.locator(".pd-slide-title, .pd-slide-body, #pd-notes-body").all_inner_texts()
+        assert all(":::notes" not in text and text.strip() != ":::" for text in rendered_copy), rendered_copy
         assert desktop.locator("#pd-notes").evaluate(
             "node => getComputedStyle(node).backgroundColor") == "rgb(255, 248, 236)"
         assert desktop.evaluate("document.documentElement.scrollWidth === document.documentElement.clientWidth")
@@ -109,6 +114,7 @@ with sync_playwright() as p:
         expect(desktop.locator(".pd-slide-title")).to_have_text("Untitled slide")
         expect(desktop.locator(".pd-slide-title")).not_to_contain_text("narrative")
         expect(desktop.locator(".pd-slide-body")).not_to_contain_text("narrative")
+        expect(desktop.locator(".pd-slide-body")).not_to_contain_text(":::")
         desktop.locator("#pd-notes-toggle").click()
         expect(desktop.locator("#pd-notes-body")).to_contain_text("Notes unavailable")
         expect(desktop.locator("#pd-notes-body")).not_to_contain_text("never become")

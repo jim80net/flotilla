@@ -240,10 +240,19 @@
   function parseSlideChunk(chunk) {
     var ls = chunk.trim().split("\n");
     var first = (ls.shift() || "").trim();
-    if (first === ":::notes") {
+    if (first === ":::notes" || first === ":::") {
       return { title: "Untitled slide", body: "", notes: "", notesError: true };
     }
     var title = first.replace(/^#+\s*/, "").trim();
+    // Directive-only lines are presentation structure, never operator copy.
+    // Filtering them independently of block validity keeps an exporter-spilled
+    // closing fence from falling through to renderMd as a visible paragraph.
+    function withoutNotesDirectives(lines) {
+      return lines.filter(function (line) {
+        var directive = line.trim();
+        return directive !== ":::notes" && directive !== ":::";
+      });
+    }
     var notesStart = -1, notesEnd = -1, nested = false;
     for (var i = 0; i < ls.length; i++) {
       if (ls[i].trim() === ":::notes") {
@@ -254,7 +263,7 @@
       }
     }
     if (notesStart === -1) {
-      return { title: title, body: ls.join("\n").trim(), notes: "", notesError: false };
+      return { title: title, body: withoutNotesDirectives(ls).join("\n").trim(), notes: "", notesError: false };
     }
     var malformed = nested || notesEnd === -1;
     var outline = malformed
@@ -262,7 +271,7 @@
       : ls.slice(0, notesStart).concat(ls.slice(notesEnd + 1));
     return {
       title: title || "Untitled slide",
-      body: outline.join("\n").trim(),
+      body: withoutNotesDirectives(outline).join("\n").trim(),
       notes: malformed ? "" : ls.slice(notesStart + 1, notesEnd).join("\n").trim(),
       notesError: malformed
     };
