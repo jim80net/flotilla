@@ -710,6 +710,8 @@
     hideSelectionAction();
     el("research-reader-empty").hidden = true;
     el("research-document").hidden = false;
+    setPresentationLinks(null);
+    el("research-presentation-stage").hidden = true;
     el("research-presentation").hidden = true;
     el("research-presentation").removeAttribute("src");
     el("research-body").hidden = false;
@@ -763,6 +765,14 @@
     document.title = doc.title + " — flotilla R&D";
     window.scrollTo(0, 0);
   }
+  function setPresentationLinks(entry) {
+    var available = !!(entry && entry.presentation_ready && entry.presentation_url);
+    [el("research-full-screen-header"), el("research-full-screen-canvas")].forEach(function (link) {
+      link.hidden = !available;
+      if (available) link.href = entry.presentation_url;
+      else link.removeAttribute("href");
+    });
+  }
   function renderPresentation(doc, entry) {
     renderDocument(doc);
     currentRendered = null;
@@ -772,6 +782,8 @@
     frame.title = doc.title + " presentation";
     frame.src = entry.presentation_url;
     frame.hidden = false;
+    setPresentationLinks(entry);
+    el("research-presentation-stage").hidden = false;
     el("research-annotation-summary").textContent = "Document comments stay private to this host; passage highlights remain on the source.";
   }
   function showLibrary(push) {
@@ -780,6 +792,8 @@
     currentDocument = null; currentRendered = null; currentDecision = null; annotationState = null;
     el("research-presentation").removeAttribute("src");
     el("research-presentation").hidden = true;
+    el("research-presentation-stage").hidden = true;
+    setPresentationLinks(null);
     el("research-annotation-panel").hidden = true;
     document.body.classList.remove("research-annotations-open");
     hideSelectionAction();

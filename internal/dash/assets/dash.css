@@ -3041,8 +3041,15 @@ html, body { overflow-x: clip; }
 .research-card.is-unlinked { border-style: dashed; }
 .research-card.is-unlinked .research-card-next { color: var(--amber); }
 .research-document-header { padding-bottom: 1.25rem; border-bottom: 1px solid var(--line); }
-.research-document-meta { display: flex; align-items: center; gap: .65rem; }
+.research-document-meta { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem .65rem; }
 .research-document-meta time { color: var(--ink-3); font-size: .65rem; }
+.research-full-screen-link {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 44px; box-sizing: border-box;
+  margin-left: auto; padding: 0 .8rem; border: 1px solid var(--cyan-dim); border-radius: var(--r-sm);
+  background: var(--abyss-2); color: var(--cyan); font: 600 .7rem var(--display); text-decoration: none;
+}
+.research-full-screen-link:hover { border-color: var(--cyan); color: var(--ink); }
+.research-full-screen-link:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .research-document-header h1 { max-width: 56rem; margin: .65rem 0 .55rem; font: 700 clamp(2rem, 5vw, 3.5rem)/1.02 var(--display); color: var(--ink); }
 .research-document-header code { color: var(--ink-3); font-size: .62rem; overflow-wrap: anywhere; }
 .research-publication-state {
@@ -3149,7 +3156,14 @@ html, body { overflow-x: clip; }
 .research-toc a { color: var(--ink-2); text-decoration: none; }
 .research-toc a:hover { color: var(--cyan); }
 .research-markdown { max-width: 70rem; color: var(--ink-2); font: 400 clamp(.88rem, 1.35vw, 1.02rem)/1.72 var(--mono); }
-.research-presentation { display: block; width: 100%; min-height: max(42rem, calc(100dvh - 15rem)); border: 1px solid var(--line); border-radius: var(--r-sm); background: #0b1020; }
+.research-presentation-stage { margin: 1rem 0; }
+.research-presentation-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: .75rem; min-height: 52px;
+  padding: .25rem .35rem .25rem .75rem; border: 1px solid var(--line); border-bottom: 0;
+  border-radius: var(--r-sm) var(--r-sm) 0 0; background: var(--abyss-1); color: var(--ink-2);
+  font: 600 .7rem var(--display); text-transform: uppercase; letter-spacing: .05em;
+}
+.research-presentation { display: block; width: 100%; min-height: max(42rem, calc(100dvh - 15rem)); border: 1px solid var(--line); border-radius: 0 0 var(--r-sm) var(--r-sm); background: #0b1020; }
 .research-presentation[hidden] { display: none; }
 .research-markdown h1, .research-markdown h2, .research-markdown h3, .research-markdown h4 { scroll-margin-top: 5.5rem; color: var(--ink); font-family: var(--display); line-height: 1.12; }
 .research-markdown h1 { margin: 2rem 0 .75rem; font-size: 2.2rem; }
@@ -3180,7 +3194,7 @@ html, body { overflow-x: clip; }
 .research-status[hidden], .research-retry[hidden], .research-reader-empty[hidden], .research-decision-strip[hidden], #research-document[hidden], .research-toc[hidden], .research-shelf[hidden],
 .research-selection-action[hidden], .research-annotation-panel[hidden], .research-annotation-thread[hidden], .research-annotation-form[hidden],
 .research-annotation-empty[hidden], .research-annotation-thread blockquote[hidden], .research-annotation-form blockquote[hidden], .research-annotation-bar button[hidden],
-.research-decision-strip button[hidden], .research-decision-response[hidden] { display: none; }
+.research-decision-strip button[hidden], .research-decision-response[hidden], .research-presentation-stage[hidden], .research-full-screen-link[hidden] { display: none; }
 
 @media (max-width: 760px) {
   .research-shell { display: block; padding: .55rem; }
@@ -3196,6 +3210,8 @@ html, body { overflow-x: clip; }
   }
   .research-decision-strip > a, .research-decision-strip > button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; }
   .research-document-header h1 { font-size: 2.15rem; }
+  .research-full-screen-link { margin-left: 0; }
+  .research-presentation-toolbar .research-full-screen-link { margin-left: auto; }
   .research-publication-heading { align-items: flex-start; flex-direction: column; }
   .research-annotation-bar { align-items: stretch; flex-direction: column; }
   .research-annotation-bar button { width: 100%; }
