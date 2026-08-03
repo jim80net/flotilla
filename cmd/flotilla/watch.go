@@ -323,6 +323,7 @@ func cmdWatch(args []string) error {
 	// RELAY-kind jobs route through the self-heal-capable submit; heartbeat/detector ticks keep the
 	// plain submit (a tick must never fire an unsolicited Ctrl-C — #156 H2). Inert when self-heal off.
 	injector.SetRelaySend(mkSend(confirm.SubmitWithSelfHeal))
+	injector.SetOperatorInterruptSend(mkSend(confirm.SubmitInterrupt))
 	// A failed/undeliverable RELAY (operator message) raises a LOUD alert — the inverse of the
 	// silent-success bug. Heartbeat/detector ticks never escalate (a stale tick is dropped).
 	injector.SetEscalate(alert)
@@ -364,7 +365,7 @@ func cmdWatch(args []string) error {
 		if j.Kind == watch.KindHeartbeat || j.Kind == watch.KindDetector {
 			return
 		}
-		if j.Kind == watch.KindRelay || j.Kind == watch.KindDefault {
+		if j.Kind == watch.KindRelay || j.Kind == watch.KindDefault || j.Kind == watch.KindOperatorInterrupt {
 			if err := watch.TrackOperatorRelayAck(watch.OperatorAckRoot(rosterDir), j, time.Now().UTC()); err != nil {
 				log.Printf("flotilla watch: operator ack pending record for %q failed: %v", j.Agent, err)
 			}
@@ -1239,12 +1240,19 @@ func cmdWatch(args []string) error {
 	// gateway health. Alert-once per message id; coordinator wake retries on busy.
 	if len(channelIDs) > 0 && botToken != "" && cfg.OperatorUserID != "" && tr != nil {
 		if hist, ok := tr.(transport.RecentHistory); ok {
+			timing, err := unackedTimingFromEnv(os.Getenv)
+			if err != nil {
+				return err
+			}
 			dests := transportDestinations(tr, channelIDs)
 			reader := &transportRecentReader{cap: hist, dest: destByChannel(dests, channelIDs)}
-			backstop := watch.NewUnackedBackstopDynamic(currentRoster, reader, *unackedPath, watch.OperatorAckRoot(rosterDir), alert, mkSend(confirm.Submit), nil)
+			backstop, err := watch.NewUnackedBackstopDynamicWithTiming(currentRoster, reader, *unackedPath, watch.OperatorAckRoot(rosterDir), alert, mkSend(confirm.Submit), nil, timing)
+			if err != nil {
+				return err
+			}
 			go backstop.Run(ctx)
-			fmt.Printf("flotilla watch: un-acked backstop active (state=%s scan=%s min-age=%s)\n",
-				*unackedPath, unacked.DefaultScanInterval, unacked.DefaultMinAge)
+			fmt.Printf("flotilla watch: un-acked backstop active (state=%s scan=%s min-age=%s working-followup=%s)\n",
+				*unackedPath, timing.ScanInterval, timing.MinAge, timing.WorkingFollowUp)
 		} else {
 			fmt.Fprintln(os.Stderr, "flotilla watch: WARNING — coordination transport has no recent-history capability; un-acked backstop disabled")
 		}
@@ -1253,6 +1261,32 @@ func cmdWatch(args []string) error {
 	<-ctx.Done()
 	fmt.Println("\nflotilla watch: shutting down")
 	return nil
+}
+
+func unackedTimingFromEnv(getenv func(string) string) (unacked.Timing, error) {
+	timing := unacked.DefaultTiming()
+	for _, setting := range []struct {
+		name string
+		dst  *time.Duration
+	}{
+		{"FLOTILLA_UNACKED_SCAN_INTERVAL", &timing.ScanInterval},
+		{"FLOTILLA_UNACKED_MIN_AGE", &timing.MinAge},
+		{"FLOTILLA_UNACKED_WORKING_FOLLOWUP", &timing.WorkingFollowUp},
+	} {
+		raw := strings.TrimSpace(getenv(setting.name))
+		if raw == "" {
+			continue
+		}
+		value, err := time.ParseDuration(raw)
+		if err != nil {
+			return timing, fmt.Errorf("%s: parse duration %q: %w", setting.name, raw, err)
+		}
+		*setting.dst = value
+	}
+	if err := timing.Validate(); err != nil {
+		return timing, fmt.Errorf("unacked timing: %w", err)
+	}
+	return timing, nil
 }
 
 // contentHasher returns a content-hash function for a file the change-detector
