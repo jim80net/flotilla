@@ -9,8 +9,9 @@ Reach for this when one project has grown past a single XO's span, or when you
 run multiple projects and want one place to steer them all. If you run a single
 fleet, you do not need any of this yet — come back when you add a second.
 
-The model is the same hub-and-spoke one tier up: the Discord **channel list
-becomes your org chart**. Each project gets its own channel bound to a
+The model is the same hub-and-spoke one tier up, but the roster's immutable
+`seat_id` and `parent` edges are the org chart. Discord channels are a validated
+routing and visibility view. Each project gets its own channel bound to a
 **project-XO**; a `#fleet-command` channel is bound to a **meta-XO** whose
 *members are the project-XOs*. A project-XO is to the meta-XO exactly what a desk
 is to a project-XO. You DM a project's chief by posting in its channel, or drive
@@ -27,9 +28,12 @@ Replace the single top-level `channel_id` / `xo_agent` with a `channels[]` list
   "operator_user_id": "YOUR_DISCORD_USER_ID",
   "xo_agent": "meta-xo",
   "agents": [
-    { "name": "meta-xo" },
-    { "name": "alpha-xo" }, { "name": "alpha-be" }, { "name": "alpha-data" },
-    { "name": "beta-xo" },  { "name": "beta-be" }
+    { "seat_id": "9dd4bbb777a015a1", "name": "meta-xo" },
+    { "seat_id": "4555787dfeaac6be", "parent": "9dd4bbb777a015a1", "name": "alpha-xo" },
+    { "seat_id": "15e9f6d3d03882b2", "parent": "4555787dfeaac6be", "name": "alpha-be" },
+    { "seat_id": "05bd02999984c6df", "parent": "4555787dfeaac6be", "name": "alpha-data" },
+    { "seat_id": "41de0c1150340a41", "parent": "9dd4bbb777a015a1", "name": "beta-xo" },
+    { "seat_id": "311eebb39b84f6a2", "parent": "41de0c1150340a41", "name": "beta-be" }
   ],
   "channels": [
     { "role": "fleet-command", "channel_id": "C_CMD",   "xo_agent": "meta-xo",
@@ -41,6 +45,15 @@ Replace the single top-level `channel_id` / `xo_agent` with a `channels[]` list
   ]
 }
 ```
+
+The example IDs are illustrative; never copy them. `workspace init` and
+`register` assign a cryptographically random ID when an existing seat lacks one.
+IDs are immutable and never reused; `parent` always references an ID, while
+`name` and `surface` may change independently. A fully legacy roster with both
+fields absent still loads so a deployment can migrate all current seats and
+edges in one reviewed commit. Once structured edges are present, an unparented
+seat other than the configured fleet root is an explicit **Unassigned** defect on
+the dash.
 
 Routing is by the message's **origin channel**: a bare message in `#fleet-alpha`
 goes to `alpha-xo`; `@alpha-be` there reaches that desk. In `#fleet-command`, a
@@ -104,11 +117,10 @@ flotilla channel move 123456789012345678 --category Alpha \
 > `members`). **Visibility synthesis** (the rolled-up fleet view, Tiers 2/3)
 > needs a **different** member shape — each agent owns its own home channel and
 > lists its *parent* in `members[]`, with the broadcast channel tagged
-> `role="fleet-command"`. At load, both layouts normalize into one compiled org
-> DAG: `Parents[x]` are who `x` reports to and `Children[x]` are its direct
-> reports. Repeated bindings are deduplicated and distinct multi-parent edges
-> are retained. Synthesis, ownership, authorization, and dash consumers all read
-> that canonical snapshot, including across atomic roster hot reloads. See
+> `role="fleet-command"`. After structured roster migration, that inferred edge
+> is no longer org truth: load checks that it agrees with the roster `parent`
+> wherever both express an edge, and refuses disagreement. Synthesis may consume
+> the validated channel view; the dash map consumes roster edges only. See
 > [visibility.md → The worked example](./visibility.md#the-worked-example).
 
 > **The bot needs the Message Content intent in EVERY bound channel — not just

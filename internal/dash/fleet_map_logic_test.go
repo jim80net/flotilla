@@ -15,17 +15,19 @@ type railGroupFixture struct {
 	Role      string `json:"role"`
 	Label     string `json:"label"`
 	Depth     int    `json:"depth"`
+	Blocked   int    `json:"blocked"`
+	Waiting   int    `json:"waiting"`
+	Defect    bool   `json:"defect"`
 	Desks     []struct {
 		Name      string `json:"name"`
 		Role      string `json:"role"`
 		ChannelID string `json:"channel_id"`
+		SeatID    string `json:"seat_id"`
 	} `json:"desks"`
 }
 
-// TestFleetMapCanonicalHierarchy745 executes the authored rail projection against a
-// channel-dump-shaped fixture: routing edges repeat every seat, while org_nodes supplies
-// the one canonical hierarchy. Generic identities stand in for the private deployment.
-func TestFleetMapCanonicalHierarchy745(t *testing.T) {
+func fleetMapProjectionVM(t *testing.T) *goja.Runtime {
+	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("assets", "dash.js"))
 	if err != nil {
 		raw, err = os.ReadFile(filepath.Join("internal", "dash", "assets", "dash.js"))
@@ -42,11 +44,20 @@ func TestFleetMapCanonicalHierarchy745(t *testing.T) {
 function escapeHtml(s) { return String(s == null ? "" : s)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
   .replace(/"/g, "&quot;").replace(/'/g, "&#39;"); }
+function operatorVisualState(state, posture) { return posture === "blocked" ? "blocked" : state; }
 ` + string(raw[start:end])
 	vm := goja.New()
 	if _, err := vm.RunString(source); err != nil {
 		t.Fatalf("load fleet-map projection: %v", err)
 	}
+	return vm
+}
+
+// TestFleetMapCanonicalHierarchy745 executes the authored rail projection against a
+// channel-dump-shaped fixture: routing edges repeat every seat, while org_nodes supplies
+// the one canonical hierarchy. Generic identities stand in for the private deployment.
+func TestFleetMapCanonicalHierarchy745(t *testing.T) {
+	vm := fleetMapProjectionVM(t)
 
 	fixture := map[string]any{
 		"coordinators": []string{"meta-xo", "alpha-xo", "beta-xo", "dev-xo"},
@@ -140,5 +151,79 @@ function escapeHtml(s) { return String(s == null ? "" : s)
 	separated, err := roleTag(goja.Undefined(), vm.ToValue("lead"), vm.ToValue("xo"))
 	if err != nil || !strings.Contains(separated.String(), "· xo") {
 		t.Errorf("separated role tag = %q, err=%v; want visible separator", separated, err)
+	}
+}
+
+func TestFleetMapUsesRosterParentEdgesAndShowsDefects942(t *testing.T) {
+	vm := fleetMapProjectionVM(t)
+	fixture := map[string]any{
+		"roster_hierarchy": true,
+		"root_seat_id":     "0102030405060708",
+		"seats": []map[string]any{
+			{"seat_id": "0102030405060708", "name": "fleet-lead", "coordinator": true, "channel_id": "C_ROOT"},
+			{"seat_id": "1112131415161718", "name": "alpha-xo", "parent": "0102030405060708", "coordinator": true, "channel_id": "C_ALPHA"},
+			{"seat_id": "2122232425262728", "name": "alpha-build", "parent": "1112131415161718", "channel_id": "C_BUILD"},
+			{"seat_id": "3132333435363738", "name": "empty-xo", "parent": "0102030405060708", "coordinator": true},
+			{"seat_id": "4142434445464748", "name": "direct-desk", "parent": "0102030405060708"},
+			{"seat_id": "5152535455565758", "name": "orphan-xo", "coordinator": true},
+			{"seat_id": "6162636465666768", "name": "orphan-child", "parent": "5152535455565758"},
+			{"name": "legacy-unassigned"},
+		},
+		// Deliberately contradictory membership: the crowned projection must ignore
+		// it for grouping and use it only through each seat's routing channel.
+		"channels": []map[string]any{{"channel_id": "C_WRONG", "xo_agent": "orphan-xo", "members": []string{"alpha-build"}}},
+	}
+	status := map[string]any{
+		"xo": "fleet-lead",
+		"agents": []map[string]any{
+			{"name": "fleet-lead", "state": "idle"},
+			{"name": "alpha-xo", "state": "idle", "loop_posture": "awaiting-authority"},
+			{"name": "alpha-build", "state": "crashed"},
+			{"name": "empty-xo", "state": "idle"},
+			{"name": "direct-desk", "state": "working"},
+		},
+	}
+	build, ok := goja.AssertFunction(vm.Get("buildRailGroups"))
+	if !ok {
+		t.Fatal("buildRailGroups not callable")
+	}
+	value, err := build(goja.Undefined(), vm.ToValue(fixture), vm.ToValue(status))
+	if err != nil {
+		t.Fatalf("buildRailGroups: %v", err)
+	}
+	encoded, err := json.Marshal(value.Export())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var groups []railGroupFixture
+	if err := json.Unmarshal(encoded, &groups); err != nil {
+		t.Fatal(err)
+	}
+	byLabel := map[string]railGroupFixture{}
+	seatCount := map[string]int{}
+	for _, group := range groups {
+		byLabel[group.Label] = group
+		for _, seat := range group.Desks {
+			seatCount[seat.Name]++
+		}
+	}
+	if len(groups) != 3 || byLabel["Fleet Command"].Label == "" || byLabel["Alpha"].Label == "" {
+		t.Fatalf("roster groups = %+v", groups)
+	}
+	if _, exists := byLabel["Empty"]; exists {
+		t.Fatalf("empty-subtree coordinator became a group: %+v", groups)
+	}
+	if seatCount["empty-xo"] != 1 || seatCount["alpha-build"] != 1 {
+		t.Fatalf("seat placement counts = %+v", seatCount)
+	}
+	if got := byLabel["Alpha"]; got.Blocked != 1 || got.Waiting != 1 {
+		t.Fatalf("Alpha rollups = blocked %d waiting %d", got.Blocked, got.Waiting)
+	}
+	if got := byLabel["Fleet Command"]; got.Blocked != 1 || got.Waiting != 1 {
+		t.Fatalf("Fleet rollups = blocked %d waiting %d", got.Blocked, got.Waiting)
+	}
+	unassigned := byLabel["Unassigned"]
+	if !unassigned.Defect || len(unassigned.Desks) != 3 {
+		t.Fatalf("unassigned defect = %+v", unassigned)
 	}
 }

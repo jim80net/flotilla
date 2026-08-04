@@ -10,6 +10,7 @@ import "fmt"
 const (
 	SourceDerived = "derived" // from channels[] via roster synthesis rules
 	SourceFile    = "file"    // from fleet-org.yaml (PR2 agreement path)
+	SourceRoster  = "roster"  // from Agent.parent seat-id edges (#942 crown)
 )
 
 // NodeKind classifies an org node.
