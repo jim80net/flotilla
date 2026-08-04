@@ -4,6 +4,7 @@
 package unacked
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -15,12 +16,34 @@ import (
 // (monitoring-cadence-equals-alert-threshold: never alert on a message the fleet
 // may still be mid-answering within one scan cycle).
 const (
-	DefaultScanInterval    = 30 * time.Minute
-	DefaultMinAge          = 30 * time.Minute // MUST be >= DefaultScanInterval
+	DefaultScanInterval    = 10 * time.Minute
+	DefaultMinAge          = 10 * time.Minute // MUST be >= DefaultScanInterval
 	DefaultAckWindow       = 2 * time.Hour
-	DefaultWorkingFollowUp = 30 * time.Minute
+	DefaultWorkingFollowUp = 15 * time.Minute
 	DefaultLookback        = 50
 )
+
+// Timing controls the standing scanner cadence and age gates.
+type Timing struct {
+	ScanInterval    time.Duration
+	MinAge          time.Duration
+	WorkingFollowUp time.Duration
+}
+
+func DefaultTiming() Timing {
+	return Timing{DefaultScanInterval, DefaultMinAge, DefaultWorkingFollowUp}
+}
+
+// Validate enforces the cadence invariant and rejects durations that would disable a gate.
+func (t Timing) Validate() error {
+	if t.ScanInterval <= 0 || t.MinAge <= 0 || t.WorkingFollowUp <= 0 {
+		return fmt.Errorf("unacked timing durations must be positive")
+	}
+	if t.MinAge < t.ScanInterval {
+		return fmt.Errorf("unacked min age %s must be >= scan interval %s", t.MinAge, t.ScanInterval)
+	}
+	return nil
+}
 
 // Message is the scan input: transport.Message plus the local exact-ID marker.
 type Message struct {

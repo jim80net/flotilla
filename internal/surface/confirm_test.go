@@ -191,6 +191,33 @@ func TestConfirmSubmitConfirmsOnComposerClear(t *testing.T) {
 	}
 }
 
+func TestSubmitInterruptWorkingMainComposerConfirmsQueued(t *testing.T) {
+	enter := 0
+	d := &stateStub{
+		assessSeq: []State{StateWorking},
+		stateSeq:  []ComposerDisposition{ComposerCleared, ComposerQueued},
+	}
+	if err := newConfirm(&enter).SubmitInterrupt(d, "0:0.0", "operator now"); err != nil {
+		t.Fatalf("SubmitInterrupt working pane: %v", err)
+	}
+	if d.submitCalls != 1 || enter != 0 {
+		t.Fatalf("Submit=%d Enter=%d, want one paste and no retry", d.submitCalls, enter)
+	}
+}
+
+func TestSubmitInterruptWorkingOverlayRefusesBeforePaste(t *testing.T) {
+	for _, composer := range []ComposerDisposition{ComposerSubAgent, ComposerListNav, ComposerPending, ComposerQueued, ComposerUndetermined} {
+		t.Run(composer.String(), func(t *testing.T) {
+			enter := 0
+			d := &stateStub{assessSeq: []State{StateWorking}, stateSeq: []ComposerDisposition{composer}}
+			err := newConfirm(&enter).SubmitInterrupt(d, "0:0.0", "operator now")
+			if err == nil || d.submitCalls != 0 {
+				t.Fatalf("composer=%v err=%v Submit=%d, want refused before paste", composer, err, d.submitCalls)
+			}
+		})
+	}
+}
+
 func TestConfirmSubmitComposerDroppedEnterThenClears(t *testing.T) {
 	// A dropped Enter: the composer stays PENDING through attempt 1, an Enter-only retry, then clears.
 	// ⇒ nil; Submit EXACTLY 1 (no re-paste); SendEnter ×1.

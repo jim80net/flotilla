@@ -194,8 +194,8 @@ func TestRelaySetsOriginChannelOnJob(t *testing.T) {
 	if c.jobs[0].OriginChannel != "C1" {
 		t.Errorf("OriginChannel = %q, want C1 (the CoS-mirror seam must carry the origin channel)", c.jobs[0].OriginChannel)
 	}
-	if c.jobs[0].Kind != "relay" {
-		t.Errorf("Kind = %q, want relay", c.jobs[0].Kind)
+	if c.jobs[0].Kind != KindOperatorInterrupt {
+		t.Errorf("Kind = %q, want %q", c.jobs[0].Kind, KindOperatorInterrupt)
 	}
 }
 

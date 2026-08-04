@@ -57,6 +57,18 @@ func NewUnackedBackstop(cfg *roster.Config, reader RecentHistoryReader, statePat
 }
 
 func NewUnackedBackstopDynamic(cfg func() *roster.Config, reader RecentHistoryReader, statePath, ackRoot string, alert func(string), wake CoordinatorWake, coordinator func(*roster.Config) string) *UnackedBackstop {
+	backstop, err := NewUnackedBackstopDynamicWithTiming(cfg, reader, statePath, ackRoot, alert, wake, coordinator, unacked.DefaultTiming())
+	if err != nil {
+		panic(err) // compile-time defaults are required to validate
+	}
+	return backstop
+}
+
+// NewUnackedBackstopDynamicWithTiming builds the backstop with validated runtime timing.
+func NewUnackedBackstopDynamicWithTiming(cfg func() *roster.Config, reader RecentHistoryReader, statePath, ackRoot string, alert func(string), wake CoordinatorWake, coordinator func(*roster.Config) string, timing unacked.Timing) (*UnackedBackstop, error) {
+	if err := timing.Validate(); err != nil {
+		return nil, err
+	}
 	if coordinator == nil {
 		coordinator = defaultCoordinator
 	}
@@ -70,11 +82,11 @@ func NewUnackedBackstopDynamic(cfg func() *roster.Config, reader RecentHistoryRe
 		coordinator:  coordinator,
 		store:        newUnackedStateStore(statePath, defaultUnackedRetention),
 		ackRoot:      ackRoot,
-		scanCfg:      unacked.DefaultConfig(initial.OperatorUserID),
+		scanCfg:      unacked.Config{MinAge: timing.MinAge, AckWindow: unacked.DefaultAckWindow, WorkingFollowUp: timing.WorkingFollowUp, OperatorUserID: initial.OperatorUserID},
 		lookback:     unacked.DefaultLookback,
-		pollInterval: unacked.DefaultScanInterval,
+		pollInterval: timing.ScanInterval,
 		now:          time.Now,
-	}
+	}, nil
 }
 
 func defaultCoordinator(cfg *roster.Config) string {

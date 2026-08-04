@@ -58,6 +58,8 @@ const (
 	KindDefault JobKind = ""
 	// KindRelay is an operator message relayed to an agent's pane.
 	KindRelay JobKind = "relay"
+	// KindOperatorInterrupt is a verified operator relay eligible for confirmed mid-turn delivery.
+	KindOperatorInterrupt JobKind = "operator-interrupt"
 	// KindHeartbeat is the XO liveness/continuation tick.
 	KindHeartbeat JobKind = "heartbeat"
 	// KindDetector is a change-detector wake or a desk-heartbeat/nudge beat
@@ -140,6 +142,7 @@ type Injector struct {
 	jobs                      chan Job
 	send                      SendFunc
 	relaySend                 SendFunc      // optional: the RELAY-kind send path (self-heal-capable, #156). nil ⇒ relays use send.
+	operatorInterruptSend     SendFunc      // optional: verified operator-only path that may submit while Working (#956).
 	stop                      chan struct{} // worker: drain then exit
 	stopped                   chan struct{} // Enqueue: stop accepting (closed once)
 	done                      chan struct{}
@@ -169,6 +172,9 @@ type Injector struct {
 // plain send — a tick must never fire an unsolicited destructive Ctrl-C. nil (the default) ⇒ relays
 // use the plain send. Must be set before Start.
 func (in *Injector) SetRelaySend(relaySend SendFunc) { in.relaySend = relaySend }
+
+// SetOperatorInterruptSend wires the only delivery path allowed to enter a Working composer.
+func (in *Injector) SetOperatorInterruptSend(send SendFunc) { in.operatorInterruptSend = send }
 
 // SetMirror installs a hook called after each CONFIRMED delivery, for the audit
 // trail. Must be set before Start.
@@ -273,7 +279,9 @@ func (in *Injector) deliver(j Job) {
 	// A RELAY (operator message) uses the self-heal-capable path when wired; a heartbeat/detector tick
 	// uses the plain send so a tick never fires an unsolicited Ctrl-C (#156 H2).
 	send := in.send
-	if in.relaySend != nil && usesSelfHealSend(j.Kind) {
+	if j.Kind == KindOperatorInterrupt && in.operatorInterruptSend != nil {
+		send = in.operatorInterruptSend
+	} else if in.relaySend != nil && usesSelfHealSend(j.Kind) {
 		send = in.relaySend
 	}
 	var err error
@@ -651,7 +659,9 @@ func deliveryKind(kind JobKind) string {
 
 // isRelay reports whether a job is an operator relay (an empty Kind is a bare relay). Relay
 // jobs are deferred-not-dropped when busy and escalated loudly on failure; ticks are not.
-func isRelay(kind JobKind) bool { return kind == KindDefault || kind == KindRelay }
+func isRelay(kind JobKind) bool {
+	return kind == KindDefault || kind == KindRelay || kind == KindOperatorInterrupt
+}
 
 // isDeferredDelivery reports jobs that are deferred-not-dropped when busy (operator relays
 // and swept inter-agent sends).
