@@ -303,12 +303,29 @@ type TopologyOrgNode struct {
 	Children      []string `json:"children,omitempty"`
 }
 
+// TopologySeat is the roster-authoritative identity and reporting edge exposed
+// to the fleet map. Parent is a seat_id, never a display name. ChannelID is
+// routing metadata only and must not participate in tree construction.
+type TopologySeat struct {
+	SeatID      string `json:"seat_id,omitempty"`
+	Name        string `json:"name"`
+	Parent      string `json:"parent,omitempty"`
+	Coordinator bool   `json:"coordinator"`
+	ChannelID   string `json:"channel_id,omitempty"`
+}
+
 // TopologyDoc is the federation org chart: the effective channel↔XO bindings
 // plus the compiled org-truth DAG (org_source + org_nodes). For a single-fleet
 // (legacy channel_id) roster Channels is the one synthesized binding. A clock-only
 // daemon (no channel_id, no channels[]) yields empty Channels with an explanatory Note.
 type TopologyDoc struct {
 	Channels []TopologyChannel `json:"channels"`
+	// RosterHierarchy is true once a parent edge exists or every seat has seat_id.
+	// At that point Seats is the map's only hierarchy input; org_nodes and channels
+	// remain compatibility/validated-view data for other consumers during migration.
+	RosterHierarchy bool           `json:"roster_hierarchy,omitempty"`
+	RootSeatID      string         `json:"root_seat_id,omitempty"`
+	Seats           []TopologySeat `json:"seats,omitempty"`
 	// Coordinators is the roster-authoritative set of coordinator agents (XOs + the CoS,
 	// per roster.IsCoordinator), sorted. The conversations rail uses it to keep the "Fleet
 	// Command" group to coordinators ONLY — a channel member that is not a coordinator groups
@@ -343,12 +360,32 @@ func BuildTopology(cfg *roster.Config) TopologyDoc {
 	// The coordinator set (XOs + CoS) computed in ONE pass by the roster (CoordinatorSet) —
 	// not IsCoordinator-per-agent, which re-scans the bindings each call (O(n²)). The roster
 	// is still the single source of truth for who is a coordinator.
-	if coords := cfg.CoordinatorSet(); len(coords) > 0 {
-		doc.Coordinators = make([]string, 0, len(coords))
-		for a := range coords {
+	coordinators := cfg.CoordinatorSet()
+	if len(coordinators) > 0 {
+		doc.Coordinators = make([]string, 0, len(coordinators))
+		for a := range coordinators {
 			doc.Coordinators = append(doc.Coordinators, a)
 		}
 		sort.Strings(doc.Coordinators)
+	}
+	rootName := cfg.XOAgent
+	if rootName == "" && len(cfg.Agents) > 0 {
+		rootName = cfg.Agents[0].Name
+	}
+	doc.RosterHierarchy = cfg.HasStructuredHierarchy()
+	for _, agent := range cfg.Agents {
+		channelID, _ := cfg.ChannelForAgent(agent.Name)
+		seatCoordinator := coordinators[agent.Name]
+		if doc.RosterHierarchy {
+			seatCoordinator = agent.Coordinator != nil && *agent.Coordinator
+		}
+		doc.Seats = append(doc.Seats, TopologySeat{
+			SeatID: agent.SeatID, Name: agent.Name, Parent: agent.Parent,
+			Coordinator: seatCoordinator, ChannelID: channelID,
+		})
+		if agent.Name == rootName {
+			doc.RootSeatID = agent.SeatID
+		}
 	}
 	if d := cfg.Org(); d != nil {
 		doc.OrgSource = d.Source

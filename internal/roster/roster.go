@@ -18,8 +18,17 @@ import (
 
 // Agent is one coordinated coding agent — a long-lived session in a tmux pane.
 type Agent struct {
-	// Name is the stable identifier used on the command line and as the
-	// agent's Discord identity (e.g. "backend").
+	// SeatID is the immutable, opaque identity of this seat. New provisioning
+	// assigns a short random hex value; an existing value never changes. Empty is
+	// accepted for backward compatibility until a deployment performs its one-shot
+	// roster migration.
+	SeatID string `json:"seat_id,omitempty"`
+	// Parent references the parent's SeatID, never its display name. Empty is a
+	// root/unassigned fact (the fleet map distinguishes the configured fleet root
+	// from visible unassigned defects).
+	Parent string `json:"parent,omitempty"`
+	// Name is the mutable display and command-line mention for the seat. Durable
+	// identity and hierarchy key on SeatID instead.
 	Name string `json:"name"`
 	// TmuxTitle is the title of the tmux pane the agent runs in. Delivery
 	// resolves the pane by matching this title, so it survives pane
@@ -294,6 +303,7 @@ func LoadWith(path string, opts LoadOptions) (*Config, error) {
 		return nil, fmt.Errorf("roster %q lists no agents", path)
 	}
 	seenName := make(map[string]bool, len(c.Agents))
+	seatByID := make(map[string]string, len(c.Agents))
 	seenTitle := make(map[string]bool, len(c.Agents))
 	for _, a := range c.Agents {
 		if a.Name == "" {
@@ -309,6 +319,15 @@ func LoadWith(path string, opts LoadOptions) (*Config, error) {
 			return nil, fmt.Errorf("roster %q has duplicate agent %q", path, a.Name)
 		}
 		seenName[a.Name] = true
+		if a.SeatID != "" {
+			if err := validateSeatID(a.SeatID); err != nil {
+				return nil, fmt.Errorf("roster %q: agent %q has invalid seat_id %q: %w", path, a.Name, a.SeatID, err)
+			}
+			if prior, exists := seatByID[a.SeatID]; exists {
+				return nil, fmt.Errorf("roster %q: agents %q and %q share seat_id %q", path, prior, a.Name, a.SeatID)
+			}
+			seatByID[a.SeatID] = a.Name
+		}
 		// The resolution key travels on a TAB-delimited, NEWLINE-separated tmux
 		// list-panes line and is stored verbatim as the @flotilla_agent marker; a
 		// tab or newline in it would corrupt that wire format — splitting the
@@ -340,6 +359,21 @@ func LoadWith(path string, opts LoadOptions) (*Config, error) {
 		if a.WorkLedgerRepositoryless && (strings.TrimSpace(a.PrimaryRepo) != "" || len(a.SecondaryRepos) > 0) {
 			return nil, fmt.Errorf("roster %q: agent %q cannot combine work_ledger_repositoryless with repository mappings", path, a.Name)
 		}
+	}
+	for _, a := range c.Agents {
+		if a.Parent == "" {
+			continue
+		}
+		_, exists := seatByID[a.Parent]
+		if !exists {
+			return nil, fmt.Errorf("roster %q: agent %q parent %q does not reference an existing seat_id", path, a.Name, a.Parent)
+		}
+		if a.SeatID != "" && a.Parent == a.SeatID {
+			return nil, fmt.Errorf("roster %q: agent %q parent %q references its own seat_id", path, a.Name, a.Parent)
+		}
+	}
+	if err := validateRosterParentCycles(c.Agents, seatByID); err != nil {
+		return nil, fmt.Errorf("roster %q: %w", path, err)
 	}
 	// watch-capability fields: validate at load so a misconfigured daemon
 	// refuses to start rather than failing silently at the first tick.

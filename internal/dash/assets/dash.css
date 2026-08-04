@@ -384,6 +384,14 @@ code {
   padding: .35rem .45rem .25rem;
   font-size: .72rem;
 }
+.conv-group-rollups { display: inline-flex; flex-wrap: wrap; gap: .3rem; margin-left: auto; }
+.conv-group-rollup {
+  display: inline-flex; align-items: center; min-height: 20px; padding: 0 .4rem;
+  border: 1px solid var(--line); border-radius: 999px; font: 600 .56rem var(--display);
+  letter-spacing: .04em; text-transform: uppercase;
+}
+.conv-group-rollup.blocked { color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, var(--line)); }
+.conv-group-rollup.waiting { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 48%, var(--line)); }
 .conv-group-items { display: grid; gap: 2px; }
 
 .conv-item {
@@ -949,6 +957,9 @@ code {
    section label, visually distinct from the cyan Fleet Command header (#421 follow-up). */
 .chan-desks { color: var(--ink-3); font-family: var(--display); letter-spacing: .1em; text-transform: uppercase; font-size: .62rem; font-weight: 600; }
 .conv-group-fleet-command .conv-group-head { border-bottom: 1px solid color-mix(in srgb, var(--cyan) 30%, transparent); background: color-mix(in srgb, var(--cyan) 4%, transparent); border-radius: var(--r-xs) var(--r-xs) 0 0; }
+.conv-group-unassigned { border: 1px solid color-mix(in srgb, var(--err) 45%, var(--line)); border-radius: var(--r-sm); }
+.conv-group-unassigned .conv-group-head { background: color-mix(in srgb, var(--err) 7%, transparent); }
+.conv-group-unassigned .chan-desks, .conv-group-unassigned .chan-role { color: var(--err); }
 .conv-group-depth-1 .conv-group-head { padding-left: .75rem; }
 .conv-group-depth-2 .conv-group-head { padding-left: 1.5rem; }
 .conv-group-depth-3 .conv-group-head { padding-left: 2.25rem; }
