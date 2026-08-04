@@ -97,6 +97,22 @@ func TestBouncedSendLandsInOutbox(t *testing.T) {
 	}
 }
 
+func TestDirectSendAfterDurableJoinsTailWithoutQueueJump(t *testing.T) {
+	dir := t.TempDir()
+	rosterPath := filepath.Join(dir, "flotilla.json")
+	if _, _, err := outbox.Enqueue(dir, "alpha", "xo", "first durable order"); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := deliverOrQueueSend(&roster.Config{}, rosterPath, "beta", "xo", nil, "unused", "later direct order")
+	if err != nil || !queued {
+		t.Fatalf("queued=%v err=%v, want durable tail join", queued, err)
+	}
+	got := outbox.ListAll(dir)
+	if len(got) != 2 || got[0].Message != "first durable order" || got[1].Message != "later direct order" {
+		t.Fatalf("recipient order=%+v", got)
+	}
+}
+
 // #475 desk-visible queued ack: machine-readable QUEUED line for monitors.
 func TestFormatQueuedAck_Visible(t *testing.T) {
 	line := dispatch.FormatQueuedAck("deadbeef", "alpha", "xo", false)

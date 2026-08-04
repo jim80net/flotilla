@@ -255,12 +255,15 @@ func TestCancelAdvancesPairEpochAndStandsDownWholeGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Sender != "alpha-desk" || result.Recipient != "alpha-xo" || result.Canceled != 2 || result.Epoch != 2 {
+	if result.Sender != "alpha-desk" || result.Recipient != "alpha-xo" || result.Canceled != 1 || result.Epoch != 2 {
 		t.Fatalf("cancel result = %+v", result)
 	}
 	remaining := NewStore(mustPath(t, dir, "alpha-desk")).Load()
-	if len(remaining) != 1 || remaining[0].ID != other {
-		t.Fatalf("remaining = %+v, want unrelated recipient only (canceled %s and %s)", remaining, first, second)
+	if len(remaining) != 2 || remaining[0].ID != second || remaining[0].Epoch != 2 || remaining[1].ID != other {
+		t.Fatalf("remaining = %+v, want re-stamped sibling %s and unrelated %s", remaining, second, other)
+	}
+	if !Current(dir, remaining[0]) {
+		t.Fatal("cancel sibling must remain current")
 	}
 
 	third, _, err := Enqueue(dir, "alpha-desk", "alpha-xo", "replacement task")
@@ -282,6 +285,49 @@ func TestCancelAdvancesPairEpochAndStandsDownWholeGeneration(t *testing.T) {
 	}
 	if !Current(dir, replacement) {
 		t.Fatal("replacement generation should be current")
+	}
+}
+
+func TestRemoveIfNonCurrentRequiresExactStaleSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	path := mustPath(t, dir, "alpha-desk")
+	if err := os.WriteFile(path, []byte(`{"epochs":{"alpha-xo":2},"pending":[{"id":"stale","sender":"alpha-desk","recipient":"alpha-xo","message":"old","epoch":1,"enqueued_at":"2026-08-01T00:00:00Z"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	decoy := Entry{ID: "stale", Sender: "alpha-desk", Recipient: "other-xo", Epoch: 1}
+	if removed, err := RemoveIfNonCurrent(dir, decoy); err != nil || removed {
+		t.Fatalf("decoy removed=%v err=%v", removed, err)
+	}
+	stale := NewStore(path).Load()[0]
+	if removed, err := RemoveIfNonCurrent(dir, stale); err != nil || !removed {
+		t.Fatalf("stale removed=%v err=%v", removed, err)
+	}
+	if got := NewStore(path).Load(); len(got) != 0 {
+		t.Fatalf("stale residue: %+v", got)
+	}
+}
+
+func TestStaleSweepSnapshotCannotGCRestampedCancelSibling(t *testing.T) {
+	dir := t.TempDir()
+	target, _, err := Enqueue(dir, "alpha", "cos", "cancel me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = Enqueue(dir, "alpha", "cos", "keep me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := NewStore(mustPath(t, dir, "alpha")).Load()
+	observedSibling := before[1]
+	if _, err := Cancel(dir, target); err != nil {
+		t.Fatal(err)
+	}
+	if removed, err := RemoveIfNonCurrent(dir, observedSibling); err != nil || removed {
+		t.Fatalf("old snapshot removed re-stamped sibling=%v err=%v", removed, err)
+	}
+	after := NewStore(mustPath(t, dir, "alpha")).Load()
+	if len(after) != 1 || after[0].Message != "keep me" || after[0].Epoch != 2 || !Current(dir, after[0]) {
+		t.Fatalf("survivor after stale GC attempt=%+v", after)
 	}
 }
 

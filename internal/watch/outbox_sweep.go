@@ -29,11 +29,23 @@ func (s *OutboxSweeper) SweepAll() int {
 	}
 	pending := outbox.ListAll(s.rosterDir)
 	n := 0
+	seenRecipient := make(map[string]bool)
 	for _, e := range pending {
 		if !outbox.Current(s.rosterDir, e) {
-			log.Printf("flotilla watch: skipped canceled or superseded send %s from %q to %q (epoch %d)", e.ID, e.Sender, e.Recipient, e.Epoch)
+			removed, err := outbox.RemoveIfNonCurrent(s.rosterDir, e)
+			if err != nil {
+				log.Printf("flotilla watch: failed to garbage-collect canceled or superseded send %s from %q to %q (epoch %d): %v", e.ID, e.Sender, e.Recipient, e.Epoch, err)
+			} else if removed {
+				log.Printf("flotilla watch: garbage-collected canceled or superseded send %s from %q to %q (epoch %d)", e.ID, e.Sender, e.Recipient, e.Epoch)
+			}
 			continue
 		}
+		// Admit only the oldest current order for each recipient. If that head is already
+		// in flight, its successors still wait; a busy-deferred head cannot be queue-jumped.
+		if seenRecipient[e.Recipient] {
+			continue
+		}
+		seenRecipient[e.Recipient] = true
 		key := entryKey(e.Sender, e.ID)
 		if _, loaded := s.inFlight.LoadOrStore(key, struct{}{}); loaded {
 			continue
