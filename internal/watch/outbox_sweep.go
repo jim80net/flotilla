@@ -32,11 +32,9 @@ func (s *OutboxSweeper) SweepAll() int {
 	seenRecipient := make(map[string]bool)
 	for _, e := range pending {
 		if !outbox.Current(s.rosterDir, e) {
-			removed, err := outbox.RemoveIfNonCurrent(s.rosterDir, e)
+			_, err := outbox.RemoveIfNonCurrent(s.rosterDir, e)
 			if err != nil {
 				log.Printf("flotilla watch: failed to garbage-collect canceled or superseded send %s from %q to %q (epoch %d): %v", e.ID, e.Sender, e.Recipient, e.Epoch, err)
-			} else if removed {
-				log.Printf("flotilla watch: garbage-collected canceled or superseded send %s from %q to %q (epoch %d)", e.ID, e.Sender, e.Recipient, e.Epoch)
 			}
 			continue
 		}

@@ -173,6 +173,7 @@ func Cancel(rosterDir, id string) (CancelResult, error) {
 
 	st := NewStore(paths[0])
 	var result CancelResult
+	var canceled Entry
 	err = st.withLock(func() error {
 		f, err := st.readFileForUpdate()
 		if err != nil {
@@ -188,6 +189,7 @@ func Cancel(rosterDir, id string) (CancelResult, error) {
 		if target == nil {
 			return fmt.Errorf("id %q no longer pending", id)
 		}
+		canceled = *target
 		result.Sender = target.Sender
 		result.Recipient = target.Recipient
 		current := currentEpoch(f, result.Recipient)
@@ -213,6 +215,7 @@ func Cancel(rosterDir, id string) (CancelResult, error) {
 	if err != nil {
 		return CancelResult{}, fmt.Errorf("outbox cancel: %w", err)
 	}
+	logExit(canceled, "canceled", "cancel")
 	return result, nil
 }
 
@@ -244,6 +247,9 @@ func RemoveIfNonCurrent(rosterDir string, observed Entry) (bool, error) {
 		}
 		return nil
 	})
+	if err == nil && removed {
+		logExit(observed, "superseded-gc", "sweep-gc")
+	}
 	return removed, err
 }
 
@@ -321,7 +327,17 @@ func AttemptCurrent(rosterDir string, e Entry, attempt func() error) (bool, erro
 	if err != nil {
 		return attempted, fmt.Errorf("outbox delivery transaction: %w", err)
 	}
+	if attempted && attemptErr == nil {
+		logExit(e, "delivered-confirmed", "attempt-current")
+	}
 	return attempted, attemptErr
+}
+
+// logExit is the single grep contract for every terminal durable-outbox outcome.
+// journald supplies the timestamp; outbox_id, outcome, route path, and code path make
+// an absent entry explainable with one exact-ID query without logging its message body.
+func logExit(e Entry, outcome, via string) {
+	log.Printf("flotilla outbox exit: outbox_id=%q outcome=%s path=%q via=%s epoch=%d", e.ID, outcome, e.Sender+"->"+e.Recipient, via, effectiveEpoch(e.Epoch))
 }
 
 // Update persists deferral bumps and stale-escalation markers on an existing entry by id (#484).

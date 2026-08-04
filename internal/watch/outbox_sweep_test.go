@@ -27,7 +27,7 @@ func TestSweepGarbageCollectsNonCurrentWithAuditLine(t *testing.T) {
 	if entries := outbox.NewStore(path).Load(); len(entries) != 0 {
 		t.Fatalf("non-current residue: %+v", entries)
 	}
-	if !strings.Contains(buf.String(), "garbage-collected canceled or superseded send zombie") {
+	if !strings.Contains(buf.String(), `outbox_id="zombie" outcome=superseded-gc path="alpha->cos" via=sweep-gc`) {
 		t.Fatalf("missing GC audit line: %q", buf.String())
 	}
 }
@@ -83,8 +83,12 @@ func TestCanceledJobAlreadyQueuedInInjectorNeverDelivers(t *testing.T) {
 	if s.SweepAll() != 1 {
 		t.Fatal("expected one swept job")
 	}
+	buf := captureLog(t)
 	if _, err := outbox.Cancel(dir, id); err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `outbox_id="`+id+`" outcome=canceled path="alpha-desk->alpha-xo" via=cancel`) {
+		t.Fatalf("missing cancel audit line: %q", buf.String())
 	}
 
 	var sends atomic.Int32
@@ -219,7 +223,7 @@ func TestSweepDeliversOnRecipientIdleLogsEnqueueTime(t *testing.T) {
 	}
 
 	buf := captureLog(t)
-	job := Job{Agent: "cos", Message: "deploy done", Kind: KindSend, MessageID: "sweep1", Sender: "alpha", enqueuedAt: enqAt}
+	job := Job{Agent: "cos", IntendedRecipient: "cos", Message: "deploy done", Kind: KindSend, MessageID: "sweep1", Sender: "alpha", Epoch: 1, OutboxBound: true, enqueuedAt: enqAt}
 	in.deliver(job) // recipient busy — deferred, not removed from outbox
 	if len(deferred) != 1 {
 		t.Fatalf("first delivery deferred: %d", len(deferred))
@@ -236,6 +240,9 @@ func TestSweepDeliversOnRecipientIdleLogsEnqueueTime(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "queued 2h0m0s") {
 		t.Fatalf("log must carry enqueue latency, got: %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), `outbox_id="sweep1" outcome=delivered-confirmed path="alpha->cos" via=attempt-current`) {
+		t.Fatalf("missing delivered audit line: %q", buf.String())
 	}
 }
 
