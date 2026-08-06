@@ -111,14 +111,16 @@ func writeQualitySummary(out io.Writer, summary harnessquality.Summary) {
 }
 
 type statusItem struct {
-	Name           string                  `json:"name"`
-	Role           string                  `json:"role,omitempty"`             // "hub" for the XO, else omitted
-	Surface        string                  `json:"surface,omitempty"`          // effective surface driver
-	State          string                  `json:"state"`                      // pane / surface.State label
-	LoopPosture    string                  `json:"loop_posture,omitempty"`     // operator-facing #524 vocabulary
-	RawLoopPosture string                  `json:"raw_loop_posture,omitempty"` // retained when display normalization differs
-	QueueState     string                  `json:"queue_state"`                // empty | has-work | unknown
-	Usage          *watch.UsageObservation `json:"usage,omitempty"`
+	Name            string                  `json:"name"`
+	Role            string                  `json:"role,omitempty"`              // "hub" for the XO, else omitted
+	Surface         string                  `json:"surface,omitempty"`           // effective surface driver
+	State           string                  `json:"state"`                       // pane / surface.State label
+	StateObservedAt string                  `json:"state_observed_at,omitempty"` // per-desk detector observation
+	StateReason     string                  `json:"state_reason,omitempty"`      // short transition/refresh code
+	LoopPosture     string                  `json:"loop_posture,omitempty"`      // operator-facing #524 vocabulary
+	RawLoopPosture  string                  `json:"raw_loop_posture,omitempty"`  // retained when display normalization differs
+	QueueState      string                  `json:"queue_state"`                 // empty | has-work | unknown
+	Usage           *watch.UsageObservation `json:"usage,omitempty"`
 }
 
 // buildStatusJSON assembles the --json document. Pure (no I/O) so it is
@@ -136,6 +138,10 @@ func buildStatusJSON(cfg *roster.Config, xo, generatedAt string, snap watch.Snap
 			State:       deskStateLabel(snap, a.Name),
 			LoopPosture: string(displayPosture),
 			QueueState:  utilization.QueueState(evidenceOK && evidence.BacklogKnown, evidence.UnblockedN),
+		}
+		if observation, ok := snap.DeskObservations[a.Name]; ok {
+			item.StateObservedAt = observation.ObservedAt.UTC().Format(time.RFC3339)
+			item.StateReason = observation.Reason
 		}
 		if rawPosture != displayPosture {
 			item.RawLoopPosture = string(rawPosture)
@@ -215,9 +221,17 @@ func writeStatus(out io.Writer, cfg *roster.Config, xo, snapshotPath, ackPath st
 			marker = "(XO)"
 		}
 		posture := loopposture.OperatorDisplay(deriveAgentPosture(a.Name, snap, loopByAgent))
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", a.Name, deskStateLabel(snap, a.Name), posture, usageLabel(snap, a.Name, now), marker)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, deskStateLabel(snap, a.Name), posture, stateObservationLabel(snap, a.Name, now), usageLabel(snap, a.Name, now), marker)
 	}
 	_ = w.Flush()
+}
+
+func stateObservationLabel(snap watch.Snapshot, name string, now time.Time) string {
+	observation, ok := snap.DeskObservations[name]
+	if !ok || observation.ObservedAt.IsZero() {
+		return "state age unknown"
+	}
+	return "state " + humanizeAge(now.Sub(observation.ObservedAt)) + " · " + observation.Reason
 }
 
 func usageLabel(snap watch.Snapshot, name string, now time.Time) string {

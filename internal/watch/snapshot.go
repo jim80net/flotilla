@@ -25,7 +25,11 @@ type Snapshot struct {
 	// DeskStates is the last assessed surface state per monitored desk (by agent
 	// name), including the XO. The diff against the next tick's states is what
 	// the materiality predicate consumes.
-	DeskStates map[string]surface.State `json:"desk_states"`
+	DeskStates map[string]surface.State `json:"-"`
+	// DeskObservations carries the freshness and provenance persisted beside each
+	// state. It is kept parallel to DeskStates so detector/materiality callers retain
+	// their compact state-map API while the on-disk desk_states shape is auditable.
+	DeskObservations map[string]DeskStateObservation `json:"-"`
 	// SignalHash is the content hash of the OPTIONAL external signal file as of the
 	// last tick; a change is a material wake signal. It is deliberately NOT the XO's
 	// own state tracker (.flotilla-state.md): the XO writes that itself, so hashing
@@ -44,6 +48,89 @@ type Snapshot struct {
 	// not create entries and do not erase prior evidence; readers use StaleAfter
 	// to distinguish old evidence from fresh coverage.
 	Usage map[string]UsageObservation `json:"usage,omitempty"`
+}
+
+// DeskStateObservation is one timestamped detector assessment. Reason is a
+// stable short code describing whether the assessment seeded, refreshed, or
+// transitioned the prior state.
+type DeskStateObservation struct {
+	State      surface.State `json:"state"`
+	ObservedAt time.Time     `json:"observed_at"`
+	Reason     string        `json:"reason"`
+}
+
+type snapshotWire struct {
+	DeskStates map[string]json.RawMessage  `json:"desk_states"`
+	SignalHash string                      `json:"signal_hash"`
+	XOSettled  bool                        `json:"xo_settled"`
+	Usage      map[string]UsageObservation `json:"usage,omitempty"`
+}
+
+// ObserveDeskStates stamps every current assessment, including steady-state
+// refreshes. The returned map is independent of prev and states.
+func ObserveDeskStates(prev Snapshot, states map[string]surface.State, at time.Time) map[string]DeskStateObservation {
+	at = at.UTC()
+	out := make(map[string]DeskStateObservation, len(states))
+	for name, state := range states {
+		reason := "surface-initial"
+		if prior, ok := prev.DeskStates[name]; ok {
+			if prior == state {
+				reason = "surface-refresh:" + state.String()
+			} else {
+				reason = "surface-transition:" + prior.String() + "->" + state.String()
+			}
+		}
+		out[name] = DeskStateObservation{State: state, ObservedAt: at, Reason: reason}
+	}
+	return out
+}
+
+func (s Snapshot) MarshalJSON() ([]byte, error) {
+	states := make(map[string]json.RawMessage, len(s.DeskStates))
+	for name, state := range s.DeskStates {
+		observation, ok := s.DeskObservations[name]
+		if !ok {
+			observation = DeskStateObservation{State: state, ObservedAt: time.Now().UTC(), Reason: "snapshot-save"}
+		}
+		observation.State = state
+		if observation.ObservedAt.IsZero() {
+			observation.ObservedAt = time.Now().UTC()
+		}
+		if observation.Reason == "" {
+			observation.Reason = "snapshot-save"
+		}
+		raw, err := json.Marshal(observation)
+		if err != nil {
+			return nil, err
+		}
+		states[name] = raw
+	}
+	return json.Marshal(snapshotWire{DeskStates: states, SignalHash: s.SignalHash, XOSettled: s.XOSettled, Usage: s.Usage})
+}
+
+func (s *Snapshot) UnmarshalJSON(raw []byte) error {
+	var wire snapshotWire
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return err
+	}
+	s.DeskStates = make(map[string]surface.State, len(wire.DeskStates))
+	s.DeskObservations = make(map[string]DeskStateObservation, len(wire.DeskStates))
+	for name, encoded := range wire.DeskStates {
+		var observation DeskStateObservation
+		if err := json.Unmarshal(encoded, &observation); err != nil {
+			var legacy surface.State
+			if legacyErr := json.Unmarshal(encoded, &legacy); legacyErr != nil {
+				return fmt.Errorf("desk_states[%q]: %w", name, err)
+			}
+			observation = DeskStateObservation{State: legacy, Reason: "legacy-snapshot"}
+		}
+		s.DeskStates[name] = observation.State
+		s.DeskObservations[name] = observation
+	}
+	s.SignalHash = wire.SignalHash
+	s.XOSettled = wire.XOSettled
+	s.Usage = wire.Usage
+	return nil
 }
 
 // UsageObservation is the acquisition-agnostic usage shape shared by watch,
@@ -78,6 +165,27 @@ func LoadSnapshot(path string) (Snapshot, bool) {
 	}
 	if s.DeskStates == nil {
 		s.DeskStates = map[string]surface.State{}
+	}
+	if s.DeskObservations == nil {
+		s.DeskObservations = map[string]DeskStateObservation{}
+	}
+	// Legacy integer-only snapshots have no per-desk clock. Use the snapshot
+	// file's own mtime as the honest lower-resolution observation time rather
+	// than presenting the row as freshly authored during upgrade.
+	legacyAt := time.Time{}
+	if fi, statErr := os.Stat(path); statErr == nil {
+		legacyAt = fi.ModTime().UTC()
+	}
+	for name, state := range s.DeskStates {
+		observation := s.DeskObservations[name]
+		observation.State = state
+		if observation.ObservedAt.IsZero() {
+			observation.ObservedAt = legacyAt
+		}
+		if observation.Reason == "" {
+			observation.Reason = "legacy-snapshot"
+		}
+		s.DeskObservations[name] = observation
 	}
 	if s.Usage == nil {
 		s.Usage = map[string]UsageObservation{}
