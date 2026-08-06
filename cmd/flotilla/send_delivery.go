@@ -176,6 +176,12 @@ func enqueueOrFailSend(rosterPath, sender, recipient, message string, deliveryEr
 // deliverOrQueueSend attempts confirmed delivery with inline retry; on sustained busy/transient
 // failure it enqueues to the sender's durable outbox and returns queued=true (not delivered).
 func deliverOrQueueSend(cfg *roster.Config, rosterPath, sender, recipient string, drv surface.Driver, pane, message string) (queued bool, err error) {
+	// Preserve operator order across CLI and daemon delivery paths: once any durable order
+	// is pending for this recipient, later direct sends join the durable tail without first
+	// attempting the pane. ListAll is globally enqueue-time ordered for the subsequent sweep.
+	if outbox.HasPendingRecipient(filepath.Dir(rosterPath), recipient) {
+		return true, enqueueOrFailSend(rosterPath, sender, recipient, message, fmt.Errorf("older durable send to %s is pending", recipient))
+	}
 	err = deliverSendWithRetry(drv, pane, recipient, message)
 	if err == nil {
 		fmt.Printf("delivered to %s (pane %s) — turn confirmed\n", recipient, pane)

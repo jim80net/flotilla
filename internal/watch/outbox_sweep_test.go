@@ -1,6 +1,8 @@
 package watch
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -9,6 +11,26 @@ import (
 	"github.com/jim80net/flotilla/internal/outbox"
 	"github.com/jim80net/flotilla/internal/surface"
 )
+
+func TestSweepGarbageCollectsNonCurrentWithAuditLine(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "flotilla-alpha-outbox.json")
+	raw := `{"epochs":{"cos":2},"pending":[{"id":"zombie","sender":"alpha","recipient":"cos","message":"old","epoch":1,"enqueued_at":"2026-08-01T00:00:00Z"}]}`
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	buf := captureLog(t)
+	s := NewOutboxSweeper(dir, func(Job) { t.Fatal("stale entry must not enqueue") })
+	if got := s.SweepAll(); got != 0 {
+		t.Fatalf("sweep count=%d", got)
+	}
+	if entries := outbox.NewStore(path).Load(); len(entries) != 0 {
+		t.Fatalf("non-current residue: %+v", entries)
+	}
+	if !strings.Contains(buf.String(), `outbox_id="zombie" outcome=superseded-gc path="alpha->cos" via=sweep-gc`) {
+		t.Fatalf("missing GC audit line: %q", buf.String())
+	}
+}
 
 // busyThenIdleSend is a SendFunc that returns ErrBusy once, then succeeds.
 type busyThenIdleSend struct {
@@ -61,8 +83,12 @@ func TestCanceledJobAlreadyQueuedInInjectorNeverDelivers(t *testing.T) {
 	if s.SweepAll() != 1 {
 		t.Fatal("expected one swept job")
 	}
+	buf := captureLog(t)
 	if _, err := outbox.Cancel(dir, "alpha-desk", id); err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `outbox_id="`+id+`" outcome=canceled path="alpha-desk->alpha-xo" via=cancel`) {
+		t.Fatalf("missing cancel audit line: %q", buf.String())
 	}
 
 	var sends atomic.Int32
@@ -81,7 +107,40 @@ func TestCanceledJobAlreadyQueuedInInjectorNeverDelivers(t *testing.T) {
 	}
 }
 
-func TestSweepPreservesQueueOrderWithinCurrentEpoch(t *testing.T) {
+func TestCancelOneOfNLeavesNMinusOneDeliverable(t *testing.T) {
+	dir := t.TempDir()
+	first, _, err := outbox.Enqueue(dir, "alpha", "cos", "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	middle, _, err := outbox.Enqueue(dir, "alpha", "cos", "middle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	last, _, err := outbox.Enqueue(dir, "alpha", "cos", "last")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := outbox.Cancel(dir, "alpha", middle); err != nil {
+		t.Fatal(err)
+	}
+	var delivered []string
+	s := NewOutboxSweeper(dir, func(j Job) { delivered = append(delivered, j.MessageID) })
+	if s.SweepAll() != 1 || len(delivered) != 1 || delivered[0] != first {
+		t.Fatalf("first survivor sweep=%v", delivered)
+	}
+	path, err := outbox.Path(dir, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outbox.NewStore(path).Remove(first)
+	s.Release("alpha", first)
+	if s.SweepAll() != 1 || len(delivered) != 2 || delivered[1] != last {
+		t.Fatalf("N-1 survivors=%v, want [%s %s]", delivered, first, last)
+	}
+}
+
+func TestSweepAdmitsOnlyRecipientHeadUntilCompleted(t *testing.T) {
 	dir := t.TempDir()
 	first, _, err := outbox.Enqueue(dir, "alpha-desk", "alpha-xo", "first")
 	if err != nil {
@@ -93,11 +152,20 @@ func TestSweepPreservesQueueOrderWithinCurrentEpoch(t *testing.T) {
 	}
 	var ids []string
 	s := NewOutboxSweeper(dir, func(j Job) { ids = append(ids, j.MessageID) })
-	if s.SweepAll() != 2 {
-		t.Fatal("expected two current jobs")
+	if s.SweepAll() != 1 {
+		t.Fatal("expected only recipient head")
 	}
-	if len(ids) != 2 || ids[0] != first || ids[1] != second {
-		t.Fatalf("sweep order = %v, want [%s %s]", ids, first, second)
+	if len(ids) != 1 || ids[0] != first {
+		t.Fatalf("first sweep = %v, want [%s]", ids, first)
+	}
+	path, err := outbox.Path(dir, "alpha-desk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outbox.NewStore(path).Remove(first)
+	s.Release("alpha-desk", first)
+	if s.SweepAll() != 1 || len(ids) != 2 || ids[1] != second {
+		t.Fatalf("after head completion = %v, want [%s %s]", ids, first, second)
 	}
 }
 
@@ -155,7 +223,7 @@ func TestSweepDeliversOnRecipientIdleLogsEnqueueTime(t *testing.T) {
 	}
 
 	buf := captureLog(t)
-	job := Job{Agent: "cos", Message: "deploy done", Kind: KindSend, MessageID: "sweep1", Sender: "alpha", enqueuedAt: enqAt}
+	job := Job{Agent: "cos", IntendedRecipient: "cos", Message: "deploy done", Kind: KindSend, MessageID: "sweep1", Sender: "alpha", Epoch: 1, OutboxBound: true, enqueuedAt: enqAt}
 	in.deliver(job) // recipient busy — deferred, not removed from outbox
 	if len(deferred) != 1 {
 		t.Fatalf("first delivery deferred: %d", len(deferred))
@@ -172,6 +240,9 @@ func TestSweepDeliversOnRecipientIdleLogsEnqueueTime(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "queued 2h0m0s") {
 		t.Fatalf("log must carry enqueue latency, got: %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), `outbox_id="sweep1" outcome=delivered-confirmed path="alpha->cos" via=attempt-current`) {
+		t.Fatalf("missing delivered audit line: %q", buf.String())
 	}
 }
 

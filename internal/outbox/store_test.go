@@ -255,12 +255,15 @@ func TestCancelAdvancesPairEpochAndStandsDownWholeGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Sender != "alpha-desk" || result.Recipient != "alpha-xo" || result.Canceled != 2 || result.Epoch != 2 {
+	if result.Sender != "alpha-desk" || result.Recipient != "alpha-xo" || result.Canceled != 1 || result.Epoch != 2 {
 		t.Fatalf("cancel result = %+v", result)
 	}
 	remaining := NewStore(mustPath(t, dir, "alpha-desk")).Load()
-	if len(remaining) != 1 || remaining[0].ID != other {
-		t.Fatalf("remaining = %+v, want unrelated recipient only (canceled %s and %s)", remaining, first, second)
+	if len(remaining) != 2 || remaining[0].ID != second || remaining[0].Epoch != 2 || remaining[1].ID != other {
+		t.Fatalf("remaining = %+v, want re-stamped sibling %s and unrelated %s", remaining, second, other)
+	}
+	if !Current(dir, remaining[0]) {
+		t.Fatal("cancel sibling must remain current")
 	}
 
 	third, _, err := Enqueue(dir, "alpha-desk", "alpha-xo", "replacement task")
@@ -282,6 +285,93 @@ func TestCancelAdvancesPairEpochAndStandsDownWholeGeneration(t *testing.T) {
 	}
 	if !Current(dir, replacement) {
 		t.Fatal("replacement generation should be current")
+	}
+}
+
+func TestRemoveIfNonCurrentRequiresExactStaleSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	path := mustPath(t, dir, "alpha-desk")
+	if err := os.WriteFile(path, []byte(`{"epochs":{"alpha-xo":2},"pending":[{"id":"stale","sender":"alpha-desk","recipient":"alpha-xo","message":"old","epoch":1,"enqueued_at":"2026-08-01T00:00:00Z"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	decoy := Entry{ID: "stale", Sender: "alpha-desk", Recipient: "other-xo", Epoch: 1}
+	if removed, err := RemoveIfNonCurrent(dir, decoy); err != nil || removed {
+		t.Fatalf("decoy removed=%v err=%v", removed, err)
+	}
+	stale := NewStore(path).Load()[0]
+	if removed, err := RemoveIfNonCurrent(dir, stale); err != nil || !removed {
+		t.Fatalf("stale removed=%v err=%v", removed, err)
+	}
+	if got := NewStore(path).Load(); len(got) != 0 {
+		t.Fatalf("stale residue: %+v", got)
+	}
+}
+
+func TestStaleSweepSnapshotCannotGCRestampedCancelSibling(t *testing.T) {
+	dir := t.TempDir()
+	target, _, err := Enqueue(dir, "alpha", "cos", "cancel me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = Enqueue(dir, "alpha", "cos", "keep me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := NewStore(mustPath(t, dir, "alpha")).Load()
+	var observedSibling Entry
+	for _, entry := range before {
+		if entry.Message == "keep me" {
+			observedSibling = entry
+			break
+		}
+	}
+	if observedSibling.ID == "" {
+		t.Fatalf("keep-me sibling missing before cancel: %+v", before)
+	}
+	if _, err := Cancel(dir, "alpha", target); err != nil {
+		t.Fatal(err)
+	}
+	if removed, err := RemoveIfNonCurrent(dir, observedSibling); err != nil || removed {
+		t.Fatalf("old snapshot removed re-stamped sibling=%v err=%v", removed, err)
+	}
+	after := NewStore(mustPath(t, dir, "alpha")).Load()
+	if len(after) != 1 || after[0].Message != "keep me" || after[0].Epoch != 2 || !Current(dir, after[0]) {
+		t.Fatalf("survivor after stale GC attempt=%+v", after)
+	}
+}
+
+func TestCancelDoesNotRestampStaleSubCurrentEntry(t *testing.T) {
+	dir := t.TempDir()
+	path := mustPath(t, dir, "alpha")
+	contents := `{"epochs":{"cos":2},"pending":[` +
+		`{"id":"stale","sender":"alpha","recipient":"cos","message":"withdrawn work","epoch":1,"enqueued_at":"2026-08-01T00:00:00Z"},` +
+		`{"id":"target","sender":"alpha","recipient":"cos","message":"cancel me","epoch":2,"enqueued_at":"2026-08-01T00:01:00Z"},` +
+		`{"id":"sibling","sender":"alpha","recipient":"cos","message":"keep me","epoch":2,"enqueued_at":"2026-08-01T00:02:00Z"}]}`
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Cancel(dir, "alpha", "target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Epoch != 3 || result.Canceled != 1 {
+		t.Fatalf("cancel result = %+v", result)
+	}
+
+	remaining := NewStore(path).Load()
+	if len(remaining) != 2 {
+		t.Fatalf("remaining = %+v, want stale row and current sibling", remaining)
+	}
+	byID := make(map[string]Entry, len(remaining))
+	for _, entry := range remaining {
+		byID[entry.ID] = entry
+	}
+	if stale := byID["stale"]; stale.Epoch != 1 || Current(dir, stale) {
+		t.Fatalf("stale row was resurrected: %+v", stale)
+	}
+	if sibling := byID["sibling"]; sibling.Epoch != 3 || !Current(dir, sibling) {
+		t.Fatalf("current sibling was not preserved: %+v", sibling)
 	}
 }
 
