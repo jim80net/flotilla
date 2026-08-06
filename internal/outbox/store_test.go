@@ -318,7 +318,16 @@ func TestStaleSweepSnapshotCannotGCRestampedCancelSibling(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := NewStore(mustPath(t, dir, "alpha")).Load()
-	observedSibling := before[1]
+	var observedSibling Entry
+	for _, entry := range before {
+		if entry.Message == "keep me" {
+			observedSibling = entry
+			break
+		}
+	}
+	if observedSibling.ID == "" {
+		t.Fatalf("keep-me sibling missing before cancel: %+v", before)
+	}
 	if _, err := Cancel(dir, target); err != nil {
 		t.Fatal(err)
 	}
@@ -328,6 +337,41 @@ func TestStaleSweepSnapshotCannotGCRestampedCancelSibling(t *testing.T) {
 	after := NewStore(mustPath(t, dir, "alpha")).Load()
 	if len(after) != 1 || after[0].Message != "keep me" || after[0].Epoch != 2 || !Current(dir, after[0]) {
 		t.Fatalf("survivor after stale GC attempt=%+v", after)
+	}
+}
+
+func TestCancelDoesNotRestampStaleSubCurrentEntry(t *testing.T) {
+	dir := t.TempDir()
+	path := mustPath(t, dir, "alpha")
+	contents := `{"epochs":{"cos":2},"pending":[` +
+		`{"id":"stale","sender":"alpha","recipient":"cos","message":"withdrawn work","epoch":1,"enqueued_at":"2026-08-01T00:00:00Z"},` +
+		`{"id":"target","sender":"alpha","recipient":"cos","message":"cancel me","epoch":2,"enqueued_at":"2026-08-01T00:01:00Z"},` +
+		`{"id":"sibling","sender":"alpha","recipient":"cos","message":"keep me","epoch":2,"enqueued_at":"2026-08-01T00:02:00Z"}]}`
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Cancel(dir, "target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Epoch != 3 || result.Canceled != 1 {
+		t.Fatalf("cancel result = %+v", result)
+	}
+
+	remaining := NewStore(path).Load()
+	if len(remaining) != 2 {
+		t.Fatalf("remaining = %+v, want stale row and current sibling", remaining)
+	}
+	byID := make(map[string]Entry, len(remaining))
+	for _, entry := range remaining {
+		byID[entry.ID] = entry
+	}
+	if stale := byID["stale"]; stale.Epoch != 1 || Current(dir, stale) {
+		t.Fatalf("stale row was resurrected: %+v", stale)
+	}
+	if sibling := byID["sibling"]; sibling.Epoch != 3 || !Current(dir, sibling) {
+		t.Fatalf("current sibling was not preserved: %+v", sibling)
 	}
 }
 

@@ -204,7 +204,7 @@ func Cancel(rosterDir, id string) (CancelResult, error) {
 				result.Canceled++
 				continue
 			}
-			if p.Recipient == result.Recipient && effectiveEpoch(p.Epoch) <= current {
+			if p.Recipient == result.Recipient && effectiveEpoch(p.Epoch) == current {
 				p.Epoch = result.Epoch
 			}
 			next = append(next, p)
