@@ -2,6 +2,7 @@ package site
 
 import (
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -24,6 +25,7 @@ func TestLandingGeneratedAtmosphereContract(t *testing.T) {
 		`hero-atmosphere-1600.webp 1600w`,
 		`tools-atmosphere-800.webp 800w`,
 		`tools-atmosphere-1600.webp 1600w`,
+		`sizes="(max-width: 720px) calc(100vw - 48px), 46vw"`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("landing page missing generated atmosphere marker %q", want)
@@ -62,7 +64,7 @@ func TestLandingShippedClaimsAreCurrent(t *testing.T) {
 	page := readSiteFile(t, "index.html")
 	for _, want := range []string{
 		"Claude Code, Codex, Grok, OpenCode, Pi, and aider",
-		"With a declared fallback chain, flotilla can move a desk to another configured harness",
+		"When auto-switch is enabled, eligible non-approval-sensitive desks currently running Claude Code",
 		"Five dashboard destinations:",
 		"Conversations, Goals, Issues, Parade, and combined R&amp;D",
 	} {
@@ -70,7 +72,7 @@ func TestLandingShippedClaimsAreCurrent(t *testing.T) {
 			t.Errorf("landing page missing current shipped claim %q", want)
 		}
 	}
-	for _, stale := range []string{"Cursor", "on the roadmap", "in supervised trial", "in trial · on the roadmap"} {
+	for _, stale := range []string{"Cursor", "on the roadmap", "in supervised trial", "in trial · on the roadmap", "eligible non-approval-sensitive desks can switch automatically"} {
 		if strings.Contains(page, stale) {
 			t.Errorf("landing page retains stale claim %q", stale)
 		}
@@ -79,14 +81,38 @@ func TestLandingShippedClaimsAreCurrent(t *testing.T) {
 
 func TestLandingToolsDesktopUsesTwoColumnRow(t *testing.T) {
 	css := readSiteFile(t, "styles.css")
-	for _, want := range []string{
-		"@media (min-width: 721px)",
-		"#yours .band-head { grid-column: 1; margin-bottom: 0; }",
-		"#yours .generated-asset--tools { grid-column: 2; width: 100%; margin: 0 0 2.6rem; }",
-		"#yours .diff-strip { grid-column: 1 / -1; }",
-	} {
-		if !strings.Contains(css, want) {
-			t.Errorf("landing CSS missing tools-row contract %q", want)
+	media := regexp.MustCompile(`@media\s*\(\s*min-width\s*:\s*721px\s*\)\s*\{`).FindStringIndex(css)
+	if media == nil {
+		t.Fatal("landing CSS missing 721px desktop media query")
+	}
+	desktop := css[media[1]:]
+	if next := strings.Index(desktop, "@media"); next >= 0 {
+		desktop = desktop[:next]
+	}
+	contracts := map[string][]string{
+		`#yours\s+\.band-head`: {
+			`grid-column\s*:\s*1\s*;`,
+			`margin-bottom\s*:\s*0\s*;`,
+		},
+		`#yours\s+\.generated-asset--tools`: {
+			`grid-column\s*:\s*2\s*;`,
+			`width\s*:\s*100%\s*;`,
+			`margin\s*:\s*0\s+0\s+2\.6rem\s*;`,
+		},
+		`#yours\s+\.diff-strip`: {
+			`grid-column\s*:\s*1\s*/\s*-1\s*;`,
+		},
+	}
+	for selector, properties := range contracts {
+		match := regexp.MustCompile(`(?s)` + selector + `\s*\{([^}]*)\}`).FindStringSubmatch(desktop)
+		if match == nil {
+			t.Errorf("landing CSS missing tools-row selector %q", selector)
+			continue
+		}
+		for _, property := range properties {
+			if !regexp.MustCompile(property).MatchString(match[1]) {
+				t.Errorf("landing CSS selector %q missing property /%s/", selector, property)
+			}
 		}
 	}
 }
