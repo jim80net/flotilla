@@ -1,0 +1,25 @@
+{
+  "routes": {
+    "/": {
+      "#view-conversations:not(.hidden)": true,
+      "#conv-thread .thread-msg": true,
+      "#view-goals:not(.hidden)": true,
+      "#goals-mobile-outline .goutline-row, #goals-mobile-outline .goutline-desk, #goals-nodes .gnode": true,
+      "#view-issues:not(.hidden)": true,
+      "#issues-list .issue-scope-incomplete": true,
+      "#issues-list .issue-row": true
+    },
+    "/research?focus=decisions": {
+      "#research-library": true,
+      "#research-decisions:not([hidden]) .research-card": true
+    },
+    "/research?focus=learn": {
+      "#research-library": true,
+      "#research-learn:not([hidden]) .research-card": true
+    },
+    "/parade": {
+      "body.parade-body": true,
+      "#pd-deck:not([hidden]) .pd-empty-state": true
+    }
+  }
+}
