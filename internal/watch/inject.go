@@ -120,6 +120,12 @@ type Job struct {
 	// bufferRecorded is set after an operator relay is persisted to the adjutant layer
 	// buffer — busy-defer re-enqueues must not append again (#593).
 	bufferRecorded bool
+	// recipientBuffered is set after the full operator body is committed to the
+	// recipient-owned pull buffer. Retries may nudge again but never append twice.
+	recipientBuffered bool
+	// bufferedBody retains the body for audit hooks after Message is replaced by
+	// the body-free pull nudge.
+	bufferedBody string
 }
 
 // SendFunc delivers a message to an agent's pane and CONFIRMS a turn started. Production
@@ -163,8 +169,10 @@ type Injector struct {
 	coordinatorIngress        *CoordinatorIngress                     // optional: #533 adjutant front-office ingress before delivery
 	// optional: #593 durable operator buffer append (+ B1 channel/operator for arc keying)
 	onOperatorRelayBuffer func(leader, messageID, body, channelID, operatorID string) error
-	relayPendingMu        sync.Mutex
-	relayPending          map[string]int // in-flight KindRelay per agent (#523)
+	// optional pull-by-push commit hook. It returns the body-free pane nudge.
+	onRecipientMessageBuffer func(Job) (string, error)
+	relayPendingMu           sync.Mutex
+	relayPending             map[string]int // in-flight KindRelay per agent (#523)
 }
 
 // SetRelaySend installs a distinct send path for RELAY-kind jobs (the operator-message kind), used to
@@ -225,6 +233,12 @@ func (in *Injector) SetOperatorRelayBuffer(fn func(leader, messageID, body, chan
 	in.onOperatorRelayBuffer = fn
 }
 
+// SetRecipientMessageBuffer makes the recipient buffer authoritative for operator
+// relays. The full body is committed before the returned best-effort nudge is sent.
+func (in *Injector) SetRecipientMessageBuffer(fn func(Job) (string, error)) {
+	in.onRecipientMessageBuffer = fn
+}
+
 // SetOutboxStaleEscalate wires the one-shot coordinator-surface escalation for undeliverable
 // swept sends (#477, #436). owningCoordinator resolves the sender's coordinator; escalate
 // delivers the message off-worker (typically a KindDetector enqueue with claimKey). nil hooks ⇒ no escalation.
@@ -276,6 +290,51 @@ func (in *Injector) Start() {
 // tick). Any other error is a real delivery failure: a relay escalates LOUDLY (never silent),
 // a tick logs only. A failed delivery never kills the worker.
 func (in *Injector) deliver(j Job) {
+	if isRelay(j.Kind) && in.onRecipientMessageBuffer != nil {
+		original := j
+		if j.bufferedBody != "" {
+			original.Message = j.bufferedBody
+		}
+		nudge := j.Message
+		if !j.recipientBuffered {
+			var err error
+			nudge, err = in.onRecipientMessageBuffer(j)
+			if err != nil {
+				// This is the only real failure on the pull-by-push path: no durable
+				// recipient copy exists yet. Keep the legacy relay queue and retry.
+				in.raise("operator message to %q could not be committed to its durable recipient buffer: %v", j.Agent, err)
+				in.queue.upsert(j)
+				in.releaseRelayBeforeDefer(j)
+				in.reEnqueue(j, busyDeferDelay)
+				return
+			}
+			j.bufferedBody = j.Message
+			j.Message = nudge
+			j.recipientBuffered = true
+			original = j
+			original.Message = j.bufferedBody
+		}
+		in.noteRelayDone(j)
+		if j.MessageID != "" {
+			in.queue.remove(j.MessageID)
+		}
+		// Arrival and audit are the durable buffer commit, not pane acceptance.
+		if in.mirror != nil {
+			in.mirror(original)
+		}
+		nudgeSend := in.send
+		if j.Kind == KindOperatorInterrupt && in.operatorInterruptSend != nil {
+			nudgeSend = in.operatorInterruptSend
+		} else if in.relaySend != nil {
+			nudgeSend = in.relaySend
+		}
+		if err := nudgeSend(j.Agent, j.Message); err != nil {
+			log.Printf("flotilla watch: nudge missed for %q (non-fatal; operator message is durable in recipient buffer): %v", j.Agent, err)
+			return
+		}
+		log.Printf("flotilla watch: pull nudge delivered to %q; operator body remains in durable recipient buffer", j.Agent)
+		return
+	}
 	// A RELAY (operator message) uses the self-heal-capable path when wired; a heartbeat/detector tick
 	// uses the plain send so a tick never fires an unsolicited Ctrl-C (#156 H2).
 	send := in.send
@@ -579,6 +638,21 @@ func (in *Injector) Enqueue(j Job) {
 						jobs[i] = jj
 					}
 				}
+			}
+		}
+		// Commit the full operator body synchronously before the job can enter
+		// the in-memory injector channel. This closes the gateway-accept→worker
+		// crash window; the queued pane operation carries only the nudge.
+		if in.onRecipientMessageBuffer != nil && isRelay(jj.Kind) && !jj.recipientBuffered {
+			nudge, err := in.onRecipientMessageBuffer(jj)
+			if err != nil {
+				in.raise("operator message to %q could not be committed to its durable recipient buffer: %v", jj.Agent, err)
+				in.queue.upsert(jj)
+			} else {
+				jj.bufferedBody = jj.Message
+				jj.Message = nudge
+				jj.recipientBuffered = true
+				jobs[i] = jj
 			}
 		}
 		select {

@@ -17,7 +17,8 @@ import (
 // drive the XO to manufacture unauthorized work. Deployments can override the
 // wording per-roster via heartbeat_message (e.g. to name absolute source paths).
 const DefaultHeartbeatPrompt = "This is an automated heartbeat, not a new instruction. " +
-	"Emit a one-line liveness ack. Then do two duties, neither from memory. DUTY A — check in on " +
+	"Emit a one-line liveness ack. Before any action run `flotilla pull` and obey the current buffered " +
+	"authority. Then do two duties, neither from memory. DUTY A — check in on " +
 	"your monitored desks: for each agent in the roster other than yourself, capture its tmux pane " +
 	"and assess its state (working / idle-awaiting-operator-decision / blocked / errored / finished " +
 	"a task / low-context needing rotation); surface anything actionable in one line and advance " +

@@ -14,16 +14,21 @@ flotilla send --from <coordinator> --file ./task.md <agent>
 
 Dispatch is **secret-free** — coordinators hold fleet secrets; execution desks must not.
 
-## Busy pane = not delivered
+## Durable recipient buffer
 
-`flotilla send` types into the desk pane. Mid-turn (working), keystrokes do not
-land as submitted messages — they are lost or self-inject.
+`flotilla send` commits the full body to the desk's recipient buffer, then sends
+only a best-effort pull nudge. Mid-turn, crashed, or input-blocked panes therefore
+cannot reject the message.
 
-1. **Retry on idle edge** — re-send when `flotilla status` shows idle.
-2. **Durable copy for decision-gating content** — same body on PR comment, issue,
-   or state file; note "pane busy → durable channel."
+1. Inspect backlog with `flotilla buffer inspect <desk>`; never resend merely
+   because a nudge missed.
+2. Receivers run `flotilla pull` before each action and `dispatch-ack` after
+   handling a dispatch.
+3. A replacement or stop names `--supersedes <message-id>` so pull output shows
+   which instruction is current.
 
-*(Trap: gate questions delivered only to busy panes vanished; lane stalled silently.)*
+*(Trap retired: gate questions delivered only to busy panes vanished; the buffer
+now remains authoritative and inspectable.)*
 
 ## Fan-out — parallelize in the first hour
 

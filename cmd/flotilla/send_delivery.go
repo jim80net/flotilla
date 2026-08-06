@@ -10,10 +10,54 @@ import (
 	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/dispatch"
 	"github.com/jim80net/flotilla/internal/inbound"
+	"github.com/jim80net/flotilla/internal/messagebuffer"
 	"github.com/jim80net/flotilla/internal/outbox"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
 )
+
+const pullNudgeText = "[flotilla pull nudge] Durable messages are waiting. Run `flotilla pull` before your next action. The nudge carries no message body."
+
+// bufferSendAndNudge is the pull-by-push send transaction. The only required
+// operation is the recipient-buffer append. Pane resolution and nudge delivery
+// happen afterwards and can never turn a durable send into a reported failure.
+func bufferSendAndNudge(cfg *roster.Config, rosterPath, sender, recipient, paneTitle string, drv surface.Driver, message string, supersedes []string) (messagebuffer.Entry, error) {
+	rosterDir := filepath.Dir(rosterPath)
+	entry, deduped, err := messagebuffer.Enqueue(rosterDir, sender, recipient, message, messagebuffer.EnqueueOptions{Supersedes: supersedes})
+	if err != nil {
+		return messagebuffer.Entry{}, fmt.Errorf("buffer message: %w", err)
+	}
+	state := "buffered"
+	if deduped {
+		state = "already-buffered"
+	}
+	fmt.Printf("BUFFERED id=%s sender=%s recipient=%s status=%s sequence=%d\n", entry.ID, sender, recipient, state, entry.SenderSequence)
+	mirrorSendToLedger(cfg, sender, recipient, message)
+
+	pane, err := deliver.ResolvePane(paneTitle)
+	if err != nil {
+		logNudgeMiss(recipient, err)
+		return entry, nil
+	}
+	txn, err := deliver.AcquirePaneTxn(pane, deliver.PaneTxnTimeout)
+	if err != nil {
+		logNudgeMiss(recipient, err)
+		return entry, nil
+	}
+	defer txn.Release()
+	if err := deliverSendOnce(drv, pane, pullNudgeText); err != nil {
+		logNudgeMiss(recipient, err)
+		return entry, nil
+	}
+	fmt.Printf("nudge sent to %s (pane %s); message remains in durable buffer until ack\n", recipient, pane)
+	return entry, nil
+}
+
+func logNudgeMiss(recipient string, err error) {
+	// Deliberately not a delivery failure: the body was committed before this
+	// best-effort hint. This wording is consumed by operational log searches.
+	fmt.Fprintf(os.Stderr, "flotilla: nudge missed for %s (non-fatal, message remains buffered): %v\n", recipient, err)
+}
 
 // Sender-side retry policy for a bounced `flotilla send` (#475). Inline retries cover short
 // busy windows; exhausted attempts fall through to the durable per-sender outbox.

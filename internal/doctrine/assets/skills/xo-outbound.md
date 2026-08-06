@@ -26,6 +26,8 @@ they are waiting on.
 **Do NOT notify for:** heartbeat ticks (ack the liveness file only); routine inter-agent
 plumbing you are merely processing. Test: *would the operator want this in their channel?*
 
-**Fleet dispatch** stays secret-free: `flotilla send <desk> "…"` into another pane. You
-hold the secrets; execution desks must not.
+**Fleet dispatch** stays secret-free: `flotilla send <desk> "…"` commits the body
+to that desk's durable recipient buffer, then sends only a best-effort pull nudge.
+Do not resend a body because its nudge missed; inspect with
+`flotilla buffer inspect <desk>`. You hold the secrets; execution desks must not.
 <!-- /flotilla:xo-outbound -->

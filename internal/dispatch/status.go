@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jim80net/flotilla/internal/inbound"
+	"github.com/jim80net/flotilla/internal/messagebuffer"
 	"github.com/jim80net/flotilla/internal/outbox"
 )
 
@@ -14,6 +15,8 @@ type Disposition string
 
 const (
 	DispositionUnknown     Disposition = "unknown"
+	DispositionBuffered    Disposition = "buffered"    // recipient buffer, not yet pulled
+	DispositionPulled      Disposition = "pulled"      // pulled (arrival recorded), pending ack
 	DispositionQueued      Disposition = "queued"      // in sender outbox, not yet pane-confirmed
 	DispositionDelivered   Disposition = "delivered"   // inbound ledger pending ack
 	DispositionConsumed    Disposition = "consumed"    // durable consumed registry
@@ -38,7 +41,7 @@ type Status struct {
 // ranks BELOW a live inbound row for the same nonce — the same dispatch text
 // can sit pending (or stale) on a desk after the coordinator hop settled, and
 // the probe must surface the live copy, not mask it. Preference order:
-// consumed(real) > inbound > consumed(coordinator-hop) > outbox.
+// consumed(real) > recipient buffer > inbound > consumed(coordinator-hop) > outbox.
 func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 	nonce = strings.TrimSpace(nonce)
 	st := Status{Nonce: nonce, Disposition: DispositionUnknown}
@@ -62,10 +65,16 @@ func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 		if e.Reason != ReasonCoordinatorRecipient {
 			return consumed
 		}
+		if live := lookupBufferNonce(rosterDir, nonce, now); live != nil {
+			return *live
+		}
 		if live := lookupInboundNonce(rosterDir, nonce, now); live != nil {
 			return *live
 		}
 		return consumed
+	}
+	if live := lookupBufferNonce(rosterDir, nonce, now); live != nil {
+		return *live
 	}
 	if live := lookupInboundNonce(rosterDir, nonce, now); live != nil {
 		return *live
@@ -90,8 +99,33 @@ func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 		st.Detail = "queued in sender outbox; waiting for recipient idle"
 		return st
 	}
-	st.Detail = "nonce not found in consumed, inbound, or outbox"
+	st.Detail = "nonce not found in consumed, recipient buffer, inbound, or outbox"
 	return st
+}
+
+func lookupBufferNonce(rosterDir, nonce string, now time.Time) *Status {
+	for _, e := range messagebuffer.ListAll(rosterDir) {
+		if e.Nonce != nonce || e.AcknowledgedAt != nil {
+			continue
+		}
+		st := Status{
+			Nonce: nonce, Sender: e.Sender, Recipient: e.Recipient, ID: e.ID,
+			PayloadHash: PayloadHash(e.Message), Disposition: DispositionBuffered,
+			Detail: "durable recipient buffer; not yet pulled",
+		}
+		if !e.EnqueuedAt.IsZero() {
+			st.Age = now.Sub(e.EnqueuedAt).Round(time.Second)
+		}
+		if e.PulledAt != nil {
+			st.Disposition = DispositionPulled
+			st.Detail = "pulled by recipient; pending durable ack"
+		}
+		if e.SupersededBy != "" {
+			st.Detail += "; superseded_by=" + e.SupersededBy
+		}
+		return &st
+	}
+	return nil
 }
 
 func lookupInboundNonce(rosterDir, nonce string, now time.Time) *Status {

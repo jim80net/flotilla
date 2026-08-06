@@ -1,13 +1,18 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/jim80net/flotilla/internal/deliver"
+	"github.com/jim80net/flotilla/internal/messagebuffer"
 	"github.com/jim80net/flotilla/internal/outbox"
+	"github.com/jim80net/flotilla/internal/roster"
+	"github.com/jim80net/flotilla/internal/surface"
 )
 
 type cancelOpts struct {
@@ -32,7 +37,7 @@ func parseCancelArgs(args []string) (cancelOpts, error) {
 		id, rest = rest[0], rest[1:]
 	}
 	if id == "" || len(rest) != 0 {
-		return cancelOpts{}, fmt.Errorf("usage: flotilla cancel <outbox-id> [--roster <path>]")
+		return cancelOpts{}, fmt.Errorf("usage: flotilla cancel <message-id> [--roster <path>]")
 	}
 	return cancelOpts{id: id, rosterPath: *rosterPath}, nil
 }
@@ -53,10 +58,52 @@ func cmdCancel(args []string) error {
 	if info.IsDir() {
 		return fmt.Errorf("cancel roster %q is a directory", rosterPath)
 	}
+	dir := filepath.Dir(rosterPath)
+	cancel, target, bufferErr := messagebuffer.Cancel(dir, opts.id)
+	if bufferErr == nil {
+		fmt.Printf("flotilla cancel: buffered cancellation id=%s supersedes=%s on %s → %s\n", cancel.ID, target.ID, target.Sender, target.Recipient)
+		bestEffortPullNudge(rosterPath, target.Recipient)
+		return nil
+	}
+	if !errors.Is(bufferErr, messagebuffer.ErrNotFound) {
+		return bufferErr
+	}
 	result, err := outbox.Cancel(filepath.Dir(rosterPath), opts.id)
 	if err != nil {
 		return err
 	}
 	fmt.Printf("flotilla cancel: stood down %d queued send(s) on %s → %s; epoch advanced to %d\n", result.Canceled, result.Sender, result.Recipient, result.Epoch)
 	return nil
+}
+
+func bestEffortPullNudge(rosterPath, recipient string) {
+	cfg, err := roster.Load(rosterPath)
+	if err != nil {
+		logNudgeMiss(recipient, err)
+		return
+	}
+	agent, err := cfg.Agent(recipient)
+	if err != nil {
+		logNudgeMiss(recipient, err)
+		return
+	}
+	drv, ok := surface.Get(agent.Surface)
+	if !ok {
+		logNudgeMiss(recipient, fmt.Errorf("unknown surface %q", agent.Surface))
+		return
+	}
+	pane, err := deliver.ResolvePane(agent.Title())
+	if err != nil {
+		logNudgeMiss(recipient, err)
+		return
+	}
+	txn, err := deliver.AcquirePaneTxn(pane, deliver.PaneTxnTimeout)
+	if err != nil {
+		logNudgeMiss(recipient, err)
+		return
+	}
+	defer txn.Release()
+	if err := deliverSendOnce(drv, pane, pullNudgeText); err != nil {
+		logNudgeMiss(recipient, err)
+	}
 }

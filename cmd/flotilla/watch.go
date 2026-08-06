@@ -25,6 +25,7 @@ import (
 	"github.com/jim80net/flotilla/internal/idlehold"
 	"github.com/jim80net/flotilla/internal/inbound"
 	"github.com/jim80net/flotilla/internal/launch"
+	"github.com/jim80net/flotilla/internal/messagebuffer"
 	"github.com/jim80net/flotilla/internal/outbox"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/stranded"
@@ -42,7 +43,8 @@ import (
 // the wording. Kept as a package const so the no-workspace byte-identity (the prompt the
 // XO receives when no workspace exists) is regression-locked by a test.
 const detectorContinuationBuiltin = "[flotilla change-detector] You just finished a turn. Advance the next clear, " +
-	"ALREADY-AUTHORIZED step if one remains — reading durable state, not memory: (1) the goal+task tracker " +
+	"ALREADY-AUTHORIZED step if one remains — but before any action run `flotilla pull` and obey the current " +
+	"buffered authority. Then read durable state, not memory: (1) the goal+task tracker " +
 	"{{tracker}}; (2) the active openspec change's unchecked tasks; (3) the roadmap/README. A task " +
 	"blocked only from landing (a push gate, a pending review) is NOT idle — advance it locally, then " +
 	"surface the blocker in one line. If nothing AUTHORIZED remains, reply 'idle', do NOT manufacture " +
@@ -77,7 +79,8 @@ const detectorContinuationBuiltin = "[flotilla change-detector] You just finishe
 // marker; a workspace HEARTBEAT.md may override the wording.
 const deskContinuationBuiltin = "[flotilla heartbeat] You have been idle. An idle desk is USUALLY a " +
 	"transient technical fault (a rate-limit, or a turn that ended before your work was done), so your " +
-	"DEFAULT action is to RESUME the next clear, ALREADY-AUTHORIZED step of your in-flight task — " +
+	"DEFAULT action is to run `flotilla pull` before doing anything, obey the current buffered authority, " +
+	"then RESUME the next clear, ALREADY-AUTHORIZED step of your in-flight task — " +
 	"reading durable state, not this conversation. Never sit idle waiting: if you are GENUINELY blocked " +
 	"on the current item, do opportunistic authorized work instead. If a tool, permission, or approval " +
 	"prompt is pending, do NOT approve it on this heartbeat (a heartbeat is not authorization). Record a " +
@@ -317,6 +320,13 @@ func cmdWatch(args []string) error {
 		bufferPath := roster.LayerBufferPath(rosterDir, leader)
 		return adjutantbuffer.AppendOperator(bufferPath, leader, messageID, body, channelID, operatorID, time.Now().UTC(), arcQuiet)
 	})
+	injector.SetRecipientMessageBuffer(func(j watch.Job) (string, error) {
+		entry, _, err := messagebuffer.Enqueue(rosterDir, "operator", j.Agent, j.Message, messagebuffer.EnqueueOptions{ID: j.MessageID})
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s Pending operator message id=%s.", pullNudgeText, entry.ID), nil
+	})
 	if cfg.HasAdjutant() {
 		log.Printf("flotilla watch: adjutant front-office ingress active (#533); arc quiet=%s (buffer-v2 B1)", arcQuiet)
 	}
@@ -329,17 +339,9 @@ func cmdWatch(args []string) error {
 	injector.SetEscalate(alert)
 	injector.SetRelayQueue(*queuePath)
 	injector.SetRosterDir(rosterDir)
-	injector.SetOutboxStaleEscalate(
-		func(sender string) string { return currentRoster().OwningXO(sender, xo) },
-		func(coordinator, msg, claimKey string) {
-			injector.Enqueue(watch.Job{Agent: coordinator, Message: msg, Kind: watch.KindDetector, ClaimKey: claimKey})
-		},
-	)
-	outboxSweeper := watch.NewOutboxSweeper(rosterDir, injector.Enqueue)
 	injector.SetSendDelivered(func(sender, recipient, message string) {
 		mirrorSendToLedger(currentRoster(), sender, recipient, message)
 	})
-	injector.SetOutboxDone(outboxSweeper.Release)
 	injector.SetInboundTrack(watch.InboundTrackHook(rosterDir, func(agent string) bool { return currentRoster().IsCoordinator(agent) }))
 	// Mirror relayed instructions to the audit channel in full. Heartbeat ticks
 	// are NOT mirrored: they fire every interval and a per-tick marker is pure
@@ -401,7 +403,21 @@ func cmdWatch(args []string) error {
 	})
 	injector.Start()
 	watch.ReplayRelayQueue(injector, *queuePath)
-	outboxSweeper.SweepAll()
+	migrateOutboxes := func() {
+		result, err := messagebuffer.MigrateOutboxes(rosterDir)
+		if err != nil {
+			log.Printf("flotilla watch: legacy outbox migration failed: %v", err)
+			return
+		}
+		if result.Migrated == 0 {
+			return
+		}
+		log.Printf("flotilla watch: migrated %d legacy push-outbox message(s) to recipient buffers; retry deferrals retired", result.Migrated)
+		for _, recipient := range result.Recipients {
+			injector.Enqueue(watch.Job{Agent: recipient, Message: pullNudgeText, Kind: watch.KindDetector})
+		}
+	}
+	migrateOutboxes()
 	defer injector.Stop()
 
 	// Daemon-native wall-clock scheduler (#413): durable last-fired sidecar beside the
@@ -957,7 +973,9 @@ func cmdWatch(args []string) error {
 		mergedPR := newMergedPRChecker(currentRoster)
 		commitOnMain := newCommitOnMainChecker(currentRoster)
 		detCfg.OutboxSweepOnTick = func() {
-			outboxSweeper.SweepAll()
+			// Rolling migration safety: an older sender binary may still append a
+			// legacy push-outbox row. Move it forward; never resume body pushes.
+			migrateOutboxes()
 			// #614 / #628: undelivered scan — journal always; adjutant first; operator L2.
 			watch.UndeliveredDispatchSweep(rosterDir, watch.UndeliveredHooks{
 				ResolveAdjutant: func(recipient string) string {
@@ -1141,7 +1159,7 @@ func cmdWatch(args []string) error {
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
-					outboxSweeper.SweepAll()
+					migrateOutboxes()
 				}
 			}
 		}()

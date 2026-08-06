@@ -104,31 +104,36 @@ pane, so it is purely additive.
 > target — no need to interrupt it:
 > `flotilla register infra --pane demo:0.0` (or a pane id like `%4`).
 
-### Deliver
+### Buffer, nudge, and pull
 
 ```sh
 flotilla send --from me infra "pull origin main and run the tests"
 ```
 
 ```
-delivered to infra (pane demo:0.0) — turn confirmed
+BUFFERED id=… sender=me recipient=infra status=buffered sequence=1
 ```
 
-The instruction is typed into the pane (a bracketed paste plus a single Enter, so
-multi-line bodies arrive as one submission, not many) and lands as the agent's
-next turn. `send` reports a **typed failure instead of a false success** when it
-cannot confirm a turn — the message is never silently dropped:
+The full instruction is committed to `infra`'s durable recipient buffer first.
+The pane receives only a short best-effort nudge to run `flotilla pull`. The
+recipient records arrival and reads the complete ordered backlog with:
+
+```sh
+FLOTILLA_SELF=infra flotilla pull
+```
+
+Pulling twice is safe: unacknowledged entries repeat with the same IDs and first
+`pulled_at` record. A nudge failure is never a body-delivery failure:
 
 | What you see | Means |
 |---|---|
-| `delivered to … — turn confirmed` | the turn started ✓ |
-| `is at a shell (crashed) — NOT delivered` | the pane is a bare shell (the agent exited) — flotilla refuses to type into a dead pane |
-| `is busy (mid-turn) — NOT delivered; retry when it is idle` | the agent is mid-turn; resend when it is idle |
+| `BUFFERED … status=buffered` | the full body is durable ✓ |
+| `nudge sent …` | the seat was prompted to pull |
+| `nudge missed … non-fatal` | the body is still durable; inspect/pull later |
 
-> **See the crash-detection guard with zero setup:** point `send` at a plain
-> shell pane (no agent running) and it reports `is at a shell (crashed) — NOT
-> delivered`. That refusal *is* the feature — flotilla never types into a pane
-> whose agent has died.
+> **See the failure isolation with zero setup:** point `send` at a seat whose
+> agent has exited. The buffer write still succeeds and the pane nudge is logged
+> non-fatally; restart the seat and run `flotilla pull` to recover the body.
 
 Long or multi-line bodies are easier from a file or stdin (no shell quoting):
 
@@ -137,8 +142,8 @@ flotilla send --from me --file ./instructions.txt infra
 echo "deploy when green" | flotilla send --from me --file - infra
 ```
 
-Inter-agent mirroring is **default-off**, so by default a send just delivers to
-the pane (no Discord post). See §4 to enable it; `--no-mirror` also forces it off.
+Inter-agent mirroring is **default-off**, so by default a send buffers and nudges
+without a Discord post. See §4 to enable it; `--no-mirror` also forces it off.
 
 ### (Re)start a dead desk: `flotilla resume`
 

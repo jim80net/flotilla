@@ -103,6 +103,37 @@ func TestInjectorHasPendingRelayForClearsAfterTransientRetry(t *testing.T) {
 	}
 }
 
+func TestRecipientBufferMakesNudgeFailureNonEvent(t *testing.T) {
+	logs := captureLog(t)
+	var buffered, nudged, mirrored string
+	var alerts []string
+	in := NewInjector(func(_ string, msg string) error {
+		nudged = msg
+		return surface.ErrBusy
+	}, 1)
+	in.SetRecipientMessageBuffer(func(j Job) (string, error) {
+		buffered = j.Message
+		return "pull now", nil
+	})
+	in.SetMirror(func(j Job) { mirrored = j.Message })
+	in.SetEscalate(func(msg string) { alerts = append(alerts, msg) })
+	in.Enqueue(Job{Agent: "xo", Message: "full stop-work body", Kind: KindRelay, MessageID: "m1"})
+	if buffered != "full stop-work body" {
+		t.Fatalf("body was not durably buffered synchronously at enqueue: %q", buffered)
+	}
+	in.Start()
+	in.Stop()
+	if buffered != "full stop-work body" || mirrored != buffered || nudged != "pull now" {
+		t.Fatalf("buffered=%q mirrored=%q nudged=%q", buffered, mirrored, nudged)
+	}
+	if len(alerts) != 0 {
+		t.Fatalf("nudge failure surfaced as delivery failure: %v", alerts)
+	}
+	if !strings.Contains(logs.String(), "nudge missed") || !strings.Contains(logs.String(), "non-fatal") {
+		t.Fatalf("missing body-free nudge log: %q", logs.String())
+	}
+}
+
 func TestInjectorSurvivesSendError(t *testing.T) {
 	var count int32
 	send := func(agent, message string) error {

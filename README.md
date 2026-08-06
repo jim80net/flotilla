@@ -86,9 +86,12 @@ $ go install github.com/jim80net/flotilla/cmd/flotilla@latest
 $ flotilla register infra --pane demo:0.0
 registered infra → pane demo:0.0 (marker @flotilla_agent=infra); title drift no longer breaks resolution
 
-# deliver an instruction — and CONFIRM the turn actually started:
+# durably buffer an instruction, then best-effort nudge the seat to pull:
 $ flotilla send --from me infra "pull origin main and run the tests"
-delivered to infra (pane demo:0.0) — turn confirmed
+BUFFERED id=… sender=me recipient=infra status=buffered sequence=1
+
+# the recipient records arrival by pulling (repeatable until ack):
+$ FLOTILLA_SELF=infra flotilla pull
 
 # keep a turn-based XO advancing already-authorized work on a clock:
 $ flotilla watch --roster ./flotilla.json --ack-file ./flotilla-xo-alive
@@ -101,9 +104,10 @@ $ flotilla provision-discord acceptance-canary --dry-run
 $ flotilla provision-discord alpha --xo alpha-xo --member alpha-be --apply-roster
 ```
 
-`send` doesn't type-and-hope: it confirms a real turn started and refuses a dead
-pane, so a "delivered" line is a turn that actually began — never a silently
-dropped message. `watch` keeps an idle fleet at ~zero cost until there's work.
+`send` doesn't type-and-hope: it commits the body to the recipient-owned buffer
+before attempting a body-free pane nudge. A dead, busy, or wedged pane can miss
+the nudge without losing the message; `flotilla buffer inspect` exposes backlog
+depth to any seat. `watch` keeps an idle fleet at ~zero cost until there's work.
 `provision-discord` creates the [intentional dual-placement federation
 layout](./docs/federation.md#spawn-layout-discord-mirrors-the-org-chart-11): XO
 C2 under `COS`, product hub under the flotilla category, roster bindings, and an
