@@ -22,25 +22,12 @@ python3 -m http.server 8000
 # open http://localhost:8000
 ```
 
-## Where the final copy slots in
+## Content contract
 
-The hero one-liner / hook is **not locked** yet. Every spot whose wording is
-still a placeholder is tagged with an HTML comment so it is trivially findable:
-
-```sh
-grep -n "COPY:" index.html
-```
-
-The most important one is the `<h1 class="hero-headline">` — the draft
-placeholder there is:
-
-> *flotilla is a drop-in chief of staff for the AI coding agents you already
-> run.*
-
-Replace **only** the `<h1>` text (and the adjacent `<!-- COPY: HERO SUBHEAD -->`
-sentence) with the operator's final hook; the surrounding structure is
-message-independent. Other `COPY:` markers cover the meta description, section
-ledes, CTA labels, the status pill, and the footer tagline.
+The seven-section order is fixed: `hero → feel → day → gives → yours → how →
+start`. At 390px the complete document must remain at or below 7,200px without
+horizontal overflow. Shipped claims stay deterministic HTML; generated imagery
+is atmosphere only.
 
 ## Generated atmosphere assets
 
@@ -66,7 +53,6 @@ source is enabled and the workflow is dispatched.
 - **Generic only.** No private deployment details, hostnames, real IDs, or
   domain-specific terms appear anywhere. Example agents (`xo`, `backend`,
   `frontend`, `data`, `infra`) are generic, matching the public quickstart.
-- **Honesty flags.** Shipped capabilities (surface drivers, inter-harness
-  fleets, the clock, the relay) are separated from roadmap items (first-class
-  modes, pluggable interfaces, richer reporting, the Cursor driver), per the
-  README's roadmap.
+- **Truthful product proof.** The page names the six registered drivers, the
+  exact bounded failover behavior, and five dashboard destinations. It does not
+  present shipped capabilities as trial or roadmap work.

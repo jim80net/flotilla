@@ -58,6 +58,39 @@ func TestLandingRemovesTemporaryBannerAndDeadStatusWidget(t *testing.T) {
 	}
 }
 
+func TestLandingShippedClaimsAreCurrent(t *testing.T) {
+	page := readSiteFile(t, "index.html")
+	for _, want := range []string{
+		"Claude Code, Codex, Grok, OpenCode, Pi, and aider",
+		"With a declared fallback chain, flotilla can move a desk to another configured harness",
+		"Five dashboard destinations:",
+		"Conversations, Goals, Issues, Parade, and combined R&amp;D",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("landing page missing current shipped claim %q", want)
+		}
+	}
+	for _, stale := range []string{"Cursor", "on the roadmap", "in supervised trial", "in trial · on the roadmap"} {
+		if strings.Contains(page, stale) {
+			t.Errorf("landing page retains stale claim %q", stale)
+		}
+	}
+}
+
+func TestLandingToolsDesktopUsesTwoColumnRow(t *testing.T) {
+	css := readSiteFile(t, "styles.css")
+	for _, want := range []string{
+		"@media (min-width: 721px)",
+		"#yours .band-head { grid-column: 1; margin-bottom: 0; }",
+		"#yours .generated-asset--tools { grid-column: 2; width: 100%; margin: 0 0 2.6rem; }",
+		"#yours .diff-strip { grid-column: 1 / -1; }",
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("landing CSS missing tools-row contract %q", want)
+		}
+	}
+}
+
 func TestParadeHasVisibleMobilePagerWithoutFallbackGlyph(t *testing.T) {
 	page := readSiteFile(t, "parade/index.html")
 	for _, want := range []string{
