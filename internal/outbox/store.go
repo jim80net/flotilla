@@ -13,6 +13,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -37,7 +38,7 @@ type file struct {
 	Epochs  map[string]uint64 `json:"epochs,omitempty"`
 }
 
-// CancelResult describes the sender→recipient generation stood down by Cancel.
+// CancelResult describes the one queued send stood down and the recipient epoch advanced by Cancel.
 type CancelResult struct {
 	Sender    string
 	Recipient string
@@ -143,9 +144,9 @@ func (s Store) Insert(e Entry) (id string, deduped bool, err error) {
 	return id, deduped, nil
 }
 
-// Cancel advances the durable epoch for the sender→recipient pair containing id and
-// removes every queued entry in that generation. A later send to the same recipient is
-// stamped with the new epoch; already-swept jobs from the old epoch therefore fail Current.
+// Cancel removes only id. It advances the sender→recipient epoch so an already-swept copy
+// of the canceled entry fails Current, then re-stamps its still-pending siblings into the
+// new epoch so canceling one order never strands or stands down the rest of the queue.
 func Cancel(rosterDir, id string) (CancelResult, error) {
 	if rosterDir == "" || id == "" {
 		return CancelResult{}, fmt.Errorf("outbox cancel: id not found")
@@ -172,6 +173,7 @@ func Cancel(rosterDir, id string) (CancelResult, error) {
 
 	st := NewStore(paths[0])
 	var result CancelResult
+	var canceled Entry
 	err = st.withLock(func() error {
 		f, err := st.readFileForUpdate()
 		if err != nil {
@@ -187,19 +189,23 @@ func Cancel(rosterDir, id string) (CancelResult, error) {
 		if target == nil {
 			return fmt.Errorf("id %q no longer pending", id)
 		}
+		canceled = *target
 		result.Sender = target.Sender
 		result.Recipient = target.Recipient
-		current := currentEpoch(f, target.Recipient)
+		current := currentEpoch(f, result.Recipient)
 		result.Epoch = current + 1
 		if f.Epochs == nil {
 			f.Epochs = make(map[string]uint64)
 		}
-		f.Epochs[target.Recipient] = result.Epoch
+		f.Epochs[result.Recipient] = result.Epoch
 		next := f.Pending[:0]
 		for _, p := range f.Pending {
-			if p.Recipient == target.Recipient && effectiveEpoch(p.Epoch) <= current {
+			if p.ID == id {
 				result.Canceled++
 				continue
+			}
+			if p.Recipient == result.Recipient && effectiveEpoch(p.Epoch) == current {
+				p.Epoch = result.Epoch
 			}
 			next = append(next, p)
 		}
@@ -209,7 +215,42 @@ func Cancel(rosterDir, id string) (CancelResult, error) {
 	if err != nil {
 		return CancelResult{}, fmt.Errorf("outbox cancel: %w", err)
 	}
+	logExit(canceled, "canceled", "cancel")
 	return result, nil
+}
+
+// RemoveIfNonCurrent atomically garbage-collects the exact stale entry observed by a
+// sweeper. The epoch and recipient are matched under the sender outbox lock, preventing
+// an old sweep snapshot from deleting a survivor that Cancel has since re-stamped.
+func RemoveIfNonCurrent(rosterDir string, observed Entry) (bool, error) {
+	path, err := Path(rosterDir, observed.Sender)
+	if err != nil {
+		return false, err
+	}
+	st := NewStore(path)
+	removed := false
+	err = st.withLock(func() error {
+		f, err := st.readFileForUpdate()
+		if err != nil {
+			return err
+		}
+		observedEpoch := effectiveEpoch(observed.Epoch)
+		if currentEpoch(f, observed.Recipient) == observedEpoch {
+			return nil
+		}
+		for i, pending := range f.Pending {
+			if pending.ID == observed.ID && pending.Recipient == observed.Recipient && effectiveEpoch(pending.Epoch) == observedEpoch {
+				f.Pending = append(f.Pending[:i], f.Pending[i+1:]...)
+				removed = true
+				return st.save(f)
+			}
+		}
+		return nil
+	})
+	if err == nil && removed {
+		logExit(observed, "superseded-gc", "sweep-gc")
+	}
+	return removed, err
 }
 
 // Current reports whether e is still pending in the active sender→recipient epoch.
@@ -286,7 +327,17 @@ func AttemptCurrent(rosterDir string, e Entry, attempt func() error) (bool, erro
 	if err != nil {
 		return attempted, fmt.Errorf("outbox delivery transaction: %w", err)
 	}
+	if attempted && attemptErr == nil {
+		logExit(e, "delivered-confirmed", "attempt-current")
+	}
 	return attempted, attemptErr
+}
+
+// logExit is the single grep contract for every terminal durable-outbox outcome.
+// journald supplies the timestamp; outbox_id, outcome, route path, and code path make
+// an absent entry explainable with one exact-ID query without logging its message body.
+func logExit(e Entry, outcome, via string) {
+	log.Printf("flotilla outbox exit: outbox_id=%q outcome=%s path=%q via=%s epoch=%d", e.ID, outcome, e.Sender+"->"+e.Recipient, via, effectiveEpoch(e.Epoch))
 }
 
 // Update persists deferral bumps and stale-escalation markers on an existing entry by id (#484).
@@ -391,7 +442,18 @@ func ListAll(rosterDir string) []Entry {
 	for _, path := range matches {
 		out = append(out, NewStore(path).Load()...)
 	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].EnqueuedAt.Before(out[j].EnqueuedAt) })
 	return out
+}
+
+// HasPendingRecipient reports whether any durable order is already queued for recipient.
+func HasPendingRecipient(rosterDir, recipient string) bool {
+	for _, entry := range ListAll(rosterDir) {
+		if entry.Recipient == recipient && Current(rosterDir, entry) {
+			return true
+		}
+	}
+	return false
 }
 
 func entryMateriallyChanged(prev, next Entry) bool {
