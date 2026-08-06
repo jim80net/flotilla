@@ -144,9 +144,14 @@ func (s Store) Insert(e Entry) (id string, deduped bool, err error) {
 }
 
 // Cancel advances the durable epoch for the sender→recipient pair containing id and
-// removes every queued entry in that generation. A later send to the same recipient is
-// stamped with the new epoch; already-swept jobs from the old epoch therefore fail Current.
-func Cancel(rosterDir, id string) (CancelResult, error) {
+// removes every queued entry in that generation. Caller must be the target's sender.
+// A later send to the same recipient is stamped with the new epoch; already-swept jobs
+// from the old epoch therefore fail Current.
+func Cancel(rosterDir, caller, id string) (CancelResult, error) {
+	caller = strings.TrimSpace(caller)
+	if caller == "" {
+		return CancelResult{}, fmt.Errorf("outbox cancel: caller identity is required")
+	}
 	if rosterDir == "" || id == "" {
 		return CancelResult{}, fmt.Errorf("outbox cancel: id not found")
 	}
@@ -186,6 +191,9 @@ func Cancel(rosterDir, id string) (CancelResult, error) {
 		}
 		if target == nil {
 			return fmt.Errorf("id %q no longer pending", id)
+		}
+		if target.Sender != caller {
+			return fmt.Errorf("caller %q does not own message %q from sender %q", caller, id, target.Sender)
 		}
 		result.Sender = target.Sender
 		result.Recipient = target.Recipient

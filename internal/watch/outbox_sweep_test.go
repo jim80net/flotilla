@@ -61,7 +61,7 @@ func TestCanceledJobAlreadyQueuedInInjectorNeverDelivers(t *testing.T) {
 	if s.SweepAll() != 1 {
 		t.Fatal("expected one swept job")
 	}
-	if _, err := outbox.Cancel(dir, id); err != nil {
+	if _, err := outbox.Cancel(dir, "alpha-desk", id); err != nil {
 		t.Fatal(err)
 	}
 

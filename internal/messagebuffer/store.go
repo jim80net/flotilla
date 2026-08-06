@@ -22,7 +22,10 @@ import (
 
 const Version = 1
 
-var ErrNotFound = errors.New("message buffer: id not found")
+var (
+	ErrNotFound = errors.New("message buffer: id not found")
+	ErrNotOwner = errors.New("message buffer: caller does not own message")
+)
 
 // Entry is one immutable message body plus mutable pull/ack lifecycle metadata.
 type Entry struct {
@@ -252,9 +255,13 @@ func FindNonce(rosterDir, recipient, nonce string) (Entry, bool) {
 }
 
 // Cancel appends a visible cancellation control message and links the target as
-// superseded. A recipient that already pulled the old instruction sees the stop
-// on its next pull; history is never silently erased.
-func Cancel(rosterDir, id string) (Entry, Entry, error) {
+// superseded. Caller must be the target's sender. A recipient that already pulled
+// the old instruction sees the stop on its next pull; history is never silently erased.
+func Cancel(rosterDir, caller, id string) (Entry, Entry, error) {
+	caller = strings.TrimSpace(caller)
+	if caller == "" {
+		return Entry{}, Entry{}, fmt.Errorf("message buffer cancel: caller identity is required")
+	}
 	var matches []Entry
 	for _, e := range ListAll(rosterDir) {
 		if e.ID == id {
@@ -268,6 +275,9 @@ func Cancel(rosterDir, id string) (Entry, Entry, error) {
 		return Entry{}, Entry{}, fmt.Errorf("message buffer: id %q is ambiguous", id)
 	}
 	target := matches[0]
+	if target.Sender != caller {
+		return Entry{}, Entry{}, fmt.Errorf("%w: %q belongs to sender %q, not %q", ErrNotOwner, id, target.Sender, caller)
+	}
 	body := fmt.Sprintf("[flotilla cancellation] Stop work from buffered message %s. Its sender withdrew that instruction; do not take another action under it.", id)
 	message, _, err := inbound.AppendDispatchNonce(body)
 	if err != nil {

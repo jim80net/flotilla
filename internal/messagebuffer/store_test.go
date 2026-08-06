@@ -182,7 +182,7 @@ func TestCancelAppendsPullVisibleStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cancel, gotTarget, err := Cancel(dir, target.ID)
+	cancel, gotTarget, err := Cancel(dir, "xo", target.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

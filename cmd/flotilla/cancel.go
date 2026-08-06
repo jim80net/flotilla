@@ -61,15 +61,19 @@ func cmdCancel(args []string) error {
 		return fmt.Errorf("cancel roster %q is a directory", rosterPath)
 	}
 	dir := filepath.Dir(rosterPath)
+	caller := strings.TrimSpace(os.Getenv("FLOTILLA_SELF"))
+	if caller == "" {
+		return fmt.Errorf("cancel: sender identity required (set $FLOTILLA_SELF)")
+	}
 	if opts.legacyOutbox {
-		result, err := outbox.Cancel(dir, opts.id)
+		result, err := outbox.Cancel(dir, caller, opts.id)
 		if err != nil {
 			return err
 		}
 		fmt.Printf("flotilla cancel: stood down %d queued send(s) on %s → %s; epoch advanced to %d\n", result.Canceled, result.Sender, result.Recipient, result.Epoch)
 		return nil
 	}
-	cancel, target, bufferErr := messagebuffer.Cancel(dir, opts.id)
+	cancel, target, bufferErr := messagebuffer.Cancel(dir, caller, opts.id)
 	if bufferErr == nil {
 		fmt.Printf("flotilla cancel: buffered cancellation id=%s supersedes=%s on %s → %s\n", cancel.ID, target.ID, target.Sender, target.Recipient)
 		bestEffortPullNudge(rosterPath, target.Recipient)

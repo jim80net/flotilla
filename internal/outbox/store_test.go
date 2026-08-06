@@ -251,7 +251,7 @@ func TestCancelAdvancesPairEpochAndStandsDownWholeGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := Cancel(dir, first)
+	result, err := Cancel(dir, "alpha-desk", first)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +291,7 @@ func TestCancelUnknownIDDoesNotAdvanceEpoch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Cancel(dir, "missing"); err == nil || !strings.Contains(err.Error(), "not found") {
+	if _, err := Cancel(dir, "alpha-desk", "missing"); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("cancel missing error = %v", err)
 	}
 	entry := NewStore(mustPath(t, dir, "alpha-desk")).Load()[0]
@@ -311,7 +311,7 @@ func TestLegacyEntryWithoutEpochIsCurrentGenerationOne(t *testing.T) {
 	if !Current(dir, entry) {
 		t.Fatal("epoch-zero legacy entry should map to generation one")
 	}
-	if _, err := Cancel(dir, "legacy"); err != nil {
+	if _, err := Cancel(dir, "alpha-desk", "legacy"); err != nil {
 		t.Fatal(err)
 	}
 	id, _, err := Enqueue(dir, "alpha-desk", "alpha-xo", "queued after cancel")
@@ -348,7 +348,7 @@ func TestCancelAndDeliveryAttemptHaveOneDurableWinner(t *testing.T) {
 	<-entered // delivery owns the sender outbox lock
 	canceled := make(chan error, 1)
 	go func() {
-		_, err := Cancel(dir, id)
+		_, err := Cancel(dir, "alpha-desk", id)
 		canceled <- err
 	}()
 	select {
