@@ -16,8 +16,9 @@ import (
 )
 
 type cancelOpts struct {
-	id         string
-	rosterPath string
+	id           string
+	rosterPath   string
+	legacyOutbox bool
 }
 
 // parseCancelArgs accepts the outbox id on either side of --roster, matching the
@@ -29,6 +30,7 @@ func parseCancelArgs(args []string) (cancelOpts, error) {
 	}
 	fs := flag.NewFlagSet("cancel", flag.ContinueOnError)
 	rosterPath := fs.String("roster", rosterDefault(), "roster config path")
+	legacyOutbox := fs.Bool("legacy-outbox", false, "cancel the legacy outbox generation containing id")
 	if err := fs.Parse(args); err != nil {
 		return cancelOpts{}, err
 	}
@@ -37,9 +39,9 @@ func parseCancelArgs(args []string) (cancelOpts, error) {
 		id, rest = rest[0], rest[1:]
 	}
 	if id == "" || len(rest) != 0 {
-		return cancelOpts{}, fmt.Errorf("usage: flotilla cancel <message-id> [--roster <path>]")
+		return cancelOpts{}, fmt.Errorf("usage: flotilla cancel <message-id> [--roster <path>] [--legacy-outbox]")
 	}
-	return cancelOpts{id: id, rosterPath: *rosterPath}, nil
+	return cancelOpts{id: id, rosterPath: *rosterPath, legacyOutbox: *legacyOutbox}, nil
 }
 
 func cmdCancel(args []string) error {
@@ -59,6 +61,14 @@ func cmdCancel(args []string) error {
 		return fmt.Errorf("cancel roster %q is a directory", rosterPath)
 	}
 	dir := filepath.Dir(rosterPath)
+	if opts.legacyOutbox {
+		result, err := outbox.Cancel(dir, opts.id)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("flotilla cancel: stood down %d queued send(s) on %s → %s; epoch advanced to %d\n", result.Canceled, result.Sender, result.Recipient, result.Epoch)
+		return nil
+	}
 	cancel, target, bufferErr := messagebuffer.Cancel(dir, opts.id)
 	if bufferErr == nil {
 		fmt.Printf("flotilla cancel: buffered cancellation id=%s supersedes=%s on %s → %s\n", cancel.ID, target.ID, target.Sender, target.Recipient)
@@ -68,12 +78,7 @@ func cmdCancel(args []string) error {
 	if !errors.Is(bufferErr, messagebuffer.ErrNotFound) {
 		return bufferErr
 	}
-	result, err := outbox.Cancel(filepath.Dir(rosterPath), opts.id)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("flotilla cancel: stood down %d queued send(s) on %s → %s; epoch advanced to %d\n", result.Canceled, result.Sender, result.Recipient, result.Epoch)
-	return nil
+	return fmt.Errorf("cancel buffered message %q: %w (legacy generation cancellation requires --legacy-outbox)", opts.id, bufferErr)
 }
 
 func bestEffortPullNudge(rosterPath, recipient string) {

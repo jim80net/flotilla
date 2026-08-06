@@ -128,7 +128,8 @@ func usage() {
 usage:
   flotilla send --from <sender> <agent> <message>     inline message
   flotilla send --from <sender> --file <path> <agent> message body from a file ('-' = stdin)
-  flotilla cancel <message-id> [--roster <path>]      append a pull-visible cancellation (legacy outbox fallback)
+  flotilla cancel <message-id> [--roster <path>]      append a pull-visible cancellation (fails closed on a miss)
+  flotilla cancel --legacy-outbox <outbox-id>         explicitly cancel one legacy sender→recipient generation
   flotilla dispatch-status [--roster <path>] <nonce>  buffered / pulled / consumed (plus legacy states)
   flotilla dispatch-ack [--roster <path>] <nonce>     settle this seat's dispatch in the durable ack ledger (#472)
   flotilla pull [--roster <path>] [--json]            pull this seat's durable message backlog (idempotent)

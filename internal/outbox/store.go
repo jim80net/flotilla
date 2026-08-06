@@ -326,11 +326,11 @@ func (s Store) Update(e Entry) {
 }
 
 // Remove deletes an entry by id under the same flock as Insert/Update.
-func (s Store) Remove(id string) {
+func (s Store) Remove(id string) error {
 	if s.path == "" || id == "" {
-		return
+		return nil
 	}
-	if err := s.withLock(func() error {
+	err := s.withLock(func() error {
 		f, err := s.readFileForUpdate()
 		if err != nil {
 			return fmt.Errorf("read for remove: %w", err)
@@ -349,9 +349,11 @@ func (s Store) Remove(id string) {
 		}
 		f.Pending = next
 		return s.save(f)
-	}); err != nil {
+	})
+	if err != nil {
 		log.Printf("flotilla outbox: remove failed: %v", err)
 	}
+	return err
 }
 
 // Enqueue inserts a new pending send and returns its id. Identical pending sends dedup

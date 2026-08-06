@@ -15,6 +15,12 @@ type MigrationResult struct {
 // MigrateOutboxes moves every legacy push-retry row into its recipient buffer.
 // Buffer insert precedes outbox removal, and the original ID makes retries idempotent.
 func MigrateOutboxes(rosterDir string) (MigrationResult, error) {
+	return migrateOutboxes(rosterDir, func(path, id string) error {
+		return outbox.NewStore(path).Remove(id)
+	})
+}
+
+func migrateOutboxes(rosterDir string, remove func(path, id string) error) (MigrationResult, error) {
 	var result MigrationResult
 	recipients := make(map[string]bool)
 	for _, legacy := range outbox.ListAll(rosterDir) {
@@ -29,7 +35,9 @@ func MigrateOutboxes(rosterDir string) (MigrationResult, error) {
 		if err != nil {
 			return result, err
 		}
-		outbox.NewStore(path).Remove(legacy.ID)
+		if err := remove(path, legacy.ID); err != nil {
+			return result, fmt.Errorf("migrate outbox %s/%s: remove legacy row: %w", legacy.Sender, legacy.ID, err)
+		}
 		result.Migrated++
 		recipients[legacy.Recipient] = true
 	}

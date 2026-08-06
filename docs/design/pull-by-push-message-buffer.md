@@ -47,6 +47,9 @@ nonce, sender sequence, enqueue time, and optional supersession/migration data.
   file lock it stamps every unread entry once and returns every unacknowledged
   entry. A second pull performs no write and returns the same backlog; a new
   urgent message is visible immediately instead of waiting behind a batch lease.
+  This intentionally has no batch cap or lease expiry: until acknowledged, even
+  a five-figure backlog is replayed in full on every pull. That is the lossless
+  first-release contract; recipients must acknowledge handled rows promptly.
 - `flotilla dispatch-ack <nonce>` records the existing consumed-registry fact
   and marks the matching buffer entry acknowledged. Non-dispatch/operator rows
   use `flotilla buffer ack <id>`. History is retained; ack only removes the row
@@ -57,7 +60,9 @@ nonce, sender sequence, enqueue time, and optional supersession/migration data.
   replacement. Pull output prints both `superseded-by` and `supersedes`, so FIFO
   order never masquerades as current authority.
 - `flotilla cancel <id>` does not erase history. It links the target to a new,
-  pull-visible cancellation dispatch and nudges the recipient best-effort.
+  pull-visible cancellation dispatch and nudges the recipient best-effort. A
+  buffer-ID miss fails closed. Generation-wide legacy outbox cancellation is
+  reachable only through the explicit `--legacy-outbox` compatibility flag.
 
 Per-sender ordering is the monotonic `sender_sequence`, allocated while holding
 the recipient file lock. Cross-sender order is observed enqueue order and is not
@@ -95,3 +100,6 @@ written by an older sender binary without ever resuming full-body push.
 4. Supersession is stored and displayed, never inferred from FIFO.
 5. A nudge carries no unique data and cannot report body-delivery failure.
 6. Migration is insert-before-remove and ID-idempotent.
+7. Every seat pulls before acting, including before continuing remembered work.
+   A cancellation is another buffered message, so this pull-before-act rule is
+   what guarantees a durable stop is observed before the next authorized step.

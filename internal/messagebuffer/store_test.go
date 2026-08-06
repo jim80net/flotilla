@@ -3,6 +3,7 @@ package messagebuffer
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -107,6 +108,34 @@ func TestMigrationPreservesFiveThousandDeferralsAndIsIdempotent(t *testing.T) {
 	got := NewStore(bufferPath).Load()
 	if len(got) != 1 || got[0].ID != "stuck" || got[0].LegacyDeferrals != 5000 || got[0].MigratedFrom != "sender-outbox" {
 		t.Fatalf("migrated entry = %+v", got)
+	}
+}
+
+func TestMigrationDoesNotCountFailedLegacyRemoval(t *testing.T) {
+	dir := t.TempDir()
+	path, _ := outbox.Path(dir, "xo")
+	_, _, err := outbox.NewStore(path).Insert(outbox.Entry{
+		ID: "still-legacy", Sender: "xo", Recipient: "build", Message: "do not double deliver",
+		EnqueuedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := migrateOutboxes(dir, func(_, _ string) error {
+		return fmt.Errorf("disk refused removal")
+	})
+	if err == nil || !strings.Contains(err.Error(), "remove legacy row") {
+		t.Fatalf("migration error = %v, want removal failure", err)
+	}
+	if result.Migrated != 0 || len(result.Recipients) != 0 {
+		t.Fatalf("failed removal reported migration: %+v", result)
+	}
+	if got := outbox.NewStore(path).Load(); len(got) != 1 || got[0].ID != "still-legacy" {
+		t.Fatalf("legacy row after failed removal = %+v", got)
+	}
+	bufferPath, _ := Path(dir, "build")
+	if got := NewStore(bufferPath).Load(); len(got) != 1 || got[0].ID != "still-legacy" {
+		t.Fatalf("insert-before-remove buffer copy = %+v", got)
 	}
 }
 
