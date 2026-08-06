@@ -3,6 +3,7 @@ package loopposture
 import (
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/jim80net/flotilla/internal/backlog"
 	"github.com/jim80net/flotilla/internal/roster"
@@ -18,7 +19,7 @@ func FromSnapshot(snap watch.Snapshot, agent string, settled, backlogKnown, snap
 	if !in {
 		pane = surface.StateUnknown
 	}
-	return Evidence{
+	evidence := Evidence{
 		Pane:          pane,
 		InSnapshot:    in,
 		SnapshotFresh: snapFresh,
@@ -29,6 +30,11 @@ func FromSnapshot(snap watch.Snapshot, agent string, settled, backlogKnown, snap
 		BlockedN:      st.Blocked,
 		Park:          ParkStrict,
 	}
+	if observation, ok := snap.DeskObservations[agent]; ok {
+		evidence.PaneObservedAt = observation.ObservedAt
+		evidence.PaneReason = observation.Reason
+	}
+	return evidence
 }
 
 // SettledFilePresent reports whether a settle marker exists at path without
@@ -65,9 +71,12 @@ func LoadFleetEvidence(cfg *roster.Config, xo, rosterDir string, snap watch.Snap
 	}
 	for _, a := range cfg.Agents {
 		backlogPath := filepath.Join(rosterDir, "flotilla-"+a.Name+"-backlog.md")
-		st, backlogKnown := ReadBacklogFile(backlogPath)
+		st, blockedItems, backlogObservedAt, backlogKnown := ReadBacklogEvidence(backlogPath)
 		settled := agentSettled(xo, rosterDir, a.Name, snap, snapOK)
-		out[a.Name] = FromSnapshot(snap, a.Name, settled, backlogKnown, snapOK && snapFresh, st)
+		evidence := FromSnapshot(snap, a.Name, settled, backlogKnown, snapOK && snapFresh, st)
+		evidence.BacklogObservedAt = backlogObservedAt
+		evidence.BlockedItems = blockedItems
+		out[a.Name] = evidence
 	}
 	return out
 }
@@ -75,12 +84,41 @@ func LoadFleetEvidence(cfg *roster.Config, xo, rosterDir string, snap watch.Snap
 // ReadBacklogFile reads path and parses the backlog. ok=false when the file is
 // missing or unreadable (strict parked cannot claim empty).
 func ReadBacklogFile(path string) (backlog.Status, bool) {
+	status, _, _, ok := ReadBacklogEvidence(path)
+	return status, ok
+}
+
+// ReadBacklogEvidence returns the parsed status plus bounded blocked-item heads
+// and the source file mtime used to explain/age loop posture.
+func ReadBacklogEvidence(path string) (backlog.Status, []string, time.Time, bool) {
 	if path == "" {
-		return backlog.Status{}, false
+		return backlog.Status{}, nil, time.Time{}, false
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return backlog.Status{}, false
+		return backlog.Status{}, nil, time.Time{}, false
 	}
-	return backlog.Parse(string(raw)), true
+	observedAt := time.Time{}
+	if fi, err := os.Stat(path); err == nil {
+		observedAt = fi.ModTime().UTC()
+	}
+	var blockedItems []string
+	for _, item := range backlog.Scan(string(raw)).Items {
+		if item.Classification != "blocked" && item.Classification != "needs-attention" {
+			continue
+		}
+		blockedItems = append(blockedItems, boundedItemHead(item.Head, 160))
+		if len(blockedItems) == 3 {
+			break
+		}
+	}
+	return backlog.Parse(string(raw)), blockedItems, observedAt, true
+}
+
+func boundedItemHead(head string, limit int) string {
+	runes := []rune(head)
+	if len(runes) <= limit {
+		return head
+	}
+	return string(runes[:limit-1]) + "…"
 }

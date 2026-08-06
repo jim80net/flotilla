@@ -7,6 +7,9 @@
 package loopposture
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/jim80net/flotilla/internal/looparbitration"
 	"github.com/jim80net/flotilla/internal/surface"
 )
@@ -65,6 +68,9 @@ const (
 type Evidence struct {
 	// Pane is the snapshot surface.State for the agent.
 	Pane surface.State
+	// PaneObservedAt / PaneReason are the detector observation that supplied Pane.
+	PaneObservedAt time.Time
+	PaneReason     string
 	// InSnapshot is true when the agent appears in the detector snapshot map.
 	InSnapshot bool
 	// SnapshotFresh is true when the snapshot age is within the freshness threshold.
@@ -79,6 +85,11 @@ type Evidence struct {
 	UnblockedN    int
 	AwaitingAuthN int
 	BlockedN      int
+	// BacklogObservedAt is the source file mtime used for the parsed counts.
+	// BlockedItems is a bounded set of the actual [blocked]/[needs-attention]
+	// heads so status can explain a blocked posture without re-reading the file.
+	BacklogObservedAt time.Time
+	BlockedItems      []string
 	// Reaped marks an intentionally terminated / reaped seat.
 	Reaped bool
 	// ComposerActive is the dash/operator compose bridge (composerComposeActive).
@@ -90,6 +101,38 @@ type Evidence struct {
 	GoalActiveOK bool
 	// Park is the parked rule; zero value is ParkStrict (product default).
 	Park ParkMode
+}
+
+// Explanation describes the evidence responsible for a derived posture.
+// It is intentionally small enough for status and dash read models.
+type Explanation struct {
+	Reason     string
+	ObservedAt time.Time
+	Items      []string
+}
+
+// Explain reports the load-bearing evidence for p. Blocked explanations follow
+// Derive's priority so the displayed reason cannot disagree with the label.
+func Explain(p Posture, e Evidence) Explanation {
+	if p != PostureBlocked {
+		return Explanation{}
+	}
+	if e.NativeOK {
+		if native, ok := mapNative(e.Native); ok && native == PostureBlocked {
+			return Explanation{Reason: "native-loop-observer:blocked", ObservedAt: e.PaneObservedAt}
+		}
+	}
+	if e.Pane == surface.StateAwaitingInput || e.Pane == surface.StateAwaitingApproval {
+		return Explanation{Reason: "pane:" + e.Pane.String(), ObservedAt: e.PaneObservedAt}
+	}
+	if e.BacklogKnown && e.BlockedN > 0 && e.UnblockedN == 0 {
+		return Explanation{
+			Reason:     fmt.Sprintf("backlog:blocked=%d,unblocked=0", e.BlockedN),
+			ObservedAt: e.BacklogObservedAt,
+			Items:      append([]string(nil), e.BlockedItems...),
+		}
+	}
+	return Explanation{Reason: "blocked:evidence-unavailable"}
 }
 
 // Derive maps Evidence to a loop_posture. Pure: no I/O.

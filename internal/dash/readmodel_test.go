@@ -102,6 +102,41 @@ func TestBuildBoard_LoopPosture(t *testing.T) {
 	}
 }
 
+func TestBuildBoard_BlockedPostureExplainsSource(t *testing.T) {
+	observedAt := time.Date(2026, 8, 6, 9, 10, 0, 0, time.UTC)
+	doc := BuildBoard(BoardInputs{
+		Cfg:       &roster.Config{Agents: []roster.Agent{{Name: "worker"}}},
+		XO:        "worker",
+		Snap:      watch.Snapshot{DeskStates: map[string]surface.State{"worker": surface.StateIdle}},
+		SnapOK:    true,
+		SnapAge:   time.Second,
+		Threshold: time.Hour,
+		LoopByAgent: map[string]loopposture.Evidence{
+			"worker": {
+				Pane: surface.StateIdle, InSnapshot: true, SnapshotFresh: true,
+				BacklogKnown: true, BlockedN: 1, BacklogObservedAt: observedAt,
+				BlockedItems: []string{"waiting on external grant"},
+			},
+		},
+	})
+	if len(doc.Agents) != 1 {
+		t.Fatalf("got %d agents, want 1", len(doc.Agents))
+	}
+	got := doc.Agents[0]
+	if got.LoopPosture != "blocked" || got.State != "idle" {
+		t.Fatalf("agent = %+v, want idle pane with blocked loop posture", got)
+	}
+	if got.PostureReason != "backlog:blocked=1,unblocked=0" {
+		t.Errorf("posture reason = %q", got.PostureReason)
+	}
+	if got.PostureObservedAt != observedAt.Format(time.RFC3339) {
+		t.Errorf("posture observed_at = %q, want %q", got.PostureObservedAt, observedAt.Format(time.RFC3339))
+	}
+	if len(got.BlockedItems) != 1 || got.BlockedItems[0] != "waiting on external grant" {
+		t.Errorf("blocked items = %#v", got.BlockedItems)
+	}
+}
+
 // TestBuildBoard_Fresh covers the superset contract: every base status field is
 // present (generated_at, xo, agents[name,role,surface,state]) plus the freshness
 // + xo_liveness additions, for a fresh snapshot.

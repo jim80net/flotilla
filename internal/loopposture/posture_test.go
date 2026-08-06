@@ -1,7 +1,9 @@
 package loopposture
 
 import (
+	"reflect"
 	"testing"
+	"time"
 
 	"github.com/jim80net/flotilla/internal/looparbitration"
 	"github.com/jim80net/flotilla/internal/surface"
@@ -14,6 +16,26 @@ func baseIdle() Evidence {
 		SnapshotFresh: true,
 		BacklogKnown:  true,
 		Park:          ParkStrict,
+	}
+}
+
+func TestExplainBlockedNamesDerivingEvidence(t *testing.T) {
+	now := time.Date(2026, 8, 6, 16, 17, 0, 0, time.UTC)
+	ledger := baseIdle()
+	ledger.BlockedN = 2
+	ledger.BacklogObservedAt = now
+	ledger.BlockedItems = []string{"- [blocked] operator question", "- [needs-attention] stalled review"}
+	got := Explain(Derive(ledger), ledger)
+	if got.Reason != "backlog:blocked=2,unblocked=0" || !got.ObservedAt.Equal(now) || !reflect.DeepEqual(got.Items, ledger.BlockedItems) {
+		t.Fatalf("backlog blocked explanation = %+v", got)
+	}
+
+	pane := baseIdle()
+	pane.Pane = surface.StateAwaitingInput
+	pane.PaneObservedAt = now.Add(-time.Minute)
+	got = Explain(Derive(pane), pane)
+	if got.Reason != "pane:awaiting-input" || !got.ObservedAt.Equal(pane.PaneObservedAt) || len(got.Items) != 0 {
+		t.Fatalf("pane blocked explanation = %+v", got)
 	}
 }
 

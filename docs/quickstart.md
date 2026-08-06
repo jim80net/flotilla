@@ -389,30 +389,41 @@ last-ack age and whether it has settled — without attaching to any pane:
 
 ```sh
 flotilla status
-flotilla status --json   # machine-readable: agents[].state + agents[].loop_posture
+flotilla status --json   # includes per-desk state_observed_at + state_reason
 ```
 
 ```
 flotilla status — states as of 12s ago (./flotilla-detector-state.json)
 XO research · last ack 7s ago · active
 
-infra     working   composing
-research  idle      available   (XO)
-data      crashed   crashed
-feature   unknown   unknown
+infra     working   composing   state 2s · surface-refresh:working
+research  idle      available   state 2s · surface-transition:working->idle   (XO)
+data      crashed   crashed     state 2s · surface-refresh:shell
+feature   unknown   unknown     state age unknown
 ```
 
 It is **read-only**: it reads the snapshot the detector already writes
 (`--snapshot-file`) plus the XO ack file (`--ack-file`) and per-agent backlog /
 settle markers for `loop_posture` — no daemon, no pane probing, no new state.
-The states are the detector's view **as of its last tick**, so the header always
-reports the snapshot's age; a desk the detector hasn't seen yet (or with no
-snapshot at all) shows `unknown`. `crashed` means the desk dropped to a bare
+The states are the detector's view **as of its last tick**. The header reports
+the whole snapshot's age, while every desk row reports its own observation age
+and short reason. The persisted `desk_states` value is an object containing
+`state`, UTC `observed_at`, and `reason`; legacy integer snapshots are accepted
+and dated from their file modification time. A desk the detector hasn't seen yet
+(or with no snapshot at all) shows `unknown`. `crashed` means the desk dropped to a bare
 shell (its agent process is gone). Pane **idle is not enough**: `loop_posture`
 distinguishes `available` / `parked` / `drifted` / `awaiting-authority` (parked
 requires a known-empty unblocked backlog — strict default). Run it from the same
 directory as your roster, or point it with `--roster` / `--snapshot-file` /
 `--ack-file` (it honors the same `$FLOTILLA_*` env vars as `watch`).
+
+When `loop_posture` is `blocked`, status also reports the deriving evidence:
+pane wait or backlog counts, the source observation time, and up to three
+`[blocked]` / `[needs-attention]` item heads. JSON consumers receive
+`loop_posture_reason`, `loop_posture_observed_at`, and `blocked_items`. Reserve
+`[blocked]` for a real unresolved external blocker; “waiting for next dispatch”
+or “desk clear” is intentionally idle meta-state and must be completed or parked,
+not left as an open blocker that permanently paints the seat blocked.
 
 ## 6. (Optional) Inbound relay
 

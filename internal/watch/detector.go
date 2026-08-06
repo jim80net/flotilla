@@ -1314,6 +1314,7 @@ func (d *Detector) tickLocked(warrant map[string]bool) (pendingRotate bool, pend
 	for _, name := range d.cfg.Desks {
 		cur.DeskStates[name] = d.debounce(name, d.cfg.Assess(name))
 	}
+	cur.DeskObservations = ObserveDeskStates(d.snap, cur.DeskStates, d.now())
 	// Start timing an already-wedged pane on the cold observation itself. The
 	// cold-start early return below still suppresses an immediate per-pane wake;
 	// only continuous observed residence past the threshold escalates.

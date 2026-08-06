@@ -12,10 +12,15 @@ import (
 
 func TestSnapshotRoundTrip(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "detector-state.json")
+	observed := time.Date(2026, 8, 6, 16, 8, 0, 0, time.UTC)
 	want := Snapshot{
 		DeskStates: map[string]surface.State{
 			"xo":      surface.StateIdle,
 			"backend": surface.StateWorking,
+		},
+		DeskObservations: map[string]DeskStateObservation{
+			"xo":      {State: surface.StateIdle, ObservedAt: observed, Reason: "surface-transition:working->idle"},
+			"backend": {State: surface.StateWorking, ObservedAt: observed.Add(-time.Second), Reason: "surface-refresh:working"},
 		},
 		SignalHash: "abc123",
 		XOSettled:  true,
@@ -36,6 +41,18 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	if got.DeskStates["xo"] != surface.StateIdle || got.DeskStates["backend"] != surface.StateWorking {
 		t.Errorf("round-trip desk states mismatch: %+v", got.DeskStates)
 	}
+	if got.DeskObservations["xo"].Reason != "surface-transition:working->idle" || !got.DeskObservations["backend"].ObservedAt.Equal(observed.Add(-time.Second)) {
+		t.Errorf("round-trip desk observations mismatch: %+v", got.DeskObservations)
+	}
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"state":3`, `"observed_at":"2026-08-06T16:08:00Z"`, `"reason":`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("persisted snapshot missing structured desk field %s: %s", want, raw)
+		}
+	}
 	if got.Usage["backend"].RemainingPercent != 8 || got.Usage["backend"].Window != "weekly" {
 		t.Errorf("round-trip usage mismatch: %+v", got.Usage)
 	}
@@ -52,6 +69,10 @@ func TestLoadSnapshotLegacyTrackerHashShape(t *testing.T) {
 	if err := os.WriteFile(p, []byte(legacy), 0o644); err != nil {
 		t.Fatalf("write legacy snapshot: %v", err)
 	}
+	legacyAt := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(p, legacyAt, legacyAt); err != nil {
+		t.Fatalf("date legacy snapshot: %v", err)
+	}
 	got, ok := LoadSnapshot(p)
 	if !ok {
 		t.Fatal("legacy snapshot must load (ok=true), not cold-start")
@@ -67,6 +88,30 @@ func TestLoadSnapshotLegacyTrackerHashShape(t *testing.T) {
 	}
 	if got.DeskStates["backend"] != surface.StateIdle { // 3 == StateIdle
 		t.Errorf("desk_states must survive the load, got %+v", got.DeskStates)
+	}
+	if observation := got.DeskObservations["backend"]; observation.Reason != "legacy-snapshot" || !observation.ObservedAt.Equal(legacyAt) {
+		t.Errorf("legacy desk state needs honest file-age provenance, got %+v", observation)
+	}
+}
+
+func TestObserveDeskStatesRefreshesAndTransitions(t *testing.T) {
+	priorAt := time.Date(2026, 8, 6, 16, 0, 0, 0, time.UTC)
+	now := priorAt.Add(8 * time.Minute)
+	prev := Snapshot{
+		DeskStates: map[string]surface.State{"alpha": surface.StateAwaitingInput, "beta": surface.StateAwaitingInput},
+		DeskObservations: map[string]DeskStateObservation{
+			"alpha": {State: surface.StateAwaitingInput, ObservedAt: priorAt, Reason: "surface-refresh:awaiting-input"},
+			"beta":  {State: surface.StateAwaitingInput, ObservedAt: priorAt, Reason: "surface-refresh:awaiting-input"},
+		},
+	}
+	states := map[string]surface.State{"alpha": surface.StateIdle, "beta": surface.StateAwaitingInput}
+	observations := ObserveDeskStates(prev, states, now)
+
+	if got := observations["alpha"]; got.Reason != "surface-transition:awaiting-input->idle" || !got.ObservedAt.Equal(now) {
+		t.Errorf("cleared premise observation = %+v", got)
+	}
+	if got := observations["beta"]; got.Reason != "surface-refresh:awaiting-input" || !got.ObservedAt.Equal(now) {
+		t.Errorf("steady blocked refresh observation = %+v", got)
 	}
 }
 
