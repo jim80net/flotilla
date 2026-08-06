@@ -99,17 +99,20 @@ func (f Freshness) String() string {
 // the `flotilla status --json` contract (the landing widget, site/app.js,
 // consumes exactly these fields). #524 adds loop_posture beside pane state.
 type AgentItem struct {
-	Name            string                  `json:"name"`
-	Role            string                  `json:"role,omitempty"`              // "hub" for the XO, else omitted
-	Surface         string                  `json:"surface,omitempty"`           // effective surface driver
-	State           string                  `json:"state"`                       // pane / surface.State label
-	StateObservedAt string                  `json:"state_observed_at,omitempty"` // per-desk detector observation
-	StateReason     string                  `json:"state_reason,omitempty"`      // short transition/refresh code
-	LoopPosture     string                  `json:"loop_posture,omitempty"`      // operator-facing #524 vocabulary
-	RawLoopPosture  string                  `json:"raw_loop_posture,omitempty"`  // retained when display normalization differs
-	QueueState      string                  `json:"queue_state"`                 // empty | has-work | unknown
-	LastAction      *AgentAction            `json:"last_action,omitempty"`       // latest safe session-mirror glance
-	Usage           *watch.UsageObservation `json:"usage,omitempty"`
+	Name              string                  `json:"name"`
+	Role              string                  `json:"role,omitempty"`              // "hub" for the XO, else omitted
+	Surface           string                  `json:"surface,omitempty"`           // effective surface driver
+	State             string                  `json:"state"`                       // pane / surface.State label
+	StateObservedAt   string                  `json:"state_observed_at,omitempty"` // per-desk detector observation
+	StateReason       string                  `json:"state_reason,omitempty"`      // short transition/refresh code
+	LoopPosture       string                  `json:"loop_posture,omitempty"`      // operator-facing #524 vocabulary
+	RawLoopPosture    string                  `json:"raw_loop_posture,omitempty"`  // retained when display normalization differs
+	PostureObservedAt string                  `json:"loop_posture_observed_at,omitempty"`
+	PostureReason     string                  `json:"loop_posture_reason,omitempty"`
+	BlockedItems      []string                `json:"blocked_items,omitempty"`
+	QueueState        string                  `json:"queue_state"`           // empty | has-work | unknown
+	LastAction        *AgentAction            `json:"last_action,omitempty"` // latest safe session-mirror glance
+	Usage             *watch.UsageObservation `json:"usage,omitempty"`
 }
 
 // AgentAction is the latest reader-modeled activity shown in the live swarm
@@ -219,6 +222,16 @@ func BuildBoard(in BoardInputs) BoardDoc {
 		if observation, ok := in.Snap.DeskObservations[a.Name]; ok {
 			item.StateObservedAt = observation.ObservedAt.UTC().Format(time.RFC3339)
 			item.StateReason = observation.Reason
+		}
+		if evidenceOK {
+			explanation := loopposture.Explain(rawPosture, evidence)
+			if explanation.Reason != "" {
+				item.PostureReason = explanation.Reason
+				item.BlockedItems = explanation.Items
+				if !explanation.ObservedAt.IsZero() {
+					item.PostureObservedAt = explanation.ObservedAt.UTC().Format(time.RFC3339)
+				}
+			}
 		}
 		if rawPosture != displayPosture {
 			item.RawLoopPosture = string(rawPosture)

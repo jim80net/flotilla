@@ -885,6 +885,12 @@ code {
   font-size: .72rem;
   color: var(--ink-3);
 }
+.desk-posture-evidence {
+  display: block;
+  margin-top: .15rem;
+  font-size: .7rem;
+  color: var(--ink-2);
+}
 .desk-usage {
   display: block;
   margin-top: .15rem;

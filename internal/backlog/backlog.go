@@ -8,7 +8,7 @@
 //
 //   - [in-flight] <text>      dispatched / being driven  → UNBLOCKED (actionable)
 //   - [next] <text>           not started yet            → UNBLOCKED (actionable)
-//   - [blocked] <text>        waiting on the operator     → operator-blocked (the OPEN-QUESTIONS ledger; drive PREP, don't settle on it)
+//   - [blocked] <text>        unresolved external blocker → operator-blocked (the OPEN-QUESTIONS ledger; drive PREP, don't settle on it)
 //   - [needs-attention] <text> deprioritized stuck item   → operator-blocked (open-questions ledger)
 //   - [awaiting-auth] <text>  pending an operator go/no-go → awaiting-authorization (the AUTHORIZATIONS ledger; settle-neutral, distinct from blocked)
 //   - [done] <text>           complete                    → excluded (drained)
@@ -20,6 +20,9 @@
 // two counts). The authorizations marker is the EXACT token `awaiting-auth` (case-insensitive on
 // the word, fixed spelling): a near-miss like `[awaiting-authorization]` is UNRECOGNIZED and falls
 // through to the fail-safe (Malformed + actionable) — so it fails LOUD, never silently settling.
+// "Waiting for the next dispatch", "desk clear", and similar intentionally-idle
+// meta-state are NOT blockers and must not remain as open [blocked] items: doing so
+// holds loop_posture=blocked forever even though the pane is correctly idle.
 //
 // The marker word is matched case-insensitively. A `[x]` checkbox is accepted as done; a leading
 // `~~strike~~` or a `✅` is also read as done (lenient). Numbered (`1.`) and bulleted (`-`/`*`/`+`)

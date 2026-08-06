@@ -417,6 +417,14 @@ requires a known-empty unblocked backlog — strict default). Run it from the sa
 directory as your roster, or point it with `--roster` / `--snapshot-file` /
 `--ack-file` (it honors the same `$FLOTILLA_*` env vars as `watch`).
 
+When `loop_posture` is `blocked`, status also reports the deriving evidence:
+pane wait or backlog counts, the source observation time, and up to three
+`[blocked]` / `[needs-attention]` item heads. JSON consumers receive
+`loop_posture_reason`, `loop_posture_observed_at`, and `blocked_items`. Reserve
+`[blocked]` for a real unresolved external blocker; “waiting for next dispatch”
+or “desk clear” is intentionally idle meta-state and must be completed or parked,
+not left as an open blocker that permanently paints the seat blocked.
+
 ## 6. (Optional) Inbound relay
 
 The relay streams your Discord coordination channel and injects **your** messages

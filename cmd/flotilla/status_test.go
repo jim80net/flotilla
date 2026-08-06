@@ -277,6 +277,46 @@ func TestBuildStatusJSON_LoopPostureV10(t *testing.T) {
 	}
 }
 
+func TestBuildStatusJSON_BlockedPostureExplainsSource(t *testing.T) {
+	now := time.Date(2026, 8, 6, 9, 15, 0, 0, time.UTC)
+	observedAt := now.Add(-5 * time.Minute)
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "worker"}}}
+	snap := watch.Snapshot{DeskStates: map[string]surface.State{"worker": surface.StateIdle}}
+	loop := map[string]loopposture.Evidence{
+		"worker": {
+			Pane: surface.StateIdle, InSnapshot: true, SnapshotFresh: true,
+			BacklogKnown: true, BlockedN: 2, BacklogObservedAt: observedAt,
+			BlockedItems: []string{"waiting on database grant", "awaiting dispatch"},
+		},
+	}
+
+	doc := buildStatusJSON(cfg, "worker", now.Format(time.RFC3339), snap, loop)
+	if len(doc.Agents) != 1 {
+		t.Fatalf("got %d agents, want 1", len(doc.Agents))
+	}
+	got := doc.Agents[0]
+	if got.LoopPosture != "blocked" || got.State != "idle" {
+		t.Fatalf("agent = %+v, want idle pane with blocked loop posture", got)
+	}
+	if got.PostureReason != "backlog:blocked=2,unblocked=0" {
+		t.Errorf("posture reason = %q", got.PostureReason)
+	}
+	if got.PostureObservedAt != observedAt.Format(time.RFC3339) {
+		t.Errorf("posture observed_at = %q, want %q", got.PostureObservedAt, observedAt.Format(time.RFC3339))
+	}
+	if len(got.BlockedItems) != 2 || got.BlockedItems[0] != "waiting on database grant" {
+		t.Errorf("blocked items = %#v", got.BlockedItems)
+	}
+
+	var text bytes.Buffer
+	writeStatus(&text, cfg, "worker", "missing-snapshot", "missing-ack", snap, true, now, loop)
+	for _, want := range []string{"backlog:blocked=2,unblocked=0", "5m0s", "waiting on database grant", "awaiting dispatch"} {
+		if !strings.Contains(text.String(), want) {
+			t.Errorf("text status missing %q\n%s", want, text.String())
+		}
+	}
+}
+
 func TestWriteStatus_NoSnapshot(t *testing.T) {
 	cfg := &roster.Config{Agents: []roster.Agent{{Name: "infra"}, {Name: "research"}}}
 	dir := t.TempDir()

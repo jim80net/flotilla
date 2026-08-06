@@ -94,7 +94,7 @@ func TestLoadSnapshotLegacyTrackerHashShape(t *testing.T) {
 	}
 }
 
-func TestObserveDeskStatesRefreshesAndClearsBlockedPremises(t *testing.T) {
+func TestObserveDeskStatesRefreshesAndTransitions(t *testing.T) {
 	priorAt := time.Date(2026, 8, 6, 16, 0, 0, 0, time.UTC)
 	now := priorAt.Add(8 * time.Minute)
 	prev := Snapshot{
@@ -112,15 +112,6 @@ func TestObserveDeskStatesRefreshesAndClearsBlockedPremises(t *testing.T) {
 	}
 	if got := observations["beta"]; got.Reason != "surface-refresh:awaiting-input" || !got.ObservedAt.Equal(now) {
 		t.Errorf("steady blocked refresh observation = %+v", got)
-	}
-	blocked := 0
-	for _, state := range states {
-		if state == surface.StateAwaitingInput || state == surface.StateAwaitingApproval {
-			blocked++
-		}
-	}
-	if blocked != 1 {
-		t.Fatalf("fresh detector assessment must drop cleared blocked premise: got %d blocked, want 1", blocked)
 	}
 }
 

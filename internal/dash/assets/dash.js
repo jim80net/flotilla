@@ -120,6 +120,25 @@
     return posture === "blocked" ? "blocked" : state;
   }
 
+  function postureEvidenceText(agent, nowMs) {
+    if (!agent || !agent.loop_posture_reason) return "";
+    var parts = [String(agent.loop_posture_reason)];
+    var observed = Date.parse(agent.loop_posture_observed_at || "");
+    var now = Number.isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
+    if (Number.isFinite(observed)) {
+      var seconds = Math.max(0, Math.round((now - observed) / 1000));
+      var age = seconds < 60 ? String(seconds) + "s" :
+        seconds < 3600 ? String(Math.floor(seconds / 60)) + "m" :
+        seconds < 86400 ? String(Math.floor(seconds / 3600)) + "h" :
+        String(Math.floor(seconds / 86400)) + "d";
+      parts.push(age + " old");
+    }
+    if (Array.isArray(agent.blocked_items) && agent.blocked_items.length) {
+      parts.push(agent.blocked_items.join(" | "));
+    }
+    return parts.join(" · ");
+  }
+
   function usageText(usage) {
     if (!usage || !Number.isFinite(Number(usage.remaining_percent))) return "";
     var text = String(usage.remaining_percent) + "% " + String(usage.window || "usage");
@@ -651,6 +670,7 @@
         var state = String(a.state || "unknown");
         // #524: show loop_posture beside pane state so officers see parked vs drifted.
         var posture = String(a.loop_posture || "");
+        var postureEvidence = postureEvidenceText(a);
         var visualState = operatorVisualState(state, posture);
         var stateLabel = posture ? (state + " · " + posture) : state;
         var usage = usageText(a.usage);
@@ -668,7 +688,7 @@
             '<span class="conv-rail ' + deskStateClass(visualState) + '" aria-hidden="true"></span>' +
             '<span class="conv-item-body">' +
               '<span class="conv-item-name">' + escapeHtml(d.name) + roleTag + "</span>" +
-              '<span class="conv-item-state ' + deskStateClass(visualState) + '" title="pane state · loop posture">' + escapeHtml(stateLabel) + "</span>" +
+              '<span class="conv-item-state ' + deskStateClass(visualState) + '" title="' + escapeHtml(postureEvidence || "pane state · loop posture") + '">' + escapeHtml(stateLabel) + "</span>" +
             "</span>" +
           "</button>"
         );
@@ -750,6 +770,7 @@
     var state = String(a.state || "unknown");
     // #524: loop_posture is distinct from pane state (idle ≠ parked).
     var posture = String(a.loop_posture || "");
+    var postureEvidence = postureEvidenceText(a);
     var visualState = operatorVisualState(state, posture);
     var usageValue = usageText(a.usage);
     var usage = usageValue
@@ -766,6 +787,7 @@
             (posture ? ('<span class="desk-loop-posture" title="loop posture">' + escapeHtml(posture) + "</span>") : "") +
           "</header>" +
           '<span class="desk-surface">' + escapeHtml(a.surface || "—") + "</span>" +
+          (postureEvidence ? ('<span class="desk-posture-evidence">' + escapeHtml(postureEvidence) + "</span>") : "") +
           usage +
         "</div>" +
       "</article>";

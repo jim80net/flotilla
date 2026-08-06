@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -111,16 +112,19 @@ func writeQualitySummary(out io.Writer, summary harnessquality.Summary) {
 }
 
 type statusItem struct {
-	Name            string                  `json:"name"`
-	Role            string                  `json:"role,omitempty"`              // "hub" for the XO, else omitted
-	Surface         string                  `json:"surface,omitempty"`           // effective surface driver
-	State           string                  `json:"state"`                       // pane / surface.State label
-	StateObservedAt string                  `json:"state_observed_at,omitempty"` // per-desk detector observation
-	StateReason     string                  `json:"state_reason,omitempty"`      // short transition/refresh code
-	LoopPosture     string                  `json:"loop_posture,omitempty"`      // operator-facing #524 vocabulary
-	RawLoopPosture  string                  `json:"raw_loop_posture,omitempty"`  // retained when display normalization differs
-	QueueState      string                  `json:"queue_state"`                 // empty | has-work | unknown
-	Usage           *watch.UsageObservation `json:"usage,omitempty"`
+	Name              string                  `json:"name"`
+	Role              string                  `json:"role,omitempty"`              // "hub" for the XO, else omitted
+	Surface           string                  `json:"surface,omitempty"`           // effective surface driver
+	State             string                  `json:"state"`                       // pane / surface.State label
+	StateObservedAt   string                  `json:"state_observed_at,omitempty"` // per-desk detector observation
+	StateReason       string                  `json:"state_reason,omitempty"`      // short transition/refresh code
+	LoopPosture       string                  `json:"loop_posture,omitempty"`      // operator-facing #524 vocabulary
+	RawLoopPosture    string                  `json:"raw_loop_posture,omitempty"`  // retained when display normalization differs
+	PostureObservedAt string                  `json:"loop_posture_observed_at,omitempty"`
+	PostureReason     string                  `json:"loop_posture_reason,omitempty"`
+	BlockedItems      []string                `json:"blocked_items,omitempty"`
+	QueueState        string                  `json:"queue_state"` // empty | has-work | unknown
+	Usage             *watch.UsageObservation `json:"usage,omitempty"`
 }
 
 // buildStatusJSON assembles the --json document. Pure (no I/O) so it is
@@ -142,6 +146,16 @@ func buildStatusJSON(cfg *roster.Config, xo, generatedAt string, snap watch.Snap
 		if observation, ok := snap.DeskObservations[a.Name]; ok {
 			item.StateObservedAt = observation.ObservedAt.UTC().Format(time.RFC3339)
 			item.StateReason = observation.Reason
+		}
+		if evidenceOK {
+			explanation := loopposture.Explain(rawPosture, evidence)
+			if explanation.Reason != "" {
+				item.PostureReason = explanation.Reason
+				item.BlockedItems = explanation.Items
+				if !explanation.ObservedAt.IsZero() {
+					item.PostureObservedAt = explanation.ObservedAt.UTC().Format(time.RFC3339)
+				}
+			}
 		}
 		if rawPosture != displayPosture {
 			item.RawLoopPosture = string(rawPosture)
@@ -220,10 +234,29 @@ func writeStatus(out io.Writer, cfg *roster.Config, xo, snapshotPath, ackPath st
 		if a.Name == xo {
 			marker = "(XO)"
 		}
-		posture := loopposture.OperatorDisplay(deriveAgentPosture(a.Name, snap, loopByAgent))
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, deskStateLabel(snap, a.Name), posture, stateObservationLabel(snap, a.Name, now), usageLabel(snap, a.Name, now), marker)
+		rawPosture := deriveAgentPosture(a.Name, snap, loopByAgent)
+		posture := loopposture.OperatorDisplay(rawPosture)
+		explanation := loopposture.Explanation{}
+		if evidence, ok := loopByAgent[a.Name]; ok {
+			explanation = loopposture.Explain(rawPosture, evidence)
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, deskStateLabel(snap, a.Name), posture, postureExplanationLabel(explanation, now), stateObservationLabel(snap, a.Name, now), usageLabel(snap, a.Name, now), marker)
 	}
 	_ = w.Flush()
+}
+
+func postureExplanationLabel(explanation loopposture.Explanation, now time.Time) string {
+	if explanation.Reason == "" {
+		return "—"
+	}
+	label := explanation.Reason
+	if !explanation.ObservedAt.IsZero() {
+		label += " · " + humanizeAge(now.Sub(explanation.ObservedAt))
+	}
+	if len(explanation.Items) > 0 {
+		label += " · " + strings.Join(explanation.Items, " | ")
+	}
+	return label
 }
 
 func stateObservationLabel(snap watch.Snapshot, name string, now time.Time) string {
