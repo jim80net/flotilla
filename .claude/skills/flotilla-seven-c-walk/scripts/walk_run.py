@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Fail-soft Seven-C capture runner.
 
-Selectors and routes belong to a versioned manifest. An absent optional state is
-recorded as unavailable; it never aborts later captures or prevents the final
-run manifest from being written.
+Selectors and routes belong to a versioned manifest. Each capture records a
+canonical loading, populated, partial, empty, or error state. A missing anchor
+never aborts later captures or prevents the final run manifest from being written.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import sys
 import tempfile
+import time
 from typing import Any
 from urllib.parse import urljoin
 
@@ -27,9 +28,12 @@ def load_json(path: Path) -> dict[str, Any]:
     return value
 
 
+STATE_VOCABULARY = {"loading", "populated", "partial", "empty", "error"}
+
+
 def validate_manifest(manifest: dict[str, Any]) -> None:
-    if manifest.get("schema") != 1:
-        raise ValueError("walk manifest schema must be 1")
+    if manifest.get("schema") != 2:
+        raise ValueError("walk manifest schema must be 2")
     captures = manifest.get("captures")
     if not isinstance(captures, list) or not captures:
         raise ValueError("walk manifest must contain captures")
@@ -48,12 +52,19 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
             route = attempt.get("route")
             if not isinstance(route, str) or not route.startswith("/") or route.startswith("//"):
                 raise ValueError(f"{capture_id}: every attempt needs a same-origin absolute route")
-            anchors = attempt.get("anchors")
-            if not isinstance(anchors, list) or not anchors:
-                raise ValueError(f"{capture_id}: every attempt needs anchors")
-            for anchor in anchors:
-                if not isinstance(anchor.get("selector"), str) or not isinstance(anchor.get("state"), str):
-                    raise ValueError(f"{capture_id}: anchors need selector and state")
+            if not isinstance(attempt.get("anchor"), str) or not attempt["anchor"]:
+                raise ValueError(f"{capture_id}: every attempt needs a stable anchor")
+            states = attempt.get("states")
+            if not isinstance(states, list) or not states:
+                raise ValueError(f"{capture_id}: every attempt needs states")
+            for state in states:
+                if not isinstance(state.get("selector"), str) or state.get("state") not in STATE_VOCABULARY:
+                    raise ValueError(f"{capture_id}: states need selector and canonical state")
+                for field in ("text", "exclude_text"):
+                    if field in state:
+                        if not isinstance(state[field], str):
+                            raise ValueError(f"{capture_id}: {field} must be a regex string")
+                        re.compile(state[field])
 
 
 def validate_output_dir(output_dir: Path) -> None:
@@ -83,10 +94,14 @@ class FixtureProbe:
 
     def attempt(self, spec: dict[str, Any], _capture_path: Path) -> dict[str, Any] | None:
         visible = self.routes.get(spec["route"], {})
-        for anchor in spec["anchors"]:
-            if visible.get(anchor["selector"], False):
+        if not fixture_visible(visible.get(spec["anchor"])):
+            return None
+        for anchor in spec["states"]:
+            fixture = visible.get(anchor["selector"])
+            if fixture_visible(fixture) and text_matches(anchor, fixture_text(fixture)):
                 return {
                     "route": spec["route"],
+                    "anchor": spec["anchor"],
                     "selector": anchor["selector"],
                     "state": anchor["state"],
                     "screenshot": None,
@@ -120,21 +135,36 @@ class PlaywrightProbe:
             action = self.page.locator(selector)
             action.wait_for(state="visible", timeout=self.timeout_ms)
             action.click()
-        for anchor in spec["anchors"]:
-            locator = self.page.locator(anchor["selector"]).first
-            try:
-                locator.wait_for(state="visible", timeout=self.timeout_ms)
-            except Exception:
-                continue
+        try:
+            self.page.locator(spec["anchor"]).first.wait_for(state="visible", timeout=self.timeout_ms)
+        except Exception:
+            if self.page_errors:
+                raise RuntimeError(f"page errors: {len(self.page_errors)}")
+            return None
+        deadline = time.monotonic() + self.timeout_ms / 1000
+        loading: dict[str, Any] | None = None
+        while time.monotonic() < deadline:
+            for anchor in spec["states"]:
+                locator = self.page.locator(anchor["selector"]).first
+                if locator.is_visible() and text_matches(anchor, locator.inner_text()):
+                    result = {
+                        "route": spec["route"], "anchor": spec["anchor"],
+                        "selector": anchor["selector"], "state": anchor["state"],
+                        "screenshot": capture_path.name,
+                    }
+                    if anchor["state"] == "loading":
+                        loading = result
+                    else:
+                        if self.page_errors:
+                            raise RuntimeError(f"page errors: {len(self.page_errors)}")
+                        self.page.screenshot(path=str(capture_path), full_page=True)
+                        return result
+            self.page.wait_for_timeout(100)
+        if loading is not None:
             if self.page_errors:
                 raise RuntimeError(f"page errors: {len(self.page_errors)}")
             self.page.screenshot(path=str(capture_path), full_page=True)
-            return {
-                "route": spec["route"],
-                "selector": anchor["selector"],
-                "state": anchor["state"],
-                "screenshot": capture_path.name,
-            }
+            return loading
         if self.page_errors:
             raise RuntimeError(f"page errors: {len(self.page_errors)}")
         return None
@@ -142,6 +172,22 @@ class PlaywrightProbe:
     def close(self) -> None:
         self.browser.close()
         self.playwright.stop()
+
+
+def fixture_visible(value: Any) -> bool:
+    return bool(value.get("visible", True)) if isinstance(value, dict) else value is True
+
+
+def fixture_text(value: Any) -> str:
+    return str(value.get("text", "")) if isinstance(value, dict) else ""
+
+
+def text_matches(spec: dict[str, Any], text: str) -> bool:
+    required = spec.get("text")
+    excluded = spec.get("exclude_text")
+    return (required is None or re.search(required, text, re.IGNORECASE) is not None) and (
+        excluded is None or re.search(excluded, text, re.IGNORECASE) is None
+    )
 
 
 def run(
@@ -170,7 +216,7 @@ def run(
                     break
             if result is None:
                 required = bool(capture.get("required", False))
-                outcome = "failed" if attempt_errors else "unavailable"
+                outcome = "failed" if attempt_errors else "anchor-missing"
                 failures += int(required or outcome == "failed")
                 results.append(
                     {
@@ -182,10 +228,12 @@ def run(
                     }
                 )
             else:
+                unhealthy = result["state"] in {"loading", "error"}
+                failures += int(unhealthy)
                 results.append(
                     {
                         "id": capture["id"],
-                        "outcome": "captured",
+                        "outcome": "failed" if unhealthy else "captured",
                         "required": bool(capture.get("required", False)),
                         **result,
                     }
@@ -194,12 +242,12 @@ def run(
         probe.close()
         summary = {
             "captured": sum(item["outcome"] == "captured" for item in results),
-            "unavailable": sum(item["outcome"] == "unavailable" for item in results),
+            "anchor_missing": sum(item["outcome"] == "anchor-missing" for item in results),
             "failed": sum(item["outcome"] == "failed" for item in results),
             "failures": failures,
         }
         run_manifest = {
-            "schema": 1,
+            "schema": 2,
             "source_manifest_schema": manifest["schema"],
             "completed": True,
             "summary": summary,
@@ -212,7 +260,7 @@ def run(
 def parse_args() -> argparse.Namespace:
     skill_dir = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, default=skill_dir / "walk-manifest.v1.json")
+    parser.add_argument("--manifest", type=Path, default=skill_dir / "walk-manifest.v2.json")
     parser.add_argument("--base-url", default="http://127.0.0.1:8787")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--fixture", type=Path, help="probe route/selector availability without a browser")
