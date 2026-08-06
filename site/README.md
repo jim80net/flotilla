@@ -1,20 +1,18 @@
 # flotilla landing page (`site/`)
 
 The marketing landing page — a single static page, **no framework, no
-backend**. Plain HTML + CSS, with a little vanilla JS only for the live
-fleet-status widget. It is the first thing a friend clicking a shared link
-sees, so it is built to look good on mobile (the product's whole pitch is "run
-it from your phone").
+backend**. Plain HTML + CSS, with a little vanilla JS for copy controls. It is
+the first thing a friend clicking a shared link sees, so it is built to look
+good on mobile (the product's whole pitch is "run it from your phone").
 
 ## Files
 
 | file | what it is |
 |------|------------|
-| `index.html` | the page (hero, what / how / architecture / live status / 30-second start / footer) |
+| `index.html` | the page (hero, what / how / architecture / 30-second start / footer) |
 | `styles.css` | the "fleet command console" theme, **warm light** — a warm-parchment ground, raised ivory panels, a deep-teal signal + ochre bus accent, warm ink; Barlow Condensed display (the dash face) over IBM Plex Mono. Matches the dash so product + marketing read as one system; see `docs/design/README.md` |
-| `app.js` | copy-to-clipboard on the install one-liner + the live fleet-status widget |
-| `status.json` | **SAMPLE** fleet status (generic desks) so the widget renders live today |
-| `assets/` | drop the demo gif / asciinema cast here (see below) |
+| `app.js` | copy-to-clipboard controls |
+| `assets/` | responsive landing-page image payloads |
 
 ## Preview locally
 
@@ -23,9 +21,6 @@ cd site
 python3 -m http.server 8000
 # open http://localhost:8000
 ```
-
-(The widget `fetch`es `./status.json`, so it must be served over HTTP —
-opening `index.html` via `file://` will block the fetch.)
 
 ## Where the final copy slots in
 
@@ -47,28 +42,12 @@ sentence) with the operator's final hook; the surrounding structure is
 message-independent. Other `COPY:` markers cover the meta description, section
 ledes, CTA labels, the status pill, and the footer tagline.
 
-## Where the demo asset goes
+## Generated atmosphere assets
 
-The hero reserves a framed demo panel. The static chat mock inside it renders
-today as a stand-in; the real asset replaces it:
-
-```sh
-grep -n "ASSET:" index.html
-```
-
-Drop `demo.gif` (or an asciinema embed) into `assets/` and swap the
-`.demo-canvas` contents per `assets/.gitkeep`.
-
-## Wiring the widget to real `flotilla status --json`
-
-`status.json` is a committed **sample** (the `flotilla status --json` command
-isn't built yet). When it ships, the widget contract is an `agents` array of
-`{ name, role?, surface?, state, task? }` where `state ∈
-working | idle | awaiting | errored | offline` (synonyms like
-`awaiting-approval`, `crashed`, `down` are normalized in `app.js`). Either
-generate `status.json` from real output, or point the widget elsewhere by
-changing the `data-src` on `#fleet-status` in `index.html`. The `TODO:`
-comments in `index.html` and `app.js` mark these spots.
+The hero and `yours` transition use claim-free generated atmosphere. Each has
+800px and 1600px WebP variants in `assets/`, selected with `srcset`, plus a
+visible deterministic `AI-GENERATED ATMOSPHERE` disclosure. PNG masters remain
+in the source design package and are not public-page payloads.
 
 ## Publishing (GitHub Pages) — operator's one step
 

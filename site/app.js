@@ -1,19 +1,7 @@
-/* =========================================================================
-   flotilla landing — minimal vanilla JS.
-   Two jobs only:
-     1. copy-to-clipboard on the install one-liner;
-     2. the FLEET STATUS widget: fetch ./status.json and render a table.
-
-   ./status.json is REAL output of `flotilla status --json` run against a generic
-   DEMO fleet (see tools/landing-status/gen.sh) — not hand-authored, and never a
-   real deployment. Its shape is exactly what the command emits: an `agents` array
-   of { name, role?, surface?, state } plus `generated_at` + `xo`. The page labels
-   it "sample · demo fleet" so a demo render is never mistaken for a live one.
-   ========================================================================= */
+/* flotilla landing — copy-to-clipboard controls only. */
 (function () {
   "use strict";
 
-  /* ── 1. copy buttons ─────────────────────────────────────────────────── */
   document.querySelectorAll(".copy-btn").forEach(function (btn) {
     btn.addEventListener("click", function () {
       var target = document.querySelector(btn.dataset.copy);
@@ -46,91 +34,4 @@
       }
     });
   });
-
-  /* ── 2. fleet-status widget ──────────────────────────────────────────── */
-  var KNOWN_STATES = ["working", "idle", "awaiting", "errored", "offline"];
-
-  var mount = document.getElementById("fleet-status");
-  var meta = document.getElementById("fleet-meta");
-  if (!mount) return;
-
-  var src = mount.getAttribute("data-src") || "./status.json";
-
-  fetch(src, { cache: "no-store" })
-    .then(function (res) {
-      if (!res.ok) throw new Error("status " + res.status);
-      return res.json();
-    })
-    .then(function (data) {
-      render(data);
-    })
-    .catch(function (err) {
-      // Honest failure: don't fabricate a fleet. Show the error.
-      mount.innerHTML =
-        '<p class="fleet-fallback">Could not load fleet status (' +
-        escapeHtml(String(err.message || err)) +
-        ").</p>";
-      if (meta) meta.textContent = "unavailable";
-    });
-
-  function render(data) {
-    var agents = (data && Array.isArray(data.agents)) ? data.agents : [];
-    if (!agents.length) {
-      mount.innerHTML = '<p class="fleet-fallback">No agents in the fleet.</p>';
-      if (meta) meta.textContent = "0 agents";
-      return;
-    }
-
-    var html = agents.map(function (a, i) {
-      var state = normalizeState(a.state);
-      var label = stateLabel(a.state, state);
-      var roleBadge = a.role
-        ? '<span class="role">' + escapeHtml(a.role) + "</span>"
-        : "";
-      // Columns mirror what `flotilla status` actually knows: name (+ role),
-      // surface driver, and assessed state. (No per-desk "task" — the detector
-      // snapshot doesn't record one, so the widget doesn't invent a column for it.)
-      var surface = a.surface
-        ? '<span class="fleet-surface">' + escapeHtml(a.surface) + "</span>"
-        : '<span class="fleet-surface"></span>';
-
-      return (
-        '<div class="fleet-row" style="animation-delay:' + (i * 60) + 'ms">' +
-          '<span class="fleet-name">' + escapeHtml(a.name || "—") + roleBadge + "</span>" +
-          surface +
-          '<span class="state ' + state + '"><span class="glyph"></span>' + escapeHtml(label) + "</span>" +
-        "</div>"
-      );
-    }).join("");
-
-    mount.innerHTML = html;
-
-    if (meta) {
-      var working = agents.filter(function (a) { return normalizeState(a.state) === "working"; }).length;
-      meta.textContent = agents.length + " agents · " + working + " working";
-    }
-  }
-
-  function normalizeState(s) {
-    s = String(s || "").toLowerCase().trim();
-    // Map `flotilla status` labels + synonyms onto the canonical class set.
-    if (s === "awaiting" || s === "awaiting-input" || s === "awaiting_input" ||
-        s === "awaiting-approval" || s === "awaiting_approval" || s === "blocked") return "awaiting";
-    if (s === "error" || s === "errored" || s === "crashed" || s === "shell") return "errored";
-    if (s === "down" || s === "dead" || s === "offline" || s === "unknown") return "offline";
-    return KNOWN_STATES.indexOf(s) >= 0 ? s : "idle";
-  }
-
-  function stateLabel(raw, normalized) {
-    var r = String(raw || "").trim();
-    return r || normalized;
-  }
-
-  function escapeHtml(s) {
-    return String(s)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-  }
 })();

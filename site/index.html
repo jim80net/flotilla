@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   flotilla landing page : single static page, no framework, no backend.
-  Vanilla JS is used ONLY for the live fleet-status widget (see app.js).
+  Vanilla JS is used only for copy-to-clipboard controls (see app.js).
 
   READER MODEL (issue #323): the reader is a busy technical HUMAN who already
   pays for one or more coding-agent subscriptions (Claude Code / Codex / Grok),
@@ -29,7 +29,7 @@
   <meta name="description" content="flotilla is a drop-in chief of staff for the AI coding agents you already run — Claude Code, Codex, Grok. One agent to talk to, your domains running in parallel, memory that carries across sessions, and a record of everything on your phone. No framework to rewrite into." />
 
   <meta property="og:title" content="flotilla — Set Your Agents Free" />
-  <meta property="og:description" content="A drop-in chief of staff for the AI coding agents you already run. See the inaugural parade: one hub, 32 days, 239 merged pull requests." />
+  <meta property="og:description" content="A drop-in chief of staff for the AI coding agents you already run. Built in the open." />
   <meta property="og:type" content="website" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -76,23 +76,9 @@
 
   <!-- ───────────────────────── HERO ───────────────────────── -->
   <main id="top">
-    <section class="id-banner" aria-label="Inaugural parade">
-      <div class="id-banner-inner">
-        <span class="id-banner-flag" aria-hidden="true">🇺🇸</span>
-        <p class="id-banner-copy">
-          <strong>See the inaugural parade</strong> — 32 days, 239 merged pull requests, one fleet.
-          <a href="./parade/">Watch the story →</a>
-        </p>
-      </div>
-    </section>
     <section class="hero" id="hero">
       <div class="hero-inner">
         <div class="hero-copy">
-          <div class="eyebrow">
-            <span class="dot"></span>
-            Independence Day 2026 · open source · v0
-          </div>
-
           <!-- HERO ONE-LINER — the operator's final wording (sentence 1). -->
           <h1 class="hero-headline">
             flotilla is a <span class="hl">drop-in chief of staff</span><br />
@@ -115,7 +101,7 @@
               <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 12.5 2.5 7l1.4-1.4L7 8.7V1h2v7.7l3.1-3.1L13.5 7 8 12.5Z"/></svg>
             </a>
             <a class="btn btn-ghost" href="./parade/">
-              Independence Day parade
+              See the inaugural parade
             </a>
             <a class="btn btn-ghost" href="https://github.com/jim80net/flotilla" target="_blank" rel="noopener">
               Star on GitHub
@@ -124,77 +110,23 @@
           </div>
         </div>
 
-        <!-- HERO MOCK-UP: a static picture of `flotilla dash`, Goals view, in the
-             command-chart (org) layout — the operator-priority hero. Pure HTML/CSS,
-             no live server, no framework. It shows the FULL command hierarchy that is
-             flotilla's differentiator: a chief of staff at the center → FLOTILLAS
-             (each led by an XO) on the inner ring → their DESKS on the outer ring —
-             never a coordinator wired straight to desks. MOCK DATA ONLY: a generic
-             example fleet — never a real deployment roster. -->
-        <figure class="hero-dash" aria-label="flotilla's fleet view: a chief of staff in the center, two flotillas each led by an XO around it, and each flotilla's desks on the outer ring, colored by whether they're working, idle, or waiting on you">
-          <div class="dash-chrome">
-            <span class="dash-brand"><span class="dash-brand-mark" aria-hidden="true"></span>flotilla <span class="dash-brand-sub">your fleet</span></span>
-            <div class="dash-tabs" aria-hidden="true">
-              <span class="dash-tab">Conversations</span>
-              <span class="dash-tab active">Goals</span>
-              <span class="dash-tab">Issues</span>
-            </div>
-            <div class="dash-toggle" aria-hidden="true"><span>tree</span><span class="on">org</span></div>
-          </div>
-
-          <div class="dash-canvas">
-            <!-- spoke edges, drawn in a 0–100 space that stretches with the box (matches
-                 the % node positions): chief of staff (50,15) → each flotilla (27,44 /
-                 73,44), then each flotilla → its two desks on the outer ring. -->
-            <svg class="dash-spokes" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-              <line x1="50" y1="15" x2="27" y2="44" /><line x1="50" y1="15" x2="73" y2="44" />
-              <line x1="27" y1="44" x2="13" y2="80" /><line x1="27" y1="44" x2="38" y2="80" />
-              <line x1="73" y1="44" x2="62" y2="80" /><line x1="73" y1="44" x2="87" y2="80" />
-            </svg>
-
-            <!-- TIER 0 — the chief of staff, at the center of the fleet -->
-            <div class="dnode hub" style="left:50%;top:15%">
-              <div class="dnode-eyebrow">Chief of staff</div>
-              <div class="dnode-title">Your chief of staff</div>
-              <div class="dnode-foot"><span class="dpill cyan">on&nbsp;it</span><span class="dharness">claude-code</span></div>
-            </div>
-
-            <!-- TIER 1 — flotillas, each LED BY AN XO (the layer that makes flotilla flotilla) -->
-            <div class="dnode flotilla" style="left:27%;top:44%">
-              <div class="dnode-eyebrow">Flotilla &middot; led by an XO</div>
-              <div class="dnode-title">Product flotilla</div>
-              <div class="dnode-foot"><span class="dpill cyan">on&nbsp;it</span><span class="dxo">product-xo</span></div>
-            </div>
-            <div class="dnode flotilla" style="left:73%;top:44%">
-              <div class="dnode-eyebrow">Flotilla &middot; led by an XO</div>
-              <div class="dnode-title">Research flotilla</div>
-              <div class="dnode-foot"><span class="dpill amber">needs&nbsp;you</span><span class="dxo">research-xo</span></div>
-            </div>
-
-            <!-- TIER 2 — the desks, each owned by a flotilla (never wired to the CoS directly) -->
-            <div class="dnode desk" style="left:13%;top:80%">
-              <div class="dnode-eyebrow">Desk &middot; backend</div>
-              <div class="dnode-title">Backend</div>
-              <div class="dnode-foot"><span class="dpill ok">idle</span><span class="dharness">grok</span></div>
-            </div>
-            <div class="dnode desk" style="left:38%;top:80%">
-              <div class="dnode-eyebrow">Desk &middot; frontend</div>
-              <div class="dnode-title">Frontend</div>
-              <div class="dnode-foot"><span class="dpill cyan">working</span><span class="dharness">codex</span></div>
-            </div>
-            <div class="dnode desk" style="left:62%;top:80%">
-              <div class="dnode-eyebrow">Desk &middot; data</div>
-              <div class="dnode-title">Data</div>
-              <div class="dnode-foot"><span class="dpill cyan">working</span><span class="dharness">codex</span></div>
-            </div>
-            <div class="dnode desk" style="left:87%;top:80%">
-              <div class="dnode-eyebrow">Desk &middot; infra</div>
-              <div class="dnode-title">Infra</div>
-              <div class="dnode-foot"><span class="dpill ok">idle</span><span class="dharness">grok</span></div>
-            </div>
-          </div>
-
-          <figcaption><strong>Mock-up — illustrative.</strong> &middot; your whole fleet on one screen: the chief of staff at the center, each flotilla (led by its own XO) around it, and their desks on the outer ring — the one that needs you flagged in amber — the same glance from your laptop or your phone</figcaption>
+        <figure class="generated-asset generated-asset--hero">
+          <picture>
+            <source
+              type="image/webp"
+              srcset="./assets/hero-atmosphere-800.webp 800w, ./assets/hero-atmosphere-1600.webp 1600w"
+              sizes="(max-width: 920px) calc(100vw - 48px), 44vw"
+            />
+            <img
+              src="./assets/hero-atmosphere-800.webp"
+              width="800"
+              height="598"
+              alt="Warm still life of blank cream papers, a green folder, and a brass clip on an ivory worktable"
+              fetchpriority="high"
+              decoding="async"
+            />
+          </picture>
+          <figcaption class="generated-asset__disclosure">AI-GENERATED ATMOSPHERE</figcaption>
         </figure>
       </div>
 
@@ -382,6 +314,25 @@
           already run at one file, and you're coordinated in minutes.
         </p>
       </div>
+
+      <figure class="generated-asset generated-asset--tools">
+        <picture>
+          <source
+            type="image/webp"
+            srcset="./assets/tools-atmosphere-800.webp 800w, ./assets/tools-atmosphere-1600.webp 1600w"
+            sizes="(max-width: 600px) calc(100vw - 48px), 46vw"
+          />
+          <img
+            src="./assets/tools-atmosphere-800.webp"
+            width="800"
+            height="598"
+            alt="Warm still life of a closed blank laptop, open blank notebook, pencil, and green glass paperweight"
+            loading="lazy"
+            decoding="async"
+          />
+        </picture>
+        <figcaption class="generated-asset__disclosure">AI-GENERATED ATMOSPHERE</figcaption>
+      </figure>
 
       <div class="diff-strip">
         <div class="diff-col">
@@ -612,7 +563,7 @@
       </div>
       <nav class="footer-links">
         <a href="https://github.com/jim80net/flotilla" target="_blank" rel="noopener">GitHub</a>
-        <a href="./parade/">Independence Day parade</a>
+        <a href="./parade/">Inaugural parade</a>
         <a href="https://github.com/jim80net/flotilla/blob/main/docs/quickstart.md" target="_blank" rel="noopener">Quickstart</a>
         <a href="https://github.com/jim80net/memex-core" target="_blank" rel="noopener">memex</a>
         <a href="https://github.com/jim80net/flotilla/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
