@@ -17,18 +17,18 @@ func cmdDispatchStatus(args []string) error {
 	}
 	rest := fs.Args()
 	if len(rest) != 1 {
-		return fmt.Errorf("usage: flotilla dispatch-status [--roster <path>] <nonce>")
+		return fmt.Errorf("usage: flotilla dispatch-status [--roster <path>] <nonce-or-message-id>")
 	}
-	nonce := rest[0]
+	identifier := rest[0]
 	rp, err := resolveRosterPath(*rosterPath)
 	if err != nil {
 		return err
 	}
 	rosterDir := filepath.Dir(rp)
-	st := dispatch.LookupNonce(rosterDir, nonce, time.Now().UTC())
+	st := dispatch.LookupIdentifier(rosterDir, identifier, time.Now().UTC())
 	fmt.Println(dispatch.FormatStatus(st))
 	if st.Disposition == dispatch.DispositionUnknown {
-		return fmt.Errorf("dispatch-status: nonce %q not found under %s", nonce, rosterDir)
+		return fmt.Errorf("dispatch-status: identifier %q not found under %s", identifier, rosterDir)
 	}
 	return nil
 }

@@ -57,11 +57,14 @@ QUEUED id=<id> sender=<s> recipient=<r> status=busy_outbox
 ## CLI
 
 ```bash
-flotilla dispatch-status [--roster <path>] <nonce>
+flotilla dispatch-status [--roster <path>] <nonce-or-message-id>
 flotilla dispatch-ack [--roster <path>] <nonce>
 ```
 
-`dispatch-status` resolves disposition across consumed → inbound → outbox.
+`dispatch-status` accepts either the durable footer nonce or the message id
+printed by `flotilla send`, and resolves disposition across consumed → inbound
+→ outbox. New consumed rows retain both handles; historical consumed rows that
+predate message-id persistence remain queryable by nonce.
 After handling a dispatch, its recipient runs `dispatch-ack`; the command writes
 the consumed registry first and then clears the inbound row, so a crash between
 those steps is healed by the watch sweep. `$FLOTILLA_SELF` identifies the recipient,

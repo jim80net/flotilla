@@ -36,6 +36,7 @@ const maxConsumedEntries = 2048
 // Keyed by Nonce when present; PayloadHash disambiguates same-nonce collisions
 // and supports hash-only lookup when a message lacked a nonce stamp.
 type ConsumedEntry struct {
+	ID          string    `json:"id,omitempty"` // send/outbox id, when consumption came from a tracked inbound row
 	Nonce       string    `json:"nonce,omitempty"`
 	PayloadHash string    `json:"payload_hash"`
 	ConsumedAt  time.Time `json:"consumed_at"`
@@ -118,6 +119,21 @@ func (r *Registry) LookupNonce(nonce string) (ConsumedEntry, bool) {
 	}
 	if coordinator != nil {
 		return *coordinator, true
+	}
+	return ConsumedEntry{}, false
+}
+
+// LookupID returns the consumed entry carrying a send/outbox id. Older
+// registry rows predate ID persistence and remain queryable by nonce.
+func (r *Registry) LookupID(id string) (ConsumedEntry, bool) {
+	id = strings.TrimSpace(id)
+	if r == nil || id == "" {
+		return ConsumedEntry{}, false
+	}
+	for _, e := range r.Load() {
+		if e.ID == id {
+			return e, true
+		}
 	}
 	return ConsumedEntry{}, false
 }
@@ -259,11 +275,18 @@ func IsConsumed(rosterDir, nonce, payloadHash string) bool {
 // prose settles nothing — consuming a quoted nonce would silently disable the
 // reinject / escalation supervision of the desk that dispatch actually targets.
 func ConsumeCoordinatorRecipient(rosterDir, sender, recipient, message string) (inserted bool, err error) {
+	return ConsumeCoordinatorRecipientID(rosterDir, sender, recipient, "", message)
+}
+
+// ConsumeCoordinatorRecipientID is the coordinator-hop variant used when a
+// queued send has an externally visible message id.
+func ConsumeCoordinatorRecipientID(rosterDir, sender, recipient, id, message string) (inserted bool, err error) {
 	nonce := inbound.ParseOwnDispatchNonce(message)
 	if nonce == "" {
 		return false, nil
 	}
 	return Consume(rosterDir, ConsumedEntry{
+		ID:          id,
 		Nonce:       nonce,
 		PayloadHash: PayloadHash(message),
 		Reason:      ReasonCoordinatorRecipient,
@@ -282,6 +305,14 @@ func ConsumeFromInbound(nonce, message, reason, sender, recipient string) Consum
 		Sender:      sender,
 		Recipient:   recipient,
 	}
+}
+
+// ConsumeFromInboundEntry preserves both public handles for a send: the
+// dispatch nonce stamped into its body and the id returned by `flotilla send`.
+func ConsumeFromInboundEntry(e inbound.Entry, reason string) ConsumedEntry {
+	consumed := ConsumeFromInbound(e.Nonce, e.Message, reason, e.Sender, e.Recipient)
+	consumed.ID = e.ID
+	return consumed
 }
 
 func (r *Registry) readFileForUpdate() (consumedFile, error) {

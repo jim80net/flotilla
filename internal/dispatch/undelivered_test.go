@@ -3,6 +3,7 @@ package dispatch
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -109,6 +110,59 @@ func TestLookupNonce_DispositionOrder(t *testing.T) {
 	}
 	if st.Reason != ReasonMerged {
 		t.Fatalf("reason = %q", st.Reason)
+	}
+}
+
+func TestLookupIdentifier_SendIDAcrossLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	msg, nonce, err := inbound.AppendDispatchNonce("trace the send id through every durable store")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _, err := outbox.Enqueue(dir, "xo", "desk", msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	queued := LookupIdentifier(dir, id, now)
+	if queued.Disposition != DispositionQueued || queued.ID != id || queued.Nonce != nonce {
+		t.Fatalf("queued id lookup = %+v", queued)
+	}
+
+	entry := inbound.Entry{
+		ID: id, Sender: "xo", Recipient: "desk", Message: msg, Nonce: nonce,
+		DeliveredAt: now,
+	}
+	if err := inbound.Record(dir, entry); err != nil {
+		t.Fatal(err)
+	}
+	delivered := LookupIdentifier(dir, id, now)
+	if delivered.Disposition != DispositionDelivered || delivered.ID != id || delivered.Nonce != nonce {
+		t.Fatalf("delivered id lookup = %+v", delivered)
+	}
+
+	if _, err := Consume(dir, ConsumeFromInboundEntry(entry, ReasonDurableAck)); err != nil {
+		t.Fatal(err)
+	}
+	consumed := LookupIdentifier(dir, id, now)
+	if consumed.Disposition != DispositionConsumed || consumed.ID != id || consumed.Nonce != nonce || consumed.Reason != ReasonDurableAck {
+		t.Fatalf("consumed id lookup = %+v", consumed)
+	}
+	if got := FormatStatus(consumed); !strings.Contains(got, "nonce="+nonce) || !strings.Contains(got, "id="+id) {
+		t.Fatalf("formatted consumed id lookup = %q", got)
+	}
+}
+
+func TestLookupIdentifier_QueuedSendWithoutDispatchFooter(t *testing.T) {
+	dir := t.TempDir()
+	id, _, err := outbox.Enqueue(dir, "xo", "desk", "ordinary send without a dispatch footer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := LookupIdentifier(dir, id, time.Now().UTC())
+	if got.Disposition != DispositionQueued || got.ID != id || got.Nonce != "" {
+		t.Fatalf("plain send id lookup = %+v", got)
 	}
 }
 

@@ -94,6 +94,75 @@ func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 	return st
 }
 
+// LookupIdentifier resolves either a dispatch nonce or the message id returned
+// by `flotilla send`. Nonces keep their hop-aware precedence semantics;
+// message ids follow the same lifecycle order: consumed → inbound → outbox.
+func LookupIdentifier(rosterDir, identifier string, now time.Time) Status {
+	identifier = strings.TrimSpace(identifier)
+	if strings.HasPrefix(identifier, "flotilla-dispatch-") {
+		return LookupNonce(rosterDir, identifier, now)
+	}
+	st := Status{ID: identifier, Disposition: DispositionUnknown}
+	if rosterDir == "" || identifier == "" {
+		st.Detail = "missing roster or identifier"
+		return st
+	}
+	if e, ok := NewRegistry(rosterDir).LookupID(identifier); ok {
+		st.Nonce = e.Nonce
+		st.Sender = e.Sender
+		st.Recipient = e.Recipient
+		st.PayloadHash = e.PayloadHash
+		st.Reason = e.Reason
+		st.Disposition = DispositionConsumed
+		st.Detail = fmt.Sprintf("consumed reason=%s at %s", e.Reason, e.ConsumedAt.UTC().Format(time.RFC3339))
+		if !e.ConsumedAt.IsZero() {
+			st.Age = now.Sub(e.ConsumedAt).Round(time.Second)
+		}
+		return st
+	}
+	for _, e := range inbound.ListAll(rosterDir) {
+		if e.ID != identifier {
+			continue
+		}
+		st.Nonce = e.Nonce
+		st.Sender = e.Sender
+		st.Recipient = e.Recipient
+		st.PayloadHash = PayloadHash(e.Message)
+		st.Disposition = DispositionDelivered
+		st.Detail = "inbound pending durable ack"
+		if !e.DeliveredAt.IsZero() {
+			st.Age = now.Sub(e.DeliveredAt).Round(time.Second)
+			if st.Age >= UndeliveredInboundAge {
+				st.Disposition = DispositionUndelivered
+				st.Detail = "delivered to pane but unacknowledged past undelivered-ack age"
+			}
+		}
+		return st
+	}
+	for _, e := range outbox.ListAll(rosterDir) {
+		if e.ID != identifier {
+			continue
+		}
+		st.Nonce = inbound.ParseOwnDispatchNonce(e.Message)
+		st.Sender = e.Sender
+		st.Recipient = e.Recipient
+		st.PayloadHash = PayloadHash(e.Message)
+		if !e.EnqueuedAt.IsZero() {
+			st.Age = now.Sub(e.EnqueuedAt).Round(time.Second)
+		}
+		if st.Age >= UndeliveredOutboxAge && e.LastStaleEscalation.IsZero() {
+			st.Disposition = DispositionUndelivered
+			st.Detail = "outbox queued past undelivered age; pane not confirmed"
+			return st
+		}
+		st.Disposition = DispositionQueued
+		st.Detail = "queued in sender outbox; waiting for recipient idle"
+		return st
+	}
+	st.Detail = "identifier not found in consumed, inbound, or outbox"
+	return st
+}
+
 func lookupInboundNonce(rosterDir, nonce string, now time.Time) *Status {
 	for _, e := range inbound.ListAll(rosterDir) {
 		if e.Nonce != nonce {
