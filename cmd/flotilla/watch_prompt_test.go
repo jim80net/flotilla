@@ -167,6 +167,7 @@ func TestDetectorContinuationBuiltinNoWorkspace(t *testing.T) {
 	}
 	for _, want := range []string{
 		"[flotilla change-detector] You just finished a turn. Advance the next clear,",
+		"before any action run `flotilla pull`",
 		"the goal+task tracker " + tracker + "; (2) the active openspec change's unchecked tasks;",
 		"signal idle by running: touch " + settle + ". (Your context is rotated between steps",
 		"— rely on durable state, not this conversation.)",
@@ -188,6 +189,7 @@ func TestDeskContinuationPromptStatesLedgerContract(t *testing.T) {
 		"parses ONLY that section",
 		"`[awaiting-auth]`",
 		"touch {{settle}}",
+		"run `flotilla pull` before doing anything",
 	} {
 		if !strings.Contains(deskContinuationBuiltin, want) {
 			t.Errorf("desk heartbeat prompt missing the ledger-contract fragment %q", want)

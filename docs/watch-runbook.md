@@ -133,46 +133,26 @@ heartbeat interval an idle XO should receive the heartbeat prompt in its pane.
 Post a message in the channel as the operator and confirm it lands in the
 target pane.
 
-### Confirmed delivery (an operator message is never silently dropped)
+### Pull-by-push delivery (the body never rides the nudge)
 
-A relayed operator message is delivered with **confirmation**, not fire-and-forget. The
-daemon submits into the XO pane and then verifies a turn actually started (the
-`Idle → Working` edge) before it logs `… delivered to "…" (N bytes)`. So that success line
-now means *a turn started*, not merely *the tmux keystrokes ran*. Concretely:
+At relay acceptance, watch synchronously commits the full operator body to the
+recipient-owned durable buffer. Only then does it submit a short `flotilla pull`
+nudge to the pane. The buffer write is the message transaction; pane confirmation
+is merely evidence that the hint started a turn.
 
-- **The XO is busy when your message arrives** → it is **not** pasted into the active
-  composer (that was the silent-drop bug). It is deferred and re-tried every few seconds;
-  it lands (and is confirmed) once the XO goes idle. Delivery to other desks continues
-  meanwhile.
-- **The XO stays busy for ~30s** → you get ONE loud alert: `operator message to "…" is
-  QUEUED — the XO has been busy …`. It still delivers when the turn ends.
-- **The XO is busy for ~5 min, or crashed, or the submit can't be confirmed** → you get a
-  loud alert (`… UNDELIVERABLE …` / `… NOT delivered …`) and the message is dropped rather
-  than retried forever. A genuinely wedged/crashed XO is also caught by the liveness
-  watchdog (see Down alerts).
-- **The XO's composer is input-blocked behind the Claude Code agents panel** → the inline
-  background-agents panel / a per-agent message sub-composer can steal input focus from the
-  main composer; keystrokes then navigate the overlay instead of submitting. Confirmed delivery
-  reads the composer AT THE CURSOR and DETECTS this; it refuses to paste into the wrong place
-  (the body is never lost or mis-delivered). **Auto-recovery (#156, opt-in):** when
-  `FLOTILLA_SELF_HEAL=1` is set, an OPERATOR-RELAY send to an overlay-blocked, idle desk first
-  attempts a bounded **Ctrl-C self-heal** — a Ctrl-C escapes the overlay back to the composer
-  (the empirically-correct key; Esc does NOT recover the inline panel). It is bounded and
-  **re-probes between each press, stopping the instant the composer is reachable** — never a
-  Ctrl-C into a recovered composer (Claude Code's "second Ctrl-C exits" would otherwise kill the
-  session), never a Ctrl-C into a Working pane (would interrupt the turn). On recovery the
-  message is delivered with no alert. The self-heal is **DEFAULT-OFF** (a destructive primitive)
-  and only attempted for relay kinds (a heartbeat/detector tick never fires Ctrl-C); flip
-  `FLOTILLA_SELF_HEAL=0` to disable instantly. If self-heal is off, fails, or can't recover, the
-  desk gets the loud TERMINAL alert (`… NOT delivered — its composer did not accept the message
-  …`) and **recovery is a manual keystroke at the pane** (a Ctrl-C, or click the composer), then
-  re-send. The alert hedges to *verify the turn did not already start before re-sending*.
+- **Busy or model-limited recipient** — the body is already waiting and appears in
+  `flotilla buffer inspect <seat>`. The nudge may miss without a delivery alert.
+- **Crashed or input-blocked pane** — the nudge is logged `non-fatal`; restart or
+  recover the seat and run `flotilla pull`. Never resend the body merely because
+  its nudge missed.
+- **Operator interrupt / stop-work** — the interrupt carries only the pull nudge.
+  If the seat pulls before its next action, the stop is read before that action;
+  it cannot sit one full-body delivery behind the work it stops.
+- **Buffer commit failure** — this is the one real delivery failure. Watch keeps
+  the legacy relay-queue recovery copy, alerts loudly, and retries the commit.
 
-So a dropped operator message is **always** surfaced via the down-alert path — never
-silent. If you see a delivery alert, the message did **not** reach the XO; re-send once the
-XO is idle (or recover it). `flotilla send` from the shell behaves the same: it prints
-`delivered … — turn confirmed` on success, or exits non-zero with `… is busy … NOT
-delivered` / `… is input-blocked behind the Claude Code agents panel …` so you know to retry.
+`flotilla send` uses the same boundary and prints `BUFFERED …` after the atomic
+recipient-buffer rename. See [the design record](design/pull-by-push-message-buffer.md).
 
 **Codex selector safety (#692).** A highlighted selector or modal overlay is not a
 composer even though its selected row uses the same `›` glyph. Delivery and `flotilla
@@ -192,7 +172,7 @@ delivery worker, so it never stalls other desks.
 ### Operator channel acknowledgement contract
 
 The unacked-message backstop accepts either an explicit fleet webhook reply in the
-origin channel or a mechanical turn-final marker. On confirmed operator-relay delivery,
+origin channel or a mechanical turn-final marker. On durable operator-buffer arrival,
 watch records the exact `(origin channel, message ID, delivered seat)` tuple. The next
 substantive turn-final from that seat consumes the pending tuple and writes a durable
 marker under `<roster-dir>/flotilla-operator-acks/`; the desk does not need to remember
@@ -200,15 +180,13 @@ or echo an acknowledgement token. The backstop checks that exact channel/message
 before alerting, so an older acknowledgement cannot settle a newer operator message and
 another seat's turn-final cannot settle the delivery.
 
-Outbox sends are outside this contract. A `KindSend` job, including a canceled or
-superseded sender→recipient epoch, never creates an operator marker; only a confirmed
-operator relay with origin metadata can do so. An alert therefore means watch found
-neither a channel reply nor the exact mechanical marker. Increasing the age threshold is
-not part of the acknowledgement policy.
+Inter-agent sends are outside this operator-channel contract. An alert therefore
+means watch found neither a channel reply nor the exact mechanical marker.
+Increasing the age threshold is not part of the acknowledgement policy.
 
 ### At-least-once ingestion — gateway-gap recovery (#161)
 
-Confirmed delivery (above) guards the **delivery** layer — after a message reaches the
+Recipient buffering (above) guards the **delivery** layer after a message reaches the
 relay. A separate failure class is a message that **never reaches the relay at all**: the
 Discord gateway websocket drops, and on a failed resume discordgo re-identifies (replaying
 no `MESSAGE_CREATE` events), so an operator message sent during that window is lost with no

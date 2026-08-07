@@ -84,7 +84,7 @@ func TestCanceledJobAlreadyQueuedInInjectorNeverDelivers(t *testing.T) {
 		t.Fatal("expected one swept job")
 	}
 	buf := captureLog(t)
-	if _, err := outbox.Cancel(dir, id); err != nil {
+	if _, err := outbox.Cancel(dir, "alpha-desk", id); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(buf.String(), `outbox_id="`+id+`" outcome=canceled path="alpha-desk->alpha-xo" via=cancel`) {
@@ -121,7 +121,7 @@ func TestCancelOneOfNLeavesNMinusOneDeliverable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := outbox.Cancel(dir, middle); err != nil {
+	if _, err := outbox.Cancel(dir, "alpha", middle); err != nil {
 		t.Fatal(err)
 	}
 	var delivered []string
@@ -194,7 +194,7 @@ func TestInjectorSendDeliveredLogsQueueAge(t *testing.T) {
 	}
 }
 
-// Acceptance (#475): sweep delivers when recipient goes idle; journal logs original enqueue age.
+// Acceptance (#475): sweep retries after the recipient goes idle; journal logs original enqueue age.
 func TestSweepDeliversOnRecipientIdleLogsEnqueueTime(t *testing.T) {
 	dir := t.TempDir()
 	enqAt := time.Date(2026, 7, 6, 10, 0, 0, 0, time.UTC)

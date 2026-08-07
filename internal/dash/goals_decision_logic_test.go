@@ -357,7 +357,7 @@ func TestFormatRespondOutcomeCardAndModalIdentical509(t *testing.T) {
 		},
 		{
 			map[string]interface{}{"outcome": "queued", "target": "frontend", "queued_id": "abc", "detail": "busy"},
-			"Queued durably for frontend (id abc) — the fleet daemon delivers it when the desk can receive. (busy)",
+			"Queued durably for frontend (id abc) — delivery unconfirmed; inspect or cancel using this id. (busy)",
 		},
 		{
 			map[string]interface{}{"outcome": "mystery"},

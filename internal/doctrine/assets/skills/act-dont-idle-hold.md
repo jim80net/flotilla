@@ -7,6 +7,11 @@
 
 ## Act — don't idle-hold on non-decisions
 
+Before each action, run `flotilla pull` and obey the current buffered authority.
+This is the safety check that lets a cancellation or stop-work order supersede
+the action it stops. Pull is cheap and repeatable; a missed pane nudge is not a
+reason to skip it.
+
 When the next step is **clear, authorized, and reversible**, **DO IT and report the
 result.** Do not end a turn by holding or waiting on the operator for a choice they
 already made by stating the goal. Choosing to wait on a non-decision is choosing to

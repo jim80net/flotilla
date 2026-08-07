@@ -13,7 +13,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/jim80net/flotilla/internal/cos"
-	"github.com/jim80net/flotilla/internal/deliver"
 	"github.com/jim80net/flotilla/internal/inbound"
 	"github.com/jim80net/flotilla/internal/roster"
 	"github.com/jim80net/flotilla/internal/surface"
@@ -50,6 +49,10 @@ func run(args []string) error {
 		return cmdDispatchStatus(args[1:])
 	case "dispatch-ack":
 		return cmdDispatchAck(args[1:])
+	case "pull":
+		return cmdPull(args[1:])
+	case "buffer":
+		return cmdBuffer(args[1:])
 	case "notify":
 		return cmdNotify(args[1:])
 	case "synthesis":
@@ -125,9 +128,14 @@ func usage() {
 usage:
   flotilla send --from <sender> <agent> <message>     inline message
   flotilla send --from <sender> --file <path> <agent> message body from a file ('-' = stdin)
-  flotilla cancel <outbox-id> [--roster <path>]       stand down the pending sender→recipient generation
-  flotilla dispatch-status [--roster <path>] <nonce>  consumed / queued / delivered / undelivered (#614)
+  flotilla cancel <message-id> [--roster <path>]      append a pull-visible cancellation (fails closed on a miss)
+  flotilla cancel --legacy-outbox <outbox-id>         explicitly cancel one legacy sender→recipient generation
+  flotilla dispatch-status [--roster <path>] <nonce>  buffered / pulled / consumed (plus legacy states)
   flotilla dispatch-ack [--roster <path>] <nonce>     settle this seat's dispatch in the durable ack ledger (#472)
+  flotilla pull [--roster <path>] [--json]            pull this seat's durable message backlog (idempotent)
+  flotilla buffer inspect [<seat>] [--all] [--json]   inspect recipient backlog depth (read-only)
+  flotilla buffer ack <message-id>                    mark a pulled non-dispatch message handled
+  flotilla buffer migrate                             move legacy push outboxes into recipient buffers
   flotilla notify --from <agent> <message>            post to the operator under <agent>'s webhook (no tmux)
   flotilla notify --from <agent> --file <path>        notify body from a file ('-' = stdin)
   flotilla notify --from <agent> --with-fleet-status  append compressed Status of the fleet (#625)
@@ -202,13 +210,19 @@ flags for 'send':
   --mirror          force-enable the Discord audit mirror for this send
   --no-mirror       force-disable it (--mirror and --no-mirror are mutually exclusive)
   --cross-venture   allow a desk→foreign-desk send and emit an audit line
+  --supersedes <id> declare that this message replaces an earlier buffered message (repeatable)
 
 Inter-agent send mirroring is DEFAULT-OFF — intra-fleet coordination stays in the
 tmux panes and does not clutter Discord; only the operator-facing 'flotilla notify'
 posts by default. Set roster "mirror_inter_agent": true to restore the always-on
 audit trail (or pass --mirror per call; precedence: flag → roster setting → off).
-When it does mirror it is best-effort: an unconfigured/failed mirror still delivers
-and the command succeeds (with a warning), so a retry never double-delivers.
+When it does mirror it is best-effort: an unconfigured/failed mirror leaves the
+durable buffer intact and the command succeeds (with a warning).
+
+send commits the full body to the recipient's durable buffer before doing anything
+to its pane. The pane push is only a short best-effort 'flotilla pull' nudge. A busy,
+wedged, or absent pane cannot lose or reject the message; use 'buffer inspect' to see
+the backlog. Recipients run 'pull' before acting and 'dispatch-ack' after handling.
 
 flags for 'notify':
   --from <name>     the agent whose webhook the message is posted under
@@ -392,6 +406,8 @@ func cmdSend(args []string) error {
 	noMirror := fs.Bool("no-mirror", false, "force-skip the Discord audit mirror")
 	doMirror := fs.Bool("mirror", false, "force-enable the Discord audit mirror (overrides a default-off roster)")
 	crossVenture := fs.Bool("cross-venture", false, "allow and audit a desk-to-foreign-desk send")
+	var supersedes stringListFlag
+	fs.Var(&supersedes, "supersedes", "buffered message id replaced by this send (repeatable)")
 	var attachPaths attachPathsFlag
 	fs.Var(&attachPaths, "attach", "attach a file to the audit mirror Discord post (repeatable)")
 	if err := fs.Parse(args); err != nil {
@@ -454,30 +470,16 @@ func cmdSend(args []string) error {
 	if decision.Audit {
 		fmt.Fprintf(os.Stderr, "flotilla send: AUDIT --cross-venture override: %s → %s (%s)\n", *from, agentName, decision.Reason)
 	}
-	// Resolve the agent's surface driver (how this surface submits a turn).
-	// Unknown surface is a clear error, never a silent mis-drive.
+	// Resolve the surface before committing so a broken roster fails closed. Pane
+	// availability itself is deliberately outside the message transaction.
 	drv, ok := surface.Get(agent.Surface)
 	if !ok {
 		return fmt.Errorf("agent %q: unknown surface %q (known: see internal/surface registry)", agentName, agent.Surface)
 	}
 
-	// Deliver = wake: submit the message into the agent's pane via its driver and CONFIRM a
-	// turn started (idle-gate → submit → confirm the Idle→Working edge → Enter-only retry),
-	// rather than assuming success from the tmux exit code (the relay silent-drop bug). This is
-	// the operation that must succeed; the
-	// audit mirror below is best-effort.
-	pane, err := deliver.ResolvePane(agent.Title())
+	_, err = bufferSendAndNudge(cfg, resolvedRoster, *from, agentName, agent.Title(), drv, message, supersedes)
 	if err != nil {
 		return err
-	}
-	// Inline retry-with-backoff, then durable per-sender outbox on sustained busy (#475).
-	queued, err := deliverOrQueueSend(cfg, resolvedRoster, *from, agentName, drv, pane, message)
-	if err != nil {
-		return err
-	}
-	if queued {
-		// Queued ≠ delivered — skip audit mirror and ledger (watch delivers later).
-		return nil
 	}
 
 	// Mirror to the Discord audit channel under the sender's identity. Inter-agent
@@ -490,11 +492,23 @@ func cmdSend(args []string) error {
 	}
 	runeCap := transportContentCap()
 	if n := len([]rune(message)); runeCap > 0 && n > runeCap {
-		fmt.Fprintf(os.Stderr, "flotilla: note — message is %d chars; the audit copy is truncated to %d (the full message WAS delivered)\n", n, runeCap)
+		fmt.Fprintf(os.Stderr, "flotilla: note — message is %d chars; the audit copy is truncated to %d (the full message IS buffered)\n", n, runeCap)
 	}
 	if err := mirror(*secretsPath, *from, agentName, message, attachPaths); err != nil {
-		fmt.Fprintln(os.Stderr, "flotilla: WARNING — audit mirror skipped (message WAS delivered): "+err.Error())
+		fmt.Fprintln(os.Stderr, "flotilla: WARNING — audit mirror skipped (message IS buffered): "+err.Error())
 	}
+	return nil
+}
+
+type stringListFlag []string
+
+func (s *stringListFlag) String() string { return strings.Join(*s, ",") }
+func (s *stringListFlag) Set(v string) error {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return fmt.Errorf("value cannot be empty")
+	}
+	*s = append(*s, v)
 	return nil
 }
 

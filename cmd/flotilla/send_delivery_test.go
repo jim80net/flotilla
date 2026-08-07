@@ -57,12 +57,25 @@ func TestBouncedSendDedupesIdenticalPending(t *testing.T) {
 	if msg1 == msg2 {
 		t.Fatal("probe requires distinct stamps")
 	}
-	if err := enqueueOrFailSend(rosterPath, "alpha", "xo", msg2, busy); err != nil {
-		t.Fatal(err)
-	}
 	path, err := outbox.Path(dir, "alpha")
 	if err != nil {
 		t.Fatal(err)
+	}
+	queued := outbox.NewStore(path).Load()
+	queued[0].Deferrals = 708
+	outbox.NewStore(path).Update(queued[0])
+	stdout, stderr := captureStdoutStderr(t, func() {
+		if err := enqueueOrFailSend(rosterPath, "alpha", "xo", msg2, busy); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(stdout, "delivery unconfirmed") || !strings.Contains(stdout, "cancel with `FLOTILLA_SELF=alpha flotilla cancel ") || !strings.Contains(stdout, "--legacy-outbox`") {
+		t.Fatalf("queued output lacks present-state recovery facts: stdout=%q", stdout)
+	}
+	for _, forbidden := range []string{"will deliver", "deferrals", "age=", "queued 0s ago", "inspect with", "flotilla outbox"} {
+		if strings.Contains(stdout, forbidden) || strings.Contains(stderr, forbidden) {
+			t.Fatalf("queued output retained superseded reporter field %q: stdout=%q stderr=%q", forbidden, stdout, stderr)
+		}
 	}
 	got := outbox.NewStore(path).Load()
 	if len(got) != 1 {
@@ -81,8 +94,23 @@ func TestBouncedSendLandsInOutbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	busy := errRetryableBusy{agent: "xo"}
-	if err := enqueueOrFailSend(rosterPath, "alpha", "xo", "deploy complete", busy); err != nil {
-		t.Fatalf("enqueueOrFailSend = %v, want success (queued)", err)
+	stdout, stderr := captureStdoutStderr(t, func() {
+		if err := enqueueOrFailSend(rosterPath, "alpha", "xo", "deploy complete", busy); err != nil {
+			t.Fatalf("enqueueOrFailSend = %v, want success (queued)", err)
+		}
+	})
+	for _, want := range []string{"QUEUED", "status=busy_outbox", "queued to alpha outbox", "delivery unconfirmed", "cancel with `FLOTILLA_SELF=alpha flotilla cancel ", "--legacy-outbox`"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("fresh queued output missing %q: stdout=%q", want, stdout)
+		}
+	}
+	if !strings.Contains(stderr, "delivery unconfirmed") {
+		t.Fatalf("fresh queued stderr lacks present-state bound: %q", stderr)
+	}
+	for _, forbidden := range []string{"will deliver", "deferrals", "age=", "queued 0s ago", "inspect with", "flotilla outbox"} {
+		if strings.Contains(stdout, forbidden) || strings.Contains(stderr, forbidden) {
+			t.Fatalf("fresh queued output retained superseded reporter field %q: stdout=%q stderr=%q", forbidden, stdout, stderr)
+		}
 	}
 	path, err := outbox.Path(dir, "alpha")
 	if err != nil {
@@ -116,10 +144,10 @@ func TestDirectSendAfterDurableJoinsTailWithoutQueueJump(t *testing.T) {
 // #475 desk-visible queued ack: machine-readable QUEUED line for monitors.
 func TestFormatQueuedAck_Visible(t *testing.T) {
 	line := dispatch.FormatQueuedAck("deadbeef", "alpha", "xo", false)
-	if !strings.Contains(line, "QUEUED") || !strings.Contains(line, "status=busy_outbox") {
+	if !strings.Contains(line, "QUEUED") || !strings.Contains(line, "status=busy_outbox") || strings.Contains(line, "age=") {
 		t.Fatalf("queued ack not desk-visible: %q", line)
 	}
-	if !strings.Contains(dispatch.FormatQueuedAck("x", "a", "b", true), "already_queued") {
+	if !strings.Contains(dispatch.FormatQueuedAck("x", "a", "b", true), "status=already_queued") {
 		t.Fatal("deduped ack missing already_queued")
 	}
 }

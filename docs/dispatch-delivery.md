@@ -7,65 +7,52 @@ resume (#472 / #475 / #614 / #616).
 
 | File | Role |
 |------|------|
-| `flotilla-<sender>-outbox.json` | Pending sends not yet pane-confirmed (#475) |
-| `flotilla-<recipient>-inbound.json` | Confirmed pane deliveries awaiting durable ack (#472) |
+| `flotilla-<recipient>-buffer.json` | Authoritative message bodies: buffered, pulled, and retained ack history |
+| `flotilla-<sender>-outbox.json` | Legacy push rows only; migrated insert-before-remove into recipient buffers |
+| `flotilla-<recipient>-inbound.json` | Legacy confirmed pane deliveries awaiting durable ack (#472) |
 | `flotilla-dispatch-consumed.json` | Durable consumed registry — nonce (+ payload hash) (#614) |
 | `flotilla-chapter-hold` | Optional marker: hold non-urgent reinjects during chapter (#616) |
 
 ## Dispositions
 
-- **queued** — in sender outbox; recipient busy / not yet confirmed
-- **delivered** — inbound ledger pending durable ack
-- **consumed** — settled (durable ack, legacy turn-final ack, MERGED suppress,
-  coordinator-recipient send-time settle, or manual)
+- **buffered** — durable in the recipient buffer; not yet pulled
+- **pulled** — recipient pull recorded arrival; pending durable ack
+- **queued / delivered** — legacy outbox / inbound states during migration
+- **consumed** — settled (durable ack, legacy turn-final ack, MERGED suppress, or manual)
 - **undelivered** — age bound exceeded (outbox or unacked inbound)
 
-## Coordinator recipients (#707)
+## Coordinator recipients
 
-Coordinator seats keep **no inbound pending row** — their finish is deliberately
-not ack-gated, so tracking would grow finish evaluation unbounded (#472). A
-confirmed send to a coordinator instead settles **straight into the consumed
-registry** with reason `coordinator-recipient`. That reason asserts confirmed
-delivery only, not that the work was addressed. `dispatch-status` therefore
-resolves the nonce (never `unknown` after a confirmed delivery), and a
-coordinator running the footer's `dispatch-ack` converges on the already-durable
-path instead of erroring `not pending`.
+Coordinator seats use the same recipient buffer as every execution seat. This
+removes the former send-time `coordinator-recipient` settlement shortcut: a body
+is now an arrival only when the coordinator pulls it, and handling is recorded
+when the coordinator runs the footer's `dispatch-ack`.
 
-Two guards keep this settlement from leaking onto other seats' dispatches:
+## Desk-visible buffered ack
 
-- **Own-footer attribution.** Only the message's own trailing #472 footer nonce
-  settles. A coordinator-directed report that merely *quotes* another
-  dispatch's nonce in prose settles nothing (nonces are reused across hops for
-  outbox dedup, so a quoted nonce is usually another seat's live dispatch).
-- **Hop-scoped matching.** A `coordinator-recipient` entry settles only its own
-  recipient's hop. The same dispatch text forwarded verbatim to a desk keeps
-  that desk's reinject / escalation / undelivered supervision alive, the desk's
-  own `dispatch-ack` still records its real settlement (which then takes
-  lookup preference over the hop entry), and the row-scrub sweeps ignore hop
-  entries for other seats.
-
-## Desk-visible queued ack
-
-When a send lands in the busy outbox, stdout includes a machine-readable line:
+Every send emits a machine-readable line after the recipient-buffer rename:
 
 ```text
-QUEUED id=<id> sender=<s> recipient=<r> status=busy_outbox
+BUFFERED id=<id> sender=<s> recipient=<r> status=buffered sequence=<n>
 ```
 
-(`status=already_queued` on dedup.)
+The full body is durable at that point. Pane nudge success is not a disposition.
 
 ## CLI
 
 ```bash
 flotilla dispatch-status [--roster <path>] <nonce>
 flotilla dispatch-ack [--roster <path>] <nonce>
+flotilla pull [--roster <path>] [--json]
+flotilla buffer inspect [<seat>] [--all] [--json]
 ```
 
-`dispatch-status` resolves disposition across consumed → inbound → outbox.
+`dispatch-status` resolves disposition across consumed → recipient buffer →
+legacy inbound → legacy outbox.
 After handling a dispatch, its recipient runs `dispatch-ack`; the command writes
-the consumed registry first and then clears the inbound row, so a crash between
-those steps is healed by the watch sweep. `$FLOTILLA_SELF` identifies the recipient,
-and one seat cannot acknowledge another seat's pending nonce.
+the consumed registry first and then stamps the buffer entry acknowledged. A
+crash between those steps converges on retry. `$FLOTILLA_SELF` identifies the
+recipient, and one seat cannot acknowledge another seat's pending nonce.
 
 ## Roster discovery (#615)
 

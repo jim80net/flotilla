@@ -319,7 +319,7 @@ func TestConfirmSubmitQueuedLateInGrace(t *testing.T) {
 	enter := 0
 	d := &stateStub{assessSeq: []State{StateIdle}, stateSeq: seq}
 	if err := newConfirm(&enter).Submit(d, "0:0.0", "hi"); err != nil {
-		t.Fatalf("err = %v, want nil (late queued is soft-success)", err)
+		t.Fatalf("err = %v, want nil (local composer accepted a late queued message)", err)
 	}
 }
 
@@ -333,14 +333,14 @@ func TestConfirmSubmitQueuedAtExpiry(t *testing.T) {
 	enter := 0
 	d := &stateStub{assessSeq: []State{StateIdle}, stateSeq: seq}
 	if err := newConfirm(&enter).Submit(d, "0:0.0", "hi"); err != nil {
-		t.Fatalf("err = %v, want nil (queued-at-expiry soft-success)", err)
+		t.Fatalf("err = %v, want nil (local composer accepted a queued message at expiry)", err)
 	}
 }
 
 func TestConfirmSubmitQueuedIsSoftSuccess(t *testing.T) {
 	// The primary-XO case: after submitting, the composer enters the QUEUED state ("Press up to edit
-	// queued messages") — the message is queued behind a modal/turn and will deliver. ⇒ nil (a
-	// soft-success), NOT a failure or an alarm.
+	// queued messages") — the local composer accepted it behind a modal/turn. ⇒ nil, but this
+	// remains sender-side evidence and does not establish eventual delivery or recipient read.
 	enter := 0
 	d := &stateStub{
 		assessSeq: []State{StateIdle},
@@ -348,7 +348,7 @@ func TestConfirmSubmitQueuedIsSoftSuccess(t *testing.T) {
 	}
 	err := newConfirm(&enter).Submit(d, "0:0.0", "hi")
 	if err != nil {
-		t.Fatalf("err = %v, want nil (queued is a soft-success — the message will deliver)", err)
+		t.Fatalf("err = %v, want nil (local composer accepted the queued message)", err)
 	}
 	if d.submitCalls != 1 {
 		t.Errorf("Submit calls = %d, want 1", d.submitCalls)

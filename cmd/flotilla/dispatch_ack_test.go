@@ -4,9 +4,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/jim80net/flotilla/internal/dispatch"
 	"github.com/jim80net/flotilla/internal/inbound"
+	"github.com/jim80net/flotilla/internal/messagebuffer"
 )
 
 func TestDispatchAckWritesDurableRecordAndClearsInbound683(t *testing.T) {
@@ -37,6 +39,69 @@ func TestDispatchAckWritesDurableRecordAndClearsInbound683(t *testing.T) {
 	}
 	if pending := inbound.NewStore(path).Load(); len(pending) != 0 {
 		t.Fatalf("pending after durable ack = %+v", pending)
+	}
+}
+
+func TestDispatchAckSettlesPulledRecipientBuffer(t *testing.T) {
+	t.Setenv("FLOTILLA_ROSTER", "")
+	dir := t.TempDir()
+	rosterPath := filepath.Join(dir, "flotilla.json")
+	if err := os.WriteFile(rosterPath, []byte(`{"agents":[{"name":"xo"},{"name":"backend"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	msg, nonce, err := inbound.AppendDispatchNonce("safe buffered work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, _, err := messagebuffer.Enqueue(dir, "xo", "backend", msg, messagebuffer.EnqueueOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messagebuffer.Pull(dir, "backend", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FLOTILLA_SELF", "backend")
+	if err := cmdDispatchAck([]string{"--roster", rosterPath, nonce}); err != nil {
+		t.Fatal(err)
+	}
+	path, _ := messagebuffer.Path(dir, "backend")
+	got := messagebuffer.NewStore(path).Load()
+	if len(got) != 1 || got[0].ID != e.ID || got[0].AcknowledgedAt == nil {
+		t.Fatalf("buffer ack history = %+v", got)
+	}
+	if pending, err := messagebuffer.Pull(dir, "backend", time.Now()); err != nil || len(pending) != 0 {
+		t.Fatalf("post-ack pull = %+v err=%v", pending, err)
+	}
+}
+
+func TestDispatchAckRegistryFirstRetryAlsoSettlesRecipientBuffer(t *testing.T) {
+	t.Setenv("FLOTILLA_ROSTER", "")
+	dir := t.TempDir()
+	rosterPath := filepath.Join(dir, "flotilla.json")
+	if err := os.WriteFile(rosterPath, []byte(`{"agents":[{"name":"xo"},{"name":"backend"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	msg, nonce, err := inbound.AppendDispatchNonce("registry write survived before buffer ack")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, _, err := messagebuffer.Enqueue(dir, "xo", "backend", msg, messagebuffer.EnqueueOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dispatch.NewRegistry(dir).Consume(dispatch.ConsumeFromInbound(
+		nonce, msg, dispatch.ReasonDurableAck, "xo", "backend",
+	)); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FLOTILLA_SELF", "backend")
+	if err := cmdDispatchAck([]string{"--roster", rosterPath, nonce}); err != nil {
+		t.Fatal(err)
+	}
+	path, _ := messagebuffer.Path(dir, "backend")
+	got := messagebuffer.NewStore(path).Load()
+	if len(got) != 1 || got[0].ID != e.ID || got[0].AcknowledgedAt == nil {
+		t.Fatalf("registry-first retry left buffer pending: %+v", got)
 	}
 }
 

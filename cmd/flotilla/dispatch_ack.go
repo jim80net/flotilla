@@ -6,9 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jim80net/flotilla/internal/dispatch"
 	"github.com/jim80net/flotilla/internal/inbound"
+	"github.com/jim80net/flotilla/internal/messagebuffer"
 )
 
 // cmdDispatchAck settles one confirmed inbound dispatch for the current seat in
@@ -42,6 +44,7 @@ func cmdDispatchAck(args []string) error {
 		return err
 	}
 	st := inbound.NewStore(path)
+	buffered, bufferedOK := messagebuffer.FindNonce(rosterDir, from, nonce)
 	// Registry scan is recipient-first (#707): the same dispatch text can settle
 	// on more than one edge (a send-time coordinator hop, another seat's real
 	// ack), so "is THIS seat settled?" must not depend on which entry happens to
@@ -60,6 +63,11 @@ func cmdDispatchAck(args []string) error {
 					st.Remove(pending.ID)
 				}
 			}
+			if bufferedOK {
+				if _, _, err := messagebuffer.AckID(rosterDir, from, buffered.ID, time.Now().UTC()); err != nil {
+					return fmt.Errorf("dispatch-ack: converge buffer ack: %w", err)
+				}
+			}
 			fmt.Printf("dispatch ack already durable nonce=%s recipient=%s\n", nonce, from)
 			return nil
 		}
@@ -67,6 +75,26 @@ func cmdDispatchAck(args []string) error {
 			e := entry
 			foreign = &e
 		}
+	}
+	if bufferedOK {
+		if buffered.Recipient != from {
+			return fmt.Errorf("dispatch-ack: buffered recipient %q does not match seat %q", buffered.Recipient, from)
+		}
+		if _, err := reg.Consume(dispatch.ConsumeFromInbound(
+			buffered.Nonce, buffered.Message, dispatch.ReasonDurableAck, buffered.Sender, buffered.Recipient,
+		)); err != nil {
+			return fmt.Errorf("dispatch-ack: write durable ack: %w", err)
+		}
+		if _, _, err := messagebuffer.AckID(rosterDir, from, buffered.ID, time.Now().UTC()); err != nil {
+			return fmt.Errorf("dispatch-ack: write buffer ack: %w", err)
+		}
+		for _, pending := range st.Load() {
+			if pending.Nonce == nonce {
+				st.Remove(pending.ID)
+			}
+		}
+		fmt.Printf("dispatch ack durable nonce=%s recipient=%s source=buffer\n", nonce, from)
+		return nil
 	}
 	var match *inbound.Entry
 	for _, entry := range st.Load() {

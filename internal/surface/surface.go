@@ -109,7 +109,7 @@ const (
 	// ComposerPending: a body remains in the cursor's composer — the submit has not been accepted.
 	ComposerPending
 	// ComposerQueued: the input is queued behind a modal/turn ("Press up to edit queued messages")
-	// — a SOFT-SUCCESS: the message is not lost; it will deliver when the agent is free.
+	// — sender-local queue evidence only. It does not establish eventual delivery or recipient read.
 	ComposerQueued
 	// ComposerSubAgent: the cursor is on a per-agent message sub-composer ("Message @<agent>") — a
 	// paste would MIS-DELIVER to that background agent. Confirmed delivery refuses to paste here.

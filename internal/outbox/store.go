@@ -144,10 +144,15 @@ func (s Store) Insert(e Entry) (id string, deduped bool, err error) {
 	return id, deduped, nil
 }
 
-// Cancel removes only id. It advances the sender→recipient epoch so an already-swept copy
-// of the canceled entry fails Current, then re-stamps its still-pending siblings into the
-// new epoch so canceling one order never strands or stands down the rest of the queue.
-func Cancel(rosterDir, id string) (CancelResult, error) {
+// Cancel removes only id. Caller must be the target's sender. It advances the
+// sender→recipient epoch so an already-swept copy of the canceled entry fails Current,
+// then re-stamps its still-pending siblings into the new epoch so canceling one order
+// never strands or stands down the rest of the queue.
+func Cancel(rosterDir, caller, id string) (CancelResult, error) {
+	caller = strings.TrimSpace(caller)
+	if caller == "" {
+		return CancelResult{}, fmt.Errorf("outbox cancel: caller identity is required")
+	}
 	if rosterDir == "" || id == "" {
 		return CancelResult{}, fmt.Errorf("outbox cancel: id not found")
 	}
@@ -188,6 +193,9 @@ func Cancel(rosterDir, id string) (CancelResult, error) {
 		}
 		if target == nil {
 			return fmt.Errorf("id %q no longer pending", id)
+		}
+		if target.Sender != caller {
+			return fmt.Errorf("caller %q does not own message %q from sender %q", caller, id, target.Sender)
 		}
 		canceled = *target
 		result.Sender = target.Sender
@@ -377,11 +385,11 @@ func (s Store) Update(e Entry) {
 }
 
 // Remove deletes an entry by id under the same flock as Insert/Update.
-func (s Store) Remove(id string) {
+func (s Store) Remove(id string) error {
 	if s.path == "" || id == "" {
-		return
+		return nil
 	}
-	if err := s.withLock(func() error {
+	err := s.withLock(func() error {
 		f, err := s.readFileForUpdate()
 		if err != nil {
 			return fmt.Errorf("read for remove: %w", err)
@@ -400,9 +408,11 @@ func (s Store) Remove(id string) {
 		}
 		f.Pending = next
 		return s.save(f)
-	}); err != nil {
+	})
+	if err != nil {
 		log.Printf("flotilla outbox: remove failed: %v", err)
 	}
+	return err
 }
 
 // Enqueue inserts a new pending send and returns its id. Identical pending sends dedup
