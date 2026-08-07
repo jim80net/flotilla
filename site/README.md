@@ -33,7 +33,7 @@ sanitized capture of the real product dashboard; decorative media is excluded.
 
 The hero uses responsive WebP captures in `assets/`. Its generic fixture data
 contains no private hosts, usernames, repositories, tokens, internal paths, or
-seat-to-deployment joins. The `yours` section is factual type and comparison
+private deployment relationships. The `yours` section is factual type and comparison
 content only; it carries no decorative still life.
 
 ## Publishing (GitHub Pages) — operator's one step
@@ -51,8 +51,8 @@ source is enabled and the workflow is dispatched.
 ## Constraints honored
 
 - **Generic only.** No private deployment details, hostnames, real IDs, or
-  domain-specific terms appear anywhere. Example agents (`xo`, `backend`,
-  `frontend`, `data`, `infra`) are generic, matching the public quickstart.
+  private fleet names appear anywhere. Example agents (`backend`, `frontend`,
+  `data`, `infra`) are generic, matching the public quickstart.
 - **Truthful product proof.** The page names the six registered drivers, the
   exact bounded failover behavior, and five dashboard destinations. It does not
   present shipped capabilities as trial or roadmap work.

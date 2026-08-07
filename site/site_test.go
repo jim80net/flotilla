@@ -32,7 +32,7 @@ func TestLandingHeroShowsProductProof(t *testing.T) {
 		`dashboard-product-proof-720.webp 720w`,
 		`dashboard-product-proof-1440.webp 1440w`,
 		`dashboard-product-proof-mobile-780.webp 780w`,
-		`alt="Flotilla dashboard showing a fleet map, active coding desks, coordination history, and a scoped work queue"`,
+		`alt="Flotilla dashboard showing a fleet map, active coding-agent sessions, coordination history, and a scoped work queue"`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("landing page missing product-proof marker %q", want)
@@ -45,6 +45,59 @@ func TestLandingHeroShowsProductProof(t *testing.T) {
 	}
 	if strings.Contains(page, `.png`) {
 		t.Error("landing page references a PNG source master as a public payload")
+	}
+}
+
+func TestPublicLandingUsesColdReaderLanguage(t *testing.T) {
+	pages := []string{
+		"index.html",
+		"docs/index.html",
+		"docs/understand.html",
+		"docs/quickstart.html",
+		"docs/commands.html",
+		"docs/architecture.html",
+	}
+	for _, path := range pages {
+		page := readSiteFile(t, path)
+		for _, stale := range []string{
+			"write a roster",
+			"next desk",
+			"stable seat identities",
+			"goals-as-data",
+			"operator interrupt",
+			"worktree lifecycle",
+			"installable doctrine",
+		} {
+			if strings.Contains(strings.ToLower(page), stale) {
+				t.Errorf("%s retains unexplained fleet vocabulary %q", path, stale)
+			}
+		}
+	}
+}
+
+func TestPublicEvidenceClosesColdRunAndClaimMap(t *testing.T) {
+	cold := readSiteFile(t, "docs/COLD-TEST.md")
+	for _, want := range []string{
+		`export PATH="$TEST_ROOT/bin:$PATH"`,
+		"site/docs/testdata/coldagent",
+		"turn confirmed",
+		"disposition=delivered",
+	} {
+		if !strings.Contains(cold, want) {
+			t.Errorf("cold-test record missing reproducibility marker %q", want)
+		}
+	}
+
+	claims := readSiteFile(t, "docs/CLAIM-TO-SOURCE.md")
+	for _, want := range []string{
+		"Delivery attempts and acknowledgments",
+		"Automatic provider-rate-limit switching",
+		"workspace init",
+		"Memex is external and optional",
+	} {
+		if !strings.Contains(claims, want) {
+			t.Errorf("claim-to-source record missing claim family %q", want)
+		}
 	}
 }
 

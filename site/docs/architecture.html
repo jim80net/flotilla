@@ -25,7 +25,7 @@
     <section class="doc-section">
       <h2>The runtime boundary</h2>
       <div class="component-list">
-        <article class="component"><header><h3>Flotilla core</h3><span class="component-status">Bundled and required</span></header><p>The Go binary owns the roster, routing, delivery receipts, lifecycle commands, detector state, goals, and local dashboard.</p></article>
+        <article class="component"><header><h3>Flotilla core</h3><span class="component-status">Bundled and required</span></header><p>The Go binary owns agent identities, routing, delivery records, lifecycle commands, observed session state, goals, and the local dashboard.</p></article>
         <article class="component"><header><h3>tmux</h3><span class="component-status">External and required for delivery</span></header><p>Flotilla identifies and drives running coding-agent panes through tmux. It does not replace the coding agent inside each pane.</p></article>
         <article class="component"><header><h3>Coding-agent runtimes</h3><span class="component-status">External and user supplied</span></header><p>Claude Code, Codex, Grok, OpenCode, Pi, and aider remain their own products and subscriptions. Flotilla coordinates them.</p></article>
         <article class="component"><header><h3>Discord</h3><span class="component-status">External and optional</span></header><p>Discord can provide an audit mirror and inbound chat surface. Local delivery, the clock, status, and the dashboard do not require it.</p></article>

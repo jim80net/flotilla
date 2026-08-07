@@ -13,8 +13,8 @@
   flotilla up — the literal prompt is in the last section).
 
   GENERIC ONLY: this page describes the open-source product. No private
-  deployment details appear anywhere : example desks are generic (backend,
-  research, docs, infra), mirroring the public quickstart, NOT any host roster.
+  deployment details appear anywhere: example agent sessions are generic
+  (backend, research, docs, infra), mirroring the public quickstart.
 
   THEME IS FIXED (docs/design/README.md): this is copy + narrative-structure
   work, not a re-theme. The two components added for the narrative (.scene and
@@ -123,7 +123,7 @@
               src="./assets/dashboard-product-proof-720.webp"
               width="720"
               height="450"
-              alt="Flotilla dashboard showing a fleet map, active coding desks, coordination history, and a scoped work queue"
+              alt="Flotilla dashboard showing a fleet map, active coding-agent sessions, coordination history, and a scoped work queue"
               fetchpriority="high"
               decoding="async"
             />
@@ -163,7 +163,7 @@
         <a class="docs-path-card" href="./docs/quickstart.html">
           <span>02 · get running</span>
           <h3>Install and check a fleet</h3>
-          <p>Start with the prerequisites, install the binary, write a roster, and verify it.</p>
+          <p>Check the prerequisites, install the binary, name two agent sessions, and verify the setup.</p>
           <strong>Run the quickstart →</strong>
         </a>
         <a class="docs-path-card" href="./docs/commands.html">
@@ -247,18 +247,18 @@
           <div>
             <h3>A result finds you, and you answer in a line</h3>
             <p>
-              A result reaches your phone. <span class="you">You answer in one line</span>,
-              and the next desk pulls the instruction from its durable buffer.
+              A result returns to your chat channel. <span class="you">You answer in one line</span>,
+              and the next coding-agent session receives the instruction.
             </p>
           </div>
         </div>
         <div class="moment">
           <div class="moment-when">4:30 · new work lands</div>
           <div>
-            <h3>A new agent that already knows your project</h3>
+            <h3>A replacement session receives the handoff</h3>
             <p>
-              <span class="you">You start a working session in minutes.</span> Its durable handoff
-              carries the project's conventions and recent decisions.
+              A durable handoff carries project context into the replacement session
+              before work resumes.
             </p>
           </div>
         </div>
@@ -400,15 +400,16 @@
             <span class="step-tag">it reaches your real sessions</span>
             <h3>Delivered, and confirmed</h3>
             <p>
-              Each coding-agent session pulls durable work before acting; acknowledgments and
-              supersession remain inspectable.
+              Each instruction goes to a named coding-agent session and receives a
+              durable dispatch record.
             </p>
           </li>
           <li>
             <span class="step-tag">state and receipts survive</span>
             <h3>Continue without losing the record</h3>
             <p>
-              Handoffs preserve context, and approval-sensitive work still stops for you.
+              Handoffs preserve context, and lifecycle commands refuse when they cannot
+              confirm a safe transition.
             </p>
           </li>
         </ol>
@@ -418,7 +419,7 @@
         <p><strong>Six registered drivers:</strong> Claude Code, Codex, Grok, OpenCode, Pi, and aider.</p>
         <p>When auto-switch is enabled, eligible non-approval-sensitive sessions currently running Claude Code can move to another configured agent runtime in their declared fallback chain after a detected provider rate limit, carrying a durable handoff into the replacement session.</p>
         <p><strong>Five dashboard destinations:</strong> Conversations, Goals, Issues, Parade, and combined R&amp;D. Goals maps the fleet; Issues exposes its work; Parade and R&amp;D keep reports and decisions readable.</p>
-        <p><strong>Built for continuity:</strong> stable seat identities, goals-as-data, durable delivery receipts, operator interrupt, worktree lifecycle, installable doctrine, and a private/public boundary.</p>
+        <p><strong>Built for continuity:</strong> work keeps a stable session identity, a durable delivery record, and a recovery handoff. Public examples stay separate from private deployment details.</p>
       </div>
     </section>
 
