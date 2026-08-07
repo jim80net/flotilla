@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>How flotilla is built</title>
+  <meta name="description" content="The responsibilities and boundaries of flotilla's core and supporting technologies." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css" />
+  <link rel="stylesheet" href="./docs.css" />
+</head>
+<body class="docs-page">
+  <header class="nav docs-nav">
+    <a class="brand" href="../"><span class="brand-name">flotilla</span></a>
+    <nav class="nav-links" aria-label="documentation"><a href="./">Docs</a><a href="./understand.html">Understand</a><a href="./quickstart.html">Quickstart</a><a href="./commands.html">Commands</a><a class="nav-cta" href="https://github.com/jim80net/flotilla">GitHub ↗</a></nav>
+  </header>
+  <main class="doc-shell">
+    <header class="doc-hero">
+      <span class="kicker">secondary · how it is built</span>
+      <h1>Responsibilities before component names.</h1>
+      <p>Flotilla owns coordination and durable delivery. Supporting technologies keep narrow boundaries and do not become the product hierarchy.</p>
+    </header>
+    <section class="doc-section">
+      <h2>The runtime boundary</h2>
+      <div class="component-list">
+        <article class="component"><header><h3>Flotilla core</h3><span class="component-status">Bundled and required</span></header><p>The Go binary owns the roster, routing, delivery receipts, lifecycle commands, detector state, goals, and local dashboard.</p></article>
+        <article class="component"><header><h3>tmux</h3><span class="component-status">External and required for delivery</span></header><p>Flotilla identifies and drives running coding-agent panes through tmux. It does not replace the coding agent inside each pane.</p></article>
+        <article class="component"><header><h3>Coding-agent runtimes</h3><span class="component-status">External and user supplied</span></header><p>Claude Code, Codex, Grok, OpenCode, Pi, and aider remain their own products and subscriptions. Flotilla coordinates them.</p></article>
+        <article class="component"><header><h3>Discord</h3><span class="component-status">External and optional</span></header><p>Discord can provide an audit mirror and inbound chat surface. Local delivery, the clock, status, and the dashboard do not require it.</p></article>
+      </div>
+    </section>
+    <section class="doc-section">
+      <h2>Memory and continuity boundary</h2>
+      <article class="component">
+        <header><h3>Memex</h3><span class="component-status">External and optional</span></header>
+        <p>Memex is a separate memory system. Flotilla can write a bare pointer into a cross-runtime handoff for a future consumer, but it does not embed retrieved memory and Memex is not required for Flotilla to deliver work, preserve the handoff, or complete a runtime switch.</p>
+        <p><a href="https://github.com/jim80net/memex-core">Open the Memex repository ↗</a></p>
+      </article>
+    </section>
+    <section class="doc-section">
+      <h2>Where to go deeper</h2>
+      <p>The contributor architecture map traces these responsibilities to packages and source files without turning supporting technologies into a vendor wall.</p>
+      <p><a href="https://github.com/jim80net/flotilla/blob/main/docs/ARCHITECTURE.md">Read the contributor architecture map ↗</a></p>
+    </section>
+    <nav class="doc-next" aria-label="documentation navigation"><a href="./commands.html">Back: commands</a><a href="./">Docs home</a></nav>
+  </main>
+</body>
+</html>

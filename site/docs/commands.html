@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>flotilla command reference</title>
+  <meta name="description" content="A task-organized reference to the commands shipped by flotilla." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css" />
+  <link rel="stylesheet" href="./docs.css" />
+</head>
+<body class="docs-page">
+  <header class="nav docs-nav">
+    <a class="brand" href="../"><span class="brand-name">flotilla</span></a>
+    <nav class="nav-links" aria-label="documentation"><a href="./">Docs</a><a href="./understand.html">Understand</a><a href="./quickstart.html">Quickstart</a><a class="nav-cta" href="https://github.com/jim80net/flotilla">GitHub ↗</a></nav>
+  </header>
+  <main class="doc-shell">
+    <header class="doc-hero">
+      <span class="kicker">03 · use it</span>
+      <h1>Find commands by the job in front of you.</h1>
+      <p>These are shipped command families, grouped by intent. Run <code>flotilla help</code> for the complete flag surface.</p>
+    </header>
+    <section class="command-group">
+      <h2>Inspect</h2>
+      <div class="command-list">
+        <article class="command-item"><code>flotilla status [--json]</code><p>Read the detector snapshot and report each agent session's observed state and loop posture.</p></article>
+        <article class="command-item"><code>flotilla dash</code><p>Open the local fleet, goals, issue, parade, and research views on a loopback address.</p></article>
+        <article class="command-item"><code>flotilla quality show [--json]</code><p>Summarize recorded completion and gate quality by agent runtime and work class.</p></article>
+      </div>
+    </section>
+    <section class="command-group">
+      <h2>Coordinate</h2>
+      <div class="command-list">
+        <article class="command-item"><code>flotilla send --from &lt;sender&gt; &lt;agent&gt; &lt;message&gt;</code><p>Queue or deliver work to one coding-agent session and report the actual disposition.</p></article>
+        <article class="command-item"><code>flotilla dispatch-status &lt;nonce&gt;</code><p>Check whether a dispatch nonce was consumed, queued, delivered, or left undelivered.</p></article>
+        <article class="command-item"><code>flotilla dispatch-ack &lt;nonce&gt;</code><p>Record that this recipient durably handled a dispatch.</p></article>
+      </div>
+    </section>
+    <section class="command-group">
+      <h2>Start and recover</h2>
+      <div class="command-list">
+        <article class="command-item"><code>flotilla register &lt;agent&gt;</code><p>Attach a stable identity to a tmux pane so title changes cannot break routing.</p></article>
+        <article class="command-item"><code>flotilla resume &lt;agent&gt;</code><p>Start or restart a session from its host-local launch recipe.</p></article>
+        <article class="command-item"><code>flotilla recycle &lt;agent&gt;</code><p>Close a work chapter through a durable handoff, then relaunch and take over.</p></article>
+        <article class="command-item"><code>flotilla switch &lt;agent&gt; --to &lt;runtime&gt;</code><p>Move an agent session across configured runtimes with a fail-closed handoff.</p></article>
+      </div>
+    </section>
+    <section class="command-group">
+      <h2>Provision</h2>
+      <div class="command-list">
+        <article class="command-item"><code>flotilla workspace init &lt;agent&gt; --repo &lt;path&gt;</code><p>Create a worktree, host workspace, launch entry, and native agent instructions.</p></article>
+        <article class="command-item"><code>flotilla doctrine install &lt;agent&gt;</code><p>Install the fleet's operating doctrine into one agent workspace.</p></article>
+        <article class="command-item"><code>flotilla goals validate</code><p>Fail closed when the fleet goals graph is malformed.</p></article>
+      </div>
+    </section>
+    <nav class="doc-next" aria-label="next documentation step"><a href="./architecture.html">Optional: how it is built →</a><a href="./quickstart.html">Back: quickstart</a></nav>
+  </main>
+</body>
+</html>

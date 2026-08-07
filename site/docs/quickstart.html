@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>flotilla quickstart</title>
+  <meta name="description" content="Install flotilla, define a small fleet, verify the roster, and connect a coding-agent session." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css" />
+  <link rel="stylesheet" href="./docs.css" />
+</head>
+<body class="docs-page">
+  <header class="nav docs-nav">
+    <a class="brand" href="../"><span class="brand-name">flotilla</span></a>
+    <nav class="nav-links" aria-label="documentation"><a href="./">Docs</a><a href="./understand.html">Understand</a><a href="./commands.html">Commands</a><a class="nav-cta" href="https://github.com/jim80net/flotilla">GitHub ↗</a></nav>
+  </header>
+  <main class="doc-shell">
+    <header class="doc-hero">
+      <span class="kicker">02 · get running</span>
+      <h1>From clone to a verified fleet.</h1>
+      <p>This path starts with prerequisites, installs the exact public binary, defines two agent sessions, and checks what flotilla can see before you send work.</p>
+    </header>
+    <section class="doc-section">
+      <h2>Before the first command</h2>
+      <ul>
+        <li>Git.</li>
+        <li>Go 1.26 or newer.</li>
+        <li>tmux.</li>
+        <li>At least one supported coding agent already installed and authenticated.</li>
+      </ul>
+      <div class="doc-callout"><p>Discord is optional. Local coordination, status, and delivery work without it.</p></div>
+    </section>
+    <section class="doc-section">
+      <h2>1. Install</h2>
+      <div class="doc-code"><code>git clone https://github.com/jim80net/flotilla.git
+cd flotilla
+go install ./cmd/flotilla
+flotilla version</code></div>
+      <p>If the shell cannot find <code>flotilla</code>, add <code>$(go env GOPATH)/bin</code> to your <code>PATH</code>.</p>
+    </section>
+    <section class="doc-section">
+      <h2>2. Define the fleet</h2>
+      <p>Create <code>flotilla.json</code> in the repository root:</p>
+      <div class="doc-code"><code>{
+  "agents": [
+    { "name": "infra" },
+    { "name": "research" }
+  ]
+}</code></div>
+      <p>The names are public examples. Each name becomes the stable identifier for one coding-agent session.</p>
+    </section>
+    <section class="doc-section">
+      <h2>3. Verify before delivery</h2>
+      <div class="doc-code"><code>flotilla status --roster ./flotilla.json</code></div>
+      <p>Before the detector has observed a session, <code>unknown</code> is the honest state. The command reads the current snapshot; it does not invent liveness.</p>
+    </section>
+    <section class="doc-section">
+      <h2>4. Connect a coding agent</h2>
+      <p>This example uses Claude Code. Replace <code>claude</code> with another supported agent command when needed.</p>
+      <div class="doc-code"><code>tmux new-session -d -s flotilla-demo
+tmux send-keys -t flotilla-demo 'flotilla register infra &amp;&amp; exec claude' Enter</code></div>
+      <p><code>register</code> gives the pane a stable identity even when the coding agent changes its title.</p>
+    </section>
+    <section class="doc-section">
+      <h2>5. Send the first instruction</h2>
+      <div class="doc-code"><code>flotilla send --from me --roster ./flotilla.json infra "Report the repository status."</code></div>
+      <p>A successful send confirms that the agent turn started. A busy target is queued durably for later delivery; a missing or crashed target returns a typed refusal instead of a false success.</p>
+      <p>For the clock, Discord mirror, recovery recipes, and production operation, continue to the <a href="https://github.com/jim80net/flotilla/blob/main/docs/quickstart.md">complete repository quickstart</a>.</p>
+    </section>
+    <nav class="doc-next" aria-label="next documentation step"><a href="./commands.html">Next: commands by task →</a><a href="./understand.html">Back: understand</a></nav>
+  </main>
+</body>
+</html>

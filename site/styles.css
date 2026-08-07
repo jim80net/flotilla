@@ -295,7 +295,9 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 
 /* what — cards */
 .cards.three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.2rem; }
+.cards.two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.2rem; max-width: 54rem; }
 @media (max-width: 860px) { .cards.three { grid-template-columns: 1fr; } }
+@media (max-width: 680px) { .cards.two { grid-template-columns: 1fr; } }
 .card {
   position: relative; padding: 1.6rem 1.5rem; border: 1px solid var(--line);
   border-radius: var(--r); background: linear-gradient(160deg, var(--hull), var(--abyss-2));
@@ -308,7 +310,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 .card p em { color: var(--ink-3); font-style: italic; }
 @media (max-width: 600px) {
   #feel .cards.three,
-  #gives .cards.three { gap: .7rem; }
+  #gives .cards.two { gap: .7rem; }
   #feel .card,
   #gives .card {
     display: grid; grid-template-columns: 1.8rem minmax(0, 1fr);
@@ -320,6 +322,31 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
   #gives .card h3 { margin-bottom: .3rem; }
   #feel .card p,
   #gives .card p { font-size: .82rem; line-height: 1.45; }
+}
+
+/* Public docs path: product model, runnable start, then task reference. */
+.docs-path { padding-top: 3.2rem; padding-bottom: 3.2rem; }
+.docs-path .band-head { margin-bottom: 1.5rem; }
+.docs-path-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+.docs-path-card {
+  display: flex; flex-direction: column; min-width: 0; padding: 1.2rem;
+  border: 1px solid var(--line); border-radius: var(--r); background: var(--abyss-2);
+  color: var(--ink); text-decoration: none;
+}
+.docs-path-card:hover { border-color: var(--cyan-dim); transform: translateY(-2px); }
+.docs-path-card span { font: 600 .68rem/1.3 var(--mono); color: var(--cyan-dim); text-transform: uppercase; letter-spacing: .08em; }
+.docs-path-card h3 { margin: .65rem 0 .45rem; font-size: 1.12rem; }
+.docs-path-card p { margin: 0 0 1rem; font-size: .84rem; line-height: 1.5; }
+.docs-path-card strong { margin-top: auto; color: var(--cyan); font: 600 .78rem/1.4 var(--mono); }
+.architecture-route { margin: 1rem 0 0; color: var(--ink-3); font-size: .82rem; }
+.architecture-route a { color: var(--ink-2); }
+@media (max-width: 760px) {
+  .band.docs-path { padding-top: .4rem; padding-bottom: .4rem; }
+  .docs-path .band-head { margin-bottom: .8rem; }
+  .docs-path-grid { grid-template-columns: 1fr; gap: .45rem; }
+  .docs-path-card { padding: .6rem .9rem; }
+  .docs-path-card p { margin-bottom: .4rem; }
+  .architecture-route { margin-top: .35rem; }
 }
 
 /* positioning — altitude + pull-quote */

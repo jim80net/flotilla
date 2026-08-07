@@ -2,6 +2,7 @@ package site
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -77,7 +78,7 @@ func TestLandingShippedClaimsAreCurrent(t *testing.T) {
 	page := readSiteFile(t, "index.html")
 	for _, want := range []string{
 		"Claude Code, Codex, Grok, OpenCode, Pi, and aider",
-		"When auto-switch is enabled, eligible non-approval-sensitive desks currently running Claude Code",
+		"When auto-switch is enabled, eligible non-approval-sensitive sessions currently running Claude Code",
 		"Five dashboard destinations:",
 		"Conversations, Goals, Issues, Parade, and combined R&amp;D",
 	} {
@@ -88,6 +89,56 @@ func TestLandingShippedClaimsAreCurrent(t *testing.T) {
 	for _, stale := range []string{"Cursor", "on the roadmap", "in supervised trial", "in trial · on the roadmap", "eligible non-approval-sensitive desks can switch automatically"} {
 		if strings.Contains(page, stale) {
 			t.Errorf("landing page retains stale claim %q", stale)
+		}
+	}
+}
+
+func TestLandingDocsHierarchyAndMemexBoundary(t *testing.T) {
+	page := readSiteFile(t, "index.html")
+	for _, path := range []string{"docs/index.html", "docs/understand.html", "docs/quickstart.html", "docs/commands.html", "docs/architecture.html"} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("public docs page %s is not readable: %v", path, err)
+		}
+	}
+	for _, want := range []string{
+		"Two parts do the whole job.",
+		`class="cards two"`,
+		`href="./docs/understand.html"`,
+		`href="./docs/quickstart.html"`,
+		`href="./docs/commands.html"`,
+		`href="./docs/architecture.html"`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("landing page missing docs hierarchy marker %q", want)
+		}
+	}
+	for _, stale := range []string{"Three ideas do the whole job.", "memex-core", ">memex<"} {
+		if strings.Contains(strings.ToLower(page), strings.ToLower(stale)) {
+			t.Errorf("landing page retains rejected component hierarchy %q", stale)
+		}
+	}
+	heroAt := strings.Index(page, `class="product-proof product-proof--hero"`)
+	docsAt := strings.Index(page, `id="docs"`)
+	problemAt := strings.Index(page, `id="feel"`)
+	if heroAt < 0 || docsAt < heroAt || problemAt < docsAt {
+		t.Errorf("landing information order = hero:%d docs:%d problem:%d, want hero product proof then docs path then narrative", heroAt, docsAt, problemAt)
+	}
+	pages, err := filepath.Glob("docs/*.html")
+	if err != nil {
+		t.Fatalf("glob public docs: %v", err)
+	}
+	for _, path := range pages {
+		if filepath.Base(path) == "architecture.html" {
+			continue
+		}
+		if strings.Contains(strings.ToLower(readSiteFile(t, path)), "memex") {
+			t.Errorf("supporting component promoted outside architecture page: %s", path)
+		}
+	}
+	architecture := readSiteFile(t, "docs/architecture.html")
+	for _, want := range []string{"Memex", "External and optional", "not required for Flotilla to deliver work"} {
+		if !strings.Contains(architecture, want) {
+			t.Errorf("architecture page missing component boundary %q", want)
 		}
 	}
 }

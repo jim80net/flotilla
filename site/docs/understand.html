@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Understand flotilla</title>
+  <meta name="description" content="What flotilla coordinates, what changes after setup, and what the product does not replace." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css" />
+  <link rel="stylesheet" href="./docs.css" />
+</head>
+<body class="docs-page">
+  <header class="nav docs-nav">
+    <a class="brand" href="../"><span class="brand-name">flotilla</span></a>
+    <nav class="nav-links" aria-label="documentation"><a href="./">Docs</a><a href="./quickstart.html">Quickstart</a><a href="./commands.html">Commands</a><a class="nav-cta" href="https://github.com/jim80net/flotilla">GitHub ↗</a></nav>
+  </header>
+  <main class="doc-shell">
+    <header class="doc-hero">
+      <span class="kicker">01 · understand</span>
+      <h1>One coordinator for the agents you already run.</h1>
+      <p>Flotilla is a coordination layer. You give one agent an outcome; it routes work to your other coding-agent sessions, preserves the record, and returns what needs you.</p>
+    </header>
+    <section class="doc-section">
+      <h2>What changes</h2>
+      <div class="doc-path">
+        <article class="doc-card"><h3>One place to direct work</h3><p>You stop copying the same context across separate agent windows.</p></article>
+        <article class="doc-card"><h3>Work keeps a record</h3><p>Messages, handoffs, acknowledgments, and supersession remain inspectable.</p></article>
+        <article class="doc-card"><h3>Only decisions come back</h3><p>The coordinator gathers results and raises approval-sensitive choices to you.</p></article>
+      </div>
+    </section>
+    <section class="doc-section">
+      <h2>The three terms you need</h2>
+      <ul>
+        <li><strong>Coordinator:</strong> the one coding agent you talk to. It routes work and gathers replies.</li>
+        <li><strong>Agent session:</strong> a running coding-agent process with a defined responsibility. The CLI also calls this a desk.</li>
+        <li><strong>Fleet:</strong> the coordinator plus the agent sessions it directs.</li>
+      </ul>
+    </section>
+    <section class="doc-section">
+      <h2>What flotilla does not replace</h2>
+      <p>It does not replace Claude Code, Codex, Grok, OpenCode, Pi, aider, your editor, your repository, or your review process. It coordinates those existing tools and keeps their work legible.</p>
+    </section>
+    <nav class="doc-next" aria-label="next documentation step"><a href="./quickstart.html">Next: get running →</a><a href="./">Back to docs</a></nav>
+  </main>
+</body>
+</html>

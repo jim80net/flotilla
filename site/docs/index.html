@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>flotilla docs - start with the product</title>
+  <meta name="description" content="Understand flotilla, get a fleet running, and find commands by task." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../styles.css" />
+  <link rel="stylesheet" href="./docs.css" />
+</head>
+<body class="docs-page">
+  <header class="nav docs-nav">
+    <a class="brand" href="../"><span class="brand-name">flotilla</span></a>
+    <nav class="nav-links" aria-label="documentation">
+      <a href="./understand.html">Understand</a>
+      <a href="./quickstart.html">Quickstart</a>
+      <a href="./commands.html">Commands</a>
+      <a href="./architecture.html">How it is built</a>
+      <a class="nav-cta" href="https://github.com/jim80net/flotilla">GitHub ↗</a>
+    </nav>
+  </header>
+  <main class="doc-shell">
+    <header class="doc-hero">
+      <span class="kicker">public documentation</span>
+      <h1>Start with what flotilla does.</h1>
+      <p>These docs move in one direction: understand the coordination model, get a small fleet running, then look up commands by the task in front of you.</p>
+    </header>
+    <div class="doc-path" aria-label="recommended documentation order">
+      <a class="doc-card" href="./understand.html">
+        <span class="doc-sequence">01 · understand</span>
+        <h2>What changes</h2>
+        <p>Learn what flotilla coordinates, what it keeps, and what it does not replace.</p>
+        <strong>Understand flotilla →</strong>
+      </a>
+      <a class="doc-card" href="./quickstart.html">
+        <span class="doc-sequence">02 · get running</span>
+        <h2>First working fleet</h2>
+        <p>Check prerequisites, install the binary, define two agent sessions, and verify the roster.</p>
+        <strong>Run the quickstart →</strong>
+      </a>
+      <a class="doc-card" href="./commands.html">
+        <span class="doc-sequence">03 · use it</span>
+        <h2>Commands by task</h2>
+        <p>Find the supported command for sending, inspecting, recovering, or maintaining work.</p>
+        <strong>Find a command →</strong>
+      </a>
+    </div>
+    <section class="doc-section">
+      <h2>Need the internals?</h2>
+      <p>Product purpose and setup come first. When you need component responsibilities and boundaries, continue to the quieter architecture route.</p>
+      <p><a href="./architecture.html">See how flotilla is built →</a></p>
+    </section>
+  </main>
+</body>
+</html>

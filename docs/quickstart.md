@@ -123,7 +123,7 @@ cannot confirm a turn — the message is never silently dropped:
 |---|---|
 | `delivered to … — turn confirmed` | the turn started ✓ |
 | `is at a shell (crashed) — NOT delivered` | the pane is a bare shell (the agent exited) — flotilla refuses to type into a dead pane |
-| `is busy (mid-turn) — NOT delivered; retry when it is idle` | the agent is mid-turn; resend when it is idle |
+| `is busy (mid-turn) — NOT delivered after 3 retries — queued to durable outbox` | the agent is mid-turn; the full message is durable and will deliver when the agent is idle |
 
 > **See the crash-detection guard with zero setup:** point `send` at a plain
 > shell pane (no agent running) and it reports `is at a shell (crashed) — NOT
@@ -137,8 +137,9 @@ flotilla send --from me --file ./instructions.txt infra
 echo "deploy when green" | flotilla send --from me --file - infra
 ```
 
-Inter-agent mirroring is **default-off**, so by default a send just delivers to
-the pane (no Discord post). See §4 to enable it; `--no-mirror` also forces it off.
+Inter-agent mirroring is **default-off**, so by default a send delivers to the
+pane or queues durably when the target remains busy (no Discord post). See §4 to
+enable mirroring; `--no-mirror` also forces it off.
 
 ### (Re)start a dead desk: `flotilla resume`
 
