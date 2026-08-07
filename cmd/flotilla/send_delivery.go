@@ -18,8 +18,6 @@ import (
 
 const pullNudgeText = "[flotilla pull nudge] Durable messages are waiting. Run `flotilla pull` before your next action. The nudge carries no message body."
 
-var queuedSendNow = time.Now
-
 // bufferSendAndNudge is the pull-by-push send transaction. The only required
 // operation is the recipient-buffer append. Pane resolution and nudge delivery
 // happen afterwards and can never turn a durable send into a reported failure.
@@ -163,36 +161,17 @@ func enqueueOrFailSend(rosterPath, sender, recipient, message string, deliveryEr
 	if err != nil {
 		return fmt.Errorf("%v; durable outbox enqueue also failed: %w", deliveryErr, err)
 	}
-	queuedAge := queuedSendAge(rosterDir, sender, id)
 	// Desk-visible machine-readable ack first (#475 / #614) so monitors can grep QUEUED.
-	fmt.Println(dispatch.FormatQueuedAck(id, sender, recipient, deduped, queuedAge))
-	nonce := inbound.ParseOwnDispatchNonce(message)
-	inspect := "inspect the durable sender outbox"
-	if nonce != "" {
-		inspect = fmt.Sprintf("inspect with `flotilla dispatch-status %s`", nonce)
-	}
+	fmt.Println(dispatch.FormatQueuedAck(id, sender, recipient, deduped))
 	cancel := fmt.Sprintf("cancel with `FLOTILLA_SELF=%s flotilla cancel %s --legacy-outbox`", sender, id)
 	if deduped {
 		fmt.Fprintf(os.Stderr, "flotilla: %v — send remains queued as %s; no duplicate added; delivery unconfirmed\n", deliveryErr, id)
-		fmt.Printf("send remains queued as %s — queued %s ago; %s; %s\n", id, queuedAge, inspect, cancel)
+		fmt.Printf("send remains queued as %s — delivery unconfirmed; %s\n", id, cancel)
 		return nil
 	}
 	fmt.Fprintf(os.Stderr, "flotilla: %v — queued to durable outbox (id=%s); delivery unconfirmed\n", deliveryErr, id)
-	fmt.Printf("queued to %s outbox (id %s) — queued %s ago; %s; %s\n", sender, id, queuedAge, inspect, cancel)
+	fmt.Printf("queued to %s outbox (id %s) — delivery unconfirmed; %s\n", sender, id, cancel)
 	return nil
-}
-
-func queuedSendAge(rosterDir, sender, id string) string {
-	path, err := outbox.Path(rosterDir, sender)
-	if err != nil {
-		return "unknown"
-	}
-	for _, entry := range outbox.NewStore(path).Load() {
-		if entry.ID == id && !entry.EnqueuedAt.IsZero() {
-			return humanizeAge(queuedSendNow().Sub(entry.EnqueuedAt))
-		}
-	}
-	return "unknown"
 }
 
 // deliverOrQueueSend attempts confirmed delivery with inline retry; on sustained busy/transient
