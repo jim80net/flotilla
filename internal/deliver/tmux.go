@@ -389,6 +389,31 @@ func sendEnterArgs(target string) []string {
 	return []string{"send-keys", "-t", target, "--", "Enter"}
 }
 
+func sendMenuNavigationArgs(target, key string) []string {
+	return []string{"send-keys", "-t", target, "--", key}
+}
+
+// SendMenuNavigation sends exactly one vertical navigation key. It deliberately
+// admits only Up and Down so callers cannot turn this narrow menu primitive into
+// an arbitrary pane writer.
+func SendMenuNavigation(target, key string) error {
+	if key != "Up" && key != "Down" {
+		return fmt.Errorf("unsupported menu navigation key %q", key)
+	}
+	lock, err := acquirePaneLock(target)
+	if err != nil {
+		return err
+	}
+	defer lock.Release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	if err := exec.CommandContext(ctx, "tmux", sendMenuNavigationArgs(target, key)...).Run(); err != nil {
+		return fmt.Errorf("tmux send-keys %s: %w", key, err)
+	}
+	return nil
+}
+
 func sendCtrlCArgs(target string) []string {
 	return []string{"send-keys", "-t", target, "--", "C-c"}
 }

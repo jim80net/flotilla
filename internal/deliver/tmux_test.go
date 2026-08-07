@@ -1,6 +1,7 @@
 package deliver
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -323,6 +324,16 @@ func TestSendEnterArgsIsSingleSubmittingEnter(t *testing.T) {
 		}
 		if !guarded {
 			t.Errorf("sendEnterArgs(%q) = %v, want -- immediately before Enter (dash-leading-target guard)", c.target, got)
+		}
+	}
+}
+
+func TestSendMenuNavigationArgsAreSingleGuardedKeys(t *testing.T) {
+	for _, key := range []string{"Up", "Down"} {
+		got := sendMenuNavigationArgs("-dash:1.2", key)
+		want := []string{"send-keys", "-t", "-dash:1.2", "--", key}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("sendMenuNavigationArgs(%q) = %v, want %v", key, got, want)
 		}
 	}
 }
