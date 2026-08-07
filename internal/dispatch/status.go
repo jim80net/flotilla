@@ -17,6 +17,7 @@ const (
 	DispositionQueued      Disposition = "queued"      // in sender outbox, not yet pane-confirmed
 	DispositionDelivered   Disposition = "delivered"   // inbound ledger pending ack
 	DispositionConsumed    Disposition = "consumed"    // durable consumed registry
+	DispositionSuppressed  Disposition = "suppressed"  // terminal evidence stopped delivery; handling not asserted
 	DispositionUndelivered Disposition = "undelivered" // queued past age bound
 )
 
@@ -47,14 +48,20 @@ func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 		return st
 	}
 	if e, ok := NewRegistry(rosterDir).LookupNonce(nonce); ok {
+		disposition := DispositionConsumed
+		detail := fmt.Sprintf("consumed reason=%s at %s", e.Reason, e.ConsumedAt.UTC().Format(time.RFC3339))
+		if IsAutoSuppressedReason(e.Reason) {
+			disposition = DispositionSuppressed
+			detail = fmt.Sprintf("auto-suppressed at %s; recipient handling is not asserted", e.ConsumedAt.UTC().Format(time.RFC3339))
+		}
 		consumed := Status{
 			Nonce:       nonce,
-			Disposition: DispositionConsumed,
+			Disposition: disposition,
 			Sender:      e.Sender,
 			Recipient:   e.Recipient,
 			PayloadHash: e.PayloadHash,
 			Reason:      e.Reason,
-			Detail:      fmt.Sprintf("consumed reason=%s at %s", e.Reason, e.ConsumedAt.UTC().Format(time.RFC3339)),
+			Detail:      detail,
 		}
 		if !e.ConsumedAt.IsZero() {
 			consumed.Age = now.Sub(e.ConsumedAt).Round(time.Second)

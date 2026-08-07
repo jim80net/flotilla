@@ -102,7 +102,7 @@ func TestReconcileInboundAcksWithMergedClearsCompletedCargoBeforeAlert(t *testin
 		t.Fatalf("merged cargo still produced undelivered alert: %+v", reports)
 	}
 	entry, ok := NewRegistry(dir).LookupNonce(nonce)
-	if !ok || entry.Reason != ReasonMerged || entry.Recipient != "product-adj" {
+	if !ok || entry.Reason != ReasonAutoSuppressed || entry.Recipient != "product-adj" {
 		t.Fatalf("durable disposition = %+v, %v", entry, ok)
 	}
 }
@@ -175,7 +175,7 @@ func TestReconcileInboundAcksWithTerminalClearsMainSHACargo(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("cleared = %d, want 1", n)
 	}
-	if entry, ok := NewRegistry(dir).LookupNonce(nonce); !ok || entry.Reason != ReasonMerged {
+	if entry, ok := NewRegistry(dir).LookupNonce(nonce); !ok || entry.Reason != ReasonAutoSuppressed {
 		t.Fatalf("SHA disposition = %+v, %v", entry, ok)
 	}
 }

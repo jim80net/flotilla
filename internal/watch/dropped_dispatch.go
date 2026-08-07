@@ -82,7 +82,7 @@ func DroppedDispatchFinishHookWithMerged(
 		// MERGED-state pre-filter (#616) — does not require turn-final text.
 		for _, e := range st.Load() {
 			if pr, merged := dispatch.ShouldSuppressMerged(e.Message, isMerged); merged {
-				if _, cerr := reg.Consume(dispatch.ConsumeFromInbound(e.Nonce, e.Message, dispatch.ReasonMerged, e.Sender, e.Recipient)); cerr != nil {
+				if _, cerr := reg.Consume(dispatch.ConsumeFromInbound(e.Nonce, e.Message, dispatch.ReasonAutoSuppressed, e.Sender, e.Recipient)); cerr != nil {
 					log.Printf("flotilla watch: dropped-dispatch consume-merged failed nonce=%s: %v", e.Nonce, cerr)
 				} else {
 					log.Printf("flotilla watch: dropped-dispatch suppress %s nonce=%s reason=merged pr=%s", agent, e.Nonce, pr)
@@ -131,7 +131,7 @@ func DroppedDispatchFinishHookWithMerged(
 					continue
 				}
 				if pr, merged := dispatch.ShouldSuppressMerged(a.Entry.Message, isMerged); merged {
-					if _, cerr := reg.Consume(dispatch.ConsumeFromInbound(a.Entry.Nonce, a.Entry.Message, dispatch.ReasonMerged, a.Entry.Sender, a.Entry.Recipient)); cerr != nil {
+					if _, cerr := reg.Consume(dispatch.ConsumeFromInbound(a.Entry.Nonce, a.Entry.Message, dispatch.ReasonAutoSuppressed, a.Entry.Sender, a.Entry.Recipient)); cerr != nil {
 						log.Printf("flotilla watch: dropped-dispatch consume-merged failed nonce=%s: %v", a.Entry.Nonce, cerr)
 					} else {
 						log.Printf("flotilla watch: dropped-dispatch suppress reinject %s nonce=%s reason=merged pr=%s", agent, a.Entry.Nonce, pr)

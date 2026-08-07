@@ -17,17 +17,24 @@ import (
 
 // Consume reasons recorded on the durable registry.
 const (
-	ReasonTurnFinalAck = "turn-final-ack"
-	ReasonDurableAck   = "durable-ack"
-	ReasonQueuedAck    = "queued-ack"
-	ReasonMerged       = "merged"
-	ReasonManual       = "manual"
-	ReasonSuppressed   = "suppressed"
+	ReasonTurnFinalAck   = "turn-final-ack"
+	ReasonDurableAck     = "durable-ack"
+	ReasonQueuedAck      = "queued-ack"
+	ReasonAutoSuppressed = "auto-suppressed-terminal"
+	ReasonMerged         = "merged" // historical auto-suppression rows
+	ReasonManual         = "manual"
+	ReasonSuppressed     = "suppressed"
 	// ReasonCoordinatorRecipient: settled at send time because the recipient is a
 	// coordinator seat, whose finish is deliberately not ack-gated (#472). Asserts
 	// confirmed delivery only — NOT that the recipient addressed the work.
 	ReasonCoordinatorRecipient = "coordinator-recipient"
 )
+
+// IsAutoSuppressedReason identifies registry rows that stop delivery without
+// asserting that the recipient handled the message.
+func IsAutoSuppressedReason(reason string) bool {
+	return reason == ReasonAutoSuppressed || reason == ReasonMerged
+}
 
 // maxConsumedEntries caps fleet-wide registry growth.
 const maxConsumedEntries = 2048

@@ -199,7 +199,7 @@ func ReconcileInboundAcksWithTerminal(rosterDir string, readTurnFinal TurnFinalR
 					commitChecker = func(sha string) bool { return isCommitOnMain(recipient, sha) }
 				}
 				if evidence, terminal := ShouldSuppressTerminal(e.Message, prChecker, commitChecker); terminal {
-					if _, cerr := reg.Consume(ConsumeFromInbound(e.Nonce, e.Message, ReasonMerged, e.Sender, e.Recipient)); cerr != nil {
+					if _, cerr := reg.Consume(ConsumeFromInbound(e.Nonce, e.Message, ReasonAutoSuppressed, e.Sender, e.Recipient)); cerr != nil {
 						log.Printf("flotilla dispatch: reconcile consume-merged failed nonce=%s: %v", e.Nonce, cerr)
 						continue
 					}

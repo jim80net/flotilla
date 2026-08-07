@@ -62,6 +62,10 @@ flotilla dispatch-ack [--roster <path>] <nonce>
 ```
 
 `dispatch-status` resolves disposition across consumed → inbound → outbox.
+Terminal reconciliation is reported separately as `disposition=suppressed`
+with `reason=auto-suppressed-terminal`; it means delivery was stopped by
+verified terminal evidence and explicitly does **not** assert recipient handling.
+Historical `reason=merged` rows render with the same suppressed disposition.
 After handling a dispatch, its recipient runs `dispatch-ack`; the command writes
 the consumed registry first and then clears the inbound row, so a crash between
 those steps is healed by the watch sweep. `$FLOTILLA_SELF` identifies the recipient,

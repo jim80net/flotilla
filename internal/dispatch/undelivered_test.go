@@ -3,6 +3,7 @@ package dispatch
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -104,11 +105,35 @@ func TestLookupNonce_DispositionOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	st = LookupNonce(dir, nonce, time.Now().UTC())
-	if st.Disposition != DispositionConsumed {
-		t.Fatalf("disposition = %s, want consumed", st.Disposition)
+	if st.Disposition != DispositionSuppressed {
+		t.Fatalf("disposition = %s, want suppressed", st.Disposition)
 	}
 	if st.Reason != ReasonMerged {
 		t.Fatalf("reason = %q", st.Reason)
+	}
+	if !strings.Contains(st.Detail, "recipient handling is not asserted") {
+		t.Fatalf("suppression detail = %q", st.Detail)
+	}
+}
+
+func TestLookupNonce_DistinguishesSuppressionFromHandledConsumption(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	for _, tc := range []struct {
+		nonce, reason string
+		want          Disposition
+	}{
+		{"flotilla-dispatch-suppressed-new", ReasonAutoSuppressed, DispositionSuppressed},
+		{"flotilla-dispatch-suppressed-legacy", ReasonMerged, DispositionSuppressed},
+		{"flotilla-dispatch-handled", ReasonDurableAck, DispositionConsumed},
+	} {
+		if _, err := Consume(dir, ConsumedEntry{Nonce: tc.nonce, PayloadHash: tc.nonce, Reason: tc.reason, ConsumedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		got := LookupNonce(dir, tc.nonce, now)
+		if got.Disposition != tc.want {
+			t.Errorf("%s disposition = %s, want %s", tc.reason, got.Disposition, tc.want)
+		}
 	}
 }
 
