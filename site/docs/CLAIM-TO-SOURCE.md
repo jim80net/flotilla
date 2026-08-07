@@ -1,0 +1,38 @@
+# Public landing and docs claim-to-source record
+
+Artifact binding: the immutable Git commit containing this record. The review
+handoff names that commit and its `site` tree object. Every factual behavior or
+component-status statement in the public HTML is covered below. Subjective
+problem framing and the explicitly illustrative clock times are not presented
+as measured capability evidence.
+
+| Public claim or claim family | Implementing source at the bound artifact | Discriminating verification |
+|---|---|---|
+| Flotilla coordinates existing coding-agent sessions and does not replace their runtimes | `README.md`; `internal/roster/roster.go`; driver registry in `internal/surface/surface.go` | `go test ./internal/roster ./internal/surface`; cold run uses an external runtime process |
+| One coordinator routes work to named agent sessions and gathers replies | coordinator fields and hierarchy in `internal/roster/roster.go`; routing in `cmd/flotilla/main.go`; result synthesis in `cmd/flotilla/synthesis.go` | `go test ./internal/roster ./cmd/flotilla` |
+| A flotilla groups sessions by responsibility rather than presenting one flat list | hierarchy parsing in `internal/roster`; organization read model in `internal/org` | `go test ./internal/roster ./internal/org` |
+| Direct instructions resolve a stable pane identity and are confirmed rather than inferred from a tmux exit code | `cmd/flotilla/register.go`; `cmd/flotilla/send_delivery.go`; `internal/deliver`; `internal/surface/confirm.go` | cold run ends `turn confirmed`; `go test ./internal/deliver ./internal/surface ./cmd/flotilla` |
+| Busy instructions queue durably; missing, crashed, or uncertain targets do not report false delivery | `cmd/flotilla/send_delivery.go`; `internal/outbox`; error mapping in `cmd/flotilla/main.go` | `cmd/flotilla/send_delivery_test.go`; `internal/watch/outbox_sweep_test.go` |
+| Delivery attempts and acknowledgments leave durable, inspectable records | `internal/inbound`; `internal/dispatch`; `cmd/flotilla/dispatch_ack.go`; `internal/dispatch/status.go` | `internal/inbound/*_test.go`; `internal/dispatch/*_test.go`; `cmd/flotilla/dispatch_ack_test.go`; cold `dispatch-status` reports delivered inbound state |
+| Handoffs preserve context and lifecycle transitions refuse when their safety gates cannot be established | `cmd/flotilla/recycle.go`; `cmd/flotilla/switch.go`; recycle bridges in `internal/surface` | `cmd/flotilla/recycle_test.go`; `cmd/flotilla/switch_test.go`; `internal/surface/recycle_test.go` include negative gates |
+| Stable session identity survives terminal-title drift | `cmd/flotilla/register.go`; marker resolution in `internal/deliver` | register tests under `cmd/flotilla` and `internal/deliver`; cold run verifies `@flotilla_agent=infra` while the process name is `claude` |
+| Public examples remain separate from private deployment identifiers | `docs/private-public-boundary.md`; `scripts/check-private-boundary.sh` | boundary script reports the tracked tree clean; raster strings and rendered text are inspected separately |
+| The dashboard exposes Conversations, Goals, Issues, Parade, and combined R&D | `internal/dash/assets/index.html`; `internal/dash/assets/app.js` | dashboard browser/server tests; bound real-product capture rendered at phone and desktop widths |
+| Six registered drivers exist: Claude Code, Codex, Grok, OpenCode, Pi, and aider | registrations under `internal/surface/`; startup validation in `cmd/flotilla/watch.go` | `go test ./internal/surface ./cmd/flotilla` |
+| Automatic provider-rate-limit switching is limited to eligible Claude Code sessions with configured fallback chains | `internal/watch/detector.go`; `cmd/flotilla/watch_autoswitch.go`; `cmd/flotilla/switch.go` | positive and non-Claude negative fixtures in `internal/watch/detector_test.go` and `cmd/flotilla/watch_test.go` |
+| The public quickstart prerequisites and install command are sufficient to build the CLI | `go.mod`; `cmd/flotilla/main.go`; repository build layout | clean `GOBIN` install and `flotilla version` in `COLD-TEST.md` |
+| The published two-session JSON loads, and status reports `unknown` before a detector snapshot exists | `internal/roster`; `cmd/flotilla/status.go` | exact public JSON and cold status output in `COLD-TEST.md`; `cmd/flotilla/status_test.go` |
+| The published tmux, register, and first-send sequence reaches a supported surface | `cmd/flotilla/register.go`; `cmd/flotilla/main.go`; `internal/surface/claude.go` | committed network-free surface fixture plus confirmed cold delivery in `COLD-TEST.md` |
+| `status`, `dash`, and `quality show` perform the inspection jobs described on the command page | `cmd/flotilla/status.go`; `cmd/flotilla/dash.go`; `cmd/flotilla/quality.go`; `internal/harnessquality` | `cmd/flotilla/status_test.go`; dash browser/server tests; `cmd/flotilla/quality_test.go` |
+| `send`, `dispatch-status`, and `dispatch-ack` deliver or queue, inspect a nonce, and durably acknowledge it | `cmd/flotilla/main.go`; `internal/dispatch/status.go`; `cmd/flotilla/dispatch_ack.go` | cold send/status control; `cmd/flotilla/send_delivery_test.go`; `cmd/flotilla/dispatch_ack_test.go` |
+| `register`, `resume`, `recycle`, and `switch` implement the start-and-recover descriptions on the command page | `cmd/flotilla/register.go`; `cmd/flotilla/resume.go`; `cmd/flotilla/recycle.go`; `cmd/flotilla/switch.go` | corresponding `*_test.go` files include success and fail-closed cases |
+| `workspace init`, `doctrine install`, and `goals validate` implement the provisioning descriptions on the command page | `cmd/flotilla/workspace.go`; `cmd/flotilla/doctrine.go`; `cmd/flotilla/goals.go`; packages under `internal/workspace`, `internal/doctrine`, and `internal/goals` | `cmd/flotilla/workspace_test.go`; `cmd/flotilla/doctrine_test.go`; `cmd/flotilla/goals_test.go` |
+| Every command family printed on the public task reference exists at this artifact | command dispatch and help in `cmd/flotilla/main.go` | cold-built `flotilla help` contains all twelve documented families |
+| Flotilla core is bundled and owns identities, routing, delivery records, lifecycle commands, observed state, goals, and the local dashboard | `cmd/flotilla`; `internal/roster`; `internal/deliver`; `internal/dispatch`; `internal/watch`; `internal/goals`; `internal/dash` | `go test ./...`; each responsibility has direct package tests |
+| tmux is external and required for pane delivery | subprocess boundary in `internal/deliver`; prerequisite in `docs/quickstart.md`; no embedded tmux dependency in `go.mod` | cold run starts and tags a real tmux pane; delivery tests inject the tmux boundary |
+| Coding-agent runtimes are external and user supplied | surface drivers under `internal/surface` operate terminal processes; runtimes are absent from `go.mod` | cold run supplies its own controlled executable; driver tests exercise captured surfaces |
+| Discord is external and optional for local status, send, and dashboard operation | mirror branch in `cmd/flotilla/main.go`; local `status`, `dash`, and delivery paths | cold install/status/send uses no Discord credential; command tests run without Discord |
+| Memex is external and optional; a switch may write a pointer but does not require retrieved memory to deliver or preserve a handoff | `cmd/flotilla/switch.go` writes `MemexInjectionHint`; `docs/harness-subscription-switching.md` defines pointer-only consumption | `cmd/flotilla/switch_test.go`; no Memex module in `go.mod`; cold delivery uses none |
+
+Dashboard fixture data demonstrates layout and product surfaces only. It is not
+used as evidence for runtime state, delivery, switching, or lifecycle claims.

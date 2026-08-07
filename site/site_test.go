@@ -2,7 +2,7 @@ package site
 
 import (
 	"os"
-	"regexp"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -16,26 +16,96 @@ func readSiteFile(t *testing.T, name string) string {
 	return string(b)
 }
 
-func TestLandingGeneratedAtmosphereContract(t *testing.T) {
+func TestLandingHeroShowsProductProof(t *testing.T) {
 	page := readSiteFile(t, "index.html")
-	for _, want := range []string{
-		`class="generated-asset generated-asset--hero"`,
-		`class="generated-asset generated-asset--tools"`,
-		`hero-atmosphere-800.webp 800w`,
-		`hero-atmosphere-1600.webp 1600w`,
-		`tools-atmosphere-800.webp 800w`,
-		`tools-atmosphere-1600.webp 1600w`,
-		`sizes="(max-width: 720px) calc(100vw - 48px), 46vw"`,
+	for _, asset := range []string{
+		"assets/dashboard-product-proof-mobile-780.webp",
+		"assets/dashboard-product-proof-720.webp",
+		"assets/dashboard-product-proof-1440.webp",
 	} {
-		if !strings.Contains(page, want) {
-			t.Errorf("landing page missing generated atmosphere marker %q", want)
+		if _, err := os.Stat(asset); err != nil {
+			t.Errorf("product-proof asset %s is not readable: %v", asset, err)
 		}
 	}
-	if got := strings.Count(page, `class="generated-asset__disclosure"`); got != 2 {
-		t.Errorf("generated disclosure count = %d, want 2", got)
+	for _, want := range []string{
+		`class="product-proof product-proof--hero"`,
+		`dashboard-product-proof-720.webp 720w`,
+		`dashboard-product-proof-1440.webp 1440w`,
+		`dashboard-product-proof-mobile-780.webp 780w`,
+		`alt="Flotilla dashboard showing a fleet map, active coding-agent sessions, coordination history, and a scoped work queue"`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("landing page missing product-proof marker %q", want)
+		}
+	}
+	for _, stale := range []string{"AI-GENERATED ATMOSPHERE", "atmosphere", "generated-asset"} {
+		if strings.Contains(page, stale) {
+			t.Errorf("landing page retains rejected decorative-media marker %q", stale)
+		}
 	}
 	if strings.Contains(page, `.png`) {
 		t.Error("landing page references a PNG source master as a public payload")
+	}
+}
+
+func TestPublicLandingUsesColdReaderLanguage(t *testing.T) {
+	pages := []string{
+		"index.html",
+		"docs/index.html",
+		"docs/understand.html",
+		"docs/quickstart.html",
+		"docs/commands.html",
+		"docs/architecture.html",
+	}
+	for _, path := range pages {
+		page := readSiteFile(t, path)
+		for _, stale := range []string{
+			"write a roster",
+			"next desk",
+			"stable seat identities",
+			"goals-as-data",
+			"operator interrupt",
+			"worktree lifecycle",
+			"installable doctrine",
+		} {
+			if strings.Contains(strings.ToLower(page), stale) {
+				t.Errorf("%s retains unexplained fleet vocabulary %q", path, stale)
+			}
+		}
+	}
+}
+
+func TestPublicEvidenceClosesColdRunAndClaimMap(t *testing.T) {
+	cold := readSiteFile(t, "docs/COLD-TEST.md")
+	for _, want := range []string{
+		`export PATH="$TEST_ROOT/bin:$PATH"`,
+		"site/docs/testdata/coldagent",
+		"concrete absolute paths",
+		"readlink -f /proc/841216/exe",
+		"/tmp/flotilla-docs-cold-v4.MqVkWN/bin/claude",
+		"Claude Code cold-test fixture",
+		"accepted: Report the repository status.",
+		"turn confirmed",
+		"disposition=delivered",
+	} {
+		if !strings.Contains(cold, want) {
+			t.Errorf("cold-test record missing reproducibility marker %q", want)
+		}
+	}
+	if strings.Contains(cold, "ran the same two commands as the page") {
+		t.Error("cold-test record still conflates the isolated control with the public bare-name command")
+	}
+
+	claims := readSiteFile(t, "docs/CLAIM-TO-SOURCE.md")
+	for _, want := range []string{
+		"Delivery attempts and acknowledgments",
+		"Automatic provider-rate-limit switching",
+		"workspace init",
+		"Memex is external and optional",
+	} {
+		if !strings.Contains(claims, want) {
+			t.Errorf("claim-to-source record missing claim family %q", want)
+		}
 	}
 }
 
@@ -64,7 +134,7 @@ func TestLandingShippedClaimsAreCurrent(t *testing.T) {
 	page := readSiteFile(t, "index.html")
 	for _, want := range []string{
 		"Claude Code, Codex, Grok, OpenCode, Pi, and aider",
-		"When auto-switch is enabled, eligible non-approval-sensitive desks currently running Claude Code",
+		"When auto-switch is enabled, eligible non-approval-sensitive sessions currently running Claude Code",
 		"Five dashboard destinations:",
 		"Conversations, Goals, Issues, Parade, and combined R&amp;D",
 	} {
@@ -79,40 +149,72 @@ func TestLandingShippedClaimsAreCurrent(t *testing.T) {
 	}
 }
 
-func TestLandingToolsDesktopUsesTwoColumnRow(t *testing.T) {
-	css := readSiteFile(t, "styles.css")
-	media := regexp.MustCompile(`@media\s*\(\s*min-width\s*:\s*721px\s*\)\s*\{`).FindStringIndex(css)
-	if media == nil {
-		t.Fatal("landing CSS missing 721px desktop media query")
+func TestLandingDocsHierarchyAndMemexBoundary(t *testing.T) {
+	page := readSiteFile(t, "index.html")
+	for _, path := range []string{"docs/index.html", "docs/understand.html", "docs/quickstart.html", "docs/commands.html", "docs/architecture.html"} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("public docs page %s is not readable: %v", path, err)
+		}
 	}
-	desktop := css[media[1]:]
-	if next := strings.Index(desktop, "@media"); next >= 0 {
-		desktop = desktop[:next]
+	for _, want := range []string{
+		"Two parts do the whole job.",
+		`class="cards two"`,
+		`href="./docs/understand.html"`,
+		`href="./docs/quickstart.html"`,
+		`href="./docs/commands.html"`,
+		`href="./docs/architecture.html"`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("landing page missing docs hierarchy marker %q", want)
+		}
 	}
-	contracts := map[string][]string{
-		`#yours\s+\.band-head`: {
-			`grid-column\s*:\s*1\s*;`,
-			`margin-bottom\s*:\s*0\s*;`,
-		},
-		`#yours\s+\.generated-asset--tools`: {
-			`grid-column\s*:\s*2\s*;`,
-			`width\s*:\s*100%\s*;`,
-			`margin\s*:\s*0\s+0\s+2\.6rem\s*;`,
-		},
-		`#yours\s+\.diff-strip`: {
-			`grid-column\s*:\s*1\s*/\s*-1\s*;`,
-		},
+	for _, stale := range []string{"Three ideas do the whole job.", "memex-core", ">memex<"} {
+		if strings.Contains(strings.ToLower(page), strings.ToLower(stale)) {
+			t.Errorf("landing page retains rejected component hierarchy %q", stale)
+		}
 	}
-	for selector, properties := range contracts {
-		match := regexp.MustCompile(`(?s)` + selector + `\s*\{([^}]*)\}`).FindStringSubmatch(desktop)
-		if match == nil {
-			t.Errorf("landing CSS missing tools-row selector %q", selector)
+	heroAt := strings.Index(page, `class="product-proof product-proof--hero"`)
+	docsAt := strings.Index(page, `id="docs"`)
+	problemAt := strings.Index(page, `id="feel"`)
+	if heroAt < 0 || docsAt < heroAt || problemAt < docsAt {
+		t.Errorf("landing information order = hero:%d docs:%d problem:%d, want hero product proof then docs path then narrative", heroAt, docsAt, problemAt)
+	}
+	pages, err := filepath.Glob("docs/*.html")
+	if err != nil {
+		t.Fatalf("glob public docs: %v", err)
+	}
+	for _, path := range pages {
+		if filepath.Base(path) == "architecture.html" {
 			continue
 		}
-		for _, property := range properties {
-			if !regexp.MustCompile(property).MatchString(match[1]) {
-				t.Errorf("landing CSS selector %q missing property /%s/", selector, property)
-			}
+		if strings.Contains(strings.ToLower(readSiteFile(t, path)), "memex") {
+			t.Errorf("supporting component promoted outside architecture page: %s", path)
+		}
+	}
+	architecture := readSiteFile(t, "docs/architecture.html")
+	for _, want := range []string{"Memex", "External and optional", "not required for Flotilla to deliver work"} {
+		if !strings.Contains(architecture, want) {
+			t.Errorf("architecture page missing component boundary %q", want)
+		}
+	}
+}
+
+func TestLandingRejectsDecorativeAtmosphereAssets(t *testing.T) {
+	page := readSiteFile(t, "index.html")
+	css := readSiteFile(t, "styles.css")
+	for _, stale := range []string{"AI-GENERATED ATMOSPHERE", "atmosphere", "generated-asset"} {
+		if strings.Contains(page, stale) || strings.Contains(css, stale) {
+			t.Errorf("landing retains rejected decorative-media concept %q", stale)
+		}
+	}
+	for _, asset := range []string{
+		"assets/hero-atmosphere-800.webp",
+		"assets/hero-atmosphere-1600.webp",
+		"assets/tools-atmosphere-800.webp",
+		"assets/tools-atmosphere-1600.webp",
+	} {
+		if _, err := os.Stat(asset); !os.IsNotExist(err) {
+			t.Errorf("rejected decorative asset %s still exists", asset)
 		}
 	}
 }

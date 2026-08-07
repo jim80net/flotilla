@@ -5,7 +5,7 @@
    CONDENSED display (Barlow Condensed — the same face the flotilla dash uses)
    over a monospace body (IBM Plex Mono), so product + marketing share ONE look:
    the page that sells flotilla matches the warm-light instrument you install.
-   Faint warm grid + grain atmosphere. Mobile-first. No framework; CSS-only
+   Faint warm grid + grain texture. Mobile-first. No framework; CSS-only
    motion with minimal copy-button JS. Tokens = the dash design book
    (docs/design/README.md); dark-theme names (--abyss*, --hull) are kept as
    aliases so every existing var() reference resolves, and every dark-baked hue
@@ -79,7 +79,7 @@ body {
   overflow-x: hidden;
 }
 
-/* ── atmosphere ─────────────────────────────────────────────────────────── */
+/* ── background texture ────────────────────────────────────────────────── */
 .bg-grid, .bg-grain {
   position: fixed; inset: 0; pointer-events: none; z-index: 0;
 }
@@ -107,7 +107,7 @@ body::before {
   filter: blur(20px);
 }
 
-/* keep content above atmosphere */
+/* keep content above the background texture */
 .nav, main, .footer { position: relative; z-index: 1; }
 
 /* ── shared ─────────────────────────────────────────────────────────────── */
@@ -199,7 +199,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
    non-wrapping code line (the install command, the start snippets) refuses to shrink
    and drags the whole column past the viewport (horizontal overflow on mobile). Let
    these columns shrink to the track so long lines scroll WITHIN their box instead. */
-.hero-copy, .generated-asset { min-width: 0; }
+.hero-copy, .product-proof { min-width: 0; }
 
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.35} }
 
@@ -234,45 +234,24 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 
 .hero-cta { display: flex; gap: .8rem; margin-top: 1.5rem; flex-wrap: wrap; }
 
-/* Generated anchors are atmosphere only. Disclosure remains deterministic HTML. */
-.generated-asset {
+/* Above the fold shows the real dashboard. */
+.product-proof {
   position: relative; margin: 0; aspect-ratio: 4 / 3;
   border: 1px solid #9e9276; border-radius: 9px; overflow: hidden;
   background: var(--raised);
   box-shadow: 0 14px 28px rgba(74, 64, 42, .12);
 }
-.generated-asset picture,
-.generated-asset img { display: block; width: 100%; height: 100%; }
-.generated-asset img { object-fit: cover; object-position: center; }
-.generated-asset__disclosure {
-  position: absolute; left: 12px; bottom: 12px;
-  padding: 6px 8px; border: 1px solid #cdbf9e; border-radius: 4px;
-  background: rgba(255, 253, 249, .9); color: var(--ink);
-  font: 700 10px/1.3 var(--mono); letter-spacing: .04em;
-}
-.generated-asset--tools { width: 100%; margin: 0 0 1.8rem; }
-@media (min-width: 721px) {
-  #yours {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    column-gap: 2.5rem;
-    align-items: start;
-  }
-  #yours .band-head { grid-column: 1; margin-bottom: 0; }
-  #yours .generated-asset--tools { grid-column: 2; width: 100%; margin: 0 0 2.6rem; }
-  #yours .diff-strip { grid-column: 1 / -1; }
-}
-@media (max-width: 600px) {
-  .generated-asset__disclosure { font-size: 9px; }
-}
-
+.product-proof { aspect-ratio: 8 / 5; }
+.product-proof picture,
+.product-proof img { display: block; width: 100%; height: 100%; }
+.product-proof img { object-fit: contain; object-position: center; }
 /* staggered hero reveal */
-.hero-copy > *, .generated-asset--hero { animation: rise .7s cubic-bezier(.2,.7,.2,1) both; }
+.hero-copy > *, .product-proof--hero { animation: rise .7s cubic-bezier(.2,.7,.2,1) both; }
 .hero-headline { animation-delay: .08s; }
 .hero-sub { animation-delay: .16s; }
 .install { animation-delay: .24s; }
 .hero-cta { animation-delay: .32s; }
-.generated-asset--hero { animation-delay: .3s; }
+.product-proof--hero { animation-delay: .3s; }
 @keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
 
 /* harness strip */
@@ -300,7 +279,9 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 
 /* what — cards */
 .cards.three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.2rem; }
+.cards.two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.2rem; max-width: 54rem; }
 @media (max-width: 860px) { .cards.three { grid-template-columns: 1fr; } }
+@media (max-width: 680px) { .cards.two { grid-template-columns: 1fr; } }
 .card {
   position: relative; padding: 1.6rem 1.5rem; border: 1px solid var(--line);
   border-radius: var(--r); background: linear-gradient(160deg, var(--hull), var(--abyss-2));
@@ -313,7 +294,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 .card p em { color: var(--ink-3); font-style: italic; }
 @media (max-width: 600px) {
   #feel .cards.three,
-  #gives .cards.three { gap: .7rem; }
+  #gives .cards.two { gap: .7rem; }
   #feel .card,
   #gives .card {
     display: grid; grid-template-columns: 1.8rem minmax(0, 1fr);
@@ -325,6 +306,31 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
   #gives .card h3 { margin-bottom: .3rem; }
   #feel .card p,
   #gives .card p { font-size: .82rem; line-height: 1.45; }
+}
+
+/* Public docs path: product model, runnable start, then task reference. */
+.docs-path { padding-top: 3.2rem; padding-bottom: 3.2rem; }
+.docs-path .band-head { margin-bottom: 1.5rem; }
+.docs-path-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+.docs-path-card {
+  display: flex; flex-direction: column; min-width: 0; padding: 1.2rem;
+  border: 1px solid var(--line); border-radius: var(--r); background: var(--abyss-2);
+  color: var(--ink); text-decoration: none;
+}
+.docs-path-card:hover { border-color: var(--cyan-dim); transform: translateY(-2px); }
+.docs-path-card span { font: 600 .68rem/1.3 var(--mono); color: var(--cyan-dim); text-transform: uppercase; letter-spacing: .08em; }
+.docs-path-card h3 { margin: .65rem 0 .45rem; font-size: 1.12rem; }
+.docs-path-card p { margin: 0 0 1rem; font-size: .84rem; line-height: 1.5; }
+.docs-path-card strong { margin-top: auto; color: var(--cyan); font: 600 .78rem/1.4 var(--mono); }
+.architecture-route { margin: 1rem 0 0; color: var(--ink-3); font-size: .82rem; }
+.architecture-route a { color: var(--ink-2); }
+@media (max-width: 760px) {
+  .band.docs-path { padding-top: .4rem; padding-bottom: .4rem; }
+  .docs-path .band-head { margin-bottom: .8rem; }
+  .docs-path-grid { grid-template-columns: 1fr; gap: .45rem; }
+  .docs-path-card { padding: .6rem .9rem; }
+  .docs-path-card p { margin-bottom: .4rem; }
+  .architecture-route { margin-top: .35rem; }
 }
 
 /* positioning — altitude + pull-quote */
@@ -414,7 +420,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 @keyframes flow { to { stroke-dashoffset: -120; } }
 @media (max-width: 920px) { .diagram { position: static; } }
 @media (prefers-reduced-motion: reduce) {
-  .spokes path, .bus-link, .hero-copy > *, .generated-asset--hero { animation: none !important; }
+  .spokes path, .bus-link, .hero-copy > *, .product-proof--hero { animation: none !important; }
 }
 
 .how-steps { list-style: none; counter-reset: step; margin: 0; padding: 0; display: grid; gap: .8rem; }
