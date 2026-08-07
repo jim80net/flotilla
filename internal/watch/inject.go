@@ -24,8 +24,8 @@ import (
 const busyDeferDelay = 5 * time.Second
 
 // busyEscalateAt is the deferral count at which a still-busy relay raises ONE loud operator
-// alert ("your message is queued behind a long XO turn") — ~busyEscalateAt×busyDeferDelay of
-// sustained busy. Once per job, so a normal turn never cries wolf.
+// alert. It is only the trigger: operator-facing age always comes from enqueuedAt, because
+// deferrals are poll observations rather than an elapsed-time measurement.
 const busyEscalateAt = 6
 
 // relayStaleAlertInterval is how long a still-busy operator relay waits between LOUD
@@ -509,7 +509,7 @@ func (in *Injector) maybeStaleEscalateOutbox(j *Job, entry *outbox.Entry, now ti
 // relayStaleAlertInterval while the message remains queued.
 func (in *Injector) maybeStaleEscalateRelay(j *Job, now time.Time) {
 	if j.lastStaleAlert.IsZero() && j.deferrals >= busyEscalateAt {
-		in.raise("operator message to %q is QUEUED — waiting ~%s; delivery remains unconfirmed", j.Agent, time.Duration(j.deferrals)*busyDeferDelay)
+		in.raise("operator message to %q is QUEUED — waiting ~%s; delivery remains unconfirmed", j.Agent, now.Sub(j.enqueuedAt).Round(time.Second))
 		j.lastStaleAlert = now
 		return
 	}

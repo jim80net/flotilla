@@ -70,6 +70,26 @@ func TestInjectorBusyRelayEscalatesOnceAtThreshold(t *testing.T) {
 	}
 }
 
+func TestInjectorBusyRelayAlertUsesElapsedAgeNotDeferralCount(t *testing.T) {
+	base := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	r := newRig(surface.ErrBusy)
+	r.in.now = func() time.Time { return base.Add(7 * time.Minute) }
+	r.in.deliver(Job{
+		Agent: "xo", Kind: KindRelay, deferrals: busyEscalateAt - 1,
+		enqueuedAt: base,
+	})
+	if len(r.alerts) != 1 {
+		t.Fatalf("alerts = %v, want one threshold escalation", r.alerts)
+	}
+	if !strings.Contains(r.alerts[0], "waiting ~7m0s") {
+		t.Fatalf("alert = %q, want age from enqueuedAt", r.alerts[0])
+	}
+	counterAge := time.Duration(busyEscalateAt) * busyDeferDelay
+	if strings.Contains(r.alerts[0], counterAge.String()) {
+		t.Fatalf("alert = %q, must not report deferrals × poll delay (%s)", r.alerts[0], counterAge)
+	}
+}
+
 func TestInjectorBusyRelayNeverDropsAfterLongDefer(t *testing.T) {
 	// Operator relays stay queued however long the agent stays busy (#286) — no UNDELIVERABLE drop.
 	r := newRig(surface.ErrBusy)
