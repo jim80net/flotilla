@@ -5,7 +5,7 @@
    CONDENSED display (Barlow Condensed — the same face the flotilla dash uses)
    over a monospace body (IBM Plex Mono), so product + marketing share ONE look:
    the page that sells flotilla matches the warm-light instrument you install.
-   Faint warm grid + grain atmosphere. Mobile-first. No framework; CSS-only
+   Faint warm grid + grain texture. Mobile-first. No framework; CSS-only
    motion with minimal copy-button JS. Tokens = the dash design book
    (docs/design/README.md); dark-theme names (--abyss*, --hull) are kept as
    aliases so every existing var() reference resolves, and every dark-baked hue
@@ -79,7 +79,7 @@ body {
   overflow-x: hidden;
 }
 
-/* ── atmosphere ─────────────────────────────────────────────────────────── */
+/* ── background texture ────────────────────────────────────────────────── */
 .bg-grid, .bg-grain {
   position: fixed; inset: 0; pointer-events: none; z-index: 0;
 }
@@ -107,7 +107,7 @@ body::before {
   filter: blur(20px);
 }
 
-/* keep content above atmosphere */
+/* keep content above the background texture */
 .nav, main, .footer { position: relative; z-index: 1; }
 
 /* ── shared ─────────────────────────────────────────────────────────────── */
@@ -199,7 +199,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
    non-wrapping code line (the install command, the start snippets) refuses to shrink
    and drags the whole column past the viewport (horizontal overflow on mobile). Let
    these columns shrink to the track so long lines scroll WITHIN their box instead. */
-.hero-copy, .product-proof, .generated-asset { min-width: 0; }
+.hero-copy, .product-proof { min-width: 0; }
 
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.35} }
 
@@ -234,9 +234,8 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 
 .hero-cta { display: flex; gap: .8rem; margin-top: 1.5rem; flex-wrap: wrap; }
 
-/* Above the fold shows the real dashboard; the later tools image remains decorative. */
-.product-proof,
-.generated-asset {
+/* Above the fold shows the real dashboard. */
+.product-proof {
   position: relative; margin: 0; aspect-ratio: 4 / 3;
   border: 1px solid #9e9276; border-radius: 9px; overflow: hidden;
   background: var(--raised);
@@ -244,23 +243,8 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 }
 .product-proof { aspect-ratio: 8 / 5; }
 .product-proof picture,
-.product-proof img,
-.generated-asset picture,
-.generated-asset img { display: block; width: 100%; height: 100%; }
+.product-proof img { display: block; width: 100%; height: 100%; }
 .product-proof img { object-fit: contain; object-position: center; }
-.generated-asset img { object-fit: cover; object-position: center; }
-.generated-asset--tools { width: 100%; margin: 0 0 1.8rem; }
-@media (min-width: 721px) {
-  #yours {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    column-gap: 2.5rem;
-    align-items: start;
-  }
-  #yours .band-head { grid-column: 1; margin-bottom: 0; }
-  #yours .generated-asset--tools { grid-column: 2; width: 100%; margin: 0 0 2.6rem; }
-  #yours .diff-strip { grid-column: 1 / -1; }
-}
 /* staggered hero reveal */
 .hero-copy > *, .product-proof--hero { animation: rise .7s cubic-bezier(.2,.7,.2,1) both; }
 .hero-headline { animation-delay: .08s; }

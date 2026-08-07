@@ -3,7 +3,6 @@ package site
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -30,22 +29,18 @@ func TestLandingHeroShowsProductProof(t *testing.T) {
 	}
 	for _, want := range []string{
 		`class="product-proof product-proof--hero"`,
-		`class="generated-asset generated-asset--tools"`,
 		`dashboard-product-proof-720.webp 720w`,
 		`dashboard-product-proof-1440.webp 1440w`,
 		`dashboard-product-proof-mobile-780.webp 780w`,
 		`alt="Flotilla dashboard showing a fleet map, active coding desks, coordination history, and a scoped work queue"`,
-		`tools-atmosphere-800.webp 800w`,
-		`tools-atmosphere-1600.webp 1600w`,
-		`sizes="(max-width: 720px) calc(100vw - 48px), 46vw"`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("landing page missing product-proof marker %q", want)
 		}
 	}
-	for _, stale := range []string{"AI-GENERATED ATMOSPHERE", "hero-atmosphere-800.webp", "hero-atmosphere-1600.webp", `generated-asset__disclosure`} {
+	for _, stale := range []string{"AI-GENERATED ATMOSPHERE", "atmosphere", "generated-asset"} {
 		if strings.Contains(page, stale) {
-			t.Errorf("landing page retains rejected hero marker %q", stale)
+			t.Errorf("landing page retains rejected decorative-media marker %q", stale)
 		}
 	}
 	if strings.Contains(page, `.png`) {
@@ -143,40 +138,22 @@ func TestLandingDocsHierarchyAndMemexBoundary(t *testing.T) {
 	}
 }
 
-func TestLandingToolsDesktopUsesTwoColumnRow(t *testing.T) {
+func TestLandingRejectsDecorativeAtmosphereAssets(t *testing.T) {
+	page := readSiteFile(t, "index.html")
 	css := readSiteFile(t, "styles.css")
-	media := regexp.MustCompile(`@media\s*\(\s*min-width\s*:\s*721px\s*\)\s*\{`).FindStringIndex(css)
-	if media == nil {
-		t.Fatal("landing CSS missing 721px desktop media query")
-	}
-	desktop := css[media[1]:]
-	if next := strings.Index(desktop, "@media"); next >= 0 {
-		desktop = desktop[:next]
-	}
-	contracts := map[string][]string{
-		`#yours\s+\.band-head`: {
-			`grid-column\s*:\s*1\s*;`,
-			`margin-bottom\s*:\s*0\s*;`,
-		},
-		`#yours\s+\.generated-asset--tools`: {
-			`grid-column\s*:\s*2\s*;`,
-			`width\s*:\s*100%\s*;`,
-			`margin\s*:\s*0\s+0\s+2\.6rem\s*;`,
-		},
-		`#yours\s+\.diff-strip`: {
-			`grid-column\s*:\s*1\s*/\s*-1\s*;`,
-		},
-	}
-	for selector, properties := range contracts {
-		match := regexp.MustCompile(`(?s)` + selector + `\s*\{([^}]*)\}`).FindStringSubmatch(desktop)
-		if match == nil {
-			t.Errorf("landing CSS missing tools-row selector %q", selector)
-			continue
+	for _, stale := range []string{"AI-GENERATED ATMOSPHERE", "atmosphere", "generated-asset"} {
+		if strings.Contains(page, stale) || strings.Contains(css, stale) {
+			t.Errorf("landing retains rejected decorative-media concept %q", stale)
 		}
-		for _, property := range properties {
-			if !regexp.MustCompile(property).MatchString(match[1]) {
-				t.Errorf("landing CSS selector %q missing property /%s/", selector, property)
-			}
+	}
+	for _, asset := range []string{
+		"assets/hero-atmosphere-800.webp",
+		"assets/hero-atmosphere-1600.webp",
+		"assets/tools-atmosphere-800.webp",
+		"assets/tools-atmosphere-1600.webp",
+	} {
+		if _, err := os.Stat(asset); !os.IsNotExist(err) {
+			t.Errorf("rejected decorative asset %s still exists", asset)
 		}
 	}
 }
