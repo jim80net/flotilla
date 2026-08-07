@@ -27,12 +27,22 @@ This boundary imposes two construction rules:
    a change detector which preserves stable defects rather than a correctness
    check.
 
+Large observed-decision corpora do not relax the second rule. Their volume makes
+them useful for pricing and change analysis, but converting their current outputs
+directly into golden expectations would bless every stable defect in the corpus.
+
 The complete safety toolchain therefore has three non-substitutable instruments:
 
 - reconciliation detects divergence from an instruction-linked desired state;
 - intent-authored fixtures prevent regression against known requirements;
-- adversarial probing discovers missing requirements, which then become new
-  intent-authored fixtures.
+- mechanism-transfer review discovers sibling instances: after every confirmed
+  defect, name its causal mechanism and sweep that mechanism across the rest of
+  the system before closure; each valid sibling becomes an intent-authored
+  fixture.
+
+Mechanism transfer is deliberately narrower than blind adversarial probing. Its
+trigger is a confirmed defect, its owner is the finding lane, and its bound is
+the known mechanism rather than the infinite input space.
 
 `reconcile-state` supplies only the first instrument. It makes no coverage claim
 about the other two.
