@@ -679,8 +679,13 @@ Fail-closed aborts are **not log-only**. On non-zero recycle:
 
 1. Loud log with abort class + recovery command
 2. Durable `~/.flotilla/<desk>/last-recycle-abort.txt`
-3. Inject into the owning coordinator's pane when resolvable
+3. Attempt confirmed injection into the owning coordinator's pane
+4. If the coordinator is busy or unreachable, enqueue the same notice durably through
+   its configured adjutant; never collapse the required escalation back to log-only
 
 Busy-desk (phase 0 / re-verify) aborts **retry** a small bound before final
-escalation. Subagent/list-nav overlays during close are self-healed when
-`FLOTILLA_SELF_HEAL=1`.
+escalation. A genuinely active turn may be allowed to finish before one retry. If the
+composer looks idle but status remains Working/Composing, further recycle attempts
+cannot pass the same idle gate; use `flotilla resume <desk> --force` to repair that
+stuck task state, after verifying a durable handoff when context must survive.
+Subagent/list-nav overlays during close are self-healed when `FLOTILLA_SELF_HEAL=1`.

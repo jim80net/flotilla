@@ -238,6 +238,11 @@ func TestRunRecyclePhase0Abort(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "phase 0") {
 		t.Fatalf("err = %v, want a phase-0 abort", err)
 	}
+	for _, want := range []string{"recycle cannot clear", "flotilla resume backend --force"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("phase-0 recovery missing %q: %v", want, err)
+		}
+	}
 	if len(r.delivered) != 0 {
 		t.Errorf("phase-0 abort must not deliver the handoff turn (got %v)", r.delivered)
 	}
