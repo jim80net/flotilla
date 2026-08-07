@@ -120,25 +120,13 @@ func enqueueOrFailSend(rosterPath, sender, recipient, message string, deliveryEr
 	// Desk-visible machine-readable ack first (#475 / #614) so monitors can grep QUEUED.
 	fmt.Println(dispatch.FormatQueuedAck(id, sender, recipient, deduped))
 	if deduped {
-		fmt.Fprintf(os.Stderr, "flotilla: %v — send already queued as %s; no duplicate added; delivery unconfirmed\n", deliveryErr, id)
-		fmt.Println(formatQueuedSendGuidance(id, sender, message, true))
+		fmt.Fprintf(os.Stderr, "flotilla: %v — send already queued as %s; no duplicate added\n", deliveryErr, id)
+		fmt.Printf("send already queued as %s — cancel: flotilla cancel %s\n", id, id)
 		return nil
 	}
-	fmt.Fprintf(os.Stderr, "flotilla: %v — queued to durable outbox (id=%s); not delivered in this call\n", deliveryErr, id)
-	fmt.Println(formatQueuedSendGuidance(id, sender, message, false))
+	fmt.Fprintf(os.Stderr, "flotilla: %v — queued to durable outbox (id=%s); cancel: flotilla cancel %s\n", deliveryErr, id, id)
+	fmt.Printf("queued to %s outbox (id %s) — cancel: flotilla cancel %s\n", sender, id, id)
 	return nil
-}
-
-func formatQueuedSendGuidance(id, sender, message string, deduped bool) string {
-	state := "queued"
-	if deduped {
-		state = "already queued"
-	}
-	line := fmt.Sprintf("%s in %s outbox (id %s; not delivered in this call)", state, sender, id)
-	if nonce := inbound.ParseOwnDispatchNonce(message); nonce != "" {
-		line += fmt.Sprintf(" — inspect: flotilla dispatch-status %s", nonce)
-	}
-	return line + fmt.Sprintf("; cancel pending generation: flotilla cancel %s", id)
 }
 
 // deliverOrQueueSend attempts confirmed delivery with inline retry; on sustained busy/transient
