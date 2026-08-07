@@ -12,16 +12,18 @@ network-free terminal fixture. It made no provider or Discord call.
 - `site/docs/testdata/coldagent` built with the output name `claude`; it accepts
   terminal input and returns to a cleared Claude Code-style composer, without a
   model, credential, session store, or network access
+- Absolute candidate and fixture paths injected into tmux, so an existing tmux
+  server's inherited `PATH` cannot select a host executable
 
 ## 1. Install and make both tested executables reachable
 
 ```text
-TEST_ROOT=$(mktemp -d /tmp/flotilla-docs-cold-v3.XXXXXX)
+TEST_ROOT=$(mktemp -d /tmp/flotilla-docs-cold-v4.XXXXXX)
 mkdir -p "$TEST_ROOT/bin" "$TEST_ROOT/work"
 export PATH="$TEST_ROOT/bin:$PATH"
 GOBIN="$TEST_ROOT/bin" go install ./cmd/flotilla
 go build -o "$TEST_ROOT/bin/claude" ./site/docs/testdata/coldagent
-flotilla version
+"$TEST_ROOT/bin/flotilla" version
 flotilla 0.0.1
 ```
 
@@ -55,39 +57,51 @@ research  unknown  unknown
 
 `unknown` is the expected state before the detector writes a snapshot.
 
-## 4. Run the published tmux and registration sequence
+## 4. Run an isolated variant of the published registration sequence
 
-The test shell was started in `$TEST_ROOT/work` with the exported `PATH`, then
-ran the same two commands as the page, using a unique session name:
+The public page uses bare `flotilla` and `claude` names after its `PATH`
+prerequisite. That is appropriate for a user install but is not a sufficient
+test isolation boundary: an existing tmux server can retain an older `PATH`.
+This controlled run therefore injected the candidate and fixture by their
+concrete absolute paths. It does not claim that this is the page's exact
+bare-name command.
 
 ```text
-tmux new-session -d -s flotilla-docs-cold-v3
-tmux send-keys -t flotilla-docs-cold-v3 \
-  'flotilla register infra && exec claude' Enter
+TEST_ROOT=/tmp/flotilla-docs-cold-v4.MqVkWN
+tmux new-session -d -s flotilla-docs-cold-v4 -c "$TEST_ROOT/work"
+tmux send-keys -t flotilla-docs-cold-v4 \
+  "$TEST_ROOT/bin/flotilla register infra && exec $TEST_ROOT/bin/claude" Enter
 registered infra (marker @flotilla_agent=infra)
 pane_current_command=claude
+pane_pid=841216
+readlink -f /proc/841216/exe
+/tmp/flotilla-docs-cold-v4.MqVkWN/bin/claude
+Claude Code cold-test fixture
+❯
 ```
 
-The first control process used a shell-like display and was correctly treated
-as busy. It was replaced with the committed fixture above, which exercises the
-real Claude Code surface probe rather than weakening delivery to a shell.
+The resolved executable identity and fixture-only banner distinguish the
+committed network-free fixture from a real provider process that happens to be
+named `claude`. The fixture exercises the real Claude Code surface probe rather
+than weakening delivery to a shell.
 
 ## 5. Deliver and verify the first instruction
 
-From `$TEST_ROOT/work`:
+From `$TEST_ROOT/work`, the candidate CLI was again invoked by absolute path:
 
 ```text
-flotilla send --from me --roster ./flotilla.json infra \
+"$TEST_ROOT/bin/flotilla" send --from me --roster "$TEST_ROOT/work/flotilla.json" infra \
   "Report the repository status."
-delivered to infra (pane flotilla-docs-cold-v3:0.0) — turn confirmed
+delivered to infra (pane flotilla-docs-cold-v4:0.0) — turn confirmed
 ```
 
-The pane contained `accepted: Report the repository status.` and returned to a
-cleared composer. The server-minted nonce was then checked independently:
+The same pane whose executable resolved to the fixture printed
+`accepted: Report the repository status.` and returned to a cleared composer.
+The server-minted nonce was then checked with the same absolute candidate:
 
 ```text
-flotilla dispatch-status --roster ./flotilla.json flotilla-dispatch-4d1dfdc4
-nonce=flotilla-dispatch-4d1dfdc4 disposition=delivered me→infra id=58737014fa1af6fc inbound pending durable ack
+"$TEST_ROOT/bin/flotilla" dispatch-status --roster "$TEST_ROOT/work/flotilla.json" flotilla-dispatch-21ffdcdd
+nonce=flotilla-dispatch-21ffdcdd disposition=delivered me→infra id=b4ff2cbf25cd3ad4 inbound pending durable ack
 ```
 
 This closes the earlier evidence gap: the cold run ends in confirmed delivery

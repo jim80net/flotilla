@@ -80,12 +80,20 @@ func TestPublicEvidenceClosesColdRunAndClaimMap(t *testing.T) {
 	for _, want := range []string{
 		`export PATH="$TEST_ROOT/bin:$PATH"`,
 		"site/docs/testdata/coldagent",
+		"concrete absolute paths",
+		"readlink -f /proc/841216/exe",
+		"/tmp/flotilla-docs-cold-v4.MqVkWN/bin/claude",
+		"Claude Code cold-test fixture",
+		"accepted: Report the repository status.",
 		"turn confirmed",
 		"disposition=delivered",
 	} {
 		if !strings.Contains(cold, want) {
 			t.Errorf("cold-test record missing reproducibility marker %q", want)
 		}
+	}
+	if strings.Contains(cold, "ran the same two commands as the page") {
+		t.Error("cold-test record still conflates the isolated control with the public bare-name command")
 	}
 
 	claims := readSiteFile(t, "docs/CLAIM-TO-SOURCE.md")
