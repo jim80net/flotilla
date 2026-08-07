@@ -104,6 +104,9 @@ guides. Each is labeled at the top.
 - **[`authorization-domains.md`](./authorization-domains.md)** — *design record*
   for deny-by-default capability grants scoped to desks, flotillas, and future
   nodes; Gmail read access for PA is the first ratified grant.
+- **[`authorized-state-reconciliation.md`](./authorized-state-reconciliation.md)** —
+  runnable reference for detecting host drift against instruction-linked desired
+  state without attempting actor attribution or repair.
 
 ### How flotilla compares
 
@@ -135,6 +138,7 @@ link to it, not restate it.
 | PR title/description rules | `pr-authoring.md` |
 | Design tokens + theme | `design/README.md` |
 | Authorization-domain grant model | `authorization-domains.md` |
+| Authorized desired state vs observed host drift | `authorized-state-reconciliation.md` |
 | PA Gmail OAuth setup | `pa-gmail-api-runbook.md` |
 
 **Editing rule:** if you're about to explain a fact that already has a home

@@ -106,6 +106,8 @@ func run(args []string) error {
 		return cmdGmail(args[1:])
 	case "launch":
 		return cmdLaunch(args[1:])
+	case "reconcile-state":
+		return cmdReconcileState(args[1:])
 	case "mirror-self":
 		return cmdMirrorSelf(args[1:])
 	case "version", "-v", "--version":
@@ -172,6 +174,8 @@ usage:
                                                       PA-only authorized Gmail read broker (host-private binding; no writes)
   flotilla launch lint [--roster <path>] [--launch <path>]
                                                       warn on roster seats without an explicit failover chain
+  flotilla reconcile-state --manifest <path> [--json]
+                                                      compare observed host state with authorized instruction records (read-only)
   flotilla channel create <name> [--type text|category] [--topic <t>] [--category <name|id>]
                                                       create a Discord channel via the bot (idempotent; emits an F#105 binding with --xo)
   flotilla channel list [--json]                      list the guild's channels (id, type, name, parent)
