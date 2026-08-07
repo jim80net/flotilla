@@ -40,7 +40,7 @@ type TurnFinalReader func(agent string) (text string, ok bool, err error)
 // against pending inbound dispatches; reinject once, escalate to operator on second miss.
 //
 // #614 / #616: before reinject, suppress when the durable consumed registry already holds
-// the nonce (or when a MergedChecker reports all cited PRs MERGED — auto-consume).
+// the nonce (or when a MergedChecker reports all repository-qualified cited PRs MERGED — auto-consume).
 // Acknowledged turn-finals are written into the consumed registry (idempotent).
 func DroppedDispatchFinishHook(
 	rosterDir string,
@@ -85,7 +85,7 @@ func DroppedDispatchFinishHookWithMerged(
 				if _, cerr := reg.Consume(dispatch.ConsumeFromInbound(e.Nonce, e.Message, dispatch.ReasonMerged, e.Sender, e.Recipient)); cerr != nil {
 					log.Printf("flotilla watch: dropped-dispatch consume-merged failed nonce=%s: %v", e.Nonce, cerr)
 				} else {
-					log.Printf("flotilla watch: dropped-dispatch suppress %s nonce=%s reason=merged pr=%d", agent, e.Nonce, pr)
+					log.Printf("flotilla watch: dropped-dispatch suppress %s nonce=%s reason=merged pr=%s", agent, e.Nonce, pr)
 				}
 				st.Remove(e.ID)
 			}
@@ -134,7 +134,7 @@ func DroppedDispatchFinishHookWithMerged(
 					if _, cerr := reg.Consume(dispatch.ConsumeFromInbound(a.Entry.Nonce, a.Entry.Message, dispatch.ReasonMerged, a.Entry.Sender, a.Entry.Recipient)); cerr != nil {
 						log.Printf("flotilla watch: dropped-dispatch consume-merged failed nonce=%s: %v", a.Entry.Nonce, cerr)
 					} else {
-						log.Printf("flotilla watch: dropped-dispatch suppress reinject %s nonce=%s reason=merged pr=%d", agent, a.Entry.Nonce, pr)
+						log.Printf("flotilla watch: dropped-dispatch suppress reinject %s nonce=%s reason=merged pr=%s", agent, a.Entry.Nonce, pr)
 					}
 					st.Remove(a.Entry.ID)
 					continue

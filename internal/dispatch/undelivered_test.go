@@ -113,16 +113,22 @@ func TestLookupNonce_DispositionOrder(t *testing.T) {
 }
 
 func TestMergedSuppress_AllCitedMustBeMerged(t *testing.T) {
-	msg := "Resume gate for PR #614 and PR #615 after review"
-	if _, ok := ShouldSuppressMerged(msg, func(pr int) bool { return pr == 614 }); ok {
+	msg := "Resume gate for jim80net/flotilla#614 and acme/product PR #615 after review"
+	if _, ok := ShouldSuppressMerged(msg, func(_ string, pr int) bool { return pr == 614 }); ok {
 		t.Fatal("partial merge must not suppress multi-PR dispatch")
 	}
-	pr, ok := ShouldSuppressMerged(msg, func(pr int) bool { return pr == 614 || pr == 615 })
-	if !ok || pr != 614 {
-		t.Fatalf("all-merged: pr=%d ok=%v", pr, ok)
+	pr, ok := ShouldSuppressMerged(msg, func(_ string, pr int) bool { return pr == 614 || pr == 615 })
+	if !ok || pr.Repository != "jim80net/flotilla" || pr.Number != 614 {
+		t.Fatalf("all-merged: pr=%+v ok=%v", pr, ok)
 	}
-	if _, ok := ShouldSuppressMerged("no pr here at all", func(int) bool { return true }); ok {
+	if _, ok := ShouldSuppressMerged("no pr here at all", func(string, int) bool { return true }); ok {
 		t.Fatal("no PR cite must not suppress")
+	}
+	if _, ok := ShouldSuppressMerged("memex-openclaw PR #29", func(string, int) bool { return true }); ok {
+		t.Fatal("repository name without owner must not suppress")
+	}
+	if _, ok := ShouldSuppressMerged("jim80net/memex-openclaw#29 and PR #30", func(string, int) bool { return true }); ok {
+		t.Fatal("one unscoped citation must make the whole terminal proof ambiguous")
 	}
 }
 
@@ -152,10 +158,13 @@ func TestFormatQueuedAck_MachineReadable(t *testing.T) {
 	}
 }
 
-func TestExtractPRNumbers(t *testing.T) {
-	got := ExtractPRNumbers("See PR #10 and pull request 10 and PR 20")
-	if len(got) != 2 || got[0] != 10 || got[1] != 20 {
-		t.Fatalf("got %v", got)
+func TestExtractQualifiedPRCitations(t *testing.T) {
+	got, unscoped := ExtractQualifiedPRCitations("See acme/one#10, acme/two PR #20, and https://github.com/acme/three/pull/30")
+	if unscoped || len(got) != 3 || got[0] != (PRCitation{Repository: "acme/one", Number: 10}) || got[1] != (PRCitation{Repository: "acme/two", Number: 20}) || got[2] != (PRCitation{Repository: "acme/three", Number: 30}) {
+		t.Fatalf("got %+v unscoped=%v", got, unscoped)
+	}
+	if got, unscoped := ExtractQualifiedPRCitations("PR #29"); len(got) != 0 || !unscoped {
+		t.Fatalf("bare citation = %+v unscoped=%v", got, unscoped)
 	}
 }
 

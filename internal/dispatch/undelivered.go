@@ -142,10 +142,10 @@ func ScanUndeliveredInbound(rosterDir string, now time.Time, age time.Duration) 
 // ok=false means unreadable (no reader / no session) — not an error for suppress.
 type TurnFinalReader func(agent string) (text string, ok bool, err error)
 
-// RecipientMergedChecker reports whether a PR cited by one inbound row is
-// merged in that recipient's authority-domain repository. The recipient scope
-// prevents a same-number PR in another product repository from settling cargo.
-type RecipientMergedChecker func(recipient string, pr int) bool
+// RecipientMergedChecker reports whether an explicitly repository-scoped PR
+// cited by one inbound row is merged. Recipient remains available for audit and
+// policy, but repository identity comes from the citation and is never guessed.
+type RecipientMergedChecker func(recipient, repository string, pr int) bool
 
 // RecipientCommitChecker confirms an explicitly terminal SHA against the
 // recipient's authority-domain mainline.
@@ -163,7 +163,7 @@ func ReconcileInboundAcks(rosterDir string, readTurnFinal TurnFinalReader) int {
 }
 
 // ReconcileInboundAcksWithMerged also durable-consumes stale cargo when every
-// PR cited by the dispatch is merged. This runs before undelivered reporting,
+// repository-qualified PR cited by the dispatch is merged. This runs before undelivered reporting,
 // so a completed chapter does not produce a false 15-minute ack incident merely
 // because the recipient's final acknowledgement was lost.
 func ReconcileInboundAcksWithMerged(rosterDir string, readTurnFinal TurnFinalReader, isMerged RecipientMergedChecker) int {
@@ -192,7 +192,7 @@ func ReconcileInboundAcksWithTerminal(rosterDir string, readTurnFinal TurnFinalR
 			for _, e := range st.Load() {
 				var prChecker MergedChecker
 				if isMerged != nil {
-					prChecker = func(pr int) bool { return isMerged(recipient, pr) }
+					prChecker = func(repository string, pr int) bool { return isMerged(recipient, repository, pr) }
 				}
 				var commitChecker CommitOnMainChecker
 				if isCommitOnMain != nil {

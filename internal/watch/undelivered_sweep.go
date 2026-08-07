@@ -112,8 +112,8 @@ type UndeliveredHooks struct {
 	// ReadTurnFinal, when set, heals inbound ledgers before scan: clear entries
 	// whose latest turn-final already acks the nonce (#628 false-positive fix).
 	ReadTurnFinal dispatch.TurnFinalReader
-	// IsMerged resolves cited PR state in the recipient's authority domain. When
-	// all cited PRs are merged, reconcile durable-consumes the completed cargo
+	// IsMerged resolves explicitly repository-scoped PR citations. When all
+	// cited PRs are merged, reconcile durable-consumes the completed cargo
 	// before it can fire an undelivered-ack alert.
 	IsMerged dispatch.RecipientMergedChecker
 	// IsCommitOnMain confirms explicitly terminal SHA citations locally.
