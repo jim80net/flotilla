@@ -164,7 +164,7 @@ func runRecycle(ops recycleOps, p recyclePlan) (string, worktreeCloseNote, error
 	// External --self and all full recycles keep the idle precondition.
 	if !(ownPaneSelf && p.selfPath) {
 		if !pollIdleCleared(ops, target, p.timeouts.boot) {
-			return "", worktreeCloseNote{}, fmt.Errorf("phase 0: %q did not settle to idle at a cleared composer within %s — ABORT, desk untouched", p.agent, p.timeouts.boot)
+			return "", worktreeCloseNote{}, fmt.Errorf("phase 0: %q did not settle to idle at a cleared composer within %s — ABORT, desk untouched; if its composer appears idle while status remains Working/Composing, recycle cannot clear that stuck task state — recover with: flotilla resume %s --force", p.agent, p.timeouts.boot, p.agent)
 		}
 	}
 

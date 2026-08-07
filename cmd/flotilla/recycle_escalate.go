@@ -88,9 +88,11 @@ func recycleAbortNotice(agent, phase string, class recycleAbortClass, err error,
 	b.WriteString("Prescribed recovery:\n")
 	switch class {
 	case abortBusyDesk:
-		b.WriteString("  - Wait for the desk to settle Idle, then: flotilla recycle ")
+		b.WriteString("  - If the desk is genuinely running a turn, let that turn finish, then retry recycle once\n")
+		b.WriteString("  - If the composer appears idle but status remains Working/Composing, do NOT retry recycle: its idle gate cannot repair the stuck task state\n")
+		b.WriteString("  - Recover the stuck state with: flotilla resume ")
 		b.WriteString(agent)
-		b.WriteString("\n")
+		b.WriteString(" --force (this replaces the live session; use a verified durable handoff when context must survive)\n")
 	case abortPhase2Close:
 		b.WriteString("  - Investigate the pane; if confirmed dead: flotilla resume ")
 		b.WriteString(agent)

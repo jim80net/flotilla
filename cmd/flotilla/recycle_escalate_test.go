@@ -57,6 +57,22 @@ func TestRecycleAbortNotice(t *testing.T) {
 	}
 }
 
+func TestRecycleAbortNoticeBusyDistinguishesActiveFromStuck(t *testing.T) {
+	err := errors.New("phase 0: backend did not settle to idle at a cleared composer")
+	got := recycleAbortNotice("backend", "phase 0", abortBusyDesk, err, "")
+	for _, want := range []string{
+		"genuinely running a turn",
+		"composer appears idle but status remains Working/Composing",
+		"do NOT retry recycle",
+		"flotilla resume backend --force",
+		"verified durable handoff",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("busy abort notice missing %q\nfull: %s", want, got)
+		}
+	}
+}
+
 func TestRecycleAbortRouteCoordinatorUsesAdjutant(t *testing.T) {
 	cfg := &roster.Config{
 		XOAgent:  "cos",
