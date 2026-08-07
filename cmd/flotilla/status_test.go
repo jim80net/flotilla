@@ -208,6 +208,9 @@ func TestBuildStatusJSON(t *testing.T) {
 			t.Errorf("marshaled JSON missing %s\n%s", want, raw)
 		}
 	}
+	if strings.Contains(string(raw), `"awaiting_authority"`) {
+		t.Errorf("authority waits must not return as a separate utilization state\n%s", raw)
+	}
 }
 
 func TestBuildStatusJSON_LoopPostureV10(t *testing.T) {
@@ -243,7 +246,7 @@ func TestBuildStatusJSON_LoopPostureV10(t *testing.T) {
 		},
 	}
 	doc := buildStatusJSON(cfg, "xo", "2026-07-09T00:00:00Z", snap, loop)
-	if doc.Utilization.Idle != 4 || doc.Utilization.IdleEmptyQueue != 2 || doc.Utilization.IdleHasQueue != 2 || doc.Utilization.AcceptsDispatch != 2 || doc.Utilization.AwaitingAuthority != 1 {
+	if doc.Utilization.Idle != 4 || doc.Utilization.IdleEmptyQueue != 2 || doc.Utilization.IdleHasQueue != 2 || doc.Utilization.AcceptsDispatch != 2 {
 		t.Fatalf("utilization queue split = %+v", doc.Utilization)
 	}
 	want := map[string]string{

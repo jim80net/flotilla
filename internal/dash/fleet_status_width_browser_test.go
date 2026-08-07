@@ -65,16 +65,18 @@ status = {
     "agents": [],
     "freshness": {"state": "fresh", "message": ""},
     "xo_liveness": {"acked": True, "ack_age": "11m23s", "settled_known": True, "settled": False},
+    # Older status producers may still send this field; the operator surface
+    # must keep treating it as ordinary available capacity.
     "utilization": {"working": 1, "total": 52, "blocked": 8, "awaiting_authority": 12, "utilization_wall": True}
 }
-expected = ["1 of 52 seats working", "8 blocked", "12 seats waiting for authority", "cos · ack 11m23s ago · active"]
-footer_expected = expected[:3] + ["Almost no one is working", "Send work or pull the next queue item"]
+expected = ["1 of 52 seats working", "8 blocked", "cos · ack 11m23s ago · active"]
+footer_expected = expected[:2] + ["Almost no one is working", "Send work or pull the next queue item"]
 
 def verify(page, width, height):
     page.set_viewport_size({"width": width, "height": height})
     page.goto(url, wait_until="domcontentloaded")
     units = page.locator("#rail-meta .fleet-status-unit")
-    expect(units).to_have_count(4)
+    expect(units).to_have_count(3)
     actual = units.all_inner_texts()
     if actual != expected:
         raise AssertionError("semantic units changed: %r" % actual)
@@ -96,7 +98,7 @@ def verify(page, width, height):
         if metric["left"] < metric["parentLeft"] - .5 or metric["right"] > metric["parentRight"] + .5:
             raise AssertionError("semantic unit escaped its column at %dpx: %r" % (width, metric))
     footer_units = page.locator("#fleet-utilization .fleet-utilization-unit")
-    expect(footer_units).to_have_count(5)
+    expect(footer_units).to_have_count(4)
     if footer_units.all_inner_texts() != footer_expected:
         raise AssertionError("footer semantic units changed at %dpx" % width)
     if " ".join(page.locator("#fleet-utilization").inner_text().split()) != " ".join(footer_expected):
