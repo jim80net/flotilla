@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -287,6 +289,18 @@ func cmdWatch(args []string) error {
 	if surface.SelfHealEnabled() {
 		confirm.SendCtrlC = deliver.SendCtrlC
 		log.Printf("flotilla watch: self-heal ENABLED (FLOTILLA_SELF_HEAL) — relay input-blocks attempt bounded Ctrl-C recovery")
+	}
+	assessDesk := func(agent string) surface.State {
+		current := currentRoster()
+		drv, ok := surface.Get(agentSurface(current, agent))
+		if !ok {
+			return surface.StateUnknown
+		}
+		pane, err := deliver.ResolvePane(agentTitle(current, agent))
+		if err != nil {
+			return surface.StateShell
+		}
+		return surface.AssessForFleet(drv, pane)
 	}
 	// mkSend resolves the surface + pane + per-pane transaction lock, then submits via `submit`. The
 	// TRANSACTION lock spans the WHOLE confirmed-delivery sequence so no other transaction (the
@@ -674,8 +688,45 @@ func cmdWatch(args []string) error {
 		// #349 item D: auto decision-brief trigger when operator-gated goals lack a brief.
 		decisionBriefClaimsPath := filepath.Join(rosterDir, "flotilla-decision-brief-claims.json")
 		decisionBriefTracker := decisionbrief.LoadTracker(decisionBriefClaimsPath)
+		ownQueueClaimer := &watch.OwnQueueClaimer{
+			Dir:    rosterDir,
+			Assess: assessDesk,
+			Authorize: func(seat, path string) (bool, string) {
+				current := currentRoster()
+				if _, err := current.Agent(seat); err != nil {
+					return false, "seat is absent from the current roster"
+				}
+				expected := filepath.Join(rosterDir, "flotilla-"+seat+"-backlog.md")
+				if filepath.Clean(path) != filepath.Clean(expected) {
+					return false, fmt.Sprintf("own queue is %s, got %s", expected, path)
+				}
+				if !current.HeartbeatEnabled(seat) {
+					return false, "seat is not authorized for autonomous heartbeat work"
+				}
+				return true, ""
+			},
+			Protected: func(seat string) (bool, string) {
+				if layerOperatorProtected(currentRoster(), rosterDir, *queuePath, injector, seat, time.Now()) {
+					return true, "pending operator relay, authority wait, or active operator conversation"
+				}
+				return false, ""
+			},
+			Emit: func(event watch.OwnQueueEvent) {
+				raw, _ := json.Marshal(event)
+				log.Printf("flotilla watch: own-queue %s", raw)
+			},
+		}
+		baseDeskHeartbeatWarranted := deskHeartbeatWarranted
+		deskHeartbeatWarranted = func(agent string) bool {
+			ownQueueClaimer.Reconcile(agent, deskBacklogPath(agent))
+			return baseDeskHeartbeatWarranted(agent)
+		}
 		injector.SetDetectorClaimHooks(
 			func(key string) {
+				if strings.HasPrefix(key, watch.OwnQueueClaimPrefix) {
+					ownQueueClaimer.Confirm(key)
+					return
+				}
 				if sender, entryID, ok := outbox.ParseStaleClaimKey(key); ok {
 					if err := outbox.MarkStaleEscalated(rosterDir, sender, entryID); err != nil {
 						log.Printf("flotilla watch: outbox stale confirm %s/%s failed: %v", sender, entryID, err)
@@ -698,6 +749,10 @@ func cmdWatch(args []string) error {
 				}
 			},
 			func(key string) {
+				if strings.HasPrefix(key, watch.OwnQueueClaimPrefix) {
+					ownQueueClaimer.Abort(key)
+					return
+				}
 				if isAdjutantSeamClaimKey(key) {
 					seamClaims.abort(key)
 					return
@@ -771,32 +826,13 @@ func cmdWatch(args []string) error {
 		if !xoRotate.AllowsIdleEdgeRotate() {
 			log.Printf("flotilla watch: xo_rotate=%s — idle-edge context rotation suppressed (roster xo_rotate / FLOTILLA_XO_ROTATE)", xoRotate)
 		}
+		var ownQueueTick atomic.Uint64
 		detCfg := watch.DetectorConfig{
 			XOAgent:           xo,
 			Desks:             desks,
 			Interval:          interval,
 			ReferenceInterval: referenceInterval,
-			Assess: func(agent string) surface.State {
-				drv, ok := surface.Get(agentSurface(cfg, agent))
-				if !ok {
-					return surface.StateUnknown
-				}
-				pane, err := deliver.ResolvePane(agentTitle(cfg, agent))
-				if err != nil {
-					// The pane titled for this agent is gone (the session died and
-					// the pane closed, or its title no longer matches) — that is a
-					// crash, equivalent to a pane that dropped back to a shell. Map
-					// it to Shell so the detector's two-consecutive debounce absorbs a
-					// transient resolve blip but a persistent vanish still crash-alerts
-					// the XO immediately (preserving — and bettering — the legacy gate,
-					// which alerted on the very first resolve failure).
-					return surface.StateShell
-				}
-				// AssessForFleet: Idle + focus-stealing composer (subagent panel /
-				// list-nav / queued) elevates so status does not claim plain idle when
-				// recycle's idle∧cleared gate would refuse (#557).
-				return surface.AssessForFleet(drv, pane)
-			},
+			Assess:            assessDesk,
 			RateLimitMaterial: rateLimitMaterial(cfg),
 			Usage:             usageObservation(cfg, flatLaunch),
 			UsageDispatch:     func(run func()) { go run() },
@@ -881,9 +917,16 @@ func cmdWatch(args []string) error {
 			SynthEveryTicks:     synthEveryTicks,
 			// Recursive desk-heartbeat (#183): default-ON, roster opt-OUT. Cadence = the heartbeat
 			// interval (the tick IS the interval ⇒ 1 tick); cap = 3 (NewDetector defaults 0 to 3).
-			HeartbeatEnabled:        deskHeartbeatEnabled,
-			HeartbeatWarranted:      deskHeartbeatWarranted,
-			WakeDeskHeartbeat:       wakeDeskHeartbeat,
+			HeartbeatEnabled:   deskHeartbeatEnabled,
+			HeartbeatWarranted: deskHeartbeatWarranted,
+			WakeDeskHeartbeat:  wakeDeskHeartbeat,
+			PullDeskWork: func(agent string) bool {
+				job, handled := ownQueueClaimer.Claim(agent, deskBacklogPath(agent), ownQueueTick.Add(1))
+				if job.Agent != "" {
+					injector.Enqueue(job)
+				}
+				return handled
+			},
 			DeskEscalate:            deskEscalate,
 			DeskHeartbeatEveryTicks: 1,
 			Activity:                activity,

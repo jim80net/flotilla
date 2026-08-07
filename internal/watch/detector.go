@@ -300,6 +300,10 @@ type DetectorConfig struct {
 	// the injector (a Kind:"detector" job never escalates), so the cap is progress-observable, never
 	// keyed on a delivery outcome. nil ⇒ no beat is ever delivered (inert).
 	WakeDeskHeartbeat func(agent string)
+	// PullDeskWork atomically claims and wakes an eligible item from the desk's
+	// own queue before the generic heartbeat. It returns true when the queue-work
+	// path handled the beat (including a durable duplicate or safe refusal).
+	PullDeskWork func(agent string) bool
 	// DeskEscalate raises the LOUD cap-escalation for a wedged desk (idle + un-progressing across
 	// capN beats) to its owning XO (the channel the desk is a member of → that channel's XO, falling
 	// back to the primary XO). Called OFF d.mu in runDeskHeartbeats. Fires ONCE on the ==capN edge,
@@ -1730,6 +1734,9 @@ func (d *Detector) runSynthesis(eligible []synthEligible) {
 // partially-wired config).
 func (d *Detector) runDeskHeartbeats(beats, escalations []string) {
 	for _, name := range beats {
+		if d.cfg.PullDeskWork != nil && d.cfg.PullDeskWork(name) {
+			continue
+		}
 		if d.cfg.WakeDeskHeartbeat != nil {
 			d.cfg.WakeDeskHeartbeat(name)
 		}
