@@ -24,8 +24,9 @@ cannot reject the message.
    because a nudge missed.
 2. Receivers run `flotilla pull` before each action and `dispatch-ack` after
    handling a dispatch.
-3. A replacement or stop names `--supersedes <message-id>` so pull output shows
-   which instruction is current.
+3. A replacement uses `flotilla send --supersedes <message-id> …`; a withdrawal
+   uses `FLOTILLA_SELF=<sender> flotilla cancel <message-id>`. Both leave the
+   supersession relation visible in pull output.
 
 *(Trap retired: gate questions delivered only to busy panes vanished; the buffer
 now remains authoritative and inspectable.)*

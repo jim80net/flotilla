@@ -100,6 +100,9 @@ type Job struct {
 	enqueuedAt time.Time
 	// lastStaleAlert is when the last periodic stale escalation fired. Internal.
 	lastStaleAlert time.Time
+	// lastBufferFailureAlert independently rate-limits recipient-buffer outage
+	// alerts; an earlier busy-queue alert must not suppress the first outage alert.
+	lastBufferFailureAlert time.Time
 	// lastStaleEscalation is when the one-shot coordinator escalation fired for KindSend (#477).
 	lastStaleEscalation time.Time
 	// Sender is the originating agent for KindSend jobs (keys the per-sender outbox file).
@@ -302,7 +305,7 @@ func (in *Injector) deliver(j Job) {
 			if err != nil {
 				// This is the only real failure on the pull-by-push path: no durable
 				// recipient copy exists yet. Keep the legacy relay queue and retry.
-				in.raise("operator message to %q could not be committed to its durable recipient buffer: %v", j.Agent, err)
+				in.maybeRaiseBufferCommitFailure(&j, err)
 				in.queue.upsert(j)
 				in.releaseRelayBeforeDefer(j)
 				in.reEnqueue(j, busyDeferDelay)
@@ -646,7 +649,8 @@ func (in *Injector) Enqueue(j Job) {
 		if in.onRecipientMessageBuffer != nil && isRelay(jj.Kind) && !jj.recipientBuffered {
 			nudge, err := in.onRecipientMessageBuffer(jj)
 			if err != nil {
-				in.raise("operator message to %q could not be committed to its durable recipient buffer: %v", jj.Agent, err)
+				// The worker owns buffer-failure escalation. Enqueue persists the
+				// retry but does not emit a duplicate alert for the same attempt.
 				in.queue.upsert(jj)
 			} else {
 				jj.bufferedBody = jj.Message
@@ -662,6 +666,15 @@ func (in *Injector) Enqueue(j Job) {
 			return
 		}
 	}
+}
+
+func (in *Injector) maybeRaiseBufferCommitFailure(j *Job, err error) {
+	now := in.clock()
+	if !j.lastBufferFailureAlert.IsZero() && now.Sub(j.lastBufferFailureAlert) < relayStaleAlertInterval {
+		return
+	}
+	in.raise("operator message to %q could not be committed to its durable recipient buffer: %v", j.Agent, err)
+	j.lastBufferFailureAlert = now
 }
 
 // HasPendingRelayFor reports whether a KindRelay for agent is queued or in-flight (#523).

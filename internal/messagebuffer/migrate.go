@@ -20,9 +20,15 @@ func MigrateOutboxes(rosterDir string) (MigrationResult, error) {
 	})
 }
 
-func migrateOutboxes(rosterDir string, remove func(path, id string) error) (MigrationResult, error) {
-	var result MigrationResult
+func migrateOutboxes(rosterDir string, remove func(path, id string) error) (result MigrationResult, err error) {
 	recipients := make(map[string]bool)
+	defer func() {
+		result.Recipients = result.Recipients[:0]
+		for recipient := range recipients {
+			result.Recipients = append(result.Recipients, recipient)
+		}
+		sort.Strings(result.Recipients)
+	}()
 	for _, legacy := range outbox.ListAll(rosterDir) {
 		_, _, err := Enqueue(rosterDir, legacy.Sender, legacy.Recipient, legacy.Message, EnqueueOptions{
 			ID: legacy.ID, EnqueuedAt: legacy.EnqueuedAt, MigratedFrom: "sender-outbox",
@@ -41,9 +47,5 @@ func migrateOutboxes(rosterDir string, remove func(path, id string) error) (Migr
 		result.Migrated++
 		recipients[legacy.Recipient] = true
 	}
-	for recipient := range recipients {
-		result.Recipients = append(result.Recipients, recipient)
-	}
-	sort.Strings(result.Recipients)
 	return result, nil
 }

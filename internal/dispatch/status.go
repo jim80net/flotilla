@@ -104,10 +104,22 @@ func LookupNonce(rosterDir, nonce string, now time.Time) Status {
 }
 
 func lookupBufferNonce(rosterDir, nonce string, now time.Time) *Status {
+	var current *messagebuffer.Entry
 	for _, e := range messagebuffer.ListAll(rosterDir) {
 		if e.Nonce != nonce || e.AcknowledgedAt != nil {
 			continue
 		}
+		// Forwarding can put the same nonce in more than one recipient buffer.
+		// The newest enqueue is the current hop; the ID tie-break keeps status
+		// deterministic if imported records share a timestamp.
+		if current == nil || e.EnqueuedAt.After(current.EnqueuedAt) ||
+			(e.EnqueuedAt.Equal(current.EnqueuedAt) && e.ID > current.ID) {
+			candidate := e
+			current = &candidate
+		}
+	}
+	if current != nil {
+		e := *current
 		st := Status{
 			Nonce: nonce, Sender: e.Sender, Recipient: e.Recipient, ID: e.ID,
 			PayloadHash: PayloadHash(e.Message), Disposition: DispositionBuffered,

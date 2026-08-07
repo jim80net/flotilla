@@ -5,7 +5,7 @@
 
 The payoff is **driving your whole fleet from a chat channel** — you talk to the
 XO in Discord and it runs the rest. This is the cold start that gets you there:
-from nothing to (1) sending a message into another agent's terminal, (2) running
+from nothing to (1) buffering work for another agent to pull, (2) running
 the self-continuing XO clock, and (3) wiring the Discord mirror + inbound relay
 (§4 and §6) that turn the channel into your day-to-day cockpit. Every command
 below is runnable as written — no prior flotilla knowledge assumed.
@@ -13,15 +13,14 @@ below is runnable as written — no prior flotilla knowledge assumed.
 ## What you need
 
 - **Go 1.26+** (to build the binary; matches the module's `go` directive).
-- **tmux** — every coordinated agent runs in a tmux pane; flotilla delivers by
-  typing into that pane.
+- **tmux** — every coordinated agent runs in a tmux pane; flotilla uses that
+  pane for best-effort pull nudges and lifecycle management.
 - **A supported agent you can run in a tmux pane** — Claude Code, Codex, or
   Grok. flotilla does not launch agents; it talks to ones you
   already run. This walkthrough uses Claude Code (the default surface). `send`
-  **confirms a real turn started**, so its target must be a live agent: a pane
-  that has dropped to a bare shell is treated as a *crashed* agent and the
-  delivery is refused (you can watch that refusal with zero setup — see §3 — but
-  seeing a *successful* delivery needs a running agent).
+  succeeds when the full body is durable in the recipient buffer; the target
+  may be busy, input-blocked, or temporarily stopped. A live pane is needed only
+  for the optional nudge—the agent can pull the body after it restarts.
 - **(Optional) a Discord bot + channel** — only if you want the audit mirror or
   the inbound relay. The clock and `send` work fully without Discord.
 
@@ -68,11 +67,9 @@ matches a name, so it never silently mis-delivers.
 
 ## 3. Send a message
 
-`send` delivers an instruction into a **live agent's** pane and confirms the turn
-actually started — it idle-gates, submits, then verifies, rather than typing
-blindly and assuming success. So the target must be a running agent; a pane
-sitting at a bare shell is reported as a crashed agent and the delivery is
-refused.
+`send` commits an instruction to the named agent's durable recipient buffer,
+then makes a best-effort attempt to nudge its pane. Buffering is the delivery;
+pane acceptance is neither required nor reported as proof that the body arrived.
 
 ### Start your agent — tagged
 
@@ -474,9 +471,9 @@ full validate / compile / link flow with examples.
   if the pane title differs.
 - **`ambiguous: N tmux panes titled "X"`** — two panes share the title; rename
   one or give the agent a unique `tmux_title`.
-- **Message pasted but not submitted** — a non-Claude/modal target may not have
-  bracketed-paste mode; multi-line delivery is validated for Claude Code's TUI
-  specifically.
+- **Nudge missed or not submitted** — the full body is already durable. Restart
+  or refocus the target if needed, then run `FLOTILLA_SELF=<name> flotilla pull`;
+  do not resend merely because the body-free pane nudge failed.
 - **Clock never ticks** — `heartbeat_interval` is empty or `"0"` (disabled); the
   XO pane keeps looking busy (the tick is idle-gated); or the XO pane is a bare
   shell, which the watchdog treats as a crashed agent (you'll see

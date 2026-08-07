@@ -28,3 +28,26 @@ func TestLookupNonceShowsBufferedThenPulled(t *testing.T) {
 		t.Fatalf("after pull = %+v", got)
 	}
 }
+
+func TestLookupNonceSelectsNewestForwardedBufferHop(t *testing.T) {
+	dir := t.TempDir()
+	msg, nonce, err := inbound.AppendDispatchNonce("forward this body verbatim")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 8, 7, 1, 0, 0, 0, time.UTC)
+	if _, _, err := messagebuffer.Enqueue(dir, "xo", "alpha", msg, messagebuffer.EnqueueOptions{
+		ID: "older", EnqueuedAt: base,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := messagebuffer.Enqueue(dir, "xo", "zulu", msg, messagebuffer.EnqueueOptions{
+		ID: "current", EnqueuedAt: base.Add(time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := LookupNonce(dir, nonce, base.Add(2*time.Minute))
+	if got.Recipient != "zulu" || got.ID != "current" {
+		t.Fatalf("status selected stale filename-first hop: %+v", got)
+	}
+}

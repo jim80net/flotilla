@@ -134,6 +134,36 @@ func TestRecipientBufferMakesNudgeFailureNonEvent(t *testing.T) {
 	}
 }
 
+func TestRecipientBufferCommitFailureAlertsInitiallyThenPeriodically(t *testing.T) {
+	now := time.Date(2026, 8, 7, 1, 0, 0, 0, time.UTC)
+	var alerts []string
+	var retries []Job
+	in := NewInjector(func(string, string) error { return nil }, 1)
+	in.now = func() time.Time { return now }
+	in.SetRecipientMessageBuffer(func(Job) (string, error) {
+		return "", errors.New("buffer unavailable")
+	})
+	in.SetEscalate(func(msg string) { alerts = append(alerts, msg) })
+	in.reEnqueue = func(j Job, _ time.Duration) { retries = append(retries, j) }
+	in.Enqueue(Job{Agent: "xo", Message: "full body", Kind: KindRelay, MessageID: "m-buffer-fail"})
+	if len(alerts) != 0 {
+		t.Fatalf("enqueue emitted duplicate-prone alert: %v", alerts)
+	}
+	in.deliver(<-in.jobs)
+	if len(alerts) != 1 || len(retries) != 1 {
+		t.Fatalf("first worker failure alerts=%v retries=%d", alerts, len(retries))
+	}
+	in.deliver(retries[0])
+	if len(alerts) != 1 || len(retries) != 2 {
+		t.Fatalf("immediate retry alerts=%v retries=%d", alerts, len(retries))
+	}
+	now = now.Add(relayStaleAlertInterval)
+	in.deliver(retries[1])
+	if len(alerts) != 2 {
+		t.Fatalf("periodic reminder alerts=%v, want 2", alerts)
+	}
+}
+
 func TestInjectorSurvivesSendError(t *testing.T) {
 	var count int32
 	send := func(agent, message string) error {

@@ -405,16 +405,14 @@ func cmdWatch(args []string) error {
 	watch.ReplayRelayQueue(injector, *queuePath)
 	migrateOutboxes := func() {
 		result, err := messagebuffer.MigrateOutboxes(rosterDir)
+		if result.Migrated > 0 {
+			log.Printf("flotilla watch: migrated %d legacy push-outbox message(s) to recipient buffers; retry deferrals retired", result.Migrated)
+			for _, recipient := range result.Recipients {
+				injector.Enqueue(watch.Job{Agent: recipient, Message: pullNudgeText, Kind: watch.KindDetector})
+			}
+		}
 		if err != nil {
-			log.Printf("flotilla watch: legacy outbox migration failed: %v", err)
-			return
-		}
-		if result.Migrated == 0 {
-			return
-		}
-		log.Printf("flotilla watch: migrated %d legacy push-outbox message(s) to recipient buffers; retry deferrals retired", result.Migrated)
-		for _, recipient := range result.Recipients {
-			injector.Enqueue(watch.Job{Agent: recipient, Message: pullNudgeText, Kind: watch.KindDetector})
+			log.Printf("flotilla watch: legacy outbox migration stopped after %d successful message(s): %v", result.Migrated, err)
 		}
 	}
 	migrateOutboxes()

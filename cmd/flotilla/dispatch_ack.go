@@ -62,10 +62,10 @@ func cmdDispatchAck(args []string) error {
 				if pending.Nonce == nonce && pending.Recipient == from {
 					st.Remove(pending.ID)
 				}
-				if bufferedOK {
-					if _, _, err := messagebuffer.AckID(rosterDir, from, buffered.ID, time.Now().UTC()); err != nil {
-						return fmt.Errorf("dispatch-ack: converge buffer ack: %w", err)
-					}
+			}
+			if bufferedOK {
+				if _, _, err := messagebuffer.AckID(rosterDir, from, buffered.ID, time.Now().UTC()); err != nil {
+					return fmt.Errorf("dispatch-ack: converge buffer ack: %w", err)
 				}
 			}
 			fmt.Printf("dispatch ack already durable nonce=%s recipient=%s\n", nonce, from)

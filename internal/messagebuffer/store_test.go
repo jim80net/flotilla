@@ -139,6 +139,32 @@ func TestMigrationDoesNotCountFailedLegacyRemoval(t *testing.T) {
 	}
 }
 
+func TestMigrationErrorRetainsRecipientsFromEarlierSuccess(t *testing.T) {
+	dir := t.TempDir()
+	path, _ := outbox.Path(dir, "xo")
+	store := outbox.NewStore(path)
+	for _, e := range []outbox.Entry{
+		{ID: "first", Sender: "xo", Recipient: "alpha", Message: "first body", EnqueuedAt: time.Now()},
+		{ID: "second", Sender: "xo", Recipient: "beta", Message: "second body", EnqueuedAt: time.Now().Add(time.Second)},
+	} {
+		if _, _, err := store.Insert(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := migrateOutboxes(dir, func(path, id string) error {
+		if id == "second" {
+			return fmt.Errorf("disk refused second removal")
+		}
+		return outbox.NewStore(path).Remove(id)
+	})
+	if err == nil {
+		t.Fatal("want second-row migration failure")
+	}
+	if result.Migrated != 1 || fmt.Sprint(result.Recipients) != "[alpha]" {
+		t.Fatalf("partial migration result = %+v, want first recipient retained", result)
+	}
+}
+
 func TestConcurrentEnqueueAllocatesGaplessSenderOrder(t *testing.T) {
 	dir := t.TempDir()
 	const count = 24
