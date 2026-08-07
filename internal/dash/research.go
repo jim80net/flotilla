@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"html"
 	"io/fs"
 	"mime"
 	"net/http"
@@ -332,13 +333,114 @@ func researchTitle(id, markdown string) string {
 	for _, line := range strings.Split(markdown, "\n") {
 		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
 		if strings.HasPrefix(line, "# ") {
-			if title := strings.TrimSpace(strings.TrimPrefix(line, "# ")); title != "" {
+			if title := researchDisplayText(strings.TrimPrefix(line, "# ")); title != "" {
 				return title
 			}
 		}
 	}
 	base := strings.TrimSuffix(path.Base(id), path.Ext(id))
 	return strings.TrimSpace(strings.NewReplacer("-", " ", "_", " ").Replace(base))
+}
+
+// researchDisplayText projects author-owned Markdown into a compact plain-text
+// label for collection cards and reader chrome. The source Markdown and digest
+// remain untouched. Links contribute only their human label, inline formatting
+// contributes only its contents, and raw HTML never becomes display copy.
+func researchDisplayText(markdown string) string {
+	value := html.UnescapeString(markdown)
+	var plain strings.Builder
+	for i := 0; i < len(value); {
+		if value[i] == '\\' && i+1 < len(value) {
+			plain.WriteByte(value[i+1])
+			i += 2
+			continue
+		}
+		if value[i] == '<' {
+			end := strings.IndexByte(value[i+1:], '>')
+			if end < 0 {
+				break
+			}
+			end += i + 1
+			tag := strings.TrimSpace(value[i+1 : end])
+			lowerTag := strings.ToLower(strings.TrimLeft(tag, "/"))
+			nameEnd := strings.IndexAny(lowerTag, " \t\r\n/")
+			if nameEnd >= 0 {
+				lowerTag = lowerTag[:nameEnd]
+			}
+			if tag != "" && tag[0] != '/' && (lowerTag == "script" || lowerTag == "style") {
+				closeStart := strings.Index(strings.ToLower(value[end+1:]), "</"+lowerTag)
+				if closeStart < 0 {
+					break
+				}
+				closeStart += end + 1
+				closeEnd := strings.IndexByte(value[closeStart:], '>')
+				if closeEnd < 0 {
+					break
+				}
+				i = closeStart + closeEnd + 1
+				continue
+			}
+			i = end + 1
+			continue
+		}
+
+		linkStart := i
+		if value[i] == '!' && i+1 < len(value) && value[i+1] == '[' {
+			linkStart++
+		}
+		if value[linkStart] == '[' {
+			labelEnd := strings.IndexByte(value[linkStart+1:], ']')
+			if labelEnd >= 0 {
+				labelEnd += linkStart + 1
+				label := researchDisplayText(value[linkStart+1 : labelEnd])
+				if label != "" {
+					plain.WriteString(label)
+				}
+				i = labelEnd + 1
+				if i < len(value) && value[i] == '(' {
+					depth, targetEnd := 0, -1
+					for j := i; j < len(value); j++ {
+						if value[j] == '\\' {
+							j++
+							continue
+						}
+						if value[j] == '(' {
+							depth++
+						} else if value[j] == ')' {
+							depth--
+							if depth == 0 {
+								targetEnd = j
+								break
+							}
+						}
+					}
+					if targetEnd < 0 {
+						break
+					}
+					i = targetEnd + 1
+				}
+				continue
+			}
+		}
+
+		switch value[i] {
+		case '*', '_', '`', '~':
+			i++
+		default:
+			plain.WriteByte(value[i])
+			i++
+		}
+	}
+	result := strings.Join(strings.Fields(plain.String()), " ")
+	return strings.NewReplacer(" .", ".", " ,", ",", " ;", ";", " :", ":", " !", "!", " ?", "?").Replace(result)
+}
+
+func clampResearchDisplayText(value string, max int) string {
+	runes := []rune(value)
+	if len(runes) <= max {
+		return value
+	}
+	return strings.TrimSpace(string(runes[:max-1])) + "…"
 }
 
 func researchSummary(markdown string) string {
@@ -354,15 +456,11 @@ func researchSummary(markdown string) string {
 			strings.HasPrefix(line, ">") || (line[0] >= '0' && line[0] <= '9') {
 			continue
 		}
-		line = strings.Trim(line, "*_` ")
+		line = researchDisplayText(line)
 		if line == "" || strings.Contains(line, ":**") {
 			continue
 		}
-		const max = 220
-		if len(line) > max {
-			line = strings.TrimSpace(line[:max-1]) + "…"
-		}
-		return line
+		return clampResearchDisplayText(line, 220)
 	}
 	return ""
 }
