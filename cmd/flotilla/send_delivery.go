@@ -161,16 +161,43 @@ func enqueueOrFailSend(rosterPath, sender, recipient, message string, deliveryEr
 	if err != nil {
 		return fmt.Errorf("%v; durable outbox enqueue also failed: %w", deliveryErr, err)
 	}
+	deferrals := queuedSendDeferrals(rosterDir, sender, id)
 	// Desk-visible machine-readable ack first (#475 / #614) so monitors can grep QUEUED.
-	fmt.Println(dispatch.FormatQueuedAck(id, sender, recipient, deduped))
+	fmt.Println(dispatch.FormatQueuedAck(id, sender, recipient, deduped, deferrals))
+	nonce := inbound.ParseOwnDispatchNonce(message)
+	inspect := "inspect the durable sender outbox"
+	if nonce != "" {
+		inspect = fmt.Sprintf("inspect with `flotilla dispatch-status %s`", nonce)
+	}
+	cancel := fmt.Sprintf("cancel with `FLOTILLA_SELF=%s flotilla cancel %s --legacy-outbox`", sender, id)
 	if deduped {
-		fmt.Fprintf(os.Stderr, "flotilla: %v — send already queued as %s; no duplicate added\n", deliveryErr, id)
-		fmt.Printf("send already queued as %s — will deliver when %s is idle\n", id, recipient)
+		fmt.Fprintf(os.Stderr, "flotilla: %v — send remains queued as %s; no duplicate added; delivery unconfirmed\n", deliveryErr, id)
+		fmt.Printf("send remains queued as %s — deferrals=%s; %s; %s\n", id, deferralDisplay(deferrals), inspect, cancel)
 		return nil
 	}
-	fmt.Fprintf(os.Stderr, "flotilla: %v — queued to durable outbox (id=%s); watch will deliver when %s is idle\n", deliveryErr, id, recipient)
-	fmt.Printf("queued to %s outbox (id %s) — will deliver when recipient is idle\n", sender, id)
+	fmt.Fprintf(os.Stderr, "flotilla: %v — queued to durable outbox (id=%s); delivery unconfirmed\n", deliveryErr, id)
+	fmt.Printf("queued to %s outbox (id %s) — deferrals=%s; %s; %s\n", sender, id, deferralDisplay(deferrals), inspect, cancel)
 	return nil
+}
+
+func queuedSendDeferrals(rosterDir, sender, id string) int {
+	path, err := outbox.Path(rosterDir, sender)
+	if err != nil {
+		return -1
+	}
+	for _, entry := range outbox.NewStore(path).Load() {
+		if entry.ID == id {
+			return entry.Deferrals
+		}
+	}
+	return -1
+}
+
+func deferralDisplay(deferrals int) string {
+	if deferrals < 0 {
+		return "unknown"
+	}
+	return fmt.Sprint(deferrals)
 }
 
 // deliverOrQueueSend attempts confirmed delivery with inline retry; on sustained busy/transient

@@ -2579,7 +2579,7 @@
   function formatRespondOutcome(res) {
     if (res && res.outcome === "delivered") return "Delivered to " + res.target + " — turn confirmed.";
     if (res && res.outcome === "queued") {
-      return "Queued durably for " + res.target + " (id " + res.queued_id + ") — the fleet daemon delivers it when the desk can receive." +
+      return "Queued durably for " + res.target + " (id " + res.queued_id + ") — delivery unconfirmed; inspect or cancel using this id." +
         (res.detail ? " (" + res.detail + ")" : "");
     }
     return "Response state unclear — check the desk's conversation thread.";

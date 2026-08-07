@@ -194,7 +194,7 @@ func TestInjectorSendDeliveredLogsQueueAge(t *testing.T) {
 	}
 }
 
-// Acceptance (#475): sweep delivers when recipient goes idle; journal logs original enqueue age.
+// Acceptance (#475): sweep retries after the recipient goes idle; journal logs original enqueue age.
 func TestSweepDeliversOnRecipientIdleLogsEnqueueTime(t *testing.T) {
 	dir := t.TempDir()
 	enqAt := time.Date(2026, 7, 6, 10, 0, 0, 0, time.UTC)

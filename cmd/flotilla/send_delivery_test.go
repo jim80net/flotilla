@@ -57,12 +57,23 @@ func TestBouncedSendDedupesIdenticalPending(t *testing.T) {
 	if msg1 == msg2 {
 		t.Fatal("probe requires distinct stamps")
 	}
-	if err := enqueueOrFailSend(rosterPath, "alpha", "xo", msg2, busy); err != nil {
-		t.Fatal(err)
-	}
 	path, err := outbox.Path(dir, "alpha")
 	if err != nil {
 		t.Fatal(err)
+	}
+	queued := outbox.NewStore(path).Load()
+	queued[0].Deferrals = 708
+	outbox.NewStore(path).Update(queued[0])
+	stdout, stderr := captureStdoutStderr(t, func() {
+		if err := enqueueOrFailSend(rosterPath, "alpha", "xo", msg2, busy); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(stdout, "deferrals=708") || !strings.Contains(stdout, "inspect with `flotilla dispatch-status ") || !strings.Contains(stdout, "cancel with `FLOTILLA_SELF=alpha flotilla cancel ") {
+		t.Fatalf("queued output lacks present-state recovery facts: stdout=%q", stdout)
+	}
+	if strings.Contains(stdout, "will deliver") || strings.Contains(stderr, "will deliver") {
+		t.Fatalf("queued output retained unsupported future promise: stdout=%q stderr=%q", stdout, stderr)
 	}
 	got := outbox.NewStore(path).Load()
 	if len(got) != 1 {
@@ -115,11 +126,11 @@ func TestDirectSendAfterDurableJoinsTailWithoutQueueJump(t *testing.T) {
 
 // #475 desk-visible queued ack: machine-readable QUEUED line for monitors.
 func TestFormatQueuedAck_Visible(t *testing.T) {
-	line := dispatch.FormatQueuedAck("deadbeef", "alpha", "xo", false)
-	if !strings.Contains(line, "QUEUED") || !strings.Contains(line, "status=busy_outbox") {
+	line := dispatch.FormatQueuedAck("deadbeef", "alpha", "xo", false, 0)
+	if !strings.Contains(line, "QUEUED") || !strings.Contains(line, "status=busy_outbox") || !strings.Contains(line, "deferrals=0") {
 		t.Fatalf("queued ack not desk-visible: %q", line)
 	}
-	if !strings.Contains(dispatch.FormatQueuedAck("x", "a", "b", true), "already_queued") {
+	if !strings.Contains(dispatch.FormatQueuedAck("x", "a", "b", true, 708), "status=already_queued deferrals=708") {
 		t.Fatal("deduped ack missing already_queued")
 	}
 }

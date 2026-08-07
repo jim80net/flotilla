@@ -55,6 +55,8 @@ with sync_playwright() as p:
 
         expect(page.locator("#thread-composer-msg")).to_contain_text(
             "Queued durably for xo (id queue-generic-1)")
+        expect(page.locator("#thread-composer-msg")).to_contain_text("delivery unconfirmed")
+        expect(page.locator("#thread-composer-msg")).not_to_contain_text("will deliver")
         expect(composer).to_have_value("")
         expect(page.locator("#conv-thread")).not_to_contain_text(queued_text)
     finally:

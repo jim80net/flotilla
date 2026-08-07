@@ -28,9 +28,9 @@ type respondReq struct {
 	Message string `json:"message"`
 }
 
-// respondDoc is the honest outcome the decisions UI renders: "delivered" (turn
-// confirmed), or "queued" with the durable outbox id (at-least-once — the watch
-// sweep delivers when the desk is idle). Never a silent drop, never a fake success.
+// respondDoc is the outcome the decisions UI renders: "delivered" (sender-side
+// pane acceptance), or "queued" with the durable outbox id. Queued is durable
+// local state, not a claim of eventual delivery.
 type respondDoc struct {
 	Outcome  string `json:"outcome"` // delivered | queued
 	Target   string `json:"target"`
@@ -96,9 +96,8 @@ func (s *Server) writeRoutedOrQueued(w http.ResponseWriter, res control.RouteRes
 // words), attempts LIVE confirmed delivery via the same Route path the thread
 // composer uses (pane txn lock, typed outcomes), and on ANY not-delivered outcome
 // (busy/transient/crashed/input-blocked/unconfirmed) enqueues the response to the
-// durable operator outbox so it is AT-LEAST-ONCE: the watch sweep delivers it when
-// the desk can receive. The operator sees exactly what happened — delivered now, or
-// queued with the id.
+// durable operator outbox for later watch retries. The operator sees exactly what
+// happened — pane-accepted now, or queued with the id and delivery unconfirmed.
 func (s *Server) handleControlRespond(w http.ResponseWriter, r *http.Request) {
 	var req respondReq
 	if !decodeJSON(w, r, &req) {
