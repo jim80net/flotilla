@@ -954,7 +954,7 @@ func cmdWatch(args []string) error {
 			detCfg.ScheduleOnTick = sched.Tick
 		}
 		undeliveredAlerted := watch.NewUndeliveredAlertSet()
-		mergedPR := newMergedPRChecker(currentRoster)
+		mergedPR := newMergedPRChecker()
 		commitOnMain := newCommitOnMainChecker(currentRoster)
 		detCfg.OutboxSweepOnTick = func() {
 			outboxSweeper.SweepAll()

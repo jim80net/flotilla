@@ -62,6 +62,10 @@ flotilla dispatch-ack [--roster <path>] <nonce>
 ```
 
 `dispatch-status` resolves disposition across consumed → inbound → outbox.
+Terminal reconciliation is reported separately as `disposition=suppressed`
+with `reason=auto-suppressed-terminal`; it means delivery was stopped by
+verified terminal evidence and explicitly does **not** assert recipient handling.
+Historical `reason=merged` rows render with the same suppressed disposition.
 After handling a dispatch, its recipient runs `dispatch-ack`; the command writes
 the consumed registry first and then clears the inbound row, so a crash between
 those steps is healed by the watch sweep. `$FLOTILLA_SELF` identifies the recipient,
@@ -82,7 +86,9 @@ and one seat cannot acknowledge another seat's pending nonce.
 On Working→Idle finish, reinject is **suppressed** when:
 
 1. Nonce is already in the consumed registry
-2. All cited `PR #N` are MERGED (checker; production may wire `gh` later)
+2. All repository-qualified PR citations (for example `owner/repo#N` or a
+   GitHub pull URL) are MERGED. A bare `PR #N` never auto-suppresses because
+   its repository identity is ambiguous.
 3. `flotilla-chapter-hold` is active (hold — does not consume)
 
 Durable ack of a nonce suppresses reinjection so resume storms cannot re-task.

@@ -73,7 +73,7 @@ func TestReconcileInboundAcks_ConsumedRegistryClearsWithoutTurnFinal(t *testing.
 
 func TestReconcileInboundAcksWithMergedClearsCompletedCargoBeforeAlert(t *testing.T) {
 	dir := t.TempDir()
-	msg, nonce, err := inbound.AppendDispatchNonce("PR #774 merged and chapter closed; no re-merge")
+	msg, nonce, err := inbound.AppendDispatchNonce("acme/product#774 merged and chapter closed; no re-merge")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,10 +83,11 @@ func TestReconcileInboundAcksWithMergedClearsCompletedCargoBeforeAlert(t *testin
 	}); err != nil {
 		t.Fatal(err)
 	}
-	var gotRecipient string
-	n := ReconcileInboundAcksWithMerged(dir, nil, func(recipient string, pr int) bool {
+	var gotRecipient, gotRepository string
+	n := ReconcileInboundAcksWithMerged(dir, nil, func(recipient, repository string, pr int) bool {
 		gotRecipient = recipient
-		return pr == 774
+		gotRepository = repository
+		return repository == "acme/product" && pr == 774
 	})
 	if n != 1 {
 		t.Fatalf("cleared = %d, want 1", n)
@@ -94,18 +95,21 @@ func TestReconcileInboundAcksWithMergedClearsCompletedCargoBeforeAlert(t *testin
 	if gotRecipient != "product-adj" {
 		t.Fatalf("merged checker recipient = %q", gotRecipient)
 	}
+	if gotRepository != "acme/product" {
+		t.Fatalf("merged checker repository = %q", gotRepository)
+	}
 	if reports := ScanUndeliveredInbound(dir, time.Now().UTC(), 15*time.Minute); len(reports) != 0 {
 		t.Fatalf("merged cargo still produced undelivered alert: %+v", reports)
 	}
 	entry, ok := NewRegistry(dir).LookupNonce(nonce)
-	if !ok || entry.Reason != ReasonMerged || entry.Recipient != "product-adj" {
+	if !ok || entry.Reason != ReasonAutoSuppressed || entry.Recipient != "product-adj" {
 		t.Fatalf("durable disposition = %+v, %v", entry, ok)
 	}
 }
 
 func TestReconcileInboundAcksWithMergedRequiresAllCitedPRs(t *testing.T) {
 	dir := t.TempDir()
-	msg, nonce, err := inbound.AppendDispatchNonce("PR #774 merged; PR #775 still needs review")
+	msg, nonce, err := inbound.AppendDispatchNonce("acme/product#774 merged; acme/product#775 still needs review")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,11 +119,41 @@ func TestReconcileInboundAcksWithMergedRequiresAllCitedPRs(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if n := ReconcileInboundAcksWithMerged(dir, nil, func(_ string, pr int) bool { return pr == 774 }); n != 0 {
+	if n := ReconcileInboundAcksWithMerged(dir, nil, func(_, _ string, pr int) bool { return pr == 774 }); n != 0 {
 		t.Fatalf("partially merged multi-PR cargo cleared = %d", n)
 	}
 	if reports := ScanUndeliveredInbound(dir, time.Now().UTC(), 15*time.Minute); len(reports) != 1 {
 		t.Fatalf("partially merged cargo reports = %d, want 1", len(reports))
+	}
+}
+
+func TestReconcileInboundAcksWithMergedRefusesUnscopedCrossRepoCollision(t *testing.T) {
+	dir := t.TempDir()
+	msg, nonce, err := inbound.AppendDispatchNonce("Review memex-openclaw PR #29 before proceeding")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := inbound.Entry{
+		ID: "collision", Sender: "ventures-xo", Recipient: "gatekeeper-xo",
+		Message: msg, Nonce: nonce, DeliveredAt: time.Now().UTC().Add(-time.Hour),
+	}
+	if err := inbound.Record(dir, entry); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	n := ReconcileInboundAcksWithMerged(dir, nil, func(_, _ string, _ int) bool {
+		called = true
+		return true // unrelated primary repository happens to have #29 merged
+	})
+	if n != 0 || called {
+		t.Fatalf("unscoped collision consumed=%d checker-called=%v, want fail-open delivery", n, called)
+	}
+	path, _ := inbound.Path(dir, "gatekeeper-xo")
+	if pending := inbound.NewStore(path).Load(); len(pending) != 1 || pending[0].ID != entry.ID {
+		t.Fatalf("unscoped collision row mutated: %+v", pending)
+	}
+	if _, ok := NewRegistry(dir).LookupNonce(nonce); ok {
+		t.Fatal("unscoped collision must not create an affirmative consumed entry")
 	}
 }
 
@@ -141,7 +175,7 @@ func TestReconcileInboundAcksWithTerminalClearsMainSHACargo(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("cleared = %d, want 1", n)
 	}
-	if entry, ok := NewRegistry(dir).LookupNonce(nonce); !ok || entry.Reason != ReasonMerged {
+	if entry, ok := NewRegistry(dir).LookupNonce(nonce); !ok || entry.Reason != ReasonAutoSuppressed {
 		t.Fatalf("SHA disposition = %+v, %v", entry, ok)
 	}
 }

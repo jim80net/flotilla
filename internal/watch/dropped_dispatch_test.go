@@ -265,7 +265,7 @@ func TestDroppedDispatch_RecipientDelegationDoesNotSuppress(t *testing.T) {
 // #616: MERGED-state suppress auto-consumes and skips reinject.
 func TestDroppedDispatch_MergedSuppressesReinject(t *testing.T) {
 	dir := t.TempDir()
-	msg, nonce, err := inbound.AppendDispatchNonce("Resume implement work for PR #614 after cubic findings")
+	msg, nonce, err := inbound.AppendDispatchNonce("Resume implement work for jim80net/flotilla#614 after cubic findings")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +278,7 @@ func TestDroppedDispatch_MergedSuppressesReinject(t *testing.T) {
 	var reinjected []Job
 	hook := DroppedDispatchFinishHookWithMerged(dir, func(string) (string, bool, error) {
 		return "idle without addressing", true, nil
-	}, func(j Job) { reinjected = append(reinjected, j) }, nil, func(pr int) bool { return pr == 614 })
+	}, func(j Job) { reinjected = append(reinjected, j) }, nil, func(repo string, pr int) bool { return repo == "jim80net/flotilla" && pr == 614 })
 	hook("desk")
 	if len(reinjected) != 0 {
 		t.Fatalf("merged PR must not reinject: %+v", reinjected)

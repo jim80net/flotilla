@@ -18,26 +18,18 @@ type mergedPRCacheEntry struct {
 	checked time.Time
 }
 
-// newMergedPRChecker resolves PR state in each recipient's declared authority
-// domain. Failures fail open for delivery (never suppress): transient GitHub or
+// newMergedPRChecker resolves PR state in the repository named by each citation.
+// Failures fail open for delivery (never suppress): transient GitHub or
 // credential trouble must not discard work. The short cache keeps the watch
 // tick from turning pending inbound rows into GitHub polling traffic.
-func newMergedPRChecker(currentRoster func() *roster.Config) func(string, int) bool {
+func newMergedPRChecker() func(string, string, int) bool {
 	var mu sync.Mutex
 	cache := map[string]mergedPRCacheEntry{}
-	return func(recipient string, pr int) bool {
-		if pr <= 0 || currentRoster == nil {
+	return func(_ string, repository string, pr int) bool {
+		if pr <= 0 || repository == "" {
 			return false
 		}
-		cfg := currentRoster()
-		if cfg == nil {
-			return false
-		}
-		agent, err := cfg.Agent(recipient)
-		if err != nil || agent.PrimaryRepo == "" {
-			return false
-		}
-		key := agent.PrimaryRepo + "#" + strconv.Itoa(pr)
+		key := strings.ToLower(repository) + "#" + strconv.Itoa(pr)
 		now := time.Now()
 		mu.Lock()
 		if hit, ok := cache[key]; ok && now.Sub(hit.checked) < mergedPRCacheTTL {
@@ -48,7 +40,7 @@ func newMergedPRChecker(currentRoster func() *roster.Config) func(string, int) b
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		out, err := exec.CommandContext(ctx, "gh", "pr", "view", strconv.Itoa(pr), "--repo", agent.PrimaryRepo, "--json", "state", "--jq", ".state").Output()
+		out, err := exec.CommandContext(ctx, "gh", "pr", "view", strconv.Itoa(pr), "--repo", repository, "--json", "state", "--jq", ".state").Output()
 		merged := err == nil && strings.TrimSpace(string(out)) == "MERGED"
 		mu.Lock()
 		cache[key] = mergedPRCacheEntry{merged: merged, checked: now}
