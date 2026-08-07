@@ -124,6 +124,32 @@ func TestFormatQueuedAck_Visible(t *testing.T) {
 	}
 }
 
+func TestFormatQueuedSendGuidanceReportsPresentFacts(t *testing.T) {
+	message := "check status\n\n---\nflotilla dispatch ack (#472)\nAfter handling this dispatch, record its durable ack: `flotilla dispatch-ack flotilla-dispatch-deadbeef`\n[dispatch nonce: `flotilla-dispatch-deadbeef`]\n"
+	line := formatQueuedSendGuidance("abc123", "alpha", message, false)
+	for _, want := range []string{
+		"queued in alpha outbox",
+		"id abc123",
+		"not delivered in this call",
+		"flotilla dispatch-status flotilla-dispatch-deadbeef",
+		"cancel pending generation: flotilla cancel abc123",
+	} {
+		if !strings.Contains(line, want) {
+			t.Errorf("queued guidance %q missing %q", line, want)
+		}
+	}
+	for _, forbidden := range []string{"will deliver", "when recipient is idle", "when alpha is idle"} {
+		if strings.Contains(line, forbidden) {
+			t.Errorf("queued guidance makes unsupported future claim %q: %q", forbidden, line)
+		}
+	}
+
+	deduped := formatQueuedSendGuidance("abc123", "alpha", message, true)
+	if !strings.Contains(deduped, "already queued") || strings.Contains(deduped, "will deliver") {
+		t.Fatalf("deduped guidance = %q", deduped)
+	}
+}
+
 // Acceptance (#494): CLI direct-delivery success writes the inbound ledger (not injector-only).
 func TestCLIDirectDeliveryTracksInboundE2E(t *testing.T) {
 	dir := t.TempDir()
