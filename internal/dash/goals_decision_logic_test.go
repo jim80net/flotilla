@@ -9,6 +9,39 @@ import (
 	"github.com/dop251/goja"
 )
 
+func TestQueuedOutcomeCopyDoesNotPromiseFutureDelivery(t *testing.T) {
+	for _, path := range []string{"assets/dash.js", "assets/goals.js"} {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		text := string(body)
+		if !strings.Contains(text, "not delivered in this call") {
+			t.Errorf("%s lacks present-state queued outcome", path)
+		}
+		for _, forbidden := range []string{"will deliver", "delivers it when"} {
+			if strings.Contains(text, forbidden) {
+				t.Errorf("%s retains unsupported future-delivery claim %q", path, forbidden)
+			}
+		}
+	}
+	dashJS, err := os.ReadFile("assets/dash.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	queuedAt := strings.Index(string(dashJS), `if (outcome === "queued")`)
+	if queuedAt < 0 {
+		t.Fatal("queued dashboard outcome block missing")
+	}
+	queuedBlock := string(dashJS)[queuedAt:]
+	if end := strings.Index(queuedBlock, `return { outcome: outcome, text: "NOT accepted`); end >= 0 {
+		queuedBlock = queuedBlock[:end]
+	}
+	if !strings.Contains(queuedBlock, "ok: false") || strings.Contains(queuedBlock, "ok: true") {
+		t.Error("queued dashboard outcome is still classified as success")
+	}
+}
+
 // classListStub returns a minimal classList object (add/remove/toggle/contains).
 func classListStub(vm *goja.Runtime) *goja.Object {
 	o := vm.NewObject()
@@ -357,7 +390,7 @@ func TestFormatRespondOutcomeCardAndModalIdentical509(t *testing.T) {
 		},
 		{
 			map[string]interface{}{"outcome": "queued", "target": "frontend", "queued_id": "abc", "detail": "busy"},
-			"Queued durably for frontend (id abc) — the fleet daemon delivers it when the desk can receive. (busy)",
+			"Queued durably for frontend (id abc) — not delivered in this call. (busy)",
 		},
 		{
 			map[string]interface{}{"outcome": "mystery"},
