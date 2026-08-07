@@ -275,27 +275,29 @@
     <aside id="work-context" class="work-context panel" hidden role="dialog" aria-label="Work context">
       <button id="wc-close" class="wc-close" type="button" aria-label="Close work context">&#215;</button>
       <header id="wc-header" class="wc-header"></header>
-      <section id="wc-timeline" class="wc-timeline" aria-labelledby="wc-timeline-title">
-        <div class="wc-timeline-head">
-          <div>
-            <span class="wc-timeline-kicker">Work history</span>
-            <h3 id="wc-timeline-title">Timeline</h3>
+      <div id="wc-body-scroll" class="wc-body-scroll">
+        <section id="wc-timeline" class="wc-timeline" aria-labelledby="wc-timeline-title">
+          <div class="wc-timeline-head">
+            <div>
+              <span class="wc-timeline-kicker">Work history</span>
+              <h3 id="wc-timeline-title">Timeline</h3>
+            </div>
+            <span id="wc-timeline-summary" class="wc-timeline-summary">Loading source coverage…</span>
           </div>
-          <span id="wc-timeline-summary" class="wc-timeline-summary">Loading source coverage…</span>
-        </div>
-        <div id="wc-timeline-sources" class="wc-timeline-sources" aria-label="Timeline source coverage"></div>
-        <ol id="wc-timeline-events" class="wc-timeline-events" aria-live="polite"></ol>
-        <button id="wc-timeline-earlier" class="wc-timeline-earlier" type="button" hidden>Show earlier history</button>
-      </section>
-      <details id="wc-github" class="wc-github" hidden>
-        <summary id="wc-github-summary"></summary>
-        <div id="wc-github-body" class="wc-github-body"></div>
-      </details>
-      <section class="wc-stream-region" aria-label="Live conversation stream">
-        <div id="wc-live-contract" class="wc-live-contract"></div>
-        <button id="wc-load-earlier" class="wc-load-earlier" type="button">&#8593; load earlier</button>
-        <div id="wc-stream" class="wc-stream conv-thread" role="log" aria-live="polite"></div>
-      </section>
+          <div id="wc-timeline-sources" class="wc-timeline-sources" aria-label="Timeline source coverage"></div>
+          <ol id="wc-timeline-events" class="wc-timeline-events" aria-live="polite"></ol>
+          <button id="wc-timeline-earlier" class="wc-timeline-earlier" type="button" hidden>Show earlier history</button>
+        </section>
+        <details id="wc-github" class="wc-github" hidden>
+          <summary id="wc-github-summary"></summary>
+          <div id="wc-github-body" class="wc-github-body"></div>
+        </details>
+        <section class="wc-stream-region" aria-label="Live conversation stream">
+          <div id="wc-live-contract" class="wc-live-contract"></div>
+          <button id="wc-load-earlier" class="wc-load-earlier" type="button">&#8593; load earlier</button>
+          <div id="wc-stream" class="wc-stream conv-thread" role="log" aria-live="polite"></div>
+        </section>
+      </div>
       <form id="wc-composer" class="thread-composer wc-composer" hidden>
         <textarea id="wc-composer-input" class="thread-composer-input" rows="1"
           placeholder="Message the active seat…" aria-label="Message the active seat"></textarea>
