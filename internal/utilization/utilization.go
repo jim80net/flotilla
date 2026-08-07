@@ -33,7 +33,6 @@ type Summary struct {
 	IdleQueueUnknown   int     `json:"idle_queue_unknown"`
 	Blocked            int     `json:"blocked"`
 	AcceptsDispatch    int     `json:"accepts_dispatch"`
-	AwaitingAuthority  int     `json:"awaiting_authority"`
 	Total              int     `json:"total"`
 	UtilizationPercent float64 `json:"utilization_percent"`
 	UtilizationWall    bool    `json:"utilization_wall"`
@@ -50,8 +49,9 @@ func QueueState(known bool, unblocked int) string {
 	return QueueEmpty
 }
 
-// Build derives the shared summary. The detailed queue and posture counters are
-// diagnostic wire data; Line deliberately does not expose their internal names.
+// Build derives the shared summary. Queue counters remain diagnostic wire data;
+// raw posture evidence stays on each seat rather than becoming a second
+// operator-facing utilization state.
 func Build(agents []Agent) Summary {
 	var out Summary
 	for _, a := range agents {
@@ -84,9 +84,6 @@ func Build(agents []Agent) Summary {
 		if state == "blocked" || raw == "blocked" {
 			out.Blocked++
 		}
-		if raw == "awaiting-authority" || raw == "awaiting_authority" {
-			out.AwaitingAuthority++
-		}
 	}
 	if out.Total > 0 {
 		out.UtilizationPercent = float64(out.Working) * 100 / float64(out.Total)
@@ -95,9 +92,9 @@ func Build(agents []Agent) Summary {
 	return out
 }
 
-// Line renders one human-readable operator metric. Structured queue and posture
-// counters remain available in Summary for diagnostics, but the default prose
-// does not make the operator decode internal state-machine vocabulary.
+// Line renders one human-readable operator metric. Structured queue counters
+// remain available in Summary for diagnostics, but the default prose does not
+// make the operator decode internal state-machine vocabulary.
 func Line(s Summary) string {
 	seatWord := "seats"
 	if s.Total == 1 {
@@ -106,13 +103,6 @@ func Line(s Summary) string {
 	line := fmt.Sprintf("%d of %d %s working", s.Working, s.Total, seatWord)
 	if s.Blocked > 0 {
 		line += fmt.Sprintf(" · %d blocked", s.Blocked)
-	}
-	if s.AwaitingAuthority > 0 {
-		seat := "seats"
-		if s.AwaitingAuthority == 1 {
-			seat = "seat"
-		}
-		line += fmt.Sprintf(" · %d %s waiting for authority", s.AwaitingAuthority, seat)
 	}
 	return line
 }
