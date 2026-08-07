@@ -129,18 +129,18 @@ func StaleEscalationMessage(e Entry, now time.Time, class RecipientClass) string
 	switch class {
 	case RecipientWorking:
 		return fmt.Sprintf(
-			"outbox: send from %q to %q still queued after %s (%d deferrals) — recipient busy (mid-turn); message remains queued until idle",
-			e.Sender, e.Recipient, age, e.Deferrals,
+			"outbox: send from %q to %q still queued after %s — recipient busy (mid-turn); delivery unconfirmed",
+			e.Sender, e.Recipient, age,
 		)
 	case RecipientWedge:
 		return fmt.Sprintf(
-			"outbox: send from %q to %q undeliverable for %s (%d deferrals) — recipient may be wedged, crashed, or input-blocked; message remains queued until deliverable",
-			e.Sender, e.Recipient, age, e.Deferrals,
+			"outbox: send from %q to %q undeliverable for %s — recipient may be wedged, crashed, or input-blocked; delivery unconfirmed",
+			e.Sender, e.Recipient, age,
 		)
 	default:
 		return fmt.Sprintf(
-			"outbox: send from %q to %q undeliverable for %s (%d deferrals) — recipient not accepting input; message remains queued until deliverable",
-			e.Sender, e.Recipient, age, e.Deferrals,
+			"outbox: send from %q to %q undeliverable for %s — recipient not accepting input; delivery unconfirmed",
+			e.Sender, e.Recipient, age,
 		)
 	}
 }

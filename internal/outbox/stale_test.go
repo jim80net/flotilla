@@ -96,7 +96,7 @@ func TestStaleEscalationMessage_WorkingHonest500(t *testing.T) {
 	now := enq.Add(2 * time.Hour)
 	e := Entry{Sender: "backend", Recipient: "build-desk", Deferrals: 10, EnqueuedAt: enq}
 	msg := StaleEscalationMessage(e, now, RecipientWorking)
-	for _, want := range []string{`from "backend"`, `to "build-desk"`, "2h0m0s", "10 deferrals", "busy", "mid-turn"} {
+	for _, want := range []string{`from "backend"`, `to "build-desk"`, "2h0m0s", "busy", "mid-turn", "delivery unconfirmed"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("Working message %q missing %q", msg, want)
 		}
@@ -106,6 +106,9 @@ func TestStaleEscalationMessage_WorkingHonest500(t *testing.T) {
 			t.Fatalf("Working message must not claim %q: %q", bad, msg)
 		}
 	}
+	if strings.Contains(msg, "deferrals") || strings.Contains(msg, "until idle") {
+		t.Fatalf("Working message must report age, not poll counts or future delivery: %q", msg)
+	}
 }
 
 func TestStaleEscalationMessage_WedgeNamesParties(t *testing.T) {
@@ -113,10 +116,13 @@ func TestStaleEscalationMessage_WedgeNamesParties(t *testing.T) {
 	now := enq.Add(2 * time.Hour)
 	e := Entry{Sender: "backend", Recipient: "cos", Deferrals: 3, EnqueuedAt: enq}
 	msg := StaleEscalationMessage(e, now, RecipientWedge)
-	for _, want := range []string{`from "backend"`, `to "cos"`, "2h0m0s", "3 deferrals", "wedged"} {
+	for _, want := range []string{`from "backend"`, `to "cos"`, "2h0m0s", "wedged", "delivery unconfirmed"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("wedge message %q missing %q", msg, want)
 		}
+	}
+	if strings.Contains(msg, "deferrals") || strings.Contains(msg, "until deliverable") {
+		t.Fatalf("wedge message must report age, not poll counts or future delivery: %q", msg)
 	}
 }
 

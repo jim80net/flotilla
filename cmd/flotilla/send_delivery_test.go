@@ -64,16 +64,19 @@ func TestBouncedSendDedupesIdenticalPending(t *testing.T) {
 	queued := outbox.NewStore(path).Load()
 	queued[0].Deferrals = 708
 	outbox.NewStore(path).Update(queued[0])
+	previousNow := queuedSendNow
+	queuedSendNow = func() time.Time { return queued[0].EnqueuedAt.Add(106 * time.Minute) }
+	t.Cleanup(func() { queuedSendNow = previousNow })
 	stdout, stderr := captureStdoutStderr(t, func() {
 		if err := enqueueOrFailSend(rosterPath, "alpha", "xo", msg2, busy); err != nil {
 			t.Fatal(err)
 		}
 	})
-	if !strings.Contains(stdout, "deferrals=708") || !strings.Contains(stdout, "inspect with `flotilla dispatch-status ") || !strings.Contains(stdout, "cancel with `FLOTILLA_SELF=alpha flotilla cancel ") {
+	if !strings.Contains(stdout, "queued 1h46m ago") || !strings.Contains(stdout, "age=1h46m") || !strings.Contains(stdout, "inspect with `flotilla dispatch-status ") || !strings.Contains(stdout, "cancel with `FLOTILLA_SELF=alpha flotilla cancel ") {
 		t.Fatalf("queued output lacks present-state recovery facts: stdout=%q", stdout)
 	}
-	if strings.Contains(stdout, "will deliver") || strings.Contains(stderr, "will deliver") {
-		t.Fatalf("queued output retained unsupported future promise: stdout=%q stderr=%q", stdout, stderr)
+	if strings.Contains(stdout, "will deliver") || strings.Contains(stderr, "will deliver") || strings.Contains(stdout, "deferrals") {
+		t.Fatalf("queued output retained misleading reporter field: stdout=%q stderr=%q", stdout, stderr)
 	}
 	got := outbox.NewStore(path).Load()
 	if len(got) != 1 {
@@ -126,11 +129,11 @@ func TestDirectSendAfterDurableJoinsTailWithoutQueueJump(t *testing.T) {
 
 // #475 desk-visible queued ack: machine-readable QUEUED line for monitors.
 func TestFormatQueuedAck_Visible(t *testing.T) {
-	line := dispatch.FormatQueuedAck("deadbeef", "alpha", "xo", false, 0)
-	if !strings.Contains(line, "QUEUED") || !strings.Contains(line, "status=busy_outbox") || !strings.Contains(line, "deferrals=0") {
+	line := dispatch.FormatQueuedAck("deadbeef", "alpha", "xo", false, "0s")
+	if !strings.Contains(line, "QUEUED") || !strings.Contains(line, "status=busy_outbox") || !strings.Contains(line, "age=0s") {
 		t.Fatalf("queued ack not desk-visible: %q", line)
 	}
-	if !strings.Contains(dispatch.FormatQueuedAck("x", "a", "b", true, 708), "status=already_queued deferrals=708") {
+	if !strings.Contains(dispatch.FormatQueuedAck("x", "a", "b", true, "1h46m"), "status=already_queued age=1h46m") {
 		t.Fatal("deduped ack missing already_queued")
 	}
 }

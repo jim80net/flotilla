@@ -142,12 +142,12 @@ func TestShouldSuppressTerminalRequiresContextualSHAOnMain(t *testing.T) {
 
 func TestFormatQueuedAck_MachineReadable(t *testing.T) {
 	// Desk-visible queued ack shape used by cmd send (#475 extension).
-	line := FormatQueuedAck("abc123", "memex", "xo", false, 0)
-	if line != "QUEUED id=abc123 sender=memex recipient=xo status=busy_outbox deferrals=0" {
+	line := FormatQueuedAck("abc123", "memex", "xo", false, "0s")
+	if line != "QUEUED id=abc123 sender=memex recipient=xo status=busy_outbox age=0s" {
 		t.Fatalf("line = %q", line)
 	}
-	line = FormatQueuedAck("abc123", "memex", "xo", true, 708)
-	if line != "QUEUED id=abc123 sender=memex recipient=xo status=already_queued deferrals=708" {
+	line = FormatQueuedAck("abc123", "memex", "xo", true, "1h46m")
+	if line != "QUEUED id=abc123 sender=memex recipient=xo status=already_queued age=1h46m" {
 		t.Fatalf("dedup line = %q", line)
 	}
 }

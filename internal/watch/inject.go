@@ -571,17 +571,17 @@ func (in *Injector) maybeStaleEscalateOutbox(j *Job, entry *outbox.Entry, now ti
 // relayStaleAlertInterval while the message remains queued.
 func (in *Injector) maybeStaleEscalateRelay(j *Job, now time.Time) {
 	if j.lastStaleAlert.IsZero() && j.deferrals >= busyEscalateAt {
-		in.raise("operator message to %q is QUEUED — %d deferrals over ~%s; delivery unconfirmed", j.Agent, j.deferrals, time.Duration(j.deferrals)*busyDeferDelay)
+		in.raise("operator message to %q is QUEUED — queued for ~%s; delivery unconfirmed", j.Agent, time.Duration(j.deferrals)*busyDeferDelay)
 		j.lastStaleAlert = now
 		return
 	}
 	if !j.lastStaleAlert.IsZero() && now.Sub(j.lastStaleAlert) >= relayStaleAlertInterval {
-		in.raise("operator message to %q still QUEUED — %d deferrals over ~%s total; delivery unconfirmed", j.Agent, j.deferrals, now.Sub(j.enqueuedAt).Round(time.Second))
+		in.raise("operator message to %q still QUEUED — queued for ~%s total; delivery unconfirmed", j.Agent, now.Sub(j.enqueuedAt).Round(time.Second))
 		j.lastStaleAlert = now
 		return
 	}
 	if j.lastStaleAlert.IsZero() && !j.enqueuedAt.IsZero() && now.Sub(j.enqueuedAt) >= relayStaleAlertInterval {
-		in.raise("operator message to %q still QUEUED — %d deferrals over ~%s total; delivery unconfirmed", j.Agent, j.deferrals, now.Sub(j.enqueuedAt).Round(time.Second))
+		in.raise("operator message to %q still QUEUED — queued for ~%s total; delivery unconfirmed", j.Agent, now.Sub(j.enqueuedAt).Round(time.Second))
 		j.lastStaleAlert = now
 	}
 }
