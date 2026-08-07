@@ -126,7 +126,7 @@ usage:
   flotilla send --from <sender> <agent> <message>     inline message
   flotilla send --from <sender> --file <path> <agent> message body from a file ('-' = stdin)
   flotilla cancel <outbox-id> [--roster <path>]       stand down the pending sender→recipient generation
-  flotilla dispatch-status [--roster <path>] <nonce>  consumed / queued / delivered / undelivered (#614)
+  flotilla dispatch-status [--roster <path>] <nonce-or-message-id>  consumed / queued / delivered / undelivered (#614)
   flotilla dispatch-ack [--roster <path>] <nonce>     settle this seat's dispatch in the durable ack ledger (#472)
   flotilla notify --from <agent> <message>            post to the operator under <agent>'s webhook (no tmux)
   flotilla notify --from <agent> --file <path>        notify body from a file ('-' = stdin)

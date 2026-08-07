@@ -85,9 +85,7 @@ func cmdDispatchAck(args []string) error {
 	if match.Recipient != from {
 		return fmt.Errorf("dispatch-ack: inbound recipient %q does not match seat %q", match.Recipient, from)
 	}
-	if _, err := reg.Consume(dispatch.ConsumeFromInbound(
-		match.Nonce, match.Message, dispatch.ReasonDurableAck, match.Sender, match.Recipient,
-	)); err != nil {
+	if _, err := reg.Consume(dispatch.ConsumeFromInboundEntry(*match, dispatch.ReasonDurableAck)); err != nil {
 		return fmt.Errorf("dispatch-ack: write durable ack: %w", err)
 	}
 	st.Remove(match.ID)

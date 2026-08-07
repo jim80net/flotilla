@@ -145,6 +145,23 @@ func TestConsumeCoordinatorRecipient_SettlesNonceAtSendTime707(t *testing.T) {
 	}
 }
 
+func TestConsumeCoordinatorRecipientID_PreservesQueuedSendHandle(t *testing.T) {
+	dir := t.TempDir()
+	msg, nonce, err := inbound.AppendDispatchNonce("queued coordinator delivery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const id = "send-id-707"
+	inserted, err := ConsumeCoordinatorRecipientID(dir, "desk", "xo", id, msg)
+	if err != nil || !inserted {
+		t.Fatalf("consume coordinator id = (%v, %v)", inserted, err)
+	}
+	got := LookupIdentifier(dir, id, time.Now().UTC())
+	if got.Disposition != DispositionConsumed || got.ID != id || got.Nonce != nonce || got.Reason != ReasonCoordinatorRecipient {
+		t.Fatalf("id lookup = %+v", got)
+	}
+}
+
 func TestConsumeCoordinatorRecipient_NoNonceRecordsNothing707(t *testing.T) {
 	dir := t.TempDir()
 	if inserted, err := ConsumeCoordinatorRecipient(dir, "desk", "xo", "plain message, no footer"); err != nil || inserted {
