@@ -16,23 +16,36 @@ func readSiteFile(t *testing.T, name string) string {
 	return string(b)
 }
 
-func TestLandingGeneratedAtmosphereContract(t *testing.T) {
+func TestLandingHeroShowsProductProof(t *testing.T) {
 	page := readSiteFile(t, "index.html")
+	for _, asset := range []string{
+		"assets/dashboard-product-proof-mobile-780.webp",
+		"assets/dashboard-product-proof-720.webp",
+		"assets/dashboard-product-proof-1440.webp",
+	} {
+		if _, err := os.Stat(asset); err != nil {
+			t.Errorf("product-proof asset %s is not readable: %v", asset, err)
+		}
+	}
 	for _, want := range []string{
-		`class="generated-asset generated-asset--hero"`,
+		`class="product-proof product-proof--hero"`,
 		`class="generated-asset generated-asset--tools"`,
-		`hero-atmosphere-800.webp 800w`,
-		`hero-atmosphere-1600.webp 1600w`,
+		`dashboard-product-proof-720.webp 720w`,
+		`dashboard-product-proof-1440.webp 1440w`,
+		`dashboard-product-proof-mobile-780.webp 780w`,
+		`alt="Flotilla dashboard showing a fleet map, active coding desks, coordination history, and a scoped work queue"`,
 		`tools-atmosphere-800.webp 800w`,
 		`tools-atmosphere-1600.webp 1600w`,
 		`sizes="(max-width: 720px) calc(100vw - 48px), 46vw"`,
 	} {
 		if !strings.Contains(page, want) {
-			t.Errorf("landing page missing generated atmosphere marker %q", want)
+			t.Errorf("landing page missing product-proof marker %q", want)
 		}
 	}
-	if got := strings.Count(page, `class="generated-asset__disclosure"`); got != 2 {
-		t.Errorf("generated disclosure count = %d, want 2", got)
+	for _, stale := range []string{"AI-GENERATED ATMOSPHERE", "hero-atmosphere-800.webp", "hero-atmosphere-1600.webp", `generated-asset__disclosure`} {
+		if strings.Contains(page, stale) {
+			t.Errorf("landing page retains rejected hero marker %q", stale)
+		}
 	}
 	if strings.Contains(page, `.png`) {
 		t.Error("landing page references a PNG source master as a public payload")

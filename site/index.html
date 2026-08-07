@@ -105,23 +105,28 @@
           </div>
         </div>
 
-        <figure class="generated-asset generated-asset--hero">
+        <figure class="product-proof product-proof--hero">
           <picture>
             <source
+              media="(max-width: 600px)"
               type="image/webp"
-              srcset="./assets/hero-atmosphere-800.webp 800w, ./assets/hero-atmosphere-1600.webp 1600w"
+              srcset="./assets/dashboard-product-proof-mobile-780.webp 780w"
+              sizes="calc(100vw - 48px)"
+            />
+            <source
+              type="image/webp"
+              srcset="./assets/dashboard-product-proof-720.webp 720w, ./assets/dashboard-product-proof-1440.webp 1440w"
               sizes="(max-width: 920px) calc(100vw - 48px), 44vw"
             />
             <img
-              src="./assets/hero-atmosphere-800.webp"
-              width="800"
-              height="598"
-              alt="Warm still life of blank cream papers, a green folder, and a brass clip on an ivory worktable"
+              src="./assets/dashboard-product-proof-720.webp"
+              width="720"
+              height="450"
+              alt="Flotilla dashboard showing a fleet map, active coding desks, coordination history, and a scoped work queue"
               fetchpriority="high"
               decoding="async"
             />
           </picture>
-          <figcaption class="generated-asset__disclosure">AI-GENERATED ATMOSPHERE</figcaption>
         </figure>
       </div>
 
@@ -287,7 +292,6 @@
             decoding="async"
           />
         </picture>
-        <figcaption class="generated-asset__disclosure">AI-GENERATED ATMOSPHERE</figcaption>
       </figure>
 
       <div class="diff-strip">

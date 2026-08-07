@@ -199,7 +199,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
    non-wrapping code line (the install command, the start snippets) refuses to shrink
    and drags the whole column past the viewport (horizontal overflow on mobile). Let
    these columns shrink to the track so long lines scroll WITHIN their box instead. */
-.hero-copy, .generated-asset { min-width: 0; }
+.hero-copy, .product-proof, .generated-asset { min-width: 0; }
 
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.35} }
 
@@ -234,22 +234,21 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 
 .hero-cta { display: flex; gap: .8rem; margin-top: 1.5rem; flex-wrap: wrap; }
 
-/* Generated anchors are atmosphere only. Disclosure remains deterministic HTML. */
+/* Above the fold shows the real dashboard; the later tools image remains decorative. */
+.product-proof,
 .generated-asset {
   position: relative; margin: 0; aspect-ratio: 4 / 3;
   border: 1px solid #9e9276; border-radius: 9px; overflow: hidden;
   background: var(--raised);
   box-shadow: 0 14px 28px rgba(74, 64, 42, .12);
 }
+.product-proof { aspect-ratio: 8 / 5; }
+.product-proof picture,
+.product-proof img,
 .generated-asset picture,
 .generated-asset img { display: block; width: 100%; height: 100%; }
+.product-proof img { object-fit: contain; object-position: center; }
 .generated-asset img { object-fit: cover; object-position: center; }
-.generated-asset__disclosure {
-  position: absolute; left: 12px; bottom: 12px;
-  padding: 6px 8px; border: 1px solid #cdbf9e; border-radius: 4px;
-  background: rgba(255, 253, 249, .9); color: var(--ink);
-  font: 700 10px/1.3 var(--mono); letter-spacing: .04em;
-}
 .generated-asset--tools { width: 100%; margin: 0 0 1.8rem; }
 @media (min-width: 721px) {
   #yours {
@@ -262,17 +261,13 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
   #yours .generated-asset--tools { grid-column: 2; width: 100%; margin: 0 0 2.6rem; }
   #yours .diff-strip { grid-column: 1 / -1; }
 }
-@media (max-width: 600px) {
-  .generated-asset__disclosure { font-size: 9px; }
-}
-
 /* staggered hero reveal */
-.hero-copy > *, .generated-asset--hero { animation: rise .7s cubic-bezier(.2,.7,.2,1) both; }
+.hero-copy > *, .product-proof--hero { animation: rise .7s cubic-bezier(.2,.7,.2,1) both; }
 .hero-headline { animation-delay: .08s; }
 .hero-sub { animation-delay: .16s; }
 .install { animation-delay: .24s; }
 .hero-cta { animation-delay: .32s; }
-.generated-asset--hero { animation-delay: .3s; }
+.product-proof--hero { animation-delay: .3s; }
 @keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
 
 /* harness strip */
@@ -414,7 +409,7 @@ h1, h2, h3 { font-family: var(--display); color: var(--ink); line-height: 1.1; l
 @keyframes flow { to { stroke-dashoffset: -120; } }
 @media (max-width: 920px) { .diagram { position: static; } }
 @media (prefers-reduced-motion: reduce) {
-  .spokes path, .bus-link, .hero-copy > *, .generated-asset--hero { animation: none !important; }
+  .spokes path, .bus-link, .hero-copy > *, .product-proof--hero { animation: none !important; }
 }
 
 .how-steps { list-style: none; counter-reset: step; margin: 0; padding: 0; display: grid; gap: .8rem; }
