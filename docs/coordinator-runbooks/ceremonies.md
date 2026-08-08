@@ -11,10 +11,43 @@ The `flotilla-watch` wall-clock scheduler fires prompts from `<roster-dir>/sched
 - **Evening walk** — dispatch PRODUCT WALK orders to every product-owning XO via
   `flotilla send`.
 - **Morning parade** — build and deliver the parade deck.
+- **Recursive retro** — synthesize the dated Cos reliability package.
+- **Fleet productivity self-audit** — measure, disposition, fan out, and ledger the top gap.
+
+The August 2026 incident was a ceremony-classification defect, not a general
+scheduler outage or a broken injector contract. The scheduler emitted once-daily
+work as `KindDetector`; after coordinator→adjutant redirect, the injector correctly
+dropped that time-relative class while the adjutant was busy. A later recursive
+retro reached the same target while idle and produced its package. Scheduled
+ceremonies now emit distinct `KindScheduled` jobs, whose busy behavior follows
+the existing durable/no-operator-escalation `KindSend` posture. Heartbeat and
+detector policy is unchanged.
+
+That classification is the primary fix and does not depend on artifact
+configuration. Expected-artifact checks begin only after confirmed delivery and
+provide second-line detection for fired/delivered-but-empty ceremonies.
 
 Schedule survives session rotation (unlike in-session crons). Cross-check
-`flotilla-schedule-state.json` against watch service logs after any coordinator
-rotation. Heed busy-pane caveat in [`incident-response.md`](./incident-response.md).
+`flotilla-schedule-state.json` after any coordinator rotation. The sidecar
+distinguishes triggered, enqueued, delivered, artifact-confirmed, and failed
+occurrences; `last_fired` alone is not success. All four Cos ceremonies need an
+expected artifact and bounded window:
+
+| Ceremony | Expected artifact | Example window |
+|---|---|---|
+| morning parade | `state/parades/<date>/facts.md` | `2h` |
+| evening walk | `state/ceremonies/evening-walk/<date>.md` | `6h` |
+| recursive retro | `state/retros/cos-<date>.md` | `6h` |
+| fleet productivity self-audit | `state/ceremonies/productivity-self-audit/<date>.md` | `1h` |
+
+Paths are relative to the roster directory unless absolute. If the roster lives
+under a config directory while ceremony state lives in a separate private repo,
+configure the artifact as an absolute repo path. Missing, empty, stale, or late
+artifacts escalate mechanically to the owning coordinator.
+The evening-walk receipt records its dispatch nonce, recipients, and collect
+disposition; the productivity receipt records the measured top gap, fan-out
+disposition, and fleet-backlog ledger reference. Dedicated dated receipts prevent
+an unrelated parade or backlog edit from manufacturing ceremony success.
 
 **Parade fires before plausible operator arrival on purpose** — the parade waits for
 the reviewer, not the reverse.

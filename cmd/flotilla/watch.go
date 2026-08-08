@@ -399,20 +399,29 @@ func cmdWatch(args []string) error {
 		// best-effort (never affects delivery).
 		mirrorRelayToLedger(cfg, j)
 	})
-	injector.Start()
-	watch.ReplayRelayQueue(injector, *queuePath)
-	outboxSweeper.SweepAll()
-	defer injector.Stop()
-
-	// Daemon-native wall-clock scheduler (#413): durable last-fired sidecar beside the
-	// roster; poll loop + optional detector hook share one Scheduler (mutex-safe).
+	// Daemon-native wall-clock scheduler: durable occurrence lifecycle beside
+	// the roster. Wire delivery callbacks before the injector worker starts so a
+	// fast confirmed turn cannot outrun its scheduler confirmation hook.
 	var sched *watch.Scheduler
 	scheduleSidecarPath := filepath.Join(rosterDir, "flotilla-schedule-state.json")
 	if len(cfg.Schedules) > 0 {
 		sched = watch.NewScheduler(cfg.Schedules, scheduleSidecarPath, rosterDir, injector.Enqueue)
+		sched.SetOwningCoordinator(func(target string) string {
+			current := currentRoster()
+			if current.IsCoordinator(target) {
+				return target
+			}
+			return current.OwningXO(target, xo)
+		})
+		injector.SetScheduledDeliveryHooks(sched.DeliveryConfirmed, sched.DeliveryFailed)
+		injector.SetScheduledAttemptHooks(sched.DeliveryAttemptStarted, sched.DeliveryDeferred)
 		fmt.Printf("flotilla watch: wall-clock scheduler active (%d schedule(s), sidecar=%s)\n",
 			len(cfg.Schedules), scheduleSidecarPath)
 	}
+	injector.Start()
+	watch.ReplayRelayQueue(injector, *queuePath)
+	outboxSweeper.SweepAll()
+	defer injector.Stop()
 
 	ack := watch.NewAckWatcher(*ackPath)
 	ackInstr := "\n(To ack you are alive, run: touch " + *ackPath + ")"

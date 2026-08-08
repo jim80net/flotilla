@@ -54,7 +54,7 @@ func NewCoordinatorIngress(cfg *roster.Config) *CoordinatorIngress {
 //
 //	Operator-authored relay (KindRelay / KindDefault): single-alias to adjutant — the
 //	  intelligent conversation buffer holds / triages / forwards verbatim at seam.
-//	System detector wakes: single-alias to adjutant (existing #533).
+//	System detector wakes and scheduled instructions: single-alias to adjutant.
 //	Durable inter-agent sends (KindSend): pass through to the named recipient.
 //	Adjutant seam drains: pass through to the leader unchanged.
 func (g *CoordinatorIngress) Apply(job Job) []Job {
@@ -62,7 +62,7 @@ func (g *CoordinatorIngress) Apply(job Job) []Job {
 	if cfg == nil {
 		return []Job{job}
 	}
-	if job.Kind == KindHeartbeat || !cfg.IsCoordinator(job.Agent) {
+	if job.Kind == KindHeartbeat || job.DirectToOwner || !cfg.IsCoordinator(job.Agent) {
 		return []Job{job}
 	}
 	if isAdjutantSeamDrain(job) {
@@ -79,10 +79,10 @@ func (g *CoordinatorIngress) Apply(job Job) []Job {
 		redirected.Message = AdjutantOperatorIngressBody(leader, job.Message)
 		return []Job{redirected}
 	}
-	if job.Kind != KindDetector {
+	if job.Kind != KindDetector && job.Kind != KindScheduled {
 		return []Job{job}
 	}
-	// System wake: adjutant front office only.
+	// System wake / scheduled instruction: adjutant front office only.
 	redirected := job
 	redirected.Agent = adj
 	return []Job{redirected}

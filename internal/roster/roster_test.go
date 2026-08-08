@@ -332,4 +332,20 @@ func TestExampleRosterLoadsPrimaryRepo(t *testing.T) {
 	if xo.PrimaryRepo != "acme/flotilla" {
 		t.Errorf("xo.PrimaryRepo = %q, want acme/flotilla", xo.PrimaryRepo)
 	}
+	wantCeremonies := map[string]string{
+		"morning-parade":                "state/parades/<date>/facts.md",
+		"evening-walk":                  "state/ceremonies/evening-walk/<date>.md",
+		"cos-recursive-retro":           "state/retros/cos-<date>.md",
+		"fleet-productivity-self-audit": "state/ceremonies/productivity-self-audit/<date>.md",
+	}
+	if len(cfg.Schedules) != len(wantCeremonies) {
+		t.Fatalf("example schedules = %d, want %d artifact-aware Cos ceremonies", len(cfg.Schedules), len(wantCeremonies))
+	}
+	for _, schedule := range cfg.Schedules {
+		if want, ok := wantCeremonies[schedule.Name]; !ok {
+			t.Errorf("unexpected example schedule %q", schedule.Name)
+		} else if schedule.ExpectedArtifact != want || schedule.ProductionWindow == "" {
+			t.Errorf("schedule %q artifact/window = %q/%q, want %q/non-empty", schedule.Name, schedule.ExpectedArtifact, schedule.ProductionWindow, want)
+		}
+	}
 }

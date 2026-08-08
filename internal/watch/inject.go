@@ -65,6 +65,10 @@ const (
 	// KindDetector is a change-detector wake or a desk-heartbeat/nudge beat
 	// (audit-suppressed; a tick is dropped when busy and never escalates).
 	KindDetector JobKind = "detector"
+	// KindScheduled is a durable scheduled work instruction or failure escalation.
+	// Unlike a detector tick it survives a busy recipient; ambiguous instruction
+	// attempts fail closed, while stable-ID failure escalations retry to confirmation.
+	KindScheduled JobKind = "scheduled"
 	// KindSend is a deferred inter-agent `flotilla send` swept from a per-sender outbox (#475).
 	// Like a relay it is deferred-not-dropped when busy, but it does not escalate to the operator.
 	KindSend JobKind = "send"
@@ -74,7 +78,7 @@ const (
 type Job struct {
 	Agent   string
 	Message string
-	Kind    JobKind // KindRelay | KindHeartbeat | KindDetector | KindDefault — labels the audit mirror
+	Kind    JobKind // relay/heartbeat/detector/scheduled/send — labels delivery policy and logs
 	// IntendedRecipient is the original named recipient before any delivery-time
 	// ingress alias. Empty means Agent for callers that bypass Enqueue.
 	IntendedRecipient string
@@ -113,6 +117,14 @@ type Job struct {
 	// ClaimKey is the decision-brief gap key for KindDetector jobs; the watch daemon sets it
 	// so the injector can confirm or abort the in-memory claim on delivery outcome (#365 P1).
 	ClaimKey string
+	// ScheduleName, ScheduleOccurrence, and SchedulePhase correlate confirmed
+	// delivery back to the scheduler's durable occurrence state.
+	ScheduleName       string
+	ScheduleOccurrence string
+	SchedulePhase      string // "instruction" or "escalation"
+	// DirectToOwner bypasses coordinator→adjutant aliasing for the actionable
+	// missing-artifact escalation. Normal scheduled instructions leave it false.
+	DirectToOwner bool
 	// ingressResolved is set after CoordinatorIngress.Apply has run once for this job.
 	// Busy-defer re-enqueues must not re-Apply — that would re-spawn adjutant observation
 	// copies on every retry (#592).
@@ -156,6 +168,10 @@ type Injector struct {
 	onOutboxDone              func(sender, id string)                 // optional: clear in-flight sweep guard (#475)
 	onDetectorConfirm         func(claimKey string)                   // optional: durable claim after confirmed detector delivery (#365)
 	onDetectorAbort           func(claimKey string)                   // optional: release in-memory claim on busy drop / failure (#365)
+	onScheduledConfirm        func(Job)                               // optional: durable scheduled-delivery confirmation
+	onScheduledFailure        func(Job, string)                       // optional: release scheduler in-flight claim after terminal failure
+	onScheduledAttempt        func(Job) error                         // optional: durable pre-delivery attempt receipt
+	onScheduledDeferred       func(Job, string) error                 // optional: clear receipt after proven non-delivery
 	onInboundTrack            func(Job)                               // optional: recipient inbound ledger after confirmed KindSend (#472)
 	now                       func() time.Time                        // clock for stale escalation; nil ⇒ time.Now()
 	outboxOwningCoordinator   func(sender string) string              // optional: sender → coordinator for stale outbox (#477)
@@ -209,6 +225,23 @@ func (in *Injector) SetOutboxDone(fn func(sender, id string)) { in.onOutboxDone 
 func (in *Injector) SetDetectorClaimHooks(confirm, abort func(claimKey string)) {
 	in.onDetectorConfirm = confirm
 	in.onDetectorAbort = abort
+}
+
+// SetScheduledDeliveryHooks wires the scheduler's durable occurrence lifecycle.
+// Confirm runs only after the target surface confirms a turn started; failure
+// runs on terminal delivery errors. Busy/transient attempts remain queued.
+func (in *Injector) SetScheduledDeliveryHooks(confirm func(Job), failure func(Job, string)) {
+	in.onScheduledConfirm = confirm
+	in.onScheduledFailure = failure
+}
+
+// SetScheduledAttemptHooks brackets the target-surface mutation with durable
+// scheduler receipts. A receipt write failure refuses the send; a busy-result
+// write failure refuses automatic requeue because the durable outcome is then
+// ambiguous.
+func (in *Injector) SetScheduledAttemptHooks(attempt func(Job) error, deferred func(Job, string) error) {
+	in.onScheduledAttempt = attempt
+	in.onScheduledDeferred = deferred
 }
 
 // SetInboundTrack installs a hook called after a CONFIRMED KindSend delivery to record the
@@ -284,6 +317,13 @@ func (in *Injector) deliver(j Job) {
 	} else if in.relaySend != nil && usesSelfHealSend(j.Kind) {
 		send = in.relaySend
 	}
+	if j.Kind == KindScheduled && in.onScheduledAttempt != nil {
+		if err := in.onScheduledAttempt(j); err != nil {
+			log.Printf("flotilla watch: scheduled delivery to %q refused before send: %v", j.Agent, err)
+			in.failScheduled(j, err.Error())
+			return
+		}
+	}
 	var err error
 	if j.Kind == KindSend && j.OutboxBound && in.rosterDir != "" {
 		attempted, attemptErr := outbox.AttemptCurrent(in.rosterDir, outbox.Entry{
@@ -327,11 +367,20 @@ func (in *Injector) deliver(j Job) {
 		if j.Kind == KindDetector && j.ClaimKey != "" && in.onDetectorConfirm != nil {
 			in.onDetectorConfirm(j.ClaimKey)
 		}
+		if j.Kind == KindScheduled && in.onScheduledConfirm != nil {
+			in.onScheduledConfirm(j)
+		}
 		if in.mirror != nil && isRelay(j.Kind) {
 			in.mirror(j) // audit only operator relays that actually landed
 		}
 	case errors.Is(err, surface.ErrBusy), errors.Is(err, surface.ErrTransient):
 		// The composer is busy (or its state is transiently uncertain) — do NOT fire into it.
+		if j.Kind == KindScheduled && in.onScheduledDeferred != nil {
+			if persistErr := in.onScheduledDeferred(j, err.Error()); persistErr != nil {
+				log.Printf("flotilla watch: scheduled delivery to %q not requeued: durable busy result failed: %v", j.Agent, persistErr)
+				return
+			}
+		}
 		in.handleBusy(j, err)
 	case errors.Is(err, surface.ErrPanelBlocked):
 		// The desk's composer did NOT accept the message (#152): either a per-agent message
@@ -350,6 +399,7 @@ func (in *Injector) deliver(j Job) {
 			in.outboxDone(j)
 		}
 		in.abortDetectorClaim(j)
+		in.failScheduled(j, err.Error())
 	default:
 		// A real delivery failure (ErrCrashed / ErrUnconfirmed / a paste-fail / a resolve or
 		// lock-contention error). Never silent for an operator message.
@@ -361,7 +411,14 @@ func (in *Injector) deliver(j Job) {
 			in.outboxDone(j)
 		}
 		in.abortDetectorClaim(j)
+		in.failScheduled(j, err.Error())
 		log.Printf("flotilla watch: deliver to %q failed: %v", j.Agent, err)
+	}
+}
+
+func (in *Injector) failScheduled(j Job, reason string) {
+	if j.Kind == KindScheduled && in.onScheduledFailure != nil {
+		in.onScheduledFailure(j, reason)
 	}
 }
 
@@ -418,9 +475,8 @@ func intendedRecipient(j Job) string {
 
 // handleBusy applies the kind-aware not-idle policy for a busy (ErrBusy) or transiently-
 // uncertain (ErrTransient) result. A heartbeat/detector tick is time-relative and is DROPPED
-// (the next tick re-evaluates; re-delivering a stale tick would double-prompt). Operator relays
-// and swept inter-agent sends are never dropped: short transient re-assess, then durable
-// disk-backed retry at the busy cadence until deliverable (#286, #475).
+// (the next tick re-evaluates; re-delivering a stale tick would double-prompt). Operator relays,
+// swept inter-agent sends, and scheduled ceremonies are never dropped for busyness.
 func (in *Injector) handleBusy(j Job, cause error) {
 	if !isDeferredDelivery(j.Kind) {
 		log.Printf("flotilla watch: drop %s to %q (not idle): %v", deliveryKind(j.Kind), j.Agent, cause)
@@ -663,9 +719,13 @@ func isRelay(kind JobKind) bool {
 	return kind == KindDefault || kind == KindRelay || kind == KindOperatorInterrupt
 }
 
-// isDeferredDelivery reports jobs that are deferred-not-dropped when busy (operator relays
-// and swept inter-agent sends).
-func isDeferredDelivery(kind JobKind) bool { return isRelay(kind) || kind == KindSend }
+// isDeferredDelivery reports jobs that are deferred-not-dropped when busy.
+// KindScheduled is deliberately grouped with KindSend/relay rather than with
+// time-relative heartbeat/detector ticks: a daily ceremony cannot wait for the
+// detector's next few-minute evaluation.
+func isDeferredDelivery(kind JobKind) bool {
+	return isRelay(kind) || kind == KindSend || kind == KindScheduled
+}
 
 // usesSelfHealSend reports jobs routed through the self-heal-capable submit path (#156).
 func usesSelfHealSend(kind JobKind) bool { return isRelay(kind) || kind == KindSend }

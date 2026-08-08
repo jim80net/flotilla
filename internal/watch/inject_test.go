@@ -288,6 +288,7 @@ func TestJobKindWireValuesAndPolicy(t *testing.T) {
 		{KindOperatorInterrupt, "operator-interrupt"},
 		{KindHeartbeat, "heartbeat"},
 		{KindDetector, "detector"},
+		{KindScheduled, "scheduled"},
 		{KindSend, "send"},
 	}
 	for _, c := range cases {
@@ -304,6 +305,7 @@ func TestJobKindWireValuesAndPolicy(t *testing.T) {
 		KindSend:              false,
 		KindHeartbeat:         false,
 		KindDetector:          false,
+		KindScheduled:         false,
 	} {
 		if got := isRelay(kind); got != want {
 			t.Errorf("isRelay(%q) = %v, want %v", string(kind), got, want)
@@ -315,6 +317,7 @@ func TestJobKindWireValuesAndPolicy(t *testing.T) {
 		KindRelay:             true,
 		KindOperatorInterrupt: true,
 		KindSend:              true,
+		KindScheduled:         true,
 		KindHeartbeat:         false,
 		KindDetector:          false,
 	} {
@@ -331,6 +334,7 @@ func TestJobKindWireValuesAndPolicy(t *testing.T) {
 		KindSend:              "send",
 		KindHeartbeat:         "heartbeat",
 		KindDetector:          "detector",
+		KindScheduled:         "scheduled",
 	} {
 		if got := deliveryKind(kind); got != want {
 			t.Errorf("deliveryKind(%q) = %q, want %q", string(kind), got, want)
