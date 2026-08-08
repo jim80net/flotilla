@@ -19,12 +19,31 @@ The roster may declare daily wall-clock dispatches the daemon fires without
 operator input (flotilla#413). Each entry needs a unique `name`, an `at` time
 with an **explicit timezone** (e.g. `12:07Z` or `03:07+00:00`), a `to` agent,
 and a `prompt` (inline text or a **host-local file path** — preferred for long
-prompts). Durable last-fired state lives beside the roster at
+prompts). A ceremony may also declare `expected_artifact` and a positive
+`production_window`; `<date>`/`{date}` in the artifact path expands in the
+schedule timezone. The artifact must be a non-empty regular file modified
+strictly after confirmed prompt delivery and no later than the production
+deadline. Relative artifact paths resolve beside the roster; use an absolute
+path when the ceremony writes another repository. Durable occurrence state lives beside the roster at
 `<roster-dir>/flotilla-schedule-state.json` so a restart does not double-fire or
 silently skip a slot missed while the daemon was down (catch-up fires once with
-a `[schedule late: …]` prefix). Delivery uses the same injector path as
-change-detector wakes (`KindDetector` — dropped when the target pane is busy,
-re-evaluated on the next poll).
+a `[schedule late: …]` prefix). State distinguishes trigger, enqueue, confirmed
+delivery, artifact confirmation, and deadline failure; `last_fired` means only
+that the wall-clock occurrence triggered. Delivery uses durable scheduled-work
+semantics: coordinator targets still alias once to their adjutant, but busy panes
+defer rather than drop. A queued occurrence with no delivery attempt is
+re-enqueued after daemon restart. Before touching a pane, the watch persists an
+attempt receipt; if a crash or post-mutation error leaves an instruction's
+outcome ambiguous, restart fails closed and escalates instead of risking
+duplicate ceremony delivery. Direct-owner failure escalations use the opposite
+safety posture: durable at-least-once retry with a stable failure ID until the
+owner surface confirms, so the alert cannot disappear in the same crash window.
+Each daily occurrence has its own record, so an unfinished prior day does not
+suppress the next one. Corrupt/unreadable schedule state disables scheduling
+rather than replaying the fleet's ceremonies as never-fired. A delivered
+ceremony whose artifact remains missing/empty/late after its window records a
+durable failure and sends that actionable escalation directly to the owning
+coordinator layer.
 
 ## Prerequisites
 
@@ -140,16 +159,33 @@ daemon submits into the XO pane and then verifies a turn actually started (the
 `Idle → Working` edge) before it logs `… delivered to "…" (N bytes)`. So that success line
 now means *a turn started*, not merely *the tmux keystrokes ran*. Concretely:
 
+Every injector job declares one busy-recipient contract, enforced by
+`busyDeliveryPolicy`:
+
+| Job class | Busy policy | Durable owner record |
+|---|---|---|
+| operator relay / interrupt | defer, retry, report terminal outcome | relay queue |
+| inter-agent send | defer, retry, report terminal outcome | sender outbox |
+| scheduled ceremony | defer, retry; ambiguous instruction fails closed and escalates | schedule occurrence sidecar |
+| heartbeat / detector tick | discard as time-relative; next tick re-evaluates | none by design |
+
+Unknown/new job kinds are rejected and reported as contract errors until their
+durability is explicitly designed; they are never mistaken for disposable
+ticks. A queued alert therefore reports retry posture, never promises that
+delivery *will* succeed.
+
 - **The XO is busy when your message arrives** → it is **not** pasted into the active
   composer (that was the silent-drop bug). It is deferred and re-tried every few seconds;
-  it lands (and is confirmed) once the XO goes idle. Delivery to other desks continues
-  meanwhile.
+  a confirmed delivery or terminal failure is reported. Delivery to other desks
+  continues meanwhile.
 - **The XO stays busy for ~30s** → you get ONE loud alert: `operator message to "…" is
-  QUEUED — the XO has been busy …`. It still delivers when the turn ends.
-- **The XO is busy for ~5 min, or crashed, or the submit can't be confirmed** → you get a
-  loud alert (`… UNDELIVERABLE …` / `… NOT delivered …`) and the message is dropped rather
-  than retried forever. A genuinely wedged/crashed XO is also caught by the liveness
-  watchdog (see Down alerts).
+  QUEUED — the XO has been busy …`. The message remains in durable retry; the alert
+  does not promise success before the terminal outcome is known.
+- **The XO remains busy for ~5 min** → durable retry continues with periodic stale
+  alerts; sustained busyness alone does not discard the message.
+- **The XO is crashed, input-blocked, or the submit can't be confirmed** → you get a
+  loud terminal alert (`… UNDELIVERABLE …` / `… NOT delivered …`). A genuinely
+  wedged/crashed XO is also caught by the liveness watchdog (see Down alerts).
 - **The XO's composer is input-blocked behind the Claude Code agents panel** → the inline
   background-agents panel / a per-agent message sub-composer can steal input focus from the
   main composer; keystrokes then navigate the overlay instead of submitting. Confirmed delivery
