@@ -149,6 +149,13 @@ type Schedule struct {
 	// (preferred for long prompts). A path that exists on disk at fire time is read
 	// as file content; otherwise the string is sent verbatim.
 	Prompt string `json:"prompt"`
+	// ExpectedArtifact optionally names the non-empty file this ceremony must
+	// produce. Relative paths resolve beside the roster. The tokens <date> and
+	// {date} expand to the occurrence's local YYYY-MM-DD date.
+	ExpectedArtifact string `json:"expected_artifact,omitempty"`
+	// ProductionWindow is the bounded duration after confirmed prompt delivery
+	// in which ExpectedArtifact must become a non-empty regular file.
+	ProductionWindow string `json:"production_window,omitempty"`
 }
 
 // Config is the committable, secret-free fleet description.
@@ -632,6 +639,17 @@ func (c *Config) validateSchedules(path string) error {
 		}
 		if strings.TrimSpace(sch.Prompt) == "" {
 			return fmt.Errorf("roster %q: schedule %q has an empty prompt", path, sch.Name)
+		}
+		artifact := strings.TrimSpace(sch.ExpectedArtifact)
+		window := strings.TrimSpace(sch.ProductionWindow)
+		if (artifact == "") != (window == "") {
+			return fmt.Errorf("roster %q: schedule %q must set expected_artifact and production_window together", path, sch.Name)
+		}
+		if window != "" {
+			d, err := time.ParseDuration(window)
+			if err != nil || d <= 0 {
+				return fmt.Errorf("roster %q: schedule %q has invalid production_window %q", path, sch.Name, sch.ProductionWindow)
+			}
 		}
 	}
 	return nil

@@ -13,8 +13,11 @@ The `flotilla-watch` wall-clock scheduler fires prompts from `<roster-dir>/sched
 - **Morning parade** — build and deliver the parade deck.
 
 Schedule survives session rotation (unlike in-session crons). Cross-check
-`flotilla-schedule-state.json` against watch service logs after any coordinator
-rotation. Heed busy-pane caveat in [`incident-response.md`](./incident-response.md).
+`flotilla-schedule-state.json` after any coordinator rotation. The sidecar
+distinguishes triggered, enqueued, delivered, artifact-confirmed, and failed
+occurrences; `last_fired` alone is not success. Configure morning parade with
+`expected_artifact: state/parades/<date>/facts.md` and a bounded
+`production_window` so a missing or empty facts artifact escalates mechanically.
 
 **Parade fires before plausible operator arrival on purpose** — the parade waits for
 the reviewer, not the reverse.

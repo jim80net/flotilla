@@ -40,9 +40,9 @@
     { "channel_id": "YOUR_CODEX_CHANNEL_ID", "xo_agent": "codex-desk", "members": ["frontend"] },
     { "channel_id": "YOUR_PI_CHANNEL_ID", "xo_agent": "pi-desk", "members": ["frontend"] }
   ],
-  "_comment_schedules": "Daemon-native daily wall-clock dispatch (flotilla#413). Each at MUST include an explicit timezone (e.g. 12:07Z). Prompt may be inline or a host-local file path (preferred for long prompts). Durable last-fired state: <roster-dir>/flotilla-schedule-state.json.",
+  "_comment_schedules": "Daemon-native daily wall-clock work. Each at MUST include an explicit timezone. Optional expected_artifact + production_window enable mechanical artifact confirmation and missing-artifact escalation. Durable trigger/enqueue/delivery/artifact state: <roster-dir>/flotilla-schedule-state.json.",
   "schedules": [
-    { "name": "morning-parade", "at": "12:07Z", "to": "xo", "prompt": "prompts/morning-parade.md" },
+    { "name": "morning-parade", "at": "12:07Z", "to": "xo", "prompt": "prompts/morning-parade.md", "expected_artifact": "state/parades/<date>/facts.md", "production_window": "2h" },
     { "name": "evening-walk", "at": "03:07Z", "to": "xo", "prompt": "prompts/evening-walk.md" }
   ]
 }

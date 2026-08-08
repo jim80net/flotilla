@@ -19,12 +19,30 @@ The roster may declare daily wall-clock dispatches the daemon fires without
 operator input (flotilla#413). Each entry needs a unique `name`, an `at` time
 with an **explicit timezone** (e.g. `12:07Z` or `03:07+00:00`), a `to` agent,
 and a `prompt` (inline text or a **host-local file path** — preferred for long
-prompts). Durable last-fired state lives beside the roster at
+prompts). A ceremony may also declare `expected_artifact` and a positive
+`production_window`; `<date>`/`{date}` in the artifact path expands in the
+schedule timezone. The artifact must be a non-empty regular file modified
+strictly after confirmed prompt delivery and no later than the production
+deadline. Durable occurrence state lives beside the roster at
 `<roster-dir>/flotilla-schedule-state.json` so a restart does not double-fire or
 silently skip a slot missed while the daemon was down (catch-up fires once with
-a `[schedule late: …]` prefix). Delivery uses the same injector path as
-change-detector wakes (`KindDetector` — dropped when the target pane is busy,
-re-evaluated on the next poll).
+a `[schedule late: …]` prefix). State distinguishes trigger, enqueue, confirmed
+delivery, artifact confirmation, and deadline failure; `last_fired` means only
+that the wall-clock occurrence triggered. Delivery uses durable scheduled-work
+semantics: coordinator targets still alias once to their adjutant, but busy panes
+defer rather than drop. A queued occurrence with no delivery attempt is
+re-enqueued after daemon restart. Before touching a pane, the watch persists an
+attempt receipt; if a crash or post-mutation error leaves an instruction's
+outcome ambiguous, restart fails closed and escalates instead of risking
+duplicate ceremony delivery. Direct-owner failure escalations use the opposite
+safety posture: durable at-least-once retry with a stable failure ID until the
+owner surface confirms, so the alert cannot disappear in the same crash window.
+Each daily occurrence has its own record, so an unfinished prior day does not
+suppress the next one. Corrupt/unreadable schedule state disables scheduling
+rather than replaying the fleet's ceremonies as never-fired. A delivered
+ceremony whose artifact remains missing/empty/late after its window records a
+durable failure and sends that actionable escalation directly to the owning
+coordinator layer.
 
 ## Prerequisites
 

@@ -77,5 +77,10 @@ daemon-native schedules (`flotilla-schedule-state.json`).
 **Dies:** session-local crons inside a harness session — ceremonies belong in the
 watch daemon scheduler ([`watch-runbook.md`](../watch-runbook.md)).
 
-**Busy-pane scheduler caveat:** `last_fired` may commit before dispatch confirms.
-Verify ceremony artifacts landed (parade dir, scorecards), not just the timestamp.
+**Scheduler lifecycle:** `last_fired` records only the wall-clock trigger. Inspect
+the occurrence's `enqueued_at`, `delivered_at`, `artifact_confirmed_at`, and
+failure/escalation fields. Scheduled work survives a busy pane and queued work
+survives daemon restart. An interrupted attempt fails closed as delivery-uncertain
+instead of replaying; configured missing, empty, or late artifacts escalate after
+their production window. Failure escalations carry a stable ID and retry
+at-least-once until the owning coordinator surface confirms them.
