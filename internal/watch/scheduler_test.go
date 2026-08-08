@@ -203,6 +203,54 @@ func TestScheduledCoordinatorAliasBusySurvivesAndConfirmsOnce(t *testing.T) {
 	}
 }
 
+func TestSchedulerClassificationIsPrimaryWithoutArtifact(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 8, 8, 12, 8, 0, 0, time.UTC)
+	var scheduled []Job
+	sc := NewScheduler([]roster.Schedule{{
+		Name: "morning-parade", At: "12:07Z", To: "cos", Prompt: "produce parade",
+		// No artifact contract: delivery classification must stand on its own.
+	}}, filepath.Join(dir, "schedule-state.json"), dir, func(job Job) { scheduled = append(scheduled, job) })
+	sc.now = func() time.Time { return now }
+	sc.Tick()
+	if len(scheduled) != 1 || scheduled[0].Kind != KindScheduled || scheduled[0].Kind == KindDetector {
+		t.Fatalf("scheduler job = %+v, want one KindScheduled job", scheduled)
+	}
+	if !isDeferredDelivery(scheduled[0].Kind) {
+		t.Fatal("KindScheduled was classified with disposable detector ticks")
+	}
+
+	attempts := 0
+	var deferred []Job
+	var alerts []string
+	in := NewInjector(func(string, string) error {
+		attempts++
+		if attempts == 1 {
+			return surface.ErrBusy
+		}
+		return nil
+	}, 1)
+	in.SetScheduledDeliveryHooks(sc.DeliveryConfirmed, sc.DeliveryFailed)
+	in.SetScheduledAttemptHooks(sc.DeliveryAttemptStarted, sc.DeliveryDeferred)
+	in.SetEscalate(func(msg string) { alerts = append(alerts, msg) })
+	in.reEnqueue = func(job Job, _ time.Duration) { deferred = append(deferred, job) }
+	in.deliver(scheduled[0])
+	if len(deferred) != 1 {
+		t.Fatalf("busy ceremony deferred = %d, want 1", len(deferred))
+	}
+	in.deliver(deferred[0])
+	if attempts != 2 {
+		t.Fatalf("ceremony delivery attempts = %d, want busy then confirmed", attempts)
+	}
+	if len(alerts) != 0 {
+		t.Fatalf("busy ceremony escalations = %v, want none", alerts)
+	}
+	state := occurrenceByName(t, LoadScheduleState(sc.statePath), "morning-parade")
+	if state.DeliveredAt == "" || state.ExpectedArtifact != "" || state.ArtifactDeadline != "" {
+		t.Fatalf("artifact-independent delivery lifecycle = %+v", state)
+	}
+}
+
 func TestCosCeremonyMatrixBusyRedirectArtifactAndMissingAlert(t *testing.T) {
 	ceremonies := []struct {
 		name     string

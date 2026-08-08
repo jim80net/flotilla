@@ -14,12 +14,18 @@ The `flotilla-watch` wall-clock scheduler fires prompts from `<roster-dir>/sched
 - **Recursive retro** — synthesize the dated Cos reliability package.
 - **Fleet productivity self-audit** — measure, disposition, fan out, and ledger the top gap.
 
-The August 2026 incident was conditional busy-recipient loss after the
-coordinator→adjutant redirect, not a general scheduler outage: a later
-recursive-retro occurrence reached the same coordinator target while its
-adjutant was idle and produced the dated package. Scheduled work therefore uses
-the durable busy policy; only genuinely time-relative detector ticks remain
-disposable.
+The August 2026 incident was a ceremony-classification defect, not a general
+scheduler outage or a broken injector contract. The scheduler emitted once-daily
+work as `KindDetector`; after coordinator→adjutant redirect, the injector correctly
+dropped that time-relative class while the adjutant was busy. A later recursive
+retro reached the same target while idle and produced its package. Scheduled
+ceremonies now emit distinct `KindScheduled` jobs, whose busy behavior follows
+the existing durable/no-operator-escalation `KindSend` posture. Heartbeat and
+detector policy is unchanged.
+
+That classification is the primary fix and does not depend on artifact
+configuration. Expected-artifact checks begin only after confirmed delivery and
+provide second-line detection for fired/delivered-but-empty ceremonies.
 
 Schedule survives session rotation (unlike in-session crons). Cross-check
 `flotilla-schedule-state.json` after any coordinator rotation. The sidecar

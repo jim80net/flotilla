@@ -29,8 +29,8 @@ const busyDeferDelay = 5 * time.Second
 const busyEscalateAt = 6
 
 // relayStaleAlertInterval is how long a still-busy operator relay waits between LOUD
-// stale escalations after the initial QUEUED alert. Escalation is IN ADDITION to retry:
-// the message stays queued and disk-backed until a terminal outcome is reported (#286).
+// stale escalations after the initial QUEUED alert. Escalation is IN ADDITION to delivery
+// — the message stays queued (and disk-backed) until the agent goes idle (#286).
 const relayStaleAlertInterval = 30 * time.Minute
 
 // transientDeferDelay / maxTransientReassess are the SHORT, low-capped policy for a relay
@@ -50,25 +50,6 @@ const (
 // values ("relay"/"heartbeat"/"detector"/"") are the audit-mirror labels and are
 // load-bearing — do not renumber or restring them.
 type JobKind string
-
-// BusyDeliveryPolicy is the single contract applied after a typed busy or
-// transient recipient result. Every JobKind must choose one of these postures;
-// unknown kinds fail closed as rejected contract errors rather than accidentally
-// acquiring either a delivery promise or disposable-tick semantics.
-type BusyDeliveryPolicy string
-
-const (
-	// BusyDiscardTimeRelative is only for observations whose meaning expires by
-	// the next evaluation (heartbeat and detector ticks).
-	BusyDiscardTimeRelative BusyDeliveryPolicy = "discard-time-relative"
-	// BusyDeferUntilOutcome preserves work across recipient busyness until a
-	// confirmed outcome. Production producers provide the appropriate owner
-	// record: relay queue, sender outbox, or schedule occurrence state.
-	BusyDeferUntilOutcome BusyDeliveryPolicy = "defer-until-outcome"
-	// BusyRejectUnknown is a programming/configuration fault. It is neither
-	// retried nor mislabeled as time-relative; the injector reports it loudly.
-	BusyRejectUnknown BusyDeliveryPolicy = "reject-unknown"
-)
 
 const (
 	// KindDefault (the zero value) is treated as an operator relay: a bare Job{}
@@ -492,17 +473,12 @@ func intendedRecipient(j Job) string {
 	return j.Agent
 }
 
-// handleBusy enforces busyDeliveryPolicy. Only heartbeat/detector ticks are
-// disposable; operator relays, sends, and scheduled work retain a durable owner
-// record and retry until a confirmed or explicitly failed outcome.
+// handleBusy applies the kind-aware not-idle policy for a busy (ErrBusy) or transiently-
+// uncertain (ErrTransient) result. A heartbeat/detector tick is time-relative and is DROPPED
+// (the next tick re-evaluates; re-delivering a stale tick would double-prompt). Operator relays,
+// swept inter-agent sends, and scheduled ceremonies are never dropped for busyness.
 func (in *Injector) handleBusy(j Job, cause error) {
-	policy := busyDeliveryPolicy(j.Kind)
-	if policy == BusyRejectUnknown {
-		log.Printf("flotilla watch: REJECT unknown job kind %q to %q on busy result: %v", j.Kind, j.Agent, cause)
-		in.raise("internal delivery contract error: unknown job kind %q for %q was rejected; classify its busy-recipient durability before use", j.Kind, j.Agent)
-		return
-	}
-	if policy == BusyDiscardTimeRelative {
+	if !isDeferredDelivery(j.Kind) {
 		log.Printf("flotilla watch: drop %s to %q (not idle): %v", deliveryKind(j.Kind), j.Agent, cause)
 		in.abortDetectorClaim(j)
 		return
@@ -518,7 +494,7 @@ func (in *Injector) handleBusy(j Job, cause error) {
 		j.enqueuedAt = now
 	}
 	if isRelay(j.Kind) && errors.Is(cause, surface.ErrTransient) && j.deferrals == maxTransientReassess {
-		in.raise("operator message to %q is QUEUED — pane state stayed uncertain after %d quick checks; retrying from durable state until a terminal outcome is reported", j.Agent, maxTransientReassess)
+		in.raise("operator message to %q is QUEUED — pane state stayed uncertain after %d quick checks; persisting to durable queue until deliverable", j.Agent, maxTransientReassess)
 		j.lastStaleAlert = now
 	}
 	if isRelay(j.Kind) {
@@ -589,17 +565,17 @@ func (in *Injector) maybeStaleEscalateOutbox(j *Job, entry *outbox.Entry, now ti
 // relayStaleAlertInterval while the message remains queued.
 func (in *Injector) maybeStaleEscalateRelay(j *Job, now time.Time) {
 	if j.lastStaleAlert.IsZero() && j.deferrals >= busyEscalateAt {
-		in.raise("operator message to %q is QUEUED — waiting ~%s; retrying while the agent is busy, with terminal outcome reporting", j.Agent, time.Duration(j.deferrals)*busyDeferDelay)
+		in.raise("operator message to %q is QUEUED — waiting ~%s; will deliver when the agent goes idle", j.Agent, time.Duration(j.deferrals)*busyDeferDelay)
 		j.lastStaleAlert = now
 		return
 	}
 	if !j.lastStaleAlert.IsZero() && now.Sub(j.lastStaleAlert) >= relayStaleAlertInterval {
-		in.raise("operator message to %q still QUEUED — waiting ~%s total; retrying while busy, with terminal outcome reporting", j.Agent, now.Sub(j.enqueuedAt).Round(time.Second))
+		in.raise("operator message to %q still QUEUED — waiting ~%s total; will deliver when the agent goes idle", j.Agent, now.Sub(j.enqueuedAt).Round(time.Second))
 		j.lastStaleAlert = now
 		return
 	}
 	if j.lastStaleAlert.IsZero() && !j.enqueuedAt.IsZero() && now.Sub(j.enqueuedAt) >= relayStaleAlertInterval {
-		in.raise("operator message to %q still QUEUED — waiting ~%s total; retrying while busy, with terminal outcome reporting", j.Agent, now.Sub(j.enqueuedAt).Round(time.Second))
+		in.raise("operator message to %q still QUEUED — waiting ~%s total; will deliver when the agent goes idle", j.Agent, now.Sub(j.enqueuedAt).Round(time.Second))
 		j.lastStaleAlert = now
 	}
 }
@@ -743,18 +719,12 @@ func isRelay(kind JobKind) bool {
 	return kind == KindDefault || kind == KindRelay || kind == KindOperatorInterrupt
 }
 
-// busyDeliveryPolicy is exhaustive for the known wire kinds. Unknown kinds are
-// rejected loudly: persistence must be designed before new work can claim that
-// it survives a busy recipient.
-func busyDeliveryPolicy(kind JobKind) BusyDeliveryPolicy {
-	switch kind {
-	case KindDefault, KindRelay, KindOperatorInterrupt, KindSend, KindScheduled:
-		return BusyDeferUntilOutcome
-	case KindHeartbeat, KindDetector:
-		return BusyDiscardTimeRelative
-	default:
-		return BusyRejectUnknown
-	}
+// isDeferredDelivery reports jobs that are deferred-not-dropped when busy.
+// KindScheduled is deliberately grouped with KindSend/relay rather than with
+// time-relative heartbeat/detector ticks: a daily ceremony cannot wait for the
+// detector's next few-minute evaluation.
+func isDeferredDelivery(kind JobKind) bool {
+	return isRelay(kind) || kind == KindSend || kind == KindScheduled
 }
 
 // usesSelfHealSend reports jobs routed through the self-heal-capable submit path (#156).

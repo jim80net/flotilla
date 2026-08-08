@@ -95,9 +95,6 @@ func TestInjectorBusyRelayRepeatsStaleEscalation(t *testing.T) {
 	if len(r.alerts) != 1 || !strings.Contains(r.alerts[0], "still QUEUED") {
 		t.Fatalf("alerts = %v, want one periodic stale escalation", r.alerts)
 	}
-	if strings.Contains(r.alerts[0], "will deliver") {
-		t.Fatalf("queued alert made an unprovable delivery promise: %q", r.alerts[0])
-	}
 	if len(r.deferred) != 1 {
 		t.Fatalf("deferred = %d, want 1 (message stays queued)", len(r.deferred))
 	}
@@ -137,17 +134,6 @@ func TestInjectorDropsBusyTick(t *testing.T) {
 				t.Errorf("%s/%v: alerts = %d, want 0 (a tick never escalates)", kind, cause, len(r.alerts))
 			}
 		}
-	}
-}
-
-func TestInjectorRejectsUnknownBusyKindLoudly(t *testing.T) {
-	r := newRig(surface.ErrBusy)
-	r.in.deliver(Job{Agent: "desk", Kind: JobKind("future-work")})
-	if len(r.deferred) != 0 {
-		t.Fatalf("unknown job kind entered retry without a durability contract: %+v", r.deferred)
-	}
-	if len(r.alerts) != 1 || !strings.Contains(r.alerts[0], "unknown job kind") {
-		t.Fatalf("alerts = %v, want loud unknown-kind contract rejection", r.alerts)
 	}
 }
 

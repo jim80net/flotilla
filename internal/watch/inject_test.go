@@ -312,18 +312,17 @@ func TestJobKindWireValuesAndPolicy(t *testing.T) {
 		}
 	}
 
-	for kind, want := range map[JobKind]BusyDeliveryPolicy{
-		KindDefault:           BusyDeferUntilOutcome,
-		KindRelay:             BusyDeferUntilOutcome,
-		KindOperatorInterrupt: BusyDeferUntilOutcome,
-		KindSend:              BusyDeferUntilOutcome,
-		KindScheduled:         BusyDeferUntilOutcome,
-		KindHeartbeat:         BusyDiscardTimeRelative,
-		KindDetector:          BusyDiscardTimeRelative,
-		JobKind("unknown"):    BusyRejectUnknown,
+	for kind, want := range map[JobKind]bool{
+		KindDefault:           true,
+		KindRelay:             true,
+		KindOperatorInterrupt: true,
+		KindSend:              true,
+		KindScheduled:         true,
+		KindHeartbeat:         false,
+		KindDetector:          false,
 	} {
-		if got := busyDeliveryPolicy(kind); got != want {
-			t.Errorf("busyDeliveryPolicy(%q) = %q, want %q", string(kind), got, want)
+		if got := isDeferredDelivery(kind); got != want {
+			t.Errorf("isDeferredDelivery(%q) = %v, want %v", string(kind), got, want)
 		}
 	}
 

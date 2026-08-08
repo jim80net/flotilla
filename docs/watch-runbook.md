@@ -29,9 +29,13 @@ path when the ceremony writes another repository. Durable occurrence state lives
 silently skip a slot missed while the daemon was down (catch-up fires once with
 a `[schedule late: …]` prefix). State distinguishes trigger, enqueue, confirmed
 delivery, artifact confirmation, and deadline failure; `last_fired` means only
-that the wall-clock occurrence triggered. Delivery uses durable scheduled-work
-semantics: coordinator targets still alias once to their adjutant, but busy panes
-defer rather than drop. A queued occurrence with no delivery attempt is
+that the wall-clock occurrence triggered. The primary prevention is classification:
+the scheduler emits `KindScheduled`, never the disposable `KindDetector` used by
+recurring time-relative ticks. `KindScheduled` follows the existing `KindSend`
+busy posture without operator escalation, so coordinator targets still alias once
+to their adjutant while busy panes defer rather than drop. This works even when no
+artifact is configured; artifact checks are second-line detection after delivery,
+not a gate on enqueue or retry. A queued occurrence with no delivery attempt is
 re-enqueued after daemon restart. Before touching a pane, the watch persists an
 attempt receipt; if a crash or post-mutation error leaves an instruction's
 outcome ambiguous, restart fails closed and escalates instead of risking
@@ -159,33 +163,16 @@ daemon submits into the XO pane and then verifies a turn actually started (the
 `Idle → Working` edge) before it logs `… delivered to "…" (N bytes)`. So that success line
 now means *a turn started*, not merely *the tmux keystrokes ran*. Concretely:
 
-Every injector job declares one busy-recipient contract, enforced by
-`busyDeliveryPolicy`:
-
-| Job class | Busy policy | Durable owner record |
-|---|---|---|
-| operator relay / interrupt | defer, retry, report terminal outcome | relay queue |
-| inter-agent send | defer, retry, report terminal outcome | sender outbox |
-| scheduled ceremony | defer, retry; ambiguous instruction fails closed and escalates | schedule occurrence sidecar |
-| heartbeat / detector tick | discard as time-relative; next tick re-evaluates | none by design |
-
-Unknown/new job kinds are rejected and reported as contract errors until their
-durability is explicitly designed; they are never mistaken for disposable
-ticks. A queued alert therefore reports retry posture, never promises that
-delivery *will* succeed.
-
 - **The XO is busy when your message arrives** → it is **not** pasted into the active
   composer (that was the silent-drop bug). It is deferred and re-tried every few seconds;
-  a confirmed delivery or terminal failure is reported. Delivery to other desks
-  continues meanwhile.
+  it lands (and is confirmed) once the XO goes idle. Delivery to other desks continues
+  meanwhile.
 - **The XO stays busy for ~30s** → you get ONE loud alert: `operator message to "…" is
-  QUEUED — the XO has been busy …`. The message remains in durable retry; the alert
-  does not promise success before the terminal outcome is known.
-- **The XO remains busy for ~5 min** → durable retry continues with periodic stale
-  alerts; sustained busyness alone does not discard the message.
-- **The XO is crashed, input-blocked, or the submit can't be confirmed** → you get a
-  loud terminal alert (`… UNDELIVERABLE …` / `… NOT delivered …`). A genuinely
-  wedged/crashed XO is also caught by the liveness watchdog (see Down alerts).
+  QUEUED — the XO has been busy …`. It still delivers when the turn ends.
+- **The XO is busy for ~5 min, or crashed, or the submit can't be confirmed** → you get a
+  loud alert (`… UNDELIVERABLE …` / `… NOT delivered …`) and the message is dropped rather
+  than retried forever. A genuinely wedged/crashed XO is also caught by the liveness
+  watchdog (see Down alerts).
 - **The XO's composer is input-blocked behind the Claude Code agents panel** → the inline
   background-agents panel / a per-agent message sub-composer can steal input focus from the
   main composer; keystrokes then navigate the overlay instead of submitting. Confirmed delivery
