@@ -203,6 +203,171 @@ func TestScheduledCoordinatorAliasBusySurvivesAndConfirmsOnce(t *testing.T) {
 	}
 }
 
+func TestCosCeremonyMatrixBusyRedirectArtifactAndMissingAlert(t *testing.T) {
+	ceremonies := []struct {
+		name     string
+		at       string
+		artifact string
+		window   string
+	}{
+		{name: "morning-parade", at: "12:07Z", artifact: "state/parades/<date>/facts.md", window: "2h"},
+		{name: "evening-walk", at: "03:07Z", artifact: "state/ceremonies/evening-walk/<date>.md", window: "6h"},
+		{name: "cos-recursive-retro", at: "15:07Z", artifact: "state/retros/cos-<date>.md", window: "6h"},
+		{name: "fleet-productivity-self-audit", at: "16:07Z", artifact: "state/ceremonies/productivity-self-audit/<date>.md", window: "1h"},
+	}
+	coordinator := true
+	cfg := &roster.Config{
+		XOAgent: "cos",
+		Agents: []roster.Agent{
+			{Name: "cos", Coordinator: &coordinator},
+			{Name: "cos-adj", AdjutantFor: "cos"},
+		},
+	}
+	ingress := NewCoordinatorIngress(cfg)
+
+	for _, ceremony := range ceremonies {
+		t.Run(ceremony.name, func(t *testing.T) {
+			t.Run("busy redirect eventually confirms and observes artifact", func(t *testing.T) {
+				dir := t.TempDir()
+				now := time.Date(2026, 8, 8, 17, 0, 0, 123, time.UTC)
+				var attemptsMu sync.Mutex
+				var targets []string
+				in := NewInjector(func(agent, _ string) error {
+					attemptsMu.Lock()
+					defer attemptsMu.Unlock()
+					targets = append(targets, agent)
+					if len(targets) == 1 {
+						return surface.ErrBusy
+					}
+					return nil
+				}, 4)
+				in.SetCoordinatorIngress(ingress)
+				schedule := roster.Schedule{
+					Name: ceremony.name, At: ceremony.at, To: "cos", Prompt: "produce ceremony artifact",
+					ExpectedArtifact: ceremony.artifact, ProductionWindow: ceremony.window,
+				}
+				sc := NewScheduler([]roster.Schedule{schedule}, filepath.Join(dir, "schedule-state.json"), dir, in.Enqueue)
+				sc.SetOwningCoordinator(func(string) string { return "cos" })
+				sc.now = func() time.Time { return now }
+				confirmed := make(chan Job, 1)
+				in.SetScheduledDeliveryHooks(func(job Job) {
+					sc.DeliveryConfirmed(job)
+					confirmed <- job
+				}, sc.DeliveryFailed)
+				in.SetScheduledAttemptHooks(sc.DeliveryAttemptStarted, sc.DeliveryDeferred)
+				in.reEnqueue = func(job Job, _ time.Duration) { in.Enqueue(job) }
+				in.Start()
+				sc.Tick()
+				select {
+				case delivered := <-confirmed:
+					if delivered.Agent != "cos-adj" || delivered.IntendedRecipient != "cos" {
+						t.Fatalf("delivered route = %+v, want cos -> cos-adj", delivered)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("ceremony did not survive busy adjutant")
+				}
+				in.Stop()
+				attemptsMu.Lock()
+				if fmt.Sprint(targets) != "[cos-adj cos-adj]" {
+					t.Fatalf("targets = %v, want busy then delivered to cos-adj", targets)
+				}
+				attemptsMu.Unlock()
+
+				deliveredState := occurrenceByName(t, LoadScheduleState(sc.statePath), ceremony.name)
+				deliveredAt, err := time.Parse(time.RFC3339, deliveredState.DeliveredAt)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.MkdirAll(filepath.Dir(deliveredState.ExpectedArtifact), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				artifactBody := fmt.Sprintf("ceremony: %s\noccurrence: %s\noutcome: produced\n", ceremony.name, deliveredState.Occurrence)
+				if err := os.WriteFile(deliveredState.ExpectedArtifact, []byte(artifactBody), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				producedAt := deliveredAt.Add(time.Second)
+				if err := os.Chtimes(deliveredState.ExpectedArtifact, producedAt, producedAt); err != nil {
+					t.Fatal(err)
+				}
+				now = deliveredAt.Add(time.Minute)
+				sc.Tick()
+				observed := occurrenceByName(t, LoadScheduleState(sc.statePath), ceremony.name)
+				if observed.ArtifactConfirmedAt == "" || observed.FailureAt != "" {
+					t.Fatalf("artifact lifecycle = %+v", observed)
+				}
+			})
+
+			t.Run("missing artifact alerts owning coordinator", func(t *testing.T) {
+				dir := t.TempDir()
+				now := time.Date(2026, 8, 8, 17, 0, 0, 456, time.UTC)
+				var jobs []Job
+				schedule := roster.Schedule{
+					Name: ceremony.name, At: ceremony.at, To: "cos", Prompt: "produce ceremony artifact",
+					ExpectedArtifact: ceremony.artifact, ProductionWindow: ceremony.window,
+				}
+				sc := NewScheduler([]roster.Schedule{schedule}, filepath.Join(dir, "schedule-state.json"), dir, func(job Job) { jobs = append(jobs, job) })
+				sc.SetOwningCoordinator(func(string) string { return "cos" })
+				sc.now = func() time.Time { return now }
+				sc.Tick()
+				instruction := jobs[0]
+				if err := sc.DeliveryAttemptStarted(instruction); err != nil {
+					t.Fatal(err)
+				}
+				sc.DeliveryConfirmed(instruction)
+				delivered := occurrenceByName(t, LoadScheduleState(sc.statePath), ceremony.name)
+				deadline, err := time.Parse(time.RFC3339, delivered.ArtifactDeadline)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var unrelatedPath string
+				switch ceremony.name {
+				case "evening-walk":
+					unrelatedPath = filepath.Join(dir, "state", "parades", "2026-08-08", "facts.md")
+				case "fleet-productivity-self-audit":
+					unrelatedPath = filepath.Join(dir, "state", "fleet-backlog.md")
+				}
+				if unrelatedPath != "" {
+					if err := os.MkdirAll(filepath.Dir(unrelatedPath), 0o700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(unrelatedPath, []byte("unrelated write\n"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					unrelatedAt := deadline.Add(-time.Second)
+					if err := os.Chtimes(unrelatedPath, unrelatedAt, unrelatedAt); err != nil {
+						t.Fatal(err)
+					}
+				}
+				jobs = nil
+				now = deadline.Add(time.Nanosecond)
+				sc.Tick()
+				if len(jobs) != 1 || jobs[0].SchedulePhase != "escalation" || !jobs[0].DirectToOwner {
+					t.Fatalf("missing-artifact jobs = %+v, want direct-owner escalation", jobs)
+				}
+				routed := ingress.Apply(jobs[0])
+				if len(routed) != 1 || routed[0].Agent != "cos" {
+					t.Fatalf("direct-owner escalation was redirected: %+v", routed)
+				}
+				var alertTarget string
+				alertInjector := NewInjector(func(agent, _ string) error {
+					alertTarget = agent
+					return nil
+				}, 1)
+				alertInjector.SetScheduledDeliveryHooks(sc.DeliveryConfirmed, sc.DeliveryFailed)
+				alertInjector.SetScheduledAttemptHooks(sc.DeliveryAttemptStarted, sc.DeliveryDeferred)
+				alertInjector.deliver(routed[0])
+				if alertTarget != "cos" {
+					t.Fatalf("missing-artifact alert delivered to %q, want owning coordinator cos", alertTarget)
+				}
+				failed := occurrenceByName(t, LoadScheduleState(sc.statePath), ceremony.name)
+				if failed.FailureAt == "" || failed.EscalationEnqueuedAt == "" || failed.EscalatedAt == "" {
+					t.Fatalf("durable missing-artifact alert = %+v", failed)
+				}
+			})
+		})
+	}
+}
+
 func TestSchedulerLifecycleArtifactConfirmation(t *testing.T) {
 	dir := t.TempDir()
 	statePath := filepath.Join(dir, "state.json")
