@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,10 @@ const schedulePollInterval = time.Minute
 // scheduleLateGrace is how far past the scheduled instant a fire still counts as
 // on-time (no [late] marker). Beyond this, catch-up fires prefix the prompt.
 const scheduleLateGrace = 90 * time.Second
+
+var scheduleRequiredFile = regexp.MustCompile(
+	`(?m)^<!-- flotilla:require-file ([^>\r\n]*) -->\r?$`,
+)
 
 // ScheduleState is the DURABLE last-fired snapshot for daemon-native schedules
 // (#413): per schedule name, the RFC3339 instant of the last occurrence that was
@@ -241,7 +246,34 @@ func resolveSchedulePrompt(rosterDir, prompt string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("read prompt file %q: %w", p, err)
 		}
+		if err := validateScheduleRequirements(p, raw); err != nil {
+			return "", err
+		}
 		return string(raw), nil
 	}
 	return prompt, nil
+}
+
+// validateScheduleRequirements makes prompt-file dependencies fail closed at
+// dispatch time. Relative paths resolve from the prompt file, keeping prompt
+// packages portable across hosts and roster roots.
+func validateScheduleRequirements(promptPath string, body []byte) error {
+	for _, match := range scheduleRequiredFile.FindAllSubmatch(body, -1) {
+		required := strings.TrimSpace(string(match[1]))
+		if required == "" {
+			return fmt.Errorf("prompt file %q has an empty require-file directive", promptPath)
+		}
+		resolved := required
+		if !filepath.IsAbs(resolved) {
+			resolved = filepath.Join(filepath.Dir(promptPath), resolved)
+		}
+		st, err := os.Stat(resolved)
+		if err != nil {
+			return fmt.Errorf("prompt file %q requires missing file %q: %w", promptPath, required, err)
+		}
+		if !st.Mode().IsRegular() {
+			return fmt.Errorf("prompt file %q requires regular file %q", promptPath, required)
+		}
+	}
+	return nil
 }

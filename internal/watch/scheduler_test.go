@@ -160,6 +160,60 @@ func TestSchedulerPromptFilePreferred(t *testing.T) {
 	}
 }
 
+func TestSchedulerPromptRequiredFileFailsClosedThenRecovers(t *testing.T) {
+	dir := t.TempDir()
+	promptDir := filepath.Join(dir, "prompts")
+	if err := os.MkdirAll(promptDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	promptPath := filepath.Join(promptDir, "walk.md")
+	body := "<!-- flotilla:require-file ../recipes/capture.md -->\ndispatch walk"
+	if err := os.WriteFile(promptPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	statePath := filepath.Join(dir, "state.json")
+	now := time.Date(2026, 7, 5, 12, 8, 0, 0, time.UTC)
+	var jobs []Job
+	sc := NewScheduler([]roster.Schedule{{
+		Name: "walk", At: "12:07Z", To: "xo", Prompt: "prompts/walk.md",
+	}}, statePath, dir, func(j Job) { jobs = append(jobs, j) })
+	sc.now = func() time.Time { return now }
+
+	sc.Tick()
+	if len(jobs) != 0 {
+		t.Fatalf("jobs = %d, want 0 while required file is missing", len(jobs))
+	}
+	if got := LoadScheduleState(statePath).LastFired["walk"]; got != "" {
+		t.Fatalf("last_fired = %q, want empty so the schedule can retry", got)
+	}
+
+	required := filepath.Join(dir, "recipes", "capture.md")
+	if err := os.MkdirAll(filepath.Dir(required), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(required, []byte("capture recipe"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sc.Tick()
+	if len(jobs) != 1 {
+		t.Fatalf("jobs = %d, want 1 after required file is restored", len(jobs))
+	}
+	if !strings.Contains(jobs[0].Message, "dispatch walk") {
+		t.Fatalf("message = %q, want prompt body", jobs[0].Message)
+	}
+}
+
+func TestValidateScheduleRequirementsRejectsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	promptPath := filepath.Join(dir, "prompt.md")
+	body := []byte("<!-- flotilla:require-file . -->\nrun")
+	if err := validateScheduleRequirements(promptPath, body); err == nil || !strings.Contains(err.Error(), "regular file") {
+		t.Fatalf("validateScheduleRequirements error = %v, want directory rejection", err)
+	}
+}
+
 func TestDueOccurrenceTimezone(t *testing.T) {
 	loc := time.FixedZone("UTC-5", -5*3600)
 	// 12:07 in UTC-5 = 17:07 UTC
