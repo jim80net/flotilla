@@ -334,18 +334,36 @@
     );
   }
 
+  // A presenter heading starts a section. Slides without a new "Name · claim"
+  // heading inherit that presenter so adjacent pages never lose identity.
+  function presenterForSlide(slides, index) {
+    var current = parsePresenter((slides[index] || {}).title);
+    if (current.presenter) return current;
+    for (var i = index - 1; i >= 0; i--) {
+      var prior = parsePresenter((slides[i] || {}).title);
+      if (prior.presenter) {
+        prior.claim = current.claim;
+        return prior;
+      }
+    }
+    return current;
+  }
+
   // Missing presenter-*.png → circular initials (no broken-image chrome).
   function wirePresenterFallback(root) {
     if (!root) return;
     var imgs = root.querySelectorAll("img.pd-presenter-avatar[data-fallback]");
     for (var i = 0; i < imgs.length; i++) {
       (function (img) {
-        img.addEventListener("error", function () {
+        function fallback() {
           var span = document.createElement("span");
           span.className = "pd-presenter-avatar pd-presenter-fallback";
           span.textContent = img.getAttribute("data-fallback") || "?";
           if (img.parentNode) img.parentNode.replaceChild(span, img);
-        });
+        }
+        img.addEventListener("error", fallback);
+        // A cached 404 can complete before listeners are attached after innerHTML.
+        if (img.complete && img.naturalWidth === 0) fallback();
       })(imgs[i]);
     }
   }
@@ -683,7 +701,7 @@
     if (sIdx < 0) sIdx = 0;
     if (sIdx > slides.length - 1) sIdx = slides.length - 1;
     var s = slides[sIdx];
-    var p = parsePresenter(s.title);
+    var p = presenterForSlide(slides, sIdx);
     var titleText = p.presenter ? p.claim : s.title;
     el("pd-deck-date").textContent = par.date;
     el("pd-counter").hidden = false;

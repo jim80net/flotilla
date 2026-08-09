@@ -532,6 +532,7 @@
   }
   function closeAnnotationPanel() {
     el("research-annotation-panel").hidden = true;
+    el("research-annotation-backdrop").hidden = true;
     document.body.classList.remove("research-annotations-open");
     if (annotationReturnFocus && annotationReturnFocus.isConnected) annotationReturnFocus.focus();
     annotationReturnFocus = null;
@@ -539,6 +540,7 @@
   function openAnnotationPanel(trigger) {
     hideSelectionAction();
     annotationReturnFocus = trigger || document.activeElement;
+    el("research-annotation-backdrop").hidden = false;
     el("research-annotation-panel").hidden = false;
     document.body.classList.add("research-annotations-open");
   }
@@ -706,6 +708,7 @@
     el("research-annotation-save-status").textContent = "";
     el("research-annotation-save-status").classList.remove("error");
     el("research-annotation-panel").hidden = true;
+    el("research-annotation-backdrop").hidden = true;
     document.body.classList.remove("research-annotations-open");
     hideSelectionAction();
     el("research-reader-empty").hidden = true;
@@ -795,6 +798,7 @@
     el("research-presentation-stage").hidden = true;
     setPresentationLinks(null);
     el("research-annotation-panel").hidden = true;
+    el("research-annotation-backdrop").hidden = true;
     document.body.classList.remove("research-annotations-open");
     hideSelectionAction();
     document.body.classList.remove("research-has-document");
@@ -942,6 +946,7 @@
   el("research-document-comment").addEventListener("click", function () { openAnnotationComposer(null, this); });
   el("research-annotations-retry").addEventListener("click", loadAnnotations);
   el("research-annotation-close").addEventListener("click", closeAnnotationPanel);
+  el("research-annotation-backdrop").addEventListener("click", closeAnnotationPanel);
   el("research-annotation-list").addEventListener("click", function (event) {
     var button = event.target.closest("[data-annotation-open]");
     if (button) showAnnotationThread(annotationByID(button.dataset.annotationOpen), button);
