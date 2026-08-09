@@ -121,9 +121,35 @@ func TestStoreConcurrentCASAdoptsExactlyOneSuccessor(t *testing.T) {
 	}
 }
 
+func TestCrashBeforeHeadLeavesSuccessorOrphaned(t *testing.T) {
+	dir := t.TempDir()
+	s, err := OpenStore(dir, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := candidate(t, 1, nil, false)
+	result, err := s.Publish(first, 0, "one", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := candidate(t, 2, &result.Digest, false)
+	// Plant the exact crash window: the immutable successor reached disk, but
+	// the committed head CAS did not. Restart must retain generation one.
+	if err := os.WriteFile(s.generationPath(2), second, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := OpenStore(dir, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := restarted.LastGood(); got == nil || got.Generation != 1 || got.Digest != result.Digest {
+		t.Fatalf("last good = %#v", got)
+	}
+}
+
 func context(t *testing.T, claim string) DomainContext {
 	t.Helper()
-	c, err := MintDomainContext(MintInput{ResolvedDomainID: "domain-one", PrincipalID: "principal-one", WorkerID: "worker-one", SessionID: "session-one", RuntimeKind: "linux_user", RuntimeSubject: "uid:1001", ResolverVersion: "resolver-v1", EvidenceDigest: strings.Repeat("a", 64), MintAuthority: "context-mint", ClaimedDomainID: claim, IsolationClaim: "unproved", TTL: time.Hour}, now)
+	c, err := newServerContextMinter().Mint(MintInput{ResolvedDomainID: "domain-one", PrincipalID: "principal-one", WorkerID: "worker-one", SessionID: "session-one", RuntimeKind: "linux_user", RuntimeSubject: "uid:1001", ResolverVersion: "resolver-v1", EvidenceDigest: strings.Repeat("a", 64), ClaimedDomainID: claim, IsolationClaim: "unproved", TTL: time.Hour}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +176,11 @@ func TestPDPDeterministicAndContextSubstitutionDenied(t *testing.T) {
 		t.Fatal("claimed and resolved context aliased")
 	}
 	sub := r
-	sub.DomainContext.SessionID = "session-two"
+	subContext, err := newServerContextMinter().Mint(MintInput{ResolvedDomainID: "domain-one", PrincipalID: "principal-one", WorkerID: "worker-one", SessionID: "session-two", RuntimeKind: "linux_user", RuntimeSubject: "uid:1001", ResolverVersion: "resolver-v1", EvidenceDigest: strings.Repeat("a", 64), IsolationClaim: "unproved", TTL: time.Hour}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub.DomainContext = subContext
 	if got := Evaluate(p, sub, now); got.Decision != DenyBlocked || got.ReasonCode != ReasonContextSubstitution {
 		t.Fatalf("substitution = %#v", got)
 	}
@@ -217,7 +247,7 @@ func TestContextTypedStoreAndReplayKeys(t *testing.T) {
 func TestNeutralAdapterKeepsClaimAndResolutionDistinct(t *testing.T) {
 	c := context(t, "untrusted-domain")
 	req := request(c)
-	d := AuthzDecision{Decision: DenyBlocked, ReasonCode: ReasonProtectedBlock}
+	d := AuthzDecision{RequestID: req.RequestID, Decision: DenyBlocked, ReasonCode: ReasonProtectedBlock, DecidedAt: now}
 	r, err := AdaptNeutralDecision("record", "protected-read-pep", "protected", req, d)
 	if err != nil {
 		t.Fatal(err)
@@ -225,7 +255,7 @@ func TestNeutralAdapterKeepsClaimAndResolutionDistinct(t *testing.T) {
 	if r.ClaimedContext == nil || r.ResolvedContext == nil || r.ClaimedContext.DomainID == r.ResolvedContext.DomainID || r.Decision.ResolvedContextID != c.ContextID {
 		t.Fatalf("record = %#v", r)
 	}
-	if _, err := AdaptNeutralDecision("record", "protected-read-pep", "protected", req, AuthzDecision{Decision: PermitException}); err == nil {
+	if _, err := AdaptNeutralDecision("record", "protected-read-pep", "protected", req, AuthzDecision{RequestID: req.RequestID, Decision: PermitException, DecidedAt: now}); err == nil {
 		t.Fatal("exception projection accepted")
 	}
 }
@@ -243,7 +273,7 @@ func replayRecords(t *testing.T) []ReplayRecord {
 }
 
 func TestNeutralReplayExportIsInertAndClosed(t *testing.T) {
-	b, err := ExportNeutral(strings.Repeat("b", 64), replayRecords(t))
+	b, err := ExportNeutral(LifecycleContractSHA256, replayRecords(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,17 +285,29 @@ func TestNeutralReplayExportIsInertAndClosed(t *testing.T) {
 		t.Fatalf("export = %#v", got)
 	}
 	missing := replayRecords(t)[:2]
-	if _, err := ExportNeutral(strings.Repeat("b", 64), missing); err == nil {
+	if _, err := ExportNeutral(LifecycleContractSHA256, missing); err == nil {
 		t.Fatal("missing critical seam accepted")
 	}
 	bad := replayRecords(t)
 	bad[1].Decision.ResolvedContextID = "substituted"
-	if _, err := ExportNeutral(strings.Repeat("b", 64), bad); err == nil {
+	if _, err := ExportNeutral(LifecycleContractSHA256, bad); err == nil {
 		t.Fatal("context substitution accepted")
 	}
 	unknown := replayRecords(t)
 	unknown[1].Seam = "future-pep"
-	if _, err := ExportNeutral(strings.Repeat("b", 64), unknown); err == nil {
+	if _, err := ExportNeutral(LifecycleContractSHA256, unknown); err == nil {
 		t.Fatal("unknown seam accepted")
+	}
+	if _, err := ExportNeutral(strings.Repeat("b", 64), replayRecords(t)); err == nil {
+		t.Fatal("unpinned lifecycle digest accepted")
+	}
+	ordinaryDenied := replayRecords(t)
+	ordinaryDenied[0].Decision = ReplayDecision{"deny", "protected_block", "none", ""}
+	if _, err := ExportNeutral(LifecycleContractSHA256, ordinaryDenied); err == nil {
+		t.Fatal("ordinary-work protected denial accepted")
+	}
+	duplicate := append(replayRecords(t), replayRecords(t)[0])
+	if _, err := ExportNeutral(LifecycleContractSHA256, duplicate); err == nil {
+		t.Fatal("duplicate seam accepted")
 	}
 }

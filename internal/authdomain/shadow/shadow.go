@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -401,33 +402,67 @@ func syncDir(dir string) error {
 	return f.Sync()
 }
 
-// recover selects the newest complete valid generation. Corrupt/truncated
-// successors are ignored, retaining the newest earlier last-good generation.
+// recover adopts only the generation named by the committed head after
+// validating its complete predecessor chain. Uncommitted successor files are
+// orphans and can never become authoritative merely because they exist.
 func (s *Store) recover(now time.Time) error {
-	entries, err := filepath.Glob(filepath.Join(s.dir, "generation-*.json"))
-	if err != nil {
-		return err
-	}
-	sort.Sort(sort.Reverse(sort.StringSlice(entries)))
-	for _, path := range entries {
-		b, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		p, err := Compile(b, now)
-		if err != nil {
-			continue
-		}
-		s.lastGood = p
-		break
-	}
 	var h headFile
-	if b, err := os.ReadFile(filepath.Join(s.dir, "head.json")); err == nil && decodeStrict(b, &h) == nil && s.lastGood != nil && h.Generation == s.lastGood.Generation && h.Digest == s.lastGood.Digest {
-		s.idempotency = h.Idempotency
+	b, err := os.ReadFile(filepath.Join(s.dir, "head.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
 	}
-	if s.idempotency == nil {
-		s.idempotency = map[string]idempotencyRecord{}
+	if err != nil {
+		return fmt.Errorf("recover policy: read committed head: %w", err)
 	}
+	if err := decodeStrict(b, &h); err != nil {
+		return fmt.Errorf("recover policy: invalid committed head: %w", err)
+	}
+	if h.Generation == 0 || h.Digest == "" {
+		return errors.New("recover policy: invalid committed head identity")
+	}
+	chain := make(map[uint64]*PolicyGeneration, h.Generation)
+	for generation := uint64(1); generation <= h.Generation; generation++ {
+		raw, err := os.ReadFile(s.generationPath(generation))
+		if err != nil {
+			return fmt.Errorf("recover policy: committed generation %d unavailable: %w", generation, err)
+		}
+		var envelope PolicyGeneration
+		if err := decodeStrict(raw, &envelope); err != nil {
+			return fmt.Errorf("recover policy: committed generation %d malformed: %w", generation, err)
+		}
+		// Validate expiration at admission time. Restart time cannot rewrite
+		// immutable policy history merely because wall time advanced.
+		p, err := Compile(raw, envelope.CreatedAt)
+		if err != nil {
+			return fmt.Errorf("recover policy: committed generation %d invalid: %w", generation, err)
+		}
+		if p.Generation != generation {
+			return fmt.Errorf("recover policy: generation file %d contains generation %d", generation, p.Generation)
+		}
+		if generation == 1 {
+			if p.ParentDigest != nil {
+				return errors.New("recover policy: genesis has a parent digest")
+			}
+		} else {
+			prior := chain[generation-1]
+			if p.ParentDigest == nil || *p.ParentDigest != prior.Digest {
+				return fmt.Errorf("recover policy: generation %d predecessor digest mismatch", generation)
+			}
+		}
+		chain[generation] = p
+	}
+	committed := chain[h.Generation]
+	if committed.Digest != h.Digest {
+		return errors.New("recover policy: committed head digest mismatch")
+	}
+	for key, record := range h.Idempotency {
+		p := chain[record.Generation]
+		if key == "" || p == nil || p.Digest != record.Digest {
+			return fmt.Errorf("recover policy: invalid idempotency record %q", key)
+		}
+	}
+	s.lastGood = committed
+	s.idempotency = cloneIDs(h.Idempotency)
 	return nil
 }
 
@@ -454,32 +489,44 @@ type DomainContext struct {
 	ExpiresAt       time.Time       `json:"expires_at"`
 	MintAuthority   string          `json:"mint_authority"`
 	ClaimedDomainID string          `json:"claimed_domain_id,omitempty"`
+	seal            [32]byte
 }
 
 func (c DomainContext) StorageKey(objectID string) (string, error) {
-	if c.DomainID == "" || !canonicalObject(objectID) {
+	if !sealedContext(c) || c.DomainID == "" || !canonicalObject(objectID) {
 		return "", errors.New("storage key: invalid domain context or object")
 	}
 	return c.DomainID + "\x00" + objectID, nil
 }
 
 func (c DomainContext) ReplayKey(decisionID, pepID string, ordinal uint64) (string, error) {
-	if c.DomainID == "" || c.ContextID == "" || decisionID == "" || pepID == "" || ordinal == 0 {
+	if !sealedContext(c) || c.DomainID == "" || c.ContextID == "" || decisionID == "" || pepID == "" || ordinal == 0 {
 		return "", errors.New("replay key: incomplete context or binding")
 	}
 	return fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%d", c.DomainID, c.ContextID, decisionID, pepID, ordinal), nil
 }
 
 type MintInput struct {
-	ResolvedDomainID, PrincipalID, WorkerID, SessionID, RuntimeKind, RuntimeSubject, ResolverVersion, EvidenceDigest, MintAuthority, ClaimedDomainID string
-	IsolationClaim                                                                                                                                   string
-	TTL                                                                                                                                              time.Duration
+	ResolvedDomainID, PrincipalID, WorkerID, SessionID, RuntimeKind, RuntimeSubject, ResolverVersion, EvidenceDigest, ClaimedDomainID string
+	IsolationClaim                                                                                                                    string
+	TTL                                                                                                                               time.Duration
 }
 
-// MintDomainContext accepts resolved server observations. Caller-supplied
-// community overrides must be rejected by ingress before this seam.
-func MintDomainContext(in MintInput, now time.Time) (DomainContext, error) {
-	if in.ResolvedDomainID == "" || in.PrincipalID == "" || in.WorkerID == "" || in.SessionID == "" || in.ResolverVersion == "" || in.EvidenceDigest == "" || in.MintAuthority == "" || in.TTL <= 0 {
+const serverMintAuthority = "flotilla.authdomain.context-mint/v1"
+
+// contextMinter is the package-owned constructor capability. Shadow ingress
+// can mint; external callers cannot obtain or implement the capability.
+type contextMinter struct{ enabled bool }
+
+func newServerContextMinter() contextMinter { return contextMinter{enabled: true} }
+
+// Mint accepts resolved server observations. Caller-supplied community
+// overrides must be rejected by ingress before this seam.
+func (m contextMinter) Mint(in MintInput, now time.Time) (DomainContext, error) {
+	if !m.enabled {
+		return DomainContext{}, errors.New("mint context: server minter is required")
+	}
+	if in.ResolvedDomainID == "" || in.PrincipalID == "" || in.WorkerID == "" || in.SessionID == "" || in.ResolverVersion == "" || in.EvidenceDigest == "" || in.TTL <= 0 {
 		return DomainContext{}, errors.New("mint context: incomplete server observation")
 	}
 	if in.RuntimeKind != "linux_user" && in.RuntimeKind != "container" {
@@ -492,7 +539,23 @@ func MintDomainContext(in MintInput, now time.Time) (DomainContext, error) {
 	if _, err := rand.Read(idBytes); err != nil {
 		return DomainContext{}, err
 	}
-	return DomainContext{SchemaVersion: SchemaVersion, ContextID: hex.EncodeToString(idBytes), DomainID: in.ResolvedDomainID, Resolution: Resolution{"server_observed_host", in.ResolverVersion, in.EvidenceDigest}, PrincipalID: in.PrincipalID, WorkerID: in.WorkerID, SessionID: in.SessionID, RuntimeIdentity: RuntimeIdentity{in.RuntimeKind, in.RuntimeSubject}, IsolationClaim: in.IsolationClaim, IssuedAt: now, ExpiresAt: now.Add(in.TTL), MintAuthority: in.MintAuthority, ClaimedDomainID: in.ClaimedDomainID}, nil
+	c := DomainContext{SchemaVersion: SchemaVersion, ContextID: hex.EncodeToString(idBytes), DomainID: in.ResolvedDomainID, Resolution: Resolution{"server_observed_host", in.ResolverVersion, in.EvidenceDigest}, PrincipalID: in.PrincipalID, WorkerID: in.WorkerID, SessionID: in.SessionID, RuntimeIdentity: RuntimeIdentity{in.RuntimeKind, in.RuntimeSubject}, IsolationClaim: in.IsolationClaim, IssuedAt: now, ExpiresAt: now.Add(in.TTL), MintAuthority: serverMintAuthority, ClaimedDomainID: in.ClaimedDomainID}
+	c.seal = contextSeal(c)
+	return c, nil
+}
+
+func contextSeal(c DomainContext) [32]byte {
+	payload := struct {
+		SchemaVersion, ContextID, DomainID string
+		Resolution                         Resolution
+		PrincipalID, WorkerID, SessionID   string
+		RuntimeIdentity                    RuntimeIdentity
+		IsolationClaim                     string
+		IssuedAt, ExpiresAt                time.Time
+		MintAuthority, ClaimedDomainID     string
+	}{c.SchemaVersion, c.ContextID, c.DomainID, c.Resolution, c.PrincipalID, c.WorkerID, c.SessionID, c.RuntimeIdentity, c.IsolationClaim, c.IssuedAt, c.ExpiresAt, c.MintAuthority, c.ClaimedDomainID}
+	b, _ := json.Marshal(payload)
+	return sha256.Sum256(append([]byte("authdomain-server-context-v1\x00"), b...))
 }
 
 type AuthzRequest struct {
@@ -601,7 +664,11 @@ func exceptionTargets(e BlockException, blocks []ProtectedBlock, r AuthzRequest)
 	return false
 }
 func validContext(c DomainContext, now time.Time) bool {
-	return c.SchemaVersion == SchemaVersion && c.ContextID != "" && c.DomainID != "" && c.PrincipalID != "" && c.WorkerID != "" && c.SessionID != "" && c.Resolution.Source == "server_observed_host" && !now.Before(c.IssuedAt) && now.Before(c.ExpiresAt)
+	return sealedContext(c) && c.SchemaVersion == SchemaVersion && c.ContextID != "" && c.DomainID != "" && c.PrincipalID != "" && c.WorkerID != "" && c.SessionID != "" && c.Resolution.Source == "server_observed_host" && !now.Before(c.IssuedAt) && now.Before(c.ExpiresAt)
+}
+func sealedContext(c DomainContext) bool {
+	want := contextSeal(c)
+	return subtle.ConstantTimeCompare(c.seal[:], want[:]) == 1 && c.MintAuthority == serverMintAuthority
 }
 func exactException(e BlockException, blocks []ProtectedBlock, r AuthzRequest, now time.Time) bool {
 	if e.DomainID != r.DomainContext.DomainID || e.PrincipalID != r.DomainContext.PrincipalID || e.WorkerID != r.DomainContext.WorkerID || e.SessionID != r.DomainContext.SessionID || e.ObjectSelector.ObjectID != r.ObjectID || !contains(e.Actions, r.Action) || !now.Before(e.ExpiresAt) || !now.Before(e.Lease.NotAfter) {
@@ -668,10 +735,14 @@ type ReplayExport struct {
 }
 
 const NeutralFixtureObject = "fixture://authorization-domains/protected/exact-read-object"
+const LifecycleContractSHA256 = "4a5d12ff96b136db5bd7e78c9467a222c242be99c060d5a17fe267725bc9caff"
 
 // AdaptNeutralDecision performs the deliberately narrow I1a projection. It
 // cannot represent an exception permit and therefore rejects one.
 func AdaptNeutralDecision(id, seam, class string, req AuthzRequest, decision AuthzDecision) (ReplayRecord, error) {
+	if req.RequestID == "" || decision.RequestID != req.RequestID {
+		return ReplayRecord{}, errors.New("replay adapter: request and decision are not correlated")
+	}
 	if decision.Decision == PermitException {
 		return ReplayRecord{}, errors.New("replay adapter: permit_exception is not representable")
 	}
@@ -681,6 +752,9 @@ func AdaptNeutralDecision(id, seam, class string, req AuthzRequest, decision Aut
 		return record, nil
 	}
 	c := req.DomainContext
+	if !validContext(c, decision.DecidedAt) {
+		return ReplayRecord{}, errors.New("replay adapter: invalid server domain context")
+	}
 	record.ResolvedContext = &ReplayContext{ContextID: c.ContextID, WorkerID: c.WorkerID, SessionID: c.SessionID, DomainID: c.DomainID, MintedBy: c.MintAuthority}
 	if c.ClaimedDomainID != "" {
 		record.ClaimedContext = &ReplayContext{ContextID: "untrusted-claim", WorkerID: c.WorkerID, SessionID: c.SessionID, DomainID: c.ClaimedDomainID, MintedBy: "caller-claim"}
@@ -692,26 +766,32 @@ func AdaptNeutralDecision(id, seam, class string, req AuthzRequest, decision Aut
 // ExportNeutral projects only the contract's supported allow-unprotected and
 // deny-protected outcomes. Exception permits are deliberately unrepresentable.
 func ExportNeutral(lifecycleDigest string, records []ReplayRecord) ([]byte, error) {
-	if len(lifecycleDigest) != 64 {
-		return nil, errors.New("replay export: invalid lifecycle digest")
+	if lifecycleDigest != LifecycleContractSHA256 {
+		return nil, errors.New("replay export: lifecycle digest does not match pinned contract")
 	}
 	allowedSeams := map[string]bool{"ordinary-work": true, "protected-read-pep": true, "protected-read-audit": true}
 	seen := map[string]bool{}
+	counts := map[string]int{}
 	for _, r := range records {
 		if !allowedSeams[r.Seam] {
 			return nil, fmt.Errorf("replay export: unknown seam %q", r.Seam)
 		}
 		seen[r.Seam] = true
-		if r.Decision.Outcome != "allow" && r.Decision.Outcome != "deny" {
-			return nil, errors.New("replay export: unsupported decision")
-		}
-		if r.Decision.Outcome == "deny" && (r.Request.Object != NeutralFixtureObject || r.ResolvedContext == nil || r.Decision.ContextSource != "server_resolved" || r.Decision.ResolvedContextID != r.ResolvedContext.ContextID) {
-			return nil, errors.New("replay export: invalid protected context projection")
+		counts[r.Seam]++
+		switch r.Seam {
+		case "ordinary-work":
+			if r.Decision.Outcome != "allow" || r.Decision.Reason != "unprotected" || r.Decision.ContextSource != "none" || r.Decision.ResolvedContextID != "" || r.Request.Object == NeutralFixtureObject || r.ClaimedContext != nil || r.ResolvedContext != nil {
+				return nil, errors.New("replay export: invalid ordinary-work projection")
+			}
+		case "protected-read-pep", "protected-read-audit":
+			if r.Request.Action != ActionRead || r.Request.Object != NeutralFixtureObject || r.Decision.Outcome != "deny" || r.Decision.Reason != "protected_block" || r.ResolvedContext == nil || r.Decision.ContextSource != "server_resolved" || r.Decision.ResolvedContextID != r.ResolvedContext.ContextID {
+				return nil, errors.New("replay export: invalid protected context projection")
+			}
 		}
 	}
 	for _, s := range []string{"ordinary-work", "protected-read-pep", "protected-read-audit"} {
-		if !seen[s] {
-			return nil, fmt.Errorf("replay export: missing seam %q", s)
+		if !seen[s] || counts[s] != 1 {
+			return nil, fmt.Errorf("replay export: seam %q must appear exactly once", s)
 		}
 	}
 	e := ReplayExport{Schema: ReplaySchema, LifecycleContractSHA256: lifecycleDigest, Coverage: []ReplayCoverage{{"ordinary-work", false, true}, {"protected-read-pep", true, true}, {"protected-read-audit", true, true}}, Records: records, Probes: []any{}}

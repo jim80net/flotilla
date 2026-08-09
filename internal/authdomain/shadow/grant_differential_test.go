@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -76,5 +77,35 @@ audit: {mode: metadata-only, retain: P30D}
 	d := shadow.Evaluate(compiled, shadow.AuthzRequest{RequestID: "grant-differential", Action: "gmail.messages.list", ObjectID: "gmail://primary-account/messages", PolicyGeneration: 1}, when)
 	if d.Decision != shadow.PermitUnblocked || d.ReasonCode != shadow.ReasonUnprotected {
 		t.Fatalf("shadow decision = %#v", d)
+	}
+}
+
+func TestCallerBuiltContextIsRejected(t *testing.T) {
+	when := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	p := shadow.PolicyGeneration{SchemaVersion: shadow.SchemaVersion, Generation: 1, RegistryVersion: shadow.RegistryVersion, CreatedAt: when, Blocks: []shadow.ProtectedBlock{{ID: "fixture-block", ObjectSelector: shadow.ExactSelector{Kind: "exact", ObjectID: shadow.NeutralFixtureObject}, Actions: []string{shadow.ActionRead}, Reason: "fixture", Owner: "policy-owner", AuditPolicy: "durable_before_effect", CreatedAt: when}}}
+	raw, err := shadow.SealCandidate(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := shadow.OpenStore(t.TempDir(), when)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Publish(raw, 0, "one", when); err != nil {
+		t.Fatal(err)
+	}
+	lookalike := shadow.DomainContext{SchemaVersion: shadow.SchemaVersion, ContextID: "caller-context", DomainID: "domain-one", Resolution: shadow.Resolution{Source: "server_observed_host", ResolverVersion: "caller", EvidenceDigest: strings.Repeat("a", 64)}, PrincipalID: "principal-one", WorkerID: "worker-one", SessionID: "session-one", RuntimeIdentity: shadow.RuntimeIdentity{Kind: "linux_user", Subject: "uid:1001"}, IsolationClaim: "unproved", IssuedAt: when, ExpiresAt: when.Add(time.Hour), MintAuthority: "caller-selected"}
+	if _, err := store.PolicyFor(lookalike, when); err == nil {
+		t.Fatal("caller-built context read policy")
+	}
+	if _, err := lookalike.StorageKey(shadow.NeutralFixtureObject); err == nil {
+		t.Fatal("caller-built context derived storage key")
+	}
+	if _, err := lookalike.ReplayKey("decision", "pep", 1); err == nil {
+		t.Fatal("caller-built context derived replay key")
+	}
+	decision := shadow.Evaluate(store.LastGood(), shadow.AuthzRequest{RequestID: "caller", DomainContext: lookalike, Action: shadow.ActionRead, ObjectID: shadow.NeutralFixtureObject, PolicyGeneration: 1}, when)
+	if decision.ReasonCode != shadow.ReasonInvalidContext || decision.Decision != shadow.DenyBlocked {
+		t.Fatalf("decision = %#v", decision)
 	}
 }
