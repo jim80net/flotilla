@@ -53,6 +53,30 @@ func TestEvidenceEnvelopeRejectsRequestDecisionMismatchBeforeAppend(t *testing.T
 	}
 }
 
+func TestEvidenceEnvelopePrevalidatesEveryRecordBeforeAppend(t *testing.T) {
+	for name, mutate := range map[string]func(*EvidenceEnvelope){
+		"unknown decision":  func(envelope *EvidenceEnvelope) { envelope.Decision = "future_decision" },
+		"empty decision id": func(envelope *EvidenceEnvelope) { envelope.DecisionID = "" },
+		"empty outcome id":  func(envelope *EvidenceEnvelope) { envelope.OutcomeID = "" },
+		"empty reason code": func(envelope *EvidenceEnvelope) { envelope.ReasonCode = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			writer, err := NewWriter(t.TempDir(), "domain-alpha")
+			if err != nil {
+				t.Fatal(err)
+			}
+			envelope := fixtureEnvelope("domain-alpha")
+			mutate(&envelope)
+			if records, err := RecordSimulatedEnvelope(context.Background(), writer, envelope); err == nil || len(records) != 0 {
+				t.Fatalf("records=%d err=%v", len(records), err)
+			}
+			if _, err := os.Stat(writer.path); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("malformed envelope created WAL: %v", err)
+			}
+		})
+	}
+}
+
 func TestAuditWALDurableChainAndClosedRegistry(t *testing.T) {
 	root := t.TempDir()
 	writer, err := NewWriter(root, "domain-alpha")
@@ -187,7 +211,8 @@ func TestAuditInitialCreateRequiresDirectorySync(t *testing.T) {
 		}
 	})
 	t.Run("failure_is_returned", func(t *testing.T) {
-		writer, _ := NewWriter(t.TempDir(), "domain-alpha")
+		root := t.TempDir()
+		writer, _ := NewWriter(root, "domain-alpha")
 		injected := errors.New("injected directory sync failure")
 		calls := 0
 		writer.syncDirectory = func(string) error {
@@ -198,7 +223,68 @@ func TestAuditInitialCreateRequiresDirectorySync(t *testing.T) {
 		if !errors.Is(err, injected) || len(records) != 0 || calls != 1 {
 			t.Fatalf("records=%d calls=%d err=%v", len(records), calls, err)
 		}
+		prefix, err := os.ReadFile(writer.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if health := writer.Verify(context.Background()); !health.Healthy() || health.Records != 1 {
+			t.Fatalf("ambiguous-create prefix health=%+v", health)
+		}
+		retryWriter, _ := NewWriter(root, "domain-alpha")
+		retrySyncs := 0
+		retryWriter.syncDirectory = func(path string) error {
+			retrySyncs++
+			return syncAuditDirectory(path)
+		}
+		records, err = RecordSimulatedEnvelope(context.Background(), retryWriter, fixtureEnvelope("domain-alpha"))
+		if err != nil || len(records) != 3 || calls != 1 || retrySyncs != 1 {
+			t.Fatalf("retry records=%d failed_syncs=%d retry_syncs=%d err=%v", len(records), calls, retrySyncs, err)
+		}
+		body, err := os.ReadFile(writer.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.HasPrefix(body, prefix) {
+			t.Fatal("ambiguous-create retry changed the valid prefix")
+		}
+		if health := retryWriter.Verify(context.Background()); !health.Healthy() || health.Records != 3 || health.LastSequence != 3 {
+			t.Fatalf("retry health=%+v", health)
+		}
 	})
+}
+
+func TestAuditCandidateIdentityConflictsFailBeforeWrite(t *testing.T) {
+	writer, err := NewWriter(t.TempDir(), "domain-alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RecordSimulatedEnvelope(context.Background(), writer, fixtureEnvelope("domain-alpha")); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(writer.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := EventInput{Kind: EventRequest, EventID: "request:request-fixture-1", RequestID: "request-fixture-1", PolicyRevision: fixturePolicy(7), DomainContext: fixtureContext("domain-alpha"), ReasonCode: "shadow_request_observed", ObservedAt: fixtureTime}
+	for name, mutate := range map[string]func(*EventInput){
+		"event content changed": func(input *EventInput) { input.ReasonCode = "changed_reason" },
+		"request id reused":     func(input *EventInput) { input.EventID = "request:alternate-event" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := base
+			mutate(&candidate)
+			if _, err := writer.Append(context.Background(), candidate); err == nil {
+				t.Fatal("conflicting candidate accepted")
+			}
+			after, err := os.ReadFile(writer.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(before, after) {
+				t.Fatal("conflicting candidate changed WAL")
+			}
+		})
+	}
 }
 
 func TestAuditPerDomainFilesAndMismatchRefusal(t *testing.T) {

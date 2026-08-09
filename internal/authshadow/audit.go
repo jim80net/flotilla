@@ -85,6 +85,21 @@ func (w *Writer) Append(ctx context.Context, input EventInput) (AuditRecord, err
 	if health.State != HealthHealthy && health.State != HealthMissing && health.State != HealthEmpty {
 		return AuditRecord{}, fmt.Errorf("shadow audit fail closed: %s (%s)", health.State, health.ReasonCode)
 	}
+	prior, idempotent, err := reconcileAuditCandidate(input, records)
+	if err != nil {
+		return AuditRecord{}, err
+	}
+	if idempotent {
+		// An exact retry of sequence one may be the recovery path after the file
+		// fsync succeeded but its first parent-directory fsync did not. Re-sync
+		// the directory before acknowledging the already-durable prefix.
+		if prior.Sequence == 1 {
+			if err := w.syncDirectory(w.root); err != nil {
+				return AuditRecord{}, fmt.Errorf("shadow audit directory resync failed: %w", err)
+			}
+		}
+		return prior, nil
+	}
 	sequence, predecessor := uint64(1), ""
 	if len(records) > 0 {
 		last := records[len(records)-1]
@@ -136,6 +151,59 @@ func (w *Writer) Append(ctx context.Context, input EventInput) (AuditRecord, err
 		return AuditRecord{}, fmt.Errorf("shadow audit post-append verification failed: %s", post.State)
 	}
 	return record, nil
+}
+
+func reconcileAuditCandidate(input EventInput, records []AuditRecord) (AuditRecord, bool, error) {
+	events := make(map[string]AuditRecord, len(records))
+	requests := make(map[string]AuditRecord, len(records))
+	decisions := make(map[string]AuditRecord, len(records))
+	outcomes := make(map[string]AuditRecord, len(records))
+	for _, record := range records {
+		events[record.EventID] = record
+		switch record.Kind {
+		case EventRequest:
+			requests[record.RequestID] = record
+		case EventDecision:
+			decisions[record.DecisionID] = record
+		case EventSimulatedOutcome:
+			outcomes[record.OutcomeID] = record
+		}
+	}
+	if existing, ok := events[input.EventID]; ok {
+		candidate, err := newRecord(input, existing.Sequence, existing.PredecessorHash)
+		if err != nil {
+			return AuditRecord{}, false, err
+		}
+		if candidate.RecordHash != existing.RecordHash {
+			return AuditRecord{}, false, errors.New("shadow audit event ID reused with different content")
+		}
+		return existing, true, nil
+	}
+	switch input.Kind {
+	case EventRequest:
+		if _, exists := requests[input.RequestID]; exists {
+			return AuditRecord{}, false, errors.New("shadow audit request ID already exists")
+		}
+	case EventDecision:
+		if _, exists := requests[input.RequestID]; !exists {
+			return AuditRecord{}, false, errors.New("shadow audit decision has no verified request")
+		}
+		if _, exists := decisions[input.DecisionID]; exists {
+			return AuditRecord{}, false, errors.New("shadow audit decision ID already exists")
+		}
+	case EventSimulatedOutcome:
+		if _, exists := requests[input.RequestID]; !exists {
+			return AuditRecord{}, false, errors.New("shadow audit outcome has no verified request")
+		}
+		decision, exists := decisions[input.DecisionID]
+		if !exists || decision.RequestID != input.RequestID {
+			return AuditRecord{}, false, errors.New("shadow audit outcome has no matching verified decision")
+		}
+		if _, exists := outcomes[input.OutcomeID]; exists {
+			return AuditRecord{}, false, errors.New("shadow audit outcome ID already exists")
+		}
+	}
+	return AuditRecord{}, false, nil
 }
 
 func (w *Writer) Verify(ctx context.Context) Health {
