@@ -735,6 +735,9 @@ type ReplayExport struct {
 }
 
 const NeutralFixtureObject = "fixture://authorization-domains/protected/exact-read-object"
+const NeutralOrdinaryObject = "document://ordinary/item"
+const NeutralOrdinaryClass = "ordinary"
+const NeutralProtectedClass = "protected"
 const LifecycleContractSHA256 = "4a5d12ff96b136db5bd7e78c9467a222c242be99c060d5a17fe267725bc9caff"
 
 // AdaptNeutralDecision performs the deliberately narrow I1a projection. It
@@ -743,12 +746,20 @@ func AdaptNeutralDecision(id, seam, class string, req AuthzRequest, decision Aut
 	if req.RequestID == "" || decision.RequestID != req.RequestID {
 		return ReplayRecord{}, errors.New("replay adapter: request and decision are not correlated")
 	}
-	if decision.Decision == PermitException {
+	switch decision.Decision {
+	case PermitException:
 		return ReplayRecord{}, errors.New("replay adapter: permit_exception is not representable")
+	case PermitUnblocked, DenyBlocked:
+		// These are the complete outcomes representable in neutral replay v1.
+	default:
+		return ReplayRecord{}, fmt.Errorf("replay adapter: unknown outcome %q", decision.Decision)
 	}
 	record := ReplayRecord{ID: id, Seam: seam, Request: ReplayRequest{Class: class, Action: req.Action, Object: req.ObjectID}}
 	if decision.Decision == PermitUnblocked {
 		record.Decision = ReplayDecision{Outcome: "allow", Reason: "unprotected", ContextSource: "none"}
+		if err := validateReplayRecord(record); err != nil {
+			return ReplayRecord{}, err
+		}
 		return record, nil
 	}
 	c := req.DomainContext
@@ -760,7 +771,29 @@ func AdaptNeutralDecision(id, seam, class string, req AuthzRequest, decision Aut
 		record.ClaimedContext = &ReplayContext{ContextID: "untrusted-claim", WorkerID: c.WorkerID, SessionID: c.SessionID, DomainID: c.ClaimedDomainID, MintedBy: "caller-claim"}
 	}
 	record.Decision = ReplayDecision{Outcome: "deny", Reason: "protected_block", ContextSource: "server_resolved", ResolvedContextID: c.ContextID}
+	if err := validateReplayRecord(record); err != nil {
+		return ReplayRecord{}, err
+	}
 	return record, nil
+}
+
+func validateReplayRecord(r ReplayRecord) error {
+	switch r.Seam {
+	case "ordinary-work":
+		if r.Request.Class != NeutralOrdinaryClass || r.Request.Action != "draft" || r.Request.Object != NeutralOrdinaryObject || r.Decision.Outcome != "allow" || r.Decision.Reason != "unprotected" || r.Decision.ContextSource != "none" || r.Decision.ResolvedContextID != "" || r.ClaimedContext != nil || r.ResolvedContext != nil {
+			return errors.New("replay export: invalid ordinary-work projection")
+		}
+	case "protected-read-pep", "protected-read-audit":
+		if r.Request.Class != NeutralProtectedClass || r.Request.Action != ActionRead || r.Request.Object != NeutralFixtureObject || r.Decision.Outcome != "deny" || r.Decision.Reason != "protected_block" || r.ResolvedContext == nil || r.Decision.ContextSource != "server_resolved" || r.Decision.ResolvedContextID != r.ResolvedContext.ContextID {
+			return errors.New("replay export: invalid protected context projection")
+		}
+		if r.ClaimedContext != nil && *r.ClaimedContext == *r.ResolvedContext {
+			return errors.New("replay export: claimed and resolved contexts are not distinct")
+		}
+	default:
+		return fmt.Errorf("replay export: unknown seam %q", r.Seam)
+	}
+	return nil
 }
 
 // ExportNeutral projects only the contract's supported allow-unprotected and
@@ -778,15 +811,8 @@ func ExportNeutral(lifecycleDigest string, records []ReplayRecord) ([]byte, erro
 		}
 		seen[r.Seam] = true
 		counts[r.Seam]++
-		switch r.Seam {
-		case "ordinary-work":
-			if r.Decision.Outcome != "allow" || r.Decision.Reason != "unprotected" || r.Decision.ContextSource != "none" || r.Decision.ResolvedContextID != "" || r.Request.Object == NeutralFixtureObject || r.ClaimedContext != nil || r.ResolvedContext != nil {
-				return nil, errors.New("replay export: invalid ordinary-work projection")
-			}
-		case "protected-read-pep", "protected-read-audit":
-			if r.Request.Action != ActionRead || r.Request.Object != NeutralFixtureObject || r.Decision.Outcome != "deny" || r.Decision.Reason != "protected_block" || r.ResolvedContext == nil || r.Decision.ContextSource != "server_resolved" || r.Decision.ResolvedContextID != r.ResolvedContext.ContextID {
-				return nil, errors.New("replay export: invalid protected context projection")
-			}
+		if err := validateReplayRecord(r); err != nil {
+			return nil, err
 		}
 	}
 	for _, s := range []string{"ordinary-work", "protected-read-pep", "protected-read-audit"} {

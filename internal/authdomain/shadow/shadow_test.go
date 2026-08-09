@@ -258,6 +258,9 @@ func TestNeutralAdapterKeepsClaimAndResolutionDistinct(t *testing.T) {
 	if _, err := AdaptNeutralDecision("record", "protected-read-pep", "protected", req, AuthzDecision{RequestID: req.RequestID, Decision: PermitException, DecidedAt: now}); err == nil {
 		t.Fatal("exception projection accepted")
 	}
+	if _, err := AdaptNeutralDecision("record", "protected-read-pep", "protected", req, AuthzDecision{RequestID: req.RequestID, Decision: Outcome("future_outcome"), DecidedAt: now}); err == nil {
+		t.Fatal("unknown future outcome projected as a denial")
+	}
 }
 
 func replayRecords(t *testing.T) []ReplayRecord {
@@ -266,9 +269,9 @@ func replayRecords(t *testing.T) []ReplayRecord {
 	resolved := &ReplayContext{c.ContextID, c.WorkerID, c.SessionID, c.DomainID, c.MintAuthority}
 	claimed := &ReplayContext{"claim", "worker-one", "session-one", "claimed-other", "caller"}
 	return []ReplayRecord{
-		{ID: "ordinary", Seam: "ordinary-work", Request: ReplayRequest{"ordinary", "draft", "document://ordinary/item"}, ClaimedContext: nil, ResolvedContext: nil, Decision: ReplayDecision{"allow", "unprotected", "none", ""}},
-		{ID: "pep", Seam: "protected-read-pep", Request: ReplayRequest{"protected", ActionRead, NeutralFixtureObject}, ClaimedContext: claimed, ResolvedContext: resolved, Decision: ReplayDecision{"deny", "protected_block", "server_resolved", resolved.ContextID}},
-		{ID: "audit", Seam: "protected-read-audit", Request: ReplayRequest{"protected", ActionRead, NeutralFixtureObject}, ClaimedContext: claimed, ResolvedContext: resolved, Decision: ReplayDecision{"deny", "protected_block", "server_resolved", resolved.ContextID}},
+		{ID: "ordinary", Seam: "ordinary-work", Request: ReplayRequest{NeutralOrdinaryClass, "draft", NeutralOrdinaryObject}, ClaimedContext: nil, ResolvedContext: nil, Decision: ReplayDecision{"allow", "unprotected", "none", ""}},
+		{ID: "pep", Seam: "protected-read-pep", Request: ReplayRequest{NeutralProtectedClass, ActionRead, NeutralFixtureObject}, ClaimedContext: claimed, ResolvedContext: resolved, Decision: ReplayDecision{"deny", "protected_block", "server_resolved", resolved.ContextID}},
+		{ID: "audit", Seam: "protected-read-audit", Request: ReplayRequest{NeutralProtectedClass, ActionRead, NeutralFixtureObject}, ClaimedContext: claimed, ResolvedContext: resolved, Decision: ReplayDecision{"deny", "protected_block", "server_resolved", resolved.ContextID}},
 	}
 }
 
@@ -309,5 +312,27 @@ func TestNeutralReplayExportIsInertAndClosed(t *testing.T) {
 	duplicate := append(replayRecords(t), replayRecords(t)[0])
 	if _, err := ExportNeutral(LifecycleContractSHA256, duplicate); err == nil {
 		t.Fatal("duplicate seam accepted")
+	}
+	identicalContext := replayRecords(t)
+	copyOfResolved := *identicalContext[1].ResolvedContext
+	identicalContext[1].ClaimedContext = &copyOfResolved
+	if _, err := ExportNeutral(LifecycleContractSHA256, identicalContext); err == nil {
+		t.Fatal("byte-identical claimed and resolved contexts accepted")
+	}
+	for name, mutate := range map[string]func([]ReplayRecord){
+		"ordinary class on protected seam":  func(records []ReplayRecord) { records[1].Request.Class = NeutralOrdinaryClass },
+		"protected class on ordinary seam":  func(records []ReplayRecord) { records[0].Request.Class = NeutralProtectedClass },
+		"read action on ordinary seam":      func(records []ReplayRecord) { records[0].Request.Action = ActionRead },
+		"draft action on protected seam":    func(records []ReplayRecord) { records[1].Request.Action = "draft" },
+		"protected object on ordinary seam": func(records []ReplayRecord) { records[0].Request.Object = NeutralFixtureObject },
+		"ordinary object on protected seam": func(records []ReplayRecord) { records[1].Request.Object = NeutralOrdinaryObject },
+	} {
+		t.Run(name, func(t *testing.T) {
+			records := replayRecords(t)
+			mutate(records)
+			if _, err := ExportNeutral(LifecycleContractSHA256, records); err == nil {
+				t.Fatal("cross-seam projection accepted")
+			}
+		})
 	}
 }
