@@ -1469,6 +1469,10 @@
       // Keep the Goals view live off the same refresh cadence (SSE-triggered). It
       // fetches /api/goals itself and no-ops until the operator has opened the tab.
       if (window.flotillaGoals) window.flotillaGoals.refresh();
+      var authView = el("view-auth-domains");
+      if (authView && !authView.classList.contains("hidden") && window.flotillaAuthDomains) {
+        window.flotillaAuthDomains.refresh();
+      }
     });
   }
 
@@ -1629,8 +1633,8 @@
     }).catch(function () {});
   }
 
-  /* ── tab nav: Conversations ⇄ Goals ⇄ Issues · Parade/R&D (nav-out) ─────────────── */
-  var VIEWS = ["conversations", "goals", "issues"];
+  /* ── tab nav: Conversations ⇄ Goals ⇄ Issues ⇄ Auth Domains · Parade/R&D (nav-out) ── */
+  var VIEWS = ["conversations", "goals", "issues", "auth-domains"];
   // #516: the brand subtitle tracks the active SPA tab. Parade and R&D are separate
   // pages; only the three SPA views land here.
   function setBrandDash(view) {
@@ -1656,7 +1660,8 @@
     if (window.flotillaWorkContext) window.flotillaWorkContext.onViewChange(view);
     if (view === "goals" && window.flotillaGoals) window.flotillaGoals.show();
     if (view === "issues" && window.flotillaTracker) window.flotillaTracker.show();
-    markTabViewed(view); // clear unseen dot when operator opens this tab
+    if (view === "auth-domains" && window.flotillaAuthDomains) window.flotillaAuthDomains.show();
+    if (unseenDot(view)) markTabViewed(view); // clear unseen dot when operator opens a tracked tab
   }
   // #429: goals.js routes a decision card's "Drives" link back into the Goals map.
   window.flotillaDash.showView = showView;
@@ -1843,7 +1848,7 @@
       var node = h.indexOf("goals/") === 0 ? decodeURIComponent(h.slice(6)) : "";
       return { view: "goals", node: node || null };
     }
-    if (h === "issues") return { view: h };
+    if (h === "issues" || h === "auth-domains") return { view: h };
     // #863: preserve the old dashboard deep link by routing it into the combined
     // R&D reading room instead of trying to reveal a removed Decisions panel.
     if (h === "decisions") return { view: "rd" };
