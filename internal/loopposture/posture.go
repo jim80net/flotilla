@@ -130,7 +130,7 @@ func Derive(e Evidence) Posture {
 	if e.AwaitingAuthN > 0 {
 		return PostureAwaitingAuthority
 	}
-	if e.Pane == surface.StateAwaitingInput || e.Pane == surface.StateAwaitingApproval {
+	if e.Pane == surface.StateAwaitingInput || e.Pane == surface.StateAwaitingApproval || e.Pane == surface.StateProviderLimited {
 		return PostureBlocked
 	}
 	if e.Pane == surface.StateErrored {

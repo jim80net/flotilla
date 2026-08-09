@@ -29,6 +29,7 @@ func TestDerive_OutOfLoop(t *testing.T) {
 		{"unknown pane", Evidence{InSnapshot: true, SnapshotFresh: true, Pane: surface.StateUnknown}, PostureUnknown},
 		{"stale snapshot", Evidence{InSnapshot: true, SnapshotFresh: false, Pane: surface.StateIdle, BacklogKnown: true}, PostureUnknown},
 		{"errored drifted", Evidence{InSnapshot: true, SnapshotFresh: true, Pane: surface.StateErrored}, PostureDrifted},
+		{"provider limited blocked", Evidence{InSnapshot: true, SnapshotFresh: true, Pane: surface.StateProviderLimited}, PostureBlocked},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -1,0 +1,14 @@
+{
+  "generated_at": "2026-08-09T12:00:00Z",
+  "xo": "fleet-lead",
+  "freshness": {"state": "fresh", "message": "fresh"},
+  "agents": [
+    {
+      "name": "alpha-desk",
+      "surface": "claude-code",
+      "state": "provider-limited",
+      "loop_posture": "blocked",
+      "queue_state": "has-work"
+    }
+  ]
+}

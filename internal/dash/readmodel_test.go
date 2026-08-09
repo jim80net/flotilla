@@ -102,6 +102,24 @@ func TestBuildBoard_LoopPosture(t *testing.T) {
 	}
 }
 
+func TestBuildBoard_ProviderLimitedCannotBeAvailable986(t *testing.T) {
+	cfg := &roster.Config{Agents: []roster.Agent{{Name: "alpha-desk"}}}
+	snap := watch.Snapshot{DeskStates: map[string]surface.State{"alpha-desk": surface.StateProviderLimited}}
+	doc := BuildBoard(BoardInputs{
+		Cfg: cfg, XO: "alpha-desk", Snap: snap, SnapOK: true, SnapAge: 0,
+		LoopByAgent: map[string]loopposture.Evidence{
+			"alpha-desk": {Pane: surface.StateProviderLimited, InSnapshot: true, SnapshotFresh: true, BacklogKnown: true},
+		},
+	})
+	if len(doc.Agents) != 1 {
+		t.Fatalf("agents = %d, want 1", len(doc.Agents))
+	}
+	got := doc.Agents[0]
+	if got.State != "provider-limited" || got.LoopPosture != "blocked" {
+		t.Fatalf("provider-limited state projection = %+v, want provider-limited · blocked", got)
+	}
+}
+
 // TestBuildBoard_Fresh covers the superset contract: every base status field is
 // present (generated_at, xo, agents[name,role,surface,state]) plus the freshness
 // + xo_liveness additions, for a fresh snapshot.
