@@ -21,6 +21,7 @@
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;");
   }
+  var renderInlineMarkdown = window.flotillaUI.renderInlineMarkdown;
 
   // Coalesce identical reads while they are in flight. Startup and one SSE tick
   // have several independent consumers (landing, tab dots, Goals badge/view),
@@ -211,7 +212,7 @@
       var summary = action.summary || "action awaiting first update";
       return '<button type="button" class="live-swarm-card" data-swarm-desk="' + escapeHtml(a.name) + '">' +
         '<span class="live-swarm-name">' + escapeHtml(a.name) + '</span>' +
-        '<span class="live-swarm-action">' + escapeHtml(summary) + '</span>' +
+        '<span class="live-swarm-action">' + renderInlineMarkdown(summary) + '</span>' +
         '<span class="live-swarm-when">' + escapeHtml(when) + '</span></button>';
     }).join("");
     var cards = items.querySelectorAll("[data-swarm-desk]");
@@ -842,7 +843,7 @@
     var when = latest.ts
       ? '<time class="mirror-when" datetime="' + escapeHtml(latest.ts) + '" title="' + escapeHtml(latest.ts) + '">' + escapeHtml(relTime(latest.ts)) + "</time>"
       : "";
-    var body = escapeHtml(latest.info || "").replace(/\r?\n/g, "<br>");
+    var body = renderInlineMarkdown(latest.info || "");
     el("conv-map").innerHTML =
       '<span class="conv-map-label">session mirror ' + when + "</span>" +
       '<div class="mirror-glance">' + body + "</div>" + debugBlock(latest);
@@ -1192,7 +1193,7 @@
         // is clamped to keep the ledger line atomic; the thread must never show that clamped
         // copy as if it were the whole message). Falls back to the gist for short messages
         // and pre-#407 lines.
-        '<p class="thread-gist">' + escapeHtml(e.body || e.gist) + "</p>" +
+        '<p class="thread-gist">' + renderInlineMarkdown(e.body || e.gist) + "</p>" +
       "</div>"
     );
   }
@@ -1208,7 +1209,7 @@
             ' <span class="thread-kind">dash</span></span>' +
           '<time class="thread-time" datetime="' + escapeHtml(o.ts || "") + '">' + escapeHtml(relTime(o.ts)) + "</time>" +
         "</header>" +
-        '<p class="thread-gist">' + escapeHtml(o.body) + "</p>" +
+        '<p class="thread-gist">' + renderInlineMarkdown(o.body) + "</p>" +
       "</div>"
     );
   }
@@ -1218,7 +1219,7 @@
   // colour so it reads as the same participant's output alongside its relay lines.
   function threadMirrorMsgFor(agent, m) {
     var hue = speakerHue(agent);
-    var body = escapeHtml(m.info || "").replace(/\r?\n/g, "<br>");
+    var body = renderInlineMarkdown(m.info || "");
     // #406 fix-forward: a firewall-refused turn is kept in the PRIVATE dash but was never posted
     // to the public channel — render that honestly so a withheld turn is not mistaken for published.
     var withheld = m.suppressed

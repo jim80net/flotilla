@@ -69,7 +69,7 @@
       if (epoch === viewEpoch) renderIssueList(doc);
     }).catch(function (err) {
       if (epoch === viewEpoch) {
-        list.innerHTML = '<div class="error">Could not load the work ledger: ' + escapeHtml(err.message) + "</div>";
+        list.innerHTML = window.flotillaUI.failurePanel("The work ledger is unavailable right now.", "Retry", err.message, "data-ledger-retry");
         if (window.flotillaPerf) window.flotillaPerf.viewRendered("issues");
       }
     });
@@ -613,6 +613,9 @@
 
   /* ── wiring ──────────────────────────────────────────────────────────── */
   el("issues-refresh").addEventListener("click", loadIssues);
+  el("issues-list").addEventListener("click", function (event) {
+    if (event.target && event.target.closest("[data-ledger-retry]")) loadIssues();
+  });
   el("filter-idea").addEventListener("change", loadIssues);
   el("filter-state").addEventListener("change", loadIssues);
   el("issues-new").addEventListener("click", showCreate);

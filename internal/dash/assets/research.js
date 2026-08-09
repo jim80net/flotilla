@@ -10,13 +10,7 @@
       .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
   function inline(raw) {
-    var safe = esc(raw);
-    return safe
-      .replace(/`([^`]+)`/g, "<code>$1</code>")
-      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-      .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-      .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-      .replace(/\[([^\]]+)\]\((#[a-zA-Z0-9_-]+)\)/g, '<a href="$2">$1</a>');
+    return window.flotillaUI.renderInlineMarkdown(raw);
   }
   function slug(text, used) {
     var base = String(text).toLowerCase().replace(/<[^>]*>/g, "")
@@ -749,10 +743,10 @@
     el("research-decision-title").textContent = currentDecision
       ? decisionTitle(currentDecision)
       : "Waiting on you";
-    el("research-decision-summary").textContent = currentDecision
+    el("research-decision-summary").innerHTML = inline(currentDecision
       ? ("What you decide · " + (decisionBriefField(currentDecision.brief, ["decision", "question", "recommendation", "recommended"]) ||
           "Read the paper, then tell your fleet what you decide."))
-      : "This paper is waiting for what you decide.";
+      : "This paper is waiting for what you decide.");
     el("research-decision-respond").hidden = !currentDecision;
     el("research-decision-response").hidden = true;
     el("research-decision-response-input").value = "";
