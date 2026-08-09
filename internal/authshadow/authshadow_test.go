@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -104,6 +105,100 @@ func TestAuditWALDurableChainAndClosedRegistry(t *testing.T) {
 	if err := bad.validate(); err == nil {
 		t.Fatal("widened action accepted")
 	}
+}
+
+func TestAuditLockExistingPermissionsAreRestricted(t *testing.T) {
+	root := t.TempDir()
+	writer, err := NewWriter(root, "domain-alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(writer.lockPath, nil, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(writer.lockPath, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RecordSimulatedEnvelope(context.Background(), writer, fixtureEnvelope("domain-alpha")); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(writer.lockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("existing lock mode survived as %o", info.Mode().Perm())
+	}
+}
+
+func TestAuditLockRejectsSymlink(t *testing.T) {
+	root := t.TempDir()
+	writer, err := NewWriter(root, "domain-alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "target")
+	if err := os.WriteFile(target, nil, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, writer.lockPath); err != nil {
+		t.Fatal(err)
+	}
+	if health := writer.Verify(context.Background()); health.State != HealthDiskUnavailable || health.ReasonCode != "lock_failed" {
+		t.Fatalf("health=%+v", health)
+	}
+}
+
+func TestAuditLockRejectsHardLink(t *testing.T) {
+	root := t.TempDir()
+	writer, err := NewWriter(root, "domain-alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "target")
+	if err := os.WriteFile(target, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(target, writer.lockPath); err != nil {
+		t.Fatal(err)
+	}
+	if health := writer.Verify(context.Background()); health.State != HealthDiskUnavailable || health.ReasonCode != "lock_failed" {
+		t.Fatalf("health=%+v", health)
+	}
+}
+
+func TestAuditInitialCreateRequiresDirectorySync(t *testing.T) {
+	t.Run("success_once", func(t *testing.T) {
+		writer, _ := NewWriter(t.TempDir(), "domain-alpha")
+		calls := 0
+		writer.syncDirectory = func(path string) error {
+			calls++
+			body, err := os.ReadFile(writer.path)
+			if err != nil || len(body) == 0 || body[len(body)-1] != '\n' {
+				t.Fatalf("directory sync ran before durable WAL content: bytes=%d err=%v", len(body), err)
+			}
+			return syncAuditDirectory(path)
+		}
+		if _, err := RecordSimulatedEnvelope(context.Background(), writer, fixtureEnvelope("domain-alpha")); err != nil {
+			t.Fatal(err)
+		}
+		if calls != 1 {
+			t.Fatalf("directory sync calls=%d want 1", calls)
+		}
+	})
+	t.Run("failure_is_returned", func(t *testing.T) {
+		writer, _ := NewWriter(t.TempDir(), "domain-alpha")
+		injected := errors.New("injected directory sync failure")
+		calls := 0
+		writer.syncDirectory = func(string) error {
+			calls++
+			return injected
+		}
+		records, err := RecordSimulatedEnvelope(context.Background(), writer, fixtureEnvelope("domain-alpha"))
+		if !errors.Is(err, injected) || len(records) != 0 || calls != 1 {
+			t.Fatalf("records=%d calls=%d err=%v", len(records), calls, err)
+		}
+	})
 }
 
 func TestAuditPerDomainFilesAndMismatchRefusal(t *testing.T) {
@@ -237,9 +332,32 @@ func TestLifecycleSameUIDAndProcessGroupAreNotIsolation(t *testing.T) {
 	if err != nil || prior.ReceiptHash != receipt.ReceiptHash {
 		t.Fatalf("idempotent retry=%+v err=%v", prior, err)
 	}
-	input.InputDigest = sha256String("different")
-	if _, err := m.Apply(input); err == nil {
-		t.Fatal("same ID/different input accepted")
+	input.InputDigest = sha256String("caller-digest-is-not-identity")
+	prior, err = m.Apply(input)
+	if err != nil || prior.ReceiptHash != receipt.ReceiptHash {
+		t.Fatalf("untrusted caller digest changed identity: prior=%+v err=%v", prior, err)
+	}
+	aliases := []struct {
+		name   string
+		mutate func(*LifecycleInput)
+	}{
+		{"generation", func(in *LifecycleInput) { in.WorkerGeneration++ }},
+		{"state", func(in *LifecycleInput) { in.From, in.To = StateProvisioning, StateReady }},
+		{"domain", func(in *LifecycleInput) { in.DomainContext.DomainID = "domain-beta" }},
+		{"runtime_identity", func(in *LifecycleInput) { in.DomainContext.RuntimeIdentity.Subject = "uid-other" }},
+		{"policy_generation", func(in *LifecycleInput) { in.PolicyRevision = fixturePolicy(8) }},
+		{"predecessor", func(in *LifecycleInput) { in.ExpectedPredecessor = sha256String("other-predecessor") }},
+		{"evidence", func(in *LifecycleInput) { in.Evidence.Indeterminate = true }},
+		{"observed_at", func(in *LifecycleInput) { in.ObservedAt = in.ObservedAt.Add(time.Second) }},
+	}
+	for _, alias := range aliases {
+		t.Run(alias.name, func(t *testing.T) {
+			changed := input
+			alias.mutate(&changed)
+			if _, err := m.Apply(changed); err == nil {
+				t.Fatalf("same ID with changed canonical %s accepted", alias.name)
+			}
+		})
 	}
 }
 
@@ -282,7 +400,7 @@ func TestPinnedProbeRunnerHasExactly38ReadOnlyReceipts(t *testing.T) {
 		actual := strings.Split(probe.Expected, "|")[0]
 		observations[probe.ID] = ProbeObservation{ActualResult: actual, ReasonCode: probe.Reason, EvidenceDigest: sha256String("evidence:" + probe.ID), Duration: time.Millisecond}
 	}
-	run, err := RunSyntheticProbes(ProbeRunInput{RunID: "run-fixture-1", RuntimeGeneration: 1, SpecDigest: sha256String("spec"), PolicyRevision: fixturePolicy(7), DomainContext: fixtureContext("domain-alpha"), Evidence: IsolationEvidence{SameUID: true, ProcessGroupManaged: true}, Observations: observations, ObservedAt: fixtureTime})
+	run, err := RunSyntheticProbes(ProbeRunInput{RunID: "run-fixture-1", RuntimeGeneration: 1, SpecDigest: LifecycleContractSHA256, PolicyRevision: fixturePolicy(7), DomainContext: fixtureContext("domain-alpha"), Evidence: IsolationEvidence{SameUID: true, ProcessGroupManaged: true}, Observations: observations, ObservedAt: fixtureTime})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,14 +411,14 @@ func TestPinnedProbeRunnerHasExactly38ReadOnlyReceipts(t *testing.T) {
 		t.Fatalf("claim=%s outcome=%s", run.Claim, run.Outcome)
 	}
 	for _, receipt := range run.Receipts {
-		if !receipt.Simulated || receipt.Enforcing || !strings.HasPrefix(receipt.Signature, "untrusted-shadow:") {
+		if receipt.SpecDigest != LifecycleContractSHA256 || !receipt.Simulated || receipt.Enforcing || !strings.HasPrefix(receipt.Signature, "untrusted-shadow:") {
 			t.Fatalf("receipt=%+v", receipt)
 		}
 	}
 }
 
 func TestPinnedProbeRunnerMissingProbeFailsHonestly(t *testing.T) {
-	run, err := RunSyntheticProbes(ProbeRunInput{RunID: "run-missing", RuntimeGeneration: 1, SpecDigest: sha256String("spec"), PolicyRevision: fixturePolicy(7), DomainContext: fixtureContext("domain-alpha"), Evidence: IsolationEvidence{DedicatedUIDProved: true}, Observations: map[string]ProbeObservation{}, ObservedAt: fixtureTime})
+	run, err := RunSyntheticProbes(ProbeRunInput{RunID: "run-missing", RuntimeGeneration: 1, SpecDigest: LifecycleContractSHA256, PolicyRevision: fixturePolicy(7), DomainContext: fixtureContext("domain-alpha"), Evidence: IsolationEvidence{DedicatedUIDProved: true}, Observations: map[string]ProbeObservation{}, ObservedAt: fixtureTime})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,6 +427,20 @@ func TestPinnedProbeRunnerMissingProbeFailsHonestly(t *testing.T) {
 	}
 	if run.Receipts[0].Traced || run.Receipts[0].ReceiptOutcome != "failed" {
 		t.Fatalf("receipt=%+v", run.Receipts[0])
+	}
+}
+
+func TestProbeRunnerRejectsNonNormativeSpecAndUnknownObservation(t *testing.T) {
+	base := ProbeRunInput{RunID: "run-closed", RuntimeGeneration: 1, SpecDigest: LifecycleContractSHA256, PolicyRevision: fixturePolicy(7), DomainContext: fixtureContext("domain-alpha"), Evidence: IsolationEvidence{DedicatedUIDProved: true}, Observations: map[string]ProbeObservation{}, ObservedAt: fixtureTime}
+	wrongSpec := base
+	wrongSpec.SpecDigest = sha256String("well-shaped-but-not-normative")
+	if _, err := RunSyntheticProbes(wrongSpec); err == nil {
+		t.Fatal("well-shaped non-normative probe digest accepted")
+	}
+	unknown := base
+	unknown.Observations = map[string]ProbeObservation{"FUTURE-99": {ActualResult: "success", EvidenceDigest: sha256String("future"), Duration: time.Millisecond}}
+	if _, err := RunSyntheticProbes(unknown); err == nil {
+		t.Fatal("unknown probe observation accepted")
 	}
 }
 

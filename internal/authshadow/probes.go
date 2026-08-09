@@ -126,8 +126,8 @@ func RunSyntheticProbes(input ProbeRunInput) (ProbeRun, error) {
 	if input.RuntimeGeneration == 0 {
 		return ProbeRun{}, errors.New("runtime generation must be positive")
 	}
-	if !validSHA256(input.SpecDigest) {
-		return ProbeRun{}, errors.New("spec digest must be sha256")
+	if input.SpecDigest != LifecycleContractSHA256 {
+		return ProbeRun{}, errors.New("probe spec digest does not match normative lifecycle source")
 	}
 	if err := input.PolicyRevision.Validate(); err != nil {
 		return ProbeRun{}, err
@@ -141,6 +141,15 @@ func RunSyntheticProbes(input ProbeRunInput) (ProbeRun, error) {
 	registry, err := PinnedProbeRegistry()
 	if err != nil {
 		return ProbeRun{}, err
+	}
+	knownProbes := make(map[string]bool, len(registry))
+	for _, spec := range registry {
+		knownProbes[spec.ID] = true
+	}
+	for observationID := range input.Observations {
+		if !knownProbes[observationID] {
+			return ProbeRun{}, fmt.Errorf("unknown probe observation %q", observationID)
+		}
 	}
 	claim, reasons, quarantined := input.Evidence.Derive()
 	receipts := make([]ProbeReceipt, 0, len(registry))

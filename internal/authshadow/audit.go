@@ -42,10 +42,11 @@ func (h Health) Healthy() bool { return h.State == HealthHealthy }
 // Writer owns one per-domain WAL. Domain IDs are hashed into filenames so a
 // caller cannot turn a logical identity into a path selector.
 type Writer struct {
-	root     string
-	domainID string
-	path     string
-	lockPath string
+	root          string
+	domainID      string
+	path          string
+	lockPath      string
+	syncDirectory func(string) error
 }
 
 func NewWriter(root, domainID string) (*Writer, error) {
@@ -58,8 +59,9 @@ func NewWriter(root, domainID string) (*Writer, error) {
 	key := sha256String(domainID)
 	return &Writer{
 		root: root, domainID: domainID,
-		path:     filepath.Join(root, "domain-"+key+".wal"),
-		lockPath: filepath.Join(root, "domain-"+key+".lock"),
+		path:          filepath.Join(root, "domain-"+key+".wal"),
+		lockPath:      filepath.Join(root, "domain-"+key+".lock"),
+		syncDirectory: syncAuditDirectory,
 	}, nil
 }
 
@@ -97,7 +99,12 @@ func (w *Writer) Append(ctx context.Context, input EventInput) (AuditRecord, err
 		return AuditRecord{}, err
 	}
 	body = append(body, '\n')
-	f, err := os.OpenFile(w.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	created := health.State == HealthMissing
+	flags := os.O_APPEND | os.O_WRONLY
+	if created {
+		flags |= os.O_CREATE | os.O_EXCL
+	}
+	f, err := os.OpenFile(w.path, flags, 0o600)
 	if err != nil {
 		return AuditRecord{}, fmt.Errorf("shadow audit disk unavailable: %w", err)
 	}
@@ -118,6 +125,11 @@ func (w *Writer) Append(ctx context.Context, input EventInput) (AuditRecord, err
 	}
 	if err := f.Close(); err != nil {
 		return AuditRecord{}, fmt.Errorf("shadow audit close failed: %w", err)
+	}
+	if created {
+		if err := w.syncDirectory(w.root); err != nil {
+			return AuditRecord{}, fmt.Errorf("shadow audit directory sync failed: %w", err)
+		}
 	}
 	post, _ := w.verifyUnlocked()
 	if !post.Healthy() || post.LastSequence != record.Sequence || post.LastHash != record.RecordHash {
@@ -245,9 +257,13 @@ func ensureDecoderEOF(dec *json.Decoder) error {
 type auditLock struct{ file *os.File }
 
 func acquireAuditLock(ctx context.Context, path string) (*auditLock, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("shadow audit lock unavailable: %w", err)
+	}
+	if err := verifyPrivateLockFile(f); err != nil {
+		_ = f.Close()
+		return nil, err
 	}
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
@@ -267,6 +283,46 @@ func acquireAuditLock(ctx context.Context, path string) (*auditLock, error) {
 		case <-ticker.C:
 		}
 	}
+}
+
+func verifyPrivateLockFile(f *os.File) error {
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("shadow audit lock stat failed: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("shadow audit lock is not a regular file")
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return errors.New("shadow audit lock ownership unavailable")
+	}
+	if stat.Uid != uint32(os.Geteuid()) {
+		return errors.New("shadow audit lock has unsafe owner")
+	}
+	if stat.Nlink != 1 {
+		return errors.New("shadow audit lock has unsafe link count")
+	}
+	if err := f.Chmod(0o600); err != nil {
+		return fmt.Errorf("shadow audit lock chmod failed: %w", err)
+	}
+	info, err = f.Stat()
+	if err != nil {
+		return fmt.Errorf("shadow audit lock restat failed: %w", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		return fmt.Errorf("shadow audit lock permissions remain unsafe: %o", info.Mode().Perm())
+	}
+	return nil
+}
+
+func syncAuditDirectory(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }
 
 func (l *auditLock) Close() error {

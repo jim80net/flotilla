@@ -70,7 +70,9 @@ func (e IsolationEvidence) Derive() (IsolationClaim, []string, bool) {
 }
 
 type LifecycleInput struct {
-	TransitionID        string
+	TransitionID string
+	// InputDigest is retained for source compatibility but is untrusted input.
+	// Apply recomputes the canonical digest from every semantic field below.
 	InputDigest         string
 	ExpectedPredecessor string
 	WorkerGeneration    uint64
@@ -116,26 +118,11 @@ func NewLifecycleMachine() *LifecycleMachine {
 func (m *LifecycleMachine) State() LifecycleState { return m.state }
 
 func (m *LifecycleMachine) Apply(input LifecycleInput) (LifecycleReceipt, error) {
-	if prior, ok := m.byID[input.TransitionID]; ok {
-		if prior.InputDigest == input.InputDigest {
-			return prior, nil
-		}
-		return LifecycleReceipt{}, errors.New("same transition ID reused with different input")
-	}
 	if err := validateStableID("transition_id", input.TransitionID); err != nil {
 		return LifecycleReceipt{}, err
 	}
-	if !validSHA256(input.InputDigest) {
-		return LifecycleReceipt{}, errors.New("lifecycle input digest must be sha256")
-	}
-	if input.ExpectedPredecessor != m.lastHash {
-		return LifecycleReceipt{}, errors.New("lifecycle predecessor mismatch")
-	}
-	if input.WorkerGeneration == 0 || input.WorkerGeneration < m.generation {
-		return LifecycleReceipt{}, errors.New("lifecycle generation regression")
-	}
-	if input.From != m.state {
-		return LifecycleReceipt{}, fmt.Errorf("lifecycle state mismatch: have %s want %s", m.state, input.From)
+	if input.WorkerGeneration == 0 {
+		return LifecycleReceipt{}, errors.New("lifecycle generation must be positive")
 	}
 	if !allowedTransition(input.From, input.To) {
 		return LifecycleReceipt{}, fmt.Errorf("invalid lifecycle transition %s -> %s", input.From, input.To)
@@ -149,6 +136,25 @@ func (m *LifecycleMachine) Apply(input LifecycleInput) (LifecycleReceipt, error)
 	if input.ObservedAt.IsZero() {
 		return LifecycleReceipt{}, errors.New("lifecycle observed_at is required")
 	}
+	inputDigest, err := canonicalLifecycleInputDigest(input)
+	if err != nil {
+		return LifecycleReceipt{}, err
+	}
+	if prior, ok := m.byID[input.TransitionID]; ok {
+		if prior.InputDigest == inputDigest {
+			return prior, nil
+		}
+		return LifecycleReceipt{}, errors.New("same transition ID reused with different canonical input")
+	}
+	if input.ExpectedPredecessor != m.lastHash {
+		return LifecycleReceipt{}, errors.New("lifecycle predecessor mismatch")
+	}
+	if input.WorkerGeneration < m.generation {
+		return LifecycleReceipt{}, errors.New("lifecycle generation regression")
+	}
+	if input.From != m.state {
+		return LifecycleReceipt{}, fmt.Errorf("lifecycle state mismatch: have %s want %s", m.state, input.From)
+	}
 	claim, reasons, quarantine := input.Evidence.Derive()
 	to, outcome := input.To, "success"
 	if quarantine {
@@ -156,7 +162,7 @@ func (m *LifecycleMachine) Apply(input LifecycleInput) (LifecycleReceipt, error)
 	}
 	receipt := LifecycleReceipt{
 		SchemaVersion: LifecycleSchemaVersion, TransitionID: input.TransitionID,
-		InputDigest: input.InputDigest, PredecessorHash: m.lastHash,
+		InputDigest: inputDigest, PredecessorHash: m.lastHash,
 		WorkerGeneration: input.WorkerGeneration, From: input.From, To: to,
 		PolicyRevision: input.PolicyRevision, DomainContext: input.DomainContext,
 		IsolationClaim: claim, ReasonCodes: reasons, Outcome: outcome,
@@ -171,6 +177,41 @@ func (m *LifecycleMachine) Apply(input LifecycleInput) (LifecycleReceipt, error)
 	m.state, m.generation, m.lastHash = receipt.To, input.WorkerGeneration, hash
 	m.byID[input.TransitionID] = receipt
 	return receipt, nil
+}
+
+type canonicalLifecycleInput struct {
+	ExpectedPredecessor string            `json:"expected_predecessor"`
+	WorkerGeneration    uint64            `json:"worker_generation"`
+	From                LifecycleState    `json:"from"`
+	To                  LifecycleState    `json:"to"`
+	PolicyRevision      PolicyRevision    `json:"policy_revision"`
+	DomainContext       DomainContext     `json:"domain_context"`
+	Evidence            IsolationEvidence `json:"evidence"`
+	ObservedAt          time.Time         `json:"observed_at"`
+}
+
+func canonicalLifecycleInputDigest(input LifecycleInput) (string, error) {
+	context := input.DomainContext
+	context.IssuedAt = context.IssuedAt.UTC()
+	context.ExpiresAt = context.ExpiresAt.UTC()
+	evidence := input.Evidence
+	evidence.Invalidators = append([]string(nil), evidence.Invalidators...)
+	sort.Strings(evidence.Invalidators)
+	evidence.Invalidators = compactStrings(evidence.Invalidators)
+	body, err := json.Marshal(canonicalLifecycleInput{
+		ExpectedPredecessor: input.ExpectedPredecessor,
+		WorkerGeneration:    input.WorkerGeneration,
+		From:                input.From,
+		To:                  input.To,
+		PolicyRevision:      input.PolicyRevision,
+		DomainContext:       context,
+		Evidence:            evidence,
+		ObservedAt:          input.ObservedAt.UTC(),
+	})
+	if err != nil {
+		return "", err
+	}
+	return sha256String(string(body)), nil
 }
 
 func lifecycleReceiptHash(receipt LifecycleReceipt) (string, error) {
