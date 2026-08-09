@@ -749,8 +749,14 @@ func AdaptNeutralDecision(id, seam, class string, req AuthzRequest, decision Aut
 	switch decision.Decision {
 	case PermitException:
 		return ReplayRecord{}, errors.New("replay adapter: permit_exception is not representable")
-	case PermitUnblocked, DenyBlocked:
-		// These are the complete outcomes representable in neutral replay v1.
+	case PermitUnblocked:
+		if decision.ReasonCode != ReasonUnprotected {
+			return ReplayRecord{}, fmt.Errorf("replay adapter: permit_unblocked has incompatible reason %q", decision.ReasonCode)
+		}
+	case DenyBlocked:
+		if decision.ReasonCode != ReasonProtectedBlock {
+			return ReplayRecord{}, fmt.Errorf("replay adapter: deny_blocked has incompatible reason %q", decision.ReasonCode)
+		}
 	default:
 		return ReplayRecord{}, fmt.Errorf("replay adapter: unknown outcome %q", decision.Decision)
 	}
@@ -784,16 +790,26 @@ func validateReplayRecord(r ReplayRecord) error {
 			return errors.New("replay export: invalid ordinary-work projection")
 		}
 	case "protected-read-pep", "protected-read-audit":
-		if r.Request.Class != NeutralProtectedClass || r.Request.Action != ActionRead || r.Request.Object != NeutralFixtureObject || r.Decision.Outcome != "deny" || r.Decision.Reason != "protected_block" || r.ResolvedContext == nil || r.Decision.ContextSource != "server_resolved" || r.Decision.ResolvedContextID != r.ResolvedContext.ContextID {
+		if r.Request.Class != NeutralProtectedClass || r.Request.Action != ActionRead || r.Request.Object != NeutralFixtureObject || r.Decision.Outcome != "deny" || r.Decision.Reason != "protected_block" || !validResolvedReplayContext(r.ResolvedContext) || r.Decision.ContextSource != "server_resolved" || r.Decision.ResolvedContextID != r.ResolvedContext.ContextID {
 			return errors.New("replay export: invalid protected context projection")
 		}
-		if r.ClaimedContext != nil && *r.ClaimedContext == *r.ResolvedContext {
-			return errors.New("replay export: claimed and resolved contexts are not distinct")
+		if r.ClaimedContext != nil {
+			if !completeReplayContext(r.ClaimedContext) || *r.ClaimedContext == *r.ResolvedContext || r.ClaimedContext.ContextID == r.ResolvedContext.ContextID {
+				return errors.New("replay export: claimed and resolved contexts are not distinct")
+			}
 		}
 	default:
 		return fmt.Errorf("replay export: unknown seam %q", r.Seam)
 	}
 	return nil
+}
+
+func completeReplayContext(c *ReplayContext) bool {
+	return c != nil && c.ContextID != "" && c.WorkerID != "" && c.SessionID != "" && c.DomainID != "" && c.MintedBy != ""
+}
+
+func validResolvedReplayContext(c *ReplayContext) bool {
+	return completeReplayContext(c) && c.MintedBy == serverMintAuthority
 }
 
 // ExportNeutral projects only the contract's supported allow-unprotected and

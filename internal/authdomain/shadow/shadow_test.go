@@ -261,6 +261,17 @@ func TestNeutralAdapterKeepsClaimAndResolutionDistinct(t *testing.T) {
 	if _, err := AdaptNeutralDecision("record", "protected-read-pep", "protected", req, AuthzDecision{RequestID: req.RequestID, Decision: Outcome("future_outcome"), DecidedAt: now}); err == nil {
 		t.Fatal("unknown future outcome projected as a denial")
 	}
+	for _, reason := range []string{ReasonStaleGeneration, ReasonPolicyUnavailable, ReasonInvalidContext, ReasonUnprotected} {
+		if _, err := AdaptNeutralDecision("record", "protected-read-pep", NeutralProtectedClass, req, AuthzDecision{RequestID: req.RequestID, Decision: DenyBlocked, ReasonCode: reason, DecidedAt: now}); err == nil {
+			t.Fatalf("deny_blocked reason %q was relabeled protected_block", reason)
+		}
+	}
+	ordinary := AuthzRequest{RequestID: "ordinary-request", Action: "draft", ObjectID: NeutralOrdinaryObject}
+	for _, reason := range []string{ReasonProtectedBlock, ReasonPolicyUnavailable} {
+		if _, err := AdaptNeutralDecision("ordinary", "ordinary-work", NeutralOrdinaryClass, ordinary, AuthzDecision{RequestID: ordinary.RequestID, Decision: PermitUnblocked, ReasonCode: reason, DecidedAt: now}); err == nil {
+			t.Fatalf("permit_unblocked reason %q was relabeled unprotected", reason)
+		}
+	}
 }
 
 func replayRecords(t *testing.T) []ReplayRecord {
@@ -318,6 +329,27 @@ func TestNeutralReplayExportIsInertAndClosed(t *testing.T) {
 	identicalContext[1].ClaimedContext = &copyOfResolved
 	if _, err := ExportNeutral(LifecycleContractSHA256, identicalContext); err == nil {
 		t.Fatal("byte-identical claimed and resolved contexts accepted")
+	}
+	for name, mutate := range map[string]func(*ReplayContext){
+		"empty context id":  func(c *ReplayContext) { c.ContextID = "" },
+		"empty worker":      func(c *ReplayContext) { c.WorkerID = "" },
+		"empty session":     func(c *ReplayContext) { c.SessionID = "" },
+		"empty domain":      func(c *ReplayContext) { c.DomainID = "" },
+		"caller provenance": func(c *ReplayContext) { c.MintedBy = "caller-mint" },
+	} {
+		t.Run("resolved "+name, func(t *testing.T) {
+			records := replayRecords(t)
+			mutate(records[1].ResolvedContext)
+			records[1].Decision.ResolvedContextID = records[1].ResolvedContext.ContextID
+			if _, err := ExportNeutral(LifecycleContractSHA256, records); err == nil {
+				t.Fatal("incomplete or caller-minted resolved context accepted")
+			}
+		})
+	}
+	sameContextID := replayRecords(t)
+	sameContextID[1].ClaimedContext.ContextID = sameContextID[1].ResolvedContext.ContextID
+	if _, err := ExportNeutral(LifecycleContractSHA256, sameContextID); err == nil {
+		t.Fatal("claimed context aliased the server-resolved context id")
 	}
 	for name, mutate := range map[string]func([]ReplayRecord){
 		"ordinary class on protected seam":  func(records []ReplayRecord) { records[1].Request.Class = NeutralOrdinaryClass },
