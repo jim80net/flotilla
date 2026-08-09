@@ -20,10 +20,12 @@ const (
 	authDomainsReplaySchema     = "gatekeeper.auth-domains.replay/v1"
 	authDomainsLifecycleDigest  = "4a5d12ff96b136db5bd7e78c9467a222c242be99c060d5a17fe267725bc9caff"
 	authDomainsSyntheticObject  = "fixture://authorization-domains/protected/exact-read-object"
+	authDomainsOrdinaryObject   = "document://ordinary/item"
 	authDomainsCoverageSHA256   = "611e918f2745b8728fdf752f2d8676e713f663500201a958abb37733d8343436"
 	authDomainsRegistrySHA256   = "919359d98860a1decb747627e9db611c05618b694da22abd396065c3ab7c9240"
 	authDomainsProbesSHA256     = "4fb6aff74ed88a47a4829f4299af5939338d1696d9713b0273be44eed16eba0e"
 	authDomainsMaxArtifactBytes = 8 << 20
+	authDomainsMaxGenerations   = 10000
 )
 
 // AuthDomainsStatus is the read-only projection of the Authorization Domains
@@ -66,6 +68,8 @@ type AuthDomainsContractStatus struct {
 type AuthDomainsGeneration struct {
 	State        string `json:"state"`
 	Generation   uint64 `json:"generation,omitempty"`
+	ChainLength  uint64 `json:"chain_length,omitempty"`
+	RootDigest   string `json:"root_digest,omitempty"`
 	Digest       string `json:"digest,omitempty"`
 	ParentDigest string `json:"parent_digest,omitempty"`
 	CreatedAt    string `json:"created_at,omitempty"`
@@ -213,24 +217,26 @@ type authDomainsReplayWire struct {
 		Critical bool   `json:"critical"`
 		Traced   bool   `json:"traced"`
 	} `json:"coverage"`
-	Records []struct {
-		ID      string `json:"id"`
-		Seam    string `json:"seam"`
-		Request struct {
-			Class  string `json:"class"`
-			Action string `json:"action"`
-			Object string `json:"object"`
-		} `json:"request"`
-		ClaimedContext  *AuthDomainsContext `json:"claimed_context"`
-		ResolvedContext *AuthDomainsContext `json:"resolved_context"`
-		Decision        struct {
-			Outcome           string `json:"outcome"`
-			Reason            string `json:"reason"`
-			ContextSource     string `json:"context_source"`
-			ResolvedContextID string `json:"resolved_context_id"`
-		} `json:"decision"`
-	} `json:"records"`
-	Probes []json.RawMessage `json:"probes"`
+	Records []authDomainsReplayRecordWire `json:"records"`
+	Probes  []json.RawMessage             `json:"probes"`
+}
+
+type authDomainsReplayRecordWire struct {
+	ID      string `json:"id"`
+	Seam    string `json:"seam"`
+	Request struct {
+		Class  string `json:"class"`
+		Action string `json:"action"`
+		Object string `json:"object"`
+	} `json:"request"`
+	ClaimedContext  *AuthDomainsContext `json:"claimed_context"`
+	ResolvedContext *AuthDomainsContext `json:"resolved_context"`
+	Decision        struct {
+		Outcome           string `json:"outcome"`
+		Reason            string `json:"reason"`
+		ContextSource     string `json:"context_source"`
+		ResolvedContextID string `json:"resolved_context_id"`
+	} `json:"decision"`
 }
 
 type authDomainsAuditHealthWire struct {
@@ -310,6 +316,8 @@ type AuthDomainsInputs struct {
 	LifecycleRegistrySource  string
 	LifecycleRegistrySHA256  string
 	Generation               *authDomainsGenerationWire
+	GenerationHead           *authDomainsHeadWire
+	GenerationChain          []authDomainsGenerationWire
 	GenerationFailure        string
 	GenerationSource         string
 	GenerationSHA256         string
@@ -430,25 +438,63 @@ func buildAuthDomainsGeneration(doc *AuthDomainsStatus, in AuthDomainsInputs) {
 	doc.Generation.Source = in.GenerationSource
 	doc.Generation.SourceSHA256 = in.GenerationSHA256
 	if in.GenerationFailure != "" {
-		doc.Generation.State, doc.Generation.Failure = "corrupt", in.GenerationFailure
+		doc.Generation.State, doc.Generation.Failure = "unavailable", in.GenerationFailure
 		return
 	}
-	if in.Generation == nil {
+	if in.Generation == nil || in.GenerationHead == nil {
 		return
 	}
 	g := in.Generation
 	doc.Generation.State = "shadow"
 	doc.Generation.Generation = g.Generation
+	doc.Generation.ChainLength = uint64(len(in.GenerationChain))
 	doc.Generation.Digest = g.Digest
 	if g.ParentDigest != nil {
 		doc.Generation.ParentDigest = *g.ParentDigest
 	}
 	doc.Generation.CreatedAt = g.CreatedAt
-	computedDigest, digestErr := authDomainsGenerationDigest(*g)
-	if g.SchemaVersion != "authorization-domains/v1" || g.RegistryVersion != "1" || g.Generation == 0 || !validAuthDomainsSHA256(g.Digest) || g.CreatedAt == "" || digestErr != nil || computedDigest != g.Digest {
-		doc.Generation.State = "corrupt"
-		doc.Generation.Failure = "generation provenance is incomplete"
+	if len(in.GenerationChain) > 0 {
+		doc.Generation.RootDigest = in.GenerationChain[0].Digest
 	}
+	if err := validateAuthDomainsGenerationChain(*in.GenerationHead, in.GenerationChain); err != nil {
+		doc.Generation.State = "unavailable"
+		doc.Generation.Failure = "committed generation chain unavailable: " + err.Error()
+	}
+}
+
+func validateAuthDomainsGenerationChain(head authDomainsHeadWire, chain []authDomainsGenerationWire) error {
+	if head.Generation == 0 || !validAuthDomainsSHA256(head.Digest) {
+		return errors.New("invalid committed head identity")
+	}
+	if uint64(len(chain)) != head.Generation {
+		return fmt.Errorf("expected %d contiguous generations, found %d", head.Generation, len(chain))
+	}
+	for i := range chain {
+		generation := &chain[i]
+		wantGeneration := uint64(i + 1)
+		computedDigest, err := authDomainsGenerationDigest(*generation)
+		if err != nil || generation.SchemaVersion != "authorization-domains/v1" || generation.RegistryVersion != "1" ||
+			generation.Generation != wantGeneration || !validAuthDomainsSHA256(generation.Digest) ||
+			generation.CreatedAt == "" || computedDigest != generation.Digest {
+			return fmt.Errorf("generation %d is invalid", wantGeneration)
+		}
+		if wantGeneration == 1 {
+			if generation.ParentDigest != nil {
+				return errors.New("trusted root has a parent digest")
+			}
+		} else if generation.ParentDigest == nil || *generation.ParentDigest != chain[i-1].Digest {
+			return fmt.Errorf("generation %d predecessor digest mismatch", wantGeneration)
+		}
+	}
+	if chain[len(chain)-1].Digest != head.Digest {
+		return errors.New("committed head digest mismatch")
+	}
+	for key, record := range head.Idempotency {
+		if key == "" || record.Generation == 0 || record.Generation > uint64(len(chain)) || chain[record.Generation-1].Digest != record.Digest {
+			return errors.New("committed head contains an invalid private idempotency binding")
+		}
+	}
+	return nil
 }
 
 func authDomainsGenerationDigest(g authDomainsGenerationWire) (string, error) {
@@ -499,37 +545,73 @@ func buildAuthDomainsReplay(doc *AuthDomainsStatus, in AuthDomainsInputs) map[st
 			continue
 		}
 		seenCoverage[c.Name] = true
-		if c.Traced {
-			traces[c.Name] = true
-		}
-		if c.Critical && !c.Traced {
+		if !c.Traced {
 			doc.Replay.State = "failed"
-			doc.Replay.Failure = "one or more critical replay seams are untraced"
+			doc.Replay.Failure = "one or more required replay seams are declared untraced"
 		}
 	}
 	if len(seenCoverage) != len(expectedCoverage) {
 		doc.Replay.State = "failed"
 		doc.Replay.Failure = "replay coverage omits one or more closed D1 seams"
 	}
+	validRecords := map[string]bool{}
+	seenRecordIDs := map[string]bool{}
+	seenRecordSeams := map[string]bool{}
 	for _, record := range r.Records {
-		object := record.Request.Object
-		if record.Request.Action != "read" || object != authDomainsSyntheticObject {
+		invalid := record.ID == "" || seenRecordIDs[record.ID] || seenRecordSeams[record.Seam] || validateAuthDomainsReplayRecord(record) != nil
+		seenRecordIDs[record.ID] = true
+		seenRecordSeams[record.Seam] = true
+		if invalid {
 			doc.Replay.State = "failed"
-			doc.Replay.Failure = "replay record widened beyond the inert read fixture"
-			object = "outside-inert-fixture"
+			doc.Replay.Failure = "replay records are missing, duplicated, unknown, or violate the closed D1 matrix"
+			continue
 		}
-		if record.Decision.ContextSource == "server_resolved" &&
-			(record.ResolvedContext == nil || record.Decision.ResolvedContextID != record.ResolvedContext.ContextID) {
-			doc.Replay.State = "failed"
-			doc.Replay.Failure = "server-resolved replay context provenance is inconsistent"
-		}
+		validRecords[record.Seam] = true
 		doc.Replay.Records = append(doc.Replay.Records, AuthDomainsReplayRecord{
-			ID: record.ID, Seam: record.Seam, Action: record.Request.Action, Object: object,
+			ID: record.ID, Seam: record.Seam, Action: record.Request.Action, Object: record.Request.Object,
 			Outcome: record.Decision.Outcome, Reason: record.Decision.Reason, ContextSource: record.Decision.ContextSource,
 			ClaimedContext: record.ClaimedContext, ResolvedContext: record.ResolvedContext,
 		})
 	}
+	if len(r.Records) != len(expectedCoverage) {
+		doc.Replay.State = "failed"
+		doc.Replay.Failure = "each closed D1 replay seam must have exactly one record"
+	}
+	for seam := range expectedCoverage {
+		if !seenCoverage[seam] || !validRecords[seam] {
+			doc.Replay.State = "failed"
+			doc.Replay.Failure = "declarations without one correlated valid record do not prove tracing"
+		}
+	}
+	if doc.Replay.State == "passed" {
+		for seam := range expectedCoverage {
+			traces[seam] = true
+		}
+	}
 	return traces
+}
+
+func validateAuthDomainsReplayRecord(record authDomainsReplayRecordWire) error {
+	switch record.Seam {
+	case "ordinary-work":
+		if record.Request.Class != "ordinary" || record.Request.Action != "draft" || record.Request.Object != authDomainsOrdinaryObject ||
+			record.Decision.Outcome != "allow" || record.Decision.Reason != "unprotected" || record.Decision.ContextSource != "none" ||
+			record.Decision.ResolvedContextID != "" || record.ClaimedContext != nil || record.ResolvedContext != nil {
+			return errors.New("invalid ordinary-work projection")
+		}
+	case "protected-read-pep", "protected-read-audit":
+		if record.Request.Class != "protected" || record.Request.Action != "read" || record.Request.Object != authDomainsSyntheticObject ||
+			record.Decision.Outcome != "deny" || record.Decision.Reason != "protected_block" || record.Decision.ContextSource != "server_resolved" ||
+			record.ResolvedContext == nil || record.ResolvedContext.ContextID == "" || record.Decision.ResolvedContextID != record.ResolvedContext.ContextID {
+			return errors.New("invalid protected projection")
+		}
+		if record.ClaimedContext != nil && *record.ClaimedContext == *record.ResolvedContext {
+			return errors.New("claimed and resolved contexts are not distinct")
+		}
+	default:
+		return errors.New("unknown replay seam")
+	}
+	return nil
 }
 
 func buildAuthDomainsAudit(doc *AuthDomainsStatus, in AuthDomainsInputs) {
@@ -777,16 +859,36 @@ func loadAuthDomainsInputsFromPaths(paths authDomainsArtifactPaths) AuthDomainsI
 		in.LifecycleRegistry = &lifecycleRegistry
 	}
 
-	var generation authDomainsGenerationWire
 	var head authDomainsHeadWire
 	var headFailure, headSource, headSHA string
 	if load(filepath.Join(paths.PolicyDir, "head.json"), &head, &headFailure, &headSource, &headSHA) {
-		generationPath := filepath.Join(paths.PolicyDir, fmt.Sprintf("generation-%020d.json", head.Generation))
-		if load(generationPath, &generation, &in.GenerationFailure, &in.GenerationSource, &in.GenerationSHA256) {
-			if generation.Generation != head.Generation || generation.Digest != head.Digest {
-				in.GenerationFailure = "head.json: generation provenance mismatch"
+		in.GenerationHead = &head
+		if head.Generation > authDomainsMaxGenerations {
+			in.GenerationFailure = "head.json: committed generation exceeds inspection bound"
+		}
+		for generationNumber := uint64(1); in.GenerationFailure == "" && generationNumber <= head.Generation; generationNumber++ {
+			var generation authDomainsGenerationWire
+			generationPath := filepath.Join(paths.PolicyDir, fmt.Sprintf("generation-%020d.json", generationNumber))
+			var failure, source, digest string
+			if !load(generationPath, &generation, &failure, &source, &digest) {
+				if failure == "" {
+					failure = filepath.Base(generationPath) + ": committed predecessor unavailable"
+				}
+				in.GenerationFailure = failure
+				break
+			}
+			in.GenerationChain = append(in.GenerationChain, generation)
+			if generationNumber == head.Generation {
+				in.GenerationSource, in.GenerationSHA256 = source, digest
+			}
+		}
+		if in.GenerationFailure == "" {
+			if failure := authDomainsOrphanGenerationFailure(paths.PolicyDir, head.Generation); failure != "" {
+				in.GenerationFailure = failure
+			} else if err := validateAuthDomainsGenerationChain(head, in.GenerationChain); err != nil {
+				in.GenerationFailure = "head.json: " + err.Error()
 			} else {
-				in.Generation = &generation
+				in.Generation = &in.GenerationChain[len(in.GenerationChain)-1]
 			}
 		}
 	} else if headFailure != "" {
@@ -805,6 +907,27 @@ func loadAuthDomainsInputsFromPaths(paths authDomainsArtifactPaths) AuthDomainsI
 		in.Lifecycle = &lifecycle
 	}
 	return in
+}
+
+func authDomainsOrphanGenerationFailure(policyDir string, committed uint64) string {
+	entries, err := os.ReadDir(policyDir)
+	if err != nil {
+		return filepath.Base(policyDir) + ": generation store unavailable"
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, "generation-") || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		var generation uint64
+		if _, err := fmt.Sscanf(name, "generation-%020d.json", &generation); err != nil || name != fmt.Sprintf("generation-%020d.json", generation) {
+			return name + ": ambiguous generation artifact"
+		}
+		if generation == 0 || generation > committed {
+			return name + ": orphan successor is not committed by head.json"
+		}
+	}
+	return ""
 }
 
 // decodeStrictAuthDomainsJSON is retained as a small test seam for proving that

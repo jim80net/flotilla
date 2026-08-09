@@ -112,7 +112,8 @@
 
     setState("auth-generation-state", generation.state, generation.failure);
     facts("auth-generation-provenance", [
-      ["generation", generation.generation], ["digest", shortDigest(generation.digest)],
+      ["generation / chain", text(generation.generation) + " / " + text(generation.chain_length)],
+      ["root digest", shortDigest(generation.root_digest)], ["digest", shortDigest(generation.digest)],
       ["created", generation.created_at], ["source", text(generation.source) + " · " + shortDigest(generation.source_sha256)]
     ]);
     setState("auth-replay-state", replay.state, replay.failure);
